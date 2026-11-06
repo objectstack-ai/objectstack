@@ -1099,3 +1099,37 @@ export function reseedLocalSampleData(manifestId: string): Promise<LocalSampleDa
 export function purgeLocalSampleData(manifestId: string): Promise<LocalSampleDataResult> {
   return postLocalSampleAction(manifestId, 'purge');
 }
+
+/**
+ * `GET /api/v1/marketplace/install-local/:manifestId/sample-data`
+ * (objectstack#30616): how many of a local install's sample rows a purge
+ * would delete right now, counted with the purge's own matcher and keep-rules,
+ * so a page reached after a reload can still say it. `unidentified` are seed
+ * records the purge would report and leave in place.
+ */
+export interface LocalSampleDataCount {
+  manifestId: string;
+  count: number;
+  unidentified: number;
+}
+
+/** {@link LocalSampleDataCount}, or `null` when the count could not be read (refused, failed, or no count in the answer). */
+export async function countLocalSampleData(manifestId: string): Promise<LocalSampleDataCount | null> {
+  try {
+    const res = await fetch(`${API_BASE}/install-local/${encodeURIComponent(manifestId)}/sample-data`, {
+      credentials: 'include',
+      headers: { 'Accept': 'application/json' },
+    });
+    if (!res.ok) return null;
+    const payload: any = await res.json().catch(() => ({}));
+    const data: any = payload?.data ?? payload;
+    if (typeof data?.count !== 'number' || !Number.isInteger(data.count) || data.count < 0) return null;
+    return {
+      manifestId,
+      count: data.count,
+      unidentified: typeof data.unidentified === 'number' ? data.unidentified : 0,
+    };
+  } catch {
+    return null;
+  }
+}

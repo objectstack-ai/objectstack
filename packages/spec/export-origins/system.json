@@ -858,6 +858,7 @@
     "resolveDocLocale": "src/system/doc.zod.ts#resolveDocLocale (function)",
     "resolveFlowScreenFieldOptions": "src/system/i18n-resolver.ts#resolveFlowScreenFieldOptions (function)",
     "resolveFlowScreenTitle": "src/system/i18n-resolver.ts#resolveFlowScreenTitle (function)",
+    "resolveLocaleAmong": "src/system/i18n-resolver.ts#resolveLocaleAmong (function)",
     "resolveMetadataFormLabels": "src/system/i18n-resolver.ts#resolveMetadataFormLabels (function)",
     "resolveMetadataFormSchemaTitles": "src/system/i18n-resolver.ts#resolveMetadataFormSchemaTitles (function)",
     "resolveMetadataTypeDescription": "src/system/i18n-resolver.ts#resolveMetadataTypeDescription (function)",

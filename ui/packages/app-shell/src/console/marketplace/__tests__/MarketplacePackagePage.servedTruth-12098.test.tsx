@@ -120,6 +120,7 @@ vi.mock('../marketplaceApi', () => ({
   purgeSampleData: async () => ({ ok: true }),
   reseedLocalSampleData: async () => ({ ok: true }),
   purgeLocalSampleData: async () => ({ ok: true }),
+  countLocalSampleData: async () => null,
 }));
 
 // Mounts its own read of the runtime; here it only marks WHEN it mounts.

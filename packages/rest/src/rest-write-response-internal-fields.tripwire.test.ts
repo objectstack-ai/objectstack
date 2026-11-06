@@ -397,6 +397,8 @@ const DISPOSITIONS: Record<string, Disposition> = {
   'POST /api/v1/security/suggested-bindings/:id/dismiss': { kind: 'no-record-echo', why: 'Dismissal receipt.' },
   'POST /api/v1/security/suggested-bindings/:id/reopen': { kind: 'no-record-echo', why: 'Re-open receipt.' },
   'POST /api/v1/security/explain': { kind: 'no-record-echo', why: 'Permission explanation verdict.' },
+  // [#30205] The hand-over answers per-field counts and failed row ids, never a record.
+  'POST /api/v1/security/users/:id/assigned-work/transfer': { kind: 'no-record-echo', why: 'Transfer report: per-field counts and failed row ids (id, code, refusal sentence), never a record body.' },
 
   // Import: per-row RECEIPTS (row number, action, id, warnings/errors) plus
   // counts — measured, the written row is never spread into a result.

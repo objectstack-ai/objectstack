@@ -181,3 +181,54 @@ describe("ObjectChart — DrillDownConfig.target: 'navigate' (objectui#3354)", (
     expect(openRecordList).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * objectstack#30654 — ObjectChart's two escape hatches (the navigate arm and
+ * the drawer header's "Open in list") ask the host's `canOpenRecordList`
+ * first: a drill filter the host's list route cannot say exactly would open a
+ * WIDER list than the segment the user clicked, so neither is offered and the
+ * drill stays in the drawer. A host without the member is unchanged (the
+ * describe above).
+ */
+describe('ObjectChart — the host says whether the drill has an exact list (objectstack#30654)', () => {
+  function renderWith(
+    drillDown: Record<string, unknown>,
+    value: {
+      openRecordList?: (objectName: string, filter?: Record<string, unknown>) => void;
+      canOpenRecordList?: (objectName: string, filter?: Record<string, unknown>) => boolean;
+    },
+  ) {
+    return render(
+      <DrillNavigationProvider value={value}>
+        <ObjectChart schema={schema(drillDown)} dataSource={{ find: async () => ({ data: [] }) }} />
+      </DrillNavigationProvider>,
+    );
+  }
+
+  it("target: 'navigate' falls back to the drawer, with no 'Open in list', when the host answers false", async () => {
+    const openRecordList = vi.fn();
+    const canOpenRecordList = vi.fn(() => false);
+    renderWith({ enabled: true, target: 'navigate' }, { openRecordList, canOpenRecordList });
+
+    fireEvent.click(screen.getByTestId('fake-segment'));
+
+    await waitFor(() => expect(screen.getByTestId('chart-drill-body')).toBeTruthy());
+    expect(drillSurface()).toBe('drawer');
+    expect(openRecordList).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('drill-open-in-list')).toBeNull();
+    // Asked with the same composition the navigate arm would have written.
+    expect(canOpenRecordList).toHaveBeenCalledWith('opportunity', { $and: [{ owner: 'me' }, { stage: 'won' }] });
+  });
+
+  it("target: 'navigate' still navigates when the host answers true", async () => {
+    const openRecordList = vi.fn();
+    renderWith({ enabled: true, target: 'navigate' }, { openRecordList, canOpenRecordList: () => true });
+
+    fireEvent.click(screen.getByTestId('fake-segment'));
+
+    await waitFor(() =>
+      expect(openRecordList).toHaveBeenCalledWith('opportunity', { $and: [{ owner: 'me' }, { stage: 'won' }] }),
+    );
+    expect(screen.queryByTestId('chart-drill-body')).toBeNull();
+  });
+});

@@ -61,6 +61,12 @@ describe('PLATFORM_LOCALE_READ_ALIASES: stored codes keep resolving', () => {
     ['zh-TW', 'zh-Hant'],
     ['zh-HK', 'zh-Hant'],
     ['zh-MO', 'zh-Hant'],
+    // The script-subtag spellings of the five regional aliases (#30618).
+    ['zh-Hans-CN', 'zh-Hans'],
+    ['zh-Hans-SG', 'zh-Hans'],
+    ['zh-Hant-TW', 'zh-Hant'],
+    ['zh-Hant-HK', 'zh-Hant'],
+    ['zh-Hant-MO', 'zh-Hant'],
     ['ja-JP', 'ja'],
     ['es-ES', 'es'],
     ['pt', 'pt-BR'],
@@ -72,13 +78,15 @@ describe('PLATFORM_LOCALE_READ_ALIASES: stored codes keep resolving', () => {
     expect(platformLocaleTagOf(code)).toBe(tag);
   });
 
-  it('the map is exactly those ten aliases', () => {
+  it('the map is exactly those fifteen aliases', () => {
     expect(PLATFORM_LOCALE_READ_ALIASES).toEqual(Object.fromEntries(ALIASES));
   });
 
-  it('the map is typed on its ten literal keys: an unlisted code does not index it as defined', () => {
+  it('the map is typed on its fifteen literal keys: an unlisted code does not index it as defined', () => {
     const zhCN: 'zh-Hans' = PLATFORM_LOCALE_READ_ALIASES['zh-CN'];
     expect(zhCN).toBe('zh-Hans');
+    const zhHantTW: 'zh-Hant' = PLATFORM_LOCALE_READ_ALIASES['zh-Hant-TW'];
+    expect(zhHantTW).toBe('zh-Hant');
     // @ts-expect-error `pt-PT` is not a read alias, so the index is not typed as a table tag.
     expect(PLATFORM_LOCALE_READ_ALIASES['pt-PT']).toBeUndefined();
   });
@@ -113,12 +121,19 @@ describe('platformLocaleTagOf', () => {
     ['EN', 'en'],
     ['en-us', 'en'],
     ['ja-jp', 'ja'],
+    ['ZH-HANS-cn', 'zh-Hans'],
+    ['zh-hans-sg', 'zh-Hans'],
+    ['ZH-HANT-tw', 'zh-Hant'],
+    ['zh-hant-hk', 'zh-Hant'],
+    ['Zh-Hant-Mo', 'zh-Hant'],
   ])('ignores case: %s reads as %s', (code, tag) => {
     expect(platformLocaleTagOf(code)).toBe(tag);
   });
 
-  // The list is closed: no region or script fallback is guessed.
-  it.each(['pt-PT', 'de-AT', 'en-GB', 'zh-Hans-CN', 'es-419', 'fr-CA', 'it', 'he', 'zh-Hant-TW'])(
+  // The list is closed: no region or script fallback is guessed. A
+  // script-subtag spelling without its own row (`zh-Hant-US`, `zh-Hans-US`)
+  // answers undefined too: the rows are read one by one, never as a pattern.
+  it.each(['pt-PT', 'de-AT', 'en-GB', 'es-419', 'fr-CA', 'it', 'he', 'zh-Hant-US', 'zh-Hans-US'])(
     'a code the table and the aliases do not list, %s, answers undefined',
     (code) => {
       expect(platformLocaleTagOf(code)).toBeUndefined();

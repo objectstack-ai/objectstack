@@ -19,7 +19,7 @@ import { type Dict, isDict, stripKeys } from '../shared.js';
  * ever read (#19992, ADR-0049 enforce-or-remove; triage direction REMOVE under
  * ruling 乙 on #19910, 「a currency's decimal places are the currency's, not a
  * setting」). objectui's `CurrencyField` derives an amount's decimal places from
- * the currency's ISO 4217 minor unit and never looked at the key; its only
+ * the currency's CLDR fraction digits and never looked at the key; its only
  * reader was its own #7918 ISO 4217 contradiction check, which policed a width
  * nothing applied.
  *
@@ -50,7 +50,7 @@ const currencyConfigPrecisionRemoved: MetadataConversion = {
   surface: 'object.fields.*.currencyConfig.precision',
   summary:
     "currency field key 'currencyConfig.precision' removed (ADR-0049 — no renderer or "
-    + 'runtime ever read it: an amount\'s decimal places are its currency\'s ISO 4217 minor unit, '
+    + 'runtime ever read it: an amount\'s decimal places are its currency\'s CLDR fraction digits, '
     + 'derived from the currency itself. Its ISO 4217 contradiction check and the default `2` '
     + 'baked into parse output went with it; the field-level `precision` is a total digit count '
     + 'and is untouched)',

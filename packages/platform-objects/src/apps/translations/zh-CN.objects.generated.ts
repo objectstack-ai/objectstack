@@ -39,7 +39,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       banned: {
         label: "已封禁",
-        help: "为 true 时，用户无法登录。可通过“封禁用户 / 解除封禁”操作切换。"
+        help: "开启后，用户无法登录。可通过“封禁用户 / 解除封禁”操作切换。"
       },
       ban_reason: {
         label: "封禁原因"
@@ -70,7 +70,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       must_change_password: {
         label: "须修改密码",
-        help: "为 true 时，用户会被阻止访问（403 PASSWORD_RESET_REQUIRED），直到修改密码。由管理员用户管理接口写入；系统维护。"
+        help: "开启后，用户必须先修改密码才能继续使用。管理员创建账号、导入用户或重置密码时会自动开启；系统维护。"
       },
       mfa_required_at: {
         label: "MFA 强制生效时间",
@@ -159,7 +159,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       ban_user: {
         label: "封禁用户",
-        description: "要封禁该用户吗？封禁后会立即登出，在解除封禁前无法再次登录，其 API 密钥也会被拒绝。解除封禁后这些密钥恢复可用。",
+        description: "要封禁该用户吗？封禁后会立即登出，在解除封禁前无法再次登录，其 API 密钥也会被拒绝，OAuth 访问令牌与令牌续期同样被拒绝。解除封禁后这些密钥恢复可用。",
         successMessage: "用户已封禁",
         params: {
           banReason: {
@@ -557,7 +557,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       require_mfa: {
         label: "强制多因素认证",
-        help: "为 true 时，该组织的每位成员都必须注册身份验证器 App 才能访问数据。需要本部署开启双重验证（OS_AUTH_TWO_FACTOR=true）；双重验证关闭时，保存为 true 会被拒绝。"
+        help: "开启后，该组织的每位成员都必须先绑定身份验证器 App，才能访问数据。需要本部署开启双重验证（OS_AUTH_TWO_FACTOR=true）；双重验证关闭时，保存为开启会被拒绝。"
       },
       timezone: {
         label: "时区",
@@ -565,11 +565,11 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       parent_organization_id: {
         label: "上级组织",
-        help: "用于汇报 / 分组的上级。不授予任何权限——跨组织的可见性来自成员关系，绝不来自此引用。"
+        help: "用于汇报 / 分组的上级。不授予任何权限——跨组织的可见性来自成员关系，绝不来自此引用。仅在部署运行多个组织时有意义。"
       },
       sort_order: {
         label: "排序",
-        help: "在同级组织中的显示顺序。仅用于展示。"
+        help: "在同级组织中的显示顺序。仅用于展示。仅在部署运行多个组织时有意义。"
       },
       id: {
         label: "组织 ID"
@@ -984,7 +984,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
   sys_business_unit: {
     label: "业务单元",
     pluralLabel: "业务单元",
-    description: "公司的组织结构——事业部、部门、区域和办公地点——用于划定数据和报表的范围。",
+    description: "公司的组织结构——事业部、部门、区域和办公地点。共享规则可以把记录共享给某个业务单元，或某个业务单元及其下级单元：成员获得这些访问权限，离开后即失去。让权限集按业务单元读取全部记录（读取范围「unit」）需要企业版。",
     fields: {
       name: {
         label: "名称"
@@ -995,7 +995,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       kind: {
         label: "类型",
-        help: "分类提示——不会改变图谱语义。",
+        help: "仅用于分类和报表，不会改变该单元在组织中的位置和覆盖范围。",
         options: {
           company: "公司",
           division: "事业部",
@@ -1006,11 +1006,11 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       parent_business_unit_id: {
         label: "上级业务单元",
-        help: "组织树的自关联字段。Null 表示租户根节点。仍有下级单元的业务单元无法删除，须先将下级单元改挂到其他上级或删除。"
+        help: "该单元的上级单元。留空表示顶级单元。仍有下级单元的业务单元无法删除，须先将下级单元改挂到其他上级或删除。"
       },
       timezone: {
         label: "时区",
-        help: "该业务单元计算日期边界所用的 IANA 时区（如 Asia/Shanghai）。留空则依次继承上级业务单元的时区、组织的时区，最后为 UTC。"
+        help: "为该业务单元保存的 IANA 时区（如 Asia/Shanghai）；留空则取上级业务单元的，再取组织的。它目前不会改变任何日期计算：公式、报表和显示的日期使用 设置 → 本地化 → 默认时区。"
       },
       organization_id: {
         label: "组织",
@@ -1022,19 +1022,19 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       active: {
         label: "启用",
-        help: "为 false 时，图谱查询不会展开该业务单元成员。"
+        help: "关闭后即停用该单元：授予该单元或其上级单元的共享等访问权限，将不再覆盖其成员及下级单元。"
       },
       effective_from: {
         label: "生效时间",
-        help: "该业务单元生效的时间（HRIS 同步）。"
+        help: "该业务单元成立的时间，通常由 HR 系统同步填写。"
       },
       effective_to: {
         label: "失效时间",
-        help: "该业务单元停用的时间（HRIS 同步）。"
+        help: "该业务单元撤销的时间，通常由 HR 系统同步填写。"
       },
       external_ref: {
         label: "外部引用",
-        help: "上游 HRIS 中的 ID（Workday / SAP HR / 北森）。"
+        help: "该单元在 HR 系统（如 Workday、SAP HR、北森）中的编号，每次同步时用它对应到本单元。"
       },
       id: {
         label: "业务单元 ID"
@@ -3446,6 +3446,54 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       }
     }
   },
+  sys_platform_setting: {
+    label: "平台设置",
+    pluralLabel: "平台设置",
+    description: "整个部署共用的设置值：设置级联中的全局层。",
+    fields: {
+      id: {
+        label: "设置 ID"
+      },
+      created_at: {
+        label: "创建时间"
+      },
+      updated_at: {
+        label: "更新时间"
+      },
+      namespace: {
+        label: "命名空间",
+        help: "Manifest 命名空间（例如 mail、storage、ai）。"
+      },
+      key: {
+        label: "键",
+        help: "命名空间内的标识键（snake_case）。"
+      },
+      value: {
+        label: "值",
+        help: "JSON 编码的值。加密存储时为空（见「加密值」）。"
+      },
+      encrypted: {
+        label: "已加密",
+        help: "开启后，值加密存放在「加密值」中，「值」一列为空。"
+      },
+      locked: {
+        label: "已锁定",
+        help: "开启后，组织和用户的设置不能覆盖该值；对这两层的写入会被拒绝（409）。"
+      },
+      locked_reason: {
+        label: "锁定原因",
+        help: "锁定时在界面提示中显示的说明。"
+      },
+      value_enc: {
+        label: "加密值",
+        help: "保存密文的 sys_secret 记录的句柄。仅在加密存储时有值。"
+      },
+      updated_by: {
+        label: "更新人",
+        help: "最近一次通过设置服务写入该记录的人。"
+      }
+    }
+  },
   sys_secret: {
     label: "密钥",
     pluralLabel: "密钥",
@@ -3565,6 +3613,84 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       request_id: {
         label: "请求 ID",
         help: "与 sys_audit_log / tracing 关联。"
+      }
+    },
+    _views: {
+      recent: {
+        label: "最近"
+      }
+    }
+  },
+  sys_platform_setting_audit: {
+    label: "平台设置审计记录",
+    pluralLabel: "平台设置审计",
+    description: "设置服务对全局设置的每次变更的追加写入审计记录。",
+    fields: {
+      id: {
+        label: "ID"
+      },
+      created_at: {
+        label: "创建时间",
+        help: "记录该变更的时间。"
+      },
+      namespace: {
+        label: "命名空间"
+      },
+      key: {
+        label: "键"
+      },
+      scope: {
+        label: "范围",
+        help: "该记录写入的级联层；这里始终是全局层。",
+        options: {
+          global: "全局"
+        }
+      },
+      action: {
+        label: "操作",
+        help: "变更类型。",
+        options: {
+          set: "设置",
+          reset: "重置",
+          lock: "锁定",
+          unlock: "解锁",
+          rotate: "轮换"
+        }
+      },
+      actor_id: {
+        label: "执行人",
+        help: "执行该变更的用户；系统任务时为空。"
+      },
+      source: {
+        label: "来源",
+        help: "变更入口。",
+        options: {
+          ui: "UI",
+          api: "API",
+          migration: "迁移",
+          import: "导入",
+          system: "系统"
+        }
+      },
+      reason: {
+        label: "原因",
+        help: "执行人提供的说明（可选）。"
+      },
+      old_hash: {
+        label: "旧哈希",
+        help: "旧值的摘要，绝不是明文：普通值为 sha256: 十六进制摘要，机密值为带密钥的 hmac-sha256: 摘要。此前未设置时为空，机密值没有可用的带密钥摘要时也为空。"
+      },
+      new_hash: {
+        label: "新哈希",
+        help: "新值的摘要，绝不是明文：普通值为 sha256: 十六进制摘要，机密值为带密钥的 hmac-sha256: 摘要。重置时为空，机密值没有可用的带密钥摘要时也为空。"
+      },
+      encrypted: {
+        label: "已加密",
+        help: "该设置保存的是密钥材料时为是（轮换更值得关注）。"
+      },
+      request_id: {
+        label: "请求 ID",
+        help: "用于与审计日志和链路追踪关联。"
       }
     },
     _views: {

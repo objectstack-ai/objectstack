@@ -6045,7 +6045,8 @@ const warnedEmailTemplateFloors = new Set<string>();
  * `IEmailService.sendTemplate` reads one row at one tag exactly. For a call
  * that NAMES a locale, over the built-in registry template loader, it folds
  * that locale against the bundle's tags (`resolveBundleLocale`: exact,
- * case-insensitive, base language, variant expansion), then the stack's
+ * case-insensitive, platform table language, base language, variant
+ * expansion), then the stack's
  * declared fallback locale (`i18n.fallbackLocale`, else `defaultLocale`) the
  * same way, then the literal `en-US` (#28880); a replacement `TemplateLoader`
  * matches the named tag exactly and retries only `en-US`. So a bundle with no

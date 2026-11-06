@@ -71,8 +71,8 @@
 - 与产品提交占比:已合提交不触 `.claude/` `AGENTS.md` `scripts/pm` 门禁脚本 `.github/workflows` 者。
 - 产品提交占比连续多轮偏低 ⇒ 席位报维护者。
 - 报告含 `UNRECOGNISED` 行:对本轮门禁日志 grep `UNRECOGNISED` 逐行照录,`NOT APPLICABLE` 行也在内。
-- 健康指标五个:可派发库存(open `pm:queue` 未认领及趋势);决策箱(待维护者数)。
-- 决策箱指标还要点名带开放下游依赖的决策卡,从 `Blocked-by:` 反向索引现算。
+- 健康指标五个:可派发库存(open `pm:queue` 未认领及趋势);决策箱:决策卡 N·待您审合 PR M。
+- 两数 ⛔ 不合计;决策卡还要点名带开放下游依赖者,从 `Blocked-by:` 反向索引现算。
 - finding 数与中位年龄:裸标签数即未定级数,hold 已换标不在内。
 - 裸卡数与中位年龄:sweep 析取①,未定级数另计析取④;老化 = 首触欠账。
 - 发版阻塞 = 三仓 `target:<major>` 之和,归零 = 三张板都空;总 open 数刻意不在指标内。

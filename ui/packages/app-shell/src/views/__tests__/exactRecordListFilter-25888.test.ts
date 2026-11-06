@@ -13,6 +13,7 @@
 import { describe, it, expect } from 'vitest';
 import { exactRecordListFilter, recordListPath } from '../useOpenRecordList';
 import { parseUrlFilterTriples } from '../drillUrlFilters';
+import { convertFiltersToAST } from '@object-ui/core';
 
 const readAll = () => true;
 const PARENT = { record_id: 'C-1' };
@@ -69,6 +70,78 @@ describe('exactRecordListFilter — the AND of the sources, written exactly or n
     ]);
   });
 
+  it('writes the spellings objectstack#30743 added: a boolean, a negation, the text operators, both sets', () => {
+    const filter = exactRecordListFilter(
+      [
+        PARENT,
+        [
+          ['done', '=', true],
+          ['archived', '=', false],
+          ['status', 'in', ['paid', 'sent']],
+          ['stage', 'nin', ['lost']],
+          ['owner', '!=', 'u1'],
+          ['name', 'contains', 'acme'],
+          ['name', 'notcontains', 'test'],
+          ['code', 'startswith', 'INV'],
+          ['code', 'endswith', '-X'],
+          ['email', 'icontains', 'ACME'],
+        ],
+      ],
+      readAll,
+    );
+    expect(roundTrip(filter)).toEqual([
+      ['record_id', '=', 'C-1'],
+      ['done', '=', true],
+      ['archived', '=', false],
+      ['status', 'in', ['paid', 'sent']],
+      ['stage', 'nin', ['lost']],
+      ['owner', '!=', 'u1'],
+      ['name', 'contains', 'acme'],
+      ['name', 'notcontains', 'test'],
+      ['code', 'startswith', 'INV'],
+      ['code', 'endswith', '-X'],
+      ['email', 'icontains', 'ACME'],
+    ]);
+  });
+
+  it('reads each of those back as the node the drill drawer queries, comparand type included', () => {
+    // The drawer lowers the drill's object filter through `convertFiltersToAST`;
+    // the list lowers nothing, it reads triples. The two must be one question.
+    const cases: Record<string, unknown>[] = [
+      { done: true },
+      { done: false },
+      { status: { $in: ['paid', 'sent'] } },
+      { stage: { $nin: ['lost'] } },
+      { owner: { $ne: 'u1' } },
+      { name: { $contains: 'acme' } },
+      { name: { $notContains: 'test' } },
+      { code: { $startsWith: 'INV' } },
+      { code: { $endsWith: '-X' } },
+      { email: { $icontains: 'ACME' } },
+    ];
+    for (const condition of cases) {
+      expect(roundTrip(exactRecordListFilter([condition], readAll))).toEqual([convertFiltersToAST(condition)]);
+    }
+  });
+
+  it('a set of numbers reads back as its members\' text, the posture equality and the bounds already have', () => {
+    expect(roundTrip(exactRecordListFilter([{ priority: { $in: [1, 2] } }], readAll))).toEqual([
+      ['priority', 'in', ['1', '2']],
+    ]);
+  });
+
+  it('a set and an equality on one field are two params, both kept', () => {
+    expect(roundTrip(exactRecordListFilter([{ status: { $in: ['a', 'b'] } }, { status: 'a' }], readAll))).toEqual([
+      ['status', 'in', ['a', 'b']],
+      ['status', '=', 'a'],
+    ]);
+  });
+
+  it('a repeated set that agrees is written once', () => {
+    const set = { status: { $in: ['a', 'b'] } };
+    expect(roundTrip(exactRecordListFilter([set, set], readAll))).toEqual([['status', 'in', ['a', 'b']]]);
+  });
+
   it('a repeated condition that agrees is written once', () => {
     const filter = exactRecordListFilter([PARENT, [['record_id', '=', 'C-1']]], readAll);
     expect(roundTrip(filter)).toEqual([['record_id', '=', 'C-1']]);
@@ -76,10 +149,13 @@ describe('exactRecordListFilter — the AND of the sources, written exactly or n
 
   it.each([
     ['an `or`', ['or', ['status', '=', 'a'], ['status', '=', 'b']]],
-    ['a set operator', [['status', 'in', ['a', 'b']]]],
-    ['a negation', [['status', '!=', 'a']]],
-    ['a text operator', [['name', 'contains', 'x']]],
-    ['a boolean comparand', [['done', '=', true]]],
+    ['an empty set', { status: { $in: [] } }],
+    ['a set holding an empty string', { status: { $in: ['a', ''] } }],
+    ['a set holding a boolean', { status: { $in: ['a', true] } }],
+    ['two different sets on one field', { $and: [{ status: { $in: ['a', 'b'] } }, { status: { $in: ['a'] } }] }],
+    ['a negation of a boolean', [['done', '!=', true]]],
+    ['a text operator with a number', { name: { $contains: 5 } }],
+    ['a `$between`', { amount: { $between: [1, 9] } }],
     ['an empty-string comparand', [['status', '=', '']]],
     ['a field-reference comparand', { amount: { $eq: { $field: 'budget' } } }],
     ['a second, different comparand for the relationship', [['record_id', '=', 'C-2']]],

@@ -759,6 +759,14 @@ export const ORGANIZATION_OWNERSHIP_INVENTORY: readonly InventoryEntry[] = [
       `${CENSUS_MAIN}: systemFields.tenant: false; ${D7}: the environment's trusted plugin-publisher keys, ` +
       'read by key id under the system context, never by organization',
   },
+  {
+    object: 'sys_lifecycle_state',
+    census: PMAIN,
+    fate: 'column-drop',
+    citation:
+      `${CENSUS_MAIN}: systemFields.tenant: false; ${D7}: the lifecycle sweeper's clock state, one row per ` +
+      'datastore, written by the sweep under the system context, never by organization',
+  },
   { object: 'sys_scim_connection_credential', census: P1, fate: 'attribution', citation: `${D3_ORG_ROWS}; ${D10_SINGLE}`, anchors: [] },
   {
     object: 'sys_flow_credential',
@@ -794,12 +802,14 @@ export const ORGANIZATION_OWNERSHIP_INVENTORY: readonly InventoryEntry[] = [
   { object: 'sys_mail_message', census: PMAIN, fate: 'attribution', citation: `${CENSUS_MAIN} (in reach); the message's mailbox carries the organization`, anchors: [parent('mailbox_id', 'sys_mailbox')] },
   { object: 'sys_mail_association', census: PMAIN, fate: 'attribution', citation: `${CENSUS_MAIN} (in reach); the association's message carries the organization`, anchors: [parent('mail_message_id', 'sys_mail_message')] },
   // Ownership queues (`@objectstack/plugin-sharing`, ADR-0142): an organization
-  // authors its queues and their members, and the assignment engine writes its
-  // cursor, each under that organization. A member and a cursor name their
-  // queue or rule by name, not by id, so no parent anchors them.
+  // authors its queues, their members and its own assignment rules, and the
+  // assignment engine writes its cursor, each under that organization. A
+  // member, a cursor and a rule name their queue or rule by name, not by id,
+  // so no parent anchors them.
   { object: 'sys_queue', census: PMAIN, fate: 'attribution', citation: `${CENSUS_MAIN} (in reach, added since the first census); ${D10_SINGLE}`, anchors: [] },
   { object: 'sys_queue_member', census: PMAIN, fate: 'attribution', citation: `${CENSUS_MAIN} (in reach); names its queue by name, not by id; ${D10_SINGLE}`, anchors: [] },
   { object: 'sys_assignment_cursor', census: PMAIN, fate: 'attribution', citation: `${CENSUS_MAIN} (in reach); names its rule by name, not by id; ${D10_SINGLE}`, anchors: [] },
+  { object: 'sys_assignment_rule', census: PMAIN, fate: 'attribution', citation: `${CENSUS_MAIN} (in reach, added since the first census); its organization column is required, so no NULL row has a producer; ${D10_SINGLE}`, anchors: [] },
   // Exchange rates (`@objectstack/platform-objects`, #27185): an organization's
   // administrators author its own rate table; no parent row anchors a rate.
   { object: 'sys_exchange_rate', census: PMAIN, fate: 'attribution', citation: `${CENSUS_MAIN} (in reach, added since the first census); ${D10_SINGLE}`, anchors: [] },

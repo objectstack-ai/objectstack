@@ -19,20 +19,14 @@
  *    same bar. The seam is injected so this package keeps no LLM dependency.
  */
 
+import type { MetadataEvalCase } from './corpus.js';
 import { scoreMetadata, type MetadataScore } from './score.js';
 
-export interface MetadataEvalCase {
-  /** Stable id (snake_case). */
-  id: string;
-  /** The natural-language authoring goal a generator would receive. */
-  prompt: string;
-  /** Golden/representative stack used in offline mode. */
-  fixture: unknown;
-  /** Minimum score to pass this case (defaults to the runner's `minScore`). */
-  minScore?: number;
-  /** Optional human note about what the case exercises. */
-  note?: string;
-}
+// Declared beside the corpus it types (`corpus.ts`), so the corpus module
+// imports nothing from this runner: @objectstack/scenarios' suite reads the
+// corpus, and a type import from here would pull the whole lint command into
+// that package's type-check program.
+export type { MetadataEvalCase } from './corpus.js';
 
 export interface MetadataEvalCaseResult {
   id: string;

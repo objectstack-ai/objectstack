@@ -4791,11 +4791,12 @@ export const INSTRUCTION_FOUR_RULING =
  * `buildBlockingIndex` map H14 is judged against. ④ costs this patrol one
  * `Map.get` per decision card.
  *
- * The inbox label is `GOVERNED_PR_DECISION_LABEL`, deliberately NOT a second
- * spelling of the same string: H52 already reads that constant on CARDS while
- * H48 reads it on PULL REQUESTS, and the self-test pins the single-spelling
- * rule there (「the label constant is the one H48 already owns, not a second
- * spelling」). It is declared further down this file; a `const` in the temporal
+ * The inbox label is `DECISION_INBOX_LABEL`, deliberately NOT a second
+ * spelling of the same string: H52, H62 and H73 already read that constant on
+ * CARDS, and the self-test pins the single-spelling rule there (「the label
+ * constant is the card inbox one, not a second spelling」). H48 reads a
+ * DIFFERENT label on PULL REQUESTS (`GOVERNED_PR_AWAITING_MERGE_LABEL`), never
+ * this one. It is declared further down this file; a `const` in the temporal
  * dead zone is fine HERE because nothing calls this at module-evaluation time.
  *
  * A decision card with NO dependent is omitted rather than rendered empty, for
@@ -4821,7 +4822,7 @@ export function decisionDependentIndex(issues, index) {
   const rows = [];
   let inbox = 0;
   for (const issue of issues ?? []) {
-    if (!labelNames(issue ?? {}).includes(GOVERNED_PR_DECISION_LABEL)) continue;
+    if (!labelNames(issue ?? {}).includes(DECISION_INBOX_LABEL)) continue;
     inbox++;
     const dependents = index?.get?.(issue.number) ?? [];
     if (dependents.length === 0) continue;
@@ -8341,6 +8342,66 @@ export function h74QueuedWithoutTriageAudit(issue, commentBodies, parent) {
   );
 }
 
+// ---------------------------------------------------------------------------
+// H75 — an OPEN PR whose body states a CROSS-REPO issue as its premise, when
+// that issue CLOSED after the PR opened. Maintainer word, 2026-11-06, verbatim:
+// 「平台的问题应该在平台处理」. Measured: an app-repo PR opened 01:54Z to build a
+// workaround because a platform door "answered 501", citing the platform card;
+// that card closed 02:10Z, fixed at its source, and the PR sat on the governed
+// review route on the stale premise with nothing re-reading it.
+//
+// The anchors are the filing card's three spellings, never imagined ones
+// (`PROSE_BLOCKER_ANCHORS`'s rule). Only CROSS-REPO refs are targets: a local
+// premise is the same board's business and H19's. Targets ride H19's resolver
+// and cache, capped per PR like H4's prose candidates. ⛔ Report-only (triage:
+// 「新增门禁默认否」): the remedy is a re-measure before ACCEPT or hand-off.
+// ---------------------------------------------------------------------------
+
+/** The premise spellings H75 reads a line for: "because …", "blocked by/on …", "answers 501 (…)". */
+export const H75_PREMISE_ANCHOR = /\bbecause\b|\bblocked (?:by|on)\b|\banswer(?:s|ed)? [1-5]\d\d\b/iu;
+
+/** Every distinct CROSS-REPO ref on a premise-anchored line of a PR body, at most `H4_PROSE_CANDIDATE_CAP`. */
+export function h75PremiseTargets(pr, ownerRepo = OWNER_REPO) {
+  const out = new Map();
+  for (const raw of String(pr?.body ?? '').split(/\r?\n/)) {
+    const line = undecorateProseLine(raw);
+    if (!H75_PREMISE_ANCHOR.test(line)) continue;
+    for (const m of line.matchAll(PROSE_REF_SCAN)) {
+      if (!m[1] || /^pr$/iu.test(m[1])) continue;
+      const target = blockerTargetKey({ repo: m[1], number: m[2] }, ownerRepo);
+      if (!target.local && Number.isFinite(target.number)) out.set(target.key, target);
+    }
+  }
+  return [...out.values()].slice(0, H4_PROSE_CANDIDATE_CAP);
+}
+
+/**
+ * H75 — null when clean, else the finding sentence. A target closed BEFORE the
+ * PR opened is clean (the author wrote against a known state); an unresolved
+ * one fires UNJUDGED, never clean (#4690).
+ */
+export function h75PremiseClosedSinceOpened(pr, resolutions) {
+  const opened = Date.parse(pr?.created_at ?? '');
+  if (!Number.isFinite(opened) || !Array.isArray(resolutions)) return null;
+  const stale = resolutions.filter((r) => r?.state === 'closed' && Date.parse(r.closedAt ?? '') > opened);
+  if (stale.length) {
+    return (
+      `open PR whose body states ${stale.map((r) => `\`${r.key}\` (closed ${r.closedAt})`).join(', ')} as its ` +
+      `premise, and that issue CLOSED after this PR opened (${pr.created_at}). The reason this PR exists may be ` +
+      'gone, fixed at its source: re-measure the premise before ACCEPT or human hand-off, and when the platform ' +
+      'fixed it, withdraw the app-side workaround rather than land it. Report-only: ⛔ never a label, comment or ' +
+      'body written from this script.'
+    );
+  }
+  const unread = resolutions.filter((r) => r?.state === 'unresolved');
+  if (!unread.length) return null;
+  return (
+    `${UNJUDGED_MARKER} open PR whose body states ${unread.map((r) => `\`${r.key}\` (${r.detail})`).join(', ')} ` +
+    'as a cross-repo premise that could NOT be read this sweep — whether it closed after this PR opened is ' +
+    'UNJUDGED, not settled. Read it by hand before ACCEPT: an unreadable premise is not a live one.'
+  );
+}
+
 /**
  * The newest `Claim:` comment on a thread, WITH its timestamp — and
  * deliberately not `governingClaim`, which is the same read narrowed to claims
@@ -11320,8 +11381,11 @@ export function h47ReleaseRecordDesync(issue, commentRows) {
 //
 // A Tier H surface lands only on the maintainer's word (Prime Directive #14),
 // so the seat's review is not a merge — it is a HANDOFF, and the handoff is one
-// act with two writes: the `needs-user-decision` label puts the PR in the
-// maintainer's inbox, and a `## 维护者速读` comment is what makes reading it a
+// act with two writes: the `pm:awaiting-merge` label puts the PR in the
+// maintainer's awaiting-merge inbox (`needs-user-decision` is the decision-card
+// inbox, ISSUES only — the maintainer ruled the two inboxes apart so a count
+// of decisions owed never includes a PR), and a `## 维护者速读` comment is what
+// makes reading it a
 // two-minute job rather than a diff review. One act, two writes means exactly
 // the shapes this row reads:
 //
@@ -11348,7 +11412,7 @@ export function h47ReleaseRecordDesync(issue, commentRows) {
 // ## The three readings, each from the PR's own state
 //
 //   VERDICT  an issue-comment on the PR whose line begins `**ACCEPT**`.
-//   LABEL    `needs-user-decision` on the PR's labels — read off the LIST row,
+//   LABEL    `pm:awaiting-merge` on the PR's labels — read off the LIST row,
 //            no request.
 //   BRIEF    an issue-comment on the PR whose line begins `## 维护者速读`.
 //
@@ -11390,12 +11454,22 @@ export function h47ReleaseRecordDesync(issue, commentRows) {
 /**
  * The label half of the verdict's second write.
  *
- * ⚠️ On a PULL REQUEST this label means「awaiting the maintainer's review」and
- * it is NOT one of the six card states — ⛔ never add it to a card-state table
- * here (H24/H29 own that vocabulary) and ⛔ never read a card's copy of it
- * through this constant.
+ * ⚠️ PULL REQUESTS ONLY: this label means「landing waits on the maintainer's own
+ * review and merge」(SKILL.md 复核 ②) and it is NOT one of the six card states —
+ * ⛔ never add it to a card-state table here (H24/H29 own that vocabulary),
+ * ⛔ never put it on an issue, and ⛔ never read the decision-card inbox
+ * through this constant: that is `DECISION_INBOX_LABEL` below. The maintainer
+ * ruled the two inboxes apart (verbatim: 「同意 pm:awaiting-merge」) so the count
+ * of decisions owed and the count of PRs awaiting a click never share a label.
  */
-export const GOVERNED_PR_DECISION_LABEL = 'needs-user-decision';
+export const GOVERNED_PR_AWAITING_MERGE_LABEL = 'pm:awaiting-merge';
+
+/**
+ * The decision-card inbox label — ISSUES only, one of the six card states.
+ * H52/H62/H73 and the ④ dependents index read cards through this constant;
+ * ⛔ never H48, whose PR-side label is `GOVERNED_PR_AWAITING_MERGE_LABEL`.
+ */
+export const DECISION_INBOX_LABEL = 'needs-user-decision';
 
 /** One comment page, and the quota backstop on the walk. */
 export const H48_COMMENTS_PAGE_SIZE = 100;
@@ -11483,7 +11557,7 @@ export function h48GovernedVerdictWithoutBrief(pr, governed, commentRows) {
   const verdict = latestMarkedComment(rows, ACCEPT_VERDICT_MARKER);
   if (!verdict) return null;
   const hasBrief = latestMarkedComment(rows, MAINTAINER_BRIEF_MARKER) !== null;
-  const hasLabel = labelNames(pr ?? {}).includes(GOVERNED_PR_DECISION_LABEL);
+  const hasLabel = labelNames(pr ?? {}).includes(GOVERNED_PR_AWAITING_MERGE_LABEL);
   if (hasLabel && hasBrief) return null;
 
   const surfaces = governed ?? [];
@@ -11496,17 +11570,17 @@ export function h48GovernedVerdictWithoutBrief(pr, governed, commentRows) {
     surfaces.length > H48_SURFACE_LIST_CAP ? `, +${surfaces.length - H48_SURFACE_LIST_CAP} more` : '';
   const when = verdict.createdAt ? ` (newest one ${verdict.createdAt})` : '';
   const missing = [
-    hasLabel ? null : `no \`${GOVERNED_PR_DECISION_LABEL}\` label`,
+    hasLabel ? null : `no \`${GOVERNED_PR_AWAITING_MERGE_LABEL}\` label`,
     hasBrief ? null : 'no comment whose line begins `## 维护者速读`',
   ].filter(Boolean);
   const remedy = [
-    hasLabel ? null : `add \`${GOVERNED_PR_DECISION_LABEL}\``,
+    hasLabel ? null : `add \`${GOVERNED_PR_AWAITING_MERGE_LABEL}\``,
     hasBrief ? null : 'post the final 维护者速读 brief as a COMMENT',
   ].filter(Boolean);
   const cost = hasLabel
     ? 'the maintainer opens a governed diff with nothing saying what is being asked of them'
     : hasBrief
-      ? 'the inbox filter that lists what is waiting for a ruling does not list this PR'
+      ? 'the awaiting-merge filter that lists what waits on the maintainer\'s click does not list this PR'
       : 'the PR is neither listed in the inbox nor readable in two minutes once it is found';
   const briefClause = hasBrief
     ? ''
@@ -12421,7 +12495,7 @@ export function h52OpenQuestionsUnrouted(issue, commentRows) {
   if (!Array.isArray(commentRows)) return null;
   if (!h52SpeaksAbout(issue)) return null;
   // The card is already IN the inbox — the state this row exists to reach.
-  if (labelNames(issue).includes(GOVERNED_PR_DECISION_LABEL)) return null;
+  if (labelNames(issue).includes(DECISION_INBOX_LABEL)) return null;
   const report = latestDevReport(commentRows);
   if (!report) return null;
   // A payload that did not read has an UNKNOWN array — decline, never accuse.
@@ -12444,7 +12518,7 @@ export function h52OpenQuestionsUnrouted(issue, commentRows) {
     : 'none of them carries a readable `question` text';
   return (
     `the newest \`os-dev-report\` (${named}, ${stamped}) carries ${n} non-empty \`open_questions\` entry(ies) ` +
-    `while the card carries NO \`${GOVERNED_PR_DECISION_LABEL}\` label: ${listed}. So a question only the ` +
+    `while the card carries NO \`${DECISION_INBOX_LABEL}\` label: ${listed}. So a question only the ` +
     'maintainer can answer is filed, well-formed and UNREACHABLE — it is in no inbox, no candidate query and ' +
     'no staleness alert, while the card\'s own state label — whichever of the six it is — reads as work in ' +
     'progress on every board, so nothing a reader can see says a decision is owed. ⚠️ This is the shape ' +
@@ -12778,7 +12852,7 @@ export function contractReviewVerdictOf(body) {
 // remedy sentence says so rather than prescribing a relabel.
 //
 // ⛔ And no new label, by the same ruling: 「不要新增标签。你已经证明词汇表够用」.
-// `needs-user-decision` is live on cards and PRs and `pm:awaiting-maintainer`
+// `needs-user-decision` is live on cards and `pm:awaiting-maintainer`
 // is live on cards, so the state the remedy points at already exists and the
 // deliverable triage ruled for is 逐卡改判, not a new state.
 //
@@ -12879,7 +12953,7 @@ export function h54DecisionTitledQueueCard(issue) {
     'must stop saying otherwise); if it is genuinely UNRULED it belongs in the decision inbox — ' +
     '`needs-user-decision`, carrying its four-facet analysis at the moment the label lands, ⛔ not ' +
     'left for the maintainer to fill in on arrival. ⛔ No new label is needed or wanted: the ' +
-    'vocabulary already carries the state (`needs-user-decision` on cards and PRs, ' +
+    'vocabulary already carries the state (`needs-user-decision` on cards, ' +
     '`pm:awaiting-maintainer` on cards), and the ruled deliverable is 逐卡改判 rather than a new ' +
     'state. Report-only: this row writes no label, relabels nothing, and its verdict is a ' +
     'disagreement between two carriers — ⛔ never a finding that the card is mislabelled. ' +
@@ -14827,7 +14901,7 @@ export function h60ClaimBranchUnparsed(issue, governance) {
 //
 // ## Population, and why BODY only
 //
-// OPEN cards carrying `GOVERNED_PR_DECISION_LABEL` — the constant H48 and H52
+// OPEN cards carrying `DECISION_INBOX_LABEL` — the constant H52 and H73
 // already own, ⛔ never a second spelling. The listing is the UNSCOPED open one
 // (H13/H18's channel) for their reason: `needs-user-decision` is not a
 // member of `SEEN_LABEL_PAGES`, so a decision card carrying no `pm:*` state is
@@ -14968,7 +15042,7 @@ export function h62SpeaksAbout(issue) {
   if (issue?.pull_request) return false;
   if (issue?.state === 'closed') return false;
   if (!Array.isArray(issue?.labels)) return false;
-  return labelNames(issue).includes(GOVERNED_PR_DECISION_LABEL);
+  return labelNames(issue).includes(DECISION_INBOX_LABEL);
 }
 
 /**
@@ -14997,7 +15071,7 @@ export function h62DecisionCardWithoutFacetBlock(issue) {
           'exact gap #15929\'s text-level remedy left open and #16934 fell into (a card presented for ' +
           'a question ADR-0131 D8 already decides).';
   return (
-    `\`${GOVERNED_PR_DECISION_LABEL}\` and its BODY carries no \`${DECISION_FACET_MARKER}\` marker in ` +
+    `\`${DECISION_INBOX_LABEL}\` and its BODY carries no \`${DECISION_FACET_MARKER}\` marker in ` +
     'EITHER spelling — neither the plain-text line nor its HTML-comment form — so the four-facet block ' +
     '〈四棱卡面块固定形状〉 requires is not machine-findable on the card face. 「落卡即带,⛔ 不留待维护者' +
     '到场再补」: the block is a FILING duty, so a marker parked in a COMMENT is not the shape and this ' +
@@ -15118,7 +15192,7 @@ export function h73SpeaksAbout(issue) {
   if (!issue || issue.pull_request) return false;
   if (issue.state === 'closed') return false;
   if (!Array.isArray(issue.labels)) return false;
-  return labelNames(issue).includes(GOVERNED_PR_DECISION_LABEL);
+  return labelNames(issue).includes(DECISION_INBOX_LABEL);
 }
 
 /**
@@ -15148,7 +15222,7 @@ export function h73RuledCardStillInBox(issue, nowMs = Date.now()) {
       ? `owed by the ${domains.map((d) => `\`${d}\``).join(' / ')} lane seat`
       : 'owed by NO lane yet — the card carries no `domain:*` label, so the TRIAGE seat routes it first';
   return (
-    `\`${GOVERNED_PR_DECISION_LABEL}\` still on a card whose BODY carries a ruling record: ` +
+    `\`${DECISION_INBOX_LABEL}\` still on a card whose BODY carries a ruling record: ` +
     `\`${RULED_LINE_KEY}:\` ruling comment ${governing.id}, ${age}. The ruling is recorded and the exit ` +
     `out of the decision box is not: ${owes}, which moves the card in one write as the ruled letter ` +
     'says (`pm:queue`, `pm:blocked` or close) — nothing else will, because the director writes no label. ' +
@@ -15643,6 +15717,48 @@ export function h72OffTableMailboxLines(reading, nowMs = Date.now()) {
     'is a skills-lane finding, ⛔ never an invented key. ⛔ Report-only: nothing is written from this script. ' +
     `Out of scope: a comment older than ${MAILBOX_OFF_TABLE_WINDOW_HOURS}h (a bell is an event and ages out), a ` +
     'closed mailbox, a mailbox whose comment page could not be read (unjudged, counted in the summary).'
+  );
+}
+
+// ---------------------------------------------------------------------------
+// H76 — an OPEN PR with NO assignee, a `pm:mailbox` PR excepted. Ruling record
+// 6674390671 (letter A): a PR names its owner — the dev's `pr_create` carries
+// the claim's `Account:` as its assignee, and a hand-over (sibling takeover,
+// release, reassignment) re-assigns the PR in the same stroke as the claim
+// change (`references/execution-duties.md` 认领). The same ruling makes this
+// row report-only, ⛔ no gate. A mailbox is a seat's doorbell, never a delivery
+// (`project-forms.md` 〈信箱 PR〉), so it is exempt; its label is
+// `mailbox-open.mjs`'s MAILBOX_LABEL, handed in by the sweep, never spelled
+// here. When the sweep could not load that label the row cannot tell a mailbox
+// from a delivery, so it fires UNJUDGED, never clean (#4690). Drafts are
+// INCLUDED: a dev's PR stays a draft until its seat lands it. Free — it reads
+// the open listing already in hand.
+// ---------------------------------------------------------------------------
+
+/**
+ * H76 — null when clean or out of scope, else the finding sentence.
+ *
+ * @param {object} pr — a `/pulls?state=open` list row.
+ * @param {string} mailboxLabel — `mailbox-open.mjs`'s MAILBOX_LABEL, handed in by the sweep; anything else is unread.
+ */
+export function h76OpenPrWithoutAssignee(pr, mailboxLabel) {
+  if (!pr || pr.state === 'closed') return null;
+  if ((pr.assignees ?? []).length > 0 || pr.assignee) return null;
+  if (typeof mailboxLabel !== 'string' || mailboxLabel === '') {
+    return (
+      `${UNJUDGED_MARKER} open PR with NO assignee, and the mailbox label could not be read this sweep — ` +
+      'whether it is an exempt mailbox PR is UNJUDGED, not settled. Read its labels by hand: a mailbox is ' +
+      'exempt, any other open PR owes its owner as assignee.'
+    );
+  }
+  if (labelNames(pr).includes(mailboxLabel)) return null;
+  return (
+    'open PR with NO assignee. A PR names its owner (ruling record 6674390671): the dev\'s `pr_create` carries ' +
+    'the claim\'s `Account:`, and a hand-over (sibling takeover, release, reassignment) re-assigns the PR in the ' +
+    'same stroke as the claim change. Remedy — WHO and HOW: the seat holding the card this PR names assigns that ' +
+    'card\'s assignee through the relay (`assign` op, the PR number as `issue`); a bot PR with no card takes its ' +
+    'owning lane seat\'s account, or stays unassigned with a note. ⛔ Report-only: nothing is written from this ' +
+    `script. Out of scope: a \`${mailboxLabel}\` PR (a seat's doorbell, never a delivery).`
   );
 }
 
@@ -19216,7 +19332,7 @@ export function renderDecisionDependents(inventory, { markdown = false } = {}) {
 
   head.push(
     `Report-only and derived at READ TIME: a card below is an open ` +
-      `\`${GOVERNED_PR_DECISION_LABEL}\` card that at least one OPEN card's \`Blocked-by:\` line ` +
+      `\`${DECISION_INBOX_LABEL}\` card that at least one OPEN card's \`Blocked-by:\` line ` +
       `names, and ⛔ no priority label is written for it. The standing instruction this ` +
       `discharges, verbatim: 「${INSTRUCTION_FOUR_RULING}」 It is one lookup over the same ` +
       `reverse index H14 is judged against — no second channel and no second parser (#17968).`,
@@ -19244,7 +19360,7 @@ export function renderDecisionDependents(inventory, { markdown = false } = {}) {
   }
 
   const count =
-    `${rows.length} of ${inbox} open \`${GOVERNED_PR_DECISION_LABEL}\` card(s) have an open ` +
+    `${rows.length} of ${inbox} open \`${DECISION_INBOX_LABEL}\` card(s) have an open ` +
     `downstream dependent.`;
   const notMeasured =
     `NOT MEASURED beside it: ${unmeasured} open \`pm:blocked\` card(s) carry no machine-readable ` +
@@ -19619,6 +19735,9 @@ export const HALF_STATE_FAMILY_BAND = Object.freeze({
   // ⛔ Not `inventory`: it alarms about one card.
   H74: 'state',
 
+  // H75 is a `stall`, H19's band for H19's reason: the PR's premise outlived itself and nothing re-reads it.
+  H75: 'stall',
+
   // H63 is a `state`, and the other three bands are refused on their own
   // criteria. ⛔ Not `gate`: that band exists for the row that can tell a
   // STRIPPED gate from an ungated card — an ABSENCE reading as a green light —
@@ -19833,6 +19952,11 @@ export const HALF_STATE_FAMILY_BAND = Object.freeze({
   // is stopped (not `stall`), and no write on the board repairs a sent comment
   // (not `state`) — the repair is the next bell, spelled from the table.
   H72: 'inventory',
+
+  // H76 is a `state`, H1's band for H1's reason: a live PR half-written — the
+  // owner the ruling makes it name is missing, and the repair is one relay
+  // `assign` on the board. ⛔ Not `stall`: an unowned PR can still land.
+  H76: 'state',
 });
 
 const FAMILY_BAND_RANK = new Map(HALF_STATE_FAMILY_BANDS.map((b) => [b.name, b.rank]));
@@ -23720,6 +23844,22 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
     }
   }
 
+  // H76 — an open PR with no assignee, off the listing above, free. The mailbox
+  // label is imported LAZILY for H72's reason (banner above `h72NeedsThread`);
+  // a failed import leaves it unread, and every unowned PR then fires UNJUDGED.
+  {
+    let mailboxLabel = null;
+    try {
+      ({ MAILBOX_LABEL: mailboxLabel } = await import('./mailbox-open.mjs'));
+    } catch {
+      mailboxLabel = null;
+    }
+    for (const pr of seenPrs.values()) {
+      const unowned = h76OpenPrWithoutAssignee(pr, mailboxLabel);
+      if (unowned) findings.push([pr, 'H76', unowned]);
+    }
+  }
+
   // H16 — the only predicate here whose input no listing carries:
   // `mergeable_state` lives on the single-PR endpoint alone. One GET per
   // CANDIDATE (the gathering policy is `h16NeedsDetail`, which answers from
@@ -24628,6 +24768,14 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
   stats.crossRepoProbed = repoReadCache.size;
   stats.crossRepoUnreadable = [...repoReadCache.values()].filter((v) => v === false).length;
 
+  // H75 — premise freshness over the open PRs listed above, on H19's resolver and cache (drafts included).
+  for (const pr of seenPrs.values()) {
+    const resolutions = [];
+    for (const target of h75PremiseTargets(pr)) resolutions.push(await resolveBlockerTarget(target));
+    const stale = h75PremiseClosedSinceOpened(pr, resolutions);
+    if (stale) findings.push([pr, 'H75', stale]);
+  }
+
   // -- H40 — the dangling-reference patrol (#13634) --------------------------
   //
   // Runs LAST, deliberately. It is the only pass here whose cost is a budget
@@ -25224,6 +25372,9 @@ export const SELF_TEST_BATTERIES = Object.freeze({
   // through this predicate — lives in record-recognisers.mjs's doorbell battery,
   // because this self-test cannot import that module (H62's banner).
   'H72 mailbox off-table bells': 20,
+  // Registered with the unowned-PR row, pin just under the count: the firing, the assignee/mailbox/closed
+  // exemptions, the unread-label UNJUDGED leg, the text, the band and the wiring.
+  'H76 unowned open PR': 11,
   // Registered with the ruled-card-in-the-box row (#29386), pin just under the
   // count: the firing case, the label / fence / anchoring / id controls each
   // beside its positive twin, the threshold boundary, the governing stamp, the
@@ -25234,6 +25385,9 @@ export const SELF_TEST_BATTERIES = Object.freeze({
   // channel, every exemption beside a non-exempt twin, the population edges,
   // the three thread states, the text, the summary pair and the band.
   'H74 first-touch audit': 46,
+  // Registered with the premise-freshness row, pin just under the count: the measured timeline firing, its
+  // before-open / open / local / unanchored controls, the UNJUDGED leg, the cap, the text and the band.
+  'H75 premise freshness': 15,
 });
 
 /** The floor on the ROSTER itself — how many batteries must be declared at all. */
@@ -28284,7 +28438,7 @@ async function selfTest() {
   const facetCard = (over = {}) => ({
     number: 16934,
     state: 'open',
-    labels: [{ name: GOVERNED_PR_DECISION_LABEL }, { name: 'priority:p2' }],
+    labels: [{ name: DECISION_INBOX_LABEL }, { name: 'priority:p2' }],
     body: '## 一句话问题\n单租户下谁是租户墙?\n',
     ...over,
   });
@@ -28309,11 +28463,11 @@ async function selfTest() {
 
   // ── Direction 2, continued: population boundaries, each with its control ──
   t('⛔ H62: a card without the decision label is out of scope', h62DecisionCardWithoutFacetBlock(facetCard({ labels: [{ name: 'priority:p2' }] })), null);
-  t('H62 control: …and adding exactly that label to the same card fires it', typeof h62DecisionCardWithoutFacetBlock(facetCard({ labels: [{ name: 'priority:p2' }, { name: GOVERNED_PR_DECISION_LABEL }] })), 'string');
+  t('H62 control: …and adding exactly that label to the same card fires it', typeof h62DecisionCardWithoutFacetBlock(facetCard({ labels: [{ name: 'priority:p2' }, { name: DECISION_INBOX_LABEL }] })), 'string');
   t('⛔ H62: a CLOSED decision card is out — the label on it is residue, H22/H39\'s reading', h62DecisionCardWithoutFacetBlock(facetCard({ state: 'closed' })), null);
   t('⛔ H62: a PULL REQUEST row that slipped into the listing is not a card', h62DecisionCardWithoutFacetBlock(facetCard({ pull_request: {} })), null);
   t('H62 control: …and the byte-identical row WITHOUT the `pull_request` field fires, so it is the PR-ness that excluded it', typeof h62DecisionCardWithoutFacetBlock(facetCard()), 'string');
-  t('⛔ H62: …and the decision label on a PULL REQUEST is H48\'s subject, whose own constant this is', GOVERNED_PR_DECISION_LABEL, 'needs-user-decision');
+  t('⛔ H62: …and the card inbox constant is `needs-user-decision`, never H48\'s PR label `pm:awaiting-merge`', [DECISION_INBOX_LABEL, GOVERNED_PR_AWAITING_MERGE_LABEL].join('|'), 'needs-user-decision|pm:awaiting-merge');
   t('⛔ H62: an UNREADABLE `labels` is excluded, never read as unlabelled (#4690)', h62DecisionCardWithoutFacetBlock(facetCard({ labels: undefined })), null);
   t('⛔ H62: a missing row does not crash', h62DecisionCardWithoutFacetBlock(undefined), null);
   t('⛔ H62: an EMPTY body is a finding, not a crash — nothing was written at all', typeof h62DecisionCardWithoutFacetBlock(facetCard({ body: null })), 'string');
@@ -28359,8 +28513,8 @@ async function selfTest() {
   // ── The row's text: the platform hazard, the remedy, the boundaries ───────
   t('H62 text: ⛔ no less-than fragment — the body is written into a GitHub issue', /[<>]/.test(row62(facetCard())), false);
   t('H62 text: …so the comment spelling is named in WORDS', row62(facetCard()).includes('HTML-comment form'), true);
-  t('H62 text: the label constant is printed, ⛔ never a re-typed literal', row62(facetCard()).includes(`\`${GOVERNED_PR_DECISION_LABEL}\``), true);
-  t('H62 text: …and it is the constant H48/H52 already own', GOVERNED_PR_DECISION_LABEL, 'needs-user-decision');
+  t('H62 text: the label constant is printed, ⛔ never a re-typed literal', row62(facetCard()).includes(`\`${DECISION_INBOX_LABEL}\``), true);
+  t('H62 text: …and it is the card inbox constant H52 already owns', DECISION_INBOX_LABEL, 'needs-user-decision');
   t('H62 text: WHO acts is the FILING seat, in one body edit', row62(facetCard()).includes('the FILING seat, in one body edit'), true);
   t('H62 text: …and the prior-ruling reader is named as the paste source', row62(facetCard()).includes('check:pm-prior-rulings'), true);
   t('H62 text: ⛔ never a label written from this script', row62(facetCard()).includes('never a label written from this script'), true);
@@ -28395,7 +28549,7 @@ async function selfTest() {
   t('H63: …while the state row calls the trigger a position on the work state machine', row63(gradedCarrier(['finding', 'pm:queue'])).includes('a position on the work state machine'), true);
   t('H63: this very card\'s own shape fires — `finding` + `pm:queue` + `priority:p3`', typeof h63StaleFindingBesideGrade(gradedCarrier(['finding', 'pm:queue', 'priority:p3', 'domain:skills'])), 'string');
   t('H63: …naming BOTH triggers, state first', row63(gradedCarrier(['finding', 'pm:queue', 'priority:p3'])).includes('`pm:queue`, `priority:p3`'), true);
-  t('H63: every grading state is a trigger — `needs-user-decision` included', typeof h63StaleFindingBesideGrade(gradedCarrier(['finding', GOVERNED_PR_DECISION_LABEL])), 'string');
+  t('H63: every grading state is a trigger — `needs-user-decision` included', typeof h63StaleFindingBesideGrade(gradedCarrier(['finding', DECISION_INBOX_LABEL])), 'string');
 
   // ── Direction 2: it is SILENT where the screen leaves the card, each silence
   //    with a lit control on the byte-identical card ─────────────────────────
@@ -28568,6 +28722,26 @@ async function selfTest() {
   b(BATTERY28675, '⭐ H72: the sweep takes the ONE reader and the opener\'s label LAZILY — `mailboxEvents` from record-recognisers.mjs, MAILBOX_LABEL from mailbox-open.mjs — and spells no doorbell key of its own', (() => { const src = readFileSync(fileURLToPath(import.meta.url), 'utf8'); return src.includes("import('./record-recognisers.mjs')") && src.includes("import('./mailbox-open.mjs')") && !/^import [^\n]*from '\.\/(?:record-recognisers|mailbox-open)\.mjs'/mu.test(src) && !src.includes(['MAILBOX_KEYS', '='].join(' ')); })(), true);
   b(BATTERY28675, 'floor: this battery is DECLARED on the roster, with a positive pin', Object.prototype.hasOwnProperty.call(SELF_TEST_BATTERIES, BATTERY28675) && SELF_TEST_BATTERIES[BATTERY28675] > 0, true);
 
+  // -- H76: an open PR with no assignee (ruling record 6674390671, letter A). The fixture is a relay-opened dev
+  //    draft as the card measured them (26 of 27 open PRs unassigned), offline, never a live read.
+  const BATTERY76 = 'H76 unowned open PR';
+  const MAILBOX76 = 'pm:mailbox';
+  const pr76 = (extra = {}) => ({ number: 30778, state: 'open', draft: true, assignees: [], assignee: null, labels: [{ name: 'skip-changeset' }], user: { login: 'objectstack-fleet[bot]', type: 'Bot' }, ...extra });
+  const row76 = String(h76OpenPrWithoutAssignee(pr76(), MAILBOX76) ?? '');
+  b(BATTERY76, 'H76 fires: an open dev draft with no assignee and no mailbox label', row76.length > 0 && !isUnjudgedFinding(row76), true);
+  b(BATTERY76, 'H76 row: names the ruling, the claim\'s `Account:`, the relay `assign` op, the bot-PR arm and the report-only boundary', ['ruling record 6674390671', 'the claim\'s `Account:`', '`assign` op', 'owning lane seat\'s account', 'Report-only'].every((x) => row76.includes(x)), true);
+  b(BATTERY76, 'H76: a ready (non-draft) PR fires exactly like a draft — drafts are included, not the only population', typeof h76OpenPrWithoutAssignee(pr76({ draft: false }), MAILBOX76), 'string');
+  b(BATTERY76, '⛔ H76: a PR with an assignee is clean — the list field or the legacy single field', [h76OpenPrWithoutAssignee(pr76({ assignees: [{ login: 'os-elon-musk' }] }), MAILBOX76), h76OpenPrWithoutAssignee(pr76({ assignee: { login: 'os-elon-musk' } }), MAILBOX76)].join(), ',');
+  b(BATTERY76, '⛔ H76: an unassigned `pm:mailbox` PR is exempt, and its unlabelled twin is not', [h76OpenPrWithoutAssignee(pr76({ labels: [{ name: MAILBOX76 }, { name: 'pinned' }] }), MAILBOX76), typeof h76OpenPrWithoutAssignee(pr76({ labels: [{ name: 'pinned' }] }), MAILBOX76)].join(), ',string');
+  b(BATTERY76, '⛔ H76: a closed PR and a missing row are silent, never a crash', [h76OpenPrWithoutAssignee(pr76({ state: 'closed' }), MAILBOX76), h76OpenPrWithoutAssignee(undefined, MAILBOX76), h76OpenPrWithoutAssignee(null, MAILBOX76)].join(), ',,');
+  const unread76 = [null, undefined, ''].map((label) => String(h76OpenPrWithoutAssignee(pr76(), label) ?? ''));
+  b(BATTERY76, 'H76: an UNREAD mailbox label fires UNJUDGED, never clean — null, undefined and empty alike', unread76.every((t) => t.startsWith(UNJUDGED_MARKER) && isUnjudgedFinding(t)), true);
+  b(BATTERY76, '⛔ H76: …but an ASSIGNED PR stays clean with the label unread — the label is only the mailbox exemption', h76OpenPrWithoutAssignee(pr76({ assignees: [{ login: 'os-elon-musk' }] }), null), null);
+  b(BATTERY76, 'H76: not a loud finding — it never escalates a sweep', [isLoudFinding(row76), isLoudFinding(unread76[0])].join(), 'false,false');
+  b(BATTERY76, 'H76 band: registered as `state` (H1\'s), and the sweep really pushes it', `${familyBand('H76')}/${familyRegistryCoverage().emitted.includes('H76')}`, 'state/true');
+  b(BATTERY76, 'H76 wiring: every listed open PR is judged with the label taken LAZILY from mailbox-open.mjs, never spelled in the sweep', (() => { const src = readFileSync(fileURLToPath(import.meta.url), 'utf8'); return src.includes("({ MAILBOX_LABEL: mailboxLabel } = await import('./mailbox-open.mjs'));") && src.includes('const unowned = h76OpenPrWithoutAssignee(pr, mailboxLabel);'); })(), true);
+  b(BATTERY76, 'floor: this battery is DECLARED on the frozen roster with a positive pin', Object.hasOwn(SELF_TEST_BATTERIES, BATTERY76) && SELF_TEST_BATTERIES[BATTERY76] > 0 && Object.isFrozen(SELF_TEST_BATTERIES), true);
+
   // -- H73 (#29386): a RULED decision card still sitting in the decision box.
   //    Positive controls beside every negative one: the label, the fence, the
   //    anchoring, the id, the threshold, the governing stamp, the re-entry line.
@@ -28577,7 +28751,7 @@ async function selfTest() {
   const card73 = (extra = {}) => ({
     number: 28658,
     state: 'open',
-    labels: [{ name: GOVERNED_PR_DECISION_LABEL }, { name: 'domain:server' }, { name: 'priority:p2' }],
+    labels: [{ name: DECISION_INBOX_LABEL }, { name: 'domain:server' }, { name: 'priority:p2' }],
     body: `director#1 · os-support-ai · session_x\n${RULED73}\n\n## 维护者速读\n\n- 问题:…`,
     ...extra,
   });
@@ -28601,13 +28775,13 @@ async function selfTest() {
   b(BATTERY29386, 'H73: …and the list form under that line is read too', h73({ body: `${RULED73}\n\n**Prior rulings on this card:**\n- 6566731522 — the old question\n` }), null);
   b(BATTERY29386, 'H73 control: …while the same line naming a DIFFERENT ruling still fires', typeof h73({ body: `${RULED73}\n\nPrior rulings on this card: 6400000001 — another ruling.` }), 'string');
   b(BATTERY29386, 'H73 control: …and an id after a blank line below it is not that line\'s', typeof h73({ body: `Prior rulings on this card: none\n\n${RULED73}` }), 'string');
-  b(BATTERY29386, 'H73: no `domain:*` label names the TRIAGE seat instead of inventing a lane', row73({ labels: [{ name: GOVERNED_PR_DECISION_LABEL }] }).includes('the TRIAGE seat routes it first'), true);
-  b(BATTERY29386, 'H73: two `domain:*` labels are both named', row73({ labels: [{ name: GOVERNED_PR_DECISION_LABEL }, { name: 'domain:spec' }, { name: 'domain:server' }] }).includes('`domain:spec` / `domain:server`'), true);
+  b(BATTERY29386, 'H73: no `domain:*` label names the TRIAGE seat instead of inventing a lane', row73({ labels: [{ name: DECISION_INBOX_LABEL }] }).includes('the TRIAGE seat routes it first'), true);
+  b(BATTERY29386, 'H73: two `domain:*` labels are both named', row73({ labels: [{ name: DECISION_INBOX_LABEL }, { name: 'domain:spec' }, { name: 'domain:server' }] }).includes('`domain:spec` / `domain:server`'), true);
   b(BATTERY29386, '⛔ H73 population: a closed card, a PR row, an unreadable `labels`, a missing row and an empty body are all silent, none a crash', [h73({ state: 'closed' }), h73({ pull_request: {} }), h73({ labels: undefined }), h73RuledCardStillInBox(undefined, NOW73), h73({ body: null })].every((v) => v === null), true);
   b(BATTERY29386, 'H73 reader: the live shapes read — a parenthesised re-ruling note and a seconds stamp', JSON.stringify([...ruledRecords('Ruled: 6439314592 · letter A (re-ruled from B, 6435350063) · 2026-10-27T10:22Z'), ...ruledRecords('- Ruled: 6398569691 · letter A · 2026-10-25T13:58:53Z')]), JSON.stringify([{ id: '6439314592', at: at73('2026-10-27T10:22Z') }, { id: '6398569691', at: at73('2026-10-25T13:58:53Z') }]));
   b(BATTERY29386, 'H73 text: no angle-bracket fragment and no tracker number — the row is written into a GitHub issue', /[<>]/.test(row73()) || /#[0-9]/.test(row73()), false);
   b(BATTERY29386, 'H73 text: names the one-act rule, the bell, the shape\'s printout and the report-only boundary', ['ONE act (lanes/director.md)', '`Notify: ruling`', '--mailbox-keys', 'never a label written from this script'].every((x) => row73().includes(x)), true);
-  b(BATTERY29386, 'H73 text: the label is the constant H48/H52/H62 own, ⛔ never a re-typed literal', row73().startsWith(`\`${GOVERNED_PR_DECISION_LABEL}\``), true);
+  b(BATTERY29386, 'H73 text: the label is the card inbox constant H52/H62 own, ⛔ never a re-typed literal', row73().startsWith(`\`${DECISION_INBOX_LABEL}\``), true);
   b(BATTERY29386, 'H73 constants: a six-hour threshold, one standing patrol cycle', `${RULED_IN_BOX_STALE_HOURS}/${PATROL_CADENCE_HOURS}`, '6/6');
   b(BATTERY29386, 'H73 band: registered as `stall`, and the sweep really pushes it', `${familyBand('H73')}/${familyRegistryCoverage().emitted.includes('H73')}`, 'stall/true');
   b(BATTERY29386, 'H73: not a loud finding — it never escalates a sweep', isLoudFinding(row73()), false);
@@ -28696,6 +28870,33 @@ async function selfTest() {
   b(BATTERY74, 'H74 band: registered as `state` (H13\'s), and the sweep really pushes it', `${familyBand('H74')}/${familyRegistryCoverage().emitted.includes('H74')}`, 'state/true');
   b(BATTERY74, 'H74: not a loud finding — it never escalates a sweep', isLoudFinding(row74([])), false);
   b(BATTERY74, 'floor: this battery is DECLARED on the frozen roster with a positive pin', Object.hasOwn(SELF_TEST_BATTERIES, BATTERY74) && SELF_TEST_BATTERIES[BATTERY74] > 0 && Object.isFrozen(SELF_TEST_BATTERIES), true);
+
+  // -- H75: an open PR whose cross-repo premise closed after it opened. The fixture is the measured timeline
+  //    (cloud PR opened 2026-11-05T01:54Z; the platform card it cites closed 02:10Z), offline, never a live read.
+  const BATTERY75 = 'H75 premise freshness';
+  const CLOUD75 = 'objectstack-ai/cloud';
+  const pr75 = (body, extra = {}) => ({ number: 3595, created_at: '2026-11-05T01:54:00Z', body, ...extra });
+  const BODY75 = "Builds a cloud-only path because the environment's HTTP door answered 501 (objectstack#30192).";
+  const res75 = (state, closedAt = null, extra = {}) => [{ ...blockerTargetKey({ repo: 'objectstack', number: 30192 }, CLOUD75), state, closedAt, detail: null, ...extra }];
+  const keys75 = (body, repo = CLOUD75) => h75PremiseTargets(pr75(body), repo).map((t) => t.key).join();
+  b(BATTERY75, 'H75 targets: the measured body names the platform card in full owner/repo form', keys75(BODY75), 'objectstack-ai/objectstack#30192');
+  b(BATTERY75, 'H75 targets: "blocked by" and "because" anchor a line too, decorated or not', [keys75('Blocked by `objectstack#7`.'), keys75('**Because** objectstack-ai/objectstack#8 refuses.')].join(), 'objectstack-ai/objectstack#7,objectstack-ai/objectstack#8');
+  b(BATTERY75, '⛔ H75 targets: a LOCAL ref is not a cross-repo premise, bare or repo-qualified', [keys75('because #30192 answered 501'), keys75('because objectstack#30192 answered 501', 'objectstack-ai/objectstack')].join(), ',');
+  b(BATTERY75, '⛔ H75 targets: a cross-repo ref on an UNANCHORED line is no premise', keys75('Follow-up to objectstack#30192.'), '');
+  b(BATTERY75, 'H75 targets: the per-PR cap bounds requests', h75PremiseTargets(pr75(`because ${[1, 2, 3, 4, 5, 6, 7].map((n) => `objectstack#${n}`).join(' ')}`), CLOUD75).length, H4_PROSE_CANDIDATE_CAP);
+  const fired75 = String(h75PremiseClosedSinceOpened(pr75(BODY75), res75('closed', '2026-11-05T02:10:00Z')) ?? '');
+  b(BATTERY75, 'H75 fires: the premise closed sixteen minutes after the PR opened', fired75.length > 0, true);
+  b(BATTERY75, 'H75 row: names the target, both stamps, the re-measure and the report-only boundary', ['`objectstack-ai/objectstack#30192` (closed 2026-11-05T02:10:00Z)', '(2026-11-05T01:54:00Z)', 're-measure the premise before ACCEPT', 'never a label, comment or body written'].every((x) => fired75.includes(x)), true);
+  b(BATTERY75, '⛔ H75: a premise that closed BEFORE the PR opened is clean', h75PremiseClosedSinceOpened(pr75(BODY75), res75('closed', '2026-11-05T01:50:00Z')), null);
+  b(BATTERY75, '⛔ H75: a premise still OPEN is clean', h75PremiseClosedSinceOpened(pr75(BODY75), res75('open')), null);
+  const unread75 = String(h75PremiseClosedSinceOpened(pr75(BODY75), res75('unresolved', null, { detail: 'HTTP 404' })) ?? '');
+  b(BATTERY75, 'H75: an UNRESOLVED premise fires UNJUDGED, never clean', unread75.startsWith(UNJUDGED_MARKER) && isUnjudgedFinding(unread75) && unread75.includes('(HTTP 404)'), true);
+  b(BATTERY75, 'H75: a closed premise leads even beside an unresolved one', String(h75PremiseClosedSinceOpened(pr75(BODY75), [...res75('closed', '2026-11-05T02:10:00Z'), ...res75('unresolved')])).startsWith('open PR whose body'), true);
+  b(BATTERY75, '⛔ H75: no targets, an unreadable open stamp or a missing row is silent, never a crash', [h75PremiseClosedSinceOpened(pr75(BODY75), []), h75PremiseClosedSinceOpened(pr75(BODY75, { created_at: undefined }), res75('closed', '2026-11-05T02:10:00Z')), h75PremiseClosedSinceOpened(undefined, undefined), h75PremiseTargets(undefined).length].join(), ',,,0');
+  b(BATTERY75, 'H75: not a loud finding — it never escalates a sweep', isLoudFinding(fired75), false);
+  b(BATTERY75, 'H75 band: registered as `stall` (H19\'s), and the sweep really pushes it', `${familyBand('H75')}/${familyRegistryCoverage().emitted.includes('H75')}`, 'stall/true');
+  b(BATTERY75, 'H75 wiring: the sweep resolves targets through H19\'s ONE resolver, never a fetch of its own', readFileSync(fileURLToPath(import.meta.url), 'utf8').includes('for (const target of h75PremiseTargets(pr)) resolutions.push(await resolveBlockerTarget(target));'), true);
+  b(BATTERY75, 'floor: this battery is DECLARED on the frozen roster with a positive pin', Object.hasOwn(SELF_TEST_BATTERIES, BATTERY75) && SELF_TEST_BATTERIES[BATTERY75] > 0 && Object.isFrozen(SELF_TEST_BATTERIES), true);
 
   // -- H64 — a seat- or dev-signed artefact that names no session (#18069,
   //    re-keyed by #18237) ---------------------------------------------------
@@ -33345,7 +33546,7 @@ Doubles as the fire's **write self-check** (step 0). \`201\` is not the reading.
   const GOV48 = [{ glob: '.claude/**', files: ['.claude/agents/os-dev.md'] }];
   const VERDICT48 = '**ACCEPT** — lands #15894 as ruled. Governed (`.claude/**`), predicate exit 3.';
   const BRIEF48 = '## 维护者速读\n\n一句话:巡查行,报告态,不写标签。';
-  const LABEL48 = GOVERNED_PR_DECISION_LABEL;
+  const LABEL48 = GOVERNED_PR_AWAITING_MERGE_LABEL;
   const cm48 = (body, at = '2026-09-05T14:30:00Z') => ({ body, created_at: at });
   // ⚠️ The fixture BODY always carries the dev's six-line draft under the SAME
   // `## 维护者速读` heading the comment marker reads, so every case below that
@@ -33366,13 +33567,15 @@ Doubles as the fire's **write self-check** (step 0). \`201\` is not the reading.
   t('H48: verdict + label, NO brief -> finding', typeof h48GovernedVerdictWithoutBrief(pr48([LABEL48]), GOV48, [cm48(VERDICT48)]), 'string');
   t('H48: …and the row names the brief half that is missing', h48row(pr48([LABEL48]), GOV48, [cm48(VERDICT48)]).includes('no comment whose line begins `## 维护者速读`'), true);
   t('H48: …and the remedy is posting it as a COMMENT', h48row(pr48([LABEL48]), GOV48, [cm48(VERDICT48)]).includes('post the final 维护者速读 brief as a COMMENT'), true);
-  t('H48: …and never asks for the label, which is already there', h48row(pr48([LABEL48]), GOV48, [cm48(VERDICT48)]).includes('add `needs-user-decision`'), false);
+  t('H48: …and never asks for the label, which is already there', h48row(pr48([LABEL48]), GOV48, [cm48(VERDICT48)]).includes('add `pm:awaiting-merge`'), false);
   t('H48: verdict + brief, NO label -> finding', typeof h48GovernedVerdictWithoutBrief(pr48([]), GOV48, [cm48(VERDICT48), cm48(BRIEF48)]), 'string');
-  t('H48: …and the row names the label half that is missing', h48row(pr48([]), GOV48, [cm48(VERDICT48), cm48(BRIEF48)]).includes('no `needs-user-decision` label'), true);
-  t('H48: …and the remedy is the label write', h48row(pr48([]), GOV48, [cm48(VERDICT48), cm48(BRIEF48)]).includes('Remedy: add `needs-user-decision`.'), true);
+  t('H48: …and the row names the label half that is missing', h48row(pr48([]), GOV48, [cm48(VERDICT48), cm48(BRIEF48)]).includes('no `pm:awaiting-merge` label'), true);
+  t('⛔ H48: the OLD shape — `needs-user-decision` on the PR — no longer satisfies the label half (the maintainer split the inboxes)', typeof h48GovernedVerdictWithoutBrief(pr48([DECISION_INBOX_LABEL]), GOV48, [cm48(VERDICT48), cm48(BRIEF48)]), 'string');
+  t('H48: the PR-side constant is `pm:awaiting-merge`, PRs only, and NOT one of the six card states', [GOVERNED_PR_AWAITING_MERGE_LABEL, PM_EXCLUSIVE_STATE_LABELS.includes(GOVERNED_PR_AWAITING_MERGE_LABEL)].join('|'), 'pm:awaiting-merge|false');
+  t('H48: …and the remedy is the label write', h48row(pr48([]), GOV48, [cm48(VERDICT48), cm48(BRIEF48)]).includes('Remedy: add `pm:awaiting-merge`.'), true);
   t('H48: …and never asks for a brief that is already posted', h48row(pr48([]), GOV48, [cm48(VERDICT48), cm48(BRIEF48)]).includes('as a COMMENT'), false);
-  t('H48: verdict and NEITHER half -> ONE finding naming both', h48row(pr48([]), GOV48, [cm48(VERDICT48)]).includes('no `needs-user-decision` label and no comment whose line begins `## 维护者速读`'), true);
-  t('H48: …and both remedies in one sentence, never two rows', h48row(pr48([]), GOV48, [cm48(VERDICT48)]).includes('add `needs-user-decision`, and post the final 维护者速读 brief as a COMMENT'), true);
+  t('H48: verdict and NEITHER half -> ONE finding naming both', h48row(pr48([]), GOV48, [cm48(VERDICT48)]).includes('no `pm:awaiting-merge` label and no comment whose line begins `## 维护者速读`'), true);
+  t('H48: …and both remedies in one sentence, never two rows', h48row(pr48([]), GOV48, [cm48(VERDICT48)]).includes('add `pm:awaiting-merge`, and post the final 维护者速读 brief as a COMMENT'), true);
   t('H48: …and it really is ONE row', (h48row(pr48([]), GOV48, [cm48(VERDICT48)]).match(/Report-only patrol INPUT/gu) ?? []).length, 1);
 
   // The BODY draft is not the brief — the half this row exists to find must not
@@ -33928,7 +34131,7 @@ Doubles as the fire's **write self-check** (step 0). \`201\` is not the reading.
   t('H52 fires: a non-empty `open_questions` on a card with no `needs-user-decision`', typeof h52(OPEN52), 'string');
   t('H52 negative control: an EMPTY `open_questions` array is NOT reported', h52(EMPTY52), null);
   t('H52 negative control: a card ALREADY carrying `needs-user-decision` is NOT reported again', h52(OPEN52, card52(['pm:dispatched', 'needs-user-decision'])), null);
-  t('H52: the label constant is the one H48 already owns, not a second spelling', GOVERNED_PR_DECISION_LABEL, 'needs-user-decision');
+  t('H52: the label constant is the card inbox one, not a second spelling — and not H48\'s PR label', DECISION_INBOX_LABEL, 'needs-user-decision');
   t('H52: a thread with no report at all is silent', h52([cm52(1, 'Triage: routing only.', T52)]), null);
 
   // The marker — two spellings, and what is deliberately NOT one.

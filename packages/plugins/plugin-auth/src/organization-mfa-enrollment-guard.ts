@@ -74,8 +74,12 @@
  * Both answers are in the caller's language: the locale the request asked for
  * (`Accept-Language`, carried as `ExecutionContext.locale` and handed to every
  * hook as `ctx.session.locale`), matched against the four the copy carries
- * with core's `resolveLocale` — exact, then by language (`zh` reaches
- * `zh-CN`), else English. A write with no caller locale (a system write, a
+ * with core's `resolveLocale`, which is `resolveLocaleAmong`'s five steps
+ * (exact, case-insensitive, platform locale table language, so `zh` reaches
+ * `zh-CN`; base language; first registered variant), else English. The
+ * table step only adds answers for the table's aliases: the copy carries no
+ * `zh-Hant`, so `zh-TW` still reads `zh-CN`. A write with no caller
+ * locale (a system write, a
  * seed) reads English. This is the same path the global switch's refusal takes
  * (`mfa-required-enrollment-predicate.ts`).
  *
@@ -96,6 +100,7 @@
  */
 
 import { resolveLocale } from '@objectstack/core';
+import type { SettingsCopyLocale } from './settings-copy-locale.js';
 import { SystemObjectName } from '@objectstack/spec/system';
 import { validationFailure } from '@objectstack/types';
 
@@ -145,8 +150,30 @@ export function turnsMfaRequirementOn(value: unknown): boolean {
   return !OFF_VALUES.has(value);
 }
 
-/** The locales the copy below carries; English is the fallback. */
-type CopyLocale = 'en' | 'zh-CN' | 'ja-JP' | 'es-ES';
+/**
+ * The locales the copy below carries: every language on the platform locale
+ * table ({@link SettingsCopyLocale}); English is the fallback.
+ */
+type CopyLocale = SettingsCopyLocale;
+
+/** `n` whole days in Arabic: its six plural forms, the dual and the singular spelled out. */
+function arabicDays(n: number): string {
+  const rest = n % 100;
+  if (n === 1) return 'يوم واحد';
+  if (n === 2) return 'يومان';
+  if (rest >= 3 && rest <= 10) return `${n} أيام`;
+  if (rest >= 11 && rest <= 99) return `${n} يومًا`;
+  return `${n} يوم`;
+}
+
+/** `n` whole days in Russian: день / дня / дней by the last one or two digits. */
+function russianDays(n: number): string {
+  const rest10 = n % 10;
+  const rest100 = n % 100;
+  if (rest10 === 1 && rest100 !== 11) return `${n} день`;
+  if (rest10 >= 2 && rest10 <= 4 && (rest100 < 12 || rest100 > 14)) return `${n} дня`;
+  return `${n} дней`;
+}
 
 /**
  * The refusal, per language: what was refused, why, who it would have locked
@@ -183,6 +210,54 @@ export const ORGANIZATION_MFA_REFUSAL_COPY: Readonly<Record<CopyLocale, string>>
     'OS_AUTH_TWO_FACTOR esté definido como false allí (prevalece sobre los ajustes), también sirve activar el ' +
     'ajuste auth.mfa_required: exige la autenticación multifactor en todas las organizaciones y activa el ' +
     'registro con él.',
+  'zh-Hant':
+    '本組織暫時無法強制多因素驗證：本部署未開啟雙重驗證的綁定，寬限期結束後所有成員（包括擁有者）都會被攔截，' +
+    '且無法綁定驗證器應用程式。請先開啟雙重驗證，再在這裡開啟此項：在部署上設定 OS_AUTH_TWO_FACTOR=true。' +
+    '只要部署上沒有把 OS_AUTH_TWO_FACTOR 設為 false（它的優先順序高於設定），開啟 auth.mfa_required 設定也可以：' +
+    '它會對所有組織強制多因素驗證，並同時開啟綁定。',
+  ar:
+    'لا تستطيع هذه المؤسسة فرض المصادقة متعددة العوامل بعد: تسجيل المصادقة الثنائية متوقف على هذا النشر، لذا ' +
+    'عند انتهاء فترة السماح سيُحظر كل عضو، بمن فيهم المالك، دون أي طريقة لتسجيل تطبيق مصادقة. فعّل المصادقة ' +
+    'الثنائية أولًا ثم اشترطها هنا: اضبط OS_AUTH_TWO_FACTOR=true على النشر. وما لم يكن OS_AUTH_TWO_FACTOR ' +
+    'مضبوطًا على false هناك (فهو يتقدّم على الإعدادات)، فإن تفعيل الإعداد auth.mfa_required يفي بالغرض أيضًا: ' +
+    'فهو يفرض المصادقة متعددة العوامل على كل المؤسسات ويفعّل التسجيل معه.',
+  fr:
+    'Cette organisation ne peut pas encore exiger l’authentification multifacteur : l’enregistrement à deux ' +
+    'facteurs est désactivé sur ce déploiement, si bien qu’à la fin du délai de grâce tous les membres, ' +
+    'propriétaire compris, seraient bloqués sans moyen d’enregistrer une application d’authentification. Activez ' +
+    'd’abord les deux facteurs, puis exigez-les ici : définissez OS_AUTH_TWO_FACTOR=true sur le déploiement. Sauf ' +
+    'si OS_AUTH_TWO_FACTOR y est défini sur false (il prévaut sur les paramètres), activer le paramètre ' +
+    'auth.mfa_required fonctionne aussi : il exige l’authentification multifacteur pour toutes les organisations ' +
+    'et active l’enregistrement en même temps.',
+  'pt-BR':
+    'Esta organização ainda não pode exigir a autenticação multifator: o cadastro de dois fatores está desativado ' +
+    'nesta implantação, então, ao fim do período de carência, todos os membros, inclusive o proprietário, ficariam ' +
+    'bloqueados sem como cadastrar um aplicativo autenticador. Ative primeiro os dois fatores e depois exija-os ' +
+    'aqui: defina OS_AUTH_TWO_FACTOR=true na implantação. A menos que OS_AUTH_TWO_FACTOR esteja definido como false ' +
+    'lá (ele prevalece sobre as configurações), ativar a configuração auth.mfa_required também funciona: ela exige ' +
+    'a autenticação multifator em todas as organizações e ativa o cadastro junto.',
+  ru:
+    'Эта организация пока не может требовать многофакторную аутентификацию: подключение двухфакторной ' +
+    'аутентификации в этом развёртывании выключено, поэтому по окончании льготного периода все участники, включая ' +
+    'владельца, были бы заблокированы без возможности подключить приложение-аутентификатор. Сначала включите ' +
+    'двухфакторную аутентификацию, затем требуйте её здесь: установите OS_AUTH_TWO_FACTOR=true в развёртывании. ' +
+    'Если там OS_AUTH_TWO_FACTOR не установлен в false (он имеет приоритет над настройками), подойдёт и включение ' +
+    'настройки auth.mfa_required: она требует многофакторную аутентификацию во всех организациях и вместе с этим ' +
+    'включает подключение.',
+  de:
+    'Diese Organisation kann die Multi-Faktor-Authentifizierung noch nicht verlangen: Die Einrichtung der ' +
+    'Zwei-Faktor-Authentifizierung ist in dieser Bereitstellung ausgeschaltet. Nach Ablauf der Schonfrist wäre daher ' +
+    'jedes Mitglied, der Eigentümer eingeschlossen, gesperrt, ohne eine Authenticator-App einrichten zu können. ' +
+    'Schalten Sie zuerst die Zwei-Faktor-Authentifizierung ein und verlangen Sie sie dann hier: Setzen Sie ' +
+    'OS_AUTH_TWO_FACTOR=true in der Bereitstellung. Sofern OS_AUTH_TWO_FACTOR dort nicht auf false gesetzt ist (es ' +
+    'hat Vorrang vor den Einstellungen), genügt auch das Einschalten der Einstellung auth.mfa_required: Sie verlangt ' +
+    'die Multi-Faktor-Authentifizierung für alle Organisationen und schaltet die Einrichtung gleich mit ein.',
+  ko:
+    '이 조직은 아직 다단계 인증을 필수로 설정할 수 없습니다. 이 배포에서는 2단계 인증 등록이 꺼져 있으므로, 유예 ' +
+    '기간이 끝나면 소유자를 포함한 모든 구성원이 인증 앱을 등록할 방법 없이 차단됩니다. 먼저 2단계 인증을 켠 다음 ' +
+    '여기에서 필수로 설정하세요. 배포에서 OS_AUTH_TWO_FACTOR=true로 설정하면 됩니다. 배포에서 OS_AUTH_TWO_FACTOR ' +
+    '값이 false로 설정되어 있지 않다면(이 값은 설정보다 우선합니다) auth.mfa_required 설정을 켜는 방법도 있습니다. 이 ' +
+    '설정은 모든 조직에 다단계 인증을 요구하고 등록도 함께 켭니다.',
 };
 
 /**
@@ -230,11 +305,81 @@ export const ORGANIZATION_MFA_REQUIRED_NOTICE_COPY: Readonly<Record<CopyLocale, 
         'a contar desde la primera vez que usa la app mientras sea obligatoria; después se le bloquea el acceso ' +
         'a los datos hasta que lo haga. Los miembros que ya usan un autenticador no se ven afectados. El periodo ' +
         'de gracia de MFA se configura en Configuración → Autenticación.',
+  'zh-Hant': (days) =>
+    days === 0
+      ? '本組織現已強制多因素驗證。尚未綁定驗證器應用程式的成員下次使用應用程式時即無法存取資料，直到完成綁定：' +
+        'MFA 寬限期為 0 天。已使用驗證器應用程式的成員不受影響。MFA 寬限期可在「設定 → 驗證」中修改。'
+      : `本組織現已強制多因素驗證。尚未綁定驗證器應用程式的成員有 ${days} 天時間完成綁定，` +
+        '從要求生效後他們第一次使用應用程式時起算；期滿後，未綁定的成員將無法存取資料，直到完成綁定。' +
+        '已使用驗證器應用程式的成員不受影響。MFA 寬限期可在「設定 → 驗證」中修改。',
+  ar: (days) =>
+    days === 0
+      ? 'أصبحت المصادقة متعددة العوامل إلزامية لهذه المؤسسة. كل عضو لم يُعدّ تطبيق مصادقة يُحظر من الوصول إلى ' +
+        'البيانات في المرة التالية التي يستخدم فيها التطبيق، إلى أن يسجّل تطبيقًا: مدة فترة السماح للمصادقة متعددة ' +
+        'العوامل 0 يوم. لا يتأثر الأعضاء الذين يستخدمون تطبيق مصادقة بالفعل. تُضبط فترة السماح في الإعداد ← المصادقة.'
+      : `أصبحت المصادقة متعددة العوامل إلزامية لهذه المؤسسة. أمام كل عضو لم يُعدّ تطبيق مصادقة مهلة ${arabicDays(days)} ` +
+        'لتسجيله، تُحسب من أول مرة يستخدم فيها التطبيق ما دام هذا الشرط قائمًا؛ وبعدها يُحظر من الوصول إلى البيانات ' +
+        'إلى أن يسجّله. لا يتأثر الأعضاء الذين يستخدمون تطبيق مصادقة بالفعل. تُضبط فترة السماح في الإعداد ← المصادقة.',
+  fr: (days) =>
+    days === 0
+      ? 'L’authentification multifacteur est désormais obligatoire pour cette organisation. Chaque membre qui n’a ' +
+        'pas configuré d’application d’authentification perd l’accès aux données dès sa prochaine utilisation de ' +
+        'l’application, jusqu’à ce qu’il en enregistre une : le délai de grâce MFA est de 0 jour. Les membres qui ' +
+        'utilisent déjà une application d’authentification ne sont pas concernés. Le délai de grâce MFA se règle ' +
+        'dans Configuration → Authentification.'
+      : 'L’authentification multifacteur est désormais obligatoire pour cette organisation. Chaque membre qui n’a ' +
+        `pas configuré d’application d’authentification dispose de ${days === 1 ? '1 jour' : `${days} jours`} pour ` +
+        'en enregistrer une, à compter de sa première utilisation de l’application depuis que l’exigence est ' +
+        'active ; passé ce délai, il perd l’accès aux données jusqu’à ce qu’il le fasse. Les membres qui utilisent ' +
+        'déjà une application d’authentification ne sont pas concernés. Le délai de grâce MFA se règle dans ' +
+        'Configuration → Authentification.',
+  'pt-BR': (days) =>
+    days === 0
+      ? 'A autenticação multifator agora é obrigatória nesta organização. Cada membro que não configurou um ' +
+        'aplicativo autenticador perde o acesso aos dados na próxima vez que usar o aplicativo, até cadastrar um: o ' +
+        'período de carência de MFA é de 0 dias. Os membros que já usam um aplicativo autenticador não são ' +
+        'afetados. O período de carência de MFA é definido em Configuração → Autenticação.'
+      : 'A autenticação multifator agora é obrigatória nesta organização. Cada membro que não configurou um ' +
+        `aplicativo autenticador tem ${days === 1 ? '1 dia' : `${days} dias`} para cadastrar um, contados a partir ` +
+        'da primeira vez que usar o aplicativo enquanto a exigência estiver ativa; depois disso, perde o acesso aos ' +
+        'dados até cadastrar. Os membros que já usam um aplicativo autenticador não são afetados. O período de ' +
+        'carência de MFA é definido em Configuração → Autenticação.',
+  ru: (days) =>
+    days === 0
+      ? 'Теперь в этой организации обязательна многофакторная аутентификация. Каждый участник, не настроивший ' +
+        'приложение-аутентификатор, теряет доступ к данным при следующем использовании приложения, пока не ' +
+        'подключит его: льготный период MFA — 0 дней. Участников, которые уже используют приложение-аутентификатор, ' +
+        'это не затрагивает. Льготный период MFA задаётся в разделе «Настройка → Аутентификация».'
+      : 'Теперь в этой организации обязательна многофакторная аутентификация. У каждого участника, не настроившего ' +
+        `приложение-аутентификатор, есть ${russianDays(days)}, чтобы подключить его, считая с первого использования ` +
+        'приложения после введения требования; после этого он теряет доступ к данным, пока не подключит приложение. ' +
+        'Участников, которые уже используют приложение-аутентификатор, это не затрагивает. Льготный период MFA ' +
+        'задаётся в разделе «Настройка → Аутентификация».',
+  de: (days) =>
+    days === 0
+      ? 'Die Multi-Faktor-Authentifizierung ist für diese Organisation jetzt Pflicht. Jedes Mitglied, das noch keine ' +
+        'Authenticator-App eingerichtet hat, ist ab der nächsten Nutzung der App vom Zugriff auf Daten gesperrt, bis ' +
+        'es eine einrichtet: Die MFA-Schonfrist beträgt 0 Tage. Mitglieder, die bereits eine Authenticator-App ' +
+        'nutzen, sind nicht betroffen. Die MFA-Schonfrist wird unter Einrichtung → Authentifizierung festgelegt.'
+      : 'Die Multi-Faktor-Authentifizierung ist für diese Organisation jetzt Pflicht. Jedes Mitglied, das noch keine ' +
+        `Authenticator-App eingerichtet hat, hat ${days === 1 ? '1 Tag' : `${days} Tage`} Zeit, eine einzurichten, ` +
+        'gerechnet ab der ersten Nutzung der App, seit sie Pflicht ist; danach ist es vom Zugriff auf Daten ' +
+        'gesperrt, bis es das tut. Mitglieder, die bereits eine Authenticator-App nutzen, sind nicht betroffen. Die ' +
+        'MFA-Schonfrist wird unter Einrichtung → Authentifizierung festgelegt.',
+  ko: (days) =>
+    days === 0
+      ? '이제 이 조직에서는 다단계 인증이 필수입니다. 인증 앱을 설정하지 않은 구성원은 다음에 앱을 사용할 때부터 ' +
+        '인증 앱을 등록할 때까지 데이터에 접근할 수 없습니다(MFA 유예 기간 0일). 이미 인증 앱을 사용하는 구성원은 ' +
+        '영향을 받지 않습니다. MFA 유예 기간은 설정 → 인증에서 변경할 수 있습니다.'
+      : '이제 이 조직에서는 다단계 인증이 필수입니다. 인증 앱을 설정하지 않은 구성원은 필수가 된 뒤 앱을 처음 ' +
+        `사용한 때부터 ${days}일 안에 인증 앱을 등록해야 하며, 그 이후에는 등록할 때까지 데이터에 접근할 수 ` +
+        '없습니다. 이미 인증 앱을 사용하는 구성원은 영향을 받지 않습니다. MFA 유예 기간은 설정 → 인증에서 변경할 수 ' +
+        '있습니다.',
 };
 
 const COPY_LOCALES = Object.keys(ORGANIZATION_MFA_REFUSAL_COPY);
 
-/** The copy language for a caller's locale: exact, then by language, else English. */
+/** The copy language for a caller's locale: `resolveLocaleAmong`'s five steps, else English. */
 function copyLocaleFor(locale: string | undefined): CopyLocale {
   const picked = typeof locale === 'string' && locale ? resolveLocale(locale, COPY_LOCALES) : undefined;
   return (picked ?? 'en') as CopyLocale;

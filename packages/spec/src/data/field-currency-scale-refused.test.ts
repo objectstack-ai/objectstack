@@ -5,7 +5,7 @@
  * 5791803339, batch #215 item 1, letter B): a currency field carrying `scale`
  * is refused at parse. The remedy is worded by ruling 5805782503 (batch #218
  * item 2, letter 乙 — a currency's decimal places are the currency's, not a
- * setting): delete the key; the currency's ISO 4217 minor unit decides its
+ * setting): delete the key; the currency's CLDR fraction digits decide its
  * display, and its write allowance stays unconstrained. It names no other key
  * to carry the value, and the remedy pins below hold both halves: the ruled
  * wording is present, and the retired pointer is absent.
@@ -49,7 +49,7 @@ function scaleIssues(result: { success: boolean; error?: { issues: Issue[] } }):
  */
 function expectRuledRemedy(message: string): void {
   expect(message.startsWith('`scale` is not valid on a `currency` field — delete the key.')).toBe(true);
-  expect(message).toContain('the currency\'s ISO 4217 minor unit (2 for USD, 0 for JPY, 3 for KWD) decides how the amount displays');
+  expect(message).toContain('the currency\'s CLDR fraction digits (2 for USD, 0 for JPY, 3 for KWD) decide how the amount displays');
   expect(message).toContain('the field\'s write allowance stays unconstrained');
   expect(message).not.toMatch(/currencyConfig|precision/);
 }
@@ -138,7 +138,7 @@ describe('CONTROLS: what the refusal must leave alone', () => {
     const description = (FieldSchema.shape as Record<string, { description?: string }>).scale?.description ?? '';
     expect(description).toContain('Applies to `number`, `percent`, `rating` and `slider`');
     expect(description).toContain('REFUSED on a `currency` field — delete it there');
-    expect(description).toContain('the currency\'s ISO 4217 minor unit decides how the amount displays');
+    expect(description).toContain('the currency\'s CLDR fraction digits decide how the amount displays');
     expect(description).not.toContain('currencyConfig');
   });
 });
@@ -240,5 +240,29 @@ describe('no registered metadata form OFFERS `scale` on a currency field', () =>
         .map((r) => `${type}:${r.path}`),
     );
     expect(offered).toEqual([]);
+  });
+});
+
+// ────────────────────────────────────────────────────────────────────────────
+// The digit source the refusal names is the one the platform uses.
+//
+// `CURRENCY_FRACTION_DIGITS` is a CLDR `currencyData` snapshot and every
+// display face asks `Intl` (ICU, the same CLDR data), so an amount's decimal
+// places are the currency's CLDR fraction digits. ISO 4217's minor unit is a
+// different number for sixteen codes (IQD 0 against 3; AFN, ALL, COP, HUF,
+// IDR, IRR, KPW, LAK, LBP, MGA, MMK, PKR, SOS, SYP and YER 0 against 2), so a
+// refusal naming ISO 4217 tells an IQD author to expect three decimals the
+// platform never shows.
+// ────────────────────────────────────────────────────────────────────────────
+
+describe('the currency `scale` refusal names CLDR fraction digits, not the ISO 4217 minor unit', () => {
+  it('the refusal and the `scale` describe say CLDR and no longer say "ISO 4217 minor unit"', () => {
+    const [issue] = scaleIssues(FieldSchema.safeParse({ name: 'amount', label: 'Amount', type: 'currency', scale: 2 }));
+    expect(issue?.code).toBe('custom');
+    expect(issue?.message).toContain('CLDR fraction digits');
+    expect(issue?.message).not.toContain('ISO 4217 minor unit');
+    const description = (FieldSchema.shape as Record<string, { description?: string }>).scale?.description ?? '';
+    expect(description).toContain('CLDR fraction digits');
+    expect(description).not.toContain('ISO 4217 minor unit');
   });
 });

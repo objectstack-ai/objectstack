@@ -31,7 +31,7 @@
 //    date, and never otherwise (a corrected rate reaches stored rows only
 //    through a recompute).
 
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import type { EngineUpdateOptions } from '@objectstack/spec/data';
 import { ObjectQL } from './engine.js';
 import { applyDriverQueryInMemory } from './driver-query-in-memory.js';
@@ -670,6 +670,56 @@ describe('recompute: the write\'s own rules, per organization', () => {
     // 721 ÷ 0.048 = 15020.83…, whole yen: JPY has no fraction digits — in the report and in the row.
     expect(report.changes.map((c) => c.to)).toEqual([{ home: 15021, rate: 0.048 }]);
     expect(t.storeFor('fx_invoice').get(b.id)).toMatchObject({ amount_home: 15021, amount_rate: 0.048 });
+  });
+});
+
+// [ruling 6670707546 item 3] `os migrate recompute-home-amounts --org`: the
+// same organization scope the code backfill takes, as the run's filter.
+describe('recompute: an organization filter', () => {
+  async function twoOrganizations() {
+    const t = await boot();
+    t.rate('USD', '2026-01-01', 0.1389);
+    const as = (org: string) => ({ context: { isSystem: true, tenantId: org } }) as any;
+    const a = await t.engine.insert('fx_invoice', { title: 'a', currency_code: 'USD', invoice_date: '2026-03-15', amount: 1389, organization_id: 'org_a' }, as('org_a'));
+    const b = await t.engine.insert('fx_invoice', { title: 'b', currency_code: 'USD', invoice_date: '2026-03-15', amount: 1389, organization_id: 'org_b' }, as('org_b'));
+    t.rate('USD', '2026-01-01', 0.125); // a correction both rows read
+    return { t, a, b };
+  }
+
+  it('limits the run to that organization\'s rows: the other organization\'s stored amount is not touched', async () => {
+    const { t, a, b } = await twoOrganizations();
+    t.engine.registry.registerObject(AUDIT_OBJECT as any);
+    const update = vi.spyOn(t.driver, 'update');
+    const report = await recompute(t, { organizationId: 'org_b', apply: true });
+    expect(report).toMatchObject({ organizationId: 'org_b', scannedRecords: 1, changed: 1, written: 1 });
+    expect(report.organizations).toEqual([expect.objectContaining({ organizationId: 'org_b', written: 1 })]);
+    expect(t.storeFor('fx_invoice').get(b.id)).toMatchObject({ amount_home: 11112, amount_rate: 0.125 });
+    expect(t.storeFor('fx_invoice').get(a.id)).toMatchObject({ amount_home: 10000, amount_rate: 0.1389 });
+    expect(update.mock.calls.filter((c) => c[0] === 'fx_invoice').map((c) => c[1])).toEqual([b.id]);
+    expect(formatHomeAmountRecomputeReport(report)[0]).toContain('of fx_invoice in organization org_b (');
+    expect(auditRows(t)[0]!.metadata).toMatchObject({ organizationId: 'org_b', written: 1 });
+  });
+
+  it('without it the run still covers every organization, never refused', async () => {
+    const { t } = await twoOrganizations();
+    const report = await recompute(t, { apply: true });
+    expect(report).toMatchObject({ organizationId: null, changed: 2, written: 2 });
+    expect(report.organizations.map((o) => o.organizationId)).toEqual(['org_a', 'org_b']);
+  });
+
+  it('a blank organization, or one on an object that stores none, is refused before any row is read', async () => {
+    const t = await boot();
+    t.engine.registry.registerObject({ ...invoice(), name: 'fx_shared', tenancy: { enabled: false } } as any);
+    expect(t.engine.getObject('fx_shared')?.fields).not.toHaveProperty('organization_id');
+    const before = (t.finds.fx_invoice ?? 0) + (t.finds.fx_shared ?? 0);
+    const errs = await Promise.all([
+      refusalOf(recompute(t, { organizationId: ' ' })),
+      refusalOf(recompute(t, { object: 'fx_shared', organizationId: 'org_a', apply: true })),
+    ]);
+    expect(errs.map((e) => [e?.code, e?.status, e?.field])).toEqual([
+      ['VALIDATION_FAILED', 400, 'organizationId'], ['INVALID_FIELD', 400, 'organization_id'],
+    ]);
+    expect((t.finds.fx_invoice ?? 0) + (t.finds.fx_shared ?? 0)).toBe(before);
   });
 });
 

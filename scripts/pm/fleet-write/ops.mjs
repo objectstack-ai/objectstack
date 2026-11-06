@@ -30,7 +30,7 @@
  *
  * An op is only what this table names. There is no row for a merge of a pull,
  * a review submission, a direct branch or ref write (`/git/**`, `/branches/**`,
- * `/contents/**`), a workflow-file write, a run cancel or delete, a whole-run
+ * `/contents/**`) but one mailbox branch's DELETE (below), a workflow-file write, a run cancel or delete, a whole-run
  * or single-job re-run, a cache or artifact write, a release, or any
  * organization / administration endpoint, so a payload naming one is refused
  * at the validator with zero writes — the `--self-test` of `validate.mjs` pins
@@ -54,6 +54,28 @@
  * dispatch, never left to the platform's 422; a stale one IS the platform's
  * 422. How the executor tells that 422 from the "nothing to merge" one, and
  * how it confirms a 202, is `execute.mjs`'s (`confirmUpdateBranch`).
+ *
+ * ## The one row that deletes a ref — `mailbox_branch_delete`
+ *
+ * A cloud seat opens its mailbox on a branch it pushed (`mailbox-open.mjs
+ * --head`) and cannot delete it, so the relay does, by the maintainer's ruling
+ * (comment 6674408912, letter A), which opens this ONE row and nothing else.
+ * `DELETE /repos/{o}/{r}/git/refs/heads/{branch}` is `contents: write`,
+ * server-to-server, no additional permission (the ledger cited below): a
+ * grant every stroke already carries for the auto-merge rows, so the mint
+ * widens nothing. The row creates no ref and writes no content: the `/git/`
+ * family of `REFUSED_PATH_FAMILIES` refuses every path but exactly one
+ * `refs/heads/` ref of `MAILBOX_BRANCH_SHAPE` (`claude/mailbox-*`), held there
+ * before the dispatch too. The fences, listed HERE only, are facts about the
+ * pull and the ref, judged by the executor on the pull's own `GET`, the open
+ * pulls on that head and the ref, the last three reads before the DELETE
+ * (`mailboxBranchPreflight`): the pull is closed, carries `pm:mailbox`, its
+ * head is `branch` on this repository, no OPEN pull has that head (the DELETE
+ * would close it), and the ref points at the pull's `head.sha` (a commit pushed
+ * after the close is not the mailbox's; a ref already absent fences nothing).
+ * Anything else is refused, the DELETE not sent. It lands only when the ref
+ * reads back absent (`confirmMailboxBranch`): a ref already gone (the DELETE's
+ * 422) is an idempotent landing, one still there FAILED.
  *
  * ## The rows whose LATER requests read the FIRST's answer — `pr_create` with `assignees` or `labels`
  *
@@ -151,10 +173,10 @@
  * auto-merge mutations (`enablePullRequestAutoMerge` /
  * `disablePullRequestAutoMerge`) additionally require `contents: write` —
  * measured on the first live use, where a token without it answered
- * "Resource not accessible by integration" — and those two rows are the ONLY
- * spenders of it: the table has no contents op (no direct file, ref or branch
- * write; `pr_update_branch` is the platform's own merge, `pull_requests: write`
- * in that ledger); arming auto-merge on a pull that changes
+ * "Resource not accessible by integration" — and beside those two rows only
+ * `mailbox_branch_delete`'s one ref DELETE (above) spends it: no row writes a
+ * file or creates or moves a ref (`pr_update_branch` is the platform's own
+ * merge, `pull_requests: write` in that ledger); arming auto-merge on a pull that changes
  * `.github/workflows/**` also requires `workflows: write` — measured: the
  * relay's `automerge_enable` on such a pull answered "refusing to allow a
  * GitHub App to create or update workflow … without `workflows` permission" —
@@ -165,7 +187,7 @@
  * the maintainer's own ruling, comment 6104822731 (「22708 A」), so this grant
  * is not a drift. The grant also reaches workflow-file writes through
  * `/contents/**` and `/git/**`; `REFUSED_PATH_FAMILIES` refuses both for every
- * row. The workflow-run dispatch (`workflow_dispatch`) and the failed-jobs
+ * row, the one mailbox ref DELETE aside (above). The workflow-run dispatch (`workflow_dispatch`) and the failed-jobs
  * re-run (`run_rerun_failed`), both below, are `actions: write`, the two rows
  * spending it; the five advisory rows that write (`advisory_report`,
  * `advisory_create`, `advisory_collaborators_add`, `advisory_versions` and
@@ -1710,6 +1732,10 @@ export const MAX_LABEL_BYTES = 50;
 /** GitHub's own cap on a login. */
 export const MAX_LOGIN_CHARS = 39;
 export const MAX_REF_BYTES = 255;
+/** The one branch name `mailbox_branch_delete` takes — `claude/mailbox-` and a lower-case slug, no `/` (header). */
+export const MAILBOX_BRANCH_SHAPE = /^claude\/mailbox-[a-z0-9]+(?:[._-][a-z0-9]+)*$/;
+/** The label a mailbox PR carries — `mailbox-open.mjs` re-exports it, so it has one spelling. */
+export const MAILBOX_LABEL = 'pm:mailbox';
 /** Names per list-valued key; ten assignees is the platform's own cap, twenty labels is ours. */
 export const MAX_LABELS_PER_ACTION = 20;
 export const MAX_LOGINS_PER_ACTION = 10;
@@ -1773,7 +1799,8 @@ export const TARGET_REPO_SHAPE = new RegExp(`^${TARGET_OWNER}/[A-Za-z0-9_.-]+$`)
  * the wrong key may be an advisory's prose, and a refusal reaches the public
  * run log. `named` is an `enum`'s values refused BY NAME, each with its
  * reason. A `str` refusal never echoes, so `summary` and `description` need
- * neither.
+ * neither; `shape` on a `str` holds it to a pattern, named by `what`
+ * (`branch`, `mailbox_branch_delete`'s, alone).
  */
 export const FIELDS = Object.freeze({
   issue: Object.freeze({ kind: 'int' }),
@@ -1783,6 +1810,7 @@ export const FIELDS = Object.freeze({
   title: Object.freeze({ kind: 'str', max: MAX_TITLE_BYTES }),
   head: Object.freeze({ kind: 'str', max: MAX_REF_BYTES }),
   base: Object.freeze({ kind: 'str', max: MAX_REF_BYTES }),
+  branch: Object.freeze({ kind: 'str', max: MAX_REF_BYTES, shape: MAILBOX_BRANCH_SHAPE, what: 'a claude/mailbox-* branch — claude/mailbox- and a lower-case slug' }),
   expected_head_sha: Object.freeze({ kind: 'sha' }),
   labels: Object.freeze({ kind: 'list', max: MAX_LABELS_PER_ACTION, itemMax: MAX_LABEL_BYTES }),
   assignees: Object.freeze({ kind: 'list', max: MAX_LOGINS_PER_ACTION, itemMax: MAX_LOGIN_CHARS }),
@@ -1817,10 +1845,10 @@ export const FIELDS = Object.freeze({
 /**
  * The App permissions the relay token is narrowed to — the union of every
  * row's `permission` and `alsoSpends`, plus the sender gate's read.
- * `contents: write` is spent by the two auto-merge rows alone (GitHub's
- * requirement for those mutations); no row writes a file, a ref or a branch
- * itself — `pr_update_branch`'s merge is the platform's, under
- * `pull-requests`. `workflows: write` is spent by the `automerge_enable` row
+ * `contents: write` is spent by the two auto-merge rows (GitHub's
+ * requirement for those mutations) and `mailbox_branch_delete`'s one ref
+ * DELETE (header); no row writes a file or creates or moves a ref —
+ * `pr_update_branch`'s merge is the platform's, under `pull-requests`. `workflows: write` is spent by the `automerge_enable` row
  * alone (`alsoSpends`: a pull changing `.github/workflows/**` is enqueued only
  * by a token carrying it), a literal grant on every stroke by the
  * maintainer's ruling, comment 6104822731 (header). `actions: write` is spent
@@ -2017,7 +2045,10 @@ export function transferRemedy(source, target) {
  *                 execute.mjs); an `assigned` descriptor lists the logins its
  *                 answer's `assignees` must carry, and a `labelled` one the
  *                 names its answer (the label set) must carry, for the request
- *                 to have landed (`requestLanded`, execute.mjs).
+ *                 to have landed (`requestLanded`, execute.mjs); a
+ *                 `mailboxBranch` descriptor carries the pull and the branch
+ *                 the executor fences before the DELETE and reads back after
+ *                 it (`mailboxBranchPreflight`, execute.mjs).
  */
 export const OPS = Object.freeze({
   comment: Object.freeze({
@@ -2153,6 +2184,14 @@ export const OPS = Object.freeze({
     required: Object.freeze(['pull']),
     optional: Object.freeze([]),
     requests: (a) => [{ verb: 'POST', path: '/graphql', graphql: { mutation: 'disablePullRequestAutoMerge', query: PR_MUTATIONS.automerge_disable, pull: a.pull, landed: PR_LANDED_STATE.automerge_disable } }],
+  }),
+  // The one row that deletes a ref — see the header. `branch` is held to `MAILBOX_BRANCH_SHAPE` before the dispatch;
+  // the pull's fences are the executor's, on its own answers immediately before the DELETE; the ref is read back absent.
+  mailbox_branch_delete: Object.freeze({
+    permission: 'contents',
+    required: Object.freeze(['pull', 'branch']),
+    optional: Object.freeze([]),
+    requests: (a, repo) => [{ verb: 'DELETE', path: `/repos/${repo}/git/refs/heads/${a.branch}`, mailboxBranch: { pull: a.pull, branch: a.branch } }],
   }),
   // The one row whose token reaches a second repository — see the header.
   // `issue`, never `pull`: a pull request does not transfer.
@@ -2334,7 +2373,8 @@ export function governedReviewRequests(repo, pull, { reviewers = [], assignees =
 export const REFUSED_PATH_FAMILIES = Object.freeze([
   /\/merge$/,
   /\/pulls\/[^/]+\/reviews/,
-  /\/git\//,
+  // Every `/git/` path but ONE `refs/heads/` ref of `MAILBOX_BRANCH_SHAPE` — `mailbox_branch_delete`'s DELETE (header).
+  new RegExp(`/git/(?!refs/heads/${MAILBOX_BRANCH_SHAPE.source.slice(1, -1)}$)`),
   /\/branches\//,
   /\/contents\//,
   // Every `actions/*` path but the dispatch call (`WORKFLOW_DISPATCH_PATH_SHAPE`) and the failed-jobs

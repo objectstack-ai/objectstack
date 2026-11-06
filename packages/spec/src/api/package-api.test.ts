@@ -201,53 +201,38 @@ describe('PackageInstallRequestSchema', () => {
 });
 
 describe('PackageInstallResponseSchema', () => {
-  it('should accept a successful install response', () => {
-    const result = PackageInstallResponseSchema.parse({
-      success: true,
-      data: {
-        package: {
-          manifest: { id: 'com.acme.crm', name: 'acme_crm', version: '1.0.0', type: 'plugin' },
-          source: 'authored',
-          status: 'installed',
-          enabled: true,
-        },
-        dependencyResolution: {
-          dependencies: [
-            { packageId: 'com.acme.core', requiredRange: '^1.0.0', status: 'satisfied', resolvedVersion: '1.2.0' },
-          ],
-          canProceed: true,
-          requiredActions: [],
-          installOrder: ['com.acme.core', 'com.acme.crm'],
-        },
-        message: 'Package installed successfully',
-      },
-    });
+  // The row `POST /api/v1/packages` answers as `data` — bare, no wrapper. The
+  // wire half (the real dispatcher's answer parsed with this schema) is pinned
+  // in `packages/client/src/packages-write-envelope.test.ts`.
+  const ROW = {
+    manifest: { id: 'com.acme.crm', name: 'acme_crm', version: '1.0.0', type: 'plugin' },
+    source: 'authored',
+    status: 'installed',
+    enabled: true,
+    installedAt: '2026-11-05T00:00:00.000Z',
+  };
+
+  it('accepts the installed row itself as data', () => {
+    const result = PackageInstallResponseSchema.parse({ success: true, data: ROW });
     expect(result.success).toBe(true);
-    expect(result.data.package.status).toBe('installed');
-    expect(result.data.dependencyResolution?.canProceed).toBe(true);
+    expect(result.data.manifest.id).toBe('com.acme.crm');
+    expect(result.data.source).toBe('authored');
+    expect(result.data.status).toBe('installed');
+    expect(result.data.enabled).toBe(true);
   });
 
-  it('should accept install response with namespace conflicts', () => {
-    const result = PackageInstallResponseSchema.parse({
+  it('refuses the { package } wrapper no surface sends, at data.manifest and data.source', () => {
+    const result = PackageInstallResponseSchema.safeParse({
       success: true,
-      data: {
-        package: {
-          manifest: { id: 'com.acme.crm', name: 'acme_crm', version: '1.0.0', type: 'plugin' },
-          source: 'authored',
-          status: 'installed',
-          enabled: true,
-        },
-        namespaceConflicts: [{
-          type: 'namespace_conflict',
-          requestedNamespace: 'acme',
-          conflictingPackageId: 'com.other.plugin',
-          conflictingPackageName: 'Other Plugin',
-          suggestion: 'acme_crm',
-        }],
-      },
+      data: { package: ROW, message: 'Package installed successfully' },
     });
-    expect(result.data.namespaceConflicts).toHaveLength(1);
-    expect(result.data.namespaceConflicts![0].suggestion).toBe('acme_crm');
+    expect(result.success).toBe(false);
+    const paths = result.error!.issues.map((i) => i.path.join('.'));
+    expect(paths).toEqual(expect.arrayContaining(['data.manifest', 'data.source']));
+  });
+
+  it('is the output the installPackage contract binds', () => {
+    expect(PackageApiContracts.installPackage.output).toBe(PackageInstallResponseSchema);
   });
 });
 

@@ -45,10 +45,10 @@
  * - `code_blank` — the amount holds a value beside a blank currency code (rows
  *   stored before the amount was switched to `record` mode; ruling 6492000994,
  *   letter B). There is no currency to convert from, so no rate can help.
- *   Remedy: `os migrate record-currency-codes`, then re-run. That command
- *   writes its one code into every organization's codeless rows (Open item
- *   13), so the report's per-organization `code_blank` count is the check
- *   before it is given one.
+ *   Remedy: `os migrate record-currency-codes --org`, one organization at a
+ *   time, then re-run. That command refuses an unscoped run over the rows of
+ *   more than one organization (Open item 13), and the report's
+ *   per-organization `code_blank` count says which organizations owe codes.
  * - `document_date_blank` — a foreign amount with no document date.
  * - `home_currency_unset` — the organization has no `localization.currency`.
  * - `unconvertible` — the code is not ISO 4217, or the amount or document
@@ -70,6 +70,16 @@
  * 3. **A skipped row is never written**, so the run's report is reproducible:
  *    a dry run lists the same rows again until they are fixed, and the
  *    stored home amount of a never-converted row stays blank, never 0.
+ *
+ * ## `organizationId` (ruling 6670707546 item 3)
+ *
+ * `organizationId` limits the run to that organization's rows: the walk, the
+ * write's reads and every `engine.update` run under `{ isSystem: true,
+ * tenantId }`, and the walk also filters on the row's own `organization_id`,
+ * because the system context narrows the driver only under a walled tenancy
+ * posture. Without it the run covers every organization, each in its own home
+ * currency: nothing here writes a value the caller chose, so there is nothing
+ * to refuse.
  *
  * ## `--since`
  *
@@ -186,6 +196,8 @@ export type HomeAmountRecomputeAudit =
 
 export interface HomeAmountRecomputeReport {
   object: string;
+  /** The organization the run was limited to, or null for every organization. */
+  organizationId: string | null;
   /** The declarations recomputed: the amount, its code, the home and rate fields and the document date. */
   fields: Array<{ field: string; codeField: string; homeField: string; rateField: string; rateDateField: string }>;
   /** The document-date floor, `YYYY-MM-DD`, or null for every row. */
@@ -239,6 +251,8 @@ export interface HomeAmountRecomputeOptions {
   field?: string;
   /** Only rows whose document date is on or after this calendar date (`YYYY-MM-DD`). */
   since?: string;
+  /** Only this organization's rows; omitted, every organization's, each in its own home currency. */
+  organizationId?: string;
   /** Write the changes. Omit for a read-only dry run. */
   apply?: boolean;
   /** Safety bound on rows read. */
@@ -325,6 +339,16 @@ function resolvePlan(engine: HomeAmountRecomputeEngine, options: HomeAmountRecom
         + 'converted amount to recompute. Refused before the walk read or wrote any row.',
     );
   }
+  if (options.organizationId !== undefined) {
+    if (options.organizationId.trim() === '') {
+      throw refusal(
+        VALIDATION_FAILED_CODE,
+        '[home-amount-recompute] the organization id is blank: give the id of the organization whose rows are '
+          + 'recomputed, or leave it out for every organization. Refused before any row was read or written.',
+        'organizationId',
+      );
+    }
+  }
   if (field === undefined) return plan;
   const entry = plan.find((e) => e.amountField === field);
   if (!entry) {
@@ -372,8 +396,16 @@ export async function recomputeHomeAmounts(
   const schema = engine.getObject(object);
   const declared = schema?.fields ?? {};
 
+  const organizationScope = options.organizationId;
+  // [ruling 6670707546 item 3] A limited run reads and writes as that organization.
+  const scopedCtx = organizationScope !== undefined ? { ...SYSTEM_CTX, tenantId: organizationScope } : { ...SYSTEM_CTX };
+  const scopedPreservingCtx = organizationScope !== undefined
+    ? { ...SYSTEM_PRESERVING_CTX, tenantId: organizationScope }
+    : { ...SYSTEM_PRESERVING_CTX };
+
   const report: HomeAmountRecomputeReport = {
     object,
+    organizationId: organizationScope ?? null,
     fields: plan.map((e) => ({
       field: e.amountField,
       codeField: e.codeField,
@@ -412,11 +444,27 @@ export async function recomputeHomeAmounts(
     if (name in declared && !isFederatedUnprovisionedInjectedColumn(schema, name)) columns.add(name);
   }
   for (const e of plan) for (const name of [e.amountField, e.codeField, e.rateDateField, e.homeField, e.rateField]) columns.add(name);
+  // A limited run needs the column it is limited by: an object that stores none has rows of no organization.
+  if (organizationScope !== undefined && !columns.has('organization_id')) {
+    throw refusal(
+      'INVALID_FIELD',
+      `[home-amount-recompute] '${object}' stores no organization_id, so its rows belong to no organization `
+        + `and cannot be limited to '${organizationScope}': run it without an organization. `
+        + 'Refused before the walk read or wrote any row.',
+      'organization_id',
+    );
+  }
 
   // Seek by `id`: this run's claim is about EVERY stored row, which an offset walk cannot promise.
+  // A limited walk filters on the row's own organization as well as reading as it: the context
+  // narrows the driver only under a walled posture.
   const walk = keysetWalk<Record<string, unknown>>(
-    (q: KeysetPageQuery) => engine.find(object, { ...q, fields: [...columns], context: { ...SYSTEM_CTX } }),
-    { pageSize: SCAN_PAGE_SIZE, max: options.maxRecords ?? 100_000 },
+    (q: KeysetPageQuery) => engine.find(object, { ...q, fields: [...columns], context: { ...scopedCtx } }),
+    {
+      pageSize: SCAN_PAGE_SIZE,
+      max: options.maxRecords ?? 100_000,
+      ...(organizationScope !== undefined ? { where: { organization_id: organizationScope } } : {}),
+    },
   );
 
   // An error no class above names (a page read or a rate read that fails) ends the walk. Rows an
@@ -425,7 +473,7 @@ export async function recomputeHomeAmounts(
   try {
     for await (const page of walk.pages()) {
       // The write's own reads, memoized across this page as one write memoizes across its batch.
-      const reads = engine.homeAmountReadsFor({ ...SYSTEM_CTX });
+      const reads = engine.homeAmountReadsFor({ ...scopedCtx });
       const serving = reads.serving;
       for (const row of page) {
         report.scannedRecords++;
@@ -524,7 +572,7 @@ export async function recomputeHomeAmounts(
                 ...patch,
                 ...(row.updated_at !== undefined && row.updated_at !== null ? { updated_at: row.updated_at } : {}),
               },
-              { context: { ...SYSTEM_PRESERVING_CTX } },
+              { context: { ...scopedPreservingCtx } },
             ),
             options.retry ?? {},
           );
@@ -612,6 +660,7 @@ async function writeAuditEntry(
     event: 'home_amount.recompute',
     source: source ?? null,
     object: report.object,
+    organizationId: report.organizationId,
     fields: report.fields.map((f) => f.field),
     since: report.since,
     scannedRecords: report.scannedRecords,
@@ -651,8 +700,9 @@ async function writeAuditEntry(
 export function formatHomeAmountRecomputeReport(report: HomeAmountRecomputeReport): string[] {
   const lines: string[] = [];
   const fields = report.fields.map((f) => `${f.field} → ${f.homeField}`).join(', ');
+  const scope = report.organizationId !== null ? ` in organization ${report.organizationId}` : '';
   lines.push(
-    `Scanned ${report.scannedRecords} row(s) of ${report.object} (${fields})`
+    `Scanned ${report.scannedRecords} row(s) of ${report.object}${scope} (${fields})`
       + (report.since ? `; document date on or after ${report.since}: ${report.amounts} amount(s), ${report.outsideSince} outside.` : `: ${report.amounts} amount(s).`),
   );
   for (const org of report.organizations) {
@@ -685,9 +735,8 @@ export function formatHomeAmountRecomputeReport(report: HomeAmountRecomputeRepor
     if (report.skippedByReason.rate_missing > 0) remedies.push('rate_missing: add the exchange rate (Setup → Exchange Rates) and re-run');
     if (report.skippedByReason.code_blank > 0) {
       remedies.push(
-        `code_blank: write the codes with \`os migrate record-currency-codes --object ${report.object} --field <amount> --code <ISO 4217>\`, then re-run`
-          + ' — that command writes its one code into the codeless rows of EVERY organization (ADR-0144 Open item 13), so check the'
-          + ' code_blank count per organization above before you give it one',
+        `code_blank: write the codes with \`os migrate record-currency-codes --object ${report.object} --field <amount> --code <ISO 4217> --org <organization>\`,`
+          + ' one organization at a time with the code its rows are in (the code_blank count per organization is above), then re-run',
       );
     }
     if (report.skippedByReason.document_date_blank > 0) remedies.push('document_date_blank: fill the document date, then re-run');

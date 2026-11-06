@@ -198,7 +198,7 @@ and caches the manifest on disk so the install survives a restart:
 
 ```bash
 # catalog mode: the target runtime fetches the version from its own catalog
-os package install com.acme.crm --version 1.2.0 --runtime https://app.example.com
+os package install com.acme.crm --version 1.2.0 --url https://app.example.com
 
 # air-gapped mode: the artifact is read locally and sent inline, no catalog
 os package install ./dist/objectstack.json

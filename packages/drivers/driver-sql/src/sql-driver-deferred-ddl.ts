@@ -29,7 +29,7 @@
  * evaluation cycle. `index.ts` re-exports nothing from this module.
  */
 
-import type { PendingSchemaWork } from './schema-drift.js';
+import { isRefusedSchemaWork, type PendingSchemaWork } from './schema-drift.js';
 import type { SqlDriver } from './sql-driver.js';
 
 /**
@@ -69,6 +69,15 @@ export class DeferredDdlFacet {
       return [];
     }
     const performed = await this.previewDeferredSchemaWork();
+    // [#30636] A table the preview refused (`refuse_table`: keyed by `_id`, no
+    // `id`, holding rows) is left out of the re-entry below, so its refusal
+    // stops nothing: every other deferred object still gets its DDL, and the
+    // refusal comes back as its entry in the returned list rather than as a
+    // throw that took that list with it. The entry stays in that list: the
+    // caller reports it, and a refused table is never read as performed work.
+    // The sync's own refusal (`initObjects`) still guards the rows should the
+    // table fill between the preview and the DDL.
+    const refused = new Set(performed.filter((w) => isRefusedSchemaWork(w.kind)).map((w) => w.table));
     this.deferredSchemaObjects.clear();
     this.deferredDdl = false;
     // Re-entering initObjects re-registers the same metadata (idempotent) and
@@ -81,7 +90,7 @@ export class DeferredDdlFacet {
     // down). It is the only thing distinguishing this path from boot sync.
     this.flushingDeferredDdl = true;
     try {
-      await this.initObjects(pending);
+      await this.initObjects(refused.size === 0 ? pending : pending.filter((obj) => !refused.has(obj.name)));
     } finally {
       this.flushingDeferredDdl = false;
     }

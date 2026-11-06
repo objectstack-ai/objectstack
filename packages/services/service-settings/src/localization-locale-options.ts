@@ -23,12 +23,15 @@
  *    简体中文), else `Intl.DisplayNames` in the code itself (`vi-VN` is
  *    "Tiếng Việt (Việt Nam)"), else the code. The language menu names them
  *    the same way.
- *  - **Accepted values.** Each code, and a second spelling of one: a stored
- *    code that means the same table language (`en-US` where `en` is offered,
- *    `zh-CN` where `zh-Hans` is). Those are the spellings this setting has
- *    stored all along, and its manifest default is `en-US`; the read aliases
- *    exist so that such values stay valid. A code the table does not name is
- *    accepted only as spelled (`fr-FR` is not `fr`).
+ *  - **Accepted values.** Each code, and a second spelling of one: whatever
+ *    `resolveOfferedLocale` (`@objectstack/core`) matches to an offered code,
+ *    the one matcher the IdP locale claim uses too. That is another case
+ *    (`zh-cn` for `zh-CN`), a code that means the same table language (`en-US`
+ *    where `en` is offered, `zh-CN` where `zh-Hans` is), and a region or base
+ *    of an offered language (`fr-FR` where `fr` is, `fr` where `fr-FR` is).
+ *    The first two are the spellings this setting has stored all along, and
+ *    its manifest default is `en-US`; the read aliases exist so that such
+ *    values stay valid.
  *  - **A stored value in effect.** Offered under its own spelling when it is a
  *    second spelling of an offered code, so the page shows it selected; and,
  *    when the deployment no longer offers it, offered as itself, named as no
@@ -41,7 +44,8 @@
  * source answers nothing and the manifest's declared four stand.
  */
 
-import { resolveLocale } from '@objectstack/core';
+import { resolveLocale, resolveOfferedLocale } from '@objectstack/core';
+import type { SettingsCopyLocale } from './settings-copy-locale.js';
 import { PLATFORM_LOCALES, platformLocaleTagOf } from '@objectstack/spec/system';
 import type { SettingsOptionSource, SettingsServedOption } from './settings-service.types.js';
 
@@ -75,12 +79,22 @@ export function localeSelfName(code: string): string {
   }
 }
 
-/** "no longer offered", in the reader's language. */
-export const NOT_OFFERED_COPY: Record<'en' | 'zh-CN' | 'ja-JP' | 'es-ES', string> = {
+/**
+ * "no longer offered", in the reader's language: one entry per language on the
+ * platform locale table ({@link SettingsCopyLocale}).
+ */
+export const NOT_OFFERED_COPY: Record<SettingsCopyLocale, string> = {
   en: 'no longer offered',
   'zh-CN': '已不再提供',
+  'zh-Hant': '已不再提供',
   'ja-JP': '現在は提供されていません',
   'es-ES': 'ya no disponible',
+  ar: 'لم تعد متاحة',
+  fr: 'plus disponible',
+  'pt-BR': 'não está mais disponível',
+  ru: 'больше не предлагается',
+  de: 'nicht mehr angeboten',
+  ko: '더 이상 제공되지 않음',
 };
 
 const COPY_LOCALES = Object.keys(NOT_OFFERED_COPY);
@@ -114,19 +128,13 @@ export function localizationLocaleOptionSource(
     const codes = offeredCodes(i18n());
     if (codes.length === 0) return undefined;
 
-    // The table language each offered code means, where the table names one.
-    const offeredTags = new Set(codes.map((code) => platformLocaleTagOf(code)).filter(Boolean));
-    const admits = (value: string): boolean => {
-      if (codes.includes(value)) return true;
-      const tag = platformLocaleTagOf(value);
-      return tag !== undefined && offeredTags.has(tag);
-    };
+    const admits = (value: string): boolean => resolveOfferedLocale(value, codes) !== undefined;
 
     const options: SettingsServedOption[] = codes.map((code) => ({ value: code, label: localeSelfName(code) }));
 
     if (typeof current === 'string' && current.trim() && !codes.includes(current)) {
-      const tag = platformLocaleTagOf(current);
-      const sameLanguage = tag === undefined ? -1 : codes.findIndex((code) => platformLocaleTagOf(code) === tag);
+      const matched = resolveOfferedLocale(current, codes);
+      const sameLanguage = matched === undefined ? -1 : codes.indexOf(matched);
       if (sameLanguage !== -1) {
         // Stored as a second spelling (`en-US` where `en` is offered): offer
         // that language under the stored spelling, so the page shows it chosen.

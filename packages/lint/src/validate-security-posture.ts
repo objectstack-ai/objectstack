@@ -1372,6 +1372,15 @@ export function validateSecurityPosture(stack: AnyRec, opts?: { nowMs?: number }
       })
       .map((o) => String(o.name ?? '')),
   );
+  // The hint offers only the scopes this stack can compile. `defineStack`
+  // refuses a hierarchy scope (`own_and_reports` / `unit` / `unit_and_below`,
+  // `findHierarchyScopeGrants`) unless `requires` names `hierarchy-security`
+  // (ADR-0057), the enterprise capability — so read the same declaration here
+  // and, without it, name the requirement beside those scopes instead of
+  // offering them bare. A stack with no `requires` (the runtime metadata
+  // door hands none) gets the requirement named too.
+  const hierarchyScopesCompile =
+    Array.isArray(stack.requires) && (stack.requires as unknown[]).includes('hierarchy-security');
   if (privateObjects.size > 0) {
     for (let i = 0; i < permissionSets.length; i++) {
       const ps = permissionSets[i];
@@ -1390,9 +1399,12 @@ export function validateSecurityPosture(stack: AnyRec, opts?: { nowMs?: number }
             message:
               `"${objName}" is private (OWD) and this set grants allowRead without a readScope — ` +
               `holders see ONLY records they own (plus explicit shares).`,
-            hint:
-              `If that is intended (personal data), ignore this. Otherwise add readScope: ` +
-              `'own_and_reports' | 'unit' | 'unit_and_below' | 'org', or widen the object's sharingModel.`,
+            hint: hierarchyScopesCompile
+              ? `If that is intended (personal data), ignore this. Otherwise add readScope: ` +
+                `'own_and_reports' | 'unit' | 'unit_and_below' | 'org', or widen the object's sharingModel.`
+              : `If that is intended (personal data), ignore this. Otherwise add readScope: 'org', ` +
+                `or widen the object's sharingModel. Scopes 'own_and_reports', 'unit' and 'unit_and_below' ` +
+                `need requires: ['hierarchy-security'], which @objectstack/security-enterprise provides.`,
           });
         }
       }

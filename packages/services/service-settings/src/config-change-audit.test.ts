@@ -382,8 +382,12 @@ describe('#8145 — a settings write reaches sys_audit_log as `config_change`', 
     expect(rows[0].object_name).toBe(CONFIG_CHANGE_GLOBAL_OBJECT_NAME);
     expect(rows[0].object_name).toBe('sys_platform_setting');
     expect(boot.scopedSettingRows()).toHaveLength(0);
-    // A settings row has no single id — the composite key is in `metadata`.
-    expect(rows[0].record_id).toBeNull();
+    // The row names the stored settings row the write landed on, so
+    // `object_name` + `record_id` point at it (#30209). WHICH setting changed is
+    // still in `metadata`.
+    const [stored] = boot.settingRows();
+    expect(typeof stored?.id).toBe('string');
+    expect(rows[0].record_id).toBe(stored.id);
     // Attribution: both channels, per ADR-0014 D2.
     expect(rows[0].user_id).toBe('usr_admin');
     expect(rows[0].actor).toBe('usr_admin');
@@ -429,6 +433,25 @@ describe('#8145 — a settings write reaches sys_audit_log as `config_change`', 
     // row, and the global rung's store took nothing.
     expect(boot.scopedSettingRows()).toHaveLength(1);
     expect(boot.settingRows()).toHaveLength(0);
+    // The pointer pair names that `sys_setting` row (#30209).
+    expect(rows[0].record_id).toBe(boot.scopedSettingRows()[0].id);
+  });
+
+  it('an OVERWRITE names the same settings row as the write that created it (#30209)', async () => {
+    const boot = await bootPlugin({ userId: 'usr_admin' });
+    await boot.service.setMany('branding_test', { workspace_name: 'A' }, boot.writeCtx);
+    await boot.service.setMany('branding_test', { workspace_name: 'B' }, boot.writeCtx);
+    await boot.service.setMany('branding_test', { workspace_name: null }, boot.writeCtx);
+
+    // One stored row, updated in place; every ledger row about it names it, a
+    // clear included, so the ledger's record page lists all three together.
+    const stored = boot.settingRows();
+    expect(stored).toHaveLength(1);
+    const rows = boot.ledgerRows();
+    expect(rows.map((r) => metaOf(r).event)).toEqual(['settings.set', 'settings.set', 'settings.reset']);
+    expect(rows.map((r) => r.record_id)).toEqual([stored[0].id, stored[0].id, stored[0].id]);
+    // `metadata` keeps its shape: the record id is a column, never a new key.
+    expect(Object.keys(metaOf(rows[1])).sort()).toEqual(['encrypted', 'event', 'key', 'namespace', 'requestId', 'scope']);
   });
 
   it('records one row per CHANGED KEY, not one per request', async () => {

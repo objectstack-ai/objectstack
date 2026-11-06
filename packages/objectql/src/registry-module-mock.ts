@@ -188,6 +188,14 @@ export function createRegistryModuleMock(
     // so it never announces: it records the subscription and answers the
     // unsubscribe the real member answers.
     onPackageUninstalled: vi.fn(() => () => {}),
+    // [#30377] The engine's constructor subscribes the roll-up recompute an
+    // enable owes. The double never enables a disabled package, so it never
+    // announces either.
+    onPackageEnabled: vi.fn(() => () => {}),
+    // [#30581] Every `registerApp` of a body with an id hands its package's
+    // navigation contributions to this member (replace, never append). The
+    // double folds no navigation, so it records the call and nothing else.
+    setPackageNavContributions: vi.fn(),
     reset: vi.fn(),
     metadata: { get: vi.fn(() => new Map()) },
     ...instanceOverrides,

@@ -460,7 +460,11 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       locale: {
         label: "Locale",
-        help: "Device locale that pushes to this device are rendered in."
+        help: "Device locale, as the registration named it. Stored for the device; no push renders by it: a push arrives in the recipient's language (their user locale, then the deployment default)."
+      },
+      origin: {
+        label: "Server Origin",
+        help: "The origin the Console was loaded from when it registered the device (for example https://crm.example.com). Every push to the device carries it, so a mobile shell with several saved servers opens the push on this one. Empty for a device registered without one."
       },
       name: {
         label: "Device Name"

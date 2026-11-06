@@ -15,7 +15,8 @@
  * accurate — those renderers consume the `data` this component hands down. On
  * `gantt` it is not: the registered `object-gantt` renderer forwards no props
  * but `schema`, so the chart queries for itself, with no `$top`
- * (`plugin-gantt/src/ObjectGantt.hostDataProp-7210.test.tsx` pins that half).
+ * (the `ObjectGantt.hostDataProp-7210` block of
+ * `plugin-gantt/src/ObjectGantt.harness.test.tsx` pins that half).
  * The bar then reports one request under a chart drawn from another — and it is
  * the only paging disclosure on the screen, so a reader takes it as describing
  * the chart. It cost a browser session and a wrong finding in an application

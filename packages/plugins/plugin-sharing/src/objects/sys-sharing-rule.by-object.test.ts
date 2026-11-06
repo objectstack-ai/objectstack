@@ -56,6 +56,8 @@ describe('sharing list views — no grouping on a field that stores an object AP
       sys_queue: [],
       sys_queue_member: [],
       sys_assignment_cursor: [],
+      // An organization's own assignment rule names the object it routes.
+      sys_assignment_rule: ['object_name'],
     });
   });
 

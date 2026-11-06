@@ -433,6 +433,16 @@ is a spec proposal for a properly named key, not a values map under this one.
   action inherits the flow's list; when both declare one, the caller needs
   both. Referenced
   capabilities must exist — `os lint` checks that.
+- **A `script` action that dispatches to a handler another declared action
+  owns is gated by that action too.** When the handler a call reaches is the
+  one a different declaration's own dispatch reaches — its `target` names that
+  declaration's handler key, or the handler that declaration's body registered —
+  the server applies that action's `requiredPermissions` (**403**
+  `PERMISSION_DENIED`) and its packaged-action switch (**409** `ACTION_DISABLED`)
+  as well as the invoked action's own, on the REST `/actions` endpoint and the
+  MCP `run_action` tool alike. The two sets add up, so the caller needs both,
+  and the handler does not run on a refusal. Give each action its own handler
+  key unless the two should share one gate.
 - **`visible`** is a CEL predicate evaluated **fail-closed**: an expression
   that throws hides the action silently. Two rules save real debugging time:
 

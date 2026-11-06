@@ -53,11 +53,12 @@ const WRITE_ONLY = 'federation-write-only@verify.test';
 const BOTH = 'federation-read-write@verify.test';
 
 /**
- * Object names the two imports ask for — prefixed with the showcase namespace,
- * which an import over `showcase_external` is held to.
+ * Object names the two imports ask for — prefixed with the namespace of the
+ * showcase's customization package, which an import over `showcase_external`
+ * lands in (#30469 item 2).
  */
-const REFUSED_IMPORT = 'showcase_fed_refused_cust';
-const SERVED_IMPORT = 'showcase_fed_served_cust';
+const REFUSED_IMPORT = 'showcase_custom_fed_refused_cust';
+const SERVED_IMPORT = 'showcase_custom_fed_served_cust';
 
 const errorOf = (json: any) => {
   const e = json?.error;

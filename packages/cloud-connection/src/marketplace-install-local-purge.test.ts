@@ -32,10 +32,10 @@ import { tmpdir } from 'node:os';
 import { assertEngineDeleteDispatch } from '@objectstack/metadata-core';
 import { SEED_WRITE_EXECUTION_CONTEXT } from '@objectstack/spec/kernel';
 
-import { matchSeedRows, purgeSeedRows, type PurgeSeedDataset, type SeedMatchProblem } from './marketplace-install-local-purge.js';
+import { countSeedRows, matchSeedRows, purgeSeedRows, type PurgeSeedDataset, type SeedMatchProblem } from './marketplace-install-local-purge.js';
 import { MarketplaceInstallLocalPlugin } from './marketplace-install-local-plugin.js';
 import { LocalManifestSource } from './local-manifest-source.js';
-import { installerAuthService, withInstallerGrants } from './install-local-principal.fixtures.js';
+import { installerAuthService, installerEmail, INSTALLER_USER_ID, withInstallerGrants } from './install-local-principal.fixtures.js';
 // The purge route loads the REAL `SeedLoaderService` through a dynamic import;
 // paid here, during collection, so no clocked window measures that load.
 import '@objectstack/runtime';
@@ -342,6 +342,38 @@ describe('matchSeedRows — the identification, read-only', () => {
     });
 });
 
+describe('countSeedRows — the purge\'s reading, before it deletes', () => {
+    it('counts exactly the rows the purge then deletes, and deletes nothing itself', async () => {
+        const tables: Record<string, Row[]> = {
+            acc: [{ id: 'a1', name: 'Acme' }, { id: 'a2', name: 'Globex' }, { id: 'u1', name: 'User Co' }],
+            con: [{ id: 'c1', email: 'ada@acme.test', account: 'a1' }],
+        };
+        const { engine, deletes } = makeEngine(tables);
+        const counted = await countSeedRows({ engine, datasets: DATASETS, graph: GRAPH, report: () => {} });
+        expect(counted).toEqual({ count: 3, unidentified: 0 });
+        expect(deletes).toEqual([]);
+
+        const purged = await purgeSeedRows({ engine, datasets: DATASETS, graph: GRAPH, warn: () => {} });
+        expect(purged.deleted).toBe(counted.count);
+        expect(names(tables.acc)).toEqual(['User Co']);
+    });
+
+    it('a key two rows carry is unidentified — counted out, the purge\'s error, never a row it deletes', async () => {
+        const tables: Record<string, Row[]> = {
+            acc: [{ id: 'a1', name: 'Acme' }, { id: 'a9', name: 'Acme' }, { id: 'a2', name: 'Globex' }],
+            con: [],
+        };
+        const { engine } = makeEngine(tables);
+        const problems: SeedMatchProblem[] = [];
+        const counted = await countSeedRows({ engine, datasets: DATASETS, graph: GRAPH, report: (p) => problems.push(p) });
+        expect(counted).toEqual({ count: 1, unidentified: 1 });
+        expect(problems.map((p) => p.kind)).toEqual(['ambiguous']);
+
+        const purged = await purgeSeedRows({ engine, datasets: DATASETS, graph: GRAPH, warn: () => {} });
+        expect(purged).toMatchObject({ deleted: counted.count, errors: counted.unidentified });
+    });
+});
+
 // ── The route: scope chosen by the install's own rule, order from the loader ──
 
 type Handler = (c: any) => Promise<any>;
@@ -361,14 +393,17 @@ const MANIFEST = {
 
 const PURGE = 'POST /api/v1/marketplace/install-local/:manifestId/purge-sample-data';
 const LIST = 'GET /api/v1/marketplace/install-local';
+const COUNT = 'GET /api/v1/marketplace/install-local/:manifestId/sample-data';
 
-function makeC(manifestId: string) {
+function makeC(manifestId: string, query?: Record<string, string>) {
     return {
         req: {
             url: 'http://localhost:3000/api/v1/marketplace/install-local',
             raw: new Request('http://localhost:3000/x'),
             json: async () => ({}),
             param: (k: string) => (k === 'manifestId' ? manifestId : undefined),
+            // Hono's `c.req.query()`: every parameter, by name.
+            query: () => ({ ...query }),
             header: () => undefined,
         },
         json: vi.fn((payload: any, status?: number) => ({ payload, status: status ?? 200 })),
@@ -389,13 +424,16 @@ async function bootWith(opts: {
     posture?: 'single' | 'isolated';
     activeOrg?: string;
     services?: Record<string, unknown>;
+    /** The ledgered package; {@link MANIFEST} unless a pin needs another shape. */
+    manifest?: Record<string, unknown> & { id: string; version: string };
 }) {
+    const manifest = opts.manifest ?? MANIFEST;
     new LocalManifestSource(dir).write({
-        packageId: MANIFEST.id,
-        versionId: MANIFEST.version,
-        manifestId: MANIFEST.id,
-        version: MANIFEST.version,
-        manifest: MANIFEST,
+        packageId: manifest.id,
+        versionId: manifest.version,
+        manifestId: manifest.id,
+        version: manifest.version,
+        manifest,
         installedAt: '2026-01-01T00:00:00.000Z',
         installedBy: 'admin',
         withSampleData: true,
@@ -438,7 +476,7 @@ async function bootWith(opts: {
     const plugin = new MarketplaceInstallLocalPlugin({ controlPlaneUrl: 'off', storageDir: dir });
     await plugin.start(ctx as any);
     await hooks.get('kernel:ready')?.();
-    return { purge: routes.get(PURGE)!, list: routes.get(LIST)!, deletes, reads, logger };
+    return { purge: routes.get(PURGE)!, list: routes.get(LIST)!, count: routes.get(COUNT)!, deletes, reads, logger };
 }
 
 describe('POST …/purge-sample-data — through the engine, in the install\'s scope', () => {
@@ -587,5 +625,122 @@ describe('GET … listing — `withSampleData` is the caller\'s own scope, read 
         const warned = logger.warn.mock.calls.map((c) => String(c[0])).join('\n');
         expect(warned).toContain(`${MANIFEST.id}: the installed-apps listing could not read this package's seed rows`);
         expect(warned).toContain('no such table: pg_account');
+    });
+});
+
+/** The count door's answer for the one ledgered package. */
+async function counted(count: Handler, query?: Record<string, string>): Promise<{ status: number; payload: any }> {
+    const res = await count(makeC(MANIFEST.id, query));
+    return { status: res.status, payload: res.payload };
+}
+
+describe('GET …/sample-data — how many sample rows a purge would delete now (#30323)', () => {
+    it('no wall: counts N; a user-added row and a key-edited sample row are not counted, a field-edited one is; the purge then deletes exactly the count; after it, 0 and withSampleData false', async () => {
+        const tables: Record<string, Row[]> = {
+            pg_account: [{ id: 'a1', name: 'Acme' }],
+            pg_contact: [{ id: 'c1', email: 'ada@acme.test', account: 'a1' }],
+        };
+        const { count, purge, list, deletes } = await bootWith({ tables, posture: 'single' });
+
+        // Freshly installed: both sample rows.
+        expect(await counted(count)).toEqual({
+            status: 200,
+            payload: { success: true, data: { manifestId: MANIFEST.id, count: 2, unidentified: 0 } },
+        });
+
+        // A user adds a record to a seeded object, edits the sample contact's
+        // KEY (its email), and edits a non-key field of the sample account.
+        tables.pg_account.push({ id: 'u1', name: 'User Authored Co' });
+        tables.pg_contact[0].email = 'ada@renamed.test';
+        tables.pg_account[0].phone = '555-0100';
+        expect((await counted(count)).payload.data).toEqual({ manifestId: MANIFEST.id, count: 1, unidentified: 0 });
+        expect(deletes).toEqual([]);
+
+        // The purge that follows deletes exactly what the count said.
+        const purged = await purge(makeC(MANIFEST.id));
+        expect(purged.payload.data).toMatchObject({ deleted: 1, errors: 0 });
+        expect(deletes.map((d) => `${d.object}#${d.id}`)).toEqual(['pg_account#a1']);
+        expect(tables.pg_account.map((r) => r.id)).toEqual(['u1']);
+        expect(tables.pg_contact.map((r) => r.id)).toEqual(['c1']);
+
+        // After it: nothing left, and the listing agrees.
+        expect((await counted(count)).payload.data).toEqual({ manifestId: MANIFEST.id, count: 0, unidentified: 0 });
+        expect(await listedSampleData(list)).toEqual({ status: 200, withSampleData: false, items: 1 });
+    });
+
+    it('wall, active organization: only that organization\'s rows are counted, every read pinned to it', async () => {
+        const tables: Record<string, Row[]> = {
+            pg_account: [{ id: 'a1', name: 'Acme', organization_id: 'org_a' }, { id: 'b1', name: 'Acme', organization_id: 'org_b' }],
+            pg_contact: [{ id: 'd1', email: 'ada@acme.test', account: 'b1', organization_id: 'org_b' }],
+        };
+        const { count, reads } = await bootWith({ tables, posture: 'isolated', activeOrg: 'org_a' });
+        reads.length = 0;
+        expect((await counted(count)).payload.data).toEqual({ manifestId: MANIFEST.id, count: 1, unidentified: 0 });
+        const rowReads = reads.filter((r) => r.object in tables);
+        expect(rowReads.length).toBeGreaterThan(0);
+        for (const r of rowReads) expect(r.query.where).toEqual({ organization_id: 'org_a' });
+    });
+
+    it('wall, no active organization: 200 with count 0 and no seed row read (ADR-0123 D2, a read), where the purge refuses', async () => {
+        const tables: Record<string, Row[]> = { pg_account: [{ id: 'a1', name: 'Acme', organization_id: 'org_a' }], pg_contact: [] };
+        const { count, reads } = await bootWith({ tables, posture: 'isolated' });
+        expect(await counted(count)).toEqual({
+            status: 200,
+            payload: { success: true, data: { manifestId: MANIFEST.id, count: 0, unidentified: 0 } },
+        });
+        expect(reads.filter((r) => r.object in tables)).toEqual([]);
+    });
+
+    it('a package that declares no seed datasets: count 0, and no row is read', async () => {
+        const bare = { ...MANIFEST, id: 'app.test.bare', data: [] };
+        const tables: Record<string, Row[]> = { pg_account: [{ id: 'a1', name: 'Acme' }], pg_contact: [] };
+        const { count, reads } = await bootWith({ tables, posture: 'single', manifest: bare });
+        const res = await count(makeC(bare.id));
+        expect([res.status, res.payload]).toEqual([200, { success: true, data: { manifestId: bare.id, count: 0, unidentified: 0 } }]);
+        expect(reads.filter((r) => r.object in tables)).toEqual([]);
+    });
+
+    it('a query parameter is refused with a located 400 — a GET carrying "dryRun=0" or "confirm" still deletes and reads nothing', async () => {
+        const tables: Record<string, Row[]> = { pg_account: [{ id: 'a1', name: 'Acme' }], pg_contact: [] };
+        const { count, deletes, reads } = await bootWith({ tables, posture: 'single' });
+        reads.length = 0;
+        for (const query of [{ dryRun: '0' }, { confirm: 'true' }] as Array<Record<string, string>>) {
+            const res = await counted(count, query);
+            expect(res.status).toBe(400);
+            expect(res.payload.error.code).toBe('VALIDATION_ERROR');
+            expect(res.payload.error.message).toContain(`"${Object.keys(query)[0]}" query parameter is not supported`);
+        }
+        expect(deletes).toEqual([]);
+        expect(reads.filter((r) => r.object in tables)).toEqual([]);
+        expect(tables.pg_account).toHaveLength(1);
+    });
+
+    it('no install: 404; no metadata service: the purge\'s 500 DRIVER_UNAVAILABLE, never a 0', async () => {
+        const tables: Record<string, Row[]> = { pg_account: [{ id: 'a1', name: 'Acme' }], pg_contact: [] };
+        const first = await bootWith({ tables, posture: 'single' });
+        const missing = await first.count(makeC('app.not.installed'));
+        expect([missing.status, missing.payload.error.code]).toEqual([404, 'RESOURCE_NOT_FOUND']);
+
+        const { count } = await bootWith({ tables, posture: 'single', services: { metadata: undefined } });
+        const res = await counted(count);
+        expect([res.status, res.payload.error.code]).toEqual([500, 'DRIVER_UNAVAILABLE']);
+    });
+
+    it('a signed-in caller without `manage_metadata` is refused the purge\'s 403, and no seed row is read', async () => {
+        // The installer's user row, and no permission-set grant at all.
+        const tables: Record<string, Row[]> = {
+            pg_account: [{ id: 'a1', name: 'Acme' }],
+            pg_contact: [],
+            sys_user: [{ id: INSTALLER_USER_ID, email: installerEmail(), email_verified: true }],
+        };
+        const ungranted = makeEngine(tables);
+        const { count, logger } = await bootWith({ tables, posture: 'single', services: { objectql: ungranted.engine } });
+        ungranted.reads.length = 0;
+        const res = await counted(count);
+        expect(res.status, JSON.stringify(res.payload)).toBe(403);
+        expect(res.payload.error).toMatchObject({ code: 'FORBIDDEN' });
+        expect(res.payload.error.message).toContain('manage_metadata');
+        expect(ungranted.reads.filter((r) => r.object.startsWith('pg_'))).toEqual([]);
+        expect(logger.warn.mock.calls.map((c) => String(c[0])).join('\n')).toContain('refused Counting sample data');
     });
 });

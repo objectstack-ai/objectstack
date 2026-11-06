@@ -21,7 +21,7 @@ The `strict` column is the one the campaign schedules against; it counts both th
 
 | Dir | Sites | strict | passthrough | catchall | strip |
 |---|---|---|---|---|---|
-| `data/` | 159 | 94 | 2 | 0 | 63 |
+| `data/` | 163 | 94 | 2 | 0 | 67 |
 
 ## `data/` — sites
 
@@ -53,11 +53,12 @@ classify and is not listed (it becomes reportable the day it grows its first sit
 | `object.zod.ts` | 25 |
 | `picklist.zod.ts` | 3 |
 | `query.zod.ts` | 5 |
+| `recycle-bin.zod.ts` | 4 |
 | `seed-file.zod.ts` | 2 |
 | `seed-loader.zod.ts` | 12 |
 | `seed.zod.ts` | 2 |
 | `validation.zod.ts` | 6 |
-| **total** | **159** |
+| **total** | **163** |
 
 ## `data/` — open
 
@@ -65,7 +66,7 @@ Per file, how many of its sites still silently discard unknown keys. The `Class`
 column that decides the bucket split is hand-written in the ledger; the arithmetic
 over it is here.
 
-**63 strip of 159**, in 10 file(s).
+**67 strip of 163**, in 11 file(s).
 
 | File | Strip | Sites |
 |---|---|---|
@@ -78,14 +79,15 @@ over it is here.
 | `filter.zod.ts` | 11 | 13 |
 | `hook.zod.ts` | 5 | 8 |
 | `query.zod.ts` | 3 | 5 |
+| `recycle-bin.zod.ts` | 4 | 4 |
 | `seed-loader.zod.ts` | 12 | 12 |
-| **total** | **63** | **159** |
+| **total** | **67** | **163** |
 
 | Bucket | Sites |
 |---|---|
 | authorable — the ruling's forced scope | 0 |
 | unresolved — needs a per-schema verdict | 0 |
-| wire / open — out of forced scope | 62 |
+| wire / open — out of forced scope | 66 |
 | no door — no carrier, ADR-0049 territory | 1 |
 | no gate — carrier live, no parse | 0 |
 | covered — no carrier, no parse, guarded at every consumer | 0 |
