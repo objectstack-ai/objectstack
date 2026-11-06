@@ -4207,6 +4207,7 @@ const zh = {
       create_record: '新建记录',
       create_seed: '为对象生成示例数据',
       delete_field: '删除一个字段',
+      delete_package: '删除一个应用包',
       describe_metadata: '查看元数据的内容',
       describe_object: '查看对象的结构',
       get_active_package: '确认当前应用包',

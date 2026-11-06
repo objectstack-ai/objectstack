@@ -4310,6 +4310,7 @@ const ar = {
       create_record: "إنشاء السجل",
       create_seed: "توليد بيانات تجريبية للكائنات",
       delete_field: "حذف أحد الحقول",
+      delete_package: "حذف حزمة",
       describe_metadata: "مراجعة البيانات الوصفية",
       describe_object: "مراجعة بنية الكائن",
       get_active_package: "التحقق من الحزمة النشطة",

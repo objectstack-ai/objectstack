@@ -4834,6 +4834,7 @@ const en = {
       create_record: 'Create the record',
       create_seed: 'Generate sample data',
       delete_field: 'Delete a field',
+      delete_package: 'Delete a package',
       describe_metadata: 'Look at the metadata',
       describe_object: 'Look at the object structure',
       get_active_package: 'Check the active package',

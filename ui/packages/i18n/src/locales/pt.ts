@@ -4074,6 +4074,7 @@ const pt = {
       create_record: "Criar o registro",
       create_seed: "Gerar dados de exemplo para os objetos",
       delete_field: "Excluir um campo",
+      delete_package: "Excluir um pacote",
       describe_metadata: "Revisar os metadados",
       describe_object: "Revisar a estrutura do objeto",
       get_active_package: "Verificar o pacote ativo",
