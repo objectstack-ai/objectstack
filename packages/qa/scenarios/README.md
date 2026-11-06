@@ -42,7 +42,7 @@ computed truths and declared outcomes:
 import { gradeCardAnswer, gradeCardOperation, scoreCardArtifact } from '@objectstack/scenarios/score/full';
 
 scoreCardArtifact(card, artifact);                 // a built dist/objectstack.json: expect, tags, agent actions
-gradeCardOperation(card, 'remove_chen', observed); // an observed write against its declared outcome
+gradeCardOperation(card, 'remove_ben', observed);  // an observed write against its declared outcome
 gradeCardAnswer(card, { question: 'account_count', persona: 'sdr', turn }); // an agent's answer
 ```
 
