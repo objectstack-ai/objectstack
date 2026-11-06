@@ -366,12 +366,6 @@ function matchesShortcutChord(
   return e.key.toLowerCase() === chord.key;
 }
 
-/**
- * A keydown aimed at something the user types into: a text field, a select,
- * a content-editable region (rich-text and code editors), or an ARIA textbox.
- * The home chord leaves those alone, so an editor that binds the same keys
- * keeps them (objectui#12605).
- */
 /** The page the Connect an AI Assistant entries open (`@objectstack/mcp`). */
 const CONNECT_ASSISTANT_PAGE = 'connect_agent';
 
@@ -387,6 +381,12 @@ function navCarriesPage(items: unknown, pageName: string): boolean {
     || navCarriesPage(item?.children, pageName));
 }
 
+/**
+ * A keydown aimed at something the user types into: a text field, a select,
+ * a content-editable region (rich-text and code editors), or an ARIA textbox.
+ * The home chord leaves those alone, so an editor that binds the same keys
+ * keeps them (objectui#12605).
+ */
 function isTypingTarget(target: EventTarget | null): boolean {
   if (!(target instanceof Element)) return false;
   if (target instanceof HTMLElement && target.isContentEditable) return true;
