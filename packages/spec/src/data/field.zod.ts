@@ -1078,8 +1078,8 @@ const INLINE_GRID_COLUMN_HISTORY =
  * as `FieldSchema`'s currency refusal with the subject swapped, same remedy:
  * delete the key, nothing replaces it.
  * `inline-grid-column-currency-scale-refused.test.ts` holds the two refusals
- * to the same first sentence and the same minor-unit clause, so a rewording of
- * one that leaves the other behind goes red.
+ * to the same first sentence and the same fraction-digits clause, so a rewording
+ * of one that leaves the other behind goes red.
  */
 const INLINE_GRID_CURRENCY_SCALE_REFUSAL =
   '`scale` is not valid on a `currency` inline grid column — delete the key. A currency '
