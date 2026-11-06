@@ -70,7 +70,8 @@ const CACHE_JOBS = [DEPS_JOB, ...Object.values(UI_JOBS)];
  *   - lint-ui, build-e2e-ui: #25869 row F13, the ceiling comment above lint-ui.
  *   - ui-deps: the derivation on that job.
  *   - live-e2e-ui: the derivation on that job, by the lint-ui rule over its
- *     first `main` population (objectstack#27228). It saves no cache, so it
+ *     first population, `main`'s push and schedule runs plus the merge-queue
+ *     runs (objectstack#27228). It saves no cache, so it
  *     is pinned here for its ceiling alone, not one of `CACHE_JOBS`.
  */
 const CEILINGS: Record<string, number> = {
@@ -78,7 +79,7 @@ const CEILINGS: Record<string, number> = {
   [UI_JOBS.typeCheck]: 40,
   [UI_JOBS.lint]: 40,
   [UI_JOBS.buildE2e]: 35,
-  [UI_LIVE_E2E_JOB]: 35,
+  [UI_LIVE_E2E_JOB]: 45,
 };
 
 /** The pinned jobs whose ceiling in `wf` is not the pinned value, as `key: found ≠ pinned`. */
@@ -215,9 +216,9 @@ describe('root ci.yml — the ui jobs\' cache saves are bounded and non-fatal (o
     // ceiling altogether: each must read as moved, and nothing else may.
     const moved = structuredClone(workflow);
     moved.jobs[UI_LIVE_E2E_JOB]['timeout-minutes'] = 40;
-    expect(movedCeilings(moved)).toEqual([`${UI_LIVE_E2E_JOB}: 40 ≠ 35`]);
+    expect(movedCeilings(moved)).toEqual([`${UI_LIVE_E2E_JOB}: 40 ≠ 45`]);
     delete moved.jobs[UI_LIVE_E2E_JOB]['timeout-minutes'];
-    expect(movedCeilings(moved)).toEqual([`${UI_LIVE_E2E_JOB}: undefined ≠ 35`]);
+    expect(movedCeilings(moved)).toEqual([`${UI_LIVE_E2E_JOB}: undefined ≠ 45`]);
     expect(movedCeilings(workflow)).toEqual([]);
   });
 });
