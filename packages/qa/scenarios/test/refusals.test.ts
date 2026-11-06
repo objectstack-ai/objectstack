@@ -82,6 +82,7 @@ const CASES: Array<[string, (c: RawCard) => void, string, RegExp]> = [
   ['a persona that hides nothing', (c) => (c.run.personas[1].hidden = {}), 'run.personas[1].hidden', /at least one object or field/],
   ['a row scope on a path that does not resolve', (c) => (c.run.personas[0].scope[1].field = 'account.region'), 'run.personas[0].scope[1].field', /no seed row of `account` carries `region`/],
   ['a question asked as an unknown persona', (c) => (q(c, 'account_count').personas[0] = 'ghost'), 'run.questions[4].personas[0]', /no persona `ghost`/],
+  ['a row scope on a card without the row-scope tag', (c) => (c.capabilities = c.capabilities.filter((t: string) => t !== 'access-security.row-scope')), 'capabilities', /persona\(s\) `sdr` declare a row `scope`, so the card must carry `access-security.row-scope`/],
   // ── unanswerable ──
   ['an unanswerable truth without its reason', (c) => delete q(c, 'acme_revenue').truth.reason, 'run.questions[7].truth.reason', /expected string/],
   // ── seed, operations and outcomes ──
@@ -132,6 +133,14 @@ describe('scenario card refusals', () => {
       o.outcome = { kind: 'refused', code: ErrorCode.parse('RECORD_NOT_FOUND') };
       c.run.guardrails[3].operation = 'add_contact';
       op(c, 'add_contact').outcome.auditActor = 'sdr';
+    });
+    expect(r.refusals.map(formatRefusal)).toEqual([]);
+  });
+
+  it('a card whose personas scope no rows loads without the row-scope tag (control for the tag rule)', () => {
+    const r = load((c) => {
+      c.capabilities = c.capabilities.filter((t: string) => t !== 'access-security.row-scope');
+      delete c.run.personas[0].scope;
     });
     expect(r.refusals.map(formatRefusal)).toEqual([]);
   });

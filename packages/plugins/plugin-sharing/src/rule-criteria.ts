@@ -115,3 +115,25 @@ export class SharingCriteriaValidationError extends Error {
     this.fields = [{ field, code: 'required', message }];
   }
 }
+
+/**
+ * [#30621] A sharing rule refused at save because its object is not under
+ * record-sharing enforcement: the rule could never share anything.
+ *
+ * `code` + `status` are the declared envelope the `/data` door and the
+ * sharing-rule routes answer at its own status: `SHARING_NOT_ENABLED` (422),
+ * the pair the per-record share routes and `POST .../evaluate` already answer
+ * for the same verdict. The message is `SharingService.sharingRuleObjectRefusal`'s
+ * sentence, which names the object and how to turn record sharing on for it.
+ */
+export class SharingRuleObjectNotEnforcedError extends Error {
+  readonly code = 'SHARING_NOT_ENABLED';
+  readonly status = 422;
+  /** The object the rule names. */
+  readonly object: string;
+  constructor(object: string, message: string) {
+    super(message);
+    this.name = 'SharingRuleObjectNotEnforcedError';
+    this.object = object;
+  }
+}

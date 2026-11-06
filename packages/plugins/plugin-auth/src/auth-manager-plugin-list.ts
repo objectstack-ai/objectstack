@@ -793,7 +793,9 @@ export async function buildPluginList(this: PluginListHost): Promise<any[]> {
   if (enabled.scim) {
     await this.addOptionalPlugin(plugins, 'scim', async () => {
       const { scim } = await import('@better-auth/scim');
-      const { verifyScimBearerToken } = await import('./scim-connection-service.js');
+      const { verifyScimBearerToken, recordScimRequestConnection } = await import(
+        './scim-connection-service.js'
+      );
       const secret = this.resolveAuthSecret();
       return scim({
         connections: [],
@@ -811,7 +813,15 @@ export async function buildPluginList(this: PluginListHost): Promise<any[]> {
             // POST + PATCH; pinned by `scim-transaction-scope.test.ts`).
             const engine = this.config.dataEngine;
             if (!engine) return null; // no store to verify against — fail closed
-            return verifyScimBearerToken(engine as never, secret, input.token);
+            // The verified connection is WRITTEN INTO the scope
+            // `handleRequest` opened — a field on the store both this frame
+            // and the endpoint handler read — not entered as a new store, so
+            // every provisioning write of the request is attributed to it
+            // (`ScimRequestScope.connectionId` says why that reaches the
+            // writes where an `enterWith` did not).
+            return recordScimRequestConnection(
+              await verifyScimBearerToken(engine as never, secret, input.token),
+            );
           },
         },
         // [#14360] The host half of `active`: stable @better-auth/scim

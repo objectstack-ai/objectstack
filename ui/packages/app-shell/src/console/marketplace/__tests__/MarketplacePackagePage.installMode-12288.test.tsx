@@ -40,7 +40,7 @@
 
 import '@testing-library/jest-dom/vitest';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 vi.mock('react-router-dom', () => ({
@@ -66,6 +66,8 @@ vi.mock('@object-ui/i18n', async (importOriginal) => ({
   }),
 }));
 
+// A hosted managed install waits for the environment to serve the app: served at once here.
+vi.mock('../waitForServedApp', () => ({ waitForServedApp: async () => ({ served: true, apps: [] }) }));
 vi.mock('../../../assistant/assistantBus', () => ({ emitMetadataRefresh: () => {} }));
 vi.mock('../../../providers/MetadataProvider', () => ({ useMetadata: () => ({ refresh: async () => {} }) }));
 vi.mock('../../../components/SuggestedBindingsPanel', () => ({
@@ -74,6 +76,7 @@ vi.mock('../../../components/SuggestedBindingsPanel', () => ({
 
 import { initRuntimeConfig, resetRuntimeConfigForTesting } from '../../../runtime-config';
 import { MarketplacePackagePage } from '../MarketplacePackagePage';
+import { installPackage } from '../marketplaceApi';
 
 const PKG = 'com.example.crm';
 const MANIFEST_PATH = '/api/v1/marketplace/packages/pkg_crm/versions/latest/manifest';
@@ -132,7 +135,12 @@ const answer = (status: number, body: unknown) => ({
   text: async () => JSON.stringify(body),
 });
 
-async function boot(installLocal = true) {
+/** A hosted environment's cloud base: the page installs through the same-origin cloud-connection route. */
+const HOSTED_CLOUD = 'https://cloud.example.test';
+const CLOUD_INSTALL_PATH = '/api/v1/cloud-connection/install';
+let cloudPosts: Array<Record<string, unknown>> = [];
+
+async function boot(installLocal = true, cloudUrl = '') {
   resetRuntimeConfigForTesting();
   vi.stubGlobal(
     'fetch',
@@ -142,8 +150,9 @@ async function boot(installLocal = true) {
       const reply = (() => {
         if (path === '/api/v1/runtime/config') {
           return answer(200, {
-            cloudUrl: '',
+            cloudUrl,
             singleEnvironment: true,
+            ...(cloudUrl ? { defaultEnvironmentId: 'env_1' } : {}),
             features: { installLocal, marketplace: true, aiStudio: true, autoPublishAiBuilds: true },
             branding: { productName: 'ObjectOS', productShortName: 'ObjectOS' },
           });
@@ -154,6 +163,13 @@ async function boot(installLocal = true) {
           return answer(wire.install.status, wire.install.body);
         }
         if (path === MANIFEST_PATH && method === 'GET') return answer(wire.manifest.status, wire.manifest.body);
+        if (path === CLOUD_INSTALL_PATH && method === 'POST') {
+          cloudPosts.push(JSON.parse(init?.body ?? '{}'));
+          return answer(wire.install.status, wire.install.body);
+        }
+        if (path === '/api/v1/cloud-connection/installation' && method === 'GET') {
+          return answer(200, { success: true, data: { installed: false } });
+        }
         if (path === '/api/v1/marketplace/packages/pkg_crm' && method === 'GET') {
           return answer(200, { success: true, data: CATALOG_PACKAGE });
         }
@@ -198,6 +214,7 @@ beforeEach(() => {
   };
   answered = [];
   posts = [];
+  cloudPosts = [];
 });
 
 afterEach(() => {
@@ -411,5 +428,157 @@ describe('the page reads the install door\'s answer (objectui#12288)', () => {
     expect(posts[0]).toEqual({ packageId: 'pkg_crm', installMode: 'unmanaged' });
     expect(await screen.findByText('«marketplace.install.unmanagedIgnored|name=Example CRM»')).toBeInTheDocument();
     expect(screen.queryByText(/marketplace\.install\.localSuccess/)).not.toBeInTheDocument();
+  });
+});
+
+describe('the hosted install path sends the mode the package permits (objectstack#30963)', () => {
+  // A hosted environment: a cloud base, no install-local door. The install goes
+  // to the same-origin cloud-connection route, which the control plane judges.
+  const installToCloud = () => screen.getByRole('button', { name: '«marketplace.action.installToCloud»' });
+
+  async function renderHosted() {
+    await boot(false, HOSTED_CLOUD);
+    render(<MarketplacePackagePage />);
+    await screen.findByRole('button', { name: '«marketplace.action.installToCloud»' });
+    await waitFor(() => expect(answered).toContain(`GET ${MANIFEST_PATH}`));
+    await act(async () => {});
+  }
+
+  /** Open the install dialog from the page and press its Install. */
+  async function installHosted() {
+    fireEvent.click(installToCloud());
+    const dialog = await screen.findByRole('dialog');
+    fireEvent.click(within(dialog).getByRole('button', { name: '«marketplace.action.install»' }));
+    await waitFor(() => expect(cloudPosts).toHaveLength(1));
+    return dialog;
+  }
+
+  it('a package that permits both modes draws the choice through the install-local resolver, and the install waits for a pick', async () => {
+    serveManifest(compiledBody({ installModes: ['managed', 'unmanaged'] }));
+    await renderHosted();
+
+    expect(screen.getByTestId('install-mode-choice')).toBeInTheDocument();
+    expect(screen.getAllByRole('radio')).toHaveLength(2);
+    expect(radio('managed')).not.toBeChecked();
+    expect(radio('unmanaged')).not.toBeChecked();
+    expect(installToCloud()).toBeDisabled();
+    expect(installToCloud()).toHaveAccessibleDescription('«marketplace.install.mode.required»');
+  });
+
+  it.each(['managed', 'unmanaged'] as const)('the picked mode `%s` is sent as `install_mode`', async (mode) => {
+    serveManifest(flatBody({ installModes: ['managed', 'unmanaged'] }));
+    await renderHosted();
+
+    fireEvent.click(radio(mode));
+    await waitFor(() => expect(installToCloud()).toBeEnabled());
+    await installHosted();
+
+    expect(cloudPosts[0]).toEqual({ package_id: 'pkg_crm', seed_sample_data: false, install_mode: mode });
+  });
+
+  it('a package that permits only `unmanaged` draws no choice, says the install is a copy, and sends `unmanaged`', async () => {
+    serveManifest(flatBody({ installModes: ['unmanaged'] }));
+    await renderHosted();
+
+    expect(screen.queryAllByRole('radio')).toHaveLength(0);
+    expect(screen.getByTestId('install-mode-sole')).toHaveTextContent('«marketplace.install.mode.unmanagedHint»');
+    await installHosted();
+
+    expect(cloudPosts[0]).toEqual({ package_id: 'pkg_crm', seed_sample_data: false, install_mode: 'unmanaged' });
+  });
+
+  it.each([
+    ['declares no `installModes`', { status: 200, body: { success: true, data: { manifest: flatBody(), version: '4.0.1', version_id: 'ver_4' } } }],
+    ['permits `managed` only', { status: 200, body: { success: true, data: { manifest: flatBody({ installModes: ['managed'] }), version: '4.0.1', version_id: 'ver_4' } } }],
+    ['cannot be read', { status: 404, body: { success: false, error: { code: 'NOT_FOUND', message: 'no manifest' } } }],
+  ])('a manifest that %s draws no choice, and the request carries no `install_mode` key', async (_label, manifest) => {
+    wire.manifest = manifest;
+    await renderHosted();
+
+    expect(screen.queryByTestId('install-mode-choice')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('install-mode-sole')).not.toBeInTheDocument();
+    expect(installToCloud()).toBeEnabled();
+    await installHosted();
+
+    expect(cloudPosts[0]).toEqual({ package_id: 'pkg_crm', seed_sample_data: false });
+    expect(cloudPosts[0]).not.toHaveProperty('install_mode');
+  });
+
+  it('a requested copy answered without `installMode` says the environment installed the package managed', async () => {
+    // Today's environment forwards no mode: the control plane installs managed.
+    serveManifest(flatBody({ installModes: ['unmanaged'] }));
+    wire.install = { status: 200, body: { success: true, data: { installation: { id: 'inst_1', environment_id: 'env_1', package_id: 'pkg_crm', version: '4.0.1' } } } };
+    await renderHosted();
+    const dialog = await installHosted();
+
+    expect(await within(dialog).findByText('«marketplace.install.unmanagedIgnored|name=Example CRM»')).toBeInTheDocument();
+    expect(within(dialog).queryByText('«marketplace.install.deployed»')).not.toBeInTheDocument();
+  });
+
+  it('an `unmanaged` answer names the base it copied into', async () => {
+    serveManifest(flatBody({ installModes: ['unmanaged'] }));
+    wire.install = { status: 200, body: { success: true, data: unmanagedAnswer([]) } };
+    await renderHosted();
+    const dialog = await installHosted();
+
+    expect(await within(dialog).findByText(`«marketplace.install.unmanagedSuccess|name=Example CRM|base=${PKG}-copy|version=4.0.1»`)).toBeInTheDocument();
+    // The copy is the environment's own base, not a package installation: the CTA does not flip to Installed.
+    expect(screen.queryByRole('button', { name: '«marketplace.action.installed»' })).not.toBeInTheDocument();
+  });
+
+  it.each([
+    [422, 'INSTALL_MODE_NOT_PERMITTED', 'MODE-REFUSAL sentinel: this package permits another mode.'],
+    [409, 'UNMANAGED_INSTALL_WALLED_POSTURE', 'POSTURE-REFUSAL sentinel: this deployment walls organizations.'],
+  ])('a %i %s refusal shows the envelope\'s own message, as install-local does', async (status, code, message) => {
+    serveManifest(flatBody({ installModes: ['managed', 'unmanaged'] }));
+    wire.install = { status, body: { success: false, error: { code, message, details: { permitted: ['managed'] } } } };
+    await renderHosted();
+    fireEvent.click(radio('unmanaged'));
+    await waitFor(() => expect(installToCloud()).toBeEnabled());
+    const dialog = await installHosted();
+
+    expect(await within(dialog).findByText(message)).toBeInTheDocument();
+  });
+
+  it('a `DEPENDENCY_MISSING` refusal is drawn from its facts, through the install-local code-to-text path', async () => {
+    serveManifest(flatBody());
+    wire.install = {
+      status: 422,
+      body: {
+        success: false,
+        error: {
+          code: 'DEPENDENCY_MISSING',
+          message: 'DEPENDENCY-SENTINEL: the server English sentence',
+          details: { compatible: false, issues: [], unmet: [{ packageId: PKG, dependency: 'com.example.base', range: '^6.0.0', found: 'absent' }] },
+        },
+      },
+    };
+    await renderHosted();
+    const dialog = await installHosted();
+
+    expect(await within(dialog).findByText(/«marketplace\.install\.dependencyMissing\.heading»/)).toBeInTheDocument();
+    expect(within(dialog).queryByText(/DEPENDENCY-SENTINEL/)).not.toBeInTheDocument();
+  });
+});
+
+describe('`installPackage()` sends `install_mode` only when it is set (objectstack#30963)', () => {
+  it.each([
+    ['the hosted route', HOSTED_CLOUD, CLOUD_INSTALL_PATH],
+    ['the control plane\'s own action', '', '/api/v1/actions/sys_package/install_package'],
+  ])('%s: absent sends no key; set sends it', async (_label, cloudUrl, path) => {
+    await boot(false, cloudUrl);
+    const bodies: Array<Record<string, unknown>> = [];
+    vi.stubGlobal('fetch', vi.fn(async (input: unknown, init?: { body?: string }) => {
+      expect(new URL(String(input), 'http://console.test').pathname).toBe(path);
+      bodies.push(JSON.parse(init?.body ?? '{}'));
+      return answer(200, { success: true, data: {} });
+    }));
+
+    await installPackage({ packageId: 'pkg_crm', environmentId: 'env_1' });
+    await installPackage({ packageId: 'pkg_crm', environmentId: 'env_1', installMode: 'unmanaged' });
+
+    const modeOf = (b: Record<string, unknown>) => (cloudUrl ? b : (b.params as Record<string, unknown>));
+    expect(modeOf(bodies[0])).not.toHaveProperty('install_mode');
+    expect(modeOf(bodies[1]).install_mode).toBe('unmanaged');
   });
 });

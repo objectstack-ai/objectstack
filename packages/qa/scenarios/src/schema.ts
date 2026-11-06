@@ -87,6 +87,13 @@ export const CapabilityTagSchema = z
   );
 
 /**
+ * The tag whose check judges a persona's row `scope` in the build. The loader
+ * requires it on every card with a scoped persona, and the scorer keys its
+ * check by it, so the two can never spell it apart.
+ */
+export const ROW_SCOPE_TAG = 'access-security.row-scope';
+
+/**
  * A card's business functions — the marketplace taxonomy's business-function
  * facet, read from `@objectstack/spec/marketplace` and never restated here:
  * 1-3 distinct values, the primary one first. A card graduates into a
@@ -419,6 +426,16 @@ export function scenarioNamespace(card: { code: string }): string {
   return `${SCENARIO_NAMESPACE_PREFIX}${card.code}`;
 }
 
+/**
+ * The permission set a persona signs in with, in an app of `namespace`:
+ * `<namespace>_<persona id>` (`democrm_sdr`). The runner grants it to the
+ * persona's user, the build prompt asks for it by this name, and the scorer
+ * reads its row-level security from it.
+ */
+export function personaPermissionSetName(namespace: string, persona: string): string {
+  return `${namespace}_${persona}`;
+}
+
 // ── The card ────────────────────────────────────────────────────────────────
 
 export const ScenarioCardSchema = z.strictObject({
@@ -449,3 +466,13 @@ export const ScenarioCardSchema = z.strictObject({
   iterate: IterateSchema,
 });
 export type ScenarioCard = z.infer<typeof ScenarioCardSchema>;
+
+/**
+ * The operation a card's `write_validation` guardrail names (a `refused`
+ * create or update; the loader holds that). The runner probes it with its own
+ * write of the declared values after the agent's turn, and the grader judges
+ * the agent and the probe as two halves (#30883 item 2).
+ */
+export function isWriteValidationOperation(card: Pick<ScenarioCard, 'run'>, operationId: string): boolean {
+  return card.run.guardrails.some((g) => g.check === 'write_validation' && g.operation === operationId);
+}

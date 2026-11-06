@@ -73,7 +73,13 @@ import {
 import { SharingRuleService, bindDeclaredRuleNameGuard, bindSharingRuleActivationReconcile } from './sharing-rule-service.js';
 import { ShareLinkService } from './share-link-service.js';
 import { registerShareLinkRoutes } from './share-link-routes.js';
-import { bindRuleHooks, unbindAllRuleHooks, bindRuleCriteriaGuard, RULE_REBIND_TRIGGER_PACKAGE } from './rule-hooks.js';
+import {
+  bindRuleHooks,
+  unbindAllRuleHooks,
+  bindRuleCriteriaGuard,
+  bindRuleObjectEnforcementGuard,
+  RULE_REBIND_TRIGGER_PACKAGE,
+} from './rule-hooks.js';
 import { bindRuleProvenanceStamp, unbindRuleProvenanceStamp } from './sharing-rule-provenance.js';
 import { bindPrimaryBuHooks, backfillPrimaryBu } from './primary-bu-projection.js';
 import { bindBusinessUnitTreeRecompute } from './bu-tree-recompute.js';
@@ -980,6 +986,10 @@ export class SharingServicePlugin implements Plugin {
             // sys_sharing_rule — it bypasses defineRule's validation, so the
             // match-all criteria gate has to sit on the table itself too.
             bindRuleCriteriaGuard(engine, ctx.logger as any);
+
+            // [#30621] …and so must the refusal of a rule whose object is not
+            // under record-sharing enforcement: it would save and share nothing.
+            if (this.service) bindRuleObjectEnforcementGuard(engine, this.service);
 
             // [ADR-0131 D6 regime C] …and so must the refusal of a row, new or
             // renamed, that takes a declared rule's name: `defineRule` makes it
