@@ -52,8 +52,14 @@ export default defineConfig({
     // over the CURRENT page. Anchored for a second reason here — `@objectstack/lint`
     // exports a `./runtime` subpath, and the object form would swallow it and
     // resolve it to `…/lint/src/index.ts/runtime` (ENOTDIR) at run time.
+    //
+    // The `/testing` entry is for `stdio-data-bridge.object-schema-mask.test.ts`,
+    // which drives the stdio exit through the shared ADR-0106 case table: the
+    // table is a VALUE import too, and judging this transport against a stale
+    // build of it would be the same silent wrong-tree verdict.
     alias: [
       { find: /^@objectstack\/metadata-core$/, replacement: path.resolve(__dirname, '../metadata-core/src/index.ts') },
+      { find: /^@objectstack\/metadata-core\/testing$/, replacement: path.resolve(__dirname, '../metadata-core/src/testing.ts') },
       { find: /^@objectstack\/lint$/, replacement: path.resolve(__dirname, '../lint/src/index.ts') },
     ],
   },
