@@ -135,6 +135,33 @@ export function resolveControlPlaneApiKey(configured?: string): string {
 }
 
 /**
+ * The spellings by which a deployment declares "this runtime has no control
+ * plane" (`OS_CLOUD_URL=off`, …) — the repo's one documented network-posture
+ * declaration. ONE definition: `@objectstack/cloud-connection`'s
+ * `resolveCloudUrl` and `isControlPlaneDeclined` read it from here, and so
+ * does the hosted push relay sender (`@objectstack/service-push`, #29920),
+ * which cannot depend on cloud-connection.
+ */
+export const CLOUD_DECLINED_SPELLINGS: readonly string[] = ['off', 'none', 'local', 'disabled'];
+
+/** Is this raw declaration one of the documented "no control plane" spellings? */
+export function isControlPlaneDeclinedSpelling(raw: string): boolean {
+  return CLOUD_DECLINED_SPELLINGS.includes(raw.trim().toLowerCase());
+}
+
+/**
+ * Did this deployment DECLARE that it has no control plane? Pass the host's
+ * explicit argument to ask about that argument; pass nothing to ask about
+ * `OS_CLOUD_URL`. An empty or unset value is not a declaration. The reasoning
+ * for why this is not "the resolved URL is empty" lives on
+ * `isControlPlaneDeclined` in `@objectstack/cloud-connection`, which re-exports
+ * this function.
+ */
+export function isControlPlaneDeclined(explicit?: string | null): boolean {
+  return isControlPlaneDeclinedSpelling(explicit ?? getEnv('OS_CLOUD_URL') ?? '');
+}
+
+/**
  * The memoized answer of {@link isCloudManaged} — its refusal included, so a
  * boot the fuse refused stays refused on every later read in the process.
  */

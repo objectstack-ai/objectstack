@@ -1235,6 +1235,46 @@ export default defineConfig({
             { name: 'i18n-ns-studio-en', test: /[\\/]packages[\\/]i18n[\\/]src[\\/]namespaces[\\/]studio[\\/]en\.ts$/, priority: 84 },
             { name: 'i18n-ns-studio-zh', test: /[\\/]packages[\\/]i18n[\\/]src[\\/]namespaces[\\/]studio[\\/]zh\.ts$/, priority: 84 },
             //
+            // The `marketplace` namespace (objectstack#30588): the pack group the
+            // two marketplace pages read, moved out of the ten packs so the
+            // eager `i18n-locale-en` chunk stops carrying it. All ten catalogues
+            // are `import()`ed by `packages/i18n/src/namespaces/marketplace/index.ts`
+            // when a marketplace page mounts, none is resident, so one group per
+            // catalogue for the rule above. The loader module gets a group too:
+            // without one it would fall to `i18n-runtime` below and be eager,
+            // while its only reader is the marketplace pages' frame.
+            //
+            // ⛔ Both the loader's group and the frame's (`marketplace-namespace-gate`,
+            // app-shell's `MarketplaceNamespaceGate.tsx`, the one module that
+            // imports the loader) take `includeDependenciesRecursively: false`,
+            // and the frame needs its group at all, for two measured reasons
+            // (console build of objectstack#30588, eager closure read from
+            // `eager-closure.json`):
+            //   - with rolldown's default the loader's group followed its imports
+            //     and took `locales/registry.ts` out of `i18n-runtime` and the
+            //     dynamic-import preload helper out of `framework`; both are
+            //     eager, so the group became an eager 2,374 B gz chunk;
+            //   - without a group of its own the frame, shared by the two lazy
+            //     marketplace pages, landed in the chunk those pages share with
+            //     the eager Studio packages page (`MarketplaceRowActions.tsx` and
+            //     the refusal readers), which is EAGER by that co-tenancy, and
+            //     pulled the loader into the eager closure with it (+1,281 B gz).
+            // With both, the loader, the frame and the ten catalogues are lazy,
+            // the shared chunk is the one the base build emits, and the only
+            // change to the eager closure is `i18n-locale-en`'s.
+            { name: 'i18n-ns-marketplace', test: /[\\/]packages[\\/]i18n[\\/]src[\\/]namespaces[\\/]marketplace[\\/]index\.ts$/, priority: 84, includeDependenciesRecursively: false },
+            { name: 'i18n-ns-marketplace-en', test: /[\\/]packages[\\/]i18n[\\/]src[\\/]namespaces[\\/]marketplace[\\/]en\.ts$/, priority: 84 },
+            { name: 'i18n-ns-marketplace-zh', test: /[\\/]packages[\\/]i18n[\\/]src[\\/]namespaces[\\/]marketplace[\\/]zh\.ts$/, priority: 84 },
+            { name: 'i18n-ns-marketplace-ja', test: /[\\/]packages[\\/]i18n[\\/]src[\\/]namespaces[\\/]marketplace[\\/]ja\.ts$/, priority: 84 },
+            { name: 'i18n-ns-marketplace-ko', test: /[\\/]packages[\\/]i18n[\\/]src[\\/]namespaces[\\/]marketplace[\\/]ko\.ts$/, priority: 84 },
+            { name: 'i18n-ns-marketplace-de', test: /[\\/]packages[\\/]i18n[\\/]src[\\/]namespaces[\\/]marketplace[\\/]de\.ts$/, priority: 84 },
+            { name: 'i18n-ns-marketplace-fr', test: /[\\/]packages[\\/]i18n[\\/]src[\\/]namespaces[\\/]marketplace[\\/]fr\.ts$/, priority: 84 },
+            { name: 'i18n-ns-marketplace-es', test: /[\\/]packages[\\/]i18n[\\/]src[\\/]namespaces[\\/]marketplace[\\/]es\.ts$/, priority: 84 },
+            { name: 'i18n-ns-marketplace-pt', test: /[\\/]packages[\\/]i18n[\\/]src[\\/]namespaces[\\/]marketplace[\\/]pt\.ts$/, priority: 84 },
+            { name: 'i18n-ns-marketplace-ru', test: /[\\/]packages[\\/]i18n[\\/]src[\\/]namespaces[\\/]marketplace[\\/]ru\.ts$/, priority: 84 },
+            { name: 'i18n-ns-marketplace-ar', test: /[\\/]packages[\\/]i18n[\\/]src[\\/]namespaces[\\/]marketplace[\\/]ar\.ts$/, priority: 84 },
+            { name: 'marketplace-namespace-gate', test: /[\\/]packages[\\/]app-shell[\\/]src[\\/]console[\\/]marketplace[\\/](?:MarketplaceNamespaceGate\.tsx|marketplaceFrameHolding\.ts)$/, priority: 84, includeDependenciesRecursively: false },
+            //
             // ⛔ `i18n-runtime` takes `includeDependenciesRecursively: false`
             // for the reason `data-adapter` below does (objectui#9345, read out
             // there in full): it outranks `framework` (83 over 80), and since

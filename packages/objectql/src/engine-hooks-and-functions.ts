@@ -4,7 +4,7 @@
  * [#29986 codemod] The
  * "Class head: units, hooks, functions, body runners, hook dispatch" section of
  * `ObjectQL`: the bodies of `recordResidualOwner`, `residualOwnerSource`,
- * `getStatus`, `unregisterHooksByPackage`, `registerFunction`,
+ * `getStatus`, `registerHook`, `unregisterHooksByPackage`, `registerFunction`,
  * `resolveFunction`, `resolveFunctionEntry`, `unregisterFunctionsByPackage`,
  * `setDefaultBodyRunner`, `getDefaultBodyRunner`, `setDefaultActionRunner`,
  * `getDefaultActionRunner`, `triggerHooks`, `hasHooksFor`,
@@ -42,8 +42,11 @@ import { HookTargetRebindError } from './hook-target-rebind-errors.js';
 import { declaredHookCondition } from './hook-wrappers.js';
 import { CoreServiceName } from '@objectstack/spec/system';
 import { bindHookNotice } from './hook-notice.js';
-import { hookMatchesObject } from './engine-top-level.js';
-import type { FunctionEntry, FunctionRegistrationOptions, HookHandler } from './engine-top-level.js';
+import {
+  DISPATCHABLE_HOOK_EVENTS, assertDispatchableHookEvent, assertHookScopeNotSelfCancelling,
+  assertValidHookExcludeObjects, assertValidHookObject, assertValidUnscopedMultiWriteFlag, hookMatchesObject,
+} from './engine-top-level.js';
+import type { FunctionEntry, FunctionRegistrationOptions, HookEntry, HookHandler } from './engine-top-level.js';
 import type { ObjectQL } from './engine.js';
 
 /**
@@ -93,6 +96,83 @@ export class HooksAndFunctionsFacet {
           version: '0.9.0',
           features: ['crud', 'query', 'aggregate', 'transactions', 'metadata']
       };
+  }
+
+  /** The body of `ObjectQL#registerHook`; the method's docblock there is its contract. */
+  static registerHook(this: Pick<HooksAndFunctionsHost, 'hooks' | 'logger'>, event: string, handler: HookHandler, options?: {
+    object?: string | string[];
+    /**
+     * [#5928] Object name(s) subtracted from what `object` admits — the way to
+     * say "global, except these". See {@link HookEntry.excludeObjects} for why
+     * an allow list cannot express it, and
+     * {@link assertValidHookExcludeObjects} for the two refused shapes.
+     */
+    excludeObjects?: string | string[];
+    priority?: number;
+    packageId?: string;
+    /**
+     * [#9719, widened by #9974] Opt-in whole-operation dispatch for an
+     * UNSCOPED predicate write (`multi: true`, no `where`) — see
+     * {@link HookEntry.dispatchUnscopedMultiWrite}. Valid on `beforeUpdate` /
+     * `beforeDelete` registrations only.
+     */
+    dispatchUnscopedMultiWrite?: boolean;
+    /** Original metadata Hook definition (set by `bindHooksToEngine`). */
+    meta?: any;
+    /** Stable name from metadata (set by `bindHooksToEngine`). */
+    hookName?: string;
+  }): void {
+    // Refuse a scope that is statically decidable as meaningless before
+    // anything is registered or reported. Each face is checked on its own
+    // first, so the combined check below can assume well-formed names.
+    // [#5928] An exclusion face that subtracts nothing (`''`) or everything (`'*'`).
+    assertValidHookExcludeObjects(options?.excludeObjects, event);
+    // [commit 708431313] An allow face that names nothing (`''` → global, `[]`/`['']` → never fires).
+    assertValidHookObject(options?.object, event);
+    // [commit 708431313] Two well-formed faces that cancel out (`'account'` minus `'account'`).
+    assertHookScopeNotSelfCancelling(options?.object, options?.excludeObjects, event);
+    // [#9719/#9974] The unscoped-multi-write flag on an event whose dispatch never reads it.
+    assertValidUnscopedMultiWriteFlag(options?.dispatchUnscopedMultiWrite, event);
+    // [#17713] An event inside the engine's OWN lifecycle namespace that the
+    // engine never dispatches — `beforeCount`, `beforeFindOne` and their four
+    // siblings. #3195 warned and registered anyway; the handler then never ran,
+    // which on a read filter is a guardrail the author believes they armed.
+    // Refused at the door, with the per-seam repair named.
+    assertDispatchableHookEvent(event);
+    // [#3195] Guard against enum-vs-dispatch drift for every OTHER unknown
+    // name: a hook on an event the engine never triggers would register
+    // "successfully" and then silently never fire. Warn loudly rather than
+    // swallow it. Still not a hard reject here — a custom driver/plugin may
+    // dispatch its own events via `triggerHooks`, and outside the engine's own
+    // vocabulary that is the likely reading (#17713 keeps it intact).
+    if (!DISPATCHABLE_HOOK_EVENTS.has(event)) {
+      this.logger.warn(
+        `Hook registered for '${event}', which the engine never dispatches — it will never fire. ` +
+          `Dispatchable events: ${[...DISPATCHABLE_HOOK_EVENTS].join(', ')}. ` +
+          `(Read filtering → RLS/permissions; field masking → field metadata; delete guards → beforeDelete.)`,
+        { event, object: options?.object, hookName: options?.hookName },
+      );
+    }
+    if (!this.hooks.has(event)) {
+        this.hooks.set(event, []);
+    }
+    const entries = this.hooks.get(event)!;
+    entries.push({
+      handler,
+      object: options?.object,
+      excludeObjects: options?.excludeObjects,
+      priority: options?.priority ?? 100,
+      packageId: options?.packageId,
+      dispatchUnscopedMultiWrite: options?.dispatchUnscopedMultiWrite,
+      meta: options?.meta,
+      hookName: options?.hookName,
+    });
+    // Sort by priority (lower runs first)
+    entries.sort((a, b) => a.priority - b.priority);
+    // The exclusion face is reported alongside the allow face: a registration's
+    // scope is BOTH halves (#5928), and a log that printed only `object` would
+    // describe a global hook for an entry that is global-minus-twenty-tables.
+    this.logger.debug('Registered hook', { event, object: options?.object, excludeObjects: options?.excludeObjects, priority: options?.priority ?? 100, totalHandlers: entries.length });
   }
 
   /** The body of `ObjectQL#unregisterHooksByPackage`; the method's docblock there is its contract. */

@@ -1,7 +1,7 @@
 ---
 title: services.push — the mobile push service API
 navTitle: services.push
-description: Mobile push delivery to APNs and FCM, configured from the stack's push key with credentials by reference.
+description: Mobile push delivery through the hosted push relay or straight to APNs and FCM, configured from the stack's push key.
 ---
 
 - **Stability:** `experimental`
@@ -16,12 +16,14 @@ services.push.send(message: PushMessage): Promise<PushSendResult>
 ```
 
 `PushMessage` is one push to one device: the `vendor` the token belongs to
-(`apns` or `fcm`), the device `token`, a plain-text `title` and `body`, and
-`data`, the delivery data the app shell reads (string values only, because FCM
-accepts only strings there).
+(`apns` or `fcm`), the device `token`, a plain-text `title` and `body`, `data`,
+the delivery data the app shell reads (string values only, because FCM accepts
+only strings there), and `notice`, the generic line a relay delivery shows in
+place of the title and body.
 
-`vendors()` lists the vendors this deployment has a transport for. An empty list
-means push delivers nothing.
+`vendors()` lists the vendors this deployment can push to right now. An empty
+list means push delivers nothing: no vendor is configured, or the relay is
+configured and the server is not bound to the cloud yet.
 
 Application code rarely calls this service directly. A `notify` flow node or a
 `NotificationService.emit` that names the `push` channel goes through the
@@ -37,7 +39,8 @@ through this service.
 - `{ status: 'invalid_token', reason }`: the vendor reported the token dead
   (APNs `BadDeviceToken` / `Unregistered`, FCM `UNREGISTERED`).
 - `{ status: 'failed', error, retryable }`: anything else. `retryable` is true
-  for a timeout, a 429 or a 5xx, and false for a refused credential or payload.
+  for a timeout, a 429 rate limit or a 5xx, and false for a refused credential,
+  a refused payload, a lapsed cloud binding or a used-up relay quota.
 
 `send()` never throws: a transport error is answered `failed`.
 
@@ -88,7 +91,7 @@ block is a vendor this deployment does not push to; devices registered on it are
 skipped. Only `apns` and `fcm` ship today. The other Android vendors (HMS /
 Honor / Xiaomi / OPPO / vivo) are planned for a later phase behind the hosted
 relay (below), as further values of `vendor`, the token type the sender routes
-on (this service's transports today, the relay once it is served), and not as
+on (the direct transports and the relay alike), and not as
 plugins or channels of their own.
 
 ### Credential references
@@ -116,29 +119,55 @@ secret is refused twice:
 A `credentialRef` that names an unset variable is not a boot error: the push to
 that vendor fails with `credential_unresolved`, naming the reference.
 
-### The hosted relay: not served yet
+### The hosted relay
 
 `PushServiceConfigSchema` has a second transport, `transport: 'relay'`, and it is
 the schema's default: a `push` block with no vendor block, `push: {}` and an
 absent `push` key all read as the relay. The relay delivers to the
 store-published ObjectOS app, whose APNs key and Firebase project stay with
-ObjectStack, and authenticates the server by its cloud binding credential.
+ObjectStack.
 
-**Its sender has not shipped.** Until it does, a stack that requires `push` with
-a relay configuration (including no `push` key) fails at boot:
-
+```ts
+export default defineStack({
+  manifest: { /* … */ },
+  requires: ['push'],
+  // push: {} — or leave the key out: both read as the relay.
+});
 ```
-Capability "push" (@objectstack/service-push) failed to start: PushServicePlugin: the hosted push relay
-(transport: 'relay', which is also what an empty push config reads as) is not served yet: its sender has
-not shipped, and nothing would deliver through it. …
-```
 
-The fix is the direct transport: `transport: 'direct'` with an `apns` and/or
-`fcm` block for an app signed with your own APNs key and Firebase project. The
-boot refuses rather than serving the relay because a served relay would mount
-the push channel and answer every push as sent while nothing left the server.
-Authoring still accepts a relay block, so a stack written for the relay does not
-need to change when the sender ships.
+- **Authentication.** The server authenticates by its cloud binding
+  credential: the `oscc_` bearer a self-hosted server receives when it is bound
+  on the Cloud connection setup page, or the service key the cloud gives the
+  servers it hosts. The relay block carries no credential of its own. The push
+  service reads the credential from the `cloud-binding` service
+  (`@objectstack/cloud-connection`) on every push, and puts it in the request's
+  `Authorization` header and nowhere else.
+- **Address.** The relay is served by the cloud's control plane at
+  `/api/v1/cloud/push/send`, under the control-plane URL (`OS_CLOUD_URL`, else
+  `https://cloud.objectos.ai`). A relay block's `endpoint` overrides it, for a
+  staging relay.
+- **ID-only.** A relay delivery carries the notification id, its same-server
+  route, the server's origin and one generic line ("You have a new
+  notification", in the recipient's language). The title and body never leave
+  the server; the app reads the notification from the server after the tap.
+
+**Before the server is bound.** A fresh self-hosted server is not bound on its
+first boot, and it still boots: the boot logs one warning that the relay
+delivers nothing until the server is bound. Until then the push channel reports
+no transport (`transport_not_configured`), so notifications are recorded with
+push suppressed and reach users in the in-app inbox. Binding takes effect
+without a restart.
+
+**When the deployment has no control plane.** A deployment that declares it has
+none (`OS_CLOUD_URL=off`, `none`, `local` or `disabled`) cannot reach the relay,
+so a stack that requires `push` with a relay configuration fails at boot,
+naming the two ways out: the in-app inbox, which needs no push service, or the
+direct transport for an app signed with your own APNs key and Firebase project.
+
+**What the relay answers.** `ok` is a delivered push; `invalid` is a dead token,
+which retires the device as below; `retry` is a retryable failure. A 401 means
+the cloud binding was revoked or is not recognised: the push fails without a
+retry, and the fix is to bind the server again.
 
 ## Devices
 
@@ -174,7 +203,7 @@ user's devices answered:
 | the user has no enabled device | `invalid_recipient` |
 | devices exist, but none on a vendor this deployment has a transport for, or the vendor refused the push for a reason no retry repairs | `permanent` |
 | a timeout, a 429 or a 5xx with nothing delivered | `retryable` |
-| no push service registered | refused `transport_not_configured`, `permanent`, as the email and SMS channels answer it |
+| no push service registered, or one with no vendor available (an unbound relay) | suppressed at fan-out as `transport_not_configured`, recorded on the notification; a delivery already queued is refused `transport_not_configured`, `permanent`, as the email and SMS channels answer it |
 
 ## Consumers
 

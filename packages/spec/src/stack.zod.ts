@@ -1139,14 +1139,15 @@ const STACK_DEFINITION_COLLECTIONS_SHAPE = {
    * mount the `push` capability (`requires: ['push']`); nothing reads it
    * without that token. Secrets are named by `credentialRef` (ADR-0143 D3),
    * never written inline: the stack definition is compiled into the published
-   * artifact. Absent reads as `{}`, the hosted relay, which the boot refuses
-   * until the relay sender ships; a direct block is what is served.
+   * artifact. Absent reads as `{}`, the hosted relay, which sends once the
+   * server is bound to the cloud; the boot refuses it only on a deployment that
+   * declared it has no control plane (`OS_CLOUD_URL=off`).
    */
   push: PushServiceConfigSchema.optional()
     .describe(
       'Mobile push configuration, read when requires names push: transport direct with apns and/or fcm blocks, each '
-      + 'naming its secret by credentialRef (never inline). Absent or transport relay is the hosted relay, which the '
-      + 'boot refuses until the relay sender ships',
+      + 'naming its secret by credentialRef (never inline). Absent or transport relay is the hosted relay, which sends '
+      + 'once the server is bound to the cloud and is refused at boot only when OS_CLOUD_URL declares no control plane',
     ),
 
   /**
