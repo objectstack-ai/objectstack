@@ -37,6 +37,7 @@ export const deObjects: NonNullable<TranslationData['objects']> = {
           account_locked: "Konto gesperrt",
           config_change: "Konfigurationsänderung",
           import: "Import",
+          export: "Export",
           platform_admin_standing_change: "Änderung des Plattform-Admin-Status",
           action_invocation: "Aktionsaufruf"
         }

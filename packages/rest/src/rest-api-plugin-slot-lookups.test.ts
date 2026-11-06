@@ -123,6 +123,9 @@ const PROVIDERS = [
   // for, the set the last case compares could not contain it, and the guard
   // read green against ANY binding at this position.
   { index: 20, label: 'tenancyServiceProvider', slot: 'tenancy', scope: 'host' },
+  // [#30955] Appended after it, by the same rule: the ledger's writers, which
+  // the export door records each export through.
+  { index: 21, label: 'auditServiceProvider', slot: 'audit', scope: 'environment' },
 ] as const;
 
 /**
@@ -421,10 +424,11 @@ describe('[#30011] a single-kernel deployment reads the environment-scoped slots
     const { args, ctx } = await boot(services);
 
     // [#30192] `auth`, `i18n`, `settings`, `security` and `metadata` joined
-    // the five #30011 scoped, and [#30218] `objectql`; `tenancy` stays on the
-    // host.
+    // the five #30011 scoped, [#30218] `objectql`, and [#30955] `audit`;
+    // `tenancy` stays on the host.
     expect(ENVIRONMENT_SCOPED.map((p) => p.slot)).toEqual([
       'auth', 'objectql', 'email', 'sharing', 'approvals', 'sharingRules', 'i18n', 'analytics', 'settings', 'security', 'metadata',
+      'audit',
     ]);
     for (const { index, label, slot } of ENVIRONMENT_SCOPED) {
       const provider = args[index] as (environmentId?: string) => Promise<unknown>;

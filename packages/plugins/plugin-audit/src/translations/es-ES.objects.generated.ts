@@ -37,6 +37,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
           account_locked: "Cuenta bloqueada",
           config_change: "Cambio de configuración",
           import: "Importar",
+          export: "Exportar",
           platform_admin_standing_change: "Cambio de acceso de administrador de plataforma",
           action_invocation: "Invocación de acción"
         }
