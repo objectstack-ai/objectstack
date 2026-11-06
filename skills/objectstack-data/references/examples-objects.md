@@ -10,15 +10,15 @@
 - Optional per-group: `icon`, `description`, and `collapse`
   (`'none'` always open · `'expanded'` collapsible, starts open ·
   `'collapsed'` collapsible, starts closed). Groups render identically on forms,
-  modals, and detail pages; for a bespoke single-page layout assign a
-  custom Page instead.
+  modals, and detail pages.
 - Hide a whole group, header included, with `visibleWhen` (CEL over
   `record.*`; FALSE or a fault hides it) or `requiresFeature` (a deployment
-  feature flag from `PUBLIC_AUTH_FEATURES`; an unknown flag is refused). At
-  parse `requiresFeature` is lowered into the group's `visibleWhen` and
-  stripped, AND-combined after an authored `visibleWhen`. Presentation only:
-  the fields stay readable through the API. `sys_organization` hides Parent
-  Organization and Sort Order on one organization:
+  feature flag from `PUBLIC_AUTH_FEATURES` in `@objectstack/spec/kernel`; an
+  unknown flag is refused). At parse `requiresFeature` is lowered into the
+  group's `visibleWhen` and stripped, AND-combined after an authored
+  `visibleWhen`. Presentation only: the fields stay readable through the API.
+  `sys_organization` hides Parent Organization and Sort Order on one
+  organization:
   `{ key: 'group_structure', label: 'Group Structure', requiresFeature: 'multiOrgEnabled' }`.
 
 <!-- os:check -->
