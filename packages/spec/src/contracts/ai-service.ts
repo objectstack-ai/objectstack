@@ -307,8 +307,11 @@ export const AI_ACTION_CONFIRMATION_MEMBER = 'confirm';
  * maintainer's decision, for every object and with no declared flag to
  * consult: `delete_record` (`packages/mcp/src/mcp-http-tools.ts`) refuses
  * EVERY call that does not carry the member as the boolean `true`, before
- * its data bridge is reached, so nothing is read or deleted. The refusal is
- * the one above: the same code and HTTP status, and `error.details` shaped as
+ * its data bridge is reached, so nothing is read or deleted. A non-boolean
+ * member (the string `"true"`, `1`) is refused first by the tool's closed
+ * input schema, with no code and no details, exactly as on `run_action`; an
+ * absent or `false` member reaches the gate, and its refusal is the one above:
+ * the same code and HTTP status, and `error.details` shaped as
  * {@link ActionConfirmationRequiredDetails}, whose `actionName` is the tool's
  * name, `delete_record`. A client that handles the action refusal confirms
  * with its human and retries the same call with the member set.
