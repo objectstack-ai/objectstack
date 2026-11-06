@@ -16,13 +16,6 @@ Metadata-protocol: none
 - **Now.** A call whose `confirm` is not the boolean `true` (absent, `false`, `"true"`) is refused before the data bridge is reached, and nothing is read or deleted. The answer is the refusal `run_action` gives an action whose author declared `ai.requiresConfirmation: true`: an `isError` result whose text is `{ "error": { "code": "ACTION_CONFIRMATION_REQUIRED", "message", "status": 428, "details": { "actionName": "delete_record", "objectName", "confirmationMember": "confirm" } } }`. `delete_record({ objectName, recordId, confirm: true })` deletes as before, under the same exposure, credential and permission checks. The tool schema advertises `confirm` as an optional boolean, and the tool description tells the agent to ask the human first, then retry.
 - **Who moves.** An MCP client or agent that calls `delete_record`. A client that already handles `run_action`'s `ACTION_CONFIRMATION_REQUIRED` (read `details.confirmationMember`, ask the human, resend the same call with that member set to `true`) needs no change.
 
-FROM → TO, for an MCP client that deletes:
-
-```
-delete_record({ objectName: 'crm_lead', recordId: 'lead_1' })                  // was: deleted
-delete_record({ objectName: 'crm_lead', recordId: 'lead_1', confirm: true })   // now: required
-```
-
 **The remedy.** Ask the human in the loop, then send the same `delete_record` call with `confirm: true` added beside `objectName` and `recordId`. The flag asserts an approval; it does not obtain one, and the gate makes forgetting loud without proving a human.
 
 **The bounds, as decided.**
