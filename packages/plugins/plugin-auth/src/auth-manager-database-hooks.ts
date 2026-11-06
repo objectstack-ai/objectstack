@@ -75,7 +75,9 @@ export interface DatabaseHooksHost {
   audienceLogError: AuthManager['audienceLogError'];
   getDataEngine: AuthManager['getDataEngine'];
   isCreatedInThisRequest: AuthManager['isCreatedInThisRequest'];
+  enforceConcurrentCap: AuthManager['enforceConcurrentCap'];
   judgeSessionScoping: AuthManager['judgeSessionScoping'];
+  judgeSessionSwitch: AuthManager['judgeSessionSwitch'];
   linkingContext: AuthManager['linkingContext'];
   logDurabilityDegradation: AuthManager['logDurabilityDegradation'];
   resolveUserAuthGates: AuthManager['resolveUserAuthGates'];
@@ -87,7 +89,7 @@ export interface DatabaseHooksHost {
 
 /** The body of `AuthManager#composeDatabaseHooks`; the method's docblock there is its contract. */
 export function composeDatabaseHooks(
-  this: Pick<DatabaseHooksHost, 'audienceLogError' | 'config' | 'idpLocale' | 'isCreatedInThisRequest' | 'judgeSessionScoping' | 'linkingContext' | 'resolveUserAuthGates' | 'settleMembership' | 'settleSelfRegistrationGrant' | 'stampIdentitySource' | 'takeOwnerVerifiedStamp'>,
+  this: Pick<DatabaseHooksHost, 'audienceLogError' | 'config' | 'idpLocale' | 'enforceConcurrentCap' | 'isCreatedInThisRequest' | 'judgeSessionScoping' | 'judgeSessionSwitch' | 'linkingContext' | 'resolveUserAuthGates' | 'settleMembership' | 'settleSelfRegistrationGrant' | 'stampIdentitySource' | 'takeOwnerVerifiedStamp'>,
   host?: BetterAuthOptions['databaseHooks'],
 ): BetterAuthOptions['databaseHooks'] {
   // A landed link ends a standing unlink record (implicit-account-linking.ts,
@@ -387,15 +389,30 @@ export function composeDatabaseHooks(
         draft = { ...draft, ...(hostResult as any).data };
       }
     }
-    // A switch of the active organization re-scopes the session: judged as
-    // the scoping at creation is (above).
-    if (typeof draft?.activeOrganizationId === 'string' && draft.activeOrganizationId) {
-      const session = ctx?.context?.session;
-      await refuseUnadmittedScoping(
-        draft.userId ?? session?.session?.userId ?? session?.user?.id,
-        draft.activeOrganizationId,
-        ctx,
-      );
+    // A switch of the active organization re-scopes the session, and is judged
+    // against the TARGET organization's policy before the switch lands
+    // (`organization-access-policy.ts`): its IP list, as the scoping at
+    // creation is (above); its idle and absolute limits, from the session row
+    // as it stands — the switch request runs no heartbeat, so nothing refreshes
+    // `last_activity_at` ahead of the judgement — a session past either is
+    // ended in place and the switch refused; then its concurrent cap, counting
+    // this session as scoped to the target.
+    const target = draft?.activeOrganizationId;
+    const current = ctx?.context?.session?.session;
+    if (typeof target === 'string' && target && target !== current?.activeOrganizationId) {
+      const userId = draft.userId ?? current?.userId ?? ctx?.context?.session?.user?.id;
+      await refuseUnadmittedScoping(userId, target, ctx);
+      const sessionId = typeof current?.id === 'string' ? current.id : undefined;
+      if (sessionId) {
+        if ((await this.judgeSessionSwitch(sessionId, target)) === 'ended') {
+          const { APIError } = await import('better-auth/api');
+          throw new APIError('UNAUTHORIZED', {
+            code: 'UNAUTHENTICATED',
+            message: "Your session has ended under this organization's session limits. Sign in again.",
+          });
+        }
+        if (typeof userId === 'string' && userId) await this.enforceConcurrentCap(userId, target, sessionId);
+      }
     }
     const held = holdPrincipalSessionExpiry(draft, ctx);
     if (held) return { data: held };

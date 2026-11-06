@@ -44,7 +44,7 @@ const manifest = {
       label: 'Allowed IP ranges',
       required: false,
       description:
-        "CIDR ranges or exact IPs (one per line, or comma-separated), e.g. 203.0.113.0/24. When set, a member's session is not opened for this organization from outside these ranges, and so is any request whose client address the server cannot establish. Each range must lie inside the deployment's allowed IP ranges, when it sets any, and the list must include the address you save it from. Empty = only the deployment's ranges apply. Platform administrators are held to the deployment's ranges only.",
+        "CIDR ranges or exact IPs (one per line, or comma-separated), e.g. 203.0.113.0/24. When set, a member's session is not opened for this organization from outside these ranges, and a session that comes from outside them later is signed out; so is any request whose client address the server cannot establish. Each range must lie inside the deployment's allowed IP ranges, when it sets any, and the list must include the address you save it from. Empty = only the deployment's ranges apply. Platform administrators are held to the deployment's ranges only.",
     },
     {
       type: 'group',
@@ -84,7 +84,7 @@ const manifest = {
       min: 0,
       max: 100,
       description:
-        "Cap a member's simultaneous signed-in sessions; the oldest are signed out past the cap. No higher than the deployment's cap when it sets one. 0 = the deployment's cap.",
+        "Cap a member's simultaneous signed-in sessions in this organization; the oldest of them are signed out past the cap, and sessions in other organizations are not counted or signed out. Checked at sign-in and when a member switches into this organization. No higher than the deployment's cap when it sets one, which still counts all of a member's sessions. 0 = the deployment's cap only.",
     },
     {
       type: 'group',

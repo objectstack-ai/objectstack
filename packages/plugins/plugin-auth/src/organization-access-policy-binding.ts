@@ -248,12 +248,23 @@ export async function bindOrganizationAccessPolicy(deps: OrganizationAccessPolic
 
   if (typeof settings.registerWritePredicate === 'function') {
     const floor = () => manager.getDeploymentAccessFloor();
-    const selfLockOut = allowedIpRangesWritePredicate(() => manager, { recovery: false });
+    // The saving request's own address must be admitted — unless the saver is
+    // a tenant-level administrator, whom an organization's list never holds
+    // (break-glass): refusing their save would guard against a lock-out that
+    // cannot happen to them.
+    const addressCheck = allowedIpRangesWritePredicate(() => manager, { recovery: false });
+    const selfLockOut = async (input: unknown) => {
+      const refusal = addressCheck(input);
+      if (!refusal || !('clientAddress' in refusal.constraint)) return refusal;
+      const userId = (input as { ctx?: { userId?: unknown } } | undefined)?.ctx?.userId;
+      if (typeof userId === 'string' && userId && (await manager.isTenantLevelAdministrator(userId))) return undefined;
+      return refusal;
+    };
     const enrollment = organizationMfaEnrollmentPredicate(() => manager.isTwoFactorEnabled());
     for (const key of Object.values(ACCESS_POLICY_KEYS)) {
       const base = accessPolicyWritePredicate(floor, key === ACCESS_POLICY_KEYS.allowedIpRanges ? selfLockOut : undefined);
       const predicate =
-        key === ACCESS_POLICY_KEYS.mfaRequired ? (input: unknown) => base(input) ?? enrollment(input) : base;
+        key === ACCESS_POLICY_KEYS.mfaRequired ? async (input: unknown) => (await base(input)) ?? enrollment(input) : base;
       try {
         settings.registerWritePredicate(
           ACCESS_POLICY_NAMESPACE,

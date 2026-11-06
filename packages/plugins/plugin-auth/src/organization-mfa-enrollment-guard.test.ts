@@ -115,6 +115,21 @@ describe('an organization cannot save below the deployment floor', () => {
     expect((await settings.get('access_policy', 'session_idle_timeout_minutes', { tenantId: ORG })).value).toBe(10);
   });
 
+  it('the self-lock-out check refuses a list leaving out the saver\'s address, but not a tenant-level administrator\'s save', async () => {
+    const { settings, manager } = await bound({ plugins: { twoFactor: true } });
+    const outside = { transport: { remoteAddress: '192.0.2.7' } };
+    const admin = vi.spyOn(manager, 'isTenantLevelAdministrator').mockResolvedValue(false);
+    const refused = await refusalOf(
+      settings.setMany('access_policy', { allowed_ip_ranges: '10.1.0.0/16' }, { tenantId: ORG, userId: 'org_admin' }, outside),
+    );
+    expect(refused.fields?.[0]).toMatchObject({ field: 'allowed_ip_ranges', constraint: { clientAddress: '192.0.2.7' } });
+    // The organization's list never holds a tenant-level administrator, so it
+    // cannot lock them out: their save on the organization's behalf passes.
+    admin.mockResolvedValue(true);
+    await settings.setMany('access_policy', { allowed_ip_ranges: '10.1.0.0/16' }, { tenantId: ORG, userId: 'platform_admin' }, outside);
+    expect((await settings.get('access_policy', 'allowed_ip_ranges', { tenantId: ORG })).value).toBe('10.1.0.0/16');
+  });
+
   it('the manager reads each organization\'s saved policy, and drops its cache on a change', async () => {
     const { settings, manager } = await bound({ plugins: { twoFactor: true } });
     await settings.setMany('access_policy', { session_idle_timeout_minutes: 10 }, { tenantId: ORG });

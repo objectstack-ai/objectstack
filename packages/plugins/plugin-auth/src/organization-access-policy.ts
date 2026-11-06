@@ -32,7 +32,8 @@
  *  | key | organization may save | enforced |
  *  |---|---|---|
  *  | `allowed_ip_ranges` | an empty list; or ranges each inside a deployment range (any range when the deployment sets none), one of which admits the saving request's own address | an address must pass the deployment's list AND the organization's |
- *  | `session_idle_timeout_minutes`, `session_absolute_max_hours`, `max_concurrent_sessions_per_user` | `0`; or a positive value no larger than the deployment's (any positive value when the deployment's is `0`) | the smaller positive value of the two; `0` on both is no limit |
+ *  | `session_idle_timeout_minutes`, `session_absolute_max_hours` | `0`; or a positive value no larger than the deployment's (any positive value when the deployment's is `0`) | the smaller positive value of the two; `0` on both is no limit |
+ *  | `max_concurrent_sessions_per_user` | as the two limits above | two caps, each over its own population (below) |
  *  | `mfa_required` | `off`; or a level at least as strong as the deployment's | the stronger level of the two (`off` < `administrators` < `everyone`) |
  *
  * ## Which organization's policy applies
@@ -48,6 +49,45 @@
  * is held to that organization's limits and multi-factor level. Switching the
  * active organization re-scopes the session and is judged the same way.
  *
+ * ## The concurrent cap — two caps, two populations
+ *
+ * The deployment's cap counts EVERY live session of the user, whatever
+ * organization each is scoped to, and ends the oldest past it — its meaning
+ * before organizations had caps, so the floor never loosens. An
+ * organization's own cap counts only the user's sessions scoped to that
+ * organization, and ends only those (oldest first): a sign-in to a strict
+ * organization never evicts a session another organization holds. Both are
+ * swept when a session is scoped to the organization — at the sign-in that
+ * mints it, and at a switch of the active organization, where the switching
+ * session counts as scoped to the target and is kept — so a strict
+ * organization's cap cannot be exceeded by opening sessions elsewhere and
+ * switching them in.
+ *
+ * ## A switch of the active organization
+ *
+ * Judged against the TARGET organization before the switch lands: its IP
+ * list, its idle and absolute limits (from the session row as it stands — the
+ * switch runs no heartbeat, so nothing refreshes `last_activity_at` ahead of
+ * the judgement; idle is the session's own inactivity, so activity in another
+ * organization is activity), and its concurrent cap. A session past either
+ * limit is ended in place (the ADR-0069 D4 revocation) and the switch refused.
+ *
+ * ## A roaming session
+ *
+ * The organization's IP list is judged again on every request that comes
+ * through the HTTP auth door (the session read, `customSession`), with the
+ * address that door established: a session the list no longer admits — it
+ * roamed, or the list was tightened — is ended in place like one past its idle
+ * limit. Data requests are judged by neither list, as before.
+ *
+ * ## Staleness
+ *
+ * An organization's policy is read per request through a 30-second cache
+ * (`ORG_ACCESS_POLICY_TTL_MS`), dropped on this process's `access_policy`
+ * change event; another node applies a changed policy up to 30 seconds late
+ * (the "any organization requires MFA" flag, up to 60), the same window the
+ * deployment's `auth` keys already have.
+ *
  * ## Break-glass
  *
  * An organization's network list never holds a tenant-level administrator
@@ -58,7 +98,8 @@
  * last-administrator guard (cloud ADR-0024 D5.2). The save check
  * ({@link accessPolicyFloorRefusal}) refuses a list that leaves out the saving
  * request's own address, so the administrator who saves is never the one it
- * locks out.
+ * locks out — and does not refuse a tenant-level administrator's save, whom
+ * the list never holds.
  */
 
 import { resolveLocale } from '@objectstack/core';
@@ -429,9 +470,12 @@ interface AccessPolicyWriteInput {
  */
 export function accessPolicyWritePredicate(
   floor: () => DeploymentAccessFloor | undefined,
-  selfLockOut?: (input: unknown) => { message: string; constraint: object } | undefined,
-): (input: unknown) => AccessPolicyRefusal | undefined {
-  return (input) => {
+  selfLockOut?: (input: unknown) =>
+    | { message: string; constraint: object }
+    | undefined
+    | Promise<{ message: string; constraint: object } | undefined>,
+): (input: unknown) => Promise<AccessPolicyRefusal | undefined> {
+  return async (input) => {
     const { key, next, locale } = (input ?? {}) as AccessPolicyWriteInput;
     const current = floor();
     if (current) {
@@ -439,7 +483,7 @@ export function accessPolicyWritePredicate(
       if (refusal) return refusal;
     }
     if (key === ACCESS_POLICY_KEYS.allowedIpRanges && selfLockOut) {
-      const refusal = selfLockOut(input);
+      const refusal = await selfLockOut(input);
       return refusal ? { message: refusal.message, constraint: { ...refusal.constraint } } : undefined;
     }
     return undefined;

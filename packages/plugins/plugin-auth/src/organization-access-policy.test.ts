@@ -92,18 +92,18 @@ describe('the floor, per key', () => {
     expect(refusal?.message).not.toMatch(/deployment/);
   });
 
-  it('the save check refuses an organization list that leaves out the saving address', () => {
+  it('the save check refuses an organization list that leaves out the saving address', async () => {
     const manager = { resolveClientAddress: (t: { remoteAddress?: string }) => t.remoteAddress };
     const predicate = accessPolicyWritePredicate(
       () => ({ allowedIpRanges: [] }),
       allowedIpRangesWritePredicate(() => manager, { recovery: false }),
     );
-    const refusal = predicate({ key: 'allowed_ip_ranges', next: '10.1.0.0/16', transport: { remoteAddress: '192.0.2.7' } });
+    const refusal = await predicate({ key: 'allowed_ip_ranges', next: '10.1.0.0/16', transport: { remoteAddress: '192.0.2.7' } });
     expect(refusal?.constraint).toEqual({ clientAddress: '192.0.2.7' });
     // The env-override way back reopens only the deployment's list, so an
     // organization's refusal does not name it.
     expect(refusal?.message).not.toContain('OS_AUTH_ALLOWED_IP_RANGES');
-    expect(predicate({ key: 'allowed_ip_ranges', next: '10.1.0.0/16', transport: { remoteAddress: '10.1.2.3' } }))
+    expect(await predicate({ key: 'allowed_ip_ranges', next: '10.1.0.0/16', transport: { remoteAddress: '10.1.2.3' } }))
       .toBeUndefined();
   });
 });
@@ -305,5 +305,128 @@ describe('two organizations, each policy enforced on its own members', () => {
     };
     expect(await alive(alice, IN_A)).toBe(false);
     expect(await alive(bob, IN_B)).toBe(true);
+  });
+
+  it('a session the organization\'s list no longer admits is ended on its next auth-door read (roaming)', async () => {
+    const { manager } = await twoOrganizationDeployment();
+    const alice = cookieFrom(await signIn(manager, 'alice@alpha.test', IN_A));
+    const read = (address: string) =>
+      manager.handleRequest(
+        new Request('http://localhost:3000/api/v1/auth/get-session', { headers: { cookie: alice } }),
+        { remoteAddress: address },
+      );
+    const alive = async (address: string) => {
+      const res = await read(address);
+      if (res.status !== 200) return false;
+      return Boolean(((await res.json().catch(() => null)) as any)?.user?.id);
+    };
+    expect(await alive(IN_A)).toBe(true);
+    // From outside Alpha's ranges: the detecting read ends the session in place…
+    await read(IN_B);
+    // …and it stays ended, even back inside the ranges.
+    expect(await alive(IN_A)).toBe(false);
+  });
+});
+
+// ───────────────────────────────────────────────────────────────────────────
+// The concurrent cap and the active-organization switch
+// ───────────────────────────────────────────────────────────────────────────
+
+describe('the concurrent cap: the deployment counts every session, an organization its own', () => {
+  const MIN = 60_000;
+  async function withSessions(config: Record<string, unknown>, policies: Record<string, Record<string, unknown>>) {
+    const engine = createMemoryEngine();
+    const manager = new AuthManager({ secret: SECRET, baseUrl: 'http://localhost:3000', dataEngine: engine, ...config } as any);
+    manager.setOrganizationAccessPolicySource({ read: async (id) => policies[id] ?? {}, anyOrganizationRequiresMfa: async () => false });
+    const now = Date.now();
+    const add = (id: string, org: string, minutesAgo: number) =>
+      engine.insert('sys_session', {
+        id, user_id: 'u1', active_organization_id: org,
+        created_at: new Date(now - minutesAgo * MIN), last_activity_at: new Date(now - minutesAgo * MIN),
+        expires_at: new Date(now + 60 * MIN),
+      });
+    return { engine, manager, add };
+  }
+  const revoked = (engine: any) =>
+    ((engine.tables.get('sys_session') ?? []) as any[]).filter((r) => r.revoked_at).map((r) => r.id).sort();
+
+  it('an organization cap ends only that organization\'s oldest sessions, never another organization\'s', async () => {
+    const { engine, manager, add } = await withSessions({}, { [ORG_A]: { max_concurrent_sessions_per_user: 1 } });
+    await add('b_old', ORG_B, 50);
+    await add('a_old', ORG_A, 40);
+    await add('a_new', ORG_A, 1);
+    await (manager as any).enforceConcurrentCap('u1', ORG_A, 'a_new');
+    expect(revoked(engine)).toEqual(['a_old']);
+  });
+
+  it('a switch into a strict organization is swept with the switching session kept', async () => {
+    const { engine, manager, add } = await withSessions({}, { [ORG_A]: { max_concurrent_sessions_per_user: 1 } });
+    await add('a_newer', ORG_A, 5);
+    await add('b_switching', ORG_B, 30); // older, and switching into Alpha
+    await (manager as any).enforceConcurrentCap('u1', ORG_A, 'b_switching');
+    expect(revoked(engine)).toEqual(['a_newer']);
+  });
+
+  it('the deployment cap still counts every session, whatever organization', async () => {
+    const { engine, manager, add } = await withSessions({ maxConcurrentSessions: 2 }, {});
+    await add('a1', ORG_A, 30);
+    await add('b1', ORG_B, 20);
+    await add('a2', ORG_A, 1);
+    await (manager as any).enforceConcurrentCap('u1', ORG_A, 'a2');
+    expect(revoked(engine)).toEqual(['a1']);
+  });
+});
+
+describe('a switch of the active organization is judged against the target\'s limits', () => {
+  const MIN = 60_000;
+  async function deployment(policies: Record<string, Record<string, unknown>>) {
+    const engine = createMemoryEngine();
+    const manager = new AuthManager({ secret: SECRET, baseUrl: 'http://localhost:3000', dataEngine: engine } as any);
+    manager.setOrganizationAccessPolicySource({ read: async (id) => policies[id] ?? {}, anyOrganizationRequiresMfa: async () => false });
+    await engine.insert('sys_session', {
+      id: 's1', user_id: 'u1', active_organization_id: ORG_B,
+      created_at: new Date(Date.now() - 60 * MIN), last_activity_at: new Date(Date.now() - 30 * MIN),
+      expires_at: new Date(Date.now() + 60 * MIN),
+    });
+    return { engine, manager };
+  }
+  const row = (engine: any) => ((engine.tables.get('sys_session') ?? []) as any[]).find((r) => r.id === 's1');
+
+  it('a session idle past the target\'s idle limit is ended and the switch refused; last activity is not refreshed first', async () => {
+    const { engine, manager } = await deployment({ [ORG_A]: { session_idle_timeout_minutes: 10 } });
+    const lastBefore = row(engine).last_activity_at;
+    const hooks: any = (manager as any).composeDatabaseHooks();
+    const ctx = { context: { session: { session: { id: 's1', userId: 'u1', activeOrganizationId: ORG_B }, user: { id: 'u1' } } } };
+    const refused = await hooks.session.update.before({ activeOrganizationId: ORG_A }, ctx).then(() => undefined, (e: any) => e);
+    expect(refused?.body?.code ?? refused?.code).toBe('UNAUTHENTICATED');
+    expect(row(engine).revoke_reason).toBe('idle_timeout');
+    expect(row(engine).last_activity_at).toEqual(lastBefore);
+  });
+
+  it('the absolute limit is judged too, and a target with no limits admits the switch', async () => {
+    const { engine, manager } = await deployment({ [ORG_A]: { session_absolute_max_hours: 0 }, [ORG_B]: {} });
+    expect(await manager.judgeSessionSwitch('s1', ORG_A)).toBe('admitted');
+    expect(row(engine).revoked_at).toBeUndefined();
+    const strict = await deployment({ [ORG_A]: { session_absolute_max_hours: 1 } });
+    // 60 minutes old against a one-hour limit: not over yet.
+    expect(await strict.manager.judgeSessionSwitch('s1', ORG_A)).toBe('admitted');
+    row(strict.engine).created_at = new Date(Date.now() - 61 * MIN);
+    expect(await strict.manager.judgeSessionSwitch('s1', ORG_A)).toBe('ended');
+    expect(row(strict.engine).revoke_reason).toBe('absolute_max');
+  });
+});
+
+describe('the retired mfaRequired option is refused, never dropped', () => {
+  it('at construction, naming the replacement', () => {
+    expect(() => new AuthManager({ secret: SECRET, baseUrl: 'http://localhost:3000', mfaRequired: true } as any))
+      .toThrow(/mfaRequired option was retired.*mfaRequirement: 'everyone'/);
+    expect(() => new AuthManager({ secret: SECRET, baseUrl: 'http://localhost:3000', mfaRequirement: 'all' } as any))
+      .toThrow(/invalid mfaRequirement "all"/);
+  });
+
+  it('on a config patch', () => {
+    const manager = new AuthManager({ secret: SECRET, baseUrl: 'http://localhost:3000', mfaRequirement: 'administrators' } as any);
+    expect(() => manager.applyConfigPatch({ mfaRequired: false } as any)).toThrow(/mfaRequired option was retired/);
+    expect(manager.getDeploymentAccessFloor().mfaRequirement).toBe('administrators');
   });
 });

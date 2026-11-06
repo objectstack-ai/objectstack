@@ -66,6 +66,7 @@ export interface PasswordSessionPolicyHost {
   getDataEngine: AuthManager['getDataEngine'];
   getOrganizationAccessPolicy: AuthManager['getOrganizationAccessPolicy'];
   isMfaAdministrator: AuthManager['isMfaAdministrator'];
+  judgeSessionScoping: AuthManager['judgeSessionScoping'];
   isTwoFactorEnabled: AuthManager['isTwoFactorEnabled'];
   logDurabilityDegradation: AuthManager['logDurabilityDegradation'];
   noteMfaRequirementWithoutEnrollment: AuthManager['noteMfaRequirementWithoutEnrollment'];
@@ -615,20 +616,31 @@ function sessionHeartbeatMemoFor(engine: object): SessionHeartbeatMemo {
 }
 
 /** The body of `AuthManager#enforceSessionControls`; the method's docblock there is its contract. */
-export async function enforceSessionControls(this: Pick<PasswordSessionPolicyHost, 'config' | 'getDataEngine' | 'getOrganizationAccessPolicy' | 'logDurabilityDegradation'>, sessionId: string | undefined, createdAtHint: unknown, organizationId?: string): Promise<void> {
+export async function enforceSessionControls(
+  this: Pick<PasswordSessionPolicyHost, 'config' | 'getDataEngine' | 'getOrganizationAccessPolicy' | 'judgeSessionScoping' | 'logDurabilityDegradation'>,
+  sessionId: string | undefined,
+  createdAtHint: unknown,
+  organizationId?: string,
+  door?: { address: string | undefined },
+): Promise<void> {
   // [ADR-0069 TL;DR 6] The limits in force for this session: the shorter of
   // the deployment's and those of the organization it is scoped to.
-  const limits = effectiveSessionLimits(
-    this.config,
-    await this.getOrganizationAccessPolicy(organizationId),
-  );
+  const organization = await this.getOrganizationAccessPolicy(organizationId);
+  const limits = effectiveSessionLimits(this.config, organization);
   const idleMin = limits.idleMinutes;
   const absHrs = limits.absoluteHours;
+  // [ADR-0069 TL;DR 6, D5] On a request through the HTTP auth door (`door`,
+  // carrying the address that door established), the organization's own IP
+  // list is judged again, so a session that roams outside a list — or that a
+  // tightened list no longer admits — is ended in place like one past its
+  // idle limit; the next request is anonymous, and a new sign-in from there
+  // is refused at the scoping (`judgeSessionScoping`).
+  const judgesAddress = !!door && !!organizationId && organization.allowedIpRanges.length > 0;
   // [#25343] Both limits off no longer returns here: `last_activity_at` is
   // "the last request on this session" on every deployment, not only where an
   // idle timeout reads it (ruling 6358844136, letter A). What both-off buys
   // instead is the memo below, so the added read is throttled like the write.
-  const limitsOff = idleMin <= 0 && absHrs <= 0;
+  const limitsOff = idleMin <= 0 && absHrs <= 0 && !judgesAddress;
   const engine = this.getDataEngine();
   if (!engine || !sessionId) return;
   const memo = limitsOff ? sessionHeartbeatMemoFor(engine) : undefined;
@@ -637,14 +649,18 @@ export async function enforceSessionControls(this: Pick<PasswordSessionPolicyHos
     const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] };
     const srow = await engine.findOne('sys_session', {
       where: { id: sessionId },
-      fields: ['id', 'created_at', 'last_activity_at', 'revoked_at'],
+      fields: ['id', 'user_id', 'created_at', 'last_activity_at', 'revoked_at'],
       context: SYSTEM_CTX,
     });
     const now = Date.now();
     memo?.note(sessionId, now);
     if (!srow?.id || srow.revoked_at) return;
     let reason: string | undefined;
-    if (absHrs > 0) {
+    if (judgesAddress && typeof srow.user_id === 'string'
+      && (await this.judgeSessionScoping(srow.user_id, organizationId!, door!.address)) === 'refused') {
+      reason = 'ip_not_allowed';
+    }
+    if (!reason && absHrs > 0) {
       const created = srow.created_at ?? createdAtHint;
       if (created && now - new Date(created as any).getTime() > absHrs * 3_600_000) reason = 'absolute_max';
     }
@@ -659,7 +675,7 @@ export async function enforceSessionControls(this: Pick<PasswordSessionPolicyHos
       // that IS over its limit fully live.
       await engine.update(
         'sys_session',
-        { id: sessionId, expires_at: new Date(now - 1000), revoked_at: new Date(now), revoke_reason: reason },
+        { id: sessionId, expires_at: new Date(now - 1000), revoked_at: new Date(now), revoke_reason: 'concurrent_cap' },
         { context: SYSTEM_CTX } as any,
       ).catch((e: unknown) => this.logDurabilityDegradation(
         'AuthManager: a session that exceeded its configured limit was NOT revoked — the '
@@ -718,31 +734,59 @@ export async function enforceSessionControls(this: Pick<PasswordSessionPolicyHos
 }
 
 /** The body of `AuthManager#enforceConcurrentCap`; the method's docblock there is its contract. */
-export async function enforceConcurrentCap(this: Pick<PasswordSessionPolicyHost, 'config' | 'getDataEngine' | 'getOrganizationAccessPolicy' | 'logDurabilityDegradation'>, userId: string, organizationId?: string): Promise<void> {
-  // [ADR-0069 TL;DR 6] The cap in force: the smaller of the deployment's and
-  // that of the organization the new session is scoped to.
-  const cap = effectiveSessionLimits(this.config, await this.getOrganizationAccessPolicy(organizationId)).concurrent;
-  if (cap <= 0 || !userId) return;
+export async function enforceConcurrentCap(
+  this: Pick<PasswordSessionPolicyHost, 'config' | 'getDataEngine' | 'getOrganizationAccessPolicy' | 'logDurabilityDegradation'>,
+  userId: string,
+  organizationId?: string,
+  keepSessionId?: string,
+): Promise<void> {
+  // [ADR-0069 TL;DR 6] Two caps, each counting its own population
+  // (`organization-access-policy.ts`, "The concurrent cap"):
+  //  - the deployment's counts EVERY live session of the user, whatever
+  //    organization each is scoped to — its meaning before organizations had
+  //    caps, so the floor never loosens;
+  //  - the organization's own counts only the user's sessions scoped to that
+  //    organization, and ends only those — a strict organization never evicts
+  //    another organization's sessions.
+  // `keepSessionId` is the session this sweep runs for (the new one at sign-in,
+  // the switching one at an active-organization switch): it counts as scoped
+  // to `organizationId` and is kept, the oldest others are ended first.
+  const deploymentCap = Math.max(0, Math.floor(Number(this.config.maxConcurrentSessions) || 0));
+  const organizationCap = organizationId
+    ? (await this.getOrganizationAccessPolicy(organizationId)).maxConcurrentSessions
+    : 0;
+  if ((deploymentCap <= 0 && organizationCap <= 0) || !userId) return;
   const engine = this.getDataEngine();
   if (!engine) return;
   try {
     const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] };
     const rows = await engine.find('sys_session', {
       where: { user_id: userId },
-      fields: ['id', 'created_at', 'expires_at', 'revoked_at'],
+      fields: ['id', 'created_at', 'expires_at', 'revoked_at', 'active_organization_id'],
       limit: 200,
       context: SYSTEM_CTX,
     });
     const now = Date.now();
+    const keptFirst = (a: any, b: any) =>
+      (b.id === keepSessionId ? 1 : 0) - (a.id === keepSessionId ? 1 : 0)
+      || new Date(b.created_at ?? 0).getTime() - new Date(a.created_at ?? 0).getTime();
     const live = (Array.isArray(rows) ? rows : [])
       .filter((sn: any) => !sn.revoked_at && (!sn.expires_at || new Date(sn.expires_at).getTime() > now))
-      .sort((a: any, b: any) => new Date(b.created_at ?? 0).getTime() - new Date(a.created_at ?? 0).getTime());
-    for (const sn of live.slice(cap)) {
+      .sort(keptFirst);
+    const over: any[] = deploymentCap > 0 ? live.slice(deploymentCap) : [];
+    if (organizationCap > 0) {
+      const ended = new Set(over.map((sn: any) => sn.id));
+      const scoped = live.filter(
+        (sn: any) => !ended.has(sn.id) && (sn.id === keepSessionId || sn.active_organization_id === organizationId),
+      );
+      over.push(...scoped.slice(organizationCap));
+    }
+    for (const sn of over) {
       // [#12981] Per-session `.catch` so one refused revocation does not
       // abandon the rest of the sweep — but it reports instead of swallowing.
       await engine.update(
         'sys_session',
-        { id: sn.id, expires_at: new Date(now - 1000), revoked_at: new Date(now), revoke_reason: 'concurrent_cap' },
+        { id: sn.id, expires_at: new Date(now - 1000), revoked_at: new Date(now), revoke_reason: reason },
         { context: SYSTEM_CTX } as any,
       ).catch((e: unknown) => this.logDurabilityDegradation(
         'AuthManager: a session over the concurrent-session cap was NOT revoked — the sign-in '
@@ -752,7 +796,7 @@ export async function enforceConcurrentCap(this: Pick<PasswordSessionPolicyHost,
           + 'session, not enforced. Remedy: make the sys_session update land; the sweep re-runs '
           + 'on this user\'s next sign-in and will try this row again.',
         e,
-        { object: 'sys_session', sessionId: sn.id, cap, userId },
+        { object: 'sys_session', sessionId: sn.id, cap: deploymentCap, organizationCap, organizationId, userId },
       ));
     }
   } catch (e) {
@@ -766,7 +810,7 @@ export async function enforceConcurrentCap(this: Pick<PasswordSessionPolicyHost,
         + 'so check driver connectivity and read permission on sys_session; the sweep re-runs '
         + 'on the next sign-in.',
       e,
-      { object: 'sys_session', userId, cap },
+      { object: 'sys_session', userId, cap: deploymentCap, organizationCap, organizationId },
     );
   }
 }

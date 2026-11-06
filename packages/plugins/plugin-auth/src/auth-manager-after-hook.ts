@@ -171,7 +171,12 @@ export async function globalAfterHook(this: AfterHookHost, ctx: any) {
         // deployment's.
         const scopedOrg = ctx?.context?.newSession?.session?.activeOrganizationId;
         if (typeof uid === 'string') {
-          await this.enforceConcurrentCap(uid, typeof scopedOrg === 'string' && scopedOrg ? scopedOrg : undefined);
+          const newSessionId = ctx?.context?.newSession?.session?.id;
+          await this.enforceConcurrentCap(
+            uid,
+            typeof scopedOrg === 'string' && scopedOrg ? scopedOrg : undefined,
+            typeof newSessionId === 'string' ? newSessionId : undefined,
+          );
         }
         // ADR-0069 D7 — login audit: stamp last_login_at/ip on success.
         // Independent of lockout config (recordSignInOutcome no-ops when

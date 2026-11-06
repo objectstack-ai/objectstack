@@ -260,17 +260,20 @@ describe('#17647 — Connect-an-Agent visibility: BOTH halves, over the wire', (
         // The Setup tree the platform admin is served BY THIS COMPOSITION: 9
         // authored groups less `group_approvals` and `group_integrations`,
         // which nothing in it contributes into and the filter collapses, plus
-        // the 23 entries `SETUP_NAV_CONTRIBUTIONS` carries, plus the MCP one.
+        // the 24 entries `SETUP_NAV_CONTRIBUTIONS` carries, plus the MCP one.
         // (25 until #25098 moved the unfiltered Packages entry to Studio; 24
         // until #30204 removed the Feature Flags entry with its namespace; 32
         // until #30895 moved the MCP entry out of `group_integrations`, the
-        // one entry this composition put there.)
+        // one entry this composition put there; 31 until the organization
+        // Access policy entry, `nav_settings_access_policy`, joined
+        // Configuration.)
         // `nav_settings_branding` is not among them, and not because of a
         // tenancy wall (this harness boots none): since #24766 it is
         // contributed by `@objectstack/service-settings` together with the
         // `branding` namespace, offered only where no organization wall stands,
         // and this harness composes platform-objects and the MCP bundle alone.
-        expect(allowedIds).toHaveLength(31);
+        expect(allowedIds).toHaveLength(32);
+        expect(allowedIds).toContain('nav_settings_access_policy');
         expect(allowedIds).not.toContain('nav_settings_branding');
         // The two per-user stores are reached from the User record page, not
         // from Setup's menu (#23803).
@@ -293,8 +296,8 @@ describe('#17647 — Connect-an-Agent visibility: BOTH halves, over the wire', (
         expect(withAccountHalf.statusCode).toBe(200);
         expect(withoutAccountHalf.statusCode).toBe(200);
         expect(navIds(withAccountHalf.body?.item)).toEqual(navIds(withoutAccountHalf.body?.item));
-        // 31: the composition the count in the test above states.
-        expect(navIds(withAccountHalf.body?.item)).toHaveLength(31);
+        // 32: the composition the count in the test above states.
+        expect(navIds(withAccountHalf.body?.item)).toHaveLength(32);
 
         // The mechanism behind the invariance, asserted rather than assumed:
         // the bundle aims exactly one contribution at `setup` and one at

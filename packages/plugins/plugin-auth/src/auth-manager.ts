@@ -42,6 +42,8 @@ import {
 } from '@objectstack/core';
 import type { AuthGate } from '@objectstack/core';
 import {
+  effectiveSessionLimits,
+  isMfaRequirementLevel,
   judgeSessionScopingAddress,
   readOrganizationAccessPolicy,
   type DeploymentAccessFloor,
@@ -1316,6 +1318,29 @@ export function unreadableIpRangeEntries<T>(entries: readonly T[]): T[] {
  * deployment would boot with a gate that admits nobody the entry was written
  * for, and say nothing.
  */
+/**
+ * [ADR-0069 D3, ruling 「可以，按三档做（推荐）」] Refuse the retired
+ * `mfaRequired` option and an `mfaRequirement` that is not one of the three
+ * levels, at construction and on every `applyConfigPatch`. The option became a
+ * level; a host still passing the boolean would otherwise run unheld, silently.
+ */
+export function assertMfaRequirementOptions(config: object): void {
+  if (Object.prototype.hasOwnProperty.call(config, 'mfaRequired') && (config as { mfaRequired?: unknown }).mfaRequired !== undefined) {
+    const was = (config as { mfaRequired?: unknown }).mfaRequired;
+    throw new Error(
+      `[auth] the mfaRequired option was retired (got ${JSON.stringify(was)}): multi-factor authentication is ` +
+        "required by level now. Pass mfaRequirement: 'everyone' for what mfaRequired: true meant, " +
+        "'administrators' for administrators only, or 'off'.",
+    );
+  }
+  const level = (config as { mfaRequirement?: unknown }).mfaRequirement;
+  if (level !== undefined && !isMfaRequirementLevel(level)) {
+    throw new Error(
+      `[auth] invalid mfaRequirement ${JSON.stringify(level)}: it is one of 'off', 'administrators' or 'everyone'.`,
+    );
+  }
+}
+
 export function assertAllowedIpRanges(configured: unknown): void {
   if (configured === undefined || configured === null) return;
   if (!Array.isArray(configured)) {
@@ -1837,6 +1862,10 @@ export class AuthManager {
     // matches no address at the gate instead (`ipMatchesRange`), and the
     // binding names it.
     assertAllowedIpRanges(config.allowedIpRanges);
+    // [ADR-0069 D3] The retired boolean MFA option is refused, never dropped:
+    // dropped, a host that still passes it would run with no requirement and
+    // nothing would say so (`assertMfaRequirementOptions`).
+    assertMfaRequirementOptions(config);
 
     // WebContainer (StackBlitz) compatibility — install a synchronous
     // AsyncLocalStorage polyfill for better-auth's request-state global
@@ -2257,6 +2286,7 @@ export class AuthManager {
       requireEmailVerificationFrom?: VerificationDeclarant;
     } = {},
   ): void {
+    assertMfaRequirementOptions(patch);
     const next: AuthManagerOptions = {
       ...this.config,
       ...patch,
@@ -5407,12 +5437,14 @@ export class AuthManager {
     // [#25224 cut 4] The body moved to `auth-manager-database-hooks.ts` (see `DatabaseHooksHost`).
     const readConfig = () => this.config;
     const readIdpLocale = () => this.idpLocale;
-    const hookHost: Pick<DatabaseHooksHost, 'audienceLogError' | 'config' | 'idpLocale' | 'isCreatedInThisRequest' | 'judgeSessionScoping' | 'linkingContext' | 'resolveUserAuthGates' | 'settleMembership' | 'settleSelfRegistrationGrant' | 'stampIdentitySource' | 'takeOwnerVerifiedStamp'> = {
+    const hookHost: Pick<DatabaseHooksHost, 'audienceLogError' | 'config' | 'idpLocale' | 'enforceConcurrentCap' | 'isCreatedInThisRequest' | 'judgeSessionScoping' | 'judgeSessionSwitch' | 'linkingContext' | 'resolveUserAuthGates' | 'settleMembership' | 'settleSelfRegistrationGrant' | 'stampIdentitySource' | 'takeOwnerVerifiedStamp'> = {
       audienceLogError: (...a) => this.audienceLogError(...a),
       get config() { return readConfig(); },
       get idpLocale() { return readIdpLocale(); },
       isCreatedInThisRequest: (...a) => this.isCreatedInThisRequest(...a),
+      enforceConcurrentCap: (...a) => this.enforceConcurrentCap(...a),
       judgeSessionScoping: (...a) => this.judgeSessionScoping(...a),
+      judgeSessionSwitch: (...a) => this.judgeSessionSwitch(...a),
       linkingContext: (...a) => this.linkingContext(...a),
       resolveUserAuthGates: (...a) => this.resolveUserAuthGates(...a),
       settleMembership: (...a) => this.settleMembership(...a),
@@ -6181,16 +6213,18 @@ export class AuthManager {
     sessionId: string | undefined,
     createdAtHint: unknown,
     organizationId?: string,
+    door?: { address: string | undefined },
   ): Promise<void> {
     // [#25224 cut 3] The body moved to `auth-manager-password-session-policy.ts` (see `PasswordSessionPolicyHost`).
     const readConfig = () => this.config;
-    const host: Pick<PasswordSessionPolicyHost, 'config' | 'getDataEngine' | 'getOrganizationAccessPolicy' | 'logDurabilityDegradation'> = {
+    const host: Pick<PasswordSessionPolicyHost, 'config' | 'getDataEngine' | 'getOrganizationAccessPolicy' | 'judgeSessionScoping' | 'logDurabilityDegradation'> = {
       get config() { return readConfig(); },
       getDataEngine: (...a) => this.getDataEngine(...a),
       getOrganizationAccessPolicy: (...a) => this.getOrganizationAccessPolicy(...a),
+      judgeSessionScoping: (...a) => this.judgeSessionScoping(...a),
       logDurabilityDegradation: (...a) => this.logDurabilityDegradation(...a),
     };
-    return enforceSessionControls.call(host, sessionId, createdAtHint, organizationId);
+    return enforceSessionControls.call(host, sessionId, createdAtHint, organizationId, door);
   }
 
   /**
@@ -6198,7 +6232,7 @@ export class AuthManager {
    * Keeps the newest `maxConcurrentSessions` live sessions for the user and
    * revokes the rest (oldest first). No-op when off. Best-effort.
    */
-  private enforceConcurrentCap(userId: string, organizationId?: string): Promise<void> {
+  private enforceConcurrentCap(userId: string, organizationId?: string, keepSessionId?: string): Promise<void> {
     // [#25224 cut 3] The body moved to `auth-manager-password-session-policy.ts` (see `PasswordSessionPolicyHost`).
     const readConfig = () => this.config;
     const host: Pick<PasswordSessionPolicyHost, 'config' | 'getDataEngine' | 'getOrganizationAccessPolicy' | 'logDurabilityDegradation'> = {
@@ -6207,7 +6241,63 @@ export class AuthManager {
       getOrganizationAccessPolicy: (...a) => this.getOrganizationAccessPolicy(...a),
       logDurabilityDegradation: (...a) => this.logDurabilityDegradation(...a),
     };
-    return enforceConcurrentCap.call(host, userId, organizationId);
+    return enforceConcurrentCap.call(host, userId, organizationId, keepSessionId);
+  }
+
+  /**
+   * @internal Package-internal: asked by the session update hook when a
+   * session switches its active organization; not a supported entry point.
+   *
+   * [ADR-0069 TL;DR 6, D4] May session `sessionId` enter `organizationId`
+   * under that organization's idle and absolute limits (the shorter of the
+   * deployment's and the organization's)? Judged from the session row as it
+   * stands, BEFORE the switch: the switch request runs no heartbeat, so
+   * `last_activity_at` is the session's last request in whatever organization
+   * it was scoped to — idle is the session's own inactivity, and activity in
+   * another organization is activity. A session past either limit is ended in
+   * place (the D4 revocation: `expires_at` into the past, `revoked_at`,
+   * `revoke_reason`), and the answer is `'ended'`; the hook then refuses the
+   * switch. `'admitted'` otherwise, and on a lookup that fails (the next request
+   * in the organization judges the same limits again, `enforceSessionControls`).
+   */
+  public async judgeSessionSwitch(sessionId: string, organizationId: string): Promise<'admitted' | 'ended'> {
+    const limits = effectiveSessionLimits(this.config, await this.getOrganizationAccessPolicy(organizationId));
+    if (limits.idleMinutes <= 0 && limits.absoluteHours <= 0) return 'admitted';
+    const engine = this.getDataEngine();
+    if (!engine) return 'admitted';
+    const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] };
+    let row: any;
+    try {
+      row = await engine.findOne('sys_session', {
+        where: { id: sessionId },
+        fields: ['id', 'created_at', 'last_activity_at', 'revoked_at'],
+        context: SYSTEM_CTX,
+      } as any);
+    } catch {
+      return 'admitted';
+    }
+    if (!row?.id || row.revoked_at) return 'admitted';
+    const now = Date.now();
+    let reason: string | undefined;
+    if (limits.absoluteHours > 0 && row.created_at
+      && now - new Date(row.created_at).getTime() > limits.absoluteHours * 3_600_000) reason = 'absolute_max';
+    const last = row.last_activity_at ?? row.created_at;
+    if (!reason && limits.idleMinutes > 0 && last
+      && now - new Date(last).getTime() > limits.idleMinutes * 60_000) reason = 'idle_timeout';
+    if (!reason) return 'admitted';
+    await (engine as any).update(
+      'sys_session',
+      { id: sessionId, expires_at: new Date(now - 1000), revoked_at: new Date(now), revoke_reason: reason },
+      { context: SYSTEM_CTX },
+    ).catch((e: unknown) => this.logDurabilityDegradation(
+      'AuthManager: a session that switched into an organization past that organization\'s session limit was NOT '
+        + 'revoked — the revocation write was refused. The switch itself is refused, so the session does not enter '
+        + 'the organization, but it stays live where it was. Remedy: make the sys_session update land; the limits '
+        + 'are judged again on the next switch and on every request in that organization.',
+      e,
+      { object: 'sys_session', sessionId, reason, organizationId },
+    ));
+    return 'ended';
   }
 
   /**
@@ -6307,6 +6397,18 @@ export class AuthManager {
       organization: await this.getOrganizationAccessPolicy(organizationId),
       isPlatformAdmin: () => this.isPlatformAdminUserId(userId),
     });
+  }
+
+  /**
+   * @internal Package-internal: asked by the `access_policy.allowed_ip_ranges`
+   * save check; not a supported entry point.
+   *
+   * Is `userId` a tenant-level administrator (ADR-0090 D12 kind 1) — the one
+   * an organization's IP list never holds? The same predicate the session
+   * scoping asks (`judgeSessionScoping`).
+   */
+  public isTenantLevelAdministrator(userId: string): Promise<boolean> {
+    return this.isPlatformAdminUserId(userId);
   }
 
   /**
