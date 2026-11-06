@@ -63,8 +63,12 @@ afterAll(() => {
 
 /** `registry.registerObject` requires a package id (see the sibling real-stack tests). */
 const TEST_PACKAGE_ID = 'objectstack-test';
-/** The base: an installed app the customer cannot author into (a platform scope). */
-const BASE = { id: 'com.acme.crm', name: 'CRM', version: '3.4.1', type: 'app', namespace: 'crm', scope: 'system' };
+/**
+ * The base: an installed app the customer cannot author into — held as code,
+ * the way an installed app's packages are. Not a `system` scope: that is the
+ * kernel's, which has no pair in this version (ruling record 6691217245).
+ */
+const BASE = { id: 'com.acme.crm', name: 'CRM', version: '3.4.1', type: 'app', namespace: 'crm' };
 const PAIR = 'com.acme.crm.custom';
 /** A writable package that depends on the base: a legal explicit target. */
 const EXT = { id: 'com.acme.ext', name: 'Ext', version: '1.0.0', type: 'module', namespace: 'ext', dependencies: { [BASE.id]: '^3' } };
@@ -118,7 +122,8 @@ async function boot(options: { parse?: boolean } = {}) {
     engine.registry.registerObject(SysMetadataAuditObject as any, TEST_PACKAGE_ID);
     await engine.syncSchemas();
     (engine.registry as unknown as { logLevel: string }).logLevel = 'silent';
-    engine.registry.installPackage(BASE as any, 'marketplace');
+    engine.registry.installPackage(BASE as any, 'code');
+    (engine as unknown as { manifests: Map<string, unknown> }).manifests.set(BASE.id, BASE);
     engine.registry.installPackage(EXT as any, 'code');
     engine.registry.installPackage(OTHER as any, 'code');
     engine.registry.installPackage(SEALED as any, 'marketplace');
