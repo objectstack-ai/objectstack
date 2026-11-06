@@ -223,7 +223,9 @@ describe('HookApi — the published hook ctx.api face', () => {
         name: 'HookDeleteOptions / EngineDeleteOptionsSchema',
         schema: EngineDeleteOptionsSchema,
         kept: ['where', 'multi'],
-        omitted: ['context'],
+        // `permanent`: app-authored code cannot purge; its deletes enter the
+        // recycle bin (maintainer ruling A, recorded in 6691358077).
+        omitted: ['context', 'permanent'],
       },
     ];
 
