@@ -53,10 +53,22 @@
  * function declarations.
  *
  * Nothing re-exports this module, so the published surface does not move.
+ *
+ * ## The consent read (objectstack-ai/cloud#3606, ruling A)
+ *
+ * Since the move, the verifier gained one step the move did not carry: the
+ * body is split into {@link verifyMcpAccessTokenClaims} (everything above,
+ * unedited, now also answering the token's `iat`) and
+ * {@link verifyMcpAccessToken}, which adds the consent read
+ * (`mcp-token-revocation.ts` `mcpConsentAdmits`) through better-auth's own
+ * storage adapter, reached as `getAuthContext`. `/oauth2/revoke` verifies
+ * through the claims half alone, because it must still find the grant of a
+ * token whose consent is already gone.
  */
 
 import type { JSONWebKeySet } from 'jose';
 import { OAUTH_ORGANIZATION_CLAIM, type AuthManager } from './auth-manager.js';
+import { mcpConsentAdmits, type OAuthGrantStore } from './mcp-token-revocation.js';
 import {
   retireHeldKeyrings,
   UNKNOWN_SIGNING_KEY_REREAD_FLOOR_MS,
@@ -90,13 +102,25 @@ export interface McpAccessTokenHost {
   getMcpResourceUrl: AuthManager['getMcpResourceUrl'];
   isMcpOAuthEnabled: AuthManager['isMcpOAuthEnabled'];
   rereadKeyringForUnknownKey: AuthManager['rereadKeyringForUnknownKey'];
+  getAuthContext: AuthManager['getAuthContext'];
 }
 
-/** The body of `AuthManager#verifyMcpAccessToken`; the method's docblock there is its contract. */
-export async function verifyMcpAccessToken(
-  this: Pick<McpAccessTokenHost, 'getApi' | 'getAuthIssuer' | 'getMcpResourceUrl' | 'isMcpOAuthEnabled' | 'rereadKeyringForUnknownKey'>,
+/** The `this` of {@link verifyMcpAccessTokenClaims}: the members it reads. */
+type McpAccessTokenClaimsHost = Pick<McpAccessTokenHost, 'getApi' | 'getAuthIssuer' | 'getMcpResourceUrl' | 'isMcpOAuthEnabled' | 'rereadKeyringForUnknownKey'>;
+
+/** A verified MCP access token's principal, as `IAuthService.verifyMcpAccessToken` returns it. */
+type McpAccessTokenPrincipal = { userId: string; scopes: string[]; clientId?: string; organizationId?: string };
+
+/**
+ * Every check of `AuthManager#verifyMcpAccessToken` but the consent read: the
+ * signature, issuer, audience and expiry, the delegated-subject rule and the
+ * organization claim. Answers the principal and the token's `iat` (absent
+ * when the token carries none), or `null`.
+ */
+export async function verifyMcpAccessTokenClaims(
+  this: McpAccessTokenClaimsHost,
   token: string,
-): Promise<{ userId: string; scopes: string[]; clientId?: string; organizationId?: string } | null> {
+): Promise<{ principal: McpAccessTokenPrincipal; issuedAt?: number } | null> {
   try {
     if (!token || token.split('.').length !== 3) return null; // not a JWS compact token
     if (!this.isMcpOAuthEnabled()) return null;
@@ -161,13 +185,45 @@ export async function verifyMcpAccessToken(
     ) return null;
     const organizationId = organizationClaim as string | undefined;
     return {
-      userId: subject,
-      scopes,
-      ...(azp ? { clientId: azp } : {}),
-      ...(organizationId ? { organizationId } : {}),
+      principal: {
+        userId: subject,
+        scopes,
+        ...(azp ? { clientId: azp } : {}),
+        ...(organizationId ? { organizationId } : {}),
+      },
+      ...(typeof payload.iat === 'number' ? { issuedAt: payload.iat } : {}),
     };
   } catch {
     return null; // unknown/expired/wrong-audience/garbage → no principal
+  }
+}
+
+/**
+ * The body of `AuthManager#verifyMcpAccessToken`; the method's docblock there
+ * is its contract. {@link verifyMcpAccessTokenClaims}, then the consent read:
+ * the token's grant must still stand (`mcpConsentAdmits`), read through
+ * better-auth's storage adapter, the one the provider writes consents through.
+ * The read is keyed by `azp`, the client the provider mints into every
+ * access token, so a token without one is refused. A store error, or no
+ * adapter at all, is a refusal: fail closed.
+ */
+export async function verifyMcpAccessToken(
+  this: McpAccessTokenClaimsHost & Pick<McpAccessTokenHost, 'getAuthContext'>,
+  token: string,
+): Promise<McpAccessTokenPrincipal | null> {
+  const verified = await verifyMcpAccessTokenClaims.call(this, token);
+  if (!verified?.principal.clientId) return null;
+  const { principal, issuedAt } = verified;
+  try {
+    const store = ((await this.getAuthContext()) as { adapter?: OAuthGrantStore } | null | undefined)?.adapter;
+    const grant = {
+      clientId: principal.clientId!,
+      userId: principal.userId,
+      ...(principal.organizationId ? { organizationId: principal.organizationId } : {}),
+    };
+    return (await mcpConsentAdmits(store, grant, issuedAt)) ? principal : null;
+  } catch {
+    return null; // the consent store could not answer → no principal (fail closed)
   }
 }
 
