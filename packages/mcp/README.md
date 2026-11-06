@@ -117,7 +117,7 @@ apply):
 'get_record'           // Fetch one by id
 'create_record'        // Create
 'update_record'        // Update by id
-'delete_record'        // Delete by id (destructive)
+'delete_record'        // Delete by id (destructive; refused without confirm: true)
 
 // Business actions — operate the app, not just its rows
 'list_actions'         // Invokable business actions the caller may run
