@@ -681,11 +681,13 @@ export const CEILINGS = new Map([
   // headings); the row carried 2,727 tokens of headroom left by an earlier
   // shrink that nobody re-locked, so the TOC needed no raise. Pinned AT the
   // measurement — zero headroom, the ratchet's steady state.
-  // 10066 -> 10011: re-locked at the landed count. A `ctx.notice` row in the sandbox
-  // table and a `notice?` member in the HookContext listing (+95), paid by three
-  // same-file restatements: the reverse-engineering aside in the `body` intro, the
-  // `tenantId` blockquote (the listing comment and the two-axes note say both
-  // halves) and the `ctx.user` paragraph under the `??` line that shows it (-141).
+  // 10066 -> 10011: re-locked at the landed count (main measured 10056; the
+  // move is -45). A `ctx.notice` row in the sandbox table and a `notice?` member
+  // in the HookContext listing, paid by same-file restatements: the
+  // reverse-engineering aside in the `body` intro, the `tenantId` blockquote
+  // (its two halves live in the listing comment and the two-axes note, which
+  // now names the two `tenantId` symbols), the `ctx.user` paragraph under the
+  // `??` line that shows it, and the `session.roles` history clause.
   ['skills/objectstack-data/references/data-hooks.md', 10011],
   ['skills/objectstack-data/rules/datasources.md', 911],
   // -552 (was 3584): re-locked at the landed count (#16374) after PR #16187
