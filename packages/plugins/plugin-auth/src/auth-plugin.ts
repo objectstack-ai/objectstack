@@ -68,7 +68,8 @@ import {
 } from './identity-write-guard.js';
 import { registerLastAdminGuard } from './last-admin-guard.js';
 import { registerApiKeyRestoreGuard } from './api-key-restore-guard.js';
-import { registerOrganizationMfaEnrollmentGuard } from './organization-mfa-enrollment-guard.js';
+import { bindOrganizationAccessPolicy } from './organization-access-policy-binding.js';
+import { MFA_REQUIREMENT_LEVELS, readMfaRequirementLevel } from './organization-access-policy.js';
 import { registerMfaRequiredEnrollmentPredicate } from './mfa-required-enrollment-predicate.js';
 import { registerPersonalViewHooks } from './personal-view-hooks.js';
 import { registerUserPreferenceHooks } from './user-preference-hooks.js';
@@ -559,6 +560,8 @@ export class AuthPlugin implements Plugin {
    * present.
    */
   private allowListUndeterminedWarned = false;
+  /** Set once the settings pass has said that `auth.mfa_required` reads a toggle spelling. */
+  private legacyMfaRequiredNoted = false;
   private allowListUntrustedHeaderWarned = false;
   /**
    * [#30203, #30312] What the deployment itself declared (plugin options and
@@ -1951,17 +1954,6 @@ export class AuthPlugin implements Plugin {
           packageId: 'com.objectstack.plugin-auth.api-key-restore-guard',
           logger: ctx.logger,
         });
-        // [#30201] ADR-0069 D3 — an organization's `require_mfa` is refused
-        // while nobody can enroll a second factor, the pairing the global
-        // `auth.mfa_required` switch gets from its settings piece below. Asks
-        // the live manager per write. See organization-mfa-enrollment-guard.ts.
-        registerOrganizationMfaEnrollmentGuard(engine, {
-          packageId: 'com.objectstack.plugin-auth.organization-mfa-enrollment-guard',
-          isTwoFactorEnabled: () => this.authManager?.isTwoFactorEnabled() ?? false,
-          // [#30411] The grace period an admitted turn-on's save notice names.
-          // No manager means two-factor reads off above, so nothing is admitted.
-          mfaGracePeriodDays: () => this.authManager?.getMfaGracePeriodDays() ?? Number.NaN,
-        });
         // A reader's own named list views: the body is judged on every save as
         // a ListView for the row's own object. See personal-view-hooks.ts.
         registerPersonalViewHooks(engine, {
@@ -2342,15 +2334,38 @@ export class AuthPlugin implements Plugin {
         // The env var OS_AUTH_TWO_FACTOR outranks this piece's plugin flag, so
         // under a pin to off the save itself is refused, before this pass
         // (mfa-required-enrollment-predicate.ts).
+        //
+        // [ruling 「可以，按三档做（推荐）」] Three levels: `off`,
+        // `administrators`, `everyone`. Either level that requires anything is
+        // one piece with the enrollment path. A toggle spelling can only come
+        // from the env override (a stored toggle is rewritten to a level at
+        // boot, `migrateLegacyMfaRequiredSetting`); it keeps its meaning and is
+        // reported once. A value that is no level keeps the level in force.
         if (isExplicit('mfa_required')) {
-          const on = asBoolean(values.mfa_required, false);
-          if (on) {
-            refusable.push({
-              key: 'mfa_required',
-              patch: { mfaRequired: true, plugins: { twoFactor: true } as AuthManagerOptions['plugins'] },
-            });
+          const read = readMfaRequirementLevel(values.mfa_required);
+          if (!read) {
+            ctx.logger.error(
+              `[auth] mfa_required '${String(values.mfa_required)}' is not a multi-factor requirement level — IGNORED, `
+                + `the deployment keeps its current level ('${authManager.getDeploymentAccessFloor().mfaRequirement}'). `
+                + `Set auth.mfa_required (or OS_AUTH_MFA_REQUIRED) to one of: ${MFA_REQUIREMENT_LEVELS.join(', ')}.`,
+            );
           } else {
-            patch.mfaRequired = false;
+            if (read.legacy && !this.legacyMfaRequiredNoted) {
+              this.legacyMfaRequiredNoted = true;
+              ctx.logger.warn(
+                `[auth] auth.mfa_required reads '${String(values.mfa_required)}', a value from before the setting `
+                  + `had levels; it is read as '${read.level}'. Set OS_AUTH_MFA_REQUIRED (or the setting) to one of `
+                  + `${MFA_REQUIREMENT_LEVELS.join(', ')}: the toggle spelling is accepted for one major release.`,
+              );
+            }
+            if (read.level !== 'off') {
+              refusable.push({
+                key: 'mfa_required',
+                patch: { mfaRequirement: read.level, plugins: { twoFactor: true } as AuthManagerOptions['plugins'] },
+              });
+            } else {
+              patch.mfaRequirement = 'off';
+            }
           }
         }
         if (isExplicit('mfa_grace_period_days')) {
@@ -2529,16 +2544,17 @@ export class AuthPlugin implements Plugin {
               sessionRestoring = true;
               restoredInPatch.push(key);
               break;
-            case 'mfaRequired':
-              // As a save of the declared value: on is one piece with its
-              // enrollment path; off leaves enrolled factors verifiable.
-              if (declared.mfaRequired === true) {
+            case 'mfaRequirement':
+              // As a save of the declared value: a level that requires anything
+              // is one piece with its enrollment path; off leaves enrolled
+              // factors verifiable.
+              if (declared.mfaRequirement && declared.mfaRequirement !== 'off') {
                 refusable.push({
                   key,
-                  patch: { mfaRequired: true, plugins: { twoFactor: true } as AuthManagerOptions['plugins'] },
+                  patch: { mfaRequirement: declared.mfaRequirement, plugins: { twoFactor: true } as AuthManagerOptions['plugins'] },
                 });
               } else {
-                patch.mfaRequired = declared.mfaRequired;
+                patch.mfaRequirement = declared.mfaRequirement;
                 restoredInPatch.push(key);
               }
               break;
@@ -2754,12 +2770,52 @@ export class AuthPlugin implements Plugin {
     // See mfa-required-enrollment-predicate.ts.
     registerMfaRequiredEnrollmentPredicate(settings, ctx.logger);
 
+    // [ADR-0069 TL;DR 6] Each organization's own access policy: the reader the
+    // manager asks per request, the save checks that hold it to the floor, and
+    // the one-off moves of the toggle-era values onto the levels.
+    await this.bindOrganizationAccessPolicy(ctx, settings);
+
     await applySettings();
     if (typeof settings.subscribe === 'function') {
       settings.subscribe('auth', () => {
         void applySettings();
       });
       ctx.logger.info('Auth: bound to settings namespace=auth');
+    }
+  }
+
+  /**
+   * [ADR-0069 TL;DR 6] Each organization's own access policy: the one-off
+   * moves of the toggle-era MFA values, the per-request reader, the save
+   * checks and the change listener. See organization-access-policy-binding.ts.
+   */
+  private async bindOrganizationAccessPolicy(ctx: PluginContext, settings: SettingsReadSurface): Promise<void> {
+    if (!this.authManager) return;
+    const manager = this.authManager;
+    try {
+      await bindOrganizationAccessPolicy({
+        settings,
+        manager,
+        engine: () => manager.getDataEngine(),
+        security: () => {
+          try {
+            return ctx.getService<any>('security');
+          } catch {
+            return undefined;
+          }
+        },
+        logger: {
+          info: (m) => ctx.logger.info(m),
+          warn: (m) => ctx.logger.warn(m),
+          error: (m) => ctx.logger.error(m),
+        },
+      });
+    } catch (err: any) {
+      ctx.logger.error(
+        `[auth] organization access policies are NOT bound (${String(err?.message ?? err)}): each organization's own `
+          + 'IP ranges, session limits and multi-factor level are not applied, while the deployment\'s values (the '
+          + 'auth settings) still are. Remedy: restore the settings service and restart.',
+      );
     }
   }
 

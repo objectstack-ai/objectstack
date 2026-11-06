@@ -212,6 +212,7 @@ export const esES: PlatformTranslationData = {
         },
         mfa_required: {
           label: 'Requerir autenticación multifactor',
+          options: { off: 'Desactivado', administrators: 'Administradores', everyone: 'Todos' },
           help: 'Los usuarios sin un autenticador registrado quedan bloqueados del acceso a los datos al terminar su periodo de gracia. Activarlo también habilita la función de dos factores para que los usuarios puedan registrarse.',
         },
         mfa_grace_period_days: {
@@ -349,6 +350,26 @@ export const esES: PlatformTranslationData = {
         },
         currency: { label: 'Moneda predeterminada', help: 'Código ISO 4217 aplicado cuando un campo de moneda no indica la suya.' },
         fiscal_year_start: { label: 'Inicio del año fiscal', help: 'Primer mes del año fiscal: determina «este trimestre / año fiscal» en los informes.' },
+      },
+    },
+
+    access_policy: {
+      title: 'Política de acceso',
+      description: 'Las restricciones de inicio de sesión de esta organización. Los ajustes de autenticación de la implementación siempre se aplican; estos solo pueden añadirles restricciones.',
+      groups: {
+        network: { title: 'Red', description: 'Desde dónde pueden iniciar sesión los miembros de esta organización.' },
+        sessions: { title: 'Sesiones', description: 'Cuánto dura la sesión de un miembro. Cada límite solo puede ser más corto que el de la implementación.' },
+        multi_factor: { title: 'Multifactor', description: 'Quién en esta organización debe proteger su cuenta con una app de autenticación (TOTP).' },
+      },
+      fields: {
+        allowed_ip_ranges: { label: 'Rangos de IP permitidos' },
+        session_idle_timeout_minutes: { label: 'Tiempo de inactividad (minutos)' },
+        session_absolute_max_hours: { label: 'Duración máxima de la sesión (horas)' },
+        max_concurrent_sessions_per_user: { label: 'Máximo de sesiones simultáneas por usuario' },
+        mfa_required: {
+          label: 'Exigir autenticación multifactor',
+          options: { off: 'Desactivado', administrators: 'Administradores', everyone: 'Todos' },
+        },
       },
     },
 

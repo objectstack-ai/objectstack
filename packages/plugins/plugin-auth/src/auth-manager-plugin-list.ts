@@ -986,7 +986,13 @@ export async function buildPluginList(this: PluginListHost): Promise<any[]> {
       // the transport seams to enforce. See computeAuthGate().
       // ADR-0069 D4 — session controls (idle / absolute). Best-effort;
       // revokes the session in place when exceeded (next request → 401).
-      await this.enforceSessionControls((session as any)?.id, (session as any)?.createdAt);
+      // [ADR-0069 TL;DR 6] Against the limits of the organization the session
+      // is scoped to, never below the deployment's.
+      await this.enforceSessionControls(
+        (session as any)?.id,
+        (session as any)?.createdAt,
+        (session as any)?.activeOrganizationId ?? undefined,
+      );
 
       // An impersonation session carries the administrator who started it
       // (`impersonatedBy`, written by the admin plugin's impersonation and

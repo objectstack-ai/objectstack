@@ -166,7 +166,13 @@ export async function globalAfterHook(this: AfterHookHost, ctx: any) {
       if (!succeeded) await this.auditRefusedSignIn(ctx, email, lockStamped);
       if (succeeded) {
         const uid = ctx?.context?.returned?.user?.id;
-        if (typeof uid === 'string') await this.enforceConcurrentCap(uid);
+        // [ADR-0069 TL;DR 6] The cap of the organization the new session
+        // was scoped to at creation (ADR-0093 D9), never above the
+        // deployment's.
+        const scopedOrg = ctx?.context?.newSession?.session?.activeOrganizationId;
+        if (typeof uid === 'string') {
+          await this.enforceConcurrentCap(uid, typeof scopedOrg === 'string' && scopedOrg ? scopedOrg : undefined);
+        }
         // ADR-0069 D7 — login audit: stamp last_login_at/ip on success.
         // Independent of lockout config (recordSignInOutcome no-ops when
         // lockout is off). The IP is the address `handleRequest`

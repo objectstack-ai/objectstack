@@ -212,6 +212,7 @@ export const jaJP: PlatformTranslationData = {
         },
         mfa_required: {
           label: '多要素認証を必須にする',
+          options: { off: 'オフ', administrators: '管理者', everyone: '全員' },
           help: '認証アプリを登録していないユーザーは、猶予期間の終了後にデータへのアクセスをブロックされます。これを有効にすると、ユーザーが登録できるよう二要素機能もオンになります。',
         },
         mfa_grace_period_days: {
@@ -349,6 +350,26 @@ export const jaJP: PlatformTranslationData = {
         },
         currency: { label: '既定の通貨', help: '通貨フィールドが独自の通貨を指定しない場合に適用される ISO 4217 コード。' },
         fiscal_year_start: { label: '会計年度の開始月', help: '会計年度の最初の月 — レポートの「今四半期 / 会計年度」を決定します。' },
+      },
+    },
+
+    access_policy: {
+      title: 'アクセスポリシー',
+      description: 'この組織のサインイン制限です。デプロイの認証設定は常に適用され、ここではそれに制限を追加することしかできません。',
+      groups: {
+        network: { title: 'ネットワーク', description: 'この組織のメンバーがサインインできる場所。' },
+        sessions: { title: 'セッション', description: 'メンバーのセッションの有効期間。各上限はデプロイの上限より短くすることしかできません。' },
+        multi_factor: { title: '多要素認証', description: 'この組織で認証アプリ (TOTP) によるアカウント保護が必須となる人。' },
+      },
+      fields: {
+        allowed_ip_ranges: { label: '許可する IP 範囲' },
+        session_idle_timeout_minutes: { label: 'アイドルタイムアウト (分)' },
+        session_absolute_max_hours: { label: 'セッションの最大有効期間 (時間)' },
+        max_concurrent_sessions_per_user: { label: 'ユーザーあたりの最大同時セッション数' },
+        mfa_required: {
+          label: '多要素認証を必須にする',
+          options: { off: 'オフ', administrators: '管理者', everyone: '全員' },
+        },
       },
     },
 

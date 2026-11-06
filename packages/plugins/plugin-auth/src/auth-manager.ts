@@ -38,8 +38,42 @@ import {
   // [#25083] Is this process a cloud-managed (hosted) environment? The ONE
   // accessor every managed-mode judgement here asks, and nothing else.
   isCloudManaged,
+  resolveUserAuthzGrants,
 } from '@objectstack/core';
 import type { AuthGate } from '@objectstack/core';
+import {
+  judgeSessionScopingAddress,
+  readOrganizationAccessPolicy,
+  type DeploymentAccessFloor,
+  type MfaRequirementLevel,
+  type OrganizationAccessPolicy,
+} from './organization-access-policy.js';
+
+/**
+ * [ADR-0069 TL;DR 6] Where `AuthManager` reads each organization's own access
+ * policy, supplied by `AuthPlugin` from the settings service
+ * ({@link AuthManager.setOrganizationAccessPolicySource}).
+ */
+export interface OrganizationAccessPolicySource {
+  /** The organization's resolved `access_policy` values, `key → value`. */
+  read(organizationId: string): Promise<Record<string, unknown> | undefined>;
+  /** Does any organization set an `access_policy.mfa_required` level other than `off`? */
+  anyOrganizationRequiresMfa(): Promise<boolean>;
+  /**
+   * Does the user hold a delegated administrator's permission set (one with an
+   * `adminScope`, ADR-0090 D12) in the organization? `grants` are the position
+   * and permission-set names the user's grants resolve there. Absent: no delegated
+   * administrator is recognised.
+   */
+  isDelegatedAdministrator?(
+    userId: string,
+    organizationId: string | undefined,
+    grants: { positions: readonly string[]; permissions: readonly string[] },
+  ): Promise<boolean>;
+}
+
+/** How long one organization's access policy is kept before it is read again. */
+export const ORG_ACCESS_POLICY_TTL_MS = 30_000;
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import type {
   ApiKeyLifecyclePolicy,
@@ -1017,12 +1051,19 @@ export interface AuthManagerOptions extends Partial<AuthConfig> {
   passwordExpiryDays?: number;
 
   /**
-   * ADR-0069 D3 — enforced MFA. When true, an authenticated user without TOTP
-   * enrolled (`sys_user.two_factor_enabled`) is gated out of protected resources
-   * (`MFA_REQUIRED`) once their grace window elapses, until they enroll. Shares
-   * the `customSession` → `user.authGate` seam with password expiry.
+   * ADR-0069 D3 — enforced MFA, as one of three levels (ruling of record on
+   * objectstack-ai/cloud#3668, 「可以，按三档做（推荐）」): `off`;
+   * `administrators`, which holds ADR-0090 D12's tenant-level,
+   * organization-level and delegated administrators; `everyone`. A user the
+   * level holds who has no TOTP enrolled (`sys_user.two_factor_enabled`) is
+   * gated out of protected resources (`MFA_REQUIRED`) once their grace window
+   * elapses, until they enroll. Shares the `customSession` → `user.authGate`
+   * seam with password expiry. This is the deployment's level — the default
+   * and the floor of every organization's (`organization-access-policy.ts`).
+   * Bound from the `auth.mfa_required` setting.
+   * @default 'off'
    */
-  mfaRequired?: boolean;
+  mfaRequirement?: MfaRequirementLevel;
 
   /** Days a user may defer MFA enrollment before the hard block. Default 7. */
   mfaGracePeriodDays?: number;
@@ -1619,6 +1660,15 @@ export class AuthManager {
   // Refreshed lazily with a TTL so isAuthGateActive() stays synchronous + cheap.
   private _orgMfaCache: { value: boolean; at: number } = { value: false, at: 0 };
   private _orgMfaRefreshing = false;
+  // [ADR-0069 TL;DR 6] Where each organization's own access policy is read
+  // (`access_policy` settings, scope `tenant`), set by `AuthPlugin` once the
+  // settings service is bound; unset, every organization reads as setting
+  // nothing and the deployment's values alone hold.
+  private orgAccessPolicySource: OrganizationAccessPolicySource | undefined;
+  // Per-organization policy, read through `orgAccessPolicySource`, kept for
+  // ORG_ACCESS_POLICY_TTL_MS and dropped whenever the namespace changes.
+  private readonly _orgAccessPolicyCache = new Map<string, { policy: OrganizationAccessPolicy; at: number }>();
+  private _orgAccessPolicyReadFailureNoted = false;
   // #2766 V1 — cached "does any user have must_change_password set" flag, so
   // the admin-issued temp-password gate activates without making
   // isAuthGateActive() (and thus every request's extra session read) hot in
@@ -5215,11 +5265,12 @@ export class AuthManager {
     // [#25224 cut 4] The body moved to `auth-manager-database-hooks.ts` (see `DatabaseHooksHost`).
     const readConfig = () => this.config;
     const readIdpLocale = () => this.idpLocale;
-    const hookHost: Pick<DatabaseHooksHost, 'audienceLogError' | 'config' | 'idpLocale' | 'isCreatedInThisRequest' | 'linkingContext' | 'settleMembership' | 'settleSelfRegistrationGrant' | 'stampIdentitySource' | 'takeOwnerVerifiedStamp'> = {
+    const hookHost: Pick<DatabaseHooksHost, 'audienceLogError' | 'config' | 'idpLocale' | 'isCreatedInThisRequest' | 'judgeSessionScoping' | 'linkingContext' | 'settleMembership' | 'settleSelfRegistrationGrant' | 'stampIdentitySource' | 'takeOwnerVerifiedStamp'> = {
       audienceLogError: (...a) => this.audienceLogError(...a),
       get config() { return readConfig(); },
       get idpLocale() { return readIdpLocale(); },
       isCreatedInThisRequest: (...a) => this.isCreatedInThisRequest(...a),
+      judgeSessionScoping: (...a) => this.judgeSessionScoping(...a),
       linkingContext: (...a) => this.linkingContext(...a),
       settleMembership: (...a) => this.settleMembership(...a),
       settleSelfRegistrationGrant: (...a) => this.settleSelfRegistrationGrant(...a),
@@ -5346,7 +5397,7 @@ export class AuthManager {
     this.refreshMustChangeCacheIfStale();
     return (
       Math.floor(Number(this.config.passwordExpiryDays) || 0) > 0 ||
-      this.config.mfaRequired === true ||
+      (this.config.mfaRequirement ?? 'off') !== 'off' ||
       this._orgMfaCache.value ||
       this._mustChangeCache.value
     );
@@ -5390,7 +5441,7 @@ export class AuthManager {
 
   /**
    * [#30201] Called by the MFA gate when a user is under an MFA requirement
-   * (the global `mfaRequired` or their organization's `require_mfa`) that it
+   * (the deployment's `mfaRequirement` or their organization's `access_policy.mfa_required`) that it
    * does not enforce, because the twoFactor plugin is off and the user has no
    * way to enroll. A functional degradation (AGENTS.md, degradation log
    * levels): the requirement is visibly not in force, nothing stored is lost.
@@ -5401,11 +5452,11 @@ export class AuthManager {
     this._mfaWithoutEnrollmentNoted = true;
     this.config.logger?.warn(
       '[auth] multi-factor authentication is required (the auth.mfa_required setting, or an organization\'s ' +
-        'require_mfa) but is NOT enforced: the two-factor feature is off, so nobody can enroll an authenticator ' +
+        'access_policy.mfa_required) but is NOT enforced: the two-factor feature is off, so nobody can enroll an authenticator ' +
         'app, and holding them would lock every affected member out, the owner included. Remedy: set ' +
         'OS_AUTH_TWO_FACTOR=true; or, unless OS_AUTH_TWO_FACTOR is set to false (it overrides the settings), turn ' +
-        'on the auth.mfa_required setting, which turns two-factor on with the requirement; or clear require_mfa on ' +
-        'the organization.',
+        'on the auth.mfa_required setting, which turns two-factor on with the requirement; or set the organization\'s ' +
+        'access_policy.mfa_required back to off.',
     );
   }
 
@@ -5486,13 +5537,13 @@ export class AuthManager {
     const readOrgMfaRefreshing = () => this._orgMfaRefreshing;
     const writeOrgMfaRefreshing = (v: AuthManager['_orgMfaRefreshing']) => { this._orgMfaRefreshing = v; };
     const readConfig = () => this.config;
-    const host: Pick<PasswordSessionPolicyHost, '_orgMfaCache' | '_orgMfaRefreshing' | 'config' | 'getDataEngine'> = {
+    const host: Pick<PasswordSessionPolicyHost, '_orgMfaCache' | '_orgMfaRefreshing' | 'anyOrganizationRequiresMfa' | 'config'> = {
       get _orgMfaCache() { return readOrgMfaCache(); },
       set _orgMfaCache(v) { writeOrgMfaCache(v); },
       get _orgMfaRefreshing() { return readOrgMfaRefreshing(); },
       set _orgMfaRefreshing(v) { writeOrgMfaRefreshing(v); },
+      anyOrganizationRequiresMfa: (...a) => this.anyOrganizationRequiresMfa(...a),
       get config() { return readConfig(); },
-      getDataEngine: (...a) => this.getDataEngine(...a),
     };
     return refreshOrgMfaCacheIfStale.call(host);
   }
@@ -5617,11 +5668,13 @@ export class AuthManager {
     const readMustChangeCache = () => this._mustChangeCache;
     const readOrgMfaCache = () => this._orgMfaCache;
     const readConfig = () => this.config;
-    const host: Pick<PasswordSessionPolicyHost, '_mustChangeCache' | '_orgMfaCache' | 'config' | 'getDataEngine' | 'isTwoFactorEnabled' | 'noteMfaRequirementWithoutEnrollment' | 'refreshMustChangeCacheIfStale' | 'refreshOrgMfaCacheIfStale'> = {
+    const host: Pick<PasswordSessionPolicyHost, '_mustChangeCache' | '_orgMfaCache' | 'config' | 'getDataEngine' | 'getOrganizationAccessPolicy' | 'isMfaAdministrator' | 'isTwoFactorEnabled' | 'noteMfaRequirementWithoutEnrollment' | 'refreshMustChangeCacheIfStale' | 'refreshOrgMfaCacheIfStale'> = {
       get _mustChangeCache() { return readMustChangeCache(); },
       get _orgMfaCache() { return readOrgMfaCache(); },
       get config() { return readConfig(); },
       getDataEngine: (...a) => this.getDataEngine(...a),
+      getOrganizationAccessPolicy: (...a) => this.getOrganizationAccessPolicy(...a),
+      isMfaAdministrator: (...a) => this.isMfaAdministrator(...a),
       isTwoFactorEnabled: (...a) => this.isTwoFactorEnabled(...a),
       noteMfaRequirementWithoutEnrollment: (...a) => this.noteMfaRequirementWithoutEnrollment(...a),
       refreshMustChangeCacheIfStale: (...a) => this.refreshMustChangeCacheIfStale(...a),
@@ -5981,15 +6034,20 @@ export class AuthManager {
    * limits or not; with both off, a per-process 60-second memo per session
    * skips the `sys_session` read too. Best-effort — never throws.
    */
-  private enforceSessionControls(sessionId: string | undefined, createdAtHint: unknown): Promise<void> {
+  private enforceSessionControls(
+    sessionId: string | undefined,
+    createdAtHint: unknown,
+    organizationId?: string,
+  ): Promise<void> {
     // [#25224 cut 3] The body moved to `auth-manager-password-session-policy.ts` (see `PasswordSessionPolicyHost`).
     const readConfig = () => this.config;
-    const host: Pick<PasswordSessionPolicyHost, 'config' | 'getDataEngine' | 'logDurabilityDegradation'> = {
+    const host: Pick<PasswordSessionPolicyHost, 'config' | 'getDataEngine' | 'getOrganizationAccessPolicy' | 'logDurabilityDegradation'> = {
       get config() { return readConfig(); },
       getDataEngine: (...a) => this.getDataEngine(...a),
+      getOrganizationAccessPolicy: (...a) => this.getOrganizationAccessPolicy(...a),
       logDurabilityDegradation: (...a) => this.logDurabilityDegradation(...a),
     };
-    return enforceSessionControls.call(host, sessionId, createdAtHint);
+    return enforceSessionControls.call(host, sessionId, createdAtHint, organizationId);
   }
 
   /**
@@ -5997,15 +6055,162 @@ export class AuthManager {
    * Keeps the newest `maxConcurrentSessions` live sessions for the user and
    * revokes the rest (oldest first). No-op when off. Best-effort.
    */
-  private enforceConcurrentCap(userId: string): Promise<void> {
+  private enforceConcurrentCap(userId: string, organizationId?: string): Promise<void> {
     // [#25224 cut 3] The body moved to `auth-manager-password-session-policy.ts` (see `PasswordSessionPolicyHost`).
     const readConfig = () => this.config;
-    const host: Pick<PasswordSessionPolicyHost, 'config' | 'getDataEngine' | 'logDurabilityDegradation'> = {
+    const host: Pick<PasswordSessionPolicyHost, 'config' | 'getDataEngine' | 'getOrganizationAccessPolicy' | 'logDurabilityDegradation'> = {
       get config() { return readConfig(); },
       getDataEngine: (...a) => this.getDataEngine(...a),
+      getOrganizationAccessPolicy: (...a) => this.getOrganizationAccessPolicy(...a),
       logDurabilityDegradation: (...a) => this.logDurabilityDegradation(...a),
     };
-    return enforceConcurrentCap.call(host, userId);
+    return enforceConcurrentCap.call(host, userId, organizationId);
+  }
+
+  /**
+   * @internal Package-internal: set by `AuthPlugin` once the settings service
+   * is bound; not a supported entry point.
+   *
+   * [ADR-0069 TL;DR 6] Where each organization's own access policy is read.
+   * Setting a source drops every cached policy.
+   */
+  public setOrganizationAccessPolicySource(source: OrganizationAccessPolicySource | undefined): void {
+    this.orgAccessPolicySource = source;
+    this.clearOrganizationAccessPolicyCache();
+  }
+
+  /**
+   * @internal Package-internal: called by `AuthPlugin` when the
+   * `access_policy` settings namespace changes.
+   *
+   * Drops every cached organization policy and the "any organization requires
+   * MFA" flag, so the next request reads what was saved.
+   */
+  public clearOrganizationAccessPolicyCache(): void {
+    this._orgAccessPolicyCache.clear();
+    this._orgMfaCache = { value: this._orgMfaCache.value, at: 0 };
+  }
+
+  /**
+   * @internal Package-internal: read by the policy bodies and by the
+   * `access_policy` save checks; not a supported entry point.
+   *
+   * The deployment's access-policy values — the floor every organization's
+   * policy is held to (`organization-access-policy.ts`) — as the settings
+   * pass applied them. Read per call.
+   */
+  public getDeploymentAccessFloor(): DeploymentAccessFloor {
+    return {
+      allowedIpRanges: this.config.allowedIpRanges ?? [],
+      sessionIdleTimeoutMinutes: this.config.sessionIdleTimeoutMinutes ?? 0,
+      sessionAbsoluteMaxHours: this.config.sessionAbsoluteMaxHours ?? 0,
+      maxConcurrentSessions: this.config.maxConcurrentSessions ?? 0,
+      mfaRequirement: this.config.mfaRequirement ?? 'off',
+    };
+  }
+
+  /**
+   * @internal Package-internal: read by the policy bodies and the session
+   * scoping hook; not a supported entry point.
+   *
+   * [ADR-0069 TL;DR 6] One organization's own access policy
+   * ({@link OrganizationAccessPolicy}), read through the source `AuthPlugin`
+   * set and kept for {@link ORG_ACCESS_POLICY_TTL_MS}. No organization, or no
+   * source, reads as an organization that sets nothing. A read that fails
+   * keeps the last policy read for that organization, or nothing beyond the
+   * deployment's when there is none, and says so once: the deployment's
+   * policy, the floor, is still enforced either way.
+   */
+  public async getOrganizationAccessPolicy(organizationId: string | null | undefined): Promise<OrganizationAccessPolicy> {
+    const source = this.orgAccessPolicySource;
+    if (!organizationId || !source) return readOrganizationAccessPolicy(undefined);
+    const cached = this._orgAccessPolicyCache.get(organizationId);
+    if (cached && Date.now() - cached.at < ORG_ACCESS_POLICY_TTL_MS) return cached.policy;
+    try {
+      const policy = readOrganizationAccessPolicy(await source.read(organizationId));
+      this._orgAccessPolicyCache.set(organizationId, { policy, at: Date.now() });
+      return policy;
+    } catch (err) {
+      if (!this._orgAccessPolicyReadFailureNoted) {
+        this._orgAccessPolicyReadFailureNoted = true;
+        this.config.logger?.warn(
+          '[auth] an organization\'s access policy (the access_policy settings) could not be read, so its own '
+            + 'IP ranges, session limits and multi-factor level are not applied while the read fails; the '
+            + 'deployment\'s values (the auth settings) are still enforced. Remedy: check the settings store; the '
+            + `read is retried on the next request. (${String((err as Error)?.message ?? err)})`,
+        );
+      }
+      return cached?.policy ?? readOrganizationAccessPolicy(undefined);
+    }
+  }
+
+  /**
+   * @internal Package-internal: asked by the session hooks
+   * (`auth-manager-database-hooks.ts`); not a supported entry point.
+   *
+   * [ADR-0069 TL;DR 6, D5] May a session of `userId` be scoped to
+   * `organizationId` from `address` (the address the server established for
+   * the request, `undefined` when it established none)? The organization's own
+   * allowed IP ranges decide, and a tenant-level administrator is never held by
+   * them (break-glass): {@link judgeSessionScopingAddress}.
+   */
+  public async judgeSessionScoping(
+    userId: string,
+    organizationId: string,
+    address: string | undefined,
+  ): Promise<'admitted' | 'refused'> {
+    return judgeSessionScopingAddress({
+      address,
+      organization: await this.getOrganizationAccessPolicy(organizationId),
+      isPlatformAdmin: () => this.isPlatformAdminUserId(userId),
+    });
+  }
+
+  /**
+   * @internal Package-internal: read by the "any organization requires MFA"
+   * cache refresh; not a supported entry point.
+   */
+  public async anyOrganizationRequiresMfa(): Promise<boolean> {
+    const source = this.orgAccessPolicySource;
+    if (!source) return false;
+    return source.anyOrganizationRequiresMfa();
+  }
+
+  /**
+   * @internal Package-internal: read by the MFA gate at the `administrators`
+   * level; not a supported entry point.
+   *
+   * Is `userId` an administrator in `organizationId`, as ADR-0090 D12 (as
+   * amended 2026-10-17) names the three kinds — through the predicates that
+   * already decide each, never a new concept:
+   *
+   *  1. tenant-level — the `PLATFORM_ADMIN` posture rung;
+   *  2. organization-level — the `TENANT_ADMIN` rung, which the
+   *     `organization_admin` grant resolves, conferred by an owner or admin
+   *     membership of that organization;
+   *  3. delegated — a permission set carrying an `adminScope`, decided by the
+   *     security plugin's own resolution of the user's sets
+   *     ({@link OrganizationAccessPolicySource.isDelegatedAdministrator}).
+   *
+   * The two rungs are `resolveUserAuthzGrants`' (`@objectstack/core`), the
+   * session payload's own reading. A delegated check that fails counts as an
+   * administrator: the requirement holds rather than lapses on an unreadable
+   * grant.
+   */
+  public async isMfaAdministrator(userId: string, organizationId: string | undefined): Promise<boolean> {
+    const engine = this.getDataEngine();
+    if (!engine) return false;
+    const grants = await resolveUserAuthzGrants(engine as any, userId, {
+      ...(organizationId ? { tenantId: organizationId } : {}),
+    });
+    if (grants.posture === 'PLATFORM_ADMIN' || grants.posture === 'TENANT_ADMIN') return true;
+    const delegated = this.orgAccessPolicySource?.isDelegatedAdministrator;
+    if (!delegated) return false;
+    try {
+      return await delegated(userId, organizationId, { positions: grants.positions, permissions: grants.permissions });
+    } catch {
+      return true;
+    }
   }
 
   /**

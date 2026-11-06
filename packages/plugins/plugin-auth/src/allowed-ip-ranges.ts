@@ -260,11 +260,17 @@ export function allowedIpRangesRefusalCopy(locale: string | undefined): AllowedI
 }
 
 /**
- * `auth.allowed_ip_ranges`'s settings write predicate. `manager` is read per
- * write, so the address rule is the one in force when the save happens.
+ * `auth.allowed_ip_ranges`'s settings write predicate, and the same check on
+ * an organization's own list (`access_policy.allowed_ip_ranges`,
+ * `organization-access-policy.ts`). `manager` is read per write, so the
+ * address rule is the one in force when the save happens. `recovery: false`
+ * leaves out the env-override way back, which reopens the deployment's list
+ * only: an organization's list is reopened by the deployment's administrator,
+ * whom it never holds.
  */
 export function allowedIpRangesWritePredicate(
   manager: () => Pick<AuthManager, 'resolveClientAddress'> | null | undefined,
+  options: { recovery?: boolean } = {},
 ): (input: unknown) => AllowedIpRangesWriteRefusal | undefined {
   return (input) => {
     // The settings write predicate's input (`SettingsWritePredicateInput`), read structurally.
@@ -278,7 +284,7 @@ export function allowedIpRangesWritePredicate(
     if (address && ranges.some((range) => ipMatchesRange(address, range))) return undefined;
     const copy = allowedIpRangesRefusalCopy(locale);
     return {
-      message: (address ? copy.outside(address) : copy.undetermined) + copy.recovery,
+      message: (address ? copy.outside(address) : copy.undetermined) + (options.recovery === false ? '' : copy.recovery),
       constraint: { clientAddress: address ?? null },
     };
   };

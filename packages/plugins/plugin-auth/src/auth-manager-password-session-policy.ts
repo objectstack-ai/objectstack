@@ -46,6 +46,7 @@
 import type { AuthManager } from './auth-manager.js';
 import type { AuthGate } from '@objectstack/core';
 import { recoverInternalFieldsForSystemRead } from './internal-field-readback.js';
+import { effectiveMfaLevel, effectiveSessionLimits } from './organization-access-policy.js';
 
 /**
  * The `AuthManager` members the functions below read — every one of them, and
@@ -61,7 +62,10 @@ export interface PasswordSessionPolicyHost {
   _mustChangeRefreshing: AuthManager['_mustChangeRefreshing'];
   _orgMfaCache: AuthManager['_orgMfaCache'];
   _orgMfaRefreshing: AuthManager['_orgMfaRefreshing'];
+  anyOrganizationRequiresMfa: AuthManager['anyOrganizationRequiresMfa'];
   getDataEngine: AuthManager['getDataEngine'];
+  getOrganizationAccessPolicy: AuthManager['getOrganizationAccessPolicy'];
+  isMfaAdministrator: AuthManager['isMfaAdministrator'];
   isTwoFactorEnabled: AuthManager['isTwoFactorEnabled'];
   logDurabilityDegradation: AuthManager['logDurabilityDegradation'];
   noteMfaRequirementWithoutEnrollment: AuthManager['noteMfaRequirementWithoutEnrollment'];
@@ -125,20 +129,17 @@ export function refreshMustChangeCacheIfStale(this: Pick<PasswordSessionPolicyHo
 }
 
 /** The body of `AuthManager#refreshOrgMfaCacheIfStale`; the method's docblock there is its contract. */
-export function refreshOrgMfaCacheIfStale(this: Pick<PasswordSessionPolicyHost, '_orgMfaCache' | '_orgMfaRefreshing' | 'config' | 'getDataEngine'>): void {
-  if (this.config.mfaRequired === true) return;
+export function refreshOrgMfaCacheIfStale(this: Pick<PasswordSessionPolicyHost, '_orgMfaCache' | '_orgMfaRefreshing' | 'anyOrganizationRequiresMfa' | 'config'>): void {
+  // [ADR-0069 TL;DR 6] An organization can only strengthen the deployment's
+  // level, so at `everyone` there is nothing an organization adds.
+  if ((this.config.mfaRequirement ?? 'off') === 'everyone') return;
   if (this._orgMfaRefreshing) return;
   if (Date.now() - this._orgMfaCache.at < 60_000) return;
-  const engine = this.getDataEngine();
-  if (!engine) return;
   this._orgMfaRefreshing = true;
   void (async () => {
     try {
-      const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] };
-      const n = await engine.count('sys_organization', {
-        where: { require_mfa: true }, context: SYSTEM_CTX,
-      });
-      this._orgMfaCache = { value: typeof n === 'number' && n > 0, at: Date.now() };
+      const value = await this.anyOrganizationRequiresMfa();
+      this._orgMfaCache = { value: value === true, at: Date.now() };
     } catch {
       // leave the prior value; try again after the TTL
     } finally {
@@ -149,7 +150,7 @@ export function refreshOrgMfaCacheIfStale(this: Pick<PasswordSessionPolicyHost, 
 
 /** The body of `AuthManager#resolveUserAuthGates`; the method's docblock there is its contract. */
 export async function resolveUserAuthGates(
-  this: Pick<PasswordSessionPolicyHost, '_mustChangeCache' | '_orgMfaCache' | 'config' | 'getDataEngine' | 'isTwoFactorEnabled' | 'noteMfaRequirementWithoutEnrollment' | 'refreshMustChangeCacheIfStale' | 'refreshOrgMfaCacheIfStale'>,
+  this: Pick<PasswordSessionPolicyHost, '_mustChangeCache' | '_orgMfaCache' | 'config' | 'getDataEngine' | 'getOrganizationAccessPolicy' | 'isMfaAdministrator' | 'isTwoFactorEnabled' | 'noteMfaRequirementWithoutEnrollment' | 'refreshMustChangeCacheIfStale' | 'refreshOrgMfaCacheIfStale'>,
   userId: string,
   options: { organizationId?: string } = {},
 ): Promise<AuthGate[]> {
@@ -160,13 +161,14 @@ export async function resolveUserAuthGates(
   this.refreshMustChangeCacheIfStale();
   const activeOrgId = options.organizationId;
   const expiryDays = Math.floor(Number(this.config.passwordExpiryDays) || 0);
-  const mfaGlobal = this.config.mfaRequired === true;
-  // Per-org tightening: an org may require MFA above the global floor.
-  const orgMaybeRequires = !mfaGlobal && !!activeOrgId && this._orgMfaCache.value;
+  // [ADR-0069 D3, ruling 「可以，按三档做（推荐）」] The deployment's level is
+  // the floor; the session's organization may only strengthen it.
+  const deploymentLevel = this.config.mfaRequirement ?? 'off';
+  const orgMaybeRequires = deploymentLevel !== 'everyone' && !!activeOrgId && this._orgMfaCache.value;
   // #2766 V1 — an admin-issued must-change-password flag activates the gate
   // even with every config feature off (per-user state, cached like org MFA).
   const mustChangeMaybe = this._mustChangeCache.value;
-  if (expiryDays <= 0 && !mfaGlobal && !orgMaybeRequires && !mustChangeMaybe) {
+  if (expiryDays <= 0 && deploymentLevel === 'off' && !orgMaybeRequires && !mustChangeMaybe) {
     return []; // no gate feature active
   }
   const engine = this.getDataEngine();
@@ -180,14 +182,11 @@ export async function resolveUserAuthGates(
       context: SYSTEM_CTX,
     });
 
-    // Effective MFA requirement: global floor OR the active org's require_mfa.
-    let mfaRequired = mfaGlobal;
-    if (!mfaRequired && orgMaybeRequires) {
-      const org = await engine.findOne('sys_organization', {
-        where: { id: activeOrgId }, fields: ['require_mfa'], context: SYSTEM_CTX,
-      });
-      mfaRequired = org?.require_mfa === true || org?.require_mfa === 1;
-    }
+    // The level in force: the stronger of the deployment's and the active
+    // organization's own (`organization-access-policy.ts`).
+    const level = orgMaybeRequires
+      ? effectiveMfaLevel({ mfaRequirement: deploymentLevel }, await this.getOrganizationAccessPolicy(activeOrgId))
+      : deploymentLevel;
 
     // ── Admin-issued force change (#2766 V1) ──────────────────────────
     // [#23287, ruling C′ item 2] Its OWN code now, scope `credential`: it
@@ -230,6 +229,10 @@ export async function resolveUserAuthGates(
     // (`organization-mfa-enrollment-guard.ts`); this covers rows stored before
     // it, and an `OS_AUTH_TWO_FACTOR=false` pin under the global setting.
     const unenrolled = !(u?.two_factor_enabled === true || u?.two_factor_enabled === 1);
+    // `administrators` holds ADR-0090 D12's three kinds and lets everyone else
+    // through; asked only for an unenrolled user, the one it can hold.
+    const mfaRequired =
+      level === 'everyone' || (level === 'administrators' && unenrolled && (await this.isMfaAdministrator(userId, activeOrgId)));
     if (mfaRequired && unenrolled && !this.isTwoFactorEnabled()) {
       this.noteMfaRequirementWithoutEnrollment();
     } else if (mfaRequired && unenrolled) {
@@ -612,9 +615,15 @@ function sessionHeartbeatMemoFor(engine: object): SessionHeartbeatMemo {
 }
 
 /** The body of `AuthManager#enforceSessionControls`; the method's docblock there is its contract. */
-export async function enforceSessionControls(this: Pick<PasswordSessionPolicyHost, 'config' | 'getDataEngine' | 'logDurabilityDegradation'>, sessionId: string | undefined, createdAtHint: unknown): Promise<void> {
-  const idleMin = Math.floor(Number(this.config.sessionIdleTimeoutMinutes) || 0);
-  const absHrs = Math.floor(Number(this.config.sessionAbsoluteMaxHours) || 0);
+export async function enforceSessionControls(this: Pick<PasswordSessionPolicyHost, 'config' | 'getDataEngine' | 'getOrganizationAccessPolicy' | 'logDurabilityDegradation'>, sessionId: string | undefined, createdAtHint: unknown, organizationId?: string): Promise<void> {
+  // [ADR-0069 TL;DR 6] The limits in force for this session: the shorter of
+  // the deployment's and those of the organization it is scoped to.
+  const limits = effectiveSessionLimits(
+    this.config,
+    await this.getOrganizationAccessPolicy(organizationId),
+  );
+  const idleMin = limits.idleMinutes;
+  const absHrs = limits.absoluteHours;
   // [#25343] Both limits off no longer returns here: `last_activity_at` is
   // "the last request on this session" on every deployment, not only where an
   // idle timeout reads it (ruling 6358844136, letter A). What both-off buys
@@ -709,8 +718,10 @@ export async function enforceSessionControls(this: Pick<PasswordSessionPolicyHos
 }
 
 /** The body of `AuthManager#enforceConcurrentCap`; the method's docblock there is its contract. */
-export async function enforceConcurrentCap(this: Pick<PasswordSessionPolicyHost, 'config' | 'getDataEngine' | 'logDurabilityDegradation'>, userId: string): Promise<void> {
-  const cap = Math.floor(Number(this.config.maxConcurrentSessions) || 0);
+export async function enforceConcurrentCap(this: Pick<PasswordSessionPolicyHost, 'config' | 'getDataEngine' | 'getOrganizationAccessPolicy' | 'logDurabilityDegradation'>, userId: string, organizationId?: string): Promise<void> {
+  // [ADR-0069 TL;DR 6] The cap in force: the smaller of the deployment's and
+  // that of the organization the new session is scoped to.
+  const cap = effectiveSessionLimits(this.config, await this.getOrganizationAccessPolicy(organizationId)).concurrent;
   if (cap <= 0 || !userId) return;
   const engine = this.getDataEngine();
   if (!engine) return;
