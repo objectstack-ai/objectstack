@@ -24,7 +24,7 @@
 //
 //   - the BUNDLED `blank` template's manifest is app-shaped and HAS `namespace`;
 //   - a REMOTE template's manifest is the template-REGISTRY document
-//     (`$schema: .../template-manifest.json` — name/displayName/category/skills/
+//     (`$schema: .../template-manifest.json` — name/displayName/businessFunctions/skills/
 //     translations) and has NO `namespace` at all. The real namespace lives in
 //     `objectstack.config.ts`.
 //

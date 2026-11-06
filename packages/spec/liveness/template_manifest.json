@@ -1,0 +1,213 @@
+{
+  "type": "template_manifest",
+  "_note": "TemplateManifestSchema (packages/spec/src/marketplace/template-manifest.zod.ts) — `objectstack.manifest.json`, the package-listing file an author writes beside objectstack.config.ts. Read by `os package publish` (packages/cli/src/commands/package/publish.ts) and by create-objectstack at scaffold; parsed for every shipped file by `pnpm --filter @objectstack/spec check:template-manifests`; never loaded by a runtime boot. GOVERNED VIA THE GATE'S SPEC-ONLY OVERRIDE (SPEC_ONLY_SCHEMAS), seeded 2026-11-06 with the marketplace taxonomy, whose facet keys (`businessFunctions`, `industries`, `solutionType`, `maturity`) have their consumers in the cloud catalog (objectstack-ai/cloud#3661) and the console — a row is where those consumers are named. MEASUREMENT: every row below was measured for this seeding against objectstack origin/main 7d9682ffd7 plus the taxonomy change, and the cloud leg against cloud origin/main 8f574b9 (its publish route reads `tags` and the category it retires; it drops every facet key today). The `dead` rows other than `category` are what entering the denominator found, not part of the taxonomy: they are recorded here, not retired.",
+  "props": {
+    "manifestId": {
+      "status": "live",
+      "evidence": "packages/cli/src/commands/package/publish.ts#PackagePublish (`--manifest-id ?? m.manifestId ?? deriveManifestId(...)` — the package id the publish request is addressed by)",
+      "verifiedAt": "2026-11-06",
+      "evidenceScope": "in-repo",
+      "note": "Optional on this file by design (the derived `local.<slug>` covers a tree that declares none); a declared value wins over the derived one."
+    },
+    "displayName": {
+      "status": "live",
+      "evidence": "packages/cli/src/commands/package/publish.ts#PackagePublish (`flags['display-name'] ?? m.displayName ?? deriveDisplayName(...)` → `display_name` on the package request)",
+      "verifiedAt": "2026-11-06",
+      "evidenceScope": "in-repo"
+    },
+    "description": {
+      "status": "live",
+      "evidence": "packages/cli/src/commands/package/publish.ts#PackagePublish (`flags.description ?? m.description` → `description` on the package request)",
+      "verifiedAt": "2026-11-06",
+      "evidenceScope": "in-repo",
+      "note": "create-objectstack drops the template's own description at scaffold, so a scaffolded project carries none until its author writes one."
+    },
+    "visibility": {
+      "status": "dead",
+      "verifiedAt": "2026-11-06",
+      "evidenceScope": "in-repo",
+      "note": "Read only to be named in a warning: `uncarriedManifestWarnings` (packages/cli/src/commands/package/publish.ts) tells the author that `os package publish` does not read `visibility` from this file and that `--visibility` carries it. The value an author writes here changes nothing. Recorded on the taxonomy enrolment (the first time this file was in the denominator); not retired here."
+    },
+    "category": {
+      "status": "dead",
+      "verifiedAt": "2026-11-06",
+      "evidenceScope": "in-repo",
+      "note": "REMOVED 2026-11-06 — tombstoned at the schema (retiredKey carries the prescription; authoring it is a tsc error and a parse error), refused by name by `os package publish` (`retiredCategoryRefusal`) and by `check:template-manifests` for every shipped file. No D2 conversion: this file is not a stack collection member (D3 `marketplace-category-retired`). The entry stays because retiredKey keeps the key in the walked shape; declare `businessFunctions`, `industries` and `solutionType` instead."
+    },
+    "businessFunctions": {
+      "status": "planned",
+      "evidence": "packages/cli/src/commands/package/publish.ts#readPublishTaxonomy (validated against `CreatePackageRequestSchema.shape.businessFunctions` and sent as `business_functions`)",
+      "verifiedAt": "2026-11-06",
+      "evidenceScope": "in-repo",
+      "note": "1-3 business functions, the primary first; required to submit to the marketplace (the cloud submit policy, cloud#3661). CONSUMERS (named per the marketplace-taxonomy ruling): the cloud catalog stores and filters it — objectstack-ai/cloud#3661, not landed at cloud origin/main 8f574b9, whose publish route picks named body keys and drops this one today — and the console marketplace (`ui/`), whose facet filters, badges and labels are the console card the repo:cloud#3 seat files from the taxonomy PR. IN THIS REPO: `os package publish` judges the value with the spec's own schema and forwards it under its wire name (`readPublishTaxonomy`), so a malformed value is refused before any network call — a gate, not a consumer. Flip to `live` with a cloud-attributed pointer when cloud#3661 lands."
+    },
+    "industries": {
+      "status": "planned",
+      "evidence": "packages/cli/src/commands/package/publish.ts#readPublishTaxonomy (validated and sent as `industries`)",
+      "verifiedAt": "2026-11-06",
+      "evidenceScope": "in-repo",
+      "note": "Up to 3; absent means cross-industry, and the catalog hides this facet while no listing carries it. CONSUMERS (named per the marketplace-taxonomy ruling): the cloud catalog stores and filters it — objectstack-ai/cloud#3661, not landed at cloud origin/main 8f574b9, whose publish route picks named body keys and drops this one today — and the console marketplace (`ui/`), whose facet filters, badges and labels are the console card the repo:cloud#3 seat files from the taxonomy PR. IN THIS REPO: `os package publish` judges the value with the spec's own schema and forwards it under its wire name (`readPublishTaxonomy`), so a malformed value is refused before any network call — a gate, not a consumer. Flip to `live` with a cloud-attributed pointer when cloud#3661 lands."
+    },
+    "maturity": {
+      "status": "planned",
+      "evidence": "packages/cli/src/commands/package/publish.ts#readPublishTaxonomy (validated and sent as `maturity`)",
+      "verifiedAt": "2026-11-06",
+      "evidenceScope": "in-repo",
+      "note": "`beta` | `stable`, a flag beside the facets; the console shows a Beta badge on the card and the detail page. CONSUMERS (named per the marketplace-taxonomy ruling): the cloud catalog stores it and serves it as a search filter — objectstack-ai/cloud#3661, not landed at cloud origin/main 8f574b9, whose publish route picks named body keys and drops this one today — and the console marketplace (`ui/`), whose facet filters, badges and labels are the console card the repo:cloud#3 seat files from the taxonomy PR. IN THIS REPO: `os package publish` judges the value with the spec's own schema and forwards it under its wire name (`readPublishTaxonomy`), so a malformed value is refused before any network call — a gate, not a consumer. Flip to `live` with a cloud-attributed pointer when cloud#3661 lands."
+    },
+    "solutionType": {
+      "status": "live",
+      "evidence": "packages/cli/src/commands/package/publish.ts#readPublishTaxonomy (a declared `template` or `connector` is checked against the built artifact by `explainSolutionTypeContradiction` — a `template` whose artifact permits no `unmanaged` install, or a `connector` that declares no connector, is refused before any network call — then sent as `solution_type`)",
+      "verifiedAt": "2026-11-06",
+      "evidenceScope": "in-repo",
+      "note": "Live in this repo through the publish cross-check: authoring the key changes what publish accepts. Its catalog half — storing it, filtering by it, the `my_apps` view — is objectstack-ai/cloud#3661 (not landed at cloud 8f574b9, which drops the key today), and its console half (a type tab or segment) is the console card the repo:cloud#3 seat files."
+    },
+    "tags": {
+      "status": "live",
+      "evidence": "packages/cli/src/commands/package/publish.ts#PackagePublish (`if (m.tags !== undefined) pkgBody.tags = m.tags` — sent as written; the hosted route owns the bounds)",
+      "verifiedAt": "2026-11-06",
+      "evidenceScope": "in-repo",
+      "note": "Search only: tags generate no filter. The cloud catalog validates and stores them (cloud @8f574b9: packages/service-cloud/src/routes/package-publish.ts#readPublishTags)."
+    },
+    "iconUrl": {
+      "status": "live",
+      "evidence": "packages/cli/src/commands/package/publish.ts#PackagePublish (`flags['icon-url'] ?? m.iconUrl` → `icon_url`)",
+      "verifiedAt": "2026-11-06",
+      "evidenceScope": "in-repo"
+    },
+    "homepageUrl": {
+      "status": "live",
+      "evidence": "packages/cli/src/commands/package/publish.ts#PackagePublish (`flags['homepage-url'] ?? m.homepageUrl` → `homepage_url`)",
+      "verifiedAt": "2026-11-06",
+      "evidenceScope": "in-repo"
+    },
+    "license": {
+      "status": "live",
+      "evidence": "packages/cli/src/commands/package/publish.ts#PackagePublish (`flags.license ?? m.license` → `license`)",
+      "verifiedAt": "2026-11-06",
+      "evidenceScope": "in-repo"
+    },
+    "publisher": {
+      "status": "dead",
+      "verifiedAt": "2026-11-06",
+      "evidenceScope": "in-repo",
+      "note": "Decided by the platform: `os package publish` names it in a warning (`uncarriedManifestWarnings`, PLATFORM_DECIDED_MANIFEST_KEYS) and never sends it — the hosted control plane assigns the trust tier from the caller's credentials. An author's value has no effect. Recorded on the taxonomy enrolment; not retired here."
+    },
+    "isStarter": {
+      "status": "dead",
+      "verifiedAt": "2026-11-06",
+      "evidenceScope": "in-repo",
+      "note": "Decided by the platform: `os package publish` names it in a warning and never sends it; the hosted control plane honours a starter flag only on a first-party service-mode seed (cloud @8f574b9 package-publish.ts, `isFirstPartySeed`). The bundled blank template still ships `isStarter: true`, which is why the warning does not fail the publish. Recorded on the taxonomy enrolment; not retired here."
+    },
+    "translations": {
+      "status": "live",
+      "evidence": "packages/cli/src/commands/package/publish.ts#PackagePublish (the per-locale `displayName` / `description` / `tagline` / `readme` entries, a `readme` path resolved against the manifest directory, sent as `translations`)",
+      "verifiedAt": "2026-11-06",
+      "evidenceScope": "in-repo",
+      "children": {
+        "displayName": {
+          "status": "live",
+          "evidence": "packages/cli/src/commands/package/publish.ts#PackagePublish (the per-locale loop copies `displayName` into the `translations` it sends)",
+          "verifiedAt": "2026-11-06",
+          "evidenceScope": "in-repo"
+        },
+        "description": {
+          "status": "live",
+          "evidence": "packages/cli/src/commands/package/publish.ts#PackagePublish (the per-locale loop copies `description` into the `translations` it sends)",
+          "verifiedAt": "2026-11-06",
+          "evidenceScope": "in-repo"
+        },
+        "readme": {
+          "status": "live",
+          "evidence": "packages/cli/src/commands/package/publish.ts#PackagePublish (the per-locale loop copies `readme` into the `translations` it sends; a value naming a file is read relative to the manifest)",
+          "verifiedAt": "2026-11-06",
+          "evidenceScope": "in-repo"
+        },
+        "tagline": {
+          "status": "live",
+          "evidence": "packages/cli/src/commands/package/publish.ts#PackagePublish (the per-locale loop copies `tagline` into the `translations` it sends)",
+          "verifiedAt": "2026-11-06",
+          "evidenceScope": "in-repo"
+        },
+        "screenshotCaptions": {
+          "status": "live",
+          "evidence": "packages/cli/src/commands/package/publish.ts#PackagePublish (the per-locale loop copies `screenshotCaptions` into the `translations` it sends)",
+          "verifiedAt": "2026-11-06",
+          "evidenceScope": "in-repo"
+        }
+      }
+    },
+    "name": {
+      "status": "dead",
+      "verifiedAt": "2026-11-06",
+      "evidenceScope": "in-repo",
+      "note": "Written, never read: create-objectstack rewrites it to the project slug at scaffold (packages/create-objectstack/src/index.ts), and neither `os package publish` (which derives the package id from `manifestId` or the artifact) nor any other reader consults the file's value. Measured on the taxonomy enrolment; not retired here."
+    },
+    "specVersion": {
+      "status": "dead",
+      "verifiedAt": "2026-11-06",
+      "evidenceScope": "in-repo",
+      "note": "No reader of the file's value. The protocol-compatibility advisory reads the artifact manifest's `engines.protocol` (packages/cli/src/utils/protocol-version-gap.ts), not this key. Measured on the taxonomy enrolment; not retired here."
+    },
+    "namespace": {
+      "status": "live",
+      "evidence": "packages/create-objectstack/src/rewrite-identity.ts#readTemplateNamespace (the fallback source for the template's original namespace when the tree carries no objectstack.config.ts to read it from)",
+      "verifiedAt": "2026-11-06",
+      "evidenceScope": "in-repo",
+      "note": "Scaffold-only; the publish namespace is read off the compiled artifact (ADR-0048 addendum §A.2)."
+    },
+    "skills": {
+      "status": "dead",
+      "verifiedAt": "2026-11-06",
+      "evidenceScope": "in-repo",
+      "note": "No reader: described as 'for docs / picker', and neither create-objectstack's template picker (template-registry.ts) nor any docs build reads it. Measured on the taxonomy enrolment; not retired here."
+    },
+    "preview": {
+      "status": "planned",
+      "evidence": "packages/cli/src/commands/package/publish.ts#uncarriedManifestWarnings (named as a key the hosted catalog does not carry yet, with the tracking issue)",
+      "verifiedAt": "2026-11-06",
+      "evidenceScope": "in-repo",
+      "note": "Screenshots and a demo URL; publish has no upload path for them yet (https://github.com/objectstack-ai/objectstack/issues/27348).",
+      "children": {
+        "screenshots": {
+          "status": "planned",
+          "verifiedAt": "2026-11-06",
+          "evidenceScope": "in-repo",
+          "note": "Not carried by the hosted catalog yet; `os package publish` names the whole `preview` block in a warning (see the parent row)."
+        },
+        "demoUrl": {
+          "status": "planned",
+          "verifiedAt": "2026-11-06",
+          "evidenceScope": "in-repo",
+          "note": "Not carried by the hosted catalog yet; `os package publish` names the whole `preview` block in a warning (see the parent row)."
+        }
+      }
+    },
+    "scaffold": {
+      "status": "dead",
+      "verifiedAt": "2026-11-06",
+      "evidenceScope": "in-repo",
+      "note": "No reader: create-objectstack prompts for nothing from `scaffold.variables` and runs no `scaffold.postInstall` (packages/create-objectstack/src/index.ts names neither). Measured on the taxonomy enrolment; not retired here.",
+      "children": {
+        "variables": {
+          "status": "dead",
+          "verifiedAt": "2026-11-06",
+          "evidenceScope": "in-repo",
+          "note": "No reader; see the parent row."
+        },
+        "postInstall": {
+          "status": "dead",
+          "verifiedAt": "2026-11-06",
+          "evidenceScope": "in-repo",
+          "note": "No reader; see the parent row."
+        }
+      }
+    },
+    "readmePath": {
+      "status": "live",
+      "evidence": "packages/cli/src/commands/package/publish.ts#PackagePublish (read relative to the manifest when neither --readme nor --readme-file is given, sent as `readme`)",
+      "verifiedAt": "2026-11-06",
+      "evidenceScope": "in-repo"
+    }
+  }
+}
