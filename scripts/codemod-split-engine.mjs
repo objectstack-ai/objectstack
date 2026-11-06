@@ -315,7 +315,20 @@ const STAY_REASONS = Object.freeze({
   'parameter-shadows': 'a parameter shadows a stub local (`host`, `readX`, `writeX`)',
   'foreign-private': 'it reads a private or protected instance member off a receiver other than `this` (a module function cannot)',
   'private-static': 'it reads a non-public static of its class (the statics route is `ObjectQL`\'s alone; the scoped classes declare none)',
+  'facade-taken': 'it hands the engine on, and the class declares a member named `facade` (the identity port would shadow it)',
 });
+
+/**
+ * The fourth pass's identity port (#30020 R1): the host entry a moved body
+ * reads the engine itself through, where the method read a bare `this`
+ * (`ql: this`, `new ScopedContext(ctx, this)`, `(this as any)._flag`). The
+ * host factory hands it as the engine (`facade: engine`), so at each such site
+ * the body sees the same object the method saw.
+ */
+const FACADE_MEMBER = 'facade';
+const FACADE_DOC = '  /** The engine itself: a moved body reads `this.facade` where the method read a bare `this` (#30020). */';
+const facadeIfaceLine = (classType) => `${FACADE_DOC}\n  readonly ${FACADE_MEMBER}: ${classType};`;
+const FACADE_INSTALL_LINE = `      ${FACADE_MEMBER}: engine,`;
 
 /** Every reason a top-level declaration ahead of the class stays in engine.ts. */
 const TOP_STAY_REASONS = Object.freeze({
@@ -539,10 +552,14 @@ function readMethod(tm, ctx, m) {
     const tag = detail ? `${code}: ${detail}` : code;
     if (!reasons.includes(tag)) reasons.push(tag);
   };
-  const host = new Map(); // member -> 'method' | 'getter'
+  const host = new Map(); // member -> 'method' | 'getter' | 'facade'
   const writes = new Set(); // fields the body assigns: the host carries a setter for each
   const imports = new Map(); // local -> { value }
   const moduleRefs = new Map(); // engine.ts top-level name -> { value }
+  // The identity port (#30020 R1, the fourth pass only): the start of every
+  // bare `this` in the body, each of which the facet member reads as
+  // `this.facade`, the host entry that hands the engine itself.
+  const identity = [];
   // The private-static-through-host rule: the statics the body reads as
   // `ObjectQL.x`, whether one is non-public (that takes the route), what the
   // route cannot carry, and whether the body names `ObjectQL` any other way.
@@ -550,7 +567,7 @@ function readMethod(tm, ctx, m) {
   const routeBlockers = [];
   let readsNonPublicStatic = false;
   let classOther = false;
-  const result = () => ({ reasons, host, writes, imports, moduleRefs, classStatics, routeBlockers, readsNonPublicStatic, classOther });
+  const result = () => ({ reasons, host, writes, imports, moduleRefs, classStatics, routeBlockers, readsNonPublicStatic, classOther, identity });
 
   if (m.isStatic() && ctx.members.has(m.getName())) add('static-name-shared');
   if (!m.getBody()) add('no-body');
@@ -605,7 +622,35 @@ function readMethod(tm, ctx, m) {
         if (thisContainer(tm, node) !== m) continue;
         if (m.isStatic()) { add('static-this'); continue; }
         const parent = node.getParent();
-        if (!Node.isPropertyAccessExpression(parent) || parent.getExpression() !== node) { add('bare-this'); continue; }
+        const inBody = region === body && !inTypePosition(tm, node, m);
+        if (ctx.identityPort && inBody && Node.isElementAccessExpression(parent) && parent.getExpression() === node) {
+          // R3 (#30020): `this[k]`, `k` typed as string literals each naming a
+          // field, reads (and writes) those fields through host getters (and
+          // setters); the body's text is unchanged.
+          const keys = literalFieldKeys(ctx, checker, parent.getArgumentExpression());
+          if (!keys) { add('bare-this'); continue; }
+          const outer = parent.getParent();
+          if (Node.isCallExpression(outer) && outer.getExpression() === parent) { add('field-call', keys.join('|')); continue; }
+          const written = isWritten(tm, parent);
+          if (written && Node.isDeleteExpression(outer)) { add('this-write', keys.join('|')); continue; }
+          for (const k of keys) {
+            host.set(k, 'getter');
+            if (written) writes.add(k);
+          }
+          continue;
+        }
+        if (!Node.isPropertyAccessExpression(parent) || parent.getExpression() !== node) {
+          // R1 (#30020): a `this` that hands the engine on reads the host's
+          // `facade`, the engine itself.
+          if (ctx.identityPort && inBody && !Node.isElementAccessExpression(parent)) {
+            if (ctx.members.has(FACADE_MEMBER)) { add('facade-taken'); continue; }
+            identity.push(node.getStart());
+            host.set(FACADE_MEMBER, 'facade');
+            continue;
+          }
+          add('bare-this');
+          continue;
+        }
         const memberNameNode = parent.getNameNode();
         if (!Node.isIdentifier(memberNameNode)) { add('bare-this'); continue; }
         const member = memberNameNode.getText();
@@ -704,6 +749,25 @@ function readMethod(tm, ctx, m) {
     if (classOther) add('static-route-conflict');
   }
   return result();
+}
+
+/**
+ * R3 (#30020): the fields a computed key `this[k]` can name, when `k`'s type
+ * is a string literal or a union of them and each one names a field of the
+ * class; null otherwise, and the body stays.
+ */
+function literalFieldKeys(ctx, checker, key) {
+  if (!key) return null;
+  const type = checker.getTypeAtLocation(key.compilerNode);
+  const parts = type.isUnion() ? type.types : [type];
+  const keys = [];
+  for (const t of parts) {
+    if (!t.isStringLiteral()) return null;
+    const info = ctx.members.get(t.value);
+    if (!info || info.kind !== 'field') return null;
+    keys.push(t.value);
+  }
+  return keys.length > 0 ? [...new Set(keys)].sort() : null;
 }
 
 /** The name of the class's non-public instance member `pa` reads, or null. */
@@ -887,6 +951,7 @@ function hostsTexts(facets) {
 /** The member lines of one facet's host factory, in its install call: sorted, a getter's setter after it. */
 function hostInstallLines(members, written) {
   return [...members.keys()].sort().flatMap((member) => {
+    if (members.get(member) === 'facade') return [FACADE_INSTALL_LINE];
     if (members.get(member) === 'getter') {
       return [`      get ${member}() { return engine.${member}; },`,
         ...(written.has(member) ? [`      set ${member}(v) { engine.${member} = v; },`] : [])];
@@ -1216,15 +1281,50 @@ function namedStatement(head, names, tail) {
   return out.join('\n');
 }
 
-/** `import { … }` and `import type { … }` from one specifier, values first. */
-function importPair(specifier, uses) {
+/**
+ * `import { … }` and `import type { … }` from one specifier, values first.
+ * `styles` keeps a statement a hand edit left on one line (`'line'`) on one
+ * line, however long; the first pass's own form (`'wrap'`, the default) is
+ * `namedStatement`'s.
+ */
+function importPair(specifier, uses, styles = {}) {
   const out = [];
   const entries = [...uses.entries()].sort(byName);
   const values = entries.filter(([, u]) => u.value).map(([n]) => n);
   const types = entries.filter(([, u]) => !u.value).map(([n]) => n);
-  if (values.length > 0) out.push(namedStatement('import', values, ` from '${specifier}';`));
-  if (types.length > 0) out.push(namedStatement('import type', types, ` from '${specifier}';`));
+  const stmt = (head, names, style) => (style === 'line'
+    ? `${head} { ${names.join(', ')} } from '${specifier}';` : namedStatement(head, names, ` from '${specifier}';`));
+  if (values.length > 0) out.push(stmt('import', values, styles.value));
+  if (types.length > 0) out.push(stmt('import type', types, styles.type));
   return out;
+}
+
+/**
+ * The form each statement of a leaf or `./engine.js` import run is in:
+ * `'wrap'` when it is `namedStatement`'s, `'line'` when a hand edit grew it on
+ * one line past the wrap width (#30227 left one so), each with its names
+ * sorted; null when a statement is in neither form. A move renders the run
+ * back in the forms it read, and so does the undo, so neither rewraps a line
+ * the hand wrote.
+ */
+function runStyles(text, decls, specifier) {
+  const styles = {};
+  if (specifier !== leafSpecifier() && specifier !== './engine.js') return styles;
+  for (const d of decls) {
+    const stmt = text.slice(d.start, d.end);
+    const type = stmt.startsWith('import type ');
+    const head = type ? 'import type' : 'import';
+    const names = [...d.bindings.keys()].sort();
+    const tail = ` from '${specifier}';`;
+    let style;
+    if (stmt === namedStatement(head, names, tail)) style = 'wrap';
+    else if (stmt === `${head} { ${names.join(', ')} }${tail}`) style = 'line';
+    else return null;
+    const key = type ? 'type' : 'value';
+    if (styles[key]) return null;
+    styles[key] = style;
+  }
+  return styles;
 }
 
 /**
@@ -1308,6 +1408,35 @@ function forwardList(m) {
   return m.getParameters().map((p) => (p.isRestParameter() ? `...${p.getName()}` : p.getName()));
 }
 
+/** A facet module header's import paragraph: values imported from `engine.ts` (lever (a)), or types only. */
+const VALUES_CYCLE_PARA = [
+  ' * Values that stayed in `engine.ts` are imported from it (lever (a) of',
+  ' * ruling 6591753301); every use is inside a function body, so the import',
+  ' * cycle is never read at evaluation time. `index.ts` re-exports nothing from',
+  ' * this module.',
+].join('\n');
+const TYPES_CYCLE_PARA = [
+  ' * The module imports `engine.ts` for types only, so the two modules form no',
+  ' * evaluation cycle. `index.ts` re-exports nothing from this module.',
+].join('\n');
+
+/** Does a facet module import a VALUE from `./engine.js`? */
+const importsEngineValues = (text) => /^import \{[^}]*\} from '\.\/engine\.js';$/m.test(text);
+
+/**
+ * A facet module's header paragraph made to say what its `./engine.js` lines
+ * import (R4 of #30020: a move that brings the first value import switches
+ * it, and the undo switches it back). Refuses a header carrying neither form.
+ */
+function withCyclePara(text, file) {
+  const values = importsEngineValues(text);
+  const [from, to] = values ? [TYPES_CYCLE_PARA, VALUES_CYCLE_PARA] : [VALUES_CYCLE_PARA, TYPES_CYCLE_PARA];
+  if (text.includes(to)) return text;
+  const at = text.indexOf(from);
+  if (at < 0 || text.indexOf(from, at + 1) >= 0) refuse(`${file}: its header carries no single import paragraph as the first pass writes one`);
+  return text.slice(0, at) + to + text.slice(at + from.length);
+}
+
 function moduleText(moduleFile, title, movers, scope, leafNames, routed = false) {
   const hostName = hostNameOf(moduleFile);
   const facet = facetNameOf(moduleFile);
@@ -1358,15 +1487,7 @@ function moduleText(moduleFile, title, movers, scope, leafNames, routed = false)
     out.push(` * static block; the class as a type is \`${CLASS_TYPE_ALIAS}\`.`);
   }
   out.push(' *');
-  if (readsHostValues) {
-    out.push(' * Values that stayed in `engine.ts` are imported from it (lever (a) of');
-    out.push(' * ruling 6591753301); every use is inside a function body, so the import');
-    out.push(' * cycle is never read at evaluation time. `index.ts` re-exports nothing from');
-    out.push(' * this module.');
-  } else {
-    out.push(' * The module imports `engine.ts` for types only, so the two modules form no');
-    out.push(' * evaluation cycle. `index.ts` re-exports nothing from this module.');
-  }
+  out.push(readsHostValues ? VALUES_CYCLE_PARA : TYPES_CYCLE_PARA);
   out.push(' */');
   out.push('');
   out.push(...importLines(scope, movers, { needsHost, moduleRefs, leafNames, routed }));
@@ -1425,7 +1546,40 @@ function facetMethodText(r, hostName) {
   const params = [...(r.host.size > 0 ? [`this: Pick<${hostName}, ${picks}>`] : []), ...paramsText(m)];
   const ret = m.getReturnTypeNode() ? `: ${m.getReturnTypeNode().getText()}` : '';
   const typeParams = m.getTypeParameters().length > 0 ? `<${m.getTypeParameters().map((t) => t.getText()).join(', ')}>` : '';
-  return `  ${r.doc ?? `${placeholderDoc(r.name)}\n  `}static ${m.isAsync() ? 'async ' : ''}${r.name}${typeParams}(${params.join(', ')})${ret} ${m.getBody().getText()}`;
+  return `  ${r.doc ?? `${placeholderDoc(r.name)}\n  `}static ${m.isAsync() ? 'async ' : ''}${r.name}${typeParams}(${params.join(', ')})${ret} ${identityBodyText(m.getBody(), r.identity)}`;
+}
+
+/**
+ * A method's body text with R1 applied (#30020): each bare `this` at the
+ * starts `identity` lists reads `this.facade`. No other byte changes, so the
+ * undo (`identityUndoText`) is the one inverse rewrite.
+ */
+function identityBodyText(body, identity = []) {
+  const start = body.getStart();
+  let text = body.getText();
+  for (const at of [...identity].sort((a, b) => b - a)) {
+    if (text.slice(at - start, at - start + 4) !== 'this') refuse(`identity port: no \`this\` at offset ${at}`);
+    text = `${text.slice(0, at - start)}this.${FACADE_MEMBER}${text.slice(at - start + 4)}`;
+  }
+  return text;
+}
+
+/**
+ * R1's inverse, read off a facet member at head: its body text with each
+ * `this.facade` its own `this` reads back to a bare `this`.
+ */
+function identityUndoText(tm, fm) {
+  const { Node, SyntaxKind } = tm;
+  const body = fm.getBody();
+  const start = body.getStart();
+  let text = body.getText();
+  const sites = body.getDescendantsOfKind(SyntaxKind.PropertyAccessExpression).filter((pa) =>
+    pa.getExpression().getKind() === SyntaxKind.ThisKeyword && Node.isIdentifier(pa.getNameNode()) &&
+    pa.getName() === FACADE_MEMBER && thisContainer(tm, pa.getExpression()) === fm);
+  for (const pa of sites.sort((a, b) => b.getStart() - a.getStart())) {
+    text = `${text.slice(0, pa.getStart() - start)}this${text.slice(pa.getEnd() - start)}`;
+  }
+  return text;
 }
 
 /**
@@ -3203,7 +3357,7 @@ function membersContext(tm, text, { pins = PATH_READER_PINS, needles = PATH_READ
   const sf = parse(tm, HOST_PATH, text);
   const cls = sf.getClass(CLASS_NAME);
   if (!cls) refuse(`no class ${CLASS_NAME} in ${HOST_BASENAME}`);
-  return { text, sf, cls, members: instanceMembers(tm, cls), scope: moduleScope(tm, sf), statics: classStaticsOf(tm, cls), pins, needles, classNeedles };
+  return { text, sf, cls, members: instanceMembers(tm, cls), scope: moduleScope(tm, sf), statics: classStaticsOf(tm, cls), pins, needles, classNeedles, identityPort: true };
 }
 
 const isGeneratedStub = (m) => Boolean(m.getBody() && STUB_MARK_LINE.test(m.getBody().getText()));
@@ -3252,7 +3406,18 @@ function interfaceRegionOf(text, hostName) {
   const end = text.indexOf('\n}', start);
   const members = new Map();
   let classType = null;
-  for (const line of text.slice(start, end).split('\n')) {
+  const lines = text.slice(start, end).split('\n');
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i];
+    if (line === FACADE_DOC) {
+      // The identity port (#30020 R1): its docblock, then `readonly facade: <class>;`.
+      const f = new RegExp(`^ {2}readonly ${FACADE_MEMBER}: ([A-Za-z]+);$`).exec(lines[i + 1] ?? '');
+      if (!f || (classType && classType !== f[1])) return null;
+      classType = f[1];
+      members.set(FACADE_MEMBER, { line: `${line}\n${lines[i + 1]}`, readonly: true, facade: true });
+      i += 1;
+      continue;
+    }
     const m = /^ {2}(readonly )?([A-Za-z_$][\w$]*): ([A-Za-z]+)\['([A-Za-z_$][\w$]*)'\];$/.exec(line);
     if (!m || m[2] !== m[4] || (classType && classType !== m[3])) return null;
     classType = m[3];
@@ -3275,7 +3440,8 @@ function installRegionOf(text, moduleFile) {
   const written = new Set();
   for (const line of text.slice(start, end).split('\n')) {
     let m;
-    if ((m = /^ {6}get ([\w$]+)\(\) \{ return engine\.\1; \},$/.exec(line))) members.set(m[1], 'getter');
+    if (line === FACADE_INSTALL_LINE) members.set(FACADE_MEMBER, 'facade');
+    else if ((m = /^ {6}get ([\w$]+)\(\) \{ return engine\.\1; \},$/.exec(line))) members.set(m[1], 'getter');
     else if ((m = /^ {6}set ([\w$]+)\(v\) \{ engine\.\1 = v; \},$/.exec(line))) written.add(m[1]);
     else if ((m = /^ {6}get ([\w$]+)\(\) \{ return engine\.\1\.bind\(engine\); \},$/.exec(line))) members.set(m[1], 'method');
     else if ((m = /^ {6}([\w$]+): \(\.\.\.a\) => engine\.\1\(\.\.\.a\),$/.exec(line))) members.set(m[1], 'method');
@@ -3346,10 +3512,10 @@ function importDeclsOf(tm, moduleFile, text) {
 }
 
 /** The lines one specifier's bindings render to in a facet module: the leaf and `engine.ts` by `importPair`, a package by `specifierImportLines`. */
-function specifierLines(specifier, bindings) {
+function specifierLines(specifier, bindings, styles = {}) {
   if (specifier === leafSpecifier() || specifier === './engine.js') {
     if ([...bindings].some(([local, e]) => e.form !== 'named' || e.imported !== local)) return null;
-    return importPair(specifier, new Map([...bindings].map(([n, e]) => [n, { value: e.value }])));
+    return importPair(specifier, new Map([...bindings].map(([n, e]) => [n, { value: e.value }])), styles);
   }
   return specifierImportLines(specifier, bindings);
 }
@@ -3380,7 +3546,7 @@ function pruneModuleImports(tm, moduleFile, text, inverse = { added: new Set(), 
       const end = text[run.at(-1).end] === '\n' ? run.at(-1).end + 1 : run.at(-1).end;
       edits.push({ start, end, text: '' });
     } else {
-      const lines = specifierLines(specifier, kept);
+      const lines = specifierLines(specifier, kept, runStyles(text, run, specifier) ?? {});
       if (!lines) refuse(`${moduleFile}: ${specifier} is imported in a form this pass does not write`);
       edits.push({ start, end: run.at(-1).end, text: lines.join('\n') });
     }
@@ -3441,6 +3607,12 @@ function planMembers(tm, text, moduleTexts, names, { anchors = SECTION_ANCHORS, 
       }
       for (const [n, use] of r.moduleRefs) {
         if (n === CLASS_NAME && (routed || (!use.value && typeImportsClass))) continue;
+        // R4 (#30020): a name `engine.ts` already exports is imported from it
+        // (lever (a) of ruling 6591753301); no export list widens.
+        if (n !== CLASS_NAME && ctx.scope.exported.has(n) && ctx.scope.bindings.get(n)?.kind === 'local') {
+          if (routed) refuse(`${r.name} reads ${n}, a name ${HOST_BASENAME} exports, and ${file} takes the statics route: this pass does not import into a routed module's \`./engine.js\` line`);
+          continue;
+        }
         refuse(`${r.name} reads ${n}, a top-level name of ${HOST_BASENAME}: this pass does not widen the generated export lists`);
       }
       for (const local of r.imports.keys()) {
@@ -3548,10 +3720,11 @@ function generateMembers(tm, text, moduleTexts, planned) {
       if (!iface) refuse(`${file}: its host interface is not as the first pass wrote it`);
       const lines = new Map([...iface.members].map(([k, v]) => [k, v.line]));
       for (const [k, kind] of reads) {
-        const readonly = kind === 'getter' && !writes.has(k);
+        const readonly = kind === 'facade' || (kind === 'getter' && !writes.has(k));
         const prev = iface.members.get(k);
         if (prev && prev.readonly && !readonly) refuse(`${file}: host member ${k} is read-only there, and a moved body ${kind === 'getter' ? 'assigns' : 'calls'} it`);
-        if (!prev) lines.set(k, `  ${readonly ? 'readonly ' : ''}${k}: ${iface.classType}['${k}'];`);
+        if (prev && Boolean(prev.facade) !== (kind === 'facade')) refuse(`${file}: host member ${k} is not the identity port there`);
+        if (!prev) lines.set(k, kind === 'facade' ? facadeIfaceLine(iface.classType) : `  ${readonly ? 'readonly ' : ''}${k}: ${iface.classType}['${k}'];`);
       }
       modEdits.push({ start: iface.start, end: iface.end, text: [...lines.keys()].sort().map((k) => lines.get(k)).join('\n') });
     }
@@ -3566,6 +3739,14 @@ function generateMembers(tm, text, moduleTexts, planned) {
         slot.set(local, { form: b.form, imported: b.imported, value: Boolean(prev && prev.value) || (use.value && !b.typeOnly) });
         adds.set(b.specifier, slot);
       }
+      // R4: the names `engine.ts` already exports, onto the module's `./engine.js` lines.
+      for (const [n, use] of r.moduleRefs) {
+        if (n === CLASS_NAME) continue;
+        const slot = adds.get('./engine.js') ?? new Map();
+        const prev = slot.get(n);
+        slot.set(n, { form: 'named', imported: n, value: Boolean(prev && prev.value) || use.value });
+        adds.set('./engine.js', slot);
+      }
     }
     const tail = decls.findIndex((d) => d.specifier === leafSpecifier() || d.specifier === './engine.js');
     const inserts = new Map(); // offset -> [{ order, text }]
@@ -3575,7 +3756,8 @@ function generateMembers(tm, text, moduleTexts, planned) {
         if (run.at(-1).i - run[0].i !== run.length - 1) refuse(`${file}: the imports of ${specifier} are not one run`);
         const have = new Map();
         for (const { d } of run) for (const [local, e] of d.bindings) have.set(local, e);
-        const before = specifierLines(specifier, have);
+        const styles = runStyles(mod, run.map(({ d }) => d), specifier);
+        const before = styles && specifierLines(specifier, have, styles);
         const span = mod.slice(run[0].d.start, run.at(-1).d.end);
         if (!before || before.join('\n') !== span) refuse(`${file}: the imports of ${specifier} are not as the first pass wrote them`);
         const merged = new Map(have);
@@ -3584,7 +3766,7 @@ function generateMembers(tm, text, moduleTexts, planned) {
           if (prev && (prev.form !== e.form || prev.imported !== e.imported)) refuse(`${file}: ${local} is bound differently there`);
           merged.set(local, { ...e, value: Boolean(prev && prev.value) || e.value });
         }
-        modEdits.push({ start: run[0].d.start, end: run.at(-1).d.end, text: specifierLines(specifier, merged).join('\n') });
+        modEdits.push({ start: run[0].d.start, end: run.at(-1).d.end, text: specifierLines(specifier, merged, styles).join('\n') });
         continue;
       }
       for (const [local] of slot) if (decls.some((d) => d.bindings.has(local))) refuse(`${file}: ${local} is bound there from another specifier`);
@@ -3610,7 +3792,7 @@ function generateMembers(tm, text, moduleTexts, planned) {
       list.sort((a, b) => a.order - b.order);
       modEdits.push({ start: at, end: at, text: list.map((x) => x.text).join('') });
     }
-    moduleOut.set(file, applyOrderedEdits(mod, modEdits));
+    moduleOut.set(file, withCyclePara(applyOrderedEdits(mod, modEdits), file));
   }
   return { host: pruned.text, modules: moduleOut, pruned: pruned.removed };
 }
@@ -3686,7 +3868,8 @@ function undoMembersModule(tm, file, text, names, title, fail, baseText) {
     const kept = union(keep);
     edits.push({ start: iface.start, end: iface.end, text: [...iface.members].filter(([k]) => kept.has(k)).map(([, v]) => v.line).join('\n') });
   }
-  return pruneModuleImports(tm, file, applyOrderedEdits(text, edits), inverse);
+  if (importsEngineValues(text) !== text.includes(VALUES_CYCLE_PARA)) fail(`${file}: its header's import paragraph does not say what its \`./engine.js\` lines import`);
+  return withCyclePara(pruneModuleImports(tm, file, applyOrderedEdits(text, edits), inverse), file);
 }
 
 /** The statics `ObjectQL.x` each routed module's text reads. */
@@ -3750,7 +3933,7 @@ function verifyMembers(tm, baseText, headText, baseModules, headModules, {
     if (hm.isAsync()) fail(`${name}: the stub kept \`async\``);
     const baseDoc = bm.getScope() === 'private' && bm.getStart(true) < bm.getStart() ? baseText.slice(bm.getStart(true), bm.getStart()) : null;
     if (mv.docMoved !== (baseDoc !== null)) fail(`${name}: its stub says its docblock ${mv.docMoved ? 'moved' : 'stayed'}, and the base method is ${baseDoc === null ? 'not a private one with a docblock' : 'a private one with a docblock'}`);
-    if (fm.text !== facetMethodText({ name, node: bm, host: read.host, doc: baseDoc }, hostNameOf(file))) {
+    if (fm.text !== facetMethodText({ name, node: bm, host: read.host, doc: baseDoc, identity: read.identity }, hostNameOf(file))) {
       fail(`${name}: the facet member is not its base method's text (docblock, parameters, return type, body)`);
     }
   }
@@ -3779,7 +3962,7 @@ function verifyMembers(tm, baseText, headText, baseModules, headModules, {
   for (const mv of moved) {
     if (!mv.fm) continue;
     const body = mv.hm.getBody();
-    edits.push({ start: body.getStart(), end: body.getEnd(), text: mv.fm.getBody().getText() });
+    edits.push({ start: body.getStart(), end: body.getEnd(), text: identityUndoText(tm, mv.fm) });
     if (mv.fm.isAsync()) edits.push({ start: mv.hm.getNameNode().getStart(), end: mv.hm.getNameNode().getStart(), text: 'async ' });
     if (mv.docMoved) edits.push({ start: mv.hm.getStart(), end: mv.hm.getStart(), text: mv.moduleText.slice(mv.fm.getStart(true), mv.fm.getStart()) });
   }
@@ -3806,7 +3989,8 @@ function verifyMembers(tm, baseText, headText, baseModules, headModules, {
     if (!inst) { fail(`${file}: its host factory in ${HOST_BASENAME} is not as the first pass writes it`); continue; }
     for (const [k, v] of iface.members) {
       const kind = inst.members.get(k);
-      if (!kind || v.readonly !== (kind === 'getter' && !inst.written.has(k))) fail(`${file}: host member ${k} is not the same member in its interface and its factory`);
+      const readonly = kind === 'facade' || (kind === 'getter' && !inst.written.has(k));
+      if (!kind || v.readonly !== readonly || Boolean(v.facade) !== (kind === 'facade')) fail(`${file}: host member ${k} is not the same member in its interface and its factory`);
     }
     if (inst.members.size !== iface.members.size) fail(`${file}: its host factory forwards members its interface does not declare`);
     const u = undone.get(file);
