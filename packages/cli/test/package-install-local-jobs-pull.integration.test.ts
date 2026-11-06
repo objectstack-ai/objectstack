@@ -94,7 +94,14 @@ const LEGACY_APP_ID = 'com.example.pulllegacy';
 const LEGACY_BOUND = 'pull_legacy_bound';
 const LEGACY_UNBOUND = 'pull_legacy_unbound';
 
-const MAPPING_NAME = 'orders_pull';
+/**
+ * Each package's own mapping, named under its namespace: a mapping name is held
+ * by ONE package per deployment (ADR-0048 §3.4 narrowed, 2026-11-06), so these
+ * packages, installed into one kernel, cannot share one. `mappingTypo` is the
+ * one-letter typo of a package's own mapping name — a mapping it never declares.
+ */
+const mappingNameOf = (ns: string) => `${ns}_orders_pull`;
+const mappingTypo = (ns: string) => `${ns}_orders_pul`;
 
 function orderObject(name: string) {
   return {
@@ -105,10 +112,10 @@ function orderObject(name: string) {
   };
 }
 
-/** A mapping that pulls into `target`; `withSource: false` drops its `connectorSource` (an import-only mapping). */
-function mapping(target: string, withSource = true) {
+/** The mapping `name`, pulling into `target`; `withSource: false` drops its `connectorSource` (an import-only mapping). */
+function mapping(name: string, target: string, withSource = true) {
   return {
-    name: MAPPING_NAME,
+    name,
     targetObject: target,
     fieldMapping: [{ source: 'id', target: 'external_id' }],
     mode: 'upsert',
@@ -127,15 +134,15 @@ function pullArtifact(id: string, ns: string, opts: { job: unknown; withSource?:
   return {
     manifest: { id, namespace: ns, version: '0.1.0', type: 'app', name: ns },
     objects: [orderObject(`${ns}_order`)],
-    mappings: [mapping(`${ns}_order`, opts.withSource ?? true)],
+    mappings: [mapping(mappingNameOf(ns), `${ns}_order`, opts.withSource ?? true)],
     jobs: [opts.job],
   };
 }
 
-const GOOD_ARTIFACT = pullArtifact(GOOD_APP_ID, 'pull_jobs', { job: pullJob(GOOD_JOB, MAPPING_NAME) });
-const MISSING_ARTIFACT = pullArtifact(MISSING_APP_ID, 'pull_missing', { job: pullJob(MISSING_JOB, 'orders_pul') });
-const NOSOURCE_ARTIFACT = pullArtifact(NOSOURCE_APP_ID, 'pull_nosource', { job: pullJob(NOSOURCE_JOB, MAPPING_NAME), withSource: false });
-const OFF_ARTIFACT = pullArtifact(OFF_APP_ID, 'pull_off', { job: pullJob(OFF_JOB, 'orders_pul', { enabled: false }) });
+const GOOD_ARTIFACT = pullArtifact(GOOD_APP_ID, 'pull_jobs', { job: pullJob(GOOD_JOB, mappingNameOf('pull_jobs')) });
+const MISSING_ARTIFACT = pullArtifact(MISSING_APP_ID, 'pull_missing', { job: pullJob(MISSING_JOB, mappingTypo('pull_missing')) });
+const NOSOURCE_ARTIFACT = pullArtifact(NOSOURCE_APP_ID, 'pull_nosource', { job: pullJob(NOSOURCE_JOB, mappingNameOf('pull_nosource')), withSource: false });
+const OFF_ARTIFACT = pullArtifact(OFF_APP_ID, 'pull_off', { job: pullJob(OFF_JOB, mappingTypo('pull_off'), { enabled: false }) });
 
 /** What the install route persists — the compiled bundle, flattened — in an earlier build's layout. */
 const LEGACY_ENTRY = {
@@ -150,8 +157,8 @@ const LEGACY_ENTRY = {
     type: 'app',
     name: 'Pull Legacy',
     objects: [orderObject('pull_legacy_order')],
-    mappings: [mapping('pull_legacy_order')],
-    jobs: [pullJob(LEGACY_BOUND, MAPPING_NAME), pullJob(LEGACY_UNBOUND, 'orders_pul')],
+    mappings: [mapping(mappingNameOf('pull_legacy'), 'pull_legacy_order')],
+    jobs: [pullJob(LEGACY_BOUND, mappingNameOf('pull_legacy')), pullJob(LEGACY_UNBOUND, mappingTypo('pull_legacy'))],
   },
   installedAt: '2026-01-01T00:00:00.000Z',
   installedBy: 'admin',
@@ -415,7 +422,7 @@ describe('install-local refuses an enabled job whose pull does not bind', () => 
     // The CLI names the code the runtime answered with.
     expect(run.output).toMatch(/Install failed \(422 VALIDATION_ERROR\)/);
     expect(run.output).toContain(MISSING_JOB);
-    expect(run.output).toContain("pull.mapping: this artifact declares no mapping 'orders_pul'");
+    expect(run.output).toContain(`pull.mapping: this artifact declares no mapping '${mappingTypo('pull_missing')}'`);
     expect(run.output).toContain('os validate');
   });
 
@@ -424,7 +431,7 @@ describe('install-local refuses an enabled job whose pull does not bind', () => 
     expect(run.exit, `${run.output}${transcript('install')}`).toBe(1);
     expect(run.output).toMatch(/Install failed \(422 VALIDATION_ERROR\)/);
     expect(run.output).toContain(NOSOURCE_JOB);
-    expect(run.output).toContain(`mapping '${MAPPING_NAME}' declares no connectorSource`);
+    expect(run.output).toContain(`mapping '${mappingNameOf('pull_nosource')}' declares no connectorSource`);
   });
 
   it('a refused package leaves nothing behind: not in the ledger, and its job not scheduled', () => {
@@ -476,6 +483,6 @@ describe('rehydrate of an entry an earlier build installed, holding a pull job t
     const out = readings.output.restart ?? '';
     const line = out.split('\n').find((l) => l.includes(LEGACY_UNBOUND) && l.includes('NOT scheduled'));
     expect(line, `no warn names the withheld pull job${transcript('restart')}`).toBeDefined();
-    expect(line).toContain("pull.mapping: this artifact declares no mapping 'orders_pul'");
+    expect(line).toContain(`pull.mapping: this artifact declares no mapping '${mappingTypo('pull_legacy')}'`);
   });
 });

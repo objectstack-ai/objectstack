@@ -5,7 +5,7 @@
 **Builds on**: [ADR-0003](./0003-package-as-first-class-citizen.md) (package as first-class citizen), [ADR-0005](./0005-metadata-customization-overlay.md) (artifact vs runtime overlay precedence), [ADR-0008](./0008-metadata-repository-and-change-log.md) (metadata repository, `MetaRef` identity), [ADR-0010](./0010-metadata-protection-model.md) (package provenance / `_packageId` stamping)
 **Consumers**: `@objectstack/objectql` (`SchemaRegistry.registerItem`, `ObjectQL.registerApp`, install path), `@objectstack/console` / `objectui` (routing + metadata resolution), package authors, CLI/CI install path, the app marketplace registry.
 **Surfaced by**: ADR-0046 review (doc naming) → generalised to all bare-named metadata → re-examined through the app-marketplace install lens.
-**Addenda**: [2026-08-08 — publish-time / marketplace namespace exclusivity](#addendum-2026-08-08-publish-time--marketplace-namespace-exclusivity) (**Accepted** 2026-08-08 — maintainer ruling on #1825, [acceptance comment 5226411687](https://github.com/objectstack-ai/objectstack/issues/1825#issuecomment-5226411687), landed by PR #6671; additive to §3.2, supersedes nothing).
+**Addenda**: [2026-08-08 — publish-time / marketplace namespace exclusivity](#addendum-2026-08-08-publish-time--marketplace-namespace-exclusivity) (**Accepted** 2026-08-08 — maintainer ruling on #1825, [acceptance comment 5226411687](https://github.com/objectstack-ai/objectstack/issues/1825#issuecomment-5226411687), landed by PR #6671; additive to §3.2, supersedes nothing); [2026-11-06 — bare names resolved without a package hold one package](#addendum-2026-11-06-bare-names-resolved-without-a-package-hold-one-package--34-narrowed) (**Accepted**, ruling C on #30798, phase 1; narrows §3.4 for picklists, mappings and datasets, supersedes nothing).
 
 ---
 
@@ -265,6 +265,21 @@ package — stays covered by the `naming/namespace-prefix` lint in `os lint`.
 > types a shared name is a real ambiguity, not the disambiguable one described
 > above. Every other type keeps §3.4 as written. See
 > [Addendum (2026-10-08)](#addendum-2026-10-08-the-security-catalog-holds-one-name-per-deployment--34-narrowed).
+
+> **Narrowed (2026-11-06) — picklists, mappings and datasets are out of §3.4.**
+> Their consumers resolve the name with no package — a field's `picklist`, an
+> import's `mappingName`, a dashboard's `datasetName` — so with two holders every
+> caller is served the first-registered one, measured on a booted two-package
+> deployment (#30803). Once the cold boot has sealed the registry, a package whose
+> picklist, mapping or dataset bears a name another installed package holds is
+> refused at managed install and at package registration (a built-in's name, at
+> managed install), naming both holders and the rename. ⛔ The environment catalog is never a
+> holder: an environment item under a package's name is the ADR-0005 overlay.
+> The other types the measurement found resolving without a package context —
+> `api`, the object-less `action`, the engine function registry, `email_template`,
+> `webhook`, `connector`, `flow`, `agent` and `skill` — are to follow, each in its
+> own change. Every other type keeps §3.4 as written. See
+> [Addendum (2026-11-06)](#addendum-2026-11-06-bare-names-resolved-without-a-package-hold-one-package--34-narrowed).
 
 ### 3.5 Namespace rename-on-install is deferred (non-goal)
 
@@ -869,3 +884,134 @@ for a package-bound registration that reaches the registry directly. Every packa
 registration reaches the package door before any in-memory registrar runs, so the
 boot of a conflicting composition — an artifact boot included — is refused in its
 first phase.
+
+---
+
+## Addendum (2026-11-06): bare names resolved without a package hold one package — §3.4 narrowed
+
+> **Status of this addendum: Accepted** — it records phase 1 of a maintainer
+> ruling. It **narrows §3.4 for three more metadata types and supersedes no other
+> text**: §§1–6, the 2026-08-08 addendum and the 2026-10-08 addendum stand
+> verbatim.
+>
+> **Ruling this addendum records** — #30798, answered by the maintainer
+> 「同意 c」 (ruling record 6676670839, 2026-11-06). The ruled option's text,
+> verbatim:
+>
+> > **C. Every name carries the namespace** — Extend ADR-0129's literal prefix to
+> > every package-authored top-level metadata name (`crm_send_email`), except
+> > names already derived from a prefixed object (fields, object extensions,
+> > container views) or already namespaced (translations `<ns>_<locale>`);
+> > enforced at `defineStack`/`os validate` and the save door; same-name clashes
+> > become impossible by construction
+>
+> and its phasing, verbatim: "**Now:** extend the existing registration refusal
+> (A's mechanism) to the silent types. It closes silent mis-resolution for
+> packages already in the field. After phase 3 it remains only as the backstop
+> for the cases C cannot reach: packages that declare no namespace, the shared
+> `base`/`system`/`sys` namespaces, and third-party packages inside the
+> deprecation window." Phase 1 is #30803; the lint, the templates and the skills
+> are phase 2 (#30804, #30805); `defineStack`, the save door and the ADR-0129
+> amendment are phase 3 (#30806).
+
+### P1.1 Why §3.4's premise does not hold for these three types
+
+§3.4 rests on every caller carrying its package id. These three consumers carry
+none when they resolve the name. Measured on a booted showcase with two packages,
+`alpha` and `beta`, each shipping one item per type under the same bare name, in
+both registration orders (#30803, stage 1):
+
+- **`picklist`** — a field's `picklist: NAME` resolves the first-registered
+  package's list for both packages' objects: the second package's object is
+  served the other package's options, and its own values are refused at write
+  (`VALIDATION_FAILED`).
+- **`mapping`** — an import's `mappingName` resolves the first-registered
+  package's mapping; the other package's import answers `400
+  MAPPING_TARGET_MISMATCH`.
+- **`dataset`** — a dashboard's `datasetName` query runs the first-registered
+  package's dataset.
+
+Each answer flips with registration order, and none warns.
+
+### P1.2 What is refused
+
+Once the cold boot has sealed the registry (P1.3), a package registration is
+refused when a picklist, mapping or dataset it declares bears a name another
+holder already holds — at managed install (the package door,
+`SchemaRegistry.installPackage`, ahead of every mutation) and at package
+registration (the item seam, `SchemaRegistry.registerItem`, for a package-bound
+registration that reaches the registry directly). The holders:
+
+- **an installed package** — including a disabled one, which is still installed
+  and still holds its names; a nested plugin declares under its parent package;
+- **a built-in** — none today for these types; the vocabulary keeps the holder so
+  a platform-held name is refused the way the security catalog refuses one, and,
+  as there, only the package door asks it.
+
+⛔ **Never the environment catalog** — the one difference from N.2. For these
+types an item authored in this environment under a package's name is the ADR-0005
+overlay of that package's item, not a second holder; a registration with no
+package is never judged, and the registry's bare slot is never read as a holder.
+
+The error is N.2's envelope (`422`, the §3.2 namespace gate's code), lists every
+conflicting name in one refusal, names both holders, and carries the rename that
+clears it: the incoming package's namespace prefixed to the name (`beta_status`),
+the one naming rule ruling C ends at. A package with no namespace, or one in a
+shared `base`/`system`/`sys` namespace, is refused without a rename.
+
+### P1.3 The cold boot
+
+Every package registers again at every boot, through the same two doors, so a
+deployment that already holds a clash would stop booting if the doors refused
+then. During a boot the doors therefore judge nothing. Once every package of the
+boot has registered — `kernel:bootstrapped`, after the `kernel:ready` rehydrates —
+the engine plugin seals the registry, and every name two installed packages
+already hold is handled by one switch, `BARE_NAME_COLD_BOOT_MODE`:
+
+- **`'warn'`** — one warning line naming every such name, both holders and the
+  rename; the boot continues and keeps serving the first-registered holder;
+- **`'refuse'`** — the boot is refused with the P1.2 envelope, as N.3's
+  amendment refuses the security catalog's.
+
+The switch is `'warn'` until the maintainer rules on the cold boot of a
+deployment that already holds a clash. In either mode the doors refuse a NEW
+holder after the seal. A package that already holds a name is never a new holder
+of it: a reload, a re-install or an upgrade of a package that came through the
+boot beside another holder keeps its name, while a third package is refused,
+naming both. A kernel that withholds the boot-phase hooks never seals, and there
+the doors never refuse.
+
+### P1.4 What stays as §3.4 has it
+
+- **Same-package re-registration** is one holder, not two.
+- **Every type not listed** keeps §3.4's coexistence: two packages' `page/home`
+  still coexist, an object-bound action stays keyed `objectName:name`, a job stays
+  keyed `appId:jobName`, and the unmanaged import's own all-type refusal is
+  unchanged.
+- **A picklist extension** (`picklistExtensions`) adds values to another
+  package's list by design; it holds no name.
+- **A paired `.custom` package's declared override** (ADR-0146 D2) is a stored
+  row bound to its pair, never a package holder, so the refusal does not close
+  the override path.
+- **No downgrade.** `OS_METADATA_COLLISION=warn` softens the §3.2 namespace gate
+  only.
+
+### P1.5 To follow
+
+The same measurement found these types resolving without a package context too:
+`api` (the endpoint store is keyed by name — the other package's path answers
+404), the object-less `action` (the last handler runs while `/meta` serves the
+first declaration), the engine function registry (`functions:`, last wins, read by
+flow `script` nodes and action `target` refs), `email_template`, `webhook` (the
+second package's webhook is never subscribed), `connector`, `flow`, `agent` and
+`skill`. Each joins P1.2's list in its own change under #30803, with its own pins,
+narrowing §3.4 the same way; a type the security seat claims lands there instead.
+`tool` and `rag_pipeline` share a reader with `agent` and were not measured.
+
+### P1.6 Where it is implemented
+
+`@objectstack/objectql`: the rule, the holders and the switch in
+`bare-name-one-holder.ts`; the package door in `SchemaRegistry.installPackage` and
+the item seam in `SchemaRegistry.registerItem`; the seal in
+`SchemaRegistry.sealBareNameHolders`, called by the engine plugin at
+`kernel:bootstrapped` through `sealBareNameHoldersAtColdBoot`.
