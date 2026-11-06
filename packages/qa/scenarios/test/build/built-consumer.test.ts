@@ -27,7 +27,11 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 const PKG = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const REPO = resolve(PKG, '../../..');
-const BUILT = ['score.js', 'score.cjs', 'score.d.ts', 'score.d.cts'].map((f) => join(PKG, 'dist', f));
+// The JS is what plain Node loads, so it is required. The declarations are
+// not built under `OS_SKIP_DTS` (CI's build sets it); when they are built,
+// the package's own `build` script already fails without them
+// (`check-dts-emitted.mjs`), so this test does not ask for them.
+const BUILT = ['score.js', 'score.cjs'].map((f) => join(PKG, 'dist', f));
 
 const TSUP_PKG = createRequire(join(REPO, 'package.json')).resolve('tsup/package.json');
 const TSUP_BIN = join(dirname(TSUP_PKG), (JSON.parse(readFileSync(TSUP_PKG, 'utf8')) as { bin: { tsup: string } }).bin.tsup);
