@@ -77,6 +77,9 @@ const LEDGERED_ROUTES = [
   `GET:${BASE}/files/:fileId`,
   `PUT:${BASE}/_local/raw/:token`,
   `GET:${BASE}/_local/raw/:token`,
+  // [#30892] The single-use upload link: its page and its upload.
+  `GET:${BASE}/upload-links/:token`,
+  `PUT:${BASE}/upload-links/:token`,
 ];
 
 // ---------------------------------------------------------------------------

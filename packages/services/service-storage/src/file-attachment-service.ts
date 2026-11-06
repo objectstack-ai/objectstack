@@ -34,6 +34,22 @@ import {
 } from './storage-limits.js';
 // The upload doors' own storage-key layout.
 import { buildKey } from './storage-routes.js';
+// [#30892] A record's files for a resolved caller (read one, attach one
+// through a single-use link), served on this same service slot.
+import {
+  RecordFileAccess,
+  type ICallerRecordFileService,
+  type RecordFileAccessDeps,
+  type RecordFileEntry,
+  type RecordFileRead,
+  type RecordFileTarget,
+  type UploadLinkDoor,
+  type UploadLinkGrant,
+  type UploadLinkOutcome,
+  type UploadLinkTarget,
+  type UploadLinkUpload,
+  type UploadLinkView,
+} from './record-file-access.js';
 
 /**
  * [#23306] The server-side attach verb — `IFileAttachmentService`, registered
@@ -117,7 +133,22 @@ export interface FileAttachmentServiceDeps {
    * The security service: the attach rule's master-detail check, and `explain`
    * for whether the caller may create an attachment at all.
    */
-  getSecurity?(): (AttachmentSecurityLike & Partial<Pick<ISecurityService, 'explain'>>) | null | undefined;
+  getSecurity?():
+    | (AttachmentSecurityLike & Partial<Pick<ISecurityService, 'explain' | 'getWritableFields'>>)
+    | null
+    | undefined;
+  /**
+   * [#30892] What the record-file verbs ({@link ICallerRecordFileService},
+   * {@link UploadLinkDoor}) are bound over beyond the members above — the
+   * download door's verdict and servability, the minting user's re-resolved
+   * context, the download lifetime and the routes' base path, which the
+   * plugin binds from the kernel. Absent: those verbs refuse
+   * `SERVICE_UNAVAILABLE` / `503`.
+   */
+  recordFiles?: Pick<
+    RecordFileAccessDeps,
+    'judgeFileRead' | 'isServable' | 'resolveUserContext' | 'getDownloadTtl' | 'getBasePath'
+  >;
 }
 
 /**
@@ -210,8 +241,69 @@ function validateAttachFileInput(input: AttachFileInput): AttachFileInput {
   return input;
 }
 
-export class FileAttachmentService implements IFileAttachmentService, ICallerFileAttachmentService {
-  constructor(private readonly deps: FileAttachmentServiceDeps) {}
+export class FileAttachmentService
+  implements IFileAttachmentService, ICallerFileAttachmentService, ICallerRecordFileService, UploadLinkDoor
+{
+  private readonly recordFiles: RecordFileAccess | null;
+
+  constructor(private readonly deps: FileAttachmentServiceDeps) {
+    const bound = deps.recordFiles;
+    this.recordFiles = bound
+      ? new RecordFileAccess({
+          ...bound,
+          getEngine: () => deps.getEngine(),
+          getStorage: () => deps.getStorage(),
+          getLimitsSnapshot: () => deps.getLimitsSnapshot(),
+          attachments: this,
+          getSharing: () => deps.getSharing?.(),
+          getSecurity: () => deps.getSecurity?.(),
+          logger: deps.logger,
+        })
+      : null;
+  }
+
+  private recordFilesOrRefuse(): RecordFileAccess {
+    if (!this.recordFiles) {
+      refuse(
+        'SERVICE_UNAVAILABLE',
+        503,
+        "A record's files cannot be read or attached through this service: it was composed without the storage " +
+          "plugin's download verdict (StorageServicePlugin binds it).",
+      );
+    }
+    return this.recordFiles;
+  }
+
+  async listRecordFilesAs(object: string, recordId: string, context: ExecutionContext): Promise<RecordFileEntry[]> {
+    return this.recordFilesOrRefuse().listRecordFilesAs(object, recordId, context);
+  }
+
+  async readRecordFileAs(
+    object: string,
+    recordId: string,
+    target: RecordFileTarget,
+    context: ExecutionContext,
+    options: { maxBytes: number },
+  ): Promise<RecordFileRead> {
+    return this.recordFilesOrRefuse().readRecordFileAs(object, recordId, target, context, options);
+  }
+
+  async createUploadLinkAs(
+    object: string,
+    recordId: string,
+    target: UploadLinkTarget,
+    context: ExecutionContext,
+  ): Promise<UploadLinkGrant> {
+    return this.recordFilesOrRefuse().createUploadLinkAs(object, recordId, target, context);
+  }
+
+  async inspectUploadLink(token: string): Promise<UploadLinkView> {
+    return this.recordFilesOrRefuse().inspectUploadLink(token);
+  }
+
+  async consumeUploadLink(token: string, upload: UploadLinkUpload): Promise<UploadLinkOutcome> {
+    return this.recordFilesOrRefuse().consumeUploadLink(token, upload);
+  }
 
   async attachFile(input: AttachFileInput): Promise<AttachedFile> {
     return this.attach(input, null);

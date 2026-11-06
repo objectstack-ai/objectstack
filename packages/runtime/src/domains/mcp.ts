@@ -126,7 +126,11 @@ export async function handleMcpRequest(deps: DomainHandlerDeps, body: any, conte
         return { handled: true, response: deps.error('MCP transport requires a standard HTTP request', 400) };
     }
 
-    const bridge = buildMcpBridge(deps, context);
+    // [#30892] The file seam, resolved once per request so the bridge carries
+    // `read_file` / `create_upload_link` exactly where the storage plugin's
+    // caller-scoped verbs are served.
+    const recordFiles = await resolveMcpRecordFileService(deps, context);
+    const bridge = buildMcpBridge(deps, context, { recordFiles });
     let webRes: Response;
     try {
         webRes = await mcp.handleHttpRequest(webRequest, {
@@ -227,7 +231,9 @@ export async function handleMcpSkillRequest(deps: DomainHandlerDeps, method: str
         } catch { /* leave the documented placeholder in place */ }
     }
 
-    const markdown: string = mcp.renderSkill({ mcpUrl });
+    // [#30892] The file pair is taught where the bridge would carry it.
+    const fileTools = (await resolveMcpRecordFileService(deps, context)) !== undefined;
+    const markdown: string = mcp.renderSkill({ mcpUrl, fileTools });
     // Raw text must NOT ride the `response` channel — `sendResult` JSON-
     // encodes those bodies unconditionally. The `result` stream channel is
     // the one raw pipe through every adapter (string events are written
@@ -557,7 +563,11 @@ async function warnIfSkillListIncomplete(
  * Also carries the action seam (`listActions` / `runAction`) and the skill seam
  * (`listSkills`, #3905) the MCP runtime wires by capability.
  */
-export function buildMcpBridge(deps: DomainHandlerDeps, context: HttpProtocolContext): any {
+export function buildMcpBridge(
+    deps: DomainHandlerDeps,
+    context: HttpProtocolContext,
+    seams: { recordFiles?: McpRecordFileService } = {},
+): any {
     const ec = context.executionContext;
     const envId = context.environmentId;
     const driver = (context as any).dataDriver;
@@ -956,6 +966,142 @@ export function buildMcpBridge(deps: DomainHandlerDeps, context: HttpProtocolCon
                     (await federationService(deps, context, ec, 'write')).importObject(datasource, remoteName, opts),
             }
             : {}),
+        // [#30892] The file seam (`read_file` / `create_upload_link`), carried
+        // only where the storage plugin serves its caller-scoped verbs.
+        ...(seams.recordFiles ? recordFileMembers(seams.recordFiles, callData, driver, envId, ec, deps, context) : {}),
+    };
+}
+
+/**
+ * [#30892] The caller-scoped face of the storage plugin's `file-attachments`
+ * service the MCP file tools call (`ICallerRecordFileService`,
+ * `@objectstack/service-storage`), named here structurally so this package
+ * takes no dependency on the storage package. Every verb acts as the context's
+ * user and throws ADR-0112 coded refusals.
+ */
+export interface McpRecordFileService {
+    listRecordFilesAs(object: string, recordId: string, context: unknown): Promise<unknown[]>;
+    readRecordFileAs(
+        object: string,
+        recordId: string,
+        target: { field: string; fileId?: string } | { attachmentId: string },
+        context: unknown,
+        options: { maxBytes: number },
+    ): Promise<{ download: { url: string; expiresAt: string } | null } & Record<string, unknown>>;
+    createUploadLinkAs(
+        object: string,
+        recordId: string,
+        target: { field: string } | { attachments: true },
+        context: unknown,
+    ): Promise<{ path: string; expiresAt: string }>;
+}
+
+/**
+ * [#30892] The `file-attachments` service when it serves the caller-scoped
+ * record-file verbs, else `undefined` (no storage plugin, or one that predates
+ * them). A lookup that throws is "not served": the tools are then not listed.
+ */
+async function resolveMcpRecordFileService(
+    deps: DomainHandlerDeps,
+    context: HttpProtocolContext,
+): Promise<McpRecordFileService | undefined> {
+    let service: Partial<McpRecordFileService> | undefined;
+    try {
+        service = (await deps.resolveService(context, 'file-attachments', context.environmentId)) as unknown as
+            Partial<McpRecordFileService> | undefined;
+    } catch {
+        return undefined;
+    }
+    return service
+        && typeof service.listRecordFilesAs === 'function'
+        && typeof service.readRecordFileAs === 'function'
+        && typeof service.createUploadLinkAs === 'function'
+        ? (service as McpRecordFileService)
+        : undefined;
+}
+
+/**
+ * [#30892] The origin a link this server mints is opened at: the one the auth
+ * service declares for the MCP endpoint (its configured base URL), else the
+ * request's own host — the order the skill route resolves the MCP URL in.
+ * `undefined` when neither is known, and a link stays the path it was minted as.
+ */
+async function publicOrigin(deps: DomainHandlerDeps, context: HttpProtocolContext): Promise<string | undefined> {
+    try {
+        const authService = await deps.resolveService(context, 'auth', context.environmentId);
+        const url = authService?.getMcpResourceUrl?.();
+        if (typeof url === 'string' && url) return new URL(url).origin;
+    } catch { /* fall through to the request host */ }
+    try {
+        const webReq = toMcpWebRequest(deps, context.request, undefined);
+        const host = webReq?.headers.get('host');
+        if (host) {
+            const proto = webReq?.headers.get('x-forwarded-proto')?.split(',')[0]?.trim() || 'http';
+            return `${proto}://${host}`;
+        }
+    } catch { /* no origin */ }
+    return undefined;
+}
+
+/** `url` made absolute against `origin`; an absolute `url` (an S3 presigned link) stays as it is. */
+function absoluteUrl(url: string, origin: string | undefined): string {
+    if (!origin) return url;
+    try {
+        return new URL(url, origin).toString();
+    } catch {
+        return url;
+    }
+}
+
+/**
+ * [#30892] The bridge's file members. Each reads the record through the door
+ * `get_record` reads it through first, so a record the caller cannot read is
+ * refused with exactly `get_record`'s answer before the storage service is
+ * asked anything; the service then reads it again as the caller and judges the
+ * file by the download door's verdict, or the link by the attach rule.
+ */
+function recordFileMembers(
+    service: McpRecordFileService,
+    callData: (action: string, params: any, driver?: any, scopeId?: string, ec?: any) => Promise<any>,
+    driver: unknown,
+    envId: string | undefined,
+    ec: unknown,
+    deps: DomainHandlerDeps,
+    context: HttpProtocolContext,
+) {
+    const readRecordFirst = async (object: string, recordId: string): Promise<void> => {
+        const res: any = await callData('get', { object, id: recordId }, driver, envId, ec);
+        if ((res?.record ?? res ?? null) == null) {
+            throw Object.assign(new Error(`Record "${recordId}" not found in "${object}"`), {
+                code: 'RECORD_NOT_FOUND',
+                status: 404,
+            });
+        }
+    };
+    return {
+        listRecordFiles: async (object: string, recordId: string) => {
+            await readRecordFirst(object, recordId);
+            return await service.listRecordFilesAs(object, recordId, ec);
+        },
+        readRecordFile: async (
+            object: string,
+            recordId: string,
+            target: { field: string; fileId?: string } | { attachmentId: string },
+            options: { maxBytes: number },
+        ) => {
+            await readRecordFirst(object, recordId);
+            const read = await service.readRecordFileAs(object, recordId, target, ec, options);
+            const origin = read.download ? await publicOrigin(deps, context) : undefined;
+            return {
+                ...read,
+                download: read.download ? { ...read.download, url: absoluteUrl(read.download.url, origin) } : null,
+            };
+        },
+        createUploadLink: async (object: string, recordId: string, target: { field: string } | { attachments: true }) => {
+            await readRecordFirst(object, recordId);
+            const grant = await service.createUploadLinkAs(object, recordId, target, ec);
+            return { url: absoluteUrl(grant.path, await publicOrigin(deps, context)), expiresAt: grant.expiresAt };
+        },
     };
 }
 

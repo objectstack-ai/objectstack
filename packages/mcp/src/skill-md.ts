@@ -31,7 +31,7 @@
  */
 
 import type { AIToolDefinition } from '@objectstack/spec/contracts';
-import { MCP_OAUTH_SCOPE_DATA_READ, MCP_OAUTH_SCOPE_METADATA_WRITE } from '@objectstack/spec/ai';
+import { MCP_OAUTH_SCOPE_DATA_READ, MCP_OAUTH_SCOPE_DATA_WRITE, MCP_OAUTH_SCOPE_METADATA_WRITE } from '@objectstack/spec/ai';
 import { grantsAuthoringTools } from './mcp-http-tools.js';
 
 /** Skill identity (mirrors the `SKILL.md` YAML frontmatter). */
@@ -100,6 +100,15 @@ export interface RenderSkillOptions {
    * renderer cannot see the bridge, so the host says so.
    */
   federationTools?: boolean;
+  /**
+   * [#30892] Whether the host's bridge carries the file pair (`read_file` /
+   * `create_upload_link`, `registerFileTools`). Each entry renders only when
+   * this is true AND {@link grantedScopes} admit its family (`read_file`:
+   * `data:read`; `create_upload_link`: `data:write`), so the skill names them
+   * exactly where `tools/list` lists them. Default false: the renderer cannot
+   * see the bridge, so the host says so.
+   */
+  fileTools?: boolean;
 }
 
 const URL_PLACEHOLDER = '<YOUR_ENV_MCP_URL>'; // e.g. https://<env>.objectos.app/api/v1/mcp
@@ -164,6 +173,34 @@ const FEDERATION_TOOL_LINES = `- **list_remote_tables({ datasource, schema? })**
   when its target is already imported, so import targets first; the result's
   \`review\` names lossy columns and left-out navigations.
 `;
+
+/** [#30892] `read_file`'s entry, rendered where `registerFileTools` registers it (`data:read`). */
+const READ_FILE_TOOL_LINES = `- **read_file({ objectName, recordId, field?, fileId?, attachmentId? })** —
+  read a file a record carries: one in a file field (\`field\`, plus \`fileId\`
+  for a multi-file field) or one attachment (\`attachmentId\`). Answers the
+  file's name, type and size, the byte cap it reads, and a short-lived download
+  link, then the text of a text file, PDF or Word document, or the image
+  itself. Send neither \`field\` nor \`attachmentId\` to list the record's
+  files with their ids. A record you cannot read answers as not found.
+`;
+
+/** [#30892] `create_upload_link`'s entry, rendered where `registerFileTools` registers it (`data:write`). */
+const UPLOAD_LINK_TOOL_LINES = `- **create_upload_link({ objectName, recordId, field? | attachments: true })** —
+  a link through which the user uploads one file onto a record: into a file
+  field, or as an attachment. Give the link to the user; it works once, for
+  that record and field only, and expires at \`expiresAt\`. The upload is
+  stored as the user, so they must be able to edit the record.
+`;
+
+/** The file pair's entries for a host whose bridge carries them, each for the grant that registers it. */
+function renderFileToolLines(options: RenderSkillOptions): string {
+  if (options.fileTools !== true) return '';
+  const scopes = options.grantedScopes;
+  // Mirrors the gates in `registerFileTools` (`!scopes || scopes.includes(…)`).
+  const read = !scopes || scopes.includes(MCP_OAUTH_SCOPE_DATA_READ);
+  const write = !scopes || scopes.includes(MCP_OAUTH_SCOPE_DATA_WRITE);
+  return (read ? READ_FILE_TOOL_LINES : '') + (write ? UPLOAD_LINK_TOOL_LINES : '');
+}
 
 /**
  * Render the full `SKILL.md` (YAML frontmatter + body). Pass the env's MCP URL
@@ -308,7 +345,7 @@ create/update payload.
   screen, which you fill with another \`resume_run\`. Only the user whose call
   started the run can resume it, under the same gates as \`run_action\`
   (including \`confirm: true\` for an action flagged \`requiresConfirmation\`).
-${options.federationTools === true && grantsAuthoringTools(options.grantedScopes) ? FEDERATION_TOOL_LINES : ''}${authoringTools ? renderAuthoringSection(authoringTools, describeObjectRegistered) : ''}
+${renderFileToolLines(options)}${options.federationTools === true && grantsAuthoringTools(options.grantedScopes) ? FEDERATION_TOOL_LINES : ''}${authoringTools ? renderAuthoringSection(authoringTools, describeObjectRegistered) : ''}
 ## Conventions & gotchas
 
 - **Permissions/RLS apply to every call.** Fewer rows than expected, or a

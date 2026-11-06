@@ -50,6 +50,16 @@ import {
 // guard's own `findFileHolder`.
 import type { FileHolder } from './attachment-lifecycle.js';
 import { contentDispositionValue } from './content-disposition.js';
+// [#30892] The upload-link doors: the service verbs they call, the one
+// refusal an unusable link gets, and the page a link opens.
+import type { UploadLinkDoor, UploadLinkView } from './record-file-access.js';
+import {
+  UPLOAD_LINK_SEGMENT,
+  UPLOAD_LINK_UNUSABLE_CODE,
+  UPLOAD_LINK_UNUSABLE_MESSAGE,
+  UPLOAD_LINK_UNUSABLE_STATUS,
+} from './upload-link-wire.js';
+import { sendUnusableUploadLinkPage, sendUploadLinkPage } from './upload-link-page.js';
 // [#22283] The `storage` settings namespace's Limits group — read and resolved
 // in ONE module, called per request by the doors below.
 // [#23306] The size refusal itself lives there too, beside the limit it
@@ -485,9 +495,10 @@ export function registerStorageFamily(
   store: StorageMetadataStore,
   opts: StorageRoutesOptions,
   readGatedSessionUser: StorageGatedSessionReader | undefined,
+  getUploadLinkDoor?: () => UploadLinkDoor | undefined,
 ): void {
   const basePath = opts.basePath ?? '/api/v1/storage';
-  const downloadTtl = opts.downloadTtl ?? 300;
+  const downloadTtl = opts.downloadTtl ?? DEFAULT_DOWNLOAD_TTL;
 
   // [#22283] The limits THIS request is served under — the saved Limits group
   // resolved against this mount's own options, asked per request (never
@@ -1570,14 +1581,8 @@ export function registerStorageFamily(
       const ttl = await authorizeDownload(file, req, res);
       if (ttl === false) return;
 
-      const downloadOpts = { filename: file.name, contentType: file.mime_type };
-      let url: string;
-      if (storage.getPresignedDownload) {
-        const desc = await storage.getPresignedDownload(file.key, ttl, downloadOpts);
-        url = desc.downloadUrl;
-      } else if (storage.getSignedUrl) {
-        url = await storage.getSignedUrl(file.key, ttl, downloadOpts);
-      } else {
+      const url = await mintDownloadUrl(storage, file, ttl);
+      if (url === null) {
         // See the sibling branch on `GET /files/:fileId`: no adapter capability
         // means no download URL, and handing back an unmounted one is worse
         // than admitting it (#3641).
@@ -1620,14 +1625,8 @@ export function registerStorageFamily(
       const ttl = await authorizeDownload(file, req, res);
       if (ttl === false) return;
 
-      const downloadOpts = { filename: file.name, contentType: file.mime_type };
-      let url: string;
-      if (storage.getPresignedDownload) {
-        const desc = await storage.getPresignedDownload(file.key, ttl, downloadOpts);
-        url = desc.downloadUrl;
-      } else if (storage.getSignedUrl) {
-        url = await storage.getSignedUrl(file.key, ttl, downloadOpts);
-      } else {
+      const url = await mintDownloadUrl(storage, file, ttl);
+      if (url === null) {
         // An adapter with neither `getPresignedDownload` nor `getSignedUrl`
         // cannot produce a download URL. This used to redirect to
         // `${basePath}/_local/file/<key>`, which no registrar mounts — a 302
@@ -1640,6 +1639,86 @@ export function registerStorageFamily(
       res.status(302).header('Location', url).send('');
     } catch (err: any) {
       sendServerFault(res, 500, 'INTERNAL', 'Internal error', err);
+    }
+  });
+
+  // ---------------------------------------------------------------------------
+  // [#30892] GET / PUT /storage/upload-links/:token — a single-use upload link
+  //
+  // Minted for a signed-in user by `createUploadLinkAs` (the MCP door's
+  // `create_upload_link` tool) and opened by that person, often on a phone
+  // with no session: the token IS the credential, as on the `_local/raw`
+  // routes, so neither route reads a session. The GET answers the picker
+  // page, the PUT spends the link on the body. What a link is bound to, who
+  // the upload acts as, and how one use is enforced are the service's
+  // (`record-file-access.ts`); these doors read no query parameter, carry
+  // the bytes, and answer.
+  // ---------------------------------------------------------------------------
+  mountFamilyRoute('get', `${basePath}/${UPLOAD_LINK_SEGMENT}/:token`, async (req: IHttpRequest, res: IHttpResponse) => {
+    try {
+      const door = getUploadLinkDoor?.();
+      if (!door) {
+        sendUnusableUploadLinkPage(res, UPLOAD_LINK_UNUSABLE_STATUS);
+        return;
+      }
+      let view: UploadLinkView;
+      try {
+        view = await door.inspectUploadLink(String(req.params.token ?? ''));
+      } catch (err) {
+        if (isUnusableUploadLink(err)) {
+          sendUnusableUploadLinkPage(res, UPLOAD_LINK_UNUSABLE_STATUS);
+          return;
+        }
+        throw err;
+      }
+      sendUploadLinkPage(res, view);
+    } catch (err: any) {
+      if (relayUploadLinkRefusal(res, err)) return;
+      sendServerFault(res, 500, 'INTERNAL', 'Internal error', err);
+    }
+  });
+
+  mountFamilyRoute('put', `${basePath}/${UPLOAD_LINK_SEGMENT}/:token`, async (req: IHttpRequest, res: IHttpResponse) => {
+    try {
+      const door = getUploadLinkDoor?.();
+      if (!door) {
+        sendError(res, UPLOAD_LINK_UNUSABLE_STATUS, UPLOAD_LINK_UNUSABLE_CODE, UPLOAD_LINK_UNUSABLE_MESSAGE);
+        return;
+      }
+      // The declared length first, so an oversized body is refused before it
+      // is read; the service judges the bytes read again, before the link is
+      // spent, so an oversized upload never uses it up.
+      const { maxUploadBytes } = currentLimits();
+      const declaredBody = declaredContentLength(req);
+      if (
+        declaredBody !== undefined &&
+        !requireWithinUploadLimit(declaredBody, maxUploadBytes, (n) => `The upload body is ${n} bytes`, res)
+      ) {
+        return;
+      }
+      let data: Buffer;
+      if (req.rawBody) {
+        data = await req.rawBody();
+      } else if (Buffer.isBuffer(req.body)) {
+        data = req.body;
+      } else {
+        sendError(res, 400, 'INVALID_REQUEST', 'Binary body required: the file bytes, as the request body');
+        return;
+      }
+      const outcome = await door.consumeUploadLink(String(req.params.token ?? ''), {
+        filename: uploadLinkFilename(req.headers?.['x-file-name']),
+        mimeType: uploadLinkMimeType(req.headers?.['content-type']),
+        data,
+      });
+      sendOk(res, {
+        fileId: outcome.fileId,
+        size: outcome.size,
+        ...(outcome.field !== undefined ? { field: outcome.field } : {}),
+        ...(outcome.attachmentId !== undefined ? { attachmentId: outcome.attachmentId } : {}),
+      });
+    } catch (err: any) {
+      if (relayUploadLinkRefusal(res, err)) return;
+      sendServerFault(res, 500, 'INTERNAL', 'Upload failed', err);
     }
   });
 
@@ -1999,6 +2078,83 @@ async function heldBytesRefusal(storage: IStorageService, file: FileRecord): Pro
  */
 function isMissingLocalFile(err: unknown): boolean {
   return typeof err === 'object' && err !== null && (err as { code?: unknown }).code === 'ENOENT';
+}
+
+/**
+ * The signed-URL lifetime, in seconds, of a download a record's rule governs
+ * ({@link StorageRoutesOptions.downloadTtl}'s default): five minutes.
+ */
+export const DEFAULT_DOWNLOAD_TTL = 300;
+
+/** [#30892] Is `err` the one refusal an unusable upload link gets? */
+function isUnusableUploadLink(err: unknown): boolean {
+  const e = err as { code?: unknown; status?: unknown } | null;
+  return !!e && e.code === UPLOAD_LINK_UNUSABLE_CODE && e.status === UPLOAD_LINK_UNUSABLE_STATUS;
+}
+
+/**
+ * [#30892] Answer a refusal the upload-link service or a write it ran threw,
+ * with the status and code it declared (ADR-0112), and say whether it did.
+ * A 4xx is the caller's to read; a 5xx is relayed only for the two declared
+ * outages (the authorization store's, and a `503` `SERVICE_UNAVAILABLE`),
+ * so a fault's own text never reaches the link's holder — every other throw
+ * is the route's `500`.
+ */
+function relayUploadLinkRefusal(res: IHttpResponse, err: unknown): boolean {
+  if (isAuthzStoreUnavailableError(err)) {
+    sendError(res, err.status, err.code, err.message);
+    return true;
+  }
+  const e = err as { code?: unknown; status?: unknown; message?: unknown } | null;
+  if (!e || typeof e.code !== 'string' || typeof e.status !== 'number') return false;
+  const relayable =
+    (e.status >= 400 && e.status < 500) || (e.status === 503 && e.code === 'SERVICE_UNAVAILABLE');
+  if (!relayable) return false;
+  sendError(res, e.status, e.code as ErrorCode, typeof e.message === 'string' ? e.message : 'Upload refused');
+  return true;
+}
+
+/** The longest file name an upload link stores, in characters. */
+const UPLOAD_LINK_FILENAME_MAX = 255;
+
+/**
+ * [#30892] The upload's file name, from the page's `x-file-name` header
+ * (URI-encoded so any name survives a header): the last path segment, with
+ * control characters dropped and the length bounded. `upload` when none is
+ * given or none survives.
+ */
+function uploadLinkFilename(raw: string | string[] | undefined): string {
+  const first = Array.isArray(raw) ? raw[0] : raw;
+  let name = typeof first === 'string' ? first : '';
+  try {
+    name = decodeURIComponent(name);
+  } catch {
+    // Not URI-encoded: taken as sent.
+  }
+  name = name.split(/[\\/]/).pop() ?? '';
+  name = name.replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, UPLOAD_LINK_FILENAME_MAX);
+  return name && name !== '.' && name !== '..' ? name : 'upload';
+}
+
+/** [#30892] The upload's media type, from `content-type` without parameters; anything that is not one is bytes. */
+function uploadLinkMimeType(raw: string | string[] | undefined): string {
+  const first = Array.isArray(raw) ? raw[0] : raw;
+  const type = typeof first === 'string' ? first.split(';')[0].trim().toLowerCase() : '';
+  return /^[a-z0-9][a-z0-9!#$&^_.+-]*\/[a-z0-9][a-z0-9!#$&^_.+-]*$/.test(type) ? type : 'application/octet-stream';
+}
+
+/**
+ * A download URL for `file`, valid for `ttl` seconds: the adapter's presigned
+ * download where it has one, else its signed URL, else `null` (the adapter
+ * can issue none). Package-internal (not re-exported from `index.ts`); the two
+ * download doors mint through it, and [#30892] so does the caller-scoped read
+ * of a record's file, so all three hand out the same link.
+ */
+export async function mintDownloadUrl(storage: IStorageService, file: FileRecord, ttl: number): Promise<string | null> {
+  const downloadOpts = { filename: file.name, contentType: file.mime_type };
+  if (storage.getPresignedDownload) return (await storage.getPresignedDownload(file.key, ttl, downloadOpts)).downloadUrl;
+  if (storage.getSignedUrl) return storage.getSignedUrl(file.key, ttl, downloadOpts);
+  return null;
 }
 
 /**
