@@ -79,6 +79,13 @@ definition writes refuse such a caller `403`, naming the posture.
 - **An organization that needs metadata of its own** is given an environment of
   its own.
 
+A datasource is metadata of this kind. Under `group` and `isolated` the
+datasource admin routes that write one (`POST /datasources`, `PATCH` and
+`DELETE /datasources/:name`, and `POST /datasources/:name/migrate-credential`)
+are the platform operator's too: a caller holding `manage_platform_settings`
+inside an organization is refused `403`, naming the posture. Listing, reading
+and testing a datasource are unchanged.
+
 Under `single` the organization is the environment, and every `manage_metadata`
 holder writes as before.
 
