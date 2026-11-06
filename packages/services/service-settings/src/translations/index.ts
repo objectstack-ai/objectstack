@@ -26,8 +26,11 @@ import { zhHant } from './zh-Hant.js';
 import { ar } from './ar.js';
 import { fr } from './fr.js';
 import { ptBR } from './pt-BR.js';
+import { ru } from './ru.js';
+import { de } from './de.js';
+import { ko } from './ko.js';
 
-export { en, zhCN, jaJP, esES, zhHant, ar, fr, ptBR };
+export { en, zhCN, jaJP, esES, zhHant, ar, fr, ptBR, ru, de, ko };
 
 export const settingsBuiltinTranslations: PlatformTranslationBundle = {
   en,
@@ -38,4 +41,7 @@ export const settingsBuiltinTranslations: PlatformTranslationBundle = {
   'ar': ar,
   'fr': fr,
   'pt-BR': ptBR,
+  'ru': ru,
+  'de': de,
+  'ko': ko,
 };
