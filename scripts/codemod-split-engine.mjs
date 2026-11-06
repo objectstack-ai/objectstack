@@ -158,7 +158,14 @@
  * when `main` was split (a path pin since retired, a return type since
  * spelled) moves by `--members`: on the split file, as the first pass would
  * have moved it, into the facet module it wrote. Its section below
- * (`MEMBERS_CARD`) states what it grows, what it refuses and the undo proof.
+ * (`MEMBERS_CARD`) states what it grows, what it refuses and the undo proof,
+ * and the three rules #30020 added to it for a body that hands the engine on.
+ *
+ * ## The fifth pass: a hand stub's computing host slot (#30020)
+ *
+ * `--hand-slots` moves a slot that computes out of a hand-series stub's host
+ * literal into the stub's hand module, so the stub is a delegation. Its
+ * section below (`HAND_SLOTS_CARD`) states the rule and the undo proof.
  *
  * ts-morph is a root devDependency, resolved from the root manifest, as the
  * pilot takes it.
@@ -3299,6 +3306,28 @@ async function mainHandDocs(tm, argv) {
 // docblock link the base left unresolved), is inverted from the base's import
 // block (`importEditsOf`): the bindings the head added or widened, each one a
 // moved member reads, and none the base had dropped or narrowed.
+//
+// Three closed rules let a body move that reads the engine other than as
+// `this.member` (#30020; the state stays on the class, one owner):
+//
+//  - R1, the identity port. A bare `this` in the body (`ql: this`,
+//    `new ScopedContext(ctx, this)`, `(this as any)._flag`) reads
+//    `this.facade`, a host entry the factory fills with the engine itself
+//    (`facade: engine`), so each such site sees the object the method saw. The
+//    undo is the one inverse rewrite, `this.facade` back to `this`, which is
+//    unambiguous because a base body that reads `this.facade` refuses
+//    (`unknown-member`) and so does a class that declares `facade`. A `this`
+//    in a parameter, a type or a `typeof this` still stays.
+//  - R3, a computed key. `this[k]`, where `k` is typed as string literals that
+//    each name a field, reads (and writes) those fields through host getters
+//    (and setters); the body's text is unchanged. Any other key stays.
+//  - R4, an exported name. A name `engine.ts` declares and already exports
+//    (`ScopedContext`) is imported from `./engine.js` (lever (a) of ruling
+//    6591753301), and the header's import paragraph says so; no export list
+//    widens, and a routed module refuses.
+//
+// A statement the hand grew on one line past the wrap width (`runStyles`) is
+// kept on one line by the move and by the undo alike.
 
 const MEMBERS_CARD = '#30055';
 
