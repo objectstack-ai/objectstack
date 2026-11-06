@@ -215,7 +215,7 @@ async function writeCredentialAudit(
         record_id: entry.credentialId,
         metadata: JSON.stringify(entry.metadata),
       },
-      { context: SYSTEM_CTX } as never,
+      { context: SYSTEM_CTX },
     );
   } catch (error) {
     // The operation already happened (a minted bearer is already in the

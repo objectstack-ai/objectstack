@@ -182,11 +182,11 @@ async function auditRows(credentialId: string): Promise<Array<Record<string, unk
 
 /** Every line the plugin logger and the console were handed, as one string. */
 function everythingLogged(): string {
-  const calls = [
+  const calls: unknown[][] = [
     ...Object.values(logger).flatMap((fn) => fn.mock.calls),
     ...consoleSpies.flatMap((spy) => spy.mock.calls),
   ];
-  return calls.map((args) => args.map((a) => (a instanceof Error ? `${a.message} ${a.stack}` : typeof a === 'string' ? a : JSON.stringify(a))).join(' ')).join('\n');
+  return calls.map((args) => args.map((a: unknown) => (a instanceof Error ? `${a.message} ${a.stack}` : typeof a === 'string' ? a : JSON.stringify(a))).join(' ')).join('\n');
 }
 
 /** The bearer and its digest appear in no audit row and no log line. */

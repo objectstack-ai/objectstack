@@ -249,7 +249,7 @@ interface RevocationEngine {
     query: { where: Record<string, unknown>; fields?: string[] },
     options?: { context?: { isSystem?: boolean } },
   ): Promise<Record<string, unknown> | null>;
-  update(object: string, data: Record<string, unknown>): Promise<unknown>;
+  update(object: string, data: Record<string, unknown>, options?: { context?: { isSystem?: boolean } }): Promise<unknown>;
 }
 
 /** What {@link revokeScimConnectionCredential} found and did. */
@@ -281,6 +281,8 @@ export async function revokeScimConnectionCredential(
   // Read `active` the way the verifier does: anything not affirmatively active is off.
   const active = (row as { active?: unknown }).active;
   if (active === false || active === 0 || active == null) return { outcome: 'already_revoked', credentialId: id, connectionId };
-  await engine.update(SCIM_CREDENTIAL_OBJECT, { id, active: false });
+  // The system context is spelled at the call, not only inherited from the
+  // caller's wrapped engine, so the write says what it is wherever it is read.
+  await engine.update(SCIM_CREDENTIAL_OBJECT, { id, active: false }, { context: { isSystem: true } });
   return { outcome: 'revoked', credentialId: id, connectionId };
 }
