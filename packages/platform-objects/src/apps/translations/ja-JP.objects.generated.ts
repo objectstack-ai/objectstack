@@ -556,8 +556,8 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         help: "JSON シリアライズされた組織メタデータ"
       },
       require_mfa: {
-        label: "多要素認証を必須化",
-        help: "true の場合、この組織のすべてのメンバーはデータにアクセスするために認証アプリの登録が必要になります。このデプロイで二要素認証がオンになっている必要があります（OS_AUTH_TWO_FACTOR=true）。オフの間は true で保存すると拒否されます。"
+        label: "多要素認証を必須化（廃止）",
+        help: "廃止されました。この組織の多要素認証の要件は「設定 → アクセスポリシー」で設定してください。ここでオンだった値は「全員」として移行され、クリアされました。"
       },
       timezone: {
         label: "タイムゾーン",

@@ -9,7 +9,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { assertEngineDeleteDispatch, assertEngineFindOnePredicate } from '@objectstack/objectql';
+import { assertEngineDeleteDispatch, assertEngineFindOnePredicate, assertEngineUpdateDispatch } from '@objectstack/objectql';
 import { AuthManager } from './auth-manager';
 import {
   accessPolicyFloorRefusal,
@@ -161,7 +161,8 @@ const createMemoryEngine = () => {
     async count(name: string, q: any = {}) {
       return rows(name).filter((r) => matches(r, q.where)).length;
     },
-    async update(name: string, patch: any) {
+    async update(name: string, patch: any, options?: any) {
+      assertEngineUpdateDispatch(patch, options);
       const row = rows(name).find((r) => r.id === patch.id);
       if (!row) return null;
       Object.assign(row, patch);
@@ -212,8 +213,14 @@ async function twoOrganizationDeployment() {
     secret: SECRET,
     baseUrl: 'http://localhost:3000',
     dataEngine: engine,
-    membershipPolicy: 'invite-only',
+    // Two self-registered members: open self-registration (the second
+    // sign-up is past the first-user bypass).
+    audience: { posture: 'open', selfRegistrationPermissionSet: 'member_default' },
+    emailAndPassword: { enabled: true, requireEmailVerification: false },
   } as any);
+  // The open audience's declared set has no security catalog behind this
+  // harness; it resolves here, as it does on a composed deployment.
+  vi.spyOn(manager as any, 'selfRegistrationSetResolvable').mockResolvedValue(true);
   const policies: Record<string, Record<string, unknown>> = {
     [ORG_A]: { allowed_ip_ranges: '10.1.0.0/16', session_idle_timeout_minutes: 5 },
     [ORG_B]: { allowed_ip_ranges: '10.2.0.0/16' },
@@ -224,8 +231,10 @@ async function twoOrganizationDeployment() {
   });
   for (const [email, org] of [['alice@alpha.test', ORG_A], ['bob@beta.test', ORG_B]] as const) {
     const res = await post(manager, '/sign-up/email', { email, password: PASSWORD, name: email }, '127.0.0.1');
-    expect(res.status).toBe(200);
+    expect(res.status, `${email}: ${await res.clone().text()}`).toBe(200);
     const user = (engine.tables.get('sys_user') ?? []).find((u: any) => u.email === email);
+    // Whatever membership the sign-up settled is replaced by the one under test.
+    engine.tables.set('sys_member', (engine.tables.get('sys_member') ?? []).filter((m: any) => m.user_id !== user.id));
     await engine.insert('sys_member', { user_id: user.id, organization_id: org, role: 'member', created_at: new Date() });
   }
   return { engine, manager };
@@ -275,12 +284,12 @@ describe('two organizations, each policy enforced on its own members', () => {
     const alice = cookieFrom(await signIn(manager, 'alice@alpha.test', IN_A));
     const bob = cookieFrom(await signIn(manager, 'bob@beta.test', IN_B));
     // Both sessions were scoped at creation (ADR-0093 D9) and last active an hour ago.
-    const sessions = (engine.tables.get('sys_session') ?? []) as any[];
+    // (The sign-up sessions from the harness carry another organization or none.)
+    const scopedTo = (row: any) => row.active_organization_id ?? row.activeOrganizationId;
+    const sessions = ((engine.tables.get('sys_session') ?? []) as any[]).filter((row) => [ORG_A, ORG_B].includes(scopedTo(row)));
+    expect(sessions.map(scopedTo).sort()).toEqual([ORG_A, ORG_B]);
     const hourAgo = new Date(Date.now() - 60 * 60_000);
-    for (const row of sessions) {
-      expect([ORG_A, ORG_B]).toContain(row.active_organization_id ?? row.activeOrganizationId);
-      Object.assign(row, { last_activity_at: hourAgo });
-    }
+    for (const row of sessions) Object.assign(row, { last_activity_at: hourAgo });
     const getSession = (cookie: string, remoteAddress: string) =>
       manager.handleRequest(
         new Request('http://localhost:3000/api/v1/auth/get-session', { headers: { cookie } }),

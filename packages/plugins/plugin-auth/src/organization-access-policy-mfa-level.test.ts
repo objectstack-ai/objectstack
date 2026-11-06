@@ -27,6 +27,7 @@ vi.mock('@objectstack/core', async (importOriginal) => {
   };
 });
 
+import { assertEngineFindOnePredicate } from '@objectstack/objectql';
 import { AuthManager } from './auth-manager';
 
 const SECRET = 'test-secret-at-least-32-chars-long';
@@ -36,7 +37,7 @@ const ORG_B = 'org_beta';
 
 /** An engine answering an unenrolled user whose grace period has lapsed. */
 const unenrolledUsers = () => ({
-  findOne: vi.fn(async (_obj: string, q: any) => ({ id: q?.where?.id, two_factor_enabled: false, mfa_required_at: LAPSED() })),
+  findOne: vi.fn(async (obj: string, q: any) => (assertEngineFindOnePredicate(obj, q), { id: q?.where?.id, two_factor_enabled: false, mfa_required_at: LAPSED() })),
   update: vi.fn(async () => ({})),
   count: vi.fn(async () => 0),
 });

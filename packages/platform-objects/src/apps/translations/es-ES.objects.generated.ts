@@ -556,8 +556,8 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         help: "Metadatos de la organización serializados en JSON."
       },
       require_mfa: {
-        label: "Exigir autenticación multifactor",
-        help: "Si es true, todos los miembros de esta organización deben registrar una aplicación de autenticación para acceder a los datos. Requiere que la autenticación de dos factores esté activada en esta implementación (OS_AUTH_TWO_FACTOR=true); mientras esté desactivada, guardarlo como true se rechaza."
+        label: "Exigir autenticación multifactor (retirado)",
+        help: "Retirado. Define el requisito multifactor de esta organización en Ajustes → Política de acceso. Un valor que estaba activado aquí se trasladó allí como «Todos» y se borró."
       },
       timezone: {
         label: "Zona horaria",

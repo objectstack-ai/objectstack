@@ -316,7 +316,7 @@ export function composeDatabaseHooks(
     const verdict = await this.judgeSessionScoping(userId, organizationId, await readRequestClientAddress());
     if (verdict === 'admitted') return;
     const { APIError } = await import('better-auth/api');
-    throw new APIError('FORBIDDEN', { ...SESSION_SCOPING_REFUSAL });
+    throw new APIError('FORBIDDEN', { code: SESSION_SCOPING_REFUSAL.code, message: SESSION_SCOPING_REFUSAL.message });
   };
   const sessionBefore = async (session: any, ctx: any) => {
     const captured = await captureSessionAddress(session);
