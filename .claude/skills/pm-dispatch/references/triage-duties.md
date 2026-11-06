@@ -10,14 +10,12 @@
 - 轮次记录按车道计欠审逾一轮的 head 数并点名车道(`check-owed-reviews.mjs`),只报 ⛔ 不接审。
 - 轮次记录分写「决策卡 N」与「待您审合 PR M」,不合计;后者 = open `pm:awaiting-merge` PR。
 - 分诊旧记录过期:delta 复审归车道或复审席,照 contract-review.md;⛔ 分诊不再审。
-- 析取 ①:全裸(无 `pm:*`、无 `needs-user-decision`、无 `domain:*`)。
-- 析取 ②:有 `pm:queue` 无 `domain:*`(仅多车道仓);析取 ③:有 `domain:*` 无 pm-state。
-- 析取 ④:有 `pm:queue`+`domain:*` 无 `priority:*`;②③④ 只取 `updated_at` 早于 ~2 分钟。
+- 析取 ①全裸(无 `pm:*`/`needs-user-decision`/`domain:*`);② `pm:queue` 无 `domain:*`(仅多车道仓);
+- ③ `domain:*` 无 pm-state;④ `pm:queue`+`domain:*` 无 `priority:*`;②③④ 只取 `updated_at` 早于 ~2min。
 - 排除 `tracking`、`status:parked`、全部 `pm:seat` 贴、`qa-run` 记录。
 - 析取 ⑤:窗内新建且 `pm:queue`/`priority:*` 与建卡同分钟,照未分诊首触;⛔ 不凭 actor。
-- 半状态治愈积压 ②③④ 最老优先、P0 嫌疑先行,⛔ 优先最新不适用。
 - 首触定级与五析取 sweep 每 fire 跑到清空,先于旧卡重验:⛔ 无每轮预算、无逐卡豁免评论。
-- 排序:队列每轮清空时最新优先;清不空的那一刻起改最老优先。
+- 排序:每轮清空时最新优先,清不空起最老优先;半状态积压 ②③④ 恒最老、P0 嫌疑先行。
 - 裸卡数 >15 ⇒ 下一 fire 整轮改域分批集中模式,每批 ≤5 张同族卡,照样跑到清空。
 - 紧急卡直接分诊:维护者点名或 p0 嫌疑 ⇒ 立即起默认判断档分诊子代理,不等定时轮。
 - 每轮读上份轮次记录 fire 以来全部 main push、schedule 与队列结论,⛔ 不只读最新一跑。
@@ -69,9 +67,11 @@
 - 每张留一条英文审计评论(`Triage: lands in …; rationale: …`),可选带 `Size/model suggestion:` 行。
 - 改作者可写面(种类非 `none` 或带 `(narrowing)`)的卡,首触 done-when 写 skills + docs + eval 三项。
 - 查重/shadow 检查先按文件/机制查本仓与姊妹仓 open 卡(含 `pm:dispatched`),再跟引用与关键词。
-- 同文件同机制 = 同一发现,不分车道,首触定级即并:证据搬先卡,后卡关 `duplicate_of`。
+- 同文件同机制 = 同一发现,不分车道即并:证据搬先卡,后卡经中继 `issue_patch` 关 `duplicate`。
 - 同族发现并入收口卡,不开单点卡;在飞(assignee/open PR)永不并,`Blocked-by:` 不派;完工查过期。
 - 执行席 ⛔ 不并卡,疑重复挂 `pm:retriage` 写明哪两张同文件同机制;同 assignee 者自关后卡。
+- 关重复卡须目标具名且新读重叠;追踪父单 `Part of #n` 子卡全关、无 open 工作 ⇒ `completed`。
+- 关卡先贴签名评论点名裁决与证据;⛔ 是非关、活认领卡、安全卡不在此权,归维护者。
 - 首触答责任三问:谁的代码出险/有正路否/谁可达且有人用否;据答改卡范围、域与路由。
 - 三类外不可逆或有硬时限(发版即固化、只被消费的文件、过窗不可补)⇒ 不关,报维护者。
 - 三类外首触关闭只清门前存量,关 not planned(不等批准可否决重开);三类内无证据拒收。
