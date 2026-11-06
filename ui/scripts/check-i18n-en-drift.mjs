@@ -190,9 +190,14 @@ const scriptDir = dirname(fileURLToPath(import.meta.url));
  * that first sees it; a pack file missing at HEAD then fails loudly in
  * {@link readPacks}.
  */
-export const LOCALES = Object.freeze([...PLATFORM_LOCALE_TAGS]);
-if (LOCALES[0] !== 'en') {
-  throw new Error(`the platform locale table no longer opens with en (got ${LOCALES[0]}); this gate compares against en`);
+export const LOCALES = Object.freeze(enFirstTableTags(PLATFORM_LOCALE_TAGS));
+
+/** The table's tags, refused unless `en` opens them: this gate compares against `en`. */
+function enFirstTableTags(tags) {
+  if (tags[0] !== 'en') {
+    throw new Error(`the platform locale table no longer opens with en (got ${tags[0]}); this gate compares against en`);
+  }
+  return [...tags];
 }
 
 /** The packs that must follow `en`: every other table tag. */
