@@ -88,6 +88,7 @@ import {
 import { TokenStorage } from '@object-ui/auth';
 import { useObjectTranslation } from '@object-ui/i18n';
 import { ComponentRegistry } from '@object-ui/core';
+import { notifyDataChanged } from '@object-ui/react';
 import { useWorkspacePreference } from '../../utils/workspacePreference.js';
 import {
   CONNECT_CLIENT_IDS,
@@ -97,6 +98,7 @@ import {
   type ConnectClientId,
 } from './connectClientPreference.js';
 import { isPublicHttpsAddress } from './deploymentReach.js';
+import { AuthorizedAccessList } from './AuthorizedAccessList.js';
 
 const SERVER_URL = (import.meta.env.VITE_SERVER_URL || '').replace(/\/$/, '');
 
@@ -289,6 +291,8 @@ export function ConnectAgent() {
       const data = json?.data ?? json;
       setMinted({ name: data?.name ?? name, key: data?.key ?? '' });
       setKeyName('');
+      // The mint bypasses the adapter, so tell the key list below it changed.
+      notifyDataChanged({ objectName: 'sys_api_key' });
     } catch (e: any) {
       setMintError(e?.message ?? String(e));
     } finally {
@@ -570,6 +574,9 @@ export function ConnectAgent() {
           </Card>
         </CollapsibleContent>
       </Collapsible>
+
+      {/* ── What can act as you: authorized assistants and API keys ──────── */}
+      <AuthorizedAccessList />
     </div>
   );
 }
