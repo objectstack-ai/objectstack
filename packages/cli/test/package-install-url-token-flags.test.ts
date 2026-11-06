@@ -123,4 +123,19 @@ describe('os package install -u/--url and -t/--token (#30126 row 13)', () => {
     expect(out).toContain('Pass either --token or --email/--password, not both');
     expect(sent).toHaveLength(0);
   });
+
+  // [#30797] A user who exported OS_RUNTIME_EMAIL/OS_RUNTIME_PASSWORD once is
+  // refused with only --token on the line: the sentence says why.
+  it('refuses --token with OS_RUNTIME_EMAIL/OS_RUNTIME_PASSWORD exported, and names both env families', async () => {
+    const { sent } = stubRuntime();
+    vi.stubEnv('OS_RUNTIME_EMAIL', 'a@b.test');
+    vi.stubEnv('OS_RUNTIME_PASSWORD', 'pw');
+    const { out, exit } = await runInstall(['--url', 'http://runtime.test', '--token', 'osk_test']);
+    expect(exit).toBe(1);
+    expect(out).toContain(
+      'Pass either --token or --email/--password, not both '
+      + '(OS_RUNTIME_TOKEN counts as --token; OS_RUNTIME_EMAIL/OS_RUNTIME_PASSWORD count as --email/--password).',
+    );
+    expect(sent).toHaveLength(0);
+  });
 });
