@@ -99,7 +99,7 @@ export const STORAGE_ROUTE_LEDGER: readonly StorageRouteLedgerEntry[] = [
   { route: 'POST /api/v1/storage/upload/presigned', family: 'upload-presigned', disposition: 'sdk', client: 'storage.getPresignedUrl',
     note: 'also step 1 of the composite storage.upload' },
   { route: 'POST /api/v1/storage/upload/complete', family: 'upload-presigned', disposition: 'sdk', client: 'storage.upload',
-    note: 'step 3 of the composite upload; no standalone client method mints the commit on its own' },
+    note: 'step 3 of the composite upload; no standalone client method mints the commit on its own. With attachTo it also attaches the upload to a record as the caller (the console attachments panel); the SDK sends none' },
 
   // ── chunked / resumable upload ────────────────────────────────────────────
   { route: 'POST /api/v1/storage/upload/chunked', family: 'upload-chunked', disposition: 'sdk', client: 'storage.initChunkedUpload' },
