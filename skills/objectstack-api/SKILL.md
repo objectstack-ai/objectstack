@@ -45,7 +45,7 @@ GET    /api/v1/data/{object}          # List records (with filter, sort, paginat
 GET    /api/v1/data/{object}/:id      # Get single record
 POST   /api/v1/data/{object}          # Create record
 PATCH  /api/v1/data/{object}/:id      # Update record
-DELETE /api/v1/data/{object}/:id      # Delete record (kept in the recycle bin)
+DELETE /api/v1/data/{object}/:id      # Delete record (business-object rows → recycle bin)
 POST   /api/v1/data/{object}/query    # Complex queries + aggregation (QueryAST in body)
 POST   /api/v1/data/{object}/batch    # Per-object batch operations
 POST   /api/v1/batch                  # Cross-object atomic batch
@@ -408,10 +408,10 @@ keys mean the run produced none — never invent an empty.
    read. Sending neither skips the check; a mismatch answers **409
    `CONCURRENT_UPDATE`**; the quoted-empty entity-tag (`""`) is refused **400
    `VALIDATION_FAILED`**, not treated as omitted.
-2. **Treating `DELETE` as final, or as restorable today.** A by-id delete
-   keeps a business object's rows in the recycle bin (`sys_recycle_bin`, 30
-   days by default; never `multi: true` deletes, platform rows or rows deleted
-   before the bin existed). Restore is not exposed yet; build no soft-delete.
+2. **Treating `DELETE` as final or as restorable.** A by-id delete keeps a
+   business object's rows in the recycle bin (`sys_recycle_bin`, 30 days by
+   default; not `multi: true` deletes, platform rows or rows deleted before the
+   bin existed); nothing lists or restores it over the API yet. No soft-delete.
 
 ---
 
