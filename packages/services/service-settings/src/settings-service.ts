@@ -1949,6 +1949,10 @@ export class SettingsService {
     // picked up by the `lockedEntry` scan below and reported as locking a value
     // it is not even providing, which is the opposite of what the read API owes
     // its caller.
+    //
+    // An override in force answers here without touching the store: this is
+    // the lightweight read request paths call. What is stored beneath the pin
+    // is listed by the inspection read, `getNamespace` (#30823).
     const envOverride = this.effectiveEnvOverride(reg, namespace, key);
     if (envOverride) {
       const { envName, value } = envOverride;
@@ -2054,13 +2058,36 @@ export class SettingsService {
     keys: readonly string[],
     ctx: SettingsContext = {},
   ): Promise<Record<string, ResolvedSettingValue>> {
+    return this.resolveMany(namespace, keys, ctx, false);
+  }
+
+  /**
+   * {@link getMany}, and, when `beneathPins` is set, the stored cascade
+   * beneath every in-force env override too ({@link withStoredBeneath}).
+   *
+   * `beneathPins` is the inspection read's, {@link getNamespace}: the
+   * namespace read the settings page draws from, where a field an `OS_*`
+   * variable pins must say whether a value is stored beneath the pin, so the
+   * page can offer the clear {@link setMany} lets through it (ADR-0007 D6).
+   * `getMany` and {@link get} leave it off: they are the lightweight resolver
+   * that request paths call (the localization read behind every request
+   * context), and an override answers there without touching the store.
+   * A pinned key joins the grouped load below, so the inspection read costs
+   * no extra load unless every key of a group is pinned.
+   */
+  private async resolveMany(
+    namespace: string,
+    keys: readonly string[],
+    ctx: SettingsContext,
+    beneathPins: boolean,
+  ): Promise<Record<string, ResolvedSettingValue>> {
     const reg = this.registry.get(namespace);
     if (!reg) throw new UnknownNamespaceError(namespace);
     for (const key of keys) {
       if (!reg.scopes.has(key)) throw new UnknownKeyError(namespace, key);
     }
     const out: Record<string, ResolvedSettingValue> = {};
-    const pending: Array<{ key: string; scope: SpecifierScope }> = [];
+    const pending: Array<{ key: string; scope: SpecifierScope; pinned?: true }> = [];
     for (const key of keys) {
       const envOverride = this.effectiveEnvOverride(reg, namespace, key);
       if (envOverride) {
@@ -2074,6 +2101,12 @@ export class SettingsService {
             { scope: 'env', value, locked: true, lockedReason: `Set via env: ${envName}`, effective: true },
           ],
         };
+        // An override whose value is null keeps its one entry: anything listed
+        // beneath it would be the first non-null entry of the chain, which the
+        // read contract makes the effective source, and the env value is.
+        if (beneathPins && value !== null && value !== undefined) {
+          pending.push({ key, scope: reg.scopes.get(key)!, pinned: true });
+        }
         continue;
       }
       pending.push({ key, scope: reg.scopes.get(key)! });
@@ -2098,11 +2131,26 @@ export class SettingsService {
       const sets = await this.loadRowSets(namespace, groups, reach);
       const userRows = userKeys.length > 0 ? sets[0] : [];
       const otherRows = otherKeys.length > 0 ? sets[sets.length - 1] : [];
-      for (const { key, scope } of userKeys) {
-        out[key] = await this.resolveKeyFromRows(reg, key, scope, userRows, userId, reach);
+      const resolve = async (
+        { key, scope, pinned }: (typeof pending)[number],
+        rows: SettingsRow[],
+        rowUserId: string | null,
+      ): Promise<ResolvedSettingValue> => {
+        if (!pinned) return this.resolveKeyFromRows(reg, key, scope, rows, rowUserId, reach);
+        // A secret beneath a pin is not in force, so no caller needs its
+        // plaintext, and decrypting it could only fail the read: its rows say
+        // whether a value is stored, as the REST read's mask says it.
+        const materialise = reg.encryptedKeys.has(key)
+          ? async (row: SettingsRow) => storedSecretPresence(row)
+          : undefined;
+        const stored = await this.resolveKeyFromRows(reg, key, scope, rows, rowUserId, reach, materialise);
+        return withStoredBeneath(out[key], stored);
+      };
+      for (const entry of userKeys) {
+        out[entry.key] = await resolve(entry, userRows, userId);
       }
-      for (const { key, scope } of otherKeys) {
-        out[key] = await this.resolveKeyFromRows(reg, key, scope, otherRows, null, reach);
+      for (const entry of otherKeys) {
+        out[entry.key] = await resolve(entry, otherRows, null);
       }
     }
     return out;
@@ -2123,6 +2171,9 @@ export class SettingsService {
    * The tenant and user rungs each take ONE row, the one the reach owns
    * ({@link preferredRow}) — never whichever row a positional `find` happens
    * to meet first.
+   *
+   * `materialise` turns a row into the value its entry carries; by default
+   * {@link materialiseRow}, which decrypts a secret.
    */
   private async resolveKeyFromRows<T = unknown>(
     reg: RegisteredManifest,
@@ -2131,6 +2182,7 @@ export class SettingsService {
     rows: SettingsRow[],
     userId: string | null,
     reach: OrganizationReach,
+    materialise: (row: SettingsRow) => Promise<unknown> = (row) => this.materialiseRow(row),
   ): Promise<ResolvedSettingValue<T>> {
     // 2. cascade walk — OS_* env (handled by callers) > global > tenant > user > default
     //
@@ -2141,7 +2193,7 @@ export class SettingsService {
 
     const globalRow = rows.find((r) => r.key === key && r.scope === 'global');
     if (globalRow) {
-      const value = await this.materialiseRow(globalRow);
+      const value = await materialise(globalRow);
       chain.push({
         scope: 'global',
         value,
@@ -2158,7 +2210,7 @@ export class SettingsService {
       if (tenantRow) {
         chain.push({
           scope: 'tenant',
-          value: await this.materialiseRow(tenantRow),
+          value: await materialise(tenantRow),
           locked: !!tenantRow.locked,
           lockedReason: tenantRow.locked_reason ?? undefined,
         });
@@ -2177,7 +2229,7 @@ export class SettingsService {
       if (userRow) {
         chain.push({
           scope: 'user',
-          value: await this.materialiseRow(userRow),
+          value: await materialise(userRow),
         });
       }
     }
@@ -2281,7 +2333,17 @@ export class SettingsService {
     return posture !== undefined && postureEnforcesWall(posture);
   }
 
-  /** Resolve every value in a namespace + return the manifest. */
+  /**
+   * Resolve every value in a namespace + return the manifest.
+   *
+   * The inspection read: the one the settings page draws from
+   * (`GET /api/settings/:namespace` serves it, redacted). Each key resolves
+   * as {@link getMany} resolves it, and a key an `OS_*` override pins also
+   * lists, beneath its env entry, the stored cascade the key falls back to
+   * once the override is removed (#30823) — so the page can tell whether a
+   * value is stored beneath the pin, at the scope a clear would null. A
+   * secret's entries there carry the read mask or `null`, never its value.
+   */
   async getNamespace(
     namespace: string,
     ctx: SettingsContext = {},
@@ -2294,8 +2356,9 @@ export class SettingsService {
     this.assertPermitted(reg.manifest, 'read', ctx);
 
     // [#10826] One grouped row load instead of one per key — same resolution
-    // per key by construction (getMany shares get()'s extracted cascade).
-    const values = await this.getMany(namespace, Array.from(reg.scopes.keys()), ctx);
+    // per key by construction (getMany shares get()'s extracted cascade), and
+    // [#30823] the stored cascade beneath each pin from that same load.
+    const values = await this.resolveMany(namespace, Array.from(reg.scopes.keys()), ctx, true);
     // A key whose options a source serves is offered what the running system
     // offers, for the value in effect (`registerOptionSource`).
     return { manifest: this.servedManifest(reg, namespace, values, display), values };
@@ -4109,6 +4172,32 @@ export class SettingsService {
 // ---------------------------------------------------------------------------
 // Local helpers
 // ---------------------------------------------------------------------------
+
+/**
+ * [#30823] An env-pinned answer with the stored cascade beneath the pin: the
+ * env entry stays first and the effective one, and below it come the entries
+ * the key's read lists when no override is in force (the rows the caller's
+ * cascade draws on, then the default), so a reader can tell whether a value is
+ * stored at the scope a clear would null. Their own `effective` flag goes:
+ * the stored pick is not what is in force. Nothing else of the answer moves.
+ */
+function withStoredBeneath(pinned: ResolvedSettingValue, stored: ResolvedSettingValue): ResolvedSettingValue {
+  const beneath = (stored.cascadeChain ?? []).map((entry) => {
+    const copy = { ...entry };
+    delete copy.effective;
+    return copy;
+  });
+  return { ...pinned, cascadeChain: [...(pinned.cascadeChain ?? []), ...beneath] };
+}
+
+/**
+ * What a secret's row shows beneath a pin: the read mask when it stores a
+ * value, else `null`. Read off the row, never decrypted.
+ */
+function storedSecretPresence(row: SettingsRow): string | null {
+  const stored = row.encrypted ? row.value_enc : row.value;
+  return stored === null || stored === undefined ? null : SETTINGS_SECRET_MASK;
+}
 
 /** Stable stringify so the audit digest is order-independent. */
 function stableStringify(input: unknown): string {

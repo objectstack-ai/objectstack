@@ -81,15 +81,19 @@ Per card and mode the runner writes `docs/qa/platform-checklist/runs/<date>-scen
 | Mode | Steps |
 |:---|:---|
 | `scratch` | `create-objectstack` → the agent builds from the card prompt and the runner's data contract (`prompts.ts`) → `objectstack validate` / `build` / `verify` (proofs chosen from the tags) → score → `objectstack dev --fresh` → seed, one user + permission-set grant + API key per persona → every question as every persona it names and every operation as its persona, over the app's MCP → the iterate change → rebuild, re-score, re-run |
-| `template` | a blank project → boot → install the card's verified build **unmanaged** (`/api/v1/marketplace/install-local`, `installMode: 'unmanaged'`) → the agent applies the iterate change to the installed copy → score → seed → Run. A refused install is a finding in the record |
+| `template` | a blank host project (`host<code>`) → boot → install the card's verified build **unmanaged** (`/api/v1/marketplace/install-local`, `installMode: 'unmanaged'`) → the agent applies the iterate change to the installed copy → score → seed → Run. A refused install is a finding in the record |
 
 - **Driver** (`driver.ts`): the local `claude` CLI on your own login (`claude -p --output-format stream-json`). It
   refuses to start when `ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN` is set or the CLI is logged in with an API key
   (the cost ruling on cloud#3600), and the record states the driver and login. `RecordedDriver` replays a recording.
 - **Observation** (`observe.ts`): the write grader is fed what the runner reads itself: the agent's write calls and
   the door's answer (a coded refusal), the object's rows before and after the turn, and the audit trail's actor.
-- **Namespaces** (`namespace.ts`): a card's object names are read relative to the package namespace (`account` →
-  `ns_account`), because a scaffolded project and the unmanaged install both refuse bare names.
-- **Persona contract**: the build is asked for one permission set per persona, named by the persona's id. The runner
+- **Namespaces** (`namespace.ts`): every card's app is in the namespace `demo` + the card's `code` (`democrm`): scratch
+  mode scaffolds the project under that name, and template mode installs a template declaring it into a host named
+  `host<code>` (the unmanaged copy keeps its namespace, and the install refuses one the host owns). The card's names are
+  read relative to it (`account` → `democrm_account`), because a scaffolded project and the unmanaged install both
+  refuse bare object names. The build prompt asks for the prefix on EVERY item, and the scorer reports each bare
+  non-object item name as a failing Build check (`bare-name:<type>:<name>`), so such a build is never verified.
+- **Persona contract**: the build is asked for one permission set per persona, named `<namespace>_<persona id>`. The runner
   grants it to that persona's user, and makes a seed row whose scope field names a persona's handle (`owner: u_sam`)
   owned by that persona's user.

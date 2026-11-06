@@ -3870,6 +3870,30 @@ const fr = {
   cloudWorkspaceTimezoneNotice: {
     seeded: "Le fuseau horaire de l’environnement a été défini sur {{zone}} d’après votre navigateur lors de sa création. Vous pouvez le modifier dans Paramètres → Localisation.",
   },
+  deploymentNotice: {
+    title: "Ce serveur conserve vos données et vos secrets sur son propre disque",
+    titleLow: "Terminez la configuration de ce déploiement",
+    intro: "Personne n'a défini où ce déploiement de production les conserve. Transmettez les paramètres ci-dessous à la personne qui gère le serveur, afin que son remplacement ne fasse rien perdre.",
+    finding: {
+      databaseLocalFile: "Vos données métier sont un fichier sur ce serveur ({{file}}). Remplacer le serveur ou son disque les fait perdre.",
+      authSecretGenerated: "Le secret de connexion a été généré sur ce serveur. S'il est perdu, tout le monde est déconnecté.",
+      dataKeyFile: "La clé qui chiffre les mots de passe et les clés d'API enregistrés est un fichier sur ce serveur ({{file}}). Si elle est perdue, ils ne peuvent plus être lus.",
+      fileStorageLocal: "Les fichiers téléversés sont conservés sur le disque de ce serveur.",
+      emailNotConfigured: "Aucun service d'e-mail n'est configuré : les invitations et les réinitialisations de mot de passe ne sont pas envoyées par e-mail.",
+    },
+    copy: {
+      button: "Copier les paramètres",
+      database: "Votre base de données, par exemple postgres://user:pass@db-host:5432/app, ou file:/path/on/a/kept/volume/app.db. Aujourd'hui, les données sont dans {{file}} : transférez-les avant de basculer.",
+      carryOver: "Reprendre la valeur actuelle : le contenu de {{file}}",
+      newValue: "Une longue valeur aléatoire, identique à chaque redémarrage, par exemple la sortie de : openssl rand -hex 32",
+    },
+    copied: "Copié",
+    hide: "Masquer",
+    hideNoAuditLog: "Ce déploiement ne tient pas de journal d'audit, l'avis ne peut donc pas être masqué.",
+    hideFailed: "L'avis n'a pas pu être masqué. Réessayez.",
+    hiddenLine: "L'avis de déploiement est masqué. Ce qu'il indique s'applique toujours.",
+    showAgain: "Afficher à nouveau",
+  },
   aiApprovals: {
     title: "Approbations IA",
     description: "Actions proposées par un agent IA qui nécessitent une validation humaine avant exécution.",

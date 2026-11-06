@@ -298,6 +298,18 @@ const SKIP_OBJECTS = new Set<string>([
   // Deliberately NOT `sys_file`: those rows are mostly permanent business truth
   // and keep their compliance value, so they stay audited (see #5202).
   'sys_upload_session',          // chunked-upload progress (1 write per chunk)
+  // [ADR-0148 D4, ADR-0057 §3.3] The recycle bin, `lifecycle.class:
+  // 'transient'` and engine-owned. Its entry is written raw by the delete that
+  // the ledger already records, so the generic writer only ever sees the
+  // bookkeeping: the lifecycle sweep's reap of an entry, the `set_null` of its
+  // `deleted_by` when the deleting user goes, and an organization delete's
+  // cascade into its entries. Each of those would copy the WHOLE entry into
+  // `sys_audit_log` and `sys_activity`, and the entry's `snapshot` holds every
+  // declared column of the deleted rows, `internal: true` ones included, which
+  // the ledger leaves out of the business row's own delete. The snapshot is
+  // read only through the bin's own doors, under the live object's field-level
+  // security; a purge by a person is an event-specific writer's to record.
+  'sys_recycle_bin',             // deleted-record snapshots (reaped by TTL)
   'ai_traces',                   // LLM trace telemetry
   // [ADR-0057 §3.3] The lifecycle sweeper's own clock state (one row per
   // datastore, `managedBy: 'engine-owned'`), written ONLY by objectql's

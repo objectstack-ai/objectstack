@@ -309,6 +309,11 @@ const READERS: Record<string, Row> = {
     disposition: 'row-value',
     why: 'reads the tenant column off the written row; a federated row has none, so the event omits it',
   },
+  // [#30237] A recycle-bin entry belongs to the organization of the record it holds.
+  'recycle-bin/capture.ts#organizationOf :: resolveTenantFieldName()': {
+    disposition: 'row-value',
+    why: "reads the tenant column off the snapshotted root row; a federated row has none, so the entry takes the deleting context's organization",
+  },
   'relation-filter-lowering.ts#admitRelationCondition :: referenceTargetOf()': {
     disposition: 'caller-predicate',
     why: "lowers a relation condition the caller wrote; it names an injected column only when the caller did",
