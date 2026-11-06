@@ -6,8 +6,8 @@
 // ISO 4217 (#7918) but read by NOTHING — measured with a positive control
 // (`currencyConfig.currencyMode` IS read) over objectstack, objectui at the
 // `.objectui-sha` pin and at `main`, and cloud `main`. objectui's
-// `CurrencyField` derives decimal places from the currency's ISO 4217 minor
-// unit and never read the key; its own contradiction check was its only
+// `CurrencyField` derives decimal places from the currency's CLDR fraction
+// digits and never read the key; its own contradiction check was its only
 // reader. The `decimals` / `scale` aliases that pointed authors at it went
 // with it (they now answer with the same prescription).
 //
