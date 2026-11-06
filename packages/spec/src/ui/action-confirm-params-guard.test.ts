@@ -23,8 +23,10 @@
  * two dialogs open, and its pick carries the `description` remedy. So does the
  * page `action:button` row, `ActionButtonPropsSchema` (#29844, ruling record
  * 6597621758 letter A), for an ARRAY `params` only: an object `params` there is
- * the static values and opens no dialog. The three doors share one predicate
- * and one message (`./action-confirm-beside-params.ts`), pinned equal below.
+ * the static values and opens no dialog. So do `action:icon` and the
+ * `action:group` / `action:menu` members (#30017, ruling record 6624208841
+ * letter A), on the same terms. The doors share one predicate and one message
+ * (`./action-confirm-beside-params.ts`), pinned equal below.
  *
  * The rejection tests assert the issue PATH and the MESSAGE SUBSTANCE rather
  * than a bare `success === false`. One condition, one wording: a refusal whose
@@ -35,7 +37,12 @@
 import { describe, expect, it } from 'vitest';
 import { ActionSchema, InlineActionSchema, defineAction } from './action.zod';
 import { BulkActionDefSchema } from './bulk-action.zod';
-import { ActionButtonPropsSchema } from './component.zod';
+import {
+  ActionButtonPropsSchema,
+  ActionGroupPropsSchema,
+  ActionIconPropsSchema,
+  ActionMenuPropsSchema,
+} from './component.zod';
 
 /**
  * Minimum legal registered action. `type` defaults to `script`, whose own
@@ -377,4 +384,117 @@ describe('`confirmText` + non-empty ARRAY `params` is refused on the `action:but
 
     expect(result.success, parseErrorOf(result)).toBe(true);
   });
+});
+
+describe('`confirmText` + non-empty ARRAY `params` is refused on `action:icon` and the `action:group` / `action:menu` members too', () => {
+  // #30017 (ruling record 6624208841, letter A). `action:icon` forwards its
+  // row's `confirmText` and an array `params` (as `actionParams`) to the same
+  // `ActionRunner`, and so do both containers for each member: the same two
+  // dialogs. Same predicate, same refusal: asserted against `action:button`'s
+  // own issue, so a wording drifting onto one door goes red. An object `params`
+  // (the icon's static values; a `type: 'api'` member's request payload) opens
+  // no dialog, so it keeps `confirmText`.
+  const pairParams = [{ name: 'reason', label: 'Reason', type: 'textarea' }];
+  const iconReject = {
+    label: 'Reject',
+    icon: 'x',
+    actionType: 'api',
+    target: '/api/v1/approvals/reject',
+    params: pairParams,
+  } as const;
+  const memberReject = {
+    name: 'reject',
+    label: 'Reject',
+    type: 'api',
+    target: '/api/v1/approvals/reject',
+    params: pairParams,
+  } as const;
+  const asContainer = (member: Record<string, unknown>) => ({
+    actions: [{ name: 'approve', label: 'Approve', type: 'script', target: 'approve' }, member],
+  });
+  const CONTAINERS = [
+    ['action:group', ActionGroupPropsSchema],
+    ['action:menu', ActionMenuPropsSchema],
+  ] as const;
+
+  const parseErrorOf = (result: { success: boolean; error?: unknown }) => JSON.stringify(result.error);
+  /** `action:button`'s issue for the pair: the message every other door must equal. */
+  const buttonMessage = (): string | undefined => {
+    const r = ActionButtonPropsSchema.safeParse({ ...iconReject, confirmText: 'Reject this request?' });
+    return r.success ? undefined : r.error.issues.find((i) => i.path.join('.') === 'confirmText')?.message;
+  };
+
+  it('`action:icon` refuses the pair at the `confirmText` path, with `action:button`\'s message', () => {
+    const result = ActionIconPropsSchema.safeParse({ ...iconReject, confirmText: 'Reject this request?' });
+
+    expect(result.success).toBe(false);
+    const issues = result.success ? [] : result.error.issues;
+    expect(issues).toHaveLength(1);
+    expect(issues[0]?.code).toBe('custom');
+    expect(issues[0]?.path).toEqual(['confirmText']);
+    expect(buttonMessage()).toBeDefined();
+    expect(issues[0]?.message).toBe(buttonMessage());
+    // The prescription: the remedy key, and the param-less case that keeps `confirmText` live.
+    expect(issues[0]?.message).toContain('TWO dialogs');
+    expect(issues[0]?.message).toContain('`description`');
+    expect(issues[0]?.message).toContain('param-LESS');
+  });
+
+  for (const [row, schema] of CONTAINERS) {
+    it(`an \`${row}\` member refuses the pair at \`actions.N.confirmText\`, with \`action:button\`'s message`, () => {
+      const result = schema.safeParse(asContainer({ ...memberReject, confirmText: 'Reject this request?' }));
+
+      expect(result.success).toBe(false);
+      const issues = result.success ? [] : result.error.issues;
+      expect(issues).toHaveLength(1);
+      expect(issues[0]?.code).toBe('custom');
+      // The member's own index, so the editor underlines the offending member, not the list.
+      expect(issues[0]?.path).toEqual(['actions', 1, 'confirmText']);
+      expect(issues[0]?.message).toBe(buttonMessage());
+      expect(issues[0]?.message).toContain('TWO dialogs');
+      expect(issues[0]?.message).toContain('`description`');
+    });
+
+    it(`an \`${row}\` member refuses the template-envelope form of \`confirmText\` too`, () => {
+      // A row's `confirmText` is a template slot: the bare string and the
+      // `{ dialect: 'template', source }` envelope are its two spellings (a
+      // localized map is refused by the slot itself, for its own reason).
+      const result = schema.safeParse(asContainer({
+        ...memberReject,
+        confirmText: { dialect: 'template', source: 'Reject this request?' },
+      }));
+
+      expect(result.success).toBe(false);
+      expect(result.success ? [] : result.error.issues.map((i) => [i.code, i.path.join('.')]))
+        .toEqual([['custom', 'actions.1.confirmText']]);
+    });
+  }
+
+  it('`action:icon` accepts `confirmText` with no `params`, beside `params: []`, and beside an OBJECT `params`', () => {
+    const { params: _params, ...paramless } = iconReject;
+    for (const props of [
+      { ...paramless, confirmText: 'Reject this request?' },
+      { ...iconReject, params: [], confirmText: 'Reject this request?' },
+      { ...iconReject, params: { reason: 'duplicate' }, confirmText: 'Reject this request?' },
+      { ...iconReject, description: 'Reject this request? Say why — the requester sees it.' },
+    ]) {
+      const result = ActionIconPropsSchema.safeParse(props);
+      expect(result.success, parseErrorOf(result)).toBe(true);
+    }
+  });
+
+  for (const [row, schema] of CONTAINERS) {
+    it(`an \`${row}\` member accepts \`confirmText\` with no \`params\`, beside \`params: []\`, and beside a \`type: 'api'\` member's OBJECT \`params\``, () => {
+      const { params: _params, ...paramless } = memberReject;
+      for (const member of [
+        { ...paramless, confirmText: 'Reject this request?' },
+        { ...memberReject, params: [], confirmText: 'Reject this request?' },
+        { ...memberReject, params: { reason: 'duplicate' }, confirmText: 'Reject this request?' },
+        { ...memberReject, description: 'Reject this request? Say why — the requester sees it.' },
+      ]) {
+        const result = schema.safeParse(asContainer(member));
+        expect(result.success, parseErrorOf(result)).toBe(true);
+      }
+    });
+  }
 });

@@ -98,17 +98,36 @@ describe('#28410 — findOverrideDeclarationRefusals walks the artifact under th
       manifest: manifest(PAIR, [BASE]),
       dashboards: [{ name: 'crm_board', overrides: { package: BASE, basedOn: '1.0.0' } }],
       objects: [{ name: 'crm_account', overrides: { package: BASE, basedOn: '1.0.0' } }],
-      // [#28412, ADR-0146 D9] A declared flow override is admitted now (its D9
-      // conditions are delivered); an `action` declaration still waits.
+      // [#28412, #30065, ADR-0146 D9] Declared flow and action overrides are
+      // admitted (their D9 conditions are delivered).
       flows: [{ name: 'crm_flow', overrides: { package: BASE, basedOn: '1.0.0' } }],
       actions: [{ name: 'crm_call', objectName: 'crm_account', label: 'Call', overrides: { package: BASE, basedOn: '1.0.0' } }],
       pages: [{ name: 'crm_home', overrides: { package: 'com.unlisted', basedOn: '1.0.0' } }],
     });
     expect(rows.map((r) => [r.path, r.rule])).toEqual([
       ['objects[0]', 'declared_object'],
-      ['actions[0]', 'declared_type_not_yet_available'],
       ['pages[0]', 'declared_outside_pair'],
     ]);
+  });
+
+  it('[#30065] a declared action override is judged against the base\'s own action: a widening is refused, a narrowing admitted', () => {
+    const gates = { requiredPermissions: ['crm_admin'], ai: { requiresConfirmation: true } };
+    const gatedBase = pkg(BASE, [], { actions: [{ name: 'log_call', objectName: 'crm_account', label: 'Log', ...gates }] });
+    const overrides = { package: BASE, basedOn: '1.0.0' };
+    const wider = { name: 'log_call', objectName: 'crm_account', label: 'Ours', overrides, requiredPermissions: [], ai: { requiresConfirmation: true } };
+    const narrower = { name: 'log_call', objectName: 'crm_account', label: 'Ours', overrides, ...gates, requiredPermissions: ['crm_admin', 'crm_auditor'] };
+    const rows = findOverrideDeclarationRefusals({
+      manifest: manifest('com.acme.bundle'),
+      packages: [gatedBase, pkg(PAIR, [BASE], { actions: [wider] })],
+    });
+    expect(rows.map((r) => [r.path, r.code, r.rule])).toEqual([
+      ['packages[1].manifest.actions[0]', 'NOT_OVERRIDABLE', 'declared_action_widens_access'],
+    ]);
+    expect(rows[0].message).toContain("drops 'crm_admin' from `requiredPermissions`");
+    expect(findOverrideDeclarationRefusals({
+      manifest: manifest('com.acme.bundle'),
+      packages: [gatedBase, pkg(PAIR, [BASE], { actions: [narrower] })],
+    })).toEqual([]);
   });
 
   it('a dependent carrying `overrides` is refused, and a declaration of an item the base does not ship is refused', () => {
@@ -124,6 +143,29 @@ describe('#28410 — findOverrideDeclarationRefusals walks the artifact under th
       [PARTNER, 'declared_outside_pair'],
       [PAIR, 'declared_package_ships_no_such_item'],
     ]);
+  });
+
+  it('[#30623] an action override moved to another object is told both objects and to keep the base action\'s objectName; CONTROL: an unshipped name keeps the name sentence', () => {
+    const overrides = { package: BASE, basedOn: '1.0.0' };
+    const rows = findOverrideDeclarationRefusals({
+      manifest: manifest('com.acme.bundle'),
+      packages: [base, pkg(PAIR, [BASE], {
+        actions: [
+          { name: 'log_call', objectName: 'crm_lead', label: 'Ours', overrides },
+          { name: 'no_such_call', objectName: 'crm_account', label: 'Ours', overrides },
+        ],
+      })],
+    });
+    expect(rows.map((r) => [r.path, r.code, r.rule])).toEqual([
+      ['packages[1].manifest.actions[0]', 'NOT_OVERRIDABLE', 'declared_package_ships_no_such_item'],
+      ['packages[1].manifest.actions[1]', 'NOT_OVERRIDABLE', 'declared_package_ships_no_such_item'],
+    ]);
+    expect(rows[0].message.split('. ')[0]).toBe(
+      `'action/log_call' declares an override of '${BASE}' on object 'crm_lead', but '${BASE}' ships its action 'log_call' on object 'crm_account'`);
+    expect(rows[0].message).toContain("keep the base action's `objectName: 'crm_account'` in the override");
+    expect(rows[1].message.split('. ')[0]).toBe(
+      `'action/no_such_call' declares an override of '${BASE}', which ships no action named 'no_such_call'`);
+    expect(rows[1].message).toContain('or correct the name');
   });
 
   it('a pair that does not depend on its base is told to declare the dependency', () => {

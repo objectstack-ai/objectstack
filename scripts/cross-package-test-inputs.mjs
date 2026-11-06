@@ -1359,6 +1359,28 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
       ],
     },
   },
+  '@objectstack/scenarios': {
+    // test/library.test.ts loads every scenario card under docs/qa/scenarios/
+    // and pins each question's computed truth, so a card edit changes this
+    // suite's verdict while touching nothing in the package. The capability
+    // area closed set is the basenames of the checklist's area files, read from
+    // the tree by every suite here, so adding or renaming an area does too.
+    //
+    // `corpus.ts` is the CLI's golden `os lint --eval` corpus, imported by the
+    // scorer's suites under test/score/ (#30291): the golden builds the
+    // discrimination tests degrade are its fixtures, and scenario-cards.test.ts
+    // holds each control card's `expect` equal to what that corpus derives, so
+    // a corpus edit moves this suite's verdict.
+    globs: ['docs/qa/scenarios/*.json', 'docs/qa/platform-checklist/areas/*.json', 'packages/cli/src/lint/corpus.ts'],
+    heldBy: {
+      // The areas directory is listed (`readdirSync`) and its basenames taken,
+      // so the roster holds the directory and no `*.json` name under it.
+      'docs/qa/platform-checklist/areas/*.json': [
+        'packages/qa/scenarios/test/library.test.ts',
+        'packages/qa/scenarios/test/refusals.test.ts',
+      ],
+    },
+  },
   '@objectstack/formula': {
     // src/rls-predicate.test.ts pins spec's RLS zod source against the
     // predicate compiler; src/skill-catalog-sync.test.ts pins the published

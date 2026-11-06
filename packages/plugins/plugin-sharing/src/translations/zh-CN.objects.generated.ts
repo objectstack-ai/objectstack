@@ -290,5 +290,58 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         label: "全部"
       }
     }
+  },
+  sys_queue: {
+    label: "队列",
+    pluralLabel: "队列",
+    description: "一组有名字的成员。尚未分配负责人的记录可以放进队列，等其中一人认领。",
+    fields: {
+      name: {
+        label: "名称",
+        help: "在所有用到该队列的地方标识它：记录上、分配规则、审批和共享规则中。只能使用小写字母、数字和下划线。"
+      },
+      label: {
+        label: "显示名称"
+      },
+      description: {
+        label: "描述"
+      }
+    },
+    _views: {
+      all_queues: {
+        label: "全部"
+      }
+    }
+  },
+  sys_queue_member: {
+    label: "队列成员",
+    pluralLabel: "队列成员",
+    description: "谁属于某个队列：一位用户、一个团队、一个岗位或一个业务单元。",
+    fields: {
+      queue: {
+        label: "队列",
+        help: "该成员所属队列的名称。"
+      },
+      recipient_type: {
+        label: "成员类型",
+        help: "这是哪一类成员。选择团队、岗位或业务单元时，其中的每个人都是成员；“业务单元及下级”还包括所选单元下的每个单元。",
+        options: {
+          user: "用户",
+          team: "团队",
+          position: "岗位",
+          business_unit: "业务单元",
+          unit_and_subordinates: "业务单元及下级"
+        }
+      },
+      recipient_id: {
+        label: "成员",
+        help: "具体的用户、团队、岗位或业务单元。"
+      }
+    },
+    _views: {
+      by_queue: {
+        label: "按队列"
+      }
+    }
   }
 };

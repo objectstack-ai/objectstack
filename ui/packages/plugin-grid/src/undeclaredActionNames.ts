@@ -46,7 +46,16 @@ export type UndeclaredActionNameKey = 'bulkActions' | 'rowActions';
 
 /** Where the offending block lives, for the first line of the message. */
 export interface UndeclaredActionNamesAddress {
-  /** The schema node's `type`: `object-grid`, or the `view:grid` alias. */
+  /**
+   * The component whose bar or menu left the names undrawn, for the message's
+   * head. Omitted: `ObjectGrid`. `@object-ui/plugin-list`'s ListView passes
+   * `ListView` for the selection bar it draws itself over a non-grid view.
+   */
+  component?: unknown;
+  /**
+   * The schema node's `type`: `object-grid`, or the `view:grid` alias; for
+   * ListView, the view on screen (`kanban`, `calendar`, …).
+   */
   blockType?: unknown;
   /** The object the grid queries, when it names one. */
   objectName?: unknown;
@@ -66,6 +75,10 @@ const SURFACE: Record<UndeclaredActionNameKey, string> = {
   bulkActions: 'the selection bar draws no button',
   rowActions: 'the row menu draws no entry',
 };
+
+function describeComponent(component: unknown): string {
+  return typeof component === 'string' && component.length > 0 ? component : 'ObjectGrid';
+}
 
 function describeAddress({ blockType, objectName, label }: UndeclaredActionNamesAddress): string {
   const block = typeof blockType === 'string' && blockType.length > 0 ? blockType : 'object-grid';
@@ -92,13 +105,13 @@ export function describeUndeclaredActionNames(
   const rule = `  A bare \`${key}\` name must name an action declared on the object.`;
   if (basis === 'unread') {
     const count = names.length === 1 ? '1 name' : `${names.length} names`;
-    return `[ObjectUI] ObjectGrid ${key}: ${describeAddress(address)} — the object's schema could not `
+    return `[ObjectUI] ${describeComponent(address.component)} ${key}: ${describeAddress(address)} — the object's schema could not `
       + `be read (no getObjectSchema on the data source, or the read failed), so its declared actions `
       + `are unknown and ${SURFACE[key]} for ${count}: ${listed}.\n`
-      + `${rule} Give the grid a data source that answers getObjectSchema, or check why the read failed.`;
+      + `${rule} Give the ${describeComponent(address.component)} a data source that answers getObjectSchema, or check why the read failed.`;
   }
   const count = names.length === 1 ? '1 name matches' : `${names.length} names match`;
-  return `[ObjectUI] ObjectGrid ${key}: ${describeAddress(address)} — ${count} no action the object `
+  return `[ObjectUI] ${describeComponent(address.component)} ${key}: ${describeAddress(address)} — ${count} no action the object `
     + `declares, so ${SURFACE[key]} for ${them}: ${listed}.\n`
     + `${rule} Declare the action on the `
     + 'object, or remove the name. An action that a disabled package withholds is left out of the '
@@ -141,10 +154,11 @@ export function useUndeclaredActionNamesWarning(input: {
   // Keyed on the names' VALUES, never on the array the fold returns, which is
   // a fresh one on every render.
   const namesKey = ready ? JSON.stringify(input.names) : '';
-  const { blockType, objectName, label } = input.address;
+  const { component, blockType, objectName, label } = input.address;
   useEffect(() => {
     if (!namesKey || !isDevelopment()) return;
     const message = describeUndeclaredActionNames(key, JSON.parse(namesKey) as string[], {
+      component,
       blockType,
       objectName,
       label,
@@ -152,5 +166,5 @@ export function useUndeclaredActionNamesWarning(input: {
     if (!message || warnedMessages.has(message)) return;
     warnedMessages.add(message);
     console.warn(message);
-  }, [key, namesKey, basis, blockType, objectName, label]);
+  }, [key, namesKey, basis, component, blockType, objectName, label]);
 }

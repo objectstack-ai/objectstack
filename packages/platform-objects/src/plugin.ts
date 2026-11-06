@@ -8,6 +8,7 @@ import { SysMigrationJournal } from './system/sys-migration-journal.object.js';
 import { SysSecret } from './system/sys-secret.object.js';
 import { SysExchangeRate } from './system/sys-exchange-rate.object.js';
 import { SysTrustedKey } from './system/sys-trusted-key.object.js';
+import { SysLifecycleState } from './system/sys-lifecycle-state.object.js';
 import { attestFreshDatastore } from './system/migration-flag.js';
 import type {
   II18nService,
@@ -56,6 +57,12 @@ import { SEED_SETTLEMENT_SERVICE } from '@objectstack/spec/contracts';
  *    and ADR-0025 M1's boot-time plugin loader in the runtime is the second
  *    reader (not built yet). No capability plugin owns plugin distribution,
  *    so it rides with the other platform infrastructure (ADR-0029 D1/D2).
+ *  - **`sys_lifecycle_state`** — the ObjectQL lifecycle sweeper's clock
+ *    state (ADR-0057): when the scheduled sweep last completed on this
+ *    datastore, so a reboot onto an existing store reads one row instead of
+ *    re-sweeping within a minute. Its only reader and writer is the engine's
+ *    own `LifecycleService`, which treats a kernel without this object as
+ *    one that cannot say and sweeps as before.
  *  - **`sys_metadata_activation`** — the packaged-metadata activation
  *    ledger (ADR-0126 §4). Same story a third time, and the ruling that
  *    moved it here is recorded verbatim on #12359 (maintainer, 2026-08-26,
@@ -202,7 +209,7 @@ export class PlatformObjectsPlugin {
         version: this.version,
         type: 'plugin',
         scope: 'system',
-        objects: [SysMigration, SysMigrationJournal, SysSecret, SysExchangeRate, SysTrustedKey],
+        objects: [SysMigration, SysMigrationJournal, SysSecret, SysExchangeRate, SysTrustedKey, SysLifecycleState],
       });
       ctx?.getService?.('manifest')?.register?.({
         ...ACTIVATION_LEDGER_MANIFEST,

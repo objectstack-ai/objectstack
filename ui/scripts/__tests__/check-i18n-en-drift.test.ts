@@ -14,6 +14,7 @@ import {
   ISSUE_PATTERN,
   LEDGER_PATH,
   LOCALES,
+  namespacePackPaths,
   packPath,
   parsePack,
   readLedger,
@@ -521,6 +522,58 @@ describe('a follower pack the base commit does not have', () => {
   });
 });
 
+// -- the pack-shaped namespaces (objectstack#30588) ---------------------------
+
+describe('a language is its pack plus its namespace partial packs', () => {
+  const NS = namespacePackPaths('en')[0].replace(/en\.ts$/, '');
+  const nsFiles = (trees: Record<string, Nested>): Record<string, string> =>
+    Object.fromEntries(LOCALES.map((lang) => [`${NS}${lang}.ts`, packSource(lang, trees[lang])]));
+
+  it('names one partial pack per language per namespace', () => {
+    expect(namespacePackPaths('zh')).toEqual(['packages/i18n/src/namespaces/marketplace/zh.ts']);
+  });
+
+  it('a group MOVED from the pack to its namespace is no drift and no key-set change', () => {
+    const before = packFiles(treesFor((lang) => ({ common: { save: `save-${lang}` }, shop: { title: `shop-${lang}` } })));
+    const after = {
+      ...packFiles(treesFor((lang) => ({ common: { save: `save-${lang}` } }))),
+      ...nsFiles(treesFor((lang) => ({ shop: { title: `shop-${lang}` } }))),
+    };
+    const { root, shas } = repoWithCommits([before, after]);
+    const { code, output } = runGate(root, [...FIXTURE_FLOOR, '--base', shas[0], '--head', shas[1]]);
+    expect(code).toBe(0);
+    expect(output).toContain('0 en value(s) changed (0 key(s) added, 0 removed');
+  });
+
+  it('an en value changed INSIDE the namespace is drift the nine must follow', () => {
+    const base = treesFor((lang) => ({ shop: { title: `shop-${lang}` } }));
+    const before = { ...packFiles(treesFor(() => ({ common: { save: 's' } }))), ...nsFiles(base) };
+    const after = {
+      ...packFiles(treesFor(() => ({ common: { save: 's' } }))),
+      ...nsFiles({ ...base, en: { shop: { title: 'Shop, renamed' } } }),
+    };
+    const { root, shas } = repoWithCommits([before, after]);
+    const { code, output } = runGateExpectingFailure(root, [
+      ...FIXTURE_FLOOR,
+      '--base',
+      shas[0],
+      '--head',
+      shas[1],
+    ]);
+    expect(code).toBe(1);
+    expect(output).toContain('shop.title');
+  });
+
+  it('refuses a key defined both in a pack and in its namespace', () => {
+    const files = {
+      ...packFiles(treesFor((lang) => ({ shop: { title: `pack-${lang}` } }))),
+      ...nsFiles(treesFor((lang) => ({ shop: { title: `ns-${lang}` } }))),
+    };
+    const { root } = repoWithCommits([files]);
+    expect(() => readPacks(root, null)).toThrow(/shop\.title is defined both in/);
+  });
+});
+
 // -- the waiver ledger --------------------------------------------------------
 
 /** The reconstructed drift plus a ledger, as a two-commit repo the CLI can read. */
@@ -679,7 +732,10 @@ describe('the shipped ledger', () => {
   });
 
   it('has no entry that the current en pack contradicts', () => {
-    const enAfter = parsePack(fs.readFileSync(path.join(repoRoot, packPath('en')), 'utf8'), 'en.ts');
+    // The gate's own `en` population — the pack and its namespaces' partial
+    // packs (objectstack#30588) — so a waived key that moved to a namespace is
+    // still read where it now lives.
+    const enAfter = readPacks(repoRoot, null).get('en')!;
     expect(checkLedger(ledger, enAfter)).toEqual([]);
     for (const entry of Object.values(ledger.waivers) as Array<{ issue: string }>) {
       expect(entry.issue).toMatch(ISSUE_PATTERN);

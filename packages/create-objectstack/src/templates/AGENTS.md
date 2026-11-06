@@ -100,7 +100,7 @@ deployment.
   holds that `src/` does not register, the `.custom` package among them, to
   `objectstack-export/NN-ID/objectstack.json`. Commit that directory. After
   the deployment is up, install each file into it, in the numbered order:
-  `npx os package install objectstack-export/NN-ID/objectstack.json --runtime URL`.
+  `npx os package install objectstack-export/NN-ID/objectstack.json --url URL`.
 
 `{{PM}} run build` prints a notice when the local dev database holds such a
 customization.

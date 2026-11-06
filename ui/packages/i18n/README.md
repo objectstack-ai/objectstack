@@ -441,6 +441,42 @@ and retired `check:i18n-designer-parity`, which paired the two homes. App-shell'
 still skips app-shell's translator **by declaration** (its `EXCLUDED_TRANSLATORS`
 entry), so a second local table cannot appear silently.
 
+## The `marketplace` namespace — the marketplace pages' strings, fetched with them
+
+The `marketplace.*` keys are ordinary pack keys to their readers — app-shell's
+marketplace pages ask `t('marketplace.…')` like any other component — but they
+are not in the packs. They live in
+[`src/namespaces/marketplace/`](./src/namespaces/marketplace/index.ts), reached
+through the `@object-ui/i18n/namespaces/marketplace` subpath:
+
+- **Ten catalogues, all lazy.** `src/namespaces/marketplace/<code>.ts` is a
+  partial pack — the same shape as `src/locales/<code>.ts`, holding only the
+  `marketplace` group. Each is its own chunk; none is in the console's first
+  load, so the eager `en` pack does not carry two lazy pages' text.
+- **A page waits for them.** `useMarketplaceNamespace()` fetches the catalogue
+  for the instance's language plus `en` (the packs' fallback) and deep-merges
+  them into the instance, never over a host's own `resources`. App-shell's
+  marketplace pages render a copy-free loading frame until it answers `ready`,
+  and again after a language switch, so a visitor never reads English in a
+  translated page nor a raw key.
+- **What Studio's packages page reads stays in the packs.** That page, outside
+  the marketplace route, draws a marketplace install's row with app-shell's
+  `MarketplaceRowActions` / `MarketplaceNotLoaded` and an import's refusal and
+  protocol note with the `dependencyMissing` / `protocolCheckSkipped` readers,
+  so the keys those read (`marketplace.installedAdditiveNote`,
+  `marketplace.notLoaded.*`, three `marketplace.action.*` and four
+  `marketplace.uninstall.*` leaves, `marketplace.install.dependencyMissing.*`,
+  `marketplace.install.protocolCheckSkipped.*`) stay resident. App-shell's
+  `marketplaceNamespaceBoundary` test holds that set to what those files read.
+- **Inside the pack gates.** `@object-ui/i18n/locales` hands out each language
+  COMPLETE — its pack merged with its namespace catalogue — so key parity and
+  every suite that walks `builtInLocales` still walk these keys, and
+  `registerBuiltInLocales()` makes them resident with the rest. The call-site,
+  dead-key and `en`-drift gates under `ui/scripts/` read the namespace files as
+  part of the packs and refuse a key defined in both.
+
+The package entry's `en` is the resident pack alone, without the namespace.
+
 ## Links
 
 - 📦 [npm package](https://www.npmjs.com/package/@object-ui/i18n)

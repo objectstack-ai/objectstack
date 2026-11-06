@@ -122,9 +122,18 @@ export function findOverrideDeclarationRefusals(parsed: Record<string, unknown>)
       if (base !== undefined && dependencies.includes(base) && !byId.has(base) && !shippers.includes(base)) {
         shippers.push(base);
       }
+      // [#30065] The base's own item of this identity, when this artifact
+      // carries the base: what a declared action override is judged against.
+      const baseItemOf = (baseId: string): unknown =>
+        byId.get(baseId)?.items.find((i) => `${i.type}\u0000${i.identity}` === key)?.item;
+      // [#30623] The base's items of this type, when this artifact carries
+      // the base: what the ships-no-such-item refusal names an action's
+      // object from.
+      const baseItemsOf = (baseId: string): unknown[] =>
+        (byId.get(baseId)?.items ?? []).filter((i) => i.type === walked.type).map((i) => i.item);
       const verdict = judgeOverrideWrite(
         { type: walked.type, name: walked.name, packageId: pkg.id, item: walked.item },
-        { dependencies, shippers },
+        { dependencies, shippers, baseItemOf, baseItemsOf },
       );
       if (verdict.verdict !== 'refuse') continue;
       rows.push({ path: walked.path, code: 'NOT_OVERRIDABLE', rule: verdict.rule, packageId: pkg.id, message: verdict.message });

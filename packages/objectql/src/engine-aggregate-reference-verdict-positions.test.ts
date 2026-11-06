@@ -32,6 +32,10 @@
  *   the engine's groupBy door and its `min` / `max` door refuse it first. The
  *   aggregated column's type carries no `multiple` flag, and the rows below
  *   hold that it needs none.
+ * - [#29304] Nor does a `formula` column: it is virtual (no stored value to
+ *   group), and the engine's groupBy storage door
+ *   (`assertGroupByTargetsAreStored`) refuses a group over it first. A
+ *   formula pair at `having` is refused there, before the verdict is asked.
  *
  * The `where` column is measured in `packages/rest`
  * (`aggregation-filter-where-doors.test.ts`), where a real `SqlDriver` answers
@@ -228,6 +232,10 @@ function expectedAt(position: Position, target: string, referent: string): Expec
     // The `multiple` seam (pointer 5944816815): no aggregated column holds a list.
     return { kind: 'refused first by', door: 'the groupBy door (a multi-value or JSON field is not grouped by)', code: 'INVALID_FIELD' };
   }
+  if (position === 'having' && (FIELDS[target].type === 'formula' || FIELDS[referent].type === 'formula')) {
+    // [#29304] No aggregated column holds a formula: a group over one is refused.
+    return { kind: 'refused first by', door: 'the groupBy storage door (a formula is not grouped by)', code: 'INVALID_FIELD' };
+  }
   if (position === 'aggregations[i].filter' && FIELDS[target].type === 'formula') {
     // `where` meets the same door first: a formula is computed on read, never filtered on.
     return { kind: 'refused first by', door: 'the materializable-filter door (a formula key)', code: 'INVALID_FIELD' };
@@ -420,16 +428,17 @@ describe('[#21299] the card\'s four measured shapes are refused before any read,
   });
 
   it('…and at having, an addDays pair from a formula projection, which was answered: refused, naming the formula', async () => {
+    // [#29304] The formula projection itself is refused now, at its groupBy
+    // position, before `having` is read: no aggregated column holds a formula.
     const { engine, calls } = await makeEngine(OBJ);
     const out = await outcomeOf(() => engine.aggregate(OBJECT, {
       groupBy: ['due_f', { field: 'due_on', dateGranularity: 'day', alias: 'due_day' }],
       aggregations: [{ function: 'count', alias: 'n' }],
       having: { due_f: { $lte: { $field: 'due_day', addDays: 1 } } },
     } as unknown as EngineAggregateOptions), () => []);
-    expect(out).toMatchObject({ refused: true, code: 'INVALID_FILTER', status: 400 });
+    expect(out).toMatchObject({ refused: true, code: 'INVALID_FIELD', status: 400 });
     expect(calls).toEqual({ aggregate: 0, find: 0 });
-    expect(out.message).toContain('the target field "due_f" (type "formula")');
-    expect(out.message).toContain('{ "$field": "due_day" } with addDays');
+    expect(out.message).toContain("groupBy.0 groups by 'due_f', but 'due_f' is a formula field");
   });
 
   it('the same-class control on the same object answers as before', async () => {

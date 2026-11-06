@@ -168,6 +168,7 @@ import { carriesNullSafeTenantKeyPart, ceremonyOwnedDropFinding, describeMissing
 import { isJsonColumnType, mediaColumnMoveDialect, mediaColumnMovePlan, type MediaColumnMovePlan, type MediaColumnMoveRefusal, type MediaColumnMoveScan } from './media-column-move.js';
 import { StandardErrorCode } from '@objectstack/spec/api';
 import { recoverUnencodedJsonText } from './unencoded-json-text.js';
+import { renderExistingTableAdoptionRefusal } from './existing-table-refusal.js';
 import { aggregandColumnClass } from '@objectstack/core';
 import { FILE_REFERENCE_TYPES, isRuntimeDefaultToken, NUMERIC_VALUE_TYPES, parseAutonumberFormat, resolveAutonumberFormat, type AutonumberToken } from '@objectstack/spec/data';
 import { formatAttribute, undeliveredStorageAttributes, type UndeliveredAttribute } from './builtin-column-collision.js';
@@ -1986,6 +1987,20 @@ export async function previewDeferredSchemaWork(this: Pick<SchemaSyncHost, 'defe
       continue;
     }
     const existing = new Set(Object.keys(await this.knex(tableName).columnInfo()));
+    // [#30636] The one existing shape the sync does not adopt additively — a
+    // table keyed by `_id` with no `id` (`existing-table-refusal.ts`) — is
+    // planned as `initObjects` treats it, with the same two probes and the
+    // same row count: rebuilt while EMPTY, refused while it holds rows, never
+    // `add_columns`. A rotation-declared object never reaches that branch of
+    // the sync (it takes the rotator's), so it never reaches this one.
+    if (existing.has('_id') && !existing.has('id') && !(rotation?.strategy === 'rotation' && this.supportsRotation)) {
+      const [{ rows }] = await this.knex(tableName).count({ rows: '*' });
+      const count = Number(rows);
+      out.push(count > 0
+        ? { table: tableName, kind: 'refuse_table', columns: ['_id'], rows: count, refusal: renderExistingTableAdoptionRefusal(tableName, '_id', count) }
+        : { table: tableName, kind: 'rebuild_table', columns: declared, rows: 0 });
+      continue;
+    }
     const missing = declared.filter((c) => !existing.has(c));
     if (missing.length > 0) {
       out.push({ table: tableName, kind: 'add_columns', columns: missing });

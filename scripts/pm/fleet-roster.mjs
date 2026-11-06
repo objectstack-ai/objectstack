@@ -59,6 +59,13 @@
  *   awaiting ruling  open `needs-user-decision` cards of the lane (issues, not
  *                    pulls): on the seat whose account is assigned, else on
  *                    the lane's lowest seated seat number, else its lowest.
+ *   awaiting merge   open pulls carrying `pm:awaiting-merge` — the PR half of
+ *                    the maintainer's inbox (SKILL.md 复核 ②; PRs only, ⛔ never
+ *                    an issue) — that close an in-flight card of the seat,
+ *                    attributed exactly as awaiting landing is. No new read:
+ *                    the labels ride on the open-pulls listing. The line under
+ *                    the table counts the two inboxes apart, every repo in:
+ *                    「决策卡 N · 待您审合 PR M」, never summed.
  *   awaiting landing open pulls on a `claude/` head that close an in-flight
  *                    card of the seat (`Fixes|Closes|Resolves #n`) and carry a
  *                    review verdict — a `## 席位核对` comment whose verdict
@@ -133,7 +140,7 @@ import { LEDGER_EXCLUSION, MAILBOX_BRANCH_PREFIX, MAILBOX_LABEL, mailboxOwner, S
 // re-spells it. The relay that imports `ROSTER_MARKER` from here (`fleet-write/dispatch.mjs`) already imports
 // check-half-states itself, so this import loads nothing new there. The opener's lane-word lists cannot import it
 // (the patrol loads the opener lazily, so that edge would be a cycle); the self-test holds the two equal.
-import { SEAT_SIGNATURE_LINE } from './check-half-states.mjs';
+import { GOVERNED_PR_AWAITING_MERGE_LABEL, SEAT_SIGNATURE_LINE } from './check-half-states.mjs';
 import { contractReviewClaimLapse, readContractReviewClaim } from './record-recognisers.mjs';
 // The seat record's heading and verdict have ONE reading, shared with H69 in
 // check-half-states; this file asks it, never re-spells the heading.
@@ -440,6 +447,13 @@ export function buildRows(snapshot, { now }) {
     if (mailboxOwner(pr) !== null || !String(pr?.head?.ref ?? '').startsWith(CARD_BRANCH_PREFIX) || !hasLandingVerdict(comments)) continue;
     for (const k of closingRefs(pr.body, repo)) landing.set(k, [...(landing.get(k) ?? []), ref(repo, pr.number)]);
   }
+  const merging = new Map(); // card key → [pull refs carrying the awaiting-merge label]
+  for (const { repo, pr } of pulls) {
+    // The label IS the reading (a seat wrote it beside the approval request, SKILL.md 复核 ②): no verdict walk,
+    // no head-prefix test. A mailbox pull never counts, whatever it carries.
+    if (mailboxOwner(pr) !== null || !labelNames(pr).includes(GOVERNED_PR_AWAITING_MERGE_LABEL)) continue;
+    for (const k of closingRefs(pr.body, repo)) merging.set(k, [...(merging.get(k) ?? []), ref(repo, pr.number)]);
+  }
 
   const out = rows.map((row) => {
     const acct = lc(row.account);
@@ -450,6 +464,7 @@ export function buildRows(snapshot, { now }) {
     const sharesWith = first !== row ? first.seat : null;
     const inFlight = row.account && sharesWith === null && claims === null ? cards.filter((c) => cardLaneMatch(c, row) && c.assignees.includes(acct)) : [];
     const awaitingLanding = inFlight.flatMap((c) => landing.get(keyOf(c)) ?? []);
+    const awaitingMerge = inFlight.flatMap((c) => merging.get(keyOf(c)) ?? []);
     // Per seat, never per account: one account holds several seats, and each seat opens its own.
     const mailbox = mailboxes.filter((m) => m.slug !== null && m.slug === seatSlugOf(row)).map((m) => m.ref);
     // The seat's own traces: a seat sharing its lane's account with a lower seat has no in-flight cards of its own.
@@ -462,6 +477,7 @@ export function buildRows(snapshot, { now }) {
       inFlight: claims ?? inFlight.map((c) => ref(c.repo, c.number)).sort(byRef),
       awaitingRuling: [],
       awaitingLanding: awaitingLanding.sort(byRef),
+      awaitingMerge: awaitingMerge.sort(byRef),
       lastActivity,
       suspectedWall: row.status === 'seated' && !isEpicLane(row.lane) && row.wallNote === null && ageHours !== null && ageHours > STALE_HOURS,
       mailbox,
@@ -490,6 +506,22 @@ function age(iso, now) {
   return `${iso.slice(0, 16).replace('T', ' ')}Z (${rel})`;
 }
 
+/**
+ * The maintainer's inbox in its two halves, every repo in — counted APART and never summed (maintainer ruling:
+ * 「同意 pm:awaiting-merge」). Decision cards are open `needs-user-decision` ISSUES (a pull carrying that label is the
+ * retired shape and counts nowhere); awaiting-merge pulls are every open pull carrying `pm:awaiting-merge`, exactly
+ * the filter the maintainer opens — the column above is the per-seat attribution of the same pulls. Pure.
+ */
+export function inboxTotals(snapshot) {
+  let decisionCards = 0;
+  let awaitingMergePulls = 0;
+  for (const s of Object.values(snapshot?.repos ?? {})) {
+    for (const i of s.rulings ?? []) if (!i.pull_request && i.state !== 'closed') decisionCards++;
+    for (const p of s.pulls ?? []) if (p.state !== 'closed' && labelNames(p).includes(GOVERNED_PR_AWAITING_MERGE_LABEL)) awaitingMergePulls++;
+  }
+  return { decisionCards, awaitingMergePulls };
+}
+
 /** The reads made for `repos`, in the order made — the footer's provenance. Pure. */
 export function readsFor(repos) {
   return repos.flatMap((r) => [
@@ -504,15 +536,15 @@ export function readsFor(repos) {
 }
 
 /** The roster body, markdown; `unassigned` is `unassignedMailboxes`' list. Pure. */
-export function renderBody(rows, { now, repos, session = null, unassigned = [] }) {
+export function renderBody(rows, { now, repos, session = null, unassigned = [], inboxes = null }) {
   const lines = [
     ROSTER_MARKER,
     '# 车队总表 — fleet roster',
     '',
     'A generated view of the seat posts (`pm:seat`), the `pm:*` labels, assignees and open pulls — **never a second tracker**: the cards and seat posts are the record, and the next run overwrites this body.',
     '',
-    '| repo | lane | seat | account | in flight | awaiting ruling | awaiting landing | wall note | last activity | mailbox PR |',
-    '|:--|:--|:-:|:--|:--|:--|:--|:--|:--|:--|',
+    '| repo | lane | seat | account | in flight | awaiting ruling | awaiting merge | awaiting landing | wall note | last activity | mailbox PR |',
+    '|:--|:--|:-:|:--|:--|:--|:--|:--|:--|:--|:--|',
   ];
   for (const r of rows) {
     const who = r.routine ? 'Routine' : r.account ? `\`${r.account}\`` : '—';
@@ -520,13 +552,16 @@ export function renderBody(rows, { now, repos, session = null, unassigned = [] }
     const wall = r.wallNote ?? (r.suspectedWall ? `⚠️ ${SUSPECTED_WALL}` : '—');
     const inFlight = r.sharesWith !== null ? `= seat ${r.sharesWith}` : refs(r.inFlight);
     lines.push(
-      `| ${r.repo.split('/')[1]} | ${cell(r.lane)} | [${r.seat}](https://github.com/${r.board}/issues/${r.post}) | ${cell(account)} | ${inFlight} | ${refs(r.awaitingRuling)} | ${refs(r.awaitingLanding)} | ${cell(wall)} | ${age(r.lastActivity, now)} | ${refs(r.mailbox)} |`,
+      `| ${r.repo.split('/')[1]} | ${cell(r.lane)} | [${r.seat}](https://github.com/${r.board}/issues/${r.post}) | ${cell(account)} | ${inFlight} | ${refs(r.awaitingRuling)} | ${refs(r.awaitingMerge)} | ${refs(r.awaitingLanding)} | ${cell(wall)} | ${age(r.lastActivity, now)} | ${refs(r.mailbox)} |`,
     );
   }
   const seated = rows.filter((r) => r.status === 'seated');
   lines.push(
     '',
     `${rows.length} seat rows (${rows.filter((r) => isEpicLane(r.lane)).length} epic) · ${seated.length} seated · ${rows.filter((r) => r.suspectedWall).length} ${SUSPECTED_WALL} (seated, no \`Wall:\` line, last activity older than ${STALE_HOURS} h).`,
+    ...(inboxes
+      ? ['', `决策卡 ${inboxes.decisionCards} · 待您审合 PR ${inboxes.awaitingMergePulls} — the maintainer's inbox in its two halves, every repo in: open \`needs-user-decision\` issues (a letter owed) and open \`pm:awaiting-merge\` pulls (a review and a click owed), never summed.`]
+      : []),
     ...(unassigned.length
       ? ['', `⚠️ ${unassigned.length} mailbox PR(s) on no seat row — never attributed to an account's seats; close a legacy one and open one per seat: ${unassigned.map((m) => `${shortRef(m.ref)} (${[m.seat ?? m.slug, m.login].filter(Boolean).join(' · ') || 'no owner'}: ${m.why})`).join(' · ')}.`]
       : []),
@@ -647,11 +682,11 @@ export async function main(argv, { env = process.env } = {}) {
   const rows = buildRows(snapshot, { now });
   const unassigned = unassignedMailboxes(snapshot, rows);
   if (opts.json) {
-    console.log(JSON.stringify({ now, repos, rows, unassignedMailboxes: unassigned }, null, 2));
+    console.log(JSON.stringify({ now, repos, rows, unassignedMailboxes: unassigned, inboxes: inboxTotals(snapshot) }, null, 2));
     return EXIT_OK;
   }
   const session = env.OS_FLEET_SESSION || env.CLAUDE_CODE_REMOTE_SESSION_ID || null;
-  const body = renderBody(rows, { now, repos, session, unassigned });
+  const body = renderBody(rows, { now, repos, session, unassigned, inboxes: inboxTotals(snapshot) });
   if (opts.write === null) {
     console.log(body);
     return EXIT_OK;
@@ -815,6 +850,9 @@ async function selfTest() {
   t('a PR with no verdict does not count', row(1353, 'objectstack-ai/hotcrm').awaitingLanding, []);
   t('an unassigned ruling sits on the lane’s lowest seated seat', [row(6023).awaitingRuling, row(20163).awaitingRuling], [[{ repo: 'objectstack-ai/objectstack', number: 25373 }], []]);
   t('a ruling assigned to seat 2’s account sits on seat 2', row(19287).awaitingRuling, [{ repo: 'objectstack-ai/objectstack', number: 25344 }]);
+  t('⭐ a pull carrying `pm:awaiting-merge` that closes an in-flight card sits on that card’s seat, in its own column — the PR half of the inbox', row(19287).awaitingMerge, [os(25427)]);
+  t('⛔ a pull labelled `needs-user-decision` (the retired shape) is awaiting merge nowhere, and awaiting ruling never counts a pull', [rows.some((r) => r.awaitingMerge.length && r.post !== 19287), rows.some((r) => r.awaitingRuling.some((x) => x.number === 25401))], [false, false]);
+  t('the two inbox halves are counted apart, every repo in, and never summed', inboxTotals(fixture), { decisionCards: 2, awaitingMergePulls: 1 });
   t('⭐ the mailbox column is the SEAT\'s pm:mailbox PR — by body line on a --head branch, by head slug, by both', [row(6023).mailbox, row(19287).mailbox, row(20163).mailbox], [[os(25392)], [os(25393)], [os(25394)]]);
   t('⛔ one login on three seats: each seat shows only its own mailbox, and a seat that opened none shows none', [row(6023).mailbox.length, row(19287).mailbox.length, row(1353, 'objectstack-ai/hotcrm').mailbox], [1, 1, []]);
   t('⛔ a legacy per-login mailbox and a seat no post or open epic parent carries sit on no row — flagged, never attributed to the login\'s seats', [unassignedMailboxes(fixture, rows).map((m) => [m.ref.number, m.seat, m.login, m.why]), [row(5560, 'objectstack-ai/objectui').mailbox, row(10243, 'objectstack-ai/objectui').mailbox]], [[[25395, null, 'os-sales', 'legacy per-login, names no seat'], [25396, 'domain:spec#5', 'os-tesla', 'no seat post or epic parent carries this seat'], [25398, 'epic:#28130#1', 'os-zhuang', 'no seat post or epic parent carries this seat']], [[], []]]);
@@ -868,7 +906,7 @@ async function selfTest() {
     })(), [true, false]);
     t('the comment read starts STALE_HOURS before now, and the footer names it', [activitySince(NOW), readsFor([R]).some((q) => q.startsWith(`GET /repos/${R}/issues/comments?since=`))], ['2026-11-01T22:00:00Z', true]);
     const { readSignatureLine } = await import('./check-half-states.mjs');
-    t('the signature pattern is check-half-states\' SEAT_SIGNATURE_LINE, imported — no second spelling of the lane alternation in this file', [/^import \{ SEAT_SIGNATURE_LINE \} from '\.\/check-half-states\.mjs';$/mu.test(readFileSync(SELF_PATH, 'utf8')), readFileSync(SELF_PATH, 'utf8').includes(['triage', 'director', 'coordinator'].join('|'))], [true, false]);
+    t('the signature pattern is check-half-states\' SEAT_SIGNATURE_LINE, imported — no second spelling of the lane alternation in this file (and the awaiting-merge label rides the same import, no second spelling of it either)', [/^import \{ GOVERNED_PR_AWAITING_MERGE_LABEL, SEAT_SIGNATURE_LINE \} from '\.\/check-half-states\.mjs';$/mu.test(readFileSync(SELF_PATH, 'utf8')), readFileSync(SELF_PATH, 'utf8').includes(['triage', 'director', 'coordinator'].join('|')), readFileSync(SELF_PATH, 'utf8').includes(["'pm:", 'awaiting-merge', "'"].join(''))], [true, false, false]);
     // The lane grammar's two remaining owners, held equal here (the only file that imports both): the signature's
     // alternation and the opener's lane-word lists. `coordinator` is the one lane that signs and has no mailbox.
     const signatureLanes = (/^\^\(\(\?:([^()]*)\)\)#/u.exec(SEAT_SIGNATURE_LINE.source)?.[1] ?? '').split('|');
@@ -878,14 +916,16 @@ async function selfTest() {
   }
 
   battery('the rendered body: marker, columns, footer, determinism');
-  const body = renderBody(rows, { now: fixture.now, repos: Object.keys(fixture.repos).sort(), session: 'cse_01ABC' });
+  const body = renderBody(rows, { now: fixture.now, repos: Object.keys(fixture.repos).sort(), session: 'cse_01ABC', inboxes: inboxTotals(fixture) });
   t('the body opens with the marker', body.split('\n')[0], ROSTER_MARKER);
-  t('the header names the ten columns', body.includes('| repo | lane | seat | account | in flight | awaiting ruling | awaiting landing | wall note | last activity | mailbox PR |'), true);
+  t('the header names the eleven columns', body.includes('| repo | lane | seat | account | in flight | awaiting ruling | awaiting merge | awaiting landing | wall note | last activity | mailbox PR |'), true);
+  t('⭐ the inbox line spells both halves in the ruled words, apart and never summed', body.includes('决策卡 2 · 待您审合 PR 1'), true);
+  t('…and a render handed no inbox totals prints no inbox line rather than a wrong one', renderBody(rows, { now: fixture.now, repos: Object.keys(fixture.repos).sort() }).includes('待您审合 PR'), false);
   t('one table row per seat post', body.split('\n').filter((l) => /^\| (?:hotcrm|objectstack|objectui) \|/.test(l)).length, rows.length);
   t('the footer names the generation time and each read', [body.includes(`Generated ${fixture.now}`), body.includes('`GET /repos/objectstack-ai/hotcrm/issues?state=open&labels=pm:seat`')], [true, true]);
   t('the suspected wall is spelled in the row', body.includes(`⚠️ ${SUSPECTED_WALL}`), true);
   t('a shared seat reads = seat N in the in-flight cell', body.includes('| = seat 1 |'), true);
-  t('⭐ a review row renders its claimed pull in the in-flight cell, never `= seat N`', body.includes('| objectstack | review | [1](https://github.com/objectstack-ai/objectstack/issues/25500) | 🟢 `os-zhuang` | objectstack#25433 | — | — | — |'), true);
+  t('⭐ a review row renders its claimed pull in the in-flight cell, never `= seat N`', body.includes('| objectstack | review | [1](https://github.com/objectstack-ai/objectstack/issues/25500) | 🟢 `os-zhuang` | objectstack#25433 | — | — | — | — |'), true);
   t('the mailboxes on no seat row are flagged under the table, each with its owner and why', (() => {
     const flagged = renderBody(rows, { now: fixture.now, repos: Object.keys(fixture.repos).sort(), unassigned: unassignedMailboxes(fixture, rows) });
     return [flagged.includes('⚠️ 3 mailbox PR(s) on no seat row'), flagged.includes('objectstack#25395 (os-sales: legacy per-login, names no seat)'), flagged.includes('objectstack#25396 (domain:spec#5 · os-tesla: no seat post or epic parent carries this seat)'), body.includes('on no seat row')];

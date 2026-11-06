@@ -35,5 +35,16 @@ export declare const GATE_ONLY_KEYS: ReadonlyArray<string>;
 /** The header the generated pack opens with. */
 export declare const GENERATED_HEADER: string;
 
+/** The header a generated pack-shaped namespace catalogue opens with. */
+export declare const NAMESPACE_GENERATED_HEADER: string;
+
 /** The zh-Hant pack source, generated from the zh-Hans pack source. */
 export declare function generateZhHantPack(zhHansSource: string): string;
+
+/** A pack-shaped namespace's zh-Hant catalogue source, generated from its zh-Hans catalogue source. */
+export declare function generateZhHantNamespaceCatalogue(zhHansSource: string): string;
+
+/** Every catalogue the generator writes, package-relative, and the function that generates it. */
+export declare const ZH_HANT_TARGETS: ReadonlyArray<
+  Readonly<{ source: string; target: string; generate: (source: string) => string }>
+>;

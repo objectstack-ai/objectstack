@@ -33,7 +33,9 @@
 //
 // [#21889] Both imported names carry the showcase's ADR-0028 prefix:
 // `showcase_external` is declared by the showcase package (namespace
-// `showcase`), so an import over it is held to that namespace.
+// `showcase`), so an import over it is held to that namespace. [#30469 item 2]
+// That package is read-only, so the import lands in its customization package
+// `com.example.showcase.custom`, whose namespace is `showcase_custom`.
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import showcaseStack, { onEnable } from '@objectstack/example-showcase';
@@ -48,9 +50,9 @@ import { join } from 'node:path';
 const DATASOURCE = 'showcase_external';
 const REMOTE = 'customers';
 /** The object the first import creates and the re-import would shrink. */
-const NAME = 'showcase_dogfood_ext_cust_21841';
+const NAME = 'showcase_custom_dogfood_ext_cust_21841';
 /** The remedy's "new `name`". */
-const NEW_NAME = 'showcase_dogfood_ext_cust_21841_v2';
+const NEW_NAME = 'showcase_custom_dogfood_ext_cust_21841_v2';
 /** The column the re-import leaves out, so the stored object would lose its field. */
 const DROPPED = 'region';
 /** The re-import's options: the same table, one column fewer. */

@@ -45,7 +45,7 @@ A **Flow** is a directed graph of nodes — the primary automation building bloc
 | `screen` | Interactive — presents UI screens to the user (wizards, forms) |
 | `schedule` | Runs on a cron/interval cadence declared on the **start node's `config.schedule`** — or a **per-record date sweep** via `config.timeRelative`, see *Time-relative triggers* |
 | `record_change` | Fires automatically on record create/update/delete. `autolaunched` + the same `record-*` binding behaves identically; `record_change` also opts into the trigger-readiness lint |
-| `api` | Inbound **webhook** — needs a start-node `secretRef` (or a literal `secret`; see *Inbound webhook triggers* below); a flow only ever started explicitly is `autolaunched` |
+| `api` | Inbound **webhook** — needs a start-node `secretRef` (see *Inbound webhook triggers* below); a flow only ever started explicitly is `autolaunched` |
 
 **A flow an installed package ships** is read-only. To change what it does, save
 a same-named flow in the base's paired `.custom` package declaring
@@ -121,9 +121,9 @@ error. **RAW** keys are read as written: a
     topic: 'task',                     // RAW; default 'notify'
     severity: 'warning',               // RAW; CLOSED enum info|warning|critical
     channels: ['inbox'],               // RAW; default inbox
-    sourceObject: 'task',              // click-through: a PAIR, else dropped
-    sourceId: { dialect: 'cel', source: 'record.id' }, // (a value slot)
-    actionUrl: '/tasks/{{ record.id }}', // text slot; overrides the synthesized link
+    sourceObject: 'task',              // link: PAIR, else dropped; none of the 3 ⇒ the
+    sourceId: { dialect: 'cel', source: 'record.id' }, // trigger record (not on delete), if any
+    actionUrl: '/tasks/{{ record.id }}', // overrides the pair
 } }
 ```
 

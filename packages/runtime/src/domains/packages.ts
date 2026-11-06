@@ -65,8 +65,9 @@ import {
 // and a second copy would be the next place it drifts.
 import { isWritablePackage, READ_ONLY_PACKAGE_SCOPES } from '@objectstack/metadata-protocol';
 // [ADR-0146 D3] The pair-shaped-id predicate the install primitive asks — asked
-// at `POST /packages` too, ahead of both its install limbs.
-import { customizationPairManifestRefusal } from '@objectstack/metadata-protocol';
+// at `POST /packages` too, ahead of both its install limbs; and, the same way,
+// its [ADR-0029 D7] refusal of a runtime-created package's navigation contributions.
+import { customizationPairManifestRefusal, runtimeNavigationContributionsRefusal } from '@objectstack/metadata-protocol';
 // [#28117] The one reader of a manifest's declared dependency ids (ADR-0141),
 // shared with the registry's co-owner gate.
 import { declaredDependencyIds } from '@objectstack/core';
@@ -97,7 +98,7 @@ import type { MetadataProtocol, PackageProtocol } from '@objectstack/spec/api';
 // a second copy of `metadata-protocol`'s `applySeedBodies`, and a second
 // private restatement of "when may a caught sentence be quoted" is where the
 // two copies start answering differently.
-import { clientFacingFailureText, seedAppliedLanded, seedRequestValidationError } from '@objectstack/metadata-protocol';
+import { clientFacingFailureText, seedAppliedLanded, seedLoadPartialWrites, seedRequestValidationError } from '@objectstack/metadata-protocol';
 import type { SeedAppliedLandedParsed } from '@objectstack/spec/api';
 // [#15591] The DECLARED removal of our OWN read-time annotations, imported
 // from the list that defines them (`METADATA_READ_DECORATIONS`) rather than
@@ -750,6 +751,19 @@ interface PackageRowRegistryHost {
     registry?: {
         getPackage?(id: string): { manifest?: { type?: unknown; scope?: unknown; dependencies?: unknown } } | undefined;
     };
+}
+
+/**
+ * [#30377] An enable of a disabled package recomputes the roll-up summaries the
+ * package adds to other packages' objects by extension (`ObjectQL`'s
+ * `onPackageEnabled` listener; the child writes made during the disable
+ * recomputed nothing). The enable doors answer once that recompute has
+ * settled, so the first read after the answer serves current values. An
+ * engine without the member (a test double) answers at once, as before.
+ */
+async function summaryRefreshSettled(engine: unknown): Promise<void> {
+    const host = engine as { summaryRefreshSettled?: () => Promise<void> } | null | undefined;
+    if (typeof host?.summaryRefreshSettled === 'function') await host.summaryRefreshSettled();
 }
 
 /**
@@ -1670,6 +1684,17 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                     response: deps.error(installBodyRefusal(body, declaredBody.error.issues), 400),
                 };
             }
+            // [#30072] ADR-0029 D7 — a package created here cannot contribute
+            // navigation: neither limb below registers a contribution (only a
+            // code package's `registerApp` does), so the key would be stored,
+            // answered `201` and never shown. The primitive's own predicate,
+            // asked here so the no-protocol fallback is judged too; ⛔ never a
+            // second copy of the rule. After the whole-body verdict, ahead of
+            // the 409: a request-shape refusal never depends on server state.
+            const navRefusal = runtimeNavigationContributionsRefusal(manifest);
+            if (navRefusal !== undefined) {
+                return { handled: true, response: deps.error(navRefusal, 400) };
+            }
             // Every option below is read off the PARSED request, and only when
             // the body arrived in the wrapped form — the one form that declares
             // options. The bare branch has none to read: it refused them above.
@@ -1847,6 +1872,7 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             if (requestedEnabled === true) {
                 const enabled = registry.enablePackage(pkgId);
                 if (enabled) pkg = enabled;
+                await summaryRefreshSettled(qlService);
             } else if (requestedEnabled === false) {
                 const disabled = registry.disablePackage(pkgId);
                 if (disabled) pkg = disabled;
@@ -1912,6 +1938,7 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             const queryRefused = refusePackageWriteDoorQuery(deps, query, PACKAGE_WRITE_NO_QUERY_PARAMS); if (queryRefused) return queryRefused;
             const pkg = registry.enablePackage(id);
             if (!pkg) return { handled: true, response: deps.error(`Package '${id}' not found`, 404) };
+            await summaryRefreshSettled(qlService);
             try {
                 setPackageDisabled(_context?.environmentId, id, false);
             } catch (err) {
@@ -2126,9 +2153,24 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                             (deps.logger ?? console).warn(
                                 `[handlePackages] seed apply failed: ${e?.message ?? e}`,
                             );
+                            // [#30429] A load that threw mid-batch still reports
+                            // what it wrote, read off the error exactly as
+                            // `metadata-protocol`'s catch reads it: the counts
+                            // (finished datasets plus the one that threw), the
+                            // object that stopped it, and `landed` for the
+                            // datasets that finished, through the same
+                            // projection. No reading (no load ran) means nothing
+                            // was written: zero counts, `landed` absent.
+                            const written = seedLoadPartialWrites(e);
+                            const failure = clientFacingFailureText(e, 'seed apply failed');
                             (result as any).seedApplied = {
                                 success: false,
-                                error: clientFacingFailureText(e, 'seed apply failed'),
+                                inserted: written?.inserted ?? 0,
+                                updated: written?.updated ?? 0,
+                                error: written?.failedObject
+                                    ? `seed apply stopped at the seed for object '${written.failedObject}': ${failure}`
+                                    : failure,
+                                ...(written ? { landed: seedAppliedLanded(written.finished) } : {}),
                                 // [#10524] The declared 422's structured
                                 // findings ride beside the headline `error` —
                                 // `seedRequestValidationError`'s message is a

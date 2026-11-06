@@ -13,7 +13,7 @@ import { useState, useEffect, useMemo, type ComponentProps } from 'react';
 import { useParams } from 'react-router-dom';
 import { DashboardRenderer } from '@object-ui/plugin-dashboard';
 import { DrillNavigationProvider, notifyDataChanged } from '@object-ui/react';
-import { useOpenRecordList } from './useOpenRecordList.js';
+import { useRecordListDrillNavigation } from './useOpenRecordList.js';
 import { toast } from 'sonner';
 import type { ActionDef, ActionContext, ActionResult } from '@object-ui/core';
 import {
@@ -97,7 +97,7 @@ type DashboardRefreshState = Parameters<
 
 export function DashboardView({ dataSource }: { dataSource?: any }) {
   // Drill "escape hatch": lets the drill drawers open an object's full list page.
-  const openRecordList = useOpenRecordList();
+  const drillNavigation = useRecordListDrillNavigation();
   const { dashboardName } = useParams<{ dashboardName: string }>();
   const { showDebug } = useMetadataInspector();
   const adapter = useAdapter();
@@ -380,7 +380,7 @@ export function DashboardView({ dataSource }: { dataSource?: any }) {
       {/* ── Main area ────────────────────────────────────────────── */}
       <div className="flex-1 overflow-hidden flex flex-col sm:flex-row relative">
          <div className="flex-1 min-w-0 overflow-auto p-2 sm:p-4 md:p-6">
-            <DrillNavigationProvider value={{ openRecordList }}>
+            <DrillNavigationProvider value={drillNavigation}>
               {/* `localized`: this document is the `/meta` read's, already
                   translated for this language, so the renderer draws its
                   title, description and sub-caption as served (objectui#11295). */}

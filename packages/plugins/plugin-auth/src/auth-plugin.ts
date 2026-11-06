@@ -131,6 +131,13 @@ import {
 import { cloudManagedRefusal } from './cloud-managed.js';
 import { registerCopyInvitationLinkAction } from './invitation-link-action.js';
 import { allowedIpRangesWritePredicate, parseAllowedIpRanges } from './allowed-ip-ranges.js';
+import {
+  AUTH_SETTING_RESTORE,
+  captureDeclaredAuthOptions,
+  copyDeclared,
+  restoreGroupKeys,
+  type DeclaredAuthOptions,
+} from './auth-settings-declared.js';
 import { FORWARDED_CLIENT_ADDRESS_HEADERS } from './client-address-forwarding.js';
 import {
   runAdminBanUser,
@@ -554,14 +561,19 @@ export class AuthPlugin implements Plugin {
   private allowListUndeterminedWarned = false;
   private allowListUntrustedHeaderWarned = false;
   /**
-   * [#30203] The allow-list the deployment itself declared (plugin options or
-   * an `auth:configure` handler), taken before any setting is applied: what
-   * the running list returns to when the stored `allowed_ip_ranges` is cleared
-   * or restored to its default.
+   * [#30203, #30312] What the deployment itself declared (plugin options and
+   * `auth:configure` handlers) for every option an `auth.*` setting can drive,
+   * taken before any setting is applied: what the running value returns to when
+   * the stored key is cleared or restored to its default.
    */
-  private declaredAllowedIpRanges: string[] | undefined;
-  /** [#30203] Whether the running allow-list is the one a stored setting gave it. */
-  private allowedIpRangesFromSettings = false;
+  private declaredAuthOptions: DeclaredAuthOptions = {};
+  /**
+   * [#30203, #30312] The `auth.*` keys whose stored value the running config
+   * was last given (or whose restore the manager refused): a key leaving this
+   * set by resolving `source: 'default'` hands its value back to the
+   * declaration. Boot never restores, so an unset key costs nothing.
+   */
+  private authSettingsFromStore = new Set<string>();
   private configuredSocialProviders: SocialProviderConfig | undefined;
   /** Whether each provider declared at boot holds a credential pair (the sign-in floor's count). */
   private bootProviderCredentials: ReadonlyMap<string, boolean> = new Map();
@@ -801,7 +813,7 @@ export class AuthPlugin implements Plugin {
       logger: ctx.logger,
     });
 
-    this.declaredAllowedIpRanges = authConfig.allowedIpRanges ? [...authConfig.allowedIpRanges] : undefined;
+    this.declaredAuthOptions = captureDeclaredAuthOptions(authConfig);
     // Initialize auth manager with data engine
     this.authManager = new AuthManager(authConfig);
     // ADR-0092 D6 — remember the storage better-auth will actually use so the
@@ -1238,10 +1250,12 @@ export class AuthPlugin implements Plugin {
         //    `setDefaultLocale`; the CLI passes `config.i18n.defaultLocale`),
         //    and is the bare `en` when the app declares nothing.
         //  - `localization.locale` (ADR-0053) is the workspace's RUNTIME
-        //    language — Setup, Localization, tenant-scoped — whose four
-        //    options are exactly `AUTH_EMAIL_TEMPLATE_LOCALES`. It is
-        //    already the authority for auth SMS (#2815) and for audit
-        //    activity summaries (framework#3039).
+        //    language — Setup, Localization, tenant-scoped — whose options
+        //    are the deployment's locale list (#30286), so it may name a
+        //    language the auth mail rows do not ship (see
+        //    `AUTH_EMAIL_TEMPLATE_LOCALES`). It is already the authority for
+        //    auth SMS (#2815) and for audit activity summaries
+        //    (framework#3039).
         //
         // A workspace that declared Chinese therefore received Chinese SMS
         // and ENGLISH mail. The workspace setting now outranks the
@@ -1944,6 +1958,9 @@ export class AuthPlugin implements Plugin {
         registerOrganizationMfaEnrollmentGuard(engine, {
           packageId: 'com.objectstack.plugin-auth.organization-mfa-enrollment-guard',
           isTwoFactorEnabled: () => this.authManager?.isTwoFactorEnabled() ?? false,
+          // [#30411] The grace period an admitted turn-on's save notice names.
+          // No manager means two-factor reads off above, so nothing is admitted.
+          mfaGracePeriodDays: () => this.authManager?.getMfaGracePeriodDays() ?? Number.NaN,
         });
         // A reader's own named list views: the body is judged on every save as
         // a ListView for the row's own object. See personal-view-hooks.ts.
@@ -2065,6 +2082,8 @@ export class AuthPlugin implements Plugin {
       // Read when judged: the index is set in init, after `auth:configure`.
       providerHasCredentials: (provider) => providerCredentialsFrom(this.bootProviderCredentials)(provider),
       env: () => ((globalThis as any)?.process?.env ?? {}) as Record<string, string | undefined>,
+      // [#30312] A cleared toggle returns to the declaration: judge it there.
+      declaredEmailPasswordEnabled: () => this.declaredAuthOptions.emailAndPassword?.enabled !== false,
     };
   }
 
@@ -2156,6 +2175,18 @@ export class AuthPlugin implements Plugin {
         }
 
         const isExplicit = (key: string) => (sources[key] ?? 'default') !== 'default';
+        // [#30312] A key the running config took from the store that now
+        // resolves `source: 'default'` (cleared, or the namespace restored to
+        // its defaults) hands its value back to the deployment's declaration in
+        // this same pass, through the piece a save of it travels. Without this,
+        // every branch below skipped it and the last stored value ruled until a
+        // restart while the console showed the default. See auth-settings-declared.ts.
+        const declared = this.declaredAuthOptions;
+        const restoring = (key: string) => !isExplicit(key) && this.authSettingsFromStore.has(key);
+        const groupRestoring = (group: 'rateLimit' | 'google'): string[] => {
+          const keys = restoreGroupKeys(group);
+          return keys.some(isExplicit) ? [] : keys.filter(restoring);
+        };
         const asBoolean = (value: unknown, fallback: boolean): boolean => {
           if (typeof value === 'boolean') return value;
           if (typeof value === 'string') return value.toLowerCase() !== 'false';
@@ -2364,9 +2395,6 @@ export class AuthPlugin implements Plugin {
           const d = asPositiveInt(values.session_refresh_days);
           if (d !== undefined) session.updateAge = d * 86_400;
         }
-        if (Object.keys(session).length > 0) {
-          patch.session = session as AuthManagerOptions['session'];
-        }
 
         // Session controls (ADR-0069 D4) — idle / absolute / concurrent. 0 = off;
         // non-negative reader so an explicit 0 disables.
@@ -2388,16 +2416,10 @@ export class AuthPlugin implements Plugin {
         }
 
         // Network gating (ADR-0069 D5) — parse the CIDR/IP textarea into a list.
-        // [#30203] A cleared or restored-default value resolves with source
-        // `default`. It hands the gate back to the deployment's own declaration
-        // at once, rather than leaving the last stored list in force until a
-        // restart while the console shows the field empty.
+        // [#30203] A cleared value hands the gate back to the deployment's own
+        // declaration at once (the restore arms below).
         if (isExplicit('allowed_ip_ranges')) {
           patch.allowedIpRanges = parseAllowedIpRanges(values.allowed_ip_ranges);
-          this.allowedIpRangesFromSettings = true;
-        } else if (this.allowedIpRangesFromSettings) {
-          patch.allowedIpRanges = this.declaredAllowedIpRanges ? [...this.declaredAllowedIpRanges] : [];
-          this.allowedIpRangesFromSettings = false;
         }
 
         // Anti-abuse (ADR-0069 D2) — account lockout (custom, per-identity)
@@ -2472,11 +2494,80 @@ export class AuthPlugin implements Plugin {
             : undefined;
         }
 
-        const audienceKeys = [
-          'audience_posture',
-          'audience_allowed_email_domains',
-          'audience_self_registration_permission_set',
-        ];
+        // [#30312] The restore arms: each key that left the store goes back to
+        // its declared value through the same piece a save of it rides, so a
+        // refusable block is judged on a restore exactly as on a save.
+        const restoredInPatch: string[] = [];
+        let sessionRestoring = false;
+        for (const [key, arm] of Object.entries(AUTH_SETTING_RESTORE)) {
+          if (!restoring(key)) continue;
+          switch (arm.via) {
+            case 'patch':
+              (patch as Record<string, unknown>)[arm.field] = copyDeclared(declared[arm.field]);
+              restoredInPatch.push(key);
+              break;
+            case 'emailAndPassword':
+              // The declared verification flag is the deployment's own
+              // declaration, as it was at boot (#20389).
+              emailAndPasswordField(
+                key,
+                { [arm.field]: declared.emailAndPassword?.[arm.field] },
+                arm.field === 'requireEmailVerification' ? { requireEmailVerificationFrom: 'deployment' } : undefined,
+              );
+              break;
+            case 'plugins':
+              refusable.push({
+                key,
+                patch: {
+                  plugins: {
+                    [arm.field]: (declared.plugins as Record<string, unknown> | undefined)?.[arm.field],
+                  } as AuthManagerOptions['plugins'],
+                },
+              });
+              break;
+            case 'session':
+              sessionRestoring = true;
+              restoredInPatch.push(key);
+              break;
+            case 'mfaRequired':
+              // As a save of the declared value: on is one piece with its
+              // enrollment path; off leaves enrolled factors verifiable.
+              if (declared.mfaRequired === true) {
+                refusable.push({
+                  key,
+                  patch: { mfaRequired: true, plugins: { twoFactor: true } as AuthManagerOptions['plugins'] },
+                });
+              } else {
+                patch.mfaRequired = declared.mfaRequired;
+                restoredInPatch.push(key);
+              }
+              break;
+            case 'group':
+              break;
+          }
+        }
+        // Session lifetime rides one `session` block, merged over the declared
+        // one: a stored field overrides its declared twin, the rest stand.
+        if (Object.keys(session).length > 0 || sessionRestoring) {
+          const merged = { ...(declared.session ?? {}), ...session };
+          patch.session = (Object.keys(merged).length > 0 ? merged : copyDeclared(declared.session)) as
+            AuthManagerOptions['session'];
+        }
+        const rateLimitRestoring = groupRestoring('rateLimit');
+        if (rateLimitRestoring.length > 0) {
+          patch.rateLimit = copyDeclared(declared.rateLimit);
+          restoredInPatch.push(...rateLimitRestoring);
+        }
+        const googleRestoring = groupRestoring('google');
+        if (googleRestoring.length > 0) {
+          const configured = this.configuredSocialProviders ? { ...this.configuredSocialProviders } : undefined;
+          patch.socialProviders = configured && Object.keys(configured).length > 0 ? configured : undefined;
+          restoredInPatch.push(...googleRestoring);
+        }
+        // Keys whose restore the manager refused: still owed on the next pass.
+        const owed: string[] = [];
+
+        const audienceKeys = restoreGroupKeys('audience');
 
         // [#20412] Each piece is applied in its own `try`, so a refusal is
         // contained to the piece it names. `error`, not `warn` (AGENTS.md,
@@ -2492,6 +2583,7 @@ export class AuthPlugin implements Plugin {
           try {
             authManager.applyConfigPatch(piece, options);
           } catch (refusal: any) {
+            owed.push(...keys.filter(restoring));
             const named = keys.map((key) => `auth.${key}`).join(', ');
             ctx.logger.error(
               `[auth] auth settings REFUSED (${named}) — the standing runtime value keeps ruling while the settings ` +
@@ -2503,9 +2595,12 @@ export class AuthPlugin implements Plugin {
         if (Object.keys(patch).length > 0) {
           const pieceKeys = new Set(refusable.map((piece) => piece.key));
           applyPiece(
-            Object.keys(values).filter(
-              (key) => isExplicit(key) && !pieceKeys.has(key) && !audienceKeys.includes(key),
-            ),
+            [
+              ...Object.keys(values).filter(
+                (key) => isExplicit(key) && !pieceKeys.has(key) && !audienceKeys.includes(key),
+              ),
+              ...restoredInPatch,
+            ],
             patch,
           );
         }
@@ -2543,6 +2638,24 @@ export class AuthPlugin implements Plugin {
         // Missing required siblings are NOT guessed: the patch goes out
         // without them and `applyConfigPatch` refuses the merged result
         // (standing config keeps ruling — refusing to OPEN fails closed).
+        // [#30312] No posture stored any more (cleared, or the namespace
+        // restored) while an audience key had been: the declared audience comes
+        // back whole, judged by the same merged-result validation. A sibling
+        // still stored without a posture is then IGNORED as below.
+        if (!isExplicit('audience_posture')) {
+          const audienceRestoring = audienceKeys.filter(restoring);
+          if (audienceRestoring.length > 0) {
+            try {
+              authManager.applyConfigPatch({ audience: copyDeclared(declared.audience) });
+            } catch (audienceErr: any) {
+              owed.push(...audienceRestoring);
+              ctx.logger.error(
+                `[auth] audience settings REFUSED — the standing posture ('${authManager.getAudience().posture}') keeps ruling. ` +
+                  String(audienceErr?.message ?? audienceErr),
+              );
+            }
+          }
+        }
         if (audienceKeys.some((key) => isExplicit(key))) {
           const rawPosture = values.audience_posture;
           if (!isExplicit('audience_posture')) {
@@ -2596,6 +2709,11 @@ export class AuthPlugin implements Plugin {
             }
           }
         }
+
+        this.authSettingsFromStore = new Set([
+          ...Object.keys(AUTH_SETTING_RESTORE).filter(isExplicit),
+          ...owed,
+        ]);
       } catch (err: any) {
         // [#20412] A refusal no longer reaches here — each piece above
         // contains its own. What does is a pass that failed as a whole, the

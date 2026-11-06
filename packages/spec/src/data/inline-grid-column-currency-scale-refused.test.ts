@@ -21,7 +21,7 @@
  *      declares no `type`, parses with its value; `prefix` on a currency
  *      column is still accepted; following the remedy parses.
  *   3. THE SHAPE PARITY — the field refusal and the column refusal share the
- *      first sentence (subject swapped) and the minor-unit clause, so a
+ *      first sentence (subject swapped) and the fraction-digits clause, so a
  *      rewording of one that leaves the other behind goes red.
  *   4. THE DESCRIBES — `prefix` no longer promises a default symbol, and
  *      `scale` names the currency refusal.
@@ -60,17 +60,17 @@ const parseColumns = (inlineColumns: Record<string, unknown>[]): Result =>
 
 const FIELD_FIRST_SENTENCE = '`scale` is not valid on a `currency` field — delete the key.';
 const COLUMN_FIRST_SENTENCE = '`scale` is not valid on a `currency` inline grid column — delete the key.';
-const MINOR_UNIT_CLAUSE = 'the currency\'s ISO 4217 minor unit (2 for USD, 0 for JPY, 3 for KWD) decides how';
+const FRACTION_DIGITS_CLAUSE = 'the currency\'s CLDR fraction digits (2 for USD, 0 for JPY, 3 for KWD) decide how';
 
 /**
  * The ruled remedy on the message itself: the wording is the contract here
  * (the card carries ruling B's sentence and remedy to the mirror), so the pin
- * reads the first sentence verbatim, the minor-unit clause, and the ABSENCE of
+ * reads the first sentence verbatim, the fraction-digits clause, and the ABSENCE of
  * any key the author could be sent to instead.
  */
 function expectRuledRemedy(message: string): void {
   expect(message.startsWith(COLUMN_FIRST_SENTENCE)).toBe(true);
-  expect(message).toContain(MINOR_UNIT_CLAUSE);
+  expect(message).toContain(FRACTION_DIGITS_CLAUSE);
   expect(message).not.toMatch(/currencyConfig|precision/);
 }
 
@@ -170,7 +170,7 @@ describe('CONTROLS: what the refusal must leave alone', () => {
 });
 
 describe('SHAPE PARITY with the currency FIELD refusal (its ruled text carried, not reworded)', () => {
-  it('both refusals open with the same sentence, subject swapped, and share the minor-unit clause', () => {
+  it('both refusals open with the same sentence, subject swapped, and share the fraction-digits clause', () => {
     const field = FieldSchema.safeParse({ name: 'amount', label: 'Amount', type: 'currency', scale: 2 }) as Result;
     const column = parseColumns([{ name: 'amount', type: 'currency', scale: 2 }]);
     const [fieldIssue] = scaleIssues(field);
@@ -179,7 +179,7 @@ describe('SHAPE PARITY with the currency FIELD refusal (its ruled text carried, 
     expect(COLUMN_FIRST_SENTENCE).toBe(FIELD_FIRST_SENTENCE.replace('`currency` field', '`currency` inline grid column'));
     expect(columnIssue.message.startsWith(COLUMN_FIRST_SENTENCE)).toBe(true);
     for (const message of [fieldIssue.message, columnIssue.message]) {
-      expect(message).toContain(MINOR_UNIT_CLAUSE);
+      expect(message).toContain(FRACTION_DIGITS_CLAUSE);
       expect(message).not.toMatch(/currencyConfig|precision/);
     }
   });

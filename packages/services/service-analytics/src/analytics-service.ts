@@ -112,8 +112,10 @@ import {
   DatasetExecutor,
   declaredDefaultGranularity,
   resolveDimensionGranularity,
+  resolveSelectionTokens,
   type DateGranularityValue,
 } from './dataset-executor.js';
+import { measureDrillScopes, type MeasureSource } from './drill-scope.js';
 import {
   resolveDimensionLabels,
   createOrderLabelResolver,
@@ -123,10 +125,10 @@ import {
 } from './dimension-labels.js';
 import { evaluateAnalyticsQueryOverRows, lowerPreviewRowFilters } from './preview-evaluator.js';
 import { assertDatasetGroupColumnsDistinct } from './dataset-group-column-door.js';
-import { assertDatasetDateBucketsTemporal } from './dataset-date-bucket-door.js';
+import { assertDatasetDateBucketsTemporal, assertDatasetGroupTargetsStored } from './dataset-date-bucket-door.js';
 // [#25778] The one lookup of a dataset duration measure by name.
 import { durationMeasureIn } from './duration-measure-sql.js';
-import { scopedMeasureFilter } from './scoped-measure-key.js';
+import { scopedMeasureFilter, scopedMeasureKey } from './scoped-measure-key.js';
 // [#5918] The measure mint refuses a dotted member through the SAME constructor
 // the strategies' member-level refusals use — `INVALID_FIELD` / 400, naming the
 // member as the request spelled it (see `dataset-refusal.ts`'s header for why
@@ -2965,6 +2967,10 @@ export class AnalyticsService implements IAnalyticsService {
             // nor a datetime, with the refusal the engine gives both live faces
             // for the same keys (after the column refusal above, as there),
             // where the evaluator served one `null` (or `1970`) group.
+            // [#29304] A key of any form over a virtual (`formula`) field
+            // first, as the engine judges it first: the evaluator served one
+            // `null` group holding the total for a plain dimension over one.
+            assertDatasetGroupTargetsStored(aggregateObjectOf(cube), aggregateGroupKeys(q, cube), declaredType);
             assertDatasetDateBucketsTemporal(aggregateObjectOf(cube), aggregateGroupKeys(q, cube), declaredType);
             return evaluateAnalyticsQueryOverRows(
               q,
@@ -3066,6 +3072,12 @@ export class AnalyticsService implements IAnalyticsService {
     // #5033 symptom wearing the opposite disguise — the caller's own mistake
     // reported as "no data", with no exception, no 4xx, no 5xx, just a warn and
     // a confident empty chart. See {@link hasDeclaredErrorEnvelope}.
+    // [#30526] Tokens resolved ONCE, here, for both readers of the filters: the
+    // executor, which computes the numbers (its own resolution is then the
+    // identity), and `drillScopes` below, which states the same filters to the
+    // drill. Two resolutions could straddle a period boundary, and the drill
+    // would list another period than the number counted.
+    const resolved = resolveSelectionTokens(compiled, selection, context);
     let result: AnalyticsResult;
     try {
       // [#20356] Through the call's own scope, never `this`: every query the
@@ -3076,7 +3088,7 @@ export class AnalyticsService implements IAnalyticsService {
       // fields they name, never by a dimension that happens to share the name:
       // see `dataset-filter-field-binding.ts`. Only this face: the draft-preview
       // branch above matches `row[key]`, which already reads the field.
-      const bound = bindDatasetFiltersToObjectFields(compiled, selection, this.getObjectFieldNames?.(dataset.object));
+      const bound = bindDatasetFiltersToObjectFields(resolved.compiled, resolved.selection, this.getObjectFieldNames?.(dataset.object));
       const scoped = this.scopedService(this.requestScope(bound.compiled));
       result = await new DatasetExecutor(scoped, orderLabels).execute(bound.compiled, bound.selection, context);
     } catch (err) {
@@ -3241,6 +3253,22 @@ export class AnalyticsService implements IAnalyticsService {
           }
         }
         return ranges;
+      });
+    }
+
+    // [#30526] The MEASURE drill scope: what each number counted beyond the
+    // bucket and the widget filter (the dataset's and the measure's own
+    // filters, and the aggregated column holding a value), which the host
+    // cannot read anywhere else. From the token-resolved filters BEFORE the
+    // field binding above, whose minted member names no record list knows.
+    // See `drill-scope.ts` for what is left out and why.
+    if (result.rows.length) {
+      const scoped = resolved.compiled;
+      result.drillScopes = measureDrillScopes({
+        measures: selection.measures ?? [],
+        filter: scoped.filter,
+        measureFilterOf: (m) => scopedMeasureFilter(scoped, m, scoped.cube.name),
+        sourceOf: (m) => datasetMeasureSource(scoped, m),
       });
     }
 
@@ -4926,6 +4954,29 @@ function mintCallerMeasures(
 }
 
 /**
+ * [#30526] What the selected measure `m` aggregates on `compiled`, resolved the
+ * way the queries resolved it — the input `measureDrillScopes` reads
+ * (`drill-scope.ts`): a derived measure by name, bare or `<cube>.`-qualified; a
+ * duration measure through {@link durationMeasureIn}; a declared cube measure
+ * through {@link scopedMeasureKey}; and an undeclared one through
+ * {@link mintCallerMeasures}, the mint `ensureCube` ran for the query.
+ * `undefined` when none of them answers.
+ */
+function datasetMeasureSource(compiled: CompiledDataset, m: string): MeasureSource | undefined {
+  const cubeName = compiled.cube.name;
+  if (compiled.derived.some((d) => d.name === m || `${cubeName}.${d.name}` === m)) return { kind: 'derived' };
+  const duration = durationMeasureIn(compiled.durations, m, cubeName);
+  if (duration) return { kind: 'duration', from: duration.from, to: duration.to };
+  const key = scopedMeasureKey(compiled.cube.measures, m, cubeName);
+  const metric = key !== undefined
+    ? compiled.cube.measures[key]
+    : mintCallerMeasures([m], compiled.cube, cubeName, compiled.durations)[mintableMeasureKey(m, cubeName)];
+  const sql = typeof metric?.sql === 'string' ? metric.sql.trim() : '';
+  if (!sql) return undefined;
+  return sql === '*' ? { kind: 'rows' } : { kind: 'field', field: sql };
+}
+
+/**
  * The aggregation suffixes {@link inferMeasure} strips, in the order it tries
  * them — the ONE list. `_count_distinct` precedes the shorter suffixes so the
  * longest spelling wins. Exported (not from the package index) for the
@@ -5078,16 +5129,20 @@ export function inferredCallerMeasureSql(measure: string, cubeName: string): str
  * `executeAggregate`, so every bucketed query goes to the engine); reached by
  * a host composing `new AnalyticsService({ fallbackService })`, or a
  * `queryCapabilities` override with `objectqlAggregate: false`.
+ *
+ * [#29304] The storage-axis door (`assertDatasetGroupTargetsStored`) runs
+ * first, on the same keys: a key of any form over a virtual (`formula`) field
+ * is refused as the engine refuses it.
  */
 function assertDelegatedDateBucketsTemporal(query: AnalyticsQuery, ctx: StrategyContext): void {
   const cube = ctx.getCube(query.cube!);
   if (!cube) return;
   const object = aggregateObjectOf(cube);
-  assertDatasetDateBucketsTemporal(
-    object,
-    aggregateGroupKeys(query, cube),
-    (field) => (ctx as DatasetScopedStrategyContext).declaredFieldType?.(object, field),
-  );
+  const groupBy = aggregateGroupKeys(query, cube);
+  const declaredType = (field: string) => (ctx as DatasetScopedStrategyContext).declaredFieldType?.(object, field);
+  // [#29304] A key of any form over a virtual field first, as the engine.
+  assertDatasetGroupTargetsStored(object, groupBy, declaredType);
+  assertDatasetDateBucketsTemporal(object, groupBy, declaredType);
 }
 
 /**

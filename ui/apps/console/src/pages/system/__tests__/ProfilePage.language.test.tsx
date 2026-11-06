@@ -79,7 +79,7 @@ vi.mock('@object-ui/auth', async (importOriginal) => ({
   }),
 }));
 
-vi.mock('@object-ui/providers', async (importOriginal) => ({
+vi.mock('@object-ui/fields', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   useUpload: () => ({ upload: async () => ({ url: '' }) }),
 }));

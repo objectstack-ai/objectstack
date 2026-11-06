@@ -246,7 +246,7 @@ Package manifest installed through POST /api/v1/packages (AUTHORING stage; scope
 | **mode** | `Enum<'insert' \| 'update' \| 'upsert' \| 'replace' \| 'ignore'>` | optional (default: `"ignore"`) | What a load does with a record whose `externalId` matches an existing row. `ignore` (default) is create-only: a missing row is inserted and an existing row is left as it is, so a replay (every boot, a package install or upgrade, a publish) never writes a seeded value back over a later edit. `upsert` also writes every declared column back onto the matched row on each replay; declare it for reference data the package keeps current. `update` writes matched rows only, `insert` inserts every record with no match, and `replace` inserts into a table the caller cleared. |
 | **columns** | `Record<string, { applyOn?: Enum<'create' \| 'always'> }>` | optional | Per-column write policy, keyed by field name: `{ status: { applyOn: 'create' } }` writes `status` only when the seed creates the row. Omitted, every column is written on create and update. |
 | **env** | `Enum<'prod' \| 'dev' \| 'test'>[]` | optional (default: `["prod","dev","test"]`) | Applicable environments |
-| **locale** | `string[]` | optional | Applicable locales (BCP-47 tags); omitted applies to every locale. The publish and install paths do not filter by locale — they load every dataset and warn |
+| **locale** | `string[]` | optional | Applicable locales (BCP-47 tags); omitted applies to every locale. The boot seed filters on the app's i18n.defaultLocale; the marketplace install, sample-data reseed, restart heal and per-organization replay filter on the locale resolved for the load (the localization.locale setting when set, then the locale of the installing, reseeding or founding user, then the app's i18n.defaultLocale where the load names one); package apply and draft publish do not filter by locale — they load every dataset and warn |
 | **records** | `Record<string, any>[]` | ✅ | Data records |
 | **files** | `Record<string, { contentType: string; size: integer; sha256: string; data: string }>` | optional | Bytes of the package files the records name with `seedFile(path)`, keyed by path. Written by `os build`, which reads each path relative to the package root; the loader stores each one as a file the written record owns. |
 | **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
@@ -354,7 +354,7 @@ Package manifest installed through POST /api/v1/packages (AUTHORING stage; scope
 | **mode** | `Enum<'insert' \| 'update' \| 'upsert' \| 'replace' \| 'ignore'>` | optional (default: `"ignore"`) | What a load does with a record whose `externalId` matches an existing row. `ignore` (default) is create-only: a missing row is inserted and an existing row is left as it is, so a replay (every boot, a package install or upgrade, a publish) never writes a seeded value back over a later edit. `upsert` also writes every declared column back onto the matched row on each replay; declare it for reference data the package keeps current. `update` writes matched rows only, `insert` inserts every record with no match, and `replace` inserts into a table the caller cleared. |
 | **columns** | `Record<string, { applyOn?: Enum<'create' \| 'always'> }>` | optional | Per-column write policy, keyed by field name: `{ status: { applyOn: 'create' } }` writes `status` only when the seed creates the row. Omitted, every column is written on create and update. |
 | **env** | `Enum<'prod' \| 'dev' \| 'test'>[]` | optional (default: `["prod","dev","test"]`) | Applicable environments |
-| **locale** | `string[]` | optional | Applicable locales (BCP-47 tags); omitted applies to every locale. The publish and install paths do not filter by locale — they load every dataset and warn |
+| **locale** | `string[]` | optional | Applicable locales (BCP-47 tags); omitted applies to every locale. The boot seed filters on the app's i18n.defaultLocale; the marketplace install, sample-data reseed, restart heal and per-organization replay filter on the locale resolved for the load (the localization.locale setting when set, then the locale of the installing, reseeding or founding user, then the app's i18n.defaultLocale where the load names one); package apply and draft publish do not filter by locale — they load every dataset and warn |
 | **records** | `Record<string, any>[]` | ✅ | Data records |
 | **files** | `Record<string, { contentType: string; size: integer; sha256: string; data: string }>` | optional | Bytes of the package files the records name with `seedFile(path)`, keyed by path. Written by `os build`, which reads each path relative to the package root; the loader stores each one as a file the written record owns. |
 | **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
@@ -461,7 +461,7 @@ Install package response
 | **success** | `boolean` | ✅ | Operation success status |
 | **error** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>; declaredCode?: string; message: string; userMessage?: string; … }` | optional | Error details if success is false |
 | **meta** | `{ timestamp: string; duration?: integer; requestId?: string; traceId?: string }` | optional | Response metadata |
-| **data** | `{ package: object; dependencyResolution?: object; namespaceConflicts?: object[]; message?: string }` | ✅ |  |
+| **data** | `{ manifest: object; source: Enum<'code' \| 'marketplace' \| 'authored'>; status?: Enum<'installed' \| 'disabled' \| 'installing' \| 'upgrading' \| 'uninstalling' \| 'error'>; enabled?: boolean; … }` | ✅ | The installed package row, served bare as `data`: the row the registry recorded, at the authoring stage |
 
 ### Nested Shape: `PackageInstallResponse.error`
 
@@ -490,10 +490,19 @@ Install package response
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **package** | `{ manifest: object; source: Enum<'code' \| 'marketplace' \| 'authored'>; status?: Enum<'installed' \| 'disabled' \| 'installing' \| 'upgrading' \| 'uninstalling' \| 'error'>; enabled?: boolean; … }` | ✅ | Installed package details |
-| **dependencyResolution** | `{ dependencies: object[]; canProceed: boolean; requiredActions: object[]; installOrder: string[]; … }` | optional | Dependency resolution result |
-| **namespaceConflicts** | `{ type: 'namespace_conflict'; requestedNamespace: string; conflictingPackageId: string; conflictingPackageName: string; … }[]` | optional | Namespace conflicts detected |
-| **message** | `string` | optional | Installation status message |
+| **manifest** | `{ id: string; namespace?: string; defaultDatasource?: string; version: string; … }` | ✅ | Package manifest at the AUTHORING stage; a row installed by a `defineStack()` host carries the assembled body instead — see `AssembledInstalledPackageSchema` / `InstalledPackageAtEitherStageSchema` |
+| **source** | `Enum<'code' \| 'marketplace' \| 'authored'>` | ✅ | Where the installed package came from: code (registered by the deployment's own code), marketplace (installed from the marketplace), or authored (a database-authored package) |
+| **status** | `Enum<'installed' \| 'disabled' \| 'installing' \| 'upgrading' \| 'uninstalling' \| 'error'>` | optional (default: `"installed"`) | Package state: installed, disabled, installing, upgrading, uninstalling, or error |
+| **enabled** | `boolean` | optional (default: `true`) | Whether the package is currently enabled |
+| **installedAt** | `string` | optional | Installation timestamp |
+| **updatedAt** | `string` | optional | Last update timestamp |
+| **installedVersion** | `string` | optional | Currently installed version for quick access |
+| **previousVersion** | `string` | optional | Version before the last upgrade |
+| **statusChangedAt** | `string` | optional | Status change timestamp |
+| **errorMessage** | `string` | optional | Error message when status is error |
+| **settings** | `Record<string, any>` | optional | User-provided configuration settings |
+| **upgradeHistory** | `{ fromVersion: string; toVersion: string; upgradedAt: string; status: Enum<'success' \| 'failed' \| 'rolled_back'>; … }[]` | optional | Version upgrade history |
+| **registeredNamespaces** | `string[]` | optional | Namespace prefixes registered by this package |
 
 
 ---

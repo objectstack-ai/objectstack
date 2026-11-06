@@ -25,7 +25,10 @@ import type { useObjectTranslation } from '@object-ui/i18n';
  *   turned on.
  * - **After an accepted save that turned it on**: who is affected (every
  *   member without an authenticator app) and when the block starts (once the
- *   MFA grace period ends, counted from each member's next use).
+ *   MFA grace period ends, counted from each member's next use). The server
+ *   now says this itself, with the grace period in force, as the save answer's
+ *   `notice` (objectstack#30411); the console's line stands in only when the
+ *   answer does not carry that notice (objectstack#30565).
  *
  * Both are judged only on what the console knows: an unread `features` says
  * nothing before saving, and a save whose stored value was already on says
@@ -58,22 +61,54 @@ export function organizationMfaFormNotice(input: {
 }
 
 /**
+ * The opening sentence of the notice the server answers an accepted turn-on
+ * with (objectstack `plugin-auth`'s `ORGANIZATION_MFA_REQUIRED_NOTICE_COPY`), in
+ * each of the four languages that copy is written in. Its sentence for N days
+ * and its sentence for 0 days both open with it; a server language the copy
+ * lacks answers the English one.
+ */
+const SERVER_MFA_NOTICE_OPENINGS: readonly string[] = [
+  'Multi-factor authentication is now required for this organization.',
+  '本组织现已强制多因素认证。',
+  'この組織では多要素認証が必須になりました。',
+  'La autenticación multifactor ahora es obligatoria en esta organización.',
+];
+
+/**
+ * True when a save answer's `notice` is the server's own MFA notice. Told by
+ * its opening sentence, not by a notice being there: the answer carries ONE
+ * notice, the last one a hook or flow on the write set, so another notice on
+ * the same save means the server's was replaced, and an older server's answer
+ * can carry another hook's notice. Should the server's wording change, this
+ * answers false and the toast shows both lines, never neither.
+ */
+const isServerMfaNotice = (notice: string | undefined): boolean =>
+  typeof notice === 'string' && SERVER_MFA_NOTICE_OPENINGS.some((opening) => notice.includes(opening));
+
+/**
  * The line an accepted organization save adds to its toast when it turned the
  * requirement on: who must enroll and when the block starts. `undefined` when
  * the saved row does not require MFA, or the stored row already did
  * (`storedRequireMfa === true`); an unread stored value (`undefined`) counts as
  * off, since saying it once too often is cheaper than not saying it.
+ *
+ * `undefined` too when the save answer's notice (`answerNotice`) is the
+ * server's MFA notice: it says all of this with the grace period in force,
+ * where the console's line can only name the default 7 days.
  */
 export function organizationMfaSavedNotice(input: {
   objectName: string | undefined;
   storedRequireMfa: boolean | undefined;
   saved: unknown;
+  /** The save answer's `notice`, as the record form's claim took it. */
+  answerNotice?: string;
   t: Translate;
 }): string | undefined {
   if (input.objectName !== ORGANIZATION_OBJECT) return undefined;
   if (input.storedRequireMfa === true) return undefined;
   const saved = input.saved as Record<string, unknown> | null | undefined;
   if (!saved || !isOn(saved[REQUIRE_MFA_FIELD])) return undefined;
+  if (isServerMfaNotice(input.answerNotice)) return undefined;
   return input.t('console.organizationMfa.nowRequired');
 }
 

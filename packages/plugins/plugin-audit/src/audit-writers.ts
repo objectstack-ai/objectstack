@@ -89,6 +89,7 @@ import {
   type ActivityTextSources,
 } from './activity-field-redaction.js';
 import type { LedgerRecordWriteAction } from './audit-log-field-redaction.js';
+import { SIGN_IN_STAMP_EVENT, isSignInStamp } from './sign-in-stamp.js';
 import type { MentionGateInput } from './mention-recipient-gate.js';
 // [ADR-0139 E6] The ONE derivation of the two writer-stamped columns the
 // withheld-row rule reads, shared with the before-insert hook and the backfill.
@@ -297,6 +298,14 @@ const SKIP_OBJECTS = new Set<string>([
   // and keep their compliance value, so they stay audited (see #5202).
   'sys_upload_session',          // chunked-upload progress (1 write per chunk)
   'ai_traces',                   // LLM trace telemetry
+  // [ADR-0057 §3.3] The lifecycle sweeper's own clock state (one row per
+  // datastore, `managedBy: 'engine-owned'`), written ONLY by objectql's
+  // `LifecycleService` under SYSTEM_CTX after every completed sweep. Audited,
+  // each sweep would feed `sys_audit_log` and `sys_activity` the very rows the
+  // next sweep archives or reaps: cleanup re-feeding the tables it drains.
+  // Not an act anyone performed; the ruling that created the object forbids
+  // an audit row per sweep.
+  'sys_lifecycle_state',         // sweep watermark (1 write per sweep)
 ]);
 
 /**
@@ -2138,6 +2147,9 @@ export function installAuditWriters(
 
     let oldValue: Record<string, any> | null = null;
     let newValue: Record<string, any> | null = null;
+    // The sign-in stamp (`sign-in-stamp.ts`): judged on the diff below, and
+    // marked in `metadata.event` so the ledger's default view can leave it out.
+    let signInStamp = false;
     if (action === 'create') {
       newValue = ledgerView(ctx.object, after, { dropComputed: true, storedType: storedBodyType });
     } else if (action === 'update') {
@@ -2147,6 +2159,7 @@ export function installAuditWriters(
       const d = diff(before || {}, after || {}, getFieldDefs(ctx.object));
       // If nothing meaningfully changed, skip the audit row to avoid noise.
       if (Object.keys(d.next).length === 0) return;
+      signInStamp = isSignInStamp(ctx.object, Object.keys(d.next));
       oldValue = ledgerView(ctx.object, d.old, { dropComputed: false, storedType: storedBodyType });
       newValue = ledgerView(ctx.object, d.next, { dropComputed: false, storedType: storedBodyType });
     } else if (action === 'delete') {
@@ -2189,10 +2202,12 @@ export function installAuditWriters(
     // `user_id` column rather than from a second carrier: rule 4 asks for both
     // sides on the row, and one source for one fact is what keeps them from
     // ever disagreeing.
-    if (performedByClientId) {
+    if (performedByClientId || signInStamp) {
       auditRow.metadata = safeStringify({
-        performed_by: performedByClientId,
-        on_behalf_of: userId ?? null,
+        // A sign-in stamp names its event the way a `config_change` row does
+        // (`metadata.event`); every other CRUD row still carries no event.
+        ...(signInStamp ? { event: SIGN_IN_STAMP_EVENT } : {}),
+        ...(performedByClientId ? { performed_by: performedByClientId, on_behalf_of: userId ?? null } : {}),
       });
     }
 

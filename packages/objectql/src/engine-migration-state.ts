@@ -9,7 +9,7 @@
  * `haveFileColumnsMoved`, `readMigrationFlagMemoized`,
  * `valueShapeViolationsAdmitted`, `admittedViolationSink`,
  * `recordObservedDeviation`, `retractCreationAttestation`,
- * `invalidateDataMigrationFlags` moved out of `engine.ts` whole by
+ * `invalidateDataMigrationFlags`, `destroy` moved out of `engine.ts` whole by
  * `scripts/codemod-split-engine.mjs`.
  *
  * A MOVE, not a redesign. {@link MigrationStateFacet} is a stateless facet of `ObjectQL`
@@ -62,6 +62,7 @@ export interface MigrationStateHost {
   readonly admittedValueShapeViolations: ObjectQLClass['admittedValueShapeViolations'];
   creationAttestationRetraction: ObjectQLClass['creationAttestationRetraction'];
   deviationRecording: ObjectQLClass['deviationRecording'];
+  readonly drivers: ObjectQLClass['drivers'];
   fileReferencesMigrationVerified: ObjectQLClass['fileReferencesMigrationVerified'];
   findOne: ObjectQLClass['findOne'];
   invalidateDataMigrationFlags: ObjectQLClass['invalidateDataMigrationFlags'];
@@ -76,6 +77,7 @@ export interface MigrationStateHost {
   readMigrationFlagRowMemoized: ObjectQLClass['readMigrationFlagRowMemoized'];
   readonly recordedDeviations: ObjectQLClass['recordedDeviations'];
   readonly retractedCreationAttestations: ObjectQLClass['retractedCreationAttestations'];
+  unregisterDriver: ObjectQLClass['unregisterDriver'];
   update: ObjectQLClass['update'];
   valueShapesMigrationVerified: ObjectQLClass['valueShapesMigrationVerified'];
   wasDatastoreCreatedFromEmpty: ObjectQLClass['wasDatastoreCreatedFromEmpty'];
@@ -426,5 +428,29 @@ export class MigrationStateFacet {
     this.valueShapesMigrationVerified = null;
     this.migrationGatesAnnounced = false;
     this.recordedDeviations.clear();
+  }
+
+  /** The body of `ObjectQL#destroy`; the method's docblock there is its contract. */
+  static async destroy(this: Pick<MigrationStateHost, 'drivers' | 'logger' | 'unregisterDriver'>): Promise<void> {
+    this.logger.info('Destroying ObjectQL engine', { driverCount: this.drivers.size });
+    
+    for (const [name, driver] of this.drivers.entries()) {
+      try {
+        await driver.disconnect();
+      } catch (e) {
+        this.logger.error('Error disconnecting driver', e as Error, { driverName: name });
+      }
+    }
+
+    // #13578 — teardown is an eviction path too, and it used to disconnect
+    // every driver while leaving all of them REGISTERED. A destroyed engine
+    // therefore still answered `checkDriversHealth()` by pinging pools it had
+    // just closed, so a readiness probe racing shutdown read a list of drivers
+    // that were deliberately dead. Disconnect-then-evict, through the one
+    // primitive, so `defaultDriver` and the datasource defs go with them.
+    // Names are snapshotted first: `unregisterDriver` mutates the Map.
+    for (const name of [...this.drivers.keys()]) this.unregisterDriver(name);
+    
+    this.logger.info('ObjectQL engine destroyed');
   }
 }

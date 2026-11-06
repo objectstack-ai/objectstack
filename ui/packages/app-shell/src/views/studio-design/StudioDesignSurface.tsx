@@ -277,6 +277,12 @@ import { getMetadataResource } from '../metadata-admin/registry.js';
 import { useMetadataClient, useMetadataTypes } from '../metadata-admin/useMetadata.js';
 // objectui#11773 — every draft save of an existing item sends the version its buffer was built on.
 import { readDraftForSave, useDraftSaveGuard } from '../metadata-admin/DraftConflictDialog.js';
+import {
+  authoredObjectBuffer,
+  authoredPublishedObject,
+  servedOnlyFields,
+  type ObjectLayers,
+} from '../metadata-admin/authoredObjectBuffer.js';
 // objectstack#26858 — the served verdict a flow's inspectors read at their own paths.
 import {
   DraftVerdictBodyContext,
@@ -384,6 +390,7 @@ import {
   readFields,
   writeFields,
   newField,
+  type FieldEntry,
 } from '../metadata-admin/previews/object-fields-io.js';
 import type { FieldTypeId } from '../metadata-admin/previews/field-types.js';
 import {
@@ -2862,6 +2869,9 @@ export function InterfacesPillar({
   const customizeBase = customizing && customization ? customization.base : null;
   const customizePair = customizing && customization ? customization.pairId : null;
   const customizeBaseLabel = customization?.baseLabel ?? packageId;
+  // objectstack#30436 — the pair the "saved to" note names: the served one, or
+  // the `<base>.custom` id the first save creates.
+  const customizeNotePair = customization ? (customization.pairId ?? pairIdOf(customization.base)) : null;
   const customizeWalled = customizing && customization?.walled === true;
   const customizeBlock: CustomizeBlock = customizeWalled
     ? 'walled'
@@ -4235,7 +4245,7 @@ export function InterfacesPillar({
       // objectstack#29693 — on a narrow row the chips and the item tools fold
       // into the ⋯ menu before the title drops below its readable width.
       foldMenu={itemMoreEl ? 'pillar' : { label: t('engine.studio.if.more', locale), testId: 'if-item-header-more' }}
-      note={ifSavedTo ? <SavedToCustomizationNote baseLabel={customizeBaseLabel} testId="if-item-saved-to" /> : undefined}
+      note={ifSavedTo ? <SavedToCustomizationNote baseLabel={customizeBaseLabel} pairId={customizeNotePair} testId="if-item-saved-to" /> : undefined}
       leading={
         <button
           type="button"
@@ -5139,7 +5149,7 @@ export function InterfacesPillar({
           {/* objectstack#30059 — where a read-only base's navigation edit is saved. */}
           {editNav && readOnly && (
             <p className="mt-1 text-[10px] text-muted-foreground">
-              <SavedToCustomizationNote baseLabel={customizeBaseLabel} testId="if-nav-saved-to" />
+              <SavedToCustomizationNote baseLabel={customizeBaseLabel} pairId={customizeNotePair} testId="if-nav-saved-to" />
             </p>
           )}
             {listOnlyCustomized && !editNav && !navMarked ? null : appStatus === 'missing' && !error ? (
@@ -5685,10 +5695,6 @@ export function DataPillar({
   // Tracks which object's baseline is currently loaded — so we (re)load exactly
   // once per selected object and never clobber an in-progress draft.
   const loadedNameRef = React.useRef<string | null>(null);
-  // objectui#12508 — the names the package's published list answered at the
-  // rail's last read; `null` until it has answered. The object load below
-  // reads it to tell a draft-only object from a published one.
-  const publishedObjectNamesRef = React.useRef<ReadonlySet<string> | null>(null);
   // objectui#11773 — the version `objDraft` was saved at, sent as `If-Match` by
   // every save of this buffer (the autosave and the column reorder). A
   // conflict's "reload" re-runs the load below for the open object.
@@ -5750,6 +5756,11 @@ export function DataPillar({
   // definition's own form fields, in its order. Set where the load installs the
   // baseline, so its identity changes only with it (see `formFields`).
   const [publishedFormFields, setPublishedFormFields] = React.useState<string[]>([]);
+  // objectstack#29793 — the fields the SERVED object carries that the buffer's
+  // authored layers do not declare (the platform's injected columns, a field
+  // another package folds on). The buffer holds what the author wrote; these
+  // keep the header count and the records grid on the server's object.
+  const [servedOnly, setServedOnly] = React.useState<FieldEntry[]>([]);
   // The package's object-name namespace (framework#2694). New objects are
   // auto-prefixed with `<namespace>_` so an author can never draft a prefix-less
   // object that publish would later reject (code NAMESPACE_PREFIX).
@@ -5845,7 +5856,6 @@ export function DataPillar({
           .map((o) => ({ type: 'object', name: String(o.name ?? ''), label: String(o.label ?? o.name ?? ''), icon: o.icon ? String(o.icon) : undefined }))
           .filter((o) => o.name);
         const known = new Set(baseItems.map((o) => o.name));
-        publishedObjectNamesRef.current = new Set(known);
         for (const d of draftHeaders) {
           if (d.name && !known.has(d.name)) {
             baseItems.push({ type: 'object', name: d.name, label: draftLabels.get(d.name) ?? d.name, icon: undefined });
@@ -5913,22 +5923,13 @@ export function DataPillar({
         // layered read naming no package is refused for a name two packages hold.
         const readLayers = () => client.layered<Record<string, unknown>>('object', current.name, { packageId });
         const readDraft = () => readDraftForSave<Record<string, unknown>>(client, 'object', current.name, packageId);
-        // objectui#12508 — a draft-only object (a pending draft, and no row in
-        // the package's published list) has no layer, and `/layers` answers
-        // 404 for it. So for a name the published list does not hold, the
-        // draft is read first and the layers only without one: a name
-        // published since the rail's read has no pending draft either, so it
-        // is still asked. A published name reads both at once, as before.
-        const publishedNames = publishedObjectNamesRef.current;
-        let layRaw: unknown;
-        let draftRead: Awaited<ReturnType<typeof readDraft>>;
-        if (publishedNames && !publishedNames.has(current.name)) {
-          draftRead = await readDraft();
-          if (cancelled) return;
-          layRaw = extractDraftBody(draftRead.answer) || 'refused' in draftRead ? {} : await readLayers();
-        } else {
-          [layRaw, draftRead] = await Promise.all([readLayers(), readDraft()]);
-        }
+        // objectstack#29793 — the layers are read for every object, a
+        // draft-only one included: they hold the buffer (`authoredObjectBuffer`,
+        // the stored `draft` layer), and a caller the server serves that layer
+        // to is answered it for a draft-only name too. The draft read stays
+        // beside it for what only it carries: the version pin, the publish
+        // verdict and the per-key provenance.
+        const [layRaw, draftRead] = await Promise.all([readLayers(), readDraft()]);
         if (cancelled) return;
         // objectstack#29148 — an object draft the server refused to read is no
         // absence: no buffer is installed over it (see InterfacesPillar's leaf
@@ -5944,8 +5945,23 @@ export function DataPillar({
         const lay = layRaw as { effective?: Record<string, unknown>; code?: Record<string, unknown> };
         const baseline = (lay.effective ?? lay.code ?? {}) as Record<string, unknown>;
         const draftBody = extractDraftBody(draftRead.answer);
-        // Served draft as-is, baseline only without one (objectui#10765).
-        setObjDraft(draftBody ?? baseline);
+        // objectstack#29793 — the buffer is the object as its author wrote it:
+        // the stored draft as-is (objectui#10765), else `overlay ?? code`. The
+        // served draft above is translated and governed, so it is never the
+        // buffer; a draft whose stored copy was not served installs nothing.
+        const authored = authoredObjectBuffer(layRaw as ObjectLayers, draftBody);
+        if (authored.kind === 'unserved') {
+          setObjDraftFor('');
+          setError({ message: t('engine.studio.refusal.draftUnreadable', locale) });
+          return;
+        }
+        setObjDraft(authored.body);
+        setServedOnly(
+          servedOnlyFields((draftBody ?? baseline).fields, [
+            authored.body.fields,
+            authoredPublishedObject(layRaw as ObjectLayers).fields,
+          ]),
+        );
         // objectstack#27644 — the verdict on that body, and the body it judged.
         const draftVerdict = draftEnvelopeDiagnostics(draftRead.answer);
         setObjVerdict(editedItemDiagnostics({ hasDraft: !!draftBody, draftDiagnostics: draftVerdict, layered: lay }));
@@ -6049,12 +6065,16 @@ export function DataPillar({
   }, [client, current, extendsBase, publishNonce, extReloadNonce, recordExtRead]);
 
   // The header counts the fields the canvas shows, and names the platform's
-  // own columns apart: "2 fields (+8 system)".
+  // own columns apart: "2 fields (+8 system)". objectstack#29793 — the
+  // platform's columns are the served object's: the buffer holds only what the
+  // author wrote, so the ones it does not declare are counted from `servedOnly`.
   const fieldCount = React.useMemo(() => {
-    const all = readFields(shownDraft.fields).entries.length;
+    const { entries } = readFields(shownDraft.fields);
+    const held = new Set(entries.map((e) => e.name));
     const own = formFieldNames(shownDraft.fields).length;
-    return { own, system: all - own };
-  }, [shownDraft]);
+    const served = servedOnly.filter((e) => !held.has(e.name)).length;
+    return { own, system: entries.length - own + served };
+  }, [shownDraft, servedOnly]);
   const fieldCountText =
     tFormat(fieldCount.own === 1 ? 'engine.studio.data.fieldCountOne' : 'engine.studio.data.fieldCount', locale, {
       count: fieldCount.own,
@@ -6089,14 +6109,18 @@ export function DataPillar({
    * a PRODUCER-side fix; ListView's by-identity dependency is correct for a genuine
    * column change and is left alone.
    */
-  const gridColumnsComputed = React.useMemo(
-    () =>
-      readFields(shownDraft.fields)
+  const gridColumnsComputed = React.useMemo(() => {
+    // objectstack#29793 — the served object's columns the buffer does not
+    // declare (`owner_id` and the other injected ones) lead, as they lead the
+    // served object: the grid shows the records as the server has them.
+    const held = readFields(shownDraft.fields).entries;
+    const heldNames = new Set(held.map((e) => e.name));
+    return [...servedOnly.filter((e) => !heldNames.has(e.name)), ...held]
         // objectui#11780 — a column the platform injects AND hides (`__search`,
         // `owning_business_unit_id`) is no column an author manages. Read off
         // the definition this memo already holds, so the key stays
         // `objDraft.fields` and the identity reasoning above is unchanged.
-        .entries.filter((e) => !isStudioHiddenSystemField(e.def))
+        .filter((e) => !isStudioHiddenSystemField(e.def))
         .map((e) => e.name)
         .filter((n) => !STUDIO_SYSTEM_FIELD_NAMES.has(n) && n !== 'actions')
         // cloud#1652 — a column the server does not have yet must not reach the
@@ -6111,9 +6135,8 @@ export function DataPillar({
         // what the grid asks for. The new field is still selected in the
         // inspector, which is where it gets configured; it joins the grid once
         // it is published and therefore queryable.
-        .filter((n) => publishedFieldNames.has(n)),
-    [shownDraft.fields, publishedFieldNames],
-  );
+        .filter((n) => publishedFieldNames.has(n));
+  }, [shownDraft.fields, publishedFieldNames, servedOnly]);
   // objectstack#28575 — with a base object's extension open, the folded object
   // (`shownDraft`) is rebuilt on every extension edit, so a label typed into an
   // extension field would hand the grid a fresh columns array per keystroke:
@@ -7003,6 +7026,7 @@ export function DataPillar({
                 (extOpen !== null && (extOpen.published.size > 0 || extHasDraft || extDirty))) ? (
                 <SavedToCustomizationNote
                   baseLabel={customization.baseLabel}
+                  pairId={customization.pairId ?? pairIdOf(customization.base)}
                   testId="data-object-saved-to"
                 />
               ) : undefined
@@ -7807,6 +7831,8 @@ export function AutomationsPillar({
   const customizeBase = flowCustomizing && customization ? customization.base : null;
   const customizePair = flowCustomizing && customization ? customization.pairId : null;
   const customizeBaseLabel = customization?.baseLabel ?? railPackageId ?? '';
+  // objectstack#30436 — the pair the "saved to" note names.
+  const customizeNotePair = customization ? (customization.pairId ?? pairIdOf(customization.base)) : null;
   const customizeWalled = flowCustomizing && customization?.walled === true;
   const customizeBlock: CustomizeBlock = customizeWalled
     ? 'walled'
@@ -9053,7 +9079,7 @@ export function AutomationsPillar({
             // or is unlocked to customize saves to the base's pair.
             note={
               customization !== null && (!!current?.addedIn || flowInPair || flowUnlocked) ? (
-                <SavedToCustomizationNote baseLabel={customizeBaseLabel} testId="auto-flow-saved-to" />
+                <SavedToCustomizationNote baseLabel={customizeBaseLabel} pairId={customizeNotePair} testId="auto-flow-saved-to" />
               ) : undefined
             }
             leading={

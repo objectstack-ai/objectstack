@@ -1494,8 +1494,9 @@ export class EmailService implements IEmailService {
     const wanted = preferred || DEFAULT_TEMPLATE_LOCALE;
     // [#28880] A named locale, over the built-in loader, is folded against the
     // bundle's own tags by the platform's one BCP-47 ladder (exact →
-    // case-insensitive → base language → variant expansion, the first match
-    // in ascending tag order), then the stack's declared fallback is folded
+    // case-insensitive → platform locale table language → base language →
+    // variant expansion, the first match in ascending tag order), then the
+    // stack's declared fallback is folded
     // the same way, before the `en-US` rung below. Each rung loads the tag it
     // resolved to, exactly. A no-locale call keeps its ladder: en-US, then the
     // loader's own answer.

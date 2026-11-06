@@ -19,8 +19,8 @@ export function CurrencyField({ value, onChange, field, readonly, error, classNa
   const currency: string | undefined = resolveFieldCurrency(currencyField, tenantCurrency, dependentValues);
   // A currency's decimal places are the CURRENCY's, not a field setting — the
   // maintainer ruling recorded on objectstack-ai/objectstack#19910 (batch #218
-  // item 2), executed here by objectui#10276. The width is the ISO 4217
-  // minor-unit count of the resolved currency: 2 for USD / CNY, 0 for JPY,
+  // item 2), executed here by objectui#10276. The width is the CLDR
+  // fraction-digit count of the resolved currency: 2 for USD / CNY, 0 for JPY,
   // 3 for KWD. With no currency resolved there is no minor unit to ask about,
   // so the historical 2 stays. `currencyDisplayWidth` is that derivation, and
   // `formatCurrency` (the grid cell's formatter, and this widget's read-only

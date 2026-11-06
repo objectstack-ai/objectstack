@@ -175,6 +175,12 @@ function makeStubEngine() {
             tableOf(table).delete(found.key);
             return { deleted: 1 };
         },
+        // [#30635] A publish syncs the object's storage, and a refused sync
+        // rides the answer's `advisories`. This double's sync succeeds, so the
+        // advisories these pins read are the gate's alone.
+        async syncObjectSchema() {
+            return true;
+        },
         registry: {
             registerItem: () => {},
             registerObject: () => {},
@@ -5529,5 +5535,78 @@ describe('runtime authoring gate — a stored page sort naming an unknown field 
             await expect(savePage(protocol, page), slot).resolves.toMatchObject({ success: true });
         }
         expect(activePages(rows)).toHaveLength(1);
+    });
+});
+
+// #30095 — an OBJECT whose own built-in list view sorts by a field the list
+// door refuses is refused at the object publish door. `validateSortableFields`
+// judged `listViews.*.sort` on `os validate` and on the view and page doors,
+// but not on an object write, so the object saved green and that list view
+// answered `400 INVALID_SORT` on every load (`sortable: false`: #29896). The
+// member now declares `object`, on the #15254 terms its two list-view siblings
+// crossed on.
+describe('runtime authoring gate — an object list view sort the list door refuses (#30095)', () => {
+    const OBJECT = 'help_ticket';
+    /** A list view on the object, sorting by `field`. */
+    const ticket = (field: string) => ({
+        name: OBJECT,
+        label: 'Ticket',
+        sharingModel: 'private',
+        fields: {
+            subject: { type: 'text', label: 'Subject' },
+            body: { type: 'textarea', label: 'Body', sortable: false },
+            priority: { type: 'number', label: 'Priority', sortable: true },
+        },
+        listViews: {
+            inbox: { label: 'Inbox', columns: ['subject'], sort: [{ field, order: 'asc' }] },
+        },
+    });
+    const saveTicket = (protocol: any, field: string) =>
+        protocol.saveMetaItem({ type: 'object', name: OBJECT, item: ticket(field) });
+    const sortIssues = (err: any) => (err?.issues ?? []).filter((i: any) => String(i.rule).startsWith('sort-field-'));
+    const activeObjects = (rows: Map<string, Row>) =>
+        Array.from(rows.values()).filter((r) => r.type === 'object' && r.state === 'active');
+
+    let warn: ReturnType<typeof vi.spyOn>;
+    beforeEach(() => {
+        warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        delete process.env.OS_ALLOW_UNLINTED_METADATA_WRITES;
+    });
+    afterEach(() => {
+        warn.mockRestore();
+    });
+
+    it('refuses a list view sorting by a `sortable: false` field, 422 with the rule named, and stores nothing', async () => {
+        const { protocol, rows } = makeProtocol();
+        const err = await saveTicket(protocol, 'body').catch((e: any) => e);
+        expect(err?.status, JSON.stringify(err?.issues ?? err?.message)).toBe(422);
+        expect(err.code).toBe('INVALID_METADATA');
+        expect(sortIssues(err)).toEqual([expect.objectContaining({
+            rule: 'sort-field-unsortable',
+            severity: 'error',
+            path: `objects.${OBJECT}.listViews.inbox.sort[0]`,
+            message: expect.stringContaining('declares `sortable: false`'),
+        })]);
+        expect(err.rulesRun).toContain('validateReferenceIntegrity');
+        expect(activeObjects(rows)).toEqual([]);
+    });
+
+    it('refuses a list view sorting by a name the object does not have, the same way', async () => {
+        const { protocol, rows } = makeProtocol();
+        const err = await saveTicket(protocol, 'gone_field').catch((e: any) => e);
+        expect(err?.status, JSON.stringify(err?.issues ?? err?.message)).toBe(422);
+        expect(err.code).toBe('INVALID_METADATA');
+        expect(sortIssues(err).map((i: any) => [i.rule, i.severity, i.path])).toEqual([
+            ['sort-field-unknown', 'error', `objects.${OBJECT}.listViews.inbox.sort[0]`],
+        ]);
+        expect(activeObjects(rows)).toEqual([]);
+    });
+
+    it('CONTROL — the same list view sorting by a sortable field saves', async () => {
+        for (const field of ['subject', 'priority']) {
+            const { protocol, rows } = makeProtocol();
+            await expect(saveTicket(protocol, field), field).resolves.toMatchObject({ success: true });
+            expect(activeObjects(rows).map((r) => r.name)).toEqual([OBJECT]);
+        }
     });
 });

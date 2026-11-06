@@ -16,50 +16,109 @@
  *     that says what it costs.
  *
  * ⚠️ Anything on a page-load path belongs on `./registry.js`, not here.
+ *
+ * ## Each catalogue here is COMPLETE: the pack plus its lazy namespaces
+ *
+ * Some of a language's strings are not in its pack: the `marketplace.*` group
+ * is a lazy namespace (`../namespaces/marketplace/`), fetched when a
+ * marketplace page mounts so the console's eager `en` pack does not carry it.
+ * This door's two purposes both want every string, so each language it hands
+ * out is its pack deep-merged with its catalogue from every such namespace:
+ * the parity / drift suites keep walking the moved keys, and an app that makes
+ * every catalogue resident gets the marketplace text resident too. A key in
+ * both places is refused at module evaluation — the gates refuse it as well.
+ *
+ * ⚠️ So `en` here is not the same object as the package entry's `en`, which is
+ * the RESIDENT pack alone (what an instance holds before any namespace has
+ * loaded), nor as `@object-ui/i18n/locales/en`, the pack module itself.
  */
-export { default as en, type TranslationKeys } from './en.js';
+import enPack from './en.js';
+import zhHansPack from './zh-Hans.js';
+import zhHantPack from './zh-Hant.js';
+import jaPack from './ja.js';
+import koPack from './ko.js';
+import dePack from './de.js';
+import frPack from './fr.js';
+import esPack from './es.js';
+import ptBrPack from './pt-BR.js';
+import ruPack from './ru.js';
+import arPack from './ar.js';
+import enMarketplace from '../namespaces/marketplace/en.js';
+import zhHansMarketplace from '../namespaces/marketplace/zh-Hans.js';
+import zhHantMarketplace from '../namespaces/marketplace/zh-Hant.js';
+import jaMarketplace from '../namespaces/marketplace/ja.js';
+import koMarketplace from '../namespaces/marketplace/ko.js';
+import deMarketplace from '../namespaces/marketplace/de.js';
+import frMarketplace from '../namespaces/marketplace/fr.js';
+import esMarketplace from '../namespaces/marketplace/es.js';
+import ptBrMarketplace from '../namespaces/marketplace/pt-BR.js';
+import ruMarketplace from '../namespaces/marketplace/ru.js';
+import arMarketplace from '../namespaces/marketplace/ar.js';
+import type { PlatformLocaleTag } from '@objectstack/spec/system';
+
+export type { TranslationKeys } from './en.js';
+
+const isPlainObject = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+/**
+ * `pack` deep-merged with a namespace's partial pack. Groups both sides hold
+ * (`marketplace`, `marketplace.install`) merge; a LEAF both sides hold is a
+ * key defined twice, which no reader could resolve the same way twice, and
+ * throws.
+ */
+function complete<P extends object, N extends object>(pack: P, partial: N, label: string): P & N {
+  const merge = (into: Record<string, unknown>, from: Record<string, unknown>, at: string) => {
+    const out: Record<string, unknown> = { ...into };
+    for (const key of Object.keys(from)) {
+      if (key === '__proto__') continue;
+      const path = at ? `${at}.${key}` : key;
+      if (isPlainObject(out[key]) && isPlainObject(from[key])) {
+        out[key] = merge(out[key] as Record<string, unknown>, from[key] as Record<string, unknown>, path);
+      } else if (Object.prototype.hasOwnProperty.call(out, key)) {
+        throw new Error(`${label}: \`${path}\` is defined both in the pack and in a namespace catalogue.`);
+      } else {
+        out[key] = from[key];
+      }
+    }
+    return out;
+  };
+  return merge(pack as Record<string, unknown>, partial as Record<string, unknown>, '') as P & N;
+}
+
 // Export names are JavaScript identifiers, not pack keys: `zh` is the zh-Hans
-// pack, `zhHant` the zh-Hant pack and `pt` the pt-BR pack. The KEYS — the table
-// tags — are {@link builtInLocales}'.
-export { default as zh } from './zh-Hans.js';
-export { default as zhHant } from './zh-Hant.js';
-export { default as ja } from './ja.js';
-export { default as ko } from './ko.js';
-export { default as de } from './de.js';
-export { default as fr } from './fr.js';
-export { default as es } from './es.js';
-export { default as pt } from './pt-BR.js';
-export { default as ru } from './ru.js';
-export { default as ar } from './ar.js';
+// catalogue, `zhHant` the zh-Hant one and `pt` the pt-BR one. The KEYS — the
+// table tags — are {@link builtInLocales}'.
+//
+// Annotated rather than inferred: the inferred type spells the packs' literal
+// types out inline in the emitted declaration, which outgrew what tsc will
+// serialize (TS7056). Each `typeof` is emitted as a reference.
+export const en: typeof enPack & typeof enMarketplace = complete(enPack, enMarketplace, 'en');
+export const zh: typeof zhHansPack & typeof zhHansMarketplace = complete(zhHansPack, zhHansMarketplace, 'zh-Hans');
+export const zhHant: typeof zhHantPack & typeof zhHantMarketplace = complete(zhHantPack, zhHantMarketplace, 'zh-Hant');
+export const ja: typeof jaPack & typeof jaMarketplace = complete(jaPack, jaMarketplace, 'ja');
+export const ko: typeof koPack & typeof koMarketplace = complete(koPack, koMarketplace, 'ko');
+export const de: typeof dePack & typeof deMarketplace = complete(dePack, deMarketplace, 'de');
+export const fr: typeof frPack & typeof frMarketplace = complete(frPack, frMarketplace, 'fr');
+export const es: typeof esPack & typeof esMarketplace = complete(esPack, esMarketplace, 'es');
+export const pt: typeof ptBrPack & typeof ptBrMarketplace = complete(ptBrPack, ptBrMarketplace, 'pt-BR');
+export const ru: typeof ruPack & typeof ruMarketplace = complete(ruPack, ruMarketplace, 'ru');
+export const ar: typeof arPack & typeof arMarketplace = complete(arPack, arMarketplace, 'ar');
 
 /**
  * Map of all built-in locales, keyed by platform locale table tag
- * (`PLATFORM_LOCALES` in `@objectstack/spec/system`), in table order.
+ * (`PLATFORM_LOCALES` in `@objectstack/spec/system`), in table order — each
+ * one complete (see the header).
  *
  * ⛔ Keys are table tags, not the codes stored values carry: there is no `zh`
  * or `pt` key. A reader holding a stored code (`zh-CN`, `pt`) finds its pack
  * through `resolveBuiltInLanguage` (`./registry.js`), which reads the table's
  * read aliases.
+ *
+ * Annotated rather than inferred, for the same TS7056 reason as the exports
+ * above. `satisfies` holds the key set to the table: a tag added to the table
+ * without its pack here (or a pack here the table lacks) is a compile error.
  */
-import en from './en.js';
-import zh from './zh-Hans.js';
-import zhHant from './zh-Hant.js';
-import ja from './ja.js';
-import ko from './ko.js';
-import de from './de.js';
-import fr from './fr.js';
-import es from './es.js';
-import pt from './pt-BR.js';
-import ru from './ru.js';
-import ar from './ar.js';
-import type { PlatformLocaleTag } from '@objectstack/spec/system';
-
-// Annotated rather than inferred: the inferred type spells every pack's literal
-// types out inline in the emitted declaration, which outgrew what tsc will
-// serialize (TS7056). Each `typeof <pack>` is the same type, emitted as a
-// reference. `satisfies` holds the key set to the table: a tag added to the
-// table without its pack here (or a pack here the table lacks) is a compile
-// error.
 export const builtInLocales: {
   readonly en: typeof en;
   readonly 'zh-Hans': typeof zh;

@@ -354,7 +354,8 @@ describe('[#18783] the engine is handed the same producer', () => {
  *    the create / edit / delete verbs may read NARROWER than the evaluator: that
  *    is the managed-write clamp, the engine write guard the permission sets do not
  *    model. There the pin holds the refuse direction only — the map never grants
- *    what the evaluator refuses.
+ *    what the evaluator refuses. [#30440] `transfer` is one of them: an owner
+ *    change is an update, which the guard refuses unless the object opts `edit` in.
  *
  * [#20134] Subjects whose sets carry a SUPER-USER wildcard are held by the same
  * table, one row per shape: the shipped platform admin and walled org admin, a
@@ -473,6 +474,15 @@ describe('[#20083] parity: can() over the member\'s map answers what checkObject
       shipped('admin_full_access'), shipped('organization_admin'), shipped('member_default'),
     ],
     // [#20135] The export slot's own shapes.
+    // [#30440] An explicit modify-all entry on guarded managed objects: one opting
+    // `edit` in (sys_user), one opting nothing in (sys_member), one private (sys_secret).
+    '[#30440] explicit modifyAllRecords entries on guarded managed objects': [
+      authored('managed_modify_all', {
+        [SysUser.name]: { modifyAllRecords: true },
+        [SysMember.name]: { modifyAllRecords: true },
+        [SysSecret.name]: { modifyAllRecords: true },
+      }),
+    ],
     'platform admin beside a plain export-only wildcard': [shipped('admin_full_access'), authored('exporter', { '*': { allowExport: true } })],
     'one set: an exporting wildcard AND an explicit entry without the grant': [
       authored('same_export', { '*': { allowRead: true, allowExport: true }, crm_lead: { allowRead: true } }),
@@ -484,7 +494,7 @@ describe('[#20083] parity: can() over the member\'s map answers what checkObject
     allowTransfer: 'transfer', allowExport: 'export',
   };
   const GUARDED = new Set(['better-auth', 'engine-owned', 'append-only']);
-  const CLAMPED = new Set(['allowCreate', 'allowEdit', 'allowDelete']);
+  const CLAMPED = new Set(['allowCreate', 'allowEdit', 'allowDelete', 'allowTransfer']);
   const USER = { id: 'u_parity', positions: [] as string[] };
   const evaluator = new PermissionEvaluator();
 

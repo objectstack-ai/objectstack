@@ -39,7 +39,7 @@
 
 import '@testing-library/jest-dom/vitest';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { act, render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { act, cleanup, render, screen, fireEvent, waitFor } from '@testing-library/react';
 
 const route = vi.hoisted(() => ({ packageId: 'com.example.crm' }));
 const viewer = vi.hoisted(() => ({ isAdmin: true }));
@@ -162,6 +162,10 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  // Unmount BEFORE the fetch double goes: a reseed or purge re-reads the
+  // ledger and then the sample-data count (objectstack#30616) after the test
+  // body returns, and a read issued once the double is gone reaches a socket.
+  cleanup();
   vi.unstubAllGlobals();
   resetRuntimeConfigForTesting();
 });
@@ -241,6 +245,8 @@ describe('a marketplace-off boot that permits install-local, seen by an admin', 
     render(<MarketplacePackagePage />);
     await openLocalMenu();
     fireEvent.click(await screen.findByRole('menuitem', { name: '«marketplace.detail.purgeSampleData»' }));
+    // objectstack#30323 — confirmed in the console's own dialog.
+    fireEvent.click(await screen.findByTestId('purge-sample-data-confirm'));
 
     await waitFor(() =>
       expect(calls).toContainEqual({

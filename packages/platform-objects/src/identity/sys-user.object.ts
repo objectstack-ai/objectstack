@@ -207,7 +207,7 @@ export const SysUser = ObjectSchema.create({
       // and nothing is POSTed until that one dialog's own Confirm.
       // NB: the top-level `description` (#7367), never `ai.description` — that
       // one is the LLM-facing tool contract and is shown to no user.
-      description: 'Ban this user? They will be signed out, unable to sign in, and their API keys refused until unbanned. The keys work again after the unban.',
+      description: 'Ban this user? They will be signed out, unable to sign in, and their API keys refused until unbanned, as are their OAuth access tokens and token refreshes. The keys work again after the unban.',
       params: [
         { name: 'banReason', label: 'Ban Reason', type: 'text', required: false },
       ],
@@ -216,7 +216,7 @@ export const SysUser = ObjectSchema.create({
       ai: {
         exposed: true,
         description:
-          'Ban a user (the record; optionally banReason): they are signed out, cannot sign in, and their API keys are refused until unbanned; the keys work again after the unban. Platform administrators only. Ask the human to confirm before calling.',
+          'Ban a user (the record; optionally banReason): they are signed out, cannot sign in, and their API keys, OAuth access tokens and token refreshes are refused until unbanned; the keys work again after the unban. Platform administrators only. Ask the human to confirm before calling.',
         requiresConfirmation: true,
       },
     },
@@ -355,8 +355,12 @@ export const SysUser = ObjectSchema.create({
         // field-backed: the grant object lives in plugin-security, whose
         // metadata the console need not have loaded on this list, and an
         // unresolvable field-backed param makes the dialog refuse the whole
-        // action. The grant column is a text field anyway (its picker is a
-        // widget hint params do not inherit), so nothing is lost.
+        // action. The value is a permission set's NAME, a `text` value like
+        // the grant column it lands in, and `widget: 'permission-ref'` draws
+        // the grant column's own picker (ADR-0131 D4): a searchable list of
+        // the security catalog's sets, each shown by its label, that submits
+        // the chosen set's name. So the administrator picks what Setup shows
+        // and never types a machine name.
         // The route writes the grant under the administrator's OWN context in
         // the same transaction as the account: the delegated-administration
         // gate and the catalog name check judge it as they judge Setup's
@@ -364,6 +368,7 @@ export const SysUser = ObjectSchema.create({
         {
           name: 'permissionSet',
           type: 'text',
+          widget: 'permission-ref',
           label: 'Permission Set',
           required: false,
           helpText: 'Optional. Grants this permission set to the new user, so they can open their apps on first sign-in.',
@@ -981,7 +986,7 @@ export const SysUser = ObjectSchema.create({
       defaultValue: false,
       readonly: true, // ADR-0092 — toggled via Ban/Unban actions (session side effects)
       group: 'Account',
-      description: 'When true, the user cannot sign in. Toggle via Ban User / Unban User actions.',
+      description: 'When on, the user cannot sign in. Use the Ban User / Unban User actions to change it.',
     }),
 
     ban_reason: Field.text({
@@ -1085,8 +1090,8 @@ export const SysUser = ObjectSchema.create({
       readonly: true,
       group: 'Admin',
       description:
-        'When true, the user is blocked (403 PASSWORD_RESET_REQUIRED) until they change ' +
-        'their password. Stamped by the admin user-management routes; system-managed.',
+        'When on, the user must change their password before they can continue. ' +
+        'Turned on when an administrator creates or imports the account, or resets its password; system-managed.',
     }),
 
     // ADR-0069 D3 — when enforced MFA first applied to this user; starts the

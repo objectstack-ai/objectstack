@@ -153,7 +153,7 @@ import type { FlowCelEntrance } from './flow-cel-root-scope.js';
 import { injectedColumnDefsFor, injectedColumnsFor, unprovisionedInjectedColumnsFor } from './system-fields.js';
 import { findUnguardedNullableOperands, nullGuardMessage, provenNonNullKeys } from './validate-null-guards.js';
 import type { NullGuardOptions, NullGuardOutcome } from './validate-null-guards.js';
-import { recordsOf } from './object-graph.js';
+import { objectsAsServed, objectsWithoutTiedFields, recordsOf } from './object-graph.js';
 export interface ExprIssue {
   where: string;
   message: string;
@@ -198,6 +198,9 @@ type AnyRec = Record<string, unknown>;
  * `owner_id`, so `record.owner_id` there stays the error it should be. A blanket
  * union would have traded a false positive for a false negative and called it
  * fixed.
+ *
+ * [#30471] Built over the objects as served ({@link objectsAsServed}), so the
+ * authored half includes every field an `objectExtensions` entry adds.
  */
 function buildFieldIndex(objects: AnyRec[]): Map<string, string[]> {
   const idx = new Map<string, string[]>();
@@ -540,6 +543,12 @@ interface FlowBareNames {
   readonly variables: readonly string[];
   /** The run can bind a name no reader sees: a bare-name mismatch is the warning. */
   readonly unproven: boolean;
+  /**
+   * [#30250] The flow is a time-relative sweep: its `run-fails` verdict names
+   * no write that fired the run (`ExprSchemaHint.timeRelativeSweep`). Rides
+   * here because every flow site that reads the names reads it too.
+   */
+  readonly timeRelativeSweep: boolean;
 }
 
 function buildNullableFieldIndex(objects: AnyRec[]): Map<string, Set<string>> {
@@ -1313,7 +1322,7 @@ function isFlattenedNearMissFor(diagnostic: string, roots: readonly string[]): b
  * | option `visibleWhen`                   | `evaluateOptionVisibility`: refuses a write picking it (ADR-0137 D2, #22402) | `fail-closed` |
  * | hook `condition`                       | `hook-wrappers.ts`: aborts the operation (#4775)             | `fail-closed` |
  * | flow start / edge condition, `decision` branch — record-triggered flow | `evaluateCondition` throws (ADR-0032 §1c); the trigger isolates the write: the run fails, the write lands. A bare name and its `record.<name>` read are the same total trigger record (#29959) | `run-fails` |
- * | the same, time-relative flow sweeping the flow's own object | `evaluateCondition` throws; `time-relative-trigger.ts` launches each run with the swept row of that object as `record` (`{ record: row }`, the stored row a find returns), so the field's type is what the name holds there too (#29959) | `run-fails` |
+ * | the same, time-relative flow sweeping the flow's own object | `evaluateCondition` throws; `time-relative-trigger.ts` launches each run with the swept row of that object as `record` (`{ record: row }`, the stored row a find returns), so the field's type is what the name holds there too (#29959). No write fires the run: the sweep starts one per row it finds, logs a failed one and goes on to the next row | `run-fails`, with `ExprSchemaHint.timeRelativeSweep` so the sentence names no firing write (#30250) |
  * | flow condition, any other flow (API, schedule, no trigger, or a sweep of another object than the one the conditions are typed against) | `evaluateCondition` throws there too, but no row of the typed object is bound (see `validate-null-guards.ts`'s ledger): the run holds what its entrance handed it — an API request body, an action's partial record, a parent's record, or nothing — so the field's type is not proven to be what the name holds | — not declared: the `type-mismatch-run-may-fail` WARNING, worded for the run (#29959) |
  * | a bare name the flow's run binds as a variable (a declared variable, a node id, a `screen` field's `name`) | the run seeds it before the flattening, which skips a bound name, or a screen's resume lands it over the flattened field: it holds the variable, not the field | — not typed as the field at all (`ExprSchemaHint.flowVariables`); `record.<name>` still is (#29959, #30025) |
  | a bare name in a flow a node of which can bind names no reader sees (`flowCelRootScope` read with no entrance: an open binder — `script`, `connector_action`, `wait`, `subflow`, `map` —, a screen with no input contract) | the run can bind the name to a value no reader sees | — no declared outcome for a bare-name mismatch: the `type-mismatch-run-may-fail` WARNING (`ExprSchemaHint.bareNamesUnproven`); `record.<name>` keeps the row's outcome (#30025) |
@@ -1331,7 +1340,8 @@ function isFlattenedNearMissFor(diagnostic: string, roots: readonly string[]): b
  * never gives its advisory — the message says so instead of a refused write.
  * The date verdicts (`date-arithmetic`, `date-text-arithmetic`) are an error
  * at every site; in a flow condition the same outcome picks their sentence:
- * `-run-fails` under `run-fails`, `-run-may-fail` anywhere else (#30016).
+ * `-run-fails` under `run-fails`, `-run-may-fail` anywhere else (#30016); on
+ * a `fail-closed` site it is `-fail-closed`, the refused write (#30250).
  */
 type FaultSite =
   | { readonly kind: 'validation rule'; readonly severity: unknown }
@@ -2228,10 +2238,23 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
     return actionCopyTemplateIssues(stack, { actions: false, objects: false, pages: true });
   }
   const objects = recordsOf(stack.objects);
-  const fieldIndex = buildFieldIndex(objects);
+  // [#30471] The field indexes read the objects as the registry SERVES them,
+  // every `objectExtensions` field of any body folded in (`objectsAsServed`,
+  // the package's one fold): a `record.FIELD` read of a field a sibling
+  // package adds resolves as it does at runtime, and a field no body declares
+  // or extends is still unknown. The walk below stays on the declared
+  // `objects`, so every finding keeps its declared path. The two indexes that
+  // judge a field's DEFINITION (its type, whether it is nullable) leave out a
+  // field two packages tie on (`objectsWithoutTiedFields`): which definition
+  // the registry serves is registration order, which the stack does not state,
+  // so such a field is a known name with no type and no null-guard verdict.
+  // The read-attachment index is object-level and an extension carries none.
+  const { objects: servedObjects, tied } = objectsAsServed(stack);
+  const typedObjects = objectsWithoutTiedFields({ objects: servedObjects, tied });
+  const fieldIndex = buildFieldIndex(servedObjects);
   const attachedOnReadIndex = buildAttachedOnReadIndex(objects);
-  const fieldTypeIndex = buildFieldTypeIndex(objects);
-  const nullableIndex = buildNullableFieldIndex(objects);
+  const fieldTypeIndex = buildFieldTypeIndex(typedObjects);
+  const nullableIndex = buildNullableFieldIndex(typedObjects);
   // [#24316] object name → its references into a stored-metadata-body table,
   // read the first time a site of that object serves a hop, or (#24677) when
   // the walk reaches the object's fields, whichever comes first — never before
@@ -2531,6 +2554,7 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
           ...(faultOutcome ? { faultOutcome } : {}),
           ...(flowBare ? { flowVariables: flowBare.variables } : {}),
           ...(flowBare?.unproven ? { bareNamesUnproven: true } : {}),
+          ...(flowBare?.timeRelativeSweep ? { timeRelativeSweep: true } : {}),
         }
         : { scope, ...roots });
     for (const e of res.errors) {
@@ -2878,6 +2902,9 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
     const flowBare: FlowBareNames = {
       variables: [...new Set([...declaredVariables, ...screenFields, ...FLOW_ENGINE_BOUND_NAMES])],
       unproven: !flowCelRootScope(flow, graphs, objectName, fieldIndex).provable,
+      // [#30250] No write fires a sweep's run: `time-relative-trigger.ts` starts
+      // one per row it finds. The validator reads it only under `run-fails`.
+      timeRelativeSweep: triggerKind === 'time_relative',
     };
     const nullGuardBare = new Set<string>();
     if (nullGuardObject && rootScope.provable) {
@@ -3450,7 +3477,10 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
     // The type is read from the field-type index, never off the field again:
     // the #5017 receiver meta-test pins the keys this walk reads off `f`. The
     // collector admits only a field whose `type` is a string, and the index
-    // records every such field, so each collected field has its type here.
+    // records every such field, so each collected field has its type here,
+    // save one two packages tie on (#30471): the index leaves its definition
+    // out, so it is skipped rather than judged on a definition the registry
+    // may not serve.
     if (objectName) {
       const familyRefs = storedMetadataBodyReferencesFor(objectName);
       const ownFieldTypes = fieldTypeIndex.get(objectName);

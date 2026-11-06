@@ -21,6 +21,10 @@
  *    the deployment declares `trustProxy`. A list that includes it saves.
  *  - The recovery the refusal names: `OS_AUTH_ALLOWED_IP_RANGES` set empty
  *    opens the gate on the next boot over a stored list.
+ *  - [#30385] The rest of that recovery: while the override is in force a
+ *    clear (`null`) goes through the settings door and clears the stored
+ *    list, so removing the override does not bring it back; any other value
+ *    is still refused `409 SETTINGS_LOCKED`.
  *  - [#30398] The read an administrator asks before saving,
  *    `GET /api/v1/auth/admin/client-address`, answers the address that same
  *    save would be judged by: the plugin's real auth routes on a real Hono app,
@@ -383,5 +387,38 @@ describe('#30398 the address read serves the address the save check judges', () 
     expect(res.body.error.code).toBe('VALIDATION_ERROR');
     expect(res.body.data).toBeUndefined();
     expect(asked).not.toHaveBeenCalled();
+  });
+});
+
+describe('#30385 the env recovery clears the stored list, so lifting the override does not lock the caller out again', () => {
+  it('set the override empty, sign in, clear the stored list through the settings door, remove the override: the caller is admitted', async () => {
+    const env: Record<string, string | undefined> = {};
+    const svc = new SettingsService({ env });
+    svc.registerManifest(authManifest);
+    await svc.set('auth', 'allowed_ip_ranges', OFFICE, {});
+    expect((await boot({ svc })).manager.isClientIpAllowed('::1')).toBe(false);
+
+    // Start the server with the override set empty: the gate opens.
+    env.OS_AUTH_ALLOWED_IP_RANGES = '';
+    const recovered = await boot({ svc });
+    expect(recovered.manager.isClientIpAllowed('::1')).toBe(true);
+
+    // A value is still refused while the override is in force, the empty string included.
+    const refused = await recovered.save({ allowed_ip_ranges: '' }, { remoteAddress: '::1' });
+    expect(refused.status).toBe(409);
+    expect(refused.body.error.code).toBe('SETTINGS_LOCKED');
+    expect(refused.body.error.details).toEqual({ namespace: 'auth', key: 'allowed_ip_ranges', reason: 'locked-by-env' });
+
+    // The clear goes through; the answer still reads the override, locked, and the gate stays open.
+    const cleared = await recovered.save({ allowed_ip_ranges: null }, { remoteAddress: '::1' });
+    expect(cleared.status).toBe(200);
+    expect(cleared.body.data.values.allowed_ip_ranges).toMatchObject({ value: '', source: 'env', locked: true });
+    expect(recovered.manager.isClientIpAllowed('::1')).toBe(true);
+
+    // Remove the override and restart: no stored list comes back.
+    delete env.OS_AUTH_ALLOWED_IP_RANGES;
+    expect((await svc.get('auth', 'allowed_ip_ranges', {})).source).toBe('default');
+    const restarted = await boot({ svc });
+    expect(restarted.manager.isClientIpAllowed('::1')).toBe(true);
   });
 });

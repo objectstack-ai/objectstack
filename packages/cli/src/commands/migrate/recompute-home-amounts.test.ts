@@ -133,6 +133,13 @@ describe('os migrate recompute-home-amounts', () => {
     expect(json()).toMatchObject({ apply: false, report: { changed: 1, written: 0 } });
   }, RUN_TIMEOUT);
 
+  it('--org hands that organization to recomputeHomeAmounts as its filter; without it, none (every organization)', async () => {
+    await MigrateRecomputeHomeAmounts.run(['--json', '--object', 'invoice', '--org', 'org_b'], { root: CLI_ROOT });
+    expect(vi.mocked(recomputeHomeAmounts).mock.calls[0]![2]).toMatchObject({ object: 'invoice', organizationId: 'org_b' });
+    await MigrateRecomputeHomeAmounts.run(['--json', '--object', 'invoice'], { root: CLI_ROOT });
+    expect(vi.mocked(recomputeHomeAmounts).mock.calls[1]![2]).toHaveProperty('organizationId', undefined);
+  }, RUN_TIMEOUT);
+
   it('--apply --yes writes, on the plain boot', async () => {
     await MigrateRecomputeHomeAmounts.run(['--json', '--apply', '--yes', '--object', 'invoice'], { root: CLI_ROOT });
     expect(vi.mocked(recomputeHomeAmounts).mock.calls[0]![2]).toMatchObject({ apply: true });

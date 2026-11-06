@@ -90,12 +90,12 @@ describe('an OData entity set drafts with EDM types mapped and snake_case fields
 
     expect(draft.name).toBe('products');
     expect(draft.definition.fields).toEqual({
-      product_id: { type: 'number' },
-      product_name: { type: 'text' },
-      supplier_id: { type: 'number' },
-      category_id: { type: 'number' },
-      unit_price: { type: 'number' },
-      discontinued: { type: 'boolean' },
+      product_id: { type: 'number', label: 'Product Id' },
+      product_name: { type: 'text', label: 'Product Name' },
+      supplier_id: { type: 'number', label: 'Supplier Id' },
+      category_id: { type: 'number', label: 'Category Id' },
+      unit_price: { type: 'number', label: 'Unit Price' },
+      discontinued: { type: 'boolean', label: 'Discontinued' },
     });
     expect(draft.definition.external).toEqual({
       remoteName: 'Products',
@@ -169,7 +169,7 @@ describe('navigations become lookups only where a column holds the key of an imp
       supplier_id: { type: 'number' },
     });
     expect(draft.review.map((r) => r.column)).toEqual(['Supplier']);
-    expect(draft.source).toContain("    category_id: { type: 'lookup', reference: 'categories' },");
+    expect(draft.source).toContain("    category_id: { type: 'lookup', label: 'Category Id', reference: 'categories' },");
     expect(draft.source).toContain("columnMap: { 'ProductID': 'product_id',");
   });
 
@@ -306,12 +306,12 @@ describe('an OData v2 datasource imports the same way: Associations become looku
     const { service } = serviceOverV2();
     const products = await service.generateObjectDraft('erp', 'Products');
     expect(products.definition.fields).toEqual({
-      product_id: { type: 'number' },
-      product_name: { type: 'text' },
-      supplier_id: { type: 'number' },
-      category_id: { type: 'number' },
-      unit_price: { type: 'number' },
-      discontinued: { type: 'boolean' },
+      product_id: { type: 'number', label: 'Product Id' },
+      product_name: { type: 'text', label: 'Product Name' },
+      supplier_id: { type: 'number', label: 'Supplier Id' },
+      category_id: { type: 'number', label: 'Category Id' },
+      unit_price: { type: 'number', label: 'Unit Price' },
+      discontinued: { type: 'boolean', label: 'Discontinued' },
     });
     const employees = await service.generateObjectDraft('erp', 'Employees');
     expect(employees.definition.fields).toMatchObject({ birth_date: { type: 'datetime' } });

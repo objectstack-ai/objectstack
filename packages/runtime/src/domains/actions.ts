@@ -675,6 +675,27 @@ export async function handleActionsRequest(deps: DomainHandlerDeps, path: string
                 }),
             };
         }
+
+        // The handler this dispatch reaches may be one a DIFFERENT declared
+        // action owns: that owner's `requiredPermissions` and activation switch
+        // gate this call too (`actionHandlerOwnerRefusal`, which the MCP
+        // `run_action` bridge calls at the same point). The candidates are the
+        // ones the script dispatch below hands `executeRegisteredAction`.
+        const ownerRefusal = await actionExec.actionHandlerOwnerRefusal(deps, _context, {
+            ql,
+            action: actionDef,
+            objectName,
+            candidates: actionExec.resolveActionHandlerKeys(actionDef, actionName),
+            ec: _context?.executionContext,
+            envId: _context?.environmentId,
+            obj: actionSchema,
+        });
+        if (ownerRefusal) {
+            return {
+                handled: true,
+                response: deps.error(ownerRefusal.message, ownerRefusal.status, { code: ownerRefusal.code }),
+            };
+        }
     }
 
     // [#3915] Action-TYPE dispatch. Per spec every non-`script` type

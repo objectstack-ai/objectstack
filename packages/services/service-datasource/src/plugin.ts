@@ -1,7 +1,14 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { Plugin, PluginContext } from '@objectstack/core';
-import type { MetadataProtocol } from '@objectstack/spec/api';
+import { classifyAdmissionTenancyPosture, type TenancyPostureSource } from '@objectstack/core';
+import type {
+  EnsureCustomizationPackageRequest,
+  EnsureCustomizationPackageResponse,
+  MetadataProtocol,
+} from '@objectstack/spec/api';
+import { customizationNamespace, customizationPackageId } from '@objectstack/spec/kernel';
+import { postureEnforcesWall } from '@objectstack/spec/security';
 import type { IDataEngine, IObjectQLEngine, IntrospectedSchema } from '@objectstack/spec/contracts';
 import {
   ExternalDatasourceService,
@@ -36,6 +43,28 @@ interface MetadataServiceLike {
 
 /** The metadata door's save, as the `'protocol'` service declares it. */
 type MetadataSaveDoor = Pick<MetadataProtocol, 'saveMetaItem'>;
+
+/**
+ * The two members of the `'protocol'` service an import's landing asks
+ * (ruling B on the placement of an imported object): the ADR-0070 writability
+ * predicate the save door applies, and the ADR-0146 D3 ensure door, the ONLY
+ * creation path of a base's customization package. Probed, like the save
+ * door, on the service this plugin already resolves: ⛔ no second spelling of
+ * either rule here.
+ */
+interface ImportLandingDoors {
+  isWritablePackage(packageId: string): boolean;
+  ensureCustomizationPackage(request: EnsureCustomizationPackageRequest): Promise<EnsureCustomizationPackageResponse>;
+}
+
+/**
+ * A refused import landing: the code and status the import door answers every
+ * refusal with, so the declaration and the served envelope agree, as for the
+ * service's own `importNameRefusedError`.
+ */
+function importLandingRefusal(message: string): Error {
+  return Object.assign(new Error(message), { code: 'EXTERNAL_IMPORT_ERROR', status: 400 });
+}
 
 /** The two reads the federation service makes of the engine's object registry. */
 type ObjectRegistryReads = Pick<IObjectQLEngine['registry'], 'getObject' | 'getAllObjects'>;
@@ -174,6 +203,56 @@ export class ExternalDatasourceServicePlugin implements Plugin {
       return typeof connection?.getConnectionState === 'function' ? connection.getConnectionState(datasource) : undefined;
     };
 
+    /**
+     * The package that declared a datasource: its stamped `_packageId`, or
+     * `undefined` for a datasource no package declares, the `'sys_metadata'`
+     * rehydration sentinel, and a datasource that cannot be read. See
+     * `getNamespace` below for why the stamp is the one source.
+     */
+    const datasourcePackageId = async (datasource: string): Promise<string | undefined> => {
+      try {
+        const ds = (await metadata()?.get('datasource', datasource)) as { _packageId?: unknown } | undefined;
+        const pkgId = typeof ds?._packageId === 'string' ? ds._packageId : undefined;
+        return !pkgId || pkgId === 'sys_metadata' ? undefined : pkgId;
+      } catch {
+        return undefined;
+      }
+    };
+
+    /** A package record as `installPackage` stored it in the engine registry, read where it is used. */
+    const packageRecord = (packageId: string): { manifest?: { namespace?: unknown } } | undefined =>
+      safeGetService<{ registry?: { getPackage?: (id: string) => unknown } }>(ctx, 'objectql')?.registry?.getPackage?.(
+        packageId,
+      ) as { manifest?: { namespace?: unknown } } | undefined;
+
+    const namespaceOf = (record: { manifest?: { namespace?: unknown } } | undefined): string | undefined => {
+      const ns = record?.manifest?.namespace;
+      return typeof ns === 'string' ? ns : undefined;
+    };
+
+    /** The landing doors on the `'protocol'` service, resolved where they are used, like `metadataSaveDoor`. */
+    const landingDoors = (): ImportLandingDoors | undefined => {
+      const protocol = safeGetService<Partial<ImportLandingDoors>>(ctx, 'protocol');
+      return typeof protocol?.isWritablePackage === 'function'
+        && typeof protocol.ensureCustomizationPackage === 'function'
+        ? (protocol as ImportLandingDoors)
+        : undefined;
+    };
+
+    /**
+     * The deployment's EFFECTIVE tenancy posture, from the `tenancy` service
+     * through the shared classification (a registered service that cannot
+     * answer is an outage, never "single"), read per import like the
+     * datasource admin routes read it.
+     */
+    const tenancyPosture = async () => {
+      const kernel = ctx.getKernel?.() as
+        | { getServiceAsync?: <T>(name: string, scopeId?: string) => Promise<T> }
+        | undefined;
+      if (!kernel || typeof kernel.getServiceAsync !== 'function') return undefined;
+      return classifyAdmissionTenancyPosture(() => kernel.getServiceAsync!<TenancyPostureSource>('tenancy'));
+    };
+
     const config: ExternalDatasourceServiceConfig = {
       introspect,
       liveDriver,
@@ -239,8 +318,85 @@ export class ExternalDatasourceServicePlugin implements Plugin {
       get persistObject() {
         const door = metadataSaveDoor();
         if (!door) return undefined;
-        return async (name: string, definition: Record<string, unknown>) => {
-          await door.saveMetaItem({ type: 'object', name, item: definition, writeFace: 'external-import' });
+        return async (name: string, definition: Record<string, unknown>, packageId?: string) => {
+          await door.saveMetaItem({
+            type: 'object',
+            name,
+            item: definition,
+            writeFace: 'external-import',
+            // [#30469 item 2] The package `resolveImportLanding` chose; absent
+            // for a package-less row, so that request is byte-for-byte the one
+            // this door sent before.
+            ...(packageId ? { packageId } : {}),
+          });
+        };
+      },
+      /**
+       * [#30469 item 2] Where an import is saved — ruling B (recorded as
+       * 6660988968), the module of `resolveImportLanding` in
+       * `external-datasource-service.ts` stating the three rows. Decided by
+       * the datasource's `_packageId` alone:
+       *
+       *  - none → package-less (ADR-0146 D11 environment metadata);
+       *  - writable (the save door's own ADR-0070 predicate) → that package;
+       *  - read-only installed base → its pair `<base>.custom` (ADR-0146 D2),
+       *    named in the pair's namespace, which the save door's prefix rule
+       *    judges against the WRITTEN package: an import over the showcase's
+       *    `showcase_external` is named `showcase_custom_customers`, and
+       *    `showcase_customers` is refused there with `NAMESPACE_PREFIX`.
+       *
+       * The pair comes from the ensure door and from nowhere else (ADR-0146
+       * D3). Under a walled posture the platform operator alone creates the
+       * pair, through that door's HTTP route (ADR-0146 D3 "Walled postures",
+       * ADR-0131 D3), so this seam NEVER creates it there: an existing pair
+       * receives the import, and an absent one refuses it, naming the
+       * operator and the route that creates it. ⛔ No package-less landing
+       * instead — the silent fallback ADR-0070 D3 forbids.
+       */
+      resolveImportLanding: async (datasource: string) => {
+        const basePackageId = await datasourcePackageId(datasource);
+        if (!basePackageId) return {};
+        const doors = landingDoors();
+        if (!doors) {
+          throw importLandingRefusal(
+            `Datasource '${datasource}' is declared by package '${basePackageId}', so an object imported from it `
+              + 'belongs in that package or its customization package, and this deployment\'s metadata protocol '
+              + 'cannot judge the package\'s writability or ensure its customization package. The import is not '
+              + 'saved anywhere else.',
+          );
+        }
+        const base = packageRecord(basePackageId);
+        if (doors.isWritablePackage(basePackageId)) {
+          return { packageId: basePackageId, namespace: namespaceOf(base) };
+        }
+        const pairId = customizationPackageId(basePackageId);
+        if (!pairId.ok) {
+          throw importLandingRefusal(
+            `Datasource '${datasource}' is declared by read-only package '${basePackageId}', which has no `
+              + `customization package (${pairId.reason}), so an object imported from it has no package to be `
+              + 'saved into. The import is not saved anywhere else.',
+          );
+        }
+        const pair = packageRecord(pairId.value);
+        const posture = await tenancyPosture();
+        if (posture !== undefined && postureEnforcesWall(posture)) {
+          if (pair) return { packageId: pairId.value, namespace: namespaceOf(pair) };
+          throw importLandingRefusal(
+            `Datasource '${datasource}' is declared by read-only package '${basePackageId}', so an object imported `
+              + `from it belongs in that package's customization package '${pairId.value}', which does not exist `
+              + `yet. This deployment runs the '${posture}' tenancy posture, where the platform operator creates `
+              + `a customization package: ask the platform operator to create it (POST `
+              + `/api/v1/packages/${basePackageId}/ensure-customization), then import again. The import is not `
+              + 'saved anywhere else (ADR-0146 D3, ADR-0131 D3).',
+          );
+        }
+        const derived = customizationNamespace(namespaceOf(base));
+        return {
+          packageId: pairId.value,
+          namespace: pair ? namespaceOf(pair) : derived.ok ? derived.value : undefined,
+          prepare: async () => {
+            await doors.ensureCustomizationPackage({ basePackageId });
+          },
         };
       },
       /**
@@ -279,18 +435,8 @@ export class ExternalDatasourceServicePlugin implements Plugin {
        */
       getNamespace: async (datasource: string) => {
         try {
-          const ds = (await metadata()?.get('datasource', datasource)) as
-            | { _packageId?: unknown }
-            | undefined;
-          const pkgId = typeof ds?._packageId === 'string' ? ds._packageId : undefined;
-          if (!pkgId || pkgId === 'sys_metadata') return undefined;
-          const registry = safeGetService<{ registry?: { getPackage?: (id: string) => unknown } }>(
-            ctx,
-            'objectql',
-          )?.registry;
-          const pkg = registry?.getPackage?.(pkgId) as { manifest?: { namespace?: unknown } } | undefined;
-          const ns = pkg?.manifest?.namespace;
-          return typeof ns === 'string' ? ns : undefined;
+          const pkgId = await datasourcePackageId(datasource);
+          return pkgId ? namespaceOf(packageRecord(pkgId)) : undefined;
         } catch {
           // Namespace resolution is best-effort provenance, never a reason to
           // fail a draft: an unresolvable namespace has a defined, documented

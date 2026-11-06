@@ -10,7 +10,7 @@ import {
 } from './solution-blueprint.zod';
 import { ViewFilterRuleSchema } from '../ui/view.zod';
 import { SortItemSchema } from '../shared/enums.zod';
-import { SelectOptionSchema } from '../data/field.zod';
+import { FieldSchema, FieldType, SelectOptionSchema } from '../data/field.zod';
 import { ObjectSchema } from '../data/object.zod';
 
 const validBlueprint: SolutionBlueprint = {
@@ -481,7 +481,7 @@ describe('SolutionBlueprintStrictSchema (OpenAI strict mirror)', () => {
         nameField: null,
         stageField: null,
         fields: [
-          { name: 'name', label: null, type: 'text', required: null, reference: null, options: null, summaryOperations: null, expression: null },
+          { name: 'name', label: null, type: 'text', required: null, reference: null, options: null, summaryOperations: null, expression: null, defaultValue: null },
         ],
       },
     ],
@@ -504,8 +504,8 @@ describe('SolutionBlueprintStrictSchema (OpenAI strict mirror)', () => {
     const parsed = SolutionBlueprintStrictSchema.parse({
       ...strictBp,
       views: [
-        { object: 'event', name: 'wall', label: null, type: 'gallery', columns: null, groupBy: null, filters: null, sort: null },
-        { object: 'event', name: 'plan', label: null, type: 'gantt', columns: null, groupBy: null, filters: null, sort: null },
+        { object: 'event', name: 'wall', label: null, type: 'gallery', columns: null, groupBy: null, filters: null, sort: null, startDateField: null },
+        { object: 'event', name: 'plan', label: null, type: 'gantt', columns: null, groupBy: null, filters: null, sort: null, startDateField: null },
       ],
     });
     expect(parsed.views?.map((v) => v.type)).toEqual(['gallery', 'gantt']);
@@ -520,7 +520,7 @@ describe('SolutionBlueprintStrictSchema (OpenAI strict mirror)', () => {
     const badField = {
       ...strictBp,
       objects: [
-        { name: 'x', label: null, description: null, sharingModel: null, nameField: null, stageField: null, fields: [{ name: 'f', type: 'text', required: null, reference: null, options: null, summaryOperations: null, expression: null }] },
+        { name: 'x', label: null, description: null, sharingModel: null, nameField: null, stageField: null, fields: [{ name: 'f', type: 'text', required: null, reference: null, options: null, summaryOperations: null, expression: null, defaultValue: null }] },
       ],
     };
     // `f` is missing the (nullable, required) `label` key.
@@ -546,11 +546,11 @@ describe('SolutionBlueprintStrictSchema (OpenAI strict mirror)', () => {
           stageField: null,
           fields: [
             {
-              name: 'task_total', label: '任务总数', type: 'summary', required: null, reference: null, options: null, expression: null,
+              name: 'task_total', label: '任务总数', type: 'summary', required: null, reference: null, options: null, expression: null, defaultValue: null,
               summaryOperations: { object: 'task', function: 'count', field: 'id', relationshipField: null, conditions: null },
             },
             {
-              name: 'completed_task_count', label: '已完成任务数', type: 'summary', required: null, reference: null, options: null, expression: null,
+              name: 'completed_task_count', label: '已完成任务数', type: 'summary', required: null, reference: null, options: null, expression: null, defaultValue: null,
               summaryOperations: {
                 object: 'task', function: 'count', field: 'id', relationshipField: null,
                 conditions: [{ field: 'status', op: 'eq', value: 'completed' }],
@@ -622,7 +622,7 @@ describe('SolutionBlueprintStrictSchema (OpenAI strict mirror)', () => {
 
   describe('stageField + option kind (the model names the stage field and states each option\'s kind, or says null)', () => {
     const statusField = (options: Array<Record<string, unknown>>) => ({
-      name: 'status', label: null, type: 'select', required: null, reference: null, options, summaryOperations: null, expression: null,
+      name: 'status', label: null, type: 'select', required: null, reference: null, options, summaryOperations: null, expression: null, defaultValue: null,
     });
     const STAGES = [
       { label: 'New', value: 'new', kind: 'open' },
@@ -731,8 +731,8 @@ describe('SolutionBlueprintStrictSchema (OpenAI strict mirror)', () => {
           name: 'overview',
           label: null,
           widgets: [
-            { id: 'revenue', title: 'Total revenue', object: 'project', chart: 'metric', measure: 'amount', groupBy: null, condition: null },
-            { id: 'low_stock', title: 'Low stock', object: 'project', chart: 'table', measure: null, groupBy: null, condition: { field: 'qty', op: 'lt', value: 10 } },
+            { id: 'revenue', title: 'Total revenue', object: 'project', chart: 'metric', measure: 'amount', aggregate: 'sum', groupBy: null, condition: null },
+            { id: 'low_stock', title: 'Low stock', object: 'project', chart: 'table', measure: null, aggregate: null, groupBy: null, condition: { field: 'qty', op: 'lt', value: 10 } },
           ],
         },
       ],
@@ -753,7 +753,7 @@ describe('SolutionBlueprintStrictSchema (OpenAI strict mirror)', () => {
 
   describe('view filters + sort (the model states a view\'s filter or says null)', () => {
     const strictView = {
-      object: 'task', name: 'overdue_tasks', label: '逾期任务', type: 'list', columns: ['title', 'due_date'], groupBy: null,
+      object: 'task', name: 'overdue_tasks', label: '逾期任务', type: 'list', columns: ['title', 'due_date'], groupBy: null, startDateField: null,
     };
     /** The first issue of a failed strict parse, as `{ path, code }`. */
     const firstIssue = (input: unknown) => {
@@ -905,10 +905,29 @@ describe('strict mirror ↔ lenient schema — key parity', () => {
     // design step could never state the filter its view's name promises, and the
     // applier would accept a filter no proposal can contain. There are NO
     // deliberate view-level exclusions (measured: both sides carry
-    // object/name/label/type/columns/groupBy/filters/sort); if one ever becomes
+    // object/name/label/type/columns/groupBy/filters/sort/startDateField); if one ever becomes
     // deliberate, list it explicitly here with its reason.
     expect(Object.keys(strictViewShape()).sort()).toEqual(Object.keys(lenientViewShape()).sort());
-    expect(Object.keys(lenientViewShape())).toEqual(expect.arrayContaining(['filters', 'sort']));
+    expect(Object.keys(lenientViewShape())).toEqual(expect.arrayContaining(['filters', 'sort', 'startDateField']));
+  });
+
+  it('the DASHBOARD and WIDGET schemas carry exactly the same keys', () => {
+    // The fifth level of the same gap, pinned with the widget `aggregate`
+    // (ruling A on cloud#3607 row 2): with the key on the lenient side only,
+    // the design model could never say "average", and a widget meant to
+    // average a number field summed it. No deliberate exclusions at either
+    // level (measured: both sides carry name/label/widgets, and the widget
+    // id/title/object/chart/measure/aggregate/groupBy/condition).
+    const dashboardShape = (root: any) => root.shape.dashboards.unwrap().element.shape;
+    const widgetShape = (root: any) => dashboardShape(root).widgets.unwrap().element.shape;
+    expect(Object.keys(dashboardShape(SolutionBlueprintStrictSchema)).sort())
+      .toEqual(Object.keys(dashboardShape(SolutionBlueprintSchema)).sort());
+    expect(Object.keys(widgetShape(SolutionBlueprintStrictSchema)).sort())
+      .toEqual(Object.keys(widgetShape(SolutionBlueprintSchema)).sort());
+    expect(Object.keys(widgetShape(SolutionBlueprintSchema))).toContain('aggregate');
+    // Value parity for the enum the VALUE-parity walker below cannot see.
+    expect([...widgetShape(SolutionBlueprintStrictSchema).aggregate.unwrap().options].sort())
+      .toEqual([...widgetShape(SolutionBlueprintSchema).aggregate.unwrap().options].sort());
   });
 
   it('the view FILTER RULE and SORT ENTRY shapes carry exactly the same keys', () => {
@@ -1134,6 +1153,7 @@ describe('strict mirror ↔ lenient schema — VALUE parity', () => {
           options: optionsWithLeadingDigit.map((o) => ({ ...o, kind: null })),
           summaryOperations: null,
           expression: null,
+          defaultValue: null,
         }],
       }],
       views: null,
@@ -1143,5 +1163,354 @@ describe('strict mirror ↔ lenient schema — VALUE parity', () => {
     // Before cloud#1967 this parse SUCCEEDED — the proposal was legal to
     // generate and illegal to apply.
     expect(strict.success).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Widget `aggregate` (ruling A on cloud#3607 row 2) and the calendar view's
+// `startDateField` (ruling B on cloud#3607). Both are optional on the lenient
+// side and required-but-nullable on the strict mirror.
+// ---------------------------------------------------------------------------
+describe('blueprint widget `aggregate` and calendar view `startDateField`', () => {
+  const AGGREGATES = ['sum', 'avg', 'min', 'max', 'count'] as const;
+  const strictBase = {
+    summary: 's',
+    assumptions: [],
+    questions: null,
+    objects: [{
+      name: 'interview', label: null, description: null, sharingModel: null, nameField: null, stageField: null,
+      fields: [{
+        name: 'score', label: null, type: 'number', required: null, reference: null, options: null,
+        summaryOperations: null, expression: null, defaultValue: null,
+      }],
+    }],
+    views: null,
+    dashboards: null,
+    app: null,
+  };
+  const strictWidget = (aggregate: unknown) => ({
+    ...strictBase,
+    dashboards: [{ name: 'hiring', label: null, widgets: [{
+      id: 'avg_score', title: '平均面试评分', object: 'interview', chart: 'metric',
+      measure: aggregate === 'count' ? null : 'score', aggregate, groupBy: null, condition: null,
+    }] }],
+  });
+  const lenientWidget = (widget: Record<string, unknown>) => ({
+    summary: 's',
+    objects: [{ name: 'interview', fields: [{ name: 'score', type: 'number' }] }],
+    dashboards: [{ name: 'hiring', widgets: [{ id: 'w', object: 'interview', chart: 'metric', ...widget }] }],
+  });
+  const strictView = (view: Record<string, unknown>) => ({
+    ...strictBase,
+    views: [{
+      object: 'interview', name: 'interview_calendar', label: null, type: 'calendar', columns: null,
+      groupBy: null, filters: null, sort: null, startDateField: null, ...view,
+    }],
+  });
+  /** The issues of a failed parse, as `{ path, code }`. */
+  const issuesOf = (result: { success: boolean; error?: { issues: Array<{ path: PropertyKey[]; code: string }> } }) => {
+    expect(result.success).toBe(false);
+    return (result.error?.issues ?? []).map((i) => ({ path: i.path, code: i.code }));
+  };
+
+  it.each(AGGREGATES)('accepts aggregate %s on both sides', (aggregate) => {
+    expect(SolutionBlueprintStrictSchema.parse(strictWidget(aggregate)).dashboards?.[0].widgets?.[0].aggregate)
+      .toBe(aggregate);
+    const measure = aggregate === 'count' ? {} : { measure: 'score' };
+    expect(SolutionBlueprintSchema.parse(lenientWidget({ ...measure, aggregate })).dashboards?.[0].widgets?.[0].aggregate)
+      .toBe(aggregate);
+  });
+
+  it('`count` needs no measure field on either side', () => {
+    const lenient = SolutionBlueprintSchema.parse(lenientWidget({ aggregate: 'count' }));
+    expect(lenient.dashboards?.[0].widgets?.[0]).toMatchObject({ aggregate: 'count' });
+    expect(lenient.dashboards?.[0].widgets?.[0].measure).toBeUndefined();
+    expect(SolutionBlueprintStrictSchema.parse(strictWidget('count')).dashboards?.[0].widgets?.[0].measure).toBeNull();
+  });
+
+  it('refuses an unknown aggregate on both sides, at the key', () => {
+    for (const bad of ['average', 'median', 'count_distinct', 'AVG', '']) {
+      expect(issuesOf(SolutionBlueprintStrictSchema.safeParse(strictWidget(bad))))
+        .toEqual([{ path: ['dashboards', 0, 'widgets', 0, 'aggregate'], code: 'invalid_value' }]);
+      expect(issuesOf(SolutionBlueprintSchema.safeParse(lenientWidget({ measure: 'score', aggregate: bad }))))
+        .toEqual([{ path: ['dashboards', 0, 'widgets', 0, 'aggregate'], code: 'invalid_value' }]);
+    }
+  });
+
+  it('absent still parses on the lenient side; the strict mirror takes null and refuses the key missing', () => {
+    expect(SolutionBlueprintSchema.parse(lenientWidget({ measure: 'score' })).dashboards?.[0].widgets?.[0].aggregate)
+      .toBeUndefined();
+    expect(SolutionBlueprintStrictSchema.parse(strictWidget(null)).dashboards?.[0].widgets?.[0].aggregate).toBeNull();
+    const missing = strictWidget(null);
+    delete (missing.dashboards[0].widgets[0] as Record<string, unknown>).aggregate;
+    // A missing enum key reads as a value outside the enum; the path is the fact.
+    expect(issuesOf(SolutionBlueprintStrictSchema.safeParse(missing)).map((i) => i.path))
+      .toEqual([['dashboards', 0, 'widgets', 0, 'aggregate']]);
+  });
+
+  it('no describe tells the author to infer the aggregation from the title', () => {
+    const widgetShape = (root: any) => root.shape.dashboards.unwrap().element.shape.widgets.unwrap().element.shape;
+    for (const root of [SolutionBlueprintSchema, SolutionBlueprintStrictSchema]) {
+      for (const key of ['measure', 'aggregate']) {
+        const text: string = widgetShape(root)[key].description;
+        expect(text).not.toMatch(/infer/i);
+        expect(text).not.toMatch(/chosen automatically/i);
+        expect(text).not.toMatch(/title/i);
+      }
+    }
+  });
+
+  it('accepts startDateField on a calendar view on both sides', () => {
+    expect(SolutionBlueprintStrictSchema.parse(strictView({ startDateField: 'interview_date' })).views?.[0].startDateField)
+      .toBe('interview_date');
+    expect(BlueprintViewSchema.parse({
+      object: 'interview', name: 'interview_calendar', type: 'calendar', startDateField: 'interview_date',
+    }).startDateField).toBe('interview_date');
+    expect(BlueprintViewSchema.parse({ object: 'interview', name: 'interview_calendar', type: 'calendar' }).startDateField)
+      .toBeUndefined();
+  });
+
+  it('refuses a wrong-typed or non-identifier startDateField, at the key', () => {
+    for (const bad of [42, true, ['interview_date'], { field: 'interview_date' }, 'Interview Date']) {
+      expect(issuesOf(SolutionBlueprintStrictSchema.safeParse(strictView({ startDateField: bad }))).map((i) => i.path))
+        .toEqual([['views', 0, 'startDateField']]);
+      expect(issuesOf(BlueprintViewSchema.safeParse({
+        object: 'interview', name: 'v', type: 'calendar', startDateField: bad,
+      })).map((i) => i.path)).toEqual([['startDateField']]);
+    }
+    const missing = strictView({});
+    delete (missing.views[0] as Record<string, unknown>).startDateField;
+    expect(issuesOf(SolutionBlueprintStrictSchema.safeParse(missing)))
+      .toEqual([{ path: ['views', 0, 'startDateField'], code: 'invalid_type' }]);
+  });
+
+  it('is ignored, not refused, on a non-calendar view: legal to generate stays legal to apply', () => {
+    // The strict mirror cannot state a cross-key rule, so both sides accept
+    // the key on every view type and the reader reads it on a calendar only.
+    for (const type of ['list', 'form', 'kanban', 'gallery', 'gantt'] as const) {
+      expect(SolutionBlueprintStrictSchema.safeParse(strictView({ type, startDateField: 'interview_date' })).success)
+        .toBe(true);
+      expect(BlueprintViewSchema.safeParse({
+        object: 'interview', name: 'v', type, startDateField: 'interview_date',
+      }).success).toBe(true);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Field `defaultValue` (ruling B on cloud#3619). Optional on the lenient side
+// and required-but-nullable on the strict mirror; one scalar union on both.
+// Whether a field takes a default, and which value, is the lenient field's
+// refinement: the mirror cannot read `type` while it judges this key.
+// ---------------------------------------------------------------------------
+describe('blueprint field `defaultValue`', () => {
+  /**
+   * The design call this PR states, restated here so a widening of the admitted
+   * set is a diff to this pin: each admitted type with a value it takes, and a
+   * value of the wrong type for it.
+   */
+  const ADMITTED: Record<string, { ok: unknown; wrong: unknown }> = {
+    boolean: { ok: false, wrong: 'false' },
+    toggle: { ok: true, wrong: 1 },
+    number: { ok: 0, wrong: '0' },
+    currency: { ok: 99.5, wrong: '99.5' },
+    percent: { ok: 50, wrong: true },
+    rating: { ok: 3, wrong: '3' },
+    slider: { ok: 10, wrong: '10' },
+    progress: { ok: 0, wrong: false },
+    text: { ok: '待处理', wrong: 0 },
+    textarea: { ok: '', wrong: false },
+    email: { ok: 'ops@example.com', wrong: 1 },
+    url: { ok: 'https://example.com', wrong: 1 },
+    phone: { ok: '+1 555 0100', wrong: 5550100 },
+    markdown: { ok: '# Notes', wrong: 1 },
+    html: { ok: '<p>Notes</p>', wrong: 1 },
+    richtext: { ok: 'Notes', wrong: 1 },
+    code: { ok: '{}', wrong: 1 },
+    color: { ok: '#3b82f6', wrong: 1 },
+    time: { ok: '09:00', wrong: '9am' },
+    select: { ok: 'open', wrong: 'Open' },
+    radio: { ok: 'done', wrong: 'closed' },
+  };
+  const OPTIONS = [{ label: 'Open', value: 'open' }, { label: 'Done', value: 'done' }];
+  const withOptions = (type: string) => (type === 'select' || type === 'radio' ? { options: OPTIONS } : {});
+  const lenientField = (field: Record<string, unknown>) => SolutionBlueprintSchema.safeParse({
+    summary: 's',
+    objects: [{ name: 'task', fields: [{ name: 'flag', ...field }] }],
+  });
+  const strictField = (field: Record<string, unknown>) => SolutionBlueprintStrictSchema.safeParse({
+    summary: 's',
+    assumptions: [],
+    questions: null,
+    objects: [{
+      name: 'task', label: null, description: null, sharingModel: null, nameField: null, stageField: null,
+      fields: [{
+        name: 'flag', label: null, required: null, reference: null, options: null, summaryOperations: null,
+        expression: null, defaultValue: null, ...field,
+      }],
+    }],
+    views: null,
+    dashboards: null,
+    app: null,
+  });
+  const PATH = ['objects', 0, 'fields', 0, 'defaultValue'];
+  /** The by-name refusals of a failed parse: custom issues at the key whose message names the field type. */
+  const namedRefusals = (result: ReturnType<typeof lenientField>, type: string) =>
+    (result.error?.issues ?? []).filter((i) => i.code === 'custom'
+      && JSON.stringify(i.path) === JSON.stringify(PATH)
+      && i.message.includes(`"flag" (${type})`));
+
+  it('carries a boolean flag\'s `defaultValue: false` through the parse, and the key survives', () => {
+    const parsed = lenientField({ type: 'boolean', defaultValue: false });
+    expect(parsed.success).toBe(true);
+    const field = parsed.data!.objects[0].fields[0];
+    expect(Object.prototype.hasOwnProperty.call(field, 'defaultValue')).toBe(true);
+    expect(field.defaultValue).toBe(false);
+  });
+
+  it('admits exactly the declared types: each takes its value, every other FieldType is refused by name', () => {
+    expect(Object.keys(ADMITTED).every((t) => (FieldType.options as readonly string[]).includes(t))).toBe(true);
+    for (const type of FieldType.options) {
+      const admitted = ADMITTED[type];
+      // A value each refused type's own value class would hold, so the refusal is
+      // the type's, never the value's.
+      const value = admitted ? admitted.ok : (type === 'date' ? '2026-01-01' : type === 'number' ? 0 : 'x');
+      const result = lenientField({ type, ...withOptions(type), defaultValue: value });
+      if (admitted) {
+        expect({ type, success: result.success }).toEqual({ type, success: true });
+        expect(result.data!.objects[0].fields[0].defaultValue).toEqual(value);
+      } else {
+        expect({ type, success: result.success }).toEqual({ type, success: false });
+        expect({ type, named: namedRefusals(result, type).length }).toEqual({ type, named: 1 });
+      }
+    }
+  });
+
+  it('refuses a value of the wrong type for an admitted type, by name at the key', () => {
+    for (const [type, { wrong }] of Object.entries(ADMITTED)) {
+      const result = lenientField({ type, ...withOptions(type), defaultValue: wrong });
+      expect({ type, success: result.success }).toEqual({ type, success: false });
+      expect({ type, issues: result.error!.issues.length, named: namedRefusals(result, type).length })
+        .toEqual({ type, issues: 1, named: 1 });
+    }
+  });
+
+  it('refuses a select default that is not one of the field\'s OWN option values', () => {
+    for (const bad of ['Open', 'closed', 'done ']) {
+      expect(namedRefusals(lenientField({ type: 'select', options: OPTIONS, defaultValue: bad }), 'select')).toHaveLength(1);
+    }
+    // A value another field declares is not this field's option.
+    const other = SolutionBlueprintSchema.safeParse({
+      summary: 's',
+      objects: [{
+        name: 'task',
+        fields: [
+          { name: 'priority', type: 'select', options: [{ label: 'High', value: 'high' }] },
+          { name: 'flag', type: 'select', options: OPTIONS, defaultValue: 'high' },
+        ],
+      }],
+    });
+    expect(other.error?.issues.map((i) => i.path)).toEqual([['objects', 0, 'fields', 1, 'defaultValue']]);
+    // With no options declared there is nothing a default could name.
+    expect(namedRefusals(lenientField({ type: 'radio', defaultValue: 'open' }), 'radio')).toHaveLength(1);
+  });
+
+  it('refuses a runtime token on an admitted type: a blueprint default is a literal', () => {
+    for (const [type, token] of [['text', 'NOW()'], ['time', 'now()'], ['select', 'current_user']] as const) {
+      const options = type === 'select' ? { options: [...OPTIONS, { label: 'Me', value: 'current_user' }] } : {};
+      expect(namedRefusals(lenientField({ type, ...options, defaultValue: token }), type)).toHaveLength(1);
+    }
+  });
+
+  it('refuses a runtime token on a type that takes no default with the token\'s reason, never the type\'s', () => {
+    // The type's reason is false of a token: `current_user` names no record and
+    // `NOW()` is not frozen at design time.
+    for (const [type, token] of [['user', 'current_user'], ['lookup', 'current_user'], ['date', 'NOW()'], ['datetime', 'now()']] as const) {
+      const result = lenientField({ type, ...(type === 'lookup' ? { reference: 'sys_user' } : {}), defaultValue: token });
+      const named = namedRefusals(result, type);
+      expect({ type, issues: result.error?.issues.length, named: named.length }).toEqual({ type, issues: 1, named: 1 });
+      expect(named[0].message).toContain('is a runtime token');
+      expect(named[0].message).toContain(`A "${type}" field takes no defaultValue in a blueprint`);
+      expect(named[0].message.endsWith('Remove defaultValue from this field.')).toBe(true);
+      expect(named[0].message).not.toMatch(/no record exists|fixed when the blueprint is written/);
+    }
+  });
+
+  it('refuses a list default on a multi-value field by name, beside the key\'s own union refusal', () => {
+    const result = lenientField({ type: 'multiselect', options: OPTIONS, defaultValue: ['open'] });
+    expect(result.success).toBe(false);
+    expect(namedRefusals(result, 'multiselect')).toHaveLength(1);
+  });
+
+  it('absent still parses on the lenient side; the strict mirror takes null and refuses the key missing', () => {
+    const lenient = lenientField({ type: 'boolean' });
+    expect(lenient.success).toBe(true);
+    expect('defaultValue' in lenient.data!.objects[0].fields[0]).toBe(false);
+    expect(strictField({ type: 'boolean', defaultValue: null }).success).toBe(true);
+    // Strict mode needs every key in `required`: a field without the key is refused at it.
+    const bare = SolutionBlueprintStrictSchema.safeParse({
+      summary: 's', assumptions: [], questions: null, views: null, dashboards: null, app: null,
+      objects: [{
+        name: 'task', label: null, description: null, sharingModel: null, nameField: null, stageField: null,
+        fields: [{
+          name: 'flag', label: null, type: 'boolean', required: null, reference: null, options: null,
+          summaryOperations: null, expression: null,
+        }],
+      }],
+    });
+    expect(bare.error?.issues.map((i) => i.path)).toEqual([PATH]);
+  });
+
+  it('the strict mirror accepts what the lenient schema accepts for each admitted type, and null', () => {
+    for (const [type, { ok }] of Object.entries(ADMITTED)) {
+      const options = type === 'select' || type === 'radio' ? { options: OPTIONS.map((o) => ({ ...o, kind: null })) } : {};
+      const strict = strictField({ type, ...options, defaultValue: ok });
+      expect({ type, success: strict.success }).toEqual({ type, success: true });
+      expect(strict.data!.objects[0].fields[0].defaultValue).toEqual(ok);
+      expect({ type, success: lenientField({ type, ...withOptions(type), defaultValue: ok }).success })
+        .toEqual({ type, success: true });
+      expect(strictField({ type, ...options, defaultValue: null }).success).toBe(true);
+    }
+  });
+
+  it('a value legal to generate is either kept by the lenient schema or refused there BY NAME, never stripped', () => {
+    // VALUE parity for a key whose rule spans `type`: the mirror's union cannot
+    // say which arm a type takes, so it generates values the lenient field
+    // refuses. Every such refusal must name the field's type at this key.
+    for (const type of FieldType.options) {
+      for (const value of [true, false, 0, 7.5, '', 'x', 'open', '09:00', '2026-01-01']) {
+        expect({ type, value, strict: strictField({ type, defaultValue: value }).success })
+          .toEqual({ type, value, strict: true });
+        const lenient = lenientField({ type, ...withOptions(type), defaultValue: value });
+        if (lenient.success) {
+          expect({ type, value, kept: lenient.data!.objects[0].fields[0].defaultValue })
+            .toEqual({ type, value, kept: value });
+        } else {
+          expect({ type, value, issues: lenient.error!.issues.length, named: namedRefusals(lenient, type).length })
+            .toEqual({ type, value, issues: 1, named: 1 });
+        }
+      }
+    }
+  });
+
+  it('every default the blueprint admits is one the built field\'s own schema admits', () => {
+    // The applier carries the value into the object field, where `FieldSchema`
+    // judges it again: a value legal to apply must be legal to stage.
+    for (const [type, { ok }] of Object.entries(ADMITTED)) {
+      const built = FieldSchema.safeParse({ name: 'flag', label: 'Flag', type, ...withOptions(type), defaultValue: ok });
+      expect({ type, success: built.success }).toEqual({ type, success: true });
+      expect(built.data?.defaultValue).toEqual(ok);
+    }
+  });
+
+  it('both describes state the admitted types and the boolean-flag rule', () => {
+    const describeOf = (root: any): string =>
+      root.shape.objects.element.shape.fields.element.shape.defaultValue.description;
+    for (const text of [describeOf(SolutionBlueprintSchema), describeOf(SolutionBlueprintStrictSchema)]) {
+      for (const type of Object.keys(ADMITTED)) expect(text).toContain(`"${type}"`);
+      expect(text).toContain('never `required`');
+      expect(text).toContain('defaultValue false');
+      expect(text).toContain('refused by name');
+    }
   });
 });

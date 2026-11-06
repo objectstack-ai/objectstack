@@ -696,23 +696,25 @@ const FLOW_TRIGGER_INPUTS: [FlowTriggerOrNone, ...FlowTriggerOrNone[]] = ['none'
 // ── Tool arguments: an undeclared key is REFUSED, not stripped (#16913) ──────
 
 /**
- * The one sentence every tool's refusal ends with — why the key the caller
- * just sent used to disappear without a word.
+ * [#30126 row 15] The refusal says which key is wrong and what to send
+ * instead, and stops there: no sentence on why the key used to be dropped.
  *
- * Kept identical across the eleven tools on purpose. Triage's reading of this
- * card was that one tool holding two postures is evidence there was never a
- * rule; the answer to that is one posture, stated in one sentence, on every
- * door — not eleven bespoke ones.
+ * `strictUnknownKeyError` (`@objectstack/spec/shared`) closes every message
+ * with its surface's `history` sentence. On an authorable metadata schema that
+ * sentence tells an author why a file that used to load is now refused; here
+ * the reader is an agent mid-call, and the history of #16913 (a mis-guessed
+ * name used to be stripped by the SDK, so the call succeeded with a different
+ * answer) tells it nothing it can act on. So the factory is handed an empty
+ * history and the separator it leaves is trimmed: the message ends at its last
+ * fix channel. The prose that explains the posture stays in this file, beside
+ * {@link strictToolInput}, where the readers who need it look.
  */
-// ⛔ No tracker id in this string. It is RUNTIME prose — it reaches an MCP
-// client, an agent transcript and any log that captures a tool error, and none
-// of those readers can resolve `#NNNN` (`pnpm check:doc-authoring`). The anchor
-// belongs in a comment, where the reader who can resolve it is already looking:
-// the card is #16913, and the campaign it extends is #4001.
-const UNKNOWN_ARG_HISTORY =
-  'This argument used to be dropped silently and the call still succeeded, so a mis-guessed '
-  + 'parameter name answered a differently filtered or differently ordered set with no way for '
-  + 'the caller to tell.';
+function withoutHistorySentence(map: z.core.$ZodErrorMap): z.core.$ZodErrorMap {
+  return (issue) => {
+    const answer = map(issue);
+    return typeof answer === 'string' ? answer.trimEnd() : answer;
+  };
+}
 
 /**
  * Close an MCP tool's argument shape against keys it does not declare.
@@ -786,12 +788,12 @@ function strictToolInput<T extends z.ZodRawShape>(
 ) {
   return z
     .object(shape, {
-      error: strictUnknownKeyError({
+      error: withoutHistorySentence(strictUnknownKeyError({
         surface: options.surface,
         knownKeys: Object.keys(shape),
         aliases: options.aliases,
-        history: UNKNOWN_ARG_HISTORY,
-      }),
+        history: '',
+      })),
     })
     .strict();
 }
@@ -1204,6 +1206,9 @@ export function registerObjectTools(
             scope,
             ...(optionFields ? { optionFields } : {}),
             ...(faultOutcome ? { faultOutcome } : {}),
+            // [#30250] A time-relative sweep's run is fired by no write: the
+            // gate's run-fails sentence there names none, and so does this one.
+            ...(site === 'flow_condition' && triggerKind === 'time_relative' ? { timeRelativeSweep: true } : {}),
           } as const;
           // The gate's envelope verdict first: `validateExpression` treats a
           // blank source as "not authored" and answers ok, while the save gate

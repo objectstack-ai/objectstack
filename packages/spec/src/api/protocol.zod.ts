@@ -259,10 +259,10 @@ export const GetMetaTypesResponseSchema = lazySchema(() => z.object({
  * empty list. A minimum, not a refinement, so the published JSON Schema
  * states it.
  *
- * **Declared ahead of its producer.** No list door reads `names` yet, so its
- * describe opens `[PLANNED — not yet served]`; the server PR on #29236 drops
- * the marker in the change that serves the member (the pin is in
- * `protocol.test.ts`).
+ * **Served.** Both list doors (the REST server's and the runtime
+ * dispatcher's `GET /meta/:type`) read `?names=` and push it down here (#29236),
+ * on every type except `package`: a `package` list item is keyed by its id and
+ * carries no `name`, so the `package` list refuses `?names=` with `400`.
  */
 export const GetMetaItemsRequestSchema = lazySchema(() => z.object({
   type: z.string().describe('Metadata type name (e.g., "object", "plugin")'),
@@ -271,12 +271,12 @@ export const GetMetaItemsRequestSchema = lazySchema(() => z.object({
     .min(1, 'Name at least one item, or leave `names` out to list every item')
     .optional()
     .describe(
-      '[PLANNED — not yet served] Item names to narrow the list to: only the named items of the type '
-      + 'are answered, among those the list would answer without it. Sent over HTTP as one '
+      'Item names to narrow the list to: only the named items of the type '
+      + 'are answered, among those the list would answer without it. Served on every type except '
+      + '`package`, whose items are keyed by id; the `package` list refuses it with 400. Sent over HTTP as one '
       + 'comma-separated value (`?names=a,b,c`). A name that matches no item is simply absent from the '
       + 'answer (no 404). An empty value is refused with 400 rather than read as every item; leave the '
-      + 'key out to list every item. No list door reads it yet: until one does, a request carrying it '
-      + 'is answered as if it were absent.',
+      + 'key out to list every item.',
     ),
   previewDrafts: z.boolean().optional().describe(
     'Draft-visibility switch (ADR-0033 draft-overlay preview): when true, '
@@ -1494,9 +1494,12 @@ const SEED_APPLIED_LANDED_DESCRIPTION =
   'Per object, the stored rows the seed landed on: `inserted` (created by this publish) and '
   + '`matched` (pre-existing rows a seed key matched), each capped at '
   + '`SEED_APPLIED_LANDED_IDS_CAP` (200) ids with `total` and `truncated` stating any cut. One '
-  + 'entry per object the loader ran, empty lists included. ABSENT means "not reported" — the '
-  + 'apply failed before or while loading (see `error`), or the producer reports no ids — never '
-  + '"no rows landed".';
+  + 'entry per object the loader ran, empty lists included. When the load threw part-way '
+  + '(`success: false` with `error`), it lists only the datasets that FINISHED before the throw, '
+  + 'and is EMPTY when none had; the dataset that threw is not listed (its rows are in the counts, '
+  + 'its object in `error`). '
+  + 'ABSENT means "not reported" — the apply failed before any load ran (see `error`), or the '
+  + 'producer reports no ids — never "no rows landed".';
 
 /**
  * Publish Metadata Item Response
@@ -1529,8 +1532,12 @@ const SEED_APPLIED_LANDED_DESCRIPTION =
  *   created, the only ones a reader may treat as the seed's own — and
  *   `matched` — pre-existing rows a seed key matched, possibly a customer's.
  *   Each list carries at most {@link SEED_APPLIED_LANDED_IDS_CAP} (200) ids
- *   and declares a cut with `truncated: true` beside the uncut `total`;
- *   absent `landed` means "not reported", never "nothing landed". The same
+ *   and declares a cut with `truncated: true` beside the uncut `total`.
+ *   [#30429] A load that threw part-way still reports `landed` for the
+ *   datasets that FINISHED before the throw, and an empty `landed` when the
+ *   throw came before any had; the dataset that threw is not listed (its ids
+ *   are only partly known), though its rows are in the counts. Absent `landed` means "not reported" (no load ran, or the
+ *   producer reports no ids), never "nothing landed". The same
  *   key, same schema, rides {@link PublishPackageDraftsResponseSchema}'s
  *   `seedApplied`. Accepted cost (objectstack-ai/cloud#3598 ruling A): row
  *   ids on the public publish responses, bounded by the cap.
@@ -3682,10 +3689,11 @@ export const GetPresenceResponseSchema = lazySchema(() => z.object({
  * `DELETE /api/v1/notifications/devices/:deviceId`.
  *
  * One request does both: registering a `deviceId` the user already has
- * refreshes that device (its token, vendor, app and locale) instead of adding
- * a second one. A request without `deviceId` gets one minted by the server
- * and answered in {@link RegisterDeviceResponseSchema}; the client keeps it
- * and sends it on every later registration and on unregister.
+ * refreshes that device (its token, vendor, platform, app, locale, origin and
+ * name) instead of adding a second one. A request without `deviceId` gets
+ * one minted by the server and answered in {@link RegisterDeviceResponseSchema};
+ * the client keeps it and sends it on every later registration and on
+ * unregister.
  *
  * The members after `name` (`vendor`, `appId`, `locale`) were added for the
  * push channel, all optional, so the body a client sent before still parses
@@ -3706,9 +3714,12 @@ export const RegisterDeviceRequestSchema = lazySchema(() => z.object({
     + 'android means fcm. web has no default vendor: a web registration names apns or fcm, and one without vendor is refused',
   ),
   appId: z.string().optional().describe('App the token was issued to: the iOS bundle ID or the Android application ID'),
-  locale: LocaleSchema.optional().describe('Device locale (BCP 47, for example zh-CN) that pushes to this device are rendered in'),
+  locale: LocaleSchema.optional().describe(
+    'Device locale (BCP 47, for example zh-CN). Stored on the device row; no push renders by it: a push arrives in the '
+    + 'recipient\'s language (sys_user.locale, then the deployment default)',
+  ),
   origin: z.string().regex(PUSH_SERVER_ORIGIN_PATTERN, { message: PUSH_SERVER_ORIGIN_MESSAGE }).optional().describe(
-    '[PLANNED — not yet stored] The origin the Console was loaded from (window.location.origin, for example '
+    'The origin the Console was loaded from (window.location.origin, for example '
     + 'https://crm.example.com): the address the mobile shell saved for this server. The Console writes it; the server '
     + 'stores it on the device row and every push to the device carries it back, so a shell with several saved servers '
     + 'opens the push on the one that sent it. http or https, a lowercase host and an optional port; a path, another '

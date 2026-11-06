@@ -143,6 +143,31 @@ describe('#8145: a settings write reaches sys_audit_log as config_change', () =>
     // bare timeout, which names neither the object nor the filter.
   }, 30_000);
 
+  it('[#30209] the config_change row names the settings row it changed, and the mirror\'s row about that row carries the value', async () => {
+    const [change] = await waitForRows(
+      async () =>
+        (await findRows(ql, 'sys_audit_log', { action: 'config_change' })).filter((r) =>
+          String(r.metadata ?? '').includes('"key":"workspace_name"'),
+        ),
+      (r) => r.length >= 1,
+      'expected the config_change row for workspace_name',
+    );
+    const settingRows = await findRows(ql, String(change.object_name), { namespace: 'branding', key: 'workspace_name' });
+    expect(settingRows).toHaveLength(1);
+    // The pointer pair: object_name names the store, record_id the row in it.
+    expect(change.record_id).toBe(String(settingRows[0].id));
+    // The record page's same-record list keys on record_id: beside the
+    // config_change row it finds the CRUD mirror's row about the same write,
+    // which holds the non-secret value the digest row does not.
+    const mirror = (await findRows(ql, 'sys_audit_log', { record_id: change.record_id })).filter((r) =>
+      ['create', 'update'].includes(String(r.action)),
+    );
+    expect(mirror.length).toBeGreaterThanOrEqual(1);
+    expect(mirror.every((r) => r.object_name === change.object_name)).toBe(true);
+    expect(mirror.some((r) => String(r.new_value ?? '').includes(WORKSPACE_NAME))).toBe(true);
+    expect(String(change.new_value)).not.toContain(WORKSPACE_NAME);
+  }, 30_000);
+
   it('the shipped `config_changes` list view — its OWN declared filter — now matches', async () => {
     // The view's filter is read off the registered object rather than retyped,
     // so this cannot pass against a filter that agrees only with this test. It

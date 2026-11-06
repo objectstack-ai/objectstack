@@ -37,6 +37,11 @@
       "types": "./dist/namespaces/studio/index.d.ts",
       "import": "./dist/namespaces/studio/index.js",
       "default": "./dist/namespaces/studio/index.js"
+    },
+    "./namespaces/marketplace": {
+      "types": "./dist/namespaces/marketplace/index.d.ts",
+      "import": "./dist/namespaces/marketplace/index.js",
+      "default": "./dist/namespaces/marketplace/index.js"
     }
   },
   "scripts": {
