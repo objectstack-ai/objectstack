@@ -69,7 +69,7 @@ export default defineStack({
     // app, so it travels with the package identity.
     navigationContributions: [
       {
-        app: 'multi_crm',
+        app: 'crm_multi_crm',
         group: 'sales_group',
         items: [
           { id: 'nav_orders', type: 'object', objectName: 'crm_order', label: 'Orders', icon: 'shopping-cart' },

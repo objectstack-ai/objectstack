@@ -253,7 +253,7 @@ export const BudgetApprovalFlow = defineFlow({
       type: 'approval',
       label: 'Manager Review',
       config: {
-        approvers: [{ type: 'position', value: 'manager' }],
+        approvers: [{ type: 'position', value: 'showcase_manager' }],
         behavior: 'first_response',
         // Deliberately UNLOCKED, and the counterpart to `exec_review` below —
         // together they dogfood both record-lock policies in one flow
@@ -295,7 +295,7 @@ export const BudgetApprovalFlow = defineFlow({
       type: 'approval',
       label: 'Executive Review',
       config: {
-        approvers: [{ type: 'position', value: 'exec' }],
+        approvers: [{ type: 'position', value: 'showcase_exec' }],
         behavior: 'unanimous',
         // Locked, unlike `manager_review` — a multi-approver sign-off must
         // decide on a stable record, so edits are refused until it completes.
@@ -818,7 +818,7 @@ export const ClosureSignoffSubflow = defineFlow({
       type: 'approval',
       label: 'Manager Sign-off',
       config: {
-        approvers: [{ type: 'position', value: 'manager' }],
+        approvers: [{ type: 'position', value: 'showcase_manager' }],
         behavior: 'first_response',
         // The parent project just hit a terminal status — no point locking it.
         lockRecord: false,
@@ -1329,8 +1329,8 @@ export const ResilientSyncFlow = defineFlow({
  * discouraged: the `approval` node declares `resumeAuthority: 'service'`, so
  * the generic run-resume route answers 403 for a run parked on one (#3801).
  *   POST /api/v1/automation/showcase_invoice_signoff/runs/{runId}/resume  ← 403
- *   POST /api/v1/approvals/requests/{id}/approve  { actorId: 'position:finance' }
- *   POST /api/v1/approvals/requests/{id}/approve  { actorId: 'position:legal' }   ← now it continues
+ *   POST /api/v1/approvals/requests/{id}/approve  { actorId: 'position:showcase_finance' }
+ *   POST /api/v1/approvals/requests/{id}/approve  { actorId: 'position:showcase_legal' }   ← now it continues
  */
 export const InvoiceDualSignoffFlow = defineFlow({
   name: 'showcase_invoice_signoff',
@@ -1367,8 +1367,8 @@ export const InvoiceDualSignoffFlow = defineFlow({
       config: {
         // Two approver groups, notified in parallel; `unanimous` waits for both.
         approvers: [
-          { type: 'position', value: 'finance' },
-          { type: 'position', value: 'legal' },
+          { type: 'position', value: 'showcase_finance' },
+          { type: 'position', value: 'showcase_legal' },
         ],
         behavior: 'unanimous',
         // The invoice keeps flowing through other automations while it waits.
@@ -1567,7 +1567,7 @@ export const OneTaskSignoffSubflow = defineFlow({
       type: 'approval',
       label: 'Task Sign-off',
       config: {
-        approvers: [{ type: 'position', value: 'manager' }],
+        approvers: [{ type: 'position', value: 'showcase_manager' }],
         behavior: 'first_response',
         lockRecord: false,
       },
@@ -1865,8 +1865,8 @@ export const ExpenseSignoffFlow = defineFlow({
       label: 'Manager + Finance Sign-off',
       config: {
         approvers: [
-          { type: 'position', value: 'manager', group: 'manager' },
-          { type: 'position', value: 'auditor', group: 'finance' },
+          { type: 'position', value: 'showcase_manager', group: 'manager' },
+          { type: 'position', value: 'showcase_auditor', group: 'finance' },
         ],
         behavior: 'per_group',
         minApprovals: 1,
@@ -1943,9 +1943,9 @@ export const CommitteeQuorumFlow = defineFlow({
       label: 'Committee Sign-off (2 of 3)',
       config: {
         approvers: [
-          { type: 'position', value: 'manager' },
-          { type: 'position', value: 'finance' },
-          { type: 'position', value: 'legal' },
+          { type: 'position', value: 'showcase_manager' },
+          { type: 'position', value: 'showcase_finance' },
+          { type: 'position', value: 'showcase_legal' },
         ],
         behavior: 'quorum',
         minApprovals: 2,
