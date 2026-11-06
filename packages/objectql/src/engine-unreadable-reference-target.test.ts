@@ -437,3 +437,64 @@ describe('[#29029] which failures of the reference check fail open, and which fa
     expect([...storeFor('urt_loose_task').values()].map((r) => r.loose)).toEqual(['x_1']);
   });
 });
+
+/**
+ * [#29029, #29062] The update's reference forgiveness compares only stored
+ * values the caller may read: the stored rows as the caller's own read door
+ * serves them. A middleware here withholds the task's reference columns from
+ * Alice's reads of the task, as a field-level read denial does.
+ */
+describe('[#29029] the update\'s reference forgiveness compares only stored values the caller may read', () => {
+  const HIDDEN_FROM_ALICE = ['duty', 'assignee'];
+  let engine: ObjectQL;
+  let storeFor: (o: string) => Map<string, Record<string, any>>;
+
+  const boot = (itemRead: 'hide columns' | 'fail' | 'serve') => {
+    ({ engine, storeFor } = makeEngine());
+    engine.registerMiddleware(async (ctx: any, next: () => Promise<void>) => {
+      const own = ctx.object === ITEM && ['find', 'findOne'].includes(ctx.operation) && ctx.context?.userId === 'alice' && !ctx.context?.isSystem;
+      if (own && itemRead === 'fail') throw new Error('the task read failed');
+      await next();
+      if (own && itemRead === 'hide columns') {
+        const strip = (row: any) => { if (row && typeof row === 'object') for (const f of HIDDEN_FROM_ALICE) delete row[f]; };
+        if (Array.isArray(ctx.result)) ctx.result.forEach(strip); else strip(ctx.result);
+      }
+    });
+    for (const id of ['k1', 'k2']) storeFor(ITEM).set(id, { id, title: 'stored', duty: UNREADABLE, assignee: UNREADABLE });
+  };
+  const write = (door: 'update by id' | 'bulk update', payload: Record<string, unknown>, context: Record<string, unknown> = ALICE) =>
+    door === 'update by id'
+      ? engine.update(ITEM, payload, { where: { id: 'k1' }, context } as any)
+      : engine.update(ITEM, payload, { where: { id: { $in: ['k1', 'k2'] } }, multi: true, context } as any);
+  const answer = (err: unknown, id: string) => JSON.stringify({ ...envelopeOf(err), sentence: sentence(err, id) });
+  const untouched = () => ['k1', 'k2'].map((id) => ({ id, title: 'stored', duty: UNREADABLE, assignee: UNREADABLE }));
+
+  describe.each(FIELDS)('a $kind column', ({ field }) => {
+    it.each(['update by id', 'bulk update'] as const)('%s — a column the caller cannot read forgives nothing: the stored value answers as another unreadable one', async (door) => {
+      boot('hide columns');
+      const storedValue = await refusalOf(() => write(door, { [field]: UNREADABLE }));
+      expect(envelopeOf(storedValue)).toEqual(notFound(field));
+      const otherValue = await refusalOf(() => write(door, { [field]: 't_flagged_other' }));
+      expect(answer(storedValue, UNREADABLE)).toBe(answer(otherValue, 't_flagged_other'));
+      expect([...storeFor(ITEM).values()]).toEqual(untouched());
+    });
+
+    it('update by id — a read of the stored row that fails forgives nothing', async () => {
+      boot('fail');
+      expect(envelopeOf(await refusalOf(() => write('update by id', { [field]: UNREADABLE })))).toEqual(notFound(field));
+    });
+
+    it.each(['update by id', 'bulk update'] as const)('%s — control: a column the caller reads keeps the forgiveness', async (door) => {
+      boot('serve');
+      await write(door, { title: 'renamed', [field]: UNREADABLE });
+      expect(storeFor(ITEM).get('k1')).toEqual({ id: 'k1', title: 'renamed', duty: UNREADABLE, assignee: UNREADABLE });
+    });
+
+    it.each(['update by id', 'bulk update'] as const)('%s — control: a flow run\'s system write compares the rows as stored', async (door) => {
+      boot('hide columns');
+      const flowRun = markFlowWriteReferenceCheck({ ...SYSTEM });
+      await write(door, { title: 'renamed', [field]: UNREADABLE }, flowRun);
+      expect(storeFor(ITEM).get('k1')?.title).toBe('renamed');
+    });
+  });
+});
