@@ -1,7 +1,7 @@
 # Data Lifecycle & Retention
 
 Guide for declaring how long an object's data lives and how its space is
-reclaimed (ADR-0057 — system data lifecycle & retention). Distinct from
+reclaimed (ADR-0057). Distinct from
 **lifecycle hooks** (`beforeInsert` / `afterUpdate` …), which run logic on
 writes: this page covers the rows' retention, rotation and archival
 — and, at its end, the save notice a hook hands the saver.
@@ -38,7 +38,7 @@ export const ApiCallLog = ObjectSchema.create({
   lifecycle: {
     class: 'telemetry',
     retention: { maxAge: '14d' },                                // reap past 14 days (created_at)
-    storage: { strategy: 'rotation', shards: 14, unit: 'day' },  // O(1) shard DROP on SQLite
+    storage: { strategy: 'rotation', shards: 14, unit: 'day' },
   },
   fields: {
     endpoint: Field.text({}),
@@ -51,7 +51,7 @@ export const ImportTicket = ObjectSchema.create({
   name: 'import_ticket',
   lifecycle: {
     class: 'transient',
-    ttl: { field: 'expires_at', expireAfter: '1d' },  // reap 1 day after expires_at
+    ttl: { field: 'expires_at', expireAfter: '1d' },
   },
   fields: {
     expires_at: Field.datetime({}),
@@ -64,7 +64,7 @@ export const ConsentLog = ObjectSchema.create({
   lifecycle: {
     class: 'audit',
     retention: { maxAge: '90d' },
-    archive: { after: '90d', to: 'archive', keep: '7y' },  // must: after === maxAge
+    archive: { after: '90d', to: 'archive', keep: '7y' },
   },
   fields: {
     subject: Field.text({}),
@@ -79,7 +79,7 @@ export const AutomationRun = ObjectSchema.create({
     class: 'telemetry',
     retention: {
       maxAge: '30d',
-      onlyWhen: { status: { $in: ['completed', 'failed'] } },  // paused rows never reaped
+      onlyWhen: { status: { $in: ['completed', 'failed'] } },
     },
   },
   fields: {
@@ -88,8 +88,7 @@ export const AutomationRun = ObjectSchema.create({
 });
 ```
 
-Duration literals: `<n>` + `h` / `d` / `w` / `y` — e.g. `'6h'`, `'14d'`,
-`'12w'`, `'7y'`.
+Duration literals: `<n>` + `h` / `d` / `w` / `y`.
 
 ## Validation Rules (rejected at parse time)
 
@@ -117,7 +116,6 @@ lifecycle: {
 
 ## Safety Semantics
 
-- **No `lifecycle` block = today's behavior**: `record` is the implicit default.
 - **Archive-then-delete is atomic-ish and safe by default**: an object
   declaring `archive` is never hot-deleted before the copy to the archive
   datasource succeeded. If no datasource is registered under the `archive.to`
@@ -155,6 +153,10 @@ record's state says so; the notice is for what *this* save started.
   import, a nested write) sets nothing.
 - Not a non-empty string ⇒ the write refuses; a refused write answers its
   error, no notice.
+- A hook's message shows untranslated.
 - A flow a record create/update trigger starts sets it with a `save_notice`
   node (`config.message`, `{{ }}` renders); refused in any other flow, and
   after an `approval` / `wait`.
+  Its message translates under `flows.<flow>.notices.<node_id>.message`.
+  Refused by name in a `subflow` / `map` child; after one whose child can
+  pause, the flow is not armed (`unboundCause: 'notice_after_suspending_subflow'`).
