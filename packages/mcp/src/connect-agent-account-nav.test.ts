@@ -68,15 +68,15 @@ function everyKey(value: unknown, out: string[] = []): string[] {
 }
 
 describe('#16746 — Connect an Agent reaches the per-user Account app', () => {
-  it('contributes into the `account` app, into the group that already ships API Keys', () => {
+  it('contributes into the `account` app, into the AI Assistant group of its own', () => {
     const account = byApp('account');
     expect(account).toHaveLength(1);
     // `ACCOUNT_APP` declares no `requiredPermissions` (deliberately: every
     // authenticated user must reach their own security surface, RLS scopes the
-    // rows), and `grp_account_developer` is the group already carrying
-    // `nav_account_api_keys`. Both are read by NAME here — this card edits
-    // nothing in `@objectstack/platform-objects`.
-    expect(account[0]).toMatchObject({ app: 'account', group: 'grp_account_developer' });
+    // rows), and declares `grp_account_ai_assistant` as an expanded, empty slot
+    // for this entry (#30895) — never the collapsed Developer group a member
+    // has to open to find it. Both are read by NAME here.
+    expect(account[0]).toMatchObject({ app: 'account', group: 'grp_account_ai_assistant' });
   });
 
   it('aims one `page` item at `connect_agent`, the page this same bundle registers', () => {
@@ -108,13 +108,27 @@ describe('#16746 — Connect an Agent reaches the per-user Account app', () => {
     expect(item).not.toHaveProperty('visible');
   });
 
-  it('leaves the Setup entry exactly as it was — admins keep the page where the guide points', () => {
+  it('puts the Setup entry in the top group, behind System Overview (#30895)', () => {
     const setup = byApp('setup');
     expect(setup).toHaveLength(1);
-    expect(setup[0]).toMatchObject({ app: 'setup', group: 'group_integrations', priority: 110 });
+    // `group_overview` carries the same `manage_platform_settings` gate as the
+    // Integrations group it left, so who sees the entry is unchanged.
+    expect(setup[0]).toMatchObject({ app: 'setup', group: 'group_overview', priority: 110 });
     expect(itemsOf(setup[0])).toEqual([
-      { id: 'nav_connect_agent', type: 'page', pageName: 'connect_agent', label: 'Connect an Agent', icon: 'bot' },
+      { id: 'nav_connect_agent', type: 'page', pageName: 'connect_agent', label: 'Connect an AI Assistant', icon: 'bot' },
     ]);
+  });
+
+  it('names the page and both entries Connect an AI Assistant (#30895)', () => {
+    // "Agent" already names what Studio builds; this page connects the AI
+    // assistant a person uses. One name for the page, its header and its doors.
+    expect(CONNECT_AGENT_UI_BUNDLE.pages.map((p) => p.label)).toEqual(['Connect an AI Assistant']);
+    const header = (CONNECT_AGENT_UI_BUNDLE.pages[0].regions ?? [])
+      .flatMap((r) => (r.components ?? []) as AnyRec[])
+      .find((c) => c.type === 'page:header') as AnyRec | undefined;
+    expect((header?.properties as AnyRec | undefined)?.title).toBe('Connect an AI Assistant');
+    expect(contributions.flatMap((c) => itemsOf(c).map((i) => i.label)))
+      .toEqual(['Connect an AI Assistant', 'Connect an AI Assistant']);
   });
 
   it('⛔ cannot widen Setup — no permission key and no app redeclaration anywhere in the bundle', () => {

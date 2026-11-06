@@ -3611,6 +3611,7 @@ const ru = {
     // objectui#13461 — the top bar's avatar button, which holds only the avatar.
     accountMenu: 'Меню аккаунта',
     profile: "Профиль",
+    connectAiAssistant: "Подключить ИИ-ассистента",
     logout: "Выйти",
     preferences: "Настройки",
     theme: "Тема",
@@ -3962,6 +3963,13 @@ const ru = {
       title: 'QwenWork',
       body: 'Расширения → Коннекторы → + Добавить → Вставить JSON-конфигурацию:',
       hint: 'Или добавьте вручную как Streamable HTTP с этим URL. Если ваша версия не поддерживает вход через браузер, добавьте заголовок запроса Authorization: Bearer <ключ API> (создайте ключ ниже).',
+    },
+    client: {
+      title: 'Каким ИИ-ассистентом вы пользуетесь?',
+      hint: 'Выберите свой, чтобы видеть только его шаги. Этот браузер запомнит ваш выбор.',
+    },
+    advanced: {
+      title: 'Дополнительно: скрипты и CI',
     },
     apiKey: {
       title: 'API-ключи',

@@ -344,6 +344,7 @@
     "data/Field:relatedListColumns",
     "data/Field:relatedListFilter",
     "data/Field:relatedListTitle",
+    "data/Field:renamedFrom",
     "data/Field:required",
     "data/Field:requiredPermissions",
     "data/Field:requiredWhen",

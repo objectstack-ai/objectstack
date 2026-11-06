@@ -2493,6 +2493,9 @@ importers:
       '@objectstack/spec':
         specifier: workspace:*
         version: link:../../spec
+      playwright-core:
+        specifier: 1.63.0
+        version: 1.63.0
       zod:
         specifier: ^4.6.6
         version: 4.6.7

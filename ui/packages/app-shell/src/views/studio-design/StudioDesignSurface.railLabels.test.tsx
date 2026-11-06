@@ -1167,7 +1167,8 @@ describe('StudioDesignSurface.railServedLabels-12688', () => {
     list: vi.fn(async (type: string) => (type === 'app' ? [JSON.parse(JSON.stringify(state.served))] : [])),
     listDrafts: vi.fn(async () => []),
     layered: vi.fn(async (type: string, name: string) => {
-      if (type === 'app') return { effective: JSON.parse(JSON.stringify(CODE)) };
+      // As the server serves an admitted author: the pending draft as stored (objectstack#30859).
+      if (type === 'app') return { effective: JSON.parse(JSON.stringify(CODE)), draft: state.draft ? JSON.parse(JSON.stringify(state.draft)) : null };
       if (type === 'page') return { effective: { name, label: name, type: 'app', regions: [{ name: 'main', components: [] }] } };
       return { effective: { name } };
     }),

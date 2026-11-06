@@ -3695,6 +3695,7 @@ const zh = {
     // objectui#13461 — the top bar's avatar button, which holds only the avatar.
     accountMenu: '账户菜单',
     profile: '个人资料',
+    connectAiAssistant: '连接 AI 助手',
     logout: '退出登录',
     preferences: '偏好设置',
     theme: '主题',
@@ -4009,6 +4010,13 @@ const zh = {
       title: '千问办公',
       body: '扩展 → 连接器 → + 添加 → 粘贴 JSON 配置:',
       hint: '也可手动添加:传输类型选 Streamable HTTP 并填写此 URL。如果你的版本不支持浏览器登录,请添加请求头 Authorization: Bearer <API 密钥>(在下方创建)。',
+    },
+    client: {
+      title: '你用的是哪个 AI 助手？',
+      hint: '选择你的助手，只看它的步骤。本浏览器会记住你的选择。',
+    },
+    advanced: {
+      title: '高级：脚本与 CI',
     },
     apiKey: {
       title: 'API 密钥',

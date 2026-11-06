@@ -8,18 +8,21 @@
   "exports": {
     ".": "./src/index.ts",
     "./score": "./src/score/index.ts",
-    "./runner": "./src/runner/index.ts"
+    "./runner": "./src/runner/index.ts",
+    "./export": "./src/export/index.ts"
   },
   "scripts": {
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "run-scenarios": "tsx src/runner/cli.ts"
+    "run-scenarios": "tsx src/runner/cli.ts",
+    "export-gallery": "tsx src/export/cli.ts"
   },
   "dependencies": {
     "@objectstack/core": "workspace:*",
     "@objectstack/objectql": "workspace:*",
     "@objectstack/plugin-sharing": "workspace:*",
     "@objectstack/spec": "workspace:*",
+    "playwright-core": "1.63.0",
     "zod": "^4.6.6"
   },
   "devDependencies": {
