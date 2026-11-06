@@ -49,6 +49,27 @@
  *      engine transactions, exactly as before this card.
  *  (d) a SCIM read opens none either: the scope adds no transaction where the
  *      vendor asks for none.
+ *
+ * ## The attribution block (#30960)
+ *
+ * The same scope carries the request's attribution slot: the bearer verifier
+ * records the connection it verified, and the adapter reads it when it builds
+ * each write's context, so the write reaches the engine as
+ * `{ isSystem: true, actor: 'svc:scim:CONNECTION_ID' }` with no
+ * `attributedUserId` (the audit writer turns that into `sys_audit_log.actor`,
+ * `metadata.scim_connection_id` and a null `user_id` — pinned in
+ * plugin-audit's `audit-writers.test.ts`). Observed at the engine, on the
+ * context every write really receives:
+ *
+ *  (e) a SCIM create, a deactivation (its ban update) and a delete: every
+ *      write names the connection, none names a human;
+ *  (f) no write carries the bearer or its digest — not in its data, its
+ *      query or its context;
+ *  (g) a non-SCIM write in the same process, after a SCIM request, carries
+ *      no service principal: sign-up and sign-in are unchanged;
+ *  (h) isolation: two SCIM requests on two connections, held so that BOTH
+ *      have verified before either writes, each attribute every write to
+ *      their own connection.
  */
 
 import { describe, it, expect, afterEach, vi } from 'vitest';
@@ -57,7 +78,12 @@ import { SqlDriver } from '@objectstack/driver-sql';
 import { AuthManager } from './auth-manager.js';
 import { authIdentityObjects } from './manifest.js';
 import { createTenancyService } from './tenancy-service.js';
-import { inScimRequestScope, mintScimConnectionCredential } from './scim-connection-service.js';
+import {
+  SCIM_CREDENTIAL_OBJECT,
+  digestScimBearerToken,
+  inScimRequestScope,
+  mintScimConnectionCredential,
+} from './scim-connection-service.js';
 
 const BASE = 'http://localhost:3000';
 const AUTH = `${BASE}/api/v1/auth`;
@@ -389,5 +415,231 @@ describe('[#14522] the scope is SCIM-only — non-SCIM flows keep their sequenti
     expect(o.transaction).not.toHaveBeenCalled();
     expect(o.beginTransaction).not.toHaveBeenCalled();
     expect(o.writes).toEqual([]);
+  }, 60_000);
+});
+
+// ---------------------------------------------------------------------------
+// (e)–(h) — #30960: every SCIM write is attributed to the connection
+// ---------------------------------------------------------------------------
+
+/** The connection `boot()` mints its bearer for, and the label its writes must carry. */
+const CONNECTION = 'okta-14522';
+const CONNECTION_ACTOR = `svc:scim:${CONNECTION}`;
+
+interface AttributedWrite {
+  op: 'insert' | 'update' | 'delete';
+  object: string;
+  /** The row (insert / update) or the query minus its context (delete). */
+  payload: unknown;
+  /** The execution context the engine received for this write. */
+  context: Record<string, unknown>;
+}
+
+/**
+ * Record every engine write with the context it reached the engine with — the
+ * raw engine, beneath the adapter's `withSystemContext`, so the context is
+ * the one the audit writer's hooks are built from. Call-through.
+ */
+function observeAttribution(h: Harness): { writes: AttributedWrite[]; reset(): void } {
+  const writes: AttributedWrite[] = [];
+  const engine = h.engine as unknown as Record<string, (...a: unknown[]) => unknown>;
+  for (const op of ['insert', 'update', 'delete'] as const) {
+    const original = engine[op].bind(h.engine);
+    vi.spyOn(engine, op).mockImplementation(async (object: unknown, ...rest: unknown[]) => {
+      const options = (op === 'delete' ? rest[0] : rest[1]) as { context?: Record<string, unknown> } | undefined;
+      const { context, ...query } = options ?? {};
+      writes.push({
+        op,
+        object: String(object),
+        payload: op === 'delete' ? query : rest[0],
+        context: context ?? {},
+      });
+      return original(object, ...rest);
+    });
+  }
+  return { writes, reset: () => void (writes.length = 0) };
+}
+
+/** A cycle-safe, function-free serialization — a write context may hold a transaction handle. */
+function serialized(value: unknown): string {
+  const seen = new WeakSet<object>();
+  return JSON.stringify(value, (_key, v: unknown) => {
+    if (typeof v === 'function') return undefined;
+    if (v && typeof v === 'object') {
+      if (seen.has(v)) return '[cycle]';
+      seen.add(v);
+    }
+    return v;
+  });
+}
+
+const describeAttribution = (writes: AttributedWrite[]): string =>
+  writes
+    .map((w) => `${w.op}:${w.object}:${String(w.context.actor ?? 'NO-ACTOR')}${w.context.attributedUserId ? `:user=${String(w.context.attributedUserId)}` : ''}`)
+    .join(' ');
+
+/** Writes whose context names something other than `actor` as their attribution, or no actor at all. */
+const misattributed = (writes: AttributedWrite[], actor: string): string[] =>
+  writes
+    .filter(
+      (w) =>
+        w.context.actor !== actor ||
+        w.context.isSystem !== true ||
+        'attributedUserId' in w.context ||
+        'impersonatedBy' in w.context ||
+        'performedBy' in w.context,
+    )
+    .map((w) => `${w.op}:${w.object}:${serialized(w.context)}`);
+
+/** The ban write's payload — `banned` as better-auth hands it to the adapter (booleans as 0/1 here). */
+const isBanWrite = (payload: unknown): boolean => {
+  const banned = (payload as { banned?: unknown } | null)?.banned;
+  return banned === true || banned === 1;
+};
+
+/**
+ * Bring the vendor instance up with a SCIM read before observing: the first
+ * request builds the better-auth instance, and that build writes the
+ * platform's own `sys_oauth_resource` row before any bearer is verified — a
+ * boot write, not a provisioning one. A read writes nothing else (case (d)).
+ */
+async function warm(h: Harness): Promise<void> {
+  const res = await h.send(scimRequest(h, 'GET', '/Users'));
+  expect(res.status, await res.clone().text()).toBe(200);
+}
+
+describe('[#30960] every SCIM write is attributed to the connection that performed it', () => {
+  it('(e) create, deactivation (the ban update) and delete: every write names the connection and no human', async () => {
+    const h = await boot();
+    await warm(h);
+    const o = observeAttribution(h);
+
+    const alice = await provision(h, 'alice');
+    const created = [...o.writes];
+    o.reset();
+    expect(created.some((w) => w.op === 'insert' && w.object === 'sys_user'), describeAttribution(created)).toBe(true);
+    expect(misattributed(created, CONNECTION_ACTOR), 'create writes not attributed to the connection').toEqual([]);
+
+    const deactivated = await setActive(h, alice.scimId, false);
+    expect(deactivated.status, await deactivated.clone().text()).toBe(200);
+    const deactivation = [...o.writes];
+    o.reset();
+    // The ban update itself — "who deactivated this account" — is among them.
+    expect(
+      deactivation.some((w) => w.op === 'update' && w.object === 'sys_user' && isBanWrite(w.payload)),
+      describeAttribution(deactivation),
+    ).toBe(true);
+    expect(misattributed(deactivation, CONNECTION_ACTOR), 'deactivation writes not attributed to the connection').toEqual([]);
+
+    const bob = await provision(h, 'bob');
+    o.reset();
+    const deleted = await h.send(scimRequest(h, 'DELETE', `/Users/${bob.scimId}`));
+    expect(deleted.status, await deleted.clone().text()).toBe(204);
+    const deletion = [...o.writes];
+    expect(deletion.some((w) => w.op === 'delete' && w.object === 'sys_scim_user'), describeAttribution(deletion)).toBe(true);
+    expect(
+      deletion.some((w) => w.op === 'update' && w.object === 'sys_user' && isBanWrite(w.payload)),
+      describeAttribution(deletion),
+    ).toBe(true);
+    expect(misattributed(deletion, CONNECTION_ACTOR), 'delete writes not attributed to the connection').toEqual([]);
+  }, 60_000);
+
+  it('(f) no write carries the bearer or its digest — data, query or context', async () => {
+    const h = await boot();
+    const o = observeAttribution(h);
+    const digest = digestScimBearerToken(SECRET, h.token);
+
+    const alice = await provision(h, 'alice');
+    expect((await setActive(h, alice.scimId, false)).status).toBe(200);
+    expect((await h.send(scimRequest(h, 'DELETE', `/Users/${alice.scimId}`))).status).toBe(204);
+
+    // The control: the writes really happened and really name the connection,
+    // so the absence below is about the bearer, not about an empty capture.
+    expect(o.writes.length, describeAttribution(o.writes)).toBeGreaterThanOrEqual(5);
+    expect(o.writes.some((w) => w.context.actor === CONNECTION_ACTOR)).toBe(true);
+    const everything = serialized(o.writes);
+    expect(everything.includes(CONNECTION_ACTOR)).toBe(true);
+    expect(everything.includes(h.token), 'a write carried the bearer').toBe(false);
+    expect(everything.includes(digest), 'a write carried the bearer digest').toBe(false);
+  }, 60_000);
+
+  it('(g) a non-SCIM write around a SCIM request carries no service principal — sign-up and sign-in unchanged', async () => {
+    const h = await boot();
+    const o = observeAttribution(h);
+
+    // Sign-up first: the deployment admits self-registration only while it
+    // holds no user, and the SCIM create below adds one.
+    const up = await signUp(h, 'carol@example.com');
+    expect(up.status, `sign-up failed: ${await up.clone().text()}`).toBeLessThan(300);
+    const signUpWrites = [...o.writes];
+    await provision(h, 'alice'); // a verified connection is recorded in THIS process
+    o.reset();
+    const down = await signIn(h, 'carol@example.com');
+    expect(down.status, `sign-in failed: ${await down.clone().text()}`).toBeLessThan(300);
+    o.writes.unshift(...signUpWrites);
+
+    expect(o.writes.some((w) => w.op === 'insert' && w.object === 'sys_user'), describeAttribution(o.writes)).toBe(true);
+    expect(o.writes.some((w) => w.object === 'sys_session'), describeAttribution(o.writes)).toBe(true);
+    expect(
+      o.writes.filter((w) => 'actor' in w.context).map((w) => `${w.op}:${w.object}:${String(w.context.actor)}`),
+      'non-SCIM writes carrying a service principal',
+    ).toEqual([]);
+    expect(serialized(o.writes).includes('svc:scim:')).toBe(false);
+  }, 60_000);
+
+  it('(h) two concurrent SCIM requests on two connections each attribute every write to their own connection', async () => {
+    const h = await boot();
+    const second = await mintScimConnectionCredential(h.engine as never, SECRET, {
+      connectionId: 'entra-30960',
+      organizationId: 'org_scim_8b',
+    });
+    await warm(h);
+
+    // Hold every bearer verification until BOTH requests have reached it, so
+    // both connections are verified before either request writes — the
+    // interleaving in which a slot shared across requests would let the
+    // second verification re-attribute the first request's writes.
+    let arrived = 0;
+    let releaseBoth!: () => void;
+    const bothArrived = new Promise<void>((resolve) => (releaseBoth = resolve));
+    const findOne = h.engine.findOne.bind(h.engine);
+    vi.spyOn(h.engine, 'findOne').mockImplementation((async (object: string, ...rest: unknown[]) => {
+      if (object === SCIM_CREDENTIAL_OBJECT) {
+        arrived += 1;
+        if (arrived === 2) releaseBoth();
+        await bothArrived;
+      }
+      return (findOne as (...a: unknown[]) => unknown)(object, ...rest);
+    }) as never);
+    const o = observeAttribution(h);
+
+    const viaEntra = { ...h, token: second.token };
+    const [alice, bob] = await Promise.all([
+      h.send(provisionRequest(h, 'alice')),
+      viaEntra.send(provisionRequest(viaEntra, 'bob')),
+    ]);
+    expect(alice.status, await alice.clone().text()).toBe(201);
+    expect(bob.status, await bob.clone().text()).toBe(201);
+    expect(arrived, 'both verifications were held at the barrier').toBe(2);
+
+    const userInsert = (email: string) =>
+      o.writes.find((w) => w.op === 'insert' && w.object === 'sys_user' && (w.payload as { email?: unknown }).email === email);
+    expect(userInsert('alice@example.com')?.context.actor, describeAttribution(o.writes)).toBe(CONNECTION_ACTOR);
+    expect(userInsert('bob@example.com')?.context.actor, describeAttribution(o.writes)).toBe('svc:scim:entra-30960');
+    // Every write the vendor itself stamps with a connection agrees with its actor.
+    const stamped = o.writes.filter((w) => typeof (w.payload as { connection_id?: unknown })?.connection_id === 'string');
+    expect(new Set(stamped.map((w) => (w.payload as { connection_id: string }).connection_id))).toEqual(
+      new Set([CONNECTION, 'entra-30960']),
+    );
+    expect(
+      stamped
+        .filter((w) => w.context.actor !== `svc:scim:${(w.payload as { connection_id: string }).connection_id}`)
+        .map((w) => `${w.op}:${w.object}:${(w.payload as { connection_id: string }).connection_id}→${String(w.context.actor)}`),
+      'writes attributed to the OTHER request’s connection',
+    ).toEqual([]);
+    expect(
+      o.writes.filter((w) => w.context.actor !== CONNECTION_ACTOR && w.context.actor !== 'svc:scim:entra-30960').map((w) => `${w.op}:${w.object}`),
+      'writes attributed to neither connection',
+    ).toEqual([]);
   }, 60_000);
 });
