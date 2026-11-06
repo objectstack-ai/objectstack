@@ -66,12 +66,16 @@
  * widens nothing. The row creates no ref and writes no content: the `/git/`
  * family of `REFUSED_PATH_FAMILIES` refuses every path but exactly one
  * `refs/heads/` ref of `MAILBOX_BRANCH_SHAPE` (`claude/mailbox-*`), held there
- * before the dispatch too. The fences are facts about the PULL, so the
- * executor judges them on the pull's own `GET` and the open pulls on that
- * head, the last reads before the DELETE (`mailboxBranchPreflight`): the pull
- * is closed, carries `pm:mailbox`, its head is `branch` on this repository,
- * and no OPEN pull has that head (the DELETE would close it). Anything else is
- * refused, the DELETE not sent. It lands only when the ref reads back absent.
+ * before the dispatch too. The fences, listed HERE only, are facts about the
+ * pull and the ref, judged by the executor on the pull's own `GET`, the open
+ * pulls on that head and the ref, the last three reads before the DELETE
+ * (`mailboxBranchPreflight`): the pull is closed, carries `pm:mailbox`, its
+ * head is `branch` on this repository, no OPEN pull has that head (the DELETE
+ * would close it), and the ref points at the pull's `head.sha` (a commit pushed
+ * after the close is not the mailbox's; a ref already absent fences nothing).
+ * Anything else is refused, the DELETE not sent. It lands only when the ref
+ * reads back absent (`confirmMailboxBranch`): a ref already gone (the DELETE's
+ * 422) is an idempotent landing, one still there FAILED.
  *
  * ## The rows whose LATER requests read the FIRST's answer — `pr_create` with `assignees` or `labels`
  *
