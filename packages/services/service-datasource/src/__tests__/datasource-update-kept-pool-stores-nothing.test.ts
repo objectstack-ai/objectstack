@@ -37,6 +37,10 @@ import { registerDatasourceAdminRoutes } from '../admin-routes.js';
 import { createDatasourceSecretBinder } from '../datasource-secret-binder.js';
 import type { IDatasourceDriverFactory, DatasourceConnectionSpec } from '../contracts/datasource-driver-factory.js';
 import { ENTITLED_CREDENTIAL, createSessionAuthService, createGrantsEngine } from './entitled-caller.fixture.js';
+// Pay the first transform of the dist-resolved driver at module load, not
+// inside a clocked `it()` (see `scripts/check-test-source-alias.mjs`).
+import '@objectstack/driver-sql';
+import '@objectstack/driver-memory';
 
 type Row = Record<string, unknown>;
 

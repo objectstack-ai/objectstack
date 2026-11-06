@@ -67,6 +67,9 @@ import type { PluginContext } from '@objectstack/core';
 import { HonoHttpServer } from '@objectstack/plugin-hono-server';
 import { registerDatasourceAdminRoutes, DATASOURCE_ADMIN_CAPABILITY } from '../admin-routes.js';
 import { bindCatalogFromTables } from './security-catalog.testkit.js';
+// Pay the first transform of the dist-resolved driver at module load, not
+// inside a clocked `it()` (see `scripts/check-test-source-alias.mjs`).
+import '@objectstack/driver-sql';
 
 const RAW_MEMBER_KEY = 'osk_15350_member';
 const RAW_EXMEMBER_KEY = 'osk_15350_exmember';
