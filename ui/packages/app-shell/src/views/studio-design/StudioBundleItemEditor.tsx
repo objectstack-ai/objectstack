@@ -78,6 +78,7 @@ import {
 } from './StudioCustomizeControls.js';
 import type { StudioBaseCustomization } from './StudioDesignSurface.js';
 import { StudioTranslationTable } from './StudioTranslationTable.js';
+import { readAuthoredDraft } from './authoredDraft.js';
 
 /**
  * objectstack#30285 — what the form still offers for a translation item: its
@@ -289,7 +290,8 @@ export function StudioBundleItemEditor({
   // The server's refusal of this item's draft read (`403`): a pending draft is
   // there that this author may not read, so no buffer is installed over it.
   // Held as thrown and worded at render, so a language switch rewords it
-  // without a reload.
+  // without a reload. `error: null`: a draft was served whose stored copy the
+  // layered read did not serve (objectstack#30859), so none is installed either.
   const [draftRefused, setDraftRefused] = React.useState<{ error: unknown } | null>(null);
   const [reloadNonce, setReloadNonce] = React.useState(0);
   const reload = React.useCallback(() => setReloadNonce((n) => n + 1), []);
@@ -324,7 +326,23 @@ export function StudioBundleItemEditor({
         setDraftRefused({ error: draftRead.refused });
         return;
       }
-      const body = extractDraftBody(draftRead.answer) as Record<string, unknown> | null;
+      // objectstack#30859 — a pending draft is edited as stored, read at the
+      // draft read's address: the served body of a translated type (a
+      // dataset's measure labels) is translated for this locale.
+      const served = extractDraftBody(draftRead.answer);
+      const authored =
+        served && readAt ? await readAuthoredDraft(client, type, name, served, { packageId: readAt, member }) : null;
+      if (cancelled) return;
+      if (authored?.kind === 'unserved') {
+        setDraft({});
+        setLoadedFor('');
+        setHasDraft(true);
+        setDirty(false);
+        forget();
+        setDraftRefused({ error: null });
+        return;
+      }
+      const body = authored ? authored.body : null;
       // The served document only when there is no pending draft: a spread
       // over it would bring back every key the draft deleted.
       const lay = body
@@ -499,7 +517,11 @@ export function StudioBundleItemEditor({
   // objectstack#29148 — a refused draft read is the load's answer: the
   // draftUnreadable sentence, with the server's own behind Details.
   const shownError: StudioRefusal | null = draftRefused
-    ? { message: t('engine.studio.refusal.draftUnreadable', locale), detail: formatMetadataError(draftRefused.error) }
+    ? {
+        message: t('engine.studio.refusal.draftUnreadable', locale),
+        // `null`: a draft whose stored copy was not served, with no server sentence to show.
+        detail: draftRefused.error === null ? undefined : formatMetadataError(draftRefused.error),
+      }
     : (loadError ?? error);
   const status = saving
     ? t('engine.studio.autoSaving', locale)

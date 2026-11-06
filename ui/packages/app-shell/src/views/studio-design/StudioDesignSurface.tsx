@@ -398,6 +398,7 @@ import {
   readExternalBinding,
   useExternalWriteState,
 } from '../metadata-admin/previews/external-object.js';
+import { readAuthoredDraft } from './authoredDraft.js';
 import { CreateItemDialog } from './CreateItemDialog.js';
 import { AddFieldPopover } from './AddFieldPopover.js';
 // objectui#11787 — the shared draft autosave, moved to its own module unchanged.
@@ -2710,7 +2711,25 @@ export function InterfacesPillar({
           setAppStatus('missing');
           return;
         }
-        const appDraftResp = appDraftRead.answer;
+        // objectstack#30859 — a pending app draft is edited as stored, read at
+        // the draft read's address: the served body's label and navigation
+        // labels are translated for this locale. A draft whose stored copy was
+        // not served installs no nav buffer, as a refused one above.
+        const servedAppDraft = extractDraftBody(appDraftRead.answer);
+        const authoredApp = servedAppDraft
+          ? await readAuthoredDraft(client, 'app', name, servedAppDraft, { packageId: navReadAt })
+          : null;
+        if (cancelled) return;
+        if (authoredApp?.kind === 'unserved') {
+          setAppDraft({});
+          setAppDraftFor('');
+          setNavDirty(false);
+          setEditNav(false);
+          setNavHasDraft(true);
+          setError({ message: t('engine.studio.refusal.draftUnreadable', locale) });
+          setAppStatus('missing');
+          return;
+        }
         const lay = layRaw as { effective?: Record<string, unknown>; code?: Record<string, unknown> } | null;
         const eff = (lay?.effective ?? lay?.code ?? {}) as Record<string, unknown>;
         // objectui#12688 — the list row read above is the server's `/meta`
@@ -2721,7 +2740,7 @@ export function InterfacesPillar({
         // objectstack#29851 — from the same two answers: the entries the fold
         // added, by id, for the contributed rows' labels. No request of its own.
         setServedContributed(saved ? servedContributedNavOf(eff, published[0]) : NO_SERVED_CONTRIBUTED_NAV);
-        const appDraftBody = extractDraftBody(appDraftResp);
+        const appDraftBody = authoredApp ? authoredApp.body : null;
         // A served draft is the whole document — taken as-is, never spread
         // over the published layer (objectui#10765; the rule is stated once
         // at `ResourceEditPage`'s load effect). Baseline only when no draft.
@@ -3040,7 +3059,25 @@ export function InterfacesPillar({
           });
           return;
         }
-        const body = extractDraftBody(draftRead.answer);
+        // objectstack#30859 — a pending draft is edited as stored, read at the
+        // draft read's address: the served body of a page, a view, a dashboard
+        // or a report is translated for this locale. A draft whose stored copy
+        // was not served installs no buffer, as a refused one above.
+        const served = extractDraftBody(draftRead.answer);
+        const authored = served
+          ? await readAuthoredDraft(client, current.type, current.name, served, { packageId: readAt })
+          : null;
+        if (cancelled) return;
+        if (authored?.kind === 'unserved') {
+          setDraft({});
+          setDraftFor('');
+          forgetLeafVersion();
+          leafReadAtRef.current = null;
+          setIfDirty(false);
+          setError({ message: t('engine.studio.refusal.draftUnreadable', locale) });
+          return;
+        }
+        const body = authored ? authored.body : null;
         // objectui#11799 — the baseline is read only when it is used, for a
         // leaf with no pending draft. An unsaved leaf always has one, so it
         // never asks `/layers`, which answers 404 for a name with no layer.

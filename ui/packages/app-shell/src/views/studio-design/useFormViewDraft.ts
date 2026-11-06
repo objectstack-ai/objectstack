@@ -33,7 +33,7 @@ import * as React from 'react';
 import { extractDraftBody, type MetadataClient } from '@object-ui/data-objectstack';
 import { stripReadDecorations } from '@objectstack/spec/kernel';
 import { readDraftForSave, useDraftSaveGuard } from '../metadata-admin/DraftConflictDialog.js';
-import { tFormat } from '../metadata-admin/i18n.js';
+import { t, tFormat } from '../metadata-admin/i18n.js';
 import {
   selectRecordFormView,
   type FormViewDefinition,
@@ -44,6 +44,7 @@ import { overrideDraftBody } from './StudioCustomizeControls.js';
 import type { StudioBaseCustomization } from './StudioPillarKit.js';
 import { formViewSectionsOf, withFormViewSections } from './formViewSections.js';
 import type { DraftSend } from './useDraftAutoSave.js';
+import { readAuthoredDraft } from './authoredDraft.js';
 
 type Row = Record<string, unknown>;
 
@@ -142,6 +143,11 @@ export function useFormViewDraft({
     customizationRef.current = customization;
   });
   const customizing = customization !== null;
+  // Read when a load words a failure; a language switch does not re-run the load.
+  const localeRef = React.useRef(locale);
+  React.useLayoutEffect(() => {
+    localeRef.current = locale;
+  });
   // The package the installed buffer's draft read was asked at: the address its pin describes.
   const readAtRef = React.useRef<{ viewId: string; at: string } | null>(null);
 
@@ -166,7 +172,18 @@ export function useFormViewDraft({
           setFailure({ during: 'draftUnreadable', error: draftRead.refused });
           return;
         }
-        const draft = extractDraftBody(draftRead.answer) as Row | null;
+        // objectstack#30859 — a pending draft is edited as stored, read at the
+        // draft read's address: the served body is translated for this locale.
+        const served = extractDraftBody(draftRead.answer);
+        const authored = served ? await readAuthoredDraft(client, 'view', viewId, served, { packageId: readAt }) : null;
+        if (cancelled) return;
+        if (authored?.kind === 'unserved') {
+          readAtRef.current = null;
+          setBuffer({ for: '', row: null, dirty: false, hasDraft: true });
+          setFailure({ during: 'draftUnreadable', error: new Error(t('engine.studio.refusal.draftUnreadable', localeRef.current)) });
+          return;
+        }
+        const draft = authored ? (authored.body as Row) : null;
         // ADR-0048 — the published layer is read at the rail's package; on a
         // read-only base that is the base, whose read serves its declared
         // override (ADR-0146 D8).
