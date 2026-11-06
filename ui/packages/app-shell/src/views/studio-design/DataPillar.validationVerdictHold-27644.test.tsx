@@ -77,7 +77,8 @@ const mockClient: Record<string, unknown> = {
   get: vi.fn(async () => PUBLISHED),
   list: vi.fn(async () => [{ name: 'showcase_task', label: 'Task' }]),
   listDrafts: vi.fn(async () => []),
-  layered: vi.fn(async () => ({ effective: PUBLISHED, code: PUBLISHED })),
+  // objectstack#29793 — the stored draft is the `draft` layer, the pillar's buffer.
+  layered: vi.fn(async () => ({ effective: PUBLISHED, code: PUBLISHED, draft: server.draft })),
   getDraft: vi.fn(async () =>
     server.draft
       ? { type: 'object', name: 'showcase_task', item: { ...server.draft, _draft: true, _diagnostics: verdictOf(server.draft) } }
