@@ -293,7 +293,7 @@ form-supported type (`select`, `lookup`, `date`, `file`, `image`, `richtext`,
 <!-- os:check -->
 ```json
 {
-  "name": "approve",
+  "name": "crm_approve",
   "params": [
     { "name": "comment", "type": "textarea", "required": true },
     { "name": "attachments", "type": "file", "multiple": true, "accept": ["application/pdf"] },
