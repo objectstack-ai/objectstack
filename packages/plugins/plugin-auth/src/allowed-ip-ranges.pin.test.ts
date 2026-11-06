@@ -416,6 +416,9 @@ describe('an allowed IP range whose prefix is not decimal digits within its fami
     for (const transport of [{}, { remoteAddress: '198.51.100.1' }]) {
       const res = await save({ allowed_ip_ranges: '203.0.113.0/24, 10.0.0.0/, 2001:db8::/0x20' }, transport);
       expect(res.status).toBe(400);
+      expect(res.body.error.code).toBe('SETTINGS_VALIDATION');
+      expect(res.body.error.details.fields[0].field).toBe('allowed_ip_ranges');
+      expect(res.body.error.details.fields[0].code).toBe('invalid_value');
       expect(res.body.error.details.fields[0].constraint).toEqual({ invalidEntries: ['10.0.0.0/', '2001:db8::/0x20'] });
     }
   });
@@ -469,5 +472,67 @@ describe('an allowed IP range whose prefix is not decimal digits within its fami
     expect(manager.isClientIpAllowed('::1')).toBe(true);
     expect(manager.isClientIpAllowed('203.0.113.5')).toBe(true);
     expect(logger.error).not.toHaveBeenCalledWith(expect.stringContaining('allowed_ip_ranges'));
+  });
+});
+
+describe('an allowed_ip_ranges value that is not text is refused at every save door, and where it is stored the gate admits nobody through it', () => {
+  // The setting is a textarea: its value is text, one entry per line or
+  // comma-separated. Each value here is not text. The saving address,
+  // 10.1.2.3, is one each of them spells, so only the value's form can refuse it.
+  const NOT_TEXT: unknown[] = [['10.1.2.3'], ['10.0.0.0/8', '10.1.2.3'], [], 167838211, true, { ranges: '10.1.2.3' }];
+  const SAVER = { remoteAddress: '10.1.2.3' };
+
+  it('the console save refuses it and stores nothing', async () => {
+    const { svc, save } = await boot();
+    for (const value of NOT_TEXT) {
+      const res = await save({ allowed_ip_ranges: value }, SAVER);
+      expect(res.status, JSON.stringify(value)).toBe(400);
+      expect(res.body.error.code).toBe('SETTINGS_VALIDATION');
+      const field = res.body.error.details.fields.find((f: any) => f.field === 'allowed_ip_ranges');
+      expect(field.code).toBe('invalid_value');
+      expect(field.constraint).toEqual({ type: 'textarea' });
+      expect(field.message).toContain('not text');
+      expect(await stored(svc)).toBeNull();
+    }
+  });
+
+  it('it is refused whatever address it is saved from', async () => {
+    const { save } = await boot();
+    for (const transport of [{}, { remoteAddress: '198.51.100.1' }]) {
+      const res = await save({ allowed_ip_ranges: ['203.0.113.0/24'] }, transport);
+      expect(res.status).toBe(400);
+      expect(res.body.error.code).toBe('SETTINGS_VALIDATION');
+      expect(res.body.error.details.fields[0].code).toBe('invalid_value');
+      expect(res.body.error.details.fields[0].constraint).toEqual({ type: 'textarea' });
+    }
+  });
+
+  it('an in-process write of it is refused too', async () => {
+    const { svc } = await boot();
+    for (const value of NOT_TEXT) {
+      const err: any = await svc.set('auth', 'allowed_ip_ranges', value, {}).then(() => null, (e) => e);
+      expect(err?.code, JSON.stringify(value)).toBe('SETTINGS_VALIDATION');
+      expect(err.fields).toEqual([
+        expect.objectContaining({ field: 'allowed_ip_ranges', code: 'invalid_value', constraint: { type: 'textarea' } }),
+      ]);
+      expect(await stored(svc)).toBeNull();
+    }
+  });
+
+  it('a value stored before the save check admits no client, the boot names it, and saving the list as text replaces it', async () => {
+    for (const value of [['10.1.2.3'], 167838211, { ranges: '10.1.2.3' }]) {
+      const svc = new SettingsService({ env: {} });
+      svc.registerManifest(authManifest);
+      // Written before the plugin registers its save check: the shape of a value stored by an earlier release.
+      await svc.set('auth', 'allowed_ip_ranges', value, {});
+      const { manager, logger, save } = await boot({ svc });
+      expect(manager.isClientIpAllowed('10.1.2.3'), JSON.stringify(value)).toBe(false);
+      expect(manager.isClientIpAllowed('8.8.8.8')).toBe(false);
+      expect(logger.error).toHaveBeenCalledWith(expect.stringMatching(/allowed_ip_ranges.*not text/));
+      const res = await save({ allowed_ip_ranges: '10.1.2.3' }, SAVER);
+      expect(res.status, JSON.stringify(res.body)).toBe(200);
+      await vi.waitFor(() => expect(manager.isClientIpAllowed('10.1.2.3')).toBe(true));
+      expect(manager.isClientIpAllowed('8.8.8.8')).toBe(false);
+    }
   });
 });
