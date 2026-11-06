@@ -185,8 +185,13 @@ import {
 import {
   rereadKeyringForUnknownKey,
   verifyMcpAccessToken,
+  verifyMcpAccessTokenClaims,
   type McpAccessTokenHost,
 } from './auth-manager-mcp-access-token.js';
+// [objectstack-ai/cloud#3606, ruling A] `/oauth2/revoke` for an MCP access
+// token: the answer `handleRequest` gives after the provider's, through
+// `answerOAuthTokenRevocation` below.
+import { answerMcpTokenRevocation, type OAuthGrantStore } from './mcp-token-revocation.js';
 // [#25224 cut 10] The request routing — the seam every better-auth request
 // passes through, route ownership and the endpoint path both key on; the
 // methods of the same names below hand each body the members it reads
@@ -3758,11 +3763,12 @@ export class AuthManager {
    */
   handleRequest(request: Request, transport?: { remoteAddress?: string }): Promise<Response> {
     // [#25224 cut 10] The body moved to `auth-manager-request-routing.ts` (see `RequestRoutingHost`).
-    const host: Pick<RequestRoutingHost, 'betterAuthEndpointPath' | 'getOrCreateAuth' | 'resolveClientAddress' | 'runSubjectErasureAtomically'> = {
+    const host: Pick<RequestRoutingHost, 'betterAuthEndpointPath' | 'getOrCreateAuth' | 'resolveClientAddress' | 'runSubjectErasureAtomically' | 'answerOAuthTokenRevocation'> = {
       betterAuthEndpointPath: (...a) => this.betterAuthEndpointPath(...a),
       getOrCreateAuth: (...a) => this.getOrCreateAuth(...a),
       resolveClientAddress: (...a) => this.resolveClientAddress(...a),
       runSubjectErasureAtomically: (...a) => this.runSubjectErasureAtomically(...a),
+      answerOAuthTokenRevocation: (...a) => this.answerOAuthTokenRevocation(...a),
     };
     return handleRequest.call(host, request, transport);
   }
@@ -4398,9 +4404,18 @@ export class AuthManager {
    * as the 503 it is (`@objectstack/runtime` `oauth-subject-ban.ts`); the
    * token endpoint mints a banned user no token (`oauth-grant-ban-refusal.ts`).
    *
-   * Revocation note: JWT access tokens are not server-tracked, so
-   * revocation takes effect at expiry (≤1h default); refresh tokens ARE
-   * revocable immediately via `/oauth2/revoke`.
+   * Revocation (objectstack-ai/cloud#3606, ruling A): a JWT access token is
+   * not stored, but the consent it was minted under is, and that consent is
+   * read on EVERY call — by (`azp`, `sub`, the `organization_id` claim), one
+   * indexed read through better-auth's own storage adapter
+   * (`mcp-token-revocation.ts` `mcpConsentAdmits`). A token is refused when
+   * its consent is gone, when the consent was created after the token was
+   * issued (revoked, then granted again), when it carries no `azp` to key the
+   * read, and when the read fails (fail closed). So revocation takes effect
+   * on the next request: `/oauth2/revoke` deletes the consent and the
+   * client's refresh family for that user (`answerOAuthTokenRevocation`), and
+   * the Console's `/oauth2/delete-consent` deletes the same row. A server-only
+   * `skip_consent` client has no consent row and is admitted without one.
    *
    * The caller (runtime dispatcher) maps the returned principal through
    * `resolveAuthzContext` — the single shared authorization resolver — so
@@ -4422,6 +4437,27 @@ export class AuthManager {
     token: string,
   ): Promise<{ userId: string; scopes: string[]; clientId?: string; organizationId?: string } | null> {
     // [#25224 cut 9] The body moved to `auth-manager-mcp-access-token.ts` (see `McpAccessTokenHost`).
+    const host: Pick<McpAccessTokenHost, 'getApi' | 'getAuthIssuer' | 'getMcpResourceUrl' | 'isMcpOAuthEnabled' | 'rereadKeyringForUnknownKey' | 'getAuthContext'> = {
+      getApi: (...a) => this.getApi(...a),
+      getAuthIssuer: (...a) => this.getAuthIssuer(...a),
+      getMcpResourceUrl: (...a) => this.getMcpResourceUrl(...a),
+      isMcpOAuthEnabled: (...a) => this.isMcpOAuthEnabled(...a),
+      rereadKeyringForUnknownKey: (...a) => this.rereadKeyringForUnknownKey(...a),
+      getAuthContext: (...a) => this.getAuthContext(...a),
+    };
+    return verifyMcpAccessToken.call(host, token);
+  }
+
+  /**
+   * [objectstack-ai/cloud#3606, ruling A] The `/oauth2/revoke` answer, given
+   * the request (unread) and the provider's response to it — the provider has
+   * already authenticated the client. An MCP access token revoked by the
+   * client it was issued to loses its consent and the client's refresh family
+   * for that user, and is answered 200; another client's token, and an
+   * unknown or invalid token, are answered 200 and change nothing (RFC 7009
+   * §2.1, §2.2). `mcp-token-revocation.ts` carries each branch.
+   */
+  private answerOAuthTokenRevocation(request: Request, vendorResponse: Response): Promise<Response> {
     const host: Pick<McpAccessTokenHost, 'getApi' | 'getAuthIssuer' | 'getMcpResourceUrl' | 'isMcpOAuthEnabled' | 'rereadKeyringForUnknownKey'> = {
       getApi: (...a) => this.getApi(...a),
       getAuthIssuer: (...a) => this.getAuthIssuer(...a),
@@ -4429,7 +4465,22 @@ export class AuthManager {
       isMcpOAuthEnabled: (...a) => this.isMcpOAuthEnabled(...a),
       rereadKeyringForUnknownKey: (...a) => this.rereadKeyringForUnknownKey(...a),
     };
-    return verifyMcpAccessToken.call(host, token);
+    return answerMcpTokenRevocation(
+      {
+        verifyClaims: async (token) => {
+          const principal = (await verifyMcpAccessTokenClaims.call(host, token))?.principal;
+          if (!principal?.clientId) return null;
+          return {
+            clientId: principal.clientId,
+            userId: principal.userId,
+            ...(principal.organizationId ? { organizationId: principal.organizationId } : {}),
+          };
+        },
+        getStore: async () => ((await this.getAuthContext()) as { adapter?: OAuthGrantStore } | undefined)?.adapter,
+      },
+      request,
+      vendorResponse,
+    );
   }
 
   /**
