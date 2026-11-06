@@ -462,6 +462,10 @@ export const deObjects: NonNullable<TranslationData['objects']> = {
         label: "Gebietsschema",
         help: "Gebietsschema des Geräts, wie es bei der Registrierung angegeben wurde. Wird für das Gerät gespeichert; keine Push-Nachricht wird danach dargestellt: Eine Push-Nachricht kommt in der Sprache des Empfängers an (seiner Benutzersprache, sonst der Standardsprache der Bereitstellung)."
       },
+      origin: {
+        label: "Server-Ursprung",
+        help: "Der Ursprung, von dem die Konsole bei der Registrierung des Geräts geladen wurde (zum Beispiel https://crm.example.com). Jede Push-Benachrichtigung an das Gerät enthält ihn, sodass eine mobile App mit mehreren gespeicherten Servern die Benachrichtigung auf diesem Server öffnet. Leer bei einem Gerät, das ohne ihn registriert wurde."
+      },
       name: {
         label: "Gerätename"
       },
