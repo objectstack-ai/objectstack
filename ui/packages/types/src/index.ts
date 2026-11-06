@@ -1252,9 +1252,9 @@ export type {
   // The `undo` payload of `ActionResult`, moved down from `@object-ui/core`'s
   // `UndoManager` with it (objectui#6349, batch 4); core re-exports it.
   UndoableOperation,
-  ActionExecutor,
-  BatchOperationConfig,
-  BatchOperationSummary,
+  // `ActionExecutor` / `BatchOperationConfig` / `BatchOperationSummary` were
+  // retired here (objectstack#25921, batch 11) — see the note at the end of
+  // `ui-action.ts`.
   TransactionIsolationLevel,
   TransactionConfig,
   TransactionResult,
