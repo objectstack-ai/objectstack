@@ -162,7 +162,7 @@ describe('scenario card travel_expense (docs/qa/scenarios/travel_expense.json)',
     expect(outcome('fix_meal_days')?.kind).toBe('applied');
     expect(outcome('manager_approves_step_one')?.kind).toBe('applied');
     expect(outcome('pay_claim')).toEqual({ kind: 'pending_confirmation' });
-    expect(outcome('employee_approves_colleague')).toEqual({ kind: 'refused', code: 'PERMISSION_DENIED' });
+    expect(outcome('employee_approves_own_claim')).toEqual({ kind: 'refused', code: 'PERMISSION_DENIED' });
     expect(outcome('over_standard_without_reason')).toEqual({ kind: 'refused', code: 'VALIDATION_FAILED' });
   });
 
