@@ -222,7 +222,10 @@ function getViewLabel(view: any, viewPath: string): { label?: unknown; path: str
  * package's item OF THE SAME NAME, so its name is the base's and is not
  * judged. A package that declares no namespace has nothing to prefix with and
  * is not judged: the object rule's posture, which does not invent a prefix on
- * the author's behalf either.
+ * the author's behalf either. A name the PLATFORM requests by its bare
+ * spelling ({@link PLATFORM_REQUESTED_BARE_NAMES}) is not judged either: a
+ * package declares it to plug into that door, and the prefixed spelling would
+ * unplug it.
  *
  * ## The duplicate finding, which stays
  *
@@ -277,7 +280,12 @@ function namespacePrefixIssues(stack: any, pathPrefix = ''): LintIssue[] {
       const name = item?.name;
       if (typeof name !== 'string' || !name) continue;
 
-      if (ns && !isOverrideDeclaration(item) && !carriesPackageNamespace(name, ns)) {
+      if (
+        ns
+        && !isOverrideDeclaration(item)
+        && !carriesPackageNamespace(name, ns)
+        && !isPlatformRequestedBareName(key, name)
+      ) {
         const renamed = `${ns}_${name}`;
         issues.push({
           severity: 'warning',
@@ -346,6 +354,30 @@ export const NAME_JUDGED_ELSEWHERE: Readonly<Record<string, string>> = Object.fr
     'item is named `<object>.<key>`',
   docs: 'refused as an error by the doc lint (`docs/namespace-prefix`, ADR-0046)',
 });
+
+/**
+ * Bare names the PLATFORM requests by spelling, per collection: a package
+ * declares one to plug into the door that asks for it, so it must keep the
+ * bare spelling, and `naming/namespace-prefix` does not judge it. Exported so
+ * the phase-3 refusal (#30806) reads the same list.
+ *
+ *  - `permissions` → `guest_portal`: the public form doors' submit context
+ *    requests the permission set of exactly this name
+ *    (`permissions: ['guest_portal']`, packages/rest/src/form-routes.ts:653),
+ *    and the grant's result masker resolves a set registered under it.
+ *    ADR-0138's ledger keeps that name ("fate: keep") and cites
+ *    `examples/app-crm/src/security/sales-positions.ts#GuestPortalProfile` as
+ *    its reference declaration; `crm_guest_portal` would reach nothing.
+ */
+export const PLATFORM_REQUESTED_BARE_NAMES: Readonly<Record<string, readonly string[]>> = Object.freeze({
+  permissions: Object.freeze(['guest_portal']),
+});
+
+/** Whether `name` in collection `key` is one {@link PLATFORM_REQUESTED_BARE_NAMES} lists. */
+function isPlatformRequestedBareName(key: string, name: string): boolean {
+  return Object.prototype.hasOwnProperty.call(PLATFORM_REQUESTED_BARE_NAMES, key)
+    && PLATFORM_REQUESTED_BARE_NAMES[key].includes(name);
+}
 
 /**
  * The types the duplicate finding judges, and the key each occupies at runtime.
