@@ -158,7 +158,7 @@ import {
   SEARCH_FLAG_EXCLUDED_TYPES,
   type SearchFieldMeta,
 } from '@objectstack/spec/data';
-import { recordsOf, suggestName } from './object-graph.js';
+import { objectsAsServed, recordsOf, suggestName } from './object-graph.js';
 import {
   SYSTEM_FIELDS,
   indexUnprovisionedAnchors,
@@ -324,6 +324,18 @@ function resolveAllowedSet(target: ObjectSearchTarget): {
  * readable field map, so "declared nothing" stays distinguishable from "not in
  * stack". Exported alongside `checkSearchableFieldList` so every surface that
  * authors a searchable set resolves against the identical index (#4329).
+ *
+ * [#30608] This is the DECLARED reading, and stays one: it reads the objects
+ * it is handed, folds no `objectExtensions` entry, and is the primitive the
+ * served readings compose ({@link indexServedSearchTargets}, and the sort
+ * rule's `indexServedSortFields`, which hands it pre-served objects and reads
+ * its `null` skip off the declared ones). Changing it would move every
+ * out-of-repo caller of this exported core at once. Both in-repo search
+ * surfaces read the served index: `validateSearchableFields` and a react
+ * page's `<ListView searchableFields>` (`validate-react-page-props`), whose
+ * `$searchFields` override reaches the same ingress gate, which resolves the
+ * set against `registry.getObject` (`resolveQueryFields`, metadata-protocol),
+ * the folded object.
  */
 export function indexObjectSearchTargets(
   stack: Record<string, unknown>,
@@ -335,6 +347,48 @@ export function indexObjectSearchTargets(
     if (name) fieldsByObject.set(name, declaredFieldTarget(obj));
   }
   return fieldsByObject;
+}
+
+/**
+ * [#30608] {@link indexObjectSearchTargets} over the objects as SERVED
+ * (`objectsAsServed`, the package's one fold): the runtime resolves a
+ * searchable set against the registry's merged object (`resolveQueryFields`
+ * reads `registry.getObject`, metadata-protocol; the engine's search
+ * expansion reads the same schema), so a field an `objectExtensions` entry of
+ * the same artifact adds is a field of the object, and an owner's field an
+ * extension re-declares is judged on the extension's definition, which
+ * replaces the owner's whole (the registry's `mergeObjectDefinitions`).
+ *
+ * - The type, `hidden` and `searchable` meta are the field's definition, so a
+ *   field two packages tie on keeps its name (read off the served objects,
+ *   ties kept) and gets a stub meta (`{}`),
+ *   the way `resolveAllowedSet` stubs a system column: existence holds, the
+ *   virtual and credential checks have no type to read, and the auto-default
+ *   admissibility pass reads an unreadable type as unresolvable, not wrong.
+ * - An object that declares no field map keeps its declared `null` (skip ②),
+ *   extended or not: an extension adding to an introspected schema does not
+ *   make the rest of it knowable.
+ * - The object's own `searchableFields`, `nameField` and `displayNameField`
+ *   are the owner's: only the fields move in the fold.
+ */
+export function indexServedSearchTargets(
+  stack: Record<string, unknown>,
+): Map<string, ObjectSearchTarget | null> {
+  if (!isRec(stack)) return new Map();
+  const served = objectsAsServed(stack);
+  // Names from the served objects, ties kept, THEN the tied metas blanked: a
+  // target built from the tie-dropped objects is `null` when every served
+  // field is tied, which would turn the existence check off.
+  const out = indexObjectSearchTargets({ objects: served.objects });
+  for (const [name, tiedKeys] of served.tied) {
+    const target = out.get(name);
+    if (!target) continue;
+    for (const key of tiedKeys) target.fields[key] = {};
+  }
+  for (const [name, target] of indexObjectSearchTargets(stack)) {
+    if (target === null) out.set(name, null);
+  }
+  return out;
 }
 
 /**
@@ -582,8 +636,12 @@ export function validateSearchableFields(stack: AnyRec): SearchableFieldFinding[
   const findings: SearchableFieldFinding[] = [];
   if (!isRec(stack)) return findings;
 
+  // [#30608] The walk below stays on the declared objects, so every finding
+  // keeps its declared path; the index it resolves against is the served one
+  // ({@link indexServedSearchTargets}). The provenance index is object-level
+  // (`external`, the injected anchors) and stays on the declared objects.
   const objects = recordsOf(stack.objects);
-  const fieldsByObject = indexObjectSearchTargets(stack);
+  const fieldsByObject = indexServedSearchTargets(stack);
   const unprovisionedAnchors = indexUnprovisionedAnchors(stack);
 
   const check = (

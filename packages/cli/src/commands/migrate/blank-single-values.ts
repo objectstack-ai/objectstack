@@ -24,6 +24,12 @@ import { describeOccupancy, JOURNAL_MODE_SWITCH_NOTE } from '../../utils/sqlite-
 import { describeDriverSqliteFile } from '../../utils/connection-display.js';
 import { buildDataMigrationPlugins } from '../../utils/data-migration-plugins.js';
 import { refuseUndeclaredObjects } from '../../utils/migrate-object-scope.js';
+import {
+  formatWithheldColumns,
+  withheldColumns,
+  type WithheldColumn,
+  type WithheldColumnsRegistry,
+} from '../../utils/migrate-withheld-columns.js';
 
 async function confirm(question: string): Promise<boolean> {
   if (!process.stdin.isTTY) return false; // non-interactive → require --yes
@@ -76,6 +82,11 @@ export interface BlankSingleValuesReport {
   truncated: boolean;
   unreadableObjects: string[];
   failures: BlankSingleValueFailure[];
+  /**
+   * [#30626] In-scope columns this run did not read because the package that
+   * adds them is disabled: re-run after enabling it.
+   */
+  withheldColumns: WithheldColumn[];
 }
 
 /** The engine surface the walk reads and writes through. */
@@ -84,6 +95,8 @@ export interface BlankSingleValuesEngine {
   getConfigs?(): Record<string, unknown>;
   find(object: string, options: Record<string, unknown>): Promise<Array<Record<string, unknown>>>;
   update(object: string, data: Record<string, unknown>, options?: any): Promise<unknown>;
+  /** [#30626] Where the columns a disabled package's extension adds are read from. */
+  registry?: WithheldColumnsRegistry;
 }
 
 export interface BlankSingleValuesLogger {
@@ -265,6 +278,7 @@ export async function walkBlankColumns(
     truncated,
     unreadableObjects,
     failures,
+    withheldColumns: withheldColumns(engine, candidates, spec.columnsOf),
   };
 }
 
@@ -290,6 +304,7 @@ export function formatBlankSingleValuesReport(report: BlankSingleValuesReport): 
   if (report.truncated) {
     lines.push('⚠ Walk incomplete — rows past the cap or in an unreadable object were not read.');
   }
+  lines.push(...formatWithheldColumns(report.withheldColumns));
   return lines;
 }
 
@@ -467,6 +482,7 @@ export default class MigrateBlankSingleValues extends Command {
         find: (object, options) =>
           !apply && stack.tableAbsent?.(object) ? Promise.resolve([]) : engine.find(object, options),
         update: (object, data, options) => engine.update(object, data, options),
+        registry: engine.registry,
       };
 
       const report = await cleanBlankSingleValues(view, logger, {
