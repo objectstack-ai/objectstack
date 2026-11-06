@@ -429,7 +429,7 @@ interface AccessPolicyWriteInput {
  */
 export function accessPolicyWritePredicate(
   floor: () => DeploymentAccessFloor | undefined,
-  selfLockOut?: (input: unknown) => { message: string; constraint: { clientAddress: string | null } } | undefined,
+  selfLockOut?: (input: unknown) => { message: string; constraint: object } | undefined,
 ): (input: unknown) => AccessPolicyRefusal | undefined {
   return (input) => {
     const { key, next, locale } = (input ?? {}) as AccessPolicyWriteInput;
@@ -438,7 +438,10 @@ export function accessPolicyWritePredicate(
       const refusal = accessPolicyFloorRefusal(key, next, current, locale);
       if (refusal) return refusal;
     }
-    if (key === ACCESS_POLICY_KEYS.allowedIpRanges && selfLockOut) return selfLockOut(input);
+    if (key === ACCESS_POLICY_KEYS.allowedIpRanges && selfLockOut) {
+      const refusal = selfLockOut(input);
+      return refusal ? { message: refusal.message, constraint: { ...refusal.constraint } } : undefined;
+    }
     return undefined;
   };
 }
