@@ -177,7 +177,11 @@ marked path (`option:@stage_ref`). An object none of those carries whose name
 has a platform prefix (`sys_`, `cloud_`, `ai_`) gets a warning at `os validate`,
 `os build` and `os lint`, its field not judged, because a package outside the
 app may register it; the publish door judges against every object the
-deployment serves and refuses it there if none of them is that object. `option` belongs to mail templates: in-app
+deployment serves and refuses it there if none of them is that object. A
+template saved into a package is judged against that package's closure (its
+own objects, the objects of the packages its manifest declares in
+`dependencies`, and platform objects): an object outside it is refused, and the
+fix is to declare the dependency. `option` belongs to mail templates: in-app
 template text (flow notifications, action and bulk-action copy) refuses it as a
 formatter it does not know.
 

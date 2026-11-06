@@ -242,6 +242,7 @@ export type TemplateHoleGrammarRule =
   | 'currency-code-path-undeclared'
   | 'option-field-shape'
   | 'option-object-unknown'
+  | 'option-object-outside-closure'
   | 'option-field-unknown'
   | 'option-field-no-options';
 

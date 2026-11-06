@@ -192,6 +192,43 @@ describe('the authoring doors', () => {
       expect(atPublish(onlySubject('{{ status | option:sys_user.status }}'), [opportunity, sysUser]))
         .toEqual({ errors: [], advisories: [] });
     });
+
+    describe('⭐ a write into a package is judged against that package\'s closure', () => {
+      const OWN = 'com.acme.crm';
+      const DEP = 'com.acme.core';
+      const STRANGER = 'com.other.sales';
+      const scope = { packageId: OWN, dependencies: [DEP] };
+      const owned = (o: Record<string, unknown>, packageId: string) => ({ ...o, _packageId: packageId });
+      const universe = [owned(opportunity, STRANGER), owned({ ...opportunity, name: 'core_deal' }, DEP)];
+      const write = (hole: string) => runRuntimeAuthoringRules({
+        type: 'email_template',
+        item: onlySubject(`Stalled at ${hole}`),
+        context: { objects: universe },
+        packageScope: scope,
+      });
+
+      it('an object that exists but outside the closure gets the closure verdict and the declare-the-dependency remedy', () => {
+        const { errors } = write('{{ stage | option:opportunity.stage }}');
+        expect(errors).toHaveLength(1);
+        expect(errors[0]).toMatchObject({ rule: EMAIL_TEMPLATE_HOLE_GRAMMAR, path: 'emailTemplates[0].subject', severity: 'error' });
+        expect(errors[0].message).toContain(`names the object \`opportunity\`, which is outside package \`${OWN}\`'s closure`);
+        expect(errors[0].message).not.toContain('resolves to no object');
+        expect(errors[0].hint).toContain(`Declare a dependency on the package that defines "opportunity" in the \`dependencies\` of "${OWN}"'s manifest`);
+        expect(errors[0].hint).toContain(OPTION_ARGUMENT_RULE);
+      });
+
+      it('control: an object inside the closure (a declared dependency) is accepted', () => {
+        expect(write('{{ stage | option:core_deal.stage }}').errors).toEqual([]);
+      });
+
+      it('control: the same write naming no package reads the whole universe and accepts it', () => {
+        expect(runRuntimeAuthoringRules({
+          type: 'email_template',
+          item: onlySubject('Stalled at {{ stage | option:opportunity.stage }}'),
+          context: { objects: universe },
+        }).errors).toEqual([]);
+      });
+    });
   });
 
   it('⭐ the runtime publish gate judges an email_template write against the live objects it carries', () => {

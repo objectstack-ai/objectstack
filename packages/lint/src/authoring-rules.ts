@@ -414,10 +414,13 @@ export interface AuthoringRuleContext {
    * [#24668] a list view bound to it is refused `list-view-object-unknown`
    * (the reference-integrity suite reads a set `runtimeWriteType` beside an
    * absent `packageScope` as that whole collection). Read
-   * by two rules: `validateListViewFieldRefs` (through the reference-integrity
+   * by three rules: `validateListViewFieldRefs` (through the reference-integrity
    * suite), which refuses a list view bound outside the closure instead of
-   * skipping it, and [#24669] `validateFlowTriggerReadiness`, which refuses a
-   * flow whose trigger object is outside it instead of advising.
+   * skipping it, [#24669] `validateFlowTriggerReadiness`, which refuses a
+   * flow whose trigger object is outside it instead of advising, and
+   * [#30172] `validateEmailTemplateHoleGrammar`, which refuses an
+   * `option:object.field` hole naming an object outside it with the closure
+   * verdict and the declare-the-dependency remedy, not as an unknown object.
    */
   packageScope?: { readonly packageId: string; readonly dependencies: readonly string[] };
   /**
@@ -2716,8 +2719,10 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
   // (`TEMPLATE_INVALID`). MEASURED first: no shipped template, example or
   // fixture in this repository writes a hole it refuses. An `option` hole's
   // object is judged at the gate against the live universe alone (a set
-  // `ctx.runtimeWriteType`), where a name it does not carry is refused; the CLI
-  // commands walk the object-reference ladder and advise on rung ④.
+  // `ctx.runtimeWriteType`), where a name it does not carry is refused — under
+  // a stated closure (`ctx.packageScope`) as outside it, the remedy being to
+  // declare the dependency; the CLI commands walk the object-reference ladder
+  // and advise on rung ④.
   {
     name: 'validateEmailTemplateHoleGrammar',
     tier: 'gating',
@@ -2726,7 +2731,11 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     source: 'packages/lint/src/validate-email-template-hole-grammar.ts',
     surfaces: CLI_AND_RUNTIME,
     runtimeTypes: ['email_template'],
-    run: (stack, ctx) => validateEmailTemplateHoleGrammar(stack, { liveUniverse: ctx.runtimeWriteType !== undefined }),
+    run: (stack, ctx) =>
+      validateEmailTemplateHoleGrammar(stack, {
+        liveUniverse: ctx.runtimeWriteType !== undefined,
+        ...(ctx.packageScope ? { packageScope: ctx.packageScope } : {}),
+      }),
   },
   // [#28473] ADR-0146 D3: a package whose `manifest.namespace` is too long to
   // have a paired customization namespace (`customizationNamespace` answers

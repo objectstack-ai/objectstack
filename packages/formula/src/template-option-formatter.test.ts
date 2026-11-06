@@ -149,6 +149,17 @@ describe('the object and field, judged against the app\'s objects', () => {
     expect(judgeMailHoleGrammar(`At ${HOLE}`, { objects, liveUniverse: true })).toEqual([]);
   });
 
+  it('⭐ objects narrowed to a package closure refuse a name they do not carry as outside it, naming the remedy', () => {
+    for (const hole of ['{{ stage | option:deal.stage }}', '{{ status | option:sys_userz.status }}']) {
+      const findings = judgeMailHoleGrammar(`At ${hole}`, { objects, packageScope: { packageId: 'com.acme.crm' } });
+      expect(findings.map((f) => f.refusal.rule)).toEqual(['option-object-outside-closure']);
+      expect(findings[0].refusal.message).toContain("outside package `com.acme.crm`'s closure");
+      expect(findings[0].refusal.message).toContain('Declare a dependency on the package that defines');
+      expect(findings[0].refusal.message).toContain(OPTION_ARGUMENT_RULE);
+    }
+    expect(judgeMailHoleGrammar(`At ${HOLE}`, { objects, packageScope: { packageId: 'com.acme.crm' } })).toEqual([]);
+  });
+
   it('judges no reference when no objects are handed in', () => {
     expect(judgeMailHoleGrammar('At {{ stage | option:deal.stage }}')).toEqual([]);
   });

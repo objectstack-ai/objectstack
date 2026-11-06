@@ -184,6 +184,17 @@ export interface MailHoleGrammarOptions {
    * applies ({@link optionObjectUnregisteredPlatform}).
    */
   liveUniverse?: boolean;
+  /**
+   * The package a write belongs to, when `objects` is the live universe
+   * narrowed to that package's closure (its own objects, the objects of the
+   * packages its manifest declares in `dependencies`, and platform objects) —
+   * the publish door's reading of a write into a package. Implies
+   * `liveUniverse`. A name `objects` does not carry is then outside that
+   * closure, whether it belongs to an undeclared package or to none, and is
+   * refused as such (`option-object-outside-closure`), the remedy being to
+   * declare the dependency.
+   */
+  packageScope?: { readonly packageId: string };
 }
 
 /**
@@ -207,9 +218,21 @@ function optionFieldRefusal(
   ref: OptionFieldReference,
   objects: ReadonlyMap<string, ReadonlyMap<string, boolean> | null>,
   liveUniverse: boolean,
+  packageId: string | undefined,
 ): TemplateHoleGrammarRefusal | null {
-  if (!liveUniverse && optionObjectUnregisteredPlatform(ref, objects)) return null;
+  if (!liveUniverse && packageId === undefined && optionObjectUnregisteredPlatform(ref, objects)) return null;
   const fields = objects.get(ref.object);
+  if (fields === undefined && packageId !== undefined) {
+    return {
+      rule: 'option-object-outside-closure',
+      message:
+        `the hole ${hole} names the object \`${ref.object}\`, which is outside package \`${packageId}\`'s closure `
+        + '(its own objects, the objects of the packages its manifest declares in `dependencies`, and platform '
+        + `objects), so no option list labels the value. ${OPTION_ARGUMENT_RULE} Declare a dependency on the package `
+        + `that defines \`${ref.object}\` in the \`dependencies\` of \`${packageId}\`'s manifest, or name an object `
+        + 'inside that closure.',
+    };
+  }
   if (fields === undefined) {
     return {
       rule: 'option-object-unknown',
@@ -258,7 +281,13 @@ export function judgeMailHoleGrammar(face: string, options: MailHoleGrammarOptio
   for (const m of face.matchAll(mailHolePattern())) {
     const parsed = parseMailHole(m[2], m[0]);
     const optionRefusal = parsed?.optionField !== undefined && options.objects !== undefined
-      ? optionFieldRefusal(m[0], parsed.optionField, options.objects, options.liveUniverse === true)
+      ? optionFieldRefusal(
+        m[0],
+        parsed.optionField,
+        options.objects,
+        options.liveUniverse === true,
+        options.packageScope?.packageId || undefined,
+      )
       : null;
     if (parsed?.refusal) {
       findings.push({ start: m.index ?? 0, text: m[0], refusal: parsed.refusal });

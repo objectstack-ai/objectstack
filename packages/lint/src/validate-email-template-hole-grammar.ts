@@ -44,7 +44,9 @@
  *   refused — it gets a `warning`, its field unjudged. At the publish door
  *   the stack's objects are the live object universe the gate carries, the
  *   whole of what resolves: no rung below it, and a name it does not carry is
- *   refused whatever its prefix.
+ *   refused whatever its prefix. A write into a package is judged against
+ *   that universe narrowed to the package's closure, and a name outside it is
+ *   refused with the closure verdict and the declare-the-dependency remedy.
  *
  * WHICH holes are refused is not decided here: it is `@objectstack/formula`'s
  * `judgeMailHoleGrammar`, the grammar the mail renderer itself parses with,
@@ -78,7 +80,7 @@ import {
 import { collectionEntries } from './collection-entries.js';
 import { PLATFORM_PROVIDED_OBJECT_NAMES } from '@objectstack/spec/system';
 
-import { objectsAsServed, packagesOf, recordsOf } from './object-graph.js';
+import { closureDependencyRemedy, objectsAsServed, packagesOf, recordsOf } from './object-graph.js';
 import { injectedColumnDefsFor } from './system-fields.js';
 
 type AnyRec = Record<string, unknown>;
@@ -163,6 +165,12 @@ function optionFieldIndex(stack: AnyRec, liveUniverse: boolean): Map<string, Map
   return index;
 }
 
+/** The object an `option` hole as written names, braces included. */
+function optionObjectOf(holeText: string): string | undefined {
+  const inner = holeText.replace(/^\{\{\{?/, '').replace(/\}\}\}?$/, '');
+  return parseMailHole(inner, holeText)?.optionField?.object;
+}
+
 /**
  * The `option` holes of one face whose object is rung ④ of the object ladder
  * against `objects` — platform-prefixed, and carried by no rung above — which
@@ -189,13 +197,24 @@ export interface EmailTemplateHoleGrammarOptions {
    * the object-reference ladder applies, rung ④ advising at `warning`.
    */
   liveUniverse?: boolean;
+  /**
+   * The written package's closure at the publish door
+   * (`AuthoringRuleContext.packageScope`), when the gate narrowed the live
+   * universe to it. Implies `liveUniverse`. An object the narrowed universe
+   * does not carry is then outside the closure, refused
+   * `option-object-outside-closure`, the remedy being to declare the
+   * dependency — the verdict `list-view-object-outside-closure` gives a list
+   * view's binding.
+   */
+  packageScope?: { readonly packageId: string };
 }
 
 export function validateEmailTemplateHoleGrammar(
   stack: AnyRec,
   options: EmailTemplateHoleGrammarOptions = {},
 ): EmailTemplateHoleGrammarFinding[] {
-  const liveUniverse = options.liveUniverse === true;
+  const packageScope = options.packageScope?.packageId ? options.packageScope : undefined;
+  const liveUniverse = options.liveUniverse === true || packageScope !== undefined;
   const findings: EmailTemplateHoleGrammarFinding[] = [];
   let objects: Map<string, Map<string, boolean> | null> | undefined;
   for (const { rec: template, path } of collectionEntries(stack.emailTemplates, 'emailTemplates')) {
@@ -206,17 +225,21 @@ export function validateEmailTemplateHoleGrammar(
       const text = template[face];
       if (typeof text !== 'string') continue;
       objects ??= optionFieldIndex(stack, liveUniverse);
-      for (const hole of judgeMailHoleGrammar(text, { variables, objects, liveUniverse })) {
+      for (const hole of judgeMailHoleGrammar(text, { variables, objects, liveUniverse, ...(packageScope ? { packageScope } : {}) })) {
+        const outside = hole.refusal.rule === 'option-object-outside-closure' && packageScope
+          ? optionObjectOf(hole.text)
+          : undefined;
         findings.push({
           severity: 'error',
           rule: EMAIL_TEMPLATE_HOLE_GRAMMAR,
           where: `email template "${name}"${locale}`,
           path: `${path}.${face}`,
           message: `${face}: ${hole.refusal.message} (offset ${hole.start})`,
-          hint:
-            'A mail template hole is `{{ path }}` or `{{ path | formatter[:arg] }}`, with one formatter. '
-            + `${hole.refusal.rule.startsWith('option-') ? OPTION_ARGUMENT_RULE : CURRENCY_ARGUMENT_RULE} `
-            + 'Anything more belongs in the caller that supplies the data.',
+          hint: outside !== undefined && packageScope
+            ? `${closureDependencyRemedy(outside, packageScope.packageId, 'name an object inside that closure')}. ${OPTION_ARGUMENT_RULE}`
+            : 'A mail template hole is `{{ path }}` or `{{ path | formatter[:arg] }}`, with one formatter. '
+              + `${hole.refusal.rule.startsWith('option-') ? OPTION_ARGUMENT_RULE : CURRENCY_ARGUMENT_RULE} `
+              + 'Anything more belongs in the caller that supplies the data.',
         });
       }
       for (const hole of liveUniverse ? [] : unregisteredPlatformOptionHoles(text, objects)) {
