@@ -47,7 +47,7 @@ import { formatDate, formatDateTime, useObjectTranslation } from '@object-ui/i18
 import { useAdapter, useDataInvalidation } from '@object-ui/react';
 
 /** The `sys_api_key` columns the list reads; the key's secret is never among them. */
-export const API_KEY_LIST_FIELDS = [
+const API_KEY_LIST_FIELDS = [
   'id',
   'name',
   'prefix',
@@ -90,7 +90,7 @@ const SCOPE_KEYS: Record<string, string> = {
   'metadata:write': 'oauth.consent.scope.metadataWrite',
 };
 
-export function describeGrantedScope(scope: string, t: Translate): string {
+function describeGrantedScope(scope: string, t: Translate): string {
   const key = SCOPE_KEYS[scope];
   return key ? t(key) : t('oauth.consent.scope.unrecognised', { scope });
 }
@@ -178,20 +178,22 @@ function AssistantRows({
 
 function KeyRows({
   keys,
+  readAt,
   onRevoke,
 }: {
   keys: ApiKeyRow[];
+  /** When the rows were read: expiry is judged against the read, not against each render. */
+  readAt: number;
   onRevoke: (row: ApiKeyRow) => void;
 }) {
   const { t, language } = useObjectTranslation();
   if (keys.length === 0) {
     return <p className="text-sm text-muted-foreground">{t('connectAgent.access.keysEmpty')}</p>;
   }
-  const now = Date.now();
   return (
     <ul className="divide-y rounded-md border">
       {keys.map((k) => {
-        const expired = isExpired(k, now);
+        const expired = isExpired(k, readAt);
         return (
           <li key={k.id} className="flex items-start gap-3 px-3 py-2 text-sm" data-testid="api-key-row">
             <div className="min-w-0 flex-1 space-y-1">
@@ -246,7 +248,7 @@ export function AuthorizedAccessList() {
   const [assistants, setAssistants] = useState<Load<AuthorizedClientsList>>({
     state: 'loading',
   });
-  const [keys, setKeys] = useState<Load<ApiKeyRow[]>>({ state: 'loading' });
+  const [keys, setKeys] = useState<Load<{ rows: ApiKeyRow[]; readAt: number }>>({ state: 'loading' });
   const [confirmKey, setConfirmKey] = useState<ApiKeyRow | null>(null);
   const [revokingId, setRevokingId] = useState<string | null>(null);
   const [revokeError, setRevokeError] = useState<string | null>(null);
@@ -260,7 +262,6 @@ export function AuthorizedAccessList() {
   useEffect(() => {
     if (!adapter || !userId) return;
     let live = true;
-    setAssistants({ state: 'loading' });
     adapter
       .getClient()
       .oauth.authorizedClients.list()
@@ -283,7 +284,8 @@ export function AuthorizedAccessList() {
         $orderby: [{ field: 'created_at', order: 'desc' }],
       })
       .then(
-        (res) => live && setKeys({ state: 'ready', value: (res?.data ?? []) as ApiKeyRow[] }),
+        (res) =>
+          live && setKeys({ state: 'ready', value: { rows: (res?.data ?? []) as ApiKeyRow[], readAt: Date.now() } }),
         (e: unknown) => live && setKeys({ state: 'error', message: errorText(e) }),
       );
     return () => {
@@ -352,7 +354,7 @@ export function AuthorizedAccessList() {
               {t('connectAgent.access.loadFailed', { message: keys.message })}
             </p>
           ) : (
-            <KeyRows keys={keys.value} onRevoke={setConfirmKey} />
+            <KeyRows keys={keys.value.rows} readAt={keys.value.readAt} onRevoke={setConfirmKey} />
           )}
           {revokingId ? (
             <p className="text-xs text-muted-foreground">{t('connectAgent.access.revoking')}</p>
