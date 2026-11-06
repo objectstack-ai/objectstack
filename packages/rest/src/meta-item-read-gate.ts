@@ -4147,11 +4147,20 @@ export function metaItemLayersDeprecationHeaders(
         : { Deprecation: 'true', Link: `<${itemPath}/layers>; rel="successor-version"` };
 }
 
-/** The layers a layered answer carries, in the order the gate judges them: `effective` first — it is what the plain read serves, so its refusal is the plain read's own. */
-const META_ITEM_LAYERS = ['effective', 'code', 'overlay'] as const;
+/**
+ * The layers a layered answer carries, in the order the gate judges them: `effective` first — it is what the plain read serves, so its refusal is the plain read's own.
+ * [#29814] `draft` last: the pending draft row as stored, present only when the transport admitted its caller to pending drafts and asked for it.
+ */
+const META_ITEM_LAYERS = ['effective', 'code', 'overlay', 'draft'] as const;
 
 /** The layers in the order the ADR-0106 mask projects them. */
-const META_ITEM_MASKED_LAYERS = ['code', 'overlay', 'effective'] as const;
+const META_ITEM_MASKED_LAYERS = ['code', 'overlay', 'effective', 'draft'] as const;
+
+/**
+ * [#29814] The layers an answer may leave out: absent means "not served", so the
+ * mask never writes the key in. The other three are always on the answer.
+ */
+const META_ITEM_OPTIONAL_LAYERS: ReadonlySet<string> = new Set(['draft']);
 
 /** The request facts the layered chain reads — no transport shape. */
 export interface MetaLayeredRequest {
@@ -4279,6 +4288,16 @@ export type MetaLayeredAnswer =
  *     through {@link projectMetaObjectSchema} under the posture resolved before
  *     the read, and the `private, no-store` an undetermined posture owes.
  *
+ * [#29814] `draft` — the pending draft row as stored
+ * (`GetMetaItemLayeredResponseSchema.draft`) — is a layer like the other three
+ * for every step above: it counts for step 1's presence (an admitted author's
+ * never-published item is its draft), the gate judges it under the same
+ * stored-version policy, and the mask projects it. It reaches this chain only
+ * when the transport asked the protocol for it, which each transport does only
+ * for a caller its draft-read admission (`mayReadPendingDrafts`) admits; for
+ * any other caller the answer carries no `draft` key, so it says nothing about
+ * whether a draft exists. The mask never writes an absent `draft` key in.
+ *
  * The protocol's answer is never mutated. A layer the gate or the mask leaves as
  * it was is served as it was, and every other key of the answer
  * (`overlayScope`, `_diagnostics`, the ADR-0010 protection envelope) rides
@@ -4330,10 +4349,13 @@ export function createMetaLayeredAnswer(
         // 3. [ADR-0106 D5(4)] The mask, on every layer — under one posture
         //    related [#21884] over every layer, so each object an `objectOverride`
         //    param names is asked about once.
-        const layerDocuments = META_ITEM_MASKED_LAYERS.map((layer) => (served.has(layer) ? served.get(layer) : layered?.[layer]));
+        const maskedLayers = META_ITEM_MASKED_LAYERS.filter(
+            (layer) => !META_ITEM_OPTIONAL_LAYERS.has(layer) || (layered != null && layer in layered),
+        );
+        const layerDocuments = maskedLayers.map((layer) => (served.has(layer) ? served.get(layer) : layered?.[layer]));
         const layerPosture = await relateObjectSchemaMaskPosture(maskPosture, ...layerDocuments);
         let cacheControl: typeof META_UNDETERMINED_CACHE_CONTROL | undefined;
-        for (const layer of META_ITEM_MASKED_LAYERS) {
+        for (const layer of maskedLayers) {
             const document = served.has(layer) ? served.get(layer) : layered?.[layer];
             const masked = projectMetaObjectSchema(layerPosture, document);
             if (!masked.ok) return { kind: 'mask-fault', object: name };

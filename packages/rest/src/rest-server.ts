@@ -4352,7 +4352,15 @@ export class RestServer {
             ...metaReadGate.metaMemberSelector(req.query),
             ...(environmentId ? { environmentId } : {}),
         };
-        const layered = await p.getMetaItemLayered(layeredRequest);
+        // [#29814] The pending draft layer, asked for only when this caller may
+        // read pending drafts — the admission every draft switch in this file
+        // carries in its own declaration ({@link mayReadPendingDrafts}). A
+        // caller it does not admit is answered the layers without a `draft`
+        // key, byte-identical to a read that never asked for one, so the answer
+        // says nothing about whether a draft exists.
+        const layeredCaller = await this.resolveExecCtx(environmentId, req).catch(rethrowAuthzStoreUnavailable);
+        const layeredOptions = { withDraft: mayReadPendingDrafts(layeredCaller) };
+        const layered = await p.getMetaItemLayered(layeredRequest, layeredOptions);
         // [#20156 · #20478] THE per-caller gate on every layer, then the mask —
         // the shared chain. The stored-version doors honour the author
         // exemption, so the caller carries this transport's save-door
