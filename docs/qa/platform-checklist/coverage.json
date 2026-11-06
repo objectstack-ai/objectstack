@@ -385,6 +385,9 @@
         "ai.console-ai-surface-gating",
         "platform-core.marketplace-install-local-lifecycle"
       ]
+    },
+    "template_manifest": {
+      "waived": "WAIVED 2026-11-06 — no item in this checklist can drive it, measured rather than asserted. TemplateManifestSchema (packages/spec/src/marketplace/template-manifest.zod.ts) is `objectstack.manifest.json`, the package-listing file; its one runtime reader is `os package publish` (packages/cli/src/commands/package/publish.ts), whose every request goes to a HOSTED control plane (`/api/v1/cloud/packages`) that a local app booted for this checklist does not serve, and its other reader is create-objectstack at scaffold time. The CLI half is pinned where it can fail: packages/cli/test/package-publish-taxonomy.test.ts (the retired `category` refused before any network call, each facet judged and sent under its wire name, the solutionType cross-check against the built artifact) and packages/cli/test/package-publish-uncarried-manifest-keys.test.ts (every schema key sent, warned about, refused or scaffold-only); every shipped file is parsed by `pnpm --filter @objectstack/spec check:template-manifests`. The catalog half — storing, filtering and showing the facets — is the cloud checklist's (objectstack-ai/cloud#3661) and the console marketplace card's. WHAT RETIRES THIS WAIVER — the console marketplace card lands facet filters this checklist can drive against a catalog it can boot, in which case author the browse-and-filter item and flip this entry to items."
     }
   }
 }
