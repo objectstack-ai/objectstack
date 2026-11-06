@@ -54,6 +54,7 @@ import { referenceTargetOf, type EngineQueryOptions } from '@objectstack/spec/da
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { isUserBanInForce, keepsFlowWriteReferenceCheck, USER_BAN_FIELDS } from '@objectstack/core';
 import { ValidationError, buildFieldError } from './validation/record-validator.js';
+import { servedAsStored } from './engine-top-level.js';
 import type { ObjectQL } from './engine.js';
 
 /**
@@ -166,6 +167,11 @@ export function referencesCheckedBeforeRules(context: unknown): boolean {
  *   value in place, `DELETE_SEMANTICS_REFERENCE_TYPES`) is not the editor's
  *   to answer for. A value new to any of the rows is refused as before, and
  *   an insert has no stored rows, so every value it supplies is judged.
+ *   [#29029] The stored rows are compared as the caller may read them
+ *   ({@link storedReferencesCallerReads}): a column the caller cannot read
+ *   holds no stored value for it, so it forgives nothing, and the answer is
+ *   the same whatever the column holds. A system write compares them as
+ *   stored, as before.
  *
  * ## Why the existence probe bypasses RLS — and why it keeps the tenant wall
  *
@@ -223,7 +229,7 @@ export function referencesCheckedBeforeRules(context: unknown): boolean {
  * (see {@link masterDetailHeadersCallerReads}).
  */
 export async function assertReferencesResolve(
-  this: Pick<ReferentialIntegrityHost, 'logger' | 'callerReadableReferenceExists' | 'callerReadableReferenceRow' | 'referenceExists' | 'referenceRow'>,
+  this: Pick<ReferentialIntegrityHost, 'logger' | 'find' | 'callerReadableReferenceExists' | 'callerReadableReferenceRow' | 'referenceExists' | 'referenceRow'>,
   schema: any,
   data: Record<string, unknown> | null | undefined,
   supplied: Record<string, unknown> | null | undefined,
@@ -328,7 +334,14 @@ export async function assertReferencesResolve(
   // [#29062] A refused value every row this write lands on already stores
   // is not a reference the write ADDS, so it is not this caller's to answer
   // for. The stored rows are read only now, once a probe has refused.
-  const stored = storedRows ? (await storedRows() ?? []).filter(isRow) : [];
+  // [#29029] …and only as this caller may read them
+  // ({@link storedReferencesCallerReads}): the update's reference forgiveness
+  // compares only stored values the caller may read, so a column it cannot
+  // read forgives nothing, and its value is refused like any other.
+  const storedAsStored = storedRows ? (await storedRows() ?? []).filter(isRow) : [];
+  const stored = storedAsStored.length === 0
+    ? storedAsStored
+    : await storedReferencesCallerReads.call(this, schema?.name, storedAsStored, [...new Set(refused.map((r) => r.name))], context);
   const failures = refused
     .filter((r) => stored.length === 0 || !stored.every((row) => storedReferenceIds(row[r.name]).has(String(r.value))))
     .map((r) => buildFieldError(
@@ -376,6 +389,71 @@ export type StoredReferenceRows = () => Promise<ReadonlyArray<Record<string, unk
 
 function isRow(row: unknown): row is Record<string, unknown> {
   return row !== null && typeof row === 'object';
+}
+
+/**
+ * [#29029] The stored rows an update's reference forgiveness compares against,
+ * as THIS caller may read them: for each of `rows`, only the `fields` the
+ * caller's own read door serves for that row exactly as stored
+ * ({@link servedAsStored}). One `find` for the batch, under the caller's own
+ * context, so every enforcement layer in the middleware chain (RBAC, RLS,
+ * sharing, field-level security) answers it, as it answers
+ * {@link masterDetailHeadersCallerReads}.
+ *
+ * A column the caller cannot read — hidden, masked or rewritten for it — is
+ * absent from the row returned here, so it holds no stored id and forgives
+ * nothing: the value the write names is judged like any other, and the
+ * answer does not depend on what the column holds. A row the read door does
+ * not return, or a read that fails, keeps no column either; ⛔ never the row
+ * as stored. A caller who can read the column keeps the forgiveness: an
+ * unchanged stored reference is still accepted.
+ *
+ * A SYSTEM caller (a flow run's elevated write, the one system write the
+ * reference check judges) is answered with `rows` unchanged, as before.
+ */
+export async function storedReferencesCallerReads(
+  this: Pick<ReferentialIntegrityHost, 'find' | 'logger'>,
+  object: unknown,
+  rows: ReadonlyArray<Record<string, unknown>>,
+  fields: ReadonlyArray<string>,
+  context: ExecutionContext | undefined,
+): Promise<ReadonlyArray<Record<string, unknown>>> {
+  if (context?.isSystem) return rows;
+  const ids = new Map<string, unknown>();
+  for (const row of rows) {
+    const id = row.id;
+    if (typeof id === 'string' || typeof id === 'number') ids.set(String(id), id);
+  }
+  const served = new Map<string, Record<string, unknown>>();
+  if (typeof object === 'string' && object && ids.size > 0) {
+    const values = [...ids.values()];
+    try {
+      const found = await this.find(object, {
+        where: { id: values.length === 1 ? values[0] : { $in: values } },
+        fields: ['id', ...fields],
+        context,
+      } as EngineQueryOptions) as Array<Record<string, unknown>>;
+      for (const row of Array.isArray(found) ? found : []) {
+        if (isRow(row) && row.id != null && ids.has(String(row.id))) served.set(String(row.id), row);
+      }
+    } catch (err) {
+      this.logger?.warn?.('the caller\'s read of the stored record failed — its stored references forgive nothing', {
+        object, error: err,
+      });
+    }
+  }
+  return rows.map((row) => {
+    const view = row.id != null ? served.get(String(row.id)) : undefined;
+    const kept: Record<string, unknown> = {};
+    if (!view) return kept;
+    for (const field of fields) {
+      if (Object.prototype.hasOwnProperty.call(view, field) && Object.prototype.hasOwnProperty.call(row, field)
+        && servedAsStored(view[field], row[field])) {
+        kept[field] = row[field];
+      }
+    }
+    return kept;
+  });
 }
 
 /** The ids a stored reference value holds: each member of a multi-valued one, or the one scalar. */

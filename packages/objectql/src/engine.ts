@@ -2783,6 +2783,8 @@ export class ObjectQL implements IObjectQLEngine {
     const readLogger = () => this.logger;
     const host: ThisParameterType<typeof assertReferencesResolve> = {
       get logger() { return readLogger(); },
+      // [#29029] The stored rows a refused value is forgiven against are read through the caller's own door.
+      find: (...a) => this.find(...a),
       callerReadableReferenceExists: (...a) => this.callerReadableReferenceExists(...a),
       callerReadableReferenceRow: (...a) => this.callerReadableReferenceRow(...a),
       referenceExists: (...a) => this.referenceExists(...a),
