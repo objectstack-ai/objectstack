@@ -148,21 +148,31 @@ function packageUninstalledRefusal(entryId: string, object: string): Error {
   );
 }
 
-/** `RESTORE_PARENT_PURGED`: a row's master-detail parent is neither live nor in the recycle bin. */
+/**
+ * `RESTORE_PARENT_PURGED`: a row's master-detail parent is neither live nor in
+ * the recycle bin, or its object is no longer registered (`objectGone`): the
+ * parent can come back in neither case.
+ */
 function parentPurgedRefusal(
   entryId: string,
   row: { object: string; id: string },
   field: string,
   parent: { object: string; id: string },
+  objectGone = false,
 ): Error {
   const err: any = new Error();
   err.code = 'RESTORE_PARENT_PURGED';
   return stampRefusal(
     err,
-    'This record cannot be restored: the record it belongs to was deleted for good.',
+    objectGone
+      ? `This record cannot be restored: the record it belongs to was a '${parent.object}', which no longer exists, because the package that defined it was uninstalled.`
+      : 'This record cannot be restored: the record it belongs to was deleted for good.',
     `Recycle-bin entry '${entryId}' holds '${row.object}' '${row.id}', whose master-detail parent ` +
-      `'${parent.object}' '${parent.id}' (field '${field}') is neither live, nor a row of this entry, nor the record ` +
-      'of another recycle-bin entry. A detail is never written back under a parent that is not there.',
+      `'${parent.object}' '${parent.id}' (field '${field}') ` +
+      (objectGone
+        ? `cannot come back: the registry no longer has '${parent.object}'. `
+        : 'is neither live, nor a row of this entry, nor held by another recycle-bin entry. ') +
+      'A detail is never written back under a parent that is not there.',
     { object: row.object, recordId: row.id, field, entryId, parentObject: parent.object, parentId: parent.id },
   );
 }
@@ -186,8 +196,8 @@ function parentInRecycleBinRefusal(
     err,
     'This record cannot be restored yet: the record it belongs to is in the recycle bin. Restore that record first.',
     `Recycle-bin entry '${entryId}' holds '${row.object}' '${row.id}', whose master-detail parent ` +
-      `'${parent.object}' '${parent.id}' (field '${field}') is not live: it is the record of recycle-bin entry ` +
-      `'${parentEntryId}'. Restore that entry first; a detail is never written back under a parent that is not there.`,
+      `'${parent.object}' '${parent.id}' (field '${field}') is not live: recycle-bin entry '${parentEntryId}' holds it. ` +
+      `Restore that entry first; a detail is never written back under a parent that is not there.`,
     { object: row.object, recordId: row.id, field, entryId, parentObject: parent.object, parentId: parent.id, parentEntryId },
   );
 }
@@ -329,6 +339,11 @@ export async function restoreRecycleBinEntry(
  * in the bin answered: `RESTORE_PARENT_IN_RECYCLE_BIN` tells the caller that
  * restoring another entry first lets this one through, which is false while a
  * permanent reason stands, so it never hides one.
+ *
+ * The parents that are neither live nor in this entry are collected across
+ * every row and field first, and the bin is asked about all of them at once
+ * ({@link parentEntriesOf}): an entry of 500 details under one missing parent
+ * reads the bin once, not 500 times.
  */
 async function judgeRestore(
   this: RecycleBinRestoreHost,
@@ -340,7 +355,8 @@ async function judgeRestore(
   for (const row of rows) {
     if (!this._registry.getObject(row.object)) throw packageUninstalledRefusal(entryId, row.object);
   }
-  const inEntry = new Set(rows.map((r) => `${r.object}\u0000${r.id}`));
+  const keyOf = (object: string, id: string) => `${object}\u0000${id}`;
+  const inEntry = new Set(rows.map((r) => keyOf(r.object, r.id)));
   const isLive = async (object: string, where: Record<string, unknown>): Promise<boolean> => {
     const live = ((await this.getDriver(object).find(
       object,
@@ -349,8 +365,9 @@ async function judgeRestore(
     )) ?? []) as unknown[];
     return live.length > 0;
   };
-  /** The first parent found in the bin, answered once nothing permanent stands. */
-  let inBin: { row: RecycleBinSnapshotRow; field: string; parent: { object: string; id: string }; parentEntryId: string } | undefined;
+  /** Each master-detail reference whose parent is not live, in row order, and each such parent once. */
+  const missing: Array<{ row: RecycleBinSnapshotRow; field: string; parent: { object: string; id: string } }> = [];
+  const missingParents = new Map<string, { object: string; id: string }>();
   for (const row of rows) {
     const schema = this._registry.getObject(row.object);
     const fields = fieldsOf(schema);
@@ -360,15 +377,15 @@ async function judgeRestore(
       const value = row.values[field];
       if (!holdsValue(value)) continue;
       const parent = { object: def.reference, id: String(value) };
-      if (inEntry.has(`${parent.object}\u0000${parent.id}`)) continue;
+      const key = keyOf(parent.object, parent.id);
+      if (inEntry.has(key)) continue;
       // A parent whose object is no longer registered can be neither live nor
       // restored (its own entry would refuse RESTORE_PACKAGE_UNINSTALLED), so it
       // is gone for good, whatever the bin holds.
-      if (!this._registry.getObject(parent.object)) throw parentPurgedRefusal(entryId, row, field, parent);
-      if (await isLive(parent.object, { id: parent.id })) continue;
-      const parentEntryId = await parentEntryOf.call(this, parent, entryId, context);
-      if (parentEntryId === undefined) throw parentPurgedRefusal(entryId, row, field, parent);
-      inBin ??= { row, field, parent, parentEntryId };
+      if (!this._registry.getObject(parent.object)) throw parentPurgedRefusal(entryId, row, field, parent, true);
+      if (!missingParents.has(key) && await isLive(parent.object, { id: parent.id })) continue;
+      missing.push({ row, field, parent });
+      missingParents.set(key, parent);
     }
     // 3. No live row holds its id, or a unique value of it.
     if (await isLive(row.object, { id: row.id })) throw uniqueValueTakenRefusal(entryId, row, 'id');
@@ -383,39 +400,60 @@ async function judgeRestore(
       if (await isLive(row.object, where)) throw uniqueValueTakenRefusal(entryId, row, field);
     }
   }
-  // 4. Nothing permanent stands: a parent in the bin is the one reason left.
-  if (inBin) throw parentInRecycleBinRefusal(entryId, inBin.row, inBin.field, inBin.parent, inBin.parentEntryId);
+  if (missing.length === 0) return;
+  // 4. The bin, asked once about every missing parent: one not held is purged
+  //    (permanent); then, nothing permanent standing, one held is the reason.
+  const heldBy = await parentEntriesOf.call(this, [...missingParents.values()], entryId, context);
+  for (const m of missing) {
+    if (!heldBy.has(keyOf(m.parent.object, m.parent.id))) throw parentPurgedRefusal(entryId, m.row, m.field, m.parent);
+  }
+  const first = missing[0];
+  throw parentInRecycleBinRefusal(entryId, first.row, first.field, first.parent, heldBy.get(keyOf(first.parent.object, first.parent.id))!);
 }
 
-/** How many entries one page of {@link parentEntryOf}'s snapshot walk reads. */
+/** How many entries one page of {@link parentEntriesOf}'s snapshot walk reads. */
 const PARENT_SCAN_PAGE_SIZE = 200;
 
 /**
- * The OTHER entry that holds a parent, as its master or as a row of its
- * cascade, when one does: named in the refusal. Reads the entries the caller
- * can see.
+ * The OTHER entries that hold the given parents, as their master or as a row
+ * of their cascade, keyed `object\u0000id`; a parent no entry holds is absent.
+ * Reads the entries the caller can see.
  *
  * A parent is the master of an entry when it was deleted by id, and a detail
  * of one when it went with ITS master's cascade (`account ← contact ← task`:
  * the task deleted alone, then the account, whose entry holds the contact). The
- * first is one indexed read on `object_name` / `record_id`; the second has no
- * column to read, so the entries are walked a page at a time, by key, and each
- * snapshot's rows searched. The walk runs only on the refusal path.
+ * first is one indexed read per parent object (`object_name` / `record_id`);
+ * the second has no column to read, so the parents still unanswered are looked
+ * for in ONE walk over the entries, a page at a time by key, each snapshot's
+ * rows searched, stopping once every parent is answered. It runs only on the
+ * refusal path.
  */
-async function parentEntryOf(
+async function parentEntriesOf(
   this: RecycleBinRestoreHost,
-  parent: { object: string; id: string },
+  parents: Array<{ object: string; id: string }>,
   entryId: string,
   context: ExecutionContext | undefined,
-): Promise<string | undefined> {
+): Promise<Map<string, string>> {
+  const keyOf = (object: string, id: string) => `${object}\u0000${id}`;
   const driver = this.getDriver(RECYCLE_BIN_OBJECT);
   const driverOptions = this.buildDriverOptions(RECYCLE_BIN_OBJECT, context);
-  const asMaster = ((await driver.find(
-    RECYCLE_BIN_OBJECT,
-    { object: RECYCLE_BIN_OBJECT, where: { object_name: parent.object, record_id: parent.id }, fields: ['id'], limit: 1 },
-    driverOptions,
-  )) ?? []) as Array<Record<string, unknown>>;
-  if (asMaster[0]?.id != null) return String(asMaster[0].id);
+  const held = new Map<string, string>();
+  const idsByObject = new Map<string, string[]>();
+  for (const p of parents) idsByObject.set(p.object, [...(idsByObject.get(p.object) ?? []), p.id]);
+  for (const [object, ids] of idsByObject) {
+    const asMaster = ((await driver.find(
+      RECYCLE_BIN_OBJECT,
+      { object: RECYCLE_BIN_OBJECT, where: { object_name: object, record_id: { $in: ids } }, fields: ['id', 'record_id'], limit: ids.length },
+      driverOptions,
+    )) ?? []) as Array<Record<string, unknown>>;
+    for (const entry of asMaster) {
+      if (entry.id == null || entry.record_id == null || String(entry.id) === entryId) continue;
+      const key = keyOf(object, String(entry.record_id));
+      if (!held.has(key)) held.set(key, String(entry.id));
+    }
+  }
+  const wanted = new Set(parents.map((p) => keyOf(p.object, p.id)).filter((k) => !held.has(k)));
+  if (wanted.size === 0) return held;
   const walk = keysetWalk<Record<string, unknown>>(
     async (q) => ((await driver.find(
       RECYCLE_BIN_OBJECT,
@@ -427,18 +465,27 @@ async function parentEntryOf(
   for await (const page of walk.pages()) {
     for (const entry of page) {
       if (entry.id == null || String(entry.id) === entryId) continue;
-      const snapshot = parseSnapshot(entry.snapshot);
-      if (snapshot?.rows.some((r) => r.object === parent.object && r.id === parent.id)) return String(entry.id);
+      for (const r of parseSnapshot(entry.snapshot)?.rows ?? []) {
+        const key = keyOf(r.object, r.id);
+        if (!wanted.has(key)) continue;
+        held.set(key, String(entry.id));
+        wanted.delete(key);
+      }
+      if (wanted.size === 0) return held;
     }
   }
   if (walk.truncated) {
-    // A store that did not apply the seek: the walk stopped rather than spin,
-    // and the parent is answered as purged, a refusal either way.
-    this.logger.warn('[recycle-bin] the walk for a parent\'s entry stopped before the end of the bin', {
-      entry: entryId, parentObject: parent.object, parentId: parent.id, scanned: walk.scanned,
-    });
+    // A store that did not apply the seek stopped the walk before the end of
+    // the bin: a defect in the store, so the restore fails rather than refuse
+    // with a reason it did not establish.
+    const err: any = new Error(
+      `Recycle-bin entry '${entryId}' cannot be judged: the walk over the recycle bin for its missing parents ` +
+        `stopped after ${walk.scanned} entries, because the store did not apply the walk's key predicate.`,
+    );
+    err.entryId = entryId;
+    throw err;
   }
-  return undefined;
+  return held;
 }
 
 /** One write the unit made, and how to undo it when no transaction covers it. */

@@ -154,6 +154,27 @@ const task = {
     organization_id: text('organization_id'),
   },
 };
+/** customer ← order (master_detail); account ← line → order: a line has two masters. */
+const customer = { name: 'customer', label: 'Customer', fields: { id: text('id'), name: text('name'), organization_id: text('organization_id') } };
+const order = {
+  name: 'order',
+  label: 'Order',
+  fields: {
+    id: text('id'),
+    customer: { name: 'customer', type: 'master_detail' as const, reference: 'customer' },
+    organization_id: text('organization_id'),
+  },
+};
+const line = {
+  name: 'line',
+  label: 'Line',
+  fields: {
+    id: text('id'),
+    account: { name: 'account', type: 'master_detail' as const, reference: 'account' },
+    order: { name: 'order', type: 'master_detail' as const, reference: 'order' },
+    organization_id: text('organization_id'),
+  },
+};
 /** A live row pointing at an account by a single-valued and a multi-valued `set_null` lookup. */
 const deal = {
   name: 'deal',
@@ -175,7 +196,7 @@ async function makeEngine(options: { withBin?: boolean } = {}) {
   const driver = makeDriver();
   engine.registerDriver(driver, true);
   await engine.init();
-  const objects: any[] = [account, contact, task, deal];
+  const objects: any[] = [account, contact, task, customer, order, line, deal];
   if (options.withBin !== false) objects.push(bin);
   for (const o of objects) engine.registry.registerObject(o as any, '__test__');
   const dispatches: Dispatch[] = [];
@@ -480,6 +501,38 @@ describe('the four refusals (409, ADR-0148 D2): nothing is written and the entry
     await engine.restore(accountEntry, ORG1_USER);
     await expect(engine.restore(taskEntry, ORG1_USER)).resolves.toMatchObject({ recordId: 't1' });
     expect(driver.rowOf('task', 't1')).toMatchObject({ contact: 'c1' });
+  });
+
+  it('asks the bin about every missing parent at once: many rows under one parent held as a cascade row read it a fixed number of times', async () => {
+    // customer cu1 ← order o1; account acc1 ← lines l1..l5 → o1. The account
+    // goes first (E1 = {acc1, l1..l5}), then the customer (E2 = {cu1, o1}):
+    // o1 is no entry's master, E2 holds it as a row.
+    const { engine, driver } = await makeEngine();
+    driver.seed('customer', { id: 'cu1', name: 'Cu', organization_id: 'org_1' });
+    driver.seed('order', { id: 'o1', customer: 'cu1', organization_id: 'org_1' });
+    driver.seed('account', ACME);
+    const lines = ['l1', 'l2', 'l3', 'l4', 'l5'];
+    for (const id of lines) driver.seed('line', { id, account: 'acc1', order: 'o1', organization_id: 'org_1' });
+    await engine.delete('account', { where: { id: 'acc1' }, ...ORG1_USER });
+    await engine.delete('customer', { where: { id: 'cu1' }, ...ORG1_USER });
+    const accountEntry = entryOf(driver, 'acc1').id as string;
+    const customerEntry = entryOf(driver, 'cu1').id as string;
+    expect((entryOf(driver, 'acc1').snapshot as any).rows).toHaveLength(1 + lines.length);
+    expect((entryOf(driver, 'cu1').snapshot as any).rows.map((r: any) => r.id)).toEqual(['cu1', 'o1']);
+
+    const find = driver.find;
+    let binReads = 0;
+    driver.find = async (o: string, ast: any, options: any) => {
+      if (o === 'sys_recycle_bin') binReads += 1;
+      return find(o, ast, options);
+    };
+    await expect(engine.restore(accountEntry, ORG1_USER)).rejects.toMatchObject({
+      code: 'RESTORE_PARENT_IN_RECYCLE_BIN', object: 'line', recordId: 'l1', field: 'order',
+      parentObject: 'order', parentId: 'o1', parentEntryId: customerEntry,
+    });
+    // The entry itself, one master lookup for `order`, one page of the walk.
+    expect(binReads).toBe(3);
+    driver.find = find;
   });
 
   it('a permanent refusal wins over RESTORE_PARENT_IN_RECYCLE_BIN: the parent in the bin is answered only when nothing else stands', async () => {
