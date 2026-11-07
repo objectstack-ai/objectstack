@@ -82,13 +82,6 @@
     {
       "file": "packages/objectql/src/engine.ts",
       "class": "ObjectQL",
-      "member": "constructor",
-      "card": "#30020",
-      "reason": "state-owning: gate reading, constructor logic (a fallback and a branch on an env flag)"
-    },
-    {
-      "file": "packages/objectql/src/engine.ts",
-      "class": "ObjectQL",
       "member": "projectHomeAmountsOntoPatch",
       "card": "#30147",
       "reason": "codemod limit: gate reading, a parameter default computes (calls this.homeAmountServing)"
