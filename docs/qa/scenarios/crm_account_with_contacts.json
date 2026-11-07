@@ -39,6 +39,7 @@
         {"id": "ct5", "full_name": "Eli Moss", "email": "eli@bitworks.test", "account": "ac3"}
       ]
     },
+    "userHandleFields": [{"object": "account", "field": "owner"}],
     "questions": [
       {
         "id": "tech_accounts",
