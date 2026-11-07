@@ -23,6 +23,7 @@ import { SysMetadataObject, SysMetadataHistoryObject, hashSpec, readLegacyOrgani
 import { applyConversionsToStoredItem } from '@objectstack/spec';
 import { lowerFilterCondition, type FilterLoweringOptions } from '@objectstack/spec/data';
 import { PLURAL_TO_SINGULAR } from '@objectstack/spec/shared';
+import { historySnapshotBody } from '../utils/history-snapshot-body.js';
 import type { IDataDriver, IDataEngine, DriverQuery } from '@objectstack/spec/contracts';
 import type { MetadataLoader, MetadataKeyedItem } from './loader-interface.js';
 import { LRUCache } from '../utils/lru-cache.js';
@@ -774,7 +775,18 @@ export class DatabaseLoader implements MetadataLoader {
     const now = new Date().toISOString();
 
     const historyId = generateId();
-    const metadataJson = JSON.stringify(metadata);
+    // [ruling 6677709817 (c)] The snapshot withholds every position the type's
+    // redactor marks not carried forward (a connector's undeclared `auth`
+    // keys), so no history row keeps what the save drains from the live row.
+    // Before the sequence read: a snapshot that cannot be made is skipped, the
+    // write itself having succeeded — this method's posture for every failure.
+    let metadataJson: string;
+    try {
+      metadataJson = JSON.stringify(historySnapshotBody(type, metadata));
+    } catch (error) {
+      console.error(`Failed to create history record for ${type}/${name}:`, error);
+      return;
+    }
 
     // Compute per-org monotonic event_seq. Legacy path: not inside a
     // transaction, so concurrent writers can collide. The SysMetadataRepository
