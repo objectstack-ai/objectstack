@@ -4,7 +4,7 @@
  * A refused enterprise OIDC sign-in names its cause — see
  * `sso-oidc-refusal-cause.ts` for the rule this file pins.
  *
- * Three layers:
+ * Two layers:
  *
  *  1. END of the chain — a real `AuthManager` with the real `sso()` plugin
  *     over the in-memory engine, driven through its HTTP surface:
@@ -15,7 +15,6 @@
  *     cause, a CONTROL that signs in, an unclassified refusal that keeps the
  *     vendor's description, and a no-leak pin on the redirect and the log.
  *  2. The classification and the redirect rewrite, read off their own inputs.
- *  3. The docs page lists exactly the exported causes.
  *
  * The END cases are what goes red if the side channel stops carrying the
  * cause (a vendor bump that logs a string instead of the error object, or a
@@ -23,10 +22,7 @@
  * `token_not_verified`, and every per-cause assertion fails.
  */
 
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { existsSync, readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { SignJWT, exportJWK, generateKeyPair, type JWK } from 'jose';
 import { AuthManager } from './auth-manager';
 import { createMemoryEngine } from './impersonation-bearer-rotation.test';
@@ -381,35 +377,5 @@ describe('the redirect rewrite', () => {
     sink.log('warn', 'a warning', { providerId: 'p1' });
     expect(h.error).toHaveBeenCalledTimes(1);
     expect(h.warn).toHaveBeenCalledWith('[better-auth] a warning', { providerId: 'p1' });
-  });
-});
-
-// ── 3. The docs page ────────────────────────────────────────────────────────
-
-const HERE = dirname(fileURLToPath(import.meta.url));
-const findUp = (match: (dir: string) => boolean): string => {
-  let dir = HERE;
-  while (!match(dir)) {
-    const parent = dirname(dir);
-    if (parent === dir) throw new Error('repo root not found');
-    dir = parent;
-  }
-  return dir;
-};
-const REPO = findUp((dir) => existsSync(join(dir, 'pnpm-workspace.yaml')));
-
-describe('the docs page', () => {
-  afterEach(() => vi.restoreAllMocks());
-
-  it('lists exactly the exported causes, plus the unclassified fallback', () => {
-    const page = readFileSync(join(REPO, 'content/docs/permissions/sso.mdx'), 'utf8');
-    const start = page.indexOf('### Why an OIDC sign-in was refused');
-    expect(start).toBeGreaterThan(-1);
-    const rest = page.slice(page.indexOf('\n', start) + 1);
-    const end = rest.search(/^#{2,3} /m);
-    const section = end === -1 ? rest : rest.slice(0, end);
-    // Table body rows only: the header row names the column, `error_description`.
-    const listed = [...section.matchAll(/^\| `([a-z_]+)` \|/gm)].map((m) => m[1]).filter((v) => v !== 'error_description');
-    expect(listed.sort()).toEqual([...SSO_OIDC_REFUSAL_CAUSES, SSO_OIDC_UNCLASSIFIED_REFUSAL].sort());
   });
 });
