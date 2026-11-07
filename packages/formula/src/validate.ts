@@ -94,8 +94,9 @@ export interface ExprSchemaHint {
    * #1928 tier 4 — field name → spec field type (`'text'`, `'currency'`,
    * `'boolean'`, `'date'`, …). Enables the advisory type-soundness check: a
    * text or boolean field used with an arithmetic/ordering operator against a
-   * number faults at runtime and the expression silently evaluates to `null`,
-   * so it is surfaced as a NON-blocking warning. Absent ⇒ the check is skipped.
+   * number faults at runtime — a formula field reads that fault as `null` —
+   * so it is surfaced as a NON-blocking warning, or as an error where the site
+   * declares its {@link faultOutcome}. Absent ⇒ the check is skipped.
    * Consulted at both scopes: `record.<field>` at a `'record'` site, the bare
    * `<field>` and its `record.<field>` / `previous.<field>` read at a
    * `'flattened'` one (#29959).
@@ -106,9 +107,12 @@ export interface ExprSchemaHint {
    * identifier is legal (#1928):
    *  - `'record'`    → the record is bound only as the `record` namespace, with
    *                    no field flattening (`Field.formula`, object validation
-   *                    predicates). A bare `amount` resolves to nothing and the
-   *                    expression silently evaluates to `null` / never fires, so
-   *                    it MUST be written `record.amount`. We flag bare refs.
+   *                    predicates). A bare `amount` is an unknown variable: the
+   *                    expression faults (`Unknown variable: amount`) instead of
+   *                    reading the field, and the site's fault rule decides the
+   *                    outcome (a formula reads null, a predicate is refused,
+   *                    locked, hidden or skipped), so it MUST be written
+   *                    `record.amount`. We flag bare refs.
    *  - `'flattened'` → the record's own fields are spread to top-level alongside
    *                    flow variables (flow / automation conditions), so bare
    *                    `status` is correct and is NOT an error. Flow variables
@@ -1247,9 +1251,9 @@ function mistypedRootRefusal(
     { name: bare, roots: [...surfaceRoots], suggestion },
     source,
     `unbound root \`${bare}\` — beyond the record this authoring surface binds ` +
-      `\`${surfaceRoots.join('`, `')}\`, and \`${bare}\` is none of them, so \`${bare}.…\` ` +
-      `resolves to nothing and the expression silently evaluates to null. ` +
-      `Did you mean \`${suggestion}\`?`,
+      `\`${surfaceRoots.join('`, `')}\`, and \`${bare}\` is none of them: \`${bare}.…\` ` +
+      `is an unknown variable, so the expression faults with \`Unknown variable: ${bare}\` ` +
+      `instead of reading it. Did you mean \`${suggestion}\`?`,
   );
 }
 
@@ -1492,8 +1496,11 @@ export function validateExpression(
               { name: bare },
               source,
               `bare reference \`${bare}\` — a formula/validation expression binds the record as the ` +
-                `\`record\` namespace, not at top level, so \`${bare}\` resolves to nothing and the ` +
-                `expression silently evaluates to null. Write \`record.${bare}\`.`,
+                `\`record\` namespace, not at top level, so \`${bare}\` is an unknown variable and the ` +
+                `expression faults with \`Unknown variable: ${bare}\` instead of reading the field. The ` +
+                `site's fault rule decides the outcome (a formula field reads null, an \`error\` ` +
+                `validation rule refuses the write, an action's \`visible\` hides the action). ` +
+                `Write \`record.${bare}\`.`,
             ),
         );
       } else if (schema.fieldTypes) {
