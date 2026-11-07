@@ -424,6 +424,71 @@ describe('the record data tools: a code-less throw answers what the /data door a
   });
 });
 
+/**
+ * [#31246] A CODED sandboxed refusal. A QuickJS hook (or action) body that runs
+ * `throw Object.assign(new Error(SENTENCE), { code: 'RECORD_LOCKED', status: 409 })`
+ * leaves the runner as this `SandboxError` (measured on the real
+ * `QuickJSScriptRunner`): `.message` is the `hook '<name>' threw: Error: …`
+ * debug wrapper, `.innerMessage` the sentence the author addressed to the
+ * caller, `code` and `status` as declared.
+ */
+const SANDBOX_SENTENCE = 'A finished invoice cannot be changed.';
+const SANDBOX_WRAPPER = `hook 'demo_invoice_guard' threw: Error: ${SANDBOX_SENTENCE}`;
+function codedSandboxRefusal(): Error {
+  return Object.assign(new Error(SANDBOX_WRAPPER), {
+    name: 'SandboxError',
+    innerMessage: SANDBOX_SENTENCE,
+    code: 'RECORD_LOCKED',
+    status: 409,
+  });
+}
+
+/**
+ * [#31246] Every tool renders a coded sandboxed refusal as the body's own
+ * sentence beside its code and status. `thrownRefusalEnvelope` read `.message`,
+ * so each answered the wrapper, the hook's internal name included, where
+ * `/api/v1/data` answers the inner sentence. It now reads the sentence through
+ * `sandboxBusinessMessage` (`@objectstack/types`), the read that door makes.
+ */
+describe('every tool: a coded sandboxed refusal answers the body\'s sentence, never the wrapper naming the hook (#31246)', () => {
+  for (const site of SITES) {
+    it(`${site.tool}: RECORD_LOCKED, the inner sentence and 409; the hook name is absent`, async () => {
+      const thrown = codedSandboxRefusal();
+      const result = await callTool(site, thrown);
+      expect(result.isError).toBe(true);
+      expect(result.content).toHaveLength(1);
+      expect(JSON.parse(result.content[0].text)).toEqual({
+        error: { code: 'RECORD_LOCKED', message: SANDBOX_SENTENCE, status: 409 },
+      });
+      // The answer the data door gives the same throw.
+      const door = mapDataError(thrown, 'task');
+      expect([door.body.code, door.body.error, door.status]).toEqual(['RECORD_LOCKED', SANDBOX_SENTENCE, 409]);
+      expect(result.content[0].text).not.toContain('demo_invoice_guard');
+      expect(result.content[0].text).not.toContain('threw');
+    });
+  }
+
+  // CONTROL: a READ of the field the sandbox populated, never a strip of the
+  // wrapper's prose. A coded refusal that is not a sandbox's renders byte for
+  // byte as before, even when its own sentence reads like the wrapper.
+  it('CONTROL: a coded non-sandbox refusal renders its own message byte for byte, wrapper-like prose included', async () => {
+    const query = SITES.find((s) => s.tool === 'query_records')!;
+    for (const thrown of [
+      Object.assign(new Error('The period is closed.'), { code: 'RECORD_LOCKED', status: 409 }),
+      Object.assign(new Error(SANDBOX_WRAPPER), { code: 'RECORD_LOCKED', status: 409 }),
+      Object.assign(new Error(SANDBOX_WRAPPER), { name: 'SandboxError', innerMessage: '', code: 'RECORD_LOCKED', status: 409 }),
+    ]) {
+      expect(await callTool(query, thrown), thrown.message).toEqual({
+        content: [{
+          type: 'text',
+          text: JSON.stringify({ error: { code: 'RECORD_LOCKED', message: thrown.message, status: 409 } }, null, 2),
+        }],
+        isError: true,
+      });
+    }
+  });
+});
+
 describe('the record resource: a coded refusal adds its code beside the unchanged sentence (#23509)', () => {
   const URI = 'objectstack://objects/task/records/t1';
 
@@ -474,6 +539,18 @@ describe('the record resource: a coded refusal adds its code beside the unchange
       error: 'Field read denied: salary',
       code: 'PERMISSION_DENIED',
     });
+  });
+
+  it('[#31246] a coded sandboxed refusal: `error` is the inner sentence, beside its code and status', async () => {
+    const text = await readRefused(codedSandboxRefusal());
+    expect(JSON.parse(text)).toEqual({ error: SANDBOX_SENTENCE, code: 'RECORD_LOCKED', status: 409 });
+    expect(text).not.toContain('demo_invoice_guard');
+  });
+
+  it('[#31246] CONTROL: a coded non-sandbox refusal keeps its own sentence, wrapper-like prose included', async () => {
+    expect(await readRefused(Object.assign(new Error(SANDBOX_WRAPPER), { code: 'RECORD_LOCKED', status: 409 }))).toBe(
+      JSON.stringify({ error: SANDBOX_WRAPPER, code: 'RECORD_LOCKED', status: 409 }),
+    );
   });
 
   it('a code-less throw answers `{ error }` byte-identically', async () => {
