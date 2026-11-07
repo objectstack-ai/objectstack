@@ -376,6 +376,20 @@ drive this MCP server. Same word, different layer.
   person publishes in the UI); it is served only to a token that carries it,
   never to an API key or a session, and every authoring call is still checked
   against the caller's own metadata permission.
+- **A person can withdraw an assistant they authorized, at any time.**
+  `GET /api/v1/auth/authorized-clients` lists the assistants the signed-in
+  person authorized (each row's `id` is the grant), and
+  `POST /api/v1/auth/authorized-clients/withdraw` with `{ "id": "…" }` revokes
+  one: the grant and the client's refresh tokens are deleted, so the
+  assistant's token is refused on its very next call and the assistant must
+  be authorized again to reconnect. Only the person's own grant is withdrawn;
+  an id that is someone else's answers `404`, exactly as one that names
+  nothing. A platform administrator does the same for a person with
+  `GET /api/v1/auth/admin/authorized-clients?userId=…` and
+  `POST /api/v1/auth/admin/authorized-clients/withdraw` with
+  `{ "userId": "…", "id": "…" }`; anyone else is refused `403`. The SDK
+  spells them `oauth.authorizedClients.list()` / `withdraw(id)` and
+  `listForUser(userId)` / `withdrawForUser(userId, id)`.
 - **Action bodies run as trusted app code** once invoked (the `ai.exposed`
   gate and `requiredPermissions` are checked at *invoke* time). Treat writing
   an action as a code-review-worthy act — that's the real security boundary.
