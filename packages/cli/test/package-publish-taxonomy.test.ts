@@ -86,7 +86,7 @@ describe('os package publish — the marketplace taxonomy', () => {
     }
   }
 
-  const BASE = { name: 'acme-crm', specVersion: '^18.0.0' };
+  const BASE = {};
 
   describe('the retired category', () => {
     it('refuses a manifest `category` before any network call, naming the facets for its value', async () => {

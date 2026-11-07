@@ -330,6 +330,13 @@ const ko = {
       loadFailed: "목록을 불러오지 못했습니다. 이름을 직접 입력할 수 있습니다.",
       notFound: "{{name}} (찾을 수 없음)",
     },
+    preferenceOption: {
+      allTopics: "모든 주제 ({{value}})",
+      allChannels: "모든 채널 ({{value}})",
+      notConfigured: "{{value}} (구성되지 않음)",
+      notInList: "{{value}} (목록에 없음)",
+      useTyped: '"{{value}}" 사용',
+    },
     recipient: {
       selectTypeFirst: "먼저 수신자 유형을 선택하세요.",
       loading: "로딩 중…",

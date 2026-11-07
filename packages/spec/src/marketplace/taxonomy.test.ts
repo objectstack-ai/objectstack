@@ -68,7 +68,7 @@ const PACKAGE_ROW = {
   createdBy: 'usr_1',
 };
 const CREATE_REQUEST = { manifestId: 'com.acme.crm', ownerOrgId: 'org_1', displayName: 'Acme CRM', createdBy: 'usr_1' };
-const TEMPLATE_MANIFEST = { name: 'acme-crm', specVersion: '^18.0.0', displayName: 'Acme CRM' };
+const TEMPLATE_MANIFEST = { displayName: 'Acme CRM' };
 const LISTING = {
   id: 'listing-001',
   packageId: 'com.acme.crm',

@@ -11,7 +11,7 @@ import {
 import { OWNERSHIP_QUEUE_SOURCE_SLOT, describeMissingOwnershipQueueService } from './assignment-rules.js';
 import { OWNERSHIP_QUEUE_SERVICE } from '@objectstack/spec/contracts';
 import { assembleMetadataProtocol, isServedOverrideRowOf } from '@objectstack/metadata-protocol';
-import { isTenantAuthored, readLegacyOrganizationRows } from '@objectstack/metadata-core';
+import { installedManifestsOf, isTenantAuthored, readLegacyOrganizationRows } from '@objectstack/metadata-core';
 import type { MetadataAuthoringChannel } from '@objectstack/metadata-protocol';
 import { Plugin, PluginContext } from '@objectstack/core';
 import { resolveArtifactPackageEntries, artifactPackageId, readDeploymentOrgScopingEntitlement } from '@objectstack/core';
@@ -3839,14 +3839,15 @@ export class ObjectQLPlugin implements Plugin {
   private isDeclaredArtifactActionOverride(row: unknown, action: any): boolean {
     const registry: any = this.ql?.registry;
     if (!registry || typeof registry.getArtifactItem !== 'function') return false;
+    const installed = installedManifestsOf(registry);
     const artifact: any = registry.getArtifactItem('action', action.name);
     if (artifact === undefined || artifact === null) {
-      return isServedOverrideRowOf(row as any, action?.overrides?.package);
+      return isServedOverrideRowOf(row as any, action?.overrides?.package, installed);
     }
     const base = artifact?._packageId;
     if (typeof base !== 'string' || base === '') return false;
     if (standaloneActionOwnerKey(artifact) !== standaloneActionOwnerKey(action)) return false;
-    return isServedOverrideRowOf(row as any, base);
+    return isServedOverrideRowOf(row as any, base, installed);
   }
 
   /**

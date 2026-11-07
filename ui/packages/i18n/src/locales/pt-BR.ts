@@ -333,6 +333,13 @@ const pt = {
       loadFailed: "Não foi possível carregar a lista. Você ainda pode digitar o nome.",
       notFound: "{{name}} (não encontrado)",
     },
+    preferenceOption: {
+      allTopics: "Todos os tópicos ({{value}})",
+      allChannels: "Todos os canais ({{value}})",
+      notConfigured: "{{value}} (não configurado)",
+      notInList: "{{value}} (fora da lista)",
+      useTyped: 'Usar "{{value}}"',
+    },
     recipient: {
       selectTypeFirst: "Selecione primeiro um tipo de destinatário.",
       loading: "Carregando…",

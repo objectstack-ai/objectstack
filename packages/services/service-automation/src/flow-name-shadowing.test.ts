@@ -32,6 +32,10 @@ import { SchemaRegistry } from '@objectstack/objectql';
 import { AutomationEngine } from './engine.js';
 import { resolveFlowPrecedence, describeFlowContender, renderFlowContender } from './flow-precedence.js';
 import { bindStoredRow } from '@objectstack/metadata-protocol';
+import { installedManifestsOf } from '@objectstack/metadata-core';
+
+/** Nothing installed: the pair lookup reads no manifest while `appOf` is the identity. */
+const NOTHING_INSTALLED = installedManifestsOf(undefined);
 
 const FLOW = 'opportunity_approval';
 const silentLogger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() } as any;
@@ -92,7 +96,7 @@ function bootPull(registry: any, logger: { warn(m: string, meta?: unknown): void
     const engine = new AutomationEngine(silentLogger);
     engine.setPackagedFlowSource(loaderSetOf(registry));
     const listed = registry.listItems('flow') as unknown[];
-    const resolved = resolveFlowPrecedence(listed, logger, (name) => engine.packagedFlowOwner(name));
+    const resolved = resolveFlowPrecedence(listed, logger, (name) => engine.packagedFlowOwner(name), NOTHING_INSTALLED);
     for (const entry of resolved) {
         engine.registerFlow(entry.name, entry.definition as never);
         if (entry.shadowing) engine.recordFlowShadowing(entry.shadowing);
@@ -212,8 +216,8 @@ describe('#11997 — precedence is a total order, not an iteration order', () =>
         // The loader's set names ONE owner per name; the second package's
         // entry is told apart by the registry's per-entry artifact test.
         const loaderSet = setOf({ [FLOW]: 'alpha' });
-        const forward = resolveFlowPrecedence([a, b], silentLogger, loaderSet);
-        const backward = resolveFlowPrecedence([b, a], silentLogger, loaderSet);
+        const forward = resolveFlowPrecedence([a, b], silentLogger, loaderSet, NOTHING_INSTALLED);
+        const backward = resolveFlowPrecedence([b, a], silentLogger, loaderSet, NOTHING_INSTALLED);
 
         expect((forward[0].definition as any).label).toBe('FROM_ALPHA');
         expect((backward[0].definition as any).label).toBe('FROM_ALPHA');
@@ -225,7 +229,7 @@ describe('#11997 — precedence is a total order, not an iteration order', () =>
         const after = { ...flowBody('zzz_last', 'Z') };
         const resolved = resolveFlowPrecedence(
             [before, packagedBody(), after, runtimeBody()],
-            silentLogger,
+            silentLogger, undefined, NOTHING_INSTALLED,
         );
         expect(resolved.map((r) => r.name)).toEqual(['aaa_first', FLOW, 'zzz_last']);
     });
@@ -237,16 +241,16 @@ describe('#11997 — precedence is a total order, not an iteration order', () =>
         // `loadMetaFromDb` rehydrates overlay rows with a synthetic
         // `_packageId = 'sys_metadata'` (ADR-0005 §Provenance edge case). A
         // bare `_packageId` truthiness test would misread it as packaged.
-        expect(describeFlowContender({ name: FLOW, _packageId: 'sys_metadata' }, loaderSet)).toEqual({
+        expect(describeFlowContender({ name: FLOW, _packageId: 'sys_metadata' }, loaderSet, NOTHING_INSTALLED)).toEqual({
             source: 'runtime',
             packageId: 'sys_metadata',
         });
         // And a tenant-authored overlay bound to a REAL package id is runtime
         // too — provenance is the axis, not the id (cloud#970).
         expect(
-            describeFlowContender({ name: FLOW, _packageId: 'app.built_by_studio', _provenance: 'org' }, loaderSet),
+            describeFlowContender({ name: FLOW, _packageId: 'app.built_by_studio', _provenance: 'org' }, loaderSet, NOTHING_INSTALLED),
         ).toEqual({ source: 'runtime', packageId: 'app.built_by_studio' });
-        expect(describeFlowContender({ name: FLOW, _packageId: 'crm' }, loaderSet)).toEqual({
+        expect(describeFlowContender({ name: FLOW, _packageId: 'crm' }, loaderSet, NOTHING_INSTALLED)).toEqual({
             source: 'package',
             packageId: 'crm',
         });
@@ -256,7 +260,7 @@ describe('#11997 — precedence is a total order, not an iteration order', () =>
         const packaged = { ...flowBody(FLOW, 'PACKAGED'), _packageId: 'crm' };
         const tenant = { ...flowBody(FLOW, 'TENANT'), _packageId: 'crm', _provenance: 'org' };
         for (const listed of [[packaged, tenant], [tenant, packaged]]) {
-            const resolved = resolveFlowPrecedence(listed, silentLogger, setOf({ [FLOW]: 'crm' }));
+            const resolved = resolveFlowPrecedence(listed, silentLogger, setOf({ [FLOW]: 'crm' }), NOTHING_INSTALLED);
             expect((resolved[0].definition as any).label).toBe('PACKAGED');
         }
     });

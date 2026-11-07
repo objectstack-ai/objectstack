@@ -103,6 +103,15 @@ const FIELD_DEFAULTS: Record<string, string> = {
   // the `en` pack.
   'fields.registryRef.loadFailed': 'The list could not be loaded. You can still type the name.',
   'fields.registryRef.notFound': '{{name}} (not found)',
+  // #30208 row 6 — the fillable arm (`notification-topic` /
+  // `notification-channel`): the `*` entry's two faces, a channel the
+  // deployment cannot send on, a value the list does not hold, and the row
+  // that commits the typed text as written. Same values as the `en` pack.
+  'fields.preferenceOption.allTopics': 'All topics ({{value}})',
+  'fields.preferenceOption.allChannels': 'All channels ({{value}})',
+  'fields.preferenceOption.notConfigured': '{{value}} (not configured)',
+  'fields.preferenceOption.notInList': '{{value}} (not in the list)',
+  'fields.preferenceOption.useTyped': 'Use "{{value}}"',
   'fields.recipient.selectTypeFirst': 'Select a recipient type first.',
   'fields.recipient.loading': 'Loading…',
   'fields.recipient.search': 'Search…',

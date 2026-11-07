@@ -47,6 +47,7 @@ import {
     getMetadataTypeSchema,
 } from '@objectstack/spec/kernel';
 import { pairOf } from '@objectstack/metadata-core';
+import { installedManifestsOfEngine } from './installed-manifests.js';
 import { storedBodyForCarryForward } from './protocol-credential-carry-forward.js';
 import type { Equal, MetaTypesListing } from './protocol-meta-types-listing.js';
 import {
@@ -405,9 +406,9 @@ export class ProtocolDiscoveryAndBasesFacet {
      * So the bundle is exactly the pair's share of the catalog the deployment
      * serves, with its package kept.
      */
-    static async getPairTranslationBundle(host: Pick<ProtocolHost, 'findEnvironmentRows'>, basePackageId: string): Promise<TranslationBundle | undefined> {
+    static async getPairTranslationBundle(host: Pick<ProtocolHost, 'engine' | 'findEnvironmentRows'>, basePackageId: string): Promise<TranslationBundle | undefined> {
         if (typeof basePackageId !== 'string' || basePackageId === '') return undefined;
-        const pair = pairOf(basePackageId);
+        const pair = pairOf(basePackageId, installedManifestsOfEngine(host.engine));
         if (!pair.ok) return undefined;
         const layer = await readAuthoredTranslationLayer({
             find: (table: string, opts: { where?: Record<string, unknown>; [key: string]: unknown } = {}) =>

@@ -1,8 +1,6 @@
 {
   "$schema": "https://schemas.objectstack.dev/template-manifest.json",
   "manifestId": "app.objectstack.connector-stripe",
-  "name": "connector-stripe",
-  "specVersion": "^18.0.0",
   "displayName": "Stripe",
   "description": "Read Stripe customers, charges, invoices and payment intents from flows, over Stripe's own OpenAPI document. Read only.",
   "businessFunctions": ["finance"],

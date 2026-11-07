@@ -83,11 +83,12 @@ command for this move; it is four steps you run yourself.
    what older scaffolds wrote) moves entirely here. Read whatever
    peer-dependency warnings this prints — the `--frozen-lockfile` install your CI
    runs skips resolution and will never print them.
-3. **Check the two protocol declarations your app ships** — `specVersion` in
-   `objectstack.manifest.json`, and `engines.protocol` in your `defineStack`
-   manifest. Both name the protocol **major**, so a move inside one major leaves
-   both alone, and a major boundary is where they change. Move them deliberately
-   when you cross one; never edit them to silence a mismatch.
+3. **Check the protocol declaration your app ships** — `engines.protocol` in
+   your `defineStack` manifest. It names the protocol **major**, so a move inside
+   one major leaves it alone, and a major boundary is where it changes. Move it
+   deliberately when you cross one; never edit it to silence a mismatch. (An
+   older scaffold also wrote `specVersion` into `objectstack.manifest.json`.
+   Nothing ever read it, and spec 18 retired it: delete it.)
 4. **Re-install the AI skills from the moved catalog, and commit them.** The
    skills your coding agent reads come from the `@objectstack/skills` dev
    dependency, which moves only with the other `@objectstack/*` packages — in

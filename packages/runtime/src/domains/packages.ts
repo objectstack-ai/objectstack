@@ -37,7 +37,7 @@ import { OBJECT_SCHEMA_READ_ONLY_EXEMPT_CAPABILITIES, isCodeArtifactBody } from 
 // sources, each read from its owner: the pair's id and a pair's base
 // (`@objectstack/spec/kernel`, the one spelling of the suffix), and the
 // activation ledger's one reader (`@objectstack/core`).
-import { customizationBasePackageId, customizationPackageId } from '@objectstack/spec/kernel';
+import { customizationBasePackageId } from '@objectstack/spec/kernel';
 import { listPackageMetadataActivations, METADATA_ACTIVATION_TABLE } from '@objectstack/core';
 import type { GetPackageCustomizationsResponse } from '@objectstack/spec/api';
 // [ADR-0131 D3 · D12 items 7–8] The walled refusal's one predicate, asked by
@@ -57,6 +57,11 @@ import {
     isProtocolIncompatibleError,
     protocolIncompatibleAnswer,
     type InstalledDependencyRecord,
+    // [ADR-0146 D3 · ruling record 6691022506] The pair of a package, looked up
+    // through the App that carries it, over the engine registry's manifests.
+    installedManifestsOf,
+    pairOf,
+    type InstalledPackageSource,
 } from '@objectstack/metadata-core';
 // [#7560] ADR-0070's read-only-package rule — the SAME predicate the metadata
 // authoring path asks before refusing a write INTO a platform package
@@ -657,19 +662,21 @@ function packageIsUnknown(registry: unknown, id: string): boolean {
  *     `capability`, the code-only types) is refused at the save door naming
  *     the route that type has ("new similar", the switch), and a locked item
  *     `ITEM_LOCKED` naming the lock (ADR-0010 §3.3);
- *   - a package the ensure door cannot pair — no namespace, a pair namespace
- *     another package owns, a version that is not SemVer — is refused there,
+ *   - a package the ensure door cannot pair — a kernel package, no namespace,
+ *     a pair namespace another package owns, a version that is not SemVer — is
+ *     refused there,
  *     naming why (ADR-0146 D3).
  * Both refusals name their own reason, so the sentence names the door rather
  * than a list of types or package shapes that could drift from them.
  *
- * An id the pairing rule derives no pair for (`customizationPackageId`,
- * `@objectstack/spec/kernel`) gets the sentence without a pair id: the ensure
- * door answers that id with the reason it has none.
+ * An id the pair lookup derives no pair for (`pairOf`,
+ * `@objectstack/metadata-core`, over the engine registry's installed
+ * manifests) gets the sentence without a pair id: the ensure door answers that
+ * id with the reason it has none.
  */
-function customizeInPairRemedy(id: string): string {
+function customizeInPairRemedy(id: string, engine: unknown): string {
     const ensure = `POST /api/v1/packages/${id}/ensure-customization`;
-    const pair = customizationPackageId(id);
+    const pair = pairOf(id, installedManifestsOf((engine as { registry?: InstalledPackageSource } | null | undefined)?.registry));
     if (!pair.ok) {
         return `customize what it ships in its paired customization package (ADR-0146 D3): ${ensure} answers `
             + 'that package, or why this one has none.';
@@ -694,7 +701,7 @@ function requireWritablePackage(
             `[writable_package_required] Cannot ${action} package '${id}': it is read-only `
             + `(provided by code or an installed app). Packages the deployment ships are managed by `
             + `the deployment, not over this API — ${action} a package you own, or `
-            + customizeInPairRemedy(id),
+            + customizeInPairRemedy(id, engine),
             422,
             {
                 code: 'WRITABLE_PACKAGE_REQUIRED',
@@ -1492,7 +1499,7 @@ function requireDuplicableSource(
             + `(provided by code or an installed app), and duplicate clones a writable base's `
             + `stored metadata rows. A code package's metadata is delivered as code, so there are `
             + `no rows to clone and the copy would be empty (ADR-0070 D4 duplicates a BASE). `
-            + `Duplicate a base you own, or ${customizeInPairRemedy(id)} `
+            + `Duplicate a base you own, or ${customizeInPairRemedy(id, engine)} `
             + `For an editable copy of the whole package, install it unmanaged instead `
             + `(installMode 'unmanaged'), where its manifest's installModes permits that.`,
             422,
@@ -3982,8 +3989,8 @@ async function readPackageCustomizations(
 ): Promise<GetPackageCustomizationsResponse> {
     const overrides = await listServedOverrides({ packageId: baseId });
 
-    const pair = customizationPackageId(baseId);
     const registry = ql?.registry;
+    const pair = pairOf(baseId, installedManifestsOf(registry));
     type Extension = GetPackageCustomizationsResponse['extensions'][number];
     const extensions: Extension[] = [];
     if (pair.ok && typeof registry?.getAllObjects === 'function') {

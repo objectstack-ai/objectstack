@@ -272,7 +272,7 @@ export { unmanagedInstallPostureRefusal } from './package-unmanaged-install.js';
 // install primitive and the duplicate ask it; exported so `POST /packages`
 // (`@objectstack/runtime`) asks the same one ahead of both its install limbs,
 // its no-protocol fallback included, instead of keeping a second copy.
-export { customizationPairManifestRefusal } from './protocol-customization-package.js';
+export { customizationPairManifestRefusal, kernelPackageScope } from './protocol-customization-package.js';
 
 // [ADR-0029 D7] The refusal of `navigationContributions` on a package created
 // at runtime, whose install never registers them. The install primitive asks

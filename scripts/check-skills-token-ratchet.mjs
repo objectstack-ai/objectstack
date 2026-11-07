@@ -1051,7 +1051,18 @@ export const CEILINGS = new Map([
   // 花板,怎么付?」, tap A, verbatim and untranslated: 「A:先削重复,余额按实测提高」.
   ['skills/objectstack-data/references/seeds.md', 1566],
   ['skills/objectstack-platform/references/bootstrap.md', 1351],
-  ['skills/objectstack-platform/references/operations.md', 3108],
+  // 3108 -> 3287: `os deploy`, the managed-package dev loop — when to deploy
+  // rather than publish a release, its entry points, how it picks the
+  // environment, its flags, and how to read its exit 1 (refusal before any
+  // write, the environment's build failure, the wait timeout). Paid first by
+  // deleting restatement in the same file (the `os dev` row's platform-admin
+  // sentence, homed in the Setup / Studio pitfall; the `os validate` row's
+  // gate summary and the "Both run the same gates:" lead-in, homed in Verify
+  // your work; the Docker row's list of the image's three variables, homed in
+  // the image pitfall row); the remainder, +179 measured, raises the row,
+  // pinned at the measurement. Maintainer ruling 2026-10-27 on the decision card 「skills 修复卡的教学和 eval 都撞 token 天
+  // 花板,怎么付?」, tap A, verbatim and untranslated: 「A:先削重复,余额按实测提高」.
+  ['skills/objectstack-platform/references/operations.md', 3287],
   ['skills/objectstack-platform/references/plugin-development.md', 3137],
   ['skills/objectstack-upgrade/references/examples-upgrade.md', 1197],
 

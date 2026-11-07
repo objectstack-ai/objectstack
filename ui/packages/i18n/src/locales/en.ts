@@ -475,6 +475,13 @@ const en = {
       loadFailed: 'The list could not be loaded. You can still type the name.',
       notFound: '{{name}} (not found)',
     },
+    preferenceOption: {
+      allTopics: 'All topics ({{value}})',
+      allChannels: 'All channels ({{value}})',
+      notConfigured: '{{value}} (not configured)',
+      notInList: '{{value}} (not in the list)',
+      useTyped: 'Use "{{value}}"',
+    },
     recipient: {
       selectTypeFirst: 'Select a recipient type first.',
       loading: 'Loading…',

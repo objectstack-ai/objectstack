@@ -2366,6 +2366,17 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'is the semantic entry `marketplace-category-retired`.',
   },
   {
+    id: 'marketplace-template-manifest-inert-keys-retired',
+    order: 120,
+    text:
+      'It also retires five `objectstack.manifest.json` keys nothing read — `name`, `specVersion`, `skills`, '
+      + '`scaffold`, and `visibility`, which `os package publish` only warned it ignores: the slug lives in '
+      + '`package.json`, the protocol handshake in the stack\'s `engines.protocol`, the skills install is the whole '
+      + 'catalog, and visibility is the `--visibility` flag. Each key is a retiredKey tombstone with no D2 '
+      + 'conversion, because this file is not a stack collection member; the D3 record is the semantic entry '
+      + '`marketplace-template-manifest-inert-keys-retired`.',
+  },
+  {
     id: 'memory-persistence-placeholder-refused',
     order: 1,
     text:

@@ -188,8 +188,6 @@ describe('TemplateManifestSchema declares namespace as a scaffold-only extra', (
     return {
       manifestId: 'com.acme.blank',
       displayName: 'Blank Starter',
-      name: 'blank',
-      specVersion: '^6.0.0',
       ...overrides,
     };
   }

@@ -62,6 +62,7 @@ import {
   resolveRelatedTitleTarget,
   resolveServedRecordTitle,
   servedRecordTitle,
+  refuseAppAuthoredPermanentDelete,
   type FormulaServingChannel,
 } from '@objectstack/objectql';
 import { deriveThroughSeam, refuseStoredMetadataBodyReads, refuseStoredMetadataBodyWrites } from '../stored-metadata-reader-seam.js';
@@ -1182,72 +1183,25 @@ function buildSandboxApi(engineCtx: any, ql: any, errLabel: string) {
 const BODY_PERMANENT_DELETES_REFUSED = Symbol.for('objectstack.runtime.bodyPermanentDeletesRefused');
 
 /**
- * The refusal of a body's `delete(…, { permanent })`: `400 VALIDATION_ERROR`,
- * `param: 'permanent'`. The message names the rule, because a job that asked
- * for a purge has to learn it got none: dropping the key would delete into the
- * bin and answer success, which reads as the purge it asked for.
- */
-function bodyPermanentDeleteRefusal(objectName: string, errLabel: string): Error {
-  const err: any = new Error(
-    `A ${errLabel} cannot delete a record permanently: app-authored code cannot purge; ` +
-      `its deletes enter the recycle bin. Remove 'permanent' from the delete of '${objectName}'.`,
-  );
-  err.developerMessage =
-    `'permanent' was passed to ctx.api.object('${objectName}').delete() in a ${errLabel}. App-authored code ` +
-    `(hook, action and job bodies) cannot erase a record past the recycle bin, under any execution context, ` +
-    `a job's system envelope included; the permanent delete stays with a principal holding manageRecycleBin ` +
-    `(ADR-0148 D3).`;
-  err.code = 'VALIDATION_ERROR';
-  err.status = 400;
-  err.httpStatus = 400;
-  err.param = 'permanent';
-  err.object = objectName;
-  return err;
-}
-
-/**
- * One repository as a body holds it: `delete(options)` whose `options` carry a
- * `permanent` key with any value but `false` is refused before the underlying
- * verb is called, so nothing is removed and no bin entry is skipped. `false`
- * and an absent key are the ordinary delete, and go through unchanged. Every
- * other member is handed through.
- */
-function refuseRepositoryPermanentDelete(objectName: string, repo: unknown, errLabel: string): unknown {
-  if (repo === null || typeof repo !== 'object') return repo;
-  return new Proxy(repo as Record<PropertyKey, unknown>, {
-    get(target, prop) {
-      const value = Reflect.get(target, prop, target);
-      if (typeof value !== 'function') return value;
-      if (prop !== 'delete') return value.bind(target);
-      return async (...args: unknown[]) => {
-        const options = args[0];
-        if (options !== null && typeof options === 'object') {
-          const permanent = (options as { permanent?: unknown }).permanent;
-          if (permanent !== undefined && permanent !== false) {
-            throw bodyPermanentDeleteRefusal(objectName, errLabel);
-          }
-        }
-        return value.apply(target, args);
-      };
-    },
-  });
-}
-
-/**
  * [ADR-0148 D3, ruling A recorded in 6691358077] The scoped API a sandboxed
  * BODY (a hook, action or job body) holds, with the permanent delete refused:
  * app-authored code cannot purge a record, so its deletes always enter the
  * recycle bin. A job body runs under a fresh `{ isSystem: true, tenantId }`
  * envelope and the system is never refused the engine's `purge` verb, so the
  * rule is held here, at the one place every body face gets its API, and not by
- * the engine, whose `delete(…, { permanent: true })` stays open to every other
- * caller. Every context the API derives (`object(name)`, `sudo()`,
- * `withRunAs(...)`, a transaction's context) is refused the same way.
- * Idempotent.
+ * the engine's `delete`, whose `delete(…, { permanent: true })` stays open to
+ * every caller that is not app-authored. Every context the API derives
+ * (`object(name)`, `sudo()`, `withRunAs(...)`, a transaction's context) is
+ * refused the same way. Idempotent.
+ *
+ * The refusal itself is objectql's `refuseAppAuthoredPermanentDelete`, the
+ * same one the engine's `ScopedContext.object()` applies to an app-authored
+ * hook's api, so a hook's in-process `handler` and every body are refused with
+ * one code and one sentence.
  */
 function refuseBodyPermanentDeletes<T>(api: T, errLabel: string): T {
   return deriveThroughSeam(api, BODY_PERMANENT_DELETES_REFUSED, (name, repo) =>
-    refuseRepositoryPermanentDelete(name, repo, errLabel),
+    refuseAppAuthoredPermanentDelete(name, repo, errLabel),
   );
 }
 

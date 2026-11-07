@@ -44,13 +44,14 @@
  * not move.
  */
 
-import { pairOf } from '@objectstack/metadata-core';
+import { pairOf, type InstalledManifestLookup } from '@objectstack/metadata-core';
 import { PLURAL_TO_SINGULAR, SINGULAR_TO_PLURAL } from '@objectstack/spec/shared';
 import type { StoredOverlayRow } from './item-lock.js';
 import { overlayMemberWhere } from './migrations/overlay-index.js';
 import type { ObjectStackProtocolImplementation } from './protocol.js';
 import { rowMatchesOverlayWhere, servedOverlayRowCandidates } from './protocol.js';
 import { isServedOverrideRowOf } from './served-override.js';
+import { installedManifestsOfEngine } from './installed-manifests.js';
 
 /**
  * The `ObjectStackProtocolImplementation` members the functions below read —
@@ -96,7 +97,7 @@ export async function findEnvironmentRow(this: Pick<EnvironmentRowsHost, 'engine
 
 /** The body of `ObjectStackProtocolImplementation#findServedOverlayRow`; the method's docblock there is its contract. */
 export async function findServedOverlayRow(
-    this: Pick<EnvironmentRowsHost, 'findEnvironmentRow'>,
+    this: Pick<EnvironmentRowsHost, 'engine' | 'findEnvironmentRow'>,
     args: {
     type: string;
     name: string;
@@ -117,7 +118,8 @@ export async function findServedOverlayRow(
     // collision would serve package B's customization for a package A
     // read); with no package context (legacy/runtime reader), any row.
     const other = PLURAL_TO_SINGULAR[args.type] ?? SINGULAR_TO_PLURAL[args.type];
-    for (const candidate of servedOverlayRowCandidates({ packageId: args.packageId, servedOverride: args.servedOverride })) {
+    const installed = installedManifestsOfEngine(this.engine);
+    for (const candidate of servedOverlayRowCandidates({ packageId: args.packageId, servedOverride: args.servedOverride, installed })) {
         const type = candidate.spelling === 'canonical' ? args.type : other;
         if (type === undefined) continue;
         const where: Record<string, unknown> = {
@@ -142,7 +144,7 @@ export async function findServedOverlayRow(
         // package ({@link isServedOverrideRowOf}, on the row's own binding and
         // body): an undeclared row of the pair is the pair's own item.
         if (candidate.overrideOf !== undefined) {
-            if (isServedOverrideRowOf(row, candidate.overrideOf)) return { row, overrideOf: candidate.overrideOf };
+            if (isServedOverrideRowOf(row, candidate.overrideOf, installed)) return { row, overrideOf: candidate.overrideOf };
             continue;
         }
         return { row };
@@ -290,9 +292,14 @@ export function soleShippingPackage(shipped: readonly unknown[]): string | undef
  * PR #28777). A declared override is served as the base's item by the
  * served-row resolution and is never asked about here.
  */
-export function baseAddressServesMember(base: string, bound: string | undefined, baseShipsMember: boolean): boolean {
+export function baseAddressServesMember(
+    base: string,
+    bound: string | undefined,
+    baseShipsMember: boolean,
+    installed: InstalledManifestLookup,
+): boolean {
     if (bound === undefined || bound === base) return true;
     if (baseShipsMember) return false;
-    const pair = pairOf(base);
+    const pair = pairOf(base, installed);
     return pair.ok && pair.value === bound;
 }

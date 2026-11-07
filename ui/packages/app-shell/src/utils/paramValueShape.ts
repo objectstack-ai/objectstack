@@ -179,6 +179,8 @@ export const PARAM_VALUE_SHAPES: Readonly<Record<string, ParamValueShapeSpec>> =
   'recipient-picker': { base: 'string', cardinality: 'scalar', widgetHintOnly: true, note: 'Recipient id string. Widget-hint only — not a declarable param type.' },
   'position-ref': { base: 'string', cardinality: 'scalar', widgetHintOnly: true, note: 'Position name string. Widget-hint only — not a declarable param type.' },
   'permission-ref': { base: 'string', cardinality: 'scalar', widgetHintOnly: true, note: 'Permission-set name string. Widget-hint only — not a declarable param type.' },
+  'notification-topic': { base: 'string', cardinality: 'scalar', widgetHintOnly: true, note: 'Notification topic string. Widget-hint only — not a declarable param type.' },
+  'notification-channel': { base: 'string', cardinality: 'scalar', widgetHintOnly: true, note: 'Notification channel string. Widget-hint only — not a declarable param type.' },
 });
 
 /** Concrete `base[]` tag for a base shape. */

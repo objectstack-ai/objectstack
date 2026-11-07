@@ -34,6 +34,7 @@ import { driverSupportsTransactions } from '@objectstack/spec/data';
 import type { IScopedContext } from '@objectstack/spec/contracts';
 import { appAutomationElevationOf, markAppAutomationElevation } from '@objectstack/core';
 import { UnscopedHookApi } from './hook-run-as.js';
+import { refuseAppAuthoredPermanentDelete } from './recycle-bin/app-authored-delete.js';
 import type { HookRunAs, HookRunAsRef } from './hook-run-as.js';
 import { ObjectRepository } from './engine.js';
 import type { ObjectQL, ScopedContext } from './engine.js';
@@ -58,8 +59,13 @@ export interface ScopedContextHost {
 /** The bodies of `ScopedContext`'s methods: a stateless facet, called by the class's stubs. */
 export class ScopedContextFacet {
   /** The body of `ScopedContext#object`; the method's docblock there is its contract. */
-  static object(this: Pick<ScopedContextHost, 'engine' | 'executionContext'>, name: string): ObjectRepository {
-    return new ObjectRepository(name, this.executionContext, this.engine as any);
+  static object(this: Pick<ScopedContextHost, 'appAuthored' | 'engine' | 'executionContext'>, name: string): ObjectRepository {
+    const repo = new ObjectRepository(name, this.executionContext, this.engine as any);
+    // [ADR-0148 D3, ruling A recorded in 6691358077] An app-authored hook's
+    // api (and every api derived from it) refuses a permanent delete: the same
+    // refusal a sandboxed body's api applies, here for the hook's in-process
+    // `handler`, whatever its `runAs`.
+    return this.appAuthored ? refuseAppAuthoredPermanentDelete(name, repo, 'hook handler') : repo;
   }
 
   /** The body of `ScopedContext#sudo`; the method's docblock there is its contract. */
