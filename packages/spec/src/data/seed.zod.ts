@@ -21,7 +21,7 @@ import {
   isSeedFileReference,
 } from './seed-file.zod';
 export const SeedMode = z.enum([
-  'insert',    // Insert every record, no match: each replay inserts them again (a row the database refuses fails)
+  'insert',    // Insert every record, no match: each replay inserts them again (a row the database refuses is that row's error)
   'update',    // Only update found records, ignore new
   'upsert',    // Create new or update existing: every replay writes the declared columns back
   'replace',   // Insert every record, no match, deleting nothing: for a cache table the caller cleared
@@ -180,10 +180,12 @@ export const SeedSchema = lazySchema(() => strictObject({
    * A row a person deleted is not brought back by every replay. The loads
    * AppPlugin (`@objectstack/runtime`) runs for an organization — the
    * single-tenant boot seed, the per-organization replay (the `seed-replayer`
-   * service) and the dev hot reload — record, per organization, the key of
-   * every row an `ignore` or `upsert` dataset landed, and do not insert again
-   * a recorded row that is now gone. A key never recorded still lands, so a
-   * row an upgrade adds to the seed is inserted. A seed publish and a package
+   * service) and the dev hot reload, where the composition registers
+   * `sys_seed_landed_key` (`@objectstack/platform-objects`) — record, per
+   * organization, the key of every keyed row an `ignore` or `upsert` dataset
+   * landed, and do not insert again a recorded row that is now gone. A key
+   * never recorded still lands, so a row an upgrade adds to the seed is
+   * inserted. A seed publish and a package
    * install or upgrade (`os package install`, the marketplace install) keep no
    * record, so the row comes back on those. The deliberate re-seed,
    * `seed-replayer(organizationId, { reseed: true })`, inserts every missing
