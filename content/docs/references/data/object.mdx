@@ -458,7 +458,7 @@ const result = ApiMethod.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **userField** | `string` | ✅ | The column of this object that holds the user a row belongs to: a single-valued user reference (`user`, or a `lookup` / `master_detail` to `sys_user`). A row counts for the signed-in user when this column holds their user id. |
-| **valueField** | `string` | ✅ | The column of this object whose values form the set: a reference (`lookup`, `master_detail` or `user`), multi-valued allowed. A policy compares the set with a column that references the same object, or with `id` on that object. Never the same column as `userField`. |
+| **valueField** | `string` | ✅ | The column of this object whose values form the set: a reference (`lookup`, `master_detail` or `user`), multi-valued allowed, or `id` for the ids of the signed-in user's own rows of this object (an employee roster's "the employee records I am"). A policy compares the set with a column that references the object the values belong to, or with `id` on that object. Never the same column as `userField`. |
 | **filter** | `string` | optional | Optional condition a roster row must also meet, in canonical CEL over this object's own columns and within the row-level security subset a policy's `using` lowers (e.g. "active == true"). It may not read any `current_user.*` value. |
 | **label** | `string` | optional | Human-readable name of the set |
 | **description** | `string` | optional | What the set holds and who it is for |
