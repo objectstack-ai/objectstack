@@ -146,11 +146,6 @@ export async function deletePackage(this: Pick<PackageUninstallHost, 'deleteMeta
         packageRegistry.assertPackageUninstallable(request.packageId);
     }
 
-    // [#31186] What the running registry holds for this id, read before
-    // anything is removed: whether there is a package to uninstall at all, and
-    // its version, for the package's own ledger row at the end of this verb.
-    const installed = readInstalledPackage(packageRegistry, request.packageId);
-
     // [#23473, ADR-0048] THE SHARED-OBJECT REFUSAL, ALSO ASKED BEFORE THE
     // STORE DELETE. A `sys_metadata` row is keyed by its package, so an
     // object this package holds can also be held by another package's row,
@@ -343,6 +338,10 @@ export async function deletePackage(this: Pick<PackageUninstallHost, 'deleteMeta
     // time: it is logged, not fatal, because the durable row is already
     // gone and the next boot is clean either way.
     //
+    // [#31186] What the registry holds for this id, read before the withdrawal
+    // below releases it: whether there was a package to uninstall, and its
+    // version, for the package's own ledger row at the end of this verb.
+    const installed = readInstalledPackage((this.engine as any)?.registry, request.packageId);
     // [ADR-0090 D5] What the package declared is captured first: the
     // withdrawal releases its names, and the cleanups below revoke the
     // grants that name them.
