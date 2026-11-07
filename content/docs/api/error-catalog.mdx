@@ -181,28 +181,40 @@ substitute. See the [Data API](/docs/api/data-api).
 ### `MISSING_REQUIRED_FIELD`
 **Cause:** A required field was not provided in the request body.  
 **Fix:** Include the missing field. Check `fields` for the field name — **except** on the
-`controlled_by_parent` stored-master path below, where the status is `422` and no `fields`
+`controlled_by_parent` stored required-master path below, where the status is `422` and no `fields`
 array is sent; read the field name out of the message there.  
 **Retry:** `no_retry`
 
 <Callout type="warn">
 **`MISSING_REQUIRED_FIELD` is `400` with one exception: a `controlled_by_parent` detail
-whose stored master reference is null answers `422`, without `fields`.**
+whose stored reference to a required master is null answers `422`, without `fields`.**
 
 An object whose `sharingModel` is `controlled_by_parent` derives its access from a master
 record, so the gate authorizing writes to it resolves that master *before* the executor —
 and the executor is where required-field validation runs. An update or delete **by id** of
-a detail record whose *stored* master reference is null answers
-`422 MISSING_REQUIRED_FIELD`, whatever the declaration: the caller sent no such field, so
-nothing could be named in `fields` and no payload would fix it.
+a detail record whose *stored* master reference is null, where the master is declared
+`required: true`, answers `422 MISSING_REQUIRED_FIELD`, whether or not the master is marked
+`readonly` or `system`: the caller sent no such field, so nothing could be named in `fields`
+and no payload would fix it.
+
+An optional master never answers this code. When the object's only `master_detail` is
+declared `required: false` (an optional master, ADR-0055 §1 as amended), a stored empty
+reference is not an error: the row belongs to no master and is its owner's. Its owner and a
+holder of View All on the detail read it; its owner and a holder of Modify All on the detail
+update or delete it. Everyone else who reaches the gate, View All included, is refused
+`403 PERMISSION_DENIED`; a principal who cannot read the row meets the read door first
+(`404 RECORD_NOT_FOUND`), as for every hidden row.
 
 A request that leaves the master reference out, or empties it, does not answer this code.
-On a `master_detail` that is `required` and neither `readonly` nor `system`, validation
-answers it with the documented `400 VALIDATION_FAILED` and `fields`. A master reference
-marked `readonly` or `system` is not one an author's write supplies, so it cannot be the
-master (ADR-0055 §1): `ObjectSchema` refuses that declaration at parse
-(`master-not-writable`), and on an object that reaches the runtime without the parse, every
-write that sets the reference answers `422 INVALID_METADATA`:
+On a `master_detail` that is `required: true` and neither `readonly` nor `system`, validation
+answers it with the documented `400 VALIDATION_FAILED` and `fields`. On an optional master
+an insert that leaves it out is not refused, and its creator owns the row; an update that
+empties it is judged by the master it leaves, asking edit access on it
+(`403 PERMISSION_DENIED` without it). A master reference marked `readonly` or `system`,
+required or optional, is not one an author's write supplies, so it cannot be the master
+(ADR-0055 §1): `ObjectSchema` refuses that declaration at parse (`master-not-writable`), and
+on an object that reaches the runtime without the parse, every write that sets the
+reference answers `422 INVALID_METADATA`:
 
 - every insert, single or batch, whether or not it names a master;
 - every update whose body carries the reference key, whatever the value, `null` included.
@@ -211,19 +223,24 @@ Its message starts `[Security] Configuration defect:` and carries the parse's ow
 naming the object, the field, the flag and the fix. A delete, and an update that leaves the
 key out, are answered as on any detail.
 
-A `master_detail` with no `required`, and a `required` `lookup` on an object that declares no
-`master_detail`, are not master references at all: the master is exactly one `master_detail`
-declared `required: true` (ADR-0055 §1). `ObjectSchema` refuses such an object at parse, and
-one that reaches the runtime unparsed answers every write `422 INVALID_METADATA`.
+The master is exactly one `master_detail`: the one declared `required: true`, or, when the
+object declares none, its only `master_detail` declared `required: false` (ADR-0055 §1 as
+amended). Two `master_detail` fields with none required, two required ones, and a
+`required` `lookup` on an object that declares no `master_detail` name no master at all:
+`ObjectSchema` refuses such an object at parse, and one that reaches the runtime unparsed
+answers every write `422 INVALID_METADATA`. Write `required` on the master either way:
+`ObjectSchema.create()` forces an omitted one to `true` and `os lint` reports the omission
+at `error`, while a raw parse reads it as `false`, the optional master.
 
 The full matrix is on the protocol page:
 [`MISSING_REQUIRED_FIELD`](/docs/protocol/kernel/error-handling#missing_required_field).
 
 The `INVALID_METADATA` refusal is not going to be relaxed: required-field validation skips
 `system` and `readonly` fields before its required check, so on those two declarations the
-gate is the only thing standing between the request and a detail record outside its master
-— which the `controlled_by_parent` read filter (`fk IN (readable masters)`) can never match,
-leaving a record readable by nobody.
+gate is the only thing standing between the request and, under a required master, a detail
+record outside its master — which the read filter of a required master
+(`fk IN (readable masters)`, with no arm for an empty reference) can never match, leaving a
+record readable by nobody.
 
 **Branch on `code`, treat `fields` as optional, and read the status off the response**
 rather than deriving it from the table at the end of this page.
@@ -1011,7 +1028,7 @@ async function handleApiCall() {
 | 404 | `not_found` | `RECORD_NOT_FOUND`, `OBJECT_NOT_FOUND`, `ENDPOINT_NOT_FOUND` |
 | 409 | `conflict` | `CONCURRENT_MODIFICATION`, `UNIQUE_VIOLATION`, `DELETE_RESTRICTED` |
 | 413 | `validation` | `PAYLOAD_TOO_LARGE` — an upload over the storage settings' `max_upload_mb`, or an import over its row ceiling (see [above](#payload_too_large)) |
-| 422 | `validation` | `MISSING_REQUIRED_FIELD` on a `controlled_by_parent` detail whose stored master reference is null (see [above](#missing_required_field)) — this row is an exception to the 400 row, not a second home for the code |
+| 422 | `validation` | `MISSING_REQUIRED_FIELD` on a `controlled_by_parent` detail whose stored reference to a required master is null; an optional master's empty reference is not an error (see [above](#missing_required_field)) — this row is an exception to the 400 row, not a second home for the code |
 | 429 | `rate_limit` | `RATE_LIMIT_EXCEEDED`, `QUOTA_EXCEEDED` |
 | 500 | `server` | `INTERNAL_ERROR`, `DATABASE_ERROR` |
 | 501 | `server` | `NOT_IMPLEMENTED` — the storage routes answer it when the adapter cannot issue presigned URLs |
