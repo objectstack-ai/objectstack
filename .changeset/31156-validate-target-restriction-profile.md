@@ -2,7 +2,7 @@
 '@objectstack/cli': patch
 ---
 
-feat(cli): `os validate --target <profile.json>` judges the stack against a target environment's restriction profile
+feat(cli): `os validate --target ./restriction-profile.json` judges the stack against a target environment's restriction profile
 
 Clause-②: yes
 Metadata-protocol: none
