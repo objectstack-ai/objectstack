@@ -490,7 +490,7 @@ describe('[#29594] the App unit: HotCRM and three modules share one pair, and a 
         expect(engine.registry.getObjectContributors(CASE).filter((c: any) => c.ownership === 'extend').map((c: any) => c.packageId))
             .toEqual([APP_PAIR]);
         // A record stores a value in the field.
-        const created: any = await engine.insert(CASE, { subject: 'Outage', sla_tier__c: 'gold' }, { context: { isSystem: true } });
+        const created: any = await engine.insert(CASE, { subject: 'Outage', sla_tier__c: 'gold', organization_id: 'org_1' }, { context: { isSystem: true } });
         const back: any = await engine.findOne(CASE, { where: { id: created.id }, context: { isSystem: true } });
         expect(back?.sla_tier__c).toBe('gold');
     }, 60_000);
