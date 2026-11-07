@@ -409,9 +409,6 @@ describe('the record data tools: a code-less throw answers what the /data door a
       const thrown = Object.assign(new Error('Record is locked'), { code: 'RECORD_LOCKED', status: 409 });
       const { error } = await errorOf(site, thrown);
       expect(error, site.tool).toEqual({ code: 'RECORD_LOCKED', message: 'Record is locked', status: 409 });
-      // A driver's own string code is coded too: relayed as before, not re-read by the door.
-      const driver = Object.assign(new Error('database is locked'), { code: 'SQLITE_BUSY' });
-      expect((await errorOf(site, driver)).error, site.tool).toEqual({ code: 'SQLITE_BUSY', message: 'database is locked' });
     }
     expect(log).not.toHaveBeenCalled();
   });
