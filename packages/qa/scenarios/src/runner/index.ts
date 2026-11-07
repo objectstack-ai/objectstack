@@ -15,4 +15,5 @@ export * from './orchestrate.js';
 export * from './project.js';
 export * from './prompts.js';
 export * from './scorecard.js';
+export * from './seed.js';
 export * from './transcript.js';

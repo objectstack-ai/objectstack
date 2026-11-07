@@ -9,10 +9,11 @@
  * exactly two drivers, and neither calls a model API itself:
  *
  *   - {@link ClaudeCodeDriver} spawns the `claude` CLI in headless mode
- *     (`claude -p … --output-format stream-json`). It REFUSES to start when the
- *     process would bill an API key — `ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN`
- *     in the environment, or a CLI whose `auth status` reports an API-key login —
- *     and strips both variables from every child it spawns.
+ *     (`claude -p --output-format stream-json`, the prompt on stdin). It REFUSES
+ *     to start when the process would bill an API key — `ANTHROPIC_API_KEY` /
+ *     `ANTHROPIC_AUTH_TOKEN` in the environment, or a CLI whose `auth status`
+ *     reports an API-key login — and strips both variables from every child it
+ *     spawns.
  *   - {@link RecordedDriver} replays turns recorded earlier, so the runner's
  *     own tests (and a re-grade of an old run) need no model and no network.
  *
@@ -25,7 +26,7 @@ import { mkdtempSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSyn
 import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 
-import { parseStreamJson, type ParsedTurn } from './transcript.js';
+import { parseStreamJson, type ParsedTurn, type TurnProcess } from './transcript.js';
 
 /** Which run step a turn belongs to; the replay key is built from it. */
 export interface StepRef {
@@ -68,6 +69,8 @@ export interface DriverInfo {
   authMethod?: string;
   /** Always `false`: no driver here bills an API key; the record states it. */
   apiBilled: false;
+  /** The live driver's wall-clock budget per authoring turn (build and iterate), ms. */
+  authorTimeoutMs?: number;
 }
 
 export interface AgentDriver {
@@ -111,6 +114,13 @@ export function assertSubscriptionLogin(env: NodeJS.ProcessEnv, authStatus: unkn
   return method;
 }
 
+/**
+ * The authoring budget a run gets unless `--author-timeout` says otherwise:
+ * sized for a mid-tier (`starter`) card, whose 7–8-object builds ran well past
+ * a quarter of an hour.
+ */
+export const DEFAULT_AUTHOR_TIMEOUT_MIN = 60;
+
 export interface ClaudeCodeDriverOptions {
   /** The CLI binary; default `claude`. */
   bin?: string;
@@ -118,8 +128,9 @@ export interface ClaudeCodeDriverOptions {
   maxTurnsAsk?: number;
   /** Agentic turns allowed for one authoring task; default 80. */
   maxTurnsAuthor?: number;
-  /** Wall-clock budget per call, ms; default 15 min for authoring, 5 min for a question. */
+  /** Wall-clock budget per authoring turn (build and iterate), ms; default {@link DEFAULT_AUTHOR_TIMEOUT_MIN}. */
   authorTimeoutMs?: number;
+  /** Wall-clock budget per question or operation, ms; default 5 min. */
   askTimeoutMs?: number;
   /** Optional model alias passed as `--model` (the login's default otherwise). */
   model?: string;
@@ -127,24 +138,79 @@ export interface ClaudeCodeDriverOptions {
 
 interface CliRun {
   stdout: string;
-  stderr: string;
-  exit: number | null;
+  process: TurnProcess;
 }
 
-function runCli(bin: string, args: string[], cwd: string, timeoutMs: number): Promise<CliRun> {
+const STDERR_TAIL = 2000;
+
+/**
+ * One CLI process, the prompt written to its stdin. The prompt never travels
+ * on argv: a build prompt carries the card's whole seed, and on Linux one
+ * argument longer than 128 KiB (`MAX_ARG_STRLEN`) makes `spawn` throw `E2BIG`
+ * before the CLI starts — the two largest cards' build prompts are past it.
+ *
+ * Never rejects: a process that could not start, was killed by the timeout or
+ * exited without a result is answered with what was seen of it, so the turn
+ * it belongs to is recorded rather than lost.
+ */
+function runCli(bin: string, args: string[], cwd: string, input: string, timeoutMs: number): Promise<CliRun> {
   return new Promise((resolvePromise) => {
-    const child = spawn(bin, args, { cwd, env: subscriptionOnlyEnv(), stdio: ['ignore', 'pipe', 'pipe'] });
+    const started = Date.now();
     let stdout = '';
     let stderr = '';
-    child.stdout.on('data', (d: Buffer) => (stdout += d.toString()));
-    child.stderr.on('data', (d: Buffer) => (stderr += d.toString()));
-    const timer = setTimeout(() => child.kill('SIGTERM'), timeoutMs);
-    child.on('close', (exit) => {
-      clearTimeout(timer);
-      resolvePromise({ stdout, stderr, exit });
+    let timedOut = false;
+    let error: string | undefined;
+    let settled = false;
+    let timer: NodeJS.Timeout | undefined;
+    const settle = (exit: number | null, signal: NodeJS.Signals | null) => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      const tail = stderr.trim().slice(-STDERR_TAIL);
+      resolvePromise({
+        stdout,
+        process: {
+          elapsedMs: Date.now() - started,
+          exit,
+          ...(signal ? { signal } : {}),
+          timedOut,
+          timeoutMs,
+          ...(tail ? { stderrTail: tail } : {}),
+          ...(error ? { error } : {}),
+        },
+      });
+    };
+    let child: ReturnType<typeof spawn>;
+    try {
+      child = spawn(bin, args, { cwd, env: subscriptionOnlyEnv(), stdio: ['pipe', 'pipe', 'pipe'] });
+    } catch (e) {
+      error = e instanceof Error ? e.message : String(e); // `spawn E2BIG` and its kin throw here
+      settle(null, null);
+      return;
+    }
+    child.stdout!.on('data', (d: Buffer) => (stdout += d.toString()));
+    child.stderr!.on('data', (d: Buffer) => (stderr += d.toString()));
+    child.on('error', (e) => {
+      error ??= e.message; // `spawn ENOENT`: no `close` may follow
+      if (child.pid === undefined) settle(null, null);
     });
+    child.stdin!.on('error', (e) => (error ??= e.message)); // EPIPE: the CLI exited before reading its prompt
+    child.stdin!.end(input);
+    timer = setTimeout(() => {
+      timedOut = true;
+      child.kill('SIGTERM');
+    }, timeoutMs);
+    child.on('close', (exit, signal) => settle(exit, signal));
   });
 }
+
+/**
+ * `no-result(exit 143)`, `no-result(signal SIGTERM)`, `no-result(spawn E2BIG)`:
+ * a turn that printed no result line, by how its process ended — or, when no
+ * process ever ran, why.
+ */
+const noResult = (p: TurnProcess): string =>
+  `no-result(${p.exit !== null ? `exit ${p.exit}` : p.signal ? `signal ${p.signal}` : (p.error ?? 'no exit code, no signal')})`;
 
 /** Every file under `dir` (skipping dependency and build trees) → content, for the author recording. */
 export function snapshotSources(dir: string): Record<string, string> {
@@ -196,8 +262,12 @@ export class ClaudeCodeDriver implements AgentDriver {
     this.authMethod = assertSubscriptionLogin(process.env, parsed);
   }
 
+  private get authorTimeoutMs(): number {
+    return this.opts.authorTimeoutMs ?? DEFAULT_AUTHOR_TIMEOUT_MIN * 60_000;
+  }
+
   info(): DriverInfo {
-    return { driver: 'claude-code-cli', version: this.version, authMethod: this.authMethod, apiBilled: false };
+    return { driver: 'claude-code-cli', version: this.version, authMethod: this.authMethod, apiBilled: false, authorTimeoutMs: this.authorTimeoutMs };
   }
 
   private base(maxTurns: number): string[] {
@@ -211,15 +281,16 @@ export class ClaudeCodeDriver implements AgentDriver {
     writeFileSync(empty, JSON.stringify({ mcpServers: {} }));
     try {
       const args = [
-        '-p', task.prompt,
+        '-p',
         ...this.base(this.opts.maxTurnsAuthor ?? 80),
         '--mcp-config', empty, '--strict-mcp-config',
         '--permission-mode', 'acceptEdits',
         '--allowedTools', 'Bash', 'Read', 'Edit', 'Write', 'Glob', 'Grep', 'Skill',
       ];
-      const run = await runCli(this.bin, args, task.cwd, this.opts.authorTimeoutMs ?? 15 * 60_000);
+      const run = await runCli(this.bin, args, task.cwd, task.prompt, this.authorTimeoutMs);
       const turn = parseStreamJson(run.stdout);
-      if (turn.meta.resultSubtype === undefined) turn.meta.resultSubtype = `no-result(exit ${run.exit})`;
+      turn.meta.process = run.process;
+      if (turn.meta.resultSubtype === undefined) turn.meta.resultSubtype = noResult(run.process);
       return { turn, files: snapshotSources(task.cwd) };
     } finally {
       rmSync(dirname(empty), { recursive: true, force: true });
@@ -237,10 +308,11 @@ export class ClaudeCodeDriver implements AgentDriver {
       { mode: 0o600 },
     );
     try {
-      const args = ['-p', task.prompt, ...this.base(this.opts.maxTurnsAsk ?? 12), '--mcp-config', cfg, '--strict-mcp-config', '--allowedTools', 'mcp__app'];
-      const run = await runCli(this.bin, args, dir, this.opts.askTimeoutMs ?? 5 * 60_000);
+      const args = ['-p', ...this.base(this.opts.maxTurnsAsk ?? 12), '--mcp-config', cfg, '--strict-mcp-config', '--allowedTools', 'mcp__app'];
+      const run = await runCli(this.bin, args, dir, task.prompt, this.opts.askTimeoutMs ?? 5 * 60_000);
       const turn = parseStreamJson(run.stdout);
-      if (turn.meta.resultSubtype === undefined) turn.meta.resultSubtype = `no-result(exit ${run.exit})`;
+      turn.meta.process = run.process;
+      if (turn.meta.resultSubtype === undefined) turn.meta.resultSubtype = noResult(run.process);
       return turn;
     } finally {
       rmSync(dir, { recursive: true, force: true });
