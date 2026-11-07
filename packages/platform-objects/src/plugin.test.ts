@@ -102,6 +102,18 @@ describe('PlatformObjectsPlugin: platform-infrastructure object registration (#4
     expect(SysRecycleBin.name).toBe(RECYCLE_BIN_OBJECT);
   });
 
+  // [#31021] The record of landed seed rows: the seed loader writes
+  // `sys_seed_landed_key` by this name (it cannot import this package), keeps
+  // it per organization, and a row reaped or served over a data API would let
+  // a removed seed row come back or be edited into one.
+  it('sys_seed_landed_key is organization-owned, durable and has no data API', () => {
+    expect(SysSeedLandedKey.name).toBe('sys_seed_landed_key');
+    expect(Object.keys(SysSeedLandedKey.fields).sort()).toEqual(['created_at', 'id', 'object_name', 'organization_id', 'seed_key']);
+    expect(SysSeedLandedKey.fields.organization_id).toMatchObject({ type: 'lookup', reference: 'sys_organization', deleteBehavior: 'cascade' });
+    expect((SysSeedLandedKey as { lifecycle?: unknown }).lifecycle).toBeUndefined();
+    expect(SysSeedLandedKey.enable).toMatchObject({ apiEnabled: false, apiMethods: [] });
+  });
+
   /**
    * [#12359 ruling, 2026-08-26 — 「同意」] ADR-0126 §4's activation ledger.
    * Registration follows the DECLARATION: the object is declared in this
