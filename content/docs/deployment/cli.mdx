@@ -3308,8 +3308,10 @@ checked against the spec's schema before anything is sent, and a declared
 install mode, a `connector` a declared connector. The retired `category` — in
 the file, or as `--category` — is refused before any network call, with the
 facets that replace the value it held, and so is a `visibility` in the file
-(pass `--visibility`). The retired `name`, `specVersion`, `skills` and
-`scaffold`, which nothing ever read, are named in a warning for deletion. `tags` has no flag and is
+(pass `--visibility`) and a `publisher` in the file (the platform assigns the
+trust tier from your credentials). The retired `name`, `specVersion`, `skills`,
+`scaffold` and `isStarter`, which never changed what publish sent, are named in
+a warning for deletion. `tags` has no flag and is
 sent as written: the control plane judges the list, and a refusal is its 400,
 printed as it is. A top-level `tagline` is used only as the description, when
 neither `--description` nor the file's `description` gives one; otherwise it is

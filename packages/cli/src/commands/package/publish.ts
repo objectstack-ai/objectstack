@@ -367,13 +367,28 @@ export function retiredVisibilityRefusal(): string {
 }
 
 /**
- * Retired `objectstack.manifest.json` keys nothing ever read (ADR-0049,
- * #31035): a parse of the file refuses each one, so this command names them
- * for deletion. A warning, not a refusal: every project scaffolded from the
- * blank template before the retirement carries them, and they never changed
- * what was published.
+ * The refusal for a manifest that still declares the retired `publisher`
+ * (ADR-0049, #31035). The platform assigns a package's trust tier from the
+ * publisher's credentials, so this command never sent the file's value and an
+ * author's claim never took effect. Refused, like `visibility`, before any
+ * network call: an author who wrote it meant to claim a trust tier, and
+ * publishing without saying so would hide that the claim was never made.
  */
-export const RETIRED_INERT_MANIFEST_KEYS = ['name', 'specVersion', 'skills', 'scaffold'] as const;
+export function retiredPublisherRefusal(): string {
+  return 'objectstack.manifest.json declares `publisher`, which was removed in @objectstack/spec 18: '
+    + 'the platform assigns a package\'s publisher trust tier from the publisher\'s credentials, and '
+    + '`os package publish` never sent it. Delete it.';
+}
+
+/**
+ * Retired `objectstack.manifest.json` keys that never changed what this
+ * command published (ADR-0049, #31035): a parse of the file refuses each one,
+ * so this command names them for deletion. A warning, not a refusal: every
+ * project scaffolded from the blank template before the retirement carries
+ * them (`isStarter: true` included — the platform decides the starter flag and
+ * this command never sent it).
+ */
+export const RETIRED_INERT_MANIFEST_KEYS = ['name', 'specVersion', 'skills', 'scaffold', 'isStarter'] as const;
 
 /** The {@link RETIRED_INERT_MANIFEST_KEYS} that `manifest` declares, in list order. */
 export function retiredInertManifestKeys(manifest: Record<string, unknown>): string[] {
@@ -382,37 +397,28 @@ export function retiredInertManifestKeys(manifest: Record<string, unknown>): str
 
 /**
  * Keys `objectstack.manifest.json` accepts that this command does NOT carry to
- * the control plane. `publisher` and `isStarter` are inherited from
- * `CreatePackageRequestSchema`; `preview` is a scaffold-side extra (publish
- * has no screenshot upload path).
+ * the control plane. `preview` is a scaffold-side extra (publish has no
+ * screenshot upload path) and is not carried by the hosted catalog yet; that
+ * is tracked at {@link CATALOG_SEND_ISSUE}.
  *
- * - `publisher` and `isStarter` are {@link PLATFORM_DECIDED_MANIFEST_KEYS}:
- *   the hosted control plane decides both and never reads an author's value
- *   (`publisher` is a trust tier that gates listing privileges; `isStarter` is
- *   honoured only for a first-party seed). ⛔ Never send them: a value
- *   self-declared in an author's file is a claim only the platform can judge.
- * - `preview` is not carried by the hosted catalog yet; that is tracked at
- *   {@link CATALOG_SEND_ISSUE}.
- *
- * `visibility` is no longer here: the file's key is retired and refused
- * ({@link retiredVisibilityRefusal}); the `--visibility` flag carries it.
+ * `visibility`, `publisher` and `isStarter` are no longer here: the file's
+ * keys are retired. `visibility` is refused ({@link retiredVisibilityRefusal};
+ * the `--visibility` flag carries it), `publisher` is refused
+ * ({@link retiredPublisherRefusal}), and `isStarter` is named for deletion
+ * ({@link RETIRED_INERT_MANIFEST_KEYS}). ⛔ Never send `publisher` or
+ * `isStarter` from the file: both are claims only the platform can judge.
  *
  * `tags` is not here: the hosted route validates and stores it, so it is sent
  * (see the request body in `run()`).
  *
  * Dropping an authored key silently is the defect, so each one the file
- * declares is named in a warning. The warning does not fail the publish: the
- * bundled blank template ships `isStarter: true`, and refusing it would break
- * every project scaffolded from it.
+ * declares is named in a warning. The warning does not fail the publish.
  *
  * Every `TemplateManifestSchema` key is classified in
  * `test/package-publish-uncarried-manifest-keys.test.ts`, so a key the schema
  * gains later goes red there until publish either sends it or lists it here.
  */
-export const UNCARRIED_MANIFEST_KEYS = ['publisher', 'isStarter', 'preview'] as const;
-
-/** The {@link UNCARRIED_MANIFEST_KEYS} the platform decides, whatever the file says. */
-const PLATFORM_DECIDED_MANIFEST_KEYS: readonly string[] = ['publisher', 'isStarter'];
+export const UNCARRIED_MANIFEST_KEYS = ['preview'] as const;
 
 /** Where carrying the remaining catalog keys to the hosted control plane is tracked. */
 export const CATALOG_SEND_ISSUE = 'https://github.com/objectstack-ai/objectstack/issues/27348';
@@ -423,24 +429,14 @@ export function uncarriedManifestKeys(manifest: Record<string, unknown>): string
 }
 
 /**
- * The warnings for the {@link uncarriedManifestKeys} a manifest declares: one
- * for the platform-decided keys (an author's value has no effect), and one for
- * the catalog keys the hosted side does not carry yet — then one for the
+ * The warnings for the {@link uncarriedManifestKeys} a manifest declares — one
+ * for the catalog keys the hosted side does not carry yet — then one for the
  * {@link retiredInertManifestKeys} it still declares. Empty when none.
  */
 export function uncarriedManifestWarnings(manifest: Record<string, unknown>): string[] {
-  const declared = uncarriedManifestKeys(manifest);
+  const catalog = uncarriedManifestKeys(manifest);
   const named = (keys: string[]) => keys.map((key) => `\`${key}\``).join(', ');
-  const platform = declared.filter((key) => PLATFORM_DECIDED_MANIFEST_KEYS.includes(key));
-  const catalog = declared.filter((key) => !PLATFORM_DECIDED_MANIFEST_KEYS.includes(key));
   const warnings: string[] = [];
-  if (platform.length > 0) {
-    const one = platform.length === 1;
-    warnings.push(
-      `objectstack.manifest.json declares ${named(platform)}, which ${one ? 'is' : 'are'} decided by the `
-      + `platform: an author's value has no effect, so \`os package publish\` does not send ${one ? 'it' : 'them'}.`,
-    );
-  }
   if (catalog.length > 0) {
     const one = catalog.length === 1;
     warnings.push(
@@ -455,8 +451,8 @@ export function uncarriedManifestWarnings(manifest: Record<string, unknown>): st
     const one = retired.length === 1;
     warnings.push(
       `objectstack.manifest.json declares ${named(retired)}, which ${one ? 'was' : 'were'} removed in `
-      + `@objectstack/spec 18: nothing ever read ${one ? 'it' : 'them'}, and a parse of the file now refuses `
-      + `${one ? 'it' : 'them'}. Delete ${one ? 'it' : 'them'}.`,
+      + `@objectstack/spec 18: ${one ? 'it' : 'they'} never changed what \`os package publish\` sent, and a `
+      + `parse of the file now refuses ${one ? 'it' : 'them'}. Delete ${one ? 'it' : 'them'}.`,
     );
   }
   return warnings;
@@ -698,6 +694,11 @@ export default class PackagePublish extends Command {
       }
       if (m.visibility !== undefined) {
         printError(retiredVisibilityRefusal());
+        this.exit(1);
+        return;
+      }
+      if (m.publisher !== undefined) {
+        printError(retiredPublisherRefusal());
         this.exit(1);
         return;
       }
