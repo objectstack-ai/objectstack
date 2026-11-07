@@ -103,6 +103,14 @@ const result = CompleteChunkedUploadRequestSchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **fileId** | `string` | ✅ | File ID returned from presigned request |
 | **eTag** | `string` | optional | ETag the client reports for the uploaded object. Stored on the file record as sent and not compared with anything: no storage adapter reports a stored object's ETag. Before committing, the door checks that the storage backend holds bytes under the file's key and, when the upload declared a size, that the held size equals it. |
+| **attachTo** | `{ parentObject: string; parentId: string }` | optional | Attach the uploaded file to this record in the same call, as the signed-in caller: the commit and the attachment row are one unit, and the answer carries the new attachmentId. Only the uploader's own pending upload in the attachments scope can be attached this way. The attachment is judged as the caller's own create: the permission to create an attachment, edit access to the record, and the record object's enable.files opt-in. A refused attach leaves the upload pending and uncommitted. |
+
+### Nested Shape: `CompleteUploadRequest.attachTo`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **parentObject** | `string` | ✅ | Object of the record the file is attached to (enable.files: true) |
+| **parentId** | `string` | ✅ | Id of the record the file is attached to |
 
 
 ---
@@ -211,6 +219,7 @@ const result = CompleteChunkedUploadRequestSchema.parse(data);
 | **created** | `string` | ✅ | Creation timestamp |
 | **etag** | `string` | optional | Entity tag |
 | **fileId** | `string` | optional | Opaque sys_file id (ADR-0104 D3 file-as-reference) |
+| **attachmentId** | `string` | optional | Id of the sys_attachment row the commit created, when the request carried attachTo |
 
 
 ---

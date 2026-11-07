@@ -129,7 +129,7 @@ All routes are mounted at `/api/v1/storage` (configurable via `basePath`).
 | Method | Path | Description |
 |--------|------|-------------|
 | POST | `/upload/presigned` | Get presigned upload URL |
-| POST | `/upload/complete` | Mark upload as committed |
+| POST | `/upload/complete` | Mark upload as committed; with `attachTo: { parentObject, parentId }`, attach the caller's own pending upload to that record as the caller, in the same unit |
 | POST | `/upload/chunked` | Initiate chunked upload |
 | PUT | `/upload/chunked/:uploadId/chunk/:chunkIndex` | Upload a chunk |
 | POST | `/upload/chunked/:uploadId/complete` | Complete chunked upload |
