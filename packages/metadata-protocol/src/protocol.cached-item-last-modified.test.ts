@@ -21,6 +21,8 @@
  * `lastModified: new Date().toISOString()` back in
  * `protocol-search-and-cache.ts` turns §1, §2 and §3 red.
  */
+// Pays the lint root's first load at collection, never inside a clocked case.
+import './lint-root-preload.testkit.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
     assertEngineDeleteDispatch,
@@ -39,6 +41,8 @@ const whereValueMatches = (actual: unknown, want: unknown): boolean =>
 
 function matches(r: Row, where: Record<string, unknown> = {}): boolean {
     for (const [k, v] of Object.entries(where)) {
+        // A combinator is refused, never read as a field name.
+        if (k.startsWith('$')) throw new Error(`matches: unsupported combinator ${k}`);
         if (v === undefined) continue;
         if (!whereValueMatches(r[k] ?? null, v)) return false;
     }

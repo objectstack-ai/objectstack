@@ -11,6 +11,9 @@
 // judged by the ETag alone, so `If-Modified-Since` never answers a `304`, with
 // or without a time to compare against.
 
+// Pays `@objectstack/objectql`'s first load at collection, never inside a clocked case
+// (the route modules import it lazily).
+import '@objectstack/objectql';
 import { describe, it, expect, vi } from 'vitest';
 import { RestServer } from './rest-server';
 
