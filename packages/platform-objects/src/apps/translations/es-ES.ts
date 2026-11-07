@@ -191,8 +191,8 @@ export const esES: TranslationData = {
     connect_agent: {
       label: 'Conectar un asistente de IA',
       subtitle:
-        'Concede a cualquier cliente de IA compatible con MCP acceso controlado a este sistema: '
-        + 'cada llamada se ejecuta con los permisos propios de quien la realiza y con seguridad a nivel de fila.',
+        'Trabaja en este sistema desde Claude, Doubao y otros asistentes de IA. '
+        + 'Cada uno actúa como tú: solo ve y cambia lo que tus propios permisos permiten.',
     },
 
     // Platform record pages (#15743) -- see `en.ts` for the key set.

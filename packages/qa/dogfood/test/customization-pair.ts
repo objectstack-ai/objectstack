@@ -11,14 +11,23 @@
 import { expect } from 'vitest';
 import type { VerifyStack } from '@objectstack/verify';
 
-/** The `.custom` pair of a base package. */
+/**
+ * The `.custom` pair of a base package that is its own customization unit —
+ * an App, or a package that declares no App. Every base these suites
+ * customize is one. A module's pair is its App's (ADR-0146 D3 as amended),
+ * which only the server answers: {@link ensurePair} returns the server's
+ * answer and asserts it is this one, so a suite that customizes a module
+ * fails here, by name, instead of addressing a pair that does not exist.
+ */
 export const pairOf = (base: string): string => `${base}.custom`;
 
-/** Ensure the base's pair exists (`201` the first time, `200` after). */
+/** Ensure the base's pair exists (`201` the first time, `200` after); the pair the server answers. */
 export async function ensurePair(stack: VerifyStack, token: string, base: string): Promise<string> {
   const res = await stack.apiAs(token, 'POST', `/packages/${base}/ensure-customization`);
   expect([200, 201], await res.clone().text()).toContain(res.status);
-  return pairOf(base);
+  const answered = ((await res.json()) as { data?: { packageId?: unknown } })?.data?.packageId;
+  expect(answered, `the pair the ensure door answers for '${base}'`).toBe(pairOf(base));
+  return answered as string;
 }
 
 /** `path` addressed to the base's pair (`package=<base>.custom` added to its query). */

@@ -111,7 +111,8 @@ capability changes only with a new version of the package that declares it. An
 sentence names that type's own route. What the reads then serve is in
 [Metadata lifecycle](/docs/concepts/metadata-lifecycle#customizing-an-installed-package-the-paired-custom-override-adr-0146).
 `POST /packages/hotcrm/ensure-customization` creates the pair when absent (Studio calls
-it on the first change); a kernel package (scope `system` or `cloud`) has no pair in this
+it on the first change); asked for a module that declares an App, it answers the App's one
+pair (`<app id>.custom`, `200` once it exists); a kernel package (scope `system` or `cloud`) has no pair in this
 version and answers `409 RESOURCE_CONFLICT`, though a pair an earlier version created keeps
 serving what it holds. `GET /packages/hotcrm/customizations` lists its overrides,
 extensions and switched-off items in one read, beside `contributions`: the fields (kind `field`)
