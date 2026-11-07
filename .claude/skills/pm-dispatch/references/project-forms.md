@@ -45,7 +45,7 @@
 - 移卡入队者→车道:p0/p1 `Blocked-by` 关闭 `Notify: unblocked`;记裁决席→被改席 `Notify: ruling`。
 - 席→兄弟席或他车道:认领文件面相交或须先落 `Notify: serial`,先落者落地 `Notify: landed`。
 - 上下线→兄弟席与分诊 `Notify: seat-online`、`Notify: seat-offline`;清单变→兄弟席 `Notify: split`。
-- 持发现的席→`security#1`:私卡建成或误公开卡挂标即 `Notify: security`,只带编号。
+- 持发现席→`security#1`:私卡建成或误公开卡挂标即 `Notify: security`,只带编号或 `OWNER/REPO#N`。
 - 分诊→认领席:认领卡或 open PR 闲置 ≥3h `Request: progress`;反向随记录 `Notify: progress`。
 - 记录 = 项上写下一步与 ETA 的评论、§C 停车或释放;同项 60 分钟一敲,答 ETA 到期前不敲。
 - ⛔ 不敲:回执、重发;收方订阅 PR 已载者;停车或待决策卡的项的进度;问维护者走决策卡。
