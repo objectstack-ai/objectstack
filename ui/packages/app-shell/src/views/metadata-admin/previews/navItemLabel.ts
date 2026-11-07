@@ -111,10 +111,13 @@ export function navEntryLabelText(
  * language's text. Only the designer locale's entry changes, and every other
  * entry is kept. The entry written is the one `resolveI18nLabel` reads first
  * for this locale — the exact tag, else its bare language (`en` under
- * `en-US`) — so the editor shows the new text straight after the edit. A map
- * with neither gains an entry under the exact tag; an entry the resolver only
- * reached as another language's fallback (`default`, `en` under `zh-CN`, a
- * sibling region) is left as it was. Because the new entry is under the exact
+ * `en-US`), else, where the resolver prefers it over that bare language, a
+ * sibling of the locale's own script (`zh-TW` under `zh-Hant` in
+ * `{ zh, 'zh-TW' }`, because bare `zh` means `zh-Hans`) — so the editor shows
+ * the new text straight after the edit. A map with none of these gains an
+ * entry under the exact tag; an entry the resolver only reached as another
+ * language's fallback (`default`, `en` under `zh-CN`, a sibling region) is left
+ * as it was. Because the new entry is under the exact
  * tag, the next edit finds it first: an editor that writes on every keystroke
  * adds that entry once, never one per keystroke.
  */
@@ -145,9 +148,31 @@ export function clearedLabel(cur: I18nLabel | undefined, locale: string): I18nLa
   return Object.values(map).some((v) => typeof v === 'string') ? map : undefined;
 }
 
-/** The map entry an edit in `locale` owns: the exact tag, else its bare language; `undefined` when the map has neither. */
+/**
+ * The map entry an edit in `locale` owns: the exact tag, else the entry
+ * `resolveI18nLabel` reads in place of the bare language, else the bare
+ * language; `undefined` when the map has neither the tag nor the language.
+ *
+ * Which entry the resolver reads is asked of the resolver itself, over a map
+ * of each usable key to its own name, so this module keeps no copy of the
+ * resolver's limbs. With the bare language present the resolver reads it,
+ * unless it prefers a sibling of the locale's own script (`zh-TW` under
+ * `zh-Hant`, where bare `zh` means `zh-Hans`); then the sibling is the entry
+ * on screen and the one an edit owns. A sibling the resolver reaches only
+ * because the bare language is ABSENT stays another region's fallback, as
+ * before: the edit adds the exact tag.
+ */
 function ownEntryKey(map: Record<string, string>, locale: string): string | undefined {
   const tag = locale.trim();
   const own = (key: string) => Object.prototype.hasOwnProperty.call(map, key) && typeof map[key] === 'string';
-  return [tag, tag.split('-')[0]].find(own);
+  if (own(tag)) return tag;
+  const base = tag.split('-')[0];
+  if (!own(base)) return undefined;
+  const keyOfEachEntry: Record<string, string> = Object.fromEntries(
+    Object.keys(map)
+      .filter(own)
+      .map((key) => [key, key]),
+  );
+  const read = resolveI18nLabel(keyOfEachEntry, locale);
+  return read !== undefined && read !== base && read.split('-')[0] === base ? read : base;
 }
