@@ -55,6 +55,8 @@ const manager = {
     pwr_person: { allowRead: true, viewAllRecords: true },
     pwr_quote: { allowCreate: true, allowRead: true, allowEdit: true, allowDelete: true },
     pwr_quote_line: { allowCreate: true, allowRead: true, allowEdit: true, allowDelete: true },
+    // Reads every contact (View All on the detail) and modifies none it does not own.
+    pwr_contact: { allowCreate: true, allowRead: true, allowEdit: true, allowDelete: true, viewAllRecords: true },
   },
 };
 const rep = {
@@ -66,6 +68,8 @@ const rep = {
     pwr_contract: { allowRead: true },
     pwr_quote: { allowCreate: true, allowRead: true, allowEdit: true },
     pwr_quote_line: { allowCreate: true, allowRead: true, allowEdit: true, allowDelete: true },
+    // Modify All on the detail: every contact that names no account is its to write.
+    pwr_contact: { allowCreate: true, allowRead: true, allowEdit: true, allowDelete: true, modifyAllRecords: true },
   },
 };
 
@@ -92,6 +96,13 @@ const source = {
       fields: { account: { type: 'master_detail', required: true, label: 'Account', reference: 'pwr_account' }, title: { type: 'text', label: 'Title' } },
     },
     {
+      // ADR-0055 §1 as amended: an OPTIONAL master — a contact may name no account.
+      name: 'pwr_contact',
+      label: 'Contact',
+      sharingModel: 'controlled_by_parent',
+      fields: { account: { type: 'master_detail', required: false, label: 'Account', reference: 'pwr_account' }, title: { type: 'text', label: 'Title' } },
+    },
+    {
       // Two levels: a line's master is a quote, whose own master is an account.
       name: 'pwr_quote_line',
       label: 'Quote line',
@@ -109,6 +120,9 @@ const source = {
 };
 
 const VERIFIERS = ['master-all-records', 'detail-only', 'master-all-records-no-delete'] as const;
+
+/** The engine operation a probe's verb is written as, and named by in a refusal's `details`. */
+const OPERATION_OF: Record<string, string> = { edit: 'update', delete: 'delete', create: 'insert' };
 
 const resultFor = (report: ParentWriteReachReport, object: string) => {
   const r = report.results.find((x) => x.object === object);
@@ -172,11 +186,17 @@ describe('deriveParentWriteReachCases — what the family reads from the metadat
 
     // Every object the parse declares controlled_by_parent, and nothing else.
     expect([...byObject.keys()].sort()).toEqual([
-      'pwr_bad', 'pwr_badge_line', 'pwr_contract',
+      'pwr_bad', 'pwr_badge_line', 'pwr_contact', 'pwr_contract',
       ...deep.map((d) => d.name).sort(),
       'pwr_loop_a', 'pwr_loop_b', 'pwr_no_master', 'pwr_outside', 'pwr_quote', 'pwr_quote_line', 'pwr_two_masters',
     ].sort());
     expect(byObject.get('pwr_contract')).toEqual({ object: 'pwr_contract', hops: [{ object: 'pwr_contract', field: 'account', master: 'pwr_account' }] });
+    // [ADR-0055 §1 as amended] An optional master is read through the spec's own resolver, and marked.
+    expect(byObject.get('pwr_contact')).toEqual({
+      object: 'pwr_contact',
+      hops: [{ object: 'pwr_contact', field: 'account', master: 'pwr_account' }],
+      optionalMaster: true,
+    });
     expect(byObject.get('pwr_quote_line')).toEqual({
       object: 'pwr_quote_line',
       hops: [
@@ -236,7 +256,8 @@ describe('runParentWriteReachProofs — the fixture app, booted with parentWrite
   });
 
   it('proves every single-level detail, for every persona, under a master chain another principal owns and one it owns', () => {
-    for (const object of ['pwr_contract', 'pwr_quote']) {
+    // `pwr_contact`'s master is optional: these are its EXPLICIT-master records.
+    for (const object of ['pwr_contract', 'pwr_quote', 'pwr_contact']) {
       expect(resultFor(report, object).status, formatParentWriteReachReport(report)).toBe('proven');
       for (const masters of ['other', 'own'] as const) {
         expect(shape(report, object, 'master-all-records', masters)).toEqual(ALL_ALLOWED);
@@ -284,6 +305,43 @@ describe('runParentWriteReachProofs — the fixture app, booted with parentWrite
       expect(shape(report, 'pwr_quote_line', 'detail-only', masters)).toEqual(ALL_REFUSED);
     }
     expect(formatParentWriteReachReport(report)).toContain('✓ pwr_quote_line (pwr_quote_line.quote → pwr_quote, pwr_quote.account → pwr_account)  held on');
+  });
+
+  it('proves an optional master\'s NULL-master records by their owner rule: owner or Modify All on the detail, never a master', () => {
+    // [ADR-0055 §3 as amended] The records name no account, so no master is
+    // read or edited; each persona edits and deletes the one it owns, and the
+    // one another principal owns only where it reads it (View All or Modify
+    // All on the detail), and creates one naming no account.
+    expect(resultFor(report, 'pwr_contact').status, formatParentWriteReachReport(report)).toBe('proven');
+    const none = (persona: string) => {
+      const r = resultFor(report, 'pwr_contact').reaches.find((x) => x.persona === persona && x.masters === 'none');
+      if (!r) throw new Error(`no null-master reach for ${persona}`);
+      return r;
+    };
+    const nullShape = (persona: string) =>
+      none(persona).probes.map((p) => `${p.verb}${p.detailOwner ? `/${p.detailOwner}` : ''} ${p.expected} ${p.outcome}`);
+    // The verifier personas hold neither View All nor Modify All on the detail:
+    // another's record is outside their reach, their own is theirs — whatever
+    // they may do to an account (the detail-only persona edits none).
+    for (const persona of ['master-all-records', 'detail-only']) {
+      expect(none(persona)).toMatchObject({ masterRead: 'none', unreadableDetails: ['other'] });
+      expect(none(persona).masterEdit).toBeUndefined();
+      expect(nullShape(persona)).toEqual(['edit/own allowed held', 'delete/own allowed held', 'create allowed held']);
+    }
+    // The detail's own verbs still bind: no delete grant, no delete.
+    expect(nullShape('master-all-records-no-delete')).toEqual(['edit/own allowed held', 'delete/own refused held', 'create allowed held']);
+    // View All on the detail READS another's record and does not write it: the owner rule refuses, attributed to the detail.
+    expect(nullShape('position:pwr_manager')).toEqual([
+      'edit/other refused held', 'delete/other refused held', 'edit/own allowed held', 'delete/own allowed held', 'create allowed held',
+    ]);
+    for (const p of none('position:pwr_manager').probes.filter((x) => x.detailOwner === 'other')) {
+      expect(p.answer).toMatchObject({ kind: 'refused', status: 403, code: 'PERMISSION_DENIED', object: 'pwr_contact', operation: OPERATION_OF[p.verb] });
+    }
+    // Modify All on the detail writes every record that names no master.
+    expect(nullShape('position:pwr_rep')).toEqual([
+      'edit/other allowed held', 'delete/other allowed held', 'edit/own allowed held', 'delete/own allowed held', 'create allowed held',
+    ]);
+    expect(formatParentWriteReachReport(report)).toContain('✓ pwr_contact (pwr_contact.account → pwr_account)  held on');
   });
 
   it('counts every reach and write, and every object is proven', () => {
