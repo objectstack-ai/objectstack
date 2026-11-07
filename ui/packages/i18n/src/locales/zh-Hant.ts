@@ -2040,6 +2040,12 @@ const zhHant = {
         done: '已有同事加入或已發出邀請。',
         action: '邀請',
       },
+      connectAssistant: {
+        title: '連線 AI 助手',
+        todo: '在 Claude、豆包等助手裡以你自己的身份使用本系統。',
+        done: '你已連線了 AI 助手或 API 金鑰。',
+        action: '連線',
+      },
     },
     error: {
       connectionFailed: '無法連線到伺服器',
@@ -3350,6 +3356,12 @@ const zhHant = {
       message: '建議設定一個備用密碼，這樣即使單點登入不可用，你仍能直接登入。',
       cta: '設定密碼',
       dismiss: '關閉',
+    },
+    connectAssistant: {
+      title: '在 AI 助手裡使用本系統',
+      body: '你可以在 Claude、豆包等 AI 助手裡查詢和修改你的記錄。助手始終以你的身份、按你的權限操作。',
+      action: '連線 AI 助手',
+      dismiss: '隱藏',
     },
     pendingDrafts: {
       // objectui#12602 — the drafts row in Home's "My work" section: the

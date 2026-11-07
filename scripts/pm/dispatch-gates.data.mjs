@@ -1062,6 +1062,30 @@ export const CHANGE_KIND_ROWS = [
         name: 'check:dispatcher-error-vocabulary',
         why: 'it sweeps the non-test TypeScript sources under the package root for every site that stamps an error code, and reports each value the registered vocabulary (StandardErrorCode joined with ERROR_CODE_LEDGER) does not contain — so a code arriving through a quoted literal, a SCREAMING_SNAKE constant, a typeof reference to one, or a template moves it. This is the gate no path derivation can name: it computes its own population from a bare top-level root, which the bare-root ledger records as REFUSE-WIDE at 39% of the tracked tree, so it scores the same quiet silence for every card and #12843 paid a CI round trip for that silence. It needs NO build — a source scan, one pass, whole tree, and it names the file and line. Repair by REGISTERING the code where the vocabulary is declared, never by widening a consumer to tolerate it; reconciliation runs BOTH ways, so a table row whose site is gone fails too, and a pending-registration row whose code has since been registered fails as the discharge it is. ⚠ This lead is deliberately WIDE — it fires on a file that merely carries a code-shaped value, not only one that adds a new one — because the wasted run is one cheap gate and the miss is a CI round trip',
       },
+      {
+        name: 'check:error-code-provenance',
+        why: "the vocabulary gate's population-disjoint sibling: it reads the SAME stamp sites in every package's non-test src, keeps only the codes the vocabulary DOES register, and fails when the stamping package's own owner key in the ADR-0112 ledger does not list the code and no PROVENANCE_WAIVERS entry names the owner that holds it instead. So a registered code stamped in a package that never stamped it before moves it, and so does a constant BOUND to one (a constant is read at its definition, whatever its name, even one that is only ever compared against). No path derivation names it: its only declared literals are the ledger file, so the derivation files it under the artifact rosters and scores it silent for every card, and PR #31214 paid a CI round trip for that silence on a scenarios-package constant. It needs NO build, being one source scan over the whole tree, and it names the package, the code and the site. Repair by listing the code under the stamping package's owner key, or by not stamping it (compare against the catalogue's spelling instead of holding it in a constant); a waiver is a recorded ruling, never a quick fix. ⚠ The lead is this entry's predicate, wide for the vocabulary gate's reason: at fe97d85b it reached all 162 files holding one of the gate's 513 registered-code sites",
+      },
+    ],
+  },
+  {
+    kind: 'adds or edits a file carrying a CLI command-id literal outside the CLI package, or a CLI command module or manifest (judged from CONTENT — no path derivation can name this gate)',
+    matches: 'cli-command-literal',
+    gates: [
+      {
+        name: 'check:cli-command-ids',
+        why: "every quoted run that opens with a CLI binary name and a space (a command id such as the migrate-apply one, and just as much the Portuguese word for administrators after that binary name in a translated message) in non-test source outside the CLI package must resolve to a real oclif command id or topic; and every module the CLI emits under its commands directory must default-export a command class. So a new or edited literal anywhere in package source moves it, and so does renaming, adding or deleting a command module. No path derivation names it: the literal population is a `src/` path SEGMENT in any package, a shape no subtree spelling covers, and its only declared root is `scripts/**`, so it scored silent for package source and for the commands directory alike, and PR #30734 paid a CI round trip for that silence on a pt-BR string fragment. It needs NO build, about 22 seconds, and it names the file, the line and the literal. Repair by spelling the real command id (or, for prose that merely starts with the binary's word, rephrasing so the binary name is not the first thing in the quotes); the exemption ledger is for a checker's own fixtures and filed real defects, never a quick fix. Derived by CONTENT rather than for every diff: the gate is unconditional in CI but not cheap enough to name on a card that cannot move it",
+      },
+    ],
+  },
+  {
+    kind: 'edits a file an ADR anchors by symbol, or moves or deletes a file an ADR anchors at all (read from the ADR corpus — no path derivation can name this gate)',
+    matches: 'adr-anchored-file',
+    gates: [
+      {
+        name: 'check:adr-symbol-anchors',
+        why: "every `path#Symbol` anchor in docs/adr/** must still resolve to a declaration (or a literal) of that name in that file, and every file-level anchor to a tracked file. So removing or renaming an anchored declaration reds it, and so does moving or deleting any anchored file, from a diff that never touches an ADR. No path derivation names it for those diffs: its declared population is docs/adr/** alone, and PR #30749 paid a CI round trip and a landing tier for that silence when it retired a constant ADR-0012 anchored. It needs NO build, about 7 seconds, and it names the record, the line and the anchor. Repair by re-anchoring the ADR where the mechanism now lives, or by keeping the symbol; ⚠ if the ADR SENTENCE has become untrue, that is its own card, and ⛔ an `anchor-exempt` marker is MAINTAINER-ONLY. ⚠ The symbol limb fires on any edit of a symbol-anchored file, not only one that removes the declaration, because the wasted run is one cheap gate and the miss is a CI round trip",
+      },
     ],
   },
   {

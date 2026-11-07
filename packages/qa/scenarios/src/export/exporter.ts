@@ -20,7 +20,7 @@
  * and then swapped in, so a re-export first deletes the old directory and
  * nothing stale survives (see {@link APP_LAYOUT}):
  *
- *   apps/<id>/README.md               what the app is, its scorecard, the files
+ *   apps/<id>/README.md               what the app is, the driver that ran it ({@link driverText}), its scorecard, the files
  *   apps/<id>/source/…                the authored metadata source (`source.ts`)
  *   apps/<id>/run-record.json         the run record, the work directories redacted (`workDirsOf`)
  *   apps/<id>/scorecard.json|.md      the per-half scorecard
@@ -54,7 +54,7 @@ import { renderScorecard, type CardScorecard } from '../runner/scorecard.js';
 import { GALLERY_GUARD, type GalleryGuard } from './generic.js';
 import { parseIndex, serializeIndex, type GalleryApp, type GalleryIndex } from './manifest.js';
 import { judgeRecord, type PassJudgement } from './pass.js';
-import { readRunRecords, redactWorkDir, unpublishedRunRefusal, type RecordFile } from './record.js';
+import { readRunRecords, redactWorkDir, unpublishedRunRefusal, type RecordFile, type ScenarioRunRecord } from './record.js';
 import type { CaptureScreenshots, PlannedShot, SkippedShot } from './screenshots.js';
 import { projectFrameworkVersion, readAuthoredSource } from './source.js';
 import { buildTranscript, mergeRecordings, renderTranscript } from './transcript.js';
@@ -124,7 +124,20 @@ class Refused extends Error {
 
 const json = (v: unknown) => `${JSON.stringify(v, null, 2)}\n`;
 
-function appReadme(scenario: LoadedScenario, entry: GalleryApp, judgement: PassJudgement, scorecard: CardScorecard, shots: PlannedShot[], skipped: SkippedShot[]): string {
+/**
+ * The page's driver line: the agent tool whose turns the app was built and
+ * graded on, with its version. A replay names the driver of the recording it
+ * replayed, never the recording's path; a replay whose record does not name
+ * that driver says so.
+ */
+export function driverText(driver: ScenarioRunRecord['env']['driver']): string {
+  const named = (d: { driver: string; version?: string | undefined }) => `${d.driver}${d.version ? ` ${d.version}` : ''}`;
+  if (driver.replayOf) return `${named(driver.replayOf)} (re-graded from a recording of that run)`;
+  if (driver.driver === 'recorded') return 'a recording (the record does not name the driver that made it)';
+  return named(driver);
+}
+
+function appReadme(scenario: LoadedScenario, record: ScenarioRunRecord, entry: GalleryApp, judgement: PassJudgement, scorecard: CardScorecard, shots: PlannedShot[], skipped: SkippedShot[]): string {
   const c = scenario.card;
   const lines = [
     `# ${c.title.en}`,
@@ -135,6 +148,7 @@ function appReadme(scenario: LoadedScenario, entry: GalleryApp, judgement: PassJ
     '',
     `- Scenario: \`${c.id}\` · business functions ${c.businessFunctions.map((f) => `\`${f}\``).join(', ')} · namespace \`${entry.namespace}\``,
     `- Framework: @objectstack/spec ${entry.framework.version} (runner checkout ${entry.framework.runner}) · run ${entry.run} on ${entry.runDate}`,
+    `- Driver: ${driverText(record.env.driver)}`,
     `- 问数: ${entry.qa.questions} questions, ${entry.qa.turns} persona turns · ${entry.operations} write operations`,
     '',
     '## The requirement',
@@ -324,7 +338,7 @@ async function exportOne(
     [APP_LAYOUT.scorecardMd, `${renderScorecard(scorecard)}\n`],
     [APP_LAYOUT.transcriptJson, json(transcript)],
     [APP_LAYOUT.transcriptMd, renderTranscript(transcript, card.title.en)],
-    [APP_LAYOUT.readme, redact(appReadme(scenario, entry, judgement, scorecard, shots, skipped))],
+    [APP_LAYOUT.readme, redact(appReadme(scenario, record, entry, judgement, scorecard, shots, skipped))],
   ]);
   return { entry, shots, skipped };
 }

@@ -2328,6 +2328,12 @@ const es = {
         done: "Hay compañeros que se han unido o han sido invitados.",
         action: "Invitar",
       },
+      connectAssistant: {
+        title: 'Conectar un asistente de IA',
+        todo: 'Trabaja en este sistema desde Claude, Doubao y asistentes similares, como tú mismo.',
+        done: 'Tienes conectado un asistente de IA o una clave de API.',
+        action: 'Conectar',
+      },
     },
     error: {
       connectionFailed: "No se puede conectar al servidor",
@@ -3299,6 +3305,12 @@ const es = {
       message: "Establezca una contraseña de recuperación para poder iniciar sesión aunque el inicio de sesión único no esté disponible.",
       cta: "Establecer contraseña",
       dismiss: "Descartar",
+    },
+    connectAssistant: {
+      title: 'Trabaja aquí desde tu asistente de IA',
+      body: 'Puedes consultar y cambiar tus registros desde Claude, Doubao y asistentes de IA similares. Cada uno actúa como tú, con tus propios permisos.',
+      action: 'Conectar un asistente de IA',
+      dismiss: 'Ocultar',
     },
     pendingDrafts: {
       // objectui#12602 — the drafts row in Home's "My work" section: the

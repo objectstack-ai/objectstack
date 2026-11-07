@@ -29,6 +29,11 @@ export default defineConfig({
     // `os validate` / `os build` share. Its own entry because objectql's
     // registry (in the ADR-0076 lean entry) reads the walk.
     'src/picklist-references.ts',
+    // `@objectstack/metadata/history-snapshot` — the body a
+    // `sys_metadata_history` snapshot stores (ruling 6677709817 (c)), shared
+    // by both history writers: `DatabaseLoader` here and the protocol's
+    // `SysMetadataRepository`. Its own entry for the reason `errors` has one.
+    'src/utils/history-snapshot-body.ts',
   ],
   splitting: false,
   sourcemap: true,
