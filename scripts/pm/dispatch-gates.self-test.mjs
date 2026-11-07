@@ -286,7 +286,13 @@ import {
   zeroSegmentForms,
   readByUiScriptsSuite,
   UI_SCRIPTS_SUITE_ROOTS,
+  adrAnchorTargets,
+  breaksAnAdrAnchor,
+  carriesACliCommandLiteral,
+  cliBinaryNames,
+  cliCommandSurfaces,
 } from './dispatch-gates.mjs';
+import { CORPUS as ADR_ANCHOR_CORPUS } from '../check-adr-symbol-anchors.mjs';
 import {
   COMPOUND_ANCHOR_LEDGER,
   GOVERNED_READ_FLOOR,
@@ -4651,7 +4657,7 @@ export function selfTest({ tier = 'full' } = {}) {
   const codeEntry = CHANGE_KIND_GATES.filter((k) => k.gates.some((g) => g.name === 'check:dispatcher-error-vocabulary'));
   t('exactly one entry in the table names the vocabulary gate', codeEntry.length === 1);
   const codeKind = changeKindLines([CODE_SPECIMEN], resolved, codeEntry);
-  t('a code-carrying path emits the convention section', codeKind.length === 2 && codeKind[0].includes('judged from CONTENT'));
+  t('a code-carrying path emits the convention section, with both code gates', codeKind.length === 3 && codeKind[0].includes('judged from CONTENT'));
   t('and it names the vocabulary gate runnably, anchored on the delimiter',
     codeKind.some((l) => l.includes('- pnpm check:dispatcher-error-vocabulary   —')));
   const codeLine = codeKind.find((l) => l.includes('- pnpm check:dispatcher-error-vocabulary   —')) ?? '';
@@ -4667,6 +4673,20 @@ export function selfTest({ tier = 'full' } = {}) {
   // narrowing that drops this sentence fails here.
   t('…and writes the false-positive trade down, so nobody assumes narrowing is free',
     /deliberately WIDE/.test(codeLine) && /CI round trip/.test(codeLine));
+  // #30763's third reading: the provenance gate reads the same stamp sites and
+  // was filed under the artifact rosters, so no card was ever handed it. PR
+  // #31214 went red on a scenarios-package constant bound to a registered code.
+  t('the provenance gate rides the same entry, so it is reached by the same predicate',
+    codeEntry[0]?.gates.some((g) => g.name === 'check:error-code-provenance') && codeEntry[0]?.matches === stampsAnErrorCodeLiteral);
+  const provLine = codeKind.find((l) => l.includes('- pnpm check:error-code-provenance   —')) ?? '';
+  t('…and names it runnably, anchored on the delimiter', provLine !== '');
+  t('…and pushes the repair to the owner key, never a waiver as a quick fix', /owner key/.test(provLine) && /never a quick fix/.test(provLine));
+  t('…and says it needs no build', /needs NO build/.test(provLine));
+  t('the #31214 shape — a constant bound to a registered code, in a scenarios-package source — is a hit',
+    stamps("export const VALIDATION_FAILED_CODE: ErrorCode = 'VALIDATION_FAILED';", 'packages/qa/scenarios/src/score/scenario-operation-grade.ts'));
+  t('…and through the whole table it derives the provenance gate', changeKindGates(['packages/qa/scenarios/src/score/scenario-operation-grade.ts'], resolved,
+    CHANGE_KIND_GATES.map((k) => (k.matches === stampsAnErrorCodeLiteral ? { ...k, matches: (p) => stampsAnErrorCodeLiteral(p, codeSrc("export const VALIDATION_FAILED_CODE: ErrorCode = 'VALIDATION_FAILED';")) } : k)))
+    .some((g) => g.gates.some((x) => x.name === 'check:error-code-provenance' && x.command === 'pnpm check:error-code-provenance')));
 
   // ── The HTTP-status CONTENT kind (#22320) ────────────────────────────────
   //
@@ -4849,6 +4869,174 @@ export function selfTest({ tier = 'full' } = {}) {
   const seamStale = changeKindLines([SEAM_SPECIMEN], () => null, seamEntry);
   t('an undiscoverable durability guard renders STALE for this entry',
     seamStale.filter((l) => l.includes(`⚠ ${DURABILITY_SEAM_GATE}: STALE`)).length === 1);
+
+  // ── The CLI command-id CONTENT kind (#30763) ─────────────────────────────
+  //
+  // The fourth content entry, in the first three's shape: limbs through an
+  // injected reader and an injected CLI surface, then the live tree, then the
+  // gate's own reader held against the net in a child process, then the
+  // rendered section. Every fixture literal is ASSEMBLED at runtime: this file
+  // sits in the gate's own `scripts` population, and a quoted binary name with
+  // an id after it spelled here would be a literal that gate judges.
+  const Q = "'";
+  const cliLit = (bin, words) => `${Q}${bin} ${words}${Q}`;
+  const CLI_SURFACE = () => [{ dir: 'packages/cli', bins: ['os', 'objectstack'] }];
+  const cliHit = (text, path = 'packages/x/src/a.ts', surfaces = CLI_SURFACE) => carriesACliCommandLiteral(path, codeSrc(text), surfaces);
+  t('a quoted command id in package source is a hit', cliHit(`export const FIX = ${cliLit('os', 'migrate apply')};`));
+  // The PR #30734 shape: a translated sentence fragment whose first word after
+  // the quote is the binary's word. The gate reads it as an unresolved id.
+  const PT_BR = `const msg = 'apenas ' +\n  ${cliLit('os', 'administradores. Mantenha')} + ' x';`;
+  t('the #30734 shape — a pt-BR fragment opening with the binary word — is a hit', cliHit(PT_BR));
+  t('a literal on the second declared binary name is a hit', cliHit(`run(${cliLit('objectstack', 'serve')});`));
+  t('a template literal opening with the binary is a hit', cliHit(`const c = \`${'os'} validate \${dir}\`;`));
+  t('a trailing comment on a code line still counts, as the gate reads it', cliHit(`f(); // ${cliLit('os', 'start')}`));
+  t('a line that opens as a comment is not a hit', !cliHit(`// run ${cliLit('os', 'migrate apply')} first\nexport const x = 1;`));
+  t('…nor a jsdoc line', !cliHit(`/**\n * see ${cliLit('os', 'validate')}\n */\nexport const x = 1;`));
+  t('the binary word in unquoted prose is not a hit', !cliHit("const s = 'the os module';"));
+  t('the binary word glued to more letters is not a hit', !cliHit(`const s = ${Q}osx build${Q};`));
+  t('a test file carrying a literal is not a hit', !cliHit(PT_BR, 'packages/x/src/a.test.ts'));
+  t('…nor a file under __tests__', !cliHit(PT_BR, 'packages/x/src/__tests__/helper.ts'));
+  t('a non-JS file carrying a literal is not a hit', !cliHit(PT_BR, 'packages/x/README.md'));
+  t('a path with nothing to read is not a hit, and does not throw', !carriesACliCommandLiteral('packages/x/src/a.ts', () => null, CLI_SURFACE));
+  t('no declared CLI reaches nothing, so the binary names are consulted', !cliHit(PT_BR, 'packages/x/src/a.ts', () => []));
+  // The SURFACE limb is judged from the path, so a deleted module still counts.
+  t('a command module of the CLI is a hit with nothing to read — a deleted or renamed command',
+    carriesACliCommandLiteral('packages/cli/src/commands/migrate/apply.ts', () => null, CLI_SURFACE));
+  t('the CLI manifest is a hit: it declares the binary names', carriesACliCommandLiteral('packages/cli/package.json', () => null, CLI_SURFACE));
+  t('CLI source outside its commands directory is not a hit, even carrying a literal: the gate never scans its own CLI',
+    !cliHit(PT_BR, 'packages/cli/src/utils/x.ts'));
+  t('cliBinaryNames: oclif.bin plus every bin key', JSON.stringify(cliBinaryNames({ oclif: { bin: 'os' }, bin: { objectstack: 'x', os: 'x' } })) === '["os","objectstack"]');
+  t('cliBinaryNames: a manifest with bin keys but no oclif.bin is no CLI', cliBinaryNames({ bin: { tool: 'x' } }).length === 0);
+
+  // The live tree: the CLI is discovered from its manifest, its command surface
+  // is reached, and the literal net discriminates.
+  const liveClis = cliCommandSurfaces();
+  t(`the live tree declares a CLI the net can read (${liveClis.map((c) => `${c.dir}: ${c.bins.join('/')}`).join('; ') || 'none'})`,
+    liveClis.some((c) => c.bins.length > 0));
+  const CLI_SURFACE_SPECIMEN = 'packages/cli/src/commands/migrate/apply.ts';
+  t('a live command module is reached', carriesACliCommandLiteral(CLI_SURFACE_SPECIMEN));
+  const cliCorpus = trackedFiles().filter((f) => /\.(?:ts|tsx|js|mjs|cjs)$/.test(f) && !/\.(?:test|spec)\.[tj]sx?$/.test(f) && !f.includes('/__tests__/')
+    && !liveClis.some((c) => f.startsWith(`${c.dir}/`)));
+  const cliHits = cliCorpus.filter((f) => carriesACliCommandLiteral(f));
+  t(`the CLI literal trigger discriminates: ${cliHits.length} of ${cliCorpus.length} non-test JS/TS files outside the CLI (neither vacuous nor tree-wide)`,
+    cliHits.length > 50 && cliHits.length < cliCorpus.length / 4);
+  // The gate's own reader, held against the net. Spawned: selfTest is
+  // synchronous, and the gate's module loads `typescript` at import time,
+  // which is exactly why the engine does not import it.
+  const cliProbe = spawnSync(
+    process.execPath,
+    [
+      '--input-type=module',
+      '-e',
+      `const fs = await import('node:fs');
+       const m = await import(${JSON.stringify(pathToFileURL(nodePath.join(ROOT, 'scripts/check-cli-command-ids.mjs')).href)});
+       const { root, clis, corpus } = JSON.parse(fs.readFileSync(0, 'utf8'));
+       const bins = {};
+       for (const c of clis) bins[c.dir] = m.binNamesOf(JSON.parse(fs.readFileSync(root + '/' + c.dir + '/package.json', 'utf8')));
+       const all = [...new Set(Object.values(bins).flat())];
+       const files = corpus.filter((f) => fs.readFileSync(root + '/' + f, 'utf8').split('\\n').some((l) => m.literalsOn(l, all).length > 0));
+       console.log(JSON.stringify({ bins, files }));`,
+    ],
+    { encoding: 'utf8', cwd: ROOT, input: JSON.stringify({ root: ROOT, clis: liveClis, corpus: cliCorpus }), maxBuffer: 1 << 26 },
+  );
+  let cliTruth = null;
+  try {
+    cliTruth = JSON.parse((cliProbe.stdout ?? '').trim());
+  } catch {
+    /* cliTruth stays null and the cases below fail loudly */
+  }
+  t(`the gate's own reader ran over the same corpus (exit ${cliProbe.status}${cliProbe.status === EXIT_PREREQUISITE_NOT_MET ? ': install the workspace first' : ''})`,
+    cliProbe.status === 0 && cliTruth !== null && cliTruth.files.length > 50);
+  t("the net reads the same binary names the gate's reader does, per CLI",
+    cliTruth !== null && liveClis.every((c) => JSON.stringify([...(cliTruth.bins[c.dir] ?? [])].sort()) === JSON.stringify([...c.bins].sort())));
+  const cliMissed = (cliTruth?.files ?? []).filter((f) => !cliHits.includes(f));
+  t(`every file the gate's reader finds a literal in is inside the net (missed: ${cliMissed.slice(0, 5).join(', ') || 'none'})`,
+    cliTruth !== null && cliMissed.length === 0);
+
+  // The rendered section, through this entry alone and then the whole table.
+  const cliEntry = CHANGE_KIND_GATES.filter((k) => k.gates.some((g) => g.name === 'check:cli-command-ids'));
+  t('exactly one entry in the table names the CLI command-id gate', cliEntry.length === 1 && cliEntry[0].gates.length === 1);
+  const cliKind = changeKindLines([CLI_SURFACE_SPECIMEN], resolved, cliEntry);
+  t('a command-module path emits the CLI convention section', cliKind.length === 2 && cliKind[0].includes('CLI command-id literal'));
+  const cliLine = cliKind.find((l) => l.includes('- pnpm check:cli-command-ids   —')) ?? '';
+  t('and it names the gate runnably, anchored on the delimiter', cliLine !== '');
+  t('…and states why it is derived by content rather than for every diff', /unconditional in CI but not cheap/.test(cliLine));
+  t('…and keeps the exemption ledger off the repair path', /exemption ledger/.test(cliLine) && /never a quick fix/.test(cliLine));
+  const throughTableCli = (p) => changeKindLines([p], resolved).some((l) => l.includes('- pnpm check:cli-command-ids   —'));
+  t('through the whole table, a live command module derives the gate', throughTableCli(CLI_SURFACE_SPECIMEN));
+  t('…a live literal-carrying source does too', cliHits.some((f) => !f.startsWith('scripts/') && throughTableCli(f)));
+  t('…and a docs-only page does not', !throughTableCli('content/docs/ai/agents.mdx'));
+  t('the runnable union carries the gate for the command module',
+    commandsFor({ kindGroups: changeKindGates([CLI_SURFACE_SPECIMEN], resolved) }).includes('pnpm check:cli-command-ids'));
+  t('an undiscoverable CLI command-id gate renders STALE for this entry',
+    changeKindLines([CLI_SURFACE_SPECIMEN], () => null, cliEntry).filter((l) => l.includes('⚠ check:cli-command-ids: STALE')).length === 1);
+
+  // ── The ADR-anchored-file kind (#30763) ──────────────────────────────────
+  //
+  // Read from the ADR corpus, not from the path's content: the anchors are the
+  // gate's own, extracted with its corpus registration. Limbs through injected
+  // targets and an injected disk, the reader against a scratch corpus, then
+  // the live tree and the rendered section.
+  const ADR_TARGETS = () => ({
+    symbolFiles: new Set(['packages/a/src/anchored.ts']),
+    anchoredFiles: new Set(['packages/a/src/anchored.ts', 'packages/b/src/file-level.ts']),
+  });
+  const onDisk = (present) => (p) => present.includes(p);
+  t('an edit to a symbol-anchored file is a hit', breaksAnAdrAnchor('packages/a/src/anchored.ts', ADR_TARGETS, onDisk(['packages/a/src/anchored.ts'])));
+  t('…and so is deleting it', breaksAnAdrAnchor('packages/a/src/anchored.ts', ADR_TARGETS, onDisk([])));
+  t('an edit to a file anchored only at file level is not a hit: it cannot red that anchor',
+    !breaksAnAdrAnchor('packages/b/src/file-level.ts', ADR_TARGETS, onDisk(['packages/b/src/file-level.ts'])));
+  t('…but moving or deleting it is', breaksAnAdrAnchor('packages/b/src/file-level.ts', ADR_TARGETS, onDisk([])));
+  t('a file no ADR anchors is not a hit, present or gone',
+    !breaksAnAdrAnchor('packages/c/src/x.ts', ADR_TARGETS, onDisk(['packages/c/src/x.ts'])) && !breaksAnAdrAnchor('packages/c/src/x.ts', ADR_TARGETS, onDisk([])));
+  t('a leading ./ is tolerated', breaksAnAdrAnchor('./packages/a/src/anchored.ts', ADR_TARGETS, onDisk(['packages/a/src/anchored.ts'])));
+  const adrFx = mkdtempSync(nodePath.join(tmpdir(), 'dispatch-gates-adr-anchors-'));
+  try {
+    const adrDir = nodePath.join(adrFx, ADR_ANCHOR_CORPUS.docRoots[0]);
+    mkdirSync(adrDir, { recursive: true });
+    writeFileSync(
+      nodePath.join(adrDir, '0001-x.md'),
+      ['# X', '', 'See `packages/a/src/x.ts#makeThing`, `#otherThing` and `packages/b/README.md`.', '',
+        'Upstream `objectui:packages/c/src/y.ts` too.', '', '```ts', 'packages/d/src/quoted.ts#notAnAnchor', '```', ''].join('\n'),
+    );
+    const fx = adrAnchorTargets(ADR_ANCHOR_CORPUS, adrFx);
+    t('adrAnchorTargets: a symbol anchor and its continuation name the file by symbol', fx.symbolFiles.has('packages/a/src/x.ts') && fx.symbolFiles.size === 1);
+    t('adrAnchorTargets: a file-level anchor names its file at file level only', fx.anchoredFiles.has('packages/b/README.md') && !fx.symbolFiles.has('packages/b/README.md'));
+    t('adrAnchorTargets: a cross-repo anchor and a fenced sample are left out',
+      ![...fx.anchoredFiles].some((p) => p.includes('packages/c/') || p.includes('packages/d/')));
+    t('adrAnchorTargets: a corpus with no document THROWS rather than reading as no anchors',
+      throwsNaming(() => adrAnchorTargets(ADR_ANCHOR_CORPUS, nodePath.join(adrFx, 'nowhere')), 'yielded no document'));
+  } finally {
+    rmSync(adrFx, { recursive: true, force: true });
+  }
+
+  // The live tree: the corpus is read, and the PR #30749 file is anchored by
+  // symbol (ADR-0012 anchors the push plugin's declarations).
+  const liveAdr = adrAnchorTargets();
+  t(`the live ADR corpus is read: ${liveAdr.docs} records, ${liveAdr.symbolFiles.size} files anchored by symbol, ${liveAdr.anchoredFiles.size} anchored at all`,
+    liveAdr.docs > 100 && liveAdr.symbolFiles.size > 100 && [...liveAdr.symbolFiles].every((p) => liveAdr.anchoredFiles.has(p)));
+  t('…and a second ask is the memoised read', adrAnchorTargets() === liveAdr);
+  const ADR_SPECIMEN = 'packages/services/service-push/src/push-plugin.ts';
+  t('the live tree still anchors the #30749 file by symbol, and the predicate reaches it', breaksAnAdrAnchor(ADR_SPECIMEN));
+  t('a live source no ADR anchors is not reached', !breaksAnAdrAnchor('packages/services/service-storage/src/index.ts')
+    && !liveAdr.anchoredFiles.has('packages/services/service-storage/src/index.ts'));
+  t(`the symbol limb discriminates: ${liveAdr.symbolFiles.size} of ${codeCorpus.length} non-test TS files at most`,
+    liveAdr.symbolFiles.size < codeCorpus.length / 10);
+
+  const adrEntry = CHANGE_KIND_GATES.filter((k) => k.gates.some((g) => g.name === 'check:adr-symbol-anchors'));
+  t('exactly one entry in the table names the ADR anchor gate', adrEntry.length === 1 && adrEntry[0].gates.length === 1);
+  const adrKind = changeKindLines([ADR_SPECIMEN], resolved, adrEntry);
+  t('the anchored path emits the ADR convention section', adrKind.length === 2 && adrKind[0].includes('ADR anchors'));
+  const adrLine = adrKind.find((l) => l.includes('- pnpm check:adr-symbol-anchors   —')) ?? '';
+  t('and it names the gate runnably, anchored on the delimiter', adrLine !== '');
+  t('…and keeps the exemption marker MAINTAINER-ONLY', /MAINTAINER-ONLY/.test(adrLine));
+  const throughTableAdr = (p) => changeKindLines([p], resolved).some((l) => l.includes('- pnpm check:adr-symbol-anchors   —'));
+  t('through the whole table, the specimen derives the ADR gate', throughTableAdr(ADR_SPECIMEN));
+  t('…and an unanchored source does not', !throughTableAdr('packages/services/service-storage/src/index.ts'));
+  t('the runnable union carries the ADR gate for the specimen',
+    commandsFor({ kindGroups: changeKindGates([ADR_SPECIMEN], resolved) }).includes('pnpm check:adr-symbol-anchors'));
+  t('an undiscoverable ADR anchor gate renders STALE for this entry',
+    changeKindLines([ADR_SPECIMEN], () => null, adrEntry).filter((l) => l.includes('⚠ check:adr-symbol-anchors: STALE')).length === 1);
 
   // ── The ui/scripts/__tests__ suite (#26318) ─────────────────────────────────
   //
@@ -6006,6 +6194,11 @@ export function selfTest({ tier = 'full' } = {}) {
   // #22320's entry, the second content-reached gate, pinned for the same reason.
   t('check:error-status-conformance is a live family, so naming it is not a guess',
     liveFamilies.has('check:error-status-conformance'));
+  // #30763's three entries, the families a diff could break and no derivation
+  // handed to --commands, pinned for the same reason.
+  for (const name of ['check:error-code-provenance', 'check:cli-command-ids', 'check:adr-symbol-anchors']) {
+    t(`${name} is a live family, so naming it is not a guess`, liveFamilies.has(name));
+  }
 
   // ── The test-file entry's deletion criterion, MEASURED (#11199) ───────────
   //
@@ -7598,7 +7791,8 @@ export function selfTest({ tier = 'full' } = {}) {
       // 133 -> 137 (#25867): the header gained four lines on the ui jobs' queue-diff outputs.
       'scripts/pm/check-expected-skips.mjs:137 self-test-reads',
       // 736 -> 738 (#26318): the data import and its re-export each gained UI_SCRIPTS_SUITE_ROOTS.
-      'scripts/pm/dispatch-gates.mjs:738 inherited-population',
+      // 738 -> 744 (#30763): the ADR anchor corpus import and its comment.
+      'scripts/pm/dispatch-gates.mjs:744 inherited-population',
       // Ninth row, added with the declaration it names: the recogniser's mailbox
       // doorbell battery pins the seven key templates verbatim in the pm-dispatch
       // references' project-forms.md, a population claim on a governed file, so

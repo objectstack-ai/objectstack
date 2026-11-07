@@ -75,6 +75,11 @@
  *    credited with it, and recording the account holder there would claim
  *    they made the attempt.
  *
+ * A `login_failed` whose sign-in was refused before any account resolved
+ * (the IP allow-list, #30924) names no account: `user_id` and `record_id` are
+ * null, so it is a row about no record, read under the ledger's own grant, and
+ * still carries the client address and the refusing rule.
+ *
  * ⛔ An account event never carries the attempted credential, in any form.
  * Its `context` is the endpoint, the refusal's machine code and, for a
  * lockout, the lock's expiry and threshold — nothing the caller typed.
@@ -130,8 +135,14 @@ export interface AuthSessionAuditEvent {
    * The event's subject — a real `sys_user` id (the `user_id` lookup): the
    * session's owner for a session event, the account the sign-in named for an
    * account event.
+   *
+   * [#30924] Optional for one event only: a `login_failed` whose sign-in was
+   * refused before any account could be resolved (the IP allow-list refuses
+   * ahead of better-auth, and the identifier may name no account) is still
+   * written, about no record and attributed to nobody. Every other event
+   * without a subject writes no row.
    */
-  userId: string;
+  userId?: string;
   /**
    * The `sys_session` row a SESSION event is about, when known. An account
    * event names its account instead (module note), so this is not read for
@@ -204,6 +215,15 @@ export interface AuthEventAuditSinkOptions {
    */
   getEngine(): IDataEngine | undefined;
   logger?: AuthEventAuditLogger;
+}
+
+/**
+ * [#30924] Whether an event of `action` is written with no subject: only a
+ * refused sign-in (`login_failed`), whose refusal may come before any account
+ * is resolved. A session needs its owner and a lockout its account.
+ */
+function mayNameNoSubject(action: unknown): boolean {
+  return action === 'login_failed';
 }
 
 /** The object a session event's row names as its target. */
@@ -354,7 +374,9 @@ export function createAuthEventAuditSink(opts: AuthEventAuditSinkOptions): AuthE
   return {
     async recordAuthEvent(event: AuthSessionAuditEvent): Promise<void> {
       const engine = getEngine();
-      if (!engine || !event?.userId) return;
+      if (!engine || !event) return;
+      const subject = typeof event.userId === 'string' && event.userId.length > 0 ? event.userId : undefined;
+      if (!subject && !mayNameNoSubject(event.action)) return;
       if (probe === undefined || probedEngine !== engine) {
         probe = createFieldPresenceProbe(engine);
         probedEngine = engine;
@@ -367,13 +389,14 @@ export function createAuthEventAuditSink(opts: AuthEventAuditSinkOptions): AuthE
         action: event.action,
         // The whole point of the card: the event names its actor. `user_id` is
         // a strict `sys_user` lookup, and a session always has a real subject.
-        // On an account event it is the account the sign-in named.
-        user_id: event.userId,
+        // On an account event it is the account the sign-in named, and null
+        // for a refused sign-in that named none (#30924).
+        user_id: subject ?? null,
         // The record this event is about, so the row is navigable from the
         // ledger to it (and back) rather than being a bare verb: the session
         // for a session event, the account for an account event.
         object_name: targetObjectFor(event.action),
-        record_id: accountEvent ? event.userId : (event.sessionId ?? null),
+        record_id: accountEvent ? (subject ?? null) : (event.sessionId ?? null),
         // No before/after state: an auth event is not a field diff. Recording
         // `{}` here would be a claim about a record that never changed.
         old_value: null,
@@ -393,7 +416,7 @@ export function createAuthEventAuditSink(opts: AuthEventAuditSinkOptions): AuthE
         // is, and recording the impersonated user as the sole principal there
         // would be a WRONG record rather than a vague one. An account event
         // authenticated nobody, so it credits no principal (module note).
-        row.actor = event.actor ?? (accountEvent ? null : event.userId);
+        row.actor = event.actor ?? (accountEvent ? null : subject);
       }
 
       try {
