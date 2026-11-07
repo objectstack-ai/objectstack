@@ -14,6 +14,9 @@ import { fileURLToPath } from 'node:url';
 import { afterAll, describe, expect, it } from 'vitest';
 
 import { runCli, USAGE } from '../../src/bin.js';
+// `runCli` imports the runner CLI lazily (only `run` pays for its graph); loading it here
+// keeps that transform in the file's import phase, not inside a case's 5 s default.
+import '../../src/runner/cli.js';
 import { locateLibraryRoot, PACKED_LIBRARY_DIR } from '../../src/runner/library.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));

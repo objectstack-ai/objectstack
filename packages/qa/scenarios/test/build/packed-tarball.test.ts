@@ -132,11 +132,28 @@ describe('the packed @objectstack/scenarios tarball', () => {
     }
   });
 
+  it('keeps the runner out of the bin: help and version load dist/bin.js alone', () => {
+    // The runner's graph (objectql, plugin-sharing, spec) costs about a second warm and
+    // several seconds cold; only `run` may pay it, through the built `dist/cli.js`.
+    const bin = readFileSync(join(installed, 'dist/bin.js'), 'utf8');
+    expect(bin.match(/from\s*["'][^"']+["']/g) ?? []).toEqual(['from "fs"', 'from "path"', 'from "url"']);
+    expect(bin).toContain('import("./cli.js")');
+    expect(packed).toContain('dist/cli.js');
+  });
+
   it('ships JavaScript and declarations, never a TypeScript source', () => {
     expect(packed.filter((p) => /\.(c|m)?ts$/.test(p) && !/\.d\.(c|m)?ts$/.test(p))).toEqual([]);
     expect(packed.filter((p) => p.startsWith('src/') || p.startsWith('test/') || p.startsWith('scripts/'))).toEqual([]);
   });
 });
+
+/**
+ * Each `run` case spawns Node over the runner's whole graph once. Measured: about
+ * 1.3 s warm in a dev container; 5.7 s and 6.5 s cold on a CI Test Core runner
+ * (run 42400730182, where vitest's 5 s default timed both out). Budgeted at
+ * 30 s each, as `built-consumer.test.ts` budgets its own spawn of the same graph.
+ */
+const RUN_SPAWN_BUDGET_MS = 30_000;
 
 describe('the packed bin, run under plain Node', () => {
   it('prints its usage and its version', () => {
@@ -155,7 +172,7 @@ describe('the packed bin, run under plain Node', () => {
     const r = runBin(['run', '--only', 'no_such_card']);
     expect(r.stderr.trim()).toBe(`no card to run under ${join(realpathSync(installed), LIBRARY, CARDS)} matching no_such_card`);
     expect(r.status).toBe(2);
-  });
+  }, RUN_SPAWN_BUDGET_MS);
 
   it('refuses an API-billed login before it scaffolds anything', () => {
     // A stand-in `claude` on a subscription login: only the key in the environment can refuse it.
@@ -174,5 +191,5 @@ describe('the packed bin, run under plain Node', () => {
     expect(r.status).toBe(1);
     expect(r.stderr).toContain('`ANTHROPIC_API_KEY` is set');
     expect(readdirSync(scaffolds)).toEqual([]);
-  });
+  }, RUN_SPAWN_BUDGET_MS);
 });

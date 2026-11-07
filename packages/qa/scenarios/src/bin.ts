@@ -13,13 +13,16 @@
  *
  * `bin/objectstack-scenarios.js` imports the BUILT form of this file
  * (`dist/bin.js`), so npm runs JavaScript, never a `.ts` source.
+ *
+ * The runner is imported only for `run`, and the build keeps it out of this
+ * file (`tsup.config.ts` turns the import into one of the built `dist/cli.js`):
+ * its graph (the scorer's objectql and plugin-sharing among it) takes about a
+ * second warm and several cold, which `help` and `version` must not pay.
  */
 
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-
-import { main as runScenarios } from './runner/cli.js';
 
 export const USAGE = `Usage: objectstack-scenarios <command> [flags]
 
@@ -48,7 +51,7 @@ function packageVersion(): string {
 /** Run one command line; answers the process exit code. */
 export async function runCli(argv: readonly string[], io: CliIo = consoleIo): Promise<number> {
   const [command, ...rest] = argv;
-  if (command === 'run') return runScenarios(rest);
+  if (command === 'run') return (await import('./runner/cli.js')).main(rest);
   if (command === 'help' || command === '--help' || command === '-h') {
     io.out(USAGE);
     return 0;
