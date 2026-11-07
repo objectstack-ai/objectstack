@@ -26,7 +26,8 @@ import {
     // {@link ObjectStackProtocolImplementation.getMetaItemLayered}'s code-layer
     // fallback so a hydrated row is never answered as the code layer.
     isTenantAuthored,
-    pairOf,
+    isPairOf,
+    pairsOf,
 } from '@objectstack/metadata-core';
 import {
     type MetadataLock,
@@ -407,13 +408,15 @@ export async function getMetaItemLayered(host: Pick<ProtocolHost, 'artifactLockL
                 const owner = boundTo(row);
                 if (owner === undefined || owner === base) return false;
                 if (isServedOverrideRowOf(row, base, installed)) return false;
-                const pair = pairOf(base, installed);
-                if (pair.ok && pair.value === owner) return true;
+                if (isPairOf(owner, base, installed)) return true;
                 return host.resolveWritePackageScope(owner)?.dependencies.includes(base) === true;
             })
             .sort((a, b) => {
-                const pair = pairOf(base, installed);
-                const rank = (row: StoredOverlayRow) => (pair.ok && boundTo(row) === pair.value ? 0 : 1);
+                const pairs = pairsOf(base, installed);
+                const rank = (row: StoredOverlayRow) => {
+                    const at = pairs.indexOf(boundTo(row) ?? '');
+                    return at === -1 ? pairs.length : at;
+                };
                 return rank(a) - rank(b) || String(boundTo(a)).localeCompare(String(boundTo(b)));
             })[0];
         if (orphan !== undefined) {

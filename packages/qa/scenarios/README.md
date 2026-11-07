@@ -94,6 +94,34 @@ discrimination test; ⛔ never match by area prefix.
 | `dashboards.report` | carries a report whose dataset binds an object the card names, every report selecting only measures and dimensions its datasets declare |
 | `ai.agent-actions` | carries every action in `run.agentActions` on its object, AI-exposed and confirm-gated where the card says `confirm` (the agent-action checks) |
 
+## Running the cards in a Claude Code cloud session
+
+The runner below also runs in a Claude Code cloud session, under these settings:
+
+- **Repository**: objectstack-ai/objectstack alone. The runner and the cards live here, and a generated app installs
+  the published packages from npm (`create-objectstack@latest` unless `--create-version` says otherwise);
+  objectstack-ai/cloud is not needed.
+- **Login**: the container's `claude` CLI is logged in with the subscription (`claude auth status` reports
+  `oauth_token`). The live driver refuses an API-key login, and refuses to start while `ANTHROPIC_API_KEY` or
+  `ANTHROPIC_AUTH_TOKEN` is set, so unset both.
+- **Permission mode**: not Auto. Auto mode's classifier refuses to launch the headless `claude -p` the runner spawns;
+  use Accept edits and approve the command.
+- **Time**: a background command is capped at 2 hours. Run one `starter` card per command (`--only ID`): its build
+  takes about 20–30 min, then come the Run halves. For more, run two commands in parallel (each boots its app on a free
+  port); do not chain several `starter` cards in one command.
+- **Build first**: `pnpm install`, then `pnpm --filter '@objectstack/scenarios^...' build`. The runner reads its own
+  `src/` but its dependencies' `dist/`, so on a fresh checkout `run-scenarios` stops at `ERR_MODULE_NOT_FOUND` on
+  `@objectstack/spec/dist/…` and the suites at `Failed to resolve entry for package "@objectstack/types"`.
+- **Network**: npm must be reachable (the default): the scaffold runs `npx -y create-objectstack@…`.
+- **Cost**: the session's subscription quota.
+
+```bash
+unset ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN
+claude auth status                                     # oauth_token
+pnpm install && pnpm --filter '@objectstack/scenarios^...' build
+pnpm --filter @objectstack/scenarios run-scenarios --only leave_balances   # one starter card per command
+```
+
 ## Running the cards — `@objectstack/scenarios/runner`
 
 ```bash
@@ -104,6 +132,7 @@ pnpm --filter @objectstack/scenarios run-scenarios --driver recorded:/tmp/rec.js
 pnpm --filter @objectstack/scenarios run-scenarios --author-timeout 90       # minutes per authoring turn (default 60)
 pnpm --filter @objectstack/scenarios run-scenarios --author-max-turns 400    # turns per authoring turn, every card (default by tier)
 pnpm --filter @objectstack/scenarios run-scenarios --ask-max-turns 20        # turns per question or operation turn (default 12)
+pnpm --filter @objectstack/scenarios run-scenarios --packages workspace      # on this checkout's unreleased packages (default: published)
 ```
 
 Per card and mode the runner writes `docs/qa/platform-checklist/runs/<date>-scenario-<card>.json`
@@ -114,6 +143,17 @@ Per card and mode the runner writes `docs/qa/platform-checklist/runs/<date>-scen
 | `scratch` | `create-objectstack` → the agent builds from the card prompt and the runner's data contract (`prompts.ts`) → `objectstack validate` / `build` / `verify` (proofs chosen from the tags) → score → `objectstack dev --fresh` → seed, one user + permission-set grant + API key per persona → every question as every persona it names and every operation as its persona, over the app's MCP → the iterate change → rebuild, re-score, re-run |
 | `template` | a blank host project (`host<code>`) → boot → install the card's verified build **unmanaged** (`/api/v1/marketplace/install-local`, `installMode: 'unmanaged'`) → the agent applies the iterate change to the installed copy → score → seed → Run. A refused install is a finding in the record |
 
+- **Package source** (`packages.ts`, `--packages`): `published` (the default) scaffolds with `npx -y
+  create-objectstack@<version>` and installs from npm, what a customer gets. `workspace` measures the next release before
+  it ships: it builds what the release builds for the packages it publishes (every non-private `@objectstack/*` and
+  `create-objectstack`, `turbo run build build:dist`), `pnpm pack`s each — the tarball npm would serve, `files[]` only —
+  and scaffolds with the packed `create-objectstack`, whose own install a global pnpmfile points at the tarballs. The
+  tarballs are then kept as `overrides` in the project's `pnpm-workspace.yaml` (a later `pnpm add` stays on them), and the
+  scaffold is refused unless every `@objectstack/*` package came from a tarball and `.claude/skills/` equals the
+  workspace build's catalog (`packages/skills/dist/skills`) file for file. Every record (`env.packages`,
+  `env.packagesLine`) and scorecard states the source: `packages: published 18.3.0`, or `packages: workspace @ <sha>
+  (unreleased)`. ⛔ The gallery exporter exports only a `published` run: a `workspace` record, or one that states no
+  source, is refused.
 - **Driver** (`driver.ts`): the local `claude` CLI on your own login (`claude -p --output-format stream-json`, the
   prompt written to its stdin: a build prompt carries the whole seed, and one argv string over 128 KiB makes `spawn`
   fail with `E2BIG` on Linux). It refuses to start when `ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN` is set or the CLI
@@ -158,3 +198,11 @@ Per card and mode the runner writes `docs/qa/platform-checklist/runs/<date>-scen
 - **Persona contract**: the build is asked for one permission set per persona, named `<namespace>_<persona id>`. The runner
   grants it to that persona's user, and makes a seed row whose scope field names a persona's handle (`owner: u_sam`)
   owned by that persona's user.
+- **Structure contract** (`prompts.ts`): every Build check traces to text the build prompt carries, so a faithful build
+  never fails for not guessing a name. Besides the seed (objects and fields) and the persona sets, the contract states
+  each `expect` row the exact-name scorer checks by name: every lookup's target, every single-choice field with its
+  minimum option count, every dashboard and every app navigation target, and, on a card carrying
+  `records-forms.select-options`, that every other single-choice field offers two options or more. An iterate prompt
+  states its change's rows the same way: the new objects (with the card's field minimum), lookups, option fields,
+  dashboards and nav targets. `test/runner/prompt-trace.test.ts` reads the checks off the scorer itself and holds every
+  card to it.

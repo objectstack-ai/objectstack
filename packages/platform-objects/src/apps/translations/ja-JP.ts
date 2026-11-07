@@ -190,7 +190,7 @@ export const jaJP: TranslationData = {
     connect_agent: {
       label: 'AI アシスタントを接続',
       subtitle:
-        'MCP 対応の AI クライアントにこのシステムへの統制されたアクセスを許可します。すべての呼び出しは、呼び出し元自身の権限と行レベルセキュリティのもとで実行されます。',
+        'Claude や Doubao などの AI アシスタントからこのシステムを使えます。アシスタントは常にあなたとして動作し、あなたの権限で許された範囲だけを参照・変更します。',
     },
 
     // Platform record pages (#15743) -- see `en.ts` for the key set.

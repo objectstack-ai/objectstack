@@ -353,6 +353,23 @@ describe('[#28413] the census and the move', () => {
         expect((await census(protocol)).incompleteDeclarations).toEqual([]);
     });
 
+    it('[#29594] a module\'s override in its App\'s pair is listed under the module it declares, not the App, and completed', async () => {
+        const { engine, protocol } = await boot();
+        // The base as an App, and a module that declares it: their pair is the App's (ADR-0146 D3 as amended).
+        const MODULE = `${BASE}.ops`;
+        const TICKET_VIEW = 'showcase_ticket.default';
+        engine.registerApp({ id: BASE, name: 'showcase', version: '1.2.0', type: 'app', namespace: 'showcase' } as any);
+        engine.registerApp({
+            id: MODULE, name: 'showcase-ops', version: '1.2.0', type: 'module', namespace: 'showcase',
+            dependencies: { [BASE]: '^1.2.0' },
+            objects: [objectOf('showcase_ticket', BASE_COLUMNS)], views: [listView('showcase_ticket', BASE_COLUMNS)],
+        } as any);
+        expect(((await (protocol as any).ensureCustomizationPackage({ basePackageId: MODULE })) as any).packageId).toBe(PAIR);
+        await storeRow(engine, TICKET_VIEW, 'showcase_ticket', EDITED_COLUMNS, PAIR, 'active', { overrides: { package: MODULE } });
+        expect((await census(protocol)).incompleteDeclarations.map((d: any) => [d.name, d.pair, d.base]))
+            .toEqual([[TICKET_VIEW, PAIR, MODULE]]);
+    });
+
     it('…on every overridable type, not only the five overlay types (a page)', async () => {
         const { engine, protocol, stores } = await boot();
         engine.registerApp({ id: BASE, name: 'showcase', version: '1.2.0', namespace: 'showcase', pages: [pageBody(PAGE, 'Home')] } as any);

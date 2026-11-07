@@ -250,6 +250,7 @@ import { resolvePasswordHasher } from './auth-manager-password-hasher.js';
 // after-hook (cut 12) and before-hook (cut 13) are now imported there, by the
 // two arrows that moved with it.
 import { createAuthInstance, type AuthInstanceHost } from './auth-manager-auth-instance.js';
+import { runSsoOidcCallbackScope } from './sso-oidc-refusal-cause.js';
 // [#25224 cut 16] The body of `buildPluginList`; the method of the same name
 // below hands it the members it reads (`PluginListHost`). The organization
 // plugin's factory (cut 15) is now imported there, by the arrow that moved
@@ -3938,14 +3939,24 @@ export class AuthManager {
    */
   handleRequest(request: Request, transport?: { remoteAddress?: string }): Promise<Response> {
     // [#25224 cut 10] The body moved to `auth-manager-request-routing.ts` (see `RequestRoutingHost`).
-    const host: Pick<RequestRoutingHost, 'betterAuthEndpointPath' | 'getOrCreateAuth' | 'resolveClientAddress' | 'runSubjectErasureAtomically' | 'answerOAuthTokenRevocation'> = {
+    const host: Pick<RequestRoutingHost, 'betterAuthEndpointPath' | 'getOrCreateAuth' | 'resolveClientAddress' | 'runSubjectErasureAtomically' | 'answerOAuthTokenRevocation' | 'runSsoOidcCallback'> = {
       betterAuthEndpointPath: (...a) => this.betterAuthEndpointPath(...a),
       getOrCreateAuth: (...a) => this.getOrCreateAuth(...a),
       resolveClientAddress: (...a) => this.resolveClientAddress(...a),
       runSubjectErasureAtomically: (...a) => this.runSubjectErasureAtomically(...a),
       answerOAuthTokenRevocation: (...a) => this.answerOAuthTokenRevocation(...a),
+      runSsoOidcCallback: (...a) => this.runSsoOidcCallback(...a),
     };
     return handleRequest.call(host, request, transport);
+  }
+
+  /**
+   * Run one enterprise OIDC callback (`/sso/callback/:providerId`) so its
+   * refusal names its cause: the redirect's `error_description` and one `warn`
+   * line on this manager's logger (`sso-oidc-refusal-cause.ts`).
+   */
+  private runSsoOidcCallback(providerId: string, run: () => Promise<Response>): Promise<Response> {
+    return runSsoOidcCallbackScope(providerId, this.config.logger, run);
   }
 
   /**

@@ -1087,12 +1087,23 @@ export function ObjectFieldInspector({
 
   /**
    * objectui#12326 — on a `controlled_by_parent` object a `master_detail` field
-   * is `required: true` and its Required box is locked on: the object derives
-   * its master from exactly one required `master_detail` (ADR-0055 §1), and the
-   * save door refuses any other value. `ObjectSettingsPanel` sets it when the
-   * sharing model is chosen; this inspector keeps it from being cleared.
+   * is `required: true` and its Required box is locked on once ticked: the
+   * object derives its master from exactly one required `master_detail`
+   * (ADR-0055 §1). `ObjectSettingsPanel` sets it when the sharing model is
+   * chosen; this inspector keeps it from being cleared.
+   *
+   * The one exception is the object's ONLY `master_detail` (ADR-0055 §1 as
+   * amended, objectstack#30905 ruling A): it may be an optional master,
+   * declared `required: false`, whose rows may name no master and are then
+   * readable only by their owner and by View All on the object. There the box
+   * stays free, clearing it writes `required: false` (an omitted `required`
+   * would be defaulted back to required), and the help text says what an
+   * optional master means. Beside another `master_detail` the spec admits no
+   * optional master, so the lock stands.
    */
   const cbpMasterDetail = draft.sharingModel === 'controlled_by_parent' && type === 'master_detail';
+  const cbpOptionalMasterAllowed =
+    cbpMasterDetail && view.entries.filter((e) => e.def.type === 'master_detail').length === 1;
 
   /**
    * A retype keeps a picklist binding only on a type the spec lets name one.
@@ -1470,10 +1481,13 @@ export function ObjectFieldInspector({
             <InspectorCheckboxField
               label={tr('designer.field.required')}
               value={!!def.required}
-              onCommit={(v) => patchDef({ required: v || undefined })}
+              // An optional master is written as `required: false`, never by
+              // dropping the key (objectstack#30905 ruling A).
+              onCommit={(v) => patchDef({ required: cbpOptionalMasterAllowed ? v : v || undefined })}
               // Locked once it is on: the box can still be ticked on a stored
-              // master that lacks it, never cleared (objectui#12326).
-              disabled={locked || (cbpMasterDetail && def.required === true)}
+              // master that lacks it, never cleared (objectui#12326), except
+              // on the object's only `master_detail`, which may be optional.
+              disabled={locked || (cbpMasterDetail && !cbpOptionalMasterAllowed && def.required === true)}
             />
             <InspectorCheckboxField
               label={tr('designer.field.unique')}
@@ -1485,7 +1499,7 @@ export function ObjectFieldInspector({
         </DisplayPatchLock>
         {cbpMasterDetail && (
           <p data-testid="field-required-cbp-master" className="text-[11px] text-muted-foreground">
-            {tr('designer.field.requiredCbpMaster')}
+            {tr(cbpOptionalMasterAllowed ? 'designer.field.requiredCbpOptionalMaster' : 'designer.field.requiredCbpMaster')}
           </p>
         )}
         <TextareaField

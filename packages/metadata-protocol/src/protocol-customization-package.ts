@@ -7,6 +7,13 @@
  *
  * ## The door
  *
+ * The unit is the App (ADR-0146 D3 as amended, ruling record 6691022506): the
+ * pair of a base is the pair of the App that carries it ({@link pairOf},
+ * `@objectstack/metadata-core`), so the door asked for any package of an App
+ * answers that App's one pair, `<app id>.custom` — creating it on the first
+ * ask and answering it after, never `422` for a package of the same App. A
+ * package that declares no App is its own unit, as before.
+ *
  * {@link ensureCustomizationPackage} is the body of
  * `ObjectStackProtocolImplementation#ensureCustomizationPackage`, served over
  * HTTP as `POST /api/v1/packages/:id/ensure-customization`
@@ -15,17 +22,18 @@
  * the pair (ADR-0146 D3: "no second door builds the pair"), and the one Studio,
  * the clone door and the migration call on a customer's first customization.
  *
- * Everything the pair is made of is the base's, through the pairing rules of
- * `@objectstack/spec/kernel` (`customization-package.ts`), ⛔ never a local
- * spelling:
+ * Everything the pair is made of is its App's — the asked base's App, which
+ * is the base itself for an App or an own-unit package — through the pairing
+ * rules of `@objectstack/spec/kernel` (`customization-package.ts`), ⛔ never a
+ * local spelling:
  *
- *   - id — `customizationPackageId`, asked through {@link pairOf}: `<base>.custom`;
- *   - namespace — {@link customizationNamespace}: `<base namespace>_custom`, SET
+ *   - id — `customizationPackageId`, asked through {@link pairOf}: `<app id>.custom`;
+ *   - namespace — {@link customizationNamespace}: `<app namespace>_custom`, SET
  *     EXPLICITLY on the manifest so `installPackage`'s id-derived default
  *     (`deriveNamespaceFromPackageId('hotcrm.custom')` = `custom`) never runs
  *     (ADR-0146 D3, Q4 「全部同意」);
- *   - dependency — {@link customizationDependencyRange}: `^<major>` of the base's
- *     `manifest.version` at creation, declared on the base in
+ *   - dependency — {@link customizationDependencyRange}: `^<major>` of the App's
+ *     `manifest.version` at creation, declared on the App in
  *     `manifest.dependencies` (ADR-0141 D1);
  *   - writable — a scope-less authored package, the same record `POST
  *     /packages` writes for a Studio-created base.
@@ -59,6 +67,9 @@
  *
  *   - `400` — the request is malformed, or the base id has no pair (it is
  *     itself a pair, or `<base>.custom` is not a valid package id);
+ *   - `409` — the base reaches several Apps and its namespace picks none or
+ *     more than one of them (ADR-0146 D3 merge question 11: no single App, so
+ *     no pair, never a guess);
  *   - `404` — the base is not installed;
  *   - `409` — the base's state rules the pair out: the base is a kernel
  *     package ({@link kernelPackageScopeOf}), whose objects are not
@@ -68,8 +79,12 @@
  *     pair namespace fails the manifest grammar (longer than
  *     {@link MAX_CUSTOMIZATION_BASE_NAMESPACE_LENGTH}, no truncation and no
  *     hashing); its version is not SemVer, so no range can be declared; or an
- *     installed `<base>.custom` lacks the namespace or the dependency;
- *   - `422 NAMESPACE_CONFLICT` — another package owns the pair's namespace: the
+ *     installed pair lacks the namespace or the dependency; or the pair's
+ *     namespace is held by the per-package pair an earlier version created for
+ *     a member of the same App (ADR-0146 D3 merge question 12: that pair stays
+ *     served, and the App's pair waits for it to be re-identified — never
+ *     `422` for a package of the same App);
+ *   - `422 NAMESPACE_CONFLICT` — a package outside the App owns the pair's namespace: the
  *     code and status `SchemaRegistry.installPackage` stamps for the same
  *     condition (`@objectstack/objectql`; that package depends on this one, so
  *     the string is spelled in each).
@@ -102,10 +117,11 @@ import type {
 import {
     MAX_CUSTOMIZATION_BASE_NAMESPACE_LENGTH,
     customizationBasePackageId,
+    customizationPackageId,
     customizationDependencyRange,
     customizationNamespace,
 } from '@objectstack/spec/kernel';
-import { pairOf } from '@objectstack/metadata-core';
+import { appOf, pairOf } from '@objectstack/metadata-core';
 import { installedManifestsOfEngine } from './installed-manifests.js';
 import type { CustomizationNamespaceRefusal } from '@objectstack/spec/kernel';
 
@@ -287,6 +303,11 @@ export async function ensureCustomizationPackage(
     const baseId = declared.data.basePackageId;
 
     const pair = pairOf(baseId, installedManifestsOfEngine(this.engine));
+    if (!pair.ok && pair.reason === 'no_single_app') {
+        throw refusal(409, `Package '${baseId}' declares several Apps and its namespace picks no single one of them, `
+            + 'so it has no paired customization package: a customization lands in the pair of the one App that '
+            + 'carries the package, and none is chosen by guess (ADR-0146 D3).');
+    }
     if (!pair.ok) {
         throw refusal(400, pair.reason === 'base_is_customization_package'
             ? `Package '${baseId}' is itself a paired customization package, and a pair is never paired again: `
@@ -374,9 +395,18 @@ export function customizationPairEnsureRefusal(
             + `('${pairId}') holds the changes to a read-only base — one provided by code or an installed app `
             + '(ADR-0146 D3).');
     }
-    const namespace = customizationNamespace(base.manifest?.namespace);
+    // [ruling record 6691022506] The pair is its App's: its namespace, its
+    // dependency and its range are read off the App (the base itself for an
+    // App or an own-unit package).
+    const appId = customizationBasePackageId(pairId) ?? baseId;
+    const app = appId === baseId ? base : registry.getPackage(appId);
+    if (!app) {
+        return refusal(404, `Package '${appId}', the App that carries '${baseId}', is not installed: its paired `
+            + `customization package '${pairId}' is ensured for an installed App (ADR-0146 D3).`);
+    }
+    const namespace = customizationNamespace(app.manifest?.namespace);
     if (!namespace.ok) {
-        return refusal(409, `Cannot ensure '${pairId}': ${noPairNamespaceClause(baseId, base.manifest?.namespace, namespace.reason)} `
+        return refusal(409, `Cannot ensure '${pairId}': ${noPairNamespaceClause(appId, app.manifest?.namespace, namespace.reason)} `
             + '(ADR-0146 D3).');
     }
     // An existing pair is returned unchanged, or refused naming what it lacks.
@@ -387,28 +417,42 @@ export function customizationPairEnsureRefusal(
         if (declaredNamespace !== namespace.value) {
             lacks.push(`namespace '${namespace.value}' (it declares ${typeof declaredNamespace === 'string' && declaredNamespace !== '' ? `'${declaredNamespace}'` : 'none'})`);
         }
-        const declaredRange = declaredRangeOn(existing.manifest, baseId);
-        if (declaredRange === undefined) lacks.push(`a dependency on '${baseId}' in manifest.dependencies`);
+        const declaredRange = declaredRangeOn(existing.manifest, appId);
+        if (declaredRange === undefined) lacks.push(`a dependency on '${appId}' in manifest.dependencies`);
         if (lacks.length > 0) {
             return refusal(409, `Package '${pairId}' is installed but is not the paired customization package of `
-                + `'${baseId}': it lacks ${lacks.join(', and ')}. It is not adopted or rewritten — delete it, or `
+                + `'${appId}': it lacks ${lacks.join(', and ')}. It is not adopted or rewritten — delete it, or `
                 + 'install a manifest over it that declares both, then ensure the pair again (ADR-0146 D3).');
         }
         return undefined;
     }
-    const range = customizationDependencyRange(base.manifest?.version);
+    const range = customizationDependencyRange(app.manifest?.version);
     if (!range.ok) {
-        return refusal(409, `Cannot ensure '${pairId}': package '${baseId}' is at version `
-            + `'${String(base.manifest?.version)}', which is not a SemVer 2.0.0 version, so the pair's dependency `
-            + 'range — the major of the base\'s version — cannot be declared (ADR-0146 D3).');
+        return refusal(409, `Cannot ensure '${pairId}': package '${appId}' is at version `
+            + `'${String(app.manifest?.version)}', which is not a SemVer 2.0.0 version, so the pair's dependency `
+            + 'range — the major of the App\'s version — cannot be declared (ADR-0146 D3).');
     }
     // The pair's namespace is the pair's alone: an owner other than the pair
     // is refused here, before the install, whatever co-ownership the registry
     // would read.
     const owner = registry.getNamespaceOwners?.(namespace.value)?.find((id) => id !== pairId);
     if (owner !== undefined) {
+        // [ADR-0146 D3 merge question 12] The per-package pair an earlier
+        // version created for a member of this App holds the namespace: it
+        // stays served as it is, and the App's pair waits for it to be
+        // re-identified as the App's pair — a resource-state conflict inside
+        // the App, never the `422` kept for a package outside it.
+        const ownerBase = customizationBasePackageId(owner);
+        const installed = installedManifestsOfEngine(engine);
+        if (ownerBase !== null && customizationPackageId(ownerBase).ok && appOf(ownerBase, installed) === appId) {
+            return refusal(409, `Cannot ensure '${pairId}' yet: its namespace '${namespace.value}' is held by `
+                + `'${owner}', the paired customization package an earlier version created for '${ownerBase}', a `
+                + `package of the App '${appId}'. That package stays installed and its customizations stay served; `
+                + `'${pairId}' is created once '${owner}' is re-identified as the App's pair, and is not created `
+                + 'beside it (ADR-0146 D3).');
+        }
         return refusal(422, `Cannot ensure '${pairId}': its namespace '${namespace.value}' is already owned by package `
-            + `'${owner}'. The pair's namespace is the base's followed by '_custom' and has no alternative; uninstall `
+            + `'${owner}'. The pair's namespace is the App's followed by '_custom' and has no alternative; uninstall `
             + `'${owner}' or move it off that namespace, then ensure the pair again (ADR-0146 D3).`,
         'NAMESPACE_CONFLICT');
     }
@@ -425,8 +469,10 @@ async function ensurePairOnce(
     // Every refusal the registry decides, read once ({@link customizationPairEnsureRefusal}).
     const refused = customizationPairEnsureRefusal(this.engine, registry, baseId, pairId);
     if (refused) throw refused;
-    const base = registry.getPackage(baseId)!;
-    const namespace = customizationNamespace(base.manifest?.namespace);
+    // The pair is its App's (the refusal above read the same App).
+    const appId = customizationBasePackageId(pairId) ?? baseId;
+    const app = registry.getPackage(appId)!;
+    const namespace = customizationNamespace(app.manifest?.namespace);
     if (!namespace.ok) throw new Error('unreachable: the namespace was judged above');
 
     // Idempotent: an existing pair is returned unchanged — ⛔ never adopted,
@@ -434,29 +480,29 @@ async function ensurePairOnce(
     const existing = registry.getPackage(pairId);
     if (existing) {
         return {
-            basePackageId: baseId,
+            basePackageId: appId,
             packageId: pairId,
             namespace: namespace.value,
-            dependencyRange: declaredRangeOn(existing.manifest, baseId)!,
+            dependencyRange: declaredRangeOn(existing.manifest, appId)!,
             created: false,
             writable: isWritablePackage(this.engine, pairId),
         };
     }
 
-    const range = customizationDependencyRange(base.manifest?.version);
+    const range = customizationDependencyRange(app.manifest?.version);
     if (!range.ok) throw new Error('unreachable: the version was judged above');
-    const baseName = typeof base.manifest?.name === 'string' && base.manifest.name !== '' ? base.manifest.name : baseId;
+    const appName = typeof app.manifest?.name === 'string' && app.manifest.name !== '' ? app.manifest.name : appId;
     const manifest = {
         id: pairId,
-        name: `${baseName} (custom)`,
+        name: `${appName} (custom)`,
         version: CREATED_PAIR_VERSION,
         type: CREATED_PAIR_TYPE,
         namespace: namespace.value,
-        dependencies: { [baseId]: range.value },
+        dependencies: { [appId]: range.value },
     };
     await this.installPackage({ manifest } as InstallPackageRequest);
     return {
-        basePackageId: baseId,
+        basePackageId: appId,
         packageId: pairId,
         namespace: namespace.value,
         dependencyRange: range.value,

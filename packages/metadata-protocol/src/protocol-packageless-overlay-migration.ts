@@ -474,9 +474,13 @@ export async function listPackagelessOverlays(
     // Every type a declaration applies to, not only the five the move acts on.
     const incompleteDeclarations: IncompleteOverrideDeclarationRow[] = [];
     for (const row of await environmentRowsOfTypes.call(this, OVERRIDABLE_TYPE_SPELLINGS)) {
-        if (isUnbound(row)) continue;
-        const base = customizationBasePackageId(row.package_id);
-        if (base === null || !isServedOverrideRowOf(row, base, installedManifestsOfEngine(this.engine))) continue;
+        if (isUnbound(row) || customizationBasePackageId(row.package_id) === null) continue;
+        // [ADR-0146 D3 as amended] The base is the one the row DECLARES: an
+        // App's pair overrides the items of every package of the App, so the
+        // pair's own id names only the App, never the module it overrides.
+        const declared = (bodyOf(row) as { overrides?: { package?: unknown } } | undefined)?.overrides?.package;
+        if (typeof declared !== 'string' || !isServedOverrideRowOf(row, declared, installedManifestsOfEngine(this.engine))) continue;
+        const base = declared;
         const basedOn = (bodyOf(row) as { overrides?: { basedOn?: unknown } } | undefined)?.overrides?.basedOn;
         if (typeof basedOn === 'string' && basedOn !== '') continue;
         const member = memberOf(row);

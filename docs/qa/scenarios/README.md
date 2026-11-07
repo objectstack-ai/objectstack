@@ -31,7 +31,7 @@ question's computed truth; a card that does not load is red in CI.
 | Layer | Key | What it states |
 |:---|:---|:---|
 | 1 | `prompt` | `{ short, detailed }`, each `{ zh?, en? }` with at least one language. |
-| 2 | `expect` | The structural expectation the deterministic scorer reads, field for field: `objects`, `minFieldsPerObject?`, `selectFields?` (`{ object, field, minOptions }`), `lookups?` (`{ object, field, to }`), `dashboards?`, `appNavTargets?`. |
+| 2 | `expect` | The structural expectation the deterministic scorer reads, field for field: `objects`, `minFieldsPerObject?`, `selectFields?` (`{ object, field, minOptions }`), `lookups?` (`{ object, field, to }`), `dashboards?`, `appNavTargets?`. The runner's build prompt states every row by name ([Build checks trace to the prompt](#build-checks-trace-to-the-prompt)). |
 | 3 | `capabilities`, `businessFunctions` | Tags `<area>.<name>`, where `<area>` is a closed set: the basenames of `docs/qa/platform-checklist/areas/*.json`, read from the tree. `businessFunctions` is the marketplace taxonomy's business-function facet, read from `@objectstack/spec/marketplace` (`MarketplaceBusinessFunctionsSchema`, defined once in `packages/spec/src/marketplace/taxonomy.zod.ts`): 1-3 distinct values, the primary one first — the card is classified the way the template it graduates into will be listed. |
 | 4 | `run.seed`, `run.questions`, `run.personas` | Seed rows per object; at least five read-only questions, each with a **declarative** truth spec; at least two personas, each a role, the objects or fields it must NOT see, and optionally a row `scope`. |
 | 5 | `run.operations`, `run.guardrails`, `run.agentActions?` | At least two writes, each acting as a persona and declaring its `outcome`; the five guardrail checks; optionally the agent-callable business actions. |
@@ -209,6 +209,27 @@ the loader enforces; each card's own test pins the rest:
   (lines included), a one-field change, a workflow step, a confirm-gated irreversible
   action, a refused overstep, a refused validation violation and one multi-step chain;
 - at least three agent actions, one of them confirm-gated.
+
+## Build checks trace to the prompt
+
+Every Build check must trace to text the build prompt carries; otherwise a faithful build fails
+for not guessing a name.
+
+- **Names.** The runner's data contract states the seed (objects and fields), each persona's
+  permission set and every `expect` row by name: lookup targets, option fields with their
+  minimum option counts, dashboards and app navigation targets. The iterate prompt does the
+  same for `iterate.expectDelta`. A card therefore picks its dashboard names knowing the build
+  is told them.
+- **Tags.** A capability tag whose check reads something the seed does not show is asked for
+  in the card's prose: `records-forms.master-detail-inline-edit` names the detail edited inline
+  on its master, in every language the prompt carries.
+- **Approvals.** A card either exercises the platform approval engine or models approvals as
+  data, never both. A card that seeds approval history as rows (an approval step object, or an
+  approver and decision date on the record) and grades approving as a data write models them
+  as data: its prose says each decision is a record it updates, asks for no approval process,
+  and it carries no `approvals.*` tag, whose checks read the engine's Approval node. The engine
+  keeps its own history, which no seed row can preload. Every open card models approvals as
+  data today.
 
 ## Adding a card
 

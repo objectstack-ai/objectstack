@@ -13,7 +13,8 @@
  * supplies the store, and the platform asks it at the three places that read
  * or write the state: the boot seed (`AppPlugin.seedPersistedDisabledPackages`)
  * and the package doors in `./domains/packages.ts` (install, enable, disable,
- * delete).
+ * delete), and the uninstall cleanup that clears a deleted package's record
+ * ({@link ensurePackageStateUninstallCleanup}).
  *
  * ## How a host supplies it
  *
@@ -136,4 +137,56 @@ export function asPackageStateStore(registered: unknown): PackageStateStore | un
     if (registered == null) return undefined;
     assertPackageStateStore(registered);
     return registered;
+}
+
+/**
+ * [#31023] The name the disable-record clear is registered under on the
+ * protocol's uninstall-cleanup registry, and the `name` of its outcome on an
+ * uninstall's `cleanups`.
+ */
+export const PACKAGE_STATE_UNINSTALL_CLEANUP = 'runtime.package-state';
+
+/** The protocols this process registered the disable-record clear on — once each. */
+const PACKAGE_STATE_CLEANUP_REGISTERED = new WeakSet<object>();
+
+/**
+ * [#31023, #18877 ruling item 3] Register, once per kernel, the uninstall
+ * cleanup that clears the uninstalled package's disable record:
+ * {@link PACKAGE_STATE_UNINSTALL_CLEANUP}, on the protocol's uninstall-cleanup
+ * registry (`registerUninstallCleanup`, ADR-0086 D3).
+ *
+ * A package that no longer exists has no lifecycle state, so the record goes
+ * with it and the next install of the id lands at its declared default. Only
+ * `DELETE /api/v1/packages/:id` cleared it, after the protocol's
+ * `deletePackage` answered; every in-process caller of that verb (a host's
+ * own uninstall tool, install-local's pair-install undo, the unmanaged-import
+ * rollback) left the record behind, so the next boot seeded the id as
+ * disabled and a reinstall came up disabled with nothing saying why. Through
+ * the registry, because it is the hook the verb already runs as its last step
+ * (and install-local's `DELETE` runs too): `@objectstack/metadata-protocol`
+ * does not know the state store, which lives here, and must not import it.
+ *
+ * `environmentId` is the key the boot seed reads (`AppPlugin`'s project
+ * context), so the record cleared is the one the next boot would seed. The
+ * store is resolved when the cleanup runs, as the package doors resolve it:
+ * the host's when one is registered as {@link PACKAGE_STATE_STORE_SERVICE},
+ * the file under `OS_HOME` otherwise. A store that refuses throws, and the
+ * registry's one runner reports it as the cleanup's failed outcome on the
+ * uninstall's response. A kernel with no protocol, or a protocol without the
+ * registry, registers nothing; the package door then clears the record itself.
+ * The store answers no count, so the outcome reports `removed: 0`.
+ */
+export function ensurePackageStateUninstallCleanup(ctx: PluginContext, environmentId: string | undefined): void {
+    let protocol: { registerUninstallCleanup?: (name: string, cleanup: (args: { packageId: string }) => Promise<{ success: boolean; removed: number; error?: string }>) => void } | undefined;
+    try { protocol = ctx.getService<any>('protocol'); } catch { return; }
+    if (!protocol || typeof protocol.registerUninstallCleanup !== 'function') return;
+    if (PACKAGE_STATE_CLEANUP_REGISTERED.has(protocol)) return;
+    PACKAGE_STATE_CLEANUP_REGISTERED.add(protocol);
+    protocol.registerUninstallCleanup(PACKAGE_STATE_UNINSTALL_CLEANUP, async ({ packageId }) => {
+        let registered: unknown;
+        try { registered = ctx.getService(PACKAGE_STATE_STORE_SERVICE); } catch { registered = undefined; }
+        const store = asPackageStateStore(registered) ?? FILE_PACKAGE_STATE_STORE;
+        await store.setPackageDisabled(environmentId, packageId, false);
+        return { success: true, removed: 0 };
+    });
 }
