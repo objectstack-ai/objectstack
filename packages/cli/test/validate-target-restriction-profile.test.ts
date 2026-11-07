@@ -70,13 +70,18 @@ const json = (r: Run): Record<string, any> => {
   }
 };
 
-/** One item per dimension: a hook and its function, a scheduled flow, and a record flow with a script node. */
+/**
+ * One item per dimension: a hook and its function, a scheduled flow, and a
+ * record flow with a script node. Plus a dev-only plugin, which `os build`
+ * leaves out of the artifact, so no target runs it and `allowCode` reads none.
+ */
 const STACK = `{
   manifest: { id: 'com.example.rpt', namespace: 'rpt', version: '1.0.0', name: 'Rpt', type: 'app', engines: { protocol: '^18' } },
   requires: ['automation', 'triggers'],
   objects: [{ name: 'rpt_doc', label: 'Doc', sharingModel: 'private', fields: { title: { type: 'text', label: 'Title' } } }],
   hooks: [{ name: 'rpt_audit', object: 'rpt_doc', events: ['beforeInsert'], handler: 'rpt_audit_fn' }],
   functions: { rpt_audit_fn: async () => {}, rpt_calc: () => 1 },
+  devPlugins: ['@acme/rpt-dev-only-plugin'],
   flows: [
     {
       name: 'rpt_nightly', label: 'Nightly', type: 'schedule', status: 'active',
@@ -147,7 +152,7 @@ describe('os validate --target <restriction profile file>', () => {
     expect(json(r).valid).toBe(true);
   }, 60_000);
 
-  it('allowCode: false refuses the hook, both functions and the script node — each row naming allowCode once', async () => {
+  it('allowCode: false refuses the hook, both functions and the script node — each row naming allowCode once; the dev-only plugin is not refused', async () => {
     const r = await run([config, '--json', '--target', profileFile('no-code', { ...OPEN, allowCode: false })]);
     expect(r.code, r.stdout).toBe(1);
     expect(json(r).valid).toBe(false);
