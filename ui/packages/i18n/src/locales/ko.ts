@@ -4053,6 +4053,7 @@ const ko = {
       create_record: "레코드 만들기",
       create_seed: "오브젝트 샘플 데이터 만들기",
       delete_field: "필드 삭제하기",
+      delete_package: "패키지 삭제하기",
       describe_metadata: "메타데이터 내용 확인하기",
       describe_object: "오브젝트 구조 살펴보기",
       get_active_package: "현재 패키지 확인하기",
