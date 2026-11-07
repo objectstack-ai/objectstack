@@ -1,5 +1,51 @@
 # @objectstack/hono
 
+## 18.4.0
+
+### Patch Changes
+
+- Updated dependencies [c17719d]
+- Updated dependencies [b90a6f7]
+- Updated dependencies [486b0a9]
+- Updated dependencies [769adff]
+- Updated dependencies [82142ed]
+- Updated dependencies [3b8c724]
+- Updated dependencies [665db00]
+- Updated dependencies [59bcd22]
+- Updated dependencies [fc869c2]
+- Updated dependencies [fd749a4]
+- Updated dependencies [9d939c5]
+- Updated dependencies [a545a04]
+- Updated dependencies [8589756]
+- Updated dependencies [8cc709d]
+- Updated dependencies [a7b8876]
+- Updated dependencies [f7afab8]
+- Updated dependencies [7b80724]
+- Updated dependencies [1de7def]
+- Updated dependencies [38d416f]
+- Updated dependencies [9052337]
+- Updated dependencies [7569fb5]
+- Updated dependencies [da3c742]
+- Updated dependencies [60dac8b]
+- Updated dependencies [704efef]
+- Updated dependencies [78eb352]
+- Updated dependencies [293a85b]
+- Updated dependencies [d9f8f7f]
+- Updated dependencies [4c31821]
+- Updated dependencies [4bf30da]
+- Updated dependencies [2d04cd2]
+- Updated dependencies [b3d2f4b]
+- Updated dependencies [e1dac19]
+- Updated dependencies [24bc259]
+- Updated dependencies [3299873]
+- Updated dependencies [30dcd8a]
+- Updated dependencies [8304b08]
+- Updated dependencies [4123865]
+- Updated dependencies [adb2b89]
+  - @objectstack/runtime@18.4.0
+  - @objectstack/plugin-hono-server@18.4.0
+  - @objectstack/types@18.4.0
+
 ## 18.3.0
 
 ### Patch Changes

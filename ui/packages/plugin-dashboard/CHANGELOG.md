@@ -1,5 +1,259 @@
 # @object-ui/plugin-dashboard
 
+## 18.4.0
+
+### Patch Changes
+
+- 48b3ae6: refactor(plugin-dashboard)!: retire five zero-consumer exports (the config panel's defaults table and hook, the retired-node tombstone and its report and reset helpers)
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (runtime-export-retired @object-ui/plugin-dashboard#CONFIG_PANEL_DEFAULT_TRANSLATIONS, @object-ui/plugin-dashboard#useConfigPanelTranslation, @object-ui/plugin-dashboard#RetiredDashboardNodeTombstone, @object-ui/plugin-dashboard#reportRetiredDashboardNodeType, @object-ui/plugin-dashboard#resetRetiredDashboardNodeTypeReports) the retired operands are a provider-less English defaults table, the translation hook that reads it, the React widget that refuses a retired dashboard node type and its two console-report helpers; nothing in the workspace or in hotcrm imports any of them from the package entry, and no packages/spec schema, registered node type, conversion surface or stored shape names them, so there is nothing for `objectstack migrate meta` to rewrite -->
+  
+  **BREAKING** for a host that imports any of these five names from `@object-ui/plugin-dashboard`. None had an importer anywhere in the workspace or in hotcrm, so the Console and every `@object-ui/*` package are unaffected. Every module stays in the package: the config panels keep using the hook and its table, and the package still registers the tombstone for every retired dashboard node type, so an authored `view:dashboard` is refused by name exactly as before. Only the entry stops publishing them. `RETIRED_DASHBOARD_NODE_TYPES`, `ConfigPanelTranslate`, `DashboardMetricNodeSchema`, the three `WidgetDataset*` types and every component stay exported unchanged.
+  
+  What leaves, and what to write instead (none has a replacement export):
+  
+  - FROM `CONFIG_PANEL_DEFAULT_TRANSLATIONS`, `useConfigPanelTranslation` TO no replacement: `DashboardConfigPanel` and `WidgetConfigPanel` translate their own labels; mount an `I18nProvider` to change them.
+  - FROM `RetiredDashboardNodeTombstone` TO no replacement: the package registers it under every key of `RETIRED_DASHBOARD_NODE_TYPES` itself, so rendering a retired node through `SchemaRenderer` still shows the refusal.
+  - FROM `reportRetiredDashboardNodeType`, `resetRetiredDashboardNodeTypeReports` TO no replacement: the tombstone reports on its own, once per retired type; read the migration text from `RETIRED_DASHBOARD_NODE_TYPES`.
+- 14c67d4: feat(plugin-dashboard): a dataset-bound KPI tile opens the records behind its number
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A dashboard metric tile bound to a dataset now opens the same drill drawer its charts and tables already open, by click or by Enter/Space. The list is the widget's filter (the dashboard's filters included) AND the answer's date window AND the measure's `drillScopes` entry, which carries the dataset's own filter and the measure's own filter, so the records listed are the records the number counts. A tile whose measure has no `drillScopes` entry (a derived measure, or a scope that names a relationship path) offers no click, as does a tile whose filter the list cannot express; its markup is unchanged. Nothing to author: the click follows from the dataset answer.
+- ea5807e: fix(console): four copy and display details from a real-user walkthrough: Latin object names spaced in zh form titles, a title on the lookup's create dialog, a success toast that names the action, and money metrics at the currency's decimals
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - **zh form titles space a Latin object name.** `新建{{object}}`, `编辑{{object}}` and `查看{{object}}` (and the AI chat's record-write card titles) read `新建 Repair Ticket` when the object has no Chinese label, and still `新建联系人` when it has one. `createI18n` applies the spacing to those keys only, through an i18next post-processor; the packs keep the plain `{{object}}` spelling.
+  - **The lookup's "create the referenced record" dialog has a title.** A `{ objectName, mode: 'create' }` modal descriptor with no `title` now reads `form.createTitle` with the object's label, the title of the console's own New dialog. An authored title still wins.
+  - **The default success toast names the action.** An action with a `label` and no `successMessage` (and no matching `outcomeMessages` entry) toasts the new pack key `actions.completedNamed` (`Resolve completed`, zh `“解决”已完成`) instead of the generic `Action completed successfully`. An action with no label keeps the generic text.
+  - **Money metrics keep the currency's decimals.** A dataset metric over a currency measure with no `format`, and a static metric card with a `currency` and no `format`, show the currency's own minor-unit width (CNY `¥1,293.00`, JPY `¥1,293`), the width the list cell shows. Before, the dataset metric printed the shortest form (`¥1,293`, `¥1,280.5`) and the static card rounded to whole units. An authored `format` pattern still states its width.
+- ff12aed: fix(core): a compareTo widget on a forward date range (next month, next quarter, next 30 days) compares with the period just before it, not with itself
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **`@object-ui/core`: `shiftFilterByCompareTo`** with `kind: 'previousPeriod'` moved only `current_*` / `today` tokens, so a dashboard filtered to `next_month` or `next_quarter` compared the window with itself and the delta always read 0, and `next_30_days` (`{today}` … `{30_days_from_now}`) moved only its start and compared with a window that overlapped it on all but one day. A forward window now steps back one period: `{next_month_*}` becomes this month, `{next_quarter_*}` this quarter, and a `{today}` … `{N_days_from_now}` pair on one field becomes the N + 1 days that end yesterday (`{(N+1)_days_ago}` … `{yesterday}`), the same window the dataset executor computes for that range. Every other token, and the 13 backward presets, compare as before.
+  - **`@object-ui/core`: `compareToTrendLabelKey`** names that window: `vsThisMonth` for a forward month, `vsThisQuarter` for a forward quarter, and `vsPreviousPeriod` for a forward rolling window (it read `vsLastMonth`, `vsLastQuarter` and `vsYesterday`).
+  - **`@object-ui/i18n`:** `dashboard.trend.vsThisMonth` and `dashboard.trend.vsThisQuarter` in all ten locale packs (zh: 较本月, 较本季度).
+  - **`@object-ui/plugin-dashboard`, `@object-ui/plugin-charts`:** English fallbacks for the two keys in the metric tile and in the chart's comparison series label.
+- f4d568b: fix(plugin-report,plugin-dashboard): a report, chart, table or cross-tab drill on a filtered measure lists the records the number counted
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A drill used to list the clicked bucket AND the report or widget filter only. The number also carries the dataset's own `filter` and the measure's own `filter`, so a drill on a filtered measure listed a superset: on the app-showcase Revenue Pulse dashboard, the Paid Invoices cell of the Sent row reads 0 and its drill listed all 4 sent invoices. The drill now also ANDs in the answer's `drillScopes` entry for the measure it stands for (the server's per-measure list filter; `{}` adds nothing, so a drill on an unfiltered measure is unchanged).
+  
+  - **What a click stands for.** A chart mark stands for its series' measure (a pivoted chart for its one measure), a cross-tab or matrix cell for its column's measure, and a table row for every measure it holds.
+  - **A table row whose measures select different records drills cell by cell.** When the row's measures all share one scope (one measure, or several plain ones), the row drills as before. Otherwise each measure cell with a scope is its own drill target (test id `dataset-drill-cell`) and the row is not.
+  - **No list that does not match the number.** A measure with no `drillScopes` entry (a derived measure, or a scope naming a relationship path) offers no drill, and neither does any measure of an answer that carries no `drillScopes`. A comparison (`<measure>__compare`) series opens nothing. A chart none of whose drawn measures has an entry gets no click handler.
+  - **Unchanged:** a report answer with no `object` (a server older than ADR-0021 D2) still hands the host its group-key fallback drill.
+- 7b2e557: fix(drill): "Open in list" from a dashboard or report drill is offered only when the list can show exactly the drawer's records
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  A drill filter is the clicked bucket AND the widget's filter AND the measure's drill scope. The list route holds one value per filter param and has no spelling for `$in`, so a drill with two conditions on one field (a `status = sent` bucket under a `status = paid` measure scope) or an `$in` scope opened a wider list than the drawer: the drawer showed 0 invoices and the list showed every sent one. The Console now offers "Open in list", and follows `drillDown.target: 'navigate'`, only when the route can write every condition of the drill filter, after resolving its placeholders; otherwise the drill stays in the drawer. A plain equality or date-range drill opens the same URL as before.
+  
+  `DrillNavigationValue` (`@object-ui/react`) gains an optional `canOpenRecordList(objectName, filter)`. The drill drawers (`DrillDownDrawer`, `OpenInListButton`, `ObjectChart`) offer the escape hatch only when `openRecordList` is present and `canOpenRecordList` is absent or answers `true`. A host that does not provide it behaves exactly as before.
+- Updated dependencies [7da99b7]
+- Updated dependencies [3214615]
+- Updated dependencies [4261169]
+- Updated dependencies [8fefefd]
+- Updated dependencies [7a5f73e]
+- Updated dependencies [8fefefd]
+- Updated dependencies [b5fd350]
+- Updated dependencies [ac5d0ce]
+- Updated dependencies [2cf269f]
+- Updated dependencies [e396095]
+- Updated dependencies [f810c34]
+- Updated dependencies [7a5f73e]
+- Updated dependencies [8aa2e91]
+- Updated dependencies [c17719d]
+- Updated dependencies [b90a6f7]
+- Updated dependencies [e8dc483]
+- Updated dependencies [bcdb1db]
+- Updated dependencies [9ebca94]
+- Updated dependencies [1e6f542]
+- Updated dependencies [140d8ce]
+- Updated dependencies [699ebd8]
+- Updated dependencies [b379262]
+- Updated dependencies [7945a3b]
+- Updated dependencies [4c2cd29]
+- Updated dependencies [4be8a2e]
+- Updated dependencies [471add3]
+- Updated dependencies [b5eb61d]
+- Updated dependencies [97e4249]
+- Updated dependencies [9037b13]
+- Updated dependencies [c2be734]
+- Updated dependencies [e3b56b2]
+- Updated dependencies [9049be2]
+- Updated dependencies [a52761f]
+- Updated dependencies [6db9198]
+- Updated dependencies [e8afd1e]
+- Updated dependencies [bd65cb6]
+- Updated dependencies [217ba78]
+- Updated dependencies [cde492d]
+- Updated dependencies [eee4149]
+- Updated dependencies [f3a52d3]
+- Updated dependencies [d59a1eb]
+- Updated dependencies [af3451b]
+- Updated dependencies [3a27208]
+- Updated dependencies [f0ad1f7]
+- Updated dependencies [03be565]
+- Updated dependencies [7e9fa4b]
+- Updated dependencies [bc8945f]
+- Updated dependencies [42afac7]
+- Updated dependencies [0c666c3]
+- Updated dependencies [38717d3]
+- Updated dependencies [a9fb14b]
+- Updated dependencies [6f095b9]
+- Updated dependencies [ac890f5]
+- Updated dependencies [5f80129]
+- Updated dependencies [0c7e95a]
+- Updated dependencies [aa57c76]
+- Updated dependencies [fc869c2]
+- Updated dependencies [fef212b]
+- Updated dependencies [c8e6d38]
+- Updated dependencies [d99cd3b]
+- Updated dependencies [dc51811]
+- Updated dependencies [b77c160]
+- Updated dependencies [09720e2]
+- Updated dependencies [b6caa14]
+- Updated dependencies [a77c2e9]
+- Updated dependencies [25fea77]
+- Updated dependencies [ea5807e]
+- Updated dependencies [d3f23d2]
+- Updated dependencies [ff12aed]
+- Updated dependencies [6c48d48]
+- Updated dependencies [3da9a4c]
+- Updated dependencies [4be9734]
+- Updated dependencies [bff5ba2]
+- Updated dependencies [bb86ff9]
+- Updated dependencies [31260ca]
+- Updated dependencies [ef2ad31]
+- Updated dependencies [2046d21]
+- Updated dependencies [18870c9]
+- Updated dependencies [fa9c0aa]
+- Updated dependencies [5174603]
+- Updated dependencies [f6faf75]
+- Updated dependencies [fd749a4]
+- Updated dependencies [d9d42d4]
+- Updated dependencies [9d939c5]
+- Updated dependencies [25e1c1a]
+- Updated dependencies [47226e6]
+- Updated dependencies [c7d1367]
+- Updated dependencies [f5aaa0b]
+- Updated dependencies [0005fec]
+- Updated dependencies [2d6402c]
+- Updated dependencies [77c203a]
+- Updated dependencies [8293c74]
+- Updated dependencies [648089d]
+- Updated dependencies [10ecafd]
+- Updated dependencies [b6f4c0e]
+- Updated dependencies [b4f4781]
+- Updated dependencies [042efb7]
+- Updated dependencies [48231b0]
+- Updated dependencies [0d54279]
+- Updated dependencies [8e5fabe]
+- Updated dependencies [ac56acf]
+- Updated dependencies [a91409c]
+- Updated dependencies [ab12a3b]
+- Updated dependencies [2b35374]
+- Updated dependencies [29702d5]
+- Updated dependencies [a839020]
+- Updated dependencies [a7b8876]
+- Updated dependencies [7b10a30]
+- Updated dependencies [8b0fbb8]
+- Updated dependencies [4dde0ae]
+- Updated dependencies [590724f]
+- Updated dependencies [38d416f]
+- Updated dependencies [d2e2f6f]
+- Updated dependencies [b55d6ab]
+- Updated dependencies [aad1603]
+- Updated dependencies [ad2393f]
+- Updated dependencies [5bca14f]
+- Updated dependencies [7145bf3]
+- Updated dependencies [55d9dd4]
+- Updated dependencies [af8aab1]
+- Updated dependencies [062236c]
+- Updated dependencies [a59d00a]
+- Updated dependencies [4bf9a2d]
+- Updated dependencies [d996c38]
+- Updated dependencies [0c9aa82]
+- Updated dependencies [49c8568]
+- Updated dependencies [47c457b]
+- Updated dependencies [4564d6f]
+- Updated dependencies [f2ea193]
+- Updated dependencies [5268f50]
+- Updated dependencies [5268f50]
+- Updated dependencies [5268f50]
+- Updated dependencies [7b2e557]
+- Updated dependencies [115a43a]
+- Updated dependencies [a30c4f4]
+- Updated dependencies [0cba0ce]
+- Updated dependencies [c893b3d]
+- Updated dependencies [677d542]
+- Updated dependencies [9bdeed2]
+- Updated dependencies [c1da957]
+- Updated dependencies [3479c33]
+- Updated dependencies [000a4c0]
+- Updated dependencies [f4d9c09]
+- Updated dependencies [c77dd17]
+- Updated dependencies [ebe0a98]
+- Updated dependencies [9038187]
+- Updated dependencies [f108e6d]
+- Updated dependencies [5cb7d7e]
+- Updated dependencies [b631573]
+- Updated dependencies [78d4fe9]
+- Updated dependencies [78eb352]
+- Updated dependencies [6ddf827]
+- Updated dependencies [d9d3eb7]
+- Updated dependencies [2ce2646]
+- Updated dependencies [bd1b768]
+- Updated dependencies [468e0c1]
+- Updated dependencies [6106b73]
+- Updated dependencies [0f920b9]
+- Updated dependencies [0f920b9]
+- Updated dependencies [33bc8ae]
+- Updated dependencies [584f7b8]
+- Updated dependencies [66b17a3]
+- Updated dependencies [a1afbb9]
+- Updated dependencies [150f740]
+- Updated dependencies [42eb126]
+- Updated dependencies [3f61e4f]
+- Updated dependencies [8cf1fd0]
+- Updated dependencies [51992df]
+- Updated dependencies [a5cb4f1]
+- Updated dependencies [3c1eb63]
+- Updated dependencies [d57be87]
+- Updated dependencies [f84205b]
+- Updated dependencies [eca7cd2]
+- Updated dependencies [eca7cd2]
+- Updated dependencies [cf4b9bf]
+- Updated dependencies [cf4b9bf]
+- Updated dependencies [614e831]
+- Updated dependencies [e1dac19]
+- Updated dependencies [21510bb]
+- Updated dependencies [0fd363d]
+- Updated dependencies [d6b88f1]
+- Updated dependencies [4123865]
+- Updated dependencies [6ffe37e]
+- Updated dependencies [63a470a]
+  - @object-ui/components@18.4.0
+  - @object-ui/core@18.4.0
+  - @object-ui/fields@18.4.0
+  - @object-ui/react@18.4.0
+  - @object-ui/types@18.4.0
+  - @objectstack/spec@18.4.0
+  - @object-ui/i18n@18.4.0
+  - @object-ui/permissions@18.4.0
+
 ## 18.3.0
 
 ### Minor Changes

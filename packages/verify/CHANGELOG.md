@@ -1,5 +1,405 @@
 # @objectstack/verify
 
+## 18.4.0
+
+### Minor Changes
+
+- 9ebca94: feat(push): `requires: ['push']` and the stack's `push` key turn mobile push on under `objectstack serve`, and a relay configuration is refused at boot
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  Skills-docs: follow-up owed — #29969 (skills/objectstack-platform/evals/config-plugins-ops.json: no eval asks for `requires: ['push']` or the `push` key); this diff teaches both in `skills/objectstack-platform/SKILL.md` (the top-level key enumeration and the `requires` table) and in the new `content/docs/kernel/runtime-services/push-service.mdx`
+  
+  A deployment that runs `objectstack serve` from a stack file can now turn on mobile push without host code. Before this, the only way to register a push service was a host that composed `PushServicePlugin` in code, so a `notify` node naming `push` had nothing to deliver through on a served stack.
+  
+  - **`@objectstack/spec`: the `push` capability token and the `push` stack key.** `push` joins `PLATFORM_CAPABILITY_TOKENS`, provided by `@objectstack/service-push` in the open edition. It is requested, never on the always-on slate. The stack definition gains a top-level `push` key beside `email` and `sms`: it is `PushServiceConfigSchema`, composed as a single value (`COMPOSE_KEY_DISPOSITIONS`). Authoring accepts a direct block, a relay block and absence; it refuses an inline secret, by key name (`key`, `privateKey`, `serviceAccount`, …) with `credentialRef` as the remedy, or pasted into a `credentialRef` (ADR-0143 D3). `PushServiceConfigSchema`'s docblock now names the stack key and `objectstack serve` as its reader; `PushRelayTransportConfigSchema` keeps its `[PLANNED — not yet served]` marker.
+  - **`@objectstack/core`: the `push` provider row and its argument.** `CAPABILITY_PROVIDERS.push` names `PushServicePlugin`, and `resolveCapabilityArgument('push', …)` builds its argument from the stack's `push` key through `resolvePushCapabilityArg`, read off the provider module as the `email` and `sms` readers are. Both `objectstack serve` and `@objectstack/verify`'s `bootStack` read this table, so an app's tests get the push service its server gets.
+  - **`@objectstack/service-push`: `resolvePushCapabilityArg`.** It parses the `push` key with `PushServiceConfigSchema` and refuses, before the kernel boots, two configurations: the relay transport (an absent key and `push: {}` read as it), whose sender has not shipped, with a message that says so and prescribes `transport: 'direct'` with an `apns` and/or `fcm` block; and anything the schema refuses, an inline secret first among them, naming each path and the schema's guidance and never the value. On a stack that declares `requires: ['push']` either refusal fails the boot as `Capability "push" (@objectstack/service-push) failed to start: …`.
+  - **`@objectstack/cli` and `@objectstack/verify`** depend on `@objectstack/service-push`, so the provider the token names resolves out of the box, as the open edition promises.
+  
+  To turn push on, add `requires: ['push']` and a direct block naming each vendor's secret by reference:
+  
+  ```ts
+  push: {
+    transport: 'direct',
+    apns: { teamId: 'ABCDE12345', keyId: 'KEY1234567', topic: 'com.example.app', environment: 'production', credentialRef: 'APNS_SIGNING_KEY' },
+    fcm: { projectId: 'example-app', credentialRef: 'FCM_SERVICE_ACCOUNT' },
+  },
+  ```
+  
+  In the open tier each `credentialRef` is the name of an environment variable holding the secret. A `push` key on a stack whose `requires` does not name `push` is not read, and `objectstack serve` logs one boot warning saying so. The runtime-services chapter has a new `services.push` page.
+- 0373715: feat(security, verify): the `controlled_by_parent` write gate judges a detail row whose optional master is empty — its owner or Modify All on the detail writes it
+  
+  Clause-②: yes
+  Metadata-protocol: semantic
+  Skills-docs: follow-up #30907
+  
+  A `controlled_by_parent` object whose only `master_detail` is declared `required: false` (an optional master) could already be declared, and its rows that name no master were already read by their owner and by View All on the detail. Writing such a row was refused with `422 MISSING_REQUIRED_FIELD`. It is now judged:
+  
+  - **Create.** An insert that names no master is admitted to anyone the detail's own `create` grant admits, and its creator becomes its owner. A batch is admitted the same way; every master its rows do name is still asked.
+  - **Update and delete.** A stored row that names no master is written by its owner (`owner_id` equal to the caller) and by a holder of `modifyAllRecords` on the detail, and refused `403 PERMISSION_DENIED` for everyone else, a holder of View All included. A row with no owner (a queue row), and every row of an object with no `owner_id` column, is Modify All's alone. The same rule judges each row a predicate update or delete (`multi: true`) selects, both principals of an on-behalf-of write, and `ISecurityService.checkControlledByParentWrite` (a refusal there is `deny` on the `master_chain` leg).
+  - **Setting a master** (none → M, M1 → M2) asks edit on the master the body names, as before. **Emptying one** (M → none) asks edit on the master the row leaves: the `sharing.controlledByParent.ownerMayEdit` opt-in, which lets an owner update a row with read on its master, does not cover a body that empties the master, so an owner who only reads the account cannot detach a contact and make it private.
+  - **Chains.** A master that is itself `controlled_by_parent` with an optional master of its own, and names none, ends the chain: writing its details asks the same rule of that row (its owner, or Modify All on its object).
+  - Ownership transfer is unchanged: a body that names another owner is still gated by `allowTransfer`.
+  - **`@objectstack/verify`.** The parent write reach family proves an optional-master detail in both cases: its records under a master, as every detail, and its records that name none, by the rule above (`ParentWriteReachReach.masters: 'none'`, with `masterRead: 'none'` and `unreadableDetails`).
+  
+  A required master is unchanged: a row whose stored required master is empty still answers `422 MISSING_REQUIRED_FIELD`.
+
+### Patch Changes
+
+- eb96480: fix(objectql)!: a non-system write may name, in a `lookup` or `user` field, only a record the caller can read (#29029)
+  
+  Clause-②: yes (narrowing) — the write's reference check narrows: a non-system `lookup` or `user` value naming a record the caller cannot read is refused, and an update's forgiveness of a value the row already stores compares only stored values the caller may read. The business-unit read widens: a delegated admin reads the business units inside the admin scope it holds, and no other.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export or type changes. The refusal is the engine's own localized reference_not_found, so there is nothing for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** accept-set narrowing at the write's reference check (`@objectstack/objectql`), served by every write door.
+  
+  After the upgrade, an insert or update that is not a system write is refused with `400 VALIDATION_FAILED` and the field's localized `reference_not_found` when a `lookup` or `user` value it supplies names a record the caller cannot read, before the record's validation rules run.
+  
+  An update that carries back a `lookup`, `master_detail` or `user` value the row already stores is still not judged again, but that comparison reads only stored values the caller may read, by id and in bulk alike. In a column the caller may edit but not read (a field permission `{ readable: false, editable: true }`), every value is judged as new: one naming a record the caller cannot read is refused with `reference_not_found` even when the row already stores it. A caller who can read the column keeps the forgiveness, and a system write is unchanged.
+  
+  A delegated admin whose admin scope covers a business-unit subtree can read the business units in that subtree, and no business unit outside it (`@objectstack/plugin-security`).
+  
+  The parent-write-reach verifier's personas read every record of each object a probed detail's required reference names outside its master chain, so the create probe names records its writer reads (`@objectstack/verify`).
+- aa57c76: feat(spec): three forward date-range presets: `next_month`, `next_quarter` and `next_30_days`
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  The relative dates a dashboard date filter and the filter builder offer looked only backward. A forecast asks forward: what closes next month, next quarter, in the next 30 days. Those questions had to use a custom range, whose fixed dates go stale.
+  
+  `DATE_RANGE_PRESETS` now also declares `next_month` (the whole of next month), `next_quarter` (the whole of next quarter) and `next_30_days` (today and the 30 days after it, the mirror of `last_30_days`). Every place that accepts a preset accepts them: `dashboard.dateRange.defaultRange`, a date global filter's `defaultValue`, the filter builder's `between` row and `AnalyticsQuery.timeDimensions[].dateRange`. They sit beside the family they extend in the filter bar: `next_month` after `last_month`, `next_quarter` after `last_quarter`, `next_30_days` after `last_90_days`. Their `DATE_RANGE_PRESET_MACRO_WINDOWS` rows follow the inclusive last-day convention: `['{next_month_start}', '{next_month_end}']`, `['{next_quarter_start}', '{next_quarter_end}']` and `['{today}', '{30_days_from_now}']`. A preset name written as a bare filter comparand is refused with that window as the prescription, as for the other presets.
+  
+  `@objectstack/core`'s `resolveAnalyticsDateRangePreset` resolves the three in its half-open form. `next_30_days` stops before `{31_days_from_now}`. `next_month` and `next_quarter` stop before the month and the quarter after next, which no macro token names: the resolver reads `next_month_start` (or `next_quarter_start`) again from the start of the day it named, so the end is still a day the one token resolver computed. No macro token is added.
+  
+  In the console, the three presets have labels in all ten locale packs, and the client date-macro resolver now answers `{next_month_end}` and `{next_quarter_end}`, two spec tokens it did not resolve before. `@objectstack/verify`'s dashboard-window proof also writes fixture rows on a forward preset's future edges, so it judges the three new windows; the days it writes for the other presets are unchanged. `@objectstack/lint` changes documentation only.
+- Updated dependencies [31fe289]
+- Updated dependencies [a35fc66]
+- Updated dependencies [eb96480]
+- Updated dependencies [8aa2e91]
+- Updated dependencies [c17719d]
+- Updated dependencies [de24d17]
+- Updated dependencies [b90a6f7]
+- Updated dependencies [486b0a9]
+- Updated dependencies [9ed2ee1]
+- Updated dependencies [769adff]
+- Updated dependencies [13c0c5b]
+- Updated dependencies [fe835b4]
+- Updated dependencies [e8dc483]
+- Updated dependencies [82142ed]
+- Updated dependencies [bcdb1db]
+- Updated dependencies [9ebca94]
+- Updated dependencies [3b8c724]
+- Updated dependencies [5cdaddb]
+- Updated dependencies [75bbebb]
+- Updated dependencies [509c40a]
+- Updated dependencies [c23501b]
+- Updated dependencies [140d8ce]
+- Updated dependencies [699ebd8]
+- Updated dependencies [5f47410]
+- Updated dependencies [4c2cd29]
+- Updated dependencies [4be8a2e]
+- Updated dependencies [471add3]
+- Updated dependencies [314ad95]
+- Updated dependencies [b5eb61d]
+- Updated dependencies [771b2db]
+- Updated dependencies [97e4249]
+- Updated dependencies [9037b13]
+- Updated dependencies [8d5aab3]
+- Updated dependencies [665db00]
+- Updated dependencies [e3b56b2]
+- Updated dependencies [18112bf]
+- Updated dependencies [a52761f]
+- Updated dependencies [e8afd1e]
+- Updated dependencies [bd65cb6]
+- Updated dependencies [cd5f554]
+- Updated dependencies [f19fbb8]
+- Updated dependencies [217ba78]
+- Updated dependencies [cde492d]
+- Updated dependencies [eee4149]
+- Updated dependencies [f9e5bef]
+- Updated dependencies [63b86b3]
+- Updated dependencies [f3a52d3]
+- Updated dependencies [d59a1eb]
+- Updated dependencies [13aa6a3]
+- Updated dependencies [af3451b]
+- Updated dependencies [ddcdc80]
+- Updated dependencies [3a27208]
+- Updated dependencies [cfb602c]
+- Updated dependencies [171b6dd]
+- Updated dependencies [f6f663a]
+- Updated dependencies [343ddb2]
+- Updated dependencies [0c666c3]
+- Updated dependencies [f672e0d]
+- Updated dependencies [38717d3]
+- Updated dependencies [bfbdeec]
+- Updated dependencies [4adc890]
+- Updated dependencies [fdad178]
+- Updated dependencies [bcdf8d3]
+- Updated dependencies [ac890f5]
+- Updated dependencies [59bcd22]
+- Updated dependencies [aa57c76]
+- Updated dependencies [fc869c2]
+- Updated dependencies [fef212b]
+- Updated dependencies [159930a]
+- Updated dependencies [dc51811]
+- Updated dependencies [b77c160]
+- Updated dependencies [09720e2]
+- Updated dependencies [a545a04]
+- Updated dependencies [8fed00f]
+- Updated dependencies [8fed00f]
+- Updated dependencies [8fed00f]
+- Updated dependencies [a77c2e9]
+- Updated dependencies [04f36b6]
+- Updated dependencies [25fea77]
+- Updated dependencies [06cccd3]
+- Updated dependencies [2fbddd4]
+- Updated dependencies [86ae2ca]
+- Updated dependencies [3da9a4c]
+- Updated dependencies [4be9734]
+- Updated dependencies [4be9734]
+- Updated dependencies [1a3ea0c]
+- Updated dependencies [bb86ff9]
+- Updated dependencies [8f05e61]
+- Updated dependencies [9afcd6a]
+- Updated dependencies [870ebce]
+- Updated dependencies [d1d90b7]
+- Updated dependencies [977be38]
+- Updated dependencies [2046d21]
+- Updated dependencies [4fae0be]
+- Updated dependencies [740edc5]
+- Updated dependencies [05a30e6]
+- Updated dependencies [778aedf]
+- Updated dependencies [71318af]
+- Updated dependencies [db04e5c]
+- Updated dependencies [fd749a4]
+- Updated dependencies [a26abbc]
+- Updated dependencies [8eca18f]
+- Updated dependencies [8b117c0]
+- Updated dependencies [d9d42d4]
+- Updated dependencies [9d939c5]
+- Updated dependencies [25e1c1a]
+- Updated dependencies [67d5d53]
+- Updated dependencies [47226e6]
+- Updated dependencies [a545a04]
+- Updated dependencies [c7d1367]
+- Updated dependencies [f5aaa0b]
+- Updated dependencies [0005fec]
+- Updated dependencies [2d6402c]
+- Updated dependencies [8589756]
+- Updated dependencies [77c203a]
+- Updated dependencies [8293c74]
+- Updated dependencies [bee9836]
+- Updated dependencies [a93ef3e]
+- Updated dependencies [0e4dfbe]
+- Updated dependencies [8cc709d]
+- Updated dependencies [b5765be]
+- Updated dependencies [5a878a3]
+- Updated dependencies [22f0d65]
+- Updated dependencies [fabd259]
+- Updated dependencies [29702d5]
+- Updated dependencies [1aeeafd]
+- Updated dependencies [a839020]
+- Updated dependencies [a7b8876]
+- Updated dependencies [26c2efd]
+- Updated dependencies [f7afab8]
+- Updated dependencies [7b80724]
+- Updated dependencies [1de7def]
+- Updated dependencies [2445cb4]
+- Updated dependencies [fb1ab89]
+- Updated dependencies [6c4c43a]
+- Updated dependencies [455b4f0]
+- Updated dependencies [4dde0ae]
+- Updated dependencies [94cef75]
+- Updated dependencies [e8e924f]
+- Updated dependencies [590724f]
+- Updated dependencies [35cd64c]
+- Updated dependencies [38d416f]
+- Updated dependencies [d2e2f6f]
+- Updated dependencies [d5f3bc5]
+- Updated dependencies [ae5bd5b]
+- Updated dependencies [e3948ae]
+- Updated dependencies [b55d6ab]
+- Updated dependencies [1c5cee6]
+- Updated dependencies [aad1603]
+- Updated dependencies [135c2fb]
+- Updated dependencies [898145b]
+- Updated dependencies [a0c68ae]
+- Updated dependencies [ede9e6b]
+- Updated dependencies [eb68b98]
+- Updated dependencies [a11ef71]
+- Updated dependencies [7c164cf]
+- Updated dependencies [ae82d05]
+- Updated dependencies [c5101a0]
+- Updated dependencies [e00bcc6]
+- Updated dependencies [f41ddbd]
+- Updated dependencies [561d532]
+- Updated dependencies [08e0247]
+- Updated dependencies [6701c08]
+- Updated dependencies [ca37605]
+- Updated dependencies [cabdfe8]
+- Updated dependencies [ab159a9]
+- Updated dependencies [0e88208]
+- Updated dependencies [33043bd]
+- Updated dependencies [66a8822]
+- Updated dependencies [7145bf3]
+- Updated dependencies [739c972]
+- Updated dependencies [55d9dd4]
+- Updated dependencies [af8aab1]
+- Updated dependencies [63de248]
+- Updated dependencies [c35fed1]
+- Updated dependencies [a59d00a]
+- Updated dependencies [a2437b5]
+- Updated dependencies [4bf9a2d]
+- Updated dependencies [0c9aa82]
+- Updated dependencies [ea41c49]
+- Updated dependencies [49c8568]
+- Updated dependencies [4564d6f]
+- Updated dependencies [f2ea193]
+- Updated dependencies [ee874b1]
+- Updated dependencies [deabe3b]
+- Updated dependencies [badf24d]
+- Updated dependencies [5268f50]
+- Updated dependencies [a255a62]
+- Updated dependencies [a30c4f4]
+- Updated dependencies [e2bcd5c]
+- Updated dependencies [0cba0ce]
+- Updated dependencies [c893b3d]
+- Updated dependencies [677d542]
+- Updated dependencies [9bdeed2]
+- Updated dependencies [b2a2b76]
+- Updated dependencies [9052337]
+- Updated dependencies [449c858]
+- Updated dependencies [3479c33]
+- Updated dependencies [000a4c0]
+- Updated dependencies [7569fb5]
+- Updated dependencies [b618224]
+- Updated dependencies [f4d9c09]
+- Updated dependencies [da3c742]
+- Updated dependencies [2a6a28d]
+- Updated dependencies [902f162]
+- Updated dependencies [c77dd17]
+- Updated dependencies [555eb1b]
+- Updated dependencies [ebe0a98]
+- Updated dependencies [87fc795]
+- Updated dependencies [60dac8b]
+- Updated dependencies [9038187]
+- Updated dependencies [f108e6d]
+- Updated dependencies [8847e09]
+- Updated dependencies [5cb7d7e]
+- Updated dependencies [704efef]
+- Updated dependencies [78eb352]
+- Updated dependencies [2ce2646]
+- Updated dependencies [468e0c1]
+- Updated dependencies [6106b73]
+- Updated dependencies [0373715]
+- Updated dependencies [0f920b9]
+- Updated dependencies [6bd00d2]
+- Updated dependencies [6bd00d2]
+- Updated dependencies [b5696b4]
+- Updated dependencies [616311c]
+- Updated dependencies [256a4b7]
+- Updated dependencies [33bc8ae]
+- Updated dependencies [293a85b]
+- Updated dependencies [022b4e7]
+- Updated dependencies [41dc302]
+- Updated dependencies [d463b99]
+- Updated dependencies [d9f8f7f]
+- Updated dependencies [30002df]
+- Updated dependencies [79a0d30]
+- Updated dependencies [4c31821]
+- Updated dependencies [6a01718]
+- Updated dependencies [a1afbb9]
+- Updated dependencies [150f740]
+- Updated dependencies [42eb126]
+- Updated dependencies [e11a575]
+- Updated dependencies [8cf1fd0]
+- Updated dependencies [4bf30da]
+- Updated dependencies [9f61e06]
+- Updated dependencies [cadd6aa]
+- Updated dependencies [a5cb4f1]
+- Updated dependencies [3c1eb63]
+- Updated dependencies [d57be87]
+- Updated dependencies [2d04cd2]
+- Updated dependencies [b58beb8]
+- Updated dependencies [5d4f2aa]
+- Updated dependencies [474c030]
+- Updated dependencies [f4cd4ec]
+- Updated dependencies [b3d2f4b]
+- Updated dependencies [70981e6]
+- Updated dependencies [85c7374]
+- Updated dependencies [eca7cd2]
+- Updated dependencies [cf4b9bf]
+- Updated dependencies [614e831]
+- Updated dependencies [adab62a]
+- Updated dependencies [42e1211]
+- Updated dependencies [7193160]
+- Updated dependencies [ea757ff]
+- Updated dependencies [e1dac19]
+- Updated dependencies [24bc259]
+- Updated dependencies [56baf78]
+- Updated dependencies [3299873]
+- Updated dependencies [72d7db0]
+- Updated dependencies [d0da880]
+- Updated dependencies [7b2bb66]
+- Updated dependencies [30dcd8a]
+- Updated dependencies [c92b887]
+- Updated dependencies [a794e32]
+- Updated dependencies [21510bb]
+- Updated dependencies [d7c0389]
+- Updated dependencies [8304b08]
+- Updated dependencies [6dd2ca5]
+- Updated dependencies [917f024]
+- Updated dependencies [0fd363d]
+- Updated dependencies [5210acf]
+- Updated dependencies [d6b88f1]
+- Updated dependencies [4123865]
+- Updated dependencies [bdbaf80]
+- Updated dependencies [a7293f7]
+- Updated dependencies [6ffe37e]
+- Updated dependencies [59e6463]
+- Updated dependencies [cad764d]
+- Updated dependencies [63a470a]
+- Updated dependencies [4851668]
+- Updated dependencies [adb2b89]
+  - @objectstack/objectql@18.4.0
+  - @objectstack/service-analytics@18.4.0
+  - @objectstack/plugin-security@18.4.0
+  - @objectstack/service-push@18.4.0
+  - @objectstack/service-messaging@18.4.0
+  - @objectstack/spec@18.4.0
+  - @objectstack/rest@18.4.0
+  - @objectstack/runtime@18.4.0
+  - @objectstack/service-automation@18.4.0
+  - @objectstack/service-datasource@18.4.0
+  - @objectstack/plugin-approvals@18.4.0
+  - @objectstack/plugin-sharing@18.4.0
+  - @objectstack/core@18.4.0
+  - @objectstack/plugin-email@18.4.0
+  - @objectstack/plugin-auth@18.4.0
+  - @objectstack/mcp@18.4.0
+  - @objectstack/platform-objects@18.4.0
+  - @objectstack/plugin-audit@18.4.0
+  - @objectstack/service-queue@18.4.0
+  - @objectstack/service-settings@18.4.0
+  - @objectstack/trigger-api@18.4.0
+  - @objectstack/trigger-record-change@18.4.0
+  - @objectstack/service-storage@18.4.0
+  - @objectstack/plugin-hono-server@18.4.0
+  - @objectstack/plugin-webhooks@18.4.0
+  - @objectstack/service-mailbox@18.4.0
+  - @objectstack/service-realtime@18.4.0
+  - @objectstack/service-sms@18.4.0
+  - @objectstack/types@18.4.0
+  - @objectstack/plugin-pinyin-search@18.4.0
+  - @objectstack/service-package@18.4.0
+  - @objectstack/metadata@18.4.0
+  - @objectstack/service-cache@18.4.0
+  - @objectstack/service-job@18.4.0
+  - @objectstack/trigger-schedule@18.4.0
+
 ## 18.3.0
 
 ### Patch Changes

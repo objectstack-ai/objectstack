@@ -1,5 +1,116 @@
 # create-objectstack
 
+## 18.4.0
+
+### Patch Changes
+
+- 1c53783: feat(cli,create-objectstack): `os build` says when the local dev database holds Studio customizations the artifact leaves behind; the starter's `AGENTS.md` and README say a Studio change lives in the database and name `os package export`
+  
+  Clause-②: yes (widening) — the exported CompileCommand gains a protected reportsLocalCustomizations flag (default false); nothing removed or narrowed
+  Metadata-protocol: none
+  
+  - **`@objectstack/cli`: `os build`** ends, on its text face, with one notice when the SQLite database `os dev` opens for the project (the same resolution, over the project's development `.env*` files) holds items of a `<base>.custom` package: how many, in which pair, the database file, and that `os package export` takes them out while `os dev` runs. A change saved in Studio is such an item (ADR-0146 D2), never part of `src/`, so neither the artifact nor the starter's `Dockerfile` carries it. The read is local and read-only; a database that is not a local SQLite file is not probed and prints nothing, and a file that cannot be read is said to be unchecked, never empty. `os compile`, which `os dev` runs on every boot and rebuild, and `os build --json` print nothing new.
+  - **`create-objectstack`: the generated `AGENTS.md` and the blank starter's README** say that Studio saves into the environment's database as an item of `<package id>.custom`, that `build` and the `Dockerfile` leave it behind, that app changes are made in `src/`, and how a customization moves as a package (`os login`, `os package export`, then `os package install` on the deployment, in the numbered order).
+- 959c26b: feat(cli,create-objectstack): a new project has a wired place for permission sets and datasets, `os g permission` / `os g dataset` write them, and the generated AGENTS.md names the package manager the project was created with
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - **`create-objectstack`: the blank starter ships `src/security/index.ts` and `src/datasets/index.ts`**, empty barrels already handed to the stack's `permissions` and `datasets` keys in `objectstack.config.ts`, like the eight directories it wired before. A permission set or a dataset exported from them is loaded and counted by `validate` with no edit to the config. The generated `AGENTS.md` lists both directories.
+  - **`@objectstack/cli`: `os g permission NAME [--object OBJECT]`** writes `src/security/NAME.permission.ts`, a `definePermissionSet` granting read, create and edit (no delete) on the object `--object` names, or the stack's only object, with `readScope: 'own'` declared. **`os g dataset NAME [--object OBJECT]`** writes `src/datasets/NAME.dataset.ts`, a `defineDataset` over that object with a `record_count` measure, grouped by the record's title field when it has one. `defineDataset` types the literal, so it needs no `as const`. Both pass `os validate`, `os build` and `os lint` with no finding on a fresh project. `os init` wires both directories too.
+  - **`create-objectstack`: the generated `AGENTS.md` (and `.github/copilot-instructions.md`) says `pnpm run validate` in a project created with pnpm**, and `npm run …` in one created with npm, the same package manager the install line and "Next steps" name. It used to say `npm run` in every project.
+- a98e5cd: Clause-②: no
+  Metadata-protocol: none
+  
+  The blank template now says its `note` object is a sample: the generated README gains a "The sample `note` object" section with the steps to delete or replace it, and `src/objects/note.object.ts` opens with a comment saying the same. A developer no longer finds a `note` object in their app, over REST or in an MCP client's object list, without anything telling them it came from the scaffold.
+- 2fbddd4: fix(cli,rest)!: `os package install` names its server and credential `-u/--url` and `-t/--token`, like `os package export`; the `/meta` read gate's permission refusal is localized
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) no key of any schema, export or stored row changes: a command-line option of one CLI command is renamed, which no metadata, artifact or database row records, so there is nothing for `objectstack migrate meta` to rewrite; the rename is for the person or script typing the command -->
+  
+  **BREAKING** for a script that runs `os package install` with `-r` or `--runtime`. The option is renamed with no alias, so the old spelling is refused as an unknown flag. Write `-u` / `--url` in its place:
+  
+  - FROM `os package install -r <url>` / `os package install --runtime <url>` TO `os package install -u <url>` / `os package install --url <url>`.
+  
+  The value, its default (`http://localhost:3000`) and its environment variable (`OS_RUNTIME_URL`) are unchanged. A script that sets only `OS_RUNTIME_URL` needs no change.
+  
+  `os package install` also takes `-t` / `--token` (environment variable `OS_RUNTIME_TOKEN`, new): a token the target runtime issued, sent as `Authorization: Bearer`, instead of signing in with `--email` / `--password`. Passing both is refused before any request. These are the spellings `os package export` and the other server-talking commands use.
+  
+  The scaffold's `AGENTS.md` and blank template README now spell the install command with `--url`.
+  
+  `@objectstack/rest`: an app, a dashboard or a list view a signed-in caller may not open is still refused `403 PERMISSION_DENIED`, and the sentence is now the operation catalog's `permission_denied` in the caller's locale, the sentence plugin-security's object refusals already use. Opening the Setup app without access in a Chinese console read `You do not have permission to open the 'com.objectstack.setup' app.`; it now reads 「您没有执行此操作的权限，如需访问请联系管理员。」. The sentence no longer carries the item's API name. A deployment's `errors.permission_denied` translation overrides it on the REST door, as it does for those refusals.
+- 780c6c3: feat(cli): `os deploy` — one command from a local checkout to your ObjectOS Cloud environment; installs pick the organization's only environment, keep it across `os cloud login`, and refuse before any write when none resolves
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  **`os deploy`** (new). With no flags it builds the app (the same compile `os build` runs), publishes it as `<manifest.version>-dev.<YYYYMMDDHHMMSS>` (a UTC semver pre-release, so deploying again never needs a version bump and never collides with an existing version), installs exactly that version into your organization's environment, and waits until the environment serves it (it reads the control plane's served-version report for the package and, since an environment rebuilds only when it gets a request, sends the environment one on every poll). A failed local build prints its errors and exits 1 having published nothing; a build the environment reports as failed prints the environment's reason and exits 1. Flags only for the uncommon case: `--env <id>` when your account reaches several environments, `--no-wait`, `--wait-timeout <seconds>` (default 600: a failing build is reported only after three failed rounds in a row). Against a control plane that does not yet report which version an environment serves, the command says so and does not claim the version is live.
+  
+  **`os package publish --install`** keeps its meaning (a release version, the manifest's own), and now resolves its environment like `os deploy`: `--env` / `$OS_ENVIRONMENT_ID`, then the environment `os environments switch` recorded for this control plane, then the organization's only environment, asked of the control plane and printed. With none, several, or an unreadable list it exits 1 **before registering the package or publishing anything**, naming how to pass one. It used to print "Skipping auto-install", publish anyway and exit 0.
+  
+  **`os cloud login`** no longer drops the active environment: re-logging in to the same control plane as the same account keeps `activeEnvironmentId` in `~/.objectstack/cloud.json`. A different control plane or a different account still starts without one.
+  
+  **`os dev`** offers the deploy on a key once the local server is up: press `d` to run `os deploy` in the same terminal; when not logged in to ObjectOS Cloud, the same key logs in first. There is no deploy on save. **`os build`** ends with the next step (`os deploy`), and bare `os` lists the everyday commands first. New projects from `create-objectstack` (and `os init`'s app template) ship `npm run deploy`.
+- 468e0c1: feat(spec)!: one marketplace taxonomy — business functions, industries, a solution type and a maturity flag replace the single `category` (#30904)
+  
+  Clause-②: yes (narrowing) — new facet keys and `maturity` widen; `category` retired and refused by name narrows; a contract review runs before the queue
+  Metadata-protocol: narrowed
+  
+  <!-- adr-0087: registered marketplace-category-retired -->
+  
+  **BREAKING** for a package source, publish request or listing that still writes `category`.
+  
+  - **`@objectstack/spec`.** The marketplace taxonomy is defined once, in `@objectstack/spec/marketplace` (`taxonomy.zod.ts`): `businessFunctions` (1-3 distinct values, the primary one first: `sales`, `marketing`, `customer_service`, `finance`, `hr`, `supply_chain`, `administration`, `project`, `legal`, `it`, `collaboration`), `industries` (up to 3, optional; absent means cross-industry), `solutionType` (`app` | `template` | `connector`; absent means `app`) and `maturity` (`beta` | `stable`; absent means `stable`), on `PackageSchema`, `CreatePackageRequestSchema`, `UpdatePackageRequestSchema`, `TemplateManifestSchema` (`objectstack.manifest.json`) and `MarketplaceListingSchema`, where `businessFunctions` is required. A search filters by `businessFunctions` / `industries` / `solutionTypes` / `maturity` and reads one facet count list per facet. `explainSolutionTypeContradiction` is the publish cross-check (a `template` needs the `unmanaged` install mode, a `connector` a declared connector) and `LEGACY_CATEGORY_MAPPING` says what every old category value becomes.
+  - **Retired.** `category` on all six schemas, and `MarketplaceSearchResponse.facets.categories`, are `retiredKey()` tombstones: `tsc` refuses them and a parse refuses them with the prescription. `MarketplaceCategorySchema` / `MarketplaceCategory` and `PackageCategorySchema` / `PackageCategory` are removed. `RETIRED_KEYS_BY_MAJOR[18]` lists the six keys, `RETIRED_DEFS_BY_MAJOR[18]` both defs, and the upgrade guide carries the semantic entry `marketplace-category-retired`. No ADR-0087 conversion: none of these shapes is a stack collection member, so `os migrate meta` has nothing to rewrite; a runtime boot never reads them.
+  - **`@objectstack/cli`.** `os package publish` refuses a `category` in `objectstack.manifest.json`, or the now-hidden `--category` flag, before any network call, naming the facets for the value it held. It judges each facet with the spec's schema, checks a declared `solutionType` against the built artifact, and sends the facets as `business_functions`, `industries`, `solution_type` and `maturity`; an absent facet is not sent.
+  - **`create-objectstack`.** The blank template no longer ships `category: "starter"`, which every project scaffolded from it inherited and which the hosted publish route refused.
+  
+  **The remedy.** FROM `"category": "<value>"` TO the facets: delete `category` and declare `businessFunctions` (and, where they apply, `industries` and `solutionType`) in `objectstack.manifest.json`. `os package publish` prints the mapping for the value you had — for example `"finance"` → `"businessFunctions": ["finance"], "solutionType": "app"` — and `LEGACY_CATEGORY_MAPPING` lists them all. A `"starter"` copied from the blank template is simply deleted. A TypeScript caller that imported `MarketplaceCategorySchema` or `PackageCategorySchema` uses `MarketplaceBusinessFunctionSchema` and `MarketplaceSolutionTypeSchema` instead.
+- a1afbb9: feat(spec)!: retire five `objectstack.manifest.json` keys nothing read — `name`, `specVersion`, `skills`, `scaffold` and `visibility` (#31035)
+  
+  Clause-②: no (narrowing) — five authorable keys of `TemplateManifestSchema` become tombstones, and `os package publish` refuses the file's `visibility` by name
+  Metadata-protocol: narrowed
+  
+  <!-- adr-0087: registered marketplace-template-manifest-inert-keys-retired -->
+  
+  **BREAKING** for an `objectstack.manifest.json` that still writes any of the five keys, and for `os package publish` run on a manifest that declares `visibility`.
+  
+  - **Retired (ADR-0049 enforce-or-remove).** `TemplateManifest.name`, `.specVersion`, `.skills`, `.scaffold` and `.visibility` are `retiredKey()` tombstones: `tsc` refuses them and a parse of `TemplateManifestSchema` refuses each with its prescription. None ever had an effect: no reader of the file's `name`, `specVersion`, `skills` or `scaffold` existed, and `os package publish` read `visibility` only to warn that it ignores it. `RETIRED_KEYS_BY_MAJOR[18]` lists the five keys and the upgrade guide carries the semantic entry `marketplace-template-manifest-inert-keys-retired`. No ADR-0087 conversion: this file is not a stack collection member, so `os migrate meta` has nothing to rewrite; a runtime boot never reads it. The publish request's own `visibility` (`CreatePackageRequestSchema`) is unchanged.
+  - **Migration** — FROM → TO, in `objectstack.manifest.json`:
+    - `name` → delete it. The project slug is `package.json` `name`; the published package id is `manifestId` (or the one `os package publish` derives from the compiled artifact).
+    - `specVersion` → delete it. The protocol your package needs is `manifest.engines.protocol` in `objectstack.config.ts`; the spec release it builds against is its `@objectstack/spec` dependency.
+    - `skills` → delete it. create-objectstack installs the whole skills catalog.
+    - `scaffold` → delete it. Nothing prompted for `scaffold.variables` or ran `scaffold.postInstall`.
+    - `visibility` → delete it and pass `os package publish --visibility <private|org|marketplace>`.
+  - **`@objectstack/cli`.** `os package publish` refuses a manifest declaring `visibility` before any network call, naming `--visibility`. It names the other four in a warning for deletion and still publishes, because every project scaffolded from the blank template before this release carries them.
+  - **`create-objectstack`.** The blank template's manifest drops the five keys it wrote (`name`, `specVersion`, `skills`, `scaffold`), and scaffolding strips every retired key (`category` and these five, one list pinned to the spec's registry rows) from the template's manifest instead of writing `name`, so a template authored before this release still scaffolds a manifest the schema accepts. The release version pass (`scripts/sync-template-versions.mjs`) no longer stamps `specVersion`.
+  - **Not retired here:** `publisher` and `isStarter`. A first-party publish script sends both to the hosted packages route, so their fate is a maintainer decision.
+- 150f740: feat(spec)!: retire `objectstack.manifest.json` `publisher` and `isStarter` — the platform decides both (#31035)
+  
+  Clause-②: no (narrowing) — two authorable keys of `TemplateManifestSchema` become tombstones, and `os package publish` refuses the file's `publisher` by name
+  Metadata-protocol: narrowed
+  
+  <!-- adr-0087: registered marketplace-template-manifest-platform-decided-keys-retired -->
+  
+  **BREAKING** for an `objectstack.manifest.json` that still writes `publisher` or `isStarter`, and for `os package publish` run on a manifest that declares `publisher`.
+  
+  - **Retired (ADR-0049 enforce-or-remove).** `TemplateManifest.publisher` and `TemplateManifest.isStarter` are `retiredKey()` tombstones: `tsc` refuses them and a parse of `TemplateManifestSchema` refuses each with its prescription. Neither ever had an effect from this file: `publisher` is the trust tier that gates listing privileges, which the platform assigns from the publisher's credentials, and the platform honours a starter flag only on a first-party seed; `os package publish` never sent either. A trust claim does not belong in an author-editable file. `RETIRED_KEYS_BY_MAJOR[18]` lists both keys and the upgrade guide carries the semantic entry `marketplace-template-manifest-platform-decided-keys-retired`. No ADR-0087 conversion: this file is not a stack collection member, so `os migrate meta` has nothing to rewrite; a runtime boot never reads it. The publish request's own `publisher` and `isStarter` (`CreatePackageRequestSchema`) are unchanged.
+  - **Migration** — FROM → TO, in `objectstack.manifest.json`:
+    - `publisher` → delete it. The platform assigns a package's trust tier from the credentials it is published with.
+    - `isStarter` → delete it. The platform decides which packages are starters; a first-party script that seeds one in service mode carries the flag itself, not in the manifest.
+  - **`@objectstack/cli`.** `os package publish` refuses a manifest declaring `publisher` before any network call. It names `isStarter` in the deletion warning with `name`, `specVersion`, `skills` and `scaffold`, and still publishes, because every project scaffolded from the blank template before this release carries `isStarter: true`. Neither key is ever sent.
+  - **`create-objectstack`.** The blank template's manifest drops `isStarter`, and scaffolding strips both keys (with the other retired ones) from a template's manifest, so a template authored before this release still scaffolds a manifest the schema accepts.
+- 98583cd: fix(formula): the bare-reference and unbound-root refusals say the expression faults, not that it evaluates to null
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **`@objectstack/formula`.** In a `record`-scoped expression, a bare field name (`amount` where `record.amount` is meant) and a mistyped root (`pge.…` where the surface binds `page`) are unknown variables: the expression faults with `Unknown variable: NAME` and never reads the field. The `bare-reference` and `unbound-root` refusals used to say the name "resolves to nothing and the expression silently evaluates to null", which is true only of a formula field. They now say the expression faults, and `bare-reference` names three outcomes of that fault: a formula field reads null, an `error` validation rule refuses the write, an action's `visible` hides the action. `os validate`, `os build` and the `validate_expression` tool print the new sentences.
+  - Codes and params are unchanged (`bare-reference` `{ name }`, `unbound-root` `{ name, roots, suggestion }`). What is refused, warned or passed is unchanged. Only the English `message` changed, so a consumer that matched the old text re-keys to the `code`.
+  - **`create-objectstack`.** The scaffolded `AGENTS.md` no longer says a bare field reference "evaluates to `null`". It now says the predicate cannot be evaluated on any record, so an action whose `visible` reads it is hidden everywhere and an `error` validation rule that reads it refuses every write. Projects scaffolded earlier keep their copy until it is edited.
+
 ## 18.3.0
 
 ### Patch Changes

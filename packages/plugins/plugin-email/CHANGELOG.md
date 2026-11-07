@@ -1,5 +1,199 @@
 # @objectstack/plugin-email
 
+## 18.4.0
+
+### Patch Changes
+
+- 509c40a: fix(plugin-email): a non-string recipient display name answers the send door's 400, not 500
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `POST /api/v1/email/send` with a recipient such as `{ "address": "ok@example.com", "name": 42 }` in `to`, `cc`, `bcc` or `replyTo` (or as one entry of a `to` / `cc` / `bcc` list) now answers `400 VALIDATION_FAILED` with "invalid recipient address in `to`: the display name of ok@example.com must be a string" (`reply-to address` for `replyTo`). It used to answer `500 EMAIL_SEND_FAILED` with `a.name?.trim is not a function`.
+  
+  The refusal itself was already right. The 500 came from the code that writes the `sys_email` rejection row after the refusal: it called `.trim()` on the caller's raw display name. That writer now reads the name as unknown input and leaves a non-string name out of the row (the row's `error` column names it), so the caller gets the 400 and the rejection is still recorded. A string name, an absent name and a `null` name behave as before.
+- db04e5c: fix(plugin-email,service-settings): mail whose sender has no From name goes out under the product name, not "ObjectStack"
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **Now.** A default sender with no display name of its own goes out under the product name the auth mails' subject and body already use: the Setup → Branding product name when an administrator set one, else the deployment's name (`OS_APP_NAME`, then `config.email.appName`, `config.email.defaultTemplateContext.appName` and the top-level `appName`), else `ObjectStack`. A Branding save renames the sender on the next mail, with no restart. The "Send test email" button sends under the same name.
+  - **Which senders.** The sender saved in Setup → Mail with the From name left empty, and a sender declared at boot without a name (`OS_EMAIL_FROM=no-reply@acme.com`, or `config.email.defaultFrom` with an `address` alone). Before, the first went out as `ObjectStack <…>` and the second with no display name.
+  - **Unchanged.** A From name somebody set always wins: one saved in Setup → Mail, or one declared at boot (`OS_EMAIL_FROM="Acme <no-reply@acme.com>"`, `config.email.defaultFrom.name`). A sender a send names itself, and a template's own sender, are never renamed. Under a walled tenancy posture, where Setup → Branding is not offered, the deployment's name applies.
+  - **`@objectstack/service-settings`.** Setup → Mail → From name no longer has the default `ObjectStack`: an unsaved field reads empty, and `GET /api/settings/mail` answers `from_name` as `value: null`, `source: 'default'`. The field's help says that an empty value uses the product name. A From name saved earlier is kept and still wins; clear the field to follow the product name.
+- deabe3b: fix(settings): settings refusals, live statements and action answers are written in every platform language, and `zh-TW` reads Traditional Chinese
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **Every module-local settings copy table carries the eleven platform languages** (the platform locale table: English, Simplified and Traditional Chinese, Spanish, Arabic, French, Brazilian Portuguese, Russian, German, Japanese, Korean). Before, they carried four (Setup → Email's live statement two), so a caller in any other language read English. Covered: the allowed-IP-ranges save refusal, the sign-in method floor refusals, the `auth.mfa_required` refusal and the organization MFA refusal and save notice (`@objectstack/plugin-auth`); Setup → Email's live-transport statement and "Send test email" answers (`@objectstack/plugin-email`); the default-currency lock and the "no longer offered" locale option (`@objectstack/service-settings`).
+  - **`zh-TW`, `zh-HK` and `zh-MO` callers read Traditional Chinese.** Each table looks the caller's code up with core's `resolveLocale`, which reads it through the platform locale table's read aliases; a code naming no language on the table is answered in English, as before.
+  - **"Send test SMS" (`sms/test`, `@objectstack/service-sms`) answers in the caller's language** (`Accept-Language`, else `?locale`), like the mail and storage connection tests. It read no locale before and answered English in every console language. A provider's own error text still passes through verbatim.
+  - **The two answers `SettingsService.runAction` writes itself** (the built-in `reset` result and the refusal for an action with no registered handler) are written in the caller's language. With no locale, or one off the platform table, every sentence is the English one callers read before.
+- b2a2b76: fix(plugin-email): a mail template's `{{ stage | option:opportunity.stage }}` hole prints the option's label in each recipient's language, and a hole the deployment cannot label refuses the send `TEMPLATE_INVALID`
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **What was wrong.** A template using the `option` formatter passed every authoring door, and then every send of it failed: the email service handed the formatter no label table, so `sendTemplate` and `renderTemplate` threw a bare `RangeError` outside the `TEMPLATE_INVALID` vocabulary, and nothing was sent.
+  - **What changes.** Before rendering, the email service builds a label table for each `object.field` the template's `option` holes name, once per send, from the deployment's served object (`IDataEngine.getObject`) with the `i18n` service's bundle laid over it by `translateObject` — the path `GET /meta/object/:name` serves the object with and a formula's `label()` reads. The locale is the send's own `locale`, the recipient's, never an execution context's: a scheduled flow that runs as the system still mails each recipient in their language. A send that names no locale reads the declared labels. A value outside the field's options prints as stored; a multi-select value prints each label, joined with `, `.
+  - **What is refused.** An object the deployment does not serve, a field the object does not have, a field that declares no options, and a field whose option list is empty refuse the whole send with `TEMPLATE_INVALID`, naming the template, the hole and the rule, before any face is rendered; nothing reaches the transport. A host with no data engine builds no table, and such a hole is refused `TEMPLATE_INVALID` by the renderer, with the formula's `optionTableRefusal` sentence.
+- ea757ff: The account mail an imported user receives now ends by telling them how to get a new set-password link on their own when it has expired (the sign-in page's "Forgot password?" with their address), and only then to contact the administrator. All four locales, HTML and text bodies. The link's 60-minute lifetime is unchanged.
+  
+  Clause-②: no
+  Metadata-protocol: none
+- bdbaf80: fix: Setup's form help speaks to an administrator, and the queue pages, the mail status banner and the test-email toast read in Chinese on a zh-CN console
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - **Field help (English source and zh-CN):** the permission set and position assignment forms, the out-of-office (approval delegation) rule, and the business unit, organization and user forms no longer describe the implementation. Gone: "fail-closed", "half-open [from, until)", "agent grants", "graph semantics", "expanded by graph queries", "Null = root of tenant", "HRIS", "When true / When false" (zh-CN 「为 true 时」 now reads 「开启后」) and an HTTP status code. The help now says when an assignment starts and ends, what turning a switch on does, and what to fill in. Text only: no field name, key, option value or behaviour changes.
+  - **`@objectstack/plugin-sharing`:** `sys_queue` and `sys_queue_member` join the plugin's translation bundle, with zh-CN text, so the 队列 and 队列成员 pages, their columns, help and the 新建 button read in Chinese. ja-JP and es-ES carry English fills for now.
+  - **`@objectstack/plugin-email`:** the live-status statement at the top of Setup → Email and the "Send test email" answer (sent, failed, logged only) are written in the caller's display language, en and zh-CN today; another language gets English.
+  - **`@objectstack/service-settings`:** a settings action handler (`SettingsActionHandler`) receives an optional `locale`, the caller's display language read from the request the same way the live-status statement's is (`Accept-Language`, else `?locale`); `runAction` takes it as a fifth `display` argument. Existing handlers compile and behave unchanged.
+- Updated dependencies [8aa2e91]
+- Updated dependencies [c17719d]
+- Updated dependencies [b90a6f7]
+- Updated dependencies [e8dc483]
+- Updated dependencies [bcdb1db]
+- Updated dependencies [9ebca94]
+- Updated dependencies [140d8ce]
+- Updated dependencies [699ebd8]
+- Updated dependencies [4c2cd29]
+- Updated dependencies [4be8a2e]
+- Updated dependencies [471add3]
+- Updated dependencies [b5eb61d]
+- Updated dependencies [771b2db]
+- Updated dependencies [97e4249]
+- Updated dependencies [9037b13]
+- Updated dependencies [e3b56b2]
+- Updated dependencies [a52761f]
+- Updated dependencies [e8afd1e]
+- Updated dependencies [bd65cb6]
+- Updated dependencies [f19fbb8]
+- Updated dependencies [217ba78]
+- Updated dependencies [cde492d]
+- Updated dependencies [eee4149]
+- Updated dependencies [0f3ee58]
+- Updated dependencies [f3a52d3]
+- Updated dependencies [d59a1eb]
+- Updated dependencies [af3451b]
+- Updated dependencies [3a27208]
+- Updated dependencies [29cbfcc]
+- Updated dependencies [0c666c3]
+- Updated dependencies [38717d3]
+- Updated dependencies [ac890f5]
+- Updated dependencies [aa57c76]
+- Updated dependencies [fc869c2]
+- Updated dependencies [fef212b]
+- Updated dependencies [dc51811]
+- Updated dependencies [b77c160]
+- Updated dependencies [09720e2]
+- Updated dependencies [8fed00f]
+- Updated dependencies [25fea77]
+- Updated dependencies [86ae2ca]
+- Updated dependencies [3da9a4c]
+- Updated dependencies [3da9a4c]
+- Updated dependencies [4be9734]
+- Updated dependencies [bb86ff9]
+- Updated dependencies [977be38]
+- Updated dependencies [2046d21]
+- Updated dependencies [740edc5]
+- Updated dependencies [778aedf]
+- Updated dependencies [71318af]
+- Updated dependencies [fd749a4]
+- Updated dependencies [d9d42d4]
+- Updated dependencies [9d939c5]
+- Updated dependencies [25e1c1a]
+- Updated dependencies [67d5d53]
+- Updated dependencies [47226e6]
+- Updated dependencies [c7d1367]
+- Updated dependencies [f5aaa0b]
+- Updated dependencies [0005fec]
+- Updated dependencies [2d6402c]
+- Updated dependencies [77c203a]
+- Updated dependencies [8293c74]
+- Updated dependencies [29702d5]
+- Updated dependencies [a839020]
+- Updated dependencies [a7b8876]
+- Updated dependencies [f7afab8]
+- Updated dependencies [4dde0ae]
+- Updated dependencies [e8e924f]
+- Updated dependencies [590724f]
+- Updated dependencies [35cd64c]
+- Updated dependencies [38d416f]
+- Updated dependencies [d2e2f6f]
+- Updated dependencies [d5f3bc5]
+- Updated dependencies [e3948ae]
+- Updated dependencies [b55d6ab]
+- Updated dependencies [1c5cee6]
+- Updated dependencies [aad1603]
+- Updated dependencies [0e4747a]
+- Updated dependencies [eb68b98]
+- Updated dependencies [a11ef71]
+- Updated dependencies [7145bf3]
+- Updated dependencies [55d9dd4]
+- Updated dependencies [af8aab1]
+- Updated dependencies [a59d00a]
+- Updated dependencies [4bf9a2d]
+- Updated dependencies [0c9aa82]
+- Updated dependencies [49c8568]
+- Updated dependencies [4564d6f]
+- Updated dependencies [f2ea193]
+- Updated dependencies [badf24d]
+- Updated dependencies [5268f50]
+- Updated dependencies [a30c4f4]
+- Updated dependencies [0cba0ce]
+- Updated dependencies [c893b3d]
+- Updated dependencies [677d542]
+- Updated dependencies [9bdeed2]
+- Updated dependencies [3479c33]
+- Updated dependencies [000a4c0]
+- Updated dependencies [7569fb5]
+- Updated dependencies [f4d9c09]
+- Updated dependencies [c77dd17]
+- Updated dependencies [ebe0a98]
+- Updated dependencies [9038187]
+- Updated dependencies [f108e6d]
+- Updated dependencies [5cb7d7e]
+- Updated dependencies [78eb352]
+- Updated dependencies [2ce2646]
+- Updated dependencies [468e0c1]
+- Updated dependencies [6106b73]
+- Updated dependencies [0f920b9]
+- Updated dependencies [6bd00d2]
+- Updated dependencies [b5696b4]
+- Updated dependencies [33bc8ae]
+- Updated dependencies [a1afbb9]
+- Updated dependencies [150f740]
+- Updated dependencies [42eb126]
+- Updated dependencies [8cf1fd0]
+- Updated dependencies [98583cd]
+- Updated dependencies [cadd6aa]
+- Updated dependencies [a5cb4f1]
+- Updated dependencies [3c1eb63]
+- Updated dependencies [d57be87]
+- Updated dependencies [5d4f2aa]
+- Updated dependencies [f4cd4ec]
+- Updated dependencies [b3d2f4b]
+- Updated dependencies [eca7cd2]
+- Updated dependencies [cf4b9bf]
+- Updated dependencies [e1dac19]
+- Updated dependencies [7b2bb66]
+- Updated dependencies [a794e32]
+- Updated dependencies [21510bb]
+- Updated dependencies [0fd363d]
+- Updated dependencies [5210acf]
+- Updated dependencies [d6b88f1]
+- Updated dependencies [4123865]
+- Updated dependencies [bdbaf80]
+- Updated dependencies [6ffe37e]
+- Updated dependencies [63a470a]
+  - @objectstack/spec@18.4.0
+  - @objectstack/core@18.4.0
+  - @objectstack/formula@18.4.0
+  - @objectstack/platform-objects@18.4.0
+
 ## 18.3.0
 
 ### Minor Changes

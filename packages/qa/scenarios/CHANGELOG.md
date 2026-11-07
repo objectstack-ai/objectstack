@@ -1,0 +1,196 @@
+# @objectstack/scenarios
+
+## 0.1.1
+
+### Patch Changes
+
+- 58085ff: Clause-②: no
+  Metadata-protocol: none
+  
+  New private package `@objectstack/scenarios` (`packages/qa/scenarios`, not published): the zod schema and loader for scenario cards, plus the open library's three control cards under `docs/qa/scenarios/`. A card states an authoring prompt, the structural `expect` the deterministic scorer reads, capability tags (area half closed to the platform-checklist areas) and a closed category, seed rows with data questions whose truth the loader computes from a declarative spec (`count | sum | avg | min | max | topN | unanswerable`, with filters, relative windows against a card-level `asOf`, relation paths through declared lookups, groupBy and order), personas with row scope whose per-persona truths are computed too, write operations that declare their outcome (post-state, refusal code or pending confirmation, with the audit actor), five guardrail checks, optional agent actions, and one iteration request. A malformed card is refused with its file and field path. No `packages/spec` change and no public surface change.
+- 6ef7f58: feat(scenarios): the deterministic scenario scorer lives in `@objectstack/scenarios` and judges capability tags, agent-action exposure, write outcomes and per-persona answers against a loaded card
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **`@objectstack/scenarios/score`** (private, unpublished): the entry the scenario runner calls. `scoreCardArtifact(card, artifact)` scores a built `dist/objectstack.json`; `gradeCardOperation(card, operationId, observation)` judges an observed write against its declared outcome; `gradeCardAnswer(card, { question, persona?, turn })` grades an agent's answer against the loader's computed truth for that persona. Each takes a card the loader returned, and the graders read the card schema's own types.
+  - **The scorer moved here from `@objectstack/cli`.** That covers the structural shape score, the artifact-to-graph reader and the Run grader, which were never released from the CLI. It now also carries:
+    - **capability-tag checks**: a closed table of nine tags, listed in the package README. A tag outside it, or a row with nothing in the card to judge, is reported `unscored` and counted nowhere;
+    - **agent-action exposure**: each declared action exists on its object, carries `ai.exposed: true` and, where the card says it asks first, `ai.requiresConfirmation: true`. A missing action fails;
+    - **a write-operation grader**: `applied`, `refused` or `pending_confirmation`. An unobserved fact fails;
+    - **per-persona Run grading**: a `withheld` truth is must-not-reveal, and an all-rows figure outside a scoped persona's rows is a leak.
+  - **`@objectstack/cli`**: `MetadataEvalCase` is now declared in `corpus.ts`, beside the golden corpus it types, and `metadata-eval.ts` re-exports it under the same name. No behaviour change, no new flag and no new package-entry export. The CLI carries no scenario code.
+  
+  No model call anywhere.
+- 802c98c: feat(scenarios): a local scenario runner builds, runs and iterates every card with a local Claude Code session and writes one run record per card
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **`pnpm --filter @objectstack/scenarios run-scenarios`** (private, unpublished; entry `@objectstack/scenarios/runner`): for each card under `docs/qa/scenarios/`, scaffold a project with `create-objectstack`, let the agent build it from the card prompt, run `objectstack validate`, `build` and `verify` (opt-in proofs chosen from the card's tags), boot it with `objectstack dev --fresh`, seed the card's rows, create one user, permission-set grant and API key per persona, and run every question and operation over the app's own MCP endpoint as that persona. Then apply the card's iterate change and score again.
+  - **Template mode**: the card's verified build is installed unmanaged (`POST /api/v1/marketplace/install-local` with `installMode: 'unmanaged'`), the agent applies the iterate change to the installed copy, and the scorecard reports both modes side by side with the size of the change. A refused install is recorded as a finding.
+  - **Scorecard and run record**: the scorecard reports Build, Run-问数, Run-operations and Iterate per mode, plus a per-tag table, with the real question and operation counts. A degraded build and a leaking answer are flagged. Records use the `docs/qa/platform-checklist/runs/` shape and stay out of git.
+  - **Card object names are read namespace-relative.** Against a package with namespace `ns`, the card's `account` means `ns_account`. A scaffolded project refuses bare object names, and so does the unmanaged install (`NAMESPACE_PREFIX`).
+  - **No API-billed model.** The live driver spawns the local `claude` CLI and refuses to start when `ANTHROPIC_API_KEY` or `ANTHROPIC_AUTH_TOKEN` is set or the CLI is logged in with an API key. A recorded driver replays turns, so the runner's own tests need no model and no network. All grading is `@objectstack/scenarios/score`.
+- Updated dependencies [31fe289]
+- Updated dependencies [eb96480]
+- Updated dependencies [8aa2e91]
+- Updated dependencies [c17719d]
+- Updated dependencies [de24d17]
+- Updated dependencies [b90a6f7]
+- Updated dependencies [486b0a9]
+- Updated dependencies [9ed2ee1]
+- Updated dependencies [769adff]
+- Updated dependencies [13c0c5b]
+- Updated dependencies [fe835b4]
+- Updated dependencies [e8dc483]
+- Updated dependencies [bcdb1db]
+- Updated dependencies [9ebca94]
+- Updated dependencies [3b8c724]
+- Updated dependencies [140d8ce]
+- Updated dependencies [699ebd8]
+- Updated dependencies [5f47410]
+- Updated dependencies [4c2cd29]
+- Updated dependencies [4be8a2e]
+- Updated dependencies [471add3]
+- Updated dependencies [314ad95]
+- Updated dependencies [b5eb61d]
+- Updated dependencies [771b2db]
+- Updated dependencies [97e4249]
+- Updated dependencies [9037b13]
+- Updated dependencies [e3b56b2]
+- Updated dependencies [a52761f]
+- Updated dependencies [e8afd1e]
+- Updated dependencies [bd65cb6]
+- Updated dependencies [cd5f554]
+- Updated dependencies [f19fbb8]
+- Updated dependencies [217ba78]
+- Updated dependencies [cde492d]
+- Updated dependencies [eee4149]
+- Updated dependencies [0f3ee58]
+- Updated dependencies [f3a52d3]
+- Updated dependencies [d59a1eb]
+- Updated dependencies [13aa6a3]
+- Updated dependencies [af3451b]
+- Updated dependencies [ddcdc80]
+- Updated dependencies [3a27208]
+- Updated dependencies [29cbfcc]
+- Updated dependencies [343ddb2]
+- Updated dependencies [0c666c3]
+- Updated dependencies [f672e0d]
+- Updated dependencies [38717d3]
+- Updated dependencies [bfbdeec]
+- Updated dependencies [4adc890]
+- Updated dependencies [bcdf8d3]
+- Updated dependencies [ac890f5]
+- Updated dependencies [aa57c76]
+- Updated dependencies [fc869c2]
+- Updated dependencies [fef212b]
+- Updated dependencies [dc51811]
+- Updated dependencies [b77c160]
+- Updated dependencies [09720e2]
+- Updated dependencies [25fea77]
+- Updated dependencies [3da9a4c]
+- Updated dependencies [3da9a4c]
+- Updated dependencies [4be9734]
+- Updated dependencies [bb86ff9]
+- Updated dependencies [2046d21]
+- Updated dependencies [05a30e6]
+- Updated dependencies [fd749a4]
+- Updated dependencies [a26abbc]
+- Updated dependencies [d9d42d4]
+- Updated dependencies [9d939c5]
+- Updated dependencies [25e1c1a]
+- Updated dependencies [67d5d53]
+- Updated dependencies [47226e6]
+- Updated dependencies [c7d1367]
+- Updated dependencies [f5aaa0b]
+- Updated dependencies [0005fec]
+- Updated dependencies [2d6402c]
+- Updated dependencies [77c203a]
+- Updated dependencies [8293c74]
+- Updated dependencies [8cc709d]
+- Updated dependencies [29702d5]
+- Updated dependencies [a839020]
+- Updated dependencies [a7b8876]
+- Updated dependencies [f7afab8]
+- Updated dependencies [7b80724]
+- Updated dependencies [fb1ab89]
+- Updated dependencies [4dde0ae]
+- Updated dependencies [590724f]
+- Updated dependencies [38d416f]
+- Updated dependencies [d2e2f6f]
+- Updated dependencies [d5f3bc5]
+- Updated dependencies [e3948ae]
+- Updated dependencies [b55d6ab]
+- Updated dependencies [1c5cee6]
+- Updated dependencies [aad1603]
+- Updated dependencies [0e4747a]
+- Updated dependencies [f41ddbd]
+- Updated dependencies [561d532]
+- Updated dependencies [7145bf3]
+- Updated dependencies [55d9dd4]
+- Updated dependencies [af8aab1]
+- Updated dependencies [63de248]
+- Updated dependencies [a59d00a]
+- Updated dependencies [a2437b5]
+- Updated dependencies [4bf9a2d]
+- Updated dependencies [0c9aa82]
+- Updated dependencies [49c8568]
+- Updated dependencies [4564d6f]
+- Updated dependencies [f2ea193]
+- Updated dependencies [ee874b1]
+- Updated dependencies [badf24d]
+- Updated dependencies [5268f50]
+- Updated dependencies [a30c4f4]
+- Updated dependencies [e2bcd5c]
+- Updated dependencies [0cba0ce]
+- Updated dependencies [c893b3d]
+- Updated dependencies [677d542]
+- Updated dependencies [9bdeed2]
+- Updated dependencies [9052337]
+- Updated dependencies [3479c33]
+- Updated dependencies [000a4c0]
+- Updated dependencies [f4d9c09]
+- Updated dependencies [2a6a28d]
+- Updated dependencies [902f162]
+- Updated dependencies [c77dd17]
+- Updated dependencies [555eb1b]
+- Updated dependencies [ebe0a98]
+- Updated dependencies [9038187]
+- Updated dependencies [f108e6d]
+- Updated dependencies [8847e09]
+- Updated dependencies [5cb7d7e]
+- Updated dependencies [468e0c1]
+- Updated dependencies [6106b73]
+- Updated dependencies [0f920b9]
+- Updated dependencies [33bc8ae]
+- Updated dependencies [a1afbb9]
+- Updated dependencies [150f740]
+- Updated dependencies [42eb126]
+- Updated dependencies [8cf1fd0]
+- Updated dependencies [98583cd]
+- Updated dependencies [a5cb4f1]
+- Updated dependencies [3c1eb63]
+- Updated dependencies [d57be87]
+- Updated dependencies [5d4f2aa]
+- Updated dependencies [f4cd4ec]
+- Updated dependencies [eca7cd2]
+- Updated dependencies [cf4b9bf]
+- Updated dependencies [7193160]
+- Updated dependencies [e1dac19]
+- Updated dependencies [21510bb]
+- Updated dependencies [8304b08]
+- Updated dependencies [0fd363d]
+- Updated dependencies [5210acf]
+- Updated dependencies [d6b88f1]
+- Updated dependencies [4123865]
+- Updated dependencies [bdbaf80]
+- Updated dependencies [6ffe37e]
+- Updated dependencies [cad764d]
+- Updated dependencies [63a470a]
+  - @objectstack/objectql@18.4.0
+  - @objectstack/spec@18.4.0
+  - @objectstack/plugin-sharing@18.4.0
+  - @objectstack/core@18.4.0
+  - @objectstack/formula@18.4.0

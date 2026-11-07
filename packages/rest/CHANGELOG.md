@@ -1,5 +1,372 @@
 # @objectstack/rest
 
+## 18.4.0
+
+### Minor Changes
+
+- fdad178: fix(metadata-protocol,rest): a `.custom` pair's declared override of a page, dataset, app, book, dashboard, view or report is labelled in the ruled order on every `/meta` read — the pair's own translation, then the override's own label, then the base's translation (#30062)
+  
+  Clause-②: yes (widening) — `ObjectStackProtocolImplementation` gains six public methods: `getPackagedPageBase`, `getPackagedDatasetBase`, `getPackagedAppBase`, `getPackagedBookBase`, `servedOverrideBaseOf` and `getPairTranslationBundle` (measured on `packages/metadata-protocol/dist/index.d.ts`); `@objectstack/rest`'s exported `MetaBookTreeSources` accepts one more optional key, `resolveProtocol` (measured on `packages/rest/dist/index.d.ts`). No accepted key, value or answer is taken away.
+  Metadata-protocol: semantic
+  
+  - **Now.** A changed label on a declared override reads the pair's own translation of that key when the pair ships one, else the override's own text, in every locale, on `GET /meta/:type/:name`, `GET /meta/:type` and `GET /meta/book/:name/tree`. An unchanged label still reads the base's translation. Before, a page, dataset, app or book override read the base's translation over its own changed label, and no type read the pair's translation first.
+  - **The pair's translations.** They are the pair's own active `translation` rows (`package_id` = the pair). A `.custom` package has no code bundle, so it has no code translation source. A package-less authored row is in the deployment catalog but is not the pair's, so it does not rank first.
+  - **Object.** An object is extended, never replaced (ADR-0146 D10), so it has no declared override and no pair bundle: seven types take one.
+  - **The book tree.** `GET /meta/book/:name/tree` now judges a book against its packaged base as the list does, so the docs sidebar and the book list serve the same label (#26690).
+- fb1ab89: fix(objectql,rest)!: an object extension that renames `label` and sets no `pluralLabel` is served without the base's plural, so list titles stop showing the old name (#30391)
+  
+  Clause-②: no (narrowing) — `/meta/object` (item and list reads, both transports) and every registry read of an object (`SchemaRegistry.getObject`, the fold) stop serving `pluralLabel` for an object an extension renames without a plural of its own, where they served the base's plural (and, in a translated locale, the base's translation of it). The shipped showcase's `showcase_account` is one: its extension renames it `Account (Success Overlay)` and declares no plural. Nothing an author writes is refused.
+  Metadata-protocol: semantic
+  Skills-docs: follow-up — `skills/objectstack-data/SKILL.md` "Object Extension Model" says an extension "can add but never remove"; a renaming `label` now takes the base's `pluralLabel` off. The sentence wants that exception (outside this change's surface).
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped: an object extension declares `label` and `pluralLabel` exactly as before. What moves is the plural an object is served with when an extension renames it without one, and nothing at rest records that answer, so there is nothing for a migration to rewrite. -->
+  
+  **BREAKING** served-value narrowing for an object an extension renames.
+  
+  - **Before.** An `objectExtensions` entry or a `.custom` `object_extension` item that set `label` and no `pluralLabel` was folded with the new label and the base's `pluralLabel`. A translated read served the base package's translation of that plural (`objects.NAME.pluralLabel`), so a list title, read plural first, kept the old name in every locale.
+  - **Now.** `pluralLabel` is the plural of `label`: such an extension is served as an object that declares no `pluralLabel`, in every locale, so a list titles it by its label. Where the owning package's `.custom` pair saves its own translation of `objects.NAME.pluralLabel`, that translation is served (ruling record 6631250894: a translation in the pair, then the override's own text, then the base's translation).
+  - **Unchanged.** An extension that sets `pluralLabel` is served with it. One that sets no `label`, or repeats the label it extends, keeps the base's plural and its translation. A plural the tenant set stays, and a tenant's own rename yields as before (ADR-0029 D9.2a). An object no extension renames is served as before. The packaged base the translators compare against keeps its plural.
+  
+  Nothing has to be rewritten: an extension that wants a plural for its new name declares `pluralLabel` beside `label`, as it always could, and a `.custom` pair can save `objects.NAME.pluralLabel` in its own `translation` item for a translated locale.
+
+### Patch Changes
+
+- c17719d: feat(rest)!: the metadata list reads several items by name in one request (`?names=a,b,c`), and refuses a query parameter it does not read
+  
+  Clause-②: yes (narrowing) — `GET /api/v1/meta/:type` (and its environment-scoped twin, on both the REST server and the runtime dispatcher) declares its closed query-parameter set, `package`, `preview`, `object`, `include`, `id`, `names` and `locale`, and refuses any other name with `400 VALIDATION_ERROR`, where it ignored it and answered the whole list with `200`. The widening half: `?names=a,b,c` narrows every type's list but `package`'s to the items of those names, `@objectstack/client`'s `meta.getItems(type, { names })` sends it, and `@objectstack/rest` exports three new names, the list's query decision that both transports ask: `META_LIST_QUERY_PARAMS`, `metaListQueryRefusal` and `metaListNames`. Ruling 6580261740 assigns both halves to this one server change.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped: `GetMetaItemsRequestSchema.names` was already declared, and only its description loses the planned marker. What moves is the list route's answer to a query-string name it never read, and nothing at rest records that answer, so there is nothing for a migration to rewrite. -->
+  
+  **The batch by-names read.** `GET /api/v1/meta/:type?names=a,b,c` answers only the items of those names, among the items the list would answer without it, on every metadata type except `package`, whose items are keyed by id and carry no `name`: the `package` list refuses `?names=` with `400 VALIDATION_ERROR`. One comma-separated value, as the data routes spell `fields`; each name is trimmed and repeats count once. A name that matches no item is simply absent from the answer (no `404`). The names are handed to the store read (`GetMetaItemsRequest.names`), so `@objectstack/metadata-protocol`'s `getMetaItems` filters before it computes locks, governance and diagnostics, and the list's per-caller gate, object field mask and translation run on the named items only. A value that names no item (`?names=`, `?names=,`) is refused with `400 VALIDATION_ERROR` rather than read as every item; leave the key out to list every item. A repeated `?names=` is refused like the list's other single-valued parameters. Before, `?names=` was ignored, so a client that needed several objects paid one by-name request for each.
+  
+  **BREAKING** accept-set narrowing at the metadata list (`@objectstack/rest`, `@objectstack/runtime`): a query parameter the list does not read is refused instead of ignored.
+  
+  - **Before.** `GET /meta/object?name=account`, `?ids=a,b` or `?filter=x` answered `200` with every object, which reads the same as a filter that matched everything.
+  - **Now.** A name outside `package`, `preview`, `object`, `include`, `id`, `names`, `locale` is refused with `400` and the nested `{ "error": { "code": "VALIDATION_ERROR", "message" } }` body; the message names the parameter and lists the supported ones, and nothing is read. A bracketed `?package[]=`, and `?id[]=` on the app list or `?object[]=` on the view list, keep their own located refusal; any other bracketed key (`?names[]=`) is refused as a name the list does not read.
+  - **Who moves.** The Console and the client SDK send only declared names. A script that sends another name gets the 400.
+  
+  **The remedy.** Drop the parameter, or spell it as one of the supported names: `?names=a,b` for several items by name, `?id=APP` for one app, `?object=OBJECT` for one object's views, `?package=ID` for one package.
+- 82142ed: fix(metadata-protocol,rest,runtime): `GET /meta/:type/:name/layers` serves the pending draft as stored, so an editor re-opens an author's draft without translations or injected columns (#29814)
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The layered view now serves the `draft` layer that `GetMetaItemLayeredResponseSchema` declares, on `RestServer` and on the runtime dispatcher, and on the deprecated `?layers=` spelling too. Before, the only read of a pending draft was `?state=draft`, which serves it translated for the caller's locale and governed (the platform's injected columns added), so an editor that built its buffer from it and saved it back wrote translations and platform columns into the author's draft.
+  
+  - **What `draft` is.** The row the `?state=draft` read serves, at the same address (`?package=` picks that package's draft), exactly as stored: converted like the `overlay` layer and credential-redacted like every layer, never translated, governed or stamped. `null` when no draft is pending. An edit buffer reads `draft ?? overlay ?? code`.
+  - **Who is served it.** Only a caller the draft-read admission already admits (the predicate every draft read asks: a system caller, `studio.access`, `setup.access` or `manage_metadata`). The per-caller gate judges it like the other layers: whole for whoever may write the item, pruned as `?state=draft` prunes it otherwise. Any other caller is answered the layers with no `draft` key, which says nothing about whether a draft exists, and a name with only a draft stays a `404` for them.
+  - **Unchanged.** `?state=draft` and every other read answer as before. A never-published name an admitted author holds a draft of is now answered `200` with only its `draft` layer, where it was a `404`.
+  - **Protocol.** `getMetaItemLayered(request, { withDraft: true })` reads the layer; without the option the answer carries no `draft` key, so its in-process readers read no draft.
+- 75bbebb: fix(rest)!: the approvals request list refuses a status value no approval request can have, and reads a comma list of statuses as a list
+  
+  Clause-②: yes (narrowing) — `GET /api/v1/approvals/requests` (and its environment-scoped twin) refuses a `status` value outside the set `sys_approval_request.status` declares (`pending`, `approved`, `rejected`, `recalled`, `returned`, `cancelled`) with `400 VALIDATION_ERROR`, where it answered `200 {"data":[]}`. An empty value or an empty comma entry is refused too. The widening half: a comma list of declared statuses now filters on all of them, where it matched no row.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped: the route keeps its parameter names and the approval service contract keeps its shape. What moves is the answer to a query-string value, and nothing at rest records that answer, so there is nothing for a migration to rewrite. -->
+  
+  **BREAKING** accept-set narrowing at the approvals request list (`@objectstack/rest`): a `status` value that is not a declared approval status is refused instead of answering an empty list.
+  
+  - **Before.** `?status=bogus`, `?status=Pending` or `?status=waiting` answered `200 {"data":[]}`, which reads the same as "no request is in that status", so an integration polling the inbox with a misspelt status skipped every pending approval in silence. `?status=pending,returned`, the spelling `@objectstack/client`'s `approvals.listRequests({ status: [...] })` sends for an array, was read as one status and answered the same empty list. `?status=` filtered on nothing and answered every status.
+  - **Now.** Each comma-separated entry must be a declared status, spelt exactly. Otherwise the request is refused with `400` and the nested `{ "error": { "code": "VALIDATION_ERROR", "message" } }` body the route already answers for an unknown or repeated parameter name; the message names the bad value and the allowed values, and the approval service is not asked. One declared status filters as before. Several filter on any of them (the service's `$in` push-down), and `total` counts on the same filter. A declared status with no rows still answers `200 {"data":[]}`.
+  - **Who moves.** The console and the client SDK send declared statuses only. A script that sends another spelling, or an empty `status=`, gets the 400.
+  
+  **The remedy.** Send one of `pending`, `approved`, `rejected`, `recalled`, `returned`, `cancelled` (lower case), or several separated by commas. To list every status, leave `status` out.
+- 18112bf: fix(rest): the one-request record page accepts a related list keyed by a `user` field again
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **Regression in 18.3.0 (#29946, duly#185).** `POST /data/:object/:id/page` (#27713) checked each related list's field against a private `lookup`/`master_detail` list and read `reference` raw, so a related list on `sys_user` keyed by a `user` field (an owner, an assignee) answered `400 VALIDATION_FAILED … is not a lookup or master-detail field that references 'sys_user'`, and the console's full-page record view showed "could not load this record". The related list's own row query (`{ [field]: id }`) follows that field, and 18.2.0 read each related list through that list read, with no type check.
+  - The check now asks the spec's one arbiter of a field's target, `referenceTargetOf` (`lookup`, `master_detail`, `user`, `tree`; a `user` field's target is fixed to `sys_user` by its type, whether or not its `reference` spells it), the same judgement the engine's `$expand` and delete walk read. A field that does not reference the page's object is still a located `400 invalid_relationship`: a `user` field on any other object's page, a `lookup` to another object, a `tree` on another object, an unreadable `reference` carrier. The message now reads `… is not a lookup, master-detail, user or tree field that references '<object>'.`
+- 63b86b3: fix(rest): the approvals, email, sharing, sharing-rule and analytics routes answer from the request's environment kernel when one REST plugin fronts many environments
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **What was wrong.** On a host that mounts one `RestApiPlugin` in front of many environment kernels (the hosted runtime shape), the five provider seams the plugin hands `RestServer` for `approvals`, `email`, `sharing`, `sharingRules` and `analytics` read the HOST kernel's service whatever environment they were asked for, and the unscoped (hostname-routed) mount asked them for no environment at all. The environment's own services were never reached: `GET /api/v1/approvals/requests` answered `{ data: [] }`, `GET /api/v1/approvals/requests/:id` answered 501, and the sharing, sharing-rule and email doors answered 501, on every hosted environment. The record page's approvals part answered no requests.
+  - **What changes.** Given an environment id and a registered `kernel-manager`, each of the five providers now reads its slot on that environment's kernel (`kernelManager.getOrCreate(id)`), the same acquisition the data routes make. The routes pass the id the shared request→environment resolution answered: the `/environments/:environmentId` param on the scoped mount, else the host's `kernel-resolver` (or the hostname / `X-Environment-Id` chain) on the unscoped one. There is no fallback to the host's occupant: an environment whose kernel carries no such service gets the door's own "not configured" answer.
+  - **Analytics.** `POST /analytics/dataset/query` already read the environment's service first, and now reads it alone: when the environment's kernel carries no analytics service, or cannot be acquired, the answer is the route's 501 rather than the host's service.
+  - **Unchanged.** A single-kernel deployment (no `kernel-manager`) reads all five services on the plugin's own kernel exactly as before, for every route and every id. The reserved `platform` id and a request the resolver places in no environment also read the plugin's own kernel.
+  - **No migration.** No configuration, route, response shape or export changes.
+- 2fbddd4: fix(cli,rest)!: `os package install` names its server and credential `-u/--url` and `-t/--token`, like `os package export`; the `/meta` read gate's permission refusal is localized
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) no key of any schema, export or stored row changes: a command-line option of one CLI command is renamed, which no metadata, artifact or database row records, so there is nothing for `objectstack migrate meta` to rewrite; the rename is for the person or script typing the command -->
+  
+  **BREAKING** for a script that runs `os package install` with `-r` or `--runtime`. The option is renamed with no alias, so the old spelling is refused as an unknown flag. Write `-u` / `--url` in its place:
+  
+  - FROM `os package install -r <url>` / `os package install --runtime <url>` TO `os package install -u <url>` / `os package install --url <url>`.
+  
+  The value, its default (`http://localhost:3000`) and its environment variable (`OS_RUNTIME_URL`) are unchanged. A script that sets only `OS_RUNTIME_URL` needs no change.
+  
+  `os package install` also takes `-t` / `--token` (environment variable `OS_RUNTIME_TOKEN`, new): a token the target runtime issued, sent as `Authorization: Bearer`, instead of signing in with `--email` / `--password`. Passing both is refused before any request. These are the spellings `os package export` and the other server-talking commands use.
+  
+  The scaffold's `AGENTS.md` and blank template README now spell the install command with `--url`.
+  
+  `@objectstack/rest`: an app, a dashboard or a list view a signed-in caller may not open is still refused `403 PERMISSION_DENIED`, and the sentence is now the operation catalog's `permission_denied` in the caller's locale, the sentence plugin-security's object refusals already use. Opening the Setup app without access in a Chinese console read `You do not have permission to open the 'com.objectstack.setup' app.`; it now reads 「您没有执行此操作的权限，如需访问请联系管理员。」. The sentence no longer carries the item's API name. A deployment's `errors.permission_denied` translation overrides it on the REST door, as it does for those refusals.
+- 1a3ea0c: fix(rest): the `/security` routes, and the auth, settings, i18n and metadata seams, answer from the request's environment kernel when one REST plugin fronts many environments
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **What was wrong.** On a host that mounts one `RestApiPlugin` in front of many environment kernels (the hosted runtime shape), the `security` provider read the HOST kernel's service whatever environment it was asked for, and the unscoped (hostname-routed) suggested-binding mount asked it for no environment at all. The host has no `security` service, so `GET /security/suggested-bindings` and `POST /security/suggested-bindings/:id/confirm` answered 501 on every hosted environment: no owner could accept an installed app's default permission set, and every invited member read 403 on that app's data. `security/explain` and the record, export and meta doors that read the same service fell back to the host's occupant whenever the environment's kernel did not answer.
+  - **What changes.** Given an environment id and a registered `kernel-manager`, the `security` provider now reads `security` on that environment's kernel, the same environment-scoped seam the approvals, email, sharing, sharing-rule and analytics providers use. Every route that reads it passes the id the shared request→environment resolution answered: the `/environments/:environmentId` param on the scoped mount, else the host's `kernel-resolver` (or the hostname / `X-Environment-Id` chain) on the unscoped one. The host's occupant is no longer a fallback.
+  - **The audited seams.** The `auth`, `settings`, `i18n` and `metadata` providers are environment-scoped the same way. On a hosted runtime the REST face's execution context now localizes (time zone, locale, currency) from the environment's own settings, as the runtime dispatcher's already did, instead of the host's. An environment whose kernel carries no `auth` service is no longer authenticated by the host's identity store. The `tenancy` provider keeps reading the plugin's own kernel: every consumer reads the bound environment kernel's `tenancy` first.
+  - **Unchanged.** A single-kernel deployment (no `kernel-manager`) reads every one of these services on the plugin's own kernel exactly as before, for every route and every id. The reserved `platform` id and a request the resolver places in no environment also read the plugin's own kernel.
+  - **No migration.** No configuration, route, response shape or export changes.
+- 2046d21: feat(objectql,rest)!: a new assignment to a banned user is refused, and a banned user's records can be counted and handed over in bulk (#30205)
+  
+  Clause-②: yes (narrowing) — the published `FieldErrorCode` enum gains the member `reference_user_banned`. A non-system create or update that sets a user field (the owner field, a `user` field, or a `lookup` to `sys_user`) to a user whose ban is in force is refused `400 VALIDATION_FAILED` with that field code, a write that answered `201` / `200` before. A value the row already stores is not judged, so a record that already holds the banned user stays editable. The two new routes and SDK methods are additions.
+  Metadata-protocol: none
+  Skills-docs: no move in `skills/**`, which teaches no user-assignment verdict; `content/docs/permissions/administrator-guide.mdx` gains "Handing over a banned user's work" and its offboarding quick path points at it.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any authorable schema is added, removed, renamed or re-shaped. What moves is the answer a data write gets when it names a banned user, and a record that already holds one is not judged, so nothing at rest needs rewriting. The new field code is a member of the response vocabulary FieldErrorCode, not of anything an author writes. -->
+  
+  **BREAKING** accept-set narrowing at every data write door (`POST` / `PATCH /api/v1/data/OBJECT`, batch, import, and a flow's elevated record write, which keeps the reference check): banning a user signs them out, but the records they own and are assigned stay where they were, and new work could still be handed to them.
+  
+  - **Before.** The Console's person picker hid a banned user, but `POST /api/v1/data/OBJECT` with `assignee` set to that user answered `201`, so new work landed on someone who cannot sign in.
+  - **Now.** The write-time reference check also asks whether a referenced user's ban is in force (`banned` is true and `ban_expires` is empty or still ahead) and refuses such a value with `reference_user_banned`, beside `reference_not_found`. It is read the way the existence probe reads, so a caller who cannot read the user object is refused the same way. A ban whose expiry has passed is not in force.
+  - **Unchanged.** A value every row of the write already stores (an edit form carries the whole record back), a system write the reference check already exempts (seed, install, restore), and a missing user (still `reference_not_found`).
+  - **New: the count.** `GET /api/v1/security/users/ID/assigned-work` (`client.security.assignedWork.count`) answers, per object and user field, how many records hold the user, counted under the caller's own context. Platform tables (`sys_*`), `managedBy` objects and `readonly` / `system` fields such as `created_by` are not counted; objects the caller cannot read are listed in `unreadable`; at most 200 fields are counted (`truncated`).
+  - **New: the hand-over.** `POST /api/v1/security/users/ID/assigned-work/transfer` (`client.security.assignedWork.transfer`) with `{ toUserId, objects? }` moves up to 500 records per call to an active user, each as an ordinary update under the caller's context, and answers per field what moved and what failed, plus how many remain. A banned, unknown or identical `toUserId` is refused before any write. Multi-valued user fields are counted but not transferred. Neither route touches the ban.
+  - **`@objectstack/spec`.** `FieldErrorCode` gains `reference_user_banned`, with its message in `en`, `zh-CN`, `ja-JP` and `es-ES`.
+  
+  **For a caller.** A write that names a banned user in a user field names an active one instead; the refusal names the field and the user. No stored metadata or row changes, so there is nothing for `objectstack migrate meta` to rewrite. An integration that reassigns work after a ban can call the transfer route and repeat it while `remaining` is above 0.
+- 8eca18f: fix(rest): the transactional `POST /batch`, the `/meta` object-state and published reads, and the meta read gate's disabled-package check use the request's environment's data engine when one REST plugin fronts many environments
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **What was wrong.** On a host that mounts one `RestApiPlugin` in front of many environment kernels (the hosted runtime shape), the `objectql` provider read the HOST kernel's engine whatever environment it was asked for, and the unscoped (hostname-routed) mount asked it for no environment at all. `POST /batch` therefore opened its transaction on the host's engine and sent its update and delete ops through it, while its create ops went to the environment's own protocol, joined to the host's transaction. `GET /meta/object/:name/state/:field` judged the object by the host engine's registry, and `GET /meta/:type/:name/published` and the meta read gate asked the host engine's registry whether an environment's package is disabled. The request's execution context already read the environment's engine, so one request used two kernels.
+  - **What changes.** Given an environment id and a registered `kernel-manager`, the `objectql` provider now reads `objectql` on that environment's kernel, the same environment-scoped seam the approvals, email, sharing, security and other providers use. Every route that reads it passes the id the shared request→environment resolution answered: the `/environments/:environmentId` param on the scoped mount, else the host's `kernel-resolver` (or the hostname / `X-Environment-Id` chain) on the unscoped one. The host's engine is no longer a fallback: an environment whose kernel carries no engine answers `POST /batch` with `501 NOT_IMPLEMENTED`.
+  - **Unchanged.** A single-kernel deployment (no `kernel-manager`) reads the engine on the plugin's own kernel exactly as before, through the same factory-aware lookup: a factory that fails to build is still a loud `503`, and only an engine that was never registered reads as absent. The reserved `platform` id and a request the resolver places in no environment also read the plugin's own kernel.
+  - **No migration.** No configuration, route, response shape or export changes.
+- 29702d5: fix(spec,rest): the record page's `timeline` count counts one create or delete written to both the activity and the ledger once, as the 动态 stream draws it (#30343)
+  
+  Clause-②: yes (narrowing) — `RecordPageTimelineCountSchema.total` falls for the same rows: with a field change counted, `created` (`deleted`) activity rows now step aside as often as the ledger holds `create` (`delete`) writes, beside the `updated` rows that already did; widening in the same line: `@objectstack/spec/api` exports one more constant, `RECORD_TIMELINE_FOLDED_ACTIVITY_TYPES`. No exported member is removed or renamed.
+  Metadata-protocol: none — a read answer's count, not anything an author writes.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) a read answer's count falls for the same rows; nothing an author or a caller sends changes, so there is nothing to migrate -->
+  
+  - **Now.** An audit reader on a record with field history sees the 动态 badge count one action once: one create and one edit read 「动态 2」 above the two rows the stream draws. Before, the create counted twice (3).
+  - **The rule.** Every `updated` row steps aside, as before. A create (a delete) steps aside as often as both sources hold one: the fewer of the record's `created` (`deleted`) activity rows and its `create` (`delete`) ledger writes. A record created before its history was kept has no `create` write, so its `created` row stays in the count, as the stream draws it.
+  - **Unchanged.** A member without audit read counts the same activity rows as before. A comment adds one. The total stays an upper bound for the `showCompleted` / `types` and no-diff cases; it can fall one short where the stream does not pair a create's (delete's) two rows (different actors, or stamped more than the stream's pairing window apart).
+- 739c972: fix(rest): the approvals request list's refusal of a non-string `status` says what the parameter takes, instead of quoting `[object Object]`
+  
+  Clause-②: no — the same requests are refused with the same status and envelope; only the message for a non-string `status` changes
+  Metadata-protocol: none
+  
+  `GET /api/v1/approvals/requests?status[$ne]=pending` (a `status` the query parser turns into an object) was refused with `"[object Object]"` quoted as if it were the value sent. It is now refused with `The "status" query parameter must be one status, or several separated by commas, given as plain text. Allowed values: pending, approved, rejected, recalled, returned, cancelled.` Still `400 VALIDATION_ERROR` in the nested envelope, and the approval service is still not asked. The approvals docs page now lists all six request statuses (`cancelled` was missing).
+- ea41c49: fix(rest): the external-datasource routes relay a declared service outage as `503 SERVICE_UNAVAILABLE`
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `POST /api/v1/datasources/:name/external/tables/:remote/import` answered a `tenancy` service outage as `400 EXTERNAL_IMPORT_ERROR`, telling the caller the request was malformed. The import reads the effective tenancy posture to decide where the imported object lands, and a registered `tenancy` service that cannot answer throws the `503` / `SERVICE_UNAVAILABLE` envelope there. The route now relays that envelope, as the datasource admin routes and the MCP `import_object` tool already do, so the caller is told to retry. Nothing was saved before and nothing is saved now. The other routes under `/datasources/:name/external/*` share the same catch and relay a declared outage the same way; every other refusal keeps its `400` and code.
+- 0cba0ce: feat(rest, client): a tenant-admin REST door for the record-currency code backfill
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  An organization admin with no shell on the deployment can now run the record-currency code backfill (`os migrate record-currency-codes`) over HTTP: `POST /api/v1/meta/_migrate-record-currency-codes` with `{ object, field, code, apply? }`, or `client.meta.migrateRecordCurrencyCodes(...)` from the SDK.
+  
+  - It fills the codeless rows of **the caller's current organization only**. There is no environment-wide form, and the body takes no organization: `organizationId`, `allOrganizations` or any other key outside the four is refused with `VALIDATION_ERROR` / 400. A request with no current organization is refused `403 FORBIDDEN`.
+  - It requires `setup.write` in that organization (`403 FORBIDDEN` otherwise), and it is mounted behind `metadata.endpoints.maintenance` with the other maintenance routes.
+  - Preview unless `apply` is `true`. The answer is the report the CLI prints under `--json`, and the code, field and object refusals are the CLI's.
+  - The SDK method answers `unknown`: the report's named type lives in `@objectstack/objectql`.
+  - The 409 `destructive_change` finding `currency_mode_to_record` now names this route beside the CLI command.
+  - `@objectstack/objectql` now exports `RecordCurrencyBackfillOrganization` and `RecordCurrencyBackfillOrganizationsRefusal` from its entry.
+  - A backfill walk stopped by `--max-records` no longer prints "nothing to backfill" for rows it did not examine. It says the walk is incomplete, and an unscoped run says its organization check saw only the rows examined.
+  - A backfill row whose write a sandboxed hook refused now reports the hook's own sentence, not the `hook '<name>' threw:` debug wrapper, and a crashed hook's row reports the write doors' withheld fault sentence. The operator's log line keeps the whole text.
+- 022b4e7: feat(audit): every data export writes one run-level `sys_audit_log` row, and the `export` action comes back with its writer
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  `GET /data/:object/export` used to leave the compliance ledger nothing to say: a user could download up to 50,000 rows of any object they may export, `sys_audit_log` included, and no row recorded who, what or how much. Each export the door streams now writes one row with `action: "export"`, the object, `record_id: null` and the exporter (user, actor, tenant, and the agent or impersonator when there is one). Its `metadata` carries the format, the row count, the effective and requested limit and whether the 50,000 cap clipped it, whether the file was truncated at the limit, a bounded summary of the filter (field names and operators, at most 32 terms, never a comparand), whether a search term narrowed it (never the term) and the outcome. An export whose read fails after the checks records `outcome: "failed"` with the status and machine code it answered.
+  
+  A request refused before anything is read (no export permission, a bad parameter, an unparseable filter) writes no row; neither does the import template. The row is written after the file is finished, so the audit write never changes or delays the download; a ledger write that fails is logged at `error` once per cause and the export is unaffected.
+  
+  `export` is declared again on `sys_audit_log.action` (it was retired under #8147 because nothing wrote it) and is shown by the `config_changes` list view beside `config_change` and `import`. The writer lives on the `audit` service slot as `recordDataExport`, beside `recordAuthEvent` and `recordActionInvocation`; a kernel without the audit plugin exports exactly as before.
+- 3299873: fix(rest, runtime)!: the /meta action doors and MCP list_actions serve an action entry as the object door projects it (ADR-0106)
+  
+  Clause-②: no (narrowing) — the `/meta` `action` reads (the list, the item read, `/layers` with its `?layers=true` spelling, and `/published`, on both transports) and MCP `list_actions` now answer a caller only the action entries the `/meta` object door's projection serves that caller, which ADR-0106 D1 ("a field the caller cannot read does not exist for that caller, on any plane") already promises, so no stated contract is narrowed; what narrows is the answer to a caller with a `readable: false` field. Nothing is widened: no answer member, error code or status is added; the new exports are the shared projection the doors ask.
+  Metadata-protocol: none
+  Skills-docs: no move — `skills/**` teaches no `/meta` action read; `content/docs/ai/connect-mcp.mdx` and `content/docs/deployment/environment-variables.mdx` state the projection.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema and no stored shape changes: the action doors answer a field-restricted caller the action entries the metadata object door already serves them. There is nothing for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** for a field-restricted caller of the `/meta` `action` reads and of MCP `list_actions` over HTTP (`/api/v1/mcp`).
+  
+  - **Now.** Each standalone `action` entry the `/meta` doors serve is projected through the object door's ADR-0106 posture and projection for this caller, as its own object's only action (`projectMetaActionForCaller` in `@objectstack/rest`, the one rule every action door asks). Each param is judged on the object it names: its `objectOverride` when set, else the action's `objectName`. An entry that projection withholds is left out of `GET /api/v1/meta/action`, and `GET /api/v1/meta/action/:name`, its `/layers` (and `?layers=true`) and its `/published` answer it exactly as they answer a name with nothing behind it. A layered read with any layer withheld is answered that way too. The cached item arm judges a conditional request after that projection, so a withheld entry is never answered `304`.
+  - **Object-less actions.** An action with no own object (a `global` action) whose `objectOverride` param binds a field the caller cannot read on the object it names is withheld the same way, on the `/meta` doors and in MCP `list_actions`.
+  - **Param summaries.** MCP `list_actions` summarises a param bound through `objectOverride` with the field of the object it names (its label and type), not the action's own object's field of the same name; a target that names no object the bridge holds is summarised as before.
+  - **Refusal.** Where the caller's field visibility on an action's own object cannot be evaluated, or the projection would leave that object with no field, the read is refused as the object door refuses it: `FIELD_VISIBILITY_UNRESOLVED` / 503.
+  - **Unchanged.** A caller who may read every field, a D4-exempt caller (`manage_metadata`, the system context) and a deployment with no `security` service or with the mask switched off are answered byte for byte as before; so is every action whose params bind only readable fields, or none. The run doors (MCP `run_action`, `POST /actions`) and their param validation and refusal text are unchanged.
+- adb2b89: fix(rest,runtime)!: the import doors and the catalog refresh read the walled-catalog verdict the metadata save door reads
+  
+  Clause-②: no (narrowing) — under the `isolated` and `group` tenancy postures, importing a remote table as an object (`POST /api/v1/datasources/:name/external/tables/:remote/import`, and the MCP `import_object` tool) and refreshing a federated datasource's cached catalog (`POST /api/v1/datasources/:name/external/refresh-catalog`) are writes to the environment's metadata catalog, and they are the platform operator's, as every other write to that catalog is.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped and nothing at rest changes: which caller an import door or the catalog refresh admits under a walled tenancy posture is all that moves, and every object already imported and every catalog snapshot already stored stays as it is. -->
+  
+  **BREAKING** accept-set narrowing at both import doors and at the catalog refresh (`@objectstack/rest`, `@objectstack/runtime`) under a walled tenancy posture.
+  
+  - **The rule.** Under `isolated` and `group` every organization shares the environment's metadata catalog, and a write to it is admitted only for the platform operator and for the engine's own writes (ADR-0131 D3, D12 items 7–8, D11). An import saves an object into that catalog, and a catalog refresh saves the datasource's `external_catalog` snapshot there, so each of those doors asks the walled-catalog verdict the metadata save door asks (`walledCatalogWriteVerdict`, `@objectstack/metadata-core`) for the type it writes, after the federation capability rule and before the federation service is looked up.
+  - **The answer.** A refused call answers `403 PERMISSION_DENIED` with the verdict's sentence for the type written, the one the metadata save door answers, naming the posture. Nothing is introspected and nothing is saved. A `tenancy` service that is registered and cannot answer refuses the call `503 SERVICE_UNAVAILABLE`.
+  - **Unchanged.** The platform operator imports and refreshes under a wall as before. Under `single`, and on a deployment with no `tenancy` service, every caller holding both federation capabilities imports and refreshes as before. Listing remote tables, drafting an object and validating are unchanged, and the federation capability rule answers first, as before.
+  - **Who moves.** On a walled deployment, an import or a catalog refresh by a caller below the platform operator is refused; the platform operator performs it.
+- Updated dependencies [8aa2e91]
+- Updated dependencies [c17719d]
+- Updated dependencies [b90a6f7]
+- Updated dependencies [486b0a9]
+- Updated dependencies [9ed2ee1]
+- Updated dependencies [769adff]
+- Updated dependencies [e8dc483]
+- Updated dependencies [bcdb1db]
+- Updated dependencies [9ebca94]
+- Updated dependencies [140d8ce]
+- Updated dependencies [699ebd8]
+- Updated dependencies [4c2cd29]
+- Updated dependencies [4be8a2e]
+- Updated dependencies [471add3]
+- Updated dependencies [b5eb61d]
+- Updated dependencies [771b2db]
+- Updated dependencies [97e4249]
+- Updated dependencies [9037b13]
+- Updated dependencies [e3b56b2]
+- Updated dependencies [a52761f]
+- Updated dependencies [e8afd1e]
+- Updated dependencies [bd65cb6]
+- Updated dependencies [f19fbb8]
+- Updated dependencies [217ba78]
+- Updated dependencies [cde492d]
+- Updated dependencies [eee4149]
+- Updated dependencies [f3a52d3]
+- Updated dependencies [d59a1eb]
+- Updated dependencies [af3451b]
+- Updated dependencies [3a27208]
+- Updated dependencies [0c666c3]
+- Updated dependencies [38717d3]
+- Updated dependencies [ac890f5]
+- Updated dependencies [aa57c76]
+- Updated dependencies [fc869c2]
+- Updated dependencies [fef212b]
+- Updated dependencies [dc51811]
+- Updated dependencies [b77c160]
+- Updated dependencies [09720e2]
+- Updated dependencies [8fed00f]
+- Updated dependencies [25fea77]
+- Updated dependencies [86ae2ca]
+- Updated dependencies [3da9a4c]
+- Updated dependencies [4be9734]
+- Updated dependencies [bb86ff9]
+- Updated dependencies [977be38]
+- Updated dependencies [2046d21]
+- Updated dependencies [740edc5]
+- Updated dependencies [778aedf]
+- Updated dependencies [71318af]
+- Updated dependencies [fd749a4]
+- Updated dependencies [d9d42d4]
+- Updated dependencies [9d939c5]
+- Updated dependencies [25e1c1a]
+- Updated dependencies [47226e6]
+- Updated dependencies [c7d1367]
+- Updated dependencies [f5aaa0b]
+- Updated dependencies [0005fec]
+- Updated dependencies [2d6402c]
+- Updated dependencies [77c203a]
+- Updated dependencies [8293c74]
+- Updated dependencies [60fe44f]
+- Updated dependencies [29702d5]
+- Updated dependencies [a839020]
+- Updated dependencies [a7b8876]
+- Updated dependencies [f7afab8]
+- Updated dependencies [4dde0ae]
+- Updated dependencies [e8e924f]
+- Updated dependencies [590724f]
+- Updated dependencies [35cd64c]
+- Updated dependencies [38d416f]
+- Updated dependencies [d2e2f6f]
+- Updated dependencies [d5f3bc5]
+- Updated dependencies [e3948ae]
+- Updated dependencies [b55d6ab]
+- Updated dependencies [1c5cee6]
+- Updated dependencies [aad1603]
+- Updated dependencies [eb68b98]
+- Updated dependencies [a11ef71]
+- Updated dependencies [7145bf3]
+- Updated dependencies [55d9dd4]
+- Updated dependencies [af8aab1]
+- Updated dependencies [a59d00a]
+- Updated dependencies [4bf9a2d]
+- Updated dependencies [0c9aa82]
+- Updated dependencies [49c8568]
+- Updated dependencies [4564d6f]
+- Updated dependencies [f2ea193]
+- Updated dependencies [badf24d]
+- Updated dependencies [5268f50]
+- Updated dependencies [a30c4f4]
+- Updated dependencies [0cba0ce]
+- Updated dependencies [c893b3d]
+- Updated dependencies [677d542]
+- Updated dependencies [9bdeed2]
+- Updated dependencies [3479c33]
+- Updated dependencies [000a4c0]
+- Updated dependencies [7569fb5]
+- Updated dependencies [f4d9c09]
+- Updated dependencies [c77dd17]
+- Updated dependencies [ebe0a98]
+- Updated dependencies [9038187]
+- Updated dependencies [f108e6d]
+- Updated dependencies [8847e09]
+- Updated dependencies [5cb7d7e]
+- Updated dependencies [78eb352]
+- Updated dependencies [2ce2646]
+- Updated dependencies [468e0c1]
+- Updated dependencies [6106b73]
+- Updated dependencies [0f920b9]
+- Updated dependencies [6bd00d2]
+- Updated dependencies [b5696b4]
+- Updated dependencies [33bc8ae]
+- Updated dependencies [293a85b]
+- Updated dependencies [a1afbb9]
+- Updated dependencies [150f740]
+- Updated dependencies [42eb126]
+- Updated dependencies [8cf1fd0]
+- Updated dependencies [cadd6aa]
+- Updated dependencies [a5cb4f1]
+- Updated dependencies [3c1eb63]
+- Updated dependencies [d57be87]
+- Updated dependencies [5d4f2aa]
+- Updated dependencies [f4cd4ec]
+- Updated dependencies [b3d2f4b]
+- Updated dependencies [eca7cd2]
+- Updated dependencies [cf4b9bf]
+- Updated dependencies [e1dac19]
+- Updated dependencies [3299873]
+- Updated dependencies [7b2bb66]
+- Updated dependencies [a794e32]
+- Updated dependencies [21510bb]
+- Updated dependencies [0fd363d]
+- Updated dependencies [5210acf]
+- Updated dependencies [d6b88f1]
+- Updated dependencies [4123865]
+- Updated dependencies [bdbaf80]
+- Updated dependencies [6ffe37e]
+- Updated dependencies [63a470a]
+  - @objectstack/spec@18.4.0
+  - @objectstack/metadata-core@18.4.0
+  - @objectstack/core@18.4.0
+  - @objectstack/platform-objects@18.4.0
+  - @objectstack/types@18.4.0
+  - @objectstack/service-package@18.4.0
+  - @objectstack/metadata@18.4.0
+  - @objectstack/observability@18.4.0
+
 ## 18.3.0
 
 ### Minor Changes

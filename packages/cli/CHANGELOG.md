@@ -1,5 +1,983 @@
 # @objectstack/cli
 
+## 18.4.0
+
+### Minor Changes
+
+- 9ebca94: feat(push): `requires: ['push']` and the stack's `push` key turn mobile push on under `objectstack serve`, and a relay configuration is refused at boot
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  Skills-docs: follow-up owed — #29969 (skills/objectstack-platform/evals/config-plugins-ops.json: no eval asks for `requires: ['push']` or the `push` key); this diff teaches both in `skills/objectstack-platform/SKILL.md` (the top-level key enumeration and the `requires` table) and in the new `content/docs/kernel/runtime-services/push-service.mdx`
+  
+  A deployment that runs `objectstack serve` from a stack file can now turn on mobile push without host code. Before this, the only way to register a push service was a host that composed `PushServicePlugin` in code, so a `notify` node naming `push` had nothing to deliver through on a served stack.
+  
+  - **`@objectstack/spec`: the `push` capability token and the `push` stack key.** `push` joins `PLATFORM_CAPABILITY_TOKENS`, provided by `@objectstack/service-push` in the open edition. It is requested, never on the always-on slate. The stack definition gains a top-level `push` key beside `email` and `sms`: it is `PushServiceConfigSchema`, composed as a single value (`COMPOSE_KEY_DISPOSITIONS`). Authoring accepts a direct block, a relay block and absence; it refuses an inline secret, by key name (`key`, `privateKey`, `serviceAccount`, …) with `credentialRef` as the remedy, or pasted into a `credentialRef` (ADR-0143 D3). `PushServiceConfigSchema`'s docblock now names the stack key and `objectstack serve` as its reader; `PushRelayTransportConfigSchema` keeps its `[PLANNED — not yet served]` marker.
+  - **`@objectstack/core`: the `push` provider row and its argument.** `CAPABILITY_PROVIDERS.push` names `PushServicePlugin`, and `resolveCapabilityArgument('push', …)` builds its argument from the stack's `push` key through `resolvePushCapabilityArg`, read off the provider module as the `email` and `sms` readers are. Both `objectstack serve` and `@objectstack/verify`'s `bootStack` read this table, so an app's tests get the push service its server gets.
+  - **`@objectstack/service-push`: `resolvePushCapabilityArg`.** It parses the `push` key with `PushServiceConfigSchema` and refuses, before the kernel boots, two configurations: the relay transport (an absent key and `push: {}` read as it), whose sender has not shipped, with a message that says so and prescribes `transport: 'direct'` with an `apns` and/or `fcm` block; and anything the schema refuses, an inline secret first among them, naming each path and the schema's guidance and never the value. On a stack that declares `requires: ['push']` either refusal fails the boot as `Capability "push" (@objectstack/service-push) failed to start: …`.
+  - **`@objectstack/cli` and `@objectstack/verify`** depend on `@objectstack/service-push`, so the provider the token names resolves out of the box, as the open edition promises.
+  
+  To turn push on, add `requires: ['push']` and a direct block naming each vendor's secret by reference:
+  
+  ```ts
+  push: {
+    transport: 'direct',
+    apns: { teamId: 'ABCDE12345', keyId: 'KEY1234567', topic: 'com.example.app', environment: 'production', credentialRef: 'APNS_SIGNING_KEY' },
+    fcm: { projectId: 'example-app', credentialRef: 'FCM_SERVICE_ACCOUNT' },
+  },
+  ```
+  
+  In the open tier each `credentialRef` is the name of an environment variable holding the secret. A `push` key on a stack whose `requires` does not name `push` is not read, and `objectstack serve` logs one boot warning saying so. The runtime-services chapter has a new `services.push` page.
+- 699ebd8: fix(metadata-protocol)!: the metadata save and publish doors refuse a select field bound to a picklist no loaded package declares, instead of storing it and then refusing every write to the field (#29898)
+  
+  Clause-②: no (narrowing) — the metadata save door (draft and live), the per-item and package publish, and the restore doors refuse an `object` or `object_extension` whose field names a picklist no loaded package declares, a body they accepted before. Nothing is widened.
+  Metadata-protocol: narrowed
+  Skills-docs: no move — `skills/**` teaches no picklist reference verdict and `content/docs/**` carries no severity table for it; the prescription ships in the refusal text, the FROM → TO below and the upgrade-guide entry.
+  
+  <!-- adr-0087: registered picklist-binding-unknown-refused -->
+  
+  **BREAKING** accept-set narrowing at the metadata save and publish doors: `PUT /api/v1/meta/object/NAME` and `PUT /api/v1/meta/object_extension/NAME` (draft and live), `POST /api/v1/packages/PKG/publish-drafts`, the per-item publish, and the rollback / revert restore doors.
+  
+  - **Before.** A select (or multiselect) field with `picklist: 'nope_list'`, a name no loaded package declares, saved `200` with its draft reading `_diagnostics.valid: true`, and `publish-drafts` answered `outcome: published`. The field was then served with no options, and every create or update that set it answered `400 VALIDATION_FAILED` ("takes its values from picklist \"nope_list\", which no loaded package declares"). The boot and a late install already refuse the same shape for a package's own objects, and `os validate` / `os build` refuse it for a stack's own fields.
+  - **Now.** The doors refuse it `422 INVALID_METADATA`, one finding per unknown binding at `fields.FIELD.picklist`, naming the field and the list. A list is declared when the engine's registry resolves it, the same read that serves the field's options: the package's own, a dependency's, the base package's of a `.custom` pair, or any other package installed here.
+  - **Unchanged.** A binding the object already holds is not judged again on a re-save, so an object published before this release keeps saving; the stored-metadata healing pass (`os migrate meta --stored`) is not judged. A draft stored before this release is judged when it is published.
+  - **`@objectstack/spec`.** The upgrade guide entry `picklist-binding-unknown-refused` (a semantic migration: no automatic rewrite, because whether the author meant another list, one still to be declared or inline options is a judgement about the field).
+  - **`@objectstack/cli`.** A source comment in the `os validate` picklist judge no longer says the runtime write path is unjudged.
+  
+  **FROM → TO.** `fields.t: { type: 'select', picklist: 'nope_list' }` → `picklist: 'NAME'` of a list a package installed here declares, or declare `nope_list` in a code package (a `*.picklist.ts` file, or `defineStack({ picklists })`), or `options: [...]` in place of `picklist`.
+- b5eb61d: Clause-②: yes (widening) — `PLATFORM_OBJECTS_BY_PACKAGE['platform-objects']` (and so `PLATFORM_PROVIDED_OBJECT_NAMES` / `isPlatformProvidedObjectName`) lists one more real platform object, `sys_lifecycle_state`. Its readers resolve references against the roster and none refuses an author declaration, so a stack that references the object now resolves it instead of drawing the unknown-platform-name advisory; nothing that was accepted is refused.
+  Metadata-protocol: added
+  Skills-docs: none — `skills/**` and `content/docs/**` enumerate no platform object roster and teach nothing about the lifecycle sweep's schedule; the object is internal clock state with no data API, so there is nothing for an author to write against it.
+  
+  The lifecycle sweep remembers when it last completed, so a kernel that reboots onto an existing datastore no longer re-sweeps within a minute of every boot.
+  
+  `LifecycleService` now keeps a watermark in a new engine-owned, tenant-less object, `sys_lifecycle_state` (declared and registered by `@objectstack/platform-objects`, one row per datastore, id `lifecycle`). At the initial delay the scheduler reads that one row: when the last completed sweep is younger than the sweep interval, the first sweep waits for the interval and the read is the only statement issued. An older or missing watermark, a kernel without the object, or a read that fails (logged at `warn`) sweeps at the initial delay as before. Every sweep that completes with no policy error and a finished reference audit advances the row; a failed or partial sweep leaves it alone. A datastore the process created from empty still defers its first sweep one interval, and now seeds the row. A direct `sweep()` call still always sweeps.
+  
+  The row is internal state, not a setting: no settings key, no environment variable, no audit row per sweep and no data API (`apiEnabled: false`). `@objectstack/plugin-audit` leaves `sys_lifecycle_state` out of `sys_audit_log` and `sys_activity`, so a sweep writes no ledger row for its own clock. `OS_LIFECYCLE_DISABLED=1` still arms nothing. `os migrate organization-ownership` inventories the new table as deployment-level state with no organization column.
+- e3b56b2: feat(spec): a lookup or master-detail field's related-list title is translatable
+  
+  Clause-②: yes
+  Metadata-protocol: added
+  
+  A related list the record page derives from a lookup or master-detail field is titled by the field's `relatedListTitle`, or by the child object's label when it has none. That title had no translation slot, so a zh-CN reader saw it in the authoring language, and `os i18n check` could not see the gap. A lookup from an object back to itself was the plainest case: with no title of its own, a contract's record page listed its renewals under 「合同」, the same word as the contract beside it.
+  
+  - `FieldTranslationSchema` declares `relatedListTitle`: `objects.<child>.fields.<field>.relatedListTitle`, on the child object whose field declares the title. `translateObject` overlays it on the served child object (`GET /meta/object`, and the app bundle's object members), which is what the console derives the related list's title from, on the side card and on the body table alike.
+  - It follows the packaged-base rule (ADR-0029 D9.2a): a title an org re-authored on top of the packaged declaration keeps its text. An authored `relatedListTitle` with no entry keeps its authored text; the child object's label is never substituted for it.
+  - `os i18n extract` scaffolds the key and `os i18n check` counts it under the field bucket. A field without a `relatedListTitle` is recorded without being demanded.
+  - The object save door puts a served (translated) `relatedListTitle` back to its source text, as it does for the field's other translated slots.
+- bcdf8d3: feat(metadata-protocol,objectql): a package's action can be customized by a declared override in its paired `.custom` package (ADR-0146 D9 `action`), and an override that widens who may run the action is refused
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  - **A declared action override is admitted.** An `action` saved, published or installed in a base's paired `<base>.custom` package with `overrides: { package: '<base>', basedOn: '<version>' }` was refused `403 NOT_OVERRIDABLE` ("action customization is not yet available"). It is now admitted by the save, publish and install doors, `os validate` and `os build`, like a flow override. It replaces the base's action whole, and every read of the base's action serves it under the base's name: the by-name and execution reads, the layered read's `effective` (with `code` still the base's), both lists, the object read's `actions` (what the list toolbar, row menu and record header are drawn from) and the engine's schema, which the REST `/actions` door and the MCP `run_action` bridge read the action from. Deleting the override serves the base's action again everywhere. The action activation switch keyed by the action's name turns the override off while it is armed, and the switch stays where it was when the base is restored. Only the pair declares: a dependent's declaration and the pair's undeclared same-named save stay refused, and a dependent's row is never served.
+  - **A script action's body is rebound.** The override's `body` runs in place of the base's handler after one resync (`kernel:ready`, `metadata:reloaded`, or the publish itself). Removing the override binds the base's handler again on the next resync, without re-registering the base. `@objectstack/objectql` adds `ObjectQL#registerActionOverride(objectName, actionName, handler, packageName)`, which binds a handler over the one registered under the key and keeps it beneath. `removeActionsByPackage(packageName)` now removes the package's entries from each key's stack, so the handler beneath is bound again. `registerAction` of another package's handler under a key an override holds takes the place beneath the override instead of replacing it: a marketplace-installed base binds its handlers in the install plugin's `kernel:ready` rehydrate, after the boot's resync bound the override, and after a restart the override still runs (and a restore runs the base's body).
+  - **An override may add a gate and never remove one (ADR-0066 D4).** The write gate refuses, with the new rule `declared_action_widens_access` (`403 NOT_OVERRIDABLE`), an action override that drops a capability the base's `requiredPermissions` names, sets `ai.exposed: true` on an action the base keeps off the agent surface, or drops the base's `ai.requiresConfirmation: true`. The refusal names each widened gate. Adding a capability or turning a gate on is admitted. Everything else (`label`, `type`, `target`, `body`, `params`, `visible` and the rest) is replaced whole, so an override can still change what runs, including a body that runs system-elevated, but only for people who could already run the action. `@objectstack/metadata-protocol` exports `actionOverrideWidening(baseItem, overrideItem)`, which returns the widened gates as clauses, and `OverrideWriteClosure.baseItemOf`, through which a door hands the judge the base's own item. `@objectstack/cli` (`os validate`) and `@objectstack/cloud-connection` (the managed install) pass it.
+  - The action switch route in the packaged-base refusal sentences is now spelled `POST /api/v1/actions/_activation/:object_or_global/:action`, which keeps the declared-save sentence within the REST door's 500-character message bound for long action names.
+  
+  Skills-docs: follow-up #30505
+- ac890f5: feat(objectql,plugin-sharing): an organization authors its own assignment rules in Setup, as `sys_assignment_rule` records
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  Skills-docs: follow-up owed — content/docs/automation/queues-and-assignment-rules.mdx, skills/objectstack-automation/SKILL.md
+  
+  Until now only a package could declare an assignment rule, so routing new records differently meant a package release. An organization can now write its own rules in Setup (Access Control → Assignment Rules), on the same two-source model sharing rules and queues already follow: the rules packages declare keep working, and the organization's own rules sit beside them.
+  
+  - **`@objectstack/plugin-sharing`**: a new object, `sys_assignment_rule`. One row is one rule: when a new record of the chosen object matches the condition (a CEL expression over `record`, empty for every record), it goes to a queue or to one person, and a queue target may pick a member by `round_robin` or `least_loaded` (which needs its open-work expression, `load`). Each row belongs to one organization (`organization_id` is required). The table's save guard refuses, naming each field at fault: a name that is not snake_case or that a package rule already holds (one name means one rule); an object that does not exist or whose records have no owner; an entry shape the stack schema refuses for a declared rule; a condition or open-work expression the engine cannot compile; a person who is not an active member of the organization; a rule that would land in no organization. A boot report logs, at `error`, an organization's rule whose name a later-installed package now declares. Setup gains an "Assignment Rules" entry beside Queues.
+  - **`@objectstack/objectql`**: the engine evaluates an object's organization rules first, ascending by `sort_order` and then by name, and the rules packages declare as the fallback; the first match decides. A user target, from either source, now owns the record only while the user is an active member of the record's organization and is not banned. One that no longer resolves leaves the record ownerless, the way a queue that no longer resolves does, and is logged once; the insert is never refused. When an organization's rules cannot be read, its new records are written as they stood rather than routed by the package rules its own would have overtaken. New exports for the save guard: `ASSIGNMENT_RULE_OBJECT`, `assignmentExpressionRefusals`, `organizationMemberStanding`.
+  - **`@objectstack/spec`**: `PLATFORM_PROVIDED_OBJECT_NAMES` lists `sys_assignment_rule` under `plugin-sharing`, and the `AssignmentRuleSchema` documentation says how the two sources combine. No key, shape or validation changes.
+  - **`@objectstack/platform-objects`**: the Setup app labels the new "Assignment Rules" navigation entry in English, Chinese, Japanese and Spanish.
+  - **`@objectstack/cli`**: the organization-ownership inventory lists `sys_assignment_rule`, so `os migrate organization-ownership` plans it instead of refusing it as an uninventoried platform table.
+  
+  Upgrading: a package rule whose entry names a user id (the `assignment-rule-user-target` lint warning) stops assigning in an organization where that user is not a member; the engine logs the lapse once per rule, user and organization. Route such a rule to a queue whose members are positions.
+- 25e1c1a: feat(objectql,platform-objects): a by-id delete keeps its rows in the recycle bin (ADR-0148): the `sys_recycle_bin` object, the snapshot on delete, the retention stamp and the TTL reap
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  Skills-docs: follow-up owed — skills/objectstack-api/SKILL.md :268, :417 (they teach that there is no recycle bin)
+  
+  The recycle bin's write side. A delete is still a physical delete, and no read path changed: the rows are gone from every query the moment the delete commits. What is new is the copy kept beside them. Restoring, purging and emptying the bin, the two grants that govern them and their REST doors are not in this release.
+  
+  - **`@objectstack/platform-objects`:** registers `sys_recycle_bin`, built from the spec's `RECYCLE_BIN_ENTRY_FIELDS`. One entry per delete operation. It is engine-owned, with no generic data-API method, because the snapshot holds every field of the deleted rows. Its tenant column cascades, so deleting an organization deletes its entries. The lifecycle sweep reaps an entry once its stamped `purge_after` has passed (`ttl` on `purge_after`, window `0h`), and asks no resolver.
+  - **`@objectstack/objectql`:** a by-id delete of a business record writes one entry in the delete's own unit of work, before the record's row is removed. The entry holds the record and its master-detail cascade, the master first. Each row keeps its declared columns, and `secret` columns are left out, so a restored record's secret fields come back empty. The entry also records the `set_null` references the delete cleared, and `deleted_by`, `deleted_at`, `retention_days` and `purge_after`. If removing the row fails, the entry goes too: the transaction rolls it back, or the engine removes it when no transaction covered it.
+  - **Retention:** `ObjectQLPlugin`'s new `recycleBinRetention: { resolve, token }` option takes the host's retention resolver, called once per delete with the token the host handed over. When the option is absent or the resolver answers `undefined`, the retention is `OS_RECYCLE_BIN_RETENTION_DAYS`, else 30 days. A value that is not a positive whole number of days is refused: from the resolver, the delete is refused before it writes anything; in the variable, the boot is refused, because the plugin reads it in `init()`.
+  - **Which deletes do NOT enter the bin:**
+    - a delete by predicate (`multi: true`), which includes every lifecycle sweep reap, even though the sweep names each reaped row by its id;
+    - a child the cascade deletes, which is a row of its root's entry instead;
+    - any platform object, meaning a `sys_*`, `cloud_*` or `ai_*` object, whose rows are also left out of a business record's snapshot;
+    - any delete on a composition that does not register `PlatformObjectsPlugin`, which logs one `info` line saying so.
+  - **Forward-only:** records deleted before this release have no entry.
+  - **Storage:** every by-id delete of a business record now also writes one `sys_recycle_bin` row holding the deleted rows. The row is reaped once its retention has passed.
+  - **`@objectstack/spec`:** `PLATFORM_OBJECTS_BY_PACKAGE['platform-objects']` lists `sys_recycle_bin`, so a reference to it lints as a real platform object. The comment above `RECYCLE_BIN_OBJECT` now names the object file that builds the table; no exported name, shape or description changed.
+  - **`@objectstack/cli`:** the organization-ownership inventory has a row for `sys_recycle_bin` (fate `attribution`).
+  - **`@objectstack/plugin-audit`:** `sys_recycle_bin` is excluded from the generic audit and activity writer, like the other engine-owned plumbing, so reaping an entry, clearing its `deleted_by` or cascading an organization's delete into its entries never copies a snapshot into `sys_audit_log` or `sys_activity`. The business delete an entry was taken for is audited exactly as before.
+- 8cc709d: fix(objectql)!: a disabled package's `objectExtensions` fields are withheld from the object they extend, and come back with their values on enable
+  
+  Clause-②: yes (narrowing) — while a package is disabled, the served object it extends (`GET /api/v1/meta/object/:name`, the record page, the `/data` field map) no longer carries the fields, validation rules and indexes the package's `objectExtensions` add, so a `/data` write, filter, sort or `fields` projection naming one of those fields is refused as a field the object does not have (`400 INVALID_FIELD` / `INVALID_SORT`), and `GET /api/v1/packages/:id/customizations` no longer lists them among the base's `contributions`.
+  Metadata-protocol: semantic
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and nothing stored changes: the extension, its columns and its values stay as they are, and enabling the package serves them again. -->
+  
+  **BREAKING** served-object narrowing under package disable (`@objectstack/objectql`, `@objectstack/runtime`, `@objectstack/cli`).
+  
+  - **Before.** Disabling a package withheld its objects (`404 OBJECT_PACKAGE_DISABLED`), flows, navigation items, permissions and actions, but the fields its `objectExtensions` add to another package's object stayed on that object: in `/meta/object`, in every `/data` read and on the record page.
+  - **Now.** The served fold of an object leaves out every `extend` contribution of a disabled package: its fields, its validation rules, its indexes and its field patches. A base layer that already carries them (a tenant overlay saved from a served read, a metadata-service copy of a resolved object) has those fields and rules taken off too. A field the owner itself declares, or another enabled extension also adds, stays. A write naming a withheld field answers exactly what a write naming an unknown field answers; a write through the object's other fields lands and leaves the withheld values alone.
+  - **Kept.** Schema sync, the federated binding and the lifecycle sweep read the object with every extension folded in (`SchemaRegistry.getStorageObject` / `getAllStorageObjects`), so a disable never drops or skips a column, and a boot that starts with the package disabled still creates them. Enabling the package serves the fields again with the stored values. With `OS_SKIP_SCHEMA_SYNC=1`, `os migrate`'s drift plan no longer reports a disabled module's columns as orphan columns to drop.
+  - **Who moves.** A client that reads a disabled module's extension fields gets the object without them. A formula on the object that reads a withheld field answers `null`. A validation rule of another, enabled package that reads a withheld field cannot be evaluated, so writes to the object are refused (`400 VALIDATION_FAILED`, naming the rule) until the field's package is enabled again or the rule's package declares and keeps that package.
+- a91ad42: fix(metadata-protocol,cli,cloud-connection)!: an object extension that re-declares an owner's field in `fields` beyond its display properties is refused at the save and publish doors, at `os validate` and at the install door, with a prescription naming `fieldPatches` (ADR-0146 D10) (#30610)
+  
+  Clause-②: no (narrowing) — the `object_extension` save, publish and restore doors, `os validate` and `POST /api/v1/marketplace/install-local` refuse an `objectExtensions[].fields` entry naming a field the extended object's owner declares when it changes anything outside the display-property whitelist, a body they accepted before. Nothing is widened.
+  Metadata-protocol: narrowed
+  Skills-docs: no move — `skills/**` and `content/docs/**` already teach `fieldPatches` as the way to change a base field's display, and no page teaches taking an owner field over through `fields`; the prescription ships in the refusal text.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) A refused shape with no mechanical rewrite: which keys of a re-declared field were meant as display and which as a takeover is a judgement about the field, and no first-party artifact (examples, HotCRM) writes the shape. A stored row that already re-declares an owner field keeps registering with the registry's warning, and is judged when it is next saved or published. -->
+  
+  **BREAKING** accept-set narrowing at the metadata save and publish doors (`PUT /api/v1/meta/object_extension/NAME`, draft and live, the per-item and package publish, and the restore doors), at `os validate`, and at the marketplace install door.
+  
+  - **Before.** An extension written into `fields` with the name of a field the extended object's owner declares replaced the owner's field whole when the registry folded the object: a module package could turn the owner's `amount: number` into `text`, drop its `required`, or make it `readonly`, and every reader judged the field on the extension's definition. Only the registry's warning named it.
+  - **Now.** Such an entry is refused when it changes anything outside the display-property whitelist (`label`, `description`, `inlineHelpText`, `placeholder`, an option's `label`): `400 VALIDATION_ERROR` at the save and publish doors (located in `issues[]` at `fields.FIELD`), `422 VALIDATION_ERROR` at the install door (every entry in `details.refusals`), and exit 1 with the entry on `errors` at `os validate`. Each refusal names the keys the entry changes and prescribes `fieldPatches`. Both bodies are read through the field schema first, so a default the parse stamps is no change; options are compared by stored value, so a relabel or reorder is no change.
+  - **Unchanged.** A re-declaration that changes only display properties is admitted. An extension of an object its own package owns is not judged, nor is an added field. `os validate` judges an owner declared by another package of the same artifact; a target outside the artifact is judged at install, against the installed owner. The registry's warning on a re-declared field stays. `os build` does not yet run the check.
+  
+  **The remedy.** Move a display change of an owner's field into the extension's `fieldPatches` (the field name as its key, the whitelisted properties as its body), and add a behaviour of your own as a new field under a new name.
+- 468e0c1: feat(spec)!: one marketplace taxonomy — business functions, industries, a solution type and a maturity flag replace the single `category` (#30904)
+  
+  Clause-②: yes (narrowing) — new facet keys and `maturity` widen; `category` retired and refused by name narrows; a contract review runs before the queue
+  Metadata-protocol: narrowed
+  
+  <!-- adr-0087: registered marketplace-category-retired -->
+  
+  **BREAKING** for a package source, publish request or listing that still writes `category`.
+  
+  - **`@objectstack/spec`.** The marketplace taxonomy is defined once, in `@objectstack/spec/marketplace` (`taxonomy.zod.ts`): `businessFunctions` (1-3 distinct values, the primary one first: `sales`, `marketing`, `customer_service`, `finance`, `hr`, `supply_chain`, `administration`, `project`, `legal`, `it`, `collaboration`), `industries` (up to 3, optional; absent means cross-industry), `solutionType` (`app` | `template` | `connector`; absent means `app`) and `maturity` (`beta` | `stable`; absent means `stable`), on `PackageSchema`, `CreatePackageRequestSchema`, `UpdatePackageRequestSchema`, `TemplateManifestSchema` (`objectstack.manifest.json`) and `MarketplaceListingSchema`, where `businessFunctions` is required. A search filters by `businessFunctions` / `industries` / `solutionTypes` / `maturity` and reads one facet count list per facet. `explainSolutionTypeContradiction` is the publish cross-check (a `template` needs the `unmanaged` install mode, a `connector` a declared connector) and `LEGACY_CATEGORY_MAPPING` says what every old category value becomes.
+  - **Retired.** `category` on all six schemas, and `MarketplaceSearchResponse.facets.categories`, are `retiredKey()` tombstones: `tsc` refuses them and a parse refuses them with the prescription. `MarketplaceCategorySchema` / `MarketplaceCategory` and `PackageCategorySchema` / `PackageCategory` are removed. `RETIRED_KEYS_BY_MAJOR[18]` lists the six keys, `RETIRED_DEFS_BY_MAJOR[18]` both defs, and the upgrade guide carries the semantic entry `marketplace-category-retired`. No ADR-0087 conversion: none of these shapes is a stack collection member, so `os migrate meta` has nothing to rewrite; a runtime boot never reads them.
+  - **`@objectstack/cli`.** `os package publish` refuses a `category` in `objectstack.manifest.json`, or the now-hidden `--category` flag, before any network call, naming the facets for the value it held. It judges each facet with the spec's schema, checks a declared `solutionType` against the built artifact, and sends the facets as `business_functions`, `industries`, `solution_type` and `maturity`; an absent facet is not sent.
+  - **`create-objectstack`.** The blank template no longer ships `category: "starter"`, which every project scaffolded from it inherited and which the hosted publish route refused.
+  
+  **The remedy.** FROM `"category": "<value>"` TO the facets: delete `category` and declare `businessFunctions` (and, where they apply, `industries` and `solutionType`) in `objectstack.manifest.json`. `os package publish` prints the mapping for the value you had — for example `"finance"` → `"businessFunctions": ["finance"], "solutionType": "app"` — and `LEGACY_CATEGORY_MAPPING` lists them all. A `"starter"` copied from the blank template is simply deleted. A TypeScript caller that imported `MarketplaceCategorySchema` or `PackageCategorySchema` uses `MarketplaceBusinessFunctionSchema` and `MarketplaceSolutionTypeSchema` instead.
+- a1afbb9: feat(spec)!: retire five `objectstack.manifest.json` keys nothing read — `name`, `specVersion`, `skills`, `scaffold` and `visibility` (#31035)
+  
+  Clause-②: no (narrowing) — five authorable keys of `TemplateManifestSchema` become tombstones, and `os package publish` refuses the file's `visibility` by name
+  Metadata-protocol: narrowed
+  
+  <!-- adr-0087: registered marketplace-template-manifest-inert-keys-retired -->
+  
+  **BREAKING** for an `objectstack.manifest.json` that still writes any of the five keys, and for `os package publish` run on a manifest that declares `visibility`.
+  
+  - **Retired (ADR-0049 enforce-or-remove).** `TemplateManifest.name`, `.specVersion`, `.skills`, `.scaffold` and `.visibility` are `retiredKey()` tombstones: `tsc` refuses them and a parse of `TemplateManifestSchema` refuses each with its prescription. None ever had an effect: no reader of the file's `name`, `specVersion`, `skills` or `scaffold` existed, and `os package publish` read `visibility` only to warn that it ignores it. `RETIRED_KEYS_BY_MAJOR[18]` lists the five keys and the upgrade guide carries the semantic entry `marketplace-template-manifest-inert-keys-retired`. No ADR-0087 conversion: this file is not a stack collection member, so `os migrate meta` has nothing to rewrite; a runtime boot never reads it. The publish request's own `visibility` (`CreatePackageRequestSchema`) is unchanged.
+  - **Migration** — FROM → TO, in `objectstack.manifest.json`:
+    - `name` → delete it. The project slug is `package.json` `name`; the published package id is `manifestId` (or the one `os package publish` derives from the compiled artifact).
+    - `specVersion` → delete it. The protocol your package needs is `manifest.engines.protocol` in `objectstack.config.ts`; the spec release it builds against is its `@objectstack/spec` dependency.
+    - `skills` → delete it. create-objectstack installs the whole skills catalog.
+    - `scaffold` → delete it. Nothing prompted for `scaffold.variables` or ran `scaffold.postInstall`.
+    - `visibility` → delete it and pass `os package publish --visibility <private|org|marketplace>`.
+  - **`@objectstack/cli`.** `os package publish` refuses a manifest declaring `visibility` before any network call, naming `--visibility`. It names the other four in a warning for deletion and still publishes, because every project scaffolded from the blank template before this release carries them.
+  - **`create-objectstack`.** The blank template's manifest drops the five keys it wrote (`name`, `specVersion`, `skills`, `scaffold`), and scaffolding strips every retired key (`category` and these five, one list pinned to the spec's registry rows) from the template's manifest instead of writing `name`, so a template authored before this release still scaffolds a manifest the schema accepts. The release version pass (`scripts/sync-template-versions.mjs`) no longer stamps `specVersion`.
+  - **Not retired here:** `publisher` and `isStarter`. A first-party publish script sends both to the hosted packages route, so their fate is a maintainer decision.
+- 150f740: feat(spec)!: retire `objectstack.manifest.json` `publisher` and `isStarter` — the platform decides both (#31035)
+  
+  Clause-②: no (narrowing) — two authorable keys of `TemplateManifestSchema` become tombstones, and `os package publish` refuses the file's `publisher` by name
+  Metadata-protocol: narrowed
+  
+  <!-- adr-0087: registered marketplace-template-manifest-platform-decided-keys-retired -->
+  
+  **BREAKING** for an `objectstack.manifest.json` that still writes `publisher` or `isStarter`, and for `os package publish` run on a manifest that declares `publisher`.
+  
+  - **Retired (ADR-0049 enforce-or-remove).** `TemplateManifest.publisher` and `TemplateManifest.isStarter` are `retiredKey()` tombstones: `tsc` refuses them and a parse of `TemplateManifestSchema` refuses each with its prescription. Neither ever had an effect from this file: `publisher` is the trust tier that gates listing privileges, which the platform assigns from the publisher's credentials, and the platform honours a starter flag only on a first-party seed; `os package publish` never sent either. A trust claim does not belong in an author-editable file. `RETIRED_KEYS_BY_MAJOR[18]` lists both keys and the upgrade guide carries the semantic entry `marketplace-template-manifest-platform-decided-keys-retired`. No ADR-0087 conversion: this file is not a stack collection member, so `os migrate meta` has nothing to rewrite; a runtime boot never reads it. The publish request's own `publisher` and `isStarter` (`CreatePackageRequestSchema`) are unchanged.
+  - **Migration** — FROM → TO, in `objectstack.manifest.json`:
+    - `publisher` → delete it. The platform assigns a package's trust tier from the credentials it is published with.
+    - `isStarter` → delete it. The platform decides which packages are starters; a first-party script that seeds one in service mode carries the flag itself, not in the manifest.
+  - **`@objectstack/cli`.** `os package publish` refuses a manifest declaring `publisher` before any network call. It names `isStarter` in the deletion warning with `name`, `specVersion`, `skills` and `scaffold`, and still publishes, because every project scaffolded from the blank template before this release carries `isStarter: true`. Neither key is ever sent.
+  - **`create-objectstack`.** The blank template's manifest drops `isStarter`, and scaffolding strips both keys (with the other retired ones) from a template's manifest, so a template authored before this release still scaffolds a manifest the schema accepts.
+- 4123865: fix(metadata-protocol,runtime): a seed row a person deleted is no longer inserted again under a new id by the next seed replay
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: semantic
+  
+  A seed replays long after its first load: on every boot of a single-tenant runtime (`objectstack serve`, `os start`) and per organization whenever a host replays the seed union, for example on a package upgrade. The create-only default (`mode` omitted, which is `ignore`) inserted every declared row it did not find, and `upsert` did the same. A row a person deleted therefore came back under a new id at the next replay.
+  
+  The seed loads AppPlugin runs now keep a per-organization record of which seed rows landed: the boot seed, the per-organization replay (the `seed-replayer` service) and the dev hot-reload seeder. The record is the new platform object `sys_seed_landed_key` (`SysSeedLandedKey`, registered by `PlatformObjectsPlugin`). It holds one row per landed key: the organization, the object, and the dataset's `externalId` fields with the values the row was matched by. The loader records every keyed row an `upsert` or `ignore` dataset lands, whether it inserted the row, updated it or matched it and left it alone. A row an earlier release seeded therefore counts as landed from the first load after the upgrade. A missing row is inserted only when its key never landed in that organization:
+  
+  - A deleted seed row stays deleted across reboots and upgrades. A row an upgrade adds to the seed still lands.
+  - An edited row is left as the person left it. Under `ignore` this includes a renamed key: the old name is not inserted again.
+  - A reference to a removed row is left as it is, and a row whose own key names a removed row is withdrawn with it. Nothing is reported unresolved for either, so a replay after a person's delete still loads clean.
+  - One `info` line per load says how many seed rows were not inserted again, and where.
+  
+  The deliberate re-seed is the `seed-replayer` service called with `{ reseed: true }`. It inserts every missing row, including the ones a person removed, and records them again. A new database starts with an empty record. Deleting an organization deletes its record.
+  
+  `SeedLoaderService` takes the record through a new constructor option, `landedKeys: 'honour' | 'reseed'`. A caller that does not pass it neither reads nor writes the record, so the package publish, marketplace install, reseed and purge doors behave as before. A load keeps no record when it seeds no organization, and says so at `info`. It also keeps none when the composition does not register `sys_seed_landed_key`, and says so at `warn`. A record write that fails is reported once at `error`. It fails neither the rows nor the load, and the next load records every row that is still present.
+  
+  `PLATFORM_OBJECTS_BY_PACKAGE['platform-objects']` in `@objectstack/spec` lists the new object, and so do `PLATFORM_PROVIDED_OBJECT_NAMES` and `isPlatformProvidedObjectName`, so a stack that references `sys_seed_landed_key` resolves it instead of drawing the unknown-platform-name advisory. `@objectstack/plugin-audit` leaves `sys_seed_landed_key` out of `sys_audit_log` and `sys_activity`: recording which seed rows landed writes no ledger row of its own, and the seeded rows stay audited. `os migrate organization-ownership` inventories the new table as organization-owned rows (fate 3, attribution), each written with the organization its load seeds.
+
+### Patch Changes
+
+- 31fe289: feat(objectql,cli): `os migrate recompute-home-amounts` — recompute stored home-currency amounts at the rates in force now, report first, rows without a rate listed and skipped
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - **`@objectstack/objectql`: `recomputeHomeAmounts(engine, logger, { object, field?, since?, apply?, maxRecords?, maxListed?, source? })`**, with `assertHomeAmountRecomputeSince` (the pure `since` check a door can run before it opens a database), `formatHomeAmountRecomputeReport`, `homeAmountRecomputeComplete` and `HOME_AMOUNT_SKIP_REASONS`. It walks every stored row of an object whose `record`-mode amounts declare `currencyConfig.homeAmount` and projects each through the write-time projection itself (the same rate row, division, single rounding, same-currency rule and organization-timezone day), in the row's own organization, so each organization converts into its own home currency at its own rates and is counted apart. A dry run (the default) reports what would change and writes nothing; `apply` writes only the rows that differ, through `engine.update` with the home field in the payload, so the value stored is the one the write itself computes, and only the home and rate fields move (`updated_at` is kept, so a consumer syncing by `updated_at` does not see the recompute). Being a write, it moves what reads the home field as a fresh write would: stored formulas, parent summaries, and the per-row audit rows where audit capture is installed. Rows that cannot be converted are listed by reason and never written: `rate_missing` (with the currency and date), `code_blank` (an amount with no currency code; the remedy is `os migrate record-currency-codes`), `document_date_blank`, `home_currency_unset` and `unconvertible`. `since` filters on the document date (`homeAmount.rateDate`). One run-level `sys_audit_log` entry records each applied run (counts per organization and reason, and the skipped rows), also when an unclassified error stops the run partway (marked `aborted`, then the error is thrown on). A walk cut short by `maxRecords` is `truncated` and not complete. Refused before any row is read: an unknown object (`OBJECT_NOT_FOUND`), an object or `field` declaring no home amount (`INVALID_FIELD`), a `since` that is not `YYYY-MM-DD` (`VALIDATION_FAILED`).
+  - **`@objectstack/objectql`: `ObjectQL.homeAmountReadsFor(context?)`**, the reads the write-time projection makes (its serving, and the organization a write converts a row under), for a caller that projects a stored row as a write would.
+  - **`@objectstack/cli`: `os migrate recompute-home-amounts --object <o> [--field <amount>] [--since YYYY-MM-DD] [--apply] [--yes] [--json] [--force] [--max-records] [--database-url]`**, the shell of `os migrate record-currency-codes`, booting the settings service (each organization's `localization.currency` and `.timezone`) and the audit ledger. It exits 1 while any row is listed and skipped, on a dry run as on an apply, because a total over the home field silently leaves such a row out, and when `--max-records` cut the walk short.
+- 769adff: feat(metadata-protocol, metadata-core)!: the ensure door creates no customization pair for a kernel package, and every pair question carries the installed manifests
+  
+  Clause-②: yes (narrowing) — both arms. Narrowing: `POST /api/v1/packages/:id/ensure-customization` (and the protocol's `ensureCustomizationPackage`) answers a kernel base, a package of scope `system` or `cloud`, with `409 RESOURCE_CONFLICT` and a sentence saying kernel objects are not customizable in this version, where it created `<id>.custom`; `POST /api/v1/automation/:name/clone` of a flow a kernel package ships, with no `package` named, answers that `409` where it answered `200` with the copy in `<id>.custom`; and the exported `pairOf`, `isPairOf` and `appOf` (`@objectstack/metadata-core`), `isServedOverrideRowOf` and the `installed` member of `OverrideWriteClosure` (`@objectstack/metadata-protocol`), and `resolveFlowPrecedence` / `describeFlowContender` (`@objectstack/service-automation`) take the installed-manifest lookup as a required argument. Widening: five new exports, `installedManifestsOf`, `InstalledManifestLookup`, `AppLookupManifest` and `InstalledPackageSource` (`@objectstack/metadata-core`) and `kernelPackageScope` (`@objectstack/metadata-protocol`), and one new `noticeCode` value on the permission-set clone answer, `PERMISSION_SET_CLONE_ENVIRONMENT_WIDE_KERNEL_SOURCE`, for a copy of a kernel-shipped set that now lands environment-wide.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) no key of any schema is added, removed or re-shaped and no stored row is read differently, converted or dropped: the narrowing is one runtime refusal at one door, for one kind of base, whose remedy is that no pair exists to create; the existing pairs and the overrides in them stay served exactly as before. The retyped exports are runtime functions with no metadata surface, and the compiler names every caller that has not passed the new argument, so there is nothing for `objectstack migrate meta` to rewrite. -->
+  
+  **BREAKING** for a caller that ensures the customization pair of a kernel package — a platform package of scope `system` (users, organizations, security, settings and the rest of the platform suite) or `cloud` — and for a TypeScript importer of the pair helpers named above.
+  
+  - **Why (ruling records 6691022506 and 6691217245 on ADR-0146 D3).** The customization unit is the App, and the kernel is not an App a customer owns: it ships with the runtime, at the runtime's version (installing it whole is the goal ruling 6691022506 records, not yet what every `serve` tier does). In this version no kernel object is customizable, so the door creates no pair for one. Which kernel objects a later version opens (a whitelist) is that version's decision.
+  - **What the door answers.** `409 RESOURCE_CONFLICT`, the status and code the door already answers when a base's state rules the pair out (a writable base, no namespace, a version that is not SemVer). Nothing is created or written. Every other base is answered exactly as before.
+  - **A kernel pair that already exists stays.** An earlier version of the door may have created `<kernel id>.custom` on a deployment. It stays installed, the overrides inside it stay served by every read of the kernel item's name, and a further save into it is still admitted. Only the ensure call is refused.
+  - **A copy of a platform permission set.** `POST /api/v1/security/permission-sets/:name/clone` with no `package` named landed the copy of a kernel-shipped set (`member_default` and the platform's other sets) in `<kernel id>.custom`. It now saves the copy environment-wide, as it already does for a set authored in the environment, with the notice code `PERMISSION_SET_CLONE_ENVIRONMENT_WIDE_KERNEL_SOURCE` and a sentence naming the kernel package and `package`. A Console that does not know the new code shows that sentence as sent. Naming a writable package with `package` still lands the copy there. The flow clone door answers a kernel-shipped flow with the ensure door's sentence.
+  - **The closes stay shut on a kernel item.** A package-less write, or a write naming the kernel package, onto an item a kernel package ships is still refused `403 NOT_OVERRIDABLE` exactly where it was refused before (ADR-0146 D11). The sentence no longer names the pair as the fix, since there is none to ensure: it says kernel objects are not customizable in this version. A later version's kernel whitelist is what opens such an item.
+  - **The lookup.** Which pair customizes a package is asked through the installed manifests of the registry the caller serves (`installedManifestsOf(registry)`). Today the answer is unchanged for every package: `appOf` is still the identity. The argument is threaded through every site now so that resolving a module to its App is one change in `appOf`.
+  - **`os validate`'s customization-namespace advisory** now skips a package that is itself a pair through `isCustomizationPackage`, the one spelling of that question. An id ending in `.custom` that no base derives (`a.custom.custom`, a bare `.custom`) is now judged like any other package.
+  - **Who moves, and the fix.** A script or client that ensured a kernel package's pair drops that call: the kernel item is served as it ships, and an existing pair keeps serving what it holds. A vendor package that declares `scope: 'system'` or `'cloud'` in its own manifest is read as kernel here, as `isWritablePackage` already reads it; its remedy is to drop the scope, which belongs to the platform's own packages. A TypeScript importer of the helpers passes `installedManifestsOf(engine.registry)`, or `installedManifestsOf(undefined)` where it holds no registry.
+- b13fc74: feat(cli): `os migrate blank-multi-values` rewrites the `[]` and `''` still stored on optional multi-value columns to `null`
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Since #29343 the write door stores a cleared optional multi-value value (`[]` or `''` on a `multiselect`, `checkboxes` or `tags` column, or on a `multiple: true` `select`, `radio`, `lookup`, `user`, `file` or `image` column) as `null` (ruling A on #29343). Rows cleared before that still hold the JSON text `'[]'` or `'""'`, so `= null`, grouping and the read shape split them from rows cleared since. This new command is the one-time clean that ruling's execution step 3 binds, an `os migrate` data step of its own beside `blank-single-values`, not part of `os migrate value-shapes`, which rewrites nothing.
+  
+  - **Columns.** Read from `blankAsNullColumns` in `@objectstack/core`, the rule the write door and the seed replay read: its optional columns on the `$empty` table's `multi_value` row. A `required` column, a `readonly` column (a platform-stamped `[]`, such as `sys_activity.changed_fields`) and a single-value column are never touched, nor is a non-empty list.
+  - **Dry run by default.** It counts the stored `[]` and `''` per object and column and writes no row. `--apply` rewrites each affected row's blank columns to `null` through the engine. `--object` narrows the walk and refuses a name the deployment does not declare. `--apply` refuses a SQLite file another process holds unless `--force`.
+  - **No flag.** Nothing is gated on it. A re-run that reports zero is the verification.
+- fbbbaee: fix(cli): `os package install` prints the connector maps the package export withheld (#29873)
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  An exported package names each connector header or environment map the export withheld whole in its `withheldMaps`, and both install modes of the runtime's install-local endpoint name each map in their answer. The command dropped that list, so an operator who installed an export the documented way (`os package install DIR/NN-ID/objectstack.json`) was never told that the connector sends none of those headers or environment variables.
+  
+  The command now prints one warning, one line per map (`connector 'NAME' PATH`, for example `connector 'erp' providerConfig.headers`), and the remedy: re-enter each map where the connector is authored. It does this for a managed install (hot-loaded or not) and for an unmanaged one, from a catalog id or an artifact file. An answer without the list prints nothing new, and the exit code is unchanged. The command has no `--json` output.
+- 8d5aab3: fix(cli): `os dev` and `os start` share one data-key file, so a secret saved under `npm run dev` reads back under `os start`
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - **`@objectstack/cli`.** Both commands open the same project database, but `os start` used to mint its own data key under its own home (`PROJECT/.objectstack/dev-crypto-key` in project mode) while `os dev` kept the key at `$HOME/.objectstack/dev-crypto-key` (or `$OS_HOME`'s). Every secret written during development then read back as unset under `os start`. Both commands now resolve the key file the way `os dev` always has (`os start --home` counts as `OS_HOME`) and hand it to their `serve` child on the internal `OS_INTERNAL_CRYPTO_KEY_FILE` channel. The project-local file an earlier `os start` minted is not orphaned: when it alone holds a key it is still read, and the boot says which file; when it and the shared file hold different keys, the shared one is used and a warning names both paths. An explicit `OS_SECRET_KEY` / `OS_DEV_CRYPTO_KEY` still wins, unchanged.
+  - **`@objectstack/service-settings`.** New exports `resolvePersistedKeyFile` (the one resolution both commands take, beside the provider's own key-file path) and `KEY_FILE_CHANNEL_ENV`; the local crypto provider's file tier reads the file that channel names, ahead of `OS_HOME`.
+- 665db00: fix(cli): `os dev` on an `os init -t app` scaffold no longer composes a second `MetadataPlugin` and warns "Plugin superseded: 'com.objectstack.metadata'"
+  
+  Clause-②: no — boot diagnostics only; nothing accepted or published changes
+  Metadata-protocol: none
+  
+  The dev artifact door in `os serve` / `os dev` added its own `MetadataPlugin` unless the stack already held one, but it recognised that plugin only by its class name. The published `@objectstack/metadata` bundle names the class `_MetadataPlugin`, so on an installed CLI the check missed the `MetadataPlugin` the standalone stack had already composed, added a second one, and every dev boot of an untouched scaffold printed a "Plugin superseded" diagnostic blaming a composition the user never wrote. The dev door now asks the same question the host-config door asks: a plugin named `com.objectstack.metadata` (or, as before, a class named `MetadataPlugin`) means the stack has one. A host config with no `MetadataPlugin` of its own still gets the dev door, as before.
+- cd5f554: fix(objectql,cli): `os migrate stored-expressions` fills a stored computed field on rows stored before it was declared, and the boot names the command when a sample of rows needs it
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  A stored computed field (a non-`formula` field declaring `expression`) is computed by the engine on every insert and update and on nothing else, so declaring one on an object that already holds rows left the new column NULL on every existing row until each was next written; a filter, sort, roll-up or analytics anchor over it read NULL where the expression gives a value, with no error. A fresh database was right and an upgraded one was not.
+  
+  - **`@objectstack/cli`: `os migrate stored-expressions [--object <o>]… [--field <f>] [--changed] [--apply] [--yes] [--json] [--force] [--max-records] [--database-url]`.** A dry run (the default) reports, per field, the rows holding a NULL the expression gives a value; `--apply` writes them. Each value is the write's own computation over the stored row (option labels, the one reference hop, the `can()` map), and the apply writes through `engine.update` with `updated_at` kept, so hooks, roll-ups over the column and audit capture see an ordinary write. A NULL the expression itself answers (an empty reference, a null input) is left alone. A value that differs from the expression — the expression changed after the row was written — is counted on every run and rewritten only with `--changed`; an expression reading the clock always differs there. A row on which an expression does not evaluate while it holds a value is listed and not written, because the write would store NULL over it. The command exits 1 while a row is skipped or could not be written, or when `--max-records` cut the walk short. Idempotent: a re-run finds nothing to fill.
+  - **Boot advisory.** At `kernel:bootstrapped` the engine plugin reads the first 100 rows of each object declaring a stored computed field (nothing for an object declaring none) and, when that sample holds such a NULL, warns once naming each `object.field` and `os migrate stored-expressions`. It writes nothing and never fails a boot.
+  - **`@objectstack/objectql`:** `backfillStoredExpressions`, `formatStoredExpressionBackfillReport`, `storedExpressionBackfillComplete`, `announceStoredExpressionHoles`, `sampleStoredExpressionHoles`, and `ObjectQL.computeStoredExpressionsOver(object, rows, context?, onFault?)` — a stored computed field's values over rows already stored, computed as a write computes them.
+- d9895a1: fix(cli): `os serve` reads `OS_TRUSTED_APP_SCHEMES` into AuthPlugin's `trustedAppSchemes`, so a deployment can register its mobile app for the sign-in hand-off
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **Before.** `serve` constructed `AuthPlugin` with no `trustedAppSchemes`, and no setting a deployment could make reached the key. The `one-time-token` plugin never mounted and `GET /api/v1/auth/one-time-token/handoff` answered `400 … is not a registered app scheme` for every app, whatever the operator set.
+  - **Now.** `OS_TRUSTED_APP_SCHEMES` is read the way `OS_TRUSTED_ORIGINS` is: comma-separated, each entry trimmed, empty entries dropped, repeats folded. The list is passed as `trustedAppSchemes`. `os dev` and `os start` run `serve` as a child with the inherited environment, so they read it through the same line.
+  - **Unset stays unset.** No default scheme is registered: unset, empty or only separators, the plugin stays unmounted and the hand-off refuses every target, as before.
+  - **A bad entry still fails the boot.** Entries are not validated, lower-cased or dropped by the reader; plugin-auth's `assertTrustedAppSchemes` refuses a bad one at construction, naming it.
+  - Environment variable only: no stack key is added. The hosted runtime's own `AuthPlugin` is not changed. Listed in `content/docs/deployment/environment-variables.mdx` beside `OS_TRUSTED_ORIGINS`.
+- f6f663a: fix(cli): when two data-key files hold different keys, `os start` and `os dev` read with the one that opens the project's stored secrets, or a production boot refuses
+  
+  Clause-②: yes (narrowing) — a production `os start` / `os serve` boot whose two candidate key files (the shared `$HOME/.objectstack/dev-crypto-key` or `$OS_HOME`'s, and the project's `.objectstack/dev-crypto-key`) both fail to open the database's newest stored secret now refuses to start, naming both files; it used to start and serve every stored secret as unset. The widening half: `@objectstack/service-settings` gains new exports (`chooseKeyFileByTrialOpen`, `settleKeyFileChannel`, `storedSecretReaderOverEngine`, `deferredLocalCryptoProvider`, `DataKeyOpensNothingError`, `KEY_FILE_CANDIDATE_CHANNEL_ENV` and their types).
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema, export or stored row changes shape: the refusal is a boot posture over which key file opens existing ciphertext. No ciphertext is rewritten, so there is nothing at rest for a migration to move. -->
+  
+  **BREAKING** boot narrowing (`@objectstack/cli`, `@objectstack/service-settings`): a production boot whose candidate data keys open none of the stored secrets refuses to start.
+  
+  - **`@objectstack/cli`.** When the shared key file and the project's own key file (the one an earlier `os start` minted) hold different keys, the CLI no longer picks one. It hands the `serve` child both, and the child decides once the database is open: it opens the newest stored `sys_secret` value under each key and reads with the key that opens it, and the boot says which file it took. A project that only ever ran `os start`, on a machine whose home holds a key from `os dev` in another project, reads its secrets back again. With no stored secret yet, the shared file is used, as before. When neither key opens the stored secrets, a production boot (`os start`, `os serve`) refuses to start and names both files; a development boot (`os dev`) starts and prints a boot error naming both files. The one-shot commands (`os migrate`, `os secret rewrap`, `os secret orphans`, `os storage orphans`) now read the same file by the same rules: the project's own file when it alone holds a key, and the key that opens a stored secret when both do.
+  - **`@objectstack/service-settings`.** The settings service makes that choice in its `start()`, before any reader decrypts, when the CLI names a second candidate on the internal `OS_INTERNAL_CRYPTO_KEY_FILE_CANDIDATE` channel. A leading `~` in `OS_HOME` (or `OBJECTSTACK_HOME`) is now the home directory when the provider finds its key file, as `os start` already read it; it used to name a directory called `~` under the working directory.
+  
+  **The remedy.** If a production boot refuses with "neither data key opens this database's stored secrets", find the key those secrets were sealed under (a backup of either file, or the `OS_SECRET_KEY` the deployment once ran with), keep a copy of both files, and put that key at the shared file the message names, or set `OS_SECRET_KEY` to it.
+  
+  Supersedes, in the same release: the note for #29934 says that when the shared file and the project's file hold different keys, the shared one is used and a warning names both paths. After this change the boot uses whichever of the two opens the stored secrets, and refuses in production when neither does.
+- 159930a: fix(service-settings): when two data-key files hold different keys, the boot judges the newest stored secrets as a page, not only the newest one, and reports a database split between the two keys
+  
+  Clause-②: no — an internal boot heuristic and its notice text. The shapes it changes (`StoredSecretReader` now answers the page, `KeyFileChoice` gains the `mixed` reason and a `tally`, `DataKeyOpensNothingError` gains `judged`) were added by #30042, whose note is still pending, so they first ship together in this release; no released export changes.
+  Metadata-protocol: none
+  
+  - **`@objectstack/service-settings`.** When the shared key file and the project's own key file hold different keys, the boot now trial-opens each of the newest stored `sys_secret` rows (up to ten) under both keys and reads with the key that opens more of them, on a tie the one that opens the newest. A row that opens under neither key (a corrupt or foreign row) no longer decides the boot: if an older row opens under one key, that key is used, and only a page where no row opens under either key keeps the production refusal. When each key opens some of the rows, the database holds secrets under both keys: the boot uses the key that opens more of them and prints an error naming both files, how many rows each key opened, and the fix. The boot's notices now say what was measured ("opens the 3 newest stored secrets", "opens 2 of the 3 newest stored secrets") instead of claiming the chosen file opens all of the database's stored secrets.
+  - **`@objectstack/cli`.** The one-shot commands (`os migrate`, `os secret rewrap`, `os secret orphans`, `os storage orphans`) share the same trial, so they make the same choice.
+  
+  **The remedy for a split database.** Keep a copy of both files, then save again each secret that reads as unset: it is sealed under the key the boot uses. Once nothing reads as unset, put that key at the shared file (or set `OS_SECRET_KEY` to it).
+  
+  Supersedes, in the same release: the note for #30042 says the boot opens the newest stored secret under each key and quotes the refusal as "neither data key opens this database's stored secrets". After this change the boot judges the newest rows as a page, and the refusal reads "neither data key opens any of the N newest stored secrets".
+- afc761c: fix(cloud-connection,cli): an exported `<base>.custom` installed on another environment lands in that environment's writable pair, and its overrides are served (ADR-0146 D2 / D3)
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **Before.** `os package install <export>/objectstack.json` of a base's paired customization package answered success and printed "Package installed into the running kernel", but the install registered the pair as code. None of its overrides was served, `GET /packages/<base>/customizations` listed none of them, and the pair turned read-only, so `ensure-customization` answered `writable: false` and every further save into it was refused `WRITABLE_PACKAGE_REQUIRED`.
+  - **Now.** `POST /api/v1/marketplace/install-local` installs a pair as what it is. The target's own pair is answered by its ensure door, which creates it when absent. Every item of the body is then written into it through the save door a Studio edit takes, with `mode: 'publish'` and the installer as actor, in load order. The overrides are served at once, the customization read lists them, and the pair stays editable. Nothing is registered as code or written to the cached-manifest directory. The answer carries `customizationPair` (`basePackageId`, `packageId`, `created`, `writable`), `writtenCount` and `written`, and the CLI prints them.
+  - **Refusals, nothing written.** A body key with no item form (code, a `translations` bundle, a key the install-key table does not classify), a nameless item, or two items claiming one name: `422`, every problem listed. A pair manifest the ensure door would not write: `400 PLUGIN_MANIFEST_INVALID`. A pair inside a multi-package artifact: `422`. A pair already read-only on the target: `409 RESOURCE_CONFLICT`, asked before the ensure door. If an earlier install registered it as code, the message names the uninstall and the restart that clear it. The ensure door's own refusal is relayed with its status and code.
+  - **A save refused part-way.** The answer is a failure with the save's code and status, naming the item and where it sits in the body. A pair this install created is deleted again. A pair that existed before is kept, and the answer lists the items written and the ones not written.
+  - **The CLI.** A runtime that predates this answers a pair as a managed install. The CLI now prints that as an error with the way back (uninstall, upgrade and restart, install again) and exits 1, instead of printing success.
+- 1c53783: feat(cli,create-objectstack): `os build` says when the local dev database holds Studio customizations the artifact leaves behind; the starter's `AGENTS.md` and README say a Studio change lives in the database and name `os package export`
+  
+  Clause-②: yes (widening) — the exported CompileCommand gains a protected reportsLocalCustomizations flag (default false); nothing removed or narrowed
+  Metadata-protocol: none
+  
+  - **`@objectstack/cli`: `os build`** ends, on its text face, with one notice when the SQLite database `os dev` opens for the project (the same resolution, over the project's development `.env*` files) holds items of a `<base>.custom` package: how many, in which pair, the database file, and that `os package export` takes them out while `os dev` runs. A change saved in Studio is such an item (ADR-0146 D2), never part of `src/`, so neither the artifact nor the starter's `Dockerfile` carries it. The read is local and read-only; a database that is not a local SQLite file is not probed and prints nothing, and a file that cannot be read is said to be unchecked, never empty. `os compile`, which `os dev` runs on every boot and rebuild, and `os build --json` print nothing new.
+  - **`create-objectstack`: the generated `AGENTS.md` and the blank starter's README** say that Studio saves into the environment's database as an item of `<package id>.custom`, that `build` and the `Dockerfile` leave it behind, that app changes are made in `src/`, and how a customization moves as a package (`os login`, `os package export`, then `os package install` on the deployment, in the numbered order).
+- a77c2e9: fix(cli): the official image refuses to start on a disk it would lose; every other production `os start` says what it keeps there, and administrators see it in the Console
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **`@objectstack/cli` (the official image).** With `OS_DEPLOYMENT_DURABILITY_CHECK_ENABLED=true`, which the official image now sets in its `ENV`, `os start` exits 1 unless `OS_DATABASE_URL`, `OS_AUTH_SECRET` and `OS_SECRET_KEY` are all set explicitly (their legacy names count, and so do `--database` / `--auth-secret` and a database the project config declares). It names the missing ones before it writes a database file or a secret, and says how a deployment already running on generated values carries them over: the files in the container's home, and which of them the container holds. An explicit `OS_DATABASE_URL=file:/path/on/a/volume/app.db` passes. A value of the switch that is not `true`/`false`/`1`/`0` is refused rather than read as off. **Upgrading an image deployment that ran on its defaults:** read `auth-secret` and `dev-crypto-key` (and `data/objectstack.db`) out of the old container's `/home/node/.objectstack` and set them before you start the new one.
+  - **`@objectstack/cli` (every other `os start`).** Unchanged: it keeps booting. In production mode, when it keeps its database, its sign-in secret or its data key on its own disk because nobody set them, it prints a block naming each file and the variable that moves it off that disk, and hands the same facts to the server process on the internal `OS_INTERNAL_DEPLOYMENT_FINDINGS` channel.
+  - **`@objectstack/service-settings`.** Two routes behind the settings door, for callers holding `manage_platform_settings`: `GET /api/settings/deployment/notice` answers what this production deployment keeps on its own disk (the database file, the generated sign-in secret, the data key file) plus two lower-severity lines (uploads on the local disk; no email service that delivers), and `POST /api/settings/deployment/notice/hide` records an administrator's acknowledgement of exactly what they read as a `config_change` row on `sys_audit_log`. A member is refused `403`, the state is not on the public auth config, a hide is refused `409` where no audit log is mounted or the notice changed since it was read, and outside production mode the notice is empty. No package export is added.
+- 959c26b: feat(cli,create-objectstack): a new project has a wired place for permission sets and datasets, `os g permission` / `os g dataset` write them, and the generated AGENTS.md names the package manager the project was created with
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - **`create-objectstack`: the blank starter ships `src/security/index.ts` and `src/datasets/index.ts`**, empty barrels already handed to the stack's `permissions` and `datasets` keys in `objectstack.config.ts`, like the eight directories it wired before. A permission set or a dataset exported from them is loaded and counted by `validate` with no edit to the config. The generated `AGENTS.md` lists both directories.
+  - **`@objectstack/cli`: `os g permission NAME [--object OBJECT]`** writes `src/security/NAME.permission.ts`, a `definePermissionSet` granting read, create and edit (no delete) on the object `--object` names, or the stack's only object, with `readScope: 'own'` declared. **`os g dataset NAME [--object OBJECT]`** writes `src/datasets/NAME.dataset.ts`, a `defineDataset` over that object with a `record_count` measure, grouped by the record's title field when it has one. `defineDataset` types the literal, so it needs no `as const`. Both pass `os validate`, `os build` and `os lint` with no finding on a fresh project. `os init` wires both directories too.
+  - **`create-objectstack`: the generated `AGENTS.md` (and `.github/copilot-instructions.md`) says `pnpm run validate` in a project created with pnpm**, and `npm run …` in one created with npm, the same package manager the install line and "Next steps" name. It used to say `npm run` in every project.
+- 2fbddd4: fix(cli,rest)!: `os package install` names its server and credential `-u/--url` and `-t/--token`, like `os package export`; the `/meta` read gate's permission refusal is localized
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) no key of any schema, export or stored row changes: a command-line option of one CLI command is renamed, which no metadata, artifact or database row records, so there is nothing for `objectstack migrate meta` to rewrite; the rename is for the person or script typing the command -->
+  
+  **BREAKING** for a script that runs `os package install` with `-r` or `--runtime`. The option is renamed with no alias, so the old spelling is refused as an unknown flag. Write `-u` / `--url` in its place:
+  
+  - FROM `os package install -r <url>` / `os package install --runtime <url>` TO `os package install -u <url>` / `os package install --url <url>`.
+  
+  The value, its default (`http://localhost:3000`) and its environment variable (`OS_RUNTIME_URL`) are unchanged. A script that sets only `OS_RUNTIME_URL` needs no change.
+  
+  `os package install` also takes `-t` / `--token` (environment variable `OS_RUNTIME_TOKEN`, new): a token the target runtime issued, sent as `Authorization: Bearer`, instead of signing in with `--email` / `--password`. Passing both is refused before any request. These are the spellings `os package export` and the other server-talking commands use.
+  
+  The scaffold's `AGENTS.md` and blank template README now spell the install command with `--url`.
+  
+  `@objectstack/rest`: an app, a dashboard or a list view a signed-in caller may not open is still refused `403 PERMISSION_DENIED`, and the sentence is now the operation catalog's `permission_denied` in the caller's locale, the sentence plugin-security's object refusals already use. Opening the Setup app without access in a Chinese console read `You do not have permission to open the 'com.objectstack.setup' app.`; it now reads 「您没有执行此操作的权限，如需访问请联系管理员。」. The sentence no longer carries the item's API name. A deployment's `errors.permission_denied` translation overrides it on the REST door, as it does for those refusals.
+- bc254be: fix(cloud-connection,cli): the install-local ledger follows `OS_HOME`, so `os dev --fresh` and a second instance under another `OS_HOME` start without an earlier run's installs
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - **Now.** With no `storageDir`, the install-local ledger (`LocalManifestSource`, and so `MarketplaceInstallLocalPlugin`) lives at `$OS_HOME/installed-packages` when `OS_HOME` is set, and at `CWD/.objectstack/installed-packages` when it is not. Before, it was always the working directory, so `os dev --fresh` (a fresh `OS_HOME` and database) rehydrated a package an earlier run installed, and so did a second instance under another `OS_HOME`.
+  - **Unchanged.** `os dev` without `OS_HOME` keeps the ledger in the project, beside its database. `os start` in project mode sets `OS_HOME` to `CWD/.objectstack`, which is the same directory as before. An explicit `storageDir` is used as given.
+  - **Existing installs.** When the ledger moved (an `OS_HOME` other than `CWD/.objectstack`) and its new directory does not exist yet, the boot copies the `.json` files of the working-directory ledger into it once, and logs a warning naming both directories. The old files are left in place and are not read again; remove them. A copy that fails is logged as an error, and the next boot tries again. Under `os dev --fresh` nothing is copied.
+  - **`os doctor`** reads the same directory the runtime does, `OS_HOME` included.
+  - **The widening.** `@objectstack/cloud-connection` exports `resolveInstalledPackagesDir({ env?, cwd? })` (returns `{ dir, legacyDir }`), `INSTALLED_PACKAGES_HOME_SUBDIR`, and `LocalManifestSource.legacyDir` / `adoptLegacyEntries()`. `os doctor` takes the ledger directory from `resolveInstalledPackagesDir`; a `@objectstack/cloud-connection` without it is reported as a reader that does not declare the ledger directory. Align the two packages' versions.
+- 8fad7b1: fix(metadata-protocol,cli): `os migrate packageless-overlays` lists a package-less view container `cannot_declare` instead of `movable`, and `--apply` no longer attempts (and fails) it on every run
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: semantic
+  
+  - **`@objectstack/metadata-protocol`: the census gains the disposition `cannot_declare`** (`PackagelessOverlayDisposition`, reachable through the exported `PackagelessOverlayCensus`). A row lands there when the schema the save door judges its body by refuses an `overrides` key on it, so the declared save the move makes could never land. Of the five overlay types the ceremony moves, that is a view container (`list` / `listViews` / `form` / `formViews`): only a single view declares an override. Before, such a row was listed `movable` and every `--apply` reported it `failed` with `Unrecognized key(s) on this view container: overrides`, leaving the row where it was. Now `migratePackagelessOverlays` does not attempt it: no outcome, no failure, no pair ensured for it.
+  - **A view container's write onto a packaged name is accepted again.** `PUT /api/v1/meta/view/<object>` with a container body (`list` / `listViews` / `form` / `formViews`) over a name one installed read-only package ships, naming no package or naming that base with `?package=<base>`, and the matching `DELETE`, answered `403 NOT_OVERRIDABLE` with a fix (a declared save into the pair) that the container schema refuses. They now succeed, as they did before the ADR-0146 D11 closes; every other shape of the five overlay types is closed exactly as before.
+  - **The two closes read the same answer.** The package-less write close (`packagelessCloseSubject`) closes only what the ceremony moves, so a container's package-less save and delete stay open, as they were before the close: they are the one door such a row keeps. The close of a write naming the read-only base (`overlayPairFixAdmits`, the "the fix can be taken" predicate both closes ask) no longer names the pair as the fix for a container body, because that fix (a declared save into the pair) cannot be taken; that write keeps the answer it had before the close.
+  - **`@objectstack/cli`: `os migrate packageless-overlays`** prints the way out for a `cannot_declare` row under "left as they are": save each of the container's views into the pair as a single view named `<object>.<view>` (one the base ships declaring `overrides: { package, basedOn }`, a new one declaring nothing), then delete the container row with a delete naming no package (naming the base, for a row bound to it). In `--json`, the row carries `disposition: "cannot_declare"` and `outcome: "left"`, and `--apply` exits 0 for it.
+- 8293c74: refactor(lint): the i18n translatable-key walk moves from the CLI into `@objectstack/lint`
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `collectExpectedEntries` — the one definition of which translation keys a stack can carry, each with the source text it translates — now lives in `@objectstack/lint` (`src/i18n-walk.ts`) and is exported from the package root with `authorWarnedTranslationGroups`, `humanizeFieldPath` and the `ExpectedEntry` / `ExpectedEntryOptions` types. It moved so a browser can run the same walk the CLI runs: Studio's translation editor builds its source-to-translation table from it. `os i18n extract` and `os lint`'s translation coverage keep reading it unchanged, through the CLI's extractor module, which keeps bundle assembly and serialization and re-exports the walk.
+  
+  - No key, no skeleton and no coverage verdict changes: the walk's code moved as is.
+  - In a browser the walk cannot read the liveness ledger from disk, so its default leaves no translation group out. That is the same set the CLI leaves out today, because the ledger warns on no translation group; a browser caller that must honour a warned group passes `warnedGroups`.
+  - `@objectstack/spec`: the `action` and `view` liveness ledgers cite the walk at its new path.
+- 6ef7f58: feat(scenarios): the deterministic scenario scorer lives in `@objectstack/scenarios` and judges capability tags, agent-action exposure, write outcomes and per-persona answers against a loaded card
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **`@objectstack/scenarios/score`** (private, unpublished): the entry the scenario runner calls. `scoreCardArtifact(card, artifact)` scores a built `dist/objectstack.json`; `gradeCardOperation(card, operationId, observation)` judges an observed write against its declared outcome; `gradeCardAnswer(card, { question, persona?, turn })` grades an agent's answer against the loader's computed truth for that persona. Each takes a card the loader returned, and the graders read the card schema's own types.
+  - **The scorer moved here from `@objectstack/cli`.** That covers the structural shape score, the artifact-to-graph reader and the Run grader, which were never released from the CLI. It now also carries:
+    - **capability-tag checks**: a closed table of nine tags, listed in the package README. A tag outside it, or a row with nothing in the card to judge, is reported `unscored` and counted nowhere;
+    - **agent-action exposure**: each declared action exists on its object, carries `ai.exposed: true` and, where the card says it asks first, `ai.requiresConfirmation: true`. A missing action fails;
+    - **a write-operation grader**: `applied`, `refused` or `pending_confirmation`. An unobserved fact fails;
+    - **per-persona Run grading**: a `withheld` truth is must-not-reveal, and an all-rows figure outside a scoped persona's rows is a leak.
+  - **`@objectstack/cli`**: `MetadataEvalCase` is now declared in `corpus.ts`, beside the golden corpus it types, and `metadata-eval.ts` re-exports it under the same name. No behaviour change, no new flag and no new package-entry export. The CLI carries no scenario code.
+  
+  No model call anywhere.
+- 1030a80: fix(metadata-protocol, cli, cloud-connection): a declared action override moved to another object is told which object the base ships the action on
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The `declared_package_ships_no_such_item` refusal (`403 NOT_OVERRIDABLE`) for a `.custom` action override whose `objectName` differs from the base action's used to say the base "ships no action named 'X'" and to "correct the name", though the name was right. It now names both objects and tells the author to keep the base action's `objectName`, at all three doors (the save and publish door, `os validate`, the managed install), from one sentence builder in `judgeOverrideWrite`. A name the base does not ship at all reads as before. The rule, code and status are unchanged.
+- 89dbc74: fix(cli): `os migrate` value walks name the columns they skip because the package that adds them is disabled
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `os migrate blank-single-values`, `blank-multi-values`, `option-codes`, `text-scalars` and `value-shapes` read each object as it is served. While a module package is disabled, the fields its `objectExtensions` add are withheld from that object (their columns and values are kept), so these runs could not read those columns and their reports read as if they had. Each report now lists every such column as `object.field (package ID)`, and the `--json` document carries the same list as `withheldColumns`. Enable the package and re-run to cover them. Nothing else changes: the runs still read and rewrite only what the served object declares.
+- 6990b0d: fix(driver-sql,cli): `os migrate plan` previews a `_id`-keyed table as apply treats it, and one refused table no longer stops `os migrate apply`
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  An existing table keyed by `_id` with no `id` column is the one shape schema sync does not adopt by adding columns: it rebuilds it while it is empty and, since #30562, refuses it while it holds rows. `os migrate plan` listed it as a harmless `add_columns` step. The plan now lists it as `apply` treats it: a `rebuild_table` entry (in place) when the table is empty, and a `refuse_table` entry when it holds rows, naming the table, the `_id` column and the row count, with the refusal's own text (`refusal`, rendered by the same renderer the sync throws through). `isRefusedSchemaWork` is exported beside `isInPlaceSchemaWork`. For a driver-sql consumer this widens the published `PendingSchemaWorkKind` / `PendingSchemaWork`: a caller of `flushDeferredSchemaDdl()` must now treat a returned `refuse_table` entry (`isRefusedSchemaWork`) as a table that was refused and left as it is, not as performed work — where that call used to throw.
+  
+  `os migrate apply` used to hand every held-back object to one sync call, so one refused table stopped the batch: the tables after it got no DDL and the list of performed work was lost with the error. The refused table is now left out of that call and reported on its own: every other table gets its DDL, the run names the refused table with the refusal text, and ends PARTIAL with exit 1 (`--json`: `refused` beside `created`, `message: "partial"`).
+- e2bcd5c: feat(objectql, cli)!: the record-currency code backfill runs one organization at a time, and the home-amount recompute takes the same organization filter
+  
+  Clause-②: yes (narrowing) — `backfillRecordCurrencyCodes` (and `os migrate record-currency-codes`) given no organization over the rows of more than one organization is refused with `400 VALIDATION_ERROR` (`field: 'organizationId'`) before any write, where it wrote the one code into every organization's codeless rows; widened beside it: the optional `organizationId` and `allOrganizations` options and the `--org` / `--all-organizations` flags, and `recomputeHomeAmounts`'s optional `organizationId` with `os migrate recompute-home-amounts --org`.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) no key of any schema is added, removed or re-shaped and no stored row is converted: an operator's run of a data command over several organizations is refused until it names its scope, which is a choice of currency per organization made by hand, not a mechanical conversion -->
+  
+  **BREAKING** for an operator who runs `os migrate record-currency-codes` (or calls `backfillRecordCurrencyCodes`) without naming an organization on a database whose rows of that object belong to more than one organization.
+  
+  - **Why (ADR-0144 Open item 13).** Each organization has its own home currency (`localization.currency`), so the one code a run writes is right for the rows of at most the organizations that use it. Before this release the run wrote it into every organization's codeless rows, silently wrong for the others.
+  - **One organization.** `--org ID` (`organizationId`) fills only that organization's rows: the walk and every write run under `{ isSystem: true, tenantId: ID }`, and the walk also filters on each row's own `organization_id`, because the system context alone narrows the driver only under a walled tenancy posture. The report counts per organization (`organizations`).
+  - **Refused, and what it says.** With neither `--org` nor `--all-organizations`, the rows are first counted read-only; when they belong to more than one organization the run (a dry run as well as `--apply`) exits 1 before any write. The refusal lists each organization's codeless row count, and under `--json` carries them in `organizations`. The code is still never derived: no organization's `localization.currency` is read to pick one (ADR-0144 D8 rule 4).
+  - **Every organization, explicitly.** `--all-organizations` (`allOrganizations: true`) writes the one code into every organization's codeless rows, as an unscoped run did before. `--org` with `--all-organizations` is a usage error; the engine refuses both options together with `400 VALIDATION_ERROR`.
+  - **Unchanged.** A database whose rows of the object belong to one organization, or name none, runs exactly as before, with the same report text.
+  - **The recompute.** `os migrate recompute-home-amounts --org ID` (`recomputeHomeAmounts`'s `organizationId`) limits the run to that organization's rows, read and written as it, and records the organization in the run's audit entry. Without it the run still covers every organization, each in its own home currency, and is never refused for that: it writes no value the operator chose. Its `code_blank` remedy now names `--org`.
+  - **Who moves, and the fix.** A script that ran the backfill once over a multi-organization database runs it once per organization with `--org ID` and the code that organization's rows are in, or adds `--all-organizations` when one code really is right for all of them.
+- 0cba0ce: feat(rest, client): a tenant-admin REST door for the record-currency code backfill
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  An organization admin with no shell on the deployment can now run the record-currency code backfill (`os migrate record-currency-codes`) over HTTP: `POST /api/v1/meta/_migrate-record-currency-codes` with `{ object, field, code, apply? }`, or `client.meta.migrateRecordCurrencyCodes(...)` from the SDK.
+  
+  - It fills the codeless rows of **the caller's current organization only**. There is no environment-wide form, and the body takes no organization: `organizationId`, `allOrganizations` or any other key outside the four is refused with `VALIDATION_ERROR` / 400. A request with no current organization is refused `403 FORBIDDEN`.
+  - It requires `setup.write` in that organization (`403 FORBIDDEN` otherwise), and it is mounted behind `metadata.endpoints.maintenance` with the other maintenance routes.
+  - Preview unless `apply` is `true`. The answer is the report the CLI prints under `--json`, and the code, field and object refusals are the CLI's.
+  - The SDK method answers `unknown`: the report's named type lives in `@objectstack/objectql`.
+  - The 409 `destructive_change` finding `currency_mode_to_record` now names this route beside the CLI command.
+  - `@objectstack/objectql` now exports `RecordCurrencyBackfillOrganization` and `RecordCurrencyBackfillOrganizationsRefusal` from its entry.
+  - A backfill walk stopped by `--max-records` no longer prints "nothing to backfill" for rows it did not examine. It says the walk is incomplete, and an unscoped run says its organization check saw only the rows examined.
+  - A backfill row whose write a sandboxed hook refused now reports the hook's own sentence, not the `hook '<name>' threw:` debug wrapper, and a crashed hook's row reports the write doors' withheld fault sentence. The operator's log line keeps the whole text.
+- da3c742: fix(runtime,cli): the dispatcher's `/meta` permission refusal applies a deployment's `errors.permission_denied` override; `os package install` says which env variables count as credentials
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - `@objectstack/runtime`: the `HttpDispatcher` meta read gate now hands the request's i18n service lookup, as `RestServer` does, so an `errors.permission_denied` override reads the same on both doors. Without an i18n service, or when it fails, the built-in sentence is served and the refusal stays a 403.
+  - `@objectstack/cli`: the `--token` conflict refusal of `os package install` now says that `OS_RUNTIME_EMAIL`/`OS_RUNTIME_PASSWORD` count as `--email`/`--password`.
+  - `@object-ui/data-objectstack`: the README and a doc comment quote the current refusal sentence. No behaviour change.
+- 1697d5c: fix(cli): `os lint`'s `naming/namespace-prefix` warns on every bare package-authored metadata name, and no longer calls the prefix optional
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Every metadata name a package authors now carries its namespace, the way object names already do: two installed packages that share a bare name such as `send_email` often resolve to only one of them, silently. `os lint` says so for every metadata type a stack can declare (flows, actions, hooks, picklists, pages, dashboards, reports, datasets, apps, email templates, webhooks, connectors, permission sets, agents, tools, skills, jobs and the rest), with the rename as the finding's `fix`:
+  
+  ```text
+  ⚠ Flow "onboard" does not carry the package namespace "crm". … rename it to "crm_onboard" …
+  ```
+  
+  It stays a warning: nothing is refused, and `os lint --strict` is the only way it fails a run.
+  
+  Not judged, because the name is judged elsewhere or derived from another item: objects (`defineStack` already refuses a bare object name), views (named for their object), docs (the doc lint's `docs/namespace-prefix`), object and picklist extensions, fields, translation bundles, `functions`, and an item that declares `overrides` (it must keep the base package's name). A name that is the namespace itself, starts with `sys_`, or starts with `<namespace>.` (the dotted capability shape, `billing.refund`) carries it already. A package that declares no `manifest.namespace` is not judged.
+  
+  `os generate` writes the names it scaffolds the same way. In a project that declares a namespace, `os g flow onboard` now writes `crm_onboard_flow`, and the same goes for actions, dashboards, apps, skills, picklists, permission sets and datasets. Before, only object names got the prefix, so a fresh scaffold drew this warning on its first lint. A name that already carries the namespace is not prefixed twice.
+  
+  The intra-package duplicate warning stays under the same rule id, for a prefixed name declared twice as well. It no longer suggests the prefixed spelling as its rename (the new finding carries that) and no longer ends with the sentence saying the prefix is an optional convention.
+- 9d313f3: fix(cli): `os lint`'s `naming/namespace-prefix` no longer asks a package to rename the `guest_portal` permission set
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The public form doors' submit context requests the permission set named exactly `guest_portal`, and the result masker resolves a set registered under that name. A package that declares it is plugging into that door. Renaming it to `<namespace>_guest_portal`, which the warning used to suggest, would leave the masker with nothing to find. `os lint` now leaves that one name alone in `permissions`. The same spelling in any other collection, or any other permission set name, is still judged.
+- 780c6c3: feat(cli): `os deploy` — one command from a local checkout to your ObjectOS Cloud environment; installs pick the organization's only environment, keep it across `os cloud login`, and refuse before any write when none resolves
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  **`os deploy`** (new). With no flags it builds the app (the same compile `os build` runs), publishes it as `<manifest.version>-dev.<YYYYMMDDHHMMSS>` (a UTC semver pre-release, so deploying again never needs a version bump and never collides with an existing version), installs exactly that version into your organization's environment, and waits until the environment serves it (it reads the control plane's served-version report for the package and, since an environment rebuilds only when it gets a request, sends the environment one on every poll). A failed local build prints its errors and exits 1 having published nothing; a build the environment reports as failed prints the environment's reason and exits 1. Flags only for the uncommon case: `--env <id>` when your account reaches several environments, `--no-wait`, `--wait-timeout <seconds>` (default 600: a failing build is reported only after three failed rounds in a row). Against a control plane that does not yet report which version an environment serves, the command says so and does not claim the version is live.
+  
+  **`os package publish --install`** keeps its meaning (a release version, the manifest's own), and now resolves its environment like `os deploy`: `--env` / `$OS_ENVIRONMENT_ID`, then the environment `os environments switch` recorded for this control plane, then the organization's only environment, asked of the control plane and printed. With none, several, or an unreadable list it exits 1 **before registering the package or publishing anything**, naming how to pass one. It used to print "Skipping auto-install", publish anyway and exit 0.
+  
+  **`os cloud login`** no longer drops the active environment: re-logging in to the same control plane as the same account keeps `activeEnvironmentId` in `~/.objectstack/cloud.json`. A different control plane or a different account still starts without one.
+  
+  **`os dev`** offers the deploy on a key once the local server is up: press `d` to run `os deploy` in the same terminal; when not logged in to ObjectOS Cloud, the same key logs in first. There is no deploy on save. **`os build`** ends with the next step (`os deploy`), and bare `os` lists the everyday commands first. New projects from `create-objectstack` (and `os init`'s app template) ship `npm run deploy`.
+- 8847e09: feat: the package upgrade plan — one comparison of an installed package version with the incoming one, a dry run of the install door, and `os package install --dry-run`
+  
+  Clause-②: yes (widening) — new exports from `@objectstack/metadata-core` (`comparePackageVersions` and its types, `typeChangeCategory`, `isEmptyPackageUpgradePlan`, `upgradePlanSeedDatasets`, `seedModeOverwritesMatchedRows`), a new `planUpgrade` method on objectql's `manifest` service, a new `dryRun` key on the `POST /api/v1/marketplace/install-local` body, a new `--dry-run` flag on `os package install`, and new `os diff` entries (declared and suspected renames, seed datasets). Nothing a request did before answers differently.
+  Metadata-protocol: none
+  
+  **One comparison.** `comparePackageVersions(installed, incoming)` (`@objectstack/metadata-core`) lists what an upgrade from one version of a package to the next changes: objects and fields added and removed; type changes, each with the drift category `schema-drift.ts` uses (`safe`, `needs_confirm`, `destructive`); renames a field declares with `renamedFrom`; suspected renames, where one object loses a stored field and gains one with nothing linking them; and seed datasets added, removed and changed, each with its mode. A declared rename whose type changes is also listed as a type change. It is pure and decides nothing.
+  
+  **What the environment knows.** The `manifest` service's `planUpgrade(installed, incoming)` (`@objectstack/objectql`) answers the comparison with two readings of the installed data: the rows holding a value in each column the upgrade removes, renames or retypes (and the rows of each object it removes), and, for each `upsert` or `update` dataset both versions declare, the rows a customer edited that the seed replay would write over. A reading that fails is `null`, never `0`.
+  
+  **A dry run.** `POST /api/v1/marketplace/install-local` with `dryRun: true` answers `200` with the plan of the installed version (its ledger entry) against the one sent, and installs and writes nothing. A dry run of an `unmanaged` install or of a customization pair is refused `400 INVALID_REQUEST`, as is a `dryRun` that is not a boolean. `os package install … --dry-run` sends it and prints the plan. A runtime that predates the key ignores it and installs; the command then says so and exits 1.
+  
+  **`os diff`** reads its object and field changes from the same comparison, so the CLI and an install cannot disagree. Its output for every shape it reported before is unchanged. New: a field renamed with `renamedFrom` prints as one rename instead of a removal and an addition (`renamedFrom` is new in this release), a suspected rename prints beside its removal and addition, and seed datasets print under `data`.
+- d5fd948: feat(cli): `os deploy` and the `d` key in `os dev` deploy to a self-hosted runtime (Docker Community or Enterprise) that `os environments use-runtime` remembered; `os package install` falls back to it
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  **`os environments use-runtime <url> --token <key>`** (new) remembers a self-hosted runtime and an API key it issued, and makes it the deploy target. The key is tried on the runtime's install-local door first (`--no-verify` skips that); a rejected key, a runtime that does not serve install-local, or one that cannot be reached is refused and nothing is recorded. Both are stored in `~/.objectstack/cloud.json` (0600) as their own record beside the cloud session: `os cloud login` and `os cloud logout` keep it, and the key is only ever sent to that url. `os environments switch <id>` makes ObjectOS Cloud the deploy target again (the runtime stays remembered); `os environments use-runtime --forget` drops it.
+  
+  **`os deploy`** with a runtime as the active target (and no `--env`) builds the app, asks the runtime's install-local dry run and prints the upgrade plan (declared `renamedFrom` renames included), then installs the build inline — no catalog publish and no `-dev` version — and reports it live from the runtime's answer. A refusal from the dry run or the install stops the deploy with exit 1 and the runtime's sentence; a runtime that does not serve install-local (one booted from a composed artifact) or that predates the dry run is named, with what to do, exit 1. `--confirm-access-upgrade <finding-set>` passes the access-upgrade confirmation through (and is refused when the target is ObjectOS Cloud). **The `d` key** names the remembered runtime and deploys there without asking for a cloud login.
+  
+  **`os package install`** without `-u` / `$OS_RUNTIME_URL` installs into the remembered runtime, and without `-t` / `--email` uses its key — only when the url is that runtime's. With nothing remembered the default stays `http://localhost:3000`. Its 404 answer now names the composed-artifact case and what to do.
+- 21c1f74: feat(cli): `os mcp connect` registers your environment's MCP server with Claude Code in one command
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `os mcp connect` finds the environment `os deploy` deploys to (`--env`, then the active environment for this control plane, then your organization's only one; several with no `--env` is refused, as deploy refuses) and runs `claude mcp add --transport http NAME https://ENV-HOST/api/v1/mcp`. The server is named after the environment (its slug, else its display name, else its id), so several environments can be registered side by side; `--name` overrides it.
+  
+  - `--print` prints the endpoint and the `claude mcp add` line and runs nothing. For any other MCP client, add that endpoint as a remote HTTP MCP server in the client's own settings.
+  - `--url http://localhost:3000` connects a self-hosted or local server instead, named `objectstack` like the `os dev` banner's Connect row. The banner now prints its line through the same builder, so the two stay one spelling.
+  - No token is stored or handed to the client. Claude Code runs the environment's own OAuth: run `/mcp` in Claude Code and the browser shows the environment's sign-in and consent. The command prints where to revoke that grant (Account → Connect an AI Assistant in the environment's console).
+- 0f920b9: fix(cli): i18n coverage reads a two-script inline label map the way the renderer does
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  For an inline locale map that carries both Chinese scripts, the text the coverage report reads for a reader locale now equals what the renderer shows: a `zh-Hant` reader of `{ en, 'zh-CN', 'zh-TW' }` is read from `zh-TW`, not from the first `zh-*` key. Every other map and language reads as before.
+- 40ecdf9: feat(cli): `createConsoleStaticPlugin` takes a `cloudflareWebAnalytics: { token }` option that adds the Cloudflare Web Analytics beacon to the console document
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - **The option.** `createConsoleStaticPlugin(distPath, { cloudflareWebAnalytics: { token } })`, also on the published `@objectstack/cli/console` subpath. The document that plugin serves then carries a deferred `script` tag for `https://static.cloudflareinsights.com/beacon.min.js` with the token as its `data-cf-beacon` JSON, stamped with the document's nonce like every other script on the page, and its `content-security-policy` adds `https://cloudflareinsights.com`, where the beacon reports page views, to `connect-src`. `script-src` is unchanged: the nonce admits the beacon tag, and no host is added.
+  - **Per mount.** It is an option, not an env var, so a host that mounts the Console more than once (a control plane and its tenant planes) passes it to the one mount it means to count.
+  - **Refused at boot.** A token that is not 32 hexadecimal digits (or a missing one) throws when the plugin starts, and the message gives the value's length and kind, not the value.
+  - **Unchanged without it.** Left out, the document and its policy are byte-identical to before.
+- 293a85b: feat(cli): `os serve` seals secrets with the crypto provider a plugin registers, so a KMS- or Vault-backed provider can hold the keys
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  A plugin supplies the host's secret crypto provider by registering an `ICryptoProvider` as the kernel service `crypto-provider` — `CRYPTO_PROVIDER_SERVICE`, new in `@objectstack/types` — with `ctx.registerService` in its `init()`, and declaring it in `providesServices`. `os serve` then hands that one provider to everything that seals a `sys_secret` row: the data engine (secret fields), the datasource secret binder (datasource credentials) and the default settings service (encrypted settings). Before, `os serve` built `LocalCryptoProvider` itself after every plugin hook and overwrote whatever a plugin had set.
+  
+  Without a registration nothing changes: the host keeps `LocalCryptoProvider`, keyed off `OS_SECRET_KEY` or the persisted key file exactly as before, and a production boot without a stable key still refuses at `kernel:ready` with the same message. The one difference is that the default settings service now shares that local provider instead of building a second one from the same key source; what either sealed, the other opens.
+  
+  The provider holds every secret's key, so the boot refuses rather than guess:
+  
+  - two plugins that both declare `providesServices: ['crypto-provider']` refuse before either initializes, both named (an undeclared second `registerService` is refused by the kernel, naming the service);
+  - a provider registered after plugin init, or the registered one replaced, refuses once the boot is up;
+  - a value registered under the name that is not an `ICryptoProvider` refuses, naming the missing methods;
+  - a secret sealed or opened while plugins are still initializing is refused, never sealed by a provider the boot has not chosen yet.
+  
+  No refusal prints a registered value.
+- 51992df: fix(cli): i18n coverage reports a blank inline-label entry the renderer shows as a gap
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  An inline locale map with an empty entry that the renderer reaches for a locale no longer counts that locale as translated. `{ 'zh-CN': '成员', 'zh-TW': '' }` was reported covered for `zh-Hant` by the Simplified text, while the console shows the blank Traditional entry; it is now a `missing translation` finding, as an empty bundle value already is. Readers that never reach the blank entry are covered as before.
+- fec1f58: fix(cli): a connection label printed by the CLI removes a password or a credential query pair wherever the URL rules read one
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **One credential grammar.** The database label that `os dev`, `os start` and `os serve` print, and the migrate and resync confirms, now remove URL credentials through the same shared function the datasource read door applies (`redactUrlCredentials` from `@objectstack/spec/data`): the userinfo password, and every credential query pair judged by the shared query-pair judge and its one list of names. Wherever those rules read a credential, on every path the label takes, the label drops it. When the shared rules read more, the label follows with no edit of its own.
+  - **Unchanged.** Every value the shared rules read no credential in prints exactly as before: `postgres://`, `libsql://` and `file:` values, values with no userinfo, a username-only userinfo, and everything the URL parser already cleaned.
+- 66bf5b4: fix(cli): `os diff` now says what a replay does to a seed dataset in mode `insert`, as it already did for `replace`: a replay inserts its records again, and a row the database refuses is that row's error. The loader's `insert` arm inserts every record without looking for a match, so the plan no longer reads an `insert` dataset as harmless.
+  
+  Clause-②: no
+  Metadata-protocol: none
+- 6ffe37e: docs(spec,cli): the seed mode text now says what the loader does. `replace` deletes nothing: it inserts every record with no match, for a table the caller cleared, and `insert` inserts every record again on each replay. The `mode` docstring and `.describe()` name the landed-keys rule: the loads AppPlugin runs for an organization (the single-tenant boot seed, the `seed-replayer` replay, the dev hot reload) do not insert again an `ignore` or `upsert` row that landed once and was later deleted, a seed publish or package install keeps no such record, and `seed-replayer(organizationId, { reseed: true })` inserts every missing row. `os diff`'s note on a `replace` dataset no longer says a replay deletes every row of the object.
+  
+  Clause-②: no
+  Metadata-protocol: none
+- Updated dependencies [31fe289]
+- Updated dependencies [a35fc66]
+- Updated dependencies [eb96480]
+- Updated dependencies [8aa2e91]
+- Updated dependencies [c17719d]
+- Updated dependencies [de24d17]
+- Updated dependencies [b90a6f7]
+- Updated dependencies [486b0a9]
+- Updated dependencies [9ed2ee1]
+- Updated dependencies [769adff]
+- Updated dependencies [13c0c5b]
+- Updated dependencies [fe835b4]
+- Updated dependencies [e8dc483]
+- Updated dependencies [82142ed]
+- Updated dependencies [bcdb1db]
+- Updated dependencies [9ebca94]
+- Updated dependencies [3b8c724]
+- Updated dependencies [5cdaddb]
+- Updated dependencies [75bbebb]
+- Updated dependencies [509c40a]
+- Updated dependencies [88cd0ab]
+- Updated dependencies [c23501b]
+- Updated dependencies [140d8ce]
+- Updated dependencies [699ebd8]
+- Updated dependencies [46d2b65]
+- Updated dependencies [5f47410]
+- Updated dependencies [4c2cd29]
+- Updated dependencies [4be8a2e]
+- Updated dependencies [471add3]
+- Updated dependencies [314ad95]
+- Updated dependencies [b5eb61d]
+- Updated dependencies [771b2db]
+- Updated dependencies [97e4249]
+- Updated dependencies [9037b13]
+- Updated dependencies [8d5aab3]
+- Updated dependencies [665db00]
+- Updated dependencies [e3b56b2]
+- Updated dependencies [18112bf]
+- Updated dependencies [a52761f]
+- Updated dependencies [e8afd1e]
+- Updated dependencies [bd65cb6]
+- Updated dependencies [cd5f554]
+- Updated dependencies [f19fbb8]
+- Updated dependencies [217ba78]
+- Updated dependencies [cde492d]
+- Updated dependencies [07685ae]
+- Updated dependencies [eee4149]
+- Updated dependencies [85a8fa0]
+- Updated dependencies [1756666]
+- Updated dependencies [f9e5bef]
+- Updated dependencies [63b86b3]
+- Updated dependencies [0f3ee58]
+- Updated dependencies [f3a52d3]
+- Updated dependencies [d59a1eb]
+- Updated dependencies [13aa6a3]
+- Updated dependencies [af3451b]
+- Updated dependencies [ddcdc80]
+- Updated dependencies [3a27208]
+- Updated dependencies [29cbfcc]
+- Updated dependencies [cfb602c]
+- Updated dependencies [171b6dd]
+- Updated dependencies [f6f663a]
+- Updated dependencies [343ddb2]
+- Updated dependencies [0c666c3]
+- Updated dependencies [f672e0d]
+- Updated dependencies [38717d3]
+- Updated dependencies [bfbdeec]
+- Updated dependencies [43faa22]
+- Updated dependencies [4adc890]
+- Updated dependencies [fdad178]
+- Updated dependencies [15f808a]
+- Updated dependencies [bcdf8d3]
+- Updated dependencies [ac890f5]
+- Updated dependencies [59bcd22]
+- Updated dependencies [aa57c76]
+- Updated dependencies [fc869c2]
+- Updated dependencies [fef212b]
+- Updated dependencies [159930a]
+- Updated dependencies [c045c34]
+- Updated dependencies [dc51811]
+- Updated dependencies [c133cfe]
+- Updated dependencies [b77c160]
+- Updated dependencies [afc761c]
+- Updated dependencies [09720e2]
+- Updated dependencies [a545a04]
+- Updated dependencies [8fed00f]
+- Updated dependencies [8fed00f]
+- Updated dependencies [8fed00f]
+- Updated dependencies [1c53783]
+- Updated dependencies [a77c2e9]
+- Updated dependencies [04f36b6]
+- Updated dependencies [959c26b]
+- Updated dependencies [25fea77]
+- Updated dependencies [a98e5cd]
+- Updated dependencies [06cccd3]
+- Updated dependencies [2fbddd4]
+- Updated dependencies [bd81a7a]
+- Updated dependencies [26f5719]
+- Updated dependencies [86ae2ca]
+- Updated dependencies [0837fdc]
+- Updated dependencies [3da9a4c]
+- Updated dependencies [3da9a4c]
+- Updated dependencies [3da9a4c]
+- Updated dependencies [4be9734]
+- Updated dependencies [4be9734]
+- Updated dependencies [1a3ea0c]
+- Updated dependencies [bb86ff9]
+- Updated dependencies [8f05e61]
+- Updated dependencies [9afcd6a]
+- Updated dependencies [870ebce]
+- Updated dependencies [d1d90b7]
+- Updated dependencies [977be38]
+- Updated dependencies [2046d21]
+- Updated dependencies [4fae0be]
+- Updated dependencies [740edc5]
+- Updated dependencies [05a30e6]
+- Updated dependencies [778aedf]
+- Updated dependencies [71318af]
+- Updated dependencies [db04e5c]
+- Updated dependencies [fd749a4]
+- Updated dependencies [a26abbc]
+- Updated dependencies [bc254be]
+- Updated dependencies [8eca18f]
+- Updated dependencies [8b117c0]
+- Updated dependencies [d9d42d4]
+- Updated dependencies [9d939c5]
+- Updated dependencies [25e1c1a]
+- Updated dependencies [67d5d53]
+- Updated dependencies [47226e6]
+- Updated dependencies [a545a04]
+- Updated dependencies [c7d1367]
+- Updated dependencies [f5aaa0b]
+- Updated dependencies [8fad7b1]
+- Updated dependencies [0005fec]
+- Updated dependencies [2d6402c]
+- Updated dependencies [8589756]
+- Updated dependencies [77c203a]
+- Updated dependencies [54b491a]
+- Updated dependencies [8293c74]
+- Updated dependencies [bee9836]
+- Updated dependencies [a93ef3e]
+- Updated dependencies [0e4dfbe]
+- Updated dependencies [ad0fbfd]
+- Updated dependencies [8cc709d]
+- Updated dependencies [b5765be]
+- Updated dependencies [8fa738f]
+- Updated dependencies [5a878a3]
+- Updated dependencies [6e8ec73]
+- Updated dependencies [4e8bbbf]
+- Updated dependencies [60fe44f]
+- Updated dependencies [22f0d65]
+- Updated dependencies [fabd259]
+- Updated dependencies [29702d5]
+- Updated dependencies [1aeeafd]
+- Updated dependencies [a839020]
+- Updated dependencies [a7b8876]
+- Updated dependencies [26c2efd]
+- Updated dependencies [f7afab8]
+- Updated dependencies [7b80724]
+- Updated dependencies [1de7def]
+- Updated dependencies [e760204]
+- Updated dependencies [2445cb4]
+- Updated dependencies [fb1ab89]
+- Updated dependencies [6c4c43a]
+- Updated dependencies [455b4f0]
+- Updated dependencies [4dde0ae]
+- Updated dependencies [94cef75]
+- Updated dependencies [e8e924f]
+- Updated dependencies [590724f]
+- Updated dependencies [35cd64c]
+- Updated dependencies [38d416f]
+- Updated dependencies [d2e2f6f]
+- Updated dependencies [d5f3bc5]
+- Updated dependencies [ae5bd5b]
+- Updated dependencies [e3948ae]
+- Updated dependencies [b55d6ab]
+- Updated dependencies [1c5cee6]
+- Updated dependencies [aad1603]
+- Updated dependencies [7d11067]
+- Updated dependencies [135c2fb]
+- Updated dependencies [898145b]
+- Updated dependencies [482e089]
+- Updated dependencies [0e4747a]
+- Updated dependencies [4bf6e8f]
+- Updated dependencies [a0c68ae]
+- Updated dependencies [ede9e6b]
+- Updated dependencies [eb68b98]
+- Updated dependencies [a11ef71]
+- Updated dependencies [7c164cf]
+- Updated dependencies [ae82d05]
+- Updated dependencies [c5101a0]
+- Updated dependencies [e00bcc6]
+- Updated dependencies [f41ddbd]
+- Updated dependencies [561d532]
+- Updated dependencies [08e0247]
+- Updated dependencies [6701c08]
+- Updated dependencies [ca37605]
+- Updated dependencies [cabdfe8]
+- Updated dependencies [ab159a9]
+- Updated dependencies [0e88208]
+- Updated dependencies [33043bd]
+- Updated dependencies [66a8822]
+- Updated dependencies [d8ed2e1]
+- Updated dependencies [7145bf3]
+- Updated dependencies [739c972]
+- Updated dependencies [55d9dd4]
+- Updated dependencies [af8aab1]
+- Updated dependencies [63de248]
+- Updated dependencies [8d7f906]
+- Updated dependencies [c35fed1]
+- Updated dependencies [a59d00a]
+- Updated dependencies [a2437b5]
+- Updated dependencies [4bf9a2d]
+- Updated dependencies [0c9aa82]
+- Updated dependencies [e9731fc]
+- Updated dependencies [ea41c49]
+- Updated dependencies [a91ad42]
+- Updated dependencies [49c8568]
+- Updated dependencies [4564d6f]
+- Updated dependencies [f2ea193]
+- Updated dependencies [ee874b1]
+- Updated dependencies [1030a80]
+- Updated dependencies [deabe3b]
+- Updated dependencies [55cd927]
+- Updated dependencies [55a00ba]
+- Updated dependencies [6990b0d]
+- Updated dependencies [badf24d]
+- Updated dependencies [5268f50]
+- Updated dependencies [a255a62]
+- Updated dependencies [a30c4f4]
+- Updated dependencies [e2bcd5c]
+- Updated dependencies [0cba0ce]
+- Updated dependencies [c893b3d]
+- Updated dependencies [677d542]
+- Updated dependencies [adf6ee0]
+- Updated dependencies [9bdeed2]
+- Updated dependencies [b2a2b76]
+- Updated dependencies [9052337]
+- Updated dependencies [449c858]
+- Updated dependencies [3479c33]
+- Updated dependencies [000a4c0]
+- Updated dependencies [7569fb5]
+- Updated dependencies [b618224]
+- Updated dependencies [bd5a443]
+- Updated dependencies [f4d9c09]
+- Updated dependencies [da3c742]
+- Updated dependencies [2a6a28d]
+- Updated dependencies [902f162]
+- Updated dependencies [c77dd17]
+- Updated dependencies [555eb1b]
+- Updated dependencies [ebe0a98]
+- Updated dependencies [87fc795]
+- Updated dependencies [60dac8b]
+- Updated dependencies [9038187]
+- Updated dependencies [780c6c3]
+- Updated dependencies [f108e6d]
+- Updated dependencies [8847e09]
+- Updated dependencies [5cb7d7e]
+- Updated dependencies [704efef]
+- Updated dependencies [78eb352]
+- Updated dependencies [2ce2646]
+- Updated dependencies [468e0c1]
+- Updated dependencies [6106b73]
+- Updated dependencies [0373715]
+- Updated dependencies [0f920b9]
+- Updated dependencies [6bd00d2]
+- Updated dependencies [6bd00d2]
+- Updated dependencies [6bd00d2]
+- Updated dependencies [b5696b4]
+- Updated dependencies [616311c]
+- Updated dependencies [256a4b7]
+- Updated dependencies [33bc8ae]
+- Updated dependencies [293a85b]
+- Updated dependencies [022b4e7]
+- Updated dependencies [41dc302]
+- Updated dependencies [d463b99]
+- Updated dependencies [d9f8f7f]
+- Updated dependencies [30002df]
+- Updated dependencies [79a0d30]
+- Updated dependencies [4c31821]
+- Updated dependencies [6a01718]
+- Updated dependencies [a1afbb9]
+- Updated dependencies [150f740]
+- Updated dependencies [42eb126]
+- Updated dependencies [e11a575]
+- Updated dependencies [8cf1fd0]
+- Updated dependencies [4bf30da]
+- Updated dependencies [9f61e06]
+- Updated dependencies [98583cd]
+- Updated dependencies [cadd6aa]
+- Updated dependencies [a5cb4f1]
+- Updated dependencies [3c1eb63]
+- Updated dependencies [d57be87]
+- Updated dependencies [2d04cd2]
+- Updated dependencies [b58beb8]
+- Updated dependencies [5d4f2aa]
+- Updated dependencies [474c030]
+- Updated dependencies [f4cd4ec]
+- Updated dependencies [b3d2f4b]
+- Updated dependencies [70981e6]
+- Updated dependencies [85c7374]
+- Updated dependencies [dcb5fb3]
+- Updated dependencies [eca7cd2]
+- Updated dependencies [cf4b9bf]
+- Updated dependencies [614e831]
+- Updated dependencies [adab62a]
+- Updated dependencies [42e1211]
+- Updated dependencies [7193160]
+- Updated dependencies [ea757ff]
+- Updated dependencies [e1dac19]
+- Updated dependencies [24bc259]
+- Updated dependencies [56baf78]
+- Updated dependencies [3299873]
+- Updated dependencies [72d7db0]
+- Updated dependencies [d0da880]
+- Updated dependencies [7b2bb66]
+- Updated dependencies [30dcd8a]
+- Updated dependencies [c92b887]
+- Updated dependencies [713beba]
+- Updated dependencies [13227b5]
+- Updated dependencies [a794e32]
+- Updated dependencies [21510bb]
+- Updated dependencies [d7c0389]
+- Updated dependencies [8304b08]
+- Updated dependencies [6dd2ca5]
+- Updated dependencies [917f024]
+- Updated dependencies [0fd363d]
+- Updated dependencies [5210acf]
+- Updated dependencies [d6b88f1]
+- Updated dependencies [4123865]
+- Updated dependencies [bdbaf80]
+- Updated dependencies [a7293f7]
+- Updated dependencies [6ffe37e]
+- Updated dependencies [59e6463]
+- Updated dependencies [cad764d]
+- Updated dependencies [63a470a]
+- Updated dependencies [4851668]
+- Updated dependencies [adb2b89]
+  - @objectstack/objectql@18.4.0
+  - @objectstack/service-analytics@18.4.0
+  - @objectstack/plugin-security@18.4.0
+  - @objectstack/verify@18.4.0
+  - @objectstack/service-push@18.4.0
+  - @objectstack/service-messaging@18.4.0
+  - @objectstack/spec@18.4.0
+  - @objectstack/rest@18.4.0
+  - @objectstack/runtime@18.4.0
+  - @objectstack/metadata-protocol@18.4.0
+  - @objectstack/client@18.4.0
+  - @objectstack/metadata-core@18.4.0
+  - @objectstack/lint@18.4.0
+  - @objectstack/service-automation@18.4.0
+  - @objectstack/service-datasource@18.4.0
+  - @objectstack/cloud-connection@18.4.0
+  - @objectstack/plugin-approvals@18.4.0
+  - @objectstack/plugin-sharing@18.4.0
+  - @objectstack/core@18.4.0
+  - @objectstack/plugin-email@18.4.0
+  - @objectstack/plugin-auth@18.4.0
+  - @objectstack/mcp@18.4.0
+  - @objectstack/formula@18.4.0
+  - @objectstack/platform-objects@18.4.0
+  - @objectstack/plugin-audit@18.4.0
+  - @objectstack/service-queue@18.4.0
+  - @objectstack/service-settings@18.4.0
+  - @objectstack/trigger-api@18.4.0
+  - create-objectstack@18.4.0
+  - @objectstack/trigger-record-change@18.4.0
+  - @objectstack/service-storage@18.4.0
+  - @objectstack/plugin-hono-server@18.4.0
+  - @objectstack/plugin-webhooks@18.4.0
+  - @objectstack/service-mailbox@18.4.0
+  - @objectstack/service-realtime@18.4.0
+  - @objectstack/driver-sql@18.4.0
+  - @objectstack/service-sms@18.4.0
+  - @objectstack/types@18.4.0
+  - @objectstack/driver-turso@18.4.0
+  - @objectstack/driver-mongodb@18.4.0
+  - @objectstack/plugin-pinyin-search@18.4.0
+  - @objectstack/service-package@18.4.0
+  - @objectstack/account@18.4.0
+  - @objectstack/setup@18.4.0
+  - @objectstack/driver-memory@18.4.0
+  - @objectstack/driver-sqlite-wasm@18.4.0
+  - @objectstack/metadata@18.4.0
+  - @objectstack/observability@18.4.0
+  - @objectstack/service-cache@18.4.0
+  - @objectstack/service-job@18.4.0
+  - @objectstack/trigger-schedule@18.4.0
+  - @objectstack/console@18.4.0
+
 ## 18.3.0
 
 ### Minor Changes

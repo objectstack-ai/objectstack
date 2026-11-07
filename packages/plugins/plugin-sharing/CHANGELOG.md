@@ -1,5 +1,282 @@
 # @objectstack/plugin-sharing
 
+## 18.4.0
+
+### Minor Changes
+
+- ac890f5: feat(objectql,plugin-sharing): an organization authors its own assignment rules in Setup, as `sys_assignment_rule` records
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  Skills-docs: follow-up owed — content/docs/automation/queues-and-assignment-rules.mdx, skills/objectstack-automation/SKILL.md
+  
+  Until now only a package could declare an assignment rule, so routing new records differently meant a package release. An organization can now write its own rules in Setup (Access Control → Assignment Rules), on the same two-source model sharing rules and queues already follow: the rules packages declare keep working, and the organization's own rules sit beside them.
+  
+  - **`@objectstack/plugin-sharing`**: a new object, `sys_assignment_rule`. One row is one rule: when a new record of the chosen object matches the condition (a CEL expression over `record`, empty for every record), it goes to a queue or to one person, and a queue target may pick a member by `round_robin` or `least_loaded` (which needs its open-work expression, `load`). Each row belongs to one organization (`organization_id` is required). The table's save guard refuses, naming each field at fault: a name that is not snake_case or that a package rule already holds (one name means one rule); an object that does not exist or whose records have no owner; an entry shape the stack schema refuses for a declared rule; a condition or open-work expression the engine cannot compile; a person who is not an active member of the organization; a rule that would land in no organization. A boot report logs, at `error`, an organization's rule whose name a later-installed package now declares. Setup gains an "Assignment Rules" entry beside Queues.
+  - **`@objectstack/objectql`**: the engine evaluates an object's organization rules first, ascending by `sort_order` and then by name, and the rules packages declare as the fallback; the first match decides. A user target, from either source, now owns the record only while the user is an active member of the record's organization and is not banned. One that no longer resolves leaves the record ownerless, the way a queue that no longer resolves does, and is logged once; the insert is never refused. When an organization's rules cannot be read, its new records are written as they stood rather than routed by the package rules its own would have overtaken. New exports for the save guard: `ASSIGNMENT_RULE_OBJECT`, `assignmentExpressionRefusals`, `organizationMemberStanding`.
+  - **`@objectstack/spec`**: `PLATFORM_PROVIDED_OBJECT_NAMES` lists `sys_assignment_rule` under `plugin-sharing`, and the `AssignmentRuleSchema` documentation says how the two sources combine. No key, shape or validation changes.
+  - **`@objectstack/platform-objects`**: the Setup app labels the new "Assignment Rules" navigation entry in English, Chinese, Japanese and Spanish.
+  - **`@objectstack/cli`**: the organization-ownership inventory lists `sys_assignment_rule`, so `os migrate organization-ownership` plans it instead of refusing it as an uninventoried platform table.
+  
+  Upgrading: a package rule whose entry names a user id (the `assignment-rule-user-target` lint warning) stops assigning in an organization where that user is not a member; the engine logs the lapse once per rule, user and organization. Route such a rule to a queue whose members are positions.
+
+### Patch Changes
+
+- 13c0c5b: fix(plugin-approvals)!: an approval node refuses to open when a team or position approver's directory read fails, or a queue approver's expansion rejects, and the ownership-queue reads page to completion
+  
+  Clause-②: yes (narrowing) — an approval node no longer opens when a `team` or `position` approver (static, or an `expression` approver with `resolveAs` `team` / `position`) cannot be expanded because a directory read or the cross-organization read filter failed, or when a `queue` approver's expansion rejects. Under every `onEmptyApprovers` policy, the `fallbackApprovers` slate included, it now fails the node with a retryable `APPROVER_DIRECTORY_UNREADABLE:` error naming the read, where it used to open on the rest of the slate, on the fallback slate or on the administrators, or auto-approve. The registered ownership-queue service does not reject yet: a failed member read inside it still answers nobody until #29604 part 2 (#30251), so a `queue` approver refuses here only when `expandMembers` itself rejects. Every other input answers as before.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped: the approval node config, the approver types and the ownership-queue contract keep their shapes. What moves is the answer a node gives while a directory table cannot be read, and nothing at rest records that answer, so there is nothing for a migration to rewrite. -->
+  
+  **BREAKING** accept-set narrowing at the approval node (`@objectstack/plugin-approvals`): a failed directory read behind a `team` or `position` approver, or a `queue` approver whose expansion rejects, refuses the node instead of opening it on a slate that is missing people (ADR-0142 D6 as amended, ruling record 6599731698 on #29604).
+  
+  - **Before.** A `team` or `position` approver whose `sys_team_member`, `sys_user_position` or `sys_member` read failed kept its `type:value` literal slot, which nobody can act on, and logged the failure. A `queue` approver whose expansion threw answered "expanded to nobody" and added no slot. Either way the node went on as if those people did not exist: beside other approvers it opened on them alone, and on an otherwise empty slate the node's `onEmptyApprovers` policy acted, opening on the `fallbackApprovers` or the organization's administrators, or auto-approving.
+  - **Now.** The node does not open and writes no request, approver or action row. It fails with an `ApproverDirectoryUnreadableError` whose message starts `APPROVER_DIRECTORY_UNREADABLE:`, names the approver, the organization and the read that failed (a failure of the cross-organization read filter is named as that filter's read, on a static approver and on an `expression` one alike), and is retryable: the flow node's failure is a runtime one, so the run can be resumed once the directory can be read. A `fallbackApprovers` slate whose own `team` or `position` read fails refuses the same way. `department` / `business_unit`, `org_membership_level` and `manager` approvers are not named by the ruling and answer exactly as before.
+  - **Unchanged.** A decision on a request opened before the approver snapshot existed still re-reads its slate on the old path, which keeps the literal slot on a failed read, because the decision has already been recorded when that read happens.
+  - **Not yet.** The ownership-queue service shipped in `@objectstack/plugin-sharing` answers a failed `sys_queue` / `sys_queue_member`, team or position read with nobody (logged once) rather than rejecting, so a `queue` approver backed by it still adds no slot on such a failure. Its refusal arrives with #29604 part 2, once the contract can carry it (#30251).
+  
+  `@objectstack/plugin-sharing`: the ownership-queue service reads its `sys_queue` and `sys_queue_member` rows by id, page after page, to the end, where it read one page of 10,000 rows and answered on it. A queue's 10,001st member, an organization's 10,001st queue and the queues naming a recipient past that bound are now found. A read that fails partway answers as a failed read did before (that read contributes nobody, logged once, with the read's reason and without the walk's own "refuses instead" clause), never with the pages it had read.
+- fe835b4: fix(plugin-sharing)!: the ownership-queue service refuses a failed member read when the caller asks, and the approver slate and the sharing-recipient grant recompute ask
+  
+  Clause-②: yes (narrowing) — `expandMembers` and `isMember` of the registered ownership-queue service, called with `onFailedRead: 'refuse'`, now reject when a read behind the queue fails, where they answered nobody. The approver slate asks for that answer, so an approval node whose `queue` approver cannot be read refuses to open under every `onEmptyApprovers` policy, where it opened on the rest of the slate, on the fallback slate or on the administrators, or auto-approved. The sharing-rule recompute asks for it too, so a whole-rule pass (`evaluateRule`, the REST evaluate endpoint, the boot backfill), the recipient-axis revoke and the per-user pass on a `queue`-recipient rule reject on such a failure, where they completed by revoking the grants of the members who could not be read. Every call without the option, and every read that succeeds, answers as before.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped: the ownership-queue contract's `onFailedRead` option already exists, and the approval node config and the sharing rule keep their shapes. What moves is the answer two consumers get while a membership table cannot be read, and nothing at rest records that answer, so there is nothing for a migration to rewrite. -->
+  
+  **BREAKING** accept-set narrowing at the ownership-queue service's `'refuse'` answer and at its two recompute consumers (`@objectstack/plugin-sharing`, `@objectstack/plugin-approvals`): an empty expansion is a fact, a failed read is a fault (ADR-0142 D2 as amended), and the approver slate (D6) and the sharing-recipient grant recompute (D7) now get the fault instead of "nobody".
+  
+  - **The service.** `OwnershipQueueService.expandMembers(name, org, { onFailedRead: 'refuse' })` and `isMember(user, name, org, { onFailedRead: 'refuse' })` reject when the queue's `sys_queue` row, its `sys_queue_member` rows, or a member table one of its specifications reads (`sys_team_member`, `sys_user_position`, `sys_member`, `sys_business_unit_member`, `sys_business_unit`) cannot be read, or a paged read cannot vouch for completion. The rejection's message starts `[queue] queue '<name>' in organization '<org>' does not answer its members, because a read behind it failed:` and names that read; the read's own error rides along as `cause`. It never answers `[]`, a partial set or `false` instead. `isMember` still answers `true` when a read that succeeded reaches the user, and answers `false` only when every read behind it succeeded. An empty queue is still `[]`, and a name that resolves nowhere is still `[]` / `false`.
+  - **Unchanged: the default.** Without the option (`onFailedRead: 'nobody'`), a failed read still contributes nobody, logged once. The sitting-record access path (`queuesOf`), the claim admission and the assignment pool take that answer, so they deny on a failed read exactly as before. A failed read of the activation ledger (`sys_metadata_activation`) is not a failed read in this sense under either answer: it still reads "switched on" for that call, logged, the posture the sharing-rule service takes for its own position recipients.
+  - **The approver slate (D6).** A `queue` approver asks with `onFailedRead: 'refuse'` beside the addressing purpose. When the registered service rejects, the node fails with the retryable `APPROVER_DIRECTORY_UNREADABLE:` error that a failed team or position read already raises, naming the queue's failed read, and writes no request, approver or action row. Before, the registered service answered nobody, so the queue added no slot and the node's `onEmptyApprovers` policy acted on a slate missing those people.
+  - **The sharing-recipient grant recompute (D7).** A `queue`-recipient rule's expansion and its per-user membership check ask with `onFailedRead: 'refuse'`. A failed member read now rejects before any grant is diffed, so the rule's existing grants stay as they were until a pass can read the queue, and each recompute's caller logs it: the record pass and the object pass per rule (`record reconcile failed for rule`, `object reconcile failed for rule`), the queue-membership and business-unit write recomputes (`queue-membership revocation failed`, `queue-membership re-grant failed`, `business-unit revocation failed`, `business-unit re-grant failed`), the membership-row recompute (`recipient membership re-evaluation failed`) and the boot backfill (`boot rule backfill failed for rule`). A direct call to `evaluateRule`, `revokeRuleGrantsForRetiredRecipients` or `reconcileRuleForUser`, the REST evaluate endpoint included, rejects with the service's failure. Before, the failed read answered nobody and the pass revoked the grant of every member behind it. This is the answer a `team` or `position` recipient has given since its own reads began to refuse.
+  - **Supersedes the approval node's "Not yet".** The approval node's own entry in this release ("an approval node refuses to open when a team or position approver's directory read fails…") says, in its `Clause-②:` line and its **Not yet** bullet, that the registered ownership-queue service answers a failed member read with nobody rather than rejecting, so a `queue` approver backed by it refuses only when `expandMembers` itself rejects. That was true when it was written and is not after this change: the service now rejects on that failure when asked, and the slate asks, so a `queue` approver backed by it refuses on a failed `sys_queue`, `sys_queue_member`, team, position or business-unit read, as a `team` or `position` approver does. Read this bullet in place of those two sentences.
+- 05a30e6: feat(service-settings,plugin-audit,plugin-sharing): a config_change ledger row names the settings row it changed, an audit row's record page lists the other changes to the same record, and a queue's record page lists its members
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **`@objectstack/service-settings`: the `config_change` row's shape changes (not breaking).** A settings write's `config_change` row in `sys_audit_log` now sets `record_id` to the id of the stored settings row the write changed (`sys_setting`, or `sys_platform_setting` for a global value), beside the `object_name` it already named; before, `record_id` was always null. `metadata` and the digest in `new_value` are unchanged, and an in-memory settings store still writes null. Rows written before this release keep their null `record_id`.
+  - **Who can read those rows narrows.** Because a `config_change` row now names a record, the ledger's parent-record read gate judges it by that settings row: a reader holding only the ledger's own read grant, who cannot read the settings store, no longer sees new `config_change` rows. Holders of the ledger's audit capability (`view_all_audit_log`, administrators by default) still see every row. Older rows with a null `record_id` are still served under the ledger grant. Nothing becomes visible to a reader who could not see it before.
+  - **`@objectstack/plugin-audit`: `sys_audit_log` gets a default record page** (`sys_audit_log_detail`) that shows the row's fields and lists every other ledger row with the same `record_id`, newest first. Beside a `config_change` row that list holds the CRUD mirror's create and update rows for the same settings row, which carry a non-secret value in plain text; a secret's mirror row carries neither the value nor its handle. The list has no "New". The page label ships in all eleven locales.
+  - **`@objectstack/plugin-sharing`: `sys_queue` gets a default record page** (`sys_queue_detail`) whose members list reads `sys_queue_member` where `queue` equals this queue's `name`, and whose "New" opens the member form with `queue` filled in with that name. `sys_queue_member.queue` is unchanged. Declared queues have no `sys_queue` row, so they have no page. The page label ships in the plugin's four locales.
+- f41ddbd: i18n(plugin-sharing): the assignment rule object ships in all eleven platform languages
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `sys_assignment_rule`, the object an organization authors its own assignment rules in, now carries its label, description, field labels and help, option labels and its "By Object" view name in `zh-CN`, `ja-JP`, `es-ES`, `zh-Hant`, `ar`, `fr`, `pt-BR`, `ru`, `de` and `ko`, so an administrator in any platform language reads Setup → Assignment Rules in their own language instead of English. The object is now listed in the package's extract config, so the existing `check:i18n` bundle check covers it. Its recipient options read the same words as the queue and sharing objects in each language. Part of #30512.
+- 561d532: i18n(plugin-sharing): the sharing and queue objects ship in all eleven platform languages
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The sharing objects (`sys_record_share`, `sys_sharing_rule`, `sys_share_link`) and the queue objects (`sys_queue`, `sys_queue_member`) now carry `zh-Hant`, `ar`, `fr`, `pt-BR`, `ru`, `de` and `ko` beside the existing `en`, `zh-CN`, `ja-JP` and `es-ES`, so an administrator in one of those languages reads the sharing and queue screens in their own language instead of English. Each recipient option reads the same on every object within a locale. The queue record page (`sys_queue_detail`) carries its title in the seven languages too, the same word as the queue object's own label. Each new locale is registered under its platform-table tag with its source-hash companion, and the package's extract command lists the tags, so the existing `check:i18n` bundle check covers them. Package 8 of #30512.
+- ee874b1: fix(plugin-sharing)!: a sharing rule on an object without record sharing is refused at save, not saved to do nothing
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped. What moves is the save door's answer to a sys_sharing_rule row whose object no sharing gate consults; a rule already stored keeps its row and can still be switched off, so there is nothing for a migration to rewrite. -->
+  
+  **BREAKING** accept-set narrowing at the sharing-rule save doors (`@objectstack/plugin-sharing`): a rule whose object is not under record-sharing enforcement is refused with `422 SHARING_NOT_ENABLED` instead of saved.
+  
+  - **Before.** An administrator could save a sharing rule on an object no sharing gate consults, such as `sys_session`, `sys_account` or `sys_api_key` (a system object with no `owner_id`), a public object without an owner, a `controlled_by_parent` detail or a bypass-listed object. The save answered `201`, the rule showed as active in Setup, and its reconcile then refused every grant (`SHARING_NOT_ENABLED`) and wrote no `sys_record_share`, so the rule's recipients saw nothing more than before. Nothing told the administrator.
+  - **Now.** Both save doors refuse that rule and save nothing: the `/data` door (Setup's New and edit forms, scripts, imports) through a `sys_sharing_rule` hook guard, and `POST /api/v1/sharing/rules` (`SharingRuleService.defineRule`). The answer is `422 SHARING_NOT_ENABLED`, the pair the per-record share routes and `POST /api/v1/sharing/rules/:idOrName/evaluate` already answer for the same verdict. Its sentence names the object and says how to make it one a rule applies to, for example "give the object a private or read-only sharing model (`sharingModel: 'private'` or `'read'`) and an `owner_id` field", or "author the rule on its master object instead". An update is refused when it moves a rule onto such an object.
+  
+  The verdict is the reconcile's own: the save doors read the same ADR-0111 D7 inert-grant check (`SharingService.sharingRuleObjectRefusal`, over `inertGrantReason`) that the grant pre-flight throws on, so the two cannot disagree. A public object that has an owner column is still admitted, because the grant service there still grants an external member of the record's organization (#25549). System writes pass, as with the declared-name guard.
+  
+  To fix a rejected save, author the rule on an object that uses record sharing, or turn record sharing on for the object as the sentence says. A rule already stored on such an object is not migrated or deleted: it keeps sharing nothing, and an edit that leaves it on its object (for example switching it off) still saves.
+- bdbaf80: fix: Setup's form help speaks to an administrator, and the queue pages, the mail status banner and the test-email toast read in Chinese on a zh-CN console
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - **Field help (English source and zh-CN):** the permission set and position assignment forms, the out-of-office (approval delegation) rule, and the business unit, organization and user forms no longer describe the implementation. Gone: "fail-closed", "half-open [from, until)", "agent grants", "graph semantics", "expanded by graph queries", "Null = root of tenant", "HRIS", "When true / When false" (zh-CN 「为 true 时」 now reads 「开启后」) and an HTTP status code. The help now says when an assignment starts and ends, what turning a switch on does, and what to fill in. Text only: no field name, key, option value or behaviour changes.
+  - **`@objectstack/plugin-sharing`:** `sys_queue` and `sys_queue_member` join the plugin's translation bundle, with zh-CN text, so the 队列 and 队列成员 pages, their columns, help and the 新建 button read in Chinese. ja-JP and es-ES carry English fills for now.
+  - **`@objectstack/plugin-email`:** the live-status statement at the top of Setup → Email and the "Send test email" answer (sent, failed, logged only) are written in the caller's display language, en and zh-CN today; another language gets English.
+  - **`@objectstack/service-settings`:** a settings action handler (`SettingsActionHandler`) receives an optional `locale`, the caller's display language read from the request the same way the live-status statement's is (`Accept-Language`, else `?locale`); `runAction` takes it as a fifth `display` argument. Existing handlers compile and behave unchanged.
+- Updated dependencies [31fe289]
+- Updated dependencies [eb96480]
+- Updated dependencies [8aa2e91]
+- Updated dependencies [c17719d]
+- Updated dependencies [de24d17]
+- Updated dependencies [b90a6f7]
+- Updated dependencies [486b0a9]
+- Updated dependencies [9ed2ee1]
+- Updated dependencies [769adff]
+- Updated dependencies [e8dc483]
+- Updated dependencies [bcdb1db]
+- Updated dependencies [9ebca94]
+- Updated dependencies [3b8c724]
+- Updated dependencies [140d8ce]
+- Updated dependencies [699ebd8]
+- Updated dependencies [5f47410]
+- Updated dependencies [4c2cd29]
+- Updated dependencies [4be8a2e]
+- Updated dependencies [471add3]
+- Updated dependencies [314ad95]
+- Updated dependencies [b5eb61d]
+- Updated dependencies [771b2db]
+- Updated dependencies [97e4249]
+- Updated dependencies [9037b13]
+- Updated dependencies [e3b56b2]
+- Updated dependencies [a52761f]
+- Updated dependencies [e8afd1e]
+- Updated dependencies [bd65cb6]
+- Updated dependencies [cd5f554]
+- Updated dependencies [f19fbb8]
+- Updated dependencies [217ba78]
+- Updated dependencies [cde492d]
+- Updated dependencies [eee4149]
+- Updated dependencies [0f3ee58]
+- Updated dependencies [f3a52d3]
+- Updated dependencies [d59a1eb]
+- Updated dependencies [13aa6a3]
+- Updated dependencies [af3451b]
+- Updated dependencies [ddcdc80]
+- Updated dependencies [3a27208]
+- Updated dependencies [29cbfcc]
+- Updated dependencies [343ddb2]
+- Updated dependencies [0c666c3]
+- Updated dependencies [f672e0d]
+- Updated dependencies [38717d3]
+- Updated dependencies [bfbdeec]
+- Updated dependencies [4adc890]
+- Updated dependencies [bcdf8d3]
+- Updated dependencies [ac890f5]
+- Updated dependencies [aa57c76]
+- Updated dependencies [fc869c2]
+- Updated dependencies [fef212b]
+- Updated dependencies [dc51811]
+- Updated dependencies [b77c160]
+- Updated dependencies [09720e2]
+- Updated dependencies [8fed00f]
+- Updated dependencies [25fea77]
+- Updated dependencies [86ae2ca]
+- Updated dependencies [3da9a4c]
+- Updated dependencies [3da9a4c]
+- Updated dependencies [4be9734]
+- Updated dependencies [bb86ff9]
+- Updated dependencies [977be38]
+- Updated dependencies [2046d21]
+- Updated dependencies [740edc5]
+- Updated dependencies [778aedf]
+- Updated dependencies [71318af]
+- Updated dependencies [fd749a4]
+- Updated dependencies [a26abbc]
+- Updated dependencies [d9d42d4]
+- Updated dependencies [9d939c5]
+- Updated dependencies [25e1c1a]
+- Updated dependencies [67d5d53]
+- Updated dependencies [47226e6]
+- Updated dependencies [c7d1367]
+- Updated dependencies [f5aaa0b]
+- Updated dependencies [0005fec]
+- Updated dependencies [2d6402c]
+- Updated dependencies [77c203a]
+- Updated dependencies [8293c74]
+- Updated dependencies [8cc709d]
+- Updated dependencies [60fe44f]
+- Updated dependencies [29702d5]
+- Updated dependencies [a839020]
+- Updated dependencies [a7b8876]
+- Updated dependencies [f7afab8]
+- Updated dependencies [7b80724]
+- Updated dependencies [fb1ab89]
+- Updated dependencies [4dde0ae]
+- Updated dependencies [e8e924f]
+- Updated dependencies [590724f]
+- Updated dependencies [35cd64c]
+- Updated dependencies [38d416f]
+- Updated dependencies [d2e2f6f]
+- Updated dependencies [d5f3bc5]
+- Updated dependencies [e3948ae]
+- Updated dependencies [b55d6ab]
+- Updated dependencies [1c5cee6]
+- Updated dependencies [aad1603]
+- Updated dependencies [0e4747a]
+- Updated dependencies [eb68b98]
+- Updated dependencies [a11ef71]
+- Updated dependencies [7145bf3]
+- Updated dependencies [55d9dd4]
+- Updated dependencies [af8aab1]
+- Updated dependencies [63de248]
+- Updated dependencies [a59d00a]
+- Updated dependencies [a2437b5]
+- Updated dependencies [4bf9a2d]
+- Updated dependencies [0c9aa82]
+- Updated dependencies [49c8568]
+- Updated dependencies [4564d6f]
+- Updated dependencies [f2ea193]
+- Updated dependencies [badf24d]
+- Updated dependencies [5268f50]
+- Updated dependencies [a30c4f4]
+- Updated dependencies [e2bcd5c]
+- Updated dependencies [0cba0ce]
+- Updated dependencies [c893b3d]
+- Updated dependencies [677d542]
+- Updated dependencies [9bdeed2]
+- Updated dependencies [9052337]
+- Updated dependencies [3479c33]
+- Updated dependencies [000a4c0]
+- Updated dependencies [7569fb5]
+- Updated dependencies [f4d9c09]
+- Updated dependencies [2a6a28d]
+- Updated dependencies [902f162]
+- Updated dependencies [c77dd17]
+- Updated dependencies [555eb1b]
+- Updated dependencies [ebe0a98]
+- Updated dependencies [9038187]
+- Updated dependencies [f108e6d]
+- Updated dependencies [8847e09]
+- Updated dependencies [5cb7d7e]
+- Updated dependencies [78eb352]
+- Updated dependencies [2ce2646]
+- Updated dependencies [468e0c1]
+- Updated dependencies [6106b73]
+- Updated dependencies [0f920b9]
+- Updated dependencies [6bd00d2]
+- Updated dependencies [b5696b4]
+- Updated dependencies [33bc8ae]
+- Updated dependencies [293a85b]
+- Updated dependencies [a1afbb9]
+- Updated dependencies [150f740]
+- Updated dependencies [42eb126]
+- Updated dependencies [8cf1fd0]
+- Updated dependencies [98583cd]
+- Updated dependencies [cadd6aa]
+- Updated dependencies [a5cb4f1]
+- Updated dependencies [3c1eb63]
+- Updated dependencies [d57be87]
+- Updated dependencies [5d4f2aa]
+- Updated dependencies [f4cd4ec]
+- Updated dependencies [b3d2f4b]
+- Updated dependencies [eca7cd2]
+- Updated dependencies [cf4b9bf]
+- Updated dependencies [7193160]
+- Updated dependencies [e1dac19]
+- Updated dependencies [3299873]
+- Updated dependencies [7b2bb66]
+- Updated dependencies [a794e32]
+- Updated dependencies [21510bb]
+- Updated dependencies [8304b08]
+- Updated dependencies [0fd363d]
+- Updated dependencies [5210acf]
+- Updated dependencies [d6b88f1]
+- Updated dependencies [4123865]
+- Updated dependencies [bdbaf80]
+- Updated dependencies [6ffe37e]
+- Updated dependencies [cad764d]
+- Updated dependencies [63a470a]
+  - @objectstack/objectql@18.4.0
+  - @objectstack/spec@18.4.0
+  - @objectstack/metadata-core@18.4.0
+  - @objectstack/core@18.4.0
+  - @objectstack/formula@18.4.0
+  - @objectstack/platform-objects@18.4.0
+  - @objectstack/types@18.4.0
+
 ## 18.3.0
 
 ### Minor Changes

@@ -1,5 +1,249 @@
 # @objectstack/service-messaging
 
+## 18.4.0
+
+### Patch Changes
+
+- 8aa2e91: feat(notifications): the `push` channel — a `notify` node naming `push` reaches the recipient's phones through APNs and FCM
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - **New package `@objectstack/service-push`.** `PushServicePlugin` registers the kernel's `push` service: APNs over HTTP/2 with token-based auth (an ES256 provider token signed with the `.p8` key, reused for fifty minutes) and FCM over the HTTP v1 API (an OAuth access token from the service account). It reads `PushServiceConfigSchema` from its `config` option and refuses an inline secret at boot with the schema's guidance. It serves the direct transport (`transport: 'direct'`, the operator's own APNs key and Firebase project, for a white-label build); the hosted relay, the schema's default and so also an empty config, is refused at init until its sender ships (#29920). Each secret is named by `credentialRef` and resolved when the transport first signs; in the open tier the reference is the name of an environment variable (ADR-0143 D3).
+  - **`@objectstack/service-messaging`: the `push` channel.** Mounted while a `push` service is registered, as the sms channel is while an `sms` service is. One delivery reaches every enabled device the recipient registered, on each vendor the push service has a transport for. The push carries the notification id and, when it is a same-server path (`PushRouteSchema`), the notification's `actionUrl` as `route`; any other `actionUrl` is left out and the delivery still goes. Each device's push also carries the origin stored on its row (`PushDeliveryDataSchema.origin`) when the row holds one; the registry does not store it yet, so today none does. A token the vendor reports dead (APNs `BadDeviceToken` / `Unregistered`, FCM `UNREGISTERED`) is retired through `invalidateDeviceToken`: the device row is kept, disabled, and the user's other devices still get the push. A recipient with no enabled device, or whose every device was reported dead, is graded `invalid_recipient`; no push service is refused `transport_not_configured`, as the sms and email channels refuse it.
+  - **`@objectstack/spec`: description and comment text only.** The `[PLANNED]` markers come off `PushServiceConfigSchema`, `PushDirectTransportConfigSchema`, `ApnsTransportConfigSchema`, `FcmTransportConfigSchema` and `PushDeliveryDataSchema`, which now have their reader and producer; `PushRelayTransportConfigSchema` keeps `[PLANNED — not yet served]`, now saying the push service refuses it at boot (#29920). `NotificationChannelSchema`'s JSDoc lists `push` among the registered channels, the docblocks name `@objectstack/service-push` where they named `plugin-notification-push`, and the `NOT_FOUND` synonym waiver's reason names service-messaging's own provenance row. No key, schema shape or export changes.
+- e8dc483: feat(messaging,spec): a push device's `origin` is stored at registration and every push to the device carries it back
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **`@objectstack/service-messaging`**: `sys_user_device` gains an optional `origin` column. `POST /api/v1/notifications/devices` stores the registration's `origin` on the device row (`null` when the registration names none, and a refresh replaces it as it does `appId` and `locale`); `listDevices` answers it; and the push channel, which already copied a device's `origin` into the push data, now finds one to copy. A mobile shell with several saved servers can therefore open a tapped push on the server that sent it. Registrations without `origin` behave exactly as before.
+  - **`@objectstack/spec`**: `RegisterDeviceRequestSchema.origin` and `UserDeviceSchema.origin` drop their `[PLANNED — not yet stored]` prefix, since the server now stores the value. The push server origin docblock names where its pattern is knowingly narrower than a URL origin (an underscore in a label, a trailing-dot host) and looser (a written-out default port, a leading zero or an out-of-range port, any bracketed run of hex digits, colons and dots), and that a dotted IPv4 host is accepted. Description and docblock text only; nothing a caller sends is accepted or refused differently.
+  - **`@objectstack/service-push`**: the `PushMessage` docblock names `origin` among the delivery data the transports forward. Docblock only; both transports already forward `data` whole.
+- bcdb1db: fix(spec,messaging): a push device's `locale` is described as what it is — stored for the device, and no push renders by it
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **`@objectstack/spec`**: `UserDeviceSchema.locale` and `RegisterDeviceRequestSchema.locale` no longer say pushes to the device are rendered in its locale. They now say the value is stored for the device and that a push arrives in the recipient's language: `sys_user.locale`, then the deployment default. Description text only; nothing a caller sends is accepted or refused differently.
+  - **`@objectstack/service-messaging`**: the `sys_user_device.locale` field description says the same, in all four shipped languages. A test now pins it end to end: with the real push channel over the real device registry, a phone registered with a locale other than its user's receives the push in the user's language, on the inline fan-out and on the durable outbox path alike.
+- 771b2db: fix(core,service-messaging,service-queue): an idle dispatch loop wakes at the next due time, and a sole writer's loop no longer re-runs the idle ramp after every boot
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - **`@objectstack/core`: `DispatchLoop` wakes at the next due time.** A new optional `DispatchLoopOptions.nextDueAt()` answers the earliest instant work becomes claimable (a deferred row, a claim's expiry). The loop asks it once per idle streak, after the first empty tick, and never sleeps past the answer, so a deferred row goes out within one tick of coming due whatever `maxIdleIntervalMs` is. The answer is remembered rather than re-read on every ceiling tick, so an idle loop's steady-state cost is unchanged; the new `DispatchLoop.wakeAt(dueAtMs)` lets a producer in the same process announce a deferred row at no read. An answer at or before the tick that found nothing is not chased, and a rejected tick or read still counts as idle, so neither can make the loop spin.
+  - **`@objectstack/core`: `DispatchLoopOptions.soleWriter`** (default `false`). On a host where no other process writes the store, an empty tick sleeps straight to the next due time or the ceiling instead of re-running the ramp from `intervalMs`, which only ever bought latency on rows another process wrote. A fresh sole-writer loop over an empty store now ticks once in its first minute; before, every boot re-ran the ramp (six ticks in the first minute at the dispatchers' 500 ms base, five at the queue's 1 s).
+  - **`@objectstack/service-messaging`:** `INotificationOutbox.nextDueAt` / `IHttpOutbox.nextDueAt` (optional; both built-in stores implement it: two reads, the earliest future `next_attempt_at` / `next_retry_at` and the oldest `in_flight` claim plus the claim TTL), wired into `NotificationDispatcher` and `HttpDispatcher`; `soleWriter` on both dispatchers' options, and `dispatchSoleWriter` on `MessagingServicePlugin`. Retries, quiet hours, digest windows and a crashed node's claims are taken at their due time instead of up to `dispatchMaxIdleIntervalMs` late.
+  - **`@objectstack/service-queue`:** `DbQueueAdapter` reads the earliest future `scheduled_for` of its subscribed queues (one read per idle streak), a deferred `publish()` announces its due time to the loop through `wakeAt` instead of waiting out the backoff, and `DbQueueAdapterOptions.soleWriter` (reachable as `QueueServicePlugin` `db.soleWriter`) skips the ramp.
+  
+  Nothing changes for a host that sets neither `soleWriter` flag except the due-time wake: the ramp keeps its shape, cut short only when a due row is earlier, and an idle stretch costs one extra read at its start.
+- 97e4249: feat(service-push)!: push sends through the hosted push relay, authenticated by the server's cloud binding
+  
+  Clause-②: yes (narrowing) — the relay transport (`transport: 'relay'`, and the default `{}`), refused at init until now, is served; the relay wire narrows: `PushRelayPayloadSchema.data` refuses a key `PushDeliveryDataSchema` does not declare instead of stripping it, and a `RATE_LIMIT_EXCEEDED` relay error must not answer `retryable: false`; `PUSH_RELAY_NOT_SERVED_MESSAGE` leaves `@objectstack/service-push`.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (runtime-export-retired @objectstack/service-push#PUSH_RELAY_NOT_SERVED_MESSAGE) the retired export is the text of an init refusal that no longer happens; no packages/spec schema, registered node type, ADR-0087 conversion surface or stored shape names it. The two wire narrowings are on the server-to-relay request and the relay's error answer, which no metadata author writes and nothing stores, so there is nothing for objectstack migrate meta to rewrite -->
+  
+  **The hosted push relay is served.** A stack that requires `push` with a relay configuration (`transport: 'relay'`, `push: {}`, or no `push` key) now boots and sends each push to the cloud's push relay at `/api/v1/cloud/push/send` under the control-plane URL (`OS_CLOUD_URL`, else `https://cloud.objectos.ai`); a relay block's `endpoint` overrides it. Each request carries one ID-only delivery (the notification id, its same-server route, the server's origin and one generic line in the recipient's language); the title and body never leave the server.
+  
+  - **Authentication.** `@objectstack/cloud-connection` registers a new kernel service, `cloud-binding` (`ICloudBindingService` in `@objectstack/spec/contracts`: `credential()`, `bound()`, `controlPlaneUrl()`), and its own control-plane routes read the credential through it. The push service reads it on every send and puts it in the `Authorization` header only.
+  - **An unbound server boots.** It logs one warning at `kernel:ready`; until the server is bound on the Cloud connection setup page, the push service lists no vendor, so the push channel is suppressed as `transport_not_configured` and notifications reach users in the in-app inbox. The bind takes effect without a restart.
+  - **A deployment with no control plane** (`OS_CLOUD_URL=off`, `none`, `local` or `disabled`) refuses a relay configuration at boot, naming the in-app inbox and the direct transport as the two ways out. The direct transport is unchanged.
+  - **Answers.** `ok` is sent, `invalid` retires the device row, `retry` is retryable; a 401 fails the push without a retry, naming the lapsed binding; a 429 rate limit is retryable and a used-up quota is not.
+  - **The notice line.** The push channel picks the generic line by the recipient's language (`sys_user.locale`, then the deployment default, then English) and hands it to the push service as `PushMessage.notice`.
+  - `isControlPlaneDeclined` and the "no control plane" spellings move to `@objectstack/core`; `@objectstack/cloud-connection` re-exports `isControlPlaneDeclined` unchanged.
+  
+  **BREAKING — what narrows, and what to do:**
+  
+  - FROM `PUSH_RELAY_NOT_SERVED_MESSAGE` TO `PUSH_RELAY_AIR_GAPPED_MESSAGE` (both exported by `@objectstack/service-push`): the relay is no longer refused for being unserved, only on a deployment that declared it has no control plane. A test that matched the old text matches the new constant, or asserts that the relay boots.
+  - The relay payload's `data` is judged strictly: a sender puts only `notificationId`, `route` and `origin` in it. A content key such as `title` was stripped before and is now refused with the ID-only guidance.
+  - A relay's `RATE_LIMIT_EXCEEDED` error answers `retryable: true`, or leaves `retryable` out (it defaults to `true`). A relay that answered `retryable: false` on a rate limit is now refused by the wire schema.
+- 06cccd3: fix: the inbox's own notification list no longer shows the raw topic, and an MCP argument refusal ends at the fix
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **`@objectstack/service-messaging`.** The `mine` list view of `sys_inbox_message` (a person's own notifications) showed a Topic column reading the producer's machine id, such as `notify` for a flow's notify node or `collab.mention` for a mention. Nothing labels those ids, so the column is gone from that view: it now shows the title, the severity and the time. The `topic` field itself is unchanged and still searchable, so a filter or another view can use it.
+  - **`@objectstack/mcp`.** When a tool call carries an argument the tool does not declare, the refusal names the argument and the spelling to send, and now stops there. It no longer ends with the sentence "This argument used to be dropped silently and the call still succeeded, …", which explained the history of the check to internal developers and gave the caller nothing to act on. Every tool still refuses an undeclared argument exactly as before; only the closing sentence is gone.
+- 4fae0be: feat(service-messaging): serve the notification topics and channels a preference or template can name
+  
+  Clause-②: yes (widening) — a new read-only route, `GET /api/v1/messaging/preference-options`, mounted by `MessagingServicePlugin` on the kernel's HTTP server; nothing existing is narrowed or refused.
+  Metadata-protocol: none
+  
+  The topic and channel of a notification preference stay free text, `*` is still stored as written, and nothing new is refused. What is new is a list the console can offer beside the text box, so an administrator picks a value instead of typing a machine name from memory.
+  
+  - **The route.** `GET /api/v1/messaging/preference-options` answers `{ topics, channels }`. `topics` starts with `*` and lists the platform's fixed topics (`approval.requested`, `collab.mention`, …), the topics this environment's flow `notify` steps send under (`notify` for a step that names none), and the topics already stored on this organization's notifications, each once with every source that names it. `channels` starts with `*` and lists every channel the service knows, with `configured: false` on one whose service is not set up yet (email with no email service, …). Any signed-in member may read it, as on `/api/v1/notifications`; an anonymous caller is refused `401`, a held sign-in `403`, and a query parameter `400`. A topic stored in one organization is never listed for another.
+  - **The fields.** `sys_notification_preference.topic` and `sys_notification_template.topic` declare `widget: 'notification-topic'`, and `sys_notification_preference.channel` declares `widget: 'notification-channel'`, for the console's pick-or-type inputs; until the console registers them, the fields render as the same text boxes. The template's channel keeps its existing refusal.
+  - **The help.** The preference channel's help now names `push`, available once a push service is configured, in every language.
+- a0c68ae: feat(approvals,messaging): approval requests, reminders and outcomes also go by e-mail, linking to the request page; messaging gains a code-declared notification template tier
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - **`@objectstack/plugin-approvals`: `approval.requested`, `approval.reminder`, `approval.approved` and `approval.rejected` request the `inbox` and `email` channels** in one emit. Before, every approval notice named no channel, so messaging delivered it to the in-app inbox alone and nobody who does not watch the Console bell heard of it. Every other `approval.*` topic stays inbox-only, and delivery preferences filter the e-mail as they filter any channel. The inbox is unchanged. On a deployment with no mail transport the e-mail is whatever the `email` channel answers there.
+  - **The approval e-mail** is the notice's own title as its subject and its body (in the recipient's language, as the inbox renders it) followed by one line that opens the request, in `en`, `zh-CN`, `ja-JP` and `es-ES`. The link is a new payload member, `approvalUrl`: the request page (`/system/approvals?request=ID`) under the deployment's public origin. `actionUrl` stays relative, as the Console routes on it. It opens the request for a signed-in reader and decides nothing; no ADR-0043 action link or token is in any payload.
+  - **`publicBaseUrl` now resolves when the option is unset**: `OS_AUTH_URL` (legacy `BETTER_AUTH_URL`), then `OS_BASE_URL`, never a guessed `localhost`. With none of them set, or a value that is not an absolute `http(s)` URL, links stay relative and the plugin warns once at start, naming the variable to set. The same origin also prefixes ADR-0043's `actionLinkUrl`, as its option always documented. To give approval e-mails a working link, set `OS_BASE_URL` (or `OS_AUTH_URL`) to the deployment's address.
+  - **`@objectstack/service-messaging`: `MessagingService.registerBuiltinTemplates(templates)`** (and the `BuiltinNotificationTemplate` type) declares `(topic, channel, locale)` notification templates in code. The channels' template store reads them at every rung of its locale ladder after the recipient organization's own `sys_notification_template` row: the rung's row, else the rung's built-in, else the next rung, else the generic title and body. Nothing is written to the database (ADR-0131 §1.4), so an organization that authors a row overrides the built-in with nothing to migrate. A malformed template, or a `(topic, channel, locale)` already declared, is refused with a `TypeError`, and nothing from that call is kept.
+- ede9e6b: fix(notifications): the `email` channel answers unavailable while the email service only has the log transport, so a notification is no longer recorded as delivered when no mail left the server
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **What was wrong.** plugin-email registers the `email` service on every boot; with no `mail` settings saved its live transport is the log transport, which writes the message to the server log and to `sys_email` and sends nothing. The `email` channel treated "an email service is registered" as "available", so fan-out wrote a `sys_notification_delivery` row per recipient and the dispatcher marked it `success` while nobody was mailed.
+  - **What changes.** The channel now asks the service's own deliverability answer, `IEmailService.isConfigured()`, on every call. While it answers `false`, `isAvailable()` answers `{ available: false, reason: 'transport_not_configured' }`: fan-out writes no delivery row and records the suppression on `sys_notification.suppressed_channels`, exactly as it does with no email service at all. `send()` refuses a row that was already written with the same `transport_not_configured` reason, graded permanent, and never hands it to the service. No new reason and no new error code.
+  - **No restart needed.** The answer is read from the live transport, so saving a working provider under Setup → Email makes the channel available on the next notification, and switching back to the log transport makes it unavailable again.
+  - **Unchanged.** An email service that does not implement `isConfigured` (it is optional on the contract) keeps today's behaviour: the channel stays available and sends through it. `EmailSenderSurface` gains the optional `isConfigured?(): boolean` member, mirroring the contract.
+- ca37605: i18n(service-messaging): the notification objects and the digest heading ship in Traditional Chinese, Arabic, French and Brazilian Portuguese
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The messaging objects (`sys_inbox_message`, `sys_notification_receipt`, `sys_notification_delivery`, `sys_notification_preference`, `sys_notification_template`, `sys_http_delivery`, `sys_user_device`) and the digest heading "You have {{count}} notifications" now carry `zh-Hant`, `ar`, `fr` and `pt-BR` beside the existing `en`, `zh-CN`, `ja-JP` and `es-ES`, so a recipient in one of those languages reads the notification screens and the digest heading in their own language instead of English. `t()` selects no plural form, so the Arabic heading is worded as a tally (`عدد الإشعارات لديك: {{count}}`), correct for every count. A recipient whose language is `fr-FR` now reads the `fr` pack. Each new locale is registered under its platform-table tag with its source-hash companion and its messages, and the package's extract command lists the tags, so the existing `check:i18n` bundle check covers them. First half of package 5 of #30512; `ru`, `de` and `ko` follow in the second half.
+- cabdfe8: i18n(service-messaging): the notification objects and the digest heading ship in Russian, German and Korean
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The messaging objects and the digest heading "You have {{count}} notifications" now carry `ru`, `de` and `ko` as well, so the package ships all eleven platform languages. `t()` selects no plural form, so the Russian heading is worded as a tally (`Уведомлений: {{count}}`), correct for every count. Each new locale is registered under its platform-table tag with its source-hash companion and its messages, and the package's extract command lists the tags, so the existing `check:i18n` bundle check covers them. Second half of package 5 of #30512.
+- Updated dependencies [8aa2e91]
+- Updated dependencies [c17719d]
+- Updated dependencies [b90a6f7]
+- Updated dependencies [e8dc483]
+- Updated dependencies [bcdb1db]
+- Updated dependencies [9ebca94]
+- Updated dependencies [140d8ce]
+- Updated dependencies [699ebd8]
+- Updated dependencies [4c2cd29]
+- Updated dependencies [4be8a2e]
+- Updated dependencies [471add3]
+- Updated dependencies [b5eb61d]
+- Updated dependencies [771b2db]
+- Updated dependencies [97e4249]
+- Updated dependencies [9037b13]
+- Updated dependencies [e3b56b2]
+- Updated dependencies [a52761f]
+- Updated dependencies [e8afd1e]
+- Updated dependencies [bd65cb6]
+- Updated dependencies [f19fbb8]
+- Updated dependencies [217ba78]
+- Updated dependencies [cde492d]
+- Updated dependencies [eee4149]
+- Updated dependencies [f3a52d3]
+- Updated dependencies [d59a1eb]
+- Updated dependencies [af3451b]
+- Updated dependencies [3a27208]
+- Updated dependencies [0c666c3]
+- Updated dependencies [38717d3]
+- Updated dependencies [ac890f5]
+- Updated dependencies [aa57c76]
+- Updated dependencies [fc869c2]
+- Updated dependencies [fef212b]
+- Updated dependencies [dc51811]
+- Updated dependencies [b77c160]
+- Updated dependencies [09720e2]
+- Updated dependencies [8fed00f]
+- Updated dependencies [25fea77]
+- Updated dependencies [86ae2ca]
+- Updated dependencies [3da9a4c]
+- Updated dependencies [4be9734]
+- Updated dependencies [bb86ff9]
+- Updated dependencies [977be38]
+- Updated dependencies [2046d21]
+- Updated dependencies [740edc5]
+- Updated dependencies [778aedf]
+- Updated dependencies [71318af]
+- Updated dependencies [fd749a4]
+- Updated dependencies [d9d42d4]
+- Updated dependencies [9d939c5]
+- Updated dependencies [25e1c1a]
+- Updated dependencies [47226e6]
+- Updated dependencies [c7d1367]
+- Updated dependencies [f5aaa0b]
+- Updated dependencies [0005fec]
+- Updated dependencies [2d6402c]
+- Updated dependencies [77c203a]
+- Updated dependencies [8293c74]
+- Updated dependencies [29702d5]
+- Updated dependencies [a839020]
+- Updated dependencies [a7b8876]
+- Updated dependencies [f7afab8]
+- Updated dependencies [4dde0ae]
+- Updated dependencies [e8e924f]
+- Updated dependencies [590724f]
+- Updated dependencies [35cd64c]
+- Updated dependencies [38d416f]
+- Updated dependencies [d2e2f6f]
+- Updated dependencies [d5f3bc5]
+- Updated dependencies [e3948ae]
+- Updated dependencies [b55d6ab]
+- Updated dependencies [1c5cee6]
+- Updated dependencies [aad1603]
+- Updated dependencies [eb68b98]
+- Updated dependencies [a11ef71]
+- Updated dependencies [7145bf3]
+- Updated dependencies [55d9dd4]
+- Updated dependencies [af8aab1]
+- Updated dependencies [a59d00a]
+- Updated dependencies [4bf9a2d]
+- Updated dependencies [0c9aa82]
+- Updated dependencies [49c8568]
+- Updated dependencies [4564d6f]
+- Updated dependencies [f2ea193]
+- Updated dependencies [badf24d]
+- Updated dependencies [5268f50]
+- Updated dependencies [a30c4f4]
+- Updated dependencies [0cba0ce]
+- Updated dependencies [c893b3d]
+- Updated dependencies [677d542]
+- Updated dependencies [9bdeed2]
+- Updated dependencies [3479c33]
+- Updated dependencies [000a4c0]
+- Updated dependencies [7569fb5]
+- Updated dependencies [f4d9c09]
+- Updated dependencies [c77dd17]
+- Updated dependencies [ebe0a98]
+- Updated dependencies [9038187]
+- Updated dependencies [f108e6d]
+- Updated dependencies [5cb7d7e]
+- Updated dependencies [78eb352]
+- Updated dependencies [2ce2646]
+- Updated dependencies [468e0c1]
+- Updated dependencies [6106b73]
+- Updated dependencies [0f920b9]
+- Updated dependencies [6bd00d2]
+- Updated dependencies [b5696b4]
+- Updated dependencies [33bc8ae]
+- Updated dependencies [293a85b]
+- Updated dependencies [a1afbb9]
+- Updated dependencies [150f740]
+- Updated dependencies [42eb126]
+- Updated dependencies [8cf1fd0]
+- Updated dependencies [cadd6aa]
+- Updated dependencies [a5cb4f1]
+- Updated dependencies [3c1eb63]
+- Updated dependencies [d57be87]
+- Updated dependencies [5d4f2aa]
+- Updated dependencies [f4cd4ec]
+- Updated dependencies [b3d2f4b]
+- Updated dependencies [eca7cd2]
+- Updated dependencies [cf4b9bf]
+- Updated dependencies [e1dac19]
+- Updated dependencies [7b2bb66]
+- Updated dependencies [a794e32]
+- Updated dependencies [21510bb]
+- Updated dependencies [0fd363d]
+- Updated dependencies [5210acf]
+- Updated dependencies [d6b88f1]
+- Updated dependencies [4123865]
+- Updated dependencies [bdbaf80]
+- Updated dependencies [6ffe37e]
+- Updated dependencies [63a470a]
+  - @objectstack/spec@18.4.0
+  - @objectstack/core@18.4.0
+  - @objectstack/platform-objects@18.4.0
+  - @objectstack/types@18.4.0
+
 ## 18.3.0
 
 ### Minor Changes

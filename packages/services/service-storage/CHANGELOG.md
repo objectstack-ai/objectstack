@@ -1,5 +1,207 @@
 # @objectstack/service-storage
 
+## 18.4.0
+
+### Patch Changes
+
+- fabd259: fix(service-storage): Setup → Storage → Test connection answers in the caller's language
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The `storage/test` settings action writes its `message` in the language the settings action route hands its handler as `locale` (`Accept-Language`, else `?locale`), the same source the mail test notice reads. It covers the sentences the product writes: the success sentence (which still names the adapter), the refusal when the probe read back is not the one written, and the refusal for S3 settings missing a bucket or a region. An adapter's own error text stays verbatim: alone in English, as before; in another language behind a lead-in saying the connection test failed. Every language on the platform locale table is served (`en`, `zh-CN`, `zh-Hant`, `es-ES`, `ar`, `fr`, `pt-BR`, `ru`, `de`, `ja-JP`, `ko`), the caller's code read through `platformLocaleTagOf` and then shortened one subtag at a time; an absent locale, or one the table does not name, is answered in English exactly as before. `ok`, `severity`, the probe and its cleanup, and the operator log lines are unchanged.
+- 66a8822: i18n(service-storage): the file and upload-session objects ship in all eleven platform languages
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `sys_file` and `sys_upload_session` now carry Traditional Chinese (`zh-Hant`), Arabic (`ar`), French (`fr`), Brazilian Portuguese (`pt-BR`), Russian (`ru`), German (`de`) and Korean (`ko`) beside the existing `en`, `zh-CN`, `ja-JP` and `es-ES`, so a reader in one of those languages sees the file and upload screens in their own language instead of English. Each new locale is registered under its platform-table tag with its source-hash companion, and the package's extract command lists the seven tags, so the existing `check:i18n` bundle check covers them. Package 10 of #30512.
+- 704efef: feat(mcp): an agent can read a record's files and attach a file to a record — `read_file` and `create_upload_link` over `/api/v1/mcp`, and the single-use upload link they hand out (#30892)
+  
+  Clause-②: yes (widening) — two MCP tools join the HTTP surface where the storage service is installed (`read_file` under `data:read`, `create_upload_link` under `data:write`), and two signed-in routes join the storage family: `GET` and `PUT /api/v1/storage/upload-links/:token`. Nothing that answered before answers differently.
+  Metadata-protocol: none
+  
+  - **`read_file`** takes `objectName`, `recordId` and a file field (with `fileId` when the field holds several files) or an `attachmentId`. With neither, it lists the record's files. It answers the file's facts (id, name, type, size, the read cap that applies), a short-lived download link, and the content: a PDF's or Word document's text (extracted on the server, capped in pages and characters), an image as an MCP image block, a text file as text. A file over the cap (10 MiB) answers its facts and the download link, without content. Access follows the record: a record the caller cannot read answers `404 RECORD_NOT_FOUND`, as `get_record` does, and a file the download door would refuse answers that door's `403`.
+  - **`create_upload_link`** takes a record the caller may edit plus a file field or `attachments: true`. It answers a link that accepts exactly one upload for ten minutes, bound to that record and that field (or the record's attachments), and usable only by the same user, signed in: a request without a session answers `401 AUTH_REQUIRED`, like every other storage door. The upload lands as the caller would land it: the file field is written through the record's own update door, so the field's `accept` and `maxSize`, the record's edit access and the upload size limit (`storage.max_upload_mb`, `413` before the link is spent) all apply. It writes the same `sys_file` row, size recorded, and the same `storage.upload` as any other upload, so whatever a host counts toward quota counts it. A used, expired or unknown link, or one made for another user, answers the same `404`.
+  - **`@objectstack/mcp`** loads `unpdf` (pinned 1.9.1) by dynamic import on the first PDF read, with pdf.js eval off; a Word document is read with `node:zlib` under a bounded inflate.
+- 5210acf: fix(service-storage): a member attaches a file through the attach verb again; the verb vouches for the one file it created
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A signed-in member who may attach files can attach one again through the server-side attach verb (`attachFileAs` on the `file-attachments` service), and so can a print to a record's attachments (`printRecordToFile`). Since the write-time reference check began judging a `lookup` value through the caller's own read door, the verb's `sys_attachment` insert — written as the caller — was refused over its `file_id`: a member who may attach need not read `sys_file`, so the file the verb had just created answered `reference_not_found` and the call failed.
+  
+  The rule now: a service verb that has created a record in the same call may vouch, on its own write, for the one reference to that record (`vouchForReference`, `@objectstack/core`). The write-time reference check does not ask the caller's read door for exactly that object, field and id, and still probes that the record exists. The attach verb vouches for its own `sys_attachment.file_id` and for nothing else; every other gate on the insert still judges the caller (the permission to create an attachment, the parent-edit attach rule, `enable.files`, the file-reference gate, row- and field-level security, and the `uploaded_by` stamp).
+  
+  Unchanged: no caller gains a read of `sys_file` or of anything else. A `sys_file` id sent through any data door — REST, MCP, a flow, an import — is judged through the caller's read door exactly as before, the file the verb attached included. The mark is a symbol-keyed context property that no request body, query, stored row or flow definition can spell.
+- d6b88f1: fix(service-storage): a member attaches a file from the browser again — the upload's own completion attaches it as them, restoring the Attachments panel after #31031
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  Skills-docs: updated here — `content/docs/permissions/attachments-access.mdx` and `content/docs/api/plugin-endpoints.mdx` state the `attachTo` key of the upload-complete request and its refusals; no file under `skills/**` teaches the upload-complete request (a `git grep` of `skills/` finds no `upload/complete` and no `CompleteUploadRequest`).
+  
+  A signed-in member who may attach files, and holds no read of `sys_file`, can attach a file from a record's Attachments panel again. Since the write-time reference check began judging a `lookup` value through the caller's own read door, the panel's second step — `POST /api/v1/data/sys_attachment` naming the file it had just uploaded — was refused `400 VALIDATION_FAILED` (`file_id`, `reference_not_found`) for such a member.
+  
+  The rule now: the upload-complete door (`POST /api/v1/storage/upload/complete`) takes an optional `attachTo: { parentObject, parentId }`. With it, the door runs every gate it already asked — the session, the upload ownership rule, the starting organization, the held bytes — and then hands the upload to the file-attachments service's `attachUploadAs`, which runs as the caller. That verb vouches for one `sys_file` only: a `pending` upload in the `attachments` scope that the caller uploaded, that no record holds yet, in the caller's write reach and in the parent's organization. It asks the attach authorization first (the permission to create an attachment, the parent-edit attach rule, `enable.files`), then writes the `sys_attachment` row and commits the file as one unit. The answer is the committed file with its new `attachmentId`. Another user's upload id, an id that names no file, a committed or already attached upload, and a record the caller may not attach to are refused, and the upload stays `pending`.
+  
+  The vouch is spent on that one write: a hook that runs under it — as the user or as the system — writes without the mark (`withoutVouchedReferences`, `@objectstack/core`), so a hook naming the same `file_id` is judged through the caller's read door.
+  
+  Unchanged: no caller gains a read of `sys_file` or of anything else. The generic data door keeps its rule — a `sys_attachment` create through `POST /api/v1/data/sys_attachment` naming a `sys_file` the caller cannot read is still refused `reference_not_found`. A completion without `attachTo` commits exactly as before. A mount with no file-attachments service bound refuses `attachTo` with `501 NOT_IMPLEMENTED`.
+  
+  The console's Attachments panel (`@object-ui/app-shell`) now completes its upload with `attachTo` and makes no second call, keeping its refusal messages; the upload adapter (`@object-ui/data-objectstack`) gains an `attachTo` option and returns the `attachmentId` it receives.
+- 59e6463: fix(service-storage)!: a stored file's uploader is the user who created it, as an attachment's and a comment's author are
+  
+  Clause-②: no (narrowing) — a non-system create of `sys_file` records the session's user as `owner_id`, whatever the request carries, and one whose session names no signed-in user is refused. Nothing is widened.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling, export or stored shape is removed, renamed or re-shaped, and no stored row is read, rewritten, converted or dropped, so there is nothing for `objectstack migrate meta` to rewrite. What narrows is a runtime accept set on one platform-written column of one platform object, `sys_file.owner_id`, whose value is recorded once at creation; the remedy for a writer that needs another value recorded is a system-context write, which no ledger entry can derive. The other categories are closed on facts: the bumped package publishes (not unpublished); no ADR-0087 id covers this column and this diff adds none (not registered, not already-registered); no export is added, removed or retyped, so no interface or type narrows (not runtime-export-retired, runtime-interface-only or type-surface-only). -->
+  
+  **BREAKING** accept-set narrowing on `sys_file` creates (`@objectstack/service-storage`), served by every data door (REST, MCP, the console).
+  
+  - **Now.** A stored file's uploader is the user who created it, as an attachment's (`sys_attachment.uploaded_by`) and a comment's (`sys_comment.author_id`) author are. A non-system create of `sys_file` records the session's user as `owner_id`, over whatever the request carries. The column was already read-only on update, so the stamp is the row's uploader for life.
+  - **Refused.** A non-system create of `sys_file` whose session names no signed-in user is refused with 403 `RECORD_NOT_ACCESSIBLE`, the answer an attachment or comment create with no signed-in user already gets: there is no user to record as the uploader.
+  - **Unchanged.** The upload doors (presigned, chunked, complete) already record the signed-in user under the system context, and keep doing so. System-context writes (seeds, imports, migrations) keep the `owner_id` they supply, as does a programmatic create with no session at all on a bare kernel. An update of `owner_id` is dropped and reported in `droppedFields`, as before. Stored rows keep what they were written with. The console needs no change: it never creates `sys_file` rows through the data API.
+  
+  **The remedy.** None for the console or the upload doors. A client that creates a `sys_file` row through the data API gets the row recorded under its own user, whatever `owner_id` it sends; to record a different uploader, write from a system context (a migration or an import). A server-side caller that creates `sys_file` rows with no signed-in user runs as the system principal or names the user it acts for.
+- Updated dependencies [8aa2e91]
+- Updated dependencies [c17719d]
+- Updated dependencies [b90a6f7]
+- Updated dependencies [e8dc483]
+- Updated dependencies [bcdb1db]
+- Updated dependencies [9ebca94]
+- Updated dependencies [140d8ce]
+- Updated dependencies [699ebd8]
+- Updated dependencies [4c2cd29]
+- Updated dependencies [4be8a2e]
+- Updated dependencies [471add3]
+- Updated dependencies [b5eb61d]
+- Updated dependencies [771b2db]
+- Updated dependencies [97e4249]
+- Updated dependencies [9037b13]
+- Updated dependencies [e3b56b2]
+- Updated dependencies [a52761f]
+- Updated dependencies [e8afd1e]
+- Updated dependencies [bd65cb6]
+- Updated dependencies [f19fbb8]
+- Updated dependencies [217ba78]
+- Updated dependencies [cde492d]
+- Updated dependencies [eee4149]
+- Updated dependencies [f3a52d3]
+- Updated dependencies [d59a1eb]
+- Updated dependencies [af3451b]
+- Updated dependencies [3a27208]
+- Updated dependencies [0c666c3]
+- Updated dependencies [38717d3]
+- Updated dependencies [ac890f5]
+- Updated dependencies [aa57c76]
+- Updated dependencies [fc869c2]
+- Updated dependencies [fef212b]
+- Updated dependencies [dc51811]
+- Updated dependencies [b77c160]
+- Updated dependencies [09720e2]
+- Updated dependencies [8fed00f]
+- Updated dependencies [25fea77]
+- Updated dependencies [86ae2ca]
+- Updated dependencies [3da9a4c]
+- Updated dependencies [4be9734]
+- Updated dependencies [bb86ff9]
+- Updated dependencies [977be38]
+- Updated dependencies [2046d21]
+- Updated dependencies [740edc5]
+- Updated dependencies [778aedf]
+- Updated dependencies [71318af]
+- Updated dependencies [fd749a4]
+- Updated dependencies [d9d42d4]
+- Updated dependencies [9d939c5]
+- Updated dependencies [25e1c1a]
+- Updated dependencies [47226e6]
+- Updated dependencies [c7d1367]
+- Updated dependencies [f5aaa0b]
+- Updated dependencies [0005fec]
+- Updated dependencies [2d6402c]
+- Updated dependencies [77c203a]
+- Updated dependencies [8293c74]
+- Updated dependencies [29702d5]
+- Updated dependencies [a839020]
+- Updated dependencies [a7b8876]
+- Updated dependencies [f7afab8]
+- Updated dependencies [4dde0ae]
+- Updated dependencies [e8e924f]
+- Updated dependencies [590724f]
+- Updated dependencies [35cd64c]
+- Updated dependencies [38d416f]
+- Updated dependencies [d2e2f6f]
+- Updated dependencies [d5f3bc5]
+- Updated dependencies [e3948ae]
+- Updated dependencies [b55d6ab]
+- Updated dependencies [1c5cee6]
+- Updated dependencies [aad1603]
+- Updated dependencies [eb68b98]
+- Updated dependencies [a11ef71]
+- Updated dependencies [7145bf3]
+- Updated dependencies [55d9dd4]
+- Updated dependencies [af8aab1]
+- Updated dependencies [a59d00a]
+- Updated dependencies [4bf9a2d]
+- Updated dependencies [0c9aa82]
+- Updated dependencies [49c8568]
+- Updated dependencies [4564d6f]
+- Updated dependencies [f2ea193]
+- Updated dependencies [badf24d]
+- Updated dependencies [5268f50]
+- Updated dependencies [a30c4f4]
+- Updated dependencies [0cba0ce]
+- Updated dependencies [c893b3d]
+- Updated dependencies [677d542]
+- Updated dependencies [9bdeed2]
+- Updated dependencies [3479c33]
+- Updated dependencies [000a4c0]
+- Updated dependencies [7569fb5]
+- Updated dependencies [f4d9c09]
+- Updated dependencies [c77dd17]
+- Updated dependencies [ebe0a98]
+- Updated dependencies [9038187]
+- Updated dependencies [f108e6d]
+- Updated dependencies [5cb7d7e]
+- Updated dependencies [78eb352]
+- Updated dependencies [2ce2646]
+- Updated dependencies [468e0c1]
+- Updated dependencies [6106b73]
+- Updated dependencies [0f920b9]
+- Updated dependencies [6bd00d2]
+- Updated dependencies [b5696b4]
+- Updated dependencies [33bc8ae]
+- Updated dependencies [293a85b]
+- Updated dependencies [a1afbb9]
+- Updated dependencies [150f740]
+- Updated dependencies [42eb126]
+- Updated dependencies [8cf1fd0]
+- Updated dependencies [cadd6aa]
+- Updated dependencies [a5cb4f1]
+- Updated dependencies [3c1eb63]
+- Updated dependencies [d57be87]
+- Updated dependencies [5d4f2aa]
+- Updated dependencies [f4cd4ec]
+- Updated dependencies [b3d2f4b]
+- Updated dependencies [eca7cd2]
+- Updated dependencies [cf4b9bf]
+- Updated dependencies [e1dac19]
+- Updated dependencies [7b2bb66]
+- Updated dependencies [a794e32]
+- Updated dependencies [21510bb]
+- Updated dependencies [0fd363d]
+- Updated dependencies [5210acf]
+- Updated dependencies [d6b88f1]
+- Updated dependencies [4123865]
+- Updated dependencies [bdbaf80]
+- Updated dependencies [6ffe37e]
+- Updated dependencies [63a470a]
+  - @objectstack/spec@18.4.0
+  - @objectstack/core@18.4.0
+  - @objectstack/platform-objects@18.4.0
+  - @objectstack/types@18.4.0
+  - @objectstack/observability@18.4.0
+
 ## 18.3.0
 
 ### Minor Changes

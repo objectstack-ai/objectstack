@@ -1,5 +1,382 @@
 # @objectstack/plugin-mcp-server
 
+## 18.4.0
+
+### Minor Changes
+
+- 140d8ce: fix(spec,metadata-protocol,mcp)!: a field marked `sortable: false` is no longer offered or performed as a sort — the sortability projection reports it unsortable, and the Data API and the stdio MCP `query_records` refuse a sort on it with `400 INVALID_SORT` (#29896)
+  
+  Clause-②: yes (narrowing) — `GET /api/v1/data/:object` (and every request that reaches the same list door: `POST /api/v1/data/:object/query`, the export route, the RPC dispatcher, the record-page `related[].sort`) and the stdio MCP `query_records` refuse a sort on a field whose author declared `sortable: false`, which they used to answer sorted by the column; a stored list view `sort` or `record:related_list` `sort` naming such a field is now refused when it is read. The widening half: `@objectstack/spec/api` exports `FIELD_UNSORTABLE_AUTHOR_DECLARED`, and `FieldSortabilitySchema.reason` accepts `'author-declared'` beside `'virtual-type'`.
+  Metadata-protocol: narrowed
+  Skills-docs: none — `skills/**` names no `sortable` field key, and `content/docs/**` already teaches `sortable: false` as "do not allow sorting by this field" and `INVALID_SORT` as "the field must exist and have `sortable: true`", which is what the platform now does. The prescription ships in the refusal text and the upgrade-guide entry.
+  
+  <!-- adr-0087: registered field-sortable-false-sort-refused -->
+  
+  **BREAKING** accept-set narrowing at the Data API list door (`@objectstack/metadata-protocol`) and the stdio MCP `query_records` (`@objectstack/mcp`): a sort on a field marked `sortable: false` is refused.
+  
+  - **Before.** An author who marked a field `sortable: false` (a long text, an unindexed column on a large table) got nothing for it. The sortability projection served on `GET /api/v1/meta/object/NAME` reported the field `{ sortable: true }`, so the list header and the Sort picker offered it, `GET /api/v1/data/NAME?sort=FIELD` answered 200 sorted by it, and so did the stdio MCP `query_records` with that `orderBy`.
+  - **Now.** The projection reports `{ sortable: false, reason: 'author-declared' }` for that field, so the grid header and the Sort picker, which read the projection, stop offering it. The Data API judges the sort by the same projection and refuses it with `400 INVALID_SORT` before any read, the answer a sort on a `formula` field already gets; the stdio MCP `query_records` refuses it the same way before the engine runs. Only the literal `false` counts: a field with no `sortable` key, or with `sortable: true`, sorts as before. A `formula` field also marked `sortable: false` keeps its `reason: 'virtual-type'` answer.
+  - **Stored sorts.** A list view whose `sort` names such a field, or a page `record:related_list` block whose `sort` does, used to load sorted and is now refused when it is read. Lint does not yet judge these at authoring. The upgrade-guide entry `field-sortable-false-sort-refused` lists them.
+  - **Not changed.** In-process callers that reach `ObjectQL.find` directly (hooks, flows) keep sorting by the stored column: the engine door judges only whether a column is stored, and `sortable: false` governs what the platform offers callers, not what its storage can do.
+  
+  **The remedy.** Drop the sort on that field or sort by another one, in requests and in stored view and related-list sorts. An author who wants the field sortable removes `sortable: false` from it.
+- 4c2cd29: **Shipped in 18.3.0**, whose CHANGELOG missed this entry; listed here one release late.
+  
+  fix(lint)!: publish refuses a validation rule (or another fail-closed predicate) that orders a text or boolean field against a number, instead of warning that it "evaluates to null" and then refusing every write (#29904)
+  
+  Clause-②: no (narrowing) — the author-time gate (`os build`, `os validate`, the object save door and the package publish) refuses a `type-mismatch` it used to pass with a warning, at the predicate sites that fail closed. Nothing is widened.
+  Metadata-protocol: narrowed
+  
+  <!-- adr-0087: registered validation-type-mismatch-refused -->
+  
+  **BREAKING** accept-set narrowing at the author-time expression gate, served by `os build`, `os validate`, the object save door and `POST /api/v1/packages/:id/publish-drafts`.
+  
+  - **Before.** `record.name > 5` on a text field, written as a validation rule's `condition`, published with one `expression-invalid` advisory at `severity: warning` saying the expression "silently evaluates to null". A validation rule fails closed, so from then on every create and update whose `name` was not numeric text was refused: `400 VALIDATION_FAILED` "Validation rule 'name_gt' could not be evaluated (runtime: no such overload: dyn<string> > int) — write rejected".
+  - **Now.** The same rule is refused at publish as `expression-invalid` at `severity: error`, at the rule's `condition` path, with a message that says the write would be refused and how to compare like with like. This is the severity the nullable-comparison verdict (`record.qty > 1000` on a nullable number) already had at the same slot.
+  - **Which sites.** Those whose runtime refuses the write (or aborts the operation) when the expression faults: a validation rule's `condition` and `when`, nested `then` / `otherwise` rules included; a field's `requiredWhen` and `readonlyWhen`; an option's `visibleWhen` (a write that picks the option); a hook's `condition`. The `validate_expression` MCP tool answers the same for `site: 'validation'`.
+  - **Unchanged.** A formula field's `expression` keeps the warning: there the fault reads null, which is what the warning says. So do flow conditions (the run fails, the write that fired it lands), a field's display `visibleWhen` / `settledWhen`, field group and action predicates, and `conditionalFormatting`. Sharing-rule conditions compile to a query filter and are not judged by this verdict.
+  - **`@objectstack/spec`.** The upgrade guide entry `validation-type-mismatch-refused` (a semantic migration: no automatic rewrite, because whether the author meant the length, a number stored as text or another field is a judgement about the rule).
+  - **`@objectstack/formula`.** `ExprSchemaHint` gains `faultOutcome?: 'fail-closed'`, which the caller sets for a fail-closed site; the `type-mismatch` refusal's `params` carry `outcome: 'fail-closed'` when it is graded an error there.
+  
+  **FROM → TO.** `condition: 'record.name > 5'` on a text field → `size(record.name) > 5` for its length, `record.score > 5` on a number field for a value, or `double(record.name) > 5` only when every value is numeric text (it faults, and refuses the write, on any other). A boolean: `record.active > 0` → `record.active == true`.
+- 9037b13: fix(lint)!: a text-vs-number comparison in a record-triggered flow condition is refused with what really happens (the run fails, the write lands), and in an advisory validation rule the refusal no longer says the write is refused (#29926)
+  
+  Clause-②: no (narrowing) — the author-time gate (`os build`, `os validate`, the package publish and the flow publish door) refuses a `type-mismatch` in a record-triggered flow's start or edge condition that it used to pass with a warning; and the fail-closed arm of the verdict is served under its own code `type-mismatch-fail-closed` instead of `type-mismatch` with `params.outcome`. Added beside them: the codes `type-mismatch-run-fails` and `type-mismatch-fail-open`, and the exported type `ExprFaultOutcome`.
+  Metadata-protocol: narrowed
+  Skills-docs: updated here — `content/docs/data-modeling/formulas.mdx` (the type-soundness row names each outcome) and the MCP skill text in `packages/mcp/src/skill-md.ts` (`flow_condition` now errors too); `skills/**` teaches no text-vs-number comparison in a flow condition or an advisory rule, so no skill or eval moves.
+  
+  <!-- adr-0087: registered flow-condition-type-mismatch-refused -->
+  
+  **BREAKING** accept-set narrowing at the author-time expression gate, served by `os build`, `os validate` and `POST /api/v1/packages/:id/publish-drafts`.
+  
+  - **Record-triggered flow conditions — before.** `name > 5` on a text field, as the start node's `condition` or an edge `condition` of a flow whose start `triggerType` is `record-*`, published with an `expression-invalid` warning saying the expression "silently evaluates to null". It does not: the engine's `evaluateCondition` throws on the fault, so the run fails at that condition, and the record-change trigger isolates the write that fired it, so the write lands and the flow's work is not done.
+  - **Now.** The same condition is refused as `expression-invalid` at `severity: error`, code `type-mismatch-run-fails`, with a message saying the run fails at the condition and the triggering write still lands. This is the severity and outcome the nullable-comparison verdict already has on those conditions (#29026). A flow that is not record-triggered, and a node `condition` other than the start node's (inert), keep the warning. The `validate_expression` MCP tool answers the same for `site: 'flow_condition'`.
+  - **Advisory validation rules** (`severity: 'warning'` / `'info'`). Still refused at publish, as the nullable twin refuses them, but under `type-mismatch-fail-open` with a message that says what happens: the rule is skipped, the write proceeds, and the rule never gives its advisory. The nullable twin's message on the same rule now says the same instead of "the write is rejected fail-closed". A `severity: 'error'` rule keeps both refusals and their wording.
+  - **Refusal codes (`@objectstack/formula`).** A code names one message template, so each outcome has its own: `type-mismatch` (warning, reads null), `type-mismatch-fail-closed`, `type-mismatch-run-fails`, `type-mismatch-fail-open` (all errors). `ExprSchemaHint.faultOutcome` takes `'fail-closed' | 'run-fails' | 'fail-open'` (exported as `ExprFaultOutcome`); the `outcome` param on `type-mismatch` is gone.
+  - **`@objectstack/spec`.** Upgrade guide entry `flow-condition-type-mismatch-refused` (semantic: no mechanical rewrite). The `validation-type-mismatch-refused` entry's acceptance criteria now say a create answers 201, the data door's status.
+  
+  **FROM → TO.** Flow condition `name > 5` on a text field → `size(name) > 5` for its length, `score > 5` on a number field for a value, or `double(name) > 5` only when every value is numeric text. A boolean: `active > 0` → `active == true`. A consumer keyed to the code: `type-mismatch` with `params.outcome === 'fail-closed'` → `type-mismatch-fail-closed`.
+  
+  **The renamed code shipped in 18.3.0.** `@objectstack/formula@18.3.0` and `@objectstack/mcp@18.3.0` already serve #29904's fail-closed refusal as `type-mismatch` with `params.outcome: 'fail-closed'` (the `outcome` param is in the 18.3.0 `ExpressionRefusalParams` type), although 18.3.0's changelog has no line for it: its changeset (`29904-type-mismatch-fail-closed.md`) was not consumed by that release. This release renames that arm `type-mismatch-fail-closed` and removes the `outcome` param, so a consumer keyed to 18.3.0's `type-mismatch` + `outcome` moves to the new code (FROM → TO above). The same changeset also says flow conditions keep the warning; a record-triggered flow's start and edge conditions are now refused, as above.
+- e8afd1e: fix(lint)!: every flow condition's text-vs-number comparison gets a verdict that says what the run does — a record-triggered flow's `record.<field>` read and `decision` branch are refused like its bare name, a time-relative sweep of the flow's object is refused like a record-triggered flow, a bare name a flow variable holds is no longer typed as the field, and any other flow's warning says the run fails instead of "evaluates to null" (#29959)
+  
+  Clause-②: yes (narrowing) — the author-time gate (`os build`, `os validate`, the package publish and the flow publish door) refuses, on a record-triggered flow, a `type-mismatch` in a `decision` branch and in a `record.<field>` / `previous.<field>` read of a start or edge condition, which it passed with no verdict before; refuses the same on a time-relative flow sweeping the object its conditions are typed against, where 18.3.0 served a warning; and a flow condition's `type-mismatch` warning is served under its own code `type-mismatch-run-may-fail` instead of `type-mismatch`. Added beside them (the widening half): the optional `severity` and `triggerKind` inputs of the `validate_expression` MCP tool, the code `type-mismatch-run-may-fail` in `@objectstack/formula`'s `ExpressionRefusalCode`, the optional `flowVariables` key of `@objectstack/formula`'s `ExprSchemaHint`, and a bare flow-condition name that a declared flow variable or node id holds is no longer typed as the field it shadows (no verdict where 18.3.0 served a `type-mismatch` warning).
+  Metadata-protocol: narrowed
+  Skills-docs: updated here — `content/docs/data-modeling/formulas.mdx` (the type-soundness row names the decision branch, the `record.<field>` read and the warning on other flows) and the MCP skill text in `packages/mcp/src/skill-md.ts` (the two new `validate_expression` inputs); `skills/**` teaches no text-vs-number comparison in a flow condition (grep for `type mismatch`, `evaluates to null`, `validate_expression` and the decision examples), so no skill or eval moves.
+  
+  <!-- adr-0087: registered flow-record-read-and-decision-type-mismatch-refused -->
+  
+  **BREAKING** accept-set narrowing at the author-time expression gate, served by `os build`, `os validate` and `POST /api/v1/packages/:id/publish-drafts`.
+  
+  - **Record-triggered flows — before.** The start and edge conditions refused `name > 5` on a text field (`type-mismatch-run-fails`), but `record.name > 5` in the same slot, and `name > 5` in a `decision` node's `config.conditions[].expression`, published with no verdict at all. Both fail the run the same way: the engine's `evaluateCondition` throws on the fault, the run binds the trigger record both as `record` and flattened to bare names, and a decision branch is evaluated over the same variables as an edge.
+  - **Now.** Both are refused as `expression-invalid` at `severity: error`, code `type-mismatch-run-fails`, with the message the bare name already gets: the run fails at the condition and the triggering write still lands. `previous.<field>` is judged the same way. The date verdicts stay on the bare name only, as before.
+  - **Time-relative flows.** A sweep launches each run with the swept row as its record, so on a flow whose `timeRelative.object` is the start node's `objectName` (or is omitted) the start, edge and `decision` conditions get the record-triggered verdict above, bare name included: `type-mismatch-run-fails`, where 18.3.0 served a `type-mismatch` warning. A sweep of another object keeps the warning below.
+  - **Any other flow** (no `triggerType`, a `schedule` flow, an `api` flow) and an inert node `condition` keep a warning. Its text said the expression "silently evaluates to null", which is false on every flow: a condition that faults fails the run. It is now `type-mismatch-run-may-fail`, worded for the failed run, and a warning because such a flow is handed whatever its entrance carries (an API request body, an action's partial record, a parent flow's record, or nothing), so the field's type is not proven to be what the name holds. A `record.<field>` read and a `decision` branch there get the same warning. The flow registration log line reads the same text.
+  - **A bare name a flow variable holds.** The run seeds a flow's declared variables (and each node's outputs, under its id) before it flattens the record, and the flattening skips a name already bound. So in a flow that declares `variables: [{ name: 'title', type: 'number' }]` over a text field `title`, a bare `title > 5` reads the number and runs; it was refused as `type-mismatch-run-fails` on the head that added that error, and warned on 18.3.0. It now gets no type verdict (the `flow-variable-shadows-field` warning still names the shadowing). `record.title > 5` reads the field and stays refused.
+  - **`validate_expression` (MCP).** Two optional inputs, so the tool answers what the gate will: `severity` (`error` | `warning` | `info`, site `validation`; default `error`) gives an advisory rule the gate's `type-mismatch-fail-open` instead of the fail-closed verdict, and `triggerKind` (`record_change` | `time_relative` | `schedule` | `api` | `none`, site `flow_condition`; default `record_change`) gives a `schedule`, `api` or `none` flow the gate's warning instead of the run-fails error (`time_relative` answers run-fails, its record being a row of `objectName`). Either input on a site it does not describe is refused as a tool error. A call that passes neither answers as before.
+  - **`@objectstack/spec`.** Upgrade guide entry `flow-record-read-and-decision-type-mismatch-refused` (semantic: no mechanical rewrite).
+  
+  **FROM → TO.** In a record-triggered flow, or a time-relative flow sweeping its own object: `record.name > 5` (or a decision branch `name > 5`) on a text field → `size(record.name) > 5` for its length, `record.score > 5` on a number field for a value, or `double(record.name) > 5` only when every value is numeric text. A boolean: `record.active > 0` → `record.active == true`. A consumer keyed to the code of a flow condition's warning: `type-mismatch` → `type-mismatch-run-may-fail` (`@objectstack/formula@18.3.0` and `@objectstack/mcp@18.3.0` serve `type-mismatch` there; the record-scoped `type-mismatch`, on a formula field or a display predicate, is unchanged).
+- cfb602c: fix(lint)!: a time-relative flow whose start node names no `objectName` has its conditions typed against the object it sweeps (`timeRelative.object`), so a text-vs-number comparison, a read of a field the swept object does not declare and date arithmetic there are refused like on a sweep of the start node's object; a sweep of another object is told why it only warns; and `validate_expression` takes the swept object (#30026)
+  
+  Clause-②: yes (narrowing) — the author-time gate (`os build`, `os validate`, the package publish and the flow publish door) refuses, in the start, edge and `decision` conditions of a time-relative flow whose start node names no `objectName`, a `type-mismatch` (`type-mismatch-run-fails`), a `record.FIELD` read of a field the swept object does not declare (`unknown field`), and date arithmetic (`date-arithmetic-run-fails` / `date-text-arithmetic-run-fails`), which it passed with no verdict at all before. Added beside it (the widening half): the optional `sweepObject` input of the `validate_expression` MCP tool.
+  Metadata-protocol: narrowed
+  Skills-docs: updated here — the MCP skill text in `packages/mcp/src/skill-md.ts` (the new `sweepObject` input); `skills/**` teaches no time-relative flow condition with a text-vs-number comparison, so no skill or eval moves.
+  
+  <!-- adr-0087: not-required (already-registered flow-record-read-and-decision-type-mismatch-refused) the entry already prescribes this exact rewrite for a time-relative flow's conditions: the same refusal code, the same replacement and the same reason (each run's record is a row of the swept object); this change extends it to a sweep whose start names no objectName; the unknown-field and date-arithmetic arms are the verdicts every flow with a typed object already gets, served here for the same reason and with the rewrite in their own message, and the entry's surface text is widened to this shape in the spec lane -->
+  
+  **BREAKING** accept-set narrowing at the author-time expression gate, served by `os build`, `os validate` and `POST /api/v1/packages/:id/publish-drafts`.
+  
+  - **Before.** A time-relative flow was typed only against its start node's `objectName`. A start that named none, with the swept object in `timeRelative.object` (the key the descriptor requires), got no type verdict on its conditions at all: `title > 5` on a text field published clean, and every run the sweep launched failed at that condition.
+  - **Now.** The conditions of such a flow are typed against `timeRelative.object`: each run's record is a row of that object, so its start, edge and `decision` conditions get every verdict a sweep of the start node's object already gets. Three of them are new refusals there: a text-vs-number comparison (`type-mismatch-run-fails`), a `record.FIELD` read of a field the swept object does not declare (`unknown field FIELD on OBJECT`; the run fails on the missing key), and arithmetic on a date field (`date-arithmetic-run-fails`, or `date-text-arithmetic-run-fails` against text). The shadowing and near-miss warnings and the root check are judged against the same object.
+  - **A sweep of another object** (the start node's `objectName` is not `timeRelative.object`) keeps the `type-mismatch-run-may-fail` warning, and the flow now gets one more warning, at its start node's `config.objectName`, saying why: the conditions are checked against that object's fields while each run's record is a row of the swept one. It is served only on a flow that got a warning it explains.
+  - **`validate_expression` (MCP).** New optional input `sweepObject` (site `flow_condition` with `triggerKind: 'time_relative'` only; a tool error anywhere else): the flow's `timeRelative.object`. When it is another object than `objectName`, a type mismatch is the gate's warning instead of the run-fails error. A call that does not pass it answers as before.
+  - **Correction to the 18.x changeset of the flow-condition type check.** It described a time-relative flow whose `timeRelative.object` "is omitted" as sweeping the start node's object. That shape never binds: `TimeRelativeTriggerSchema` requires `object`, and the gate refuses its absence (`flow-time-relative-descriptor-invalid`). Such a flow now gets the warning, not the run-fails verdict, on its conditions, since no run of it binds a row.
+  
+  **FROM → TO.** In a time-relative flow whose start names no `objectName`, sweeping `crm_opportunity` with a text field `title` and a date field `close_date`: `title > 5` (or `record.title > 5`, or a decision branch `title * 2 > 10`) → `size(title) > 5` for its length, a number field for a value, or `double(title) > 5` only when every value is numeric text. `record.nope > 1`, where `crm_opportunity` declares no `nope` → the field's declared name, or the object that declares it as `timeRelative.object`. `close_date + 1 > …` → `addDays(close_date, 1) > …` to shift a date (`addMonths(d, n)` and `daysFromNow(n)` likewise), or `daysBetween(a, b)` for a span in whole days. A flow whose start names one object and sweeps another: set the start node's `objectName` to the swept object, or remove it.
+
+### Patch Changes
+
+- 06cccd3: fix: the inbox's own notification list no longer shows the raw topic, and an MCP argument refusal ends at the fix
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **`@objectstack/service-messaging`.** The `mine` list view of `sys_inbox_message` (a person's own notifications) showed a Topic column reading the producer's machine id, such as `notify` for a flow's notify node or `collab.mention` for a mention. Nothing labels those ids, so the column is gone from that view: it now shows the title, the severity and the time. The `topic` field itself is unchanged and still searchable, so a filter or another view can use it.
+  - **`@objectstack/mcp`.** When a tool call carries an argument the tool does not declare, the refusal names the argument and the spelling to send, and now stops there. It no longer ends with the sentence "This argument used to be dropped silently and the call still succeeded, …", which explained the history of the check to internal developers and gave the caller nothing to act on. Every tool still refuses an undeclared argument exactly as before; only the closing sentence is gone.
+- 67d5d53: fix(formula,lint,mcp): a fail-closed date verdict says the write is refused, and a time-relative sweep's run-fails verdict names no firing write
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - **`@objectstack/formula`: three codes join `ExpressionRefusalCode`** (`EXPRESSION_REFUSAL_CODES`), with the params of the code they split from:
+    - `date-arithmetic-fail-closed` and `date-text-arithmetic-fail-closed`. On a site that fails closed (`faultOutcome: 'fail-closed'`: an `error` validation rule, a field `requiredWhen` / `readonlyWhen`, an option `visibleWhen`, a hook `condition`), date arithmetic used to be told "this faults at runtime, so the field silently evaluates to null". There the fault refuses the write instead, and the verdict now says so. A formula field and an advisory (`warning` / `info`) validation rule keep `date-arithmetic` / `date-text-arithmetic` and their sentence. A consumer keyed to the old codes on a fail-closed site re-keys to the new ones.
+    - `type-mismatch-sweep-run-fails`. A time-relative sweep of the typed object is graded `run-fails` like a record-triggered flow, but no write fires its run: the sweep starts one run per row it finds. Its condition's text-vs-number verdict used to say "the write that fired it still lands". Served where the new optional `ExprSchemaHint.timeRelativeSweep` is set beside `faultOutcome: 'run-fails'`, it now says the run for that row fails and nothing else happens. A record-triggered flow keeps `type-mismatch-run-fails` and its sentence.
+  - The grade is unchanged at every site. What is refused, warned or passed is unchanged.
+  - **`@objectstack/lint`**: the flow walk passes `timeRelativeSweep` on a `time_relative` flow. The nullable-comparison verdict, which also says "still lands", runs on record-triggered flows only, so it is unchanged.
+  - **`@objectstack/mcp`**: `validate_expression` with `site: 'flow_condition'` and `triggerKind: 'time_relative'` passes the same key, so its answer stays the gate's.
+- 6c4c43a: fix(service-automation,mcp): a time-relative flow's conditions are typed against the object its sweep scans, at registration and in the `validate_expression` advice
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **`@objectstack/service-automation`**: the registration pass's advisory schema check (the logged `unknown field` / typo / type-mismatch warnings) typed a time-relative flow's conditions against the start node's `config.objectName`, while the run binds a row of `config.timeRelative.object`. A flow stored with a start naming another object kept a warning on a field that is right for the scanned object and none on a field that fails at run time; a start naming no `objectName` got no schema check at all. The pass now reads the object off the flow's trigger binding, the same answer the run uses: `timeRelative.object` when it is a string, `config.objectName` only otherwise. Every other flow is typed as before. The warnings stay logged, never thrown.
+  - **`@objectstack/mcp`**: `validate_expression`'s description, its `sweepObject` input text and the SKILL.md line no longer advise passing a `sweepObject` other than `objectName` as a supported shape. They say to pass the scanned object as `objectName`, and that a start whose `objectName` names another object is refused at publish (`flow-time-relative-object-mismatch`). The tool's inputs and verdicts are unchanged.
+- 7569fb5: fix(platform-objects)!: the platform-admin actions declare their gate, so MCP `list_actions` no longer lists them to a caller who cannot run them, and both action doors refuse that caller themselves
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) nothing an author wrote is retired or renamed: the change adds `requiredPermissions` to fifteen first-party action declarations, so stored metadata needs no rewrite, and the one thing an upgrader may act on (a legacy role-only admin needing the admin_full_access set or OS_PLATFORM_OWNER_EMAIL) is a grant, not a metadata edit -->
+  
+  **BREAKING.** The 15 first-party actions whose door runs the platform-admin gate (on `sys_user`: `ban_user`, `unban_user`, `unlock_user`, `create_user`, `set_user_password`, `impersonate_user`, `set_user_manager`, `list_platform_admins`; on `sys_member`: `add_member`; on `sys_oauth_application`: `disable_oauth_application`, `enable_oauth_application`; on `sys_sso_provider`: `register_sso_provider`, `register_saml_provider`, `request_domain_verification`, `verify_domain`) now declare `requiredPermissions`: `['manage_users']` for the account and membership doors, `['manage_platform_settings']` for the OAuth application and SSO doors. It is the existing ADR-0066 D4 key, read by one runtime check for MCP `list_actions`, MCP `run_action` and `POST /api/v1/actions/:object/:action`. A platform administrator holds both capabilities on either way of becoming one (the `admin_full_access` grant or `OS_PLATFORM_OWNER_EMAIL`), so nothing changes for them.
+  
+  What changes, before and now:
+  
+  - **MCP `list_actions`.** Before: every caller was listed all of these actions (a plain member saw `ban_user` and `set_user_manager`). Now: a caller without the capability is not listed them.
+  - **The refusal at `POST /actions/:object/:action` and MCP `run_action`.** Before: the door forwarded the call and the target answered 403 `PERMISSION_DENIED` "Admin role required". Now: nothing reaches the target. `POST /actions/...` answers 403 itself, with the capability sentence (`Action 'ban_user' on 'sys_user' requires capability [manage_users] — caller is missing [manage_users]`), and MCP `run_action` answers the same sentence as `PERMISSION_DENIED` with status 403, whether it is called by `actionName` alone or with `objectName`.
+  - **A caller whose only admin standing is the legacy better-auth `role === 'admin'` scalar** (no `admin_full_access` grant, not in `OS_PLATFORM_OWNER_EMAIL`). Before: the action doors forwarded the call and the target admitted it. Now: the action doors refuse it 403, because that caller holds no `manage_users` / `manage_platform_settings`. The target endpoints themselves (`/api/v1/auth/admin/*`) are unchanged and still admit it; give the account the `admin_full_access` permission set, or list its email in `OS_PLATFORM_OWNER_EMAIL`, to keep it on the action doors.
+  
+  **MCP `run_action` refusal codes (`@objectstack/runtime`, `@objectstack/mcp`).** The capability gate's refusal at MCP `run_action` used to be a plain message; it now carries `code: 'PERMISSION_DENIED'` and `status: 403`, the REST door's answer, for every action with `requiredPermissions`. With `objectName` on a `sys_*` object, the MCP tools admit an action only where `list_actions` lists it, and answered every action missing from the listing with the system-object sentence (`… is not exposed via MCP …`). An action that IS exposed but whose gate refuses the caller now gets the gate's refusal there too, through a new optional `McpActionBridge.capabilityRefusal(name, objectName)` the runtime bridge implements; an action not exposed to AI keeps the system-object sentence, and a bridge without the member behaves as before.
+  
+  What does not change: the target endpoints judge the platform-admin standing as before, the console shows and hides these buttons from their `visible` standing as before, and an action on another object is unaffected.
+- c77dd17: feat(mcp)!: the MCP `delete_record` tool refuses a call without `confirm: true`, with `run_action`'s confirmation refusal
+  
+  Clause-②: yes (narrowing) — the MCP `delete_record` tool refuses every call that does not carry `confirm: true`, where it deleted the record. The confirmation contract in `@objectstack/spec/contracts` (`AIActionConfirmation`, `ActionConfirmationRequiredDetails`) gains its second door in its docblock, and the error-code ledger lists `ACTION_CONFIRMATION_REQUIRED` under `@objectstack/mcp` as a second emitter; no shape changes.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and nothing at rest records a tool call: what moves is the answer an MCP client gets for a delete_record call that does not carry the confirmation member. The fix is in the calling client, which adds one member to the call; there is nothing for a metadata migration to rewrite. -->
+  
+  **BREAKING** accept-set narrowing at the MCP `delete_record` tool (`@objectstack/mcp`), over both transports (Streamable HTTP `/api/v1/mcp` and stdio): every MCP client that deletes is refused until it sends the confirmation member.
+  
+  - **Before.** `delete_record({ objectName, recordId })` deleted the record. A delete is hard and permanent, and the tool's only safety signal was `annotations.destructiveHint`, a hint a client may ignore. A call carrying `confirm` was refused as an unknown key.
+  - **Now.** A call without `confirm`, or with `confirm: false`, is refused before the data bridge is reached, and nothing is read or deleted. A non-boolean `confirm` (the string `"true"`, `1`) is refused before that by the tool's closed input schema, with no code and no `details`, exactly as on `run_action`. The answer to an absent or `false` member is the refusal `run_action` gives an action whose author declared `ai.requiresConfirmation: true`: an `isError` result whose text is `{ "error": { "code": "ACTION_CONFIRMATION_REQUIRED", "message", "status": 428, "details": { "actionName": "delete_record", "objectName", "confirmationMember": "confirm" } } }`. `delete_record({ objectName, recordId, confirm: true })` deletes as before, under the same exposure, credential and permission checks. The tool schema advertises `confirm` as an optional boolean, and the tool description tells the agent to ask the human first, then retry.
+  - **Who moves.** An MCP client or agent that calls `delete_record`. A client that already handles `run_action`'s `ACTION_CONFIRMATION_REQUIRED` (read `details.confirmationMember`, ask the human, resend the same call with that member set to `true`) needs no change.
+  
+  **The remedy.** Ask the human in the loop, then send the same `delete_record` call with `confirm: true` added beside `objectName` and `recordId`. The flag asserts an approval; it does not obtain one, and the gate makes forgetting loud without proving a human.
+  
+  **The bounds, as decided.**
+  
+  - REST `DELETE /api/v1/data/:object/:id` (the human path) is outside the gate and unchanged.
+  - `update_record` is not gated.
+  - No object is exempt: every object a caller may delete through `delete_record` takes the gate.
+  - Any future bulk-delete tool takes the same gate.
+  
+  The member, the code, the status and the `details` shape are the contract `run_action` already serves (`AI_ACTION_CONFIRMATION_MEMBER` and `ActionConfirmationRequiredDetails` in `@objectstack/spec/contracts`), so an agent learns one retry for both tools. The MCP server's own skill (`GET /api/v1/mcp/skill`) teaches the member on `delete_record`.
+- 5cb7d7e: feat(mcp): `delete_records` deletes many records of one object in one confirmed call, by a filter or an id list (#30891)
+  
+  Clause-②: yes (widening) — the MCP surface (HTTP `/api/v1/mcp` and the stdio server) registers one more tool, `delete_records`, offered to an OAuth token that carries both `data:read` and `data:write`; no existing tool, input or answer changes.
+  Metadata-protocol: none
+  
+  An agent that had to clear a set of records called `delete_record` once per row, and confirmed each one. `delete_records` takes the selection as `where` (a filter, `{}` for every record) or `recordIds` (an id list), never both.
+  
+  - **The preview is the refusal.** A call without `confirm: true` deletes nothing. It answers `delete_record`'s refusal (`428` `ACTION_CONFIRMATION_REQUIRED`, the same `details` keys, `details.actionName` naming `delete_records`) with a `preview` member beside `error`: how many records the selection matches for this caller (`matched`), how many a confirmed call attempts (`wouldAttempt`), up to ten sample ids and, for an id list, the ids that name no readable record (`notFound`). The agent shows that to its human and retries with `confirm: true` once they approve.
+  - **A confirmed call deletes each record as `delete_record` does**, through the same bridge member, under the caller's permissions, row-level security and the object's delete rules (`beforeDelete` hooks, restricted relations). No caller bypasses a package's locking rule, an administrator included. Records a rule refuses stay, and the answer groups them by code, status and reason, with their ids: `{ matched, attempted, deleted, refused, refusals: [{ code, status, reason, count, recordIds }], remaining, cap }`. A refusal's `details` stays off the wire, as on every other tool.
+  - **A fault is not a refusal.** A rule's refusal and a fault are told apart the way the REST `/data` door tells them apart (its own classifier): a 4xx verdict (a coded rule refusal, a sandboxed hook body's `400 HOOK_ABORTED`) is grouped and the call goes on; a 5xx verdict (a code hook's bare `throw new Error`, a lost connection, a driver error, a driver's own string code) stops the call at that record. The tool error names the fault and the record, and carries the call's `progress` (`deleted`, `stoppedAt`, `notAttempted`): the records deleted before it stay deleted.
+  - **At most 200 records per call**, the bound REST `POST /data/:object/deleteMany` applies by default (`batch.maxBatchSize`). A filter is read in id order at the cap, and the count says whether more match; when more than 200 match, the answer says how many remain and the next call with the same selection continues. When the deployment has no aggregate support, the answer says `matchedMoreThan: 200` instead of guessing a count. On a deployment whose read page size or row budget (`OS_DATA_MAX_PAGE_SIZE`, `OS_DATA_QUERY_ROW_BUDGET`) is under 200, one call runs at that size, since the data door refuses a larger read, and the answer's `cap` names it; a longer id list is refused before anything is read.
+  - **Scopes.** Over OAuth the tool needs both `data:read` and `data:write`: its preview reads the selection's ids and count, a read a `data:write`-only token is not granted.
+  
+  What a preview cannot say: which records a delete rule will refuse. The engine has no delete dry run, so the rules are judged when the confirmed call runs, and the preview says so.
+  
+  `@object-ui/console`: the Integrations page's "Download skill" SKILL.md is a byte-for-byte mirror of the server's (#31015's drift pin), so it carries the same `delete_records` bullet.
+  
+  `@objectstack/spec` changes only doc comments: `AIActionConfirmation` names `delete_records` as the third door of the confirmation member, and the error-code ledger's `ACTION_CONFIRMATION_REQUIRED` rows name both delete tools.
+- 704efef: feat(mcp): an agent can read a record's files and attach a file to a record — `read_file` and `create_upload_link` over `/api/v1/mcp`, and the single-use upload link they hand out (#30892)
+  
+  Clause-②: yes (widening) — two MCP tools join the HTTP surface where the storage service is installed (`read_file` under `data:read`, `create_upload_link` under `data:write`), and two signed-in routes join the storage family: `GET` and `PUT /api/v1/storage/upload-links/:token`. Nothing that answered before answers differently.
+  Metadata-protocol: none
+  
+  - **`read_file`** takes `objectName`, `recordId` and a file field (with `fileId` when the field holds several files) or an `attachmentId`. With neither, it lists the record's files. It answers the file's facts (id, name, type, size, the read cap that applies), a short-lived download link, and the content: a PDF's or Word document's text (extracted on the server, capped in pages and characters), an image as an MCP image block, a text file as text. A file over the cap (10 MiB) answers its facts and the download link, without content. Access follows the record: a record the caller cannot read answers `404 RECORD_NOT_FOUND`, as `get_record` does, and a file the download door would refuse answers that door's `403`.
+  - **`create_upload_link`** takes a record the caller may edit plus a file field or `attachments: true`. It answers a link that accepts exactly one upload for ten minutes, bound to that record and that field (or the record's attachments), and usable only by the same user, signed in: a request without a session answers `401 AUTH_REQUIRED`, like every other storage door. The upload lands as the caller would land it: the file field is written through the record's own update door, so the field's `accept` and `maxSize`, the record's edit access and the upload size limit (`storage.max_upload_mb`, `413` before the link is spent) all apply. It writes the same `sys_file` row, size recorded, and the same `storage.upload` as any other upload, so whatever a host counts toward quota counts it. A used, expired or unknown link, or one made for another user, answers the same `404`.
+  - **`@objectstack/mcp`** loads `unpdf` (pinned 1.9.1) by dynamic import on the first PDF read, with pdf.js eval off; a Word document is read with `node:zlib` under a bounded inflate.
+- 78eb352: feat: put Connect an AI Assistant where each person looks, and call it that
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The Connect an Agent page is now Connect an AI Assistant (连接 AI 助手, AI アシスタントを接続, Conectar un asistente de IA): the page title, its header and both of its navigation entries, in every shipped language. "Agent" already names the agents an author builds in Studio, and this page connects the AI assistant a person uses, such as Claude, Doubao or Cursor.
+  
+  Where to find it:
+  
+  - **Every signed-in person**: the avatar menu has a Connect an AI Assistant item, under Profile. In the Account app the entry has a group of its own, AI Assistant, open by default, instead of sitting inside the collapsed Developer group.
+  - **Platform administrators**: in Setup the entry is in the top group, Overview, under System Overview, instead of near the bottom of Integrations. Who sees it does not change: both groups need `manage_platform_settings`.
+  
+  All three doors appear only where the MCP server is enabled; with `OS_MCP_SERVER_ENABLED=false` the page, both menu entries and the avatar item are absent. The page address (`page/connect_agent`) and the nav item id (`nav_connect_agent`) are unchanged, so bookmarks and links keep working. The stdio start-up refusal and the API-key session refusal name the new page and paths.
+- 2ce2646: feat(console): Connect an AI Assistant names the connected assistant and its last call; plain-words page subtitle
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - **`@object-ui/app-shell`**: once the signed-in person has connected, the line under the example requests on Connect an AI Assistant names what is connected and when it last made a call, the most recent call first: an authorized assistant by its name, with its last call "in the hour from" the recorded hour, or an API key by its name, with its last call as a moment; "no call yet" when none is recorded, and a pointer to the list at the bottom when more than one is connected. With nothing connected (or when it cannot be read) the line stays the try-first hint. It reads the records the "What can act as you" list reads (`oauth.authorizedClients.list()` and the person's own `sys_api_key` rows; a revoked or expired key is not a connection) through one hook, `useConnectedAccess`, and follows a Revoke made on the page.
+  - **`@object-ui/i18n`**: `connectAgent.capabilities.connected`, `connectedKey`, `lastCallHour`, `lastCallAt`, `noCallYet` and `moreConnected` added in all eleven packs.
+  - **`@objectstack/mcp`**: the Connect an AI Assistant page header no longer speaks of MCP-capable clients or row-level security: "Work in this system from Claude, Doubao and other AI assistants. Each one acts as you: it sees and changes only what your own permissions allow."
+  - **`@objectstack/platform-objects`**: `pages.connect_agent.subtitle` follows in en, es-ES, ja-JP, zh-CN and zh-Hant, with the source digests re-recorded.
+- 614e831: feat(app-shell): Connect an Agent adds connect cards for WorkBuddy, Doubao Work and QwenWork, and drops the VS Code card
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The Connect an Agent page (Account → Developer, and Setup) now carries three more client cards, each filled in with the deployment's MCP URL, listed after the Claude, Codex and Cursor cards:
+  
+  - **WorkBuddy** — the `mcpServers` entry for Connectors → Custom connector → Configure MCP, with the `streamableHttp` transport spelling WorkBuddy reads, and the reminder that the connector stays inactive until it is trusted.
+  - **Doubao Work** — the name, transport and server URL to type into Skills · Connectors → New → New custom connector.
+  - **QwenWork** — the `mcpServers` JSON for Extensions → Connectors → Paste JSON config, with the `streamable-http` spelling QwenWork reads.
+  
+  Each of the three names the fallback for a client version without the browser sign-in: the request header `Authorization: Bearer <API key>`. A minted key is now revealed in that form as well as the existing `x-api-key` line.
+  
+  The claude.ai / Claude Desktop and Claude Code cards merge into one full-width Claude card with a half for each. The Codex CLI card becomes a Codex card for the Codex app: the name, transport and URL to enter under Settings → MCP servers → Add server, and where to sign in (new string `connectAgent.codex.hint`); it no longer shows a `config.toml` snippet. The VS Code / Copilot card is gone, with its string `connectAgent.vscode.body`; the generic `mcpServers` snippet on the Cursor card and the MCP URL at the top still serve any MCP client. The client cards and the API-key card form one list, the API-key card last. Long one-line snippets wrap instead of being clipped. The Doubao Work and QwenWork card titles are strings too (`connectAgent.doubao.title`, `connectAgent.qwenwork.title`), so the zh pack shows the products' own names, 豆包工作 and 千问办公. New strings live under `connectAgent.fields`, `connectAgent.workbuddy`, `connectAgent.doubao` and `connectAgent.qwenwork`, translated in all ten packs. Nothing on the server changes; `@objectstack/mcp` updates only its description of the page.
+- e1dac19: fix(mcp, runtime)!: MCP describe_object answers the same field-masked object schema the /meta door answers (ADR-0106)
+  
+  Clause-②: no (narrowing) — the MCP object-schema reads now serve a caller only the fields the `/meta` object door serves that caller, which ADR-0106 D1 ("a field the caller cannot read does not exist for that caller, on any plane") and the MCP security model ("field-level security applies to the agent exactly as it does to a person") already promise, so no stated contract is narrowed; what narrows is the answer to a caller with a `readable: false` field. Nothing is widened: no export, answer member, error code or status is added.
+  Metadata-protocol: none
+  Skills-docs: no move — `skills/**` teaches no field set for `describe_object`; `content/docs/ai/connect-mcp.mdx` states that schema discovery is covered by field-level security.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema, no export and no stored shape changes: the MCP tools answer a field-restricted caller the field set the metadata door already serves them, with a code and status already on the wire. There is nothing for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** for a field-restricted caller of the MCP object-schema reads, on both transports (`/api/v1/mcp` and the stdio server).
+  
+  - **Now.** `describe_object`, `list_objects`' `fieldCount`, the fields `validate_expression` puts in scope (and its `label()` option-field check) and, on the stdio server, the `objectstack://objects` resources serve each object through the ADR-0106 posture and projection the `/meta` doors run (`resolveObjectSchemaMaskPosture` → `relateObjectSchemaMaskPosture` → `applyObjectSchemaMask`, `@objectstack/metadata-core`), for the same caller: a field the caller cannot read is not listed, and the D4 exemptions, the D6 tiers and the D8 switch (`OS_ALLOW_UNMASKED_OBJECT_METADATA`) are the shared posture's. The HTTP bridge asks the `/meta` door's own masker (`resolveObjectMasker` / `maskObjectSchema`, `@objectstack/runtime`); the stdio bridge asks the host's `security` service about its API-key principal.
+  - **Refusal.** Where the caller's field visibility cannot be evaluated, or the projection would leave the object with no field, the read is refused as the `/meta` door refuses it: `FIELD_VISIBILITY_UNRESOLVED` / 503, rendered as the tools' coded error (`{ error: { code, message, status } }`) and, on a stdio object resource, as `{ error, code, status }`. One object that cannot be projected refuses `list_objects`, as the `/meta` object list does.
+  - **Unchanged.** A caller who may read every field, a D4-exempt caller and a deployment with no `security` service are answered byte for byte as before. The data verbs, their gates and `list_actions` / `run_action` are untouched. The stdio object reads now resolve the API-key principal on each call, as the data verbs already do, so a revoked key is refused there too.
+  - **`@objectstack/mcp`** now depends on `@objectstack/metadata-core` at runtime (it was a dev dependency).
+  - **`@objectstack/spec`**: the error-code ledger lists `FIELD_VISIBILITY_UNRESOLVED` under `@objectstack/runtime` and `@objectstack/mcp` as well, its two new emitters. The code itself was already registered.
+- 56baf78: feat(mcp): a host passes per-request server instructions on `McpAuthoringInjection`, answered at `initialize` only where the authoring family registers
+  
+  Clause-②: yes
+  Metadata-protocol: none
+  
+  `McpAuthoringInjection` gains an optional `instructions` string. `MCPServerRuntime.handleHttpRequest` answers `initialize` with it when the request's grant registers the injected authoring family (a scope list naming `metadata:write`, the same predicate that admits the registry). Every other request — a `data:read`, `data:write` or `actions:execute` token, an API key or a session — is answered with the runtime's configured `instructions`, or the default sentence, and never sees the injected text; an authoring request whose injection carries no `instructions` gets the configured or default text too. A host that serves a build door can now tell the MCP client where its authoring rules live without widening what a read-only connection is told. Nothing existing changes: a host that passes no `instructions` answers exactly as before.
+- Updated dependencies [8aa2e91]
+- Updated dependencies [c17719d]
+- Updated dependencies [b90a6f7]
+- Updated dependencies [486b0a9]
+- Updated dependencies [9ed2ee1]
+- Updated dependencies [769adff]
+- Updated dependencies [e8dc483]
+- Updated dependencies [bcdb1db]
+- Updated dependencies [9ebca94]
+- Updated dependencies [140d8ce]
+- Updated dependencies [699ebd8]
+- Updated dependencies [4c2cd29]
+- Updated dependencies [4be8a2e]
+- Updated dependencies [471add3]
+- Updated dependencies [b5eb61d]
+- Updated dependencies [771b2db]
+- Updated dependencies [97e4249]
+- Updated dependencies [9037b13]
+- Updated dependencies [e3b56b2]
+- Updated dependencies [a52761f]
+- Updated dependencies [e8afd1e]
+- Updated dependencies [bd65cb6]
+- Updated dependencies [f19fbb8]
+- Updated dependencies [217ba78]
+- Updated dependencies [cde492d]
+- Updated dependencies [eee4149]
+- Updated dependencies [0f3ee58]
+- Updated dependencies [f3a52d3]
+- Updated dependencies [d59a1eb]
+- Updated dependencies [af3451b]
+- Updated dependencies [3a27208]
+- Updated dependencies [29cbfcc]
+- Updated dependencies [0c666c3]
+- Updated dependencies [38717d3]
+- Updated dependencies [ac890f5]
+- Updated dependencies [aa57c76]
+- Updated dependencies [fc869c2]
+- Updated dependencies [fef212b]
+- Updated dependencies [dc51811]
+- Updated dependencies [b77c160]
+- Updated dependencies [09720e2]
+- Updated dependencies [25fea77]
+- Updated dependencies [3da9a4c]
+- Updated dependencies [3da9a4c]
+- Updated dependencies [4be9734]
+- Updated dependencies [bb86ff9]
+- Updated dependencies [2046d21]
+- Updated dependencies [fd749a4]
+- Updated dependencies [d9d42d4]
+- Updated dependencies [9d939c5]
+- Updated dependencies [25e1c1a]
+- Updated dependencies [67d5d53]
+- Updated dependencies [47226e6]
+- Updated dependencies [c7d1367]
+- Updated dependencies [f5aaa0b]
+- Updated dependencies [0005fec]
+- Updated dependencies [2d6402c]
+- Updated dependencies [77c203a]
+- Updated dependencies [8293c74]
+- Updated dependencies [60fe44f]
+- Updated dependencies [29702d5]
+- Updated dependencies [a839020]
+- Updated dependencies [a7b8876]
+- Updated dependencies [f7afab8]
+- Updated dependencies [4dde0ae]
+- Updated dependencies [590724f]
+- Updated dependencies [38d416f]
+- Updated dependencies [d2e2f6f]
+- Updated dependencies [d5f3bc5]
+- Updated dependencies [e3948ae]
+- Updated dependencies [b55d6ab]
+- Updated dependencies [1c5cee6]
+- Updated dependencies [aad1603]
+- Updated dependencies [0e4747a]
+- Updated dependencies [7145bf3]
+- Updated dependencies [55d9dd4]
+- Updated dependencies [af8aab1]
+- Updated dependencies [a59d00a]
+- Updated dependencies [4bf9a2d]
+- Updated dependencies [0c9aa82]
+- Updated dependencies [49c8568]
+- Updated dependencies [4564d6f]
+- Updated dependencies [f2ea193]
+- Updated dependencies [badf24d]
+- Updated dependencies [5268f50]
+- Updated dependencies [a30c4f4]
+- Updated dependencies [0cba0ce]
+- Updated dependencies [c893b3d]
+- Updated dependencies [677d542]
+- Updated dependencies [9bdeed2]
+- Updated dependencies [3479c33]
+- Updated dependencies [000a4c0]
+- Updated dependencies [f4d9c09]
+- Updated dependencies [c77dd17]
+- Updated dependencies [ebe0a98]
+- Updated dependencies [9038187]
+- Updated dependencies [f108e6d]
+- Updated dependencies [8847e09]
+- Updated dependencies [5cb7d7e]
+- Updated dependencies [468e0c1]
+- Updated dependencies [6106b73]
+- Updated dependencies [0f920b9]
+- Updated dependencies [33bc8ae]
+- Updated dependencies [293a85b]
+- Updated dependencies [a1afbb9]
+- Updated dependencies [150f740]
+- Updated dependencies [42eb126]
+- Updated dependencies [8cf1fd0]
+- Updated dependencies [98583cd]
+- Updated dependencies [a5cb4f1]
+- Updated dependencies [3c1eb63]
+- Updated dependencies [d57be87]
+- Updated dependencies [5d4f2aa]
+- Updated dependencies [f4cd4ec]
+- Updated dependencies [eca7cd2]
+- Updated dependencies [cf4b9bf]
+- Updated dependencies [e1dac19]
+- Updated dependencies [3299873]
+- Updated dependencies [21510bb]
+- Updated dependencies [0fd363d]
+- Updated dependencies [5210acf]
+- Updated dependencies [d6b88f1]
+- Updated dependencies [4123865]
+- Updated dependencies [6ffe37e]
+- Updated dependencies [63a470a]
+  - @objectstack/spec@18.4.0
+  - @objectstack/metadata-core@18.4.0
+  - @objectstack/core@18.4.0
+  - @objectstack/formula@18.4.0
+  - @objectstack/types@18.4.0
+
 ## 18.3.0
 
 ### Patch Changes

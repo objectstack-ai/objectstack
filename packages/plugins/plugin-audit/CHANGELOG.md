@@ -1,5 +1,318 @@
 # @objectstack/plugin-audit
 
+## 18.4.0
+
+### Minor Changes
+
+- b5eb61d: Clause-②: yes (widening) — `PLATFORM_OBJECTS_BY_PACKAGE['platform-objects']` (and so `PLATFORM_PROVIDED_OBJECT_NAMES` / `isPlatformProvidedObjectName`) lists one more real platform object, `sys_lifecycle_state`. Its readers resolve references against the roster and none refuses an author declaration, so a stack that references the object now resolves it instead of drawing the unknown-platform-name advisory; nothing that was accepted is refused.
+  Metadata-protocol: added
+  Skills-docs: none — `skills/**` and `content/docs/**` enumerate no platform object roster and teach nothing about the lifecycle sweep's schedule; the object is internal clock state with no data API, so there is nothing for an author to write against it.
+  
+  The lifecycle sweep remembers when it last completed, so a kernel that reboots onto an existing datastore no longer re-sweeps within a minute of every boot.
+  
+  `LifecycleService` now keeps a watermark in a new engine-owned, tenant-less object, `sys_lifecycle_state` (declared and registered by `@objectstack/platform-objects`, one row per datastore, id `lifecycle`). At the initial delay the scheduler reads that one row: when the last completed sweep is younger than the sweep interval, the first sweep waits for the interval and the read is the only statement issued. An older or missing watermark, a kernel without the object, or a read that fails (logged at `warn`) sweeps at the initial delay as before. Every sweep that completes with no policy error and a finished reference audit advances the row; a failed or partial sweep leaves it alone. A datastore the process created from empty still defers its first sweep one interval, and now seeds the row. A direct `sweep()` call still always sweeps.
+  
+  The row is internal state, not a setting: no settings key, no environment variable, no audit row per sweep and no data API (`apiEnabled: false`). `@objectstack/plugin-audit` leaves `sys_lifecycle_state` out of `sys_audit_log` and `sys_activity`, so a sweep writes no ledger row for its own clock. `OS_LIFECYCLE_DISABLED=1` still arms nothing. `os migrate organization-ownership` inventories the new table as deployment-level state with no organization column.
+- 25e1c1a: feat(objectql,platform-objects): a by-id delete keeps its rows in the recycle bin (ADR-0148): the `sys_recycle_bin` object, the snapshot on delete, the retention stamp and the TTL reap
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  Skills-docs: follow-up owed — skills/objectstack-api/SKILL.md :268, :417 (they teach that there is no recycle bin)
+  
+  The recycle bin's write side. A delete is still a physical delete, and no read path changed: the rows are gone from every query the moment the delete commits. What is new is the copy kept beside them. Restoring, purging and emptying the bin, the two grants that govern them and their REST doors are not in this release.
+  
+  - **`@objectstack/platform-objects`:** registers `sys_recycle_bin`, built from the spec's `RECYCLE_BIN_ENTRY_FIELDS`. One entry per delete operation. It is engine-owned, with no generic data-API method, because the snapshot holds every field of the deleted rows. Its tenant column cascades, so deleting an organization deletes its entries. The lifecycle sweep reaps an entry once its stamped `purge_after` has passed (`ttl` on `purge_after`, window `0h`), and asks no resolver.
+  - **`@objectstack/objectql`:** a by-id delete of a business record writes one entry in the delete's own unit of work, before the record's row is removed. The entry holds the record and its master-detail cascade, the master first. Each row keeps its declared columns, and `secret` columns are left out, so a restored record's secret fields come back empty. The entry also records the `set_null` references the delete cleared, and `deleted_by`, `deleted_at`, `retention_days` and `purge_after`. If removing the row fails, the entry goes too: the transaction rolls it back, or the engine removes it when no transaction covered it.
+  - **Retention:** `ObjectQLPlugin`'s new `recycleBinRetention: { resolve, token }` option takes the host's retention resolver, called once per delete with the token the host handed over. When the option is absent or the resolver answers `undefined`, the retention is `OS_RECYCLE_BIN_RETENTION_DAYS`, else 30 days. A value that is not a positive whole number of days is refused: from the resolver, the delete is refused before it writes anything; in the variable, the boot is refused, because the plugin reads it in `init()`.
+  - **Which deletes do NOT enter the bin:**
+    - a delete by predicate (`multi: true`), which includes every lifecycle sweep reap, even though the sweep names each reaped row by its id;
+    - a child the cascade deletes, which is a row of its root's entry instead;
+    - any platform object, meaning a `sys_*`, `cloud_*` or `ai_*` object, whose rows are also left out of a business record's snapshot;
+    - any delete on a composition that does not register `PlatformObjectsPlugin`, which logs one `info` line saying so.
+  - **Forward-only:** records deleted before this release have no entry.
+  - **Storage:** every by-id delete of a business record now also writes one `sys_recycle_bin` row holding the deleted rows. The row is reaped once its retention has passed.
+  - **`@objectstack/spec`:** `PLATFORM_OBJECTS_BY_PACKAGE['platform-objects']` lists `sys_recycle_bin`, so a reference to it lints as a real platform object. The comment above `RECYCLE_BIN_OBJECT` now names the object file that builds the table; no exported name, shape or description changed.
+  - **`@objectstack/cli`:** the organization-ownership inventory has a row for `sys_recycle_bin` (fate `attribution`).
+  - **`@objectstack/plugin-audit`:** `sys_recycle_bin` is excluded from the generic audit and activity writer, like the other engine-owned plumbing, so reaping an entry, clearing its `deleted_by` or cascading an organization's delete into its entries never copies a snapshot into `sys_audit_log` or `sys_activity`. The business delete an entry was taken for is audited exactly as before.
+- 4123865: fix(metadata-protocol,runtime): a seed row a person deleted is no longer inserted again under a new id by the next seed replay
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: semantic
+  
+  A seed replays long after its first load: on every boot of a single-tenant runtime (`objectstack serve`, `os start`) and per organization whenever a host replays the seed union, for example on a package upgrade. The create-only default (`mode` omitted, which is `ignore`) inserted every declared row it did not find, and `upsert` did the same. A row a person deleted therefore came back under a new id at the next replay.
+  
+  The seed loads AppPlugin runs now keep a per-organization record of which seed rows landed: the boot seed, the per-organization replay (the `seed-replayer` service) and the dev hot-reload seeder. The record is the new platform object `sys_seed_landed_key` (`SysSeedLandedKey`, registered by `PlatformObjectsPlugin`). It holds one row per landed key: the organization, the object, and the dataset's `externalId` fields with the values the row was matched by. The loader records every keyed row an `upsert` or `ignore` dataset lands, whether it inserted the row, updated it or matched it and left it alone. A row an earlier release seeded therefore counts as landed from the first load after the upgrade. A missing row is inserted only when its key never landed in that organization:
+  
+  - A deleted seed row stays deleted across reboots and upgrades. A row an upgrade adds to the seed still lands.
+  - An edited row is left as the person left it. Under `ignore` this includes a renamed key: the old name is not inserted again.
+  - A reference to a removed row is left as it is, and a row whose own key names a removed row is withdrawn with it. Nothing is reported unresolved for either, so a replay after a person's delete still loads clean.
+  - One `info` line per load says how many seed rows were not inserted again, and where.
+  
+  The deliberate re-seed is the `seed-replayer` service called with `{ reseed: true }`. It inserts every missing row, including the ones a person removed, and records them again. A new database starts with an empty record. Deleting an organization deletes its record.
+  
+  `SeedLoaderService` takes the record through a new constructor option, `landedKeys: 'honour' | 'reseed'`. A caller that does not pass it neither reads nor writes the record, so the package publish, marketplace install, reseed and purge doors behave as before. A load keeps no record when it seeds no organization, and says so at `info`. It also keeps none when the composition does not register `sys_seed_landed_key`, and says so at `warn`. A record write that fails is reported once at `error`. It fails neither the rows nor the load, and the next load records every row that is still present.
+  
+  `PLATFORM_OBJECTS_BY_PACKAGE['platform-objects']` in `@objectstack/spec` lists the new object, and so do `PLATFORM_PROVIDED_OBJECT_NAMES` and `isPlatformProvidedObjectName`, so a stack that references `sys_seed_landed_key` resolves it instead of drawing the unknown-platform-name advisory. `@objectstack/plugin-audit` leaves `sys_seed_landed_key` out of `sys_audit_log` and `sys_activity`: recording which seed rows landed writes no ledger row of its own, and the seeded rows stay audited. `os migrate organization-ownership` inventories the new table as organization-owned rows (fate 3, attribution), each written with the organization its load seeds.
+
+### Patch Changes
+
+- 171b6dd: fix(plugin-audit): the activity list opens newest first, without the platform's own rows, under a plain name and description
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **`sys_activity` declares two list views.** `recent` comes first, so it is the list Home's "view all activity" and the bell's Activity tab open (both name no view): newest first, and only rows a person wrote (`actor_id` set) about something other than the platform's own objects: the metadata store, the data-migration ledger, and every identity object `@objectstack/platform-objects/identity` declares (users, members, organizations, sessions, keys, SCIM): every sign-in stamps the last-login columns on `sys_user` under the signing-in person's own name, the signing key in `sys_jwks` is minted under the first sign-in's session, and adding a person writes `sys_user` and `sys_member` rows that person can read. Sign-in stamps, migrations, seeds and metadata history no longer sit between the business rows; an administrator's edits to users are in `all`. `all` lists every row the reader may read, platform rows included, newest first. Nothing is removed from storage and nothing changes in what is written; every excluded row still has its `sys_audit_log` entry.
+  - **Label and description.** The object reads `Activity Feed` (zh-CN `动态`) instead of `Activity`, which collided with an app's own activity object (a CRM's calls and meetings), and its description says what the page is instead of `Recent activity stream entries (lightweight, denormalized)`.
+- 740edc5: fix(plugin-audit,platform-objects): the audit log's default list shows what people did, not the rows the platform writes beside it; the audit objects read in Chinese
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Setup's 审计日志 opens the first `sys_audit_log` list view, `recent`. One sign-in used to put two rows there (the `login` row and an `update` of the person's `sys_user` stamping `last_login_at` / `last_login_ip`), the first sign-in through the console a third (the token-signing key in `sys_jwks`), and one settings change three or four (the `config_change` row, the stored setting, a secret's ciphertext, and the settings trail's own entry).
+  
+  - The ledger writer now marks the sign-in stamp row with `metadata: {"event":"auth.last_login_stamp"}`, the way `config_change` rows carry `settings.set`. Only an update of `sys_user` whose changes are the stamp's fields alone is marked; an administrator's edit of a user is not. The row is still written.
+  - `recent` leaves out the marked row, the rows on `sys_secret`, `sys_setting_audit`, `sys_platform_setting_audit`, `sys_jwks`, `sys_migration` and `sys_migration_journal`, and the rows on `sys_setting` / `sys_platform_setting` other than `config_change`. Nothing is removed from storage, and `all_events` (全部) still lists every row.
+  - `sys_platform_setting` and `sys_platform_setting_audit` were in no translation bundle, so they read English in every locale; they now ship in `@objectstack/platform-objects`' bundles with zh-CN translations (ja-JP and es-ES carry the English fill). `sys_comment_reaction`'s zh-CN bundle is translated.
+- 05a30e6: feat(service-settings,plugin-audit,plugin-sharing): a config_change ledger row names the settings row it changed, an audit row's record page lists the other changes to the same record, and a queue's record page lists its members
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **`@objectstack/service-settings`: the `config_change` row's shape changes (not breaking).** A settings write's `config_change` row in `sys_audit_log` now sets `record_id` to the id of the stored settings row the write changed (`sys_setting`, or `sys_platform_setting` for a global value), beside the `object_name` it already named; before, `record_id` was always null. `metadata` and the digest in `new_value` are unchanged, and an in-memory settings store still writes null. Rows written before this release keep their null `record_id`.
+  - **Who can read those rows narrows.** Because a `config_change` row now names a record, the ledger's parent-record read gate judges it by that settings row: a reader holding only the ledger's own read grant, who cannot read the settings store, no longer sees new `config_change` rows. Holders of the ledger's audit capability (`view_all_audit_log`, administrators by default) still see every row. Older rows with a null `record_id` are still served under the ledger grant. Nothing becomes visible to a reader who could not see it before.
+  - **`@objectstack/plugin-audit`: `sys_audit_log` gets a default record page** (`sys_audit_log_detail`) that shows the row's fields and lists every other ledger row with the same `record_id`, newest first. Beside a `config_change` row that list holds the CRUD mirror's create and update rows for the same settings row, which carry a non-secret value in plain text; a secret's mirror row carries neither the value nor its handle. The list has no "New". The page label ships in all eleven locales.
+  - **`@objectstack/plugin-sharing`: `sys_queue` gets a default record page** (`sys_queue_detail`) whose members list reads `sys_queue_member` where `queue` equals this queue's `name`, and whose "New" opens the member form with `queue` filled in with that name. `sys_queue_member.queue` is unchanged. Declared queues have no `sys_queue` row, so they have no page. The page label ships in the plugin's four locales.
+- fd749a4: feat(audit): a write made while an administrator impersonates a user now records the administrator
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  An administrator who impersonates a user writes as that user, and until now nothing on the write said otherwise: the `sys_audit_log` row, the `sys_activity` row and the record were byte-identical to the user's own work. The session already knew (`sys_session.impersonated_by`); the write did not.
+  
+  - `ExecutionContext.impersonatedBy` (new, optional, attribution only) carries the administrator's `sys_user` id. The shared request-identity resolution sets it from the session read that admitted the caller, for a session credential only. `HookContext.provenance.impersonatedBy` hands it to hooks; it is never folded into `session`, so a hook that gates on the caller still sees the impersonated user.
+  - `userId`, `created_by`, ownership, `current_user.*` RLS and every permission stay the impersonated user's. Nothing in the authorization path reads the new field.
+  - The audit writer stamps `sys_audit_log.metadata.impersonated_by` on record writes and on `action_invocation` rows, and `impersonated_by` plus `impersonated_by_name` in the `sys_activity` row's metadata. Each key is present only on such a write; its absence means the user acted themselves. `user_id` and `actor` do not move.
+  - A flow started from such a session carries the administrator onto its own writes (`AutomationContext.impersonatedBy`), on both `runAs` arms: a record-triggered flow, a manual `POST /:name/trigger` and a `type: 'flow'` action alike. After an approval decision the decider's segment carries none.
+  - The console's record timeline and field history read 「Dev Admin 代王工操作」 (`detail.impersonatedActor`, in all ten console languages).
+  
+  No schema column and no migration: older rows simply carry no key.
+- c5101a0: i18n(plugin-audit): the audit, activity and comment objects and the activity-feed sentences ship in all eleven platform languages
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `sys_audit_log`, `sys_activity`, `sys_comment` and `sys_comment_reaction` now carry Traditional Chinese (`zh-Hant`), Arabic (`ar`), French (`fr`), Brazilian Portuguese (`pt-BR`), Russian (`ru`), German (`de`) and Korean (`ko`) beside the existing `en`, `zh-CN`, `ja-JP` and `es-ES`, and so do the activity-feed summaries ("Created … ", "Updated …: fields", "… mentioned you"). A reader in one of those languages sees the audit trail, the activity feed and the mention notice in their own language instead of English. Each new locale is registered under its platform-table tag with its source-hash companion and its messages, and the package's extract command lists the seven tags, so the existing `check:i18n` bundle check covers them. Part of #30512.
+- 616311c: fix(service-settings): a settings `config_change` audit row records the value before and after the change, with secrets kept as digests
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  A settings write's `config_change` row on `sys_audit_log` recorded who changed which key and when, plus a digest of the new value. It had no `old_value`, and its `new_value` held no readable value, so the row could not show what a policy setting (for example `auth.allowed_ip_ranges`) was changed from or to. ADR-0007 (Audit & history) asks for both, with an encrypted value recorded only as a placeholder and a checksum.
+  
+  - **`@objectstack/service-settings`.** `new_value` is `{ namespace, key, scope, value, digest }`. `old_value` has the same shape for the value the same stored settings row held before the write. It is `null` when that row held no value: a first write at that scope, or a row an earlier reset cleared. A reset now records its before value in `old_value`, and its `new_value` stays `null`. A secret-valued key, which is one the manifest declares `encrypted: true` (`type: 'password'` forces it), carries no `value` on either side. Each side carries only its masked digest, `<encrypted:hmac-sha256:…>`, or `<encrypted>` when no keyed digest is available. That is the same `new_value` such rows had before, so readers that parse it keep working. A row stored encrypted is never shown either, even if the key is no longer declared secret. `metadata` is unchanged and carries no value. `SettingsAuditSink.record` gets two optional entry fields, `value` and `previous`, and a host sink that ignores them works as before.
+  - **`@objectstack/plugin-audit`.** The ledger's read-side field redaction now also applies to a `config_change` row about a settings store (`sys_setting`, or `sys_platform_setting` for a global value). If a reader's field-level security masks that store's `value` field, the reader gets neither the value nor its digest on either side. They still see which setting changed. The CRUD mirror's row about the same write is narrowed the same way. Readers who can see the field get the row exactly as stored.
+- 022b4e7: feat(audit): every data export writes one run-level `sys_audit_log` row, and the `export` action comes back with its writer
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  `GET /data/:object/export` used to leave the compliance ledger nothing to say: a user could download up to 50,000 rows of any object they may export, `sys_audit_log` included, and no row recorded who, what or how much. Each export the door streams now writes one row with `action: "export"`, the object, `record_id: null` and the exporter (user, actor, tenant, and the agent or impersonator when there is one). Its `metadata` carries the format, the row count, the effective and requested limit and whether the 50,000 cap clipped it, whether the file was truncated at the limit, a bounded summary of the filter (field names and operators, at most 32 terms, never a comparand), whether a search term narrowed it (never the term) and the outcome. An export whose read fails after the checks records `outcome: "failed"` with the status and machine code it answered.
+  
+  A request refused before anything is read (no export permission, a bad parameter, an unparseable filter) writes no row; neither does the import template. The row is written after the file is finished, so the audit write never changes or delays the download; a ledger write that fails is logged at `error` once per cause and the export is unaffected.
+  
+  `export` is declared again on `sys_audit_log.action` (it was retired under #8147 because nothing wrote it) and is shown by the `config_changes` list view beside `config_change` and `import`. The writer lives on the `audit` service slot as `recordDataExport`, beside `recordAuthEvent` and `recordActionInvocation`; a kernel without the audit plugin exports exactly as before.
+- d463b99: fix(plugin-auth,plugin-audit): a SCIM-driven write names the SCIM connection that performed it, on its audit row
+  
+  Clause-②: yes (widening) — `authSystemWriteContext()`, published through `export * from './auth-actor-attribution.js'`, now declares an optional `actor` member on the context it returns; nothing it returned before is removed or narrowed.
+  Metadata-protocol: none
+  
+  An identity provider's SCIM writes (the `sys_user` create, the deactivation's ban update, the delete, and the `sys_scim_*` rows written beside them) used to leave `sys_audit_log` rows with `actor`, `user_id` and `metadata` all null, so no row said which SCIM connection (which IdP) acted, and "who deactivated this account" had no answer.
+  
+  - **`@objectstack/plugin-auth`.** The SCIM request scope `handleRequest` opens around every `/scim/v2/*` request now carries the connection the bearer verified as: the bearer verifier records it, and `authSystemWriteContext()` gives every write of that request `actor: 'svc:scim:CONNECTION_ID'` on `ExecutionContext.actor`, with no `attributedUserId`. The connection id is the label's identifier because it is immutable and keys every resource the connection provisions. Writes outside a SCIM request are unchanged.
+  - **`@objectstack/plugin-audit`.** The audit writer records that label on `sys_audit_log.actor`, as it records any service principal, and the connection id alone as `metadata.scim_connection_id`, read off the same label so the two never disagree. `user_id` stays null, because no human acted. Rows of every other actor are unchanged.
+  - **Never on a row:** the bearer, its digest and the credential row stay out of the write context, so none of them can reach `actor`, `metadata` or any other column.
+- 79a0d30: fix(plugin-audit): a comment write leaves a ledger row and an activity row, stamped when the author was impersonated
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `sys_comment` is no longer on the audit writer's skip list. Creating, editing and deleting a comment now writes one `sys_audit_log` row and one `sys_activity` row, exactly like a write to any other object, and a comment written from an impersonation session carries the administrator in `metadata.impersonated_by` (and `impersonated_by_name` on the activity row). Before, such a comment could not be told from one the user wrote.
+  
+  The rows name the comment as their parent (`object_name: 'sys_comment'`, `record_id`: the comment's id), so a record's own activity timeline does not show the comment twice; they appear in the object-agnostic feeds (the recent-activity feed, the Audit Logs list). A reader is served them only when it can read the comment, which means reading the record the comment is on: the activity and ledger read gates now enumerate `sys_comment` as a parent and ask the comment's own read gate. A holder of the ledger's audit capability keeps reading every ledger row of the organization, as before. Comments written before this change have no rows; nothing is backfilled.
+- Updated dependencies [31fe289]
+- Updated dependencies [eb96480]
+- Updated dependencies [8aa2e91]
+- Updated dependencies [c17719d]
+- Updated dependencies [de24d17]
+- Updated dependencies [b90a6f7]
+- Updated dependencies [486b0a9]
+- Updated dependencies [9ed2ee1]
+- Updated dependencies [769adff]
+- Updated dependencies [e8dc483]
+- Updated dependencies [bcdb1db]
+- Updated dependencies [9ebca94]
+- Updated dependencies [3b8c724]
+- Updated dependencies [140d8ce]
+- Updated dependencies [699ebd8]
+- Updated dependencies [5f47410]
+- Updated dependencies [4c2cd29]
+- Updated dependencies [4be8a2e]
+- Updated dependencies [471add3]
+- Updated dependencies [314ad95]
+- Updated dependencies [b5eb61d]
+- Updated dependencies [771b2db]
+- Updated dependencies [97e4249]
+- Updated dependencies [9037b13]
+- Updated dependencies [e3b56b2]
+- Updated dependencies [a52761f]
+- Updated dependencies [e8afd1e]
+- Updated dependencies [bd65cb6]
+- Updated dependencies [cd5f554]
+- Updated dependencies [f19fbb8]
+- Updated dependencies [217ba78]
+- Updated dependencies [cde492d]
+- Updated dependencies [eee4149]
+- Updated dependencies [f3a52d3]
+- Updated dependencies [d59a1eb]
+- Updated dependencies [13aa6a3]
+- Updated dependencies [af3451b]
+- Updated dependencies [ddcdc80]
+- Updated dependencies [3a27208]
+- Updated dependencies [343ddb2]
+- Updated dependencies [0c666c3]
+- Updated dependencies [f672e0d]
+- Updated dependencies [38717d3]
+- Updated dependencies [bfbdeec]
+- Updated dependencies [4adc890]
+- Updated dependencies [bcdf8d3]
+- Updated dependencies [ac890f5]
+- Updated dependencies [aa57c76]
+- Updated dependencies [fc869c2]
+- Updated dependencies [fef212b]
+- Updated dependencies [dc51811]
+- Updated dependencies [b77c160]
+- Updated dependencies [09720e2]
+- Updated dependencies [8fed00f]
+- Updated dependencies [25fea77]
+- Updated dependencies [86ae2ca]
+- Updated dependencies [3da9a4c]
+- Updated dependencies [4be9734]
+- Updated dependencies [bb86ff9]
+- Updated dependencies [977be38]
+- Updated dependencies [2046d21]
+- Updated dependencies [740edc5]
+- Updated dependencies [778aedf]
+- Updated dependencies [71318af]
+- Updated dependencies [fd749a4]
+- Updated dependencies [a26abbc]
+- Updated dependencies [d9d42d4]
+- Updated dependencies [9d939c5]
+- Updated dependencies [25e1c1a]
+- Updated dependencies [47226e6]
+- Updated dependencies [c7d1367]
+- Updated dependencies [f5aaa0b]
+- Updated dependencies [0005fec]
+- Updated dependencies [2d6402c]
+- Updated dependencies [77c203a]
+- Updated dependencies [8293c74]
+- Updated dependencies [8cc709d]
+- Updated dependencies [60fe44f]
+- Updated dependencies [29702d5]
+- Updated dependencies [a839020]
+- Updated dependencies [a7b8876]
+- Updated dependencies [f7afab8]
+- Updated dependencies [7b80724]
+- Updated dependencies [fb1ab89]
+- Updated dependencies [4dde0ae]
+- Updated dependencies [e8e924f]
+- Updated dependencies [590724f]
+- Updated dependencies [35cd64c]
+- Updated dependencies [38d416f]
+- Updated dependencies [d2e2f6f]
+- Updated dependencies [d5f3bc5]
+- Updated dependencies [e3948ae]
+- Updated dependencies [b55d6ab]
+- Updated dependencies [1c5cee6]
+- Updated dependencies [aad1603]
+- Updated dependencies [eb68b98]
+- Updated dependencies [a11ef71]
+- Updated dependencies [7145bf3]
+- Updated dependencies [55d9dd4]
+- Updated dependencies [af8aab1]
+- Updated dependencies [63de248]
+- Updated dependencies [a59d00a]
+- Updated dependencies [a2437b5]
+- Updated dependencies [4bf9a2d]
+- Updated dependencies [0c9aa82]
+- Updated dependencies [49c8568]
+- Updated dependencies [4564d6f]
+- Updated dependencies [f2ea193]
+- Updated dependencies [badf24d]
+- Updated dependencies [5268f50]
+- Updated dependencies [a30c4f4]
+- Updated dependencies [e2bcd5c]
+- Updated dependencies [0cba0ce]
+- Updated dependencies [c893b3d]
+- Updated dependencies [677d542]
+- Updated dependencies [9bdeed2]
+- Updated dependencies [9052337]
+- Updated dependencies [3479c33]
+- Updated dependencies [000a4c0]
+- Updated dependencies [7569fb5]
+- Updated dependencies [f4d9c09]
+- Updated dependencies [2a6a28d]
+- Updated dependencies [902f162]
+- Updated dependencies [c77dd17]
+- Updated dependencies [555eb1b]
+- Updated dependencies [ebe0a98]
+- Updated dependencies [9038187]
+- Updated dependencies [f108e6d]
+- Updated dependencies [8847e09]
+- Updated dependencies [5cb7d7e]
+- Updated dependencies [78eb352]
+- Updated dependencies [2ce2646]
+- Updated dependencies [468e0c1]
+- Updated dependencies [6106b73]
+- Updated dependencies [0f920b9]
+- Updated dependencies [6bd00d2]
+- Updated dependencies [b5696b4]
+- Updated dependencies [33bc8ae]
+- Updated dependencies [293a85b]
+- Updated dependencies [a1afbb9]
+- Updated dependencies [150f740]
+- Updated dependencies [42eb126]
+- Updated dependencies [8cf1fd0]
+- Updated dependencies [cadd6aa]
+- Updated dependencies [a5cb4f1]
+- Updated dependencies [3c1eb63]
+- Updated dependencies [d57be87]
+- Updated dependencies [5d4f2aa]
+- Updated dependencies [f4cd4ec]
+- Updated dependencies [b3d2f4b]
+- Updated dependencies [eca7cd2]
+- Updated dependencies [cf4b9bf]
+- Updated dependencies [7193160]
+- Updated dependencies [e1dac19]
+- Updated dependencies [3299873]
+- Updated dependencies [7b2bb66]
+- Updated dependencies [a794e32]
+- Updated dependencies [21510bb]
+- Updated dependencies [8304b08]
+- Updated dependencies [0fd363d]
+- Updated dependencies [5210acf]
+- Updated dependencies [d6b88f1]
+- Updated dependencies [4123865]
+- Updated dependencies [bdbaf80]
+- Updated dependencies [6ffe37e]
+- Updated dependencies [cad764d]
+- Updated dependencies [63a470a]
+  - @objectstack/objectql@18.4.0
+  - @objectstack/spec@18.4.0
+  - @objectstack/metadata-core@18.4.0
+  - @objectstack/core@18.4.0
+  - @objectstack/platform-objects@18.4.0
+  - @objectstack/types@18.4.0
+
 ## 18.3.0
 
 ### Minor Changes
