@@ -148,7 +148,7 @@ describe('judgeRestrictionProfile — the reader rules', () => {
     ])],
   };
 
-  it('parallel / try_catch are always allowed — by an empty list AND under allowCode: false — while their nodes are judged', () => {
+  it('parallel / try_catch are always allowed — by a list that omits them AND under allowCode: false — while their nodes are judged', () => {
     expect(FLOW_BUILTIN_NODE_TYPES).not.toContain(PARALLEL_NODE_TYPE);
     expect(FLOW_BUILTIN_NODE_TYPES).not.toContain(TRY_CATCH_NODE_TYPE);
     const rows = rowsOf(profile({ allowCode: false, allowedFlowNodeTypes: ['get_record'] }), CONTAINERS);
