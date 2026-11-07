@@ -280,7 +280,10 @@ describe('#3863 — a fault edge must not swallow a guard refusal', () => {
     it('a guard refusal without any fault edge is fatal, as before', async () => {
         const flow = guardedDeleteWithHandler();
         flow.name = 'no_handler';
-        flow.edges = flow.edges.filter((e) => e.type !== 'fault');
+        // Without its fault edge the handler is reached by nothing, which the
+        // parse refuses, so it goes with the edge.
+        flow.edges = flow.edges.filter((e) => e.type !== 'fault' && e.source !== 'handler');
+        flow.nodes = flow.nodes.filter((n) => n.id !== 'handler');
         engine.registerFlow('no_handler', flow);
 
         const result = await engine.execute('no_handler', {

@@ -131,7 +131,10 @@ describe('notify — a currency hole refused after a FAILED tenant-settings read
 
     it('under errorHandling retry the run succeeds once the read does, and the title formats in the default', async () => {
         const flow = flowWith({ errorHandling: { strategy: 'retry', maxRetries: 2, backoffMs: 1 } });
-        flow.edges = flow.edges.filter((e) => e.type !== 'fault');
+        // Without its fault edge the handler is reached by nothing, which the
+        // parse refuses, so it goes with the edge.
+        flow.edges = flow.edges.filter((e) => e.type !== 'fault' && e.source !== 'handled');
+        flow.nodes = flow.nodes.filter((n) => n.id !== 'handled');
         const { engine, messaging } = engineWith(flow);
         let reads = 0;
         engine.setTenantCurrencyResolver(() => {

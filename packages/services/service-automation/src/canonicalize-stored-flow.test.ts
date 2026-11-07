@@ -246,13 +246,16 @@ describe('canonicalizeStoredFlow — every site registerFlow refuses after the p
         engine.registerNodeExecutor(stampExecutor);
         return engine;
     };
+    // The nodes are chained `start → … → end`: a top-level node no edge reaches
+    // is refused at parse, and that is not the check these cases judge.
+    const chain = (ids: string[]) => ids.slice(1).map((target, i) => ({ id: `e${i}`, source: ids[i], target }));
     const flowOf = (nodes: unknown[], extra: Record<string, unknown> = {}) => ({
         name: 'fd_stored',
         label: 'Stored',
         type: 'autolaunched',
         status: 'active',
         nodes: [{ id: 'start', type: 'start', label: 'Start' }, ...nodes, { id: 'end', type: 'end', label: 'End' }],
-        edges: [],
+        edges: chain(['start', ...nodes.map((n) => (n as { id: string }).id), 'end']),
         ...extra,
     });
     const notify = (title: string) => ({

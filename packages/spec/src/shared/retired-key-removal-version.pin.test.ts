@@ -247,7 +247,7 @@ const flowWithNode = (node: Record<string, unknown>) => ({
   name: 'settle',
   label: 'Settle',
   type: 'autolaunched',
-  edges: [],
+  edges: [{ id: 'e1', source: 'n1', target: 'n2' }],
   nodes: [{ id: 'n1', type: 'start', label: 'Start' }, { id: 'n2', label: 'Step', ...node }],
 });
 
