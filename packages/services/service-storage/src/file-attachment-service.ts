@@ -15,7 +15,13 @@ import type { ExecutionContext } from '@objectstack/spec/kernel';
 // The one reference this verb's caller-scoped insert vouches for: the file it
 // created in the same call (see step ⑤).
 import { vouchForReference } from '@objectstack/core';
-import { StorageMetadataStore, type StorageWriteContext } from './metadata-store.js';
+import { StorageMetadataStore, organizationOutOfWriteReach, type StorageWriteContext } from './metadata-store.js';
+// The upload ownership rule, asked of the upload the attach-on-commit verb
+// names — the commit door's own rule and its one refusal.
+import { isFileUploader, NOT_UPLOADER_CODE, NOT_UPLOADER_MESSAGE, NOT_UPLOADER_STATUS } from './upload-ownership.js';
+// The one definition of "is anything holding this file?" — the reap guard's —
+// asked so the attach-on-commit verb vouches only for an upload nothing holds.
+import { findFileHolder } from './attachment-lifecycle.js';
 // The attach rule's one verdict (parent EDIT), asked here before a producer
 // spends work on a file it could not attach.
 import {
@@ -35,8 +41,9 @@ import {
   UPLOAD_TOO_LARGE_STATUS,
   type StorageLimitsSnapshot,
 } from './storage-limits.js';
-// The upload doors' own storage-key layout.
-import { buildKey } from './storage-routes.js';
+// The upload doors' own storage-key layout, and the commit door's question
+// of whether the backend holds an upload's bytes.
+import { buildKey, heldBytesRefusal } from './storage-routes.js';
 
 /**
  * [#23306] The server-side attach verb — `IFileAttachmentService`, registered
@@ -157,6 +164,46 @@ export interface ICallerFileAttachmentService {
    * `403`: the system has `attachFile`.
    */
   attachFileAs(input: AttachFileInput, context: ExecutionContext): Promise<AttachedFile>;
+  /**
+   * Attach the caller's own browser upload to a record, and commit it, in one
+   * unit, as `context`'s user: the attach verb of the record attachments
+   * surface, asked by the upload-complete door when its request carries
+   * `attachTo` (`POST /api/v1/storage/upload/complete`).
+   *
+   * The file must be the upload the caller is completing: a `sys_file` row
+   * whose `owner_id` is the caller (the upload doors stamp it from the
+   * session), still `pending`, in the `attachments` scope, in the caller's
+   * organization, held by nothing yet (no `sys_attachment` names it and no
+   * record field owns it — `findFileHolder`), with its bytes held by the
+   * storage backend. That is the whole premise of the vouch: the one file this
+   * call turns from the caller's unattached upload into an attachment, and
+   * nothing else. Any other id —
+   * another user's upload, an id that names no file — is refused with the
+   * upload ownership rule's one answer (`PERMISSION_DENIED` / `403`, the same
+   * body for both); a committed or already-held file `RESOURCE_CONFLICT` /
+   * `409`; another scope `INVALID_REQUEST` / `400`.
+   *
+   * Then the attach authorization, before any write: {@link assertMayAttach}
+   * (the permission to create an attachment, and the parent-EDIT attach rule),
+   * and the parent read as the caller (`RECORD_NOT_FOUND` / `404`, as
+   * {@link attachFileAs} answers). The `sys_attachment` insert runs as the
+   * caller, so every gate on it judges the caller, and it vouches for this
+   * one file id and for nothing else (`vouchForReference`, `@objectstack/core`).
+   * A refusal leaves the upload `pending`, its bytes stored, and no attachment.
+   */
+  attachUploadAs(input: AttachUploadInput, context: ExecutionContext): Promise<AttachedFile>;
+}
+
+/** What {@link ICallerFileAttachmentService.attachUploadAs} attaches: an upload, and the record it is attached to. */
+export interface AttachUploadInput {
+  /** The `sys_file` id the upload-start door returned to the caller. */
+  fileId: string;
+  /** The object of the record the file is attached to. */
+  parentObject: string;
+  /** The id of the record the file is attached to. */
+  parentId: string;
+  /** The ETag the client reports for the uploaded bytes, stored on the file as the commit door stores it. */
+  eTag?: string;
 }
 
 /** The upload scope of every file this verb writes: the attachments surface. */
@@ -213,6 +260,17 @@ function validateAttachFileInput(input: AttachFileInput): AttachFileInput {
   return input;
 }
 
+/** {@link validateAttachFileInput}'s counterpart for {@link AttachUploadInput}. */
+function validateAttachUploadInput(input: AttachUploadInput): AttachUploadInput {
+  const fail = (message: string): never => refuse('VALIDATION_ERROR', 400, `attachUploadAs: ${message}`);
+  if (!input || typeof input !== 'object') fail('the input must be an object');
+  for (const field of ['fileId', 'parentObject', 'parentId'] as const) {
+    if (!nonEmptyString(input[field])) fail(`'${field}' must be a non-empty string`);
+  }
+  if (input.eTag !== undefined && typeof input.eTag !== 'string') fail("'eTag' must be a string when it is given");
+  return input;
+}
+
 export class FileAttachmentService implements IFileAttachmentService, ICallerFileAttachmentService {
   constructor(private readonly deps: FileAttachmentServiceDeps) {}
 
@@ -222,6 +280,127 @@ export class FileAttachmentService implements IFileAttachmentService, ICallerFil
 
   async attachFileAs(input: AttachFileInput, context: ExecutionContext): Promise<AttachedFile> {
     return this.attach(input, requireUserContext(context));
+  }
+
+  async attachUploadAs(input: AttachUploadInput, context: ExecutionContext): Promise<AttachedFile> {
+    const caller = requireUserContext(context);
+    const request = validateAttachUploadInput(input);
+    const engine = this.deps.getEngine();
+    const storage = this.deps.getStorage();
+    if (!engine || !storage) refuse('SERVICE_UNAVAILABLE', 503, NOT_READY_MESSAGE);
+    const store = new StorageMetadataStore(engine);
+
+    // ① The upload — the caller's own, as the store stamped it. Read as the
+    // system, by id, as the commit door reads it; nothing about the row is
+    // answered before the ownership rule has passed, and a missing row gets
+    // the same answer as another user's.
+    const file = await store.getFile(request.fileId);
+    if (!file || !isFileUploader(caller.userId, file)) {
+      refuse(NOT_UPLOADER_CODE, NOT_UPLOADER_STATUS, NOT_UPLOADER_MESSAGE);
+    }
+    if (file.status !== 'pending') {
+      refuse(
+        'RESOURCE_CONFLICT',
+        409,
+        'This upload is already completed, so it cannot be attached on completion. An upload is attached in the ' +
+          'call that completes it: start a new upload and complete it with attachTo.',
+      );
+    }
+    if (file.scope !== ATTACHMENTS_SCOPE) {
+      refuse(
+        'INVALID_REQUEST',
+        400,
+        `This upload was started in the '${String(file.scope ?? 'user')}' scope, and only an upload in the ` +
+          `'${ATTACHMENTS_SCOPE}' scope is attached to a record. Start the upload with scope '${ATTACHMENTS_SCOPE}'.`,
+      );
+    }
+    const callerOrganization = nonEmptyString(caller.tenantId) ? caller.tenantId : null;
+    if (organizationOutOfWriteReach(store, file, { organizationId: callerOrganization }) !== null) {
+      refuse(
+        'PERMISSION_DENIED',
+        403,
+        'attachUploadAs: this upload was started in another organization than the one the caller acts in; ' +
+          'switch back to that organization to attach it.',
+      );
+    }
+    if ((await findFileHolder(engine, file.id, file as unknown as Record<string, unknown>)) !== null) {
+      refuse(
+        'RESOURCE_CONFLICT',
+        409,
+        'This upload is already attached to a record or owned by a record field, so it cannot be attached on ' +
+          'completion. Start a new upload and complete it with attachTo.',
+      );
+    }
+    const notHeld = await heldBytesRefusal(storage, file);
+    if (notHeld !== null) refuse('RESOURCE_CONFLICT', 409, notHeld);
+
+    // ② The attach authorization, before any write: the permission to create
+    // an attachment and the attach rule (parent EDIT), then the parent read as
+    // the caller and the organization the attachment is written in.
+    await this.assertMayAttach(request.parentObject, request.parentId, caller);
+    const organizationId = await this.organizationOfParent(
+      engine,
+      { parentObject: request.parentObject, parentId: request.parentId, organizationId: callerOrganization },
+      caller,
+    );
+    const fileOrganization = nonEmptyString(file.organization_id) ? file.organization_id : null;
+    if (fileOrganization !== null && fileOrganization !== organizationId) {
+      refuse(
+        'RECORD_NOT_FOUND',
+        404,
+        `Cannot attach a file to ${request.parentObject}/${request.parentId}: the record does not exist in the ` +
+          'organization the upload was started in.',
+      );
+    }
+    const writeContext: StorageWriteContext = { organizationId };
+
+    // ③ The attachment and the commit — one unit, as the caller.
+    let attachmentId: string | undefined;
+    let ownedUnit = false;
+    try {
+      await this.inOneUnit(engine, organizationId, caller, async (unitContext, owned) => {
+        ownedUnit = owned;
+        const row = (await engine.insert(
+          'sys_attachment',
+          {
+            parent_object: request.parentObject,
+            parent_id: request.parentId,
+            file_id: file.id,
+            file_name: file.name,
+            mime_type: file.mime_type,
+            size: file.size,
+          },
+          // As in `attachFileAs`: the call vouches for the one file it judged
+          // in ① — the caller's own pending upload, which this call commits —
+          // and for no other value. The write-time reference check does not
+          // ask the caller's read door for that id, and still probes that it
+          // exists; every other gate on the insert judges the caller.
+          { context: vouchForReference(unitContext as ExecutionContext, { object: 'sys_attachment', field: 'file_id', id: file.id }) },
+        )) as { id?: unknown } | null | undefined;
+        if (row?.id === undefined || row.id === null || row.id === '') {
+          throw new Error('attachUploadAs: the sys_attachment insert answered no row id, so the attachment cannot be named');
+        }
+        attachmentId = String(row.id);
+        const committed = await store.updateFile(
+          file.id,
+          { status: 'committed', ...(request.eTag !== undefined ? { etag: request.eTag } : {}) },
+          writeContext,
+        );
+        if (!committed) {
+          throw new Error(`attachUploadAs: the sys_file row ${file.id} was gone before it could be committed`);
+        }
+      });
+    } catch (err) {
+      // An owned transaction rolled the attachment back with the commit. A
+      // unit this call does not own keeps an inserted row, so it is removed
+      // here. The upload itself is the caller's and stays as it was —
+      // `pending`, its bytes stored — so completing again can still commit it.
+      if (!ownedUnit && attachmentId !== undefined) {
+        await this.removeAttachment(engine, attachmentId, file.id, writeContext);
+      }
+      throw err;
+    }
+    return { fileId: file.id, attachmentId: attachmentId!, size: Number(file.size ?? 0) };
   }
 
   async assertMayAttach(parentObject: string, parentId: string, context: ExecutionContext): Promise<void> {
@@ -393,7 +572,7 @@ export class FileAttachmentService implements IFileAttachmentService, ICallerFil
    */
   private async organizationOfParent(
     engine: FileAttachmentEngine,
-    request: AttachFileInput,
+    request: Pick<AttachFileInput, 'parentObject' | 'parentId' | 'organizationId'>,
     caller: ExecutionContext | null,
   ): Promise<string | null> {
     let parent: Record<string, unknown> | null;
@@ -454,6 +633,31 @@ export class FileAttachmentService implements IFileAttachmentService, ICallerFil
   }
 
   /**
+   * Remove the `sys_attachment` row a refused call inserted outside a
+   * transaction it owns. Best-effort: the call's refusal is what is thrown.
+   */
+  private async removeAttachment(
+    engine: FileAttachmentEngine,
+    attachmentId: string,
+    fileId: string,
+    writeContext: StorageWriteContext,
+  ): Promise<void> {
+    try {
+      const tenant = writeContext.organizationId;
+      await engine.delete('sys_attachment', {
+        where: { id: attachmentId },
+        context: tenant ? { isSystem: true, tenantId: tenant } : { isSystem: true },
+      });
+    } catch (err) {
+      this.deps.logger.warn(
+        `[storage] attachFile: a refused call could not remove its sys_attachment row ${attachmentId} ` +
+          `(${(err as Error)?.message ?? err}). It points at the pending sys_file ${fileId}; delete the ` +
+          'attachment row by hand.',
+      );
+    }
+  }
+
+  /**
    * Undo a refused call: the attachment row it still holds (if any), then the
    * bytes, then the pending row. Best-effort, and the caller's refusal is what
    * is thrown either way. A failure only delays the reclaim: while the pending
@@ -468,19 +672,7 @@ export class FileAttachmentService implements IFileAttachmentService, ICallerFil
   ): Promise<void> {
     const { logger } = this.deps;
     if (call.attachmentId !== undefined) {
-      try {
-        const tenant = call.writeContext.organizationId;
-        await engine.delete('sys_attachment', {
-          where: { id: call.attachmentId },
-          context: tenant ? { isSystem: true, tenantId: tenant } : { isSystem: true },
-        });
-      } catch (err) {
-        logger.warn(
-          `[storage] attachFile: a refused call could not remove its sys_attachment row ${call.attachmentId} ` +
-            `(${(err as Error)?.message ?? err}). It points at the pending sys_file ${call.fileId}; delete the ` +
-            'attachment row by hand.',
-        );
-      }
+      await this.removeAttachment(engine, call.attachmentId, call.fileId, call.writeContext);
     }
     try {
       await storage.delete(call.key);

@@ -846,3 +846,81 @@ describe('RecordAttachmentsPanel — mobile shell openFile', () => {
     expect(host.openFile).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * The upload attaches through the server's attach verb: the presigned upload's
+ * own completion carries `attachTo` (`POST /api/v1/storage/upload/complete`),
+ * and the server commits the file and writes its `sys_attachment` row as the
+ * signed-in user. The panel never creates `sys_attachment` through the generic
+ * data door, which refuses a member who may attach but cannot read `sys_file`.
+ * Driven through the REAL ObjectStack upload adapter over a stubbed `fetch`.
+ */
+describe('RecordAttachmentsPanel — upload attaches through the upload’s own completion', () => {
+  const ok = (data: unknown) =>
+    new Response(JSON.stringify({ success: true, data }), { status: 200, headers: { 'content-type': 'application/json' } });
+
+  function stubStorage(complete: () => Response) {
+    const calls: Array<{ url: string; method: string; body: unknown }> = [];
+    const spy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      const method = init?.method ?? 'GET';
+      const body = typeof init?.body === 'string' ? JSON.parse(init.body) : init?.body;
+      calls.push({ url, method, body });
+      if (url.endsWith('/api/v1/storage/upload/presigned')) {
+        return ok({ uploadUrl: '/api/v1/storage/_local/raw/tok', method: 'PUT', fileId: 'f-new', headers: {} });
+      }
+      if (url.endsWith('/api/v1/storage/_local/raw/tok')) return ok({ key: 'attachments/f-new.pdf' });
+      if (url.endsWith('/api/v1/storage/upload/complete')) return complete();
+      throw new Error(`unexpected fetch ${method} ${url}`);
+    });
+    return { spy, calls };
+  }
+
+  async function uploadOne() {
+    const dataSource = makeDataSource();
+    const { container } = render(
+      <RecordAttachmentsPanel objectName="att_case" recordId="r1" dataSource={dataSource} currentUserId="me" />,
+    );
+    await waitFor(() => expect(screen.getByText('report.pdf')).toBeInTheDocument());
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+    await userEvent.setup().upload(input, new File(['%PDF'], 'quote.pdf', { type: 'application/pdf' }));
+    return dataSource;
+  }
+
+  afterEach(() => vi.restoreAllMocks());
+
+  it('completes the upload with attachTo naming this record, and creates no sys_attachment through the data door', async () => {
+    const { calls } = stubStorage(() => ok({ fileId: 'f-new', name: 'quote.pdf', attachmentId: 'a-new' }));
+    const dataSource = await uploadOne();
+    await waitFor(() => expect(dataSource.find).toHaveBeenCalledTimes(2)); // the list re-read after the attach
+    const complete = calls.find((c) => c.url.endsWith('/upload/complete'));
+    expect(complete).toMatchObject({
+      method: 'POST',
+      body: { fileId: 'f-new', attachTo: { parentObject: 'att_case', parentId: 'r1' } },
+    });
+    expect(calls.find((c) => c.url.endsWith('/upload/presigned'))?.body).toMatchObject({ scope: 'attachments' });
+    expect(dataSource.create).not.toHaveBeenCalled();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('maps the attach verb’s ATTACHMENT_PARENT_ACCESS refusal to the friendly copy', async () => {
+    stubStorage(
+      () =>
+        new Response(
+          JSON.stringify({ success: false, error: { code: 'ATTACHMENT_PARENT_ACCESS', message: 'Cannot attach to att_case/r1' } }),
+          { status: 403, headers: { 'content-type': 'application/json' } },
+        ),
+    );
+    const dataSource = await uploadOne();
+    await waitFor(() =>
+      expect(screen.getByRole('alert')).toHaveTextContent("You don't have access to attach files to this record."),
+    );
+    expect(dataSource.create).not.toHaveBeenCalled();
+  });
+
+  it('a completion that attached nothing is an error, never a silent success', async () => {
+    stubStorage(() => ok({ fileId: 'f-new', name: 'quote.pdf' }));
+    await uploadOne();
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('did not attach it to this record'));
+  });
+});
