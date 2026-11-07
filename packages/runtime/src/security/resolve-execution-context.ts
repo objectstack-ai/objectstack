@@ -164,6 +164,11 @@ export async function resolveExecutionContext(opts: ResolveOptions): Promise<Exe
   // it is read in (`@objectstack/spec/ai`) is MCP-domain knowledge the core
   // package deliberately does not depend on.
   let oauthPrincipal: VerifiedMcpAccessToken | undefined;
+  // [#31211] The verifier's own answer, once this door has not refused it for
+  // a ban: recorded as used (`recordMcpAccessTokenUse`) only after the request
+  // context below resolves. A forward credential is never set here: it is the
+  // in-process continuation of a call that was already recorded.
+  let verifiedTokenPrincipal: VerifiedMcpAccessToken | undefined;
   let oauthBearerPresented = false;
   // [ADR-0090 D10 rule 5, #28367] The second way this door resolves an agent:
   // a forward credential the action door minted for an agent's in-process
@@ -205,11 +210,12 @@ export async function resolveExecutionContext(opts: ResolveOptions): Promise<Exe
       // outage (503), never a token that did not verify.
       if (verified?.userId && Array.isArray(verified.scopes) && !(await isOAuthSubjectBanned(ql, verified.userId))) {
         oauthPrincipal = verified;
+        verifiedTokenPrincipal = verified;
       }
     }
   }
 
-  return resolveRequestExecutionContext({
+  const context = await resolveRequestExecutionContext({
     headers,
     ql,
     authService,
@@ -290,6 +296,14 @@ export async function resolveExecutionContext(opts: ResolveOptions): Promise<Exe
     // rule) must read it as the agent it is, never as a signed-in session.
     onAdmission: forwardAgent ? undefined : opts.onAdmission,
   });
+
+  // [#31211] Verifying a token is not admitting the call. Only now, after the
+  // ban read above and after the context resolved (a grant-read outage throws
+  // before this line), is the call admitted, so only now is it recorded as a
+  // use of the token's grant: once, with the very object the verifier
+  // answered. A refused call never reaches this line, so it records nothing.
+  if (verifiedTokenPrincipal) authService?.recordMcpAccessTokenUse?.(verifiedTokenPrincipal);
+  return context;
 }
 
 /**

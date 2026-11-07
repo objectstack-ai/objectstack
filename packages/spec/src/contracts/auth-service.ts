@@ -322,6 +322,29 @@ export interface IAuthService {
     } | undefined>;
 
     /**
+     * [#31211] Record that the caller ADMITTED a call made with a verified MCP
+     * access token, so the provider can keep its coarse "last used" record of
+     * the grant the token was minted under.
+     *
+     * Verifying a token is not admitting the call: the door that resolves the
+     * principal can still refuse it after `verifyMcpAccessToken` answers (a
+     * banned subject, an authorization store it could not read). So a
+     * provider records nothing at verification, and the caller calls this
+     * member once per admitted call, only after its last refusal has had its
+     * say, with the very object `verifyMcpAccessToken` resolved to. A refused
+     * call never reaches it, so it is never recorded as a use.
+     *
+     * The provider records only a principal object it returned itself; any
+     * other object (a hand-built principal, a copy) records nothing. It
+     * returns nothing, never throws and never makes the caller wait: the
+     * record is the provider's own bookkeeping, settled off the request's
+     * path, and its failure is never the call's failure.
+     */
+    recordMcpAccessTokenUse?(
+        principal: NonNullable<Awaited<ReturnType<NonNullable<IAuthService['verifyMcpAccessToken']>>>>,
+    ): void;
+
+    /**
      * [#23772] Mint a short-lived session for the requesting user's OWN
      * principal, so an in-process service can act as that user through a
      * door that only accepts a session (a headless browser rendering a page

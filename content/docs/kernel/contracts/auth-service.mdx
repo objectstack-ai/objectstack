@@ -41,6 +41,9 @@ export interface IAuthService {
   /** Verify an OAuth 2.1 access token from the embedded AS (MCP surface); the optional `organizationId` is the organization the user's OAuth consent bound, absent for a token minted before consents bound an organization. Optional. */
   verifyMcpAccessToken?(token: string): Promise<{ userId: string; scopes: string[]; clientId?: string; organizationId?: string } | undefined>;
 
+  /** Record that the caller admitted a call made with a verified MCP access token: called once, after the caller's last refusal, with the object `verifyMcpAccessToken` returned; a principal the provider did not return records nothing. Never throws. Optional. */
+  recordMcpAccessTokenUse?(principal: { userId: string; scopes: string[]; clientId?: string; organizationId?: string }): void;
+
   /** The MCP resource identifier (RFC 8707 `resource` / token `aud`). Optional. */
   getMcpResourceUrl?(): string;
 
@@ -51,10 +54,11 @@ export interface IAuthService {
 
 The two required members are the core: it follows the Dependency Inversion Principle so that plugins depend on the contract rather than a concrete provider. Concrete implementations (better-auth, custom, LDAP, etc.) supply the actual logic, and `handleRequest` works directly with the standard `Request`/`Response` types.
 
-Everything after `verify` is optional, and each optional member describes a capability a provider may or may not have — a caller must probe before use. Two pairs are worth reading together:
+Everything after `verify` is optional, and each optional member describes a capability a provider may or may not have — a caller must probe before use. Three pairs are worth reading together:
 
 - **`api` and `getApi()`** are the same session handle by two routes. `api` is the legacy direct mount; `getApi()` is the lazy accessor, and it is the one to prefer — the shipped `plugin-auth` registers an `AuthManager`, which has **no `api` member at all**, so a caller that reads only `api` gets `undefined` on every current deployment. Read `api ?? await getApi?.()`.
 - **`getMcpResourceUrl()` and `getMcpResourceMetadataUrl()`** both describe the MCP OAuth surface; the second returns `null` (rather than being absent) when the OAuth track is off for the deployment.
+- **`verifyMcpAccessToken()` and `recordMcpAccessTokenUse()`** split verifying a token from admitting the call. The MCP door verifies first, then applies its own refusals (a banned subject, an authorization store it could not read), and only for a call it admits hands the verified principal back to `recordMcpAccessTokenUse()`. So a refused call is never recorded as a use of the grant (the coarse "last used" time the authorized-clients reads show).
 
 ---
 
