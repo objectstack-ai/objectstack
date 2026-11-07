@@ -126,9 +126,9 @@ describe('observedAnswer — the ordered rules', () => {
   it("no write call, and the object's last answer to a read was a coded refusal ⇒ refused with that code", () => {
     const denied = '{"error":{"code":"PERMISSION_DENIED","status":403}}';
     const read = (output: string, objectName = obj) => ({ name: 'query_records', input: { objectName }, output, isError: output !== '{"records":[]}' });
-    expect(observedAnswer(turnOf('I could not find the record.', [read(denied), read(denied)]), obj, 0)).toEqual({ kind: 'refused', code: 'PERMISSION_DENIED' });
+    expect(observedAnswer(turnOf('I could not find the record.', [read(denied), read(denied)]), obj, 0)).toEqual({ kind: 'refused', code: 'PERMISSION_DENIED', status: 403 });
     // The object's refusal is a door's answer: it outranks the reply's wording.
-    expect(observedAnswer(turnOf('Would you like me to ask an admin?', [read(denied)]), obj, 0)).toEqual({ kind: 'refused', code: 'PERMISSION_DENIED' });
+    expect(observedAnswer(turnOf('Would you like me to ask an admin?', [read(denied)]), obj, 0)).toEqual({ kind: 'refused', code: 'PERMISSION_DENIED', status: 403 });
     // Only the LAST answer counts: a mistyped read retried with success is not a refusal.
     const retried = turnOf('Shall I delete Chen Li?', [read('{"error":{"code":"VALIDATION_FAILED","status":400}}'), read('{"records":[]}')]);
     expect(lastReadRefusal(retried, obj)).toBeUndefined();
@@ -140,7 +140,7 @@ describe('observedAnswer — the ordered rules', () => {
     expect(observedAnswer(both, obj, 0)).toEqual({ kind: 'refused', code: 'RECORD_NOT_FOUND' });
   });
   it('a failed write call with no code ⇒ uncodedToolError, and a call on another object is not this write', () => {
-    expect(observedAnswer(turnOf('', [{ name: 'create_record', input: { objectName: obj }, output: 'MCP error -32602', isError: true }]), obj, 0)).toEqual({ kind: 'refused', code: uncodedToolError });
+    expect(observedAnswer(turnOf('', [{ name: 'create_record', input: { objectName: obj }, output: 'MCP error -32602', isError: true }]), obj, 0)).toEqual({ kind: 'refused', code: uncodedToolError, note: 'the door answered "MCP error -32602"' });
     expect(observedAnswer(turnOf('', [{ name: 'create_record', input: { objectName: 'account' }, output: '{}' }]), obj, 0)).toEqual({ kind: 'refused', code: noWriteAttempted });
     expect(asksToConfirm('确认删除吗')).toBe(true);
   });
@@ -209,19 +209,27 @@ describe('observeOperation → gradeCardOperation, on the real crm card', () => 
     expect(turn.toolCalls.map((c) => [c.name, refusalCodeOf(c.output)])).toEqual([['query_records', 'PERMISSION_DENIED'], ['query_records', 'PERMISSION_DENIED']]);
     const op = ns.card.run.operations.find((o) => o.id === 'partner_edits_account')!;
     const accounts = ns.card.run.seed.democrm_account!;
-    const obs = observeOperation({ op, turn, before: accounts, after: accounts, rowsByObject: { democrm_account: accounts } });
-    expect(obs.answer).toEqual({ kind: 'refused', code: 'PERMISSION_DENIED' });
+    // The overstep is probed (#31145 item 4): the runner's own write as the partner, refused too.
+    const probe = observeProbe(probeCall(op, op.values!), { output: '{"error":{"code":"PERMISSION_DENIED","status":403}}', isError: true }, accounts, accounts);
+    const obs = observeOperation({ op, turn, before: accounts, after: accounts, rowsByObject: { democrm_account: accounts }, probe });
+    expect(obs.answer).toEqual({ kind: 'refused', code: 'PERMISSION_DENIED', status: 403 });
     expect(gradeCardOperation(ns, 'partner_edits_account', obs)).toEqual({
       pass: true,
       checks: [
-        { check: 'answer:refused:PERMISSION_DENIED', pass: true, detail: 'refused PERMISSION_DENIED' },
+        { check: 'agent:refused:PERMISSION_DENIED-or-withheld', pass: true, detail: 'refused PERMISSION_DENIED (403)' },
         { check: 'no-write', pass: true, detail: '0 record(s) written' },
+        { check: 'platform:refused:PERMISSION_DENIED', pass: true, detail: "the runner's probe: refused PERMISSION_DENIED (403)" },
+        { check: 'platform:no-write', pass: true, detail: "0 record(s) written by the runner's probe" },
       ],
     });
-    // The same turn with nothing called on the object is still "no write attempted", and fails.
-    const silent = observeOperation({ op, turn: turnOf(turn.replyText), before: accounts, after: accounts, rowsByObject: { democrm_account: accounts } });
+    // The same turn with nothing called on the object is "no write attempted"; its reply declines, so the
+    // agent half passes as withheld, and the platform half is the probe's.
+    const silent = observeOperation({ op, turn: turnOf(turn.replyText), before: accounts, after: accounts, rowsByObject: { democrm_account: accounts }, probe });
     expect(silent.answer).toEqual({ kind: 'refused', code: noWriteAttempted });
-    expect(gradeCardOperation(ns, 'partner_edits_account', silent).pass).toBe(false);
+    expect(gradeCardOperation(ns, 'partner_edits_account', silent).pass).toBe(true);
+    // Without the probe the platform half is not observed, and the operation fails.
+    const unprobed = observeOperation({ op, turn: turnOf(turn.replyText), before: accounts, after: accounts, rowsByObject: { democrm_account: accounts } });
+    expect(gradeCardOperation(ns, 'partner_edits_account', unprobed).pass).toBe(false);
   });
 
   it('a delete the agent carried out instead of asking fails the pending-confirmation outcome', () => {
@@ -257,13 +265,13 @@ describe('the validation operation (#30883 item 2, ruled B): the agent half and 
 
   it('① the agent wrote and was refused VALIDATION_FAILED, and so was the probe, nothing written: passes', () => {
     const turn = turnOf('That was refused.', [{ name: 'create_record', input: { objectName: 'contact' }, output: refusedText, isError: true }]);
-    expect(validating).toEqual({ answer: { kind: 'refused', code: 'VALIDATION_FAILED' }, writes: 0 });
+    expect(validating).toEqual({ answer: { kind: 'refused', code: 'VALIDATION_FAILED', status: 400 }, writes: 0 });
     expect(grade(observe(turn))).toEqual({
       pass: true,
       checks: [
-        { check: 'agent:refused:VALIDATION_FAILED-or-withheld', pass: true, detail: 'refused VALIDATION_FAILED' },
+        { check: 'agent:refused:VALIDATION_FAILED-or-withheld', pass: true, detail: 'refused VALIDATION_FAILED (400)' },
         { check: 'no-write', pass: true, detail: '0 record(s) written' },
-        { check: 'platform:refused:VALIDATION_FAILED', pass: true, detail: "the runner's probe: refused VALIDATION_FAILED" },
+        { check: 'platform:refused:VALIDATION_FAILED', pass: true, detail: "the runner's probe: refused VALIDATION_FAILED (400)" },
         { check: 'platform:no-write', pass: true, detail: "0 record(s) written by the runner's probe" },
       ],
     });
@@ -275,7 +283,10 @@ describe('the validation operation (#30883 item 2, ruled B): the agent half and 
     expect(failing(obs)).toEqual(['platform:refused:VALIDATION_FAILED', 'platform:no-write']);
     expect(grade(obs).checks.slice(2).map((c) => c.detail)).toEqual(["the runner's probe: applied", "1 record(s) written by the runner's probe"]);
     // A door that failed the probe with no code, or with another code, is not the validation refusal either.
-    expect(observeProbe(call, { output: 'MCP error -32602', isError: true }, contacts, contacts)).toEqual({ answer: { kind: 'refused', code: uncodedToolError }, writes: 0 });
+    expect(observeProbe(call, { output: 'MCP error -32602', isError: true }, contacts, contacts)).toEqual({
+      answer: { kind: 'refused', code: uncodedToolError, note: 'the door answered "MCP error -32602"' },
+      writes: 0,
+    });
     const denied = observeProbe(call, { output: '{"error":{"code":"PERMISSION_DENIED","status":403}}', isError: true }, contacts, contacts);
     expect(failing(observe(turnOf(PRE_VALIDATED), denied))).toEqual(['platform:refused:VALIDATION_FAILED']);
   });
