@@ -652,7 +652,27 @@ describe('[ADR-0106 D1] a standalone or object-less action entry is served as th
 
     /** One `/meta` answer, every byte a caller can compare: status, body and headers. */
     interface Wire { status: number; body: any; headers: Record<string, string> }
-    const wireText = (w: Wire) => JSON.stringify(w);
+    /**
+     * Headers whose value is the wall clock at the moment of the read, not
+     * anything the projection decided: the protocol stamps `lastModified` with
+     * the time of the read, which the door renders at one-second precision, so
+     * two sequential reads of one answer differ there whenever they straddle a
+     * second boundary.
+     */
+    const CLOCK_HEADERS = new Set(['last-modified', 'date']);
+    /**
+     * The wire as compared: every byte, except that a clock header's VALUE
+     * reads as a fixed token when it is a date. Its presence, its position and
+     * a value that is not a date are still compared, so an answer that gains
+     * or drops the header still differs.
+     */
+    const wireText = (w: Wire) => JSON.stringify({
+        ...w,
+        headers: w.headers && Object.fromEntries(Object.entries(w.headers).map(([k, v]) => [
+            k,
+            CLOCK_HEADERS.has(k.toLowerCase()) && !Number.isNaN(Date.parse(v)) ? 'CLOCK' : v,
+        ])),
+    });
 
     /** A code/package store answering `/published` with each standalone fixture as declared, and nothing for any other name. */
     const publishedStore = {
