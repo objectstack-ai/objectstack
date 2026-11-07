@@ -118,7 +118,18 @@ async function boot() {
         }, res);
         return { status: res.statusCode, body: res.body };
     };
-    return { engine, protocol, read, remove };
+    /**
+     * The legacy pair's declared override as an earlier version stored it: the
+     * row itself, written straight to the store, so the reads and the removal
+     * below are judged on a row no write gate of this version admitted.
+     */
+    const seedLegacyOverride = (type: string, body: Record<string, unknown>) =>
+        engine.insert('sys_metadata', {
+            name: body.name, type, namespace: 'default', package_id: LEGACY_PAIR, scope: 'platform', strategy: 'merge',
+            state: 'active', version: 1,
+            metadata: JSON.stringify({ ...body, overrides: { package: MODULE, basedOn: '6.1.0' } }),
+        }, { context: { isSystem: true } } as any);
+    return { engine, protocol, read, remove, seedLegacyOverride };
 }
 
 const itemOf = (body: any) => body?.data?.item ?? body?.data ?? body;
@@ -131,18 +142,25 @@ const listedLabel = (body: any) => {
 const effectiveLabel = (body: any) => (body?.data ?? body)?.effective?.label;
 
 describe('[#29594] merge question 12: a legacy per-package pair of an App\'s module is honoured as before', () => {
+    it('the pair still saves a declared override of the module\'s item (the write gate admits it)', async () => {
+        const { protocol, read } = await boot();
+        await protocol.saveMetaItem({
+            type: 'dashboard', name: BOARD, packageId: LEGACY_PAIR,
+            item: { ...board(CUSTOMIZED), overrides: { package: MODULE, basedOn: '6.1.0' } },
+        });
+        const byName = await read(`/meta/dashboard/${BOARD}`, { package: MODULE });
+        expect([byName.status, labelOf(byName.body)]).toEqual([200, CUSTOMIZED]);
+    }, 60_000);
+
     it('its declared override is served at the module\'s address (by name, list, layered); it removes it, and the module\'s item is served again', async () => {
-        const { protocol, read, remove } = await boot();
+        const { read, remove, seedLegacyOverride } = await boot();
 
         // Precondition: the module ships the board.
         const shipped = await read(`/meta/dashboard/${BOARD}`, { package: MODULE });
         expect([shipped.status, labelOf(shipped.body)], JSON.stringify(shipped.body).slice(0, 400)).toEqual([200, SHIPPED]);
 
         // The legacy pair holds its declared override of the module's board.
-        await protocol.saveMetaItem({
-            type: 'dashboard', name: BOARD, packageId: LEGACY_PAIR,
-            item: { ...board(CUSTOMIZED), overrides: { package: MODULE, basedOn: '6.1.0' } },
-        });
+        await seedLegacyOverride('dashboard', board(CUSTOMIZED));
 
         const byName = await read(`/meta/dashboard/${BOARD}`, { package: MODULE });
         const list = await read('/meta/dashboard', { package: MODULE });
@@ -167,11 +185,8 @@ describe('[#29594] merge question 12: a legacy per-package pair of an App\'s mod
     }, 60_000);
 
     it('a doc (no overlay channel) the legacy pair overrides is served, and its removal passes the sealed-removal refusal as the pair\'s own', async () => {
-        const { protocol, read, remove } = await boot();
-        await protocol.saveMetaItem({
-            type: 'doc', name: GUIDE, packageId: LEGACY_PAIR,
-            item: { ...guide(CUSTOMIZED), overrides: { package: MODULE, basedOn: '6.1.0' } },
-        });
+        const { read, remove, seedLegacyOverride } = await boot();
+        await seedLegacyOverride('doc', guide(CUSTOMIZED));
         const byName = await read(`/meta/doc/${GUIDE}`, { package: MODULE });
         expect([byName.status, labelOf(byName.body)], JSON.stringify(byName.body).slice(0, 400)).toEqual([200, CUSTOMIZED]);
 
