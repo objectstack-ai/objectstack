@@ -223,7 +223,11 @@ npx @objectstack/scenarios help                                      # the comma
   yet left out, then one update per row sets those (`seed.secondPass` in the record). The side that waits is one the
   build left optional; a build that makes every side of a cycle `required` cannot be seeded, which the data contract
   states and the scorecard reports as a Build finding naming the cycle (the seed is still sent, so the record holds
-  the app's own refusals).
+  the app's own refusals). A refused row takes out what it feeds (`seedDependence` in `orchestrate.ts`): with its
+  children through the declared lookups, the runner computes every question's truth again over the rest of the seed
+  by the loader's own rules (`truthsOver`), and only a turn (a question, or a question as one persona) whose expected
+  answer changes is **not measured**; every other turn is asked and graded as usual. An operation is not measured
+  when a row it names is out.
 - **Observation** (`observe.ts`): the write grader is fed what the runner reads itself: the agent's write calls and
   the door's answer (a coded refusal), the object's rows before and after the turn, and the audit trail's actor. A turn
   that wrote nothing because the object refused the read it needed first (a persona that may not read it) grades as
@@ -246,7 +250,9 @@ npx @objectstack/scenarios help                                      # the comma
   non-object item name as a failing Build check (`bare-name:<type>:<name>`), so such a build is never verified.
 - **Persona contract**: the build is asked for one permission set per persona, named `<namespace>_<persona id>`. The runner
   grants it to that persona's user, and makes a seed row whose scope field names a persona's handle (`owner: u_sam`)
-  owned by that persona's user.
+  owned by that persona's user. A field the card declares in `run.userHandleFields` (`userHandleFields` in
+  `prompts.ts` reads the declaration, never infers it) is loaded with the user's id in place of the handle text, and
+  the record's `seed.rewritten` lists each field so rewritten.
 - **Structure contract** (`prompts.ts`): every Build check traces to text the build prompt carries, so a faithful build
   never fails for not guessing a name. Besides the seed (objects and fields) and the persona sets, the contract states
   each `expect` row the exact-name scorer checks by name: every lookup's target, every single-choice field with its
