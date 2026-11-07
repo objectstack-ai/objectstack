@@ -15,6 +15,7 @@ import { fileURLToPath } from 'node:url';
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { formatRefusal, loadScenarioFile, loadScenarios, readCapabilityAreas, type LoadedScenario } from '../../src/loader.js';
+import type { ScenarioTier } from '../../src/schema.js';
 import { gradeCardOperation, type OperationObservation } from '../../src/score/index.js';
 import type { PersonaAccount } from '../../src/runner/app.js';
 import { makeDriver, parseArgs } from '../../src/runner/cli.js';
@@ -22,6 +23,8 @@ import {
   ApiBillingRefusedError,
   assertSubscriptionLogin,
   ClaudeCodeDriver,
+  DEFAULT_ASK_MAX_TURNS,
+  DEFAULT_AUTHOR_MAX_TURNS,
   DEFAULT_AUTHOR_TIMEOUT_MIN,
   MissingRecordingError,
   RecordedDriver,
@@ -621,7 +624,8 @@ describe("the seed's load plan — reference cycles found from the card's own lo
  * as a subscription login does, reads its prompt from stdin, and then acts on
  * the prompt's first word — `HANG` waits to be killed (and exits 143 on
  * SIGTERM, as the real CLI was measured to), `CRASH` exits 1 with no result
- * line, anything else answers one stream-json success saying what it read.
+ * line, `ARGV` answers its own argument list as JSON, anything else answers
+ * one stream-json success saying what it read.
  */
 const STAND_IN = `#!/usr/bin/env node
 process.on('SIGTERM', () => { process.stderr.write('stand-in: terminated\\n'); process.exit(143); });
@@ -637,8 +641,9 @@ process.stdin.on('end', () => {
   }
   if (input.startsWith('CRASH')) { process.stderr.write('stand-in: could not start a session\\n'); process.exit(1); }
   const longest = Math.max(...args.map((a) => a.length));
+  const text = input.startsWith('ARGV') ? JSON.stringify(args) : 'stdin ' + input.length + ' · longest argv ' + longest;
   console.log(JSON.stringify({ type: 'system', subtype: 'init', model: 'stand-in' }));
-  console.log(JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: 'stdin ' + input.length + ' · longest argv ' + longest }] } }));
+  console.log(JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text }] } }));
   console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, num_turns: 1 }));
 });
 `;
@@ -648,7 +653,14 @@ describe('the live driver against a stand-in `claude`: the prompt on stdin, and 
   const bin = join(dir, 'claude');
   writeFileSync(bin, STAND_IN);
   chmodSync(bin, 0o755);
-  const task = (prompt: string) => ({ card: 'c', mode: 'scratch' as const, phase: 'build' as const, step: 'author', cwd: mkdtempSync(join(dir, 'project-')), prompt });
+  const task = (prompt: string, tier: ScenarioTier = 'control') => ({ card: 'c', mode: 'scratch' as const, phase: 'build' as const, step: 'author', cwd: mkdtempSync(join(dir, 'project-')), prompt, tier });
+  const ask = (prompt: string) => ({ card: 'c', mode: 'scratch' as const, phase: 'run' as const, step: 'q', prompt, mcp: { url: 'http://127.0.0.1:9/api/v1/mcp', apiKey: 'k' } });
+  /** The `--max-turns` value on the argument list the stand-in was started with (an `ARGV` turn's reply). */
+  const maxTurnsArg = (t: ParsedTurn): string | undefined => {
+    const argv = JSON.parse(t.replyText) as string[];
+    const at = argv.indexOf('--max-turns');
+    return at === -1 ? undefined : argv[at + 1];
+  };
   beforeEach(() => {
     vi.stubEnv('ANTHROPIC_API_KEY', '');
     vi.stubEnv('ANTHROPIC_AUTH_TOKEN', '');
@@ -700,5 +712,54 @@ describe('the live driver against a stand-in `claude`: the prompt on stdin, and 
     expect(makeDriver('claude').info().authorTimeoutMs).toBe(60 * 60_000);
     expect(makeDriver('claude', { authorTimeoutMin: 90 }).info().authorTimeoutMs).toBe(90 * 60_000);
     expect(() => makeDriver('recorded:/nowhere.json', { authorTimeoutMin: 90 })).toThrow(/live driver only/);
+  });
+
+  it('with no flag, the card’s tier sizes the authoring turn’s `--max-turns` (control 80, starter 300, delivery 600), an ask turn takes 12, and each turn records its cap', async () => {
+    expect(DEFAULT_AUTHOR_MAX_TURNS).toEqual({ control: 80, starter: 300, delivery: 600 });
+    expect(DEFAULT_ASK_MAX_TURNS).toBe(12);
+    const driver = new ClaudeCodeDriver({ bin });
+    for (const tier of ['control', 'starter', 'delivery'] as const) {
+      const { turn } = await driver.author(task('ARGV', tier));
+      expect([tier, maxTurnsArg(turn), turn.meta.process!.maxTurns]).toEqual([tier, String(DEFAULT_AUTHOR_MAX_TURNS[tier]), DEFAULT_AUTHOR_MAX_TURNS[tier]]);
+    }
+    const asked = await driver.ask(ask('ARGV'));
+    expect([maxTurnsArg(asked), asked.meta.process!.maxTurns]).toEqual(['12', 12]);
+    expect(driver.info()).toMatchObject({ authorMaxTurns: { control: 80, starter: 300, delivery: 600 }, askMaxTurns: 12 });
+  });
+
+  it('`--author-max-turns` and `--ask-max-turns` reach the CLI’s argument list on every tier, the record states them, and a replay refuses them', async () => {
+    vi.stubEnv('PATH', `${dir}${delimiter}${process.env.PATH ?? ''}`);
+    const args = parseArgs(['--author-max-turns', '450', '--ask-max-turns', '20']);
+    expect([args.authorMaxTurns, args.askMaxTurns]).toEqual([450, 20]);
+    const driver = makeDriver('claude', args);
+    for (const tier of ['control', 'starter', 'delivery'] as const) {
+      const { turn } = await driver.author(task('ARGV', tier));
+      expect([tier, maxTurnsArg(turn), turn.meta.process!.maxTurns]).toEqual([tier, '450', 450]);
+    }
+    const asked = await driver.ask(ask('ARGV'));
+    expect([maxTurnsArg(asked), asked.meta.process!.maxTurns]).toEqual(['20', 20]);
+    expect(driver.info()).toMatchObject({ authorMaxTurns: { control: 450, starter: 450, delivery: 450 }, askMaxTurns: 20 });
+
+    expect([parseArgs([]).authorMaxTurns, parseArgs([]).askMaxTurns]).toEqual([undefined, undefined]);
+    /** The refusal's message, or `undefined` when nothing was refused. */
+    const refusal = (run: () => unknown): string | undefined => {
+      try {
+        run();
+      } catch (e) {
+        return (e as Error).message;
+      }
+      return undefined;
+    };
+    for (const flag of ['--author-max-turns', '--ask-max-turns']) {
+      for (const bad of ['0', '-3', '1.5', 'many']) {
+        const message = refusal(() => parseArgs([flag, bad]));
+        expect([flag, bad, message?.startsWith(`${flag} `), message?.endsWith(`\`${bad}\``)]).toEqual([flag, bad, true, true]);
+      }
+    }
+    // A replay names every live-driver flag it was handed, and runs nothing.
+    const replay = (limits: Parameters<typeof makeDriver>[1]) => refusal(() => makeDriver('recorded:/nowhere.json', limits));
+    expect(replay({ authorMaxTurns: 300 })).toMatch(/^--author-max-turns .*live driver only/);
+    expect(replay({ askMaxTurns: 20 })).toMatch(/^--ask-max-turns .*live driver only/);
+    expect(replay({ authorTimeoutMin: 90, authorMaxTurns: 300, askMaxTurns: 20 })).toMatch(/^--author-timeout, --author-max-turns, --ask-max-turns .*live driver only/);
   });
 });

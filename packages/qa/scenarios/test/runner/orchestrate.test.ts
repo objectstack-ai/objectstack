@@ -192,6 +192,8 @@ function truthfulAnswer(scenario: LoadedScenario, question: string, persona?: st
 
 class ScriptedDriver implements AgentDriver {
   readonly seen: string[] = [];
+  /** The tier each authoring task carried, by step key: what sizes the live driver's turn cap. */
+  readonly tiers: Record<string, string> = {};
   private readonly scenario: LoadedScenario;
   constructor(
     scenario: LoadedScenario,
@@ -210,6 +212,7 @@ class ScriptedDriver implements AgentDriver {
   }
   async author(task: AuthorTask) {
     this.seen.push(stepKey(task));
+    this.tiers[stepKey(task)] = task.tier;
     const instead = this.authorAs[`${task.mode}/${task.phase}`];
     if (instead instanceof Error) throw instead;
     if (instead) return { turn: instead };
@@ -595,6 +598,12 @@ const CRASHED: ParsedTurn = {
   toolCalls: [],
   meta: { resultSubtype: 'no-result(exit 1)', process: { elapsedMs: 900, exit: 1, timedOut: false, timeoutMs: 3_600_000, stderrTail: 'Error: could not start a session' } },
 };
+/** A build author turn that reached its turn cap: the CLI's own `error_max_turns` result line, the cap on its process. */
+const OUT_OF_TURNS: ParsedTurn = {
+  replyText: '',
+  toolCalls: [],
+  meta: { resultSubtype: 'error_max_turns', numTurns: 80, process: { elapsedMs: 1_414_000, exit: 1, timedOut: false, timeoutMs: 3_600_000, maxTurns: 80 } },
+};
 
 describe('runCard — an authoring turn that does not finish leaves its build not measured, never a degraded score', () => {
   const results = (run: Awaited<ReturnType<typeof runCard>>, driver: ScriptedDriver) =>
@@ -671,6 +680,42 @@ describe('runCard — an authoring turn that does not finish leaves its build no
     expect(template.template!.install.ok).toBe(true);
     expect(template.iterate).toEqual({ build: expect.objectContaining({ notMeasured: 'author turn failed: no-result(exit 1)', score: null }) });
     expect(driver.seen.filter((k) => k.startsWith('crm_account_with_contacts/template/iterate-run/'))).toEqual([]);
+  });
+
+  it('a build author turn that ran out of turns: not measured as before, and the author row and the written record show the turns it took of its cap', async () => {
+    const { scenario, ops, driver } = setup({ authorAs: { 'scratch/build': OUT_OF_TURNS } });
+    const run = await runCard(scenario, driver, ops, { modes: ['scratch'], admin: ADMIN });
+    const scratch = run.modes[0]!;
+    expect([scratch.build!.notMeasured, scratch.build!.author!.numTurns, scratch.build!.author!.maxTurns]).toEqual(['author turn failed: error_max_turns', 80, 80]);
+    expect([scratch.run, scratch.iterate]).toEqual([undefined, undefined]);
+    const sc = cardScorecard(run);
+    expect(sc.modes[0]!.first.build!.author).toEqual({ resultSubtype: 'error_max_turns', numTurns: 80, maxTurns: 80, elapsedMs: 1_414_000 });
+    expect(renderScorecard(sc)).toContain('| Build · author | error_max_turns · 80/80 turns · 23m 34s |');
+    const written = JSON.parse(JSON.stringify(runRecord({ run: 'r', date: '2026-11-07', driver: driver.info(), runner: 'test', evidenceDir: '/tmp' }, run)));
+    expect([written.cardRun.modes[0].build.author.maxTurns, written.scorecard.modes[0].first.build.author.maxTurns]).toEqual([80, 80]);
+  });
+
+  it('an iterate author turn killed before any result line: its row shows the cap with the count unknown', async () => {
+    const killedUnderCap: ParsedTurn = { ...KILLED, meta: { ...KILLED.meta, process: { ...KILLED.meta.process!, maxTurns: 80 } } };
+    const { scenario, ops, driver } = setup({ authorAs: { 'scratch/iterate': killedUnderCap } });
+    const table = renderScorecard(cardScorecard(await runCard(scenario, driver, ops, { modes: ['scratch'], admin: ADMIN })));
+    expect(table).toContain('| Iterate · author | no-result(exit 143) · ?/80 turns · 60m 00s |');
+    expect(table).toContain('| Build · author | success · elapsed not recorded |'); // a turn with neither a count nor a cap shows neither
+  });
+});
+
+// ── The card's tier reaches every authoring turn ────────────────────────────
+
+describe('runCard — every authoring turn carries the card’s tier to the driver, which sizes the live turn cap by it', () => {
+  it('a control card: the scratch build, the scratch iterate and the template iterate each carry `control`', async () => {
+    const { scenario, ops, driver } = setup();
+    await runCard(scenario, driver, ops, { modes: ['scratch', 'template'], admin: ADMIN });
+    expect(scenario.card.tier).toBe('control');
+    expect(driver.tiers).toEqual({
+      'crm_account_with_contacts/scratch/build/author/-': 'control',
+      'crm_account_with_contacts/scratch/iterate/author/-': 'control',
+      'crm_account_with_contacts/template/iterate/author/-': 'control',
+    });
   });
 });
 
@@ -789,13 +834,23 @@ describe('runCard — a build that makes both sides of a reference cycle require
       },
       namespace: (dir) => dir.slice(dir.lastIndexOf('/') + 1),
     };
+    const tiers: string[] = [];
     const quiet: AgentDriver = {
       info: () => ({ driver: 'recorded', version: 'quiet test replay', apiBilled: false }),
-      author: async () => ({ turn: turn('Done.') }),
+      author: async (task) => {
+        tiers.push(`${task.phase}: ${task.tier}`);
+        return { turn: turn('Done.') };
+      },
       ask: async () => turn('I cannot tell from here.'),
     };
-    return runCard(original, quiet, ops, { modes: ['scratch'], admin: ADMIN, iterateRun: false }).then((r) => ({ run: r, apps }));
+    return runCard(original, quiet, ops, { modes: ['scratch'], admin: ADMIN, iterateRun: false }).then((r) => ({ run: r, apps, tiers }));
   }
+
+  it('a starter card’s build and iterate authoring turns each carry `starter` to the driver', async () => {
+    const { tiers } = await run(new Set(['demopurchase_employee.department']));
+    expect(original.card.tier).toBe('starter');
+    expect(tiers).toEqual(['build: starter', 'iterate: starter']);
+  });
 
   it('both sides required: the finding names the cycle, and the seed is still sent so the record holds the app’s own refusals', async () => {
     const { run: r } = await run(new Set(['demopurchase_department.manager', 'demopurchase_employee.department']));

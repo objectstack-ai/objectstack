@@ -91,6 +91,8 @@ export interface TurnSummary {
   /** The result line said `is_error: true` (a usage limit answers `success` with it). */
   isError?: true;
   numTurns?: number;
+  /** The turn cap the CLI process ran under (`meta.process`): `numTurns` of `maxTurns`. */
+  maxTurns?: number;
   toolCalls: number;
   model?: string;
   /** Wall-clock time of the CLI process, when the driver ran one (`meta.process`). */
@@ -198,6 +200,7 @@ const summarize = (t: ParsedTurn): TurnSummary => {
     ...(t.meta.resultSubtype ? { resultSubtype: t.meta.resultSubtype } : {}),
     ...(t.meta.isError === true ? { isError: true as const } : {}),
     ...(t.meta.numTurns !== undefined ? { numTurns: t.meta.numTurns } : {}),
+    ...(p?.maxTurns !== undefined ? { maxTurns: p.maxTurns } : {}),
     ...(t.meta.model ? { model: t.meta.model } : {}),
     toolCalls: t.toolCalls.length,
     ...(p ? { elapsedMs: p.elapsedMs } : {}),
@@ -705,14 +708,14 @@ async function scratchMode(original: LoadedScenario, driver: AgentDriver, ops: P
   const labels = citationLabels(original);
   const card = scenario.card;
   const ref = { card: card.id, mode: 'scratch' as const };
-  mode.build = await buildHalf(scenario, dir, ops, async () => (await driver.author({ ...ref, phase: 'build', step: 'author', cwd: dir, prompt: buildPrompt(card) })).turn, scenario);
+  mode.build = await buildHalf(scenario, dir, ops, async () => (await driver.author({ ...ref, phase: 'build', step: 'author', cwd: dir, prompt: buildPrompt(card), tier: card.tier })).turn, scenario);
   // A build whose authoring turn did not finish is not measured: no seed, no Run, no iterate on it.
   if (mode.build.notMeasured) return { mode };
   const builtArtifact = ops.readArtifact(dir);
   if (builtArtifact !== undefined) mode.run = await withApp(ops, dir, mode.findings, (app) => runHalf(scenario, app, driver, { ...ref, phase: 'run' }, labels, builtArtifact));
 
   const iterated = iteratedScenario(scenario);
-  const build = await buildHalf(iterated, dir, ops, async () => (await driver.author({ ...ref, phase: 'iterate', step: 'author', cwd: dir, prompt: iteratePrompt(card) })).turn, iterated);
+  const build = await buildHalf(iterated, dir, ops, async () => (await driver.author({ ...ref, phase: 'iterate', step: 'author', cwd: dir, prompt: iteratePrompt(card), tier: card.tier })).turn, iterated);
   if (build.notMeasured) {
     mode.iterate = { build };
     return { mode, ...(buildPassed(mode.build) ? { verified: builtArtifact } : {}) };
@@ -767,7 +770,7 @@ async function templateMode(original: LoadedScenario, driver: AgentDriver, ops: 
     }
     const before = await app.metadataAsArtifact(collections);
     const build: BuildHalf = { commands: [], score: null };
-    await authorInto(build, async () => (await driver.author({ card: card.id, mode: 'template', phase: 'iterate', step: 'author', cwd: dir, prompt: templateIteratePrompt(card, { baseUrl: booted.url, adminEmail: opts.admin.email, adminPassword: opts.admin.password }) })).turn);
+    await authorInto(build, async () => (await driver.author({ card: card.id, mode: 'template', phase: 'iterate', step: 'author', cwd: dir, prompt: templateIteratePrompt(card, { baseUrl: booted.url, adminEmail: opts.admin.email, adminPassword: opts.admin.password }), tier: card.tier })).turn);
     if (build.notMeasured) {
       mode.iterate = { build };
       return;

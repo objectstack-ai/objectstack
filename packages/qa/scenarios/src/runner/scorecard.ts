@@ -18,7 +18,8 @@
  *     timeout (`author timed out after N min`), or ended with no result line
  *     or an error result (`author turn failed: …`) — is NOT MEASURED, never a
  *     degraded score: nothing after it ran. The author row shows every
- *     authoring turn's `resultSubtype` and elapsed time.
+ *     authoring turn's `resultSubtype`, the turns it took of the cap it ran
+ *     under (`80/80 turns` beside `error_max_turns`), and its elapsed time.
  *   - Run-问数: one turn per (question, persona); it passes when the answer is
  *     correct AND cited AND leaks nothing. Leaks are also counted apart, so a
  *     leaking answer shows up even when it is otherwise right.
@@ -46,7 +47,8 @@ export interface HalfScores {
     failedCommands: string[];
     /** The authoring turn did not finish (`BuildHalf.notMeasured`): 0 of 0, never degraded. */
     notMeasuredReason?: string;
-    author?: { resultSubtype?: string; elapsedMs?: number };
+    /** The authoring turn: how it ended, the turns it took of the cap it ran under, and its wall-clock time. */
+    author?: { resultSubtype?: string; numTurns?: number; maxTurns?: number; elapsedMs?: number };
   };
   /** Rows the app took of the rows the runner sent. */
   seed?: { inserted: number; total: number; refused: number };
@@ -74,7 +76,12 @@ const cmdName = (c: string) => c.replace(/^npx objectstack /, '').split(' ')[0]!
 export function buildTally(b: BuildHalf | undefined, expectCount: number): HalfScores['build'] | undefined {
   if (!b) return undefined;
   const author = b.author
-    ? { ...(b.author.resultSubtype ? { resultSubtype: b.author.resultSubtype } : {}), ...(b.author.elapsedMs !== undefined ? { elapsedMs: b.author.elapsedMs } : {}) }
+    ? {
+        ...(b.author.resultSubtype ? { resultSubtype: b.author.resultSubtype } : {}),
+        ...(b.author.numTurns !== undefined ? { numTurns: b.author.numTurns } : {}),
+        ...(b.author.maxTurns !== undefined ? { maxTurns: b.author.maxTurns } : {}),
+        ...(b.author.elapsedMs !== undefined ? { elapsedMs: b.author.elapsedMs } : {}),
+      }
     : undefined;
   if (b.notMeasured) return { passed: 0, total: 0, degraded: false, failedCommands: [], notMeasuredReason: b.notMeasured, ...(author ? { author } : {}) };
   const failedCommands = b.commands.filter((c) => c.exit !== 0).map((c) => cmdName(c.command));
@@ -176,8 +183,13 @@ export const elapsedText = (ms: number): string => {
 
 const buildCell = (b: HalfScores['build']) =>
   !b ? '—' : b.notMeasuredReason ? `not measured: ${b.notMeasuredReason}` : `${cell(b)}${b.degraded ? ' ⚠ degraded' : ''}${b.failedCommands.length ? ` (failed: ${b.failedCommands.join(', ')})` : ''}`;
+/** `300/300 turns`; `?/300 turns` when no result line reported a count; `17 turns` on a recording without the cap; nothing when neither is known. */
+const turnsText = (a: { numTurns?: number; maxTurns?: number }): string | undefined =>
+  a.maxTurns !== undefined ? `${a.numTurns ?? '?'}/${a.maxTurns} turns` : a.numTurns !== undefined ? `${a.numTurns} turn${a.numTurns === 1 ? '' : 's'}` : undefined;
 const authorCell = (b: HalfScores['build']) =>
-  b?.author ? `${b.author.resultSubtype ?? '(no result)'} · ${b.author.elapsedMs !== undefined ? elapsedText(b.author.elapsedMs) : 'elapsed not recorded'}` : '—';
+  b?.author
+    ? [b.author.resultSubtype ?? '(no result)', turnsText(b.author), b.author.elapsedMs !== undefined ? elapsedText(b.author.elapsedMs) : 'elapsed not recorded'].filter(Boolean).join(' · ')
+    : '—';
 
 /** The scorecard as a markdown table: the modes side by side, one row per half. */
 export function renderScorecard(sc: CardScorecard): string {

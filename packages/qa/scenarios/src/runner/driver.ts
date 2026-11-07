@@ -26,6 +26,7 @@ import { mkdtempSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSyn
 import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 
+import { SCENARIO_TIERS, type ScenarioTier } from '../schema.js';
 import { parseStreamJson, type ParsedTurn, type TurnProcess } from './transcript.js';
 
 /** Which run step a turn belongs to; the replay key is built from it. */
@@ -46,6 +47,8 @@ export interface AuthorTask extends StepRef {
   /** The project directory the agent edits. */
   cwd: string;
   prompt: string;
+  /** The card's tier: it sizes the live driver's turn cap ({@link DEFAULT_AUTHOR_MAX_TURNS}). Not part of the replay key. */
+  tier: ScenarioTier;
 }
 
 export interface AskTask extends StepRef {
@@ -71,6 +74,10 @@ export interface DriverInfo {
   apiBilled: false;
   /** The live driver's wall-clock budget per authoring turn (build and iterate), ms. */
   authorTimeoutMs?: number;
+  /** The live driver's turn cap per authoring turn, by card tier (`--author-max-turns` sets every tier alike). */
+  authorMaxTurns?: Record<ScenarioTier, number>;
+  /** The live driver's turn cap per question or operation turn. */
+  askMaxTurns?: number;
 }
 
 export interface AgentDriver {
@@ -121,13 +128,29 @@ export function assertSubscriptionLogin(env: NodeJS.ProcessEnv, authStatus: unkn
  */
 export const DEFAULT_AUTHOR_TIMEOUT_MIN = 60;
 
+/**
+ * The agentic turns one authoring turn (build or iterate) may take unless
+ * `--author-max-turns` says otherwise, by the card's tier. A `control` card's
+ * 2–3-object build finished in 17–21 turns under the old flat cap of 80, which
+ * stays. Every `starter` build measured hit that 80 (`error_max_turns`) after
+ * 15–24 minutes, 11–18 s a turn: the 60-minute author timeout holds 200–325
+ * such turns, so 300 puts the turn cap and the wall clock at about the same
+ * point. A `delivery` card (none in the library yet) gets twice that; at the
+ * same pace 600 turns outlast the default timeout, so its run raises
+ * `--author-timeout` too, or the clock ends the turn first.
+ */
+export const DEFAULT_AUTHOR_MAX_TURNS: Readonly<Record<ScenarioTier, number>> = { control: 80, starter: 300, delivery: 600 };
+
+/** The agentic turns one question or operation turn may take unless `--ask-max-turns` says otherwise, every tier alike. */
+export const DEFAULT_ASK_MAX_TURNS = 12;
+
 export interface ClaudeCodeDriverOptions {
   /** The CLI binary; default `claude`. */
   bin?: string;
-  /** Agentic turns allowed for one question or operation; default 12. */
-  maxTurnsAsk?: number;
-  /** Agentic turns allowed for one authoring task; default 80. */
-  maxTurnsAuthor?: number;
+  /** Agentic turns allowed for one question or operation; default {@link DEFAULT_ASK_MAX_TURNS}. */
+  askMaxTurns?: number;
+  /** Agentic turns allowed for one authoring task, every tier alike; default by the card's tier, {@link DEFAULT_AUTHOR_MAX_TURNS}. */
+  authorMaxTurns?: number;
   /** Wall-clock budget per authoring turn (build and iterate), ms; default {@link DEFAULT_AUTHOR_TIMEOUT_MIN}. */
   authorTimeoutMs?: number;
   /** Wall-clock budget per question or operation, ms; default 5 min. */
@@ -266,8 +289,24 @@ export class ClaudeCodeDriver implements AgentDriver {
     return this.opts.authorTimeoutMs ?? DEFAULT_AUTHOR_TIMEOUT_MIN * 60_000;
   }
 
+  private authorMaxTurns(tier: ScenarioTier): number {
+    return this.opts.authorMaxTurns ?? DEFAULT_AUTHOR_MAX_TURNS[tier];
+  }
+
+  private get askMaxTurns(): number {
+    return this.opts.askMaxTurns ?? DEFAULT_ASK_MAX_TURNS;
+  }
+
   info(): DriverInfo {
-    return { driver: 'claude-code-cli', version: this.version, authMethod: this.authMethod, apiBilled: false, authorTimeoutMs: this.authorTimeoutMs };
+    return {
+      driver: 'claude-code-cli',
+      version: this.version,
+      authMethod: this.authMethod,
+      apiBilled: false,
+      authorTimeoutMs: this.authorTimeoutMs,
+      authorMaxTurns: Object.fromEntries(SCENARIO_TIERS.map((t) => [t, this.authorMaxTurns(t)])) as Record<ScenarioTier, number>,
+      askMaxTurns: this.askMaxTurns,
+    };
   }
 
   private base(maxTurns: number): string[] {
@@ -280,16 +319,17 @@ export class ClaudeCodeDriver implements AgentDriver {
     const empty = join(mkdtempSync(join(tmpdir(), 'scenario-mcp-')), 'none.json');
     writeFileSync(empty, JSON.stringify({ mcpServers: {} }));
     try {
+      const maxTurns = this.authorMaxTurns(task.tier);
       const args = [
         '-p',
-        ...this.base(this.opts.maxTurnsAuthor ?? 80),
+        ...this.base(maxTurns),
         '--mcp-config', empty, '--strict-mcp-config',
         '--permission-mode', 'acceptEdits',
         '--allowedTools', 'Bash', 'Read', 'Edit', 'Write', 'Glob', 'Grep', 'Skill',
       ];
       const run = await runCli(this.bin, args, task.cwd, task.prompt, this.authorTimeoutMs);
       const turn = parseStreamJson(run.stdout);
-      turn.meta.process = run.process;
+      turn.meta.process = { ...run.process, maxTurns };
       if (turn.meta.resultSubtype === undefined) turn.meta.resultSubtype = noResult(run.process);
       return { turn, files: snapshotSources(task.cwd) };
     } finally {
@@ -308,10 +348,11 @@ export class ClaudeCodeDriver implements AgentDriver {
       { mode: 0o600 },
     );
     try {
-      const args = ['-p', ...this.base(this.opts.maxTurnsAsk ?? 12), '--mcp-config', cfg, '--strict-mcp-config', '--allowedTools', 'mcp__app'];
+      const maxTurns = this.askMaxTurns;
+      const args = ['-p', ...this.base(maxTurns), '--mcp-config', cfg, '--strict-mcp-config', '--allowedTools', 'mcp__app'];
       const run = await runCli(this.bin, args, dir, task.prompt, this.opts.askTimeoutMs ?? 5 * 60_000);
       const turn = parseStreamJson(run.stdout);
-      turn.meta.process = run.process;
+      turn.meta.process = { ...run.process, maxTurns };
       if (turn.meta.resultSubtype === undefined) turn.meta.resultSubtype = noResult(run.process);
       return turn;
     } finally {
