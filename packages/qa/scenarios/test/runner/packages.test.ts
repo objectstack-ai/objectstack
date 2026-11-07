@@ -5,11 +5,12 @@
  * own: a two-package pnpm workspace in a temp directory — a skills catalog
  * holding a marker skill, and a stand-in `create-objectstack` that does what
  * the real one does in the order it does it (write `package.json` and
- * `pnpm-workspace.yaml`, `pnpm install`, copy the installed catalog into
- * `.claude/skills/`). The pack, the `npx --package=` scaffold, the pnpmfile and
- * both installs are the real tools. The packages carry a version npm has
- * never published, so an install that reached for the registry fails instead
- * of quietly finding something.
+ * `pnpm-workspace.yaml`, `pnpm install`, copy each skill of the installed
+ * catalog into `.claude/skills/`, as `skills experimental_sync --copy` does).
+ * The pack, the `npx -y file:` scaffold, the pnpmfile and both installs are
+ * the real tools. The packages carry a version npm has never published, so an
+ * install that reached for the registry fails instead of quietly finding
+ * something.
  */
 
 import { execFileSync } from 'node:child_process';
@@ -43,7 +44,10 @@ fs.mkdirSync(dir);
 fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ name: path.basename(dir), version: '0.1.0', private: true, devDependencies: { '@objectstack/skills': '${VERSION}' } }, null, 2) + '\\n');
 fs.writeFileSync(path.join(dir, 'pnpm-workspace.yaml'), 'packages: []\\n');
 execSync('pnpm install --no-frozen-lockfile', { cwd: dir, stdio: 'inherit' });
-fs.cpSync(path.join(dir, 'node_modules/@objectstack/skills/dist/skills'), path.join(dir, '.claude/skills'), { recursive: true });
+const catalog = path.join(dir, 'node_modules/@objectstack/skills/dist/skills');
+for (const skill of fs.readdirSync(catalog)) {
+  if (fs.existsSync(path.join(catalog, skill, 'SKILL.md'))) fs.cpSync(path.join(catalog, skill), path.join(dir, '.claude/skills', skill), { recursive: true });
+}
 `;
 
 function writeJson(file: string, value: unknown) {
@@ -59,6 +63,7 @@ function makeWorkspace(root: string) {
   writeJson(join(skills, 'package.json'), { name: '@objectstack/skills', version: VERSION, files: ['dist'] });
   mkdirSync(join(skills, 'dist', 'skills', 'objectstack-marker'), { recursive: true });
   writeFileSync(join(skills, 'dist', 'skills', 'objectstack-marker', 'SKILL.md'), `---\nname: objectstack-marker\n---\n\n${MARKER}\n`);
+  writeFileSync(join(skills, 'dist', 'skills', 'README.md'), 'the catalog, described: not a skill, so never synced\n');
   writeFileSync(join(skills, 'NOT-SHIPPED.md'), 'outside `files`: a link would show it, a tarball never does\n');
   const create = join(root, 'packages', 'create-objectstack');
   writeJson(join(create, 'package.json'), { name: 'create-objectstack', version: VERSION, bin: { 'create-objectstack': 'bin.cjs' }, files: ['bin.cjs'] });

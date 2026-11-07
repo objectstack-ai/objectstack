@@ -26,7 +26,7 @@
  *   2. `pnpm pack` each one: the tarball npm would serve — `files[]` only, and
  *      every `workspace:` range rewritten to the version. A link would let the
  *      project see files the package never ships.
- *   3. Scaffold with that `create-objectstack` tarball (`npx -y --package=`),
+ *   3. Scaffold with that `create-objectstack` tarball (`npx -y file:<tarball>`),
  *      untouched: its own install, its own skills sync, its own summary. Its
  *      `pnpm install` is pointed at the tarballs by a global pnpmfile
  *      (`npm_config_global_pnpmfile`, the one pnpm 10 reads from the
@@ -42,11 +42,12 @@
  *      would measure the release already out, under a line that says it did
  *      not: every `@objectstack/*` entry in `node_modules/.pnpm` must be a
  *      tarball (`@file+…`), and `.claude/skills/` must hold the workspace
- *      build's catalog, file for file (`packages/skills/dist/skills`).
+ *      build's catalog (`packages/skills/dist/skills`), skill for skill and
+ *      file for file.
  */
 
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
 
 import { runCommand, type CommandResult } from './project.js';
@@ -234,7 +235,10 @@ export async function prepareWorkspacePackages(repo: string, dest: string, opts:
 /** Step 3's command and environment: the packed scaffolder, its install pointed at the tarballs. */
 export function workspaceScaffolder(ws: WorkspacePackages): { createCommand: string[]; env: Record<string, string> } {
   return {
-    createCommand: ['npx', '-y', `--package=${ws.tarballs.get(SCAFFOLDER_PACKAGE)!}`, SCAFFOLDER_PACKAGE],
+    // A positional `file:` spec, as `npx -y create-objectstack@<version>` names the published one. Not `--package=`:
+    // npx hands that to its child as `npm_config_package`, and the scaffolder's own `npx -y skills@…` then runs
+    // `skills@…` as a bin of the scaffolder's tarball ("not found"), so no skill is installed.
+    createCommand: ['npx', '-y', `file:${ws.tarballs.get(SCAFFOLDER_PACKAGE)!}`],
     env: { npm_config_global_pnpmfile: ws.pnpmfile },
   };
 }
@@ -283,10 +287,14 @@ export function verifyWorkspaceInstall(projectDir: string, ws: Pick<WorkspacePac
     if (!real.includes('@file+')) problems.push(`${name} resolves to ${real}, not to the workspace tarball`);
   }
 
-  const want = treeFiles(ws.skillsCatalog);
+  // A skill is a directory holding a SKILL.md, as the scaffolder counts them; the sync copies each one whole and
+  // nothing else (the catalog's own top-level README.md stays in the package).
+  const skillDirs = (dir: string) => (existsSync(dir) ? readdirSync(dir, { withFileTypes: true }).filter((e) => e.isDirectory() && existsSync(join(dir, e.name, 'SKILL.md'))).map((e) => e.name) : []);
   const skills = join(projectDir, PROJECT_SKILLS_DIR);
-  const got = treeFiles(skills);
-  if (want.length === 0) problems.push(`the workspace catalog ${ws.skillsCatalog} holds no file`);
+  const filesOf = (dir: string, names: string[]) => names.flatMap((n) => treeFiles(join(dir, n)).map((f) => join(n, f))).sort();
+  const want = filesOf(ws.skillsCatalog, skillDirs(ws.skillsCatalog));
+  const got = filesOf(skills, existsSync(skills) ? readdirSync(skills).filter((n) => statSync(join(skills, n)).isDirectory()) : []);
+  if (want.length === 0) problems.push(`the workspace catalog ${ws.skillsCatalog} holds no skill`);
   const missing = want.filter((f) => !got.includes(f));
   const extra = got.filter((f) => !want.includes(f));
   const differ = want.filter((f) => got.includes(f) && !readFileSync(join(skills, f)).equals(readFileSync(join(ws.skillsCatalog, f))));
