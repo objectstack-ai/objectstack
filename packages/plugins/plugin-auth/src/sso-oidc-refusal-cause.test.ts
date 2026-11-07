@@ -311,7 +311,8 @@ describe('an enterprise OIDC callback names the cause of a refused ID token', ()
     const known = await signInThroughIdp(rp, await idToken({ exp: -600 }));
     const unknown = await signInThroughIdp(other, await idToken({ exp: -600, email: 'nobody@acme.com' }));
     expect(errorParams(known)).toEqual(errorParams(unknown));
-    expect(refusalLines(rp).at(-1)).toEqual(refusalLines(other).at(-1));
+    const last = (r: Rp) => refusalLines(r)[refusalLines(r).length - 1];
+    expect(last(rp)).toEqual(last(other));
   });
 });
 
@@ -407,7 +408,8 @@ describe('the docs page', () => {
     const rest = page.slice(page.indexOf('\n', start) + 1);
     const end = rest.search(/^#{2,3} /m);
     const section = end === -1 ? rest : rest.slice(0, end);
-    const listed = [...section.matchAll(/^\| `([a-z_]+)` \|/gm)].map((m) => m[1]);
+    // Table body rows only: the header row names the column, `error_description`.
+    const listed = [...section.matchAll(/^\| `([a-z_]+)` \|/gm)].map((m) => m[1]).filter((v) => v !== 'error_description');
     expect(listed.sort()).toEqual([...SSO_OIDC_REFUSAL_CAUSES, SSO_OIDC_UNCLASSIFIED_REFUSAL].sort());
   });
 });
