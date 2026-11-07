@@ -1,5 +1,5 @@
 ---
-'@objectstack/spec': patch
+'@objectstack/spec': minor
 '@objectstack/core': patch
 '@objectstack/objectql': patch
 '@objectstack/service-storage': patch
@@ -10,7 +10,8 @@
 fix(service-storage): a member attaches a file from the browser again — the upload's own completion attaches it as them, restoring the Attachments panel after #31031
 
 Clause-②: yes (widening)
-Metadata-protocol: none
+Metadata-protocol: added
+Skills-docs: updated here — `content/docs/permissions/attachments-access.mdx` and `content/docs/api/plugin-endpoints.mdx` state the `attachTo` key of the upload-complete request and its refusals; no file under `skills/**` teaches the upload-complete request (a `git grep` of `skills/` finds no `upload/complete` and no `CompleteUploadRequest`).
 
 A signed-in member who may attach files, and holds no read of `sys_file`, can attach a file from a record's Attachments panel again. Since the write-time reference check began judging a `lookup` value through the caller's own read door, the panel's second step — `POST /api/v1/data/sys_attachment` naming the file it had just uploaded — was refused `400 VALIDATION_FAILED` (`file_id`, `reference_not_found`) for such a member.
 
