@@ -22,6 +22,7 @@
 // Parent: Account
 export default ObjectSchema.create({
   name: 'account',
+  sharingModel: 'private',
   fields: {
     name: { type: 'text', required: true },
   }
@@ -30,12 +31,13 @@ export default ObjectSchema.create({
 // Child: Contact (independent lifecycle)
 export default ObjectSchema.create({
   name: 'contact',
+  sharingModel: 'private',
   fields: {
     first_name: { type: 'text', required: true },
     account_id: {
       type: 'lookup',
       reference: 'account',
-      required: false,  // Contact can exist without account
+      required: false,
     },
   }
 });
@@ -47,6 +49,7 @@ export default ObjectSchema.create({
 // Parent: Invoice
 export default ObjectSchema.create({
   name: 'invoice',
+  sharingModel: 'private',
   fields: {
     invoice_number: { type: 'text', required: true },
     total: {
@@ -63,6 +66,7 @@ export default ObjectSchema.create({
 // Child: Line Item (owned by parent)
 export default ObjectSchema.create({
   name: 'invoice_line_item',
+  sharingModel: 'controlled_by_parent',
   fields: {
     invoice_id: {
       type: 'master_detail',
@@ -117,6 +121,7 @@ an omitted `required` as `true`.
 // Side A: Project
 export default ObjectSchema.create({
   name: 'project',
+  sharingModel: 'private',
   fields: {
     name: { type: 'text', required: true },
   }
@@ -125,6 +130,7 @@ export default ObjectSchema.create({
 // Side B: Employee
 export default ObjectSchema.create({
   name: 'employee',
+  sharingModel: 'private',
   fields: {
     name: { type: 'text', required: true },
   }
@@ -133,6 +139,7 @@ export default ObjectSchema.create({
 // Junction: Project Assignment
 export default ObjectSchema.create({
   name: 'project_assignment',
+  sharingModel: 'private',
   fields: {
     project_id: {
       type: 'lookup',
@@ -159,6 +166,7 @@ export default ObjectSchema.create({
 ```typescript
 export default ObjectSchema.create({
   name: 'category',
+  sharingModel: 'private',
   fields: {
     name: { type: 'text', required: true },
     parent_category: {
@@ -247,6 +255,7 @@ atomic transaction**.
 // On the CHILD object's FK field:
 export default ObjectSchema.create({
   name: 'invoice_line',
+  sharingModel: 'controlled_by_parent',
   fields: {
     invoice: {
       type: 'master_detail',
@@ -405,13 +414,4 @@ The [master_detail](#one-to-many-master_detail) pattern above.
 
 ### ✅ Correct — Junction Object Pattern
 
-```typescript
-// Create explicit junction object with two lookup fields
-export default ObjectSchema.create({
-  name: 'post_tag',
-  fields: {
-    post_id: { type: 'lookup', reference: 'post', required: true },
-    tag_id: { type: 'lookup', reference: 'tag', required: true },
-  },
-});
-```
+The [junction object](#many-to-many-junction-object) pattern above.

@@ -61,6 +61,7 @@ import {
     // through the App that carries it, over the engine registry's manifests.
     installedManifestsOf,
     pairOf,
+    pairsOf,
     type InstalledPackageSource,
 } from '@objectstack/metadata-core';
 // [#7560] ADR-0070's read-only-package rule — the SAME predicate the metadata
@@ -159,7 +160,7 @@ import { parseBooleanParam } from '../query-param.js';
 import { setPackageDisabled } from '../package-state-store.js';
 // [#30962] The host seam for the same state: a store a host registers as the
 // `package-state-store` service replaces the file at every door below.
-import { asPackageStateStore, PACKAGE_STATE_STORE_SERVICE } from '../package-state-host-store.js';
+import { asPackageStateStore, PACKAGE_STATE_STORE_SERVICE, PACKAGE_STATE_UNINSTALL_CLEANUP } from '../package-state-host-store.js';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.js';
 import { readDispatchedBody } from '../deferred-request-body.js';
@@ -413,7 +414,8 @@ function requireManageMetadata(deps: DomainHandlerDeps, context: HttpProtocolCon
  * doors, so attribution cannot drift from authorization. [#28414] Every
  * package door that stamps history or a commit reads it: `publish-drafts`
  * (and its app re-save), `discard-drafts`, `commits/:commitId/revert`,
- * `rollback`, `adopt-orphans` and `duplicate`. A body `actor` is ignored, not
+ * `rollback`, `adopt-orphans` and `duplicate`, and [#31023] the package
+ * `DELETE`, whose verb credits each metadata delete. A body `actor` is ignored, not
  * refused, so a client still sending one keeps working and is recorded as
  * itself. No caller acts on behalf of another identity through these doors
  * (measured: the console and the SDK send none, the CLI calls none); one that
@@ -1051,8 +1053,18 @@ function declaredRulesOf(body: unknown): Array<{ name?: unknown; active?: unknow
  *
  * Ordered by package, object and rule. Empty for a package already disabled
  * (the disable withholds nothing more) and for one that extends nothing.
+ *
+ * ## On the package entry
+ *
+ * Exported as `readPackageDisableDependents` from `@objectstack/runtime`, with
+ * {@link disableDependentRulesMessage} as `formatPackageDisableDependents`, so
+ * a host door that takes a package out of service another way (a control
+ * plane's per-install disable, a soft-disable uninstall) asks the scan this
+ * door asks and answers the sentence it answers, instead of a second copy of
+ * either. Pure over `registry`: it reads the registry and writes nothing, so
+ * a host asks it BEFORE its own write, as this door does.
  */
-function readDisableDependentRules(registry: any, packageId: string): DisableDependentRule[] {
+export function readDisableDependentRules(registry: any, packageId: string): DisableDependentRule[] {
     if (typeof registry?.getObjectContributors !== 'function' || typeof registry?.getAllObjects !== 'function') return [];
     const disabled = (id: unknown): boolean =>
         typeof registry.isPackageDisabled === 'function' && registry.isPackageDisabled(id);
@@ -1178,8 +1190,11 @@ function ruleLayerLabel(layer: { packageId?: unknown; ownership?: unknown }): st
 /**
  * The sentence a dependent-rule refusal carries: `lead` (what was refused),
  * then every rule as `package · object · rule (reads FIELD, …)`, then the remedy.
+ * Exported as `formatPackageDisableDependents` from `@objectstack/runtime`
+ * beside {@link readDisableDependentRules}; a host door answers it with `409`
+ * `PACKAGE_DISABLE_RESTRICTED_BY_VALIDATION_RULE`, as this door does.
  */
-function disableDependentRulesMessage(lead: string, dependents: readonly DisableDependentRule[]): string {
+export function disableDependentRulesMessage(lead: string, dependents: readonly DisableDependentRule[]): string {
     const one = dependents.length === 1;
     const listed = dependents
         .map((d) => `${d.packageId} · ${d.object} · ${d.rule} (reads ${d.fields.join(', ')})`)
@@ -3791,12 +3806,21 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             //
             // [#20492] `protocol` is the one resolved above, before the registry
             // was touched.
+            //
+            // [#31023, ADR-0146 D1] The actor is the request's authenticated
+            // user, resolved as every sibling package write door resolves it
+            // (`resolvePackageWriteActor`), so each metadata delete the verb
+            // performs is credited to that user in `sys_audit_log` and
+            // `sys_metadata_history`. A caller with no user id sends no
+            // `actor`, and the deletes stay unattributed, as before.
             if (protocol && typeof protocol.deletePackage === 'function') {
                 try {
                     const keepData = query?.keepData === 'true' || query?.keepData === '1';
+                    const actor = resolvePackageWriteActor(_context);
                     persisted = await protocol.deletePackage({
                         packageId: id,
                         ...(keepData ? { keepData: true } : {}),
+                        ...(actor ? { actor } : {}),
                     });
                 } catch (e: any) {
                     // [#21276] Nothing was touched on this path: the registry
@@ -3859,7 +3883,19 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             // Same best-effort try/catch as the install arm above: the
             // uninstall itself already happened, so a state-store failure must
             // not turn it into a 500.
-            if (persists ? existed : registryRemoved) {
+            //
+            // [#31023] The verb clears the record itself when the runtime's
+            // uninstall cleanup is registered on its protocol
+            // (`ensurePackageStateUninstallCleanup`, from `AppPlugin.start`),
+            // so every in-process caller of `deletePackage` gets the clear,
+            // not only this door; its outcome rides on `persisted.cleanups`.
+            // The verb runs its cleanups for every id it is asked to
+            // uninstall, so with it a 404 here clears a record naming an id
+            // that is neither installed nor stored. This door writes the
+            // record only when the verb did not: a host with no persisted
+            // half, or a protocol on a kernel that registered no such cleanup.
+            const verbClearedState = persisted?.cleanups?.some((c) => c?.name === PACKAGE_STATE_UNINSTALL_CLEANUP) === true;
+            if (!verbClearedState && (persists ? existed : registryRemoved)) {
                 try {
                     await writePackageStateAfterChange(deps, _context, id, false);
                 } catch (err) {
@@ -3990,15 +4026,18 @@ async function readPackageCustomizations(
     const overrides = await listServedOverrides({ packageId: baseId });
 
     const registry = ql?.registry;
-    const pair = pairOf(baseId, installedManifestsOf(registry));
+    // [#29594, ADR-0146 D3 merge question 12] Every pair of the base: the
+    // App's pair, then the per-package pair an earlier version created for it.
+    const pairs = pairsOf(baseId, installedManifestsOf(registry));
     type Extension = GetPackageCustomizationsResponse['extensions'][number];
     const extensions: Extension[] = [];
-    if (pair.ok && typeof registry?.getAllObjects === 'function') {
-        for (const object of registry.getAllObjects(pair.value) as Array<{ name?: unknown }>) {
+    const pairIdsToRead = typeof registry?.getAllObjects === 'function' ? pairs : [];
+    for (const pairId of pairIdsToRead) {
+        for (const object of registry.getAllObjects(pairId) as Array<{ name?: unknown }>) {
             const name = object?.name;
             if (typeof name !== 'string' || registry.getObjectOwner(name)?.packageId !== baseId) continue;
             for (const contributor of registry.getObjectContributors(name) as Array<{ packageId?: unknown; ownership?: unknown; definition?: any }>) {
-                if (contributor.packageId !== pair.value || contributor.ownership !== 'extend') continue;
+                if (contributor.packageId !== pairId || contributor.ownership !== 'extend') continue;
                 const body = contributor.definition ?? {};
                 for (const field of Object.keys(body.fields ?? {})) extensions.push({ object: name, kind: 'field', name: field });
                 for (const rule of Array.isArray(body.validations) ? body.validations : []) {
@@ -4033,7 +4072,7 @@ async function readPackageCustomizations(
         .map((row) => ({ type: row.metadataType, name: row.name }))
         .sort((a, b) => a.type.localeCompare(b.type) || a.name.localeCompare(b.name));
 
-    const contributions = readBaseContributions(baseId, pair.ok ? pair.value : undefined, registry);
+    const contributions = readBaseContributions(baseId, pairs, registry);
 
     return {
         packageId: baseId,
@@ -4095,7 +4134,7 @@ async function readPackageCustomizations(
  */
 function readBaseContributions(
     baseId: string,
-    pairId: string | undefined,
+    pairIds: readonly string[],
     registry: any,
 ): GetPackageCustomizationsResponse['contributions'] {
     type Contribution = GetPackageCustomizationsResponse['contributions'][number];
@@ -4105,9 +4144,10 @@ function readBaseContributions(
     const navs: NavContribution[] = [];
     // The one stamp reading both kinds share: the package `packageId` names
     // when `body` is a code package's item and the package is neither the base
-    // nor its pair; `undefined` otherwise.
+    // nor one of its pairs ([#29594] the App's pair, or the per-package pair
+    // an earlier version created for it); `undefined` otherwise.
     const codePackageOf = (packageId: unknown, body: unknown): string | undefined => {
-        if (typeof packageId !== 'string' || packageId === baseId || packageId === pairId) return undefined;
+        if (typeof packageId !== 'string' || packageId === baseId || pairIds.includes(packageId)) return undefined;
         const stamped = { _packageId: packageId, _provenance: (body as { _provenance?: unknown } | null | undefined)?._provenance };
         return isCodeArtifactBody(stamped) ? packageId : undefined;
     };

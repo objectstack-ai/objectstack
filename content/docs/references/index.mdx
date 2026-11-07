@@ -1,7 +1,7 @@
 ---
 title: Protocol reference — every schema by module
 navTitle: Protocol Reference
-description: Every schema published by @objectstack/spec — 1635 schemas across 14 protocol modules
+description: Every schema published by @objectstack/spec — 1636 schemas across 14 protocol modules
 ---
 
 {/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
@@ -32,9 +32,9 @@ counts are sums of the rows they head. Regenerate with
 | [Security Protocol](/docs/references/security) | 6 | 37 | Permission sets, row-level security, sharing rules, tenancy posture. |
 | [Shared Protocol](/docs/references/shared) | 10 | 31 | Primitives used across every protocol — identifiers, HTTP, expressions, error maps, enums. |
 | [Studio Protocol](/docs/references/studio) | 3 | 35 | Studio designer metadata — the authoring surfaces for the protocols above. |
-| [System Protocol](/docs/references/system) | 39 | 295 | The runtime environment — logging, jobs, cache, metrics, notifications, i18n and compliance. |
+| [System Protocol](/docs/references/system) | 40 | 296 | The runtime environment — logging, jobs, cache, metrics, notifications, i18n and compliance. |
 | [UI Protocol](/docs/references/ui) | 16 | 175 | Apps, pages, views, dashboards, reports, actions and themes — the ObjectUI layer. |
-| **Total** | **212** | **1635** | 14 protocol modules |
+| **Total** | **213** | **1636** | 14 protocol modules |
 
 ---
 
@@ -329,7 +329,7 @@ Studio designer metadata — the authoring surfaces for the protocols above.
 
 ## System Protocol
 
-**Source:** `packages/spec/src/system/` · **Import:** `@objectstack/spec/system` · **39 pages, 295 schemas**
+**Source:** `packages/spec/src/system/` · **Import:** `@objectstack/spec/system` · **40 pages, 296 schemas**
 
 The runtime environment — logging, jobs, cache, metrics, notifications, i18n and compliance.
 
@@ -363,6 +363,7 @@ The runtime environment — logging, jobs, cache, metrics, notifications, i18n a
 | [`push-config.zod.ts`](/docs/references/system/push-config) | `ApnsTransportConfig`, `FcmTransportConfig`, `PushDirectTransportConfig`, `PushRelayTransportConfig`, `PushServiceConfig`, `PushVendor` |
 | [`push-device.zod.ts`](/docs/references/system/push-device) | `UserDevice` |
 | [`registry-config.zod.ts`](/docs/references/system/registry-config) | `RegistryConfig`, `RegistrySyncPolicy`, `RegistryUpstream` |
+| [`restriction-profile.zod.ts`](/docs/references/system/restriction-profile) | `RestrictionProfile` |
 | [`search-engine.zod.ts`](/docs/references/system/search-engine) | `AnalyzerConfig`, `FacetConfig`, `SearchConfig`, `SearchIndexConfig`, `SearchProvider` |
 | [`security-context.zod.ts`](/docs/references/system/security-context) | `ComplianceAuditRequirement`, `ComplianceEncryptionRequirement`, `ComplianceFramework`, `DataClassification`, `DataClassificationPolicy`, `MaskingVisibilityRule`, `SecurityContextConfig`, `SecurityEventCorrelation` |
 | [`settings-client.zod.ts`](/docs/references/system/settings-client) | `SettingsChangeEvent` |

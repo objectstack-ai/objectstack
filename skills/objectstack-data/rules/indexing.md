@@ -206,10 +206,16 @@ indexes: [
 
 ### Multi-Tenant Queries
 
+The tenant column is `organization_id`, injected by `systemFields.tenant` — not a
+field you declare (an index naming an undeclared `tenant_id` is refused). On a
+multi-tenant host the platform adds its single-column index. A non-unique
+composite may lead with it; a unique one says `unique: 'organization'` instead
+(above):
+
 ```typescript
-// Query: WHERE tenant_id = X AND ...
+// Query: WHERE organization_id = X AND ...
 indexes: [
-  { fields: ['tenant_id', 'status', 'created_at'] },
+  { fields: ['organization_id', 'status', 'created_at'] },
 ]
 ```
 

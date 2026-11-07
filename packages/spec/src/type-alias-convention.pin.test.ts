@@ -295,9 +295,11 @@ import type * as M200 from './automation/api-trigger-signature.zod.js';
 import type * as M201 from './data/recycle-bin.zod.js';
 // The marketplace taxonomy (business function, industry, solution type) and the maturity flag -- new module, next free index.
 import type * as M202 from './marketplace/taxonomy.zod.js';
+// The restriction profile a target environment publishes -- new module, next free index.
+import type * as M203 from './system/restriction-profile.zod.js';
 
 // ---------------------------------------------------------------------------
-// 841 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
+// 842 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
 //
 // That number is machine-checked, not hand-kept. The runtime companion at the
 // bottom of this file recomputes the pin count from the source and asserts that
@@ -1467,6 +1469,9 @@ export type Iso_system_pushDevice__UserDeviceSchema = Assert<Eq< z.input< typeof
 // system/registry-config.zod.ts
 export type Iso_system_registryConfig__RegistrySyncPolicySchema = Assert<Eq< z.input< typeof M143.RegistrySyncPolicySchema >, z.infer< typeof M143.RegistrySyncPolicySchema > >>;
 
+// system/restriction-profile.zod.ts
+export type Iso_system_restrictionProfile__RestrictionProfileSchema = Assert<Eq< z.input< typeof M203.RestrictionProfileSchema >, z.infer< typeof M203.RestrictionProfileSchema > >>;
+
 // system/search-engine.zod.ts
 export type Iso_system_searchEngine__AnalyzerConfigSchema = Assert<Eq< z.input< typeof M144.AnalyzerConfigSchema >, z.infer< typeof M144.AnalyzerConfigSchema > >>;
 export type Iso_system_searchEngine__SearchProviderSchema = Assert<Eq< z.input< typeof M144.SearchProviderSchema >, z.infer< typeof M144.SearchProviderSchema > >>;
@@ -1801,7 +1806,7 @@ describe('ADR-0122 type-alias convention', () => {
   // this title and the section header above the pin list — are now asserted
   // against the recomputed count below, so neither can go stale without a red
   // test naming it.
-  it('still declares all 841 isomorphic pins', () => {
+  it('still declares all 842 isomorphic pins', () => {
     // The truth of each pin is proved by tsc, not here — an `Assert<Eq<...>>`
     // that stops holding is a compile error with the alias named. What tsc
     // cannot notice is a pin that was DELETED: removing the assertion removes
@@ -2834,7 +2839,12 @@ describe('ADR-0122 type-alias convention', () => {
     // retired, `MarketplaceCategorySchema` and `PackageCategorySchema`, left
     // their modules whole (RETIRED_DEFS_BY_MAJOR[18]) and took their pins with
     // them, -2 removed.
-    expect(pins).toHaveLength(841);
+    // 841 -> 842 is the restriction profile a target environment publishes
+    // (`system/restriction-profile.zod.ts`): a strict object of two booleans,
+    // an array of the built-in node type enum and a strict object of two
+    // regex strings, no default and no transform
+    // (Iso_system_restrictionProfile__RestrictionProfileSchema). +1 added.
+    expect(pins).toHaveLength(842);
 
     // The count is stated in PROSE twice as well — this case's title and the
     // section header above the pin list — and until commit c6b05c76a nothing read either

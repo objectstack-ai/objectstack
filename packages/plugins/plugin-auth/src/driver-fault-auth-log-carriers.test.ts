@@ -14,6 +14,13 @@
  * this package's adapter or its logger wiring was changed for it, because a
  * per-consumer patch would leave the class open for the next logger.
  *
+ * The library's lines reach the manager's logger, through the sink plugin-auth
+ * hands `betterAuth` (`sso-oidc-refusal-cause.ts`), and the console only when
+ * no logger is configured. So "the library's carriers" below are both: the
+ * console, and the manager-logger lines the sink tags `[better-auth]`. The sink
+ * passes the vendor's arguments through as written, so the error object is
+ * the same carrier it was on the console.
+ *
  * ## How a driver error is forced, honestly
  *
  * A UNIQUE index is added to `sys_user.name` after the schema is synced, and a
@@ -350,17 +357,23 @@ for (const cell of CELLS) {
         expect(engineWarns).toContain('Update operation failed');
       });
 
+      /** Every line the auth library wrote: the console, and its lines on the manager logger. */
+      const libraryLines = (): RecordedCall[] => [
+        ...captured.console,
+        ...captured.manager.calls.filter((c) => String(c.args[0]).startsWith('[better-auth]')),
+      ];
+
       it("the library's error line and its server-error line carry no bound value", () => {
-        const errorLines = captured.console.filter((l) => l.level === 'error');
+        const errorLines = libraryLines().filter((l) => l.level === 'error');
         expect(errorLines.map((l) => format(...l.args)).some((t) => t.includes('Failed to create user'))).toBe(true);
         expect(errorLines.map((l) => format(...l.args)).some((t) => t.includes('DuplicateRecordError'))).toBe(true);
-        for (const line of captured.console) {
-          expect(renderCall(line.args).includes(S), `console.${line.level} carries the caller's value`).toBe(false);
+        for (const line of libraryLines()) {
+          expect(renderCall(line.args).includes(S), `${line.level} ${String(line.args[0])} carries the caller's value`).toBe(false);
         }
       });
 
       it("the error object's properties carry no bound value, while its class, code and diagnostic survive", () => {
-        const errors = captured.console
+        const errors = libraryLines()
           .flatMap((l) => l.args)
           .filter((a): a is Error & Record<string, unknown> => a instanceof Error);
         for (const error of errors) {

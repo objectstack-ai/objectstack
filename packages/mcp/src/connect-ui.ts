@@ -74,8 +74,8 @@ export const CONNECT_AGENT_PAGE: Page = {
           properties: {
             title: 'Connect an AI Assistant',
             subtitle:
-              'Give any MCP-capable AI client governed access to this system — ' +
-              'every call runs under the caller\'s own permissions and row-level security.',
+              'Work in this system from Claude, Doubao and other AI assistants. ' +
+              'Each one acts as you: it sees and changes only what your own permissions allow.',
             // `icon` removed here (#6946): `page:header` never drew one — retired from the spec.
           },
         },

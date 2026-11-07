@@ -92,13 +92,13 @@ columns for a missing key. The per-locale shape is the
 **Two things the file can say that never reach the listing.** Publish uploads no
 screenshot images, and the Console's marketplace pages render none: a
 `preview.screenshots` list stays on your disk, and `screenshotCaptions` travels
-with no image to caption. The schema also accepts `publisher` and `isStarter`,
-but the platform decides both: an author's value has no effect, so
-`os package publish` never sends them and prints a warning naming each one the
-file declares. `tags` is different: it is sent as written (see the table above).
-The file no longer accepts `visibility` (pass `--visibility`; publish refuses the
-key by name) nor `name`, `specVersion`, `skills` or `scaffold`, which nothing
-ever read: publish names each one still present so you can delete it.
+with no image to caption. `tags` is different: it is sent as written (see the
+table above). The file no longer accepts `visibility` (pass `--visibility`;
+publish refuses the key by name), nor `publisher` — the platform assigns a
+package's trust tier from your credentials, and publish refuses the key by name —
+nor `isStarter`, `name`, `specVersion`, `skills` or `scaffold`, which never
+changed what publish sent (the platform decides which packages are starters):
+publish names each one still present so you can delete it.
 Put the icon, the description, the tags, the tagline and the README where the
 table above says, and nothing else.
 </Callout>

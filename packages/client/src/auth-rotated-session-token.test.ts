@@ -214,8 +214,10 @@ const arrangeServer = async () => {
 };
 
 /**
- * [#23181] The file's ONE server, built by the first case that signs in and
- * shared by every later one. Each case still signs a user of its own up on it,
+ * [#23181] The file's ONE server, shared by every case. It is built at module
+ * scope right after the warm-up (below), so no case's clock carries its
+ * engine, schema sync and better-auth instance: before, the first case to
+ * sign in built it inside its own window. Each case still signs a user of its own up on it,
  * through a client of its own, and every assertion here is about that user's
  * credential: a rotation revokes only the rotating user's sessions, and a
  * case reads its own user by address. So no case reads another case's writes,
@@ -357,6 +359,10 @@ const closeEngines = async (): Promise<void> => {
 // and `④` below pins that.
 await signedIn();
 await closeEngines();
+// The cases' shared server, built here for the same reason: it is
+// arrangement, not behaviour, and the first case used to pay it. Its
+// better-auth instance is built on first use, so that is asked for here too.
+await (await fileServer()).manager.getAuthInstance();
 
 beforeEach(() => {
   vi.spyOn(console, 'warn').mockImplementation(() => {});

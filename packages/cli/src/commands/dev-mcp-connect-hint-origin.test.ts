@@ -38,6 +38,21 @@ import { OBJECTSTACK_MCP_SERVER_NAME, renderSkillMarkdown } from '@objectstack/m
 import { printMcpConnectHint } from './dev.js';
 import { AUTH_BASE_URL_ENV_NAMES, resolveAuthBaseUrl } from './serve.js';
 import { printServerReady, type ServerReadyOptions } from '../utils/format.js';
+import McpConnect from './mcp/connect.js';
+
+// Pay the first load of what `serve.ts` reaches through dynamic `import()`s at
+// MODULE LOAD, outside any clocked case (`pnpm check:test-source-alias`).
+import '@objectstack/metadata-protocol';
+import '@objectstack/metadata';
+import '@objectstack/objectql';
+import '@objectstack/plugin-hono-server';
+import '@objectstack/rest';
+import '@objectstack/service-settings';
+import '@objectstack/service-datasource';
+import '@objectstack/driver-turso';
+import '@objectstack/driver-sql';
+import '@objectstack/platform-objects/plugin';
+import '@objectstack/plugin-security';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const DEV_SOURCE = readFileSync(resolve(HERE, 'dev.ts'), 'utf8');
@@ -371,11 +386,23 @@ describe('os dev MCP connect hint — origin (#16734)', () => {
       expect(skill).toEqual([OBJECTSTACK_MCP_SERVER_NAME]);
     });
 
+    it('`os mcp connect --url` for the same origin prints the very line the banner prints', async () => {
+      const banner = boot(3000).split('\n').find((l) => l.includes('Connect   claude mcp add'));
+      expect(banner).toBeDefined();
+
+      lines = [];
+      await McpConnect.run(['--url', 'http://localhost:3000', '--print']);
+      const connect = lines.find((l) => l.includes('Connect   claude mcp add'));
+
+      expect(connect?.trim()).toBe(banner!.trim());
+    });
+
     it('dev reads that constant and derives no name of its own', () => {
       // The name used to be the folder `os dev` ran in, so a `hotcrm/` checkout
       // registered the server as `hotcrm` while the skill said `objectstack`.
       expect(DEV_SOURCE).toContain("import { OBJECTSTACK_MCP_SERVER_NAME } from '@objectstack/mcp';");
-      expect(DEV_SOURCE).toContain('claude mcp add --transport http ${OBJECTSTACK_MCP_SERVER_NAME} ');
+      // The line is `os mcp connect`'s builder, fed that constant: one spelling for both commands.
+      expect(DEV_SOURCE).toContain('claudeMcpAddLine(OBJECTSTACK_MCP_SERVER_NAME, ');
       expect(DEV_SOURCE).not.toMatch(/basename\(process\.cwd\(\)\)/);
     });
   });
