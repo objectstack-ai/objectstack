@@ -178,7 +178,7 @@ async function rig() {
     return value == null || value === '' ? null : new Date(value).toISOString();
   };
 
-  /** The person withdraws a consent: the row is deleted, as `/oauth2/delete-consent` and `/oauth2/revoke` delete it. */
+  /** The person withdraws a consent: the row is deleted, as `/oauth2/revoke`, the authorized-clients withdraw and better-auth's own `/oauth2/delete-consent` delete it. */
   const withdraw = async (consentId: string): Promise<void> => {
     const ctx = await manager.getAuthContext();
     await ctx.adapter.delete({ model: 'oauthConsent', where: [{ field: 'id', value: consentId }] });

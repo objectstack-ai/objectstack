@@ -20,7 +20,9 @@
  *    `verifyMcpAccessToken` — which the MCP route answers with a 401
  *    (`@objectstack/runtime` `http-dispatcher.mcp-oauth.test.ts`, "invalid /
  *    expired JWT bearer → 401", pins that a refused bearer is a 401 there);
- *  - the Console's `delete-consent` refuses the same bearer, with no extra write;
+ *  - better-auth's own `delete-consent` (which the Console does not call; it
+ *    withdraws through `authorized-clients-withdraw.ts`) refuses the same
+ *    bearer, with no extra write;
  *  - a revoke sent by ANOTHER client answers 200 and the owner's token works;
  *  - a `token_type_hint` naming another token type does not end the search
  *    (RFC 7009 §2.1): the MCP access token is revoked all the same;
@@ -250,7 +252,7 @@ describe('[ruling A] /oauth2/revoke revokes an MCP access token through its cons
     expect(await r.rowsAtRest('sys_oauth_consent')).toHaveLength(1);
   }, 60_000);
 
-  it('the Console\'s `delete-consent` refuses the same bearer on the next request, with no extra write', async () => {
+  it('better-auth\'s own `delete-consent` refuses the same bearer on the next request, with no extra write', async () => {
     const r = await rig();
     const { clientId, cookie, access_token } = await r.connect();
     const listed = await r.send(new Request(`${AUTH}/oauth2/get-consents`, { headers: { cookie } }));

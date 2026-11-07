@@ -20,7 +20,8 @@
  * Each withdraw deletes the consent through better-auth's own adapter, so
  * plugin-audit's generic writer records it exactly as it records the grant:
  * a `create` row when the consent page writes the consent, a `delete` row when
- * the withdraw removes it, credited to the person who withdrew it. The access
+ * the withdraw removes it, credited to whoever withdrew it (the person on the
+ * own door, the administrator on the admin door). The access
  * matrix (unknown ids, foreign keys, every non-admin caller) is pinned on the
  * real plugin in `plugin-auth` `authorized-clients-read.real-plugin.test.ts`.
  */
@@ -247,5 +248,13 @@ describe('#31048 withdrawing an authorized AI assistant refuses its token on the
     expect(await consentRows(id)).toEqual([]);
     const refused = await initialize(grant.accessToken);
     expect(refused.status, await refused.clone().text()).toBe(401);
+
+    const adminMe = await stack.apiAs(adminToken, 'GET', '/auth/get-session');
+    const adminId = String(((await adminMe.json()) as any)?.user?.id ?? '');
+    expect(adminId).not.toBe('');
+    expect(adminId).not.toBe(ownerId);
+    const deletes = await auditRowsFor(id, 'delete');
+    expect(deletes, 'the admin withdraw is audited as the own one is: a generic delete row').toHaveLength(1);
+    expect(deletes[0].user_id, 'credited to the administrator who withdrew it, not the person').toBe(adminId);
   });
 });
