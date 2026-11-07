@@ -85,7 +85,12 @@ export const MANAGED_EXTENSION_FIELDS: Readonly<Record<string, ReadonlySet<strin
     'locale',
   ]),
   sys_organization: new Set([
-    // ADR-0069 D3 — per-org MFA tightening above the global floor.
+    // ADR-0069 D3 — the toggle-era per-org MFA column. Retired: an
+    // organization's multi-factor level is its `access_policy.mfa_required`
+    // setting (`organization-access-policy.ts`), and the boot move
+    // (`migrateLegacyOrganizationRequireMfa`) carries a stored `true` there
+    // and clears the column. Still ours (the column is still provisioned, so
+    // the move can read it); no longer editable — see below.
     'require_mfa',
     // ADR-0105 D6 — group structure. Reporting dimension ONLY: no permission
     // inheritance walks this reference (lint-enforced).
@@ -180,12 +185,13 @@ export const MANAGED_EXTENSION_EDITABLE_FIELDS: Readonly<Record<string, Readonly
   // `SYS_USER_PROFILE_EDIT_FIELDS` — see the warning above.
   sys_user: new Set(['locale']),
   sys_organization: new Set([
-    'require_mfa',
+    // `require_mfa` left this list with the multi-factor levels: a value
+    // written here would be read by nothing (ADR-0049), so the guard strips it.
     'parent_organization_id',
     'sort_order',
     // #14238 — the hierarchy's root default is a value an administrator SETS;
     // a column the guard strips on every user-context write would be a root
-    // default nobody can set. Same tier as `require_mfa` and the D6 pair.
+    // default nobody can set. Same tier as the D6 pair.
     // What reaches the row is still judged by the column itself:
     // `valueDomain: 'iana_time_zone'` refuses a non-member on the write path
     // (`org-hierarchy-timezone-write-contract.test.ts` drives both layers).

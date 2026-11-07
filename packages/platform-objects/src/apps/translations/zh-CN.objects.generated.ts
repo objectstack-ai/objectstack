@@ -556,8 +556,8 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         help: "JSON 序列化的组织元数据"
       },
       require_mfa: {
-        label: "强制多因素认证",
-        help: "开启后，该组织的每位成员都必须先绑定身份验证器 App，才能访问数据。需要本部署开启双重验证（OS_AUTH_TWO_FACTOR=true）；双重验证关闭时，保存为开启会被拒绝。"
+        label: "强制多因素认证（已停用）",
+        help: "已停用。请在“设置 → 访问策略”中设置本组织的多因素认证要求。此处原为开启的值已迁移为“所有人”并清除。"
       },
       timezone: {
         label: "时区",

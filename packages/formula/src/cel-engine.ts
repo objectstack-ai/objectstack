@@ -351,8 +351,10 @@ let recordScopeEnv: Environment | undefined;
  * In a `record`-scoped CEL site — a `Field.formula` or an object validation
  * predicate — the evaluation scope binds only the `record`/`previous`/… *namespaces*
  * (no field flattening). A bare top-level identifier like `amount` or `status`
- * therefore resolves to nothing and the expression silently evaluates to `null`
- * / never fires (#1928, the class behind #1927's broken formulas). Returns the
+ * is therefore an unknown variable: the expression faults with `Unknown
+ * variable: <name>` instead of reading the field, and the site's fault rule
+ * decides the outcome — a formula reads null, a predicate is refused, locked,
+ * hidden or skipped (#1928, the class behind #1927's broken formulas). Returns the
  * first such bare reference, or `null`.
  *
  * Acts ONLY on cel-js's `Unknown variable: X` fault, so it cannot false-positive
