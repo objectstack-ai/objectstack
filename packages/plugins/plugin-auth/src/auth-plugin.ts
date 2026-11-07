@@ -2,7 +2,18 @@
 
 // [#25083] `isCloudManaged`: the ONE accessor the cloud-managed doors below ask.
 import { serveAgentForwardAtIdentityMount } from './agent-forward-identity-view.js';
-import { Plugin, PluginContext, IHttpServer, isCloudManaged, resolveRequestExecutionContext, type RequestAuthService } from '@objectstack/core';
+import {
+  Plugin,
+  PluginContext,
+  IHttpServer,
+  isCloudManaged,
+  resolveRequestExecutionContext,
+  isAuthzStoreUnavailableError,
+  AUTHZ_STORE_UNAVAILABLE_CODE,
+  AUTHZ_STORE_UNAVAILABLE_MESSAGE,
+  AUTHZ_STORE_UNAVAILABLE_STATUS,
+  type RequestAuthService,
+} from '@objectstack/core';
 import type { BetterAuthOptions } from 'better-auth';
 import {
   AuthConfig,
@@ -54,6 +65,7 @@ import { recoverInternalFieldsForSystemRead } from './internal-field-readback.js
 import { runAttributedToUser } from './auth-actor-attribution.js';
 import { withSystemContext } from './objectql-adapter.js';
 import type { AuthEventAuditSurface } from './auth-session-audit.js';
+import type { OrganizationAddressReaderContext } from './client-address-read.js';
 import { createTenancyService, type TenancyService } from './tenancy-service.js';
 import {
   isMembershipPolicy,
@@ -123,7 +135,7 @@ import {
   ssoProviderDeleteRefusal,
   type SignInMethodFloorDeps,
 } from './sign-in-method-floor.js';
-import { judgePlatformAdmin, isPlatformAdminUser, type PlatformAdminActor } from './platform-admin-gate.js';
+import { judgePlatformAdmin, judgeHeldSession, isPlatformAdminUser, type PlatformAdminActor } from './platform-admin-gate.js';
 import {
   decideDemoStaffEnvironmentGate,
   probeDemoStaffPriorLogin,
@@ -3363,6 +3375,42 @@ export class AuthPlugin implements Plugin {
   }
 
   /**
+   * The caller of a raw mount as the settings door resolves a SAVING caller:
+   * the platform's one composition (`resolveRequestExecutionContext`) with the
+   * settings door's parameter set (`service-settings`'
+   * `verifiedContextFromRequest`), so a capability judged here is the one the
+   * same caller's settings save is judged by — resolved for the caller's
+   * current organization, a session or an API key admitting them, and the
+   * ADR-0069 posture that holds the credential carried as `authGate` for the
+   * route to refuse. `undefined` when the request resolves no principal.
+   * ⛔ An unreachable permission store throws (`AuthzStoreUnavailableError`):
+   * an outage, never a caller with no capability.
+   */
+  private async resolveOrganizationSettingsCaller(headers: Headers): Promise<OrganizationAddressReaderContext | undefined> {
+    const context = await resolveRequestExecutionContext({
+      headers,
+      ql: this.authManager!.getDataEngine(),
+      authService: this.authManager as unknown as RequestAuthService,
+      tenancy: () => this.tenancy ?? undefined,
+      anonymous: 'fail-closed',
+      authGate: 'resolved',
+      credentials: 'api-key-and-session',
+      sessionApi: 'optional',
+      session: 'request',
+      localization: 'withhold',
+      requestLocale: undefined,
+      accessToken: 'withhold',
+      oauth: undefined,
+      onAdmission: undefined,
+    });
+    if (!context) return undefined;
+    return {
+      systemPermissions: context.systemPermissions ?? [],
+      ...(context.authGate ? { authGate: context.authGate } : {}),
+    };
+  }
+
+  /**
    * ADR-0069 D5 — the operator-facing explanation of an allow-list refusal,
    * for the two cases where the reason is not simply "an address outside the
    * ranges". Logged at `warn` (a refusal the requester was told about, not a
@@ -3930,6 +3978,42 @@ export class AuthPlugin implements Plugin {
         const err = error instanceof Error ? error : new Error(String(error));
         ctx.logger.error('[AuthPlugin] admin/client-address failed', err);
         return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: err.message } }, 500);
+      }
+    });
+
+    // ────────────────────────────────────────────────────────────────────
+    // ADR-0069 TL;DR 6 — the same address, read by an ORGANIZATION
+    // administrator before saving the organization's `access_policy` Allowed
+    // IP ranges, whose save check judges it. Gated to the caller who may save
+    // that list (`setup.write` in their current organization), resolved by the
+    // platform's one composition; then the read above, unchanged: the caller's
+    // own address only, closed and empty query set, no body
+    // (client-address-read.ts).
+    rawApp.get(`${basePath}/client-address`, async (c: any) => {
+      try {
+        const { judgeOrganizationAddressReader, runClientAddressRead } = await import('./client-address-read.js');
+        const refusal = judgeOrganizationAddressReader(
+          await this.resolveOrganizationSettingsCaller(c.req.raw.headers),
+          judgeHeldSession,
+        );
+        if (refusal) return c.json(refusal.body, refusal.status);
+        const answer = runClientAddressRead(this.authManager!, {
+          queries: (c.req.queries() ?? {}) as Record<string, string[]>,
+          transport: { headers: (c.req.header() ?? {}) as Record<string, string>, ...transportOf(c) },
+        });
+        return c.json(answer.body, answer.status as any, answer.headers);
+      } catch (error) {
+        // An unreachable permission store is an outage, never a caller with
+        // no capability: answered 503 in the shared seam's words.
+        if (isAuthzStoreUnavailableError(error)) {
+          return c.json(
+            { success: false, error: { code: AUTHZ_STORE_UNAVAILABLE_CODE, message: AUTHZ_STORE_UNAVAILABLE_MESSAGE } },
+            AUTHZ_STORE_UNAVAILABLE_STATUS,
+          );
+        }
+        const err = error instanceof Error ? error : new Error(String(error));
+        ctx.logger.error('[AuthPlugin] client-address failed', err);
+        return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: 'Your client address could not be read.' } }, 500);
       }
     });
 

@@ -29,6 +29,10 @@
  *    `GET /api/v1/auth/admin/client-address`, answers the address that same
  *    save would be judged by: the plugin's real auth routes on a real Hono app,
  *    the transport peer supplied the way `@hono/node-server` supplies it.
+ *  - Its organization twin, `GET /api/v1/auth/client-address`, answers the
+ *    same address to the caller who may save their organization's
+ *    `access_policy` list (`setup.write` in their current organization), and
+ *    refuses everyone else before any address is read.
  *
  * `@objectstack/service-settings` resolves to its `src/` here (this package's
  * `vitest.config.ts`), so the routes and the service are the checkout's.
@@ -44,6 +48,7 @@ import {
 } from '@objectstack/service-settings';
 import { AuthPlugin } from './auth-plugin.js';
 import type { AuthManager } from './auth-manager.js';
+import type { OrganizationAddressReaderContext } from './client-address-read.js';
 
 const OFFICE = '203.0.113.0/24';
 const ADMIN_CTX = { enforced: true, permissions: ['manage_platform_settings'], userId: 'usr_admin' };
@@ -78,7 +83,18 @@ interface Rig {
   /** `GET /api/v1/auth/admin/client-address` on the plugin's real auth routes. */
   read(transport?: Transport, opts?: { session?: unknown; query?: string }):
     Promise<{ status: number; body: any; cacheControl: string | null }>;
+  /**
+   * `GET /api/v1/auth/client-address` on the same routes. `caller` is what the
+   * route's resolution of its caller answers (the settings door's composition,
+   * stubbed at that one seam): an organization administrator unless a test
+   * says otherwise; an `Error` is thrown from it.
+   */
+  orgRead(transport?: Transport, opts?: { caller?: OrganizationAddressReaderContext | Error; query?: string }):
+    Promise<{ status: number; body: any; cacheControl: string | null }>;
 }
+
+/** What the organization read's caller resolution answers for an organization administrator. */
+const ORG_ADMIN_CALLER: OrganizationAddressReaderContext = { systemPermissions: ['setup.access', 'setup.write'] };
 
 async function boot(
   opts: { env?: Record<string, string | undefined>; svc?: SettingsService; plugin?: Record<string, unknown> } = {},
@@ -135,11 +151,15 @@ async function boot(
   };
 
   let app: Hono | undefined;
-  const read: Rig['read'] = async (transport = {}, opts = {}) => {
+  const mounted = (): Hono => {
     if (!app) {
       app = new Hono();
       (plugin as any).registerAuthRoutes({ getRawApp: () => app, getPort: () => 0 }, ctx);
     }
+    return app;
+  };
+  const read: Rig['read'] = async (transport = {}, opts = {}) => {
+    const app = mounted();
     const session = 'session' in opts ? opts.session : PLATFORM_ADMIN_SESSION;
     // The gate reads the session through the auth service's in-process read.
     const getApi = vi.spyOn(manager, 'getApi').mockResolvedValue({ getSession: async () => session } as any);
@@ -154,7 +174,25 @@ async function boot(
       getApi.mockRestore();
     }
   };
-  return { svc, manager, logger: ctx.logger, save, read };
+  const orgRead: Rig['orgRead'] = async (transport = {}, opts = {}) => {
+    const app = mounted();
+    const caller = 'caller' in opts ? opts.caller : ORG_ADMIN_CALLER;
+    const resolve = vi.spyOn(plugin as any, 'resolveOrganizationSettingsCaller').mockImplementation(async () => {
+      if (caller instanceof Error) throw caller;
+      return caller;
+    });
+    try {
+      const res = await app.request(
+        `http://localhost:3000/api/v1/auth/client-address${opts.query ?? ''}`,
+        { method: 'GET', headers: transport.headers ?? {} },
+        transport.remoteAddress ? { incoming: { socket: { remoteAddress: transport.remoteAddress } } } : {},
+      );
+      return { status: res.status, body: await res.json(), cacheControl: res.headers.get('cache-control') };
+    } finally {
+      resolve.mockRestore();
+    }
+  };
+  return { svc, manager, logger: ctx.logger, save, read, orgRead };
 }
 
 const stored = async (svc: SettingsService) => (await svc.get('auth', 'allowed_ip_ranges', {})).value ?? null;
@@ -387,6 +425,92 @@ describe('#30398 the address read serves the address the save check judges', () 
     expect(res.status).toBe(400);
     expect(res.body.error.code).toBe('VALIDATION_ERROR');
     expect(res.body.data).toBeUndefined();
+    expect(asked).not.toHaveBeenCalled();
+  });
+});
+
+describe('the organization administrator reads the address their access-policy save is judged by', () => {
+  const NOBODY = '192.0.2.0/24';
+
+  it('an organization administrator reads the address the save check judges, the platform route\'s answer', async () => {
+    for (const [plugin, transport] of [
+      [{}, { remoteAddress: '203.0.113.9' }],
+      [{ trustProxy: true }, { headers: { 'x-forwarded-for': '198.51.100.7, 10.0.0.2' }, remoteAddress: '10.0.0.1' }],
+      [{}, {}],
+    ] as const) {
+      const rig = await boot({ plugin });
+      const read = await rig.orgRead(transport);
+      expect(read.status, JSON.stringify(read.body)).toBe(200);
+      expect(read.cacheControl).toBe('no-store');
+      // The platform administrator's read of the same connection answers the same address…
+      expect(read.body.data).toEqual((await rig.read(transport)).body.data);
+      // …and it is the address a save from that connection is judged by.
+      const save = await rig.save({ allowed_ip_ranges: NOBODY }, transport);
+      expect(save.status, JSON.stringify(save.body)).toBe(400);
+      const judged = save.body.error.details.fields.find((f: any) => f.field === 'allowed_ip_ranges').constraint.clientAddress;
+      expect(read.body.data.clientAddress).toBe(judged);
+    }
+  });
+
+  it('the platform route still refuses that organization administrator, who is not a platform admin', async () => {
+    const res = await (await boot()).read(
+      { remoteAddress: '203.0.113.9' },
+      { session: { user: { id: 'usr_org_admin', email: 'org-admin@example.com' } } },
+    );
+    expect(res.status).toBe(403);
+    expect(res.body.error.code).toBe('PERMISSION_DENIED');
+  });
+
+  describe('who may read it: the caller who may save the list, refused before any address is read', () => {
+    const refusedBeforeTheRead = async (caller: OrganizationAddressReaderContext | undefined) => {
+      const rig = await boot();
+      const asked = vi.spyOn(rig.manager, 'trustsForwardedHeaders');
+      const res = await rig.orgRead({ remoteAddress: '203.0.113.9' }, { caller });
+      expect(asked).not.toHaveBeenCalled();
+      expect(res.body.success).toBe(false);
+      expect(res.body.data).toBeUndefined();
+      return res;
+    };
+
+    it('no principal: 401 UNAUTHENTICATED', async () => {
+      const res = await refusedBeforeTheRead(undefined);
+      expect(res.status).toBe(401);
+      expect(res.body.error.code).toBe('UNAUTHENTICATED');
+    });
+
+    it('a plain member, without setup.write in their organization: 403 PERMISSION_DENIED', async () => {
+      const res = await refusedBeforeTheRead({ systemPermissions: ['setup.access'] });
+      expect(res.status).toBe(403);
+      expect(res.body.error.code).toBe('PERMISSION_DENIED');
+    });
+
+    it("a held organization administrator (ADR-0069 D3): 403 with the posture's own code", async () => {
+      const res = await refusedBeforeTheRead({
+        ...ORG_ADMIN_CALLER,
+        authGate: { code: 'MFA_REQUIRED', message: 'Set up two-factor authentication.' },
+      });
+      expect(res.status).toBe(403);
+      expect(res.body.error.code).toBe('MFA_REQUIRED');
+    });
+  });
+
+  it('an unreachable permission store is an outage, 503 SERVICE_UNAVAILABLE, never a refusal', async () => {
+    const { AuthzStoreUnavailableError } = await import('@objectstack/core');
+    const res = await (await boot()).orgRead({ remoteAddress: '203.0.113.9' }, { caller: new AuthzStoreUnavailableError('sys_user_permission_set') });
+    expect(res.status).toBe(503);
+    expect(res.body.error.code).toBe('SERVICE_UNAVAILABLE');
+    expect(res.body.data).toBeUndefined();
+  });
+
+  it('the query set is closed and empty: no parameter can name another address, user or organization', async () => {
+    const rig = await boot();
+    const asked = vi.spyOn(rig.manager, 'trustsForwardedHeaders');
+    for (const query of ['?userId=usr_other', '?organizationId=org_other', '?address=198.51.100.7']) {
+      const res = await rig.orgRead({ remoteAddress: '203.0.113.9' }, { query });
+      expect(res.status).toBe(400);
+      expect(res.body.error.code).toBe('VALIDATION_ERROR');
+      expect(res.body.data).toBeUndefined();
+    }
     expect(asked).not.toHaveBeenCalled();
   });
 });
