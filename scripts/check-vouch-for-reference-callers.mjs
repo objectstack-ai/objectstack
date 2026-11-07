@@ -137,7 +137,7 @@ export const SCAN_ROOTS = Object.freeze(['packages', 'examples', 'apps']);
  * self-test holds it equal to `SCAN_ROOTS` in both directions, so widening or
  * renaming a root cannot leave it describing the old population.
  */
-export const ROOT_DIR_WATCH_HINTS = Object.freeze(['packages/**', 'examples/**', 'apps/**']);
+export const ROOT_DIR_WATCH_HINTS = ['packages/**', 'examples/**', 'apps/**'];
 
 const SOURCE_FILE = /\.(?:[cm]?ts|tsx|[cm]?js|jsx)$/;
 const TEST_FILE = /(?:\.test\.|\.spec\.|\.testkit\.|\/__tests__\/|\/__fixtures__\/)/;
