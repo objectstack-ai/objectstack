@@ -2,8 +2,8 @@
 
 /**
  * The gallery exporter on a real run of the real crm card (`fixture.ts`): the
- * layout it writes, the pass rule it reads from the record, the generic-only
- * guard, re-export replacing what was there, an app that stops passing
+ * layout it writes, the pass rule it reads from the record, the gallery guard
+ * (origin `generic`, tier `starter` or `delivery`), re-export replacing what was there, an app that stops passing
  * leaving the gallery, the transcript joined with (and proven against) the
  * recording, and `index.json` validated and stable.
  */
@@ -15,17 +15,29 @@ import { join, relative } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import { exportGallery, scratchProjectDir, type ExportOptions } from '../../src/export/exporter.js';
-import { NO_GENERIC_MARKER, type GenericGuard } from '../../src/export/generic.js';
+import { GALLERY_GUARD, type GalleryGuard } from '../../src/export/generic.js';
 import { GalleryIndexSchema, parseIndex } from '../../src/export/manifest.js';
 import { judgeRecord } from '../../src/export/pass.js';
 import { readRunRecords, redactWorkDir, ScenarioRunRecordSchema, type ScenarioRunRecord } from '../../src/export/record.js';
 import type { CaptureScreenshots } from '../../src/export/screenshots.js';
 import { main, parseExportArgs, renderSummary } from '../../src/export/cli.js';
 import type { Recording } from '../../src/runner/driver.js';
+import type { LoadedScenario } from '../../src/loader.js';
+import type { ScenarioOrigin, ScenarioTier } from '../../src/schema.js';
 import { CARD_ID, loadAllCards, loadCrm, runCrm, tempDir, writeRecord, type FixtureRun } from './fixture.js';
 
-/** The test's stand-in for the generic marker the card schema does not have yet. */
-const GENERIC_DOUBLE: GenericGuard = () => ({ generic: true, reason: 'test double' });
+/**
+ * A guard that lets every card through, so the export path is exercised on the
+ * crm card, which is a `control` card the real guard refuses. The real guard
+ * ({@link GALLERY_GUARD}) is tested on its own below.
+ */
+const ELIGIBLE_DOUBLE: GalleryGuard = () => ({ eligible: true, reasons: [] });
+
+/** The recorded crm run's card, re-declared with this origin and tier — the only two keys the guard reads. */
+const asCard = (scenario: LoadedScenario, origin: ScenarioOrigin, tier: ScenarioTier): LoadedScenario => ({
+  ...scenario,
+  card: { ...scenario.card, origin, tier },
+});
 
 const asRecord = (r: Record<string, unknown>) => ScenarioRunRecordSchema.parse(r) as ScenarioRunRecord;
 
@@ -53,7 +65,7 @@ async function setup(run?: FixtureRun) {
     outDir: out,
     cards: [fx.scenario],
     recordings: [fx.recording],
-    isGeneric: GENERIC_DOUBLE,
+    guard: ELIGIBLE_DOUBLE,
     screenshots: false,
     ...over,
   });
@@ -170,7 +182,7 @@ describe('exportGallery — one passing, generic app', () => {
         namespace: 'democrm',
         path: `apps/${CARD_ID}`,
         function: 'sales',
-        title: { en: fx.scenario.card.title, zh: null },
+        title: { en: fx.scenario.card.title.en, zh: fx.scenario.card.title.zh },
         summary: { ...(fx.scenario.card.prompt.short.en ? { en: fx.scenario.card.prompt.short.en } : {}), ...(fx.scenario.card.prompt.short.zh ? { zh: fx.scenario.card.prompt.short.zh } : {}) },
         capabilities: [...fx.scenario.card.capabilities].sort(),
         screenshots: [],
@@ -341,21 +353,63 @@ describe('⛔ no local path: every work directory that names the run is redacted
   });
 });
 
-describe('exportGallery — what it refuses', () => {
-  it('⛔ generic only: with the default guard every card is refused and nothing is written but an empty index', async () => {
-    const { out, opts } = await setup();
-    const s = await exportGallery({ ...opts(), isGeneric: undefined });
-    expect(s.exported).toEqual([]);
-    expect(s.refused).toEqual([{ id: CARD_ID, reasons: [expect.stringMatching(/^not marked generic: the card schema carries no explicit generic marker/)] }]);
-    expect(readdirSync(join(out, 'apps'))).toEqual([]);
-    expect(GalleryIndexSchema.parse(JSON.parse(readFileSync(join(out, 'index.json'), 'utf8'))).apps).toEqual([]);
+describe('exportGallery — ⛔ the default guard: origin `generic`, tier `starter` or `delivery`', () => {
+  it('a generic starter exports through the default guard, its index title filled from the card in both languages', async () => {
+    const { out, fx, opts } = await setup();
+    const starter = asCard(fx.scenario, 'generic', 'starter');
+    const s = await exportGallery(opts({ guard: undefined, cards: [starter] }));
+    expect(s.refused).toEqual([]);
+    expect(s.exported.map((e) => e.id)).toEqual([CARD_ID]);
+    const index = parseIndex(readFileSync(join(out, 'index.json'), 'utf8'));
+    expect(index.apps.map((a) => a.title)).toEqual([{ en: 'CRM: accounts and independently-living contacts', zh: '客户管理:客户及可独立维护的联系人' }]);
+    // The README and the transcript each pick their language explicitly; the title object is never printed whole.
+    const readme = readFileSync(join(out, 'apps', CARD_ID, 'README.md'), 'utf8');
+    expect(readme.startsWith(`# ${starter.card.title.en}\n\n${starter.card.title.zh}\n\n`)).toBe(true);
+    expect(readFileSync(join(out, 'apps', CARD_ID, 'transcript.md'), 'utf8').split('\n')[0]).toBe(`# 问数 transcript — ${starter.card.title.en}`);
+    for (const f of ['README.md', 'transcript.md', 'scorecard.md']) expect(readFileSync(join(out, 'apps', CARD_ID, f), 'utf8')).not.toContain('[object Object]');
   });
 
-  it('the default guard refuses every card of the open library: none carries a generic marker', () => {
+  it('a generic delivery card exports too', async () => {
+    const { fx, opts } = await setup();
+    const s = await exportGallery(opts({ guard: undefined, cards: [asCard(fx.scenario, 'generic', 'delivery')] }));
+    expect(s.exported.map((e) => e.id)).toEqual([CARD_ID]);
+  });
+
+  /** [origin, tier, the reasons the default guard gives]. */
+  const REFUSED: Array<[ScenarioOrigin, ScenarioTier, RegExp[]]> = [
+    ['customer-derived', 'starter', [/^origin `customer-derived`: only a `generic` card is exported/]],
+    ['held-out', 'starter', [/^origin `held-out`: only a `generic` card is exported/]],
+    ['held-out', 'delivery', [/^origin `held-out`/]],
+    ['generic', 'control', [/^tier `control`: an internal quality check, never exported/]],
+    ['customer-derived', 'control', [/^origin `customer-derived`/, /^tier `control`/]],
+  ];
+  for (const [origin, tier, reasons] of REFUSED) {
+    it(`refuses a ${origin} ${tier} card, writing nothing but an empty index — though its run passed every half`, async () => {
+      const { out, fx, opts } = await setup();
+      const s = await exportGallery(opts({ guard: undefined, cards: [asCard(fx.scenario, origin, tier)] }));
+      expect(s.exported).toEqual([]);
+      expect(s.refused).toEqual([{ id: CARD_ID, reasons: reasons.map((r) => expect.stringMatching(r)) }]);
+      expect(readdirSync(join(out, 'apps'))).toEqual([]);
+      expect(GalleryIndexSchema.parse(JSON.parse(readFileSync(join(out, 'index.json'), 'utf8'))).apps).toEqual([]);
+      // Control: the same run, card and output pass the export path once the guard lets the card through.
+      expect((await exportGallery(opts({ cards: [asCard(fx.scenario, origin, tier)] }))).exported.map((e) => e.id)).toEqual([CARD_ID]);
+    });
+  }
+
+  it('over the open library: the six generic starter cards are eligible, the three control cards are refused for their tier', () => {
     const cards = loadAllCards();
     expect(cards.length).toBeGreaterThanOrEqual(9);
-    for (const c of cards) expect(NO_GENERIC_MARKER(c)).toMatchObject({ generic: false });
+    const verdicts = Object.fromEntries(cards.map((c) => [c.card.id, GALLERY_GUARD(c)]));
+    const eligible = Object.keys(verdicts).filter((id) => verdicts[id]!.eligible).sort();
+    const refused = Object.keys(verdicts).filter((id) => !verdicts[id]!.eligible).sort();
+    expect(eligible).toEqual(cards.filter((c) => c.card.tier === 'starter').map((c) => c.card.id).sort());
+    expect(eligible).toEqual(expect.arrayContaining(['asset_lifecycle', 'leave_balances', 'order_to_cash', 'requisition_to_receipt', 'service_desk', 'travel_expense']));
+    expect(refused).toEqual(['crm_account_with_contacts', 'invoice_with_line_items', 'project_with_tasks']);
+    for (const id of refused) expect(verdicts[id]!.reasons).toEqual([expect.stringMatching(/^tier `control`/)]);
   });
+});
+
+describe('exportGallery — what it refuses', () => {
 
   it('an asked turn with no recorded reply is refused: a grade is never shown without its answer', async () => {
     const { out, opts } = await setup();
@@ -442,7 +496,7 @@ describe('index.json — the schema', () => {
     namespace: 'democrm',
     path: `apps/${id}`,
     function: 'sales',
-    title: { en: 'CRM', zh: null },
+    title: { en: 'CRM', zh: '客户管理' },
     summary: { en: 'Build a CRM.' },
     capabilities: [],
     screenshots: [],
@@ -459,6 +513,12 @@ describe('index.json — the schema', () => {
     expect(GalleryIndexSchema.safeParse({ schemaVersion: 1, apps: [{ ...app('a_card'), path: 'apps/other' }] }).success).toBe(false);
     expect(GalleryIndexSchema.safeParse({ schemaVersion: 1, apps: [{ ...app('a_card'), generatedAt: 'now' }] }).success).toBe(false);
   });
+
+  it('carries a title in both languages: a missing or empty Chinese title is refused', () => {
+    expect(GalleryIndexSchema.safeParse({ schemaVersion: 1, apps: [{ ...app('a_card'), title: { en: 'CRM', zh: null } }] }).success).toBe(false);
+    expect(GalleryIndexSchema.safeParse({ schemaVersion: 1, apps: [{ ...app('a_card'), title: { en: 'CRM', zh: '' } }] }).success).toBe(false);
+    expect(GalleryIndexSchema.safeParse({ schemaVersion: 1, apps: [{ ...app('a_card'), title: { en: 'CRM' } }] }).success).toBe(false);
+  });
 });
 
 describe('export-gallery CLI', () => {
@@ -468,7 +528,7 @@ describe('export-gallery CLI', () => {
     expect(parseExportArgs(['--out', 'o', '--recording', 'a', '--recording', 'b', '--no-screenshots'])).toMatchObject({ out: 'o', recordings: ['a', 'b'], screenshots: false });
   });
 
-  it('end to end over the real card directory: today it refuses every card, so the gallery stays empty', async () => {
+  it('end to end over the real card directory: the crm card is a `control` card, so it is refused and the gallery stays empty', async () => {
     const { fx, runs, out } = await setup();
     const recording = join(tempDir('rec'), 'recording.json');
     writeFileSync(recording, JSON.stringify(fx.recording));
@@ -480,8 +540,27 @@ describe('export-gallery CLI', () => {
     } finally {
       console.error = log;
     }
-    expect(errors.some((l) => l.startsWith(`refused  ${CARD_ID} · not marked generic`))).toBe(true);
+    expect(errors.some((l) => l.startsWith(`refused  ${CARD_ID} · tier \`control\``))).toBe(true);
     expect(parseIndex(readFileSync(join(out, 'index.json'), 'utf8')).apps).toEqual([]);
     expect(loadCrm().card.id).toBe(CARD_ID);
+  });
+
+  it('--cards elsewhere is the private overlay: a generic card there is refused by the loader and never reaches the export', async () => {
+    const { fx, runs, out } = await setup();
+    const overlay = tempDir('overlay');
+    writeFileSync(join(overlay, `${CARD_ID}.json`), JSON.stringify(loadCrm().card));
+    const recording = join(tempDir('rec'), 'recording.json');
+    writeFileSync(recording, JSON.stringify(fx.recording));
+    const errors: string[] = [];
+    const log = console.error;
+    console.error = (...a: unknown[]) => void errors.push(a.join(' '));
+    try {
+      expect(await main(['--runs', runs, '--out', out, '--cards', overlay, '--recording', recording, '--no-screenshots'])).toBe(0);
+    } finally {
+      console.error = log;
+    }
+    expect(errors).toContainEqual(expect.stringMatching(new RegExp(`${CARD_ID}\\.json: origin: a \`generic\` card does not belong in the private overlay`)));
+    expect(errors).toContainEqual(`refused  ${CARD_ID} · no loaded card \`${CARD_ID}\` (removed, renamed, or refused by the loader)`);
+    expect(parseIndex(readFileSync(join(out, 'index.json'), 'utf8')).apps).toEqual([]);
   });
 });

@@ -7,7 +7,7 @@
  * that thing: the file, the exact path, and the class of the fault.
  */
 
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -15,9 +15,11 @@ import { afterAll, describe, expect, it } from 'vitest';
 
 import { ErrorCode } from '@objectstack/spec/api';
 
-import { formatRefusal, loadScenarios, readCapabilityAreas } from '../src/index.js';
+import { formatRefusal, libraryOf, loadScenarioFile, loadScenarios, readCapabilityAreas, type ScenarioLibrary } from '../src/index.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
+const REPO = resolve(HERE, '../../../..');
+const OPEN_DIR = resolve(HERE, '../../../../docs/qa/scenarios');
 const BASE_CARD = resolve(HERE, '../../../../docs/qa/scenarios/crm_account_with_contacts.json');
 const AREAS_DIR = resolve(HERE, '../../../../docs/qa/platform-checklist/areas');
 
@@ -31,14 +33,14 @@ afterAll(() => {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any -- a card is mutated as raw JSON on purpose
 type RawCard = any;
 
-function load(mutate: (card: RawCard) => void, fileName = `${base.id}.json`) {
+function load(mutate: (card: RawCard) => void, fileName = `${base.id}.json`, library: ScenarioLibrary = 'open') {
   const dir = mkdtempSync(join(tmpdir(), 'scenario-refusal-'));
   dirs.push(dir);
   const card = structuredClone(base);
   mutate(card);
   const file = join(dir, fileName);
   writeFileSync(file, JSON.stringify(card, null, 2));
-  return { file, ...loadScenarios(dir, { areas }) };
+  return { file, ...loadScenarios(dir, { areas, library }) };
 }
 
 const q = (c: RawCard, id: string) => c.run.questions.find((x: { id: string }) => x.id === id);
@@ -64,6 +66,17 @@ const CASES: Array<[string, (c: RawCard) => void, string, RegExp]> = [
   // ── the tier (what the card is for) ──
   ['a card with no tier', (c) => delete c.tier, 'tier', /names its `tier`: `control`.*`starter` or `delivery`/],
   ['a tier outside the closed set', (c) => (c.tier = 'gallery'), 'tier', /expected one of "control"\|"starter"\|"delivery"/],
+  // ── the origin (where the card comes from) ──
+  ['a card with no origin', (c) => delete c.origin, 'origin', /names its `origin`: `generic`.*`customer-derived` or `held-out`/],
+  ['an origin outside the closed set', (c) => (c.origin = 'public'), 'origin', /expected one of "generic"\|"customer-derived"\|"held-out"/],
+  // ── the title: `{ zh, en }`, both non-empty ──
+  ['a title as one string (the retired shape)', (c) => (c.title = 'CRM: accounts and contacts'), 'title', /names its `title` as `\{ zh, en \}`, both non-empty/],
+  ['a card with no title', (c) => delete c.title, 'title', /names its `title` as `\{ zh, en \}`/],
+  ['a title with no Chinese', (c) => delete c.title.zh, 'title.zh', /expected string/],
+  ['a title with no English', (c) => delete c.title.en, 'title.en', /expected string/],
+  ['an empty English title', (c) => (c.title.en = ''), 'title.en', /must not be blank/],
+  ['a blank Chinese title', (c) => (c.title.zh = ' \t'), 'title.zh', /must not be blank/],
+  ['a title in a third language', (c) => (c.title.ja = '顧客管理'), 'title.ja', /unknown key `ja`/],
   // ── expect consistency ──
   ['a lookup to an object the card does not expect', (c) => c.expect.lookups.push({ object: 'contact', field: 'email', to: 'customer' }), 'expect.lookups[1].to', /lookup target `customer` is not in expect.objects/],
   ['a dangling app nav target', (c) => (c.expect.appNavTargets = ['account', 'overview']), 'expect.appNavTargets[1]', /dangling nav/],
@@ -171,7 +184,7 @@ describe('scenario card refusals', () => {
     const second = join(dir, 'crm_twin.json');
     writeFileSync(first, JSON.stringify(base));
     writeFileSync(second, JSON.stringify({ ...base, id: 'crm_twin' }));
-    const r = loadScenarios(dir, { areas });
+    const r = loadScenarios(dir, { areas, library: 'open' });
     expect(r.cards).toEqual([]);
     expect(r.refusals).toEqual([
       { file: first, path: 'code', message: expect.stringMatching(/^duplicate app code `crm`, also the code of crm_twin\.json/) },
@@ -181,7 +194,7 @@ describe('scenario card refusals', () => {
     const twin = { ...base, id: 'crm_twin' };
     twin.code = 'crmtwin';
     writeFileSync(second, JSON.stringify(twin));
-    const ok = loadScenarios(dir, { areas });
+    const ok = loadScenarios(dir, { areas, library: 'open' });
     expect(ok.refusals).toEqual([]);
     expect(ok.cards.map((c) => c.card.code)).toEqual(['crm', 'crmtwin']);
   });
@@ -193,7 +206,7 @@ describe('scenario card refusals', () => {
     const second = join(dir, 'crm_twin.json');
     writeFileSync(first, JSON.stringify(base));
     writeFileSync(second, JSON.stringify({ ...base, id: 'crm_twin', businessFunctions: ['retail'] }));
-    const r = loadScenarios(dir, { areas });
+    const r = loadScenarios(dir, { areas, library: 'open' });
     expect(r.cards).toEqual([]);
     expect(r.refusals.map((x) => [x.file, x.path])).toEqual([
       [first, 'code'],
@@ -207,7 +220,71 @@ describe('scenario card refusals', () => {
     dirs.push(dir);
     const file = join(dir, 'broken.json');
     writeFileSync(file, '{ "id": ');
-    expect(loadScenarios(dir, { areas }).refusals).toEqual([{ file, path: '(card)', message: expect.stringMatching(/not valid JSON/) }]);
+    expect(loadScenarios(dir, { areas, library: 'open' }).refusals).toEqual([{ file, path: '(card)', message: expect.stringMatching(/not valid JSON/) }]);
+  });
+});
+
+/**
+ * The library a card is loaded as. The private overlay holds customer-derived
+ * and held-out cards only, so a `generic` card there is refused; the caller
+ * states the library (`LoadOptions.library`), and the CLIs answer it from the
+ * directory's real path (`libraryOf`).
+ */
+describe('the origin and the library: no generic card in the private overlay, no other card in the open library', () => {
+  it('the base card is generic and loads clean as the open library (control)', () => {
+    expect(base.origin).toBe('generic');
+    expect(load(() => {}, undefined, 'open').refusals).toEqual([]);
+  });
+
+  it('refuses a generic card loaded as the overlay, at `origin`, and hands it out not at all', () => {
+    const r = load(() => {}, undefined, 'overlay');
+    expect(r.cards).toEqual([]);
+    expect(r.refusals).toEqual([
+      {
+        file: r.file,
+        path: 'origin',
+        message: expect.stringMatching(/^a `generic` card does not belong in the private overlay, which holds only `customer-derived` and `held-out` cards: move it to the open library \(docs\/qa\/scenarios\)/),
+      },
+    ]);
+  });
+
+  it('a customer-derived or a held-out card loads clean as the overlay (control for the refusal)', () => {
+    for (const origin of ['customer-derived', 'held-out']) {
+      const r = load((c) => (c.origin = origin), undefined, 'overlay');
+      expect(r.refusals.map(formatRefusal), origin).toEqual([]);
+      expect(r.cards.map((x) => x.card.origin)).toEqual([origin]);
+    }
+  });
+
+  it('refuses a customer-derived or a held-out card loaded as the open library, at `origin`, and hands it out not at all', () => {
+    for (const origin of ['customer-derived', 'held-out']) {
+      const r = load((c) => (c.origin = origin), undefined, 'open');
+      expect(r.cards, origin).toEqual([]);
+      expect(r.refusals, origin).toEqual([
+        {
+          file: r.file,
+          path: 'origin',
+          message: expect.stringMatching(new RegExp(`^a \`${origin}\` card does not belong in the open library, which is public and holds only \`generic\` cards: move it to the private overlay`)),
+        },
+      ]);
+    }
+  });
+
+  it('one file loaded as the overlay is judged the same way', () => {
+    const { file } = load(() => {});
+    expect(loadScenarioFile(file, { areas, library: 'overlay' }).refusals.map((x) => x.path)).toEqual(['origin']);
+    expect(loadScenarioFile(file, { areas, library: 'open' }).card?.card.origin).toBe('generic');
+  });
+
+  it('libraryOf: the repository\'s docs/qa/scenarios is the open library by real path, through a link too; any other directory is the overlay', () => {
+    expect(libraryOf(OPEN_DIR, REPO)).toBe('open');
+    expect(libraryOf(join(OPEN_DIR, '..', 'scenarios', '.'), REPO)).toBe('open');
+    const elsewhere = mkdtempSync(join(tmpdir(), 'scenario-overlay-'));
+    dirs.push(elsewhere);
+    const link = join(elsewhere, 'linked-open-library');
+    symlinkSync(OPEN_DIR, link);
+    expect(libraryOf(link, REPO)).toBe('open');
+    expect(libraryOf(elsewhere, REPO)).toBe('overlay');
   });
 });
 
