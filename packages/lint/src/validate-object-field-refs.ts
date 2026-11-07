@@ -103,6 +103,17 @@
  *  - **`lookupFilters[].field`** — the picker's base filter.
  *  - **`dependsOn[]`** (both arms: a name, or `{ field, param }`) — the fields
  *    whose values gate this field and, on a picker, scope its candidates.
+ *  - **`summaryOperations.filter`** — every field key of a roll-up's child-row
+ *    predicate (#31224), walked by `walkFilterFieldKeys` (`$and` / `$or` /
+ *    `$not` groups, operator objects, nested relationship hops). Judged
+ *    against the CHILD object `summaryOperations.object` names, never the
+ *    object that owns the summary field: the engine ANDs the filter with the
+ *    parent-FK match and runs it as the `where` of an aggregate on the child
+ *    (`summary-aggregate.ts` `aggregateSummaryValue`). Measured on a real
+ *    `SqlDriver` (better-sqlite3): a key the child lacks makes every child
+ *    insert answer `SummaryRecomputeError` (the row IS written) and the
+ *    roll-up keeps its stale value; the parse cannot see it, because one
+ *    field's Zod parse has no view of another object's field map.
  *
  * ## Which object a field-level name addresses — measured on each reader
  *
@@ -218,6 +229,7 @@ import {
   type FieldPathVerdict,
   type ObjectGraph,
 } from './object-graph.js';
+import { walkFilterFieldKeys } from './filter-walk.js';
 
 /**
  * A field-name list entry — object-level, or on one of the object's fields —
@@ -439,6 +451,14 @@ const FIELD_NAME_SLOTS: readonly FieldNameSlot[] = [
 ];
 
 /**
+ * The hint at a roll-up filter key (#31224): the position's remedy, one line.
+ * The verdict's "Did you mean" names the nearest field of the child.
+ */
+const SUMMARY_FILTER_PRESCRIPTION =
+  'Fix the key — `summaryOperations.filter` runs on the child object `summaryOperations.object` '
+  + 'names, so each key is a field of that child, not of the object that owns this summary.';
+
+/**
  * {@link resolveFieldPath}, or — at a position whose reader takes the name
  * verbatim — the one-name verdict: a dotted name there is not a path to walk,
  * it is a name no field carries.
@@ -600,6 +620,24 @@ export function validateObjectFieldRefs(stack: AnyRec): ObjectFieldRefFinding[] 
             prescription: slot.prescription,
           });
           if (hit) reported.add(`${at}=${read.name}`);
+        });
+      }
+
+      // ── fields.<f>.summaryOperations.filter — keys of the CHILD (#31224) ──
+      const ops = isRec(field.summaryOperations) ? field.summaryOperations : undefined;
+      const child = ops ? nameOf(ops.object) : undefined;
+      if (ops && child && ops.filter !== undefined) {
+        const filterPath = `${objPath}.fields.${fieldName}.summaryOperations.filter`;
+        walkFilterFieldKeys(ops.filter, filterPath, (key) => {
+          judge({
+            against: child,
+            name: key.field,
+            verbatim: false,
+            subject: key.path.slice(objPath.length + 1),
+            where: `${label} › fields.${fieldName}.summaryOperations.filter`,
+            path: key.path,
+            prescription: SUMMARY_FILTER_PRESCRIPTION,
+          });
         });
       }
     }

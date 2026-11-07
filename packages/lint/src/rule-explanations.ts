@@ -4249,6 +4249,12 @@ const OBJECT_FIELD_REF_UNKNOWN_EXPLANATION: RuleExplanation = {
       '(the picker scopes its candidates by that key). The referenced object is judged only on ' +
       '`lookup`, `master_detail` and `user` fields, the types that render the picker, and a bare ' +
       '`dependsOn` name that misses on the owning object is reported once, there.',
+    'A summary field\'s `summaryOperations.filter` is judged against the CHILD object ' +
+      '`summaryOperations.object` names: the engine ANDs it with the parent-FK match and runs it as the ' +
+      'query on that child, so every key (inside `$and` / `$or` / `$not` groups and operator objects, ' +
+      'or a relationship path) is a field of the child. A key the child lacks makes every child write ' +
+      'answer a roll-up recompute failure (the row is still written) while the summary keeps a stale ' +
+      'value.',
     '`lookupColumns`, `dependsOn` and `indexes[].fields` are read verbatim (a picker column key, a ' +
       'record key, a physical column), so a dotted name there is one name no field carries; the ' +
       'other positions resolve a relationship path. Not judged: an object this stack does not ' +

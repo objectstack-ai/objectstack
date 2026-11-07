@@ -532,6 +532,64 @@ describe('validateObjectFieldRefs — lookupFilters[].field (addresses the REFER
   });
 });
 
+describe('validateObjectFieldRefs — summaryOperations.filter (addresses the CHILD object, #31224)', () => {
+  // `crm_account` is the parent; `crm_invoice` (with an FK to it) the child.
+  const rollup = (filter: unknown, over: Record<string, unknown> = {}) => ({
+    objects: [
+      account({
+        fields: {
+          ...account().fields,
+          billed: { type: 'summary', summaryOperations: { object: 'crm_invoice', field: 'total', function: 'sum', filter, ...over } },
+        },
+      }),
+      invoice({ account: lookup() }),
+    ],
+  });
+
+  it('REFUSES a misspelt key against the child object, at its path, as an error', () => {
+    const findings = validateObjectFieldRefs(rollup({ regoin: 'emea' }));
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatchObject({
+      severity: 'error',
+      rule: OBJECT_FIELD_REF_UNKNOWN,
+      path: 'objects[0].fields.billed.summaryOperations.filter.regoin',
+    });
+    expect(findings[0]!.message).toContain('"regoin" is not a field on object "crm_invoice"');
+    expect(findings[0]!.message).toContain('Did you mean "region"');
+    expect(findings[0]!.hint).toContain('runs on the child object `summaryOperations.object` names');
+  });
+
+  it('REFUSES a key only the PARENT (the object owning the summary) has', () => {
+    const findings = validateObjectFieldRefs(rollup({ industry: 'saas' }));
+    expect(findings.map((f) => f.path)).toEqual(['objects[0].fields.billed.summaryOperations.filter.industry']);
+  });
+
+  it('walks $and / $or / $not groups and reads past operator objects', () => {
+    const findings = validateObjectFieldRefs(rollup({
+      $and: [{ total: { $gte: 100 } }, { $or: [{ region: 'emea' }, { stauts: 'paid' }] }],
+      $not: { isssued_on: { $lt: '2026-01-01' } },
+    }));
+    expect(findings.map((f) => f.path)).toEqual([
+      'objects[0].fields.billed.summaryOperations.filter.$and[1].$or[1].stauts',
+      'objects[0].fields.billed.summaryOperations.filter.$not.isssued_on',
+    ]);
+  });
+
+  it('passes child fields, operators, and a relationship path through the child', () => {
+    expect(validateObjectFieldRefs(rollup({
+      total: { $gt: 0 },
+      issued_on: { $gte: '2026-01-01' },
+      region: { $in: ['emea', 'apac'] },
+      'account.status': 'active',
+    }))).toEqual([]);
+  });
+
+  it('does not judge a filter whose child the stack does not define, or a roll-up with no filter', () => {
+    expect(validateObjectFieldRefs(rollup({ anything: 1 }, { object: 'elsewhere_line' }))).toEqual([]);
+    expect(validateObjectFieldRefs(rollup(undefined))).toEqual([]);
+  });
+});
+
 describe('validateObjectFieldRefs — dependsOn (the gate on the OWNER, the filter on the REFERENCE)', () => {
   it('REFUSES a misspelt name in the string arm against the owning object — once, not twice', () => {
     const findings = validateObjectFieldRefs(twoObjects({
@@ -755,6 +813,7 @@ describe('[#22161] one-line verdicts — object-field-ref-unknown', () => {
       '.lookupColumns[',
       '.lookupFilters[',
       '.dependsOn[',
+      '.summaryOperations.filter.',
     ]) {
       expect(converted.some((f) => f.path.includes(position)), position).toBe(true);
     }
@@ -773,7 +832,7 @@ describe('[#22161] one-line fix — object-field-ref-unknown', () => {
     const converted = fired.filter((f) => f.rule === OBJECT_FIELD_REF_UNKNOWN);
     // Coverage control: every position fired (the verdict block above names
     // them), so the bound reads each prescription.
-    for (const position of ['.highlightFields[', '.publicSharing.redactFields[', '.indexes[', '.relatedListColumns[', '.lookupColumns[', '.lookupFilters[', '.dependsOn[']) {
+    for (const position of ['.highlightFields[', '.publicSharing.redactFields[', '.indexes[', '.relatedListColumns[', '.lookupColumns[', '.lookupFilters[', '.dependsOn[', '.summaryOperations.filter.']) {
       expect(converted.some((f) => f.path.includes(position)), position).toBe(true);
     }
     for (const f of converted) {
