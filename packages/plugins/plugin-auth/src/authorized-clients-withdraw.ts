@@ -24,7 +24,9 @@
  * client still holds from coming back if the person later authorizes the same
  * assistant again. Every write goes through better-auth's own storage adapter,
  * so the model names and field mapping are the provider's, and is attributed
- * to the person who withdrew it (`runAttributedToUser`; attribution only).
+ * to the person who withdrew it, with the impersonating administrator beside
+ * them when the session is an impersonation (`runAttributedToUser`;
+ * attribution only).
  *
  * ## Why not better-auth's `POST /oauth2/delete-consent`
  *
@@ -233,7 +235,7 @@ async function readWithdrawRequest(
 /** Withdraw `userId`'s consent `id`, credited to `actor`. */
 async function withdrawConsentOf(
   deps: AuthorizedClientWithdrawDeps,
-  actor: string | PlatformAdminActor,
+  actor: { id: string; impersonatedBy?: string },
   userId: string,
   id: string,
 ): Promise<AuthorizedClientWithdrawResult> {
@@ -258,7 +260,13 @@ export async function runOwnAuthorizedClientWithdraw(
 
   const read = await readWithdrawRequest(request, AUTHORIZED_CLIENT_WITHDRAW_BODY_KEYS);
   if (!('values' in read)) return read;
-  return withdrawConsentOf(deps, subject, subject, read.values.id);
+  // An impersonation session names the administrator at the keyboard: it is
+  // credited beside the person as the attribution-only `impersonatedBy`, read
+  // off this session and never off the body, as `gateAdmin` and the auth
+  // before-hook carry it.
+  const impersonatedBy = nonEmpty((session?.session as { impersonatedBy?: unknown } | undefined)?.impersonatedBy);
+  const actor = impersonatedBy ? { id: subject, impersonatedBy } : { id: subject };
+  return withdrawConsentOf(deps, actor, subject, read.values.id);
 }
 
 /**

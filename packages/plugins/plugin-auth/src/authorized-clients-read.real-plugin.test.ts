@@ -43,7 +43,10 @@ import {
   ADMIN_AUTHORIZED_CLIENT_WITHDRAW_PATH,
   AUTHORIZED_CLIENT_WITHDRAW_NOT_FOUND_MESSAGE,
   AUTHORIZED_CLIENT_WITHDRAW_PATH,
+  type AuthorizedClientWithdrawDeps,
+  runOwnAuthorizedClientWithdraw,
 } from './authorized-clients-withdraw';
+import { resolveAttributedActor } from './auth-actor-attribution';
 
 const SECRET = 'test-secret-at-least-32-chars-long-30918';
 const PASSWORD = 'S3cure!Passw0rd-authorized-clients';
@@ -789,5 +792,43 @@ describe('#31048 POST /admin/authorized-clients/withdraw — another person\'s g
 
     expect(rig.consentIds()).toEqual(before);
     expect(await rig.manager.verifyMcpAccessToken(deskToken), 'Bob\'s assistant still connects').not.toBeNull();
+  });
+});
+
+describe('#31048 the own withdraw credits the administrator at the keyboard of an impersonation session', () => {
+  /** The actor the revoke's writes are credited to, read inside the revoke as the adapter's writes read it. */
+  const creditOf = async (session: unknown) => {
+    let credited: unknown = 'revoke never ran';
+    const deps: AuthorizedClientWithdrawDeps = {
+      readCallerSession: async () => session as any,
+      findConsentOf: async (userId, id) => (id === 'consent_1' ? { clientId: 'client_1', userId } : null),
+      revokeGrant: async () => {
+        credited = await resolveAttributedActor();
+      },
+      userExists: async () => true,
+    };
+    const answer = await runOwnAuthorizedClientWithdraw(deps, {
+      raw: new Request(`${ORIGIN}${BASE}${AUTHORIZED_CLIENT_WITHDRAW_PATH}`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ id: 'consent_1' }),
+      }),
+      queries: {},
+    });
+    expect(answer.status, JSON.stringify(answer.body)).toBe(200);
+    return credited;
+  };
+
+  it('an impersonation session: the person, with the impersonating administrator beside them', async () => {
+    expect(
+      await creditOf({ user: { id: 'usr_person_31048' }, session: { impersonatedBy: 'usr_admin_31048' } }),
+    ).toEqual({ userId: 'usr_person_31048', impersonatedBy: 'usr_admin_31048' });
+  });
+
+  it('an ordinary session: the person alone, no impersonatedBy invented', async () => {
+    expect(await creditOf({ user: { id: 'usr_person_31048' }, session: {} })).toEqual({ userId: 'usr_person_31048' });
+    expect(
+      await creditOf({ user: { id: 'usr_person_31048' }, session: { impersonatedBy: '  ' } }),
+    ).toEqual({ userId: 'usr_person_31048' });
   });
 });
