@@ -36,16 +36,41 @@ question's computed truth; a card that does not load is red in CI.
 | 5 | `run.operations`, `run.guardrails`, `run.agentActions?` | At least two writes, each acting as a persona and declaring its `outcome`; the five guardrail checks; optionally the agent-callable business actions. |
 | 6 | `iterate` | A one-sentence change request plus the `expectDelta` it should add to `expect`. |
 
-Besides the layers a card carries `id` (its basename), `code`, `title`, `provenance` (where the
+Besides the layers a card carries `id` (its basename), `code`, `tier` (what the card is for,
+[below](#tiers)), `title`, `provenance` (where the
 scenario comes from) and, when a question uses a time window, `asOf`: the fixed "today"
 (`YYYY-MM-DD`) windows are computed against. `code` is the app code: 2–8 lowercase letters,
 unique across the library. The app lives in the namespace `demo` + code (`democrm`) wherever
 it is built, scored or exported, and every item it declares carries that prefix.
 
 **Counts.** The default band is 8–10 questions and 4–6 operations. A card below 8 questions
-or 4 operations states why in `run.countsReason`, or it is refused.
+or 4 operations states why in `run.countsReason`, or it is refused; a `starter` or `delivery`
+card has no such excuse ([Tiers](#tiers)).
 
 Every object in a card is strict: an unknown key is refused, never dropped.
+
+## Tiers
+
+Every card names its `tier`, a closed set; a card without one is refused.
+
+| `tier` | What the card is | Floor |
+|:---|:---|:---|
+| `control` | An internal quality check: one of the small golden cases. Never exported, never shown in the gallery, whatever it scores. | none |
+| `starter` | A gallery starter template: the mid-tier scenarios. | the gallery floor |
+| `delivery` | A delivery-grade scenario. | the gallery floor, until the delivery-grade list sets its own |
+
+The **gallery floor** is the countable part of the [mid-tier floor](#the-library). The loader
+refuses a `starter` or `delivery` card under any line of it, at the field that falls short:
+
+- at least 5 objects in `expect.objects`, and at least 1 in `expect.dashboards`;
+- at least 100 seed rows on one object;
+- at least 2 personas with a row `scope`;
+- at least 8 questions and 4 operations: the default band's lower edge, which a
+  `countsReason` does not lower on a gallery card;
+- at least 3 `run.agentActions`.
+
+The gallery exporter's filter on `tier` is a change of its own: until it lands the exporter
+reads no tier, and it exports no card at all (`packages/qa/scenarios/src/export/generic.ts`).
 
 ## Seed rows
 
@@ -138,7 +163,7 @@ card states the bad write in full in `values` (and `target`), exactly as the app
 
 ## The library
 
-The library holds nine scenarios. The three **simple controls** are here:
+The library holds nine scenarios. The three **simple controls**, tier `control`, are here:
 `invoice_with_line_items`, `project_with_tasks` and `crm_account_with_contacts`, the golden
 cases of `packages/cli/src/lint/corpus.ts`. Their `expect` is derived mechanically from each
 fixture: every object; `minFieldsPerObject` = the smallest object's field count; one
@@ -146,8 +171,9 @@ fixture: every object; `minFieldsPerObject` = the smallest object's field count;
 per lookup or master_detail field.
 
 The six **mid-tier** scenarios — travel expense, order-to-cash, service desk, leave and
-balances, requisition-to-receipt, asset lifecycle — each land as a card of their own and
-meet this floor:
+balances, requisition-to-receipt, asset lifecycle — each land as a card of their own, tier
+`starter`, and meet this floor. Its countable lines are the [gallery floor](#tiers), which
+the loader enforces; each card's own test pins the rest:
 
 - 5–8 related objects, at least one approval or automation flow, and at least one report
   or dashboard;
@@ -164,7 +190,9 @@ meet this floor:
 
 ## Adding a card
 
-1. Write `<id>.json` here; `id` equals the basename, and `code` is one no other card uses.
+1. Write `<id>.json` here; `id` equals the basename, `code` is one no other card uses, and
+   `tier` says what the card is for. A new gallery card is `starter` and meets the gallery
+   floor; `control` is kept for the golden cases, which `test/library.test.ts` pins.
 2. Keep it generic — a scenario anyone could write from the domain alone.
 3. Run `pnpm --filter @objectstack/scenarios test`: a refusal names the file and the field
    path. Then pin the card's hand-worked truths, per persona too, in its own
