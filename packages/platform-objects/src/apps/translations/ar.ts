@@ -43,7 +43,7 @@ export const ar: TranslationData = {
         nav_cloud_connection: { label: 'الاتصال السحابي' },
         group_people_org: { label: 'الأشخاص والمؤسسة' },
         group_access_control: { label: 'التحكم في الوصول' },
-        group_approvals: { label: 'بانتظار موافقتي' },
+        group_approvals: { label: 'الموافقات' },
         group_configuration: { label: 'التهيئة' },
         group_integrations: { label: 'عمليات التكامل' },
         group_diagnostics: { label: 'التشخيص' },
@@ -87,7 +87,7 @@ export const ar: TranslationData = {
         // service-settings' ar bundle (`setup-nav-hub-parity.test.ts`), so the
         // two delivery pages say إرسال here while the HTTP log below says تسليم,
         // as sys_http_delivery's ar object label does.
-        nav_settings_hub: { label: 'كل الإعدادات' },
+        nav_settings_hub: { label: 'جميع الإعدادات' },
         nav_settings_localization: { label: 'الترجمة والإعدادات المحلية' },
         nav_exchange_rates: { label: 'أسعار الصرف' },
         nav_settings_company: { label: 'الشركة' },

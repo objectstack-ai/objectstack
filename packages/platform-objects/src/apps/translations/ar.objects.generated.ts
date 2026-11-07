@@ -35,7 +35,7 @@ export const arObjects: NonNullable<TranslationData['objects']> = {
       },
       role: {
         label: "دور المنصة",
-        help: "قيمة الدور القديمة في better-auth (admin، user، …). لم يعد ObjectStack يكتبها. لمنح صلاحية مسؤول المنصة، أدرِج البريد الإلكتروني الموثَّق للمستخدم في `OS_PLATFORM_OWNER_EMAIL`؛ وفي وضع الإيجار `single` يمنحها أيضًا إسناد `admin_full_access` غير المقيَّد بنطاق في `sys_user_permission_set`."
+        help: "قيمة الدور القديمة في better-auth (admin، user، …). لم يعد ObjectStack يكتبها. لمنح صلاحية مسؤول المنصة، أدرِج البريد الإلكتروني الموثَّق للمستخدم في `OS_PLATFORM_OWNER_EMAIL`؛ وفي وضعية المستأجرين `single` يمنحها أيضًا إسناد `admin_full_access` غير المقيَّد بنطاق في `sys_user_permission_set`."
       },
       banned: {
         label: "محظور",
@@ -2215,11 +2215,11 @@ export const arObjects: NonNullable<TranslationData['objects']> = {
         label: "تاريخ اكتمال إيقاف التشغيل"
       },
       decommission_lease_id: {
-        label: "عقد إيجار إيقاف التشغيل",
-        help: "عقد إيجار تسوية لعامل واحد تتولى المكتبة صيانته"
+        label: "حجز إيقاف التشغيل",
+        help: "حجز تسوية لعامل واحد تتولى المكتبة صيانته"
       },
       decommission_lease_expires_at: {
-        label: "انتهاء عقد إيجار إيقاف التشغيل"
+        label: "انتهاء حجز إيقاف التشغيل"
       },
       created_at: {
         label: "تاريخ الإنشاء"
@@ -3041,15 +3041,15 @@ export const arObjects: NonNullable<TranslationData['objects']> = {
       },
       scheduled_for: {
         label: "مجدول في",
-        help: "أبكر وقت يجوز فيه لعامل استئجار هذه الرسالة"
+        help: "أبكر وقت يجوز فيه لعامل حجز هذه الرسالة"
       },
       locked_by: {
         label: "مقفل بواسطة",
-        help: "معرّف العامل الذي يحمل عقد الإيجار"
+        help: "معرّف العامل الذي يحمل الحجز"
       },
       locked_until: {
         label: "مقفل حتى",
-        help: "انتهاء عقد الإيجار؛ إذا انقضى، يجوز لعامل آخر المطالبة بالرسالة"
+        help: "انتهاء مهلة الحجز؛ إذا انقضت، يجوز لعامل آخر المطالبة بالرسالة"
       },
       last_error: {
         label: "آخر خطأ"
