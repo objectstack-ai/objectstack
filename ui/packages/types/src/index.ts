@@ -660,7 +660,7 @@ export type {
   OrderByNode,
   LimitNode,
   OffsetNode,
-  SubqueryNode,
+  // `SubqueryNode` was retired here (objectstack#25921, batch 12).
   AggregateNode,
   WindowNode,
   WindowFunction,
@@ -687,8 +687,8 @@ export type {
   // Renamed from `DateRangePreset` in objectui#4167 — the spec owns that name
   // for the narrower dashboard filter-bar vocabulary (objectstack#4115).
   FilterBuilderDateRangePreset,
-  FilterBuilderConfig,
-  FilterFieldConfig,
+  // `FilterBuilderConfig` / `FilterFieldConfig` were retired here
+  // (objectstack#25921, batch 12) — see the notes in `data-protocol.ts`.
   // Object-level validation rules. The five spec-named variants are derived from
   // `@objectstack/spec/data`; the other three are @deprecated objectui-local
   // variants the spec's union rejects. See data-protocol.ts.

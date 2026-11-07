@@ -158,7 +158,7 @@ describe('@object-ui/types — the Phase 3.5 validation types stay retired (obje
     // Firing controls on the same matcher: a truncated read or a matcher that
     // can never match would otherwise pass the absence assertion below.
     expect(declares(source, 'ObjectValidationRule'), 'the object-level rule union is missing').toBe(true);
-    expect(declares(source, 'FilterFieldConfig'), 'the neighbouring filter type is missing').toBe(true);
+    expect(declares(source, 'DateRangeFilter'), 'the neighbouring date range filter type is missing').toBe(true);
 
     expect(
       RETIRED.filter((name) => declares(source, name)),
