@@ -282,6 +282,12 @@ const MODULES = {
   // `sendServerFault`), so it builds none itself.
   'packages/services/service-messaging/src/preference-options-routes.ts': { responses: 0, ok: 0, err: 0 },
 
+  // [#30209] The shareable-objects door (`GET /api/v1/sharing/shareable-objects`),
+  // mounted by `SharingServicePlugin` straight on `IHttpServer`. Every body it
+  // answers is written by the shared pair (`sendOk` / `sendError` /
+  // `sendServerFault`), so it builds none itself.
+  'packages/plugins/plugin-sharing/src/shareable-objects-routes.ts': { responses: 0, ok: 0, err: 0 },
+
   // The unreact door (`DELETE /api/v1/comments/reactions/:id`), mounted by
   // `AuditPlugin` straight on `IHttpServer`. It supplies its part of the shared
   // own-row delete door below and answers nothing itself, so it builds no body.

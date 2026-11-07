@@ -12,6 +12,7 @@ export * from './driver.js';
 export * from './namespace.js';
 export * from './observe.js';
 export * from './orchestrate.js';
+export * from './packages.js';
 export * from './project.js';
 export * from './prompts.js';
 export * from './scorecard.js';

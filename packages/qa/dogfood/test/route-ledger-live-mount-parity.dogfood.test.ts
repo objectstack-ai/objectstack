@@ -74,6 +74,7 @@ import { SETTINGS_ROUTE_LEDGER } from '../../../services/service-settings/src/se
 import { PRINT_ROUTE_LEDGER } from '../../../services/service-print/src/print-route-ledger.js';
 import { MESSAGING_ROUTE_LEDGER } from '../../../services/service-messaging/src/messaging-route-ledger.js';
 import { PERSONAL_VIEW_ROUTE_LEDGER } from '../../../plugins/plugin-auth/src/personal-view-route-ledger.js';
+import { SHARING_ROUTE_LEDGER } from '../../../plugins/plugin-sharing/src/sharing-route-ledger.js';
 
 /** One ledger row, normalized to a wire pattern this gate can probe. */
 interface LedgerRow {
@@ -114,6 +115,8 @@ function collectLedgerRows(): LedgerRow[] {
   // [#29443] AuthPlugin's own-row delete door for a personal view, mounted on
   // the IHttpServer port (unlike its raw-app `/auth/*` catch-all above).
   for (const r of PERSONAL_VIEW_ROUTE_LEDGER) add('plugin-auth/personal-view-route-ledger.ts', r.route, '');
+  // [#30209] SharingServicePlugin's shareable-objects list, on the IHttpServer port.
+  for (const r of SHARING_ROUTE_LEDGER) add('plugin-sharing/sharing-route-ledger.ts', r.route, '');
   return rows;
 }
 

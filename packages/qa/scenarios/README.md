@@ -132,6 +132,7 @@ pnpm --filter @objectstack/scenarios run-scenarios --driver recorded:/tmp/rec.js
 pnpm --filter @objectstack/scenarios run-scenarios --author-timeout 90       # minutes per authoring turn (default 60)
 pnpm --filter @objectstack/scenarios run-scenarios --author-max-turns 400    # turns per authoring turn, every card (default by tier)
 pnpm --filter @objectstack/scenarios run-scenarios --ask-max-turns 20        # turns per question or operation turn (default 12)
+pnpm --filter @objectstack/scenarios run-scenarios --packages workspace      # on this checkout's unreleased packages (default: published)
 ```
 
 Per card and mode the runner writes `docs/qa/platform-checklist/runs/<date>-scenario-<card>.json`
@@ -142,6 +143,17 @@ Per card and mode the runner writes `docs/qa/platform-checklist/runs/<date>-scen
 | `scratch` | `create-objectstack` → the agent builds from the card prompt and the runner's data contract (`prompts.ts`) → `objectstack validate` / `build` / `verify` (proofs chosen from the tags) → score → `objectstack dev --fresh` → seed, one user + permission-set grant + API key per persona → every question as every persona it names and every operation as its persona, over the app's MCP → the iterate change → rebuild, re-score, re-run |
 | `template` | a blank host project (`host<code>`) → boot → install the card's verified build **unmanaged** (`/api/v1/marketplace/install-local`, `installMode: 'unmanaged'`) → the agent applies the iterate change to the installed copy → score → seed → Run. A refused install is a finding in the record |
 
+- **Package source** (`packages.ts`, `--packages`): `published` (the default) scaffolds with `npx -y
+  create-objectstack@<version>` and installs from npm, what a customer gets. `workspace` measures the next release before
+  it ships: it builds what the release builds for the packages it publishes (every non-private `@objectstack/*` and
+  `create-objectstack`, `turbo run build build:dist`), `pnpm pack`s each — the tarball npm would serve, `files[]` only —
+  and scaffolds with the packed `create-objectstack`, whose own install a global pnpmfile points at the tarballs. The
+  tarballs are then kept as `overrides` in the project's `pnpm-workspace.yaml` (a later `pnpm add` stays on them), and the
+  scaffold is refused unless every `@objectstack/*` package came from a tarball and `.claude/skills/` equals the
+  workspace build's catalog (`packages/skills/dist/skills`) file for file. Every record (`env.packages`,
+  `env.packagesLine`) and scorecard states the source: `packages: published 18.3.0`, or `packages: workspace @ <sha>
+  (unreleased)`. ⛔ The gallery exporter exports only a `published` run: a `workspace` record, or one that states no
+  source, is refused.
 - **Driver** (`driver.ts`): the local `claude` CLI on your own login (`claude -p --output-format stream-json`, the
   prompt written to its stdin: a build prompt carries the whole seed, and one argv string over 128 KiB makes `spawn`
   fail with `E2BIG` on Linux). It refuses to start when `ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN` is set or the CLI
