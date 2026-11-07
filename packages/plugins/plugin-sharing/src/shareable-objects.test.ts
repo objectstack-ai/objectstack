@@ -267,8 +267,10 @@ function grantStore() {
     });
   };
   const store = {
-    find: async (object: string, opts?: { where?: unknown; filter?: unknown }) =>
-      (rows[object] ?? []).filter((r) => matches(r, opts?.where ?? opts?.filter)),
+    find: async (object: string, opts?: { where?: unknown; filter?: unknown; limit?: number }) => {
+      const matched = (rows[object] ?? []).filter((r) => matches(r, opts?.where ?? opts?.filter));
+      return typeof opts?.limit === 'number' ? matched.slice(0, opts.limit) : matched;
+    },
     findOne: async (object: string, opts?: { where?: unknown; filter?: unknown }) =>
       (rows[object] ?? []).find((r) => matches(r, opts?.where ?? opts?.filter)) ?? null,
   };
