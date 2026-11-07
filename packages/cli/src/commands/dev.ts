@@ -35,6 +35,7 @@ import {
 import { artifactObjectNames } from '../utils/stack-collections.js';
 import { readEnvWithDeprecation, isMcpServerEnabled } from '@objectstack/types';
 import { OBJECTSTACK_MCP_SERVER_NAME } from '@objectstack/mcp';
+import { claudeMcpAddLine, MCP_ENDPOINT_PATH } from './mcp/connect.js';
 // The ONE port contract, shared with `start` and with the `serve` child this
 // command spawns (#12673). ⛔ Nothing about ports is declared in this file —
 // no range, no reader, no wording; a second copy of the bound is exactly what
@@ -194,6 +195,9 @@ export function prepareDevDatabaseDirectory(
  * used to be the current folder's basename, so one endpoint was registered as
  * the folder's name from the banner and as `objectstack` from the skill and
  * the console: two entries for one server in the agent's config.
+ *
+ * The line itself is `os mcp connect`'s ({@link claudeMcpAddLine}), so
+ * `os mcp connect --url <this origin>` prints and runs exactly this row.
  */
 export function printMcpConnectHint(
   opts: { boundPort: number | string; boundProtocol?: ListenerProtocol },
@@ -202,9 +206,9 @@ export function printMcpConnectHint(
   if (baseOrigin === null) return;
   console.log();
   console.log(chalk.cyan('  🤖 MCP server — connect a coding agent:'));
-  console.log(`     Endpoint  ${baseOrigin}/api/v1/mcp`);
-  console.log(`     Skill     ${baseOrigin}/api/v1/mcp/skill`);
-  console.log(chalk.dim(`     Connect   claude mcp add --transport http ${OBJECTSTACK_MCP_SERVER_NAME} ${baseOrigin}/api/v1/mcp`));
+  console.log(`     Endpoint  ${baseOrigin}${MCP_ENDPOINT_PATH}`);
+  console.log(`     Skill     ${baseOrigin}${MCP_ENDPOINT_PATH}/skill`);
+  console.log(chalk.dim(`     Connect   ${claudeMcpAddLine(OBJECTSTACK_MCP_SERVER_NAME, `${baseOrigin}${MCP_ENDPOINT_PATH}`)}`));
   console.log(chalk.dim('     Disable   OS_MCP_SERVER_ENABLED=false'));
 }
 

@@ -4,12 +4,13 @@
  * [#29986 codemod] The
  * "Class head: units, hooks, functions, body runners, hook dispatch" section of
  * `ObjectQL`: the bodies of `recordResidualOwner`, `residualOwnerSource`,
- * `getStatus`, `registerHook`, `unregisterHooksByPackage`, `registerFunction`,
- * `resolveFunction`, `resolveFunctionEntry`, `unregisterFunctionsByPackage`,
- * `bindHooks`, `setDefaultBodyRunner`, `getDefaultBodyRunner`,
- * `setDefaultActionRunner`, `getDefaultActionRunner`, `triggerHooks`,
- * `hasHooksFor`, `opensAfterAbortUnit`, `dispatchUnscopedMultiWriteHooks` moved
- * out of `engine.ts` whole by `scripts/codemod-split-engine.mjs`.
+ * `constructLogger`, `construct`, `getStatus`, `registerHook`,
+ * `unregisterHooksByPackage`, `registerFunction`, `resolveFunction`,
+ * `resolveFunctionEntry`, `unregisterFunctionsByPackage`, `bindHooks`,
+ * `setDefaultBodyRunner`, `getDefaultBodyRunner`, `setDefaultActionRunner`,
+ * `getDefaultActionRunner`, `triggerHooks`, `hasHooksFor`,
+ * `opensAfterAbortUnit`, `dispatchUnscopedMultiWriteHooks` moved out of
+ * `engine.ts` whole by `scripts/codemod-split-engine.mjs`.
  *
  * A MOVE, not a redesign. {@link HooksAndFunctionsFacet} is a stateless facet of `ObjectQL`
  * (ruling 6624345766): each static method of it is the body of the `ObjectQL`
@@ -37,7 +38,10 @@
 import { driverSupportsTransactions } from '@objectstack/spec/data';
 import type { HookContext } from '@objectstack/spec/data';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
+import { STORED_METADATA_TYPE_READ_GATE_OBJECTS, storedMetadataTypeReadGate } from './stored-metadata-type-read-gate.js';
+import { createLogger } from '@objectstack/core';
 import { hookStoppedRefusal } from './summary-errors.js';
+import { startSummaryRefreshOnEnable } from './summary-enable-refresh.js';
 import { HookTargetRebindError } from './hook-target-rebind-errors.js';
 import { declaredHookCondition } from './hook-wrappers.js';
 import { CoreServiceName } from '@objectstack/spec/system';
@@ -61,6 +65,7 @@ import type { ObjectQL } from './engine.js';
 export interface HooksAndFunctionsHost {
   _defaultActionRunner: ObjectQL['_defaultActionRunner'];
   _defaultBodyRunner: ObjectQL['_defaultBodyRunner'];
+  readonly _registry: ObjectQL['_registry'];
   readonly defaultDriver: ObjectQL['defaultDriver'];
   readonly drivers: ObjectQL['drivers'];
   /** The engine itself: a moved body reads `this.facade` where the method read a bare `this` (#30020). */
@@ -70,6 +75,8 @@ export interface HooksAndFunctionsHost {
   readonly hooks: ObjectQL['hooks'];
   isClosedUnitHandle: ObjectQL['isClosedUnitHandle'];
   readonly logger: ObjectQL['logger'];
+  readonly manifests: ObjectQL['manifests'];
+  registerMiddleware: ObjectQL['registerMiddleware'];
   readonly residualOwnerSources: ObjectQL['residualOwnerSources'];
   readonly txStore: ObjectQL['txStore'];
 }
@@ -85,6 +92,46 @@ export class HooksAndFunctionsFacet {
   /** The body of `ObjectQL#residualOwnerSource`; the method's docblock there is its contract. */
   static residualOwnerSource(this: Pick<HooksAndFunctionsHost, 'residualOwnerSources'>, ownerId: string): 'code' | 'marketplace' | undefined {
     return this.residualOwnerSources.get(ownerId);
+  }
+
+  /** R8 (#30020): the value `ObjectQL`'s constructor assigns to `logger`, a field only a constructor may assign. */
+  static constructLogger(hostContext: Record<string, any> = {}): ObjectQL['logger'] {
+    return hostContext.logger || createLogger({ level: 'info', format: 'pretty' });
+  }
+
+  /** The body of `ObjectQL`'s constructor; the constructor there keeps its signature and docblock. */
+  static construct(this: Pick<HooksAndFunctionsHost, '_registry' | 'facade' | 'logger' | 'manifests' | 'registerMiddleware'>): void {
+    // Use provided logger or create a new one
+    // [#29986 codemod] R8: `this.logger` is assigned on the class (`constructLogger`).
+    // [#30215] `registerApp` writes `manifests`; an uninstall withdraws the
+    // package through the registry's own verb, on every door, so the entry goes
+    // with the registry's record. Left behind, ADR-0070's `isWritablePackage`
+    // (which reads this map first) kept an uninstalled package read-only until
+    // a restart.
+    this._registry.onPackageUninstalled((packageId) => { this.manifests.delete(packageId); });
+    // [#30377] A roll-up a package adds by extension is withheld with it, so
+    // the child writes made during a disable recompute nothing: an enable
+    // recomputes it (`summary-enable-refresh.ts`), on every enable door.
+    this._registry.onPackageEnabled((packageId) => startSummaryRefreshOnEnable(this.facade, this.logger, packageId));
+    // Pick up production hardening switches from env so deployers can
+    // enforce strict-body without code changes:
+    //   OBJECTQL_STRICT_HOOKS=1 → unresolved hooks throw at bind time
+    //   OBJECTQL_WARN_LEGACY_HANDLER=1 → log a deprecation per legacy bind
+    if (process?.env?.OBJECTQL_STRICT_HOOKS === '1') {
+      (this.facade as any)._strictHookBinding = true;
+    }
+    if (process?.env?.OBJECTQL_WARN_LEGACY_HANDLER === '1') {
+      (this.facade as any)._warnLegacyHandler = true;
+    }
+    // [#27884] The stored-row read gate: a caller-context read of a
+    // stored-metadata table serves a capability-gated type's documents only to
+    // holders of that capability — the row the `/meta` type gate reads. In the
+    // constructor, so no engine serves those tables without it. See
+    // `stored-metadata-type-read-gate.ts`.
+    for (const object of STORED_METADATA_TYPE_READ_GATE_OBJECTS) {
+      this.registerMiddleware(storedMetadataTypeReadGate, { object });
+    }
+    this.logger.info('ObjectQL Engine Instance Created');
   }
 
   /** The body of `ObjectQL#getStatus`; the method's docblock there is its contract. */

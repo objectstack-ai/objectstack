@@ -121,9 +121,12 @@ export function describeEnvironment(env: { id: string; displayName?: string }): 
 /**
  * Resolve the install target. `subject` names what needs it, for the refusal's
  * first words — `--install` on `os package publish`, `os deploy` on deploy.
+ * `purpose` finishes "needs an environment …" for a caller that does not
+ * install (`os mcp connect` connects to it); the resolution is the same one.
  */
 export async function resolveInstallTarget(args: {
   subject: string;
+  purpose?: string;
   explicit: string | undefined;
   baseUrl: string;
   token: string;
@@ -136,6 +139,7 @@ export async function resolveInstallTarget(args: {
   const active = await resolveCloudActiveEnvironmentId(args.baseUrl);
   if (active) return { kind: 'resolved', environmentId: active, source: 'active' };
 
+  const needs = `${args.subject} needs an environment ${args.purpose ?? 'to install into'}`;
   const remedy = 'Pass `--env <id>` (or set $OS_ENVIRONMENT_ID), or record one with `os environments switch <id>`.';
   const listed = await (args.list ?? listCloudEnvironments)({
     baseUrl: args.baseUrl,
@@ -146,7 +150,7 @@ export async function resolveInstallTarget(args: {
     return {
       kind: 'refused',
       message:
-        `${args.subject} needs an environment to install into. None was given, and the list of your `
+        `${needs}. None was given, and the list of your `
         + `organization's environments on ${args.baseUrl} could not be read`
         + `${listed.status ? ` (${listed.status})` : ''}: ${listed.error}. ${remedy}`,
     };
@@ -161,14 +165,14 @@ export async function resolveInstallTarget(args: {
     return {
       kind: 'refused',
       message:
-        `${args.subject} needs an environment to install into, and your account has none on ${args.baseUrl}. `
+        `${needs}, and your account has none on ${args.baseUrl}. `
         + `Create one in the ObjectOS Cloud console, then run this again. ${remedy}`,
     };
   }
   return {
     kind: 'refused',
     message:
-      `${args.subject} needs an environment to install into, and your account can reach `
+      `${needs}, and your account can reach `
       + `${candidates.length} on ${args.baseUrl}, so none was picked:\n`
       + candidates.map((env) => `    • ${describeEnvironment(env)}`).join('\n')
       + `\n  ${remedy}`,
