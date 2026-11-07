@@ -7,7 +7,7 @@
 
 feat(plugin-auth)!: an organization administrator reads the client address their access-policy list is judged by, and the console's notices over the retired `require_mfa` column are gone
 
-Clause-②: yes (narrowing) — the published `@object-ui/i18n` packs (all eleven) drop the `console.organizationMfa.needsTwoFactor` and `.nowRequired` keys, which had no reader outside the removed notices. The widening half: a new served read, `GET /api/v1/auth/client-address`.
+Clause-②: yes (narrowing) — the published `@object-ui/i18n` packs (all eleven) drop the `console.organizationMfa.needsTwoFactor` and `.nowRequired` keys, which had no reader outside the removed notices. Both keys were added by the still-pending `.changeset/30295-org-mfa-notice-and-enroll-refusal.md` and never released, so no published version of the packs carries them. The widening half: a new served read, `GET /api/v1/auth/client-address`.
 Metadata-protocol: none
 Skills-docs: none — `skills/**` teaches no access-policy key, client-address read or console notice, and `content/docs/**` teaches no per-organization access policy; its `allowed_ip_ranges` section in `permissions/authentication.mdx` is the deployment's own list, whose platform-admin read it names correctly.
 
@@ -19,7 +19,7 @@ Skills-docs: none — `skills/**` teaches no access-policy key, client-address r
 
 `sys_session.revoke_reason`'s published vocabulary (the field description) now names `ip_not_allowed`.
 
-**BREAKING** (`@object-ui/i18n`, TypeScript only): the exported `TranslationKeys` (`typeof en`) loses the two `console.organizationMfa.*` keys, in all eleven packs (ar, de, en, es, fr, ja, ko, pt-BR, ru, zh-Hans, zh-Hant). A `t()` call that names one still compiles, since its key is a `string`, and reads the key back.
+**BREAKING** (`@object-ui/i18n`, TypeScript only): the exported `TranslationKeys` (`typeof en`) loses the two `console.organizationMfa.*` keys, in all eleven packs (ar, de, en, es, fr, ja, ko, pt-BR, ru, zh-Hans, zh-Hant). A `t()` call that names one still compiles, since its key is a `string`, and reads the key back. Both keys come from the still-pending `.changeset/30295-org-mfa-notice-and-enroll-refusal.md` and were never released: a consumer of a published `@object-ui/i18n` never had them.
 
 | Removed key | Replacement |
 |:---|:---|
