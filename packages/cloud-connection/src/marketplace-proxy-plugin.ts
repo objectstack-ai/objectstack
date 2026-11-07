@@ -40,6 +40,7 @@ import {
     MarketplaceIndustrySchema,
     MarketplaceSolutionTypeSchema,
     PackageMaturitySchema,
+    retiredCategoryGuidance,
 } from '@objectstack/spec/marketplace';
 import { repeatedQueryParamMessage } from '@objectstack/rest';
 
@@ -418,9 +419,9 @@ export class MarketplaceProxyPlugin implements Plugin {
  * (`MarketplaceSearchRequestSchema` in `@objectstack/spec/marketplace`):
  * `businessFunctions`, `industries` and `solutionTypes` — plural, each a list —
  * and `maturity`, one value. The catalog's own `category` filter was retired
- * with the listing's `category`; the facets replace it, and a `category`
- * parameter is read as no filter at all, like any other parameter this door
- * does not know.
+ * with the listing's `category` (`MarketplaceSearchRequest.category` is a
+ * retired key in the spec); the facets replace it, and a `category` parameter
+ * is refused with the spec's own prescription rather than read as no filter.
  */
 interface CatalogListQuery {
     /** Lower-cased search text, matched against display name and manifest id. */
@@ -457,6 +458,10 @@ const CATALOG_FACETS: readonly CatalogFacet[] = [
  * parameter on this platform takes (`fields`, `names`); each value trimmed,
  * blanks dropped, repeats folded. Refused, `400 VALIDATION_ERROR`:
  *
+ * - `category`, the retired filter, with `retiredCategoryGuidance` — the
+ *   prescription a parse of `MarketplaceSearchRequestSchema` gives the same key,
+ *   so a caller still filtering by category learns which facet to send instead
+ *   of receiving the whole catalog as though it had matched;
  * - a facet or `maturity` supplied more than once — a repeated key is not a
  *   second spelling of a list, and the door will not pick one occurrence;
  * - a facet that names no value (`?industries=`): a list of nothing is not a
@@ -467,6 +472,13 @@ const CATALOG_FACETS: readonly CatalogFacet[] = [
  * `q`, `limit` and `offset` read as they always have.
  */
 function readCatalogListQuery(params: URLSearchParams): CatalogListQueryRead {
+    if (params.has('category')) {
+        return {
+            ok: false,
+            param: 'category',
+            message: `Query parameter 'category' is retired: ${retiredCategoryGuidance('MarketplaceSearchRequest.category')}`,
+        };
+    }
     const query: CatalogListQuery = {
         q: (params.get('q') ?? '').trim().toLowerCase(),
         limit: Math.min(Math.max(Number(params.get('limit') ?? 50), 1), 100),
