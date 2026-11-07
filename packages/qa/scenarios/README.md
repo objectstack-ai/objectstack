@@ -104,6 +104,8 @@ pnpm --filter @objectstack/scenarios run-scenarios --driver recorded:/tmp/rec.js
 pnpm --filter @objectstack/scenarios run-scenarios --author-timeout 90       # minutes per authoring turn (default 60)
 pnpm --filter @objectstack/scenarios run-scenarios --author-max-turns 400    # turns per authoring turn, every card (default by tier)
 pnpm --filter @objectstack/scenarios run-scenarios --ask-max-turns 20        # turns per question or operation turn (default 12)
+pnpm --filter @objectstack/scenarios run-scenarios --model sonnet            # the model every turn asks for (default: the login's own)
+pnpm --filter @objectstack/scenarios run-scenarios --author-model opus --ask-model haiku  # build and persona turns apart
 ```
 
 Per card and mode the runner writes `docs/qa/platform-checklist/runs/<date>-scenario-<card>.json`
@@ -120,7 +122,15 @@ Per card and mode the runner writes `docs/qa/platform-checklist/runs/<date>-scen
   is logged in with an API key (the cost ruling on cloud#3600), and the record states the driver, the login, the
   authoring timeout and the turn caps. Every turn records its process: elapsed time, the turn cap it ran under
   (`--max-turns`), and for a turn that did not finish its exit code or signal, whether the runner's timeout killed it,
-  and the end of its stderr. `RecordedDriver` replays a recording, and refuses the three live-driver limits below.
+  and the end of its stderr. `RecordedDriver` replays a recording, and refuses the live-driver limits and models below.
+- **Model** (`driver.ts`): `--model M` passes `claude --model M` on every turn, an alias (`sonnet`) or a name
+  (`claude-sonnet-4-5`); `--author-model` sets the authoring turns (build and iterate) and `--ask-model` the question
+  and operation turns apart, each in place of `--model`. With none, a turn takes the login's default model. Every turn
+  records the model it asked for (`requestedModel`) and the one it was served, read off the stream's init line
+  (`model`); a served name that does not hold the requested one as whole dash-separated parts (`sonnet` is in
+  `claude-sonnet-4-5-20250929`, `opus` is not) is a mismatch (`modelMismatch`). The scorecard's author rows name the
+  served model (`⚠ asked for sonnet` on a mismatch), and its `Run · model` rows count the persona turns per served
+  model (`claude-opus-5-5 ×9 ⚠ 9 not sonnet`).
 - **Turn caps** (`driver.ts`): an authoring turn, build and iterate alike, may take `DEFAULT_AUTHOR_MAX_TURNS` by the
   card's `tier` — `control` 80, `starter` 300, `delivery` 600 — unless `--author-max-turns N` sets one cap for every
   card; a question or operation turn takes 12 unless `--ask-max-turns N` says otherwise. The cap guards a looping turn

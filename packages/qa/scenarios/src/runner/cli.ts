@@ -22,6 +22,14 @@
  *                        half not measured
  *   --ask-max-turns N    the live driver's turn cap per question or operation
  *                        turn (default 12)
+ *   --model M            the model every live turn asks for, an alias (`sonnet`)
+ *                        or a name (`claude-sonnet-4-5`), as `claude --model`
+ *                        takes it (default: the login's own)
+ *   --author-model M     the model for authoring turns, build and iterate, in
+ *                        place of --model
+ *   --ask-model M        the model for question and operation turns, in place
+ *                        of --model; the record and the scorecard state the
+ *                        model each turn was served, and mark a mismatch
  *   --template F         a verified build (dist/objectstack.json) for template mode
  *   --no-iterate-run     skip the Run half after the iterate (scratch mode)
  *   --out DIR            where records go (default docs/qa/platform-checklist/runs, git-ignored)
@@ -72,6 +80,12 @@ export interface CliArgs {
   authorMaxTurns?: number;
   /** Turns per question or operation turn (`--ask-max-turns`); the driver's default when absent. */
   askMaxTurns?: number;
+  /** The model every live turn asks for (`--model`); the login's default when absent. */
+  model?: string;
+  /** The model an authoring turn asks for (`--author-model`), in place of `model`. */
+  authorModel?: string;
+  /** The model a question or operation turn asks for (`--ask-model`), in place of `model`. */
+  askModel?: string;
   out?: string;
   work?: string;
   createVersion?: string;
@@ -92,6 +106,11 @@ export function parseArgs(argv: readonly string[]): CliArgs {
       if (!Number.isInteger(n) || n <= 0) throw new Error(`${flag} takes a whole number of turns above 0, not \`${raw}\``);
       return n;
     };
+    const model = () => {
+      const raw = val();
+      if (raw.trim() === '' || raw.startsWith('-')) throw new Error(`${flag} takes a model alias or name (sonnet, opus, claude-sonnet-4-5), not \`${raw}\``);
+      return raw;
+    };
     if (flag === '--cards') a.cards = val();
     else if (flag === '--only') a.only = val().split(',');
     else if (flag === '--modes') {
@@ -110,6 +129,9 @@ export function parseArgs(argv: readonly string[]): CliArgs {
     }
     else if (flag === '--author-max-turns') a.authorMaxTurns = turns();
     else if (flag === '--ask-max-turns') a.askMaxTurns = turns();
+    else if (flag === '--model') a.model = model();
+    else if (flag === '--author-model') a.authorModel = model();
+    else if (flag === '--ask-model') a.askModel = model();
     else if (flag === '--out') a.out = val();
     else if (flag === '--work') a.work = val();
     else if (flag === '--create-version') a.createVersion = val();
@@ -121,22 +143,31 @@ export function parseArgs(argv: readonly string[]): CliArgs {
 /** The live driver's limits a run may set: `--author-timeout`, `--author-max-turns`, `--ask-max-turns`. */
 export type DriverLimits = Pick<CliArgs, 'authorTimeoutMin' | 'authorMaxTurns' | 'askMaxTurns'>;
 
-const LIMIT_FLAGS: ReadonlyArray<readonly [keyof DriverLimits, string]> = [
+/** The models a run may ask the live driver for: `--model`, `--author-model`, `--ask-model`. */
+export type DriverModels = Pick<CliArgs, 'model' | 'authorModel' | 'askModel'>;
+
+const LIVE_FLAGS: ReadonlyArray<readonly [keyof (DriverLimits & DriverModels), string]> = [
   ['authorTimeoutMin', '--author-timeout'],
   ['authorMaxTurns', '--author-max-turns'],
   ['askMaxTurns', '--ask-max-turns'],
+  ['model', '--model'],
+  ['authorModel', '--author-model'],
+  ['askModel', '--ask-model'],
 ];
 
-export function makeDriver(spec: string, opts: DriverLimits = {}): AgentDriver {
+export function makeDriver(spec: string, opts: DriverLimits & DriverModels = {}): AgentDriver {
   if (spec === 'claude') {
     return new ClaudeCodeDriver({
       ...(opts.authorTimeoutMin !== undefined ? { authorTimeoutMs: opts.authorTimeoutMin * 60_000 } : {}),
       ...(opts.authorMaxTurns !== undefined ? { authorMaxTurns: opts.authorMaxTurns } : {}),
       ...(opts.askMaxTurns !== undefined ? { askMaxTurns: opts.askMaxTurns } : {}),
+      ...(opts.model !== undefined ? { model: opts.model } : {}),
+      ...(opts.authorModel !== undefined ? { authorModel: opts.authorModel } : {}),
+      ...(opts.askModel !== undefined ? { askModel: opts.askModel } : {}),
     });
   }
   if (spec.startsWith('recorded:')) {
-    const given = LIMIT_FLAGS.filter(([key]) => opts[key] !== undefined).map(([, flag]) => flag);
+    const given = LIVE_FLAGS.filter(([key]) => opts[key] !== undefined).map(([, flag]) => flag);
     if (given.length) throw new Error(`${given.join(', ')} ${given.length === 1 ? 'applies' : 'apply'} to the live driver only: a replay re-reads each turn as it was recorded`);
     return RecordedDriver.fromFile(spec.slice('recorded:'.length));
   }
@@ -171,7 +202,9 @@ export async function main(argv: readonly string[]): Promise<number> {
     `driver: ${info.driver} ${info.version ?? ''} · login: ${info.authMethod ?? 'n/a'} · API-billed: no` +
       (info.authorTimeoutMs !== undefined ? ` · author timeout: ${minutesText(info.authorTimeoutMs)}` : '') +
       (info.authorMaxTurns ? ` · author max turns: ${Object.entries(info.authorMaxTurns).map(([tier, n]) => `${tier} ${n}`).join(', ')}` : '') +
-      (info.askMaxTurns !== undefined ? ` · ask max turns: ${info.askMaxTurns}` : ''),
+      (info.askMaxTurns !== undefined ? ` · ask max turns: ${info.askMaxTurns}` : '') +
+      (info.authorModel ? ` · author model: ${info.authorModel}` : '') +
+      (info.askModel ? ` · ask model: ${info.askModel}` : ''),
   );
 
   const ops: ProjectOps = {
