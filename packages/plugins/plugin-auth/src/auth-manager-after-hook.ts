@@ -91,22 +91,45 @@ function changeEmailFrom(user: unknown): { email: string; name?: string; id?: st
 }
 
 /**
+ * better-auth's admin plugin refuses a banned user's new session with this
+ * code, from its `session.create.before` hook (`ADMIN_ERROR_CODES.BANNED_USER`
+ * in `better-auth/dist/plugins/admin/error-codes.mjs`). The package exports no
+ * public path to that table, so the code is named here, once.
+ */
+const VENDOR_BANNED_USER_CODE = 'BANNED_USER';
+
+/**
  * ADR-0069 D2 — the `/sign-in/email` refusals that come AFTER the password
  * passed, which the lockout counter neither counts nor clears: only a refused
- * credential counts toward a lock. An organization's own allowed IP ranges are
- * judged where the new session is scoped to it (`refuseUnadmittedScoping`, at
- * session creation), which better-auth reaches only once the password has
- * verified, so a wrong password never carries this code to the counter.
+ * credential counts toward a lock. better-auth's `signInEmail` throws
+ * `INVALID_EMAIL_OR_PASSWORD` for a wrong password before it reaches either
+ * place these are raised, so a wrong password never carries one of them to
+ * the counter:
+ *
+ *  - `EMAIL_NOT_VERIFIED` (`BASE_ERROR_CODES`), thrown by `signInEmail` itself
+ *    right after the password verified, when the deployment requires a
+ *    verified address;
+ *  - the organization's own allowed IP ranges (`SESSION_SCOPING_REFUSAL`),
+ *    judged where the new session is scoped to it (`refuseUnadmittedScoping`,
+ *    at session creation);
+ *  - a ban ({@link VENDOR_BANNED_USER_CODE}), judged at session creation too.
  *
  * A function, read when a sign-in is judged, rather than a set built when this
  * module loads: `organization-access-policy.ts` imports `auth-manager.ts`,
- * which reaches this module, so on that import order the constant is not yet
- * initialised while this module evaluates.
+ * which reaches this module, so on that import order its constant is not yet
+ * initialised while this module evaluates; and better-auth is loaded lazily,
+ * as everywhere in this package.
  */
-function refusedAfterTheCredential(returned: unknown): boolean {
-  const after: readonly string[] = [SESSION_SCOPING_REFUSAL.code];
+async function refusedAfterTheCredential(returned: unknown): Promise<boolean> {
   const code = refusalCodeOf(returned);
-  return code !== undefined && after.includes(code);
+  if (code === undefined) return false;
+  const { BASE_ERROR_CODES } = await import('@better-auth/core/error');
+  const after: readonly string[] = [
+    BASE_ERROR_CODES.EMAIL_NOT_VERIFIED.code,
+    SESSION_SCOPING_REFUSAL.code,
+    VENDOR_BANNED_USER_CODE,
+  ];
+  return after.includes(code);
 }
 
 /** The body of `createAuthInstance`'s `hooks.after` arrow; the comments there and in it are its contract. */
@@ -170,8 +193,8 @@ export async function globalAfterHook(this: AfterHookHost, ctx: any) {
   // the after-hook with it on `ctx.context.returned`; a success leaves
   // the session payload there. Count failures, reset on success.
   // A refusal `refusedAfterTheCredential` names is neither: the password
-  // passed and a policy refused the session, so the counter is left as
-  // it stands. Its `login_failed` row is still written below.
+  // passed and a policy then refused the sign-in, so the counter is left
+  // as it stands. Its `login_failed` row is still written below.
   if (ctx?.path === SIGN_IN_EMAIL_PATH) {
     const email = typeof ctx?.body?.email === 'string' ? ctx.body.email : '';
     if (email) {
@@ -182,7 +205,7 @@ export async function globalAfterHook(this: AfterHookHost, ctx: any) {
       } catch {
         succeeded = !(ctx?.context?.returned instanceof Error);
       }
-      const lockStamped = !succeeded && refusedAfterTheCredential(ctx?.context?.returned)
+      const lockStamped = !succeeded && await refusedAfterTheCredential(ctx?.context?.returned)
         ? undefined
         : await this.recordSignInOutcome(email, succeeded);
       // A refused sign-in writes `login_failed`, and the one that

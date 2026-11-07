@@ -23,8 +23,8 @@
 //
 // Only a refused CREDENTIAL moves the counter. A sign-in whose password passed
 // and that a policy then refused (the organization's allowed IP ranges, judged
-// when the session is scoped to it) neither counts nor clears: the last
-// `describe` below.
+// when the session is scoped to it; a ban; an address the deployment requires
+// verified) neither counts nor clears: the last two `describe`s below.
 //
 // ## Why the server here is the real one
 //
@@ -61,7 +61,8 @@ const PASSWORD = 'Corr3ct!Horse-Battery';
 const WRONG_PASSWORD = 'Wr0ng!Guess-Zebra-7731';
 const THRESHOLD = 3;
 
-function deployment() {
+/** `extra` is merged into the manager's config (a plugin switch, an e-mail rule). */
+function deployment(extra: Record<string, unknown> = {}) {
   const engine = createMemoryEngine();
   const events: AuthSessionAuditEventInput[] = [];
   const manager = new AuthManager({
@@ -70,6 +71,7 @@ function deployment() {
     dataEngine: engine,
     lockoutThreshold: THRESHOLD,
     lockoutDurationMinutes: 15,
+    ...extra,
     getAuditSink: () => ({
       recordAuthEvent: async (event: AuthSessionAuditEventInput) => {
         events.push(event);
@@ -308,5 +310,52 @@ describe('ADR-0069 D2: a correct password the organization\'s IP list refuses ne
     }
     expect(isLocked(accountRow(engine))).toBe(true);
     expect(await outcome(await signInFrom(manager, PASSWORD, INSIDE))).toEqual(LOCKED);
+  });
+});
+
+describe('ADR-0069 D2: a correct password refused for a ban or an unverified address neither counts nor clears', () => {
+  it('a banned account: wrong passwords count, the correct one is refused BANNED_USER and moves nothing', async () => {
+    const { engine, manager, events } = deployment({ plugins: { admin: true } });
+    await signUp(manager);
+    accountRow(engine).banned = true;
+    for (let i = 0; i < THRESHOLD - 1; i++) {
+      expect(await outcome(await signIn(manager, EMAIL, WRONG_PASSWORD))).toEqual(REFUSED);
+    }
+    expect(Number(accountRow(engine).failed_login_count)).toBe(THRESHOLD - 1);
+    events.length = 0;
+
+    for (let i = 0; i < THRESHOLD; i++) {
+      expect(await outcome(await signIn(manager, EMAIL, PASSWORD)), `attempt ${i + 1}`)
+        .toEqual({ status: 403, code: 'BANNED_USER' });
+      expect(Number(accountRow(engine).failed_login_count), `attempt ${i + 1}`).toBe(THRESHOLD - 1);
+    }
+    expect(isLocked(accountRow(engine))).toBe(false);
+    expect(events.some((e) => e.action === 'account_locked')).toBe(false);
+
+    // Lifted, the ban leaves no lock behind: the correct password signs in and clears the count.
+    accountRow(engine).banned = false;
+    expect((await signIn(manager, EMAIL, PASSWORD)).status).toBe(200);
+    expect(Number(accountRow(engine).failed_login_count)).toBe(0);
+  });
+
+  it('an unverified address: wrong passwords count, the correct one is refused EMAIL_NOT_VERIFIED and moves nothing', async () => {
+    const { engine, manager } = deployment({ emailAndPassword: { enabled: true, requireEmailVerification: true } });
+    await signUp(manager);
+    accountRow(engine).email_verified = false;
+    for (let i = 0; i < THRESHOLD - 1; i++) {
+      expect(await outcome(await signIn(manager, EMAIL, WRONG_PASSWORD))).toEqual(REFUSED);
+    }
+    expect(Number(accountRow(engine).failed_login_count)).toBe(THRESHOLD - 1);
+
+    for (let i = 0; i < THRESHOLD; i++) {
+      expect(await outcome(await signIn(manager, EMAIL, PASSWORD)), `attempt ${i + 1}`)
+        .toEqual({ status: 403, code: 'EMAIL_NOT_VERIFIED' });
+      expect(Number(accountRow(engine).failed_login_count), `attempt ${i + 1}`).toBe(THRESHOLD - 1);
+    }
+    expect(isLocked(accountRow(engine))).toBe(false);
+
+    // One more wrong password still reaches the threshold and locks.
+    expect(await outcome(await signIn(manager, EMAIL, WRONG_PASSWORD))).toEqual(REFUSED);
+    expect(isLocked(accountRow(engine))).toBe(true);
   });
 });
