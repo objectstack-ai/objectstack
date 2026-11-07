@@ -22,13 +22,12 @@
  *      output's keys (the three `service_desk` cases).
  */
 
-import { readdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
 
-import { formatRefusal, loadScenarioFile, readCapabilityAreas, type LoadedScenario } from '../../src/loader.js';
+import { formatRefusal, loadScenarios, readCapabilityAreas, type LoadedScenario } from '../../src/loader.js';
 import { clockDates, observeOperation, observeProbe, postStateRows, probeCall, uncodedNote, uncodedToolError, type Row } from '../../src/runner/observe.js';
 import { hiddenValues } from '../../src/runner/orchestrate.js';
 import { operationPrompt, questionPrompt } from '../../src/runner/prompts.js';
@@ -40,9 +39,11 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const CARDS = resolve(HERE, '../../../../../docs/qa/scenarios');
 const AREAS_DIR = resolve(HERE, '../../../../../docs/qa/platform-checklist/areas');
 
+const LIBRARY = loadScenarios(CARDS, { areas: readCapabilityAreas(AREAS_DIR), library: 'open' });
+
 function load(id: string): LoadedScenario {
-  const { card, refusals } = loadScenarioFile(resolve(CARDS, `${id}.json`), { areas: readCapabilityAreas(AREAS_DIR), library: 'open' });
-  if (!card) throw new Error(refusals.map(formatRefusal).join('\n'));
+  const card = LIBRARY.cards.find((c) => c.card.id === id);
+  if (!card) throw new Error(`no card ${id}: ${LIBRARY.refusals.map(formatRefusal).join('\n')}`);
   return card;
 }
 
@@ -87,10 +88,9 @@ describe('1. the card\'s today: a declared asOf date is met by the run date the 
   });
 
   it('every run-phase prompt of a card with an asOf states it, operations as well as questions', () => {
-    const dir = readdirSync(CARDS).filter((f) => f.endsWith('.json'));
     let dated = 0;
-    for (const file of dir) {
-      const scenario = load(file.slice(0, -'.json'.length));
+    expect(LIBRARY.refusals).toEqual([]);
+    for (const scenario of LIBRARY.cards) {
       const { card } = scenario;
       if (!card.asOf) continue;
       dated++;
@@ -125,9 +125,11 @@ describe('2. an app-defined validation code meets a declared VALIDATION_FAILED, 
 
   it('applies to every card: each validation operation passes on the build\'s own code, the agent\'s half and the probe\'s', () => {
     const evidence: Record<string, string> = { check_out_asset_in_repair: 'ASSET_NOT_IN_STOCK', receive_more_than_ordered: 'OVER_RECEIPT' };
-    for (const scenario of [asset, purchasing, orders, leave, desk]) {
+    expect(LIBRARY.cards.length).toBe(9);
+    for (const scenario of LIBRARY.cards) {
       const g = scenario.card.run.guardrails.find((x) => x.check === 'write_validation')!;
       const op = scenario.card.run.operations.find((o) => o.id === g.operation)!;
+      expect(op.outcome, `${scenario.card.id} ${op.id}`).toEqual({ kind: 'refused', code: 'VALIDATION_FAILED' });
       const code = evidence[op.id] ?? 'APP_RULE';
       const answer = { kind: 'refused', code, status: 400 } as const;
       const grade = gradeCardOperation(scenario, op.id, { answer, writes: 0, withheld: false, probe: { answer, writes: 0 } });
