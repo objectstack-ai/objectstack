@@ -320,6 +320,13 @@ const SKIP_OBJECTS = new Set<string>([
   // Not an act anyone performed; the ruling that created the object forbids
   // an audit row per sweep.
   'sys_lifecycle_state',         // sweep watermark (1 write per sweep)
+  // [#31021] The seed loader's record of which seed rows landed in an
+  // organization (`managedBy: 'engine-owned'`, no data API), written ONLY by
+  // `SeedLoaderService` under the seed write context, one row per key it
+  // lands. Audited, every seed load would mirror its own bookkeeping into
+  // `sys_audit_log` and `sys_activity` row for row — the first replay after
+  // the upgrade, one per seeded row. The seeded rows themselves stay audited.
+  'sys_seed_landed_key',         // landed seed keys (1 write per new key)
 ]);
 
 /**

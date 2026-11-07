@@ -10,6 +10,9 @@
  *   --driver claude      the local Claude Code CLI on your own login (default)
  *   --driver recorded:F  replay the recording F (no model, no network to a model)
  *   --record F           also save every live turn to F, for later replay
+ *   --author-timeout MIN the live driver's budget per authoring turn, build and
+ *                        iterate alike (default 60); a turn it kills leaves its
+ *                        Build half not measured
  *   --template F         a verified build (dist/objectstack.json) for template mode
  *   --no-iterate-run     skip the Run half after the iterate (scratch mode)
  *   --out DIR            where records go (default docs/qa/platform-checklist/runs, git-ignored)
@@ -29,7 +32,7 @@ import { fileURLToPath } from 'node:url';
 import { formatRefusal, loadScenarios, readCapabilityAreas } from '../loader.js';
 import { HttpApp } from './app.js';
 import { ClaudeCodeDriver, RecordedDriver, RecordingDriver, type AgentDriver } from './driver.js';
-import { runCard, type ProjectOps } from './orchestrate.js';
+import { minutesText, runCard, type ProjectOps } from './orchestrate.js';
 import { bootDev, os, readArtifact, readNamespace, scaffold } from './project.js';
 import { cardScorecard, renderScorecard, runRecord } from './scorecard.js';
 
@@ -54,6 +57,8 @@ export interface CliArgs {
   record?: string;
   template?: string;
   iterateRun: boolean;
+  /** Minutes per authoring turn (`--author-timeout`); the driver's default when absent. */
+  authorTimeoutMin?: number;
   out?: string;
   work?: string;
   createVersion?: string;
@@ -78,6 +83,12 @@ export function parseArgs(argv: readonly string[]): CliArgs {
     else if (flag === '--record') a.record = val();
     else if (flag === '--template') a.template = val();
     else if (flag === '--no-iterate-run') a.iterateRun = false;
+    else if (flag === '--author-timeout') {
+      const raw = val();
+      const min = Number(raw);
+      if (!Number.isFinite(min) || min <= 0) throw new Error(`--author-timeout takes a number of minutes above 0, not \`${raw}\``);
+      a.authorTimeoutMin = min;
+    }
     else if (flag === '--out') a.out = val();
     else if (flag === '--work') a.work = val();
     else if (flag === '--create-version') a.createVersion = val();
@@ -86,9 +97,12 @@ export function parseArgs(argv: readonly string[]): CliArgs {
   return a;
 }
 
-export function makeDriver(spec: string): AgentDriver {
-  if (spec === 'claude') return new ClaudeCodeDriver();
-  if (spec.startsWith('recorded:')) return RecordedDriver.fromFile(spec.slice('recorded:'.length));
+export function makeDriver(spec: string, opts: { authorTimeoutMin?: number } = {}): AgentDriver {
+  if (spec === 'claude') return new ClaudeCodeDriver(opts.authorTimeoutMin !== undefined ? { authorTimeoutMs: opts.authorTimeoutMin * 60_000 } : {});
+  if (spec.startsWith('recorded:')) {
+    if (opts.authorTimeoutMin !== undefined) throw new Error('--author-timeout applies to the live driver only: a replay re-reads each turn as it was recorded');
+    return RecordedDriver.fromFile(spec.slice('recorded:'.length));
+  }
   throw new Error(`unknown driver \`${spec}\` (claude, recorded:FILE)`);
 }
 
@@ -110,10 +124,13 @@ export async function main(argv: readonly string[]): Promise<number> {
     return 2;
   }
 
-  const live = makeDriver(args.driver);
+  const live = makeDriver(args.driver, args.authorTimeoutMin !== undefined ? { authorTimeoutMin: args.authorTimeoutMin } : {});
   const driver = args.record ? new RecordingDriver(live) : live;
   const info = driver.info();
-  console.log(`driver: ${info.driver} ${info.version ?? ''} · login: ${info.authMethod ?? 'n/a'} · API-billed: no`);
+  console.log(
+    `driver: ${info.driver} ${info.version ?? ''} · login: ${info.authMethod ?? 'n/a'} · API-billed: no` +
+      (info.authorTimeoutMs !== undefined ? ` · author timeout: ${minutesText(info.authorTimeoutMs)}` : ''),
+  );
 
   const ops: ProjectOps = {
     scaffold: (name, under) => {

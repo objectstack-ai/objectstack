@@ -27,6 +27,8 @@ export { SysMigrationJournal } from './sys-migration-journal.object.js';
 export { SysLifecycleState } from './sys-lifecycle-state.object.js';
 // [ADR-0148, #30237] The recycle bin: one entry per delete operation.
 export { SysRecycleBin } from './sys-recycle-bin.object.js';
+// [#31021] Which declared seed rows landed in an organization.
+export { SysSeedLandedKey } from './sys-seed-landed-key.object.js';
 // Multi-currency M1-1 (epic #8345): the dated rate table the write-time
 // home-currency projection reads.
 export {

@@ -61,6 +61,7 @@ import { usePermissions } from '@object-ui/permissions';
 import { extractWriteErrorMessage, useAdapter, useMetadata } from '@object-ui/react';
 import { AlertCircle, Loader2, Plus, UserCheck, X } from 'lucide-react';
 import { useMetadataLocale } from './i18n.js';
+import { isZhLocale } from './schema-field-label.js';
 import { membershipOrganization, readOrganizationMemberIds, type MemberFilter } from './organization-members.js';
 
 export interface PositionHoldersSectionProps {
@@ -107,7 +108,7 @@ const PICKER_EMAIL_FIELD = 'email';
 const refusalSentence = (err: unknown): string => extractWriteErrorMessage(err) ?? '';
 
 function useCopy() {
-  const zh = useMetadataLocale() === 'zh-CN';
+  const zh = isZhLocale(useMetadataLocale());
   return React.useMemo(
     () =>
       zh

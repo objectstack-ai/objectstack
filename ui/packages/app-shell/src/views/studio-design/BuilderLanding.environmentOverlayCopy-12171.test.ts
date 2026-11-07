@@ -88,7 +88,7 @@ const ENVIRONMENT_OVERLAY = /\benvironment overlay\b|环境覆盖/iu;
  * `SupportedLocale`, so a locale added to that union fails the type-check here
  * until it is listed.
  */
-const DECLARED_LOCALES = { 'en-US': true, 'zh-CN': true } satisfies Record<SupportedLocale, true>;
+const DECLARED_LOCALES = { 'en-US': true, 'zh-CN': true, 'zh-Hant': true } satisfies Record<SupportedLocale, true>;
 
 function tablesCarryingKeys(): Array<[string, Map<string, string>]> {
   return [...readTables(REPO_ROOT)].filter(([, table]) => KEYS.some((key) => table.has(key)));

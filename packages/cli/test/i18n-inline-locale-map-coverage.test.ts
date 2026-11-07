@@ -277,6 +277,9 @@ describe('coverage reads the map the way the renderer does', () => {
     { en: 'Members', 'zh-CN': '成员', 'zh-TW': '成員' },
     { en: 'Members', 'zh-TW': '成員', 'zh-CN': '成员' },
     { en: 'Members', zh: '成员', 'zh-Hant': '成員' },
+    // An empty entry the renderer reaches (#31074): that reader sees nothing.
+    { en: 'Members', 'zh-CN': '成员', 'zh-TW': '' },
+    { en: 'Members', zh: '成员', 'zh-CN': '' },
   ];
   const locales = ['en', 'zh', 'zh-CN', 'zh-TW', 'zh-Hans', 'zh-Hant', 'zh-HK', 'ja-JP', 'es-ES'];
 
@@ -309,7 +312,21 @@ describe('coverage reads the map the way the renderer does', () => {
   it("a map with both Chinese scripts covers each reader with its own script's entry (#30910)", () => {
     expect(inlineLocaleText({ 'zh-CN': '成员', 'zh-TW': '成員' }, 'zh-Hant')).toBe('成員');
     expect(inlineLocaleText({ 'zh-TW': '成員', 'zh-CN': '成员' }, 'zh')).toBe('成员');
-    // An empty entry of the reader's script is no translation: the other script still covers.
-    expect(inlineLocaleText({ 'zh-CN': '成员', 'zh-TW': '' }, 'zh-Hant')).toBe('成员');
+    // (The row that pinned an empty `zh-TW` as covered by `zh-CN` at `zh-Hant`
+    // moved to the #31074 case below: the renderer shows the empty entry.)
+  });
+
+  it('an empty entry the renderer shows is a gap, not covered by another entry (#31074)', () => {
+    // Own script: the reader of the Traditional script sees the blank `zh-TW`.
+    expect(resolveI18nLabel({ 'zh-CN': '成员', 'zh-TW': '' }, 'zh-Hant')).toBe('');
+    expect(inlineLocaleText({ 'zh-CN': '成员', 'zh-TW': '' }, 'zh-Hant')).toBeUndefined();
+    expect(inlineLocaleText({ 'zh-CN': '成员', 'zh-TW': '' }, 'zh-HK')).toBeUndefined();
+    // Own tag: an exact blank `zh-CN` shadows the bare `zh`.
+    expect(resolveI18nLabel({ zh: '成员', 'zh-CN': '' }, 'zh-CN')).toBe('');
+    expect(inlineLocaleText({ zh: '成员', 'zh-CN': '' }, 'zh-CN')).toBeUndefined();
+    // CONTROL: the readers that never reach the blank entry stay covered.
+    expect(inlineLocaleText({ 'zh-CN': '成员', 'zh-TW': '' }, 'zh-Hans')).toBe('成员');
+    expect(inlineLocaleText({ zh: '成员', 'zh-CN': '' }, 'zh')).toBe('成员');
+    expect(inlineLocaleText({ 'zh-CN': '成员' }, 'zh-TW')).toBe('成员');
   });
 });

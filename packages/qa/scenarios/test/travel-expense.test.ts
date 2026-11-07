@@ -132,6 +132,8 @@ describe('scenario card travel_expense (docs/qa/scenarios/travel_expense.json)',
 
   it('meets the mid-tier floor', () => {
     const { run, expect: ex } = card;
+    // A gallery starter template, so the loader holds it to the gallery floor too.
+    expect(card.tier).toBe('starter');
     // 5-8 related objects, at least one report or dashboard.
     expect(ex.objects.length).toBeGreaterThanOrEqual(5);
     expect(ex.objects.length).toBeLessThanOrEqual(8);

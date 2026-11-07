@@ -222,10 +222,10 @@ describe('setLocalized — a script-split language writes the entry of its own s
   });
 
   /** Byte-identical controls: `[map, language, the key main writes]`. */
+  // The three one-script Chinese rows that stood here (`{ en, 'zh-CN' }` at
+  // `zh-Hant`, `{ en, zh }` at `zh-TW`, `{ en, 'zh-HK' }` at `zh-Hans`) pinned
+  // a cross-script overwrite; #31074 moved them to the block below.
   const UNCHANGED: ReadonlyArray<readonly [Record<string, string>, string, string]> = [
-    [{ en: 'Customer', 'zh-CN': '客户' }, 'zh-Hant', 'zh-CN'],
-    [{ en: 'Customer', zh: '客户' }, 'zh-TW', 'zh'],
-    [{ en: 'Customer', 'zh-HK': '客戶' }, 'zh-Hans', 'zh-HK'],
     [{ 'pt-PT': 'PT', 'pt-BR': 'BR' }, 'pt', 'pt-PT'],
     [{ 'en-GB': 'GB', 'en-US': 'US' }, 'en', 'en-GB'],
     [{ 'es-MX': 'MX', 'es-ES': 'ES' }, 'es', 'es-MX'],
@@ -235,5 +235,49 @@ describe('setLocalized — a script-split language writes the entry of its own s
   it.each(UNCHANGED)('%j edited in %s still writes %s, exactly as before', (map, language, key) => {
     const written = setLocalized(map, language, 'WRITTEN') as Record<string, unknown>;
     expect(written[key]).toBe('WRITTEN');
+  });
+});
+
+/**
+ * #31074 — an edit in a script the map lacks ADDS its own script's entry. The
+ * other script's text is a borrowed display fallback for this editor, the way
+ * `en` is for `fr`: `{ en, zh }` edited in `zh-Hant` used to overwrite the
+ * Simplified `zh` text with Traditional. The read side is unchanged, so the
+ * editor saw the Simplified text before the edit and sees its own after it.
+ */
+describe('setLocalized — an edit in a script the map lacks adds its own entry (#31074)', () => {
+  /** `[map, language, what the map reads in that language before the edit]` */
+  const ADDS: ReadonlyArray<readonly [Record<string, string>, string, string]> = [
+    [{ en: 'Customer', zh: '客户' }, 'zh-Hant', '客户'],
+    [{ en: 'Customer', 'zh-CN': '客户' }, 'zh-Hant', '客户'],
+    [{ en: 'Customer', zh: '客户' }, 'zh-TW', '客户'],
+    [{ en: 'Customer', 'zh-Hans': '客户' }, 'zh-HK', '客户'],
+    [{ en: 'Customer', 'zh-HK': '客戶' }, 'zh-Hans', '客戶'],
+    [{ en: 'Customer', 'zh-TW': '客戶' }, 'zh', '客戶'],
+    [{ en: 'Customer', 'zh-TW': '客戶' }, 'zh-CN', '客戶'],
+    // A script subtag the platform table does not name is not guessed at to be
+    // the editor's own.
+    [{ en: 'Customer', 'zh-Hant-US': '客戶' }, 'zh-Hant', '客戶'],
+  ];
+
+  it.each(ADDS)('%j edited in %s adds that tag and keeps every entry', (map, language, before) => {
+    expect(pickLocalized(map, language)).toBe(before);
+    const written = setLocalized(map, language, 'WRITTEN') as Record<string, unknown>;
+    expect(written).toEqual({ ...map, [language]: 'WRITTEN' });
+    expect(pickLocalized(written, language)).toBe('WRITTEN');
+  });
+
+  /** `[map, language, the key the edit replaces]`: an entry of the editor's own script is still owned. */
+  const OWN_SCRIPT: ReadonlyArray<readonly [Record<string, string>, string, string]> = [
+    [{ en: 'Customer', zh: '客户' }, 'zh-CN', 'zh'],
+    [{ en: 'Customer', zh: '客户' }, 'zh-Hans', 'zh'],
+    [{ en: 'Customer', 'zh-CN': '客户' }, 'zh', 'zh-CN'],
+    [{ en: 'Customer', 'zh-TW': '客戶' }, 'zh-HK', 'zh-TW'],
+    [{ en: 'Customer', 'zh-Hant': '客戶' }, 'zh-TW', 'zh-Hant'],
+  ];
+
+  it.each(OWN_SCRIPT)('%j edited in %s still replaces %s', (map, language, key) => {
+    const written = setLocalized(map, language, 'WRITTEN') as Record<string, unknown>;
+    expect(written).toEqual({ ...map, [key]: 'WRITTEN' });
   });
 });
