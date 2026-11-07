@@ -71,6 +71,19 @@ describe('ObjectSchema.membershipKeys — the closed shape', () => {
     expect(r.success).toBe(true);
   });
 
+  it("[#31129 ruling A] parses `valueField: 'id'`, the caller's own rows of the roster (\"the records I am\")", () => {
+    const employee = {
+      name: 'hr_employee',
+      fields: { user: { type: 'user' as const }, department: { type: 'lookup' as const, reference: 'hr_department' } },
+      membershipKeys: { my_employee_ids: { userField: 'user', valueField: 'id' } },
+    };
+    const r = ObjectSchema.safeParse(employee);
+    expect(r.success).toBe(true);
+    if (!r.success) return;
+    expect(r.data.membershipKeys).toEqual({ my_employee_ids: { userField: 'user', valueField: 'id' } });
+    expect(getMetadataTypeSchema('object')!.safeParse(employee).success).toBe(true);
+  });
+
   it('the metadata write door (the `object` registry binding) applies the same shape', () => {
     const door = getMetadataTypeSchema('object');
     expect(door).toBeDefined();
