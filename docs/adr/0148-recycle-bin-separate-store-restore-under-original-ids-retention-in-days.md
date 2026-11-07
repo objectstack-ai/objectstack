@@ -187,7 +187,10 @@ its master comes back with its master.
 
 - a **unique value has since been taken** by a live row;
 - the **parent was purged** — the row's master-detail parent is no longer in the bin and no longer live;
-- the **object's package was uninstalled** — the object no longer exists in the registry.
+- the **object's package was uninstalled** — the object no longer exists in the registry;
+- the **parent is in the bin** — the row's master-detail parent is not live but is the record of another entry; the
+  refusal names that entry, and restoring it first lets this one through (added 2026-11-07 by the maintainer's ruling
+  on #30237, record [`6710220841`](https://github.com/objectstack-ai/objectstack/issues/30237#issuecomment-6710220841)).
 
 Each refusal is a named code in the ADR-0112 envelope (#30235 names them; #30237 answers them and pins one test per
 refusal), so the Console and an AI caller read the reason, not a generic failure.
@@ -392,7 +395,8 @@ of days and a default; the plan that maps to those days lives in the host that c
   write per operation; bulk delete is a later item with its own cap.
 - **Bin storage** is real storage until purge, counted and shown separately.
 - **Restore is best-effort by design**: the three refusals are permanent for that entry (a taken unique value, a
-  purged parent, an uninstalled package) and the person is told why rather than given a forced write.
+  purged parent, an uninstalled package) and the person is told why rather than given a forced write. The fourth, a
+  parent that is in the bin, is not: it names the parent's entry, and restoring that entry first clears it.
 - **Forward-only**: nothing deleted before the engine slice lands is in the bin.
 - A restore brings a record back without its secret-channel values until the later item holds them.
 
