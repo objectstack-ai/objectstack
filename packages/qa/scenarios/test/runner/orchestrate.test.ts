@@ -140,6 +140,12 @@ class FakeApp implements AppHarness {
     (this.rows[object] ??= []).push({ ...row });
     return { ok: true, status: 200, body: {} };
   }
+  async updateRow(object: string, id: string, patch: Record<string, unknown>): Promise<HttpAnswer> {
+    const row = (this.rows[object] ?? []).find((r) => r.id === id);
+    if (!row) return { ok: false, status: 404, body: {}, code: 'NOT_FOUND', message: `no ${object} ${id}` };
+    Object.assign(row, patch);
+    return { ok: true, status: 200, body: {} };
+  }
   async listRows(object: string) {
     return { ok: true, status: 200, body: {}, rows: (this.rows[object] ?? []).map((r) => ({ ...r })) };
   }
