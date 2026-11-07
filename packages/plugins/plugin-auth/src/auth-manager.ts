@@ -6166,6 +6166,22 @@ export class AuthManager {
   }
 
   /**
+   * [#30924] The id of the account a sign-in refused by the ADR-0069 D5 IP
+   * allow-list names, for its `login_failed` row only
+   * (`ip-allow-list-refusal-audit.ts`), or `undefined` — the password
+   * sign-in's own account question ({@link findSignInAccount}). The gate
+   * refuses before better-auth resolves any account, so this is the only way
+   * that row can name one. It decides nothing: the refusal is already
+   * answered. Throws what the engine throws; the caller writes the row with no
+   * subject then.
+   */
+  public async resolveRefusedSignInAccountId(email: string): Promise<string | undefined> {
+    const engine = this.getDataEngine();
+    if (!engine) return undefined;
+    return (await this.findSignInAccount(engine, email, []))?.id;
+  }
+
+  /**
    * ADR-0069 D2 — the ONE answer to "which account does this password sign-in
    * name", read by the lock gate ({@link assertAccountNotLocked}), the counter
    * ({@link recordSignInOutcome}) and the account events
