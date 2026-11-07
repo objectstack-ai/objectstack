@@ -32,6 +32,18 @@ import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 
 import { PackageDetailSheet, PackagesPage, type InstalledPackageRow } from './PackagesPage';
 
+/**
+ * objectstack#31025 — the data source the Delete dialog counts each object's
+ * rows through. `null` (no provider), as before, unless a test installs one.
+ */
+let adapter: { find: ReturnType<typeof vi.fn> } | null = null;
+vi.mock('@object-ui/react', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@object-ui/react')>()),
+  useAdapter: () => adapter,
+}));
+/** What `GET /packages/:id/export` answers; a test may replace it. */
+let exportAnswer: unknown;
+
 const PKG_ID = 'com.acme.crm';
 const PKG_NAME = 'Acme CRM';
 const PKG: InstalledPackageRow = {
@@ -72,6 +84,8 @@ function respond(body: unknown, status = 200) {
 
 beforeEach(() => {
   calls = [];
+  adapter = null;
+  exportAnswer = { success: true, data: { id: PKG_ID, name: PKG_ID, version: '1.0.0' } };
   duplicateAnswer = { success: true, data: { success: true, copiedCount: 3, failedCount: 0 } };
   vi.stubGlobal(
     'fetch',
@@ -90,6 +104,9 @@ beforeEach(() => {
       }
       if (input.endsWith('/duplicate')) {
         return respond(duplicateAnswer);
+      }
+      if (input === `/api/v1/packages/${PKG_ID}/export` && method === 'GET') {
+        return respond(exportAnswer, (exportAnswer as { success?: boolean }).success === false ? 500 : 200);
       }
       return respond({ success: true, data: {} });
     }),
@@ -428,5 +445,112 @@ describe('Console Packages page — a delete there stays on the page (objectui#1
     expect(screen.getByTestId('path').textContent).toBe(START);
     expect(screen.queryByTestId('studio-landing')).toBeNull();
     expect(screen.queryByTestId('elsewhere')).toBeNull();
+  });
+});
+
+describe('PackageDetailSheet — the Delete dialog states what goes (objectstack#31025)', () => {
+  /** The export door's answer for a package with two objects and other items. */
+  const EXPORT = {
+    success: true,
+    data: {
+      id: PKG_ID,
+      name: PKG_ID,
+      version: '1.0.0',
+      objects: [
+        { name: 'acme_lead', label: 'Lead', fields: {} },
+        { name: 'acme_deal', label: 'Deal', fields: {} },
+      ],
+      views: [{ name: 'acme_lead_list' }],
+      viewItems: [{ name: 'acme_deal_board' }],
+      dashboards: [{ name: 'acme_home' }],
+      flows: [{ name: 'acme_assign' }, { name: 'acme_notify' }],
+      objectExtensions: [{ extend: 'sys_user' }],
+      withheldMaps: [{ type: 'connector', name: 'acme_api', path: 'providerConfig.headers' }],
+    },
+  };
+  const TOTALS: Record<string, number | undefined> = { acme_lead: 1234, acme_deal: 1 };
+
+  beforeEach(() => {
+    exportAnswer = EXPORT;
+    adapter = { find: vi.fn(async (name: string) => ({ data: [], total: TOTALS[name] })) };
+  });
+
+  it('lists each object with the rows the data list counts, and other items by type', async () => {
+    renderSheet();
+    const dialog = await openDeleteDialog();
+    const lead = await within(dialog).findByTestId('pkg-detail-delete-object-acme_lead');
+    await waitFor(() => expect(lead).toHaveTextContent('1234 records'));
+    expect(lead).toHaveTextContent('Lead');
+    expect(within(dialog).getByTestId('pkg-detail-delete-object-acme_deal')).toHaveTextContent('1 record');
+    // Each count is the data list asked for no rows, by object name.
+    expect(adapter!.find.mock.calls.map((c) => c.slice(0, 2))).toEqual([
+      ['acme_lead', { $top: 0 }],
+      ['acme_deal', { $top: 0 }],
+    ]);
+    // Counted by type: `views` and `viewItems` are both views.
+    expect(within(dialog).getByTestId('pkg-detail-delete-type-view')).toHaveTextContent('2');
+    expect(within(dialog).getByTestId('pkg-detail-delete-type-dashboard')).toHaveTextContent('1');
+    expect(within(dialog).getByTestId('pkg-detail-delete-type-flow')).toHaveTextContent('2');
+    expect(within(dialog).getByTestId('pkg-detail-delete-type-object_extension')).toHaveTextContent('1');
+    // The withheld-map positions are not items of the package.
+    expect(within(dialog).queryByTestId('pkg-detail-delete-type-withheldMaps')).toBeNull();
+    // The pending drafts the sheet read go too.
+    expect(within(dialog).getByTestId('pkg-detail-delete-drafts')).toHaveTextContent('2 unpublished drafts');
+    // Reading what goes writes nothing.
+    expect(writes()).toEqual([]);
+  });
+
+  it('states the permanent drop only once the author chooses to drop the data', async () => {
+    renderSheet();
+    const dialog = await openDeleteDialog();
+    await within(dialog).findByTestId('pkg-detail-delete-object-acme_lead');
+    expect(within(dialog).queryByTestId('pkg-detail-delete-permanent')).toBeNull();
+    fireEvent.click(within(dialog).getByTestId('pkg-detail-delete-mode-structure'));
+    expect(within(dialog).queryByTestId('pkg-detail-delete-permanent')).toBeNull();
+    fireEvent.click(within(dialog).getByTestId('pkg-detail-delete-mode-all'));
+    expect(within(dialog).getByTestId('pkg-detail-delete-permanent')).toHaveTextContent(
+      'Dropped tables do not go to the recycle bin',
+    );
+    fireEvent.click(within(dialog).getByTestId('pkg-detail-delete-mode-structure'));
+    expect(within(dialog).queryByTestId('pkg-detail-delete-permanent')).toBeNull();
+  });
+
+  it('a package with no object drops no table, so the permanent line is not drawn', async () => {
+    exportAnswer = { success: true, data: { id: PKG_ID, name: PKG_ID, version: '1.0.0', flows: [{ name: 'f' }] } };
+    renderSheet();
+    const dialog = await openDeleteDialog();
+    await within(dialog).findByTestId('pkg-detail-delete-type-flow');
+    fireEvent.click(within(dialog).getByTestId('pkg-detail-delete-mode-all'));
+    expect(within(dialog).queryByTestId('pkg-detail-delete-permanent')).toBeNull();
+  });
+
+  it('a count the data list does not answer is unknown, never 0', async () => {
+    adapter = { find: vi.fn(async (name: string) => (name === 'acme_lead' ? { data: [] } : Promise.reject(new Error('x')))) };
+    renderSheet();
+    const dialog = await openDeleteDialog();
+    const lead = await within(dialog).findByTestId('pkg-detail-delete-object-acme_lead');
+    await waitFor(() => expect(lead).toHaveTextContent('Record count unavailable'));
+    await waitFor(() =>
+      expect(within(dialog).getByTestId('pkg-detail-delete-object-acme_deal')).toHaveTextContent(
+        'Record count unavailable',
+      ),
+    );
+    expect(lead).not.toHaveTextContent(/\b0 records/);
+  });
+
+  it('an export the server refuses is said, and the delete can still be confirmed', async () => {
+    exportAnswer = { success: false, error: { code: 'INTERNAL_ERROR', message: 'boom' } };
+    renderSheet();
+    const dialog = await openDeleteDialog();
+    await within(dialog).findByTestId('pkg-detail-delete-contents-failed');
+    fireEvent.click(within(dialog).getByTestId('pkg-detail-delete-mode-all'));
+    // Not known to hold no object, so the permanent line stands.
+    expect(within(dialog).getByTestId('pkg-detail-delete-permanent')).toBeInTheDocument();
+    fireEvent.change(within(dialog).getByTestId('pkg-detail-delete-name-input'), {
+      target: { value: PKG_NAME },
+    });
+    fireEvent.click(within(dialog).getByTestId('pkg-detail-delete-confirm'));
+    await waitFor(() => expect(deletes()).toHaveLength(1));
+    expect(deletes()[0].url).toBe(`/api/v1/packages/${PKG_ID}`);
   });
 });
