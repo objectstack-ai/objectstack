@@ -375,7 +375,8 @@ describe('os dev MCP connect hint — origin (#16734)', () => {
       // The name used to be the folder `os dev` ran in, so a `hotcrm/` checkout
       // registered the server as `hotcrm` while the skill said `objectstack`.
       expect(DEV_SOURCE).toContain("import { OBJECTSTACK_MCP_SERVER_NAME } from '@objectstack/mcp';");
-      expect(DEV_SOURCE).toContain('claude mcp add --transport http ${OBJECTSTACK_MCP_SERVER_NAME} ');
+      // The line is `os mcp connect`'s builder, fed that constant: one spelling for both commands.
+      expect(DEV_SOURCE).toContain('claudeMcpAddLine(OBJECTSTACK_MCP_SERVER_NAME, ');
       expect(DEV_SOURCE).not.toMatch(/basename\(process\.cwd\(\)\)/);
     });
   });
