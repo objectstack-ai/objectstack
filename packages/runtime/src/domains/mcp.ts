@@ -17,6 +17,7 @@ import {
     FEDERATION_READ_CAPABILITY,
     FEDERATION_WRITE_CAPABILITY,
     federationCapabilityRefusal,
+    projectMetaActionForCaller,
     type FederationCallKind,
 } from '@objectstack/rest';
 // [ADR-0131 D3 · D12 items 7–8 · D11] The walled refusal every door that writes
@@ -700,19 +701,35 @@ export function buildMcpBridge(deps: DomainHandlerDeps, context: HttpProtocolCon
     /**
      * [ADR-0106 D1] The object one action is summarised against, as THIS
      * caller is served it — or `undefined` when the `/meta` object door's
-     * projection withholds the action from this caller. The action is
-     * projected as its object's only `actions` entry ({@link servedToCaller}),
-     * the position where that projection drops an action reading a field the
-     * caller cannot read: a param's `field` (one under `objectOverride` judged
-     * on the object it names), or any other position of the action. So one
-     * rule decides on both doors, and the object handed back is the projected
-     * one, which carries no field the caller cannot read. An action with no
-     * object definition carries no field of one, and is answered as declared.
+     * projection withholds the action from this caller. The decision is
+     * `projectMetaActionForCaller` (`@objectstack/rest`), the one the `/meta`
+     * action list and item read ask, over the same masker: the action is
+     * projected as its object's only `actions` entry, the position where that
+     * projection drops an action reading a field the caller cannot read — a
+     * param's `field` (one under `objectOverride` judged on the object it
+     * names), or any other position of the action. An action with no object
+     * definition (an object-less one) carries no field of its own object, and
+     * each of its `objectOverride` params is judged on the object it names.
+     * The object handed back is the projected one where it was projected, so it
+     * carries no field the caller cannot read; a projection that cannot be
+     * evaluated is refused with the door's code ({@link fieldVisibilityRefusal}).
      */
-    const servedActionObject = async (action: any, obj: any): Promise<{ obj: any } | undefined> => {
-        if (!obj || typeof obj !== 'object') return { obj };
-        const served = await servedToCaller({ ...obj, actions: [action] });
-        return Array.isArray(served?.actions) && served.actions.length === 1 ? { obj: served } : undefined;
+    const servedActionObject = async (
+        action: any,
+        objectName: string,
+        obj: any,
+        objects: ReadonlyMap<string, any>,
+    ): Promise<{ obj: any } | undefined> => {
+        const ownerName = obj && typeof obj === 'object'
+            ? objectName
+            : (actionExec.isObjectLessActionKey(objectName) ? undefined : objectName);
+        const projected = await projectMetaActionForCaller({
+            masker: async (name) => (await (masker ??= resolveObjectMasker(deps, context, 'object')))(name),
+            readObject: async (name) => (name === objectName && obj ? obj : objects.get(name)),
+        }, action, ownerName);
+        if (projected.kind === 'fault') throw fieldVisibilityRefusal(projected.object);
+        if (projected.kind === 'withhold') return undefined;
+        return { obj: projected.object ?? obj };
     };
 
     /** {@link readServedObject}, as this caller is served it ({@link servedToCaller}). */
@@ -937,8 +954,13 @@ export function buildMcpBridge(deps: DomainHandlerDeps, context: HttpProtocolCon
                 await deps.getObjectQL(context, envId).catch(() => undefined),
             );
             const out: any[] = [];
+            const servedObjects = await readServedObjects();
+            // [ADR-0106 D1] The objects an action's `objectOverride` params
+            // name, by name: judged and summarised on the object each names.
+            const objectsByName = new Map<string, any>();
+            for (const o of servedObjects) if (typeof o?.name === 'string') objectsByName.set(o.name, o);
             const declarations = await actionExec.collectActionDeclarations(
-                deps, meta, await readServedObjects(), await readServedActions(),
+                deps, meta, servedObjects, await readServedActions(),
             );
             for (const { action, objectName, obj } of declarations) {
                 if (!objectName) continue;
@@ -984,10 +1006,13 @@ export function buildMcpBridge(deps: DomainHandlerDeps, context: HttpProtocolCon
                 const refusal = actionExec.apiForwardCredentialRefusal(context, action);
                 // [ADR-0106 D1] Summarised against the object as this caller is
                 // served it, and not listed where `/meta` withholds it.
-                const served = await servedActionObject(action, obj);
+                const served = await servedActionObject(action, objectName, obj, objectsByName);
                 if (!served) continue;
                 out.push({
-                    ...actionExec.summarizeAction(deps, action, served.obj, objectName, flow ?? undefined),
+                    ...actionExec.summarizeAction(
+                        deps, action, served.obj, objectName, flow ?? undefined,
+                        (name) => (name === objectName ? served.obj : objectsByName.get(name)),
+                    ),
                     ...(refusal ? { unavailable: { code: refusal.code, reason: refusal.message } } : {}),
                 });
             }

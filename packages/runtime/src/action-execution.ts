@@ -2940,7 +2940,9 @@ export function actionConfirmationRefusal(
     };
 }
 
-export function summarizeAction(deps: ActionExecutionDeps, action: any, obj: any, objectName: string, flow?: any): any {
+export function summarizeAction(
+    deps: ActionExecutionDeps, action: any, obj: any, objectName: string, flow?: any, objectOf?: ActionParamObjectLookup,
+): any {
     // [#15079] `operation` before `type`, on the LISTING face. A declarative
     // update always requires a current record — that is contract point 7, and
     // the executor refuses without one — so the answer cannot be left to
@@ -2958,7 +2960,7 @@ export function summarizeAction(deps: ActionExecutionDeps, action: any, obj: any
     const description =
         (typeof action?.ai?.description === 'string' ? action.ai.description : undefined) ??
         (typeof action?.label === 'string' ? action.label : undefined);
-    const params = summarizeActionParams(deps, action, obj, flow);
+    const params = summarizeActionParams(deps, action, obj, flow, objectOf);
     return {
         name: action.name,
         objectName,
@@ -2994,12 +2996,38 @@ export function jsonTypeOf(_deps: ActionExecutionDeps, t: string | undefined): '
     }
 }
 
-export function summarizeActionParams(deps: ActionExecutionDeps, action: any, obj: any, flow?: any): any[] {
-    const fields: Record<string, any> = obj?.fields ?? {};
+/**
+ * Resolves an object definition by name — the objects an action's
+ * `objectOverride` params name. `undefined` when there is no such object.
+ */
+export type ActionParamObjectLookup = (objectName: string) => any;
+
+/**
+ * [ADR-0106 D1 · ADR-0104 D2] The field one declared param binds: its `field`
+ * on the object the param names — the `objectOverride` object when one is
+ * named and `objectOf` resolves it, otherwise the action's own `obj`. A param
+ * whose `objectOverride` names an object `objectOf` does not resolve (or a
+ * call with no `objectOf`) keeps the own object's same-named field, the
+ * reading every caller had before the override was honoured here.
+ */
+function boundParamField(p: any, obj: any, objectOf?: ActionParamObjectLookup): any {
+    const fieldRef: unknown = p?.field;
+    if (typeof fieldRef !== 'string' || fieldRef === '') return undefined;
+    const override: unknown = p?.objectOverride;
+    if (typeof override === 'string' && override !== '' && objectOf) {
+        const target = objectOf(override);
+        if (target && typeof target === 'object') return target.fields?.[fieldRef];
+    }
+    return obj?.fields?.[fieldRef];
+}
+
+export function summarizeActionParams(
+    deps: ActionExecutionDeps, action: any, obj: any, flow?: any, objectOf?: ActionParamObjectLookup,
+): any[] {
     const out: any[] = [];
     for (const p of (Array.isArray(action?.params) ? action.params : [])) {
         const fieldRef: string | undefined = p?.field;
-        const field = fieldRef ? fields[fieldRef] : undefined;
+        const field = boundParamField(p, obj, objectOf);
         const name: string | undefined = p?.name ?? fieldRef;
         if (!name) continue;
         const type = jsonTypeOf(deps, p?.type ?? field?.type);
@@ -3112,7 +3140,10 @@ function collectScreenFieldSpecs(flow: any): Map<string, any> {
  * options/required from the referenced object field; an inline param
  * carries them directly (inline overrides win). `obj` is the action's
  * parent object schema (holds `.fields`); pass `undefined` for a global
- * action with only inline params.
+ * action with only inline params. A param bound through `objectOverride`
+ * inherits from that object's field when `objectOf` resolves it
+ * ({@link boundParamField}); without `objectOf` — the run doors' call through
+ * {@link enforceActionParams} — it reads the own object's same-named field.
  *
  * ⛔ [#18199] THE `multiple` READ BELOW IS NOT THE MULTI-VALUE QUESTION — do not
  * "align" it on `isMultiValueField` because it matched a grep for
@@ -3130,12 +3161,13 @@ function collectScreenFieldSpecs(flow: any): Map<string, any> {
  * would stop carrying what the author wrote, and the predicate would then be
  * applied to its own output.
  */
-export function resolveDeclaredActionParams(_deps: ActionExecutionDeps, action: any, obj: any): ResolvedActionParam[] {
-    const fields: Record<string, any> = obj?.fields ?? {};
+export function resolveDeclaredActionParams(
+    _deps: ActionExecutionDeps, action: any, obj: any, objectOf?: ActionParamObjectLookup,
+): ResolvedActionParam[] {
     const out: ResolvedActionParam[] = [];
     for (const p of (Array.isArray(action?.params) ? action.params : [])) {
         const fieldRef: string | undefined = p?.field;
-        const field = fieldRef ? fields[fieldRef] : undefined;
+        const field = boundParamField(p, obj, objectOf);
         const name: string | undefined = p?.name ?? fieldRef;
         if (!name) continue;
         out.push({

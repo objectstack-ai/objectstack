@@ -763,6 +763,8 @@ async function answerMetaItem(
         // [#22250] `runtimeDocument` — the caller's runtime view, which `sortability` derives from.
         translateEnvelope: (itemEnvelope, document, runtimeDocument) =>
             translateMetaEnvelope(translation, request.metaType, itemEnvelope, document, runtimeDocument),
+        // [ADR-0106 D1] The `action` item step's masker, the list chain's own.
+        resolveObjectMasker: () => resolveObjectMasker(deps, context, 'object'),
     };
     let answer: MetaItemAnswer;
     try {

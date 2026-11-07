@@ -4304,6 +4304,8 @@ export class RestServer {
                     undefined,
                     runtimeDocument,
                 ),
+            // [ADR-0106 D1] The `action` item step's masker, the list chain's own.
+            resolveObjectMasker: () => this.resolveObjectMasker(environmentId, req, 'object'),
         };
     }
 
