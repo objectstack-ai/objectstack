@@ -1996,6 +1996,20 @@ function templateFace({ face: faceId, paths }) {
   return { face, scopeHits: undefined };
 }
 
+/**
+ * The grades every at-tier ④ judgment closes with, on every face that carries ④ (the owner's
+ * order of 2026-11-07): a nit has no effect on correctness or the contract, only a must-fix or
+ * should-fix earns a delta review, and a nit is never fixed in a commit that moves a reviewed file —
+ * the queue guard carries a record only over a pure-regeneration or prose-only hop.
+ */
+const BRIEF_GRADE_LINES = Object.freeze([
+  '     Grade each finding must-fix, should-fix or nit — a nit has no effect on correctness or the contract.',
+  '     A must-fix is a FAIL; a must-fix or should-fix earns a delta review of its fix; nits alone end the round.',
+  '     A nit is fixed only on the prose faces, or left as an accepted deviation or a follow-up card: a fix',
+  '     anywhere else moves the head, and this record no longer covers it.',
+  "     ⛔ Judge the tree, never the PR body's account of it.",
+]);
+
 /** Where the brief's copyable region starts and ends. */
 export const BRIEF_TEMPLATE_FENCE_START = '----- copy from here; replace every placeholder -----';
 export const BRIEF_TEMPLATE_FENCE_END = '----- to here -----';
@@ -2054,8 +2068,9 @@ export const BRIEF_TEMPLATE_PLACEHOLDERS = Object.freeze({
  * letter A): no `hits`, so the judgment is of the narrowing itself against the published spec on
  * `main` — a declared capability taken away at the consumer, or the spec's own refusal made real —
  * over the whole-diff floor; lockfiles, generated output, changesets and prose elsewhere are not
- * reviewed there either. ⛔ The 2026-11-07 order left the narrowing face's words as ruled: no
- * implementing-file rule (its floor is already the whole diff) and its two grades.
+ * reviewed there either. The 2026-11-07 order left the narrowing face's ruled floor and ④ shape as
+ * they were (no implementing-file rule: its floor is already the whole diff); it grades on the same
+ * three-grade scale as every face (`BRIEF_GRADE_LINES`), since the rule grades every finding once.
  */
 export function contractReviewBriefLines(values = {}) {
   const { pr, card, headSha, scratchpad } = { ...BRIEF_TEMPLATE_PLACEHOLDERS, ...values };
@@ -2093,6 +2108,8 @@ export function contractReviewBriefLines(values = {}) {
   return [
     'record-recognisers --brief-template — the brief a seat hands its contract reviewer, copyable. The',
     "read-only shape is built in: keep every ⛔ line, they are the review's shape and not advice to it.",
+    "A card thread handing it to its isolated sub-agent posts the filled brief beside the record, for the seat to",
+    'read before it adopts the record (`references/contract-review.md`).',
     '',
     BRIEF_TEMPLATE_FENCE_START,
     `## Contract review brief — PR #${pr} @ \`${headSha}\` (card #${card})`,
@@ -2121,17 +2138,16 @@ export function contractReviewBriefLines(values = {}) {
       '  ④ Design judgment — the narrowing itself, read against the published spec on `main`: does it take a',
       "     declared capability away at the consumer, or make the spec's own refusal real? A capability declared",
       '     and not delivered is an implementation gap, implemented or retired, ⛔ never narrowed at the consumer.',
-      '     Read the spec and the cited code in the live tree, and try to break the design; name each finding',
-      "     must-fix or should-fix. A must-fix is a FAIL. ⛔ Judge the tree, never the PR body's account of it.",
+      '     Read the spec and the cited code in the live tree, and try to break the design.',
+      ...BRIEF_GRADE_LINES,
     ] : designJudgment ? [
       '  ④ Design judgment — for EVERY `hits` file: does the change hold against the code it cites and the',
       "     scenario it is accepted against? A skill file against the card's eval prompt and the spec it teaches",
       '     on `main`; a schema file against the ruling or ADR it implements and its first consumer; an ADR',
       '     against its first consumer and its execution plan. For EVERY implementing file in the diff: does the',
       '     code agree with the contract, sentence by sentence? Read the cited code in the live tree, and try to',
-      '     break the design; grade each finding must-fix, should-fix or nit — a nit has no effect on correctness',
-      '     or the contract. A must-fix is a FAIL; a must-fix or should-fix earns a delta review of its fix; nits',
-      "     alone end the round. ⛔ Judge the tree, never the PR body's account of it.",
+      '     break the design.',
+      ...BRIEF_GRADE_LINES,
     ] : []),
     "Sign `Implemented-by:` with the dev's branch and `Reviewed-by:` with your session id — the value is the FIRST",
     'thing after each colon.',
@@ -2285,7 +2301,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '#18042: the copyable record TEMPLATE — the one machine-read artefact with nothing to copy': 30,
   '#18701: ONE thread set -- what the template STATES is what the queue guard READS': 17,
   'the `Local-runs:` reading — `none` or ONE named probe, judged when present; an absent line is not re-judged': 12,
-  'the reviewer BRIEF template — the read-only shape a hand-written brief dropped, built in and printed': 21,
+  'the reviewer BRIEF template — the read-only shape a hand-written brief dropped, built in and printed': 23,
   '⭐ B′ with C: the review tier FOLLOWS THE FACE that made it owed — exact, never a floor': 23,
   '⭐ B′ with C: a PROSE-ONLY head move keeps the record, decided on the COMMITTED trees like a regeneration': 6,
   '⭐ letter C: the at-tier review of a mixed diff is SCOPED — `hits` plus what they claim, on the `Scope:` line': 19,
@@ -2317,7 +2333,8 @@ const SELF_TEST_BATTERIES = Object.freeze({
 // face (ruling record 6442046166, letter A) flipped three pins and added one to each: 28 → 29 and 17 → 18.
 // The owner's 2026-11-07 order (implementing files in the diff reviewed, nit as a third grade) added one
 // template pin (29 → 30), three brief pins (18 → 21: the nit grade, the implementing-file ④ line, the
-// narrowing brief left as ruled) and one scope pin (18 → 19: the named remainder).
+// narrowing brief left as ruled) and one scope pin (18 → 19: the named remainder). One grade scale on every ④
+// face, the nit's allowed fixes and the posted brief turned the narrowing pin and added two brief pins (21 → 23).
 // Raised 12 → 13 with the hand-off battery (the maintainer's exhausted-tier rule): one battery, one row.
 // Raised 13 → 14 with the mailbox doorbell battery (the maintainer's per-seat mailbox and its closed
 // vocabulary): one battery, one row.
@@ -3115,7 +3132,9 @@ export async function selfTest() {
   t('…and the surface-file scope rule: ④ judges the `hits` files and the implementing files ONLY; lockfiles, generated output, changesets and prose elsewhere are not reviewed; code outside the diff is READ, never reviewed', ['④ judges the `hits` files and those implementing files ONLY', 'lockfiles, generated output, changesets and prose', 'not reviewed', 'READ to judge them, never reviewed'].every((frag) => says(BRIEF_BODY, frag)));
   t('…on the schema, rules and narrowing faces and over a mixed path list alike', ['schema', 'rules', 'narrowing'].every((id) => contractReviewBriefLines({ face: id }).join('\n').includes('④ Design judgment')) && contractReviewBriefLines({ paths: MIXED }).join('\n').includes('④ judges the `hits` files and those implementing files ONLY'));
   t('⭐ the narrowing brief carries ④ in the narrowing\'s own shape — the narrowing itself against the published spec on `main`, over the whole-diff floor, no `hits`-ONLY rule', (() => { const b = contractReviewBriefLines({ face: 'narrowing' }).join('\n'); return ['④ Design judgment — the narrowing itself, read against the published spec on `main`', 'declared capability away at the consumer', "spec's own refusal real", '⛔ never narrowed at the consumer', '④ judges the narrowing itself over that floor', 'A must-fix is a FAIL', 'Judge the tree'].every((frag) => says(b, frag)) && !b.includes('files ONLY') && !b.includes('<') && !b.includes('>') && !isModelIdentifierToken(b); })());
-  t('⛔ …and keeps its ruled words untouched: two grades, no nit, no implementing-file rule (ruling record 6442046166 left as is)', (() => { const b = contractReviewBriefLines({ face: 'narrowing' }).join('\n'); return says(b, 'name each finding') && says(b, 'must-fix or should-fix. A must-fix is a FAIL.') && !says(b, 'or nit') && !says(b, 'implementing file') && says(b, 'plus every file those hunks make a claim about'); })());
+  t('⭐ …keeps its ruled ④ shape and floor, and grades on the SAME three-grade scale as every other face — one scale per rule', (() => { const b = contractReviewBriefLines({ face: 'narrowing' }).join('\n'); return says(b, 'Read the spec and the cited code in the live tree, and try to break the design.') && BRIEF_GRADE_LINES.every((line) => b.includes(line)) && !says(b, 'name each finding') && !says(b, 'implementing file') && says(b, 'plus every file those hunks make a claim about'); })());
+  t('⭐ every ④ face tells the reviewer where a nit may be fixed — the prose faces, or left as an accepted deviation or a follow-up — since a fix elsewhere moves the head', ['schema', 'rules', 'narrowing'].every((id) => { const b = contractReviewBriefLines({ face: id }).join('\n'); return says(b, 'A nit is fixed only on the prose faces, or left as an accepted deviation or a follow-up card') && says(b, 'moves the head, and this record no longer covers it'); }) && !says(contractReviewBriefLines({ face: 'declaration' }).join('\n'), 'A nit is fixed'));
+  t('⭐ the brief tells a card thread to post the filled brief beside the record, for the seat to read before adopting', says(BRIEF_TEXT, 'posts the filled brief beside the record') && !says(BRIEF_BODY, 'posts the filled brief'));
   t('…and the `hits` faces keep the per-file ④ shape, never the narrowing\'s', ['schema', 'rules'].every((id) => { const b = contractReviewBriefLines({ face: id }).join('\n'); return says(b, 'for EVERY `hits` file') && !says(b, 'the narrowing itself'); }) && !says(BRIEF_BODY, 'the narrowing itself'));
   t('⛔ nor the declaration brief, below tier', !contractReviewBriefLines({ face: 'declaration' }).join('\n').includes('④'));
   t('⛔ the ④ text keeps the brief free of angle brackets, model identifiers and digit-shaped card numbers', !BRIEF_TEXT.includes('<') && !BRIEF_TEXT.includes('>') && !isModelIdentifierToken(BRIEF_TEXT) && !/#\d/.test(BRIEF_BODY));

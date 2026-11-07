@@ -33,7 +33,6 @@
 - 同形 = `## Contract review` 题头之下 `Head-sha:` 行独占码段、①②③逐项、独立性对、PASS/FAIL。
 - 同形含首行 `Served-tier:`:值写该面所定档的常量名 `CONTRACT_REVIEW_TIER` 或 `TIER_DEFAULT`;
   无此行不成裁决;模板 `node scripts/pm/record-recognisers.mjs --template`,申报面加 `--face declaration`。
-- 同形带 `Local-runs:` 行:`none` 或 `probe — REASON` 具名唯一探针;有行必校,缺行旧记录不改判。
 - ④ 设计判断欠 schema、governed 规则文本、收窄三面,spec、skills、ADR 皆已在内 ⛔ 不另立面:
   逐 `hits` 文件判改动对所引代码与验收场景是否成立,ADR 另判首个消费者与执行计划;
   实现文件审合契约、diff 外只读;①–④ 合称完整复核,余面同形无 ④,⛔ 无第二条记录。
@@ -43,7 +42,8 @@
 - 简报从 `record-recognisers.mjs --brief-template` 起稿:只读条款与输入集内建,⛔ 不删 ⛔ 行。
 - 独立性对:`Implemented-by:`/`Reviewed-by:` 取值同见 `--template`;子代理记采纳它的席位。
 - ④ 恒由起草者之外的 agent 达档跑,起草已达档不免;喂入同上,⛔ 不喂起草者的结论。
-- 卡线程隔离子代理照上落现 head 记录 ⇒ 派发席核 `Scope:` 与独立性对后采纳,只补未盖处。
+- 卡线程隔离子代理照上落现 head 记录并贴简报 ⇒ 席核简报、`Scope:` 与独立性对后采纳,
+  ACCEPT 点名其评论 id;`Scope:` 窄于 `hits` 不采纳;席的补缺记录只管缺口,⛔ 不单充 head 记录。
 - 轮次报告设复审清单专节,与呈裁清单同为强制审计。
 - 请审/求批与落地前检两条,过则 Tier S 入队、Tier H 等人批:① 现 head 同形达档 PASS 在案。
 - head 后移例外:纯重生成或只动散文面原记录续管,落 `Regen-provenance:` 行;余移或现 head 落 FAIL
