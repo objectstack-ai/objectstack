@@ -1892,10 +1892,13 @@ export class HonoHttpServer implements IHttpServer {
      *   handed to the socket — and no other response on that connection is
      *   pending. `destroySoon()` flushes what is queued before it closes.
      *
-     * ⛔ Never the server-wide `closeIdleConnections()` from here: Node counts
-     * a response as done once it has called `end()`, before its bytes are
-     * flushed, so a sweep when one response ends destroys any other connection
-     * whose response is ended but still flushing to a slow reader.
+     * ⛔ Never Node's own server-wide sweep from here: Node counts a response
+     * as done once it has called `end()`, before its bytes are flushed, so a
+     * sweep when one response ends destroys any other connection whose
+     * response is ended but still flushing to a slow reader. The only sweep
+     * run here is one `close()` asked for and
+     * {@link closeIdleConnectionsOnceFlushed} held back, and it still runs only
+     * once no response is flushing.
      *
      * A connection's entry is dropped when the connection closes, not only
      * when each response does: a response pipelined behind another never gets
@@ -1974,10 +1977,11 @@ export class HonoHttpServer implements IHttpServer {
         // requests finish rather than force-killing them mid-response.
         // `closeIdleConnections()` releases idle keep-alive sockets so the process
         // can exit promptly, once no ended response is still flushing
-        // (`closeIdleConnectionsOnceFlushed`); active requests keep running until they complete or
-        // the drain window elapses, and each one's connection closes as soon as
-        // its response ends (`trackForDrain`), so the drain finishes with the
-        // last in-flight request rather than a keep-alive window after it.
+        // (`closeIdleConnectionsOnceFlushed`); active requests keep running
+        // until they complete or the drain window elapses, and each one's
+        // connection closes as soon as its response ends (`trackForDrain`), so
+        // the drain finishes with the last in-flight request rather than a
+        // keep-alive window after it.
         this.draining = true;
         for (const owed of this.inFlightResponses.values()) {
             for (const res of owed) {
