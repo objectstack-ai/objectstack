@@ -30,6 +30,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 
+// The page reaches both through a dynamic `import()`; loaded here so the first
+// load is paid at collection, never inside a clocked case.
+import '@objectstack/formula';
+import '@objectstack/lint';
 import { PackageDetailSheet, PackagesPage, type InstalledPackageRow } from './PackagesPage';
 
 /**
