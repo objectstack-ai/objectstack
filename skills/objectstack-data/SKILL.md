@@ -202,7 +202,7 @@ export const Invoice = ObjectSchema.create({
   set → field permission `when`, rules/security.md).
 - **`readonly: true` governs the end-user surface, not trusted system writers.**
   A non-system write (REST/UI, and any `runAs:'user'` flow — the default) has
-  the field **stripped** from any non-system write; the write reports
+  the field **stripped**; the write reports
   success but the value never lands. System-context writes —
   `runAs:'system'` flows, system hooks, seeds, imports, migrations — are exempt
   and DO write it. So the pattern "users can't edit this, but automation
@@ -447,13 +447,15 @@ os validate     # Zod schema + CEL predicates (record.<field> existence) + bindi
 # or: os build  # the same gates, plus emits dist/
 ```
 
-It catches what otherwise fails **silently at runtime**: a bare field ref in a
-`requiredWhen` / `readonlyWhen` / `visibleWhen`, a validation rule, a formula, or
-a row-level-security/sharing predicate (`done` instead of `record.done`) that
-evaluates to `null` and never fires. `os lint` is a *separate*
+It catches what otherwise surfaces only at runtime, where a bare field ref
+(`done` for `record.done`) faults: an `error` validation rule or `requiredWhen`
+refuses the write naming it, an option `visibleWhen` only a write picking the
+option (forms still offer it); a `readonlyWhen` field stays editable and the
+save succeeds without its change (logged); a formula reads `null` (logged).
+`os lint` is a *separate*
 pass that additionally checks the data model against the conventions in this
-skill (relationships, master-detail, roll-ups) — run it too, but it does **not**
-replace `os validate`. In a scaffolded project the gate is `npm run validate`.
+skill (relationships, master-detail, roll-ups) — run it too.
+In a scaffolded project the gate is `npm run validate`.
 
 ---
 
