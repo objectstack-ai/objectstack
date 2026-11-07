@@ -36,6 +36,7 @@ import '@objectstack/runtime';
 import { MarketplaceInstallLocalPlugin } from './marketplace-install-local-plugin.js';
 import { declareInstallerPlatformOwner, installerAuthService, withInstallerGrants } from './install-local-principal.fixtures.js';
 import { LocalManifestSource } from './local-manifest-source.js';
+import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 
 const ROUTE = '/api/v1/marketplace/install-local';
 const INSTALLER = 'usr_installer';
@@ -566,4 +567,62 @@ describe('install-local — `targetNamespace` renames an unmanaged copy, and onl
             expect(h.ledgerHas('com.example.crm')).toBe(false);
         });
     }
+});
+
+describe('install-local — the import\'s own `targetNamespace` refusal, as the door answers it (#30794)', () => {
+    // The REAL copy-once import, not a double: the refusal is judged by its
+    // plan before the engine is asked anything, so an empty engine suffices.
+    const realImporter = () => {
+        const protocol = new ObjectStackProtocolImplementation({ registry: {} } as any, () => new Map()) as any;
+        return (request: any) => protocol.importUnmanagedPackage(request);
+    };
+
+    for (const [label, targetNamespace, sentence] of [
+        ['a value the namespace declaration refuses', 'Acme', "Invalid package namespace 'Acme' on `targetNamespace`"],
+        ['a platform-reserved namespace', 'sys', "`targetNamespace` 'sys' is a platform-reserved namespace"],
+    ] as const) {
+        it(`${label}: 400 INVALID_REQUEST, the reason in the body and \`details.targetNamespace\`; nothing written`, async () => {
+            const h = await mount(dir, { importer: realImporter() });
+            const res = await h.install({ manifest: crm({ installModes: BOTH }), installMode: 'unmanaged', targetNamespace });
+            expect(res.status, JSON.stringify(res.payload)).toBe(400);
+            expect(res.payload.error.code).toBe('INVALID_REQUEST');
+            expect(res.payload.error.message).toContain(sentence);
+            expect(res.payload.error.message).not.toContain('the reason is in the server log');
+            expect(res.payload.error.details).toEqual({ targetNamespace });
+            expect(h.register).not.toHaveBeenCalled();
+            expect(h.ledgerHas('com.example.crm')).toBe(false);
+        });
+    }
+});
+
+describe('install-local — Q6 after a RENAMED copy: the managed install is admitted; after an unrenamed one, refused (#30794)', () => {
+    // The ruling (record 6709037798, Q6 = B): a copy renamed into a namespace
+    // of its own does not hold the source namespace, so a later managed
+    // install of the same source package is not refused. A copy that kept the
+    // source namespace still holds it, and Q6 (step 1f) refuses as written.
+    const renamedCopyHeld: RegistryState = {
+        owners: { acme: ['com.example.crm-copy'] },
+        packages: { 'com.example.crm-copy': { manifest: { id: 'com.example.crm-copy', namespace: 'acme' } } },
+    };
+    const unrenamedCopyHeld: RegistryState = {
+        owners: { crm: ['com.example.crm-copy'] },
+        packages: { 'com.example.crm-copy': { manifest: { id: 'com.example.crm-copy', namespace: 'crm' } } },
+    };
+
+    it('beside a copy renamed to `acme`: the managed install of `com.example.crm` proceeds to its own steps', async () => {
+        const h = await mount(dir, { registry: renamedCopyHeld });
+        const res = await h.install({ manifest: crm({ installModes: BOTH }) });
+        expect(res.payload?.error?.code, JSON.stringify(res.payload)).not.toBe('RESOURCE_CONFLICT');
+        expect(h.register).toHaveBeenCalledTimes(1);
+    });
+
+    it('TWIN: beside a copy that kept `crm`, the same install is refused 409 RESOURCE_CONFLICT, before any write', async () => {
+        const h = await mount(dir, { registry: unrenamedCopyHeld });
+        const res = await h.install({ manifest: crm({ installModes: BOTH }) });
+        expect(res.status).toBe(409);
+        expect(res.payload.error.code).toBe('RESOURCE_CONFLICT');
+        expect(res.payload.error.details).toEqual({ namespace: 'crm', base: 'com.example.crm-copy' });
+        expect(h.register).not.toHaveBeenCalled();
+        expect(h.ledgerHas('com.example.crm')).toBe(false);
+    });
 });
