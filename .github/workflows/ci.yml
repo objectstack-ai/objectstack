@@ -522,6 +522,17 @@ jobs:
               # narrower audits entry is left as the package that declared it
               # spelled it, exactly as the two narrower `skills/` entries were.
               - 'docs/**'
+              # @objectstack/mcp's src/skill-md.test.ts imports the Console's
+              # "Download skill" mirror and pins it byte-identical to the
+              # SKILL.md the server renders (#31017) -- the server's half of the
+              # drift pin ui/apps/console/src/pages/developer/
+              # objectstack-skill.test.ts carries since #30865. That Console
+              # half runs only when Test UI starts, which a diff confined to
+              # packages/mcp never does; this half runs in Test Core on every
+              # packages/mcp change, `core` already starting it. Verbatim per
+              # the declaration, one file: a mirror-only diff starts Test Core
+              # here and `--union-into` adds @objectstack/mcp to it.
+              - 'ui/apps/console/src/pages/developer/objectstack-skill.ts'
             # The objectui tree, the root files the ui jobs build from, and the
             # five paths outside ui/ that the ui jobs' gates and tests read
             # (objectstack#25712):
