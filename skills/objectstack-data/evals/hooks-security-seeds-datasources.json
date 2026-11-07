@@ -90,6 +90,16 @@
         "must_contain": ["INVALID_FIELD", "is_not_null"],
         "must_not_contain": ["starts_with"]
       }
+    },
+    {
+      "id": 10,
+      "prompt": "An `account` whose `tax_id` appears in our `blocked_tax_id` object must not save, on create or edit. Our tax authority also offers a lookup API; can the same hook call it?",
+      "expected_output": "A `beforeInsert` / `beforeUpdate` hook on `account` with a sandboxed `body: { language: 'js', source, capabilities: ['api.read'] }`: the source returns when the write carries no `tax_id`, reads `ctx.api.object('blocked_tax_id').findOne({ where: { tax_id: ctx.input.tax_id } })` and throws when it finds a row. Not a validation rule (there is no `custom` / `async` type) and not the deprecated inline `handler`. The tax-authority API is not called from the hook: a `body` has no outbound HTTP, so that check goes through a Connector recipe.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["beforeInsert", "beforeUpdate", "language: 'js'", "'api.read'", "ctx.api.object("],
+        "must_not_contain": ["handler:", "HookContext", "'http.fetch'"]
+      }
     }
   ]
 }

@@ -20,7 +20,7 @@
 | `os compile` | Compile to portable JSON artifact (for runtime hydration) |
 | `os serve` | Serve a compiled stack in production mode |
 | `os start` | Quick-start a server: auto-compiles `objectstack.config.ts` when no artifact is present, and falls back to an empty kernel with the Console + marketplace when there is no config at all. It does **not** validate env or apply migrations — run `os validate` / `os migrate apply` yourself |
-| `os generate <kind>` | Scaffold an object / view / flow / agent from a template |
+| `os generate <kind>` | Scaffold an object / view / flow / skill from a template |
 
 ## Verify your work
 

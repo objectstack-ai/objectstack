@@ -123,7 +123,7 @@ Arming a red PR does not queue it, it hides it:
 
 ← [`AGENTS.md` › Multi-agent working discipline](../../AGENTS.md#multi-agent-working-discipline)
 
-A check outside those ten is advisory and rides through, and an advisory red
+A check outside those eleven is advisory and rides through, and an advisory red
    that lands rides `main`'s merge ref into every later PR until stanched.
 
 ## Two speeds: which runs carry which battery
@@ -134,9 +134,9 @@ A check outside those ten is advisory and rides through, and an advisory red
    of wall per queue entry (median, 2026-11-05); `main`'s scheduled (4-hourly) and push runs
    carry the full battery — dogfood, e2e, `Temporal Conformance (live PG + MySQL)` — read by the publish lane before
    any approval. Queue runs also carry the three `Dogfood Regression Gate` shards (ruling record
-   6663883327), so a dogfood red shows on the queue build, advisory only; `Dogfood Verify CLI`,
+   6663883327), so a dogfood red shows on the queue build; `Dogfood Verify CLI`,
    Temporal Conformance and `UI Published Artifacts` stay full-battery only. The `Dogfood Regression
-   Gate` context is outside the required set, so the queue does not hold an entry on it.
+   Gate` context is in the required set again (ruling record 6669982756), so a dogfood red ejects the entry.
 
 ## Re-arm awareness
 
