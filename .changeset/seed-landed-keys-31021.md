@@ -2,6 +2,9 @@
 '@objectstack/metadata-protocol': minor
 '@objectstack/runtime': minor
 '@objectstack/platform-objects': minor
+'@objectstack/spec': minor
+'@objectstack/cli': minor
+'@objectstack/plugin-audit': minor
 ---
 
 fix(metadata-protocol,runtime): a seed row a person deleted is no longer inserted again under a new id by the next seed replay
@@ -21,3 +24,5 @@ The seed loads AppPlugin runs now keep a per-organization record of which seed r
 The deliberate re-seed is the `seed-replayer` service called with `{ reseed: true }`. It inserts every missing row, including the ones a person removed, and records them again. A new database starts with an empty record. Deleting an organization deletes its record.
 
 `SeedLoaderService` takes the record through a new constructor option, `landedKeys: 'honour' | 'reseed'`. A caller that does not pass it neither reads nor writes the record, so the package publish, marketplace install, reseed and purge doors behave as before. A load keeps no record when it seeds no organization, and says so at `info`. It also keeps none when the composition does not register `sys_seed_landed_key`, and says so at `warn`. A record write that fails is reported once at `error`. It fails neither the rows nor the load, and the next load records every row that is still present.
+
+`PLATFORM_OBJECTS_BY_PACKAGE['platform-objects']` in `@objectstack/spec` lists the new object, and so do `PLATFORM_PROVIDED_OBJECT_NAMES` and `isPlatformProvidedObjectName`, so a stack that references `sys_seed_landed_key` resolves it instead of drawing the unknown-platform-name advisory. `@objectstack/plugin-audit` leaves `sys_seed_landed_key` out of `sys_audit_log` and `sys_activity`: recording which seed rows landed writes no ledger row of its own, and the seeded rows stay audited. `os migrate organization-ownership` inventories the new table as organization-owned rows (fate 3, attribution), each written with the organization its load seeds.
