@@ -33,6 +33,7 @@ import { serveStatic } from '@hono/node-server/serve-static';
 // the same drain, one different server factory. See {@link HttpsListenerMaterial}.
 import { createServer as createHttpsServer } from 'node:https';
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import type { Socket } from 'node:net';
 import { matchesRoutePattern } from './route-pattern';
 import { readRequestBody, type RequestBodyReading, type RequestBodyRefusal } from './request-body';
 // The ADR-0112 wire vocabulary, read as DATA rather than restated: `ErrorCode`
@@ -584,8 +585,13 @@ export class HonoHttpServer implements IHttpServer {
      * {@link trackForDrain}.
      */
     private draining = false;
-    /** Responses the listener is still writing, so {@link close} can reach the in-flight ones. */
-    private inFlightResponses = new Set<ServerResponse>();
+    /**
+     * The responses each open connection still owes, so {@link close} can reach
+     * the in-flight ones. Keyed by connection and dropped when the connection
+     * closes, so a response that will never be written (one pipelined behind
+     * another on a connection that died) is not held past its connection.
+     */
+    private inFlightResponses = new Map<Socket, Set<ServerResponse>>();
     /**
      * Every `(method, pattern)` pair registered through this server, kept so
      * the `notFound` handler can answer "the path exists but the method is
@@ -1842,8 +1848,8 @@ export class HonoHttpServer implements IHttpServer {
             this.server = server;
             // Prepended so it runs before the Hono listener can write a
             // synchronous response's headers.
-            server.prependListener('request', (_req: IncomingMessage, res: ServerResponse) => {
-                this.trackForDrain(server, res);
+            server.prependListener('request', (req: IncomingMessage, res: ServerResponse) => {
+                this.trackForDrain(req, res);
             });
             server.on('error', (err: any) => {
                 reject(err);
@@ -1867,19 +1873,40 @@ export class HonoHttpServer implements IHttpServer {
      *   `Connection: close`, and Node ends the socket once it is sent. The
      *   client is told, so it never reuses a socket that is about to close;
      * - a response that had already written its keep-alive headers when the
-     *   drain began releases its socket through `closeIdleConnections()` once
-     *   it has ended. That call skips any socket still writing a response.
+     *   drain began ends its OWN connection once it has finished — every byte
+     *   handed to the socket — and no other response on that connection is
+     *   pending. `destroySoon()` flushes what is queued before it closes.
      *
-     * Neither arm cuts a response short: both act only once it has ended.
+     * ⛔ Never the server-wide `closeIdleConnections()` from here: Node counts
+     * a response as done once it has called `end()`, before its bytes are
+     * flushed, so a sweep when one response ends destroys any other connection
+     * whose response is ended but still flushing to a slow reader.
+     *
+     * A connection's entry is dropped when the connection closes, not only
+     * when each response does: a response pipelined behind another never gets
+     * a socket if the connection dies first, and never emits `'close'`.
      */
-    private trackForDrain(server: any, res: ServerResponse) {
+    private trackForDrain(req: IncomingMessage, res: ServerResponse) {
         if (this.draining) res.shouldKeepAlive = false;
-        this.inFlightResponses.add(res);
-        const socket = res.socket;
+        // `req.socket`, not `res.socket`: a pipelined response waiting its turn
+        // has no socket yet.
+        const socket = req.socket;
+        let pending = this.inFlightResponses.get(socket);
+        if (!pending) {
+            const owed = new Set<ServerResponse>();
+            pending = owed;
+            this.inFlightResponses.set(socket, owed);
+            socket.once('close', () => {
+                if (this.inFlightResponses.get(socket) === owed) this.inFlightResponses.delete(socket);
+            });
+        }
+        const owed = pending;
+        owed.add(res);
         res.once('close', () => {
-            this.inFlightResponses.delete(res);
-            if (!this.draining || !socket || socket.destroyed || socket.writableEnded) return;
-            if (typeof server.closeIdleConnections === 'function') server.closeIdleConnections();
+            owed.delete(res);
+            if (!this.draining || owed.size > 0 || !res.writableFinished) return;
+            if (socket.destroyed || socket.writableEnded) return;
+            socket.destroySoon();
         });
     }
 
@@ -1903,8 +1930,10 @@ export class HonoHttpServer implements IHttpServer {
         // its response ends (`trackForDrain`), so the drain finishes with the
         // last in-flight request rather than a keep-alive window after it.
         this.draining = true;
-        for (const res of this.inFlightResponses) {
-            if (!res.headersSent) res.shouldKeepAlive = false;
+        for (const owed of this.inFlightResponses.values()) {
+            for (const res of owed) {
+                if (!res.headersSent) res.shouldKeepAlive = false;
+            }
         }
         await new Promise<void>((resolve) => {
             let settled = false;

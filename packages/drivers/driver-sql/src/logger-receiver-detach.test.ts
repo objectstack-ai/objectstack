@@ -522,10 +522,13 @@ describe('[#12792] ③ no detach-then-call shape survives in sql-driver.ts', () 
    * Readings: the slowest `Test Core` reading is 2499 ms (`main` push and merge
    * group runs, 2026-11-03..06, n=2); local idle, 442 and 469 ms.
    *
-   * The rule is 3x the slowest reading, rounded up to the next second (the rule
-   * and why 3x: plugin-sharing's `share-link-password-webcontainer.test.ts`):
-   * 3 x 2499 = 7497, so the budget is 8000. If the split adds modules,
-   * re-measure and re-size.
+   * The rule (plugin-sharing's `share-link-password-webcontainer.test.ts`):
+   * a case whose slowest reading is over half the default gets 3x that
+   * reading, rounded up to the next second. 2499 ms is 1 ms under that line,
+   * and it takes the budget anyway: the default leaves it 2.0x, barely above
+   * the 1.88x spread between two CI runs that the rule's 3x was sized on, from
+   * only two readings. 3 x 2499 = 7497, so the budget is 8000. If the split
+   * adds modules, re-measure and re-size.
    */
   const SCAN_BUDGET_MS = 8_000;
 
