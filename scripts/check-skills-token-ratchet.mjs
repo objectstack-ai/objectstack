@@ -1062,7 +1062,25 @@ export const CEILINGS = new Map([
   // the image pitfall row); the remainder, +179 measured, raises the row,
   // pinned at the measurement. Maintainer ruling 2026-10-27 on the decision card 「skills 修复卡的教学和 eval 都撞 token 天
   // 花板,怎么付?」, tap A, verbatim and untranslated: 「A:先削重复,余额按实测提高」.
-  ['skills/objectstack-platform/references/operations.md', 3287],
+  // 3287 -> 3341: `os environments use-runtime` (a self-hosted runtime as the
+  // deploy target: key tried first, `--no-verify`, kept in cloud.json across
+  // cloud login/logout, `--forget` / `os environments switch` back to the
+  // cloud), the self-hosted `os deploy` sequence and `--confirm-access-upgrade`,
+  // `os package install`'s fallback with no `-u`, and `os mcp connect`. Paid
+  // first by deleting restatement in the same file (-594 bytes): the `os dev`
+  // row's "idempotent, never overwrites" clause (home: the same row's "on an
+  // empty DB only"); Verify your work's bare-`field` sentence (home: its
+  // intro) and its `os lint` parenthesis (homes: the `os lint` row and the
+  // rule of thumb); the Production port row's list of what a shifted port
+  // breaks and "Don't rely on the 3000 default" (home: Production guidance);
+  // Testing's "a full bootstrap is cheap" (home: its intro); and two rows that
+  // misstated `os login` / `os register` (home: content/docs/deployment/cli.mdx
+  // § Authentication). 13140 -> 13362 bytes (+222 net: -594 cut, +816 added)
+  // -> ceil(13362 / 4) = 3341; headroom was 2 tokens, so the remainder, +54
+  // measured, raises the row, pinned at the measurement. Same maintainer
+  // ruling, verbatim and untranslated: 「A:先削重复,余额按实测提高」 (ruling
+  // record 6513306068 on #27847).
+  ['skills/objectstack-platform/references/operations.md', 3341],
   ['skills/objectstack-platform/references/plugin-development.md', 3137],
   ['skills/objectstack-upgrade/references/examples-upgrade.md', 1197],
 
