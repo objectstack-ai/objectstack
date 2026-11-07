@@ -54,8 +54,8 @@ objectstack.manifest.json — template / package source descriptor
 | **iconUrl** | `string` | optional |  |
 | **homepageUrl** | `string` | optional |  |
 | **license** | `string` | optional |  |
-| **publisher** | `Enum<'objectstack' \| 'partner' \| 'community' \| 'private'>` | optional | Package publisher provenance tier |
-| **isStarter** | `boolean` | optional |  |
+| **publisher** | `never` | optional | [REMOVED] `TemplateManifest.publisher` was removed in @objectstack/spec 18 (ADR-0049) — the platform assigns a package's publisher trust tier from the publisher's credentials, so a value written here never had an effect and `os package publish` never sent it. Delete the key. |
+| **isStarter** | `never` | optional | [REMOVED] `TemplateManifest.isStarter` was removed in @objectstack/spec 18 (ADR-0049) — the platform decides which packages are starters (honoured only on a first-party seed), so a value written here never had an effect and `os package publish` never sent it. Delete the key. |
 | **translations** | `Record<string, { displayName?: string; description?: string; readme?: string; tagline?: string; … }>` | optional | Locale-keyed overrides; missing keys fall back to base columns |
 | **manifestId** | `string` | optional | Optional declarative default for the published package id (reverse-domain, e.g. com.acme.crm). Absent on a template source tree: `objectstack package publish` falls back to --manifest-id and then to a derived `local.<slug>`. NOT optional on the publish request itself |
 | **name** | `never` | optional | [REMOVED] `TemplateManifest.name` was removed in @objectstack/spec 18 (ADR-0049) — nothing read it: `os package publish` addresses the package by `manifestId` (or derives one from the compiled artifact), and a project's slug is its `package.json` `name`. Delete the key. |

@@ -31,7 +31,7 @@ import { describeSeedLocale, resolveSeedLocaleForLoad } from './seed-locale.js';
 import { declareSeedSource, recordOrganizationReplay, type SeedLandingReport } from './seed-settlement.js';
 import { loadDisabledPackageIds } from './package-state-store.js';
 import { readServedWithheldFieldReaders, servedWithheldFieldReadersMessage } from './domains/packages.js';
-import { asPackageStateStore, PACKAGE_STATE_STORE_PLUGIN_NAME } from './package-state-host-store.js';
+import { asPackageStateStore, ensurePackageStateUninstallCleanup, PACKAGE_STATE_STORE_PLUGIN_NAME } from './package-state-host-store.js';
 import type { IFieldFileService, IMetadataService, IObjectQLEngine, II18nService } from '@objectstack/spec/contracts';
 import { FIELD_FILE_SERVICE } from '@objectstack/spec/contracts';
 import { normalizeFlowFunctionEntry, type NormalizedFlowFunction } from '@objectstack/spec/automation';
@@ -1396,6 +1396,11 @@ export class AppPlugin implements Plugin {
 
     start = async (ctx: PluginContext) => {
         this.refuseLatePackageStateStore(ctx);
+        // [#31023] The uninstall verb clears a deleted package's disable record
+        // under the key this plugin's boot seed reads. Before the empty-env
+        // return: an empty env is where every package arrives by hydration or
+        // install, and is deleted the same way.
+        ensurePackageStateUninstallCleanup(ctx, this.projectContext?.environmentId);
         if (this.empty) {
             ctx.logger.debug('[AppPlugin] empty env — no app payload, skipping start', {
                 pluginName: this.name,

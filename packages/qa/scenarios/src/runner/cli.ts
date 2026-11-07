@@ -35,6 +35,10 @@
  *   --out DIR            where records go (default docs/qa/platform-checklist/runs, git-ignored)
  *   --work DIR           where projects are scaffolded (default: a temp dir)
  *   --create-version V   the create-objectstack version (default latest)
+ *   --packages P         where the @objectstack/* packages come from (`packages.ts`):
+ *                        `published` (default) — npm, what a customer gets;
+ *                        `workspace` — this checkout, built and packed as the
+ *                        release would publish it (unreleased; never exported)
  *
  * ⛔ No API-billed model: the live driver refuses to start when an API key is
  * configured (the cost ruling on cloud#3600).
@@ -50,6 +54,7 @@ import { formatRefusal, libraryOf, loadScenarios, readCapabilityAreas } from '..
 import { HttpApp } from './app.js';
 import { ClaudeCodeDriver, RecordedDriver, RecordingDriver, type AgentDriver } from './driver.js';
 import { minutesText, runCard, type ProjectOps } from './orchestrate.js';
+import { installedSpecVersion, PACKAGES_MODES, prepareWorkspacePackages, settleWorkspaceProject, workspaceScaffolder, type PackageSource, type PackagesMode } from './packages.js';
 import { bootDev, os, readArtifact, readNamespace, scaffold } from './project.js';
 import { cardScorecard, renderScorecard, runRecord } from './scorecard.js';
 
@@ -89,10 +94,12 @@ export interface CliArgs {
   out?: string;
   work?: string;
   createVersion?: string;
+  /** `--packages`: where the `@objectstack/*` packages come from. */
+  packages: PackagesMode;
 }
 
 export function parseArgs(argv: readonly string[]): CliArgs {
-  const a: CliArgs = { modes: ['scratch', 'template'], driver: 'claude', iterateRun: true };
+  const a: CliArgs = { modes: ['scratch', 'template'], driver: 'claude', iterateRun: true, packages: 'published' };
   for (let i = 0; i < argv.length; i++) {
     const flag = argv[i]!;
     const val = () => {
@@ -135,7 +142,14 @@ export function parseArgs(argv: readonly string[]): CliArgs {
     else if (flag === '--out') a.out = val();
     else if (flag === '--work') a.work = val();
     else if (flag === '--create-version') a.createVersion = val();
-    else throw new Error(`unknown flag \`${flag}\``);
+    else if (flag === '--packages') {
+      const p = val();
+      if (!(PACKAGES_MODES as readonly string[]).includes(p)) throw new Error(`unknown --packages \`${p}\` (${PACKAGES_MODES.join(', ')})`);
+      a.packages = p as PackagesMode;
+    } else throw new Error(`unknown flag \`${flag}\``);
+  }
+  if (a.packages === 'workspace' && a.createVersion !== undefined) {
+    throw new Error('--create-version names a published create-objectstack; --packages workspace scaffolds with the one this checkout builds');
   }
   return a;
 }
@@ -207,11 +221,25 @@ export async function main(argv: readonly string[]): Promise<number> {
       (info.askModel ? ` · ask model: ${info.askModel}` : ''),
   );
 
+  // Built and packed once, before the first card: every scaffold of this run installs the same tarballs.
+  const workspace = args.packages === 'workspace' ? await prepareWorkspacePackages(repo, join(work, 'workspace-packages')) : undefined;
+  if (workspace) console.log(`packages: workspace @ ${workspace.source.commit}${workspace.source.uncommitted ? ' + uncommitted changes' : ''} — ${workspace.tarballs.size} packed under ${join(work, 'workspace-packages')}`);
+  /** The `@objectstack/spec` versions the current card's published scaffolds installed. */
+  let publishedVersions = new Set<string>();
+
   const ops: ProjectOps = {
-    scaffold: (name, under) => {
+    scaffold: async (name, under) => {
       const parent = join(work, under);
       mkdirSync(parent, { recursive: true });
-      return scaffold(parent, name, args.createVersion ? { version: args.createVersion } : {});
+      if (workspace) {
+        const done = await scaffold(parent, name, workspaceScaffolder(workspace));
+        if (done.result.exit !== 0) return done;
+        return { dir: done.dir, result: await settleWorkspaceProject(done.dir, workspace) };
+      }
+      const done = await scaffold(parent, name, args.createVersion ? { version: args.createVersion } : {});
+      const version = installedSpecVersion(done.dir);
+      if (version) publishedVersions.add(version);
+      return done;
     },
     os: (dir, a) => os(dir, a),
     readArtifact,
@@ -230,11 +258,13 @@ export async function main(argv: readonly string[]): Promise<number> {
 
   for (const scenario of chosen) {
     console.log(`\n▶ ${scenario.card.id} (${args.modes.join(' + ')})`);
+    publishedVersions = new Set();
     const cardRun = await runCard(scenario, driver, ops, { modes: args.modes, iterateRun: args.iterateRun, admin: ADMIN, ...(template ? { templateArtifact: template } : {}) });
-    const record = runRecord({ run: `${date}-scenario-${scenario.card.id}`, date, ...(framework ? { framework } : {}), driver: info, runner: 'scenario-runner', evidenceDir: work }, cardRun);
+    const packages: PackageSource = workspace ? workspace.source : { source: 'published', versions: [...publishedVersions].sort() };
+    const record = runRecord({ run: `${date}-scenario-${scenario.card.id}`, date, ...(framework ? { framework } : {}), packages, driver: info, runner: 'scenario-runner', evidenceDir: work }, cardRun);
     const file = join(outDir, `${date}-scenario-${scenario.card.id}.json`);
     writeFileSync(file, JSON.stringify(record, null, 2));
-    console.log(renderScorecard(cardScorecard(cardRun)));
+    console.log(renderScorecard(cardScorecard(cardRun, packages)));
     console.log(`record: ${file}`);
     if (driver instanceof RecordingDriver && args.record) driver.save(args.record);
   }

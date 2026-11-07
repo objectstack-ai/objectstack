@@ -51,7 +51,7 @@
  * {@link ServedOverridesHost} members.
  */
 
-import { pairOf } from '@objectstack/metadata-core';
+import { pairsOf } from '@objectstack/metadata-core';
 import { PLURAL_TO_SINGULAR } from '@objectstack/spec/shared';
 import { storedRowDocument } from './item-lock.js';
 import type { ObjectStackProtocolImplementation } from './protocol.js';
@@ -98,12 +98,14 @@ export async function listServedOverrides(
 ): Promise<ServedOverrideEntry[]> {
     const base = request.packageId;
     const installed = installedManifestsOfEngine(this.engine);
-    const pair = pairOf(base, installed);
-    if (!pair.ok) return [];
+    // [ADR-0146 D3 merge question 12] The App's pair, and a per-package pair
+    // an earlier version created while it is installed (`pairsOf`).
+    const pairs = pairsOf(base, installed);
+    if (pairs.length === 0) return [];
     let rows: any[] = [];
     try {
         rows = await this.findEnvironmentRows('sys_metadata', {
-            where: { package_id: pair.value, state: 'active' },
+            where: { package_id: pairs.length === 1 ? pairs[0] : { $in: pairs }, state: 'active' },
             context: { isSystem: true },
         });
     } catch (error) {

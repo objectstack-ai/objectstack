@@ -7,7 +7,7 @@
  * script, never the real CLI.
  */
 
-import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { delimiter, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -43,6 +43,7 @@ import {
   probeCall,
   uncodedToolError,
 } from '../../src/runner/observe.js';
+import { installedSpecVersion, packagesLine } from '../../src/runner/packages.js';
 import { citationLabels, namespaceOfConfig, namespacedScenario, permissionSetName, templateHostName } from '../../src/runner/namespace.js';
 import { authorNotMeasured, changeSize, hiddenValues, installableManifest, probeValues, seedDependence, seedOrder, withoutItems } from '../../src/runner/orchestrate.js';
 import { referenceCycles, requiredLookups, seedPlan, type SeedPlan } from '../../src/runner/seed.js';
@@ -848,5 +849,35 @@ describe('the live driver against a stand-in `claude`: the prompt on stdin, and 
     const replay = (opts: Parameters<typeof makeDriver>[1]) => refusal(() => makeDriver('recorded:/nowhere.json', opts));
     expect(replay({ model: 'sonnet' })).toMatch(/^--model applies to the live driver only/);
     expect(replay({ authorModel: 'opus', askModel: 'haiku' })).toMatch(/^--author-model, --ask-model apply to the live driver only/);
+  });
+});
+
+describe('`--packages published|workspace` — the flag and the line every record and scorecard states', () => {
+  it('defaults to published, takes workspace, refuses anything else, and refuses a scaffolder version beside workspace', () => {
+    expect(parseArgs([]).packages).toBe('published');
+    expect(parseArgs(['--packages', 'workspace']).packages).toBe('workspace');
+    expect(parseArgs(['--packages', 'published', '--create-version', '18.3.0'])).toMatchObject({ packages: 'published', createVersion: '18.3.0' });
+    expect(() => parseArgs(['--packages', 'linked'])).toThrow('unknown --packages `linked` (published, workspace)');
+    expect(() => parseArgs(['--packages', 'workspace', '--create-version', '18.3.0'])).toThrow(/--create-version names a published create-objectstack/);
+  });
+
+  it('states the published version, or the commit and that it is unreleased', () => {
+    expect(packagesLine({ source: 'published', versions: ['18.3.0'] })).toBe('packages: published 18.3.0');
+    expect(packagesLine({ source: 'published', versions: [] })).toBe('packages: published (no version read: no project was installed)');
+    expect(packagesLine({ source: 'workspace', commit: '1a2b3c4', uncommitted: false })).toBe('packages: workspace @ 1a2b3c4 (unreleased)');
+    expect(packagesLine({ source: 'workspace', commit: '1a2b3c4', uncommitted: true })).toBe('packages: workspace @ 1a2b3c4 + uncommitted changes (unreleased)');
+  });
+
+  it('a published version is the @objectstack/spec the scaffolded project installed', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'scenario-packages-'));
+    try {
+      expect(installedSpecVersion(dir)).toBeUndefined();
+      const spec = join(dir, 'node_modules', '@objectstack', 'spec');
+      mkdirSync(spec, { recursive: true });
+      writeFileSync(join(spec, 'package.json'), JSON.stringify({ name: '@objectstack/spec', version: '18.3.0' }));
+      expect(installedSpecVersion(dir)).toBe('18.3.0');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

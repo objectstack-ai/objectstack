@@ -1,10 +1,12 @@
 // Copyright (c) 2026 ObjectStack contributors. Apache-2.0 license.
 //
 // The scaffolder strips every `objectstack.manifest.json` key that
-// @objectstack/spec 18 retired (`category` #30980, five more #31035), so a
+// @objectstack/spec 18 retired (`category` #30980, seven more #31035), so a
 // template authored before that release never hands a new project a manifest
-// the schema refuses (or, for `category` and `visibility`, one
-// `os package publish` refuses). The restated list is pinned equal to the
+// the schema refuses (or, for `category`, `visibility` and `publisher`, one
+// `os package publish` refuses). The bundled blank template wrote
+// `isStarter: true` until its retirement, so every template copied from it
+// carries that one. The restated list is pinned equal to the
 // spec's own registry rows, and the call site in index.ts is pinned to use it
 // (index.ts runs `program.parse()` on import, so `rewriteProjectIdentity`
 // cannot be called from a test; the bundled template no longer carries any
@@ -21,7 +23,7 @@ import { RETIRED_TEMPLATE_MANIFEST_KEYS, stripRetiredManifestKeys } from './rewr
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const INDEX_TS = path.join(HERE, 'index.ts');
 
-/** A manifest as the blank template wrote it before #31035, plus `category` and `visibility`. */
+/** A manifest as the blank template wrote it before #31035, plus `category`, `visibility` and `publisher`. */
 const PRE_18_MANIFEST = () => ({
   category: 'crm',
   name: 'blank',
@@ -33,6 +35,7 @@ const PRE_18_MANIFEST = () => ({
   skills: ['objectstack-platform'],
   scaffold: { variables: { appName: { type: 'string' } } },
   visibility: 'marketplace',
+  publisher: 'community',
 });
 
 describe('RETIRED_TEMPLATE_MANIFEST_KEYS', () => {
@@ -60,7 +63,6 @@ describe('stripRetiredManifestKeys', () => {
     expect(m).toEqual({
       namespace: 'blank',
       displayName: 'Blank Starter',
-      isStarter: true,
       readmePath: 'README.md',
     });
     expect(TemplateManifestSchema.safeParse(m).success).toBe(true);

@@ -200,7 +200,7 @@ export const zhHant: TranslationData = {
     },
     connect_agent: {
       label: '連接 AI 助理',
-      subtitle: '讓任何支援 MCP 的 AI 用戶端以受控方式存取本系統——每次呼叫都在呼叫者自身的權限與列級安全範圍內執行。',
+      subtitle: '在 Claude、豆包等 AI 助理中使用本系統。助理始終以你的身分操作：只能檢視和修改你有權限的內容。',
     },
 
     // Platform record pages (#15743) -- see `en.ts` for the key set.

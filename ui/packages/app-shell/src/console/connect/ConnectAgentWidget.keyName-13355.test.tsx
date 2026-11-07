@@ -395,7 +395,7 @@ describe('Connect an Agent says what a connected assistant can do, in plain word
       expect(example.closest('li')?.querySelector('button')).not.toBeNull();
       expect(example.compareDocumentPosition(endpoint) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     }
-    // What to try first is said to everyone: the page cannot tell whether you have connected.
+    // Without a read of what is connected (no adapter here), the line says what to try first.
     expect(screen.getByText('«connectAgent.capabilities.tryFirst»')).toBeInTheDocument();
   });
 
@@ -410,6 +410,12 @@ describe('Connect an Agent says what a connected assistant can do, in plain word
       'capabilities.example2',
       'capabilities.example3',
       'capabilities.tryFirst',
+      'capabilities.connected',
+      'capabilities.connectedKey',
+      'capabilities.lastCallHour',
+      'capabilities.lastCallAt',
+      'capabilities.noCallYet',
+      'capabilities.moreConnected',
     ]);
     for (const [lang, pack] of Object.entries(builtInLocales)) {
       const strings = new Map(flatten((pack as Record<string, unknown>).connectAgent));

@@ -2377,6 +2377,18 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + '`marketplace-template-manifest-inert-keys-retired`.',
   },
   {
+    id: 'marketplace-template-manifest-platform-decided-keys-retired',
+    order: 121,
+    text:
+      'It retires the file\'s last two keys that configured nothing, `publisher` and `isStarter`: both '
+      + 'are claims only the platform can make — `publisher` is the trust tier that gates listing '
+      + 'privileges, assigned from the publisher\'s credentials, and the starter flag is honoured only on '
+      + 'a first-party seed — so `os package publish` never sent either, and a trust claim does not belong '
+      + 'in an author-editable file. Both are retiredKey tombstones with no D2 conversion, because this file '
+      + 'is not a stack collection member; the D3 record is the semantic entry '
+      + '`marketplace-template-manifest-platform-decided-keys-retired`.',
+  },
+  {
     id: 'memory-persistence-placeholder-refused',
     order: 1,
     text:

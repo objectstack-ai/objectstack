@@ -27,15 +27,18 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ObjectKernel, type Plugin, type PluginContext } from '@objectstack/core';
 import { ObjectQLPlugin } from '@objectstack/objectql';
+import { SqlDriver } from '@objectstack/driver-sql';
 import { resolveThrownHttpError } from '@objectstack/types';
 // Paid during collection, not inside a case's clock: `AppPlugin` loads it lazily.
 import '@objectstack/metadata';
 
 import { AppPlugin } from './app-plugin.js';
+import { DriverPlugin } from './driver-plugin.js';
 import { HttpDispatcher } from './http-dispatcher.js';
 import {
     PACKAGE_STATE_STORE_PLUGIN_NAME,
     PACKAGE_STATE_STORE_SERVICE,
+    PACKAGE_STATE_UNINSTALL_CLEANUP,
     createPackageStateStorePlugin,
     type PackageStateStore,
 } from './package-state-host-store.js';
@@ -109,9 +112,13 @@ const manifestFor = (id: string) => ({ id, name: id, version: '1.0.0', type: 'mo
  * in `use()` order — so a store that still seeds proves the declared ordering,
  * not the slot it was given.
  */
-async function boot(extra: Plugin[] = []): Promise<{ kernel: ObjectKernel; registry: Registry }> {
+async function boot(extra: Plugin[] = [], opts: { store?: boolean } = {}): Promise<{ kernel: ObjectKernel; registry: Registry }> {
     const kernel = new ObjectKernel({ logger: { level: 'silent' }, gracefulShutdown: false });
     kernels.push(kernel);
+    // [#31023] The uninstall verb reads `sys_metadata`, so its cases boot a store.
+    if (opts.store) {
+        await kernel.use(new DriverPlugin(new SqlDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true })));
+    }
     await kernel.use(new ObjectQLPlugin({}));
     await kernel.use(new AppPlugin({}, { environmentId: ENVIRONMENT_ID, organizationId: 'org_qa' }));
     for (const plugin of extra) await kernel.use(plugin);
@@ -274,5 +281,91 @@ describe('[#30962] without a host store, behaviour is unchanged', () => {
         expect(await patch(kernel, PKG, 'disable')).toMatchObject({ status: 200 });
         expect(registry.getPackage(PKG)).toMatchObject({ enabled: false, status: 'disabled' });
         expect(warn).toHaveBeenCalledWith('[handlePackages] failed to persist disable state', expect.objectContaining({ id: PKG }));
+    });
+});
+
+/**
+ * [#31023, #18877 ruling item 3] The uninstall verb itself clears the deleted
+ * package's disable record, through the runtime's uninstall cleanup that
+ * `AppPlugin.start` registers on the protocol
+ * ({@link PACKAGE_STATE_UNINSTALL_CLEANUP}). Only the HTTP door cleared it, so
+ * an in-process `deletePackage` (a host's uninstall tool, install-local's
+ * pair-install undo, the unmanaged-import rollback) left the id listed, the
+ * next boot seeded it, and a reinstall came up disabled.
+ */
+describe('[#31023] the uninstall verb clears the disable record for every caller', () => {
+    type Protocol = {
+        deletePackage(request: { packageId: string; actor?: string }): Promise<{ cleanups: Array<{ name: string; success: boolean }> }>;
+    };
+    const protocolOf = (kernel: ObjectKernel) => kernel.getService<Protocol>('protocol');
+    const stateCleanup = (out: { cleanups: Array<{ name: string; success: boolean }> }) =>
+        out.cleanups.filter((c) => c.name === PACKAGE_STATE_UNINSTALL_CLEANUP);
+
+    it('an in-process delete clears the file record, and a reinstall after a restart comes up enabled', async () => {
+        const first = await boot([], { store: true });
+        first.registry.installPackage(manifestFor(PKG), 'authored');
+        expect(await patch(first.kernel, PKG, 'disable')).toMatchObject({ status: 200 });
+        expect(readFileSync(stateFile(), 'utf8')).toContain(PKG);
+
+        const out = await protocolOf(first.kernel).deletePackage({ packageId: PKG, actor: 'u_tool' });
+
+        expect(stateCleanup(out)).toEqual([expect.objectContaining({ success: true })]);
+        expect(readFileSync(stateFile(), 'utf8')).toBe(`{\n  "disabled": []\n}\n`);
+        await first.kernel.shutdown();
+
+        const second = await boot([], { store: true });
+        second.registry.installPackage(manifestFor(PKG), 'authored');
+        expect(second.registry.getPackage(PKG)).toMatchObject({ enabled: true });
+    });
+
+    it('with a host store, the clear lands in the host store under the boot\'s environment', async () => {
+        const store = new RecordingStore();
+        const first = await boot([createPackageStateStorePlugin(store)], { store: true });
+        first.registry.installPackage(manifestFor(PKG), 'authored');
+        expect(await patch(first.kernel, PKG, 'disable')).toMatchObject({ status: 200 });
+
+        await protocolOf(first.kernel).deletePackage({ packageId: PKG });
+
+        expect(store.writes).toEqual([
+            [ENVIRONMENT_ID, PKG, true],
+            [ENVIRONMENT_ID, PKG, false],
+        ]);
+        await first.kernel.shutdown();
+        const second = await boot([createPackageStateStorePlugin(store)], { store: true });
+        second.registry.installPackage(manifestFor(PKG), 'authored');
+        expect(second.registry.getPackage(PKG)).toMatchObject({ enabled: true });
+    });
+
+    it('a refusing host store is the cleanup\'s failed outcome on the uninstall, and the record stays', async () => {
+        const store = new RecordingStore();
+        const { kernel, registry } = await boot([createPackageStateStorePlugin(store)], { store: true });
+        registry.installPackage(manifestFor(PKG), 'authored');
+        expect(await patch(kernel, PKG, 'disable')).toMatchObject({ status: 200 });
+        store.refuseWrites = true;
+        vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+        const out = await protocolOf(kernel).deletePackage({ packageId: PKG });
+
+        expect(stateCleanup(out)).toEqual([expect.objectContaining({ success: false })]);
+        expect([...(store.disabled.get(ENVIRONMENT_ID) ?? [])]).toEqual([PKG]);
+    });
+
+    it('the HTTP DELETE door leaves the clear to the verb: one write, not two', async () => {
+        const store = new RecordingStore();
+        const { kernel, registry } = await boot([createPackageStateStorePlugin(store)], { store: true });
+        registry.installPackage(manifestFor(PKG), 'authored');
+        expect(await patch(kernel, PKG, 'disable')).toMatchObject({ status: 200 });
+
+        const path = `/packages/${encodeURIComponent(PKG)}`;
+        const dispatcher = new HttpDispatcher(kernel as any, undefined, { enforceProjectMembership: false });
+        (dispatcher as any).timedResolveExecutionContext = async () => ({ ...ADMIN });
+        const request = new Request(`http://localhost/api/v1${path}`, { method: 'DELETE' });
+        const answer: any = await dispatcher.dispatch('DELETE', path, undefined, {}, { request, environmentId: ENVIRONMENT_ID } as any, '/api/v1');
+
+        expect(answer.response?.status, JSON.stringify(answer.response?.body)).toBe(200);
+        expect(store.writes).toEqual([
+            [ENVIRONMENT_ID, PKG, true],
+            [ENVIRONMENT_ID, PKG, false],
+        ]);
     });
 });

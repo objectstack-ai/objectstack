@@ -3,6 +3,5 @@
   "namespace": "blank",
   "displayName": "Blank Starter",
   "description": "Minimal ObjectStack environment with a single object — a clean slate for building.",
-  "isStarter": true,
   "readmePath": "README.md"
 }

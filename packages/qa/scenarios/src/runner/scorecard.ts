@@ -41,6 +41,7 @@
 
 import type { CardRun, ModeRun, RunHalf, BuildHalf } from './orchestrate.js';
 import type { DriverInfo } from './driver.js';
+import { packagesLine, type PackageSource } from './packages.js';
 import { cycleText } from './seed.js';
 
 export interface Tally {
@@ -88,6 +89,8 @@ export interface ModeScorecard {
 
 export interface CardScorecard {
   card: string;
+  /** Where the run's `@objectstack/*` packages came from (`--packages`); the table's first line states it. */
+  packages?: PackageSource;
   counts: CardRun['counts'];
   modes: ModeScorecard[];
 }
@@ -205,8 +208,8 @@ export function modeScorecard(m: ModeRun): ModeScorecard {
   return out;
 }
 
-export function cardScorecard(run: CardRun): CardScorecard {
-  return { card: run.card, counts: run.counts, modes: run.modes.map((m) => modeScorecard(m)) };
+export function cardScorecard(run: CardRun, packages?: PackageSource): CardScorecard {
+  return { card: run.card, ...(packages ? { packages } : {}), counts: run.counts, modes: run.modes.map((m) => modeScorecard(m)) };
 }
 
 const cell = (t: (Tally & { notMeasured?: number }) | undefined) => (t ? `${t.passed}/${t.total}${t.notMeasured ? ` · ${t.notMeasured} not measured` : ''}` : '—');
@@ -249,6 +252,7 @@ export function renderScorecard(sc: CardScorecard): string {
   const lines = [
     `### \`${sc.card}\` — ${sc.counts.questions} questions (${sc.counts.questionTurns} persona turns), ${sc.counts.operations} operations, ${sc.counts.personas} personas`,
     '',
+    ...(sc.packages ? [packagesLine(sc.packages), ''] : []),
     `| Half | ${sc.modes.map((m) => m.mode).join(' | ')} |`,
     `|:---|${sc.modes.map(() => ':---').join('|')}|`,
   ];
@@ -289,13 +293,15 @@ export interface RunRecordMeta {
   run: string;
   date: string;
   framework?: string;
+  /** Where the run's `@objectstack/*` packages came from — every record states it (`env.packages`). */
+  packages: PackageSource;
   driver: DriverInfo;
   runner: string;
   evidenceDir: string;
 }
 
 export function runRecord(meta: RunRecordMeta, cardRun: CardRun): Record<string, unknown> {
-  const sc = cardScorecard(cardRun);
+  const sc = cardScorecard(cardRun, meta.packages);
   const results: Array<Record<string, unknown>> = [];
   for (const m of cardRun.modes) {
     const s = sc.modes.find((x) => x.mode === m.mode)!;
@@ -326,7 +332,7 @@ export function runRecord(meta: RunRecordMeta, cardRun: CardRun): Record<string,
     date: meta.date,
     scope: `scenario card ${cardRun.card}`,
     app: cardRun.card,
-    env: { framework: meta.framework ?? 'unknown', driver: meta.driver },
+    env: { framework: meta.framework ?? 'unknown', packages: meta.packages, packagesLine: packagesLine(meta.packages), driver: meta.driver },
     runner: meta.runner,
     evidenceDir: meta.evidenceDir,
     results,
