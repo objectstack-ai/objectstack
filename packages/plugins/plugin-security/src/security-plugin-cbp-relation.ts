@@ -210,8 +210,10 @@ export function resolveCbpRelation(
       // the validator's test it mirrors and cannot widen if the resolver
       // changes — and it did: an OPTIONAL master (#30905 ruling A) resolves
       // with `required: false`, so this is `false` there and the master gate
-      // keeps answering an insert that leaves the reference empty (the write
-      // gate is unchanged by that ruling: such an insert is still refused).
+      // keeps answering an insert that leaves the reference empty itself: it
+      // admits it, by the optional master's own rule (`CbpRelation.optional`
+      // in the write gate — the row is then its creator's), never by handing
+      // the omission to validation.
       omissionRefusedByValidation:
         def?.type === 'master_detail' && !!def?.required && !def?.readonly && !def?.system,
       // [#25095] From the same def, asked of the parse's own predicate.

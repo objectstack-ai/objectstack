@@ -5,7 +5,7 @@
 
 feat(security, verify): the `controlled_by_parent` write gate judges a detail row whose optional master is empty — its owner or Modify All on the detail writes it
 
-Clause-②: no
+Clause-②: yes
 Metadata-protocol: semantic
 Skills-docs: follow-up #30907
 
