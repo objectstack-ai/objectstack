@@ -8,7 +8,7 @@ import type {
   MetadataProtocol,
 } from '@objectstack/spec/api';
 import { customizationNamespace } from '@objectstack/spec/kernel';
-import { pairOf } from '@objectstack/metadata-core';
+import { installedManifestsOf, pairOf } from '@objectstack/metadata-core';
 import { postureEnforcesWall } from '@objectstack/spec/security';
 import type { IDataEngine, IObjectQLEngine, IntrospectedSchema } from '@objectstack/spec/contracts';
 import {
@@ -220,11 +220,13 @@ export class ExternalDatasourceServicePlugin implements Plugin {
       }
     };
 
+    /** The engine registry `installPackage` stores package records in, read where it is used. */
+    const objectqlRegistry = (): { getPackage?: (id: string) => { manifest?: unknown } | undefined } | undefined =>
+      safeGetService<{ registry?: { getPackage?: (id: string) => { manifest?: unknown } | undefined } }>(ctx, 'objectql')?.registry;
+
     /** A package record as `installPackage` stored it in the engine registry, read where it is used. */
     const packageRecord = (packageId: string): { manifest?: { namespace?: unknown } } | undefined =>
-      safeGetService<{ registry?: { getPackage?: (id: string) => unknown } }>(ctx, 'objectql')?.registry?.getPackage?.(
-        packageId,
-      ) as { manifest?: { namespace?: unknown } } | undefined;
+      objectqlRegistry()?.getPackage?.(packageId) as { manifest?: { namespace?: unknown } } | undefined;
 
     const namespaceOf = (record: { manifest?: { namespace?: unknown } } | undefined): string | undefined => {
       const ns = record?.manifest?.namespace;
@@ -370,7 +372,7 @@ export class ExternalDatasourceServicePlugin implements Plugin {
         if (doors.isWritablePackage(basePackageId)) {
           return { packageId: basePackageId, namespace: namespaceOf(base) };
         }
-        const pairId = pairOf(basePackageId);
+        const pairId = pairOf(basePackageId, installedManifestsOf(objectqlRegistry()));
         if (!pairId.ok) {
           throw importLandingRefusal(
             `Datasource '${datasource}' is declared by read-only package '${basePackageId}', which has no `

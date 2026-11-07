@@ -14,6 +14,7 @@
 import { describe, expect, it } from 'vitest';
 import { judgeOverrideWrite } from '@objectstack/metadata-protocol';
 import { findOverrideDeclarationRefusals } from './override-declarations.js';
+import { installedManifestsOf } from '@objectstack/metadata-core';
 
 const BASE = 'com.acme.crm';
 const PAIR = 'com.acme.crm.custom';
@@ -33,7 +34,7 @@ const base = pkg(BASE, [], {
 });
 
 const judged = (type: string, name: string, packageId: string, item: unknown, dependencies: string[], shippers: string[]) => {
-  const v = judgeOverrideWrite({ type, name, packageId, item }, { dependencies, shippers });
+  const v = judgeOverrideWrite({ type, name, packageId, item }, { dependencies, shippers, installed: installedManifestsOf(undefined) });
   if (v.verdict !== 'refuse') throw new Error(`expected a refusal, got ${v.verdict}`);
   return v.message;
 };

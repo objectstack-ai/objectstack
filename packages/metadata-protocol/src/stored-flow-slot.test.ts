@@ -12,6 +12,10 @@
 import { describe, expect, it } from 'vitest';
 import { bindStoredRow } from './stored-row-binding.js';
 import { incomingTakesStoredFlowSlot, shadowedStoredRowsOf } from './stored-flow-slot.js';
+import { installedManifestsOf } from '@objectstack/metadata-core';
+
+/** Nothing installed: the pair lookup reads no manifest while `appOf` is the identity. */
+const NOTHING_INSTALLED = installedManifestsOf(undefined);
 
 const BASE = 'com.acme.crm';
 const PAIR = `${BASE}.custom`;
@@ -26,58 +30,58 @@ describe('[#28717] the declared override keeps the bare slot of its shipped flow
     it('held override, incoming legacy row: the override keeps the slot and carries the legacy row', () => {
         const held = override();
         const incoming = legacy();
-        expect(incomingTakesStoredFlowSlot(held, incoming, BASE)).toBe(false);
+        expect(incomingTakesStoredFlowSlot(held, incoming, BASE, NOTHING_INSTALLED)).toBe(false);
         expect(labels(shadowedStoredRowsOf(held))).toEqual(['LEGACY']);
     });
 
     it('held legacy row, incoming override: the override takes the slot and carries the legacy row', () => {
         const held = legacy();
         const incoming = override();
-        expect(incomingTakesStoredFlowSlot(held, incoming, BASE)).toBe(true);
+        expect(incomingTakesStoredFlowSlot(held, incoming, BASE, NOTHING_INSTALLED)).toBe(true);
         expect(labels(shadowedStoredRowsOf(incoming))).toEqual(['LEGACY']);
     });
 
     it('the legacy row read again is carried once, as its latest body', () => {
         const held = override();
-        incomingTakesStoredFlowSlot(held, legacy(), BASE);
+        incomingTakesStoredFlowSlot(held, legacy(), BASE, NOTHING_INSTALLED);
         const again = bindStoredRow(body('LEGACY 2'), null);
-        expect(incomingTakesStoredFlowSlot(held, again, BASE)).toBe(false);
+        expect(incomingTakesStoredFlowSlot(held, again, BASE, NOTHING_INSTALLED)).toBe(false);
         expect(labels(shadowedStoredRowsOf(held))).toEqual(['LEGACY 2']);
     });
 
     it('the override read again replaces itself and keeps what it shadowed, declared or not', () => {
         const held = override();
-        incomingTakesStoredFlowSlot(held, legacy(), BASE);
+        incomingTakesStoredFlowSlot(held, legacy(), BASE, NOTHING_INSTALLED);
         const resaved = bindStoredRow(body('OVERRIDE, UNDECLARED'), PAIR);
-        expect(incomingTakesStoredFlowSlot(held, resaved, BASE)).toBe(true);
+        expect(incomingTakesStoredFlowSlot(held, resaved, BASE, NOTHING_INSTALLED)).toBe(true);
         expect(labels(shadowedStoredRowsOf(resaved))).toEqual(['LEGACY']);
     });
 
     it('the binding decides, never a body stamp: a package-less row stamping the pair is not the override', () => {
         const held = override();
         const stamped = bindStoredRow(body('STAMPED', { _packageId: PAIR, overrides: { package: BASE, basedOn: '1.0.0' } }), null);
-        expect(incomingTakesStoredFlowSlot(held, stamped, BASE)).toBe(false);
+        expect(incomingTakesStoredFlowSlot(held, stamped, BASE, NOTHING_INSTALLED)).toBe(false);
         const heldStamped = bindStoredRow(body('STAMPED', { _packageId: PAIR, overrides: { package: BASE, basedOn: '1.0.0' } }), null);
-        expect(incomingTakesStoredFlowSlot(heldStamped, legacy(), BASE)).toBe(true);
+        expect(incomingTakesStoredFlowSlot(heldStamped, legacy(), BASE, NOTHING_INSTALLED)).toBe(true);
     });
 
     it('control: with no declared override among them, the last row read takes the slot and nothing is carried', () => {
         const held = legacy();
         const undeclaredPair = bindStoredRow(body('PAIR, UNDECLARED'), PAIR);
-        expect(incomingTakesStoredFlowSlot(held, undeclaredPair, BASE)).toBe(true);
+        expect(incomingTakesStoredFlowSlot(held, undeclaredPair, BASE, NOTHING_INSTALLED)).toBe(true);
         expect(shadowedStoredRowsOf(undeclaredPair)).toEqual([]);
-        expect(incomingTakesStoredFlowSlot(undeclaredPair, legacy(), BASE)).toBe(true);
+        expect(incomingTakesStoredFlowSlot(undeclaredPair, legacy(), BASE, NOTHING_INSTALLED)).toBe(true);
     });
 
     it('control: an empty slot, a slot holding no stored row, or a name no package ships, settles nothing', () => {
-        expect(incomingTakesStoredFlowSlot(undefined, legacy(), BASE)).toBe(true);
-        expect(incomingTakesStoredFlowSlot(body('LOADER', { _packageId: BASE }), legacy(), BASE)).toBe(true);
-        expect(incomingTakesStoredFlowSlot(override(), legacy(), undefined)).toBe(true);
+        expect(incomingTakesStoredFlowSlot(undefined, legacy(), BASE, NOTHING_INSTALLED)).toBe(true);
+        expect(incomingTakesStoredFlowSlot(body('LOADER', { _packageId: BASE }), legacy(), BASE, NOTHING_INSTALLED)).toBe(true);
+        expect(incomingTakesStoredFlowSlot(override(), legacy(), undefined, NOTHING_INSTALLED)).toBe(true);
     });
 
     it('the carried rows never leave the process', () => {
         const held = override();
-        incomingTakesStoredFlowSlot(held, legacy(), BASE);
+        incomingTakesStoredFlowSlot(held, legacy(), BASE, NOTHING_INSTALLED);
         expect(Object.keys(held)).not.toContain('shadowedStoredRows');
         expect(JSON.parse(JSON.stringify(held))).toEqual(body('OVERRIDE', { overrides: { package: BASE, basedOn: '1.0.0' } }));
         expect(shadowedStoredRowsOf({ ...held })).toEqual([]);

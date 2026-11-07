@@ -44,8 +44,9 @@ import {
   type FieldPatchTargetMiss,
   // [ADR-0146 D3 · ruling record 6691022506] The pair of a package, looked up
   // through the App that carries it — the uninstall refusal's "is its pair
-  // installed?" asks it.
+  // installed?" asks it, over this registry's installed manifests.
   pairOf,
+  installedManifestsOf,
 } from '@objectstack/metadata-core';
 // [ADR-0029 D9.2a] `scalarOverridesPackagedBase` is the #8284 comparison, imported rather
 // than re-spelled: the object FOLD asks the same question one layer down (has
@@ -7333,7 +7334,7 @@ export class SchemaRegistry {
         extended.push({ objectName: fqn, extenders: otherExtenders.map(c => String(c.packageId)) });
       }
     }
-    const pair = pairOf(packageId);
+    const pair = pairOf(packageId, installedManifestsOf(this));
     const installedPair = pair.ok && this.getPackage(pair.value) !== undefined ? pair.value : undefined;
     if (extended.length > 0 || installedPair !== undefined) {
       throw new PackageUninstallExtendedError(packageId, extended, installedPair);

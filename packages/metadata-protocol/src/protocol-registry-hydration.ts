@@ -31,7 +31,7 @@
 
 import { overlayMemberWhere } from './migrations/overlay-index.js';
 import { storedRowDocument } from './item-lock.js';
-import { itemDiscriminator } from '@objectstack/metadata-core';
+import { installedManifestsOf, itemDiscriminator } from '@objectstack/metadata-core';
 import { PLURAL_TO_SINGULAR } from '@objectstack/spec/shared';
 import { expandViewContainer, isAggregatedViewContainer } from '@objectstack/spec/ui';
 import { bindStoredRow } from './stored-row-binding.js';
@@ -524,7 +524,7 @@ export class ProtocolRegistryHydrationFacet {
                 ? registry.getItem(type, String((data as any).name))
                 : undefined;
             const owner = host.packagedArtifactOwner({ type, name: String((data as any).name) });
-            if (!incomingTakesStoredFlowSlot(held, registered, owner)) return true;
+            if (!incomingTakesStoredFlowSlot(held, registered, owner, installedManifestsOf(registry))) return true;
         }
         registry.registerItem(type, registered, 'name' as any);
         await host.hydrateExpandedViewItems(type, data, options);

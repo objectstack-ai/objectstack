@@ -228,7 +228,11 @@ describe('the permission-set clone door, on a booted showcase', () => {
         }
     });
 
-    it('a platform set (the lock-and-clone rule\'s commonest source) copies into its shipping package\'s pair', async () => {
+    // [#29594, ruling record 6691217245] A kernel package has no paired
+    // customization package, so a platform set's copy is saved where an
+    // environment-authored set's copy is: environment-wide, the notice naming
+    // the kernel package and `package`.
+    it('a platform set (the lock-and-clone rule\'s commonest source) copies environment-wide: the kernel has no pair', async () => {
         const reader = securityCatalogReaderOf(ql)!;
         const source = await reader.resolve('permission', 'member_default');
         expect(source?.packageId, 'member_default is not packaged on this boot').toBeTruthy();
@@ -236,9 +240,12 @@ describe('the permission-set clone door, on a booted showcase', () => {
         const res = await clone(token, 'member_default', { name: 'my_member_baseline', label: 'My Member Baseline' });
         const text = await res.clone().text();
         expect(res.status, text).toBe(200);
-        const landed = ((await res.json()) as any).data.package;
-        expect(landed).toBe(`${source!.packageId}.custom`);
-        expect((await reader.resolve('permission', 'my_member_baseline'))?.packageId).toBe(landed);
+        const data = ((await res.json()) as any).data;
+        expect(data.package).toBeNull();
+        expect(data.noticeCode).toBe('PERMISSION_SET_CLONE_ENVIRONMENT_WIDE_KERNEL_SOURCE');
+        expect(data.notice).toContain(`kernel package '${source!.packageId}'`);
+        expect((await reader.resolve('permission', 'my_member_baseline'))?.packageId).toBeUndefined();
+        expect((await stack.apiAs(token, 'GET', `/packages/${source!.packageId}.custom`)).status).toBe(404);
     });
 
     it('CONTROL — an environment-authored source still copies environment-wide, with no package', async () => {
