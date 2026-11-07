@@ -103,6 +103,20 @@
  *          answers `503 SERVICE_UNAVAILABLE`. Under a wall only the operator
  *          reaches this step (ADR-0131 D12 items 7–8).
  *
+ *          [epic cloud#3652 Q3, #30884] After that check, the same managed
+ *          RE-install is compared with the installed version (its ledger
+ *          entry) by the package upgrade plan, before any write. A field
+ *          rename the package declares (`renamedFrom`) answers
+ *          `501 NOT_IMPLEMENTED`, naming each: this runtime cannot yet carry a
+ *          renamed field's values to its new key. A stored field removed while
+ *          one is added with nothing linking them (a suspected rename), or a
+ *          type change the drift categories call `needs_confirm` or
+ *          `destructive`, answers `409 SCHEMA_UPGRADE_CONFIRMATION_REQUIRED`
+ *          with `details.findings` and the finding set's token; the same
+ *          request with `confirmSchemaUpgrade: <token>` installs and records
+ *          the confirmation in the ledger entry. Removed fields, `safe` type
+ *          changes and seed changes are refused by nothing.
+ *
  *          [epic cloud#3652 Q3, #30884] `dryRun: true` answers `200` with the
  *          package upgrade plan — the installed version (its ledger entry)
  *          against this one: objects, fields, type changes, declared and
@@ -189,6 +203,9 @@ import {
     orderHydrationBatch,
     artifactPackageId,
     declaredDependencyIds,
+    // [epic cloud#3652 Q3, #30884] The platform's one collection reader: each
+    // side of the schema upgrade verdict is folded as `planUpgrade` folds it.
+    resolveStackCollection,
 } from '@objectstack/core';
 import {
     resolveTenancyPosture,
@@ -249,10 +266,18 @@ import {
     // override gate's pair lookup reads.
     installedManifestsOf,
     type InstalledManifestLookup,
+    // [epic cloud#3652 Q3, #30884] The ONE comparison of two package versions —
+    // the one the dry run and `os diff` read — which step 2c′'s verdict reads.
+    comparePackageVersions,
+    type PackageUpgradeSide,
+    type PackageUpgradePlan,
+    type UpgradePlanDeclaredRename,
+    type UpgradeDriftCategory,
 } from '@objectstack/metadata-core';
 import { resolveCloudUrl } from './cloud-url.js';
 import { resolveMarketplacePublicBaseUrl } from './marketplace-public-url.js';
 import { join } from 'node:path';
+import { createHash } from 'node:crypto';
 
 import {
     LocalManifestSource,
@@ -486,6 +511,134 @@ const ACCESS_UPGRADE_CONFIRMATION_STATUS = 409;
  * upgrade.
  */
 const ACCESS_UPGRADE_CHECK_SERVICE = 'security.accessUpgradeCheck';
+
+/**
+ * [epic cloud#3652 Q3 「默认拒绝，需显式映射（推荐）」, #30884] The refusal of a
+ * managed upgrade whose package upgrade plan carries a change the additive
+ * schema sync would make silently: a stored field removed while one is added
+ * with no `renamedFrom` linking them (if it is a rename, the new field starts
+ * empty and the data stays in the old column), or a type change the drift
+ * categories call `needs_confirm` or `destructive`. 409, before any write,
+ * until the same request carries the finding set's token
+ * (`confirmSchemaUpgrade`). Its own code, beside
+ * {@link ACCESS_UPGRADE_CONFIRMATION_REQUIRED}: its findings and its token are
+ * its own, so neither confirmation answers the other's question.
+ */
+const SCHEMA_UPGRADE_CONFIRMATION_REQUIRED = 'SCHEMA_UPGRADE_CONFIRMATION_REQUIRED';
+const SCHEMA_UPGRADE_CONFIRMATION_STATUS = 409;
+
+/** The token's topic: a finding set token reads as what it confirms. */
+const SCHEMA_UPGRADE_TOPIC = 'schema-upgrade';
+
+/**
+ * The drift categories a type change must be confirmed under (ruling record
+ * 6709061297, (ii)). A `safe` change — the installed field had no stored
+ * column — loses nothing and is reported by the dry run, never refused.
+ */
+const SCHEMA_UPGRADE_CONFIRMED_CATEGORIES: ReadonlySet<UpgradeDriftCategory> = new Set(['needs_confirm', 'destructive']);
+
+/**
+ * One finding of the schema upgrade verdict, as the 409 (and the 501) name it
+ * in `details.findings`: what the comparison found, one readable sentence,
+ * and — when this runtime's `manifest` service answers `planUpgrade` — the
+ * rows holding a value in the installed column (`null`: the reading failed).
+ */
+type SchemaUpgradeFinding =
+    | {
+        kind: 'suspected_rename';
+        object: string;
+        /** The removed (installed) key. */
+        field: string;
+        type?: string;
+        candidates: Array<{ field: string; type?: string }>;
+        describe: string;
+        rows?: number | null;
+    }
+    | {
+        kind: 'type_change';
+        object: string;
+        /** The key in the incoming version. */
+        field: string;
+        from: string;
+        to: string;
+        category: UpgradeDriftCategory;
+        /** Set when the change rides on a declared rename: the installed key. */
+        renamedFrom?: string;
+        describe: string;
+        rows?: number | null;
+    };
+
+/**
+ * [epic cloud#3652 Q3, #30884] The verdict step 2c′ gives, read from the
+ * pure comparison alone (ruling record 6709061297, C3): which declared renames
+ * this runtime cannot carry yet, which findings need the installer's
+ * confirmation, and the token of that finding set. Nothing here reads the
+ * environment: whether an upgrade is refused is decided by the two package
+ * bodies, never by a reading that could fail.
+ *
+ * - A declared rename (`renamedFrom`) is listed on its own: no token answers
+ *   it (C2).
+ * - A suspected rename always needs confirming.
+ * - A type change needs confirming when its category is `needs_confirm` or
+ *   `destructive` — on a declared rename too: a declared rename never stands
+ *   in for a type-change confirmation (scope note 6685166393).
+ * - Removed fields, removed objects, `safe` type changes and seed changes are
+ *   reported by the dry run and refused by nothing.
+ *
+ * The token is a digest of the findings' identities (never of their
+ * sentences or readings), order-free, so the same two versions always yield
+ * the same token and any change to the finding set yields another.
+ */
+function schemaUpgradeVerdict(plan: PackageUpgradePlan): {
+    declaredRenames: UpgradePlanDeclaredRename[];
+    findings: SchemaUpgradeFinding[];
+    findingSet: string;
+} {
+    const findings: SchemaUpgradeFinding[] = [];
+    for (const s of plan.suspectedRenames) {
+        const candidates = s.candidates.map((c) => ({ field: c.field, ...(c.type !== undefined ? { type: c.type } : {}) }));
+        const added = candidates.map((c) => `${s.object}.${c.field}${c.type ? ` (${c.type})` : ''}`).join(', ');
+        findings.push({
+            kind: 'suspected_rename',
+            object: s.object,
+            field: s.field,
+            ...(s.type !== undefined ? { type: s.type } : {}),
+            candidates,
+            describe: `${s.object}.${s.field}${s.type ? ` (${s.type})` : ''} is removed while ${added} `
+                + `${candidates.length === 1 ? 'is' : 'are'} added, and no \`renamedFrom\` links them: if this is a rename, `
+                + 'the new field starts empty and the data stays in the old column, which nothing reads any more.',
+        });
+    }
+    for (const t of plan.typeChanges) {
+        if (!SCHEMA_UPGRADE_CONFIRMED_CATEGORIES.has(t.category)) continue;
+        const what = t.category === 'destructive'
+            ? 'the new type stores no column, so the values the existing column holds are no longer read'
+            : 'the existing column keeps its type under the new declaration, and nothing converts the values it holds';
+        findings.push({
+            kind: 'type_change',
+            object: t.object,
+            field: t.field,
+            from: t.from,
+            to: t.to,
+            category: t.category,
+            ...(t.renamedFrom !== undefined ? { renamedFrom: t.renamedFrom } : {}),
+            describe: `${t.object}.${t.field}${t.renamedFrom !== undefined ? ` (renamed from ${t.renamedFrom})` : ''} `
+                + `changes type ${t.from} → ${t.to} (${t.category}): ${what}.`,
+        });
+    }
+    const identities = findings
+        .map((f) => JSON.stringify(f.kind === 'suspected_rename'
+            ? [f.kind, f.object, f.field, f.type ?? null, f.candidates.map((c) => [c.field, c.type ?? null]).sort()]
+            : [f.kind, f.object, f.field, f.from, f.to, f.category, f.renamedFrom ?? null]))
+        .sort();
+    const digest = createHash('sha256').update(JSON.stringify(identities)).digest('hex').slice(0, 32);
+    return { declaredRenames: plan.declaredRenames, findings, findingSet: `${SCHEMA_UPGRADE_TOPIC}:${digest}` };
+}
+
+/** One side of the comparison, a multi-package artifact folded as `planUpgrade` folds it. */
+function packageUpgradeSideOf(artifact: unknown): PackageUpgradeSide {
+    return { objects: resolveStackCollection(artifact, 'objects'), data: resolveStackCollection(artifact, 'data') };
+}
 
 /** A finding of the access upgrade check, as this door reads it (`access-upgrade-report.ts`). */
 type AccessFinding = Record<string, any>;
@@ -2497,6 +2650,25 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             accessUpgradeConfirmation = access.confirmation;
         }
 
+        // 2c′. [epic cloud#3652 Q3 「默认拒绝，需显式映射（推荐）」, #30884;
+        //      ruling record 6709061297] ⭐ AN UPGRADE NEVER CHANGES A STORED
+        //      FIELD SILENTLY. On a managed re-install, the package upgrade
+        //      plan of the installed version (its ledger entry) against this
+        //      one decides, before any write: a declared rename (`renamedFrom`)
+        //      is refused `501 NOT_IMPLEMENTED` while this runtime cannot carry
+        //      the column; an undeclared suspected rename or a `needs_confirm`
+        //      / `destructive` type change is refused `409
+        //      SCHEMA_UPGRADE_CONFIRMATION_REQUIRED` until the same call
+        //      carries the finding set's token. After the access gate (2c),
+        //      which answers its own token first; removed fields and seed
+        //      changes are the dry run's to report, never refused.
+        let schemaUpgradeConfirmation: InstalledEntry['schemaUpgradeConfirmation'];
+        if (conflict === 'marketplace') {
+            const schema = await this.evaluateSchemaUpgradeGate(ctx, manifestId, converted, previousEntry, body, userId);
+            if (schema.refusal) return c.json(schema.refusal.body, schema.refusal.status);
+            schemaUpgradeConfirmation = schema.confirmation;
+        }
+
         // 2d. [ADR-0146 D2, #28410] ⭐ THE OVERRIDE WRITE GATE. A managed
         //     install registers the package's items as code, past every publish
         //     door, so the gate those doors ask is asked here, on the converted
@@ -2634,6 +2806,8 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             ...(gate.attestation ? { globalUniqueAttestation: gate.attestation } : {}),
             // [ADR-0126 §6 wall 3] The confirmation step 2c admitted, recorded.
             ...(accessUpgradeConfirmation ? { accessUpgradeConfirmation } : {}),
+            // [#30884] The confirmation step 2c′ admitted, recorded.
+            ...(schemaUpgradeConfirmation ? { schemaUpgradeConfirmation } : {}),
         };
         try {
             this.ledger.write(entry);
@@ -3566,6 +3740,181 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                 },
             },
         };
+    };
+
+    /**
+     * [epic cloud#3652 Q3, #30884] Step 2c′ of {@link handleInstall}: the
+     * schema upgrade verdict ({@link schemaUpgradeVerdict}) of the installed
+     * version — its ledger entry, converted forward as the registry reads it —
+     * against `converted`, and what it decides.
+     *
+     * - **No installed body** (the ledger entry would not parse): nothing to
+     *   compare against. The upgrade proceeds as it did before this gate, and
+     *   one `warn` line says no comparison ran.
+     * - **A declared rename**: `501 NOT_IMPLEMENTED`, naming each — no token
+     *   answers it while this runtime cannot carry a renamed field's column to
+     *   its new key (ruling record 6709061297, C2). The findings a token would
+     *   still have to confirm are listed beside it.
+     * - **No finding**: the upgrade proceeds unchanged.
+     * - **Findings**: `409 SCHEMA_UPGRADE_CONFIRMATION_REQUIRED`, naming each,
+     *   unless `body.confirmSchemaUpgrade` is the finding set's token. A token
+     *   that no longer matches (the findings changed since it was issued) is
+     *   refused again with the fresh set, and a bare `true` confirms nothing.
+     *
+     * Both refusals carry, per finding, the rows the installed column holds
+     * when this runtime's `manifest` service answers `planUpgrade` (C3); the
+     * verdict itself never reads them.
+     */
+    private evaluateSchemaUpgradeGate = async (
+        ctx: PluginContext,
+        manifestId: string,
+        converted: unknown,
+        previousEntry: InstalledEntry | null | undefined,
+        body: any,
+        userId: string,
+    ): Promise<{
+        refusal?: { body: Record<string, unknown>; status: 409 | 501 };
+        confirmation?: InstalledEntry['schemaUpgradeConfirmation'];
+    }> => {
+        if (!previousEntry?.manifest) {
+            ctx.logger?.warn?.(
+                `[MarketplaceInstallLocal] upgrade of ${manifestId}: no schema upgrade comparison ran — the record of the `
+                + 'installed version could not be read, so this re-install is not checked for renamed or retyped fields. '
+                + 'Run the same install with `dryRun: true` to see what the record holds.',
+            );
+            return {};
+        }
+        const installed = this.convertPackageBodyForward(ctx, previousEntry.manifest);
+        const plan = comparePackageVersions(packageUpgradeSideOf(installed), packageUpgradeSideOf(converted));
+        const verdict = schemaUpgradeVerdict(plan);
+        const { declaredRenames, findingSet } = verdict;
+        if (declaredRenames.length === 0 && verdict.findings.length === 0) return {};
+
+        const token = body?.confirmSchemaUpgrade;
+        if (declaredRenames.length === 0 && typeof token === 'string' && token === findingSet) {
+            const confirmedAt = new Date().toISOString();
+            ctx.logger?.warn?.(
+                `[MarketplaceInstallLocal] upgrade of ${manifestId} confirmed by ${userId} over its schema findings `
+                + `(${findingSet}): ${verdict.findings.length} finding(s) install as the additive schema sync leaves them`,
+            );
+            return { confirmation: { findingSet, confirmedBy: userId, confirmedAt } };
+        }
+
+        const rows = await this.readSchemaUpgradeRows(ctx, manifestId, installed, converted);
+        const findings = verdict.findings.map((f) => {
+            const installedKey = f.kind === 'type_change' ? (f.renamedFrom ?? f.field) : f.field;
+            const held = rows?.get(`${f.object}.${installedKey}`);
+            if (rows === undefined) return f;
+            return {
+                ...f,
+                rows: held ?? null,
+                ...(typeof held === 'number' ? { describe: `${f.describe} ${held} row(s) hold a value in ${f.object}.${installedKey}.` } : {}),
+            };
+        });
+
+        if (declaredRenames.length > 0) {
+            const renames = declaredRenames.map((r) => ({
+                object: r.object,
+                from: r.from,
+                to: r.to,
+                ...(r.fromType !== undefined ? { fromType: r.fromType } : {}),
+                ...(r.toType !== undefined ? { toType: r.toType } : {}),
+                ...(rows !== undefined ? { rows: rows.get(`${r.object}.${r.from}`) ?? null } : {}),
+            }));
+            ctx.logger?.warn?.(
+                `[MarketplaceInstallLocal] upgrade of ${manifestId} refused: ${renames.length} declared rename(s) this `
+                + 'runtime cannot carry yet',
+            );
+            return {
+                refusal: {
+                    status: 501,
+                    body: {
+                        success: false,
+                        error: {
+                            code: 'NOT_IMPLEMENTED',
+                            message: `Upgrading "${manifestId}" is refused: it declares ${renames.length} field rename(s) `
+                                + `(${renames.map((r) => `${r.object}.${r.from} → ${r.object}.${r.to}`).join(', ')}), and this `
+                                + 'runtime cannot yet move a renamed field\'s stored values to its new key — installed now, '
+                                + 'the new field would start empty while the values stay in the old column. Nothing was '
+                                + 'installed or written. Install this version once the runtime carries declared renames; or, '
+                                + 'to install it now without moving the values, remove the `renamedFrom` declaration, '
+                                + 'rebuild, and confirm the suspected rename the next refusal lists.'
+                                + (findings.length > 0
+                                    ? ` That refusal will also ask to confirm ${findings.length} other finding(s), listed here.`
+                                    : ''),
+                            details: { manifestId, declaredRenames: renames, findings },
+                        },
+                    },
+                },
+            };
+        }
+
+        const stale = token !== undefined
+            ? ' The confirmation sent does not confirm these findings: a confirmation is the finding set\'s token from '
+                + 'this refusal, it no longer matches once the findings change, and `true` confirms nothing.'
+            : '';
+        ctx.logger?.warn?.(
+            `[MarketplaceInstallLocal] upgrade of ${manifestId} stopped: ${findings.length} schema finding(s) unconfirmed `
+            + `(${findingSet})`,
+        );
+        return {
+            refusal: {
+                status: SCHEMA_UPGRADE_CONFIRMATION_STATUS,
+                body: {
+                    success: false,
+                    error: {
+                        code: SCHEMA_UPGRADE_CONFIRMATION_REQUIRED,
+                        message: `Upgrading "${manifestId}" would change stored fields in a way the schema sync does not `
+                            + `carry — ${findings.length} finding(s): ${findings.map((f) => f.describe).join(' ')} `
+                            + 'Nothing was installed or written. If a field was renamed, declare the old key in the new '
+                            + 'field\'s `renamedFrom` and rebuild the package; to upgrade anyway, accepting each finding as '
+                            + `listed, send the same request with "confirmSchemaUpgrade": "${findingSet}".${stale}`,
+                        details: {
+                            manifestId,
+                            findingSet,
+                            findings,
+                            confirmWith: {
+                                body: { confirmSchemaUpgrade: findingSet },
+                                cli: `os package install … --confirm-upgrade ${findingSet}`,
+                            },
+                        },
+                    },
+                },
+            },
+        };
+    };
+
+    /**
+     * [epic cloud#3652 Q3, #30884 · ruling record 6709061297, C3] The rows the
+     * installed columns a schema refusal names hold, by `object.field` (the
+     * INSTALLED key), from the `manifest` service's `planUpgrade` — the dry
+     * run's own reading. `undefined` when this runtime answers no
+     * `planUpgrade` or the reading threw: a refusal then names its findings
+     * without counts, and is the same refusal either way.
+     */
+    private readSchemaUpgradeRows = async (
+        ctx: PluginContext,
+        manifestId: string,
+        installed: unknown,
+        converted: unknown,
+    ): Promise<Map<string, number | null> | undefined> => {
+        let service: { planUpgrade?: (installed: unknown, incoming: unknown) => Promise<unknown> } | undefined;
+        try { service = ctx.getService('manifest') as typeof service; } catch { /* no manifest service */ }
+        if (typeof service?.planUpgrade !== 'function') return undefined;
+        try {
+            const reading = await service.planUpgrade(installed, converted) as {
+                environment?: { columns?: Array<{ object: string; field: string; rows: number | null }> };
+            };
+            const out = new Map<string, number | null>();
+            for (const column of reading?.environment?.columns ?? []) out.set(`${column.object}.${column.field}`, column.rows);
+            return out;
+        } catch (err: any) {
+            ctx.logger?.warn?.(
+                `[MarketplaceInstallLocal] upgrade of ${manifestId}: the rows behind its schema findings could not be read `
+                + `(${String(err?.message ?? err)}); the refusal names its findings without row counts`,
+            );
+            return undefined;
+        }
     };
 
     /**

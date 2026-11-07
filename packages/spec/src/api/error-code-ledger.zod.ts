@@ -1368,6 +1368,19 @@ export const ERROR_CODE_LEDGER = {
     'PLUGIN_REGISTER_FAILED',
     'RESEED_NO_ROWS',                // reseed ran but wrote nothing
     'RESEED_SKIPPED',                // reseed declined to run; message carries why
+    // [epic cloud#3652 Q3, #30884] install-local refused a managed UPGRADE
+    // whose package upgrade plan (`comparePackageVersions`,
+    // `@objectstack/metadata-core`) lists an undeclared suspected rename (a
+    // stored field removed while one is added, nothing linking them) or a
+    // `needs_confirm` / `destructive` type change, 409, before any write
+    // (step 2c′, after the access gate), until the same request carries the
+    // finding set's token (`confirmSchemaUpgrade`); `details.findings` names
+    // each. The sibling of ACCESS_UPGRADE_CONFIRMATION_REQUIRED above, its own
+    // code because its findings and its token are its own: an access token
+    // never confirms a schema finding, nor the reverse. READ off the wire by
+    // `os package install` (`packages/cli/src/commands/package/install.ts`),
+    // which prints each finding and the `--confirm-upgrade` retry.
+    'SCHEMA_UPGRADE_CONFIRMATION_REQUIRED',
     // [#9246] ADR-0120 D5e posture gate: the marketplace install seam stops an
     // install that declares installation-wide (`'global'`) unique constraints
     // under the `isolated` tenancy posture, 409, until the caller confirms them
