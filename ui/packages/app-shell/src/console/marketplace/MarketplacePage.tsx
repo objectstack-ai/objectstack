@@ -57,6 +57,14 @@ import { ProtocolCheckSkippedNote } from './ProtocolCheckSkippedNote.js';
 import { ConnectorCredentialsStep } from './ConnectorCredentialsStep.js';
 import { packagesHref } from '../../views/metadata-admin/packageSource.js';
 import { MarketplaceNamespaceGate } from './MarketplaceNamespaceGate.js';
+import { MarketplaceFacetFilters } from './MarketplaceFacetFilters.js';
+import {
+  EMPTY_FACET_SELECTION,
+  facetOptions,
+  matchesFacets,
+  readListingTaxonomy,
+  type FacetSelection,
+} from './marketplaceTaxonomy.js';
 
 /**
  * The card grid's track (objectui#12616): a card is never narrower than 240px,
@@ -360,7 +368,7 @@ function MarketplacePageBody() {
     phaseTimers.current = [];
   };
   const [query, setQuery] = useState('');
-  const [category, setCategory] = useState<string>('');
+  const [facets, setFacets] = useState<FacetSelection>(EMPTY_FACET_SELECTION);
   const [installed, setInstalled] = useState<LocalInstallEntry[]>([]);
   // ADR-0007 step ②: the org's own packages (visibility org/private), shown in
   // a "Your organization" section and installable inline (no public listing).
@@ -549,32 +557,24 @@ function MarketplacePageBody() {
     }
   };
 
-  const categories = useMemo(() => {
-    const s = new Set<string>();
-    for (const it of items) {
-      if (it.category) s.add(it.category);
-    }
-    return Array.from(s).sort();
-  }, [items]);
-
-  // Translate a category enum value via the i18n bundle; fall back to the
-  // raw value (lowercased) so unknown publisher categories still render.
-  const categoryLabel = (cat: string): string => {
-    const key = `marketplace.category.${cat}`;
-    const translated = t(key, { defaultValue: cat });
-    return translated === key ? cat : translated;
-  };
-
-  const filtered = useMemo(() => {
+  // The search box, then the facets (`marketplaceTaxonomy.ts`): OR inside a
+  // facet, AND across facets and with the search. One memo over the loaded
+  // page — the catalog read is `limit: 100`, filtered here on the client.
+  const { filtered, facetChoices } = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return items.filter((it) => {
-      if (category && it.category !== category) return false;
-      if (!q) return true;
-      const loc = localizePackage(it, language);
-      const hay = `${loc.displayName} ${it.manifest_id} ${loc.description ?? ''}`.toLowerCase();
-      return hay.includes(q);
-    });
-  }, [items, query, category, language]);
+    const rows = items.map((it) => ({ it, taxonomy: readListingTaxonomy(it) }));
+    const searched = q
+      ? rows.filter(({ it }) => {
+          const loc = localizePackage(it, language);
+          const hay = `${loc.displayName} ${it.manifest_id} ${loc.description ?? ''}`.toLowerCase();
+          return hay.includes(q);
+        })
+      : rows;
+    return {
+      filtered: searched.filter(({ taxonomy }) => matchesFacets(taxonomy, facets)),
+      facetChoices: facetOptions(rows.map((r) => r.taxonomy), searched.map((r) => r.taxonomy), facets),
+    };
+  }, [items, query, facets, language]);
 
   // Ahead of the `!isAdmin` guard below deliberately (objectui#5557): on a
   // runtime that mounts no marketplace, "there is no marketplace here" is true
@@ -692,7 +692,7 @@ function MarketplacePageBody() {
       />
     <div className="flex flex-col gap-6 p-4 sm:p-6">
 
-      <div className="flex flex-col sm:flex-row gap-3">
+      <div className="flex flex-col gap-3">
         <div className="relative flex-1">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" aria-hidden="true" />
           <Input
@@ -703,27 +703,7 @@ function MarketplacePageBody() {
             aria-label={t('marketplace.searchAria')}
           />
         </div>
-        {categories.length > 0 && (
-          <div className="flex flex-wrap gap-1.5">
-            <Button
-              size="sm"
-              variant={category === '' ? 'default' : 'outline'}
-              onClick={() => setCategory('')}
-            >
-              {t('marketplace.all')}
-            </Button>
-            {categories.map((cat) => (
-              <Button
-                key={cat}
-                size="sm"
-                variant={category === cat ? 'default' : 'outline'}
-                onClick={() => setCategory(cat)}
-              >
-                {categoryLabel(cat)}
-              </Button>
-            ))}
-          </div>
-        )}
+        <MarketplaceFacetFilters options={facetChoices} selection={facets} onChange={setFacets} />
       </div>
 
       {/* objectui#12710 — a catalog read still pending once the skeleton's
@@ -900,7 +880,8 @@ function MarketplacePageBody() {
         </div>
       ) : (
         <div className={CARD_GRID}>
-          {filtered.map((pkg) => {
+          {filtered.map(({ it: pkg, taxonomy }) => {
+            const primaryFunction = taxonomy.businessFunctions[0];
             const localEntry = installedByManifestId.get(pkg.manifest_id);
             const loc = localizePackage(pkg, language);
             return (
@@ -962,8 +943,17 @@ function MarketplacePageBody() {
                         {t('marketplace.versionBadge', { version: pkg.latest_version.version })}
                       </Badge>
                     )}
-                    {pkg.category && (
-                      <Badge variant="outline" className="text-xs">{categoryLabel(pkg.category)}</Badge>
+                    {/* The primary business function — the first the
+                        listing names — and Beta for a beta package. */}
+                    {primaryFunction && (
+                      <Badge variant="outline" className="text-xs" data-testid="marketplace-card-function">
+                        {t(`marketplace.businessFunction.${primaryFunction}`)}
+                      </Badge>
+                    )}
+                    {taxonomy.beta && (
+                      <Badge variant="secondary" className="text-xs" data-testid="marketplace-card-beta">
+                        {t('marketplace.maturity.beta')}
+                      </Badge>
                     )}
                     {pkg.latest_version?.published_at && (
                       <span className="text-xs text-muted-foreground ml-auto">
