@@ -404,3 +404,94 @@ describe('[ADR-0146 D10] a module\'s extension that re-declares the base\'s fiel
         expect(rig.extenders()).toEqual([MODULE]);
     }, 60_000);
 });
+
+/**
+ * [ruling record 6691022506, ADR-0146 D3 as amended] The HotCRM rehearsal, on
+ * an in-repo fixture of HotCRM's shape (the HotCRM repository is not part of
+ * this tree): the App `app.objectstack.hotcrm` and three modules that declare
+ * it, all `namespace: 'crm'`, all held as code. The ensure door is asked for
+ * each — one `app.objectstack.hotcrm.custom` — and a MODULE's object is then
+ * extended in that pair and read back on every object read.
+ */
+describe('[#29594] the App unit: HotCRM and three modules share one pair, and a module object is customized in it', () => {
+    const APP = 'app.objectstack.hotcrm';
+    const APP_PAIR = `${APP}.custom`;
+    const MODULES = ['service', 'revenue', 'marketing'] as const;
+    const CASE = 'crm_service_case';
+    const ADMIN_CTX: any = {
+        request: {},
+        environmentId: 'hotcrm-app-unit',
+        executionContext: { userId: 'u_admin', systemPermissions: ['manage_metadata', 'studio.access', 'setup.access'] },
+    };
+
+    async function hotcrm() {
+        const engine = new ObjectQL();
+        liveEngines.push(engine);
+        engine.registerDriver(new SqlDriver({
+            client: 'better-sqlite3',
+            connection: { filename: ':memory:' },
+            useNullAsDefault: true,
+        }), true);
+        await engine.init();
+        engine.registry.registerObject(SysMetadata as any, TEST_PACKAGE_ID);
+        engine.registry.registerObject(SysMetadataHistoryObject as any, TEST_PACKAGE_ID);
+        engine.registry.registerObject(SysMetadataAuditObject as any, TEST_PACKAGE_ID);
+        (engine.registry as unknown as { logLevel: string }).logLevel = 'silent';
+        engine.registerApp({
+            id: APP, name: 'hotcrm', version: '6.1.0', type: 'app', namespace: 'crm',
+            objects: [{ name: 'crm_account', label: 'Account', fields: { name: { name: 'name', label: 'Name', type: 'text' } } }],
+        });
+        for (const m of MODULES) {
+            engine.registerApp({
+                id: `${APP}.${m}`, name: `hotcrm-${m}`, version: '6.1.0', type: 'module', namespace: 'crm',
+                dependencies: { [APP]: '^6.1.0' },
+                objects: [{ name: `crm_${m}_case`, label: `${m} case`, fields: { subject: { name: 'subject', label: 'Subject', type: 'text' } } }],
+            });
+        }
+        await engine.syncSchemas();
+        const protocol: any = new ObjectStackProtocolImplementation(engine as any, () => new Map());
+        const named: Record<string, unknown> = { protocol, objectql: engine };
+        const get = (name: string) => named[name] ?? null;
+        const kernel: any = { context: { getService: get }, getService: get, getServiceAsync: async (name: string) => get(name) };
+        const dispatcher = new HttpDispatcher(kernel);
+        const ensure = (id: string) =>
+            dispatcher.handlePackages(`/${encodeURIComponent(id)}/ensure-customization`, 'POST', undefined, {}, ADMIN_CTX) as Promise<any>;
+        return { engine, protocol, ensure };
+    }
+
+    it('ensure on the App and each module answers one app.objectstack.hotcrm.custom; a module object extended there reads back', async () => {
+        const { engine, protocol, ensure } = await hotcrm();
+        const answers: Array<[string, number, string]> = [];
+        for (const id of [APP, ...MODULES.map((m) => `${APP}.${m}`)]) {
+            const r = await ensure(id);
+            answers.push([id, r.response.status, r.response.body?.data?.packageId]);
+        }
+        expect(answers).toEqual([
+            [APP, 201, APP_PAIR],
+            [`${APP}.service`, 200, APP_PAIR],
+            [`${APP}.revenue`, 200, APP_PAIR],
+            [`${APP}.marketing`, 200, APP_PAIR],
+        ]);
+        const pairs = engine.registry.getAllPackages().map((p: any) => p.manifest?.id).filter((id: string) => id.endsWith('.custom'));
+        expect(pairs).toEqual([APP_PAIR]);
+
+        // Customize a MODULE's object in the App's pair: Studio's add-field body.
+        await protocol.saveMetaItem({
+            type: TYPE, name: CASE, mode: 'draft', packageId: APP_PAIR,
+            item: { extend: CASE, fields: { sla_tier__c: { type: 'text', label: 'SLA tier' } } },
+        });
+        await protocol.publishMetaItem({ type: TYPE, name: CASE, packageId: APP_PAIR });
+
+        const byName = (await protocol.getMetaItem({ type: 'object', name: CASE }))?.item;
+        const layered = await protocol.getMetaItemLayered({ type: 'object', name: CASE });
+        expect(Object.keys(byName?.fields ?? {})).toEqual(expect.arrayContaining(['subject', 'sla_tier__c']));
+        expect(Object.keys(layered?.effective?.fields ?? {})).toContain('sla_tier__c');
+        expect(Object.keys((engine.registry.getObject(CASE) as any)?.fields ?? {})).toContain('sla_tier__c');
+        expect(engine.registry.getObjectContributors(CASE).filter((c: any) => c.ownership === 'extend').map((c: any) => c.packageId))
+            .toEqual([APP_PAIR]);
+        // A record stores a value in the field.
+        const created: any = await engine.insert(CASE, { subject: 'Outage', sla_tier__c: 'gold' }, { context: { isSystem: true } });
+        const back: any = await engine.findOne(CASE, { where: { id: created.id }, context: { isSystem: true } });
+        expect(back?.sla_tier__c).toBe('gold');
+    }, 60_000);
+});
