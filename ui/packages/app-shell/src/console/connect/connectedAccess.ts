@@ -39,7 +39,7 @@ import {
   isExpired,
   type ApiKeyRow,
   type AuthorizedClient,
-} from './AuthorizedAccessList.js';
+} from './accessRecords.js';
 
 export interface ConnectedEntry {
   kind: 'assistant' | 'apiKey';
