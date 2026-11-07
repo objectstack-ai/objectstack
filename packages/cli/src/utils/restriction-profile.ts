@@ -318,7 +318,8 @@ function judgeNodeType(
 /** The installed version of `name`, resolved by `from` (a directory's `package.json` or a module URL), or `null`. */
 function resolveInstalledVersion(name: string, from: string): string | null {
   try {
-    const pkg = createRequire(from)(`${name}/package.json`) as { version?: unknown };
+    // Read off disk rather than `require`d: a module-cached manifest would outlive the install it describes.
+    const pkg = JSON.parse(readFileSync(createRequire(from).resolve(`${name}/package.json`), 'utf8')) as { version?: unknown };
     return typeof pkg.version === 'string' ? pkg.version : null;
   } catch {
     return null;
