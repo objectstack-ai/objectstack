@@ -3,7 +3,8 @@
   "id": "service_desk",
   "code": "helpdesk",
   "tier": "starter",
-  "title": "Service desk: tickets with comment threads, SLA policies, time-based escalation and satisfaction surveys",
+  "origin": "generic",
+  "title": { "zh": "客服工单:工单及沟通记录、SLA 策略、超时升级和满意度调查", "en": "Service desk: tickets with comment threads, SLA policies, time-based escalation and satisfaction surveys" },
   "provenance": "Mid-tier scenario 客服工单 (service desk) of the open library, written for this card from the domain alone: invented company and agent names, example.com addresses and invented figures, no customer-derived content. The seed follows the arithmetic rule in `$comment`, so each truth can be worked out by hand.",
   "prompt": {
     "short": {

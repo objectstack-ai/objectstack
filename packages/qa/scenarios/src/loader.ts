@@ -18,11 +18,18 @@
  * A card with any refusal is not returned at all: a half-valid card would let
  * a runner score against a scenario that does not mean what it says.
  *
+ * Which library a directory is, the loader cannot tell from the directory: a
+ * card file carries nothing that says where it lives. So the caller says it
+ * ({@link LoadOptions.library}; the CLIs answer with {@link libraryOf}), and the
+ * loader refuses a `generic` card in the private overlay — a generic card
+ * belongs in the open library, and one in the overlay is mislabelled or
+ * misplaced either way.
+ *
  * Nothing here calls a model, the network, or anything outside the two
  * directories it is handed.
  */
 
-import { readdirSync, readFileSync } from 'node:fs';
+import { readdirSync, readFileSync, realpathSync } from 'node:fs';
 import { basename, join } from 'node:path';
 
 import { ErrorCode } from '@objectstack/spec/api';
@@ -64,9 +71,34 @@ export interface LoadResult {
   refusals: Refusal[];
 }
 
+/**
+ * Which library a directory of cards is: the `open` one (`docs/qa/scenarios/`
+ * in this repository, every card `generic`) or the private `overlay` outside
+ * it (customer-derived and held-out cards).
+ */
+export type ScenarioLibrary = 'open' | 'overlay';
+
+/** The open library, relative to the repository root. */
+export const OPEN_LIBRARY_DIR = 'docs/qa/scenarios';
+
 export interface LoadOptions {
   /** The closed set of capability areas; see {@link readCapabilityAreas}. */
   areas: ReadonlySet<string>;
+  /**
+   * The library the cards are loaded as — stated by the caller, because the
+   * directory says nothing the loader could read. A `generic` card in the
+   * `overlay` is refused.
+   */
+  library: ScenarioLibrary;
+}
+
+/**
+ * The library `dir` is: `open` when it is the repository's open library
+ * (`<repo>/docs/qa/scenarios`, compared by real path), else `overlay` — a card
+ * directory anywhere else is not the open library.
+ */
+export function libraryOf(dir: string, repoRoot: string): ScenarioLibrary {
+  return realpathSync(dir) === realpathSync(join(repoRoot, OPEN_LIBRARY_DIR)) ? 'open' : 'overlay';
 }
 
 /** `['run', 'questions', 2, 'truth']` → `run.questions[2].truth`. */
@@ -313,6 +345,14 @@ function checkCard(
 
   // ── identity ──
   if (card.id !== stem) refuse(['id'], `\`${card.id}\` must equal the file's basename \`${stem}\``);
+
+  // ── origin: the private overlay holds no generic card ──
+  if (options.library === 'overlay' && card.origin === 'generic') {
+    refuse(
+      ['origin'],
+      `a \`generic\` card does not belong in the private overlay, which holds only \`customer-derived\` and \`held-out\` cards: move it to the open library (${OPEN_LIBRARY_DIR}), or mark the origin it really has`,
+    );
+  }
 
   // ── expect: internal consistency ──
   const objects = new Set(expect.objects);
