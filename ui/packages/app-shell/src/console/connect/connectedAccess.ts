@@ -134,9 +134,10 @@ export function useConnectedAccess({ enabled = true }: { enabled?: boolean } = {
   useEffect(() => {
     if (!adapter || !userId) return;
     let live = true;
-    adapter
-      .getClient()
-      .oauth.authorizedClients.list()
+    // Through a promise, so an adapter without the auth client is a failed
+    // read rather than a throw out of the effect.
+    Promise.resolve()
+      .then(() => adapter.getClient().oauth.authorizedClients.list())
       .then(
         (value) => live && setAssistants({ state: 'ready', value: value.clients.map(assistantEntry) }),
         () => live && setAssistants({ state: 'failed' }),
