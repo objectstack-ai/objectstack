@@ -456,7 +456,7 @@ describe('conversion layer (ADR-0087 D2)', () => {
             { id: 's', type: 'start', label: 'S' },
             { id: 'g', type: 'get_record', label: 'G', config: { objectName: 'lead', object: 'lead' } },
           ],
-          edges: [{ id: 'e1', source: 's', target: 'g' }],
+          edges: [],
         }],
       };
       let refusal: unknown;
@@ -482,7 +482,7 @@ describe('conversion layer (ADR-0087 D2)', () => {
             { id: 's', type: 'start', label: 'S' },
             { id: 'h', type: 'http_request', label: 'H', config: { url: 'https://example.com' } },
           ],
-          edges: [{ id: 'e1', source: 's', target: 'h' }],
+          edges: [],
         }],
       };
       let refusal: unknown;
@@ -723,7 +723,7 @@ describe('conversion layer (ADR-0087 D2)', () => {
           name: 'settle',
           label: 'Settle',
           type: 'autolaunched',
-          edges: [{ id: 'e1', source: 'n1', target: 'w' }],
+          edges: [],
           nodes: [
             { id: 'n1', type: 'start', label: 'Start' },
             { id: 'w', type: 'wait', label: 'Wait', ...node },
@@ -839,7 +839,7 @@ describe('conversion layer (ADR-0087 D2)', () => {
           name: 'notify_slack',
           label: 'Notify Slack',
           type: 'autolaunched',
-          edges: [{ id: 'e1', source: 'n1', target: 'c' }],
+          edges: [],
           nodes: [
             { id: 'n1', type: 'start', label: 'Start' },
             { id: 'c', type: 'connector_action', label: 'Call', ...node },
@@ -892,7 +892,7 @@ describe('conversion layer (ADR-0087 D2)', () => {
       name: 'settle',
       label: 'Settle',
       type: 'autolaunched',
-      edges: [{ id: 'e1', source: 'n1', target: String(node.id) }],
+      edges: [],
       nodes: [
         { id: 'n1', type: 'start', label: 'Start' },
         { label: 'Step', ...node },

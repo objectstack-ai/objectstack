@@ -57,13 +57,7 @@ const pausingNode = (type: string, id = 'pauser'): FlowNode => ({
 
 const step = (id: string): FlowNode => ({ id, type: 'assignment', label: id });
 
-// Unless a test passes its own edges, the nodes are chained from `start` in
-// order: a top-level node no edge reaches is refused at parse, and that rule is
-// not the one these tests judge.
-const chainFromStart = (nodes: FlowNode[]): FlowEdge[] =>
-  nodes.map((node, i) => ({ id: `chain_${i}`, source: i === 0 ? 'start' : nodes[i - 1].id, target: node.id }));
-
-const flowWith = (nodes: FlowNode[], edges: FlowEdge[] = chainFromStart(nodes)): Flow => ({
+const flowWith = (nodes: FlowNode[], edges: FlowEdge[] = []): Flow => ({
   name: 'region_contents',
   label: 'Region contents',
   type: 'autolaunched',
