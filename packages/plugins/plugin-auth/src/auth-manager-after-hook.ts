@@ -97,8 +97,16 @@ function changeEmailFrom(user: unknown): { email: string; name?: string; id?: st
  * judged where the new session is scoped to it (`refuseUnadmittedScoping`, at
  * session creation), which better-auth reaches only once the password has
  * verified, so a wrong password never carries this code to the counter.
+ *
+ * A function, read when a sign-in is judged, rather than a set built when this
+ * module loads: `organization-access-policy.ts` imports `auth-manager.ts`,
+ * which reaches this module, so on that import order the constant is not yet
+ * initialised while this module evaluates.
  */
-const REFUSALS_AFTER_THE_CREDENTIAL: ReadonlySet<string> = new Set([SESSION_SCOPING_REFUSAL.code]);
+function refusedAfterTheCredential(returned: unknown): boolean {
+  const code = refusalCodeOf(returned);
+  return code !== undefined && [SESSION_SCOPING_REFUSAL.code].includes(code);
+}
 
 /** The body of `createAuthInstance`'s `hooks.after` arrow; the comments there and in it are its contract. */
 export async function globalAfterHook(this: AfterHookHost, ctx: any) {
@@ -160,7 +168,7 @@ export async function globalAfterHook(this: AfterHookHost, ctx: any) {
   // better-auth catches an INVALID_EMAIL_OR_PASSWORD APIError and runs
   // the after-hook with it on `ctx.context.returned`; a success leaves
   // the session payload there. Count failures, reset on success.
-  // A refusal in REFUSALS_AFTER_THE_CREDENTIAL is neither: the password
+  // A refusal `refusedAfterTheCredential` names is neither: the password
   // passed and a policy refused the session, so the counter is left as
   // it stands. Its `login_failed` row is still written below.
   if (ctx?.path === SIGN_IN_EMAIL_PATH) {
@@ -173,8 +181,9 @@ export async function globalAfterHook(this: AfterHookHost, ctx: any) {
       } catch {
         succeeded = !(ctx?.context?.returned instanceof Error);
       }
-      const refusedAfterCredential = !succeeded && REFUSALS_AFTER_THE_CREDENTIAL.has(refusalCodeOf(ctx?.context?.returned) ?? '');
-      const lockStamped = refusedAfterCredential ? undefined : await this.recordSignInOutcome(email, succeeded);
+      const lockStamped = !succeeded && refusedAfterTheCredential(ctx?.context?.returned)
+        ? undefined
+        : await this.recordSignInOutcome(email, succeeded);
       // A refused sign-in writes `login_failed`, and the one that
       // stamped the lockout also writes `account_locked`. A successful
       // one is recorded as `login` by the session hook, unchanged.
