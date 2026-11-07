@@ -330,11 +330,21 @@ describe('[ADR-0106] HTTP MCP list_actions summarises an action against the obje
         name: 'quote_rate', label: 'Quote rate', operation: 'update',
         params: [{ field: DENIED_OTHER, objectOverride: OTHER }], ai: ai('Quote the day rate of a vendor for this project.'),
     };
+    /**
+     * Binds the OTHER object's field of the same name as the denied one, which
+     * the member can read: listed, and summarised against no field of this
+     * object (the served one carries no `budget`).
+     */
+    const VENDOR_BUDGET = {
+        name: 'quote_vendor_budget', label: 'Quote vendor budget', operation: 'update',
+        params: [{ field: DENIED, objectOverride: OTHER }], ai: ai('Quote the budget a vendor offered for this project.'),
+    };
     /** Binds a field the member CAN read: the control. */
     const RENAME = { name: 'rename_project', label: 'Rename', operation: 'update', params: [{ field: 'title' }], ai: ai('Rename this project to the title the user gives.') };
     /** Binds no field at all. */
     const CLOSE = { name: 'close_project', label: 'Close', operation: 'update', patch: { stage: 'closed' }, ai: ai('Close this project once the work on it is finished.') };
-    const ALL_ACTIONS = [CLOSE.name, QUOTE_RATE.name, RENAME.name, SET_BUDGET.name];
+    const ALL_ACTIONS = [CLOSE.name, QUOTE_RATE.name, VENDOR_BUDGET.name, RENAME.name, SET_BUDGET.name];
+    const MEMBER_ACTIONS = [CLOSE.name, VENDOR_BUDGET.name, RENAME.name];
     const READABLE_ACTIONS = [CLOSE.name, RENAME.name];
 
     const PERSONAS = {
@@ -371,7 +381,7 @@ describe('[ADR-0106] HTTP MCP list_actions summarises an action against the obje
                         },
                         [DENIED]: { name: DENIED, type: 'currency', label: DENIED_LABEL, description: DENIED_HELP },
                     },
-                    actions: [SET_BUDGET, QUOTE_RATE, RENAME, CLOSE],
+                    actions: [SET_BUDGET, QUOTE_RATE, VENDOR_BUDGET, RENAME, CLOSE],
                 },
                 {
                     name: OTHER,
@@ -380,6 +390,7 @@ describe('[ADR-0106] HTTP MCP list_actions summarises an action against the obje
                     fields: {
                         name: { name: 'name', type: 'text', label: 'Name' },
                         [DENIED_OTHER]: { name: DENIED_OTHER, type: 'currency', label: 'Day rate' },
+                        [DENIED]: { name: DENIED, type: 'currency', label: 'Vendor budget' },
                     },
                 },
             ],
@@ -450,12 +461,20 @@ describe('[ADR-0106] HTTP MCP list_actions summarises an action against the obje
     it('a member who cannot read the bound field is not listed the action, nor shown the field — as the /metadata door serves them', async () => {
         const { listed, metaActions, metaStatus } = await listBoth(PERSONAS.member);
         expect(metaStatus).toBe(200);
-        expect(metaActions, 'the /metadata object door withholds both').toEqual(READABLE_ACTIONS);
+        expect(metaActions, 'the /metadata object door withholds both').toEqual(MEMBER_ACTIONS);
         expect(namesOf(listed), 'list_actions lists what the /metadata door serves').toEqual(metaActions);
-        const text = JSON.stringify(listed);
+        const text = JSON.stringify(listed.filter((a) => a.name !== VENDOR_BUDGET.name));
         for (const hidden of [DENIED, DENIED_OTHER, DENIED_LABEL, DENIED_HELP, 'Day rate']) {
             expect(text.includes(hidden), `'${hidden}' must not reach this caller`).toBe(false);
         }
+    });
+
+    it('a param bound to another object\'s readable field is summarised against no field of this object the member cannot read', async () => {
+        const { listed } = await listBoth(PERSONAS.member);
+        const entry = byName(listed, VENDOR_BUDGET.name);
+        expect(entry.params).toEqual([{ name: DENIED, type: 'string', required: false }]);
+        expect(JSON.stringify(entry).includes(DENIED_LABEL)).toBe(false);
+        expect(JSON.stringify(entry).includes(DENIED_HELP)).toBe(false);
     });
 
     it('CONTROL — an unrestricted member is shown the full summary, byte-identical to a deployment with no security service', async () => {
