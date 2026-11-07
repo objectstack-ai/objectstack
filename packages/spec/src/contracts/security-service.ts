@@ -346,7 +346,8 @@ export interface OwnershipFloorAlternate {
  *   its own rows, or it ends at a row whose owner rule refuses the principal.
  *   The record's own OPTIONAL master reference is empty and the principal
  *   neither owns the record (its `owner_id`) nor holds Modify All on its
- *   object. A master above the record whose own OPTIONAL master reference is
+ *   object; a record with no owner, or of an object without that column, is
+ *   owned by nobody here, so Modify All alone writes it. A master above the record whose own OPTIONAL master reference is
  *   empty ends the chain under that row's owner rule: the three legs above
  *   still run on it, and then the principal must own it or hold Modify All on
  *   its object. The chain re-enters an object it has already visited, or it
@@ -1099,13 +1100,18 @@ export interface ISecurityService {
    * refuses on `deny` refuses exactly the principals this check refuses on the
    * record's own update. It answers the master check alone: the gates the
    * update meets on the record itself (its object-level grant, its own
-   * row-level security and sharing) are not part of the answer.
+   * row-level security and sharing) are not part of the answer. The owner rule
+   * of a record whose optional master reference is empty is the master check's
+   * own answer, and is part of it.
    *
    * The contexts around the check answer as the write path does:
    * - A system context bypasses the write path, and answers `allow`.
    * - A principal whose permission sets resolve to none is judged over that
-   *   empty list. It holds no `update` grant on any master, so it answers `deny`
-   *   on `object_permission` (ADR-0056 D2).
+   *   empty list. It holds no `update` grant on any master, so wherever a master
+   *   is asked it answers `deny` on `object_permission` (ADR-0056 D2). A record
+   *   whose optional master reference is empty asks no master: such a principal
+   *   holds no Modify All either, so it answers `allow` only as the record's
+   *   owner, and `deny` on `master_chain` otherwise.
    * - Where the write path refuses the CONTEXT before any gate runs, the member
    *   rejects with that same refusal, `403 PERMISSION_DENIED`. Those cases are a
    *   context with no principal at all (ADR-0096 D5), permission sets that
