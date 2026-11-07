@@ -158,10 +158,16 @@ Full table, `$like` portability and the `$ilike` boundary: **[filter rules](./ru
 |:---------|:--------|:------------|
 | `$null` | Is null check | `IS NULL` / `IS NOT NULL` |
 | `$exists` | Has a value | `IS NOT NULL` / `IS NULL` |
+| `$empty` | Is empty by the field's declared type | `IS NULL`, plus `''` (text types) or `[]` (multi-value) |
 
 ```typescript
 { where: { deleted_at: { $null: true } } }
+{ where: { notes: { $empty: true } } }   // false = has content
 ```
+
+A view filter's `is_empty` / `is_not_empty` lowers to `$empty`. A face that judges
+by declared type refuses it on a column it holds no declaration for (the built-in
+`id`, for one) — use `$null` there.
 
 ### Logical Operators
 

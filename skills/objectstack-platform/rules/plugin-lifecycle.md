@@ -256,7 +256,7 @@ circular **service-factory** dependency graphs in ObjectKernel
 ## Complete Plugin Example
 
 See the **Complete Plugin Example** (AuditPlugin) in
-[../SKILL.md](../SKILL.md#complete-plugin-example) — a full three-phase
+[../references/plugin-development.md](../references/plugin-development.md#complete-plugin-example) — a full three-phase
 plugin that registers a service in `init()`, subscribes to the
 `kernel:ready` / `metadata:reloaded` kernel events, and cleans up in
 `destroy()`.
