@@ -410,7 +410,7 @@ describe('[#30905 ruling A] security/explain narrates the null-master arm on a r
   const EDITOR = PermissionSetSchema.parse({ name: 'crm_rep', objects: { [OBJECT]: CRUD } });
   const EXPLAINED = { userId: REP, tenantId: 'org1', positions: [], permissions: ['crm_rep'] };
 
-  const deps = (opts: { record: Row; absent: boolean; schema?: unknown; sets?: PermissionSet[] }): ExplainEngineDeps => ({
+  const deps = (opts: { record: Row; absent: boolean; schema?: unknown; sets?: PermissionSet[]; master?: ControlledByParentWriteOutcome }): ExplainEngineDeps => ({
     ql: { getSchema: () => opts.schema ?? CONTACT_OPTIONAL },
     resolveSets: async () => opts.sets ?? [EDITOR],
     evaluator: new PermissionEvaluator(),
@@ -433,6 +433,8 @@ describe('[#30905 ruling A] security/explain narrates the null-master arm on a r
     canDeleteRecord: async () => true,
     // The read door withholds the record from the EXPLAINED principal (or not); the asker always reads it.
     recordAbsentToCaller: vi.fn(async (_o: string, _r: string, context: unknown) => (context === EXPLAINED ? opts.absent : false)),
+    // The served master-detail write check, as the record's by-id writes ask it.
+    ...(opts.master ? { checkControlledByParentWrite: vi.fn(async () => opts.master!) } : {}),
   });
   const sharingDetail = (d: any): string =>
     String(d.layers.find((l: any) => l.layer === 'sharing')?.record?.detail ?? '');
@@ -461,6 +463,29 @@ describe('[#30905 ruling A] security/explain narrates the null-master arm on a r
 
     const queue = await explain(deps({ record: { id: 'r1', account: null, owner_id: null }, absent: true }));
     expect(sharingDetail(queue)).toContain('it has no owner (a queue row), so View All alone reads it');
+  });
+
+  // [#30906] The write side: the served check judges a null-master row by its
+  // owner rule and refuses on the `master_chain` leg; explain names the rule.
+  const explainWrite = (d: ExplainEngineDeps) =>
+    explainAccessForAsker(d, { object: OBJECT, operation: 'update', context: EXPLAINED, recordId: 'r1' }, {
+      context: ASKER,
+      cannotRead: (o, id) => d.recordAbsentToCaller!(o, id, ASKER),
+    });
+  const DENY_CHAIN: ControlledByParentWriteOutcome = { outcome: 'deny', leg: 'master_chain' };
+
+  it('[#30906] a null-master row the write check refuses: the update names the empty reference and the owner rule', async () => {
+    const d = await explainWrite(deps({ record: { id: 'r1', account: null, owner_id: OTHER }, absent: false, master: DENY_CHAIN }));
+    expect(d.record).toEqual({ recordId: 'r1', visible: false, decidedBy: 'sharing' });
+    expect(sharingDetail(d)).toContain("its master reference 'account' is empty");
+    expect(sharingDetail(d)).toContain('admits only its owner and a holder of Modify All on the object');
+    expect(sharingDetail(d)).toContain("refuses this update on its 'master_chain' leg");
+  });
+
+  it('[#30906] a row that names its master keeps the leg narration for the same refusal', async () => {
+    const d = await explainWrite(deps({ record: { id: 'r1', account: 'acct_eu', owner_id: REP }, absent: false, master: DENY_CHAIN }));
+    expect(sharingDetail(d)).toContain("the by-id update runs refuses this update on its 'master_chain' leg");
+    expect(sharingDetail(d)).not.toContain('is empty');
   });
 
   it('a row that names its master, and any row of a required master, keep the master-scope narration', async () => {
