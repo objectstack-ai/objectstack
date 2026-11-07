@@ -10,7 +10,11 @@ import type {
   ControlledByParentWriteOutcome,
   ControlledByParentWriteDenialLeg,
   ControlledByParentWriteUnresolvedReason,
+  EffectiveAccess,
+  EffectivePermissionSet,
+  EffectivePermissionSetOrigin,
   ExplainAccessRequest,
+  SecurityContext,
 } from './security-service';
 import type { ExplainRequestSchema } from '../security/explain.zod';
 
@@ -792,6 +796,79 @@ describe('Security Service Contract', () => {
       checkControlledByParentWrite: async () => ({ outcome: 'unresolvable', reason: 'record_not_found' }),
     });
     await expect(gate(missingRow)).resolves.toBe('refuse');
+  });
+
+  it('describeEffectiveAccess is OPTIONAL — absence is typed, and it means the read is not served (compile-time)', async () => {
+    // A security service that predates the read still satisfies the contract;
+    // a caller feature-detects and answers "not served", never an empty list:
+    // "no permission sets" is a claim about the user, absence is not.
+    const withoutIt: ISecurityService = makeService();
+    expect(typeof withoutIt.describeEffectiveAccess).toBe('undefined');
+    const mustNotCompileWithoutAGuard = () =>
+      // @ts-expect-error possibly undefined — a caller must feature-detect first
+      withoutIt.describeEffectiveAccess('u2', { userId: 'u1' });
+    expect(typeof mustNotCompileWithoutAGuard).toBe('function');
+    // @ts-expect-error `describeEffectiveAccess` is OPTIONAL — not a required member
+    const notRequired: RequiredMember = 'describeEffectiveAccess';
+    expect(notRequired).toBe('describeEffectiveAccess');
+
+    const answer: EffectiveAccess = {
+      userId: 'u2',
+      organizationId: 'org_1',
+      positions: ['sales_rep'],
+      permissionSets: [
+        { name: 'member_default', origins: [{ kind: 'default' }] },
+        { name: 'sales_user', origins: [{ kind: 'direct' }, { kind: 'position', position: 'sales_rep' }] },
+      ],
+    };
+    const withIt = makeService({ describeEffectiveAccess: async () => answer });
+    await expect(withIt.describeEffectiveAccess?.('u2', { userId: 'u1' })).resolves.toEqual(answer);
+  });
+
+  it('EffectiveAccess: three closed origins, a position origin names its position, no organization is null (compile-time)', () => {
+    const everyOrigin: EffectivePermissionSetOrigin[] = [
+      { kind: 'default' },
+      { kind: 'position', position: 'sales_rep' },
+      { kind: 'direct' },
+    ];
+    expect(everyOrigin).toHaveLength(3);
+    // @ts-expect-error a `position` origin must name the position
+    const positionWithoutName: EffectivePermissionSetOrigin = { kind: 'position' };
+    // @ts-expect-error the vocabulary is closed: a set reaches a user by default, position or direct grant
+    const notAnOrigin: EffectivePermissionSetOrigin = { kind: 'inherited' };
+    expect([positionWithoutName, notAnOrigin]).toHaveLength(2);
+
+    expectTypeOf<EffectivePermissionSet>().toEqualTypeOf<{
+      name: string;
+      origins: EffectivePermissionSetOrigin[];
+    }>();
+    expectTypeOf<EffectiveAccess>().toEqualTypeOf<{
+      userId: string;
+      organizationId: string | null;
+      positions: string[];
+      permissionSets: EffectivePermissionSet[];
+    }>();
+    expectTypeOf<NonNullable<ISecurityService['describeEffectiveAccess']>>().toEqualTypeOf<
+      (userId: string, callerContext?: SecurityContext) => Promise<EffectiveAccess>
+    >();
+
+    // An exhaustive consumer: a fourth origin added to the union would stop
+    // this switch compiling at the `never` line.
+    const label = (o: EffectivePermissionSetOrigin): string => {
+      switch (o.kind) {
+        case 'default':
+          return 'default';
+        case 'position':
+          return `position:${o.position}`;
+        case 'direct':
+          return 'direct';
+        default: {
+          const unhandled: never = o;
+          return unhandled;
+        }
+      }
+    };
+    expect(everyOrigin.map(label)).toEqual(['default', 'position:sales_rep', 'direct']);
   });
 
   it('reopenAudienceBindingSuggestion is OPTIONAL — absence leaves every dismissal standing (compile-time)', async () => {

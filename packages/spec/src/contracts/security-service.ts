@@ -152,6 +152,52 @@ export interface PositionGrantSummary {
   permissionSets: Array<{ name: string; via: PositionGrantVia }>;
 }
 
+/**
+ * How a permission set reaches a user, in {@link EffectivePermissionSet}:
+ *
+ * - `default` — a default binding: the set is bound to the `everyone`
+ *   audience anchor (the deployment baseline, an app's `isDefault` set, an
+ *   accepted package default; ADR-0090 D5), or it is the human baseline the
+ *   resolution adds for every authenticated member (`external_default` for an
+ *   external member).
+ * - `position` — the definition of a position the user holds names it in
+ *   `permissionSets` (ADR-0131 D3/D4); `position` is that position's name.
+ *   `everyone` is never reported here: its bindings are `default`.
+ * - `direct` — one of the user's own `sys_user_permission_set` grant rows
+ *   names it.
+ */
+export type EffectivePermissionSetOrigin =
+  | { kind: 'default' }
+  | { kind: 'position'; position: string }
+  | { kind: 'direct' };
+
+/** One permission set in {@link EffectiveAccess}. */
+export interface EffectivePermissionSet {
+  /** The permission set's machine name. */
+  name: string;
+  /**
+   * Every way the set reaches the user, at least one. A set reached two ways
+   * is listed once, with both origins (a direct grant and a position, or two
+   * positions).
+   */
+  origins: EffectivePermissionSetOrigin[];
+}
+
+/** Return shape of {@link ISecurityService.describeEffectiveAccess}. */
+export interface EffectiveAccess {
+  /** The user described. */
+  userId: string;
+  /**
+   * The organization the access was resolved in: the caller's active one,
+   * vetted for the described user as `explain` vets it. `null` with none.
+   */
+  organizationId: string | null;
+  /** The positions the user holds there, in force (the resolver's `positions`). */
+  positions: string[];
+  /** The permission sets in force for the user there, in resolution order. */
+  permissionSets: EffectivePermissionSet[];
+}
+
 /** Selector for {@link ISecurityService.explain}. */
 export interface ExplainAccessRequest {
   /** Object API name to explain access for. */
@@ -1193,6 +1239,25 @@ export interface ISecurityService {
    * empty lists.
    */
   describeDelegableScope(callerContext?: SecurityContext): Promise<DelegableScope>;
+
+  /**
+   * [ADR-0090 D6/D12] Describe ANOTHER user's (or the caller's own) effective
+   * permission sets, each with where it comes from: a default binding, a held
+   * position, or a direct grant. Resolved in the caller's organization by the
+   * resolver enforcement uses, so the list matches enforcement by construction.
+   *
+   * Gated as `explain` is: describing someone else requires `manage_users`,
+   * organization administration of an organization that user is a member of,
+   * or a delegated `adminScope` covering that user. A user who does not exist
+   * is refused exactly as one the caller may not manage, so the answer says
+   * nothing about which ids exist.
+   *
+   * **OPTIONAL, and absence is a defined state.** A security service that
+   * predates it omits it; callers feature-detect
+   * (`typeof svc.describeEffectiveAccess === 'function'`) and answer that the
+   * read is not served (a REST door answers 501), never an empty list.
+   */
+  describeEffectiveAccess?(userId: string, callerContext?: SecurityContext): Promise<EffectiveAccess>;
 
   /**
    * List install-time audience-binding suggestions (a package proposes its
