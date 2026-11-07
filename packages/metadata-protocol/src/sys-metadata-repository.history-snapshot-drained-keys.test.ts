@@ -114,7 +114,9 @@ const DECLARED_AUTH = { type: 'bearer', credentialRef: 'VENDOR_API_TOKEN' };
 describe('[ruling 6677709817 (c)] SysMetadataRepository history snapshots withhold the drained connector keys', () => {
   let engine: ReturnType<typeof makeFakeEngine>;
   let repo: SysMetadataRepository;
-  const ref = { org: 'org_alpha', type: 'connector' as const, name: 'vendor_api' };
+  // `connector` is not in the repository's typed `MetaRef` union; the protocol
+  // builds its refs the same way (`as Parameters<typeof repo.put>[0]`).
+  const ref = { org: 'org_alpha', type: 'connector', name: 'vendor_api' } as unknown as Parameters<SysMetadataRepository['put']>[0];
 
   beforeEach(() => {
     engine = makeFakeEngine();
