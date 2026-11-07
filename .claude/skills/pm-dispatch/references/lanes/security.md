@@ -13,7 +13,7 @@
 
 ## 接收与台账
 
-- 接收 ①:发现者的一次 `Notify: security · GHSA-ID`(私有仓 `#N`)门铃,私卡已由其经中继建好。
+- 接收 ①:发现者 `Notify: security · GHSA-ID`(私有仓 `OWNER/REPO#N`)门铃,私卡已由其经中继建好。
 - 接收 ②:无门铃的 `triage` 公告(外报或中继实测):经 `advisory_read` 读,座位贴记 `received`。
 - 判定:发现 ⇒ 中继 `advisory_state` 置 `draft` 走派修;非发现 ⇒ 置 `closed`,台账记非发现。
 - 中继拒或本席空缺照第 3、9 节。
