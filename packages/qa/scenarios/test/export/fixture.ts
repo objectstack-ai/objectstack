@@ -24,6 +24,7 @@ import type { AppHarness, HttpAnswer, PersonaAccount, ToolAnswer } from '../../s
 import { RecordingDriver, type AgentDriver, type AskTask, type AuthorTask, type DriverInfo, type Recording } from '../../src/runner/driver.js';
 import { namespacedScenario } from '../../src/runner/namespace.js';
 import { runCard, type CardRun, type ProjectOps } from '../../src/runner/orchestrate.js';
+import type { PackageSource } from '../../src/runner/packages.js';
 import { runRecord } from '../../src/runner/scorecard.js';
 import type { ParsedTurn } from '../../src/runner/transcript.js';
 
@@ -249,7 +250,14 @@ export interface FixtureRun {
 
 /** One run of the crm card, both modes; `iterateRun: false` leaves the iterate Run halves not run; `refuse` makes every booted app refuse those seed rows. */
 export async function runCrm(
-  opts: { work?: string; date?: string; iterateRun?: boolean; modes?: Array<'scratch' | 'template'>; /** Seed rows every booted app refuses, `object/id`. */ refuse?: string[] } = {},
+  opts: {
+    work?: string;
+    date?: string;
+    iterateRun?: boolean;
+    modes?: Array<'scratch' | 'template'>;
+    /** Seed rows every booted app refuses, `object/id`. */ refuse?: string[];
+    /** The package source the record states; default published 18.3.0. */ packages?: PackageSource;
+  } = {},
 ): Promise<FixtureRun> {
   const scenario = loadCrm();
   const work = opts.work ?? tempDir('work');
@@ -268,7 +276,8 @@ export async function runCrm(
   const driver = new RecordingDriver(new ScriptedDriver(scenario, ops, () => current));
   const cardRun = await runCard(scenario, driver, ops, { modes: opts.modes ?? ['scratch', 'template'], admin: ADMIN, ...(opts.iterateRun === false ? { iterateRun: false } : {}) });
   const date = opts.date ?? '2026-11-06';
-  const record = runRecord({ run: `${date}-scenario-${CARD_ID}`, date, framework: 'abc1234', driver: driver.info(), runner: 'scenario-runner', evidenceDir: work }, cardRun);
+  const packages = opts.packages ?? { source: 'published', versions: ['18.3.0'] };
+  const record = runRecord({ run: `${date}-scenario-${CARD_ID}`, date, framework: 'abc1234', packages, driver: driver.info(), runner: 'scenario-runner', evidenceDir: work }, cardRun);
   return { scenario, work, cardRun, record, recording: driver.recording };
 }
 

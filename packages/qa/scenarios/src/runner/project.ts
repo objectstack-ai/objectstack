@@ -2,7 +2,8 @@
 
 /**
  * The runner's project lifecycle, as a user meets it: scaffold a project with
- * `create-objectstack` (`npm create objectstack`), run the project's own
+ * `create-objectstack` (`npm create objectstack`; under `--packages workspace`
+ * the workspace's packed one, `packages.ts`), run the project's own
  * `objectstack` CLI (`validate`, `build`, `verify`), boot it with
  * `objectstack dev --fresh`, read `dist/objectstack.json`.
  *
@@ -27,11 +28,11 @@ export interface CommandResult {
   ms: number;
 }
 
-/** Run a command to completion; output is kept as a bounded tail. */
-export function runCommand(cmd: string, args: readonly string[], cwd: string, timeoutMs = 10 * 60_000): Promise<CommandResult> {
+/** Run a command to completion; output is kept as a bounded tail. `env` adds to the child's environment. */
+export function runCommand(cmd: string, args: readonly string[], cwd: string, timeoutMs = 10 * 60_000, env: Readonly<Record<string, string>> = {}): Promise<CommandResult> {
   const started = Date.now();
   return new Promise((resolve) => {
-    const child = spawn(cmd, args, { cwd, env: subscriptionOnlyEnv(), stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(cmd, args, { cwd, env: { ...subscriptionOnlyEnv(), ...env }, stdio: ['ignore', 'pipe', 'pipe'] });
     let out = '';
     const keep = (d: Buffer) => {
       out = (out + d.toString()).slice(-16_000);
@@ -55,12 +56,14 @@ export interface ProjectOptions {
   createCommand?: readonly string[];
   /** The `create-objectstack` version; default `latest`. */
   version?: string;
+  /** Added to the scaffolder's environment (`--packages workspace` points its install at the packed workspace). */
+  env?: Readonly<Record<string, string>>;
 }
 
 /** `npm create objectstack <name>` in `parent`; answers the project directory. */
 export async function scaffold(parent: string, name: string, opts: ProjectOptions = {}): Promise<{ dir: string; result: CommandResult }> {
   const cmd = opts.createCommand ?? ['npx', '-y', `create-objectstack@${opts.version ?? 'latest'}`];
-  const result = await runCommand(cmd[0]!, [...cmd.slice(1), name], parent);
+  const result = await runCommand(cmd[0]!, [...cmd.slice(1), name], parent, undefined, opts.env);
   return { dir: join(parent, name), result };
 }
 
