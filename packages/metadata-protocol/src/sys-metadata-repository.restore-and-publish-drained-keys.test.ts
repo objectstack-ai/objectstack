@@ -99,7 +99,7 @@ function legacyConnector(label = 'Vendor API'): Row {
     label,
     type: 'api',
     provider: 'rest',
-    // A DECLARED credential position (withheld on read, carried forward on save): kept in history.
+    // Withheld whole on read and carried forward on save, never drained: kept as written.
     providerConfig: { baseUrl: 'https://api.vendor.example/v1', headers: { Accept: 'application/json' } },
     auth: { type: 'bearer', credentialRef: 'VENDOR_API_TOKEN', token: LEGACY_AUTH_VALUE },
   };
