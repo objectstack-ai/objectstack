@@ -4948,9 +4948,9 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
      */
     private registeredPackageBody = (ctx: PluginContext, manifestId: string): unknown => {
         try {
-            const ql: any = ctx.getService('objectql');
-            const packages: any[] = ql?.registry?.getAllPackages?.() ?? [];
-            const row = packages.find((p: any) => manifestIdOf(p) === manifestId);
+            const ql = ctx.getService<OverrideGateEngine>('objectql');
+            const packages = ql?.registry?.getAllPackages?.();
+            const row = Array.isArray(packages) ? packages.find((p: unknown) => manifestIdOf(p) === manifestId) : undefined;
             return row?.manifest && typeof row.manifest === 'object' ? row.manifest : undefined;
         } catch { return undefined; }
     };
