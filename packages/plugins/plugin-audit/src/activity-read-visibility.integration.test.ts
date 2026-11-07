@@ -237,3 +237,102 @@ describe('sys_activity read visibility — the plugin read path', () => {
     expect(rows.length).toBe(allRows.length);
   });
 });
+
+/**
+ * A comment's own ledger and activity rows (maintainer ruling on #30213's
+ * comments fork, 「A 评论也记审计和动态」): `sys_comment` is mirrored like any
+ * other object, so both streams now hold rows whose parent is a comment. A
+ * reader who cannot read the comment, because it cannot read the record the
+ * comment is on, is not served them: the parent gates enumerate `sys_comment`
+ * as a parent and, since the comment's read is narrowed by an object-scoped
+ * middleware (`installCommentReadVisibility`), read it through the bounded
+ * probe as the caller, so the comment's own thread gate decides. No second
+ * judgment exists to drift from it.
+ *
+ * Same stand-in as above: the owned parent's middleware is the record's own
+ * readability. The comments are written by their authors through the real
+ * comment create path, which itself requires the parent to be readable.
+ */
+describe('a comment’s ledger and activity rows are served only to a reader of the comment', () => {
+  const COMMENT = 'sys_comment';
+  const LEDGER = 'sys_audit_log';
+  let kernel: ObjectKernel;
+  let engine: ObjectQL;
+  const ids: Record<string, string> = {};
+
+  const aboutComments = async (object: string, context: object): Promise<string[]> =>
+    (await engine.find(object, { where: { object_name: COMMENT }, context }))
+      .map((r: Row) => String(r.record_id))
+      .sort();
+
+  beforeAll(async () => {
+    kernel = new ObjectKernel({ logger: { level: 'silent' } });
+    await kernel.use(new ObjectQLPlugin());
+    await kernel.use(singlePostureTenancy());
+    await kernel.use(new AuditPlugin());
+    await kernel.bootstrap();
+
+    engine = kernel.getService<ObjectQL>('objectql');
+    const driver = new SqliteWasmDriver({ filename: ':memory:' });
+    await driver.connect();
+    engine.registerDriver(driver, true);
+    engine.registry.registerObject(ownedObject as any, HARNESS_PACKAGE);
+    await engine.syncSchemas();
+    await installDefaultOrganization(engine);
+
+    engine.registerMiddleware(async (op: any, next: () => Promise<void>) => {
+      if (READ_OPS.has(op.operation) && op.context && !op.context.isSystem && op.ast) {
+        if (op.context.userId !== ADMIN.userId) {
+          const mine = { owner: op.context.userId ?? '__nobody__' };
+          op.ast.where = op.ast.where ? { $and: [op.ast.where, mine] } : mine;
+        }
+      }
+      return next();
+    }, { object: OWNED });
+
+    ids.mine = (await engine.insert(OWNED, { name: 'mine', owner: MEMBER.userId }, { context: SYS })).id;
+    ids.theirs = (await engine.insert(OWNED, { name: 'theirs', owner: OTHER.userId }, { context: SYS })).id;
+    // Each author comments on the record it can read.
+    ids.myComment = (await engine.insert(COMMENT, { thread_id: `${OWNED}:${ids.mine}`, body: 'my note' }, { context: MEMBER })).id;
+    ids.theirComment = (await engine.insert(COMMENT, { thread_id: `${OWNED}:${ids.theirs}`, body: 'their note' }, { context: OTHER })).id;
+  }, 120_000);
+
+  afterAll(async () => {
+    if (kernel) {
+      await Promise.race([kernel.shutdown(), new Promise<void>((r) => setTimeout(r, 10_000))]);
+    }
+  }, 30_000);
+
+  it('control: each comment write left one ledger row and one activity row, naming its author', async () => {
+    const both = [ids.myComment, ids.theirComment].sort();
+    expect(await aboutComments(LEDGER, SYS)).toEqual(both);
+    expect(await aboutComments(ACTIVITY, SYS)).toEqual(both);
+    const ledger = await engine.find(LEDGER, { where: { object_name: COMMENT }, context: SYS });
+    const byComment = Object.fromEntries(ledger.map((r: Row) => [String(r.record_id), r]));
+    expect(byComment[ids.myComment]).toMatchObject({ action: 'create', user_id: MEMBER.userId });
+    expect(byComment[ids.theirComment]).toMatchObject({ action: 'create', user_id: OTHER.userId });
+  });
+
+  it('control: the comment gate answers each member exactly the comment on its own record', async () => {
+    expect((await engine.find(COMMENT, { context: MEMBER })).map((r: Row) => String(r.id))).toEqual([ids.myComment]);
+    expect((await engine.find(COMMENT, { context: OTHER })).map((r: Row) => String(r.id))).toEqual([ids.theirComment]);
+  });
+
+  it('a reader without read access to the comment’s record is served neither of its rows', async () => {
+    expect(await aboutComments(ACTIVITY, MEMBER)).toEqual([ids.myComment]);
+    expect(await aboutComments(LEDGER, MEMBER)).toEqual([ids.myComment]);
+    expect(await aboutComments(ACTIVITY, OTHER)).toEqual([ids.theirComment]);
+    expect(await aboutComments(LEDGER, OTHER)).toEqual([ids.theirComment]);
+    // Scoped by id, the hidden comment's rows are absent too.
+    const scoped = { object_name: COMMENT, record_id: ids.theirComment };
+    expect(await engine.find(ACTIVITY, { where: scoped, context: MEMBER })).toEqual([]);
+    expect(await engine.find(LEDGER, { where: scoped, context: MEMBER })).toEqual([]);
+    expect(await engine.count(ACTIVITY, { where: scoped, context: MEMBER } as any)).toBe(0);
+  });
+
+  it('control: an admin, who reads every record, is served both comments’ rows', async () => {
+    const both = [ids.myComment, ids.theirComment].sort();
+    expect(await aboutComments(ACTIVITY, ADMIN)).toEqual(both);
+    expect(await aboutComments(LEDGER, ADMIN)).toEqual(both);
+  });
+});
