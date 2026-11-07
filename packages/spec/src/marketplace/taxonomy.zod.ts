@@ -33,6 +33,11 @@ import type { InstallMode } from '../kernel/manifest.zod';
  *
  * ## Growing a facet
  *
+ * Every value is a lowercase identifier (`SystemIdentifierSchema`, the grammar
+ * of `SelectOptionSchema.value`): words joined by `_`, never `-`, so a select
+ * field — the cloud catalog's facet columns, a console filter — can carry the
+ * facet as its options unchanged.
+ *
  * Values are append-only. Renaming or removing one is an ADR-0087 retirement
  * with a data migration. Adding one needs a real listed package, or a ruled
  * scenario card, that needs it, and the console's labels in the same change.
@@ -61,10 +66,10 @@ import type { InstallMode } from '../kernel/manifest.zod';
 export const MarketplaceBusinessFunctionSchema = lazySchema(() => z.enum([
   'sales',             // Sales
   'marketing',         // Marketing
-  'customer-service',  // Customer service and support
+  'customer_service',  // Customer service and support
   'finance',           // Finance and accounting
   'hr',                // Human resources
-  'supply-chain',      // Procurement and supply chain
+  'supply_chain',      // Procurement and supply chain
   'administration',    // Administration and assets
   'project',           // Project management
   'legal',             // Legal and compliance
@@ -88,15 +93,15 @@ export const MAX_BUSINESS_FUNCTIONS = 3;
  */
 export const MarketplaceIndustrySchema = lazySchema(() => z.enum([
   'manufacturing',            // Manufacturing (chemicals included)
-  'trade-distribution',       // Trade and distribution (export included)
+  'trade_distribution',       // Trade and distribution (export included)
   'retail',                   // Retail and consumer goods
   'logistics',                // Logistics and transport
-  'professional-services',    // Professional services
-  'financial-services',       // Financial services
+  'professional_services',    // Professional services
+  'financial_services',       // Financial services
   'healthcare',               // Healthcare
   'education',                // Education
-  'public-sector',            // Government and public sector
-  'real-estate-construction', // Real estate and construction
+  'public_sector',            // Government and public sector
+  'real_estate_construction', // Real estate and construction
 ]).describe('Industry a marketplace package is built for'));
 
 export type MarketplaceIndustry = z.input<typeof MarketplaceIndustrySchema>;
@@ -281,7 +286,7 @@ export type LegacyCategoryMapping =
 export const LEGACY_CATEGORY_MAPPING: Readonly<Record<string, LegacyCategoryMapping>> = Object.freeze({
   // The spec listing's enum.
   crm: { kind: 'mapped', businessFunctions: ['sales'], solutionType: 'app', tag: 'crm' },
-  erp: { kind: 'mapped', businessFunctions: ['finance', 'supply-chain'], solutionType: 'app', tag: 'erp' },
+  erp: { kind: 'mapped', businessFunctions: ['finance', 'supply_chain'], solutionType: 'app', tag: 'erp' },
   hr: { kind: 'mapped', businessFunctions: ['hr'], solutionType: 'app' },
   finance: { kind: 'mapped', businessFunctions: ['finance'], solutionType: 'app' },
   project: { kind: 'mapped', businessFunctions: ['project'], solutionType: 'app' },
