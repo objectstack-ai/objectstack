@@ -65,6 +65,17 @@ export interface LoadedScenario {
   truths: Record<string, Truth>;
   /** Question id → persona id → the truth AS that persona, for questions that list personas. */
   personaTruths: Record<string, Record<string, Truth>>;
+  /**
+   * Question id → persona id → every figure computable from the rows of the
+   * question's object that persona may read, ascending, for questions that
+   * list personas: over its rows in the persona's `scope`, with its fields but
+   * the hidden ones and the fields one lookup away on a row the persona also
+   * sees, the row count, the count of each value of each field, and each
+   * number field's values, sum, mean, least and greatest (none when the
+   * object is hidden). The leak grader flags an all-rows figure only when none
+   * of these equals it (`gradePersonaRun`'s `inScopeFigures`).
+   */
+  scopeFigures: Record<string, Record<string, number[]>>;
 }
 
 export interface LoadResult {
@@ -342,7 +353,7 @@ function checkCard(
   stem: string,
   options: LoadOptions,
   refuse: Refuse,
-): Pick<LoadedScenario, 'truths' | 'personaTruths'> {
+): Pick<LoadedScenario, 'truths' | 'personaTruths' | 'scopeFigures'> {
   const { expect, run } = card;
 
   // ── identity ──
@@ -526,6 +537,43 @@ function checkCard(
   // ── questions: refs resolve, then the truth is computed (and per persona) ──
   const truths: Record<string, Truth> = {};
   const personaTruths: Record<string, Record<string, Truth>> = {};
+  const scopeFigures: Record<string, Record<string, number[]>> = {};
+  /** {@link LoadedScenario.scopeFigures} for one persona over one object. */
+  const figuresInScope = (p: Persona, object: string): number[] => {
+    const hiddenObjects = new Set(p.hidden.objects ?? []);
+    if (hiddenObjects.has(object)) return [];
+    const visible = (o: string) => {
+      const hidden = new Set((p.hidden.fields ?? []).filter((f) => f.object === o).map((f) => f.field));
+      return [...fieldsOf(seed[o])].filter((f) => f !== 'id' && !hidden.has(f));
+    };
+    const mine = (seed[object] ?? []).filter((r) => inScope(p, object, r));
+    const columns: Array<(r: SeedRow) => unknown> = [];
+    for (const f of visible(object)) {
+      columns.push((r) => r[f]);
+      const to = lookupFields.get(`${object}.${f}`);
+      if (to === undefined || hiddenObjects.has(to)) continue;
+      const target = (r: SeedRow): SeedRow | undefined => {
+        const t = typeof r[f] === 'string' ? rowById.get(to)?.get(r[f] as string) : undefined;
+        return t !== undefined && inScope(p, to, t) ? t : undefined;
+      };
+      for (const g of visible(to)) columns.push((r) => target(r)?.[g]);
+    }
+    const figures = new Set<number>([mine.length]);
+    for (const read of columns) {
+      const counts = new Map<unknown, number>();
+      const numbers: number[] = [];
+      for (const r of mine) {
+        const v = read(r) ?? null;
+        counts.set(v, (counts.get(v) ?? 0) + 1);
+        if (typeof v === 'number') numbers.push(v);
+      }
+      for (const n of counts.values()) figures.add(n);
+      if (numbers.length === 0) continue;
+      const sum = numbers.reduce((a, b) => a + b, 0);
+      for (const n of [...numbers, sum, sum / numbers.length, Math.min(...numbers), Math.max(...numbers)]) figures.add(n);
+    }
+    return [...figures].sort((a, b) => a - b);
+  };
   duplicates(run.questions, (q) => q.id, ['run', 'questions'], 'question id', refuse);
   run.questions.forEach((q, i) => {
     const at: IssuePath = ['run', 'questions', i];
@@ -571,9 +619,11 @@ function checkCard(
     if (all) truths[q.id] = all;
     if (q.personas === undefined) return;
     personaTruths[q.id] = {};
+    scopeFigures[q.id] = {};
     q.personas.forEach((id, j) => {
       if (unscoped.has(id)) return;
       const p = run.personas.find((x) => x.id === id)!;
+      scopeFigures[q.id][id] = figuresInScope(p, q.object);
       const hiddenFields = new Set((p.hidden.fields ?? []).map((f) => `${f.object}.${f.field}`));
       const hiddenObjects = new Set(p.hidden.objects ?? []);
       const withheld =
@@ -740,7 +790,7 @@ function checkCard(
   const after = applyExpectDelta(expect, delta);
   checkExpectRefs(delta, new Set(after.objects), new Set(after.dashboards ?? []), at, refuse);
 
-  return { truths, personaTruths };
+  return { truths, personaTruths, scopeFigures };
 }
 
 /** `expect` after an iteration's delta is applied (additive). */

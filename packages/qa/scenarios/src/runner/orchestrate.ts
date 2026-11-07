@@ -7,9 +7,10 @@
  *             `os build`, `os verify` (opt-in proofs from the tags) → score the
  *             artifact → boot, seed, one user + key per persona → the Run half
  *             (every question as every persona it names, every operation as
- *             its persona, each over the app's own MCP, and the validation
- *             operation's declared write re-sent by the runner itself as that
- *             persona, `observeProbe`) → the iterate change →
+ *             its persona, each over the app's own MCP, and a probed
+ *             operation's declared write — the validation operation's and
+ *             each permission overstep's — re-sent by the runner itself as
+ *             that persona, `observeProbe`) → the iterate change →
  *             rebuild + re-score Build, and (unless disabled) re-run the Run half.
  *             A build whose authoring turn did not finish (killed by the
  *             runner's timeout, no result, an error result) is NOT MEASURED,
@@ -31,7 +32,7 @@
  */
 
 import { applyExpectDelta, type LoadedScenario } from '../loader.js';
-import { isWriteValidationOperation, scenarioNamespace, type CardTitle } from '../schema.js';
+import { isProbedOperation, scenarioNamespace, type CardTitle } from '../schema.js';
 import {
   gradeCardAnswer,
   gradeCardOperation,
@@ -45,7 +46,7 @@ import {
 import type { AppHarness, PersonaAccount } from './app.js';
 import type { AgentDriver, StepRef } from './driver.js';
 import { citationLabels, namespaceOfArtifact, namespacedScenario, permissionSetName, templateHostName } from './namespace.js';
-import { observeOperation, observeProbe, probeCall, touchedRowId, type Row } from './observe.js';
+import { agentSetOf, clockDates, observeOperation, observeProbe, probeCall, touchedRowId, type Row } from './observe.js';
 import type { CommandResult } from './project.js';
 import { buildPrompt, iteratePrompt, operationPrompt, personaHandles, questionPrompt, templateIteratePrompt, userHandleFields, verifyArgs } from './prompts.js';
 import { lookupKey, requiredLookups, seedPlan, type SeedLookup } from './seed.js';
@@ -383,7 +384,7 @@ export function seedDependence(
 
 /** The persona (not a card artifact) a scenario's audit trail names, from the user id the app recorded. */
 /**
- * A validation operation's declared values as its probe sends them: a value in
+ * A probed operation's declared values as its probe sends them: a value in
  * a user-handle field (`task.assignee` = `u_kim`) is that handle's user id, the
  * persona's or the admin's, exactly as {@link seedApp} loads it; every other
  * value is sent verbatim.
@@ -627,23 +628,29 @@ export async function runHalf(
       }
       try {
         const before = (await app.listRows(op.object)).rows as Row[];
+        const started = new Date();
         const turn = await driver.ask({ ...ref, step: op.id, persona: op.actingAs, prompt: operationPrompt(card, op.id), mcp: { url: app.mcpUrl, apiKey: keyOf(op.actingAs) } });
         res.turn = summarize(turn);
         const after = (await app.listRows(op.object)).rows as Row[];
+        // The card's today, the dates the app's clock read during the turn, and
+        // the fields the agent's own writes set: a value declared as the card's
+        // today is met by a run date only where the platform stamped it (`observe.ts`).
+        const today = { ...(card.asOf !== undefined ? { asOf: card.asOf } : {}), runDates: clockDates(started, new Date()), agentSet: agentSetOf(op, turn) };
         const rowsByObject: Record<string, Row[]> = { [op.object]: after };
         if (op.outcome.kind === 'applied') {
           for (const s of op.outcome.state) if (!rowsByObject[s.object]) rowsByObject[s.object] = (await app.listRows(s.object)).rows as Row[];
         }
         let auditActor: string | null | undefined;
         if (op.outcome.kind === 'applied' && op.outcome.auditActor !== undefined) {
-          const id = touchedRowId(op, rowsByObject);
+          const id = touchedRowId(op, rowsByObject, today);
           auditActor = id === undefined ? null : personaOfUser(await app.auditActorUserId(op.object, id), accounts, app.adminUserId());
         }
-        // The validation operation's probe: the runner sends the declared write
-        // itself, as the same persona through the same MCP door, after the turn.
-        // A probe that cannot be sent leaves the platform half "not observed".
+        // A probed operation's probe (the validation operation, or a permission
+        // overstep): the runner sends the declared write itself, as the same
+        // persona through the same MCP door, after the turn. A probe that cannot
+        // be sent leaves the platform half "not observed".
         let probe: ProbeObservation | undefined;
-        if (isWriteValidationOperation(card, op.id)) {
+        if (isProbedOperation(card, op.id)) {
           try {
             const call = probeCall(op, probeValues(card, op, accounts, app.adminUserId()));
             const answer = await app.callTool(keyOf(op.actingAs), call.tool, call.args);
@@ -652,7 +659,7 @@ export async function runHalf(
             res.error = `probe: ${errText(e)}`;
           }
         }
-        res.observation = observeOperation({ op, turn, before, after, rowsByObject, ...(auditActor !== undefined ? { auditActor } : {}), ...(probe ? { probe } : {}) });
+        res.observation = observeOperation({ op, turn, before, after, rowsByObject, today, ...(auditActor !== undefined ? { auditActor } : {}), ...(probe ? { probe } : {}) });
         res.grade = gradeCardOperation(scenario, op.id, res.observation);
       } catch (e) {
         res.error = errText(e);
