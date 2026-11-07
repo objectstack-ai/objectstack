@@ -27,6 +27,8 @@ import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { resolveThrownHttpError } from '@objectstack/types';
 import type { PermissionSet } from '@objectstack/spec/security';
+import { ORGANIZATION_ADMIN } from '@objectstack/spec/identity';
+import { defaultPermissionSets } from './objects/default-permission-sets.js';
 
 import { SecurityPlugin } from './security-plugin.js';
 import { SysUser, SysMember } from '@objectstack/platform-objects/identity';
@@ -74,6 +76,28 @@ const QA_READ_ONLY_ON_GRANTS = {
   },
 } as unknown as PermissionSet;
 
+/** The shipped organization administrator's `sys_user` read: its object entry and its row policies. */
+const SHIPPED_ORG_ADMIN = defaultPermissionSets.find((s) => s.name === ORGANIZATION_ADMIN)!;
+const SHIPPED_USER_READ_POLICIES = (SHIPPED_ORG_ADMIN.rowLevelSecurity ?? []).filter((p) => p.object === 'sys_user');
+
+/** The superuser wildcard, with the shipped organization administrator's `sys_user` read (its own row and its organization's members). */
+const QA_ADMIN_SHIPPED_USER_READ = {
+  name: 'qa_admin_shipped_user_read',
+  label: 'QA Admin, shipped user read',
+  objects: { ...(QA_ADMIN as any).objects, sys_user: (SHIPPED_ORG_ADMIN.objects as any).sys_user },
+  rowLevelSecurity: SHIPPED_USER_READ_POLICIES,
+} as unknown as PermissionSet;
+
+/** The same, with a `sys_user` read NARROWER than organization membership: its own row only. */
+const QA_ADMIN_OWN_USER_ROW = {
+  name: 'qa_admin_own_user_row',
+  label: 'QA Admin, own user row',
+  objects: { ...(QA_ADMIN as any).objects, sys_user: (SHIPPED_ORG_ADMIN.objects as any).sys_user },
+  rowLevelSecurity: SHIPPED_USER_READ_POLICIES.filter((p) => p.name === 'sys_user_self'),
+} as unknown as PermissionSet;
+
+const PERMISSION_SETS = [MEMBER_DEFAULT, QA_ADMIN, QA_READ_ONLY_ON_GRANTS, QA_ADMIN_SHIPPED_USER_READ, QA_ADMIN_OWN_USER_ROW];
+
 const SYS = { isSystem: true } as const;
 const ORG_A = 'org_a';
 const ORG_B = 'org_b';
@@ -119,6 +143,8 @@ interface BootOptions {
    * every membership read fails.
    */
   members?: boolean | 'unprovisioned';
+  /** `false` registers no `sys_user` object: the engine's reference check has no holder to read. */
+  users?: boolean;
 }
 
 /** The positions the fixture's assignment rows name, as their definitions. */
@@ -154,8 +180,10 @@ async function boot(opts: BootOptions = {}) {
   // name: the engine's own `user_id` reference check reads the holder through
   // the caller's read door and finds it, so what is measured here is the
   // membership predicate alone.
-  if (!engine.registry.getObject(SysUser.name)) engine.registry.registerObject(SysUser as never, 'qa.authz-read-set');
-  await provisionRigUsers(engine, RIG_USERS);
+  if (opts.users !== false) {
+    if (!engine.registry.getObject(SysUser.name)) engine.registry.registerObject(SysUser as never, 'qa.authz-read-set');
+    await provisionRigUsers(engine, RIG_USERS);
+  }
   if (opts.members === 'unprovisioned') engine.registry.registerObject(SysMember as never, 'qa.authz-read-set');
   engines.push(engine);
 
@@ -167,7 +195,7 @@ async function boot(opts: BootOptions = {}) {
     metadata: {
       get: async (type: string, name: string) =>
         (type === 'position' ? QA_POSITIONS.find((p) => p.name === name) : engine.getSchema(name)) ?? null,
-      list: async (type: string) => (type === 'position' ? QA_POSITIONS : [MEMBER_DEFAULT, QA_ADMIN, QA_READ_ONLY_ON_GRANTS]),
+      list: async (type: string) => (type === 'position' ? QA_POSITIONS : PERMISSION_SETS),
     },
     ...(opts.walled
       ? { 'org-scoping': { name: 'com.objectstack.org-scoping' }, tenancy: { posture: 'isolated' } }
@@ -443,6 +471,175 @@ describe('single posture', () => {
       'sys_user_position', { user_id: 'u_member_b', position: 'qa_rep' }, { context: ADMIN_A } as any,
     );
     expect(created).toMatchObject({ user_id: 'u_member_b' });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A holder the caller cannot read
+// ---------------------------------------------------------------------------
+
+/**
+ * A refused grant holder the caller cannot read is answered as a holder that
+ * does not exist — one answer, the engine's own reference refusal, whatever
+ * that holder is. One id is named in three stores (a member of the row's
+ * organization, a member of another organization only, no user at all) by a
+ * caller whose `sys_user` read is narrower than organization membership, and
+ * the whole answer an HTTP door serves is compared byte for byte. A holder the
+ * caller CAN read keeps the membership refusal, and the refusal SET is the
+ * ruled one on every path.
+ */
+describe('a refused grant holder the caller cannot read is answered as a holder that does not exist', () => {
+  const HOLDER = 'u_x';
+  type Store = 'member here' | 'member elsewhere' | 'no such user';
+  const STORES: readonly Store[] = ['member here', 'member elsewhere', 'no such user'];
+
+  /** May write both grant tables; reads its own `sys_user` row only. Not a member of org_a itself. */
+  const OWN_ROW_ADMIN_A = { userId: 'u_admin_a', positions: [], permissions: ['qa_admin_own_user_row'], tenantId: ORG_A };
+  /** The same grants, held by a member of org_a. */
+  const OWN_ROW_MEMBER_A = { userId: 'u_member_a', positions: [], permissions: ['qa_admin_own_user_row'], tenantId: ORG_A };
+
+  /** `boot`, then the holder as `store` says: a `sys_user` row and one membership, or nothing at all. */
+  async function bootWith(store: Store, opts: BootOptions = { walled: true }) {
+    const h = await boot(opts);
+    if (store !== 'no such user') {
+      await provisionRigUsers(h.engine, [HOLDER]);
+      const org = store === 'member here' ? ORG_A : ORG_B;
+      await h.engine.insert(
+        'sys_member', { id: 'm_x', user_id: HOLDER, organization_id: org, role: 'member' },
+        { context: { isSystem: true, tenantId: org } } as any,
+      );
+    }
+    return h;
+  }
+
+  /** Everything an HTTP door serves for this throw: status, codes, message and every field entry. */
+  const wireOf = (e: unknown): string => JSON.stringify(resolveThrownHttpError(e));
+
+  /** One answer across the stores, and that answer the reference refusal at `user_id`. */
+  function expectOneHolderAnswer(answers: ReadonlyMap<Store, unknown>) {
+    const wires = STORES.map((s) => wireOf(answers.get(s)));
+    for (const [i, s] of STORES.entries()) expect(wires[i], s).toBe(wires[0]);
+    const env = envelopeOf(answers.get(STORES[0]));
+    expectMembershipRefusal(answers.get(STORES[0]));
+    expect(env.fields[0]?.constraint?.target).toBe('sys_user');
+  }
+
+  it('CONTROL: the caller reads its own sys_user row and never the holder, which exists in two of the stores', async () => {
+    for (const store of STORES) {
+      const h = await bootWith(store);
+      const seen = await h.engine.find('sys_user', { where: { id: { $in: ['u_admin_a', HOLDER] } }, context: OWN_ROW_ADMIN_A } as any);
+      expect((seen as any[]).map((r) => r.id), store).toEqual(['u_admin_a']);
+      expect(await rowsOf(h, 'sys_user', { id: HOLDER }), store).toHaveLength(store === 'no such user' ? 0 : 1);
+      expect(await rowsOf(h, 'sys_member', { user_id: HOLDER }), store).toHaveLength(store === 'no such user' ? 0 : 1);
+    }
+  });
+
+  for (const [object, row] of [
+    ['sys_user_position', { position: 'qa_rep' }],
+    ['sys_user_permission_set', { permission_set: 'qa_rep_set' }],
+  ] as const) {
+    it(`${object}: an insert naming it gets one answer in every store, and stores nothing`, async () => {
+      const answers = new Map<Store, unknown>();
+      for (const store of STORES) {
+        const h = await bootWith(store);
+        answers.set(store, await refusalOf(() => h.engine.insert(
+          object, { user_id: HOLDER, ...row }, { context: OWN_ROW_ADMIN_A } as any,
+        )));
+        expect(await rowsOf(h, object, { user_id: HOLDER }), store).toHaveLength(0);
+      }
+      expectOneHolderAnswer(answers);
+    });
+
+    it(`${object}: an update by id that moves the holder to it gets one answer in every store; the stored row is untouched`, async () => {
+      const answers = new Map<Store, unknown>();
+      for (const store of STORES) {
+        const h = await bootWith(store);
+        await h.engine.insert(
+          object, { id: 'g1', user_id: 'u_member_a', organization_id: ORG_A, ...row },
+          { context: { isSystem: true, tenantId: ORG_A } } as any,
+        );
+        answers.set(store, await refusalOf(() => h.engine.update(
+          object, { id: 'g1', user_id: HOLDER }, { context: OWN_ROW_ADMIN_A } as any,
+        )));
+        const [stored] = await rowsOf(h, object, { id: 'g1' });
+        expect(stored?.user_id, store).toBe('u_member_a');
+      }
+      expectOneHolderAnswer(answers);
+    });
+  }
+
+  it('a holder the caller CAN read keeps the membership refusal; a readable member is admitted', async () => {
+    const h = await bootWith('member elsewhere');
+    // The caller's own row is readable, and the caller is no member of org_a.
+    const err = await refusalOf(() => h.engine.insert(
+      'sys_user_position', { user_id: 'u_admin_a', position: 'qa_rep' }, { context: OWN_ROW_ADMIN_A } as any,
+    ));
+    expectMembershipRefusal(err);
+    expect(envelopeOf(err).fields[0]?.constraint?.target).toBe('sys_member');
+    expect(await rowsOf(h, 'sys_user_position', { user_id: 'u_admin_a' })).toHaveLength(0);
+
+    await h.engine.insert(
+      'sys_user_position', { user_id: 'u_member_a', position: 'qa_rep' }, { context: OWN_ROW_MEMBER_A } as any,
+    );
+    const [row] = await rowsOf(h, 'sys_user_position', { user_id: 'u_member_a' });
+    expect(row?.organization_id).toBe(ORG_A);
+  });
+
+  it('the refusal set is unchanged: an update that moves only the organization still judges a holder the caller cannot read on membership', async () => {
+    const h = await bootWith('member here', {});
+    await h.engine.insert(
+      'sys_user_position', { id: 'mv', user_id: HOLDER, position: 'qa_rep', organization_id: ORG_A },
+      { context: { isSystem: true, tenantId: ORG_A } } as any,
+    );
+    const err = await refusalOf(() => h.engine.update(
+      'sys_user_position', { id: 'mv', organization_id: ORG_B }, { context: OWN_ROW_ADMIN_A } as any,
+    ));
+    expectMembershipRefusal(err);
+    expect((await rowsOf(h, 'sys_user_position', { id: 'mv' }))[0]?.organization_id).toBe(ORG_A);
+
+    // Positive control: once the holder is a member there, the same move lands.
+    await h.engine.insert(
+      'sys_member', { id: 'm_x_b', user_id: HOLDER, organization_id: ORG_B, role: 'member' },
+      { context: { isSystem: true, tenantId: ORG_B } } as any,
+    );
+    await h.engine.update('sys_user_position', { id: 'mv', organization_id: ORG_B }, { context: OWN_ROW_ADMIN_A } as any);
+    expect((await rowsOf(h, 'sys_user_position', { id: 'mv' }))[0]?.organization_id).toBe(ORG_B);
+  });
+
+  it('under the shipped user read, a member is admitted, and a user outside the organization gets the answer a missing user gets', async () => {
+    const orgAPeers = (store: Store) => [
+      'u_admin_a', ...MEMBERSHIPS.filter((m) => m.organization_id === ORG_A).map((m) => m.user_id),
+      ...(store === 'member here' ? [HOLDER] : []),
+    ];
+    const caller = (store: Store) => ({
+      userId: 'u_admin_a', positions: [], permissions: ['qa_admin_shipped_user_read'], tenantId: ORG_A,
+      org_user_ids: orgAPeers(store),
+    });
+    const answers = new Map<Store, unknown>();
+    for (const store of STORES) {
+      const h = await bootWith(store);
+      const write = () => h.engine.insert(
+        'sys_user_position', { user_id: HOLDER, position: 'qa_rep' }, { context: caller(store) } as any,
+      );
+      if (store === 'member here') {
+        await write();
+        expect(await rowsOf(h, 'sys_user_position', { user_id: HOLDER })).toHaveLength(1);
+      } else {
+        answers.set(store, await refusalOf(write));
+      }
+    }
+    expect(wireOf(answers.get('member elsewhere'))).toBe(wireOf(answers.get('no such user')));
+    expectMembershipRefusal(answers.get('no such user'));
+  });
+
+  it('a composition with no sys_user object leaves the reference check nothing to read: membership is judged here', async () => {
+    const h = await boot({ walled: true, users: false });
+    expectMembershipRefusal(await refusalOf(() => h.engine.insert(
+      'sys_user_position', { user_id: 'u_member_b', position: 'qa_rep' }, { context: ADMIN_A } as any,
+    )));
+    expect(await rowsOf(h, 'sys_user_position', { user_id: 'u_member_b' })).toHaveLength(0);
+    await h.engine.insert('sys_user_position', { user_id: 'u_member_a', position: 'qa_rep' }, { context: ADMIN_A } as any);
+    expect(await rowsOf(h, 'sys_user_position', { user_id: 'u_member_a' })).toHaveLength(1);
   });
 });
 
