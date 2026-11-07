@@ -104,8 +104,9 @@ function changeEmailFrom(user: unknown): { email: string; name?: string; id?: st
  * initialised while this module evaluates.
  */
 function refusedAfterTheCredential(returned: unknown): boolean {
+  const after: readonly string[] = [SESSION_SCOPING_REFUSAL.code];
   const code = refusalCodeOf(returned);
-  return code !== undefined && [SESSION_SCOPING_REFUSAL.code].includes(code);
+  return code !== undefined && after.includes(code);
 }
 
 /** The body of `createAuthInstance`'s `hooks.after` arrow; the comments there and in it are its contract. */
