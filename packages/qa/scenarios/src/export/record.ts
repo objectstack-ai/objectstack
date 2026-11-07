@@ -56,7 +56,12 @@ export const ScenarioRunRecordSchema = z.looseObject({
     framework: z.string().min(1),
     /** `runner/packages.ts` `PackageSource`; judged by {@link unpublishedRunRefusal}, so a record without it still reads. */
     packages: z.unknown().optional(),
-    driver: z.looseObject({ driver: z.string().min(1) }),
+    /** `runner/driver.ts` `DriverInfo`: what ran the turns; a replay names the driver of its recording (`replayOf`). */
+    driver: z.looseObject({
+      driver: z.string().min(1),
+      version: z.string().optional(),
+      replayOf: z.looseObject({ driver: z.string().min(1), version: z.string().optional() }).optional(),
+    }),
   }),
   evidenceDir: z.string().min(1),
   results: z.array(z.looseObject({ id: z.string().min(1), verdict: VerdictSchema })),

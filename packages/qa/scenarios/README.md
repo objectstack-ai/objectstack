@@ -138,6 +138,8 @@ pnpm --filter @objectstack/scenarios run-scenarios                       # every
 pnpm --filter @objectstack/scenarios run-scenarios --only service_desk --modes scratch
 pnpm --filter @objectstack/scenarios run-scenarios --record /tmp/rec.json  # also save every turn
 pnpm --filter @objectstack/scenarios run-scenarios --driver recorded:/tmp/rec.json  # replay, no model
+pnpm --filter @objectstack/scenarios run-scenarios --driver codex           # the Codex CLI on your ChatGPT plan
+pnpm --filter @objectstack/scenarios run-scenarios --driver external:./my-agent.mjs  # any command on the driver contract
 pnpm --filter @objectstack/scenarios run-scenarios --author-timeout 90       # minutes per authoring turn (default 60)
 pnpm --filter @objectstack/scenarios run-scenarios --author-max-turns 400    # turns per authoring turn, every card (default by tier)
 pnpm --filter @objectstack/scenarios run-scenarios --ask-max-turns 20        # turns per question or operation turn (default 12)
@@ -196,7 +198,9 @@ npx @objectstack/scenarios help                                      # the comma
   is logged in with an API key (the cost ruling on cloud#3600), and the record states the driver, the login, the
   authoring timeout and the turn caps. Every turn records its process: elapsed time, the turn cap it ran under
   (`--max-turns`), and for a turn that did not finish its exit code or signal, whether the runner's timeout killed it,
-  and the end of its stderr. `RecordedDriver` replays a recording, and refuses the live-driver limits and models below.
+  and the end of its stderr. `RecordedDriver` replays a recording, and refuses the live-driver limits and models below;
+  its record keeps the driver of the recording (`replayOf`). For Codex and any other agent tool, see
+  [Other agent tools](#other-agent-tools--codex-and-the-external-driver-contract).
 - **Model** (`driver.ts`): `--model M` passes `claude --model M` on every turn, an alias (`sonnet`) or a name
   (`claude-sonnet-4-5`); `--author-model` sets the authoring turns (build and iterate) and `--ask-model` the question
   and operation turns apart, each in place of `--model`. With none, a turn takes the login's default model. Every turn
@@ -255,3 +259,69 @@ npx @objectstack/scenarios help                                      # the comma
   states its change's rows the same way: the new objects (with the card's field minimum), lookups, option fields,
   dashboards and nav targets. `test/runner/prompt-trace.test.ts` reads the checks off the scorer itself and holds every
   card to it.
+
+## Other agent tools — Codex and the external driver contract
+
+The same card can measure another agent tool. Every record (`env.driver`) and every gallery app page (`- Driver:`)
+names the driver and its version; a replay (`--driver recorded:F`) names the driver of the recording it replays
+(`replayOf`), never the recording's path.
+
+### `--driver codex`
+
+`drivers/codex.ts` runs the OpenAI Codex CLI in non-interactive mode, on your own ChatGPT plan. What it reads of the
+CLI was measured on `codex-cli 0.167.0`:
+
+- **Login**: the ChatGPT plan only. It refuses to start while `OPENAI_API_KEY` or `CODEX_API_KEY` is set, or when
+  `codex login status` reports anything but `Logged in using ChatGPT` (an API key, no login, an access token); every
+  turn passes `-c forced_login_method="chatgpt"`, and both variables are removed from its environment.
+- **A turn**: `codex exec --json --ephemeral --skip-git-repo-check -c approval_policy="never" -p PROFILE … -`, the
+  prompt on stdin. An authoring turn runs `-s workspace-write -c sandbox_workspace_write.network_access=true -C
+  <project>`; a question or operation runs `-s read-only` in an empty temp directory.
+- **MCP**: the app is served under the name `app` from a profile layer, `$CODEX_HOME/scenario-runner-<random>.config.toml`
+  (0600, deleted when the turn returns), that holds the persona's key as an `http_headers` `Authorization` header and
+  turns off every MCP server of your own config (`enabled = false`). A server of your own named `app` is refused.
+- **Flags**: `--model`, `--author-model` and `--ask-model` pass `-m`; `--author-timeout` is the runner's own clock.
+  `codex exec` has no cap on its agentic turns, so `--author-max-turns` and `--ask-max-turns` are refused. Its JSONL
+  names no model, so the scorecard shows `model not reported (asked for …)`.
+
+### `--driver external:COMMAND` — the contract
+
+`drivers/external.ts` runs any command that speaks the driver seam as a process contract. `COMMAND` is split on
+whitespace (no shell, no quoting); a word that starts `./` or `../`, and a first word holding a `/`, is resolved against
+the directory you run from. For anything more, write a wrapper script.
+
+- **One process per call.** The call is one JSON object on stdin; the answer is one JSON object on stdout; logs go to
+  stderr (the record keeps its last 2,000 characters). Every input starts with `"contract":
+  "objectstack-scenario-driver/1"`; a command should refuse a contract it does not know.
+- **`info`**, once, before any card runs: `{"contract":…,"kind":"info"}` → `{"name":"my-agent","version":"1.4.2"}`.
+  The record's driver is `external:my-agent`, its version `1.4.2`. A command that cannot answer it is refused.
+- **`author`**: build or iterate the app in `cwd` with shell and file tools; the call runs in `cwd`.
+  `{"contract":…,"kind":"author","step":{"card","mode","phase","step"},"prompt":"…","cwd":"/abs/project","tier":"starter","limits":{…}}`
+- **`ask`**: answer one data question or write operation as a persona, over the app's MCP endpoint; the call runs in
+  the directory of `mcp.configFile`.
+  `{"contract":…,"kind":"ask","step":{"card","mode","phase","step","persona"},"prompt":"…","mcp":{"url":"…","configFile":"/tmp/…/mcp.json"},"limits":{…}}`
+- **The answer** to `author` and `ask`, strict (an unknown key is refused):
+  `{"replyText":"every text the agent said, joined","toolCalls":[{"name":"query_records","input":{…},"output":"…","isError":false}],"model":"…","numTurns":3}`.
+  `model` and `numTurns` are optional; an MCP tool may be named bare or `mcp__<server>__<tool>`; a call that never
+  answered leaves `output` out.
+- **Exit codes**: 0 with an answer of that shape is the turn. Any other end is a failed turn with a named reason,
+  never an empty pass: a non-zero exit or a signal is `no-result(exit N)`, stdout that is not one JSON object of that
+  shape is `invalid-output(…)`. A failed authoring turn leaves its Build half not measured; a failed persona turn is
+  graded as the empty answer it is.
+- **Timeout**: `limits.timeoutMs` — `--author-timeout` for `author` (default 60 min), 5 min for `ask`. The runner kills
+  a call still running then (SIGTERM).
+- **Limits**: `limits` carries `timeoutMs`, and `maxTurns` (`--author-max-turns` / `--ask-max-turns`) and `model`
+  (`--model`, `--author-model`, `--ask-model`) when given. The command may ignore them; the record states them.
+- ⛔ **The key**: the persona's API key is only in `mcp.configFile`, a 0600 file in the shape of Claude Code's
+  `--mcp-config` (`{"mcpServers":{"app":{"type":"http","url":…,"headers":{"Authorization":"Bearer …"}}}}`), deleted
+  when the call returns. It is never on argv, in the environment or on stdin, and so never in a run record, a
+  scorecard or a gallery export. A command must not print it.
+- **Cost**: the runner cannot see an external command's login, so the record's login reads `not verified`; the cost
+  ruling still applies, and the runner removes `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `OPENAI_API_KEY` and
+  `CODEX_API_KEY` from the command's environment.
+
+`test/runner/fixtures/fake-external-driver.mjs` is a complete command in about a hundred lines.
+
+**WorkBuddy** (checked 2026-11-07): Tencent's WorkBuddy is a desktop app; no headless mode with structured output
+and an MCP client was found for it, so it is not wired here. A tool that has both rides `--driver external:` with a
+wrapper, with no change to the runner.
