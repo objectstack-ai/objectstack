@@ -31,10 +31,15 @@
  *  who can read the column keeps the forgiveness (the stored value carried
  *  back lands) and is refused a new unreadable value; a system write keeps
  *  its exemption.
+ *
+ * Two more update seams that compare a sent value with the stored row are
+ * pinned on the same rule at the end of this file: the stored header a
+ * parent-scoped `requiredWhen` pre-check reads, and the `secret` reference a
+ * write may keep.
  */
 
 import { describe, it, expect, vi } from 'vitest';
-import { ObjectQL } from '@objectstack/objectql';
+import { ObjectQL, SECRET_MASK } from '@objectstack/objectql';
 import { resolveThrownHttpError } from '@objectstack/types';
 import type { PermissionSet } from '@objectstack/spec/security';
 import { SecurityPlugin } from './security-plugin.js';
@@ -265,5 +270,223 @@ describe('the update\'s reference forgiveness compares only stored values the ca
     const { engine, storeFor } = await boot(HIDDEN_COLUMNS);
     await write(engine, door, { duty: OTHER.duty }, SYS_CTX);
     expect(storedItems(storeFor).find((r) => r.id === 'k1')?.duty).toBe(OTHER.duty);
+  });
+});
+
+/**
+ * The same rule on the two other update seams that compare a sent value with
+ * the stored row: the master-detail header the ADR-0113 pre-check of a
+ * parent-scoped `requiredWhen` reads, and the `secret` reference a write may
+ * keep. Each is answered from the stored row only as the caller's own read
+ * door serves it, so for a column the caller may edit but not read the answer
+ * is the same whatever the column holds.
+ *
+ * The rig is the one above with its own objects: a header the caller can
+ * read, a detail line whose `header` FK carries the grant's `readable` bit,
+ * and a vault whose `token` secret does. Rows are seeded straight into the
+ * store, so a line can hold a stored state no write would produce (a legacy
+ * line that already lacks its required note).
+ */
+const HEADER = 'rfc_header';
+const LINE = 'rfc_line';
+const VAULT = 'rfc_vault';
+
+const HEADER_OBJECT = { name: HEADER, fields: { name: { type: 'text' }, status: { type: 'text' } } };
+const LINE_OBJECT = {
+  name: LINE,
+  fields: {
+    title: { type: 'text' },
+    header: { type: 'master_detail', reference: HEADER },
+    note: { type: 'text', requiredWhen: "parent.status == 'paid'" },
+  },
+};
+const SYS_SECRET_OBJECT = {
+  name: 'sys_secret', systemFields: { tenant: false },
+  fields: {
+    namespace: { type: 'text' }, key: { type: 'text' }, kms_key_id: { type: 'text' }, alg: { type: 'text' },
+    version: { type: 'number' }, ciphertext: { type: 'text' }, created_at: { type: 'datetime' },
+  },
+};
+const VAULT_OBJECT = { name: VAULT, fields: { name: { type: 'text' }, token: { type: 'secret' } } };
+
+/** Reads headers; edits lines and vaults; `readable` is the one bit two grants differ in. */
+function columnGrant(readable: boolean): PermissionSet {
+  return {
+    name: 'member_default',
+    label: readable ? 'Editor who may read the column' : 'Editor who may edit but not read the column',
+    objects: {
+      [HEADER]: { allowRead: true },
+      [LINE]: { allowRead: true, allowCreate: true, allowEdit: true },
+      [VAULT]: { allowRead: true, allowCreate: true, allowEdit: true },
+    },
+    fields: {
+      [`${LINE}.header`]: { readable, editable: true },
+      [`${VAULT}.token`]: { readable, editable: true },
+    },
+  } as unknown as PermissionSet;
+}
+
+function makeCrypto() {
+  let n = 0;
+  return {
+    async encrypt(plain: string) {
+      n += 1;
+      return { id: `sec_${n}`, kmsKeyId: 'local', alg: 'test-b64', version: 1, ciphertext: Buffer.from(plain).toString('base64') };
+    },
+    async decrypt(handle: { ciphertext: string }) { return Buffer.from(handle.ciphertext, 'base64').toString('utf8'); },
+    async rotateKey(handle: unknown) { return handle; },
+    digest(plain: string) { return `d:${plain.length}`; },
+    async keyedDigest(plain: string) { return `k:${plain.length}`; },
+  };
+}
+
+async function bootStored(set: PermissionSet) {
+  const engine = new ObjectQL();
+  const d = makeDriver();
+  engine.registerDriver(d.driver, true);
+  await engine.init();
+  for (const object of [HEADER_OBJECT, LINE_OBJECT, SYS_SECRET_OBJECT, VAULT_OBJECT]) {
+    engine.registry.registerObject(object as any, 'test-package');
+  }
+  engine.setCryptoProvider(makeCrypto() as never);
+  d.storeFor(HEADER).set('h_paid', { id: 'h_paid', name: 'paid', status: 'paid' });
+  d.storeFor(HEADER).set('h_open', { id: 'h_open', name: 'open', status: 'open' });
+
+  const services: Record<string, unknown> = {
+    manifest: { register: vi.fn() },
+    objectql: engine,
+    metadata: {
+      get: async (_type: string, name: string) => engine.getSchema(name) ?? null,
+      list: async () => [set],
+    },
+  };
+  const ctx = {
+    logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
+    registerService: vi.fn(),
+    getService: (name: string) => {
+      if (!(name in services)) throw new Error(`service not registered: ${name}`);
+      return services[name];
+    },
+  };
+  const plugin = new SecurityPlugin({ fallbackPermissionSet: 'member_default' });
+  await plugin.init(ctx as any);
+  await plugin.start(ctx as any);
+  return { engine, storeFor: d.storeFor };
+}
+
+/** The answer a write gets, whole: `ok`, or the status, code, sentence and field findings (ADR-0112). */
+async function outcomeOf(run: () => Promise<unknown>): Promise<string> {
+  try {
+    await run();
+    return 'ok';
+  } catch (err) {
+    const thrown = resolveThrownHttpError(err);
+    return JSON.stringify({
+      status: thrown.status,
+      code: thrown.code,
+      message: (err as Error).message,
+      fields: ((err as any)?.fields ?? []).map((f: any) => ({ field: f.field, code: f.code, message: f.message })),
+    });
+  }
+}
+
+describe('a parent-scoped requiredWhen pre-check reads the stored header only through a FK the caller may read', () => {
+  /** Two lines that already lack the note, each hanging off `stored`. */
+  async function rig(readable: boolean, stored: 'h_paid' | 'h_open') {
+    const booted = await bootStored(columnGrant(readable));
+    for (const id of ['l1', 'l2']) booted.storeFor(LINE).set(id, { id, title: 'stored', header: stored, note: null });
+    return booted;
+  }
+  const writeLines = (engine: ObjectQL, door: Door, payload: Record<string, unknown>, context: Record<string, unknown> = CALLER) =>
+    door === 'update by id'
+      ? engine.update(LINE, payload, { where: { id: 'l1' }, context } as any)
+      : engine.update(LINE, payload, { where: { id: { $in: ['l1', 'l2'] } }, multi: true, context } as any);
+  const linesOf = (storeFor: (o: string) => Map<string, any>) =>
+    [...storeFor(LINE).values()].map((r) => ({ id: r.id, title: r.title, header: r.header }));
+
+  it.each(DOORS)('%s — naming a header with the FK hidden answers the same whatever the line stores', async (door) => {
+    const answers: string[] = [];
+    for (const stored of ['h_paid', 'h_open'] as const) {
+      const { engine, storeFor } = await rig(false, stored);
+      answers.push(await outcomeOf(() => writeLines(engine, door, { title: 'renamed', header: 'h_paid' })));
+      // Refused before the statement: the lines are as stored.
+      expect(linesOf(storeFor)).toEqual(['l1', 'l2'].map((id) => ({ id, title: 'stored', header: stored })));
+    }
+    expect(answers[0]).toBe(answers[1]);
+    const answer = JSON.parse(answers[0]);
+    expect({ status: answer.status, code: answer.code }).toEqual({ status: 400, code: 'VALIDATION_FAILED' });
+    expect(answer.fields.map((f: any) => ({ field: f.field, code: f.code }))).toEqual([{ field: 'note', code: 'required' }]);
+  });
+
+  it.each(DOORS)('%s — control: with the FK hidden, an edit that does not name it is judged as before', async (door) => {
+    const { engine, storeFor } = await rig(false, 'h_paid');
+    await writeLines(engine, door, { title: 'renamed' });
+    expect(linesOf(storeFor).find((r) => r.id === 'l1')).toEqual({ id: 'l1', title: 'renamed', header: 'h_paid' });
+  });
+
+  it.each(DOORS)('%s — control: a caller who reads the FK keeps the legacy rest, and a repoint is judged as before', async (door) => {
+    const resting = await rig(true, 'h_paid');
+    await writeLines(resting.engine, door, { title: 'renamed', header: 'h_paid' });
+    expect(linesOf(resting.storeFor).find((r) => r.id === 'l1')).toEqual({ id: 'l1', title: 'renamed', header: 'h_paid' });
+
+    const repointed = await rig(true, 'h_open');
+    const answer = JSON.parse(await outcomeOf(() => writeLines(repointed.engine, door, { title: 'renamed', header: 'h_paid' })));
+    expect(answer.fields.map((f: any) => ({ field: f.field, code: f.code }))).toEqual([{ field: 'note', code: 'required' }]);
+    expect(linesOf(repointed.storeFor).find((r) => r.id === 'l1')).toEqual({ id: 'l1', title: 'stored', header: 'h_open' });
+  });
+
+  it.each(DOORS)('%s — control: a system write is judged on the stored row as before', async (door) => {
+    const resting = await rig(false, 'h_paid');
+    await writeLines(resting.engine, door, { title: 'renamed', header: 'h_paid' }, SYS_CTX);
+    expect(linesOf(resting.storeFor).find((r) => r.id === 'l1')).toEqual({ id: 'l1', title: 'renamed', header: 'h_paid' });
+
+    const repointed = await rig(false, 'h_open');
+    const answer = JSON.parse(await outcomeOf(() => writeLines(repointed.engine, door, { title: 'renamed', header: 'h_paid' }, SYS_CTX)));
+    expect(answer.fields.map((f: any) => ({ field: f.field, code: f.code }))).toEqual([{ field: 'note', code: 'required' }]);
+  });
+});
+
+describe('a secret reference on a non-system update is answered the same whatever the column holds', () => {
+  /** Two vault rows sealed by a system write; `v1` and `v2` hold different refs. */
+  async function rig(readable: boolean) {
+    const booted = await bootStored(columnGrant(readable));
+    for (const id of ['v1', 'v2']) await booted.engine.insert(VAULT, { id, name: id, token: `${id}-value` }, { context: SYS_CTX } as any);
+    const refOf = (id: string) => booted.storeFor(VAULT).get(id)?.token as string;
+    return { ...booted, refOf };
+  }
+  const writeVault = (engine: ObjectQL, door: Door, payload: Record<string, unknown>, context: Record<string, unknown> = CALLER) =>
+    door === 'update by id'
+      ? engine.update(VAULT, payload, { where: { id: 'v1' }, context } as any)
+      : engine.update(VAULT, payload, { where: { id: { $in: ['v1'] } }, multi: true, context } as any);
+
+  describe.each([false, true])('the caller reads the column: %s', (readable) => {
+    it.each(DOORS)('%s — the ref the row holds, another row\'s and one naming nothing get one answer', async (door) => {
+      const { engine, storeFor, refOf } = await rig(readable);
+      const before = [...storeFor(VAULT).values()].map((r) => ({ ...r }));
+      const own = await outcomeOf(() => writeVault(engine, door, { name: 'renamed', token: refOf('v1') }));
+      const other = await outcomeOf(() => writeVault(engine, door, { name: 'renamed', token: refOf('v2') }));
+      const none = await outcomeOf(() => writeVault(engine, door, { name: 'renamed', token: 'secret:sec_none' }));
+      expect(own).toBe(other);
+      expect(own).toBe(none);
+      expect(JSON.parse(own)).toMatchObject({ status: 400, code: 'VALIDATION_ERROR' });
+      expect([...storeFor(VAULT).values()]).toEqual(before);
+    });
+
+    it.each(DOORS)('%s — control: a new value is sealed, and the echoed mask leaves the column alone', async (door) => {
+      const { engine, storeFor, refOf } = await rig(readable);
+      const held = refOf('v1');
+      await writeVault(engine, door, { name: 'masked', token: SECRET_MASK });
+      expect(storeFor(VAULT).get('v1')).toMatchObject({ name: 'masked', token: held });
+      await writeVault(engine, door, { token: 'v1-next' });
+      expect(refOf('v1')).toMatch(/^secret:/);
+      expect(refOf('v1')).not.toBe(held);
+      expect(await engine.resolveSecretField(VAULT, 'v1', 'token')).toBe('v1-next');
+    });
+  });
+
+  it.each(DOORS)('%s — control: a system write keeps the pass-through', async (door) => {
+    const { engine, refOf } = await rig(false);
+    await writeVault(engine, door, { token: refOf('v2') }, SYS_CTX);
+    expect(refOf('v1')).toBe(refOf('v2'));
   });
 });

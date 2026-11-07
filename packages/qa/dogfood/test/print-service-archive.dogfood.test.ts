@@ -26,6 +26,12 @@
 // default record page; `showcase_invoice` declares `enable.files` for it, and
 // its select RLS (`owner == current_user.email`) is what hides another user's
 // invoice from a contributor.
+//
+// A second member, `print-attacher`, holds the contributor's set plus the one
+// grant an app ships when it lets members attach files: `sys_attachment`
+// read and create, and nothing on `sys_file`. Their print archives as THEIR
+// write — the attachment names them — while `sys_file` stays unreadable to
+// them through the data engine.
 
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -34,6 +40,9 @@ import { join } from 'node:path';
 import type { VerifyStack } from '@objectstack/verify';
 import { StorageServicePlugin } from '@objectstack/service-storage';
 import { AuditPlugin } from '@objectstack/plugin-audit';
+import { SecurityPlugin, appSecurityPluginOptions, securityDefaultPermissionSets } from '@objectstack/plugin-security';
+import { PermissionSetSchema } from '@objectstack/spec/security';
+import showcaseStack from '@objectstack/example-showcase';
 import { bootShowcase } from './showcase-boot.js';
 import { PrintServicePlugin } from '../../../services/service-print/src/print-service-plugin.js';
 import { principalSessionMinterOf } from '../../../services/service-print/src/principal-session.js';
@@ -53,6 +62,13 @@ const SYS = { isSystem: true } as const;
 const PAGE = 'showcase_invoice_document';
 const PDF = Buffer.from('%PDF-1.4\n% print-service dogfood\n%%EOF\n');
 const PRINT_ENV = ['OS_PRINT_CHROMIUM_PATH', 'OS_PRINT_BROWSER_ENDPOINT', 'OS_PRINT_CONSOLE_URL'];
+
+/** The grant an app ships to let members attach files: `sys_attachment` only, nothing on `sys_file`. */
+const attacherSet = PermissionSetSchema.parse({
+  name: 'print_dogfood_attacher',
+  label: 'Print dogfood: attach files',
+  objects: { sys_attachment: { allowRead: true, allowCreate: true } },
+});
 
 interface Refusal {
   code: unknown;
@@ -83,6 +99,8 @@ describe('print service on a real showcase boot', () => {
   }));
   const renderPdf = vi.fn(async () => PDF);
   let memberToken: string;
+  let attacherToken: string;
+  let attacherInvoice: string;
   let auditorToken: string;
   let adminToken: string;
   let memberEmail: string;
@@ -96,6 +114,12 @@ describe('print service on a real showcase boot', () => {
     }
     rootDir = mkdtempSync(join(tmpdir(), 'print-dogfood-'));
     stack = await bootShowcase({
+      // The showcase's own composition (`appSecurityPluginOptions`, what the
+      // harness passes by default), plus the attach grant above.
+      security: new SecurityPlugin({
+        ...appSecurityPluginOptions(showcaseStack),
+        defaultPermissionSets: [...securityDefaultPermissionSets, attacherSet],
+      }),
       extraPlugins: [
         new StorageServicePlugin({ adapter: 'local', local: { rootDir }, bindToSettings: false }),
         new AuditPlugin(),
@@ -112,6 +136,13 @@ describe('print service on a real showcase boot', () => {
     const member = await ql.findOne('sys_user', { where: { email: memberEmail } }, { context: SYS });
     await ql.insert('sys_user_permission_set', { user_id: member!.id, permission_set: 'showcase_contributor' }, { context: SYS });
     adminToken = await stack.signIn();
+    // The member who may attach files: the contributor's set and the attach grant.
+    const attacherEmail = 'print-attacher@dogfood.test';
+    attacherToken = await stack.signUp(attacherEmail);
+    const attacher = await ql.findOne('sys_user', { where: { email: attacherEmail } }, { context: SYS });
+    for (const permission_set of ['showcase_contributor', attacherSet.name]) {
+      await ql.insert('sys_user_permission_set', { user_id: attacher!.id, permission_set }, { context: SYS });
+    }
     // A reader who may read every invoice and edit none: the app's own `showcase_auditor`.
     const auditorEmail = 'print-auditor@dogfood.test';
     auditorToken = await stack.signUp(auditorEmail);
@@ -123,6 +154,7 @@ describe('print service on a real showcase boot', () => {
       ql.insert('showcase_invoice', { name, owner, account: seeded.account, status: 'draft' }, { context: SYS });
     ownInvoice = String((await invoice('INV-PRINT-OWN', memberEmail)).id);
     othersInvoice = String((await invoice('INV-PRINT-OTHER', 'someone-else@dogfood.test')).id);
+    attacherInvoice = String((await invoice('INV-PRINT-ATTACHER', attacherEmail)).id);
 
     service = new PrintService({
       placement: {
@@ -244,6 +276,51 @@ describe('print service on a real showcase boot', () => {
       // Attached AS THE CALLER: both rows name the requester.
       expect(file!.owner_id).toBe(ctx.userId);
       expect(attachment!.uploaded_by).toBe(ctx.userId);
+    });
+
+    it('a member who may attach files archives their own invoice: the attachment is their write, and sys_file stays unreadable to them', async () => {
+      const ctx = await stack.contextFor(attacherToken);
+      // Preconditions: the member reads their invoice, and is refused a read of `sys_file`.
+      expect(await ql.findOne('showcase_invoice', { where: { id: attacherInvoice } }, { context: ctx })).not.toBeNull();
+      expect(await refusalOf(ql.find('sys_file', { limit: 1 }, { context: ctx }))).toEqual({ code: 'PERMISSION_DENIED', status: 403 });
+      const out = await service.printRecordToFile(request(attacherInvoice), ctx);
+      const file = await ql.findOne('sys_file', { where: { id: out.fileId } }, { context: SYS });
+      expect(file).toMatchObject({ status: 'committed', mime_type: 'application/pdf', scope: 'attachments', owner_id: ctx.userId });
+      const attachment = await ql.findOne('sys_attachment', { where: { id: out.attachmentId } }, { context: SYS });
+      expect(attachment).toMatchObject({
+        parent_object: 'showcase_invoice', parent_id: attacherInvoice, file_id: out.fileId, uploaded_by: ctx.userId,
+      });
+      // Still not readable after the archive: the print widened no read.
+      expect(await refusalOf(ql.findOne('sys_file', { where: { id: out.fileId } }, { context: ctx }))).toEqual({
+        code: 'PERMISSION_DENIED',
+        status: 403,
+      });
+    });
+
+    it('control: the same member’s own sys_attachment insert, naming a file they own and cannot read, is refused reference_not_found', async () => {
+      const ctx = await stack.contextFor(attacherToken);
+      // A file the member owns, written by the system as the upload doors write one.
+      const fileId = 'print_dogfood_attacher_file';
+      await ql.insert('sys_file', {
+        id: fileId, key: `attachments/${fileId}/own.pdf`, name: 'own.pdf', mime_type: 'application/pdf', size: PDF.byteLength,
+        scope: 'attachments', acl: 'private', status: 'committed', owner_id: ctx.userId,
+        ...(ctx.tenantId ? { organization_id: ctx.tenantId } : {}),
+      }, { context: SYS });
+      let refusal: { code?: unknown; fields?: Array<{ field?: unknown; code?: unknown }> } | undefined;
+      try {
+        await ql.insert(
+          'sys_attachment',
+          { parent_object: 'showcase_invoice', parent_id: attacherInvoice, file_id: fileId, file_name: 'own.pdf' },
+          { context: ctx },
+        );
+      } catch (err) {
+        refusal = err as typeof refusal;
+      }
+      expect(refusal, 'the insert was refused').toBeDefined();
+      expect([refusal!.code, (refusal!.fields ?? []).map((f) => [f.field, f.code])]).toEqual([
+        'VALIDATION_FAILED',
+        [['file_id', 'reference_not_found']],
+      ]);
     });
 
     it('with the real auth mint: the render loads as the caller, and the session is gone once the print returns', async () => {
