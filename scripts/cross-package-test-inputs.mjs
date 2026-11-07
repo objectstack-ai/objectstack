@@ -360,8 +360,15 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
     // of the vouched-reference mark, a root script, with `--ts-only`: the same
     // `packages/` `.ts` surface as this glob. The census's other extensions,
     // and its `examples/` and `apps/` roots, are judged by its bare run in the
-    // lint step, never by this pin.
-    globs: ['packages/**/*.ts', 'scripts/check-vouch-for-reference-callers.mjs'],
+    // lint step, never by this pin. The census imports `js-comment-mask.mjs`
+    // (which code is prose) and `invoked-as.mjs` (whether its dispatch runs),
+    // so an edit to either moves the pin's verdict and re-runs it.
+    globs: [
+      'packages/**/*.ts',
+      'scripts/check-vouch-for-reference-callers.mjs',
+      'scripts/js-comment-mask.mjs',
+      'scripts/invoked-as.mjs',
+    ],
   },
   '@objectstack/types': {
     // src/driver-error-classification.callers.test.ts is the #13440 gate: it

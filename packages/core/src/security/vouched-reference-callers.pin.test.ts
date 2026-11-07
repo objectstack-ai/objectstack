@@ -25,6 +25,18 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, '../../../..');
 const GATE = resolve(HERE, '../../../../scripts/check-vouch-for-reference-callers.mjs');
 
+/**
+ * The budget of each test, which spawns the census once. The `--ts-only` scan
+ * reads every `.ts` file under `packages/`, about a second on an idle machine;
+ * a runner building the monorepo alongside the suite can push that past
+ * vitest's default 5 s test timeout, and a timed-out test fails before any
+ * assertion runs, so it says nothing about the mark it guards and reds every
+ * batch it shares a shard with. The self-test is given the same budget because
+ * it pays the same process start on the same runner. 60 s is the budget of the
+ * sibling scan pin, `./operation-private-keys.pin.test.ts`.
+ */
+const SCAN_TIMEOUT_MS = 60_000;
+
 const run = (...args: string[]) =>
   spawnSync(process.execPath, [GATE, ...args], { cwd: REPO_ROOT, encoding: 'utf8' });
 
@@ -34,7 +46,7 @@ describe('check:vouch-for-reference-callers', () => {
     expect(out.stderr).toBe('');
     expect(out.status).toBe(0);
     expect(out.stdout).toMatch(/self-test: \d+ cases pass/);
-  });
+  }, SCAN_TIMEOUT_MS);
 
   it('this tree is green on the .ts surface: the only production caller is the file-attachments writer, at its pinned count', () => {
     const out = run('--ts-only');
@@ -42,5 +54,5 @@ describe('check:vouch-for-reference-callers', () => {
     expect(out.status).toBe(0);
     expect(out.stdout).toContain('(the .ts surface)');
     expect(out.stdout).toContain('packages/services/service-storage/src/file-attachment-service.ts (2)');
-  });
+  }, SCAN_TIMEOUT_MS);
 });
