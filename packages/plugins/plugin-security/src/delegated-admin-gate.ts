@@ -437,13 +437,9 @@ const DELEGATED_READ_OPERATIONS: ReadonlySet<string> = new Set(['find', 'findOne
  * The authz middleware asks this only for an operation the caller's sets do
  * NOT grant, and admits it only on a non-null answer: the `where` scope
  * `id IN <the covered units>` it then ANDs into the read. Null — the ordinary
- * refusal stands — unless every condition holds: a read of
- * `sys_business_unit` carrying a query, on the caller's own behalf (no
- * on-behalf-of delegator), with the gate composed, and at least one covered
- * unit ({@link DelegatedAdminGate.scopedBusinessUnitIds}). Nothing wider: no
- * other object, no write, and no unit outside the scopes the caller holds; a
- * caller whose sets already grant the read is untouched. A scope that cannot
- * be resolved admits nothing (fail closed).
+ * refusal stands — unless every condition holds: a read carrying a query, and
+ * every condition of {@link delegatedUnitReadAdmission}, the one judgment the
+ * answers outside the middleware ask too.
  */
 export async function delegatedUnitReadScope(
   gate: Pick<DelegatedAdminGate, 'scopedBusinessUnitIds'> | null | undefined,
@@ -451,13 +447,40 @@ export async function delegatedUnitReadScope(
   permissionSets: PermissionSet[],
   delegatorSets: PermissionSet[] | null | undefined,
 ): Promise<Record<string, unknown> | null> {
+  if (!opCtx.ast) return null;
+  return delegatedUnitReadAdmission(gate, opCtx.object, opCtx.operation, opCtx.context, permissionSets, delegatorSets);
+}
+
+/**
+ * [ADR-0090 D12, ruling of record 6663849489] The delegated business-unit read
+ * itself, for an operation the caller's sets do NOT grant: the scope
+ * `id IN <the covered units>` the read is confined to, or null when it
+ * admits nothing. Asked by the read door ({@link delegatedUnitReadScope}) and
+ * by every answer that must say what that door does — `canReadObject`,
+ * `getReadFilter` and `security/explain` — so there is one judgment, never a
+ * second copy of it.
+ *
+ * Non-null only when every condition holds: a read (`find`, `findOne`,
+ * `count` or `aggregate`) of `sys_business_unit`, on the caller's own behalf
+ * (no on-behalf-of delegator), with the gate composed, and at least one
+ * covered unit ({@link DelegatedAdminGate.scopedBusinessUnitIds}). Nothing
+ * wider: no other object, no write, no export, and no unit outside the scopes
+ * the caller holds; a caller whose sets already grant the read is untouched.
+ * A scope that cannot be resolved admits nothing (fail closed).
+ */
+export async function delegatedUnitReadAdmission(
+  gate: Pick<DelegatedAdminGate, 'scopedBusinessUnitIds'> | null | undefined,
+  object: string | undefined,
+  operation: string | undefined,
+  context: any,
+  permissionSets: PermissionSet[],
+  delegatorSets: PermissionSet[] | null | undefined,
+): Promise<Record<string, unknown> | null> {
   if (!gate || delegatorSets) return null;
-  if (opCtx.object !== DELEGATED_READ_OBJECT || !DELEGATED_READ_OPERATIONS.has(String(opCtx.operation)) || !opCtx.ast) {
-    return null;
-  }
+  if (object !== DELEGATED_READ_OBJECT || !DELEGATED_READ_OPERATIONS.has(String(operation))) return null;
   let ids: ReadonlySet<string>;
   try {
-    ids = await gate.scopedBusinessUnitIds(permissionSets, opCtx.context);
+    ids = await gate.scopedBusinessUnitIds(permissionSets, context);
   } catch {
     return null;
   }

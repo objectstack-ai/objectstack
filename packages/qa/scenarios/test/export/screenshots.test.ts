@@ -22,7 +22,7 @@ import { captureScreenshots, CONSOLE_NOT_FOUND, declaredListViews, pageRefusal, 
 import { AREAS_DIR, CARDS_DIR, FakeApp, tempDir } from './fixture.js';
 
 function load(id: string): LoadedScenario {
-  const { card, refusals } = loadScenarioFile(join(CARDS_DIR, `${id}.json`), { areas: readCapabilityAreas(AREAS_DIR) });
+  const { card, refusals } = loadScenarioFile(join(CARDS_DIR, `${id}.json`), { areas: readCapabilityAreas(AREAS_DIR), library: 'open' });
   if (!card) throw new Error(refusals.map(formatRefusal).join('\n'));
   return card;
 }

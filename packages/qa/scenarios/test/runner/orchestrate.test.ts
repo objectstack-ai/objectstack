@@ -33,7 +33,7 @@ const CARD_FILE = resolve(HERE, '../../../../../docs/qa/scenarios/crm_account_wi
 const AREAS_DIR = resolve(HERE, '../../../../../docs/qa/platform-checklist/areas');
 
 function load(file = CARD_FILE): LoadedScenario {
-  const { card, refusals } = loadScenarioFile(file, { areas: readCapabilityAreas(AREAS_DIR) });
+  const { card, refusals } = loadScenarioFile(file, { areas: readCapabilityAreas(AREAS_DIR), library: 'open' });
   if (!card) throw new Error(refusals.map(formatRefusal).join('\n'));
   return card;
 }
