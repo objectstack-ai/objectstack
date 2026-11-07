@@ -3750,6 +3750,19 @@ describe('lintFlowPatterns — a node no edge path from start reaches (flow-node
     ]);
   });
 
+  it('refuses a second start node with the cure that fits it: delete the extra start', () => {
+    const found = unreachable(reachFlow(
+      [START, { id: 'start2', type: 'start' }, { id: 'b', type: 'assignment' }, END],
+      [{ id: 'e1', source: 'start', target: 'end' }, { id: 'e2', source: 'start2', target: 'b' }],
+    ));
+    expect(found.map((f) => f.where)).toEqual([
+      "flow 'orphan' · node 'start2' (start)",
+      "flow 'orphan' · node 'b' (assignment)",
+    ]);
+    expect(found[0].hint).toMatch(/delete this extra start node/);
+    expect(found[1].hint).toMatch(/Add an edge into it from a node that runs/);
+  });
+
   it('refuses a cycle cut off from start', () => {
     const found = unreachable(reachFlow(
       [START, { id: 'a', type: 'assignment' }, { id: 'b', type: 'assignment' }, END],
@@ -3839,7 +3852,7 @@ describe('lintFlowPatterns — a node no edge path from start reaches (flow-node
     expect(rule, 'the authoring rule that runs lintFlowPatterns').toBeDefined();
     expect(rule!.tier).toBe('gating');
     expect(rule!.runtimeTypes).toContain('flow');
-    const served = rule!.run(reachFlow([START, { id: 'stamp', type: 'assignment' }, END], [{ id: 'e1', source: 'start', target: 'end' }]) as never);
+    const served = rule!.run(reachFlow([START, { id: 'stamp', type: 'assignment' }, END], [{ id: 'e1', source: 'start', target: 'end' }]) as never, {});
     expect(served).toContainEqual(expect.objectContaining({ rule: FLOW_NODE_UNREACHABLE, severity: 'error' }));
   });
 });

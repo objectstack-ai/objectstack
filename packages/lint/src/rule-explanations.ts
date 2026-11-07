@@ -2027,6 +2027,9 @@ const FLOW_NODE_UNREACHABLE_EXPLANATION: RuleExplanation = {
       'out of it. A top-level node no edge path from the start node leads to is never executed, while the ' +
       'flow still parses, registers and reports itself as configured, so nothing tells the author the step ' +
       'is dead.',
+    'A run starts at the FIRST start node, so a second start node is reported too, with a different cure: ' +
+      'delete the extra start node rather than wiring an edge into it, and wire what followed it from a ' +
+      'node that runs.',
     'Every edge type counts as a path: default, conditional, fault and back. A `boundary_event` node is ' +
       'reached by attachment to its host node rather than by an edge, so it and the nodes only it leads to ' +
       'are not judged. Nodes inside a region body (`loop`, `parallel`, `try_catch` and the rest) are not ' +

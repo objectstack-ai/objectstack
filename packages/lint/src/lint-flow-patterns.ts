@@ -1937,7 +1937,11 @@ function scanUnreachableNodes(
       message:
         `no edge path leads to this node from the start node '${start.id}', so it never runs: a run starts ` +
         `at the start node and follows edges, and the flow still registers and reports itself as configured.`,
-      hint: `Add an edge into it from a node that runs, or delete the node.`,
+      // A second `start` node is unreached by construction (a run starts at the
+      // first one), and an edge into it is not the cure: remove the extra start.
+      hint: node.type === 'start'
+        ? `A run starts at the first start node only: delete this extra start node, and wire what follows it from a node that runs.`
+        : `Add an edge into it from a node that runs, or delete the node.`,
       rule: FLOW_NODE_UNREACHABLE,
       severity: 'error',
     });
