@@ -347,11 +347,12 @@ export interface OwnershipFloorAlternate {
  *   The record's own OPTIONAL master reference is empty and the principal
  *   neither owns the record (its `owner_id`) nor holds Modify All on its
  *   object; a record with no owner, or of an object without that column, is
- *   owned by nobody here, so Modify All alone writes it. A master above the record whose own OPTIONAL master reference is
- *   empty ends the chain under that row's owner rule: the three legs above
- *   still run on it, and then the principal must own it or hold Modify All on
- *   its object. The chain re-enters an object it has already visited, or it
- *   exceeds the depth bound. Or a master that is itself `controlled_by_parent`
+ *   owned by nobody here, so Modify All alone writes it. A master above the
+ *   record whose own OPTIONAL master reference is empty ends the chain under
+ *   that row's owner rule: the three legs above still run on it, and then the
+ *   principal must own it or hold Modify All on its object. The chain
+ *   re-enters an object it has already visited, or it exceeds the depth
+ *   bound. Or a master that is itself `controlled_by_parent`
  *   (the record's own master, or any master above it) has no relation to
  *   derive its own master from, is not present, or has an empty REQUIRED
  *   master reference. Each of these is an access answer, not a defect of the
