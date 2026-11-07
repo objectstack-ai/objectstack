@@ -155,12 +155,20 @@ const answerText = (a: ObservedAnswer): string => {
   return `refused ${a.code}${a.status !== undefined ? ` (${a.status})` : ''}${a.note !== undefined ? `: ${a.note}` : ''}`;
 };
 
-/** The code a validation operation declares (`write_validation`, ADR-0112). */
-export const VALIDATION_FAILED_CODE: ErrorCode = 'VALIDATION_FAILED';
+/**
+ * The code is the one a validation operation declares (`write_validation`,
+ * ADR-0112). A comparison, never a constant: the grader judges codes the
+ * platform answered and stamps none (`check:error-code-provenance` reads a
+ * constant holding a registered code as a stamp site), and `satisfies` keeps
+ * the spelling checked against the catalogue.
+ */
+function isValidationCode(code: string): boolean {
+  return code === ('VALIDATION_FAILED' satisfies ErrorCode);
+}
 
 /**
  * The refusal met the declared code. Exactly that code, or — for a declared
- * {@link VALIDATION_FAILED_CODE} — a refusal of the validation class the app
+ * `VALIDATION_FAILED` — a refusal of the validation class the app
  * defined itself (#31145 item 2), read from the door's envelope alone:
  *
  *   - its `code` is none of the platform's (it fails the spec's `ErrorCode`
@@ -177,7 +185,7 @@ export const VALIDATION_FAILED_CODE: ErrorCode = 'VALIDATION_FAILED';
 export function refusalMeets(declared: string, answer: ObservedAnswer): boolean {
   if (answer.kind !== 'refused') return false;
   if (answer.code === declared) return true;
-  if (declared !== VALIDATION_FAILED_CODE || answer.status === undefined) return false;
+  if (!isValidationCode(declared) || answer.status === undefined) return false;
   if (ErrorCode.safeParse(answer.code).success) return false;
   return answer.status >= 400 && answer.status < 500 && standardErrorCodeForHttpStatus(answer.status) === 'VALIDATION_ERROR';
 }
