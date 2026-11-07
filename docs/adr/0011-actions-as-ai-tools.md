@@ -333,8 +333,10 @@ three buckets, and the declarations were written in the same change as this adde
 > `sys_scim_connection_credential.mint_scim_credential` is assessed H, since it mints a SCIM bearer
 > credential and answers it once (triage on #31032, `6692886264`: "Classify mint as not exposed to AI
 > tools"), and `sys_scim_connection_credential.revoke_scim_credential` is assessed C (the same triage:
-> "Revoke may be classified on its own merits"), since it hands out no credential and widens no access
-> but switches one bearer off and cannot be undone, as `sys_api_key.revoke_api_key` does. The lists
+> "Revoke may be classified on its own merits"): it switches one bearer off, as `sys_api_key.revoke_api_key`
+> does, bounded to that one connection, and it hands out no credential and widens no access. No door
+> restores a revoked credential (the revoke door answers `409` on one already revoked, and the only
+> write of `active: true` is the mint), so provisioning resumes only by minting a new one. The lists
 > below are the amended record.
 
 **H — human-only (24):** `sys_user.impersonate_user` · `sys_user.set_user_password` ·
