@@ -212,6 +212,10 @@ export async function handleRequest(this: Pick<RequestRoutingHost, 'betterAuthEn
   // longer sign in. Nothing tells the operator, and there is no way back.
   const endpointPath = this.betterAuthEndpointPath(request);
 
+  // An enterprise OIDC callback runs inside the refusal scope that puts the
+  // cause of a refused ID token on the redirect (`sso-oidc-refusal-cause.ts`).
+  const ssoOidcProviderId = ssoOidcCallbackProviderId(endpointPath);
+
   // [#3653 / #14522] A SCIM protocol request (`/scim/v2/*`) runs inside
   // `scimRequestScope`, which is what makes the adapter's `transaction`
   // config open a REAL engine transaction around the vendor's provisioning
@@ -227,9 +231,6 @@ export async function handleRequest(this: Pick<RequestRoutingHost, 'betterAuthEn
   // so it is exactly as narrow as before — SCIM protocol requests only; the
   // non-SCIM flows keep their sequential posture, which the scoping note
   // records as load-bearing. Pinned by `scim-transaction-scope.test.ts`.
-  // An enterprise OIDC callback runs inside the refusal scope that puts the
-  // cause of a refused ID token on the redirect (`sso-oidc-refusal-cause.ts`).
-  const ssoOidcProviderId = ssoOidcCallbackProviderId(endpointPath);
   const runRequest = isScimProtocolPath(endpointPath)
     ? async (): Promise<Response> => {
         const { scimRequestScope } = await import('./scim-connection-service.js');
