@@ -368,7 +368,7 @@ const DECLARED_BY_12130: Readonly<Record<string, readonly string[]>> = {
   // recorder sees. The effects file measures where it lands, type by type.
   className: [
     'checkboxes', 'currency', 'filter-condition', 'multiselect', 'object-ref', 'password',
-    'percent', 'radio', 'rating', 'recipient-picker', 'tags',
+    'percent', 'radio', 'rating', 'recipient-picker', 'shareable-object-ref', 'tags',
   ],
 };
 
