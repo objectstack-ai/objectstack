@@ -369,6 +369,13 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
       'scripts/js-comment-mask.mjs',
       'scripts/invoked-as.mjs',
     ],
+    heldBy: {
+      // The pin names only the census; these two are the census's own relative
+      // imports, loaded by the spawned child, so no path the pin quotes lands
+      // in them and the pin itself is what holds them.
+      'scripts/js-comment-mask.mjs': ['packages/core/src/security/vouched-reference-callers.pin.test.ts'],
+      'scripts/invoked-as.mjs': ['packages/core/src/security/vouched-reference-callers.pin.test.ts'],
+    },
   },
   '@objectstack/types': {
     // src/driver-error-classification.callers.test.ts is the #13440 gate: it
