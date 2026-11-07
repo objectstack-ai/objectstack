@@ -52,33 +52,14 @@ import {
 import { AlertCircle, Bot, KeyRound, ShieldCheck } from 'lucide-react';
 import { useAuth } from '@object-ui/auth';
 import { formatDate, formatDateTime, useObjectTranslation } from '@object-ui/i18n';
-import { useAdapter, useDataInvalidation } from '@object-ui/react';
-
-/** The `sys_api_key` columns the list reads; the key's secret is never among them. */
-const API_KEY_LIST_FIELDS = [
-  'id',
-  'name',
-  'prefix',
-  'created_at',
-  'last_used_at',
-  'expires_at',
-  'revoked',
-] as const;
-
-export interface ApiKeyRow {
-  id: string;
-  name?: string | null;
-  prefix?: string | null;
-  created_at?: string | null;
-  last_used_at?: string | null;
-  expires_at?: string | null;
-  revoked?: boolean | null;
-}
-
-type ShellClient = ReturnType<NonNullable<ReturnType<typeof useAdapter>>['getClient']>;
-/** What `oauth.authorizedClients.list()` answers, read off the adapter's own client. */
-type AuthorizedClientsList = Awaited<ReturnType<ShellClient['oauth']['authorizedClients']['list']>>;
-type AuthorizedClient = AuthorizedClientsList['clients'][number];
+import { notifyDataChanged, useAdapter, useDataInvalidation } from '@object-ui/react';
+import {
+  API_KEY_LIST_FIELDS,
+  isExpired,
+  type ApiKeyRow,
+  type AuthorizedClient,
+  type AuthorizedClientsList,
+} from './accessRecords.js';
 
 type Translate = (key: string, options?: Record<string, unknown>) => string;
 
@@ -101,13 +82,6 @@ const SCOPE_KEYS: Record<string, string> = {
 function describeGrantedScope(scope: string, t: Translate): string {
   const key = SCOPE_KEYS[scope];
   return key ? t(key) : t('oauth.consent.scope.unrecognised', { scope });
-}
-
-/** A key past its `expires_at` no longer authenticates, revoked or not. */
-function isExpired(row: ApiKeyRow, now: number): boolean {
-  if (!row.expires_at) return false;
-  const at = Date.parse(row.expires_at);
-  return Number.isFinite(at) && at <= now;
 }
 
 function errorText(e: unknown): string {
@@ -322,6 +296,9 @@ export function AuthorizedAssistantsSection({ forUserId }: { forUserId?: string 
       setWithdrawingId(null);
       // Read again either way: a refused withdraw is most often a grant that is already gone.
       setReadNonce((n) => n + 1);
+      // The withdraw bypasses the adapter, so tell every other reader of the
+      // person's grants (the "Connected" line, `useConnectedAccess`) it changed.
+      notifyDataChanged({ objectName: 'sys_oauth_consent', recordId: client.id });
     }
   };
 

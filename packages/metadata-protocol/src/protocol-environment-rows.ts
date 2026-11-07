@@ -44,7 +44,7 @@
  * not move.
  */
 
-import { pairOf, type InstalledManifestLookup } from '@objectstack/metadata-core';
+import { isPairOf, type InstalledManifestLookup } from '@objectstack/metadata-core';
 import { PLURAL_TO_SINGULAR, SINGULAR_TO_PLURAL } from '@objectstack/spec/shared';
 import type { StoredOverlayRow } from './item-lock.js';
 import { overlayMemberWhere } from './migrations/overlay-index.js';
@@ -300,6 +300,5 @@ export function baseAddressServesMember(
 ): boolean {
     if (bound === undefined || bound === base) return true;
     if (baseShipsMember) return false;
-    const pair = pairOf(base, installed);
-    return pair.ok && pair.value === bound;
+    return isPairOf(bound, base, installed);
 }

@@ -28,6 +28,9 @@ import { describe, it, expect, vi } from 'vitest';
 import { SchemaRegistry } from '@objectstack/objectql';
 import { repeatedQueryParamMessage } from '@objectstack/rest';
 import { HttpDispatcher } from '../http-dispatcher.js';
+// Paid during collection, not inside a case's clock: the package-state store's
+// `standalone-stack.ts` loads it lazily.
+import '@objectstack/metadata';
 
 const PKG = 'com.acme.app';
 
@@ -82,10 +85,11 @@ describe('[#23214] DELETE /packages/:id — `keepData` is one flag', () => {
     });
 
     it.each([
-        ['true', { packageId: PKG, keepData: true }],
-        ['1', { packageId: PKG, keepData: true }],
-        [['true'], { packageId: PKG, keepData: true }],
-        [undefined, { packageId: PKG }],
+        // [#31023] The signed-in caller rides as the actor (ADR-0146 D1).
+        ['true', { packageId: PKG, keepData: true, actor: AUTHOR.userId }],
+        ['1', { packageId: PKG, keepData: true, actor: AUTHOR.userId }],
+        [['true'], { packageId: PKG, keepData: true, actor: AUTHOR.userId }],
+        [undefined, { packageId: PKG, actor: AUTHOR.userId }],
     ])('preserves one `keepData` (%j): deletePackage receives %j', async (keepData, received) => {
         const { dispatcher, protocol } = boot();
         const answer = await call(dispatcher, 'DELETE', `/packages/${PKG}`, undefined, keepData === undefined ? {} : { keepData });
