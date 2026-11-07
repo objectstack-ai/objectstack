@@ -528,7 +528,6 @@ import type {
     UninstallCleanupOutcome,
     UninstallDeclared,
     UninstallGuard,
-    UninstallGuardRefusal,
 } from './protocol-package-lifecycle-types.js';
 export { captureUninstallDeclared } from './protocol-package-lifecycle-types.js';
 export type {

@@ -45,7 +45,7 @@
  * A formula over the field does not refuse the disable: it answers `null`.
  */
 
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -58,8 +58,14 @@ import { resolveThrownHttpError } from '@objectstack/types';
 import { AppPlugin } from '../app-plugin.js';
 import { HttpDispatcher } from '../http-dispatcher.js';
 import { loadDisabledPackageIds, setPackageDisabled } from '../package-state-store.js';
+import { PACKAGE_STATE_UNINSTALL_CLEANUP } from '../package-state-host-store.js';
 import * as runtime from '../index.js';
-import { disableDependentRulesMessage, readDisableDependentRules } from './packages.js';
+import {
+    disableDependentRulesMessage,
+    PACKAGE_DEPENDENT_RULES_UNINSTALL_GUARD,
+    packageUninstallDependentRulesRefusal,
+    readDisableDependentRules,
+} from './packages.js';
 
 const ENVIRONMENT_ID = 'env_suite_extension_fields';
 const ADMIN = {
@@ -1230,5 +1236,153 @@ describe('[#31067] the verdict the disable door asks is the package entry\'s exp
         const result: any = await disable(EXTENDER);
         expect(result.response?.status, String(result.response?.body?.error?.message)).toBe(200);
         expect(registry.getPackage(EXTENDER)?.enabled).toBe(false);
+    });
+});
+
+/**
+ * [#31232] The uninstall VERB (`protocol.deletePackage`, in
+ * `@objectstack/metadata-protocol`) withdraws the package's `objectExtensions`
+ * fields from the served objects for every in-process caller (a host's own
+ * uninstall tool, install-local's pair-install undo, the unmanaged-import
+ * rollback), not only behind the package door. The runtime registers the
+ * package doors' dependent-rule verdict on the verb as a pre-uninstall guard
+ * (`ensureDependentRulesUninstallGuard`, from `AppPlugin.start`), so the verb
+ * itself refuses, before it reads or moves anything, with `409`
+ * `PACKAGE_DISABLE_RESTRICTED_BY_VALIDATION_RULE` and the doors' sentence
+ * under an uninstall lead. Measured before this change on this rig: the
+ * in-process uninstall answered, the field left the served object, and every
+ * write to the object then answered `400 VALIDATION_FAILED`, the rule failing
+ * closed on the withdrawn field.
+ *
+ * Two writable packages extend the app's object with one field each; a third
+ * package's active rule reads the first one's field. The verb is the kernel's
+ * real protocol, called in process.
+ */
+describe('[#31232] the in-process uninstall verb refuses while an enabled package\'s validation rule reads a field the package adds', () => {
+    const TIERS = 'com.qa.inproc.tiers';
+    const NOTES = 'com.qa.inproc.notes';
+    const READER = 'com.qa.inproc.reader';
+    const TIER = 'qy_tier';
+    const NOTE = 'qy_note';
+    const RULE = 'qy_tier_known';
+    const CODE = 'PACKAGE_DISABLE_RESTRICTED_BY_VALIDATION_RULE';
+    const manifestOf = (id: string) => ({ id, name: id, version: '1.0.0', type: 'module' });
+
+    let root: string;
+    let booted: Booted | undefined;
+    let accountId: string;
+    let protocol: any;
+
+    beforeAll(async () => {
+        root = mkdtempSync(join(tmpdir(), 'os-suite-ext-inproc-'));
+        writeFileSync(join(root, '.keep'), '');
+        process.env.OS_HOME = mkdtempSync(join(home, 'inproc-uninstall-'));
+        booted = await bootKernel(root);
+        const { kernel, engine } = booted;
+        for (const id of [TIERS, NOTES, READER]) engine.registry.installPackage(manifestOf(id) as any, 'authored');
+        engine.registry.registerObject({ name: ACCOUNT, fields: { [TIER]: { name: TIER, type: 'text', label: 'Tier' } } } as any, TIERS, undefined, 'extend');
+        engine.registry.registerObject({ name: ACCOUNT, fields: { [NOTE]: { name: NOTE, type: 'text', label: 'Note' } } } as any, NOTES, undefined, 'extend');
+        engine.registry.registerObject({
+            name: ACCOUNT,
+            validations: [{ name: RULE, type: 'script', severity: 'error', message: 'Unknown tier', condition: `record.${TIER} == 'unknown'` }],
+        } as any, READER, undefined, 'extend');
+        await engine.syncSchemas();
+        const created = await dispatchAs(kernel, 'POST', `/data/${ACCOUNT}`, { name: 'Acme', [TIER]: 'gold', [NOTE]: 'n' });
+        expect(created.status, `precondition: the account is written (${String(created.message)})`).toBe(201);
+        accountId = idOf(created);
+        protocol = kernel.getService<any>('protocol');
+    }, 120_000);
+    afterAll(async () => {
+        vi.restoreAllMocks();
+        await shutdown(booted);
+        rmSync(root, { recursive: true, force: true });
+    }, 60_000);
+
+    /** The verb's refusal sentence: the exported builder over the exported verdict, under the uninstall lead. */
+    const expectedMessage = () => runtime.formatPackageDisableDependents(
+        `Package '${TIERS}' cannot be uninstalled`,
+        runtime.readPackageDisableDependents(booted!.engine.registry, TIERS),
+    );
+
+    it('the verb answers 409 with the doors\' code and sentence under an uninstall lead, having read and moved nothing', async () => {
+        const { kernel, engine } = booted!;
+        const disabledBefore = [...loadDisabledPackageIds(ENVIRONMENT_ID)].sort();
+        const reads = vi.spyOn(protocol, 'findEnvironmentRows');
+        const deletes = vi.spyOn(protocol, 'deleteMetaItem');
+        const cleanups = vi.spyOn(protocol, 'runUninstallCleanups');
+        const withdrawals = vi.spyOn(engine.registry, 'uninstallPackage');
+
+        const refused = await protocol.deletePackage({ packageId: TIERS, actor: ADMIN.userId }).then(
+            () => { throw new Error('the in-process uninstall was not refused'); },
+            (e: any) => e,
+        );
+
+        expect({ status: refused.status, code: refused.code }).toEqual({ status: 409, code: CODE });
+        expect(refused.message).toBe(expectedMessage());
+        expect(refused.message).toBe(packageUninstallDependentRulesRefusal(engine.registry, TIERS)?.message);
+        expect(String(refused.message)).toMatch(new RegExp(`^Package '${TIERS.replace(/\./g, '\\.')}' cannot be uninstalled: an active validation rule reads a field it adds through objectExtensions`));
+        expect(String(refused.message)).toContain(`${READER} · ${ACCOUNT} · ${RULE} (reads ${TIER})`);
+
+        // Nothing read, nothing moved: no stored row read or deleted, no
+        // registry withdrawal, no cleanup; the package and its field stay
+        // served, the state file is as it was, and writes still land.
+        expect({
+            reads: reads.mock.calls.length,
+            deletes: deletes.mock.calls.length,
+            cleanups: cleanups.mock.calls.length,
+            withdrawals: withdrawals.mock.calls.length,
+        }).toEqual({ reads: 0, deletes: 0, cleanups: 0, withdrawals: 0 });
+        expect(engine.registry.getPackage(TIERS)).toBeDefined();
+        expect(await servedFieldNames(kernel)).toEqual(expect.arrayContaining([TIER, NOTE]));
+        expect([...loadDisabledPackageIds(ENVIRONMENT_ID)].sort()).toEqual(disabledBefore);
+        const written = await dispatchAs(kernel, 'PATCH', `/data/${ACCOUNT}/${accountId}`, { [TIER]: 'silver' });
+        expect(written.status, String(written.message)).toBe(200);
+        expect(await readAccount(kernel, accountId)).toMatchObject({ [TIER]: 'silver' });
+        vi.restoreAllMocks();
+    });
+
+    it('the package door answers the same refusal, word for word, and the package stays', async () => {
+        const { kernel, engine } = booted!;
+        const refused = await dispatchAs(kernel, 'DELETE', `/packages/${TIERS}`);
+        expect({ status: refused.status, code: refused.code }).toEqual({ status: 409, code: CODE });
+        expect(String(refused.message)).toBe(expectedMessage());
+        expect(refused.details).toBeUndefined();
+        expect(engine.registry.getPackage(TIERS)).toBeDefined();
+        expect(await servedFieldNames(kernel)).toContain(TIER);
+    });
+
+    it('control: a package no rule depends on uninstalls in process as before, its disable record cleared by the verb', async () => {
+        const { kernel, engine } = booted!;
+        // Disabled first, so the verb has a disable record to clear. The
+        // reader's rule stays active on the same object: it reads another field.
+        expect((await dispatchAs(kernel, 'PATCH', `/packages/${NOTES}/disable`)).status).toBe(200);
+        expect(loadDisabledPackageIds(ENVIRONMENT_ID).has(NOTES), 'precondition: the disable is recorded').toBe(true);
+
+        const uninstalled = await protocol.deletePackage({ packageId: NOTES, actor: ADMIN.userId });
+
+        expect(uninstalled.cleanups.map((c: { name: string }) => c.name)).toContain(PACKAGE_STATE_UNINSTALL_CLEANUP);
+        expect(engine.registry.getPackage(NOTES)).toBeUndefined();
+        expect(loadDisabledPackageIds(ENVIRONMENT_ID).has(NOTES)).toBe(false);
+        expect(await servedFieldNames(kernel)).not.toContain(NOTE);
+        // The guard is still registered: it answered nothing for this package.
+        expect([...(protocol as any).uninstallGuards.keys()]).toContain(PACKAGE_DEPENDENT_RULES_UNINSTALL_GUARD);
+    });
+
+    it('control: proceeds in process once the reading rule is switched off through the tenant overlay, and writes still land', async () => {
+        const { kernel, engine } = booted!;
+        engine.registry.registerObject({
+            name: ACCOUNT, label: 'Account', fields: { name: { name: 'name', type: 'text', label: 'Name' } },
+            validations: [{ name: RULE, type: 'script', message: 'Switched off by the tenant', condition: 'true', active: false }],
+            _provenance: 'org',
+        } as any, APP, undefined, 'overlay');
+        const served = ((engine.registry.getObject(ACCOUNT) as any)?.validations ?? []) as Array<{ name?: string; active?: unknown }>;
+        expect(served.find((r) => r.name === RULE)?.active, 'precondition: the reader\'s rule is served, switched off').toBe(false);
+
+        await protocol.deletePackage({ packageId: TIERS, actor: ADMIN.userId });
+
+        expect(engine.registry.getPackage(TIERS)).toBeUndefined();
+        expect(await servedFieldNames(kernel)).not.toContain(TIER);
+        const written = await dispatchAs(kernel, 'PATCH', `/data/${ACCOUNT}/${accountId}`, { name: 'Acme Ltd' });
+        expect(written.status, String(written.message)).toBe(200);
     });
 });
