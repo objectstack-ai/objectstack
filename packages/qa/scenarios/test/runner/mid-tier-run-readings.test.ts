@@ -6,8 +6,9 @@
  * outputs are rebuilt from the run's report and the epic seat's evidence, not
  * replayed: no recording is in this repository.
  *
- *   1. "Today": a post-state declared as the card's `asOf` is met by the run
- *      date the platform's clock stamped.
+ *   1. "Today": every run-phase prompt states the card's `asOf`, and a
+ *      post-state declared as it is met by the run date the platform's clock
+ *      stamped.
  *   2. An app-defined validation code meets a declared `VALIDATION_FAILED`
  *      when the envelope files it in the validation class; nothing else does.
  *   3. An answer with no code names the build's own body when the sandbox's
@@ -21,6 +22,7 @@
  *      output's keys (the three `service_desk` cases).
  */
 
+import { readdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -29,6 +31,7 @@ import { describe, expect, it } from 'vitest';
 import { formatRefusal, loadScenarioFile, readCapabilityAreas, type LoadedScenario } from '../../src/loader.js';
 import { clockDates, observeOperation, observeProbe, postStateRows, probeCall, uncodedNote, uncodedToolError, type Row } from '../../src/runner/observe.js';
 import { hiddenValues } from '../../src/runner/orchestrate.js';
+import { operationPrompt, questionPrompt } from '../../src/runner/prompts.js';
 import type { ParsedTurn } from '../../src/runner/transcript.js';
 import { isProbedOperation } from '../../src/schema.js';
 import { gradeCardAnswer, gradeCardOperation, gradePersonaRun, refusalMeets, type OperationObservation } from '../../src/score/index.js';
@@ -81,6 +84,22 @@ describe('1. the card\'s today: a declared asOf date is met by the run date the 
     expect(postStateRows(op, rowsByObject)![0]).toEqual([]);
     expect(postStateRows(op, rowsByObject, { asOf: '2026-10-31', runDates: [RUN_DAY] })![0]).toEqual([order]);
     expect(postStateRows(op, rowsByObject, { asOf: '2026-10-31', runDates: ['2026-11-06'] })![0]).toEqual([]);
+  });
+
+  it('every run-phase prompt of a card with an asOf states it, operations as well as questions', () => {
+    const dir = readdirSync(CARDS).filter((f) => f.endsWith('.json'));
+    let dated = 0;
+    for (const file of dir) {
+      const scenario = load(file.slice(0, -'.json'.length));
+      const { card } = scenario;
+      if (!card.asOf) continue;
+      dated++;
+      const today = `Today is ${card.asOf}.`;
+      for (const q of card.run.questions) expect(questionPrompt(scenario, q.id), `${card.id} ${q.id}`).toContain(today);
+      for (const op of card.run.operations) expect(operationPrompt(card, op.id), `${card.id} ${op.id}`).toContain(today);
+    }
+    expect(dated).toBeGreaterThan(0);
+    expect(operationPrompt(asset.card, 'manager_approves_scrap')).toMatch(/ Today is 2026-10-31\.\n\nYou act for /);
   });
 
   it('the run dates are each instant\'s UTC and local date, distinct and ascending', () => {

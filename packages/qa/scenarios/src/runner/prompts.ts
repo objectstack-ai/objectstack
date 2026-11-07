@@ -238,11 +238,20 @@ export function templateIteratePrompt(card: Card, server: TemplateServer): strin
   ].join('\n');
 }
 
+/**
+ * The card's "today", said to the agent. A question or operation that says
+ * "today", "this month" or "overdue" is judged against the card's `asOf`, so
+ * every run-phase prompt states it; a write the platform's clock stamps is
+ * judged against the run date instead (the operation grader's `asOf` rule).
+ */
+function todayOf(card: Card): string {
+  return card.asOf ? ` Today is ${card.asOf}.` : '';
+}
+
 export function questionPrompt(scenario: LoadedScenario, questionId: string): string {
   const q = scenario.card.run.questions.find((x) => x.id === questionId)!;
-  const today = scenario.card.asOf ? ` Today is ${scenario.card.asOf}.` : '';
   return (
-    `${text(q.ask)}${today}\n\nAnswer from the app’s data using the \`app\` tools. State the figures, and end with a line ` +
+    `${text(q.ask)}${todayOf(scenario.card)}\n\nAnswer from the app’s data using the \`app\` tools. State the figures, and end with a line ` +
     '`Source: <object>` naming the object the figures come from.'
   );
 }
@@ -250,7 +259,7 @@ export function questionPrompt(scenario: LoadedScenario, questionId: string): st
 export function operationPrompt(card: Card, operationId: string): string {
   const op = card.run.operations.find((o) => o.id === operationId)!;
   const persona = card.run.personas.find((p) => p.id === op.actingAs);
-  return `${text(op.ask)}\n\nYou act for ${persona?.role ?? op.actingAs}, through the \`app\` tools.`;
+  return `${text(op.ask)}${todayOf(card)}\n\nYou act for ${persona?.role ?? op.actingAs}, through the \`app\` tools.`;
 }
 
 /** `os verify`'s opt-in proofs, chosen from the card's capability tags. */

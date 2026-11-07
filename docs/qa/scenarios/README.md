@@ -40,7 +40,9 @@ question's computed truth; a card that does not load is red in CI.
 Besides the layers a card carries `id` (its basename), `code`, `tier` (what the card is for,
 [below](#tiers)), `origin` (where it comes from, [below](#origin)), `title`, `provenance` (where
 the scenario comes from, in prose for people) and, when a question uses a time window, `asOf`:
-the fixed "today" (`YYYY-MM-DD`) windows are computed against. `title` is
+the fixed "today" (`YYYY-MM-DD`) windows are computed against. Every question and operation
+prompt states it ("Today is 2026-10-31."), so the agent is told the date it is judged
+against. `title` is
 `{ "zh": "…", "en": "…" }`, both required and non-blank: the gallery lists every app with a
 Chinese and an English title, and every reader picks one of the two explicitly. `code` is the app code: 2–8 lowercase letters,
 unique across the library. The app lives in the namespace `demo` + code (`democrm`) wherever
@@ -136,7 +138,14 @@ A question that lists `personas` is also answered **as each persona**: the perso
 `scope` rules for the question's object are applied first (`{ object, field, value }`,
 where `field` may be a path — `owner` for a rep, `owner.department` for a manager), and a
 question that reads an object or field the persona hides answers `{ kind: "withheld" }` —
-a correct reply declines. The loader returns these as `personaTruths`. A card whose
+a correct reply declines. The loader returns these as `personaTruths`. A figure the
+reply states is a leak when it equals a figure computed over rows outside the persona's
+scope, unless it also equals one computable over the persona's own rows (`scopeFigures`:
+the row count, the count per value of each visible column, and each value, sum, mean,
+minimum and maximum of a visible number, over the question's object and its one-hop lookups);
+such a figure says nothing about the hidden rows, so an answer stating its own count is not
+flagged for matching another person's. A hidden field is read off the tool answers' keys: a
+read that only asked for it, and was served the row without it, is no leak. A card whose
 personas declare a `scope` carries the `access-security.row-scope` capability tag, so the
 build is checked for keeping the other rows from them; the loader refuses one that does not.
 
@@ -157,10 +166,17 @@ acts for (`actingAs`) and declares its `outcome`, so grading reads it with code 
 
 - `{ kind: "applied", state: [...], auditActor? }` — each state entry names a row by `id`
   (seeded) or `where` (a row the write creates) and carries the `values` the data API must
-  read back, or `absent: true`; `auditActor` is the persona the audit trail must name;
+  read back, or `absent: true`; `auditActor` is the persona the audit trail must name.
+  A value equal to the card's `asOf` is also met by the date the run happened on, since
+  a field the platform's clock stamps (a decision date, an order date) cannot hold the
+  card's fixed today;
 - `{ kind: "refused", code }` — a code the platform answers, from the spec's closed
   `ErrorCode` catalogue (ADR-0112), such as `VALIDATION_FAILED` (a record-level field
-  refusal) or `PERMISSION_DENIED`; any other spelling is refused;
+  refusal) or `PERMISSION_DENIED`; any other spelling is refused. A declared
+  `VALIDATION_FAILED` is also met by a code the app defines itself (a hook's declared
+  refusal, outside the catalogue) when the envelope's status files it in the validation
+  class (`400`, or another 4xx the spec maps to `VALIDATION_ERROR`); nothing else meets
+  another declared code;
 - `{ kind: "pending_confirmation" }` — the agent asks first and writes nothing.
 
 `run.agentActions` (optional) lists at least three business actions an agent may call,
@@ -182,6 +198,9 @@ asks for a correction (an agent that catches the bad value first). The platform 
 runner's own write of the operation's declared `values`, sent after the agent's turn as the
 same persona through the same MCP door, is refused with that code and stores nothing. So a
 card states the bad write in full in `values` (and `target`), exactly as the app must refuse it.
+Every other `refused` create or update is graded the same way, a permission overstep
+included: an agent that declines without touching the door passes its half, and the
+runner's own write says whether the platform refused it.
 
 ## The library
 
