@@ -81,6 +81,9 @@ vi.mock('./RecordDetailView', () => ({ RecordDetailView: () => null }));
 
 import { ObjectView } from './ObjectView';
 import '@object-ui/plugin-grid';
+// `ObjectView` reaches a dynamic `import('@objectstack/lint')`: pay its load at
+// collection, never inside a case's clocked window (`check:test-source-alias`).
+import '@objectstack/lint';
 import { ExpressionProvider } from '../providers/ExpressionProvider';
 import { LIST_PAGE_PARAM, LIST_SEARCH_PARAM } from './userFilterUrlState';
 
