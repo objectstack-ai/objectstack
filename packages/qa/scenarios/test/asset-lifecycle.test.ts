@@ -108,7 +108,7 @@ const EXPECTED_PERSONA_TRUTHS: Record<string, Record<string, Truth>> = {
 };
 
 function load(file: string): LoadedScenario {
-  const { card, refusals } = loadScenarioFile(file, { areas });
+  const { card, refusals } = loadScenarioFile(file, { areas, library: 'open' });
   expect(refusals.map(formatRefusal)).toEqual([]);
   expect(card).toBeDefined();
   return card!;

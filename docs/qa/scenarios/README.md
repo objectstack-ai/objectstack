@@ -6,9 +6,10 @@ is seeded with, the data questions an agent must answer about that data and the 
 the seed determines, who may see what, the writes an agent performs and the guardrails
 those writes must respect, and one follow-up change request.
 
-The cards here are the **open** library. Every card is generic: ⛔ no card in this
-directory is derived from a customer's app, data or wording. Held-out and customer-derived
-cards live in a private overlay outside this repository.
+The cards here are the **open** library. Every card is generic, and says so in its
+`origin` ([below](#origin)): ⛔ no card in this directory is derived from a customer's app,
+data or wording. Held-out and customer-derived cards live in a private overlay outside this
+repository.
 
 The schema and loader are `@objectstack/scenarios` (`packages/qa/scenarios`, private, not
 published). This format is a devx instrument, not a protocol: `packages/spec` carries no
@@ -37,9 +38,11 @@ question's computed truth; a card that does not load is red in CI.
 | 6 | `iterate` | A one-sentence change request plus the `expectDelta` it should add to `expect`. |
 
 Besides the layers a card carries `id` (its basename), `code`, `tier` (what the card is for,
-[below](#tiers)), `title`, `provenance` (where the
-scenario comes from) and, when a question uses a time window, `asOf`: the fixed "today"
-(`YYYY-MM-DD`) windows are computed against. `code` is the app code: 2–8 lowercase letters,
+[below](#tiers)), `origin` (where it comes from, [below](#origin)), `title`, `provenance` (where
+the scenario comes from, in prose for people) and, when a question uses a time window, `asOf`:
+the fixed "today" (`YYYY-MM-DD`) windows are computed against. `title` is
+`{ "zh": "…", "en": "…" }`, both required and non-blank: the gallery lists every app with a
+Chinese and an English title, and every reader picks one of the two explicitly. `code` is the app code: 2–8 lowercase letters,
 unique across the library. The app lives in the namespace `demo` + code (`democrm`) wherever
 it is built, scored or exported, and every item it declares carries that prefix.
 
@@ -69,8 +72,26 @@ refuses a `starter` or `delivery` card under any line of it, at the field that f
   `countsReason` does not lower on a gallery card;
 - at least 3 `run.agentActions`.
 
-The gallery exporter's filter on `tier` is a change of its own: until it lands the exporter
-reads no tier, and it exports no card at all (`packages/qa/scenarios/src/export/generic.ts`).
+The gallery exporter exports a `starter` or `delivery` card only, and only a `generic` one
+([Origin](#origin)); a `control` card is never exported, whatever it scores
+(`packages/qa/scenarios/src/export/generic.ts`).
+
+## Origin
+
+Every card names its `origin`, a closed set; a card without one is refused. It is the marker
+the gallery exporter reads: neither `provenance` (prose) nor the directory a card sits in is
+one, because the loader reads whatever directory it is handed.
+
+| `origin` | Where the card comes from | Lives in | Exported |
+|:---|:---|:---|:---|
+| `generic` | Written from the domain alone; anyone could write it. | this open library | when its `tier` is `starter` or `delivery` |
+| `customer-derived` | Derived from a customer's app, data or wording. | the private overlay | ⛔ never |
+| `held-out` | Withheld from the open set, so a score on it is not one anything was tuned against. | the private overlay | ⛔ never |
+
+The caller tells the loader which library it is loading (`LoadOptions.library`: `open` or
+`overlay`), and the loader refuses a `generic` card in the overlay, at `origin`. The runner and
+the exporter CLIs answer it from the directory: the repository's `docs/qa/scenarios` (by real
+path) is the open library, and any other `--cards` directory is the overlay.
 
 ## Seed rows
 
@@ -192,8 +213,11 @@ the loader enforces; each card's own test pins the rest:
 
 1. Write `<id>.json` here; `id` equals the basename, `code` is one no other card uses, and
    `tier` says what the card is for. A new gallery card is `starter` and meets the gallery
-   floor; `control` is kept for the golden cases, which `test/library.test.ts` pins.
-2. Keep it generic — a scenario anyone could write from the domain alone.
+   floor; `control` is kept for the golden cases, which `test/library.test.ts` pins. Give it
+   a `title` in both languages.
+2. Keep it generic — a scenario anyone could write from the domain alone — and say so:
+   `"origin": "generic"`. A card derived from a customer, or held out, goes to the private
+   overlay instead, with that `origin`.
 3. Run `pnpm --filter @objectstack/scenarios test`: a refusal names the file and the field
    path. Then pin the card's hand-worked truths, per persona too, in its own
    `packages/qa/scenarios/test/<id>.test.ts` (model: `travel-expense.test.ts`). The three control

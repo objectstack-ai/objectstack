@@ -8,7 +8,7 @@ reference.
 import { loadScenarios, readCapabilityAreas, formatRefusal } from '@objectstack/scenarios';
 
 const areas = readCapabilityAreas('docs/qa/platform-checklist/areas');
-const { cards, refusals } = loadScenarios('docs/qa/scenarios', { areas });
+const { cards, refusals } = loadScenarios('docs/qa/scenarios', { areas, library: 'open' }); // 'overlay' refuses a generic card
 for (const r of refusals) console.error(formatRefusal(r)); // FILE: FIELD.PATH: message
 // cards[i].truths[questionId] → the question's computed truth
 ```
@@ -18,7 +18,8 @@ for (const r of refusals) console.error(formatRefusal(r)); // FILE: FIELD.PATH: 
   seed does not determine.
 - `src/loader.ts` — reads a directory of cards, validates shape and cross-references, holds
   a `starter` or `delivery` card to the gallery floor (`GALLERY_FLOOR`; the tiers are in the
-  format's README), and returns typed cards or located refusals.
+  format's README), refuses a `generic` card loaded as the private overlay (`library`; the
+  origins are in the format's README), and returns typed cards or located refusals.
 - `src/score/` — the deterministic scorer, entries `@objectstack/scenarios/score` and
   `@objectstack/scenarios/score/full` (below).
 
