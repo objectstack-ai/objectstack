@@ -384,4 +384,38 @@ describe('handleInstall() — step 2c′ over an unreadable record asks, never i
         expect(entry?.version).toBe('1.0.1');
         expect(entry?.schemaUpgradeConfirmation).toMatchObject({ findingSet: details.findingSet });
     });
+
+    it('a declared rename over an unreadable record still answers 501, with or without the token, and writes nothing', async () => {
+        writeCorruptEntryFor('app.test.crm');
+        const { rawApp, ctx } = await boot();
+        const install = rawApp.routes.get('POST /api/v1/marketplace/install-local')!;
+        const renamed = {
+            ...GOOD_MANIFEST,
+            version: '1.0.1',
+            objects: [{ name: 'crm_x', fields: { name2: { type: 'text', renamedFrom: ['name'] } } }],
+        };
+        const register = ctx.getService('manifest').register;
+        register.mockClear(); // isolate from the boot's own registrations
+
+        const bare = await install(makeInstallC({ manifest: renamed }));
+
+        expect(bare.status).toBe(501);
+        expect(bare.payload.error.code).toBe('NOT_IMPLEMENTED');
+        expect(bare.payload.error.details.declaredRenames).toEqual([{ object: 'crm_x', from: 'name', to: 'name2', toType: 'text' }]);
+        expect(bare.payload.error.details.findings).toEqual([expect.objectContaining({
+            kind: 'installed_record_unreadable', file: 'app.test.crm.json',
+        })]);
+
+        // The token the unreadable record's 409 would print — the same finding
+        // set the plain upgrade above is asked to confirm — admits no rename.
+        const plain = await install(makeInstallC({ manifest: { ...GOOD_MANIFEST, version: '1.0.1' } }));
+        expect(plain.status).toBe(409);
+        const token = plain.payload.error.details.findingSet;
+        const withToken = await install(makeInstallC({ manifest: renamed, confirmSchemaUpgrade: token }));
+
+        expect(withToken.status).toBe(501);
+        expect(withToken.payload.error.details.declaredRenames).toEqual([{ object: 'crm_x', from: 'name', to: 'name2', toType: 'text' }]);
+        expect(register).not.toHaveBeenCalled();
+        expect(new LocalManifestSource(dir).read('app.test.crm').failure).toBeDefined();
+    });
 });

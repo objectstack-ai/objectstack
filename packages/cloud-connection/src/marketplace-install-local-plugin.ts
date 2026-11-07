@@ -117,11 +117,13 @@
  *          the confirmation in the ledger entry. An orphaned install (the
  *          registry serves it, the ledger holds no record) is compared against
  *          the body the registry serves. A record of the installed version
- *          that will not parse, or an orphan whose registry row carries no
- *          body, answers the same 409 with one finding naming it
- *          (`installed_record_unreadable` / `installed_record_missing`): no
- *          comparison ran, and its token admits the re-install. Removed fields,
- *          `safe` type changes and seed changes are refused by nothing.
+ *          that will not parse, or no installed body anywhere (an entry or an
+ *          orphan's registry row carrying none), answers the same 409 with one
+ *          finding naming it (`installed_record_unreadable` /
+ *          `installed_record_missing`): no comparison ran, and its token admits
+ *          the re-install — unless the version declares a rename, still 501.
+ *          Removed fields, `safe` type changes and seed changes are refused by
+ *          nothing.
  *
  *          [epic cloud#3652 Q3, #30884] `dryRun: true` answers `200` with the
  *          package upgrade plan — the installed version (its ledger entry)
@@ -583,7 +585,11 @@ type SchemaUpgradeFinding =
         describe: string;
     }
     | {
-        /** The registry serves the package but the ledger holds no record of it (an orphaned install). */
+        /**
+         * No installed body to compare: the ledger entry parses but carries no
+         * package body, or the registry serves the package while the ledger
+         * holds no record of it (an orphaned install) and its row carries none.
+         */
         kind: 'installed_record_missing';
         describe: string;
     };
@@ -674,17 +680,23 @@ function schemaUpgradeFindingSet(manifestId: string, findings: readonly SchemaUp
 
 /**
  * [epic cloud#3652 Q3, #30884] The verdict when there is no installed side to
- * compare: the ledger file would not parse, or neither the ledger nor the
- * registry (an orphaned install's row) holds the installed body. The upgrade's
- * renames and type changes cannot be known, and a comparison that did not
- * run is never taken for "no finding" (2a, 2b and 2c answer the same way): the
- * one finding names what is missing, and its token admits the re-install —
- * the re-install that rewrites the record — confirmed and recorded, one round
- * trip, never silently.
+ * compare: the ledger file would not parse, its entry carries no package body,
+ * or neither the ledger nor the registry (an orphaned install's row) holds
+ * one. The upgrade's renames and type changes against the installed version
+ * cannot be known, and a comparison that did not run is never taken for "no
+ * finding" (2a, 2b and 2c answer the same way): the one finding names what is
+ * missing, and its token admits the re-install — the re-install that rewrites
+ * the record — confirmed and recorded, one round trip, never silently.
+ *
+ * A rename the incoming version declares is read from that version alone
+ * ({@link declaredRenamesOfIncoming}) and still answers 501 (ruling record
+ * 6709061297, C2): the token admits an unchecked re-install, never a rename
+ * this runtime cannot carry.
  */
 function installedRecordUnavailableVerdict(
     manifestId: string,
     failure: { file: string; cause: unknown } | undefined,
+    incoming: PackageUpgradeSide,
 ): { declaredRenames: UpgradePlanDeclaredRename[]; findings: SchemaUpgradeFinding[]; findingSet: string } {
     const consequence = 'so this upgrade cannot be checked for fields it renames or retypes: confirming installs it '
         + 'unchecked, and the install rewrites the record.';
@@ -692,16 +704,50 @@ function installedRecordUnavailableVerdict(
         ? {
             kind: 'installed_record_unreadable',
             file: failure.file,
-            cause: String((failure.cause as { message?: unknown } | null)?.message ?? failure.cause),
+            cause: describeLedgerCause(failure.cause),
             describe: `The record of the installed "${manifestId}" (${failure.file}) could not be read `
-                + `(${String((failure.cause as { message?: unknown } | null)?.message ?? failure.cause)}), ${consequence}`,
+                + `(${describeLedgerCause(failure.cause)}), ${consequence}`,
         }
         : {
             kind: 'installed_record_missing',
-            describe: `This runtime serves "${manifestId}" but holds no record of the installed version's package body, `
-                + consequence,
+            describe: `This runtime holds no package body of the installed "${manifestId}" (neither its install record `
+                + `nor the registry carries one), ${consequence}`,
         };
-    return { declaredRenames: [], findings: [finding], findingSet: schemaUpgradeFindingSet(manifestId, [finding]) };
+    return {
+        declaredRenames: declaredRenamesOfIncoming(incoming),
+        findings: [finding],
+        findingSet: schemaUpgradeFindingSet(manifestId, [finding]),
+    };
+}
+
+/**
+ * [epic cloud#3652 Q3, #30884] The renames the incoming version declares,
+ * read from it alone, for the verdict without an installed side: each field
+ * whose `renamedFrom` names a key the same object no longer declares, as its
+ * first such key ({@link comparePackageVersions} takes the first that the
+ * installed version has; with no installed version, the first is the claim).
+ * There is no `fromType`: the installed type is the unknown.
+ */
+function declaredRenamesOfIncoming(incoming: PackageUpgradeSide): UpgradePlanDeclaredRename[] {
+    const renames: UpgradePlanDeclaredRename[] = [];
+    for (const object of incoming.objects ?? []) {
+        const o = object as { name?: unknown; fields?: unknown } | null;
+        if (!o || typeof o.name !== 'string' || o.name === '' || !o.fields || typeof o.fields !== 'object') continue;
+        const fields = o.fields as Record<string, unknown>;
+        for (const [key, def] of Object.entries(fields)) {
+            const d = def as { renamedFrom?: unknown; type?: unknown } | null;
+            if (!d || !Array.isArray(d.renamedFrom)) continue;
+            const from = d.renamedFrom.find((k): k is string => typeof k === 'string' && k !== '' && !(k in fields));
+            if (from === undefined) continue;
+            renames.push({
+                object: o.name,
+                from,
+                to: key,
+                ...(typeof d.type === 'string' && d.type !== '' ? { toType: d.type } : {}),
+            });
+        }
+    }
+    return renames;
 }
 
 /** One side of the comparison, a multi-package artifact folded as `planUpgrade` folds it. */
@@ -3823,12 +3869,13 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
      * - **The installed side** is the ledger entry's body; for an orphaned
      *   install (no ledger file, the registry still serves the package) it is
      *   the body the registry serves ({@link registeredPackageBody}).
-     * - **No installed body** (the ledger file would not parse, or neither the
-     *   ledger nor the registry holds one): no comparison can run, and one
-     *   that did not run is never taken for "no finding" — the 409 below with
-     *   one finding, `installed_record_unreadable` (its `file` and `cause`) or
-     *   `installed_record_missing`. Its token admits the re-install, which
-     *   rewrites the record, confirmed and recorded.
+     * - **No installed body** (the ledger file would not parse, its entry
+     *   carries no body, or neither the ledger nor the registry holds one): no
+     *   comparison can run, and one that did not run is never taken for "no
+     *   finding" — the 409 below with one finding, `installed_record_unreadable`
+     *   (its `file` and `cause`) or `installed_record_missing`. Its token admits
+     *   the re-install, which rewrites the record, confirmed and recorded — but
+     *   a rename the incoming version declares still answers the 501 below.
      * - **A declared rename**: `501 NOT_IMPLEMENTED`, naming each — no token
      *   answers it while this runtime cannot carry a renamed field's column to
      *   its new key (ruling record 6709061297, C2). Card 01b (#30885), which
@@ -3858,14 +3905,15 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         // The installed side: the ledger entry's body; for an orphaned install
         // (no ledger file, the registry still serves the package — findConflict
         // step 3) the body the registry serves. With neither — a ledger file
-        // that will not parse, or a registry row carrying no body — the verdict
-        // is the one finding that says so, confirmable like any other, never
-        // "no finding".
+        // that will not parse, an entry or a registry row carrying no body —
+        // the verdict is the one finding that says so, confirmable like any
+        // other, never "no finding"; a rename the incoming version declares
+        // still answers 501.
         const installedBody = previous.entry?.manifest
             ?? (previous.entry === null && previous.failure === undefined ? this.registeredPackageBody(ctx, manifestId) : undefined);
         const installed = installedBody ? this.convertPackageBodyForward(ctx, installedBody) : undefined;
         const verdict = installed === undefined
-            ? installedRecordUnavailableVerdict(manifestId, previous.failure)
+            ? installedRecordUnavailableVerdict(manifestId, previous.failure, packageUpgradeSideOf(converted))
             : schemaUpgradeVerdict(manifestId, comparePackageVersions(packageUpgradeSideOf(installed), packageUpgradeSideOf(converted)));
         const { declaredRenames, findingSet } = verdict;
         if (declaredRenames.length === 0 && verdict.findings.length === 0) return {};
@@ -3920,7 +3968,8 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                                 + 'the new field would start empty while the values stay in the old column. Nothing was '
                                 + 'installed or written. Install this version once the runtime carries declared renames; or, '
                                 + 'to install it now without moving the values, remove the `renamedFrom` declaration, '
-                                + 'rebuild, and confirm the suspected rename the next refusal lists.'
+                                + 'rebuild, and confirm what the next refusal lists (a suspected rename, or the '
+                                + 'installed record it could not read).'
                                 + (findings.length > 0
                                     ? ` That refusal will also ask to confirm ${findings.length} other finding(s), listed here.`
                                     : ''),
@@ -4945,6 +4994,10 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
      * under `manifestId` — the row {@link findConflict} step 3 finds for an
      * orphaned install — or `undefined` when there is none, or it carries no
      * body. Step 2c′ compares against it when the ledger holds no record.
+     *
+     * One row, the one {@link findConflict} matches: for an artifact that
+     * bundles several packages, the other packages' rows are not folded in,
+     * so their objects read as added (never refused) rather than compared.
      */
     private registeredPackageBody = (ctx: PluginContext, manifestId: string): unknown => {
         try {
