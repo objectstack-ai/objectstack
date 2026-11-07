@@ -182,7 +182,7 @@ import { draftChangedPaths, mergeDraftChanges, storedDraftChanges, type DraftCha
  * promises its callers the RAW value back, a contract this domain rewrite
  * would reverse.
  */
-function canonicalIsoInstant(value: unknown): string | undefined {
+export function canonicalIsoInstant(value: unknown): string | undefined {
   if (value === null || value === undefined) return undefined;
   // [#14078] Total `Date` arm: an Invalid `Date` is the ONE `Date` shape
   // `toISOString()` refuses, and it is reachable from two live drivers. It
