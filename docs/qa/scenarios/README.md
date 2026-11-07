@@ -167,9 +167,10 @@ acts for (`actingAs`) and declares its `outcome`, so grading reads it with code 
 - `{ kind: "applied", state: [...], auditActor? }` — each state entry names a row by `id`
   (seeded) or `where` (a row the write creates) and carries the `values` the data API must
   read back, or `absent: true`; `auditActor` is the persona the audit trail must name.
-  A value equal to the card's `asOf` is also met by the date the run happened on, since
-  a field the platform's clock stamps (a decision date, an order date) cannot hold the
-  card's fixed today;
+  A value equal to the card's `asOf` is also met by the date the run happened on in a
+  field the platform's clock stamps (a default or a flow writing a decision date, an
+  order date), which cannot hold the card's fixed today. A field the agent's own write
+  set is judged against the date it was told: writing the run date there fails;
 - `{ kind: "refused", code }` — a code the platform answers, from the spec's closed
   `ErrorCode` catalogue (ADR-0112), such as `VALIDATION_FAILED` (a record-level field
   refusal) or `PERMISSION_DENIED`; any other spelling is refused. A declared

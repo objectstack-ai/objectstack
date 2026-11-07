@@ -13,8 +13,9 @@
  *                         created), and — when declared — the audit trail
  *                         names the acting persona. A value declared as the
  *                         card's `asOf` (its "today", which the operation
- *                         prompt states) is also met by the run date the
- *                         platform's clock stamped (`GradeOperationOptions.asOf`).
+ *                         prompt states) is also met by the run date when the
+ *                         platform's clock stamped it, a field no write of the
+ *                         agent's set (`GradeOperationOptions.asOf`).
  *   refused               the write door refused with the declared code (the
  *                         spec's `ErrorCode` catalogue), and nothing was
  *                         written. A declared `VALIDATION_FAILED` is also met
@@ -102,9 +103,16 @@ export interface OperationObservation {
   /**
    * The dates the platform's clock read while the operation ran (its UTC and
    * local date at the turn's start and end). A declared value equal to the
-   * card's `asOf` is also met by one of these: see {@link GradeOperationOptions.asOf}.
+   * card's `asOf` is also met by one of these in a field the platform stamped:
+   * see {@link GradeOperationOptions.asOf}.
    */
   runDates?: readonly string[];
+  /**
+   * Per object, the fields the agent's own write calls set (a create's or
+   * update's `data`, a `run_action`'s `params`). A field in it holds what the
+   * agent wrote, never a clock stamp; absent ⇒ not observed.
+   */
+  agentSet?: Readonly<Record<string, readonly string[]>>;
 }
 
 /** The runner's own write of a probed operation's declared values, through the persona's MCP write door. */
@@ -124,10 +132,12 @@ export interface GradeOperationOptions {
   probed?: boolean;
   /**
    * The card's fixed "today" (`asOf`), which the operation prompt states. A
-   * declared post-state value equal to it is met by that date, or by a date
-   * the platform's clock read during the run ({@link OperationObservation.runDates}):
-   * a default or a flow that stamps today writes the run date, and the app
-   * cannot be booted at the card's date.
+   * declared post-state value equal to it is met by that date. It is met by a
+   * date the platform's clock read during the run ({@link OperationObservation.runDates})
+   * only in a field the platform stamped (a default, a flow): one that no write
+   * call of the agent's set ({@link OperationObservation.agentSet}), since the
+   * app cannot be booted at the card's date. A field the agent wrote is judged
+   * against the date it was told: writing the run date there fails.
    */
   asOf?: string;
 }
@@ -181,9 +191,24 @@ function same(actual: unknown, expected: Scalar): boolean {
   return actual === expected;
 }
 
-/** A value declared as the card's today read back as a date the platform's clock read during the run. */
-function isRunDate(actual: unknown, expected: Scalar, asOf: string | undefined, runDates: readonly string[] | undefined): boolean {
-  return asOf !== undefined && expected === asOf && typeof actual === 'string' && (runDates ?? []).includes(actual);
+/**
+ * A value declared as the card's today that read back as a date the
+ * platform's clock read during the run: `stamped` when no write of the
+ * agent's set the field (the platform's clock wrote it), `agent` when the
+ * agent's own write did, `unknown` when which write set it was not observed;
+ * `undefined` when it is no run date read in place of the card's today.
+ */
+function runDateReading(
+  actual: unknown,
+  expected: Scalar,
+  object: string,
+  field: string,
+  asOf: string | undefined,
+  obs: Pick<OperationObservation, 'runDates' | 'agentSet'>,
+): 'stamped' | 'agent' | 'unknown' | undefined {
+  if (asOf === undefined || expected !== asOf || typeof actual !== 'string' || !(obs.runDates ?? []).includes(actual)) return undefined;
+  if (obs.agentSet === undefined) return 'unknown';
+  return (obs.agentSet[object] ?? []).includes(field) ? 'agent' : 'stamped';
 }
 
 function rowLabel(s: DeclaredPostState): string {
@@ -241,7 +266,10 @@ export function gradeOperation(declared: DeclaredOutcome, obs: OperationObservat
       const row = rows[0]!;
       for (const [field, value] of Object.entries(s.values ?? {})) {
         const read = `read ${JSON.stringify(row[field] ?? null)}, declared ${JSON.stringify(value)}`;
-        if (isRunDate(row[field], value, opts.asOf, obs.runDates)) checks.push(check(`${at}.${field}`, true, `${read} (the card's today), the run date`));
+        const runDate = same(row[field], value) ? undefined : runDateReading(row[field], value, s.object, field, opts.asOf, obs);
+        if (runDate === 'stamped') checks.push(check(`${at}.${field}`, true, `${read} (the card's today), the run date the platform stamped`));
+        else if (runDate === 'agent') checks.push(check(`${at}.${field}`, false, `${read}: the agent wrote the run date where the prompt told it the card's today`));
+        else if (runDate === 'unknown') checks.push(check(`${at}.${field}`, false, `${read}: the run date, and which write set it was not observed`));
         else checks.push(check(`${at}.${field}`, same(row[field], value), read));
       }
     });

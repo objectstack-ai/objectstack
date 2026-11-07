@@ -7,8 +7,8 @@
  * replayed: no recording is in this repository.
  *
  *   1. "Today": every run-phase prompt states the card's `asOf`, and a
- *      post-state declared as it is met by the run date the platform's clock
- *      stamped.
+ *      post-state declared as it is met by the run date only in a field the
+ *      platform's clock stamped; a run date the agent wrote itself fails.
  *   2. An app-defined validation code meets a declared `VALIDATION_FAILED`
  *      when the envelope files it in the validation class; nothing else does.
  *   3. An answer with no code names the build's own body when the sandbox's
@@ -28,7 +28,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
 import { formatRefusal, loadScenarios, readCapabilityAreas, type LoadedScenario } from '../../src/loader.js';
-import { clockDates, observeOperation, observeProbe, postStateRows, probeCall, uncodedNote, uncodedToolError, type Row } from '../../src/runner/observe.js';
+import { agentSetOf, clockDates, observeOperation, observeProbe, postStateRows, probeCall, uncodedNote, uncodedToolError, type Row } from '../../src/runner/observe.js';
 import { hiddenValues } from '../../src/runner/orchestrate.js';
 import { operationPrompt, questionPrompt } from '../../src/runner/prompts.js';
 import type { ParsedTurn } from '../../src/runner/transcript.js';
@@ -59,32 +59,58 @@ const leave = load('leave_balances');
 const purchasing = load('requisition_to_receipt');
 const desk = load('service_desk');
 
-describe('1. the card\'s today: a declared asOf date is met by the run date the platform stamped', () => {
+describe('1. the card\'s today: a declared asOf date is met by the run date only where the platform stamped it', () => {
   const RUN_DAY = '2026-11-07';
 
-  it('asset_lifecycle manager_approves_scrap: decided_on read as the run date passes; any other date fails', () => {
+  it('asset_lifecycle manager_approves_scrap: the run date passes where the platform stamped decided_on, and fails where the agent wrote it', () => {
     const op = asset.card.run.operations.find((o) => o.id === 'manager_approves_scrap')!;
-    const rows = (decided: string): OperationObservation['state'] => [[{ id: 'dr06', status: 'approved', decided_on: decided }], [{ id: 'a102', status: 'pending_disposal' }]];
-    const obs = (decided: string, runDates: string[]): OperationObservation => ({ answer: { kind: 'applied' }, writes: 1, state: rows(decided), auditActor: 'dept_manager', runDates });
     expect(asset.card.asOf).toBe('2026-10-31');
     expect(op.outcome.kind).toBe('applied');
-    const ran = gradeCardOperation(asset, op.id, obs(RUN_DAY, [RUN_DAY]));
-    expect(ran.pass).toBe(true);
-    expect(ran.checks.find((c) => c.check === 'state:disposal_request#dr06.decided_on')!.detail).toBe(`read "${RUN_DAY}", declared "2026-10-31" (the card's today), the run date`);
-    // The date the agent was told passes as before.
-    expect(gradeCardOperation(asset, op.id, obs('2026-10-31', [RUN_DAY])).pass).toBe(true);
-    // Controls: a date that is neither, and the run date with no run dates observed.
-    expect(failing(gradeCardOperation(asset, op.id, obs('2026-11-06', [RUN_DAY])))).toEqual(['state:disposal_request#dr06.decided_on']);
-    expect(failing(gradeCardOperation(asset, op.id, { ...obs(RUN_DAY, []), runDates: undefined }))).toEqual(['state:disposal_request#dr06.decided_on']);
+    const before: Row[] = [{ id: 'dr06', status: 'pending', decided_on: null }];
+    const graded = (data: Record<string, unknown>, decided: string, runDates: string[] = [RUN_DAY]) => {
+      const after: Row[] = [{ id: 'dr06', status: 'approved', decided_on: decided }];
+      const turn = turnOf('Approved DR-0006.', [{ name: 'update_record', input: { objectName: 'disposal_request', recordId: 'dr06', data }, output: '{"id":"dr06"}' }]);
+      const obs = observeOperation({ op, turn, before, after, rowsByObject: { disposal_request: after, asset: [{ id: 'a102', status: 'pending_disposal' }] }, auditActor: 'dept_manager', today: { asOf: '2026-10-31', runDates } });
+      return gradeCardOperation(asset, op.id, obs);
+    };
+    const DECIDED = 'state:disposal_request#dr06.decided_on';
+    // The agent set the status only; the platform's clock stamped decided_on with the run date.
+    const stamped = graded({ status: 'approved' }, RUN_DAY);
+    expect(stamped.pass).toBe(true);
+    expect(stamped.checks.find((c) => c.check === DECIDED)!.detail).toBe(`read "${RUN_DAY}", declared "2026-10-31" (the card's today), the run date the platform stamped`);
+    // ⛔ The agent wrote the run date itself where the prompt told it "Today is 2026-10-31": it fails.
+    const wrote = graded({ status: 'approved', decided_on: RUN_DAY }, RUN_DAY);
+    expect(failing(wrote)).toEqual([DECIDED]);
+    expect(wrote.checks.find((c) => c.check === DECIDED)!.detail).toBe(`read "${RUN_DAY}", declared "2026-10-31": the agent wrote the run date where the prompt told it the card's today`);
+    // The date the agent was told passes, written by the agent.
+    expect(graded({ status: 'approved', decided_on: '2026-10-31' }, '2026-10-31').pass).toBe(true);
+    // Controls: a date that is neither; the run date when no run dates were observed; and an
+    // observation that does not say which write set the field.
+    expect(failing(graded({ status: 'approved' }, '2026-11-06'))).toEqual([DECIDED]);
+    expect(failing(graded({ status: 'approved' }, RUN_DAY, []))).toEqual([DECIDED]);
+    const unobserved: OperationObservation = { answer: { kind: 'applied' }, writes: 1, state: [[{ id: 'dr06', status: 'approved', decided_on: RUN_DAY }], [{ id: 'a102', status: 'pending_disposal' }]], auditActor: 'dept_manager', runDates: [RUN_DAY] };
+    expect(failing(gradeCardOperation(asset, op.id, unobserved))).toEqual([DECIDED]);
   });
 
-  it('order_to_cash order_from_text: the created row is found by a where on the run date', () => {
+  it('order_to_cash order_from_text: the created row is found by a where on the run date only where the platform stamped it', () => {
     const op = orders.card.run.operations.find((o) => o.id === 'order_from_text')!;
     const order: Row = { id: 'so_new', account: 'a08', order_date: RUN_DAY, owner: 'e03', status: 'pending_approval', approver: 'e01', total_amount: 10640 };
     const rowsByObject = { sales_order: [order], order_line: [] };
+    const today = { asOf: '2026-10-31', runDates: [RUN_DAY] };
     expect(postStateRows(op, rowsByObject)![0]).toEqual([]);
-    expect(postStateRows(op, rowsByObject, { asOf: '2026-10-31', runDates: [RUN_DAY] })![0]).toEqual([order]);
-    expect(postStateRows(op, rowsByObject, { asOf: '2026-10-31', runDates: ['2026-11-06'] })![0]).toEqual([]);
+    expect(postStateRows(op, rowsByObject, { ...today, agentSet: { sales_order: ['account'] } })![0]).toEqual([order]);
+    expect(postStateRows(op, rowsByObject, { ...today, agentSet: { sales_order: ['account'] }, runDates: ['2026-11-06'] })![0]).toEqual([]);
+    // ⛔ The agent set order_date to the run date itself, or which write set it was not observed.
+    expect(postStateRows(op, rowsByObject, { ...today, agentSet: { sales_order: ['account', 'order_date'] } })![0]).toEqual([]);
+    expect(postStateRows(op, rowsByObject, today)![0]).toEqual([]);
+    // Read off the turn: the fields of the agent's own create.
+    const create = (data: Record<string, unknown>) =>
+      turnOf('Order entered and submitted for discount approval.', [{ name: 'create_record', input: { objectName: 'sales_order', data }, output: '{"id":"so_new"}' }]);
+    const observed = (data: Record<string, unknown>) =>
+      observeOperation({ op, turn: create(data), before: [], after: [order], rowsByObject, auditActor: 'sales_rep', today }).state![0];
+    expect(agentSetOf(op, create({ account: 'a08', order_date: RUN_DAY }))).toEqual({ sales_order: ['account', 'order_date'], order_line: [] });
+    expect(observed({ account: 'a08' })).toEqual([order]);
+    expect(observed({ account: 'a08', order_date: RUN_DAY })).toEqual([]);
   });
 
   it('every run-phase prompt of a card with an asOf states it, operations as well as questions', () => {

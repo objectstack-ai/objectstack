@@ -66,7 +66,8 @@ gradeCardAnswer(card, { question: 'account_count', persona: 'sdr', turn }); // a
   the declared values, the probe, was refused with that code and stored nothing); so is every
   other `refused` create or update, permission oversteps included (`isProbedOperation`). A
   declared `VALIDATION_FAILED` is met by an app-defined code at a validation-class status
-  (`refusalMeets`), and a declared value equal to the card's `asOf` by the run date.
+  (`refusalMeets`), and a declared value equal to the card's `asOf` by the run date, only in a
+  field none of the agent's own write calls set (`agentSet`: the platform's clock stamped it).
 - `scenario-run-grade.ts` — an answer graded on correct / cited / leaks, per persona against
   that persona's truth; a `withheld` truth is must-not-reveal. A figure computed over rows
   outside the persona's scope is flagged only when no figure of the persona's own rows
@@ -157,8 +158,9 @@ Per card and mode the runner writes `docs/qa/platform-checklist/runs/<date>-scen
   failure, never the agent's. Every other `refused` create or update is probed the same way, so a permission
   overstep the agent declined still measures the platform's refusal. An answer that carries no code is reported
   with whose throw it was (`uncodedNote`: the build's own hook or action, named off the sandbox's wrapper, or the
-  door's text). The runner also records the run dates (each clock instant's UTC and local date), which a
-  declared `asOf` value is matched against.
+  door's text). The runner also records the run dates (each clock instant's UTC and local date) and the fields
+  the agent's own write calls set (`agentSetOf`: a create's or update's `data`, a `run_action`'s `params`); a
+  declared `asOf` value is matched against a run date only in a field the agent did not set.
 - **Namespaces** (`namespace.ts`): every card's app is in the namespace `demo` + the card's `code` (`democrm`): scratch
   mode scaffolds the project under that name, and template mode installs a template declaring it into a host named
   `host<code>` (the unmanaged copy keeps its namespace, and the install refuses one the host owns). The card's names are

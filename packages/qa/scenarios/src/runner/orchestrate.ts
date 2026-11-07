@@ -46,7 +46,7 @@ import {
 import type { AppHarness, PersonaAccount } from './app.js';
 import type { AgentDriver, StepRef } from './driver.js';
 import { citationLabels, namespaceOfArtifact, namespacedScenario, permissionSetName, templateHostName } from './namespace.js';
-import { clockDates, observeOperation, observeProbe, probeCall, touchedRowId, type Row } from './observe.js';
+import { agentSetOf, clockDates, observeOperation, observeProbe, probeCall, touchedRowId, type Row } from './observe.js';
 import type { CommandResult } from './project.js';
 import { buildPrompt, iteratePrompt, operationPrompt, personaHandles, questionPrompt, templateIteratePrompt, userHandleFields, verifyArgs } from './prompts.js';
 import { lookupKey, requiredLookups, seedPlan, type SeedLookup } from './seed.js';
@@ -632,9 +632,10 @@ export async function runHalf(
         const turn = await driver.ask({ ...ref, step: op.id, persona: op.actingAs, prompt: operationPrompt(card, op.id), mcp: { url: app.mcpUrl, apiKey: keyOf(op.actingAs) } });
         res.turn = summarize(turn);
         const after = (await app.listRows(op.object)).rows as Row[];
-        // The card's today, and the dates the app's clock read during the turn:
-        // a value declared as the one is met by the other (`observe.ts`).
-        const today = { ...(card.asOf !== undefined ? { asOf: card.asOf } : {}), runDates: clockDates(started, new Date()) };
+        // The card's today, the dates the app's clock read during the turn, and
+        // the fields the agent's own writes set: a value declared as the card's
+        // today is met by a run date only where the platform stamped it (`observe.ts`).
+        const today = { ...(card.asOf !== undefined ? { asOf: card.asOf } : {}), runDates: clockDates(started, new Date()), agentSet: agentSetOf(op, turn) };
         const rowsByObject: Record<string, Row[]> = { [op.object]: after };
         if (op.outcome.kind === 'applied') {
           for (const s of op.outcome.state) if (!rowsByObject[s.object]) rowsByObject[s.object] = (await app.listRows(s.object)).rows as Row[];

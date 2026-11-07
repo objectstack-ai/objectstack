@@ -65,12 +65,14 @@
  *     write door, and reads the door's answer by rules 1–3 and 6 above
  *     ({@link observeProbe}) — the app's rule, measured whatever the agent did.
  *
- * And one fact serves every applied operation's dates: the dates the
- * platform's clock read during the turn ({@link clockDates}). The operation
+ * And two facts serve every applied operation's dates: the dates the
+ * platform's clock read during the turn ({@link clockDates}), and the fields
+ * the agent's own write calls set ({@link agentSetFields}). The operation
  * prompt tells the agent the card's today (`asOf`); a default or a flow that
  * stamps the platform's own today writes the run date instead, so a declared
- * value equal to `asOf` is matched by either ({@link postStateRows}, and the
- * grader's `asOf`).
+ * value equal to `asOf` is matched by the run date in a field no write of the
+ * agent's set ({@link postStateRows}, and the grader's `asOf`). A field the
+ * agent wrote is judged against the date it was told.
  */
 
 import { ErrorCode } from '@objectstack/spec/api';
@@ -207,19 +209,45 @@ export function observedAnswer(turn: ParsedTurn, object: string, writes: number)
 }
 
 /**
- * The card's today and the dates the platform's clock read during the run: a
- * `where` value declared as the card's today also matches a run date, as the
- * grader reads a declared value (`GradeOperationOptions.asOf`).
+ * The fields the turn's own write calls on `object` set: each create's or
+ * update's `data`, each `run_action`'s `params`. A field in it holds what the
+ * agent wrote, never a clock stamp, whatever the write door answered.
+ */
+export function agentSetFields(turn: Pick<ParsedTurn, 'toolCalls'>, object: string): string[] {
+  const fields = new Set<string>();
+  for (const c of writeCallsOn(turn, object)) {
+    const input = (typeof c.input === 'object' && c.input !== null ? c.input : {}) as Record<string, unknown>;
+    for (const member of [input.data, input.params]) {
+      if (typeof member === 'object' && member !== null && !Array.isArray(member)) for (const k of Object.keys(member)) fields.add(k);
+    }
+  }
+  return [...fields].sort();
+}
+
+/** {@link agentSetFields} for the operation's object and every object its declared post-states name. */
+export function agentSetOf(op: CardOperation, turn: Pick<ParsedTurn, 'toolCalls'>): Record<string, string[]> {
+  const objects = new Set([op.object, ...(op.outcome.kind === 'applied' ? op.outcome.state.map((s) => s.object) : [])]);
+  return Object.fromEntries([...objects].map((o) => [o, agentSetFields(turn, o)]));
+}
+
+/**
+ * The card's today, the dates the platform's clock read during the run, and
+ * the fields the agent's own writes set ({@link agentSetOf}): a `where` value
+ * declared as the card's today also matches a run date in a field no write of
+ * the agent's set, as the grader reads a declared value
+ * (`GradeOperationOptions.asOf`). Without `agentSet` no run date matches.
  */
 export interface DeclaredToday {
   asOf?: string;
   runDates?: readonly string[];
+  agentSet?: Readonly<Record<string, readonly string[]>>;
 }
 
-function matches(row: Row, where: Readonly<Record<string, Scalar>>, today: DeclaredToday): boolean {
+function matches(row: Row, where: Readonly<Record<string, Scalar>>, object: string, today: DeclaredToday): boolean {
   return Object.entries(where).every(([k, v]) => {
     if (v === null) return row[k] === null || row[k] === undefined;
     if (row[k] === v) return true;
+    if (today.agentSet === undefined || (today.agentSet[object] ?? []).includes(k)) return false;
     return today.asOf !== undefined && v === today.asOf && typeof row[k] === 'string' && (today.runDates ?? []).includes(row[k] as string);
   });
 }
@@ -229,7 +257,7 @@ export function postStateRows(op: CardOperation, rowsByObject: Readonly<Record<s
   if (op.outcome.kind !== 'applied') return undefined;
   return op.outcome.state.map((s) => {
     const rows = rowsByObject[s.object] ?? [];
-    return s.id !== undefined ? rows.filter((r) => String(r.id) === s.id) : rows.filter((r) => matches(r, s.where ?? {}, today));
+    return s.id !== undefined ? rows.filter((r) => String(r.id) === s.id) : rows.filter((r) => matches(r, s.where ?? {}, s.object, today));
   });
 }
 
@@ -255,7 +283,10 @@ export interface ObserveInput {
   auditActor?: string | null;
   /** A probed operation's probe ({@link observeProbe}); absent = not run. */
   probe?: ProbeObservation;
-  /** The card's today (`asOf`) and the dates the clock read during the turn ({@link clockDates}). */
+  /**
+   * The card's today (`asOf`) and the dates the clock read during the turn
+   * ({@link clockDates}); its `agentSet`, when absent, is read off `turn` ({@link agentSetOf}).
+   */
   today?: DeclaredToday;
 }
 
@@ -267,9 +298,11 @@ export function observeOperation(input: ObserveInput): OperationObservation {
     writes,
     withheld: withheldWrite(input.turn, input.op.object, writes),
   };
-  const state = postStateRows(input.op, input.rowsByObject, input.today);
+  const agentSet = input.today?.agentSet ?? agentSetOf(input.op, input.turn);
+  const state = postStateRows(input.op, input.rowsByObject, { ...input.today, agentSet });
   if (state) obs.state = state;
   if (input.today?.runDates !== undefined) obs.runDates = input.today.runDates;
+  obs.agentSet = agentSet;
   if (input.auditActor !== undefined) obs.auditActor = input.auditActor;
   if (input.probe !== undefined) obs.probe = input.probe;
   return obs;
