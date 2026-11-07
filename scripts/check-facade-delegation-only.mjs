@@ -111,7 +111,10 @@
  * Today's facade keeps shared state on the class, so a few hot bodies may stay
  * (ruling 6624345766 item 3). Each one is an `exceptions` row naming the file,
  * the member and the card that will move it (#30020, the state-owning facets
- * card). The registry is refused, not trusted:
+ * card). A row may instead be an accepted terminal exception: its `reason`
+ * opens by citing the maintainer ruling that accepted it (6687801899 for the
+ * three #30147 rows), its `card` is the card that recorded it, and it stays
+ * after that card closes. The registry is refused, not trusted:
  *
  *   • a row with no card, or a card that is not `#<number>`        → red
  *   • a row naming a file that is not a registered facade           → red
