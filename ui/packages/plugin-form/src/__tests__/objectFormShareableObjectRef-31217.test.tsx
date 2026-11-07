@@ -88,10 +88,10 @@ function mount(answer: () => Promise<Response>, initialData?: Record<string, unk
   return { ds, apiFetch, ...view };
 }
 
-/** Open the picker and read its options, in the order drawn. */
+/** Once the picker has its list, open it and read its options, in the order drawn. */
 async function openOptions(): Promise<string[]> {
-  const trigger = await screen.findByRole('combobox');
-  fireEvent.click(trigger);
+  await waitFor(() => expect(screen.getByRole('combobox')).not.toHaveTextContent(/Loading/));
+  fireEvent.click(screen.getByRole('combobox'));
   const listbox = await screen.findByRole('listbox');
   return within(listbox)
     .getAllByRole('option')
@@ -106,11 +106,10 @@ describe('the sharing-rule object picker lists only shareable objects (objectsta
 
     await waitFor(() => expect(apiFetch).toHaveBeenCalled());
     expect(String(apiFetch.mock.calls[0][0])).toBe(SHAREABLE_OBJECTS_URL);
-    await waitFor(async () =>
-      expect(await openOptions()).toEqual(['Account (crm_account)', 'Opportunity (crm_opportunity)', 'Team (sys_team)']),
-    );
+    const options = await openOptions();
+    expect(options).toEqual(['Account (crm_account)', 'Opportunity (crm_opportunity)', 'Team (sys_team)']);
     // No credential or session object, and no object the save would refuse.
-    const drawn = (await openOptions()).join(' | ');
+    const drawn = options.join(' | ');
     expect(drawn).not.toContain('sys_session');
     expect(drawn).not.toContain('sys_api_key');
     expect(drawn).not.toContain('crm_audit_note');
@@ -121,7 +120,7 @@ describe('the sharing-rule object picker lists only shareable objects (objectsta
   it('CONTROL: a shareable object stays selectable and the form saves its name', async () => {
     const { ds, container } = mount(json(200, DOOR_ANSWER));
 
-    await waitFor(async () => expect(await openOptions()).toContain('Opportunity (crm_opportunity)'));
+    expect(await openOptions()).toContain('Opportunity (crm_opportunity)');
     fireEvent.click(screen.getByRole('option', { name: 'Opportunity (crm_opportunity)' }));
     const trigger = screen.getByRole('combobox');
     await waitFor(() => expect(trigger).toHaveTextContent('Opportunity (crm_opportunity)'));
@@ -135,14 +134,12 @@ describe('the sharing-rule object picker lists only shareable objects (objectsta
   it('keeps a stored object the door does not list, so editing never drops it', async () => {
     mount(json(200, DOOR_ANSWER), { object_name: 'crm_audit_note' });
 
-    await waitFor(async () =>
-      expect(await openOptions()).toEqual([
-        'crm_audit_note',
-        'Account (crm_account)',
-        'Opportunity (crm_opportunity)',
-        'Team (sys_team)',
-      ]),
-    );
+    expect(await openOptions()).toEqual([
+      'crm_audit_note',
+      'Account (crm_account)',
+      'Opportunity (crm_opportunity)',
+      'Team (sys_team)',
+    ]);
   });
 
   it.each([
@@ -152,9 +149,9 @@ describe('the sharing-rule object picker lists only shareable objects (objectsta
     const { ds, container } = mount(json(status, body));
 
     await waitFor(() => expect(ds.getObjects).toHaveBeenCalled());
-    await waitFor(async () => expect(await openOptions()).toHaveLength(ALL_OBJECTS.length));
+    const options = await openOptions();
     // `object-ref`'s own list: every registered object, sorted by label.
-    expect(await openOptions()).toContain('Account (crm_account)');
+    expect(options).toEqual([...ALL_OBJECTS].map((o) => `${o.label} (${o.name})`).sort((a, b) => a.localeCompare(b)));
 
     fireEvent.click(screen.getByRole('option', { name: 'Account (crm_account)' }));
     fireEvent.submit(container.querySelector('form') as HTMLFormElement);
