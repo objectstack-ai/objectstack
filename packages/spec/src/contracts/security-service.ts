@@ -405,8 +405,14 @@ export type ControlledByParentWriteUnresolvedReason =
  *   chain for the principal (and, on an on-behalf-of context, for the delegator
  *   too), and where the chain ends at a row whose OPTIONAL master reference is
  *   empty (the record itself, or a master above it) that row's owner rule
- *   admits them too. Or the context is a system one, which the write path
- *   never checks.
+ *   admits them too. Or the detail opts in with
+ *   `sharing.controlledByParent.ownerMayEdit: true` (ADR-0055 §3 as amended
+ *   2026-10-26) and its owner leg admits the principal in place of the walk:
+ *   the context is not on behalf of another user, the record's stored
+ *   `owner_id` is the principal's own `userId`, and the principal can READ the
+ *   master the record names, so no leg asks EDIT on that master or any master
+ *   above it. Or the context is a system one, which the write path never
+ *   checks.
  * - `deny`: the check refuses, on the {@link ControlledByParentWriteDenialLeg}
  *   it names.
  * - `not_applicable`: the object does not declare `controlled_by_parent`, so
@@ -1086,7 +1092,18 @@ export interface ISecurityService {
    * security, and record sharing (whose refusal an app-authored update policy
    * on the master can lift, {@link checkAuthoredRowWrite}). A master whose own
    * optional master reference is empty ends the chain, and the same owner rule
-   * is asked of it on its own object. This member exposes that check
+   * is asked of it on its own object. A detail that declares
+   * `sharing.controlledByParent.ownerMayEdit: true` relaxes the edit rule for
+   * one write (ADR-0055 §3 as amended 2026-10-26): a by-id update by the
+   * record's owner (its stored `owner_id` is the caller's own `userId`), not on
+   * behalf of another user, that does not empty an optional master, needs only
+   * READ access to the master the record names, asked of the read door under
+   * the caller's own context, and walks no chain for that master; a body that
+   * re-points the row under another master still asks EDIT on that master, as
+   * every body naming a new master does. Every other caller, and every
+   * insert, delete, predicate update and on-behalf-of write, keeps the edit
+   * rule. The leg is part of the check, so such an owner who can read the
+   * master gets `allow` here as on the update. This member exposes that check
    * to code outside the write path, such as a gate on a record's attachments or
    * comments that must judge the record as its own update is judged. It adds no
    * verdict: every outcome it resolves with is one the check already reaches,
