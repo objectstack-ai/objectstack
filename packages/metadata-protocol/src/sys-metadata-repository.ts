@@ -1522,9 +1522,10 @@ export class SysMetadataRepository implements MetadataRepository {
        * source), so a publish stores what an active save of the same body
        * would. Return the argument unchanged when there is nothing to derive.
        *
-       * Omitted → the draft body is promoted byte for byte, as before. The
-       * draft row is still drained by its OWN hash: the derivation changes
-       * what lands in `active`, never which draft is consumed.
+       * It is handed the draft body without the positions a save drains
+       * (`historySnapshotBody`). Omitted → that body is promoted byte for
+       * byte. The draft row is still drained by its OWN hash: the derivation
+       * changes what lands in `active`, never which draft is consumed.
        */
       deriveActiveBody?: (draftBody: unknown) => unknown;
       /**
@@ -1605,7 +1606,12 @@ export class SysMetadataRepository implements MetadataRepository {
     // [#23495] The scope written is `activePackageId`: the draft's own binding,
     // or the package an unbound draft is adopted into.
     const currentActive = await this.get(ref, { state: 'active', packageId: activePackageId, member: opts.member });
-    const activeBody = opts.deriveActiveBody ? opts.deriveActiveBody(draft.body) : draft.body;
+    // The active row a publish writes carries no position a save drains (the
+    // type's redactor marks it withheld AND not carried forward): the same
+    // removal a history snapshot gets (`historySnapshotBody`), by reference
+    // when there is none.
+    const promotable = historySnapshotBody(ref.type, draft.body);
+    const activeBody = opts.deriveActiveBody ? opts.deriveActiveBody(promotable) : promotable;
     const result = await this.put(ref, activeBody, {
       parentVersion: currentActive?.hash ?? null,
       actor: opts.actor,
@@ -1682,7 +1688,9 @@ export class SysMetadataRepository implements MetadataRepository {
        * judges read the store. Awaited before the active row is read and
        * before the put, so a refused version writes nothing.
        *
-       * Omitted → the history body is restored byte for byte, as before.
+       * It is handed the history body without the positions a save drains
+       * (`historySnapshotBody`). Omitted → that body is restored byte for
+       * byte.
        */
       deriveRestoredBody?: (historyBody: unknown) => unknown | Promise<unknown>;
       /**
@@ -1740,7 +1748,12 @@ export class SysMetadataRepository implements MetadataRepository {
       err.status = 404;
       throw err;
     }
-    const body = opts.deriveRestoredBody ? await opts.deriveRestoredBody(historyBody) : historyBody;
+    // The live row a revert writes carries no position a save drains: the
+    // same removal a history snapshot gets (`historySnapshotBody`), applied
+    // before `deriveRestoredBody` so the body it judges is the body written,
+    // by reference when there is none.
+    const restorable = historySnapshotBody(ref.type, historyBody);
+    const body = opts.deriveRestoredBody ? await opts.deriveRestoredBody(restorable) : restorable;
     // ADR-0048 / #6215 — read the RAW active row, not just its body, and carry
     // its `package_id` into the write. `put` upserts exactly ONE row and scopes
     // its optimistic-lock lookup by package; an unstated `packageId` resolves to
