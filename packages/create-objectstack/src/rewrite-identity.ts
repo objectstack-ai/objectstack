@@ -133,6 +133,48 @@ export function deriveManifestId(projectName: string): string {
 export const SCAFFOLD_NAMESPACE_MAX_LENGTH = 13;
 
 /**
+ * The `objectstack.manifest.json` keys `@objectstack/spec` 18 retired
+ * (ADR-0049): `category` (#30980) and `name`, `specVersion`, `skills`,
+ * `scaffold`, `visibility` (#31035). `TemplateManifestSchema` carries a
+ * `retiredKey()` tombstone for each, so a manifest still declaring one fails a
+ * parse, and `os package publish` refuses `category` and `visibility`
+ * outright. The scaffolder strips
+ * every one of them from the template's manifest, so a template authored
+ * before that release can never hand a new project a manifest the schema
+ * refuses.
+ *
+ * Restated rather than imported for the reason {@link SCAFFOLD_NAMESPACE_MAX_LENGTH}
+ * gives (the spec is not a runtime dependency of this two-dependency `npx`
+ * entry point). `scaffold-retired-manifest-keys.test.ts` pins this list equal
+ * to the spec's own registry rows (`RETIRED_KEYS_BY_MAJOR`, every
+ * `marketplace/TemplateManifest:<key>` entry), so a key retired there without
+ * being added here goes red.
+ */
+export const RETIRED_TEMPLATE_MANIFEST_KEYS = [
+  'category',
+  'name',
+  'specVersion',
+  'skills',
+  'scaffold',
+  'visibility',
+] as const;
+
+/**
+ * Delete every {@link RETIRED_TEMPLATE_MANIFEST_KEYS} key from a parsed
+ * manifest, in place. Returns the keys it found, in list order.
+ */
+export function stripRetiredManifestKeys(manifest: Record<string, unknown>): string[] {
+  const found: string[] = [];
+  for (const key of RETIRED_TEMPLATE_MANIFEST_KEYS) {
+    if (Object.prototype.hasOwnProperty.call(manifest, key)) {
+      delete manifest[key];
+      found.push(key);
+    }
+  }
+  return found;
+}
+
+/**
  * Convert an npm package name into a valid ObjectStack namespace identifier
  * (regex `^[a-z][a-z0-9_]{1,19}$`, reserved: base/system/sys) that is at most
  * {@link SCAFFOLD_NAMESPACE_MAX_LENGTH} characters, so it has a paired
