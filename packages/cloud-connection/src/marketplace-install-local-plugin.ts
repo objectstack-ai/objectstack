@@ -3803,12 +3803,13 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         const rows = await this.readSchemaUpgradeRows(ctx, manifestId, installed, converted);
         const findings = verdict.findings.map((f) => {
             const installedKey = f.kind === 'type_change' ? (f.renamedFrom ?? f.field) : f.field;
-            const held = rows?.get(`${f.object}.${installedKey}`);
-            if (rows === undefined) return f;
+            const key = `${f.object}.${installedKey}`;
+            if (!rows?.has(key)) return f;
+            const held = rows.get(key) ?? null;
             return {
                 ...f,
-                rows: held ?? null,
-                ...(typeof held === 'number' ? { describe: `${f.describe} ${held} row(s) hold a value in ${f.object}.${installedKey}.` } : {}),
+                rows: held,
+                ...(held !== null ? { describe: `${f.describe} ${held} row(s) hold a value in ${key}.` } : {}),
             };
         });
 
@@ -3819,7 +3820,7 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                 to: r.to,
                 ...(r.fromType !== undefined ? { fromType: r.fromType } : {}),
                 ...(r.toType !== undefined ? { toType: r.toType } : {}),
-                ...(rows !== undefined ? { rows: rows.get(`${r.object}.${r.from}`) ?? null } : {}),
+                ...(rows?.has(`${r.object}.${r.from}`) ? { rows: rows.get(`${r.object}.${r.from}`) ?? null } : {}),
             }));
             ctx.logger?.warn?.(
                 `[MarketplaceInstallLocal] upgrade of ${manifestId} refused: ${renames.length} declared rename(s) this `
