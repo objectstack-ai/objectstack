@@ -307,6 +307,7 @@ import {
 } from './object-graph.js';
 import {
   declaredMembershipKeysOf,
+  MEMBERSHIP_KEY_OWN_ID_FIELD,
   objectsDeclaringKey,
   stackObjectNamesOf,
   type MembershipKeyOwners,
@@ -642,8 +643,9 @@ interface MembershipKeyContext {
   declared: ReadonlySet<string>;
   /**
    * Key → the object its values reference: the target of the declaring
-   * object's `valueField`. Present only when one object the stack carries
-   * declares the key and that column is a judgeable reference.
+   * object's `valueField`, or the declaring object itself when that is its
+   * own `id`. Present only when one object the stack carries declares the key
+   * and that column is a judgeable reference or that `id`.
    */
   targetOf: ReadonlyMap<string, string>;
   /**
@@ -1458,7 +1460,8 @@ interface MembershipTargetFault {
  * The `in` / not-`in` sites of a lowered predicate that test a declared key
  * against a column whose values can never be the key's (refusal 11).
  *
- * The key holds ids of its `valueField`'s target T. So the compared column must
+ * The key holds ids of its `valueField`'s target T — the declaring object
+ * itself when `valueField` is `id` (#31129 ruling A). So the compared column must
  * reference T, or be the `id` of T itself. A reference to another object, a
  * column that is no reference, and the `id` of another object hold values that
  * never equal a T id: `x in KEY` then matches no row, and `!(x in KEY)` every
@@ -1862,6 +1865,12 @@ function membershipKeyContextOf(
     if (!verdict || verdict.kind !== 'ok') continue;
     const meta: GraphField = verdict.meta ?? {};
     if (meta.type && RELATIONSHIP_FIELD_TYPES.has(meta.type) && meta.reference) targetOf.set(decl.key, meta.reference);
+    // [#31129 ruling A] `valueField: 'id'` — X's own primary key, never an
+    // author column of that name — holds ids of X itself: the caller's own
+    // roster rows. The key's target is the declaring object.
+    else if (decl.valueField === MEMBERSHIP_KEY_OWN_ID_FIELD && verdict.injected === true && !meta.type) {
+      targetOf.set(decl.key, decl.object);
+    }
   }
   return { declared, targetOf, ...(owners ? { resolverKeys: owners.resolverKeys } : {}) };
 }

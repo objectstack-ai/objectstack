@@ -28,11 +28,14 @@
  *   wrong ones. A registry-injected column (`owner_id`, `created_by`) is a
  *   column of the object and is judged by its injected definition.
  * - {@link MEMBERSHIP_KEY_VALUE_FIELD_INVALID} (refusal 6) — F is not a column
- *   of the merged object, or not a reference (`lookup`, `master_detail` or
- *   `user`). The set holds F's values, and a policy compares it with a column
- *   that references F's target or with that target's `id` (refusal 11), which
- *   only a reference has. `multiple: true` is allowed: its values are
- *   flattened. F naming U's column is refused by `MembershipKeySchema` itself.
+ *   of the merged object, or neither a reference (`lookup`, `master_detail` or
+ *   `user`) nor `id`, the object's own primary key. The set holds F's values,
+ *   and a policy compares it with a column that references F's target or with
+ *   that target's `id` (refusal 11): a reference names its target, and `id`
+ *   names X itself, so the key holds the caller's own rows of X (#31129 ruling
+ *   A, "the records I am"). Any other column has no target to compare with.
+ *   `multiple: true` is allowed: its values are flattened. F naming U's column
+ *   is refused by `MembershipKeySchema` itself.
  * - {@link MEMBERSHIP_KEY_DECLARED_TWICE} (refusal 3) — one key on two objects.
  *   `defineStack` and `composeStacks` refuse it inside one stack; this is the
  *   door they do not see, the runtime publish gate, where the other declaration
@@ -105,8 +108,15 @@ function str(v: unknown): string {
 /** The platform's user object, the target of every `user` field. */
 const USER_OBJECT = 'sys_user';
 
-/** The field types a membership key's `valueField` may have. */
+/**
+ * The field types a membership key's `valueField` may have. The one other
+ * column it may name is `id`, X's own primary key ({@link isOwnPrimaryKey}),
+ * which has no field type: the driver, not a definition, provisions it.
+ */
 const VALUE_FIELD_TYPES: ReadonlySet<string> = new Set(['lookup', 'master_detail', 'user']);
+
+/** The column a membership key names for "the caller's own rows of X" (#31129 ruling A). */
+export const MEMBERSHIP_KEY_OWN_ID_FIELD = 'id';
 
 /** One `membershipKeys` entry, where the stack declares it. */
 export interface DeclaredMembershipKey {
@@ -219,11 +229,29 @@ function userFieldFault(meta: GraphField): string | null {
   return null;
 }
 
-/** F's verdict: `null` when it is a reference, else the reason. */
-function valueFieldFault(meta: GraphField): string | null {
+/** F's verdict: `null` when it is a reference or X's own `id`, else the reason. */
+function valueFieldFault(column: Extract<ColumnVerdict, { kind: 'ok' }>): string | null {
+  if (column.primaryKey) return null;
+  const { meta } = column;
   if (meta.type && VALUE_FIELD_TYPES.has(meta.type)) return null;
-  return `is a \`${meta.type ?? 'untyped'}\` field, not a reference (\`lookup\`, \`master_detail\` or \`user\`)`;
+  return `is a \`${meta.type ?? 'untyped'}\` field, not a reference (\`lookup\`, \`master_detail\` or \`user\`) or \`id\``;
 }
+
+/**
+ * Does the resolved column name X's own primary key? Only the `id` the
+ * driver provisions: the graph serves it as an injected column with an empty
+ * slice. An author-declared field that happens to be named `id` is judged by
+ * its own definition, like any other column.
+ */
+function isOwnPrimaryKey(column: string, verdict: { injected?: true; meta?: GraphField }): boolean {
+  return column === MEMBERSHIP_KEY_OWN_ID_FIELD && verdict.injected === true && !verdict.meta?.type;
+}
+
+/** One of U / F, resolved on the merged object — see {@link columnOf}. */
+type ColumnVerdict =
+  | { kind: 'ok'; meta: GraphField; primaryKey: boolean }
+  | { kind: 'missing'; candidates: ReadonlySet<string> }
+  | { kind: 'skip' };
 
 /**
  * The column one of U / F names, judged on the merged object: `ok` with its
@@ -236,14 +264,15 @@ function columnOf(
   object: string,
   column: string,
   tied: ReadonlySet<string> | undefined,
-): { kind: 'ok'; meta: GraphField } | { kind: 'missing'; candidates: ReadonlySet<string> } | { kind: 'skip' } {
+): ColumnVerdict {
   if (!column || tied?.has(column)) return { kind: 'skip' };
   const verdict = resolveFieldPath(graph, object, column);
   if (!verdict || isUnjudgeable(verdict)) return { kind: 'skip' };
   if (verdict.kind === 'field-unknown') return { kind: 'missing', candidates: verdict.candidates };
   if (verdict.kind !== 'ok') return { kind: 'skip' };
   // `id` maps to an empty slice: the driver's primary key, never a reference.
-  return { kind: 'ok', meta: verdict.meta ?? {} };
+  // As U it is no user reference; as F it is the roster row's own id.
+  return { kind: 'ok', meta: verdict.meta ?? {}, primaryKey: isOwnPrimaryKey(column, verdict) };
 }
 
 /**
@@ -319,7 +348,7 @@ export function validateMembershipKeyDeclarations(
           suggestName(decl.valueField, value.candidates),
       });
     } else if (value.kind === 'ok' && decl.valueField !== decl.userField) {
-      const fault = valueFieldFault(value.meta);
+      const fault = valueFieldFault(value);
       if (fault) {
         findings.push({
           severity: 'error',
@@ -329,7 +358,7 @@ export function validateMembershipKeyDeclarations(
           message:
             `\`valueField\` '${decl.valueField}' ${fault}, so the set holds values no policy can compare ` +
             'with a record',
-          hint: 'Point `valueField` at a `lookup`, `master_detail` or `user` column, or reference the values\' object',
+          hint: 'Point `valueField` at a `lookup`, `master_detail` or `user` column, or at `id` for the caller\'s own rows',
         });
       }
     }

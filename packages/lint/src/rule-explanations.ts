@@ -1786,9 +1786,12 @@ const MEMBERSHIP_KEY_VALUE_FIELD_INVALID_EXPLANATION: RuleExplanation = {
     MEMBERSHIP_KEY_RESOLUTION,
     'The set holds F\'s values, and a policy compares it with a column that references the same object, or ' +
       'with `id` on that object. So F must be a reference column of X: `lookup`, `master_detail` or `user`. A ' +
-      'multi-valued one is allowed, and its values are flattened. A column X does not have makes the read ' +
-      'fail; any other type holds values no policy can compare with a record. F may not be U\'s column: the ' +
-      'schema refuses that, because the set would hold only the caller\'s own id.',
+      'multi-valued one is allowed, and its values are flattened. F may also be `id`, X\'s own primary key: the ' +
+      'set is then the caller\'s own rows of X, "the records I am" (an `employee` roster\'s ' +
+      '`my_employee_ids`), compared with a column that references X, such as a leave request\'s `employee`. A ' +
+      'column X does not have makes the read fail; any other type holds values no policy can compare with a ' +
+      'record. F may not be U\'s column: the schema refuses that, because the set would hold only the ' +
+      'caller\'s own user id.',
     'F is judged on the object as it runs, an `objectExtensions` entry that replaces it folded in first.',
   ],
 };

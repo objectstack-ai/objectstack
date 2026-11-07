@@ -198,6 +198,72 @@ describe('refusal 11 — a declared key tested against a column of another targe
   });
 });
 
+describe("[#31129 ruling A] a key over the roster's own `id` holds ids of the roster object itself", () => {
+  const employee = parsed({
+    name: 'hr_employee',
+    label: 'Employee',
+    fields: {
+      user: { type: 'user', label: 'User' },
+      department: { type: 'lookup', reference: 'hr_department', label: 'Department' },
+    },
+    membershipKeys: { my_employee_ids: { userField: 'user', valueField: 'id' } },
+  });
+  const department = parsed({ name: 'hr_department', label: 'Department', fields: { title: { type: 'text', label: 'Title' } } });
+  const leave = parsed({
+    name: 'hr_leave_request',
+    label: 'Leave request',
+    fields: {
+      employee: { type: 'lookup', reference: 'hr_employee', label: 'Employee' },
+      department: { type: 'lookup', reference: 'hr_department', label: 'Department' },
+      approver: { type: 'user', label: 'Approver' },
+      reason: { type: 'text', label: 'Reason' },
+    },
+  });
+  const leaveSet = (using: string, object = 'hr_leave_request') => ({
+    name: 'employee_self',
+    label: 'Employee self-service',
+    rowLevelSecurity: [{ name: 'own_rows', object, operation: 'select', using }],
+  });
+  const stackWith = (using: string, object?: string) => ({
+    objects: [employee, department, leave],
+    permissions: [leaveSet(using, object)],
+  });
+
+  it('CONTROL: a column that references the roster, and `id` on the roster itself, are accepted', () => {
+    expect(judge(stackWith('employee in current_user.my_employee_ids'))).toEqual([]);
+    expect(judge(stackWith('!(employee in current_user.my_employee_ids)'))).toEqual([]);
+    expect(judge(stackWith('id in current_user.my_employee_ids', 'hr_employee'))).toEqual([]);
+  });
+
+  it.each([
+    ['a reference to an unrelated object', 'department in current_user.my_employee_ids', "'department', which references 'hr_department'"],
+    ['a user reference', 'approver in current_user.my_employee_ids', "'approver', which references 'sys_user'"],
+    ['a text column', 'reason in current_user.my_employee_ids', "'reason', a `text` field"],
+    ['the `id` of another object', 'id in current_user.my_employee_ids', "`id` of 'hr_leave_request'"],
+  ])('refuses %s', (_label, using, holds) => {
+    const findings = judge(stackWith(using));
+    expect(brief(findings)).toEqual([{ rule: RLS_PREDICATE_MEMBERSHIP_KEY_TARGET, path: POLICY_PATH }]);
+    expect(findings[0].severity).toBe('error');
+    expect(findings[0].message).toContain(holds);
+    expect(findings[0].message).toContain("which holds 'hr_employee' ids, so the two never match");
+  });
+
+  it('the CLI door and the save door judge it the same way', () => {
+    const stack = stackWith('department in current_user.my_employee_ids');
+    const cli = runAuthoringRules('validate', { normalized: stack, parsed: stack }).filter((f) => f.rule.startsWith('rls-predicate-'));
+    expect(cli.map((f) => f.rule)).toEqual([RLS_PREDICATE_MEMBERSHIP_KEY_TARGET]);
+    const write = (using: string) =>
+      runRuntimeAuthoringRules({
+        type: 'permission',
+        item: leaveSet(using),
+        context: { objects: [employee, department, leave], permissions: [] },
+        rlsMembershipResolverKeys: [],
+      }).errors.filter((f) => f.rule.startsWith('rls-predicate-'));
+    expect(write('employee in current_user.my_employee_ids')).toEqual([]);
+    expect(write('department in current_user.my_employee_ids').map((f) => f.rule)).toEqual([RLS_PREDICATE_MEMBERSHIP_KEY_TARGET]);
+  });
+});
+
 describe('refusal 13 — a declared key under `==` is the list type fault, now exact', () => {
   it('reports `rls-predicate-unenforceable` naming the key as a membership set', () => {
     const findings = judge({ objects: [roster(), supplier, po], permissions: [portalSet('supplier == current_user.portal_supplier_ids')] });
