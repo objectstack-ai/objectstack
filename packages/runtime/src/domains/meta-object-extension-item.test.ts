@@ -36,6 +36,10 @@ import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protoco
 import { SysMetadata, SysMetadataHistoryObject, SysMetadataAuditObject } from '@objectstack/platform-objects/metadata';
 import { ObjectExtensionSchema } from '@objectstack/spec/data';
 import { HttpDispatcher } from '../http-dispatcher.js';
+// The [#29594] rehearsal boots the real dispatcher, whose package door reaches
+// `import('@objectstack/metadata')` in standalone-stack.ts; pay that load
+// during collection, never inside a clocked case (check:test-source-alias).
+import '@objectstack/metadata';
 
 let home: string;
 let priorHome: string | undefined;
