@@ -23,6 +23,11 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { FLOW_BUILTIN_NODE_TYPES } from '@objectstack/spec/automation';
+// Clocked windows measure behaviour, never loading: the command reaches both
+// of these through a dynamic import, so their first load is paid here, during
+// collection (`pnpm check:test-source-alias`).
+import '@objectstack/objectql/core';
+import '@objectstack/plugin-security';
 import Validate from '../src/commands/validate';
 import { defineStackSourceFromLiteral, linkSpec } from './helpers/define-stack-fixture.js';
 
