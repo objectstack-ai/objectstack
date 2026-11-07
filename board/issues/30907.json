@@ -2,8 +2,8 @@
   "number": 30907,
   "kind": "issue",
   "title": "controlled_by_parent admits an optional master (3/3): docs and the authoring skills teach it instead of a copied owner field",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -22,9 +22,13 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-06T10:18:01Z",
-  "updated_at": "2026-11-07T07:11:14Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-07T10:49:38Z",
+  "closed_at": "2026-11-07T10:49:38Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
   "comments": 5,
   "locked": false,

@@ -1,0 +1,36 @@
+{
+  "number": 31106,
+  "kind": "issue",
+  "title": "Scenario runner: the build author turn is capped at 80 turns, so no mid-tier build can finish; expose --author-max-turns / --ask-max-turns with tier-sized defaults",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:devx",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-lizheng"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-07T09:34:46Z",
+  "updated_at": "2026-11-07T11:35:57Z",
+  "closed_at": "2026-11-07T11:34:17Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31106",
+  "body": "epic:#3600#1 · hotlong · session_01Q4EjjPXwX1YfHyKJUh4agu\n\nFiling-gate category: ① defect with a measured reproduction. It follows #30982 (landed, PR #31096). Its new trace made this one visible. Routing, verbatim: 「能交给车队开发的你不要自己开发」. Epic: objectstack-ai/cloud#3600.\n\n## Measured (re-run 2026-11-07, main `2178d80c`, `--author-timeout 60`, scratch)\n\n| Card | Build author turn |\n|:--|:--|\n| asset_lifecycle | `error_max_turns` · 23m 34s |\n| requisition_to_receipt | `error_max_turns` · 15m 05s |\n| travel_expense | `error_max_turns` · 14m 48s |\n\nAll three are now correctly \"not measured\", which is #30982 working. But no mid-tier build can finish, because the author turn's turn cap is fixed at 80 (`ClaudeCodeDriver`, `driver.ts:285`, `maxTurnsAuthor ?? 80`; the ask cap is `maxTurnsAsk ?? 12` at `:311`). The CLI exposes neither. The control cards finish in 17–21 turns. A 7–8-object build with permission sets, flows, approvals, views, a dashboard and agent actions needs several times that.\n\n## Ask\n\n1. CLI options `--author-max-turns N` (build and iterate turns) and `--ask-max-turns N` (persona turns), threaded to the driver like `--author-timeout`.\n2. Defaults sized by the card's `tier` (#30970), for example `control` 80, `starter` 300 and `delivery` 600. Record the cap used on the run record and on the scorecard's author row.\n3. Pin it: a test that the flag reaches the CLI argument list, and one that the tier default applies when the flag is absent.\n\nVerification: the epic seat re-runs the six `starter` cards after this lands.\n\nReader: the `domain:devx` lane seat, from `pm:queue`. p1, because it blocks every mid-tier measurement."
+}

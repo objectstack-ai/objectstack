@@ -1,7 +1,7 @@
 {
   "number": 18917,
   "kind": "issue",
-  "title": "[PM seat] domain:spec · seat 4 — ⏳ vacant",
+  "title": "[PM seat] domain:spec · seat 4 — 🟢 marchtian",
   "state": "open",
   "state_reason": null,
   "draft": null,
@@ -13,16 +13,18 @@
   "labels": [
     "pm:seat"
   ],
-  "assignees": [],
+  "assignees": [
+    "marchtian"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-18T05:48:48Z",
-  "updated_at": "2026-11-02T18:55:07Z",
+  "updated_at": "2026-11-07T13:03:41Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 75,
+  "comments": 76,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/18917",
-  "body": "domain:spec#4 · os-steve · session_01ADHkmQNap7ryQcyQXocWct\n\n**This post is the seat (`domain:spec` seat 4).** Project-seat stub: only what another account must read lives here. The job description is versioned at `.claude/skills/pm-dispatch/references/lanes/spec.md`, ⛔ not copied here.\n\n## Current PM\n\n⏳ **vacant** since 2026-11-02T18:49Z. The last holder, `os-steve` · `session_01ADHkmQNap7ryQcyQXocWct` (seated 2026-11-02T14:52Z), signed off on the maintainer's order 「spec 车道当前任务处理完就下班」. Its clock-out brief 6585431112 is the release marker: take the seat directly with `/pm-dispatch 接手`.\n\n- **Patrol:** none (`trig_01SbVyALxwJN1EPjkJfQUn5q` deleted at sign-off).\n- **Mailbox:** none (#29432 closed at sign-off).\n\n## Handover ledger\n\n- **In flight:** none. All three cards this seat dispatched landed:\n  - objectstack-ai/objectstack#29261 → objectstack-ai/objectstack#29457\n  - objectstack-ai/objectstack#29297 → objectstack-ai/objectstack#29470\n  - objectstack-ai/objectstack#29049 → objectstack-ai/objectstack#29495\n  \n  Each card has a landing note and `pm:dispatched` removed. `check-handover` returned clear.\n- **Left in the queue, unclaimed:** objectstack-ai/objectstack#29393, objectstack-ai/objectstack#29415, objectstack-ai/objectstack#29419. None had a triage first-touch audit. objectstack-ai/objectstack#29419 waits on PR objectstack-ai/objectstack#29404. objectstack-ai/objectstack#29393's serial partner objectstack-ai/objectstack#29261 has landed.\n- **Filed this term:**\n  - objectstack-ai/objectstack#29461 (skills lane).\n  - objectstack-ai/objectstack#29481 (`domain:server`; its blocker objectstack-ai/objectstack#29297 is closed).\n- **Carried:** objectstack-ai/objectstack#29233 holds the objectstack-ai/objectstack#29495 review's should-fix 2 (6583607752).\n- **Split:** spec seats 1, 2 and 4 split new cards by issue number mod 3 (0 = this seat). While this seat is vacant, the seats still on duty take its share by lane order.\n\n## Hot-file serial queue\n\n- **This seat holds:** nothing. ⛔ Re-derive from the live `Claim:` comments and each open PR's file list before every dispatch.\n\n## Notes\n\n- **Write path:** the relay (`post-stamped.mjs`, `label-write.mjs`, `fleet-write/dispatch.mjs`) as `objectstack-fleet[bot]`. ⛔ No GitHub MCP writes.\n- **Names:** a new public name is the seat's call in its ACCEPT unless a real product or contract fork exists. ⛔ No names-only `needs-user-decision`.\n- **Publication:** objectstack. A merge to `main` publishes nothing; the release is the Version Packages PR, a human act.\n- **Tier H:** a governed PR is never readied, queued or armed before an APPROVED review from a `GOVERNED_APPROVERS` account.\n- **Other `domain:spec` seats:** objectstack-ai/objectstack#6017 (seat 1), objectstack-ai/objectstack#18549 (seat 2), objectstack-ai/objectstack#18883 (seat 3), objectstack-ai/objectstack#19357 (seat 5). ⛔ No liveness judgement on them.\n"
+  "body": "domain:spec#4 · marchtian · session_017ihL2eHDXrsKgGAUHq956U\n\n⚠️ **Seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/spec.md` (⛔ not copied here). This is **`domain:spec` seat 4**. Seat 1 is #6017, seat 2 is #18549, seat 3 is #18883 and seat 5 is #19357 (⛔ this post is none of them).\n\n## Current PM\n\n🟢 **`marchtian`** · `session_017ihL2eHDXrsKgGAUHq956U` · seated 2026-11-07T13:01Z (project \"Objectstack devx server spec\", thread \"接手 spec 车道席位(并发 5)\"). Opening mark: 6707273013. Previous PM: `os-steve` · `session_01ADHkmQNap7ryQcyQXocWct`, clock-out brief 6585431112.\n\n## Handover ledger\n\n- **In flight:** none yet.\n- **Pointer:** canonical ledger = labels + assignee + `Claim:` comments carrying `Seat: domain:spec#4` + `head:claude/` PRs. Posture, ledger and round reports live in the project.\n- **Split:** the other `domain:spec` seats are vacant at seating, so this seat reads the whole lane. If a sibling seats, the claim stamp arbitrates.\n\n## Hot-file serial queue\n\n- **This seat holds:** nothing. ⛔ Re-derive from the live `Claim:` comments and each open PR's file list before every dispatch.\n\n## Notes\n\n- **Mailbox:** PR #31118. **Patrol:** `trig_01JwEKRSkChmo5DHWnsME1xh` · `48 * * * *`.\n- **Write path:** the relay (`post-stamped.mjs`, `label-write.mjs`, `fleet-write/dispatch.mjs`) as `objectstack-fleet[bot]`. ⛔ No GitHub MCP writes.\n- **Names:** a new public name is the seat's call in its ACCEPT unless a real product or contract fork exists. ⛔ No names-only `needs-user-decision`.\n- **Publication:** objectstack. A merge to `main` publishes nothing; the release is the Version Packages PR, a human act.\n- **Tier H:** a governed PR is never readied, queued or armed before an APPROVED review from a `GOVERNED_APPROVERS` account.\n\n<!-- signed: domain:spec#4 · marchtian · session_017ihL2eHDXrsKgGAUHq956U -->\n"
 }

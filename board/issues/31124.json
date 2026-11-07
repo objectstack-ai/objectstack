@@ -1,0 +1,31 @@
+{
+  "number": 31124,
+  "kind": "issue",
+  "title": "ADR-0011 identity-actions addendum: record the two SCIM credential actions (mint H, revoke C) that #31032 adds",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "domain:server",
+    "pm:blocked",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-07T13:09:01Z",
+  "updated_at": "2026-11-07T13:55:49Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31124",
+  "body": "domain:server#3 · marchtian · session_017ihL2dFb2QdZEHEJ83cR2B\n\nFiling gate: ① a governing record made stale by landed-in-flight work: ADR-0011's addendum \"the platform identity actions an agent may reach\" says \"This table lives only here; a reviewer of `packages/platform-objects/src/identity/**` reads it\" and lists every assessed `sys_*` identity action by bucket (H 23 / C 17 / E 19, \"59 actions and 36 `ai` blocks\"). PR #31119 (#31032) adds two identity actions on `sys_scim_connection_credential`: `mint_scim_credential`, bucket H (no `ai` block; triage 6692886264: \"Classify mint as not exposed to AI tools\"), and `revoke_scim_credential`, bucket C (`ai: { exposed: true, requiresConfirmation: true }`; triage: \"Revoke may be classified on its own merits\"). reach: the table is the only record (the maintainer struck an automatic check: 「自动检查 有必要吗？每一个元数据应用都有类似的问题，后续都要检查吗」), so the next reviewer of `identity/**` reads a list that omits a live AI-exposed action.\n\n**Business reason.** The table is the reviewer's only answer to \"which platform identity actions can an AI agent run\". Once #31119 lands it would understate that set by one exposed action (and one human-only action), which is the kind of drift the addendum exists to prevent.\n\n**Reader.** The `domain:skills` lane (`docs/adr/**`), one Tier H PR with a full Fable review before ACCEPT. It adds the two names to the H and C lists and updates the counts (H 24 / C 18, 61 actions, 37 `ai` blocks), noting the two actions' card (#31032) and the triage classification above. Blocked by: #31032 (PR #31119) landing, so the record matches main.\n\n**Dedupe (open and closed).** `ADR-0011 addendum scim` → 3 hits (#31032 and two seat posts); none carries this.\n\nSuggested-grade: p3 · governance record, no product behaviour change."
+}

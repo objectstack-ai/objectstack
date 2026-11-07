@@ -1,0 +1,32 @@
+{
+  "number": 31115,
+  "kind": "issue",
+  "title": "skills gates: a link/anchor walk over skills/**, three hand-written tables as liveness-exhaustive sections, and spec versions in skill bodies checked — the blind spots behind the 2026-11-02 skills review",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:skills",
+    "needs-user-decision",
+    "pm:queue",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-07T11:03:53Z",
+  "updated_at": "2026-11-07T11:56:19Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31115",
+  "body": "domain:skills#3 · huangyiirene · session_01J8VVAmFFuy5ap2gXYq25sy\n\nFiling gate ③ (maintainer-directed). The maintainer, 2026-11-07, on the review report that recommends these three checks: 「按照你的建议立卡」. Item 1 adds a gate and so needs the maintainer's own naming (「新增门禁默认否」); that sentence is read here as the naming, and triage confirms or returns it. Items 2 and 3 widen existing gates onto their measured blind spots (not new gates). Report: https://claude.ai/artifact/UXUaprHxBYrXE8DfJpfRGU (P3 section). ⛔ Not a claim. Triage sets the grade and the lane (`scripts/check-skill-*.mjs` are governed-surface gates; `domain:skills` per the lane table).\n\n## Why\n\nAll eleven mechanical gates were green on 2026-11-02 and again on `main` `aa3e21cc` today, while the review found 20 semantic defects by hand. Each gate below would have caught a named item of the two text-fix cards filed alongside this one; the fixes land without them, and the same classes come back (bootstrap.md's version already drifted once after #25666).\n\n## 1 · Link and anchor walk (new check)\n\n- Walk every `*.md` under `skills/**`, resolve relative links to files and `#anchors` to headings with GitHub's slug rule (lower-case, punctuation and em-dashes dropped, spaces to hyphens — double hyphens are legal and common here).\n- Caught today: `objectstack-data/references/data-hooks.md:961` → `../SKILL.md#lifecycle-hooks`, `objectstack-platform/rules/plugin-lifecycle.md:259` → `../SKILL.md#complete-plugin-example`, `objectstack-platform/rules/service-registry.md:149` → `../SKILL.md#well-known-plugin-names--services`: all three left by \"moved verbatim\" refactors. An ad-hoc walk flagged 71 links, 68 of them slug false positives from em-dash headings; the check must get the slug rule right or it is noise.\n- Shape: `scripts/check-skill-links.mjs` with `--self-test`, wired beside the other `check:skill-*` scripts in `package.json`; illustrative example links (`./crm_index.md` inside a fenced example) are exempt by fence.\n\n## 2 · Three hand-written tables become liveness-exhaustive sections (existing gate)\n\n`scripts/check-skill-identifier-liveness.mjs` already registers eight exhaustive sections (`:325-382`) and measures Leg 2 missing rows. Register three more, each against its source symbol:\n\n| Skill section | Source symbol | Missing today |\n|:--|:--|:--|\n| `skills/objectstack-platform/SKILL.md` `### requires:` token table | `PLATFORM_CAPABILITY_TOKENS` ∩ `CAPABILITY_PROVIDERS` (`packages/core/src/capability-providers.ts`) | `package-registry`, `mailbox` |\n| `skills/objectstack-platform/references/operations.md` `os generate <kind>` row | `GENERATORS` minus `RETIRED_GENERATORS` (`packages/cli/src/commands/generate.ts:183`, `:974`) | lists retired `agent` |\n| `skills/objectstack-query/rules/filters.md` `## Operator Reference` | `FILTER_OPERATORS` (`packages/spec/src/data/filter.zod.ts:3367`) | `$empty` (confirm membership first) |\n\nThe first two are Leg 1 phantom / Leg 2 missing by the gate's own definitions; the third is Leg 2.\n\n## 3 · Spec versions in the body (existing gate)\n\n`scripts/check-skill-compatibility-version.mjs` pins the frontmatter `compatibility` / `metadata.version` to the package version (#22658) and `--fix` rewrites them on release. The body is unread: `skills/objectstack-platform/references/bootstrap.md:147-148` pins `18.1.0` today, and `skills/objectstack-ui/rules/record-page.md:44` named `18.3.0` while the package was still `18.2.0`. Extend the same check to any `\"@objectstack/<pkg>\": \"<x.y.z>\"` or `@objectstack/spec <x.y.z>` in a body: equal to the package version, or inside a sentence that reads as history (\"since\", \"removed in\", \"until\"). `--fix` rewrites the install-shape ones as it already rewrites the frontmatter.\n\n## Acceptance\n\n- Each check ships with `--self-test`, a header stating the contract it guards and the expected catch, and is added to the `check:skill-*` family and to CI where that family already runs; no new workflow job.\n- Items 2 and 3 are paid for by the two text-fix cards landing first or in the same PR (the gate must be green on `main` the moment it is wired).\n- **Level:** `scripts/**` gate code and `package.json` scripts (Tier S unless the lane table reads governed-surface gates as Tier H); `Clause-②: no`, `Metadata-protocol: none`; no skills changeset unless a skill text moves.\n\n## Dedupe (REST search, open and closed)\n\n- `check-skill-links anchors gate` → 26, none about links.\n- `skills version in body gate check-skill-compatibility-version` → 37; #22658, #22970, #23192 closed (frontmatter only).\n- `\"os:check\" coverage skills` → 38; #22059 closed, ruling B — the opt-in example check exists; this card does not touch it.\n\nRelated: #22059, #22658, #25666, #27522."
+}

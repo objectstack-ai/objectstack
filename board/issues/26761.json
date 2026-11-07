@@ -1,7 +1,7 @@
 {
   "number": 26761,
   "kind": "issue",
-  "title": "[PM seat] domain:server · seat 3 — ⏳ vacant",
+  "title": "[PM seat] domain:server · seat 3 — 🟢 marchtian",
   "state": "open",
   "state_reason": null,
   "draft": null,
@@ -14,17 +14,17 @@
     "pm:seat"
   ],
   "assignees": [
-    "os-elon-musk"
+    "marchtian"
   ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-27T14:46:52Z",
-  "updated_at": "2026-11-06T18:57:46Z",
+  "updated_at": "2026-11-07T11:04:48Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 18,
+  "comments": 19,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/26761",
-  "body": "domain:server#3 · os-elon-musk · session_016WV4cytQjG9X1CrCgytUM5\n\n⚠️ **Seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/server.md` (⛔ not copied here). This is **`domain:server` seat 3**. Seat 1 is #6367, seat 2 is #20966, seat 4 is #27737, seat 5 is #28677 and seat 6 is #29908 (⛔ this post is none of them).\n\n<sub>Refreshed 2026-11-06T18:55Z at sign-off.</sub>\n\n## Current PM\n\n⏳ **vacant** since sign-off. Previous PM: `os-elon-musk` · `session_016WV4cytQjG9X1CrCgytUM5` · seated 2026-11-05T21:34Z (project \"Objectstack\", thread \"Server 车道派发(席3 #26761)\"). Sign-off brief: the latest comment on this post by that session. Signed off on the maintainer's order of 2026-11-06T15:14Z: 「当前任务处理完，合并后就下班」. Successor: `/pm-dispatch 接手`, then read this post.\n\n## Handover ledger\n\n- **In flight:** none. Every PR this seat ACCEPTed has landed (`check-handover.mjs --session=session_016WV4cytQjG9X1CrCgytUM5 --account=os-elon-musk` exit 0).\n- **Stay-behind:** none. #30803's PR2 (draft PR #31006, no contract review yet) was handed to `domain:server#2` on the maintainer's word. The handoff note is on the card.\n- **Parked:** #30020 (E1 landed; E2+ in the card's design note), #30924 (`pm:blocked` behind #30922), #30803 (PR3/4 after PR2).\n- **Queue snapshot:** read live (`pm:queue` + `domain:server`); ⛔ not copied here.\n- **Pointer:** canonical ledger = labels + assignee + `Claim:` comments carrying `Seat: domain:server#3` + `head:claude/` PRs.\n\n## Hot-file serial queue\n\n- **This seat holds:** nothing. ⛔ Re-derive from the live `Claim:` comments and each open PR's file list before every dispatch.\n\n## Notes\n\n- **Mailbox:** #30660, closed at sign-off; the successor reopens one at seating. **Patrol:** deleted at sign-off.\n- **Write path:** the relay (`post-stamped.mjs`, `label-write.mjs`, `fleet-write/dispatch.mjs`). ⛔ No GitHub MCP writes.\n- **Publication:** objectstack. A merge to `main` publishes nothing. The release is the Version Packages PR, a human act.\n\n<!-- signed: domain:server#3 · os-elon-musk · session_016WV4cytQjG9X1CrCgytUM5 -->\n"
+  "body": "domain:server#3 · marchtian · session_017ihL2dFb2QdZEHEJ83cR2B\n\n⚠️ **Seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/server.md` (⛔ not copied here). This is **`domain:server` seat 3**. Seat 1 is #6367, seat 2 is #20966, seat 4 is #27737, seat 5 is #28677 and seat 6 is #29908 (⛔ this post is none of them).\n\n<sub>Refreshed 2026-11-07T11:04Z (concurrency raised).</sub>\n\n## Current PM\n\n🟢 **`marchtian`** (`GET /user`) · `session_017ihL2dFb2QdZEHEJ83cR2B`, in the project thread \"接手 server 车道席位 2\" of the marchtian account's project \"Objectstack devx\". Summons: the maintainer, verbatim 「开三个 server 车道，90分钟后开始派发」 (2026-11-07T10:47:48Z), in this account's project. Opening mark: 6705863175.\n\n- **Grounds:** the sign-off brief 6692910861 (`os-elon-musk`, `check-handover` exit 0, no stay-behind) was the newest event on this post.\n- **Concurrency:** 5 cards in hand for this seat (the maintainer, verbatim 「每个 seat 后续并发5」, 2026-11-07T11:04:01Z); slots granted by this account's project coordinator. First claim no earlier than 90 minutes after the summons.\n- **Patrol:** `trig_01UUy8tmL3WYLL6jN6hAZAPC` · `38 * * * *` (hourly, self-bound to the seat session).\n- **Mailbox:** PR objectstack-ai/objectstack#31110 (`Mailbox-of: domain:server#3 · marchtian`), subscribed.\n- Posture, ledger and round reports live in the project (pointer only). Lane ledger = labels + assignee + `Claim:` comments carrying `Seat: domain:server#3` + `head:claude/` PRs.\n\n## Inherited ledger\n\n- The previous term's ledger is in the prior body revision and its sign-off brief 6692910861; ⛔ not restated here.\n\n## Hot-file serial queue\n\n- None held by this seat. ⛔ Re-derive from live `Claim:` comments and open PR file lists before every dispatch.\n\n## Notes\n\n- **Publication:** objectstack. A merge to `main` publishes nothing; the release is the Version Packages PR, a human act.\n- **Write path:** the relay (`post-stamped.mjs`, `label-write.mjs`, `issue-create.mjs`, `fleet-write/dispatch.mjs`). ⛔ No GitHub MCP writes.\n\n<!-- signed: domain:server#3 · marchtian · session_017ihL2dFb2QdZEHEJ83cR2B -->\n"
 }

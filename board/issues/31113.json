@@ -1,0 +1,33 @@
+{
+  "number": 31113,
+  "kind": "issue",
+  "title": "skills: four teaching errors copied into refused or retired metadata — validation.md nullable comparisons, requires: table misses package-registry/mailbox, `os generate agent` still listed, deprecated `handler` taught first",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "domain:skills",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-07T11:02:50Z",
+  "updated_at": "2026-11-07T13:43:33Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31113",
+  "body": "domain:skills#3 · huangyiirene · session_01J8VVAmFFuy5ap2gXYq25sy\n\nFiling gate ③ (maintainer-directed) · class: c (metadata an AI writes from the skill is refused at publish) and b (the skill contradicts the declared contract) · reach: every agent that reads the published catalog `@objectstack/skills@18.3.0` (synced into each consumer's `.claude/skills/`).\nFiled from the skills review thread on the maintainer's words, verbatim (2026-11-07): 「按照你的建议立卡」 · 「时间久了，立卡的时候重新确认一下问题」. Every item was re-read on `main` `aa3e21cc` (2026-11-07 10:39Z) before filing; the review report is https://claude.ai/artifact/UXUaprHxBYrXE8DfJpfRGU (P0 section). ⛔ Not a claim. Triage sets the grade and the lane.\n\n## What is wrong (four sites, one text-only PR)\n\n1. **`skills/objectstack-data/rules/validation.md:61`, `:79`, `:163`** — the validation examples compare declared-nullable date fields bare: `record.due_date < today()`, `record.end_date < record.start_date`, `record.end_date <= record.start_date`. None of the fields in those examples carries `required: true`. `skills/objectstack-formula/SKILL.md:112` and `:120-122` teach the opposite for the same spec: an ordering or arithmetic operator on a declared-nullable field is refused at publish unless guarded by `!= null` / `== null`, and give the guarded spelling `record.start_date != null && record.end_date != null && record.end_date < record.start_date`. Two skills in one bundle, two rules; the data one is the one that gets copied. Fix: guard the three examples (or declare the fields `required: true` and say why).\n2. **`skills/objectstack-platform/SKILL.md:297-311` (`### requires:` token table)** — the table enumerates the opt-in tokens but omits `package-registry` and `mailbox`. Both are members of `PLATFORM_CAPABILITY_TOKENS` (`packages/spec/src/kernel/platform-capabilities.ts:58`, `:64`; provider rows `:216`, `:218`) and rows of `CAPABILITY_PROVIDERS` (`packages/core/src/capability-providers.ts:174`, `:184`). An author who needs inbound mail or the always-on package persistence half cannot find the token here and reaches for `plugins[]`. Fix: two rows (`package-registry` → `@objectstack/service-package`; `mailbox` → `@objectstack/service-mailbox`). Per #27522 keep no count in the prose.\n3. **`skills/objectstack-platform/references/operations.md:23`** — the `os generate <kind>` row reads \"Scaffold an object / view / flow / agent from a template\". `agent` is a member of `RETIRED_GENERATORS` (`packages/cli/src/commands/generate.ts:974`, `:980`, ADR-0063 §2: the kernel ships `ask` and `build`, nothing else is picked from a roster) and `skills/objectstack-ai/SKILL.md:347` already says `os g agent` is retired. The platform skill contradicts the ai skill and the CLI. Fix: drop `agent` from the row (the live roster is `object fields view list action flow dashboard app skill picklist`).\n4. **`skills/objectstack-data/references/examples-objects.md:122`, `skills/objectstack-data/rules/validation.md:260`, `skills/objectstack-data/SKILL.md:46`** — the hook examples still open with `handler: async (ctx: HookContext) => …` and the SKILL.md index lists `handler` beside `body` as peers. `skills/objectstack-data/references/data-hooks.md:322` marks `handler` **Deprecated** (`HookSchema`: \"prefer `body`\") and `:368` records that `ctx.title` is undeclared on `HookContext` under `handler` (TS2339 when annotated). An AI reads the example before the reference and ships the deprecated door. Fix: make `body` the first and only taught form in the two examples; the SKILL.md line names `handler` only as the deprecated form.\n\n## Acceptance\n\n- `pnpm check:skill-identifier-liveness`, `check:skill-top-level-keys`, `check:skill-compatibility`, the skills token ratchet and `check:skill-refs` stay green; the three validation examples gain `<!-- os:check -->` so the gate owns them (#22059 ruling B: the opt-in schema check over example blocks is the agreed instrument).\n- `skills/objectstack-data/evals/*.json` and `skills/objectstack-platform/evals/*.json` gain or correct a case for each of the four sites (done-when for author-writable surfaces: skills + docs + eval).\n- **Level:** `skills/**` text only (Tier H): `'@objectstack/skills': patch` changeset, `Clause-②: no`, `Metadata-protocol: none`.\n\n## Dedupe (REST search, open and closed)\n\n- `validation.md today() nullable` → 0.\n- `capability-providers skill platform SKILL` → 29; nearest #18705 (closed: hand-written counts in that table, fixed) — none on the two missing tokens.\n- `\"os generate\" agent operations.md` → 45; none on the kind list (#30857 closed is the same file, a different row).\n- `handler deprecated body data-hooks skill` → 11; #28253, #24289 closed, neither moves the examples to `body`.\n\nRelated: #22059 (ruling B), #27522, #18705, #17311."
+}

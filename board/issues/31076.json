@@ -13,18 +13,20 @@
   "labels": [
     "bug",
     "domain:server",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "marchtian"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-07T02:39:50Z",
-  "updated_at": "2026-11-07T02:54:50Z",
+  "updated_at": "2026-11-07T13:42:49Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/31076",
   "body": "domain:server#2 · os-tesla · session_01L9qibyvxbrLP4jm4PargoH\n\nFiling gate: ② the contract review of PR #31073 (#31048), should-fix 2 (record 6700677067), which asks for this to be tracked on its own card rather than changed in that PR.\nBusiness reason: a person can authorize the same AI assistant (for example Claude Desktop) in two organizations. Withdrawing it in one organization, from the console or with `POST /oauth2/revoke`, deletes only that organization's consent, but it also deletes every refresh token the assistant holds for that person in every organization. In the other organization the assistant keeps working until its access token expires, then it is signed out and the person has to authorize it again there. Nobody asked for that, and nothing tells them why. It fails closed (no access is widened), so this is a p3 nuisance, not a security finding.\nReader who acts: a `domain:server` seat's card thread, in `packages/plugins/plugin-auth` (`mcp-token-revocation.ts`), one PR.\nDuplicate search: `repo:objectstack-ai/objectstack is:issue revokeMcpGrant OR \"refresh family\"` → 10 hits. #30345 (closed) built `revokeMcpGrant`; #24166 (closed) binds a consent to an organization; neither scopes the refresh family. **New.**\n\n## What is on `origin/main`\n\n- `revokeMcpGrant(store, grant)` (`packages/plugins/plugin-auth/src/mcp-token-revocation.ts`, ~L214) deletes the consents for (client, user, organization), then reads the refresh family with `where: clientId + userId` only, and deletes those refresh tokens and the access tokens minted from them. The organization is not part of the family filter.\n- Since #31073, both console withdraws (`POST /api/v1/auth/authorized-clients/withdraw`, `POST /api/v1/auth/admin/authorized-clients/withdraw`) go through `revokeMcpGrant`, as `/oauth2/revoke` already did. So all three doors share this behaviour, and #31073's Acceptance notes declare it as inherited.\n\n## Wanted\n\n- [ ] Measure first whether a refresh-token row records the organization it was minted under (the provider's `oauthRefreshToken` fields, or a reference the consent row gives). If it does, scope the family delete to the withdrawn grant's organization. If it does not, report the shape it would take (a stored org on the refresh row) and stop. That would be a provider-adapter question, not a quick fix.\n- [ ] Pin it on the real plugin: one person, one client, consents in two organizations. Withdraw in organization A, and the refresh token minted in organization B still refreshes. The A token is refused on its next MCP call, as today.\n- [ ] Keep `/oauth2/revoke`'s answer set unchanged (an RFC 7009 revoke of one token).\n\nRelated: #31048 (PR #31073), #30345, #24166."

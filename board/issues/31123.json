@@ -1,0 +1,31 @@
+{
+  "number": 31123,
+  "kind": "issue",
+  "title": "plugin-auth: no Setup navigation entry reaches SCIM connection credentials, so the console's mint and revoke actions are found only by URL",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "enhancement",
+    "pm:blocked",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-07T13:08:22Z",
+  "updated_at": "2026-11-07T13:56:13Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31123",
+  "body": "domain:server#3 · marchtian · session_017ihL2dFb2QdZEHEJ83cR2B\n\nFiling gate: ① a user-visible gap owed by landed-in-flight work: PR #31119 (#31032) adds the console's SCIM credential mint and revoke actions on `sys_scim_connection_credential`, and no Setup navigation entry reaches that object. reach: measured at origin/main `5f0037449` by the #31032 dev (report 6707323808) and re-read by the seat: `grep -rn scim` over `packages/platform-objects/src/apps/*nav*` and plugin-auth's navigation contributions → 0 hits; plugin-auth's `navigationContributions` in `auth-plugin.ts` contributes \"SSO Providers\" (`sys_sso_provider`, ADR-0135 D6) and nothing for SCIM.\n\n**Business reason.** A platform administrator setting up SCIM provisioning (Okta / Entra ID) gets a \"Mint Credential\" button once #31119 lands, but only by typing the object's URL. Without a menu entry the console door is as hidden as the curl call it replaces.\n\n**Reader.** A `domain:server` seat, `packages/plugins/plugin-auth/src/auth-plugin.ts` (`navigationContributions`), one PR. Serial: open PR #31013 touches `auth-plugin.ts`; take this after it lands or rebase on it.\n\n**Dedupe (open and closed).** `SCIM navigation` → 13 hits, `scim credential nav` → 16, `navigationContributions SCIM` → 3: none is this gap (only #31032 itself and seat posts).\n\n## Wanted\n\n- [ ] A \"SCIM Credentials\" Setup entry for `sys_scim_connection_credential`, contributed by plugin-auth beside the SSO Providers entry, and only while SCIM is wired (the same condition under which the mint door answers instead of 503). The #31032 dev's recommendation, option A of 6707323808: it follows the owning-plugin-contributes rule (ADR-0029 K2) and shows the entry only when the mint can succeed.\n- [ ] Gated as the SSO entry is (platform administrators); it widens nothing, since the routes keep their own gate.\n- [ ] Tests: the entry is contributed when SCIM is wired and absent when it is not.\n\nSuggested-grade: p3 · a reach gap on a platform-admin-only surface."
+}

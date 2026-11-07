@@ -1,0 +1,34 @@
+{
+  "number": 31105,
+  "kind": "pull_request",
+  "title": "test(core): give the vouched-reference census pin a scan budget and declare its census imports as inputs",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-07T09:33:03Z",
+  "updated_at": "2026-11-07T10:29:39Z",
+  "closed_at": "2026-11-07T10:29:37Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-07T10:29:37Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/31105",
+  "body": "security#1 · os-tesla · session_01L9qibvynRbCtMndW8EHNGc\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- **改了什么**：vouched-reference 调用点普查的 core pin 两个测试各带显式时限 `SCAN_TIMEOUT_MS = 60_000`（与同目录 operation-private-keys 扫描 pin 同值）；普查脚本 import 的 `scripts/js-comment-mask.mjs` 与 `scripts/invoked-as.mjs` 登记为 `@objectstack/core` 的跨包测试输入（声明表 + `turbo.json` 的 `core#test:repo`），并在声明表里以该 pin 作 `heldBy` 见证。\n- **为什么改**：`--ts-only` 扫描读 `packages/` 下全部 `.ts`，闲机约 1 秒；繁忙 runner 上会越过 vitest 默认 5 秒，测试在任何断言前超时，把无关 PR 和合并队列批次一起拖红。另外普查导入的两个模块一改，pin 的判定就会变，但此前改它们不会重跑这个 pin，也不会让 turbo 缓存失效。\n- **风险与回滚**：只改测试与仓根配置，不发布任何包、不改运行时；回滚即还原这 3 个文件。\n- **先看**：① `packages/core/src/security/vouched-reference-callers.pin.test.ts` 的 `SCAN_TIMEOUT_MS` 及两处 `it` 末参；② `scripts/cross-package-test-inputs.mjs` 的 `@objectstack/core` 条目（`globs` 与新增 `heldBy`）；③ `turbo.json` 的 `@objectstack/core#test:repo` inputs。\n- **两分钟验证**：`pnpm check:cross-package-test-inputs`，预期末行 `OK: 32 package(s) read outside themselves, all declared, and turbo.json hashes every declared glob`。\n- **需要你做的**：无，席位落地。\n\n## What changes\n\n- **Scan budget.** Both tests in `vouched-reference-callers.pin.test.ts` spawn the census (`--self-test`, then `--ts-only`) and ran under vitest's default 5000 ms test timeout. The `--ts-only` scan reads every `.ts` file under `packages/`. On a runner that is building the monorepo at the same time, it can overrun that timeout, and the test then fails with `Test timed out in 5000ms` before any assertion runs. Each `it` now passes `SCAN_TIMEOUT_MS` (60 s), and a one-paragraph docblock gives the reason. This is the same constant name, value and shape as the sibling scan pin `operation-private-keys.pin.test.ts`. No repo gate registers or spells per-test timeouts. The file-level `// test-budget:` header grammar in `scripts/measure-test-shard-timings.mjs` is for files over the 10 s wall line, and this file runs in about 1.2 s, so it does not apply.\n- **Census imports declared as inputs.** The census imports `./js-comment-mask.mjs`, which decides what counts as prose, and `./invoked-as.mjs`, which decides whether its dispatch runs. `js-comment-mask.mjs` also imports `invoked-as.mjs`. An edit to either file moves the pin's verdict, so both are now:\n  - globs of the `@objectstack/core` entry in `scripts/cross-package-test-inputs.mjs`, next to the census script itself;\n  - inputs of `@objectstack/core#test:repo` in `turbo.json`.\n\n  The review asked for `js-comment-mask.mjs`. `invoked-as.mjs` belongs to the same import closure, so it is included as the same omission.\n- **`heldBy` witness.** `check:cross-package-test-inputs` cannot see from the pin's quoted paths that it reads these two files, because only the spawned child loads them. On the first commit it flagged both globs as \"held by nothing\". The entry now names the pin as their `heldBy` witness, which is that gate's second disposition: the read is real, and the scan cannot name it.\n\n## Tests\n\n- Core `repo` project on `ce6158a02f`: 7 files and 96 tests pass. The two pin tests take 91 ms (`--self-test`) and 1091 ms (`--ts-only`) on a 4-core container while other gates run.\n- The census run alone on the same tree: `--self-test` takes 0.09 s and passes 39 cases. `--ts-only` takes 1.07 s to 1.15 s over 3 runs and stays green at `file-attachment-service.ts (2)`. The scan is not restructured in this PR.\n- `pnpm --filter @objectstack/core typecheck`: exit 0. The test layer holds at its pinned 4 signatures.\n\n## Acceptance notes\n\n- Changeset: none. The diff is one `*.test.ts` in `@objectstack/core`, which ships only `dist`, plus root config (`turbo.json`, `scripts/`). Nothing published moves, so `skip-changeset` applies, the same as for the census PR. The label is not applied here; the seat applies it.\n- No ablation was run. The diff changes a test timeout and input declarations, not tested behaviour.\n- `check:dual-build-cjs-loads` is NOT MEASURED locally. It needs every package's `dist` (PREREQUISITE NOT MET, exit 3) and is left to CI's `Lint & Repo Gates`.\n\n## Verification\n\n<details><summary>Derived gates on ce6158a02f: 69 derived, 68 exit 0, 1 NOT MEASURED</summary>\n\n`node scripts/pm/dispatch-gates.mjs --commands` (change set vs merge base `465c2bea3`, 3 files) derived 69 commands. Every one was run on `ce6158a02f`, and the exit code was captured before any pipe. 68 exited 0. `pnpm check:dual-build-cjs-loads` exited 3 (PREREQUISITE NOT MET). Reconciliation:\n\n```text\ndispatch-gates --ran: 69 derived famil(ies) accounted for — 68 run, 1 NOT-MEASURED (1 DERIVED from a recorded exit 3).\n```\n\n`pnpm check:cross-package-test-inputs`, which was red on the first commit and is green after the `heldBy` witness:\n\n```text\nAll 261 self-test cases passed.\nOK: 32 package(s) read outside themselves, all declared, and turbo.json hashes every declared glob (6 of them on a split \"test:repo\" task)\n```\n\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01L9qibvynRbCtMndW8EHNGc)_\n"
+}

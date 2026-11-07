@@ -2,8 +2,8 @@
   "number": 31085,
   "kind": "issue",
   "title": "Setup user page: add an \"AI Assistants\" tab that shows and revokes the assistants a person authorized",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -15,18 +15,23 @@
     "domain:server",
     "enhancement",
     "pm:blocking",
-    "pm:queue",
     "priority:p1"
   ],
-  "assignees": [],
+  "assignees": [
+    "marchtian"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-07T04:51:03Z",
-  "updated_at": "2026-11-07T07:02:25Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-07T14:07:22Z",
+  "closed_at": "2026-11-07T14:04:45Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/31085",
   "body": "domain:ui#3 · os-tesla · session_01L9qibxW6qraU2Z3mwupUGp\n\nFiling gate: ③ the maintainer's order that names this work: #30894 (「都同意，立卡」, 2026-11-06). Its Expected says \"An administrator can see and revoke them for a person they manage\". ⛔ Not a claim. Triage sets the grade and the lane. Suggested grade: p1 (#30894's grade; this is the half that closes it).\n\n**Business reason.** A person who lost a laptop with Claude Desktop on it may not be able to sign in and withdraw it themselves, and an administrator handling a departure or role change needs to see and end what acts as that person. The server doors exist (#31048, PR #31073) and the console widget is built (PR #31084), but no page shows it, so an administrator still cannot find it.\n\n**Reader.** The lane that owns `packages/platform-objects` page metadata (`domain:server`), then the `domain:ui` seat holding #30894.\n\n**Dedupe.** `sys-user.page.ts tab` (only the page's own history), `authorized-assistants` (#30918, #31048, both closed, #30894 open), `admin revoke assistant user page` (none). **New.**\n\n## What exists\n\n- `GET /api/v1/auth/admin/authorized-clients?userId=` and `POST /api/v1/auth/admin/authorized-clients/withdraw` `{ userId, id }`, platform-admin gated (#30946, #31073); client `oauth.authorizedClients.listForUser` / `withdrawForUser`.\n- PR #31084 (`Part of #30894`) registers the SDUI widget `mcp:authorized-assistants` in `@object-ui/app-shell`. It takes no props and reads the bound record through `useRecordContext()`. That record must be a `sys_user` with an id; anywhere else it renders nothing. It lists that person's assistants with a confirm-first Revoke. A caller who is not a platform admin sees the server's 403 as a failed read.\n- `packages/platform-objects/src/pages/sys-user.page.ts` is `kind: 'full'` and owns a curated `page:tabs` strip (Details, Positions, Permission Sets, Business Units, Sessions, OAuth Apps, API Keys, Preferences, Security). The console has no ui-side door to add a tab there.\n\n## Wanted\n\n- [ ] One `page:tabs` item in `sys-user.page.ts`, \"AI Assistants\" (with the page's inline label locales), whose body is `{ type: 'mcp:authorized-assistants', properties: {} }`.\n- [ ] Whether the tab is shown only to a platform administrator, and how, is this lane's call. The server refuses anyone else either way.\n- [ ] Lands after PR #31084 (the widget must be registered before a page names it). This card's PR says `Fixes #30894`.\n\nRelated: #30894, #31048 (PR #31073), PR #31084, #30918 (PR #30946)."

@@ -12,19 +12,21 @@
   },
   "labels": [
     "domain:server",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p3",
     "tech-debt"
   ],
-  "assignees": [],
+  "assignees": [
+    "marchtian"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-06T18:49:48Z",
-  "updated_at": "2026-11-06T18:56:16Z",
+  "updated_at": "2026-11-07T14:12:35Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/31033",
   "body": "domain:server#3 · os-elon-musk · session_016WV4cytQjG9X1CrCgytUM5\n\nFollow-up of #30958 / #30960 (PRs #30991 and #30989, both merged).\n\n`packages/plugins/plugin-auth/src/scim-connection-admin.ts` computes `MAX_SCIM_CONNECTION_ID = MAX_TEXT - 'svc:scim:'.length` (246) with the prefix spelled literally. #30989 exports the same prefix as `SCIM_SERVICE_PRINCIPAL_PREFIX` from `scim-connection-service.ts`. If the prefix ever changes, the cap drifts away from the actor label it protects, and `sys_audit_log.actor` (255) could overflow.\n\nFix: import `SCIM_SERVICE_PRINCIPAL_PREFIX` and use its `.length`. The existing unit pin (246 accepted, 247 refused, `9 + 246 === 255`) keeps holding. This is a one-line change, `patch` on `@objectstack/plugin-auth`.\n\nOptional in the same stroke: the #30991 changeset names the two routes but not the two new public `AuthManager` methods (`isScimWired`, `mintScimConnectionCredential`). Adding one \"Exported\" line would complete the record."

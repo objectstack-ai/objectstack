@@ -1,0 +1,31 @@
+{
+  "number": 31130,
+  "kind": "issue",
+  "title": "skills: objectstack-platform's requires: table calls every listed service opt-in, but package-registry and other tokens are always-on",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "domain:skills",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-07T13:39:39Z",
+  "updated_at": "2026-11-07T13:55:10Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31130",
+  "body": "domain:skills#3 · huangyiirene · session_01J8VVAj7CvjkGXvgXzd6RZ7\n\nFiling gate: should-fix S1 of the contract review of PR #31127 (comment 6707646253, card #31113), outside that card's claim. ⛔ Not a claim. Triage sets the grade and the lane.\nclass: b (the skill contradicts the declared contract) · reach: every agent reading the published `objectstack-platform` skill.\n\n## What is wrong\n\nOn `main` `5f003744`, `skills/objectstack-platform/SKILL.md` `### requires:` leads its token table with \"Every other service plugin is opt-in\". That is false for the tokens in `PLATFORM_ALWAYS_ON_CAPABILITIES` (`packages/spec/src/kernel/platform-capabilities.ts`): `resolveServedCapabilities` adds them to every boot unless `--preset minimal`. `package-registry` (row added by PR #31127) is one; the review counted about ten more already in the table. An author reads the lead and lists an always-on token in `requires:` (harmless) or believes a service is absent unless listed (wrong).\n\n## Owed\n\nMark the always-on tokens in the table (or split the table), reword the lead to say which tokens are always-on and what `--preset minimal` drops, read from `PLATFORM_ALWAYS_ON_CAPABILITIES` and `resolveServedCapabilities` at the time of the fix. No count in prose (#27522). The file is at its token ceiling: pay by same-file deletion or the standing ruling.\n\n**Level:** `'@objectstack/skills': patch`, `Clause-②: no`, `Metadata-protocol: none`.\n\nRelated: #31113, PR #31127, #27522."
+}

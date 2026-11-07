@@ -1,0 +1,32 @@
+{
+  "number": 31129,
+  "kind": "issue",
+  "title": "spec(rls): a membership key cannot yield \"the person records I am\" — valueField must be a reference column, never `id`, so an employee, agent or customer roster cannot give its user `current_user.my_employee_ids`",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:access",
+    "domain:spec",
+    "enhancement",
+    "needs-user-decision",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-07T13:37:28Z",
+  "updated_at": "2026-11-07T13:56:54Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31129",
+  "body": "domain:devx#2 · marchtian · session_017ihL2ebbZkr2QAEG1x7UC8\n\nFiling gate: ① a named location. This came up in the #30913 ruling analysis (in the project files at `issue-30913/decision-analysis.md` §6), which was read against `origin/main` `5f00374492`. ⛔ Not a claim. Triage sets the grade and the lane.\nclass: b · reach: every app whose people are records (HR employees, service-desk agents, portal customers) and whose managers or leads must see their people's rows. Read from the spec, not measured on a running server.\ntype: finding\n\n## Business reason\n\nIn HR, service-desk and portal apps, the person is a **row**: `employee` e05, `agent` a04, `customer` cus_03. A row-level rule such as \"a manager sees the assets of their department\" needs `current_user.my_department_ids`. That works today: the key is declared on `employee` with `userField: 'user'` and `valueField: 'department'`. But a rule that needs **which employee I am**, for example \"I see leave requests whose `employee` is me\" or \"a lead sees tickets whose `agent` reports to me\", needs `current_user.my_employee_ids`. That is the `id` of the roster row itself, and the shape refuses it.\n\nThe only routes left are `owner_id` on every such row, or a separate (user, employee) junction table. Real apps in these domains do not model either. The scenario runner (#30913, ruled Q2 = C) leaves the manager and portal views to the build's own platform means, so this gap shows up there as AI-built apps that cannot express a common rule.\n\n## Where (`origin/main` `5f00374492`)\n\n- `packages/spec/src/security/rls.zod.ts` around line 760: the membership-key contract. `valueField` (F) must be \"a reference column on X\", judged at authoring and publish, and `valueField` may not equal `userField`. `id` is not a reference column, so the self row cannot be produced.\n- ADR-0105 D11 and the #25234 ruling: the roster was designed as a (user, parent) relation table. The case where the roster row **is** the person is not discussed.\n\n## Wanted (a design question for the spec lane; not decided here)\n\nDecide whether a membership key may take `valueField: 'id'` (the set of the caller's own roster rows), or whether another documented route covers \"the records I am\".\n- If the answer is no, the RLS guide and the data skill should say so and name the route. Today an author finds out only at publish.\n- If yes: the refusal list loses its `id` exclusion, and the skill gains the \"person is a record\" example.\n\n**Level:** spec (RLS contract). `Clause-②`: to be decided by the spec lane. `Metadata-protocol`: to be decided by the spec lane.\n\nDedupe (open and closed): \"membershipKeys valueField\" and \"membership key roster valueField id\" (11 hits) turned up the original design (#25234, closed), its docs and skill cards (#26423, #26297, #26184), catalog cards (#22682, #20297, #15196, #15204) and QA run records. None raises the self-row case. **New.**\n\nRelated: #30913, #25234, #30914."
+}

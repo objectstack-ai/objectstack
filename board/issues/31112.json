@@ -1,0 +1,31 @@
+{
+  "number": 31112,
+  "kind": "issue",
+  "title": "skills: one home per rule — the same rule written in three skills, \"moved verbatim\" stubs in data and upgrade SKILL.md, an undocumented `user-invocable` frontmatter key, and `<!-- os:check -->` coverage of 1/63 (platform) and 0/42 (query) example blocks",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "domain:skills",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-07T11:01:31Z",
+  "updated_at": "2026-11-07T11:55:36Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31112",
+  "body": "domain:skills#3 · huangyiirene · session_01J8VVAmFFuy5ap2gXYq25sy\n\nFiling gate ③ (maintainer-directed), 2026-11-07, verbatim: 「按照你的建议立卡」. Structure, not a wrong sentence: this card removes the mechanism by which the two text-fix cards' defects recur (a rule stated in three places drifts in two) and brings the published examples under the check #22059 ruling B chose. Re-read on `main` `aa3e21cc`. Report: https://claude.ai/artifact/UXUaprHxBYrXE8DfJpfRGU (P2 and P3 §18). ⛔ Not a claim. Triage grades; the seat may split per skill (fold-or-serial: one PR per skill at whole-file boundaries, the token ratchet is paid line by line).\n\n## 1 · Duplicated rules → one owner, one-sentence cross-references elsewhere\n\nMeasured on `main` (`grep -c` per `SKILL.md`):\n\n| Rule | Written in | Proposed owner |\n|:--|:--|:--|\n| `conditionalRequired` → `requiredWhen` | objectstack-data, objectstack-formula, objectstack-ui | objectstack-data (the field key); others link |\n| ADR-0146 (publish-time formula refusals) | objectstack-data, objectstack-platform | objectstack-formula |\n| `runAs` on hooks / flows | objectstack-automation (12 mentions), objectstack-data (4) | objectstack-automation |\n| queues (`queue` capability, worker shape) | objectstack-automation (10), objectstack-data (12), objectstack-platform (5) | objectstack-platform `requires:` + one rule file |\n| \"Verify your work\" boilerplate | 9 SKILL.md files, 6 of them twice | one sentence linking `objectstack-platform/references/operations.md#verify-your-work` |\n\nEach duplicate is a drift source and a token-ratchet line. The lane's own rule applies: a new line with no named reader is a token tax.\n\n## 2 · \"Moved verbatim\" stubs\n\n`skills/objectstack-data/SKILL.md` (5) and `skills/objectstack-upgrade/SKILL.md` (3) still carry \"→ Moved verbatim to …\" lines and the runs of `---` they left (platform's were already cleared). They say where a section went and nothing else; the three broken anchors in the stale-teaching card are their residue. Replace each with the one-line section index entry it stands for, or delete.\n\n## 3 · `user-invocable: false`\n\n`skills/objectui/SKILL.md:11` (and `ui/.claude/skills/objectui-contributor`, `ui/.claude/skills/verify`) carry a frontmatter key no other published skill has, no gate lists (`check-skill-top-level-keys.mjs` tolerates it) and no document explains. Either register it in the top-level-keys gate with a sentence on who reads it, or remove it. Changing frontmatter triggers `check-skill-frame-sync` — pay it in the same PR.\n\n## 4 · `<!-- os:check -->` coverage\n\n#22059 ruled B: the published examples are checked by the opt-in schema/type check (`packages/spec/scripts/check-skill-examples.ts`) rather than by scored evals. Coverage today, fenced `ts`/`typescript` blocks marked:\n\n| Skill | marked / blocks |\n|:--|:--|\n| objectstack-platform | 1 / 63 |\n| objectstack-query | 0 / 42 |\n| objectstack-data | 9 / 98 |\n| objectstack-automation | 3 / 17 |\n| objectstack-formula | 1 / 9 |\n| objectstack-ui | 16 / 32 |\n| objectui | 87 / 104 |\n\nEvery defect in the P0 text-fix card sits in an unmarked block. Mark every self-contained block; turn the fragments that teach a complete rule into compilable form (import + wrapper) where that costs under ~5 lines; leave true fragments unmarked and say so once per file. Start with data and query.\n\n## Acceptance\n\n- Per skill: ratchet paid (deletions shrink it), `check:skill-examples` green with the new marks, no rule lost (the seat's \"砍点逐条核幸存\" check: each cut rule is named with its surviving home).\n- **Level:** `skills/**` (Tier H): `'@objectstack/skills': patch` changeset per PR, `Clause-②: no`, `Metadata-protocol: none`.\n\n## Dedupe (REST search, open and closed)\n\n- `skills duplicated rules conditionalRequired three skills` → 2, none.\n- `Moved verbatim SKILL.md` → 862 (noise); #14655 closed (catalog anatomy drift, same refactor family).\n- `user-invocable` → 3; #14317 closed (internal skills flight, did not touch the key).\n- `\"os:check\" coverage skills` → 38; #22059 closed ruling B (the instrument), #14297 closed (data restructure, \"3.3% example gate coverage\" then).\n\nRelated: #22059, #14655, #14297, #14298, #14299."
+}

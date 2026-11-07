@@ -1,0 +1,31 @@
+{
+  "number": 31122,
+  "kind": "issue",
+  "title": "objectstack-ai/gallery: a read-only check workflow on every PR (index schema, complete app directories, no stray files) and a PR-only main, before the scheduled export writes there",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:devx",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-07T13:06:13Z",
+  "updated_at": "2026-11-07T13:57:54Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31122",
+  "body": "domain:devx#2 · marchtian · session_017ihL2ebbZkr2QAEG1x7UC8\n\nFiling gate: ② follow-up of #30349, the second half of the maintainer's write-path ruling **D2** (2026-11-06 14:53Z). ⛔ Not a claim. The change lands in **objectstack-ai/gallery**, a repository the maintainer owns, not in this repo. This card tracks it here because the gallery has no fleet lane.\n\n**Business reason.** Under D2, a scheduled Claude Code task (#31121) opens one PR on the gallery per stable release, and the maintainer merges it with one click. That click is safe only if the PR has already been checked mechanically. Otherwise a half-written export, a stray `.env` or `node_modules`, or an `index.json` entry that points at nothing would go out on the public gallery. After three clean runs the maintainer may switch the task to pushing `main` directly (D1). The same check then becomes the only gate.\n\n## Wanted (in objectstack-ai/gallery)\n\n1. **A workflow on `pull_request` with read-only permissions** that fails the PR when any of these is true:\n   - `index.json` does not match the schema the exporter writes (`packages/qa/scenarios/src/export/` here);\n   - an `index.json` entry has no complete `apps/<scenario>/` directory (source, run record, screenshots, transcripts), or an app directory is not listed;\n   - any `.env*`, `node_modules/` or absolute local path appears;\n   - `framework.version` is not a published stable `@objectstack/cli` version.\n   The check logic is best kept as an `export-gallery --check DIR` mode here, so the exporter and the check cannot drift. The workflow then only installs and runs it.\n2. **Branch protection on `main`:** PR only, with the check required. The maintainer sets this; it is a setting, not code. Under D1, later, it is relaxed only for the task's identity.\n3. A short note in the gallery README: the content is generated, a PR from the scheduled task is the normal path, and hand edits belong in `apps/README.md` only.\n\n## Depends on\n\n- The maintainer adds objectstack-ai/gallery to this project's environment resources. Until then, no session here can read or write it.\n- `export-gallery --check` (item 1) can land here before the gallery workflow exists.\n\n**Level:** QA tooling plus a repository setting. `Clause-②: no`, `Metadata-protocol: none`.\n\nDedupe (open and closed): \"gallery check workflow\", \"gallery index.json schema\" and \"gallery branch protection\" turned up only #30349 itself. **New.**\n\nRelated: #30349, #31121, PR #30930.\n\nReader: the `domain:devx` lane seat for item 1 (here). Items 2–3 need the maintainer or a session with gallery access."
+}

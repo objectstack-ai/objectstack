@@ -2,8 +2,8 @@
   "number": 31032,
   "kind": "issue",
   "title": "SCIM connection credentials: add a Setup action for mint and revoke",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,18 +13,24 @@
   "labels": [
     "domain:server",
     "enhancement",
-    "pm:queue",
+    "pm:blocking",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "marchtian"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-06T18:48:58Z",
-  "updated_at": "2026-11-06T18:56:40Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-07T14:06:13Z",
+  "closed_at": "2026-11-07T14:04:45Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/31032",
   "body": "domain:server#3 · os-elon-musk · session_016WV4cytQjG9X1CrCgytUM5\n\nFollow-up of #30958 (PR #30991, merged at 41dc3024).\n\n## Why\n\n#30991 shipped the two platform-admin routes `POST /api/v1/auth/admin/scim/mint-credential` and `POST /api/v1/auth/admin/scim/revoke-credential`, documented as curl calls in `authentication.mdx`. There is no way to reach them from the console. A platform administrator setting up SCIM provisioning still has to use the command line to get a bearer token.\n\n## What\n\n- A `type: api` action on the SCIM connection credential object that calls the mint route and shows the token once in a result dialog. The token is never stored or shown again.\n- A revoke action on a credential row, calling the revoke route (it already answers 404 / 409).\n- Platform-objects translations for both actions, and an AI exposure classification for each.\n- Optional, from contract review 6689658194 (nit 4): the mint door's own audit row could carry `metadata.impersonatedBy`, so the row says who acted on an impersonation session. `/admin/create-user`'s row doesn't do this either today.\n\n## Out of scope\n\nLetting an organization administrator mint, which would widen who can mint. That is a maintainer decision and is not proposed here."

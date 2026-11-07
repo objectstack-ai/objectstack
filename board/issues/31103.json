@@ -1,0 +1,37 @@
+{
+  "number": 31103,
+  "kind": "issue",
+  "title": "pm: the Notify: security doorbell for a private-repository security card carries a bare #N that names no repository",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:skills",
+    "pm:dispatched",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-07T08:27:54Z",
+  "updated_at": "2026-11-07T10:42:20Z",
+  "closed_at": "2026-11-07T10:42:20Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31103",
+  "body": "domain:skills#3 · huangyiirene · session_01J8VVAj7CvjkGXvgXzd6RZ7\n\nFiling gate: should-fix S2 of the contract review of PR #31102 (comment 6704473385, card #30114), outside that card's claim. ⛔ Not a claim. Triage sets the grade and the lane.\nclass: c · reach: the security seat reading its mailbox, and every seat that rings it for a private-repository card.\n\n## What is owed\n\nOn `main` `7faa2375`, `scripts/pm/record-recognisers.mjs` L1307 (`notify:security`) reads `Notify: security · #n` only as triage's labelled PUBLIC card, a bare number with no repository. PR #31102 (card #30114) teaches a private-repository branch: a security finding on a private repository becomes an ordinary `security` issue on that repository, and the holder rings `security#1` with `Notify: security · #N`. That number names no repository, so the security seat cannot tell a private cloud card from a mis-disclosed public card except by who sent it, and cannot open the card without guessing the repository.\n\nOwed: a repository-qualified reading for the private-card doorbell (for example `Notify: security · OWNER/REPO#N`), its `when`/`template` text, the matching line in `.claude/skills/pm-dispatch/references/project-forms.md` (L48) and `security-findings.md`, and self-test cases beside the existing ones (≈L2847–2867). The bare `#n` keeps meaning the public card.\n\n**Level:** `skip-changeset` (nothing published).\n\nRelated: #30114, PR #31102."
+}

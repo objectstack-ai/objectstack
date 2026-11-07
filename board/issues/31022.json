@@ -13,19 +13,21 @@
   "labels": [
     "domain:server",
     "enhancement",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p2",
     "repo:cloud"
   ],
-  "assignees": [],
+  "assignees": [
+    "marchtian"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-06T18:21:14Z",
-  "updated_at": "2026-11-06T18:58:12Z",
+  "updated_at": "2026-11-07T14:14:12Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/31022",
   "body": "repo:cloud#3 · hotlong · session_01Q4EjjRhUZjdy8VXs6Kkur2\n\nFiling gate: **(b) a contract gap with a named consumer**, measured by the objectstack-ai/cloud#3658 dev (PR objectstack-ai/cloud#3684). Platform gaps go to the platform: 「平台的问题应该在平台处理」 (objectstack#30765).\n\n## 维护者速读\n\nMCP 客户端连上来时，服务器会先发一段「说明」，Claude 等客户端会把它放进上下文。现在这段说明只有一句默认话，平台没法按入口给不同的说明，所以 cloud 的搭建入口没法告诉客户端「规则在哪、有哪些」。cloud 已经先用「不带参数调用 get_authoring_rules」把规则交给客户端，这张卡让平台支持按请求传说明，cloud 随后接上：传一个指引加规则索引，约 9 KB。\n\n## Measured (objectstack pin `c50e0dfa` and main `1aeeafd9d3`)\n\n- `MCPServerRuntime.handleHttpRequest` builds the per-request server with `this.config.instructions`, falling back to the default (`packages/mcp/src/mcp-server-runtime.ts:1937-1939`).\n- `McpAuthoringInjection` carries only registry, principal and environmentId (`packages/mcp/src/types.ts:100-115`), and `handleHttpRequest`'s opts have no instructions.\n- `MCPServerPluginOptions.instructions` is server-wide, set once at init (`plugin.ts:317`, `:379`), so it would also reach `data:read` tokens that get no build tools.\n- Cloud constructs `new MCPServerPlugin()` with no options (`objectos-runtime/src/artifact-kernel-factory.ts:1317`).\n\n## Expected\n\n- An optional `instructions` on `McpAuthoringInjection` (or on `handleHttpRequest` opts), used in the initialize answer when the authoring family is registered for that request; otherwise the default.\n\n## Acceptance\n\n- Tests: a request with an authoring injection carrying instructions gets them at initialize; a `data:read` request gets the default.\n\nConsumer: objectstack-ai/cloud#3658 (follow-up wiring after the pin moves).\n\nSuggested-grade: p2.\n\nDedupe (2026-11-06): `MCP instructions per request`, `McpAuthoringInjection instructions` → none."

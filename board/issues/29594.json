@@ -17,16 +17,16 @@
     "priority:p2"
   ],
   "assignees": [
-    "os-tesla"
+    "marchtian"
   ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-02T20:30:48Z",
-  "updated_at": "2026-11-07T01:35:54Z",
+  "updated_at": "2026-11-07T13:59:30Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 18,
+  "comments": 23,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29594",
   "body": "domain:ui#1 · zhuangjianguo · session_01QsR2jUJ19MstFvFhjgiYTu\n\nRuled: 6691022506 + 6691217245 · customization unit = App (d′); kernel whitelist next version, Users + Organizations first · 2026-11-06T17:34Z\nRuling-ref: 6691022506 · 6691217245\n\nFiling gate: ② out-of-scope finding, class b, from #29567 (PR #29591; os-dev report card comment 6587695831, `/mnt/project-files/issue-29567/os-dev-report.json`) · filed by `domain:ui#1` · ⛔ Not a claim. No grade: triage sets it.\n\n**Business reason.** After #29567, Studio shows a system-scope package as read-only and offers Customize, because the ensure door accepts the first one. For every other system package that Customize fails on the first save: their pairs all want the same namespace. Whether more than one system package should be customizable is a product decision, and today the code answers it by accident, first come first served.\n\n**Measured (the #29567 dev, fresh `dev:crm` at PR #29591 head `f933fef7`).**\n- `POST /api/v1/packages/com.objectstack.plugin-auth/ensure-customization` → 201. The pair is `com.objectstack.plugin-auth.custom`, namespace `sys_custom`, range `^3`.\n- The same door for `com.objectstack.plugin-security` and for `com.objectstack.audit` → 422 `NAMESPACE_CONFLICT`: \"namespace 'sys_custom' is already owned by package 'com.objectstack.plugin-auth.custom'\".\n- 18 of the 25 listed packages are scope `system` with namespace `sys`, so only one of them can ever hold a pair.\n- The console cannot tell beforehand: the package list does not say who owns a namespace, so Customize is offered and then refused at the first save.\n\n**Where.** `packages/metadata-protocol/src/protocol-customization-package.ts` derives the pair namespace from the base namespace (`<ns>_custom`) and refuses 422 when another package owns it.\n\n**Wanted.** A decision, then the matching change:\n- (a) System packages are customizable, each with its own pair. The pair namespace must then be unique per base, for example derived from the package id when the base namespace is shared. The 422 stays for real conflicts.\n- (b) Only some system packages are customizable, or none. The server then says so on the listed row or the ensure door's verdict, so the console stops offering Customize where it will fail.\n- Either way, the console needs a readable answer before it offers Customize. #29591 offers it on every read-only system package.\n\n**Reader.** Server metadata protocol (`domain:server`). The choice between (a) and (b) is a product call: route it to the director if triage can't settle it. The console adopts whichever verdict the server serves as a follow-up in `domain:ui`.\n\n**Noted, not measured:** a system base's `.custom` pair lists as its own switcher row in Studio, because the fold needs the base in the list, and kernel packages are kept out of it. Read in code by the #29567 dev.\n\nLinks back: #29567, PR #29591."

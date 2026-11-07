@@ -1,7 +1,7 @@
 {
   "number": 26373,
   "kind": "issue",
-  "title": "[PM seat] domain:devx · seat 3 — 🟢 os-lizheng",
+  "title": "[PM seat] domain:devx · seat 3 — ⏳ vacant",
   "state": "open",
   "state_reason": null,
   "draft": null,
@@ -13,18 +13,16 @@
   "labels": [
     "pm:seat"
   ],
-  "assignees": [
-    "os-lizheng"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-27T00:41:13Z",
-  "updated_at": "2026-11-07T05:06:49Z",
+  "updated_at": "2026-11-07T12:59:19Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 4,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/26373",
-  "body": "domain:devx#3 · os-lizheng · session_012MmDsRzowAnXEmogPGSEKA\n\n⚠️ **Seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/devx.md` (⛔ not copied here). This is **`domain:devx` seat 3**. Seat 1 is #6023, seat 2 is #20163 (⛔ this post is neither).\n\n<sub>Refreshed 2026-11-07T05:05Z (seated).</sub>\n\n## Current PM\n\n🟢 **`os-lizheng`** (`GET /user`) · `session_012MmDsRzowAnXEmogPGSEKA` (a Claude Code cloud session). Seated 2026-11-07T05:05Z.\n\n- **Summons, verbatim:** `/pm-dispatch devx`, then 「并发2」 and 「只处理 p1」 (the maintainer, to this session, 2026-11-07).\n- **Grounds:** the previous term's clock-out brief 6684508560 was the newest event on this post; seats 1 (#6023, os-elon-musk) and 2 (#20163, marchtian) are held, so this account takes the vacant seat 3.\n- **Concurrency:** at most 2 running slots. **Scope:** `priority:p1` cards only.\n- **Split:** seat 3 takes only unclaimed `pm:queue` cards, re-reading the assignee and newest comments before every claim and yielding to an earlier claim. Claims carry `Seat: domain:devx#3`.\n- **Patrol:** `trig_01DsyCjenmFBfuHU4kM8jh96` · `3 * * * *` (hourly, self-bound to the seat session).\n- **Mailbox:** PR objectstack-ai/objectstack#31087 (`Mailbox-of: domain:devx#3 · os-lizheng`), subscribed. Its head is `claude/beautiful-davinci-9u2m16` (an empty commit on `main`), because a cloud seat cannot push `mailbox/**`.\n- **Dispatch back end:** `mode:subagent` (`os-dev`). Posture and round reports live in the session (pointer only).\n\n## Inherited ledger\n\n- The previous term (os-elon-musk, `session_016WV4cz3RTQjLh7hZBLzgtZ`) held no card, no PR and no open decision. See its clock-out brief 6684508560 and the prior body revision. ⛔ Not restated here.\n\n## Hot-file serial queue\n\n- None held by this seat. ⛔ Re-derive from live `Claim:` comments and open PR file lists before every dispatch.\n\n## Notes\n\n- **Publication:** objectstack. A merge to `main` publishes nothing; the release is the Version Packages PR, a human act.\n- **Standing constraints honoured (maintainer, recorded on #20163):** `ui/.github/**` and the root `ci.yml` are ⛔ out of bounds for now; changesets go to the root `.changeset/`; no PR on the objectui repository.\n- Write path: the relay (`post-stamped.mjs`, `label-write.mjs`, `issue-create.mjs`, `fleet-write/dispatch.mjs`). ⛔ No GitHub MCP writes.\n"
+  "body": "domain:devx#3 · os-lizheng · session_012MmDsRzowAnXEmogPGSEKA\n\n⚠️ **Seat-post stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/devx.md`. This is **`domain:devx` seat 3**. Seat 1 is #6023, seat 2 is #20163 (⛔ this post is neither).\n\n<sub>Refreshed 2026-11-07T12:56Z (clocked out).</sub>\n\n- **Current PM:** ⏳ vacant. The last incumbent was `os-lizheng` · `session_012MmDsRzowAnXEmogPGSEKA` (a Claude Code cloud session), seated 2026-11-07T05:05Z on `/pm-dispatch devx` with 「并发2」 and 「只处理 p1」, and clocked out 2026-11-07T12:56Z on the maintainer's 「收班吧」. The clock-out brief is the newest comment. `check-handover` exit 0. Re-summon: `/pm-dispatch devx`, then read this post and its newest comments.\n- **Ledger:** seat 3 holds no card, no PR and no open decision. This term landed #30970 (PR #31091), #30982 (PR #31096), #30984 (PR #31098) and #31106 (PR #31111).\n- **Split:** while seat 3 is vacant, seat 1 picks the whole lane's total order; seat 2 (#20163, marchtian) under the claim race. A re-seated seat 3 takes only unclaimed `pm:queue` cards (re-read assignee and newest comments before every claim; yield to an earlier one). Claims carry `Seat: domain:devx#3`.\n- **Hot-file serial queue:** seat 3 holds none.\n- **Patrol / mailbox:** the patrol `trig_01DsyCjenmFBfuHU4kM8jh96` is deleted, and mailbox #31087 is closed.\n- **Standing constraints honoured (maintainer, recorded on #20163):** `ui/.github/**` and the root `ci.yml` are ⛔ out of bounds for now; changesets go to the root `.changeset/`; no PR on the objectui repository.\n- **Publication:** objectstack. A merge to `main` publishes nothing; the release is the Version Packages PR, a human act.\n"
 }

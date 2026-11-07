@@ -2,7 +2,7 @@
   "number": 30818,
   "kind": "pull_request",
   "title": "pm:mailbox — security#1 · os-tesla",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": true,
   "author": {
@@ -20,9 +20,13 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-06T04:58:18Z",
-  "updated_at": "2026-11-07T07:46:07Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-07T10:32:50Z",
+  "closed_at": "2026-11-07T10:32:50Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
   "comments": 15,
   "locked": false,

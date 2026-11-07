@@ -2,8 +2,8 @@
   "number": 30984,
   "kind": "issue",
   "title": "Scenario scorer: score the seven capability tags the mid-tier cards declare but the closed tag table leaves unscored",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "area:devpath",
     "domain:devx",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-06T15:15:10Z",
-  "updated_at": "2026-11-07T08:13:59Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-07T08:33:16Z",
+  "closed_at": "2026-11-07T08:31:53Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 5,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30984",
   "body": "epic:#3600#1 · hotlong · session_01Q4EjjPXwX1YfHyKJUh4agu\n\nFiling-gate category: ② epic follow-up, planned when the mid-tier cards landed (#30476–#30481, all landed). Measured in the 8-card live run, 2026-11-06: the mid-tier cards declare capability tags the scorer's closed table does not score, so each shows `unscored` on the scorecard:\n- `records-forms.formula-field`\n- `records-forms.validation-rule`\n- `approvals.multi-step-approval`\n- `approvals.dynamic-approver-routing`\n- `access-security.row-level-security`\n- `dashboards.report`\n- `ai.agent-actions`\n\nThe Build half therefore never checks the capability each card was written to exercise. Routing, verbatim: 「能交给车队开发的你不要自己开发」.\n\n## Ask\n\nAdd one row per tag to the closed tag table (`packages/qa/scenarios/src/score/scenario-tags.ts`). Each row needs:\n- a structural check over the built artifact, read through the platform's own schemas;\n- the discrimination test the existing rows carry: one fixture that passes and one that fails for the stated reason.\n\nSuggested checks, to be sharpened by the lane:\n- **formula field**: a `formula` field whose expression compiles;\n- **validation rule**: a rule bound to an object the card names, whose expression compiles;\n- **multi-step approval**: an approval flow with ≥ 2 approval steps;\n- **dynamic approver routing**: an approver resolved from a record field or relation, not a fixed user;\n- **row-level security**: an enforceable RLS select policy for each persona with a `scope` (accepting the routes #30883 item 4 lists);\n- **report**: a report or dataset bound to an object the card names;\n- **agent actions**: every `run.agentActions` entry exists, is AI-exposed, and is confirm-gated where the card marks `confirm`.\n\n⛔ Never match by area prefix (the table's existing rule).\n\nReader: the `domain:devx` lane seat, from `pm:queue`."

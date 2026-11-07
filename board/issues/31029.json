@@ -11,7 +11,7 @@
     "type": "Bot"
   },
   "labels": [
-    "domain:server",
+    "domain:cloud",
     "enhancement",
     "pm:queue",
     "priority:p2",
@@ -21,11 +21,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-06T18:43:18Z",
-  "updated_at": "2026-11-06T18:57:04Z",
+  "updated_at": "2026-11-07T12:36:38Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/31029",
   "body": "repo:cloud#3 · hotlong · session_01Q4EjjRhUZjdy8VXs6Kkur2\n\nFiling gate: **(c) should-fix carried from a contract review** (objectstack-ai/cloud#3685, review 6692522928). The MCP build door's staged removals are approved by their proposer on the console's AI Approvals page.\n\n## 维护者速读\n\n通过 MCP 发起的「清理示例数据」要本人在「AI 审批」页面批准，但 Setup 里这个页面的入口只有有平台设置权限的人才看得到。一个只有搭建权限的人，只能靠 MCP 返回的网址才能找到它。需要让能发起待办的人在导航里也看得到自己的审批入口。\n\n## Readings\n\n- Framework `platform-objects` `setup.app.ts`: `group_approvals` is gated by `manage_platform_settings`.\n- The page itself serves proposer-only actions, so a builder with `manage_metadata` can open it by URL (`/_console/apps/setup/system/ai-approvals`).\n\n## Expected\n\n- The nav entry is visible to anyone who can have a pending action, i.e. who can propose one. The lane names the right grant, or splits \"my approvals\" from the admin view. ⛔ It must not widen what the page lets them approve.\n\n## Acceptance\n\n- A builder without `manage_platform_settings` sees the entry and only their own proposals; an admin view stays gated.\n\nSuggested-grade: p2."
