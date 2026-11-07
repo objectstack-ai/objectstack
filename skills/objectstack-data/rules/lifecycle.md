@@ -1,10 +1,9 @@
 # Data Lifecycle & Retention
 
 Guide for declaring how long an object's data lives and how its space is
-reclaimed (ADR-0057 — system data lifecycle & retention). Distinct from
+reclaimed (ADR-0057). Distinct from
 **lifecycle hooks** (`beforeInsert` / `afterUpdate` …), which run logic on
-writes: this page covers the rows' retention, rotation and archival
-— and, at its end, the save notice a hook hands the saver.
+writes: this page covers the rows' retention, rotation and archival.
 
 ## Why This Exists
 
@@ -35,10 +34,11 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
 // ✅ Telemetry stream: bounded by a rotation window
 export const ApiCallLog = ObjectSchema.create({
   name: 'api_call_log',
+  sharingModel: 'private',
   lifecycle: {
     class: 'telemetry',
     retention: { maxAge: '14d' },                                // reap past 14 days (created_at)
-    storage: { strategy: 'rotation', shards: 14, unit: 'day' },  // O(1) shard DROP on SQLite
+    storage: { strategy: 'rotation', shards: 14, unit: 'day' },
   },
   fields: {
     endpoint: Field.text({}),
@@ -49,6 +49,7 @@ export const ApiCallLog = ObjectSchema.create({
 // ✅ Ephemeral token: TTL on its own expiry field
 export const ImportTicket = ObjectSchema.create({
   name: 'import_ticket',
+  sharingModel: 'private',
   lifecycle: {
     class: 'transient',
     ttl: { field: 'expires_at', expireAfter: '1d' },  // reap 1 day after expires_at
@@ -61,10 +62,11 @@ export const ImportTicket = ObjectSchema.create({
 // ✅ Compliance ledger: hot window, then cold storage
 export const ConsentLog = ObjectSchema.create({
   name: 'consent_log',
+  sharingModel: 'private',
   lifecycle: {
     class: 'audit',
     retention: { maxAge: '90d' },
-    archive: { after: '90d', to: 'archive', keep: '7y' },  // must: after === maxAge
+    archive: { after: '90d', to: 'archive', keep: '7y' },
   },
   fields: {
     subject: Field.text({}),
@@ -79,7 +81,7 @@ export const AutomationRun = ObjectSchema.create({
     class: 'telemetry',
     retention: {
       maxAge: '30d',
-      onlyWhen: { status: { $in: ['completed', 'failed'] } },  // paused rows never reaped
+      onlyWhen: { status: { $in: ['completed', 'failed'] } },
     },
   },
   fields: {
@@ -88,8 +90,7 @@ export const AutomationRun = ObjectSchema.create({
 });
 ```
 
-Duration literals: `<n>` + `h` / `d` / `w` / `y` — e.g. `'6h'`, `'14d'`,
-`'12w'`, `'7y'`.
+Duration literals: `<n>` + `h` / `d` / `w` / `y`.
 
 ## Validation Rules (rejected at parse time)
 
@@ -100,7 +101,7 @@ lifecycle: { class: 'telemetry' }
 // ❌ Policies on record-class — business truth is permanent
 lifecycle: { class: 'record', retention: { maxAge: '30d' } }
 
-// ❌ Archive window detached from the hot window
+// ❌ archive.after must equal retention.maxAge
 lifecycle: { class: 'audit', retention: { maxAge: '90d' }, archive: { after: '30d', to: 'archive' } }
 
 // ❌ Free-form durations
@@ -117,12 +118,10 @@ lifecycle: {
 
 ## Safety Semantics
 
-- **No `lifecycle` block = today's behavior**: `record` is the implicit default.
 - **Archive-then-delete is atomic-ish and safe by default**: an object
   declaring `archive` is never hot-deleted before the copy to the archive
   datasource succeeded. If no datasource is registered under the `archive.to`
-  name, rows are simply retained — a compliance ledger cannot be destroyed
-  by declaring a lifecycle.
+  name, rows are simply retained.
 - **Rotation** physically time-shards the table on SQLite (writes hit the
   current shard, reads go through a view under the object's name, expired
   shards are DROPped). Other dialects enforce the same window with an
@@ -155,6 +154,11 @@ record's state says so; the notice is for what *this* save started.
   import, a nested write) sets nothing.
 - Not a non-empty string ⇒ the write refuses; a refused write answers its
   error, no notice.
+- A hook's message is untranslated.
 - A flow a record create/update trigger starts sets it with a `save_notice`
   node (`config.message`, `{{ }}` renders); refused in any other flow, and
   after an `approval` / `wait`.
+  Its message translates under `flows.<flow>.notices.<node_id>.message`
+  in the saver's locale.
+  Refused by name in a `subflow` / `map` child; after one whose child can
+  pause, the flow is not armed (`unboundCause: 'notice_after_suspending_subflow'`).

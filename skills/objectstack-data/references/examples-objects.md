@@ -113,25 +113,23 @@ Declared `indexes` are a separate decision — see
 
 <!-- os:check -->
 ```typescript
-import { defineHook, HookContext } from '@objectstack/spec/data';
+import { defineHook } from '@objectstack/spec/data';
 
 export default defineHook({
   name: 'crm_account_defaults',
   object: 'account',
   events: ['beforeInsert'],
-  handler: async (ctx: HookContext) => {
-    if (!ctx.input.industry) {
-      ctx.input.industry = 'Other';
-    }
-    ctx.input.created_at = new Date().toISOString();
+  body: {
+    language: 'js',
+    source: `if (!ctx.input.industry) ctx.input.industry = 'Other';`,
   },
 });
 ```
 
-The `handler` above is the inline (in-process) form. The **preferred**,
-metadata-native form is a sandboxed `body` — `{ language: 'js', source, capabilities }`
-run in an isolated VM, the shape that AI/Studio-authored hooks and every build
-artifact carry. See [references/data-hooks.md](./data-hooks.md) for all 8
+`body` is the metadata-native form: `source` is a function body run against
+`ctx` in an isolated VM (`capabilities` gates `ctx.api`, `ctx.log`, …), the
+shape AI/Studio-authored hooks and every build artifact carry. The inline
+`handler` function is deprecated. See [references/data-hooks.md](./data-hooks.md) for all 8
 lifecycle events, both registration forms, the **sandboxed `body` ctx + capability
 contract**, and the canonical patterns.
 

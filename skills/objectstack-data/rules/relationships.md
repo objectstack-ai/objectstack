@@ -6,14 +6,12 @@
 - [Inline Editing (Master-Detail Entry)](#inline-editing-master-detail-entry) · [Detail-page related lists](#detail-page-related-lists-the-read-side-mirror)
 - [Incorrect vs Correct](#incorrect-vs-correct)
 
-Guide for modeling relationships between objects using `lookup`, `master_detail`, and junction patterns.
-
 ## Relationship Types
 
 | Type | Lifecycle | Required | Sharing | Roll-ups | Use Case |
 |:-----|:----------|:---------|:--------|:---------|:---------|
 | `lookup` | Independent | Optional by default | Independent | Supported via `summary` | "Related to" |
-| `master_detail` | Coupled (cascade delete) | Forced only under `controlled_by_parent`; else lint-warned | Inherits parent; owner opt-in `ownerMayEdit` (below) | Supported via `summary` | "Owned by" |
+| `master_detail` | Coupled (cascade delete) | Forced only under `controlled_by_parent`, unless the optional master (below); else lint-warned | Inherits parent; owner opt-in `ownerMayEdit` (below) | Supported via `summary` | "Owned by" |
 | `tree` | Self-reference | Optional — and so is `reference`, which when written must name this object itself; any other object is refused at parse, not lint-warned | N/A | Not available | Hierarchical |
 
 ## Patterns
@@ -24,6 +22,7 @@ Guide for modeling relationships between objects using `lookup`, `master_detail`
 // Parent: Account
 export default ObjectSchema.create({
   name: 'account',
+  sharingModel: 'private',
   fields: {
     name: { type: 'text', required: true },
   }
@@ -32,12 +31,13 @@ export default ObjectSchema.create({
 // Child: Contact (independent lifecycle)
 export default ObjectSchema.create({
   name: 'contact',
+  sharingModel: 'private',
   fields: {
     first_name: { type: 'text', required: true },
     account_id: {
       type: 'lookup',
       reference: 'account',
-      required: false,  // Contact can exist without account
+      required: false,
     },
   }
 });
@@ -49,6 +49,7 @@ export default ObjectSchema.create({
 // Parent: Invoice
 export default ObjectSchema.create({
   name: 'invoice',
+  sharingModel: 'private',
   fields: {
     invoice_number: { type: 'text', required: true },
     total: {
@@ -65,6 +66,7 @@ export default ObjectSchema.create({
 // Child: Line Item (owned by parent)
 export default ObjectSchema.create({
   name: 'invoice_line_item',
+  sharingModel: 'controlled_by_parent',
   fields: {
     invoice_id: {
       type: 'master_detail',
@@ -80,8 +82,8 @@ export default ObjectSchema.create({
 
 #### Owner edits under `controlled_by_parent` — `ownerMayEdit`
 
-A `controlled_by_parent` detail inherits the master's access: reads are scoped
-to accessible masters and **every write needs edit access on the master**. To
+A `controlled_by_parent` detail row naming a master inherits its access: reads are scoped
+to accessible masters and **every write needs edit on the master**. To
 let a detail row's owner (`owner_id`) update that row with only *read* access
 to the master, opt in on the detail:
 
@@ -91,9 +93,27 @@ sharing: { controlledByParent: { ownerMayEdit: true } },   // by-id update only
 ```
 
 Nothing else widens — insert, delete, predicate (`multi: true`) updates and
-on-behalf-of writes still need master edit; the detail's own row policies
+on-behalf-of writes under a master still need its edit; the detail's own row policies
 still AND in. Refused at parse under any other `sharingModel` (the owner
 already writes there) and one level up (`sharing.ownerMayEdit`).
+
+#### Optional master — a detail row with no master
+
+"A rep sees the contacts of the accounts they own; a contact need not have an
+account": the detail's **only** `master_detail` declared `required: false`, never
+an owner field copied by hooks:
+
+```typescript
+account: { type: 'master_detail', reference: 'account', required: false },
+```
+
+A row with no master is its owner's (`owner_id`): the owner or View All on the
+detail reads it, the owner or Modify All writes it (no owner: View All / Modify
+All only). An insert naming no master is admitted. Setting a master asks edit
+on it; emptying one asks edit on the stored master, even under `ownerMayEdit`. A
+chain hop with no master ends there under the same rule. Refused beside a
+second `master_detail` or as `readonly`/`system`; `ObjectSchema.create()` reads
+an omitted `required` as `true`.
 
 ### Many-to-Many: Junction Object
 
@@ -101,6 +121,7 @@ already writes there) and one level up (`sharing.ownerMayEdit`).
 // Side A: Project
 export default ObjectSchema.create({
   name: 'project',
+  sharingModel: 'private',
   fields: {
     name: { type: 'text', required: true },
   }
@@ -109,6 +130,7 @@ export default ObjectSchema.create({
 // Side B: Employee
 export default ObjectSchema.create({
   name: 'employee',
+  sharingModel: 'private',
   fields: {
     name: { type: 'text', required: true },
   }
@@ -117,6 +139,7 @@ export default ObjectSchema.create({
 // Junction: Project Assignment
 export default ObjectSchema.create({
   name: 'project_assignment',
+  sharingModel: 'private',
   fields: {
     project_id: {
       type: 'lookup',
@@ -143,6 +166,7 @@ export default ObjectSchema.create({
 ```typescript
 export default ObjectSchema.create({
   name: 'category',
+  sharingModel: 'private',
   fields: {
     name: { type: 'text', required: true },
     parent_category: {
@@ -164,14 +188,6 @@ an authored `set_null` is refused at publish (it would orphan the detail row).
 | `cascade` | Delete all child records | Invoice → Line Items |
 | `restrict` | Prevent parent deletion if children exist | Department → Employees |
 
-```typescript
-{
-  type: 'master_detail',
-  reference: 'parent_object',
-  deleteBehavior: 'cascade',  // or 'restrict' — 'set_null' is refused here
-}
-```
-
 The walk also reads `lookup` and `tree` (`set_null` by default — the field is
 cleared; a `multiple` field loses only that member — or an authored `cascade` /
 `restrict`), and a `user` field only when it declares a value: deleting the user
@@ -184,7 +200,7 @@ with `409 DELETE_RESTRICTED`.
 
 A parent `summary` field aggregates a child collection. The engine recomputes it
 **server-side** whenever a child is inserted/updated/deleted (inside the same
-transaction as the write, so it's consistent and never summed on the client).
+transaction as the write, so it's consistent).
 
 ```typescript
 // On the PARENT object:
@@ -204,8 +220,6 @@ transaction as the write, so it's consistent and never summed on the client).
 ```
 
 Empty collections roll up to `0` for `count`/`sum`, `null` for `min`/`max`/`avg`.
-Pairs naturally with inline editing (below): the parent total updates atomically
-as line items are saved.
 
 Add `filter` (a query `where` FilterCondition) to aggregate only a **subset** of
 the children — this is how a single child object feeds several different totals.
@@ -223,12 +237,13 @@ Declare inline editing **on the relationship**, in the data model — not in a f
 view. Set `inlineEdit: true` on the child's `master_detail` (or `lookup`) field
 that points back to the parent. The parent's **standard** create/edit form then
 renders an editable grid for these children and saves parent + children in **one
-atomic transaction** — with no form-view config and no bespoke page.
+atomic transaction**.
 
 ```typescript
 // On the CHILD object's FK field:
 export default ObjectSchema.create({
   name: 'invoice_line',
+  sharingModel: 'controlled_by_parent',
   fields: {
     invoice: {
       type: 'master_detail',
@@ -250,8 +265,7 @@ the parent. **Leave it off for associations** (comments, attachments, activity,
 audit): those are also `master_detail` (cascade delete) but should NOT clutter
 the parent's entry form — surface them as related lists on the detail page.
 
-A form view may still set `subforms` to override the derived columns/order, but
-the relationship `inlineEdit` is the primary, zero-config path. See the
+A form view may still set `subforms` to override the derived columns/order. See the
 objectstack-ui skill (Master-Detail Forms) for the rendering side.
 
 #### Inline-edit form factor (`grid` vs `form`)
@@ -361,7 +375,6 @@ rendering side.
 ### ❌ Incorrect — Using lookup When master_detail is Needed
 
 ```typescript
-// Invoice line items should NOT be independent
 export default ObjectSchema.create({
   name: 'invoice_line_item',
   fields: {
@@ -375,19 +388,7 @@ export default ObjectSchema.create({
 
 ### ✅ Correct — Using master_detail for Owned Children
 
-```typescript
-export default ObjectSchema.create({
-  name: 'invoice_line_item',
-  fields: {
-    invoice_id: {
-      type: 'master_detail',  // ✅ Child owned by parent
-      reference: 'invoice',
-      deleteBehavior: 'cascade',
-      required: true,
-    },
-  }
-});
-```
+The [master_detail](#one-to-many-master_detail) pattern above.
 
 ### ❌ Incorrect — Native Many-to-Many
 
@@ -401,13 +402,4 @@ export default ObjectSchema.create({
 
 ### ✅ Correct — Junction Object Pattern
 
-```typescript
-// Create explicit junction object with two lookup fields
-export default ObjectSchema.create({
-  name: 'post_tag',
-  fields: {
-    post_id: { type: 'lookup', reference: 'post', required: true },
-    tag_id: { type: 'lookup', reference: 'tag', required: true },
-  },
-});
-```
+The [junction object](#many-to-many-junction-object) pattern above.

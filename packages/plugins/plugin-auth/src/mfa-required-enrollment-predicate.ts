@@ -29,7 +29,8 @@
  *
  * ## The rule
  *
- * A save that turns `mfa_required` ON (from a stored or default off) is
+ * A save that turns `mfa_required` ON — from a stored or default `off` to
+ * `administrators` or `everyone`, the setting's three levels — is
  * refused while turning the twoFactor plugin on would still leave enrollment
  * off: {@link resolveTwoFactorEnabled} over `plugins.twoFactor: true`, the
  * config the piece applies, answers false. That is exactly an
@@ -47,6 +48,7 @@
 
 import { resolveLocale } from '@objectstack/core';
 import { resolveTwoFactorEnabled } from './auth-manager.js';
+import { readMfaRequirementLevel } from './organization-access-policy.js';
 import type { SettingsCopyLocale } from './settings-copy-locale.js';
 
 /** The `auth` settings key this guards. */
@@ -55,12 +57,14 @@ export const MFA_REQUIRED_SETTING_KEY = 'mfa_required';
 /** The env var that outranks the settings for two-factor enrollment. */
 export const TWO_FACTOR_ENV = 'OS_AUTH_TWO_FACTOR';
 
-/** The same reading `bindAuthSettings` gives a stored toggle. */
-function readToggle(value: unknown): boolean {
-  if (typeof value === 'boolean') return value;
-  if (typeof value === 'string') return value.toLowerCase() !== 'false';
-  if (typeof value === 'number') return value !== 0;
-  return false;
+/**
+ * Does the value name a requirement — a level other than `off`, as
+ * `bindAuthSettings` reads it (`readMfaRequirementLevel`)? A value that is not
+ * a level names none: the save door refuses it on its option table first.
+ */
+function namesRequirement(value: unknown): boolean {
+  const read = readMfaRequirementLevel(value);
+  return !!read && read.level !== 'off';
 }
 
 /**
@@ -155,7 +159,9 @@ export function mfaRequiredEnrollmentPredicate(
   enrollable: () => boolean = twoFactorEnrollableWithSwitchOn,
 ): (input: MfaRequiredWriteInput) => MfaRequiredWriteRefusal | undefined {
   return ({ next, current, locale }) => {
-    if (!readToggle(next) || readToggle(current)) return undefined;
+    // A save that turns a requirement on — from `off` to either level. A move
+    // between the two levels turns nothing on that is not already on.
+    if (!namesRequirement(next) || namesRequirement(current)) return undefined;
     if (enrollable()) return undefined;
     return {
       message: mfaRequiredEnrollmentCopy(locale),

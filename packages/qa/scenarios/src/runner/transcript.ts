@@ -30,6 +30,7 @@
  */
 
 import type { RunToolCall, RunTranscript } from '../score/index.js';
+import { contentText } from './drivers/process.js';
 
 /** A tool call as the runner keeps it: the graders' shape plus the error flag. */
 export interface RunnerToolCall extends RunToolCall {
@@ -39,9 +40,42 @@ export interface RunnerToolCall extends RunToolCall {
   rawName: string;
 }
 
+/**
+ * What the live driver saw of the CLI process behind a turn — no part of the
+ * stream itself. It travels in `meta` so a recording carries it and a replay
+ * re-reads a killed or failed turn as the run saw it.
+ */
+export interface TurnProcess {
+  /** Wall-clock time from spawn to exit, ms. */
+  elapsedMs: number;
+  /** The exit code; `null` when the process ended on a signal or never started. */
+  exit: number | null;
+  signal?: string;
+  /** The runner's own timeout (`timeoutMs`) killed it with SIGTERM. */
+  timedOut: boolean;
+  timeoutMs: number;
+  /**
+   * The `--max-turns` the CLI was given: a turn that reaches it ends
+   * `error_max_turns`. Absent on a turn recorded before the runner kept it.
+   */
+  maxTurns?: number;
+  /**
+   * The `--model` the CLI was given; absent ⇒ none, the login's default. The
+   * model it was served is the stream's own `meta.model`.
+   */
+  requestedModel?: string;
+  /** The end of what the CLI wrote to stderr (at most 2,000 characters). */
+  stderrTail?: string;
+  /** The process could not be started or fed its prompt (`spawn ENOENT`, `write EPIPE`). */
+  error?: string;
+}
+
 export interface ParsedTurn extends RunTranscript {
   toolCalls: RunnerToolCall[];
   meta: {
+    /** Set by the live driver, absent on a parse alone ({@link TurnProcess}). */
+    process?: TurnProcess;
+    /** The model the session was served, from the stream's init line (`claude-sonnet-4-5-20250929`). */
     model?: string;
     /** MCP servers the session reported at init, with their connection status. */
     mcpServers?: Array<{ name: string; status: string }>;
@@ -66,17 +100,6 @@ export function toolNameOf(raw: string): string {
 
 function isBag(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v);
-}
-
-/** A tool result's content as the text the model was given. */
-function resultText(content: unknown): unknown {
-  if (typeof content === 'string') return content;
-  if (Array.isArray(content)) {
-    const texts = content.filter(isBag).filter((c) => c.type === 'text' && typeof c.text === 'string').map((c) => c.text as string);
-    if (texts.length === content.length) return texts.join('\n');
-    return content;
-  }
-  return content;
 }
 
 /** Parse a stream-json transcript (the whole stdout, or its lines). */
@@ -121,7 +144,7 @@ export function parseStreamJson(stream: string | readonly string[]): ParsedTurn 
         } else if (ev.type === 'user' && block.type === 'tool_result' && typeof block.tool_use_id === 'string') {
           const call = byId.get(block.tool_use_id);
           if (!call) continue;
-          call.output = resultText(block.content);
+          call.output = contentText(block.content);
           if (block.is_error === true) call.isError = true;
         }
       }
@@ -132,4 +155,4 @@ export function parseStreamJson(stream: string | readonly string[]): ParsedTurn 
 }
 
 /** A coded refusal inside a tool output: the scorer's reading, re-exported here where the runner reads it. */
-export { refusalCodeOf } from '../score/scenario-run-grade.js';
+export { refusalCodeOf, refusalOf } from '../score/scenario-run-grade.js';

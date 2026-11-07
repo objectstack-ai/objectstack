@@ -328,9 +328,12 @@ export interface OwnershipFloorAlternate {
  *
  * The check asks whether the caller may EDIT the record's master. It asks that
  * of each master up the `controlled_by_parent` chain until it reaches a master
- * that governs its own rows. Every value here is a refusal the check already
- * makes, `403 PERMISSION_DENIED`, and the check tells them apart by the reason
- * its refusal states:
+ * that governs its own rows, or a master whose OPTIONAL master reference is
+ * empty. A record whose own OPTIONAL master reference is empty names no master
+ * to ask, so the check asks the record's owner rule instead (ADR-0055 §3 as
+ * amended 2026-11-07). Every value here is a refusal the check already makes,
+ * `403 PERMISSION_DENIED`, and the check tells them apart by the reason its
+ * refusal states:
  *
  * - `object_permission`: the principal holds no object-level `update` grant on
  *   a master.
@@ -340,12 +343,20 @@ export interface OwnershipFloorAlternate {
  *   row, and no app-authored update policy on that master admits the row
  *   ({@link ISecurityService.checkAuthoredRowWrite}).
  * - `master_chain`: the chain itself cannot be walked to a master that governs
- *   its own rows. It re-enters an object it has already visited, it exceeds
- *   the depth bound, or a master that is itself `controlled_by_parent` (the
- *   record's own master, or any master above it) has no relation to derive its
- *   own master from, is not present, or has an empty master reference. Past the
- *   record itself the check answers these as refusals, not as defects of the
- *   request, so they are a leg here and never `unresolvable`.
+ *   its own rows, or it ends at a row whose owner rule refuses the principal.
+ *   The record's own OPTIONAL master reference is empty and the principal
+ *   neither owns the record (its `owner_id`) nor holds Modify All on its
+ *   object; a record with no owner, or of an object without that column, is
+ *   owned by nobody here, so Modify All alone writes it. A master above the
+ *   record whose own OPTIONAL master reference is empty ends the chain under
+ *   that row's owner rule: the three legs above still run on it, and then the
+ *   principal must own it or hold Modify All on its object. The chain
+ *   re-enters an object it has already visited, or it exceeds the depth
+ *   bound. Or a master that is itself `controlled_by_parent`
+ *   (the record's own master, or any master above it) has no relation to
+ *   derive its own master from, is not present, or has an empty REQUIRED
+ *   master reference. Each of these is an access answer, not a defect of the
+ *   request, so it is a leg here and never `unresolvable`.
  *
  * The first three legs run on every hop, so `object_permission` can name the
  * master's own master. A closed vocabulary: a consumer branches on it and
@@ -374,8 +385,11 @@ export type ControlledByParentWriteDenialLeg =
  *   is itself `controlled_by_parent` the walk reads that row to derive the next
  *   master, so an absent row after the legs is the `master_chain` leg, on the
  *   first hop or above it.
- * - `master_reference_missing`: the record's stored master reference is empty
- *   (`422 MISSING_REQUIRED_FIELD`).
+ * - `master_reference_missing`: the record's stored REQUIRED master reference
+ *   is empty (`422 MISSING_REQUIRED_FIELD`). An empty OPTIONAL master reference
+ *   is not this reason: the record then belongs to no master, and the check
+ *   answers `allow` for its owner or a holder of Modify All on its object, and
+ *   `deny` on the `master_chain` leg for anyone else.
  */
 export type ControlledByParentWriteUnresolvedReason =
   | 'master_detail_relation_missing'
@@ -389,7 +403,16 @@ export type ControlledByParentWriteUnresolvedReason =
  *
  * - `allow`: the check does not refuse. Every leg passes on every master up the
  *   chain for the principal (and, on an on-behalf-of context, for the delegator
- *   too), or the context is a system one, which the write path never checks.
+ *   too), and where the chain ends at a row whose OPTIONAL master reference is
+ *   empty (the record itself, or a master above it) that row's owner rule
+ *   admits them too. Or the detail opts in with
+ *   `sharing.controlledByParent.ownerMayEdit: true` (ADR-0055 §3 as amended
+ *   2026-10-26) and its owner leg admits the principal in place of the walk:
+ *   the context is not on behalf of another user, the record's stored
+ *   `owner_id` is the principal's own `userId`, and the principal can READ the
+ *   master the record names, so no leg asks EDIT on that master or any master
+ *   above it. Or the context is a system one, which the write path never
+ *   checks.
  * - `deny`: the check refuses, on the {@link ControlledByParentWriteDenialLeg}
  *   it names.
  * - `not_applicable`: the object does not declare `controlled_by_parent`, so
@@ -1062,10 +1085,25 @@ export interface ISecurityService {
    * `recordId` on `object` by `context`.
    *
    * A by-id write to a `controlled_by_parent` record requires EDIT access to
-   * its master. The write path checks it on every master up the chain: the
-   * object-level `update` grant, the master's write row-level security, and
-   * record sharing (whose refusal an app-authored update policy on the master
-   * can lift, {@link checkAuthoredRowWrite}). This member exposes that check
+   * its master, or, where its optional master reference is empty, ownership of
+   * the record or Modify All on its object (ADR-0055 §3 as amended
+   * 2026-11-07). The write path checks edit access on every master up the
+   * chain: the object-level `update` grant, the master's write row-level
+   * security, and record sharing (whose refusal an app-authored update policy
+   * on the master can lift, {@link checkAuthoredRowWrite}). A master whose own
+   * optional master reference is empty ends the chain, and the same owner rule
+   * is asked of it on its own object. A detail that declares
+   * `sharing.controlledByParent.ownerMayEdit: true` relaxes the edit rule for
+   * one write (ADR-0055 §3 as amended 2026-10-26): a by-id update by the
+   * record's owner (its stored `owner_id` is the caller's own `userId`), not on
+   * behalf of another user, that does not empty an optional master, needs only
+   * READ access to the master the record names, asked of the read door under
+   * the caller's own context, and walks no chain for that master; a body that
+   * re-points the row under another master still asks EDIT on that master, as
+   * every body naming a new master does. Every other caller, and every
+   * insert, delete, predicate update and on-behalf-of write, keeps the edit
+   * rule. The leg is part of the check, so such an owner who can read the
+   * master gets `allow` here as on the update. This member exposes that check
    * to code outside the write path, such as a gate on a record's attachments or
    * comments that must judge the record as its own update is judged. It adds no
    * verdict: every outcome it resolves with is one the check already reaches,
@@ -1080,13 +1118,18 @@ export interface ISecurityService {
    * refuses on `deny` refuses exactly the principals this check refuses on the
    * record's own update. It answers the master check alone: the gates the
    * update meets on the record itself (its object-level grant, its own
-   * row-level security and sharing) are not part of the answer.
+   * row-level security and sharing) are not part of the answer. The owner rule
+   * of a record whose optional master reference is empty is the master check's
+   * own answer, and is part of it.
    *
    * The contexts around the check answer as the write path does:
    * - A system context bypasses the write path, and answers `allow`.
    * - A principal whose permission sets resolve to none is judged over that
-   *   empty list. It holds no `update` grant on any master, so it answers `deny`
-   *   on `object_permission` (ADR-0056 D2).
+   *   empty list. It holds no `update` grant on any master, so wherever a master
+   *   is asked it answers `deny` on `object_permission` (ADR-0056 D2). A record
+   *   whose optional master reference is empty asks no master: such a principal
+   *   holds no Modify All either, so it answers `allow` only as the record's
+   *   owner, and `deny` on `master_chain` otherwise.
    * - Where the write path refuses the CONTEXT before any gate runs, the member
    *   rejects with that same refusal, `403 PERMISSION_DENIED`. Those cases are a
    *   context with no principal at all (ADR-0096 D5), permission sets that

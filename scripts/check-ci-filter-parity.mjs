@@ -1304,10 +1304,15 @@ export async function selfTest() {
   // `docs/qa/scenarios/*.json`, covered only through the `docs/**` root in
   // `crosspkg` (judged per declared glob, like #18650's). Its second glob is
   // #18650's own string, already a member, so it moves nothing. Twenty-one.
+  // Plus, since #31017, the one `ui/` source file that card declared for
+  // @objectstack/mcp: the server's half of the Console SKILL.md mirror pin
+  // imports `ui/apps/console/src/pages/developer/objectstack-skill.ts`, covered
+  // only through its own single-file `crosspkg` entry, the way #12924's
+  // manifest is. Twenty-two.
   const preFix = judge(fixtureWorkflow({ core: real.filters?.core, crosspkg: ['scripts/**'] }), CROSS_PACKAGE_TEST_INPUTS);
   assert(
-    new Set(uncoveredGlobs(preFix)).size === 21,
-    `rolling \`crosspkg\` back to its pre-#10015 list uncovers the ten it fixed plus #10848's one plus #10178's two plus #12201's one plus #12924's one plus #14561's one plus #14824's three plus #15818's two plus #18650's one plus #29972's one plus #30289's one, minus the three under the \`skills/**\` build input \`core\` now covers -- got ${new Set(uncoveredGlobs(preFix)).size}`,
+    new Set(uncoveredGlobs(preFix)).size === 22,
+    `rolling \`crosspkg\` back to its pre-#10015 list uncovers the ten it fixed plus #10848's one plus #10178's two plus #12201's one plus #12924's one plus #14561's one plus #14824's three plus #15818's two plus #18650's one plus #29972's one plus #30289's one plus #31017's one, minus the three under the \`skills/**\` build input \`core\` now covers -- got ${new Set(uncoveredGlobs(preFix)).size}`,
   );
   assert(
     !uncoveredGlobs(preFix).includes('skills/**'),
@@ -1350,6 +1355,10 @@ export async function selfTest() {
   assert(
     uncoveredGlobs(preFix).includes('docs/qa/scenarios/*.json'),
     `-- and #30289 added the scenario-library card glob, by name`,
+  );
+  assert(
+    uncoveredGlobs(preFix).includes('ui/apps/console/src/pages/developer/objectstack-skill.ts'),
+    `-- and #31017 added the Console SKILL.md mirror the server's half of its drift pin imports, by name`,
   );
   for (const page of [
     'content/docs/deployment/troubleshooting.mdx',
@@ -1903,7 +1912,7 @@ export async function selfTest() {
       `same-root-different-file case observed failing and then covered by naming the file, a glob covered by ` +
       `\`core\`, one covered only by \`crosspkg\` and one covered by neither judged separately in one table, the ` +
       `stale-entry direction, seven refusals over subjects that could not be read, the checked-in ci.yml, the ` +
-      `pre-#10015 rollback uncovering the ten it fixed plus #10848's one plus #10178's two plus #12201's one plus #12924's one plus #14561's one plus #14824's three plus #15818's two plus #18650's one plus #29972's one plus #30289's one, minus the three under the \`skills/**\` build input \`core\` now covers, ` +
+      `pre-#10015 rollback uncovering the ten it fixed plus #10848's one plus #10178's two plus #12201's one plus #12924's one plus #14561's one plus #14824's three plus #15818's two plus #18650's one plus #29972's one plus #30289's one plus #31017's one, minus the three under the \`skills/**\` build input \`core\` now covers, ` +
       `and the CI wiring read out of lint.yml; ` +
       `and Build Core's build inputs: a build input dropped from \`core\` observed red by path and declaring task, ` +
       `turbo.json itself, a globalDependencies entry and a new-root input each required, test-task and negated inputs ` +

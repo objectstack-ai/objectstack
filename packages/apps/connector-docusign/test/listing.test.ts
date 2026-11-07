@@ -105,7 +105,7 @@ describe('connector-docusign listing', () => {
   });
 
   it('declares no key the publisher ignores', () => {
-    // The handbook: the platform decides `publisher` and `isStarter`; the CLI never sends them.
+    // Retired from the file: the platform decides `publisher` and `isStarter`, and the schema refuses both.
     expect(manifest).not.toHaveProperty('publisher');
     expect(manifest).not.toHaveProperty('isStarter');
   });

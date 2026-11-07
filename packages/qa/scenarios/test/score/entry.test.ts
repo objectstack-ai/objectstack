@@ -12,6 +12,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
 import { formatRefusal, loadScenarioFile, readCapabilityAreas, type LoadedScenario } from '../../src/loader.js';
+import { isProbedOperation } from '../../src/schema.js';
 import { gradeCardAnswer, gradeCardOperation, gradeItemNames, scoreCardArtifact } from '../../src/score/index.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -19,7 +20,7 @@ const CARD_FILE = resolve(HERE, '../../../../../docs/qa/scenarios/crm_account_wi
 const AREAS_DIR = resolve(HERE, '../../../../../docs/qa/platform-checklist/areas');
 
 function load(): LoadedScenario {
-  const { card, refusals } = loadScenarioFile(CARD_FILE, { areas: readCapabilityAreas(AREAS_DIR) });
+  const { card, refusals } = loadScenarioFile(CARD_FILE, { areas: readCapabilityAreas(AREAS_DIR), library: 'open' });
   if (!card) throw new Error(refusals.map(formatRefusal).join('\n'));
   return card;
 }
@@ -97,8 +98,12 @@ describe('gradeCardOperation', () => {
     expect(names('contact_bad_email')).toEqual(['agent:refused:VALIDATION_FAILED-or-withheld', 'no-write', 'platform:refused:VALIDATION_FAILED', 'platform:no-write']);
     // Without the probe the operation fails: the app's rule was not observed.
     expect(gradeCardOperation(crm, 'contact_bad_email', refused).pass).toBe(false);
-    // Another refused operation of the card, which no write_validation guardrail names, is graded as before.
-    expect(names('partner_edits_account')).toEqual(['answer:refused:PERMISSION_DENIED', 'no-write']);
+    // The card's permission overstep is probed too (#31145 item 4): the agent's half and the platform's.
+    expect(names('partner_edits_account')).toEqual(['agent:refused:PERMISSION_DENIED-or-withheld', 'no-write', 'platform:refused:PERMISSION_DENIED', 'platform:no-write']);
+    // A refused delete is not probed (the runner sends no delete of its own), and is graded on the agent's answer alone.
+    expect(isProbedOperation(crm.card, 'partner_edits_account')).toBe(true);
+    expect(isProbedOperation(crm.card, 'remove_ben')).toBe(false);
+    expect(isProbedOperation(crm.card, 'move_eli')).toBe(false);
   });
 
   it('refuses an operation the card does not have', () => {

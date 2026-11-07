@@ -1286,6 +1286,27 @@ export function registerAuthoringTools(
 }
 
 /**
+ * [#31022] The per-request server instructions a host injected beside its
+ * authoring registry, or `undefined` when this request must not see them.
+ *
+ * The text rides {@link McpAuthoringInjection} rather than
+ * `handleHttpRequest`'s own options so that the authoring family stays its
+ * only reader: it is read under {@link grantsAuthoringTools}, the one
+ * predicate that admits the registry in {@link registerAuthoringTools}. A
+ * grant that registers the family is answered with the host's text; a
+ * `data:read` / `data:write` / `actions:execute` token, an empty grant, and
+ * the undefined grant of an API key or a session are not, whatever the host
+ * injected — they fall through to the configured or default instructions.
+ */
+function authoringInstructions(
+  authoring: McpAuthoringInjection | undefined,
+  grantedScopes: readonly string[] | undefined,
+): string | undefined {
+  if (!authoring || !grantsAuthoringTools(grantedScopes)) return undefined;
+  return authoring.instructions;
+}
+
+/**
  * MCPServerRuntime — Bridges ObjectStack kernel services to the Model Context Protocol.
  *
  * Responsibilities:
@@ -1546,6 +1567,9 @@ export class MCPServerRuntime {
             // does. A throw with no code answers `{ error }` as before.
             // `details` is withheld, as on the data tools; `errorResultWithCode`
             // in mcp-http-tools.ts says why.
+            // [#31246] A coded refusal's `error` is the envelope's sentence,
+            // so a sandboxed hook's refusal answers the body's own sentence
+            // rather than the runner's wrapper naming the hook, as the tools do.
             const envelope = thrownRefusalEnvelope(err);
             return {
               contents: [{
@@ -1554,7 +1578,7 @@ export class MCPServerRuntime {
                 text: JSON.stringify(
                   envelope
                     ? {
-                        error: message,
+                        error: envelope.message,
                         code: envelope.code,
                         ...(envelope.status !== undefined ? { status: envelope.status } : {}),
                       }
@@ -1914,6 +1938,7 @@ export class MCPServerRuntime {
    * @param opts.toolOptions  Tool exposure options (system objects, query limits, the token's `grantedScopes`).
    * @param opts.authoring    [#26464] The host's authoring registry plus the token principal and environment
    *                          that become each call's provenance; registered only for a `metadata:write` grant.
+   *                          [#31022] Its optional `instructions` answer `initialize` under that same grant.
    */
   async handleHttpRequest(
     request: Request,
@@ -1972,7 +1997,13 @@ export class MCPServerRuntime {
         // declaration is what makes the handlers installable, and it is gated
         // on the seam actually being there — declared IS served.
         capabilities: { ...(skillBridge ? { prompts: {} } : {}) },
+        // [#31022] A host's per-request instructions ride the authoring
+        // injection and are read under the grant that admits the family
+        // (`authoringInstructions`), so a request the family does not
+        // register for — a `data:read` token, a key, a session — is answered
+        // with the configured or default text and never sees them.
         instructions:
+          authoringInstructions(opts.authoring, opts.toolOptions?.grantedScopes) ??
           this.config.instructions ??
           'ObjectStack MCP Server — query and modify your app\'s data objects as tools.',
       },

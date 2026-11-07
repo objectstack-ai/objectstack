@@ -7,10 +7,14 @@
  *             `os build`, `os verify` (opt-in proofs from the tags) → score the
  *             artifact → boot, seed, one user + key per persona → the Run half
  *             (every question as every persona it names, every operation as
- *             its persona, each over the app's own MCP, and the validation
- *             operation's declared write re-sent by the runner itself as that
- *             persona, `observeProbe`) → the iterate change →
+ *             its persona, each over the app's own MCP, and a probed
+ *             operation's declared write — the validation operation's and
+ *             each permission overstep's — re-sent by the runner itself as
+ *             that persona, `observeProbe`) → the iterate change →
  *             rebuild + re-score Build, and (unless disabled) re-run the Run half.
+ *             A build whose authoring turn did not finish (killed by the
+ *             runner's timeout, no result, an error result) is NOT MEASURED,
+ *             and nothing after it runs: no score, seed, Run or iterate.
  *   template  scaffold a blank project → boot → install a VERIFIED build of the
  *             same card unmanaged (ADR-0131 D6) → the agent applies the iterate
  *             change to the installed copy → score it → seed → the Run half.
@@ -28,7 +32,7 @@
  */
 
 import { applyExpectDelta, type LoadedScenario } from '../loader.js';
-import { isWriteValidationOperation, scenarioNamespace } from '../schema.js';
+import { isProbedOperation, scenarioNamespace, type CardTitle } from '../schema.js';
 import {
   gradeCardAnswer,
   gradeCardOperation,
@@ -40,11 +44,12 @@ import {
   type ScenarioArtifactScore,
 } from '../score/index.js';
 import type { AppHarness, PersonaAccount } from './app.js';
-import type { AgentDriver, StepRef } from './driver.js';
+import { servedAsRequested, type AgentDriver, type StepRef } from './driver.js';
 import { citationLabels, namespaceOfArtifact, namespacedScenario, permissionSetName, templateHostName } from './namespace.js';
-import { observeOperation, observeProbe, probeCall, touchedRowId, type Row } from './observe.js';
+import { agentSetOf, clockDates, observeOperation, observeProbe, probeCall, touchedRowId, type Row } from './observe.js';
 import type { CommandResult } from './project.js';
 import { buildPrompt, iteratePrompt, operationPrompt, personaHandles, questionPrompt, templateIteratePrompt, userHandleFields, verifyArgs } from './prompts.js';
+import { lookupKey, requiredLookups, seedPlan, type SeedLookup } from './seed.js';
 import type { ParsedTurn } from './transcript.js';
 
 // ── What the orchestrator needs from the outside world ──────────────────────
@@ -84,16 +89,41 @@ export interface RunOptions {
 
 export interface TurnSummary {
   resultSubtype?: string;
+  /** The result line said `is_error: true` (a usage limit answers `success` with it). */
+  isError?: true;
   numTurns?: number;
+  /** The turn cap the CLI process ran under (`meta.process`): `numTurns` of `maxTurns`. */
+  maxTurns?: number;
   toolCalls: number;
+  /** The model the turn was served (the stream's `meta.model`); absent when its stream named none. */
   model?: string;
+  /** The model the driver asked for (`--model`, `meta.process`); absent ⇒ the login's default. */
+  requestedModel?: string;
+  /** The served model is not the requested one ({@link servedAsRequested}); only when both are known. */
+  modelMismatch?: true;
+  /** Wall-clock time of the CLI process, when the driver ran one (`meta.process`). */
+  elapsedMs?: number;
+  // What a turn that did not finish leaves to say why (`meta.process`):
+  exit?: number | null;
+  signal?: string;
+  timedOut?: true;
+  stderrTail?: string;
+  processError?: string;
 }
 
 export interface BuildHalf {
   commands: CommandResult[];
   author?: TurnSummary;
+  /**
+   * Why this half is not measured: its authoring turn did not finish (`author
+   * timed out after N min`, `author turn failed: …`). Nothing is built, scored,
+   * seeded, run or iterated on it — never a degraded score.
+   */
+  notMeasured?: string;
   /** `null` when there is no artifact to score (a build that never produced one). */
   score: ScenarioArtifactScore | null;
+  /** The card's reference cycles this build made required on every side: its seed cannot load them (a Build finding). */
+  requiredCycles?: SeedLookup[][];
   error?: string;
 }
 
@@ -121,10 +151,18 @@ export interface OperationResult {
 export interface RunHalf {
   personas: Array<Omit<PersonaAccount, 'apiKey'>>;
   seed: {
+    /** Rows the app holds as the card states them: inserted, and every lookup the second pass set on them accepted. */
     inserted: number;
-    refused: Array<{ object: string; id: string; code?: string; message?: string }>;
+    /**
+     * Rows the app refused. With `fields`, the row went in but the second
+     * pass's update of those lookups was refused, so it is not held as the card
+     * states it either.
+     */
+    refused: Array<{ object: string; id: string; fields?: string[]; code?: string; message?: string }>;
     /** Handles a user-handle field named that no persona holds, each loaded as the admin user (`u_tia`). */
     handlesAsAdmin?: string[];
+    /** Lookup values the second pass set, per `object.field` ({@link seedPlan}); absent when nothing waited. */
+    secondPass?: Record<string, number>;
   };
   questions: QuestionResult[];
   operations: OperationResult[];
@@ -151,7 +189,8 @@ export interface ModeRun {
 
 export interface CardRun {
   card: string;
-  title: string;
+  /** The card's title, both languages, carried into the run record as data. */
+  title: CardTitle;
   capabilities: string[];
   counts: { questions: number; questionTurns: number; operations: number; personas: number };
   modes: ModeRun[];
@@ -159,14 +198,52 @@ export interface CardRun {
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
-const summarize = (t: ParsedTurn): TurnSummary => ({
-  ...(t.meta.resultSubtype ? { resultSubtype: t.meta.resultSubtype } : {}),
-  ...(t.meta.numTurns !== undefined ? { numTurns: t.meta.numTurns } : {}),
-  ...(t.meta.model ? { model: t.meta.model } : {}),
-  toolCalls: t.toolCalls.length,
-});
+/** Did the turn finish: a `success` result line that is not flagged `is_error`? */
+const finished = (t: ParsedTurn): boolean => t.meta.resultSubtype === 'success' && t.meta.isError !== true;
+
+const summarize = (t: ParsedTurn): TurnSummary => {
+  const p = t.meta.process;
+  return {
+    ...(t.meta.resultSubtype ? { resultSubtype: t.meta.resultSubtype } : {}),
+    ...(t.meta.isError === true ? { isError: true as const } : {}),
+    ...(t.meta.numTurns !== undefined ? { numTurns: t.meta.numTurns } : {}),
+    ...(p?.maxTurns !== undefined ? { maxTurns: p.maxTurns } : {}),
+    ...(t.meta.model ? { model: t.meta.model } : {}),
+    ...(p?.requestedModel ? { requestedModel: p.requestedModel } : {}),
+    ...(p?.requestedModel && t.meta.model && !servedAsRequested(p.requestedModel, t.meta.model) ? { modelMismatch: true as const } : {}),
+    toolCalls: t.toolCalls.length,
+    ...(p ? { elapsedMs: p.elapsedMs } : {}),
+    ...(p && !finished(t)
+      ? {
+          exit: p.exit,
+          ...(p.signal ? { signal: p.signal } : {}),
+          ...(p.timedOut ? { timedOut: true as const } : {}),
+          ...(p.stderrTail ? { stderrTail: p.stderrTail } : {}),
+          ...(p.error ? { processError: p.error } : {}),
+        }
+      : {}),
+  };
+};
 
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e)).slice(0, 2000);
+
+/** `60 min`, `0.5 min`: a timeout as the not-measured reason states it. */
+export const minutesText = (ms: number): string => `${Number((ms / 60_000).toFixed(2))} min`;
+
+/**
+ * Why an authoring turn leaves its build NOT MEASURED, or `undefined` when it
+ * finished. A turn the runner's own timeout killed is `author timed out after
+ * N min`; any other turn without a clean `success` result — no result line (the
+ * CLI never started or died), an error subtype (`error_max_turns`, the
+ * runner's own turn budget), or `is_error` — is `author turn failed: …`. A
+ * build cut off mid-way is not an AI-quality reading until it runs to
+ * completion.
+ */
+export function authorNotMeasured(t: ParsedTurn): string | undefined {
+  if (t.meta.process?.timedOut) return `author timed out after ${minutesText(t.meta.process.timeoutMs)}`;
+  if (finished(t)) return undefined;
+  return `author turn failed: ${t.meta.resultSubtype ?? 'no result line'}${t.meta.isError === true ? ' (is_error)' : ''}`;
+}
 
 /** The card with its iterate delta applied to `expect` — what the post-iterate build is scored against. */
 export function iteratedScenario(scenario: LoadedScenario): LoadedScenario {
@@ -210,23 +287,15 @@ export function withoutItems(artifact: Record<string, unknown[]>, baseline: Reco
   );
 }
 
-/** Seed objects in lookup order: a row's lookup target is inserted before it. */
-export function seedOrder(scenario: LoadedScenario): string[] {
-  const { seed } = scenario.card.run;
-  const deps = new Map<string, Set<string>>();
-  for (const o of Object.keys(seed)) deps.set(o, new Set());
-  for (const l of scenario.card.expect.lookups ?? []) if (l.object !== l.to && deps.has(l.object) && deps.has(l.to)) deps.get(l.object)!.add(l.to);
-  const out: string[] = [];
-  const seen = new Set<string>();
-  const visit = (o: string, stack: Set<string>) => {
-    if (seen.has(o) || stack.has(o)) return;
-    stack.add(o);
-    for (const d of deps.get(o) ?? []) visit(d, stack);
-    seen.add(o);
-    out.push(o);
-  };
-  for (const o of Object.keys(seed)) visit(o, new Set());
-  return out;
+/** Seed objects in lookup order: a row's lookup target is inserted before it, wherever a reference cycle allows ({@link seedPlan}). */
+export function seedOrder(scenario: LoadedScenario, required?: ReadonlySet<string>): string[] {
+  return seedPlan(scenario.card, required).order;
+}
+
+/** The card's reference cycles a built artifact made required on every side — what its Build half reports. */
+export function requiredCyclesOf(scenario: LoadedScenario, artifact: unknown): SeedLookup[][] {
+  const required = requiredLookups(artifact);
+  return required ? seedPlan(scenario.card, required).unseedable : [];
 }
 
 /**
@@ -322,7 +391,7 @@ export function seedDependence(
 
 /** The persona (not a card artifact) a scenario's audit trail names, from the user id the app recorded. */
 /**
- * A validation operation's declared values as its probe sends them: a value in
+ * A probed operation's declared values as its probe sends them: a value in
  * a user-handle field (`task.assignee` = `u_kim`) is that handle's user id, the
  * persona's or the admin's, exactly as {@link seedApp} loads it; every other
  * value is sent verbatim.
@@ -366,6 +435,34 @@ export function installableManifest(artifact: unknown): { manifest: Record<strin
 
 // ── The halves ──────────────────────────────────────────────────────────────
 
+/**
+ * The authoring turn, recorded on `half`: its summary, and — when it did not
+ * finish ({@link authorNotMeasured}) or never ran (the driver threw) — why the
+ * half is not measured.
+ */
+async function authorInto(half: BuildHalf, author: () => Promise<ParsedTurn>): Promise<void> {
+  try {
+    const turn = await author();
+    half.author = summarize(turn);
+    const why = authorNotMeasured(turn);
+    if (why) half.notMeasured = why;
+  } catch (e) {
+    half.error = `author: ${errText(e)}`;
+    half.notMeasured = `author turn failed: ${errText(e)}`;
+  }
+}
+
+/** Score `artifact` against `scoreAgainst`, and name the card's reference cycles it made required on every side. */
+function scoreInto(half: BuildHalf, seeded: LoadedScenario, scoreAgainst: LoadedScenario, artifact: unknown): void {
+  try {
+    half.score = scoreCardArtifact(scoreAgainst, artifact);
+  } catch (e) {
+    half.error = half.error ?? `score: ${errText(e)}`;
+  }
+  const cycles = requiredCyclesOf(seeded, artifact);
+  if (cycles.length) half.requiredCycles = cycles;
+}
+
 async function buildHalf(
   scenario: LoadedScenario,
   dir: string,
@@ -374,11 +471,8 @@ async function buildHalf(
   scoreAgainst: LoadedScenario,
 ): Promise<BuildHalf> {
   const half: BuildHalf = { commands: [], score: null };
-  try {
-    half.author = summarize(await author());
-  } catch (e) {
-    half.error = `author: ${errText(e)}`;
-  }
+  await authorInto(half, author);
+  if (half.notMeasured) return half;
   half.commands.push(await ops.os(dir, ['validate']));
   half.commands.push(await ops.os(dir, ['build']));
   half.commands.push(await ops.os(dir, verifyArgs(scenario.card))); // the invocation every authoring prompt names
@@ -387,16 +481,18 @@ async function buildHalf(
     half.error = half.error ?? 'no dist/objectstack.json after `objectstack build`';
     return half;
   }
-  try {
-    half.score = scoreCardArtifact(scoreAgainst, artifact);
-  } catch (e) {
-    half.error = `score: ${errText(e)}`;
-  }
+  scoreInto(half, scenario, scoreAgainst, artifact);
   return half;
 }
 
 /**
- * Load the card's seed into a booted app, as the admin, in lookup order.
+ * Load the card's seed into a booted app, as the admin, by its load plan
+ * ({@link seedPlan}): in lookup order, and in two passes where the card's
+ * lookups close a reference cycle — every row first, with each lookup value
+ * naming a row loaded later left out, then one update per such row setting
+ * them. `required` is the built schema's required lookup fields
+ * ({@link requiredLookups}), so a cycle is broken on a side the build left
+ * optional; without it any side may wait.
  *
  * Row ownership is mapped from the persona handles. A row whose direct scope
  * field names a persona's handle is owned (`owner_id`, the platform's record
@@ -411,19 +507,31 @@ async function buildHalf(
  * The tally is kept in `seed` as each row is loaded, and `seed` is what is
  * returned: when an insert throws, the caller's tally already holds what was
  * inserted and refused before it (the record shows the partial seed next to the
- * half's error).
+ * half's error). A row whose second-pass update is refused moves from
+ * `inserted` to `refused` (with the `fields` it could not set), so the tally
+ * still counts each row sent once.
  */
 export async function seedApp(
   scenario: LoadedScenario,
   app: AppHarness,
   accounts: readonly PersonaAccount[],
   seed: RunHalf['seed'] = { inserted: 0, refused: [] },
+  required?: ReadonlySet<string>,
 ): Promise<RunHalf['seed']> {
   const { card } = scenario;
   const handles = personaHandles(card);
   const ownerFields = new Set(card.run.personas.flatMap((p) => (p.scope ?? []).filter((s) => !s.field.includes('.')).map((s) => `${s.object}.${s.field}`)));
   const userFields = userHandleFields(card);
-  for (const object of seedOrder(scenario)) {
+  const plan = seedPlan(card, required);
+  /** `object/id` → the lookup values its second-pass update sets. */
+  const later = new Map<string, { object: string; id: string; patch: Record<string, string> }>();
+  for (const d of plan.deferred) {
+    const key = `${d.object}/${d.id}`;
+    if (!later.has(key)) later.set(key, { object: d.object, id: d.id, patch: {} });
+    later.get(key)!.patch[d.field] = d.value;
+  }
+  if (later.size) seed.secondPass = Object.fromEntries([...new Set(plan.deferred.map((d) => lookupKey(d)))].map((k) => [k, 0]));
+  for (const object of plan.order) {
     for (const row of card.run.seed[object] ?? []) {
       const body: Record<string, unknown> = { ...row };
       for (const [k, v] of Object.entries(row)) {
@@ -438,21 +546,41 @@ export async function seedApp(
           if (!acct) seed.handlesAsAdmin = [...new Set([...(seed.handlesAsAdmin ?? []), v])].sort();
         }
       }
+      const waits = later.get(`${object}/${row.id}`);
+      for (const field of Object.keys(waits?.patch ?? {})) delete body[field];
       const r = await app.insertRow(object, body);
       if (r.ok) seed.inserted++;
-      else seed.refused.push({ object, id: row.id, ...(r.code ? { code: r.code } : {}), ...(r.message ? { message: r.message.slice(0, 300) } : {}) });
+      else {
+        seed.refused.push({ object, id: row.id, ...(r.code ? { code: r.code } : {}), ...(r.message ? { message: r.message.slice(0, 300) } : {}) });
+        later.delete(`${object}/${row.id}`); // nothing to update: the row is not there
+      }
+    }
+  }
+  // The second pass: every row each waiting lookup names is in by now.
+  for (const { object, id, patch } of later.values()) {
+    const r = await app.updateRow(object, id, patch);
+    if (r.ok) {
+      for (const field of Object.keys(patch)) seed.secondPass![lookupKey({ object, field })]!++;
+    } else {
+      seed.inserted--;
+      seed.refused.push({ object, id, fields: Object.keys(patch), ...(r.code ? { code: r.code } : {}), ...(r.message ? { message: r.message.slice(0, 300) } : {}) });
     }
   }
   return seed;
 }
 
-/** Seed, personas, every question and every operation, against one booted app. */
+/**
+ * Seed, personas, every question and every operation, against one booted app.
+ * `built` is the artifact the app serves, whose required lookups decide which
+ * side of a reference cycle the seed's second pass sets ({@link seedApp}).
+ */
 export async function runHalf(
   scenario: LoadedScenario,
   app: AppHarness,
   driver: AgentDriver,
   ref: Pick<StepRef, 'card' | 'mode' | 'phase'>,
   objectLabels?: Record<string, string[]>,
+  built?: unknown,
 ): Promise<RunHalf> {
   const { card } = scenario;
   const half: RunHalf = { personas: [], seed: { inserted: 0, refused: [] }, questions: [], operations: [] };
@@ -467,7 +595,7 @@ export async function runHalf(
     }
     const adminKey = await app.adminApiKey();
 
-    await seedApp(scenario, app, accounts, half.seed); // tallied in place, so a throw keeps the partial seed
+    await seedApp(scenario, app, accounts, half.seed, requiredLookups(built)); // tallied in place, so a throw keeps the partial seed
 
     const keyOf = (persona: string | null) => (persona === null ? adminKey : accounts.find((a) => a.persona === persona)!.apiKey);
     // A refused seed row makes what reads it not measured — never a fail of the app's answer.
@@ -507,23 +635,29 @@ export async function runHalf(
       }
       try {
         const before = (await app.listRows(op.object)).rows as Row[];
+        const started = new Date();
         const turn = await driver.ask({ ...ref, step: op.id, persona: op.actingAs, prompt: operationPrompt(card, op.id), mcp: { url: app.mcpUrl, apiKey: keyOf(op.actingAs) } });
         res.turn = summarize(turn);
         const after = (await app.listRows(op.object)).rows as Row[];
+        // The card's today, the dates the app's clock read during the turn, and
+        // the fields the agent's own writes set: a value declared as the card's
+        // today is met by a run date only where the platform stamped it (`observe.ts`).
+        const today = { ...(card.asOf !== undefined ? { asOf: card.asOf } : {}), runDates: clockDates(started, new Date()), agentSet: agentSetOf(op, turn) };
         const rowsByObject: Record<string, Row[]> = { [op.object]: after };
         if (op.outcome.kind === 'applied') {
           for (const s of op.outcome.state) if (!rowsByObject[s.object]) rowsByObject[s.object] = (await app.listRows(s.object)).rows as Row[];
         }
         let auditActor: string | null | undefined;
         if (op.outcome.kind === 'applied' && op.outcome.auditActor !== undefined) {
-          const id = touchedRowId(op, rowsByObject);
+          const id = touchedRowId(op, rowsByObject, today);
           auditActor = id === undefined ? null : personaOfUser(await app.auditActorUserId(op.object, id), accounts, app.adminUserId());
         }
-        // The validation operation's probe: the runner sends the declared write
-        // itself, as the same persona through the same MCP door, after the turn.
-        // A probe that cannot be sent leaves the platform half "not observed".
+        // A probed operation's probe (the validation operation, or a permission
+        // overstep): the runner sends the declared write itself, as the same
+        // persona through the same MCP door, after the turn. A probe that cannot
+        // be sent leaves the platform half "not observed".
         let probe: ProbeObservation | undefined;
-        if (isWriteValidationOperation(card, op.id)) {
+        if (isProbedOperation(card, op.id)) {
           try {
             const call = probeCall(op, probeValues(card, op, accounts, app.adminUserId()));
             const answer = await app.callTool(keyOf(op.actingAs), call.tool, call.args);
@@ -532,7 +666,7 @@ export async function runHalf(
             res.error = `probe: ${errText(e)}`;
           }
         }
-        res.observation = observeOperation({ op, turn, before, after, rowsByObject, ...(auditActor !== undefined ? { auditActor } : {}), ...(probe ? { probe } : {}) });
+        res.observation = observeOperation({ op, turn, before, after, rowsByObject, today, ...(auditActor !== undefined ? { auditActor } : {}), ...(probe ? { probe } : {}) });
         res.grade = gradeCardOperation(scenario, op.id, res.observation);
       } catch (e) {
         res.error = errText(e);
@@ -589,16 +723,22 @@ async function scratchMode(original: LoadedScenario, driver: AgentDriver, ops: P
   const labels = citationLabels(original);
   const card = scenario.card;
   const ref = { card: card.id, mode: 'scratch' as const };
-  mode.build = await buildHalf(scenario, dir, ops, async () => (await driver.author({ ...ref, phase: 'build', step: 'author', cwd: dir, prompt: buildPrompt(card) })).turn, scenario);
+  mode.build = await buildHalf(scenario, dir, ops, async () => (await driver.author({ ...ref, phase: 'build', step: 'author', cwd: dir, prompt: buildPrompt(card), tier: card.tier })).turn, scenario);
+  // A build whose authoring turn did not finish is not measured: no seed, no Run, no iterate on it.
+  if (mode.build.notMeasured) return { mode };
   const builtArtifact = ops.readArtifact(dir);
-  if (builtArtifact !== undefined) mode.run = await withApp(ops, dir, mode.findings, (app) => runHalf(scenario, app, driver, { ...ref, phase: 'run' }, labels));
+  if (builtArtifact !== undefined) mode.run = await withApp(ops, dir, mode.findings, (app) => runHalf(scenario, app, driver, { ...ref, phase: 'run' }, labels, builtArtifact));
 
   const iterated = iteratedScenario(scenario);
-  const build = await buildHalf(iterated, dir, ops, async () => (await driver.author({ ...ref, phase: 'iterate', step: 'author', cwd: dir, prompt: iteratePrompt(card) })).turn, iterated);
+  const build = await buildHalf(iterated, dir, ops, async () => (await driver.author({ ...ref, phase: 'iterate', step: 'author', cwd: dir, prompt: iteratePrompt(card), tier: card.tier })).turn, iterated);
+  if (build.notMeasured) {
+    mode.iterate = { build };
+    return { mode, ...(buildPassed(mode.build) ? { verified: builtArtifact } : {}) };
+  }
   const after = ops.readArtifact(dir);
   mode.iterate = { build, ...(builtArtifact !== undefined && after !== undefined ? { changeSize: changeSize(builtArtifact, after) } : {}) };
   if (opts.iterateRun !== false && after !== undefined) {
-    const run = await withApp(ops, dir, mode.findings, (app) => runHalf(scenario, app, driver, { ...ref, phase: 'iterate-run' }, labels));
+    const run = await withApp(ops, dir, mode.findings, (app) => runHalf(scenario, app, driver, { ...ref, phase: 'iterate-run' }, labels, after));
     if (run) mode.iterate.run = run;
   }
   return { mode, ...(buildPassed(mode.build) ? { verified: builtArtifact } : {}) };
@@ -645,20 +785,16 @@ async function templateMode(original: LoadedScenario, driver: AgentDriver, ops: 
     }
     const before = await app.metadataAsArtifact(collections);
     const build: BuildHalf = { commands: [], score: null };
-    try {
-      const turn = (await driver.author({ card: card.id, mode: 'template', phase: 'iterate', step: 'author', cwd: dir, prompt: templateIteratePrompt(card, { baseUrl: booted.url, adminEmail: opts.admin.email, adminPassword: opts.admin.password }) })).turn;
-      build.author = summarize(turn);
-    } catch (e) {
-      build.error = `author: ${errText(e)}`;
+    await authorInto(build, async () => (await driver.author({ card: card.id, mode: 'template', phase: 'iterate', step: 'author', cwd: dir, prompt: templateIteratePrompt(card, { baseUrl: booted.url, adminEmail: opts.admin.email, adminPassword: opts.admin.password }), tier: card.tier })).turn);
+    if (build.notMeasured) {
+      mode.iterate = { build };
+      return;
     }
     const after = await app.metadataAsArtifact(collections);
-    try {
-      build.score = scoreCardArtifact(iterated, withoutItems(after, baseline));
-    } catch (e) {
-      build.error = build.error ?? `score: ${errText(e)}`;
-    }
+    const served = withoutItems(after, baseline);
+    scoreInto(build, scenario, iterated, served);
     mode.iterate = { build, changeSize: changeSize(before, after) };
-    mode.iterate.run = await runHalf(scenario, app, driver, { card: card.id, mode: 'template', phase: 'iterate-run' }, labels);
+    mode.iterate.run = await runHalf(scenario, app, driver, { card: card.id, mode: 'template', phase: 'iterate-run' }, labels, served);
   });
   return mode;
 }

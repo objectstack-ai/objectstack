@@ -71,6 +71,9 @@ export const esES: TranslationData = {
         // the rationale in `en.ts` (#6659). Wording matches this locale's
         // `sys_sso_provider.pluralLabel`.
         nav_sso_providers: { label: 'Proveedores SSO' },
+        // Conditionally contributed by plugin-auth (only while SCIM is wired),
+        // the same case as the entry above; see `en.ts` (#31123).
+        nav_scim_credentials: { label: 'Credenciales SCIM' },
         nav_api_keys: { label: 'Claves API' },
 
         nav_approvals_inbox: { label: 'Centro de aprobaciones' },
@@ -86,6 +89,7 @@ export const esES: TranslationData = {
         nav_settings_sms: { label: 'Envío de SMS' },
         nav_settings_branding: { label: 'Marca' },
         nav_settings_auth: { label: 'Autenticación' },
+        nav_settings_access_policy: { label: 'Política de acceso' },
         nav_settings_storage: { label: 'Almacenamiento de archivos' },
         nav_settings_ai: { label: 'IA y Embedder' },
         nav_settings_knowledge: { label: 'Conocimiento' },
@@ -190,8 +194,8 @@ export const esES: TranslationData = {
     connect_agent: {
       label: 'Conectar un asistente de IA',
       subtitle:
-        'Concede a cualquier cliente de IA compatible con MCP acceso controlado a este sistema: '
-        + 'cada llamada se ejecuta con los permisos propios de quien la realiza y con seguridad a nivel de fila.',
+        'Trabaja en este sistema desde Claude, Doubao y otros asistentes de IA. '
+        + 'Cada uno actúa como tú: solo ve y cambia lo que tus propios permisos permiten.',
     },
 
     // Platform record pages (#15743) -- see `en.ts` for the key set.

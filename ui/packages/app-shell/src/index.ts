@@ -316,6 +316,16 @@ export { useInvitationSignUpJoin, type InvitationSignUpJoin } from './console/au
 export { ForgotPasswordPage as DefaultForgotPasswordPage } from './console/auth/ForgotPasswordPage.js';
 export { HomeLayout as DefaultHomeLayout, HomeLayout } from './console/home/HomeLayout.js';
 export { HomePage as DefaultHomePage, HomePage } from './console/home/HomePage.js';
+// Whether the signed-in person has connected an AI assistant (or holds a
+// working API key), and where Connect an AI Assistant opens: the one read and
+// the one path the Connect page, Home's card and the first-run checklist share
+// (#30898, #30895).
+export {
+  useConnectedAccess,
+  type ConnectedAccess,
+  type ConnectedEntry,
+} from './console/connect/connectedAccess.js';
+export { connectAssistantPath } from './console/connect/connectAssistantPath.js';
 export { OrganizationsLayout as DefaultOrganizationsLayout } from './console/organizations/OrganizationsLayout.js';
 export { OrganizationsPage as DefaultOrganizationsPage } from './console/organizations/OrganizationsPage.js';
 
@@ -353,6 +363,7 @@ import './services/builtinComponents.js';
 // SDUI widget for the metadata-driven Cloud Connection page (cloud ADR-0008).
 import './console/cloud-connection/CloudConnectionPanel.js';
 import './console/connect/ConnectAgentWidget.js';
+import './console/connect/ManagedPersonAssistants.js';
 // Generic product-page blocks — hero, stat, usage-bar, checklist, tile-grid
 // (objectui#12197).
 import './console/blocks/productBlocks.js';

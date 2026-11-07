@@ -22,10 +22,18 @@
  *
  * No TTY (piped stdin, CI, a backgrounded `os dev`): nothing is attached and
  * no line is printed — a key nobody can press is not offered.
+ *
+ * ## A self-hosted runtime target
+ *
+ * When `os environments use-runtime` made a self-hosted runtime the deploy
+ * target, the line names that runtime and the key runs the same `os deploy`,
+ * which installs there — no cloud login is asked for: the runtime's own key
+ * is the credential.
  */
 
 import { spawn } from 'node:child_process';
 import { tryReadCloudConfig } from './cloud-config.js';
+import { activeRuntimeTarget } from './runtime-target.js';
 
 /** The slice of `process.stdin` this module uses — a fake in tests. */
 export interface DeployKeyInput {
@@ -47,6 +55,8 @@ export interface DeployKeyOptions {
   runLogin: () => Promise<number>;
   /** Runs `os deploy`; resolves to its exit status. */
   runDeploy: () => Promise<number>;
+  /** The url of the self-hosted runtime that is the active deploy target, if one is; it needs no cloud login. */
+  runtimeTarget?: () => Promise<string | undefined>;
   /** Ctrl-C while the terminal is raw. */
   onInterrupt: () => void;
 }
@@ -60,8 +70,9 @@ export interface DeployKeyHandle {
   readonly current: Promise<void> | undefined;
 }
 
-/** The offer line, by whether a cloud credential is available. */
-export function deployKeyHint(loggedIn: boolean): string {
+/** The offer line, by the target: a self-hosted runtime's url, else whether a cloud credential is available. */
+export function deployKeyHint(loggedIn: boolean, runtimeUrl?: string): string {
+  if (runtimeUrl) return `Press d to deploy this app to the self-hosted runtime ${runtimeUrl} (runs \`os deploy\`).`;
   return loggedIn
     ? 'Press d to deploy this app to your ObjectOS Cloud environment (runs `os deploy`).'
     : 'Press d to log in to ObjectOS Cloud and deploy this app (runs `os cloud login`, then `os deploy`).';
@@ -94,14 +105,17 @@ export function attachDeployKey(options: DeployKeyOptions): DeployKeyHandle | un
     listening = false;
   };
 
+  const runtimeUrl = async () => (options.runtimeTarget ? options.runtimeTarget() : undefined);
+
   const offer = async () => {
-    print(deployKeyHint(await options.isLoggedIn()));
+    const runtime = await runtimeUrl();
+    print(deployKeyHint(runtime ? true : await options.isLoggedIn(), runtime));
   };
 
   const act = async () => {
     release();
     try {
-      if (!(await options.isLoggedIn())) {
+      if (!(await runtimeUrl()) && !(await options.isLoggedIn())) {
         const login = await options.runLogin();
         if (login !== 0 || !(await options.isLoggedIn())) {
           print('Not logged in to ObjectOS Cloud, so nothing was deployed. Press d to try again.');
@@ -171,6 +185,7 @@ export function startDevDeployKey(binPath: string, print: (line: string) => void
     isLoggedIn: hasCloudCredential,
     runLogin: () => runCliChild(binPath, ['cloud', 'login']),
     runDeploy: () => runCliChild(binPath, ['deploy']),
+    runtimeTarget: async () => (await activeRuntimeTarget().catch(() => undefined))?.url,
     onInterrupt: () => { process.kill(process.pid, 'SIGINT'); },
   });
   if (!handle) return undefined;

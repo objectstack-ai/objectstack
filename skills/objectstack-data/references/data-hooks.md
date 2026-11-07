@@ -958,7 +958,6 @@ body: { language: 'js', source: `
 ## References
 
 - `node_modules/@objectstack/spec/src/data/hook.zod.ts` — Hook schema definition, HookContext interface
-- [Project hooks pattern](../SKILL.md#lifecycle-hooks) — Hook integration in the data skill
 - [objectstack-platform/references/plugin-hooks.md](../../objectstack-platform/references/plugin-hooks.md) — plugin/kernel hooks (a different extension point)
 - [objectstack-automation](../../objectstack-automation/SKILL.md) — Flows and Workflows
 - [objectstack-platform/SKILL.md](../../objectstack-platform/SKILL.md) — hook test harnesses (vitest units, `LiteKernel`)

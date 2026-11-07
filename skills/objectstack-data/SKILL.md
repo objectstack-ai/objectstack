@@ -43,7 +43,7 @@ Detailed rules, with incorrect/correct examples:
 - **[Validation Rules](./rules/validation.md)** — All validation types, script inversion, severity levels
 - **[Index Strategy](./rules/indexing.md)** — btree/gin/gist/fulltext, composite indexes, partial indexes
 - **[Data Lifecycle & Retention](./rules/lifecycle.md)** — `lifecycle` classes (record/audit/telemetry/transient/event), retention/TTL/rotation/archive policies; ❗ append-only objects must declare one (distinct from lifecycle *hooks* below); plus the **save notice** a hook hands the saver (`ctx.notice`)
-- **[Lifecycle Hooks](./references/data-hooks.md)** — the lifecycle events, `handler` vs sandboxed `body` (ctx + capability contract), registration, canonical patterns
+- **[Lifecycle Hooks](./references/data-hooks.md)** — the lifecycle events, the sandboxed `body` (ctx + capability contract; the inline `handler` is deprecated), registration, canonical patterns
 - **[Datasources & Federation](./rules/datasources.md)** — `defineDatasource`, external/federated objects (`remoteName`/`columnMap`), auto-connect gating, credentials; ❌ no `field.columnName` on external objects
 - **[Security & Access Control](./rules/security.md)** — permission sets, assignment rows, RLS policies, `secret` / `requiredPermissions`, `tenancy`, platform-global posture
 
@@ -73,7 +73,7 @@ the publish door rejects it before that:
 | `private` | owner only (widen with sharing rules, RLS, or `readScope`/`writeScope`) |
 | `public_read` | everyone reads; the owner writes |
 | `public_read_write` | everyone reads and writes |
-| `controlled_by_parent` | inherited from the master record (`master_detail` children) |
+| `controlled_by_parent` | inherited from the master record (`master_detail` children); a row with no (optional) master is its owner's |
 
 **Important optional properties:**
 
@@ -202,7 +202,7 @@ export const Invoice = ObjectSchema.create({
   set → field permission `when`, rules/security.md).
 - **`readonly: true` governs the end-user surface, not trusted system writers.**
   A non-system write (REST/UI, and any `runAs:'user'` flow — the default) has
-  the field **stripped** from any non-system write; the write reports
+  the field **stripped**; the write reports
   success but the value never lands. System-context writes —
   `runAs:'system'` flows, system hooks, seeds, imports, migrations — are exempt
   and DO write it. So the pattern "users can't edit this, but automation
@@ -290,8 +290,6 @@ via the registered `ICryptoProvider`, masked on read, fail-closed, ADR-0100) —
 | Many-to-Many (simple) | multi-value `lookup` (`multiple: true`) — an **array column** of ids |
 | Many-to-Many (with attributes) | Junction object with two `lookup` fields |
 | Hierarchical | `tree` field (self-reference) |
-
-See [rules/relationships.md](./rules/relationships.md) for detailed examples.
 
 > **`multiple: true` lookup ≠ junction object.** A multi-value lookup
 > (`{ type: 'lookup', reference: 'x', multiple: true }`) is stored and read as an
@@ -447,13 +445,15 @@ os validate     # Zod schema + CEL predicates (record.<field> existence) + bindi
 # or: os build  # the same gates, plus emits dist/
 ```
 
-It catches what otherwise fails **silently at runtime**: a bare field ref in a
-`requiredWhen` / `readonlyWhen` / `visibleWhen`, a validation rule, a formula, or
-a row-level-security/sharing predicate (`done` instead of `record.done`) that
-evaluates to `null` and never fires. `os lint` is a *separate*
+It catches what otherwise surfaces only at runtime, where a bare field ref
+(`done` for `record.done`) faults: an `error` validation rule or `requiredWhen`
+refuses the write naming it, an option `visibleWhen` only a write picking the
+option (forms still offer it); a `readonlyWhen` field stays editable and the
+save succeeds without its change (logged); a formula reads `null` (logged).
+`os lint` is a *separate*
 pass that additionally checks the data model against the conventions in this
-skill (relationships, master-detail, roll-ups) — run it too, but it does **not**
-replace `os validate`. In a scaffolded project the gate is `npm run validate`.
+skill (relationships, master-detail, roll-ups) — run it too.
+In a scaffolded project the gate is `npm run validate`.
 
 ---
 

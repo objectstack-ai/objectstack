@@ -245,6 +245,24 @@ describe('validate-ai-tool-references', () => {
     expect(control[1].message).toContain('draft_record');
   });
 
+  /**
+   * The build agent's package removal (cloud#3656), which only stages the
+   * removal of a package built in the environment: a skill naming
+   * `delete_package` resolves; a near name nobody registers does not.
+   */
+  it('resolves the service-ai-studio package removal', () => {
+    expect(validateAiToolReferences({ skills: [{ name: 's', tools: ['delete_package'] }] })).toEqual([]);
+
+    // The control: the plural registered by nobody is still reported, so this
+    // pin fails on a universe widened too far.
+    const control = validateAiToolReferences({
+      skills: [{ name: 's', tools: ['delete_package', 'delete_packages'] }],
+    });
+    expect(control).toHaveLength(1);
+    expect(control[0].path).toBe('skills[0].tools[1]');
+    expect(control[0].message).toContain('delete_packages');
+  });
+
   it('reports stable paths and tolerates junk shapes', () => {
     const stack = {
       skills: [{ name: 's', tools: ['query_records', 'nope_tool'] }],

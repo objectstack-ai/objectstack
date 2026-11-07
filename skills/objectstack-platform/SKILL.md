@@ -52,8 +52,8 @@ objectstack-data): named sets of people a new record of an `ownership: 'user'`
 object sits in until a member claims it. `assignmentRules` (`defineAssignmentRule`,
 `@objectstack/spec/automation`; objectstack-automation) routes each inserted
 ownerless row into a queue — parked, `round_robin` or `least_loaded` — or to one
-user. Both need the ownership-queue service `@objectstack/plugin-sharing` registers
-(`sharing` in `requires`): a stack declaring either without it is refused at boot.
+user. Both need the ownership-queue service `@objectstack/plugin-sharing` registers:
+a stack declaring either without it is refused at boot.
 
 Undeclared keys are handled per surface, in two postures:
 
@@ -165,9 +165,7 @@ what the platform owns.
   generic connector executors in `plugins:`; and the eight generator barrels
   (`objects`, `views`, `actions`, `flows`, `dashboards`, `apps`, `skills`, `picklists`),
   each `src/*/index.ts` handed to the stack key of its name through
-  `exportsOf` — the scaffolded `AGENTS.md` says how to add to them. The
-  memory driver and the Hono server are NOT in the file — the CLI
-  auto-registers both at boot
+  `exportsOf` — the scaffolded `AGENTS.md` says how to add to them.
 
 The five retired remote templates (`todo`, `compliance`, `content`,
 `contracts`, `procurement`) are refused by name.
@@ -296,17 +294,19 @@ production fails loudly): [Ports & networking](./references/operations.md#ports-
 
 ### `requires:` — which service plugins boot
 
-Step 4's list is the fixed core. Every other service plugin is opt-in, and
-`requires: [...]` on the stack root is what turns it on. The CLI expands each
+Step 4's list is the fixed core. Tokens marked ° are always-on: every boot
+mounts them, listed or not, and `--preset minimal` drops exactly those. Every
+other service plugin is opt-in: `requires: [...]` on the stack root turns it on. The CLI expands each
 token through the `CAPABILITY_PROVIDERS` registry in
 `@objectstack/core`:
 
 | Token | Provider package |
 |:--|:--|
 | `automation` | `@objectstack/service-automation` — flows, and any declarative `connectors:` entry |
-| `analytics` `cache` `storage` `queue` `job` `messaging` `realtime` `settings` `sms` `push` | `@objectstack/service-` + the token ([the `push` block](./references/operations.md#mobile-push)) |
-| `marketplace` | `@objectstack/service-package` |
-| `audit` `email` `sharing` `approvals` `webhooks` | `@objectstack/plugin-` + the token |
+| `analytics`° `cache`° `storage`° `queue`° `job`° `messaging`° `realtime` `settings`° `sms`° `push` | `@objectstack/service-` + the token ([the `push` block](./references/operations.md#mobile-push)) |
+| `mailbox` | `@objectstack/service-mailbox` — inbound mail |
+| `marketplace` `package-registry`° | `@objectstack/service-package` |
+| `audit` `email`° `sharing`° `approvals` `webhooks` | `@objectstack/plugin-` + the token |
 | `pinyin-search` | `@objectstack/plugin-pinyin-search` |
 | `mcp` | `@objectstack/mcp` |
 | `triggers` | `@objectstack/trigger-record-change`, plus `trigger-schedule` and `trigger-api` |
@@ -316,8 +316,7 @@ through it:
 
 - **Tier-gated** — `ai`, `ai-studio`, `i18n`, `ui`, `auth` have no provider
   entry; dedicated blocks in `serve.ts` `run()` open their tier instead
-  (`ai`/`ai-studio` through the intent-driven AI block, the other three through
-  their tier blocks).
+  (`ai`/`ai-studio` through the intent-driven AI block).
 - **Enterprise / cloud** — `hierarchy-security` has no open-edition provider and
   ships in `@objectstack/security-enterprise`, loaded through `plugins[]`;
   `ai-seat` and `governance` are resolved only by cloud's objectos-runtime.
@@ -333,14 +332,14 @@ Five rules that change what you write:
 - **Declaring is a demand.** A capability YOU declared whose provider package is
   absent is a hard boot error; one the platform auto-injects for you stays
   best-effort (warn and continue).
-- **`auth` implies `email`.** Auth callbacks need the mail service, so the CLI
-  appends `email` whenever `auth` is required.
+- **`auth` implies `email`**, even under `--preset minimal`: auth callbacks
+  need the mail service.
 - **Keep `automation` whenever `plugins:` lists a connector** — connector
-  executors register their provider factories with it, and without it they have
-  nowhere to register and boot fails.
-- **Pair `triggers` with `job`.** `triggers` alone arms record-change triggers;
-  schedule and time-relative triggers run on the job service, so autolaunched
-  scheduled flows stay silent without `job`.
+  executors register their provider factories with it, and without it boot
+  fails.
+- **Under `--preset minimal`, pair `triggers` with `job`:** `triggers` alone
+  arms record-change triggers; schedule and time-relative ones run on the job
+  service, so scheduled flows stay silent.
 
 ### `onEnable` — where an app binds runtime code
 

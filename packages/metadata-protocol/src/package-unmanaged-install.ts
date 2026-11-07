@@ -480,16 +480,26 @@ export function planUnmanagedImport(
         const declared = ManifestSchema.shape.namespace.safeParse(targetNamespace);
         if (!declared.success) {
             const rule = declared.error.issues[0]?.message ?? 'See `manifest.namespace`';
-            throw invalidRequest(
+            // `INVALID_REQUEST` / 400 with `details.targetNamespace`, as the
+            // documented refusal row and the rename refusal below answer: a
+            // code-less 400 reaches the boundary as the status-derived
+            // `VALIDATION_ERROR`, and the install-local door withholds its reason.
+            throw refusal(
+                'INVALID_REQUEST',
+                400,
                 `Invalid package namespace '${targetNamespace}' on \`targetNamespace\`. ${rule}. It becomes the `
                 + 'copy\'s `manifest.namespace` and the prefix of every copied object name.',
+                { targetNamespace },
             );
         }
         if (PLATFORM_RESERVED_NAMESPACES.has(targetNamespace)) {
-            throw invalidRequest(
+            throw refusal(
+                'INVALID_REQUEST',
+                400,
                 `\`targetNamespace\` '${targetNamespace}' is a platform-reserved namespace `
                 + `(${[...PLATFORM_RESERVED_NAMESPACES].map((ns) => `'${ns}'`).join(', ')}), which many packages share, `
                 + 'so it cannot carry one copy\'s names. Name a namespace of the copy\'s own.',
+                { targetNamespace },
             );
         }
     }

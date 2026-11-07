@@ -86,6 +86,7 @@ import { usePermissions } from '@object-ui/permissions';
 import { extractWriteErrorMessage, useAdapter, useMetadata } from '@object-ui/react';
 import { Plus, X, Users, Loader2, AlertCircle } from 'lucide-react';
 import { useMetadataLocale } from './i18n.js';
+import { isZhLocale } from './schema-field-label.js';
 import { membershipOrganization, readOrganizationMemberIds, type MemberFilter } from './organization-members.js';
 
 /** The object a permission set's direct grants are rows of: ADD creates one, REMOVE deletes one. */
@@ -129,7 +130,7 @@ interface AssignedRow {
  * them: a space in English, none after a CJK full stop.
  */
 function useCopy() {
-  const zh = useMetadataLocale() === 'zh-CN';
+  const zh = isZhLocale(useMetadataLocale());
   return React.useMemo(
     () =>
       zh

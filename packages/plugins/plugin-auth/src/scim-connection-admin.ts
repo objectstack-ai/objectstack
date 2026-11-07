@@ -50,7 +50,8 @@
  * Each mint and each revoke writes one `sys_audit_log` row: the administrator
  * as `user_id` / `actor`, the credential as `object_name` + `record_id`, and
  * `metadata` naming the event and the `connectionId` ({@link ScimCredentialAuditDecisions},
- * a closed type with no room for the bearer). It is written directly, as
+ * a closed type with no room for the bearer); a mint made on an impersonation
+ * session also names the administrator at the keyboard as `impersonated_by`. It is written directly, as
  * `/admin/create-user` writes its own, so the trail does not depend on what the
  * generic audit mirror decides to record for this object. A refused audit
  * write does not undo the operation (the bearer is already shown); it is
@@ -66,6 +67,7 @@ import type { PlatformAdminActor } from './platform-admin-gate.js';
 import { readJsonRequestBody } from './request-json-body.js';
 import {
   SCIM_CREDENTIAL_OBJECT,
+  SCIM_SERVICE_PRINCIPAL_PREFIX,
   revokeScimConnectionCredential,
   type MintScimConnectionCredentialInput,
   type MintedScimConnectionCredential,
@@ -83,9 +85,11 @@ const MAX_TEXT = 255;
  * A write made by a SCIM connection is audited with the service actor
  * `svc:scim:<connectionId>` (#30960), and `sys_audit_log.actor` holds 255
  * characters, so a longer id would make that audit insert fail for every
- * request the connection makes. 255 minus the 9-character prefix.
+ * request the connection makes. 255 minus the 9-character prefix, read from
+ * {@link SCIM_SERVICE_PRINCIPAL_PREFIX} (the one spelling the actor label is
+ * built from) so the cap moves with the label it protects.
  */
-const MAX_SCIM_CONNECTION_ID = MAX_TEXT - 'svc:scim:'.length;
+const MAX_SCIM_CONNECTION_ID = MAX_TEXT - SCIM_SERVICE_PRINCIPAL_PREFIX.length;
 
 /** Execution context for the store reads and the audit write. */
 const SYSTEM_CTX = { isSystem: true } as const;
@@ -130,6 +134,12 @@ export interface ScimCredentialAdminDeps {
 export interface ScimCredentialAuditDecisions {
   event: 'scim_credential_minted' | 'scim_credential_revoked';
   connectionId: string;
+  /**
+   * The administrator at the keyboard when the mint ran on an impersonation
+   * session, under the key the audit writers record it with
+   * (`sys_audit_log.metadata.impersonated_by`). Absent otherwise.
+   */
+  impersonated_by?: string;
 }
 
 function fail(status: ScimCredentialAdminResult['status'], code: string, message: string): ScimCredentialAdminResult {
@@ -329,7 +339,11 @@ export async function runMintScimCredential(
     action: 'create',
     actor,
     credentialId: minted.credentialId,
-    metadata: { event: 'scim_credential_minted', connectionId },
+    metadata: {
+      event: 'scim_credential_minted',
+      connectionId,
+      ...(actor.impersonatedBy ? { impersonated_by: actor.impersonatedBy } : {}),
+    },
   });
 
   return {

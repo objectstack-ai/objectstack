@@ -112,7 +112,9 @@ the package's paired `<package id>.custom` package
 ([how](/docs/concepts/metadata-lifecycle#customizing-an-installed-package-the-paired-custom-override-adr-0146)).
 `POST /api/v1/packages/<package id>/ensure-customization` creates the pair, or
 answers it when it already exists, and a save naming it
-(`?package=<package id>.custom`) lands there:
+(`?package=<package id>.custom`) lands there. A module that declares its App is
+customized in the App's pair, `<app id>.custom`: the same door, asked for the
+module, answers that pair (its `packageId`), and a save names it:
 
 - an item the package ships, of a type that takes an override (a `view`,
   `dashboard`, `flow` and the other types ADR-0146 lists), is replaced by

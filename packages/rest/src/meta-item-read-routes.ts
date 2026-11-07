@@ -733,8 +733,15 @@ export function registerMetaItemReadRoutes(this: MetaItemReadRouteHost, scope: M
                         // withheld folds nothing, so the `304` answers as
                         // before.
                         const audienceFolds = metaType === 'view' || metaType === 'object';
+                        // [ADR-0106 D1] And for an `action`: it is withheld
+                        // from a caller who cannot read a field it binds, and
+                        // that caller is answered as for a name with nothing
+                        // behind it, so the protocol must not answer a `304`
+                        // before the projection below has judged it. The
+                        // validator is judged after it, unchanged.
+                        const actionProjects = metaType === 'action';
                         const cacheRequest = {
-                            ifNoneMatch: (maskApplies || intakeFolds || audienceFolds) ? undefined : (req.headers['if-none-match'] as string),
+                            ifNoneMatch: (maskApplies || intakeFolds || audienceFolds || actionProjects) ? undefined : (req.headers['if-none-match'] as string),
                             ifModifiedSince: req.headers['if-modified-since'] as string,
                         };
 
@@ -857,6 +864,33 @@ export function registerMetaItemReadRoutes(this: MetaItemReadRouteHost, scope: M
                             cachedDocument = masked.document;
                             visibilityFingerprint = masked.fingerprint;
                         }
+                        // [ADR-0106 D1] The item chain's `action` step on this
+                        // arm (`projectMetaActionItem`, the one decision): a
+                        // withheld action is answered {@link sendMetaItemAbsent},
+                        // the answer this arm gives a name with nothing behind
+                        // it; a served one keeps the protocol's validator, and
+                        // its `304` is judged here as the protocol judges it.
+                        let actionUndetermined = false;
+                        if (actionProjects) {
+                            const projected = await metaReadGate.projectMetaActionItem(
+                                this.metaItemAnswerSources(environmentId, req, p, { arms: 'all', app: 'gate' }),
+                                cachedDocument,
+                            );
+                            if (projected.kind === 'withhold') {
+                                sendMetaItemAbsent(res);
+                                return;
+                            }
+                            if (projected.kind === 'fault') {
+                                sendFieldVisibilityFault(res, projected.object);
+                                return;
+                            }
+                            actionUndetermined = projected.cacheControl !== undefined;
+                            if (!actionUndetermined && result.etag
+                                && normalizeIfNoneMatch(req.headers['if-none-match']) === result.etag.value) {
+                                res.status(304).send();
+                                return;
+                            }
+                        }
                         // [#21476] The administrator's read names why an open
                         // public form is not offered on this posture.
                         let intakeFingerprint = '';
@@ -877,7 +911,7 @@ export function registerMetaItemReadRoutes(this: MetaItemReadRouteHost, scope: M
                         // revalidated under a SHARED validator: a later 304
                         // would hand this body to a caller whose projection
                         // did resolve. No ETag, no Last-Modified, no-store.
-                        if (maskPosture.kind === 'undetermined') {
+                        if (maskPosture.kind === 'undetermined' || actionUndetermined) {
                             res.header('Cache-Control', 'private, no-store');
                             res.header('Vary', 'Accept-Language');
                             res.json(await this.translateMetaEnvelope(

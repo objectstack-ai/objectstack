@@ -436,7 +436,8 @@
         "!coverage/**",
         "!.turbo/**",
         "$TURBO_ROOT$/scripts/js-comment-mask.mjs",
-        "$TURBO_ROOT$/scripts/js-comment-mask.d.mts"
+        "$TURBO_ROOT$/scripts/js-comment-mask.d.mts",
+        "$TURBO_ROOT$/ui/apps/console/src/pages/developer/objectstack-skill.ts"
       ]
     },
     "@objectstack/runtime#test": {
@@ -615,6 +616,7 @@
         "$TURBO_ROOT$/packages/services/service-settings/src/settings-route-ledger.ts",
         "$TURBO_ROOT$/packages/services/service-messaging/src/messaging-route-ledger.ts",
         "$TURBO_ROOT$/packages/plugins/plugin-auth/src/personal-view-route-ledger.ts",
+        "$TURBO_ROOT$/packages/plugins/plugin-sharing/src/sharing-route-ledger.ts",
         "$TURBO_ROOT$/packages/spec/src/automation/**",
         "$TURBO_ROOT$/packages/spec/src/data/**",
         "$TURBO_ROOT$/examples/app-showcase/**",
@@ -806,7 +808,10 @@
         "!coverage/**",
         "!.turbo/**",
         "!**/node_modules/**",
-        "$TURBO_ROOT$/packages/**/*.ts"
+        "$TURBO_ROOT$/packages/**/*.ts",
+        "$TURBO_ROOT$/scripts/check-vouch-for-reference-callers.mjs",
+        "$TURBO_ROOT$/scripts/js-comment-mask.mjs",
+        "$TURBO_ROOT$/scripts/invoked-as.mjs"
       ]
     },
     "@objectstack/types#test:repo": {

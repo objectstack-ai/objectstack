@@ -44,16 +44,38 @@
  * `run.agentActions` — picked from the card schema's own type
  * ({@link ScenarioArtifactCard}), never a copy of it.
  *
+ * ## Whether an expression compiles
+ *
+ * A row that asks whether an expression compiles or enforces (a formula, a
+ * validation rule, an approver expression, an RLS predicate) asks the
+ * platform's own expression front end, through `scenario-expressions.ts`,
+ * which names the function each site's runtime and build run and what of the
+ * build's pass it leaves out.
+ *
  * Deterministic: no model call, no network (the cost ruling on cloud#3600).
  */
 
 import { resolveStackCollection } from '@objectstack/core';
 import { standaloneActionOwnerKey } from '@objectstack/objectql';
 import { effectiveSharingModel } from '@objectstack/plugin-sharing';
-import { APPROVAL_NODE_TYPE, resolveFlowTriggerKind } from '@objectstack/spec/automation';
-import { SINGLE_OPTION_TYPES, summaryFunctionReadsField } from '@objectstack/spec/data';
+import {
+  APPROVAL_BRANCH_LABELS,
+  APPROVAL_NODE_TYPE,
+  APPROVER_VALUE_BINDINGS,
+  canonicalApproverType,
+  resolveFlowTriggerKind,
+} from '@objectstack/spec/automation';
+import {
+  SINGLE_OPTION_TYPES,
+  controlledByParentMasterOf,
+  injectedSystemColumnDefs,
+  referenceTargetOf,
+  summaryFunctionReadsField,
+} from '@objectstack/spec/data';
+import { SystemFieldName } from '@objectstack/spec/system';
 
 import { personaPermissionSetName, ROW_SCOPE_TAG, type ScenarioCard } from '../schema.js';
+import { approverExpressionRefusal, recordExpressionRefusal, rlsPredicateEnforces } from './scenario-expressions.js';
 import { artifactToEvalGraph } from './scenario-graph.js';
 import { gradeItemNames } from './scenario-naming.js';
 import {
@@ -99,6 +121,9 @@ export interface ArtifactFacts {
   flows: readonly Bag[];
   permissionSets: readonly Bag[];
   actions: readonly ArtifactAction[];
+  /** Raw dataset and report definitions — for the keys the eval graph does not carry. */
+  datasets: readonly Bag[];
+  reports: readonly Bag[];
 }
 
 /**
@@ -145,7 +170,16 @@ export function readArtifactFacts(artifact: unknown): ArtifactFacts {
     (p): p is Bag => isBag(p) && typeof p.name === 'string' && isBag(p.objects),
   );
 
-  return { graph, objects, flows: resolveStackCollection(artifact, 'flows').filter(isBag), permissionSets, actions };
+  const collection = (key: string) => resolveStackCollection(artifact, key).filter(isBag);
+  return {
+    graph,
+    objects,
+    flows: collection('flows'),
+    permissionSets,
+    actions,
+    datasets: collection('datasets'),
+    reports: collection('reports'),
+  };
 }
 
 // ── Check helpers ───────────────────────────────────────────────────────────
@@ -187,6 +221,127 @@ function flowBoundObject(flow: Bag): string | undefined {
 }
 
 const flowName = (flow: Bag): string => (typeof flow.name === 'string' ? flow.name : '(unnamed flow)');
+
+/** A raw object definition, matched by name as the graph matches one. */
+function rawObject(facts: ArtifactFacts, name: string): Bag | undefined {
+  return [...facts.objects].find(([n]) => norm(n) === norm(name))?.[1];
+}
+
+/** The object a user reference points at, asked of the spec (the `user` type fixes it). */
+const USER_OBJECT = referenceTargetOf({ type: 'user' });
+
+/** Whether `field` of this object holds a user: a declared field, or an injected column, that references the user object. */
+function holdsUser(def: Bag, field: string): boolean {
+  const declared = isBag(def.fields) ? def.fields[field] : undefined;
+  return USER_OBJECT !== undefined && referenceTargetOf(declared ?? injectedSystemColumnDefs(def)[field]) === USER_OBJECT;
+}
+
+const flowNodes = (flow: Bag): Bag[] => (Array.isArray(flow.nodes) ? flow.nodes.filter(isBag) : []);
+const approvalNodes = (flow: Bag): Bag[] => flowNodes(flow).filter((n) => n.type === APPROVAL_NODE_TYPE);
+
+/**
+ * The first pair of Approval nodes that run in sequence: the second reached
+ * from the first's `approve` branch, as the engine walks a flow
+ * (`traverseNext`, service-automation `dag-traversal.ts`). Out of an Approval
+ * node it follows the edges labelled `approve`, or every out-edge when none
+ * is; out of any other node, every out-edge; never a `fault` edge. Two
+ * Approval nodes on alternative branches, or one behind the other's `reject`
+ * edge, are not in sequence.
+ */
+function approvalSequence(flow: Bag): [string, string] | undefined {
+  const edges = Array.isArray(flow.edges) ? flow.edges.filter(isBag) : [];
+  const nodes = new Map(flowNodes(flow).map((n) => [String(n.id), n]));
+  const out = (id: string) => edges.filter((e) => e.source === id && e.type !== 'fault');
+  for (const first of approvalNodes(flow)) {
+    const from = String(first.id);
+    const approve = out(from).filter((e) => e.label === APPROVAL_BRANCH_LABELS.approve);
+    const queue = (approve.length > 0 ? approve : out(from)).map((e) => String(e.target));
+    const seen = new Set<string>([from]);
+    while (queue.length > 0) {
+      const id = queue.shift()!;
+      if (seen.has(id)) continue;
+      seen.add(id);
+      const node = nodes.get(id);
+      if (node?.type === APPROVAL_NODE_TYPE) return [from, id];
+      if (node) queue.push(...out(id).map((e) => String(e.target)));
+    }
+  }
+  return undefined;
+}
+
+/**
+ * The approver bindings whose value is read off the request record
+ * (`APPROVER_VALUE_BINDINGS`): `trigger-field` (a field of the record holds the
+ * approver), `auto` (the manager of the record's subject user) and
+ * `expression` (CEL over the record at node entry). Every other binding names a
+ * fixed directory member or catalog item — one person, team, department,
+ * position, queue or membership tier for every request.
+ */
+const RECORD_ROUTED_SOURCES: ReadonlySet<string> = new Set(['trigger-field', 'auto', 'expression']);
+
+/** Every approver of an Approval node of `flow` whose binding reads the request record. */
+function recordRoutedApprovers(flow: Bag): Array<{ at: string; type: string; approver: Bag }> {
+  return approvalNodes(flow).flatMap((node) => {
+    const approvers = isBag(node.config) && Array.isArray(node.config.approvers) ? node.config.approvers.filter(isBag) : [];
+    return approvers.flatMap((approver, i) => {
+      const type = canonicalApproverType(String(approver.type));
+      const binding = (APPROVER_VALUE_BINDINGS as Readonly<Record<string, { source: string }>>)[type];
+      return binding && RECORD_ROUTED_SOURCES.has(binding.source) ? [{ at: `${flowName(flow)}.${String(node.id)}[${i}]`, type, approver }] : [];
+    });
+  });
+}
+
+/**
+ * Why a record-routed approver can name no one, or `undefined`. A `field`
+ * approver reads the user ids its field holds; a `manager` approver the
+ * manager of the user its `value` field holds, else of the record's owner
+ * (plugin-approvals `resolveApproverSpec`); either field must hold a user. An
+ * `expression` must parse over the closed approver roots.
+ */
+function approverRouteRefusal(type: string, approver: Bag, object: string | undefined, def: Bag | undefined): string | undefined {
+  if (type === 'expression') return approverExpressionRefusal(approver.value);
+  const named = typeof approver.value === 'string' && approver.value !== '' ? approver.value : undefined;
+  const field = named ?? (type === 'manager' ? SystemFieldName.OWNER_ID : undefined);
+  if (field === undefined) return 'names no field';
+  if (!def) return object === undefined ? 'the flow binds no object' : `the build has no object ${object}`;
+  return holdsUser(def, field) ? undefined : `${object}.${field} holds no user`;
+}
+
+/** A validation rule's predicates: `condition`, a conditional rule's `when`, and those of the rules in its `then` / `otherwise`. */
+function rulePredicates(rule: Bag): unknown[] {
+  return [
+    ...[rule.condition, rule.when].filter((p) => p !== undefined),
+    ...[rule.then, rule.otherwise].filter(isBag).flatMap(rulePredicates),
+  ];
+}
+
+const strings = (list: unknown): string[] => (Array.isArray(list) ? list.filter((s): s is string => typeof s === 'string') : []);
+const memberNames = (list: unknown): Set<string> =>
+  new Set((Array.isArray(list) ? list : []).filter(isBag).flatMap((m) => (typeof m.name === 'string' ? [norm(m.name)] : [])));
+
+/** What a report selects from each dataset it binds: its own selection, or each block's on a `joined` report. */
+function reportBindings(report: Bag): Bag[] {
+  if (report.type !== 'joined') return [report];
+  return Array.isArray(report.blocks) ? report.blocks.filter(isBag) : [];
+}
+
+function datasetNamed(facts: ArtifactFacts, name: unknown): Bag | undefined {
+  return typeof name === 'string' ? facts.datasets.find((d) => typeof d.name === 'string' && norm(d.name) === norm(name)) : undefined;
+}
+
+/** Why a report binding draws nothing, or `undefined`: it names a dataset of the build, and selects only its measures and dimensions. */
+function reportBindingGap(facts: ArtifactFacts, binding: Bag): string | undefined {
+  if (typeof binding.dataset !== 'string') return 'binds no dataset';
+  const ds = datasetNamed(facts, binding.dataset);
+  if (!ds) return `no dataset ${binding.dataset}`;
+  const measures = memberNames(ds.measures);
+  const dimensions = memberNames(ds.dimensions);
+  const missing = [
+    ...strings(binding.values).filter((m) => !measures.has(norm(m))).map((m) => `measure ${m}`),
+    ...[...strings(binding.rows), ...strings(binding.columns)].filter((d) => !dimensions.has(norm(d))).map((d) => `dimension ${d}`),
+  ];
+  return missing.length === 0 ? undefined : `dataset ${binding.dataset} has no ${missing.join(', ')}`;
+}
 
 // ── The closed tag → check table ────────────────────────────────────────────
 
@@ -247,6 +402,48 @@ function uniqueBy<T>(items: readonly T[], key: (t: T) => string): T[] {
     seen.add(k);
     return true;
   });
+}
+
+/** Each object a card persona sees only part of (`run.personas[].scope`) → the personas scoping it, in card order. */
+function scopedObjects(card: ScenarioArtifactCard): Map<string, string[]> {
+  const scopedBy = new Map<string, string[]>();
+  for (const p of card.run.personas) {
+    for (const s of p.scope ?? []) {
+      const personas = scopedBy.get(s.object) ?? [];
+      if (!personas.includes(p.id)) scopedBy.set(s.object, [...personas, p.id]);
+    }
+  }
+  return scopedBy;
+}
+
+/**
+ * Why `persona` is not kept to its rows of `object` by a route that enforces,
+ * or `undefined` when it is. The routes are the three row-scope accepts
+ * (#30883 item 4 as corrected): a private object (plugin-sharing's
+ * `effectiveSharingModel`), a detail controlled by its parent — here only
+ * when that master is itself kept so for the persona (ADR-0055: the detail
+ * reads through it), or a read policy on the persona's own permission set.
+ * Whichever route, every read policy that applies there must lower to a query
+ * filter: one that does not matches no row (`rlsPredicateEnforces`), so the
+ * persona would see none of its own.
+ */
+function rowSecurityGap(f: ArtifactFacts, ctx: TagCheckContext, persona: string, object: string, via: readonly string[] = []): string | undefined {
+  const def = rawObject(f, object);
+  if (!def) return `the build has no object ${object}`;
+  const set = personaSetName(ctx, persona);
+  const policies = readPolicies(f.permissionSets.find((ps) => ps.name === set), object);
+  const dead = policies.find((r) => typeof r.using === 'string' && r.using.trim() !== '' && !rlsPredicateEnforces(r.using));
+  if (dead) return `the read policy ${String(dead.name)} on ${set} does not lower to a filter on ${object}, so it matches no row`;
+  if (effectiveSharingModel(def) === 'private') return undefined;
+  if (def.sharingModel === 'controlled_by_parent') {
+    const master = controlledByParentMasterOf(def.fields);
+    const target = master && isBag(def.fields) ? referenceTargetOf(def.fields[master.field]) : undefined;
+    if (target === undefined) return `${object} is controlled by a parent it names no master of`;
+    if ([...via, object].some((o) => norm(o) === norm(target))) return `${object} is controlled by a parent chain that loops back to ${target}`;
+    return rowSecurityGap(f, ctx, persona, target, [...via, object]);
+  }
+  if (policies.length === 0 || policies.some(admitsEveryRow)) return `no read policy on ${set} narrows ${object}`;
+  return undefined;
 }
 
 /**
@@ -344,6 +541,60 @@ export const CAPABILITY_TAG_CHECKS: Readonly<Record<string, TagCheck>> = Object.
     },
   },
 
+  'records-forms.formula-field': {
+    asserts:
+      "the build carries a computed field (a `formula` field, or a stored field computed from an `expression`), and every computed field's expression compiles: valid CEL reading only columns its object has, by the validator `os build` runs",
+    run(f) {
+      // A stored field with an `expression` is the same capability, stored:
+      // the engine computes and keeps it, which is what lets a roll-up sum it
+      // (a `formula` field is virtual — no column — and cannot be rolled up).
+      // A card whose total sums a computed line amount is built that way.
+      const computed = [...f.objects].flatMap(([object, def]) =>
+        Object.entries(isBag(def.fields) ? def.fields : {}).flatMap(([field, fd]) =>
+          isBag(fd) && (fd.type === 'formula' || fd.expression !== undefined) ? [{ object, def, field, fd }] : [],
+        ),
+      );
+      return {
+        checks: [
+          check('computed-field-exists', computed.length > 0, `${computed.length} computed field(s)`),
+          ...computed.map(({ object, def, field, fd }) => {
+            const refusal = recordExpressionRefusal('value', fd.expression, object, def);
+            return check(`formula:${object}.${field}->compiles`, refusal === undefined, refusal);
+          }),
+        ],
+      };
+    },
+  },
+
+  'records-forms.validation-rule': {
+    asserts:
+      "an object the card names carries an active validation rule that refuses the write (`severity: 'error'`), and every validation rule's predicates (`condition`, a conditional rule's `when`, and those of the rules in its `then` / `otherwise`) compile against its object, by the validator `os build` runs",
+    run(f, card) {
+      const expected = new Set(card.expect.objects.map(norm));
+      const rules = [...f.objects].flatMap(([object, def]) =>
+        (Array.isArray(def.validations) ? def.validations.filter(isBag) : []).map((rule) => ({ object, def, rule })),
+      );
+      // An advisory severity flags and lets the write through, and a nested
+      // branch follows its top-level rule's severity.
+      const blocking = rules.filter(({ object, rule }) => expected.has(norm(object)) && rule.active !== false && (rule.severity ?? 'error') === 'error');
+      return {
+        checks: [
+          ...rules.flatMap(({ object, def, rule }) => {
+            const predicates = rulePredicates(rule);
+            if (predicates.length === 0) return [];
+            const refusal = predicates.map((p) => recordExpressionRefusal('predicate', p, object, def)).find((r) => r !== undefined);
+            return [check(`validation:${object}.${String(rule.name)}->compiles`, refusal === undefined, refusal)];
+          }),
+          check(
+            'validation-rule-binds-expected-object',
+            blocking.length > 0,
+            `${rules.length} validation rule(s), ${blocking.length} refusing a write on an object the card names`,
+          ),
+        ],
+      };
+    },
+  },
+
   'access-security.field-permissions': {
     asserts: 'every field a card persona must not see exists and is denied (`readable: false`) by a permission set',
     run(f, card) {
@@ -373,13 +624,7 @@ export const CAPABILITY_TAG_CHECKS: Readonly<Record<string, TagCheck>> = Object.
     asserts:
       "every object a card persona sees only part of keeps its records private (owner-scoped), derives access from its master, or is narrowed for each such persona by a read policy (`rowLevelSecurity`) on that persona's permission set",
     run(f, card, ctx) {
-      const scopedBy = new Map<string, string[]>(); // object → the personas scoping it
-      for (const p of card.run.personas) {
-        for (const s of p.scope ?? []) {
-          const personas = scopedBy.get(s.object) ?? [];
-          if (!personas.includes(p.id)) scopedBy.set(s.object, [...personas, p.id]);
-        }
-      }
+      const scopedBy = scopedObjects(card);
       if (scopedBy.size === 0) return { unscored: "the card's personas scope no rows, so no object has a row scope to keep" };
       return {
         checks: [...scopedBy].map(([object, personas]) => {
@@ -412,6 +657,29 @@ export const CAPABILITY_TAG_CHECKS: Readonly<Record<string, TagCheck>> = Object.
     },
   },
 
+  'access-security.row-level-security': {
+    asserts:
+      "every object a card persona sees only part of is kept to that persona's rows by a route that enforces: it is private (owner-scoped), it is a detail whose master is itself kept so, or a read policy (`rowLevelSecurity`) on the persona's permission set narrows it; and every read policy that applies there lowers to a query filter",
+    run(f, card, ctx) {
+      // Row-scope's routes (#30883 item 4 as corrected), each held to enforce:
+      // see `rowSecurityGap`. What this row adds is the enforcement — a read
+      // policy that matches no row, and a detail whose master any persona
+      // reads in full, keep nothing to the persona's own rows.
+      const scopedBy = scopedObjects(card);
+      if (scopedBy.size === 0) return { unscored: "the card's personas scope no rows, so no row-level security has a scope to enforce" };
+      return {
+        checks: [...scopedBy].map(([object, personas]) => {
+          const gaps = uniqueBy(personas.flatMap((p) => rowSecurityGap(f, ctx, p, object) ?? []), (g) => g);
+          return check(
+            `row-level-security:${object}->enforced`,
+            gaps.length === 0,
+            gaps.length === 0 ? `enforced for ${personas.map((p) => personaSetName(ctx, p)).join(', ')}` : gaps.join('; '),
+          );
+        }),
+      };
+    },
+  },
+
   'approvals.approval-flow': {
     asserts: 'the build carries an approval (a flow with an Approval node), every approval binds to an object it serves, and one binds to an object the card names',
     run(f, card) {
@@ -430,6 +698,59 @@ export const CAPABILITY_TAG_CHECKS: Readonly<Record<string, TagCheck>> = Object.
             'approval-binds-expected-object',
             bound.some(({ object }) => object !== undefined && expected.has(norm(object))),
             `${approvals.length} approval flow(s)`,
+          ),
+        ],
+      };
+    },
+  },
+
+  'approvals.multi-step-approval': {
+    asserts:
+      "an approval flow bound to an object the card names and the build carries runs its approval in steps: a second Approval node follows the first on its `approve` branch (ADR-0019: a step is an Approval node)",
+    run(f, card) {
+      const expected = new Set(card.expect.objects.map(norm));
+      const flows = f.flows.filter((flow) => approvalNodes(flow).length > 0);
+      const stepped = flows.flatMap((flow) => {
+        const object = flowBoundObject(flow);
+        const steps = approvalSequence(flow);
+        return object !== undefined && expected.has(norm(object)) && findObject(f.graph, object) && steps
+          ? [`${flowName(flow)} on ${object}: ${steps.join(' then ')}`]
+          : [];
+      });
+      return {
+        checks: [
+          check(
+            'multi-step-approval-binds-expected-object',
+            stepped.length > 0,
+            stepped.length > 0 ? stepped.join('; ') : `${flows.length} approval flow(s), none in steps on an object the card names`,
+          ),
+        ],
+      };
+    },
+  },
+
+  'approvals.dynamic-approver-routing': {
+    asserts:
+      'an approval flow bound to an object the card names and the build carries routes to an approver read off the request record (a field of it, the manager of its owner or of a user it names, or an expression over it), and every such approver can name someone: its field holds a user, its expression parses over `current` / `trigger` / `vars` alone',
+    run(f, card) {
+      const expected = new Set(card.expect.objects.map(norm));
+      const routed = f.flows.flatMap((flow) => {
+        const object = flowBoundObject(flow);
+        const def = object === undefined ? undefined : rawObject(f, object);
+        return recordRoutedApprovers(flow).map((r) => ({ ...r, object, def }));
+      });
+      return {
+        checks: [
+          ...routed.map(({ at, type, approver, object, def }) => {
+            const refusal = approverRouteRefusal(type, approver, object, def);
+            return check(`approver:${at}->routes`, refusal === undefined, refusal ?? (typeof approver.value === 'string' ? `${type} ${approver.value}` : type));
+          }),
+          // Also the existence check: a fixed approver (a user, a position, a
+          // team…) is the same slate for every request.
+          check(
+            'dynamic-approver-binds-expected-object',
+            routed.some(({ object, def }) => object !== undefined && !!def && expected.has(norm(object))),
+            `${routed.length} approver(s) read off the request record`,
           ),
         ],
       };
@@ -463,6 +784,46 @@ export const CAPABILITY_TAG_CHECKS: Readonly<Record<string, TagCheck>> = Object.
     run(f) {
       const measures = measureChecks(f.graph, (d, m, ds) => `measure:${d}.${m}@${ds}`);
       return { checks: [check('dashboard-measure-exists', measures.length > 0, `${measures.length} widget measure(s)`), ...measures] };
+    },
+  },
+
+  'dashboards.report': {
+    asserts:
+      "the build carries a report (`reports`) whose dataset binds an object the card names, and every report draws from datasets the build carries, selecting only the measures (`values`) and dimensions (`rows`, `columns`) they declare — a `joined` report through each block's own",
+    run(f, card) {
+      // ADR-0021: a report binds a dataset, never an object; the dataset's
+      // `object` is what it reports on. A dashboard widget is the sibling tag's
+      // (`dashboards.widget-measures`), not a report.
+      const expected = new Set(card.expect.objects.map(norm));
+      const onExpected = f.reports.filter((r) =>
+        reportBindings(r).some((b) => {
+          const object = datasetNamed(f, b.dataset)?.object;
+          return typeof object === 'string' && expected.has(norm(object));
+        }),
+      );
+      return {
+        checks: [
+          ...f.reports.map((r) => {
+            const bindings = reportBindings(r);
+            const gaps = bindings.length === 0 ? ['binds no dataset'] : bindings.flatMap((b) => reportBindingGap(f, b) ?? []);
+            return check(`report:${typeof r.name === 'string' ? r.name : '(unnamed report)'}->resolves`, gaps.length === 0, gaps.length === 0 ? undefined : gaps.join('; '));
+          }),
+          check('report-binds-expected-object', onExpected.length > 0, `${f.reports.length} report(s)`),
+        ],
+      };
+    },
+  },
+
+  'ai.agent-actions': {
+    asserts:
+      'every business action the card declares an agent may call (`run.agentActions`) exists on its object, is opted into the AI / MCP surface (`ai.exposed`), and is confirm-gated (`ai.requiresConfirmation`) where the card says `confirm`',
+    run(f, card) {
+      // The checks `gradeAgentActions` runs for the card's actions, counted
+      // under this tag as well — as `dashboards.widget-measures` counts the
+      // measure checks `expect` already runs.
+      const actions = card.run.agentActions ?? [];
+      if (actions.length === 0) return { unscored: 'the card declares no agent action, so none has to be callable' };
+      return { checks: gradeAgentActions(f, actions) };
     },
   },
 });

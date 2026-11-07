@@ -27,10 +27,12 @@ export default defineConfig({
         replacement: path.join(path.resolve(__dirname, '..', '..'), 'spec/src/$1/index.ts'),
       },
       { find: /^@objectstack\/spec$/, replacement: path.resolve(__dirname, '../../spec/src/index.ts') },
-      // The scorer's three readers (`src/score/`): the stack-collection rule,
-      // the standalone-action owner and the effective sharing model are judged
-      // as the checkout states them, never as the last build did.
+      // The scorer's four readers (`src/score/`): the stack-collection rule,
+      // the standalone-action owner, the effective sharing model and the
+      // expression front end are judged as the checkout states them, never as
+      // the last build did.
       { find: /^@objectstack\/core$/, replacement: path.resolve(__dirname, '../../core/src/index.ts') },
+      { find: /^@objectstack\/formula$/, replacement: path.resolve(__dirname, '../../formula/src/index.ts') },
       { find: /^@objectstack\/objectql$/, replacement: path.resolve(__dirname, '../../objectql/src/index.ts') },
       { find: /^@objectstack\/plugin-sharing$/, replacement: path.resolve(__dirname, '../../plugins/plugin-sharing/src/index.ts') },
     ],

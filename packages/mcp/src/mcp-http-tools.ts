@@ -50,7 +50,7 @@ import { StandardErrorCode, type ErrorCode } from '@objectstack/spec/api';
 // [#23701] The one key every door that translates the engine's unique-violation
 // envelope asks (the registered code AND the class name, never message text),
 // and the one classification whose arm states the wire code for it.
-import { earnedAnswerOf, isEngineDuplicateRecordEnvelope, mapDataError, resolveQueryReadLimits, staleSummaryAnswerLines, structuredCodeAnswer, type SummaryRecomputeRefusal } from '@objectstack/types';
+import { earnedAnswerOf, isEngineDuplicateRecordEnvelope, isServerFault, logServerFault, mapDataError, resolveQueryReadLimits, sandboxBusinessMessage, staleSummaryAnswerLines, structuredCodeAnswer, type SummaryRecomputeRefusal } from '@objectstack/types';
 import {
   MCP_OAUTH_SCOPE_DATA_READ,
   MCP_OAUTH_SCOPE_DATA_WRITE,
@@ -93,6 +93,8 @@ import {
   metadataPartialListingSentence,
   type DiagnosedObjectListing,
 } from './metadata-completeness.js';
+// [#30892] The file seam and what `read_file` renders from it.
+import { READ_FILE_MAX_BYTES, renderReadFile, type McpFileBridge } from './file-content.js';
 
 export interface McpObjectSummary {
   name: string;
@@ -473,11 +475,13 @@ function errorResultFromThrown(err: unknown) {
 }
 
 /**
- * [#23509] The data tools' and `list_actions`' tool error: a thrown coded
- * refusal renders its `code` and `status` beside the message, in
- * {@link errorResultFromThrown}'s shape. A throw with no code renders as
- * `errorResult(messageOf(err))`, byte-identical to what every one of these
- * catches answered before.
+ * [#23509] The metadata tools', `list_actions`' and `delete_records`' tool
+ * error, and the coded half of the record data tools' ({@link dataDoorErrorResult}):
+ * a thrown coded refusal renders its `code` and `status` beside the message, in
+ * {@link errorResultFromThrown}'s shape. A throw with no code renders here as
+ * `errorResult(messageOf(err))`, byte-identical to what these catches answered
+ * before; the record data tools classify it as the `/data` door does instead
+ * (#31218).
  *
  * These catches used to answer the message alone, so a client never read the
  * code it is meant to branch on. The affected refusals: a key whose owner is
@@ -500,20 +504,108 @@ function errorResultWithCode(err: unknown) {
 }
 
 /**
+ * The tools whose throw the `/api/v1/data` door classifies: the record reads
+ * and writes, each the MCP face of one `/data` route. {@link dataDoorErrorResult}
+ * renders their catches.
+ */
+type DataDoorTool =
+  | 'query_records'
+  | 'aggregate_records'
+  | 'get_record'
+  | 'create_record'
+  | 'update_record'
+  | 'delete_record';
+
+/** What the `/data` door answers a thrown value with, read off {@link mapDataError}. */
+interface DataDoorAnswer {
+  code?: string;
+  message: string;
+  status: number;
+}
+
+/**
+ * The `/api/v1/data` door's answer to a thrown value: `mapDataError`
+ * (`@objectstack/types`), the classifier that door answers with, read as the
+ * `code`, sentence and status it would put on the wire. ⛔ Never a second
+ * classification: this file asks the door's own function, so the two doors
+ * cannot drift apart on a throw.
+ *
+ * The sentence is the door's `error` text, which is the caller-addressed one:
+ * a sandboxed hook body's inner sentence without the `<kind> '<name>' threw:`
+ * wrapper, and `Internal server error` for a fault. `object`, `field` and the
+ * other context keys the door adds are not read, as `details` is not
+ * ({@link errorResultWithCode}).
+ */
+function dataDoorAnswerOf(err: unknown, objectName: string): DataDoorAnswer {
+  const door = mapDataError(err, objectName);
+  const code = typeof door.body.code === 'string' && door.body.code !== '' ? door.body.code : undefined;
+  const message = typeof door.body.error === 'string' && door.body.error !== '' ? door.body.error : messageOf(err);
+  return { ...(code !== undefined ? { code } : {}), message, status: door.status };
+}
+
+/**
+ * [#31218] The record data tools' tool error: a CODED throw renders exactly as
+ * {@link errorResultWithCode} renders it, and a throw with NO code renders the
+ * answer the `/api/v1/data` door gives the same throw ({@link dataDoorAnswerOf}),
+ * as `{ error: { code, message, status } }` with `isError`.
+ *
+ * Those catches used to answer a code-less throw as its bare message. Measured
+ * on `MCPServerRuntime`: a sandboxed hook body's `throw new Error('…')` (the
+ * QuickJS runner's `SandboxError`, which carries no `code`) reached the agent
+ * as `hook '<name>' threw: Error: …`, the debug wrapper with the hook's name and
+ * no code, where `/data` answers `400 HOOK_ABORTED` with the inner sentence. The
+ * family is answered the same way, each as the door answers it:
+ *
+ * - an undeclared sandboxed abort: `HOOK_ABORTED`, the door's 4xx, the inner
+ *   sentence only;
+ * - a code hook's bare `throw new Error`, a driver error: `500 INTERNAL_ERROR`,
+ *   `Internal server error`. The thrown message is WITHHELD, as the door
+ *   withholds it, and reaches the operator instead, through the one 5xx log
+ *   line every door prints (`logServerFault`);
+ * - a throw that declared a status and no code (the runtime's
+ *   `{ statusCode: 503, message }` when no data service is registered): the
+ *   status, and no code, since the door invents none. A declared 5xx's prose is
+ *   withheld there too.
+ *
+ * ⛔ The coded path is read FIRST and is unchanged: a thrown `code` keeps
+ * {@link thrownRefusalEnvelope}'s rendering byte for byte, its unique-violation
+ * spelling included.
+ *
+ * Only these six tools. `delete_records` groups its rows through the same door
+ * ({@link rowRefusalOf}); its outer catch also renders this file's own
+ * code-less sentences, which the door's message heuristics would misread, so
+ * it keeps {@link errorResultWithCode}.
+ */
+function dataDoorErrorResult(err: unknown, tool: DataDoorTool, objectName: string) {
+  const envelope = thrownRefusalEnvelope(err);
+  if (envelope) return codedErrorResult({ ...envelope });
+  const door = dataDoorAnswerOf(err, objectName);
+  if (isServerFault(door.status)) {
+    logServerFault({
+      status: door.status,
+      error: err,
+      ...(door.code !== undefined ? { code: door.code } : {}),
+      request: { method: 'tools/call', path: `${tool} ${objectName}` },
+    });
+  }
+  return codedErrorResult(door);
+}
+
+/**
  * [#28782, #28844, #28856] A write tool's answer to a throw: a write the engine
  * stored but whose parent roll-up it could not recompute (`ERR_SUMMARY_RECOMPUTE`,
  * "the triggering records WERE written") answers the write it is, read off
  * #28781's carrier the bridge attached, with the stale column logged once at
  * `error`. An agent that read an error would apply the write again. Any other
  * throw, including every refusal raised before the write, renders through
- * `otherwise` exactly as before: {@link errorResultWithCode} for the data tools,
+ * `otherwise`: {@link dataDoorErrorResult} for the data tools,
  * {@link errorResultFromThrown} for `run_action`, whose answer the runtime
  * composed and attached.
  */
 function landedWriteResultOrError(
   err: unknown,
   objectName: string | undefined,
-  otherwise: (err: unknown) => ReturnType<typeof errorResultWithCode> = errorResultWithCode,
+  otherwise: (err: unknown) => ReturnType<typeof errorResultWithCode>,
 ) {
   const earned = earnedAnswerOf(err);
   if (earned === undefined) return otherwise(err);
@@ -521,7 +613,7 @@ function landedWriteResultOrError(
   return textResult(earned);
 }
 
-function codedErrorResult(error: ThrownRefusalEnvelope & { details?: unknown }) {
+function codedErrorResult(error: { code?: string; message: string; status?: number; details?: unknown }) {
   return {
     content: [{ type: 'text' as const, text: jsonText({ error }) }],
     isError: true as const,
@@ -826,13 +918,11 @@ interface DeleteEachOutcome {
  * `400 HOOK_ABORTED` and the code hook's bare throw `500 INTERNAL_ERROR`.
  */
 function rowRefusalOf(err: unknown, objectName: string): Omit<DeleteRefusalGroup, 'count' | 'recordIds'> | undefined {
-  const door = mapDataError(err, objectName);
-  if (door.status >= 500) return undefined;
+  const door = dataDoorAnswerOf(err, objectName);
+  if (isServerFault(door.status)) return undefined;
   const envelope = thrownRefusalEnvelope(err);
   if (envelope) return { code: envelope.code, status: envelope.status ?? door.status, reason: envelope.message };
-  const code = typeof door.body.code === 'string' ? door.body.code : undefined;
-  const reason = typeof door.body.error === 'string' && door.body.error !== '' ? door.body.error : messageOf(err);
-  return { ...(code !== undefined ? { code } : {}), status: door.status, reason };
+  return { ...(door.code !== undefined ? { code: door.code } : {}), status: door.status, reason: door.message };
 }
 
 /**
@@ -1028,6 +1118,19 @@ export interface ThrownRefusalEnvelope {
  * (`developerMessage`, `object`, `field`) in their envelope's context slot;
  * this envelope has none. It is `code`, `message` and `status`, and the data
  * tools withhold `details` by design ({@link errorResultWithCode}).
+ *
+ * ## The caller-addressed sentence of a sandboxed refusal (#31246)
+ *
+ * A QuickJS hook or action body that throws with a declared `code` and
+ * `status` leaves the runner as a `SandboxError` whose `.message` is the
+ * `<kind> '<name>' threw: Error: …` debug wrapper, naming the hook, and whose
+ * `.innerMessage` is the sentence the author addressed to the caller. The
+ * `message` here is `sandboxBusinessMessage` (`@objectstack/types`), the read
+ * the `/api/v1/data` door makes for the same throw, and `.message` only when
+ * that read declines: not a sandbox refusal, or a body that crashed. ⛔ One
+ * reader, never a copy of its logic here, and never a strip of the wrapper's
+ * prose: a non-sandbox refusal keeps its own message byte for byte. The code
+ * and status are unchanged.
  */
 export function thrownRefusalEnvelope(err: unknown): ThrownRefusalEnvelope | undefined {
   const thrownCode = (err as { code?: unknown } | null | undefined)?.code;
@@ -1035,7 +1138,7 @@ export function thrownRefusalEnvelope(err: unknown): ThrownRefusalEnvelope | und
   const status = (err as { status?: unknown }).status;
   return {
     code: wireCodeOf(err, thrownCode),
-    message: messageOf(err),
+    message: sandboxBusinessMessage(err) ?? messageOf(err),
     ...(typeof status === 'number' ? { status } : {}),
   };
 }
@@ -1295,10 +1398,13 @@ const RECORD_ID_ALIASES = { id: 'recordId', record_id: 'recordId' } as const;
  */
 export function wireBridgeTools(
   server: McpServer,
-  bridge: McpDataBridge & Partial<McpActionBridge> & Partial<McpFederationBridge>,
+  bridge: McpDataBridge & Partial<McpActionBridge> & Partial<McpFederationBridge> & McpFileBridge,
   options: RegisterObjectToolsOptions & RegisterActionToolsOptions = {},
 ): string[] {
   const registered = registerObjectTools(server, bridge, options);
+  // [#30892] `read_file` / `create_upload_link`, each only where the bridge
+  // implements its member.
+  registered.push(...registerFileTools(server, bridge, options));
   if (typeof bridge.listActions === 'function' && typeof bridge.runAction === 'function') {
     registered.push(...registerActionTools(server, bridge as McpActionBridge, options));
   }
@@ -1793,7 +1899,7 @@ export function registerObjectTools(
           if (!diagnosed?.narrowed || !diagnosed.statement) return textResult(result);
           return textResult(withDelegationNotice(result, diagnosed.statement));
         } catch (err) {
-          return errorResultWithCode(err);
+          return dataDoorErrorResult(err, 'query_records', objectName);
         }
       },
     );
@@ -1888,7 +1994,7 @@ export function registerObjectTools(
               ...(truncated ? { truncated: true } : {}),
             });
           } catch (err) {
-            return errorResultWithCode(err);
+            return dataDoorErrorResult(err, 'aggregate_records', objectName);
           }
         },
       );
@@ -1915,7 +2021,7 @@ export function registerObjectTools(
           if (record == null) return errorResult(`Record "${recordId}" not found in "${objectName}"`);
           return textResult(record);
         } catch (err) {
-          return errorResultWithCode(err);
+          return dataDoorErrorResult(err, 'get_record', objectName);
         }
       },
     );
@@ -1944,7 +2050,7 @@ export function registerObjectTools(
         try {
           return textResult(await bridge.create(objectName, data));
         } catch (err) {
-          return landedWriteResultOrError(err, objectName);
+          return landedWriteResultOrError(err, objectName, (e) => dataDoorErrorResult(e, 'create_record', objectName));
         }
       },
     );
@@ -1978,7 +2084,7 @@ export function registerObjectTools(
         try {
           return textResult(await bridge.update(objectName, recordId, data));
         } catch (err) {
-          return landedWriteResultOrError(err, objectName);
+          return landedWriteResultOrError(err, objectName, (e) => dataDoorErrorResult(e, 'update_record', objectName));
         }
       },
     );
@@ -2021,7 +2127,7 @@ export function registerObjectTools(
         try {
           return textResult(await bridge.remove(objectName, recordId));
         } catch (err) {
-          return landedWriteResultOrError(err, objectName);
+          return landedWriteResultOrError(err, objectName, (e) => dataDoorErrorResult(e, 'delete_record', objectName));
         }
       },
     );
@@ -2458,6 +2564,171 @@ export function registerActionTools(
           return textResult(result);
         } catch (err) {
           return errorResultFromThrown(err);
+        }
+      },
+    );
+  }
+
+  return registered;
+}
+
+/**
+ * [#30892] Register the file pair over {@link McpFileBridge}: `read_file`
+ * (with `data:read`) reads a file a record carries, and `create_upload_link`
+ * (with `data:write`) mints a single-use link through which the user uploads
+ * a file onto a record. Each registers only where the bridge implements its
+ * member, so a host that cannot reach a record's files serves neither.
+ *
+ * Neither tool judges access itself. The bridge reads the record as the
+ * caller first (the `get_record` door), so a record the caller cannot read is
+ * refused here with the code `get_record` answers; the storage service then
+ * asks the download door's own verdict for the file, and the attach rule's
+ * for a link. `sys_*` objects are refused as every object tool refuses them.
+ */
+export function registerFileTools(
+  server: McpServer,
+  bridge: McpFileBridge,
+  options: RegisterObjectToolsOptions = {},
+): string[] {
+  const registered: string[] = [];
+  const note = (name: string): string => {
+    registered.push(name);
+    return name;
+  };
+  const allowSystem = options.allowSystemObjects === true;
+  const scopes = options.grantedScopes;
+  const canRead = !scopes || scopes.includes(MCP_OAUTH_SCOPE_DATA_READ);
+  const canWrite = !scopes || scopes.includes(MCP_OAUTH_SCOPE_DATA_WRITE);
+  const guard = (objectName: string): string | undefined => {
+    if (!objectName || typeof objectName !== 'string') return 'objectName is required';
+    if (!allowSystem && isSystemObject(objectName)) {
+      return `Object "${objectName}" is a system object and is not exposed via MCP`;
+    }
+    return undefined;
+  };
+
+  if (canRead && typeof bridge.readRecordFile === 'function') {
+    const readFn = bridge.readRecordFile.bind(bridge);
+    const listFn = typeof bridge.listRecordFiles === 'function' ? bridge.listRecordFiles.bind(bridge) : undefined;
+    server.registerTool(
+      note('read_file'),
+      {
+        description:
+          'Read a file a record carries: one held by a file field (field, plus fileId when the field holds several) ' +
+          'or one of its attachments (attachmentId). Answers the file\'s facts (name, type, size in bytes, the ' +
+          `byte cap read_file reads, ${READ_FILE_MAX_BYTES}) with a short-lived download link, then its content: the ` +
+          'text of a text file, a PDF or a Word (.docx) document, or the image itself. A larger file answers its ' +
+          'facts and the link only. ' +
+          (listFn
+            ? 'Name neither field nor attachmentId to list the files on the record you can read, with their ids. '
+            : '') +
+          'You can read a file only where you can read its record: a record you cannot read answers as not found.',
+        inputSchema: strictToolInput(
+          {
+            surface: 'this read_file call',
+            aliases: {
+              ...OBJECT_NAME_ALIASES,
+              ...RECORD_ID_ALIASES,
+              fieldName: 'field',
+              field_name: 'field',
+              file_id: 'fileId',
+              attachment_id: 'attachmentId',
+              attachment: 'attachmentId',
+            },
+          },
+          {
+            objectName: z.string().describe('The object/table name'),
+            recordId: z.string().describe('The record id'),
+            field: z.string().optional().describe('A file or image field of the record'),
+            fileId: z
+              .string()
+              .optional()
+              .describe('Which file, when the field holds several (a multi-file field); with field only'),
+            attachmentId: z.string().optional().describe('One of the record\'s attachments, by its id'),
+          },
+        ),
+        annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+      },
+      async ({ objectName, recordId, field, fileId, attachmentId }) => {
+        const bad = guard(objectName);
+        if (bad) return errorResult(bad);
+        if (field !== undefined && attachmentId !== undefined) {
+          return errorResult('Name one file: either field (with fileId for a multi-file field) or attachmentId, not both.');
+        }
+        if (fileId !== undefined && field === undefined) {
+          return errorResult('fileId names a file within a field: send field with it.');
+        }
+        try {
+          if (field === undefined && attachmentId === undefined) {
+            if (!listFn) return errorResult('Name the file to read: field (a file field of the record) or attachmentId.');
+            return textResult({ files: await listFn(objectName, recordId) });
+          }
+          const target = attachmentId !== undefined ? { attachmentId } : { field: field as string, ...(fileId !== undefined ? { fileId } : {}) };
+          const file = await readFn(objectName, recordId, target, { maxBytes: READ_FILE_MAX_BYTES });
+          return { content: await renderReadFile(file) };
+        } catch (err) {
+          return errorResultWithCode(err);
+        }
+      },
+    );
+  }
+
+  if (canWrite && typeof bridge.createUploadLink === 'function') {
+    const linkFn = bridge.createUploadLink.bind(bridge);
+    server.registerTool(
+      note('create_upload_link'),
+      {
+        description:
+          'Create a link through which the user uploads one file onto a record: into a file field (field) or ' +
+          'as an attachment (attachments: true). Give the link to the user to open in a browser where they are ' +
+          'signed in to this deployment as themselves; it works only for them, once, for this record and field ' +
+          'only, and expires (see expiresAt). The upload is stored as the user, so they must be able to edit the ' +
+          'record (and the field).',
+        inputSchema: strictToolInput(
+          {
+            surface: 'this create_upload_link call',
+            aliases: {
+              ...OBJECT_NAME_ALIASES,
+              ...RECORD_ID_ALIASES,
+              fieldName: 'field',
+              field_name: 'field',
+              attachment: 'attachments',
+            },
+          },
+          {
+            objectName: z.string().describe('The object/table name'),
+            recordId: z.string().describe('The record id'),
+            field: z.string().optional().describe('A file or image field of the record the upload fills'),
+            attachments: z
+              .literal(true)
+              .optional()
+              .describe('true to attach the upload to the record instead of filling a field'),
+          },
+        ),
+        annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+      },
+      async ({ objectName, recordId, field, attachments }) => {
+        const bad = guard(objectName);
+        if (bad) return errorResult(bad);
+        if ((field === undefined) === (attachments === undefined)) {
+          return errorResult('Say where the upload lands: either field (a file field of the record) or attachments: true.');
+        }
+        try {
+          const target = field !== undefined ? { field } : { attachments: true as const };
+          const link = await linkFn(objectName, recordId, target);
+          return textResult({
+            url: link.url,
+            expiresAt: link.expiresAt,
+            singleUse: true,
+            objectName,
+            recordId,
+            ...(field !== undefined ? { field } : { attachments: true }),
+            instructions:
+              'Give this link to the user to open in a browser where they are signed in to this deployment, and ' +
+              'pick the file. It works only for them, once, until expiresAt.',
+          });
+        } catch (err) {
+          return errorResultWithCode(err);
         }
       },
     );

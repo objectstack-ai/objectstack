@@ -72,3 +72,39 @@ describe('HttpApp.callTool — one tools/call as the key owner, through the agen
     await expect(app.callTool('key-ok', 'nope', {})).rejects.toThrow('tools/call nope: JSON-RPC -32602 Tool nope not found');
   });
 });
+
+describe('HttpApp.updateRow — the seed’s second pass, through the data door', () => {
+  const seen: Array<{ method?: string; path?: string; body: unknown }> = [];
+  let server: Server;
+  let app: HttpApp;
+
+  beforeAll(async () => {
+    server = createServer((req, res) => {
+      let raw = '';
+      req.on('data', (c) => (raw += c));
+      req.on('end', () => {
+        seen.push({ method: req.method, path: req.url, body: raw ? JSON.parse(raw) : undefined });
+        if (req.url?.endsWith('/dep_fin')) {
+          res.writeHead(400, { 'content-type': 'application/json' }).end(JSON.stringify({ error: 'Manager: no demopurchase_employee record has id "e99"', code: 'VALIDATION_FAILED' }));
+          return;
+        }
+        res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ id: 'dep_sales' }));
+      });
+    });
+    await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
+    app = new HttpApp({ baseUrl: `http://127.0.0.1:${(server.address() as AddressInfo).port}`, adminEmail: 'a', adminPassword: 'b' });
+  });
+
+  afterAll(() => new Promise<void>((r) => server.close(() => r())));
+
+  it('sends PATCH /api/v1/data/OBJECT/ID with the bare field patch, and reads a refusal’s code and message', async () => {
+    expect(await app.updateRow('demopurchase_department', 'dep_sales', { manager: 'e13' })).toMatchObject({ ok: true, status: 200 });
+    expect(seen[0]).toEqual({ method: 'PATCH', path: '/api/v1/data/demopurchase_department/dep_sales', body: { manager: 'e13' } });
+    expect(await app.updateRow('demopurchase_department', 'dep_fin', { manager: 'e99' })).toMatchObject({
+      ok: false,
+      status: 400,
+      code: 'VALIDATION_FAILED',
+      message: 'Manager: no demopurchase_employee record has id "e99"',
+    });
+  });
+});

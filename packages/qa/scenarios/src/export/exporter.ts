@@ -8,17 +8,19 @@
  * For each card the runs directory holds a record of, the NEWEST record (by
  * date) decides, in this order, each a refusal with its reason:
  *
- *   1. the card is loaded and marked generic ({@link GenericGuard});
- *   2. the record passed every half ({@link judgeRecord});
- *   3. the run's scratch project is still on disk, with its build;
- *   4. its transcript joins with the recording ({@link buildTranscript});
- *   5. its screenshots were taken, unless the caller turned them off.
+ *   1. the card is loaded, marked generic and of a gallery tier ({@link GalleryGuard});
+ *   2. ⛔ the run was on published packages ({@link unpublishedRunRefusal}): a
+ *      `--packages workspace` run is never exported or shown;
+ *   3. the record passed every half ({@link judgeRecord});
+ *   4. the run's scratch project is still on disk, with its build;
+ *   5. its transcript joins with the recording ({@link buildTranscript});
+ *   6. its screenshots were taken, unless the caller turned them off.
  *
  * Output (`--out`), per exported app, written whole into a staging directory
  * and then swapped in, so a re-export first deletes the old directory and
  * nothing stale survives (see {@link APP_LAYOUT}):
  *
- *   apps/<id>/README.md               what the app is, its scorecard, the files
+ *   apps/<id>/README.md               what the app is, the driver that ran it ({@link driverText}), its scorecard, the files
  *   apps/<id>/source/…                the authored metadata source (`source.ts`)
  *   apps/<id>/run-record.json         the run record, the work directories redacted (`workDirsOf`)
  *   apps/<id>/scorecard.json|.md      the per-half scorecard
@@ -28,7 +30,7 @@
  *
  * What the exporter owns is what the previous `index.json` lists. An app it
  * listed that does not export this time — its newest record fails, its card
- * is gone or not generic, its project is gone — is deleted and leaves the
+ * is gone or not exportable, its project is gone — is deleted and leaves the
  * index; the summary names why. A directory under `apps/` the index never
  * listed is not the exporter's and is left alone (and named). Nothing is
  * touched when the previous index does not validate, or when the runs
@@ -49,10 +51,10 @@ import type { Recording } from '../runner/driver.js';
 import { modeDir } from '../runner/orchestrate.js';
 import { readArtifact } from '../runner/project.js';
 import { renderScorecard, type CardScorecard } from '../runner/scorecard.js';
-import { NO_GENERIC_MARKER, type GenericGuard } from './generic.js';
+import { GALLERY_GUARD, type GalleryGuard } from './generic.js';
 import { parseIndex, serializeIndex, type GalleryApp, type GalleryIndex } from './manifest.js';
 import { judgeRecord, type PassJudgement } from './pass.js';
-import { readRunRecords, redactWorkDir, type RecordFile } from './record.js';
+import { readRunRecords, redactWorkDir, unpublishedRunRefusal, type RecordFile, type ScenarioRunRecord } from './record.js';
 import type { CaptureScreenshots, PlannedShot, SkippedShot } from './screenshots.js';
 import { projectFrameworkVersion, readAuthoredSource } from './source.js';
 import { buildTranscript, mergeRecordings, renderTranscript } from './transcript.js';
@@ -90,8 +92,8 @@ export interface ExportOptions {
   recordings: readonly Recording[];
   /** Read the projects here instead of each record's `evidenceDir` (records moved off the machine that ran them). */
   workDir?: string;
-  /** Decides "generic". Default {@link NO_GENERIC_MARKER}, which refuses every card. */
-  isGeneric?: GenericGuard;
+  /** Decides which cards may be exported. Default {@link GALLERY_GUARD}: origin `generic`, tier `starter` or `delivery`. */
+  guard?: GalleryGuard;
   /** Take screenshots with this; `false` exports without them. */
   screenshots: CaptureScreenshots | false;
 }
@@ -122,15 +124,31 @@ class Refused extends Error {
 
 const json = (v: unknown) => `${JSON.stringify(v, null, 2)}\n`;
 
-function appReadme(scenario: LoadedScenario, entry: GalleryApp, judgement: PassJudgement, scorecard: CardScorecard, shots: PlannedShot[], skipped: SkippedShot[]): string {
+/**
+ * The page's driver line: the agent tool whose turns the app was built and
+ * graded on, with its version. A replay names the driver of the recording it
+ * replayed, never the recording's path; a replay whose record does not name
+ * that driver says so.
+ */
+export function driverText(driver: ScenarioRunRecord['env']['driver']): string {
+  const named = (d: { driver: string; version?: string | undefined }) => `${d.driver}${d.version ? ` ${d.version}` : ''}`;
+  if (driver.replayOf) return `${named(driver.replayOf)} (re-graded from a recording of that run)`;
+  if (driver.driver === 'recorded') return 'a recording (the record does not name the driver that made it)';
+  return named(driver);
+}
+
+function appReadme(scenario: LoadedScenario, record: ScenarioRunRecord, entry: GalleryApp, judgement: PassJudgement, scorecard: CardScorecard, shots: PlannedShot[], skipped: SkippedShot[]): string {
   const c = scenario.card;
   const lines = [
-    `# ${c.title}`,
+    `# ${c.title.en}`,
+    '',
+    c.title.zh,
     '',
     `Generated by the ObjectStack scenario pipeline — do not edit by hand. Fix the card, the platform or the authoring skills instead; the next release rebuild corrects this directory.`,
     '',
     `- Scenario: \`${c.id}\` · business functions ${c.businessFunctions.map((f) => `\`${f}\``).join(', ')} · namespace \`${entry.namespace}\``,
     `- Framework: @objectstack/spec ${entry.framework.version} (runner checkout ${entry.framework.runner}) · run ${entry.run} on ${entry.runDate}`,
+    `- Driver: ${driverText(record.env.driver)}`,
     `- 问数: ${entry.qa.questions} questions, ${entry.qa.turns} persona turns · ${entry.operations} write operations`,
     '',
     '## The requirement',
@@ -186,7 +204,7 @@ export function workDirsOf(recordEvidenceDir: string, workDir: string | undefine
 }
 
 export async function exportGallery(opts: ExportOptions): Promise<ExportSummary> {
-  const isGeneric = opts.isGeneric ?? NO_GENERIC_MARKER;
+  const guard = opts.guard ?? GALLERY_GUARD;
   const appsDir = join(opts.outDir, 'apps');
   const indexFile = join(opts.outDir, 'index.json');
 
@@ -220,7 +238,7 @@ export async function exportGallery(opts: ExportOptions): Promise<ExportSummary>
     const staging = join(appsDir, `.staging-${id}`);
     rmSync(staging, { recursive: true, force: true });
     try {
-      const done = await exportOne(id, rf, cards.get(id), staging, isGeneric, turns, opts);
+      const done = await exportOne(id, rf, cards.get(id), staging, guard, turns, opts);
       const old = previousById.get(id);
       if (opts.screenshots === false && old && old.screenshots.length > 0 && existsSync(join(appsDir, id))) {
         // It still passes, but this export has no screenshots: the old directory and entry stand, shots and all.
@@ -263,14 +281,16 @@ async function exportOne(
   rf: RecordFile,
   scenario: LoadedScenario | undefined,
   staging: string,
-  isGeneric: GenericGuard,
+  guard: GalleryGuard,
   turns: ReturnType<typeof mergeRecordings>,
   opts: ExportOptions,
 ): Promise<{ entry: GalleryApp; shots: PlannedShot[]; skipped: SkippedShot[] }> {
   if (!scenario) throw new Refused([`no loaded card \`${id}\` (removed, renamed, or refused by the loader)`]);
-  const generic = isGeneric(scenario);
-  if (!generic.generic) throw new Refused([generic.reason]);
+  const verdict = guard(scenario);
+  if (!verdict.eligible) throw new Refused(verdict.reasons);
   const { record } = rf;
+  const unpublished = unpublishedRunRefusal(record);
+  if (unpublished) throw new Refused([`${rf.file}: ${unpublished}`]);
   const judgement = judgeRecord(record);
   if (!judgement.passed) throw new Refused([`${rf.file} did not pass every half`, ...judgement.reasons]);
 
@@ -300,7 +320,7 @@ async function exportOne(
     namespace: scenarioNamespace(card),
     path: `apps/${id}`,
     function: card.businessFunctions[0]!,
-    title: { en: card.title, zh: null },
+    title: { en: card.title.en, zh: card.title.zh },
     summary: { ...(card.prompt.short.en ? { en: card.prompt.short.en } : {}), ...(card.prompt.short.zh ? { zh: card.prompt.short.zh } : {}) },
     capabilities: [...card.capabilities].sort(),
     screenshots: shots.map((s) => ({ kind: s.kind, path: `apps/${id}/${s.file}`, ...(s.object ? { object: s.object } : {}), ...(s.view ? { view: s.view } : {}) })),
@@ -317,8 +337,8 @@ async function exportOne(
     [APP_LAYOUT.scorecardJson, json(scorecard)],
     [APP_LAYOUT.scorecardMd, `${renderScorecard(scorecard)}\n`],
     [APP_LAYOUT.transcriptJson, json(transcript)],
-    [APP_LAYOUT.transcriptMd, renderTranscript(transcript, card.title)],
-    [APP_LAYOUT.readme, redact(appReadme(scenario, entry, judgement, scorecard, shots, skipped))],
+    [APP_LAYOUT.transcriptMd, renderTranscript(transcript, card.title.en)],
+    [APP_LAYOUT.readme, redact(appReadme(scenario, record, entry, judgement, scorecard, shots, skipped))],
   ]);
   return { entry, shots, skipped };
 }

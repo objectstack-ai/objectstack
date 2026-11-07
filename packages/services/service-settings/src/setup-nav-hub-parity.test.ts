@@ -46,7 +46,7 @@ import { settingsBuiltinTranslations } from './translations/index.js';
 /** Where the hub opens a namespace; the sidebar entry for it points here. */
 const SETTINGS_PAGE = /^\/apps\/setup\/system\/settings\/([a-z_]+)$/;
 
-const TRANSLATED_LOCALES = ['zh-CN', 'ja-JP', 'es-ES', 'zh-Hant'] as const;
+const TRANSLATED_LOCALES = ['zh-CN', 'ja-JP', 'es-ES', 'zh-Hant', 'ar'] as const;
 
 interface NavItem { id?: string; type?: string; label?: string; url?: string; children?: NavItem[] }
 

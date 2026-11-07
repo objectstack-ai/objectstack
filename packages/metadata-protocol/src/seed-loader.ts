@@ -392,6 +392,55 @@ function perOrganizationSeedRowId(authoredId: string, organizationId: string): s
 }
 
 /**
+ * [#31021] The platform object that records which seed rows landed in an
+ * organization (`@objectstack/platform-objects`' `SysSeedLandedKey`). Spelled
+ * here rather than imported: this package does not depend on that one.
+ */
+const SEED_LANDED_KEY_OBJECT = 'sys_seed_landed_key';
+
+/**
+ * [#31021] The key a landed seed row is recorded under in
+ * {@link SEED_LANDED_KEY_OBJECT}: the dataset's `externalId` field names, each
+ * with the value the row is matched by, JSON-encoded (`[["name","Acme"]]`).
+ *
+ * The parts are exactly {@link SeedLoaderService.externalIdKey}'s, so the two
+ * agree on which records have a key at all: `''` when any component is
+ * missing. The FIELD NAMES travel with the values so two datasets keyed on
+ * different fields of one object never share a key, and JSON rather than the
+ * in-memory `\u0000` joiner because the key is STORED, and a NUL byte is a
+ * value Postgres refuses in a text column.
+ */
+function seedLandedKey(record: Record<string, unknown>, externalId: string | string[]): string {
+  const fields = Array.isArray(externalId) ? externalId : [externalId];
+  const pairs: Array<[string, string]> = [];
+  for (const field of fields) {
+    const value = record[field];
+    if (value === undefined || value === null || value === '') return '';
+    pairs.push([field, String(value)]);
+  }
+  return JSON.stringify(pairs);
+}
+
+/**
+ * [#31021] What a load does with the record of landed seed rows — see
+ * {@link SeedLoaderServiceOptions.landedKeys}. Set once per load.
+ */
+interface LandedKeyLedger {
+  /** The organization the load seeds, which the record is kept under. */
+  readonly organizationId: string;
+  /** `false` on a deliberate re-seed: record, but insert every missing row. */
+  readonly honour: boolean;
+  /** Per object, the keys recorded so far: read once, grown as this load records. */
+  readonly recorded: Map<string, Set<string>>;
+  /** Per object, the rows this load did not insert again because the record names them. */
+  readonly withdrawnRows: Map<string, number>;
+  /** References to such rows this load left as they are. */
+  withdrawnReferences: number;
+  /** Whether a failed record write has been reported yet (once per load). */
+  writeFailureReported: boolean;
+}
+
+/**
  * SeedLoaderService — Runtime implementation of ISeedLoaderService
  *
  * Provides metadata-driven seed data loading with:
@@ -619,6 +668,26 @@ export interface SeedLoaderServiceOptions {
    * `() => ctx.getService(FIELD_FILE_SERVICE)`.
    */
   getFieldFiles?: () => IFieldFileService | null | undefined;
+  /**
+   * [#31021] Keep, and honour, the record of which seed rows landed in the
+   * organization a load seeds (`sys_seed_landed_key`).
+   *
+   * - `'honour'` — every keyed row an `upsert` or `ignore` dataset lands
+   *   (inserted, updated, or matched and left alone) is recorded, and a
+   *   recorded key whose row is now gone is NOT inserted again: a person
+   *   removed it. A reference to such a row is left as it is instead of being
+   *   reported unresolved. A key never recorded still lands, so a row an
+   *   upgrade adds to the seed is inserted as before.
+   * - `'reseed'` — the deliberate re-seed: records the same, and inserts every
+   *   missing row whatever the record says.
+   * - absent — the record is neither read nor written.
+   *
+   * Kept only on a load that seeds an organization (`config.organizationId`,
+   * or the install's sole organization) and only where the composition
+   * registers `sys_seed_landed_key` (`@objectstack/platform-objects`); a load
+   * without one keeps no record and says so once.
+   */
+  landedKeys?: 'honour' | 'reseed';
 }
 
 export class SeedLoaderService implements ISeedLoaderService {
@@ -775,11 +844,22 @@ export class SeedLoaderService implements ISeedLoaderService {
    */
   private readonly getFieldFiles: () => IFieldFileService | null | undefined;
 
+  /** [#31021] {@link SeedLoaderServiceOptions.landedKeys}, as constructed. */
+  private readonly landedKeysMode?: 'honour' | 'reseed';
+  /**
+   * [#31021] The CURRENT {@link load}'s record of landed seed rows, or
+   * `undefined` when the load keeps none. An instance field for
+   * {@link replayIdByAuthoredId}'s reason: reference resolution reads it
+   * several parameters away from where the load opens it. Reset per `load`.
+   */
+  private landedKeyLedger?: LandedKeyLedger;
+
   constructor(engine: IDataEngine, metadata: IMetadataService, logger: Logger, options: SeedLoaderServiceOptions = {}) {
     this.engine = engine;
     this.metadata = metadata;
     this.logger = logger;
     this.getFieldFiles = options.getFieldFiles ?? (() => undefined);
+    this.landedKeysMode = options.landedKeys;
   }
 
   // ==========================================================================
@@ -953,6 +1033,8 @@ export class SeedLoaderService implements ISeedLoaderService {
     this.replayIdByAuthoredId.clear();
     // [#24624] One notice per load, about this load's skips only.
     this.uncomparedCredentials.clear();
+    // [#31021] One load's record belongs to one organization (opened below).
+    this.landedKeyLedger = undefined;
 
     // When the caller pinned no target org (an in-process publish has no active
     // user session — the AI build agent's publish path; the `single`-posture
@@ -976,6 +1058,10 @@ export class SeedLoaderService implements ISeedLoaderService {
 
     // 1. Filter datasets by the scope axes (environment AND locale)
     const datasets = this.filterDatasets(request.seeds, config);
+
+    // [#31021] The record of landed seed rows, once the organization this load
+    // seeds is known. A load with nothing to seed reads and writes none.
+    this.landedKeyLedger = datasets.length > 0 ? await this.openLandedKeyLedger(config) : undefined;
 
     if (datasets.length === 0) {
       return this.buildEmptyResult(config, Date.now() - startTime);
@@ -1084,6 +1170,8 @@ export class SeedLoaderService implements ISeedLoaderService {
 
     // [#24624] The rule the replay applied to credential fields, said once.
     this.reportUncomparedCredentials();
+    // [#31021] The seed rows this load did not insert again, said once.
+    this.reportWithdrawnSeedRows();
 
     // 7. Build final result
     const durationMs = Date.now() - startTime;
@@ -1310,6 +1398,27 @@ export class SeedLoaderService implements ISeedLoaderService {
         );
       }
     }
+
+    // [#31021] The record of landed seed rows, for the datasets that insert a
+    // keyed row they do not find (`upsert`, `ignore`): the modes the
+    // create-only rule reaches. `update` never inserts; `insert` / `replace`
+    // match no key.
+    const recordedKeys = this.landedKeyLedger && (mode === 'upsert' || mode === 'ignore')
+      ? await this.landedKeysOf(objectName)
+      : undefined;
+    const keyFields: ReadonlySet<string> = new Set(Array.isArray(externalId) ? externalId : [externalId]);
+    /** [#31021] Record index → the key its row is recorded under once it lands. */
+    const landedKeyByRecordIndex = new Map<number, string>();
+    /**
+     * [#31021] The key row `recordIndex` is recorded under: its authored id,
+     * not the id a per-organization replay gave it (#21665), so an `id`-keyed
+     * row reads the same in every organization and on every replay, whichever
+     * id the replay assigns it this time.
+     */
+    const landedKeyOf = (rec: Record<string, unknown>, recordIndex: number): string => {
+      const authored = authoredIdByRecordIndex.get(recordIndex);
+      return seedLandedKey(authored === undefined ? rec : { ...rec, id: authored }, externalId);
+    };
 
     // Get reference resolutions for this object
     const objectRefs = refMap.get(objectName) || [];
@@ -1808,13 +1917,51 @@ export class SeedLoaderService implements ISeedLoaderService {
       // [#25761] Create-only references resolve LAST, so a reference column of
       // the externalId has been resolved by the time one asks
       // `matchesExistingRow`. Every other dataset keeps its order.
-      const recordRefs = createOnlyColumns.size === 0
+      const orderedRefs = createOnlyColumns.size === 0
         ? allRecordRefs
         : [
           ...allRecordRefs.filter((ref) => !createOnlyColumns.has(ref.field)),
           ...allRecordRefs.filter((ref) => createOnlyColumns.has(ref.field)),
         ];
+      // [#31021] With a record of landed rows to consult, the externalId's own
+      // references resolve FIRST: whether this is a row a person removed is a
+      // question about its key, asked before any other reference resolves for
+      // a row the load may not write at all — and a key reference naming a
+      // removed row withdraws the row before anything else of it is resolved
+      // or deferred. A load keeping no record keeps its order. (A create-only
+      // column is never a key field, so the create-only references stay behind
+      // the key's.)
+      const recordRefs = this.landedKeyLedger === undefined
+        ? orderedRefs
+        : [
+          ...orderedRefs.filter((ref) => keyFields.has(ref.field)),
+          ...orderedRefs.filter((ref) => !keyFields.has(ref.field)),
+        ];
+      /**
+       * [#31021] Is this the row of a key recorded as landed here whose row is
+       * now gone? A row the load cannot find is inserted only when its key
+       * never landed in this organization; once it has, its absence is a
+       * person's removal, which a replay must not undo.
+       */
+      const isWithdrawnRow = (): boolean => {
+        if (!recordedKeys || !this.landedKeyLedger?.honour) return false;
+        const key = this.externalIdKey(record, externalId);
+        if (key === '' || existingRecords?.has(key)) return false;
+        return recordedKeys.has(landedKeyOf(record, i));
+      };
+      let withdrawnRow = false;
+      let withdrawnAsked = recordedKeys === undefined;
+      const referencesResolvedBeforeRow = referencesResolved;
       for (const ref of recordRefs) {
+        // [#31021] Asked once, the moment the key is final: before the first
+        // reference that is not part of it.
+        if (!withdrawnAsked && !keyFields.has(ref.field)) {
+          withdrawnAsked = true;
+          if (!unresolvedRefError && isWithdrawnRow()) {
+            withdrawnRow = true;
+            break;
+          }
+        }
         // Never re-resolve the tenant stamp we just wrote (see above). A seed
         // that authors `organization_id` ITSELF still goes through resolution,
         // so naming an org by its natural key keeps working.
@@ -1904,6 +2051,8 @@ export class SeedLoaderService implements ISeedLoaderService {
         let invalidItem = false;
         let unresolvedItem: unknown;
         let sawUnresolved = false;
+        /** [#31021] Elements naming a seed row a person removed from this organization. */
+        let withdrawnItems = 0;
 
         for (const item of items) {
           // A blank hole (`isMissing`: null, undefined, `''`, whitespace-only)
@@ -1912,6 +2061,12 @@ export class SeedLoaderService implements ISeedLoaderService {
           if (isMissing(item)) continue;
 
           const outcome = await this.resolveReferenceItem(ref, item, insertedRecords, config);
+          // [#31021] No link to write for this element: its target is gone on
+          // purpose. Handled once the field's other elements are known (below).
+          if (outcome.status === 'withdrawn') {
+            withdrawnItems++;
+            continue;
+          }
           if (outcome.status === 'invalid') {
             // LOUD FAILURE: a reference must be a natural-key string (or an
             // internal id). An object value — e.g. the wrapper
@@ -2042,10 +2197,44 @@ export class SeedLoaderService implements ISeedLoaderService {
           continue;
         }
 
+        // [#31021] The reference names a seed row a person removed from this
+        // organization (recorded as landed, gone now). Nothing is resolved for
+        // it and nothing is deferred: the row is gone on purpose, so pass 2
+        // could only report it missing, on every replay.
+        if (withdrawnItems > 0) {
+          // A key naming a removed row is the identity of a row that cannot
+          // exist without it: this row is withdrawn with it.
+          if (keyFields.has(ref.field)) {
+            withdrawnRow = true;
+            break;
+          }
+          this.landedKeyLedger!.withdrawnReferences += withdrawnItems;
+          // A single link is left as it is: no column is written, so a matched
+          // row keeps what it holds and a created row lands without the link.
+          if (!ref.multiple) {
+            delete record[ref.field];
+            continue;
+          }
+          // A multi-value link keeps the elements that still resolve.
+        }
+
         // Every element resolved (or was already an internal id). A
         // `multiple: true` field always lands an ARRAY — including when the
         // seed authored a lone key — because that is its stored shape.
         record[ref.field] = ref.multiple ? resolvedItems : resolvedItems[0];
+      }
+
+      // [#31021] A key with no reference in it is final before any reference
+      // resolves; ask now if the loop above never reached a reference outside it.
+      if (!withdrawnRow && !withdrawnAsked && !unresolvedRefError) withdrawnRow = isWithdrawnRow();
+      if (withdrawnRow) {
+        // Nothing of this row is written, and the references its key resolved
+        // on the way are not booked as this load's.
+        referencesResolved = referencesResolvedBeforeRow;
+        skipped++;
+        const ledger = this.landedKeyLedger!;
+        ledger.withdrawnRows.set(objectName, (ledger.withdrawnRows.get(objectName) ?? 0) + 1);
+        continue;
       }
 
       // A definitively unresolvable reference (no pass 2 to fix it) drops the
@@ -2152,6 +2341,13 @@ export class SeedLoaderService implements ISeedLoaderService {
             );
           }
         }
+      }
+
+      // [#31021] The key this row is recorded under, should it land: read off
+      // the record as written, references resolved.
+      if (recordedKeys) {
+        const landedKey = landedKeyOf(record, i);
+        if (landedKey !== '') landedKeyByRecordIndex.set(i, landedKey);
       }
 
       // Insert/upsert the record
@@ -2281,6 +2477,18 @@ export class SeedLoaderService implements ISeedLoaderService {
       const entry = deferredUpdates[d];
       const internalId = internalIdByRecordIndex.get(entry.recordIndex);
       if (internalId) entry.internalId = internalId;
+    }
+
+    // [#31021] Record the keys of the rows this dataset landed on — inserted,
+    // updated, or matched and left alone — in the same pass that wrote them,
+    // before the next dataset loads. A matched row is recorded too: that is
+    // what lets a row an earlier release seeded count as landed here.
+    if (recordedKeys) {
+      const fresh = new Set<string>();
+      for (const [recordIndex, landedKey] of landedKeyByRecordIndex) {
+        if (internalIdByRecordIndex.has(recordIndex) && !recordedKeys.has(landedKey)) fresh.add(landedKey);
+      }
+      await this.recordLandedKeys(objectName, [...fresh], recordedKeys);
     }
 
     // [#23354] The same map, published: the rows this dataset landed on. Every
@@ -2448,6 +2656,7 @@ export class SeedLoaderService implements ISeedLoaderService {
     | { status: 'kept'; value: unknown }
     | { status: 'invalid'; hint: string }
     | { status: 'unresolved' }
+    | { status: 'withdrawn' }
   > {
     if (typeof value === 'object') {
       const wrapped = (value as Record<string, unknown>).externalId;
@@ -2485,7 +2694,12 @@ export class SeedLoaderService implements ISeedLoaderService {
     const fromDatabase = await this.resolveFromDatabase(
       ref.targetObject, ref.targetField, value, config.organizationId,
     );
-    return fromDatabase ? { status: 'resolved', value: fromDatabase } : { status: 'unresolved' };
+    if (fromDatabase) return { status: 'resolved', value: fromDatabase };
+    // [#31021] No row answers, and the record says one landed here under this
+    // key: a person removed it. Asked only once every probe has missed, so the
+    // record can never stand in for a row that is there.
+    if (await this.isWithdrawnSeedTarget(ref.targetObject, ref.targetField, value)) return { status: 'withdrawn' };
+    return { status: 'unresolved' };
   }
 
   private async resolveFromDatabase(
@@ -2619,6 +2833,8 @@ export class SeedLoaderService implements ISeedLoaderService {
       const resolvedItems: unknown[] = [];
       let missingItem: unknown;
       let stillUnresolved = false;
+      /** [#31021] Elements naming a seed row a person removed from this organization. */
+      let withdrawnItems = 0;
 
       for (const item of items) {
         // The same blank rule pass 1 drops a hole by: the deferred value is the
@@ -2631,11 +2847,31 @@ export class SeedLoaderService implements ISeedLoaderService {
           resolvedItems.push(outcome.value);
           continue;
         }
+        // [#31021] Gone on purpose — no link to write, and no miss to report.
+        if (outcome.status === 'withdrawn') {
+          withdrawnItems++;
+          continue;
+        }
         // 'invalid' can't reach pass 2 (pass 1 drops it), but treat it as a
         // miss rather than writing an unresolvable value.
         missingItem = item;
         stillUnresolved = true;
         break;
+      }
+
+      // [#31021] An element names a seed row a person removed from this
+      // organization. With nothing left to write — a single link, or a
+      // multi-value one whose every element is gone — the deferral is settled
+      // here: no write, no error, and it leaves `referencesDeferred`, whose
+      // leftover count must match an entry in `errors`. A multi-value link
+      // with elements left writes those below, like any back-fill.
+      if (!stillUnresolved && withdrawnItems > 0) {
+        this.landedKeyLedger!.withdrawnReferences += withdrawnItems;
+        if (!deferred.multiple || resolvedItems.length === 0) {
+          const resultEntry = allResults.find(r => r.object === deferred.objectName);
+          if (resultEntry) resultEntry.referencesDeferred--;
+          continue;
+        }
       }
 
       // A multi-value field writes the array it re-resolved; a single-value one
@@ -3797,6 +4033,172 @@ export class SeedLoaderService implements ISeedLoaderService {
       if (!isMissingTableError(error, objectName)) throw error;
     }
     return map;
+  }
+
+  // ==========================================================================
+  // Internal: the record of landed seed rows (#31021)
+  // ==========================================================================
+
+  /**
+   * [#31021] Open this load's record of landed seed rows, or answer
+   * `undefined` when the load keeps none: the loader was not asked to
+   * ({@link SeedLoaderServiceOptions.landedKeys}), it is a dry run, it seeds
+   * no organization, or the composition does not register the object. The
+   * last two are said once — every load kept no record before this existed,
+   * so neither is a loss; each is the reason a removed seed row still returns.
+   */
+  private async openLandedKeyLedger(config: SeedLoaderConfigParsed): Promise<LandedKeyLedger | undefined> {
+    if (!this.landedKeysMode || config.dryRun) return undefined;
+    const organizationId = config.organizationId ?? this.fallbackOrgId;
+    if (!organizationId) {
+      this.logger.info(
+        `[SeedLoader] This load seeds no organization (no config.organizationId, and the install holds no sole ` +
+          `organization), so it keeps no record of the seed rows it lands: a seed row a person deletes is inserted ` +
+          `again by the next seed load. That record is kept per organization.`,
+      );
+      return undefined;
+    }
+    const definition = await this.resolveObjectDefinition(SEED_LANDED_KEY_OBJECT);
+    if (!definition?.fields) {
+      this.logger.warn(
+        `[SeedLoader] '${SEED_LANDED_KEY_OBJECT}' is not registered in this composition, so this load keeps no ` +
+          `record of the seed rows it lands in organization ${organizationId}: a seed row a person deletes is ` +
+          `inserted again by the next seed load. Compose @objectstack/platform-objects (PlatformObjectsPlugin), ` +
+          `which registers it.`,
+        { organizationId },
+      );
+      return undefined;
+    }
+    return {
+      organizationId,
+      honour: this.landedKeysMode === 'honour',
+      recorded: new Map(),
+      withdrawnRows: new Map(),
+      withdrawnReferences: 0,
+      writeFailureReported: false,
+    };
+  }
+
+  /**
+   * [#31021] The keys recorded as landed for `objectName` in this load's
+   * organization: read once per load and object, then grown in place as the
+   * load records more.
+   */
+  private async landedKeysOf(objectName: string): Promise<Set<string>> {
+    const ledger = this.landedKeyLedger!;
+    const cached = ledger.recorded.get(objectName);
+    if (cached) return cached;
+    const keys = new Set<string>();
+    try {
+      const query: EngineQueryOptions = {
+        where: { organization_id: ledger.organizationId, object_name: objectName },
+        fields: ['seed_key'],
+        context: { isSystem: true },
+      };
+      const rows = await this.engine.find(SEED_LANDED_KEY_OBJECT, query);
+      for (const row of rows || []) {
+        const key = (row as { seed_key?: unknown } | null | undefined)?.seed_key;
+        if (typeof key === 'string' && key !== '') keys.add(key);
+      }
+    } catch (error) {
+      // Discriminated by error TYPE, as `loadExistingRecords` is: a table not
+      // provisioned yet holds no row, so an empty record is the truth there.
+      // Any other failure propagates — an empty record read from a store that
+      // never answered would insert again every row a person removed.
+      if (!isMissingTableError(error, SEED_LANDED_KEY_OBJECT)) throw error;
+    }
+    ledger.recorded.set(objectName, keys);
+    return keys;
+  }
+
+  /**
+   * [#31021] Does the record name the row a reference into `targetObject` by
+   * `targetField` = `value` points at as landed in this organization? Asked
+   * only after every probe for that row missed, so a yes means it is gone.
+   */
+  private async isWithdrawnSeedTarget(targetObject: string, targetField: string, value: string): Promise<boolean> {
+    if (!this.landedKeyLedger?.honour) return false;
+    return (await this.landedKeysOf(targetObject)).has(seedLandedKey({ [targetField]: value }, targetField));
+  }
+
+  /**
+   * [#31021] Record `keys` as landed for `objectName` in this load's
+   * organization, in batches; `recordedKeys` grows by what was written.
+   *
+   * A failed write is `error`, said once per load: the rows landed and look
+   * seeded, while the record that keeps a person's removal from being undone
+   * is missing for them (AGENTS.md → "Degradation log levels"). It fails no
+   * row and no load — the rows are there — and it heals on its own: the next
+   * load records every row still present.
+   */
+  private async recordLandedKeys(objectName: string, keys: readonly string[], recordedKeys: Set<string>): Promise<void> {
+    const ledger = this.landedKeyLedger;
+    if (!ledger || keys.length === 0) return;
+    for (let start = 0; start < keys.length; start += SeedLoaderService.BULK_BATCH_SIZE) {
+      const batch = keys.slice(start, start + SeedLoaderService.BULK_BATCH_SIZE);
+      try {
+        await this.writeLandedKeys(
+          batch.map((seedKey) => ({ organization_id: ledger.organizationId, object_name: objectName, seed_key: seedKey })),
+        );
+      } catch (err) {
+        if (!ledger.writeFailureReported) {
+          ledger.writeFailureReported = true;
+          const unrecorded = keys.length - start;
+          this.logger.error(
+            `[SeedLoader] Recording which seed rows landed FAILED for ${objectName} in organization ` +
+              `${ledger.organizationId}: ${unrecorded} row(s) WERE seeded, but ${SEED_LANDED_KEY_OBJECT} does not ` +
+              `record them, so the seed looks complete while a person who deletes one of them before the next seed ` +
+              `load gets it back on that load (which records every row still present). Nothing retries this write ` +
+              `in this load: fix the cause below. Cause: ${seedFailureCause(err)}`,
+            err instanceof Error ? err : undefined,
+            { object: objectName, organizationId: ledger.organizationId, unrecorded },
+          );
+        }
+        return;
+      }
+      for (const key of batch) recordedKeys.add(key);
+    }
+  }
+
+  /**
+   * [#31021] One batch of {@link SEED_LANDED_KEY_OBJECT} rows, under the seed
+   * write context every write here uses. A named callee for the reason
+   * {@link writeDeferredReference} is one: the write sits inside a retry
+   * closure no AST scan of the caller's `try` reaches.
+   */
+  private async writeLandedKeys(rows: Array<Record<string, string>>): Promise<void> {
+    await withTransientRetry(() => this.engine.insert(SEED_LANDED_KEY_OBJECT, rows, SeedLoaderService.SEED_OPTIONS as any));
+  }
+
+  /**
+   * [#31021] ONE line per load naming the seed rows the record kept out and
+   * the references to them left alone. Logged at `info`, like
+   * {@link reportUncomparedCredentials}: it is the declared, intended outcome
+   * of a replay after a person removed a seed row, and it happens on every
+   * healthy replay of that organization from then on — a `warn` would cry wolf.
+   */
+  private reportWithdrawnSeedRows(): void {
+    const ledger = this.landedKeyLedger;
+    if (!ledger) return;
+    const rows = [...ledger.withdrawnRows.values()].reduce((sum, n) => sum + n, 0);
+    if (rows === 0 && ledger.withdrawnReferences === 0) return;
+    const objects = [...ledger.withdrawnRows].map(([object, n]) => `${object} (${n})`).join(', ');
+    this.logger.info(
+      `[SeedLoader] ${rows} seed row(s) were not inserted again${objects ? ` — ${objects}` : ''}: each landed in ` +
+        `organization ${ledger.organizationId} on an earlier load and its row is gone, so a person removed it. A ` +
+        `seed row the load cannot find is inserted only when its key never landed here, so a row an upgrade adds ` +
+        `still lands.` +
+        (ledger.withdrawnReferences > 0
+          ? ` ${ledger.withdrawnReferences} reference(s) to such rows were left as they are rather than reported unresolved.`
+          : '') +
+        ` A deliberate re-seed brings them back: the seed-replayer service called with { reseed: true }.`,
+      {
+        organizationId: ledger.organizationId,
+        rows,
+        objects: Object.fromEntries(ledger.withdrawnRows),
+        references: ledger.withdrawnReferences,
+      },
+    );
   }
 
   private looksLikeInternalId(value: string): boolean {

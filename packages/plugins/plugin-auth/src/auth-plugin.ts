@@ -53,7 +53,8 @@ import { ensureDefaultOrganizationExists } from './default-organization-invarian
 import { recoverInternalFieldsForSystemRead } from './internal-field-readback.js';
 import { runAttributedToUser } from './auth-actor-attribution.js';
 import { withSystemContext } from './objectql-adapter.js';
-import type { AuthEventAuditSurface } from './auth-session-audit.js';
+import { signInClientFingerprint, type AuthEventAuditSurface } from './auth-session-audit.js';
+import { ipRefusalAuditBoundFor, isSignInEndpoint, recordDeploymentListRefusal } from './ip-allow-list-refusal-audit.js';
 import { createTenancyService, type TenancyService } from './tenancy-service.js';
 import {
   isMembershipPolicy,
@@ -69,7 +70,11 @@ import {
 } from './identity-write-guard.js';
 import { registerLastAdminGuard } from './last-admin-guard.js';
 import { registerApiKeyRestoreGuard } from './api-key-restore-guard.js';
-import { registerOrganizationMfaEnrollmentGuard } from './organization-mfa-enrollment-guard.js';
+import {
+  bindOrganizationAccessPolicy,
+  type OrganizationAccessPolicySecuritySurface,
+} from './organization-access-policy-binding.js';
+import { MFA_REQUIREMENT_LEVELS, readMfaRequirementLevel } from './organization-access-policy.js';
 import { registerMfaRequiredEnrollmentPredicate } from './mfa-required-enrollment-predicate.js';
 import { registerPersonalViewHooks } from './personal-view-hooks.js';
 import { registerUserPreferenceHooks } from './user-preference-hooks.js';
@@ -565,6 +570,8 @@ export class AuthPlugin implements Plugin {
    * present.
    */
   private allowListUndeterminedWarned = false;
+  /** Set once the settings pass has said that `auth.mfa_required` reads a toggle spelling. */
+  private legacyMfaRequiredNoted = false;
   private allowListUntrustedHeaderWarned = false;
   /** The applied allow-list value whose unreadable value or entries were last reported, so one is reported once. */
   private allowListUnreadableReportedFor: string | undefined;
@@ -926,6 +933,33 @@ export class AuthPlugin implements Plugin {
     // `AuthPluginOptions.registerOrganizationRecordPage`.
     const registerOrganizationRecordPage = this.options.registerOrganizationRecordPage !== false;
 
+    const accessControlNavItems = [
+      ...(this.authManager.isSsoWired()
+        ? [
+            {
+              id: 'nav_sso_providers',
+              type: 'object',
+              label: 'SSO Providers',
+              objectName: 'sys_sso_provider',
+              icon: 'log-in',
+              requiredPermissions: ['manage_platform_settings'],
+            },
+          ]
+        : []),
+      ...(this.authManager.isScimWired()
+        ? [
+            {
+              id: 'nav_scim_credentials',
+              type: 'object',
+              label: 'SCIM Credentials',
+              objectName: 'sys_scim_connection_credential',
+              icon: 'key-round',
+              requiredPermissions: ['manage_platform_settings'],
+            },
+          ]
+        : []),
+    ];
+
     ctx.getService<{ register(m: any): void }>('manifest').register({
       // The header, `objects` and `objectExtensions`, from the ONE builder
       // `IdentityObjectsPlugin` registers on its own in a reduced kernel, so the
@@ -969,13 +1003,25 @@ export class AuthPlugin implements Plugin {
       dashboards: [SystemOverviewDashboard],
       // ADR-0021 — datasets backing the System Overview dashboard's widgets.
       datasets: SystemOverviewDatasets,
-      // ADR-0135 D6 / cloud#551 — surface "SSO Providers" (sys_sso_provider) in the
-      // Setup app's Access Control group, but ONLY when the external-IdP RP is
-      // wired (self-host `OS_SSO_ENABLED`, or the cloud per-env `planAllowsSso`
-      // arriving via `plugins.sso`). Without the gate the entry would render an
-      // empty list + a "Register" button whose endpoint 404s when SSO is off.
-      // Owning-plugin-contributes pattern (ADR-0029 K2), mirroring plugin-security.
-      ...(this.authManager.isSsoWired()
+      // Setup > Access Control entries for the identity surfaces this plugin
+      // owns (owning-plugin-contributes, ADR-0029 K2, mirroring
+      // plugin-security). Each is contributed only while its capability is
+      // wired, so no entry opens a list whose actions can only fail:
+      // - ADR-0135 D6 / cloud#551 — "SSO Providers" (sys_sso_provider), only
+      //   when the external-IdP RP is wired (self-host `OS_SSO_ENABLED`, or the
+      //   cloud per-env `planAllowsSso` arriving via `plugins.sso`). Without
+      //   the gate the entry would render an empty list + a "Register" button
+      //   whose endpoint 404s when SSO is off.
+      // - [#31123] "SCIM Credentials" (sys_scim_connection_credential, where
+      //   the Mint / Revoke Credential actions live), only when SCIM is wired:
+      //   `isScimWired()` is the same answer the `/admin/scim/mint-credential`
+      //   door reads before refusing 503, so the entry and the door cannot
+      //   disagree. Same gate as SSO Providers; the doors keep their own.
+      // Both labels are translated in `@objectstack/platform-objects`
+      // (`apps.setup.navigation`), pinned there by
+      // `setup-nav-dead-key-tombstone.test.ts`'s conditional list, because no
+      // boot of `check:app-nav-i18n` merges a gated-off entry.
+      ...(accessControlNavItems.length > 0
         ? {
             navigationContributions: [
               {
@@ -983,16 +1029,7 @@ export class AuthPlugin implements Plugin {
                 group: 'group_access_control',
                 // After Roles/Permission-Sets (100) and Sharing (200), near API Keys (300).
                 priority: 250,
-                items: [
-                  {
-                    id: 'nav_sso_providers',
-                    type: 'object',
-                    label: 'SSO Providers',
-                    objectName: 'sys_sso_provider',
-                    icon: 'log-in',
-                    requiredPermissions: ['manage_platform_settings'],
-                  },
-                ],
+                items: accessControlNavItems,
               },
             ],
           }
@@ -1959,17 +1996,6 @@ export class AuthPlugin implements Plugin {
           packageId: 'com.objectstack.plugin-auth.api-key-restore-guard',
           logger: ctx.logger,
         });
-        // [#30201] ADR-0069 D3 — an organization's `require_mfa` is refused
-        // while nobody can enroll a second factor, the pairing the global
-        // `auth.mfa_required` switch gets from its settings piece below. Asks
-        // the live manager per write. See organization-mfa-enrollment-guard.ts.
-        registerOrganizationMfaEnrollmentGuard(engine, {
-          packageId: 'com.objectstack.plugin-auth.organization-mfa-enrollment-guard',
-          isTwoFactorEnabled: () => this.authManager?.isTwoFactorEnabled() ?? false,
-          // [#30411] The grace period an admitted turn-on's save notice names.
-          // No manager means two-factor reads off above, so nothing is admitted.
-          mfaGracePeriodDays: () => this.authManager?.getMfaGracePeriodDays() ?? Number.NaN,
-        });
         // A reader's own named list views: the body is judged on every save as
         // a ListView for the row's own object. See personal-view-hooks.ts.
         registerPersonalViewHooks(engine, {
@@ -2350,15 +2376,38 @@ export class AuthPlugin implements Plugin {
         // The env var OS_AUTH_TWO_FACTOR outranks this piece's plugin flag, so
         // under a pin to off the save itself is refused, before this pass
         // (mfa-required-enrollment-predicate.ts).
+        //
+        // [ruling 「可以，按三档做（推荐）」] Three levels: `off`,
+        // `administrators`, `everyone`. Either level that requires anything is
+        // one piece with the enrollment path. A toggle spelling can only come
+        // from the env override (a stored toggle is rewritten to a level at
+        // boot, `migrateLegacyMfaRequiredSetting`); it keeps its meaning and is
+        // reported once. A value that is no level keeps the level in force.
         if (isExplicit('mfa_required')) {
-          const on = asBoolean(values.mfa_required, false);
-          if (on) {
-            refusable.push({
-              key: 'mfa_required',
-              patch: { mfaRequired: true, plugins: { twoFactor: true } as AuthManagerOptions['plugins'] },
-            });
+          const read = readMfaRequirementLevel(values.mfa_required);
+          if (!read) {
+            ctx.logger.error(
+              `[auth] mfa_required '${String(values.mfa_required)}' is not a multi-factor requirement level — IGNORED, `
+                + `the deployment keeps its current level ('${authManager.getDeploymentAccessFloor().mfaRequirement}'). `
+                + `Set auth.mfa_required (or OS_AUTH_MFA_REQUIRED) to one of: ${MFA_REQUIREMENT_LEVELS.join(', ')}.`,
+            );
           } else {
-            patch.mfaRequired = false;
+            if (read.legacy && !this.legacyMfaRequiredNoted) {
+              this.legacyMfaRequiredNoted = true;
+              ctx.logger.warn(
+                `[auth] auth.mfa_required reads '${String(values.mfa_required)}', a value from before the setting `
+                  + `had levels; it is read as '${read.level}'. Set OS_AUTH_MFA_REQUIRED (or the setting) to one of `
+                  + `${MFA_REQUIREMENT_LEVELS.join(', ')}: the toggle spelling is accepted for one major release.`,
+              );
+            }
+            if (read.level !== 'off') {
+              refusable.push({
+                key: 'mfa_required',
+                patch: { mfaRequirement: read.level, plugins: { twoFactor: true } as AuthManagerOptions['plugins'] },
+              });
+            } else {
+              patch.mfaRequirement = 'off';
+            }
           }
         }
         if (isExplicit('mfa_grace_period_days')) {
@@ -2539,16 +2588,17 @@ export class AuthPlugin implements Plugin {
               sessionRestoring = true;
               restoredInPatch.push(key);
               break;
-            case 'mfaRequired':
-              // As a save of the declared value: on is one piece with its
-              // enrollment path; off leaves enrolled factors verifiable.
-              if (declared.mfaRequired === true) {
+            case 'mfaRequirement':
+              // As a save of the declared value: a level that requires anything
+              // is one piece with its enrollment path; off leaves enrolled
+              // factors verifiable.
+              if (declared.mfaRequirement && declared.mfaRequirement !== 'off') {
                 refusable.push({
                   key,
-                  patch: { mfaRequired: true, plugins: { twoFactor: true } as AuthManagerOptions['plugins'] },
+                  patch: { mfaRequirement: declared.mfaRequirement, plugins: { twoFactor: true } as AuthManagerOptions['plugins'] },
                 });
               } else {
-                patch.mfaRequired = declared.mfaRequired;
+                patch.mfaRequirement = declared.mfaRequirement;
                 restoredInPatch.push(key);
               }
               break;
@@ -2764,12 +2814,52 @@ export class AuthPlugin implements Plugin {
     // See mfa-required-enrollment-predicate.ts.
     registerMfaRequiredEnrollmentPredicate(settings, ctx.logger);
 
+    // [ADR-0069 TL;DR 6] Each organization's own access policy: the reader the
+    // manager asks per request, the save checks that hold it to the floor, and
+    // the one-off moves of the toggle-era values onto the levels.
+    await this.bindOrganizationAccessPolicy(ctx, settings);
+
     await applySettings();
     if (typeof settings.subscribe === 'function') {
       settings.subscribe('auth', () => {
         void applySettings();
       });
       ctx.logger.info('Auth: bound to settings namespace=auth');
+    }
+  }
+
+  /**
+   * [ADR-0069 TL;DR 6] Each organization's own access policy: the one-off
+   * moves of the toggle-era MFA values, the per-request reader, the save
+   * checks and the change listener. See organization-access-policy-binding.ts.
+   */
+  private async bindOrganizationAccessPolicy(ctx: PluginContext, settings: SettingsReadSurface): Promise<void> {
+    if (!this.authManager) return;
+    const manager = this.authManager;
+    try {
+      await bindOrganizationAccessPolicy({
+        settings,
+        manager,
+        engine: () => manager.getDataEngine(),
+        security: () => {
+          try {
+            return ctx.getService<OrganizationAccessPolicySecuritySurface>('security');
+          } catch {
+            return undefined;
+          }
+        },
+        logger: {
+          info: (m) => ctx.logger.info(m),
+          warn: (m) => ctx.logger.warn(m),
+          error: (m) => ctx.logger.error(m),
+        },
+      });
+    } catch (err: any) {
+      ctx.logger.error(
+        `[auth] organization access policies are NOT bound (${String(err?.message ?? err)}): each organization's own `
+          + 'IP ranges, session limits and multi-factor level are not applied, while the deployment\'s values (the '
+          + 'auth settings) still are. Remedy: restore the settings service and restart.',
+      );
     }
   }
 
@@ -3355,6 +3445,42 @@ export class AuthPlugin implements Plugin {
   }
 
   /**
+   * [#30924] ADR-0069 D5 — the `login_failed` row of a sign-in the
+   * deployment's allow-list refused (`ip-allow-list-refusal-audit.ts`): a
+   * `/sign-in/*` endpoint only, counted by the per-address bound, and written
+   * detached from the refusal, so the answer, and the time it takes, do not
+   * depend on whether the identifier names an account. No `audit` service ⇒
+   * nothing is counted or read.
+   */
+  private auditAllowListRefusal(
+    ctx: PluginContext,
+    mgr: AuthManager,
+    c: any,
+    endpoint: string,
+    ip: string | undefined,
+  ): void {
+    if (!isSignInEndpoint(endpoint)) return;
+    let sink: AuthEventAuditSurface | undefined;
+    try {
+      sink = ctx.getService<AuthEventAuditSurface>('audit');
+    } catch {
+      return;
+    }
+    if (!sink || typeof sink.recordAuthEvent !== 'function') return;
+    const attempts = ipRefusalAuditBoundFor(sink).admit(ip, (line) => ctx.logger.warn(line));
+    if (attempts === undefined) return;
+    const request: Request = c.req.raw;
+    void recordDeploymentListRefusal(sink, {
+      request,
+      endpoint,
+      attempts,
+      fingerprint: signInClientFingerprint({ headers: request.headers }, ip),
+      resolveAccount: (email) => mgr.resolveRefusedSignInAccountId(email),
+      debug: (line, meta) => ctx.logger.debug(line, meta),
+    });
+  }
+
+  /**
    * Register authentication routes with HTTP server
    *
    * Uses better-auth's universal handler for all authentication requests.
@@ -3440,6 +3566,7 @@ export class AuthPlugin implements Plugin {
       const ip = mgr.resolveClientAddress({ headers, ...transportOf(c) });
       if (!mgr.isClientIpAllowed(ip)) {
         this.explainAllowListRefusal(ctx, mgr, ip, headers);
+        this.auditAllowListRefusal(ctx, mgr, c, path.startsWith(basePath) ? path.slice(basePath.length) : path, ip);
         return c.json(
           { success: false, error: { code: 'IP_NOT_ALLOWED', message: 'Sign-in is not allowed from your network.' } },
           403,

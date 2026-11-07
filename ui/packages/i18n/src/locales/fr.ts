@@ -2324,6 +2324,12 @@ const fr = {
         done: "Des collègues ont rejoint l’organisation ou ont été invités.",
         action: "Inviter",
       },
+      connectAssistant: {
+        title: 'Connecter un assistant IA',
+        todo: "Travaillez dans ce système depuis Claude, Doubao et d'autres assistants, en votre nom.",
+        done: "Un assistant IA ou une clé d'API à vous est connecté.",
+        action: 'Connecter',
+      },
     },
     error: {
       connectionFailed: "Impossible de se connecter au serveur",
@@ -3296,6 +3302,12 @@ const fr = {
       cta: "Définir le mot de passe",
       dismiss: "Ignorer",
     },
+    connectAssistant: {
+      title: 'Travaillez ici depuis votre assistant IA',
+      body: "Vous pouvez consulter et modifier vos enregistrements depuis Claude, Doubao et d'autres assistants IA. Chacun agit en votre nom, avec vos propres autorisations.",
+      action: 'Connecter un assistant IA',
+      dismiss: 'Masquer',
+    },
     pendingDrafts: {
       // objectui#12602 — the drafts row in Home's "My work" section: the
       // count, then the first draft names joined by `nameSeparator`, in
@@ -3872,6 +3884,12 @@ const fr = {
       example2: 'Compte le nombre d’enregistrements de chacun de ces objets.',
       example3: 'Quelles actions puis-je exécuter ici, et que fait chacune d’elles ?',
       tryFirst: 'Commencez par la première : si votre assistant répond avec les objets que vous utilisez, la connexion fonctionne.',
+      connected: 'Connecté : {{name}}.',
+      connectedKey: "Connecté avec la clé d'API « {{name}} ».",
+      lastCallHour: "Son dernier appel a eu lieu dans l'heure à partir de {{time}}.",
+      lastCallAt: 'Son dernier appel date du {{time}}.',
+      noCallYet: "Aucun appel pour l'instant : essayez la première demande ci-dessus pour vérifier la connexion.",
+      moreConnected: 'Tout ce qui peut agir en votre nom est listé en bas de cette page.',
     },
     disabled: {
       title: 'La connexion des assistants IA est désactivée ici',
@@ -3955,7 +3973,8 @@ const fr = {
       lastUsedHour: 'Dernière utilisation dans l’heure commençant à {{time}}',
       notRecorded: 'Aucune utilisation enregistrée',
       truncated: 'Seuls les plus récents sont affichés ; vous en avez autorisé d’autres.',
-      withdrawLater: 'Retirer un assistant depuis cette page n’est pas encore disponible.',
+      withdrawTitle: 'Révoquer l’accès de {{name}} ?',
+      withdrawBody: 'L’assistant perd l’accès immédiatement. Pour l’utiliser de nouveau, il faut l’autoriser à nouveau.',
       keys: 'Vos clés API',
       keysEmpty: 'Vous n’avez aucune clé API.',
       created: 'Créée le {{date}}',
@@ -3968,6 +3987,9 @@ const fr = {
       revokeBody: 'Tout ce qui utilise cette clé perd l’accès immédiatement. Cette action est irréversible.',
       revoking: 'Révocation…',
       loadFailed: 'Impossible de charger cette liste : {{message}}',
+      managedBody: 'Les assistants IA que cette personne a autorisés. Chacun agit avec ses autorisations, et Révoquer met fin à son accès immédiatement.',
+      managedEmpty: 'Cette personne n’a encore autorisé aucun assistant IA.',
+      managedTruncated: 'Seuls les plus récents sont affichés ; cette personne en a autorisé d’autres.',
     },
   },
   excelImport: {

@@ -52,7 +52,17 @@ export const ScenarioRunRecordSchema = z.looseObject({
   date: z.iso.date(),
   app: z.string().min(1),
   runner: z.literal('scenario-runner'),
-  env: z.looseObject({ framework: z.string().min(1), driver: z.looseObject({ driver: z.string().min(1) }) }),
+  env: z.looseObject({
+    framework: z.string().min(1),
+    /** `runner/packages.ts` `PackageSource`; judged by {@link unpublishedRunRefusal}, so a record without it still reads. */
+    packages: z.unknown().optional(),
+    /** `runner/driver.ts` `DriverInfo`: what ran the turns; a replay names the driver of its recording (`replayOf`). */
+    driver: z.looseObject({
+      driver: z.string().min(1),
+      version: z.string().optional(),
+      replayOf: z.looseObject({ driver: z.string().min(1), version: z.string().optional() }).optional(),
+    }),
+  }),
   evidenceDir: z.string().min(1),
   results: z.array(z.looseObject({ id: z.string().min(1), verdict: VerdictSchema })),
   scorecard: z.looseObject({ card: z.string().min(1), modes: z.array(z.unknown()) }),
@@ -80,6 +90,23 @@ export interface ReadRecordsResult {
   newest: Map<string, RecordFile>;
   /** JSON files in the directory that are not scenario-runner records (platform-checklist runs, …). */
   ignored: string[];
+}
+
+/**
+ * Why a record's run may not be exported or shown, or `undefined` when it ran
+ * on published packages. ⛔ Only a `published` run is gallery content: a
+ * `--packages workspace` run measured an unreleased build — the record's
+ * `@objectstack/spec` pin reads as a released version all the same — and a
+ * record that does not state its source (written before `--packages`) proves
+ * neither.
+ */
+export function unpublishedRunRefusal(record: ScenarioRunRecord): string | undefined {
+  const p = record.env.packages as { source?: unknown; versions?: unknown; commit?: unknown } | undefined;
+  if (p === undefined || p === null) return 'the record does not state its package source (`env.packages`): only a run on published packages is exported, and this one does not say it was — run the card again';
+  if (p.source === 'workspace') return `the run was on this workspace's unreleased packages (\`packages: workspace @ ${String(p.commit)}\`): only a run on published packages is exported or shown`;
+  if (p.source !== 'published') return `the record's package source is \`${String(p.source)}\`, not \`published\`: only a run on published packages is exported or shown`;
+  if (!Array.isArray(p.versions) || p.versions.length === 0) return 'the record states published packages but no version: the run installed no project, so nothing proves what it ran on';
+  return undefined;
 }
 
 export class RunRecordError extends Error {

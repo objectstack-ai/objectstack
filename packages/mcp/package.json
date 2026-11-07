@@ -33,6 +33,7 @@
     "@objectstack/metadata-core": "workspace:*",
     "@objectstack/spec": "workspace:*",
     "@objectstack/types": "workspace:*",
+    "unpdf": "1.9.1",
     "zod": "^4.6.6"
   },
   "devDependencies": {

@@ -44,8 +44,9 @@ import { describe, it, expect, beforeEach } from 'vitest';
 
 import { MCPServerRuntime } from './mcp-server-runtime.js';
 import type { McpActionBridge, McpDataBridge } from './mcp-http-tools.js';
+import type { McpFileBridge } from './file-content.js';
 
-interface StubBridge extends McpDataBridge, McpActionBridge {
+interface StubBridge extends McpDataBridge, McpActionBridge, McpFileBridge {
   calls: any[];
 }
 
@@ -64,6 +65,16 @@ function makeBridge(): StubBridge {
     async listActions() { calls.push(['listActions']); return [{ name: 'complete_task', objectName: 'crm_opportunity' }]; },
     async runAction(name: string, input: any) { calls.push(['runAction', name, input]); return { ok: true }; },
     async resumeRun(runId: string, input: any) { calls.push(['resumeRun', runId, input]); return { ok: true }; },
+    // [#30892] The file pair's members, so `read_file` / `create_upload_link` are swept too.
+    async listRecordFiles(object: string, recordId: string) { calls.push(['listRecordFiles', object, recordId]); return []; },
+    async readRecordFile(object: string, recordId: string, target: any, options: any) {
+      calls.push(['readRecordFile', object, recordId, target, options]);
+      return { fileId: 'f1', name: 'a.txt', mimeType: 'text/plain', size: 1, maxBytes: options.maxBytes, bytes: new Uint8Array([0x61]), download: null };
+    },
+    async createUploadLink(object: string, recordId: string, target: any) {
+      calls.push(['createUploadLink', object, recordId, target]);
+      return { url: 'https://x.test/api/v1/storage/upload-links/t', expiresAt: '2026-11-06T12:10:00.000Z' };
+    },
   };
 }
 
@@ -114,6 +125,8 @@ const VALID_ARGS: Record<string, Record<string, unknown>> = {
   list_actions: {},
   run_action: { actionName: 'complete_task' },
   resume_run: { runId: 'run_1' },
+  read_file: { objectName: 'crm_opportunity', recordId: 'r1', field: 'contract' },
+  create_upload_link: { objectName: 'crm_opportunity', recordId: 'r1', field: 'contract' },
 };
 
 describe('MCP tool arguments — undeclared keys are refused (#16913)', () => {
@@ -217,13 +230,14 @@ describe('MCP tool arguments — undeclared keys are refused (#16913)', () => {
 
   // ── The sweep: every advertised tool holds the same posture ────────────────
 
-  it('advertises the thirteen tools this sweep covers', async () => {
+  it('advertises the fifteen tools this sweep covers', async () => {
     const json = await rpc(runtime, bridge, 'tools/list');
     const names = (json.result?.tools ?? []).map((t: any) => t.name).sort();
     expect(names).toEqual(Object.keys(VALID_ARGS).sort());
     // [#15705] Twelve with `resume_run`, which this stub's bridge implements;
-    // [#30891] thirteen with `delete_records`.
-    expect(names).toHaveLength(13);
+    // [#30891] thirteen with `delete_records`; [#30892] fifteen with
+    // `read_file` and `create_upload_link`, which it implements too.
+    expect(names).toHaveLength(15);
   });
 
   it('every advertised tool ACCEPTS its declared arguments (the sweep control)', async () => {

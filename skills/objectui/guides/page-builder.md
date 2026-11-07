@@ -300,7 +300,7 @@ When pages need heavy widgets (grids, forms, kanbans, charts), import the plugin
 Those three `gantt` keys are the required ones; every other option — the tree,
 dependency, baseline, resource-view, quick-filter, working-calendar and
 read-only surfaces — is optional and documented in
-[`@object-ui/plugin-gantt`'s README](https://github.com/objectstack-ai/objectui/blob/main/packages/plugin-gantt/README.md).
+[`@object-ui/plugin-gantt`'s README](https://github.com/objectstack-ai/objectstack/tree/main/ui/packages/plugin-gantt).
 A flat `startDateField` / `endDateField` / `titleField` on the node is refused
 by name; the refusal points at `properties.gantt.KEY`, the block's one home.
 

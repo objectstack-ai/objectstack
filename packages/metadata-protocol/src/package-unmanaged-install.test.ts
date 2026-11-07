@@ -954,20 +954,22 @@ describe('planUnmanagedImport — `targetNamespace`, the rename-on-install (#307
         }
     });
 
-    it('refuses a value the namespace declaration refuses — 400, naming `targetNamespace`, never sanitised', () => {
+    it('refuses a value the namespace declaration refuses — INVALID_REQUEST / 400, naming `targetNamespace`, never sanitised', () => {
         for (const targetNamespace of ['Acme', 'a', 'my-ns', '1acme', 'acme_namespace_too_long']) {
             const err = (() => { try { plan(renamableBody(), { targetNamespace }); } catch (e) { return e as any; } })();
             const envelope = resolveThrownHttpError(err);
-            expect([envelope.status, envelope.code]).toEqual([400, 'VALIDATION_ERROR']);
+            expect([envelope.status, envelope.code]).toEqual([400, 'INVALID_REQUEST']);
+            expect(err.details).toEqual({ targetNamespace });
             expect(err.message).toContain(`Invalid package namespace '${targetNamespace}' on \`targetNamespace\``);
         }
     });
 
-    it('refuses a platform-reserved namespace — `base`, `system`, `sys` — 400', () => {
+    it('refuses a platform-reserved namespace — `base`, `system`, `sys` — INVALID_REQUEST / 400, naming `targetNamespace`', () => {
         for (const targetNamespace of ['base', 'system', 'sys']) {
             const err = (() => { try { plan(renamableBody(), { targetNamespace }); } catch (e) { return e as any; } })();
             const envelope = resolveThrownHttpError(err);
-            expect([envelope.status, envelope.code]).toEqual([400, 'VALIDATION_ERROR']);
+            expect([envelope.status, envelope.code]).toEqual([400, 'INVALID_REQUEST']);
+            expect(err.details).toEqual({ targetNamespace });
             expect(err.message).toContain(`\`targetNamespace\` '${targetNamespace}' is a platform-reserved namespace`);
         }
     });

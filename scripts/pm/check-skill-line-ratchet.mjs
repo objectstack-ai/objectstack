@@ -1348,7 +1348,13 @@ export const CEILINGS = new Map([
   // body, filed under the maintainer's verbatim 「开发中遇到的问题应该通过安全通道上报而不是直接处理」. The
   // dev's route and the fix-only-by-order sentence folded into existing lines (§9 L60, §3 L28). Measured
   // delta +2 (62 → 64 lines); landed count, headroom 0.
-  ['.claude/skills/pm-dispatch/references/security-findings.md', 64],
+  // 64 → 65 (#30114): the private-repository branch — a seat tells a public repository from a private one by its
+  // `private` flag read from the API, a private repository's private card is an ordinary `security` issue its fix
+  // is dispatched from, and its PRs, commits and changesets still state the rule and link that issue. +4 lines,
+  // paid by three same-file deletions (a stale private-repository line, the seat's own-account sentence, the
+  // cross-repo finder's filing line); the one-line remainder raised on the maintainer's ruling of record, comment
+  // 6704167516 on that card (option A, 2026-11-07). Measured delta +1 (64 → 65 lines); landed count, headroom 0.
+  ['.claude/skills/pm-dispatch/references/security-findings.md', 65],
   ['.claude/skills/pm-dispatch/references/external-contributions.md', 22],
   ['.claude/skills/pm-dispatch/references/reading-discipline.md', 37],
   // Lowered 51 → 47 by #25712 item 4: objectui stopped being a sister repo, so

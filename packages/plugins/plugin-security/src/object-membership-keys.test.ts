@@ -404,14 +404,151 @@ describe('[#25234 A] explain names the key, the roster and who can grant it', ()
   });
 });
 
+// [#31129 ruling A] The person is a record: an `employee` roster whose key
+// takes `valueField: 'id'` stages the caller's own employee rows, and a leave
+// request policy reading `employee in current_user.my_employee_ids` admits
+// exactly the caller's own requests.
+const SELF_KEY = 'my_employee_ids';
+const SELF_SERVICE = authored({
+  name: 'qa_employee_self',
+  label: 'Employee self-service',
+  objects: { qa_leave_request: { allowRead: true } },
+  rowLevelSecurity: [
+    { name: 'qa_leave_mine', object: 'qa_leave_request', operation: 'select', using: `employee in current_user.${SELF_KEY}` },
+  ],
+});
+
+async function bootPeople(declaration: Record<string, unknown> | null = { userField: 'user', valueField: 'id' }) {
+  const driver = new SqlDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true });
+  const engine = new ObjectQL();
+  engines.push(engine);
+  engine.registerDriver(driver as never, true);
+  await engine.init();
+  engine.registerApp({
+    id: 'com.objectstack.qa.object-membership-keys-self',
+    name: 'Object membership keys, own rows',
+    version: '1.0.0',
+    type: 'plugin',
+    scope: 'system',
+    objects: [
+      {
+        name: 'qa_employee',
+        label: 'qa_employee',
+        fields: { name: { name: 'name', type: 'text' }, user: { name: 'user', type: 'text' } },
+        ...(declaration ? { membershipKeys: { [SELF_KEY]: declaration } } : {}),
+      },
+      {
+        name: 'qa_leave_request',
+        label: 'qa_leave_request',
+        fields: { name: { name: 'name', type: 'text' }, employee: { name: 'employee', type: 'text' } },
+      },
+    ],
+  } as never);
+  await engine.syncSchemas();
+  for (const o of [SysPosition, SysUserPosition, SysPermissionSet, SysUserPermissionSet, SysPositionPermissionSet]) {
+    if (!engine.registry.getObject(o.name)) engine.registry.registerObject(o as never, 'qa.authz-read-set');
+  }
+  const sets = [...defaultPermissionSets, SELF_SERVICE];
+  const services: Record<string, unknown> = {
+    'org-scoping': { name: 'com.objectstack.org-scoping' },
+    tenancy: { posture: 'isolated' },
+    manifest: { register: vi.fn() },
+    objectql: engine,
+    metadata: { get: async (_t: string, name: string) => engine.getSchema(name) ?? null, list: async () => sets },
+  };
+  const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
+  let security: any;
+  const ctx = {
+    logger,
+    registerService: (name: string, impl: unknown) => { if (name === 'security') security = impl; },
+    getService: (name: string) => {
+      if (!(name in services)) throw new Error(`service not registered: ${name}`);
+      return services[name];
+    },
+  };
+  const plugin = new SecurityPlugin({ defaultPermissionSets: sets, fallbackPermissionSet: null });
+  await plugin.init(ctx as never);
+  await plugin.start(ctx as never);
+  vi.spyOn((engine as unknown as { logger: { warn: () => void } }).logger, 'warn').mockImplementation(() => undefined);
+
+  const table = (driver as unknown as { knex: Table }).knex;
+  // u_x is employee e_05 in organisation X, and also e_07 in organisation Y
+  // (dropped by the caller's wall); u_y is e_06.
+  await table('qa_employee').insert([
+    { id: 'e_05', name: 'E-05', user: 'u_x', organization_id: 'org_x' },
+    { id: 'e_06', name: 'E-06', user: 'u_y', organization_id: 'org_x' },
+    { id: 'e_07', name: 'E-07', user: 'u_x', organization_id: 'org_y' },
+  ]);
+  await table('qa_leave_request').insert([
+    { id: 'lr_1', name: 'LR-1', employee: 'e_05', organization_id: 'org_x' },
+    { id: 'lr_2', name: 'LR-2', employee: 'e_06', organization_id: 'org_x' },
+    { id: 'lr_3', name: 'LR-3', employee: 'e_07', organization_id: 'org_x' },
+    { id: 'lr_4', name: 'LR-4', employee: 'e_05', organization_id: 'org_x' },
+  ]);
+  const findSpy = vi.spyOn(engine, 'find');
+  const ids = async (context: object): Promise<string[]> => {
+    const rows = (await engine.find('qa_leave_request', { context: { ...context } } as never)) as Array<{ id: string }>;
+    return rows.map((r) => r.id).sort();
+  };
+  const rosterReads = () =>
+    findSpy.mock.calls.filter(([object, opts]) => object === 'qa_employee' && (opts as any)?.context?.isSystem === true);
+  return { ids, rosterReads, security: () => security };
+}
+
+describe("[#31129 ruling A] a key with `valueField: 'id'` stages the caller's own roster rows", () => {
+  it('an employee sees their own leave requests only, inside their organisation', async () => {
+    const { ids, rosterReads } = await bootPeople();
+    expect(await ids(principal([SELF_SERVICE.name]))).toEqual(['lr_1', 'lr_4']);
+    expect(await ids(principal([SELF_SERVICE.name], { userId: 'u_y', org_user_ids: ['u_y'] }))).toEqual(['lr_2']);
+    // The roster read projects `id` once, not `['id', 'id']`.
+    expect((rosterReads()[0]?.[1] as { fields?: unknown })?.fields).toEqual(['id']);
+  });
+
+  it('the own-row set is de-duplicated and bounded like any other: over the bound it stays unstaged', async () => {
+    const policy = { name: 'p', object: 'qa_po', operation: 'select', using: `supplier in current_user.${KEY}` } as never;
+    const own = { userField: 'user', valueField: 'id' };
+    const stage = async (rows: unknown[]) => {
+      const context: Record<string, any> = { userId: 'u_x', tenantId: 'org_x' };
+      await stageDeclaredMembershipKeys(stubHost({ find: async () => rows }, own), context, [policy], 'qa_po');
+      return context.rlsMembership?.[KEY];
+    };
+    expect(await stage([{ id: 'c_1' }, { id: 'c_2' }, { id: 'c_1' }])).toEqual(['c_1', 'c_2']);
+    const over = Array.from({ length: MEMBERSHIP_KEY_MAX_VALUES + 1 }, (_, i) => ({ id: `c_${i}` }));
+    expect(await stage(over)).toBeUndefined();
+    expect(await stage(over.slice(1))).toHaveLength(MEMBERSHIP_KEY_MAX_VALUES);
+  });
+
+  it("explain links a leave request to the caller's own employee row", async () => {
+    const { security } = await bootPeople();
+    const decision = await security().explain(
+      { object: 'qa_leave_request', operation: 'read', recordId: 'lr_1' },
+      principal([SELF_SERVICE.name]),
+    );
+    const layer = decision.layers.find((l: { layer: string }) => l.layer === 'rls');
+    expect(layer.detail).toContain(`'${SELF_KEY}', declared on 'qa_employee' as the 'id' values of its rows whose 'user' is the user`);
+    expect(layer.record.rules).toEqual([expect.objectContaining({ via: `membership:${SELF_KEY}`, effect: 'admits' })]);
+    expect(layer.record.detail).toContain("'qa_employee' row 'e_05' links them to 'e_05' (its 'id')");
+  });
+
+  it('CONTROL: a caller with no employee row sees nothing, and without the declaration nobody does', async () => {
+    const { ids } = await bootPeople();
+    expect(await ids(principal([SELF_SERVICE.name], { userId: 'u_z', org_user_ids: ['u_z'] }))).toEqual([]);
+    const undeclared = await bootPeople(null);
+    expect(await undeclared.ids(principal([SELF_SERVICE.name]))).toEqual([]);
+  });
+});
+
 /** A staging host over a stub engine whose registry declares the key on the roster. */
-function stubHost(engine: { find: (object: string, opts: unknown) => Promise<unknown[]> }): MembershipKeyStagingHost {
+function stubHost(
+  engine: { find: (object: string, opts: unknown) => Promise<unknown[]> },
+  declaration: Record<string, unknown> = DECLARATION,
+): MembershipKeyStagingHost {
   const rosterFields = new Set(['id', 'name', 'user', 'supplier', 'active', 'organization_id']);
   return {
     logger: { warn: vi.fn(), error: vi.fn() },
     ql: {
       find: engine.find,
-      registry: { getAllObjects: () => [{ name: 'qa_supplier_contact', membershipKeys: { [KEY]: DECLARATION } }] },
+      registry: { getAllObjects: () => [{ name: 'qa_supplier_contact', membershipKeys: { [KEY]: declaration } }] },
     },
     metadata: {},
     rlsCompiler: new RLSCompiler(),

@@ -24,6 +24,7 @@ import type { AppHarness, HttpAnswer, PersonaAccount, ToolAnswer } from '../../s
 import { RecordingDriver, type AgentDriver, type AskTask, type AuthorTask, type DriverInfo, type Recording } from '../../src/runner/driver.js';
 import { namespacedScenario } from '../../src/runner/namespace.js';
 import { runCard, type CardRun, type ProjectOps } from '../../src/runner/orchestrate.js';
+import type { PackageSource } from '../../src/runner/packages.js';
 import { runRecord } from '../../src/runner/scorecard.js';
 import type { ParsedTurn } from '../../src/runner/transcript.js';
 
@@ -34,13 +35,13 @@ export const CARD_ID = 'crm_account_with_contacts';
 export const NS = 'democrm';
 
 export function loadCrm(): LoadedScenario {
-  const { card, refusals } = loadScenarioFile(join(CARDS_DIR, `${CARD_ID}.json`), { areas: readCapabilityAreas(AREAS_DIR) });
+  const { card, refusals } = loadScenarioFile(join(CARDS_DIR, `${CARD_ID}.json`), { areas: readCapabilityAreas(AREAS_DIR), library: 'open' });
   if (!card) throw new Error(refusals.map(formatRefusal).join('\n'));
   return card;
 }
 
 export function loadAllCards(): LoadedScenario[] {
-  return loadScenarios(CARDS_DIR, { areas: readCapabilityAreas(AREAS_DIR) }).cards;
+  return loadScenarios(CARDS_DIR, { areas: readCapabilityAreas(AREAS_DIR), library: 'open' }).cards;
 }
 
 export const tempDir = (prefix: string) => mkdtempSync(join(tmpdir(), `gallery-${prefix}-`));
@@ -135,6 +136,8 @@ export class FakeApp implements AppHarness {
   installed: Record<string, unknown> | undefined;
   /** Seed rows this app refuses, `object/id`. */
   refuse = new Set<string>();
+  /** Every API key this app issues is this prefix + the persona's id (`admin` for the admin). */
+  keyPrefix = 'key-';
   signedIn = 0;
   async signInAdmin() {
     this.signedIn++;
@@ -146,14 +149,21 @@ export class FakeApp implements AppHarness {
     return 'org';
   }
   async createPersona(persona: string, permissionSet: string): Promise<PersonaAccount> {
-    return { persona, userId: `u-${persona}`, email: `${persona}@scenario.test`, apiKey: `key-${persona}`, permissionSet: { name: permissionSet, assigned: true } };
+    return { persona, userId: `u-${persona}`, email: `${persona}@scenario.test`, apiKey: `${this.keyPrefix}${persona}`, permissionSet: { name: permissionSet, assigned: true } };
   }
   async adminApiKey() {
-    return 'key-admin';
+    return `${this.keyPrefix}admin`;
   }
   async insertRow(object: string, row: Record<string, unknown>): Promise<HttpAnswer> {
     if (this.refuse.has(`${object}/${String(row.id)}`)) return { ok: false, status: 400, body: {}, code: 'VALIDATION_FAILED', message: 'refused by the double' };
     (this.rows[object] ??= []).push({ ...row });
+    return { ok: true, status: 200, body: {} };
+  }
+  /** The seed's second pass (a lookup that closes a reference cycle). */
+  async updateRow(object: string, id: string, patch: Record<string, unknown>): Promise<HttpAnswer> {
+    const row = (this.rows[object] ?? []).find((r) => r.id === id);
+    if (!row) return { ok: false, status: 404, body: {}, code: 'NOT_FOUND', message: 'no such row in the double' };
+    Object.assign(row, patch);
     return { ok: true, status: 200, body: {} };
   }
   async listRows(object: string) {
@@ -173,7 +183,9 @@ export class FakeApp implements AppHarness {
     return out;
   }
   /** The validation probe's door: this double validates, so it refuses every write it is sent. */
-  async callTool(): Promise<ToolAnswer> {
+  async callTool(_apiKey: string, _tool: string, args: Record<string, unknown>): Promise<ToolAnswer> {
+    // A faithful app: the partner may not edit an account (the card's overstep), and the bad email fails validation.
+    if (args.objectName === 'democrm_account') return { output: JSON.stringify({ error: { code: 'PERMISSION_DENIED', status: 403 } }), isError: true };
     return { output: JSON.stringify({ error: { code: 'VALIDATION_FAILED', status: 400 } }), isError: true };
   }
 }
@@ -242,13 +254,23 @@ export interface FixtureRun {
 
 /** One run of the crm card, both modes; `iterateRun: false` leaves the iterate Run halves not run; `refuse` makes every booted app refuse those seed rows. */
 export async function runCrm(
-  opts: { work?: string; date?: string; iterateRun?: boolean; modes?: Array<'scratch' | 'template'>; /** Seed rows every booted app refuses, `object/id`. */ refuse?: string[] } = {},
+  opts: {
+    work?: string;
+    date?: string;
+    iterateRun?: boolean;
+    modes?: Array<'scratch' | 'template'>;
+    /** Seed rows every booted app refuses, `object/id`. */ refuse?: string[];
+    /** The package source the record states; default published 18.3.0. */ packages?: PackageSource;
+    /** The prefix of every API key the booted apps issue; default `key-`. */ keyPrefix?: string;
+    /** Wraps the scripted model (e.g. to send its turns through another driver); the recording records what this answers. */ wrap?: (scripted: AgentDriver) => AgentDriver;
+  } = {},
 ): Promise<FixtureRun> {
   const scenario = loadCrm();
   const work = opts.work ?? tempDir('work');
   const fresh = () => {
     const app = new FakeApp();
     for (const r of opts.refuse ?? []) app.refuse.add(r);
+    if (opts.keyPrefix !== undefined) app.keyPrefix = opts.keyPrefix;
     return app;
   };
   let current = fresh();
@@ -258,10 +280,12 @@ export async function runCrm(
     current = fresh();
     return boot(dir);
   };
-  const driver = new RecordingDriver(new ScriptedDriver(scenario, ops, () => current));
+  const scripted = new ScriptedDriver(scenario, ops, () => current);
+  const driver = new RecordingDriver(opts.wrap ? opts.wrap(scripted) : scripted);
   const cardRun = await runCard(scenario, driver, ops, { modes: opts.modes ?? ['scratch', 'template'], admin: ADMIN, ...(opts.iterateRun === false ? { iterateRun: false } : {}) });
   const date = opts.date ?? '2026-11-06';
-  const record = runRecord({ run: `${date}-scenario-${CARD_ID}`, date, framework: 'abc1234', driver: driver.info(), runner: 'scenario-runner', evidenceDir: work }, cardRun);
+  const packages = opts.packages ?? { source: 'published', versions: ['18.3.0'] };
+  const record = runRecord({ run: `${date}-scenario-${CARD_ID}`, date, framework: 'abc1234', packages, driver: driver.info(), runner: 'scenario-runner', evidenceDir: work }, cardRun);
   return { scenario, work, cardRun, record, recording: driver.recording };
 }
 

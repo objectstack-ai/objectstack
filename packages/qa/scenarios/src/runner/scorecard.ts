@@ -11,7 +11,22 @@
  *   - Build: the artifact score's counted checks (`expect`, scored tags, agent
  *     actions, and one failing check per bare item name); a build with no
  *     artifact is 0 of the card's `expect` count, never "not run" — a degraded
- *     build must show up. Each bare item name is also listed as a finding.
+ *     build must show up. Each bare item name is also listed as a finding, and
+ *     so is each reference cycle the build made required on every side (its
+ *     seed cannot load it).
+ *   - A build whose authoring turn did not finish — killed by the runner's
+ *     timeout (`author timed out after N min`), or ended with no result line
+ *     or an error result (`author turn failed: …`) — is NOT MEASURED, never a
+ *     degraded score: nothing after it ran. The author row shows every
+ *     authoring turn's `resultSubtype`, the turns it took of the cap it ran
+ *     under (`80/80 turns` beside `error_max_turns`), and its elapsed time.
+ *   - Model: the model each turn was SERVED, read off its stream, never the
+ *     one asked for. The author row names it, and the `Run · model` rows count
+ *     the question and operation turns per served model. A turn served another
+ *     model than it asked for (`--model`, `--author-model`, `--ask-model`) is
+ *     marked `⚠`: `asked for sonnet` on the author row, `⚠ N not sonnet` on a
+ *     Run row. Each turn in the record's `cardRun` carries `model`,
+ *     `requestedModel` and `modelMismatch`.
  *   - Run-问数: one turn per (question, persona); it passes when the answer is
  *     correct AND cited AND leaks nothing. Leaks are also counted apart, so a
  *     leaking answer shows up even when it is otherwise right.
@@ -26,6 +41,8 @@
 
 import type { CardRun, ModeRun, RunHalf, BuildHalf } from './orchestrate.js';
 import type { DriverInfo } from './driver.js';
+import { packagesLine, type PackageSource } from './packages.js';
+import { cycleText } from './seed.js';
 
 export interface Tally {
   passed: number;
@@ -33,12 +50,33 @@ export interface Tally {
 }
 
 export interface HalfScores {
-  build?: Tally & { degraded: boolean; failedCommands: string[] };
+  build?: Tally & {
+    degraded: boolean;
+    failedCommands: string[];
+    /** The authoring turn did not finish (`BuildHalf.notMeasured`): 0 of 0, never degraded. */
+    notMeasuredReason?: string;
+    /** The authoring turn: how it ended, the turns it took of the cap it ran under, its wall-clock time, and the model it was served of the one it asked for. */
+    author?: { resultSubtype?: string; numTurns?: number; maxTurns?: number; elapsedMs?: number; model?: string; requestedModel?: string; modelMismatch?: true };
+  };
   /** Rows the app took of the rows the runner sent. */
   seed?: { inserted: number; total: number; refused: number };
   ask?: Tally & { leaks: number; notMeasured: number };
   operations?: Tally & { notMeasured: number };
+  /** The models the half's question and operation turns were served ({@link modelTally}). */
+  models?: ModelTally;
 }
+
+/** The models a half's persona turns — every question and operation turn that ran — were served. */
+export interface ModelTally {
+  /** Turns per served model (`TurnSummary.model`); a turn whose stream named none counts under {@link MODEL_NOT_REPORTED}. */
+  served: Record<string, number>;
+  /** Every model the turns asked for (`--model` / `--ask-model`); empty ⇒ the login's default. */
+  requested: string[];
+  /** Turns served a model other than the one they asked for (`TurnSummary.modelMismatch`). */
+  mismatched: number;
+}
+
+export const MODEL_NOT_REPORTED = '(not reported)';
 
 export interface ModeScorecard {
   mode: 'scratch' | 'template';
@@ -51,6 +89,8 @@ export interface ModeScorecard {
 
 export interface CardScorecard {
   card: string;
+  /** Where the run's `@objectstack/*` packages came from (`--packages`); the table's first line states it. */
+  packages?: PackageSource;
   counts: CardRun['counts'];
   modes: ModeScorecard[];
 }
@@ -59,10 +99,22 @@ const cmdName = (c: string) => c.replace(/^npx objectstack /, '').split(' ')[0]!
 
 export function buildTally(b: BuildHalf | undefined, expectCount: number): HalfScores['build'] | undefined {
   if (!b) return undefined;
+  const author = b.author
+    ? {
+        ...(b.author.resultSubtype ? { resultSubtype: b.author.resultSubtype } : {}),
+        ...(b.author.numTurns !== undefined ? { numTurns: b.author.numTurns } : {}),
+        ...(b.author.maxTurns !== undefined ? { maxTurns: b.author.maxTurns } : {}),
+        ...(b.author.elapsedMs !== undefined ? { elapsedMs: b.author.elapsedMs } : {}),
+        ...(b.author.model ? { model: b.author.model } : {}),
+        ...(b.author.requestedModel ? { requestedModel: b.author.requestedModel } : {}),
+        ...(b.author.modelMismatch ? { modelMismatch: true as const } : {}),
+      }
+    : undefined;
+  if (b.notMeasured) return { passed: 0, total: 0, degraded: false, failedCommands: [], notMeasuredReason: b.notMeasured, ...(author ? { author } : {}) };
   const failedCommands = b.commands.filter((c) => c.exit !== 0).map((c) => cmdName(c.command));
   const passed = b.score?.passed ?? 0;
   const total = b.score?.total ?? expectCount;
-  return { passed, total, degraded: !b.score || failedCommands.length > 0 || passed < total, failedCommands };
+  return { passed, total, degraded: !b.score || failedCommands.length > 0 || passed < total, failedCommands, ...(author ? { author } : {}) };
 }
 
 export function seedTally(r: RunHalf | undefined): HalfScores['seed'] | undefined {
@@ -89,12 +141,28 @@ export function opsTally(r: RunHalf | undefined): HalfScores['operations'] | und
   return { passed: measured.filter((o) => o.grade?.pass).length, total: measured.length, notMeasured: r.operations.length - measured.length };
 }
 
+export function modelTally(r: RunHalf | undefined): ModelTally | undefined {
+  const turns = [...(r?.questions ?? []), ...(r?.operations ?? [])].flatMap((x) => (x.turn ? [x.turn] : []));
+  if (turns.length === 0) return undefined;
+  const served: Record<string, number> = {};
+  for (const t of turns) served[t.model ?? MODEL_NOT_REPORTED] = (served[t.model ?? MODEL_NOT_REPORTED] ?? 0) + 1;
+  const requested = [...new Set(turns.flatMap((t) => (t.requestedModel ? [t.requestedModel] : [])))];
+  return { served, requested, mismatched: turns.filter((t) => t.modelMismatch).length };
+}
+
 /** An artifact-less build scores 0 of 1 — a degraded build is never "nothing to score". */
 const NO_ARTIFACT_TOTAL = 1;
 
 /** One finding per bare item name a build declared, named per item. */
 export function bareNameFindings(b: BuildHalf | undefined, half: string): string[] {
   return (b?.score?.naming ?? []).map((c) => `${half}: bare item name ${c.check.slice('bare-name:'.length).replace(':', ' ')} (${c.detail})`);
+}
+
+/** One finding per reference cycle a build made required on every side, naming the cycle. */
+export function requiredCycleFindings(b: BuildHalf | undefined, half: string): string[] {
+  return (b?.requiredCycles ?? []).map(
+    (c) => `${half}: the reference cycle ${cycleText(c)} is required on every side, so the seed cannot load it (at least one side of a reference cycle must be optional)`,
+  );
 }
 
 export function modeScorecard(m: ModeRun): ModeScorecard {
@@ -107,11 +175,19 @@ export function modeScorecard(m: ModeRun): ModeScorecard {
   if (a) first.ask = a;
   const o = opsTally(m.run);
   if (o) first.operations = o;
+  const mt = modelTally(m.run);
+  if (mt) first.models = mt;
   const out: ModeScorecard = {
     mode: m.mode,
     first,
     tags: (m.build?.score ?? m.iterate?.build.score)?.tags.map((t) => ({ tag: t.tag, status: t.status })) ?? [],
-    findings: [...m.findings, ...bareNameFindings(m.build, 'build'), ...bareNameFindings(m.iterate?.build, 'iterate build')],
+    findings: [
+      ...m.findings,
+      ...bareNameFindings(m.build, 'build'),
+      ...requiredCycleFindings(m.build, 'build'),
+      ...bareNameFindings(m.iterate?.build, 'iterate build'),
+      ...requiredCycleFindings(m.iterate?.build, 'iterate build'),
+    ],
   };
   if (m.skipped) out.skipped = m.skipped;
   if (m.iterate) {
@@ -124,36 +200,75 @@ export function modeScorecard(m: ModeRun): ModeScorecard {
     if (ia) it.ask = ia;
     const io = opsTally(m.iterate.run);
     if (io) it.operations = io;
+    const imt = modelTally(m.iterate.run);
+    if (imt) it.models = imt;
     if (m.iterate.changeSize) it.changeSize = m.iterate.changeSize.total;
     out.iterate = it;
   }
   return out;
 }
 
-export function cardScorecard(run: CardRun): CardScorecard {
-  return { card: run.card, counts: run.counts, modes: run.modes.map((m) => modeScorecard(m)) };
+export function cardScorecard(run: CardRun, packages?: PackageSource): CardScorecard {
+  return { card: run.card, ...(packages ? { packages } : {}), counts: run.counts, modes: run.modes.map((m) => modeScorecard(m)) };
 }
 
 const cell = (t: (Tally & { notMeasured?: number }) | undefined) => (t ? `${t.passed}/${t.total}${t.notMeasured ? ` · ${t.notMeasured} not measured` : ''}` : '—');
 const seedCell = (s: HalfScores['seed']) => (s ? `${s.inserted}/${s.total}${s.refused ? ` ⚠ seed: ${s.refused} refused` : ''}` : '—');
+
+/** `42s`, `15m 00s`. */
+export const elapsedText = (ms: number): string => {
+  const s = Math.round(ms / 1000);
+  return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, '0')}s`;
+};
+
+const buildCell = (b: HalfScores['build']) =>
+  !b ? '—' : b.notMeasuredReason ? `not measured: ${b.notMeasuredReason}` : `${cell(b)}${b.degraded ? ' ⚠ degraded' : ''}${b.failedCommands.length ? ` (failed: ${b.failedCommands.join(', ')})` : ''}`;
+/** `300/300 turns`; `?/300 turns` when no result line reported a count; `17 turns` on a recording without the cap; nothing when neither is known. */
+const turnsText = (a: { numTurns?: number; maxTurns?: number }): string | undefined =>
+  a.maxTurns !== undefined ? `${a.numTurns ?? '?'}/${a.maxTurns} turns` : a.numTurns !== undefined ? `${a.numTurns} turn${a.numTurns === 1 ? '' : 's'}` : undefined;
+/** `claude-opus-5-5`; `claude-opus-5-5 ⚠ asked for sonnet`; `model not reported (asked for sonnet)`; nothing when neither is known. */
+const servedText = (a: { model?: string; requestedModel?: string; modelMismatch?: true }): string | undefined =>
+  a.model
+    ? `${a.model}${a.modelMismatch ? ` ⚠ asked for ${a.requestedModel}` : ''}`
+    : a.requestedModel
+      ? `model not reported (asked for ${a.requestedModel})`
+      : undefined;
+const authorCell = (b: HalfScores['build']) =>
+  b?.author
+    ? [b.author.resultSubtype ?? '(no result)', turnsText(b.author), b.author.elapsedMs !== undefined ? elapsedText(b.author.elapsedMs) : 'elapsed not recorded', servedText(b.author)]
+        .filter(Boolean)
+        .join(' · ')
+    : '—';
+/** `claude-sonnet-4-5 ×20, claude-opus-5-5 ×4 ⚠ 4 not sonnet`; `—` when no turn named a model and none was asked for. */
+const modelCell = (t: ModelTally | undefined): string => {
+  if (!t) return '—';
+  const served = Object.entries(t.served).sort(([an, a], [bn, b]) => b - a || an.localeCompare(bn));
+  if (t.requested.length === 0 && served.every(([name]) => name === MODEL_NOT_REPORTED)) return '—';
+  return `${served.map(([name, n]) => `${name} ×${n}`).join(', ')}${t.mismatched ? ` ⚠ ${t.mismatched} not ${t.requested.join(' / ')}` : ''}`;
+};
 
 /** The scorecard as a markdown table: the modes side by side, one row per half. */
 export function renderScorecard(sc: CardScorecard): string {
   const lines = [
     `### \`${sc.card}\` — ${sc.counts.questions} questions (${sc.counts.questionTurns} persona turns), ${sc.counts.operations} operations, ${sc.counts.personas} personas`,
     '',
+    ...(sc.packages ? [packagesLine(sc.packages), ''] : []),
     `| Half | ${sc.modes.map((m) => m.mode).join(' | ')} |`,
     `|:---|${sc.modes.map(() => ':---').join('|')}|`,
   ];
   const row = (label: string, f: (m: ModeScorecard) => string) => lines.push(`| ${label} | ${sc.modes.map((m) => (m.skipped ? `skipped` : f(m))).join(' | ')} |`);
-  row('Build', (m) => (m.first.build ? `${cell(m.first.build)}${m.first.build.degraded ? ' ⚠ degraded' : ''}${m.first.build.failedCommands.length ? ` (failed: ${m.first.build.failedCommands.join(', ')})` : ''}` : '—'));
+  row('Build', (m) => buildCell(m.first.build));
+  row('Build · author', (m) => authorCell(m.first.build));
   row('Seed', (m) => seedCell(m.first.seed));
   row('Run-问数', (m) => (m.first.ask ? `${cell(m.first.ask)}${m.first.ask.leaks ? ` ⚠ ${m.first.ask.leaks} leaking` : ''}` : '—'));
   row('Run-operations', (m) => cell(m.first.operations));
-  row('Iterate · Build', (m) => (m.iterate?.build ? `${cell(m.iterate.build)}${m.iterate.build.degraded ? ' ⚠ degraded' : ''}` : '—'));
+  row('Run · model', (m) => modelCell(m.first.models));
+  row('Iterate · Build', (m) => buildCell(m.iterate?.build));
+  row('Iterate · author', (m) => authorCell(m.iterate?.build));
   row('Iterate · Seed', (m) => seedCell(m.iterate?.seed));
   row('Iterate · Run-问数', (m) => (m.iterate?.ask ? `${cell(m.iterate.ask)}${m.iterate.ask.leaks ? ` ⚠ ${m.iterate.ask.leaks} leaking` : ''}` : '—'));
   row('Iterate · Run-operations', (m) => cell(m.iterate?.operations));
+  row('Iterate · Run · model', (m) => modelCell(m.iterate?.models));
   row('AI change size (items)', (m) => (m.iterate?.changeSize !== undefined ? String(m.iterate.changeSize) : '—'));
   const tags = sc.modes.find((m) => m.tags.length)?.tags ?? [];
   if (tags.length) {
@@ -178,31 +293,37 @@ export interface RunRecordMeta {
   run: string;
   date: string;
   framework?: string;
+  /** Where the run's `@objectstack/*` packages came from — every record states it (`env.packages`). */
+  packages: PackageSource;
   driver: DriverInfo;
   runner: string;
   evidenceDir: string;
 }
 
 export function runRecord(meta: RunRecordMeta, cardRun: CardRun): Record<string, unknown> {
-  const sc = cardScorecard(cardRun);
+  const sc = cardScorecard(cardRun, meta.packages);
   const results: Array<Record<string, unknown>> = [];
   for (const m of cardRun.modes) {
     const s = sc.modes.find((x) => x.mode === m.mode)!;
-    const halves: Array<[string, Tally | undefined, string | undefined, unknown[]]> = [
-      ['build', s.first.build, m.build?.error, m.build?.score ? [...m.build.score.expect.checks, ...m.build.score.tags.flatMap((t) => t.checks), ...m.build.score.agentActions, ...m.build.score.naming] : []],
-      ['run-ask', s.first.ask, m.run?.error, m.run?.questions ?? []],
-      ['run-operations', s.first.operations, m.run?.error, m.run?.operations ?? []],
-      ['iterate-build', s.iterate?.build, m.iterate?.build.error, m.iterate?.build.score ? [...m.iterate.build.score.expect.checks, ...m.iterate.build.score.naming] : []],
-      ['iterate-run-ask', s.iterate?.ask, m.iterate?.run?.error, m.iterate?.run?.questions ?? []],
-      ['iterate-run-operations', s.iterate?.operations, m.iterate?.run?.error, m.iterate?.run?.operations ?? []],
+    // A half that never ran because the build before it was not measured says so.
+    const firstOut = m.build?.notMeasured ? `not run: the build was not measured (${m.build.notMeasured})` : undefined;
+    const iterateOut = firstOut ?? (m.iterate?.build.notMeasured ? `not run: the iterate build was not measured (${m.iterate.build.notMeasured})` : undefined);
+    const buildNote = (b: HalfScores['build']) => (b?.notMeasuredReason ? `not measured: ${b.notMeasuredReason}` : b ? cell(b) : '');
+    const halves: Array<[string, Tally | undefined, string | undefined, unknown[], string]> = [
+      ['build', s.first.build, m.build?.error, m.build?.score ? [...m.build.score.expect.checks, ...m.build.score.tags.flatMap((t) => t.checks), ...m.build.score.agentActions, ...m.build.score.naming] : [], buildNote(s.first.build)],
+      ['run-ask', s.first.ask, m.run?.error, m.run?.questions ?? [], s.first.ask ? cell(s.first.ask) : (firstOut ?? '')],
+      ['run-operations', s.first.operations, m.run?.error, m.run?.operations ?? [], s.first.operations ? cell(s.first.operations) : (firstOut ?? '')],
+      ['iterate-build', s.iterate?.build, m.iterate?.build.error, m.iterate?.build.score ? [...m.iterate.build.score.expect.checks, ...m.iterate.build.score.naming] : [], s.iterate?.build ? buildNote(s.iterate.build) : (firstOut ?? '')],
+      ['iterate-run-ask', s.iterate?.ask, m.iterate?.run?.error, m.iterate?.run?.questions ?? [], s.iterate?.ask ? cell(s.iterate.ask) : (iterateOut ?? '')],
+      ['iterate-run-operations', s.iterate?.operations, m.iterate?.run?.error, m.iterate?.run?.operations ?? [], s.iterate?.operations ? cell(s.iterate.operations) : (iterateOut ?? '')],
     ];
-    for (const [half, tally, error, evidence] of halves) {
+    for (const [half, tally, error, evidence, note] of halves) {
       results.push({
         id: `${cardRun.card}.${m.mode}.${half}`,
         verdict: m.skipped ? 'not-run' : verdictOf(tally, error),
         clauses: evidence.map((e, i) => ({ clause: i, evidence: e })),
         issues: [],
-        notes: [tally ? cell(tally) : '', error ?? '', m.skipped ?? ''].filter(Boolean).join(' · '),
+        notes: [note, error ?? '', m.skipped ?? ''].filter(Boolean).join(' · '),
       });
     }
   }
@@ -211,7 +332,7 @@ export function runRecord(meta: RunRecordMeta, cardRun: CardRun): Record<string,
     date: meta.date,
     scope: `scenario card ${cardRun.card}`,
     app: cardRun.card,
-    env: { framework: meta.framework ?? 'unknown', driver: meta.driver },
+    env: { framework: meta.framework ?? 'unknown', packages: meta.packages, packagesLine: packagesLine(meta.packages), driver: meta.driver },
     runner: meta.runner,
     evidenceDir: meta.evidenceDir,
     results,

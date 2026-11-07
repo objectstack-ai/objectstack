@@ -122,9 +122,8 @@ concurrency:
 #     github.event_name != 'pull_request'
 #
 # in its `if:`, so a dogfood red shows on the queue build of the entry that
-# carries it rather than first on `main`'s push run after it. It is advisory
-# there: the context is outside the required set (below), so the queue may
-# merge the entry before or despite the shards.
+# carries it rather than first on `main`'s push run after it, and the red
+# ejects that entry: the context is in the required set again (below).
 # `main`'s 4-hourly `schedule` run, its `push` runs and an on-demand
 # `workflow_dispatch` carry the FULL BATTERY: all of that plus the three jobs
 # below that spell
@@ -139,9 +138,9 @@ concurrency:
 # `scripts/ci/scheduled-full-run.mjs --release-gate`). ⛔ No affected-only
 # dogfood filter on the queue: the shards run on every entry, through the
 # `core` output, which is 'true' on `merge_group` (letter C was not ruled).
-# The queue enforces only the ruleset's required set, and `Dogfood Regression
-# Gate` is outside it since #22998 (check:required-contexts' tombstone); this
-# file does not decide whether it rejoins.
+# The queue enforces only the ruleset's required set. `Dogfood Regression
+# Gate` left it by #22998 and rejoined it by the #30461 follow-up ruling
+# (ruling record 6669982756); check:required-contexts pins its row.
 #
 # Spelled as a DENY-list of the per-PR events on purpose — the filter
 # contract's half 1 below, applied to events: a trigger added to `on:` later
@@ -522,6 +521,17 @@ jobs:
               # narrower audits entry is left as the package that declared it
               # spelled it, exactly as the two narrower `skills/` entries were.
               - 'docs/**'
+              # @objectstack/mcp's src/skill-md.test.ts imports the Console's
+              # "Download skill" mirror and pins it byte-identical to the
+              # SKILL.md the server renders (#31017) -- the server's half of the
+              # drift pin ui/apps/console/src/pages/developer/
+              # objectstack-skill.test.ts carries since #30865. That Console
+              # half runs only when Test UI starts, which a diff confined to
+              # packages/mcp never does; this half runs in Test Core on every
+              # packages/mcp change, `core` already starting it. Verbatim per
+              # the declaration, one file: a mirror-only diff starts Test Core
+              # here and `--union-into` adds @objectstack/mcp to it.
+              - 'ui/apps/console/src/pages/developer/objectstack-skill.ts'
             # The objectui tree, the root files the ui jobs build from, and the
             # five paths outside ui/ that the ui jobs' gates and tests read
             # (objectstack#25712):
@@ -2724,9 +2734,9 @@ jobs:
           overwrite: true
 
   dogfood-gate:
-    # Stable check name for a SHARDED job (#3622 follow-up). Since #22998 the
-    # context is outside the required set (THE TWO SPEEDS above `jobs:`). On a
-    # PR both legs skip and this gate counts zero expected attestations; on a
+    # Stable check name for a SHARDED job (#3622 follow-up), a required
+    # context again since #30461 (THE TWO SPEEDS above `jobs:`). On a PR both
+    # legs skip and this gate counts zero expected attestations; on a
     # queue build (since #30461) the three dogfood shards run and are counted,
     # while `dogfood-verify` skips and is judged with zero expected; the full
     # battery runs and counts both. The history below is why the name and the
@@ -2738,10 +2748,9 @@ jobs:
     # EVERY pull request in the repo sat permanently BLOCKED (mergeable, all
     # checks green, merge button dead). #3622's own comment called for updating
     # branch protection; keeping the contract HERE instead means a future
-    # shard-count change cannot deadlock the repo a second time. From #6865
-    # until #22998 the bare name was pinned by `check:required-contexts`; it
-    # left that registry with the required set, so a rename now falsifies the
-    # prose that names it without reddening anything — treat it as contract.
+    # shard-count change cannot deadlock the repo a second time. The bare name
+    # is pinned by `check:required-contexts` (since #6865; out of that registry
+    # from #22998 until #30461) — treat it as contract.
     #
     # Also aggregates dogfood-verify (the CLI pass that used to ride shard 1),
     # so the one context still covers everything it covered before the split.

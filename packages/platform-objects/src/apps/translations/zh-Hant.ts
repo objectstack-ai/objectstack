@@ -71,6 +71,9 @@ export const zhHant: TranslationData = {
         // the rationale in `en.ts` (#6659). Wording matches this locale's
         // `sys_sso_provider.pluralLabel`.
         nav_sso_providers: { label: 'SSO 提供方' },
+        // Conditionally contributed by plugin-auth (only while SCIM is wired),
+        // the same case as the entry above; see `en.ts` (#31123).
+        nav_scim_credentials: { label: 'SCIM 憑證' },
         nav_api_keys: { label: 'API 金鑰' },
 
         // 核准中心 = the Approvals Inbox component (#7234) — the surface with
@@ -95,6 +98,7 @@ export const zhHant: TranslationData = {
         nav_settings_sms: { label: '簡訊投遞' },
         nav_settings_branding: { label: '品牌' },
         nav_settings_auth: { label: '驗證' },
+        nav_settings_access_policy: { label: '存取原則' },
         nav_settings_storage: { label: '檔案儲存' },
         nav_settings_ai: { label: 'AI 與 Embedder' },
         nav_settings_knowledge: { label: '知識庫' },
@@ -199,7 +203,7 @@ export const zhHant: TranslationData = {
     },
     connect_agent: {
       label: '連接 AI 助理',
-      subtitle: '讓任何支援 MCP 的 AI 用戶端以受控方式存取本系統——每次呼叫都在呼叫者自身的權限與列級安全範圍內執行。',
+      subtitle: '在 Claude、豆包等 AI 助理中使用本系統。助理始終以你的身分操作：只能檢視和修改你有權限的內容。',
     },
 
     // Platform record pages (#15743) -- see `en.ts` for the key set.

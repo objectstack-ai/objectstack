@@ -10,6 +10,7 @@ import { SysExchangeRate } from './system/sys-exchange-rate.object.js';
 import { SysTrustedKey } from './system/sys-trusted-key.object.js';
 import { SysLifecycleState } from './system/sys-lifecycle-state.object.js';
 import { SysRecycleBin } from './system/sys-recycle-bin.object.js';
+import { SysSeedLandedKey } from './system/sys-seed-landed-key.object.js';
 import { attestFreshDatastore } from './system/migration-flag.js';
 import type {
   II18nService,
@@ -70,6 +71,11 @@ import { SEED_SETTLEMENT_SERVICE } from '@objectstack/spec/contracts';
  *    engine, present in every composition, so it registers with the engine-
  *    facing infrastructure, on the project database. A composition without it
  *    keeps no snapshot, and the engine says so once per object.
+ *  - **`sys_seed_landed_key`** — which declared seed rows landed in each
+ *    organization (#31021), so a seed replay does not insert again a row a
+ *    person deleted. Its only reader and writer is the seed loader, on the
+ *    project database beside the rows it describes; a composition without it
+ *    keeps no record, and the loader says so once per load.
  *  - **`sys_metadata_activation`** — the packaged-metadata activation
  *    ledger (ADR-0126 §4). Same story a third time, and the ruling that
  *    moved it here is recorded verbatim on #12359 (maintainer, 2026-08-26,
@@ -216,7 +222,7 @@ export class PlatformObjectsPlugin {
         version: this.version,
         type: 'plugin',
         scope: 'system',
-        objects: [SysMigration, SysMigrationJournal, SysSecret, SysExchangeRate, SysTrustedKey, SysLifecycleState, SysRecycleBin],
+        objects: [SysMigration, SysMigrationJournal, SysSecret, SysExchangeRate, SysTrustedKey, SysLifecycleState, SysRecycleBin, SysSeedLandedKey],
       });
       ctx?.getService?.('manifest')?.register?.({
         ...ACTIVATION_LEDGER_MANIFEST,

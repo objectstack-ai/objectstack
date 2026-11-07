@@ -99,6 +99,7 @@ export const zhHantSourceHashes: Readonly<Record<string, string>> = {
   'apps.setup.navigation.nav_queue_members.label': '46715e86f5231603',
   'apps.setup.navigation.nav_assignment_rules.label': '1779fe384b23954f',
   'apps.setup.navigation.nav_sso_providers.label': '7b06b6a6abf53ba4',
+  'apps.setup.navigation.nav_scim_credentials.label': '2d94a32c33ca2957',
   'apps.setup.navigation.nav_api_keys.label': '8cda9851248b0490',
   'apps.setup.navigation.nav_connect_agent.label': 'a4542422fb5e8a68',
   'apps.setup.navigation.nav_approvals_inbox.label': '0a9269b20d0266c9',
@@ -190,7 +191,7 @@ export const zhHantSourceHashes: Readonly<Record<string, string>> = {
   'pages.cloud_connection_settings.label': '3a7caad0cb98e71d',
   'pages.cloud_connection_settings.subtitle': 'f5cdd253e8ffef9f',
   'pages.connect_agent.label': 'a4542422fb5e8a68',
-  'pages.connect_agent.subtitle': 'b0d7c6d174511bcb',
+  'pages.connect_agent.subtitle': '51c467af44024a1b',
   'pages.sys_user_detail.label': '6c0d22a931e235bd',
   'pages.sys_organization_detail.label': '3e55836156e1c1de',
 };

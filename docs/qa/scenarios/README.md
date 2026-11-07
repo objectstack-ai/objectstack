@@ -6,9 +6,10 @@ is seeded with, the data questions an agent must answer about that data and the 
 the seed determines, who may see what, the writes an agent performs and the guardrails
 those writes must respect, and one follow-up change request.
 
-The cards here are the **open** library. Every card is generic: ⛔ no card in this
-directory is derived from a customer's app, data or wording. Held-out and customer-derived
-cards live in a private overlay outside this repository.
+The cards here are the **open** library. Every card is generic, and says so in its
+`origin` ([below](#origin)): ⛔ no card in this directory is derived from a customer's app,
+data or wording. Held-out and customer-derived cards live in a private overlay outside this
+repository.
 
 The schema and loader are `@objectstack/scenarios` (`packages/qa/scenarios`, private, not
 published). This format is a devx instrument, not a protocol: `packages/spec` carries no
@@ -30,22 +31,70 @@ question's computed truth; a card that does not load is red in CI.
 | Layer | Key | What it states |
 |:---|:---|:---|
 | 1 | `prompt` | `{ short, detailed }`, each `{ zh?, en? }` with at least one language. |
-| 2 | `expect` | The structural expectation the deterministic scorer reads, field for field: `objects`, `minFieldsPerObject?`, `selectFields?` (`{ object, field, minOptions }`), `lookups?` (`{ object, field, to }`), `dashboards?`, `appNavTargets?`. |
+| 2 | `expect` | The structural expectation the deterministic scorer reads, field for field: `objects`, `minFieldsPerObject?`, `selectFields?` (`{ object, field, minOptions }`), `lookups?` (`{ object, field, to }`), `dashboards?`, `appNavTargets?`. The runner's build prompt states every row by name ([Build checks trace to the prompt](#build-checks-trace-to-the-prompt)). |
 | 3 | `capabilities`, `businessFunctions` | Tags `<area>.<name>`, where `<area>` is a closed set: the basenames of `docs/qa/platform-checklist/areas/*.json`, read from the tree. `businessFunctions` is the marketplace taxonomy's business-function facet, read from `@objectstack/spec/marketplace` (`MarketplaceBusinessFunctionsSchema`, defined once in `packages/spec/src/marketplace/taxonomy.zod.ts`): 1-3 distinct values, the primary one first — the card is classified the way the template it graduates into will be listed. |
 | 4 | `run.seed`, `run.questions`, `run.personas` | Seed rows per object; at least five read-only questions, each with a **declarative** truth spec; at least two personas, each a role, the objects or fields it must NOT see, and optionally a row `scope`. |
 | 5 | `run.operations`, `run.guardrails`, `run.agentActions?` | At least two writes, each acting as a persona and declaring its `outcome`; the five guardrail checks; optionally the agent-callable business actions. |
 | 6 | `iterate` | A one-sentence change request plus the `expectDelta` it should add to `expect`. |
 
-Besides the layers a card carries `id` (its basename), `code`, `title`, `provenance` (where the
-scenario comes from) and, when a question uses a time window, `asOf`: the fixed "today"
-(`YYYY-MM-DD`) windows are computed against. `code` is the app code: 2–8 lowercase letters,
+Besides the layers a card carries `id` (its basename), `code`, `tier` (what the card is for,
+[below](#tiers)), `origin` (where it comes from, [below](#origin)), `title`, `provenance` (where
+the scenario comes from, in prose for people) and, when a question uses a time window, `asOf`:
+the fixed "today" (`YYYY-MM-DD`) windows are computed against. Every question and operation
+prompt states it ("Today is 2026-10-31."), so the agent is told the date it is judged
+against. `title` is
+`{ "zh": "…", "en": "…" }`, both required and non-blank: the gallery lists every app with a
+Chinese and an English title, and every reader picks one of the two explicitly. `code` is the app code: 2–8 lowercase letters,
 unique across the library. The app lives in the namespace `demo` + code (`democrm`) wherever
 it is built, scored or exported, and every item it declares carries that prefix.
 
 **Counts.** The default band is 8–10 questions and 4–6 operations. A card below 8 questions
-or 4 operations states why in `run.countsReason`, or it is refused.
+or 4 operations states why in `run.countsReason`, or it is refused; a `starter` or `delivery`
+card has no such excuse ([Tiers](#tiers)).
 
 Every object in a card is strict: an unknown key is refused, never dropped.
+
+## Tiers
+
+Every card names its `tier`, a closed set; a card without one is refused.
+
+| `tier` | What the card is | Floor |
+|:---|:---|:---|
+| `control` | An internal quality check: one of the small golden cases. Never exported, never shown in the gallery, whatever it scores. | none |
+| `starter` | A gallery starter template: the mid-tier scenarios. | the gallery floor |
+| `delivery` | A delivery-grade scenario. | the gallery floor, until the delivery-grade list sets its own |
+
+The **gallery floor** is the countable part of the [mid-tier floor](#the-library). The loader
+refuses a `starter` or `delivery` card under any line of it, at the field that falls short:
+
+- at least 5 objects in `expect.objects`, and at least 1 in `expect.dashboards`;
+- at least 100 seed rows on one object;
+- at least 2 personas with a row `scope`;
+- at least 8 questions and 4 operations: the default band's lower edge, which a
+  `countsReason` does not lower on a gallery card;
+- at least 3 `run.agentActions`.
+
+The gallery exporter exports a `starter` or `delivery` card only, and only a `generic` one
+([Origin](#origin)); a `control` card is never exported, whatever it scores
+(`packages/qa/scenarios/src/export/generic.ts`).
+
+## Origin
+
+Every card names its `origin`, a closed set; a card without one is refused. It is the marker
+the gallery exporter reads: neither `provenance` (prose) nor the directory a card sits in is
+one, because the loader reads whatever directory it is handed.
+
+| `origin` | Where the card comes from | Lives in | Exported |
+|:---|:---|:---|:---|
+| `generic` | Written from the domain alone; anyone could write it. | this open library | when its `tier` is `starter` or `delivery` |
+| `customer-derived` | Derived from a customer's app, data or wording. | the private overlay | ⛔ never |
+| `held-out` | Withheld from the open set, so a score on it is not one anything was tuned against. | the private overlay | ⛔ never |
+
+The caller tells the loader which library it is loading (`LoadOptions.library`: `open` or
+`overlay`), and the loader refuses, at `origin`, a `generic` card in the overlay and a
+`customer-derived` or `held-out` card in the open library. The runner and
+the exporter CLIs answer it from the directory: the repository's `docs/qa/scenarios` (by real
+path) is the open library, and any other `--cards` directory is the overlay.
 
 ## Seed rows
 
@@ -89,7 +138,14 @@ A question that lists `personas` is also answered **as each persona**: the perso
 `scope` rules for the question's object are applied first (`{ object, field, value }`,
 where `field` may be a path — `owner` for a rep, `owner.department` for a manager), and a
 question that reads an object or field the persona hides answers `{ kind: "withheld" }` —
-a correct reply declines. The loader returns these as `personaTruths`. A card whose
+a correct reply declines. The loader returns these as `personaTruths`. A figure the
+reply states is a leak when it equals a figure computed over rows outside the persona's
+scope, unless it also equals one computable over the persona's own rows (`scopeFigures`:
+the row count, the count per value of each visible column, and each value, sum, mean,
+minimum and maximum of a visible number, over the question's object and its one-hop lookups);
+such a figure says nothing about the hidden rows, so an answer stating its own count is not
+flagged for matching another person's. A hidden field is read off the tool answers' keys: a
+read that only asked for it, and was served the row without it, is no leak. A card whose
 personas declare a `scope` carries the `access-security.row-scope` capability tag, so the
 build is checked for keeping the other rows from them; the loader refuses one that does not.
 
@@ -110,10 +166,18 @@ acts for (`actingAs`) and declares its `outcome`, so grading reads it with code 
 
 - `{ kind: "applied", state: [...], auditActor? }` — each state entry names a row by `id`
   (seeded) or `where` (a row the write creates) and carries the `values` the data API must
-  read back, or `absent: true`; `auditActor` is the persona the audit trail must name;
+  read back, or `absent: true`; `auditActor` is the persona the audit trail must name.
+  A value equal to the card's `asOf` is also met by the date the run happened on in a
+  field the platform's clock stamps (a default or a flow writing a decision date, an
+  order date), which cannot hold the card's fixed today. A field the agent's own write
+  set is judged against the date it was told: writing the run date there fails;
 - `{ kind: "refused", code }` — a code the platform answers, from the spec's closed
   `ErrorCode` catalogue (ADR-0112), such as `VALIDATION_FAILED` (a record-level field
-  refusal) or `PERMISSION_DENIED`; any other spelling is refused;
+  refusal) or `PERMISSION_DENIED`; any other spelling is refused. A declared
+  `VALIDATION_FAILED` is also met by a code the app defines itself (a hook's declared
+  refusal, outside the catalogue) when the envelope's status files it in the validation
+  class (`400`, or another 4xx the spec maps to `VALIDATION_ERROR`); nothing else meets
+  another declared code;
 - `{ kind: "pending_confirmation" }` — the agent asks first and writes nothing.
 
 `run.agentActions` (optional) lists at least three business actions an agent may call,
@@ -135,10 +199,13 @@ asks for a correction (an agent that catches the bad value first). The platform 
 runner's own write of the operation's declared `values`, sent after the agent's turn as the
 same persona through the same MCP door, is refused with that code and stores nothing. So a
 card states the bad write in full in `values` (and `target`), exactly as the app must refuse it.
+Every other `refused` create or update is graded the same way, a permission overstep
+included: an agent that declines without touching the door passes its half, and the
+runner's own write says whether the platform refused it.
 
 ## The library
 
-The library holds nine scenarios. The three **simple controls** are here:
+The library holds nine scenarios. The three **simple controls**, tier `control`, are here:
 `invoice_with_line_items`, `project_with_tasks` and `crm_account_with_contacts`, the golden
 cases of `packages/cli/src/lint/corpus.ts`. Their `expect` is derived mechanically from each
 fixture: every object; `minFieldsPerObject` = the smallest object's field count; one
@@ -146,8 +213,9 @@ fixture: every object; `minFieldsPerObject` = the smallest object's field count;
 per lookup or master_detail field.
 
 The six **mid-tier** scenarios — travel expense, order-to-cash, service desk, leave and
-balances, requisition-to-receipt, asset lifecycle — each land as a card of their own and
-meet this floor:
+balances, requisition-to-receipt, asset lifecycle — each land as a card of their own, tier
+`starter`, and meet this floor. Its countable lines are the [gallery floor](#tiers), which
+the loader enforces; each card's own test pins the rest:
 
 - 5–8 related objects, at least one approval or automation flow, and at least one report
   or dashboard;
@@ -162,10 +230,36 @@ meet this floor:
   action, a refused overstep, a refused validation violation and one multi-step chain;
 - at least three agent actions, one of them confirm-gated.
 
+## Build checks trace to the prompt
+
+Every Build check must trace to text the build prompt carries; otherwise a faithful build fails
+for not guessing a name.
+
+- **Names.** The runner's data contract states the seed (objects and fields), each persona's
+  permission set and every `expect` row by name: lookup targets, option fields with their
+  minimum option counts, dashboards and app navigation targets. The iterate prompt does the
+  same for `iterate.expectDelta`. A card therefore picks its dashboard names knowing the build
+  is told them.
+- **Tags.** A capability tag whose check reads something the seed does not show is asked for
+  in the card's prose: `records-forms.master-detail-inline-edit` names the detail edited inline
+  on its master, in every language the prompt carries.
+- **Approvals.** A card either exercises the platform approval engine or models approvals as
+  data, never both. A card that seeds approval history as rows (an approval step object, or an
+  approver and decision date on the record) and grades approving as a data write models them
+  as data: its prose says each decision is a record it updates, asks for no approval process,
+  and it carries no `approvals.*` tag, whose checks read the engine's Approval node. The engine
+  keeps its own history, which no seed row can preload. Every open card models approvals as
+  data today.
+
 ## Adding a card
 
-1. Write `<id>.json` here; `id` equals the basename, and `code` is one no other card uses.
-2. Keep it generic — a scenario anyone could write from the domain alone.
+1. Write `<id>.json` here; `id` equals the basename, `code` is one no other card uses, and
+   `tier` says what the card is for. A new gallery card is `starter` and meets the gallery
+   floor; `control` is kept for the golden cases, which `test/library.test.ts` pins. Give it
+   a `title` in both languages.
+2. Keep it generic — a scenario anyone could write from the domain alone — and say so:
+   `"origin": "generic"`. A card derived from a customer, or held out, goes to the private
+   overlay instead, with that `origin`.
 3. Run `pnpm --filter @objectstack/scenarios test`: a refusal names the file and the field
    path. Then pin the card's hand-worked truths, per persona too, in its own
    `packages/qa/scenarios/test/<id>.test.ts` (model: `travel-expense.test.ts`). The three control

@@ -33,8 +33,8 @@
     },
     {
       "id": 4,
-      "prompt": "Seed the `country` table for every environment; add demo `opportunity` rows (dev/test only) closing 45 days after install, owned by the installer. A nightly job advances `stage`; a seed replay must not reset it.",
-      "expected_output": "`defineSeed(Country, { externalId: 'code', mode: 'upsert', records })` for reference data; `defineSeed(Opportunity, { env: ['dev', 'test'], ... })` for demo rows — natural-key lookups, CEL values (`close_date: cel`daysFromNow(45)``, `owner_id: cel`os.user.id``), parents first; `columns: { stage: { applyOn: 'create' } }` so an `upsert` replay leaves the job-owned column.",
+      "prompt": "Seed the `country` table for every environment; add demo `opportunity` rows (dev/test only) closing 45 days after install, owned by the installer, and refreshed from the seed on every replay except `stage`: a nightly job advances it, and a replay must not reset it.",
+      "expected_output": "`defineSeed(Country, { externalId: 'code', mode: 'upsert', records })` for reference data; `defineSeed(Opportunity, { mode: 'upsert', env: ['dev', 'test'], ... })` for the refreshed demo rows — natural-key lookups, CEL values (`close_date: cel`daysFromNow(45)``, `owner_id: cel`os.user.id``), parents first; `columns: { stage: { applyOn: 'create' } }` so the `upsert` replay leaves the job-owned column (the `ignore` default would refresh nothing).",
       "files": [],
       "assertions": {
         "must_contain": ["defineSeed", "externalId", "upsert", "env:", "daysFromNow", "applyOn: 'create'"],
@@ -89,6 +89,26 @@
       "assertions": {
         "must_contain": ["INVALID_FIELD", "is_not_null"],
         "must_not_contain": ["starts_with"]
+      }
+    },
+    {
+      "id": 10,
+      "prompt": "An `account` whose `tax_id` appears in our `blocked_tax_id` object must not save, on create or edit. Our tax authority also offers a lookup API; can the same hook call it?",
+      "expected_output": "A `beforeInsert` / `beforeUpdate` hook on `account` with a sandboxed `body: { language: 'js', source, capabilities: ['api.read'] }`: the source returns when the write carries no `tax_id`, reads `ctx.api.object('blocked_tax_id').findOne({ where: { tax_id: ctx.input.tax_id } })` and throws when it finds a row. Not a validation rule (there is no `custom` / `async` type) and not the deprecated inline `handler`. The tax-authority API is not called from the hook: a `body` has no outbound HTTP, so that check goes through a Connector recipe.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["beforeInsert", "beforeUpdate", "language: 'js'", "'api.read'", "ctx.api.object("],
+        "must_not_contain": ["handler:", "HookContext", "'http.fetch'"]
+      }
+    },
+    {
+      "id": 11,
+      "prompt": "Expose the remote `suppliers` table of our `warehouse` datasource as a read-only `ext_supplier` object every member can read.",
+      "expected_output": "A complete `ObjectSchema.create` with `datasource: 'warehouse'`, `external: { remoteName: 'suppliers' }` and an authored `sharingModel: 'public_read'` — a publish with none is refused (`security-owd-unset`), and on 'private' a member reads no row of a binding whose remote rows carry no owner.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["ObjectSchema.create", "remoteName", "sharingModel: 'public_read'"],
+        "must_not_contain": ["columnName:"]
       }
     }
   ]

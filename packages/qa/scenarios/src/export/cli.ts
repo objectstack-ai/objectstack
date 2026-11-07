@@ -9,7 +9,9 @@
  *   --out DIR            where `apps/` and `index.json` go (required)
  *   --recording F        a run's recording (`run-scenarios --record F`, or the
  *                        file a `--driver recorded:F` run replayed); repeatable
- *   --cards DIR          the card directory (default: the repo's docs/qa/scenarios)
+ *   --cards DIR          the card directory (default: the repo's docs/qa/scenarios);
+ *                        any other directory is loaded as the private overlay,
+ *                        where a `generic` card is refused (`libraryOf`)
  *   --work DIR           read the projects here, not at each record's `evidenceDir`
  *                        (both directories are redacted to `$WORK` in the output)
  *   --no-screenshots     export without screenshots (no app is booted); an app
@@ -20,16 +22,17 @@
  *   --chromium PATH      the Chromium executable for the screenshots
  *
  * It writes only under `--out`; it pushes nothing anywhere. ⛔ It exports only
- * cards marked generic, and the card schema has no generic marker yet, so
- * today it refuses every card (`generic.ts`) — and offers no flag to do
- * otherwise.
+ * a card whose `origin` is `generic` and whose `tier` is `starter` or
+ * `delivery` (`generic.ts`), and only a run on published packages — never a
+ * `run-scenarios --packages workspace` record (`record.ts`) — and offers no
+ * flag to do otherwise.
  */
 
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { formatRefusal, loadScenarios, readCapabilityAreas } from '../loader.js';
+import { formatRefusal, libraryOf, loadScenarios, readCapabilityAreas } from '../loader.js';
 import { HttpApp } from '../runner/app.js';
 import { ADMIN, findUp } from '../runner/cli.js';
 import type { Recording } from '../runner/driver.js';
@@ -93,7 +96,10 @@ export async function main(argv: readonly string[], deps: ExportCliDeps = {}): P
   const repo = findUp(here, (d) => existsSync(join(d, 'pnpm-workspace.yaml')));
   const cardsDir = resolve(args.cards ?? join(repo, 'docs/qa/scenarios'));
   const runsDir = resolve(args.runs ?? join(repo, 'docs/qa/platform-checklist/runs'));
-  const { cards, refusals } = loadScenarios(cardsDir, { areas: readCapabilityAreas(join(repo, 'docs/qa/platform-checklist/areas')) });
+  const { cards, refusals } = loadScenarios(cardsDir, {
+    areas: readCapabilityAreas(join(repo, 'docs/qa/platform-checklist/areas')),
+    library: libraryOf(cardsDir, repo),
+  });
   for (const r of refusals) console.error(formatRefusal(r));
   const recordings = args.recordings.map((f) => JSON.parse(readFileSync(resolve(f), 'utf8')) as Recording);
   const browser = playwrightBrowser(args.chromium ? { executablePath: args.chromium } : {});

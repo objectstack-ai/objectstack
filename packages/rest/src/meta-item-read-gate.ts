@@ -72,6 +72,8 @@ import { resolveObjectSortability } from '@objectstack/spec/api';
 import { canonicalMetaUrlType, pluralToSingular, unrecognisedMetaTypeRefusal } from '@objectstack/spec/shared';
 import {
     ObjectSchemaMaskEvaluationError,
+    actionObjectOverrideTargets,
+    actionServedWithoutOwnObject,
     applyObjectSchemaMask,
     isObjectSchemaMaskExempt,
     relateObjectSchemaMaskPosture,
@@ -3727,6 +3729,197 @@ export function projectMetaObjectSchema(
 }
 
 /**
+ * What {@link projectMetaActionForCaller} answers for one action entry:
+ *
+ *  - `serve` — the entry is served to this caller as declared (the object
+ *    door's projection keeps it; it is never rewritten). `object` is the
+ *    action's own object as this caller is served it, present only where that
+ *    object was projected; `cacheControl` is the
+ *    {@link META_UNDETERMINED_CACHE_CONTROL} an undetermined posture owes;
+ *  - `withhold` — the projection drops it: the caller is answered as for an
+ *    action that does not exist;
+ *  - `fault` — the caller's field visibility on `object` cannot be evaluated,
+ *    or the projection would leave it no field (ADR-0106 D6), which the door
+ *    answers as its field-visibility fault.
+ */
+export type MetaActionProjection =
+    | { kind: 'serve'; object?: any; cacheControl?: typeof META_UNDETERMINED_CACHE_CONTROL }
+    | { kind: 'withhold' }
+    | { kind: 'fault'; object: string };
+
+/** What {@link projectMetaActionForCaller} reads, for one request. */
+export interface MetaActionProjectionSources {
+    /** This request's object-schema masker (`resolveObjectMasker` for `object`), asked per object name. */
+    masker(objectName: string): Promise<ObjectSchemaMaskPosture>;
+    /** The definition of the object `name`, or `undefined` when there is none. A rejection is a fault, never "none". */
+    readObject(name: string): Promise<unknown>;
+}
+
+/** An object definition the object projection can project: a record carrying a `fields` record. */
+function projectableObject(definition: unknown): definition is Record<string, unknown> {
+    if (!definition || typeof definition !== 'object' || Array.isArray(definition)) return false;
+    const fields = (definition as Record<string, unknown>).fields;
+    return !!fields && typeof fields === 'object' && !Array.isArray(fields);
+}
+
+/**
+ * [ADR-0106 D1] ONE action entry as this caller is served it — the one rule
+ * every door that serves an action entry asks: the `/meta` action list and
+ * item read on both transports, and MCP `list_actions`.
+ *
+ * It is the `/meta` object door's projection, not a second one. The action is
+ * projected as its own object's only `actions` entry
+ * ({@link projectMetaObjectSchema} over the posture related to that document,
+ * `maskDeniedFieldReferences` → `actionParamReadsDenied`), so it is withheld
+ * exactly where `GET /meta/object/:name` drops it from that object: a param
+ * whose `field` the caller cannot read, judged on the object the param names
+ * (`objectOverride` if set, else the action's own object), or any other
+ * position of the action that reads such a field.
+ *
+ * `ownerName` is the action's own object, `undefined` for an object-less one.
+ * Where it names no object definition the action carries no field of an own
+ * object, so only its `objectOverride` params are judged
+ * (`actionServedWithoutOwnObject`), each against the caller's posture on the
+ * object it names: a posture that cannot be evaluated or is undetermined
+ * withholds the action (fail closed, as a related object does on the object
+ * door).
+ *
+ * Who is projected is the masker's decision alone (ADR-0106 D4/D6/D8): a
+ * `passthrough` posture — a D4-exempt caller, a deployment with no security
+ * service or with the mask switched off — is served every action as declared,
+ * with no object read.
+ */
+export async function projectMetaActionForCaller(
+    sources: MetaActionProjectionSources,
+    action: unknown,
+    ownerName: string | undefined,
+): Promise<MetaActionProjection> {
+    if (ownerName !== undefined) {
+        let posture: ObjectSchemaMaskPosture | undefined;
+        let evaluationError: ObjectSchemaMaskEvaluationError | undefined;
+        try {
+            posture = await sources.masker(ownerName);
+        } catch (error) {
+            if (!(error instanceof ObjectSchemaMaskEvaluationError)) throw error;
+            evaluationError = error;
+        }
+        if (posture?.kind === 'passthrough') return { kind: 'serve' };
+        const definition = await sources.readObject(ownerName);
+        if (projectableObject(definition)) {
+            if (evaluationError || !posture) return { kind: 'fault', object: ownerName };
+            const document = { ...definition, actions: [action] };
+            const masked = projectMetaObjectSchema(await relateObjectSchemaMaskPosture(posture, document), document);
+            if (!masked.ok) return { kind: 'fault', object: ownerName };
+            const kept = Array.isArray(masked.document?.actions) && masked.document.actions.length === 1;
+            if (!kept) return { kind: 'withhold' };
+            return masked.cacheControl
+                ? { kind: 'serve', object: masked.document, cacheControl: masked.cacheControl }
+                : { kind: 'serve', object: masked.document };
+        }
+    }
+    const targets = actionObjectOverrideTargets(action, ownerName);
+    if (targets.length === 0) return { kind: 'serve' };
+    const related = new Map<string, ReadonlySet<string> | undefined>();
+    for (const target of targets) {
+        let posture: ObjectSchemaMaskPosture | undefined;
+        try {
+            posture = await sources.masker(target);
+        } catch (error) {
+            if (!(error instanceof ObjectSchemaMaskEvaluationError)) throw error;
+        }
+        if (posture?.kind === 'passthrough') return { kind: 'serve' };
+        related.set(target, posture?.kind === 'project' ? posture.readable : undefined);
+    }
+    return actionServedWithoutOwnObject(action, ownerName, related) ? { kind: 'serve' } : { kind: 'withhold' };
+}
+
+/**
+ * [ADR-0106 D1] The own object of a STANDALONE `action` entry the `/meta`
+ * doors serve: its spec `objectName`, or `undefined` for an object-less one.
+ */
+function metaActionOwnerName(action: unknown): string | undefined {
+    const objectName = action && typeof action === 'object' ? (action as { objectName?: unknown }).objectName : undefined;
+    return typeof objectName === 'string' && objectName !== '' ? objectName : undefined;
+}
+
+/**
+ * [ADR-0106 D1] {@link MetaActionProjectionSources} for one `/meta` request:
+ * the transport's masker, each object's posture asked once, and the object
+ * definitions read once, from the gate's own `object` list read (none of it is
+ * served). A list read that is absent or rejects is a fault, ⛔ never "no
+ * object": that would judge every action as object-less.
+ */
+function metaActionProjectionSources(
+    listSource: MetaReadGateListSource,
+    masker: (objectName: string) => Promise<ObjectSchemaMaskPosture>,
+): MetaActionProjectionSources {
+    const postures = new Map<string, Promise<ObjectSchemaMaskPosture>>();
+    let objects: Promise<Map<string, unknown>> | undefined;
+    const readObjects = async (): Promise<Map<string, unknown>> => {
+        const pending = listSource.listMetaItems('object');
+        if (pending === undefined) {
+            throw new TypeError('No metadata list read is available to resolve the objects an action entry reads.');
+        }
+        const byName = new Map<string, unknown>();
+        for (const item of metaItemsArray(await pending)) {
+            if (item && typeof item === 'object' && typeof item.name === 'string') byName.set(item.name, item);
+        }
+        return byName;
+    };
+    return {
+        masker: (objectName) => {
+            let posture = postures.get(objectName);
+            if (!posture) postures.set(objectName, (posture = masker(objectName)));
+            return posture;
+        },
+        readObject: async (name) => (await (objects ??= readObjects())).get(name),
+    };
+}
+
+/**
+ * [ADR-0106 D1] ONE `action` item a `/meta` item read is about to serve, as
+ * this caller is served it ({@link projectMetaActionForCaller}, over the
+ * transport's masker and its gate's `object` list read). Asked by the item
+ * chain ({@link createMetaItemAnswer} step 4a) and by `RestServer`'s cached
+ * arm, which is `GET /meta/action/:name`'s default door: one decision for both
+ * arms. A `withhold` is answered as the read answers a name with nothing
+ * behind it.
+ */
+export async function projectMetaActionItem(
+    sources: MetaReadGateListSource & Pick<MetaItemAnswerSources, 'resolveObjectMasker'>,
+    action: unknown,
+): Promise<MetaActionProjection> {
+    return projectMetaActionForCaller(
+        metaActionProjectionSources(sources, await sources.resolveObjectMasker()),
+        action, metaActionOwnerName(action),
+    );
+}
+
+/**
+ * [ADR-0106 D1] Every action entry of a listed `action` page as this caller is
+ * served it ({@link projectMetaActionForCaller}): a withheld entry is left out,
+ * as the object door leaves it out of its object. One object whose field
+ * visibility cannot be evaluated fails the whole list (`ok: false`, naming it),
+ * as the `object` list does; the page is served `private, no-store` when any
+ * entry's posture was undetermined.
+ */
+async function projectMetaActionList(
+    sources: MetaActionProjectionSources,
+    items: readonly any[],
+): Promise<{ ok: true; items: any[]; cacheControl?: typeof META_UNDETERMINED_CACHE_CONTROL } | { ok: false; object: string }> {
+    const served: any[] = [];
+    let cacheControl: typeof META_UNDETERMINED_CACHE_CONTROL | undefined;
+    for (const item of items) {
+        const projected = await projectMetaActionForCaller(sources, item, metaActionOwnerName(item));
+        if (projected.kind === 'fault') return { ok: false, object: projected.object };
+        if (projected.kind === 'withhold') continue;
+        cacheControl ??= projected.cacheControl;
+        served.push(item);
+    }
+    return cacheControl ? { ok: true, items: served, cacheControl } : { ok: true, items: served };
+}
+
+/**
  * [ADR-0106 D5(2)] Project every object schema of a listed `object` page. One
  * unevaluable object fails the whole list (`ok: false`, naming it) — serving the
  * rest would leave a hole in the projection no client can see — whether its
@@ -4038,6 +4231,10 @@ async function describeMetaPositionList(sources: MetaListAnswerSources, list: an
  *  7. `object` — the ADR-0106 mask ({@link projectMetaObjectSchema} over the
  *     transport's {@link MetaListAnswerSources.resolveObjectMasker}), and the
  *     `private, no-store` an undetermined posture owes (D6 tier 2).
+ *  7a. `action` — each entry as the object door's projection serves it to this
+ *     caller ({@link projectMetaActionForCaller}, the same masker): an entry
+ *     binding a field the caller cannot read, on the object its param names,
+ *     is left out.
  *  8. `position` — `?include=grants`: each position as the resolver enforces
  *     it for a holder ({@link describeMetaPositionList}).
  *  9. The translation step ({@link translateMetaList}, reached through
@@ -4165,6 +4362,20 @@ export function createMetaListAnswer(
             }
         }
 
+        // 7a. [ADR-0106 D1] `action` — each entry as the object door's
+        //     projection serves it to this caller; a withheld one is left out.
+        if (metaType === 'action') {
+            const list = listItemsOf(visible);
+            if (list && list.length > 0) {
+                const projected = await projectMetaActionList(
+                    metaActionProjectionSources(sources, await sources.resolveObjectMasker()), list,
+                );
+                if (!projected.ok) return projected;
+                if (projected.items.length !== list.length) visible = withItems(visible, projected.items);
+                cacheControl = projected.cacheControl;
+            }
+        }
+
         // 8. [#25333] `position` — `?include=grants`.
         if (metaType === 'position' && query?.include === 'grants') {
             const list = listItemsOf(visible);
@@ -4205,6 +4416,13 @@ export interface MetaItemAnswerSources extends MetaItemReadGateSources {
         document: unknown,
         runtimeDocument?: unknown,
     ): Promise<unknown>;
+    /**
+     * [ADR-0106 D1] This request's object-schema masker — the same port
+     * {@link MetaListAnswerSources.resolveObjectMasker} is — asked only for an
+     * `action` item, which the chain serves as the object door's projection
+     * serves it ({@link projectMetaActionForCaller}).
+     */
+    resolveObjectMasker(): Promise<(objectName: string) => Promise<ObjectSchemaMaskPosture>>;
 }
 
 /** The request facts the item chain reads — no transport shape. */
@@ -4275,6 +4493,10 @@ export type MetaItemAnswer =
  *     `translations` map is dropped whatever the locale).
  *  4. `object` — the ADR-0106 mask ({@link projectMetaObjectSchema}) under the
  *     posture resolved before the fetch.
+ *  4a. `action` — the entry as the object door's projection serves it to this
+ *     caller ({@link projectMetaActionForCaller}, over
+ *     {@link MetaItemAnswerSources.resolveObjectMasker}); a withheld one is
+ *     `absent`, the answer step 1 gives a name with nothing behind it.
  *  5. The body ({@link translateMetaEnvelope}, through the transport's entry):
  *     the translation, and `sortability` beside an object schema — derived
  *     from the caller's runtime view ([#22250] `resolveObjectSchemaRuntimeView`:
@@ -4312,12 +4534,23 @@ export function createMetaItemAnswer(
         if (!masked.ok) return { kind: 'mask-fault', object: name };
         visible = masked.document;
 
+        // 4a. [ADR-0106 D1] `action` — served as the object door's projection
+        //     serves it to this caller; a withheld one is answered `absent`,
+        //     exactly as a name with nothing behind it (step 1).
+        let cacheControl = masked.cacheControl;
+        if (metaType === 'action') {
+            const projected = await projectMetaActionItem(sources, visible);
+            if (projected.kind === 'withhold') return { kind: 'refuse', refusal: { reason: 'absent' } };
+            if (projected.kind === 'fault') return { kind: 'mask-fault', object: projected.object };
+            cacheControl ??= projected.cacheControl;
+        }
+
         // 5. The body — translation, and `sortability` beside an object schema,
         //    over [#22250] the caller's runtime view of what step 4 serves.
         const runtime = await resolveObjectSchemaRuntimeView(visible, maskPosture);
         const served = await sources.translateEnvelope(envelope ?? {}, visible, runtime.document);
         // 6. [#27627] The validator of what is served — over `served`, never an earlier stage of it.
-        return { kind: 'serve', envelope: served, ...metaRepresentationCaching(served, masked.cacheControl) };
+        return { kind: 'serve', envelope: served, ...metaRepresentationCaching(served, cacheControl) };
     };
 }
 
@@ -4500,6 +4733,12 @@ export type MetaLayeredAnswer =
  *  3. [ADR-0106 D5(4)] The mask on every layer — each is a full object schema —
  *     through {@link projectMetaObjectSchema} under the posture resolved before
  *     the read, and the `private, no-store` an undetermined posture owes.
+ *  3a. [ADR-0106 D1] `action` — every present layer as the object door's
+ *     projection serves it to this caller ({@link projectMetaActionForCaller},
+ *     over {@link MetaItemAnswerSources.resolveObjectMasker}; a layer that
+ *     names no `objectName` is judged on the one another layer names). Any
+ *     layer withheld answers the read `absent`, as step 1 answers a name with
+ *     nothing behind it.
  *
  * [#29814] `draft` — the pending draft row as stored
  * (`GetMetaItemLayeredResponseSchema.draft`) — is a layer like the other three
@@ -4518,7 +4757,7 @@ export type MetaLayeredAnswer =
  * answers that fault, ⛔ never a layered view with a layer missing.
  */
 export function createMetaLayeredAnswer(
-    sources: MetaItemReadGateSources,
+    sources: MetaItemReadGateSources & Pick<MetaItemAnswerSources, 'resolveObjectMasker'>,
     request: MetaLayeredRequest,
 ): (layered: unknown) => Promise<MetaLayeredAnswer> {
     const { metaType, name, packageId, member, maskPosture } = request;
@@ -4574,6 +4813,24 @@ export function createMetaLayeredAnswer(
             if (!masked.ok) return { kind: 'mask-fault', object: name };
             cacheControl ??= masked.cacheControl;
             if (masked.document !== document) served.set(layer, masked.document);
+        }
+
+        // 3a. [ADR-0106 D1] `action` — every present layer as the object door's
+        //     projection serves it to this caller; any layer withheld answers
+        //     the whole read `absent`, the answer step 1 gives a name with
+        //     nothing behind it, ⛔ never a layered view with a layer missing.
+        if (metaType === 'action') {
+            const actionSources = metaActionProjectionSources(sources, await sources.resolveObjectMasker());
+            const layerOwner = present.map((layer) => metaActionOwnerName(served.get(layer))).find((owner) => owner !== undefined);
+            for (const layer of present) {
+                const document = served.get(layer);
+                const projected = await projectMetaActionForCaller(
+                    actionSources, document, metaActionOwnerName(document) ?? layerOwner,
+                );
+                if (projected.kind === 'withhold') return { kind: 'refuse', refusal: { reason: 'absent' } };
+                if (projected.kind === 'fault') return { kind: 'mask-fault', object: projected.object };
+                cacheControl ??= projected.cacheControl;
+            }
         }
 
         let answer: unknown = raw;

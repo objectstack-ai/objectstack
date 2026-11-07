@@ -36,7 +36,7 @@ export const SysOrganization = ObjectSchema.create({
   // D2 identity write guard clamps every user-context update on this table to
   // the registered column whitelist, `MANAGED_EXTENSION_EDITABLE_FIELDS
   // .sys_organization` in plugin-auth — the platform-owned extension columns
-  // (`require_mfa`, `parent_organization_id`, `sort_order`, `timezone`) and
+  // (`parent_organization_id`, `sort_order`, `timezone`) and
   // nothing else. Per D4's form-rendering constraint, every column outside that
   // whitelist is marked `readonly` below, so the edit form cannot offer a write
   // the server will refuse or strip.
@@ -412,21 +412,23 @@ export const SysOrganization = ObjectSchema.create({
       group: 'configuration',
     }),
 
-    // ADR-0069 D3 — per-org MFA tightening above the global floor. When true,
-    // members of this org must enrol TOTP to access data (enforced at the
-    // session-validation gate). An org can only tighten, never loosen, the
-    // global `mfa_required` setting. Saving it on is refused while two-factor
-    // enrollment is off for the deployment (plugin-auth's
-    // `organization-mfa-enrollment-guard.ts`), which the help says (#30411).
+    // ADR-0069 D3 — the toggle-era per-org MFA column, RETIRED. An
+    // organization's multi-factor requirement has three levels now (ruling of
+    // record on objectstack-ai/cloud#3668, 「可以，按三档做（推荐）」) and lives in
+    // its access policy (`access_policy.mfa_required`, plugin-auth's
+    // `organization-access-policy.ts`). plugin-auth's boot move carries a
+    // stored `true` there as `everyone` and clears this column; nothing reads
+    // it otherwise, so it is readonly (the D2 guard strips a user-context
+    // write to it) and kept only for that move.
     require_mfa: Field.boolean({
-      label: 'Require Multi-Factor Auth',
+      label: 'Require Multi-Factor Auth (retired)',
       required: false,
+      readonly: true,
       defaultValue: false,
       group: 'configuration',
       description:
-        'Turn on to require every member of this organization to set up an authenticator app before they can access data. ' +
-        'Needs two-factor authentication on for this deployment (OS_AUTH_TWO_FACTOR=true); while it is off, ' +
-        'saving this as on is refused.',
+        'Retired. Set this organization\'s multi-factor requirement in Settings → Access policy. ' +
+        'A value that was on here was moved there as "everyone" and cleared.',
     }),
 
     // #14238 — maintainer ruling 2026-09-02, option A (verbatim 「同意」): the
@@ -462,7 +464,7 @@ export const SysOrganization = ObjectSchema.create({
     // registered in plugin-auth's `MANAGED_EXTENSION_FIELDS` (whose collision
     // guard proves better-auth's organization schema owns no `timezone` at the
     // pinned version) and generically editable under the ADR-0092 D2 whitelist
-    // (`MANAGED_EXTENSION_EDITABLE_FIELDS`) — the path `require_mfa` above and
+    // (`MANAGED_EXTENSION_EDITABLE_FIELDS`) — the path
     // the D6 group-structure fields below take. ⚠️ Same shape as
     // `sys_business_unit.timezone` by design (`text`, optional, `maxLength: 64`,
     // `valueDomain: 'iana_time_zone'`, no default): the card's thesis is that

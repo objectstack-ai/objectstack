@@ -31,7 +31,7 @@ import { describeSeedLocale, resolveSeedLocaleForLoad } from './seed-locale.js';
 import { declareSeedSource, recordOrganizationReplay, type SeedLandingReport } from './seed-settlement.js';
 import { loadDisabledPackageIds } from './package-state-store.js';
 import { readServedWithheldFieldReaders, servedWithheldFieldReadersMessage } from './domains/packages.js';
-import { asPackageStateStore, PACKAGE_STATE_STORE_PLUGIN_NAME } from './package-state-host-store.js';
+import { asPackageStateStore, ensurePackageStateUninstallCleanup, PACKAGE_STATE_STORE_PLUGIN_NAME } from './package-state-host-store.js';
 import type { IFieldFileService, IMetadataService, IObjectQLEngine, II18nService } from '@objectstack/spec/contracts';
 import { FIELD_FILE_SERVICE } from '@objectstack/spec/contracts';
 import { normalizeFlowFunctionEntry, type NormalizedFlowFunction } from '@objectstack/spec/automation';
@@ -73,8 +73,18 @@ const WITHHELD_FIELD_READERS_REPORTED = new WeakSet<object>();
  * through, resolved when a dataset loads. A kernel without
  * `@objectstack/service-storage` answers none, and the loader refuses a row
  * naming a seed file, by name, rather than write an object into a file field.
+ *
+ * [#31021] …and how the load treats the record of which seed rows landed in
+ * the organization it seeds (`sys_seed_landed_key`). Every load this plugin
+ * runs — the boot seed, the per-organization replay, the dev hot-reload
+ * seeder — honours it, so a seed row a person deleted is not inserted again
+ * by the next boot or replay; the replay's deliberate re-seed
+ * (`{ reseed: true }`) inserts every missing row and records them again.
  */
-function seedLoaderOptionsFor(ctx: PluginContext): { getFieldFiles: () => IFieldFileService | undefined } {
+function seedLoaderOptionsFor(
+    ctx: PluginContext,
+    landedKeys: 'honour' | 'reseed',
+): { getFieldFiles: () => IFieldFileService | undefined; landedKeys: 'honour' | 'reseed' } {
     return {
         getFieldFiles: () => {
             try {
@@ -83,6 +93,7 @@ function seedLoaderOptionsFor(ctx: PluginContext): { getFieldFiles: () => IField
                 return undefined;
             }
         },
+        landedKeys,
     };
 }
 
@@ -1385,6 +1396,11 @@ export class AppPlugin implements Plugin {
 
     start = async (ctx: PluginContext) => {
         this.refuseLatePackageStateStore(ctx);
+        // [#31023] The uninstall verb clears a deleted package's disable record
+        // under the key this plugin's boot seed reads. Before the empty-env
+        // return: an empty env is where every package arrives by hydration or
+        // install, and is deleted the same way.
+        ensurePackageStateUninstallCleanup(ctx, this.projectContext?.environmentId);
         if (this.empty) {
             ctx.logger.debug('[AppPlugin] empty env — no app payload, skipping start', {
                 pluginName: this.name,
@@ -1942,7 +1958,14 @@ export class AppPlugin implements Plugin {
                  // when the org-scoping middleware knows one (the insert's
                  // attributed user). The callable stays `(organizationId)` for
                  // every caller that has none.
-                 const replayer = async (organizationId: string, options?: { userId?: string }) => {
+                 //
+                 // [#31021] `options.reseed` is the DELIBERATE re-seed — a
+                 // host's "restore sample data" or reset action: every missing
+                 // seed row is inserted, including the ones a person removed,
+                 // and recorded as landed again. Without it the replay honours
+                 // the organization's record of landed seed rows
+                 // (`sys_seed_landed_key`) and does not insert those again.
+                 const replayer = async (organizationId: string, options?: { userId?: string; reseed?: boolean }) => {
                      if (!organizationId) return { inserted: 0, updated: 0, skipped: 0, errors: [] as any[] };
                      const md = ctx.getService('metadata') as IMetadataService | undefined;
                      if (!md) {
@@ -1974,7 +1997,9 @@ export class AppPlugin implements Plugin {
                          appDefaultLocale: appSeedLocale,
                      });
                      loggerRef.info(`[seed-replayer] organization ${organizationId} seeds for locale ${describeSeedLocale(seedLocale)}`);
-                     const seedLoader = new SeedLoaderService(ql, md, loggerRef, seedLoaderOptionsFor(ctx));
+                     const seedLoader = new SeedLoaderService(
+                         ql, md, loggerRef, seedLoaderOptionsFor(ctx, options?.reseed === true ? 'reseed' : 'honour'),
+                     );
                      const { SeedLoaderRequestSchema } = await import('@objectstack/spec/data');
                      const request = SeedLoaderRequestSchema.parse({
                          seeds: datasetsNow,
@@ -2075,7 +2100,7 @@ export class AppPlugin implements Plugin {
               try {
                   const metadata = ctx.getService('metadata') as IMetadataService | undefined;
                   if (metadata) {
-                      const seedLoader = new SeedLoaderService(ql, metadata, ctx.logger, seedLoaderOptionsFor(ctx));
+                      const seedLoader = new SeedLoaderService(ql, metadata, ctx.logger, seedLoaderOptionsFor(ctx, 'honour'));
                       const { SeedLoaderRequestSchema } = await import('@objectstack/spec/data');
                       // [#16595] `Seed.locale`'s producer on the DEFAULT boot
                       // path — see {@link resolveSeedLocale}.
@@ -2503,7 +2528,7 @@ export class AppPlugin implements Plugin {
                     ctx.logger.warn('[Seeder] hot-reload seed skipped — metadata service unavailable');
                     return;
                 }
-                const seedLoader = new SeedLoaderService(ql, metadata, ctx.logger, seedLoaderOptionsFor(ctx));
+                const seedLoader = new SeedLoaderService(ql, metadata, ctx.logger, seedLoaderOptionsFor(ctx, 'honour'));
                 const { SeedLoaderRequestSchema } = await import('@objectstack/spec/data');
                 // [#16595] `Seed.locale`'s producer on the dev hot-reload
                 // path. Resolved from the BOOT bundle, not from `payload`: a

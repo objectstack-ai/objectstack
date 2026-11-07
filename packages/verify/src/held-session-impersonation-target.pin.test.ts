@@ -47,6 +47,10 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+// The harness loads these two inside a function body; paid at collection, so
+// no clocked window carries their first load (`check:test-source-alias`).
+import '@objectstack/service-datasource';
+import '@objectstack/service-automation';
 import { bootStack } from './harness.js';
 
 const app = {
@@ -162,13 +166,13 @@ async function clearReset(): Promise<void> {
 async function armMfa(): Promise<void> {
   // Two-factor with it, as the `auth.mfa_required` setting applies them: the
   // gate holds a user for MFA only while they can enroll.
-  auth.applyConfigPatch({ mfaRequired: true, mfaGracePeriodDays: 7, plugins: { twoFactor: true } });
+  auth.applyConfigPatch({ mfaRequirement: 'everyone', mfaGracePeriodDays: 7, plugins: { twoFactor: true } });
   await ql.update('sys_user', { id: targetId, mfa_required_at: new Date(Date.now() - 10 * DAY_MS) }, SYS);
   await ql.update('sys_user', { id: adminId, mfa_required_at: new Date() }, SYS);
 }
 
 async function disarmMfa(): Promise<void> {
-  auth.applyConfigPatch({ mfaRequired: false });
+  auth.applyConfigPatch({ mfaRequirement: 'off' });
 }
 
 /**

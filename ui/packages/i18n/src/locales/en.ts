@@ -2442,6 +2442,12 @@ const en = {
         done: 'Colleagues have joined or been invited.',
         action: 'Invite',
       },
+      connectAssistant: {
+        title: 'Connect an AI assistant',
+        todo: 'Work in this system from Claude, Doubao and similar assistants, as yourself.',
+        done: 'An AI assistant or API key of yours is connected.',
+        action: 'Connect',
+      },
     },
     error: {
       connectionFailed: 'Cannot connect to server',
@@ -3896,6 +3902,12 @@ const en = {
       cta: 'Set password',
       dismiss: 'Dismiss',
     },
+    connectAssistant: {
+      title: 'Work here from your AI assistant',
+      body: 'You can look up and change your records from Claude, Doubao and similar AI assistants. Each one acts as you, with your own permissions.',
+      action: 'Connect an AI Assistant',
+      dismiss: 'Hide',
+    },
     pendingDrafts: {
       // objectui#12602 — the drafts row in Home's "My work" section: the
       // count, then the first draft names joined by `nameSeparator`, in
@@ -4610,6 +4622,12 @@ const en = {
       example2: 'Count how many records each of those objects has.',
       example3: 'What actions can I run here, and what does each one do?',
       tryFirst: 'Start with the first one: if your assistant answers with the objects you work with, the connection works.',
+      connected: 'Connected: {{name}}.',
+      connectedKey: 'Connected with the API key "{{name}}".',
+      lastCallHour: 'Its last call was in the hour from {{time}}.',
+      lastCallAt: 'Its last call was at {{time}}.',
+      noCallYet: 'No call yet: ask it the first request above to check the connection.',
+      moreConnected: 'Everything else that can act as you is listed at the bottom of this page.',
     },
     disabled: {
       title: 'Connecting AI assistants is turned off here',
@@ -4693,7 +4711,8 @@ const en = {
       lastUsedHour: 'Last used in the hour from {{time}}',
       notRecorded: 'Last use not recorded',
       truncated: 'Only the newest are shown; you have authorized more.',
-      withdrawLater: 'Withdrawing an assistant from this page is not available yet.',
+      withdrawTitle: 'Revoke access for {{name}}?',
+      withdrawBody: 'The assistant loses access at once. To use it again, it has to be authorized again.',
       keys: 'Your API keys',
       keysEmpty: 'You have no API keys.',
       created: 'Created {{date}}',
@@ -4706,6 +4725,9 @@ const en = {
       revokeBody: 'Anything that uses this key loses access at once. This cannot be undone.',
       revoking: 'Revoking…',
       loadFailed: 'Could not load this list: {{message}}',
+      managedBody: 'The AI assistants this person authorized. Each one acts with their permissions, and Revoke ends its access at once.',
+      managedEmpty: 'This person has not authorized any AI assistant.',
+      managedTruncated: 'Only the newest are shown; this person has authorized more.',
     },
   },
   excelImport: {
