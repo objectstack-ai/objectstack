@@ -346,19 +346,23 @@ describe('runParentWriteReachProofs — the fixture app, booted with parentWrite
 
   it('counts every reach and write, and every object is proven', () => {
     expect(report.summary).toEqual({
-      objects: 3,
-      probed: 3,
-      proven: 3,
+      objects: 4,
+      probed: 4,
+      proven: 4,
       contradicted: 0,
       failed: 0,
       inconclusive: 0,
       excluded: 0,
       notDerivable: 0,
       personas: { run: 5, notRun: 0 },
-      // 3 objects × 5 personas × 2 master chains, the rep's three chains another principal owns outside its reach.
-      reaches: { probed: 27, unreadable: 3, unmeasured: 0 },
-      probes: { edit: 54, delete: 54, create: 27 },
-      held: 135,
+      // 4 objects × 5 personas × 2 master chains, the rep's four chains another
+      // principal owns outside its reach (36 probed, two edits, two deletes and
+      // a create each), plus pwr_contact's 5 null-master reaches: 7 records read
+      // and written (one each for the three verifier personas, two each for the
+      // manager and the rep) and 5 creates.
+      reaches: { probed: 41, unreadable: 4, unmeasured: 0 },
+      probes: { edit: 79, delete: 79, create: 41 },
+      held: 199,
       contradictions: 0,
       unattributed: 0,
       faults: 0,
@@ -539,7 +543,7 @@ describe('runParentWriteReachProofs — a stack booted without parentWriteReachS
     for (const p of report.personas.filter((x) => x.kind === 'verifier')) {
       expect(p.reason).toMatch(/the server does not resolve it for the persona: boot the stack with `parentWriteReachSecurity\(config\)`/);
     }
-    expect(report.summary).toMatchObject({ proven: 2, contradicted: 0, personas: { run: 2, notRun: 3 }, hardFailures: 3 });
+    expect(report.summary).toMatchObject({ proven: 3, contradicted: 0, personas: { run: 2, notRun: 3 }, hardFailures: 3 });
     expect(formatParentWriteReachReport(report)).toContain('⛔ persona master-all-records NOT RUN');
   });
 });
