@@ -327,7 +327,7 @@ describe('a comment’s ledger and activity rows are served only to a reader of 
     const scoped = { object_name: COMMENT, record_id: ids.theirComment };
     expect(await engine.find(ACTIVITY, { where: scoped, context: MEMBER })).toEqual([]);
     expect(await engine.find(LEDGER, { where: scoped, context: MEMBER })).toEqual([]);
-    expect(await engine.count(ACTIVITY, { where: scoped, context: MEMBER } as any)).toBe(0);
+    expect(await engine.count(ACTIVITY, { where: scoped, context: MEMBER })).toBe(0);
   });
 
   it('control: an admin, who reads every record, is served both comments’ rows', async () => {
