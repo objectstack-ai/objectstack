@@ -6357,6 +6357,30 @@ export function createHostCryptoProvider(local: () => ICryptoProvider): {
 }
 
 /**
+ * The plugins of a composition that declare, in `providesServices`
+ * (ADR-0116), that they register {@link CRYPTO_PROVIDER_SERVICE} — by name, in
+ * composition order. A plugin composed twice under one `name` boots once (the
+ * later one), and is listed once, as that later instance.
+ *
+ * The one reading of "who provides the crypto provider" that `os serve`
+ * ({@link refuseTwoCryptoProviderPlugins}) and the one-shot commands
+ * (`utils/one-shot-settings.ts`) both take.
+ */
+export function cryptoProviderPlugins(composed: Iterable<unknown>): Array<{ name: string; plugin: object }> {
+  const byName = new Map<string, object>();
+  for (const candidate of composed) {
+    const name = (candidate as { name?: unknown } | null)?.name;
+    if (typeof name === 'string') byName.set(name, candidate as object);
+  }
+  return [...byName]
+    .filter(([, plugin]) => {
+      const provides = (plugin as { providesServices?: unknown }).providesServices;
+      return Array.isArray(provides) && provides.includes(CRYPTO_PROVIDER_SERVICE);
+    })
+    .map(([name, plugin]) => ({ name, plugin }));
+}
+
+/**
  * Refuse a composition in which more than one plugin declares, in
  * `providesServices` (ADR-0116), that it registers {@link CRYPTO_PROVIDER_SERVICE}.
  *
@@ -6368,17 +6392,7 @@ export function createHostCryptoProvider(local: () => ICryptoProvider): {
  * twice under one `name` boots once (the later one), and is counted once.
  */
 export function refuseTwoCryptoProviderPlugins(composed: Iterable<unknown>): void {
-  const byName = new Map<string, unknown>();
-  for (const candidate of composed) {
-    const name = (candidate as { name?: unknown } | null)?.name;
-    if (typeof name === 'string') byName.set(name, candidate);
-  }
-  const declaring = [...byName]
-    .filter(([, plugin]) => {
-      const provides = (plugin as { providesServices?: unknown }).providesServices;
-      return Array.isArray(provides) && provides.includes(CRYPTO_PROVIDER_SERVICE);
-    })
-    .map(([name]) => name);
+  const declaring = cryptoProviderPlugins(composed).map(({ name }) => name);
   if (declaring.length > 1) {
     throw new HostCryptoProviderRefusal(
       `Refusing to boot: ${declaring.length} plugins provide the crypto provider ('${CRYPTO_PROVIDER_SERVICE}'): `
