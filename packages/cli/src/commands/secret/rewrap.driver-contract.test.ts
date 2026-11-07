@@ -35,8 +35,18 @@ import { ciphertextDerivationStatus, LocalCryptoProvider } from '@objectstack/se
 import type { CryptoContext } from '@objectstack/spec/contracts';
 import { bootSchemaStack, type SchemaStack } from '../../utils/schema-migrate.js';
 import type { SecretReferenceEngineLike } from '../../utils/secret-reference-union.js';
-import { oneShotSettingsPlugin } from '../../utils/one-shot-settings.js';
+import { oneShotSettingsPlugins } from '../../utils/one-shot-settings.js';
 import SecretRewrap from './rewrap.js';
+
+// [#31007] Pay the first load of what the one-shot crypto composition reaches through
+// dynamic `import()`s (the host config reader and `serve.ts`) at MODULE LOAD, outside
+// any clocked case.
+import '@objectstack/driver-sql';
+import '@objectstack/driver-turso';
+import '@objectstack/plugin-security';
+import '@objectstack/rest';
+import '@objectstack/runtime';
+import '@objectstack/service-datasource';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const CLI_ROOT = resolve(HERE, '..', '..', '..');
@@ -106,7 +116,7 @@ describe('os secret rewrap — the concrete driver and the command, end to end (
       // `rewrap.ts`'s own list: the one-shot settings composition, over the
       // key this file declares in `OS_SECRET_KEY` (the command resolves the
       // same key first and hands that instance in).
-      extraPlugins: [new PlatformObjectsPlugin(), await oneShotSettingsPlugin()],
+      extraPlugins: [new PlatformObjectsPlugin(), ...await oneShotSettingsPlugins()],
     });
     const engine = stack.kernel.getService('objectql') as SecretReferenceEngineLike | undefined;
     if (!engine) throw new Error('no objectql engine on the booted stack — nothing to measure');
@@ -205,6 +215,58 @@ describe('os secret rewrap — the concrete driver and the command, end to end (
     expect(await secretDriver.find('sys_secret', {})).toEqual(before);
   }, 180_000);
 
+  /**
+   * [#31007] A host config in the run's directory whose one plugin declares
+   * the crypto provider — `os serve`'s provider for this deployment. Removed
+   * again by the returned function.
+   */
+  const declareProvider = (plugin: Record<string, unknown>): (() => void) => {
+    (globalThis as Record<string, unknown>).__os_rewrap_provider_plugin = plugin;
+    const file = join(dir, 'objectstack.config.mjs');
+    writeFileSync(file, "export default { name: 'rewrap_dc', plugins: [globalThis.__os_rewrap_provider_plugin] };\n");
+    return () => {
+      rmSync(file, { force: true });
+      delete (globalThis as Record<string, unknown>).__os_rewrap_provider_plugin;
+    };
+  };
+
+  it('[#31007] a declared provider that boots re-wraps the rows, and the local key is never read', async () => {
+    const opened: string[] = [];
+    const inner = new LocalCryptoProvider({ key: KEY });
+    const kms = {
+      encrypt: (plain: string, ctx: CryptoContext) => inner.encrypt(plain, ctx),
+      decrypt: (handle: Parameters<typeof inner.decrypt>[0], ctx: CryptoContext) => { opened.push(ctx.scope); return inner.decrypt(handle, ctx); },
+      rotateKey: (handle: Parameters<typeof inner.rotateKey>[0], ctx: CryptoContext) => inner.rotateKey(handle, ctx),
+      digest: (plain: string) => inner.digest(plain),
+      keyedDigest: (plain: string) => inner.keyedDigest(plain),
+    };
+    const removeConfig = declareProvider({
+      name: 'com.example.kms',
+      version: '1.0.0',
+      providesServices: ['crypto-provider'],
+      init: async (ctx: { registerService(name: string, service: unknown): void }) => {
+        ctx.registerService('crypto-provider', kms);
+      },
+    });
+    const savedKey = process.env.OS_SECRET_KEY;
+    // No local key at all: only the registered provider can open these rows.
+    delete process.env.OS_SECRET_KEY;
+    try {
+      const before = await secretDriver.find('sys_secret', {});
+      const { payload, exitCode } = await runJson(['--declared-datasources', declaredFile]);
+
+      expect(payload.error, JSON.stringify(payload).slice(0, 400)).toBeUndefined();
+      expect(payload.report.byClass).toMatchObject({ rewrap: 2, refused_unreadable: 0 });
+      expect(payload.report.keySource).toBe("crypto provider 'com.example.kms'");
+      expect(exitCode).toBe(0);
+      expect(opened.length).toBeGreaterThan(0);
+      expect(await secretDriver.find('sys_secret', {})).toEqual(before);
+    } finally {
+      process.env.OS_SECRET_KEY = savedKey;
+      removeConfig();
+    }
+  }, 180_000);
+
   it('with no data key, the run refuses before opening a row, and NO provider in its boot mints one', async () => {
     // A development posture with no key anywhere: the posture in which a
     // default provider mints a key file. The settings service the boot
@@ -276,5 +338,38 @@ describe('os secret rewrap — the concrete driver and the command, end to end (
     expect(again.payload.report.byClass).toMatchObject({ rewrap: 0, done: 2, left_orphan: 2 });
     expect(again.exitCode).toBe(0);
     expect(await secretDriver.find('sys_secret', {})).toEqual(tableBefore);
+  }, 180_000);
+  // LAST on purpose: a boot that fails keeps this process's stdout reserved
+  // for the JSON payload (`bootSchemaStack`'s `jsonOutput`), as the one-shot
+  // process exits right after it, so no run may follow it in this file.
+  it('[#31007] a declared provider that cannot boot: --apply refuses naming it, and every stored value is byte-equal', async () => {
+    // A held version-1 row the earlier --apply has not re-wrapped, so a run
+    // that fell back to the local key — still present in `OS_SECRET_KEY` —
+    // would re-wrap it.
+    const engine = stack!.kernel.getService('objectql') as SecretReferenceEngineLike;
+    const settingDriver = engine.getDriverForObject('sys_setting') as unknown as DriverProbe;
+    const held = v1Row('sec_rewrap_dc_31007', 'smtp', 'username', 'dc-31007-plain');
+    await secretDriver.create('sys_secret', { ...held });
+    await settingDriver.create('sys_setting', { namespace: 'smtp', key: 'username', value_enc: held.id, organization_id: 'org_fixture' });
+
+    const removeConfig = declareProvider({
+      name: 'com.example.kms-offline',
+      version: '1.0.0',
+      providesServices: ['crypto-provider'],
+      init: async () => { throw new Error('KMS endpoint unreachable'); },
+    });
+    try {
+      const before = await secretDriver.find('sys_secret', {});
+      const { payload, exitCode } = await runJson(['--apply', '--yes', '--declared-datasources', declaredFile]);
+
+      expect(payload.error, JSON.stringify(payload).slice(0, 400)).toBe('boot_failed');
+      expect(payload.message).toContain("'com.example.kms-offline'");
+      expect(payload.message).toContain('Nothing was opened or written');
+      expect(payload.message).not.toContain(KEY.toString('hex'));
+      expect(exitCode).toBe(1);
+      expect(await secretDriver.find('sys_secret', {})).toEqual(before);
+    } finally {
+      removeConfig();
+    }
   }, 180_000);
 });
