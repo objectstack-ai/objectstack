@@ -77,11 +77,8 @@ import {
 import { useMetadataLocale, t, tFormat } from './i18n.js';
 import { useMetadataClient } from './useMetadata.js';
 import { PackageFormDialog } from './PackageFormDialog.js';
-import {
-  PackageRemovalSummary,
-  readPackageRemovalContents,
-  type PackageRemovalState,
-} from './packageRemovalContents.js';
+import { readPackageRemovalContents, type PackageRemovalState } from './packageRemovalContents.js';
+import { PackageRemovalSummary } from './PackageRemovalSummary.js';
 import { useAdapter } from '@object-ui/react';
 import { PageHeader } from '../../layout/PageHeader.js';
 import { errorCodeIs } from '@object-ui/types';
@@ -607,15 +604,11 @@ export function PackageDetailSheet({
 
   // objectstack#31025 — the Delete dialog states what goes: the export door's
   // items (each object with the rows the data list counts), read each time
-  // the dialog opens.
+  // the dialog opens (`openDelete` marks it loading).
   const removalPackageId = deleteOpen ? pkg?.manifest.id : undefined;
   React.useEffect(() => {
-    if (!removalPackageId) {
-      setRemoval(null);
-      return;
-    }
+    if (!removalPackageId) return;
     let cancelled = false;
-    setRemoval({ status: 'loading' });
     apiJson<unknown>(`${API}/${encodeURIComponent(removalPackageId)}/export`)
       .then((manifest) => {
         if (cancelled) return;
@@ -869,6 +862,7 @@ export function PackageDetailSheet({
     startAction(() => {
       setDeleteMode('');
       setDeleteTyped('');
+      setRemoval({ status: 'loading' });
       setDeleteOpen(true);
     });
 
