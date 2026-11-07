@@ -82,28 +82,33 @@ async function readShareableObjects(doFetch: ApiFetch): Promise<ShareableObjectH
   return listOf(await res.json());
 }
 
+/** What the door answered through one fetch function: its list, or `null` for no list. */
+interface DoorAnswer {
+  from: ApiFetch;
+  objects: ShareableObjectHeader[] | null;
+}
+
 function useShareableObjects(doFetch: ApiFetch | undefined, enabled: boolean): ShareableCatalog {
-  const [catalog, setCatalog] = React.useState<ShareableCatalog>(doFetch && enabled ? LOADING : FALLBACK);
+  const [answer, setAnswer] = React.useState<DoorAnswer | null>(null);
   React.useEffect(() => {
-    if (!doFetch || !enabled) {
-      setCatalog(FALLBACK);
-      return;
-    }
+    if (!doFetch || !enabled) return;
     let cancelled = false;
-    setCatalog(LOADING);
     readShareableObjects(doFetch).then(
       (objects) => {
-        if (!cancelled) setCatalog(objects ? { status: 'listed', objects } : FALLBACK);
+        if (!cancelled) setAnswer({ from: doFetch, objects });
       },
       () => {
-        if (!cancelled) setCatalog(FALLBACK);
+        if (!cancelled) setAnswer({ from: doFetch, objects: null });
       },
     );
     return () => {
       cancelled = true;
     };
   }, [doFetch, enabled]);
-  return catalog;
+  if (!doFetch || !enabled) return FALLBACK;
+  // An answer read through another fetch function is not this one's.
+  if (!answer || answer.from !== doFetch) return LOADING;
+  return answer.objects ? { status: 'listed', objects: answer.objects } : FALLBACK;
 }
 
 export function ShareableObjectRefField(props: FieldWidgetComponentProps<string>) {
@@ -112,12 +117,14 @@ export function ShareableObjectRefField(props: FieldWidgetComponentProps<string>
   const { t } = useFieldTranslation();
   const catalog = useShareableObjects(ctx?.apiFetch, !readonly);
 
-  const options = React.useMemo(() => {
-    if (catalog.status !== 'listed') return [];
-    const opts = catalog.objects.map((o) => ({ value: o.name, label: objectRefOptionLabel(o.name, o.label) }));
-    if (value && !opts.some((o) => o.value === value)) opts.unshift({ value, label: value });
-    return opts;
-  }, [catalog, value]);
+  // The door's order, as given; a stored name it does not list leads.
+  const options =
+    catalog.status === 'listed'
+      ? catalog.objects.map((o) => ({ value: o.name, label: objectRefOptionLabel(o.name, o.label) }))
+      : [];
+  if (value && catalog.status === 'listed' && !options.some((o) => o.value === value)) {
+    options.unshift({ value, label: value });
+  }
 
   if (readonly || catalog.status === 'fallback') return <ObjectRefField {...props} />;
 
