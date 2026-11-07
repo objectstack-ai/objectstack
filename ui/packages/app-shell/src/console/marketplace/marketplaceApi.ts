@@ -102,7 +102,17 @@ export interface MarketplacePackageSummary {
   manifest_id: string;
   display_name: string;
   description?: string | null;
-  category?: string | null;
+  /**
+   * The marketplace taxonomy (`@objectstack/spec/marketplace`), as the catalog
+   * row's snake_case columns: `businessFunctions` (1–3, the first is primary),
+   * `industries` (0–3), `solutionType` and `maturity`. Absent on a catalog
+   * that does not serve the taxonomy yet, and then every facet hides.
+   * `marketplaceTaxonomy.ts` reads them.
+   */
+  business_functions?: readonly MarketplaceBusinessFunction[] | null;
+  industries?: readonly MarketplaceIndustry[] | null;
+  solution_type?: MarketplaceSolutionType | null;
+  maturity?: PackageMaturity | null;
   tags?: string | null;
   icon_url?: string | null;
   homepage_url?: string | null;
@@ -148,6 +158,12 @@ export type { PluginRuntime } from '@objectstack/spec/kernel';
 import type { InstallMode, MetadataLock, PluginPermissions, PluginRuntime } from '@objectstack/spec/kernel';
 import { INSTALL_MODES } from '@objectstack/spec/kernel';
 import { isPlainRecord } from '@objectstack/spec/data';
+import type {
+  MarketplaceBusinessFunction,
+  MarketplaceIndustry,
+  MarketplaceSolutionType,
+  PackageMaturity,
+} from '@objectstack/spec/marketplace';
 import type { ProtocolCheckSkipped } from './protocolCheckSkipped.js';
 
 export interface MarketplacePackageVersion {
@@ -233,10 +249,9 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
   return (payload?.data ?? payload) as T;
 }
 
-export async function listMarketplacePackages(params: { q?: string; category?: string; limit?: number; offset?: number } = {}): Promise<MarketplaceListResponse> {
+export async function listMarketplacePackages(params: { q?: string; limit?: number; offset?: number } = {}): Promise<MarketplaceListResponse> {
   const usp = new URLSearchParams();
   if (params.q) usp.set('q', params.q);
-  if (params.category) usp.set('category', params.category);
   if (params.limit != null) usp.set('limit', String(params.limit));
   if (params.offset != null) usp.set('offset', String(params.offset));
   const qs = usp.toString();
