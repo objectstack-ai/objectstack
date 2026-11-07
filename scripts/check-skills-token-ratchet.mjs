@@ -524,7 +524,7 @@ export const CEILINGS = new Map([
   // 6123 -> 6078: re-locked at the landed count. The rule index's `rules/lifecycle.md`
   // entry names the save notice (+16); the `lifecycle` property row dropped the
   // bounding-policy clause that entry and `rules/lifecycle.md` already carry (-25).
-  // 6078 -> 6675 (#31155, card 1 of the cloud#3659 ruling-A split): the
+  // 6078 -> 6677 (#31155, card 1 of the cloud#3659 ruling-A split): the
   // metadata-authoring judgment the hosted build agent carried privately, now
   // the one published source — the `sharingModel` posture chosen from the
   // request; a yes/no flag is `defaultValue: false` and never `required`; a
@@ -537,15 +537,15 @@ export const CEILINGS = new Map([
   // `rules/validation.md` § Uniqueness and is a one-line pointer now; the
   // `secret` / `user` parentheticals restated `rules/field-types.md` rows 42-43
   // and 96 and are gone. Arithmetic in priced bytes (stamp line excluded):
-  // 24308 -> 26700 (+2392 net) -> ceil(26700 / 4) = 6675; headroom was 1
-  // token, so the ceiling moves +597, pinned AT the measurement. Authorised by
+  // 24308 -> 26707 (+2399 net) -> ceil(26707 / 4) = 6677; headroom was 1
+  // token, so the ceiling moves +599, pinned AT the measurement. Authorised by
   // the ruling of record that orders this text into the published skills:
   // objectstack-ai/cloud#3659, letter A, maintainer 「A」 (ruling comment
   // 6682024726, 2026-11-06): "How to write valid, working metadata lives in the
   // public skills … The private corpus's rules of that kind move there". The
   // raise path is the standing 2026-10-27 ruling, verbatim and untranslated:
   // 「A:先削重复,余额按实测提高」 (ruling record 6513306068).
-  ['skills/objectstack-data/SKILL.md', 6675],
+  ['skills/objectstack-data/SKILL.md', 6677],
   ['skills/objectstack-formula/SKILL.md', 5997], //     -53 (was 6055), then -5 A2′ (was 6002)
   ['skills/objectstack-i18n/SKILL.md', 6333], //        -11 (was 6349), then -5 A2′ (was 6338)
   // 12705 -> 12984 (2026-08-31 app-repo-principles raise, see the block above).

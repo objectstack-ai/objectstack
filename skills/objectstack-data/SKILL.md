@@ -313,7 +313,7 @@ picker; `formula` takes CEL in `expression` (`F\`...\`` from `@objectstack/spec`
 | Many-to-Many (with attributes) | Junction object with two `lookup` fields |
 | Hierarchical | `tree` field (self-reference) |
 | Record status / lifecycle | a `select` on the business object (plus a `state_machine` validation) — never a separate status / stage / step table |
-| Approval, review, routing, audit trail | not objects: an approval is a flow node (**objectstack-automation**) and its trail is platform history; model only the people it references, as `user` fields for roles other than the owner |
+| Approval, review, routing, audit trail | not objects: an approval is a flow node (**objectstack-automation**) and its trail is platform history; model only the people it references (approver, reviewer), as `user` fields beside the owner |
 | Record owner | the platform's `owner_id` (`ownership: 'user'`, the default) — never a hand-added 负责人 / owner lookup, a second owner that owner-scoped visibility and "My records" views never read; `ownership: 'none'` only for a shared catalog or a pure junction table |
 
 > **`multiple: true` lookup ≠ junction object.** A multi-value lookup
