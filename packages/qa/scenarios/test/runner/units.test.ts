@@ -2,22 +2,27 @@
 
 /**
  * The runner's pure parts: the stream-json reader, the observation builder,
- * and the cost guard. No model, no network, no server.
+ * the cost guard, the seed's load plan and the CLI's flags. No model, no
+ * network, no server; the live driver is driven against a stand-in `claude`
+ * script, never the real CLI.
  */
 
-import { mkdtempSync, readFileSync, existsSync } from 'node:fs';
+import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { delimiter, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { formatRefusal, loadScenarioFile, readCapabilityAreas, type LoadedScenario } from '../../src/loader.js';
+import { formatRefusal, loadScenarioFile, loadScenarios, readCapabilityAreas, type LoadedScenario } from '../../src/loader.js';
 import { gradeCardOperation, type OperationObservation } from '../../src/score/index.js';
 import type { PersonaAccount } from '../../src/runner/app.js';
+import { makeDriver, parseArgs } from '../../src/runner/cli.js';
 import {
   ApiBillingRefusedError,
   assertSubscriptionLogin,
+  ClaudeCodeDriver,
+  DEFAULT_AUTHOR_TIMEOUT_MIN,
   MissingRecordingError,
   RecordedDriver,
   subscriptionOnlyEnv,
@@ -35,7 +40,8 @@ import {
   uncodedToolError,
 } from '../../src/runner/observe.js';
 import { citationLabels, namespaceOfConfig, namespacedScenario, permissionSetName, templateHostName } from '../../src/runner/namespace.js';
-import { changeSize, hiddenValues, installableManifest, probeValues, seedDependence, seedOrder, withoutItems } from '../../src/runner/orchestrate.js';
+import { authorNotMeasured, changeSize, hiddenValues, installableManifest, probeValues, seedDependence, seedOrder, withoutItems } from '../../src/runner/orchestrate.js';
+import { referenceCycles, requiredLookups, seedPlan, type SeedPlan } from '../../src/runner/seed.js';
 import { buildPrompt, dataContract, iteratePrompt, questionPrompt, templateIteratePrompt, unheldHandles, userHandleFields, verifyArgs, verifyFlags } from '../../src/runner/prompts.js';
 import { parseStreamJson, refusalCodeOf, toolNameOf, type ParsedTurn } from '../../src/runner/transcript.js';
 
@@ -493,5 +499,206 @@ describe('namespace-relative cards', () => {
 
   it("template mode's host is named after the code, never the app's namespace", () => {
     expect(templateHostName(crm.card)).toBe('hostcrm');
+  });
+});
+
+// ── The seed's load plan ────────────────────────────────────────────────────
+
+const SCENARIOS_DIR = resolve(HERE, '../../../../../docs/qa/scenarios');
+const RTR_FILE = resolve(HERE, '../../../../../docs/qa/scenarios/requisition_to_receipt.json');
+const O2C_FILE = resolve(HERE, '../../../../../docs/qa/scenarios/order_to_cash.json');
+
+/**
+ * Replay a plan's first pass and answer every lookup value it SENDS that names
+ * a seed row not in yet — what an app checking reference integrity refuses.
+ */
+function forwardReferences(card: LoadedScenario['card'], plan: SeedPlan): string[] {
+  const waits = new Set(plan.deferred.map((d) => `${d.object}/${d.id}/${d.field}`));
+  const inSeed = new Set(Object.entries(card.run.seed).flatMap(([o, rows]) => rows.map((r) => `${o}/${r.id}`)));
+  const loaded = new Set<string>();
+  const out: string[] = [];
+  for (const object of plan.order) {
+    for (const row of card.run.seed[object] ?? []) {
+      for (const l of card.expect.lookups ?? []) {
+        const v = row[l.field];
+        if (l.object !== object || typeof v !== 'string' || waits.has(`${object}/${row.id}/${l.field}`)) continue;
+        if (inSeed.has(`${l.to}/${v}`) && !loaded.has(`${l.to}/${v}`)) out.push(`${object}/${row.id}.${l.field} → ${l.to}/${v}`);
+      }
+      loaded.add(`${object}/${row.id}`);
+    }
+  }
+  return out;
+}
+
+describe("the seed's load plan — reference cycles found from the card's own lookups (requisition_to_receipt)", () => {
+  const rtr = load(RTR_FILE);
+  const card = rtr.card;
+  const cycle = [
+    { object: 'department', field: 'manager', to: 'employee' },
+    { object: 'employee', field: 'department', to: 'department' },
+  ];
+
+  it('finds the department ↔ employee cycle from expect.lookups, and only that one', () => {
+    expect(referenceCycles(card)).toEqual([cycle]);
+    expect(referenceCycles(load().card)).toEqual([]); // crm: no lookup leads back
+  });
+
+  it('loads departments first with their manager left out, then sets the five managers in the second pass', () => {
+    const plan = seedPlan(card);
+    expect(plan.order).toEqual(['department', 'employee', 'supplier', 'purchase_requisition', 'approval_step', 'purchase_order', 'po_line', 'goods_receipt']);
+    expect(plan.deferred).toEqual([
+      { object: 'department', id: 'dep_sales', field: 'manager', value: 'e13' },
+      { object: 'department', id: 'dep_eng', field: 'manager', value: 'e14' },
+      { object: 'department', id: 'dep_ops', field: 'manager', value: 'e15' },
+      { object: 'department', id: 'dep_fin', field: 'manager', value: 'e16' },
+      { object: 'department', id: 'dep_exec', field: 'manager', value: 'e18' },
+    ]);
+    expect(plan.unseedable).toEqual([]);
+    expect(forwardReferences(card, plan)).toEqual([]);
+    // The object-by-object order every mid-tier run used: its first pass names rows not in yet.
+    const oneByOne: SeedPlan = { order: plan.order, deferred: [], unseedable: [] };
+    expect(forwardReferences(card, oneByOne)).toHaveLength(5);
+  });
+
+  it('breaks the cycle on the side the build left optional', () => {
+    const managerRequired = seedPlan(card, new Set(['department.manager']));
+    expect(managerRequired.order.slice(0, 2)).toEqual(['employee', 'department']);
+    expect(new Set(managerRequired.deferred.map((d) => `${d.object}.${d.field}`))).toEqual(new Set(['employee.department']));
+    expect(managerRequired.deferred).toHaveLength(card.run.seed.employee!.length);
+    expect(managerRequired.unseedable).toEqual([]);
+    expect(forwardReferences(card, managerRequired)).toEqual([]);
+    expect(seedPlan(card, new Set(['employee.department'])).deferred.map((d) => `${d.object}.${d.field}`)).toEqual(Array(5).fill('department.manager'));
+  });
+
+  it('a build that makes both sides required cannot be seeded: the plan names the cycle, and still loads every object', () => {
+    const plan = seedPlan(card, new Set(['department.manager', 'employee.department']));
+    expect(plan.unseedable).toEqual([cycle]);
+    expect([...plan.order].sort()).toEqual(Object.keys(card.run.seed).sort());
+  });
+
+  it('a self-lookup naming a later row of its own object waits too (order_to_cash: e09 → e10)', () => {
+    const o2c = load(O2C_FILE).card;
+    expect(referenceCycles(o2c)).toEqual([[{ object: 'employee', field: 'manager', to: 'employee' }]]);
+    const plan = seedPlan(o2c);
+    expect(plan.deferred).toEqual([{ object: 'employee', id: 'e09', field: 'manager', value: 'e10' }]);
+    expect(forwardReferences(o2c, plan)).toEqual([]);
+    expect(seedPlan(o2c, new Set(['employee.manager'])).unseedable).toEqual([[{ object: 'employee', field: 'manager', to: 'employee' }]]);
+  });
+
+  it('on every card in the library the first pass never names a row that is not in yet', () => {
+    const { cards, refusals } = loadScenarios(SCENARIOS_DIR, { areas: readCapabilityAreas(AREAS_DIR) });
+    expect(refusals.map(formatRefusal)).toEqual([]);
+    expect(cards.length).toBeGreaterThanOrEqual(9);
+    for (const { card: c } of cards) {
+      const id = c.id;
+      const plan = seedPlan(c);
+      expect([id, forwardReferences(c, plan)]).toEqual([id, []]);
+      expect([id, [...plan.order].sort()]).toEqual([id, Object.keys(c.run.seed).sort()]);
+    }
+  });
+
+  it('reads the required lookups off a built artifact through the scorer’s reader, and none off an unreadable one', () => {
+    const artifact = { objects: [{ name: 'd', fields: { manager: { type: 'lookup', reference: 'e', required: true }, name: { type: 'text' } } }] };
+    expect(requiredLookups(artifact)).toEqual(new Set(['d.manager']));
+    expect(requiredLookups({ objects: [{ fields: {} }] })).toBeUndefined();
+    expect(requiredLookups(undefined)).toBeUndefined();
+  });
+
+  it('the build contract names the cycle and says one side must be optional; a card with none says nothing', () => {
+    const contract = dataContract(namespacedScenario(rtr).card);
+    expect(contract).toContain(
+      'Reference cycles: `demopurchase_department.manager` → `demopurchase_employee`, `demopurchase_employee.department` → `demopurchase_department`.',
+    );
+    expect(contract).toContain('At least one side of a reference cycle must be optional: never make every lookup in it required.');
+    expect(dataContract(namespacedScenario(load()).card)).not.toContain('Reference cycles');
+  });
+});
+
+// ── The live driver, against a stand-in `claude` ────────────────────────────
+
+/**
+ * A stand-in for the `claude` CLI: it answers `--version` and `auth status`
+ * as a subscription login does, reads its prompt from stdin, and then acts on
+ * the prompt's first word — `HANG` waits to be killed (and exits 143 on
+ * SIGTERM, as the real CLI was measured to), `CRASH` exits 1 with no result
+ * line, anything else answers one stream-json success saying what it read.
+ */
+const STAND_IN = `#!/usr/bin/env node
+process.on('SIGTERM', () => { process.stderr.write('stand-in: terminated\\n'); process.exit(143); });
+const args = process.argv.slice(2);
+if (args[0] === '--version') { console.log('2.1.0 (stand-in)'); process.exit(0); }
+if (args[0] === 'auth') { console.log(JSON.stringify({ loggedIn: true, authMethod: 'oauth_token' })); process.exit(0); }
+let input = '';
+process.stdin.on('data', (d) => (input += d));
+process.stdin.on('end', () => {
+  if (input.startsWith('HANG')) {
+    setInterval(() => {}, 1000);
+    return;
+  }
+  if (input.startsWith('CRASH')) { process.stderr.write('stand-in: could not start a session\\n'); process.exit(1); }
+  const longest = Math.max(...args.map((a) => a.length));
+  console.log(JSON.stringify({ type: 'system', subtype: 'init', model: 'stand-in' }));
+  console.log(JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: 'stdin ' + input.length + ' · longest argv ' + longest }] } }));
+  console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, num_turns: 1 }));
+});
+`;
+
+describe('the live driver against a stand-in `claude`: the prompt on stdin, and a turn that does not finish recorded', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'scenario-stand-in-'));
+  const bin = join(dir, 'claude');
+  writeFileSync(bin, STAND_IN);
+  chmodSync(bin, 0o755);
+  const task = (prompt: string) => ({ card: 'c', mode: 'scratch' as const, phase: 'build' as const, step: 'author', cwd: mkdtempSync(join(dir, 'project-')), prompt });
+  beforeEach(() => {
+    vi.stubEnv('ANTHROPIC_API_KEY', '');
+    vi.stubEnv('ANTHROPIC_AUTH_TOKEN', '');
+  });
+  afterEach(() => vi.unstubAllEnvs());
+  afterAll(() => rmSync(dir, { recursive: true, force: true }));
+
+  it('a 200 KB build prompt — past the 128 KiB a single argv string may hold on Linux — reaches the CLI whole, on stdin', async () => {
+    const { turn } = await new ClaudeCodeDriver({ bin }).author(task('x'.repeat(200_000)));
+    expect(turn.replyText).toMatch(/^stdin 200000 · longest argv \d{1,3}$/);
+    expect(turn.meta.resultSubtype).toBe('success');
+    expect(turn.meta.process).toMatchObject({ exit: 0, timedOut: false, timeoutMs: DEFAULT_AUTHOR_TIMEOUT_MIN * 60_000 });
+    expect(turn.meta.process!.elapsedMs).toBeGreaterThanOrEqual(0);
+    expect(authorNotMeasured(turn)).toBeUndefined();
+  });
+
+  it('a turn the runner’s timeout kills is recorded with its exit, elapsed time and stderr tail, and is not measured', async () => {
+    const { turn } = await new ClaudeCodeDriver({ bin, authorTimeoutMs: 1200 }).author(task('HANG'));
+    expect(turn.meta.resultSubtype).toBe('no-result(exit 143)');
+    expect(turn.meta.process).toMatchObject({ exit: 143, timedOut: true, timeoutMs: 1200, stderrTail: 'stand-in: terminated' });
+    expect(turn.meta.process!.elapsedMs).toBeGreaterThanOrEqual(1200);
+    expect(authorNotMeasured(turn)).toBe('author timed out after 0.02 min');
+  });
+
+  it('a CLI that exits without a result line, or a binary gone missing, is a failed turn with what was seen — never a lost one', async () => {
+    const driver = new ClaudeCodeDriver({ bin });
+    const crashed = (await driver.author(task('CRASH'))).turn;
+    expect(crashed.meta.resultSubtype).toBe('no-result(exit 1)');
+    expect(crashed.meta.process).toMatchObject({ exit: 1, timedOut: false, stderrTail: 'stand-in: could not start a session' });
+    expect(authorNotMeasured(crashed)).toBe('author turn failed: no-result(exit 1)');
+
+    const gone = join(dir, 'gone');
+    writeFileSync(gone, STAND_IN);
+    chmodSync(gone, 0o755);
+    const vanishing = new ClaudeCodeDriver({ bin: gone });
+    rmSync(gone);
+    const lost = (await vanishing.author(task('anything'))).turn;
+    expect(lost.meta.resultSubtype).toBe(`no-result(spawn ${gone} ENOENT)`);
+    expect(lost.meta.process).toMatchObject({ exit: null, error: `spawn ${gone} ENOENT` });
+    expect(authorNotMeasured(lost)).toBe(`author turn failed: no-result(spawn ${gone} ENOENT)`);
+  });
+
+  it('`--author-timeout` reaches the live driver (default 60 min), and a replay refuses it', () => {
+    vi.stubEnv('PATH', `${dir}${delimiter}${process.env.PATH ?? ''}`);
+    expect(parseArgs([]).authorTimeoutMin).toBeUndefined();
+    expect(parseArgs(['--author-timeout', '90']).authorTimeoutMin).toBe(90);
+    expect(() => parseArgs(['--author-timeout', '0'])).toThrow(/above 0/);
+    expect(() => parseArgs(['--author-timeout', 'soon'])).toThrow(/above 0, not `soon`/);
+    expect(makeDriver('claude').info().authorTimeoutMs).toBe(60 * 60_000);
+    expect(makeDriver('claude', { authorTimeoutMin: 90 }).info().authorTimeoutMs).toBe(90 * 60_000);
+    expect(() => makeDriver('recorded:/nowhere.json', { authorTimeoutMin: 90 })).toThrow(/live driver only/);
   });
 });

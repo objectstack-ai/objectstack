@@ -15,6 +15,9 @@
  *     `<namespace>_<persona id>`, with what that persona must not see and
  *     which rows it sees (the card states these as requirements of the app);
  *   - the business actions an agent may call, when the card declares them;
+ *   - the reference cycles the seed's lookups close (`seed.ts`), when there
+ *     are any: the runner loads them in two passes, so at least one side of
+ *     each must be optional;
  *   - the naming rule: EVERY item the app declares is named
  *     `<namespace>_<short>`, not only its objects ({@link namingRule}). The
  *     scorer reports a bare one as a Build finding, so every authoring prompt
@@ -33,6 +36,7 @@
 import type { LoadedScenario } from '../loader.js';
 import { scenarioNamespace, type ScenarioCard } from '../schema.js';
 import { permissionSetName } from './namespace.js';
+import { cycleText, referenceCycles } from './seed.js';
 
 type Card = ScenarioCard;
 type Persona = Card['run']['personas'][number];
@@ -155,6 +159,15 @@ export function dataContract(card: Card): string {
           ].join('; ')}). Make that field accept a user id; a rule on it matches that user.`,
       );
     }
+  }
+  const cycles = referenceCycles(card);
+  if (cycles.length) {
+    lines.push('');
+    lines.push(
+      `Reference cycles: ${cycles.map((c) => cycleText(c)).join('; ')}. These lookups lead back to where they start, so the runner ` +
+        'loads their rows in two passes: first with the lookup that closes the cycle left empty, then it sets that lookup. ' +
+        'At least one side of a reference cycle must be optional: never make every lookup in it required.',
+    );
   }
   if (card.run.agentActions?.length) {
     lines.push('');

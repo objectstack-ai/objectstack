@@ -89,6 +89,7 @@ pnpm --filter @objectstack/scenarios run-scenarios                       # every
 pnpm --filter @objectstack/scenarios run-scenarios --only service_desk --modes scratch
 pnpm --filter @objectstack/scenarios run-scenarios --record /tmp/rec.json  # also save every turn
 pnpm --filter @objectstack/scenarios run-scenarios --driver recorded:/tmp/rec.json  # replay, no model
+pnpm --filter @objectstack/scenarios run-scenarios --author-timeout 90       # minutes per authoring turn (default 60)
 ```
 
 Per card and mode the runner writes `docs/qa/platform-checklist/runs/<date>-scenario-<card>.json`
@@ -99,9 +100,24 @@ Per card and mode the runner writes `docs/qa/platform-checklist/runs/<date>-scen
 | `scratch` | `create-objectstack` → the agent builds from the card prompt and the runner's data contract (`prompts.ts`) → `objectstack validate` / `build` / `verify` (proofs chosen from the tags) → score → `objectstack dev --fresh` → seed, one user + permission-set grant + API key per persona → every question as every persona it names and every operation as its persona, over the app's MCP → the iterate change → rebuild, re-score, re-run |
 | `template` | a blank host project (`host<code>`) → boot → install the card's verified build **unmanaged** (`/api/v1/marketplace/install-local`, `installMode: 'unmanaged'`) → the agent applies the iterate change to the installed copy → score → seed → Run. A refused install is a finding in the record |
 
-- **Driver** (`driver.ts`): the local `claude` CLI on your own login (`claude -p --output-format stream-json`). It
-  refuses to start when `ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN` is set or the CLI is logged in with an API key
-  (the cost ruling on cloud#3600), and the record states the driver and login. `RecordedDriver` replays a recording.
+- **Driver** (`driver.ts`): the local `claude` CLI on your own login (`claude -p --output-format stream-json`, the
+  prompt written to its stdin: a build prompt carries the whole seed, and one argv string over 128 KiB makes `spawn`
+  fail with `E2BIG` on Linux). It refuses to start when `ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN` is set or the CLI
+  is logged in with an API key (the cost ruling on cloud#3600), and the record states the driver, the login and the
+  authoring timeout. Every turn records its process: elapsed time, and for a turn that did not finish its exit code or
+  signal, whether the runner's timeout killed it, and the end of its stderr. `RecordedDriver` replays a recording.
+- **A build that did not finish is not measured** (`orchestrate.ts`): an authoring turn the timeout killed
+  (`--author-timeout`, build and iterate alike) leaves its Build half **not measured: author timed out after N min**;
+  one that ended with no result line or an error result (`error_max_turns`, `is_error`), or never ran, leaves it **not
+  measured: author turn failed: …**. Never a degraded score, and nothing runs on it: no score, seed, Run or iterate. The
+  scorecard's author rows show every authoring turn's `resultSubtype` and elapsed time.
+- **Seed** (`seed.ts`): rows go in as the admin, a lookup's target before its referrer. Where the card's declared
+  lookups lead back to where they start — `department.manager → employee` with `employee.department → department`, or a
+  self-lookup naming a later row — the seed loads in two passes: every row first with each lookup naming a row not in
+  yet left out, then one update per row sets those (`seed.secondPass` in the record). The side that waits is one the
+  build left optional; a build that makes every side of a cycle `required` cannot be seeded, which the data contract
+  states and the scorecard reports as a Build finding naming the cycle (the seed is still sent, so the record holds
+  the app's own refusals).
 - **Observation** (`observe.ts`): the write grader is fed what the runner reads itself: the agent's write calls and
   the door's answer (a coded refusal), the object's rows before and after the turn, and the audit trail's actor. A turn
   that wrote nothing because the object refused the read it needed first (a persona that may not read it) grades as
