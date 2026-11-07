@@ -79,7 +79,7 @@ export default ObjectSchema.create({
 #### Owner edits under `controlled_by_parent` — `ownerMayEdit`
 
 A `controlled_by_parent` detail inherits the master's access: reads are scoped
-to accessible masters and **every write needs edit access on the master**. To
+to accessible masters and **every write of a row naming a master needs edit on it**. To
 let a detail row's owner (`owner_id`) update that row with only *read* access
 to the master, opt in on the detail:
 
@@ -89,7 +89,7 @@ sharing: { controlledByParent: { ownerMayEdit: true } },   // by-id update only
 ```
 
 Nothing else widens — insert, delete, predicate (`multi: true`) updates and
-on-behalf-of writes still need master edit; the detail's own row policies
+on-behalf-of writes under a master still need its edit; the detail's own row policies
 still AND in. Refused at parse under any other `sharingModel` (the owner
 already writes there) and one level up (`sharing.ownerMayEdit`).
 
@@ -106,7 +106,7 @@ account: { type: 'master_detail', reference: 'account', required: false },
 A row with no master is its owner's (`owner_id`): the owner or View All on the
 detail reads it, the owner or Modify All writes it (no owner: View All / Modify
 All only). An insert naming no master is admitted. Setting a master asks edit
-on it; emptying one asks edit on the stored master, `ownerMayEdit` aside. A
+on it; emptying one asks edit on the stored master, even under `ownerMayEdit`. A
 chain hop with no master ends there under the same rule. Refused beside a
 second `master_detail` or as `readonly`/`system`; `ObjectSchema.create()` reads
 an omitted `required` as `true`.
