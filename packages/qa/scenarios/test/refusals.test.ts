@@ -61,6 +61,9 @@ const CASES: Array<[string, (c: RawCard) => void, string, RegExp]> = [
   ['a card with no app code', (c) => delete c.code, 'code', /names its app `code`/],
   ['an app code with an underscore', (c) => (c.code = 'crm_app'), 'code', /2–8 lowercase letters/],
   ['an app code longer than eight letters', (c) => (c.code = 'customers'), 'code', /2–8 lowercase letters/],
+  // ── the tier (what the card is for) ──
+  ['a card with no tier', (c) => delete c.tier, 'tier', /names its `tier`: `control`.*`starter` or `delivery`/],
+  ['a tier outside the closed set', (c) => (c.tier = 'gallery'), 'tier', /expected one of "control"\|"starter"\|"delivery"/],
   // ── expect consistency ──
   ['a lookup to an object the card does not expect', (c) => c.expect.lookups.push({ object: 'contact', field: 'email', to: 'customer' }), 'expect.lookups[1].to', /lookup target `customer` is not in expect.objects/],
   ['a dangling app nav target', (c) => (c.expect.appNavTargets = ['account', 'overview']), 'expect.appNavTargets[1]', /dangling nav/],
@@ -206,4 +209,106 @@ describe('scenario card refusals', () => {
     writeFileSync(file, '{ "id": ');
     expect(loadScenarios(dir, { areas }).refusals).toEqual([{ file, path: '(card)', message: expect.stringMatching(/not valid JSON/) }]);
   });
+});
+
+/**
+ * The gallery floor a `starter` or `delivery` card meets, line by line: 5
+ * expected objects, 1 dashboard, 100 rows on one seeded object, 2 personas
+ * with a row scope, 8 questions, 4 operations, 3 agent actions. The numbers
+ * are spelled here, not imported, so moving the floor is a visible edit.
+ *
+ * The control card is raised to EXACTLY the floor on every line (it loads),
+ * then each case lowers one line by one and asserts the one refusal it earns.
+ */
+describe('the gallery floor (tier starter | delivery)', () => {
+  const extra = (n: number, prefix: string) =>
+    Array.from({ length: n }, (_, i) => ({ id: `${prefix}${i + 1}`, name: `${prefix} ${i + 1}`, kind: 'call' }));
+
+  /** The control card, declared `starter` and raised to exactly the floor. */
+  const atFloor = (tier: 'starter' | 'delivery') => (c: RawCard) => {
+    c.tier = tier;
+    // 2 → 5 objects; `activity` carries exactly 100 rows, the largest object.
+    c.expect.objects.push('region', 'territory', 'activity');
+    Object.assign(c.run.seed, { region: extra(1, 'rg'), territory: extra(1, 'tr'), activity: extra(100, 'act') });
+    // 0 → 1 dashboard.
+    c.expect.dashboards = ['pipeline'];
+    // 1 → 2 personas with a row scope (a scope on an object no question or write reads).
+    c.run.personas[1].scope = [{ object: 'activity', field: 'kind', value: 'call' }];
+    // 5 → 4 operations (no guardrail names this one); 8 questions and 3 agent actions already sit on the floor.
+    c.run.operations = c.run.operations.filter((o: { id: string }) => o.id !== 'partner_edits_account');
+  };
+  const below = (mutate: (c: RawCard) => void, tier: 'starter' | 'delivery' = 'starter') => (c: RawCard) => {
+    atFloor(tier)(c);
+    mutate(c);
+  };
+
+  it('a starter card exactly at the floor loads clean (control for every case below)', () => {
+    const r = load(atFloor('starter'));
+    expect(r.refusals.map(formatRefusal)).toEqual([]);
+    expect(r.cards.map((x) => x.card.tier)).toEqual(['starter']);
+    // The fixture sits ON the floor, line by line, so each case below is one step under it.
+    const card = r.cards[0].card;
+    expect(card.expect.objects).toHaveLength(5);
+    expect(card.expect.dashboards).toHaveLength(1);
+    expect(Math.max(...Object.values(card.run.seed).map((rows) => rows.length))).toBe(100);
+    expect(card.run.personas.filter((p) => p.scope !== undefined)).toHaveLength(2);
+    expect(card.run.questions).toHaveLength(8);
+    expect(card.run.operations).toHaveLength(4);
+    expect(card.run.agentActions).toHaveLength(3);
+  });
+
+  it('a delivery card exactly at the floor loads clean (delivery holds the same floor)', () => {
+    const r = load(atFloor('delivery'));
+    expect(r.refusals.map(formatRefusal)).toEqual([]);
+  });
+
+  it('a control card has no floor: the two-object, eight-row base card loads clean', () => {
+    expect(base.tier).toBe('control');
+    expect(load(() => {}).refusals).toEqual([]);
+  });
+
+  it('the same two-object, eight-row card declared starter is refused at every line it falls short of', () => {
+    const r = load((c) => (c.tier = 'starter'));
+    expect(r.cards).toEqual([]);
+    expect(r.refusals.map((x) => [x.path, x.message])).toEqual([
+      ['expect.objects', expect.stringMatching(/^a `starter` card expects at least 5 objects \(the gallery floor\); this one expects 2: .*declare it `control`/)],
+      ['expect.dashboards', expect.stringMatching(/at least 1 dashboard .*this one expects 0/)],
+      ['run.seed', expect.stringMatching(/at least 100 rows on one object .*this one seeds at most 5, on `contact`/)],
+      ['run.personas', expect.stringMatching(/at least 2 personas with a row `scope` .*this one has 1/)],
+    ]);
+  });
+
+  /** [name, mutation one step below the floor, the ONE refusal's path, its message]. */
+  const FLOOR_CASES: Array<[string, (c: RawCard) => void, string, RegExp]> = [
+    ['4 expected objects', below((c) => {
+      c.expect.objects = c.expect.objects.filter((o: string) => o !== 'territory');
+      delete c.run.seed.territory;
+    }), 'expect.objects', /^a `starter` card expects at least 5 objects \(the gallery floor\); this one expects 4:/],
+    ['no dashboard', below((c) => delete c.expect.dashboards), 'expect.dashboards', /expects at least 1 dashboard .*this one expects 0/],
+    ['99 rows on its largest object', below((c) => c.run.seed.activity.pop()), 'run.seed', /seeds at least 100 rows on one object .*this one seeds at most 99, on `activity`/],
+    ['1 persona with a row scope', below((c) => delete c.run.personas[1].scope), 'run.personas', /has at least 2 personas with a row `scope` .*this one has 1/],
+    // Below the default band too, yet the band's "state why in countsReason" is not
+    // offered: no reason lifts a gallery card's floor.
+    ['7 questions', below((c) => c.run.questions.pop()), 'run.questions', /asks at least 8 questions .*this one asks 7:/],
+    ['7 questions with a countsReason', below((c) => {
+      c.run.questions.pop();
+      c.run.countsReason = 'The model carries seven distinct questions.';
+    }), 'run.questions', /this one asks 7 \(a `countsReason` does not lower the floor\)/],
+    ['3 operations', below((c) => (c.run.operations = c.run.operations.filter((o: { id: string }) => o.id !== 'add_contact'))), 'run.operations', /performs at least 4 operations .*this one performs 3:/],
+    ['no agent actions', below((c) => delete c.run.agentActions), 'run.agentActions', /declares at least 3 agent actions .*this one declares 0/],
+    ['4 expected objects, as a delivery card', below((c) => {
+      c.expect.objects = c.expect.objects.filter((o: string) => o !== 'territory');
+      delete c.run.seed.territory;
+    }, 'delivery'), 'expect.objects', /^a `delivery` card expects at least 5 objects \(the gallery floor\); this one expects 4:/],
+  ];
+
+  for (const [name, mutate, path, message] of FLOOR_CASES) {
+    it(`refuses a gallery card with ${name}`, () => {
+      const r = load(mutate);
+      expect(r.refusals.map(formatRefusal)).toHaveLength(1);
+      expect(r.refusals[0]).toMatchObject({ file: r.file, path });
+      expect(r.refusals[0].message).toMatch(message);
+      expect(r.cards).toEqual([]);
+    });
+  }
 });
