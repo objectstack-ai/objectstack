@@ -512,6 +512,23 @@ describe('[#12792] ③ no detach-then-call shape survives in sql-driver.ts', () 
     expect(SCANNED.length).toBeGreaterThan(1);
   });
 
+  /**
+   * An explicit budget, sized to the measured work. The case parses every
+   * module in SCANNED with the TypeScript compiler and walks each tree twice
+   * (37 files, about 1.5 MB of source, at this commit). That work is the claim,
+   * so it is not cut. The case is synchronous, so vitest judges it after the
+   * body returns.
+   *
+   * Readings: the slowest `Test Core` reading is 2499 ms (`main` push and merge
+   * group runs, 2026-11-03..06, n=2); local idle, 442 and 469 ms.
+   *
+   * The rule is 3x the slowest reading, rounded up to the next second (the rule
+   * and why 3x: plugin-sharing's `share-link-password-webcontainer.test.ts`):
+   * 3 x 2499 = 7497, so the budget is 8000. If the split adds modules,
+   * re-measure and re-size.
+   */
+  const SCAN_BUDGET_MS = 8_000;
+
   it('sql-driver.ts and the modules split out of it contain none of them', () => {
     const found = SCANNED.flatMap((name) =>
       scan(readFileSync(new URL(`./${name}`, import.meta.url), 'utf8'), name).map(
@@ -519,5 +536,5 @@ describe('[#12792] ③ no detach-then-call shape survives in sql-driver.ts', () 
       ),
     );
     expect(found, 'every log call must go through a property access so the receiver stays bound').toEqual([]);
-  });
+  }, SCAN_BUDGET_MS);
 });
