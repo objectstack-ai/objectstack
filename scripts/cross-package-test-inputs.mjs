@@ -1308,6 +1308,8 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
       'packages/services/service-messaging/src/messaging-route-ledger.ts',
       // [#29443] The personal-view door's ledger, imported the same way.
       'packages/plugins/plugin-auth/src/personal-view-route-ledger.ts',
+      // [#30209] The shareable-objects door's ledger, imported the same way.
+      'packages/plugins/plugin-sharing/src/sharing-route-ledger.ts',
       // flow-trigger / validation conformance pin spec's zod schemas.
       'packages/spec/src/automation/**',
       'packages/spec/src/data/**',
