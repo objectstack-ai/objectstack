@@ -54,7 +54,8 @@ import {
   recordUnlinkTombstone,
 } from './implicit-account-linking.js';
 import { withSystemReadContext } from './objectql-adapter.js';
-import { emitAuthSessionAuditEvent, loginEventFor, logoutEventFor } from './auth-session-audit.js';
+import { emitAuthSessionAuditEvent, loginEventFor, logoutEventFor, signInClientFingerprint } from './auth-session-audit.js';
+import { ipAllowListRefusalEventFor, ipRefusalAuditBoundFor } from './ip-allow-list-refusal-audit.js';
 import { sessionPolicyHoldFor, withSessionPolicyHold } from './session-policy-hold.js';
 import { holdPrincipalSessionExpiry } from './principal-session-mint.js';
 import { canonicalClientAddress } from './client-address-canonical.js';
@@ -314,11 +315,32 @@ export function composeDatabaseHooks(
   // established address is in the request state, exactly the address the
   // deployment's list judged at that door. A programmatic `auth.api.*` call
   // carries no request and is not judged, as the door never judged it.
-  const refuseUnadmittedScoping = async (userId: unknown, organizationId: unknown, ctx: any) => {
+  //
+  // [#30924] A refused CREATION is a refused sign-in, and leaves its
+  // `login_failed` row (`ip-allow-list-refusal-audit.ts`), counted by the same
+  // per-address bound as the deployment gate's rows. A refused SWITCH is not a
+  // sign-in and writes none: only the creation hands `creating` in.
+  const refuseUnadmittedScoping = async (userId: unknown, organizationId: unknown, ctx: any, creating?: any) => {
     if (!ctx?.request || typeof userId !== 'string' || !userId) return;
     if (typeof organizationId !== 'string' || !organizationId) return;
-    const verdict = await this.judgeSessionScoping(userId, organizationId, await readRequestClientAddress());
+    const address = await readRequestClientAddress();
+    const verdict = await this.judgeSessionScoping(userId, organizationId, address);
     if (verdict === 'admitted') return;
+    const sink = creating ? this.config.getAuditSink?.() : undefined;
+    if (sink) {
+      const fingerprint = signInClientFingerprint(ctx, address);
+      const attempts = ipRefusalAuditBoundFor(sink).admit(fingerprint.ipAddress, (line) => this.config.logger?.warn?.(line));
+      if (attempts !== undefined) {
+        await emitAuthSessionAuditEvent(sink, ipAllowListRefusalEventFor({
+          path: typeof ctx?.path === 'string' ? ctx.path : '',
+          attempts,
+          userId,
+          organizationId,
+          impersonatedBy: typeof creating?.impersonatedBy === 'string' ? creating.impersonatedBy : undefined,
+          fingerprint,
+        }));
+      }
+    }
     const { APIError } = await import('better-auth/api');
     throw new APIError('FORBIDDEN', { code: SESSION_SCOPING_REFUSAL.code, message: SESSION_SCOPING_REFUSAL.message });
   };
@@ -329,7 +351,7 @@ export function composeDatabaseHooks(
     const final = result && typeof result === 'object' && 'data' in result
       ? { ...captured, ...(result as any).data }
       : captured;
-    await refuseUnadmittedScoping(final?.userId, final?.activeOrganizationId, ctx);
+    await refuseUnadmittedScoping(final?.userId, final?.activeOrganizationId, ctx, final);
     if (result && typeof result === 'object' && 'data' in result) return { data: final };
     return captured === session ? result : { data: captured };
   };

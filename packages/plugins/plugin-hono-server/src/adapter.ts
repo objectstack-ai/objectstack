@@ -596,6 +596,12 @@ export class HonoHttpServer implements IHttpServer {
      */
     private inFlightResponses = new Map<Socket, OwedResponses>();
     /**
+     * Node's idle-connection sweep, held back because a response was still
+     * flushing when it was asked for. {@link trackForDrain} runs it once none
+     * is — see {@link closeIdleConnectionsOnceFlushed}.
+     */
+    private deferredIdleSweep: (() => void) | undefined;
+    /**
      * Every `(method, pattern)` pair registered through this server, kept so
      * the `notFound` handler can answer "the path exists but the method is
      * wrong" with a `405` + `Allow` instead of an opaque `404`. Populated by
@@ -1849,6 +1855,12 @@ export class HonoHttpServer implements IHttpServer {
                     resolve();
                 });
             this.server = server;
+            // On the instance, so `server.close()` reaches it too: Node's
+            // `httpServerPreClose` calls `server.closeIdleConnections()`.
+            if ('closeIdleConnections' in server) {
+                const sweepIdle: () => void = server.closeIdleConnections.bind(server);
+                server.closeIdleConnections = () => this.closeIdleConnectionsOnceFlushed(sweepIdle);
+            }
             // Prepended so it runs before the Hono listener can write a
             // synchronous response's headers.
             server.prependListener('request', (req: IncomingMessage, res: ServerResponse) => {
@@ -1880,10 +1892,13 @@ export class HonoHttpServer implements IHttpServer {
      *   handed to the socket — and no other response on that connection is
      *   pending. `destroySoon()` flushes what is queued before it closes.
      *
-     * ⛔ Never the server-wide `closeIdleConnections()` from here: Node counts
-     * a response as done once it has called `end()`, before its bytes are
-     * flushed, so a sweep when one response ends destroys any other connection
-     * whose response is ended but still flushing to a slow reader.
+     * ⛔ Never Node's own server-wide sweep from here: Node counts a response
+     * as done once it has called `end()`, before its bytes are flushed, so a
+     * sweep when one response ends destroys any other connection whose
+     * response is ended but still flushing to a slow reader. The only sweep
+     * run here is one `close()` asked for and
+     * {@link closeIdleConnectionsOnceFlushed} held back, and it still runs only
+     * once no response is flushing.
      *
      * A connection's entry is dropped when the connection closes, not only
      * when each response does: a response pipelined behind another never gets
@@ -1898,10 +1913,40 @@ export class HonoHttpServer implements IHttpServer {
         owed.add(res);
         res.once('close', () => {
             owed.delete(res);
-            if (!this.draining || owed.size > 0 || !res.writableFinished) return;
-            if (socket.destroyed || socket.writableEnded) return;
-            socket.destroySoon();
+            if (this.draining && owed.size === 0 && res.writableFinished
+                && !socket.destroyed && !socket.writableEnded) {
+                socket.destroySoon();
+            }
+            const sweep = this.deferredIdleSweep;
+            if (sweep) this.closeIdleConnectionsOnceFlushed(sweep);
         });
+    }
+
+    /**
+     * Node's `closeIdleConnections()`, but never while a response is ended and
+     * still flushing.
+     *
+     * Node counts a connection as idle once its request has been read, and
+     * skips it only while its response has not called `end()`. `end()` comes
+     * before the bytes are flushed, so a sweep destroys a connection that is
+     * still sending an ended response to a slow reader, and the client gets a
+     * truncated body. `server.close()` runs that sweep first thing (Node 19 and
+     * later), so the drain's force-close backstop never gets a say. Such a
+     * connection closes on its own once flushed ({@link trackForDrain}); the
+     * sweep is held back until no response is flushing, then run for the idle
+     * connections it is for.
+     */
+    private closeIdleConnectionsOnceFlushed(sweep: () => void) {
+        for (const owed of this.inFlightResponses.values()) {
+            for (const res of owed) {
+                if (res.writableEnded && !res.writableFinished) {
+                    this.deferredIdleSweep = sweep;
+                    return;
+                }
+            }
+        }
+        this.deferredIdleSweep = undefined;
+        sweep();
     }
 
     /** The {@link inFlightResponses} entry for one connection, made on its first request and dropped when it closes. */
@@ -1931,10 +1976,12 @@ export class HonoHttpServer implements IHttpServer {
         // Graceful drain (P1-3): stop accepting new connections and let in-flight
         // requests finish rather than force-killing them mid-response.
         // `closeIdleConnections()` releases idle keep-alive sockets so the process
-        // can exit promptly; active requests keep running until they complete or
-        // the drain window elapses, and each one's connection closes as soon as
-        // its response ends (`trackForDrain`), so the drain finishes with the
-        // last in-flight request rather than a keep-alive window after it.
+        // can exit promptly, once no ended response is still flushing
+        // (`closeIdleConnectionsOnceFlushed`); active requests keep running
+        // until they complete or the drain window elapses, and each one's
+        // connection closes as soon as its response ends (`trackForDrain`), so
+        // the drain finishes with the last in-flight request rather than a
+        // keep-alive window after it.
         this.draining = true;
         for (const owed of this.inFlightResponses.values()) {
             for (const res of owed) {
@@ -1963,6 +2010,7 @@ export class HonoHttpServer implements IHttpServer {
         });
         this.server = undefined;
         this.draining = false;
+        this.deferredIdleSweep = undefined;
         this.inFlightResponses.clear();
     }
 }
