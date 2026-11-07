@@ -146,6 +146,19 @@ describe('validateMembershipKeyDeclarations — refusal 6: `valueField` is a ref
     expect(judge({ objects: [roster({ valueField: 'id', filter: undefined }), supplier] })).toEqual([]);
   });
 
+  it("[#31129] only the driver's primary key counts: an authored text field named `id` is still refused", () => {
+    const authoredId = parsed({
+      name: 'srm_supplier_contact',
+      label: 'Supplier contact',
+      fields: { ...ROSTER_FIELDS, id: { type: 'text', label: 'Id' } },
+      membershipKeys: { portal_supplier_ids: { userField: 'user', valueField: 'id' } },
+    });
+    const findings = judge({ objects: [authoredId, supplier] });
+    expect(brief(findings)).toEqual([{ rule: MEMBERSHIP_KEY_VALUE_FIELD_INVALID, path: `${KEY_PATH}.valueField` }]);
+    expect(findings[0].severity).toBe('error');
+    expect(findings[0].message).toContain('is a `text` field, not a reference');
+  });
+
   it("[#31129] `id` is X's own key only as `valueField`: as `userField` it is still no user reference", () => {
     const findings = judge({ objects: [roster({ userField: 'id', valueField: 'supplier' }), supplier] });
     expect(brief(findings)).toEqual([{ rule: MEMBERSHIP_KEY_USER_FIELD_INVALID, path: `${KEY_PATH}.userField` }]);

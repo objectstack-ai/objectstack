@@ -248,6 +248,11 @@ describe("[#31129 ruling A] a key over the roster's own `id` holds ids of the ro
     expect(findings[0].message).toContain("which holds 'hr_employee' ids, so the two never match");
   });
 
+  it('`os explain` says a key over `id` holds ids of the declaring object itself', () => {
+    const text = explainRule(RLS_PREDICATE_MEMBERSHIP_KEY_TARGET)?.paragraphs.join('\n') ?? '';
+    expect(text).toContain('the declaring object X itself when F is `id`');
+  });
+
   it('the CLI door and the save door judge it the same way', () => {
     const stack = stackWith('department in current_user.my_employee_ids');
     const cli = runAuthoringRules('validate', { normalized: stack, parsed: stack }).filter((f) => f.rule.startsWith('rls-predicate-'));

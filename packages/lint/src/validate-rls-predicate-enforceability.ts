@@ -307,7 +307,7 @@ import {
 } from './object-graph.js';
 import {
   declaredMembershipKeysOf,
-  MEMBERSHIP_KEY_OWN_ID_FIELD,
+  isRosterOwnId,
   objectsDeclaringKey,
   stackObjectNamesOf,
   type MembershipKeyOwners,
@@ -1868,7 +1868,7 @@ function membershipKeyContextOf(
     // [#31129 ruling A] `valueField: 'id'` — X's own primary key, never an
     // author column of that name — holds ids of X itself: the caller's own
     // roster rows. The key's target is the declaring object.
-    else if (decl.valueField === MEMBERSHIP_KEY_OWN_ID_FIELD && verdict.injected === true && !meta.type) {
+    else if (isRosterOwnId(decl.valueField, verdict)) {
       targetOf.set(decl.key, decl.object);
     }
   }

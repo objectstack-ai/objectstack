@@ -457,9 +457,10 @@ async function bootPeople(declaration: Record<string, unknown> | null = { userFi
     metadata: { get: async (_t: string, name: string) => engine.getSchema(name) ?? null, list: async () => sets },
   };
   const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
+  let security: any;
   const ctx = {
     logger,
-    registerService: () => undefined,
+    registerService: (name: string, impl: unknown) => { if (name === 'security') security = impl; },
     getService: (name: string) => {
       if (!(name in services)) throw new Error(`service not registered: ${name}`);
       return services[name];
@@ -491,7 +492,7 @@ async function bootPeople(declaration: Record<string, unknown> | null = { userFi
   };
   const rosterReads = () =>
     findSpy.mock.calls.filter(([object, opts]) => object === 'qa_employee' && (opts as any)?.context?.isSystem === true);
-  return { ids, rosterReads };
+  return { ids, rosterReads, security: () => security };
 }
 
 describe("[#31129 ruling A] a key with `valueField: 'id'` stages the caller's own roster rows", () => {
@@ -515,6 +516,18 @@ describe("[#31129 ruling A] a key with `valueField: 'id'` stages the caller's ow
     const over = Array.from({ length: MEMBERSHIP_KEY_MAX_VALUES + 1 }, (_, i) => ({ id: `c_${i}` }));
     expect(await stage(over)).toBeUndefined();
     expect(await stage(over.slice(1))).toHaveLength(MEMBERSHIP_KEY_MAX_VALUES);
+  });
+
+  it("explain links a leave request to the caller's own employee row", async () => {
+    const { security } = await bootPeople();
+    const decision = await security().explain(
+      { object: 'qa_leave_request', operation: 'read', recordId: 'lr_1' },
+      principal([SELF_SERVICE.name]),
+    );
+    const layer = decision.layers.find((l: { layer: string }) => l.layer === 'rls');
+    expect(layer.detail).toContain(`'${SELF_KEY}', declared on 'qa_employee' as the 'id' values of its rows whose 'user' is the user`);
+    expect(layer.record.rules).toEqual([expect.objectContaining({ via: `membership:${SELF_KEY}`, effect: 'admits' })]);
+    expect(layer.record.detail).toContain("'qa_employee' row 'e_05' links them to 'e_05' (its 'id')");
   });
 
   it('CONTROL: a caller with no employee row sees nothing, and without the declaration nobody does', async () => {

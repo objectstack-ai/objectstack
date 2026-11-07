@@ -1827,15 +1827,18 @@ const RLS_PREDICATE_MEMBERSHIP_KEY_TARGET_EXPLANATION: RuleExplanation = {
   covers: 'what a membership key can be compared with',
   paragraphs: [
     MEMBERSHIP_KEY_RESOLUTION,
-    'The set holds ids of the object F references; call it T (`sys_user` for a `user` field). A policy can ' +
+    'The set holds ids of the object F references; call it T (`sys_user` for a `user` field, and the ' +
+      'declaring object X itself when F is `id`, the caller\'s own rows of X). A policy can ' +
       'only find those ids in a column that references T, or in the `id` of T itself. Tested against a ' +
       'reference to another object, against a column that is not a reference, or against the `id` of another ' +
       'object, the set never matches: `x in KEY` matches no row, and `!(x in KEY)` matches every row. Neither ' +
       'is the policy that was written. The compiler accepts the comparison, because it knows the predicate ' +
       'and not what the declaration collects; the rule reads the declaration.',
     'So test the key against the column that references T — on a purchase order whose `supplier` is a lookup ' +
-      'to the supplier object, `supplier in current_user.portal_supplier_ids` — or against `id` when the ' +
-      'policy is on T itself. A key whose declaring object is not in the stack, or that two objects declare, ' +
+      'to the supplier object, `supplier in current_user.portal_supplier_ids`; on a leave request whose ' +
+      '`employee` is a lookup to an employee roster declaring `my_employee_ids` with `valueField: \'id\'`, ' +
+      '`employee in current_user.my_employee_ids` — or against `id` when the policy is on T itself. A key ' +
+      'whose declaring object is not in the stack, or that two objects declare, ' +
       'is not judged here.',
   ],
 };

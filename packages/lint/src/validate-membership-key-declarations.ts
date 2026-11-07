@@ -110,13 +110,10 @@ const USER_OBJECT = 'sys_user';
 
 /**
  * The field types a membership key's `valueField` may have. The one other
- * column it may name is `id`, X's own primary key ({@link isOwnPrimaryKey}),
+ * column it may name is `id`, X's own primary key ({@link isRosterOwnId}),
  * which has no field type: the driver, not a definition, provisions it.
  */
 const VALUE_FIELD_TYPES: ReadonlySet<string> = new Set(['lookup', 'master_detail', 'user']);
-
-/** The column a membership key names for "the caller's own rows of X" (#31129 ruling A). */
-export const MEMBERSHIP_KEY_OWN_ID_FIELD = 'id';
 
 /** One `membershipKeys` entry, where the stack declares it. */
 export interface DeclaredMembershipKey {
@@ -238,13 +235,15 @@ function valueFieldFault(column: Extract<ColumnVerdict, { kind: 'ok' }>): string
 }
 
 /**
- * Does the resolved column name X's own primary key? Only the `id` the
+ * [#31129 ruling A] Does a membership key's resolved `valueField` name X's
+ * own primary key, so the set is the caller's own rows of X? Only the `id` the
  * driver provisions: the graph serves it as an injected column with an empty
  * slice. An author-declared field that happens to be named `id` is judged by
- * its own definition, like any other column.
+ * its own definition, like any other column. Shared by the declaration judge
+ * and the policy-target judge, so the two cannot disagree about it.
  */
-function isOwnPrimaryKey(column: string, verdict: { injected?: true; meta?: GraphField }): boolean {
-  return column === MEMBERSHIP_KEY_OWN_ID_FIELD && verdict.injected === true && !verdict.meta?.type;
+export function isRosterOwnId(column: string, verdict: { injected?: true; meta?: GraphField }): boolean {
+  return column === 'id' && verdict.injected === true && !verdict.meta?.type;
 }
 
 /** One of U / F, resolved on the merged object — see {@link columnOf}. */
@@ -272,7 +271,7 @@ function columnOf(
   if (verdict.kind !== 'ok') return { kind: 'skip' };
   // `id` maps to an empty slice: the driver's primary key, never a reference.
   // As U it is no user reference; as F it is the roster row's own id.
-  return { kind: 'ok', meta: verdict.meta ?? {}, primaryKey: isOwnPrimaryKey(column, verdict) };
+  return { kind: 'ok', meta: verdict.meta ?? {}, primaryKey: isRosterOwnId(column, verdict) };
 }
 
 /**
