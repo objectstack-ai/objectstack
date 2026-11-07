@@ -9,7 +9,7 @@ fix(service-settings)!: a `json` setting persists a JSON object or array, and th
 Clause-②: yes (narrowing) — the settings save door and the env door start refusing a `json` value that is not a JSON object or array, which they accept today; ADR-0007:123 already declares `json` persists an object, so the narrowing enforces the declared contract and widens nothing
 Metadata-protocol: none
 
-<!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export or type changes. What narrows is the value a settings door accepts for a `json` key: a stored value is runtime state in `sys_setting` / `sys_platform_setting` and an `OS_*` override is a deployment's environment, so there is nothing for a migration to rewrite. Values already stored as JSON text are read as the object they hold by their one reader (`LifecycleService`), with a warning. -->
+<!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export or type changes. What narrows is the value a settings door accepts for a `json` key: a stored value is runtime state in `sys_setting` / `sys_platform_setting` and an `OS_*` override is a deployment's environment, so there is nothing for a migration to rewrite. Values already stored as JSON text are handled by their one reader (`LifecycleService`): quota text is read as the object it holds, with a warning, and retention-override text waits for an administrator's save. -->
 
 **BREAKING** accept-set narrowing at the settings doors (`@objectstack/service-settings`): a `json` key takes a JSON object or array, as ADR-0007 declares.
 
@@ -19,4 +19,9 @@ Metadata-protocol: none
 
 **The remedy.** Send the parsed value, not its text: `{ "quotas": { "sys_audit_log": 1000 } }`, not `{ "quotas": "{\"sys_audit_log\": 1000}" }`. For an `OS_*` override, set JSON text of an object, such as `OS_LIFECYCLE_QUOTAS='{"sys_audit_log":1000}'`.
 
-**Values saved as text before this release** (`@objectstack/objectql`). A deployment that saved the Data Lifecycle page through the old console holds JSON text. The lifecycle service now reads text that holds a JSON object as that object and applies it, and logs one warning per stored value naming the key: `lifecycle.quotas is stored as JSON text, not an object … Save the Data Lifecycle settings page again to store it as an object.` So quotas and retention overrides saved earlier start being enforced on the first sweep after the upgrade, with no migration. Check them before you upgrade: a retention override that never applied before will now delete or keep rows on its window. A stored value that is not a JSON object still applies nothing, as before, and is now reported once at `error`.
+**Values saved as text before this release** (`@objectstack/objectql`). A deployment that saved the Data Lifecycle page through the old console holds JSON text, which applied nothing. After the upgrade the lifecycle service treats the three keys by what they drive:
+
+- `quotas` and `quota_defaults` only raise alerts, so text that holds a JSON object is read as that object and applied, with one warning per stored value: `lifecycle.quotas is stored as JSON text, not an object … Save the Data Lifecycle settings page again to store it as an object.`
+- `retention_overrides` drives the reaper and the archiver, which delete rows, so its text is **not** applied: the declared retention windows stay in force and no row is reaped or archived on the old windows. One error per stored value names the key (and the organization, for an organization's own value) and the fix: open Setup → Data Lifecycle, check the value and save the page once. The page shows the stored text and now sends it as an object, so that save is what puts the window in force.
+
+A stored value that is not a JSON object still applies nothing, as before, and is now reported once at `error`.
