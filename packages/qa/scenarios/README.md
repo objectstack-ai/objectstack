@@ -1,6 +1,7 @@
 # @objectstack/scenarios
 
-Private, unpublished. The schema (zod) and loader for the open scenario library under
+Published, with a command line: `npx @objectstack/scenarios run` (below, "Running from npm").
+The schema (zod) and loader for the open scenario library under
 [`docs/qa/scenarios/`](../../../docs/qa/scenarios/README.md) — that README is the format's
 reference.
 
@@ -27,10 +28,11 @@ The private overlay's owner migrates its cards to each new card shape (today: `o
 - `src/score/` — the deterministic scorer, entries `@objectstack/scenarios/score` and
   `@objectstack/scenarios/score/full` (below).
 
-Not published. `pnpm --filter @objectstack/scenarios build` (tsup) writes `dist/` as ESM, CJS and
-`.d.ts`, and every `exports` subpath points there, so a consumer that links the framework tree
-and bundles its own entry can load the scorer under plain Node. The suites and `run-scenarios`
-read `src/` directly. Nothing here calls a model or the network.
+`pnpm --filter @objectstack/scenarios build` (tsup) writes `dist/` as ESM, CJS and `.d.ts`, and
+every `exports` subpath points there, so plain Node loads the package with no TypeScript resolver.
+The build then copies the open library into `dist/library/` (`scripts/pack-library.mjs`), which
+the published command line runs. The suites and `run-scenarios` read `src/` directly. The schema,
+loader and scorer call no model and no network; the runner drives a local Claude Code session.
 
 ## Scoring a run against a card — `@objectstack/scenarios/score`
 
@@ -139,11 +141,38 @@ pnpm --filter @objectstack/scenarios run-scenarios --driver recorded:/tmp/rec.js
 pnpm --filter @objectstack/scenarios run-scenarios --author-timeout 90       # minutes per authoring turn (default 60)
 pnpm --filter @objectstack/scenarios run-scenarios --author-max-turns 400    # turns per authoring turn, every card (default by tier)
 pnpm --filter @objectstack/scenarios run-scenarios --ask-max-turns 20        # turns per question or operation turn (default 12)
+pnpm --filter @objectstack/scenarios run-scenarios --model sonnet            # the model every turn asks for (default: the login's own)
+pnpm --filter @objectstack/scenarios run-scenarios --author-model opus --ask-model haiku  # build and persona turns apart
 pnpm --filter @objectstack/scenarios run-scenarios --packages workspace      # on this checkout's unreleased packages (default: published)
 ```
 
 Per card and mode the runner writes `docs/qa/platform-checklist/runs/<date>-scenario-<card>.json`
 (git-ignored) and prints the scorecard.
+
+### Running from npm
+
+No checkout needed: the package's `objectstack-scenarios` command is the same runner, with the same flags.
+
+```bash
+npx @objectstack/scenarios run --only service_desk --modes scratch   # one card, scratch mode
+npx @objectstack/scenarios run                                       # every card, both modes
+npx @objectstack/scenarios run --cards ./my-cards                    # a directory of your own, loaded as the overlay
+npx @objectstack/scenarios help                                      # the commands; `version` prints the package version
+```
+
+- **Prerequisites**: Node 22 or later, and Claude Code installed and logged in with your own subscription
+  (`claude auth login`). The runner refuses to start when `ANTHROPIC_API_KEY` or `ANTHROPIC_AUTH_TOKEN` is set, or the
+  CLI is logged in with an API key. Each card scaffolds a project with `create-objectstack` (`--create-version` picks
+  its version).
+- **The cards**: the package carries the open library of this repository (`docs/qa/scenarios/*.json` and the
+  capability areas, copied into `dist/library/` at build time) and nothing else. `--cards DIR` runs another directory
+  as the overlay, where a `generic` card is refused.
+- **The records**: one `scenario-runs/<date>-scenario-<card>.json` per card, under the directory you run it from,
+  unless `--out DIR` says otherwise; the scorecard is printed as in a checkout. `--work DIR` keeps the scaffolded
+  projects (default: a temp directory).
+- **The packages**: always the published ones (`--packages published`, the default). `--packages workspace` builds
+  and packs a checkout's packages, so the published CLI refuses it; run it from a checkout.
+- It is not an `objectstack` (`os`) command: scenario scoring stays out of the customer CLI.
 
 | Mode | Steps |
 |:---|:---|
@@ -167,7 +196,15 @@ Per card and mode the runner writes `docs/qa/platform-checklist/runs/<date>-scen
   is logged in with an API key (the cost ruling on cloud#3600), and the record states the driver, the login, the
   authoring timeout and the turn caps. Every turn records its process: elapsed time, the turn cap it ran under
   (`--max-turns`), and for a turn that did not finish its exit code or signal, whether the runner's timeout killed it,
-  and the end of its stderr. `RecordedDriver` replays a recording, and refuses the three live-driver limits below.
+  and the end of its stderr. `RecordedDriver` replays a recording, and refuses the live-driver limits and models below.
+- **Model** (`driver.ts`): `--model M` passes `claude --model M` on every turn, an alias (`sonnet`) or a name
+  (`claude-sonnet-4-5`); `--author-model` sets the authoring turns (build and iterate) and `--ask-model` the question
+  and operation turns apart, each in place of `--model`. With none, a turn takes the login's default model. Every turn
+  records the model it asked for (`requestedModel`) and the one it was served, read off the stream's init line
+  (`model`); a served name that does not hold the requested one as whole dash-separated parts (`sonnet` is in
+  `claude-sonnet-4-5-20250929`, `opus` is not) is a mismatch (`modelMismatch`). The scorecard's author rows name the
+  served model (`⚠ asked for sonnet` on a mismatch), and its `Run · model` rows count the persona turns per served
+  model (`claude-opus-5-5 ×9 ⚠ 9 not sonnet`).
 - **Turn caps** (`driver.ts`): an authoring turn, build and iterate alike, may take `DEFAULT_AUTHOR_MAX_TURNS` by the
   card's `tier` — `control` 80, `starter` 300, `delivery` 600 — unless `--author-max-turns N` sets one cap for every
   card; a question or operation turn takes 12 unless `--ask-max-turns N` says otherwise. The cap guards a looping turn

@@ -44,7 +44,7 @@ import {
   type ScenarioArtifactScore,
 } from '../score/index.js';
 import type { AppHarness, PersonaAccount } from './app.js';
-import type { AgentDriver, StepRef } from './driver.js';
+import { servedAsRequested, type AgentDriver, type StepRef } from './driver.js';
 import { citationLabels, namespaceOfArtifact, namespacedScenario, permissionSetName, templateHostName } from './namespace.js';
 import { agentSetOf, clockDates, observeOperation, observeProbe, probeCall, touchedRowId, type Row } from './observe.js';
 import type { CommandResult } from './project.js';
@@ -95,7 +95,12 @@ export interface TurnSummary {
   /** The turn cap the CLI process ran under (`meta.process`): `numTurns` of `maxTurns`. */
   maxTurns?: number;
   toolCalls: number;
+  /** The model the turn was served (the stream's `meta.model`); absent when its stream named none. */
   model?: string;
+  /** The model the driver asked for (`--model`, `meta.process`); absent ⇒ the login's default. */
+  requestedModel?: string;
+  /** The served model is not the requested one ({@link servedAsRequested}); only when both are known. */
+  modelMismatch?: true;
   /** Wall-clock time of the CLI process, when the driver ran one (`meta.process`). */
   elapsedMs?: number;
   // What a turn that did not finish leaves to say why (`meta.process`):
@@ -204,6 +209,8 @@ const summarize = (t: ParsedTurn): TurnSummary => {
     ...(t.meta.numTurns !== undefined ? { numTurns: t.meta.numTurns } : {}),
     ...(p?.maxTurns !== undefined ? { maxTurns: p.maxTurns } : {}),
     ...(t.meta.model ? { model: t.meta.model } : {}),
+    ...(p?.requestedModel ? { requestedModel: p.requestedModel } : {}),
+    ...(p?.requestedModel && t.meta.model && !servedAsRequested(p.requestedModel, t.meta.model) ? { modelMismatch: true as const } : {}),
     toolCalls: t.toolCalls.length,
     ...(p ? { elapsedMs: p.elapsedMs } : {}),
     ...(p && !finished(t)
