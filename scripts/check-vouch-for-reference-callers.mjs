@@ -177,7 +177,7 @@ export function censusOf(path, text) {
       const names = spec.match(/(?<![\w$])(?:vouchForReference|VOUCHED_REFERENCES)(?![\w$])|vouchedReferences/);
       if (names) {
         if (spec !== FN && spec !== KEY) {
-          findings.push(`${at(offset)}: ${m[0].trimStart().startsWith('export') ? 'exports' : 'imports'} ${names[0]} as \`${spec}\` — a rename hides every later use from this census; import it as itself`);
+          findings.push(`${at(offset)}: renames ${names[0]} on ${m[0].trimStart().startsWith('export') ? 'export' : 'import'} (\`${spec}\`) — a rename hides every later use from this census; import it as itself`);
         }
         code = blankSpan(code, offset, offset + raw.length);
       }
