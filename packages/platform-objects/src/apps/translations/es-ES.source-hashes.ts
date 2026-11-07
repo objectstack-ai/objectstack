@@ -95,6 +95,7 @@ export const esESSourceHashes: Readonly<Record<string, string>> = {
   'apps.setup.navigation.nav_sharing_rules.label': 'ceaa66fa5f1df4ad',
   'apps.setup.navigation.nav_record_shares.label': 'e261d340ceb25b9a',
   'apps.setup.navigation.nav_sso_providers.label': '7b06b6a6abf53ba4',
+  'apps.setup.navigation.nav_scim_credentials.label': '2d94a32c33ca2957',
   'apps.setup.navigation.nav_api_keys.label': '8cda9851248b0490',
   'apps.setup.navigation.nav_connect_agent.label': 'a4542422fb5e8a68',
   'apps.setup.navigation.nav_approvals_inbox.label': '0a9269b20d0266c9',
