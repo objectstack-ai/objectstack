@@ -820,6 +820,12 @@ export const ORGANIZATION_OWNERSHIP_INVENTORY: readonly InventoryEntry[] = [
   // organization). The record an entry names is gone, so no parent row
   // anchors an entry.
   { object: 'sys_recycle_bin', census: PMAIN, fate: 'attribution', citation: `${CENSUS_MAIN} (in reach, added since the first census); ${D10_SINGLE}`, anchors: [] },
+  // The record of landed seed rows (`@objectstack/platform-objects`, #31021):
+  // the seed loader writes each row with the organization the load seeds and
+  // writes none when the load seeds no organization, so a NULL row has no
+  // producer. A key names a seed row by its natural key, not by id, so no
+  // parent row anchors it.
+  { object: 'sys_seed_landed_key', census: PMAIN, fate: 'attribution', citation: `${CENSUS_MAIN} (in reach, added since the first census); ${D10_SINGLE}`, anchors: [] },
   // A reader's own named list views (`@objectstack/platform-objects`, ruling
   // 6570568131 on #28971): user data on the preference template, each row in
   // its owner's organization; no parent row anchors a view.
