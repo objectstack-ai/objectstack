@@ -135,6 +135,40 @@
           "name: 'crm_account'"
         ]
       }
+    },
+    {
+      "id": 8,
+      "prompt": "Model a `project` and its `milestone` rows; a milestone belongs to exactly one project and is deleted with it. Give me both object files.",
+      "expected_output": "Two complete `ObjectSchema.create` calls, each with an authored `sharingModel` (a publish without one is refused with `security-owd-unset`): `project` with `sharingModel: 'private'`, `milestone` with `sharingModel: 'controlled_by_parent'` and a `master_detail` field to `project` with `deleteBehavior: 'cascade'`.",
+      "files": [],
+      "assertions": {
+        "must_contain": [
+          "ObjectSchema.create",
+          "sharingModel: 'private'",
+          "sharingModel: 'controlled_by_parent'",
+          "master_detail",
+          "deleteBehavior: 'cascade'"
+        ],
+        "must_not_contain": [
+          "many_to_many",
+          "deleteBehavior: 'set_null'"
+        ]
+      }
+    },
+    {
+      "id": 9,
+      "prompt": "Our app runs multi-tenant. Add an index on `ticket` for the list every agent opens: their organization's open tickets, newest first.",
+      "expected_output": "`indexes: [{ fields: ['organization_id', 'status', 'created_at'] }]` — the tenant column is `organization_id`, injected by `systemFields.tenant`, so it is indexed but not declared as a field; an index naming an undeclared `tenant_id` is refused. The platform already adds the single-column `organization_id` index on a multi-tenant host.",
+      "files": [],
+      "assertions": {
+        "must_contain": [
+          "indexes",
+          "organization_id"
+        ],
+        "must_not_contain": [
+          "tenant_id"
+        ]
+      }
     }
   ]
 }

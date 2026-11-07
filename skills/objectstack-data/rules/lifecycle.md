@@ -3,8 +3,7 @@
 Guide for declaring how long an object's data lives and how its space is
 reclaimed (ADR-0057). Distinct from
 **lifecycle hooks** (`beforeInsert` / `afterUpdate` …), which run logic on
-writes: this page covers the rows' retention, rotation and archival
-— and, at its end, the save notice a hook hands the saver.
+writes: this page covers the rows' retention, rotation and archival.
 
 ## Why This Exists
 
@@ -35,6 +34,7 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
 // ✅ Telemetry stream: bounded by a rotation window
 export const ApiCallLog = ObjectSchema.create({
   name: 'api_call_log',
+  sharingModel: 'private',
   lifecycle: {
     class: 'telemetry',
     retention: { maxAge: '14d' },                                // reap past 14 days (created_at)
@@ -49,6 +49,7 @@ export const ApiCallLog = ObjectSchema.create({
 // ✅ Ephemeral token: TTL on its own expiry field
 export const ImportTicket = ObjectSchema.create({
   name: 'import_ticket',
+  sharingModel: 'private',
   lifecycle: {
     class: 'transient',
     ttl: { field: 'expires_at', expireAfter: '1d' },  // reap 1 day after expires_at
@@ -61,10 +62,11 @@ export const ImportTicket = ObjectSchema.create({
 // ✅ Compliance ledger: hot window, then cold storage
 export const ConsentLog = ObjectSchema.create({
   name: 'consent_log',
+  sharingModel: 'private',
   lifecycle: {
     class: 'audit',
     retention: { maxAge: '90d' },
-    archive: { after: '90d', to: 'archive', keep: '7y' },  // must: after === maxAge
+    archive: { after: '90d', to: 'archive', keep: '7y' },
   },
   fields: {
     subject: Field.text({}),

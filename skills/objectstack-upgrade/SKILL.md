@@ -118,7 +118,8 @@ deleting them on merge, is the usual arrangement — decide it with the owner.
 
 A 17.x project's skills came from `skills add`; their `skills-lock.json` entries
 read `sourceType: github`, so the sync skips them (exit 0) and the agent keeps
-reading 17.x skill text. Remove them (a missing name is skipped), add
+reading 17.x skill text. Remove them (a missing name is skipped;
+`objectstack-pm-dispatch` is not in the 18 catalog, only an older install has it), add
 `@objectstack/skills` at the installed spec's version with the manager that
 installed the project, copy it:
 
