@@ -936,6 +936,13 @@ export const ESCAPABLE_LITERAL_LEDGER_ROWS = Object.freeze([
  *     each test "really" reads does NOT qualify: that map is a second thing
  *     that goes stale, and the run is cheap enough not to need one (measured
  *     below).
+ *   - population-net entries (#31257, fifteen): when the gate's own source
+ *     declares a population this derivation can MATCH (a subtree it really
+ *     walks, beside a filter the derivation reads), the ordinary path match
+ *     names it and the entry is redundant. ⛔ Re-deciding a REFUSE-WIDE row to
+ *     make a path match possible does NOT qualify (it takes a ruling), and ⛔
+ *     neither does the net going quiet on a card: the net is the gate's own
+ *     first filter, so a quiet net is a quiet gate, not a cleared one.
  *
  *
  *   Delete an entry the day its criterion is met, not before.
