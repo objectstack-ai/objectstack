@@ -247,7 +247,7 @@ const zhHant = {
         connector: '聯結器',
       },
       maturity: {
-        beta: 'Beta',
+        beta: '測試版',
       },
       relativeTime: {
         today: '今天',

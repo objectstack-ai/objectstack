@@ -252,7 +252,7 @@ const zh = {
         connector: '连接器',
       },
       maturity: {
-        beta: 'Beta',
+        beta: '测试版',
       },
       relativeTime: {
         today: '今天',
