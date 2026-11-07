@@ -15,7 +15,12 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
-import { RECYCLE_BIN_ENTRY_FIELDS, RECYCLE_BIN_RESTORE_REFUSAL_CODES, RECORD_RESTORED_EVENT } from '@objectstack/spec/data';
+import {
+  RECYCLE_BIN_ENTRY_FIELDS,
+  RECYCLE_BIN_RESTORE_REFUSAL_CODES,
+  RECYCLE_BIN_RESTORE_REFUSAL_STATUS,
+  RECORD_RESTORED_EVENT,
+} from '@objectstack/spec/data';
 import { ObjectQL } from '../engine.js';
 import { relinkedValue } from './restore.js';
 
@@ -33,7 +38,15 @@ function makeDriver() {
     if (options?.tenantId !== undefined && 'organization_id' in row && row.organization_id !== options.tenantId) return false;
     if (!where || typeof where !== 'object') return true;
     for (const [k, v] of Object.entries(where)) {
+      if (k === '$and') {
+        if (!(v as unknown[]).every((w) => matches(row, w, undefined))) return false;
+        continue;
+      }
       if (k.startsWith('$')) continue;
+      if (v && typeof v === 'object' && (v as any).$gt !== undefined) {
+        if (!(String(row[k]) > String((v as any).$gt))) return false;
+        continue;
+      }
       if (v && typeof v === 'object' && Array.isArray((v as any).$in)) {
         if (!(v as any).$in.some((x: unknown) => String(x) === String(row[k]))) return false;
         continue;
@@ -55,6 +68,9 @@ function makeDriver() {
     async syncSchema() {},
     async find(o: string, ast: any, options: any) {
       const rows = Array.from(storeFor(o).values()).filter((r) => matches(r, ast?.where, options));
+      // The keyset walk's only order: ascending by one key.
+      const by = ast?.orderBy?.[0]?.field;
+      if (by) rows.sort((a, b) => (String(a[by]) < String(b[by]) ? -1 : String(a[by]) > String(b[by]) ? 1 : 0));
       const page = typeof ast?.limit === 'number' ? rows.slice(0, ast.limit) : rows;
       return page.map((r) => ({ ...r }));
     },
@@ -127,6 +143,17 @@ const contact = {
     organization_id: text('organization_id'),
   },
 };
+/** contact ← task (master_detail): an account's grandchild. */
+const task = {
+  name: 'task',
+  label: 'Task',
+  fields: {
+    id: text('id'),
+    name: text('name'),
+    contact: { name: 'contact', type: 'master_detail' as const, reference: 'contact' },
+    organization_id: text('organization_id'),
+  },
+};
 /** A live row pointing at an account by a single-valued and a multi-valued `set_null` lookup. */
 const deal = {
   name: 'deal',
@@ -148,7 +175,7 @@ async function makeEngine(options: { withBin?: boolean } = {}) {
   const driver = makeDriver();
   engine.registerDriver(driver, true);
   await engine.init();
-  const objects: any[] = [account, contact, deal];
+  const objects: any[] = [account, contact, task, deal];
   if (options.withBin !== false) objects.push(bin);
   for (const o of objects) engine.registry.registerObject(o as any, '__test__');
   const dispatches: Dispatch[] = [];
@@ -429,6 +456,69 @@ describe('the four refusals (409, ADR-0148 D2): nothing is written and the entry
     await engine.restore(accountEntry, ORG1_USER);
     await expect(engine.restore(contactEntry, ORG1_USER)).resolves.toMatchObject({ recordId: 'c1' });
     expect(driver.rowOf('contact', 'c1')).toMatchObject({ account: 'acc1' });
+  });
+
+  it('RESTORE_PARENT_IN_RECYCLE_BIN: a grandchild whose parent went as a DETAIL of another entry names that entry', async () => {
+    // account a1 ← contact c1 ← task t1: t1 deleted alone (E1 = {t1}), then
+    // acc1 (E2 = {acc1, c1}). c1 is no entry's master; E2 holds it as a row.
+    const { engine, driver } = await makeEngine();
+    driver.seed('account', ACME);
+    driver.seed('contact', { id: 'c1', name: 'Ann', account: 'acc1', organization_id: 'org_1' });
+    driver.seed('task', { id: 't1', name: 'Call', contact: 'c1', organization_id: 'org_1' });
+    await engine.delete('task', { where: { id: 't1' }, ...ORG1_USER });
+    await engine.delete('account', { where: { id: 'acc1' }, ...ORG1_USER });
+    const taskEntry = entryOf(driver, 't1').id as string;
+    const accountEntry = entryOf(driver, 'acc1').id as string;
+    expect(entriesOf(driver).map((e) => e.record_id)).not.toContain('c1');
+
+    await expect(engine.restore(taskEntry, ORG1_USER)).rejects.toMatchObject({
+      code: 'RESTORE_PARENT_IN_RECYCLE_BIN', status: 409, object: 'task', recordId: 't1', field: 'contact',
+      parentObject: 'contact', parentId: 'c1', parentEntryId: accountEntry,
+    });
+    expect(driver.rowsOf('task')).toHaveLength(0);
+
+    await engine.restore(accountEntry, ORG1_USER);
+    await expect(engine.restore(taskEntry, ORG1_USER)).resolves.toMatchObject({ recordId: 't1' });
+    expect(driver.rowOf('task', 't1')).toMatchObject({ contact: 'c1' });
+  });
+
+  it('a permanent refusal wins over RESTORE_PARENT_IN_RECYCLE_BIN: the parent in the bin is answered only when nothing else stands', async () => {
+    const { engine, driver } = await makeEngine();
+    driver.seed('account', ACME);
+    driver.seed('contact', { id: 'c1', name: 'Ann', account: 'acc1', organization_id: 'org_1' });
+    await engine.delete('contact', { where: { id: 'c1' }, ...ORG1_USER });
+    await engine.delete('account', { where: { id: 'acc1' }, ...ORG1_USER });
+    const contactEntry = entryOf(driver, 'c1').id as string;
+    // A live row now holds c1's id: restoring the account first would not help.
+    driver.seed('contact', { id: 'c1', name: 'Someone else', account: 'acc9', organization_id: 'org_1' });
+
+    await expect(engine.restore(contactEntry, ORG1_USER)).rejects.toMatchObject({
+      code: 'RESTORE_UNIQUE_VALUE_TAKEN', status: 409, object: 'contact', recordId: 'c1', field: 'id',
+    });
+  });
+
+  it('RESTORE_PARENT_PURGED: a parent whose object is no longer registered, whatever the bin holds', async () => {
+    const { engine, driver } = await makeEngine();
+    driver.seed('account', ACME);
+    driver.seed('contact', { id: 'c1', name: 'Ann', account: 'acc1', organization_id: 'org_1' });
+    await engine.delete('contact', { where: { id: 'c1' }, ...ORG1_USER });
+    await engine.delete('account', { where: { id: 'acc1' }, ...ORG1_USER });
+    const contactEntry = entryOf(driver, 'c1').id as string;
+    engine.registry.unregisterObject('account', { force: true });
+
+    await expect(engine.restore(contactEntry, ORG1_USER)).rejects.toMatchObject({
+      code: 'RESTORE_PARENT_PURGED', status: 409, parentObject: 'account', parentId: 'acc1',
+    });
+  });
+
+  it('answers with exactly the four codes the spec spells', () => {
+    expect(Object.values(RECYCLE_BIN_RESTORE_REFUSAL_CODES)).toEqual([
+      'RESTORE_UNIQUE_VALUE_TAKEN',
+      'RESTORE_PARENT_PURGED',
+      'RESTORE_PACKAGE_UNINSTALLED',
+      'RESTORE_PARENT_IN_RECYCLE_BIN',
+    ]);
+    expect(RECYCLE_BIN_RESTORE_REFUSAL_STATUS).toBe(409);
   });
 
   it('RESTORE_UNIQUE_VALUE_TAKEN: a live row holds a unique value of a snapshotted row', async () => {

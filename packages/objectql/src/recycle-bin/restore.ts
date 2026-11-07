@@ -28,10 +28,12 @@
  *   - `RESTORE_PACKAGE_UNINSTALLED`: an object of the entry is no longer
  *     registered;
  *   - `RESTORE_PARENT_PURGED`: a row's master-detail parent is neither live, nor
- *     a row of this entry, nor the record of another entry;
+ *     a row of this entry, nor held by another entry (as its master or as a row
+ *     of its cascade), or its object is no longer registered;
  *   - `RESTORE_PARENT_IN_RECYCLE_BIN`: a row's master-detail parent is not live
- *     but is the record of another entry; the refusal names that entry, and
- *     restoring it first lets this one through. Either way a detail is never
+ *     but is held by another entry; the refusal names that entry, and restoring
+ *     it first lets this one through. It is answered only when none of the
+ *     permanent refusals stands for any row. Either way a detail is never
  *     written back under a parent that is not there;
  *   - `RESTORE_UNIQUE_VALUE_TAKEN`: a live row now holds a unique value of a
  *     snapshotted row, or its id. The probe reads as the caller; a value held
@@ -61,7 +63,7 @@ import {
 } from '@objectstack/spec/data';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import type { Logger } from '@objectstack/core';
-import { isUniqueViolationError, redactBoundStatement, uniqueViolationColumn } from '@objectstack/types';
+import { isUniqueViolationError, keysetWalk, redactBoundStatement, uniqueViolationColumn } from '@objectstack/types';
 import type { OperationContext } from '../engine-top-level.js';
 import { declaredMultiValued } from '../engine-top-level.js';
 import { SummaryRecomputeError, type SummaryRecomputeFailure } from '../summary-errors.js';
@@ -167,7 +169,7 @@ function parentPurgedRefusal(
 
 /**
  * `RESTORE_PARENT_IN_RECYCLE_BIN`: a row's master-detail parent is not live but
- * is the record of ANOTHER recycle-bin entry. Unlike the other three, the
+ * is held by ANOTHER recycle-bin entry, as its master or as a row of its cascade. Unlike the other three, the
  * refusal is not permanent: it names that entry (`parentEntryId`), and
  * restoring it first lets this one through (ruling 6710220841 on #30237).
  */
@@ -209,21 +211,27 @@ function uniqueValueTakenRefusal(entryId: string, row: { object: string; id: str
   return err;
 }
 
-/** The entry's stored snapshot, read off a driver that may hand JSON back as text. */
-function readSnapshot(entryId: string, stored: unknown) {
+/** A stored snapshot, read off a driver that may hand JSON back as text; `undefined` when it does not parse. */
+function parseSnapshot(stored: unknown) {
   let value = stored;
   if (typeof value === 'string') {
     try { value = JSON.parse(value); } catch { value = undefined; }
   }
   const parsed = RecycleBinSnapshotSchema.safeParse(value);
-  if (!parsed.success) {
+  return parsed.success ? parsed.data : undefined;
+}
+
+/** The entry's stored snapshot; an entry whose snapshot does not parse cannot be restored. */
+function readSnapshot(entryId: string, stored: unknown) {
+  const snapshot = parseSnapshot(stored);
+  if (snapshot === undefined) {
     // The bin is engine-owned and its snapshot engine-written: an entry that
     // does not parse is a defect in the store, not a caller's mistake.
     const err: any = new Error(`Recycle-bin entry '${entryId}' holds a snapshot that does not parse, so it cannot be restored.`);
     err.entryId = entryId;
     throw err;
   }
-  return parsed.data;
+  return snapshot;
 }
 
 /**
@@ -315,6 +323,12 @@ export async function restoreRecycleBinEntry(
 /**
  * Refuse, before anything is written, a restore that would write what it
  * should not. Reads only, as the caller.
+ *
+ * Every row is judged for the PERMANENT refusals first (package uninstalled,
+ * parent purged, id or unique value taken), and only then is a parent that is
+ * in the bin answered: `RESTORE_PARENT_IN_RECYCLE_BIN` tells the caller that
+ * restoring another entry first lets this one through, which is false while a
+ * permanent reason stands, so it never hides one.
  */
 async function judgeRestore(
   this: RecycleBinRestoreHost,
@@ -335,6 +349,8 @@ async function judgeRestore(
     )) ?? []) as unknown[];
     return live.length > 0;
   };
+  /** The first parent found in the bin, answered once nothing permanent stands. */
+  let inBin: { row: RecycleBinSnapshotRow; field: string; parent: { object: string; id: string }; parentEntryId: string } | undefined;
   for (const row of rows) {
     const schema = this._registry.getObject(row.object);
     const fields = fieldsOf(schema);
@@ -345,11 +361,14 @@ async function judgeRestore(
       if (!holdsValue(value)) continue;
       const parent = { object: def.reference, id: String(value) };
       if (inEntry.has(`${parent.object}\u0000${parent.id}`)) continue;
-      if (this._registry.getObject(parent.object) && await isLive(parent.object, { id: parent.id })) continue;
-      const parentEntryId = await parentEntryOf.call(this, parent, context);
-      throw parentEntryId !== undefined
-        ? parentInRecycleBinRefusal(entryId, row, field, parent, parentEntryId)
-        : parentPurgedRefusal(entryId, row, field, parent);
+      // A parent whose object is no longer registered can be neither live nor
+      // restored (its own entry would refuse RESTORE_PACKAGE_UNINSTALLED), so it
+      // is gone for good, whatever the bin holds.
+      if (!this._registry.getObject(parent.object)) throw parentPurgedRefusal(entryId, row, field, parent);
+      if (await isLive(parent.object, { id: parent.id })) continue;
+      const parentEntryId = await parentEntryOf.call(this, parent, entryId, context);
+      if (parentEntryId === undefined) throw parentPurgedRefusal(entryId, row, field, parent);
+      inBin ??= { row, field, parent, parentEntryId };
     }
     // 3. No live row holds its id, or a unique value of it.
     if (await isLive(row.object, { id: row.id })) throw uniqueValueTakenRefusal(entryId, row, 'id');
@@ -364,20 +383,62 @@ async function judgeRestore(
       if (await isLive(row.object, where)) throw uniqueValueTakenRefusal(entryId, row, field);
     }
   }
+  // 4. Nothing permanent stands: a parent in the bin is the one reason left.
+  if (inBin) throw parentInRecycleBinRefusal(entryId, inBin.row, inBin.field, inBin.parent, inBin.parentEntryId);
 }
 
-/** The entry that holds a parent as its master, when the parent is one: named in the refusal. */
+/** How many entries one page of {@link parentEntryOf}'s snapshot walk reads. */
+const PARENT_SCAN_PAGE_SIZE = 200;
+
+/**
+ * The OTHER entry that holds a parent, as its master or as a row of its
+ * cascade, when one does: named in the refusal. Reads the entries the caller
+ * can see.
+ *
+ * A parent is the master of an entry when it was deleted by id, and a detail
+ * of one when it went with ITS master's cascade (`account ← contact ← task`:
+ * the task deleted alone, then the account, whose entry holds the contact). The
+ * first is one indexed read on `object_name` / `record_id`; the second has no
+ * column to read, so the entries are walked a page at a time, by key, and each
+ * snapshot's rows searched. The walk runs only on the refusal path.
+ */
 async function parentEntryOf(
   this: RecycleBinRestoreHost,
   parent: { object: string; id: string },
+  entryId: string,
   context: ExecutionContext | undefined,
 ): Promise<string | undefined> {
-  const found = ((await this.getDriver(RECYCLE_BIN_OBJECT).find(
+  const driver = this.getDriver(RECYCLE_BIN_OBJECT);
+  const driverOptions = this.buildDriverOptions(RECYCLE_BIN_OBJECT, context);
+  const asMaster = ((await driver.find(
     RECYCLE_BIN_OBJECT,
     { object: RECYCLE_BIN_OBJECT, where: { object_name: parent.object, record_id: parent.id }, fields: ['id'], limit: 1 },
-    this.buildDriverOptions(RECYCLE_BIN_OBJECT, context),
+    driverOptions,
   )) ?? []) as Array<Record<string, unknown>>;
-  return found[0]?.id == null ? undefined : String(found[0].id);
+  if (asMaster[0]?.id != null) return String(asMaster[0].id);
+  const walk = keysetWalk<Record<string, unknown>>(
+    async (q) => ((await driver.find(
+      RECYCLE_BIN_OBJECT,
+      { object: RECYCLE_BIN_OBJECT, ...(q.where !== undefined ? { where: q.where } : {}), orderBy: q.orderBy, limit: q.limit, fields: ['id', 'snapshot'] },
+      driverOptions,
+    )) ?? []) as Array<Record<string, unknown>>,
+    { pageSize: PARENT_SCAN_PAGE_SIZE },
+  );
+  for await (const page of walk.pages()) {
+    for (const entry of page) {
+      if (entry.id == null || String(entry.id) === entryId) continue;
+      const snapshot = parseSnapshot(entry.snapshot);
+      if (snapshot?.rows.some((r) => r.object === parent.object && r.id === parent.id)) return String(entry.id);
+    }
+  }
+  if (walk.truncated) {
+    // A store that did not apply the seek: the walk stopped rather than spin,
+    // and the parent is answered as purged, a refusal either way.
+    this.logger.warn('[recycle-bin] the walk for a parent\'s entry stopped before the end of the bin', {
+      entry: entryId, parentObject: parent.object, parentId: parent.id, scanned: walk.scanned,
+    });
+  }
+  return undefined;
 }
 
 /** One write the unit made, and how to undo it when no transaction covers it. */
@@ -435,6 +496,10 @@ async function writeBack(
         if (next === undefined) continue;
         await this.update(ref.object, { id: ref.id, [ref.field]: next }, { context: writeContext });
         relinked += 1;
+        // Through `engine.update`, so the re-link publishes `data.record.updated`
+        // when it lands, and its undo publishes one more: a restore that fails
+        // after a re-link outside a transaction leaves two update events for a
+        // row that ends as it began.
         done.push({
           covered: driverOptions?.transaction != null,
           undo: async () => { await this.update(ref.object, { id: ref.id, [ref.field]: previous ?? null }, { context: writeContext }); },
