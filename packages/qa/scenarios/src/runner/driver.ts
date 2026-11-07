@@ -204,8 +204,13 @@ function runCli(bin: string, args: string[], cwd: string, input: string, timeout
   });
 }
 
-/** `no-result(exit 143)`, `no-result(signal SIGTERM)`, `no-result(spawn E2BIG)`: a turn that printed no result line. */
-const noResult = (p: TurnProcess): string => `no-result(${p.error ?? (p.exit !== null ? `exit ${p.exit}` : `signal ${p.signal ?? 'unknown'}`)})`;
+/**
+ * `no-result(exit 143)`, `no-result(signal SIGTERM)`, `no-result(spawn E2BIG)`:
+ * a turn that printed no result line, by how its process ended — or, when no
+ * process ever ran, why.
+ */
+const noResult = (p: TurnProcess): string =>
+  `no-result(${p.exit !== null ? `exit ${p.exit}` : p.signal ? `signal ${p.signal}` : (p.error ?? 'no exit code, no signal')})`;
 
 /** Every file under `dir` (skipping dependency and build trees) → content, for the author recording. */
 export function snapshotSources(dir: string): Record<string, string> {
