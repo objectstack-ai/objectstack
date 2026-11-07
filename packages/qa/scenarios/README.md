@@ -16,8 +16,9 @@ for (const r of refusals) console.error(formatRefusal(r)); // FILE: FIELD.PATH: 
 - `src/schema.ts` — the card shape, one strict zod object per layer.
 - `src/truth.ts` — evaluates a declarative truth spec over seed rows; refuses a truth the
   seed does not determine.
-- `src/loader.ts` — reads a directory of cards, validates shape and cross-references, and
-  returns typed cards or located refusals.
+- `src/loader.ts` — reads a directory of cards, validates shape and cross-references, holds
+  a `starter` or `delivery` card to the gallery floor (`GALLERY_FLOOR`; the tiers are in the
+  format's README), and returns typed cards or located refusals.
 - `src/score/` — the deterministic scorer, entries `@objectstack/scenarios/score` and
   `@objectstack/scenarios/score/full` (below).
 

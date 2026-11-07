@@ -8,14 +8,22 @@
  *    client id when the client declares none), the granted scopes in the
  *    consent page's own words, when authorized, and "in the hour from" the
  *    recorded last use or "not recorded"; the organization only when it is
- *    not the active one; and no Revoke control on an assistant row;
+ *    not the active one;
+ *  - §1b Revoke on an assistant row asks first, naming the assistant; Cancel
+ *    withdraws nothing; confirming calls `withdraw(id)` and reads the list
+ *    again, and a refused withdraw (the grant already gone) names the refusal
+ *    and reads the list again too;
  *  - §2 keys are the person's OWN `sys_api_key` rows: the read filters on the
  *    signed-in user (a platform administrator's unfiltered read answers every
  *    person's keys) and never selects the secret; revoked and expired keys
  *    carry their state and no Revoke;
  *  - §3 Revoke on an active key asks first, naming the key; Cancel writes
  *    nothing; confirming writes `revoked: true` and the list re-reads in place;
- *  - §4 empty, failed and signed-out states.
+ *  - §4 empty, failed and signed-out states;
+ *  - §5 the administrator's widget `mcp:authorized-assistants` on a `sys_user`
+ *    record page: it reads the person from the bound record, lists through
+ *    `listForUser` and revokes through `withdrawForUser`, and renders nothing
+ *    off a `sys_user` record.
  *
  * `t` echoes the key with any interpolation values appended, so assertions
  * read which string was asked for and with what.
@@ -55,8 +63,10 @@ vi.mock('@object-ui/auth', async (importOriginal) => ({
   }),
 }));
 
-import { notifyDataChanged } from '@object-ui/react';
+import { ComponentRegistry } from '@object-ui/core';
+import { notifyDataChanged, RecordContextProvider } from '@object-ui/react';
 import { AuthorizedAccessList } from './AuthorizedAccessList';
+import { ManagedPersonAssistants } from './ManagedPersonAssistants';
 
 type Row = Record<string, unknown>;
 
@@ -93,6 +103,10 @@ const CLIENTS = [
 const FAR_FUTURE = '2999-01-01T00:00:00.000Z';
 let keyRows: Row[];
 let listMock: ReturnType<typeof vi.fn>;
+let withdrawMock: ReturnType<typeof vi.fn>;
+let listForUserMock: ReturnType<typeof vi.fn>;
+let withdrawForUserMock: ReturnType<typeof vi.fn>;
+let granted: typeof CLIENTS;
 let findMock: ReturnType<typeof vi.fn>;
 let updateMock: ReturnType<typeof vi.fn>;
 
@@ -104,7 +118,18 @@ beforeEach(() => {
     { id: 'k_revoked', name: 'old key', prefix: 'osk_ghi', created_at: '2026-10-01T10:00:00.000Z', last_used_at: null, expires_at: FAR_FUTURE, revoked: true },
     { id: 'k_expired', name: 'stale key', prefix: 'osk_jkl', created_at: '2026-01-01T10:00:00.000Z', last_used_at: null, expires_at: '2026-02-01T00:00:00.000Z', revoked: false },
   ];
-  listMock = vi.fn(async () => ({ clients: CLIENTS, truncated: false }));
+  granted = [...CLIENTS];
+  listMock = vi.fn(async () => ({ clients: [...granted], truncated: false }));
+  withdrawMock = vi.fn(async (id: string) => {
+    if (!granted.some((c) => c.id === id)) throw new Error('No authorized assistant you may withdraw matches the supplied id.');
+    granted = granted.filter((c) => c.id !== id);
+    return { id };
+  });
+  listForUserMock = vi.fn(async () => ({ clients: [...granted], truncated: false }));
+  withdrawForUserMock = vi.fn(async (_userId: string, id: string) => {
+    granted = granted.filter((c) => c.id !== id);
+    return { id };
+  });
   findMock = vi.fn(async () => ({ data: keyRows.map((r) => ({ ...r })) }));
   updateMock = vi.fn(async (resource: string, id: string, patch: Row) => {
     keyRows = keyRows.map((r) => (r.id === id ? { ...r, ...patch } : r));
@@ -113,7 +138,16 @@ beforeEach(() => {
     return keyRows.find((r) => r.id === id);
   });
   adapter = {
-    getClient: () => ({ oauth: { authorizedClients: { list: listMock } } }),
+    getClient: () => ({
+      oauth: {
+        authorizedClients: {
+          list: listMock,
+          withdraw: withdrawMock,
+          listForUser: listForUserMock,
+          withdrawForUser: withdrawForUserMock,
+        },
+      },
+    }),
     find: findMock,
     update: updateMock,
   };
@@ -173,12 +207,11 @@ describe('§1 authorized assistants', () => {
     expect(within(nameless).getByText('«connectAgent.access.unnamed»')).toBeInTheDocument();
   });
 
-  it('offers no Revoke on any assistant row, and says withdrawing is not available here yet', async () => {
+  it('offers a Revoke on every assistant row', async () => {
     await renderSettled();
     for (const row of screen.getAllByTestId('authorized-assistant')) {
-      expect(within(row).queryByRole('button')).toBeNull();
+      expect(within(row).getByRole('button', { name: '«connectAgent.access.revoke»' })).toBeInTheDocument();
     }
-    expect(screen.getByText('«connectAgent.access.withdrawLater»')).toBeInTheDocument();
     expect(screen.queryByText(/connectAgent\.access\.truncated/)).toBeNull();
   });
 
@@ -186,6 +219,54 @@ describe('§1 authorized assistants', () => {
     listMock.mockResolvedValueOnce({ clients: CLIENTS, truncated: true });
     await renderSettled();
     expect(screen.getByText('«connectAgent.access.truncated»')).toBeInTheDocument();
+  });
+});
+
+describe('§1b revoking an assistant', () => {
+  it('asks first, naming the assistant; Cancel withdraws nothing', async () => {
+    await renderSettled();
+    fireEvent.click(within(assistantRow('Claude Desktop')).getByRole('button', { name: '«connectAgent.access.revoke»' }));
+    const dialog = await screen.findByRole('alertdialog');
+    expect(within(dialog).getByText('«connectAgent.access.withdrawTitle|Claude Desktop»')).toBeInTheDocument();
+    expect(within(dialog).getByText('«connectAgent.access.withdrawBody»')).toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole('button', { name: '«common.cancel»' }));
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull());
+    expect(withdrawMock).not.toHaveBeenCalled();
+  });
+
+  it('names a nameless assistant by the fallback in the confirm', async () => {
+    await renderSettled();
+    fireEvent.click(within(assistantRow('client_nameless')).getByRole('button', { name: '«connectAgent.access.revoke»' }));
+    const dialog = await screen.findByRole('alertdialog');
+    expect(within(dialog).getByText('«connectAgent.access.withdrawTitle|«connectAgent.access.unnamed»»')).toBeInTheDocument();
+  });
+
+  it('confirming withdraws the grant by its id and reads the list again', async () => {
+    await renderSettled();
+    fireEvent.click(within(assistantRow('Claude Desktop')).getByRole('button', { name: '«connectAgent.access.revoke»' }));
+    const dialog = await screen.findByRole('alertdialog');
+    fireEvent.click(within(dialog).getByRole('button', { name: '«connectAgent.access.revoke»' }));
+
+    await waitFor(() => expect(withdrawMock).toHaveBeenCalledWith('consent_2'));
+    await waitFor(() => expect(listMock).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(screen.getAllByTestId('authorized-assistant')).toHaveLength(2));
+    expect(screen.queryByText('Claude Desktop')).toBeNull();
+    // An assistant withdraw is not a key write: the keys are not re-read.
+    expect(findMock).toHaveBeenCalledTimes(1);
+    expect(withdrawForUserMock).not.toHaveBeenCalled();
+  });
+
+  it('a refused withdraw names the refusal and still reads the list again', async () => {
+    await renderSettled();
+    // Withdrawn elsewhere after this page read the list: the server answers 404.
+    granted = granted.filter((c) => c.id !== 'consent_1');
+    fireEvent.click(within(assistantRow('Cursor')).getByRole('button', { name: '«connectAgent.access.revoke»' }));
+    const dialog = await screen.findByRole('alertdialog');
+    fireEvent.click(within(dialog).getByRole('button', { name: '«connectAgent.access.revoke»' }));
+
+    expect(await screen.findByText(/No authorized assistant you may withdraw/)).toBeInTheDocument();
+    await waitFor(() => expect(listMock).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(screen.queryByText('Cursor')).toBeNull());
   });
 });
 
@@ -273,5 +354,66 @@ describe('§4 empty, failed and signed-out states', () => {
     expect(second.container).toBeEmptyDOMElement();
     expect(listMock).not.toHaveBeenCalled();
     expect(findMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('§5 the administrator widget on a person\'s record page', () => {
+  const renderOn = (objectName: string, recordId: string | null) =>
+    render(
+      <RecordContextProvider objectName={objectName} recordId={recordId}>
+        <ManagedPersonAssistants />
+      </RecordContextProvider>,
+    );
+
+  it('is registered as mcp:authorized-assistants', () => {
+    expect(ComponentRegistry.get('mcp:authorized-assistants')).toBeDefined();
+  });
+
+  it("lists the person's grants through listForUser and revokes through withdrawForUser", async () => {
+    renderOn('sys_user', 'user_mia');
+    await screen.findAllByTestId('authorized-assistant');
+    expect(listForUserMock).toHaveBeenCalledWith('user_mia');
+    expect(listMock).not.toHaveBeenCalled();
+    expect(screen.getByText('«connectAgent.access.managedBody»')).toBeInTheDocument();
+
+    fireEvent.click(within(assistantRow('Cursor')).getByRole('button', { name: '«connectAgent.access.revoke»' }));
+    const dialog = await screen.findByRole('alertdialog');
+    expect(within(dialog).getByText('«connectAgent.access.withdrawTitle|Cursor»')).toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole('button', { name: '«connectAgent.access.revoke»' }));
+
+    await waitFor(() => expect(withdrawForUserMock).toHaveBeenCalledWith('user_mia', 'consent_1'));
+    await waitFor(() => expect(listForUserMock).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(screen.queryByText('Cursor')).toBeNull());
+    expect(withdrawMock).not.toHaveBeenCalled();
+  });
+
+  it('speaks of this person when the list is empty or truncated', async () => {
+    listForUserMock.mockResolvedValueOnce({ clients: [], truncated: false });
+    const first = renderOn('sys_user', 'user_mia');
+    expect(await screen.findByText('«connectAgent.access.managedEmpty»')).toBeInTheDocument();
+    expect(screen.queryByText('«connectAgent.access.assistantsEmpty»')).toBeNull();
+    first.unmount();
+    listForUserMock.mockResolvedValueOnce({ clients: CLIENTS, truncated: true });
+    renderOn('sys_user', 'user_mia');
+    expect(await screen.findByText('«connectAgent.access.managedTruncated»')).toBeInTheDocument();
+  });
+
+  it('names a refused read (not a platform administrator) instead of an empty list', async () => {
+    listForUserMock.mockRejectedValueOnce(new Error('Admin role required'));
+    renderOn('sys_user', 'user_mia');
+    expect(await screen.findByText('«connectAgent.access.loadFailed|Admin role required»')).toBeInTheDocument();
+    expect(screen.queryByText('«connectAgent.access.managedEmpty»')).toBeNull();
+  });
+
+  it("renders nothing and reads nothing off a sys_user record", () => {
+    const other = renderOn('crm_account', 'acc_1');
+    expect(other.container).toBeEmptyDOMElement();
+    other.unmount();
+    const unbound = render(<ManagedPersonAssistants />);
+    expect(unbound.container).toBeEmptyDOMElement();
+    unbound.unmount();
+    const noId = renderOn('sys_user', null);
+    expect(noId.container).toBeEmptyDOMElement();
+    expect(listForUserMock).not.toHaveBeenCalled();
   });
 });

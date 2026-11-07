@@ -105,6 +105,11 @@ describe('the open scenario library (docs/qa/scenarios)', () => {
     expect(result.cards.map((c) => c.card.id)).toEqual(expect.arrayContaining(Object.keys(EXPECTED_TRUTHS)));
   });
 
+  it('the three controls, and only they, are tier `control` (internal checks, never exported)', () => {
+    const controls = result.cards.filter((c) => c.card.tier === 'control').map((c) => c.card.id);
+    expect(controls.sort()).toEqual(Object.keys(EXPECTED_TRUTHS).sort());
+  });
+
   for (const [id, expected] of Object.entries(EXPECTED_TRUTHS)) {
     it(`${id}: every question's computed truth is the hand-worked one`, () => {
       const loaded = result.cards.find((c) => c.card.id === id);

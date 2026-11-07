@@ -551,6 +551,11 @@ export {
 export { CloudWorkspaceTimezoneNoticeSchema } from './cloud.zod.js';
 
 // ============================================================================
+// `mcp:authorized-assistants` - `@object-ui/app-shell`'s person's-assistants widget
+// ============================================================================
+export { McpAuthorizedAssistantsSchema } from './mcp-authorized-assistants.zod.js';
+
+// ============================================================================
 // `record:approval_decision` - `@object-ui/app-shell`'s approval decision panel (objectui#12342)
 // ============================================================================
 export { RecordApprovalDecisionBlockSchema } from './record-approval-decision.zod.js';
@@ -584,6 +589,7 @@ import { ProductBlockComponentSchema } from './product-blocks.zod.js';
 import { DesignerUnionSchema } from './designer.zod.js';
 import { PublicBlockComponentSchema } from './public-blocks.zod.js';
 import { CloudWorkspaceTimezoneNoticeSchema, RetiredCloudPlanStatusNodeSchema } from './cloud.zod.js';
+import { McpAuthorizedAssistantsSchema } from './mcp-authorized-assistants.zod.js';
 import { RecordApprovalDecisionBlockSchema } from './record-approval-decision.zod.js';
 import { RecordApprovalsBlockSchema, RecordAttachmentsBlockSchema } from './record-panels.zod.js';
 import { nestedComponentJudgment } from './nested-component-walk.js';
@@ -695,6 +701,8 @@ export const AnyComponentSchema = defineNodeComponentUnion(z.discriminatedUnion(
   // objectui#12954 — the retired `cloud:plan-status` literal's named refusal.
   RetiredCloudPlanStatusNodeSchema,
   CloudWorkspaceTimezoneNoticeSchema,
+  // Landed with its `@object-ui/app-shell` registration.
+  McpAuthorizedAssistantsSchema,
   // objectui#12342 — landed with its registration.
   RecordApprovalDecisionBlockSchema,
   // objectui#12363 — the two record panels the default record page emits.

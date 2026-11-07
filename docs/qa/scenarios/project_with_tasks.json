@@ -1,6 +1,7 @@
 {
   "id": "project_with_tasks",
   "code": "project",
+  "tier": "control",
   "title": "Project management: projects owning inline-edited tasks with roll-ups",
   "provenance": "Golden case `project_with_tasks` of packages/cli/src/lint/corpus.ts; `expect` derived mechanically from its fixture (every object; minFieldsPerObject = the smallest object's field count; one selectFields row per select field with minOptions = its option count; one lookups row per lookup or master_detail field).",
   "prompt": {

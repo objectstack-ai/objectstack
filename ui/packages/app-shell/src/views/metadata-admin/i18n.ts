@@ -58,7 +58,7 @@
  * `ui/scripts/__tests__/check-i18n-dead-keys.test.ts`.
  */
 
-import { useObjectTranslation } from '@object-ui/i18n';
+import { resolveBuiltInLanguage, useObjectTranslation } from '@object-ui/i18n';
 // The designer strings' new home. Its `en` catalogue is resident; its other
 // catalogues are fetched on demand, and `useMetadataLocale()` re-renders its
 // caller when one lands. ⚠️ `ui/scripts/check-i18n-dead-keys.mjs` reads the
@@ -74,7 +74,15 @@ import type {
   MetadataOverlayScope,
 } from '@object-ui/data-objectstack';
 
-export type SupportedLocale = 'en-US' | 'zh-CN';
+/**
+ * The designer locale. `'zh-Hant'` is a Traditional Chinese session: Studio
+ * reads and writes the Traditional entry of an inline label in it, and its
+ * chrome strings fall back to the namespace's `zh` (Simplified) catalogue,
+ * which is the only Chinese one it ships (`resolveStudioLanguage`). Compare a
+ * value with `isZhLocale`, never `=== 'zh-CN'`, when the question is "Chinese
+ * chrome?".
+ */
+export type SupportedLocale = 'en-US' | 'zh-CN' | 'zh-Hant';
 
 const TYPE_LABELS_EN: Record<string, string> = {
   // Data
@@ -932,8 +940,22 @@ export function detectLocale(): SupportedLocale {
 }
 
 /**
+ * The designer locale for an i18n `language` — {@link useMetadataLocale}'s
+ * answer, as a pure function.
+ */
+export function designerLocaleOf(language: string | undefined): SupportedLocale {
+  if (!/^zh/i.test(language ?? '')) return 'en-US';
+  return resolveBuiltInLanguage(language ?? '') === 'zh-Hant' ? 'zh-Hant' : 'zh-CN';
+}
+
+/**
  * React hook — the Studio/metadata-admin locale derived from the app's ACTIVE
- * i18n language, collapsed to one of the two locales this catalog ships.
+ * i18n language: `'zh-Hant'` for a session the console serves in Traditional
+ * Chinese (`zh-Hant`, `zh-TW`, `zh-HK`, … through `resolveBuiltInLanguage`,
+ * the console's own resolution), `'zh-CN'` for every other Chinese session,
+ * `'en-US'` otherwise. The Traditional value exists for the label entries an
+ * author reads and edits (the nav designer shows and renames the entry the
+ * sidebar shows); its chrome strings are the Simplified ones.
  *
  * Prefer this over {@link detectLocale} in components: `detectLocale()` reads
  * `navigator.language`, which never changes when the user switches languages
@@ -944,7 +966,7 @@ export function detectLocale(): SupportedLocale {
  *
  * ⛔ Never hand this value to `Intl` (`Intl.*Format`, `toLocale*String`) as the
  * locale a date, time or number is formatted in. It picks one of this file's
- * TWO string tables, so it is `'en-US'` for every language that is not zh — a
+ * string tables, so it is `'en-US'` for every language that is not zh — a
  * de-DE session would read its faces in US English (objectui#10232). Faces
  * format with `useDisplayLocale()` from `@object-ui/i18n`, the channel every
  * date and number renderer resolves through; keep this value for `t()` /
@@ -952,7 +974,7 @@ export function detectLocale(): SupportedLocale {
  */
 export function useMetadataLocale(): SupportedLocale {
   const { language } = useObjectTranslation();
-  const locale: SupportedLocale = /^zh/i.test(language) ? 'zh-CN' : 'en-US';
+  const locale = designerLocaleOf(language);
   // Starts the fetch of the `studio` namespace catalogue this locale reads and
   // re-renders the caller when it lands, so a moved key does not stay on the
   // `en` answer the first render gave.
