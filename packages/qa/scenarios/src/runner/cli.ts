@@ -11,6 +11,13 @@
  *   --only ID[,ID]       run only these cards
  *   --modes M[,M]        scratch, template (default: both)
  *   --driver claude      the local Claude Code CLI on your own login (default)
+ *   --driver codex       the local OpenAI Codex CLI on your own ChatGPT plan
+ *                        login (`drivers/codex.ts`); it has no turn cap, so the
+ *                        two --*-max-turns flags are refused with it
+ *   --driver external:C  any command C that speaks the driver contract (one
+ *                        process per call, JSON in on stdin, JSON out on stdout;
+ *                        `drivers/external.ts` and the package README); every
+ *                        flag below reaches it in the call's `limits`
  *   --driver recorded:F  replay the recording F (no model, no network to a model)
  *   --record F           also save every live turn to F, for later replay
  *   --author-timeout MIN the live driver's budget per authoring turn, build and
@@ -56,6 +63,8 @@ import { fileURLToPath } from 'node:url';
 import { formatRefusal, libraryOf, loadScenarios, readCapabilityAreas } from '../loader.js';
 import { HttpApp } from './app.js';
 import { ClaudeCodeDriver, RecordedDriver, RecordingDriver, type AgentDriver } from './driver.js';
+import { CodexDriver } from './drivers/codex.js';
+import { ExternalDriver } from './drivers/external.js';
 import { CAPABILITY_AREAS_DIR, locateLibraryRoot } from './library.js';
 import { minutesText, runCard, type ProjectOps } from './orchestrate.js';
 import { installedSpecVersion, PACKAGES_MODES, prepareWorkspacePackages, settleWorkspaceProject, workspaceScaffolder, type PackageSource, type PackagesMode } from './packages.js';
@@ -189,7 +198,29 @@ export function makeDriver(spec: string, opts: DriverLimits & DriverModels = {})
     if (given.length) throw new Error(`${given.join(', ')} ${given.length === 1 ? 'applies' : 'apply'} to the live driver only: a replay re-reads each turn as it was recorded`);
     return RecordedDriver.fromFile(spec.slice('recorded:'.length));
   }
-  throw new Error(`unknown driver \`${spec}\` (claude, recorded:FILE)`);
+  if (spec === 'codex') {
+    // Measured on codex-cli 0.167.0: `codex exec` takes no cap on its agentic turns (`drivers/codex.ts`).
+    const capped = (['authorMaxTurns', 'askMaxTurns'] as const).filter((k) => opts[k] !== undefined).map((k) => LIVE_FLAGS.find(([key]) => key === k)![1]);
+    if (capped.length) throw new Error(`${capped.join(', ')} ${capped.length === 1 ? 'has' : 'have'} no equivalent in the Codex CLI: \`codex exec\` takes no turn cap`);
+    return new CodexDriver({
+      ...(opts.authorTimeoutMin !== undefined ? { authorTimeoutMs: opts.authorTimeoutMin * 60_000 } : {}),
+      ...(opts.model !== undefined ? { model: opts.model } : {}),
+      ...(opts.authorModel !== undefined ? { authorModel: opts.authorModel } : {}),
+      ...(opts.askModel !== undefined ? { askModel: opts.askModel } : {}),
+    });
+  }
+  if (spec.startsWith('external:')) {
+    return new ExternalDriver({
+      command: spec.slice('external:'.length),
+      ...(opts.authorTimeoutMin !== undefined ? { authorTimeoutMs: opts.authorTimeoutMin * 60_000 } : {}),
+      ...(opts.authorMaxTurns !== undefined ? { authorMaxTurns: opts.authorMaxTurns } : {}),
+      ...(opts.askMaxTurns !== undefined ? { askMaxTurns: opts.askMaxTurns } : {}),
+      ...(opts.model !== undefined ? { model: opts.model } : {}),
+      ...(opts.authorModel !== undefined ? { authorModel: opts.authorModel } : {}),
+      ...(opts.askModel !== undefined ? { askModel: opts.askModel } : {}),
+    });
+  }
+  throw new Error(`unknown driver \`${spec}\` (claude, codex, external:COMMAND, recorded:FILE)`);
 }
 
 export async function main(argv: readonly string[]): Promise<number> {
