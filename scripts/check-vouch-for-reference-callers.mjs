@@ -19,44 +19,76 @@
  * an import, a flow or an agent tool hands the engine. Whether a call site
  * honours that is a judgement a reviewer makes once, when the call site is
  * written. This gate makes sure no call site arrives without that review: every
- * production source file that sets the mark is named in {@link ALLOWED_CALLERS}
- * with the exact number of call sites it holds, and the gate is red when a file
- * outside the list sets it, when a listed file holds more or fewer call sites
- * than its row, and when a row names a file that no longer sets it.
+ * production source file on the scan surface (below) that sets the mark is
+ * named in {@link ALLOWED_CALLERS} with the exact number of call sites it
+ * holds, and the gate is red when a file outside the list sets it, when a
+ * listed file holds more or fewer call sites than its row, and when a row
+ * names a file that no longer sets it.
  *
- * "Sets the mark" is decided three ways, each a spelling that reaches the same
- * context key:
+ * ## One rule for every spelling: a mention the census cannot count is a finding
  *
- *  1. a call `vouchForReference(` (not a mention in a comment or in backticks);
- *  2. an import that renames it (`vouchForReference as …`), which would hide
- *     every later call from (1);
- *  3. the key itself, outside the module that defines it — `VOUCHED_REFERENCES`
- *     used as a computed property, or `Symbol.for('objectstack.core.vouchedReferences')`
- *     spelled anywhere else — a context built with the key by hand.
+ * The mark has three names: the function `vouchForReference`, the context key
+ * `VOUCHED_REFERENCES`, and the key's `Symbol.for` description
+ * (`objectstack.core.vouchedReferences`). Outside the module that defines them,
+ * every occurrence of any of the three — in code or in a string literal — is
+ * exactly one of:
  *
- * Test files (`*.test.*`, `*.spec.*`, `*.testkit.*`, `__tests__/`) are outside
- * the census: they set the mark on purpose to pin what it admits.
+ *  1. a direct call, `vouchForReference(…)` (a type argument list allowed),
+ *     not reached through a member, a bracket or a string. It is COUNTED, and
+ *     the count is what {@link ALLOWED_CALLERS} pins;
+ *  2. an unrenamed specifier of an `import { … } from` or `export { … } from`
+ *     statement, `vouchForReference` or `VOUCHED_REFERENCES` as itself. It sets
+ *     nothing and is not counted;
+ *  3. a FINDING: anything else. A rename on import or export, a namespace or
+ *     member access, a bracket or string-keyed access, a value alias, `.call`
+ *     or `.apply`, a `require` destructuring, the key as a computed property or
+ *     an argument to `Object.defineProperty` / `Reflect.set`, or the symbol's
+ *     description in any literal. Each would let a call or a hand-built key
+ *     reach the context without a counted call, so each is red, naming the file
+ *     and line, and the remedy is the same: call `vouchForReference` directly,
+ *     unrenamed, and add the row.
  *
- * The scan surface is git's (`git ls-files --cached --others --exclude-standard`
- * under `packages/`), so build output never reads as a call site.
+ * And because the description can be assembled, a `Symbol.for(…)` whose
+ * argument the census cannot read is a finding too, in any scanned file: the
+ * argument must be one plain string literal, a template literal with no
+ * substitution, or a bare identifier bound in the same file by `const` to a
+ * plain string literal. Anything else — an imported constant, a concatenation,
+ * a call, a substituted template — is red, naming the file and line.
  *
- * ## Two surfaces: every source extension, and `.ts` alone
+ * Code is told from prose by `maskComments` (`scripts/js-comment-mask.mjs`),
+ * which blanks comment spans and keeps string, template and regex literals,
+ * so a `//` inside a string never hides the code after it and a `/* … *\/`
+ * span never hides the code beside it. The `Symbol.for` argument is read off
+ * `maskCommentsAndLiterals`, so a `Symbol.for(` written inside a string or a
+ * template (generated source) is not a call.
  *
- * The bare run judges every source extension (`.ts`, `.mts`, `.cts`, `.tsx`,
- * `.js`, `.mjs`, `.cjs`, `.jsx`). It is the authority: the lint step runs it
- * on every PR, with no cache in front of it.
+ * Test files (`*.test.*`, `*.spec.*`, `*.testkit.*`, `__tests__/`,
+ * `__fixtures__/`) are outside the census: they set the mark on purpose to pin
+ * what it admits.
  *
- * `--ts-only` judges the files ending in `.ts` and nothing else, and it exists
- * for one caller: the pin in `@objectstack/core`
+ * ## Two surfaces: the full one, and `packages/**` `.ts` alone
+ *
+ * The scan surface is git's (`git ls-files --cached --others --exclude-standard`),
+ * so build output never reads as a call site.
+ *
+ * The bare run judges `packages/`, `examples/` and `apps/` — every workspace
+ * tree that can depend on `@objectstack/core` and boot the kernel in-process —
+ * over every source extension (`.ts`, `.mts`, `.cts`, `.tsx`, `.js`, `.mjs`,
+ * `.cjs`, `.jsx`). It is the authority: the lint step runs it on every PR, with
+ * no cache in front of it.
+ *
+ * `--ts-only` judges the files under `packages/` ending in `.ts` and nothing
+ * else, and it exists for one caller: the pin in `@objectstack/core`
  * (`src/security/vouched-reference-callers.pin.test.ts`). That pin's re-run
  * radius is the `@objectstack/core` entry of
- * `scripts/cross-package-test-inputs.mjs`, a `packages/` glob ending in `.ts`,
+ * `scripts/cross-package-test-inputs.mjs`, `packages/**` ending in `.ts`,
  * mirrored in its `test:repo` turbo inputs. A pin that judged a wider set than
  * that radius would judge files whose edits never re-run it, and replay a
  * cached green over them; so the pin judges the radius, the lint step judges
- * the rest, and the radius stays `.ts` for the reason that entry's comment
- * gives. Under `--ts-only`, a row for a file outside the surface is not
- * judged stale: the bare run judges it.
+ * the rest (`examples/`, `apps/` and the other extensions), and the radius
+ * stays `packages/**` `.ts` for the reason that entry's comment gives. Under
+ * `--ts-only`, a row for a file outside the surface is not judged stale: the
+ * bare run judges it.
  *
  * Adding a caller is an edit to {@link ALLOWED_CALLERS} in the same change,
  * with the reason in the row: what the verb created or authorized for the
@@ -68,6 +100,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isEntrypoint } from './invoked-as.mjs';
+import { maskComments, maskCommentsAndLiterals } from './js-comment-mask.mjs';
 
 const REPO = join(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -90,50 +123,119 @@ export const ALLOWED_CALLERS = Object.freeze({
   },
 });
 
+/** The trees the bare run reads; `--ts-only` reads the first alone. */
+export const SCAN_ROOTS = Object.freeze(['packages', 'examples', 'apps']);
+
 const SOURCE_FILE = /\.(?:[cm]?ts|tsx|[cm]?js|jsx)$/;
 const TEST_FILE = /(?:\.test\.|\.spec\.|\.testkit\.|\/__tests__\/|\/__fixtures__\/)/;
 
 /**
- * Whether the census reads `path`: a production source file, on the full
- * surface or, with `tsOnly`, the `.ts` one (see "Two surfaces" above).
+ * Whether the census reads `path`: a production source file under a scan
+ * root, on the full surface or, with `tsOnly`, the `packages/**` `.ts` one
+ * (see "Two surfaces" above).
  */
 export function inScanSurface(path, { tsOnly = false } = {}) {
   if (!SOURCE_FILE.test(path) || TEST_FILE.test(path)) return false;
-  return !tsOnly || path.endsWith('.ts');
+  if (tsOnly) return path.startsWith('packages/') && path.endsWith('.ts');
+  return SCAN_ROOTS.some((root) => path.startsWith(`${root}/`));
 }
 
-/** A line that is a comment, by its first non-blank characters. */
-const isCommentLine = (line) => /^\s*(?:\/\/|\/\*|\*)/.test(line);
+const FN = 'vouchForReference';
+const KEY = 'VOUCHED_REFERENCES';
+const DESCRIPTION = 'vouchedReferences';
+/** Every occurrence of a name of the mark; the description matches inside any longer literal. */
+const MENTION = /(?<![\w$])(vouchForReference|VOUCHED_REFERENCES)(?![\w$])|vouchedReferences/g;
+/** An `import { … } from` / `export { … } from` statement's specifier list. */
+const SPECIFIER_LIST = /\b(?:import|export)\s+(?:type\s+)?(?:[\w$]+\s*,\s*)?\{([^{}]*)\}\s*from\b/g;
+/** After a name: an optional type argument list, then the call's open paren. */
+const CALL_TAIL = /^\s*(?:<[^<>()]*>)?\s*\(/;
 
-/** Strip backtick-quoted spans, so prose naming `vouchForReference(` is no call. */
-const withoutBacktickSpans = (line) => line.replace(/`[^`]*`/g, '``');
+const lineAt = (text, offset) => text.slice(0, offset).split('\n').length;
+const blankSpan = (text, from, to) =>
+  text.slice(0, from) + text.slice(from, to).replace(/[^\n]/g, ' ') + text.slice(to);
 
 /**
- * The census of one file's text: its call sites and the spellings that would
- * hide or step around one.
+ * The census of one file's text: its counted call sites, and a finding for
+ * every mention of the mark it cannot count and every `Symbol.for` argument it
+ * cannot read.
  */
 export function censusOf(path, text) {
-  let calls = 0;
   const findings = [];
-  const lines = String(text).split('\n');
-  lines.forEach((raw, index) => {
-    if (isCommentLine(raw)) return;
-    const line = withoutBacktickSpans(raw.replace(/\/\/.*$/, ''));
-    const where = `${path}:${index + 1}`;
-    const callHits = line.match(/\bvouchForReference\s*\(/g);
-    if (callHits && path !== DEFINING_MODULE) calls += callHits.length;
-    if (/\bvouchForReference\s+as\s+\w/.test(line)) {
-      findings.push(`${where}: renames vouchForReference on import — every later call would hide from this census`);
+  if (path === DEFINING_MODULE) return { calls: 0, findings };
+  const source = String(text);
+  let code = maskComments(source);
+  const at = (offset) => `${path}:${lineAt(source, offset)}`;
+
+  // 2. Unrenamed import/export-from specifiers set nothing: blank them before
+  //    the mention pass. A renamed one is a finding and is blanked too, so it
+  //    is reported once.
+  for (const m of [...code.matchAll(SPECIFIER_LIST)]) {
+    const listStart = m.index + m[0].indexOf('{') + 1;
+    let offset = listStart;
+    for (const raw of m[1].split(',')) {
+      const spec = raw.trim().replace(/^type\s+/, '');
+      const names = spec.match(/(?<![\w$])(?:vouchForReference|VOUCHED_REFERENCES)(?![\w$])|vouchedReferences/);
+      if (names) {
+        if (spec !== FN && spec !== KEY) {
+          findings.push(`${at(offset)}: ${m[0].trimStart().startsWith('export') ? 'exports' : 'imports'} ${names[0]} as \`${spec}\` — a rename hides every later use from this census; import it as itself`);
+        }
+        code = blankSpan(code, offset, offset + raw.length);
+      }
+      offset += raw.length + 1;
     }
-    if (path === DEFINING_MODULE) return;
-    if (/\[\s*VOUCHED_REFERENCES\s*\]/.test(line)) {
-      findings.push(`${where}: builds the mark's key by hand ([VOUCHED_REFERENCES]) — call vouchForReference instead`);
+  }
+
+  // 1 and 3. Every remaining mention is a counted direct call or a finding.
+  let calls = 0;
+  for (const m of code.matchAll(MENTION)) {
+    const name = m[1] ?? DESCRIPTION;
+    const before = code.slice(0, m.index).replace(/\s+$/, '');
+    const prev = before.slice(-1);
+    const reached = prev === '.' || prev === '[' || prev === "'" || prev === '"' || prev === '`';
+    if (name === FN && !reached && CALL_TAIL.test(code.slice(m.index + FN.length))) {
+      calls += 1;
+      continue;
     }
-    if (/Symbol\.for\(\s*['"]objectstack\.core\.vouchedReferences['"]\s*\)/.test(line)) {
-      findings.push(`${where}: spells the mark's symbol by hand — call vouchForReference instead`);
-    }
-  });
+    const what =
+      name === DESCRIPTION
+        ? "spells the mark's symbol description"
+        : name === KEY
+          ? 'reaches the context key VOUCHED_REFERENCES'
+          : 'reaches vouchForReference without a direct call';
+    findings.push(
+      `${at(m.index)}: ${what} — a spelling this census cannot count. Call vouchForReference directly, unrenamed, ` +
+        'and add the file to ALLOWED_CALLERS',
+    );
+  }
+
+  // The description assembled at run time: every Symbol.for argument must be readable.
+  findings.push(...unreadableSymbolFor(path, source, code));
   return { calls, findings };
+}
+
+/** `Symbol.for(…)` calls in code whose argument the census cannot read (see the header). */
+function unreadableSymbolFor(path, source, commentsMasked) {
+  const findings = [];
+  const codeOnly = maskCommentsAndLiterals(source);
+  for (const m of codeOnly.matchAll(/\bSymbol\s*\.\s*for\s*\(/g)) {
+    const argStart = m.index + m[0].length;
+    const shown = commentsMasked.slice(argStart);
+    const plain = /^\s*(['"])(?:(?!\1)[^\\\n]|\\.)*\1\s*,?\s*\)/.test(shown);
+    const template = /^\s*`([^`]*)`\s*,?\s*\)/.exec(shown);
+    if (plain || (template && !template[1].includes('${'))) continue;
+    const ident = /^\s*([A-Za-z_$][\w$]*)\s*\)/.exec(codeOnly.slice(argStart));
+    if (ident) {
+      const bound = new RegExp(
+        `\\bconst\\s+${ident[1].replace(/\$/g, '\\$')}\\s*(?::[^=;]+)?=\\s*(['"])(?:(?!\\1)[^\\\\\\n]|\\\\.)*\\1\\s*(?:as\\s+const\\s*)?[;,\\n]`,
+      );
+      if (bound.test(commentsMasked)) continue;
+    }
+    findings.push(
+      `${path}:${lineAt(source, m.index)}: Symbol.for is fed an argument this census cannot read — use a plain string ` +
+        'literal, or a const in this file bound to one, so the description it registers is visible',
+    );
+  }
+  return findings;
 }
 
 /** The verdict over a set of `{ path, text }` files against `allowed`. */
@@ -166,7 +268,10 @@ export function check(files, allowed = ALLOWED_CALLERS) {
   }
   for (const path of Object.keys(allowed)) {
     if (!counts.has(path)) {
-      problems.push(`${path}: is in ALLOWED_CALLERS and no longer sets the mark — remove the stale row.`);
+      problems.push(
+        `${path}: is in ALLOWED_CALLERS and no longer sets the mark. Remove the stale row in the same change, or ` +
+          'restore the call it pins if its removal was not meant.',
+      );
     }
   }
   return { problems, counts };
@@ -174,8 +279,8 @@ export function check(files, allowed = ALLOWED_CALLERS) {
 
 /**
  * The verdict on one surface: `files` and the rows of `allowed` narrowed to
- * it first, so under `tsOnly` a row for a file outside the `.ts` surface is
- * left to the bare run rather than reported stale.
+ * it first, so under `tsOnly` a row for a file outside the `packages/**` `.ts`
+ * surface is left to the bare run rather than reported stale.
  */
 export function verdict(files, allowed = ALLOWED_CALLERS, { tsOnly = false } = {}) {
   const onSurface = (path) => inScanSurface(path, { tsOnly });
@@ -183,9 +288,10 @@ export function verdict(files, allowed = ALLOWED_CALLERS, { tsOnly = false } = {
   return check(files.filter((f) => onSurface(f.path)), rows);
 }
 
-/** The files the census reads: what git sees under `packages/`, never build output. */
+/** The files the census reads: what git sees under the scan roots, never build output. */
 function readTree({ tsOnly = false } = {}) {
-  const out = execFileSync('git', ['ls-files', '--cached', '--others', '--exclude-standard', '-z', '--', 'packages'], {
+  const roots = tsOnly ? ['packages'] : [...SCAN_ROOTS];
+  const out = execFileSync('git', ['ls-files', '--cached', '--others', '--exclude-standard', '-z', '--', ...roots], {
     cwd: REPO,
     encoding: 'utf8',
     maxBuffer: 256 * 1024 * 1024,
@@ -199,9 +305,8 @@ function readTree({ tsOnly = false } = {}) {
     } catch {
       continue; // listed by git, deleted in the working tree
     }
-    if (!text.includes('vouchForReference') && !text.includes('VOUCHED_REFERENCES') && !text.includes('vouchedReferences')) {
-      text = '';
-    }
+    // A fixed-string prefilter, an exact superset of what censusOf can find.
+    if (![FN, KEY, DESCRIPTION, 'Symbol'].some((needle) => text.includes(needle))) text = '';
     files.push({ path, text });
   }
   return files;
@@ -221,44 +326,93 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'a call from a file outside the allow-list → RED': 1,
   'an allow-listed file with one more call site than its row → RED': 1,
   'an allow-listed file with one fewer call site than its row → RED': 1,
-  'a row naming a file that no longer sets the mark → RED (stale row)': 1,
+  'a row naming a file that no longer sets the mark → RED (stale row), naming both remedies': 1,
   'an import that renames vouchForReference → RED': 1,
   'the key built by hand as [VOUCHED_REFERENCES] → RED': 1,
-  "the symbol spelled by hand with Symbol.for → RED": 1,
+  'the symbol spelled by hand with Symbol.for → RED': 1,
   'a test file that sets the mark → GREEN (outside the census)': 1,
-  'a comment or backtick mention is no call site → GREEN': 1,
+  'a comment mention, line or block, is no call site → GREEN': 1,
   'the defining module’s own spellings → GREEN': 1,
   'an empty scan → RED, never a green skip': 1,
   'a call from a .mjs file on the full surface → RED': 1,
   'the same .mjs call under --ts-only → GREEN (the bare run judges it)': 1,
   'a row for a non-.ts file under --ts-only → not judged stale': 1,
+  'the key renamed on import, then used as [MARK] → RED': 1,
+  'the key through a namespace, [ns.VOUCHED_REFERENCES] → RED': 1,
+  'the key set with Object.defineProperty → RED': 1,
+  'the key set with Reflect.set → RED': 1,
+  'Symbol.for fed a const holding the description → RED': 1,
+  'Symbol.for fed an imported or computed constant → RED': 1,
+  'Symbol.for fed a substituted template → RED': 1,
+  'Symbol.for fed a same-file const bound to another plain literal → GREEN': 1,
+  'Symbol.for written inside a string of generated source → GREEN': 1,
+  'a value alias of vouchForReference → RED': 1,
+  'vouchForReference.call → RED': 1,
+  'vouchForReference.apply → RED': 1,
+  'a require destructuring rename → RED': 1,
+  "string-keyed access, core['vouchForReference'](…) → RED": 1,
+  'a namespace call, core.vouchForReference(…) → RED': 1,
+  'a template-literal mention → RED (a string mention is no exemption)': 1,
+  'a // inside a string before a call on the same line does not hide the call → RED': 1,
+  'a /* … */ span before code on the same line does not hide the call → RED': 1,
+  'unrenamed import and re-export specifiers, and a call with a type argument → GREEN': 1,
+  'a call under examples/ on the full surface → RED': 1,
+  'the same examples/ call under --ts-only → GREEN (outside its radius)': 1,
+  'a rename on re-export → RED': 1,
 });
-const SELF_TEST_BATTERY_FLOOR = 15;
+const SELF_TEST_BATTERY_FLOOR = 37;
 
 function selfTest() {
   const VERB = 'packages/services/demo/src/verb.ts';
   const OTHER = 'packages/rest/src/door.ts';
   const SCRIPT = 'packages/plugins/demo/scripts/seed.mjs';
+  const CJS = 'packages/plugins/demo/src/legacy.cjs';
+  const EXAMPLE = 'examples/app-demo/src/hook.ts';
   const ALLOW = { [VERB]: { count: 1, reason: 'demo' } };
   const call = "  const ctx = vouchForReference(context, { object: 'o', field: 'f', id });\n";
+  const imp = "import { vouchForReference } from '@objectstack/core';\n";
   const filler = { path: 'packages/core/src/other.ts', text: 'export const x = 1;\n' };
+  const verb = { path: VERB, text: imp + call };
+  const other = (text) => [verb, { path: OTHER, text }];
 
   const cases = [
-    { label: 'an allow-listed file with exactly its pinned call sites → GREEN', files: [{ path: VERB, text: call }], expect: 'green' },
-    { label: 'a call from a file outside the allow-list → RED', files: [{ path: VERB, text: call }, { path: OTHER, text: call }], expect: 'red', names: OTHER },
-    { label: 'an allow-listed file with one more call site than its row → RED', files: [{ path: VERB, text: call + call }], expect: 'red', names: VERB },
-    { label: 'an allow-listed file with one fewer call site than its row → RED', files: [{ path: VERB, text: call }], allow: { [VERB]: { count: 2, reason: 'demo' } }, expect: 'red', names: VERB },
-    { label: 'a row naming a file that no longer sets the mark → RED (stale row)', files: [filler], expect: 'red', names: VERB },
-    { label: 'an import that renames vouchForReference → RED', files: [{ path: VERB, text: call }, { path: OTHER, text: "import { vouchForReference as vouch } from '@objectstack/core';\n" }], expect: 'red', names: OTHER },
-    { label: 'the key built by hand as [VOUCHED_REFERENCES] → RED', files: [{ path: VERB, text: call }, { path: OTHER, text: '  const ctx = { ...context, [VOUCHED_REFERENCES]: [ref] };\n' }], expect: 'red', names: OTHER },
-    { label: "the symbol spelled by hand with Symbol.for → RED", files: [{ path: VERB, text: call }, { path: OTHER, text: "  const k = Symbol.for('objectstack.core.vouchedReferences');\n" }], expect: 'red', names: OTHER },
-    { label: 'a test file that sets the mark → GREEN (outside the census)', files: [{ path: VERB, text: call }, { path: 'packages/rest/src/door.test.ts', text: call + '  ({ [VOUCHED_REFERENCES]: [] });\n' }], expect: 'green' },
-    { label: 'a comment or backtick mention is no call site → GREEN', files: [{ path: VERB, text: call }, { path: OTHER, text: '// vouchForReference(context, ref) is the verb\'s\n * see vouchForReference( here\nconst s = `vouchForReference(x)`;\n' }], expect: 'green' },
-    { label: 'the defining module’s own spellings → GREEN', files: [{ path: VERB, text: call }, { path: DEFINING_MODULE, text: "export const VOUCHED_REFERENCES = Symbol.for('objectstack.core.vouchedReferences');\nexport function vouchForReference(context, reference) {\n  return { ...context, [VOUCHED_REFERENCES]: [] };\n}\n" }], expect: 'green' },
+    { label: 'an allow-listed file with exactly its pinned call sites → GREEN', files: [verb], expect: 'green' },
+    { label: 'a call from a file outside the allow-list → RED', files: other(call), expect: 'red', names: OTHER },
+    { label: 'an allow-listed file with one more call site than its row → RED', files: [{ path: VERB, text: imp + call + call }], expect: 'red', names: VERB },
+    { label: 'an allow-listed file with one fewer call site than its row → RED', files: [verb], allow: { [VERB]: { count: 2, reason: 'demo' } }, expect: 'red', names: VERB },
+    { label: 'a row naming a file that no longer sets the mark → RED (stale row), naming both remedies', files: [filler], expect: 'red', names: 'restore the call it pins' },
+    { label: 'an import that renames vouchForReference → RED', files: other("import { vouchForReference as vouch } from '@objectstack/core';\n"), expect: 'red', names: OTHER },
+    { label: 'the key built by hand as [VOUCHED_REFERENCES] → RED', files: other('  const ctx = { ...context, [VOUCHED_REFERENCES]: [ref] };\n'), expect: 'red', names: OTHER },
+    { label: 'the symbol spelled by hand with Symbol.for → RED', files: other("  const k = Symbol.for('objectstack.core.vouchedReferences');\n"), expect: 'red', names: OTHER },
+    { label: 'a test file that sets the mark → GREEN (outside the census)', files: [verb, { path: 'packages/rest/src/door.test.ts', text: call + '  ({ [VOUCHED_REFERENCES]: [] });\n' }], expect: 'green' },
+    { label: 'a comment mention, line or block, is no call site → GREEN', files: other("// vouchForReference(context, ref) is the verb's\n/*\n  vouchForReference(x) with no leading star\n  VOUCHED_REFERENCES too\n*/\nexport const y = 2;\n"), expect: 'green' },
+    { label: 'the defining module’s own spellings → GREEN', files: [verb, { path: DEFINING_MODULE, text: "export const VOUCHED_REFERENCES = Symbol.for('objectstack.core.vouchedReferences');\nexport function vouchForReference(context, reference) {\n  return { ...context, [VOUCHED_REFERENCES]: [] };\n}\n" }], expect: 'green' },
     { label: 'an empty scan → RED, never a green skip', files: [], expect: 'red', names: 'no source files' },
-    { label: 'a call from a .mjs file on the full surface → RED', files: [{ path: VERB, text: call }, { path: SCRIPT, text: call }], expect: 'red', names: SCRIPT },
-    { label: 'the same .mjs call under --ts-only → GREEN (the bare run judges it)', tsOnly: true, files: [{ path: VERB, text: call }, { path: SCRIPT, text: call }], expect: 'green' },
-    { label: 'a row for a non-.ts file under --ts-only → not judged stale', tsOnly: true, files: [{ path: VERB, text: call }], allow: { ...ALLOW, [SCRIPT]: { count: 1, reason: 'demo' } }, expect: 'green' },
+    { label: 'a call from a .mjs file on the full surface → RED', files: [verb, { path: SCRIPT, text: call }], expect: 'red', names: SCRIPT },
+    { label: 'the same .mjs call under --ts-only → GREEN (the bare run judges it)', tsOnly: true, files: [verb, { path: SCRIPT, text: call }], expect: 'green' },
+    { label: 'a row for a non-.ts file under --ts-only → not judged stale', tsOnly: true, files: [verb], allow: { ...ALLOW, [SCRIPT]: { count: 1, reason: 'demo' } }, expect: 'green' },
+    { label: 'the key renamed on import, then used as [MARK] → RED', files: other("import { VOUCHED_REFERENCES as MARK } from '@objectstack/core';\nconst ctx = { ...context, [MARK]: [ref] };\n"), expect: 'red', names: `${OTHER}:1` },
+    { label: 'the key through a namespace, [ns.VOUCHED_REFERENCES] → RED', files: other("import * as ns from '@objectstack/core';\nconst ctx = { ...context, [ns.VOUCHED_REFERENCES]: [ref] };\n"), expect: 'red', names: `${OTHER}:2` },
+    { label: 'the key set with Object.defineProperty → RED', files: other("import { VOUCHED_REFERENCES } from '@objectstack/core';\nObject.defineProperty(ctx, VOUCHED_REFERENCES, { value: [ref] });\n"), expect: 'red', names: `${OTHER}:2` },
+    { label: 'the key set with Reflect.set → RED', files: other("import { VOUCHED_REFERENCES } from '@objectstack/core';\nReflect.set(ctx, VOUCHED_REFERENCES, [ref]);\n"), expect: 'red', names: `${OTHER}:2` },
+    { label: 'Symbol.for fed a const holding the description → RED', files: other("const D = 'objectstack.core.vouchedReferences';\nconst k = Symbol.for(D);\n"), expect: 'red', names: `${OTHER}:1` },
+    { label: 'Symbol.for fed an imported or computed constant → RED', files: other("import { PREFIX } from './keys.js';\nconst k = Symbol.for(PREFIX + 'vouched' + 'References');\nconst j = Symbol.for(PREFIX);\n"), expect: 'red', names: `${OTHER}:3` },
+    { label: 'Symbol.for fed a substituted template → RED', files: other("const k = Symbol.for(`objectstack.core.${'vouched'}References`);\n"), expect: 'red', names: `${OTHER}:1` },
+    { label: 'Symbol.for fed a same-file const bound to another plain literal → GREEN', files: other("const OTHER_KEY = '@objectstack/demo:other';\nexport const OTHER_MARK = Symbol.for(OTHER_KEY);\nexport const T = Symbol.for(`plain.template`);\n"), expect: 'green' },
+    { label: 'Symbol.for written inside a string of generated source → GREEN', files: other("const lines = [`const k = Symbol.for(${JSON.stringify(key)});`];\n"), expect: 'green' },
+    { label: 'a value alias of vouchForReference → RED', files: other(imp + 'const v = vouchForReference;\nv(context, ref);\n'), expect: 'red', names: `${OTHER}:2` },
+    { label: 'vouchForReference.call → RED', files: other(imp + 'vouchForReference.call(null, context, ref);\n'), expect: 'red', names: `${OTHER}:2` },
+    { label: 'vouchForReference.apply → RED', files: other(imp + 'vouchForReference.apply(null, [context, ref]);\n'), expect: 'red', names: `${OTHER}:2` },
+    { label: 'a require destructuring rename → RED', files: [verb, { path: CJS, text: "const { vouchForReference: v } = require('@objectstack/core');\nv(context, ref);\n" }], expect: 'red', names: `${CJS}:1` },
+    { label: "string-keyed access, core['vouchForReference'](…) → RED", files: other("import * as core from '@objectstack/core';\ncore['vouchForReference'](context, ref);\n"), expect: 'red', names: `${OTHER}:2` },
+    { label: 'a namespace call, core.vouchForReference(…) → RED', files: other("import * as core from '@objectstack/core';\ncore.vouchForReference(context, ref);\n"), expect: 'red', names: `${OTHER}:2` },
+    { label: 'a template-literal mention → RED (a string mention is no exemption)', files: other('const s = `vouchForReference(x)`;\n'), expect: 'red', names: `${OTHER}:1` },
+    { label: 'a // inside a string before a call on the same line does not hide the call → RED', files: other("const u = 'https://example.test/a'; const c = vouchForReference(context, ref);\n"), expect: 'red', names: 'not in ALLOWED_CALLERS' },
+    { label: 'a /* … */ span before code on the same line does not hide the call → RED', files: other('/* the verb */ const c = vouchForReference(context, ref);\n'), expect: 'red', names: 'not in ALLOWED_CALLERS' },
+    { label: 'unrenamed import and re-export specifiers, and a call with a type argument → GREEN', files: [{ path: VERB, text: "import {\n  type VouchedReference,\n  vouchForReference,\n} from '@objectstack/core';\nconst ctx = vouchForReference<Ctx>(context, ref);\n" }, { path: 'packages/core/src/security/index.ts', text: "export {\n  VOUCHED_REFERENCES,\n  vouchForReference,\n} from './vouched-reference.js';\n" }], expect: 'green' },
+    { label: 'a call under examples/ on the full surface → RED', files: [verb, { path: EXAMPLE, text: imp + call }], expect: 'red', names: EXAMPLE },
+    { label: 'the same examples/ call under --ts-only → GREEN (outside its radius)', tsOnly: true, files: [verb, { path: EXAMPLE, text: imp + call }], expect: 'green' },
+    { label: 'a rename on re-export → RED', files: other("export { vouchForReference as vouch } from '@objectstack/core';\n"), expect: 'red', names: `${OTHER}:1` },
   ];
 
   const batterySeen = new Map();
@@ -325,7 +479,8 @@ function main() {
     process.exit(1);
   }
   const listed = [...counts].map(([path, n]) => `${path} (${n})`).join(', ');
-  console.log(`✓ check-vouch-for-reference-callers: every call site that sets the vouched-reference mark is allow-listed (${tsOnly ? 'the .ts surface' : 'every source extension'}) — ${listed}.`);
+  const surface = tsOnly ? 'the .ts surface' : `${SCAN_ROOTS.join('/, ')}/, every source extension`;
+  console.log(`✓ check-vouch-for-reference-callers: every call site that sets the vouched-reference mark is allow-listed (${surface}) — ${listed}.`);
 }
 
 if (isEntrypoint(import.meta.url)) {

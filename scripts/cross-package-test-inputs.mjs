@@ -358,8 +358,9 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
     //
     // src/security/vouched-reference-callers.pin.test.ts runs the census gate
     // of the vouched-reference mark, a root script, with `--ts-only`: the same
-    // `.ts` surface as this glob. The census's other extensions are judged by
-    // its bare run in the lint step, never by this pin.
+    // `packages/` `.ts` surface as this glob. The census's other extensions,
+    // and its `examples/` and `apps/` roots, are judged by its bare run in the
+    // lint step, never by this pin.
     globs: ['packages/**/*.ts', 'scripts/check-vouch-for-reference-callers.mjs'],
   },
   '@objectstack/types': {

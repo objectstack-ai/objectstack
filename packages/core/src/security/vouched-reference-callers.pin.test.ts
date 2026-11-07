@@ -9,10 +9,11 @@
  * its exact call-site count. The gate's header is the authority on the rule.
  *
  * The scan here is `--ts-only`: the files this pin judges are the files whose
- * edits re-run it, the `.ts` glob of this package's entry in
- * scripts/cross-package-test-inputs.mjs. The other source extensions are
- * judged by the bare run in the lint step, on every PR; the gate's header,
- * "Two surfaces", says why the pin does not judge them.
+ * edits re-run it, the `packages/` glob ending in `.ts` of this package's
+ * entry in scripts/cross-package-test-inputs.mjs. `examples/`, `apps/` and the
+ * other source extensions are judged by the bare run in the lint step, on
+ * every PR; the gate's header, "Two surfaces", says why the pin does not
+ * judge them.
  */
 
 import { describe, expect, it } from 'vitest';
