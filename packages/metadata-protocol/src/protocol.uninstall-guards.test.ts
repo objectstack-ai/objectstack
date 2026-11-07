@@ -21,6 +21,9 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
+// Paid at collection, not inside a case's clocked window: the protocol reaches
+// `@objectstack/lint` through a dynamic import (`check:test-source-alias`).
+import '@objectstack/lint';
 import { ObjectStackProtocolImplementation } from './index.js';
 
 const PACKAGE_ID = 'com.example.tasksapp';
