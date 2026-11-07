@@ -23,13 +23,10 @@ const {
   mcpUrlFromBase,
   claudeMcpAddLine,
 } = await import('../src/commands/mcp/connect.js');
-const { printMcpConnectHint } = await import('../src/commands/dev.js');
 
 const CLOUD_PLANE = 'http://cloud.test';
 const CLOUD_TOKEN = 'cloud_tok_30889';
-const { AUTH_BASE_URL_ENV_NAMES } = await import('../src/commands/serve.js');
-// The base-URL chain is cleared too: `os dev`'s banner resolves its origin through it.
-const MANAGED_ENV = ['OS_CLOUD_URL', 'OS_CLOUD_API_KEY', 'OS_TOKEN', 'OS_ENVIRONMENT_ID', ...AUTH_BASE_URL_ENV_NAMES];
+const MANAGED_ENV = ['OS_CLOUD_URL', 'OS_CLOUD_API_KEY', 'OS_TOKEN', 'OS_ENVIRONMENT_ID'] as const;
 
 type Call = { url: string; method: string; auth: string | undefined };
 
@@ -148,20 +145,16 @@ describe('os mcp connect', () => {
     ]);
   });
 
-  it('--url http://localhost:3000: prints the local server, named and spelled as `os dev`\'s banner prints it, with no control plane', async () => {
+  it('--url http://localhost:3000: prints the local server under the name `os dev`\'s banner gives it, with no control plane', async () => {
+    // That the banner's Connect row is this same line is pinned beside the banner's other
+    // pins, in `src/commands/dev-mcp-connect-hint-origin.test.ts`.
     const calls = stubPlane();
 
     const exit = await connect(['--url', 'http://localhost:3000', '--print']);
 
     expect(exit, text()).toBeUndefined();
-    const line = `claude mcp add --transport http ${OBJECTSTACK_MCP_SERVER_NAME} http://localhost:3000/api/v1/mcp`;
-    expect(text()).toContain(`Connect   ${line}`);
+    expect(text()).toContain(`Connect   claude mcp add --transport http ${OBJECTSTACK_MCP_SERVER_NAME} http://localhost:3000/api/v1/mcp`);
     expect(calls).toEqual([]);
-
-    // One spelling: `os dev`'s Connect row for the same origin is this exact line.
-    output = [];
-    printMcpConnectHint({ boundPort: 3000 });
-    expect(text()).toContain(`Connect   ${line}`);
   });
 
   it('several environments and no --env: refuses non-zero, as `os deploy` does, and registers nothing', async () => {
