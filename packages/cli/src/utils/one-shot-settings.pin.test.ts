@@ -45,6 +45,11 @@ import { LocalCryptoProvider, settleKeyFileChannel } from '@objectstack/service-
 import { maskComments } from '../../../../scripts/js-comment-mask.mjs';
 import { oneShotCrypto, refusingCryptoProvider, resolveExistingDataKey, type OneShotCrypto } from './one-shot-settings.js';
 
+// [#31007] Pay the first load of what the one-shot crypto composition reaches through
+// dynamic `import()`s (the host config reader and `serve.ts`) at MODULE LOAD, outside
+// any clocked case.
+import '@objectstack/core';
+
 /** …/packages/cli/src/utils */
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
 /** …/packages/cli/src — the whole CLI source tree, this package's own. */

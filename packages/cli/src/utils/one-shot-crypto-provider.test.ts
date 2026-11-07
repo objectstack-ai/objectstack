@@ -51,6 +51,20 @@ import { CRYPTO_PROVIDER_SERVICE } from '@objectstack/types';
 import { HostCryptoProviderRefusal } from '../commands/serve.js';
 import { oneShotCrypto, type OneShotCrypto } from './one-shot-settings.js';
 
+// [#31007] Pay the first load of what the one-shot crypto composition reaches through
+// dynamic `import()`s (the host config reader and `serve.ts`) at MODULE LOAD, outside
+// any clocked case.
+import '@objectstack/driver-sql';
+import '@objectstack/driver-turso';
+import '@objectstack/metadata';
+import '@objectstack/metadata-protocol';
+import '@objectstack/objectql';
+import '@objectstack/platform-objects/plugin';
+import '@objectstack/plugin-hono-server';
+import '@objectstack/plugin-security';
+import '@objectstack/rest';
+import '@objectstack/service-datasource';
+
 /** The local key, when a case gives the run one. */
 const LOCAL_KEY_HEX = '606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f';
 /** The key behind the registered ("KMS") provider. Never the local one. */

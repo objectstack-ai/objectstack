@@ -40,6 +40,16 @@ import SecretRewrap from './rewrap.js';
 import { bootSchemaStack } from '../../utils/schema-migrate.js';
 import { JOURNAL_MODE_SWITCH_NOTE } from '../../utils/sqlite-occupancy.js';
 
+// [#31007] Pay the first load of what the one-shot crypto composition reaches through
+// dynamic `import()`s (the host config reader and `serve.ts`) at MODULE LOAD, outside
+// any clocked case.
+import '@objectstack/driver-sql';
+import '@objectstack/driver-turso';
+import '@objectstack/plugin-security';
+import '@objectstack/rest';
+import '@objectstack/runtime';
+import '@objectstack/service-datasource';
+
 vi.mock('../../utils/schema-migrate.js', () => ({ bootSchemaStack: vi.fn() }));
 // Constructed and handed to the (mocked) boot, never used.
 vi.mock('@objectstack/platform-objects/plugin', () => ({ PlatformObjectsPlugin: class {} }));

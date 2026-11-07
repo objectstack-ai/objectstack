@@ -38,6 +38,16 @@ import type { SecretReferenceEngineLike } from '../../utils/secret-reference-uni
 import { oneShotSettingsPlugins } from '../../utils/one-shot-settings.js';
 import SecretRewrap from './rewrap.js';
 
+// [#31007] Pay the first load of what the one-shot crypto composition reaches through
+// dynamic `import()`s (the host config reader and `serve.ts`) at MODULE LOAD, outside
+// any clocked case.
+import '@objectstack/driver-sql';
+import '@objectstack/driver-turso';
+import '@objectstack/plugin-security';
+import '@objectstack/rest';
+import '@objectstack/runtime';
+import '@objectstack/service-datasource';
+
 const HERE = dirname(fileURLToPath(import.meta.url));
 const CLI_ROOT = resolve(HERE, '..', '..', '..');
 
