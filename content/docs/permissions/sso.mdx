@@ -288,6 +288,27 @@ caller gets **401 `UNAUTHENTICATED`** and a signed-in non-platform-admin **403
 cannot use these routes to probe which features an environment has enabled.
 </Callout>
 
+### Why an OIDC sign-in was refused
+
+When the identity provider's ID token is not accepted, the callback redirects to
+your `errorCallbackURL` (or `callbackURL`) with `error=invalid_provider`, and
+`error_description` names the cause. The server also writes one `warn` log line
+with the `providerId`, `protocol: 'oidc'` and the same `cause`. Neither carries
+any token content, and the answer does not depend on whether the account exists.
+
+| `error_description` | What to check |
+| :--- | :--- |
+| `id_token_expired` | The token's `exp` is in the past. Check the clocks of this server and the IdP. |
+| `id_token_not_yet_valid` | The token's `nbf` is in the future. Check the clocks of this server and the IdP. |
+| `id_token_audience_mismatch` | The token's `aud` is not this provider's `clientId`. Check the client ID registered here against the IdP application. |
+| `id_token_issuer_mismatch` | The token's `iss` is not this provider's `issuer`. Check the issuer URL, including any trailing path or slash. |
+| `id_token_signing_key_unknown` | No key in the IdP's JWKS matches the token's key ID, usually after the IdP rotated or retired its signing key. Check the `jwksEndpoint`. |
+| `id_token_signature_invalid` | The JWKS key does not verify the token's signature. Check that the `jwksEndpoint` belongs to the same IdP as the `issuer`. |
+| `token_not_verified` | Any other refusal of the ID token. The server log carries the detail. |
+
+The list is exported as `SSO_OIDC_REFUSAL_CAUSES` from `@objectstack/plugin-auth`.
+SAML refusals do not name their cause yet.
+
 ---
 
 ## Enterprise SSO (SAML 2.0)
