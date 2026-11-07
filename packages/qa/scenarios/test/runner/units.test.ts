@@ -53,7 +53,7 @@ const CARD_FILE = resolve(HERE, '../../../../../docs/qa/scenarios/crm_account_wi
 const AREAS_DIR = resolve(HERE, '../../../../../docs/qa/platform-checklist/areas');
 
 function load(file = CARD_FILE): LoadedScenario {
-  const { card, refusals } = loadScenarioFile(file, { areas: readCapabilityAreas(AREAS_DIR) });
+  const { card, refusals } = loadScenarioFile(file, { areas: readCapabilityAreas(AREAS_DIR), library: 'open' });
   if (!card) throw new Error(refusals.map(formatRefusal).join('\n'));
   return card;
 }
@@ -412,7 +412,7 @@ describe('prompts, seed order, template manifest and change size', () => {
         'the runner signs in as). Make that field accept a user id; a rule on it matches that user.',
     );
     // A scope field that names a row (`ticket.assignee` → agent, `customer.id`) or an option (`ticket_comment.visibility`) is not one.
-    const desk = loadScenarioFile(resolve(HERE, '../../../../../docs/qa/scenarios/service_desk.json'), { areas: readCapabilityAreas(AREAS_DIR) }).card!;
+    const desk = loadScenarioFile(resolve(HERE, '../../../../../docs/qa/scenarios/service_desk.json'), { areas: readCapabilityAreas(AREAS_DIR), library: 'open' }).card!;
     expect([...userHandleFields(desk.card)]).toEqual([]);
   });
 
@@ -589,7 +589,7 @@ describe("the seed's load plan — reference cycles found from the card's own lo
   });
 
   it('on every card in the library the first pass never names a row that is not in yet', () => {
-    const { cards, refusals } = loadScenarios(SCENARIOS_DIR, { areas: readCapabilityAreas(AREAS_DIR) });
+    const { cards, refusals } = loadScenarios(SCENARIOS_DIR, { areas: readCapabilityAreas(AREAS_DIR), library: 'open' });
     expect(refusals.map(formatRefusal)).toEqual([]);
     expect(cards.length).toBeGreaterThanOrEqual(9);
     for (const { card: c } of cards) {

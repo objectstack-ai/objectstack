@@ -2902,12 +2902,17 @@ export class SecurityPlugin implements Plugin {
     context?: any,
   ): Promise<Record<string, unknown> | undefined> {
     // [#25223 cut 9] The body moved to `security-plugin-read-filter.ts` (see `ReadFilterHost`).
+    const readDelegatedAdminGate = () => this.delegatedAdminGate;
     const readLogger = () => this.logger;
-    const host: Pick<ReadFilterHost, 'computeControlledByParentFilter' | 'computeDelegatedReadFilter' | 'computeRlsFilter' | 'logger' | 'resolvePermissionSetsForContext' | 'resolveSharingReadFilter'> = {
+    const readPermissionEvaluator = () => this.permissionEvaluator;
+    const host: Pick<ReadFilterHost, 'computeControlledByParentFilter' | 'computeDelegatedReadFilter' | 'computeRlsFilter' | 'delegatedAdminGate' | 'getObjectSecurityMeta' | 'logger' | 'permissionEvaluator' | 'resolvePermissionSetsForContext' | 'resolveSharingReadFilter'> = {
       computeControlledByParentFilter: (...a) => this.computeControlledByParentFilter(...a),
       computeDelegatedReadFilter: (...a) => this.computeDelegatedReadFilter(...a),
       computeRlsFilter: (...a) => this.computeRlsFilter(...a),
+      get delegatedAdminGate() { return readDelegatedAdminGate(); },
+      getObjectSecurityMeta: (...a) => this.getObjectSecurityMeta(...a),
       get logger() { return readLogger(); },
+      get permissionEvaluator() { return readPermissionEvaluator(); },
       resolvePermissionSetsForContext: (...a) => this.resolvePermissionSetsForContext(...a),
       resolveSharingReadFilter: (...a) => this.resolveSharingReadFilter(...a),
     };
@@ -3335,7 +3340,13 @@ export class SecurityPlugin implements Plugin {
    *      CRUD class, checked BEFORE the grant, for the caller AND (D10) the
    *      delegator;
    *   5. the `allowRead` CRUD grant ({@link PermissionEvaluator.checkObjectPermission}
-   *      on `find`);
+   *      on `find`) — or, where no set grants it, the one admission the
+   *      middleware makes beside it: [ADR-0090 D12, ruling of record
+   *      6663849489] a delegate reads the business units its admin scopes
+   *      cover (`delegatedUnitReadAdmission`, the middleware's own judgment).
+   *      That read is of SOME units, so `true` here comes with
+   *      {@link getReadFilter} confining it to them, as every row-restricted
+   *      read does;
    *   6. ADR-0090 D10 — the delegator must independently hold the same grant;
    *      a dangling delegator denies.
    *
@@ -3353,10 +3364,12 @@ export class SecurityPlugin implements Plugin {
    */
   canReadObject(object: string, context?: any): Promise<boolean> {
     // [#25223 cut 9] The body moved to `security-plugin-object-admission.ts` (see `ObjectAdmissionHost`).
+    const readDelegatedAdminGate = () => this.delegatedAdminGate;
     const readLogger = () => this.logger;
     const readQl = () => this.ql;
     const readTenancyPosture = () => this.tenancyPosture;
-    const host: Pick<ObjectAdmissionHost, 'logger' | 'objectReadAdmission' | 'ql' | 'resolvePermissionSetsForContext' | 'tenancyPosture'> = {
+    const host: Pick<ObjectAdmissionHost, 'delegatedAdminGate' | 'logger' | 'objectReadAdmission' | 'ql' | 'resolvePermissionSetsForContext' | 'tenancyPosture'> = {
+      get delegatedAdminGate() { return readDelegatedAdminGate(); },
       get logger() { return readLogger(); },
       objectReadAdmission: (...a) => this.objectReadAdmission(...a),
       get ql() { return readQl(); },
@@ -3392,7 +3405,10 @@ export class SecurityPlugin implements Plugin {
    *   - 3. [#3545] An unresolvable posture denies.
    *   - 4. The capabilities the object requires for a read, held by the caller
    *     and (D10) by a delegator who resolved any set.
-   *   - 5. The caller's `find` grant, with the posture's `isPrivate` (ADR-0066 D2).
+   *   - 5. The caller's `find` grant, with the posture's `isPrivate` (ADR-0066 D2),
+   *     or `ungrantedRead` where the asker hands it — the read door's admission
+   *     beside the grant (`canReadObject` hands the ADR-0090 D12 delegated unit
+   *     read; the ADR-0055 master-derived scope hands none).
    *   - 6. [ADR-0090 D10] The delegator's `find` grant, asked over its list
    *     whatever its length, as the middleware asks it: a delegator who resolves
    *     NO set grants nothing, the deny baseline for the second principal too.
@@ -3404,6 +3420,7 @@ export class SecurityPlugin implements Plugin {
     objectName: string,
     permissionSets: PermissionSet[],
     delegatorSets: PermissionSet[] | null,
+    ungrantedRead?: () => Promise<boolean>,
   ): Promise<boolean> {
     // [#25223 cut 9] The body moved to `security-plugin-object-admission.ts` (see `ObjectAdmissionHost`).
     const readPermissionEvaluator = () => this.permissionEvaluator;
@@ -3411,7 +3428,7 @@ export class SecurityPlugin implements Plugin {
       getObjectSecurityMeta: (...a) => this.getObjectSecurityMeta(...a),
       get permissionEvaluator() { return readPermissionEvaluator(); },
     };
-    return objectReadAdmission.call(host, objectName, permissionSets, delegatorSets);
+    return objectReadAdmission.call(host, objectName, permissionSets, delegatorSets, ungrantedRead);
   }
 
   /**

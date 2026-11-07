@@ -425,9 +425,9 @@ export const AppCodeSchema = z
  *
  * A card-level key, outside `expect`: the scorer never reads it. The loader
  * holds a {@link GALLERY_TIERS} card to its floor (`GALLERY_FLOOR` in
- * `loader.ts`); a `control` card has no floor. The gallery exporter's filter
- * on this key is a change of its own: until it lands the exporter reads no
- * tier, and it exports no card at all (`src/export/generic.ts`).
+ * `loader.ts`); a `control` card has no floor. The gallery exporter exports a
+ * {@link GALLERY_TIERS} card only, and only a `generic` one
+ * ({@link SCENARIO_ORIGINS}; `src/export/generic.ts`).
  */
 export const SCENARIO_TIERS = ['control', 'starter', 'delivery'] as const;
 export type ScenarioTier = (typeof SCENARIO_TIERS)[number];
@@ -445,6 +445,54 @@ export const GALLERY_TIERS = ['starter', 'delivery'] as const satisfies readonly
 export function isGalleryTier(tier: ScenarioTier): tier is (typeof GALLERY_TIERS)[number] {
   return (GALLERY_TIERS as readonly ScenarioTier[]).includes(tier);
 }
+
+// ── The origin: where a card comes from ─────────────────────────────────────
+
+/**
+ * Where a card COMES FROM — a closed set, and every card names one:
+ *
+ *   generic           written from the domain alone, by anyone; the only
+ *                     origin the open library (`docs/qa/scenarios/`) holds and
+ *                     the only one the gallery exporter exports;
+ *   customer-derived  derived from a customer's app, data or wording: lives in
+ *                     the private overlay, never exported;
+ *   held-out          withheld from the open set, so a score on it is not one
+ *                     anything was tuned against: lives in the private
+ *                     overlay, never exported.
+ *
+ * The explicit marker the exporter reads. Neither `provenance` (free prose)
+ * nor the card's directory is one: the loader reads whatever directory it is
+ * handed. What the loader does know is which library its caller says it is
+ * loading (`LoadOptions.library` in `loader.ts`), and it refuses a `generic`
+ * card in the private overlay and any other card in the open library.
+ */
+export const SCENARIO_ORIGINS = ['generic', 'customer-derived', 'held-out'] as const;
+export type ScenarioOrigin = (typeof SCENARIO_ORIGINS)[number];
+
+export const ScenarioOriginSchema = z.enum(SCENARIO_ORIGINS, {
+  error: (issue) =>
+    issue.input === undefined
+      ? 'a card names its `origin`: `generic` (written from the domain alone), `customer-derived` or `held-out` (both private, never exported)'
+      : undefined,
+});
+
+// ── The title ───────────────────────────────────────────────────────────────
+
+const titleText = z.string().regex(/\S/, 'must not be blank');
+
+/**
+ * The card's title in both languages, each non-empty: the gallery lists every
+ * app with a Chinese and an English title. A reader picks one explicitly
+ * (`title.en`, `title.zh`); the object is never printed whole.
+ */
+export const CardTitleSchema = z.strictObject(
+  { zh: titleText, en: titleText },
+  {
+    error: (issue) =>
+      issue.code === 'invalid_type' ? 'a card names its `title` as `{ zh, en }`, both non-empty' : undefined,
+  },
+);
+export type CardTitle = z.infer<typeof CardTitleSchema>;
 
 /** What every scenario app's namespace starts with. */
 export const SCENARIO_NAMESPACE_PREFIX = 'demo';
@@ -479,8 +527,11 @@ export const ScenarioCardSchema = z.strictObject({
   code: AppCodeSchema,
   /** What the card is for: {@link SCENARIO_TIERS}. */
   tier: ScenarioTierSchema,
-  title: z.string().min(1),
-  /** Where the scenario comes from — the open set holds generic scenarios only. */
+  /** Where the card comes from: {@link SCENARIO_ORIGINS}. */
+  origin: ScenarioOriginSchema,
+  /** {@link CardTitleSchema}: `{ zh, en }`. */
+  title: CardTitleSchema,
+  /** Where the scenario comes from, in prose — read by people; {@link SCENARIO_ORIGINS} is the marker code reads. */
   provenance: z.string().min(1),
   prompt: PromptSchema,
   expect: ExpectSchema,

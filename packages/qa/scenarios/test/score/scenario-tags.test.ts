@@ -661,7 +661,7 @@ describe('the library — every tag a mid-tier card declares that this table now
     'ai.agent-actions',
   ];
   const MID_TIER = ['asset_lifecycle', 'leave_balances', 'order_to_cash', 'requisition_to_receipt', 'service_desk', 'travel_expense'];
-  const { cards, refusals } = loadScenarios(SCENARIOS_DIR, { areas: readCapabilityAreas(AREAS_DIR) });
+  const { cards, refusals } = loadScenarios(SCENARIOS_DIR, { areas: readCapabilityAreas(AREAS_DIR), library: 'open' });
 
   it('loads the library, the six mid-tier cards among it', () => {
     expect(refusals.map(formatRefusal)).toEqual([]);

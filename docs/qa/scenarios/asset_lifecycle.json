@@ -3,7 +3,8 @@
   "id": "asset_lifecycle",
   "code": "asset",
   "tier": "starter",
-  "title": "Asset lifecycle: register, checkout and return, repairs, monthly depreciation and a scrap approval",
+  "origin": "generic",
+  "title": { "zh": "固定资产全生命周期:资产登记、领用与归还、维修、按月折旧和报废审批", "en": "Asset lifecycle: register, checkout and return, repairs, monthly depreciation and a scrap approval" },
   "provenance": "Mid-tier scenario 资产全生命周期 (asset lifecycle) of the open library, written for this card from the domain alone: generic names, equipment and amounts, no customer-derived content. The seed follows the arithmetic rule in `$comment`, so each truth can be worked out by hand.",
   "prompt": {
     "short": {
