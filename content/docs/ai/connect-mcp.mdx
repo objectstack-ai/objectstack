@@ -364,7 +364,11 @@ drive this MCP server. Same word, different layer.
   the Console. Schema discovery is included: `describe_object`,
   `list_objects`' `fieldCount` and the fields `validate_expression` puts in
   scope name only the fields the caller can read, the same field set
-  `GET /api/v1/meta/object/:name` serves that caller. Sparse results or denied
+  `GET /api/v1/meta/object/:name` serves that caller. `list_actions` follows
+  the same projection: an action that object door withholds from the caller
+  (one whose param binds a field the caller cannot read) is not listed, and a
+  listed action's params carry no label, help text or options of such a
+  field. Sparse results or denied
   writes usually mean governance is *working*, not that the connection is
   broken.
 - **OAuth scopes narrow the toolset.** Tokens carry `data:read`,
@@ -489,7 +493,7 @@ skill and a guided `/objectstack:connect` command.
 | stdio won't start / boot fails closed | `OS_MCP_STDIO_ENABLED=true` but `OS_MCP_STDIO_API_KEY` is missing, unknown, revoked, or expired — fail-closed by design (ADR-0101). Set a valid `osk_` key; there is no unscoped or `system` fallback |
 | `401` on every call | Anonymous or invalid credentials. Interactive clients: complete the browser login (the `WWW-Authenticate` header advertises the OAuth metadata). Headless: check the `osk_` key and header spelling |
 | `403 insufficient_scope` | The OAuth token lacks the scope for that tool family (e.g. writes without `data:write`) — reconnect and grant the scope |
-| An action is missing from `list_actions` | `ai.exposed` is not `true`, `ai.description` is shorter than 40 characters, the type isn't headless-callable here (`script` with a body/handler, `flow` with an automation service, and `api` with a same-origin `target` are — `url`, `modal`, `form`, and an `api` action whose `target` is on another origin never appear), it targets `sys_metadata` / `sys_metadata_history` (refused even when flagged — use the metadata API), or the caller fails its `requiredPermissions` |
+| An action is missing from `list_actions` | `ai.exposed` is not `true`, `ai.description` is shorter than 40 characters, the type isn't headless-callable here (`script` with a body/handler, `flow` with an automation service, and `api` with a same-origin `target` are — `url`, `modal`, `form`, and an `api` action whose `target` is on another origin never appear), it targets `sys_metadata` / `sys_metadata_history` (refused even when flagged — use the metadata API), or the caller fails its `requiredPermissions`, or one of its params binds a field the caller cannot read |
 | Reads return few rows / writes denied | Working as designed — the caller's permissions and RLS apply. Verify with the same user in the Console |
 
 ## Related
