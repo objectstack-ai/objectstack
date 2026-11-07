@@ -527,8 +527,8 @@ describe('a refused grant holder the caller cannot read is answered as a holder 
   it('CONTROL: the caller reads its own sys_user row and never the holder, which exists in two of the stores', async () => {
     for (const store of STORES) {
       const h = await bootWith(store);
-      const seen = await h.engine.find('sys_user', { where: { id: { $in: ['u_admin_a', HOLDER] } }, context: OWN_ROW_ADMIN_A } as any);
-      expect((seen as any[]).map((r) => r.id), store).toEqual(['u_admin_a']);
+      const seen = await h.engine.find('sys_user', { where: { id: { $in: ['u_admin_a', HOLDER] } }, context: OWN_ROW_ADMIN_A });
+      expect(seen.map((r) => r.id), store).toEqual(['u_admin_a']);
       expect(await rowsOf(h, 'sys_user', { id: HOLDER }), store).toHaveLength(store === 'no such user' ? 0 : 1);
       expect(await rowsOf(h, 'sys_member', { user_id: HOLDER }), store).toHaveLength(store === 'no such user' ? 0 : 1);
     }
