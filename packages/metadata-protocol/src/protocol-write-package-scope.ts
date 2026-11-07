@@ -43,8 +43,8 @@ interface MemberRegistry {
 
 /**
  * [ADR-0146 D3, ruling record 6691022506] The write closure of an App's pair:
- * `closure` — the pair and what it declares, the App — widened by every
- * installed package whose pair it is (`pairOf`, `@objectstack/metadata-core`)
+ * `closure` — the pair and what it declares, the App — widened, when it
+ * declares its App, by every other installed package whose pair it is (`pairOf`, `@objectstack/metadata-core`)
  * and their own declared closures. A customization of any package of the App
  * lands in the App's pair, and the pair declares only the App (its range is
  * the App's), so the members it overrides and extends are reached through the
@@ -57,14 +57,18 @@ export function widenPairClosureToAppMembers(
     registry: MemberRegistry | undefined,
 ): { packageId: string; dependencies: string[] } {
     const pairId = closure.packageId;
-    if (customizationBasePackageId(pairId) === null) return closure;
+    const appId = customizationBasePackageId(pairId);
+    // Members are reached THROUGH the App: a pair that does not declare its
+    // App (an installed copy that dropped the dependency) is widened by
+    // nothing, and the App itself is only ever in the closure by declaration.
+    if (appId === null || !closure.dependencies.includes(appId)) return closure;
     if (!registry || typeof registry.getPackage !== 'function' || typeof registry.getAllPackages !== 'function') return closure;
     const installed = installedManifestsOf(registry as { getPackage(id: string): { manifest?: unknown } | undefined });
     const getPackage = (id: string) => registry.getPackage!.call(registry, id);
     const dependencies = new Set(closure.dependencies);
     for (const row of registry.getAllPackages.call(registry)) {
         const id = (row?.manifest as { id?: unknown } | undefined)?.id;
-        if (typeof id !== 'string' || id === pairId || dependencies.has(id)) continue;
+        if (typeof id !== 'string' || id === pairId || id === appId || dependencies.has(id)) continue;
         const pair = pairOf(id, installed);
         if (!pair.ok || pair.value !== pairId) continue;
         dependencies.add(id);
