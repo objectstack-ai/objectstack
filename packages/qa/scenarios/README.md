@@ -16,8 +16,9 @@ for (const r of refusals) console.error(formatRefusal(r)); // FILE: FIELD.PATH: 
 - `src/schema.ts` — the card shape, one strict zod object per layer.
 - `src/truth.ts` — evaluates a declarative truth spec over seed rows; refuses a truth the
   seed does not determine.
-- `src/loader.ts` — reads a directory of cards, validates shape and cross-references, and
-  returns typed cards or located refusals.
+- `src/loader.ts` — reads a directory of cards, validates shape and cross-references, holds
+  a `starter` or `delivery` card to the gallery floor (`GALLERY_FLOOR`; the tiers are in the
+  format's README), and returns typed cards or located refusals.
 - `src/score/` — the deterministic scorer, entries `@objectstack/scenarios/score` and
   `@objectstack/scenarios/score/full` (below).
 
@@ -75,11 +76,18 @@ discrimination test; ⛔ never match by area prefix.
 | `records-forms.master-detail-inline-edit` | has every master-detail field resolving, and one of them edited inline on its master (`inlineEdit`) |
 | `records-forms.roll-up-summary` | carries a roll-up summary, each reading a child object that relates back and, unless it counts, a child field that exists |
 | `records-forms.select-options` | carries a single-choice option field (`select`, `radio`), each offering at least two options |
+| `records-forms.formula-field` | carries a computed field (a `formula` field, or a stored field with an `expression`), each expression compiling at `record` scope against its object's columns |
+| `records-forms.validation-rule` | carries an active, refusing (`severity: 'error'`) validation rule on an object the card names, every rule's predicates (nested ones included) compiling against its object |
 | `access-security.field-permissions` | denies (`readable: false`, in a permission set) every field a card persona hides, and has that field |
 | `access-security.row-scope` | keeps every object a persona's `scope` names private (owner-scoped) or derived from its master, or narrows it for each such persona by a read policy (`rowLevelSecurity`, `select` or `all`, no `positions`, a `using` that is not `true`) on that persona's permission set |
+| `access-security.row-level-security` | keeps every object a persona's `scope` names to that persona by a route that enforces: private, a detail whose master is itself kept so, or a narrowing read policy on its permission set; and every read policy that applies there lowers to a query filter |
 | `approvals.approval-flow` | carries an approval (a flow with an Approval node), each bound to an object it serves, one bound to an object the card names |
+| `approvals.multi-step-approval` | carries an approval flow, bound to an object the card names, in which a second Approval node follows the first on its `approve` branch |
+| `approvals.dynamic-approver-routing` | routes an Approval node of a flow bound to an object the card names to an approver read off the record (`field`, `manager`, `expression`), each one able to name someone: a field holding a user, an expression over `current` / `trigger` / `vars` |
 | `automation.record-triggered-flow` | carries a record-triggered flow, each bound to an object it serves, one bound to an object the card names |
 | `dashboards.widget-measures` | carries a dashboard widget with a measure, and every widget measure resolves on the dataset it binds |
+| `dashboards.report` | carries a report whose dataset binds an object the card names, every report selecting only measures and dimensions its datasets declare |
+| `ai.agent-actions` | carries every action in `run.agentActions` on its object, AI-exposed and confirm-gated where the card says `confirm` (the agent-action checks) |
 
 ## Running the cards — `@objectstack/scenarios/runner`
 
@@ -88,6 +96,7 @@ pnpm --filter @objectstack/scenarios run-scenarios                       # every
 pnpm --filter @objectstack/scenarios run-scenarios --only service_desk --modes scratch
 pnpm --filter @objectstack/scenarios run-scenarios --record /tmp/rec.json  # also save every turn
 pnpm --filter @objectstack/scenarios run-scenarios --driver recorded:/tmp/rec.json  # replay, no model
+pnpm --filter @objectstack/scenarios run-scenarios --author-timeout 90       # minutes per authoring turn (default 60)
 ```
 
 Per card and mode the runner writes `docs/qa/platform-checklist/runs/<date>-scenario-<card>.json`
@@ -98,9 +107,24 @@ Per card and mode the runner writes `docs/qa/platform-checklist/runs/<date>-scen
 | `scratch` | `create-objectstack` → the agent builds from the card prompt and the runner's data contract (`prompts.ts`) → `objectstack validate` / `build` / `verify` (proofs chosen from the tags) → score → `objectstack dev --fresh` → seed, one user + permission-set grant + API key per persona → every question as every persona it names and every operation as its persona, over the app's MCP → the iterate change → rebuild, re-score, re-run |
 | `template` | a blank host project (`host<code>`) → boot → install the card's verified build **unmanaged** (`/api/v1/marketplace/install-local`, `installMode: 'unmanaged'`) → the agent applies the iterate change to the installed copy → score → seed → Run. A refused install is a finding in the record |
 
-- **Driver** (`driver.ts`): the local `claude` CLI on your own login (`claude -p --output-format stream-json`). It
-  refuses to start when `ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN` is set or the CLI is logged in with an API key
-  (the cost ruling on cloud#3600), and the record states the driver and login. `RecordedDriver` replays a recording.
+- **Driver** (`driver.ts`): the local `claude` CLI on your own login (`claude -p --output-format stream-json`, the
+  prompt written to its stdin: a build prompt carries the whole seed, and one argv string over 128 KiB makes `spawn`
+  fail with `E2BIG` on Linux). It refuses to start when `ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN` is set or the CLI
+  is logged in with an API key (the cost ruling on cloud#3600), and the record states the driver, the login and the
+  authoring timeout. Every turn records its process: elapsed time, and for a turn that did not finish its exit code or
+  signal, whether the runner's timeout killed it, and the end of its stderr. `RecordedDriver` replays a recording.
+- **A build that did not finish is not measured** (`orchestrate.ts`): an authoring turn the timeout killed
+  (`--author-timeout`, build and iterate alike) leaves its Build half **not measured: author timed out after N min**;
+  one that ended with no result line or an error result (`error_max_turns`, `is_error`), or never ran, leaves it **not
+  measured: author turn failed: …**. Never a degraded score, and nothing runs on it: no score, seed, Run or iterate. The
+  scorecard's author rows show every authoring turn's `resultSubtype` and elapsed time.
+- **Seed** (`seed.ts`): rows go in as the admin, a lookup's target before its referrer. Where the card's declared
+  lookups lead back to where they start — `department.manager → employee` with `employee.department → department`, or a
+  self-lookup naming a later row — the seed loads in two passes: every row first with each lookup naming a row not in
+  yet left out, then one update per row sets those (`seed.secondPass` in the record). The side that waits is one the
+  build left optional; a build that makes every side of a cycle `required` cannot be seeded, which the data contract
+  states and the scorecard reports as a Build finding naming the cycle (the seed is still sent, so the record holds
+  the app's own refusals).
 - **Observation** (`observe.ts`): the write grader is fed what the runner reads itself: the agent's write calls and
   the door's answer (a coded refusal), the object's rows before and after the turn, and the audit trail's actor. A turn
   that wrote nothing because the object refused the read it needed first (a persona that may not read it) grades as

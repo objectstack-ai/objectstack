@@ -18,6 +18,10 @@
  *                      set reads `PERMISSION_DENIED` on every app object
  *   a seed row         POST /api/v1/data/:object with the card's own `id` (accepted
  *                      verbatim, so a lookup value in the seed names the real row)
+ *   a waiting lookup   PATCH /api/v1/data/:object/:id with the bare field patch (the
+ *                      seed's second pass, `seedApp` in `orchestrate.ts`; read from the
+ *                      route's source, `packages/rest/src/crud-routes.ts`, not yet
+ *                      measured live)
  *   rows               GET  /api/v1/data/:object?limit=…
  *   the audit actor    GET  /api/v1/data/sys_audit_log?record_id=… (`user_id`)
  *   unmanaged install  POST /api/v1/marketplace/install-local { packageId, manifest,
@@ -119,6 +123,8 @@ export interface AppHarness {
   /** An API key for the admin, for the questions no persona is named on. */
   adminApiKey(): Promise<string>;
   insertRow(object: string, row: Record<string, unknown>): Promise<HttpAnswer>;
+  /** Set fields on a row already in (the seed's second pass: the lookups that close a reference cycle). */
+  updateRow(object: string, id: string, patch: Record<string, unknown>): Promise<HttpAnswer>;
   listRows(object: string): Promise<HttpAnswer & { rows: Array<Record<string, unknown>> }>;
   /** The `user_id` the newest audit row for this record names; `null` when none names one. */
   auditActorUserId(object: string, recordId: string): Promise<string | null>;
@@ -260,6 +266,10 @@ export class HttpApp implements AppHarness {
 
   insertRow(object: string, row: Record<string, unknown>): Promise<HttpAnswer> {
     return this.call('POST', `/api/v1/data/${encodeURIComponent(object)}`, row, { session: this.admin });
+  }
+
+  updateRow(object: string, id: string, patch: Record<string, unknown>): Promise<HttpAnswer> {
+    return this.call('PATCH', `/api/v1/data/${encodeURIComponent(object)}/${encodeURIComponent(id)}`, patch, { session: this.admin });
   }
 
   async listRows(object: string): Promise<HttpAnswer & { rows: Array<Record<string, unknown>> }> {

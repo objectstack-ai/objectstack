@@ -411,6 +411,35 @@ type ConditionalProgressWrite = (
 const CONDITIONAL_PROGRESS_WRITES = new WeakMap<object, ConditionalProgressWrite>();
 
 /**
+ * [#30892] What a conditional `sys_file` write compares: the row's `status`
+ * and its `name`, exactly as last read. See {@link updateFileIfUnchanged}.
+ *
+ * Two short columns, never the `metadata` text: the engine reads a string
+ * filter value shaped `{…}` as a filter placeholder (`{current_user_id}`), so
+ * a JSON `metadata` value cannot be compared in a `where` at all.
+ */
+export interface FileWriteGuard {
+  status: FileRecord['status'];
+  name: string;
+}
+
+/** A store's conditional file write — see {@link updateFileIfUnchanged}. */
+type ConditionalFileWrite = (
+  id: string,
+  seen: FileWriteGuard,
+  patch: Partial<FileRecord>,
+  context?: StorageWriteContext,
+) => Promise<boolean>;
+
+/**
+ * [#30892] Each store's conditional file write, keyed by store — the
+ * {@link CONDITIONAL_PROGRESS_WRITES} pattern, for the same reason: the
+ * upload-link door reaches it through {@link updateFileIfUnchanged} without
+ * the class's public face growing a method.
+ */
+const CONDITIONAL_FILE_WRITES = new WeakMap<object, ConditionalFileWrite>();
+
+/**
  * [#22332] The progress columns `seen` held, as the guard a conditional write
  * compares against. A column the row did not carry is `null` in the guard —
  * never `undefined`, which a `where` would drop, silently removing that term
@@ -457,6 +486,9 @@ export class StorageMetadataStore {
     if (engine) ENGINE_BACKED_STORES.add(this);
     CONDITIONAL_PROGRESS_WRITES.set(this, (id, seen, progress, context) =>
       this.updateSessionProgressIfUnchanged(id, seen, progress, context),
+    );
+    CONDITIONAL_FILE_WRITES.set(this, (id, seen, patch, context) =>
+      this.updateFileIfUnchanged(id, seen, patch, context),
     );
   }
 
@@ -574,6 +606,46 @@ export class StorageMetadataStore {
       }),
     );
     return merged;
+  }
+
+  /**
+   * [#30892] Update one `sys_file` row only while it still holds `seen` — one
+   * compare-and-set, answering whether THIS call's write landed. Scoped like
+   * {@link updateFile}: a row out of the acting organization's reach matches
+   * nothing. On the engine-absent stand-in it is one synchronous
+   * compare-and-set on the Map, which no other call can interleave with.
+   */
+  private async updateFileIfUnchanged(
+    id: string,
+    seen: FileWriteGuard,
+    patch: Partial<FileRecord>,
+    context?: StorageWriteContext,
+  ): Promise<boolean> {
+    if (!this.engine) {
+      // Same reasoning as `updateFile`'s stand-in branch: no reach to enforce.
+      const row = this.files.get(id);
+      if (!row || row.status !== seen.status || row.name !== seen.name) return false;
+      this.files.set(id, { ...row, ...patch, id, updated_at: new Date().toISOString() });
+      return true;
+    }
+    const matched = await this.engineOp('sys_file', 'update', FILE_UPDATE_CONSEQUENCE, async (engine) => {
+      const answer = await engine.update('sys_file', changedColumns<FileRecord>(patch), {
+        where: { id, status: seen.status, name: seen.name },
+        multi: true,
+        ...systemByIdWriteOptionsFor(context),
+      });
+      // A predicate update answers the matched-row count (`IDataEngine.update`);
+      // anything else leaves the write's outcome unknown, so it is not read as
+      // either one.
+      if (typeof answer !== 'number') {
+        throw new Error(
+          `the conditional update answered ${answer === null ? 'null' : `a value of type ${typeof answer}`} where a matched-row count was due, ` +
+            'so whether the write landed is unknown',
+        );
+      }
+      return answer;
+    });
+    return matched > 0;
   }
 
   /**
@@ -861,4 +933,33 @@ export function updateSessionProgressIfUnchanged(
     );
   }
   return write(id, seen, progress, context);
+}
+
+/**
+ * [#30892] Write `patch` onto one `sys_file` row only while the row still
+ * holds `seen` (its `status` and `name`, as last read), and answer whether
+ * this call's write landed. Of two concurrent calls that read the same row,
+ * exactly one lands; the other answers `false` and has written nothing.
+ *
+ * The upload-link door's consumption: the link is spent by the one write that
+ * turns its row from open to used, so a second use of the same link — however
+ * close behind — finds the row changed and is refused.
+ *
+ * ⛔ Not re-exported from the package entry, like
+ * {@link updateSessionProgressIfUnchanged}: it is the door's write, not API.
+ */
+export function updateFileIfUnchanged(
+  store: StorageMetadataStore,
+  id: string,
+  seen: FileWriteGuard,
+  patch: Partial<FileRecord>,
+  context?: StorageWriteContext,
+): Promise<boolean> {
+  const write = CONDITIONAL_FILE_WRITES.get(store);
+  if (!write) {
+    throw new TypeError(
+      'updateFileIfUnchanged: the store was not constructed by StorageMetadataStore, so it has no conditional file write',
+    );
+  }
+  return write(id, seen, patch, context);
 }

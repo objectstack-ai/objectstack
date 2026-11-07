@@ -93,6 +93,8 @@ import {
   metadataPartialListingSentence,
   type DiagnosedObjectListing,
 } from './metadata-completeness.js';
+// [#30892] The file seam and what `read_file` renders from it.
+import { READ_FILE_MAX_BYTES, renderReadFile, type McpFileBridge } from './file-content.js';
 
 export interface McpObjectSummary {
   name: string;
@@ -1295,10 +1297,13 @@ const RECORD_ID_ALIASES = { id: 'recordId', record_id: 'recordId' } as const;
  */
 export function wireBridgeTools(
   server: McpServer,
-  bridge: McpDataBridge & Partial<McpActionBridge> & Partial<McpFederationBridge>,
+  bridge: McpDataBridge & Partial<McpActionBridge> & Partial<McpFederationBridge> & McpFileBridge,
   options: RegisterObjectToolsOptions & RegisterActionToolsOptions = {},
 ): string[] {
   const registered = registerObjectTools(server, bridge, options);
+  // [#30892] `read_file` / `create_upload_link`, each only where the bridge
+  // implements its member.
+  registered.push(...registerFileTools(server, bridge, options));
   if (typeof bridge.listActions === 'function' && typeof bridge.runAction === 'function') {
     registered.push(...registerActionTools(server, bridge as McpActionBridge, options));
   }
@@ -2458,6 +2463,171 @@ export function registerActionTools(
           return textResult(result);
         } catch (err) {
           return errorResultFromThrown(err);
+        }
+      },
+    );
+  }
+
+  return registered;
+}
+
+/**
+ * [#30892] Register the file pair over {@link McpFileBridge}: `read_file`
+ * (with `data:read`) reads a file a record carries, and `create_upload_link`
+ * (with `data:write`) mints a single-use link through which the user uploads
+ * a file onto a record. Each registers only where the bridge implements its
+ * member, so a host that cannot reach a record's files serves neither.
+ *
+ * Neither tool judges access itself. The bridge reads the record as the
+ * caller first (the `get_record` door), so a record the caller cannot read is
+ * refused here with the code `get_record` answers; the storage service then
+ * asks the download door's own verdict for the file, and the attach rule's
+ * for a link. `sys_*` objects are refused as every object tool refuses them.
+ */
+export function registerFileTools(
+  server: McpServer,
+  bridge: McpFileBridge,
+  options: RegisterObjectToolsOptions = {},
+): string[] {
+  const registered: string[] = [];
+  const note = (name: string): string => {
+    registered.push(name);
+    return name;
+  };
+  const allowSystem = options.allowSystemObjects === true;
+  const scopes = options.grantedScopes;
+  const canRead = !scopes || scopes.includes(MCP_OAUTH_SCOPE_DATA_READ);
+  const canWrite = !scopes || scopes.includes(MCP_OAUTH_SCOPE_DATA_WRITE);
+  const guard = (objectName: string): string | undefined => {
+    if (!objectName || typeof objectName !== 'string') return 'objectName is required';
+    if (!allowSystem && isSystemObject(objectName)) {
+      return `Object "${objectName}" is a system object and is not exposed via MCP`;
+    }
+    return undefined;
+  };
+
+  if (canRead && typeof bridge.readRecordFile === 'function') {
+    const readFn = bridge.readRecordFile.bind(bridge);
+    const listFn = typeof bridge.listRecordFiles === 'function' ? bridge.listRecordFiles.bind(bridge) : undefined;
+    server.registerTool(
+      note('read_file'),
+      {
+        description:
+          'Read a file a record carries: one held by a file field (field, plus fileId when the field holds several) ' +
+          'or one of its attachments (attachmentId). Answers the file\'s facts (name, type, size in bytes, the ' +
+          `byte cap read_file reads, ${READ_FILE_MAX_BYTES}) with a short-lived download link, then its content: the ` +
+          'text of a text file, a PDF or a Word (.docx) document, or the image itself. A larger file answers its ' +
+          'facts and the link only. ' +
+          (listFn
+            ? 'Name neither field nor attachmentId to list the files on the record you can read, with their ids. '
+            : '') +
+          'You can read a file only where you can read its record: a record you cannot read answers as not found.',
+        inputSchema: strictToolInput(
+          {
+            surface: 'this read_file call',
+            aliases: {
+              ...OBJECT_NAME_ALIASES,
+              ...RECORD_ID_ALIASES,
+              fieldName: 'field',
+              field_name: 'field',
+              file_id: 'fileId',
+              attachment_id: 'attachmentId',
+              attachment: 'attachmentId',
+            },
+          },
+          {
+            objectName: z.string().describe('The object/table name'),
+            recordId: z.string().describe('The record id'),
+            field: z.string().optional().describe('A file or image field of the record'),
+            fileId: z
+              .string()
+              .optional()
+              .describe('Which file, when the field holds several (a multi-file field); with field only'),
+            attachmentId: z.string().optional().describe('One of the record\'s attachments, by its id'),
+          },
+        ),
+        annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+      },
+      async ({ objectName, recordId, field, fileId, attachmentId }) => {
+        const bad = guard(objectName);
+        if (bad) return errorResult(bad);
+        if (field !== undefined && attachmentId !== undefined) {
+          return errorResult('Name one file: either field (with fileId for a multi-file field) or attachmentId, not both.');
+        }
+        if (fileId !== undefined && field === undefined) {
+          return errorResult('fileId names a file within a field: send field with it.');
+        }
+        try {
+          if (field === undefined && attachmentId === undefined) {
+            if (!listFn) return errorResult('Name the file to read: field (a file field of the record) or attachmentId.');
+            return textResult({ files: await listFn(objectName, recordId) });
+          }
+          const target = attachmentId !== undefined ? { attachmentId } : { field: field as string, ...(fileId !== undefined ? { fileId } : {}) };
+          const file = await readFn(objectName, recordId, target, { maxBytes: READ_FILE_MAX_BYTES });
+          return { content: await renderReadFile(file) };
+        } catch (err) {
+          return errorResultWithCode(err);
+        }
+      },
+    );
+  }
+
+  if (canWrite && typeof bridge.createUploadLink === 'function') {
+    const linkFn = bridge.createUploadLink.bind(bridge);
+    server.registerTool(
+      note('create_upload_link'),
+      {
+        description:
+          'Create a link through which the user uploads one file onto a record: into a file field (field) or ' +
+          'as an attachment (attachments: true). Give the link to the user to open in a browser where they are ' +
+          'signed in to this deployment as themselves; it works only for them, once, for this record and field ' +
+          'only, and expires (see expiresAt). The upload is stored as the user, so they must be able to edit the ' +
+          'record (and the field).',
+        inputSchema: strictToolInput(
+          {
+            surface: 'this create_upload_link call',
+            aliases: {
+              ...OBJECT_NAME_ALIASES,
+              ...RECORD_ID_ALIASES,
+              fieldName: 'field',
+              field_name: 'field',
+              attachment: 'attachments',
+            },
+          },
+          {
+            objectName: z.string().describe('The object/table name'),
+            recordId: z.string().describe('The record id'),
+            field: z.string().optional().describe('A file or image field of the record the upload fills'),
+            attachments: z
+              .literal(true)
+              .optional()
+              .describe('true to attach the upload to the record instead of filling a field'),
+          },
+        ),
+        annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+      },
+      async ({ objectName, recordId, field, attachments }) => {
+        const bad = guard(objectName);
+        if (bad) return errorResult(bad);
+        if ((field === undefined) === (attachments === undefined)) {
+          return errorResult('Say where the upload lands: either field (a file field of the record) or attachments: true.');
+        }
+        try {
+          const target = field !== undefined ? { field } : { attachments: true as const };
+          const link = await linkFn(objectName, recordId, target);
+          return textResult({
+            url: link.url,
+            expiresAt: link.expiresAt,
+            singleUse: true,
+            objectName,
+            recordId,
+            ...(field !== undefined ? { field } : { attachments: true }),
+            instructions:
+              'Give this link to the user to open in a browser where they are signed in to this deployment, and ' +
+              'pick the file. It works only for them, once, until expiresAt.',
+          });
+        } catch (err) {
+          return errorResultWithCode(err);
         }
       },
     );

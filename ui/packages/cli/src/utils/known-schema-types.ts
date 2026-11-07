@@ -216,6 +216,7 @@ export const KNOWN_SCHEMA_TYPES: readonly string[] = [
   'main',
   'mark',
   'markdown',
+  'mcp:authorized-assistants',
   'mcp:connect-agent',
   'menubar',
   'nav',

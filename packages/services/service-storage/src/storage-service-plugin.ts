@@ -35,6 +35,11 @@ import {
   // [#25693] The organization wall's one verdict, asked for an unclaimed
   // file's download (`isWithinCallerOrganization`).
   computeTenantLayer0Verdict,
+  // [#30892] An upload link acts as the user who minted it, resolved again
+  // when it is used: their grants (the `runAs: 'user'` automation
+  // precedent) and their organization claim vetted under the posture in force.
+  resolveUserAuthzGrants,
+  vetOrganizationClaim,
 } from '@objectstack/core';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import type {
@@ -59,13 +64,14 @@ import type { S3StorageAdapterOptions } from './s3-storage-adapter.js';
 import { StorageMetadataStore, releasingRecordOf } from './metadata-store.js';
 import type { FileRecord } from './metadata-store.js';
 import type { TenancyPosture } from '@objectstack/spec/security';
-import { registerStorageFamily } from './storage-routes.js';
+import { registerStorageFamily, DEFAULT_DOWNLOAD_TTL } from './storage-routes.js';
 import type {
   FileReadVerdict,
   StorageGatedSessionReader,
   StorageUploadAttacher,
   StorageUploadSession,
 } from './storage-routes.js';
+import type { RecordFileAccessDeps, UploadLinkDoor } from './record-file-access.js';
 import { installAttachmentLifecycleHooks, createSysFileReapGuard, createUploadSessionReapGuard, findFileHolder, findHeldFiles } from './attachment-lifecycle.js';
 import { installFileReferenceHooks, type FileReferenceEngine } from './file-reference-lifecycle.js';
 import { installSysFileStorageOwnedColumnsGuard } from './sys-file-storage-owned-columns.js';
@@ -414,6 +420,13 @@ export class StorageServicePlugin implements Plugin {
             return null;
           }
         },
+        // [#30892] The record-file verbs (read a record's file, mint and spend
+        // an upload link), bound over the download door's own verdict.
+        recordFiles: bindRecordFileAccess(
+          toGateRegistry(ctx),
+          () => this.attachmentEngine,
+          this.options.basePath ?? DEFAULT_STORAGE_BASE_PATH,
+        ),
       }),
     );
     // [#25779] The server-side field-file verb, under `FIELD_FILE_SERVICE`.
@@ -1227,6 +1240,9 @@ export function composeStorageRoutes(
     readGatedSessionUser,
     // The commit door's `attachTo` arm — bound here with the other gates.
     attachUpload,
+    // [#30892] The upload-link doors, served by the `file-attachments`
+    // service when the kernel has the storage plugin's.
+    resolveUploadLinkDoor(registry),
   );
 
   return {
@@ -1235,6 +1251,99 @@ export function composeStorageRoutes(
     downloadAuthorizer: authorizeFileRead !== undefined,
     tombstoneHolderResolver: resolveFileHolder !== undefined,
     metadataStore: engine ? 'engine' : 'memory',
+  };
+}
+
+/**
+ * [#30892] The upload-link doors' verbs, read per request from the kernel's
+ * `file-attachments` service (the plugin's `FileAttachmentService`), so a
+ * host's mount and the plugin's serve the same links. `undefined` from the
+ * reader when the kernel has no such service: the doors then answer the
+ * unusable-link refusal, as for any link this kernel never issued.
+ */
+function resolveUploadLinkDoor(registry: StorageGateRegistry): () => UploadLinkDoor | undefined {
+  return () => {
+    let service: Partial<UploadLinkDoor> | undefined;
+    try {
+      service = registry.getService<Partial<UploadLinkDoor>>('file-attachments') ?? undefined;
+    } catch {
+      return undefined;
+    }
+    return service && typeof service.inspectUploadLink === 'function' && typeof service.consumeUploadLink === 'function'
+      ? (service as UploadLinkDoor)
+      : undefined;
+  };
+}
+
+/**
+ * [#30892] What the record-file verbs on `FileAttachmentService` are bound
+ * over, from the kernel — each answer the existing door's own:
+ *
+ *  - `judgeFileRead`: the download door's verdict ({@link judgeFileRead}),
+ *    under the door's wiring fact as the file-reference rule reads it (a
+ *    kernel with no `auth` service binds no download gate, so every file is
+ *    served there).
+ *  - `isServable`: the download doors' servability — committed, or a
+ *    tombstone the reap guard's `findFileHolder` still finds held.
+ *  - `resolveUserContext`: the minting user, resolved now. Their grants are
+ *    read fresh (`bypassGrantsCache`, the `runAs: 'user'` precedent: a link is
+ *    not request-shaped), in the organization the link was minted in while a
+ *    current membership backs it under a walled posture
+ *    (`vetOrganizationClaim`, the session arm of `resolveAuthzContext`). A
+ *    claim that is no longer backed answers `null`: the user cannot act there
+ *    now, so nothing lands. A posture read that fails throws the branded
+ *    outage, never a verdict.
+ *  - `getDownloadTtl`: the record-governed download lifetime the routes use.
+ */
+function bindRecordFileAccess(
+  registry: StorageGateRegistry,
+  getEngine: () => IDataEngine | null,
+  basePath: string,
+): Pick<RecordFileAccessDeps, 'judgeFileRead' | 'isServable' | 'resolveUserContext' | 'getDownloadTtl' | 'getBasePath'> {
+  return {
+    judgeFileRead: async (file, context) => {
+      const engine = getEngine();
+      if (!engine) return 'deny';
+      if (!resolveGateAuthService(registry)) return 'allow';
+      return judgeFileRead(registry, engine, file, context);
+    },
+    isServable: async (file) => {
+      if (file.status === 'committed') return true;
+      const engine = getEngine();
+      if (file.status !== 'deleted' || !engine || typeof (engine as any).find !== 'function') return false;
+      try {
+        return (await findFileHolder(engine as any, file.id, file as any)) !== null;
+      } catch {
+        return false;
+      }
+    },
+    resolveUserContext: async (userId, organizationId) => {
+      const engine = getEngine();
+      if (!engine) return null;
+      const posture = await resolveAdmissionTenancyPosture(registry);
+      const grants = await resolveUserAuthzGrants(engine, userId, {
+        ...(organizationId ? { tenantId: organizationId } : {}),
+        bypassGrantsCache: true,
+      });
+      const tenantId = vetOrganizationClaim(organizationId ?? undefined, grants.accessible_org_ids, posture);
+      if (organizationId && tenantId === undefined) return null;
+      return {
+        userId,
+        ...(tenantId ? { tenantId } : {}),
+        isSystem: false,
+        positions: grants.positions,
+        permissions: grants.permissions,
+        systemPermissions: grants.systemPermissions,
+        org_user_ids: grants.org_user_ids,
+        accessible_org_ids: grants.accessible_org_ids,
+        ...(grants.tabPermissions ? { tabPermissions: grants.tabPermissions } : {}),
+        ...(grants.posture ? { posture: grants.posture } : {}),
+        ...(grants.audience ? { audience: grants.audience } : {}),
+        ...(grants.email ? { email: grants.email } : {}),
+      };
+    },
+    getDownloadTtl: () => DEFAULT_DOWNLOAD_TTL,
+    getBasePath: () => basePath,
   };
 }
 

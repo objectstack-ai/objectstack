@@ -355,7 +355,27 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
     // hints: the case flipped from true to false with the added glob itself as
     // the covering hint. ⇒ Extensions and glob widen together or not at all,
     // and that pin's header carries the measurement of what the boundary costs.
-    globs: ['packages/**/*.ts'],
+    //
+    // src/security/vouched-reference-callers.pin.test.ts runs the census gate
+    // of the vouched-reference mark, a root script, with `--ts-only`: the same
+    // `packages/` `.ts` surface as this glob. The census's other extensions,
+    // and its `examples/` and `apps/` roots, are judged by its bare run in the
+    // lint step, never by this pin. The census imports `js-comment-mask.mjs`
+    // (which code is prose) and `invoked-as.mjs` (whether its dispatch runs),
+    // so an edit to either moves the pin's verdict and re-runs it.
+    globs: [
+      'packages/**/*.ts',
+      'scripts/check-vouch-for-reference-callers.mjs',
+      'scripts/js-comment-mask.mjs',
+      'scripts/invoked-as.mjs',
+    ],
+    heldBy: {
+      // The pin names only the census; these two are the census's own relative
+      // imports, loaded by the spawned child, so no path the pin quotes lands
+      // in them and the pin itself is what holds them.
+      'scripts/js-comment-mask.mjs': ['packages/core/src/security/vouched-reference-callers.pin.test.ts'],
+      'scripts/invoked-as.mjs': ['packages/core/src/security/vouched-reference-callers.pin.test.ts'],
+    },
   },
   '@objectstack/types': {
     // src/driver-error-classification.callers.test.ts is the #13440 gate: it

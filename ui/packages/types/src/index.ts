@@ -660,7 +660,7 @@ export type {
   OrderByNode,
   LimitNode,
   OffsetNode,
-  SubqueryNode,
+  // `SubqueryNode` was retired here (objectstack#25921, batch 12).
   AggregateNode,
   WindowNode,
   WindowFunction,
@@ -687,8 +687,8 @@ export type {
   // Renamed from `DateRangePreset` in objectui#4167 — the spec owns that name
   // for the narrower dashboard filter-bar vocabulary (objectstack#4115).
   FilterBuilderDateRangePreset,
-  FilterBuilderConfig,
-  FilterFieldConfig,
+  // `FilterBuilderConfig` / `FilterFieldConfig` were retired here
+  // (objectstack#25921, batch 12) — see the notes in `data-protocol.ts`.
   // Object-level validation rules. The five spec-named variants are derived from
   // `@objectstack/spec/data`; the other three are @deprecated objectui-local
   // variants the spec's union rejects. See data-protocol.ts.
@@ -884,6 +884,7 @@ import type { CRUDComponentSchema } from './crud.js';
 import type { ObjectQLComponentSchema, ListViewSchema } from './objectql.js';
 import type { AppComponentSchema, AppSchemaRendererNodeSchema } from './app.js';
 import type { CloudWorkspaceTimezoneNoticeSchema } from './cloud.js';
+import type { McpAuthorizedAssistantsSchema } from './mcp-authorized-assistants.js';
 import type {
   HeroBlockSchema,
   StatBlockSchema,
@@ -1020,6 +1021,11 @@ export type {
 } from './cloud.js';
 
 export type {
+  // The `mcp:authorized-assistants` node's TS twin, landed with its zod arm.
+  McpAuthorizedAssistantsSchema,
+} from './mcp-authorized-assistants.js';
+
+export type {
   // The product-page blocks' TS twins, landed with their zod arms and their
   // `@object-ui/app-shell` registrations (objectui#12197).
   ProductBlockExpressionHole,
@@ -1148,6 +1154,8 @@ export type AnySchema =
   | AppSchemaRendererNodeSchema
   // objectui#11930 — landed with its zod arm.
   | CloudWorkspaceTimezoneNoticeSchema
+  // Landed with its zod arm and its `@object-ui/app-shell` registration.
+  | McpAuthorizedAssistantsSchema
   // objectui#12342 — landed with its zod arm.
   | RecordApprovalDecisionBlockSchema
   // objectui#12363 — landed with their zod arms.

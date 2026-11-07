@@ -71,8 +71,8 @@ customer has since edited.
 
 | Mode | Behavior | Use Case |
 |:-----|:---------|:---------|
-| `ignore` | **Default.** Create-only: insert a record whose row is missing, leave an existing row exactly as it is | Business and starter data the customer owns once it is loaded |
-| `upsert` | Create if new, and on **every** replay write each declared column back onto the matched row | Reference data the package must keep current |
+| `ignore` | **Default.** Create-only: insert a record whose row is missing (a boot or organization replay skips one a person [deleted](#a-deleted-seed-row-stays-deleted)), leave an existing row exactly as it is | Business and starter data the customer owns once it is loaded |
+| `upsert` | Create if new (a boot or organization replay skips one a person [deleted](#a-deleted-seed-row-stays-deleted)), and on **every** replay write each declared column back onto the matched row | Reference data the package must keep current |
 | `insert` | Insert **every** record unconditionally — no existing-row check, so it **duplicates the table on each replay boot** ([#3434](https://github.com/objectstack-ai/objectstack/issues/3434)). Rarely what you want | Append-only rows loaded exactly once (never re-run) |
 | `update` | Update only, skip if not found | Migration patches on existing rows |
 | `replace` | Insert without checking for an existing match — the seed loader does **not** delete anything itself; the target table must already be empty (or cleared by the caller) | Cache / lookup tables rebuilt from an already-truncated table |
@@ -152,6 +152,38 @@ check**, so a replayed `insert` dataset duplicates its table on each restart
 (a 3-row fixture becomes 6, then 9 — [#3434](https://github.com/objectstack-ai/objectstack/issues/3434)).
 It is almost never the right mode: leave `mode` unset (create-only), or declare
 `upsert` for reference data, with a stable `externalId` instead. `os validate` warns on any `mode: 'insert'` seed.
+
+### A Deleted Seed Row Stays Deleted
+
+Each organization records which seed rows landed in it, by `externalId`, in the
+platform object `sys_seed_landed_key`. When a person deletes a seeded row, the
+next boot or organization replay does not insert it again: an `ignore` or
+`upsert` dataset inserts a missing row only if its key never landed in that
+organization. A row an upgrade adds to the seed has never landed, so it
+is still inserted. A reference to the deleted row from another seed row is left
+unwritten rather than reported as an error.
+
+The record is kept and honoured only where AppPlugin runs the load for a known
+organization: the single-tenant boot seed (`objectstack serve`, `os start`, on
+every restart; a multi-tenant boot seeds through the per-organization replay
+instead), the per-organization replay (`seed-replayer`), and the dev hot reload.
+A seed publish, a package install or upgrade (`os package install`, the
+marketplace install, its heal and its sample-data reseed) keep no record, so a
+deleted row comes back on those. So do a load with no organization, a
+composition that does not register `sys_seed_landed_key`
+(`@objectstack/platform-objects`), and the marketplace's fallback
+`seed-replayer`, which it registers when no app has seed data.
+
+A row deleted before your runtime had this rule comes back once, on the first
+replay after the upgrade, and stays deleted from then on.
+
+To bring the deleted rows back on purpose, a host or plugin calls the
+`seed-replayer` kernel service with `{ reseed: true }`:
+
+```typescript
+const replay = ctx.getService('seed-replayer');   // ctx: the plugin's context
+await replay(organizationId, { reseed: true });   // inserts every missing seed row
+```
 
 ---
 

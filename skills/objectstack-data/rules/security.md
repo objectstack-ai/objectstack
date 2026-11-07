@@ -79,8 +79,8 @@ rowLevelSecurity: [
     name: 'own_records',
     object: 'account',                       // REQUIRED per policy
     operation: 'all',                        // singular: select|insert|update|delete|all
-    using: 'owner_id == current_user.id',    // rows readable / targetable
-    check: 'owner_id == current_user.id',    // every row written
+    using: 'owner_id == current_user.id',
+    check: 'owner_id == current_user.id',
   },
   {
     name: 'org_isolation',
@@ -116,8 +116,8 @@ bridge (warns). The compiler resolves these
 
 ## Membership keys — a `current_user.KEY` set the roster object declares
 
-Rows keyed on a **named record** (an account, a supplier) rather than on a
-person or a position: declare the set on the **roster** object whose rows
+Rows keyed on a **named record** (an account, a supplier):
+declare the set on the **roster** object whose rows
 define it, not one policy per record.
 
 <!-- os:check -->
@@ -148,7 +148,8 @@ rowLevelSecurity: [
 
 - `userField`: the roster's user column (`user`, or a lookup to `sys_user`);
   `valueField`: the reference column whose values form the set (never the
-  same column); `filter`: optional canonical CEL over the roster's own
+  same column, nor `id`: `membership-key-value-field-invalid`);
+  `filter`: optional canonical CEL over the roster's own
   columns, no `current_user.*`.
 - One name per stack: a key on two objects, a kernel name (`id`,
   `organization_id`, `positions`, `org_user_ids`, `accessible_org_ids`,
@@ -159,6 +160,7 @@ rowLevelSecurity: [
   rows grants the key.
 - **Choose by what the rows are keyed on:** the person → owner scoping; a
   position → `positions` on the policy; a named record → a membership key;
+  a parent's owner, parent optional → an optional master (relationships.md);
   one record, once → a sharing rule or a manual share; a team's records → a
   sharing rule whose `sharedWith: { type: 'queue', value: '<queue name>' }`
   reaches an ownership queue's members (SKILL.md § Ownership queues).

@@ -33,19 +33,19 @@ silent, and `node scripts/tenant-audit-census.mjs --write` is the resolution.
 
 | Measure | Value |
 |---|---:|
-| Write call sites | 267 |
-| Object name statically decidable | 190 |
-| Object name chosen at run time | 77 |
-| Against a tenancy-enabled object | 184 |
+| Write call sites | 269 |
+| Object name statically decidable | 191 |
+| Object name chosen at run time | 78 |
+| Against a tenancy-enabled object | 185 |
 | Against an object declaring tenancy off | 6 |
-| Threading a tenant context | 204 |
+| Threading a tenant context | 205 |
 | Provably carrying none | 8 |
 | …and decidably tenancy-enabled | 2 |
-| Options argument unreadable | 55 |
-| …and decidably tenancy-enabled | 29 |
+| Options argument unreadable | 56 |
+| …and decidably tenancy-enabled | 30 |
 | Threading a decidably elevated context | 149 |
 | Threading a decidably non-elevated context | 0 |
-| Threading a context of undecidable elevation | 110 |
+| Threading a context of undecidable elevation | 112 |
 
 ## Subtractions the census could NOT defend — enforced
 
@@ -90,14 +90,14 @@ holds still. They are required to be HERE and to say WHEN they were true;
 their values are not compared. The reasoning, and the measurement behind it,
 are in `scripts/check-tenant-audit-census.mjs`.
 
-Measured on 2026-11-07 at `b0b494c04`.
+Measured on 2026-11-07 at `a06983b5c`.
 
 | corpus scale (not enforced) | count |
 | :--- | ---: |
-| tracked non-test sources scanned | 1049 |
-| engine-shaped types recognised | 112 |
-| declared objects in the registry | 130 |
-| same-named calls subtracted as non-engine | 235 |
+| tracked non-test sources scanned | 1052 |
+| engine-shaped types recognised | 113 |
+| declared objects in the registry | 131 |
+| same-named calls subtracted as non-engine | 237 |
 
 ## Every site
 
@@ -276,7 +276,8 @@ Measured on 2026-11-07 at `b0b494c04`.
 | `packages/services/service-storage/src/file-reference-lifecycle.ts` | `update` | `sys_file` | enabled | elevated | 2 |
 | `packages/services/service-storage/src/metadata-store.ts` | `delete` | `sys_file` | enabled | options unreadable | 1 |
 | `packages/services/service-storage/src/metadata-store.ts` | `insert` | `sys_file` | enabled | options unreadable | 1 |
-| `packages/services/service-storage/src/metadata-store.ts` | `update` | `sys_file` | enabled | options unreadable | 1 |
+| `packages/services/service-storage/src/metadata-store.ts` | `update` | `sys_file` | enabled | options unreadable | 2 |
 | `packages/services/service-storage/src/metadata-store.ts` | `delete` | `sys_upload_session` | enabled | options unreadable | 1 |
 | `packages/services/service-storage/src/metadata-store.ts` | `insert` | `sys_upload_session` | enabled | options unreadable | 1 |
 | `packages/services/service-storage/src/metadata-store.ts` | `update` | `sys_upload_session` | enabled | options unreadable | 2 |
+| `packages/services/service-storage/src/record-file-access.ts` | `update` | `state.object` | undecidable | context, elevation undecidable | 1 |

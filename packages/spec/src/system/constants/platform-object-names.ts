@@ -87,6 +87,7 @@ export const PLATFORM_OBJECTS_BY_PACKAGE: Readonly<Record<string, readonly strin
     'sys_scim_subject',
     'sys_scim_user',
     'sys_secret',
+    'sys_seed_landed_key',
     'sys_session',
     'sys_setting',
     'sys_setting_audit',

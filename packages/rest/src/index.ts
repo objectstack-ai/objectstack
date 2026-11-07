@@ -179,6 +179,8 @@ export {
     metaRequestLocale,
     metaTypeReadRefusal,
     metaTypeWriteRefusal,
+    projectMetaActionForCaller,
+    projectMetaActionItem,
     projectMetaObjectSchema,
     refuseUnknownMetaListType,
     STORED_VERSION_DOOR_POLICY,
@@ -187,6 +189,8 @@ export {
     wantsMetaItemLayers,
 } from './meta-item-read-gate.js';
 export type {
+    MetaActionProjection,
+    MetaActionProjectionSources,
     MetaBookTreeAnswer,
     MetaBookTreeSources,
     MetaItemAnswer,

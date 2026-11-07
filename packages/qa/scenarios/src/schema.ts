@@ -413,6 +413,39 @@ export const AppCodeSchema = z
   .string({ error: (issue) => (issue.input === undefined ? 'a card names its app `code`: 2–8 lowercase letters, e.g. `crm`' : undefined) })
   .regex(/^[a-z]{2,8}$/, 'must be 2–8 lowercase letters (no digit, no underscore), e.g. `crm`');
 
+// ── The tier: what a card is for ────────────────────────────────────────────
+
+/**
+ * What a card is FOR — a closed set, and every card names one:
+ *
+ *   control   an internal quality check (the small golden cases): never
+ *             exported, never shown in the gallery, whatever it scores;
+ *   starter   a gallery starter template (the mid-tier scenarios);
+ *   delivery  a delivery-grade scenario.
+ *
+ * A card-level key, outside `expect`: the scorer never reads it. The loader
+ * holds a {@link GALLERY_TIERS} card to its floor (`GALLERY_FLOOR` in
+ * `loader.ts`); a `control` card has no floor. The gallery exporter's filter
+ * on this key is a change of its own: until it lands the exporter reads no
+ * tier, and it exports no card at all (`src/export/generic.ts`).
+ */
+export const SCENARIO_TIERS = ['control', 'starter', 'delivery'] as const;
+export type ScenarioTier = (typeof SCENARIO_TIERS)[number];
+
+export const ScenarioTierSchema = z.enum(SCENARIO_TIERS, {
+  error: (issue) =>
+    issue.input === undefined
+      ? 'a card names its `tier`: `control` (an internal check, never exported), `starter` or `delivery`'
+      : undefined,
+});
+
+/** The tiers a gallery export may carry: every tier but `control`. */
+export const GALLERY_TIERS = ['starter', 'delivery'] as const satisfies readonly ScenarioTier[];
+
+export function isGalleryTier(tier: ScenarioTier): tier is (typeof GALLERY_TIERS)[number] {
+  return (GALLERY_TIERS as readonly ScenarioTier[]).includes(tier);
+}
+
 /** What every scenario app's namespace starts with. */
 export const SCENARIO_NAMESPACE_PREFIX = 'demo';
 
@@ -444,6 +477,8 @@ export const ScenarioCardSchema = z.strictObject({
   id: MachineNameSchema,
   /** The app code; the app's namespace is {@link scenarioNamespace}. */
   code: AppCodeSchema,
+  /** What the card is for: {@link SCENARIO_TIERS}. */
+  tier: ScenarioTierSchema,
   title: z.string().min(1),
   /** Where the scenario comes from — the open set holds generic scenarios only. */
   provenance: z.string().min(1),

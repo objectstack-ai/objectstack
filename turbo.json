@@ -806,7 +806,10 @@
         "!coverage/**",
         "!.turbo/**",
         "!**/node_modules/**",
-        "$TURBO_ROOT$/packages/**/*.ts"
+        "$TURBO_ROOT$/packages/**/*.ts",
+        "$TURBO_ROOT$/scripts/check-vouch-for-reference-callers.mjs",
+        "$TURBO_ROOT$/scripts/js-comment-mask.mjs",
+        "$TURBO_ROOT$/scripts/invoked-as.mjs"
       ]
     },
     "@objectstack/types#test:repo": {
