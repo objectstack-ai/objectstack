@@ -32,7 +32,8 @@
  *   --packages P         where the @objectstack/* packages come from (`packages.ts`):
  *                        `published` (default) — npm, what a customer gets;
  *                        `workspace` — this checkout, built and packed as the
- *                        release would publish it (unreleased; never exported)
+ *                        release would publish it (unreleased; never exported;
+ *                        refused when run from the published package, which has no checkout)
  *
  * ⛔ No API-billed model: the live driver refuses to start when an API key is
  * configured (the cost ruling on cloud#3600).
@@ -165,6 +166,9 @@ export async function main(argv: readonly string[]): Promise<number> {
   const here = dirname(fileURLToPath(import.meta.url));
   // The checkout, or the library root the published package carries (`library.ts`).
   const { root: repo, checkout } = locateLibraryRoot(here);
+  if (args.packages === 'workspace' && !checkout) {
+    throw new Error('--packages workspace builds and packs the packages of an objectstack checkout; the published CLI has none. Run it from a checkout (`pnpm --filter @objectstack/scenarios run-scenarios --packages workspace`), or use --packages published');
+  }
   const cardsDir = resolve(args.cards ?? join(repo, 'docs/qa/scenarios'));
   const outDir = resolve(args.out ?? (checkout ? join(repo, 'docs/qa/platform-checklist/runs') : 'scenario-runs'));
   const work = resolve(args.work ?? mkdtempSync(join(tmpdir(), 'scenario-run-')));

@@ -161,6 +161,8 @@ npx @objectstack/scenarios help                                      # the comma
 - **The records**: one `scenario-runs/<date>-scenario-<card>.json` per card, under the directory you run it from,
   unless `--out DIR` says otherwise; the scorecard is printed as in a checkout. `--work DIR` keeps the scaffolded
   projects (default: a temp directory).
+- **The packages**: always the published ones (`--packages published`, the default). `--packages workspace` builds
+  and packs a checkout's packages, so the published CLI refuses it; run it from a checkout.
 - It is not an `objectstack` (`os`) command: scenario scoring stays out of the customer CLI.
 
 | Mode | Steps |

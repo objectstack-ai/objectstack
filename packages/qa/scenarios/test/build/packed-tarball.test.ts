@@ -174,6 +174,15 @@ describe('the packed bin, run under plain Node', () => {
     expect(r.status).toBe(2);
   }, RUN_SPAWN_BUDGET_MS);
 
+  it('refuses --packages workspace: an install has no checkout to build', () => {
+    const scaffolds = join(work, 'workspace-scaffolds');
+    const r = runBin(['run', '--packages', 'workspace', '--only', 'service_desk', '--work', scaffolds]);
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain('--packages workspace builds and packs the packages of an objectstack checkout; the published CLI has none');
+    // Refused before the run makes anything: no work directory, no build, no pack.
+    expect(existsSync(scaffolds)).toBe(false);
+  }, RUN_SPAWN_BUDGET_MS);
+
   it('refuses an API-billed login before it scaffolds anything', () => {
     // A stand-in `claude` on a subscription login: only the key in the environment can refuse it.
     const fakeBin = join(work, 'fake-bin');
