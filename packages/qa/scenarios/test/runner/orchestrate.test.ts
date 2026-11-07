@@ -370,7 +370,7 @@ describe('runCard — the seed against a build whose owner field is a user looku
     const { scenario, ops, driver, apps } = setup({ app: () => new UserLookupApp() });
     const run = await runCard(scenario, driver, ops, { modes: ['scratch'], admin: ADMIN, iterateRun: false });
     const seed = run.modes[0]!.run!.seed;
-    expect(seed).toEqual({ inserted: 8, refused: [], handlesAsAdmin: ['u_tia'] });
+    expect(seed).toEqual({ inserted: 8, refused: [], handlesAsAdmin: ['u_tia'], rewritten: ['democrm_account.owner'] }); // the record lists the field it rewrote
     const owners = Object.fromEntries(apps[0]!.rows.democrm_account!.map((r) => [r.id, [r.owner, r.owner_id]]));
     expect(owners).toEqual({ ac1: ['u-sdr', 'u-sdr'], ac2: ['u-admin', 'u-admin'], ac3: ['u-sdr', 'u-sdr'] });
     expect(apps[0]!.rows.democrm_contact!.map((r) => r.id)).toEqual(['ct1', 'ct2', 'ct3', 'ct4', 'ct5', 'new-add_contact']); // the five seeded, then the sdr's add
@@ -543,53 +543,63 @@ describe('runCard — a seed insert that throws keeps the partial tally in the r
     const run = await runCard(scenario, driver, ops, { modes: ['scratch'], admin: ADMIN, iterateRun: false });
     const half = run.modes[0]!.run!;
     expect(half.error).toContain('connection reset while seeding');
-    expect(half.seed).toEqual({ inserted: 2, refused: [{ object: 'democrm_account', id: 'ac2', code: 'VALIDATION_FAILED', message: 'democrm_account ac2 refused' }], handlesAsAdmin: ['u_tia'] });
+    expect(half.seed).toEqual({ inserted: 2, refused: [{ object: 'democrm_account', id: 'ac2', code: 'VALIDATION_FAILED', message: 'democrm_account ac2 refused' }], handlesAsAdmin: ['u_tia'], rewritten: ['democrm_account.owner'] });
     expect(half.questions).toEqual([]);
     expect(cardScorecard(run).modes[0]!.first.seed).toEqual({ inserted: 2, total: 3, refused: 1 }); // total counts the rows the tally reached
   });
 });
 
 describe('runCard — a refused seed row makes what reads it not measured, never a fail', () => {
-  it('shows ⚠ seed: 1 refused, leaves the questions on that object unasked and unscored, and grades the rest as usual', async () => {
+  it('shows ⚠ seed: 1 refused, leaves only the turns whose answer ct4 feeds unasked and unscored, and grades the rest as usual', async () => {
     const { scenario, ops, driver } = setup({ app: () => new RefusingApp(new Set(['democrm_contact/ct4'])) });
     const run = await runCard(scenario, driver, ops, { modes: ['scratch'], admin: ADMIN, iterateRun: false });
     const half = run.modes[0]!.run!;
     expect(half.seed).toMatchObject({ inserted: 7, refused: [{ object: 'democrm_contact', id: 'ct4', code: 'VALIDATION_FAILED' }] });
 
-    // Every contact question is out (its object lost ct4); the account questions are asked and graded.
+    // Only the turns whose expected answer ct4 (the one unattached contact) feeds are out; the other contact
+    // questions, `contacts_per_account` as `sdr` among them (its scope never reads ct4), are asked and graded.
     const out = half.questions.filter((q) => q.notMeasured).map((q) => `${q.question}/${q.persona ?? '-'}`);
-    expect(out).toEqual(['contacts_per_account/sdr', 'unattached_contacts/-', 'best_covered_account/-', 'tech_contacts/-', 'contacts_by_industry/-']);
-    expect(half.questions.find((q) => q.notMeasured)!.notMeasured).toBe('seed: needs democrm_contact ct4, which the app refused');
+    expect(out).toEqual(['unattached_contacts/-', 'contacts_by_industry/-']);
+    expect(half.questions.find((q) => q.notMeasured)!.notMeasured).toBe('seed: its expected answer changes without democrm_contact ct4, which the app refused');
     expect(half.questions.filter((q) => q.notMeasured).every((q) => q.grade === undefined && q.turn === undefined)).toBe(true);
-    expect(driver.seen).not.toContain('crm_account_with_contacts/scratch/run/tech_contacts/-');
+    expect(driver.seen).not.toContain('crm_account_with_contacts/scratch/run/unattached_contacts/-');
+    expect(driver.seen).toContain('crm_account_with_contacts/scratch/run/contacts_per_account/sdr');
     expect(half.operations.filter((o) => o.notMeasured)).toEqual([]); // no operation names ct4
 
     const sc = cardScorecard(run);
     expect(sc.modes[0]!.first.seed).toEqual({ inserted: 7, total: 8, refused: 1 });
-    expect(sc.modes[0]!.first.ask).toEqual({ passed: 4, total: 4, leaks: 0, notMeasured: 5 });
+    expect(sc.modes[0]!.first.ask).toEqual({ passed: 7, total: 7, leaks: 0, notMeasured: 2 });
     expect(sc.modes[0]!.first.operations).toEqual({ passed: 5, total: 5, notMeasured: 0 });
     const table = renderScorecard(sc);
     expect(table).toContain('| Seed | 7/8 ⚠ seed: 1 refused |');
-    expect(table).toContain('| Run-问数 | 4/4 · 5 not measured |');
+    expect(table).toContain('| Run-问数 | 7/7 · 2 not measured |');
     const record = runRecord({ run: 'r', date: '2026-11-06', packages: PUBLISHED, driver: driver.info(), runner: 'test', evidenceDir: '/tmp' }, run);
     const ask = (record.results as Array<{ id: string; verdict: string; notes: string }>).find((r) => r.id === 'crm_account_with_contacts.scratch.run-ask')!;
-    expect(ask).toMatchObject({ verdict: 'pass', notes: '4/4 · 5 not measured' });
+    expect(ask).toMatchObject({ verdict: 'pass', notes: '7/7 · 2 not measured' });
   });
 
-  it('an operation whose target hangs off a refused row is not run; a half with nothing measured is not-run, not fail', async () => {
+  it('an operation whose target hangs off a refused row is not run; a turn no refused row feeds is still asked; a half with nothing measured is not-run, not fail', async () => {
     const { scenario, ops, driver } = setup({ app: () => new RefusingApp(new Set(['democrm_account/ac1', 'democrm_account/ac2', 'democrm_account/ac3'])) });
     const run = await runCard(scenario, driver, ops, { modes: ['scratch'], admin: ADMIN, iterateRun: false });
     const half = run.modes[0]!.run!;
     expect(half.seed.inserted).toBe(5); // the double does not cascade; the runner still takes the contacts out
     expect(half.operations.filter((o) => !o.notMeasured).map((o) => o.operation)).toEqual(['contact_bad_email']);
-    expect(half.questions.every((q) => q.notMeasured)).toBe(true);
+    // Only the turns no account feeds stay measured: ct4 (unattached) is still the one unattached contact, an
+    // unanswerable question stays unanswerable, and a persona that may not read accounts still declines.
+    expect(half.questions.filter((q) => !q.notMeasured).map((q) => `${q.question}/${q.persona ?? '-'}`)).toEqual(['unattached_contacts/-', 'account_count/partner_user', 'acme_revenue/-']);
     const sc = cardScorecard(run);
-    expect(sc.modes[0]!.first.ask).toEqual({ passed: 0, total: 0, leaks: 0, notMeasured: 9 });
+    expect(sc.modes[0]!.first.ask).toEqual({ passed: 3, total: 3, leaks: 0, notMeasured: 6 });
     expect(renderScorecard(sc)).toContain('| Seed | 5/8 ⚠ seed: 3 refused |');
     const record = runRecord({ run: 'r', date: '2026-11-06', packages: PUBLISHED, driver: driver.info(), runner: 'test', evidenceDir: '/tmp' }, run);
-    const verdict = (id: string) => (record.results as Array<{ id: string; verdict: string }>).find((r) => r.id === id)!.verdict;
-    expect(verdict('crm_account_with_contacts.scratch.run-ask')).toBe('not-run');
-    expect(verdict('crm_account_with_contacts.scratch.run-operations')).toBe('pass');
+    const verdict = (r: typeof record, id: string) => (r.results as Array<{ id: string; verdict: string }>).find((x) => x.id === id)!.verdict;
+    expect(verdict(record, 'crm_account_with_contacts.scratch.run-ask')).toBe('pass');
+    expect(verdict(record, 'crm_account_with_contacts.scratch.run-operations')).toBe('pass');
+    // The same half with every turn not measured is not-run, never fail.
+    const none = structuredClone(run);
+    none.modes[0]!.run!.questions = half.questions.map((q) => ({ question: q.question, persona: q.persona, notMeasured: 'seed: its expected answer changes without democrm_account ac1, which the app refused' }));
+    expect(cardScorecard(none).modes[0]!.first.ask).toEqual({ passed: 0, total: 0, leaks: 0, notMeasured: 9 });
+    const noneRecord = runRecord({ run: 'r', date: '2026-11-06', packages: PUBLISHED, driver: driver.info(), runner: 'test', evidenceDir: '/tmp' }, none);
+    expect(verdict(noneRecord, 'crm_account_with_contacts.scratch.run-ask')).toBe('not-run');
   });
 });
 
