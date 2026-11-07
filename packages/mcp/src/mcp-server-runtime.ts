@@ -1567,6 +1567,9 @@ export class MCPServerRuntime {
             // does. A throw with no code answers `{ error }` as before.
             // `details` is withheld, as on the data tools; `errorResultWithCode`
             // in mcp-http-tools.ts says why.
+            // [#31246] A coded refusal's `error` is the envelope's sentence,
+            // so a sandboxed hook's refusal answers the body's own sentence
+            // rather than the runner's wrapper naming the hook, as the tools do.
             const envelope = thrownRefusalEnvelope(err);
             return {
               contents: [{
@@ -1575,7 +1578,7 @@ export class MCPServerRuntime {
                 text: JSON.stringify(
                   envelope
                     ? {
-                        error: message,
+                        error: envelope.message,
                         code: envelope.code,
                         ...(envelope.status !== undefined ? { status: envelope.status } : {}),
                       }

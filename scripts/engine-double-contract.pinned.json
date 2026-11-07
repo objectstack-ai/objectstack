@@ -2732,6 +2732,21 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata-protocol/src/sys-metadata-repository.history-snapshot-drained-keys.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/sys-metadata-repository.history-snapshot-drained-keys.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/sys-metadata-repository.history-snapshot-drained-keys.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/metadata-protocol/src/sys-metadata-repository.package-writability.test.ts",
       "verb": "delete",
       "pinned": 1

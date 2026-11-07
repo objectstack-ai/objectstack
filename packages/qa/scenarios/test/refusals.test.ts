@@ -98,6 +98,20 @@ const CASES: Array<[string, (c: RawCard) => void, string, RegExp]> = [
   ['a persona that hides nothing', (c) => (c.run.personas[1].hidden = {}), 'run.personas[1].hidden', /at least one object or field/],
   ['a row scope on a path that does not resolve', (c) => (c.run.personas[0].scope[1].field = 'account.region'), 'run.personas[0].scope[1].field', /no seed row of `account` carries `region`/],
   ['a question asked as an unknown persona', (c) => (q(c, 'account_count').personas[0] = 'ghost'), 'run.questions[4].personas[0]', /no persona `ghost`/],
+  // ── what a scope value names: a row (`id`, a lookup), an option (a select) or a user (a declared handle) ──
+  ['a row scope ending on a field that is no declared handle, lookup or select', (c) => (c.run.personas[0].scope[1].field = 'account.name'), 'run.personas[0].scope[1].field', /`account.name` is neither a declared user-handle field nor a declared lookup or select/],
+  ['a user-handle field that is a declared lookup', (c) => c.run.userHandleFields.push({ object: 'contact', field: 'account' }), 'run.userHandleFields[1].field', /`contact.account` is a declared lookup, not a user handle/],
+  ['a user-handle field that is a declared select', (c) => c.run.userHandleFields.push({ object: 'account', field: 'industry' }), 'run.userHandleFields[1].field', /`account.industry` is a declared select, not a user handle/],
+  ['a user-handle field that is the row id', (c) => c.run.userHandleFields.push({ object: 'account', field: 'id' }), 'run.userHandleFields[1].field', /`account.id` is the row id, not a user handle/],
+  ['a user-handle field on an object the card does not seed', (c) => c.run.userHandleFields.push({ object: 'lead', field: 'owner' }), 'run.userHandleFields[1].object', /`lead` is not a seeded expected object/],
+  ['a user-handle field no seed row carries', (c) => c.run.userHandleFields.push({ object: 'account', field: 'owner_name' }), 'run.userHandleFields[1].field', /no seed row of `account` carries `owner_name`/],
+  ['a user-handle field declared twice', (c) => c.run.userHandleFields.push({ object: 'account', field: 'owner' }), 'run.userHandleFields[1]', /duplicate user-handle field `account.owner`/],
+  ['an empty user-handle declaration', (c) => (c.run.userHandleFields = []), 'run.userHandleFields', /too small|>=1/],
+  // ── the person a persona is: `record`, or a user handle ──
+  ['a persona record naming no seeded row', (c) => (c.run.personas[0].record = { object: 'account', id: 'ac9' }), 'run.personas[0].record', /no seeded `account` row has id `ac9`/],
+  ['a persona record on an object the card does not seed', (c) => (c.run.personas[1].record = { object: 'lead', id: 'ld1' }), 'run.personas[1].record', /no seeded `lead` row has id `ld1`/],
+  ['a scoped persona that names no person, by record or by handle', (c) => (c.run.personas[0].scope = [{ object: 'contact', field: 'account.owner', value: 'u_sam' }]), 'run.personas[0].record', /`sdr` declares a row `scope` but names no person: add `record: \{ object, id \}`/],
+  ['a persona record with a key it does not declare', (c) => (c.run.personas[0].record = { object: 'contact', id: 'ct1', field: 'user' }), 'run.personas[0].record.field', /unknown key `field`/],
   ['a row scope on a card without the row-scope tag', (c) => (c.capabilities = c.capabilities.filter((t: string) => t !== 'access-security.row-scope')), 'capabilities', /persona\(s\) `sdr` declare a row `scope`, so the card must carry `access-security.row-scope`/],
   // ── unanswerable ──
   ['an unanswerable truth without its reason', (c) => delete q(c, 'acme_revenue').truth.reason, 'run.questions[7].truth.reason', /expected string/],
@@ -151,6 +165,23 @@ describe('scenario card refusals', () => {
       op(c, 'add_contact').outcome.auditActor = 'sdr';
     });
     expect(r.refusals.map(formatRefusal)).toEqual([]);
+  });
+
+  it('a scoped persona that names its person record loads clean, and a global one may name one too (control for `record`)', () => {
+    const r = load((c) => {
+      c.run.personas[0].scope = [{ object: 'contact', field: 'account.owner', value: 'u_sam' }];
+      c.run.personas[0].record = { object: 'contact', id: 'ct1' };
+      c.run.personas[1].record = { object: 'contact', id: 'ct3' };
+    });
+    expect(r.refusals.map(formatRefusal)).toEqual([]);
+    expect(r.cards[0].card.run.personas.map((p) => p.record)).toEqual([{ object: 'contact', id: 'ct1' }, { object: 'contact', id: 'ct3' }]);
+  });
+
+  it('the handle declaration is what makes `account.owner` a handle: without it both of `sdr`\'s rules and its missing person are refused', () => {
+    const r = load((c) => delete c.run.userHandleFields);
+    expect(r.refusals.map((x) => x.path)).toEqual(['run.personas[0].scope[0].field', 'run.personas[0].scope[1].field', 'run.personas[0].record']);
+    expect(r.refusals[0].message).toMatch(/`account.owner` is neither a declared user-handle field/);
+    expect(r.cards).toEqual([]);
   });
 
   it('a card whose personas scope no rows loads without the row-scope tag (control for the tag rule)', () => {
@@ -309,8 +340,11 @@ describe('the gallery floor (tier starter | delivery)', () => {
     Object.assign(c.run.seed, { region: extra(1, 'rg'), territory: extra(1, 'tr'), activity: extra(100, 'act') });
     // 0 → 1 dashboard.
     c.expect.dashboards = ['pipeline'];
-    // 1 → 2 personas with a row scope (a scope on an object no question or write reads).
+    // 1 → 2 personas with a row scope (a scope on an object no question or write reads):
+    // on a declared select, by a persona that names the seed row it is.
+    c.expect.selectFields.push({ object: 'activity', field: 'kind', minOptions: 1 });
     c.run.personas[1].scope = [{ object: 'activity', field: 'kind', value: 'call' }];
+    c.run.personas[1].record = { object: 'contact', id: 'ct3' };
     // 5 → 4 operations (no guardrail names this one); 8 questions and 3 agent actions already sit on the floor.
     c.run.operations = c.run.operations.filter((o: { id: string }) => o.id !== 'partner_edits_account');
   };

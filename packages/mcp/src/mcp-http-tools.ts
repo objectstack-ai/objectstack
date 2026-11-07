@@ -50,7 +50,7 @@ import { StandardErrorCode, type ErrorCode } from '@objectstack/spec/api';
 // [#23701] The one key every door that translates the engine's unique-violation
 // envelope asks (the registered code AND the class name, never message text),
 // and the one classification whose arm states the wire code for it.
-import { earnedAnswerOf, isEngineDuplicateRecordEnvelope, isServerFault, logServerFault, mapDataError, resolveQueryReadLimits, staleSummaryAnswerLines, structuredCodeAnswer, type SummaryRecomputeRefusal } from '@objectstack/types';
+import { earnedAnswerOf, isEngineDuplicateRecordEnvelope, isServerFault, logServerFault, mapDataError, resolveQueryReadLimits, sandboxBusinessMessage, staleSummaryAnswerLines, structuredCodeAnswer, type SummaryRecomputeRefusal } from '@objectstack/types';
 import {
   MCP_OAUTH_SCOPE_DATA_READ,
   MCP_OAUTH_SCOPE_DATA_WRITE,
@@ -1118,6 +1118,19 @@ export interface ThrownRefusalEnvelope {
  * (`developerMessage`, `object`, `field`) in their envelope's context slot;
  * this envelope has none. It is `code`, `message` and `status`, and the data
  * tools withhold `details` by design ({@link errorResultWithCode}).
+ *
+ * ## The caller-addressed sentence of a sandboxed refusal (#31246)
+ *
+ * A QuickJS hook or action body that throws with a declared `code` and
+ * `status` leaves the runner as a `SandboxError` whose `.message` is the
+ * `<kind> '<name>' threw: Error: …` debug wrapper, naming the hook, and whose
+ * `.innerMessage` is the sentence the author addressed to the caller. The
+ * `message` here is `sandboxBusinessMessage` (`@objectstack/types`), the read
+ * the `/api/v1/data` door makes for the same throw, and `.message` only when
+ * that read declines: not a sandbox refusal, or a body that crashed. ⛔ One
+ * reader, never a copy of its logic here, and never a strip of the wrapper's
+ * prose: a non-sandbox refusal keeps its own message byte for byte. The code
+ * and status are unchanged.
  */
 export function thrownRefusalEnvelope(err: unknown): ThrownRefusalEnvelope | undefined {
   const thrownCode = (err as { code?: unknown } | null | undefined)?.code;
@@ -1125,7 +1138,7 @@ export function thrownRefusalEnvelope(err: unknown): ThrownRefusalEnvelope | und
   const status = (err as { status?: unknown }).status;
   return {
     code: wireCodeOf(err, thrownCode),
-    message: messageOf(err),
+    message: sandboxBusinessMessage(err) ?? messageOf(err),
     ...(typeof status === 'number' ? { status } : {}),
   };
 }
