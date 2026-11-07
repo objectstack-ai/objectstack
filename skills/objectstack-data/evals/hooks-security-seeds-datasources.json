@@ -100,6 +100,36 @@
         "must_contain": ["beforeInsert", "beforeUpdate", "language: 'js'", "'api.read'", "ctx.api.object("],
         "must_not_contain": ["handler:", "HookContext", "'http.fetch'"]
       }
+    },
+    {
+      "id": 11,
+      "prompt": "Seed eight demo members for the gym app. For privacy, mask the phone numbers like `138****4207` and put `N/A` where we have no email.",
+      "expected_output": "A `defineSeed(Member, { env: ['dev', 'test'], records: [...] })` whose every value is fictional but WELL-FORMED: `+86 138 0013 8000`-style phones, `liyy@example.com`-style emails, option VALUES for selects. Explains that a seed row passes the same field validation as a user's insert, so a masked phone or an `N/A` email is refused and never lands — the table loads short or empty while bookings point at members that do not exist. Does not downgrade the `phone` field to `text` to make the rows load.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["defineSeed", "+86 138", "@example.com"],
+        "must_not_contain": ["****", "'N/A'", "type: 'text', label: 'Phone'"]
+      }
+    },
+    {
+      "id": 12,
+      "prompt": "报销单：申请人默认是当前用户，还有一个审批人和一个复核人。",
+      "expected_output": "`applicant`, `approver` and `reviewer` are `type: 'user'` fields (the person picker — no `reference`, never a `lookup` to a user object you invent); `applicant` carries `defaultValue: 'current_user'`; none is `required`, since the request does not ask for it and the platform already stamps the owner and `created_by`. Describes the default as SAVE-time — 「保存后申请人会自动填为当前用户；表单里这一栏可能显示为空，留空提交即可」 — and does not promise the create form pre-fills it.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["type: 'user'", "defaultValue: 'current_user'"],
+        "must_not_contain": ["reference: 'sys_user'", "reference: 'user'", "{ type: 'user', required: true }", "会自动预填"]
+      }
+    },
+    {
+      "id": 13,
+      "prompt": "Two objects: performance reviews that only the reviewed person's manager and HR may see, and a price list everyone can read but only finance maintains.",
+      "expected_output": "`performance_review` is `sharingModel: 'private'` (owner-only by default, widened to the manager and HR with sharing rules / RLS in a permission set, rules/security.md); `price_list` is `sharingModel: 'public_read'` (everyone reads, the owner writes) with finance as its owners. Neither is `public_read_write`, the posture for an ordinary shared business object — the posture is chosen from the request, not by habit. No `permissions` key on the object.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["sharingModel: 'private'", "sharingModel: 'public_read'"],
+        "must_not_contain": ["sharingModel: 'public_read_write'", "permissions:"]
+      }
     }
   ]
 }

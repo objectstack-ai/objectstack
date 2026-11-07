@@ -136,6 +136,96 @@
           "name: 'crm_account'"
         ]
       }
+    },
+    {
+      "id": 8,
+      "prompt": "给 `task` 加一个「是否完成」字段，设成必填，免得有人忘了填。",
+      "expected_output": "Adds `is_done: { type: 'boolean', label: '是否完成', defaultValue: false }` with NO `required`: a checkbox always holds one of its two values, so `required` can only read as \"must be true\" and a form that reads it that way refuses the unchecked state — the one state a new task starts in; the default also lands imported or seeded rows that omit the column on a real `false`. Tells the user that \"must be ticked\" (terms, a confirmation) is a `validations[]` rule, not `required`. The label is Chinese, as the request is.",
+      "files": [],
+      "assertions": {
+        "must_contain": [
+          "type: 'boolean'",
+          "defaultValue: false",
+          "label: '是否完成'"
+        ],
+        "must_not_contain": [
+          "required: true",
+          "label: 'Is Done'"
+        ]
+      }
+    },
+    {
+      "id": 9,
+      "prompt": "订单的流程是 草稿 → 已提交 → 已审批 / 已驳回，审批通过后才能发货。请建模这个流程，并保证没人能直接建一张已审批的订单。",
+      "expected_output": "The lifecycle is a `status` `select` on `order` (options `draft` / `submitted` / `approved` / `rejected` with Chinese labels), guarded by a `state_machine` validation whose `transitions` map uses option VALUES and which declares `initialStates: ['draft']` — `transitions` governs only UPDATE and a `select` accepts any option on insert, so without it an order can be created already `approved`. No separate status / stage / step table, and no approval-record object: the approval itself is a flow (objectstack-automation).",
+      "files": [],
+      "assertions": {
+        "must_contain": [
+          "type: 'select'",
+          "type: 'state_machine'",
+          "initialStates: ['draft']",
+          "transitions"
+        ],
+        "must_not_contain": [
+          "reference: 'order_status'",
+          "name: 'approval_record'",
+          "approved: ['已发货']"
+        ]
+      }
+    },
+    {
+      "id": 10,
+      "prompt": "项目上要显示「已完成任务数」「任务总数」和「完成率」。",
+      "expected_output": "Three fields on `project`: `completed_task_count` and `task_count` are `summary` fields over the `task` child with `function: 'count'` (and `summaryOperations.object: 'task'`), the completed one carrying the qualifier in `filter: { status: 'completed' }` — keyed by a CHILD field and the option VALUE, never the label `已完成`; dropped, the field counts every task and shows a plausible wrong total. `completion_rate` is a `formula` over the two summaries, authored after them (it computes only once they do). Notes that a summary added after data loaded stays blank until a task is edited.",
+      "files": [],
+      "assertions": {
+        "must_contain": [
+          "type: 'summary'",
+          "function: 'count'",
+          "filter: { status: 'completed' }",
+          "type: 'formula'"
+        ],
+        "must_not_contain": [
+          "filter: { status: '已完成' }",
+          "status: { $eq: '已完成' }"
+        ]
+      }
+    },
+    {
+      "id": 11,
+      "prompt": "工单需要一个「负责人」，每个客服只能看到自己负责的工单。",
+      "expected_output": "Adds NO owner lookup: every object already carries the platform `owner_id` (reassignable, stamped to the creator), which is what owner-scoped visibility and \"my records\" views read — a hand-added 负责人 lookup is a second owner those never see. Sets `sharingModel: 'private'` on `ticket` (owner-only by default) and leaves `ownership` at its default. A people field is added only for a role DISTINCT from the owner (a reviewer, an approver), as `type: 'user'`.",
+      "files": [],
+      "assertions": {
+        "must_contain": [
+          "owner_id",
+          "sharingModel: 'private'"
+        ],
+        "must_not_contain": [
+          "reference: 'sys_user'",
+          "reference: 'user'",
+          "ownership: 'user'"
+        ]
+      }
+    },
+    {
+      "id": 12,
+      "prompt": "新建「供应商」对象：公司名称、联系邮箱、合作状态（合作中 / 已终止）。",
+      "expected_output": "`supplier` with `label: '供应商'` and Chinese field and option labels (`公司名称`, `联系邮箱`, `合作状态`; options `active` → `合作中`, `terminated` → `已终止`) — labels follow the language of the request, only machine names stay ASCII `snake_case`. An authored `sharingModel`, `pluralLabel` and `icon`; the status is a `select` with a non-empty `options` list.",
+      "files": [],
+      "assertions": {
+        "must_contain": [
+          "label: '供应商'",
+          "label: '公司名称'",
+          "value: 'active'",
+          "sharingModel"
+        ],
+        "must_not_contain": [
+          "label: 'Supplier'",
+          "label: 'Company Name'",
+          "value: '合作中'"
+        ]
+      }
     }
   ]
 }

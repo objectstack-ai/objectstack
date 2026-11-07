@@ -161,3 +161,13 @@ produce byte-identical `dist/objectstack.json`.
 | Scope demo data with `env: ['dev','test']` | Keep noise out of prod |
 | Order seeds parent → child in the exported array | References resolve at load time |
 | `replace` only on cache tables the caller clears | It never deletes: duplicates otherwise |
+
+**Fictional is fine; malformed is not.** A seed row is written through the same
+field validation as a user's insert, and a value the field type refuses never
+lands — the table loads short or empty while sibling rows point at records that
+do not exist. So never mask or placeholder a sample value: no `138****4207`,
+`***`, `XXX`, `N/A`, `—`, `TBD`. Invent a plausible well-formed one — `+86 138
+0013 8000` for a `phone`, `liyy@example.com` for an `email`,
+`https://example.com/a` for a `url`; a `select` value is an option `value`,
+never its label. Never downgrade a field type (an `address` to `text`) to make a
+seed load.
