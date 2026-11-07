@@ -290,7 +290,7 @@ export async function runSsoOidcCallbackScope(
     return response;
   }
 
-  const classified = scope.held.at(-1);
+  const classified = scope.held.length > 0 ? scope.held[scope.held.length - 1] : undefined;
   for (const line of scope.held.slice(0, -1)) line.release();
   const cause = classified?.cause ?? SSO_OIDC_UNCLASSIFIED_REFUSAL;
   const meta = { providerId, protocol: 'oidc', cause };
