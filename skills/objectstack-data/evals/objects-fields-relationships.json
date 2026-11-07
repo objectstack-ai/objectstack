@@ -53,7 +53,8 @@
           "unique: 'organization'",
           "state_machine",
           "transitions",
-          "record."
+          "record.",
+          "!= null"
         ],
         "must_not_contain": [
           "type: 'unique'",
