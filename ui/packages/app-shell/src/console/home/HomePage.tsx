@@ -35,6 +35,7 @@ import { HomeAppsStrip } from './HomeAppsStrip.js';
 import { appSegmentOf, lastOpenedByApp } from './appLastOpened.js';
 import { recentItemObject, recentItemTypeLabel } from './recentItemTypeLabel.js';
 import { RecoveryPasswordReminder } from './RecoveryPasswordReminder.js';
+import { ConnectAssistantCard } from './ConnectAssistantCard.js';
 import { DeploymentNotice } from '../deployment-notice/DeploymentNotice.js';
 import { HomeActionCenter, HomeContinue, HomeActivity, HomePendingDraftsRow, type RecentItemContext } from './HomeRail.js';
 import { resolveI18nLabel } from '@objectstack/spec/ui';
@@ -575,6 +576,7 @@ export function HomePage() {
             one person's; this is the deployment's. */}
         <DeploymentNotice placement="home" />
         <RecoveryPasswordReminder t={t} />
+        <ConnectAssistantCard />
         <div className="flex flex-1 items-center justify-center p-6">
         {/*
           Role-aware empty state. ADMINS get the AI-first magic moment as the
@@ -662,6 +664,8 @@ export function HomePage() {
       {/* objectstack#30120 — see the empty-state branch above. */}
       <DeploymentNotice placement="home" />
       <RecoveryPasswordReminder t={t} />
+      {/* objectstack#30895 — every person: connect an AI assistant, until they have or hide it. */}
+      <ConnectAssistantCard />
 
       {/* The content column (objectui#12601): 1120 px, centred, 28 px above the
           first section and 28 px between sections. No bordered card around the

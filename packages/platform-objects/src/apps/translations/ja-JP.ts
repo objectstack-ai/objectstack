@@ -71,6 +71,9 @@ export const jaJP: TranslationData = {
         // the rationale in `en.ts` (#6659). Wording matches this locale's
         // `sys_sso_provider.pluralLabel`.
         nav_sso_providers: { label: 'SSO プロバイダー' },
+        // Conditionally contributed by plugin-auth (only while SCIM is wired),
+        // the same case as the entry above; see `en.ts` (#31123).
+        nav_scim_credentials: { label: 'SCIM 資格情報' },
         nav_api_keys: { label: 'API キー' },
 
         nav_approvals_inbox: { label: '承認センター' },

@@ -103,6 +103,18 @@
  * (`AuthManager.resolveUserAuthGates`), so the row records a posture the
  * session is really held by, and fails open exactly where the gate does: no
  * posture read, no hold recorded.
+ *
+ * ## A sign-in the IP allow-list refuses (#30924)
+ *
+ * The ADR-0069 D5 allow-list refuses a sign-in at two doors — the deployment's
+ * list, before any account is resolved, and an organization's own list, when
+ * the session is created — and each refusal is a `login_failed` row with
+ * `context.reason: 'IP_NOT_ALLOWED'` and `context.rule: 'ip_allow_list'`,
+ * bounded per client address (`ip-allow-list-refusal-audit.ts`). It is the one
+ * account event that may name no subject: refused before better-auth runs, the
+ * identifier the request carried may name no account, and the address and the
+ * rule are still the record an enforcement report reads. The identifier is
+ * still never recorded, and the password never read.
  */
 
 import { getIP } from '@better-auth/core/utils/ip';
@@ -125,7 +137,12 @@ import { canonicalClientAddress } from './client-address-canonical.js';
 export interface AuthEventAuditSurface {
   recordAuthEvent(event: {
     action: 'login' | 'logout' | 'login_failed' | 'account_locked';
-    userId: string;
+    /**
+     * The event's subject. Every event names one, except a `login_failed` for
+     * a sign-in refused before any account could be resolved (the IP
+     * allow-list, #30924), which may name none.
+     */
+    userId?: string;
     sessionId?: string;
     organizationId?: string;
     ipAddress?: string;
@@ -280,8 +297,19 @@ export function refusalCodeOf(returned: unknown): string | undefined {
 }
 
 /**
+ * [#30924] The refusals whose refusing door writes the sign-in's
+ * `login_failed` row itself: an organization's IP list refuses the session at
+ * its creation (`IP_NOT_ALLOWED`, `auth-manager-database-hooks.ts`) and records
+ * the account, the organization, the rule and the per-address count there,
+ * which the password sign-in's outcome cannot see. The outcome writes no
+ * second row for one.
+ */
+const REFUSALS_RECORDED_AT_THEIR_DOOR: ReadonlySet<string> = new Set(['IP_NOT_ALLOWED']);
+
+/**
  * The `login_failed` event for a refused password sign-in, or `null` when no
- * account was resolved (no subject ⇒ no row; see the module note).
+ * account was resolved (no subject ⇒ no row; see the module note) or the
+ * refusing door wrote the row itself ({@link REFUSALS_RECORDED_AT_THEIR_DOOR}).
  */
 export function signInFailureEventFor(
   userId: string | null | undefined,
@@ -289,6 +317,7 @@ export function signInFailureEventFor(
 ): AuthSessionAuditEventInput | null {
   const subject = str(userId);
   if (!subject) return null;
+  if (outcome.reason && REFUSALS_RECORDED_AT_THEIR_DOOR.has(outcome.reason)) return null;
   const context: Record<string, unknown> = { endpoint: outcome.path };
   if (outcome.reason) context.reason = outcome.reason;
   return {

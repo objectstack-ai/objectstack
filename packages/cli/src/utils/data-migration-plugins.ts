@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { resolveStorageCapabilityArg, resolveStorageLocalRootEnv } from '../commands/serve.js';
-import { oneShotSettingsPlugin } from './one-shot-settings.js';
+import { oneShotSettingsPlugins } from './one-shot-settings.js';
 
 /**
  * The plugins a gated data migration boots with.
@@ -88,12 +88,17 @@ export async function buildDataMigrationPlugins(
     // currency and timezone (`localization.currency` / `.timezone`) from the
     // settings service; without it every organization reads as having no home
     // currency. The one-shot composition, as the storage arm below takes it.
-    plugins.push(await oneShotSettingsPlugin());
+    plugins.push(...await oneShotSettingsPlugins());
   }
   if (opts.storage === true) {
+    // [#31007] Not optional any more where it refuses: a refusal of the crypto
+    // composition (a declared provider this run cannot read) is the run's
+    // answer, never a reason to boot on without the settings service.
+    const { HostCryptoProviderRefusal } = await import('../commands/serve.js');
     try {
-      plugins.push(await oneShotSettingsPlugin());
-    } catch {
+      plugins.push(...await oneShotSettingsPlugins());
+    } catch (error) {
+      if (error instanceof HostCryptoProviderRefusal) throw error;
       // optional — without it, constructor/env-driven storage config still applies
     }
     const { StorageServicePlugin } = await import('@objectstack/service-storage');

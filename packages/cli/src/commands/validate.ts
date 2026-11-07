@@ -91,6 +91,15 @@ import { findFlowCycleRefusals } from '../utils/flow-undeclared-cycle.js';
 // reported when the declaring package depends on packages outside the stack.
 // Walked the way the load path registers, like the refusal above.
 import { judgePicklistReferences, picklistRefusalHeading, printPicklistReferenceNotices } from '../utils/picklist-references.js';
+// `--target`: a target environment's restriction profile (`RestrictionProfileSchema`,
+// `@objectstack/spec/system`) — what that environment refuses, and the versions it runs.
+import {
+  loadRestrictionProfile,
+  judgeRestrictionProfile,
+  restrictionProfileVersionDrift,
+  type ParsedRestrictionProfile,
+  type RestrictionVersionDrift,
+} from '../utils/restriction-profile.js';
 
 export default class Validate extends Command {
   static override description =
@@ -103,6 +112,11 @@ export default class Validate extends Command {
   static override flags = {
     strict: Flags.boolean({ description: 'Treat warnings as errors' }),
     json: Flags.boolean({ description: 'Output results as JSON' }),
+    target: Flags.string({
+      description:
+        'Also judge the stack against a target environment\'s restriction profile (a JSON file): refuse what '
+        + 'it forbids, warn when the local @objectstack/spec / @objectstack/skills version differs from the target\'s',
+    }),
   };
 
   async run(): Promise<void> {
@@ -206,6 +220,13 @@ export default class Validate extends Command {
     // permission-set lists: reports, never refuses, NOT in `--strict`'s list,
     // and `os compile` computes the identical records.
     let dependencyRangeWarnings: DependencyRangeDiagnostic[] = [];
+    // `--target` only (step 1c): the local `@objectstack/spec` / `@objectstack/skills`
+    // versions that are not the ones the target's restriction profile says it
+    // runs. Same class as the list above — reports, never refuses, and is NOT in
+    // the `warnings` list `--strict` reads: the target's version is the
+    // environment's, not something this stack can fix, the reason the protocol
+    // drift advisory is never gated by `--strict` either. Empty without `--target`.
+    let targetVersionWarnings: RestrictionVersionDrift[] = [];
     const warningsSoFar = () => [
       ...ruleAdvisories,
       ...docWarnings,
@@ -228,6 +249,8 @@ export default class Validate extends Command {
       ...picklistReferenceNotices,
       // APPENDED for the same reason, one member later again.
       ...dependencyRangeWarnings,
+      // APPENDED for the same reason, one member later again.
+      ...targetVersionWarnings,
     ];
     // [commit 79cf692b0] The ADR-0087 D2 conversion notices, hoisted for the SAME reason
     // and under the SAME ruling as the five lists above — one field over. The
@@ -264,6 +287,19 @@ export default class Validate extends Command {
     const conversionNotices: ConversionNotice[] = [];
 
     try {
+      // 0. `--target`: read the target environment's restriction profile FIRST,
+      //    before the stack — an unreadable or invalid profile is refused
+      //    (thrown into the catch-all: `--json` gets `error`, exit 1) whatever
+      //    the stack holds, so no run ever judges against half a profile. No
+      //    `--target`, no profile: nothing below that reads it runs, and the
+      //    command is exactly what it was.
+      let targetProfile: ParsedRestrictionProfile | undefined;
+      if (flags.target !== undefined) {
+        const loadedProfile = loadRestrictionProfile(flags.target);
+        targetProfile = loadedProfile.profile;
+        if (!flags.json) printKV('Target profile', loadedProfile.file);
+      }
+
       // 1. Load configuration
       if (!flags.json) printStep('Loading configuration...');
       const loaded = await loadConfig(args.config);
@@ -289,6 +325,18 @@ export default class Validate extends Command {
       if (!flags.json) {
         printKV('Config', absolutePath);
         printKV('Load time', `${duration}ms`);
+      }
+
+      // 1c. `--target`: the version drift between this project and the target.
+      //     Warns, never refuses (see `targetVersionWarnings` above). Resolved
+      //     from the config's directory — the project being validated.
+      if (targetProfile) {
+        targetVersionWarnings = restrictionProfileVersionDrift(targetProfile, dirname(absolutePath));
+        if (targetVersionWarnings.length > 0 && !flags.json) {
+          console.log('');
+          printWarning(`Version drift from the target environment (${targetVersionWarnings.length})`);
+          printBulletList(targetVersionWarnings.map((w) => w.message), { noun: 'version drift warning' });
+        }
       }
 
       // 2. Normalize map-formatted stack definition and validate against schema.
@@ -1052,6 +1100,37 @@ export default class Validate extends Command {
             + ' — a package the same artifact delivers is checked for presence only',
         );
         printBulletList(dependencyRangeWarnings.map(formatDependencyRangeDiagnostic), { noun: 'dependency-range diagnostic' });
+      }
+
+      // 3f. `--target`: what the target environment's restriction profile
+      //     forbids. LAST of the refusals on purpose: every gate above asks
+      //     whether ANY runtime accepts the stack, this one asks whether THIS
+      //     target does, and the first question is the one worth answering
+      //     first. One row per refused item, each naming the item and the one
+      //     profile dimension that refuses it (`utils/restriction-profile.ts`
+      //     holds the reader rules).
+      if (targetProfile) {
+        const restrictionRefusals = judgeRestrictionProfile(result.data as Record<string, unknown>, targetProfile);
+        if (restrictionRefusals.length > 0) {
+          if (flags.json) {
+            await emitJson({
+              valid: false,
+              errors: restrictionRefusals,
+              warnings: warningsSoFar(),
+              conversions: conversionNotices,
+              duration: timer.elapsed(),
+            });
+            this.exit(1);
+          }
+          const n = restrictionRefusals.length;
+          console.log('');
+          printError(`The target environment's restriction profile refuses this stack (${n} item${n > 1 ? 's' : ''})`);
+          printBulletList(
+            restrictionRefusals.map((r) => `[${r.rule}] ${r.where}: ${r.message}`),
+            { noun: 'restriction refusal(s)', remedy: JSON_FULL_LIST_REMEDY },
+          );
+          this.exit(1);
+        }
       }
 
       // 4. Collect and display stats

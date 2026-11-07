@@ -17,7 +17,8 @@ import * as SharingObjects from './index.js';
  * `sys_record_share.by_object`, where the field is a pointer pair's type half.
  *
  * A field stores an object's API name when it declares the `object-ref`
- * widget (the object picker) or when it is the `referenceVia` sibling of a
+ * widget (the object picker) or `shareable-object-ref` (the sharing-rule object
+ * picker, the same stored name) or when it is the `referenceVia` sibling of a
  * pointer pair. Enumerated over every object this package ships
  * (`objects/index.ts`), so a view added later is judged without anyone
  * listing it here.
@@ -40,7 +41,7 @@ describe('sharing list views — no grouping on a field that stores an object AP
   function apiNameFields(object: ObjectDef): string[] {
     const names = new Set<string>();
     for (const [name, def] of Object.entries(object.fields)) {
-      if (def?.widget === 'object-ref') names.add(name);
+      if (def?.widget === 'object-ref' || def?.widget === 'shareable-object-ref') names.add(name);
       if (typeof def?.referenceVia === 'string') names.add(def.referenceVia);
     }
     return [...names].sort();
@@ -77,6 +78,6 @@ describe('sharing list views — no grouping on a field that stores an object AP
     expect(view?.sort?.[0]).toEqual({ field: 'object_name', order: 'asc' });
     expect(view?.columns?.[0]).toBe('object_name');
     const fields = SysSharingRule.fields as Record<string, { widget?: unknown }>;
-    expect(fields.object_name.widget).toBe('object-ref');
+    expect(fields.object_name.widget).toBe('shareable-object-ref');
   });
 });

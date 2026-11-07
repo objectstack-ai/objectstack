@@ -1116,17 +1116,44 @@ export const DYNAMIC_KEY_FAMILIES = [
     vocabulary: { module: 'packages/app-shell/src/components/ManagedByBadge.tsx', name: 'VARIANTS', kind: 'objectField', field: 'i18nKey' },
   },
   {
-    head: 'marketplace.category.',
+    head: 'marketplace.businessFunction.',
     enumerable: false,
-    why: 'runtime-data',
+    why: 'external-vocabulary',
     reason:
-      '`MarketplacePackage.category` is `string | null` off the registry API — a marketplace ' +
-      'the platform does not own decides the set. The 15 members `en` carries are a curated ' +
-      'subset, not the vocabulary.',
+      'The member set is `MarketplaceBusinessFunctionSchema.options` in `@objectstack/spec/marketplace`, which the console ' +
+      'iterates (`marketplaceTaxonomy.ts`) and this reader cannot open (see readVocabulary). A ' +
+      'repo-local Record would be the second hand-kept list the taxonomy ruling forbids. The set ' +
+      'is pinned one layer out, where the enum can be imported: ' +
+      'packages/i18n/src/__tests__/marketplace-taxonomy-labels-31011.test.ts requires a non-empty ' +
+      'label for every spec value, and none for any other, in every marketplace catalogue.',
   },
   {
     head: 'marketplace.disclosure.runtime.',
     vocabulary: { module: 'packages/app-shell/src/console/marketplace/PluginDisclosure.tsx', name: 'RUNTIME_FALLBACK', kind: 'objectKeys' },
+  },
+  {
+    head: 'marketplace.industry.',
+    enumerable: false,
+    why: 'external-vocabulary',
+    reason:
+      'The member set is `MarketplaceIndustrySchema.options` in `@objectstack/spec/marketplace`, which the console ' +
+      'iterates (`marketplaceTaxonomy.ts`) and this reader cannot open (see readVocabulary). A ' +
+      'repo-local Record would be the second hand-kept list the taxonomy ruling forbids. The set ' +
+      'is pinned one layer out, where the enum can be imported: ' +
+      'packages/i18n/src/__tests__/marketplace-taxonomy-labels-31011.test.ts requires a non-empty ' +
+      'label for every spec value, and none for any other, in every marketplace catalogue.',
+  },
+  {
+    head: 'marketplace.solutionType.',
+    enumerable: false,
+    why: 'external-vocabulary',
+    reason:
+      'The member set is `MarketplaceSolutionTypeSchema.options` in `@objectstack/spec/marketplace`, which the console ' +
+      'iterates (`marketplaceTaxonomy.ts`) and this reader cannot open (see readVocabulary). A ' +
+      'repo-local Record would be the second hand-kept list the taxonomy ruling forbids. The set ' +
+      'is pinned one layer out, where the enum can be imported: ' +
+      'packages/i18n/src/__tests__/marketplace-taxonomy-labels-31011.test.ts requires a non-empty ' +
+      'label for every spec value, and none for any other, in every marketplace catalogue.',
   },
   {
     head: 'organization.invitations.status.',

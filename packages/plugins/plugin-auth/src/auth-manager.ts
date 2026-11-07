@@ -250,7 +250,7 @@ import { resolvePasswordHasher } from './auth-manager-password-hasher.js';
 // after-hook (cut 12) and before-hook (cut 13) are now imported there, by the
 // two arrows that moved with it.
 import { createAuthInstance, type AuthInstanceHost } from './auth-manager-auth-instance.js';
-import { runSsoOidcCallbackScope } from './sso-oidc-refusal-cause.js';
+import { readSamlAcsLanding, runSsoCallbackScope, type SamlLandingContext, type SsoCallbackRequest } from './sso-oidc-refusal-cause.js';
 // [#25224 cut 16] The body of `buildPluginList`; the method of the same name
 // below hands it the members it reads (`PluginListHost`). The organization
 // plugin's factory (cut 15) is now imported there, by the arrow that moved
@@ -3939,24 +3939,36 @@ export class AuthManager {
    */
   handleRequest(request: Request, transport?: { remoteAddress?: string }): Promise<Response> {
     // [#25224 cut 10] The body moved to `auth-manager-request-routing.ts` (see `RequestRoutingHost`).
-    const host: Pick<RequestRoutingHost, 'betterAuthEndpointPath' | 'getOrCreateAuth' | 'resolveClientAddress' | 'runSubjectErasureAtomically' | 'answerOAuthTokenRevocation' | 'runSsoOidcCallback'> = {
+    const host: Pick<RequestRoutingHost, 'betterAuthEndpointPath' | 'getOrCreateAuth' | 'resolveClientAddress' | 'runSubjectErasureAtomically' | 'answerOAuthTokenRevocation' | 'runSsoCallback'> = {
       betterAuthEndpointPath: (...a) => this.betterAuthEndpointPath(...a),
       getOrCreateAuth: (...a) => this.getOrCreateAuth(...a),
       resolveClientAddress: (...a) => this.resolveClientAddress(...a),
       runSubjectErasureAtomically: (...a) => this.runSubjectErasureAtomically(...a),
       answerOAuthTokenRevocation: (...a) => this.answerOAuthTokenRevocation(...a),
-      runSsoOidcCallback: (...a) => this.runSsoOidcCallback(...a),
+      runSsoCallback: (...a) => this.runSsoCallback(...a),
     };
     return handleRequest.call(host, request, transport);
   }
 
   /**
-   * Run one enterprise OIDC callback (`/sso/callback/:providerId`) so its
-   * refusal names its cause: the redirect's `error_description` and one `warn`
-   * line on this manager's logger (`sso-oidc-refusal-cause.ts`).
+   * Run one enterprise SSO callback inside the refusal scope
+   * (`sso-oidc-refusal-cause.ts`): an OIDC callback (`/sso/callback/:providerId`)
+   * whose refusal names its cause on the redirect's `error_description` and in
+   * one `warn` line on this manager's logger, and a SAML ACS
+   * (`/sso/saml2/sp/acs/:providerId`) whose refusal lands on the sign-in's error
+   * URL, read from the relay state before better-auth consumes it.
    */
-  private runSsoOidcCallback(providerId: string, run: () => Promise<Response>): Promise<Response> {
-    return runSsoOidcCallbackScope(providerId, this.config.logger, run);
+  private runSsoCallback(callback: SsoCallbackRequest, run: () => Promise<Response>): Promise<Response> {
+    return runSsoCallbackScope(
+      callback,
+      this.config.logger,
+      async (saml) => {
+        const auth: any = await this.getOrCreateAuth();
+        const context = (await auth.$context) as SamlLandingContext;
+        return readSamlAcsLanding(context, saml.providerId, saml.request);
+      },
+      run,
+    );
   }
 
   /**
@@ -6151,6 +6163,22 @@ export class AuthManager {
       logDurabilityDegradation: (...a) => this.logDurabilityDegradation(...a),
     };
     return resolveSignInAccountId.call(host, email);
+  }
+
+  /**
+   * [#30924] The id of the account a sign-in refused by the ADR-0069 D5 IP
+   * allow-list names, for its `login_failed` row only
+   * (`ip-allow-list-refusal-audit.ts`), or `undefined` — the password
+   * sign-in's own account question ({@link findSignInAccount}). The gate
+   * refuses before better-auth resolves any account, so this is the only way
+   * that row can name one. It decides nothing: the refusal is already
+   * answered. Throws what the engine throws; the caller writes the row with no
+   * subject then.
+   */
+  public async resolveRefusedSignInAccountId(email: string): Promise<string | undefined> {
+    const engine = this.getDataEngine();
+    if (!engine) return undefined;
+    return (await this.findSignInAccount(engine, email, []))?.id;
   }
 
   /**

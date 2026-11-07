@@ -2,16 +2,20 @@
 
 /**
  * `@objectstack/scenarios/runner` — the local scenario runner: Build, Run and
- * Iterate one card with a local Claude Code session (or a recorded replay),
+ * Iterate one card with a local Claude Code session, a local Codex session or
+ * any command that speaks the external driver contract (or a recorded replay),
  * scored by `@objectstack/scenarios/score`, written as run records. Private,
  * like the rest of this package. CLI: `pnpm --filter @objectstack/scenarios run-scenarios`.
  */
 
 export * from './app.js';
 export * from './driver.js';
+export * from './drivers/codex.js';
+export * from './drivers/external.js';
 export * from './namespace.js';
 export * from './observe.js';
 export * from './orchestrate.js';
+export * from './packages.js';
 export * from './project.js';
 export * from './prompts.js';
 export * from './scorecard.js';

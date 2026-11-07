@@ -351,12 +351,17 @@ configure on the IdP side:
 ### SAML sign-in flow
 
 1. User enters their work email (or clicks the enterprise-login button).
-2. Client calls `POST /api/v1/auth/sign-in/sso` with `{ email, callbackURL }`.
+2. Client calls `POST /api/v1/auth/sign-in/sso` with `{ email, callbackURL }`
+   (and optionally `errorCallbackURL`).
 3. The email **domain** is matched to the registered provider; the response is a
    redirect to the IdP's `entryPoint` carrying a signed `SAMLRequest`.
 4. The IdP authenticates the user and POSTs a SAML assertion back to the SP ACS
    URL; `@better-auth/sso` (samlify) validates the signature/timestamp, then
    creates a session and redirects to `callbackURL`.
+5. A refused sign-in redirects to `errorCallbackURL`, or to the platform's
+   sign-in page when none was given, with `error=` naming the refusal: for
+   example `account_not_linked` when the email belongs to an existing account
+   this provider is not linked to. It never lands on `callbackURL`, as with OIDC.
 
 > Signature, timestamp, and replay validation are handled by `@better-auth/sso`
 > (samlify). You only supply the IdP's signing certificate at registration time.

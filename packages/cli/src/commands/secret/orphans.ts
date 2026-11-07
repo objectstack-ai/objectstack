@@ -18,7 +18,7 @@ import {
   isExitSignal,
 } from '../../utils/format.js';
 import { bootSchemaStack } from '../../utils/schema-migrate.js';
-import { oneShotSettingsPlugin } from '../../utils/one-shot-settings.js';
+import { oneShotSettingsPlugins } from '../../utils/one-shot-settings.js';
 import { absentTableReads, secretUnionReadView } from '../../utils/absent-table-reads.js';
 import { describeDriverSqliteFile } from '../../utils/connection-display.js';
 import { JOURNAL_MODE_SWITCH_NOTE } from '../../utils/sqlite-occupancy.js';
@@ -230,7 +230,7 @@ export default class SecretOrphans extends Command {
         // service's default provider: in a development posture with no key,
         // that default mints a key file in the key home, and this report
         // promises to write no row or table, and writes no key file either.
-        extraPlugins: [new PlatformObjectsPlugin(), await oneShotSettingsPlugin()],
+        extraPlugins: [new PlatformObjectsPlugin(), ...await oneShotSettingsPlugins()],
         // [#21391] The report boots READ-ONLY, the boot `os migrate plan`
         // takes: `deferSchemaDdl` holds schema DDL back on every SQL
         // datasource, and `readOnlyProbe` keeps a missing sqlite file from
