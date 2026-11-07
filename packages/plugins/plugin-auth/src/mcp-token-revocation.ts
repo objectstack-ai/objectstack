@@ -21,7 +21,8 @@
  *    `@objectstack/spec` `IAuthService.verifyMcpAccessToken` already says
  *    this: a falsy value when the token is revoked, and callers fail CLOSED.
  *  - **`/oauth2/revoke` deletes it** ({@link answerMcpTokenRevocation}) and
- *    revokes the client's refresh family for that user.
+ *    revokes the grant's refresh family: the client's refresh tokens for that
+ *    user minted under the same organization ({@link revokeMcpGrant}).
  *  - **The Console's withdraw** (`authorized-clients-withdraw.ts`, the own and
  *    the admin door) revokes a grant through {@link revokeMcpGrant} too, keyed
  *    by the consent id; the read above refuses on the next request.
@@ -133,34 +134,45 @@ export interface McpGrantKey {
   organizationId?: string;
 }
 
-/** A consent row as the adapter answers it (camelCase, the provider's field names). */
-interface ConsentRow {
+/**
+ * A consent or refresh-token row as the adapter answers it (camelCase, the
+ * provider's field names). Both models store the organization reference the
+ * grant was made under in `referenceId`.
+ */
+interface GrantRow {
   id?: unknown;
   referenceId?: unknown;
   createdAt?: unknown;
 }
 
 /**
- * Whether a consent row is the one for this organization reference — the
- * provider's own rule (`findConsent`): with a reference, the row carrying
- * exactly it; without one, a row whose reference is missing, null or empty.
+ * Whether a row belongs to the grant of this organization reference — the
+ * provider's own consent rule (`findConsent`): with a reference, the row
+ * carrying exactly it; without one, a row whose reference is missing, null or
+ * empty. The same rule picks the refresh family, because the provider copies
+ * the consent's reference onto the authorization code, the refresh token it
+ * starts and every rotation of it (`handleRefreshTokenGrant` passes the row's
+ * own `referenceId` on), so a family's rows carry their consent's value.
  */
-function isConsentFor(row: ConsentRow, organizationId: string | undefined): boolean {
+function isGrantRow(row: GrantRow, organizationId: string | undefined): boolean {
   return organizationId ? row.referenceId === organizationId : !row.referenceId;
 }
 
-async function consentsOf(store: OAuthGrantStore, grant: McpGrantKey): Promise<ConsentRow[]> {
+/** The rows of `model` for (client, user) that belong to the grant's organization. */
+async function grantRowsOf(store: OAuthGrantStore, model: string, grant: McpGrantKey): Promise<GrantRow[]> {
   const rows = await store.findMany({
-    model: 'oauthConsent',
+    model,
     where: [
       { field: 'clientId', value: grant.clientId },
       { field: 'userId', value: grant.userId },
     ],
   });
   return (Array.isArray(rows) ? rows : []).filter(
-    (row): row is ConsentRow => !!row && typeof row === 'object' && isConsentFor(row as ConsentRow, grant.organizationId),
+    (row): row is GrantRow => !!row && typeof row === 'object' && isGrantRow(row as GrantRow, grant.organizationId),
   );
 }
+
+const consentsOf = (store: OAuthGrantStore, grant: McpGrantKey) => grantRowsOf(store, 'oauthConsent', grant);
 
 /** Whether the client is a server-only `skip_consent` client: one that never has a consent row. */
 async function isSkipConsentClient(store: OAuthGrantStore, clientId: string): Promise<boolean> {
@@ -204,33 +216,54 @@ export async function mcpConsentAdmits(
 }
 
 /**
+ * How many times {@link revokeMcpGrant} reads and deletes the refresh family.
+ * The second read finds the row a rotation racing the first pass wrote: that
+ * rotation started from a row the first read returned and wrote its successor
+ * after the read. A rotation needs a live row to start from, and the first
+ * pass deletes every row it read, so a rotation that starts after it finds
+ * none. The provider's own family delete, by filter, catches a successor
+ * written before its delete runs; the second read runs later than that.
+ */
+const REFRESH_FAMILY_PASSES = 2;
+
+/**
  * Revokes the grant: deletes the consent for (client, user, organization),
- * then the client's refresh family for that user — the refresh tokens and the
- * opaque access tokens minted from them, as the provider's own
- * `invalidateRefreshFamily` does. The consent goes first because it is what
- * the MCP door reads; a failure after it leaves the access token already
- * refused, and the client's retry finishes the rest (every step is
- * idempotent).
+ * then that grant's refresh family — the client's refresh tokens for that
+ * user minted under the same organization, and the opaque access tokens
+ * minted from them, as the provider's own `invalidateRefreshFamily` does for
+ * a whole (client, user) pair. The consent goes first because it is what the
+ * MCP door reads; a failure after it leaves the access token already refused,
+ * and the client's retry finishes the rest (every step is idempotent).
+ *
+ * ⛔ The family is the grant's organization only. A person can authorize the
+ * same client in two organizations: withdrawing it in one must not sign the
+ * client out of the other. A refresh row is picked by the consent's own rule
+ * ({@link isGrantRow}), so every row this grant minted is deleted. A row with
+ * no reference (minted with no active organization, or before consents bound
+ * one) belongs to the grant with no organization, and only that grant's
+ * revoke deletes it. Leaving it under another grant's revoke fails closed: a
+ * token it mints carries no `organization_id`, so the MCP door admits it only
+ * against a consent with no organization ({@link mcpConsentAdmits}), never as
+ * the organization withdrawn.
  */
 export async function revokeMcpGrant(store: OAuthGrantStore, grant: McpGrantKey): Promise<void> {
   for (const consent of await consentsOf(store, grant)) {
     await store.delete({ model: 'oauthConsent', where: [{ field: 'id', value: consent.id }] });
   }
-  const family = [
-    { field: 'clientId', value: grant.clientId },
-    { field: 'userId', value: grant.userId },
-  ];
-  const refreshTokens = (await store.findMany({ model: 'oauthRefreshToken', where: family })) ?? [];
-  const refreshIds = refreshTokens
-    .map((row) => (row as { id?: unknown } | null)?.id)
-    .filter((id) => id !== undefined && id !== null);
-  if (refreshIds.length) {
+  for (let pass = 0; pass < REFRESH_FAMILY_PASSES; pass += 1) {
+    const refreshIds = (await grantRowsOf(store, 'oauthRefreshToken', grant))
+      .map((row) => row.id)
+      .filter((id) => id !== undefined && id !== null);
+    if (!refreshIds.length) return;
     await store.deleteMany({
       model: 'oauthAccessToken',
       where: [{ field: 'refreshId', operator: 'in', value: refreshIds }],
     });
+    await store.deleteMany({
+      model: 'oauthRefreshToken',
+      where: [{ field: 'id', operator: 'in', value: refreshIds }],
+    });
   }
-  await store.deleteMany({ model: 'oauthRefreshToken', where: family });
 }
 
 /**

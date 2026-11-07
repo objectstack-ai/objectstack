@@ -33,7 +33,12 @@
  *    (RFC 7009 §2.2.1);
  *  - a token minted before its consent was granted again stays refused;
  *  - a server-only `skip_consent` client keeps the provider's honest
- *    `unsupported_token_type` and is admitted without a consent row.
+ *    `unsupported_token_type` and is admitted without a consent row;
+ *  - one person, one client, consents in two organizations: revoking the
+ *    grant of one deletes that organization's whole refresh family (every
+ *    rotation of it) and leaves the other organization's family refreshing;
+ *    a refresh row with no organization belongs to the grant with none;
+ *    a rotation racing the revoke does not leave a live successor behind.
  */
 
 import { createRequire } from 'node:module';
@@ -44,7 +49,7 @@ import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { AuthManager } from './auth-manager.js';
 import { authIdentityObjects } from './manifest.js';
-import { UNKNOWN_TOKEN_DESCRIPTIONS } from './mcp-token-revocation.js';
+import { revokeMcpGrant, UNKNOWN_TOKEN_DESCRIPTIONS, type OAuthGrantStore } from './mcp-token-revocation.js';
 
 const BASE = 'http://localhost:3000';
 const AUTH = `${BASE}/api/v1/auth`;
@@ -193,7 +198,38 @@ async function rig() {
   const revoke = (params: Record<string, string>, headers?: Record<string, string>) =>
     postForm('/oauth2/revoke', params, headers);
 
-  return { engine, driver, manager, send, postJson, postForm, rowsAtRest, registerClient, signUp, authorize, exchange, connect, revoke };
+  /** A refresh-token grant: the provider's own answer, status and body. */
+  const refresh = async (clientId: string, refreshToken: string) => {
+    const res = await postForm('/oauth2/token', {
+      grant_type: 'refresh_token', refresh_token: refreshToken, client_id: clientId, resource: MCP_RESOURCE,
+    });
+    return { status: res.status, body: (await res.json().catch(() => null)) as any };
+  };
+
+  /**
+   * Makes the signed-in user a member of a new organization and that
+   * organization the session's active one, so the next consent binds it.
+   * (`/organization/create` is refused under this rig's single posture, so the
+   * organization and the membership are written directly; `set-active` is the
+   * real door, and it checks the membership.)
+   */
+  async function enterOrganization(cookie: string, slug: string): Promise<string> {
+    const [session]: any[] = (await rowsAtRest('sys_session')).filter((row) => cookie.includes(String(row.token)));
+    const userId = session?.user_id ?? (await rowsAtRest('sys_user'))[0]?.id;
+    const org: any = await (engine as any).insert('sys_organization', { name: slug, slug }, SYS);
+    await (engine as any).insert('sys_member', { organization_id: org.id, user_id: userId, role: 'member' }, SYS);
+    const res = await postJson('/organization/set-active', { organizationId: org.id }, cookie);
+    expect(res.status, await res.clone().text()).toBe(200);
+    return String(org.id);
+  }
+
+  /** better-auth's storage adapter: the store every revoke door hands `revokeMcpGrant`. */
+  const store = async (): Promise<OAuthGrantStore> => (await (manager as any).getAuthContext()).adapter;
+
+  return {
+    engine, driver, manager, send, postJson, postForm, rowsAtRest, registerClient, signUp, authorize, exchange, connect, revoke,
+    refresh, enterOrganization, store,
+  };
 }
 
 const bodyOf = async (res: Response) => ({ status: res.status, body: await res.clone().json().catch(() => res.clone().text()) });
@@ -384,5 +420,118 @@ describe('[ruling A, step 5] a server-only `skip_consent` client', () => {
     const hinted = await r.revoke({ token: access_token, token_type_hint: 'refresh_token', client_id: clientId });
     expect(await bodyOf(hinted)).toEqual(provider);
     expect(await r.manager.verifyMcpAccessToken(access_token)).toMatchObject({ clientId });
+  }, 60_000);
+});
+
+describe('a grant is revoked in its own organization only', () => {
+  /** One person, one client: consents in organizations A and B, and the tokens each earned. */
+  async function twoOrganizations() {
+    const r = await rig();
+    const clientId = await r.registerClient();
+    const cookie = await r.signUp('mia@acme.example.com');
+    const userId = String((await r.rowsAtRest('sys_user'))[0]!.id);
+    const orgA = await r.enterOrganization(cookie, 'org-a');
+    const inA = await r.authorize(clientId, cookie);
+    expect(inA.prompted, 'the first consent, in A').toBe(true);
+    const a = await r.exchange(clientId, inA.code);
+    const orgB = await r.enterOrganization(cookie, 'org-b');
+    const inB = await r.authorize(clientId, cookie);
+    expect(inB.prompted, 'B is a consent of its own').toBe(true);
+    const b = await r.exchange(clientId, inB.code);
+    expect((await r.manager.verifyMcpAccessToken(a.access_token))?.organizationId).toBe(orgA);
+    expect((await r.manager.verifyMcpAccessToken(b.access_token))?.organizationId).toBe(orgB);
+    const referencesOf = async (object: string) => (await r.rowsAtRest(object)).map((row) => row.reference_id).sort();
+    expect(await referencesOf('sys_oauth_consent')).toEqual([orgA, orgB].sort());
+    expect(await referencesOf('sys_oauth_refresh_token'), 'each refresh row records its organization').toEqual([orgA, orgB].sort());
+    return { r, clientId, cookie, userId, orgA, orgB, a, b, referencesOf };
+  }
+
+  it('⭐ /oauth2/revoke in A deletes A\'s consent and refresh family; B\'s token still verifies and its refresh token still refreshes', async () => {
+    const { r, clientId, orgB, a, b, referencesOf } = await twoOrganizations();
+
+    const res = await r.revoke({ token: a.access_token, token_type_hint: 'access_token', client_id: clientId });
+    expect(await bodyOf(res)).toEqual({ status: 200, body: null });
+
+    expect(await r.manager.verifyMcpAccessToken(a.access_token), 'A\'s bearer is refused').toBeNull();
+    expect((await r.refresh(clientId, a.refresh_token)).status, 'A\'s refresh token mints nothing').toBe(400);
+    expect(await referencesOf('sys_oauth_consent')).toEqual([orgB]);
+    expect(await referencesOf('sys_oauth_refresh_token')).toEqual([orgB]);
+
+    expect((await r.manager.verifyMcpAccessToken(b.access_token))?.organizationId, 'B\'s bearer still verifies').toBe(orgB);
+    const refreshed = await r.refresh(clientId, b.refresh_token);
+    expect(refreshed.status, JSON.stringify(refreshed.body)).toBe(200);
+    expect((await r.manager.verifyMcpAccessToken(refreshed.body.access_token))?.organizationId, 'and B refreshes in B').toBe(orgB);
+  }, 60_000);
+
+  it('the shared function deletes EVERY row of the withdrawn organization\'s family — a rotated row and its live successor — and only those', async () => {
+    const { r, clientId, userId, orgA, orgB, a, b, referencesOf } = await twoOrganizations();
+    // Rotate A once: the family now holds the rotated row and its successor.
+    const rotated = await r.refresh(clientId, a.refresh_token);
+    expect(rotated.status, JSON.stringify(rotated.body)).toBe(200);
+    expect(await referencesOf('sys_oauth_refresh_token')).toEqual([orgA, orgA, orgB].sort());
+
+    // The consent id's grant, as both console withdraws hand it over.
+    await revokeMcpGrant(await r.store(), { clientId, userId, organizationId: orgA });
+
+    expect(await referencesOf('sys_oauth_refresh_token'), 'no row of A survives').toEqual([orgB]);
+    expect((await r.refresh(clientId, rotated.body.refresh_token)).status, 'A\'s live successor mints nothing').toBe(400);
+    expect(await r.manager.verifyMcpAccessToken(rotated.body.access_token)).toBeNull();
+    expect((await r.refresh(clientId, b.refresh_token)).status, 'B still refreshes').toBe(200);
+
+    // CONTROL: with one organization left, its revoke leaves nothing at all.
+    await revokeMcpGrant(await r.store(), { clientId, userId, organizationId: orgB });
+    expect(await r.rowsAtRest('sys_oauth_refresh_token')).toEqual([]);
+    expect(await r.rowsAtRest('sys_oauth_consent')).toEqual([]);
+  }, 60_000);
+
+  it('a refresh row with NO organization belongs to the grant with none: revoking A keeps it, and what it mints never acts in A', async () => {
+    const r = await rig();
+    const clientId = await r.registerClient();
+    const cookie = await r.signUp('mia@acme.example.com');
+    const userId = String((await r.rowsAtRest('sys_user'))[0]!.id);
+    // A consent made with no active organization: its refresh row has no reference.
+    const none = await r.exchange(clientId, (await r.authorize(clientId, cookie)).code);
+    const orgA = await r.enterOrganization(cookie, 'org-a');
+    const inA = await r.exchange(clientId, (await r.authorize(clientId, cookie)).code);
+    const references = async () => (await r.rowsAtRest('sys_oauth_refresh_token')).map((row) => row.reference_id ?? null);
+    expect((await references()).sort()).toEqual([orgA, null].sort());
+
+    await revokeMcpGrant(await r.store(), { clientId, userId, organizationId: orgA });
+    expect(await references(), 'the row with no organization is not A\'s').toEqual([null]);
+    expect(await r.manager.verifyMcpAccessToken(inA.access_token)).toBeNull();
+    // What it mints carries no organization, so the MCP door admits it only
+    // against the consent with none — never as A.
+    const minted = await r.refresh(clientId, none.refresh_token);
+    expect(minted.status, JSON.stringify(minted.body)).toBe(200);
+    const principal = await r.manager.verifyMcpAccessToken(minted.body.access_token);
+    expect(principal, 'admitted by the consent with no organization').toMatchObject({ clientId });
+    expect(Object.keys(principal!), 'and with no organization at all').not.toContain('organizationId');
+
+    // The grant with no organization deletes its own rows.
+    await revokeMcpGrant(await r.store(), { clientId, userId });
+    expect(await references()).toEqual([]);
+    expect(await r.manager.verifyMcpAccessToken(minted.body.access_token)).toBeNull();
+  }, 60_000);
+
+  it('a rotation racing the revoke leaves no live successor in the withdrawn organization', async () => {
+    const { r, clientId, userId, orgA, orgB, a, referencesOf } = await twoOrganizations();
+    const real = await r.store();
+    let raced: { status: number; body: any } | undefined;
+    // The client refreshes A between the revoke's read of the family and its
+    // delete: the provider marks the row it started from and writes a successor.
+    const racing: OAuthGrantStore = {
+      findOne: (q) => real.findOne(q),
+      findMany: (q) => real.findMany(q),
+      delete: (q) => real.delete(q),
+      deleteMany: async (q) => {
+        if (!raced && q.model === 'oauthAccessToken') raced = await r.refresh(clientId, a.refresh_token);
+        return real.deleteMany(q);
+      },
+    };
+    await revokeMcpGrant(racing, { clientId, userId, organizationId: orgA });
+
+    expect(raced?.status, 'the race happened: the rotation succeeded mid-revoke').toBe(200);
+    expect(await referencesOf('sys_oauth_refresh_token'), 'its successor was deleted too').toEqual([orgB]);
+    expect((await r.refresh(clientId, raced!.body.refresh_token)).status).toBe(400);
   }, 60_000);
 });
