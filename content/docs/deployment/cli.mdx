@@ -3257,13 +3257,14 @@ answers are the ones printed.
    nothing is installed.
 2. **Dry run** — the runtime's upgrade plan of the installed version against this
    build is printed; nothing is installed. A runtime that refuses it, or does not
-   serve install-local, stops the deploy with exit `1`.
+   serve install-local, stops the deploy with exit `1`. A runtime that predates the
+   dry run ignores it and installs: the command says so and exits `1`.
 3. **Install** — with `--confirm-access-upgrade` passed through. The endpoint's
-   refusals (an access upgrade to confirm, …) stop the deploy with exit `1`.
+   refusals (an access upgrade to confirm, a package the running kernel cannot
+   register, …) stop the deploy with exit `1`.
 4. **Live** — install-local registers the package in the running kernel before it
    answers, so the answer is the verdict: `hotLoaded` prints `Live: … now serves …`
-   and exits `0`; a package the running kernel could not load exits `1`, and it
-   loads when the runtime restarts.
+   and exits `0`.
 
 The `d` key in [`os dev`](#os-dev) runs the same `os deploy`, so it deploys to the
 runtime too and asks for no cloud login.
@@ -3288,14 +3289,15 @@ The ObjectOS Cloud environment is resolved exactly as [`os deploy`](#os-deploy)
 resolves it: `--env`, then the active environment for this control plane, then
 your organization's only environment; none or several is refused, naming
 `--env`. A self-hosted runtime `os environments use-runtime` remembered is not
-consulted; name it with `--url`. Its
-MCP URL is the environment's address, read from the control plane, plus
-`/api/v1/mcp`, and the server is registered under the environment's own name (its
-slug, else its display name, else its id), so several environments can be
-registered side by side. `--url` skips ObjectOS Cloud: it takes the base URL of a
-self-hosted or local server (the command adds `/api/v1/mcp` itself and refuses a
-URL that already ends in it) and registers it as `objectstack`, the name
-`os dev`'s banner gives it. `--name` overrides either name.
+consulted; name it with `--url`. Its MCP URL is the environment's address, read
+from the control plane, plus `/api/v1/mcp`, and the server is registered under
+the environment's own name (its slug, else its display name, else its id,
+lower-cased with every run of other characters turned into one `-`), so several
+environments can be registered side by side. `--url` skips ObjectOS Cloud: it
+takes the base URL of a self-hosted or local server (the command adds
+`/api/v1/mcp` itself and refuses a URL that already ends in it) and registers it
+as `objectstack`, the name `os dev`'s banner gives it. `--name` overrides either
+name.
 
 For Claude Code — the only `--client` value, and the default — the command runs
 `claude mcp add --transport http NAME URL`. `--print` prints the endpoint and that

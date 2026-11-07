@@ -5,7 +5,7 @@
 | Command | What it does |
 |:--------|:-------------|
 | `os init` | Scaffold a new project (alternative to `npx create-objectstack`) |
-| `os dev` | Start the dev server with hot metadata reload. `--seed-admin` (default **on** for plain `os dev`) seeds a loginable dev admin **in-process via the runtime** (env vars `OS_SEED_ADMIN*`) on an **empty** DB only (default `admin@objectos.ai` / `admin123`; override with `--admin-email` / `--admin-password`; disable with `--no-seed-admin`). `--fresh` = ephemeral clean OS_HOME/DB, implies `--seed-admin`. |
+| `os dev` | Start the dev server with hot metadata reload. `--seed-admin` (default **on** for plain `os dev`) seeds a loginable dev admin **in-process via the runtime** (env vars `OS_SEED_ADMIN*`) with **no login** yet (default `admin@objectos.ai` / `admin123`; override with `--admin-email` / `--admin-password`; disable with `--no-seed-admin`). `--fresh` = ephemeral clean OS_HOME/DB, implies `--seed-admin`. |
 | `os dev --ui` | Also mount the bundled Console portal at `/_console/` (there is no separate `os studio` command) |
 | `os validate` | Validate `objectstack.config.ts` — see [Verify your work](#verify-your-work) |
 | `os lint` | Style/convention lint on metadata files |
