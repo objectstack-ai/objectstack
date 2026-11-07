@@ -332,7 +332,14 @@ export interface IAuthService {
      * provider records nothing at verification, and the caller calls this
      * member once per admitted call, only after its last refusal has had its
      * say, with the very object `verifyMcpAccessToken` resolved to. A refused
-     * call never reaches it, so it is never recorded as a use.
+     * call never reaches it, so it is never recorded as a use. Admitting is
+     * the decision about WHO calls, not every later authorization verdict:
+     * once the principal is admitted, a refusal of what it then asks for,
+     * rendered further down the request (the MCP domain's 403
+     * `insufficient_scope` for a token that grants none of the MCP tool
+     * families, a tool the token's scopes leave unregistered, an action whose
+     * scope family the token was not granted), is still a use of the grant,
+     * and it is recorded.
      *
      * The provider records only a principal object it returned itself; any
      * other object (a hand-built principal, a copy) records nothing. It
