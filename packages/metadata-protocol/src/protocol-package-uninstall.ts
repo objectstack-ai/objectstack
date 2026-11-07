@@ -51,10 +51,11 @@ export interface PackageUninstallHost {
     readonly packagelessAddress: ObjectStackProtocolImplementation['packagelessAddress'];
     readonly runUninstallCleanups: ObjectStackProtocolImplementation['runUninstallCleanups'];
     readonly shouldDropStorage: ObjectStackProtocolImplementation['shouldDropStorage'];
+    readonly uninstallGuards: ObjectStackProtocolImplementation['uninstallGuards'];
 }
 
 /** The body of `ObjectStackProtocolImplementation#deletePackage`; the method's docblock there is its contract. */
-export async function deletePackage(this: Pick<PackageUninstallHost, 'deleteMetaItem' | 'engine' | 'findEnvironmentRows' | 'getServicesRegistry' | 'packagelessAddress' | 'runUninstallCleanups' | 'shouldDropStorage'>, request: DeletePackageRequest): Promise<DeletePackageResponse> {
+export async function deletePackage(this: Pick<PackageUninstallHost, 'deleteMetaItem' | 'engine' | 'findEnvironmentRows' | 'getServicesRegistry' | 'packagelessAddress' | 'runUninstallCleanups' | 'shouldDropStorage' | 'uninstallGuards'>, request: DeletePackageRequest): Promise<DeletePackageResponse> {
     // [ADR-0131 D6/D12] An uninstall is environment-wide by construction:
     // every `sys_metadata` row bound to the package, in this environment,
     // whatever organization a legacy row was stored under. The
@@ -77,6 +78,25 @@ export async function deletePackage(this: Pick<PackageUninstallHost, 'deleteMeta
             throw err;
         }
     }
+
+    // [#31232] THE PRE-UNINSTALL GUARDS, ASKED BEFORE ANYTHING IS READ OR
+    // MOVED. A plugin that owns a verdict this package must not know
+    // registers it as a guard (`registerUninstallGuard`); the runtime
+    // registers its dependent-rule scan, so an uninstall that would withdraw
+    // a field an active validation rule of another enabled package reads is
+    // refused here for EVERY caller of this verb (a host's own uninstall
+    // tool, install-local's pair-install undo, the unmanaged-import
+    // rollback), not only at the package door that asks it first. This
+    // package holds no copy of the rule.
+    //
+    // Each guard is asked in registration order and the first refusal is
+    // thrown, spelled as the guard answered it (`code`, `status`, `message`):
+    // nothing has been read or removed yet, so there is nothing to undo. A
+    // guard's own throw propagates as is — an uninstall a guard could not
+    // judge does not proceed. With no guard registered nothing is asked, and
+    // the verb behaves exactly as it did before guards existed.
+    await askUninstallGuards(this.uninstallGuards, request);
+
     const where: Record<string, unknown> = { package_id: request.packageId };
     // [#8136] This read is the uninstall's FIRST database touch, and until
     // now it sat outside every `try` in this method — the per-item `catch`
@@ -362,4 +382,24 @@ export async function deletePackage(this: Pick<PackageUninstallHost, 'deleteMeta
         failed,
         cleanups,
     };
+}
+
+/**
+ * [#31232] Ask every registered pre-uninstall guard, in registration order,
+ * and throw the first refusal one answers: an `Error` carrying the guard's
+ * `message`, with its `code` and `status`. Asked by {@link deletePackage}
+ * before it reads or moves anything; a guard's own throw propagates.
+ */
+async function askUninstallGuards(
+    guards: PackageUninstallHost['uninstallGuards'],
+    request: DeletePackageRequest,
+): Promise<void> {
+    for (const guard of guards.values()) {
+        const refusal = await guard({
+            packageId: request.packageId,
+            ...(request.actor ? { actor: request.actor } : {}),
+        });
+        if (!refusal) continue;
+        throw Object.assign(new Error(refusal.message), { code: refusal.code, status: refusal.status });
+    }
 }
