@@ -1194,17 +1194,30 @@ function ruleLayerLabel(layer: { packageId?: unknown; ownership?: unknown }): st
  * Exported as `formatPackageDisableDependents` from `@objectstack/runtime`
  * beside {@link readDisableDependentRules}; a host door answers it with `409`
  * `PACKAGE_DISABLE_RESTRICTED_BY_VALIDATION_RULE`, as this door does.
+ *
+ * [#30999] `operation` names what was refused, so the sentence says what that
+ * operation would do and which remedy keeps the field served: a disable
+ * (the default) would withhold the fields and is avoided by keeping the
+ * package enabled; an uninstall would withdraw them and is avoided by keeping
+ * the package installed. The default's bytes are the disable door's, unchanged.
  */
-export function disableDependentRulesMessage(lead: string, dependents: readonly DisableDependentRule[]): string {
+export function disableDependentRulesMessage(
+    lead: string,
+    dependents: readonly DisableDependentRule[],
+    { operation = 'disable' }: { operation?: 'disable' | 'uninstall' } = {},
+): string {
     const one = dependents.length === 1;
     const listed = dependents
         .map((d) => `${d.packageId} · ${d.object} · ${d.rule} (reads ${d.fields.join(', ')})`)
         .join('; ');
+    const [effect, kept] = operation === 'uninstall'
+        ? ['which the uninstall would withdraw', 'or keep the package installed.']
+        : ['which the disable would withhold', 'or keep the package enabled.'];
     return `${lead}: ${one
         ? 'an active validation rule reads a field'
         : `${dependents.length} active validation rules read fields`} it adds through objectExtensions, `
-        + `which the disable would withhold — ${listed}. Switch off or change ${one ? 'that rule' : 'those rules'} first, `
-        + 'or keep the package enabled.';
+        + `${effect} — ${listed}. Switch off or change ${one ? 'that rule' : 'those rules'} first, `
+        + kept;
 }
 
 /**
@@ -3766,7 +3779,7 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             // of those fields, every write to the rule's object would be
             // refused once the package is gone, with no package left to
             // re-enable. Refused with the disable door's code and sentence
-            // ({@link disableDependentRulesMessage}) under an uninstall lead,
+            // ({@link disableDependentRulesMessage}, in its uninstall form) under an uninstall lead,
             // BEFORE the protocol is resolved and `deletePackage`, the
             // registry withdrawal and the disable-record clear below, so a
             // refused uninstall leaves the stored rows, the running registry
@@ -3778,7 +3791,7 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                 return {
                     handled: true,
                     response: deps.error(
-                        disableDependentRulesMessage(`Package '${id}' cannot be uninstalled`, dependents),
+                        disableDependentRulesMessage(`Package '${id}' cannot be uninstalled`, dependents, { operation: 'uninstall' }),
                         PACKAGE_DISABLE_RESTRICTED_BY_VALIDATION_RULE.status,
                         { code: PACKAGE_DISABLE_RESTRICTED_BY_VALIDATION_RULE.code },
                     ),

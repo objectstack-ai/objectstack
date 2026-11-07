@@ -1194,6 +1194,18 @@ describe('[#31067] the verdict the disable door asks is the package entry\'s exp
         expect(runtime.formatPackageDisableDependents).toBe(disableDependentRulesMessage);
     });
 
+    it('[#30999] the builder\'s uninstall form changes only the effect and the remedy; the default is the disable form', () => {
+        const dependents = [{ packageId: READER, object: THING, rule: RULE, fields: [FLAG] }];
+        const disable = runtime.formatPackageDisableDependents('LEAD', dependents);
+        expect(runtime.formatPackageDisableDependents('LEAD', dependents, { operation: 'disable' })).toBe(disable);
+        expect(runtime.formatPackageDisableDependents('LEAD', dependents, { operation: 'uninstall' })).toBe(
+            disable
+                .replace('which the disable would withhold', 'which the uninstall would withdraw')
+                .replace('or keep the package enabled.', 'or keep the package installed.'),
+        );
+        expect(disable).toContain('which the disable would withhold');
+    });
+
     it('answers the active rules a disable would leave reading a withheld field, and writes nothing', async () => {
         const { registry } = await door();
         const dependents: runtime.DisableDependentRule[] = runtime.readPackageDisableDependents(registry, EXTENDER);
@@ -1293,8 +1305,18 @@ describe('[#30999] the uninstall door refuses while an enabled package\'s valida
     it('answers 409 with the disable door\'s code and sentence under an uninstall lead, and nothing moves', async () => {
         const { kernel, engine } = booted!;
         const disabledBefore = [...loadDisabledPackageIds(ENVIRONMENT_ID)].sort();
-        const expected = disableDependentRulesMessage(`Package '${TIERS}' cannot be uninstalled`, readDisableDependentRules(engine.registry, TIERS));
-        expect(expected, 'precondition: the verdict names the reading rule').toContain(`${READER} · ${ACCOUNT} · ${RULE} (reads ${TIER})`);
+        const expected = disableDependentRulesMessage(
+            `Package '${TIERS}' cannot be uninstalled`,
+            readDisableDependentRules(engine.registry, TIERS),
+            { operation: 'uninstall' },
+        );
+        // The uninstall form says what the uninstall would do and which remedy
+        // keeps the field served; keeping the package ENABLED would not.
+        expect(expected).toBe(
+            `Package '${TIERS}' cannot be uninstalled: an active validation rule reads a field it adds through objectExtensions, `
+            + `which the uninstall would withdraw — ${READER} · ${ACCOUNT} · ${RULE} (reads ${TIER}). Switch off or change that rule first, `
+            + 'or keep the package installed.',
+        );
 
         const refused = await dispatchAs(kernel, 'DELETE', `/packages/${TIERS}`);
         expect({ status: refused.status, code: refused.code }).toEqual({ status: 409, code: CODE });
