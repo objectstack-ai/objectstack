@@ -50,7 +50,6 @@ export const KNOWN_SCHEMA_TYPES: readonly string[] = [
   'app-shell:cloud-connection:panel',
   'app-shell:cloud:ai-model-status',
   'app-shell:hero',
-  'app-shell:mcp:authorized-assistants',
   'app-shell:mcp:connect-agent',
   'app-shell:stat',
   'app-shell:tile-grid',

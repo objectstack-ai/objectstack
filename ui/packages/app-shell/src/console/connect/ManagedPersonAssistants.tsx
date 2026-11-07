@@ -6,8 +6,11 @@
  * for a `sys_user` record page.
  *
  * It reads one thing from the page: the bound record (`useRecordContext()`),
- * which must be a `sys_user` record with an id. It takes no props. Outside such
- * a record (the Studio palette, another object's page) it renders nothing.
+ * which must be a `sys_user` record with an id. Of the node it reads only
+ * `className`; it takes no props, so its `@object-ui/types` arm
+ * (`McpAuthorizedAssistantsSchema`) accepts only an empty `properties` bag.
+ * Outside such a record (the Studio palette, another object's page) it renders
+ * nothing.
  *
  * The rows, the Revoke and its confirm are `AuthorizedAssistantsSection`'s,
  * pointed at the person: `oauth.authorizedClients.listForUser(userId)` and
@@ -16,7 +19,7 @@
  * read rather than an empty list.
  */
 
-import { Card, CardContent } from '@object-ui/components';
+import { Card, CardContent, cn } from '@object-ui/components';
 import { ComponentRegistry } from '@object-ui/core';
 import { useObjectTranslation } from '@object-ui/i18n';
 import { useRecordContext } from '@object-ui/react';
@@ -25,13 +28,18 @@ import { AuthorizedAssistantsSection } from './AuthorizedAccessList.js';
 /** The object whose record pages this widget belongs on. */
 export const MANAGED_PERSON_OBJECT = 'sys_user';
 
-export function ManagedPersonAssistants() {
+export interface ManagedPersonAssistantsProps {
+  /** Carries the scope class of the node's `responsiveStyles`. */
+  className?: string;
+}
+
+export function ManagedPersonAssistants({ className }: ManagedPersonAssistantsProps = {}) {
   const { t } = useObjectTranslation();
   const record = useRecordContext();
   const userId = record?.objectName === MANAGED_PERSON_OBJECT && record.recordId ? record.recordId : null;
   if (!userId) return null;
   return (
-    <Card>
+    <Card className={cn(className)}>
       <CardContent className="space-y-3 pt-4">
         <p className="text-sm text-muted-foreground">{t('connectAgent.access.managedBody')}</p>
         <AuthorizedAssistantsSection forUserId={userId} />
@@ -41,8 +49,14 @@ export function ManagedPersonAssistants() {
 }
 
 // SDUI registration: a `sys_user` record page names this widget by type.
-ComponentRegistry.register('mcp:authorized-assistants', () => <ManagedPersonAssistants />, {
-  namespace: 'app-shell',
+// Registered under the `mcp` namespace with no bare fallback, so the one key is
+// `mcp:authorized-assistants`: the spelling a page authors, and the one literal
+// its `@object-ui/types` arm claims.
+ComponentRegistry.register('authorized-assistants', (props: ManagedPersonAssistantsProps) => (
+  <ManagedPersonAssistants className={props.className} />
+), {
+  namespace: 'mcp',
+  skipFallback: true,
   label: 'Authorized AI Assistants',
   category: 'plugin',
   inputs: [],

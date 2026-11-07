@@ -678,6 +678,16 @@ describe('registered NAMESPACED component types refused at `type` — a ratchet 
     expect(refusedAtType('cloud:workspace-timezone-notice')).toBe(false);
   });
 
+  it('counts `mcp:authorized-assistants` armed — it registered WITH its arm', () => {
+    // One registry key (`skipFallback: true`, so no bare `authorized-assistants`
+    // and no `app-shell:` spelling), armed in `@object-ui/types/zod` in the same
+    // change, so the pin above did not move.
+    expect(NAMESPACED_KEYS).toContain('mcp:authorized-assistants');
+    expect(NAMESPACED_KEYS).not.toContain('app-shell:mcp:authorized-assistants');
+    expect(BARE_KEYS).not.toContain('authorized-assistants');
+    expect(refusedAtType('mcp:authorized-assistants')).toBe(false);
+  });
+
   it('counts `record:approval_decision` armed — it registered WITH its arm (objectui#12342)', () => {
     // One registry key (`skipFallback: true`, so no bare `approval_decision`),
     // armed in `@object-ui/types/zod` in the same change, so the pin above did not move.
