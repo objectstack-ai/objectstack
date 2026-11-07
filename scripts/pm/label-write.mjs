@@ -197,8 +197,10 @@
  * states are 「issue 上的信号」, `needs-user-decision` is 「只挂决策卡(issue)、⛔ 永不挂 PR」,
  * and 「`pm:awaiting-merge` 只挂 PR、不入六态」. A PR that took a state label left
  * the maintainer's awaiting-merge list for the decision box (cloud PR #3680,
- * 2026-11-06), and every label reaches the board through this file, so the rule
- * is enforced here: an `--add` naming one of the six states on a pull request,
+ * 2026-11-06). This file is the seat's label write door, so it enforces the
+ * rule for every write it makes — it is not the only door that can put a label
+ * on the board, and it claims nothing about the others: an `--add` naming one
+ * of the six states on a pull request,
  * or `pm:awaiting-merge` on an issue, is REFUSED at step ② (exit 2) with zero
  * writes — and so is a `--release` on a pull request, whose stroke adds
  * `pm:queue`. The kind is step ①'s own read, no extra call: the card object's
@@ -400,9 +402,9 @@ export function refuseKindLabels({ kind, why = null, add = [], ref = 'the card' 
   const decisionRule = states.includes(DECISION_INBOX_LABEL) ? `, and of \`${DECISION_INBOX_LABEL}\` 「${KIND_RULE_DECISION_NEVER_ON_PR}」` : '';
   const never = 'removing a label is never refused.';
   if (kind === null || (kind !== KIND_PULL && kind !== KIND_ISSUE)) {
-    const named = tick([...states, ...(awaiting ? [GOVERNED_PR_AWAITING_MERGE_LABEL] : [])]);
+    const governed = [...states, ...(awaiting ? [GOVERNED_PR_AWAITING_MERGE_LABEL] : [])];
     return (
-      `${ref}'s kind could not be read (${why ?? 'no kind'}), and ${named} is legal on only one kind — ${KIND_RULE_PATH}: ` +
+      `${ref}'s kind could not be read (${why ?? 'no kind'}), and ${tick(governed)} ${governed.length > 1 ? 'are' : 'is'} legal on only one kind — ${KIND_RULE_PATH}: ` +
       `${statesRule}${decisionRule} — so the write is refused rather than guessed; re-run once the card reads whole, and ${never}`
     );
   }
@@ -1276,7 +1278,8 @@ export async function runRelease(options, deps = {}) {
   const assignees = computeAssigneeTarget({ current: currentAssignees, clearAll: true });
   record(`[${stamp()}] ② 目标 labels — ${labels.target.length}: ${render(labels.target)} · on ${render(labels.addCalls)} · off ${render(labels.removeCalls)}`);
   record(`[${stamp()}] ② 目标 assignees — none · off ${render(assignees.removeCalls)}`);
-  const wrongKind = refuseKindLabels({ ...readTargetKind(card), add: labels.addCalls, ref: `${repo}#${issue}` });
+  // Asked of the label the release ADDS, as runLabelWrite asks of `--add` — a PR already carrying it is refused too.
+  const wrongKind = refuseKindLabels({ ...readTargetKind(card), add: [RELEASE_TO], ref: `${repo}#${issue}` });
   if (wrongKind) return refuse(`${wrongKind} A release puts \`${RELEASE_TO}\` on the card, so it is for issues only.`, { stoppedAt: 2 });
   const twoStates = refuseTwoStates(labels.target);
   if (twoStates) return refuse(`${twoStates} A release never takes --allow-two-states: fix the board first.`, { stoppedAt: 2 });
@@ -1679,7 +1682,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the four steps, end to end against a fake board': 10,
   'the fallback: one PATCH, and the assignee echo that makes it survivable': 7,
   'the remaining exits: refusal, mismatch, the ONE-OF block and the dry run': 5,
-  [KIND_BATTERY]: 19,
+  [KIND_BATTERY]: 21,
   'the retired lane aliases: an --add of domain:engine / services / cli / rest is written as domain:server before the target, step ② says so, the read-back is clean on either transport; --remove and a live domain:* label pass untouched': 8,
   'the CLI: what a typo must never be allowed to mean': 8,
   'the relay transport: ONE dispatch carrying the whole stroke, the same read-back, and an accepted dispatch with no run UNCONFIRMED under auto too — never a direct write': 14,
@@ -1914,6 +1917,9 @@ export async function selfTest() {
     t('…and under the relay nothing is dispatched: the refusal comes before the transport', [relayPull.exit, relayPull.sent.length, writes(relayPull), said(relayPull).includes('is a pull request')], [EXIT_USAGE, 0, [], true]);
     const releasePull = await driveRelease(RELEASE_ARGV, silentCard(13, { kind: 'pull' }));
     t('⛔ a --release on a PULL REQUEST (its stroke adds `pm:queue`) is refused before the comment, zero sends, zero writes', [releasePull.exit, releasePull.sent.length, releasePull.direct, releasePull.text.includes('is a pull request'), releasePull.text.includes('for issues only')], [EXIT_USAGE, 0, [], true, true]);
+    const releasePullQueued = await driveRelease(RELEASE_ARGV, silentCard(13, { kind: 'pull', labels: ['pm:dispatched', 'pm:queue', 'domain:skills'] }));
+    t('…and so is one on a PR that ALREADY carries `pm:queue` — the rule asks what the release adds, not what it would newly POST', [releasePullQueued.exit, releasePullQueued.sent.length, releasePullQueued.direct, releasePullQueued.text.includes('`pm:queue` is a pm card STATE and objectstack-ai/objectstack#7 is a pull request')], [EXIT_USAGE, 0, [], true]);
+    t('the unreadable-kind sentence agrees in number with the labels it names', [refuseKindLabels({ kind: null, why: 'x', add: ['pm:queue'] }).includes('`pm:queue` is legal'), refuseKindLabels({ kind: null, why: 'x', add: ['pm:queue', GOVERNED_PR_AWAITING_MERGE_LABEL] }).includes('`pm:queue`, `pm:awaiting-merge` are legal')], [true, true]);
   }
 
   // ── retired lane aliases ─────────────────────────────────────────────────
