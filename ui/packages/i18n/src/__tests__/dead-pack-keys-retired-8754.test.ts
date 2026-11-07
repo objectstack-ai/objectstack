@@ -147,7 +147,7 @@ const SURVIVING = [
   'approvalsInbox.overrideNotice',
   'approvalsInbox.approverUnstaffed',
   // The live marketplace surface, including the sibling namespace that IS
-  // dynamically reached (`marketplace.category.` is a collected template head,
+  // dynamically reached (`marketplace.businessFunction.` is a collected template head,
   // which is exactly why none of that family was ever a candidate).
   'marketplace.title',
   'marketplace.load.failed',
