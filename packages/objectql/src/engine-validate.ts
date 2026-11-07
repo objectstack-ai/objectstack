@@ -442,7 +442,9 @@ export async function validate(
   // payload-FK-first reading (`masterIdOf`): the row's own FK on an insert,
   // and on an update the patch's FK, else the stored row's. A repointing
   // update also binds the header the stored row hangs off as
-  // `previousParent`, the header the write's ADR-0113 pre-check reads.
+  // `previousParent`, the header the write's ADR-0113 pre-check reads — and,
+  // as the write binds it, the unresolved header (`null`) when the patch
+  // names the FK over a stored FK this caller was not served as stored.
   //
   // ⛔ Read under the caller's access, as the write reads it since #22519:
   // see {@link resolvePreviewParents}. A header the caller cannot read binds
