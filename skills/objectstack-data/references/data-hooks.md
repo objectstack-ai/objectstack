@@ -51,7 +51,7 @@ ObjectStack provides lifecycle events organized by operation type:
 > `OperationContext.ast`, so the RLS / sharing filters composed onto it bind
 > the driver call itself, where no handler can widen them — scope a batch through
 > `options.where` at the caller. Both phases dispatch **once per matched row**,
-> each on a single-record-shaped context whose `input.id` names that row and
+> each on a single-record-shaped context whose `input.id` (`handler`; a `body`: `ctx.previous.id`) names that row and
 > whose `previous` is that row's pre-image (ADR-0058 Addendum II). And there is
 > no `beforeCount`/`beforeAggregate`: read authorization and
 > row filtering belong to **RLS / permission rules**, and field masking to
@@ -249,7 +249,7 @@ in neither). So:
   insert. The `before*` dispatch of a predicate (`multi: true`) write is
   **not** such a case: `beforeUpdate` / `beforeDelete` dispatch once per
   matched row, each on a single-record-shaped context whose `previous` is that
-  row's pre-image and whose `input.id` names the row (ADR-0058 Addendum II,
+  row's pre-image and whose `input.id` (`handler`; a `body`: `ctx.previous.id`) names the row (ADR-0058 Addendum II,
   D1/D2), so a transition condition evaluates there exactly as on a
   single-record write, and `record` is that row's state, stored ⊕ payload. Only
   the *payload* stays batch-scoped (D3):
@@ -263,7 +263,7 @@ in neither). So:
   condition.** A predicate (`multi: true`) update/delete dispatches its `after*`
   hooks **once per matched row**, each on a single-record-shaped context —
   `previous` is that row's pre-image, `record` is that row's real state (not the
-  bare payload), and `input.id` names the row. A transition condition therefore
+  bare payload), and `input.id` (`handler`; a `body`: `ctx.previous.id`) names the row. A transition condition therefore
   **is** available on `afterUpdate` / `afterDelete`: write it once and it means
   the same thing whether the write carried an id or a predicate, with no
   bulk-aware branch of its own.
@@ -350,7 +350,7 @@ The sandbox is handed a **JSON snapshot** of these (built by
 
 | `ctx.*` | Shape | Notes |
 |:--|:--|:--|
-| `ctx.input` | object | The write payload (mutable). On update, only the **changed** fields plus `id`. |
+| `ctx.input` | object | The write payload (mutable). On update, only the **changed** fields; `id` only if the payload has it (the row: `ctx.previous.id`). |
 | `ctx.previous` | object \| `undefined` | Pre-write record on update/delete. **`undefined` on insert** → use `!ctx.previous` to detect *create*. |
 | `ctx.result` | object \| `undefined` | `after*` only. ⚠️ **partial** on afterUpdate — see gotcha 1. |
 | `ctx.user` | object \| `undefined` | `{ id, name, email, organizationId }`. `undefined` for system / unauthenticated writes. |
@@ -441,7 +441,7 @@ set of legal tokens (`HookBodyCapability`) is exactly five:
 
 There is **no `http.fetch` capability** by design — outbound calls go through
 [Connector recipes](../../objectstack-automation/references/integration-recipes.md)
-(`connector_action` in a `record-before-*` flow) so they stay auditable and replayable.
+(`connector_action` in a flow) so they stay auditable and replayable.
 
 ### Sandbox restrictions
 
@@ -479,8 +479,7 @@ const full = await ctx.api.object('candidate').findOne({ where: { id: ctx.result
 
 (A declarative `condition` does **not** hit this wall — it is
 evaluated against the stored record overlaid with the payload, so
-`record.position_id` is readable there even when the PATCH never wrote it. Guard
-optional values with `record.x != null`, not with `has(record.x)`.)
+`record.position_id` is readable there even when the PATCH never wrote it.)
 
 ### ⚠️ Gotcha 2 — cross-object writes obey the *target's* sharing model
 
@@ -745,16 +744,16 @@ const protectStrategicAccounts = defineHook({
   body: {
     language: 'js',
     source: `
-      // ctx.previous carries the record being deleted (it is undefined on insert).
+      // A delete's ctx.input is empty: ctx.previous is the row being deleted.
       if (ctx.previous && ctx.previous.type === 'Strategic')
         throw new Error('Cannot delete Strategic accounts');
       const open = await ctx.api.object('opportunity').count({
-        where: { account_id: ctx.input.id, stage: { $in: ['Prospecting', 'Negotiation'] } },
+        where: { account_id: ctx.previous.id, stage: { $in: ['Prospecting', 'Negotiation'] } },
       });
       if (open > 0)
         throw new Error('Cannot delete an account with ' + open + ' open opportunities');
     `,
-    capabilities: ['api.read'],   // count() is a read; an undeclared token throws in the VM
+    capabilities: ['api.read'],
   },
 });
 ```
@@ -766,13 +765,12 @@ const createAuditTrail = defineHook({
   name: 'crm_audit_trail',
   object: ['account', 'contact', 'opportunity'],
   events: ['afterInsert', 'afterUpdate', 'afterDelete'],
-  async: false,                    // must run inside the transaction
   body: {
     language: 'js',
     source: `
       await ctx.api.object('audit_log').insert({
         object_type: ctx.object,
-        record_id: String(ctx.input.id || ''),
+        record_id: String((ctx.previous || ctx.result || {}).id || ''),
         action: ctx.event.replace('after', '').toLowerCase(),
         user_id: ctx.session && ctx.session.userId,
         timestamp: new Date().toISOString(),
@@ -798,7 +796,7 @@ const cascadeAccountUpdate = defineHook({
       if (ctx.input.industry && ctx.previous && ctx.previous.industry !== ctx.input.industry)
         await ctx.api.object('contact').update(
           { account_industry: ctx.input.industry },
-          { where: { account_id: ctx.input.id }, multi: true },
+          { where: { account_id: ctx.previous.id }, multi: true },
         );
     `,
     capabilities: ['api.write'],
