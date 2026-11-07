@@ -490,3 +490,105 @@ describe('POST /api/v1/packages/:id/duplicate: a copy into a pair id is refused,
         expect(d.published).toHaveLength(writes);
     });
 });
+
+/**
+ * [ruling record 6691022506, ADR-0146 D3 as amended] The customization unit is
+ * the App: the door asked for any package of an App answers the App's one
+ * pair, `<app id>.custom`, created on the first ask and answered after —
+ * never `422` for a package of the same App. The App is read from what the
+ * installed manifests declare (merge question 11); a per-package pair an
+ * earlier version created stays installed and served (merge question 12).
+ */
+describe(`${ENSURE_PATH.replace(CRM.id, ':id')}: the App unit — one pair for an App and its modules`, () => {
+    const APP = { id: 'app.objectstack.hotcrm', name: 'HotCRM', version: '6.1.0', type: 'app', namespace: 'crm' };
+    const MODULES = ['service', 'revenue', 'marketing'].map((m) => ({
+        id: `${APP.id}.${m}`, name: `HotCRM ${m}`, version: '6.1.0', type: 'module', namespace: 'crm',
+        dependencies: { [APP.id]: '^6.1.0' },
+    }));
+    const APP_PAIR = `${APP.id}.custom`;
+
+    /** HotCRM as `dev:crm` boots it: the App and its modules, held as code. */
+    function hotcrm(): Door {
+        const d = door();
+        for (const manifest of [APP, ...MODULES]) withBase(d, manifest);
+        return d;
+    }
+    const pairsIn = (d: Door) => ids(d).filter((id) => id.endsWith('.custom'));
+
+    it('a module first, then the App and the other modules: one app.objectstack.hotcrm.custom, 201 then 200', async () => {
+        const d = hotcrm();
+        const asked = [MODULES[0]!.id, APP.id, MODULES[1]!.id, MODULES[2]!.id];
+        const answers: any[] = [];
+        for (const id of asked) {
+            const r = await ensure(d, id);
+            answers.push({ id, status: r.response.status, data: r.response.body.data });
+        }
+        expect(answers.map((a) => a.status), JSON.stringify(answers)).toEqual([201, 200, 200, 200]);
+        for (const a of answers) {
+            expect(EnsureCustomizationPackageResponseSchema.parse(a.data)).toEqual({
+                basePackageId: APP.id,
+                packageId: APP_PAIR,
+                namespace: 'crm_custom',
+                dependencyRange: '^6',
+                created: a.status === 201,
+                writable: true,
+            });
+        }
+        expect(pairsIn(d)).toEqual([APP_PAIR]);
+        expect(d.registry.getPackage(APP_PAIR)?.manifest).toMatchObject({
+            id: APP_PAIR, name: 'HotCRM (custom)', namespace: 'crm_custom', dependencies: { [APP.id]: '^6' },
+        });
+        expect(d.published).toHaveLength(1);
+    });
+
+    it('the namespace held by a package outside the App: 422 NAMESPACE_CONFLICT still, asked from a module', async () => {
+        const d = hotcrm();
+        register(d, { id: 'com.other.squatter', name: 'Squatter', version: '1.0.0', type: 'app', namespace: 'crm_custom' }, 'code');
+        const before = ids(d);
+        const r = await ensure(d, MODULES[1]!.id);
+        expectRefusal(r, 422, 'NAMESPACE_CONFLICT', "its namespace 'crm_custom' is already owned by package 'com.other.squatter'");
+        expect(ids(d)).toEqual(before);
+        expect(d.published).toHaveLength(0);
+    });
+
+    it('a per-package pair an earlier version created for a module holds the namespace: 409 naming it, never 422; it stays installed (merge question 12)', async () => {
+        const d = hotcrm();
+        const legacy = {
+            id: `${MODULES[0]!.id}.custom`, name: 'Service (custom)', version: '0.1.0', type: 'module', namespace: 'crm_custom',
+            dependencies: { [MODULES[0]!.id]: '^6' },
+        };
+        register(d, legacy);
+        const before = structuredClone(d.registry.getPackage(legacy.id));
+        for (const asked of [APP.id, MODULES[0]!.id, MODULES[2]!.id]) {
+            const r = await ensure(d, asked);
+            expectRefusal(r, 409, 'RESOURCE_CONFLICT',
+                `Cannot ensure '${APP_PAIR}' yet`, `held by '${legacy.id}'`, 'stays installed', 'is not created beside it');
+        }
+        expect(pairsIn(d)).toEqual([legacy.id]);
+        expect(d.registry.getPackage(legacy.id)).toEqual(before);
+        expect(d.published).toHaveLength(0);
+    });
+
+    it('a package declaring two Apps whose namespace picks neither: 409, no single App, nothing created', async () => {
+        const d = hotcrm();
+        const other = { id: 'com.example.showcase', name: 'Showcase', version: '1.0.0', type: 'app', namespace: 'showcase' };
+        withBase(d, other);
+        const bridge = {
+            id: 'com.acme.bridge', name: 'Bridge', version: '1.0.0', type: 'plugin', namespace: 'bridge',
+            dependencies: { [APP.id]: '^6', [other.id]: '^1' },
+        };
+        withBase(d, bridge);
+        const r = await ensure(d, bridge.id);
+        expectRefusal(r, 409, 'RESOURCE_CONFLICT', `Package '${bridge.id}' declares several Apps`);
+        expect(pairsIn(d)).toEqual([]);
+    });
+
+    it('a package that declares no App is its own unit: its own pair, as before', async () => {
+        const d = hotcrm();
+        const solo = { id: 'com.acme.solo', name: 'Solo', version: '2.0.0', type: 'plugin', namespace: 'solo' };
+        withBase(d, solo);
+        const r = await ensure(d, solo.id);
+        expect(r.response.status, JSON.stringify(r.response.body)).toBe(201);
+        expect(r.response.body.data).toMatchObject({ basePackageId: solo.id, packageId: 'com.acme.solo.custom', namespace: 'solo_custom', dependencyRange: '^2' });
+    });
+});

@@ -18,7 +18,7 @@
  * not move.
  */
 
-import { ITEM_KEY_DISCRIMINATORS, isTenantAuthored, pairOf } from '@objectstack/metadata-core';
+import { ITEM_KEY_DISCRIMINATORS, isTenantAuthored, pairsOf } from '@objectstack/metadata-core';
 import { PLURAL_TO_SINGULAR, SINGULAR_TO_PLURAL } from '@objectstack/spec/shared';
 import { isAggregatedViewContainer } from '@objectstack/spec/ui';
 import {
@@ -197,9 +197,11 @@ export async function readFlattenedMetaItems(host: Pick<ProtocolHost, 'artifactL
         // come from the package-agnostic read too. They stand in like the
         // package-less rows: a pair's item of a name the package does not
         // ship is the pair's own, and never listed in the package's list.
-        const pairOfScope = servedOverride && packageId ? pairOf(packageId, installed) : undefined;
-        const overrideRows = pairOfScope?.ok
-            ? lockRows.filter((row) => row?.package_id === pairOfScope.value)
+        // [ADR-0146 D3 merge question 12] The App's pair, and a per-package
+        // pair an earlier version created while it is installed (`pairsOf`).
+        const pairsOfScope = servedOverride && packageId ? pairsOf(packageId, installed) : [];
+        const overrideRows = pairsOfScope.length > 0
+            ? lockRows.filter((row) => pairsOfScope.includes(row?.package_id))
             : [];
         if ((records && records.length > 0) || standInRows.length > 0 || overrideRows.length > 0) {
             const isView = (PLURAL_TO_SINGULAR[request.type] ?? request.type) === 'view';
@@ -531,9 +533,9 @@ export async function readFlattenedMetaItems(host: Pick<ProtocolHost, 'artifactL
             // [#28409] …and the pair's drafts, as stand-ins, as its active
             // arm previews the pair's rows: the pending edit of the
             // package's declared override previews over its slot.
-            const pairOfDraftScope = servedOverride && packageId ? pairOf(packageId, installed) : undefined;
-            const overrideDraftRecords = pairOfDraftScope?.ok
-                ? packageAgnosticDrafts.filter((record) => record?.package_id === pairOfDraftScope.value)
+            const pairsOfDraftScope = servedOverride && packageId ? pairsOf(packageId, installed) : [];
+            const overrideDraftRecords = pairsOfDraftScope.length > 0
+                ? packageAgnosticDrafts.filter((record) => pairsOfDraftScope.includes(record?.package_id))
                 : [];
             if (draftRecords.length > 0 || standInDraftRecords.length > 0 || overrideDraftRecords.length > 0) {
                 // ADR-0048 (#1828) — package-aware draft overlay (parity with
@@ -675,11 +677,12 @@ export async function readFlattenedMetaItems(host: Pick<ProtocolHost, 'artifactL
     // address serves beside the package's members
     // ({@link baseServesBundleMember}), as the env-wide list below does.
     if (unseated && servedOverride && packageId && ITEM_KEY_DISCRIMINATORS[request.type] !== undefined) {
-        const pairOfList = pairOf(packageId, installed);
+        const pairsOfList = pairsOf(packageId, installed);
         const typeShipping = host.shippingPackagesOf(request.type);
         for (const it of items as any[]) {
             if (!(it && typeof it === 'object' && unseated.has(it))) continue;
-            if (!pairOfList.ok || boundPackageOf(it._packageId) !== pairOfList.value || typeof it.name !== 'string') continue;
+            const bound = boundPackageOf(it._packageId);
+            if (bound === undefined || !pairsOfList.includes(bound) || typeof it.name !== 'string') continue;
             if (host.shipsBundleName(request.type, it.name, packageId, typeShipping)
                 && host.baseServesBundleMember(request.type, it.name, packageId, it, typeShipping)) {
                 unseated.delete(it);

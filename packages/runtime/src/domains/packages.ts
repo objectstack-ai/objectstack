@@ -61,6 +61,7 @@ import {
     // through the App that carries it, over the engine registry's manifests.
     installedManifestsOf,
     pairOf,
+    pairsOf,
     type InstalledPackageSource,
 } from '@objectstack/metadata-core';
 // [#7560] ADR-0070's read-only-package rule — the SAME predicate the metadata
@@ -4025,15 +4026,18 @@ async function readPackageCustomizations(
     const overrides = await listServedOverrides({ packageId: baseId });
 
     const registry = ql?.registry;
-    const pair = pairOf(baseId, installedManifestsOf(registry));
+    // [#29594, ADR-0146 D3 merge question 12] Every pair of the base: the
+    // App's pair, then the per-package pair an earlier version created for it.
+    const pairs = pairsOf(baseId, installedManifestsOf(registry));
     type Extension = GetPackageCustomizationsResponse['extensions'][number];
     const extensions: Extension[] = [];
-    if (pair.ok && typeof registry?.getAllObjects === 'function') {
-        for (const object of registry.getAllObjects(pair.value) as Array<{ name?: unknown }>) {
+    const pairIdsToRead = typeof registry?.getAllObjects === 'function' ? pairs : [];
+    for (const pairId of pairIdsToRead) {
+        for (const object of registry.getAllObjects(pairId) as Array<{ name?: unknown }>) {
             const name = object?.name;
             if (typeof name !== 'string' || registry.getObjectOwner(name)?.packageId !== baseId) continue;
             for (const contributor of registry.getObjectContributors(name) as Array<{ packageId?: unknown; ownership?: unknown; definition?: any }>) {
-                if (contributor.packageId !== pair.value || contributor.ownership !== 'extend') continue;
+                if (contributor.packageId !== pairId || contributor.ownership !== 'extend') continue;
                 const body = contributor.definition ?? {};
                 for (const field of Object.keys(body.fields ?? {})) extensions.push({ object: name, kind: 'field', name: field });
                 for (const rule of Array.isArray(body.validations) ? body.validations : []) {
@@ -4068,7 +4072,7 @@ async function readPackageCustomizations(
         .map((row) => ({ type: row.metadataType, name: row.name }))
         .sort((a, b) => a.type.localeCompare(b.type) || a.name.localeCompare(b.name));
 
-    const contributions = readBaseContributions(baseId, pair.ok ? pair.value : undefined, registry);
+    const contributions = readBaseContributions(baseId, pairs, registry);
 
     return {
         packageId: baseId,
@@ -4130,7 +4134,7 @@ async function readPackageCustomizations(
  */
 function readBaseContributions(
     baseId: string,
-    pairId: string | undefined,
+    pairIds: readonly string[],
     registry: any,
 ): GetPackageCustomizationsResponse['contributions'] {
     type Contribution = GetPackageCustomizationsResponse['contributions'][number];
@@ -4140,9 +4144,10 @@ function readBaseContributions(
     const navs: NavContribution[] = [];
     // The one stamp reading both kinds share: the package `packageId` names
     // when `body` is a code package's item and the package is neither the base
-    // nor its pair; `undefined` otherwise.
+    // nor one of its pairs ([#29594] the App's pair, or the per-package pair
+    // an earlier version created for it); `undefined` otherwise.
     const codePackageOf = (packageId: unknown, body: unknown): string | undefined => {
-        if (typeof packageId !== 'string' || packageId === baseId || packageId === pairId) return undefined;
+        if (typeof packageId !== 'string' || packageId === baseId || pairIds.includes(packageId)) return undefined;
         const stamped = { _packageId: packageId, _provenance: (body as { _provenance?: unknown } | null | undefined)?._provenance };
         return isCodeArtifactBody(stamped) ? packageId : undefined;
     };
