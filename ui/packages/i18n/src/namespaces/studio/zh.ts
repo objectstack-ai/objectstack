@@ -296,6 +296,8 @@ const STUDIO_ZH: Record<string, string> = {
   'designer.field.required': '必填',
   'designer.field.requiredCbpMaster':
     '必填已锁定:该对象受父级控制,其主记录由这个主从字段推导,该字段必须必填。',
+  'designer.field.requiredCbpOptionalMaster':
+    '该对象受父级控制,这个主从字段是它的主字段。取消必填即成为可选主字段:未指定主记录的记录仅其所有者及对该对象拥有“查看所有记录”权限的用户可见。',
   'designer.field.unique': '唯一',
   'designer.field.description': '描述',
   'designer.field.readonly': '只读',

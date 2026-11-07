@@ -368,6 +368,8 @@ const STUDIO_EN: Record<string, string> = {
   'designer.field.required': 'Required',
   'designer.field.requiredCbpMaster':
     'Required is locked on: this object is controlled by parent, and it derives its master from this master-detail field, which must be required.',
+  'designer.field.requiredCbpOptionalMaster':
+    'This object is controlled by parent, and this master-detail field is its master. Clear Required to make it an optional master: a record that names no master is visible only to its owner and to users with View All Records on this object.',
   'designer.field.unique': 'Unique',
   'designer.field.description': 'Description',
   'designer.field.readonly': 'Read-only',
