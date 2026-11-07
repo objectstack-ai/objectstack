@@ -67,6 +67,7 @@ import { clientAddressStateEntries } from './request-client-address.js';
 import { SESSION_ERASURE_PATHS } from './session-tombstone.js';
 import { envelopeVendorAdminRefusal } from './vendor-admin-refusal-envelope.js';
 import { OAUTH_REVOKE_PATH } from './mcp-token-revocation.js';
+import { ssoOidcCallbackProviderId } from './sso-oidc-refusal-cause.js';
 
 /**
  * The `AuthManager` members the functions below read — every one of them, and
@@ -85,10 +86,11 @@ export interface RequestRoutingHost {
   resolveClientAddress: AuthManager['resolveClientAddress'];
   runSubjectErasureAtomically: AuthManager['runSubjectErasureAtomically'];
   answerOAuthTokenRevocation: AuthManager['answerOAuthTokenRevocation'];
+  runSsoOidcCallback: AuthManager['runSsoOidcCallback'];
 }
 
 /** The body of `AuthManager#handleRequest`; the method's docblock there is its contract. */
-export async function handleRequest(this: Pick<RequestRoutingHost, 'betterAuthEndpointPath' | 'getOrCreateAuth' | 'resolveClientAddress' | 'runSubjectErasureAtomically' | 'answerOAuthTokenRevocation'>, request: Request, transport?: { remoteAddress?: string }): Promise<Response> {
+export async function handleRequest(this: Pick<RequestRoutingHost, 'betterAuthEndpointPath' | 'getOrCreateAuth' | 'resolveClientAddress' | 'runSubjectErasureAtomically' | 'answerOAuthTokenRevocation' | 'runSsoOidcCallback'>, request: Request, transport?: { remoteAddress?: string }): Promise<Response> {
   // ADR-0069 D7 — the client address this request's sign-in audit stamps,
   // established ONCE, here, by the same trust rule the D5 allow-list judges
   // with (`resolveClientAddress`). Read before any rewrite below, and carried
@@ -225,12 +227,17 @@ export async function handleRequest(this: Pick<RequestRoutingHost, 'betterAuthEn
   // so it is exactly as narrow as before — SCIM protocol requests only; the
   // non-SCIM flows keep their sequential posture, which the scoping note
   // records as load-bearing. Pinned by `scim-transaction-scope.test.ts`.
+  // An enterprise OIDC callback runs inside the refusal scope that puts the
+  // cause of a refused ID token on the redirect (`sso-oidc-refusal-cause.ts`).
+  const ssoOidcProviderId = ssoOidcCallbackProviderId(endpointPath);
   const runRequest = isScimProtocolPath(endpointPath)
     ? async (): Promise<Response> => {
         const { scimRequestScope } = await import('./scim-connection-service.js');
         return scimRequestScope.run({ scim: true }, runHandler);
       }
-    : runHandler;
+    : ssoOidcProviderId !== undefined
+      ? (): Promise<Response> => this.runSsoOidcCallback(ssoOidcProviderId, runHandler)
+      : runHandler;
   // [objectstack-ai/cloud#3606, ruling A] `/oauth2/revoke` is answered a
   // second time, AFTER the provider: the provider authenticates the client
   // and answers first, unchanged, and the MCP access token it cannot revoke
