@@ -26,9 +26,11 @@ import { stepKey, type AgentDriver, type AskTask, type AuthorTask, type DriverIn
 import { namespacedScenario } from '../../src/runner/namespace.js';
 import { runCard, seedApp, type ProjectOps } from '../../src/runner/orchestrate.js';
 import { cardScorecard, renderScorecard, runRecord } from '../../src/runner/scorecard.js';
+import type { PackageSource } from '../../src/runner/packages.js';
 import type { ParsedTurn } from '../../src/runner/transcript.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
+const PUBLISHED: PackageSource = { source: 'published', versions: ['18.3.0'] };
 const CARD_FILE = resolve(HERE, '../../../../../docs/qa/scenarios/crm_account_with_contacts.json');
 const AREAS_DIR = resolve(HERE, '../../../../../docs/qa/platform-checklist/areas');
 
@@ -309,7 +311,7 @@ describe('runCard — the crm card, both modes, a clean agent', () => {
     expect(driver.seen).toContain('crm_account_with_contacts/template/iterate-run/remove_ben/sdr');
     expect(driver.seen).not.toContain('crm_account_with_contacts/scratch/run/account_count/-'); // persona-scoped: asked as its personas
 
-    const record = runRecord({ run: 'r', date: '2026-11-05', driver: driver.info(), runner: 'test', evidenceDir: '/tmp' }, run);
+    const record = runRecord({ run: 'r', date: '2026-11-05', packages: PUBLISHED, driver: driver.info(), runner: 'test', evidenceDir: '/tmp' }, run);
     const results = record.results as Array<{ id: string; verdict: string }>;
     expect(results.find((r) => r.id === 'crm_account_with_contacts.scratch.run-operations')!.verdict).toBe('pass');
     expect(results.find((r) => r.id === 'crm_account_with_contacts.template.build')!.verdict).toBe('not-run'); // template mode builds nothing first
@@ -563,7 +565,7 @@ describe('runCard — a refused seed row makes what reads it not measured, never
     const table = renderScorecard(sc);
     expect(table).toContain('| Seed | 7/8 ⚠ seed: 1 refused |');
     expect(table).toContain('| Run-问数 | 4/4 · 5 not measured |');
-    const record = runRecord({ run: 'r', date: '2026-11-06', driver: driver.info(), runner: 'test', evidenceDir: '/tmp' }, run);
+    const record = runRecord({ run: 'r', date: '2026-11-06', packages: PUBLISHED, driver: driver.info(), runner: 'test', evidenceDir: '/tmp' }, run);
     const ask = (record.results as Array<{ id: string; verdict: string; notes: string }>).find((r) => r.id === 'crm_account_with_contacts.scratch.run-ask')!;
     expect(ask).toMatchObject({ verdict: 'pass', notes: '4/4 · 5 not measured' });
   });
@@ -578,7 +580,7 @@ describe('runCard — a refused seed row makes what reads it not measured, never
     const sc = cardScorecard(run);
     expect(sc.modes[0]!.first.ask).toEqual({ passed: 0, total: 0, leaks: 0, notMeasured: 9 });
     expect(renderScorecard(sc)).toContain('| Seed | 5/8 ⚠ seed: 3 refused |');
-    const record = runRecord({ run: 'r', date: '2026-11-06', driver: driver.info(), runner: 'test', evidenceDir: '/tmp' }, run);
+    const record = runRecord({ run: 'r', date: '2026-11-06', packages: PUBLISHED, driver: driver.info(), runner: 'test', evidenceDir: '/tmp' }, run);
     const verdict = (id: string) => (record.results as Array<{ id: string; verdict: string }>).find((r) => r.id === id)!.verdict;
     expect(verdict('crm_account_with_contacts.scratch.run-ask')).toBe('not-run');
     expect(verdict('crm_account_with_contacts.scratch.run-operations')).toBe('pass');
@@ -608,7 +610,7 @@ const OUT_OF_TURNS: ParsedTurn = {
 describe('runCard — an authoring turn that does not finish leaves its build not measured, never a degraded score', () => {
   const results = (run: Awaited<ReturnType<typeof runCard>>, driver: ScriptedDriver) =>
     Object.fromEntries(
-      (runRecord({ run: 'r', date: '2026-11-07', driver: driver.info(), runner: 'test', evidenceDir: '/tmp' }, run).results as Array<{ id: string; verdict: string; notes: string }>).map((r) => [
+      (runRecord({ run: 'r', date: '2026-11-07', packages: PUBLISHED, driver: driver.info(), runner: 'test', evidenceDir: '/tmp' }, run).results as Array<{ id: string; verdict: string; notes: string }>).map((r) => [
         r.id.replace('crm_account_with_contacts.', ''),
         `${r.verdict} · ${r.notes}`,
       ]),
@@ -691,7 +693,7 @@ describe('runCard — an authoring turn that does not finish leaves its build no
     const sc = cardScorecard(run);
     expect(sc.modes[0]!.first.build!.author).toEqual({ resultSubtype: 'error_max_turns', numTurns: 80, maxTurns: 80, elapsedMs: 1_414_000 });
     expect(renderScorecard(sc)).toContain('| Build · author | error_max_turns · 80/80 turns · 23m 34s |');
-    const written = JSON.parse(JSON.stringify(runRecord({ run: 'r', date: '2026-11-07', driver: driver.info(), runner: 'test', evidenceDir: '/tmp' }, run)));
+    const written = JSON.parse(JSON.stringify(runRecord({ run: 'r', date: '2026-11-07', packages: PUBLISHED, driver: driver.info(), runner: 'test', evidenceDir: '/tmp' }, run)));
     expect([written.cardRun.modes[0].build.author.maxTurns, written.scorecard.modes[0].first.build.author.maxTurns]).toEqual([80, 80]);
   });
 

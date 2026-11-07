@@ -207,9 +207,11 @@ export function ObjectSettingsPanel({
     { value: 'controlled_by_parent', label: t('engine.studio.settings.sharingControlledByParent', locale) },
   ];
   // objectui#12326 — choosing `controlled_by_parent` sets `required: true` on
-  // every `master_detail` field in the same patch: the spec admits no other
-  // value there (ADR-0055 §1), and the save door refuses an omitted one. The
-  // fields are written only when that changes them.
+  // each `master_detail` field that writes no `required`, in the same patch:
+  // the save door would read the omission as an optional master. An explicit
+  // `required: false` is an optional master the author chose (ADR-0055 §1 as
+  // amended, objectstack#30905 ruling A) and is kept. The fields are written
+  // only when that changes them.
   const pickSharingModel = (v: string) => {
     if (!v) {
       onPatch({ sharingModel: undefined });
