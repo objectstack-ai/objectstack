@@ -31,7 +31,7 @@
 
 ## 4. 跨仓发现者(应用仓量框架、cloud 席位)
 
-- 公开面至多一行「a security item is with the maintainer」,⛔ 无细节。
+- 公开面至多一行「a security item is with the owner seat」,⛔ 无细节。
 
 ## 5. os-dev 报告
 
@@ -60,6 +60,6 @@
 
 - 每份安全发现从接收到发布归 `security#1` 席(章程 `lanes/security.md`),发现者只报不修。
 - ⛔ 不扩本 PR 或分支,不自开修复分支,不在同一面顺手加固;dev 只走第 5 节上报。
-- 席位与 QA runner 两件事:照第 3 节建私卡;敲 `Notify: security · GHSA-ID`(私有仓 `#N`),只带编号。
+- 席位两件事:照第 3 节建私卡;敲 `Notify: security · GHSA-ID`(私有仓 `#N`),只带编号。
 - 中继拒(第 3 节)⇒ 机制在会话里交 `security#1` 席;席空缺 ⇒ 交维护者;发布清单归维护者。
 - 任务绕不开它 ⇒ 报 `blocked`,只写「a security item is with the owner seat」;席位停卡,⛔ 不绕行。
