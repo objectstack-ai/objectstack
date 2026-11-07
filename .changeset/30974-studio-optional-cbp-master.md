@@ -5,7 +5,7 @@
 
 fix(studio): Studio shows, keeps and authors the optional master of a controlled-by-parent object (#30974)
 
-Clause-②: no
+Clause-②: yes (widening)
 Metadata-protocol: none
 
 Since ADR-0055 §1 as amended (#30905, ruling A), a `controlled_by_parent` object's ONLY `master_detail` may be declared `required: false`: an optional master, whose records may name no master and are then visible only to their owner and to View All Records on the object. Studio still treated every master as required. It now follows the spec:
