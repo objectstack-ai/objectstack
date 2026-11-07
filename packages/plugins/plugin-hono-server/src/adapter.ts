@@ -34,6 +34,9 @@ import { serveStatic } from '@hono/node-server/serve-static';
 import { createServer as createHttpsServer } from 'node:https';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Socket } from 'node:net';
+
+/** The responses one open connection still owes, for the drain in {@link HonoHttpServer.close}. */
+type OwedResponses = Set<ServerResponse>;
 import { matchesRoutePattern } from './route-pattern';
 import { readRequestBody, type RequestBodyReading, type RequestBodyRefusal } from './request-body';
 // The ADR-0112 wire vocabulary, read as DATA rather than restated: `ErrorCode`
@@ -591,7 +594,7 @@ export class HonoHttpServer implements IHttpServer {
      * closes, so a response that will never be written (one pipelined behind
      * another on a connection that died) is not held past its connection.
      */
-    private inFlightResponses = new Map<Socket, Set<ServerResponse>>();
+    private inFlightResponses = new Map<Socket, OwedResponses>();
     /**
      * Every `(method, pattern)` pair registered through this server, kept so
      * the `notFound` handler can answer "the path exists but the method is
@@ -1891,16 +1894,7 @@ export class HonoHttpServer implements IHttpServer {
         // `req.socket`, not `res.socket`: a pipelined response waiting its turn
         // has no socket yet.
         const socket = req.socket;
-        let pending = this.inFlightResponses.get(socket);
-        if (!pending) {
-            const owed = new Set<ServerResponse>();
-            pending = owed;
-            this.inFlightResponses.set(socket, owed);
-            socket.once('close', () => {
-                if (this.inFlightResponses.get(socket) === owed) this.inFlightResponses.delete(socket);
-            });
-        }
-        const owed = pending;
+        const owed: OwedResponses = this.responsesOwedOn(socket);
         owed.add(res);
         res.once('close', () => {
             owed.delete(res);
@@ -1908,6 +1902,18 @@ export class HonoHttpServer implements IHttpServer {
             if (socket.destroyed || socket.writableEnded) return;
             socket.destroySoon();
         });
+    }
+
+    /** The {@link inFlightResponses} entry for one connection, made on its first request and dropped when it closes. */
+    private responsesOwedOn(socket: Socket): OwedResponses {
+        const known: OwedResponses | undefined = this.inFlightResponses.get(socket);
+        if (known) return known;
+        const created: OwedResponses = new Set();
+        this.inFlightResponses.set(socket, created);
+        socket.once('close', () => {
+            if (this.inFlightResponses.get(socket) === created) this.inFlightResponses.delete(socket);
+        });
+        return created;
     }
 
     getPort() {
