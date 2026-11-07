@@ -60,6 +60,16 @@
         "must_contain": ["$now: true", "addDays", "$field: 'grace_days_offset'", "$lt"],
         "must_not_contain": ["subDays", "type: 'formula'"]
       }
+    },
+    {
+      "id": 7,
+      "prompt": "Find tasks with no notes. `notes` is a textarea, and a note saved blank (an empty string) counts as none.",
+      "expected_output": "`engine.find('task', { where: { notes: { $empty: true } } })` — `$empty` judges by the field's declared type: on a text-like field it matches null AND the empty string, where `$null: true` misses ''. `$empty: false` is the complement (has content); a view filter's `is_empty` / `is_not_empty` lowers to it. Not `$regex` (retired) and not a hand-built `$or` of `$null` and `$eq: ''`.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["$empty: true"],
+        "must_not_contain": []
+      }
     }
   ]
 }

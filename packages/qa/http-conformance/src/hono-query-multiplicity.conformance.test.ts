@@ -162,6 +162,7 @@ describe('[#23214] a real createHonoApp host refuses a repeated single-valued na
         const { send, protocol } = await boot();
         const answer = await send('DELETE', `/packages/${PKG}?keepData=true`);
         expect(answer.status).toBe(200);
-        expect(protocol.deletePackage.mock.calls.map((c) => c[0])).toEqual([{ packageId: PKG, keepData: true }]);
+        // [#31023] The door also credits the delete to the signed-in author (ADR-0146 D1).
+        expect(protocol.deletePackage.mock.calls.map((c) => c[0])).toEqual([{ packageId: PKG, keepData: true, actor: AUTHOR.userId }]);
     });
 });

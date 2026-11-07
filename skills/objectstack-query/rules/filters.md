@@ -24,6 +24,7 @@ Comprehensive guide for building ObjectStack query filters.
 | String | `$ilike` | `$like`, case-blind | `{ code: { $ilike: 'prj-%' } }` |
 | Null | `$null` | `IS NULL` / `IS NOT NULL` | `{ deleted_at: { $null: true } }` |
 | Null | `$exists` | `IS NOT NULL` / `IS NULL` | `{ metadata: { $exists: true } }` |
+| Null | `$empty` | `IS NULL`, `''` or `[]` by type | `{ notes: { $empty: true } }` |
 
 **Case sensitivity is part of the contract** (`filter.zod.ts`): "`$contains` /
 `$notContains` / `$startsWith` / `$endsWith` compare CASE-SENSITIVELY.
@@ -127,14 +128,13 @@ only; use the comparison operators for numbers and dates.
 
 `where: { deleted_at: null }` works — a bare null lowers to `IS NULL` on both
 paths — but it reads as "equals null" and has no `IS NOT NULL` spelling. Write
-`{ deleted_at: { $null: true } }` instead; `$null: false` is `IS NOT NULL`.
+`{ deleted_at: { $null: true } }` instead.
 
 ## Date Filtering Patterns
 
 For **ad-hoc queries in application code**, compute the date yourself:
 
 ```typescript
-// Records created in the last 7 days (compute date in application code)
 where: {
   created_at: { $gte: new Date('2025-01-01') }
 }

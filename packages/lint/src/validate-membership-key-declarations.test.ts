@@ -141,6 +141,41 @@ describe('validateMembershipKeyDeclarations — refusal 6: `valueField` is a ref
     expect(judge({ objects: [roster({ valueField: 'contact_user' }), supplier] })).toEqual([]);
   });
 
+  it("[#31129 ruling A] accepts `id`, the roster row's own primary key: the caller's own rows", () => {
+    expect(judge({ objects: [roster({ valueField: 'id' }), supplier] })).toEqual([]);
+    expect(judge({ objects: [roster({ valueField: 'id', filter: undefined }), supplier] })).toEqual([]);
+  });
+
+  it("[#31129] only the driver's primary key counts: an authored text field named `id` is still refused", () => {
+    const authoredId = parsed({
+      name: 'srm_supplier_contact',
+      label: 'Supplier contact',
+      fields: { ...ROSTER_FIELDS, id: { type: 'text', label: 'Id' } },
+      membershipKeys: { portal_supplier_ids: { userField: 'user', valueField: 'id' } },
+    });
+    const findings = judge({ objects: [authoredId, supplier] });
+    expect(brief(findings)).toEqual([{ rule: MEMBERSHIP_KEY_VALUE_FIELD_INVALID, path: `${KEY_PATH}.valueField` }]);
+    expect(findings[0].severity).toBe('error');
+    expect(findings[0].message).toContain('is a `text` field, not a reference');
+  });
+
+  it("[#31129] `id` is X's own key only as `valueField`: as `userField` it is still no user reference", () => {
+    const findings = judge({ objects: [roster({ userField: 'id', valueField: 'supplier' }), supplier] });
+    expect(brief(findings)).toEqual([{ rule: MEMBERSHIP_KEY_USER_FIELD_INVALID, path: `${KEY_PATH}.userField` }]);
+    expect(findings[0].severity).toBe('error');
+    expect(findings[0].message).toContain('not a user reference');
+  });
+
+  it('[#31129] the save door accepts an object write whose key takes `valueField: \'id\'`', () => {
+    const saved = runRuntimeAuthoringRules({
+      type: 'object',
+      item: roster({ valueField: 'id' }),
+      context: { objects: [supplier], permissions: [] },
+      rlsMembershipResolverKeys: [],
+    });
+    expect(saved.errors.filter((f) => f.rule.startsWith('membership-key-'))).toEqual([]);
+  });
+
   it('refuses a column the object does not declare, and a column that is no reference', () => {
     const missing = judge({ objects: [roster({ valueField: 'supplierr' }), supplier] });
     expect(brief(missing)).toEqual([{ rule: MEMBERSHIP_KEY_VALUE_FIELD_INVALID, path: `${KEY_PATH}.valueField` }]);
@@ -149,6 +184,8 @@ describe('validateMembershipKeyDeclarations — refusal 6: `valueField` is a ref
     const text = judge({ objects: [roster({ valueField: 'supplier_name' }), supplier] });
     expect(brief(text)).toEqual([{ rule: MEMBERSHIP_KEY_VALUE_FIELD_INVALID, path: `${KEY_PATH}.valueField` }]);
     expect(text[0].message).toContain('is a `text` field, not a reference');
+    expect(text[0].severity).toBe('error');
+    expect(text[0].hint).toContain('or at `id`');
   });
 });
 

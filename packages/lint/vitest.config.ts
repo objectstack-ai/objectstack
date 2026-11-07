@@ -1,14 +1,25 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
-// This config exists for exactly two settings; everything else stays on
+// This config exists for exactly three settings; everything else stays on
 // vitest's defaults, deliberately — a key added here re-specifies behaviour
 // for every test file in the package (packages/cli/vitest.config.ts's header
 // records the incident that taught that). Both settings are package-wide on
 // purpose: each removes a mechanism every file here is exposed to, rather
 // than tuning one file.
 import { defineConfig } from 'vitest/config';
+import path from 'path';
 
 export default defineConfig({
+  // `@objectstack/metadata-core` is read from source, never its dist/, so a
+  // unit test here is a verdict about the checkout
+  // (scripts/check-test-source-alias.mjs). It is the one workspace package
+  // lint's source imports that is not spec: `appOf`, which the customization
+  // namespace advisory asks. Anchored, so it cannot swallow a subpath.
+  resolve: {
+    alias: [
+      { find: /^@objectstack\/metadata-core$/, replacement: path.resolve(__dirname, '../metadata-core/src/index.ts') },
+    ],
+  },
   test: {
     // A late console.* must not redden a green suite (#10374): vitest's worker
     // forwards console output over RPC and discards the promise, and a write

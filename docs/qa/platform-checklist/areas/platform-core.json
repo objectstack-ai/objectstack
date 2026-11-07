@@ -3053,10 +3053,10 @@
     },
     {
       "id": "platform-core.seed-mode-matrix",
-      "title": "Seed mode matrix (insert/update/upsert/replace/ignore): each mode does exactly its verb through the ONE SeedLoaderService, no-op replays skip instead of churning, ignore reports skips — and `replace` is DECLARED delete-all-then-insert but IMPLEMENTED as bare insert (no caller clears the table): the posture is recorded, never ticked as scoped deletion",
+      "title": "Seed mode matrix (insert/update/upsert/replace/ignore): each mode does exactly its verb through the ONE SeedLoaderService, no-op replays skip instead of churning, ignore reports skips — and `replace` inserts and deletes nothing, DECLARED and IMPLEMENTED alike (no caller clears the table): its posture is scored as bare insert, never ticked as scoped deletion",
       "since": "v15",
       "status": "active",
-      "revision": 6,
+      "revision": 7,
       "priority": "P1",
       "surface": "api",
       "personas": ["seeded admin (admin@objectos.ai / admin123)"],
@@ -3078,7 +3078,7 @@
         "UPDATE: seed draft (mode update) touching A (changed value) and a nonexistent D → A updates, D is SKIPPED (update never creates); row count unchanged",
         "IGNORE: seed draft (mode ignore) with A (changed value) and new E → A untouched (still the update-mode value; existing rows are never rewritten), E inserted; the skip is visible as A's unchanged value + count",
         "INSERT: seed draft (mode insert) re-declaring A → a SECOND A-named row appears (no matching in insert mode); record the duplication; if the object declares a unique key on the natural key instead, record the refusal — either shape is the mode's real contract",
-        "REPLACE (expected-posture probe): add one row F by hand through /api/v1/data (a row the seed does NOT declare); publish a seed draft (mode replace) declaring only G → capture what happens to F. At head: F SURVIVES and G is inserted — the loader's replace case is bare insert with the comment 'caller should have cleared the table', and NO caller in the tree clears anything. Record the declared-vs-implemented gap; do NOT tick 'replace scoped to its own object' (there is no deletion to scope) and do NOT file F's survival as data loss (it is the opposite)",
+        "REPLACE (expected-posture probe): add one row F by hand through /api/v1/data (a row the seed does NOT declare); publish a seed draft (mode replace) declaring only G → capture what happens to F. At head: F SURVIVES and G is inserted — the loader's replace case is bare insert with the comment 'caller should have cleared the table', and NO caller in the tree clears anything, which is what SeedMode now declares for replace ('deleting nothing: for a cache table the caller cleared'). Score F's survival as the declared posture; do NOT tick 'replace scoped to its own object' (there is no deletion to scope) and do NOT file F's survival as data loss (it is the opposite)",
         "idempotence tie-in: re-publish the upsert draft unchanged TWICE. The first replay may legitimately write, because steps 2–4 rewrote A's rows (update mode set A to a2, insert mode added a second A-named row), so it re-converges them to the seed; the SECOND replay is the idempotence probe — zero inserts and zero updates (all no-op skips), every row's updated_at untouched (the churn-avoidance isNoOpReplay exists for exactly this)",
         "teardown: the writable package's own delete, or discard the run's own DB"
       ],
@@ -3108,7 +3108,7 @@
           "evidence": "the post-insert row listing (or the refusal body)"
         },
         {
-          "clause": "EXPECTED POSTURE (declared ≠ implemented): `replace` is documented 'Delete ALL records in object then insert (Dangerous)' but the implementation is bare insert — writeRecord's replace arm inserts with the comment 'caller should have cleared the table' and NO caller anywhere clears it, so pre-existing rows SURVIVE a replace-mode publish. The run records this gap (a checklist-accuracy/product finding routed through the sweep's anchor, not re-filed per run); it must NOT tick a 'replace deletes only its own object's rows' claim — no deletion exists to scope. If a future head implements the clear, this clause is stale: revise, and then ALSO prove the deletion is scoped to the seed's own object before trusting it",
+          "clause": "EXPECTED POSTURE (declared = implemented): `replace` inserts every record with no match and deletes nothing. SeedMode's replace member declares 'Insert every record, no match, deleting nothing: for a cache table the caller cleared', SeedSchema's mode description says replace 'does the same and deletes nothing: it is for a table the caller cleared', and writeRecord's replace arm is that bare insert (its comment 'caller should have cleared the table'; NO caller anywhere clears it), so pre-existing rows SURVIVE a replace-mode publish. F's survival is the declared behaviour: neither a gap to record nor data loss to file; the run must NOT tick a 'replace deletes only its own object's rows' claim — no deletion exists to scope. If a future head implements a clear (in the loader or in a caller), this clause is stale: revise, and then ALSO prove the deletion is scoped to the seed's own object before trusting it",
           "oracle": "api",
           "verify": "F (undeclared, hand-inserted) still present after the replace publish; G inserted; grep evidence: the only 'replace' write arm is the insert in seed-loader.ts's writeRecord, and decideWriteAction (the batched mirror) routes replace to insert — cite the symbols, never a line number",
           "evidence": "F's surviving read + G's read + the source excerpt"
@@ -3128,7 +3128,7 @@
         "mode insert — no matching, always writes (duplicates on replay unless the object's own unique constraint refuses)",
         "mode update — matched rows only; unmatched skipped, never created",
         "mode upsert — create-or-update on externalId with no-op-replay skip (the default)",
-        "mode replace — DECLARED clear-then-insert, IMPLEMENTED bare insert (the expected-posture clause)",
+        "mode replace — bare insert, no matching, nothing deleted: DECLARED and IMPLEMENTED alike (the expected-posture clause)",
         "mode ignore — insert-if-absent; existing rows never rewritten"
       ],
       "enumSource": {
@@ -3138,7 +3138,7 @@
       },
       "traps": ["destructive-in-place", "seed-data-thin", "silent-coercion"],
       "source": [
-        "packages/spec/src/data/seed.zod.ts#SeedMode (SeedMode — the five modes with their declared semantics, incl. replace's 'Delete ALL records … Dangerous' claim)",
+        "packages/spec/src/data/seed.zod.ts#SeedMode (SeedMode — the five modes with their declared semantics, incl. replace's 'Insert every record, no match, deleting nothing: for a cache table the caller cleared'), (SeedSchema's mode description — replace 'does the same and deletes nothing: it is for a table the caller cleared')",
         "packages/metadata-protocol/src/seed-loader.ts#writeRecord (mode = dataset.mode || config.defaultMode), (existing-records preload for upsert/update/ignore ONLY — insert/replace never match), (writeRecord per-mode switch; the replace arm's bare insert + 'caller should have cleared the table' comment), (decideWriteAction — the batched mirror, replace → insert),+ (isNoOpReplay — seed-declared fields only, conservative on doubt)",
         "packages/spec/src/data/seed-loader.zod.ts#defaultMode (defaultMode default 'upsert')",
         "packages/metadata-protocol/src/protocol.ts#applySeedBodies+ (applySeedBodies — published seed bodies materialize through the same loader; failures returned, never thrown, surfaced as seedApplied)",
@@ -3182,6 +3182,12 @@
           "date": "2026-10-28",
           "change": "fixtures.requires[0] names the earlier refusal. Checklist-accuracy finding of the 18.2.0 wave 2 (QA run #26476, manual api set, at 756220c4; wave anchor #25807, slice B): a body name that mismatches the URL answered 400 VALIDATION_ERROR before the strict schema's 422 unrecognized_keys could. Measured live by that run; the requirement (no body name) is unchanged. No clause changed",
           "ref": "#25807"
+        },
+        {
+          "revision": 7,
+          "date": "2026-11-07",
+          "change": "title, steps[5], acceptance[4].clause, variants[3] and source[0] re-worded: replace is now declared = implemented. #31099 (PR #31135) rewrote SeedMode's replace member and SeedSchema's mode description to what the loader does (insert every record, no match, deleting nothing), so the clause's 'declared ≠ implemented' posture went false and source[0] quoted the old delete-all-then-insert wording, which seed.zod.ts no longer holds. Read at base 658d84f5: seed.zod.ts SeedMode and SeedSchema mode describe text (no delete-all wording left), seed-loader.ts writeRecord's replace arm (bare insert, comment 'caller should have cleared the table') and decideWriteAction (replace routes to insert), and no other replace arm on the seed path (packages/cli/src/commands/diff.ts only words a plan line). The probe and its verdicts are unchanged: F survives, G is inserted, nothing is ticked as scoped deletion",
+          "ref": "#31140"
         }
       ]
     },

@@ -290,8 +290,8 @@ export const en: TranslationData = {
     connect_agent: {
       label: 'Connect an AI Assistant',
       subtitle:
-        'Give any MCP-capable AI client governed access to this system — '
-        + "every call runs under the caller's own permissions and row-level security.",
+        'Work in this system from Claude, Doubao and other AI assistants. '
+        + 'Each one acts as you: it sees and changes only what your own permissions allow.',
     },
 
     // The platform's own record pages (`@objectstack/platform-objects/pages`,

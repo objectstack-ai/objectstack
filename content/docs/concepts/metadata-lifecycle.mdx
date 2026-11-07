@@ -115,7 +115,14 @@ later ships. See [ADR-0070](https://github.com/objectstack-ai/objectstack/blob/m
 
 A customer's change to an installed base package — HotCRM, id `hotcrm` — is an item of
 the base's paired writable package **`hotcrm.custom`**, which depends on the base; the
-base's own items stay read-only. An item of the pair that bears a base item's name — for an
+base's own items stay read-only. **The unit is the App**: an App and every module or plugin
+that declares it (HotCRM's `app.objectstack.hotcrm` and its modules) share **one** pair,
+`<app id>.custom` (`app.objectstack.hotcrm.custom`, namespace `<app namespace>_custom`, depending on
+the App at `^<major>`), and the ensure door asked for any of them answers that one pair. A package that
+declares no App is its own unit, and a kernel package (scope `system` or `cloud`) has no pair in this
+version. A per-package pair an earlier version created for a module stays installed and keeps serving
+what it holds; while it holds the App's pair namespace, the ensure door answers `409` naming it rather
+than create the App's pair beside it. An item of the pair that bears a base item's name — for an
 `email_template`, one item per `(name, locale)`, the name **and** a locale the base ships — and
 declares in its body `overrides: { package: 'hotcrm', basedOn: '3.2.0' }` (the base's
 `manifest.id` and `manifest.version`; `basedOn` is recorded and never judged; schema:

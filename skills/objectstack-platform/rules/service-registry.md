@@ -144,9 +144,9 @@ async start(ctx: PluginContext) {
 
 ## Well-Known Service Keys
 
-The full plugin-name -> service-key table (13 rows, including which plugins
+The full plugin-name -> service-key table (including which plugins
 register no service at all) lives in
-[../SKILL.md](../SKILL.md#well-known-plugin-names--services).
+[../references/plugin-development.md](../references/plugin-development.md#well-known-plugin-names--services).
 
 ## Core Fallback Injection
 

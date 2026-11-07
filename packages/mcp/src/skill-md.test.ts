@@ -8,6 +8,15 @@ import {
   OBJECTSTACK_SKILL_DESCRIPTION,
   OBJECTSTACK_MCP_SERVER_NAME,
 } from './skill-md.js';
+// The Console's "Download skill" mirror, imported from source by relative
+// path: the Console cannot import this package (it is not browser-safe), so it
+// carries a copy that must stay byte-identical to the render below.
+import {
+  renderObjectStackSkill,
+  OBJECTSTACK_SKILL_NAME as CONSOLE_SKILL_NAME,
+  OBJECTSTACK_SKILL_DESCRIPTION as CONSOLE_SKILL_DESCRIPTION,
+  OBJECTSTACK_MCP_SERVER_NAME as CONSOLE_MCP_SERVER_NAME,
+} from '../../../ui/apps/console/src/pages/developer/objectstack-skill.js';
 
 /** Pull the YAML frontmatter block (between the first two `---` lines). */
 function frontmatter(md: string): Record<string, string> {
@@ -104,5 +113,31 @@ describe('renderSkillMarkdown', () => {
     const md = renderSkillMarkdown({ mcpUrl: '  https://x.objectos.app/api/v1/mcp  ' });
     expect(md).toContain('https://x.objectos.app/api/v1/mcp');
     expect(md).not.toContain('  https://');
+  });
+});
+
+// Drift pin, the server's half: the Console download must be the SKILL.md this
+// package serves to a caller with no OAuth scopes (an API key or a session),
+// byte for byte. The Console carries the same comparison in
+// ui/apps/console/src/pages/developer/objectstack-skill.test.ts, which runs
+// only when Test UI does; a diff confined to this package starts Test Core and
+// not Test UI, so this half is what runs on it. Every input of the render
+// (DELETE_RECORDS_MAX_PER_CALL in mcp-http-tools.ts included) lives in this
+// package or upstream of it, so any change to one runs this file.
+describe('renderSkillMarkdown is mirrored by the Console download', () => {
+  it('shares the identity constants', () => {
+    expect(CONSOLE_SKILL_NAME).toBe(OBJECTSTACK_SKILL_NAME);
+    expect(CONSOLE_SKILL_DESCRIPTION).toBe(OBJECTSTACK_SKILL_DESCRIPTION);
+    expect(CONSOLE_MCP_SERVER_NAME).toBe(OBJECTSTACK_MCP_SERVER_NAME);
+  });
+
+  it.each([
+    ['no options', {}],
+    ['an MCP URL', { mcpUrl: 'https://acme.objectos.app/api/v1/mcp' }],
+    ['an env name', { envName: 'Acme CRM' }],
+    ['both, padded with whitespace', { mcpUrl: '  https://acme.objectos.app/api/v1/mcp ', envName: ' Acme CRM ' }],
+    ['blank values', { mcpUrl: '   ', envName: '' }],
+  ])('renders the served text for %s', (_label, options) => {
+    expect(renderObjectStackSkill(options)).toBe(renderSkillMarkdown(options));
   });
 });

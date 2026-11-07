@@ -67,6 +67,7 @@ import type { PlatformAdminActor } from './platform-admin-gate.js';
 import { readJsonRequestBody } from './request-json-body.js';
 import {
   SCIM_CREDENTIAL_OBJECT,
+  SCIM_SERVICE_PRINCIPAL_PREFIX,
   revokeScimConnectionCredential,
   type MintScimConnectionCredentialInput,
   type MintedScimConnectionCredential,
@@ -84,9 +85,11 @@ const MAX_TEXT = 255;
  * A write made by a SCIM connection is audited with the service actor
  * `svc:scim:<connectionId>` (#30960), and `sys_audit_log.actor` holds 255
  * characters, so a longer id would make that audit insert fail for every
- * request the connection makes. 255 minus the 9-character prefix.
+ * request the connection makes. 255 minus the 9-character prefix, read from
+ * {@link SCIM_SERVICE_PRINCIPAL_PREFIX} (the one spelling the actor label is
+ * built from) so the cap moves with the label it protects.
  */
-const MAX_SCIM_CONNECTION_ID = MAX_TEXT - 'svc:scim:'.length;
+const MAX_SCIM_CONNECTION_ID = MAX_TEXT - SCIM_SERVICE_PRINCIPAL_PREFIX.length;
 
 /** Execution context for the store reads and the audit write. */
 const SYSTEM_CTX = { isSystem: true } as const;
