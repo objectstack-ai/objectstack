@@ -255,6 +255,8 @@ describe('platform-admin-gated doors: every first-party action offers itself to 
         'sys_sso_provider.register_saml_provider',
         'sys_sso_provider.request_domain_verification',
         'sys_sso_provider.verify_domain',
+        'sys_scim_connection_credential.mint_scim_credential',
+        'sys_scim_connection_credential.revoke_scim_credential',
       ]),
     );
   });

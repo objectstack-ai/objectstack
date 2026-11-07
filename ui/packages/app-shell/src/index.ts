@@ -353,6 +353,7 @@ import './services/builtinComponents.js';
 // SDUI widget for the metadata-driven Cloud Connection page (cloud ADR-0008).
 import './console/cloud-connection/CloudConnectionPanel.js';
 import './console/connect/ConnectAgentWidget.js';
+import './console/connect/ManagedPersonAssistants.js';
 // Generic product-page blocks — hero, stat, usage-bar, checklist, tile-grid
 // (objectui#12197).
 import './console/blocks/productBlocks.js';

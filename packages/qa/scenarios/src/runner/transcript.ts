@@ -39,9 +39,36 @@ export interface RunnerToolCall extends RunToolCall {
   rawName: string;
 }
 
+/**
+ * What the live driver saw of the CLI process behind a turn — no part of the
+ * stream itself. It travels in `meta` so a recording carries it and a replay
+ * re-reads a killed or failed turn as the run saw it.
+ */
+export interface TurnProcess {
+  /** Wall-clock time from spawn to exit, ms. */
+  elapsedMs: number;
+  /** The exit code; `null` when the process ended on a signal or never started. */
+  exit: number | null;
+  signal?: string;
+  /** The runner's own timeout (`timeoutMs`) killed it with SIGTERM. */
+  timedOut: boolean;
+  timeoutMs: number;
+  /**
+   * The `--max-turns` the CLI was given: a turn that reaches it ends
+   * `error_max_turns`. Absent on a turn recorded before the runner kept it.
+   */
+  maxTurns?: number;
+  /** The end of what the CLI wrote to stderr (at most 2,000 characters). */
+  stderrTail?: string;
+  /** The process could not be started or fed its prompt (`spawn ENOENT`, `write EPIPE`). */
+  error?: string;
+}
+
 export interface ParsedTurn extends RunTranscript {
   toolCalls: RunnerToolCall[];
   meta: {
+    /** Set by the live driver, absent on a parse alone ({@link TurnProcess}). */
+    process?: TurnProcess;
     model?: string;
     /** MCP servers the session reported at init, with their connection status. */
     mcpServers?: Array<{ name: string; status: string }>;

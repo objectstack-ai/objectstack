@@ -251,7 +251,7 @@ export const zhHant: PlatformTranslationData = {
         lockout_duration_minutes: { label: '鎖定時間（分鐘）', help: '超過門檻後帳戶維持鎖定的時間，兩個登入階段皆適用。' },
         rate_limit_max: { label: '驗證限流：最大請求數', help: '每個 IP 在每個時間窗內對登入／註冊／重設密碼端點的最大請求數。' },
         rate_limit_window_seconds: { label: '驗證限流：時間窗（秒）', help: '計算上方請求上限所用的滑動時間窗。' },
-        mfa_required: { label: '要求多重要素驗證', help: '尚未註冊驗證器的使用者，在寬限期結束後將無法存取資料。啟用此項也會開啟雙重驗證功能，讓使用者可以註冊。' },
+        mfa_required: { label: '要求多重要素驗證', help: '尚未註冊驗證器的使用者，在寬限期結束後將無法存取資料。啟用此項也會開啟雙重驗證功能，讓使用者可以註冊。', options: { off: '不強制', administrators: '管理員', everyone: '所有人' } },
         mfa_grace_period_days: { label: 'MFA 寬限期（天）', help: '使用者在被強制封鎖前可延後註冊的時間。0 表示立即封鎖。' },
         session_expiry_days: { label: '工作階段有效期（天）', help: '工作階段在登入後這麼多天到期。' },
         session_refresh_days: { label: '更新門檻（天）', help: '使用中的工作階段超過此時間後會自動延長。' },
@@ -280,6 +280,26 @@ export const zhHant: PlatformTranslationData = {
         google_client_secret: { label: 'Google 用戶端密鑰', help: '加密儲存。也可在伺服器設定中設定。' },
       },
     },
+    access_policy: {
+      title: '存取原則',
+      description: '本組織的登入限制。部署的驗證設定一律生效；這裡只能在其之上追加限制。',
+      groups: {
+        network: { title: '網路', description: '本組織成員可以從哪裡登入。' },
+        sessions: { title: '工作階段', description: '成員工作階段的有效時長。每項限制只能比部署的更短。' },
+        multi_factor: { title: '多因素驗證', description: '本組織中哪些人必須以驗證器應用程式(TOTP)保護帳戶。' },
+      },
+      keys: {
+        allowed_ip_ranges: { label: '允許的 IP 範圍' },
+        session_idle_timeout_minutes: { label: '閒置逾時(分鐘)' },
+        session_absolute_max_hours: { label: '工作階段最長有效期(小時)' },
+        max_concurrent_sessions_per_user: { label: '每位使用者的最大同時工作階段數' },
+        mfa_required: {
+          label: '要求多因素驗證',
+          options: { off: '不強制', administrators: '管理員', everyone: '所有人' },
+        },
+      },
+    },
+
     storage: {
       title: '檔案儲存',
       description: '附件、匯出檔案與使用者上傳所使用的儲存後端。',

@@ -323,6 +323,7 @@ export const ar: PlatformTranslationData = {
         },
         mfa_required: {
           label: 'طلب المصادقة متعددة العوامل',
+          options: { off: 'متوقف', administrators: 'المسؤولون', everyone: 'الجميع' },
           help: 'يُمنع المستخدمون الذين لم يسجّلوا تطبيق مصادقة من الوصول إلى البيانات بعد انتهاء فترة السماح. تفعيل هذا الخيار يشغّل أيضًا ميزة التحقق الثنائي ليتمكن المستخدمون من التسجيل.',
         },
         mfa_grace_period_days: {
@@ -380,6 +381,26 @@ export const ar: PlatformTranslationData = {
         google_client_secret: { label: 'سر عميل Google', help: 'يُخزَّن مشفّرًا. ويمكن ضبطه أيضًا في إعدادات الخادم.' },
       },
     },
+    access_policy: {
+      title: 'سياسة الوصول',
+      description: 'قيود تسجيل الدخول لهذه المؤسسة. تنطبق إعدادات المصادقة في النشر دائمًا؛ ولا يمكن لهذه الإعدادات إلا أن تضيف إليها.',
+      groups: {
+        network: { title: 'الشبكة', description: 'من أين يمكن لأعضاء هذه المؤسسة تسجيل الدخول.' },
+        sessions: { title: 'الجلسات', description: 'مدة صلاحية جلسة العضو. لا يمكن لأي حد إلا أن يكون أقصر من حد النشر.' },
+        multi_factor: { title: 'المصادقة متعددة العوامل', description: 'من في هذه المؤسسة يجب أن يحمي حسابه بتطبيق مصادقة (TOTP).' },
+      },
+      keys: {
+        allowed_ip_ranges: { label: 'نطاقات IP المسموح بها' },
+        session_idle_timeout_minutes: { label: 'مهلة الخمول (بالدقائق)' },
+        session_absolute_max_hours: { label: 'الحد الأقصى لعمر الجلسة (بالساعات)' },
+        max_concurrent_sessions_per_user: { label: 'الحد الأقصى للجلسات المتزامنة لكل مستخدم' },
+        mfa_required: {
+          label: 'اشتراط المصادقة متعددة العوامل',
+          options: { off: 'متوقف', administrators: 'المسؤولون', everyone: 'الجميع' },
+        },
+      },
+    },
+
     storage: {
       title: 'تخزين الملفات',
       description: 'الواجهة الخلفية المستخدمة للمرفقات والتصديرات وملفات المستخدمين المرفوعة.',

@@ -196,6 +196,13 @@ const CALLERS: Record<string, Classification> = {
       'built metadata artifact offline, only to score whether the reference resolves to an object the build carries; ' +
       'it reads no record and serves nothing of the target to any caller',
   },
+  'packages/qa/scenarios/src/score/scenario-tags.ts': {
+    kind: 'not-a-served-read',
+    reason:
+      "the scenario scorer's capability-tag checks: they read a field's declared target out of a built metadata " +
+      "artifact offline (whether an approver's field holds a user, a controlled-by-parent detail's master), only to " +
+      'judge a capability check; they read no record and serve nothing of the target to any caller',
+  },
   'packages/lint/src/object-graph.ts': {
     kind: 'not-a-served-read',
     reason: 'authoring-time static analysis of metadata; reads no record',

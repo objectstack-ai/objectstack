@@ -238,7 +238,7 @@ OWD sets the baseline access level for each object across the entire organizatio
 | **Public Read/Write** | `public_read_write` | All users | All users | Low-sensitivity data (e.g., tasks, wiki pages) |
 | **Public Read Only** | `public_read` | All users | Owner + shared | Moderate sensitivity (e.g., accounts, contacts) |
 | **Private** | `private` | Owner + shared | Owner + shared | High sensitivity (e.g., opportunities, HR records) |
-| **Controlled by Parent** | `controlled_by_parent` | Derived from the master record | Derived from the master record | Master-detail children (e.g., order lines) |
+| **Controlled by Parent** | `controlled_by_parent` | Derived from the master record; a row with no (optional) master: its owner + View All | Derived from the master record; a row with no (optional) master: its owner + Modify All | Master-detail children (e.g., order lines; a contact whose account is optional) |
 
 <Callout type="warn">
 These are the **only four canonical values** (ADR-0090 D4). The legacy spellings

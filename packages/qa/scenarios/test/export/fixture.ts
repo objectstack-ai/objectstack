@@ -34,13 +34,13 @@ export const CARD_ID = 'crm_account_with_contacts';
 export const NS = 'democrm';
 
 export function loadCrm(): LoadedScenario {
-  const { card, refusals } = loadScenarioFile(join(CARDS_DIR, `${CARD_ID}.json`), { areas: readCapabilityAreas(AREAS_DIR) });
+  const { card, refusals } = loadScenarioFile(join(CARDS_DIR, `${CARD_ID}.json`), { areas: readCapabilityAreas(AREAS_DIR), library: 'open' });
   if (!card) throw new Error(refusals.map(formatRefusal).join('\n'));
   return card;
 }
 
 export function loadAllCards(): LoadedScenario[] {
-  return loadScenarios(CARDS_DIR, { areas: readCapabilityAreas(AREAS_DIR) }).cards;
+  return loadScenarios(CARDS_DIR, { areas: readCapabilityAreas(AREAS_DIR), library: 'open' }).cards;
 }
 
 export const tempDir = (prefix: string) => mkdtempSync(join(tmpdir(), `gallery-${prefix}-`));
@@ -154,6 +154,13 @@ export class FakeApp implements AppHarness {
   async insertRow(object: string, row: Record<string, unknown>): Promise<HttpAnswer> {
     if (this.refuse.has(`${object}/${String(row.id)}`)) return { ok: false, status: 400, body: {}, code: 'VALIDATION_FAILED', message: 'refused by the double' };
     (this.rows[object] ??= []).push({ ...row });
+    return { ok: true, status: 200, body: {} };
+  }
+  /** The seed's second pass (a lookup that closes a reference cycle). */
+  async updateRow(object: string, id: string, patch: Record<string, unknown>): Promise<HttpAnswer> {
+    const row = (this.rows[object] ?? []).find((r) => r.id === id);
+    if (!row) return { ok: false, status: 404, body: {}, code: 'NOT_FOUND', message: 'no such row in the double' };
+    Object.assign(row, patch);
     return { ok: true, status: 200, body: {} };
   }
   async listRows(object: string) {

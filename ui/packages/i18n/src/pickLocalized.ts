@@ -126,7 +126,8 @@ export function pickLocalized(value: unknown, language: string | undefined | nul
  *
  * It deliberately follows only the first three limbs (exact tag, base
  * language, region-qualified sibling — one {@link localizedEntryKey} call, the
- * very function the read side calls) and then STOPS. `pickLocalized` continues
+ * very function the read side calls) and then STOPS (one script check aside,
+ * below). `pickLocalized` continues
  * into `default` -> `en` -> first value, and those last three limbs must never
  * be write targets: they are DISPLAY fallbacks that hand back *another*
  * locale's string. Following them would mean an author editing in `fr`, shown
@@ -138,6 +139,16 @@ export function pickLocalized(value: unknown, language: string | undefined | nul
  * the author was actually looking at. Writing `zh` when the map stores `zh-CN`
  * would leave the edited-away `zh-CN` string in place — invisible in the panel
  * that just "changed" it, still live for any consumer that asks for `zh-CN`.
+ *
+ * One more stop, where the platform table splits the language by script
+ * ({@link splitScriptTagOf}: `zh` today): the entry those limbs pick must mean
+ * the editor's own script. A map with only the other script's entry is shown
+ * to the editor as a borrowed fallback, the same as `en` is to `fr`, so an
+ * edit in `zh-Hant` over `{ en, zh }` or `{ en, 'zh-CN' }` ADDS `zh-Hant` and
+ * the Simplified text survives. A key whose script the table cannot name
+ * (`zh-Hant-US`) is not guessed at to be the editor's own either. The read
+ * side is unchanged: that `zh-Hant` reader still sees the `zh` text until a
+ * Traditional entry exists.
  *
  * Own properties only, `string` values only, for the same reason every
  * `pickLocalized` limb narrowed that way in objectui#3907: a locale tag that
@@ -151,7 +162,10 @@ function localeWriteKey(
   const lang = (language || 'en').trim() || 'en';
   const has = (key: string): boolean =>
     Object.prototype.hasOwnProperty.call(o, key) && typeof o[key] === 'string';
-  return localizedEntryKey(lang, has, Object.keys(o)) ?? lang;
+  const key = localizedEntryKey(lang, has, Object.keys(o));
+  if (key === undefined) return lang;
+  const script = splitScriptTagOf(lang);
+  return script === undefined || platformLocaleTagOf(key) === script ? key : lang;
 }
 
 /**

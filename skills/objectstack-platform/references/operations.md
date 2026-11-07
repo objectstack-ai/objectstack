@@ -20,15 +20,15 @@
 | `os compile` | Compile to portable JSON artifact (for runtime hydration) |
 | `os serve` | Serve a compiled stack in production mode |
 | `os start` | Quick-start a server: auto-compiles `objectstack.config.ts` when no artifact is present, and falls back to an empty kernel with the Console + marketplace when there is no config at all. It does **not** validate env or apply migrations — run `os validate` / `os migrate apply` yourself |
-| `os generate <kind>` | Scaffold an object / view / flow / agent from a template |
+| `os generate <kind>` | Scaffold an object / view / flow / skill from a template |
 
 ## Verify your work
 
-ObjectStack metadata mistakes fail **silently at runtime**, not at edit time:
-a bare field ref in a predicate (`done` instead of `record.done`) evaluates to
-`null` and silently hides an action/validation on every record; a
-dangling dashboard widget binding renders an empty chart (ADR-0021). Both are
-caught at author time by one command:
+Metadata mistakes surface at runtime, not at edit time: a bare field ref in a
+predicate (`done` for `record.done`) faults, so an `error` validation rule
+refuses each write naming the rule and an action's `visible` hides it; a
+dangling dashboard widget binding renders an empty chart. Both are caught at
+author time by one command:
 
 ```bash
 os validate     # Zod schema + CEL predicates + widget bindings — no artifact

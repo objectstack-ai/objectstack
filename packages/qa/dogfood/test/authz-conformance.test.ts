@@ -519,10 +519,13 @@ const PROBES: readonly Probe[] = [
     re: /async\s+handleMcp\s*\(/g,
     key: () => 'mcp:http-dispatcher.ts:handleMcp',
   },
+  // [#30892] The request context stays the bridge's SECOND argument; a trailing
+  // seams object literal (the per-request file seam) is admitted beside it, so
+  // a bridge built from anything but the request context still vanishes here.
   {
     kind: 'GATE_PIN',
     file: 'packages/runtime/src/domains/mcp.ts',
-    re: /buildMcpBridge\(deps, context\)/g,
+    re: /buildMcpBridge\(deps, context(?:, \{[^}]*\})?\)/g,
     key: () => 'mcp:domains/mcp.ts:buildMcpBridge(context-threaded)',
   },
   // (3) The stdio transport's PRINCIPAL binding (ADR-0101): the long-lived

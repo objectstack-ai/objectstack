@@ -300,7 +300,8 @@ reference** — `status` instead of `record.status`:
 {/* os:check */}
 ```typescript
 // ✗ Wrong — bare `status`. Type-checks (it's just a string), but at runtime
-//   it resolves to null, so the action is hidden on EVERY ticket.
+//   it is an unknown variable, so the predicate faults on every ticket — and
+//   the Console hides an action whose `visible` faults: hidden on EVERY ticket.
 visible: 'status != "resolved"'
 ```
 
@@ -315,8 +316,11 @@ visible: 'status != "resolved"'
   ✗ Author-time rules failed (1 issue)
   • stack · action 'resolve_ticket' visible: bare reference `status` — a
     formula/validation expression binds the record as the `record` namespace,
-    not at top level, so `status` resolves to nothing and the expression
-    silently evaluates to null. Write `record.status`.
+    not at top level, so `status` is an unknown variable and the expression
+    faults with `Unknown variable: status` instead of reading the field. The
+    site's fault rule decides the outcome (a formula field reads null, an
+    `error` validation rule refuses the write, an action's `visible` hides the
+    action). Write `record.status`.
     — source: `status != "resolved"`
       rule: expression-invalid  at stack · action 'resolve_ticket' visible
 ```

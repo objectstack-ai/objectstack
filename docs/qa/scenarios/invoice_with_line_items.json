@@ -1,7 +1,9 @@
 {
   "id": "invoice_with_line_items",
   "code": "invoice",
-  "title": "Invoicing: invoices with inline line items and a summed total",
+  "tier": "control",
+  "origin": "generic",
+  "title": { "zh": "发票管理:发票随单录入明细行,自动汇总金额", "en": "Invoicing: invoices with inline line items and a summed total" },
   "provenance": "Golden case `invoice_with_line_items` of packages/cli/src/lint/corpus.ts; `expect` derived mechanically from its fixture (every object; minFieldsPerObject = the smallest object's field count; one selectFields row per select field with minOptions = its option count; one lookups row per lookup or master_detail field).",
   "prompt": {
     "short": {"en": "Build an invoicing app with invoices and their line items."},

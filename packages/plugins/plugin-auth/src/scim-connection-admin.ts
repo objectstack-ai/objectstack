@@ -50,7 +50,8 @@
  * Each mint and each revoke writes one `sys_audit_log` row: the administrator
  * as `user_id` / `actor`, the credential as `object_name` + `record_id`, and
  * `metadata` naming the event and the `connectionId` ({@link ScimCredentialAuditDecisions},
- * a closed type with no room for the bearer). It is written directly, as
+ * a closed type with no room for the bearer); a mint made on an impersonation
+ * session also names the administrator at the keyboard as `impersonated_by`. It is written directly, as
  * `/admin/create-user` writes its own, so the trail does not depend on what the
  * generic audit mirror decides to record for this object. A refused audit
  * write does not undo the operation (the bearer is already shown); it is
@@ -130,6 +131,12 @@ export interface ScimCredentialAdminDeps {
 export interface ScimCredentialAuditDecisions {
   event: 'scim_credential_minted' | 'scim_credential_revoked';
   connectionId: string;
+  /**
+   * The administrator at the keyboard when the mint ran on an impersonation
+   * session, under the key the audit writers record it with
+   * (`sys_audit_log.metadata.impersonated_by`). Absent otherwise.
+   */
+  impersonated_by?: string;
 }
 
 function fail(status: ScimCredentialAdminResult['status'], code: string, message: string): ScimCredentialAdminResult {
@@ -329,7 +336,11 @@ export async function runMintScimCredential(
     action: 'create',
     actor,
     credentialId: minted.credentialId,
-    metadata: { event: 'scim_credential_minted', connectionId },
+    metadata: {
+      event: 'scim_credential_minted',
+      connectionId,
+      ...(actor.impersonatedBy ? { impersonated_by: actor.impersonatedBy } : {}),
+    },
   });
 
   return {

@@ -9,10 +9,11 @@
  * exactly two drivers, and neither calls a model API itself:
  *
  *   - {@link ClaudeCodeDriver} spawns the `claude` CLI in headless mode
- *     (`claude -p … --output-format stream-json`). It REFUSES to start when the
- *     process would bill an API key — `ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN`
- *     in the environment, or a CLI whose `auth status` reports an API-key login —
- *     and strips both variables from every child it spawns.
+ *     (`claude -p --output-format stream-json`, the prompt on stdin). It REFUSES
+ *     to start when the process would bill an API key — `ANTHROPIC_API_KEY` /
+ *     `ANTHROPIC_AUTH_TOKEN` in the environment, or a CLI whose `auth status`
+ *     reports an API-key login — and strips both variables from every child it
+ *     spawns.
  *   - {@link RecordedDriver} replays turns recorded earlier, so the runner's
  *     own tests (and a re-grade of an old run) need no model and no network.
  *
@@ -25,7 +26,8 @@ import { mkdtempSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSyn
 import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 
-import { parseStreamJson, type ParsedTurn } from './transcript.js';
+import { SCENARIO_TIERS, type ScenarioTier } from '../schema.js';
+import { parseStreamJson, type ParsedTurn, type TurnProcess } from './transcript.js';
 
 /** Which run step a turn belongs to; the replay key is built from it. */
 export interface StepRef {
@@ -45,6 +47,8 @@ export interface AuthorTask extends StepRef {
   /** The project directory the agent edits. */
   cwd: string;
   prompt: string;
+  /** The card's tier: it sizes the live driver's turn cap ({@link DEFAULT_AUTHOR_MAX_TURNS}). Not part of the replay key. */
+  tier: ScenarioTier;
 }
 
 export interface AskTask extends StepRef {
@@ -68,6 +72,12 @@ export interface DriverInfo {
   authMethod?: string;
   /** Always `false`: no driver here bills an API key; the record states it. */
   apiBilled: false;
+  /** The live driver's wall-clock budget per authoring turn (build and iterate), ms. */
+  authorTimeoutMs?: number;
+  /** The live driver's turn cap per authoring turn, by card tier (`--author-max-turns` sets every tier alike). */
+  authorMaxTurns?: Record<ScenarioTier, number>;
+  /** The live driver's turn cap per question or operation turn. */
+  askMaxTurns?: number;
 }
 
 export interface AgentDriver {
@@ -111,15 +121,39 @@ export function assertSubscriptionLogin(env: NodeJS.ProcessEnv, authStatus: unkn
   return method;
 }
 
+/**
+ * The authoring budget a run gets unless `--author-timeout` says otherwise:
+ * sized for a mid-tier (`starter`) card, whose 7–8-object builds ran well past
+ * a quarter of an hour.
+ */
+export const DEFAULT_AUTHOR_TIMEOUT_MIN = 60;
+
+/**
+ * The agentic turns one authoring turn (build or iterate) may take unless
+ * `--author-max-turns` says otherwise, by the card's tier. A `control` card's
+ * 2–3-object build finished in 17–21 turns under the old flat cap of 80, which
+ * stays. Every `starter` build measured hit that 80 (`error_max_turns`) after
+ * 15–24 minutes, 11–18 s a turn: the 60-minute author timeout holds 200–325
+ * such turns, so 300 puts the turn cap and the wall clock at about the same
+ * point. A `delivery` card (none in the library yet) gets twice that; at the
+ * same pace 600 turns outlast the default timeout, so its run raises
+ * `--author-timeout` too, or the clock ends the turn first.
+ */
+export const DEFAULT_AUTHOR_MAX_TURNS: Readonly<Record<ScenarioTier, number>> = { control: 80, starter: 300, delivery: 600 };
+
+/** The agentic turns one question or operation turn may take unless `--ask-max-turns` says otherwise, every tier alike. */
+export const DEFAULT_ASK_MAX_TURNS = 12;
+
 export interface ClaudeCodeDriverOptions {
   /** The CLI binary; default `claude`. */
   bin?: string;
-  /** Agentic turns allowed for one question or operation; default 12. */
-  maxTurnsAsk?: number;
-  /** Agentic turns allowed for one authoring task; default 80. */
-  maxTurnsAuthor?: number;
-  /** Wall-clock budget per call, ms; default 15 min for authoring, 5 min for a question. */
+  /** Agentic turns allowed for one question or operation; default {@link DEFAULT_ASK_MAX_TURNS}. */
+  askMaxTurns?: number;
+  /** Agentic turns allowed for one authoring task, every tier alike; default by the card's tier, {@link DEFAULT_AUTHOR_MAX_TURNS}. */
+  authorMaxTurns?: number;
+  /** Wall-clock budget per authoring turn (build and iterate), ms; default {@link DEFAULT_AUTHOR_TIMEOUT_MIN}. */
   authorTimeoutMs?: number;
+  /** Wall-clock budget per question or operation, ms; default 5 min. */
   askTimeoutMs?: number;
   /** Optional model alias passed as `--model` (the login's default otherwise). */
   model?: string;
@@ -127,24 +161,79 @@ export interface ClaudeCodeDriverOptions {
 
 interface CliRun {
   stdout: string;
-  stderr: string;
-  exit: number | null;
+  process: TurnProcess;
 }
 
-function runCli(bin: string, args: string[], cwd: string, timeoutMs: number): Promise<CliRun> {
+const STDERR_TAIL = 2000;
+
+/**
+ * One CLI process, the prompt written to its stdin. The prompt never travels
+ * on argv: a build prompt carries the card's whole seed, and on Linux one
+ * argument longer than 128 KiB (`MAX_ARG_STRLEN`) makes `spawn` throw `E2BIG`
+ * before the CLI starts — the two largest cards' build prompts are past it.
+ *
+ * Never rejects: a process that could not start, was killed by the timeout or
+ * exited without a result is answered with what was seen of it, so the turn
+ * it belongs to is recorded rather than lost.
+ */
+function runCli(bin: string, args: string[], cwd: string, input: string, timeoutMs: number): Promise<CliRun> {
   return new Promise((resolvePromise) => {
-    const child = spawn(bin, args, { cwd, env: subscriptionOnlyEnv(), stdio: ['ignore', 'pipe', 'pipe'] });
+    const started = Date.now();
     let stdout = '';
     let stderr = '';
-    child.stdout.on('data', (d: Buffer) => (stdout += d.toString()));
-    child.stderr.on('data', (d: Buffer) => (stderr += d.toString()));
-    const timer = setTimeout(() => child.kill('SIGTERM'), timeoutMs);
-    child.on('close', (exit) => {
-      clearTimeout(timer);
-      resolvePromise({ stdout, stderr, exit });
+    let timedOut = false;
+    let error: string | undefined;
+    let settled = false;
+    let timer: NodeJS.Timeout | undefined;
+    const settle = (exit: number | null, signal: NodeJS.Signals | null) => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      const tail = stderr.trim().slice(-STDERR_TAIL);
+      resolvePromise({
+        stdout,
+        process: {
+          elapsedMs: Date.now() - started,
+          exit,
+          ...(signal ? { signal } : {}),
+          timedOut,
+          timeoutMs,
+          ...(tail ? { stderrTail: tail } : {}),
+          ...(error ? { error } : {}),
+        },
+      });
+    };
+    let child: ReturnType<typeof spawn>;
+    try {
+      child = spawn(bin, args, { cwd, env: subscriptionOnlyEnv(), stdio: ['pipe', 'pipe', 'pipe'] });
+    } catch (e) {
+      error = e instanceof Error ? e.message : String(e); // `spawn E2BIG` and its kin throw here
+      settle(null, null);
+      return;
+    }
+    child.stdout!.on('data', (d: Buffer) => (stdout += d.toString()));
+    child.stderr!.on('data', (d: Buffer) => (stderr += d.toString()));
+    child.on('error', (e) => {
+      error ??= e.message; // `spawn ENOENT`: no `close` may follow
+      if (child.pid === undefined) settle(null, null);
     });
+    child.stdin!.on('error', (e) => (error ??= e.message)); // EPIPE: the CLI exited before reading its prompt
+    child.stdin!.end(input);
+    timer = setTimeout(() => {
+      timedOut = true;
+      child.kill('SIGTERM');
+    }, timeoutMs);
+    child.on('close', (exit, signal) => settle(exit, signal));
   });
 }
+
+/**
+ * `no-result(exit 143)`, `no-result(signal SIGTERM)`, `no-result(spawn E2BIG)`:
+ * a turn that printed no result line, by how its process ended — or, when no
+ * process ever ran, why.
+ */
+const noResult = (p: TurnProcess): string =>
+  `no-result(${p.exit !== null ? `exit ${p.exit}` : p.signal ? `signal ${p.signal}` : (p.error ?? 'no exit code, no signal')})`;
 
 /** Every file under `dir` (skipping dependency and build trees) → content, for the author recording. */
 export function snapshotSources(dir: string): Record<string, string> {
@@ -196,8 +285,28 @@ export class ClaudeCodeDriver implements AgentDriver {
     this.authMethod = assertSubscriptionLogin(process.env, parsed);
   }
 
+  private get authorTimeoutMs(): number {
+    return this.opts.authorTimeoutMs ?? DEFAULT_AUTHOR_TIMEOUT_MIN * 60_000;
+  }
+
+  private authorMaxTurns(tier: ScenarioTier): number {
+    return this.opts.authorMaxTurns ?? DEFAULT_AUTHOR_MAX_TURNS[tier];
+  }
+
+  private get askMaxTurns(): number {
+    return this.opts.askMaxTurns ?? DEFAULT_ASK_MAX_TURNS;
+  }
+
   info(): DriverInfo {
-    return { driver: 'claude-code-cli', version: this.version, authMethod: this.authMethod, apiBilled: false };
+    return {
+      driver: 'claude-code-cli',
+      version: this.version,
+      authMethod: this.authMethod,
+      apiBilled: false,
+      authorTimeoutMs: this.authorTimeoutMs,
+      authorMaxTurns: Object.fromEntries(SCENARIO_TIERS.map((t) => [t, this.authorMaxTurns(t)])) as Record<ScenarioTier, number>,
+      askMaxTurns: this.askMaxTurns,
+    };
   }
 
   private base(maxTurns: number): string[] {
@@ -210,16 +319,18 @@ export class ClaudeCodeDriver implements AgentDriver {
     const empty = join(mkdtempSync(join(tmpdir(), 'scenario-mcp-')), 'none.json');
     writeFileSync(empty, JSON.stringify({ mcpServers: {} }));
     try {
+      const maxTurns = this.authorMaxTurns(task.tier);
       const args = [
-        '-p', task.prompt,
-        ...this.base(this.opts.maxTurnsAuthor ?? 80),
+        '-p',
+        ...this.base(maxTurns),
         '--mcp-config', empty, '--strict-mcp-config',
         '--permission-mode', 'acceptEdits',
         '--allowedTools', 'Bash', 'Read', 'Edit', 'Write', 'Glob', 'Grep', 'Skill',
       ];
-      const run = await runCli(this.bin, args, task.cwd, this.opts.authorTimeoutMs ?? 15 * 60_000);
+      const run = await runCli(this.bin, args, task.cwd, task.prompt, this.authorTimeoutMs);
       const turn = parseStreamJson(run.stdout);
-      if (turn.meta.resultSubtype === undefined) turn.meta.resultSubtype = `no-result(exit ${run.exit})`;
+      turn.meta.process = { ...run.process, maxTurns };
+      if (turn.meta.resultSubtype === undefined) turn.meta.resultSubtype = noResult(run.process);
       return { turn, files: snapshotSources(task.cwd) };
     } finally {
       rmSync(dirname(empty), { recursive: true, force: true });
@@ -237,10 +348,12 @@ export class ClaudeCodeDriver implements AgentDriver {
       { mode: 0o600 },
     );
     try {
-      const args = ['-p', task.prompt, ...this.base(this.opts.maxTurnsAsk ?? 12), '--mcp-config', cfg, '--strict-mcp-config', '--allowedTools', 'mcp__app'];
-      const run = await runCli(this.bin, args, dir, this.opts.askTimeoutMs ?? 5 * 60_000);
+      const maxTurns = this.askMaxTurns;
+      const args = ['-p', ...this.base(maxTurns), '--mcp-config', cfg, '--strict-mcp-config', '--allowedTools', 'mcp__app'];
+      const run = await runCli(this.bin, args, dir, task.prompt, this.opts.askTimeoutMs ?? 5 * 60_000);
       const turn = parseStreamJson(run.stdout);
-      if (turn.meta.resultSubtype === undefined) turn.meta.resultSubtype = `no-result(exit ${run.exit})`;
+      turn.meta.process = { ...run.process, maxTurns };
+      if (turn.meta.resultSubtype === undefined) turn.meta.resultSubtype = noResult(run.process);
       return turn;
     } finally {
       rmSync(dir, { recursive: true, force: true });

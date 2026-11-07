@@ -258,7 +258,15 @@ const SKIP_OBJECTS = new Set<string>([
   // (1) recursion + auth/session noise
   'sys_audit_log',
   'sys_activity',
-  'sys_comment',
+  // NOT `sys_comment`: a comment is an act a person performed, so its insert,
+  // update and delete write the same ledger and activity rows as every other
+  // mirrored write, an impersonated one stamped like the rest (maintainer
+  // ruling on #30213's comments fork, 「A 评论也记审计和动态」). Its rows name
+  // `sys_comment` as their parent, so the record timeline (which reads the
+  // parent record's own pair) never draws them twice, and the parent-record
+  // read gates serve them only to a reader the comment's own read gate admits
+  // (`parent-record-read-gate.ts`: a parent narrowed by an object-scoped read
+  // middleware is read through the bounded probe, as the caller).
   'sys_session',
   'sys_presence',
   'sys_account',
@@ -320,6 +328,13 @@ const SKIP_OBJECTS = new Set<string>([
   // Not an act anyone performed; the ruling that created the object forbids
   // an audit row per sweep.
   'sys_lifecycle_state',         // sweep watermark (1 write per sweep)
+  // [#31021] The seed loader's record of which seed rows landed in an
+  // organization (`managedBy: 'engine-owned'`, no data API), written ONLY by
+  // `SeedLoaderService` under the seed write context, one row per key it
+  // lands. Audited, every seed load would mirror its own bookkeeping into
+  // `sys_audit_log` and `sys_activity` row for row — the first replay after
+  // the upgrade, one per seeded row. The seeded rows themselves stay audited.
+  'sys_seed_landed_key',         // landed seed keys (1 write per new key)
 ]);
 
 /**
@@ -2474,8 +2489,8 @@ export function installAuditWriters(
       // `showcase_task_assigned_notify` flow for a ready-made example.
       //
       // (Comment @mention notifications remain a platform behavior — they are
-      //  handled separately by the sys_comment hook below, since SKIP_OBJECTS
-      //  excludes it from this writer.)
+      //  handled by the dedicated sys_comment hook below, which judges each
+      //  mentioned reader; this writer records the comment write itself.)
       await persistAuditTrailRow(api, auditRow, activityRowToWrite, progress);
     } catch (err) {
       // #5226 — DURABILITY degradation, not a functional one, so it is reported
@@ -2627,9 +2642,9 @@ export function installAuditWriters(
    * M10.8: Dedicated hook on `sys_comment` afterInsert and afterUpdate that
    * parses the `mentions` JSON field and writes one sys_notification per
    * mentioned user who can read the comment and its record
-   * (`admitMentionRecipients`). Lives outside `writeAudit` because
-   * sys_comment is in SKIP_OBJECTS (we don't want audit/activity rows for
-   * comments — those have their own first-class feed).
+   * (`admitMentionRecipients`). Lives outside `writeAudit` because a
+   * notification is a per-recipient judgment, not the write's own record: the
+   * comment write itself is mirrored by `writeAudit` like any other.
    *
    * [#27703] An update judges only the mentions it ADDED — the entries of the
    * written row's list that the bound pre-image (`ctx.previous`) did not carry

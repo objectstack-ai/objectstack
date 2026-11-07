@@ -10,7 +10,7 @@ Data-model rules (in addition to naming/label/i18n):
 | Rule | Severity | Catches |
 |---|---|---|
 | `relationship/missing-reference` | error | lookup/master_detail without a `reference` target |
-| `relationship/master-detail-required` | warning; error under `controlled_by_parent` | a `master_detail` that isn't `required` — or, under `controlled_by_parent`, is `readonly`/`system` |
+| `relationship/master-detail-required` | warning; error under `controlled_by_parent` | a `master_detail` that isn't `required` (under `controlled_by_parent`, the only one may be `required: false`: the optional master) — or, under `controlled_by_parent`, is `readonly`/`system` |
 | `relationship/delete-behavior` | suggestion | `master_detail` without an explicit `deleteBehavior` |
 | `relationship/line-items-inline-edit` | suggestion | a `*_line`/`*_item` master_detail child without `inlineEdit` |
 | `relationship/line-item-should-be-master-detail` | suggestion | a line-item-shaped child using `lookup` instead of `master_detail` |

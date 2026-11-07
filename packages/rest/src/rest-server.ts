@@ -4304,6 +4304,8 @@ export class RestServer {
                     undefined,
                     runtimeDocument,
                 ),
+            // [ADR-0106 D1] The `action` item step's masker, the list chain's own.
+            resolveObjectMasker: () => this.resolveObjectMasker(environmentId, req, 'object'),
         };
     }
 
@@ -4386,7 +4388,11 @@ export class RestServer {
         // exemption, so the caller carries this transport's save-door
         // admission (`metaItemReadGateSources(…, true)`).
         const answer = await metaReadGate.createMetaLayeredAnswer(
-            this.metaItemReadGateSources(environmentId, req, p, true),
+            {
+                ...this.metaItemReadGateSources(environmentId, req, p, true),
+                // [ADR-0106 D1] The `action` layers step's masker, the list chain's own.
+                resolveObjectMasker: () => this.resolveObjectMasker(environmentId, req, 'object'),
+            },
             {
                 metaType: RestServer.metaTypeSingular(req.params.type),
                 name: req.params.name,
@@ -5656,6 +5662,7 @@ export class RestServer {
             get objectQLProvider() { return readObjectQLProvider(); },
             resolveRequestEnvironmentId: (...a) => this.resolveRequestEnvironmentId(...a),
             resolveMetadataService: (...a) => this.resolveMetadataService(...a),
+            metaListSource: (...a) => this.metaListSource(...a),
         };
         registerMetaItemPublishedRoute.call(itemPublishedHost, scope);
 

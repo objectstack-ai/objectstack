@@ -92,6 +92,7 @@ import {
     metaSaveRequestOptions,
     metaTypeReadRefusal,
     metaTypeWriteRefusal,
+    projectMetaActionItem,
     projectMetaObjectSchema,
     refuseUnknownMetaListType,
     STORED_VERSION_DOOR_POLICY,
@@ -763,6 +764,8 @@ async function answerMetaItem(
         // [#22250] `runtimeDocument` — the caller's runtime view, which `sortability` derives from.
         translateEnvelope: (itemEnvelope, document, runtimeDocument) =>
             translateMetaEnvelope(translation, request.metaType, itemEnvelope, document, runtimeDocument),
+        // [ADR-0106 D1] The `action` item step's masker, the list chain's own.
+        resolveObjectMasker: () => resolveObjectMasker(deps, context, 'object'),
     };
     let answer: MetaItemAnswer;
     try {
@@ -946,7 +949,11 @@ async function answerMetaLayered(
             ...memberSelector,
         }, layeredOptions);
         answer = await createMetaLayeredAnswer(
-            metaItemReadGateSources(deps, context, protocol, mayWriteItem),
+            {
+                ...metaItemReadGateSources(deps, context, protocol, mayWriteItem),
+                // [ADR-0106 D1] The `action` layers step's masker, the list chain's own.
+                resolveObjectMasker: () => resolveObjectMasker(deps, context, 'object'),
+            },
             // [#28337] The member the layers were read at, for step 1c.
             { metaType: pluralToSingular(type), name, ...(packageId ? { packageId } : {}), ...memberSelector, maskPosture },
         )(layered);
@@ -1340,6 +1347,19 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
                 served = masked.document;
                 // [#20408] ADR-0106 D6 tier 2 — as `RestServer`'s `/published`.
                 cacheControl = masked.cacheControl;
+            }
+            // [ADR-0106 D1] An `action` is served as the object door's
+            // projection serves it to this caller, as `RestServer`'s
+            // `/published` serves it; a withheld one is this door's answer for
+            // a name with nothing published behind it.
+            if (publishedType === 'action') {
+                const projected = await projectMetaActionItem({
+                    ...metaItemReadGateSources(deps, _context, protocol),
+                    resolveObjectMasker: () => resolveObjectMasker(deps, _context, 'object'),
+                }, served);
+                if (projected.kind === 'withhold') return { handled: true, response: deps.error('Not found', 404) };
+                if (projected.kind === 'fault') return fieldVisibilityFault(deps, projected.object);
+                cacheControl = projected.cacheControl;
             }
             return successWithHeaders(deps, served, { 'Cache-Control': cacheControl });
         };

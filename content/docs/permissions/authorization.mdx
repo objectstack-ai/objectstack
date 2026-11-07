@@ -537,11 +537,14 @@ Five mechanisms — four CI-time, one runtime — make the security posture a
   wildcards carrying View/Modify All outside the platform admin set,
   high-privilege `isDefault` (everyone-suggested) sets, the reserved word
   "role" in security identifiers, a `controlled_by_parent` object without
-  exactly one required `master_detail` to derive access from (ADR-0055 §1:
-  `security-controlled-by-parent-no-relation` when it declares none — a
-  `master_detail` without `required: true` and a required `lookup` derive
-  nothing — and `security-controlled-by-parent-ambiguous-relation` when it
-  declares two or more; either way the runtime denies every read and refuses
+  exactly one master to derive access from (ADR-0055 §1 as amended: one
+  `master_detail` declared `required: true`, or, with none, its only
+  `master_detail` declared `required: false`, an optional master;
+  `security-controlled-by-parent-no-relation` when it declares none — two
+  `master_detail` fields with none required, one that writes no `required`,
+  and a required `lookup` derive nothing — and
+  `security-controlled-by-parent-ambiguous-relation` when it declares two or
+  more required ones; either way the runtime denies every read and refuses
   every write), and the ADR-0091
   grant-lifecycle rules (a seed grant already expired at authoring time; a
   delegation row missing its mandatory `reason`) — every error rule mirrors

@@ -391,3 +391,319 @@ describe('SeedLoadResult.insertedIds — the landed rows this load created (#303
     for (const r of dryRun.results) expect(r.insertedIds).toEqual([]);
   });
 });
+
+/**
+ * #31021 — the record of which seed rows landed in an organization
+ * (`sys_seed_landed_key`), and the rule it carries: a keyed seed row the load
+ * cannot find is inserted only when its key never landed in that organization.
+ *
+ * Before it, the create-only rule (#30081) inserted every declared row it did
+ * not find, so a row a person deleted came back under a new id at the next
+ * replay — a reboot, or an upgrade that changes the seed union. Pinned here,
+ * each case scoped to an organization:
+ *
+ *  - a deleted seed row is not inserted again by a reboot or by a seed-union
+ *    change, while a row the upgrade adds still lands;
+ *  - an edited row is left as the person left it — renamed included;
+ *  - a reference to a removed row is left alone, never reported unresolved;
+ *  - the deliberate re-seed (`landedKeys: 'reseed'`) inserts it again;
+ *  - the record is the organization's: another organization's replay lands it.
+ *
+ * The record object is registered in the metadata double the way
+ * `@objectstack/platform-objects` registers it in a real composition.
+ */
+describe('the record of landed seed rows: a row a person removed is not inserted again (#31021)', () => {
+  const LEDGER = 'sys_seed_landed_key';
+  const ORG = 'org_a';
+
+  const LEDGER_OBJECT = {
+    name: LEDGER,
+    fields: {
+      object_name: { type: 'text' },
+      seed_key: { type: 'textarea' },
+      organization_id: { type: 'lookup', reference: 'sys_organization' },
+    },
+  };
+  const ledgerMetadata = (extra: Record<string, any> = {}, opts: { registered?: boolean } = {}) => createMetadata({
+    ...(opts.registered === false ? {} : { [LEDGER]: LEDGER_OBJECT }),
+    lk_account: { name: 'lk_account', fields: { name: { type: 'text' }, tier: { type: 'text' } } },
+    lk_contact: {
+      name: 'lk_contact',
+      fields: {
+        email: { type: 'text' },
+        title: { type: 'text' },
+        account: { type: 'lookup', reference: 'lk_account' },
+        accounts: { type: 'lookup', reference: 'lk_account', multiple: true },
+      },
+    },
+    ...extra,
+  });
+
+  // `mode` omitted parses to `ignore` (the create-only default, #30081).
+  const seeds = (extraAccounts: any[] = []) => [
+    {
+      object: 'lk_account',
+      externalId: 'name',
+      mode: 'ignore',
+      records: [{ name: 'Acme', tier: 'gold' }, { name: 'Globex', tier: 'silver' }, ...extraAccounts],
+    },
+    {
+      object: 'lk_contact',
+      externalId: 'email',
+      mode: 'ignore',
+      records: [
+        { email: 'ann@acme.test', title: 'CEO', account: 'Acme' },
+        { email: 'gus@globex.test', title: 'CTO', account: 'Globex' },
+      ],
+    },
+  ] as any[];
+
+  const orgConfig = (organizationId = ORG) => ({ ...CONFIG, defaultMode: 'ignore', organizationId });
+  const loadInto = (
+    engine: IDataEngine,
+    metadata: IMetadataService,
+    datasets: any[],
+    opts: { organizationId?: string; landedKeys?: 'honour' | 'reseed'; logger?: ReturnType<typeof createLogger> } = {},
+  ) => new SeedLoaderService(engine, metadata, opts.logger ?? createLogger(), { landedKeys: opts.landedKeys ?? 'honour' })
+    .load({ seeds: datasets, config: orgConfig(opts.organizationId) });
+
+  const names = (rows: any[] | undefined, org = ORG) => (rows ?? []).filter((r) => r.organization_id === org).map((r) => r.name).sort();
+  const removeRow = (store: Record<string, any[]>, object: string, match: (r: any) => boolean) => {
+    store[object] = store[object].filter((r) => !match(r));
+  };
+
+  it('records the key of every row it lands, under the organization it seeds', async () => {
+    const { engine, store } = createFaithfulEngine();
+    const result = await loadInto(engine, ledgerMetadata(), seeds());
+
+    expect(result.success).toBe(true);
+    const recorded = (store[LEDGER] ?? []).map((r) => [r.organization_id, r.object_name, r.seed_key]);
+    expect(recorded).toEqual([
+      [ORG, 'lk_account', '[["name","Acme"]]'],
+      [ORG, 'lk_account', '[["name","Globex"]]'],
+      [ORG, 'lk_contact', '[["email","ann@acme.test"]]'],
+      [ORG, 'lk_contact', '[["email","gus@globex.test"]]'],
+    ]);
+
+    // A replay of the same seed records nothing twice.
+    await loadInto(engine, ledgerMetadata(), seeds());
+    expect(store[LEDGER]).toHaveLength(4);
+  });
+
+  it('a deleted seed row is not inserted again by a reboot, nor by an upgrade that changes the seed union — whose new row still lands', async () => {
+    const { engine, store } = createFaithfulEngine();
+    const metadata = ledgerMetadata();
+    await loadInto(engine, metadata, seeds());
+    const globexId = store.lk_account.find((r) => r.name === 'Globex')!.id;
+    // The person deletes the row (its contact keeps a link to nothing, as a
+    // `set_null` delete leaves it).
+    removeRow(store, 'lk_account', (r) => r.id === globexId);
+    store.lk_contact.find((r) => r.email === 'gus@globex.test')!.account = null;
+
+    const logger = createLogger();
+    const reboot = await loadInto(engine, metadata, seeds(), { logger });
+    expect(names(store.lk_account)).toEqual(['Acme']);
+    expect(reboot.results.find((r) => r.object === 'lk_account')!).toMatchObject({ inserted: 0, skipped: 2 });
+    // Said once, at `info`: the intended outcome of a replay, never a warning.
+    expect(logger.info.mock.calls.map((c: any[]) => String(c[0])).filter((m: string) => m.includes('not inserted again'))).toHaveLength(1);
+    expect(logger.warn).not.toHaveBeenCalled();
+
+    // The upgrade: a new account joins the seed.
+    const upgrade = await loadInto(engine, metadata, seeds([{ name: 'Initech', tier: 'bronze' }]));
+    expect(names(store.lk_account)).toEqual(['Acme', 'Initech']);
+    expect(upgrade.results.find((r) => r.object === 'lk_account')!).toMatchObject({ inserted: 1, skipped: 2 });
+    expect(upgrade.success).toBe(true);
+  });
+
+  it('under `upsert` too: a deleted row stays deleted while the rows still there are kept current', async () => {
+    const { engine, store } = createFaithfulEngine();
+    const metadata = ledgerMetadata();
+    const upsertSeeds = () => seeds().map((d) => ({ ...d, mode: 'upsert' }));
+    await loadInto(engine, metadata, upsertSeeds());
+    removeRow(store, 'lk_account', (r) => r.name === 'Globex');
+    store.lk_account.find((r) => r.name === 'Acme')!.tier = 'edited';
+
+    await loadInto(engine, metadata, upsertSeeds());
+
+    expect(names(store.lk_account)).toEqual(['Acme']);
+    // Positive control: this was the upsert path — the surviving row was rewritten.
+    expect(store.lk_account.find((r) => r.name === 'Acme')!.tier).toBe('gold');
+  });
+
+  it('an edited row is untouched — a changed column, and a renamed key, which is not inserted again under its seed name', async () => {
+    const { engine, store } = createFaithfulEngine();
+    const metadata = ledgerMetadata();
+    await loadInto(engine, metadata, seeds());
+    const acme = store.lk_account.find((r) => r.name === 'Acme')!;
+    acme.tier = 'platinum';
+    const globex = store.lk_account.find((r) => r.name === 'Globex')!;
+    globex.name = 'Globex Corporation';
+
+    const replay = await loadInto(engine, metadata, seeds());
+
+    expect(replay.success).toBe(true);
+    expect(store.lk_account).toHaveLength(2);
+    expect(store.lk_account.find((r) => r.id === acme.id)).toMatchObject({ name: 'Acme', tier: 'platinum' });
+    expect(store.lk_account.find((r) => r.id === globex.id)).toMatchObject({ name: 'Globex Corporation', tier: 'silver' });
+  });
+
+  it('a reference to a removed row is left as it is: no error, no deferral, and the rest of the row still loads', async () => {
+    const { engine, store } = createFaithfulEngine();
+    const metadata = ledgerMetadata();
+    await loadInto(engine, metadata, seeds());
+    removeRow(store, 'lk_account', (r) => r.name === 'Globex');
+    store.lk_contact.find((r) => r.email === 'gus@globex.test')!.account = null;
+    // The contact whose account is gone is removed too, and a new contact
+    // naming the removed account joins the seed.
+    removeRow(store, 'lk_contact', (r) => r.email === 'gus@globex.test');
+    const next = seeds();
+    next[1].records.push({ email: 'new@globex.test', title: 'CFO', account: 'Globex', accounts: ['Acme', 'Globex'] });
+
+    const logger = createLogger();
+    const replay = await loadInto(engine, metadata, next, { logger });
+
+    expect(replay.success).toBe(true);
+    expect(replay.errors).toEqual([]);
+    expect(logger.error).not.toHaveBeenCalled();
+    const contacts = replay.results.find((r) => r.object === 'lk_contact')!;
+    expect(contacts).toMatchObject({ inserted: 1, skipped: 2, referencesDeferred: 0, referencesDropped: 0, errored: 0 });
+    const acmeId = store.lk_account.find((r) => r.name === 'Acme')!.id;
+    // The new contact lands without the single link, and keeps the elements
+    // of the multi-value link that still resolve.
+    const fresh = store.lk_contact.find((r) => r.email === 'new@globex.test')!;
+    expect(fresh.account ?? null).toBeNull();
+    expect(fresh.accounts).toEqual([acmeId]);
+    // The removed contact stays removed.
+    expect(store.lk_contact.map((r) => r.email).sort()).toEqual(['ann@acme.test', 'new@globex.test']);
+  });
+
+  it('a row keyed on a reference to a removed row is withdrawn with it', async () => {
+    const { engine, store } = createFaithfulEngine();
+    const metadata = ledgerMetadata();
+    const withMembership = () => [
+      { object: 'lid_team', externalId: 'name', mode: 'ignore', records: [{ name: 'Experience' }, { name: 'Platform' }] },
+      { object: 'lid_membership', externalId: 'team', mode: 'ignore', records: [{ team: 'Experience', role: 'lead' }, { team: 'Platform', role: 'member' }] },
+    ] as any[];
+    await loadInto(engine, metadata, withMembership());
+    const experience = store.lid_team.find((r) => r.name === 'Experience')!.id;
+    removeRow(store, 'lid_team', (r) => r.id === experience);
+    removeRow(store, 'lid_membership', (r) => r.team === experience);
+
+    const replay = await loadInto(engine, metadata, withMembership());
+
+    expect(replay.success).toBe(true);
+    expect(replay.errors).toEqual([]);
+    expect(store.lid_team.map((r) => r.name)).toEqual(['Platform']);
+    expect(store.lid_membership).toHaveLength(1);
+    expect(replay.results.find((r) => r.object === 'lid_membership')!).toMatchObject({ inserted: 0, skipped: 2, referencesResolved: 1 });
+  });
+
+  it('the deliberate re-seed inserts a removed row again and records it, so a second delete is remembered too', async () => {
+    const { engine, store } = createFaithfulEngine();
+    const metadata = ledgerMetadata();
+    await loadInto(engine, metadata, seeds());
+    removeRow(store, 'lk_account', (r) => r.name === 'Globex');
+
+    const reseed = await loadInto(engine, metadata, seeds(), { landedKeys: 'reseed' });
+    expect(reseed.results.find((r) => r.object === 'lk_account')!.inserted).toBe(1);
+    expect(names(store.lk_account)).toEqual(['Acme', 'Globex']);
+    expect(store[LEDGER]).toHaveLength(4);
+
+    removeRow(store, 'lk_account', (r) => r.name === 'Globex');
+    await loadInto(engine, metadata, seeds());
+    expect(names(store.lk_account)).toEqual(['Acme']);
+  });
+
+  it("the record is the organization's own: a removal in one organization does not reach another's replay", async () => {
+    const { engine, store } = createFaithfulEngine();
+    const metadata = ledgerMetadata();
+    await loadInto(engine, metadata, seeds(), { organizationId: 'org_a' });
+    await loadInto(engine, metadata, seeds(), { organizationId: 'org_b' });
+    removeRow(store, 'lk_account', (r) => r.organization_id === 'org_a' && r.name === 'Globex');
+    removeRow(store, 'lk_account', (r) => r.organization_id === 'org_b' && r.name === 'Acme');
+
+    await loadInto(engine, metadata, seeds(), { organizationId: 'org_a' });
+    await loadInto(engine, metadata, seeds(), { organizationId: 'org_b' });
+    expect(names(store.lk_account, 'org_a')).toEqual(['Acme']);
+    expect(names(store.lk_account, 'org_b')).toEqual(['Globex']);
+
+    // A new organization has no record yet: it gets the whole seed.
+    await loadInto(engine, metadata, seeds(), { organizationId: 'org_c' });
+    expect(names(store.lk_account, 'org_c')).toEqual(['Acme', 'Globex']);
+  });
+
+  it('an `id`-keyed row is recorded under its authored id, so a replay that gives it a per-organization id still finds it removed', async () => {
+    const { engine, store } = createFaithfulEngine();
+    const metadata = ledgerMetadata({ lk_unit: { name: 'lk_unit', fields: { name: { type: 'text' } } } });
+    const units = () => [{ object: 'lk_unit', externalId: 'id', mode: 'ignore', records: [{ id: 'bu_hq', name: 'HQ' }] }] as any[];
+    await loadInto(engine, metadata, units(), { organizationId: 'org_a' });
+    await loadInto(engine, metadata, units(), { organizationId: 'org_b' });
+    // org_b holds the derived id (#21665); both record the authored one.
+    expect(store.lk_unit.map((r) => [r.organization_id, r.id])).toEqual([['org_a', 'bu_hq'], ['org_b', 'bu_hq__org_b']]);
+    expect(store[LEDGER].map((r) => r.seed_key)).toEqual(['[["id","bu_hq"]]', '[["id","bu_hq"]]']);
+
+    // Removed in org_b, then in org_a: the authored id is free again, and
+    // org_b's replay would take it — the record still names the row.
+    removeRow(store, 'lk_unit', (r) => r.organization_id === 'org_b');
+    removeRow(store, 'lk_unit', (r) => r.organization_id === 'org_a');
+    await loadInto(engine, metadata, units(), { organizationId: 'org_b' });
+    expect(store.lk_unit).toEqual([]);
+  });
+
+  it('a load that keeps no record says why once, and inserts as before: no organization, or no registered record object', async () => {
+    const noOrg = createFaithfulEngine();
+    const noOrgLogger = createLogger();
+    await new SeedLoaderService(noOrg.engine, ledgerMetadata(), noOrgLogger, { landedKeys: 'honour' })
+      .load({ seeds: seeds(), config: { ...CONFIG, defaultMode: 'ignore' } });
+    expect(noOrg.store[LEDGER]).toBeUndefined();
+    expect(noOrgLogger.info.mock.calls.map((c: any[]) => String(c[0])).filter((m: string) => m.includes('seeds no organization'))).toHaveLength(1);
+
+    const unregistered = createFaithfulEngine();
+    const logger = createLogger();
+    const bare = ledgerMetadata({}, { registered: false });
+    await loadInto(unregistered.engine, bare, seeds(), { logger });
+    removeRow(unregistered.store, 'lk_account', (r) => r.name === 'Globex');
+    await loadInto(unregistered.engine, bare, seeds(), { logger });
+    expect(unregistered.store[LEDGER]).toBeUndefined();
+    expect(names(unregistered.store.lk_account)).toEqual(['Acme', 'Globex']);
+    const warned = logger.warn.mock.calls.map((c: any[]) => String(c[0]));
+    expect(warned).toHaveLength(2);
+    expect(warned[0]).toContain(`'${LEDGER}' is not registered`);
+  });
+
+  it('a loader not asked for the record neither reads nor writes it', async () => {
+    const { engine, store } = createFaithfulEngine();
+    const metadata = ledgerMetadata();
+    await new SeedLoaderService(engine, metadata, createLogger()).load({ seeds: seeds(), config: orgConfig() });
+    expect(store[LEDGER]).toBeUndefined();
+    expect((engine.find as any).mock.calls.some((c: any[]) => c[0] === LEDGER)).toBe(false);
+  });
+
+  it('a failed record write is reported once at `error`; the rows it seeded still land and the load succeeds', async () => {
+    const { engine, store } = createFaithfulEngine();
+    const insert = (engine.insert as any).getMockImplementation();
+    (engine.insert as any).mockImplementation(async (object: string, data: any, opts?: any) => {
+      if (object === LEDGER) throw Object.assign(new Error('disk full'), { code: 'SQLITE_FULL' });
+      return insert(object, data, opts);
+    });
+    const logger = createLogger();
+
+    const result = await loadInto(engine, ledgerMetadata(), seeds(), { logger });
+
+    expect(result.success).toBe(true);
+    expect(names(store.lk_account)).toEqual(['Acme', 'Globex']);
+    expect(logger.error).toHaveBeenCalledTimes(1);
+    expect(String(logger.error.mock.calls[0][0])).toContain('Recording which seed rows landed FAILED');
+  });
+
+  it('a record read that fails for any reason but a missing table stops the load rather than guess', async () => {
+    const { engine } = createFaithfulEngine();
+    const find = (engine.find as any).getMockImplementation();
+    (engine.find as any).mockImplementation(async (object: string, query?: any) => {
+      if (object === LEDGER) throw Object.assign(new Error('connection reset'), { code: 'ECONNRESET' });
+      return find(object, query);
+    });
+
+    await expect(loadInto(engine, ledgerMetadata(), seeds())).rejects.toThrow('connection reset');
+  });
+});

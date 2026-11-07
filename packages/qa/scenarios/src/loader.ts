@@ -18,11 +18,19 @@
  * A card with any refusal is not returned at all: a half-valid card would let
  * a runner score against a scenario that does not mean what it says.
  *
+ * Which library a directory is, the loader cannot tell from the directory: a
+ * card file carries nothing that says where it lives. So the caller says it
+ * ({@link LoadOptions.library}; the CLIs answer with {@link libraryOf}), and the
+ * loader refuses a `generic` card in the private overlay and a
+ * `customer-derived` or `held-out` card in the open library — each belongs in
+ * the other, and a card on the wrong side is mislabelled or misplaced either
+ * way (in the open library, it is also a leak).
+ *
  * Nothing here calls a model, the network, or anything outside the two
  * directories it is handed.
  */
 
-import { readdirSync, readFileSync } from 'node:fs';
+import { readdirSync, readFileSync, realpathSync } from 'node:fs';
 import { basename, join } from 'node:path';
 
 import { ErrorCode } from '@objectstack/spec/api';
@@ -30,6 +38,7 @@ import { ErrorCode } from '@objectstack/spec/api';
 import {
   AppCodeSchema,
   GUARDRAIL_CHECKS,
+  isGalleryTier,
   ROW_SCOPE_TAG,
   ScenarioCardSchema,
   type ScenarioCard,
@@ -63,9 +72,35 @@ export interface LoadResult {
   refusals: Refusal[];
 }
 
+/**
+ * Which library a directory of cards is: the `open` one (`docs/qa/scenarios/`
+ * in this repository, every card `generic`) or the private `overlay` outside
+ * it (customer-derived and held-out cards).
+ */
+export type ScenarioLibrary = 'open' | 'overlay';
+
+/** The open library, relative to the repository root. */
+export const OPEN_LIBRARY_DIR = 'docs/qa/scenarios';
+
 export interface LoadOptions {
   /** The closed set of capability areas; see {@link readCapabilityAreas}. */
   areas: ReadonlySet<string>;
+  /**
+   * The library the cards are loaded as — stated by the caller, because the
+   * directory says nothing the loader could read. A `generic` card in the
+   * `overlay` is refused, and so is a `customer-derived` or `held-out` card in
+   * the `open` library.
+   */
+  library: ScenarioLibrary;
+}
+
+/**
+ * The library `dir` is: `open` when it is the repository's open library
+ * (`<repo>/docs/qa/scenarios`, compared by real path), else `overlay` — a card
+ * directory anywhere else is not the open library.
+ */
+export function libraryOf(dir: string, repoRoot: string): ScenarioLibrary {
+  return realpathSync(dir) === realpathSync(join(repoRoot, OPEN_LIBRARY_DIR)) ? 'open' : 'overlay';
 }
 
 /** `['run', 'questions', 2, 'truth']` → `run.questions[2].truth`. */
@@ -196,6 +231,75 @@ const HIDDEN_WRITE_CODE: ErrorCode = 'PERMISSION_DENIED';
 ErrorCode.parse(NOT_REACHABLE_ROW_CODE);
 ErrorCode.parse(HIDDEN_WRITE_CODE);
 
+/**
+ * The floor a `starter` or `delivery` card meets: the countable lines of the
+ * library's mid-tier floor (docs/qa/scenarios/README.md, "The library"). A
+ * gallery card is an app someone installs as a template, so a two-object,
+ * eight-row check never passes as one. `delivery` holds the same floor until
+ * the delivery-grade list sets its own. The floor's other lines (an approval
+ * or automation flow, a seed spanning three months, the question and
+ * operation mix, declarative first) cannot be counted from the card; each
+ * mid-tier card's own test pins them.
+ */
+export const GALLERY_FLOOR = {
+  /** `expect.objects`. */
+  objects: 5,
+  /** `expect.dashboards`. */
+  dashboards: 1,
+  /** The rows of the card's largest seeded object (the main object's, on a mid-tier card). */
+  rowsOnOneObject: 100,
+  /** Personas that declare a row `scope`. */
+  scopedPersonas: 2,
+  /** `run.questions`: the default band's lower edge, which a `countsReason` does not lower here. */
+  questions: 8,
+  /** `run.operations`: likewise. */
+  operations: 4,
+  /** `run.agentActions`. */
+  agentActions: 3,
+} as const;
+
+/** Refuses every line of {@link GALLERY_FLOOR} a gallery-tier card falls below, at the field that falls short. */
+function checkGalleryFloor(card: ScenarioCard, refuse: Refuse) {
+  const { expect, run } = card;
+  const f = GALLERY_FLOOR;
+  const short = (at: IssuePath, floor: string, has: string) =>
+    refuse(
+      at,
+      `a \`${card.tier}\` card ${floor} (the gallery floor); this one ${has}: raise it to the floor, or declare it \`control\`, an internal check that is never exported`,
+    );
+  if (expect.objects.length < f.objects) {
+    short(['expect', 'objects'], `expects at least ${f.objects} objects`, `expects ${expect.objects.length}`);
+  }
+  const dashboards = expect.dashboards?.length ?? 0;
+  if (dashboards < f.dashboards) {
+    short(['expect', 'dashboards'], `expects at least ${f.dashboards} dashboard`, `expects ${dashboards}`);
+  }
+  let largest: [string, number] | undefined;
+  for (const [name, rows] of Object.entries(run.seed)) if (largest === undefined || rows.length > largest[1]) largest = [name, rows.length];
+  if ((largest?.[1] ?? 0) < f.rowsOnOneObject) {
+    short(
+      ['run', 'seed'],
+      `seeds at least ${f.rowsOnOneObject} rows on one object`,
+      largest === undefined ? 'seeds none' : `seeds at most ${largest[1]}, on \`${largest[0]}\``,
+    );
+  }
+  const scoped = run.personas.filter((p) => p.scope !== undefined).length;
+  if (scoped < f.scopedPersonas) {
+    short(['run', 'personas'], `has at least ${f.scopedPersonas} personas with a row \`scope\``, `has ${scoped}`);
+  }
+  const reason = run.countsReason === undefined ? '' : ' (a `countsReason` does not lower the floor)';
+  if (run.questions.length < f.questions) {
+    short(['run', 'questions'], `asks at least ${f.questions} questions`, `asks ${run.questions.length}${reason}`);
+  }
+  if (run.operations.length < f.operations) {
+    short(['run', 'operations'], `performs at least ${f.operations} operations`, `performs ${run.operations.length}${reason}`);
+  }
+  const actions = run.agentActions?.length ?? 0;
+  if (actions < f.agentActions) {
+    short(['run', 'agentActions'], `declares at least ${f.agentActions} agent actions`, `declares ${actions}`);
+  }
+}
+
 function duplicates<T>(items: readonly T[], keyOf: (t: T) => string, at: IssuePath, what: string, refuse: Refuse) {
   const seen = new Set<string>();
   items.forEach((item, i) => {
@@ -243,6 +347,20 @@ function checkCard(
 
   // ── identity ──
   if (card.id !== stem) refuse(['id'], `\`${card.id}\` must equal the file's basename \`${stem}\``);
+
+  // ── origin: each library holds its own origins, never the other's ──
+  if (options.library === 'overlay' && card.origin === 'generic') {
+    refuse(
+      ['origin'],
+      `a \`generic\` card does not belong in the private overlay, which holds only \`customer-derived\` and \`held-out\` cards: move it to the open library (${OPEN_LIBRARY_DIR}), or mark the origin it really has`,
+    );
+  }
+  if (options.library === 'open' && card.origin !== 'generic') {
+    refuse(
+      ['origin'],
+      `a \`${card.origin}\` card does not belong in the open library, which is public and holds only \`generic\` cards: move it to the private overlay, or mark it \`generic\` only if it was written from the domain alone`,
+    );
+  }
 
   // ── expect: internal consistency ──
   const objects = new Set(expect.objects);
@@ -540,9 +658,15 @@ function checkCard(
   });
 
   // ── read/write counts: below the default band needs a stated reason ──
-  if ((run.questions.length < 8 || run.operations.length < 4) && run.countsReason === undefined) {
+  // A gallery card has no such excuse: the floor below holds it to the band,
+  // so it is never told to state a reason that could not lift the refusal.
+  const gallery = isGalleryTier(card.tier);
+  if (!gallery && (run.questions.length < 8 || run.operations.length < 4) && run.countsReason === undefined) {
     refuse(['run', 'countsReason'], `${run.questions.length} questions / ${run.operations.length} operations is below the default 8 / 4: state why in \`countsReason\``);
   }
+
+  // ── tier: a gallery card meets the gallery floor; a control card has none ──
+  if (gallery) checkGalleryFloor(card, refuse);
 
   // ── agent actions: resolvable, unique, at least one confirm-gated ──
   if (run.agentActions !== undefined) {

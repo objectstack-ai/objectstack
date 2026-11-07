@@ -165,9 +165,7 @@ what the platform owns.
   generic connector executors in `plugins:`; and the eight generator barrels
   (`objects`, `views`, `actions`, `flows`, `dashboards`, `apps`, `skills`, `picklists`),
   each `src/*/index.ts` handed to the stack key of its name through
-  `exportsOf` — the scaffolded `AGENTS.md` says how to add to them. The
-  memory driver and the Hono server are NOT in the file — the CLI
-  auto-registers both at boot
+  `exportsOf` — the scaffolded `AGENTS.md` says how to add to them.
 
 The five retired remote templates (`todo`, `compliance`, `content`,
 `contracts`, `procurement`) are refused by name.
@@ -305,7 +303,8 @@ token through the `CAPABILITY_PROVIDERS` registry in
 |:--|:--|
 | `automation` | `@objectstack/service-automation` — flows, and any declarative `connectors:` entry |
 | `analytics` `cache` `storage` `queue` `job` `messaging` `realtime` `settings` `sms` `push` | `@objectstack/service-` + the token ([the `push` block](./references/operations.md#mobile-push)) |
-| `marketplace` | `@objectstack/service-package` |
+| `mailbox` | `@objectstack/service-mailbox` — inbound mail |
+| `marketplace` `package-registry` | `@objectstack/service-package` |
 | `audit` `email` `sharing` `approvals` `webhooks` | `@objectstack/plugin-` + the token |
 | `pinyin-search` | `@objectstack/plugin-pinyin-search` |
 | `mcp` | `@objectstack/mcp` |

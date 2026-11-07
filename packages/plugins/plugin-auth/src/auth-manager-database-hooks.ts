@@ -59,6 +59,7 @@ import { sessionPolicyHoldFor, withSessionPolicyHold } from './session-policy-ho
 import { holdPrincipalSessionExpiry } from './principal-session-mint.js';
 import { canonicalClientAddress } from './client-address-canonical.js';
 import { readRequestClientAddress } from './request-client-address.js';
+import { SESSION_SCOPING_REFUSAL } from './organization-access-policy.js';
 
 /**
  * The `AuthManager` members the functions below read — every one of them, and
@@ -74,6 +75,9 @@ export interface DatabaseHooksHost {
   audienceLogError: AuthManager['audienceLogError'];
   getDataEngine: AuthManager['getDataEngine'];
   isCreatedInThisRequest: AuthManager['isCreatedInThisRequest'];
+  enforceConcurrentCap: AuthManager['enforceConcurrentCap'];
+  judgeSessionScoping: AuthManager['judgeSessionScoping'];
+  judgeSessionSwitch: AuthManager['judgeSessionSwitch'];
   linkingContext: AuthManager['linkingContext'];
   logDurabilityDegradation: AuthManager['logDurabilityDegradation'];
   resolveUserAuthGates: AuthManager['resolveUserAuthGates'];
@@ -85,7 +89,7 @@ export interface DatabaseHooksHost {
 
 /** The body of `AuthManager#composeDatabaseHooks`; the method's docblock there is its contract. */
 export function composeDatabaseHooks(
-  this: Pick<DatabaseHooksHost, 'audienceLogError' | 'config' | 'idpLocale' | 'isCreatedInThisRequest' | 'linkingContext' | 'resolveUserAuthGates' | 'settleMembership' | 'settleSelfRegistrationGrant' | 'stampIdentitySource' | 'takeOwnerVerifiedStamp'>,
+  this: Pick<DatabaseHooksHost, 'audienceLogError' | 'config' | 'idpLocale' | 'enforceConcurrentCap' | 'isCreatedInThisRequest' | 'judgeSessionScoping' | 'judgeSessionSwitch' | 'linkingContext' | 'resolveUserAuthGates' | 'settleMembership' | 'settleSelfRegistrationGrant' | 'stampIdentitySource' | 'takeOwnerVerifiedStamp'>,
   host?: BetterAuthOptions['databaseHooks'],
 ): BetterAuthOptions['databaseHooks'] {
   // A landed link ends a standing unlink record (implicit-account-linking.ts,
@@ -301,13 +305,32 @@ export function composeDatabaseHooks(
     const ipAddress = canonicalClientAddress((await readRequestClientAddress()) ?? derived);
     return ipAddress === derived ? session : { ...session, ipAddress };
   };
+  // [ADR-0069 TL;DR 6, D5] A session is scoped to an organization only from
+  // an address that organization's own allowed IP ranges admit
+  // (`organization-access-policy.ts`). Judged where a session gains an
+  // organization — its creation (the sign-in, after ADR-0093 D9 picked the
+  // organization above) and a switch of the active organization (below) —
+  // and only on a request that came through the HTTP auth door: its
+  // established address is in the request state, exactly the address the
+  // deployment's list judged at that door. A programmatic `auth.api.*` call
+  // carries no request and is not judged, as the door never judged it.
+  const refuseUnadmittedScoping = async (userId: unknown, organizationId: unknown, ctx: any) => {
+    if (!ctx?.request || typeof userId !== 'string' || !userId) return;
+    if (typeof organizationId !== 'string' || !organizationId) return;
+    const verdict = await this.judgeSessionScoping(userId, organizationId, await readRequestClientAddress());
+    if (verdict === 'admitted') return;
+    const { APIError } = await import('better-auth/api');
+    throw new APIError('FORBIDDEN', { code: SESSION_SCOPING_REFUSAL.code, message: SESSION_SCOPING_REFUSAL.message });
+  };
   const sessionBefore = async (session: any, ctx: any) => {
     const captured = await captureSessionAddress(session);
     const result = sessionActiveOrgBefore ? await sessionActiveOrgBefore(captured, ctx) : undefined;
     if (result === false) return false;
-    if (result && typeof result === 'object' && 'data' in result) {
-      return { data: { ...captured, ...(result as any).data } };
-    }
+    const final = result && typeof result === 'object' && 'data' in result
+      ? { ...captured, ...(result as any).data }
+      : captured;
+    await refuseUnadmittedScoping(final?.userId, final?.activeOrganizationId, ctx);
+    if (result && typeof result === 'object' && 'data' in result) return { data: final };
     return captured === session ? result : { data: captured };
   };
 
@@ -364,6 +387,31 @@ export function composeDatabaseHooks(
       if (hostResult === false) return false;
       if (hostResult && typeof hostResult === 'object' && 'data' in hostResult) {
         draft = { ...draft, ...(hostResult as any).data };
+      }
+    }
+    // A switch of the active organization re-scopes the session, and is judged
+    // against the TARGET organization's policy before the switch lands
+    // (`organization-access-policy.ts`): its IP list, as the scoping at
+    // creation is (above); its idle and absolute limits, from the session row
+    // as it stands — the switch request runs no heartbeat, so nothing refreshes
+    // `last_activity_at` ahead of the judgement — a session past either is
+    // ended in place and the switch refused; then its concurrent cap, counting
+    // this session as scoped to the target.
+    const target = draft?.activeOrganizationId;
+    const current = ctx?.context?.session?.session;
+    if (typeof target === 'string' && target && target !== current?.activeOrganizationId) {
+      const userId = draft.userId ?? current?.userId ?? ctx?.context?.session?.user?.id;
+      await refuseUnadmittedScoping(userId, target, ctx);
+      const sessionId = typeof current?.id === 'string' ? current.id : undefined;
+      if (sessionId) {
+        if ((await this.judgeSessionSwitch(sessionId, target)) === 'ended') {
+          const { APIError } = await import('better-auth/api');
+          throw new APIError('UNAUTHORIZED', {
+            code: 'UNAUTHENTICATED',
+            message: "Your session has ended under this organization's session limits. Sign in again.",
+          });
+        }
+        if (typeof userId === 'string' && userId) await this.enforceConcurrentCap(userId, target, sessionId);
       }
     }
     const held = holdPrincipalSessionExpiry(draft, ctx);

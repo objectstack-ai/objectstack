@@ -413,6 +413,87 @@ export const AppCodeSchema = z
   .string({ error: (issue) => (issue.input === undefined ? 'a card names its app `code`: 2–8 lowercase letters, e.g. `crm`' : undefined) })
   .regex(/^[a-z]{2,8}$/, 'must be 2–8 lowercase letters (no digit, no underscore), e.g. `crm`');
 
+// ── The tier: what a card is for ────────────────────────────────────────────
+
+/**
+ * What a card is FOR — a closed set, and every card names one:
+ *
+ *   control   an internal quality check (the small golden cases): never
+ *             exported, never shown in the gallery, whatever it scores;
+ *   starter   a gallery starter template (the mid-tier scenarios);
+ *   delivery  a delivery-grade scenario.
+ *
+ * A card-level key, outside `expect`: the scorer never reads it. The loader
+ * holds a {@link GALLERY_TIERS} card to its floor (`GALLERY_FLOOR` in
+ * `loader.ts`); a `control` card has no floor. The gallery exporter exports a
+ * {@link GALLERY_TIERS} card only, and only a `generic` one
+ * ({@link SCENARIO_ORIGINS}; `src/export/generic.ts`).
+ */
+export const SCENARIO_TIERS = ['control', 'starter', 'delivery'] as const;
+export type ScenarioTier = (typeof SCENARIO_TIERS)[number];
+
+export const ScenarioTierSchema = z.enum(SCENARIO_TIERS, {
+  error: (issue) =>
+    issue.input === undefined
+      ? 'a card names its `tier`: `control` (an internal check, never exported), `starter` or `delivery`'
+      : undefined,
+});
+
+/** The tiers a gallery export may carry: every tier but `control`. */
+export const GALLERY_TIERS = ['starter', 'delivery'] as const satisfies readonly ScenarioTier[];
+
+export function isGalleryTier(tier: ScenarioTier): tier is (typeof GALLERY_TIERS)[number] {
+  return (GALLERY_TIERS as readonly ScenarioTier[]).includes(tier);
+}
+
+// ── The origin: where a card comes from ─────────────────────────────────────
+
+/**
+ * Where a card COMES FROM — a closed set, and every card names one:
+ *
+ *   generic           written from the domain alone, by anyone; the only
+ *                     origin the open library (`docs/qa/scenarios/`) holds and
+ *                     the only one the gallery exporter exports;
+ *   customer-derived  derived from a customer's app, data or wording: lives in
+ *                     the private overlay, never exported;
+ *   held-out          withheld from the open set, so a score on it is not one
+ *                     anything was tuned against: lives in the private
+ *                     overlay, never exported.
+ *
+ * The explicit marker the exporter reads. Neither `provenance` (free prose)
+ * nor the card's directory is one: the loader reads whatever directory it is
+ * handed. What the loader does know is which library its caller says it is
+ * loading (`LoadOptions.library` in `loader.ts`), and it refuses a `generic`
+ * card in the private overlay and any other card in the open library.
+ */
+export const SCENARIO_ORIGINS = ['generic', 'customer-derived', 'held-out'] as const;
+export type ScenarioOrigin = (typeof SCENARIO_ORIGINS)[number];
+
+export const ScenarioOriginSchema = z.enum(SCENARIO_ORIGINS, {
+  error: (issue) =>
+    issue.input === undefined
+      ? 'a card names its `origin`: `generic` (written from the domain alone), `customer-derived` or `held-out` (both private, never exported)'
+      : undefined,
+});
+
+// ── The title ───────────────────────────────────────────────────────────────
+
+const titleText = z.string().regex(/\S/, 'must not be blank');
+
+/**
+ * The card's title in both languages, each non-empty: the gallery lists every
+ * app with a Chinese and an English title. A reader picks one explicitly
+ * (`title.en`, `title.zh`); the object is never printed whole.
+ */
+export const CardTitleSchema = z.strictObject(
+  { zh: titleText, en: titleText },
+  {
+    error: (issue) =>
+      issue.code === 'invalid_type' ? 'a card names its `title` as `{ zh, en }`, both non-empty' : undefined,
+  },
+);
+export type CardTitle = z.infer<typeof CardTitleSchema>;
+
 /** What every scenario app's namespace starts with. */
 export const SCENARIO_NAMESPACE_PREFIX = 'demo';
 
@@ -444,8 +525,13 @@ export const ScenarioCardSchema = z.strictObject({
   id: MachineNameSchema,
   /** The app code; the app's namespace is {@link scenarioNamespace}. */
   code: AppCodeSchema,
-  title: z.string().min(1),
-  /** Where the scenario comes from — the open set holds generic scenarios only. */
+  /** What the card is for: {@link SCENARIO_TIERS}. */
+  tier: ScenarioTierSchema,
+  /** Where the card comes from: {@link SCENARIO_ORIGINS}. */
+  origin: ScenarioOriginSchema,
+  /** {@link CardTitleSchema}: `{ zh, en }`. */
+  title: CardTitleSchema,
+  /** Where the scenario comes from, in prose — read by people; {@link SCENARIO_ORIGINS} is the marker code reads. */
   provenance: z.string().min(1),
   prompt: PromptSchema,
   expect: ExpectSchema,

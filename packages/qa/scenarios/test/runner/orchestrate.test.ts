@@ -24,7 +24,7 @@ import { truthFigures } from '../../src/score/index.js';
 import type { AppHarness, HttpAnswer, PersonaAccount, ToolAnswer } from '../../src/runner/app.js';
 import { stepKey, type AgentDriver, type AskTask, type AuthorTask, type DriverInfo } from '../../src/runner/driver.js';
 import { namespacedScenario } from '../../src/runner/namespace.js';
-import { runCard, type ProjectOps } from '../../src/runner/orchestrate.js';
+import { runCard, seedApp, type ProjectOps } from '../../src/runner/orchestrate.js';
 import { cardScorecard, renderScorecard, runRecord } from '../../src/runner/scorecard.js';
 import type { ParsedTurn } from '../../src/runner/transcript.js';
 
@@ -32,8 +32,8 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const CARD_FILE = resolve(HERE, '../../../../../docs/qa/scenarios/crm_account_with_contacts.json');
 const AREAS_DIR = resolve(HERE, '../../../../../docs/qa/platform-checklist/areas');
 
-function load(): LoadedScenario {
-  const { card, refusals } = loadScenarioFile(CARD_FILE, { areas: readCapabilityAreas(AREAS_DIR) });
+function load(file = CARD_FILE): LoadedScenario {
+  const { card, refusals } = loadScenarioFile(file, { areas: readCapabilityAreas(AREAS_DIR), library: 'open' });
   if (!card) throw new Error(refusals.map(formatRefusal).join('\n'));
   return card;
 }
@@ -140,6 +140,12 @@ class FakeApp implements AppHarness {
     (this.rows[object] ??= []).push({ ...row });
     return { ok: true, status: 200, body: {} };
   }
+  async updateRow(object: string, id: string, patch: Record<string, unknown>): Promise<HttpAnswer> {
+    const row = (this.rows[object] ?? []).find((r) => r.id === id);
+    if (!row) return { ok: false, status: 404, body: {}, code: 'NOT_FOUND', message: `no ${object} ${id}` };
+    Object.assign(row, patch);
+    return { ok: true, status: 200, body: {} };
+  }
   async listRows(object: string) {
     return { ok: true, status: 200, body: {}, rows: (this.rows[object] ?? []).map((r) => ({ ...r })) };
   }
@@ -186,6 +192,8 @@ function truthfulAnswer(scenario: LoadedScenario, question: string, persona?: st
 
 class ScriptedDriver implements AgentDriver {
   readonly seen: string[] = [];
+  /** The tier each authoring task carried, by step key: what sizes the live driver's turn cap. */
+  readonly tiers: Record<string, string> = {};
   private readonly scenario: LoadedScenario;
   constructor(
     scenario: LoadedScenario,
@@ -194,6 +202,8 @@ class ScriptedDriver implements AgentDriver {
     private readonly leak: { question: string; persona: string } | undefined,
     /** The agent catches a validation operation's bad value itself and writes nothing (#30883 item 2). */
     private readonly preValidates = false,
+    /** What an authoring turn answers instead of finishing, per `mode/phase` (`scratch/build`): a turn, or a throw. */
+    private readonly authorAs: Readonly<Record<string, ParsedTurn | Error>> = {},
   ) {
     this.scenario = namespacedScenario(scenario);
   }
@@ -202,6 +212,10 @@ class ScriptedDriver implements AgentDriver {
   }
   async author(task: AuthorTask) {
     this.seen.push(stepKey(task));
+    this.tiers[stepKey(task)] = task.tier;
+    const instead = this.authorAs[`${task.mode}/${task.phase}`];
+    if (instead instanceof Error) throw instead;
+    if (instead) return { turn: instead };
     if (task.mode === 'scratch') this.ops.projects.get(task.cwd)!.phase = task.phase === 'build' ? 'built' : 'iterated';
     if (task.mode === 'template') {
       const app = this.app();
@@ -240,7 +254,15 @@ class ScriptedDriver implements AgentDriver {
 }
 
 function setup<A extends FakeApp = FakeApp>(
-  opts: { degradedBuild?: boolean; leak?: { question: string; persona: string }; bareItems?: boolean; declares?: string; app?: () => A; preValidates?: boolean } = {},
+  opts: {
+    degradedBuild?: boolean;
+    leak?: { question: string; persona: string };
+    bareItems?: boolean;
+    declares?: string;
+    app?: () => A;
+    preValidates?: boolean;
+    authorAs?: Record<string, ParsedTurn | Error>;
+  } = {},
 ) {
   const scenario = load();
   const fresh = opts.app ?? (() => new FakeApp() as A);
@@ -254,7 +276,7 @@ function setup<A extends FakeApp = FakeApp>(
     apps.push(current);
     return boot(dir);
   };
-  const driver = new ScriptedDriver(scenario, ops, getApp, opts.leak, opts.preValidates);
+  const driver = new ScriptedDriver(scenario, ops, getApp, opts.leak, opts.preValidates, opts.authorAs);
   return { scenario, ops, driver, apps };
 }
 
@@ -560,5 +582,300 @@ describe('runCard — a refused seed row makes what reads it not measured, never
     const verdict = (id: string) => (record.results as Array<{ id: string; verdict: string }>).find((r) => r.id === id)!.verdict;
     expect(verdict('crm_account_with_contacts.scratch.run-ask')).toBe('not-run');
     expect(verdict('crm_account_with_contacts.scratch.run-operations')).toBe('pass');
+  });
+});
+
+// ── An authoring turn that does not finish ──────────────────────────────────
+
+/** A build author turn the runner's own timeout killed, as the live driver records one. */
+const KILLED: ParsedTurn = {
+  replyText: '',
+  toolCalls: [],
+  meta: { resultSubtype: 'no-result(exit 143)', process: { elapsedMs: 3_600_000, exit: 143, timedOut: true, timeoutMs: 3_600_000, stderrTail: 'terminated' } },
+};
+const CRASHED: ParsedTurn = {
+  replyText: '',
+  toolCalls: [],
+  meta: { resultSubtype: 'no-result(exit 1)', process: { elapsedMs: 900, exit: 1, timedOut: false, timeoutMs: 3_600_000, stderrTail: 'Error: could not start a session' } },
+};
+/** A build author turn that reached its turn cap: the CLI's own `error_max_turns` result line, the cap on its process. */
+const OUT_OF_TURNS: ParsedTurn = {
+  replyText: '',
+  toolCalls: [],
+  meta: { resultSubtype: 'error_max_turns', numTurns: 80, process: { elapsedMs: 1_414_000, exit: 1, timedOut: false, timeoutMs: 3_600_000, maxTurns: 80 } },
+};
+
+describe('runCard — an authoring turn that does not finish leaves its build not measured, never a degraded score', () => {
+  const results = (run: Awaited<ReturnType<typeof runCard>>, driver: ScriptedDriver) =>
+    Object.fromEntries(
+      (runRecord({ run: 'r', date: '2026-11-07', driver: driver.info(), runner: 'test', evidenceDir: '/tmp' }, run).results as Array<{ id: string; verdict: string; notes: string }>).map((r) => [
+        r.id.replace('crm_account_with_contacts.', ''),
+        `${r.verdict} · ${r.notes}`,
+      ]),
+    );
+
+  it('a build author turn the timeout killed: no command, score, seed, Run or iterate runs on it, and the scorecard says why', async () => {
+    const { scenario, ops, driver } = setup({ authorAs: { 'scratch/build': KILLED } });
+    const run = await runCard(scenario, driver, ops, { modes: ['scratch', 'template'], admin: ADMIN });
+    const scratch = run.modes[0]!;
+    expect(scratch.build).toEqual({
+      commands: [],
+      score: null,
+      notMeasured: 'author timed out after 60 min',
+      author: { resultSubtype: 'no-result(exit 143)', toolCalls: 0, elapsedMs: 3_600_000, exit: 143, timedOut: true, stderrTail: 'terminated' },
+    });
+    expect([scratch.run, scratch.iterate]).toEqual([undefined, undefined]);
+    expect(driver.seen).toEqual(['crm_account_with_contacts/scratch/build/author/-']);
+
+    const sc = cardScorecard(run);
+    expect(sc.modes[0]!.first.build).toMatchObject({ passed: 0, total: 0, degraded: false, notMeasuredReason: 'author timed out after 60 min' });
+    expect(sc.modes[1]!.skipped).toMatch(/no verified build/);
+    const table = renderScorecard(sc);
+    expect(table).toContain('| Build | not measured: author timed out after 60 min | skipped |');
+    expect(table).toContain('| Build · author | no-result(exit 143) · 60m 00s | skipped |');
+    expect(results(run, driver)).toMatchObject({
+      'scratch.build': 'not-run · not measured: author timed out after 60 min',
+      'scratch.run-ask': 'not-run · not run: the build was not measured (author timed out after 60 min)',
+      'scratch.iterate-build': 'not-run · not run: the build was not measured (author timed out after 60 min)',
+      'scratch.iterate-run-operations': 'not-run · not run: the build was not measured (author timed out after 60 min)',
+    });
+  });
+
+  it('a build author turn that failed, answered a usage limit, or never ran: not measured, with its exit, stderr tail or error, and no iterate turn', async () => {
+    const failed = setup({ authorAs: { 'scratch/build': CRASHED } });
+    const f = (await runCard(failed.scenario, failed.driver, failed.ops, { modes: ['scratch'], admin: ADMIN })).modes[0]!;
+    expect(f.build).toMatchObject({ notMeasured: 'author turn failed: no-result(exit 1)', author: { exit: 1, stderrTail: 'Error: could not start a session', elapsedMs: 900 } });
+    expect(f.build!.author!.timedOut).toBeUndefined();
+    expect([f.run, f.iterate, failed.driver.seen]).toEqual([undefined, undefined, ['crm_account_with_contacts/scratch/build/author/-']]);
+
+    const limited = setup({ authorAs: { 'scratch/build': { replyText: 'usage limit reached', toolCalls: [], meta: { resultSubtype: 'success', isError: true } } } });
+    const l = (await runCard(limited.scenario, limited.driver, limited.ops, { modes: ['scratch'], admin: ADMIN })).modes[0]!;
+    expect([l.build!.notMeasured, l.build!.author!.isError, l.iterate]).toEqual(['author turn failed: success (is_error)', true, undefined]);
+
+    const thrown = setup({ authorAs: { 'scratch/build': new Error('no recorded turn for `x`') } });
+    const tRun = await runCard(thrown.scenario, thrown.driver, thrown.ops, { modes: ['scratch'], admin: ADMIN });
+    expect(tRun.modes[0]!.build).toEqual({ commands: [], score: null, error: 'author: no recorded turn for `x`', notMeasured: 'author turn failed: no recorded turn for `x`' });
+    expect(renderScorecard(cardScorecard(tRun))).toContain('| Build · author | — |');
+  });
+
+  it('an iterate author turn the timeout killed: the first halves stand, the iterate build is not measured, and its Run half is not run', async () => {
+    const { scenario, ops, driver } = setup({ authorAs: { 'scratch/iterate': KILLED } });
+    const run = await runCard(scenario, driver, ops, { modes: ['scratch'], admin: ADMIN });
+    const sc = cardScorecard(run);
+    expect(sc.modes[0]!.first.build).toMatchObject({ degraded: false, failedCommands: [] });
+    expect(sc.modes[0]!.first.ask).toEqual({ passed: 9, total: 9, leaks: 0, notMeasured: 0 });
+    expect(run.modes[0]!.iterate).toEqual({ build: expect.objectContaining({ notMeasured: 'author timed out after 60 min', commands: [] }) });
+    expect(driver.seen.filter((k) => k.includes('/iterate-run/'))).toEqual([]);
+    expect(renderScorecard(sc)).toContain('| Iterate · Build | not measured: author timed out after 60 min |');
+    expect(results(run, driver)).toMatchObject({
+      'scratch.run-ask': 'pass · 9/9',
+      'scratch.iterate-run-ask': 'not-run · not run: the iterate build was not measured (author timed out after 60 min)',
+    });
+  });
+
+  it('template mode: an iterate author turn that failed is not measured, scored on nothing, and its Run half is not run', async () => {
+    const { scenario, ops, driver } = setup({ authorAs: { 'template/iterate': CRASHED } });
+    const run = await runCard(scenario, driver, ops, { modes: ['scratch', 'template'], admin: ADMIN, iterateRun: false });
+    const template = run.modes[1]!;
+    expect(template.template!.install.ok).toBe(true);
+    expect(template.iterate).toEqual({ build: expect.objectContaining({ notMeasured: 'author turn failed: no-result(exit 1)', score: null }) });
+    expect(driver.seen.filter((k) => k.startsWith('crm_account_with_contacts/template/iterate-run/'))).toEqual([]);
+  });
+
+  it('a build author turn that ran out of turns: not measured as before, and the author row and the written record show the turns it took of its cap', async () => {
+    const { scenario, ops, driver } = setup({ authorAs: { 'scratch/build': OUT_OF_TURNS } });
+    const run = await runCard(scenario, driver, ops, { modes: ['scratch'], admin: ADMIN });
+    const scratch = run.modes[0]!;
+    expect([scratch.build!.notMeasured, scratch.build!.author!.numTurns, scratch.build!.author!.maxTurns]).toEqual(['author turn failed: error_max_turns', 80, 80]);
+    expect([scratch.run, scratch.iterate]).toEqual([undefined, undefined]);
+    const sc = cardScorecard(run);
+    expect(sc.modes[0]!.first.build!.author).toEqual({ resultSubtype: 'error_max_turns', numTurns: 80, maxTurns: 80, elapsedMs: 1_414_000 });
+    expect(renderScorecard(sc)).toContain('| Build · author | error_max_turns · 80/80 turns · 23m 34s |');
+    const written = JSON.parse(JSON.stringify(runRecord({ run: 'r', date: '2026-11-07', driver: driver.info(), runner: 'test', evidenceDir: '/tmp' }, run)));
+    expect([written.cardRun.modes[0].build.author.maxTurns, written.scorecard.modes[0].first.build.author.maxTurns]).toEqual([80, 80]);
+  });
+
+  it('an iterate author turn killed before any result line: its row shows the cap with the count unknown', async () => {
+    const killedUnderCap: ParsedTurn = { ...KILLED, meta: { ...KILLED.meta, process: { ...KILLED.meta.process!, maxTurns: 80 } } };
+    const { scenario, ops, driver } = setup({ authorAs: { 'scratch/iterate': killedUnderCap } });
+    const table = renderScorecard(cardScorecard(await runCard(scenario, driver, ops, { modes: ['scratch'], admin: ADMIN })));
+    expect(table).toContain('| Iterate · author | no-result(exit 143) · ?/80 turns · 60m 00s |');
+    expect(table).toContain('| Build · author | success · elapsed not recorded |'); // a turn with neither a count nor a cap shows neither
+  });
+});
+
+// ── The card's tier reaches every authoring turn ────────────────────────────
+
+describe('runCard — every authoring turn carries the card’s tier to the driver, which sizes the live turn cap by it', () => {
+  it('a control card: the scratch build, the scratch iterate and the template iterate each carry `control`', async () => {
+    const { scenario, ops, driver } = setup();
+    await runCard(scenario, driver, ops, { modes: ['scratch', 'template'], admin: ADMIN });
+    expect(scenario.card.tier).toBe('control');
+    expect(driver.tiers).toEqual({
+      'crm_account_with_contacts/scratch/build/author/-': 'control',
+      'crm_account_with_contacts/scratch/iterate/author/-': 'control',
+      'crm_account_with_contacts/template/iterate/author/-': 'control',
+    });
+  });
+});
+
+// ── The seed through a reference cycle (requisition_to_receipt) ─────────────
+
+const RTR_FILE = resolve(HERE, '../../../../../docs/qa/scenarios/requisition_to_receipt.json');
+
+/**
+ * The data door of a build that checks reference integrity, as the live
+ * mid-tier runs' apps did (`VALIDATION_FAILED · Manager: no
+ * demopurchase_employee record has id "e13"`): a lookup value must name a row
+ * already in, and a `required` lookup must hold one — on insert and on update.
+ */
+class ReferentialApp extends FakeApp {
+  constructor(
+    private readonly lookups: ReadonlyArray<{ object: string; field: string; to: string }>,
+    private readonly required: ReadonlySet<string> = new Set(),
+  ) {
+    super();
+  }
+  private refusal(object: string, values: Record<string, unknown>, whole: boolean): HttpAnswer | undefined {
+    for (const l of this.lookups) {
+      if (l.object !== object || (!whole && !(l.field in values))) continue;
+      const v = values[l.field];
+      const message =
+        v === undefined || v === null
+          ? this.required.has(`${object}.${l.field}`) ? `${l.field} is required` : undefined
+          : (this.rows[l.to] ?? []).some((r) => r.id === v) ? undefined : `${l.field}: no ${l.to} record has id "${String(v)}"`;
+      if (message) return { ok: false, status: 400, body: { error: message, code: 'VALIDATION_FAILED' }, code: 'VALIDATION_FAILED', message };
+    }
+    return undefined;
+  }
+  override async insertRow(object: string, row: Record<string, unknown>): Promise<HttpAnswer> {
+    return this.refusal(object, row, true) ?? super.insertRow(object, row);
+  }
+  override async updateRow(object: string, id: string, patch: Record<string, unknown>): Promise<HttpAnswer> {
+    return this.refusal(object, patch, false) ?? super.updateRow(object, id, patch);
+  }
+}
+
+describe('seedApp — the requisition_to_receipt seed loads whole through its department ↔ employee cycle', () => {
+  const rtr = namespacedScenario(load(RTR_FILE));
+  const lookups = rtr.card.expect.lookups!;
+  const rows = Object.values(rtr.card.run.seed).reduce((n, r) => n + r.length, 0);
+
+  it('the double refuses a lookup naming a row not in yet, so the object-by-object load fails on it', async () => {
+    const app = new ReferentialApp(lookups);
+    expect(await app.insertRow('demopurchase_employee', { id: 'e01', department: 'dep_sales' })).toMatchObject({ ok: false, code: 'VALIDATION_FAILED' });
+    expect(await app.insertRow('demopurchase_department', { id: 'dep_sales', manager: 'e13' })).toMatchObject({ ok: false, message: 'manager: no demopurchase_employee record has id "e13"' });
+  });
+
+  it('loads all 637 rows: departments first with their manager left out, then the five managers set in a second pass', async () => {
+    const app = new ReferentialApp(lookups);
+    const seed = await seedApp(rtr, app, []);
+    expect(rows).toBe(637);
+    expect(seed).toEqual({ inserted: 637, refused: [], secondPass: { 'demopurchase_department.manager': 5 } });
+    expect(Object.fromEntries(app.rows.demopurchase_department!.map((d) => [d.id, d.manager]))).toEqual(
+      Object.fromEntries(rtr.card.run.seed.demopurchase_department!.map((d) => [d.id, d.manager])),
+    );
+  });
+
+  it('a build that made the manager required: employees go in first, and their department is set in the second pass', async () => {
+    const required = new Set(['demopurchase_department.manager']);
+    const seed = await seedApp(rtr, new ReferentialApp(lookups, required), [], undefined, required);
+    expect(seed).toEqual({ inserted: 637, refused: [], secondPass: { 'demopurchase_employee.department': 18 } });
+  });
+
+  it('a second-pass update the app refuses moves the row from inserted to refused, naming the lookup', async () => {
+    class NoManagers extends ReferentialApp {
+      override async updateRow(object: string, id: string, patch: Record<string, unknown>): Promise<HttpAnswer> {
+        if (id === 'dep_fin') return { ok: false, status: 403, body: {}, code: 'PERMISSION_DENIED', message: 'manager is read-only' };
+        return super.updateRow(object, id, patch);
+      }
+    }
+    const seed = await seedApp(rtr, new NoManagers(lookups), []);
+    expect(seed).toEqual({
+      inserted: 636,
+      refused: [{ object: 'demopurchase_department', id: 'dep_fin', fields: ['manager'], code: 'PERMISSION_DENIED', message: 'manager is read-only' }],
+      secondPass: { 'demopurchase_department.manager': 4 },
+    });
+  });
+});
+
+describe('runCard — a build that makes both sides of a reference cycle required is a Build finding naming the cycle', () => {
+  const original = load(RTR_FILE);
+  const card = namespacedScenario(original).card;
+
+  /** An artifact carrying every object the card expects, each with its declared lookups, `required` where asked. */
+  const rtrArtifact = (required: ReadonlySet<string>) => ({
+    manifest: { id: 'com.example.demopurchase', namespace: 'demopurchase' },
+    objects: card.expect.objects.map((name) => ({
+      name,
+      fields: Object.fromEntries(
+        (card.expect.lookups ?? []).filter((l) => l.object === name).map((l) => [l.field, { type: 'lookup', reference: l.to, ...(required.has(`${name}.${l.field}`) ? { required: true } : {}) }]),
+      ),
+    })),
+  });
+
+  function run(required: ReadonlySet<string>) {
+    const apps: ReferentialApp[] = [];
+    const ops: ProjectOps = {
+      async scaffold(name, under) {
+        return { dir: `${under}/${name}`, result: { command: 'create-objectstack', exit: 0, tail: '', ms: 1 } };
+      },
+      async os(_dir, args) {
+        return { command: `npx objectstack ${args.join(' ')}`, exit: 0, tail: '', ms: 1 };
+      },
+      readArtifact: () => rtrArtifact(required),
+      async boot() {
+        return { url: 'http://fake', stop: async () => {}, log: () => '' };
+      },
+      harness: () => {
+        const app = new ReferentialApp(card.expect.lookups!, required);
+        apps.push(app);
+        return app;
+      },
+      namespace: (dir) => dir.slice(dir.lastIndexOf('/') + 1),
+    };
+    const tiers: string[] = [];
+    const quiet: AgentDriver = {
+      info: () => ({ driver: 'recorded', version: 'quiet test replay', apiBilled: false }),
+      author: async (task) => {
+        tiers.push(`${task.phase}: ${task.tier}`);
+        return { turn: turn('Done.') };
+      },
+      ask: async () => turn('I cannot tell from here.'),
+    };
+    return runCard(original, quiet, ops, { modes: ['scratch'], admin: ADMIN, iterateRun: false }).then((r) => ({ run: r, apps, tiers }));
+  }
+
+  it('a starter card’s build and iterate authoring turns each carry `starter` to the driver', async () => {
+    const { tiers } = await run(new Set(['demopurchase_employee.department']));
+    expect(original.card.tier).toBe('starter');
+    expect(tiers).toEqual(['build: starter', 'iterate: starter']);
+  });
+
+  it('both sides required: the finding names the cycle, and the seed is still sent so the record holds the app’s own refusals', async () => {
+    const { run: r } = await run(new Set(['demopurchase_department.manager', 'demopurchase_employee.department']));
+    const cycle = [
+      { object: 'demopurchase_department', field: 'manager', to: 'demopurchase_employee' },
+      { object: 'demopurchase_employee', field: 'department', to: 'demopurchase_department' },
+    ];
+    expect(r.modes[0]!.build!.requiredCycles).toEqual([cycle]);
+    const sc = cardScorecard(r);
+    const finding =
+      'the reference cycle `demopurchase_department.manager` → `demopurchase_employee`, `demopurchase_employee.department` → `demopurchase_department` ' +
+      'is required on every side, so the seed cannot load it (at least one side of a reference cycle must be optional)';
+    expect(sc.modes[0]!.findings).toEqual([`build: ${finding}`, `iterate build: ${finding}`]);
+    expect(renderScorecard(sc)).toContain(`- scratch finding: build: ${finding}`);
+    const seed = r.modes[0]!.run!.seed;
+    expect(seed.refused.filter((x) => x.object === 'demopurchase_department').map((x) => x.message)).toEqual(Array(5).fill('manager is required'));
+    expect(seed.inserted).toBe(card.run.seed.demopurchase_supplier!.length); // only what hangs off neither side
+  });
+
+  it('one side optional: no finding, and the whole seed loads', async () => {
+    const { run: r } = await run(new Set(['demopurchase_employee.department']));
+    expect(r.modes[0]!.build!.requiredCycles).toBeUndefined();
+    const sc = cardScorecard(r);
+    expect(sc.modes[0]!.findings).toEqual([]);
+    expect(sc.modes[0]!.first.seed).toEqual({ inserted: 637, total: 637, refused: 0 });
+    expect(renderScorecard(sc)).toContain('| Seed | 637/637 |');
   });
 });

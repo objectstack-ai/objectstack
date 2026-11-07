@@ -245,7 +245,8 @@ decision.
 
 ## What the agent gets
 
-Thirteen tools, generated from your metadata:
+Thirteen tools, generated from your metadata, and two more for files where the
+storage service is installed:
 
 | Tool | What it does |
 |:---|:---|
@@ -257,6 +258,40 @@ Thirteen tools, generated from your metadata:
 | `delete_records` | Delete many records of one object, by a filter or an id list, at most 200 per call (an OAuth token needs both `data:read` and `data:write`) |
 | `list_actions` / `run_action` | Discover and invoke your business actions by name |
 | `resume_run` | Finish a flow action that paused on a screen, by submitting the screen's values |
+| `read_file` | Read a file a record carries: its text (text files, PDF, Word `.docx`) or the image itself, with its size, the byte cap and a short-lived download link |
+| `create_upload_link` | Hand the user a single-use link that uploads one file onto a record's file field or its attachments |
+
+### Files: `read_file` and `create_upload_link`
+
+Both tools are registered only where the storage service is installed (they
+read and write through it), `read_file` with the `data:read` scope and
+`create_upload_link` with `data:write`. Neither judges access on its own: the
+record is read first, exactly as `get_record` reads it, so **no access to the
+record means no file**, refused with the same `RECORD_NOT_FOUND`.
+
+- **`read_file({ objectName, recordId, field?, fileId?, attachmentId? })`**
+  reads one file: the one a file field holds (`field`, plus `fileId` when the
+  field holds several), or one attachment (`attachmentId`). Send neither to
+  list the record's files with their ids. The file is then judged by the same
+  rule as a download from the Console. The answer carries the file's name,
+  type and size, the byte cap `read_file` reads (10 MiB), a download link that
+  expires after five minutes, and the content: the text of a text file, a PDF
+  or a Word document (cut at 100,000 characters or 200 PDF pages), or the image
+  itself for PNG, JPEG, GIF and WebP up to 5 MiB. A larger file answers its
+  facts and the link only; a damaged PDF or Word file answers a sentence
+  saying so.
+- **`create_upload_link({ objectName, recordId, field? | attachments: true })`**
+  needs a record the caller may edit (and, for a field, a field they may
+  write). It answers a link and its expiry (ten minutes). The user opens the
+  link in a browser where they are signed in to this deployment, picks one
+  file, and it lands on exactly that record and field, or as an attachment of
+  that record. On a phone, they sign in there first. The link works only for
+  the user it was made for, and only once: without a session it answers
+  `401`, and a second use, an expired link, an unknown link and another user's
+  link all get the same `404`. The upload is stored as that user, with their
+  access checked again when the file arrives, and it meets the storage
+  service's maximum upload size before the link is spent. Sending a file's
+  bytes through the MCP protocol itself is not supported yet.
 
 The tools are a fixed ~10-tool **spine** with the object name as a *parameter*
 (`query_records(objectName, …)`), not one tool per object — so the list stays
@@ -366,7 +401,8 @@ drive this MCP server. Same word, different layer.
   scope name only the fields the caller can read, the same field set
   `GET /api/v1/meta/object/:name` serves that caller. `list_actions` follows
   the same projection: an action that object door withholds from the caller
-  (one whose param binds a field the caller cannot read) is not listed, and a
+  (one whose param binds a field the caller cannot read, judged on the object
+  the param names, so an object-less action too) is not listed, and a
   listed action's params carry no label, help text or options of such a
   field. Sparse results or denied
   writes usually mean governance is *working*, not that the connection is
@@ -454,7 +490,7 @@ call '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":
 # → {"result":{"serverInfo":{"name":"objectstack",...},"capabilities":{"tools":{...},"prompts":{}}},...}
 
 call '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' | grep -o '"name":"[a-z_]*"'
-# → the thirteen tools, list_objects … resume_run
+# → the thirteen tools, list_objects … resume_run (fifteen with read_file and create_upload_link where storage is installed)
 
 call '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"query_records","arguments":{"objectName":"crm_opportunity","limit":3}}}'
 # → {"result":{"content":[{"type":"text","text":"{ \"object\": \"crm_opportunity\", \"records\": [ ... ], \"total\": 23, \"hasMore\": true }"}]}}

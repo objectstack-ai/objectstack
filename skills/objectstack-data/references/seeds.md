@@ -2,8 +2,6 @@
 
 Object definition and seed data live together — a `*.object.ts` usually
 pairs with a `*.seed.ts` (fixtures, reference rows, bootstrap data).
-`defineSeed()` is type-safe: TypeScript checks every record's field keys
-against the object definition.
 
 > The factory is `defineSeed` — **not** `defineDataset`, which is the
 > unrelated ADR-0021 analytics semantic layer (`@objectstack/spec/ui`).
@@ -33,7 +31,6 @@ export const statusSeed = defineSeed(Status, {
 // Demo data — dev/test only
 export const categorySeed = defineSeed(Category, {
   externalId: 'slug',
-  mode: 'upsert',
   env: ['dev', 'test'],
   records: [
     { slug: 'electronics', name: 'Electronics' },
@@ -48,8 +45,8 @@ export const SeedData = [statusSeed, categorySeed];   // parents first
 | Field | Default | Purpose |
 |:------|:--------|:--------|
 | `object` | derived | Auto-set from `objectDef.name` — never write manually |
-| `externalId` | `'name'` | Stable business key used for upsert / update lookup |
-| `mode` | `'upsert'` | Import strategy (see below) |
+| `externalId` | `'name'` | Stable business key every keyed mode matches on |
+| `mode` | `'ignore'` | Import strategy (see below) |
 | `columns` | — | Per-column write policy, keyed by field: `{ FIELD: { applyOn: 'create' } }` (below) |
 | `env` | `['prod','dev','test']` | Environments where the seed loads |
 | `records` | — | `Partial<Record<keyof object.fields, unknown>>[]` |
@@ -60,20 +57,23 @@ Full Zod shape: `node_modules/@objectstack/spec/src/data/seed.zod.ts`.
 
 | Mode | Behavior | Use for |
 |:-----|:---------|:--------|
-| `upsert` (default) | Update by `externalId`, insert if missing. Idempotent. | Reference data, bootstrap rows |
-| `insert` | Insert all; fail on duplicate `externalId`. | Append-only / audit tables |
+| `ignore` (default) | Create-only: insert a missing row, leave a matched row as is. | Data the customer owns |
+| `upsert` | Insert if missing; every replay writes declared columns back. | Reference data kept current |
+| `insert` | Insert every record, no match: duplicates on each replay. | Rows loaded once |
 | `update` | Update only existing rows; never create. | Patching existing config |
-| `ignore` | Insert; silently skip duplicates. | Additive bootstrap |
-| `replace` ⚠️ | Delete everything, then insert. **Data loss.** | Cache / lookup tables only — never user data |
+| `replace` ⚠️ | Insert with no match; deletes nothing, the caller clears the table. | Cache / lookup tables only |
+
+A seed replays on each boot, install and re-publish. AppPlugin's boot and organization
+replays (not a publish or package install) do not re-insert a keyed row a
+person deleted; `seed-replayer` with `{ reseed: true }` restores it.
 
 ### Columns the app owns after the first load — `columns.FIELD.applyOn`
 
-A seed is replayed (every dev-server boot, every re-publish) and an `upsert`
-replay re-asserts every column on the row it matched — right for master data,
-wrong for a column a job or an admin advances after the first load. Declare it
+An `upsert` replay re-asserts every column on the row it matched — wrong for
+a column a job or an admin advances after the first load. Declare it
 `applyOn: 'create'`: written when the seed creates the row, left as the row
-holds it on every replay (an `update` dataset never writes it; `insert` /
-`ignore` / `replace` never update a matched row, so nothing changes there).
+holds it on every replay (`update` never writes it; no other mode updates a
+matched row).
 Each key must be a field of the object or an injected system column —
 `defineSeed` refuses one that is not. Same values and meaning as an import
 mapping entry's `applyOn` (objectstack-api).
@@ -81,6 +81,7 @@ mapping entry's `applyOn` (objectstack-api).
 ```typescript
 defineSeed(Invoice, {
   externalId: 'number',
+  mode: 'upsert',
   columns: { status: { applyOn: 'create' } },   // the payment job owns it after the first seed
   records: [{ number: 'INV-001', status: 'draft', amount: 1200 }],
 });
@@ -147,9 +148,8 @@ Stdlib in seed context: `now()`, `today()`, `daysFromNow(n)`, `daysAgo(n)`,
 `isBlank(v)`, `coalesce(v, fallback)`. Scope: `os.user`, `os.org`, `os.env`.
 See **objectstack-formula** for the full contract.
 
-**Determinism gate:** two consecutive `os build` runs with no source
-changes must produce byte-identical `dist/objectstack.json`. CEL + pinned
-`now` is what guarantees that — using `Date.now()` will fail CI.
+**Determinism gate:** two `os build` runs with no source change must
+produce byte-identical `dist/objectstack.json`.
 
 ### Seed best practices
 
@@ -157,7 +157,7 @@ changes must produce byte-identical `dist/objectstack.json`. CEL + pinned
 |:---------|:----|
 | Always use `defineSeed()`, never `SeedSchema.parse()` | Lose compile-time field checking otherwise |
 | Prefer natural keys (`code` / `email` / `slug`) | Portable across environments |
-| Default to `upsert` | Idempotent re-runs |
+| Leave `mode` unset; `upsert` only for reference data | Replays keep customer edits |
 | Scope demo data with `env: ['dev','test']` | Keep noise out of prod |
 | Order seeds parent → child in the exported array | References resolve at load time |
-| Use `replace` only on cache/lookup tables, with comments | Data-loss footgun |
+| `replace` only on cache tables the caller clears | It never deletes: duplicates otherwise |

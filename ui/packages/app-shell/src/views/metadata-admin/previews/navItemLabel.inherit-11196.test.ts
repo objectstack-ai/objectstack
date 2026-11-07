@@ -195,8 +195,8 @@ describe('#30910 — renamedLabel and clearedLabel change the entry the resolver
     // Neither the exact tag nor the bare language: the exact tag is added, a sibling region is not owned.
     [{ en: 'Customer', 'zh-CN': '客户', 'zh-TW': '客戶' }, 'zh-Hant', { en: 'Customer', 'zh-CN': '客户', 'zh-TW': '客戶', 'zh-Hant': 'RENAMED' }],
     [{ en: 'Customer', 'zh-TW': '客戶' }, 'zh-Hant', { en: 'Customer', 'zh-TW': '客戶', 'zh-Hant': 'RENAMED' }],
-    // The bare language with no sibling of the locale's script: the bare language, as before.
-    [{ en: 'Customer', zh: '客户' }, 'zh-Hant', { en: 'Customer', zh: 'RENAMED' }],
+    // The bare language of the locale's own script: the bare language, as before.
+    // (`{ en, zh }` renamed in `zh-Hant`, which wrote `zh` here, moved to the #31074 block.)
     [{ en: 'Customer', zh: '客户', 'zh-TW': '客戶' }, 'zh-CN', { en: 'Customer', zh: 'RENAMED', 'zh-TW': '客戶' }],
     // Languages the table names once.
     [{ en: 'Accounts', 'en-GB': 'Accounts (GB)' }, 'en-US', { en: 'RENAMED', 'en-GB': 'Accounts (GB)' }],
@@ -205,5 +205,31 @@ describe('#30910 — renamedLabel and clearedLabel change the entry the resolver
 
   it.each(UNCHANGED)('%j renamed in %s writes exactly as before', (map, locale, expected) => {
     expect(renamedLabel(map as I18nLabel, 'RENAMED', locale)).toEqual(expected);
+  });
+});
+
+/**
+ * #31074 — a rename in a script the map lacks adds the locale's own entry
+ * (the shared write limb, `setLocalized`), and a clear there removes nothing:
+ * a Traditional designer over `{ en, zh }` used to overwrite the Simplified
+ * text. The entry is shown in the other script until then, as the sidebar
+ * shows it.
+ */
+describe('#31074 — a rename in a script the map lacks adds its own entry', () => {
+  const CROSS: ReadonlyArray<readonly [Record<string, string>, string]> = [
+    [{ en: 'Customer', zh: '客户' }, 'zh-Hant'],
+    [{ en: 'Customer', 'zh-CN': '客户' }, 'zh-Hant'],
+    [{ en: 'Customer', zh: '客户' }, 'zh-TW'],
+    [{ en: 'Customer', 'zh-Hant': '客戶' }, 'zh-CN'],
+  ];
+
+  it.each(CROSS)('%j renamed in %s adds that tag, keeps the other script, and shows the new text', (map, locale) => {
+    const next = renamedLabel(map as I18nLabel, 'RENAMED', locale) as Record<string, string>;
+    expect(next).toEqual({ ...map, [locale]: 'RENAMED' });
+    expect(navItemLabelText(next as I18nLabel, locale)).toBe('RENAMED');
+  });
+
+  it.each(CROSS)('%j cleared in %s removes nothing', (map, locale) => {
+    expect(clearedLabel(map as I18nLabel, locale)).toEqual(map);
   });
 });

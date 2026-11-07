@@ -4,12 +4,24 @@
  * `pnpm --filter @objectstack/scenarios run-scenarios [flags]` — run every card
  * under `docs/qa/scenarios/` end to end and write one run record per card.
  *
- *   --cards DIR          the card directory (default: the repo's docs/qa/scenarios)
+ *   --cards DIR          the card directory (default: the repo's docs/qa/scenarios);
+ *                        any other directory is loaded as the private overlay,
+ *                        where a `generic` card is refused (`libraryOf`)
  *   --only ID[,ID]       run only these cards
  *   --modes M[,M]        scratch, template (default: both)
  *   --driver claude      the local Claude Code CLI on your own login (default)
  *   --driver recorded:F  replay the recording F (no model, no network to a model)
  *   --record F           also save every live turn to F, for later replay
+ *   --author-timeout MIN the live driver's budget per authoring turn, build and
+ *                        iterate alike (default 60); a turn it kills leaves its
+ *                        Build half not measured
+ *   --author-max-turns N the live driver's turn cap per authoring turn, build
+ *                        and iterate alike, on every card (default by the card's
+ *                        tier: control 80, starter 300, delivery 600); a turn
+ *                        that reaches it (`error_max_turns`) leaves its Build
+ *                        half not measured
+ *   --ask-max-turns N    the live driver's turn cap per question or operation
+ *                        turn (default 12)
  *   --template F         a verified build (dist/objectstack.json) for template mode
  *   --no-iterate-run     skip the Run half after the iterate (scratch mode)
  *   --out DIR            where records go (default docs/qa/platform-checklist/runs, git-ignored)
@@ -26,10 +38,10 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { formatRefusal, loadScenarios, readCapabilityAreas } from '../loader.js';
+import { formatRefusal, libraryOf, loadScenarios, readCapabilityAreas } from '../loader.js';
 import { HttpApp } from './app.js';
 import { ClaudeCodeDriver, RecordedDriver, RecordingDriver, type AgentDriver } from './driver.js';
-import { runCard, type ProjectOps } from './orchestrate.js';
+import { minutesText, runCard, type ProjectOps } from './orchestrate.js';
 import { bootDev, os, readArtifact, readNamespace, scaffold } from './project.js';
 import { cardScorecard, renderScorecard, runRecord } from './scorecard.js';
 
@@ -54,6 +66,12 @@ export interface CliArgs {
   record?: string;
   template?: string;
   iterateRun: boolean;
+  /** Minutes per authoring turn (`--author-timeout`); the driver's default when absent. */
+  authorTimeoutMin?: number;
+  /** Turns per authoring turn on every card (`--author-max-turns`); the card tier's default when absent. */
+  authorMaxTurns?: number;
+  /** Turns per question or operation turn (`--ask-max-turns`); the driver's default when absent. */
+  askMaxTurns?: number;
   out?: string;
   work?: string;
   createVersion?: string;
@@ -68,6 +86,12 @@ export function parseArgs(argv: readonly string[]): CliArgs {
       if (v === undefined) throw new Error(`${flag} needs a value`);
       return v;
     };
+    const turns = () => {
+      const raw = val();
+      const n = Number(raw);
+      if (!Number.isInteger(n) || n <= 0) throw new Error(`${flag} takes a whole number of turns above 0, not \`${raw}\``);
+      return n;
+    };
     if (flag === '--cards') a.cards = val();
     else if (flag === '--only') a.only = val().split(',');
     else if (flag === '--modes') {
@@ -78,6 +102,14 @@ export function parseArgs(argv: readonly string[]): CliArgs {
     else if (flag === '--record') a.record = val();
     else if (flag === '--template') a.template = val();
     else if (flag === '--no-iterate-run') a.iterateRun = false;
+    else if (flag === '--author-timeout') {
+      const raw = val();
+      const min = Number(raw);
+      if (!Number.isFinite(min) || min <= 0) throw new Error(`--author-timeout takes a number of minutes above 0, not \`${raw}\``);
+      a.authorTimeoutMin = min;
+    }
+    else if (flag === '--author-max-turns') a.authorMaxTurns = turns();
+    else if (flag === '--ask-max-turns') a.askMaxTurns = turns();
     else if (flag === '--out') a.out = val();
     else if (flag === '--work') a.work = val();
     else if (flag === '--create-version') a.createVersion = val();
@@ -86,9 +118,28 @@ export function parseArgs(argv: readonly string[]): CliArgs {
   return a;
 }
 
-export function makeDriver(spec: string): AgentDriver {
-  if (spec === 'claude') return new ClaudeCodeDriver();
-  if (spec.startsWith('recorded:')) return RecordedDriver.fromFile(spec.slice('recorded:'.length));
+/** The live driver's limits a run may set: `--author-timeout`, `--author-max-turns`, `--ask-max-turns`. */
+export type DriverLimits = Pick<CliArgs, 'authorTimeoutMin' | 'authorMaxTurns' | 'askMaxTurns'>;
+
+const LIMIT_FLAGS: ReadonlyArray<readonly [keyof DriverLimits, string]> = [
+  ['authorTimeoutMin', '--author-timeout'],
+  ['authorMaxTurns', '--author-max-turns'],
+  ['askMaxTurns', '--ask-max-turns'],
+];
+
+export function makeDriver(spec: string, opts: DriverLimits = {}): AgentDriver {
+  if (spec === 'claude') {
+    return new ClaudeCodeDriver({
+      ...(opts.authorTimeoutMin !== undefined ? { authorTimeoutMs: opts.authorTimeoutMin * 60_000 } : {}),
+      ...(opts.authorMaxTurns !== undefined ? { authorMaxTurns: opts.authorMaxTurns } : {}),
+      ...(opts.askMaxTurns !== undefined ? { askMaxTurns: opts.askMaxTurns } : {}),
+    });
+  }
+  if (spec.startsWith('recorded:')) {
+    const given = LIMIT_FLAGS.filter(([key]) => opts[key] !== undefined).map(([, flag]) => flag);
+    if (given.length) throw new Error(`${given.join(', ')} ${given.length === 1 ? 'applies' : 'apply'} to the live driver only: a replay re-reads each turn as it was recorded`);
+    return RecordedDriver.fromFile(spec.slice('recorded:'.length));
+  }
   throw new Error(`unknown driver \`${spec}\` (claude, recorded:FILE)`);
 }
 
@@ -102,7 +153,10 @@ export async function main(argv: readonly string[]): Promise<number> {
   mkdirSync(work, { recursive: true });
   mkdirSync(outDir, { recursive: true });
 
-  const { cards, refusals } = loadScenarios(cardsDir, { areas: readCapabilityAreas(join(repo, 'docs/qa/platform-checklist/areas')) });
+  const { cards, refusals } = loadScenarios(cardsDir, {
+    areas: readCapabilityAreas(join(repo, 'docs/qa/platform-checklist/areas')),
+    library: libraryOf(cardsDir, repo),
+  });
   for (const r of refusals) console.error(formatRefusal(r));
   const chosen = args.only ? cards.filter((c) => args.only!.includes(c.card.id)) : cards;
   if (chosen.length === 0) {
@@ -110,10 +164,15 @@ export async function main(argv: readonly string[]): Promise<number> {
     return 2;
   }
 
-  const live = makeDriver(args.driver);
+  const live = makeDriver(args.driver, args);
   const driver = args.record ? new RecordingDriver(live) : live;
   const info = driver.info();
-  console.log(`driver: ${info.driver} ${info.version ?? ''} · login: ${info.authMethod ?? 'n/a'} · API-billed: no`);
+  console.log(
+    `driver: ${info.driver} ${info.version ?? ''} · login: ${info.authMethod ?? 'n/a'} · API-billed: no` +
+      (info.authorTimeoutMs !== undefined ? ` · author timeout: ${minutesText(info.authorTimeoutMs)}` : '') +
+      (info.authorMaxTurns ? ` · author max turns: ${Object.entries(info.authorMaxTurns).map(([tier, n]) => `${tier} ${n}`).join(', ')}` : '') +
+      (info.askMaxTurns !== undefined ? ` · ask max turns: ${info.askMaxTurns}` : ''),
+  );
 
   const ops: ProjectOps = {
     scaffold: (name, under) => {
