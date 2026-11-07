@@ -50,6 +50,11 @@ import {
     hasMetadataRedactor,
     redactMetadataItem,
 } from './index.js';
+// `@objectstack/lint` is reached through the save door's author-time gate, a
+// dynamic `import()` (`metadata-diagnostics.ts`). Paid here, at collection, so no
+// case's `testTimeout` window pays that first load
+// (`scripts/check-test-source-alias.mjs`, "The source reach").
+import '@objectstack/lint';
 // [#20611] Not on the package entry — the gate's half of the carry-forward,
 // consumed inside this package only.
 import { redactedPathsCarriedForward } from './metadata-redaction.js';
