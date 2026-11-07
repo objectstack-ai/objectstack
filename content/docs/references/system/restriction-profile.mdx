@@ -1,0 +1,47 @@
+---
+title: Restriction Profile — System Protocol
+navTitle: Restriction Profile
+description: "Restriction Profile schemas of the ObjectStack System Protocol: RestrictionProfile — each property with its type, default and a TypeScript example."
+---
+
+{/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
+
+<Callout type="info">
+**Source:** `packages/spec/src/system/restriction-profile.zod.ts`
+</Callout>
+
+## TypeScript Usage
+
+```typescript
+import { RestrictionProfileSchema } from '@objectstack/spec/system';
+import type { RestrictionProfile } from '@objectstack/spec/system';
+
+// Validate data
+const result = RestrictionProfileSchema.parse(data);
+```
+
+---
+
+## RestrictionProfile
+
+What a target environment does not let metadata do, published by that environment; an absent profile means no restriction
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **allowCode** | `boolean` | ✅ | Whether metadata that carries code is allowed (object lifecycle hooks, named handler functions, code plugins) |
+| **allowScheduledAutomation** | `boolean` | ✅ | Whether scheduled automation is allowed (flows of type 'schedule' and scheduled background jobs) |
+| **allowedFlowNodeTypes** | `Enum<'start' \| 'end' \| 'decision' \| 'assignment' \| 'loop' \| 'create_record' \| 'update_record' \| 'delete_record' \| 'get_record' \| 'http' \| 'notify' \| 'save_notice' \| 'script' \| 'screen' \| 'wait' \| 'subflow' \| 'map' \| 'connector_action' \| 'parallel_gateway' \| 'join_gateway' \| 'boundary_event'>[]` | ✅ | Built-in flow node types a flow may use (FlowNodeAction ids); a built-in type not listed is forbidden |
+| **versions** | `{ spec: string; skills: string }` | ✅ | The @objectstack/spec and @objectstack/skills versions the environment runs |
+
+### Nested Shape: `RestrictionProfile.versions`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **spec** | `string` | ✅ | The @objectstack/spec version the environment runs (SemVer 2.0.0, e.g. 18.4.0) |
+| **skills** | `string` | ✅ | The @objectstack/skills version the environment runs (SemVer 2.0.0, e.g. 18.4.0) |
+
+
+---
+

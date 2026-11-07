@@ -4005,6 +4005,12 @@ const zh = {
       example2: '统计这些对象各有多少条记录。',
       example3: '我在这里能运行哪些操作？每个操作是做什么的？',
       tryFirst: '先试第一条：如果助手回答出你平时用的对象，就说明连接成功了。',
+      connected: '已连接：{{name}}。',
+      connectedKey: '已用 API 密钥“{{name}}”连接。',
+      lastCallHour: '最近一次调用在 {{time}} 起的那一小时内。',
+      lastCallAt: '最近一次调用在 {{time}}。',
+      noCallYet: '还没有调用：先在助手里试上面第一条请求，确认连接成功。',
+      moreConnected: '其他能以你的身份操作的助手和密钥，都列在本页底部。',
     },
     disabled: {
       title: '此部署已关闭 AI 助手连接',

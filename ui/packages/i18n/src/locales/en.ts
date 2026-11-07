@@ -4604,6 +4604,12 @@ const en = {
       example2: 'Count how many records each of those objects has.',
       example3: 'What actions can I run here, and what does each one do?',
       tryFirst: 'Start with the first one: if your assistant answers with the objects you work with, the connection works.',
+      connected: 'Connected: {{name}}.',
+      connectedKey: 'Connected with the API key "{{name}}".',
+      lastCallHour: 'Its last call was in the hour from {{time}}.',
+      lastCallAt: 'Its last call was at {{time}}.',
+      noCallYet: 'No call yet: ask it the first request above to check the connection.',
+      moreConnected: 'Everything else that can act as you is listed at the bottom of this page.',
     },
     disabled: {
       title: 'Connecting AI assistants is turned off here',

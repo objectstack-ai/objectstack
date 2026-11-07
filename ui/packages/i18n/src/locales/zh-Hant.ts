@@ -4005,6 +4005,12 @@ const zhHant = {
       example2: '統計這些物件各有多少條記錄。',
       example3: '我在這裡能執行哪些操作？每個操作是做什麼的？',
       tryFirst: '先試第一條：如果助手回答出你平時用的物件，就說明連線成功了。',
+      connected: '已連線：{{name}}。',
+      connectedKey: '已用 API 金鑰“{{name}}”連線。',
+      lastCallHour: '最近一次呼叫在 {{time}} 起的那一小時內。',
+      lastCallAt: '最近一次呼叫在 {{time}}。',
+      noCallYet: '還沒有呼叫：先在助手裡試上面第一條請求，確認連線成功。',
+      moreConnected: '其他能以你的身份操作的助手和金鑰，都列在本頁底部。',
     },
     disabled: {
       title: '此部署已關閉 AI 助手連線',

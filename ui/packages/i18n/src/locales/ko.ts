@@ -3794,6 +3794,12 @@ const ko = {
       example2: '각 객체에 레코드가 몇 개씩 있는지 세어 줘.',
       example3: '여기서 실행할 수 있는 작업은 무엇이고, 각각 무엇을 하나요?',
       tryFirst: '첫 번째 요청부터 시도해 보세요. 평소 사용하는 객체로 답하면 연결된 것입니다.',
+      connected: '연결됨: {{name}}.',
+      connectedKey: 'API 키 "{{name}}"(으)로 연결됨.',
+      lastCallHour: '마지막 호출은 {{time}}부터 한 시간 사이에 있었습니다.',
+      lastCallAt: '마지막 호출: {{time}}.',
+      noCallYet: '아직 호출이 없습니다. 위의 첫 번째 요청을 시도해 연결을 확인하세요.',
+      moreConnected: '사용자로서 동작할 수 있는 나머지 항목은 이 페이지 아래쪽에 나와 있습니다.',
     },
     disabled: {
       title: '이 배포에서는 AI 어시스턴트 연결이 꺼져 있습니다',

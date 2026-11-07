@@ -3872,6 +3872,12 @@ const es = {
       example2: 'Cuenta cuántos registros tiene cada uno de esos objetos.',
       example3: '¿Qué acciones puedo ejecutar aquí y qué hace cada una?',
       tryFirst: 'Empieza por la primera: si tu asistente responde con los objetos con los que trabajas, la conexión funciona.',
+      connected: 'Conectado: {{name}}.',
+      connectedKey: 'Conectado con la clave de API «{{name}}».',
+      lastCallHour: 'Su última llamada fue en la hora que empieza a las {{time}}.',
+      lastCallAt: 'Su última llamada fue el {{time}}.',
+      noCallYet: 'Aún no hay llamadas: prueba la primera solicitud de arriba para comprobar la conexión.',
+      moreConnected: 'Todo lo demás que puede actuar como tú aparece al final de esta página.',
     },
     disabled: {
       title: 'La conexión de asistentes de IA está desactivada aquí',
