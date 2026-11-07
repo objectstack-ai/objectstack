@@ -48,8 +48,8 @@ export const GalleryAppSchema = z.strictObject({
    * `@objectstack/spec/marketplace` — the one a listing card shows.
    */
   function: MarketplaceBusinessFunctionSchema,
-  /** `en` is the card's `title`; the card schema has no Chinese title, so `zh` is `null` until it does. */
-  title: z.strictObject({ en: z.string().min(1), zh: z.string().min(1).nullable() }),
+  /** The card's `title`, both languages (the card schema requires both). */
+  title: z.strictObject({ en: z.string().min(1), zh: z.string().min(1) }),
   /** The card's one-sentence requirement (`prompt.short`), in the languages it has. */
   summary: z.strictObject({ en: z.string().min(1).optional(), zh: z.string().min(1).optional() }),
   /** The card's capability tags, sorted. */

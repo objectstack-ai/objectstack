@@ -372,6 +372,24 @@ export interface ExplainEngineDeps {
    * error.
    */
   tenancyPosture: TenancyPosture;
+  /**
+   * [ADR-0090 D12, ruling of record 6663849489] The one admission the read
+   * door makes beside the CRUD grant, for an operation the principal's sets do
+   * NOT grant: a delegate reads the business units its admin scopes cover.
+   * The middleware's own judgment (`delegatedUnitReadAdmission`), answering the
+   * scope `id IN <the covered units>` the read is confined to, or null.
+   *
+   * Optional: a deps bag wired without it explains such a read as refused —
+   * the answer from before the read was ruled, which over-refuses and never
+   * widens. The plugin's own wiring passes it.
+   */
+  delegatedUnitReadScope?: (
+    sets: PermissionSet[],
+    object: string,
+    engineOperation: string,
+    context: any,
+    delegatorSets: PermissionSet[] | null,
+  ) => Promise<Record<string, unknown> | null>;
 
   // ── [C2 / ADR-0095] Record-grained deps. All OPTIONAL: absent → the engine
   // stays object-level and byte-compatible. Present → the sharing / rls / owd /
@@ -1713,6 +1731,13 @@ interface RecordAttributionContext {
    * so the record verdict of an `update` or a `delete` composes it too.
    */
   delegator?: { sets: PermissionSet[]; context: any };
+  /**
+   * [ADR-0090 D12] The delegated business-unit read's confinement, when the
+   * object-level pass admitted the read through it and no set's grant: the
+   * read door ANDs `id IN <the covered units>` into the find, so a unit
+   * outside it is a unit the principal does not read.
+   */
+  delegatedUnitScope?: Record<string, unknown>;
 }
 
 /**
@@ -1769,7 +1794,7 @@ async function applyRecordAttribution(
 ): Promise<{ record: NonNullable<ExplainDecision['record']>; posture: AuthzPosture }> {
   const {
     deps, object, recordId, engineOp, rlsOp, context, sets, layers, owd, capsDeny, crudAllowed, vamaEffective, vamaSets,
-    declaredColumns, depthScope, delegator,
+    declaredColumns, depthScope, delegator, delegatedUnitScope,
   } = ra;
   const isRead = engineOp === 'find';
   const posture = derivePosture(context);
@@ -2413,6 +2438,10 @@ async function applyRecordAttribution(
   if (capsDeny) { visible = false; decidedBy = 'required_permissions'; }
   else if (!crudAllowed) { visible = false; decidedBy = 'object_crud'; }
   else if (!recordExists) { visible = false; decidedBy = undefined; }
+  // [ADR-0090 D12] A read the object grant admitted only as the delegated
+  // business-unit read reaches the covered units alone: the door's find
+  // answers no other, so the layer that admitted it is the one that withholds it.
+  else if (delegatedUnitScope && matches(delegatedUnitScope) === false) { visible = false; decidedBy = 'object_crud'; }
   else if (tenantExcluded) { visible = false; decidedBy = 'tenant_isolation'; }
   else if (rlsExcluded) { visible = false; decidedBy = 'rls'; }
   // A dependency that threw decides by failing the request, in the order the
@@ -2707,6 +2736,8 @@ interface ObjectPass {
   delegatorContextForRls: any;
   readFilter: Record<string, unknown> | null | undefined;
   allowed: boolean;
+  /** [ADR-0090 D12] The delegated business-unit read's confinement, when the object grant admitted the read through it. */
+  delegatedUnitScope: Record<string, unknown> | null;
 }
 
 async function explainOnce(deps: ExplainEngineDeps, input: ExplainInput, asker: ExplainAsker | undefined): Promise<ExplainDecision> {
@@ -2969,7 +3000,15 @@ async function explainObjectPass(deps: ExplainEngineDeps, input: ExplainInput, a
   // that layer's grant is computed FROM, and reporting the real cause beats a
   // misleading "no set grants it" when the sets were never the problem.
   const postureUnresolved = secMeta.unresolved === true;
-  const crudAllowed = agentCrud && delegatorCrud && !delegatorRefused && !postureUnresolved;
+  // [ADR-0090 D12, ruling of record 6663849489] The one admission the read
+  // door makes beside the grant, asked as the door asks it: only for an
+  // operation the principal's sets do not grant, and through the door's own
+  // judgment ({@link ExplainEngineDeps.delegatedUnitReadScope}). A delegated
+  // (on-behalf-of) principal is never admitted by it.
+  const delegatedUnitScope = !agentCrud && !postureUnresolved && !delegatorRefused && deps.delegatedUnitReadScope
+    ? await deps.delegatedUnitReadScope(sets, object, engineOp, context, delegatorSets).catch(() => null)
+    : null;
+  const crudAllowed = (agentCrud || delegatedUnitScope !== null) && delegatorCrud && !delegatorRefused && !postureUnresolved;
   const granting = postureUnresolved
     ? []
     : sets
@@ -2979,8 +3018,12 @@ async function explainObjectPass(deps: ExplainEngineDeps, input: ExplainInput, a
     layer: 'object_crud',
     verdict: crudAllowed ? 'grants' : 'denies',
     detail: crudAllowed
-      ? `${operation} on '${object}' is granted by [${granting.join(', ')}]` +
-        (delegatorSets ? ' AND by the delegator (D10 intersection).' : '.')
+      ? delegatedUnitScope !== null
+        ? `No resolved permission set grants ${operation} on '${object}'; the business units the principal's ` +
+          `delegated admin scope covers are read as delegated administration (ADR-0090 D12), and no other ` +
+          `(see readFilter).`
+        : `${operation} on '${object}' is granted by [${granting.join(', ')}]` +
+          (delegatorSets ? ' AND by the delegator (D10 intersection).' : '.')
       : postureUnresolved
         // [#10401] One wording, shared with the middleware's own throw, so
         // explanation and enforcement cannot drift into telling a reader two
@@ -3219,7 +3262,10 @@ async function explainObjectPass(deps: ExplainEngineDeps, input: ExplainInput, a
       delegatorFilter = { id: DENY_ALL_SENTINEL_ID };
     }
   }
-  const filterParts = [agentFilter, delegatorFilter].filter(Boolean) as Record<string, unknown>[];
+  // [ADR-0090 D12] The delegated business-unit read is confined as the door
+  // confines it: `id IN <the covered units>`, ANDed beside the row-level
+  // security at step 3.
+  const filterParts = [agentFilter, delegatorFilter, delegatedUnitScope].filter(Boolean) as Record<string, unknown>[];
   // [#20604] A composed filter the find cannot run is refused here, as
   // enforcement refuses it, and never published as the filter a read runs
   // under. Before the record-grained pass, so a record id no row carries is
@@ -3252,6 +3298,7 @@ async function explainObjectPass(deps: ExplainEngineDeps, input: ExplainInput, a
       : readFilter
         ? 'Row-level security narrows the row set (see readFilter for the composed predicate)' +
           (delegatorFilter ? ' — intersection of agent + delegator filters (D10).' : '.') +
+          (delegatedUnitScope ? ' The delegated business-unit read is confined to the units the delegated admin scope covers (ADR-0090 D12).' : '') +
           (objectDefaults.length > 0 ? objectDefaultRowScopeSource(object, objectDefaults) : '')
         : 'No RLS policy applies.') +
       (membershipKeys.length > 0 ? await membershipKeySource(deps, membershipKeys) : ''),
@@ -3263,6 +3310,7 @@ async function explainObjectPass(deps: ExplainEngineDeps, input: ExplainInput, a
   return {
     object, operation, context, dataOp, rlsOp, layers, sets, setNames, positions, owd, capsDeny, crudAllowed,
     vamaEffective, vamaSets, declaredColumns, scope, delegatorSets, delegatorContextForRls, readFilter, allowed,
+    delegatedUnitScope,
   };
 }
 
@@ -3279,7 +3327,7 @@ async function explainRecordOnPass(
 ): Promise<{ record: NonNullable<ExplainDecision['record']>; posture: AuthzPosture }> {
   const {
     object, operation, context, dataOp, rlsOp, layers, sets, owd, capsDeny, crudAllowed, vamaEffective, vamaSets,
-    declaredColumns, scope, delegatorSets, delegatorContextForRls,
+    declaredColumns, scope, delegatorSets, delegatorContextForRls, delegatedUnitScope,
   } = pass;
   let recordVerdict: NonNullable<ExplainDecision['record']>;
   const readQuestion = deps.recordAbsentToCaller;
@@ -3350,6 +3398,7 @@ async function explainRecordOnPass(
     object, recordId, engineOp: dataOp, rlsOp, context, sets, layers, owd, capsDeny, crudAllowed,
     vamaEffective, vamaSets, declaredColumns, depthScope: scope,
     ...(delegatorSets && delegatorContextForRls ? { delegator: { sets: delegatorSets, context: delegatorContextForRls } } : {}),
+    ...(delegatedUnitScope ? { delegatedUnitScope } : {}),
   });
   recordVerdict = out.record;
   if (principalCannotRead) {

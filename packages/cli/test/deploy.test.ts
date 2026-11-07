@@ -408,3 +408,196 @@ describe('devVersion — a semver pre-release of the version the author wrote', 
     expect(result.ok).toBe(false);
   });
 });
+
+describe('os deploy — a self-hosted runtime as the active target (os environments use-runtime)', () => {
+  const RUNTIME = 'http://runtime.test:8080';
+  const KEY = 'osk_runtime_key';
+  let home = '';
+  let work = '';
+  const previous: Record<string, string | undefined> = {};
+  const prevCwd = process.cwd();
+  let output: string[] = [];
+  const RUNTIME_ENV = [...MANAGED_ENV, 'OS_RUNTIME_URL', 'OS_RUNTIME_TOKEN', 'OS_RUNTIME_EMAIL', 'OS_RUNTIME_PASSWORD'] as const;
+
+  beforeEach(async () => {
+    home = await mkdtemp(join(tmpdir(), 'os-30888-deploy-home-'));
+    work = await mkdtemp(join(tmpdir(), 'os-30888-deploy-work-'));
+    await mkdir(join(home, '.objectstack'), { recursive: true });
+    for (const key of ['HOME', 'USERPROFILE', ...RUNTIME_ENV]) previous[key] = process.env[key];
+    process.env.HOME = home;
+    process.env.USERPROFILE = home;
+    for (const key of RUNTIME_ENV) delete process.env[key];
+    // A cloud login AND a remembered runtime that is the active target: the runtime wins.
+    await writeFile(join(home, '.objectstack', 'cloud.json'), JSON.stringify({
+      url: CLOUD_PLANE, token: 'cloud_tok', createdAt: 'now',
+      runtimeTarget: { url: RUNTIME, token: KEY, recordedAt: 'then' }, deployTarget: 'runtime',
+    }));
+    process.chdir(work);
+    compileForDeploy.mockReset();
+    compileForDeploy.mockImplementation((artifactPath: string) => {
+      mkdirSync(dirname(artifactPath), { recursive: true });
+      writeFileSync(artifactPath, JSON.stringify({ manifest: { id: 'com.acme.crm', name: 'Acme CRM', version: '1.2.0' }, objects: [] }));
+      return 0;
+    });
+    output = [];
+    const record = (...args: unknown[]) => { output.push(args.map(String).join(' ')); };
+    vi.spyOn(console, 'log').mockImplementation(record);
+    vi.spyOn(console, 'error').mockImplementation(record);
+  });
+
+  afterEach(async () => {
+    process.chdir(prevCwd);
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+    await rm(home, { recursive: true, force: true });
+    await rm(work, { recursive: true, force: true });
+  });
+
+  type Sent = { url: string; method: string; headers: Record<string, string>; body: any };
+  type Answer = { status: number; body: unknown };
+  const PLAN = {
+    dryRun: true, manifestId: 'com.acme.crm', version: '1.2.0', installedVersion: '1.1.0',
+    plan: { declaredRenames: [{ object: 'lead', from: 'phone', to: 'mobile' }] },
+    environment: { columns: [{ object: 'lead', field: 'phone', rows: 3 }] },
+  };
+  const INSTALLED = { manifestId: 'com.acme.crm', version: '1.2.0', hotLoaded: true, installedAt: '2026-11-07T00:00:00.000Z' };
+  const ok = (data: unknown): Answer => ({ status: 200, body: { success: true, data } });
+  const refused = (status: number, code: string, message: string, details?: unknown): Answer =>
+    ({ status, body: { success: false, error: { code, message, ...(details ? { details } : {}) } } });
+
+  /** The runtime: the dry-run answer, then the install answer. Anything else is unexpected. */
+  function stubRuntime(answers: { dryRun?: Answer; install?: Answer }): Sent[] {
+    const sent: Sent[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (input: string, init: any = {}) => {
+      const url = String(input);
+      const body = typeof init.body === 'string' ? JSON.parse(init.body) : undefined;
+      sent.push({ url, method: init.method ?? 'GET', headers: { ...(init.headers ?? {}) }, body });
+      const answer = url === `${RUNTIME}/api/v1/marketplace/install-local` && init.method === 'POST'
+        ? (body?.dryRun ? answers.dryRun ?? ok(PLAN) : answers.install ?? ok(INSTALLED))
+        : { status: 599, body: { success: false, error: { message: `unexpected ${init.method} ${url}` } } };
+      return {
+        ok: answer.status >= 200 && answer.status < 300,
+        status: answer.status,
+        statusText: String(answer.status),
+        headers: { get: () => null },
+        json: async () => answer.body,
+      } as any;
+    }));
+    return sent;
+  }
+
+  async function deploy(argv: string[] = []): Promise<number | undefined> {
+    try {
+      await Deploy.run(argv);
+      return undefined;
+    } catch (err: any) {
+      const exit = err?.oclif?.exit ?? err?.exitCode;
+      if (exit === undefined) throw err;
+      return exit;
+    }
+  }
+  const text = () => output.join('\n');
+
+  it('with no flags: builds, asks the dry run (plan printed), installs the build inline, and reports it live', async () => {
+    const sent = stubRuntime({});
+
+    const exit = await deploy();
+
+    expect(exit, text()).toBeUndefined();
+    expect(compileForDeploy).toHaveBeenCalledWith(join(work, 'dist', 'objectstack.json'));
+    // Two calls, both to the remembered runtime with its key: the dry run, then the install. No cloud call.
+    expect(sent.map((s) => [s.method, s.url, s.body?.dryRun === true])).toEqual([
+      ['POST', `${RUNTIME}/api/v1/marketplace/install-local`, true],
+      ['POST', `${RUNTIME}/api/v1/marketplace/install-local`, false],
+    ]);
+    for (const s of sent) expect(s.headers.Authorization).toBe(`Bearer ${KEY}`);
+    // Inline artifact, the manifest's own version: no catalog, no -dev suffix.
+    expect(sent[1].body.manifest.id).toBe('com.acme.crm');
+    expect(sent[1].body.manifest.version).toBe('1.2.0');
+    expect(sent[1].body.packageId).toBeUndefined();
+    // The plan is printed, declared rename included, before the install.
+    expect(text()).toContain('Renames declared by renamedFrom');
+    expect(text()).toContain('lead.phone → mobile — 3 row(s) hold a value');
+    expect(text()).toContain(`Live: ${RUNTIME} now serves com.acme.crm 1.2.0.`);
+  });
+
+  it('a refusal from the dry run stops the deploy before any install', async () => {
+    const sent = stubRuntime({ dryRun: refused(422, 'VALIDATION_ERROR', "Package 'com.acme.crm' declares a job with no body.") });
+
+    const exit = await deploy();
+
+    expect(exit).toBe(1);
+    expect(sent).toHaveLength(1);
+    expect(sent[0].body.dryRun).toBe(true);
+    expect(text()).toContain('Install failed (422 VALIDATION_ERROR)');
+  });
+
+  it('a runtime that declines install-local (404, e.g. booted from a composed artifact) is named, exit 1', async () => {
+    const sent = stubRuntime({ dryRun: { status: 404, body: { success: false, error: { message: 'Not Found' } } } });
+
+    const exit = await deploy();
+
+    expect(exit).toBe(1);
+    expect(sent).toHaveLength(1);
+    expect(text()).toContain(`${RUNTIME} does not serve install-local`);
+    expect(text()).toContain('A runtime booted from a composed artifact takes no package installs');
+  });
+
+  it('a runtime that predates the dry run is said so, exit 1, naming what to do', async () => {
+    // It ignored `dryRun` and installed: the answer carries no `dryRun`.
+    const sent = stubRuntime({ dryRun: ok(INSTALLED) });
+
+    const exit = await deploy();
+
+    expect(exit).toBe(1);
+    expect(sent).toHaveLength(1);
+    expect(text()).toContain('does not support a dry run');
+    expect(text()).toContain('Upgrade the runtime to preview an upgrade before it is installed, then run `os deploy` again.');
+  });
+
+  it("the install's refusal stops the deploy, and its retry names os deploy; the confirmation passes through", async () => {
+    const accessRefusal = refused(409, 'ACCESS_UPGRADE_CONFIRMATION_REQUIRED', 'confirm', {
+      findings: [{ describe: "permission set 'sales' would re-enable lead.delete" }], findingSet: 'fs_123',
+    });
+    let sent = stubRuntime({ install: accessRefusal });
+    expect(await deploy()).toBe(1);
+    expect(sent).toHaveLength(2);
+    expect(text()).toContain('os deploy --confirm-access-upgrade fs_123');
+
+    vi.unstubAllGlobals();
+    sent = stubRuntime({});
+    expect(await deploy(['--confirm-access-upgrade', 'fs_123']), text()).toBeUndefined();
+    expect(sent[0].body.confirmAccessUpgrade).toBeUndefined();
+    expect(sent[1].body.confirmAccessUpgrade).toBe('fs_123');
+  });
+
+  it('a package the running kernel could not load is not called live: exit 1', async () => {
+    stubRuntime({ install: ok({ ...INSTALLED, hotLoaded: false, hotLoadError: 'boom' }) });
+
+    expect(await deploy()).toBe(1);
+    expect(text()).toContain('it is not live: it loads when the runtime restarts');
+    expect(text()).not.toContain('Live:');
+  });
+
+  it('a failed build installs nothing', async () => {
+    const sent = stubRuntime({});
+    compileForDeploy.mockImplementation(() => 1);
+
+    expect(await deploy()).toBe(1);
+    expect(sent).toHaveLength(0);
+    expect(text()).toContain('Nothing was installed.');
+  });
+
+  it('--confirm-access-upgrade is refused when the target is ObjectOS Cloud, before anything is sent', async () => {
+    await writeFile(join(home, '.objectstack', 'cloud.json'), JSON.stringify({ url: CLOUD_PLANE, token: 'cloud_tok', createdAt: 'now' }));
+    const sent = stubRuntime({});
+
+    expect(await deploy(['--confirm-access-upgrade', 'fs_123'])).toBe(1);
+    expect(sent).toHaveLength(0);
+    expect(compileForDeploy).not.toHaveBeenCalled();
+  });
+});

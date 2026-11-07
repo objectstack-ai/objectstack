@@ -92,7 +92,7 @@ const EXPECTED_PERSONA_TRUTHS: Record<string, Record<string, Record<string, Trut
 
 describe('the open scenario library (docs/qa/scenarios)', () => {
   const areas = readCapabilityAreas(AREAS_DIR);
-  const result = loadScenarios(SCENARIOS_DIR, { areas });
+  const result = loadScenarios(SCENARIOS_DIR, { areas, library: 'open' });
 
   it('loads every card with no refusal', () => {
     expect(result.refusals.map(formatRefusal)).toEqual([]);
@@ -108,6 +108,17 @@ describe('the open scenario library (docs/qa/scenarios)', () => {
   it('the three controls, and only they, are tier `control` (internal checks, never exported)', () => {
     const controls = result.cards.filter((c) => c.card.tier === 'control').map((c) => c.card.id);
     expect(controls.sort()).toEqual(Object.keys(EXPECTED_TRUTHS).sort());
+  });
+
+  it('every card is `generic` (the open library holds no customer-derived or held-out card) and carries a Chinese and an English title', () => {
+    expect(result.cards.length).toBeGreaterThanOrEqual(9);
+    for (const { card } of result.cards) {
+      expect(card.origin, card.id).toBe('generic');
+      expect(Object.keys(card.title).sort(), card.id).toEqual(['en', 'zh']);
+      // A Chinese title is Chinese: at least one CJK ideograph, not the English one copied over.
+      expect(card.title.zh, card.id).toMatch(/[\u4e00-\u9fff]/);
+      expect(card.title.zh, card.id).not.toBe(card.title.en);
+    }
   });
 
   for (const [id, expected] of Object.entries(EXPECTED_TRUTHS)) {

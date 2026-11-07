@@ -31,7 +31,7 @@
  */
 
 import { applyExpectDelta, type LoadedScenario } from '../loader.js';
-import { isWriteValidationOperation, scenarioNamespace } from '../schema.js';
+import { isWriteValidationOperation, scenarioNamespace, type CardTitle } from '../schema.js';
 import {
   gradeCardAnswer,
   gradeCardOperation,
@@ -183,7 +183,8 @@ export interface ModeRun {
 
 export interface CardRun {
   card: string;
-  title: string;
+  /** The card's title, both languages, carried into the run record as data. */
+  title: CardTitle;
   capabilities: string[];
   counts: { questions: number; questionTurns: number; operations: number; personas: number };
   modes: ModeRun[];

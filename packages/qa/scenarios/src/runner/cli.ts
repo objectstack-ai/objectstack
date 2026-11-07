@@ -4,7 +4,9 @@
  * `pnpm --filter @objectstack/scenarios run-scenarios [flags]` — run every card
  * under `docs/qa/scenarios/` end to end and write one run record per card.
  *
- *   --cards DIR          the card directory (default: the repo's docs/qa/scenarios)
+ *   --cards DIR          the card directory (default: the repo's docs/qa/scenarios);
+ *                        any other directory is loaded as the private overlay,
+ *                        where a `generic` card is refused (`libraryOf`)
  *   --only ID[,ID]       run only these cards
  *   --modes M[,M]        scratch, template (default: both)
  *   --driver claude      the local Claude Code CLI on your own login (default)
@@ -36,7 +38,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { formatRefusal, loadScenarios, readCapabilityAreas } from '../loader.js';
+import { formatRefusal, libraryOf, loadScenarios, readCapabilityAreas } from '../loader.js';
 import { HttpApp } from './app.js';
 import { ClaudeCodeDriver, RecordedDriver, RecordingDriver, type AgentDriver } from './driver.js';
 import { minutesText, runCard, type ProjectOps } from './orchestrate.js';
@@ -151,7 +153,10 @@ export async function main(argv: readonly string[]): Promise<number> {
   mkdirSync(work, { recursive: true });
   mkdirSync(outDir, { recursive: true });
 
-  const { cards, refusals } = loadScenarios(cardsDir, { areas: readCapabilityAreas(join(repo, 'docs/qa/platform-checklist/areas')) });
+  const { cards, refusals } = loadScenarios(cardsDir, {
+    areas: readCapabilityAreas(join(repo, 'docs/qa/platform-checklist/areas')),
+    library: libraryOf(cardsDir, repo),
+  });
   for (const r of refusals) console.error(formatRefusal(r));
   const chosen = args.only ? cards.filter((c) => args.only!.includes(c.card.id)) : cards;
   if (chosen.length === 0) {

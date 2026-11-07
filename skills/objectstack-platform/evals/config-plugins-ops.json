@@ -301,6 +301,38 @@
           "os push"
         ]
       }
+    },
+    {
+      "id": 18,
+      "prompt": "Our `os serve` app must receive customers' inbound email into mailboxes and link each message to its records. What turns that on?",
+      "expected_output": "`requires: ['mailbox']` on the stack root: the token mounts `@objectstack/service-mailbox` (inbound mail). No `MailboxServicePlugin` instance in `plugins:` and no hand-built mail objects; `defineStack` rejects an unknown token at authoring time.",
+      "files": [],
+      "assertions": {
+        "must_contain": [
+          "requires",
+          "'mailbox'",
+          "@objectstack/service-mailbox"
+        ],
+        "must_not_contain": [
+          "MailboxServicePlugin("
+        ]
+      }
+    },
+    {
+      "id": 19,
+      "prompt": "Scaffold, with the CLI, an object, a flow and an AI agent for our support app.",
+      "expected_output": "`os generate object <name>` and `os generate flow <name>` scaffold the first two. There is no agent generator: `os generate agent` is retired (agents are platform-internal, ADR-0063 §2), so the AI extension is a skill, `os generate skill <name>`. No hand-written `defineAgent` file.",
+      "files": [],
+      "assertions": {
+        "must_contain": [
+          "os generate object",
+          "os generate flow",
+          "os generate skill"
+        ],
+        "must_not_contain": [
+          "defineAgent("
+        ]
+      }
     }
   ]
 }

@@ -45,6 +45,31 @@
  *
  * ⛔ Not the retired `os publish` id (see `package/publish.ts`'s header), on
  * purpose: that id is documented as removed and must stay unresolvable.
+ *
+ * ## A self-hosted runtime target
+ *
+ * When `os environments use-runtime` made a self-hosted runtime (the Docker
+ * image, Community or Enterprise) the active deploy target, the same command
+ * with no flags deploys THERE instead (`--env` still names a cloud environment
+ * and deploys to it). There is no catalog and no version to mint: the build is
+ * sent inline to the runtime's install-local door — `os package install` itself,
+ * run in this process with the remembered url and key, so its refusals and
+ * answers stay in ONE place:
+ *
+ *   1. build (`compileForDeploy`), as above;
+ *   2. the dry run — the runtime's package upgrade plan of the installed
+ *      version against this build, printed; nothing is installed. A runtime
+ *      that refuses it, or does not serve install-local, stops the deploy here
+ *      with its sentence and exit 1;
+ *   3. the install, with `--confirm-access-upgrade` passed through; the door's
+ *      refusals (an access upgrade to confirm, …) stop the deploy with exit 1;
+ *   4. the answer — install-local registers the package in the live kernel
+ *      before it answers, so the answer IS "live": `hotLoaded` ⇒ 0; a package
+ *      the running kernel could not load ⇒ 1, naming the restart it waits for.
+ *
+ * Whether an upgrade is refused for a rename or a type change (epic
+ * cloud#3652 Q3) is install-local's verdict, not this command's: a refusal it
+ * answers is printed and stops the deploy like any other.
  */
 
 import { readFile } from 'node:fs/promises';
@@ -56,7 +81,10 @@ import { describeEnvironment, resolveInstallTarget } from '../utils/install-targ
 import { compileForDeploy } from '../utils/deploy-build.js';
 import { devVersion } from '../utils/dev-version.js';
 import { fetchEnvironmentOrigin, waitUntilServed, wakeEnvironment, type ServedVersionVerdict } from '../utils/served-version.js';
+import { activeRuntimeTarget } from '../utils/runtime-target.js';
+import type { RuntimeTarget } from '../utils/cloud-config.js';
 import PackagePublish from './package/publish.js';
+import PackageInstall from './package/install.js';
 
 /** The artifact the build writes and the publish reads — `os build`'s default output. */
 export const DEPLOY_ARTIFACT = 'dist/objectstack.json';
@@ -66,12 +94,14 @@ export const DEPLOY_POLL_INTERVAL_MS = 3_000;
 
 export default class Deploy extends Command {
   static override description =
-    'Deploy this app to your ObjectOS Cloud environment: build it, publish a dev version, install it, and wait until it is live';
+    'Deploy this app to your ObjectOS Cloud environment (build it, publish a dev version, install it, and wait until '
+    + 'it is live), or to the self-hosted runtime `os environments use-runtime` made the active target';
 
   static override examples = [
     '$ os deploy',
     '$ os deploy --env env_abc123    # your account reaches several environments',
     '$ os deploy --no-wait           # return once the install is recorded',
+    '$ os deploy --confirm-access-upgrade <finding-set>   # self-hosted: confirm the findings the runtime printed',
   ];
 
   static override flags = {
@@ -105,6 +135,11 @@ export default class Deploy extends Command {
       description: 'API key for ObjectOS Cloud (bearer token; defaults to OS_CLOUD_API_KEY / OS_TOKEN, then `os cloud login`)',
       env: 'OS_CLOUD_API_KEY',
     }),
+    'confirm-access-upgrade': Flags.string({
+      description:
+        'Self-hosted runtime target: confirm the access findings of this upgrade with the finding-set token the '
+        + "runtime's refusal printed (as `os package install --confirm-access-upgrade`)",
+    }),
   };
 
   async run(): Promise<void> {
@@ -112,6 +147,22 @@ export default class Deploy extends Command {
     printHeader('Deploy');
 
     try {
+      // 0. Target: the self-hosted runtime when it is the active one and no
+      // cloud environment was named.
+      const runtime = flags.env ? undefined : await activeRuntimeTarget();
+      if (runtime) {
+        await this.deployToRuntime(runtime, flags['confirm-access-upgrade']);
+        return;
+      }
+      if (flags['confirm-access-upgrade'] !== undefined) {
+        printError(
+          '`--confirm-access-upgrade` confirms a self-hosted runtime\'s refusal; the deploy target is ObjectOS Cloud. '
+          + 'Drop the flag, or record the runtime with `os environments use-runtime <url> --token <key>`.',
+        );
+        this.exit(1);
+        return;
+      }
+
       // 1. Credential.
       const { token, baseUrl } = await resolveCloudCredential({ token: flags.token, server: flags.server });
       if (!token) {
@@ -228,6 +279,59 @@ export default class Deploy extends Command {
       printError((error as Error).message);
       this.exit(1);
     }
+  }
+
+  /**
+   * The self-hosted half (the header's "A self-hosted runtime target"):
+   * build → dry run (plan printed) → install → the `hotLoaded` answer.
+   */
+  private async deployToRuntime(runtime: RuntimeTarget, confirmAccessUpgrade: string | undefined): Promise<void> {
+    printStep(`Deploying to the self-hosted runtime ${runtime.url} (os environments use-runtime)`);
+
+    printStep('Building...');
+    const artifactPath = resolvePath(process.cwd(), DEPLOY_ARTIFACT);
+    if (compileForDeploy(artifactPath) !== 0) {
+      printError('The build failed — fix the errors above, then run `os deploy` again. Nothing was installed.');
+      this.exit(1);
+      return;
+    }
+
+    const install = async (extra: string[]) => {
+      const command = new PackageInstall(
+        [artifactPath, '--url', runtime.url, '--token', runtime.token, ...extra],
+        this.config,
+      );
+      command.retryCommand = 'os deploy';
+      command.embedded = true;
+      await command.run();
+      return command.outcome;
+    };
+
+    console.log('');
+    printStep(`Asking ${runtime.url} for the upgrade plan (dry run — nothing is installed)...`);
+    const plan = await install(['--dry-run']);
+    if (plan?.kind !== 'dry-run') {
+      printError(`${runtime.url} did not answer the dry run with a plan, so nothing more was sent. Upgrade the runtime, then run \`os deploy\` again.`);
+      this.exit(1);
+      return;
+    }
+
+    printStep(`Installing ${plan.manifestId} ${plan.version} into ${runtime.url}...`);
+    const outcome = await install(confirmAccessUpgrade !== undefined ? ['--confirm-access-upgrade', confirmAccessUpgrade] : []);
+    if (outcome?.kind !== 'installed') {
+      printError(`${runtime.url} did not answer the install as a managed package install, so this cannot say ${plan.manifestId} is live (see above).`);
+      this.exit(1);
+      return;
+    }
+    if (!outcome.hotLoaded) {
+      printError(
+        `${runtime.url} recorded ${outcome.manifestId} ${outcome.version}, but its running kernel could not load it, so `
+        + 'it is not live: it loads when the runtime restarts. Fix the cause above, then run `os deploy` again.',
+      );
+      this.exit(1);
+      return;
+    }
+    printSuccess(`Live: ${runtime.url} now serves ${outcome.manifestId} ${outcome.version}.`);
   }
 }
 

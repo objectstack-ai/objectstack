@@ -477,3 +477,99 @@ describe('a write made from an impersonation session names the administrator bes
     expect(seen[0].provenance).toEqual({ impersonatedBy: GRACE });
   });
 });
+
+/**
+ * A comment is mirrored like every other write (maintainer ruling on #30213's
+ * comments fork, 「A 评论也记审计和动态」): `sys_comment` is no longer on the
+ * writer's skip list, so a comment written from an impersonation session
+ * leaves the same two rows, with the same administrator stamp, as the task
+ * above. Without it, a comment the administrator wrote as the user could not
+ * be told from one the user wrote.
+ */
+describe('a comment written from an impersonation session is recorded like any other write', () => {
+  const AUTHZ = {
+    userId: ADA,
+    tenantId: 'org_1',
+    positions: ['member'],
+    permissions: [],
+    directPermissions: [],
+    systemPermissions: [],
+    org_user_ids: [ADA],
+    accessible_org_ids: ['org_1'],
+  };
+  const envelope = (authz: Record<string, unknown>) =>
+    assembleExecutionContext({
+      authz: authz as any,
+      oauth: undefined,
+      localization: undefined,
+      requestLocale: undefined,
+      accessToken: undefined,
+      authGate: undefined,
+    }) as any;
+  const impersonated = () => envelope({ ...AUTHZ, impersonatedBy: GRACE });
+  const own = () => envelope({ ...AUTHZ });
+
+  /** The comment columns the writer reads; access and stamping hooks are not this file's subject. */
+  const sysComment = {
+    name: 'sys_comment', label: 'Comment', nameField: 'body',
+    fields: {
+      id: f('id', 'text', { primaryKey: true }), thread_id: f('thread_id', 'text'),
+      body: f('body', 'textarea'), author_id: f('author_id', 'text'),
+    },
+  };
+  const bootWithComments = async () => {
+    const booted = await boot();
+    booted.engine.registry.registerObject(sysComment as any, OWNER_PACKAGE);
+    return booted;
+  };
+  const rowsAbout = (storeFor: (o: string) => Map<string, Record<string, unknown>>, table: string, id: string) =>
+    Array.from(storeFor(table).values()).filter((r) => r.object_name === 'sys_comment' && r.record_id === id);
+  const meta = (row: Record<string, unknown> | undefined) =>
+    row?.metadata == null ? null : (JSON.parse(String(row.metadata)) as Record<string, unknown>);
+
+  it('an impersonated comment insert writes a ledger row and an activity row, both naming the administrator', async () => {
+    const { engine, storeFor } = await bootWithComments();
+    await engine.insert('sys_comment', { id: 'c1', thread_id: 'biz_task:t1', body: 'Looks good', author_id: ADA }, { context: impersonated() });
+
+    const [ledger, ...moreLedger] = rowsAbout(storeFor, 'sys_audit_log', 'c1');
+    expect(moreLedger).toEqual([]);
+    expect(ledger.action).toBe('create');
+    expect(ledger.user_id).toBe(ADA);
+    expect(meta(ledger)).toEqual({ impersonated_by: GRACE });
+
+    const [activity, ...moreActivity] = rowsAbout(storeFor, 'sys_activity', 'c1');
+    expect(moreActivity).toEqual([]);
+    expect(activity.type).toBe('created');
+    expect(activity.actor_id).toBe(ADA);
+    expect(meta(activity)).toMatchObject({ impersonated_by: GRACE, impersonated_by_name: 'Grace Hopper' });
+  });
+
+  it('an impersonated edit and delete of a comment are recorded and stamped too', async () => {
+    const { engine, storeFor } = await bootWithComments();
+    await engine.insert('sys_comment', { id: 'c2', thread_id: 'biz_task:t1', body: 'Draft', author_id: ADA }, { context: own() });
+    await engine.update('sys_comment', { body: 'Final' }, { where: { id: 'c2' }, context: impersonated() } as any);
+    await engine.delete('sys_comment', { where: { id: 'c2' }, context: impersonated() } as any);
+
+    const ledger = rowsAbout(storeFor, 'sys_audit_log', 'c2');
+    expect(ledger.map((r) => r.action)).toEqual(['create', 'update', 'delete']);
+    expect(ledger.map((r) => meta(r)?.impersonated_by ?? null)).toEqual([null, GRACE, GRACE]);
+    const activity = rowsAbout(storeFor, 'sys_activity', 'c2');
+    expect(activity.map((r) => r.type)).toEqual(['created', 'updated', 'deleted']);
+    expect(activity.map((r) => meta(r)?.impersonated_by ?? null)).toEqual([null, GRACE, GRACE]);
+  });
+
+  it('control — the user\'s own comment writes both rows, unstamped', async () => {
+    const { engine, storeFor } = await bootWithComments();
+    await engine.insert('sys_comment', { id: 'c3', thread_id: 'biz_task:t1', body: 'Mine', author_id: ADA }, { context: own() });
+
+    const [ledger] = rowsAbout(storeFor, 'sys_audit_log', 'c3');
+    expect(ledger.action).toBe('create');
+    expect(ledger.user_id).toBe(ADA);
+    expect(meta(ledger)).toBeNull();
+    const [activity] = rowsAbout(storeFor, 'sys_activity', 'c3');
+    expect(activity.type).toBe('created');
+    expect(activity.actor_id).toBe(ADA);
+    expect(meta(activity)).not.toHaveProperty('impersonated_by');
+    expect(meta(activity)).not.toHaveProperty('impersonated_by_name');
+  });
+});
