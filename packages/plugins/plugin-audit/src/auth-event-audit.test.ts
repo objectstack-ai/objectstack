@@ -620,3 +620,54 @@ describe('auth-event audit — reported once per CAUSE, not once per process (#1
     expect(warns[1].message).toMatch(/ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED/);
   });
 });
+
+/**
+ * [#30924] A sign-in the IP allow-list refuses is refused before any account
+ * is resolved, and the identifier it carried may name no account at all. Its
+ * `login_failed` row is still worth writing — the address and the rule are
+ * the record an enforcement report reads — so a `login_failed` is the one
+ * event that may name no subject. Every other event still needs one.
+ */
+describe('[#30924] a login_failed with no resolvable account is still a row', () => {
+  it('a subject-less login_failed lands about no record, credits nobody, and keeps the address and the rule', async () => {
+    const { engine } = await boot();
+    const sink = createAuthEventAuditSink({ getEngine: () => engine as any });
+
+    await sink.recordAuthEvent({
+      action: 'login_failed',
+      ipAddress: '198.51.100.9',
+      userAgent: 'scanner/1.0',
+      context: { endpoint: '/sign-in/email', reason: 'IP_NOT_ALLOWED', rule: 'ip_allow_list', attempts: 1 },
+    });
+
+    const rows = await ledgerRows(engine, { action: 'login_failed' });
+    expect(rows).toHaveLength(1);
+    const [row] = rows;
+    expect(row.user_id ?? null).toBeNull();
+    expect(row.object_name).toBe('sys_user');
+    expect(row.record_id ?? null).toBeNull();
+    expect(row.actor ?? null).toBeNull();
+    expect(row.tenant_id ?? null).toBeNull();
+    expect(row.ip_address).toBe('198.51.100.9');
+    expect(row.user_agent).toBe('scanner/1.0');
+    expect(JSON.parse(String(row.metadata))).toEqual({
+      endpoint: '/sign-in/email',
+      reason: 'IP_NOT_ALLOWED',
+      rule: 'ip_allow_list',
+      attempts: 1,
+    });
+  });
+
+  it('every other event still needs its subject: no row', async () => {
+    const { engine } = await boot();
+    const sink = createAuthEventAuditSink({ getEngine: () => engine as any });
+
+    await sink.recordAuthEvent({ action: 'login', sessionId: 'ses_1' });
+    await sink.recordAuthEvent({ action: 'logout', sessionId: 'ses_1' });
+    await sink.recordAuthEvent({ action: 'account_locked', context: { threshold: 3 } });
+    await sink.recordAuthEvent({ action: 'login_failed', userId: '' });
+
+    expect(await ledgerRows(engine)).toHaveLength(1);
+    expect((await ledgerRows(engine, { action: 'login_failed' }))[0].user_id ?? null).toBeNull();
+  });
+});

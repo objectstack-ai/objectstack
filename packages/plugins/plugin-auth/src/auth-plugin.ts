@@ -53,7 +53,8 @@ import { ensureDefaultOrganizationExists } from './default-organization-invarian
 import { recoverInternalFieldsForSystemRead } from './internal-field-readback.js';
 import { runAttributedToUser } from './auth-actor-attribution.js';
 import { withSystemContext } from './objectql-adapter.js';
-import type { AuthEventAuditSurface } from './auth-session-audit.js';
+import { signInClientFingerprint, type AuthEventAuditSurface } from './auth-session-audit.js';
+import { ipRefusalAuditBoundFor, isSignInEndpoint, recordDeploymentListRefusal } from './ip-allow-list-refusal-audit.js';
 import { createTenancyService, type TenancyService } from './tenancy-service.js';
 import {
   isMembershipPolicy,
@@ -3414,6 +3415,42 @@ export class AuthPlugin implements Plugin {
   }
 
   /**
+   * [#30924] ADR-0069 D5 — the `login_failed` row of a sign-in the
+   * deployment's allow-list refused (`ip-allow-list-refusal-audit.ts`): a
+   * `/sign-in/*` endpoint only, counted by the per-address bound, and written
+   * detached from the refusal, so the answer, and the time it takes, do not
+   * depend on whether the identifier names an account. No `audit` service ⇒
+   * nothing is counted or read.
+   */
+  private auditAllowListRefusal(
+    ctx: PluginContext,
+    mgr: AuthManager,
+    c: any,
+    endpoint: string,
+    ip: string | undefined,
+  ): void {
+    if (!isSignInEndpoint(endpoint)) return;
+    let sink: AuthEventAuditSurface | undefined;
+    try {
+      sink = ctx.getService<AuthEventAuditSurface>('audit');
+    } catch {
+      return;
+    }
+    if (!sink || typeof sink.recordAuthEvent !== 'function') return;
+    const attempts = ipRefusalAuditBoundFor(sink).admit(ip, (line) => ctx.logger.warn(line));
+    if (attempts === undefined) return;
+    const request: Request = c.req.raw;
+    void recordDeploymentListRefusal(sink, {
+      request,
+      endpoint,
+      attempts,
+      fingerprint: signInClientFingerprint({ headers: request.headers }, ip),
+      resolveAccount: (email) => mgr.resolveRefusedSignInAccountId(email),
+      debug: (line, meta) => ctx.logger.debug(line, meta),
+    });
+  }
+
+  /**
    * Register authentication routes with HTTP server
    *
    * Uses better-auth's universal handler for all authentication requests.
@@ -3499,6 +3536,7 @@ export class AuthPlugin implements Plugin {
       const ip = mgr.resolveClientAddress({ headers, ...transportOf(c) });
       if (!mgr.isClientIpAllowed(ip)) {
         this.explainAllowListRefusal(ctx, mgr, ip, headers);
+        this.auditAllowListRefusal(ctx, mgr, c, path.startsWith(basePath) ? path.slice(basePath.length) : path, ip);
         return c.json(
           { success: false, error: { code: 'IP_NOT_ALLOWED', message: 'Sign-in is not allowed from your network.' } },
           403,
