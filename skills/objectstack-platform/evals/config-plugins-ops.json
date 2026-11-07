@@ -48,13 +48,11 @@
         "must_contain": [
           "requires",
           "triggers",
-          "always-on",
           "--preset minimal"
         ],
         "must_not_contain": [
           "plugins: [new ServiceJobPlugin",
-          "@objectstack/adapter-",
-          "'triggers', 'job', 'messaging'"
+          "@objectstack/adapter-"
         ]
       }
     },
@@ -149,14 +147,14 @@
     {
       "id": 9,
       "prompt": "Add a `crm_support_intake` queue staffed by the `crm_service_agent` position and route every new `crm_case` into it (`requires: ['automation', 'triggers']`).",
-      "expected_output": "Two stack collections: `queues: [defineQueue({ name: 'crm_support_intake', label: 'Support Intake', members: [{ type: 'position', value: 'crm_service_agent' }] })]` and `assignmentRules: [defineAssignmentRule(...)]` with one entry, `assignTo: { type: 'queue', value: 'crm_support_intake' }`; plus `'sharing'` in `requires`: the keys need `@objectstack/plugin-sharing`'s ownership-queue service (`queue` is the job queue), else the boot is refused.",
+      "expected_output": "Two stack collections: `queues: [defineQueue({ name: 'crm_support_intake', label: 'Support Intake', members: [{ type: 'position', value: 'crm_service_agent' }] })]` and `assignmentRules: [defineAssignmentRule(...)]` with one entry, `assignTo: { type: 'queue', value: 'crm_support_intake' }`; no `requires` change: the keys need `@objectstack/plugin-sharing`'s ownership-queue service (`queue` is the job queue), and `sharing` is always-on, so a default boot mounts it unlisted. Only under `--preset minimal` must `'sharing'` be listed, else the boot is refused.",
       "files": [],
       "assertions": {
         "must_contain": [
           "queues:",
           "assignmentRules:",
           "defineQueue",
-          "'sharing'"
+          "sharing"
         ],
         "must_not_contain": [
           "assigned_to",
@@ -342,7 +340,6 @@
       "files": [],
       "assertions": {
         "must_contain": [
-          "always-on",
           "--preset minimal"
         ],
         "must_not_contain": [

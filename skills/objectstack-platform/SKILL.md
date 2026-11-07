@@ -52,8 +52,8 @@ objectstack-data): named sets of people a new record of an `ownership: 'user'`
 object sits in until a member claims it. `assignmentRules` (`defineAssignmentRule`,
 `@objectstack/spec/automation`; objectstack-automation) routes each inserted
 ownerless row into a queue — parked, `round_robin` or `least_loaded` — or to one
-user. Both need the ownership-queue service `@objectstack/plugin-sharing` registers
-(`sharing` in `requires`): a stack declaring either without it is refused at boot.
+user. Both need the ownership-queue service `@objectstack/plugin-sharing` registers:
+a stack declaring either without it is refused at boot.
 
 Undeclared keys are handled per surface, in two postures:
 
