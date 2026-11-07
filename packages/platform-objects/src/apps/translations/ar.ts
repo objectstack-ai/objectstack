@@ -95,6 +95,7 @@ export const ar: TranslationData = {
         nav_settings_sms: { label: 'إرسال الرسائل النصية' },
         nav_settings_branding: { label: 'العلامة التجارية' },
         nav_settings_auth: { label: 'المصادقة' },
+        nav_settings_access_policy: { label: 'سياسة الوصول' },
         nav_settings_storage: { label: 'تخزين الملفات' },
         nav_settings_ai: { label: 'الذكاء الاصطناعي والتضمين (Embedder)' },
         nav_settings_knowledge: { label: 'المعرفة' },

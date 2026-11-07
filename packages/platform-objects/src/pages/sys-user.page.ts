@@ -647,7 +647,7 @@ export const SysUserDetailPage: Page = {
               // anyone else either way. Same `P` envelope as the Security tab:
               // this raw `Page` literal reaches the wire verbatim.
               {
-                label: { en: 'AI Assistants', 'zh-CN': 'AI 助手', 'ja-JP': 'AI アシスタント', 'es-ES': 'Asistentes de IA', 'zh-Hant': 'AI 助理' },
+                label: { en: 'AI Assistants', 'zh-CN': 'AI 助手', 'ja-JP': 'AI アシスタント', 'es-ES': 'Asistentes de IA', 'zh-Hant': 'AI 助理', ar: 'مساعدو الذكاء الاصطناعي' },
                 icon: 'bot',
                 visibleWhen: P`current_user.isPlatformAdmin == true`,
                 children: [
