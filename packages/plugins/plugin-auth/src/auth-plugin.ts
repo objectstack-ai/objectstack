@@ -161,6 +161,7 @@ import {
   type DeclaredAuthOptions,
 } from './auth-settings-declared.js';
 import { FORWARDED_CLIENT_ADDRESS_HEADERS } from './client-address-forwarding.js';
+import { runAtMountDoor } from './request-client-address.js';
 import {
   runAdminBanUser,
   runAdminUnbanUser,
@@ -3571,6 +3572,26 @@ export class AuthPlugin implements Plugin {
     // yields: every branch of the seam hands the request on to `next`.
     if (typeof rawApp.use === 'function') {
       rawApp.use(`${basePath}/*`, (c: any, next: () => Promise<void>) => serveAgentForwardAtIdentityMount(c, next));
+    }
+
+    // ── ADR-0069 TL;DR 6, D5 — the organization's IP list at this mount ────
+    // An objectstack mount below reads its caller's session IN PROCESS
+    // (`gateAdmin`, and every raw route that reads it itself), and that read
+    // carries no request: `customSession` judged the organization's session
+    // limits on it but not the organization's IP list, which it judges only
+    // with the address a door established. This carries this request's
+    // address, by the one trust rule the D5 gate above judged it by
+    // (`resolveClientAddress`), to those reads (`runAtMountDoor`): a session
+    // the organization's list no longer admits is ended on its read here as on
+    // the better-auth-served door. The catch-all hands its request to
+    // `handleRequest`, which judges by the request as before.
+    if (typeof rawApp.use === 'function') {
+      rawApp.use(`${basePath}/*`, async (c: any, next: () => Promise<void>) => {
+        const mgr = this.authManager;
+        if (!mgr || typeof mgr.resolveClientAddress !== 'function') return next();
+        const address = mgr.resolveClientAddress({ headers: (c.req.header() ?? {}) as Record<string, string>, ...transportOf(c) });
+        return runAtMountDoor(address, () => next());
+      });
     }
 
     // Register /config before the wildcard so it takes precedence.

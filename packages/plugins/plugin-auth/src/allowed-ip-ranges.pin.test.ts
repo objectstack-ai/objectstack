@@ -49,6 +49,7 @@ import {
 import { AuthPlugin } from './auth-plugin.js';
 import type { AuthManager } from './auth-manager.js';
 import type { OrganizationAddressReaderContext } from './client-address-read.js';
+import { readMountDoor } from './request-client-address.js';
 
 const OFFICE = '203.0.113.0/24';
 const ADMIN_CTX = { enforced: true, permissions: ['manage_platform_settings'], userId: 'usr_admin' };
@@ -81,7 +82,7 @@ interface Rig {
   logger: { info: Mock; error: Mock; warn: Mock; debug: Mock };
   save(body: Record<string, unknown>, transport?: Transport): Promise<{ status: number; body: any }>;
   /** `GET /api/v1/auth/admin/client-address` on the plugin's real auth routes. */
-  read(transport?: Transport, opts?: { session?: unknown; query?: string }):
+  read(transport?: Transport, opts?: { session?: unknown; query?: string; onSessionRead?: () => Promise<void> }):
     Promise<{ status: number; body: any; cacheControl: string | null }>;
   /**
    * `GET /api/v1/auth/client-address` on the same routes. `caller` is what the
@@ -162,7 +163,12 @@ async function boot(
     const app = mounted();
     const session = 'session' in opts ? opts.session : PLATFORM_ADMIN_SESSION;
     // The gate reads the session through the auth service's in-process read.
-    const getApi = vi.spyOn(manager, 'getApi').mockResolvedValue({ getSession: async () => session } as any);
+    const getApi = vi.spyOn(manager, 'getApi').mockResolvedValue({
+      getSession: async () => {
+        await opts.onSessionRead?.();
+        return session;
+      },
+    } as any);
     try {
       const res = await app.request(
         `http://localhost:3000/api/v1/auth/admin/client-address${opts.query ?? ''}`,
@@ -426,6 +432,37 @@ describe('#30398 the address read serves the address the save check judges', () 
     expect(res.body.error.code).toBe('VALIDATION_ERROR');
     expect(res.body.data).toBeUndefined();
     expect(asked).not.toHaveBeenCalled();
+  });
+});
+
+describe("a mount's in-process session read carries the address the D5 gate judged", () => {
+  // `customSession` judges the organization's IP list on that read with the
+  // door it finds open (`organization-access-policy-doors.test.ts`); this is
+  // the mount half: the middleware opens it, for the read the route makes.
+  const doorAtTheRead = async (rig: Rig, transport: Transport) => {
+    let door: unknown = 'not read';
+    const res = await rig.read(transport, { onSessionRead: async () => { door = await readMountDoor(); } });
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    return door;
+  };
+
+  it("the peer address, or the forwarded one under trustProxy, the read's own answer", async () => {
+    expect(await doorAtTheRead(await boot(), { remoteAddress: '203.0.113.9' })).toEqual({ address: '203.0.113.9' });
+    const forwarded = { headers: { 'x-forwarded-for': '198.51.100.7, 10.0.0.2' }, remoteAddress: '10.0.0.1' };
+    expect(await doorAtTheRead(await boot({ plugin: { trustProxy: true } }), forwarded)).toEqual({ address: '198.51.100.7' });
+  });
+
+  it('a forged forwarded header is not believed without trustProxy', async () => {
+    const forged = { headers: { 'x-forwarded-for': '198.51.100.7' }, remoteAddress: '10.0.0.1' };
+    expect(await doorAtTheRead(await boot(), forged)).toEqual({ address: '10.0.0.1' });
+  });
+
+  it('an address the server cannot establish is still a door, with no address', async () => {
+    expect(await doorAtTheRead(await boot(), {})).toEqual({ address: undefined });
+  });
+
+  it('outside a mount no door is open', async () => {
+    expect(await readMountDoor()).toBeUndefined();
   });
 });
 
