@@ -7,14 +7,14 @@
  * script, never the real CLI.
  */
 
-import { chmodSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { delimiter, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { formatRefusal, loadScenarioFile, readCapabilityAreas, type LoadedScenario } from '../../src/loader.js';
+import { formatRefusal, loadScenarioFile, loadScenarios, readCapabilityAreas, type LoadedScenario } from '../../src/loader.js';
 import { gradeCardOperation, type OperationObservation } from '../../src/score/index.js';
 import type { PersonaAccount } from '../../src/runner/app.js';
 import { makeDriver, parseArgs } from '../../src/runner/cli.js';
@@ -505,7 +505,8 @@ describe('namespace-relative cards', () => {
 // ── The seed's load plan ────────────────────────────────────────────────────
 
 const SCENARIOS_DIR = resolve(HERE, '../../../../../docs/qa/scenarios');
-const loadCard = (id: string) => load(join(SCENARIOS_DIR, `${id}.json`));
+const RTR_FILE = resolve(HERE, '../../../../../docs/qa/scenarios/requisition_to_receipt.json');
+const O2C_FILE = resolve(HERE, '../../../../../docs/qa/scenarios/order_to_cash.json');
 
 /**
  * Replay a plan's first pass and answer every lookup value it SENDS that names
@@ -530,7 +531,7 @@ function forwardReferences(card: LoadedScenario['card'], plan: SeedPlan): string
 }
 
 describe("the seed's load plan — reference cycles found from the card's own lookups (requisition_to_receipt)", () => {
-  const rtr = loadCard('requisition_to_receipt');
+  const rtr = load(RTR_FILE);
   const card = rtr.card;
   const cycle = [
     { object: 'department', field: 'manager', to: 'employee' },
@@ -576,7 +577,7 @@ describe("the seed's load plan — reference cycles found from the card's own lo
   });
 
   it('a self-lookup naming a later row of its own object waits too (order_to_cash: e09 → e10)', () => {
-    const o2c = loadCard('order_to_cash').card;
+    const o2c = load(O2C_FILE).card;
     expect(referenceCycles(o2c)).toEqual([[{ object: 'employee', field: 'manager', to: 'employee' }]]);
     const plan = seedPlan(o2c);
     expect(plan.deferred).toEqual([{ object: 'employee', id: 'e09', field: 'manager', value: 'e10' }]);
@@ -585,10 +586,11 @@ describe("the seed's load plan — reference cycles found from the card's own lo
   });
 
   it('on every card in the library the first pass never names a row that is not in yet', () => {
-    const ids = readdirSync(SCENARIOS_DIR).filter((f) => f.endsWith('.json')).map((f) => f.replace(/\.json$/, ''));
-    expect(ids.length).toBeGreaterThanOrEqual(9);
-    for (const id of ids) {
-      const c = loadCard(id).card;
+    const { cards, refusals } = loadScenarios(SCENARIOS_DIR, { areas: readCapabilityAreas(AREAS_DIR) });
+    expect(refusals.map(formatRefusal)).toEqual([]);
+    expect(cards.length).toBeGreaterThanOrEqual(9);
+    for (const { card: c } of cards) {
+      const id = c.id;
       const plan = seedPlan(c);
       expect([id, forwardReferences(c, plan)]).toEqual([id, []]);
       expect([id, [...plan.order].sort()]).toEqual([id, Object.keys(c.run.seed).sort()]);
