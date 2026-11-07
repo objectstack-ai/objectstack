@@ -5,7 +5,7 @@
 
 fix(metadata): a `sys_metadata_history` snapshot no longer stores what a connector save drains from the live row
 
-Clause-②: no (narrowing)
+Clause-②: yes (narrowing)
 Metadata-protocol: none
 
 <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no authoring door accepts or refuses anything it did not before. Only the body a history row stores for a new write changes; existing history rows are left as they are, so there is nothing for a migration to rewrite and no tombstone. -->

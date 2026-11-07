@@ -10,7 +10,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { getMetadataTypeRedactor } from '@objectstack/spec/kernel';
+import { getMetadataTypeRedactor, registerMetadataTypeRedactor } from '@objectstack/spec/kernel';
 import { historySnapshotBody } from './history-snapshot-body.js';
 
 const LEGACY_AUTH_VALUE = 'TEST_PLACEHOLDER_LEGACY_AUTH_VALUE';
@@ -74,6 +74,19 @@ describe('[ruling 6677709817 (c)] historySnapshotBody', () => {
     expect(historySnapshotBody('object', object)).toBe(object);
     const datasource = { name: 'warehouse', driver: 'postgres', config: { password: 'x' } };
     expect(historySnapshotBody('datasource', datasource)).toBe(datasource);
+  });
+
+  it('fails closed when the redactor names a position it cannot remove (an array hop), naming the fix', () => {
+    // A test-only type: its redactor names a position under an array, which
+    // the helper does not walk. No built-in redactor does this today.
+    registerMetadataTypeRedactor('history_snapshot_test_array_hop', (item) => ({
+      item,
+      redactedKeys: ['nodes.0.secret'],
+      notCarriedForwardKeys: ['nodes.0.secret'],
+    }));
+    const body = { name: 'x', nodes: [{ secret: 'x' }] };
+    expect(() => historySnapshotBody('history_snapshot_test_array_hop', body)).toThrow(/was not written.*Fix:/);
+    expect(body.nodes[0]).toHaveProperty('secret', 'x');
   });
 
   it('CONTROL: a non-object body comes back as it is', () => {

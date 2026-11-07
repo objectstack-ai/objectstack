@@ -99,8 +99,11 @@ export function historySnapshotBody<T>(type: string, body: T): T {
   const left = notCarriedForwardPositionsOf(type, out);
   if (left.length > 0) {
     throw new Error(
-      `[Metadata] The ${type} history snapshot still holds ${left.length} position(s) its redactor marks ` +
-        `not carried forward (${left.join(', ')}); the snapshot was not written.`,
+      `[Metadata] The ${type} history snapshot was not written: it still holds ${left.length} position(s) ` +
+        `the type's redactor marks not carried forward (${left.join(', ')}), and this helper cannot remove them. ` +
+        `Fix: the redactor must name each such position as a dotted path through plain objects ` +
+        `(\`notCarriedForwardKeys\`, @objectstack/spec/kernel), or \`historySnapshotBody\` ` +
+        `(@objectstack/metadata/history-snapshot) must learn to resolve the shape it names.`,
     );
   }
   return out as T;
