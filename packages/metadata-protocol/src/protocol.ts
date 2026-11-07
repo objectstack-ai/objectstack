@@ -1300,7 +1300,7 @@ export class ObjectStackProtocolImplementation implements
             packagelessDraftAddress: (...a) => protocol.packagelessDraftAddress(...a),
             packagelessOverlayWriteRefusal: (...a) => protocol.packagelessOverlayWriteRefusal(...a),
             packagelessReadAddress: (...a) => protocol.packagelessReadAddress(...a),
-            pairOfAddedMember: (...a) => protocol.pairOfAddedMember(...a),
+            pairsOfAddedMember: (...a) => protocol.pairsOfAddedMember(...a),
             parseCommitItems: (...a) => protocol.parseCommitItems(...a),
             permissionSetNameCollisionRefusal: (...a) => protocol.permissionSetNameCollisionRefusal(...a),
             probeRecord: (...a) => protocol.probeRecord(...a),
@@ -7420,10 +7420,10 @@ export class ObjectStackProtocolImplementation implements
         return ProtocolWriteGatesFacet.baseServesBundleMember(protocolHost(this), type, name, base, item, shipping);
     }
 
-    /** Docblock and body: {@link ProtocolWriteGatesFacet.pairOfAddedMember} in `protocol-write-gates.ts` [#29985 codemod]. */
-    private pairOfAddedMember(type: string, name: string, base: string, member: string): string | undefined {
+    /** Docblock and body: {@link ProtocolWriteGatesFacet.pairsOfAddedMember} in `protocol-write-gates.ts` [#29985 codemod]. */
+    private pairsOfAddedMember(type: string, name: string, base: string, member: string): readonly string[] | undefined {
         // [#29985 codemod] The body moved to `protocol-write-gates.ts`; it reaches this class through `protocol-host.ts`.
-        return ProtocolWriteGatesFacet.pairOfAddedMember(protocolHost(this), type, name, base, member);
+        return ProtocolWriteGatesFacet.pairsOfAddedMember(protocolHost(this), type, name, base, member);
     }
 
     /** Docblock and body: {@link ProtocolWriteGatesFacet.findPairAddedMemberRow} in `protocol-write-gates.ts` [#29985 codemod]. */

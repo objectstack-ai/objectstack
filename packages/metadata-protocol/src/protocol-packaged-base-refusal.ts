@@ -204,10 +204,13 @@ function sealedDeclareOrRenameTail(
     const pair = pairOf(basePackageId, installed);
     if (!pair.ok) return '';
     const writer = typeof writerPackageId === 'string' && writerPackageId.length > 0 ? writerPackageId : undefined;
-    if (writer !== undefined && writer !== pair.value) {
+    // [#29594, merge question 12] A per-package pair an earlier version
+    // created for the base still declares its overrides: it is told so.
+    const writerIsPair = writer !== undefined && isPairOf(writer, basePackageId, installed);
+    if (writer !== undefined && !writerIsPair) {
         return ` To change it, rename the item: only '${pair.value}' may declare an override of '${basePackageId}'.`;
     }
-    return ` To change it, declare an override from '${pair.value}' `
+    return ` To change it, declare an override from '${writerIsPair ? writer : pair.value}' `
         + `(overrides: { package: '${basePackageId}', basedOn }), or rename the item.`;
 }
 
@@ -229,10 +232,11 @@ function sealedDeclareOrRenameClause(
     const pair = pairOf(basePackageId, installed);
     if (!pair.ok) return undefined;
     const writer = typeof writerPackageId === 'string' && writerPackageId.length > 0 ? writerPackageId : undefined;
-    if (writer !== undefined && writer !== pair.value) {
+    const writerIsPair = writer !== undefined && isPairOf(writer, basePackageId, installed);
+    if (writer !== undefined && !writerIsPair) {
         return `Rename it to customize it (only '${pair.value}' may declare an override of '${basePackageId}')`;
     }
-    return `Declare an override from '${pair.value}' or rename it to customize it`;
+    return `Declare an override from '${writerIsPair ? writer : pair.value}' or rename it to customize it`;
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -752,7 +756,8 @@ function isOpenOverrideType(singular: string): boolean {
  * overlay channel or the #6960 carve-out); the removal is now told to the
  * store as runtime-only for all of them, as the declared save wrote the row.
  *
- * ⛔ Only the pair, named: a removal naming no package, the base, or any
+ * ⛔ Only a pair of the base, named ({@link isPairOf}: the App's pair, or the
+ * per-package pair an earlier version created for the base): a removal naming no package, the base, or any
  * other package, keeps the refusal it had — a base's own item is never
  * removed. ⛔ Only an open type: every excluded type keeps main's delete
  * verdict. [#30065] `action` is open, so a pair's removal of its declared
@@ -768,8 +773,10 @@ export function isPairRowRemoval(
     if (!isOpenOverrideType(singular)) return false;
     if (typeof basePackageId !== 'string') return false;
     if (typeof packageId !== 'string' || packageId.length === 0) return false;
-    const pair = pairOf(basePackageId, installed);
-    return pair.ok && pair.value === packageId;
+    // [#29594, ADR-0146 D3 merge question 12] Any pair of the base: the App's
+    // pair, or the per-package pair an earlier version created for it, which
+    // still removes its own declared override as it did before.
+    return isPairOf(packageId, basePackageId, installed);
 }
 
 /**
@@ -1204,15 +1211,18 @@ export function judgeOverrideWrite(
 
     if (packageId === undefined || closure.shippers.length === 0) return NOT_CONCERNED;
     if (getOverrideTypeClassification(type)?.disposition !== 'overridable') return NOT_CONCERNED;
-    const pairBase = customizationBasePackageId(packageId);
-    const base = pairBase !== null && closure.shippers.includes(pairBase) ? pairBase : closure.shippers[0];
-    if (pairBase === base && isOpenOverrideType(type)) {
+    // [#29594, ADR-0146 D3] The shipper `packageId` is a pair of: the App's
+    // pair is a pair of every member of the App, and a per-package pair an
+    // earlier version created is its base's (merge question 12).
+    const pairedShipper = closure.shippers.find((shipper) => isPairOf(packageId, shipper, closure.installed));
+    const base = pairedShipper ?? closure.shippers[0];
+    if (pairedShipper !== undefined && isOpenOverrideType(type)) {
         return refuse('undeclared_same_name',
             `${item} in '${packageId}' bears the name of the ${type} '${base}' ships but declares no override. `
             + `Declare it, adding overrides: { package: '${base}', basedOn } with the version of '${base}' it was `
             + 'taken from, or rename the item (ADR-0146 D2).');
     }
-    const notYet = pairBase === base ? ` ${type} customization is not yet available.` : '';
+    const notYet = pairedShipper !== undefined ? ` ${type} customization is not yet available.` : '';
     return refuse('undeclared_same_name',
         `${item} in package '${packageId}' bears the name of the ${type} '${base}' ships, inside its dependency `
         + `closure.${notYet} A dependent package adds items under its own names and never replaces a base item. `
