@@ -2468,7 +2468,7 @@ export class ObjectStackProtocolImplementation implements
         return ProtocolDiscoveryAndBasesFacet.getProjectId(protocolHost(this));
     }
 
-    async getDiscovery(searchAllOnInstance: unknown): Promise<{
+    async getDiscovery(): Promise<{
         authFamilies?: {
             admin: boolean;
         } | undefined;
@@ -2523,7 +2523,9 @@ export class ObjectStackProtocolImplementation implements
         }>;
     }> {
         // [#29985 codemod] The body moved to `protocol-discovery-and-bases.ts`; it reaches this class through `protocol-host.ts`.
-        return ProtocolDiscoveryAndBasesFacet.getDiscovery(protocolHost(this), searchAllOnInstance);
+        // [#30147 hand move] `capabilities.search` probes `typeof this.searchAll`; the host would forward the
+        // method through a closure that is always a function, so the stub reads it on the instance and hands it in.
+        return ProtocolDiscoveryAndBasesFacet.getDiscovery(protocolHost(this), this.searchAll);
     }
 
     /**
