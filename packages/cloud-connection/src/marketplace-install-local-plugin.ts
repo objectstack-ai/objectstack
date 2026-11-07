@@ -114,8 +114,12 @@
  *          `destructive`, answers `409 SCHEMA_UPGRADE_CONFIRMATION_REQUIRED`
  *          with `details.findings` and the finding set's token; the same
  *          request with `confirmSchemaUpgrade: <token>` installs and records
- *          the confirmation in the ledger entry. Removed fields, `safe` type
- *          changes and seed changes are refused by nothing.
+ *          the confirmation in the ledger entry. A record of the installed
+ *          version that will not parse, or an install the registry serves with
+ *          no record, answers the same 409 with one finding naming it
+ *          (`installed_record_unreadable` / `installed_record_missing`): no
+ *          comparison ran, and its token admits the re-install. Removed fields,
+ *          `safe` type changes and seed changes are refused by nothing.
  *
  *          [epic cloud#3652 Q3, #30884] `dryRun: true` answers `200` with the
  *          package upgrade plan — the installed version (its ledger entry)
@@ -566,6 +570,20 @@ type SchemaUpgradeFinding =
         renamedFrom?: string;
         describe: string;
         rows?: number | null;
+    }
+    | {
+        /** The ledger file exists and would not parse: no installed side to compare. */
+        kind: 'installed_record_unreadable';
+        /** The ledger file's basename. */
+        file: string;
+        /** The thrower's own words. */
+        cause: string;
+        describe: string;
+    }
+    | {
+        /** The registry serves the package but the ledger holds no record of it (an orphaned install). */
+        kind: 'installed_record_missing';
+        describe: string;
     };
 
 /**
@@ -585,11 +603,12 @@ type SchemaUpgradeFinding =
  * - Removed fields, removed objects, `safe` type changes and seed changes are
  *   reported by the dry run and refused by nothing.
  *
- * The token is a digest of the findings' identities (never of their
- * sentences or readings), order-free, so the same two versions always yield
- * the same token and any change to the finding set yields another.
+ * The token ({@link schemaUpgradeFindingSet}) is a digest of the package id
+ * and the findings' identities (never of their sentences or readings),
+ * order-free, so the same two versions always yield the same token and any
+ * change to the finding set yields another.
  */
-function schemaUpgradeVerdict(plan: PackageUpgradePlan): {
+function schemaUpgradeVerdict(manifestId: string, plan: PackageUpgradePlan): {
     declaredRenames: UpgradePlanDeclaredRename[];
     findings: SchemaUpgradeFinding[];
     findingSet: string;
@@ -626,13 +645,60 @@ function schemaUpgradeVerdict(plan: PackageUpgradePlan): {
                 + `changes type ${t.from} → ${t.to} (${t.category}): ${what}.`,
         });
     }
+    return { declaredRenames: plan.declaredRenames, findings, findingSet: schemaUpgradeFindingSet(manifestId, findings) };
+}
+
+/**
+ * The finding set's token: `schema-upgrade:` and 32 hex of a SHA-256 over the
+ * package id and the findings' identities, string-sorted — never their
+ * sentences or row counts. The package id is in the digest, so a token issued
+ * for one package never confirms the same findings on another.
+ */
+function schemaUpgradeFindingSet(manifestId: string, findings: readonly SchemaUpgradeFinding[]): string {
     const identities = findings
-        .map((f) => JSON.stringify(f.kind === 'suspected_rename'
-            ? [f.kind, f.object, f.field, f.type ?? null, f.candidates.map((c) => [c.field, c.type ?? null]).sort()]
-            : [f.kind, f.object, f.field, f.from, f.to, f.category, f.renamedFrom ?? null]))
+        .map((f) => JSON.stringify(
+            f.kind === 'suspected_rename'
+                ? [f.kind, f.object, f.field, f.type ?? null, f.candidates.map((c) => [c.field, c.type ?? null]).sort()]
+                : f.kind === 'type_change'
+                    ? [f.kind, f.object, f.field, f.from, f.to, f.category, f.renamedFrom ?? null]
+                    : f.kind === 'installed_record_unreadable'
+                        ? [f.kind, f.file]
+                        : [f.kind],
+        ))
         .sort();
-    const digest = createHash('sha256').update(JSON.stringify(identities)).digest('hex').slice(0, 32);
-    return { declaredRenames: plan.declaredRenames, findings, findingSet: `${SCHEMA_UPGRADE_TOPIC}:${digest}` };
+    const digest = createHash('sha256').update(JSON.stringify([manifestId, identities])).digest('hex').slice(0, 32);
+    return `${SCHEMA_UPGRADE_TOPIC}:${digest}`;
+}
+
+/**
+ * [epic cloud#3652 Q3, #30884] The verdict when there is no installed side to
+ * compare: the ledger file would not parse, or the registry serves the
+ * package with no ledger record at all (an orphaned install). The upgrade's
+ * renames and type changes cannot be known, and a comparison that did not
+ * run is never taken for "no finding" (2a, 2b and 2c answer the same way): the
+ * one finding names what is missing, and its token admits the re-install —
+ * the re-install that rewrites the record — confirmed and recorded, one round
+ * trip, never silently.
+ */
+function installedRecordUnavailableVerdict(
+    manifestId: string,
+    failure: { file: string; cause: unknown } | undefined,
+): { declaredRenames: UpgradePlanDeclaredRename[]; findings: SchemaUpgradeFinding[]; findingSet: string } {
+    const consequence = 'so this upgrade cannot be checked for fields it renames or retypes: confirming installs it '
+        + 'unchecked, and the install rewrites the record.';
+    const finding: SchemaUpgradeFinding = failure
+        ? {
+            kind: 'installed_record_unreadable',
+            file: failure.file,
+            cause: String((failure.cause as { message?: unknown } | null)?.message ?? failure.cause),
+            describe: `The record of the installed "${manifestId}" (${failure.file}) could not be read `
+                + `(${String((failure.cause as { message?: unknown } | null)?.message ?? failure.cause)}), ${consequence}`,
+        }
+        : {
+            kind: 'installed_record_missing',
+            describe: `This runtime serves "${manifestId}" but holds no record of the installed version, ${consequence}`,
+        };
+    return { declaredRenames: [], findings: [finding], findingSet: schemaUpgradeFindingSet(manifestId, [finding]) };
 }
 
 /** One side of the comparison, a multi-package artifact folded as `planUpgrade` folds it. */
@@ -2588,7 +2654,8 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         //     Conflating the two nulls is the right call at THIS call site; it
         //     is now made here, in the open, instead of by the ledger for
         //     everyone.
-        const previousEntry = this.ledger.read(manifestId).entry;
+        const previousLookup = this.ledger.read(manifestId);
+        const previousEntry = previousLookup.entry;
         const gate = this.evaluateGlobalUniqueGate(manifest, previousEntry, body, userId);
         if (gate.blocked) {
             ctx.logger?.warn?.(
@@ -2656,7 +2723,9 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         //      plan of the installed version (its ledger entry) against this
         //      one decides, before any write: a declared rename (`renamedFrom`)
         //      is refused `501 NOT_IMPLEMENTED` while this runtime cannot carry
-        //      the column; an undeclared suspected rename or a `needs_confirm`
+        //      the column (lifted by card 01b, #30885); an undeclared
+        //      suspected rename, a record of the installed version this step
+        //      cannot read, or a `needs_confirm`
         //      / `destructive` type change is refused `409
         //      SCHEMA_UPGRADE_CONFIRMATION_REQUIRED` until the same call
         //      carries the finding set's token. After the access gate (2c),
@@ -2664,7 +2733,7 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         //      changes are the dry run's to report, never refused.
         let schemaUpgradeConfirmation: InstalledEntry['schemaUpgradeConfirmation'];
         if (conflict === 'marketplace') {
-            const schema = await this.evaluateSchemaUpgradeGate(ctx, manifestId, converted, previousEntry, body, userId);
+            const schema = await this.evaluateSchemaUpgradeGate(ctx, manifestId, converted, previousLookup, body, userId);
             if (schema.refusal) return c.json(schema.refusal.body, schema.refusal.status);
             schemaUpgradeConfirmation = schema.confirmation;
         }
@@ -3748,12 +3817,16 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
      * version — its ledger entry, converted forward as the registry reads it —
      * against `converted`, and what it decides.
      *
-     * - **No installed body** (the ledger entry would not parse): nothing to
-     *   compare against. The upgrade proceeds as it did before this gate, and
-     *   one `warn` line says no comparison ran.
+     * - **No installed body** (the ledger file would not parse, or the
+     *   registry serves the package with no ledger record): no comparison can
+     *   run, and one that did not run is never taken for "no finding" — the
+     *   409 below with one finding, `installed_record_unreadable` (its `file`
+     *   and `cause`) or `installed_record_missing`. Its token admits the
+     *   re-install, which rewrites the record, confirmed and recorded.
      * - **A declared rename**: `501 NOT_IMPLEMENTED`, naming each — no token
      *   answers it while this runtime cannot carry a renamed field's column to
-     *   its new key (ruling record 6709061297, C2). The findings a token would
+     *   its new key (ruling record 6709061297, C2). Card 01b (#30885), which
+     *   carries the column, lifts this answer. The findings a token would
      *   still have to confirm are listed beside it.
      * - **No finding**: the upgrade proceeds unchanged.
      * - **Findings**: `409 SCHEMA_UPGRADE_CONFIRMATION_REQUIRED`, naming each,
@@ -3769,24 +3842,20 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         ctx: PluginContext,
         manifestId: string,
         converted: unknown,
-        previousEntry: InstalledEntry | null | undefined,
+        previous: ReturnType<LocalManifestSource['read']>,
         body: any,
         userId: string,
     ): Promise<{
         refusal?: { body: Record<string, unknown>; status: 409 | 501 };
         confirmation?: InstalledEntry['schemaUpgradeConfirmation'];
     }> => {
-        if (!previousEntry?.manifest) {
-            ctx.logger?.warn?.(
-                `[MarketplaceInstallLocal] upgrade of ${manifestId}: no schema upgrade comparison ran — the record of the `
-                + 'installed version could not be read, so this re-install is not checked for renamed or retyped fields. '
-                + 'Run the same install with `dryRun: true` to see what the record holds.',
-            );
-            return {};
-        }
-        const installed = this.convertPackageBodyForward(ctx, previousEntry.manifest);
-        const plan = comparePackageVersions(packageUpgradeSideOf(installed), packageUpgradeSideOf(converted));
-        const verdict = schemaUpgradeVerdict(plan);
+        // No installed body to compare (a ledger file that will not parse, or an
+        // orphaned install the registry still serves): the verdict is the one
+        // finding that says so, confirmable like any other — never "no finding".
+        const installed = previous.entry?.manifest ? this.convertPackageBodyForward(ctx, previous.entry.manifest) : undefined;
+        const verdict = installed === undefined
+            ? installedRecordUnavailableVerdict(manifestId, previous.failure)
+            : schemaUpgradeVerdict(manifestId, comparePackageVersions(packageUpgradeSideOf(installed), packageUpgradeSideOf(converted)));
         const { declaredRenames, findingSet } = verdict;
         if (declaredRenames.length === 0 && verdict.findings.length === 0) return {};
 
@@ -3800,8 +3869,9 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             return { confirmation: { findingSet, confirmedBy: userId, confirmedAt } };
         }
 
-        const rows = await this.readSchemaUpgradeRows(ctx, manifestId, installed, converted);
+        const rows = installed === undefined ? undefined : await this.readSchemaUpgradeRows(ctx, manifestId, installed, converted);
         const findings = verdict.findings.map((f) => {
+            if (f.kind !== 'type_change' && f.kind !== 'suspected_rename') return f;
             const installedKey = f.kind === 'type_change' ? (f.renamedFrom ?? f.field) : f.field;
             const key = `${f.object}.${installedKey}`;
             if (!rows?.has(key)) return f;
@@ -3865,11 +3935,15 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                     success: false,
                     error: {
                         code: SCHEMA_UPGRADE_CONFIRMATION_REQUIRED,
-                        message: `Upgrading "${manifestId}" would change stored fields in a way the schema sync does not `
-                            + `carry — ${findings.length} finding(s): ${findings.map((f) => f.describe).join(' ')} `
-                            + 'Nothing was installed or written. If a field was renamed, declare the old key in the new '
-                            + 'field\'s `renamedFrom` and rebuild the package; to upgrade anyway, accepting each finding as '
-                            + `listed, send the same request with "confirmSchemaUpgrade": "${findingSet}".${stale}`,
+                        message: installed === undefined
+                            ? `Upgrading "${manifestId}" is refused: ${findings.map((f) => f.describe).join(' ')} Nothing was `
+                                + 'installed or written. To re-install anyway, send the same request with '
+                                + `"confirmSchemaUpgrade": "${findingSet}".${stale}`
+                            : `Upgrading "${manifestId}" would change stored fields in a way the schema sync does not `
+                                + `carry — ${findings.length} finding(s): ${findings.map((f) => f.describe).join(' ')} `
+                                + 'Nothing was installed or written. If a field was renamed, declare the old key in the new '
+                                + 'field\'s `renamedFrom` and rebuild the package; to upgrade anyway, accepting each finding as '
+                                + `listed, send the same request with "confirmSchemaUpgrade": "${findingSet}".${stale}`,
                         details: {
                             manifestId,
                             findingSet,

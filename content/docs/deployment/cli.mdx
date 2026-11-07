@@ -3393,6 +3393,7 @@ write `-u URL` instead.
 | `--password <password>` | `OS_RUNTIME_PASSWORD` | Account password on the target runtime |
 | `--confirm-global-uniques` | — | Affirm this app's installation-wide `unique` constraints are genuinely platform-wide — see below |
 | `--confirm-access-upgrade <token>` | — | Confirm an upgrade's access findings with the finding-set token the runtime's refusal printed — see below |
+| `--confirm-upgrade <token>` | — | Confirm an upgrade's schema findings (a suspected rename, a type change that is not safe) with the finding-set token the runtime's refusal printed — see below |
 | `--timeout <ms>` | `OS_CLOUD_TIMEOUT_MS` | HTTP timeout in milliseconds, default `120000`. `0` disables it |
 
 **`--confirm-global-uniques` answers a stop; it does not force one past.**
@@ -3423,6 +3424,25 @@ The token is not a standing yes — once the findings change it no longer matche
 and the upgrade stops again with the new set; the confirmation is recorded in
 the install's ledger entry. Under `group` and `isolated` only the platform
 operator reaches this check. A fresh install is never checked.
+
+**`--confirm-upgrade <token>` confirms exactly the schema findings it names.**
+Upgrading an installed package stops with `SCHEMA_UPGRADE_CONFIRMATION_REQUIRED`
+when the new version would change a stored field in a way the schema sync does
+not carry: a field removed while another is added with no `renamedFrom` linking
+them (if it is a rename, the new field starts empty and the values stay in the
+old column), or a type change that keeps or drops a stored column
+(`needs_confirm` or `destructive`). It also stops when the runtime cannot read
+its record of the installed version, since nothing could be compared. Nothing is
+installed. The command prints each finding and the exact retry, carrying the
+finding set's token. If a field was renamed, declare its old key in the new
+field's `renamedFrom` and rebuild instead; a declared rename is refused with
+`501 NOT_IMPLEMENTED` until the runtime can carry the column's values to the new
+key. As with `--confirm-access-upgrade`, the token stops matching once the
+findings change, and the confirmation is recorded in the install's ledger entry.
+A type change on a field that had no stored column, a removed field and a seed
+data change are never refused; `--dry-run` lists them. `os deploy` passes
+`--confirm-upgrade` through to a self-hosted runtime. A fresh install is never
+checked.
 
 A `404` means the target runtime does not mount `MarketplaceInstallLocalPlugin`
 (from `@objectstack/cloud-connection`). The endpoint is opt-in, so a runtime

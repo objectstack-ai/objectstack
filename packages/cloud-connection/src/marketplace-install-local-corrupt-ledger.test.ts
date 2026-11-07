@@ -343,3 +343,45 @@ describe('handleList() — the wire shape it kept', () => {
         expect(Object.keys(payload.data).sort()).toEqual(['items', 'storageDir', 'total']);
     });
 });
+
+/**
+ * [epic cloud#3652 Q3, #30884] A managed re-install over a record that will
+ * not parse: step 2c′ has no installed version to compare, and a comparison
+ * that did not run is never taken for "no finding" — the 409 names the record
+ * as its one finding, and that finding's token admits the re-install, which
+ * rewrites the record and records the confirmation.
+ */
+describe('handleInstall() — step 2c′ over an unreadable record asks, never installs blind', () => {
+    function makeInstallC(body: Record<string, unknown>) {
+        const c = makeC();
+        return { ...c, req: { ...c.req, json: async () => body } };
+    }
+
+    it('answers 409 with installed_record_unreadable (file, cause), writes nothing; its token installs', async () => {
+        writeCorruptEntryFor('app.test.crm');
+        const { rawApp, ctx } = await boot();
+        const install = rawApp.routes.get('POST /api/v1/marketplace/install-local')!;
+        const upgrade = { ...GOOD_MANIFEST, version: '1.0.1' };
+        const register = ctx.getService('manifest').register;
+        register.mockClear(); // isolate from the boot's own registrations
+
+        const res = await install(makeInstallC({ manifest: upgrade }));
+
+        expect(res.status).toBe(409);
+        expect(res.payload.error.code).toBe('SCHEMA_UPGRADE_CONFIRMATION_REQUIRED');
+        const { details } = res.payload.error;
+        expect(details.findings).toEqual([expect.objectContaining({
+            kind: 'installed_record_unreadable', file: 'app.test.crm.json', cause: expect.stringMatching(/JSON/i),
+        })]);
+        expect(details.findingSet).toMatch(/^schema-upgrade:[0-9a-f]{32}$/);
+        expect(register).not.toHaveBeenCalled();
+        expect(new LocalManifestSource(dir).read('app.test.crm').failure).toBeDefined();
+
+        const confirmed = await install(makeInstallC({ manifest: upgrade, confirmSchemaUpgrade: details.findingSet }));
+
+        expect(confirmed.status).toBe(200);
+        const entry = new LocalManifestSource(dir).read('app.test.crm').entry;
+        expect(entry?.version).toBe('1.0.1');
+        expect(entry?.schemaUpgradeConfirmation).toMatchObject({ findingSet: details.findingSet });
+    });
+});

@@ -1372,7 +1372,8 @@ export const ERROR_CODE_LEDGER = {
     // whose package upgrade plan (`comparePackageVersions`,
     // `@objectstack/metadata-core`) lists an undeclared suspected rename (a
     // stored field removed while one is added, nothing linking them) or a
-    // `needs_confirm` / `destructive` type change, 409, before any write
+    // `needs_confirm` / `destructive` type change — or has no installed
+    // record it can read to compare against — 409, before any write
     // (step 2c′, after the access gate), until the same request carries the
     // finding set's token (`confirmSchemaUpgrade`); `details.findings` names
     // each. The sibling of ACCESS_UPGRADE_CONFIRMATION_REQUIRED above, its own

@@ -18,6 +18,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
+import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 // [#21321] An install binds the package's handlers through
 // `@objectstack/runtime` (a lazy `import()` inside the plugin). Its first load
@@ -82,7 +83,7 @@ afterEach(() => {
 
 const fold = (artifact: unknown) => ({ objects: resolveStackCollection(artifact, 'objects'), data: resolveStackCollection(artifact, 'data') });
 
-async function mount(options: { installed?: Row; planUpgrade?: false; columns?: Row[] } = {}) {
+async function mount(options: { installed?: Row; planUpgrade?: false; columns?: Row[]; registryPackages?: Row[] } = {}) {
     const register = vi.fn();
     const syncSchemas = vi.fn(async () => undefined);
     const planUpgrade = vi.fn(async (installed: unknown, incoming: unknown) => ({
@@ -94,7 +95,10 @@ async function mount(options: { installed?: Row; planUpgrade?: false; columns?: 
     const services: Record<string, any> = {
         manifest: options.planUpgrade === false ? { register } : { register, planUpgrade },
         auth: installerAuthService(INSTALLER),
-        objectql: withInstallerGrants({ syncSchemas }, INSTALLER),
+        objectql: withInstallerGrants({
+            syncSchemas,
+            ...(options.registryPackages ? { registry: { getAllPackages: () => options.registryPackages } } : {}),
+        }, INSTALLER),
     };
     const hooks = new Map<string, any>();
     const ctx = {
@@ -116,7 +120,7 @@ async function mount(options: { installed?: Row; planUpgrade?: false; columns?: 
     }
     register.mockClear();
     syncSchemas.mockClear();
-    return { install, register, syncSchemas, planUpgrade, logger };
+    return { install, register, syncSchemas, planUpgrade };
 }
 
 /** Every ledger file and its bytes. */
@@ -275,6 +279,54 @@ describe('step 2c′: the schema upgrade verdict on a managed re-install', () =>
         expect(entry()?.version).toBe('1.0.0');
     });
 
+    /** The token the door computes for a finding set, restated from its documented shape (package id + sorted identities). */
+    const tokenFor = (identities: unknown[][]): string => 'schema-upgrade:' + createHash('sha256')
+        .update(JSON.stringify([VENDOR, identities.map((i) => JSON.stringify(i)).sort()]))
+        .digest('hex').slice(0, 32);
+
+    it('the token restated from the documented shape is the one the door answers (the helper below is sound)', async () => {
+        const door = await mount({ installed: V1 });
+        const res = await door.install(makeC({ manifest: V2 }));
+        expect(res.payload.error.details.findingSet).toBe(tokenFor([['suspected_rename', 'acme_lead', 'company', 'text', [['account_name', 'text']]]]));
+    });
+
+    it('`true` confirms nothing', async () => {
+        const door = await mount({ installed: V1 });
+        const res = await door.install(makeC({ manifest: V2, confirmSchemaUpgrade: true }));
+        expect(res.status).toBe(409);
+        expect(res.payload.error.message).toMatch(/`true` confirms nothing/);
+        expect(door.register).not.toHaveBeenCalled();
+    });
+
+    it('a destructive type change (a stored field turned formula) is refused 409', async () => {
+        const door = await mount({ installed: V1 });
+        const res = await door.install(makeC({ manifest: vendorBody('2.0.0', { company: { type: 'formula' } }) }));
+        expect(res.status).toBe(409);
+        expect(res.payload.error.details.findings).toEqual([expect.objectContaining({
+            kind: 'type_change', field: 'company', from: 'text', to: 'formula', category: 'destructive',
+        })]);
+        expect(door.register).not.toHaveBeenCalled();
+    });
+
+    it('an orphaned install (served by the registry, no ledger record) is refused 409 with one finding; its token installs', async () => {
+        const registryPackages: Row[] = [];
+        const door = await mount({ registryPackages });
+        registryPackages.push({ manifest: { id: VENDOR } }); // registered after boot: an orphan, not user code
+
+        const res = await door.install(makeC({ manifest: V2 }));
+        expect(res.status).toBe(409);
+        expect(res.payload.error.code).toBe('SCHEMA_UPGRADE_CONFIRMATION_REQUIRED');
+        expect(res.payload.error.details.findings).toEqual([expect.objectContaining({ kind: 'installed_record_missing' })]);
+        expect(res.payload.error.details.findingSet).toBe(tokenFor([['installed_record_missing']]));
+        expect(door.register).not.toHaveBeenCalled();
+        expect(door.planUpgrade).not.toHaveBeenCalled();
+        expect(ledgerFiles()).toEqual({});
+
+        const confirmed = await door.install(makeC({ manifest: V2, confirmSchemaUpgrade: res.payload.error.details.findingSet }));
+        expect(confirmed.status).toBe(200);
+        expect(entry()?.schemaUpgradeConfirmation).toMatchObject({ findingSet: res.payload.error.details.findingSet, confirmedBy: INSTALLER });
+    });
+
     it('a needs_confirm type change is refused 409, judged on its category', async () => {
         const door = await mount({ installed: V1 });
         const res = await door.install(makeC({ manifest: vendorBody('2.0.0', { company: { type: 'number' } }) }));
@@ -290,7 +342,8 @@ describe('step 2c′: the schema upgrade verdict on a managed re-install', () =>
         const before = ledgerFiles();
         const renamed = vendorBody('2.0.0', { account_name: { type: 'text', renamedFrom: ['company'] } });
 
-        for (const extra of [{}, { confirmSchemaUpgrade: 'schema-upgrade:0' }]) {
+        // The real token of this verdict's finding set — the empty set — which a caller can compute.
+        for (const extra of [{}, { confirmSchemaUpgrade: tokenFor([]) }]) {
             const res = await door.install(makeC({ manifest: renamed, ...extra }));
             expect(res.status).toBe(501);
             expect(res.payload.error.code).toBe('NOT_IMPLEMENTED');
@@ -306,7 +359,8 @@ describe('step 2c′: the schema upgrade verdict on a managed re-install', () =>
 
     it('a declared rename that also retypes needs_confirm still owes the type change its confirmation', async () => {
         const door = await mount({ installed: V1 });
-        const res = await door.install(makeC({ manifest: vendorBody('2.0.0', { account_name: { type: 'number', renamedFrom: ['company'] } }) }));
+        const token = tokenFor([['type_change', 'acme_lead', 'account_name', 'text', 'number', 'needs_confirm', 'company']]);
+        const res = await door.install(makeC({ manifest: vendorBody('2.0.0', { account_name: { type: 'number', renamedFrom: ['company'] } }), confirmSchemaUpgrade: token }));
         expect(res.status).toBe(501);
         expect(res.payload.error.details.findings).toEqual([expect.objectContaining({
             kind: 'type_change', field: 'account_name', renamedFrom: 'company', from: 'text', to: 'number', category: 'needs_confirm',

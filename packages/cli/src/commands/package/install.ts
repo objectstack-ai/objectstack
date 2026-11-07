@@ -474,12 +474,17 @@ export default class PackageInstall extends Command {
         // confirm exactly these findings.
         if (res.body?.error?.code === 'SCHEMA_UPGRADE_CONFIRMATION_REQUIRED') {
           const details = res.body.error.details ?? {};
-          const findings: Array<{ describe?: string }> = Array.isArray(details.findings) ? details.findings : [];
-          printError('Upgrade stopped — it would rename or retype stored fields without carrying their values');
+          const findings: Array<{ kind?: string; describe?: string }> = Array.isArray(details.findings) ? details.findings : [];
+          // A record of the installed version the runtime could not read is a
+          // finding too (no comparison ran): there is no field to declare.
+          const fieldFindings = findings.some((f) => f.kind === 'suspected_rename' || f.kind === 'type_change');
+          printError(fieldFindings
+            ? 'Upgrade stopped — it would rename or retype stored fields without carrying their values'
+            : 'Upgrade stopped — the runtime cannot compare it with the installed version');
           console.log('');
           for (const finding of findings) console.log(`  • ${finding.describe ?? JSON.stringify(finding)}`);
           console.log('');
-          console.log("  If a field was renamed, declare its old key in the new field's `renamedFrom` and rebuild.");
+          if (fieldFindings) console.log("  If a field was renamed, declare its old key in the new field's `renamedFrom` and rebuild.");
           console.log('  To upgrade anyway, accepting each finding as listed, confirm exactly these findings:');
           console.log(`    ${retry} --confirm-upgrade ${details.findingSet}`);
           this.exit(1);
