@@ -55,9 +55,10 @@ function makeStubEngine(code: Record<string, Row> = {}) {
             if (t !== 'sys_metadata') return null;
             return rows.find((r) => matches(r, opts.where)) ?? null;
         },
-        async find(t: string, opts?: { where?: Record<string, unknown> }) {
+        async find(t: string, opts?: { where?: Record<string, unknown>; limit?: number }) {
             if (t !== 'sys_metadata') return [];
-            return rows.filter((r) => matches(r, opts?.where));
+            const found = rows.filter((r) => matches(r, opts?.where));
+            return typeof opts?.limit === 'number' ? found.slice(0, opts.limit) : found;
         },
         async count(t: string, opts?: { where?: Record<string, unknown> }) {
             if (t !== 'sys_metadata') return 0;
