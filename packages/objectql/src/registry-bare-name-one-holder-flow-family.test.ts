@@ -382,6 +382,11 @@ describe('email_template — the name holds the bundle, and the built-in templat
     expect(isOverridableBaseline('email_template', 'com.acme.alpha')).toBe(false);
     expect(isOverridableBaseline('email_template', undefined)).toBe(false);
     expect(declaredBareNames(emailServicePkg([member('sys', 'auth.welcome', 'en-US')]))).toEqual([]);
+    // The baseline is read by the package id the door judges (`artifactPackageId`: `id`, else `name`).
+    expect(declaredBareNames({ name: EMAIL_SERVICE_PKG, emailTemplates: [member('sys', 'auth.welcome', 'en-US')] })).toEqual([]);
+    expect(declaredBareNames({ name: 'com.acme.alpha', emailTemplates: [member('alpha', 'auth.welcome', 'en-US')] })).toEqual([
+      { type: 'email_template', name: 'auth.welcome' },
+    ]);
   });
 
   it('CONTROL — an app overriding a built-in template after the boot installs: the baseline holds nothing', async () => {

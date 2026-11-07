@@ -25,10 +25,12 @@
 //   - CONTROL: a package declaring fresh names installs — and so does one
 //     overriding the platform's built-in `auth.password_reset` template, whose
 //     holder package is the overridable baseline: the send then renders the
-//     app's template, and the vocabulary spells that package exactly as the
-//     email plugin registers the built-in templates on this boot (read back
-//     from the registry, so the two spellings are pinned together across the
-//     package boundary without either package importing the other).
+//     app's template. That install is the spelling pin: the package the email
+//     plugin registers the built-in templates under on this boot is read back
+//     from the registry, and had the engine's baseline vocabulary spelled it
+//     any other way, that package would hold the name and the install would be
+//     refused naming it. The vocabulary stays private to the engine; neither
+//     package imports the other.
 
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -37,7 +39,6 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { type VerifyStack } from '@objectstack/verify';
 import { AppPlugin } from '@objectstack/runtime';
 import { MarketplaceInstallLocalPlugin } from '@objectstack/cloud-connection';
-import { OVERRIDABLE_BASELINE_PACKAGES } from '@objectstack/objectql';
 import { defineStack } from '@objectstack/spec';
 import { PROTOCOL_MAJOR } from '@objectstack/spec/kernel';
 import { bootShowcase } from './showcase-boot.js';
@@ -189,11 +190,9 @@ describe('one package holder per flow, webhook, connector and email template nam
     for (const name of [FLOW, HOOK, CONN, TPL]) expect(line, `the rename of ${name}`).toContain(`"beta_${name}"`);
     expect(line).toContain('package "com.qa.bare.alpha"');
     expect(line).toContain('package "com.qa.bare.beta"');
-    // The platform's built-in templates are the overridable baseline, and the vocabulary spells
-    // their package exactly as the email plugin registered them on this boot.
+    // The platform's built-in templates are the overridable baseline: never named by the warning.
     const baseline = builtInTemplatePackage();
     expect(baseline, 'the built-in templates are registered under a package').toBeDefined();
-    expect([...OVERRIDABLE_BASELINE_PACKAGES.email_template]).toEqual([baseline]);
     expect(line).not.toContain(BUILT_IN_TPL);
     expect(line).not.toContain(baseline!);
     expect(await packageIds(), 'both packages booted').toEqual(expect.arrayContaining(['com.qa.bare.alpha', 'com.qa.bare.beta']));
@@ -237,14 +236,16 @@ describe('one package holder per flow, webhook, connector and email template nam
 
   it('CONTROL — install-local of a package declaring fresh names, and overriding the built-in password-reset template, installs; the send renders the app\'s template', async () => {
     const baseline = builtInTemplatePackage();
-    expect([...OVERRIDABLE_BASELINE_PACKAGES.email_template], 'the vocabulary spells the package the email plugin registers the built-ins under').toEqual([baseline]);
+    expect(baseline, 'the built-in templates are registered under a package').toBeDefined();
     const { status, body } = await installLocal(inline('epsilon', {
       flows: [flow('epsilon', 'epsilon_flow')],
       webhooks: [webhook('epsilon', 'epsilon_hook')],
       connectors: [connector('epsilon', 'epsilon_conn')],
       emailTemplates: [template('epsilon', 'epsilon_tpl'), template('epsilon', BUILT_IN_TPL)],
     }));
-    expect(status, JSON.stringify(body)).toBeLessThan(300);
+    // The spelling pin: a refusal here would name the package the built-ins are registered under
+    // as a holder of the built-in name — the engine's baseline vocabulary spelling it otherwise.
+    expect(status, `the package ${baseline} registered the built-ins under is the baseline, not a holder: ${JSON.stringify(body)}`).toBeLessThan(300);
     expect(await packageIds()).toContain('com.qa.bare.epsilon');
     const email = (stack.kernel as any).getService('email');
     const rendered = await email.renderTemplate({ template: BUILT_IN_TPL, data: {} });

@@ -135,6 +135,7 @@
  */
 
 import type { ObjectStackManifest } from '@objectstack/spec/kernel';
+import { artifactPackageId } from '@objectstack/core';
 import { isObjectLessActionKey, standaloneActionOwnerKey } from './action-governance.js';
 
 /**
@@ -244,7 +245,8 @@ export const BUILT_IN_BARE_NAMES: Readonly<Record<BareNameOneHolderType, Readonl
  * under its own package id (`EmailServicePlugin.init`, `@objectstack/plugin-email`),
  * and its template loader picks any other package's `(name, locale)` member
  * before the built-in's (`BUILTIN_EMAIL_TEMPLATES_PACKAGE_ID` there — the
- * same spelling, pinned together by the flow family's booted dogfood pin).
+ * same spelling, held together by the flow family's booted dogfood pin: an
+ * app overriding a built-in template installs only while the two agree).
  */
 export const OVERRIDABLE_BASELINE_PACKAGES: Readonly<Record<BareNameOneHolderType, ReadonlySet<string>>> = Object.freeze({
   picklist: new Set<string>(),
@@ -331,14 +333,13 @@ function itemName(item: unknown): string | undefined {
  * An action bound to an object declares nothing here ({@link holdsBareName});
  * a function is never declared by a manifest — it is code, and its door is
  * the hook binder's bind. A package that is a type's overridable baseline
- * ({@link isOverridableBaseline}, by the manifest's own id) declares nothing
+ * ({@link isOverridableBaseline}, by its package id as the door reads it) declares nothing
  * of that type. A bundled type (`email_template`) declares its NAME: two
  * members of one bundle are one declaration, read twice.
  */
 export function declaredBareNames(manifest: ObjectStackManifest | unknown): DeclaredBareName[] {
   const out: DeclaredBareName[] = [];
-  const selfId = (manifest as { id?: unknown } | null | undefined)?.id;
-  const packageId = typeof selfId === 'string' ? selfId : undefined;
+  const packageId = artifactPackageId(manifest);
   const read = (source: unknown) => {
     if (!source || typeof source !== 'object') return;
     for (const type of BARE_NAME_REGISTRY_TYPES) {

@@ -96,15 +96,6 @@ export {
 // stay private to the engine.
 export { findPackageHeldSecurityCatalogNames } from './registry.js';
 
-// [#30803] The bare-name rule's overridable baseline (ADR-0048 P1.8): per
-// covered type, the packages whose items any other package's same-named item
-// is served over by contract — today the email service's built-in templates.
-// Exported so the booted dogfood pin can hold this vocabulary's spelling of
-// that package equal to the email plugin's own `BUILTIN_EMAIL_TEMPLATES_PACKAGE_ID`
-// across the package boundary; the rule's other vocabulary stays private to
-// the engine.
-export { OVERRIDABLE_BASELINE_PACKAGES } from './bare-name-one-holder.js';
-
 // [#15204 W2] Every `(type, name)` a manifest declares, read from the sources
 // the engine's registration seams read. Exported for the install-local door
 // (`@objectstack/cloud-connection`), which refuses a catalog-carrying package
