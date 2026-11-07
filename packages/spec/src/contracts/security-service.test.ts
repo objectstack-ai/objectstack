@@ -817,10 +817,12 @@ describe('Security Service Contract', () => {
       organizationId: 'org_1',
       positions: ['org_member', 'sales_rep', 'everyone'],
       // The resolver's order: grant rows, position-bound sets, derived names, the human baseline.
+      // `member_default` is bound to `everyone`, a held position, so it sits in the
+      // position-bound slot (origin `default`), before any derived name.
       permissionSets: [
         { name: 'sales_user', origins: [{ kind: 'direct' }, { kind: 'position', position: 'sales_rep' }] },
-        { name: 'ai_seat', origins: [{ kind: 'derived', source: 'ai_access' }] },
         { name: 'member_default', origins: [{ kind: 'default' }] },
+        { name: 'ai_seat', origins: [{ kind: 'derived', source: 'ai_access' }] },
       ],
     };
     const withIt = makeService({ describeEffectiveAccess: async () => answer });
