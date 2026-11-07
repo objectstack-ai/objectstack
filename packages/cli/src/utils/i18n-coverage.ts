@@ -44,6 +44,7 @@
 
 import { deepMerge } from '@objectstack/core';
 import type { TranslationBundle, TranslationData } from '@objectstack/spec/system';
+import { resolveI18nLabel } from '@objectstack/spec/ui';
 import { collectExpectedEntries, type ExpectedEntry } from './i18n-bundle-extract.js';
 
 export type CoverageSeverity = 'error' | 'warning';
@@ -518,15 +519,16 @@ function collectExpectedKeys(config: any): ExpectedKey[] {
  * as covered the moment a map exists, which is the mirror image of the bug
  * this function was added to fix: one answer standing for two opposite facts.
  *
- * So only the **tag-matching** limbs count as coverage, in the reference's own
- * order and with its own case rules:
- *
- *   1. the exact tag — `zh-CN` reads the key `zh-CN`;
- *   2. the base language — `zh-CN` reads the key `zh`;
- *   3. the first region-qualified sibling sharing that base — `zh` reads
- *      `zh-CN`; `zh-TW` reads `zh-CN` too. Same language, other region: what
- *      the renderer really shows, and a translation into the language asked
- *      for.
+ * So only the **tag-matching** limbs count as coverage: the entries whose
+ * language subtag is the locale's (the exact tag, the bare language, a
+ * region-qualified sibling). Which of them the reader sees is asked of
+ * `resolveI18nLabel` itself, over the map cut down to those entries, so this
+ * function keeps no copy of the resolver's limb order: `zh-CN` reads `zh-CN`,
+ * else `zh`; `zh` reads `zh-CN`; `zh-TW` reads `zh-CN` when the map has no
+ * Traditional entry, and `zh-TW` over `zh-CN` when it has both (the script
+ * preference where the platform table splits a language). Same language,
+ * other region: what the renderer really shows, and a translation into the
+ * language asked for.
  *
  * The fallback limbs are excluded because falling back **is** what an
  * untranslated locale looks like: a `ja-JP` reader shown the `en` entry is
@@ -536,7 +538,8 @@ function collectExpectedKeys(config: any): ExpectedKey[] {
  * `i18n-label-resolver.ts` is the authority on the limb rule and on the case
  * asymmetry mirrored here (region case is irrelevant because limb 3 compares
  * language subtags only; language case is significant, because the reference
- * folds neither side). `inline-locale-coverage-parity.test.ts` pins this
+ * folds neither side). The describe block "coverage reads the map the way the
+ * renderer does" in `test/i18n-inline-locale-map-coverage.test.ts` pins this
  * function against `resolveI18nLabel`: whenever this says "covered", the
  * renderer really shows that entry.
  *
@@ -555,18 +558,14 @@ export function inlineLocaleText(
     return typeof value === 'string' && value.length > 0 ? value : undefined;
   };
   const tag = (locale || 'en').trim();
-  const exact = read(tag);
-  if (exact !== undefined) return exact;
   const base = tag.split('-')[0];
-  const baseHit = read(base);
-  if (baseHit !== undefined) return baseHit;
+  const sameLanguage: Record<string, string> = {};
   for (const key of Object.keys(map)) {
-    if (key.split('-')[0] === base) {
-      const sibling = read(key);
-      if (sibling !== undefined) return sibling;
-    }
+    const value = read(key);
+    if (value !== undefined && key.split('-')[0] === base) sameLanguage[key] = value;
   }
-  return undefined;
+  if (Object.keys(sameLanguage).length === 0) return undefined;
+  return resolveI18nLabel(sameLanguage, tag);
 }
 
 /**
