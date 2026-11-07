@@ -3,7 +3,8 @@
   "id": "travel_expense",
   "code": "travel",
   "tier": "starter",
-  "title": "Travel expense: trip requests, claims with lines, grade-based standards and a two-step approval",
+  "origin": "generic",
+  "title": { "zh": "差旅报销:出差申请、报销单及明细、按职级的差旅标准,两级审批", "en": "Travel expense: trip requests, claims with lines, grade-based standards and a two-step approval" },
   "provenance": "Mid-tier scenario 差旅报销 (travel expense) of the open library, written for this card from the domain alone: generic names, cities and amounts, no customer-derived content. The seed follows the arithmetic rule in `$comment`, so each truth can be worked out by hand.",
   "prompt": {
     "short": {

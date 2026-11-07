@@ -61,6 +61,16 @@
  * `-u/--url` and `-t/--token`. `-r/--runtime` is retired with no alias — the
  * startup rule keeps no window for an old spelling — so `os package install
  * -r URL` is refused by the parser as an unknown flag and the fix is `-u URL`.
+ *
+ * With neither `-u` nor `$OS_RUNTIME_URL`, the server is the self-hosted
+ * runtime `os environments use-runtime` remembered, and its API key is the
+ * credential when no `-t` / `--email` is given — sent only to that runtime's
+ * own url (`utils/runtime-target.ts`). Nothing remembered: `http://localhost:3000`.
+ *
+ * `os deploy` runs this command in-process for a self-hosted target — the dry
+ * run, then the install — so every refusal and answer below is printed once,
+ * here, for both; it reads {@link PackageInstall.outcome} and names itself in
+ * the retry lines through {@link PackageInstall.retryCommand}.
  */
 
 import { readFile } from 'node:fs/promises';
@@ -69,6 +79,13 @@ import { resolve as resolvePath } from 'node:path';
 import { Args, Command, Flags } from '@oclif/core';
 import { INSTALL_MODES, customizationBasePackageId, type InstallMode } from '@objectstack/spec/kernel';
 import { printHeader, printKV, printSuccess, printWarning, printError, printStep, isExitSignal } from '../../utils/format.js';
+import { DEFAULT_RUNTIME_INSTALL_URL, runtimeInstallTarget } from '../../utils/runtime-target.js';
+
+/** What an install answered, for an in-process caller (`os deploy`). Unset until the runtime answered 2xx. */
+export type PackageInstallOutcome =
+  | { kind: 'dry-run'; manifestId: string; version: string; installedVersion: string | null }
+  | { kind: 'installed'; manifestId: string; version: string; hotLoaded: boolean; runtime: string }
+  | { kind: 'other'; manifestId: string };
 
 /**
  * [#28640 ruling ③A] The connector maps the package export withheld whole,
@@ -199,15 +216,20 @@ export default class PackageInstall extends Command {
   };
 
   static override flags = {
+    // No oclif `default`: an absent flag must be told apart from a typed one,
+    // so the remembered runtime can fill it (`utils/runtime-target.ts`).
     url: Flags.string({
       char: 'u',
-      description: 'Server URL of the runtime to install INTO',
+      description:
+        'Server URL of the runtime to install INTO (default: the runtime `os environments use-runtime` remembered, '
+        + `else ${DEFAULT_RUNTIME_INSTALL_URL})`,
       env: 'OS_RUNTIME_URL',
-      default: 'http://localhost:3000',
     }),
     token: Flags.string({
       char: 't',
-      description: 'Authentication token issued by the target runtime (an API key); instead of --email/--password',
+      description:
+        'Authentication token issued by the target runtime (an API key); instead of --email/--password. Defaults to '
+        + 'the key `os environments use-runtime` remembered, when the URL is that runtime',
       env: 'OS_RUNTIME_TOKEN',
     }),
     version: Flags.string({
@@ -275,11 +297,20 @@ export default class PackageInstall extends Command {
     }),
   };
 
+  /** What the runtime answered — read by `os deploy`, which runs this command in-process. */
+  outcome: PackageInstallOutcome | undefined;
+
+  /** The command a retry line names (`os deploy` sets its own); defaults to this command with its argument. */
+  retryCommand: string | undefined;
+
+  /** Set by an in-process caller that prints its own header. */
+  embedded = false;
+
   async run(): Promise<void> {
     const { args, flags } = await this.parse(PackageInstall);
+    const retry = this.retryCommand ?? `os package install ${args.package}`;
 
-    printHeader('Install Package');
-    const runtime = flags.url.replace(/\/+$/, '');
+    if (!this.embedded) printHeader('Install Package');
 
     // One credential per call: a token and a password sign-in name two
     // identities, and picking one silently would install as whichever the
@@ -294,6 +325,17 @@ export default class PackageInstall extends Command {
     }
 
     try {
+      const target = await runtimeInstallTarget({
+        url: flags.url,
+        token: flags.token,
+        useStoredToken: !flags.email && !flags.password,
+      });
+      const runtime = target.url;
+      const token = target.token;
+      if (target.rememberedUrl || target.rememberedToken) {
+        printStep(`Runtime ${runtime} — remembered by \`os environments use-runtime\``);
+      }
+
       // ---- Resolve the source: inline artifact file vs catalog id ---------
       const looksLikeFile = args.package.endsWith('.json')
         || args.package.startsWith('./')
@@ -340,7 +382,7 @@ export default class PackageInstall extends Command {
 
       // ---- Authenticate against the TARGET runtime ------------------------
       let cookie: string | undefined;
-      if (flags.token) {
+      if (token) {
         printStep(`Authenticating to ${runtime} with a token`);
       } else if (flags.email && flags.password) {
         printStep(`Signing in to ${runtime} as ${flags.email}...`);
@@ -377,7 +419,7 @@ export default class PackageInstall extends Command {
         headers: {
           'Content-Type': 'application/json',
           ...(cookie ? { Cookie: cookie } : {}),
-          ...(flags.token ? { Authorization: `Bearer ${flags.token}` } : {}),
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
         body: JSON.stringify(body),
       }, flags.timeout);
@@ -395,7 +437,7 @@ export default class PackageInstall extends Command {
           }
           console.log('');
           console.log('  Confirm them as genuinely platform-wide:');
-          console.log(`    os package install ${args.package} --confirm-global-uniques`);
+          console.log(`    ${retry} --confirm-global-uniques`);
           console.log("  …or edit the app's metadata to `unique: 'organization'` and rebuild.");
           this.exit(1);
           return;
@@ -410,7 +452,7 @@ export default class PackageInstall extends Command {
           for (const finding of findings) console.log(`  • ${finding.describe ?? JSON.stringify(finding)}`);
           console.log('');
           console.log('  Review each finding. To upgrade anyway, confirm exactly these findings:');
-          console.log(`    os package install ${args.package} --confirm-access-upgrade ${details.findingSet}`);
+          console.log(`    ${retry} --confirm-access-upgrade ${details.findingSet}`);
           this.exit(1);
           return;
         }
@@ -418,12 +460,18 @@ export default class PackageInstall extends Command {
           printError(
             'The runtime rejected the call as unauthenticated. Pass --token (or OS_RUNTIME_TOKEN) with a ' +
             'token the target runtime issued, or --email/--password (or OS_RUNTIME_EMAIL/OS_RUNTIME_PASSWORD) ' +
-            'for an account on the target runtime.',
+            'for an account on the target runtime, or record one with `os environments use-runtime <url> --token <key>`.',
           );
         } else if (res.status === 404) {
+          // The door is absent, not refusing: a runtime booted from a composed
+          // artifact takes no package installs (ObjectOS Enterprise declines
+          // install-local in that mode), and any other host may simply not
+          // mount it. Both are named, with what to do — nothing was installed.
           printError(
-            `install-local endpoint not found on ${runtime}. The target runtime must mount ` +
-            'MarketplaceInstallLocalPlugin (see @objectstack/cloud-connection).',
+            `${runtime} does not serve install-local (POST /api/v1/marketplace/install-local answered 404), so `
+            + 'nothing was installed. A runtime booted from a composed artifact takes no package installs: rebuild '
+            + 'its artifact with this package in it and restart it. Any other runtime must mount '
+            + 'MarketplaceInstallLocalPlugin (@objectstack/cloud-connection) to take installs.',
           );
         } else {
           // [#21489] The runtime's refusal is printed with its CODE beside the
@@ -444,6 +492,12 @@ export default class PackageInstall extends Command {
 
       // [#30884] The dry run's answer: the plan, and nothing installed.
       if (data.dryRun === true) {
+        this.outcome = {
+          kind: 'dry-run',
+          manifestId: String(data.manifestId ?? label),
+          version: String(data.version ?? flags.version),
+          installedVersion: typeof data.installedVersion === 'string' ? data.installedVersion : null,
+        };
         console.log('');
         printSuccess('Dry run — nothing was installed or written');
         printKV('  Package',   String(data.manifestId ?? label));
@@ -460,7 +514,8 @@ export default class PackageInstall extends Command {
       if (flags['dry-run']) {
         printError(
           `The runtime at ${runtime} does not support a dry run: it ignored \`--dry-run\` and INSTALLED ${label}. `
-          + 'Upgrade the runtime to preview an upgrade before it is installed.',
+          + 'Upgrade the runtime to preview an upgrade before it is installed'
+          + `${this.retryCommand ? `, then run \`${this.retryCommand}\` again` : ''}.`,
         );
         this.exit(1);
         return;
@@ -470,6 +525,7 @@ export default class PackageInstall extends Command {
       // its own shape too: the writable pair its items were written into,
       // never a kernel registration or a cached manifest — so, as for an
       // unmanaged install, none of the managed lines below is true of it.
+      this.outcome = { kind: 'other', manifestId: String(data.manifestId ?? label) };
       const pair = data.customizationPair;
       if (pair && typeof pair === 'object' && typeof pair.packageId === 'string') {
         console.log('');
@@ -570,6 +626,13 @@ export default class PackageInstall extends Command {
       // missing, blank or not a string prints no reason line at all.
       const notHotLoaded = data.hotLoaded === false;
       const hotLoadError = typeof data.hotLoadError === 'string' ? data.hotLoadError.trim() : '';
+      this.outcome = {
+        kind: 'installed',
+        manifestId: String(data.manifestId ?? data.packageId ?? label),
+        version: String(data.version ?? flags.version),
+        hotLoaded: !notHotLoaded,
+        runtime,
+      };
       console.log('');
       if (notHotLoaded) {
         printWarning(

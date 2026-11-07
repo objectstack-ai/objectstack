@@ -22,6 +22,10 @@
  *     injected registry when the scope is absent, and the long-lived stdio
  *     bridge (`bridgeTools`) still calls its registry with ONE argument — the
  *     shared registration body gained a seam, not a behaviour change.
+ *  4. [#31022] The INSTRUCTIONS. A host's per-request instructions on the
+ *     injection answer `initialize` only under the grant that registers the
+ *     family; a `data:read` token, a key or a session gets the configured or
+ *     default text, and so does an authoring request that carries none.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
@@ -141,6 +145,8 @@ interface CallOptions {
   headers?: Record<string, string>;
   /** Omit the data bridge entirely (authoring-only host). */
   noBridge?: boolean;
+  /** [#31022] Per-request server instructions carried on the authoring injection. */
+  instructions?: string;
 }
 
 async function call(runtime: MCPServerRuntime, bridge: any, body: unknown, o: CallOptions = {}) {
@@ -158,7 +164,14 @@ async function call(runtime: MCPServerRuntime, bridge: any, body: unknown, o: Ca
     parsedBody: body,
     ...(o.grantedScopes ? { toolOptions: { grantedScopes: o.grantedScopes } } : {}),
     ...(o.registry
-      ? { authoring: { registry: o.registry, principal: PRINCIPAL, environmentId: ENVIRONMENT_ID } }
+      ? {
+          authoring: {
+            registry: o.registry,
+            principal: PRINCIPAL,
+            environmentId: ENVIRONMENT_ID,
+            ...(o.instructions !== undefined ? { instructions: o.instructions } : {}),
+          },
+        }
       : {}),
   });
   // The buffered JSON-RPC answer, read untyped on purpose: these pins assert
@@ -601,5 +614,94 @@ describe('[#26464] stdio parity — bridgeTools still calls its ToolRegistry wit
     expect(calls).toHaveLength(1);
     expect(calls[0]).toMatchObject({ type: 'tool-call', toolName: 'create_object', input: { name: 'invoice' } });
     expect(arities).toEqual([1]);
+  });
+});
+
+describe('[#31022] per-request instructions on the authoring injection — answered at initialize', () => {
+  let runtime: MCPServerRuntime;
+  let bridge: ReturnType<typeof makeBridge>;
+  let registry: RecordingAuthoringRegistry;
+  const HOST_INSTRUCTIONS = 'Authoring rules: call get_authoring_rules with no arguments for the index.';
+
+  beforeEach(() => {
+    runtime = new MCPServerRuntime({ name: 't', version: '1.0.0' });
+    bridge = makeBridge();
+    registry = makeAuthoringRegistry();
+  });
+
+  async function instructionsAtInitialize(rt: MCPServerRuntime, o: CallOptions = {}): Promise<unknown> {
+    const { status, json } = await call(rt, bridge, {
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'initialize',
+      params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'pin', version: '0' } },
+    }, o);
+    expect(status).toBe(200);
+    expect(json.error).toBeUndefined();
+    return json.result.instructions;
+  }
+
+  it('a metadata:write request whose injection carries instructions is answered with them', async () => {
+    const control = await instructionsAtInitialize(runtime, { grantedScopes: [MCP_OAUTH_SCOPE_METADATA_WRITE], registry });
+    const subject = await instructionsAtInitialize(runtime, {
+      grantedScopes: [MCP_OAUTH_SCOPE_DATA_READ, MCP_OAUTH_SCOPE_METADATA_WRITE],
+      registry,
+      instructions: HOST_INSTRUCTIONS,
+    });
+    expect(subject).toBe(HOST_INSTRUCTIONS);
+    // Control leg: the same door without the field answers something else, so
+    // the equality above is the injection's doing and not a coincidence.
+    expect(control).not.toBe(HOST_INSTRUCTIONS);
+  });
+
+  it('a data:read request never sees the injected text — it gets the default', async () => {
+    const defaultText = await instructionsAtInitialize(runtime, { grantedScopes: [MCP_OAUTH_SCOPE_DATA_READ] });
+    const subject = await instructionsAtInitialize(runtime, {
+      grantedScopes: [MCP_OAUTH_SCOPE_DATA_READ],
+      registry,
+      instructions: HOST_INSTRUCTIONS,
+    });
+    expect(typeof defaultText).toBe('string');
+    expect(subject).toBe(defaultText);
+    expect(subject).not.toBe(HOST_INSTRUCTIONS);
+  });
+
+  it('the undefined grant (API key / session) and a data:write token never see it either', async () => {
+    const defaultText = await instructionsAtInitialize(runtime, {});
+    expect(await instructionsAtInitialize(runtime, { registry, instructions: HOST_INSTRUCTIONS })).toBe(defaultText);
+    expect(
+      await instructionsAtInitialize(runtime, {
+        grantedScopes: [MCP_OAUTH_SCOPE_DATA_WRITE],
+        registry,
+        instructions: HOST_INSTRUCTIONS,
+      }),
+    ).toBe(defaultText);
+  });
+
+  it('a metadata:write request whose injection carries no instructions gets the default', async () => {
+    const defaultText = await instructionsAtInitialize(runtime, { grantedScopes: [MCP_OAUTH_SCOPE_DATA_READ] });
+    const subject = await instructionsAtInitialize(runtime, { grantedScopes: [MCP_OAUTH_SCOPE_METADATA_WRITE], registry });
+    expect(subject).toBe(defaultText);
+  });
+
+  it('a runtime configured with instructions keeps them for every request the injection does not reach', async () => {
+    const CONFIGURED = 'Configured server-wide instructions.';
+    const configured = new MCPServerRuntime({ name: 't', version: '1.0.0', instructions: CONFIGURED });
+    expect(
+      await instructionsAtInitialize(configured, {
+        grantedScopes: [MCP_OAUTH_SCOPE_DATA_READ],
+        registry,
+        instructions: HOST_INSTRUCTIONS,
+      }),
+    ).toBe(CONFIGURED);
+    expect(await instructionsAtInitialize(configured, { grantedScopes: [MCP_OAUTH_SCOPE_METADATA_WRITE], registry })).toBe(CONFIGURED);
+    // Under the admitting grant the per-request text wins over the server-wide one.
+    expect(
+      await instructionsAtInitialize(configured, {
+        grantedScopes: [MCP_OAUTH_SCOPE_METADATA_WRITE],
+        registry,
+        instructions: HOST_INSTRUCTIONS,
+      }),
+    ).toBe(HOST_INSTRUCTIONS);
   });
 });

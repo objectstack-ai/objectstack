@@ -3,7 +3,8 @@
   "id": "requisition_to_receipt",
   "code": "purchase",
   "tier": "starter",
-  "title": "Requisition to receipt: purchase requisitions, an amount-threshold approval, purchase orders with lines and goods receipts",
+  "origin": "generic",
+  "title": { "zh": "采购申请到收货:采购申请、按金额分级审批、采购单及明细、收货登记", "en": "Requisition to receipt: purchase requisitions, an amount-threshold approval, purchase orders with lines and goods receipts" },
   "provenance": "Mid-tier scenario 采购申请到收货 (requisition to receipt) of the open library, written for this card from the procurement domain alone: generic names, suppliers, items and amounts, no customer-derived content. The seed follows the arithmetic rule in `$comment`, so each truth can be worked out by hand.",
   "prompt": {
     "short": {
