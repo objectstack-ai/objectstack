@@ -1,6 +1,6 @@
 # ADR-0048: Cross-package metadata collision — package-id identity, namespace install gate, package-scoped resolution
 
-**Status**: Revised (2026-06-13) — supersedes the original *per-item collision detection* framing. The runtime guard shipped under the original proposal is **retained as a same-package authoring backstop**; the strategic direction for the app-marketplace era is revised below. · **Superseded in part by [ADR-0146](./0146-studio-designs-setup-administers-one-editor-per-item-paired-customize-package.md)** (2026-10-31) — §3.3's sentence that a context-free read "is best-effort: it returns the first match": a read of a name a code package ships has an owner — that package, or the declared override its paired `<base>.custom` publishes — and a same-named item of a package outside that closure is served only under its own address (ADR-0146 D8); and §3.4's coexistence "by construction", for a base's dependency closure only: the paired `<base>.custom`'s item bearing a base item's name is a declared override or is refused at publish — declare or rename — and any other dependent package's item bearing a base item's name is refused at publish — rename; only the pair declares (ADR-0146 D2, ruled 2026-10-31 on #28364 and #28390). Packages with no dependency relation keep §3.3 and §3.4 as written; qualify-to-cross, the same-package overwrite and the 2026-10-08 addendum stand.
+**Status**: Revised (2026-06-13) — supersedes the original *per-item collision detection* framing. The runtime guard shipped under the original proposal is **retained as a same-package authoring backstop**; the strategic direction for the app-marketplace era is revised below. · **Superseded in part by [ADR-0146](./0146-studio-designs-setup-administers-one-editor-per-item-paired-customize-package.md)** (2026-10-31) — §3.3's sentence that a context-free read "is best-effort: it returns the first match": a read of a name a code package ships has an owner — that package, or the declared override its paired `<base>.custom` publishes — and a same-named item of a package outside that closure is served only under its own address (ADR-0146 D8); and §3.4's coexistence "by construction", for a base's dependency closure only: the paired `<base>.custom`'s item bearing a base item's name is a declared override or is refused at publish — declare or rename — and any other dependent package's item bearing a base item's name is refused at publish — rename; only the pair declares (ADR-0146 D2, ruled 2026-10-31 on #28364 and #28390). Packages with no dependency relation keep §3.3 and §3.4 as written; qualify-to-cross, the same-package overwrite and the 2026-10-08 addendum stand. · **Amended** (2026-11-07, [#30794](https://github.com/objectstack-ai/objectstack/issues/30794)): §3.5 — rename-on-install ships for **unmanaged** copies, through the one rename engine `duplicatePackage` applies; a managed install is never renamed and §3.2 stands for it as written. See the dated note under §3.5.
 **Deciders**: ObjectStack Protocol Architects
 **Builds on**: [ADR-0003](./0003-package-as-first-class-citizen.md) (package as first-class citizen), [ADR-0005](./0005-metadata-customization-overlay.md) (artifact vs runtime overlay precedence), [ADR-0008](./0008-metadata-repository-and-change-log.md) (metadata repository, `MetaRef` identity), [ADR-0010](./0010-metadata-protection-model.md) (package provenance / `_packageId` stamping)
 **Consumers**: `@objectstack/objectql` (`SchemaRegistry.registerItem`, `ObjectQL.registerApp`, install path), `@objectstack/console` / `objectui` (routing + metadata resolution), package authors, CLI/CI install path, the app marketplace registry.
@@ -292,6 +292,45 @@ object name (`crm_account` → `acme_account`), every cross-reference, and every
 formula / view / flow that names `crm_account`. That is a deep rewrite, not a
 URL change. v1 is **refuse-on-conflict** (§3.2). Rename-on-install is recorded
 as future work, not part of this decision.
+
+> **Amended (2026-11-07, #30794) — rename-on-install ships for unmanaged copies, and only for them.**
+> An unmanaged install ([ADR-0131](./0131-total-organization-ownership-no-null-organization-id.md) D6)
+> may name a `targetNamespace`. The copy's new base takes it as its `namespace`. Every copied object
+> name takes it in place of the package's, and a name that lacks the package's prefix takes it in front.
+> Every reference to a renamed name follows. That is the deep rewrite this section describes, done by
+> the one engine `duplicatePackage` already applies (ADR-0070 D4): `planNamespaceRename`,
+> `packages/metadata-protocol/src/package-namespace-rename.ts`. Both doors call it, so the two renames
+> cannot drift. The doors share the rename and nothing more: only the duplicate rebinds a permission
+> set's `packageId` (ADR-0086 D3), which the import never does, and only the import judges the copy
+> names against the item-name grammar and the identifier limits below.
+>
+> - **The rename runs after view containers are expanded.** A view item follows its object, and so
+>   does a view container (a view named exactly like an object) and every view it expands into; this
+>   holds on both doors, so a bare object's container now follows it under the duplicate too.
+>   Translations are named `<targetNamespace>_<locale>`, with the object keys inside them renamed. A
+>   field keeps its key. Free text is renamed only at a whole prefixed object name.
+> - **Every refusal the names can answer comes before the base exists**: a copy name another object's
+>   copy takes, a copy name the item-name grammar refuses, a copy name longer than an object's table
+>   identifier (63) or an item name (255) may be, and a renamed key that meets a key the item already
+>   holds. `targetNamespace` is judged by `manifest.namespace`'s own declaration, and the shared
+>   namespaces `base`, `system` and `sys` are refused; both refusals answer `400 INVALID_REQUEST`,
+>   naming `targetNamespace`.
+> - **§3.2's refuse-on-conflict runs on the renamed names.** A `targetNamespace` another package owns
+>   is refused, and so is a renamed name the environment or a managed package holds.
+> - ⛔ **A managed install is never renamed.** It keeps the package's namespace and its upgrade
+>   channel, and `targetNamespace` beside it is refused (`400 INVALID_REQUEST`) before anything is
+>   fetched. For a managed install, §3.2 stands exactly as written.
+> - **Provenance** is the import answer's `sourceNamespace` and the install-local answer's
+>   `installedFrom.namespace`. Both are information only, as ADR-0131 D6 records provenance.
+> - **The request carries it, the CLI does not.** `targetNamespace` is a key of the import's request
+>   (`importUnmanagedPackage`) and of the `POST /api/v1/marketplace/install-local` body;
+>   `os package install` sends none.
+>
+> Not in this amendment: renaming bare non-object names (ruling C on #30798 makes every
+> package-authored top-level name carry the namespace, see the
+> [2026-11-06 addendum](#addendum-2026-11-06-bare-names-resolved-without-a-package-hold-one-package--34-narrowed)),
+> seed data (the import copies none), and the hosted-cloud default namespace
+> (objectstack-ai/cloud#3624).
 
 ### 3.6 The package-id URL is transparent; a friendly alias is optional
 
