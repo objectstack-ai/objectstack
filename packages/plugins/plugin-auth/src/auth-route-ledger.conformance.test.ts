@@ -248,6 +248,14 @@ describe('auth route ledger hygiene', () => {
       // holds it to the same proof — better-auth's own read is
       // `/organization/get-invitation`, a different path.
       'GET /api/v1/auth/organization/invitation-preview',
+      // [#31048] Both withdraws, on this pin's own terms: `auth-plugin.ts`
+      // mounts each itself (a `rawApp.post` on the
+      // `${basePath}/admin/authorized-clients/withdraw` and
+      // `${basePath}/authorized-clients/withdraw` templates, ahead of the
+      // catch-all), and the `live.has(route)` loop below holds them to the same
+      // proof — better-auth's own withdraw is `/oauth2/delete-consent`, a
+      // different path.
+      'POST /api/v1/auth/admin/authorized-clients/withdraw',
       'POST /api/v1/auth/admin/import-users',
       // On this pin's own terms: `auth-plugin.ts` mounts it itself (a
       // `rawApp.post` on the `${basePath}/admin/list-platform-admins`
@@ -274,6 +282,7 @@ describe('auth route ledger hygiene', () => {
       'POST /api/v1/auth/admin/sso/request-domain-verification',
       'POST /api/v1/auth/admin/sso/verify-domain',
       'POST /api/v1/auth/admin/unlock-user',
+      'POST /api/v1/auth/authorized-clients/withdraw',
       'POST /api/v1/auth/organization/add-member',
       'POST /api/v1/auth/set-initial-password',
       'POST /api/v1/auth/sys-oauth-application/register',

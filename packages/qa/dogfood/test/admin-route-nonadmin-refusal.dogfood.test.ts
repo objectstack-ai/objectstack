@@ -289,6 +289,12 @@ function expectationsFor(targetUserId: string): Record<string, RouteExpectation>
       query: `?userId=${targetUserId}`,
       note: 'a read: the gate runs before the query is read, so anon and member are refused whoever userId names; the admin gets 200 { clients, truncated } for the target',
     },
+    // ── #31048 — withdraw one of another person's authorized AI assistants ──
+    'POST /api/v1/auth/admin/authorized-clients/withdraw': {
+      bucket: 'objectstack-gate',
+      body: { userId: targetUserId, id: 'refusal-probe-consent' },
+      note: 'the gate runs ahead of any body read, so anon and member are refused whoever the body names; the admin passes it and lands on 404 RESOURCE_NOT_FOUND for the consent the target does not hold',
+    },
     // ── #30958 — the SCIM connection-credential door (mint + revoke) ────────
     //
     // Both mounts run `gateAdmin(c)` as their first statement, ahead of any body
