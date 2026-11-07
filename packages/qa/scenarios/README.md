@@ -18,8 +18,12 @@ for (const r of refusals) console.error(formatRefusal(r)); // FILE: FIELD.PATH: 
   seed does not determine.
 - `src/loader.ts` — reads a directory of cards, validates shape and cross-references, holds
   a `starter` or `delivery` card to the gallery floor (`GALLERY_FLOOR`; the tiers are in the
-  format's README), refuses a `generic` card loaded as the private overlay (`library`; the
-  origins are in the format's README), and returns typed cards or located refusals.
+  format's README), refuses a `generic` card loaded as the private overlay and a
+  `customer-derived` or `held-out` card loaded as the open library (`library`; the origins are
+  in the format's README), and returns typed cards or located refusals.
+
+The private overlay's owner migrates its cards to each new card shape (today: `origin` and the
+`{ zh, en }` title); the loader keeps no lenient conversion for an old shape.
 - `src/score/` — the deterministic scorer, entries `@objectstack/scenarios/score` and
   `@objectstack/scenarios/score/full` (below).
 

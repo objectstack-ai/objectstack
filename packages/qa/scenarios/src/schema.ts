@@ -464,7 +464,7 @@ export function isGalleryTier(tier: ScenarioTier): tier is (typeof GALLERY_TIERS
  * nor the card's directory is one: the loader reads whatever directory it is
  * handed. What the loader does know is which library its caller says it is
  * loading (`LoadOptions.library` in `loader.ts`), and it refuses a `generic`
- * card in the private overlay.
+ * card in the private overlay and any other card in the open library.
  */
 export const SCENARIO_ORIGINS = ['generic', 'customer-derived', 'held-out'] as const;
 export type ScenarioOrigin = (typeof SCENARIO_ORIGINS)[number];

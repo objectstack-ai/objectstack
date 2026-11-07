@@ -89,7 +89,8 @@ one, because the loader reads whatever directory it is handed.
 | `held-out` | Withheld from the open set, so a score on it is not one anything was tuned against. | the private overlay | ⛔ never |
 
 The caller tells the loader which library it is loading (`LoadOptions.library`: `open` or
-`overlay`), and the loader refuses a `generic` card in the overlay, at `origin`. The runner and
+`overlay`), and the loader refuses, at `origin`, a `generic` card in the overlay and a
+`customer-derived` or `held-out` card in the open library. The runner and
 the exporter CLIs answer it from the directory: the repository's `docs/qa/scenarios` (by real
 path) is the open library, and any other `--cards` directory is the overlay.
 

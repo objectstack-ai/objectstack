@@ -21,9 +21,10 @@
  * Which library a directory is, the loader cannot tell from the directory: a
  * card file carries nothing that says where it lives. So the caller says it
  * ({@link LoadOptions.library}; the CLIs answer with {@link libraryOf}), and the
- * loader refuses a `generic` card in the private overlay — a generic card
- * belongs in the open library, and one in the overlay is mislabelled or
- * misplaced either way.
+ * loader refuses a `generic` card in the private overlay and a
+ * `customer-derived` or `held-out` card in the open library — each belongs in
+ * the other, and a card on the wrong side is mislabelled or misplaced either
+ * way (in the open library, it is also a leak).
  *
  * Nothing here calls a model, the network, or anything outside the two
  * directories it is handed.
@@ -87,7 +88,8 @@ export interface LoadOptions {
   /**
    * The library the cards are loaded as — stated by the caller, because the
    * directory says nothing the loader could read. A `generic` card in the
-   * `overlay` is refused.
+   * `overlay` is refused, and so is a `customer-derived` or `held-out` card in
+   * the `open` library.
    */
   library: ScenarioLibrary;
 }
@@ -346,11 +348,17 @@ function checkCard(
   // ── identity ──
   if (card.id !== stem) refuse(['id'], `\`${card.id}\` must equal the file's basename \`${stem}\``);
 
-  // ── origin: the private overlay holds no generic card ──
+  // ── origin: each library holds its own origins, never the other's ──
   if (options.library === 'overlay' && card.origin === 'generic') {
     refuse(
       ['origin'],
       `a \`generic\` card does not belong in the private overlay, which holds only \`customer-derived\` and \`held-out\` cards: move it to the open library (${OPEN_LIBRARY_DIR}), or mark the origin it really has`,
+    );
+  }
+  if (options.library === 'open' && card.origin !== 'generic') {
+    refuse(
+      ['origin'],
+      `a \`${card.origin}\` card does not belong in the open library, which is public and holds only \`generic\` cards: move it to the private overlay, or mark it \`generic\` only if it was written from the domain alone`,
     );
   }
 

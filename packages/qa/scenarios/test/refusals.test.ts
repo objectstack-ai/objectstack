@@ -230,7 +230,7 @@ describe('scenario card refusals', () => {
  * states the library (`LoadOptions.library`), and the CLIs answer it from the
  * directory's real path (`libraryOf`).
  */
-describe('the origin and the library: no generic card in the private overlay', () => {
+describe('the origin and the library: no generic card in the private overlay, no other card in the open library', () => {
   it('the base card is generic and loads clean as the open library (control)', () => {
     expect(base.origin).toBe('generic');
     expect(load(() => {}, undefined, 'open').refusals).toEqual([]);
@@ -253,6 +253,20 @@ describe('the origin and the library: no generic card in the private overlay', (
       const r = load((c) => (c.origin = origin), undefined, 'overlay');
       expect(r.refusals.map(formatRefusal), origin).toEqual([]);
       expect(r.cards.map((x) => x.card.origin)).toEqual([origin]);
+    }
+  });
+
+  it('refuses a customer-derived or a held-out card loaded as the open library, at `origin`, and hands it out not at all', () => {
+    for (const origin of ['customer-derived', 'held-out']) {
+      const r = load((c) => (c.origin = origin), undefined, 'open');
+      expect(r.cards, origin).toEqual([]);
+      expect(r.refusals, origin).toEqual([
+        {
+          file: r.file,
+          path: 'origin',
+          message: expect.stringMatching(new RegExp(`^a \`${origin}\` card does not belong in the open library, which is public and holds only \`generic\` cards: move it to the private overlay`)),
+        },
+      ]);
     }
   });
 
