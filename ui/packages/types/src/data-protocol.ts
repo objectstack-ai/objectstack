@@ -157,14 +157,8 @@ export interface OffsetNode extends QueryASTNode {
   value: number;
 }
 
-/**
- * Subquery node (Phase 3.3.3)
- */
-export interface SubqueryNode extends QueryASTNode {
-  type: 'subquery';
-  query: SqlQueryAST;
-  alias?: string;
-}
+// `SubqueryNode` (Phase 3.3.3) is retired (objectstack#25921, batch 12): no
+// query builder, adapter or host constructed or read a subquery node.
 
 /**
  * Aggregate function node (Phase 3.3.5)
@@ -571,7 +565,7 @@ export interface DateRangeFilter {
  *    anything outside those thirteen by name;
  *  - this one adds eight FUTURE windows (`tomorrow`, `next_week`,
  *    `next_month`, `next_quarter`, `next_year`, `next_7_days`, `next_30_days`,
- *    `next_90_days`) for the `FilterBuilderConfig` surface below, where a
+ *    `next_90_days`) for {@link DateRangeFilter}'s `preset` above, where a
  *    forward-looking range ("due next week") is the point.
  *
  * So an author or agent who read the spec's thirteen off this name would have
@@ -608,60 +602,9 @@ export type FilterBuilderDateRangePreset =
   | 'next_30_days'
   | 'next_90_days';
 
-/**
- * Filter builder configuration (Phase 3.4.5)
- */
-export interface FilterBuilderConfig {
-  /**
-   * Available fields for filtering
-   */
-  fields: FilterFieldConfig[];
-  
-  /**
-   * Default operator
-   */
-  default_operator?: 'and' | 'or';
-  
-  /**
-   * Allow nested groups
-   */
-  allow_groups?: boolean;
-  
-  /**
-   * Maximum nesting depth
-   */
-  max_depth?: number;
-}
-
-/**
- * Filter field configuration
- */
-export interface FilterFieldConfig {
-  /**
-   * Field name
-   */
-  name: string;
-  
-  /**
-   * Display label
-   */
-  label: string;
-  
-  /**
-   * Field type
-   */
-  type: string;
-  
-  /**
-   * Available operators for this field
-   */
-  operators?: AdvancedFilterOperator[];
-  
-  /**
-   * Options for select fields
-   */
-  options?: Array<{ label: string; value: any }>;
-}
+// The filter builder configuration pair (Phase 3.4.5: `FilterBuilderConfig`,
+// `FilterFieldConfig`) is retired (objectstack#25921, batch 12): no filter
+// builder, adapter or host read either shape.
 
 // RETIRED (objectui#10719): the "Phase 3.5" field-validation family —
 // `AdvancedValidationSchema`, `AdvancedValidationRule`, `ValidationRuleType`,

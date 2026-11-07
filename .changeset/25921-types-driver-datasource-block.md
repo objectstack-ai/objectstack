@@ -11,7 +11,7 @@ Metadata-protocol: none
 
 **BREAKING** for a host that imports any of these fifteen types from `@object-ui/types`. None had an importer anywhere in the workspace or in hotcrm, so the Console and every `@object-ui/*` package are unaffected.
 
-They are **gone from the package, not only from the entry**: the "Phase 3.6" driver interfaces and the "Phase 3.7" datasource interfaces at the end of `data-protocol.ts` were read only by each other. Nothing implemented the driver interface and nothing constructed the datasource manager; the client talks to data through the `DataSource` interface instead. Every other name of `data-protocol.ts` stays exported unchanged, among them `DriverQueryConfig`, `SqlQueryAST`, the query-AST node types, `AdvancedFilterSchema`, `FilterBuilderConfig` and `ObjectValidationRule` with its variants.
+They are **gone from the package, not only from the entry**: the "Phase 3.6" driver interfaces and the "Phase 3.7" datasource interfaces at the end of `data-protocol.ts` were read only by each other. Nothing implemented the driver interface and nothing constructed the datasource manager; the client talks to data through the `DataSource` interface instead. Every other name of `data-protocol.ts` stays exported unchanged, among them `DriverQueryConfig`, `SqlQueryAST`, the query-AST node types, `AdvancedFilterSchema` and `ObjectValidationRule` with its variants.
 
 What leaves, and what to write instead:
 
