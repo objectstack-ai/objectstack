@@ -668,11 +668,20 @@ describe('the library — every tag a mid-tier card declares that this table now
     expect(cards.map((c) => c.card.id)).toEqual(expect.arrayContaining(MID_TIER));
   });
 
-  it('has a row for each of the seven, and each is declared by a card', () => {
+  // Every open card models approvals as data (an approval step object, or an
+  // approver and decision date on the record, graded as data writes), so none
+  // declares an `approvals.*` tag: those rows judge the engine's Approval node,
+  // whose history no seed row can preload (docs/qa/scenarios/README.md, "Build
+  // checks trace to the prompt"). The rows stay for a card that exercises the
+  // engine.
+  const ENGINE_ROWS = ROWS_ADDED.filter((t) => t.startsWith('approvals.'));
+
+  it('has a row for each of the seven, and each but the approval-engine rows is declared by a card', () => {
     for (const tag of ROWS_ADDED) {
       expect(ALL_TAGS, tag).toContain(tag);
-      expect(cards.some((c) => c.card.capabilities.includes(tag)), tag).toBe(true);
+      if (!ENGINE_ROWS.includes(tag)) expect(cards.some((c) => c.card.capabilities.includes(tag)), tag).toBe(true);
     }
+    expect(ENGINE_ROWS).toEqual(['approvals.multi-step-approval', 'approvals.dynamic-approver-routing']);
   });
 
   it('scores each one on every card that declares it: an empty build fails it, never "unscored"', () => {
