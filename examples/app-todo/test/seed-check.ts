@@ -2,6 +2,7 @@
 import { ObjectKernel, DriverPlugin, AppPlugin } from '@objectstack/runtime';
 import { SqliteWasmDriver } from '@objectstack/driver-sqlite-wasm';
 import { ObjectQLPlugin } from '@objectstack/objectql';
+import { createIdentityObjectsPlugin } from '@objectstack/plugin-auth';
 import TodoApp from '../objectstack.config';
 
 (async () => {
@@ -14,6 +15,11 @@ import TodoApp from '../objectstack.config';
   // Core Services
   await kernel.use(new ObjectQLPlugin());
   await kernel.use(new DriverPlugin(new SqliteWasmDriver({ filename: ':memory:' })));
+
+  // The organization object and the Default Organization a `single` install
+  // holds before seeds load (ADR-0131 D3); without them every seed row is
+  // refused with "Organization is required". See test/mcp-actions.test.ts.
+  await kernel.use(createIdentityObjectsPlugin());
 
   // Load App with Data
   await kernel.use(new AppPlugin(TodoApp));

@@ -21,6 +21,7 @@ import {
   // [#23367] The API-key lifecycle policy source, and its branded refusal.
   apiKeyLifecyclePolicySourceOf,
   isApiKeyLifecycleRefusalError,
+  type RequestAuthService,
 } from '@objectstack/core';
 import type { EngineMiddleware, OperationContext } from '@objectstack/objectql';
 import type {
@@ -73,6 +74,8 @@ import {
 import { SharingRuleService, bindDeclaredRuleNameGuard, bindSharingRuleActivationReconcile } from './sharing-rule-service.js';
 import { ShareLinkService } from './share-link-service.js';
 import { registerShareLinkRoutes } from './share-link-routes.js';
+import { SHAREABLE_OBJECTS_ROUTE, registerShareableObjectsRoutes } from './shareable-objects-routes.js';
+import { SharingRulesNotRunningError } from './shareable-objects.js';
 import {
   bindRuleHooks,
   unbindAllRuleHooks,
@@ -639,6 +642,47 @@ export class SharingServicePlugin implements Plugin {
     );
   };
 
+  /**
+   * [#30209 row 5 B] Mount `GET /api/v1/sharing/shareable-objects`
+   * (`shareable-objects-routes.ts`, ledger `sharing-route-ledger.ts`). The
+   * list is `SharingRuleService.listShareableObjects`, read at request time,
+   * so a rule service that never started answers 501 there instead of the
+   * path going unmounted. Canonical `http.server` first, the deprecated
+   * `http-server` alias second, as the share-link mount reads them.
+   */
+  private mountShareableObjectsRoute(ctx: PluginContext): void {
+    const readServer = (name: string): IHttpServer | null => {
+      try { return ctx.getService<IHttpServer>(name); } catch { return null; }
+    };
+    const http: IHttpServer | null = readServer('http.server') ?? readServer('http-server');
+    if (!http) {
+      ctx.logger.warn(
+        'SharingServicePlugin: no HTTP server — GET ' + SHAREABLE_OBJECTS_ROUTE + ' (the sharing-rule object '
+          + 'picker list) not registered. SharingRuleService.listShareableObjects is still reachable via '
+          + 'kernel.getService("sharingRules").',
+      );
+      return;
+    }
+    const optional = <T>(name: string): T | undefined => {
+      try { return ctx.getService<T>(name); } catch { return undefined; }
+    };
+    const kernel = ctx.getKernel?.() as
+      | { getServiceAsync?: <T>(name: string) => Promise<T> }
+      | undefined;
+    registerShareableObjectsRoutes(http, {
+      getEngine: () => optional<unknown>('objectql'),
+      getAuth: () => optional<RequestAuthService>('auth'),
+      tenancy: kernel && typeof kernel.getServiceAsync === 'function'
+        ? () => kernel.getServiceAsync!<TenancyPostureSource>('tenancy')
+        : undefined,
+      listShareableObjects: (context) => {
+        if (!this.ruleService) throw new SharingRulesNotRunningError();
+        return this.ruleService.listShareableObjects(context);
+      },
+    });
+    ctx.logger.info(`SharingServicePlugin: shareable objects list mounted at GET ${SHAREABLE_OBJECTS_ROUTE}`);
+  }
+
   async init(ctx: PluginContext): Promise<void> {
     // Register sys_record_share via the manifest service.
     ctx.getService<{ register(m: any): void }>('manifest').register({
@@ -1182,6 +1226,12 @@ export class SharingServicePlugin implements Plugin {
       } catch (err: any) {
         ctx.logger.warn('SharingServicePlugin: share-link subsystem not started', { error: err?.message });
       }
+
+      // [#30209 row 5 B] The objects a sharing rule can take effect on, for
+      // Setup's sharing-rule object picker. Mounted whenever an HTTP server is
+      // present; with no rule service running it answers 501 rather than an
+      // unmounted path (see `shareable-objects-routes.ts`).
+      this.mountShareableObjectsRoute(ctx);
     });
 
     // [#2926 ③] Materialize sharing grants for rows already present at boot.

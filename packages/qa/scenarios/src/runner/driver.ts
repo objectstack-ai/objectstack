@@ -78,6 +78,10 @@ export interface DriverInfo {
   authorMaxTurns?: Record<ScenarioTier, number>;
   /** The live driver's turn cap per question or operation turn. */
   askMaxTurns?: number;
+  /** The model the live driver asks for on an authoring turn (`--model` / `--author-model`); absent ⇒ the login's default. */
+  authorModel?: string;
+  /** The model the live driver asks for on a question or operation turn (`--model` / `--ask-model`); absent ⇒ the login's default. */
+  askModel?: string;
 }
 
 export interface AgentDriver {
@@ -155,8 +159,35 @@ export interface ClaudeCodeDriverOptions {
   authorTimeoutMs?: number;
   /** Wall-clock budget per question or operation, ms; default 5 min. */
   askTimeoutMs?: number;
-  /** Optional model alias passed as `--model` (the login's default otherwise). */
+  /** The model passed as `--model` on every turn (an alias such as `sonnet`, or a full name); the login's default otherwise. */
   model?: string;
+  /** The model for an authoring turn (build and iterate), in place of {@link model}. */
+  authorModel?: string;
+  /** The model for a question or operation turn, in place of {@link model}. */
+  askModel?: string;
+}
+
+/** `claude-sonnet-4-5-20250929[1m]` → `['claude', 'sonnet', '4', '5', '20250929']`: the name's parts, the context-size suffix dropped. */
+const modelParts = (name: string): string[] => name.toLowerCase().replace(/\[[^\]]*\]$/, '').split('-').filter(Boolean);
+
+/**
+ * Was the turn served the model it asked for? The CLI takes an alias
+ * (`sonnet`) or a name (`claude-opus-4-1`) and the stream's init line names
+ * the model it resolved to (`claude-sonnet-4-5-20250929`), so a turn is served
+ * as asked when the served name holds the requested one as a whole run of its
+ * dash-separated parts — `sonnet` and `claude-sonnet-4-5` in
+ * `claude-sonnet-4-5-20250929`, never `opus` in it. Any other answer, an alias
+ * that names no model family (`default`, `opusplan`) included, is a mismatch the
+ * scorecard shows beside both names, for the reader to judge.
+ */
+export function servedAsRequested(requested: string, served: string): boolean {
+  const want = modelParts(requested);
+  const got = modelParts(served);
+  if (want.length === 0) return false;
+  for (let i = 0; i + want.length <= got.length; i++) {
+    if (want.every((part, j) => got[i + j] === part)) return true;
+  }
+  return false;
 }
 
 interface CliRun {
@@ -297,6 +328,14 @@ export class ClaudeCodeDriver implements AgentDriver {
     return this.opts.askMaxTurns ?? DEFAULT_ASK_MAX_TURNS;
   }
 
+  private get authorModel(): string | undefined {
+    return this.opts.authorModel ?? this.opts.model;
+  }
+
+  private get askModel(): string | undefined {
+    return this.opts.askModel ?? this.opts.model;
+  }
+
   info(): DriverInfo {
     return {
       driver: 'claude-code-cli',
@@ -306,12 +345,14 @@ export class ClaudeCodeDriver implements AgentDriver {
       authorTimeoutMs: this.authorTimeoutMs,
       authorMaxTurns: Object.fromEntries(SCENARIO_TIERS.map((t) => [t, this.authorMaxTurns(t)])) as Record<ScenarioTier, number>,
       askMaxTurns: this.askMaxTurns,
+      ...(this.authorModel ? { authorModel: this.authorModel } : {}),
+      ...(this.askModel ? { askModel: this.askModel } : {}),
     };
   }
 
-  private base(maxTurns: number): string[] {
+  private base(maxTurns: number, model: string | undefined): string[] {
     const a = ['--output-format', 'stream-json', '--verbose', '--max-turns', String(maxTurns)];
-    if (this.opts.model) a.push('--model', this.opts.model);
+    if (model) a.push('--model', model);
     return a;
   }
 
@@ -320,16 +361,17 @@ export class ClaudeCodeDriver implements AgentDriver {
     writeFileSync(empty, JSON.stringify({ mcpServers: {} }));
     try {
       const maxTurns = this.authorMaxTurns(task.tier);
+      const model = this.authorModel;
       const args = [
         '-p',
-        ...this.base(maxTurns),
+        ...this.base(maxTurns, model),
         '--mcp-config', empty, '--strict-mcp-config',
         '--permission-mode', 'acceptEdits',
         '--allowedTools', 'Bash', 'Read', 'Edit', 'Write', 'Glob', 'Grep', 'Skill',
       ];
       const run = await runCli(this.bin, args, task.cwd, task.prompt, this.authorTimeoutMs);
       const turn = parseStreamJson(run.stdout);
-      turn.meta.process = { ...run.process, maxTurns };
+      turn.meta.process = { ...run.process, maxTurns, ...(model ? { requestedModel: model } : {}) };
       if (turn.meta.resultSubtype === undefined) turn.meta.resultSubtype = noResult(run.process);
       return { turn, files: snapshotSources(task.cwd) };
     } finally {
@@ -349,10 +391,11 @@ export class ClaudeCodeDriver implements AgentDriver {
     );
     try {
       const maxTurns = this.askMaxTurns;
-      const args = ['-p', ...this.base(maxTurns), '--mcp-config', cfg, '--strict-mcp-config', '--allowedTools', 'mcp__app'];
+      const model = this.askModel;
+      const args = ['-p', ...this.base(maxTurns, model), '--mcp-config', cfg, '--strict-mcp-config', '--allowedTools', 'mcp__app'];
       const run = await runCli(this.bin, args, dir, task.prompt, this.opts.askTimeoutMs ?? 5 * 60_000);
       const turn = parseStreamJson(run.stdout);
-      turn.meta.process = { ...run.process, maxTurns };
+      turn.meta.process = { ...run.process, maxTurns, ...(model ? { requestedModel: model } : {}) };
       if (turn.meta.resultSubtype === undefined) turn.meta.resultSubtype = noResult(run.process);
       return turn;
     } finally {
