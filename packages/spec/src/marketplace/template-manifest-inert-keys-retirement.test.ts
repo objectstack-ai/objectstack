@@ -11,9 +11,11 @@
  * `name` and never read it back; the protocol check reads the artifact's
  * `engines.protocol`; the skills install is the whole catalog), and `os
  * package publish` read `visibility` only to warn that it ignores it.
- * `publisher` and `isStarter` stay: a first-party publish script sends both,
- * so their fate is a maintainer decision, and the control case below holds
- * that this retirement did not take them.
+ * `publisher` and `isStarter` were retired afterwards as their own family
+ * (maintainer ruling 6708417668, the second half of #31035): both are claims
+ * only the platform makes — a trust tier and the starter flag — so a value in
+ * an author's file never had an effect. Their pins are the second top-level
+ * `describe` below; the tree-scoped scan covers all seven keys.
  *
  * The bookkeeping shape, pinned below: a `retiredKey()` tombstone per key (the
  * schema is not strict, so a bare delete would strip silently), five
@@ -39,6 +41,8 @@ import { TemplateManifestSchema, type TemplateManifest } from './template-manife
 
 const RETIRED = ['name', 'specVersion', 'skills', 'scaffold', 'visibility'] as const;
 const D3_ID = 'marketplace-template-manifest-inert-keys-retired';
+const PLATFORM_DECIDED = ['publisher', 'isStarter'] as const;
+const PLATFORM_DECIDED_D3_ID = 'marketplace-template-manifest-platform-decided-keys-retired';
 
 /** A value each key used to accept — the shape an old manifest still carries. */
 const OLD_VALUES: Record<(typeof RETIRED)[number], unknown> = {
@@ -73,9 +77,9 @@ describe('TemplateManifestSchema — five inert keys are retired', () => {
     expect(message('specVersion', '^18.0.0')).toContain('engines.protocol');
   });
 
-  it('control: a manifest without them parses, and `publisher` / `isStarter` are NOT retired here', () => {
+  it('control: a manifest without them parses', () => {
     expect(TemplateManifestSchema.safeParse({ ...BASE }).success).toBe(true);
-    expect(TemplateManifestSchema.safeParse({ ...BASE, publisher: 'community', isStarter: true }).success).toBe(true);
+    expect(TemplateManifestSchema.safeParse({ ...BASE, readmePath: 'README.md' }).success).toBe(true);
   });
 
   it('the tsc channel: no value is assignable to a retired key', () => {
@@ -94,6 +98,35 @@ describe('TemplateManifestSchema — five inert keys are retired', () => {
   });
 });
 
+describe('TemplateManifestSchema — the two platform-decided keys are retired', () => {
+  const OLD: Record<(typeof PLATFORM_DECIDED)[number], unknown> = { publisher: 'community', isStarter: true };
+
+  it.each(PLATFORM_DECIDED)('REFUSES `%s` at its own path, carrying the prescription', (key) => {
+    const result = TemplateManifestSchema.safeParse({ ...BASE, [key]: OLD[key] });
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    const issue = result.error.issues.find((i) => i.path.join('.') === key);
+    expect(issue, JSON.stringify(result.error.issues)).toBeDefined();
+    expect(issue!.code).toBe('invalid_type');
+    expect(issue!.message).toMatch(
+      new RegExp(`^\`TemplateManifest\\.${key}\` was removed in @objectstack/spec 18 \\(ADR-0049\\) — `),
+    );
+    expect(issue!.message).toContain('Delete the key.');
+  });
+
+  it('refuses `isStarter: false` too — no value is accepted', () => {
+    expect(TemplateManifestSchema.safeParse({ ...BASE, isStarter: false }).success).toBe(false);
+  });
+
+  it('the tsc channel: no value is assignable to either key', () => {
+    // @ts-expect-error — `publisher` is a retiredKey() tombstone on this file.
+    const a: TemplateManifest = { ...BASE, publisher: 'community' };
+    // @ts-expect-error — `isStarter` is a retiredKey() tombstone on this file.
+    const b: TemplateManifest = { ...BASE, isStarter: true };
+    expect([a, b]).toHaveLength(2);
+  });
+});
+
 describe('ADR-0087 registration', () => {
   it('declares every tombstoned key under major 18', () => {
     expect(RETIRED_KEYS_BY_MAJOR[18]).toEqual(
@@ -105,6 +138,17 @@ describe('ADR-0087 registration', () => {
     const entries = MIGRATIONS_BY_MAJOR[18]!.semantic.filter((s) => s.id === D3_ID);
     expect(entries).toHaveLength(1);
     for (const key of RETIRED) expect(entries[0]!.surface).toContain(`TemplateManifest.${key}`);
+    expect(entries[0]!.reason.length).toBeGreaterThan(0);
+    expect(entries[0]!.acceptanceCriteria.length).toBeGreaterThan(0);
+  });
+
+  it('declares the two platform-decided keys under major 18, with their own D3 entry', () => {
+    expect(RETIRED_KEYS_BY_MAJOR[18]).toEqual(
+      expect.arrayContaining(PLATFORM_DECIDED.map((key) => `marketplace/TemplateManifest:${key}`)),
+    );
+    const entries = MIGRATIONS_BY_MAJOR[18]!.semantic.filter((s) => s.id === PLATFORM_DECIDED_D3_ID);
+    expect(entries).toHaveLength(1);
+    for (const key of PLATFORM_DECIDED) expect(entries[0]!.surface).toContain(`TemplateManifest.${key}`);
     expect(entries[0]!.reason.length).toBeGreaterThan(0);
     expect(entries[0]!.acceptanceCriteria.length).toBeGreaterThan(0);
   });
@@ -124,12 +168,13 @@ describe('ADR-0087 registration', () => {
 // on which this file is a `heldBy` witness (the walk descends with
 // `readdirSync` on a loop variable, so no literal path names the glob).
 describe('tree-scoped absence: no shipped objectstack.manifest.json declares a retired key', () => {
+  const ALL_RETIRED = [...RETIRED, ...PLATFORM_DECIDED];
   const SPEC_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
   const REPO_ROOT = path.resolve(SPEC_ROOT, '../..');
   const WALK_ROOTS = ['packages', 'examples'];
   const SKIPPED_DIRS = new Set(['node_modules', 'dist', '.git', '.turbo', '.cache', '.objectstack', 'coverage', '.next', '.source']);
 
-  it('every manifest in the radius omits the five keys', () => {
+  it('every manifest in the radius omits the seven keys', () => {
     const found: string[] = [];
     const offenders: string[] = [];
     const walk = (dir: string) => {
@@ -144,7 +189,7 @@ describe('tree-scoped absence: no shipped objectstack.manifest.json declares a r
         const rel = path.relative(REPO_ROOT, full).split(path.sep).join('/');
         found.push(rel);
         const manifest = JSON.parse(fs.readFileSync(full, 'utf-8')) as Record<string, unknown>;
-        for (const key of RETIRED) if (key in manifest) offenders.push(`${rel} declares \`${key}\``);
+        for (const key of ALL_RETIRED) if (key in manifest) offenders.push(`${rel} declares \`${key}\``);
       }
     };
     for (const root of WALK_ROOTS) walk(path.join(REPO_ROOT, root));
