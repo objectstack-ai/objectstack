@@ -54,6 +54,9 @@
 import { describe, it, expect, vi } from 'vitest';
 import { resolveThrownHttpError } from '@objectstack/types';
 import { ObjectStackProtocolImplementation } from './index.js';
+// Paid during collection, not inside a case's clock: the source reaches `@objectstack/lint`
+// through a dynamic import (`check:test-source-alias`).
+import '@objectstack/lint';
 
 const PKG = 'com.example.leave';
 
