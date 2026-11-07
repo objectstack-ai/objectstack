@@ -329,7 +329,15 @@ three buckets, and the declarations were written in the same change as this adde
 > sign-in factor, and `sys_invitation.copy_invitation_link` is assessed H, since it answers the
 > invitation's accept link, a bearer credential. The lists below are the amended record.
 
-**H — human-only (23):** `sys_user.impersonate_user` · `sys_user.set_user_password` ·
+> Amended (2026-11-07, #31124 — the two actions #31032 added, shipped in PR #31119, `a794e32c9b`):
+> `sys_scim_connection_credential.mint_scim_credential` is assessed H, since it mints a SCIM bearer
+> credential and answers it once (triage on #31032, `6692886264`: "Classify mint as not exposed to AI
+> tools"), and `sys_scim_connection_credential.revoke_scim_credential` is assessed C (the same triage:
+> "Revoke may be classified on its own merits"), since it hands out no credential and widens no access
+> but switches one bearer off and cannot be undone, as `sys_api_key.revoke_api_key` does. The lists
+> below are the amended record.
+
+**H — human-only (24):** `sys_user.impersonate_user` · `sys_user.set_user_password` ·
 `sys_user.create_user` · `sys_user.delete_my_account` · `sys_user.change_my_password` ·
 `sys_user.change_my_email` · `sys_user.disable_two_factor` · `sys_user.generate_backup_codes` ·
 `sys_two_factor.disable_two_factor` · `sys_two_factor.regenerate_backup_codes` ·
@@ -338,15 +346,17 @@ three buckets, and the declarations were written in the same change as this adde
 `sys_sso_provider.register_sso_provider` · `sys_sso_provider.register_saml_provider` ·
 `sys_sso_provider.verify_domain` · `sys_member.transfer_ownership` · `sys_member.update_member_role` ·
 `sys_organization.delete_organization` · `sys_user.enable_two_factor` ·
-`sys_two_factor.enable_two_factor` · `sys_invitation.copy_invitation_link`.
+`sys_two_factor.enable_two_factor` · `sys_invitation.copy_invitation_link` ·
+`sys_scim_connection_credential.mint_scim_credential`.
 
-**C — exposed, confirmed (17):** `sys_user.ban_user` · `sys_user.unban_user` · `sys_user.unlock_user` ·
+**C — exposed, confirmed (18):** `sys_user.ban_user` · `sys_user.unban_user` · `sys_user.unlock_user` ·
 `sys_user.set_user_manager` · `sys_api_key.revoke_api_key` · `sys_session.revoke_session` ·
 `sys_session.revoke_my_other_sessions` · `sys_invitation.cancel_invitation` ·
 `sys_invitation.reject_invitation` · `sys_member.remove_member` · `sys_team_member.remove_team_member` ·
 `sys_team.remove_team` · `sys_oauth_application.disable_oauth_application` ·
 `sys_oauth_application.delete_oauth_application` · `sys_sso_provider.delete_sso_provider` ·
-`sys_organization.leave_organization` · `sys_account.unlink_account`.
+`sys_organization.leave_organization` · `sys_account.unlink_account` ·
+`sys_scim_connection_credential.revoke_scim_credential`.
 
 **E — exposed (19):** `sys_user.invite_user` · `sys_invitation.invite_user` ·
 `sys_organization.invite_user` · `sys_member.invite_user` · `sys_invitation.resend_invitation` ·
@@ -357,13 +367,17 @@ three buckets, and the declarations were written in the same change as this adde
 `sys_oauth_application.enable_oauth_application` · `sys_user.update_my_profile` ·
 `sys_user.resend_verification_email` · `sys_sso_provider.request_domain_verification`.
 
-That is 59 actions and 36 `ai` blocks (H 23 / C 17 / E 19). The 2026-10-30 assessment covered 58
+That is 61 assessed actions and 37 `ai` blocks (H 24 / C 18 / E 19); the tree holds one more identity
+action, unassessed (below). The 2026-10-30 assessment covered 58
 actions in 38 blocks: the card's bucket headers read H 19 and E 22, its name lists, which the ruling
 adopted, held 20 and 21, and the names are the record. `sys_invitation.copy_invitation_link`, added
-after that assessment, and the two `enable_two_factor` moves came with the 2026-10-31 amendment.
+after that assessment, and the two `enable_two_factor` moves came with the 2026-10-31 amendment; the two
+`sys_scim_connection_credential` actions came with the 2026-11-07 amendment.
 
 **Not assessed.** `sys_approval_request`'s 9 actions (`plugin-approvals`) are outside this assessment:
-they are unassessed and human-only, with no `ai` block, until a maintainer ruling assesses them.
+they are unassessed and human-only, with no `ai` block, until a maintainer ruling assesses them. So is
+`sys_user.list_platform_admins` (PR #29427, 2026-11-02), the one identity action that postdates the
+assessment and is in no bucket above: no `ai` block, human-only, until a ruling assesses it.
 
 **No automatic check.** The maintainer struck the pin test the assessment proposed:
 「自动检查 有必要吗？每一个元数据应用都有类似的问题，后续都要检查吗」. This table lives only here; a reviewer
@@ -374,14 +388,14 @@ activation switch.
 **How the declarations reach an agent.** Over MCP, a `sys_*` action is listed and run only when the
 action itself declares `ai.exposed: true` — ADR-0066 D4's 2026-10-30 note records that mechanism
 (`packages/runtime/src/action-execution.ts#systemObjectActionExposureError`). As of this addendum the
-36 E and C actions above are the platform `sys_*` actions that declare it. Every gate after admission
+37 E and C actions above are the platform `sys_*` actions that declare it. Every gate after admission
 still runs: ADR-0066 D4's capability gate, the ADR-0126 §8 activation switch, the
 `ai.requiresConfirmation` gate (a C action is refused `428 ACTION_CONFIRMATION_REQUIRED`, nothing run,
 until the call carries `confirm: true`; `packages/runtime/src/action-execution.ts#actionConfirmationRefusal`),
 and the target's own authorization.
 
-**Declared is not yet runnable for an OAuth-connected agent.** All 36 are `type: 'api'` actions that
-forward to an identity route: 35 to the better-auth routes under `/api/v1/auth/`, and
+**Declared is not yet runnable for an OAuth-connected agent.** All 37 are `type: 'api'` actions that
+forward to an identity route: 36 to the better-auth routes under `/api/v1/auth/`, and
 `sys_api_key.revoke_api_key` to the REST data route. Those targets accept a signed-in session, and the
 forward of an OAuth-connected agent's call is answered `401` there. Which credentials a forward
 target accepts is not decided here; it is the open decision on #28178. Until that lands, an
