@@ -14,7 +14,7 @@
 - 活着 = 工作流文件在 `main` 且 Actions 状态 `active`;维护者在 Actions UI 停用即整队回 `direct`。
 - dispatch 带会话令牌发往 objectstack;run 在 runner 上以逐次铸造、窄到目标仓的 App 令牌执行。
 - 闭合 op 表住 `fleet-write/ops.mjs`;读侧不走中继;批量恒走逐 op 工具。
-- 直调 `dispatch.mjs` 仅落地,与 PR 正文单笔 `issue_patch`(`seat-post-protocol.md` 正文行,不送页脚)。
+- 直调 `dispatch.mjs` 仅落地,与 PR 正文单笔 `issue_patch`(`seat-post-protocol.md` 正文行)。
 - 正文超 60,000 字节的那一笔 `post-stamped` 写走 `direct` 并印一行,身份是席位自己的用户。
 - run 失败记 5(post-stamped 4,close-cards 有步落地或读不回 4),UNCONFIRMED 6:只读,⛔ 永不重试。
 
