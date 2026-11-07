@@ -48,6 +48,7 @@ import { OBJECT_EXTENSION_TYPE } from './protocol-object-extension-item.js';
 import { customizationPairEnsureRefusal, kernelPackageScope, type PairRegistry } from './protocol-customization-package.js';
 import { resolveOverlaySchema } from './protocol-meta-type-schema.js';
 import { resolvePackageClosure } from '@objectstack/lint/runtime';
+import { widenPairClosureToAppMembers } from './protocol-write-package-scope.js';
 import { overlayMemberField, overlayMemberOfBody, overlayMemberValue } from './migrations/overlay-index.js';
 import {
     customizationBasePackageId,
@@ -500,10 +501,16 @@ export function overlayPairFixOf(
     const kernelScope = kernelPackageScope(host.engine, base);
     const kernel = kernelScope === undefined ? {} : { kernelScope };
     if (registry.getPackage(pair)) return { base, pair, basedOn, ...kernel };
-    // The pair the ensure door would create: one dependency, the base.
-    const baseClosure = resolvePackageClosure(base, (id) => registry.getPackage(id) as { manifest?: unknown } | undefined);
-    const dependencies = [base, ...(baseClosure?.dependencies ?? []).filter((id) => id !== pair)];
-    return { base, pair, basedOn, pendingPairScope: { packageId: pair, dependencies }, ...kernel };
+    // The pair the ensure door would create: one dependency, the App that
+    // carries the base (the base itself for an App or an own-unit package),
+    // and the App's members through it ({@link widenPairClosureToAppMembers}).
+    const app = customizationBasePackageId(pair) ?? base;
+    const appClosure = resolvePackageClosure(app, (id) => registry.getPackage(id) as { manifest?: unknown } | undefined);
+    const pendingPairScope = widenPairClosureToAppMembers({
+        packageId: pair,
+        dependencies: [app, ...(appClosure?.dependencies ?? []).filter((id) => id !== pair)],
+    }, registry as Parameters<typeof widenPairClosureToAppMembers>[1]);
+    return { base, pair, basedOn, pendingPairScope, ...kernel };
 }
 
 /**

@@ -12408,17 +12408,19 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /**
-     * ADR-0146 D3 — ensure the paired customization package `<base>.custom` of
-     * an installed, read-only base: answer it when it is installed, create it
-     * when it is absent. The ONE creation path of the pair ("no second door
-     * builds the pair"), served over HTTP as `POST
+     * ADR-0146 D3 — ensure the paired customization package of an installed,
+     * read-only base: the pair of the App that carries it, `<app id>.custom`
+     * (the base's own `<base>.custom` for an App or a package that declares
+     * no App; ruling record 6691022506) — answer it when it is installed,
+     * create it when it is absent. The ONE creation path of the pair ("no
+     * second door builds the pair"), served over HTTP as `POST
      * /api/v1/packages/:id/ensure-customization` and called in-process by the
      * doors that customize a base.
      *
      * The created pair is a writable package whose id, namespace
-     * (`<base namespace>_custom`, set explicitly and never derived from the
-     * pair's id) and dependency (`^<major>` of the base's version) are the
-     * base's, through the pairing rules of `@objectstack/spec/kernel`; it is
+     * (`<app namespace>_custom`, set explicitly and never derived from the
+     * pair's id) and dependency (`^<major>` of the App's version) are the
+     * App's, through the pairing rules of `@objectstack/spec/kernel`; it is
      * installed through {@link installPackage}, so it lands in the registry
      * and in `sys_packages` together. An existing pair is returned unchanged,
      * or refused when it lacks the namespace or the dependency — never
@@ -12426,10 +12428,12 @@ export class ObjectStackProtocolImplementation implements
      * call in flight and judges afresh.
      *
      * Refused, before anything is written: a malformed request or a base id
-     * with no pair (`400`), a base not installed (`404`), a writable base, a
-     * base with no pair namespace or no SemVer version, an existing pair that
-     * lacks the namespace or the dependency (`409`), and a pair namespace
-     * another package owns (`422 NAMESPACE_CONFLICT`). The request and the
+     * with no pair (`400`), a base not installed (`404`), a kernel base, a
+     * base with no single App, a writable base, an App with no pair namespace
+     * or no SemVer version, an existing pair that lacks the namespace or the
+     * dependency, a pair namespace held by the per-package pair an earlier
+     * version created for a member of the same App (`409`), and a pair
+     * namespace a package outside the App owns (`422 NAMESPACE_CONFLICT`). The request and the
      * answer are `EnsureCustomizationPackageRequestSchema` /
      * `EnsureCustomizationPackageResponseSchema` (`@objectstack/spec/api`).
      */

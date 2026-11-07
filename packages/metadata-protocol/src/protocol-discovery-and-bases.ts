@@ -46,7 +46,7 @@ import {
     getMetadataTypeActions,
     getMetadataTypeSchema,
 } from '@objectstack/spec/kernel';
-import { pairOf } from '@objectstack/metadata-core';
+import { pairsOf } from '@objectstack/metadata-core';
 import { installedManifestsOfEngine } from './installed-manifests.js';
 import { storedBodyForCarryForward } from './protocol-credential-carry-forward.js';
 import type { Equal, MetaTypesListing } from './protocol-meta-types-listing.js';
@@ -408,11 +408,14 @@ export class ProtocolDiscoveryAndBasesFacet {
      */
     static async getPairTranslationBundle(host: Pick<ProtocolHost, 'engine' | 'findEnvironmentRows'>, basePackageId: string): Promise<TranslationBundle | undefined> {
         if (typeof basePackageId !== 'string' || basePackageId === '') return undefined;
-        const pair = pairOf(basePackageId, installedManifestsOfEngine(host.engine));
-        if (!pair.ok) return undefined;
+        // [ADR-0146 D3 merge question 12] The App's pair, and a per-package
+        // pair an earlier version created while it is installed (`pairsOf`).
+        const pairs = pairsOf(basePackageId, installedManifestsOfEngine(host.engine));
+        if (pairs.length === 0) return undefined;
+        const binding = pairs.length === 1 ? pairs[0] : { $in: pairs };
         const layer = await readAuthoredTranslationLayer({
             find: (table: string, opts: { where?: Record<string, unknown>; [key: string]: unknown } = {}) =>
-                host.findEnvironmentRows(table, { ...opts, where: { ...opts.where, package_id: pair.value } }),
+                host.findEnvironmentRows(table, { ...opts, where: { ...opts.where, package_id: binding } }),
         });
         // `null` is a read that failed: the layer's own rule is "keep what you
         // had", and a translation input has nothing to keep, so the caller
