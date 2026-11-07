@@ -21,10 +21,12 @@
  * ## Order
  *
  * Business objects first, then platform (system) objects; inside each group
- * by label, then by machine name. A platform object is one the registry marks
- * `isSystem`, or one named with the platform's `sys_` prefix (AGENTS.md Prime
- * Directive 6: a module prefix is part of the name).
+ * by label, then by machine name. A platform object is the one test
+ * `effectiveSharingModel` already asks (`isPlatformObjectSchema`): the registry
+ * marks it `isSystem`, or its name carries the platform's `sys_` prefix.
  */
+
+import { isPlatformObjectSchema } from './sharing-service.js';
 
 /** One object a sharing rule can take effect on. */
 export interface ShareableObject {
@@ -69,7 +71,6 @@ export class SharingRulesNotRunningError extends Error {
 interface ObjectConfigShape {
   name?: unknown;
   label?: unknown;
-  isSystem?: unknown;
 }
 
 function labelOf(name: string, config: ObjectConfigShape): string {
@@ -77,7 +78,7 @@ function labelOf(name: string, config: ObjectConfigShape): string {
 }
 
 function isPlatformObject(name: string, config: ObjectConfigShape): boolean {
-  return config.isSystem === true || name.startsWith('sys_');
+  return isPlatformObjectSchema(config) || name.startsWith('sys_');
 }
 
 function byGroupThenLabel(a: ShareableObject, b: ShareableObject): number {
