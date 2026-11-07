@@ -114,7 +114,7 @@ describe('TemplateManifestSchema — the two platform-decided keys are retired',
     expect(issue!.message).toContain('Delete the key.');
   });
 
-  it('refuses `isStarter: false` too — no value is accepted, not even the default', () => {
+  it('refuses `isStarter: false` too — no value is accepted', () => {
     expect(TemplateManifestSchema.safeParse({ ...BASE, isStarter: false }).success).toBe(false);
   });
 
