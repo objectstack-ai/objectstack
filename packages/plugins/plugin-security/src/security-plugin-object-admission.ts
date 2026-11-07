@@ -71,6 +71,7 @@ import type { PermissionSet } from '@objectstack/spec/security';
 import { PermissionDeniedError } from './errors.js';
 import { assertEngineOwnedWriteAllowed } from './system-write-guard.js';
 import { delegatedOrganizationRefusal, resolveDelegatorContext } from './explain-engine.js';
+import { delegatedUnitReadAdmission } from './delegated-admin-gate.js';
 
 /**
  * The `SecurityPlugin` members the functions below read — every one of them,
@@ -95,7 +96,7 @@ export interface ObjectAdmissionHost {
 
 /** The body of `SecurityPlugin#canReadObject`; the method's docblock there is its contract. */
 export async function canReadObject(
-  this: Pick<ObjectAdmissionHost, 'logger' | 'objectReadAdmission' | 'ql' | 'resolvePermissionSetsForContext' | 'tenancyPosture'>,
+  this: Pick<ObjectAdmissionHost, 'delegatedAdminGate' | 'logger' | 'objectReadAdmission' | 'ql' | 'resolvePermissionSetsForContext' | 'tenancyPosture'>,
   object: string,
   context?: any,
 ): Promise<boolean> {
@@ -130,7 +131,16 @@ export async function canReadObject(
 
     // 3–6. The posture and grant arms, over the resolved sets — the one
     // predicate the ADR-0055 master-derived read scope asks as well.
-    return await this.objectReadAdmission(objectName, permissionSets, delegatorSets);
+    //
+    // [ADR-0090 D12, ruling of record 6663849489] With the one admission the
+    // read door makes beside the grant at arm 5: a delegate reads the business
+    // units its admin scopes cover ({@link delegatedUnitReadAdmission}), so this
+    // answers yes where that read is admitted. A read of SOME rows, answered
+    // as every row-restricted read is: `true` here, the rows in
+    // `getReadFilter`, which confines the same read to the same units.
+    const gate = this.delegatedAdminGate;
+    return await this.objectReadAdmission(objectName, permissionSets, delegatorSets, async () =>
+      (await delegatedUnitReadAdmission(gate, objectName, 'find', context, permissionSets, delegatorSets)) !== null);
   } catch (e) {
     this.logger.error?.(
       `[security] canReadObject could not resolve the object-level read admission for ` +
@@ -147,6 +157,7 @@ export async function objectReadAdmission(
   objectName: string,
   permissionSets: PermissionSet[],
   delegatorSets: PermissionSet[] | null,
+  ungrantedRead?: () => Promise<boolean>,
 ): Promise<boolean> {
   if (permissionSets.length === 0) return false;
 
@@ -168,8 +179,14 @@ export async function objectReadAdmission(
     }
   }
 
-  // 5. The object-level CRUD grant.
-  if (!this.permissionEvaluator.checkObjectPermission('find', objectName, permissionSets, { isPrivate })) {
+  // 5. The object-level CRUD grant — or, where the asker hands one, the
+  //    admission the read door makes beside it for a read no set grants
+  //    (`canReadObject`'s ADR-0090 D12 delegated unit read). The ADR-0055
+  //    master-derived scope hands none.
+  if (
+    !this.permissionEvaluator.checkObjectPermission('find', objectName, permissionSets, { isPrivate })
+    && !(ungrantedRead && (await ungrantedRead()))
+  ) {
     return false;
   }
 

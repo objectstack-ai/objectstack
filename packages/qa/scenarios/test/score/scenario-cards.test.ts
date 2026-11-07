@@ -53,7 +53,7 @@ const AREAS = readCapabilityAreas(resolve(HERE, '../../../../../docs/qa/platform
 const controls: ScenarioCard[] = DEFAULT_METADATA_EVAL_CORPUS.map((c) => resolve(SCENARIOS_DIR, `${c.id}.json`))
   .filter((file) => existsSync(file))
   .map((file) => {
-    const { card, refusals } = loadScenarioFile(file, { areas: AREAS });
+    const { card, refusals } = loadScenarioFile(file, { areas: AREAS, library: 'open' });
     if (!card) throw new Error(refusals.map(formatRefusal).join('\n'));
     return card.card;
   })

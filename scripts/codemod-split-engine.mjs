@@ -323,6 +323,8 @@ const STAY_REASONS = Object.freeze({
   'foreign-private': 'it reads a private or protected instance member off a receiver other than `this` (a module function cannot)',
   'private-static': 'it reads a non-public static of its class (the statics route is `ObjectQL`\'s alone; the scoped classes declare none)',
   'facade-taken': 'it hands the engine on, and the class declares a member named `facade` (the identity port would shadow it)',
+  'ctor-facet-name': 'a class that declares a member of the name a moved constructor body takes in its facet',
+  'definite-assignment': 'a constructor that writes a field only a constructor may assign (TS2564) other than as R8 carries it: a leading `this.F = EXPR;` whose EXPR reads no `this` and no top-level name of engine.ts',
 });
 
 /**
@@ -552,8 +554,12 @@ function instanceMembers(tm, cls) {
  * Read one method: why it must stay (empty = it moves), what its body reads
  * through the host, and which imports its module needs.
  */
-function readMethod(tm, ctx, m) {
+function readMethod(tm, ctx, m, { skip = [] } = {}) {
   const { Node, SyntaxKind } = tm;
+  // The constructor (#30020 R8) is read as a method is, with the statements
+  // R8 keeps on the class (`skip`, source ranges) left out of the reading.
+  const isCtor = Node.isConstructorDeclaration(m);
+  const skipped = (node) => skip.some(([s, e]) => node.getStart() >= s && node.getEnd() <= e);
   const reasons = [];
   const add = (code, detail) => {
     const tag = detail ? `${code}: ${detail}` : code;
@@ -574,18 +580,20 @@ function readMethod(tm, ctx, m) {
   const routeBlockers = [];
   let readsNonPublicStatic = false;
   let classOther = false;
-  const result = () => ({ reasons, host, writes, imports, moduleRefs, classStatics, routeBlockers, readsNonPublicStatic, classOther, identity });
+  // The parameters the body reads (a constructor's facet takes only those: R8).
+  const paramsRead = new Set();
+  const result = () => ({ reasons, host, writes, imports, moduleRefs, classStatics, routeBlockers, readsNonPublicStatic, classOther, identity, paramsRead });
 
-  if (m.isStatic() && ctx.members.has(m.getName())) add('static-name-shared');
+  if (!isCtor && m.isStatic() && ctx.members.has(m.getName())) add('static-name-shared');
   if (!m.getBody()) add('no-body');
   if (m.isAbstract && m.isAbstract()) add('no-body');
-  if (m.isGenerator()) add('generator');
+  if (!isCtor && m.isGenerator()) add('generator');
   if (m.getOverloads().length > 0) add('overloaded');
-  if (m.getDecorators().length > 0) add('decorated');
-  const nameNode = m.getNameNode();
-  if (!Node.isIdentifier(nameNode)) { add('not-identifier-name'); return result(); }
-  const name = nameNode.getText();
-  if (!m.getReturnTypeNode() && m.getScope() !== 'private') add('inferred-return-type');
+  if (!isCtor && m.getDecorators().length > 0) add('decorated');
+  const nameNode = isCtor ? null : m.getNameNode();
+  if (!isCtor && !Node.isIdentifier(nameNode)) { add('not-identifier-name'); return result(); }
+  const name = isCtor ? 'constructor' : nameNode.getText();
+  if (!isCtor && !m.getReturnTypeNode() && m.getScope() !== 'private') add('inferred-return-type');
   for (const p of m.getParameters()) {
     // A defaulted identifier forwards as it is: the stub keeps the default and
     // hands the body the value it produced.
@@ -614,6 +622,7 @@ function readMethod(tm, ctx, m) {
   for (const region of regions) {
     const nodes = [region, ...region.getDescendants()];
     for (const node of nodes) {
+      if (skip.length > 0 && skipped(node)) continue;
       const kind = node.getKind();
       if (kind === SyntaxKind.SuperKeyword) add('super');
       if (kind === SyntaxKind.ThisType) add('this-type');
@@ -627,7 +636,7 @@ function readMethod(tm, ctx, m) {
       }
       if (kind === SyntaxKind.ThisKeyword) {
         if (thisContainer(tm, node) !== m) continue;
-        if (m.isStatic()) { add('static-this'); continue; }
+        if (!isCtor && m.isStatic()) { add('static-this'); continue; }
         const parent = node.getParent();
         const inBody = region === body && !inTypePosition(tm, node, m);
         if (ctx.identityPort && inBody && Node.isElementAccessExpression(parent) && parent.getExpression() === node) {
@@ -706,6 +715,7 @@ function readMethod(tm, ctx, m) {
         if (decl.getSourceFile() !== ctx.sf.compilerNode) continue;
         const ts = tm.ts;
         const typePos = inTypePosition(tm, node, m);
+        if (ts.isParameter(decl) && decl.parent === m.compilerNode && region === body) paramsRead.add(node.getText());
         if (ts.isImportSpecifier(decl) || ts.isImportClause(decl) || ts.isNamespaceImport(decl)) {
           const local = node.getText();
           const prev = imports.get(local);
@@ -761,6 +771,117 @@ function readMethod(tm, ctx, m) {
     if (classOther) add('static-route-conflict');
   }
   return result();
+}
+
+/**
+ * The fields of the class a strict compiler requires the constructor to
+ * assign (TS2564 when no constructor statement does): an instance property
+ * with a declared type, no initializer, no `?` and no `!`, whose type node is
+ * not `any`, `unknown` or a union naming `undefined`. Judged on the type
+ * node's text alone, so a type that admits `undefined` through an alias counts
+ * as required, which only ever keeps more on the class.
+ */
+function requiredFieldsOf(tm, cls) {
+  const { SyntaxKind } = tm;
+  const out = new Set();
+  for (const p of cls.getProperties()) {
+    if (p.isStatic() || p.hasInitializer() || p.hasQuestionToken() || p.hasExclamationToken()) continue;
+    const t = p.getTypeNode();
+    if (!t) continue;
+    const k = t.getKind();
+    if (k === SyntaxKind.AnyKeyword || k === SyntaxKind.UnknownKeyword) continue;
+    if (k === SyntaxKind.UnionType && t.getTypeNodes().some((u) => u.getKind() === SyntaxKind.UndefinedKeyword)) continue;
+    out.add(p.getName());
+  }
+  return out;
+}
+
+/** The marker R8 leaves in the constructor's facet body where it kept a statement on the class. */
+const r8MarkerText = (field, fn) => `// ${MARK} R8: \`this.${field}\` is assigned on the class (\`${fn}\`).`;
+
+/** The facet member that returns the value R8 keeps a constructor assignment of `field` reading. */
+const r8FnName = (field) => `${CTOR_FACET_MEMBER}${field[0].toUpperCase()}${field.slice(1)}`;
+
+/** The facet member a moved constructor body becomes. */
+const CTOR_FACET_MEMBER = 'construct';
+
+/** Is `name` one a moved constructor's facet member takes (`construct`, or R8's `constructF`)? */
+const isCtorFacetName = (name) => name === CTOR_FACET_MEMBER || new RegExp(`^${CTOR_FACET_MEMBER}[A-Z_$]`).test(name);
+
+/**
+ * R8 (#30020), definite-assignment wiring. A strict compiler accepts a field
+ * the constructor must assign (`requiredFieldsOf`) only when a constructor
+ * statement assigns it, so moving that statement into a facet is a TS2564
+ * (and a TS2565 at every read after it). R8 keeps the assignment on the class
+ * and moves its right side: each LEADING statement of the body that is
+ * exactly `this.F = EXPR;`, F required, EXPR reading no `this` and no
+ * top-level name of `engine.ts` (its parameters, imports and globals only),
+ * stays as `this.F = Facet.constructF(params);`, and `constructF` returns
+ * EXPR. The facet body holds a marker line in its place, which the undo turns
+ * back into the statement. Any other write to a required field (after another
+ * statement, nested, or with a right side R8 cannot carry) keeps the
+ * constructor whole: `definite-assignment`.
+ *
+ * Returns `{ r8: [{ field, fn, start, end, exprText, imports, params }], reasons }`.
+ */
+function definiteAssignmentsOf(tm, ctx, ctor) {
+  const { Node, SyntaxKind } = tm;
+  const required = requiredFieldsOf(tm, ctx.cls);
+  const r8 = [];
+  const reasons = [];
+  const body = ctor.getBody();
+  if (!body || required.size === 0) return { r8, reasons };
+  const checker = ctx.sf.getProject().getTypeChecker().compilerObject;
+  const ts = tm.ts;
+  const carried = (stmt) => {
+    if (!Node.isExpressionStatement(stmt)) return null;
+    const e = stmt.getExpression();
+    if (!Node.isBinaryExpression(e) || e.getOperatorToken().getKind() !== SyntaxKind.EqualsToken) return null;
+    const left = e.getLeft();
+    if (!Node.isPropertyAccessExpression(left) || left.getExpression().getKind() !== SyntaxKind.ThisKeyword) return null;
+    const field = left.getName();
+    if (!required.has(field)) return null;
+    const expr = e.getRight();
+    if (stmt.getText() !== `this.${field} = ${expr.getText()};`) return null;
+    const imports = new Map();
+    const params = new Set();
+    for (const n of [expr, ...expr.getDescendants()]) {
+      const k = n.getKind();
+      if (k === SyntaxKind.ThisKeyword || k === SyntaxKind.SuperKeyword) return null;
+      if (k !== SyntaxKind.Identifier) continue;
+      if (n.getText() === 'arguments') return null;
+      const symbol = checker.getSymbolAtLocation(n.compilerNode);
+      for (const decl of symbol?.declarations ?? []) {
+        if (decl.getSourceFile() !== ctx.sf.compilerNode) continue;
+        if (ts.isParameter(decl) && decl.parent === ctor.compilerNode) { params.add(n.getText()); continue; }
+        if (ts.isImportSpecifier(decl) || ts.isImportClause(decl) || ts.isNamespaceImport(decl)) {
+          const prev = imports.get(n.getText());
+          imports.set(n.getText(), { value: Boolean(prev && prev.value) || !inTypePosition(tm, n, ctor) });
+          continue;
+        }
+        if (isModuleScopeDecl(ts, decl)) return null;
+      }
+    }
+    if (ctx.members.has(r8FnName(field))) return null;
+    return { field, fn: r8FnName(field), start: stmt.getStart(), end: stmt.getEnd(), exprText: expr.getText(), imports, params };
+  };
+  const statements = body.getStatements();
+  let i = 0;
+  for (; i < statements.length; i += 1) {
+    const hit = carried(statements[i]);
+    if (!hit) break;
+    r8.push(hit);
+  }
+  for (const st of statements.slice(i)) {
+    for (const pa of [st, ...st.getDescendants()].filter((n) => Node.isPropertyAccessExpression(n))) {
+      if (pa.getExpression().getKind() !== SyntaxKind.ThisKeyword || thisContainer(tm, pa.getExpression()) !== ctor) continue;
+      if (required.has(pa.getName()) && isWritten(tm, pa)) {
+        const tag = `definite-assignment: ${pa.getName()}`;
+        if (!reasons.includes(tag)) reasons.push(tag);
+      }
+    }
+  }
+  return { r8, reasons };
 }
 
 /**
@@ -1657,6 +1778,66 @@ function stubBody({ node, name, usesHost, docMoved }, moduleFile, closeIndent, m
   }
   out.push(`${closeIndent}}`);
   return out.join('\n');
+}
+
+/** The constructor's forwarded arguments: the parameters a moved part reads, in declaration order. */
+const ctorArgs = (node, read) => forwardList(node).filter((_, i) => read.has(node.getParameters()[i].getName()));
+
+/**
+ * A moved constructor's body (#30020 R8): the marker line, each statement R8
+ * keeps (`this.F = Facet.constructF(…)`), then ONE call of the facet's
+ * `construct`. Gate wiring only: `this.x = <forwarding call>` and a
+ * forwarding call. Pure: `verify` rebuilds it and compares.
+ */
+function ctorStubBody({ node, usesHost, r8, paramsRead }, moduleFile, closeIndent, mark = MARK) {
+  const ind = `${closeIndent}  `;
+  const facet = facetNameOf(moduleFile);
+  const out = ['{'];
+  out.push(usesHost
+    ? `${ind}// ${mark} The body moved to \`${moduleFile}\` (see \`${hostNameOf(moduleFile)}\`).`
+    : `${ind}// ${mark} The body moved to \`${moduleFile}\`.`);
+  for (const a of r8) out.push(`${ind}this.${a.field} = ${facet}.${a.fn}(${ctorArgs(node, a.params).join(', ')});`);
+  const args = ctorArgs(node, paramsRead).join(', ');
+  out.push(usesHost
+    ? `${ind}${facet}.${CTOR_FACET_MEMBER}.call(${hostVarOf(moduleFile)}.of(this)${args ? `, ${args}` : ''});`
+    : `${ind}${facet}.${CTOR_FACET_MEMBER}(${args});`);
+  out.push(`${closeIndent}}`);
+  return out.join('\n');
+}
+
+/** R8's facet member: the value the constructor statement R8 keeps on the class assigns. */
+function r8FnText(node, a, classType) {
+  const params = node.getParameters().filter((p) => a.params.has(p.getName())).map((p) => p.getText());
+  return `  /** R8 (#30020): the value \`${CLASS_NAME}\`'s constructor assigns to \`${a.field}\`, a field only a constructor may assign. */\n` +
+    `  static ${a.fn}(${params.join(', ')}): ${classType}['${a.field}'] {\n    return ${a.exprText};\n  }`;
+}
+
+/**
+ * The constructor's facet member: its parameters the body reads, `this` a
+ * `Pick` of the host when it reads the class, and its body with R1 applied and
+ * each statement R8 kept on the class replaced by a marker line.
+ */
+function ctorFacetText(r, hostName) {
+  const m = r.node;
+  const picks = [...r.host.keys()].sort().map((k) => `'${k}'`).join(' | ');
+  const params = [...(r.host.size > 0 ? [`this: Pick<${hostName}, ${picks}>`] : []),
+    ...m.getParameters().filter((p) => r.paramsRead.has(p.getName())).map((p) => p.getText())];
+  const body = m.getBody();
+  const start = body.getStart();
+  const text = body.getText();
+  const edits = [];
+  for (const at of r.identity) {
+    if (text.slice(at - start, at - start + 4) !== 'this') refuse(`identity port: no \`this\` at offset ${at}`);
+    edits.push({ start: at - start, end: at - start + 4, text: `this.${FACADE_MEMBER}` });
+  }
+  for (const a of r.r8) edits.push({ start: a.start - start, end: a.end - start, text: r8MarkerText(a.field, a.fn) });
+  return `  /** The body of \`${CLASS_NAME}\`'s constructor; the constructor there keeps its signature and docblock. */\n` +
+    `  static ${CTOR_FACET_MEMBER}(${params.join(', ')}): void ${applyOrderedEdits(text, edits)}`;
+}
+
+/** The facet member texts a moved constructor becomes, in module order: R8's, then `construct`. */
+function ctorFacetTexts(r, hostName, classType) {
+  return [...r.r8.map((a) => r8FnText(r.node, a, classType)), ctorFacetText(r, hostName)];
 }
 
 /** The facets whose bodies read the class, as `hostsTexts` takes them, from the movers of each module. */
@@ -3325,6 +3506,17 @@ async function mainHandDocs(tm, argv) {
 //    (`ScopedContext`) is imported from `./engine.js` (lever (a) of ruling
 //    6591753301), and the header's import paragraph says so; no export list
 //    widens, and a routed module refuses.
+//  - R8, definite-assignment wiring (`--members constructor`). The
+//    constructor moves as a method does, into its section's facet as
+//    `construct` (taking only the parameters its body reads), and its stub
+//    keeps the signature. A field a strict compiler requires the constructor
+//    to assign (`requiredFieldsOf`: moved out, it is a TS2564) stays assigned
+//    on the class: each LEADING `this.F = EXPR;`, EXPR reading no `this` and
+//    no top-level name of `engine.ts`, becomes `this.F = Facet.constructF(…)`
+//    in the stub, `constructF` returns EXPR, and the facet body holds a marker
+//    line in the statement's place, which the undo turns back into it. Any
+//    other write to such a field keeps the constructor whole
+//    (`definite-assignment`).
 //
 // A statement the hand grew on one line past the wrap width (`runStyles`) is
 // kept on one line by the move and by the undo alike.
@@ -3604,11 +3796,25 @@ function planMembers(tm, text, moduleTexts, names, { anchors = SECTION_ANCHORS, 
   const sectionOf = readSections(ctx.cls, anchors);
   const records = [];
   for (const name of names) {
-    const found = ctx.cls.getMethods().filter((m) => m.getName() === name);
-    if (found.length !== 1) refuse(`--members names ${name}, which ${CLASS_NAME} declares as ${found.length === 0 ? 'no method' : 'more than one method'}`);
+    // The constructor (#30020 R8): read with the statements R8 keeps on the
+    // class left out; their right sides' imports go with the facet.
+    const isCtor = name === 'constructor';
+    const found = isCtor ? ctx.cls.getConstructors() : ctx.cls.getMethods().filter((m) => m.getName() === name);
+    if (found.length !== 1) refuse(`--members names ${name}, which ${CLASS_NAME} declares as ${found.length === 0 ? `no ${isCtor ? 'constructor' : 'method'}` : `more than one ${isCtor ? 'constructor' : 'method'}`}`);
     const m = found[0];
     if (isGeneratedStub(m)) refuse(`${name} is already moved: its body is a ${MARK} stub`);
-    const read = readMethod(tm, ctx, m);
+    const da = isCtor ? definiteAssignmentsOf(tm, ctx, m) : null;
+    const read = readMethod(tm, ctx, m, { skip: da ? da.r8.map((a) => [a.start, a.end]) : [] });
+    if (da) {
+      read.reasons.push(...da.reasons);
+      if (ctx.members.has(CTOR_FACET_MEMBER)) read.reasons.push(`ctor-facet-name: ${CTOR_FACET_MEMBER}`);
+      for (const a of da.r8) {
+        for (const [local, use] of a.imports) {
+          const prev = read.imports.get(local);
+          read.imports.set(local, { value: Boolean(prev && prev.value) || use.value });
+        }
+      }
+    }
     const section = sectionOf(m);
     if (!section) read.reasons.unshift('no-section');
     else if (section[2] === null) read.reasons.unshift('section-kept');
@@ -3617,8 +3823,9 @@ function planMembers(tm, text, moduleTexts, names, { anchors = SECTION_ANCHORS, 
       refuse(`${name} stays on the class, as the first pass would keep it: ${read.reasons.map((r) => `${r} (${STAY_REASONS[r.split(':')[0]] ?? r})`).join('; ')}`);
     }
     const docStart = m.getStart(true);
-    const doc = m.getScope() === 'private' && docStart < m.getStart() ? text.slice(docStart, m.getStart()) : null;
-    records.push({ name, node: m, module: section[2], section: section[1], doc, ...read });
+    const doc = !isCtor && m.getScope() === 'private' && docStart < m.getStart() ? text.slice(docStart, m.getStart()) : null;
+    const ctorParts = da ? { r8: da.r8, facetNames: [...da.r8.map((a) => a.fn), CTOR_FACET_MEMBER] } : {};
+    records.push({ name, node: m, module: section[2], section: section[1], doc: isCtor ? null : doc, ...read, ...ctorParts });
   }
   records.sort((a, b) => a.node.getStart() - b.node.getStart());
   const modules = new Map();
@@ -3631,6 +3838,11 @@ function planMembers(tm, text, moduleTexts, names, { anchors = SECTION_ANCHORS, 
     const typeImportsClass = new RegExp(`^import type \\{[^}]*\\b${CLASS_NAME}\\b[^}]*\\} from '\\./engine\\.js';$`, 'm').test(mod);
     for (const r of movers) {
       if (r.host.size > 0 && !hasHost) refuse(`${r.name} reads the class, and ${file} has no host: this pass does not give a facet one`);
+      if (r.r8 && r.r8.length > 0 && !hasHost) refuse(`${r.name}: R8 types its facet members by the host interface's class, and ${file} has no host`);
+      if (r.facetNames) {
+        const held = facetMembersOf(tm, file, mod)?.members.map((x) => x.name) ?? [];
+        for (const n of r.facetNames) if (held.includes(n)) refuse(`${r.name}: ${file} already holds a facet member ${n}`);
+      }
       if (r.host.size > 0 && r.node.getParameters().some((p) => p.getName() === hostVarOf(file))) {
         refuse(`${r.name}: a parameter is named ${hostVarOf(file)}, which its stub reads as the facet's host`);
       }
@@ -3669,7 +3881,10 @@ function generateMembers(tm, text, moduleTexts, planned) {
       const lineStart = lineStartOf(text, body.getEnd() - 1);
       const closeIndent = text.slice(lineStart, body.getEnd() - 1);
       if (!/^ *$/.test(closeIndent)) refuse(`${r.name}: the body's closing brace does not open its own line`);
-      edits.push({ start: body.getStart(), end: body.getEnd(), text: stubBody({ node: r.node, name: r.name, usesHost: r.host.size > 0, docMoved: Boolean(r.doc) }, file, closeIndent) });
+      edits.push({ start: body.getStart(), end: body.getEnd(), text: r.r8
+        ? ctorStubBody({ node: r.node, usesHost: r.host.size > 0, r8: r.r8, paramsRead: r.paramsRead }, file, closeIndent)
+        : stubBody({ node: r.node, name: r.name, usesHost: r.host.size > 0, docMoved: Boolean(r.doc) }, file, closeIndent) });
+      if (r.r8) continue;
       const asyncKw = r.node.getModifiers().find((x) => x.getKind() === tm.SyntaxKind.AsyncKeyword);
       if (asyncKw) edits.push({ start: asyncKw.getStart(), end: r.node.getNameNode().getStart(), text: '' });
       if (r.doc) edits.push({ start: r.node.getStart(true), end: r.node.getStart(), text: '' });
@@ -3713,18 +3928,23 @@ function generateMembers(tm, text, moduleTexts, planned) {
     // The members, in class order among the ones the module holds.
     const facet = facetMembersOf(tm, file, mod);
     if (!facet) refuse(`${file}: its facet class is not as the first pass wrote it`);
+    const ctorAt = ctx.cls.getConstructors()[0]?.getStart();
     const classPos = (name) => {
       const ms = ctx.cls.getMethods().filter((m) => m.getName() === name);
+      // A moved constructor's facet members (R8's, then `construct`) stand where the constructor does.
+      if (ms.length === 0 && ctorAt !== undefined && isCtorFacetName(name)) return ctorAt;
       if (ms.length !== 1) refuse(`${file}: facet member ${name} has ${ms.length} methods of that name on the class`);
       return ms[0].getStart();
     };
     const held = facet.members.map((m) => ({ ...m, at: classPos(m.name) }));
     const hostName = hostNameOf(file);
+    const classType = interfaceRegionOf(mod, hostName)?.classType ?? CLASS_NAME;
     const groups = new Map();
     for (const r of movers) {
       const next = held.find((m) => m.at > r.node.getStart());
       const key = next ? next.name : '';
-      groups.set(key, [...(groups.get(key) ?? []), facetMethodText(r, hostName)]);
+      const texts = r.r8 ? ctorFacetTexts(r, hostName, classType) : [facetMethodText(r, hostName)];
+      groups.set(key, [...(groups.get(key) ?? []), ...texts]);
     }
     for (const [key, texts] of groups) {
       if (key) {
@@ -3741,7 +3961,7 @@ function generateMembers(tm, text, moduleTexts, planned) {
     const listed = [...header.names];
     for (const r of movers) {
       const k = listed.findIndex((n) => classPos(n) > r.node.getStart());
-      listed.splice(k < 0 ? listed.length : k, 0, r.name);
+      listed.splice(k < 0 ? listed.length : k, 0, ...(r.facetNames ?? [r.name]));
     }
     modEdits.push({ start: header.region.start, end: header.region.end, text: moduleHeaderLines(title, listed, header.tail).join('\n') });
     // The host interface gains what the moved bodies read.
@@ -3917,6 +4137,74 @@ function routedStaticReads(texts) {
   return reads;
 }
 
+/** R8's marker line in a moved constructor's facet body, parsed: the field and the facet member. */
+const R8_MARKER = new RegExp(`// ${MARK.replace(/[[\]]/g, '\\$&')} R8: \`this\\.([\\w$]+)\` is assigned on the class \\(\`([\\w$]+)\`\\)\\.`, 'g');
+
+/**
+ * `verifyMembers` for a moved constructor (#30020 R8): its base reading
+ * (R8's statements, then the rest as a method is read) holds no stay reason;
+ * the stub, each R8 facet member and `construct` are what `generateMembers`
+ * writes from that base. Sets `mv.fm` (`construct`), `mv.r8Fms` and
+ * `mv.facetNames` for the undo.
+ */
+function verifyCtorMove(tm, base, headText, headModules, mv, fail) {
+  const { hm, bm, file } = mv;
+  if (mv.docMoved) fail('constructor: its stub says its docblock moved, and a constructor keeps its docblock');
+  const da = definiteAssignmentsOf(tm, base, bm);
+  const read = readMethod(tm, base, bm, { skip: da.r8.map((a) => [a.start, a.end]) });
+  const reasons = [...read.reasons, ...da.reasons];
+  if (reasons.length > 0) fail(`constructor: a stay rule holds it at base (${reasons.join('; ')})`);
+  if ((read.host.size > 0) !== mv.usesHost) fail(`constructor: its stub ${mv.usesHost ? 'hands' : 'hands no'} host, and its base body reads ${read.host.size > 0 ? 'the class' : 'no class member'}`);
+  const text = headModules.get(file);
+  const facet = text && text.includes(MARK) ? facetMembersOf(tm, file, text) : null;
+  const names = [...da.r8.map((a) => a.fn), CTOR_FACET_MEMBER];
+  const fms = names.map((n) => facet?.members.find((m) => m.name === n));
+  if (fms.some((fm) => !fm)) { fail(`constructor: ${file} at head does not hold every facet member ${names.join(', ')}`); return; }
+  mv.facetNames = names;
+  mv.fm = fms.at(-1).node;
+  mv.r8Fms = new Map(fms.slice(0, -1).map((fm) => [fm.name, fm.node]));
+  mv.moduleText = text;
+  const body = hm.getBody();
+  const closeIndent = headText.slice(lineStartOf(headText, body.getEnd() - 1), body.getEnd() - 1);
+  if (body.getText() !== ctorStubBody({ node: hm, usesHost: mv.usesHost, r8: da.r8, paramsRead: read.paramsRead }, file, closeIndent)) {
+    fail('constructor: the stub is not the R8 stub its base reading gives');
+  }
+  const hostName = hostNameOf(file);
+  const iface = interfaceRegionOf(text, hostName);
+  if (da.r8.length > 0 && !iface) { fail(`constructor: ${file} has no host interface to type R8's members by`); return; }
+  const r = { node: bm, host: read.host, identity: read.identity, r8: da.r8, paramsRead: read.paramsRead };
+  const want = ctorFacetTexts(r, hostName, iface?.classType ?? CLASS_NAME);
+  fms.forEach((fm, i) => {
+    if (fm.text !== want[i]) fail(`constructor: the facet member ${fm.name} is not its base constructor's text (R8 ${i < da.r8.length ? 'right side' : 'body'})`);
+  });
+}
+
+/**
+ * The undo of a moved constructor's body, read off the head alone: R1's
+ * inverse on `construct`, then each R8 marker back into `this.F = EXPR;`,
+ * EXPR the one `return` of the facet member the marker names. Null (and a
+ * failure) when a marker names no R8 member, or a member no marker names.
+ */
+function ctorUndoText(tm, mv, fail) {
+  const { Node } = tm;
+  let text = identityUndoText(tm, mv.fm);
+  const seen = new Set();
+  let bad = false;
+  text = text.replace(R8_MARKER, (whole, field, fn) => {
+    const fm = mv.r8Fms.get(fn);
+    const st = fm?.getBody()?.getStatements() ?? [];
+    if (!fm || seen.has(fn) || st.length !== 1 || !Node.isReturnStatement(st[0]) || !st[0].getExpression()) {
+      fail(`constructor: the R8 marker for \`this.${field}\` names no single-return facet member ${fn}`);
+      bad = true;
+      return whole;
+    }
+    seen.add(fn);
+    return `this.${field} = ${st[0].getExpression().getText()};`;
+  });
+  for (const fn of mv.r8Fms.keys()) if (!seen.has(fn)) { fail(`constructor: no R8 marker names the facet member ${fn}`); bad = true; }
+  return bad ? null : text;
+}
+
 /**
  * Prove this pass's moves against their base, from the texts alone (it
  * shares no state with `generateMembers`). `baseModules` / `headModules`: the
@@ -3945,6 +4233,19 @@ function verifyMembers(tm, baseText, headText, baseModules, headModules, {
     const m = STUB_MARK_LINE.exec(hm.getBody().getText());
     moved.push({ name: hm.getName(), hm, bm, file: m[1], docMoved: Boolean(m[2]), usesHost: Boolean(m[3]) });
   }
+  // The constructor (#30020 R8): a stub at head over a body at base.
+  const baseCtors = base.cls.getConstructors();
+  const headCtors = headCls.getConstructors();
+  if (baseCtors.length !== headCtors.length) fail(`${CLASS_NAME} declares ${baseCtors.length} constructor(s) at base and ${headCtors.length} at head`);
+  else if (baseCtors.length === 1) {
+    const [bm] = baseCtors;
+    const [hm] = headCtors;
+    if (isGeneratedStub(bm) && !isGeneratedStub(hm)) fail('constructor: a stub at base is a body at head');
+    if (isGeneratedStub(hm) && !isGeneratedStub(bm)) {
+      const m = STUB_MARK_LINE.exec(hm.getBody().getText());
+      moved.push({ name: 'constructor', ctor: true, hm, bm, file: m[1], docMoved: Boolean(m[2]), usesHost: Boolean(m[3]) });
+    }
+  }
   if (moved.length === 0) fail('nothing moved: the head carries no stub its base did not');
   const sectionOf = readSections(base.cls, anchors);
   for (const mv of moved) {
@@ -3952,6 +4253,7 @@ function verifyMembers(tm, baseText, headText, baseModules, headModules, {
     const section = sectionOf(bm);
     if (!section || section[2] !== file) { fail(`${name}: its stub names ${file}, and its section's module is ${section?.[2] ?? 'none'}`); continue; }
     mv.title = section[1];
+    if (mv.ctor) { verifyCtorMove(tm, base, headText, headModules, mv, fail); continue; }
     const read = readMethod(tm, base, bm);
     if (read.reasons.length > 0) fail(`${name}: a stay rule holds it at base (${read.reasons.join('; ')})`);
     if ((read.host.size > 0) !== mv.usesHost) fail(`${name}: its stub ${mv.usesHost ? 'hands' : 'hands no'} host, and its base body reads ${read.host.size > 0 ? 'the class' : 'no class member'}`);
@@ -3985,7 +4287,7 @@ function verifyMembers(tm, baseText, headText, baseModules, headModules, {
     }
     if (b === null) { fail(`${file}: absent at base (this pass never starts a facet)`); continue; }
     const mvs = touched.get(file);
-    const u = undoMembersModule(tm, file, h, mvs.map((mv) => mv.name), mvs[0].title, fail, b);
+    const u = undoMembersModule(tm, file, h, mvs.flatMap((mv) => mv.facetNames ?? [mv.name]), mvs[0].title, fail, b);
     if (u === null) continue;
     undone.set(file, u);
     if (u !== b) fail(`undoing the moves out of ${file} does not rebuild its base (first difference at line ${firstDiffLine(u, b)})`);
@@ -3996,6 +4298,11 @@ function verifyMembers(tm, baseText, headText, baseModules, headModules, {
   for (const mv of moved) {
     if (!mv.fm) continue;
     const body = mv.hm.getBody();
+    if (mv.ctor) {
+      const undo = ctorUndoText(tm, mv, fail);
+      if (undo !== null) edits.push({ start: body.getStart(), end: body.getEnd(), text: undo });
+      continue;
+    }
     edits.push({ start: body.getStart(), end: body.getEnd(), text: identityUndoText(tm, mv.fm) });
     if (mv.fm.isAsync()) edits.push({ start: mv.hm.getNameNode().getStart(), end: mv.hm.getNameNode().getStart(), text: 'async ' });
     if (mv.docMoved) edits.push({ start: mv.hm.getStart(), end: mv.hm.getStart(), text: mv.moduleText.slice(mv.fm.getStart(true), mv.fm.getStart()) });
@@ -4608,6 +4915,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'named methods onto the split class (fourth pass)': 23,
   'identity port, computed keys and exported names (fourth pass, #30020)': 23,
   'hand-series host slots (fifth pass, #30020)': 17,
+  'constructor and definite-assignment wiring (fourth pass, #30020 R8)': 17,
 });
 const SELF_TEST_BATTERY_FLOOR = 5;
 
@@ -5046,6 +5354,36 @@ export class Scoped {
 }
 `;
   return facadeField ? source.replace('  private count = 0;\n', '  private count = 0;\n  private facade = 0;\n') : source;
+}
+
+/**
+ * The constructor fixture (#30020 R8): the identity fixture with a field only
+ * a constructor may assign (`log`) and a constructor in the `Identity`
+ * section that assigns it first (R8), then hands the engine on (R1), writes
+ * and reads fields, and calls a method. `body` replaces the constructor's
+ * statements, for the refusals.
+ */
+const CTOR_FIXTURE_BODY = [
+  '    // The log, from the options or made.',
+  "    this.log = opts.log || makeLog('engine');",
+  '    // A comment the facet keeps.',
+  '    this.knex = opts.n ?? null;',
+  '    registerAll(this, this.count);',
+  '    if ((this as any)._flag) this.knex = 1;',
+  "    this.log.info('made');",
+];
+function ctorFixtureSource({ body = CTOR_FIXTURE_BODY, constructField = false } = {}) {
+  const ctor = `
+  constructor(opts: { log?: { info(m: string): void }; n?: number } = {}, spare = 0) {
+${body.join('\n')}
+  }
+`;
+  const source = identityFixtureSource()
+    .replace("import { seamHelper } from './engine-seam.js';\n",
+      "import { seamHelper } from './engine-seam.js';\nimport { makeLog } from './log-maker.js';\nimport { registerAll } from './register-all.js';\n")
+    .replace('  private count = 0;\n', `  private count = 0;\n  private log: { info(m: string): void };\n${constructField ? '  private construct = 0;\n' : ''}`)
+    .replace('\n  /** Hands the engine on (R1); its object-literal method keeps its own `this`. */', `${ctor}\n  /** Hands the engine on (R1); its object-literal method keeps its own \`this\`. */`);
+  return source;
 }
 
 /**
@@ -5628,6 +5966,70 @@ async function selfTest() {
       check('a statement in neither form reads as null, so the pass refuses the run rather than rewrap it',
         runStyles(neither, importDeclsOf(tm, 'engine-identity.ts', neither), leaf) === null);
     }
+  }
+
+  open('constructor and definite-assignment wiring (fourth pass, #30020 R8)');
+  {
+    const opts = { anchors: IDENTITY_FIXTURE_ANCHORS, pins: FIXTURE_PINS, needles: FIXTURE_NEEDLES, classNeedles: FIXTURE_CLASS_NEEDLES };
+    const splitOf = (source) => generate(tm, source, plan(tm, source, opts));
+    const source = ctorFixtureSource();
+    const split = splitOf(source);
+    const input = split.host;
+    const mods = split.modules;
+    check('the first pass keeps the constructor on the class, whole',
+      input.includes("    this.log = opts.log || makeLog('engine');\n    // A comment the facet keeps.") && (mods.get('engine-identity.ts') ?? '').includes('static seed('));
+    const planned = planMembers(tm, input, mods, ['constructor'], opts);
+    const r = planned.records[0];
+    check('the plan takes the constructor into its section\'s module, with R8 keeping the leading `this.log = …` on the class',
+      [...planned.modules.keys()].join() === 'engine-identity.ts' && r.name === 'constructor' &&
+      r.r8.map((a) => `${a.field}:${a.fn}`).join() === 'log:constructLog' && r.facetNames.join() === 'constructLog,construct',
+      JSON.stringify({ r8: r.r8?.map((a) => a.field), names: r.facetNames }));
+    const out = generateMembers(tm, input, mods, planned);
+    const again = generateMembers(tm, input, mods, planMembers(tm, input, mods, ['constructor'], opts));
+    const head = new Map([...mods, ...out.modules]);
+    const v = verifyMembers(tm, input, out.host, mods, head, opts);
+    check('the generated move proves against its base', v.failures.length === 0 && v.moved.join() === 'constructor', v.failures.join(' | '));
+    check('two runs on one input write byte-identical trees',
+      treeHash(new Map([['h', out.host], ...out.modules])) === treeHash(new Map([['h', again.host], ...again.modules])));
+    const idm = out.modules.get('engine-identity.ts') ?? '';
+    check('the stub: the marker, R8\'s assignment from its facet member, then one `construct` call with the parameters the body reads',
+      out.host.includes('  constructor(opts: { log?: { info(m: string): void }; n?: number } = {}, spare = 0) {\n' +
+        '    // [#29986 codemod] The body moved to `engine-identity.ts` (see `IdentityHost`).\n' +
+        '    this.log = IdentityFacet.constructLog(opts);\n' +
+        '    IdentityFacet.construct.call(identityHost.of(this), opts);\n  }\n'), out.host.slice(out.host.indexOf('  constructor('), out.host.indexOf('  constructor(') + 400));
+    check('R8: the facet member returns the right side, typed as the field, taking only the parameters it reads',
+      idm.includes("  static constructLog(opts: { log?: { info(m: string): void }; n?: number } = {}): ObjectQL['log'] {\n    return opts.log || makeLog('engine');\n  }"),
+      idm.slice(idm.indexOf('static constructLog') - 200, idm.indexOf('static constructLog') + 300));
+    check('the body: `construct` reads the host, R1 hands `this.facade`, and the marker stands where R8\'s statement did',
+      idm.includes("  static construct(this: Pick<IdentityHost, 'count' | 'facade' | 'knex' | 'log'>, opts: { log?: { info(m: string): void }; n?: number } = {}): void {\n" +
+        '    // The log, from the options or made.\n' +
+        `    ${r8MarkerText('log', 'constructLog')}\n` +
+        '    // A comment the facet keeps.\n    this.knex = opts.n ?? null;\n    registerAll(this.facade, this.count);\n' +
+        '    if ((this.facade as any)._flag) this.knex = 1;\n'), idm.slice(idm.indexOf('static construct('), idm.indexOf('static construct(') + 600));
+    check('the imports only the constructor read leave engine.ts for the facet, and the header lists both members',
+      out.pruned.slice().sort().join() === 'makeLog,registerAll' && idm.includes("import { makeLog } from './log-maker.js';") &&
+      idm.includes("import { registerAll } from './register-all.js';") && /`constructLog`,\s+\*?\s*`construct`/.test(idm), out.pruned.join());
+    check('a field the body writes gains a setter; the one R8 kept on the class does not',
+      out.host.includes('      set knex(v) { engine.knex = v; },') && !out.host.includes('set log(v)'));
+    // Refusals: what R8 does not carry keeps the constructor whole.
+    const refusal = (body) => { const sp = splitOf(ctorFixtureSource({ body })); return refusalOf(() => planMembers(tm, sp.host, sp.modules, ['constructor'], opts)); };
+    const late = refusal([CTOR_FIXTURE_BODY[3], CTOR_FIXTURE_BODY[1], CTOR_FIXTURE_BODY[6]]);
+    check('a required field written after another statement refuses (definite-assignment)', /definite-assignment: log/.test(late), late);
+    const readsThis = refusal(["    this.log = this.knex ? makeLog('k') : makeLog('engine');", CTOR_FIXTURE_BODY[6]]);
+    check('an R8 right side that reads `this` refuses (definite-assignment)', /definite-assignment: log/.test(readsThis), readsThis);
+    const readsLocal = refusal(['    this.log = makeLog(namesClass.name);', CTOR_FIXTURE_BODY[6]]);
+    check('an R8 right side that reads a top-level name of engine.ts refuses (definite-assignment)', /definite-assignment: log/.test(readsLocal), readsLocal);
+    {
+      const sp = splitOf(ctorFixtureSource({ constructField: true }));
+      check('a class that declares `construct` refuses (ctor-facet-name)', /ctor-facet-name/.test(refusalOf(() => planMembers(tm, sp.host, sp.modules, ['constructor'], opts))));
+    }
+    const fails = (host, edited) => !(host === out.host && edited.every(([f, t]) => t === head.get(f))) &&
+      verifyMembers(tm, input, host, mods, new Map([...head, ...edited]), opts).failures.length > 0;
+    check('an edited R8 right side fails', fails(out.host, [['engine-identity.ts', idm.replace("makeLog('engine');\n  }", "makeLog('Engine');\n  }")]]));
+    check('a stub that dropped R8\'s assignment fails', fails(out.host.replace('    this.log = IdentityFacet.constructLog(opts);\n', ''), []));
+    check('a marker that names another facet member fails', fails(out.host, [['engine-identity.ts', idm.replace(r8MarkerText('log', 'constructLog'), r8MarkerText('log', 'constructLogs'))]]));
+    check('a statement the body moved back above the marker fails',
+      fails(out.host, [['engine-identity.ts', idm.replace(`    ${r8MarkerText('log', 'constructLog')}\n    // A comment the facet keeps.\n    this.knex = opts.n ?? null;`, `    this.knex = opts.n ?? null;\n    ${r8MarkerText('log', 'constructLog')}\n    // A comment the facet keeps.`)]]));
   }
 
   open('hand-series host slots (fifth pass, #30020)');

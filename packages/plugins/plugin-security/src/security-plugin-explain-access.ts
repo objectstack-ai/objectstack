@@ -74,6 +74,7 @@ import type { SecurityPlugin } from './security-plugin.js';
 import { absentUnderCallerRead, requiredCapsForOperation, unreadableUnderCallerRead } from './security-plugin.js';
 import { ExplainUserNotFoundError, PermissionDeniedError } from './errors.js';
 import { grantRowPolicySpeaks } from './external-owd-grant-stamp.js';
+import { delegatedUnitReadAdmission } from './delegated-admin-gate.js';
 import { rlsOperationForVerb } from './lifecycle-verb-rls-operation.js';
 import {
   buildContextForUser,
@@ -421,6 +422,10 @@ export async function explainAccessForCaller(
       // [#25107] The prologue's posture, for its organization-membership
       // refusal of a delegated context ({@link delegatedOrganizationRefusal}).
       tenancyPosture: this.tenancyPosture,
+      // [ADR-0090 D12, ruling of record 6663849489] The read door's admission
+      // beside the grant, asked through the door's own judgment.
+      delegatedUnitReadScope: (sets, o, engineOp, c, delSets) =>
+        delegatedUnitReadAdmission(this.delegatedAdminGate, o, engineOp, c, sets as any, delSets as any),
       // ── record-grained deps (only consulted when recordId is present) ──
       computeLayeredRlsFilter: async (sets, o, engineOp, c) =>
         this.computeLayeredRlsFilter(

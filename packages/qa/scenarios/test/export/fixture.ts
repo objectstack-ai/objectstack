@@ -34,13 +34,13 @@ export const CARD_ID = 'crm_account_with_contacts';
 export const NS = 'democrm';
 
 export function loadCrm(): LoadedScenario {
-  const { card, refusals } = loadScenarioFile(join(CARDS_DIR, `${CARD_ID}.json`), { areas: readCapabilityAreas(AREAS_DIR) });
+  const { card, refusals } = loadScenarioFile(join(CARDS_DIR, `${CARD_ID}.json`), { areas: readCapabilityAreas(AREAS_DIR), library: 'open' });
   if (!card) throw new Error(refusals.map(formatRefusal).join('\n'));
   return card;
 }
 
 export function loadAllCards(): LoadedScenario[] {
-  return loadScenarios(CARDS_DIR, { areas: readCapabilityAreas(AREAS_DIR) }).cards;
+  return loadScenarios(CARDS_DIR, { areas: readCapabilityAreas(AREAS_DIR), library: 'open' }).cards;
 }
 
 export const tempDir = (prefix: string) => mkdtempSync(join(tmpdir(), `gallery-${prefix}-`));

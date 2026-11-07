@@ -3,7 +3,8 @@
   "id": "order_to_cash",
   "code": "order",
   "tier": "starter",
-  "title": "Order to cash: accounts, an activity stream, sales orders with lines, a discount approval, invoices, payments and receivables aging",
+  "origin": "generic",
+  "title": { "zh": "订单到收款:客户、跟进活动、销售订单及明细、折扣审批、发票、收款和应收账龄", "en": "Order to cash: accounts, an activity stream, sales orders with lines, a discount approval, invoices, payments and receivables aging" },
   "provenance": "Mid-tier scenario 订单到收款 (order to cash) of the open library, written for this card from general business knowledge alone: generic account names, cities, products and amounts, no customer-derived content. The seed follows the arithmetic rule in `$comment`, so each truth can be worked out by hand.",
   "prompt": {
     "short": {
