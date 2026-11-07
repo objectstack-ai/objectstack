@@ -352,6 +352,7 @@ export const zhCN: PlatformTranslationData = {
         },
         mfa_required: {
           label: '要求多因素认证',
+          options: { off: '不强制', administrators: '管理员', everyone: '所有人' },
           help: '未注册身份验证器的用户在宽限期结束后将被阻止访问数据。启用此项也会开启两步验证功能,以便用户注册。',
         },
         mfa_grace_period_days: {
@@ -403,6 +404,26 @@ export const zhCN: PlatformTranslationData = {
         google_client_secret: {
           label: 'Google 客户端密钥',
           help: '加密存储。也可在服务器配置中设置。',
+        },
+      },
+    },
+
+    access_policy: {
+      title: '访问策略',
+      description: '本组织的登录限制。部署的认证设置始终生效；这里只能在其之上追加限制。',
+      groups: {
+        network: { title: '网络', description: '本组织成员可以从哪里登录。' },
+        sessions: { title: '会话', description: '成员会话的有效时长。每项限制只能比部署的更短。' },
+        multi_factor: { title: '多因素认证', description: '本组织中哪些人必须用身份验证器应用(TOTP)保护账户。' },
+      },
+      keys: {
+        allowed_ip_ranges: { label: '允许的 IP 范围' },
+        session_idle_timeout_minutes: { label: '闲置超时(分钟)' },
+        session_absolute_max_hours: { label: '会话最长有效期(小时)' },
+        max_concurrent_sessions_per_user: { label: '每个用户的最大同时会话数' },
+        mfa_required: {
+          label: '要求多因素认证',
+          options: { off: '不强制', administrators: '管理员', everyone: '所有人' },
         },
       },
     },

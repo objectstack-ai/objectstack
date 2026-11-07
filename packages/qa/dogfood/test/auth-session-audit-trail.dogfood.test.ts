@@ -280,7 +280,7 @@ describe('#30924: a sign-in that enforced MFA holds records the hold on its own 
     heldUserId = String(held.id);
 
     const settings = await stack.kernel.getServiceAsync<any>('settings');
-    await settings.setMany('auth', { mfa_required: true, mfa_grace_period_days: 0 });
+    await settings.setMany('auth', { mfa_required: 'everyone', mfa_grace_period_days: 0 });
     await ql.update(
       'sys_user',
       { id: heldUserId, two_factor_enabled: false, mfa_required_at: new Date(Date.now() - 86_400_000) },

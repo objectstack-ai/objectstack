@@ -141,6 +141,12 @@ export const SETUP_NAV_CONTRIBUTIONS: NavigationContribution[] = [
       // with the `branding` namespace, which is offered only where no
       // organization wall stands (#24766) — so the entry lives and dies with it.
       { id: 'nav_settings_auth', type: 'url', label: 'Authentication', url: '/apps/setup/system/settings/auth', icon: 'lock-keyhole', requiredPermissions: ['manage_platform_settings'] },
+      // [ADR-0069 TL;DR 6] An organization's own sign-in restrictions, held to
+      // the deployment's Authentication values (the `access_policy` namespace,
+      // scope `tenant`). No `requiredPermissions`: like Localization, the
+      // manifest's `setup.access` read is the app's base permission, and an
+      // organization administrator writes it (`setup.write`).
+      { id: 'nav_settings_access_policy', type: 'url', label: 'Access policy', url: '/apps/setup/system/settings/access_policy', icon: 'shield-check' },
       // Every entry below opening a settings page carries that page's hub
       // title, and every hub page has one (#27854): the sidebar and the
       // "All Settings" hub are two lists of one set of pages. Pinned against
