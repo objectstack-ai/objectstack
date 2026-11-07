@@ -5,7 +5,7 @@
 
 feat(fields): Setup's notification topic and channel fields offer the served list and still take any typed value
 
-Clause-②: no
+Clause-②: yes (widening) — five new `fields.preferenceOption.*` keys in every published `@object-ui/i18n` pack, and `field:notification-topic` / `field:notification-channel` join `@object-ui/fields`' registered widget keys (`RegisteredFieldWidgetType`); nothing is narrowed.
 Metadata-protocol: none
 
 A notification preference's `topic` and `channel`, and a notification template's `topic`, already declare `widget: 'notification-topic'` / `'notification-channel'`. The record form now resolves both: `@object-ui/fields` registers `field:notification-topic` and `field:notification-channel`, a fillable arm of the registry-name picker (`RegistryRefField`).
