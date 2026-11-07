@@ -291,7 +291,13 @@ import {
   carriesACliCommandLiteral,
   cliBinaryNames,
   cliCommandSurfaces,
+  POPULATION_NETS,
+  inNetPopulation,
+  reachesPopulationNet,
+  verifyStandInGuarded,
 } from './dispatch-gates.mjs';
+import { SCANNED_ROOTS as RUNNER_ENV_ROOTS, isProductSource as runnerEnvIsProductSource } from '../check-runner-env-posture.mjs';
+import { findViolations as casingFindViolations } from '../check-error-code-casing.mjs';
 import { CORPUS as ADR_ANCHOR_CORPUS } from '../check-adr-symbol-anchors.mjs';
 import {
   COMPOUND_ANCHOR_LEDGER,
@@ -305,6 +311,7 @@ import {
   ROOT_WALK_RESIDUE_LEDGER,
   TIER_DEFAULT,
   TIER_FLOOR,
+  CHANGE_KIND_ROWS,
 } from './dispatch-gates.data.mjs';
 
 /**
@@ -4580,7 +4587,11 @@ export function selfTest({ tier = 'full' } = {}) {
   // print STALE exactly as designed, and a `includes('pnpm check:i18n')` pin
   // stayed green through it — every prefix-preserving rename is invisible to a
   // substring, which is the one class of rot the STALE branch exists to catch.
-  const i18nHit = changeKindLines(['packages/services/service-messaging/src/objects/http-delivery.object.ts'], resolved);
+  // Read through the entries that name check:i18n, not the whole table: since
+  // #31257 a population net may fire on the same live file for its own reason,
+  // and that is no fact about this section.
+  const i18nRows = CHANGE_KIND_GATES.filter((k) => k.gates.some((g) => g.name === 'check:i18n'));
+  const i18nHit = changeKindLines(['packages/services/service-messaging/src/objects/http-delivery.object.ts'], resolved, i18nRows);
   // One kind line plus one line per gate in the entry — TWO gates since #11671
   // added the stale-fill ratchet to the same file surface. The count is pinned
   // (not `>= 1`) so a gate silently dropped from the entry fails here.
@@ -5038,6 +5049,139 @@ export function selfTest({ tier = 'full' } = {}) {
   t('an undiscoverable ADR anchor gate renders STALE for this entry',
     changeKindLines([ADR_SPECIMEN], () => null, adrEntry).filter((l) => l.includes('⚠ check:adr-symbol-anchors: STALE')).length === 1);
 
+  // ── The population nets (#31257) ─────────────────────────────────────────
+  //
+  // Fifteen whole-root gates, each reached through its own net: the gate's walk
+  // plus its first filter. Per net, table-driven: a real diff shape is a hit, the
+  // walk's own exclusion and the filter's own refusal are misses, the net's
+  // copy is held to the gate's SOURCE, and a live specimen derives the gate
+  // through the whole table. The slow tier holds each net to the files the
+  // gate's own --list names. Fixture sources are assembled where a whole-tree
+  // gate scanning this file could read them as its own subject.
+  const NET_CASES = [
+    { key: 'init-service-lookup', hit: ['packages/plugins/plugin-x/src/x-plugin.ts', "export const p = { name: 'x', init(ctx) { ctx.getService('settings'); } };"],
+      walkMiss: 'packages/plugins/plugin-x/src/x-plugin.conformance.ts', specimen: 'packages/services/service-settings/src/settings-service-plugin.ts',
+      spelled: ["const SERVICE_LOOKUP_CALLEES = new Set(['getService', 'getServiceAsync', 'getServiceScoped']);", "const PREFILTER_TOKENS = [...SERVICE_LOOKUP_CALLEES, 'providesServices'];", "walk(join(ROOT, 'packages'));"] },
+    { key: 'settings-bind-read', hit: ['packages/plugins/plugin-x/src/x-plugin.ts', "await ctx.trigger('app:seeded');"],
+      walkMiss: 'packages/plugins/plugin-x/src/x-plugin.spec.ts', specimen: 'packages/services/service-settings/src/settings-service-plugin.ts',
+      spelled: ["const SERVICE_LOOKUP_CALLEES = new Set(['getService', 'getServiceAsync', 'getServiceScoped']);", "const EMIT_CALLEE = 'trigger';", "const PREFILTER_TOKENS = [...SERVICE_LOOKUP_CALLEES, 'providesServices', EMIT_CALLEE];"] },
+    { key: 'startup-registry-probe', hit: ['packages/plugins/plugin-x/src/x-plugin.ts', "init(ctx) { if (!ctx.hasService('cache')) this.cacheless = true; }"],
+      walkMiss: 'packages/plugins/plugin-x/src/x-plugin.test.ts', specimen: 'packages/services/service-settings/src/settings-service-plugin.ts',
+      spelled: ["if (!text.includes('providesServices')) continue;", 'for (const probe of SERVICE_REGISTRY_PROBES.keys()) if (text.includes(probe)) interesting = true;',
+        'for (const registry of OPEN_CAPABILITY_REGISTRIES.keys()) if (text.includes(registry)) interesting = true;'],
+      tokensFrom: (src) => [...['SERVICE_REGISTRY_PROBES', 'OPEN_CAPABILITY_REGISTRIES'].flatMap((name) => {
+        const block = new RegExp(`const ${name} = new Map\\(\\[([\\s\\S]*?)\\n\\]\\);`).exec(src)?.[1] ?? '';
+        return [...block.matchAll(/^ {4}\[\s*'(\w+)'/gm)].map((m) => m[1]);
+      }), 'providesServices'] },
+    { key: 'optional-error-sink', hit: ['packages/core/src/x-logger.ts', 'export interface XSink { error?: (m: string) => void; info: (m: string) => void }'],
+      walkMiss: 'packages/core/src/x-logger.test.ts', specimen: 'packages/core/src/hook-dispatch.ts',
+      spelled: ['const CHANNEL_PREFILTER = new RegExp(`\\\\b(?:${[...LOG_CHANNELS].join(\'|\')})\\\\s*\\\\??\\\\s*[:(]`);', 'if (!CHANNEL_PREFILTER.test(text)) continue;'],
+      tokensFrom: (src) => [.../const LOG_CHANNELS = new Set\(\[([\s\S]*?)\]\);/.exec(src)?.[1].matchAll(/'(\w+)'/g) ?? []].map((m) => m[1]) },
+    { key: 'action-descriptor', hit: ['examples/app-x/src/actions/x.ts', "export const x = defineActionDescriptor({ type: 'x.pause' });"],
+      walkMiss: 'examples/app-x/src/actions/x.test.tsx', specimen: 'packages/plugins/plugin-approvals/src/approval-node.ts',
+      spelled: ["const FACTORY = 'defineActionDescriptor';", 'if (!text.includes(FACTORY)) continue;', "const DEFAULT_SCAN_ROOTS = ['packages', 'examples'];"] },
+    { key: 'route-response-writer', hit: ['packages/plugins/plugin-x/src/x-plugin.ts', 'app.get(p, (c) => c.json({ ok: true }));'],
+      walkMiss: 'packages/plugins/plugin-x/src/x-plugin.conformance.ts', specimen: 'packages/rest/src/rest-server.ts',
+      spelled: ["if (!source.includes('.json(')) continue;", "if (entry.endsWith('-routes.ts') || OFF_CONVENTION_MODULES.has(entry)) {", "const DISPATCHER_DOMAIN_DIR = 'packages/runtime/src/domains';"] },
+    { key: 'verify-stand-in-call', hit: ['packages/drivers/driver-x/src/x-driver.verify.test.ts', `const r = await ${'check'}ReadCoercion(driver as never);`],
+      walkMiss: 'packages/drivers/driver-x/src/x-driver.d.ts', specimen: 'packages/verify/src/index.ts',
+      spelled: ['if (!guarded.some((g) => text.includes(g))) continue;', "const SCAN_ROOTS = ['packages', 'examples'];", "await requireDependency('../eslint.config.mjs'"] },
+    { key: 'wildcard-mount', hit: ['packages/plugins/plugin-x/src/x-plugin.ts', 'app.all(`${base}/*`, (c, next) => next());'],
+      walkMiss: 'packages/plugins/plugin-x/src/x-plugin.test.ts', specimen: 'packages/plugins/plugin-auth/src/auth-plugin.ts',
+      spelled: ["if (!text.includes('/*`') && !text.includes(\"/*'\") && !text.includes('/*\"')) continue;", "walk(join(ROOT, 'packages'));"] },
+    { key: 'live-db-suite', hit: ['packages/drivers/driver-x/src/x.live.test.ts', `const url = process.env.${'OS_TEST'}_POSTGRES_URL;`],
+      walkMiss: 'packages/drivers/driver-x/src/x.live.d.ts', specimen: 'packages/drivers/driver-sql/src/live-dialect-matrix.isolation.test.ts',
+      spelled: ['OS_TEST_(?:MYSQL|POSTGRES)_URL', "const ROOTS = ['packages', 'apps', 'examples'];", "/\\.m?ts$/.test(entry.name) && !entry.name.endsWith('.d.ts')"] },
+    { key: 'runner-env-read', hit: ['packages/core/src/x.ts', `if (process.env.${'VITEST'}) return;`], walkMiss: 'packages/core/src/x.test.ts', imported: true },
+    { key: 'meta-type-route-source', hit: ['packages/rest/src/x-handler.ts', null], walkMiss: 'packages/rest/src/x-handler.test.ts', specimen: 'packages/rest/src/rest-server.ts',
+      spelled: ["const SCAN_DIRS = [join('packages', 'rest', 'src')];", "/\\.(m|c)?tsx?$/.test(entry) && !/\\.(test|spec)\\.(m|c)?tsx?$/.test(entry)"] },
+    { key: 'sql-driver-seam-module', hit: ['packages/drivers/driver-sql/src/sql-driver-next-split.ts', null], walkMiss: 'packages/drivers/driver-sql/src/nested/sql-driver-next-split.ts',
+      specimen: 'packages/drivers/driver-sql/src/sql-driver-crud.ts',
+      spelled: [".filter((n) => /^sql-driver-.+\\.ts$/.test(n) && !/\\.(test|spec)\\.ts$/.test(n) && !n.endsWith('.d.ts'))", "...seamModulesOf(listing(join('packages', 'drivers', 'driver-sql', 'src')))"] },
+    { key: 'grant-table-reader', hit: ['packages/plugins/plugin-x/src/x-grants.ts', "await ql.find('sys_user_position', q); await ql.find('sys_user_permission_set', q);"],
+      walkMiss: 'packages/plugins/plugin-x/src/__tests__/x-grants.ts', specimen: 'packages/core/src/security/resolve-authz-context.ts',
+      spelled: ["const GRANT_TABLES = ['sys_user_position', 'sys_user_permission_set'];", 'return GRANT_TABLES.every((t) => queriesGrantTable(src, t));', "const SCAN_ROOTS = ['packages'];"] },
+    { key: 'lowercase-error-code', hit: ['packages/core/src/x.ts', `throw Object.assign(new Error('x'), { ${'code'}: 'not_found' });`], walkMiss: 'packages/core/src/x.d.ts', imported: true },
+    { key: 'object-def-class', hit: ['packages/drivers/driver-x/src/x-driver.ts', 'export class XDriver extends SqlDriver {}'],
+      walkMiss: 'packages/drivers/driver-x/test/x-driver.ts', specimen: 'packages/drivers/driver-turso/src/turso-driver.ts',
+      spelled: ["f.endsWith('.ts') && f.includes('/src/') && !/\\.(test|spec)\\.ts$/.test(f)", "execFileSync('git', ['-C', root, 'ls-files', 'packages']"] },
+  ];
+  t('the case table covers every population net, once', JSON.stringify(NET_CASES.map((c) => c.key).sort()) === JSON.stringify(Object.keys(POPULATION_NETS).sort()));
+  const NOTHING_PRIOR = () => null;
+  for (const c of NET_CASES) {
+    const net = POPULATION_NETS[c.key];
+    const [hitPath, hitText] = c.hit;
+    const reach = (p, text) => reachesPopulationNet(p, net, codeSrc(text), NOTHING_PRIOR);
+    t(`${c.key}: the real diff shape is a hit (${hitPath})`, reach(hitPath, hitText ?? ''));
+    t(`${c.key}: …and the gate's walk excludes ${c.walkMiss}, so the net does too`, !reach(c.walkMiss, hitText ?? ''));
+    if (!net.pathOnly) {
+      t(`${c.key}: a population file without the gate's filter is not a hit`, !reach(hitPath, 'export const unrelated = 1;\n'));
+      t(`${c.key}: a deleted file is judged on the content it had — a hit when that passed the filter`,
+        reachesPopulationNet(hitPath, net, () => null, () => hitText) && !reachesPopulationNet(hitPath, net, () => null, () => 'export const unrelated = 1;\n'));
+      t(`${c.key}: a path git never held is not a hit`, !reachesPopulationNet(hitPath, net, () => null, NOTHING_PRIOR));
+    }
+    t(`${c.key}: a path outside the gate's roots is not a hit`, !reach(`docs/${hitPath}`, hitText ?? ''));
+    const gateSource = readFileSync(nodePath.join(ROOT, net.script), 'utf8');
+    const unspelled = (c.spelled ?? []).filter((s) => !gateSource.includes(s));
+    t(`${c.key}: the gate's source still spells what the net copies (unspelled: ${unspelled.join(' | ') || 'none'})`, unspelled.length === 0);
+    if (c.tokensFrom) {
+      const own = [...new Set(c.tokensFrom(gateSource))].sort();
+      t(`${c.key}: the net's tokens are exactly the gate's filter vocabulary (${own.join(', ')})`, own.length > 0 && JSON.stringify(own) === JSON.stringify([...net.tokens].sort()));
+    }
+    const entry = CHANGE_KIND_GATES.filter((k) => k.gates.some((g) => g.name === net.gate));
+    t(`${c.key}: exactly one entry names ${net.gate}, bound to this net`, entry.length === 1 && entry[0].gates.length === 1 && CHANGE_KIND_ROWS.filter((r) => r.gates.some((g) => g.name === net.gate)).map((r) => r.matches).join() === c.key);
+    if (c.specimen) {
+      const lines = changeKindLines([c.specimen], resolved);
+      t(`${c.key}: through the whole table, the live specimen ${c.specimen} derives ${net.gate}`, lines.some((l) => l.includes(`- pnpm ${net.gate}   —`)));
+    }
+    const line = changeKindLines([hitPath], resolved, entry.map((k) => ({ ...k, matches: (p) => reach(p, hitText ?? '') })))
+      .find((l) => l.includes(`- pnpm ${net.gate}   —`)) ?? '';
+    t(`${c.key}: the rendered lead names the gate runnably and says it needs no build and why no card had it`, /needs NO build/.test(line) && /#31257/.test(line));
+  }
+  t('the imported readers are the gates\' own functions, not copies',
+    POPULATION_NETS['runner-env-read'].keep === runnerEnvIsProductSource && POPULATION_NETS['runner-env-read'].roots === RUNNER_ENV_ROOTS
+      && reachesPopulationNet('packages/core/src/x.ts', POPULATION_NETS['lowercase-error-code'], codeSrc(`({ ${'code'}: 'not_found' })`)) === (casingFindViolations(`({ ${'code'}: 'not_found' })`, 'packages/core/src/x.ts').length > 0));
+  t('the verify net reads the guarded helpers off the ESLint config the gate imports', verifyStandInGuarded().includes(['check', 'ReadCoercion'].join('')));
+  t('…and a config with no such table THROWS rather than reaching nothing', throwsNaming(() => verifyStandInGuarded('export default [];'), 'VERIFY_STAND_IN_CHECKS'));
+  t('a docs-only page derives none of the fifteen', !changeKindLines(['content/docs/ai/agents.mdx'], resolved)
+    .some((l) => Object.values(POPULATION_NETS).some((n) => l.includes(`- pnpm ${n.gate}   —`))));
+
+  // The two roster families closed by MEASUREMENT, not by a row: every file
+  // the gate reads is a literal its own source spells, and the path
+  // derivation already names the gate for each of those files.
+  for (const [script, readsOf] of [
+    ['scripts/check-stack-collection-maps.mjs', (src) => [...src.matchAll(/^\s+file: '([^']+)'/gm), ...src.matchAll(/readSource\('([^']+)'\)/g)].map((m) => m[1])],
+    ['scripts/check-filter-alias-parity.mjs', (src) => [...src.matchAll(/^const (?:SPEC|PROTOCOL|REST)_FILE = '([^']+)';/gm)].map((m) => m[1])],
+  ]) {
+    const src = readFileSync(nodePath.join(ROOT, script), 'utf8');
+    const reads = [...new Set(readsOf(src))];
+    const hints = extractWatchHints(src, script);
+    const unmatched = reads.filter((f) => !hints.includes(f));
+    t(`${script}: every source file it reads (${reads.length}) is a literal the path derivation already matches (unmatched: ${unmatched.join(', ') || 'none'})`,
+      reads.length >= 3 && reads.every((f) => existsSync(nodePath.join(ROOT, f))) && unmatched.length === 0);
+    t(`${script}: …and it walks no root to find another`, !/readdirSync\(|ls-files/.test(src));
+  }
+
+  slow('population nets: each held to the files the gate\'s own --list names, and discriminating on the live tree', () => {
+    const tracked = trackedFiles();
+    for (const c of NET_CASES) {
+      const net = POPULATION_NETS[c.key];
+      const population = tracked.filter((f) => inNetPopulation(f, net));
+      if (!net.pathOnly) {
+        const hits = population.filter((f) => reachesPopulationNet(f, net));
+        t(`${c.key}: the net discriminates — ${hits.length} of ${population.length} population files`, population.length > 30 && hits.length < population.length);
+      }
+    }
+    for (const key of ['init-service-lookup', 'settings-bind-read', 'startup-registry-probe', 'optional-error-sink', 'action-descriptor', 'wildcard-mount', 'object-def-class']) {
+      const net = POPULATION_NETS[key];
+      const run = spawnSync(process.execPath, [net.script, '--list'], { cwd: ROOT, encoding: 'utf8', maxBuffer: 1 << 26 });
+      const listed = [...new Set([...`${run.stdout}${run.stderr}`.matchAll(/(?:^|\s)((?:packages|examples|apps)\/[\w@./-]+\.[mc]?tsx?):\d+/gm)].map((m) => m[1]))];
+      const missed = listed.filter((f) => !reachesPopulationNet(f, net));
+      t(`${key}: every file ${net.gate} --list names is inside the net (exit ${run.status}${run.status === EXIT_PREREQUISITE_NOT_MET ? ': install the workspace first' : ''}; ${listed.length} listed, missed: ${missed.slice(0, 5).join(', ') || 'none'})`,
+        run.status === 0 && listed.length > 3 && missed.length === 0);
+    }
+  });
+
   // ── The ui/scripts/__tests__ suite (#26318) ─────────────────────────────────
   //
   // The 178 files run only in CI's Test UI shards, so no family named them and a
@@ -5147,7 +5291,7 @@ export function selfTest({ tier = 'full' } = {}) {
   // rendered delimiters for the reason the entry above states: a bare substring
   // stays green through a prefix-preserving rename, the one rot the STALE branch
   // exists to catch.
-  const formHit = changeKindLines(['packages/spec/src/data/object.form.ts', 'packages/spec/src/data/field.form.ts'], resolved);
+  const formHit = changeKindLines(['packages/spec/src/data/object.form.ts', 'packages/spec/src/data/field.form.ts'], resolved, i18nRows);
   // The `?? ''` is not defensive noise: reverse-verifying this block by making
   // every config opt out emptied `formHit`, and the bare index CRASHED the whole
   // self-test on a TypeError — one stack in place of 180-odd named verdicts. A
@@ -7792,7 +7936,8 @@ export function selfTest({ tier = 'full' } = {}) {
       'scripts/pm/check-expected-skips.mjs:137 self-test-reads',
       // 736 -> 738 (#26318): the data import and its re-export each gained UI_SCRIPTS_SUITE_ROOTS.
       // 738 -> 744 (#30763): the ADR anchor corpus import and its comment.
-      'scripts/pm/dispatch-gates.mjs:744 inherited-population',
+      // 744 -> 748 (#31257): the two imported gate readers and their comment.
+      'scripts/pm/dispatch-gates.mjs:748 inherited-population',
       // Ninth row, added with the declaration it names: the recogniser's mailbox
       // doorbell battery pins the seven key templates verbatim in the pm-dispatch
       // references' project-forms.md, a population claim on a governed file, so
