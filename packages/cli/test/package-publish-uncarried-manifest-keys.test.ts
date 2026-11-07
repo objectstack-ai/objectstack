@@ -5,20 +5,22 @@
  * hosted catalog stores, and names every key it does not send, instead of
  * dropping it silently.
  *
- * `TemplateManifestSchema` accepts `tags`, `publisher`, `isStarter` and
- * `preview`, so an author (or an AI agent) writes them and the file validates. The hosted publish route validates and stores `tags`, so publish
- * sends them as written: the server owns the bounds, and its 400 is what the
- * author reads. `publisher` and `isStarter` are decided by the platform, so an
- * author's value has no effect and is not sent. `preview` still waits on what
- * the hosted side accepts (`CATALOG_SEND_ISSUE`). The top-level `tagline` has
- * no column on the hosted side: publish uses it as the `description` when none
- * is given, and otherwise does not send it. The retired `visibility` is refused
- * by name (the `--visibility` flag carries it), and the four retired keys
- * nothing ever read (`name`, `specVersion`, `skills`, `scaffold`) are named for
- * deletion without failing the publish.
+ * `TemplateManifestSchema` accepts `tags` and `preview`, so an author (or an
+ * AI agent) writes them and the file validates. The hosted publish route
+ * validates and stores `tags`, so publish sends them as written: the server
+ * owns the bounds, and its 400 is what the author reads. `preview` still waits
+ * on what the hosted side accepts (`CATALOG_SEND_ISSUE`). The top-level
+ * `tagline` has no column on the hosted side: publish uses it as the
+ * `description` when none is given, and otherwise does not send it. The
+ * retired `visibility` is refused by name (the `--visibility` flag carries
+ * it), as is the retired `publisher` (a trust tier only the platform assigns),
+ * and the retired keys that never changed what publish sent (`name`,
+ * `specVersion`, `skills`, `scaffold`, `isStarter`) are named for deletion
+ * without failing the publish.
  *
  * These cases drive the real command and read the request body it sends, pin
- * that the warning does not fail the publish (the blank template ships
+ * that the deletion warning does not fail the publish (every project
+ * scaffolded from the blank template before the retirement carries
  * `isStarter: true`), and classify every schema key so a key added later
  * cannot be dropped silently again.
  */
@@ -32,6 +34,7 @@ import PackagePublish, {
   CATALOG_SEND_ISSUE,
   RETIRED_INERT_MANIFEST_KEYS,
   UNCARRIED_MANIFEST_KEYS,
+  retiredPublisherRefusal,
   retiredVisibilityRefusal,
   uncarriedManifestKeys,
 } from '../src/commands/package/publish.js';
@@ -70,7 +73,7 @@ const SENT = [
  * Retired keys the schema still declares as tombstones: publish refuses them,
  * naming the replacement (`test/package-publish-taxonomy.test.ts`).
  */
-const REFUSED = ['category', 'visibility'] as const;
+const REFUSED = ['category', 'visibility', 'publisher'] as const;
 /** Scaffold-time extras: read by `create-objectstack`, never a publish key. */
 const SCAFFOLD_ONLY = ['namespace'] as const;
 
@@ -232,10 +235,10 @@ describe('os package publish — manifest keys', () => {
   });
 
   describe('keys it does not send', () => {
-    it('names `publisher` and `isStarter` as decided by the platform, and still publishes', async () => {
-      const path = await projectWith({
-        displayName: 'Acme CRM', publisher: 'community', isStarter: true,
-      });
+    it('names the retired `isStarter` for deletion, still publishes, and never sends it', async () => {
+      // The blank template wrote `isStarter: true` until its retirement, so
+      // every project scaffolded from it carries the key.
+      const path = await projectWith({ displayName: 'Acme CRM', isStarter: true });
       const calls = stubCloud();
       const out = captureOutput();
 
@@ -244,14 +247,13 @@ describe('os package publish — manifest keys', () => {
       expect(calls).toHaveLength(2);
       const warnings = warningsIn(out);
       expect(warnings).toHaveLength(1);
-      expect(warnings[0]).toContain('`publisher`');
       expect(warnings[0]).toContain('`isStarter`');
-      expect(warnings[0]).toContain('decided by the platform');
-      // Not "not carried yet": nothing is pending on the hosted side for these two.
+      expect(warnings[0]).toContain('removed in @objectstack/spec 18');
+      // Not "not carried yet": nothing is pending on the hosted side for it.
       expect(warnings[0]).not.toContain('does not carry');
       expect(warnings[0]).not.toContain(CATALOG_SEND_ISSUE);
-      // ⛔ Never sent under either spelling: the platform decides both.
-      for (const key of ['publisher', 'isStarter', 'is_starter']) expect(key in calls[0].body).toBe(false);
+      // ⛔ Never sent under either spelling: the platform decides the starter flag.
+      for (const key of ['isStarter', 'is_starter']) expect(key in calls[0].body).toBe(false);
     });
 
     it('names `preview` as not carried by the hosted catalog yet, with the tracking issue', async () => {
@@ -272,11 +274,12 @@ describe('os package publish — manifest keys', () => {
       expect('preview' in calls[0].body).toBe(false);
     });
 
-    it('names the retired keys nothing ever read for deletion, and still publishes', async () => {
+    it('names the retired keys that never changed what it sent for deletion, and still publishes', async () => {
       // Every project scaffolded from the blank template before the retirement
       // carries these, so naming them must not fail the publish.
       const path = await projectWith({
         name: 'acme-crm', specVersion: '^18.0.0', skills: ['objectstack-data'], scaffold: { variables: {} },
+        isStarter: true,
       });
       const calls = stubCloud();
       const out = captureOutput();
@@ -302,6 +305,36 @@ describe('os package publish — manifest keys', () => {
       await PackagePublish.run([path]);
 
       expect(warningsIn(out)).toEqual([]);
+    });
+  });
+
+  describe('the retired `publisher`', () => {
+    it('is refused by name before any network call', async () => {
+      const path = await projectWith({ displayName: 'Acme CRM', publisher: 'community' });
+      const calls = stubCloud();
+      const out = captureOutput();
+
+      let exitCode: number | undefined;
+      try {
+        await PackagePublish.run([path]);
+      } catch (err: any) {
+        exitCode = err?.oclif?.exit ?? err?.exitCode;
+      }
+
+      expect(exitCode).toBe(1);
+      expect(calls).toHaveLength(0);
+      expect(out.join('\n')).toContain(retiredPublisherRefusal());
+    });
+
+    it('control: a manifest without it publishes, and the request carries no publisher', async () => {
+      const path = await projectWith({ displayName: 'Acme CRM' });
+      const calls = stubCloud();
+      captureOutput();
+
+      await PackagePublish.run([path]);
+
+      expect(calls).toHaveLength(2);
+      expect('publisher' in calls[0].body).toBe(false);
     });
   });
 
@@ -352,7 +385,7 @@ describe('every TemplateManifestSchema key is sent, warned about, refused, retir
   it('warns only about keys the schema accepts', () => {
     // A warned key the schema rejects would never reach publish; the list
     // would then be naming a key no valid file can carry.
-    const fixture = { displayName: 'Acme CRM', tags: ['crm'], publisher: 'community', isStarter: true, preview: { demoUrl: 'https://demo.example.com' } };
+    const fixture = { displayName: 'Acme CRM', tags: ['crm'], preview: { demoUrl: 'https://demo.example.com' } };
     expect(TemplateManifestSchema.safeParse(fixture).success).toBe(true);
     expect(uncarriedManifestKeys(fixture)).toEqual([...UNCARRIED_MANIFEST_KEYS]);
   });
