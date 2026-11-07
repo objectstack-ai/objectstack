@@ -1051,8 +1051,18 @@ function declaredRulesOf(body: unknown): Array<{ name?: unknown; active?: unknow
  *
  * Ordered by package, object and rule. Empty for a package already disabled
  * (the disable withholds nothing more) and for one that extends nothing.
+ *
+ * ## On the package entry
+ *
+ * Exported as `readPackageDisableDependents` from `@objectstack/runtime`, with
+ * {@link disableDependentRulesMessage} as `formatPackageDisableDependents`, so
+ * a host door that takes a package out of service another way (a control
+ * plane's per-install disable, a soft-disable uninstall) asks the scan this
+ * door asks and answers the sentence it answers, instead of a second copy of
+ * either. Pure over `registry`: it reads the registry and writes nothing, so
+ * a host asks it BEFORE its own write, as this door does.
  */
-function readDisableDependentRules(registry: any, packageId: string): DisableDependentRule[] {
+export function readDisableDependentRules(registry: any, packageId: string): DisableDependentRule[] {
     if (typeof registry?.getObjectContributors !== 'function' || typeof registry?.getAllObjects !== 'function') return [];
     const disabled = (id: unknown): boolean =>
         typeof registry.isPackageDisabled === 'function' && registry.isPackageDisabled(id);
@@ -1178,8 +1188,11 @@ function ruleLayerLabel(layer: { packageId?: unknown; ownership?: unknown }): st
 /**
  * The sentence a dependent-rule refusal carries: `lead` (what was refused),
  * then every rule as `package · object · rule (reads FIELD, …)`, then the remedy.
+ * Exported as `formatPackageDisableDependents` from `@objectstack/runtime`
+ * beside {@link readDisableDependentRules}; a host door answers it with `409`
+ * `PACKAGE_DISABLE_RESTRICTED_BY_VALIDATION_RULE`, as this door does.
  */
-function disableDependentRulesMessage(lead: string, dependents: readonly DisableDependentRule[]): string {
+export function disableDependentRulesMessage(lead: string, dependents: readonly DisableDependentRule[]): string {
     const one = dependents.length === 1;
     const listed = dependents
         .map((d) => `${d.packageId} · ${d.object} · ${d.rule} (reads ${d.fields.join(', ')})`)
