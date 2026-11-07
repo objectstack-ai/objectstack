@@ -3879,7 +3879,7 @@ describe('AuthManager', () => {
       // Every posture computable at once: enforced MFA with no grace, and a
       // one-day expiry. Each row below decides which postures its user holds.
       // [#30201] Two-factor on: the gate holds a user for MFA only while they can enroll.
-      const POLICY = { mfaRequired: true, mfaGracePeriodDays: 0, passwordExpiryDays: 1, plugins: { twoFactor: true } };
+      const POLICY = { mfaRequirement: 'everyone', mfaGracePeriodDays: 0, passwordExpiryDays: 1, plugins: { twoFactor: true } };
       const sessionGateFor = async (row: Record<string, unknown>, session: Record<string, unknown>) => {
         const engine = makeDataEngine({ platformAdmin: false });
         // The block's double, its `findOne` answering the posture read of the user row.
@@ -4709,15 +4709,15 @@ describe('AuthManager', () => {
       return m;
     };
 
-    it('isAuthGateActive is true when mfaRequired (even with expiry off)', () => {
-      expect(mgr(makeEngine(null), { mfaRequired: true }).isAuthGateActive()).toBe(true);
+    it('isAuthGateActive is true when mfaRequirement is set (even with expiry off)', () => {
+      expect(mgr(makeEngine(null), { mfaRequirement: 'everyone' }).isAuthGateActive()).toBe(true);
       expect(mgr(makeEngine(null), {}).isAuthGateActive()).toBe(false);
     });
 
     it('blocks MFA_REQUIRED for an un-enrolled user past the grace window', async () => {
       const old = new Date(Date.now() - 30 * 86_400_000).toISOString();
       const m = mgr(makeEngine({ id: 'u1', two_factor_enabled: false, mfa_required_at: old }), {
-        mfaRequired: true, mfaGracePeriodDays: 7,
+        mfaRequirement: 'everyone', mfaGracePeriodDays: 7,
       });
       const g = await (m as any).computeAuthGate('u1', undefined, false);
       expect(g?.code).toBe('MFA_REQUIRED');
@@ -4726,14 +4726,14 @@ describe('AuthManager', () => {
     it('does NOT block within the grace window', async () => {
       const recent = new Date(Date.now() - 1 * 86_400_000).toISOString();
       const m = mgr(makeEngine({ id: 'u1', two_factor_enabled: false, mfa_required_at: recent }), {
-        mfaRequired: true, mfaGracePeriodDays: 7,
+        mfaRequirement: 'everyone', mfaGracePeriodDays: 7,
       });
       await expect((m as any).computeAuthGate('u1', undefined, false)).resolves.toBeUndefined();
     });
 
     it('stamps mfa_required_at the first time (null) and does not block yet', async () => {
       const engine = makeEngine({ id: 'u1', two_factor_enabled: false, mfa_required_at: null });
-      const m = mgr(engine, { mfaRequired: true, mfaGracePeriodDays: 7 });
+      const m = mgr(engine, { mfaRequirement: 'everyone', mfaGracePeriodDays: 7 });
       await expect((m as any).computeAuthGate('u1', undefined, false)).resolves.toBeUndefined();
       const wrote = engine.update.mock.calls.find((c: any[]) => 'mfa_required_at' in (c[1] ?? {}));
       expect(wrote).toBeTruthy();
@@ -4743,7 +4743,7 @@ describe('AuthManager', () => {
     it('does NOT block an enrolled user (two_factor_enabled)', async () => {
       const old = new Date(Date.now() - 30 * 86_400_000).toISOString();
       const m = mgr(makeEngine({ id: 'u1', two_factor_enabled: true, mfa_required_at: old }), {
-        mfaRequired: true, mfaGracePeriodDays: 7,
+        mfaRequirement: 'everyone', mfaGracePeriodDays: 7,
       });
       await expect((m as any).computeAuthGate('u1', undefined, false)).resolves.toBeUndefined();
     });
@@ -4751,7 +4751,7 @@ describe('AuthManager', () => {
     it('grace 0 blocks an un-enrolled user immediately (after the clock is set)', async () => {
       const past = new Date(Date.now() - 1000).toISOString();
       const m = mgr(makeEngine({ id: 'u1', two_factor_enabled: false, mfa_required_at: past }), {
-        mfaRequired: true, mfaGracePeriodDays: 0,
+        mfaRequirement: 'everyone', mfaGracePeriodDays: 0,
       });
       const g = await (m as any).computeAuthGate('u1', undefined, false);
       expect(g?.code).toBe('MFA_REQUIRED');
@@ -4767,12 +4767,12 @@ describe('AuthManager', () => {
       it('two-factor off: no hold and no grace clock started, said once with the remedy', async () => {
         const log = logger();
         const lapsed = makeEngine({ id: 'u1', two_factor_enabled: false, mfa_required_at: OLD() });
-        const m = mgr(lapsed, { mfaRequired: true, mfaGracePeriodDays: 0, plugins: {}, logger: log });
+        const m = mgr(lapsed, { mfaRequirement: 'everyone', mfaGracePeriodDays: 0, plugins: {}, logger: log });
         expect(m.isTwoFactorEnabled()).toBe(false);
         await expect((m as any).computeAuthGate('u1', undefined, false)).resolves.toBeUndefined();
         expect(await m.resolveUserAuthGates('u1')).toEqual([]);
         const fresh = makeEngine({ id: 'u2', two_factor_enabled: false, mfa_required_at: null });
-        const m2 = mgr(fresh, { mfaRequired: true, plugins: {}, logger: log });
+        const m2 = mgr(fresh, { mfaRequirement: 'everyone', plugins: {}, logger: log });
         expect(await m2.resolveUserAuthGates('u2')).toEqual([]);
         // The window opens when enrollment does, not before.
         expect(fresh.update).not.toHaveBeenCalled();
@@ -4789,7 +4789,7 @@ describe('AuthManager', () => {
         process.env.OS_AUTH_TWO_FACTOR = 'false';
         try {
           const m = mgr(makeEngine({ id: 'u1', two_factor_enabled: false, mfa_required_at: OLD() }), {
-            mfaRequired: true, mfaGracePeriodDays: 0, logger: logger(),
+            mfaRequirement: 'everyone', mfaGracePeriodDays: 0, logger: logger(),
           });
           expect(m.isTwoFactorEnabled()).toBe(false);
           // The one answer: what is wired, what is advertised, what the gate asks.
@@ -4803,12 +4803,12 @@ describe('AuthManager', () => {
 
       it('control: the same user is held once two-factor is on, and an enrolled user never is', async () => {
         const m = mgr(makeEngine({ id: 'u1', two_factor_enabled: false, mfa_required_at: OLD() }), {
-          mfaRequired: true, mfaGracePeriodDays: 0,
+          mfaRequirement: 'everyone', mfaGracePeriodDays: 0,
         });
         expect(m.isTwoFactorEnabled()).toBe(true);
         expect((await m.resolveUserAuthGates('u1')).map((g) => g.code)).toEqual(['MFA_REQUIRED']);
         const enrolled = mgr(makeEngine({ id: 'u1', two_factor_enabled: true, mfa_required_at: OLD() }), {
-          mfaRequired: true, mfaGracePeriodDays: 0, plugins: {},
+          mfaRequirement: 'everyone', mfaGracePeriodDays: 0, plugins: {},
         });
         expect(await enrolled.resolveUserAuthGates('u1')).toEqual([]);
       });
@@ -4816,10 +4816,13 @@ describe('AuthManager', () => {
   });
 
   // ADR-0069 D3 — per-org MFA tightening (an org may require MFA above the
-  // global floor). Uses an object-aware engine mock (sys_user + sys_organization).
+  // global floor). The organization's level is its `access_policy.mfa_required`
+  // setting, served here by an organization access-policy source built from the
+  // second argument (`{ id, mfa_required }`); the engine mock answers sys_user.
   describe('per-org enforced MFA (ADR-0069 D3)', () => {
     const SECRET = 'test-secret-at-least-32-chars-long';
     const makeEngine = (user: any, org: any) => ({
+      org,
       findOne: vi.fn(async (obj: string, q: any) => {
         assertEngineFindOnePredicate(obj, q);
         const row = obj === 'sys_organization' ? org : user;
@@ -4837,6 +4840,10 @@ describe('AuthManager', () => {
         secret: SECRET, baseUrl: 'http://localhost:3000', dataEngine: engine, plugins: { twoFactor: true }, ...extra,
       });
       warn.mockRestore();
+      m.setOrganizationAccessPolicySource({
+        read: async (id: string) => (engine.org?.id === id ? { mfa_required: engine.org.mfa_required } : {}),
+        anyOrganizationRequiresMfa: async () => !!engine.org && engine.org.mfa_required !== 'off',
+      });
       return m;
     };
 
@@ -4851,9 +4858,9 @@ describe('AuthManager', () => {
       const old = new Date(Date.now() - 30 * 86_400_000).toISOString();
       const engine = makeEngine(
         { id: 'u1', two_factor_enabled: false, mfa_required_at: old },
-        { id: 'org1', require_mfa: true },
+        { id: 'org1', mfa_required: 'everyone' },
       );
-      const m = mgr(engine, { mfaRequired: false, mfaGracePeriodDays: 7 });
+      const m = mgr(engine, { mfaRequirement: 'off', mfaGracePeriodDays: 7 });
       (m as any)._orgMfaCache = { value: true, at: Date.now() }; // org-requires cache primed
       const g = await (m as any).computeAuthGate('u1', 'org1', false);
       expect(g?.code).toBe('MFA_REQUIRED');
@@ -4863,19 +4870,19 @@ describe('AuthManager', () => {
       const old = new Date(Date.now() - 30 * 86_400_000).toISOString();
       const engine = makeEngine(
         { id: 'u1', two_factor_enabled: false, mfa_required_at: old },
-        { id: 'org1', require_mfa: false },
+        { id: 'org1', mfa_required: 'off' },
       );
-      const m = mgr(engine, { mfaRequired: false });
+      const m = mgr(engine, { mfaRequirement: 'off' });
       (m as any)._orgMfaCache = { value: true, at: Date.now() };
       await expect((m as any).computeAuthGate('u1', 'org1', false)).resolves.toBeUndefined();
     });
 
-    it('[#30201] does NOT block for the active org\'s require_mfa while two-factor is off, nor start the clock', async () => {
+    it('[#30201] does NOT block for the active org\'s MFA level while two-factor is off, nor start the clock', async () => {
       const engine = makeEngine(
         { id: 'u1', two_factor_enabled: false, mfa_required_at: null },
-        { id: 'org1', require_mfa: true },
+        { id: 'org1', mfa_required: 'everyone' },
       );
-      const m = mgr(engine, { mfaRequired: false, mfaGracePeriodDays: 0, plugins: {}, logger: { warn: vi.fn() } });
+      const m = mgr(engine, { mfaRequirement: 'off', mfaGracePeriodDays: 0, plugins: {}, logger: { warn: vi.fn() } });
       (m as any)._orgMfaCache = { value: true, at: Date.now() };
       await expect((m as any).computeAuthGate('u1', 'org1', false)).resolves.toBeUndefined();
       expect(engine.update).not.toHaveBeenCalled();
@@ -4883,7 +4890,7 @@ describe('AuthManager', () => {
 
     it('is a no-op when no org requires MFA and there is no active org', async () => {
       const engine = makeEngine({ id: 'u1', two_factor_enabled: false }, null);
-      const m = mgr(engine, { mfaRequired: false });
+      const m = mgr(engine, { mfaRequirement: 'off' });
       // cache says no org requires MFA
       (m as any)._orgMfaCache = { value: false, at: Date.now() };
       await expect((m as any).computeAuthGate('u1', undefined, false)).resolves.toBeUndefined();
@@ -4904,7 +4911,7 @@ describe('AuthManager', () => {
             { id: 'u1', must_change_password: true, password_changed_at: OLD(), two_factor_enabled: false, mfa_required_at: OLD() },
             null,
           ),
-          { passwordExpiryDays: 90, mfaRequired: true, mfaGracePeriodDays: 7 },
+          { passwordExpiryDays: 90, mfaRequirement: 'everyone', mfaGracePeriodDays: 7 },
         );
         m.noteMustChangePasswordIssued();
         const gates = await m.resolveUserAuthGates('u1');
@@ -4915,7 +4922,7 @@ describe('AuthManager', () => {
 
       it('answers [] for a user no policy holds, and reads nothing when no policy is enabled', async () => {
         const enrolled = makeEngine({ id: 'u1', two_factor_enabled: true }, null);
-        expect(await mgr(enrolled, { mfaRequired: true }).resolveUserAuthGates('u1')).toEqual([]);
+        expect(await mgr(enrolled, { mfaRequirement: 'everyone' }).resolveUserAuthGates('u1')).toEqual([]);
         const idle = makeEngine({ id: 'u1' }, null);
         const m = mgr(idle, {});
         (m as any)._orgMfaCache = { value: false, at: Date.now() };
@@ -4927,7 +4934,7 @@ describe('AuthManager', () => {
       it('asks the organization the credential operates in for a per-org MFA requirement', async () => {
         const engine = makeEngine(
           { id: 'u1', two_factor_enabled: false, mfa_required_at: OLD() },
-          { id: 'org_key', require_mfa: true },
+          { id: 'org_key', mfa_required: 'everyone' },
         );
         const m = mgr(engine, { mfaGracePeriodDays: 7 });
         (m as any)._orgMfaCache = { value: true, at: Date.now() };
@@ -4940,7 +4947,7 @@ describe('AuthManager', () => {
       it('fails open on a lookup error, as the session gate does', async () => {
         const engine = makeEngine(null, null);
         engine.findOne.mockImplementation(async () => { throw new Error('db down'); });
-        const m = mgr(engine, { mfaRequired: true });
+        const m = mgr(engine, { mfaRequirement: 'everyone' });
         expect(await m.resolveUserAuthGates('u1')).toEqual([]);
       });
     });

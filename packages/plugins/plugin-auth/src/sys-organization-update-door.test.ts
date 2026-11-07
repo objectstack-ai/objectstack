@@ -11,7 +11,7 @@
  * `sys-organization-update-door.test.ts` there). The whole safety of that
  * widening rests on this package: the identity write guard's per-object update
  * whitelist — `MANAGED_EXTENSION_EDITABLE_FIELDS.sys_organization`, registered
- * at `kernel:ready` by `auth-plugin.ts` — must keep admitting exactly the four
+ * at `kernel:ready` by `auth-plugin.ts` — must keep admitting exactly the ruled
  * platform-owned extension columns and keep stripping everything else,
  * better-auth's own `name` / `slug` / `logo` / `metadata` included.
  *
@@ -47,8 +47,11 @@ import {
 } from './identity-write-guard.js';
 import { managedExtensionEditableFields } from './managed-extension-fields.js';
 
-/** The four columns the ruling names, in the whitelist's own order. */
-const RULED_COLUMNS = ['require_mfa', 'parent_organization_id', 'sort_order', 'timezone'];
+/** The columns the ruling names, in the whitelist's own order — less `require_mfa`, retired with the multi-factor levels (`organization-access-policy.ts`). */
+const RULED_COLUMNS = ['parent_organization_id', 'sort_order', 'timezone'];
+
+/** Retired columns: still provisioned, written by no generic surface (the D4 assertion below holds them readonly). */
+const RETIRED_COLUMNS = ['require_mfa'];
 
 /** better-auth's own organization columns on this object — protocol fields. */
 const BETTER_AUTH_COLUMNS = ['name', 'slug', 'logo', 'metadata'];
@@ -89,24 +92,24 @@ async function guardedUpdate(data: Record<string, unknown>): Promise<any> {
   }
 }
 
-describe('#15873 — the whitelist is the four ruled columns, every one a real column on the object', () => {
+describe('#15873 — the whitelist is the ruled columns (less the retired require_mfa), every one a real column on the object', () => {
   it('MANAGED_EXTENSION_EDITABLE_FIELDS.sys_organization is exactly the ruled set', () => {
     expect([...managedExtensionEditableFields('sys_organization')].sort()).toEqual([...RULED_COLUMNS].sort());
   });
 
   it('every whitelisted name is a declared field, and every better-auth column named here is too', () => {
     const fields = Object.keys(SysOrganization.fields as Record<string, unknown>);
-    for (const name of [...RULED_COLUMNS, ...BETTER_AUTH_COLUMNS, ...SYSTEM_COLUMNS]) {
+    for (const name of [...RULED_COLUMNS, ...BETTER_AUTH_COLUMNS, ...SYSTEM_COLUMNS, ...RETIRED_COLUMNS]) {
       expect(fields, `${name} is declared on sys_organization`).toContain(name);
     }
-    // And the three lists above partition the object: a column this file does
+    // And the four lists above partition the object: a column this file does
     // not classify is a column the D4 assertion below would judge blind.
-    expect([...fields].sort()).toEqual([...RULED_COLUMNS, ...BETTER_AUTH_COLUMNS, ...SYSTEM_COLUMNS].sort());
+    expect([...fields].sort()).toEqual([...RULED_COLUMNS, ...BETTER_AUTH_COLUMNS, ...SYSTEM_COLUMNS, ...RETIRED_COLUMNS].sort());
   });
 });
 
 describe('#15873 — the guard holds the column gate on a user-context update', () => {
-  it.each(BETTER_AUTH_COLUMNS)('%s alone is REFUSED — 403 PERMISSION_DENIED, never silently ignored', async (column) => {
+  it.each([...BETTER_AUTH_COLUMNS, ...RETIRED_COLUMNS])('%s alone is REFUSED — 403 PERMISSION_DENIED, never silently ignored', async (column) => {
     const data: Record<string, unknown> = { id: 'org_1', [column]: 'hijacked' };
     const err = await guardedUpdate(data);
     expect(err, `${column} must be refused`).toBeTruthy();
@@ -117,7 +120,7 @@ describe('#15873 — the guard holds the column gate on a user-context update', 
   });
 
   it.each(RULED_COLUMNS)('%s alone passes the guard un-stripped', async (column) => {
-    const value = column === 'require_mfa' ? true : column === 'sort_order' ? 7 : column === 'timezone' ? 'Asia/Shanghai' : 'org_parent';
+    const value = column === 'sort_order' ? 7 : column === 'timezone' ? 'Asia/Shanghai' : 'org_parent';
     const data: Record<string, unknown> = { id: 'org_1', [column]: value };
     expect(await guardedUpdate(data)).toBeNull();
     expect(data, `the guard must not strip ${column}`).toEqual({ id: 'org_1', [column]: value });
@@ -158,7 +161,7 @@ describe('#15873 — ADR-0092 D4: the edit form offers exactly what the guard ad
     expect(fields[column]?.readonly, `${column} must not be readonly`).not.toBe(true);
   });
 
-  it.each(BETTER_AUTH_COLUMNS)('%s is readonly in the form — the guard would strip or refuse it', (column) => {
+  it.each([...BETTER_AUTH_COLUMNS, ...RETIRED_COLUMNS])('%s is readonly in the form — the guard would strip or refuse it', (column) => {
     expect(fields[column]?.readonly, `${column} must be readonly`).toBe(true);
   });
 

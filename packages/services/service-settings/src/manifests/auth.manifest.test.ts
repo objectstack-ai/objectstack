@@ -28,12 +28,22 @@ describe('authSettingsManifest', () => {
     expect(keys).toEqual([
       'email_password_enabled',
       'google_enabled',
-      'mfa_required',
       'password_reject_breached',
       'password_require_complexity',
       'require_email_verification',
       'signup_enabled',
     ]);
+  });
+
+  // [ruling 「可以，按三档做（推荐）」] The deployment's multi-factor requirement
+  // has three levels — the default and the floor of every organization's own.
+  it('mfa_required is a three-level select, off by default', () => {
+    const spec = (authSettingsManifest.specifiers as any[]).find((s) => s.key === 'mfa_required');
+    expect(spec.type).toBe('select');
+    expect(spec.default).toBe('off');
+    expect(spec.options.map((o: any) => o.value)).toEqual(['off', 'administrators', 'everyone']);
+    const grace = (authSettingsManifest.specifiers as any[]).find((s) => s.key === 'mfa_grace_period_days');
+    expect(grace.visible).toBe("${data.mfa_required !== 'off'}");
   });
 
   // #5152 / ADR-0093 D1 — `signup_enabled` says whether people may

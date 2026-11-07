@@ -353,6 +353,7 @@ export const fr: PlatformTranslationData = {
         },
         mfa_required: {
           label: 'Exiger l’authentification multifacteur',
+          options: { off: 'Désactivé', administrators: 'Administrateurs', everyone: 'Tout le monde' },
           help: 'Les utilisateurs sans application d’authentification enregistrée perdent l’accès aux données à la fin de leur délai de grâce. L’activer active aussi la fonction à deux facteurs pour que les utilisateurs puissent s’enregistrer.',
         },
         mfa_grace_period_days: {
@@ -413,6 +414,26 @@ export const fr: PlatformTranslationData = {
         },
       },
     },
+    access_policy: {
+      title: 'Politique d’accès',
+      description: 'Les restrictions de connexion de cette organisation. Les paramètres d’authentification du déploiement s’appliquent toujours ; ceux-ci ne peuvent qu’y ajouter.',
+      groups: {
+        network: { title: 'Réseau', description: 'D’où les membres de cette organisation peuvent se connecter.' },
+        sessions: { title: 'Sessions', description: 'Combien de temps la session d’un membre reste valide. Chaque limite peut seulement être plus courte que celle du déploiement.' },
+        multi_factor: { title: 'Multifacteur', description: 'Qui, dans cette organisation, doit protéger son compte avec une application d’authentification (TOTP).' },
+      },
+      keys: {
+        allowed_ip_ranges: { label: 'Plages d’adresses IP autorisées' },
+        session_idle_timeout_minutes: { label: 'Délai d’inactivité (minutes)' },
+        session_absolute_max_hours: { label: 'Durée de vie maximale de la session (heures)' },
+        max_concurrent_sessions_per_user: { label: 'Sessions simultanées max. par utilisateur' },
+        mfa_required: {
+          label: 'Exiger l’authentification multifacteur',
+          options: { off: 'Désactivé', administrators: 'Administrateurs', everyone: 'Tout le monde' },
+        },
+      },
+    },
+
     storage: {
       title: 'Stockage des fichiers',
       description: 'Backend utilisé pour les pièces jointes, les exports et les fichiers envoyés par les utilisateurs.',

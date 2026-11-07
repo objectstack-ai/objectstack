@@ -401,9 +401,16 @@ export function allowedIpRangesRefusalCopy(locale: string | undefined): AllowedI
  * the entries, both on every write; then a list that leaves out the judged
  * address of an HTTP write. `manager` is read per write, so the address rule is
  * the one in force when the save happens.
+ *
+ * The same check holds an organization's own list
+ * (`access_policy.allowed_ip_ranges`, `organization-access-policy.ts`).
+ * `recovery: false` leaves out the env-override way back, which reopens the
+ * deployment's list only: an organization's list is reopened by the
+ * deployment's administrator, whom it never holds.
  */
 export function allowedIpRangesWritePredicate(
   manager: () => Pick<AuthManager, 'resolveClientAddress'> | null | undefined,
+  options: { recovery?: boolean } = {},
 ): (input: unknown) => AllowedIpRangesWriteRefusal | undefined {
   return (input) => {
     // The settings write predicate's input (`SettingsWritePredicateInput`), read structurally.
@@ -428,7 +435,7 @@ export function allowedIpRangesWritePredicate(
     if (address && ranges.some((range) => ipMatchesRange(address, range))) return undefined;
     const copy = allowedIpRangesRefusalCopy(locale);
     return {
-      message: (address ? copy.outside(address) : copy.undetermined) + copy.recovery,
+      message: (address ? copy.outside(address) : copy.undetermined) + (options.recovery === false ? '' : copy.recovery),
       constraint: { clientAddress: address ?? null },
     };
   };

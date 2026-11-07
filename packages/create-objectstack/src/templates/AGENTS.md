@@ -15,9 +15,11 @@ that defines business objects, views, automations, and AI agents in TypeScript.
 ## Verify your work (do this after every metadata change)
 
 Metadata mistakes fail **silently at runtime**, not at edit time — a bare field
-reference in a predicate (`done` instead of `record.done`) evaluates to `null`
-and silently hides an action on every record; a dangling widget binding renders
-an empty chart. Catch them before you ship:
+reference in a predicate (`done` instead of `record.done`) is an unknown
+variable, so the predicate cannot be evaluated on any record: an action whose
+`visible` reads it is hidden on every record, and an `error` validation rule
+that reads it refuses every write; a dangling widget binding renders an empty chart. Catch
+them before you ship:
 
 ```bash
 {{PM}} run validate      # schema + CEL predicates + widget bindings (no artifact)
