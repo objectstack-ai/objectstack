@@ -2487,6 +2487,9 @@ importers:
       '@objectstack/core':
         specifier: workspace:*
         version: link:../../core
+      '@objectstack/formula':
+        specifier: workspace:*
+        version: link:../../formula
       '@objectstack/objectql':
         specifier: workspace:*
         version: link:../../objectql

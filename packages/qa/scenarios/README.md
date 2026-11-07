@@ -76,11 +76,18 @@ discrimination test; ⛔ never match by area prefix.
 | `records-forms.master-detail-inline-edit` | has every master-detail field resolving, and one of them edited inline on its master (`inlineEdit`) |
 | `records-forms.roll-up-summary` | carries a roll-up summary, each reading a child object that relates back and, unless it counts, a child field that exists |
 | `records-forms.select-options` | carries a single-choice option field (`select`, `radio`), each offering at least two options |
+| `records-forms.formula-field` | carries a computed field (a `formula` field, or a stored field with an `expression`), each expression compiling at `record` scope against its object's columns |
+| `records-forms.validation-rule` | carries an active, refusing (`severity: 'error'`) validation rule on an object the card names, every rule's predicates (nested ones included) compiling against its object |
 | `access-security.field-permissions` | denies (`readable: false`, in a permission set) every field a card persona hides, and has that field |
 | `access-security.row-scope` | keeps every object a persona's `scope` names private (owner-scoped) or derived from its master, or narrows it for each such persona by a read policy (`rowLevelSecurity`, `select` or `all`, no `positions`, a `using` that is not `true`) on that persona's permission set |
+| `access-security.row-level-security` | keeps every object a persona's `scope` names to that persona by a route that enforces: private, a detail whose master is itself kept so, or a narrowing read policy on its permission set; and every read policy that applies there lowers to a query filter |
 | `approvals.approval-flow` | carries an approval (a flow with an Approval node), each bound to an object it serves, one bound to an object the card names |
+| `approvals.multi-step-approval` | carries an approval flow, bound to an object the card names, in which a second Approval node follows the first on its `approve` branch |
+| `approvals.dynamic-approver-routing` | routes an Approval node of a flow bound to an object the card names to an approver read off the record (`field`, `manager`, `expression`), each one able to name someone: a field holding a user, an expression over `current` / `trigger` / `vars` |
 | `automation.record-triggered-flow` | carries a record-triggered flow, each bound to an object it serves, one bound to an object the card names |
 | `dashboards.widget-measures` | carries a dashboard widget with a measure, and every widget measure resolves on the dataset it binds |
+| `dashboards.report` | carries a report whose dataset binds an object the card names, every report selecting only measures and dimensions its datasets declare |
+| `ai.agent-actions` | carries every action in `run.agentActions` on its object, AI-exposed and confirm-gated where the card says `confirm` (the agent-action checks) |
 
 ## Running the cards — `@objectstack/scenarios/runner`
 
