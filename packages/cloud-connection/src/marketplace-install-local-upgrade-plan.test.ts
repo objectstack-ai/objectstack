@@ -308,10 +308,30 @@ describe('step 2c′: the schema upgrade verdict on a managed re-install', () =>
         expect(door.register).not.toHaveBeenCalled();
     });
 
-    it('an orphaned install (served by the registry, no ledger record) is refused 409 with one finding; its token installs', async () => {
+    it('an orphaned install (served by the registry, no ledger record) is compared against the body the registry serves', async () => {
         const registryPackages: Row[] = [];
         const door = await mount({ registryPackages });
-        registryPackages.push({ manifest: { id: VENDOR } }); // registered after boot: an orphan, not user code
+        registryPackages.push({ manifest: V1 }); // registered after boot: an orphan, not user code
+
+        // A retype against the registry's body is refused like any other.
+        const res = await door.install(makeC({ manifest: vendorBody('2.0.0', { company: { type: 'number' } }) }));
+        expect(res.status).toBe(409);
+        expect(res.payload.error.details.findings).toEqual([expect.objectContaining({
+            kind: 'type_change', field: 'company', from: 'text', to: 'number', category: 'needs_confirm',
+        })]);
+        expect(door.register).not.toHaveBeenCalled();
+        expect(ledgerFiles()).toEqual({});
+
+        // CONTROL: the same orphan upgraded with no field change installs, unasked.
+        const clean = await door.install(makeC({ manifest: vendorBody('2.0.0', { company: { type: 'text' }, region: { type: 'text' } }) }));
+        expect(clean.status).toBe(200);
+        expect(entry()?.schemaUpgradeConfirmation).toBeUndefined();
+    });
+
+    it('an orphan whose registry row carries no body is refused 409 installed_record_missing; its token installs', async () => {
+        const registryPackages: Row[] = [];
+        const door = await mount({ registryPackages });
+        registryPackages.push({ id: VENDOR }); // served, but no body to compare against
 
         const res = await door.install(makeC({ manifest: V2 }));
         expect(res.status).toBe(409);

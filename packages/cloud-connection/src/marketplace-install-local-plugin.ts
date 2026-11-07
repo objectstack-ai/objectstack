@@ -114,9 +114,11 @@
  *          `destructive`, answers `409 SCHEMA_UPGRADE_CONFIRMATION_REQUIRED`
  *          with `details.findings` and the finding set's token; the same
  *          request with `confirmSchemaUpgrade: <token>` installs and records
- *          the confirmation in the ledger entry. A record of the installed
- *          version that will not parse, or an install the registry serves with
- *          no record, answers the same 409 with one finding naming it
+ *          the confirmation in the ledger entry. An orphaned install (the
+ *          registry serves it, the ledger holds no record) is compared against
+ *          the body the registry serves. A record of the installed version
+ *          that will not parse, or an orphan whose registry row carries no
+ *          body, answers the same 409 with one finding naming it
  *          (`installed_record_unreadable` / `installed_record_missing`): no
  *          comparison ran, and its token admits the re-install. Removed fields,
  *          `safe` type changes and seed changes are refused by nothing.
@@ -672,8 +674,8 @@ function schemaUpgradeFindingSet(manifestId: string, findings: readonly SchemaUp
 
 /**
  * [epic cloud#3652 Q3, #30884] The verdict when there is no installed side to
- * compare: the ledger file would not parse, or the registry serves the
- * package with no ledger record at all (an orphaned install). The upgrade's
+ * compare: the ledger file would not parse, or neither the ledger nor the
+ * registry (an orphaned install's row) holds the installed body. The upgrade's
  * renames and type changes cannot be known, and a comparison that did not
  * run is never taken for "no finding" (2a, 2b and 2c answer the same way): the
  * one finding names what is missing, and its token admits the re-install —
@@ -696,7 +698,8 @@ function installedRecordUnavailableVerdict(
         }
         : {
             kind: 'installed_record_missing',
-            describe: `This runtime serves "${manifestId}" but holds no record of the installed version, ${consequence}`,
+            describe: `This runtime serves "${manifestId}" but holds no record of the installed version's package body, `
+                + consequence,
         };
     return { declaredRenames: [], findings: [finding], findingSet: schemaUpgradeFindingSet(manifestId, [finding]) };
 }
@@ -3817,12 +3820,15 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
      * version — its ledger entry, converted forward as the registry reads it —
      * against `converted`, and what it decides.
      *
-     * - **No installed body** (the ledger file would not parse, or the
-     *   registry serves the package with no ledger record): no comparison can
-     *   run, and one that did not run is never taken for "no finding" — the
-     *   409 below with one finding, `installed_record_unreadable` (its `file`
-     *   and `cause`) or `installed_record_missing`. Its token admits the
-     *   re-install, which rewrites the record, confirmed and recorded.
+     * - **The installed side** is the ledger entry's body; for an orphaned
+     *   install (no ledger file, the registry still serves the package) it is
+     *   the body the registry serves ({@link registeredPackageBody}).
+     * - **No installed body** (the ledger file would not parse, or neither the
+     *   ledger nor the registry holds one): no comparison can run, and one
+     *   that did not run is never taken for "no finding" — the 409 below with
+     *   one finding, `installed_record_unreadable` (its `file` and `cause`) or
+     *   `installed_record_missing`. Its token admits the re-install, which
+     *   rewrites the record, confirmed and recorded.
      * - **A declared rename**: `501 NOT_IMPLEMENTED`, naming each — no token
      *   answers it while this runtime cannot carry a renamed field's column to
      *   its new key (ruling record 6709061297, C2). Card 01b (#30885), which
@@ -3849,10 +3855,15 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         refusal?: { body: Record<string, unknown>; status: 409 | 501 };
         confirmation?: InstalledEntry['schemaUpgradeConfirmation'];
     }> => {
-        // No installed body to compare (a ledger file that will not parse, or an
-        // orphaned install the registry still serves): the verdict is the one
-        // finding that says so, confirmable like any other — never "no finding".
-        const installed = previous.entry?.manifest ? this.convertPackageBodyForward(ctx, previous.entry.manifest) : undefined;
+        // The installed side: the ledger entry's body; for an orphaned install
+        // (no ledger file, the registry still serves the package — findConflict
+        // step 3) the body the registry serves. With neither — a ledger file
+        // that will not parse, or a registry row carrying no body — the verdict
+        // is the one finding that says so, confirmable like any other, never
+        // "no finding".
+        const installedBody = previous.entry?.manifest
+            ?? (previous.entry === null && previous.failure === undefined ? this.registeredPackageBody(ctx, manifestId) : undefined);
+        const installed = installedBody ? this.convertPackageBodyForward(ctx, installedBody) : undefined;
         const verdict = installed === undefined
             ? installedRecordUnavailableVerdict(manifestId, previous.failure)
             : schemaUpgradeVerdict(manifestId, comparePackageVersions(packageUpgradeSideOf(installed), packageUpgradeSideOf(converted)));
@@ -4927,6 +4938,21 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             }
         } catch { /* objectql not registered yet — treat as fresh */ }
         return 'none';
+    };
+
+    /**
+     * [epic cloud#3652 Q3, #30884] The package body the engine registry serves
+     * under `manifestId` — the row {@link findConflict} step 3 finds for an
+     * orphaned install — or `undefined` when there is none, or it carries no
+     * body. Step 2c′ compares against it when the ledger holds no record.
+     */
+    private registeredPackageBody = (ctx: PluginContext, manifestId: string): unknown => {
+        try {
+            const ql: any = ctx.getService('objectql');
+            const packages: any[] = ql?.registry?.getAllPackages?.() ?? [];
+            const row = packages.find((p: any) => manifestIdOf(p) === manifestId);
+            return row?.manifest && typeof row.manifest === 'object' ? row.manifest : undefined;
+        } catch { return undefined; }
     };
 
     /**
