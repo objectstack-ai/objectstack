@@ -467,7 +467,7 @@ The body runs in an isolated QuickJS VM, **not** Node:
 ### ⚠️ Gotcha 1 — `ctx.result` is a *partial* record on afterUpdate
 
 On `afterUpdate`, both `ctx.result` and `ctx.input` carry only the fields this
-PATCH touched, plus `id`. A field you did **not** write — a lookup FK, a status
+PATCH touched (`ctx.result` adds `id`). A field you did **not** write — a lookup FK, a status
 you want to branch on — is **absent**, not stale. To read the whole record,
 re-query it:
 
