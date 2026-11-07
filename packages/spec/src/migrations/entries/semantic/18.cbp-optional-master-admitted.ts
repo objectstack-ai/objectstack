@@ -13,6 +13,13 @@ import type { SemanticMigration } from '../../types.js';
 // its meaning where the spec sees the omission (the builder force and the D2
 // conversion cbp-master-detail-required-defaulted, both unchanged). No D2
 // conversion: nothing is rewritten.
+//
+// The write side followed under ADR-0055 §3 as amended (same ruling A, PR
+// #31082), and the `replacement` below records it beside the read side: a
+// detail row whose OPTIONAL master reference is empty is written by its owner
+// and by Modify All on the detail and refused `403 PERMISSION_DENIED` for
+// everyone else, an insert naming no master is admitted, and only a REQUIRED
+// master's empty stored reference still answers `422 MISSING_REQUIRED_FIELD`.
 export const entry: SemanticMigration = {
   id: 'cbp-optional-master-admitted',
   surface: 'object.sharingModel = \'controlled_by_parent\' together with object.fields — a `master_detail` '
@@ -21,9 +28,15 @@ export const entry: SemanticMigration = {
     + 'field with `required: false`, an optional master. A detail row that names its master is read exactly as '
     + 'before, by whoever can read that master. A row whose master reference is empty is read by its owner '
     + '(`owner_id`) and by a holder of View All on the detail, and by nobody else: a row with no owner, or on '
-    + 'an object that carries no `owner_id` column, is read through View All alone. Writes are unchanged by '
-    + 'this entry: an insert or update that leaves the master reference empty is still refused with 422. '
-    + 'Declare `required: true` when every row must name its master; an omitted `required` keeps meaning '
+    + 'an object that carries no `owner_id` column, is read through View All alone. Writes follow the same '
+    + 'owner: an insert that names no master is admitted, and its creator owns the row; its owner and a '
+    + 'holder of Modify All on the detail update or delete a row whose master reference is empty, and '
+    + 'everyone else who reaches the write gate, View All included, is refused `403 PERMISSION_DENIED`; a '
+    + 'row with no owner, or on an object that carries no `owner_id` column, is written through Modify All '
+    + 'alone. An update that empties a named master asks edit access on the master it leaves. A required '
+    + 'master is unchanged: a row whose stored required master reference is empty is still refused with '
+    + '`422 MISSING_REQUIRED_FIELD`. Declare `required: true` when every row must name its master; an '
+    + 'omitted `required` keeps meaning '
     + 'required through `ObjectSchema.create()` and on stored rows, and `os lint` reports it at `error` so the '
     + 'author writes one of the two.',
   reason:

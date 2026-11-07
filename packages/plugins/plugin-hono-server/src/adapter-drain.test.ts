@@ -185,6 +185,88 @@ describe('HonoHttpServer — graceful close drains in-flight requests (P1-3)', (
     await closeP;
   });
 
+  it('a response that ended before close() but is still flushing to a slow reader arrives whole', async () => {
+    // Node counts a response as done once it has called `end()`, before its
+    // bytes are flushed. `server.close()` sweeps idle connections first thing
+    // (Node 19 and later), so without the guard this response's connection is
+    // destroyed at drain start: 3,919,702 of 33,554,432 bytes arrived on main.
+    // An idle keep-alive connection alongside it must still be released by the
+    // drain, once the flush is done, rather than holding `close()` open until
+    // the server's keep-alive timer fires.
+    const BIG = new Uint8Array(32 * 1024 * 1024).fill(0x61);
+    let bigResponse: ServerResponse | undefined;
+    const server = new HonoHttpServer(0, undefined, 10_000);
+    server.getRawApp().get('/big', (c) => {
+      bigResponse = (c.env as { outgoing: ServerResponse }).outgoing;
+      return c.body(BIG);
+    });
+    server.getRawApp().get('/probe', (c) => c.text('idle-after-this'));
+    await server.listen(0);
+    const port = server.getPort();
+
+    const idle = await rawConnection(port);
+    idle.socket.write('GET /probe HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n');
+    const slowReader = await rawConnection(port);
+    slowReader.socket.pause(); // reads nothing until resumed below
+    slowReader.socket.write('GET /big HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n');
+    await sleep(100);
+    expect(splitResponse(idle.received()).headers.connection).toBe('keep-alive');
+    // The premise: the big response has called end() and is still flushing.
+    expect(bigResponse?.writableEnded, 'the big response has called end()').toBe(true);
+    expect(bigResponse?.writableFinished, 'the big response is still flushing').toBe(false);
+
+    const closeP = server.close();
+    await sleep(50);
+    slowReader.socket.resume();
+    await slowReader.ended;
+    const flushed = Date.now();
+    const { head, headers, body } = splitResponse(slowReader.received());
+    expect(head).toMatch(/^HTTP\/1\.1 200/);
+    expect(Number(headers['content-length'])).toBe(BIG.length);
+    expect(body.length, 'every byte of the body arrived').toBe(BIG.length);
+
+    await idle.ended;
+    await closeP;
+    // The keep-alive timer would hold it 5 s; the release takes milliseconds.
+    expect(Date.now() - flushed).toBeLessThan(1000);
+  });
+
+  it('an idle keep-alive connection is released at drain start', async () => {
+    const server = new HonoHttpServer(0, undefined, 10_000);
+    server.getRawApp().get('/probe', (c) => c.text('idle-after-this'));
+    await server.listen(0);
+    const idle = await rawConnection(server.getPort());
+    idle.socket.write('GET /probe HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n');
+    await sleep(50);
+    expect(splitResponse(idle.received()).headers.connection).toBe('keep-alive');
+
+    const t0 = Date.now();
+    await server.close();
+    await idle.ended;
+    // Nothing is flushing, so the sweep runs at once: no keep-alive wait.
+    expect(Date.now() - t0).toBeLessThan(1000);
+  });
+
+  it('the drain window still force-closes a reader that never drains', async () => {
+    const BIG = new Uint8Array(32 * 1024 * 1024).fill(0x61);
+    const server = new HonoHttpServer(0, undefined, 300);
+    server.getRawApp().get('/big', (c) => c.body(BIG));
+    await server.listen(0);
+    const stalled = await rawConnection(server.getPort());
+    stalled.socket.pause(); // never resumed
+    stalled.socket.write('GET /big HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n');
+    await sleep(100);
+
+    const t0 = Date.now();
+    await server.close();
+    const elapsed = Date.now() - t0;
+    expect(elapsed).toBeGreaterThanOrEqual(250); // held for the window, not swept at drain start
+    expect(elapsed).toBeLessThan(2000); // the 300 ms window, not the reader
+    stalled.socket.resume(); // read what made it out, to see the connection end
+    await stalled.ended; // the backstop destroyed it
+    expect(stalled.received().length).toBeLessThan(BIG.length);
+  });
+
   it('forgets a pipelined response whose connection died before it was written', async () => {
     // Pipelined requests queue behind the first one's response; the queued
     // responses have no socket of their own, so if the connection dies they

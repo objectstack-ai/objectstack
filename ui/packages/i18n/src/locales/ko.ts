@@ -2262,6 +2262,12 @@ const ko = {
         done: "동료가 참여했거나 초대되었습니다.",
         action: "초대",
       },
+      connectAssistant: {
+        title: 'AI 어시스턴트 연결',
+        todo: 'Claude, Doubao 같은 어시스턴트에서 본인으로서 이 시스템을 사용하세요.',
+        done: 'AI 어시스턴트 또는 API 키가 연결되어 있습니다.',
+        action: '연결',
+      },
     },
     error: {
       connectionFailed: "서버에 연결할 수 없습니다",
@@ -3230,6 +3236,12 @@ const ko = {
       message: "싱글 사인온을 사용할 수 없을 때도 로그인할 수 있도록 복구 비밀번호를 설정하세요.",
       cta: "비밀번호 설정",
       dismiss: "닫기",
+    },
+    connectAssistant: {
+      title: 'AI 어시스턴트에서 이 시스템 사용하기',
+      body: 'Claude, Doubao 같은 AI 어시스턴트에서 레코드를 조회하고 변경할 수 있습니다. 어시스턴트는 항상 사용자 본인으로서, 본인의 권한으로 동작합니다.',
+      action: 'AI 어시스턴트 연결',
+      dismiss: '숨기기',
     },
     pendingDrafts: {
       // objectui#12602 — the drafts row in Home's "My work" section: the

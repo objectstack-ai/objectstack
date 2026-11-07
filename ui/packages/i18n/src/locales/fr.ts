@@ -2320,6 +2320,12 @@ const fr = {
         done: "Des collègues ont rejoint l’organisation ou ont été invités.",
         action: "Inviter",
       },
+      connectAssistant: {
+        title: 'Connecter un assistant IA',
+        todo: "Travaillez dans ce système depuis Claude, Doubao et d'autres assistants, en votre nom.",
+        done: "Un assistant IA ou une clé d'API à vous est connecté.",
+        action: 'Connecter',
+      },
     },
     error: {
       connectionFailed: "Impossible de se connecter au serveur",
@@ -3291,6 +3297,12 @@ const fr = {
       message: "Définissez un mot de passe de secours afin de pouvoir vous connecter même si l'authentification unique est indisponible.",
       cta: "Définir le mot de passe",
       dismiss: "Ignorer",
+    },
+    connectAssistant: {
+      title: 'Travaillez ici depuis votre assistant IA',
+      body: "Vous pouvez consulter et modifier vos enregistrements depuis Claude, Doubao et d'autres assistants IA. Chacun agit en votre nom, avec vos propres autorisations.",
+      action: 'Connecter un assistant IA',
+      dismiss: 'Masquer',
     },
     pendingDrafts: {
       // objectui#12602 — the drafts row in Home's "My work" section: the

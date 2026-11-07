@@ -2262,6 +2262,12 @@ const de = {
         done: "Kollegen sind beigetreten oder wurden eingeladen.",
         action: "Einladen",
       },
+      connectAssistant: {
+        title: 'KI-Assistenten verbinden',
+        todo: 'Arbeiten Sie in diesem System aus Claude, Doubao und ähnlichen Assistenten, als Sie selbst.',
+        done: 'Ein KI-Assistent oder API-Schlüssel von Ihnen ist verbunden.',
+        action: 'Verbinden',
+      },
     },
     error: {
       connectionFailed: "Verbindung zum Server nicht möglich",
@@ -3230,6 +3236,12 @@ const de = {
       message: "Legen Sie ein Wiederherstellungspasswort fest, damit Sie sich auch anmelden können, wenn Single Sign-on einmal nicht verfügbar ist.",
       cta: "Passwort festlegen",
       dismiss: "Ausblenden",
+    },
+    connectAssistant: {
+      title: 'Arbeiten Sie hier mit Ihrem KI-Assistenten',
+      body: 'Sie können Ihre Datensätze aus Claude, Doubao und ähnlichen KI-Assistenten abrufen und ändern. Jeder handelt in Ihrem Namen, mit Ihren eigenen Berechtigungen.',
+      action: 'KI-Assistenten verbinden',
+      dismiss: 'Ausblenden',
     },
     pendingDrafts: {
       // objectui#12602 — the drafts row in Home's "My work" section: the

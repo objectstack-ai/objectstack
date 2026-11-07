@@ -27,7 +27,10 @@ import {
   type MePermissionsResponse,
 } from '@object-ui/permissions';
 
-const { AUTH, toastError, toastSuccess } = vi.hoisted(() => ({
+const { AUTH, toastError, toastSuccess, SHELL } = vi.hoisted(() => ({
+  // What the Connect an AI Assistant row reads: the served apps (for the page's
+  // path) and the adapter (for what this administrator has connected).
+  SHELL: { apps: [] as unknown[], adapter: null as unknown },
   AUTH: {
     user: { id: 'u_admin' },
     activeOrganization: { id: 'org_1', name: 'Default Organization' } as { id: string; name: string },
@@ -47,8 +50,13 @@ vi.mock('sonner', () => ({ toast: { error: toastError, success: toastSuccess } }
 // provider; the real surface is inherited and only that read is stubbed.
 vi.mock('@object-ui/app-shell', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
-  useMetadata: () => ({ apps: [], objects: [], loading: false, error: null, refresh: async () => {} }),
+  useMetadata: () => ({ apps: SHELL.apps, objects: [], loading: false, error: null, refresh: async () => {} }),
   resolveSetupAppPath: () => '/apps/setup',
+}));
+
+vi.mock('@object-ui/react', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  useAdapter: () => SHELL.adapter,
 }));
 
 import { FirstRunChecklist } from '../FirstRunChecklist';
@@ -221,6 +229,8 @@ beforeEach(() => {
   mailValues = { provider: resolved('smtp') };
   putRefusal = null;
   AUTH.activeOrganization = { id: 'org_1', name: 'Default Organization' };
+  SHELL.apps = [];
+  SHELL.adapter = null;
   AUTH.getMembers.mockReset().mockResolvedValue([{ id: 'm_1' }]);
   AUTH.listInvitations.mockReset().mockResolvedValue([]);
   browserZone = 'Asia/Shanghai';
@@ -409,5 +419,87 @@ describe('the reads wait for the first paint (objectui#12980)', () => {
     });
     expect(await screen.findByTestId('first-run-checklist')).toBeTruthy();
     expect(calls('GET', '/api/settings')).toHaveLength(1);
+  });
+});
+
+describe('Connect an AI assistant: done from a real record, never from a click', () => {
+  const ACCOUNT_APP = {
+    name: 'account',
+    navigation: [{ type: 'group', id: 'grp', children: [{ type: 'page', id: 'nav_connect_agent', pageName: 'connect_agent' }] }],
+  };
+  let granted: unknown[];
+  let keys: Record<string, unknown>[];
+  let list: ReturnType<typeof vi.fn>;
+  let find: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    granted = [];
+    keys = [];
+    list = vi.fn(async () => ({ clients: granted, truncated: false }));
+    find = vi.fn(async () => ({ data: keys }));
+    SHELL.apps = [ACCOUNT_APP];
+    SHELL.adapter = { getClient: () => ({ oauth: { authorizedClients: { list } } }), find };
+  });
+
+  it('nothing connected: the row is not done and links to the page', async () => {
+    keys = [{ id: 'k_old', name: 'old', revoked: true, expires_at: null }];
+    renderChecklist(ADMIN);
+    const r = await screen.findByTestId('first-run-checklist-row-connect_assistant');
+    expect(r.getAttribute('data-done')).toBe('false');
+    expect(within(r).getByText('Work in this system from Claude, Doubao and similar assistants, as yourself.')).toBeTruthy();
+    expect(screen.getByTestId('first-run-checklist-link-connect_assistant').getAttribute('href')).toBe(
+      '/apps/account/page/connect_agent',
+    );
+    expect(screen.getByTestId('first-run-checklist-progress').textContent).toBe('0 of 7 done');
+    expect(find).toHaveBeenCalledWith('sys_api_key', expect.objectContaining({ $filter: { user_id: 'u_admin' } }));
+  });
+
+  it('an authorized assistant makes it done', async () => {
+    granted = [{ id: 'c1', clientId: 'cl', name: 'Claude Desktop', scopes: [], organizationId: null, authorizedAt: null, lastUsedAt: null }];
+    renderChecklist(ADMIN);
+    const r = await screen.findByTestId('first-run-checklist-row-connect_assistant');
+    expect(r.getAttribute('data-done')).toBe('true');
+    expect(within(r).getByText('An AI assistant or API key of yours is connected.')).toBeTruthy();
+  });
+
+  it('an API key that still works makes it done', async () => {
+    keys = [{ id: 'k_live', name: 'doubao key', revoked: false, expires_at: null }];
+    renderChecklist(ADMIN);
+    const r = await screen.findByTestId('first-run-checklist-row-connect_assistant');
+    expect(r.getAttribute('data-done')).toBe('true');
+  });
+
+  it('opening the page through the row writes nothing and leaves it not done', async () => {
+    renderChecklist(ADMIN);
+    const link = await screen.findByTestId('first-run-checklist-link-connect_assistant');
+    fireEvent.click(link);
+    await settle();
+    expect(row('connect_assistant').getAttribute('data-done')).toBe('false');
+    expect(fetchMock.mock.calls.filter(([, init]) => ((init as RequestInit | undefined)?.method ?? 'GET') !== 'GET')).toHaveLength(0);
+  });
+
+  it('a read that fails leaves the row out rather than not done', async () => {
+    list.mockRejectedValue(new Error('down'));
+    renderChecklist(ADMIN);
+    await screen.findByTestId('first-run-checklist-row-invite');
+    await settle();
+    expect(screen.queryByTestId('first-run-checklist-row-connect_assistant')).toBeNull();
+  });
+
+  it('MCP turned off (no page in the Account app): no row and no read', async () => {
+    SHELL.apps = [{ name: 'account', navigation: [] }];
+    renderChecklist(ADMIN);
+    await screen.findByTestId('first-run-checklist-row-invite');
+    await settle();
+    expect(screen.queryByTestId('first-run-checklist-row-connect_assistant')).toBeNull();
+    expect(list).not.toHaveBeenCalled();
+    expect(find).not.toHaveBeenCalled();
+  });
+
+  it('a member reads nothing of it', async () => {
+    renderChecklist(MEMBER);
+    await settle();
+    expect(list).not.toHaveBeenCalled();
+    expect(find).not.toHaveBeenCalled();
   });
 });

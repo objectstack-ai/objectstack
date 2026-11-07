@@ -2436,6 +2436,12 @@ const en = {
         done: 'Colleagues have joined or been invited.',
         action: 'Invite',
       },
+      connectAssistant: {
+        title: 'Connect an AI assistant',
+        todo: 'Work in this system from Claude, Doubao and similar assistants, as yourself.',
+        done: 'An AI assistant or API key of yours is connected.',
+        action: 'Connect',
+      },
     },
     error: {
       connectionFailed: 'Cannot connect to server',
@@ -3889,6 +3895,12 @@ const en = {
       message: 'Set a recovery password so you can still sign in if single sign-on is ever unavailable.',
       cta: 'Set password',
       dismiss: 'Dismiss',
+    },
+    connectAssistant: {
+      title: 'Work here from your AI assistant',
+      body: 'You can look up and change your records from Claude, Doubao and similar AI assistants. Each one acts as you, with your own permissions.',
+      action: 'Connect an AI Assistant',
+      dismiss: 'Hide',
     },
     pendingDrafts: {
       // objectui#12602 — the drafts row in Home's "My work" section: the

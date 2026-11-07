@@ -278,6 +278,11 @@ const VALIDATE_ONLY_GATES: Readonly<Record<string, string>> = {
     '`judgeRedeclaredOwnerFields`. Wired at the three doors its card named (`os validate`, the publish doors, the ' +
     'install door); `os build` still emits such an artifact, which the install door then refuses — the same ' +
     'build-side gap as the row above, reported rather than closed here.',
+  judgeRestrictionProfile:
+    'Runs only under `os validate --target <profile>`: it judges the stack against ONE target environment\'s ' +
+    'restriction profile (`RestrictionProfileSchema`). `os build` names no target — its artifact is the same ' +
+    'whichever environment it is deployed to — so there is no profile for it to judge against, and refusing at ' +
+    'build would refuse a stack another environment accepts.',
 };
 
 /**
@@ -333,6 +338,14 @@ const NOT_A_GATE: Readonly<Record<string, readonly string[]>> = {
   // `test/rls-policy-authoring-admission.test.ts`.
   'The engine judge handed to the authoring-rule registry as an input — the rule that reads it is the gate':
     ['stackFilterJudge'],
+  // `os validate --target` only (`utils/restriction-profile.ts`): the first
+  // reads and parses the target's restriction profile — the input
+  // `judgeRestrictionProfile` (VALIDATE_ONLY_GATES above) judges against — and
+  // refuses an unreadable or invalid PROFILE, never the stack; the second warns
+  // when the local spec / skills version is not the target's, and refuses
+  // nothing.
+  'The target\'s restriction profile, read as the input of the `--target` gate, and its version drift warning — refuses no metadata':
+    ['loadRestrictionProfile', 'restrictionProfileVersionDrift'],
   // [#20583] The catch-all's fold: it reads the ADR-0087 conversion record a
   // stack PRODUCER stamped on the refusal it threw at load — the refusing half
   // of step 1b's `loaded.stackConversions`, which is a property read and so

@@ -33,6 +33,11 @@
  *      Only for a session that may write mail.
  *   6. Invite colleagues: a second member or a pending invitation; links to
  *      Setup → Users, where Invite User is.
+ *   7. Connect an AI assistant: done once this administrator has authorized an
+ *      AI assistant or holds an API key that still works, read from those
+ *      records by `useConnectedAccess` (the read Connect an AI Assistant's
+ *      Connected line uses), never from a click; links to that page. Only
+ *      where the served Account app carries the page (MCP turned on).
  *
  * A row whose state cannot be read is left out rather than shown as not done.
  * Once every row shown is done the checklist draws nothing; it comes back on
@@ -63,7 +68,7 @@ import { Link } from 'react-router-dom';
 import { toast } from 'sonner';
 import { CheckCircle2, Circle, Loader2, X } from 'lucide-react';
 import { Button, cn } from '@object-ui/components';
-import { useMetadata, resolveSetupAppPath } from '@object-ui/app-shell';
+import { connectAssistantPath, resolveSetupAppPath, useConnectedAccess, useMetadata } from '@object-ui/app-shell';
 import { useAuth } from '@object-ui/auth';
 import { useObjectTranslation } from '@object-ui/i18n';
 import { usePermissions } from '@object-ui/permissions';
@@ -403,6 +408,10 @@ export function FirstRunChecklist() {
   const colleagues = invited && invited.identity === identity ? invited.colleagues : undefined;
   const dismissed =
     recordKey !== null && (hiddenKey === recordKey || wasDismissed(deviceStorage(), recordKey));
+  // Connect an AI Assistant: the row reads whether this administrator has
+  // connected one only once the checklist is going to draw.
+  const assistantPath = connectAssistantPath(apps);
+  const assistant = useConnectedAccess({ enabled: Boolean(settings && !dismissed && assistantPath) });
   const setSettings = (update: (prev: ChecklistSettingsState) => ChecklistSettingsState) =>
     setLoaded((prev) => (prev ? { identity: prev.identity, settings: update(prev.settings) } : prev));
 
@@ -539,6 +548,34 @@ export function FirstRunChecklist() {
               to={`${setupPath}/sys_user/view/all_users`}
               label={colleagues ? t('console.firstRunChecklist.view') : t('console.firstRunChecklist.invite.action')}
               testId="first-run-checklist-link-invite"
+            />
+          }
+        />
+      ),
+    });
+  }
+
+  if (assistantPath && assistant.state === 'ready') {
+    const done = assistant.connected;
+    rows.push({
+      id: 'connect_assistant',
+      done,
+      node: (
+        <ChecklistRow
+          key="connect_assistant"
+          id="connect_assistant"
+          done={done}
+          title={t('console.firstRunChecklist.connectAssistant.title')}
+          detail={
+            done
+              ? t('console.firstRunChecklist.connectAssistant.done')
+              : t('console.firstRunChecklist.connectAssistant.todo')
+          }
+          action={
+            <RowLink
+              to={assistantPath}
+              label={done ? t('console.firstRunChecklist.view') : t('console.firstRunChecklist.connectAssistant.action')}
+              testId="first-run-checklist-link-connect_assistant"
             />
           }
         />
