@@ -9,10 +9,12 @@
  * date) decides, in this order, each a refusal with its reason:
  *
  *   1. the card is loaded, marked generic and of a gallery tier ({@link GalleryGuard});
- *   2. the record passed every half ({@link judgeRecord});
- *   3. the run's scratch project is still on disk, with its build;
- *   4. its transcript joins with the recording ({@link buildTranscript});
- *   5. its screenshots were taken, unless the caller turned them off.
+ *   2. ⛔ the run was on published packages ({@link unpublishedRunRefusal}): a
+ *      `--packages workspace` run is never exported or shown;
+ *   3. the record passed every half ({@link judgeRecord});
+ *   4. the run's scratch project is still on disk, with its build;
+ *   5. its transcript joins with the recording ({@link buildTranscript});
+ *   6. its screenshots were taken, unless the caller turned them off.
  *
  * Output (`--out`), per exported app, written whole into a staging directory
  * and then swapped in, so a re-export first deletes the old directory and
@@ -52,7 +54,7 @@ import { renderScorecard, type CardScorecard } from '../runner/scorecard.js';
 import { GALLERY_GUARD, type GalleryGuard } from './generic.js';
 import { parseIndex, serializeIndex, type GalleryApp, type GalleryIndex } from './manifest.js';
 import { judgeRecord, type PassJudgement } from './pass.js';
-import { readRunRecords, redactWorkDir, type RecordFile } from './record.js';
+import { readRunRecords, redactWorkDir, unpublishedRunRefusal, type RecordFile } from './record.js';
 import type { CaptureScreenshots, PlannedShot, SkippedShot } from './screenshots.js';
 import { projectFrameworkVersion, readAuthoredSource } from './source.js';
 import { buildTranscript, mergeRecordings, renderTranscript } from './transcript.js';
@@ -273,6 +275,8 @@ async function exportOne(
   const verdict = guard(scenario);
   if (!verdict.eligible) throw new Refused(verdict.reasons);
   const { record } = rf;
+  const unpublished = unpublishedRunRefusal(record);
+  if (unpublished) throw new Refused([`${rf.file}: ${unpublished}`]);
   const judgement = judgeRecord(record);
   if (!judgement.passed) throw new Refused([`${rf.file} did not pass every half`, ...judgement.reasons]);
 
