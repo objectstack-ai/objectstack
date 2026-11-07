@@ -208,6 +208,7 @@
     "system/ResolvedEntry",
     "system/ResolvedGroup",
     "system/ResolvedSettingValue",
+    "system/RestrictionProfile",
     "system/RetryPolicy",
     "system/RouteHandlerMetadata",
     "system/RowLevelIsolationStrategy",
