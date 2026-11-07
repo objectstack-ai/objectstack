@@ -177,8 +177,8 @@ rows. Match on `id` or `email`, which are.
 Any other `current_user.KEY` is a **membership set**: a pre-resolved array that
 lets a policy express set membership without the subqueries the grammar doesn't
 allow. Declare it first — a `membershipKeys` entry on the **roster** object whose
-rows define the set names the user column (`userField`), the reference column
-whose values form the set, or `id` (`valueField`), and an optional `filter` over the
+rows define the set names the user column (`userField`), the column whose
+values form the set (`valueField`: a reference column, or `id`) and an optional `filter` over the
 roster's own columns, and every policy reads the result as `current_user.KEY`:
 
 {/* os:check */}
@@ -243,7 +243,7 @@ export const Employee = ObjectSchema.create({
 
 export const LeaveRequest = ObjectSchema.create({
   name: 'leave_request',
-  sharingModel: 'private',
+  sharingModel: 'public_read',
   fields: {
     employee: { type: 'lookup', reference: 'employee', required: true },
   },
@@ -266,6 +266,10 @@ column that is not a reference, or another object's `id`, the set could never
 match, and the policy is refused (`rls-predicate-membership-key-target`). The
 key grants nothing by itself: it yields only the rows whose `userField` is the
 caller, and what a policy lets through with it is the author's choice.
+`leave_request` is `public_read` so that the policy decides which rows the
+holder reads: RLS only narrows what the org-wide default already allowed, so
+under `private` it would narrow the employee's own rows, and a request someone
+else filed for them would stay hidden.
 
 ## How policies compose
 

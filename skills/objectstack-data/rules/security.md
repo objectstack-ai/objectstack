@@ -149,7 +149,7 @@ rowLevelSecurity: [
 
 - `userField`: the roster's user column (`user`, or a lookup to `sys_user`);
   `valueField`: the reference column whose values form the set, or `id`
-  (never the same column: `membership-key-value-field-invalid`);
+  (`membership-key-value-field-invalid`; never the same column);
   `filter`: optional canonical CEL over the roster's own
   columns, no `current_user.*`.
 - With `id` the set is the ids of the caller's own roster rows; it grants

@@ -113,12 +113,12 @@
     },
     {
       "id": 12,
-      "prompt": "In our HR app each `employee` record has a `user` lookup to the person who signs in. An employee may read only their own `leave_request` rows (each has an `employee` lookup), and we don't want an owner stamp or a junction table for it.",
+      "prompt": "In our HR app each `employee` record has a `user` lookup to the person who signs in. An employee may read only their own `leave_request` rows (each has an `employee` lookup), and we don't want an owner stamp or a junction table for it. Call the set `my_employee_ids`.",
       "expected_output": "On the `employee` roster: `membershipKeys: { my_employee_ids: { userField: 'user', valueField: 'id' } }`, so the set is the ids of the caller's own employee rows; a permission set reads it (`using: 'employee in current_user.my_employee_ids'`) on `leave_request`, whose `employee` references the roster. The key grants nothing by itself, and tested against a column that does not reference `employee` (or another object's `id`) the policy is refused (`rls-predicate-membership-key-target`). No `owner_id` scoping, no junction object.",
       "files": [],
       "assertions": {
         "must_contain": ["membershipKeys", "my_employee_ids", "valueField: 'id'", "employee in current_user.my_employee_ids"],
-        "must_not_contain": ["owner_id == current_user.id"]
+        "must_not_contain": ["using: 'owner_id"]
       }
     }
   ]
