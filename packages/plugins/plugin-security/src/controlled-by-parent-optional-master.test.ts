@@ -20,8 +20,16 @@
 //     owner, and its children's master arm sees exactly that;
 //   - a caller who reads another master does not see the null-master rows
 //     they do not own;
-//   - a required master's leaf is unchanged, and the write gate is unchanged
-//     (a null-master insert is still refused, 422).
+//   - a required master's leaf is unchanged.
+//
+// [ADR-0055 §3 as amended · #30906, card 2 of ruling A] The write gate judges
+// the null-master row (the last top-level block, on the real engine): its
+// owner or a holder of Modify All on the detail writes it, every other
+// principal is refused `403`; an insert that names no master is admitted and
+// its creator owns it; setting a master asks edit on it, and emptying one asks
+// edit on the master it leaves — never the opt-in owner leg; a chain hop whose
+// master names none asks the same owner rule; a predicate write judges each
+// selected row that way, and an on-behalf-of write asks it of both principals.
 //
 // The fixture mirrors `controlled-by-parent-sharing.test.ts`: the REAL
 // security plugin and the REAL sharing service over an in-memory read
@@ -31,16 +39,23 @@
 // middleware's injected `where` and `getReadFilter` (the analytics read and
 // the engine's `ReadableIds` composer for parent gates).
 
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
 import { SecurityPlugin } from './security-plugin.js';
-import { SharingService, type SharingEngine } from '@objectstack/plugin-sharing';
+import { SharingService, buildSharingMiddleware, SysRecordShare, type SharingEngine } from '@objectstack/plugin-sharing';
 import { matchesFilterCondition } from '@objectstack/formula';
-import { assertEngineFindOnePredicate } from '@objectstack/objectql';
+import { ObjectQL, assertEngineFindOnePredicate } from '@objectstack/objectql';
+import { SqlDriver } from '@objectstack/driver-sql';
+import { SysMember, SysOrganization, SysUser } from '@objectstack/platform-objects/identity';
 import { ObjectSchema, isComposedReadableIds, isReadableIds } from '@objectstack/spec/data';
 import { PermissionSetSchema, type PermissionSet } from '@objectstack/spec/security';
+import type { ControlledByParentWriteOutcome } from '@objectstack/spec/contracts';
 import { composeReadableIdsInMemory } from './readable-ids-in-memory.testkit.js';
 import { PermissionEvaluator } from './permission-evaluator.js';
 import { explainAccessForAsker, type ExplainEngineDeps } from './explain-engine.js';
+import { defaultPermissionSets } from './objects/default-permission-sets.js';
+import { SysUserPosition } from './objects/sys-user-position.object.js';
+import { SysUserPermissionSet } from './objects/sys-user-permission-set.object.js';
+import { wireEngineSecuritySource } from './engine-security-source.testkit.js';
 
 const REP = 'usr_rep';
 const OTHER = 'usr_other';
@@ -359,17 +374,11 @@ describe('[#30905 ruling A] the cbp read leaf of an OPTIONAL master — one $or,
   });
 });
 
-describe('[#30905 ruling A] the write gate is unchanged (card 2/3 moves it)', () => {
-  it('an insert of an optional-master detail with an empty master reference is still refused, 422', async () => {
+describe('[#30906] the write gate admits an insert of an optional-master detail that names no master', () => {
+  it('an empty master reference reaches the executor — no 422', async () => {
     const h = await boot();
-    let err: any;
-    try {
-      await h.insertContact({ id: 'ct_new', account: null, owner_id: REP });
-    } catch (e) {
-      err = e;
-    }
-    expect(err?.code).toBe('MISSING_REQUIRED_FIELD');
-    expect(err?.statusCode).toBe(422);
+    expect(await h.insertContact({ id: 'ct_new', account: null, owner_id: REP })).toBe(true);
+    expect(await h.insertContact({ id: 'ct_new_2', owner_id: REP })).toBe(true);
   });
 
   it('an insert naming a master the rep owns reaches the executor, as before', async () => {
@@ -401,7 +410,7 @@ describe('[#30905 ruling A] security/explain narrates the null-master arm on a r
   const EDITOR = PermissionSetSchema.parse({ name: 'crm_rep', objects: { [OBJECT]: CRUD } });
   const EXPLAINED = { userId: REP, tenantId: 'org1', positions: [], permissions: ['crm_rep'] };
 
-  const deps = (opts: { record: Row; absent: boolean; schema?: unknown; sets?: PermissionSet[] }): ExplainEngineDeps => ({
+  const deps = (opts: { record: Row; absent: boolean; schema?: unknown; sets?: PermissionSet[]; master?: ControlledByParentWriteOutcome }): ExplainEngineDeps => ({
     ql: { getSchema: () => opts.schema ?? CONTACT_OPTIONAL },
     resolveSets: async () => opts.sets ?? [EDITOR],
     evaluator: new PermissionEvaluator(),
@@ -424,6 +433,8 @@ describe('[#30905 ruling A] security/explain narrates the null-master arm on a r
     canDeleteRecord: async () => true,
     // The read door withholds the record from the EXPLAINED principal (or not); the asker always reads it.
     recordAbsentToCaller: vi.fn(async (_o: string, _r: string, context: unknown) => (context === EXPLAINED ? opts.absent : false)),
+    // The served master-detail write check, as the record's by-id writes ask it.
+    ...(opts.master ? { checkControlledByParentWrite: vi.fn(async () => opts.master!) } : {}),
   });
   const sharingDetail = (d: any): string =>
     String(d.layers.find((l: any) => l.layer === 'sharing')?.record?.detail ?? '');
@@ -454,6 +465,29 @@ describe('[#30905 ruling A] security/explain narrates the null-master arm on a r
     expect(sharingDetail(queue)).toContain('it has no owner (a queue row), so View All alone reads it');
   });
 
+  // [#30906] The write side: the served check judges a null-master row by its
+  // owner rule and refuses on the `master_chain` leg; explain names the rule.
+  const explainWrite = (d: ExplainEngineDeps) =>
+    explainAccessForAsker(d, { object: OBJECT, operation: 'update', context: EXPLAINED, recordId: 'r1' }, {
+      context: ASKER,
+      cannotRead: (o, id) => d.recordAbsentToCaller!(o, id, ASKER),
+    });
+  const DENY_CHAIN: ControlledByParentWriteOutcome = { outcome: 'deny', leg: 'master_chain' };
+
+  it('[#30906] a null-master row the write check refuses: the update names the empty reference and the owner rule', async () => {
+    const d = await explainWrite(deps({ record: { id: 'r1', account: null, owner_id: OTHER }, absent: false, master: DENY_CHAIN }));
+    expect(d.record).toEqual({ recordId: 'r1', visible: false, decidedBy: 'sharing' });
+    expect(sharingDetail(d)).toContain("its master reference 'account' is empty");
+    expect(sharingDetail(d)).toContain('admits only its owner and a holder of Modify All on the object');
+    expect(sharingDetail(d)).toContain("refuses this update on its 'master_chain' leg");
+  });
+
+  it('[#30906] a row that names its master keeps the leg narration for the same refusal', async () => {
+    const d = await explainWrite(deps({ record: { id: 'r1', account: 'acct_eu', owner_id: REP }, absent: false, master: DENY_CHAIN }));
+    expect(sharingDetail(d)).toContain("the by-id update runs refuses this update on its 'master_chain' leg");
+    expect(sharingDetail(d)).not.toContain('is empty');
+  });
+
   it('a row that names its master, and any row of a required master, keep the master-scope narration', async () => {
     const named = await explain(deps({ record: { id: 'r1', account: 'acct_eu', owner_id: REP }, absent: true }));
     expect(sharingDetail(named)).toContain("so its master is outside the principal's read scope");
@@ -461,5 +495,456 @@ describe('[#30905 ruling A] security/explain narrates the null-master arm on a r
 
     const required = await explain(deps({ record: { id: 'r1', account: null, owner_id: REP }, absent: true, schema: CONTACT_REQUIRED }));
     expect(sharingDetail(required)).toContain("so its master is outside the principal's read scope");
+  });
+});
+
+// ── [#30906] the write gate judges the null-master row — on the real engine ──
+//
+// Card 2 of ruling A (ADR-0055 §3 as amended). The real `SecurityPlugin` over a
+// real `ObjectQL` and SQL driver (better-sqlite3, in memory), the real
+// `SharingService` with its middleware on the engine after this plugin's, and
+// the platform's own `member_default` set carrying the ownership floor — the
+// `controlled-by-parent-owner-may-edit.test.ts` rig. Step 2.7 hands a detail's
+// floor to the master gate on a by-id write, so for a row that names no master
+// the gate's owner rule is the only row-level write gate left: every refusal
+// below is asserted on its envelope (`code`, `status` and the `details` that
+// name the write and the record it judged) AND on the stored row.
+//
+//   onm_contact --account?--> onm_account   optional master, ownership: user
+//   onm_lead    --account?--> onm_account   optional master, ownerMayEdit opt-in
+//   onm_memo    --account?--> onm_account   optional master, ownership: none (no owner_id)
+//   onm_note    --contact---> onm_contact   required master: a chain over an optional one
+//   onm_task    --account---> onm_account   REQUIRED master: the control
+
+const W_ACCOUNT = 'onm_account';
+const W_CONTACT = 'onm_contact';
+const W_LEAD = 'onm_lead';
+const W_MEMO = 'onm_memo';
+const W_NOTE = 'onm_note';
+const W_TASK = 'onm_task';
+const W_DETAILS = [W_CONTACT, W_LEAD, W_MEMO, W_NOTE, W_TASK];
+const W_ORG = 'org_onm';
+const W_SYS = { context: { isSystem: true } } as never;
+
+/** Creates every seeded row (`created_by`) unless a case names its creator; never a caller. */
+const W_REP = 'usr_onm_rep';
+/** Owns the null-master rows; reads every account and edits the ones it owns. */
+const W_OWNER = 'usr_onm_owner';
+/** Reads every detail row (View All on the details); owns none; no Modify All. */
+const W_VIEWER = 'usr_onm_viewer';
+/** Modify All on the details; owns none. */
+const W_MODIFIER = 'usr_onm_modifier';
+/** Edits every account (Modify All on the master) and reads every detail row; owns none. */
+const W_EDITOR = 'usr_onm_editor';
+/** Delegators bound by no floor (no `sys_member` row): one reads every detail row, one holds Modify All on them. */
+const W_DEL_VIEW = 'usr_onm_del_view';
+const W_DEL_MODIFY = 'usr_onm_del_modify';
+
+const W_CRUD = { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true };
+const wDetails = (extra: Record<string, boolean> = {}) =>
+  Object.fromEntries(W_DETAILS.map((o) => [o, { ...W_CRUD, ...extra }]));
+const W_OWNER_SET = PermissionSetSchema.parse({
+  name: 'onm_owner',
+  objects: { [W_ACCOUNT]: { allowRead: true, allowEdit: true, viewAllRecords: true }, ...wDetails() },
+});
+const W_VIEWER_SET = PermissionSetSchema.parse({
+  name: 'onm_viewer',
+  objects: { [W_ACCOUNT]: { allowRead: true, viewAllRecords: true }, ...wDetails({ viewAllRecords: true }) },
+});
+const W_MODIFIER_SET = PermissionSetSchema.parse({
+  name: 'onm_modifier',
+  objects: { [W_ACCOUNT]: { allowRead: true, viewAllRecords: true }, ...wDetails({ viewAllRecords: true, modifyAllRecords: true }) },
+});
+const W_EDITOR_SET = PermissionSetSchema.parse({
+  name: 'onm_editor',
+  objects: {
+    [W_ACCOUNT]: { allowRead: true, allowEdit: true, viewAllRecords: true, modifyAllRecords: true },
+    ...wDetails({ viewAllRecords: true }),
+  },
+});
+const W_MEMBER_DEFAULT = defaultPermissionSets.find((p) => p.name === 'member_default')!;
+const W_SETS = [W_MEMBER_DEFAULT, W_OWNER_SET, W_VIEWER_SET, W_MODIFIER_SET, W_EDITOR_SET];
+
+/** The execution context `resolveAuthzContext` hands the middleware for an organization member holding the sets. */
+const wMemberOf = (userId: string, set: string) => ({
+  userId,
+  tenantId: W_ORG,
+  positions: ['org_member'],
+  permissions: [set, 'member_default'],
+  posture: 'MEMBER',
+});
+const W_OWNER_CALLER = wMemberOf(W_OWNER, W_OWNER_SET.name);
+const W_VIEWER_CALLER = wMemberOf(W_VIEWER, W_VIEWER_SET.name);
+const W_MODIFIER_CALLER = wMemberOf(W_MODIFIER, W_MODIFIER_SET.name);
+const W_EDITOR_CALLER = wMemberOf(W_EDITOR, W_EDITOR_SET.name);
+const wOnBehalfOf = (caller: object, delegator: string) => ({ ...caller, onBehalfOf: { userId: delegator } });
+
+type WAnswer =
+  | { kind: 'admitted' }
+  | { kind: 'refused'; code?: string; status?: number; details?: Record<string, unknown> };
+
+const wLanded = (p: Promise<unknown>): Promise<WAnswer> =>
+  p.then(
+    () => ({ kind: 'admitted' as const }),
+    (e: any) => ({
+      kind: 'refused' as const,
+      code: e?.code == null ? undefined : String(e.code),
+      status: e?.statusCode ?? e?.status,
+      details: e?.details,
+    }),
+  );
+
+/**
+ * The gate's refusal, by its envelope and the record it names: `403
+ * PERMISSION_DENIED`, the caller's object and operation (#7474), and `recordId`
+ * — the detail row the owner rule judged, or the master row a master-edit leg
+ * refused. Prose is not pinned: no consumer parses it.
+ */
+function expectRefusal(answer: WAnswer, operation: string, object: string, recordId: string): void {
+  expect(answer).toMatchObject({
+    kind: 'refused',
+    code: 'PERMISSION_DENIED',
+    status: 403,
+    details: { operation, object, recordId },
+  });
+}
+
+const W_OPT_IN = { sharing: { controlledByParent: { ownerMayEdit: true } } };
+const wDetail = (name: string, fk: string, reference: string, required: boolean, extra: Record<string, unknown> = {}) => ({
+  name,
+  label: name,
+  sharingModel: 'controlled_by_parent',
+  tenancy: { enabled: false },
+  fields: {
+    id: { name: 'id', type: 'text', primaryKey: true },
+    name: { name: 'name', type: 'text' },
+    [fk]: { name: fk, type: 'master_detail', reference, required },
+    created_by: { name: 'created_by', type: 'text' },
+  },
+  ...extra,
+});
+
+describe('[#30906] the write gate judges a row whose OPTIONAL master is empty — the real engine', () => {
+  let engine: ObjectQL;
+  let security: {
+    checkControlledByParentWrite: (object: string, id: string, context: unknown) => Promise<ControlledByParentWriteOutcome>;
+  };
+  let seq = 0;
+
+  beforeAll(async () => {
+    engine = new ObjectQL();
+    engine.registerDriver(
+      new SqlDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true }) as never,
+      true,
+    );
+    await engine.init();
+    engine.registerApp({
+      id: 'com.objectstack.qa.controlled-by-parent-optional-master-write',
+      name: 'A controlled_by_parent detail whose master is optional, written',
+      version: '1.0.0',
+      type: 'plugin',
+      scope: 'system',
+      objects: [
+        SysRecordShare,
+        SysUser,
+        SysOrganization,
+        SysMember,
+        SysUserPosition,
+        SysUserPermissionSet,
+        {
+          name: W_ACCOUNT,
+          label: 'Account',
+          sharingModel: 'private',
+          tenancy: { enabled: false },
+          fields: {
+            id: { name: 'id', type: 'text', primaryKey: true },
+            name: { name: 'name', type: 'text' },
+            owner_id: { name: 'owner_id', type: 'text' },
+            created_by: { name: 'created_by', type: 'text' },
+          },
+        },
+        // No owner column of their own: the registry injects `owner_id` (ownership: 'user').
+        wDetail(W_CONTACT, 'account', W_ACCOUNT, false),
+        wDetail(W_LEAD, 'account', W_ACCOUNT, false, W_OPT_IN),
+        wDetail(W_MEMO, 'account', W_ACCOUNT, false, { ownership: 'none' }),
+        wDetail(W_NOTE, 'contact', W_CONTACT, true),
+        wDetail(W_TASK, 'account', W_ACCOUNT, true),
+      ],
+    } as never);
+    await engine.syncSchemas();
+
+    await engine.insert('sys_user', [W_REP, W_OWNER, W_VIEWER, W_MODIFIER, W_EDITOR, W_DEL_VIEW, W_DEL_MODIFY].map((id) => ({
+      id, name: id, email: `${id}@onm.test`,
+    })), W_SYS);
+    await engine.insert('sys_organization', [{ id: W_ORG, name: 'ONM', slug: 'onm' }], W_SYS);
+    // Each delegator holds its set through a stored direct grant row owned by
+    // the organization, and NO `sys_member` row, so no ownership floor binds
+    // its pass: on a delegated write the gate's delegator pass is what is left.
+    const grants = (engine as any).getDriver('sys_user_permission_set');
+    await grants.create('sys_user_permission_set', {
+      id: 'ups_onm_del_view', user_id: W_DEL_VIEW, permission_set: W_VIEWER_SET.name, organization_id: W_ORG,
+    });
+    await grants.create('sys_user_permission_set', {
+      id: 'ups_onm_del_modify', user_id: W_DEL_MODIFY, permission_set: W_MODIFIER_SET.name, organization_id: W_ORG,
+    });
+
+    let securityService: unknown;
+    let sharing: SharingService | undefined;
+    const services: Record<string, unknown> = {
+      manifest: { register: vi.fn() },
+      objectql: engine,
+      metadata: {
+        get: async (type: string, name: string) =>
+          type === 'permission' ? W_SETS.find((s) => s.name === name) ?? null : engine.getSchema(name) ?? null,
+        list: async () => W_SETS,
+      },
+      get sharing() { return sharing; },
+    };
+    const ctx = {
+      logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
+      registerService: (name: string, svc: unknown) => { if (name === 'security') securityService = svc; },
+      hook: () => undefined,
+      getService: (name: string) => {
+        if (!(name in services)) throw new Error(`service not registered: ${name}`);
+        return services[name];
+      },
+    };
+    const plugin = new SecurityPlugin({ fallbackPermissionSet: 'member_default' });
+    await plugin.init(ctx as never);
+    await plugin.start(ctx as never);
+    wireEngineSecuritySource(engine, () => plugin);
+    sharing = new SharingService({ engine: engine as never, securityService: () => securityService as never });
+    engine.registerMiddleware(buildSharingMiddleware(sharing, ctx.logger) as never, { object: '*' });
+    security = securityService as typeof security;
+  });
+
+  afterAll(async () => {
+    try { await engine?.destroy(); } catch { /* noop */ }
+  });
+
+  /** An account owned by `owner`, created by the rep (so the floor never names the caller). */
+  async function account(owner: string): Promise<string> {
+    const id = `acct_${++seq}`;
+    await engine.insert(W_ACCOUNT, [{ id, name: `account ${seq}`, owner_id: owner, created_by: W_REP }], W_SYS);
+    return id;
+  }
+
+  /** One detail row, written as system: `master` (null for none) under its master field, owned by `owner`. */
+  async function row(
+    object: string,
+    opts: { master?: string | null; owner?: string | null; createdBy?: string } = {},
+  ): Promise<string> {
+    const id = `${object}_${++seq}`;
+    const fk = object === W_NOTE ? 'contact' : 'account';
+    const data: Record<string, unknown> = { id, name: 'as seeded', [fk]: opts.master ?? null, created_by: opts.createdBy ?? W_REP };
+    if (opts.owner !== undefined) data.owner_id = opts.owner;
+    await engine.insert(object, [data], W_SYS);
+    return id;
+  }
+
+  const stored = (object: string, id: string) =>
+    engine.findOne(object, { where: { id }, context: { isSystem: true } } as never) as Promise<Record<string, unknown> | null>;
+  const updateById = (object: string, id: string, caller: object, data: Record<string, unknown> = { name: 'edited' }) =>
+    wLanded(engine.update(object, data, { where: { id }, context: { ...caller } } as never));
+  const deleteById = (object: string, id: string, caller: object) =>
+    wLanded(engine.delete(object, { where: { id }, context: { ...caller } } as never));
+  const updateMany = (object: string, ids: string[], caller: object, data: Record<string, unknown> = { name: 'edited' }) =>
+    wLanded(engine.update(object, data, { where: { id: { $in: ids } }, multi: true, context: { ...caller } } as never));
+  const deleteMany = (object: string, ids: string[], caller: object) =>
+    wLanded(engine.delete(object, { where: { id: { $in: ids } }, multi: true, context: { ...caller } } as never));
+
+  describe('create: a row that names no master is created, and its creator owns it', () => {
+    it('an insert with no master reference, and one with `account: null`, land owned by the caller', async () => {
+      const omitted = (await engine.insert(W_CONTACT, { name: 'no account' }, { context: { ...W_OWNER_CALLER } } as never)) as { id: string };
+      const nulled = (await engine.insert(W_CONTACT, { name: 'null account', account: null }, { context: { ...W_OWNER_CALLER } } as never)) as { id: string };
+      for (const id of [omitted.id, nulled.id]) {
+        expect(await stored(W_CONTACT, id)).toMatchObject({ account: null, owner_id: W_OWNER });
+      }
+    });
+
+    it('a batch: rows naming no master land, and a row naming a master the caller cannot edit refuses the whole batch', async () => {
+      const others = await account(W_REP);
+      const before = ((await engine.find(W_CONTACT, { context: { isSystem: true } } as never)) as unknown[]).length;
+      const refused = await wLanded(engine.insert(W_CONTACT, [
+        { name: 'batch, no account' },
+        { name: 'batch, under an account the owner reads', account: others },
+      ], { context: { ...W_OWNER_CALLER } } as never));
+      expectRefusal(refused, 'insert', W_CONTACT, others);
+      expect(((await engine.find(W_CONTACT, { context: { isSystem: true } } as never)) as unknown[]).length).toBe(before);
+      expect(await wLanded(engine.insert(W_CONTACT, [{ name: 'batch a' }, { name: 'batch b' }], { context: { ...W_OWNER_CALLER } } as never)))
+        .toEqual({ kind: 'admitted' });
+    });
+  });
+
+  describe('update and delete by id: its owner or Modify All on the detail, and nobody else', () => {
+    it('the owner updates and deletes it', async () => {
+      const id = await row(W_CONTACT, { owner: W_OWNER });
+      expect(await updateById(W_CONTACT, id, W_OWNER_CALLER)).toEqual({ kind: 'admitted' });
+      expect((await stored(W_CONTACT, id))?.name).toBe('edited');
+      expect(await deleteById(W_CONTACT, id, W_OWNER_CALLER)).toEqual({ kind: 'admitted' });
+      expect(await stored(W_CONTACT, id)).toBeNull();
+    });
+
+    it('a principal who READS it (View All) and does not own it is refused both, and the row is as seeded', async () => {
+      const id = await row(W_CONTACT, { owner: W_OWNER });
+      expectRefusal(await updateById(W_CONTACT, id, W_VIEWER_CALLER), 'update', W_CONTACT, id);
+      expectRefusal(await deleteById(W_CONTACT, id, W_VIEWER_CALLER), 'delete', W_CONTACT, id);
+      expect(await stored(W_CONTACT, id)).toMatchObject({ name: 'as seeded', owner_id: W_OWNER });
+    });
+
+    it('Modify All on the detail updates and deletes it without owning it', async () => {
+      const id = await row(W_CONTACT, { owner: W_OWNER });
+      expect(await updateById(W_CONTACT, id, W_MODIFIER_CALLER)).toEqual({ kind: 'admitted' });
+      expect((await stored(W_CONTACT, id))?.name).toBe('edited');
+      expect(await deleteById(W_CONTACT, id, W_MODIFIER_CALLER)).toEqual({ kind: 'admitted' });
+      expect(await stored(W_CONTACT, id)).toBeNull();
+    });
+
+    it('a row with no owner (a queue row) is Modify All\'s alone', async () => {
+      const id = await row(W_CONTACT, { owner: null });
+      expectRefusal(await updateById(W_CONTACT, id, W_VIEWER_CALLER), 'update', W_CONTACT, id);
+      expect((await stored(W_CONTACT, id))?.name).toBe('as seeded');
+      expect(await updateById(W_CONTACT, id, W_MODIFIER_CALLER)).toEqual({ kind: 'admitted' });
+    });
+
+    it('on an object with no owner_id column, every such row is Modify All\'s alone', async () => {
+      const id = await row(W_MEMO);
+      expectRefusal(await updateById(W_MEMO, id, W_VIEWER_CALLER), 'update', W_MEMO, id);
+      expect((await stored(W_MEMO, id))?.name).toBe('as seeded');
+      expect(await updateById(W_MEMO, id, W_MODIFIER_CALLER)).toEqual({ kind: 'admitted' });
+      expect((await stored(W_MEMO, id))?.name).toBe('edited');
+    });
+
+    it('a principal who cannot READ it meets the read door first: not found, never the gate', async () => {
+      const id = await row(W_CONTACT, { owner: W_VIEWER });
+      expect(await updateById(W_CONTACT, id, W_OWNER_CALLER)).toMatchObject({ kind: 'refused', code: 'RECORD_NOT_FOUND', status: 404 });
+      expect((await stored(W_CONTACT, id))?.name).toBe('as seeded');
+    });
+  });
+
+  describe('setting and emptying the master', () => {
+    it('setting a master asks EDIT on it: refused under an account the owner only reads, admitted under one it edits', async () => {
+      const id = await row(W_CONTACT, { owner: W_OWNER });
+      const others = await account(W_REP);
+      const mine = await account(W_OWNER);
+      expectRefusal(await updateById(W_CONTACT, id, W_OWNER_CALLER, { account: others }), 'update', W_CONTACT, others);
+      expect((await stored(W_CONTACT, id))?.account).toBeNull();
+      expect(await updateById(W_CONTACT, id, W_OWNER_CALLER, { account: mine })).toEqual({ kind: 'admitted' });
+      expect((await stored(W_CONTACT, id))?.account).toBe(mine);
+    });
+
+    it('a principal who edits every account but does not own the row cannot adopt it: the row\'s own rule is asked first', async () => {
+      const id = await row(W_CONTACT, { owner: W_OWNER });
+      const mine = await account(W_EDITOR);
+      expectRefusal(await updateById(W_CONTACT, id, W_EDITOR_CALLER, { account: mine }), 'update', W_CONTACT, id);
+      expect((await stored(W_CONTACT, id))?.account).toBeNull();
+    });
+
+    it('emptying a master asks EDIT on the master it leaves: refused while the owner only reads it, even under the ownerMayEdit opt-in', async () => {
+      const others = await account(W_REP);
+      const id = await row(W_LEAD, { master: others, owner: W_OWNER });
+      // CONTROL — the opt-in admits the owner's ordinary update with read on the master.
+      expect(await updateById(W_LEAD, id, W_OWNER_CALLER)).toEqual({ kind: 'admitted' });
+      // …and does not admit a body that detaches the row from that master.
+      expectRefusal(await updateById(W_LEAD, id, W_OWNER_CALLER, { account: null }), 'update', W_LEAD, others);
+      expect((await stored(W_LEAD, id))?.account).toBe(others);
+    });
+
+    it('emptying a master the caller edits is admitted, and the row then follows the owner rule', async () => {
+      const mine = await account(W_OWNER);
+      const id = await row(W_CONTACT, { master: mine, owner: W_OWNER });
+      expect(await updateById(W_CONTACT, id, W_OWNER_CALLER, { account: null })).toEqual({ kind: 'admitted' });
+      expect((await stored(W_CONTACT, id))?.account).toBeNull();
+      expectRefusal(await updateById(W_CONTACT, id, W_VIEWER_CALLER), 'update', W_CONTACT, id);
+      expect(await updateById(W_CONTACT, id, W_OWNER_CALLER, { name: 'still mine' })).toEqual({ kind: 'admitted' });
+    });
+  });
+
+  describe('chain: a hop whose master names no master of its own asks the owner rule of that row', () => {
+    it('the contact\'s owner writes its notes; a principal who reads them and does not own the contact is refused', async () => {
+      const contact = await row(W_CONTACT, { owner: W_OWNER });
+      const note = await row(W_NOTE, { master: contact });
+      expect(await updateById(W_NOTE, note, W_OWNER_CALLER)).toEqual({ kind: 'admitted' });
+      expect((await stored(W_NOTE, note))?.name).toBe('edited');
+
+      const other = await row(W_NOTE, { master: contact });
+      expectRefusal(await updateById(W_NOTE, other, W_VIEWER_CALLER), 'update', W_NOTE, contact);
+      expect((await stored(W_NOTE, other))?.name).toBe('as seeded');
+      expectRefusal(
+        await wLanded(engine.insert(W_NOTE, { name: 'under it', contact }, { context: { ...W_VIEWER_CALLER } } as never)),
+        'insert', W_NOTE, contact,
+      );
+      // Modify All on the hop's own object admits it.
+      expect(await updateById(W_NOTE, other, W_MODIFIER_CALLER)).toEqual({ kind: 'admitted' });
+    });
+  });
+
+  describe('predicate writes (multi: true): every selected row that names no master is judged', () => {
+    it('the owner\'s predicate update of its own rows lands', async () => {
+      const ids = [await row(W_CONTACT, { owner: W_OWNER, createdBy: W_OWNER }), await row(W_CONTACT, { owner: W_OWNER, createdBy: W_OWNER })];
+      expect(await updateMany(W_CONTACT, ids, W_OWNER_CALLER)).toEqual({ kind: 'admitted' });
+      for (const id of ids) expect((await stored(W_CONTACT, id))?.name).toBe('edited');
+    });
+
+    it('a reader who owns none of them is refused, update and delete, on the first such row, and nothing is written', async () => {
+      const ids = [await row(W_CONTACT, { owner: W_OWNER, createdBy: W_VIEWER }), await row(W_CONTACT, { owner: W_OWNER, createdBy: W_VIEWER })];
+      expectRefusal(await updateMany(W_CONTACT, ids, W_VIEWER_CALLER), 'update', W_CONTACT, ids[0]!);
+      expectRefusal(await deleteMany(W_CONTACT, ids, W_VIEWER_CALLER), 'delete', W_CONTACT, ids[0]!);
+      for (const id of ids) expect((await stored(W_CONTACT, id))?.name).toBe('as seeded');
+    });
+
+    it('Modify All on the detail is admitted', async () => {
+      const ids = [await row(W_CONTACT, { owner: W_OWNER })];
+      expect(await updateMany(W_CONTACT, ids, W_MODIFIER_CALLER)).toEqual({ kind: 'admitted' });
+    });
+
+    it('a body naming a master is asked of it even when every selected row names none', async () => {
+      const others = await account(W_REP);
+      const ids = [await row(W_CONTACT, { owner: W_OWNER, createdBy: W_OWNER })];
+      expectRefusal(await updateMany(W_CONTACT, ids, W_OWNER_CALLER, { account: others }), 'update', W_CONTACT, others);
+      expect((await stored(W_CONTACT, ids[0]!))?.account).toBeNull();
+    });
+  });
+
+  describe('on behalf of: both principals are asked the owner rule', () => {
+    it('the agent owns the row and the delegator only reads it: refused on the delegator\'s pass; a Modify All delegator is admitted', async () => {
+      // The agent CREATED the row, so its own floor (kept on a delegated by-id
+      // write, ADR-0090 D10) passes, and the delegators are bound by none: the
+      // gate's two passes are what decide.
+      const id = await row(W_CONTACT, { owner: W_OWNER, createdBy: W_OWNER });
+      expectRefusal(await updateById(W_CONTACT, id, wOnBehalfOf(W_OWNER_CALLER, W_DEL_VIEW)), 'update', W_CONTACT, id);
+      expect((await stored(W_CONTACT, id))?.name).toBe('as seeded');
+      expect(await updateById(W_CONTACT, id, wOnBehalfOf(W_OWNER_CALLER, W_DEL_MODIFY))).toEqual({ kind: 'admitted' });
+      expect((await stored(W_CONTACT, id))?.name).toBe('edited');
+    });
+
+    it('ISecurityService.checkControlledByParentWrite asks it of each pass: the agent\'s and the delegator\'s', async () => {
+      const id = await row(W_CONTACT, { owner: W_OWNER });
+      expect(await security.checkControlledByParentWrite(W_CONTACT, id, wOnBehalfOf(W_OWNER_CALLER, W_DEL_MODIFY))).toEqual({ outcome: 'allow' });
+      // The delegator's pass refuses.
+      expect(await security.checkControlledByParentWrite(W_CONTACT, id, wOnBehalfOf(W_OWNER_CALLER, W_DEL_VIEW)))
+        .toEqual({ outcome: 'deny', leg: 'master_chain' });
+      // The agent's pass refuses.
+      expect(await security.checkControlledByParentWrite(W_CONTACT, id, wOnBehalfOf(W_VIEWER_CALLER, W_DEL_MODIFY)))
+        .toEqual({ outcome: 'deny', leg: 'master_chain' });
+    });
+  });
+
+  describe('ISecurityService.checkControlledByParentWrite answers as the write path does', () => {
+    it('allow for the owner and for Modify All; deny on the master_chain leg for a reader who owns nothing', async () => {
+      const id = await row(W_CONTACT, { owner: W_OWNER });
+      expect(await security.checkControlledByParentWrite(W_CONTACT, id, { ...W_OWNER_CALLER })).toEqual({ outcome: 'allow' });
+      expect(await security.checkControlledByParentWrite(W_CONTACT, id, { ...W_MODIFIER_CALLER })).toEqual({ outcome: 'allow' });
+      expect(await security.checkControlledByParentWrite(W_CONTACT, id, { ...W_VIEWER_CALLER })).toEqual({ outcome: 'deny', leg: 'master_chain' });
+    });
+
+    it('CONTROL — a REQUIRED master\'s stored empty reference is still unresolvable, master_reference_missing (422)', async () => {
+      // Planted through the driver: no door the platform serves writes a
+      // required master empty.
+      const id = `${W_TASK}_${++seq}`;
+      await (engine as any).getDriver(W_TASK).create(W_TASK, { id, name: 'planted', account: null, owner_id: W_OWNER, created_by: W_REP });
+      expect(await security.checkControlledByParentWrite(W_TASK, id, { ...W_MODIFIER_CALLER }))
+        .toEqual({ outcome: 'unresolvable', reason: 'master_reference_missing' });
+    });
   });
 });
