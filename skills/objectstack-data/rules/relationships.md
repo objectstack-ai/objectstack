@@ -22,7 +22,7 @@
 // Parent: Account
 export default ObjectSchema.create({
   name: 'account',
-  sharingModel: 'private',
+  sharingModel: 'public_read_write',
   fields: {
     name: { type: 'text', required: true },
   }
@@ -31,7 +31,7 @@ export default ObjectSchema.create({
 // Child: Contact (independent lifecycle)
 export default ObjectSchema.create({
   name: 'contact',
-  sharingModel: 'private',
+  sharingModel: 'public_read_write',
   fields: {
     first_name: { type: 'text', required: true },
     account_id: {
@@ -49,7 +49,7 @@ export default ObjectSchema.create({
 // Parent: Invoice
 export default ObjectSchema.create({
   name: 'invoice',
-  sharingModel: 'private',
+  sharingModel: 'public_read_write',
   fields: {
     invoice_number: { type: 'text', required: true },
     total: {
@@ -139,7 +139,7 @@ export default ObjectSchema.create({
 // Junction: Project Assignment
 export default ObjectSchema.create({
   name: 'project_assignment',
-  sharingModel: 'private',
+  sharingModel: 'public_read_write',
   fields: {
     project_id: {
       type: 'lookup',
@@ -166,7 +166,7 @@ export default ObjectSchema.create({
 ```typescript
 export default ObjectSchema.create({
   name: 'category',
-  sharingModel: 'private',
+  sharingModel: 'public_read',
   fields: {
     name: { type: 'text', required: true },
     parent_category: {
@@ -213,8 +213,7 @@ transaction as the write, so it's consistent).
     // relationshipField: 'invoice' // optional; auto-detected from the child's
                                      // master_detail/lookup field referencing
                                      // this parent when omitted
-    // filter: { status: 'received' } // optional; only children matching this
-                                       // `where` predicate are aggregated
+    // filter: { status: 'received' } // optional; see below
   },
 }
 ```
@@ -230,18 +229,20 @@ plausible wrong total that no check on the parent can see — worse than a
 visible 0. This is also how one child feeds several totals: 已完成 / 进行中 /
 逾期 task counts are three `summary` fields over the same child, differing only
 in `filter`; one `procurement_receipt` child yields `received_amount`
-(`function: 'sum', filter: { status: 'received' }`). Every `filter` key is a
-field on the CHILD object and a select's value is its option `value`, never its
-label; operator and compound forms work (`filter: { status: { $in: ['received',
-'partial'] } }`). A child moving in or out of the predicate (a status change)
+(`function: 'sum', filter: { status: 'received' }`). A select's value in
+`filter` is its option `value`, never its label; operator and compound forms
+work (`filter: { status: { $in: ['received', 'partial'] } }`). A child moving
+in or out of the predicate (a status change)
 recomputes the parent on its next write like any other child update. A **rate**
 (上座率, 完成率 = a child count ÷ a capacity) is a `formula` over a working
 `summary` — author the summary first; the rate computes only once it does.
 
-**No backfill.** A summary is recomputed when a CHILD row is written, so
-`summaryOperations` added after the data loaded leaves every parent blank until
-a child is edited — declare it with the object, or touch a child record and say
-that the number fills in as children are edited.
+**The recompute runs only on a child write.** A `summary` declared after its
+parent rows exist reads `NULL` on every existing parent until a child of it is
+written. The backfill is `os migrate summary-nulls --apply`
+(`--recompute-undefined-on-empty OBJECT.FIELD` for a `min` / `max` / `avg`
+declared late) — never an edit to a child. Declare the summary with the object
+where you can; declared late, run the migration before you call the number ready.
 
 ## Inline Editing (Master-Detail Entry)
 

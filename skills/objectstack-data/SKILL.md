@@ -183,7 +183,7 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
 
 export const Invoice = ObjectSchema.create({
   name: 'invoice',
-  sharingModel: 'private',
+  sharingModel: 'public_read_write',
   fields: {
     status: Field.select({
       options: [
@@ -335,8 +335,7 @@ The **complete** set of types (`ValidationRuleSchema` discriminators): `script`,
 `state_machine`, `format`, `cross_field`, `json_schema`, `conditional`.
 
 A `state_machine` rule also declares `initialStates` whenever the status has a
-real starting point: `transitions` governs only UPDATE and a `select` accepts any
-option on insert, so without it a record can be created already `approved` /
+real starting point — without it a record can be created already `approved` /
 `paid` and walk past the process. List only the genuine entry states (usually
 one: `draft` / `pending` / `new`), never a terminal one; keys and values are
 option `value`s, never labels.

@@ -208,7 +208,7 @@
     {
       "id": 12,
       "prompt": "项目上要显示「已完成任务数」「任务总数」和「完成率」。",
-      "expected_output": "Three fields on `project`: `completed_task_count` and `task_count` are `summary` fields over the `task` child with `function: 'count'` (and `summaryOperations.object: 'task'`), the completed one carrying the qualifier in `filter: { status: 'completed' }` — keyed by a CHILD field and the option VALUE, never the label `已完成`; dropped, the field counts every task and shows a plausible wrong total. `completion_rate` is a `formula` over the two summaries, authored after them (it computes only once they do). Notes that a summary added after data loaded stays blank until a task is edited.",
+      "expected_output": "Three fields on `project`: `completed_task_count` and `task_count` are `summary` fields over the `task` child with `function: 'count'` (and `summaryOperations.object: 'task'`), the completed one carrying the qualifier in `filter: { status: 'completed' }` — keyed by a CHILD field and the option VALUE, never the label `已完成`; dropped, the field counts every task and shows a plausible wrong total. `completion_rate` is a `formula` over the two summaries, authored after them (it computes only once they do). If `project` rows already exist, says the recompute runs only on a child write, so the backfill is `os migrate summary-nulls --apply` — not editing a task to trigger it.",
       "files": [],
       "assertions": {
         "must_contain": [
