@@ -16,8 +16,7 @@
     "build": "objectstack build",
     "validate": "objectstack validate",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run",
-    "test:mcp": "tsx test/mcp-actions.e2e.ts"
+    "test": "vitest run"
   },
   "dependencies": {
     "@objectstack/client": "workspace:*",
@@ -34,6 +33,7 @@
   "devDependencies": {
     "@objectstack/cli": "workspace:*",
     "@objectstack/core": "workspace:*",
+    "@objectstack/plugin-auth": "workspace:*",
     "@objectstack/service-automation": "workspace:*",
     "@objectstack/trigger-record-change": "workspace:*",
     "tsx": "^4.23.15",
