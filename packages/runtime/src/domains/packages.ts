@@ -3996,7 +3996,8 @@ async function readPackageCustomizations(
     const pairs = pairsOf(baseId, installedManifestsOf(registry));
     type Extension = GetPackageCustomizationsResponse['extensions'][number];
     const extensions: Extension[] = [];
-    if (typeof registry?.getAllObjects === 'function') for (const pairId of pairs) {
+    const pairIdsToRead = typeof registry?.getAllObjects === 'function' ? pairs : [];
+    for (const pairId of pairIdsToRead) {
         for (const object of registry.getAllObjects(pairId) as Array<{ name?: unknown }>) {
             const name = object?.name;
             if (typeof name !== 'string' || registry.getObjectOwner(name)?.packageId !== baseId) continue;

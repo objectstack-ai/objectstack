@@ -3,9 +3,10 @@
 '@objectstack/metadata-protocol': minor
 '@objectstack/objectql': minor
 '@objectstack/lint': minor
+'@objectstack/runtime': minor
 ---
 
-feat(metadata-core, metadata-protocol, objectql, lint)!: an App and the modules that declare it share one customization pair
+feat(metadata-core, metadata-protocol, objectql, lint, runtime)!: an App and the modules that declare it share one customization pair
 
 Clause-②: yes (narrowing) — the ensure door refuses two asks it accepted: a package that reaches several Apps and whose namespace picks none of them (was `201` with its own pair, now `409`, merge question 11), and a module whose earlier per-package pair holds the App's pair namespace (was `201`/`200`, now `409 RESOURCE_CONFLICT` naming that pair, merge question 12); `appOf` now returns `string | undefined`. The widening half: a module of an App gets the App's pair (`200`, where it was `422 NAMESPACE_CONFLICT` when the App held the namespace), and `@objectstack/metadata-core` exports `pairsOf`, `AppOfRefusal` and `PairOfRefusal`. Ruling 6691022506; ADR-0146 D3 as amended by #31027.
 Metadata-protocol: semantic

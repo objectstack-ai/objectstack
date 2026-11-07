@@ -63,7 +63,7 @@ function makeRes() {
     return res;
 }
 
-async function boot() {
+async function boot(environmentId?: string) {
     const engine = new ObjectQL();
     liveEngines.push(engine);
     engine.registerDriver(new SqlDriver({
@@ -91,7 +91,7 @@ async function boot() {
         dependencies: { [MODULE]: '^6' },
     } as any, 'authored');
     await engine.syncSchemas();
-    const protocol: any = new ObjectStackProtocolImplementation(engine as any, () => new Map());
+    const protocol: any = new ObjectStackProtocolImplementation(engine as any, () => new Map(), environmentId);
 
     // The reads: the dispatcher's catch-all.
     const get = (n: string) => (n === 'protocol' ? protocol : n === 'objectql' ? engine : null);
@@ -141,58 +141,65 @@ const listedLabel = (body: any) => {
 };
 const effectiveLabel = (body: any) => (body?.data ?? body)?.effective?.label;
 
-describe('[#29594] merge question 12: a legacy per-package pair of an App\'s module is honoured as before', () => {
-    it('the pair still saves a declared override of the module\'s item (the write gate admits it)', async () => {
-        const { protocol, read } = await boot();
-        await protocol.saveMetaItem({
-            type: 'dashboard', name: BOARD, packageId: LEGACY_PAIR,
-            item: { ...board(CUSTOMIZED), overrides: { package: MODULE, basedOn: '6.1.0' } },
-        });
-        const byName = await read(`/meta/dashboard/${BOARD}`, { package: MODULE });
-        expect([byName.status, labelOf(byName.body)]).toEqual([200, CUSTOMIZED]);
-    }, 60_000);
+// Both topologies: an environment kernel (`environmentId` set) asks the
+// protocol's removal door — `refusePackagedBaseRemoval` and the pair-row
+// removal's pass past it — and a host-config kernel only the repository's
+// delete gate.
+for (const environmentId of [undefined, 'env_hotcrm'] as const) {
+        const topology = environmentId === undefined ? 'host-config kernel' : 'environment kernel';
+    describe(`[#29594] merge question 12 (${topology}): a legacy per-package pair of an App's module is honoured as before`, () => {
+        it('the pair still saves a declared override of the module\'s item (the write gate admits it)', async () => {
+            const { protocol, read } = await boot(environmentId);
+            await protocol.saveMetaItem({
+                type: 'dashboard', name: BOARD, packageId: LEGACY_PAIR,
+                item: { ...board(CUSTOMIZED), overrides: { package: MODULE, basedOn: '6.1.0' } },
+            });
+            const byName = await read(`/meta/dashboard/${BOARD}`, { package: MODULE });
+            expect([byName.status, labelOf(byName.body)]).toEqual([200, CUSTOMIZED]);
+        }, 60_000);
 
-    it('its declared override is served at the module\'s address (by name, list, layered); it removes it, and the module\'s item is served again', async () => {
-        const { read, remove, seedLegacyOverride } = await boot();
+        it('its declared override is served at the module\'s address (by name, list, layered); it removes it, and the module\'s item is served again', async () => {
+            const { read, remove, seedLegacyOverride } = await boot(environmentId);
 
-        // Precondition: the module ships the board.
-        const shipped = await read(`/meta/dashboard/${BOARD}`, { package: MODULE });
-        expect([shipped.status, labelOf(shipped.body)], JSON.stringify(shipped.body).slice(0, 400)).toEqual([200, SHIPPED]);
+            // Precondition: the module ships the board.
+            const shipped = await read(`/meta/dashboard/${BOARD}`, { package: MODULE });
+            expect([shipped.status, labelOf(shipped.body)], JSON.stringify(shipped.body).slice(0, 400)).toEqual([200, SHIPPED]);
 
-        // The legacy pair holds its declared override of the module's board.
-        await seedLegacyOverride('dashboard', board(CUSTOMIZED));
+            // The legacy pair holds its declared override of the module's board.
+            await seedLegacyOverride('dashboard', board(CUSTOMIZED));
 
-        const byName = await read(`/meta/dashboard/${BOARD}`, { package: MODULE });
-        const list = await read('/meta/dashboard', { package: MODULE });
-        const layered = await read(`/meta/dashboard/${BOARD}/layers`, { package: MODULE });
-        expect({
-            byName: [byName.status, labelOf(byName.body)],
-            list: [list.status, listedLabel(list.body)],
-            layered: [layered.status, effectiveLabel(layered.body)],
-        }, JSON.stringify({ byName: byName.body, layered: layered.body }).slice(0, 800)).toEqual({
-            byName: [200, CUSTOMIZED],
-            list: [200, CUSTOMIZED],
-            layered: [200, CUSTOMIZED],
-        });
+            const byName = await read(`/meta/dashboard/${BOARD}`, { package: MODULE });
+            const list = await read('/meta/dashboard', { package: MODULE });
+            const layered = await read(`/meta/dashboard/${BOARD}/layers`, { package: MODULE });
+            expect({
+                byName: [byName.status, labelOf(byName.body)],
+                list: [list.status, listedLabel(list.body)],
+                layered: [layered.status, effectiveLabel(layered.body)],
+            }, JSON.stringify({ byName: byName.body, layered: layered.body }).slice(0, 800)).toEqual({
+                byName: [200, CUSTOMIZED],
+                list: [200, CUSTOMIZED],
+                layered: [200, CUSTOMIZED],
+            });
 
-        // "Restore package original": the legacy pair removes its own override.
-        const removed = await remove('dashboard', BOARD, { package: LEGACY_PAIR });
-        expect(removed.status, JSON.stringify(removed.body).slice(0, 600)).toBe(200);
+            // "Restore package original": the legacy pair removes its own override.
+            const removed = await remove('dashboard', BOARD, { package: LEGACY_PAIR });
+            expect(removed.status, JSON.stringify(removed.body).slice(0, 600)).toBe(200);
 
-        const after = await read(`/meta/dashboard/${BOARD}`, { package: MODULE });
-        const layeredAfter = await read(`/meta/dashboard/${BOARD}/layers`, { package: MODULE });
-        expect([labelOf(after.body), effectiveLabel(layeredAfter.body)]).toEqual([SHIPPED, SHIPPED]);
-    }, 60_000);
+            const after = await read(`/meta/dashboard/${BOARD}`, { package: MODULE });
+            const layeredAfter = await read(`/meta/dashboard/${BOARD}/layers`, { package: MODULE });
+            expect([labelOf(after.body), effectiveLabel(layeredAfter.body)]).toEqual([SHIPPED, SHIPPED]);
+        }, 60_000);
 
-    it('a doc (no overlay channel) the legacy pair overrides is served, and its removal passes the sealed-removal refusal as the pair\'s own', async () => {
-        const { read, remove, seedLegacyOverride } = await boot();
-        await seedLegacyOverride('doc', guide(CUSTOMIZED));
-        const byName = await read(`/meta/doc/${GUIDE}`, { package: MODULE });
-        expect([byName.status, labelOf(byName.body)], JSON.stringify(byName.body).slice(0, 400)).toEqual([200, CUSTOMIZED]);
+        it('a doc (no overlay channel) the legacy pair overrides is served, and its removal passes the sealed-removal refusal as the pair\'s own', async () => {
+            const { read, remove, seedLegacyOverride } = await boot(environmentId);
+            await seedLegacyOverride('doc', guide(CUSTOMIZED));
+            const byName = await read(`/meta/doc/${GUIDE}`, { package: MODULE });
+            expect([byName.status, labelOf(byName.body)], JSON.stringify(byName.body).slice(0, 400)).toEqual([200, CUSTOMIZED]);
 
-        const removed = await remove('doc', GUIDE, { package: LEGACY_PAIR });
-        expect(removed.status, JSON.stringify(removed.body).slice(0, 600)).toBe(200);
-        const after = await read(`/meta/doc/${GUIDE}`, { package: MODULE });
-        expect([after.status, labelOf(after.body)]).toEqual([200, SHIPPED]);
-    }, 60_000);
-});
+            const removed = await remove('doc', GUIDE, { package: LEGACY_PAIR });
+            expect(removed.status, JSON.stringify(removed.body).slice(0, 600)).toBe(200);
+            const after = await read(`/meta/doc/${GUIDE}`, { package: MODULE });
+            expect([after.status, labelOf(after.body)]).toEqual([200, SHIPPED]);
+        }, 60_000);
+    });
+}
