@@ -40,7 +40,9 @@ import { retirementTombstone } from './tombstone.zod.js';
 const MCP_AUTHORIZED_ASSISTANTS_NEITHER_CHANNEL =
   'REFUSED — `mcp:authorized-assistants` reads NEITHER content channel: its registration hands '
   + 'the node to `ManagedPersonAssistants`, which reads only `className`, and `SchemaRenderer` strips '
-  + 'both channels out of the props bag it spreads. An authored value would render NOTHING. What it '
+  + 'both channels out of the props bag it spreads. An authored value would render NOTHING — no '
+  + 'render-time error or warning and no element; only the parser tier\'s `not-a-container` warning '
+  + '(objectui#9910) noticed it, because the registration declares no `children` input. What it '
   + 'renders instead: the AI assistants the person of the bound `sys_user` record authorized, each '
   + 'with a Revoke.';
 

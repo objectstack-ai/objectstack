@@ -5402,7 +5402,7 @@ const ZOD_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', 'zod');
  * MINUEND under it had moved. Nothing failed on any of those days, because nothing
  * compared the registry to a number. objectui#7433 is that absence, not the digits.
  */
-const EXPECTED_MIRROR_PAIRS = 197;
+const EXPECTED_MIRROR_PAIRS = 198;
 
 /**
  * A ledger this file can size from its own AST. `WiderThanDeclared` joined at
