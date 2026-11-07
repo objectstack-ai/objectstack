@@ -46,7 +46,7 @@
 - ⛔ 非当前 head 上的 `cancelled` 零动作、永不重跑:新推送自带全套 run。
 - 席位核对门禁证据 = check-runs(名+结论);本地并集只证本地子集,⛔ 不替缺席者。
 - `!` 或 `(narrowing)`:入队前核 `dogfood_battery` 钉 head、全量、红已修/已报;缺或收窄 ⇒ REWORK。
-- 把发送或写挪到应答之后的 PR:dogfood 门禁不跑于 PR 与队列,全绿照样红 `main` 的 push 全量。
+- 把发送或写挪到应答之后的 PR:dogfood 门禁不跑于 PR、跑于队列,全绿 PR 照样被队列弹出。
 - ⇒ 入队前 grep `packages/qa/dogfood/test` 里应答后紧读该副作用的用例,同一 PR 改为有界等待。
 
 ## 断言与收益

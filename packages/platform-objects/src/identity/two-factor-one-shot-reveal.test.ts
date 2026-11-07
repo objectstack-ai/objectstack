@@ -70,6 +70,11 @@ const ONE_SHOT_ROUTES: Record<string, readonly string[]> = {
   '/api/v1/auth/two-factor/enable': ['totpURI', 'backupCodes'],
   '/api/v1/auth/two-factor/generate-backup-codes': ['backupCodes'],
   '/api/v1/keys': ['key'],
+  // plugin-auth `scim-connection-admin.ts` answers the plaintext SCIM bearer
+  // once as `data.token`; `sys_scim_connection_credential` stores only its
+  // keyed HMAC digest (`token_digest`, `internal`), so no read returns it.
+  // `sys_scim_connection_credential.mint_scim_credential` targets it.
+  '/api/v1/auth/admin/scim/mint-credential': ['token'],
 };
 
 /** Every action declared on every exported identity object, tagged with its object. */

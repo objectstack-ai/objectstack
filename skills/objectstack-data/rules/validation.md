@@ -6,8 +6,6 @@
 - [External / Custom Validation → Lifecycle Hooks](#external--custom-validation--lifecycle-hooks) · [Validation Properties](#validation-properties)
 - [Incorrect vs Correct](#incorrect-vs-correct)
 
-Comprehensive guide for implementing validation rules in ObjectStack.
-
 ## Available Rule Types
 
 The **complete** set of `type` discriminators accepted by `ValidationRuleSchema`:
@@ -25,9 +23,7 @@ There is no other type. In particular:
 
 - **No `unique` type** (removed from the spec) — enforce uniqueness
   with a **unique index** ([see below](#uniqueness--use-unique-indexes)).
-- **No `async` / `custom` type** — external checks and arbitrary validation
-  code belong in a `beforeInsert` / `beforeUpdate` **lifecycle hook**
-  (see [references/data-hooks.md](../references/data-hooks.md)).
+- **No `async` / `custom` type** — see [External / Custom Validation](#external--custom-validation--lifecycle-hooks).
 
 ## Expression Syntax
 
@@ -36,6 +32,8 @@ There is no other type. In particular:
 as CEL. Record fields are addressed as `record.<field>`; on update the prior
 row is available as `previous.<field>`. CEL operator and null-handling rules:
 see **objectstack-formula**.
+An ordering or arithmetic operator on a field with no `required: true` /
+`defaultValue` is refused at publish unless a `!= null` test guards it.
 
 **⚠️ CRITICAL:** For `script` **and** `cross_field`, the predicate expresses
 the **failure** condition — validation **fails** when it evaluates to `true`.
@@ -51,6 +49,7 @@ from a transition onward is not this tool: use `requiredWhen` or a field bound
 stored row (see **Choose by intent — invariant or transition gate** in
 `SKILL.md`).
 
+<!-- os:check -->
 ```typescript
 import { P } from '@objectstack/spec';
 
@@ -58,7 +57,7 @@ const validations = [
   {
     name: 'prevent_past_dates',
     type: 'script',
-    condition: P`record.due_date < today()`,  // ❌ Fails when this is TRUE
+    condition: P`record.due_date != null && record.due_date < today()`,  // ❌ Fails when this is TRUE
     message: 'Due date cannot be in the past',
     severity: 'error',
     events: ['insert', 'update'],
@@ -70,16 +69,13 @@ const validations = [
 
 ```typescript
 // Prevent negative values
-condition: P`record.amount < 0`
+condition: P`record.amount != null && record.amount < 0`
 
 // Require field when another field has value
 condition: P`record.status == 'approved' && isBlank(record.approver_id)`
 
 // Date range validation
-condition: P`record.end_date < record.start_date`
-
-// Conditional required field
-condition: P`record.type == 'enterprise' && isBlank(record.account_manager)`
+condition: P`record.start_date != null && record.end_date != null && record.end_date < record.start_date`
 ```
 
 > On **insert**, an optional field omitted from the payload reads as `null`
@@ -160,14 +156,14 @@ validations: [
   {
     name: 'date_range',
     type: 'cross_field',
-    condition: P`record.end_date <= record.start_date`,  // ❌ TRUE = invalid
+    condition: P`record.start_date != null && record.end_date != null && record.end_date <= record.start_date`,  // ❌ TRUE = invalid
     message: 'End date must be after start date',
     fields: ['start_date', 'end_date'],
   },
   {
     name: 'discount_limit',
     type: 'cross_field',
-    condition: P`record.discount_amount > record.subtotal * 0.5`,
+    condition: P`record.discount_amount != null && record.subtotal != null && record.discount_amount > record.subtotal * 0.5`,
     message: 'Discount cannot exceed 50% of subtotal',
     fields: ['discount_amount', 'subtotal'],
   },
@@ -227,7 +223,7 @@ With an `otherwise` branch:
 {
   name: 'payment_validation',
   type: 'conditional',
-  when: P`record.order_total > 10000`,
+  when: P`record.order_total != null && record.order_total > 10000`,
   message: 'Order validation',
   then: {
     name: 'manager_approval_required',
@@ -246,21 +242,27 @@ With an `otherwise` branch:
 
 ## External / Custom Validation → Lifecycle Hooks
 
-Calling an external API, hitting another object, or running arbitrary code is
-**not** a validation type. Implement it as a `beforeInsert` / `beforeUpdate`
-lifecycle hook and throw on failure:
+Hitting another object or running arbitrary code is **not** a validation type.
+Implement it as a `beforeInsert` / `beforeUpdate` lifecycle hook whose `body`
+throws on failure. A `body` has no outbound HTTP: an external-API check goes
+through a Connector recipe ([data-hooks.md](../references/data-hooks.md#capabilities--the-complete-list)).
 
+<!-- os:check -->
 ```typescript
-import { defineHook, HookContext } from '@objectstack/spec/data';
+import { defineHook } from '@objectstack/spec/data';
 
 const taxIdCheck = defineHook({
-  name: 'crm_tax_id_external_check',
+  name: 'crm_tax_id_blocklist_check',
   object: 'account',
   events: ['beforeInsert', 'beforeUpdate'],
-  handler: async (ctx: HookContext) => {
-    if (ctx.input.tax_id && !(await verifyTaxId(ctx.input.tax_id))) {
-      throw new Error('Invalid tax ID');
-    }
+  body: {
+    language: 'js',
+    source: `
+      if (!ctx.input.tax_id) return;
+      const hit = await ctx.api.object('blocked_tax_id').findOne({ where: { tax_id: ctx.input.tax_id } });
+      if (hit) throw new Error('Tax ID is blocked');
+    `,
+    capabilities: ['api.read'],
   },
 });
 ```
@@ -301,29 +303,7 @@ priority: 100    // Application validations (default)
 priority: 1000   // User validations (run last)
 ```
 
-Lower numbers execute **first**.
-
 ## Incorrect vs Correct
-
-### ❌ Incorrect — Script Logic Inverted
-
-```typescript
-{
-  type: 'script',
-  condition: P`record.amount > 0`,  // ❌ Fails when amount > 0 (inverted!)
-  message: 'Amount must be positive',
-}
-```
-
-### ✅ Correct — Script Logic
-
-```typescript
-{
-  type: 'script',
-  condition: P`record.amount <= 0`,  // ✅ Fails when amount <= 0
-  message: 'Amount must be positive',
-}
-```
 
 ### ❌ Incorrect — Validation Fires Too Often
 
