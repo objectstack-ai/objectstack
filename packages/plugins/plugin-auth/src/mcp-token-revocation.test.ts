@@ -37,7 +37,7 @@
  *  - one person, one client, consents in two organizations: revoking the
  *    grant of one deletes that organization's whole refresh family (every
  *    rotation of it) and leaves the other organization's family refreshing;
- *    a refresh row with no organization belongs to the grant with none;
+ *    a refresh row with no organization dies on every withdraw (fail closed);
  *    a rotation racing the revoke does not leave a live successor behind.
  */
 
@@ -484,7 +484,7 @@ describe('a grant is revoked in its own organization only', () => {
     expect(await r.rowsAtRest('sys_oauth_consent')).toEqual([]);
   }, 60_000);
 
-  it('a refresh row with NO organization belongs to the grant with none: revoking A keeps it, and what it mints never acts in A', async () => {
+  it('a refresh row with NO organization dies on EVERY withdraw of the client: revoking A deletes it, and B\'s row still refreshes', async () => {
     const r = await rig();
     const clientId = await r.registerClient();
     const cookie = await r.signUp('mia@acme.example.com');
@@ -492,25 +492,20 @@ describe('a grant is revoked in its own organization only', () => {
     // A consent made with no active organization: its refresh row has no reference.
     const none = await r.exchange(clientId, (await r.authorize(clientId, cookie)).code);
     const orgA = await r.enterOrganization(cookie, 'org-a');
-    const inA = await r.exchange(clientId, (await r.authorize(clientId, cookie)).code);
-    const references = async () => (await r.rowsAtRest('sys_oauth_refresh_token')).map((row) => row.reference_id ?? null);
-    expect((await references()).sort()).toEqual([orgA, null].sort());
+    await r.exchange(clientId, (await r.authorize(clientId, cookie)).code);
+    const orgB = await r.enterOrganization(cookie, 'org-b');
+    const inB = await r.exchange(clientId, (await r.authorize(clientId, cookie)).code);
+    const references = async () =>
+      (await r.rowsAtRest('sys_oauth_refresh_token')).map((row) => row.reference_id ?? '(none)').sort();
+    expect(await references()).toEqual([orgA, orgB, '(none)'].sort());
 
     await revokeMcpGrant(await r.store(), { clientId, userId, organizationId: orgA });
-    expect(await references(), 'the row with no organization is not A\'s').toEqual([null]);
-    expect(await r.manager.verifyMcpAccessToken(inA.access_token)).toBeNull();
-    // What it mints carries no organization, so the MCP door admits it only
-    // against the consent with none — never as A.
-    const minted = await r.refresh(clientId, none.refresh_token);
-    expect(minted.status, JSON.stringify(minted.body)).toBe(200);
-    const principal = await r.manager.verifyMcpAccessToken(minted.body.access_token);
-    expect(principal, 'admitted by the consent with no organization').toMatchObject({ clientId });
-    expect(Object.keys(principal!), 'and with no organization at all').not.toContain('organizationId');
-
-    // The grant with no organization deletes its own rows.
-    await revokeMcpGrant(await r.store(), { clientId, userId });
-    expect(await references()).toEqual([]);
-    expect(await r.manager.verifyMcpAccessToken(minted.body.access_token)).toBeNull();
+    // Which grant a row with no reference was minted under cannot be read off
+    // it, so it goes with any withdraw (fail closed); only a row naming
+    // another organization stays.
+    expect(await references(), 'the row with no organization went with A').toEqual([orgB]);
+    expect((await r.refresh(clientId, none.refresh_token)).status, 'and mints nothing').toBe(400);
+    expect((await r.refresh(clientId, inB.refresh_token)).status, 'B still refreshes').toBe(200);
   }, 60_000);
 
   it('a rotation racing the revoke leaves no live successor in the withdrawn organization', async () => {
