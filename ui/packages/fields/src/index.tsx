@@ -4890,6 +4890,14 @@ const fieldWidgetMap = {
   //   permission-ref → a permission set (sys_user_permission_set.permission_set)
   'position-ref': () => import('./widgets/RegistryRefField.js').then(m => ({ default: m.PositionRefField })),
   'permission-ref': () => import('./widgets/RegistryRefField.js').then(m => ({ default: m.PermissionRefField })),
+  // The fillable arm of the same widget (#30208 row 6, ruling E on #30527): a
+  // notification preference's `topic` / `channel` and a template's `topic`,
+  // offered from `GET /api/v1/messaging/preference-options` and still taking
+  // any typed value, which the server stores as written.
+  //   notification-topic   → a notification topic, `*` for all
+  //   notification-channel → a notification channel, `*` for all
+  'notification-topic': () => import('./widgets/RegistryRefField.js').then(m => ({ default: m.NotificationTopicField })),
+  'notification-channel': () => import('./widgets/RegistryRefField.js').then(m => ({ default: m.NotificationChannelField })),
 } satisfies Record<string, FieldWidgetLoader>;
 
 /** The registered field widget keys, as a literal union (objectui#4857). */
@@ -5072,6 +5080,8 @@ const FIELD_TYPES_SKIP_FALLBACK = new Set([
   'recipient-picker',
   'position-ref',
   'permission-ref',
+  'notification-topic',
+  'notification-channel',
   // ── Retired bare node keys (objectui#10859 batch 8) ───────────────────────
   // Each was registered bare only as this loop's fallback: no other package
   // owns the name, no form path reads it, and no document authors it as a

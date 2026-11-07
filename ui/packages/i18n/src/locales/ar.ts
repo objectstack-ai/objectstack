@@ -348,6 +348,13 @@ const ar = {
       loadFailed: "تعذّر تحميل القائمة. لا يزال بإمكانك كتابة الاسم.",
       notFound: "{{name}} (غير موجود)",
     },
+    preferenceOption: {
+      allTopics: "كل الموضوعات ({{value}})",
+      allChannels: "كل القنوات ({{value}})",
+      notConfigured: "{{value}} (غير مُهيّأة)",
+      notInList: "{{value}} (ليست في القائمة)",
+      useTyped: "استخدام «{{value}}»",
+    },
     recipient: {
       selectTypeFirst: "اختر نوع المستلم أولاً.",
       loading: "جارٍ التحميل…",
