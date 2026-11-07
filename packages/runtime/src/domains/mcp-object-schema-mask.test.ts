@@ -45,6 +45,7 @@ import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { SecurityPlugin } from '@objectstack/plugin-security';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
+import { RestServer } from '@objectstack/rest';
 import { HttpDispatcher } from '../http-dispatcher.js';
 // Paid at collection, not inside a case's clock: the dispatcher's reach loads it lazily.
 import '@objectstack/metadata';
@@ -475,10 +476,10 @@ describe('[ADR-0106] HTTP MCP list_actions summarises an action against the obje
         }
     });
 
-    it('a param bound to another object\'s readable field is summarised against no field of this object the member cannot read', async () => {
+    it('a param bound to another object\'s readable field is summarised against that object\'s field, never this object\'s the member cannot read', async () => {
         const { listed } = await listBoth(PERSONAS.member);
         const entry = byName(listed, VENDOR_BUDGET.name);
-        expect(entry.params).toEqual([{ name: DENIED, type: 'string', required: false }]);
+        expect(entry.params).toEqual([{ name: DENIED, type: 'number', required: false, description: 'Vendor budget' }]);
         expect(JSON.stringify(entry).includes(DENIED_LABEL)).toBe(false);
         expect(JSON.stringify(entry).includes(DENIED_HELP)).toBe(false);
     });
@@ -509,5 +510,281 @@ describe('[ADR-0106] HTTP MCP list_actions summarises an action against the obje
         }
         expect(byName(member.listed, RENAME.name).params).toEqual([{ name: 'title', type: 'string', required: false, description: 'Title' }]);
         expect(byName(member.listed, CLOSE.name)).not.toHaveProperty('params');
+    });
+});
+
+describe('[ADR-0106 D1] a standalone or object-less action entry is served as the object door projects it — /meta action door (REST, dispatcher) and MCP list_actions', () => {
+    const OBJ = 'meta_act_project';
+    const OTHER = 'meta_act_vendor';
+    const PKG = 'com.objectstack.qa.meta-action-entry-mask';
+    const META = '/api/v1/meta';
+    const ai = (description: string) => ({ exposed: true, description });
+    /** Standalone, bound to this object's `budget`, which the member cannot read. */
+    const ST_BUDGET = {
+        name: 'st_set_budget', label: 'Set budget', objectName: OBJ, operation: 'update',
+        params: [{ field: 'budget', label: 'Budget param label', helpText: 'Budget param help' }],
+        ai: ai('Set the approved budget of this project to a new amount.'),
+    };
+    /** Standalone, bound to `title`, which the member can read: the control. */
+    const ST_RENAME = {
+        name: 'st_rename', label: 'Rename', objectName: OBJ, operation: 'update',
+        params: [{ field: 'title' }], ai: ai('Rename this project to the title the user gives.'),
+    };
+    /** Standalone, binding no field at all. */
+    const ST_PING = { name: 'st_ping', label: 'Ping', objectName: OBJ, type: 'api', target: '/api/v1/ping', ai: ai('Ping the project service to check that it answers.') };
+    /** Object-less, bound through `objectOverride` to the other object's `rate`, which the member cannot read. */
+    const GL_RATE = {
+        name: 'gl_quote_rate', label: 'Quote rate', type: 'api', target: '/api/v1/quote',
+        params: [{ field: 'rate', objectOverride: OTHER, label: 'Rate param label' }],
+        ai: ai('Quote the day rate of a vendor before the work is booked.'),
+    };
+    /** Object-less, bound through `objectOverride` to the other object's `budget`, which the member CAN read. */
+    const GL_VENDOR_BUDGET = {
+        name: 'gl_vendor_budget', label: 'Vendor budget', type: 'api', target: '/api/v1/quote',
+        params: [{ field: 'budget', objectOverride: OTHER }],
+        ai: ai('Quote the budget a vendor offered before the work is booked.'),
+    };
+    /** Embedded on this object, bound through `objectOverride` to the other object's `budget`. */
+    const EMBEDDED_VENDOR_BUDGET = {
+        name: 'quote_vendor_budget', label: 'Quote vendor budget', operation: 'update',
+        params: [{ field: 'budget', objectOverride: OTHER }], ai: ai('Quote the budget a vendor offered for this project.'),
+    };
+    const STANDALONE = [ST_BUDGET, ST_RENAME, ST_PING, GL_RATE, GL_VENDOR_BUDGET];
+    const WITHHELD = [ST_BUDGET.name, GL_RATE.name];
+    const HIDDEN_TEXT = ['Budget param label', 'Budget param help', 'Rate param label', 'Approved budget', 'Day rate'];
+
+    const PERSONAS = {
+        /** Denied this object's `budget` and the other object's `rate`. */
+        member: { userId: 'usr_member', positions: [] as string[], permissions: ['meta_act_member'], systemPermissions: [] as string[] },
+        /** Denied nothing: the control. */
+        staff: { userId: 'usr_staff', positions: [] as string[], permissions: ['meta_act_staff'], systemPermissions: [] as string[] },
+        /** D4: holds the member's denies and may write the schema. */
+        author: { userId: 'usr_author', positions: [] as string[], permissions: ['meta_act_member'], systemPermissions: ['manage_metadata'] },
+        /** The system context. */
+        system: { userId: 'usr_system', isSystem: true, positions: [] as string[], permissions: ['meta_act_member'], systemPermissions: [] as string[] },
+    } as const;
+    type Persona = (typeof PERSONAS)[keyof typeof PERSONAS];
+
+    let engine: ObjectQL;
+    let services: Record<string, any>;
+
+    beforeAll(async () => {
+        engine = new ObjectQL();
+        const driver = new SqlDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true } as any);
+        const storeObjects = [SysMetadataObject, SysMetadataHistoryObject, SysMetadataAuditObject] as any[];
+        await driver.initObjects(storeObjects);
+        engine.registerDriver(driver as any, true);
+        await engine.init();
+        for (const o of storeObjects) engine.registry.registerObject(o, '@objectstack/platform-objects');
+        engine.registerApp({
+            id: PKG,
+            name: 'Meta action entry mask',
+            version: '1.0.0',
+            type: 'plugin',
+            scope: 'system',
+            objects: [
+                {
+                    name: OBJ,
+                    label: 'Project',
+                    sharingModel: 'public_read_write',
+                    fields: {
+                        title: { name: 'title', type: 'text', label: 'Title', required: true },
+                        budget: { name: 'budget', type: 'currency', label: 'Approved budget', description: 'Spend ceiling the board signed off' },
+                    },
+                    actions: [EMBEDDED_VENDOR_BUDGET],
+                },
+                {
+                    name: OTHER,
+                    label: 'Vendor',
+                    sharingModel: 'public_read_write',
+                    fields: {
+                        name: { name: 'name', type: 'text', label: 'Name' },
+                        rate: { name: 'rate', type: 'currency', label: 'Day rate' },
+                        budget: { name: 'budget', type: 'currency', label: 'Vendor budget' },
+                    },
+                },
+            ],
+        } as never);
+        for (const action of STANDALONE) engine.registry.registerItem('action', structuredClone(action) as any, 'name', PKG);
+        await engine.syncSchemas();
+        const all = { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true };
+        const deny = { readable: false, editable: false };
+        const sets = [
+            PermissionSetSchema.parse({
+                name: 'meta_act_member', label: 'Member', objects: { '*': all },
+                fields: { [`${OBJ}.budget`]: deny, [`${OTHER}.rate`]: deny },
+            }),
+            PermissionSetSchema.parse({ name: 'meta_act_staff', label: 'Staff', objects: { '*': all } }),
+        ];
+        const pluginServices: Record<string, unknown> = {
+            manifest: { register: vi.fn() },
+            objectql: engine,
+            metadata: {
+                get: async (_type: string, name: string) => engine.getSchema(name) ?? null,
+                list: async () => sets,
+            },
+        };
+        const ctx = {
+            logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
+            registerService: vi.fn((name: string, service: unknown) => { pluginServices[name] = service; }),
+            getService: (name: string) => {
+                if (!(name in pluginServices)) throw new Error(`service not registered: ${name}`);
+                return pluginServices[name];
+            },
+        };
+        const plugin = new SecurityPlugin({ fallbackPermissionSet: 'meta_act_staff' });
+        await plugin.init(ctx as never);
+        await plugin.start(ctx as never);
+        expect(pluginServices.security, 'precondition: the security plugin registered its service').toBeDefined();
+        vi.spyOn((engine as unknown as { logger: { warn: () => void } }).logger, 'warn').mockImplementation(() => undefined);
+        services = {
+            protocol: new ObjectStackProtocolImplementation(engine as any),
+            security: pluginServices.security,
+            objectql: engine,
+        };
+        vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    }, 60_000);
+
+    afterAll(async () => {
+        vi.restoreAllMocks();
+        try { await engine?.destroy(); } catch { /* noop */ }
+    });
+
+    /** One `/meta` answer, every byte a caller can compare: status, body and headers. */
+    interface Wire { status: number; body: any; headers: Record<string, string> }
+    const wireText = (w: Wire) => JSON.stringify(w);
+
+    /** `RestServer`'s registered `/meta` handlers, under `persona`; `cached: false` is a deployment with the published-value cache off. */
+    function restDoor(persona: Persona, opts: { cached: boolean; secured?: boolean }) {
+        const noop = () => {};
+        const server = { get: noop, post: noop, put: noop, delete: noop, patch: noop, use: noop, listen: async () => {}, close: async () => {} };
+        const rest: any = new RestServer(server as any, services.protocol, {
+            api: { requireAuth: false }, ...(opts.cached ? {} : { metadata: { enableCache: false } }),
+        } as any);
+        rest.resolveExecCtx = async () => JSON.parse(JSON.stringify(persona));
+        rest.securityServiceProvider = async () => (opts.secured === false ? undefined : services.security);
+        rest.registerRoutes();
+        const read = async (routePath: string, params: Record<string, string>, headers: Record<string, string> = {}): Promise<Wire> => {
+            const route = rest.getRoutes().find((r: any) => r.method === 'GET' && r.path === routePath);
+            if (!route) throw new Error(`GET ${routePath} is not registered`);
+            const res: any = { statusCode: 200, body: undefined, headers: {} as Record<string, string> };
+            res.status = (code: number) => { res.statusCode = code; return res; };
+            res.json = (body: any) => { res.body = body; return res; };
+            res.send = () => res;
+            res.end = () => res;
+            res.header = (k: string, v: string) => { res.headers[k] = v; return res; };
+            res.setHeader = () => {};
+            const path = `${META}/${params.type}${params.name ? `/${params.name}` : ''}`;
+            await route.handler({ method: 'GET', path, params, query: {}, body: {}, headers }, res);
+            return { status: res.statusCode, body: res.body, headers: res.headers };
+        };
+        return {
+            list: () => read(`${META}/:type`, { type: 'action' }),
+            item: (name: string, headers?: Record<string, string>) => read(`${META}/:type/:name`, { type: 'action', name }, headers),
+        };
+    }
+
+    /** The runtime dispatcher's `/meta` door, under `persona`. */
+    function dispatcherDoor(persona: Persona, opts: { secured?: boolean } = {}) {
+        const dispatcher = new HttpDispatcher(kernelOver({ ...services, ...(opts.secured === false ? { security: undefined } : {}) }), undefined, { enforceProjectMembership: false });
+        const read = async (path: string): Promise<Wire> => {
+            const answer = await dispatcher.handleMetadata(path, {
+                request: {}, environmentId: undefined, executionContext: JSON.parse(JSON.stringify(persona)),
+            } as any, 'GET');
+            return { status: answer.response?.status ?? 0, body: answer.response?.body, headers: (answer.response as any)?.headers ?? {} };
+        };
+        return { list: () => read('/action'), item: (name: string) => read(`/action/${name}`) };
+    }
+
+    const listedNames = (w: Wire): string[] => {
+        const data = w.body?.data ?? w.body;
+        const items: any[] = Array.isArray(data) ? data : (data?.items ?? []);
+        return items.map((a: any) => a?.name).filter((n: unknown) => STANDALONE.some((s) => s.name === n)).sort();
+    };
+    const DOORS = [
+        ['REST, cached arm', (p: Persona) => restDoor(p, { cached: true })],
+        ['REST, uncached arm', (p: Persona) => restDoor(p, { cached: false })],
+        ['dispatcher', (p: Persona) => dispatcherDoor(p)],
+    ] as const;
+    const ALL_NAMES = STANDALONE.map((a) => a.name).sort();
+
+    it('precondition: every standalone fixture is listed and read whole by an unrestricted caller, on every door', async () => {
+        for (const [door, open] of DOORS) {
+            const staff = open(PERSONAS.staff);
+            const list = await staff.list();
+            expect(list.status, door).toBe(200);
+            expect(listedNames(list), door).toEqual(ALL_NAMES);
+            const item = await staff.item(ST_BUDGET.name);
+            expect(item.status, door).toBe(200);
+            expect(JSON.stringify(item.body), door).toContain('Budget param label');
+        }
+    });
+
+    for (const [door, open] of DOORS) {
+        it(`${door}: a member who cannot read a bound field is not listed the action, and is answered for it as for an unknown name`, async () => {
+            const member = open(PERSONAS.member);
+            const list = await member.list();
+            expect(list.status).toBe(200);
+            expect(listedNames(list)).toEqual(ALL_NAMES.filter((n) => !WITHHELD.includes(n)));
+            for (const hidden of HIDDEN_TEXT) expect(wireText(list).includes(hidden), `'${hidden}' must not reach this caller`).toBe(false);
+            const unknown = await member.item('no_such_action');
+            expect(unknown.status, 'precondition: an unknown name is a 404').toBe(404);
+            for (const name of WITHHELD) {
+                expect(wireText(await member.item(name)), `${name} answers as an absent name`).toBe(wireText(unknown));
+            }
+        });
+
+        it(`${door}: CONTROL — a field-bound action the member can read, and one binding no field, are served to the member as to the staff`, async () => {
+            for (const name of [ST_RENAME.name, ST_PING.name, GL_VENDOR_BUDGET.name]) {
+                const member = await open(PERSONAS.member).item(name);
+                expect(member.status, name).toBe(200);
+                expect(wireText(member), name).toBe(wireText(await open(PERSONAS.staff).item(name)));
+            }
+        });
+
+        it(`${door}: CONTROL — an exempt author and the system context are answered byte-identical to a deployment with no security service`, async () => {
+            const unsecured = door === 'dispatcher'
+                ? dispatcherDoor(PERSONAS.staff, { secured: false })
+                : restDoor(PERSONAS.staff, { cached: door === 'REST, cached arm', secured: false });
+            const baseList = wireText(await unsecured.list());
+            for (const persona of [PERSONAS.author, PERSONAS.system]) {
+                const exempt = open(persona);
+                expect(wireText(await exempt.list()), persona.userId).toBe(baseList);
+                for (const name of ALL_NAMES) {
+                    expect(wireText(await exempt.item(name)), `${persona.userId} ${name}`).toBe(wireText(await unsecured.item(name)));
+                }
+            }
+        });
+    }
+
+    it('REST, cached arm: a member holding the validator of a withheld action is answered 404, never 304; the staff still revalidates', async () => {
+        const staff = restDoor(PERSONAS.staff, { cached: true });
+        const served = await staff.item(ST_BUDGET.name);
+        const etag = served.headers.ETag;
+        expect(etag, 'precondition: the cached arm issues a validator').toBeTruthy();
+        const member = restDoor(PERSONAS.member, { cached: true });
+        const conditional = await member.item(ST_BUDGET.name, { 'if-none-match': etag });
+        expect(wireText(conditional)).toBe(wireText(await member.item('no_such_action')));
+        expect((await staff.item(ST_BUDGET.name, { 'if-none-match': etag })).status).toBe(304);
+    });
+
+    it('MCP list_actions: an object-less action whose objectOverride param binds an unreadable field is not listed, nor its field shown', async () => {
+        const member = await (await bridgeFor(kernelOver(services), PERSONAS.member)).bridge.listActions();
+        const staff = await (await bridgeFor(kernelOver(services), PERSONAS.staff)).bridge.listActions();
+        const names = (listed: any[]) => listed.map((a) => a.name).filter((n) => [GL_RATE.name, GL_VENDOR_BUDGET.name].includes(n)).sort();
+        expect(names(staff), 'precondition: the staff is listed both').toEqual([GL_VENDOR_BUDGET.name, GL_RATE.name].sort());
+        expect(names(member)).toEqual([GL_VENDOR_BUDGET.name]);
+        for (const hidden of ['Rate param label', 'Day rate', '"rate"']) {
+            expect(JSON.stringify(member).includes(hidden), `'${hidden}' must not reach this caller`).toBe(false);
+        }
+    });
+
+    it('MCP list_actions: an objectOverride param is summarised with the field of the object it names, not the own object\'s same-named field', async () => {
+        const listed: any[] = await (await bridgeFor(kernelOver(services), PERSONAS.staff)).bridge.listActions();
+        const target = { name: 'budget', type: 'number', required: false, description: 'Vendor budget' };
+        expect(listed.find((a) => a.name === EMBEDDED_VENDOR_BUDGET.name)?.params).toEqual([target]);
+        expect(listed.find((a) => a.name === GL_VENDOR_BUDGET.name)?.params).toEqual([target]);
+        const member: any[] = await (await bridgeFor(kernelOver(services), PERSONAS.member)).bridge.listActions();
+        expect(member.find((a) => a.name === EMBEDDED_VENDOR_BUDGET.name)?.params).toEqual([target]);
     });
 });
