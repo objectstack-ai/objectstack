@@ -219,7 +219,9 @@ const arrange = async () => {
   /**
    * A consent, written by better-auth's own storage adapter (the write the
    * provider's consent door makes), plus the token rows a real grant carries,
-   * so an answer that leaked one would be caught.
+   * so an answer that leaked one would be caught. The token rows carry the
+   * consent's organization reference, as the provider writes them: a withdraw
+   * deletes the refresh family of the withdrawn grant's organization only.
    */
   const grant = async (
     userId: string,
@@ -242,12 +244,14 @@ const arrange = async () => {
       token: `${ACCESS_TOKEN}-${row.id}`,
       client_id: clientId,
       user_id: userId,
+      ...(opts.referenceId ? { reference_id: opts.referenceId } : {}),
       scopes: JSON.stringify(opts.scopes ?? ['openid', 'data:read']),
     });
     await engine.insert('sys_oauth_refresh_token', {
       token: `${REFRESH_TOKEN}-${row.id}`,
       client_id: clientId,
       user_id: userId,
+      ...(opts.referenceId ? { reference_id: opts.referenceId } : {}),
       scopes: JSON.stringify(opts.scopes ?? ['openid', 'data:read']),
     });
     return String(row.id);
