@@ -3787,7 +3787,7 @@ describe('lintFlowPatterns — a node no edge path from start reaches (flow-node
         [
           START,
           { id: 'task', type: 'wait', waitEventConfig: { eventType: 'timer', timerDuration: 'PT1H' } },
-          { id: 'timeout', type: 'boundary_event', config: { attachedToNodeId: 'task' } },
+          { id: 'timeout', type: 'boundary_event', boundaryConfig: { attachedToNodeId: 'task', eventType: 'timer' } },
           { id: 'escalate', type: 'assignment' },
           END,
         ],
