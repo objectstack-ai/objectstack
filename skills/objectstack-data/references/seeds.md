@@ -45,7 +45,7 @@ export const SeedData = [statusSeed, categorySeed];   // parents first
 | Field | Default | Purpose |
 |:------|:--------|:--------|
 | `object` | derived | Auto-set from `objectDef.name` — never write manually |
-| `externalId` | `'name'` | Stable business key used for upsert / update lookup |
+| `externalId` | `'name'` | Stable business key every keyed mode matches on |
 | `mode` | `'ignore'` | Import strategy (see below) |
 | `columns` | — | Per-column write policy, keyed by field: `{ FIELD: { applyOn: 'create' } }` (below) |
 | `env` | `['prod','dev','test']` | Environments where the seed loads |
@@ -57,15 +57,15 @@ Full Zod shape: `node_modules/@objectstack/spec/src/data/seed.zod.ts`.
 
 | Mode | Behavior | Use for |
 |:-----|:---------|:--------|
-| `ignore` (default) | Create-only: insert a missing row, leave a matched row as is. | Data the customer owns once loaded |
-| `upsert` | Insert if missing; every replay writes the declared columns back. | Reference data the package keeps current |
+| `ignore` (default) | Create-only: insert a missing row, leave a matched row as is. | Data the customer owns |
+| `upsert` | Insert if missing; every replay writes declared columns back. | Reference data kept current |
 | `insert` | Insert every record, no match: duplicates on each replay. | Rows loaded once |
 | `update` | Update only existing rows; never create. | Patching existing config |
 | `replace` ⚠️ | Insert with no match; deletes nothing, the caller clears the table. | Cache / lookup tables only |
 
-A boot or organization replay does not re-insert a keyed row a person deleted
-(landed keys are recorded per organization); `seed-replayer` with
-`{ reseed: true }` restores it.
+A seed replays on each boot, install and re-publish. AppPlugin's boot and organization
+replays (not a publish or package install) do not re-insert a keyed row a
+person deleted; `seed-replayer` with `{ reseed: true }` restores it.
 
 ### Columns the app owns after the first load — `columns.FIELD.applyOn`
 
