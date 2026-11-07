@@ -375,7 +375,7 @@ export class FileAttachmentService implements IFileAttachmentService, ICallerFil
           // and for no other value. The write-time reference check does not
           // ask the caller's read door for that id, and still probes that it
           // exists; every other gate on the insert judges the caller.
-          { context: vouchForReference(unitContext, { object: 'sys_attachment', field: 'file_id', id: file.id }) },
+          { context: vouchForReference(unitContext as ExecutionContext, { object: 'sys_attachment', field: 'file_id', id: file.id }) },
         )) as { id?: unknown } | null | undefined;
         if (row?.id === undefined || row.id === null || row.id === '') {
           throw new Error('attachUploadAs: the sys_attachment insert answered no row id, so the attachment cannot be named');

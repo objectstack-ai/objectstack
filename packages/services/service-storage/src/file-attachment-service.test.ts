@@ -724,7 +724,7 @@ describe('attachUploadAs: a member attaches their own pending browser upload, an
     const others = await seedUpload(ql, storage, { id: 'upl_bob', owner: BOB.userId });
     const a = await refusalOf(asCaller(attachments).attachUploadAs(target(others), ALICE as never));
     const b = await refusalOf(asCaller(attachments).attachUploadAs(target('upl_nowhere'), ALICE as never));
-    expect([b.code, b.status, b.message]).toEqual([a.code, a.status, a.message]);
+    expect([b.code, b.status, (b as Error).message]).toEqual([a.code, a.status, (a as Error).message]);
     expect(await rows(ql, 'sys_attachment')).toEqual([]);
   });
 
@@ -739,7 +739,7 @@ describe('attachUploadAs: a member attaches their own pending browser upload, an
   it('control: a pending upload something already holds is refused RESOURCE_CONFLICT / 409, and no second attachment is written', async () => {
     const { ql, attachments, storage } = await bootMember();
     const fileId = await seedUpload(ql, storage);
-    await ql.insert('sys_attachment', { parent_object: 'att_case', parent_id: 'case_global', file_id: fileId, file_name: 'n.txt' }, SYS);
+    await ql.insert('sys_attachment', { parent_object: 'att_case', parent_id: 'case_a', file_id: fileId, file_name: 'n.txt', organization_id: 'org_a' }, SYS);
     const err = await refusalOf(asCaller(attachments).attachUploadAs(target(fileId), ALICE as never));
     expect(answer(err)).toEqual({ code: 'RESOURCE_CONFLICT', status: 409 });
     expect(await rows(ql, 'sys_attachment')).toHaveLength(1);
