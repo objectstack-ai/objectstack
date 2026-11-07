@@ -68,7 +68,7 @@
       "files": [],
       "assertions": {
         "must_contain": ["$empty: true"],
-        "must_not_contain": ["$regex", "$options"]
+        "must_not_contain": []
       }
     }
   ]

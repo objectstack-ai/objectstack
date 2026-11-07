@@ -126,7 +126,7 @@ installed the project, copy it:
 ```bash
 npx skills remove objectstack-ai objectstack-api objectstack-automation \
   objectstack-data objectstack-formula objectstack-i18n objectstack-platform \
-  objectstack-pm-dispatch objectstack-query objectstack-ui objectstack-upgrade -y
+  objectstack-pm-dispatch objectstack-query objectstack-ui objectstack-upgrade objectui -y
 pnpm add -D "@objectstack/skills@$(node -p "require('@objectstack/spec/package.json').version")"
 #   npm: npm install --save-dev "@objectstack/skills@…"   ·   yarn: yarn add -D "@objectstack/skills@…"
 npx skills@1.7.2 experimental_sync --agent claude-code --copy -y

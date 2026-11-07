@@ -14,5 +14,5 @@ Metadata-protocol: none
 - Every complete `ObjectSchema.create` example in `relationships.md`, `lifecycle.md` and `datasources.md` authors `sharingModel`, because a publish without one is refused with `security-owd-unset`. Master-detail children use `controlled_by_parent`, and the read-only external object uses `public_read`.
 - `indexing.md`: the tenant column is `organization_id`, injected by `systemFields.tenant`, not an authored `tenant_id`.
 - `objectstack-query`: teaches `$empty`, the is-empty-by-declared-type operator that the view filters `is_empty` / `is_not_empty` lower to.
-- `objectstack-upgrade`: the `skills remove` roster says `objectstack-pm-dispatch` is not in the 18 catalog.
+- `objectstack-upgrade`: the `skills remove` roster also removes a 17.x `objectui` install (sourced from `objectstack-ai/objectui`), and says `objectstack-pm-dispatch` is not in the 18 catalog.
 - New eval cases cover the authored `sharingModel`, the `organization_id` tenant index and `$empty`. The touched files stay inside their token ceilings by removing restatements in the same files. No schema, key or behaviour changes.

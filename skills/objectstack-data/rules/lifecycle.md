@@ -101,7 +101,7 @@ lifecycle: { class: 'telemetry' }
 // ❌ Policies on record-class — business truth is permanent
 lifecycle: { class: 'record', retention: { maxAge: '30d' } }
 
-// ❌ Archive window detached from the hot window
+// ❌ archive.after must equal retention.maxAge
 lifecycle: { class: 'audit', retention: { maxAge: '90d' }, archive: { after: '30d', to: 'archive' } }
 
 // ❌ Free-form durations

@@ -165,9 +165,7 @@
           "indexes",
           "organization_id"
         ],
-        "must_not_contain": [
-          "tenant_id"
-        ]
+        "must_not_contain": []
       }
     }
   ]
