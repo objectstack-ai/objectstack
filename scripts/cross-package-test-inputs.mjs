@@ -355,7 +355,13 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
     // hints: the case flipped from true to false with the added glob itself as
     // the covering hint. ⇒ Extensions and glob widen together or not at all,
     // and that pin's header carries the measurement of what the boundary costs.
-    globs: ['packages/**/*.ts'],
+    //
+    // src/security/vouched-reference-callers.pin.test.ts runs the census gate
+    // of the vouched-reference mark, a root script, with `--ts-only`: the same
+    // `packages/` `.ts` surface as this glob. The census's other extensions,
+    // and its `examples/` and `apps/` roots, are judged by its bare run in the
+    // lint step, never by this pin.
+    globs: ['packages/**/*.ts', 'scripts/check-vouch-for-reference-callers.mjs'],
   },
   '@objectstack/types': {
     // src/driver-error-classification.callers.test.ts is the #13440 gate: it

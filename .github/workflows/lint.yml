@@ -2550,10 +2550,20 @@ jobs:
       # @objectstack/core). Guards against a duplicate resolver copy drifting on a
       # security path (the REST-vs-dispatcher sys_user_role drift) and against an
       # entry point silently dropping the delegation.
+      #
+      # The second command is the same kind of guard on the write-time reference
+      # check: the code that may set the vouched-reference mark (a service verb
+      # vouching, on its own write, for the one record it proved) is pinned to an
+      # allowlist, so a new caller is a reviewed edit and never a quiet one. Its
+      # alias runs the census's `--self-test` first, which is what
+      # `check:self-test-wired` requires. Folded into this step rather than a step
+      # of its own: no new check context and no new required-status entry.
       - name: Single authz resolver guard
         id: single-authz-resolver-guard
         continue-on-error: true
-        run: pnpm check:authz-resolver
+        run: |
+          pnpm check:authz-resolver
+          pnpm check:vouch-for-reference-callers
 
       # #11352. Product code may not read a test-RUNNER variable (`TEST`,
       # `VITEST*`, `JEST_WORKER_ID`). Runner variables are INHERITED by every
