@@ -283,10 +283,15 @@ The key's full contract is in the [Field reference](/docs/references/data/field)
 `reference` is **enforced on write**. A create or update that sets a
 `lookup` / `master_detail` to an id with no matching row in the target object is
 rejected with `400 VALIDATION_FAILED` and a `fields[]` entry whose `code` is
-`reference_not_found` (see the [error catalog](/docs/api/error-catalog)). The
+`reference_not_found` (see the [error catalog](/docs/api/error-catalog)). A
+write that is not a system write may name, in a `lookup`, `master_detail` or
+`user` field, only a record its caller can read: one the caller cannot read is
+rejected the same way, before the record's validation rules run. The
 same check runs on bulk updates. An update judges only the references it adds: a
 value the row already stores, carried back unchanged, is not judged again, so a
 deleted user's id left in a `user` field does not block later edits of the record.
+That comparison reads only stored values the caller may read: in a column the
+caller may edit but not read, every value is judged as new.
 
 Clearing a relationship is not a dangling reference: `null`, `""` and `[]` all mean
 "no link". Which of them `deleteBehavior: 'set_null'` writes when the referenced
@@ -371,6 +376,17 @@ decision that governs the write is the one on the **child**. The parent's own
 row is unaffected — a user still needs edit access to change any other field on
 it — and the summary column stays subject to the parent's field-level security
 on read.
+So a permission set that cannot read the aggregated child field, a child field
+the roll-up's `filter` tests, or the child object (whether through its object
+grant, its field entries or a `requiredPermissions` capability it does not hold),
+or that reads only some child rows, still reads the roll-up; `os lint`,
+`os validate` and `os build` tell you about each such set
+(the `security-rollup-source-unreadable` warning, and the `security-rollup-source-row-scoped`
+note — see [the one gate, four doors](/docs/deployment/validating-metadata#the-one-gate-four-doors)).
+If the value should not be visible, set `readable: false` on the summary field in
+that set: it hides the field from every holder of the set, and another set they
+hold with no entry for the field does not restore it, so declare `readable: true`
+on the field in the sets whose holders should keep it.
 
 A child validation rule can read a parent summary one hop through its
 reference, for example "each supplier has at most one primary contact" as a

@@ -42,6 +42,11 @@ import {
   // cannot apply by the same verdict those doors refuse it by.
   fieldPatchTargetMisses,
   type FieldPatchTargetMiss,
+  // [ADR-0146 D3 · ruling record 6691022506] The pair of a package, looked up
+  // through the App that carries it — the uninstall refusal's "is its pair
+  // installed?" asks it, over this registry's installed manifests.
+  pairOf,
+  installedManifestsOf,
 } from '@objectstack/metadata-core';
 // [ADR-0029 D9.2a] `scalarOverridesPackagedBase` is the #8284 comparison, imported rather
 // than re-spelled: the object FOLD asks the same question one layer down (has
@@ -51,7 +56,7 @@ import { SystemFieldName, scalarOverridesPackagedBase } from '@objectstack/spec/
 import { resolveTenancyPosture, resolveSearchPinyinEnabled } from '@objectstack/types';
 import { postureEnforcesWall } from '@objectstack/spec/security';
 import { provisionSearchCompanion, SEARCH_COMPANION_FIELD } from './search-companion.js';
-import { ObjectStackManifest, ManifestSchema, InstalledPackage, InstalledPackageSchema, InstalledPackageSourceSchema, type InstalledPackageSource, checkFieldCompleteness, customizationPackageId } from '@objectstack/spec/kernel';
+import { ObjectStackManifest, ManifestSchema, InstalledPackage, InstalledPackageSchema, InstalledPackageSourceSchema, type InstalledPackageSource, checkFieldCompleteness } from '@objectstack/spec/kernel';
 import { DEFAULT_FLOW_FUNCTION_EFFECT } from '@objectstack/spec/automation';
 import { AppSchema, ActionSchema } from '@objectstack/spec/ui';
 import { applyProtection } from '@objectstack/spec/shared';
@@ -748,10 +753,18 @@ type ServedObjectLayer = 'served' | 'code';
  *
  * Both may be given; a contribution either one leaves out is left out. The
  * base layer (`own` / `overlay`) is never left out.
+ *
+ * [#30756] `asEnabled` asks the opposite question of a DISABLED package: the
+ * fold as it will serve once that package is enabled, its `extend`
+ * contributions folded in instead of withheld ({@link SchemaRegistry.withholdDisabledExtensions}).
+ * Every other disabled package's stay withheld. The enable door's pre-check
+ * reads it, as the disable door's reads `withoutExtensionsOf`; for a package
+ * that is not disabled it changes nothing.
  */
 export interface ObjectExtensionFoldOptions {
   withoutExtensionsOf?: string;
   onlyExtensionsOf?: string;
+  asEnabled?: string;
 }
 
 /** Whether `options` leaves any contribution out (otherwise the fold is the ordinary one). */
@@ -3324,7 +3337,7 @@ const EXTENDED_OBJECTS_LISTED = 5;
  *
  * [#28408, ADR-0146 D3] …and the uninstall refusal of a base whose paired
  * customization package is installed: `<base>.custom`, the id
- * {@link customizationPackageId} derives, held by this registry. That package
+ * {@link pairOf} looks up, held by this registry. That package
  * holds every customization of the base, so uninstalling the base under it
  * would strand them all, with nothing serving them and nothing saying why.
  * ADR-0146 puts this refusal in this family and this shape, so it is this
@@ -5275,9 +5288,15 @@ export class SchemaRegistry {
    *
    * `undefined` when no extension of the object is withheld, so the ordinary
    * fold runs unchanged.
+   *
+   * [#30756] `asEnabled` names a package whose contributions are kept although
+   * it is disabled: the fold the enable of that package would leave
+   * ({@link ObjectExtensionFoldOptions}).
    */
-  private withholdDisabledExtensions(contributors: readonly ObjectContributor[]): WithheldExtensions | undefined {
-    const withheld = contributors.filter((c) => c.ownership === 'extend' && this.isPackageDisabled(c.packageId));
+  private withholdDisabledExtensions(contributors: readonly ObjectContributor[], asEnabled?: string): WithheldExtensions | undefined {
+    const withheld = contributors.filter((c) => c.ownership === 'extend'
+      && this.isPackageDisabled(c.packageId)
+      && (asEnabled === undefined || c.packageId !== asEnabled));
     if (withheld.length === 0) return undefined;
     const kept = contributors.filter((c) => !withheld.includes(c));
     const owner = contributors.find((c) => c.ownership === 'own')?.definition;
@@ -5319,14 +5338,21 @@ export class SchemaRegistry {
    * patches travel twice, the second time as if the owner shipped them.
    */
   private resolveObjectLeavingExtensionsOut(fqn: string, options: ObjectExtensionFoldOptions | undefined): ServiceObject | undefined {
-    const contributors = leavesExtensionsOut(options) ? this.objectContributors.get(fqn) : undefined;
-    if (!contributors || !contributors.some((c) => isLeftOutExtension(c, options!))) return this.resolveObject(fqn);
+    // [#30756] A disabled package folded in as if enabled; one that is not
+    // disabled changes nothing, so it does not leave the cached fold.
+    const asEnabled = options?.asEnabled !== undefined && this.isPackageDisabled(options.asEnabled)
+      ? options.asEnabled
+      : undefined;
+    const contributors = leavesExtensionsOut(options) || asEnabled !== undefined ? this.objectContributors.get(fqn) : undefined;
+    if (!contributors || !contributors.some((c) => isLeftOutExtension(c, options!)
+      || (asEnabled !== undefined && c.ownership === 'extend' && c.packageId === asEnabled))) return this.resolveObject(fqn);
     const kept = contributors.filter((c) => !isLeftOutExtension(c, options!));
     const ownerContrib = kept.find(c => c.ownership === 'own');
     if (!ownerContrib) return undefined;
     const base = kept.find(c => c.ownership === 'overlay') ?? ownerContrib;
-    // …and a disabled package's, as on every served fold ({@link withholdDisabledExtensions}).
-    const withheld = this.withholdDisabledExtensions(kept);
+    // …and a disabled package's, as on every served fold ({@link withholdDisabledExtensions}),
+    // except the one `asEnabled` names.
+    const withheld = this.withholdDisabledExtensions(kept, asEnabled);
     return withheld
       ? this.foldExtendersOntoDefinition(withheld.kept, withoutWithheldMembers(base.definition, withheld))
       : this.foldExtenders(kept, base);
@@ -7277,7 +7303,7 @@ export class SchemaRegistry {
    *
    * [#28408, ADR-0146 D3] It also refuses while this registry holds the
    * package's paired customization package — the id
-   * {@link customizationPackageId} derives from `packageId`, so the pair is
+   * {@link pairOf} looks up for `packageId`, so the pair is
    * found by id alone, whichever door created or installed it. The same
    * refusal, carrying both causes when both hold. Uninstalling the pair itself
    * asks nothing of this kind: a `.custom` id derives no pair of its own. An
@@ -7308,7 +7334,7 @@ export class SchemaRegistry {
         extended.push({ objectName: fqn, extenders: otherExtenders.map(c => String(c.packageId)) });
       }
     }
-    const pair = customizationPackageId(packageId);
+    const pair = pairOf(packageId, installedManifestsOf(this));
     const installedPair = pair.ok && this.getPackage(pair.value) !== undefined ? pair.value : undefined;
     if (extended.length > 0 || installedPair !== undefined) {
       throw new PackageUninstallExtendedError(packageId, extended, installedPair);

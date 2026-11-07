@@ -632,6 +632,11 @@ export type {
 export { parseLifecycleDuration } from './lifecycle/duration.js';
 // [#30237, ADR-0148 D3] What a host hands `ObjectQLPlugin`'s `recycleBinRetention`.
 export type { RecycleBinRetentionSettings } from './recycle-bin/retention.js';
+export type { RecycleBinRemovalOptions } from './recycle-bin/purge.js';
+// [ADR-0148 D3, ruling A recorded in 6691358077] The one refusal of an
+// app-authored permanent delete: the engine applies it to an app-authored
+// hook's api, and the runtime's sandbox to every body's.
+export { refuseAppAuthoredPermanentDelete } from './recycle-bin/app-authored-delete.js';
 export { lifecycleSettingsManifest } from './lifecycle/lifecycle-settings.js';
 
 // [#4551] Read-only referential-integrity audit — the reporting half of the

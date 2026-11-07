@@ -63,7 +63,7 @@ model: opus
    - 写预算三笔:`git push`、`pr_create`(draft,含 labels 与 assignees)、`os-dev-report` 评论。
    - 卡与线程只走 payload 档(公开仓单卡网页内嵌 JSON,拼写住 platform-readings)或单卡 REST 读。
    - 三类发现进报告交席位代立,不 `POST /issues`、⛔ 不静默弃报;PM 去重读数当既有事实用。
-   - PR 正文 dev 只写一次,在开 PR 那一笔,⛔ 不 `PATCH`;事后要改的报告点名改法,席位代写。
+   - PR 正文 dev 只在 `pr_create` 写,⛔ 不 `PATCH`;改法报告点名,席位经 `seat-post-protocol.md` 代写。
    - 报告记 `api_writes`(次数 + 端点清单)与 `mcp_calls`;越界真写了的照列注明缘由,⛔ 不漏记。
    - 归挂不散落:落在已排队 issue 范围内的发现,报告点名为它的 sub-issue(自动进派发池)。
    - 只是依赖它的,报告点名独立单带 `Blocked-by:` 行;立在修复落地的仓,带回链;席位代立。

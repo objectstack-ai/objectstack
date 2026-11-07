@@ -37,6 +37,7 @@ export const arObjects: NonNullable<TranslationData['objects']> = {
           account_locked: "الحساب مقفل",
           config_change: "تغيير الإعدادات",
           import: "استيراد",
+          export: "تصدير",
           platform_admin_standing_change: "تغيير صلاحية مسؤول المنصّة",
           action_invocation: "استدعاء إجراء"
         }

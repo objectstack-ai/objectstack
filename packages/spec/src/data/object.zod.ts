@@ -4492,12 +4492,13 @@ function assertReferenceViaSiblingDeclared(objectName: unknown, fields: unknown)
  * {@link assertSystemDataIsWritable}, and deliberately NOT in raw
  * `.parse()`/`.safeParse()`: a parse must not rewrite what it reads. The force
  * is the builder's convenience, not the rule: the RULE — exactly one required
- * `master_detail` under this sharing model — is judged on the parse itself by
- * {@link refuseControlledByParentWithoutOneMaster} (#23100, maintainer ruling
- * B), so a raw parse of a `master_detail` without `required: true` is refused
- * rather than forced, and the security gate's fallbacks this paragraph used to
- * call "runtime tolerance" (any `master_detail`, then a required `lookup`) are
- * retired.
+ * `master_detail` under this sharing model, or (ADR-0055 §1 as amended,
+ * #30905 ruling A) its only `master_detail` as the optional master — is judged
+ * on the parse itself by {@link refuseControlledByParentWithoutOneMaster}
+ * (#23100, maintainer ruling B), so a raw parse is never forced (it reads an
+ * omitted `required` after its `false` default), and the security gate's
+ * fallbacks this paragraph used to call "runtime tolerance" (any
+ * `master_detail`, then a required `lookup`) are retired.
  *
  * Alias spellings (`isRequired` / `mandatory` / `notNull`) need no handling
  * here: `FieldSchema` is a `strictObject`, so those keys are refused at parse

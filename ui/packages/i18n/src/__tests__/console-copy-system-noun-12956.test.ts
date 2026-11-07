@@ -51,7 +51,7 @@ function strings(node: unknown, path: string, out: Array<[string, string]> = [])
 }
 
 describe('console copy names the system the user is in, not the cloud noun (objectui#12956)', () => {
-  const zh = builtInLocales.zh as unknown;
+  const zh = builtInLocales['zh-Hans'] as unknown;
 
   it.each(FAMILIES)('zh %s carries no 此环境 / 本环境 / 该环境', (family) => {
     const entries = strings(resolve(zh, family), family);

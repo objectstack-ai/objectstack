@@ -5546,12 +5546,12 @@
       "title": "A validation rule reads a parent field one hop through a lookup",
       "since": "v17",
       "status": "active",
-      "revision": 6,
+      "revision": 7,
       "priority": "P1",
       "surface": "api",
       "personas": [
         "seeded admin (admin@objectos.ai / admin123)",
-        "a member with create/edit on a child object and NO read on its lookup parent — the persona the rule exists to constrain. ⚠ No stock showcase persona is one (fixtures.knownGaps): acceptance[3] is scored from the engine pin or on a scratch pair"
+        "a member with create/edit on a child object and NO read on its lookup parent — who may not name that parent at all: a non-system write may name, in a lookup, only a record the caller's own read door returns. ⚠ No stock showcase persona is one (fixtures.knownGaps): acceptance[3] is scored on a scratch pair"
       ],
       "fixtures": {
         "app": "showcase",
@@ -5561,14 +5561,14 @@
           "at least one churned account and one non-churned account to invoice against"
         ],
         "knownGaps": [
-          "No stock persona has showcase_invoice CRUD WITHOUT showcase_account read, and none can be made from the stock showcase objects: showcase_member_default, the everyone baseline every member holds, grants showcase_account allowRead (examples/app-showcase/src/security/permission-sets.ts), and permission sets only ever ADD grants, so no extra set takes it away (QA run #21720, parked on #22017 row 14). An earlier revision of this item said the opposite, reading packages/qa/dogfood/test/showcase-d3-d4-capabilities.dogfood.test.ts. That test's persona is its own injected fallback set, not a stock persona, and it never writes against a churned account. So acceptance[3] is scored from the ENGINE pin in `automated`, which proves the mechanism the clause rests on: the related row is read under SYSTEM authority with the acting identity carried, and the write path accepts and refuses by the parent field. Or it is scored live on the scratch substitute #21720 measured, which is runtime-only on a stock boot (QA run #27438 built and drove it at c4c515ad): POST /api/v1/packages with a declared namespace; PUT /api/v1/meta/object for a parent object, and for a child object carrying a one-hop script validation over its lookup to the parent; PUT /api/v1/meta/permission for a set granting the member the CHILD only, bound with POST /api/v1/data/sys_user_permission_set; then, as that member, write against a tripping and a non-tripping parent. The control is the member's GET of a parent row, which must answer 403: without it the leg proves nothing about an unreadable parent"
+          "No stock persona has showcase_invoice CRUD WITHOUT showcase_account read, and none can be made from the stock showcase objects: showcase_member_default, the everyone baseline every member holds, grants showcase_account allowRead (examples/app-showcase/src/security/permission-sets.ts), and permission sets only ever ADD grants, so no extra set takes it away (QA run #21720, parked on #22017 row 14). An earlier revision of this item said the opposite, reading packages/qa/dogfood/test/showcase-d3-d4-capabilities.dogfood.test.ts. That test's persona is its own injected fallback set, not a stock persona, and it never writes against a churned account. So acceptance[3] is scored on a scratch pair: the dogfood pin in `automated` builds one at boot, or it is scored live on the scratch substitute #21720 measured, which is runtime-only on a stock boot (QA run #27438 built and drove it at c4c515ad): POST /api/v1/packages with a declared namespace; PUT /api/v1/meta/object for a parent object, and for a child object carrying a one-hop script validation over its lookup to the parent; PUT /api/v1/meta/permission for a set granting the member the CHILD only, bound with POST /api/v1/data/sys_user_permission_set; then, as that member, write naming a parent row. The control is the member's GET of a parent row, which must answer 403: without it the leg proves nothing about an unreadable parent"
         ]
       },
       "steps": [
         "POST /api/v1/data/showcase_invoice with `account` pointing at a NON-churned account",
         "POST /api/v1/data/showcase_invoice with `account` pointing at a CHURNED account",
         "PATCH an existing invoice to REPOINT it at a churned account (the update path reads the FK off the merged record, not the patch alone)",
-        "as a persona with NO read on the parent (none exists on stock — fixtures.knownGaps): run the engine pin, or on the scratch substitute write against a non-tripping parent, then a tripping one"
+        "as a member with NO read on the parent (none exists on stock — fixtures.knownGaps), on the scratch pair: write naming a parent row"
       ],
       "acceptance": [
         {
@@ -5590,23 +5590,23 @@
           "evidence": "the patch response"
         },
         {
-          "clause": "a rule whose parent the acting user cannot read still ENFORCES, and still lets a legitimate write through — the read is system-authority, bounded by the fields the predicate names",
+          "clause": "a member who cannot read the parent cannot name it: the write answers reference_not_found on the lookup, before the record's validation rules",
           "oracle": "api",
-          "verify": "on stock showcase no such persona exists (fixtures.knownGaps), so score this from the engine pin in `automated` or live on the scratch substitute. The engine-pin verdict is a layer exception this item declares (fixtures.knownGaps), not a RUNNER rule 6 pass of this api clause: the run record says the verdict rests on the engine layer. With such a persona, the non-churned write is 2xx and the churned write is 400 carrying the AUTHORED message; an unevaluable-rule envelope for this persona is the defect this clause exists to catch, and so is a 2xx on the churned account",
-          "evidence": "both responses for the restricted persona"
+          "verify": "on stock showcase no such persona exists (fixtures.knownGaps), so score this on the scratch pair. For the member who cannot read the parent, the write naming it is 400 VALIDATION_FAILED with exactly one fields[] entry, { field: <the lookup>, code: 'reference_not_found' } — the answer for a parent that exists nowhere — and nothing is stored. The answer carries neither the rule's authored message nor the unevaluable-rule fault, and the member's own GET of the parent answers 403 (the control)",
+          "evidence": "the restricted persona's responses"
         }
       ],
       "negative": [
         "a 2xx on the churned-account create is a FAIL — the rule did not run",
         "a rejection whose text is the unevaluable-rule fault on the READABLE-parent cases is a FAIL: the related row was not preloaded and the rule is rejecting every write, which is the pre-capability behaviour",
-        "a 400 unevaluable-rule envelope for the persona who cannot read the parent is a FAIL: it means the related read was not system-authority, and the rule cannot be authored for the persona it exists to constrain. A 2xx on the CHURNED account is also a FAIL — the rule did not enforce"
+        "for the member who cannot read the parent, a 2xx is a FAIL — it named a record it cannot read — and so is a refusal carrying the rule's authored message or the unevaluable-rule fault instead of the lookup's reference_not_found: the write answered for a parent its caller cannot read"
       ],
       "traps": [
         "seed-data-thin"
       ],
       "automated": {
         "kind": "dogfood",
-        "ref": "packages/qa/dogfood/test/predicate-relationship-traversal.dogfood.test.ts, at the REST data door of a booted stack: on the showcase as shipped, acceptance[0] (an invoice on an active account is 2xx and reads back, no unevaluable fault), acceptance[1] and negative[0] (an invoice on a churned account is 400 VALIDATION_FAILED with one _record rule_violation entry carrying the authored message, and nothing is stored), acceptance[2] (a PATCH carrying only the repointed account is refused and the stored account is unchanged) and negative[1] (no readable-parent case answers the unevaluable fault); on a scratch pair, acceptance[3] and negative[2] for the persona no stock showcase persona is (fixtures.knownGaps): a member with create/edit on the child and no grant on the parent, whose parent read is the control (403 PERMISSION_DENIED), writes 2xx against a non-tripping parent and 400 with the authored message against a tripping one. packages/objectql/src/engine-predicate-relationship.test.ts stays engine-layer evidence of the mechanism ('reads the related row under SYSTEM authority' and its two siblings)"
+        "ref": "packages/qa/dogfood/test/predicate-relationship-traversal.dogfood.test.ts, at the REST data door of a booted stack: on the showcase as shipped, acceptance[0] (an invoice on an active account is 2xx and reads back, no unevaluable fault), acceptance[1] and negative[0] (an invoice on a churned account is 400 VALIDATION_FAILED with one _record rule_violation entry carrying the authored message, and nothing is stored), acceptance[2] (a PATCH carrying only the repointed account is refused and the stored account is unchanged) and negative[1] (no readable-parent case answers the unevaluable fault); on a scratch pair, acceptance[3] and negative[2] for a member no stock showcase persona is (fixtures.knownGaps): a member with create/edit on the child and no grant on the parent, whose parent read is the control (403 PERMISSION_DENIED), is answered 400 VALIDATION_FAILED with the lookup's reference_not_found, before the record's validation rules, and nothing is stored. packages/objectql/src/engine-predicate-relationship.test.ts stays engine-layer evidence of the mechanism ('reads the related row under SYSTEM authority' and its two siblings)"
       },
       "source": [
         "examples/app-showcase/src/data/objects/invoice.object.ts (no_invoice_for_churned_account)",
@@ -5649,6 +5649,12 @@
           "date": "2026-10-31",
           "change": "fixtures.knownGaps[0] no longer says the restricted persona cannot be provisioned. From QA run #27438 (W3-C2b, at c4c515ad; wave anchor #27377, wave-3 accuracy slice S1). It still holds that no STOCK persona has invoice CRUD without account read. But the scratch substitute is runtime-only on a stock boot: the run installed a package, authored a parent and a child (a one-hop script validation on the child), granted the member the child alone and bound the set, with the member's 403 on a parent read as the control. The gap now spells that sequence and the control. acceptance[3] keeps both of its routes (the engine pin, or the live substitute); no clause changed",
           "ref": "#27438"
+        },
+        {
+          "revision": 7,
+          "date": "2026-11-05",
+          "change": "the persona that wrote a child without reading its lookup parent is retired: a non-system write may name, in a lookup or user field, only a record the caller's own read door returns, and that reference check runs before the record's validation rules (ruling records 6573561091 and 6663849489). acceptance[3], its verify, negative[2], step 4, the second persona and automated.ref now state that rule: the member who cannot read the parent is answered reference_not_found, before the record's validation rules. acceptance[0]–[2] are unchanged",
+          "ref": "#29029"
         }
       ]
     },

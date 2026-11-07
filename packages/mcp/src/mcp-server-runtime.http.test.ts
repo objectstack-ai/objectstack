@@ -97,6 +97,7 @@ describe('MCPServerRuntime.handleHttpRequest (Streamable HTTP)', () => {
       [
         'create_record',
         'delete_record',
+        'delete_records',
         'describe_object',
         'get_record',
         'list_objects',

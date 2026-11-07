@@ -54,6 +54,11 @@
  * onto its function (`--hand-docs` of `scripts/codemod-split-engine.mjs`),
  * and the class keeps none for it; a public or protected method's docblock
  * stays on the class, the contract, and its function keeps the placeholder.
+ *
+ * One body was written here rather than moved: `priorMasterIdsCallerReads`,
+ * the stored master an update's pre-check reads, as the caller's read door
+ * serves the FK. Its private method on the class is a delegation of the same
+ * shape.
  */
 
 import { referenceTargetOf } from '@objectstack/spec/data';
@@ -70,6 +75,7 @@ import type { RelatedFieldBinding, RelatedRecordBinding } from './validation/rul
 import { resolveMasterDetailRelation } from './master-detail.js';
 import { isFederatedObject } from './federated-object.js';
 import { masterIdOf, servedAsStored, staticReadonlyStoredView, undeclaredRelatedFields } from './engine.js';
+import { storedReferencesCallerReads } from './engine-referential-integrity.js';
 import type { ObjectQL } from './engine.js';
 
 /**
@@ -248,6 +254,14 @@ export async function settleMasterDetailLanding<H>(
  * merged with the patch on an update, so the patch's FK wins over the stored
  * one; `storedRows[i]` names the header a repoint leaves.
  *
+ * ⛔ `storedRows[i]` holds only the columns the read door served this caller
+ * as stored, so a stored FK it was not served is absent there. When the patch
+ * names the FK over such a row, the header the row leaves is UNKNOWN to this
+ * caller, and `previousParents[i]` is `null`, the unresolved header — the one
+ * fixed binding the write gives it ({@link priorMasterIdsCallerReads}), so the
+ * pre-check's verdict is the write's and never depends on what the column
+ * holds. A patch that does not name the FK reads no second header.
+ *
  * ## Read under the caller's access, not elevated
  *
  * A header read elevated here would answer a predicate over a row the caller
@@ -290,6 +304,13 @@ export async function resolvePreviewParents(
   const priorIds = storedRows.map((stored) => (rel && stored ? masterIdOf(rel.fk, null, stored) : undefined));
   // The write resolves a second header only for a repoint (`repointsMaster`).
   const repoints = priorIds.map((prior, i) => prior != null && landingIds[i] !== prior);
+  // The patch names the FK over a stored row whose FK this caller was not
+  // served as stored: the prior header is unknown, as the write binds it.
+  const priorUnknown = storedRows.map((stored, i) => {
+    const view = views[i];
+    return rel != null && stored != null && !Object.prototype.hasOwnProperty.call(stored, rel.fk)
+      && view != null && typeof view === 'object' && rel.fk in view;
+  });
   const ids = new Set<string>();
   landingIds.forEach((id) => { if (id != null) ids.add(String(id)); });
   priorIds.forEach((id, i) => { if (repoints[i]) ids.add(String(id)); });
@@ -334,8 +355,48 @@ export async function resolvePreviewParents(
   const headerOf = (id: string | number | undefined) => (id == null ? null : (headers.get(String(id)) ?? null));
   return {
     parents: landingIds.map(headerOf),
-    previousParents: priorIds.map((id, i) => (repoints[i] ? headerOf(id) : undefined)),
+    previousParents: priorIds.map((id, i) => (priorUnknown[i] ? null : repoints[i] ? headerOf(id) : undefined)),
   };
+}
+
+/**
+ * The master each of an update's stored rows hangs off, as THIS caller's own
+ * read door serves the master-detail FK: the header the ADR-0113 pre-check of
+ * a parent-scoped `requiredWhen` reads as `previousParent` when the write
+ * names the FK.
+ *
+ * `{ id }` for a row whose FK the read door serves this caller exactly as
+ * stored ({@link storedReferencesCallerReads}, the update's one projection of
+ * stored rows onto the caller's read): `id` is the stored master, or
+ * `undefined` for a row that hangs off none. `null` for a row whose FK it does
+ * not — hidden, or served transformed, or a row the door does not return: the
+ * prior master is UNKNOWN to this caller, and the write binds one fixed header
+ * for it, the unresolved one, so neither whether the pre-check reads a second
+ * header nor which one it reads depends on what the column holds. A SYSTEM
+ * caller is answered from the rows as stored, as before.
+ *
+ * A stored row that carries no FK key at all is read as holding no master, as
+ * `masterIdOf` reads it: the key is spelled out as empty before the
+ * projection, so a system caller's answer for it is `{ id: undefined }`.
+ */
+export async function priorMasterIdsCallerReads(
+  this: Pick<MasterDetailRelatedHost, 'find' | 'logger'>,
+  schema: unknown,
+  rows: ReadonlyArray<Record<string, unknown> | null | undefined>,
+  context: ExecutionContext | undefined,
+): Promise<Array<{ readonly id: string | number | undefined } | null>> {
+  const rel = resolveMasterDetailRelation(schema as any);
+  if (!rel) return rows.map(() => null);
+  const stored = rows.map((row) => {
+    const own = row && typeof row === 'object' ? row : {};
+    return Object.prototype.hasOwnProperty.call(own, rel.fk) ? own : { ...own, [rel.fk]: undefined };
+  });
+  const served = await storedReferencesCallerReads.call(
+    this, (schema as { name?: unknown } | null | undefined)?.name, stored, [rel.fk], context,
+  );
+  return served.map((view) => (
+    view && Object.prototype.hasOwnProperty.call(view, rel.fk) ? { id: masterIdOf(rel.fk, null, view) } : null
+  ));
 }
 
 /**
@@ -354,11 +415,19 @@ export async function resolvePreviewParents(
  * The VALUES are read as SYSTEM: a validation rule's output is a pass/fail the
  * SYSTEM enforces, not data handed to the caller — categorically unlike an
  * access-control rule, which is why RLS predicates are excluded from this
- * capability altogether. Reading the columns as the acting user instead made
- * the rule unauthorable for exactly the persona it exists to constrain. What
- * bounds that elevation is the PROJECTION: only the columns the predicate
- * names, intersected with the related object's declared fields. ⛔ Never the
- * whole row.
+ * capability altogether. What bounds that elevation is the PROJECTION: only
+ * the columns the predicate names, intersected with the related object's
+ * declared fields. ⛔ Never the whole row.
+ *
+ * ⛔ No caller writes a row naming a related row it cannot read (#29029,
+ * ruling records 6573561091 and 6663849489). A non-system write may name, in
+ * a `master_detail`, `lookup` or `user` field, only a row the caller's own
+ * read door returns, and that reference check runs BEFORE the rules
+ * (`assertReferencesResolve`), so a rule never answers for a reference the
+ * caller supplied and cannot read: the write answers `reference_not_found`.
+ * The elevated value read therefore serves a related row the caller can read,
+ * a value the row already stores (#29062), a `tree` parent, and a system
+ * caller.
  *
  * Which ROWS a caller that is not SYSTEM may have read is a different
  * question, answered before any value is read:
@@ -375,8 +444,9 @@ export async function resolvePreviewParents(
  *    stored values, as the write judges it.
  *  - On a related object no organization wall scopes, the own read of the
  *    caller bounds the rows, and any other id is `unreadable`, stored or not.
- *  - ⛔ A plain `lookup` to a walled object keeps the tenant-kept elevated read
- *    alone: no ruling extends the header rule to it.
+ *  - A plain `lookup` to a walled object keeps the tenant-kept elevated read
+ *    alone HERE: a value the caller supplies and cannot read was already
+ *    refused by the reference check before this read is judged (above).
  *
  * A SYSTEM caller (seed replay, boot) asks no read door: the elevated read
  * alone, as before.
@@ -592,10 +662,12 @@ export async function resolveOneHopRelated(
       // A validation rule's output is a pass/fail the SYSTEM enforces, not
       // data handed to the caller — categorically unlike an access-control
       // rule, which is why RLS predicates are excluded from this capability
-      // altogether. Reading as the acting user instead made the rule
-      // unauthorable for exactly the persona it exists to constrain: a member
-      // with CRUD on the child and no read on the parent faulted on every
-      // write, so a legitimate business rule could not ship.
+      // altogether. [#29029] A reference the caller supplies and cannot read
+      // never reaches a rule: the write's reference check refuses it first
+      // (`reference_not_found`), so no caller writes a row naming a related
+      // row it cannot read. What this read still serves without a read door
+      // is a row the caller can read, a value the row already stores, and a
+      // system caller.
       //
       // What bounds the elevation is the PROJECTION: only the
       // columns this predicate names, intersected with the related object's
@@ -604,11 +676,12 @@ export async function resolveOneHopRelated(
       // The accepted cost, recorded so nobody widens it by accident: a caller
       // can INFER a value they cannot see by observing which writes refuse —
       // a column hidden from them on a row they may read, or a column of a
-      // row a plain `lookup` names on a walled object. The value itself never
-      // appears — not in the row handed to CEL beyond the predicate's own use
-      // of it, and not in the refusal text, which names the field and the
-      // rule and never the value. [#22892] ⛔ Never what a master-detail
-      // header the caller cannot read holds: the door below answers first.
+      // row a plain `lookup` the row already stores names on a walled object.
+      // The value itself never appears — not in the row handed to CEL beyond
+      // the predicate's own use of it, and not in the refusal text, which
+      // names the field and the rule and never the value. [#22892] ⛔ Never
+      // what a master-detail header the caller cannot read holds: the door
+      // below answers first.
       //
       // ⛔ No organization wall scopes a related object with no tenant column
       // (e.g. `sys_user`), `tenancy.enabled: false` or `external`, so for a

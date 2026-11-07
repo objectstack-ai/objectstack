@@ -150,6 +150,19 @@ import {
   type DiagnosedObjectListing,
 } from './metadata-completeness.js';
 import { staleSummaryRefusalOrThrow, withEarnedAnswer, type SummaryRecomputeRefusal } from '@objectstack/types';
+// [ADR-0106] Metadata-plane field-level security: the posture, its relation to
+// the fetched document and the projection every object-schema exit runs — the
+// REST `/meta` doors and the runtime dispatcher's included. Imported, never
+// restated, so this transport serves a caller the field set they serve.
+import {
+  ObjectSchemaMaskEvaluationError,
+  applyObjectSchemaMask,
+  isObjectSchemaMaskingEnabled,
+  relateObjectSchemaMaskPosture,
+  resolveObjectSchemaMaskPosture,
+  type ObjectSchemaMaskPosture,
+  type ObjectSchemaMaskSecuritySurface,
+} from '@objectstack/metadata-core';
 
 /**
  * [#25138] The object reads this transport asks of the `protocol` service,
@@ -203,6 +216,14 @@ export interface StdioDataBridgeDeps {
    * live session, and a bridge built once at boot would outlive it.
    */
   resolvePrincipal: () => Promise<ExecutionContext>;
+  /**
+   * [ADR-0106] The `security` service the object-schema mask asks for the
+   * principal's readable fields ({@link callerObjectView}), resolved at each
+   * use and `undefined` when this host registers none — the deployment then
+   * has no field-level posture, and the schema is served as declared, as on
+   * every other object-schema exit.
+   */
+  security?: () => ObjectSchemaMaskSecuritySurface | undefined;
   /**
    * [#21207] The registered crypto provider's keyed digest
    * (`ICryptoProvider.keyedDigest`, reached through the engine's
@@ -282,12 +303,17 @@ export const GATED_ACTIONS = {
  */
 const OBJECT_API_DISABLED = 'OBJECT_API_DISABLED';
 const OBJECT_API_METHOD_NOT_ALLOWED = 'OBJECT_API_METHOD_NOT_ALLOWED';
+/** [ADR-0106 D6 tier 3] The REST `/meta` object read's refusal code, for {@link fieldVisibilityRefusal}. */
+const FIELD_VISIBILITY_UNRESOLVED = 'FIELD_VISIBILITY_UNRESOLVED';
 
 /** An exposure refusal: an `Error` (so the tool layer reads `.message`) carrying the envelope. */
 export interface McpExposureError extends Error {
   /** ADR-0112 machine code. */
   code: string;
-  /** 404 (object hidden) or 405 (operation not in the whitelist). */
+  /**
+   * 404 (object hidden) or 405 (operation not in the whitelist); 503 for the
+   * object-schema reads' field-visibility refusal ({@link fieldVisibilityRefusal}).
+   */
   status: number;
   /** The effective operation set — present on a 405, as REST's `allowed` is. */
   allowedOperations?: string[];
@@ -424,6 +450,99 @@ export function stdioObjectView(reads: StdioObjectReads): McpObjectView {
       return merged !== undefined
         ? merged.find((o) => o?.name === name)
         : (((await reads.metadataService.getObject(name)) ?? undefined) as ObjectDef | undefined);
+    },
+  };
+}
+
+/** What {@link callerObjectView} needs: the principal it serves, and the service it asks. */
+export interface CallerObjectViewDeps {
+  /** This transport's principal, re-resolved per read ({@link StdioDataBridgeDeps.resolvePrincipal}). */
+  resolvePrincipal: () => Promise<ExecutionContext>;
+  /** The `security` service, resolved at each use ({@link StdioDataBridgeDeps.security}). */
+  security?: () => ObjectSchemaMaskSecuritySurface | undefined;
+}
+
+/**
+ * [ADR-0106 D1/D5] The refusal an object-schema read on this transport answers
+ * when the principal's field visibility could not be evaluated (D6 tier 3), or
+ * the projection would leave the object with no field: the code, status and
+ * sentence the REST `/meta` object read answers (`sendFieldVisibilityFault`).
+ * Never the unmasked schema, never an object with no fields.
+ */
+function fieldVisibilityRefusal(objectName: string): McpExposureError {
+  return exposureError(
+    `Field visibility for object '${objectName}' could not be evaluated; the object schema is not being served.`,
+    FIELD_VISIBILITY_UNRESOLVED,
+    503,
+  );
+}
+
+/** The D6 tier-2 notice (field visibility undetermined), said where this transport says its warnings. */
+const OBJECT_SCHEMA_MASK_TELEMETRY = {
+  warn: (message: string, meta: Record<string, unknown>) => {
+    console.warn(message, meta);
+  },
+};
+
+/**
+ * [ADR-0106 D1/D5] `view` as THIS transport's principal is served it: each
+ * object definition through the posture and projection every object-schema
+ * exit runs (`resolveObjectSchemaMaskPosture` → `relateObjectSchemaMaskPosture`
+ * → `applyObjectSchemaMask`, `@objectstack/metadata-core`), so a field the
+ * principal cannot read does not exist in `list_objects`, `describe_object`,
+ * `validate_expression` or the `objectstack://objects` resources either — the
+ * D1 invariant, on this plane as on `/meta`.
+ *
+ * The D4 exemptions, the D6 tiers and the D8 switch are the shared posture's,
+ * decided there and nowhere here. An unrestricted principal is handed each
+ * definition by reference, exactly as before. A posture that throws, or a
+ * projection that empties an object, refuses the read
+ * ({@link fieldVisibilityRefusal}); in a listing, one such object refuses the
+ * listing, as the `/meta` object list does.
+ *
+ * The principal is resolved once per read, before anything is served, so a
+ * key revoked mid-session stops being described objects on its next read
+ * (ADR-0101 D1) as it stops being served rows.
+ *
+ * Only the reads that SERVE a definition go through it. The data verbs' gates
+ * keep reading `view` whole: they serve none of it.
+ */
+export function callerObjectView(view: McpObjectView, deps: CallerObjectViewDeps): McpObjectView {
+  const servedToPrincipal = async (): Promise<(def: ObjectDef) => Promise<ObjectDef>> => {
+    const context = await deps.resolvePrincipal();
+    const security = deps.security?.();
+    const enabled = isObjectSchemaMaskingEnabled();
+    return async (def) => {
+      const objectName = String(def?.name ?? '');
+      let posture: ObjectSchemaMaskPosture;
+      try {
+        posture = await resolveObjectSchemaMaskPosture({
+          objectName,
+          context,
+          security,
+          enabled,
+          telemetry: OBJECT_SCHEMA_MASK_TELEMETRY,
+        });
+      } catch (error) {
+        if (error instanceof ObjectSchemaMaskEvaluationError) throw fieldVisibilityRefusal(objectName);
+        throw error;
+      }
+      const masked = applyObjectSchemaMask(def, await relateObjectSchemaMaskPosture(posture, def));
+      if (masked.emptied) throw fieldVisibilityRefusal(objectName);
+      return masked.document;
+    };
+  };
+  return {
+    async listObjects() {
+      const serve = await servedToPrincipal();
+      const served: ObjectDef[] = [];
+      for (const def of ((await view.listObjects()) ?? []) as ObjectDef[]) served.push(await serve(def));
+      return served;
+    },
+    async getObject(name) {
+      const serve = await servedToPrincipal();
+      const def = (await view.getObject(name)) as ObjectDef | undefined;
+      return def ? await serve(def) : def;
     },
   };
 }
@@ -946,17 +1065,22 @@ function enforceApiKeyManagementCredential(object: string, action: string): void
  * honoured rather than re-decided.
  */
 export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge {
-  const { engine, metadataService, protocol, resolvePrincipal, keyedDigest } = deps;
+  const { engine, metadataService, protocol, resolvePrincipal, keyedDigest, security } = deps;
   // [#25138] One definition source for the gate, the relation-target gate and
   // the write-response strip, and one listing for discovery.
   const reads: StdioObjectReads = { metadataService, protocol };
   // [#25245] …and that listing is the view the object resources read too.
   const objectView = stdioObjectView(reads);
+  // [ADR-0106 D1/D5] …served to the principal through the object-schema mask:
+  // the view discovery answers from. The gates below read `objectView` whole.
+  const servedView = callerObjectView(objectView, { resolvePrincipal, security });
 
   const bridge: McpDataBridge = {
     async listObjects(): Promise<McpObjectSummary[]> {
-      // [#25138] The protocol's merged listing ({@link readMergedObjects}).
-      return ((await objectView.listObjects()) as ObjectDef[]).map((o) => ({
+      // [#25138] The protocol's merged listing ({@link readMergedObjects}),
+      // [ADR-0106] as the principal is served it, so `fieldCount` counts the
+      // fields that exist for them ({@link callerObjectView}).
+      return ((await servedView.listObjects()) as ObjectDef[]).map((o) => ({
         name: o.name,
         label: o.label ?? o.name,
         fieldCount: o.fields ? Object.keys(o.fields).length : undefined,
@@ -983,8 +1107,9 @@ export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge 
     // ({@link readMergedObjects}), so every object an agent is listed it can
     // describe, and a name the listing omits (a disabled package's object among
     // them) is "not found" here too, as on the HTTP bridge.
+    // [ADR-0106 D1/D5] …as the principal is served it ({@link callerObjectView}).
     async describeObject(name: string): Promise<unknown | null> {
-      const def = (await objectView.getObject(name)) as ObjectDef | undefined;
+      const def = (await servedView.getObject(name)) as ObjectDef | undefined;
       if (!def) return null;
       const fields = def.fields ?? {};
       // The field list is an ARRAY here, not the stored map: `validate_expression`
@@ -1007,8 +1132,9 @@ export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge 
     // [#28715] From the object `describeObject` reads: the protocol's served
     // object, where a picklist-bound field carries its list's resolved
     // `options`, so the served-form predicate is the one that matches.
+    // [ADR-0106 D1] …the principal's object, so no field it cannot read is named.
     async optionFieldsOf(name: string): Promise<readonly string[] | null> {
-      const def = (await objectView.getObject(name)) as ObjectDef | undefined;
+      const def = (await servedView.getObject(name)) as ObjectDef | undefined;
       if (!def) return null;
       return Object.entries(def.fields ?? {})
         .filter(([, f]) => declaresOptions(f))

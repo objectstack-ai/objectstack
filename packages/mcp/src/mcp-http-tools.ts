@@ -50,7 +50,7 @@ import { StandardErrorCode, type ErrorCode } from '@objectstack/spec/api';
 // [#23701] The one key every door that translates the engine's unique-violation
 // envelope asks (the registered code AND the class name, never message text),
 // and the one classification whose arm states the wire code for it.
-import { earnedAnswerOf, isEngineDuplicateRecordEnvelope, staleSummaryAnswerLines, structuredCodeAnswer, type SummaryRecomputeRefusal } from '@objectstack/types';
+import { earnedAnswerOf, isEngineDuplicateRecordEnvelope, mapDataError, resolveQueryReadLimits, staleSummaryAnswerLines, structuredCodeAnswer, type SummaryRecomputeRefusal } from '@objectstack/types';
 import {
   MCP_OAUTH_SCOPE_DATA_READ,
   MCP_OAUTH_SCOPE_DATA_WRITE,
@@ -571,22 +571,419 @@ function recordDeleteConfirmationRefusal(
   objectName: string,
   recordId: string,
   request: AIActionConfirmation,
-): (ThrownRefusalEnvelope & { details: ActionConfirmationRequiredDetails }) | undefined {
-  // Only the boolean `true` attests; absent, `false` and a truthy string do not.
-  if (request[AI_ACTION_CONFIRMATION_MEMBER] === true) return undefined;
-  return {
-    code: ACTION_CONFIRMATION_REQUIRED,
-    message:
-      `delete_record on '${objectName}' record '${recordId}' carries no confirmation — nothing was deleted. `
+): DeleteConfirmationRefusal | undefined {
+  if (isDeleteConfirmed(request)) return undefined;
+  return deleteConfirmationRefusal(
+    DELETE_RECORD_TOOL,
+    objectName,
+    `delete_record on '${objectName}' record '${recordId}' carries no confirmation — nothing was deleted. `
       + 'A delete over MCP is permanent: confirm with the human in the loop, then retry this call with '
       + `'${AI_ACTION_CONFIRMATION_MEMBER}': true on the request.`,
+  );
+}
+
+/** The refusal both delete tools answer an unconfirmed call with: `run_action`'s, addressed to the tool. */
+type DeleteConfirmationRefusal = ThrownRefusalEnvelope & { details: ActionConfirmationRequiredDetails };
+
+/**
+ * Only the boolean `true` attests; absent, `false` and a truthy string do not.
+ * One predicate for `delete_record` and `delete_records`, so the one-row and
+ * the many-row delete cannot disagree about what a confirmation is.
+ */
+function isDeleteConfirmed(request: AIActionConfirmation): boolean {
+  return request[AI_ACTION_CONFIRMATION_MEMBER] === true;
+}
+
+/**
+ * The ONE builder of the delete tools' confirmation refusal: the code, status
+ * and `details` shape (`ActionConfirmationRequiredDetails`) `run_action`'s gate
+ * answers, with `details.actionName` naming the tool the refused call
+ * addressed. `delete_record` and `delete_records` differ only in the sentence.
+ */
+function deleteConfirmationRefusal(actionName: string, objectName: string, message: string): DeleteConfirmationRefusal {
+  return {
+    code: ACTION_CONFIRMATION_REQUIRED,
+    message,
     status: ACTION_CONFIRMATION_REQUIRED_HTTP_STATUS,
     details: {
-      actionName: DELETE_RECORD_TOOL,
+      actionName,
       objectName,
       confirmationMember: AI_ACTION_CONFIRMATION_MEMBER,
     },
   };
+}
+
+// ── delete_records: many rows of one object in one confirmed call (#30891) ──
+
+/** The `details.actionName` a `delete_records` refusal names: the tool the refused call addressed. */
+const DELETE_RECORDS_TOOL = 'delete_records';
+
+/**
+ * [#30891] The most records one `delete_records` call deletes.
+ *
+ * 200 is the bound the platform's other many-row delete door already applies
+ * per request: REST `POST /data/:object/deleteMany` refuses more ids than
+ * `RestServerConfig.batch.maxBatchSize`, whose default is 200. Like that
+ * route, this tool deletes ONE ROW AT A TIME (each row its own engine delete,
+ * so each row meets its own delete rules and cascade), so the cap also bounds
+ * the length of one call. A selection that matches more answers how many
+ * remain, and the next call continues.
+ */
+export const DELETE_RECORDS_MAX_PER_CALL = 200;
+
+/**
+ * The cap one `delete_records` call runs under: {@link DELETE_RECORDS_MAX_PER_CALL},
+ * or the deployment's read window when that is smaller.
+ *
+ * The selection is READ before anything is deleted, and the data door's read
+ * window refuses (never clamps) a read asking for more rows than
+ * `OS_DATA_MAX_PAGE_SIZE` or walking past `OS_DATA_QUERY_ROW_BUDGET`
+ * (`@objectstack/types`' `query-read-limits.ts`). A cap above either would
+ * make every filter selection a refusal on that host, and the caller has no
+ * `limit` to lower. So the cap follows the window down, and the answer's
+ * `cap` names the number used.
+ */
+export function deleteRecordsCap(env?: Record<string, string | undefined>): number {
+  const { maxPageSize, rowBudget } = resolveQueryReadLimits(env);
+  return Math.min(DELETE_RECORDS_MAX_PER_CALL, maxPageSize ?? Infinity, rowBudget ?? Infinity);
+}
+
+/** How many ids of the selection a preview names. */
+const DELETE_RECORDS_SAMPLE_SIZE = 10;
+
+/** The alias the selection's count is read under. */
+const DELETE_RECORDS_COUNT_ALIAS = 'matched';
+
+/** What one `delete_records` call selects: a filter, or an id list. Exactly one. */
+interface DeleteRecordsSelection {
+  where?: Record<string, unknown>;
+  recordIds?: string[];
+}
+
+/** The selection, resolved under the caller's permissions and row-level security. */
+interface ResolvedDeleteSelection {
+  /** The cap this call runs under ({@link deleteRecordsCap}). */
+  cap: number;
+  /** The ids a confirmed call attempts NOW, at most the cap: by id for a filter, the caller's order for a list. */
+  attempt: string[];
+  /** How many records the selection matches for this caller, when that is known. */
+  matched?: number;
+  /** True when more records match than one call attempts, whether or not `matched` is known. */
+  moreThanCap: boolean;
+  /** The listed ids that name no record this caller can read (an id-list selection only). */
+  notFound: string[];
+}
+
+/** One group of refused rows: the same code, status and reason, as the delete answered each row. */
+interface DeleteRefusalGroup {
+  code?: string;
+  status?: number;
+  reason: string;
+  count: number;
+  recordIds: string[];
+}
+
+/** The rows a bridge's `query` answered, read off the protocol's `{ records }` shape. */
+function queriedRows(result: unknown, objectName: string): Array<Record<string, unknown>> {
+  const records = (result as { records?: unknown } | null | undefined)?.records;
+  if (!Array.isArray(records)) {
+    // Loud, never "nothing matched": an answer this tool cannot read is not a
+    // selection of zero rows, and a delete planned from it would be a guess.
+    throw new Error(`delete_records could not read the records the query on '${objectName}' answered — nothing was deleted.`);
+  }
+  return records as Array<Record<string, unknown>>;
+}
+
+function idOfRow(row: Record<string, unknown>): string | undefined {
+  const id = row?.id;
+  return typeof id === 'string' && id.length > 0 ? id : typeof id === 'number' ? String(id) : undefined;
+}
+
+/**
+ * Resolve a `delete_records` selection to the ids one call attempts, through
+ * the bridge's `query` (and `aggregate`, for the count), so the read runs as
+ * the caller: a record the caller cannot read is never selected, and so never
+ * deleted by this tool.
+ *
+ * A filter is read in id order, at most the cap. Whether more match than one
+ * call attempts is then the count's answer, asked of `aggregate` only when the
+ * read came back full. ⛔ Not a read of one row past the cap: the data door's
+ * read window REFUSES a read over the host's page size or row budget
+ * (`OS_DATA_MAX_PAGE_SIZE` / `OS_DATA_QUERY_ROW_BUDGET`, "refuse, never
+ * clamp"), so a 201-row probe would refuse every filter on a host that sets
+ * either at 200. A bridge without `aggregate` (or whose count cannot be read)
+ * keeps the probe, the one way it has to tell "exactly the cap" from "more".
+ * An id list is at most the cap long (the handler refuses a longer one before
+ * reading), so one read of those ids answers both which exist and how many.
+ */
+async function resolveDeleteSelection(
+  bridge: McpDataBridge,
+  objectName: string,
+  selection: DeleteRecordsSelection,
+  cap: number,
+): Promise<ResolvedDeleteSelection> {
+  if (selection.recordIds) {
+    const listed = [...new Set(selection.recordIds)];
+    const rows = queriedRows(
+      await bridge.query(objectName, { where: { id: { $in: listed } }, fields: ['id'], limit: listed.length }),
+      objectName,
+    );
+    const found = new Set(rows.map(idOfRow).filter((id): id is string => id !== undefined));
+    const attempt = listed.filter((id) => found.has(id));
+    return { cap, attempt, matched: attempt.length, moreThanCap: false, notFound: listed.filter((id) => !found.has(id)) };
+  }
+  const where = selection.where ?? {};
+  const readIds = async (limit: number): Promise<string[]> =>
+    queriedRows(
+      await bridge.query(objectName, { where, fields: ['id'], orderBy: [{ field: 'id', order: 'asc' }], limit }),
+      objectName,
+    )
+      .map(idOfRow)
+      .filter((id): id is string => id !== undefined);
+
+  if (typeof bridge.aggregate === 'function') {
+    const ids = await readIds(cap);
+    if (ids.length < cap) return { cap, attempt: ids, matched: ids.length, moreThanCap: false, notFound: [] };
+    const count = await countSelection(bridge, objectName, where);
+    if (count !== undefined) {
+      // A count below the rows just read is a write landing between the two
+      // reads; the read is the floor.
+      const matched = Math.max(count, ids.length);
+      return { cap, attempt: ids, matched, moreThanCap: matched > cap, notFound: [] };
+    }
+  }
+  const probed = await readIds(cap + 1);
+  const moreThanCap = probed.length > cap;
+  return {
+    cap,
+    attempt: probed.slice(0, cap),
+    ...(moreThanCap ? {} : { matched: probed.length }),
+    moreThanCap,
+    notFound: [],
+  };
+}
+
+/** The selection's count under the caller's row-level security, or `undefined` when the bridge cannot say. */
+async function countSelection(
+  bridge: McpDataBridge,
+  objectName: string,
+  where: Record<string, unknown>,
+): Promise<number | undefined> {
+  if (typeof bridge.aggregate !== 'function') return undefined;
+  const rows = await bridge.aggregate(objectName, {
+    where,
+    aggregations: [{ function: 'count', alias: DELETE_RECORDS_COUNT_ALIAS }],
+  });
+  const value = (rows?.[0] as Record<string, unknown> | undefined)?.[DELETE_RECORDS_COUNT_ALIAS];
+  if (typeof value === 'bigint') return Number(value);
+  // A SQL driver may answer a COUNT as a decimal string (a 64-bit integer).
+  if (typeof value === 'string' && /^\d+$/.test(value)) return Number(value);
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
+/** A row the delete stopped at: a fault, not a delete rule's refusal. */
+interface DeleteFault {
+  recordId: string;
+  code?: string;
+  status?: number;
+  message: string;
+}
+
+/** What {@link deleteEach} did with the attempt set, in order. */
+interface DeleteEachOutcome {
+  /** Rows the bridge was asked to delete: every row before a fault, and the faulted one. */
+  attempted: number;
+  deleted: number;
+  refusals: DeleteRefusalGroup[];
+  notRemoved: string[];
+  /** Set when a fault stopped the walk; the rows after it were not attempted. */
+  fault?: DeleteFault;
+  notAttempted: number;
+}
+
+/**
+ * A refused row's group key, or `undefined` when the throw is a FAULT.
+ *
+ * The line is the one the platform's data door already draws, read with its
+ * own classifier so the two doors cannot disagree on a row: `mapDataError`
+ * (`@objectstack/types`), the REST `/data` door's table, which the bulk-import
+ * runner adopts per row too. A 4xx verdict is a refusal; a 5xx verdict is a
+ * fault. That covers the coded and the uncoded throw alike:
+ *
+ * - a delete rule's coded refusal (`RECORD_LOCKED` / 409, `PERMISSION_DENIED`
+ *   / 403, a package's own code at 422) is a 4xx refusal, grouped under the
+ *   code and message {@link thrownRefusalEnvelope} reads, the spelling
+ *   `delete_record` answers;
+ * - a sandboxed hook body's deliberate throw carries no code; the door
+ *   answers it `400 HOOK_ABORTED` with the body's own sentence, and so is it
+ *   grouped here;
+ * - a code hook's bare `throw new Error`, a lost connection, a driver error
+ *   are faults, and so is a driver's OWN string code (`ECONNREFUSED`, a SQL
+ *   state such as `57P01`, `SQLITE_BUSY`): a `code` is not a rule's verdict
+ *   by being a string, and the door answers each of those `500`.
+ *
+ * Measured on a booted stack: REST `DELETE` answers the sandboxed refusal
+ * `400 HOOK_ABORTED` and the code hook's bare throw `500 INTERNAL_ERROR`.
+ */
+function rowRefusalOf(err: unknown, objectName: string): Omit<DeleteRefusalGroup, 'count' | 'recordIds'> | undefined {
+  const door = mapDataError(err, objectName);
+  if (door.status >= 500) return undefined;
+  const envelope = thrownRefusalEnvelope(err);
+  if (envelope) return { code: envelope.code, status: envelope.status ?? door.status, reason: envelope.message };
+  const code = typeof door.body.code === 'string' ? door.body.code : undefined;
+  const reason = typeof door.body.error === 'string' && door.body.error !== '' ? door.body.error : messageOf(err);
+  return { ...(code !== undefined ? { code } : {}), status: door.status, reason };
+}
+
+/**
+ * Delete each id of the attempt set through the bridge's `remove`, the member
+ * `delete_record` deletes with, so each row passes exactly the checks a
+ * one-row delete passes: the object's exposure, the caller's permissions and
+ * row-level security, and the package's delete rules (`beforeDelete` hooks,
+ * restricted relations). No row is deleted any other way, so no rule is
+ * bypassed, for an administrator either (the maintainer's ruling on the card).
+ *
+ * A refused row stays, and its refusal is grouped: rows refused with the same
+ * code, status and reason are one group ({@link rowRefusalOf}; a refusal's
+ * `details` is never read, as the one-row tool renders a throw). A delete
+ * that landed under a parent roll-up the engine could not recompute counts as
+ * deleted, as `delete_record` answers it, with the stale column logged.
+ *
+ * ⛔ A FAULT stops the walk. A driver error or a crash is not a rule's verdict
+ * on that row: grouped as a "refusal" it would read as the rules' answer, and
+ * the rows after it would meet the same broken store. So the first fault ends
+ * the call, and the answer names it, the row it stopped at, and what was
+ * already deleted (those deletes stay deleted).
+ */
+async function deleteEach(
+  bridge: McpDataBridge,
+  objectName: string,
+  ids: readonly string[],
+): Promise<DeleteEachOutcome> {
+  let deleted = 0;
+  let attempted = 0;
+  const notRemoved: string[] = [];
+  const groups = new Map<string, DeleteRefusalGroup>();
+  let fault: DeleteFault | undefined;
+  for (const id of ids) {
+    attempted++;
+    try {
+      const answer = await bridge.remove(objectName, id);
+      // `success: false` is the protocol's "matched, and deliberately NOT
+      // removed" (a reset, not a delete); anything else is a deletion.
+      if ((answer as { success?: unknown } | null | undefined)?.success === false) notRemoved.push(id);
+      else deleted++;
+    } catch (err) {
+      if (earnedAnswerOf(err) !== undefined) {
+        for (const line of staleSummaryAnswerLines(err as SummaryRecomputeRefusal, objectName)) console.error(`[MCP] ${line}`);
+        deleted++;
+        continue;
+      }
+      const refusal = rowRefusalOf(err, objectName);
+      if (!refusal) {
+        const envelope = thrownRefusalEnvelope(err);
+        fault = {
+          recordId: id,
+          ...(envelope ? { code: envelope.code } : {}),
+          ...(envelope?.status !== undefined ? { status: envelope.status } : {}),
+          message: envelope?.message ?? messageOf(err),
+        };
+        break;
+      }
+      const key = JSON.stringify([refusal.code ?? null, refusal.status ?? null, refusal.reason]);
+      const group = groups.get(key) ?? { ...refusal, count: 0, recordIds: [] };
+      group.count++;
+      group.recordIds.push(id);
+      groups.set(key, group);
+    }
+  }
+  // Largest group first; a tie keeps the order the rows were refused in.
+  const refusals = [...groups.values()].sort((a, b) => b.count - a.count);
+  return { attempted, deleted, refusals, notRemoved, ...(fault ? { fault } : {}), notAttempted: ids.length - attempted };
+}
+
+/** How many records one call names: the exact count, or that more than the cap match. */
+function selectionCount(resolved: ResolvedDeleteSelection): { matched: number } | { matchedMoreThan: number } {
+  return resolved.matched !== undefined ? { matched: resolved.matched } : { matchedMoreThan: resolved.cap };
+}
+
+function deleteRecordsPreview(objectName: string, resolved: ResolvedDeleteSelection) {
+  return {
+    object: objectName,
+    ...selectionCount(resolved),
+    wouldAttempt: resolved.attempt.length,
+    cap: resolved.cap,
+    sampleRecordIds: resolved.attempt.slice(0, DELETE_RECORDS_SAMPLE_SIZE),
+    ...(resolved.notFound.length > 0 ? { notFound: resolved.notFound } : {}),
+    note:
+      'Nothing was deleted. The object\'s delete rules (locks, restricted relations, permissions) are judged per '
+      + 'record when the delete runs: a confirmed call deletes the records they allow and answers the rest grouped '
+      + 'by reason, with their ids.',
+  };
+}
+
+/** The unconfirmed `delete_records` call's refusal sentence. */
+function deleteRecordsRefusalMessage(objectName: string, resolved: ResolvedDeleteSelection): string {
+  const count = resolved.matched !== undefined
+    ? `${resolved.matched} record(s)`
+    : `more than ${resolved.cap} records`;
+  return (
+    `delete_records on '${objectName}' carries no confirmation — nothing was deleted. The selection matches ${count}; `
+    + `a confirmed call deletes up to ${resolved.cap} of them. A delete over MCP is permanent: show `
+    + `the preview to the human in the loop, then retry this call with '${AI_ACTION_CONFIRMATION_MEMBER}': true on the request.`
+  );
+}
+
+/** What a confirmed `delete_records` call answers: the outcome per row, counted and grouped. */
+function deleteRecordsOutcome(objectName: string, resolved: ResolvedDeleteSelection, done: DeleteEachOutcome) {
+  const refused = done.refusals.reduce((n, g) => n + g.count, 0);
+  // Of the records the selection matched when this call began, how many still
+  // match: the refused, the not removed, the faulted, the not attempted and
+  // the ones past the cap.
+  const remaining = resolved.matched !== undefined ? resolved.matched - done.deleted : undefined;
+  const beyondCap = resolved.matched !== undefined ? resolved.matched - resolved.attempt.length : undefined;
+  const next: string[] = [];
+  if (resolved.moreThanCap && !done.fault) {
+    next.push(
+      `${beyondCap !== undefined ? beyondCap : 'More'} matching record(s) were past this call's cap of `
+        + `${resolved.cap}: call again with the same selection and confirm: true to continue.`,
+    );
+  }
+  if (refused > 0 && resolved.moreThanCap && !done.fault) {
+    next.push(
+      'Refused records still match the selection and are attempted again first; to move past them, exclude their ids '
+        + '(for example {"id": {"$nin": [...]}} in where).',
+    );
+  }
+  return {
+    object: objectName,
+    ...selectionCount(resolved),
+    attempted: done.attempted,
+    deleted: done.deleted,
+    refused,
+    refusals: done.refusals,
+    ...(done.notRemoved.length > 0 ? { notRemoved: done.notRemoved } : {}),
+    ...(resolved.notFound.length > 0 ? { notFound: resolved.notFound } : {}),
+    ...(done.fault ? { stoppedAt: done.fault.recordId, notAttempted: done.notAttempted } : {}),
+    ...(remaining !== undefined ? { remaining } : {}),
+    cap: resolved.cap,
+    ...(next.length > 0 ? { next: next.join(' ') } : {}),
+  };
+}
+
+/**
+ * The tool error a fault answers: the fault itself (its code and status when
+ * it declared them), the row it stopped at, and the call's progress, since
+ * the records deleted before it stay deleted and an agent that read a bare
+ * error would retry them as if nothing had happened.
+ */
+function deleteRecordsFaultMessage(objectName: string, done: DeleteEachOutcome & { fault: DeleteFault }): string {
+  return (
+    `delete_records on '${objectName}' stopped at record '${done.fault.recordId}': ${done.fault.message} `
+    + 'This is a fault, not a delete rule\'s refusal, so no record after it was attempted. '
+    + `${done.deleted} record(s) were deleted before it and stay deleted; ${done.notAttempted} were not attempted. `
+    + 'Retry the same call once the fault is resolved: it selects what still matches.'
+  );
 }
 
 /** What {@link thrownRefusalEnvelope} reads off a thrown coded refusal. */
@@ -1628,6 +2025,156 @@ export function registerObjectTools(
         }
       },
     );
+
+    // [#30891] Registered under BOTH data scopes. Its unconfirmed call reads
+    // the selection (ids and a count) through `query` / `aggregate`, a
+    // list-class read; under `data:write` alone that read would serve ids a
+    // token granted no `data:read` cannot list (seat decision on the review).
+    if (canRead) {
+      // [#30891] Many records of one object in one confirmed call, where the
+      // agent used to plan one `delete_record` per row. It composes the bridge
+      // members the other data tools call — `query` (and `aggregate`) to select,
+      // `remove` to delete each row — so it adds no execution path: each row is
+      // deleted exactly as `delete_record` deletes it, under the caller's
+      // permissions, row-level security and the package's delete rules, and a
+      // rule's refusal holds for every caller, an administrator included
+      // (maintainer's ruling on the card: no bypass).
+      //
+      // The confirmation is `delete_record`'s, by the decision that gated it: an
+      // unconfirmed call is refused with the same code, status and `details`
+      // shape. What the refusal adds is a `preview` beside `error` — the count
+      // and a sample of what a confirmed call would delete — because a human
+      // asked to approve a bulk delete has to see its size. Reading the
+      // selection is the one thing an unconfirmed call does; it deletes nothing.
+      //
+      // ⛔ The preview names no per-record refusal, and claims none: the engine
+      // has no delete dry run (`BatchOptions.validateOnly` was retired for
+      // promising one), and running the delete inside a rolled-back transaction
+      // would still fire `afterDelete` hooks, which do not wait for a commit.
+      // So the delete rules are judged when the delete runs, and the confirmed
+      // call answers them grouped by reason.
+      server.registerTool(
+        note(DELETE_RECORDS_TOOL),
+        {
+          description:
+            'Delete many records of ONE object in one call: those a filter (where) matches, or an id list (recordIds) — '
+            + 'instead of one delete_record per row. Destructive and permanent. A call without confirm: true deletes '
+            + 'nothing: it is REFUSED (ACTION_CONFIRMATION_REQUIRED) with a `preview` of what a confirmed call would '
+            + 'delete (how many match, sample ids). Show that to the human, and retry with confirm: true only once they '
+            + `approve. A confirmed call deletes at most ${DELETE_RECORDS_MAX_PER_CALL} records (fewer when the `
+            + 'deployment\'s read page size or row budget is smaller; the answer\'s cap says), each under your '
+            + 'permissions, row-level security and the object\'s delete rules, which no caller can bypass. Records a '
+            + 'rule refuses stay; the answer counts them grouped by reason with their ids, and says how many still match.',
+          inputSchema: strictToolInput(
+            {
+              surface: 'this delete_records call',
+              aliases: {
+                ...OBJECT_NAME_ALIASES,
+                filters: 'where',
+                filter: 'where',
+                conditions: 'where',
+                criteria: 'where',
+                ids: 'recordIds',
+                record_ids: 'recordIds',
+                recordId: 'recordIds',
+              },
+            },
+            {
+              objectName: z.string().describe('The object/table name'),
+              where: z
+                .record(z.string(), z.unknown())
+                .optional()
+                .describe(
+                  'Filter conditions selecting the records to delete, as query_records takes them, e.g. '
+                    + '{"status":"closed"}. {} selects every record you can see. Send this or recordIds, not both.',
+                ),
+              recordIds: z
+                .array(z.string().min(1))
+                .min(1)
+                .max(DELETE_RECORDS_MAX_PER_CALL)
+                .optional()
+                .describe(
+                  `The ids of the records to delete (at most ${DELETE_RECORDS_MAX_PER_CALL}). Send this or where, not both.`,
+                ),
+              // The confirmation member, as `delete_record` declares it: optional
+              // in the schema so an unconfirmed call reaches the handler and is
+              // answered with the gate's refusal and the preview.
+              [AI_ACTION_CONFIRMATION_MEMBER]: z
+                .boolean()
+                .optional()
+                .describe(
+                  'Set to true only when the human in the loop has approved deleting the records this selection '
+                    + 'matches. Without it nothing is deleted: the call answers a preview.',
+                ),
+            },
+          ),
+          annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
+        },
+        async (args) => {
+          const { objectName, where, recordIds } = args;
+          const bad = guard(objectName);
+          if (bad) return errorResult(bad);
+          if ((where === undefined) === (recordIds === undefined)) {
+            return errorResult(
+              where === undefined
+                ? 'delete_records needs a selection: send where (a filter, {} for every record) or recordIds (an id list).'
+                : 'delete_records takes one selection: send where or recordIds, not both.',
+            );
+          }
+          try {
+            const cap = deleteRecordsCap();
+            if (recordIds !== undefined && new Set(recordIds).size > cap) {
+              // Before any read: the read of a longer list would be the read
+              // window's own refusal, naming a `limit` this caller never sent.
+              return errorResult(
+                `delete_records takes at most ${cap} ids per call on this deployment (its read page size or row `
+                  + `budget is ${cap}) — nothing was deleted. Send the list in parts of at most ${cap} ids.`,
+              );
+            }
+            const resolved = await resolveDeleteSelection(bridge, objectName, { where, recordIds }, cap);
+            // [ADR-0090 D10] A count a delegated read narrowed is served with the
+            // narrowing stated, as `query_records` serves its rows. ⛔ The probe
+            // never fails the call it annotates.
+            const narrowing = typeof bridge.diagnoseDelegation === 'function'
+              ? await bridge.diagnoseDelegation(objectName).catch(() => undefined)
+              : undefined;
+            const stated = (value: Record<string, unknown>): unknown =>
+              narrowing?.narrowed && narrowing.statement ? withDelegationNotice(value, narrowing.statement) : value;
+            if (!isDeleteConfirmed(args)) {
+              const refusal = deleteConfirmationRefusal(
+                DELETE_RECORDS_TOOL,
+                objectName,
+                deleteRecordsRefusalMessage(objectName, resolved),
+              );
+              return {
+                content: [{
+                  type: 'text' as const,
+                  text: jsonText({ error: refusal, preview: stated(deleteRecordsPreview(objectName, resolved)) }),
+                }],
+                isError: true as const,
+              };
+            }
+            const done = await deleteEach(bridge, objectName, resolved.attempt);
+            const outcome = stated(deleteRecordsOutcome(objectName, resolved, done));
+            if (done.fault) {
+              const { fault } = done;
+              const error = {
+                ...(fault.code !== undefined ? { code: fault.code } : {}),
+                message: deleteRecordsFaultMessage(objectName, { ...done, fault }),
+                ...(fault.status !== undefined ? { status: fault.status } : {}),
+              };
+              return {
+                content: [{ type: 'text' as const, text: jsonText({ error, progress: outcome }) }],
+                isError: true as const,
+              };
+            }
+            return textResult(outcome);
+          } catch (err) {
+            return errorResultWithCode(err);
+          }
+        },
+      );
+    }
   } // end canWrite (data:write)
 
   return registered;

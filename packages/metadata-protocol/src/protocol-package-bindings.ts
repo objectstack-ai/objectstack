@@ -15,6 +15,7 @@ import {
 } from './item-lock.js';
 import {
     itemDiscriminator,
+    type InstalledManifestLookup,
 } from '@objectstack/metadata-core';
 import { isServedOverrideRowOf } from './served-override.js';
 import { canonicalMetaType } from './protocol-meta-type-schema.js';
@@ -269,6 +270,7 @@ function perPackageLayerEnvelope(
     itemPackageId: string | undefined,
     artifact: unknown,
     rowsOfName: readonly any[],
+    installed: InstalledManifestLookup,
 ): unknown {
     if (artifact === undefined || artifact === null || typeof artifact !== 'object') return artifact;
     const own = boundPackageOf(itemPackageId);
@@ -277,7 +279,7 @@ function perPackageLayerEnvelope(
     if (lender === own) return artifact;
     const member = bundleMemberOf(type, item);
     const declared = rowsOfName.some((row) => {
-        if (row?.package_id !== own || !isServedOverrideRowOf(row, lender)) return false;
+        if (row?.package_id !== own || !isServedOverrideRowOf(row, lender, installed)) return false;
         try {
             return bundleMemberOf(type, storedRowDocument(row)) === member;
         } catch {

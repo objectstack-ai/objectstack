@@ -398,7 +398,14 @@ describe('objectui#3876 — de pack closes „ with “ and not with a straight 
     // organization still carries („{{name}}“) — one interpolated span, runtime
     // data — and `.timezone.todo` quotes the word formulas read („heute“) —
     // one literal span.
-    expect(okSpans, 'correctly paired spans').toBe(107);
+    // 108 once objectstack-ai/objectstack#30894 added
+    // `connectAgent.access.revokeTitle`, the confirm that names the API key
+    // being revoked („{{name}}“) — one interpolated span, runtime data.
+    // 109 once objectstack-ai/objectstack#31062 added
+    // `fields.preferenceOption.useTyped`, the picker row that commits the typed
+    // topic or channel („{{value}}“ verwenden) — one interpolated span, runtime
+    // data.
+    expect(okSpans, 'correctly paired spans').toBe(109);
   });
 
   it('keeps the count identity that replaces the card’s count(„) === count(“)', () => {
@@ -486,8 +493,11 @@ describe('objectui#3876 — de pack closes „ with “ and not with a straight 
     // `marketplace.detail.sampleDataBannerTitle`, one more matched pair.
     // 107 / 107 / 0 after objectstack-ai/objectstack#30206 added
     // `console.firstRunChecklist.organizationName.todo` and `.timezone.todo`,
-    // one matched pair each.
-    expect({ open, close, rdq }).toEqual({ open: 107, close: 107, rdq: 0 });
+    // one matched pair each. 108 / 108 / 0 after objectstack-ai/objectstack#30894
+    // added `connectAgent.access.revokeTitle`, one more matched pair. 109 / 109 / 0
+    // after objectstack-ai/objectstack#31062 added
+    // `fields.preferenceOption.useTyped`, one more matched pair.
+    expect({ open, close, rdq }).toEqual({ open: 109, close: 109, rdq: 0 });
     // The durable shape: every „ closed by a “, every surplus “ an English
     // opener answered by a ”. Survived translating the two English values.
     expect(close).toBe(open + rdq);

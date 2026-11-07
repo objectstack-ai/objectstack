@@ -680,7 +680,7 @@ describe('interpretFlowResponse — a refusal met inside the run, by the record-
         expect(en).toMatchObject({ error: builtInLocales.en.form.noPermissionToSave });
 
         const zh = failed400(flowFailed({ innerRefusal: DENIED }), 'zh-CN');
-        expect(zh).toMatchObject({ error: builtInLocales.zh.form.noPermissionToSave });
+        expect(zh).toMatchObject({ error: builtInLocales['zh-Hans'].form.noPermissionToSave });
         expect((zh as { error: string }).error).not.toContain('crm_account');
     });
 
@@ -760,7 +760,7 @@ describe('apiActionFailureMessage — a flow-backed api action reads the run ref
 
     it("a one-level permission refusal reads the record form's line, in the host's language", () => {
         expect(on400(endpointFailed(ONE_LEVEL, { innerRefusal: DENIED }))).toBe(builtInLocales.en.form.noPermissionToSave);
-        expect(on400(endpointFailed(ONE_LEVEL, { innerRefusal: DENIED }), 'zh-CN')).toBe(builtInLocales.zh.form.noPermissionToSave);
+        expect(on400(endpointFailed(ONE_LEVEL, { innerRefusal: DENIED }), 'zh-CN')).toBe(builtInLocales['zh-Hans'].form.noPermissionToSave);
     });
 
     it('the nested map → subflow chain reads the same line once the inner refusal is carried', () => {

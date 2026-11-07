@@ -91,6 +91,7 @@
  * checking its tier first. A key name in a comment is a textual hit.
  */
 import { describe, it, expect } from 'vitest';
+import { PLATFORM_LOCALE_TAGS } from '@objectstack/spec/system';
 import { builtInLocales } from '../locales/index';
 
 type LocaleCode = keyof typeof builtInLocales;
@@ -174,7 +175,7 @@ describe('objectui#8754 — the measured-dead pack keys stay retired', () => {
     // empty pack list, or asserts absence inside a pack that itself vanished, is
     // green for the wrong reason — which is the single failure mode a negative
     // pin cannot otherwise distinguish from success.
-    expect(LANGS).toHaveLength(10);
+    expect(LANGS).toHaveLength(PLATFORM_LOCALE_TAGS.length);
     expect(RETIRED).toHaveLength(23);
     expect(new Set(RETIRED).size).toBe(23);
     for (const lang of LANGS) {
@@ -242,7 +243,7 @@ describe('objectui#8754 — the measured-dead pack keys stay retired', () => {
     // satisfied by the English string ten times — the same complement
     // `objectView-config-keys-retired-4730.test.ts` carries next door.
     expect(at(builtInLocales.en, 'sidebar.helpTooltip')).toBe('Help & Documentation');
-    for (const lang of ['zh', 'ru', 'ar', 'ja'] as const) {
+    for (const lang of ['zh-Hans', 'zh-Hant', 'ru', 'ar', 'ja'] as const) {
       const value = at(builtInLocales[lang], 'sidebar.helpTooltip');
       expect(typeof value, `${lang} sidebar.helpTooltip`).toBe('string');
       expect(value, `${lang} sidebar.helpTooltip is the English value`).not.toBe(

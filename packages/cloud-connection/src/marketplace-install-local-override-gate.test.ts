@@ -32,6 +32,7 @@ import '@objectstack/runtime';
 import { judgeOverrideWrite } from '@objectstack/metadata-protocol';
 import { MarketplaceInstallLocalPlugin } from './marketplace-install-local-plugin.js';
 import { installerAuthService, withInstallerGrants } from './install-local-principal.fixtures.js';
+import { installedManifestsOf } from '@objectstack/metadata-core';
 
 type Handler = (c: any) => Promise<any>;
 
@@ -163,7 +164,7 @@ describe('install-local 2d — the override write gate at the managed install (A
         expect(res.payload?.error?.code).toBe('NOT_OVERRIDABLE');
         const verdict = judgeOverrideWrite(
             { type: 'dashboard', name: 'crm_board', packageId: PARTNER, item },
-            { dependencies: [BASE], shippers: [BASE] },
+            { dependencies: [BASE], shippers: [BASE], installed: installedManifestsOf(undefined) },
         );
         expect(res.payload.error.details.refusals).toEqual([
             { type: 'dashboard', name: 'crm_board', rule: 'undeclared_same_name', message: (verdict as any).message },

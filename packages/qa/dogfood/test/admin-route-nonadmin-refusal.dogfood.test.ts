@@ -283,6 +283,30 @@ function expectationsFor(targetUserId: string): Record<string, RouteExpectation>
       bucket: 'objectstack-gate',
       note: 'a read: the gate runs first and the handler reads no body and no query parameter; the admin gets 200 { clientAddress, trustProxy }',
     },
+    // ── #30918 — another person's authorized AI assistants (a read) ─────────
+    'GET /api/v1/auth/admin/authorized-clients': {
+      bucket: 'objectstack-gate',
+      query: `?userId=${targetUserId}`,
+      note: 'a read: the gate runs before the query is read, so anon and member are refused whoever userId names; the admin gets 200 { clients, truncated } for the target',
+    },
+    // ── #30958 — the SCIM connection-credential door (mint + revoke) ────────
+    //
+    // Both mounts run `gateAdmin(c)` as their first statement, ahead of any body
+    // read, so anon 401 / member 403 hold on any body. The admin side on these
+    // payloads: SCIM is on in this boot (OS_SCIM_ENABLED, beforeAll), so the
+    // mint answers 200 with a fresh credential for a probe connection nothing
+    // provisions through (the sweep's own stack, discarded at teardown), and
+    // the revoke lands on 404 RESOURCE_NOT_FOUND for the unknown credential.
+    'POST /api/v1/auth/admin/scim/mint-credential': {
+      bucket: 'objectstack-gate',
+      body: { connectionId: 'refusal-probe-scim' },
+      note: 'the gate runs ahead of any body read; the admin gets 200 and a credential for the probe connection, since SCIM is on in this boot',
+    },
+    'POST /api/v1/auth/admin/scim/revoke-credential': {
+      bucket: 'objectstack-gate',
+      body: { credentialId: 'refusal-probe-credential' },
+      note: 'the gate runs ahead of any body read; the admin passes it and lands on 404 RESOURCE_NOT_FOUND for the unknown credential',
+    },
     // ── #9653: the /admin/sso/* bridges, gated ahead of their delegation ────
     //
     // The ADR-0068 gate runs BEFORE the bridge re-dispatches into better-auth,

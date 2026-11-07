@@ -37,7 +37,7 @@ import { OBJECT_SCHEMA_READ_ONLY_EXEMPT_CAPABILITIES, isCodeArtifactBody } from 
 // sources, each read from its owner: the pair's id and a pair's base
 // (`@objectstack/spec/kernel`, the one spelling of the suffix), and the
 // activation ledger's one reader (`@objectstack/core`).
-import { customizationBasePackageId, customizationPackageId } from '@objectstack/spec/kernel';
+import { customizationBasePackageId } from '@objectstack/spec/kernel';
 import { listPackageMetadataActivations, METADATA_ACTIVATION_TABLE } from '@objectstack/core';
 import type { GetPackageCustomizationsResponse } from '@objectstack/spec/api';
 // [ADR-0131 D3 · D12 items 7–8] The walled refusal's one predicate, asked by
@@ -57,6 +57,11 @@ import {
     isProtocolIncompatibleError,
     protocolIncompatibleAnswer,
     type InstalledDependencyRecord,
+    // [ADR-0146 D3 · ruling record 6691022506] The pair of a package, looked up
+    // through the App that carries it, over the engine registry's manifests.
+    installedManifestsOf,
+    pairOf,
+    type InstalledPackageSource,
 } from '@objectstack/metadata-core';
 // [#7560] ADR-0070's read-only-package rule — the SAME predicate the metadata
 // authoring path asks before refusing a write INTO a platform package
@@ -657,19 +662,21 @@ function packageIsUnknown(registry: unknown, id: string): boolean {
  *     `capability`, the code-only types) is refused at the save door naming
  *     the route that type has ("new similar", the switch), and a locked item
  *     `ITEM_LOCKED` naming the lock (ADR-0010 §3.3);
- *   - a package the ensure door cannot pair — no namespace, a pair namespace
- *     another package owns, a version that is not SemVer — is refused there,
+ *   - a package the ensure door cannot pair — a kernel package, no namespace,
+ *     a pair namespace another package owns, a version that is not SemVer — is
+ *     refused there,
  *     naming why (ADR-0146 D3).
  * Both refusals name their own reason, so the sentence names the door rather
  * than a list of types or package shapes that could drift from them.
  *
- * An id the pairing rule derives no pair for (`customizationPackageId`,
- * `@objectstack/spec/kernel`) gets the sentence without a pair id: the ensure
- * door answers that id with the reason it has none.
+ * An id the pair lookup derives no pair for (`pairOf`,
+ * `@objectstack/metadata-core`, over the engine registry's installed
+ * manifests) gets the sentence without a pair id: the ensure door answers that
+ * id with the reason it has none.
  */
-function customizeInPairRemedy(id: string): string {
+function customizeInPairRemedy(id: string, engine: unknown): string {
     const ensure = `POST /api/v1/packages/${id}/ensure-customization`;
-    const pair = customizationPackageId(id);
+    const pair = pairOf(id, installedManifestsOf((engine as { registry?: InstalledPackageSource } | null | undefined)?.registry));
     if (!pair.ok) {
         return `customize what it ships in its paired customization package (ADR-0146 D3): ${ensure} answers `
             + 'that package, or why this one has none.';
@@ -694,7 +701,7 @@ function requireWritablePackage(
             `[writable_package_required] Cannot ${action} package '${id}': it is read-only `
             + `(provided by code or an installed app). Packages the deployment ships are managed by `
             + `the deployment, not over this API — ${action} a package you own, or `
-            + customizeInPairRemedy(id),
+            + customizeInPairRemedy(id, engine),
             422,
             {
                 code: 'WRITABLE_PACKAGE_REQUIRED',
@@ -904,7 +911,7 @@ const PACKAGE_DISABLE_RESTRICTED_BY_VALIDATION_RULE = { code: 'PACKAGE_DISABLE_R
  * name, and the withheld fields it reads (`FIELD`, or `REF.FIELD` for a read
  * one hop through a reference field of the rule's object).
  */
-interface DisableDependentRule {
+export interface DisableDependentRule {
     packageId: string;
     object: string;
     rule: string;
@@ -1185,6 +1192,218 @@ function disableDependentRulesMessage(lead: string, dependents: readonly Disable
 }
 
 /**
+ * One validation rule an enable would put into service reading a field that
+ * stays withheld: {@link DisableDependentRule}, plus the disabled packages that
+ * add the fields it reads (`withheldBy`), whose enable is the other remedy.
+ */
+export interface EnableDependentRule extends DisableDependentRule {
+    withheldBy: string[];
+}
+
+/**
+ * The rules a served fold carries that read a field the fold withholds, on
+ * every object whose owner `isOff` does not name (a disabled owner's object is
+ * refused whole, so no write reaches its rules). `served` is the registry's
+ * own fold for the state being judged; a field is withheld from an object
+ * when the storage fold (`getStorageObject`: every `extend` contribution, a
+ * disabled package's included) declares it and `served` does not, which is
+ * the registry's own reading of a withheld member, never re-assembled here.
+ * Each rule is judged as {@link readDisableDependentRules} judges one: the
+ * served copy (one per name, a tenant overlay's `active` on it), its reads by
+ * {@link addRuleFieldReads}, named after the last layer in fold order that
+ * declares its name.
+ */
+function readWithheldFieldReaders(
+    registry: any,
+    served: ReadonlyMap<string, { fields?: Record<string, unknown>; validations?: unknown }>,
+    isOff: (packageId: unknown) => boolean,
+): EnableDependentRule[] {
+    type Contributor = { packageId?: unknown; ownership?: unknown; definition?: unknown };
+    const withheldCache = new Map<string, Set<string>>();
+    const withheldOf = (object: string): Set<string> => {
+        let withheld = withheldCache.get(object);
+        if (withheld) return withheld;
+        withheld = new Set<string>();
+        const storage = registry.getStorageObject(object) as { fields?: Record<string, unknown> } | undefined;
+        const servedFields = served.get(object)?.fields ?? {};
+        for (const field of Object.keys(storage?.fields ?? {})) if (!(field in servedFields)) withheld.add(field);
+        withheldCache.set(object, withheld);
+        return withheld;
+    };
+    /** The disabled packages whose `extend` contributions to `object` add `field`. */
+    const addersOf = (object: string, field: string): string[] =>
+        (registry.getObjectContributors(object) as Contributor[])
+            .filter((c) => c.ownership === 'extend' && isOff(c.packageId) && typeof c.packageId === 'string')
+            .filter((c) => declaredFieldNamesOf(c.definition).includes(field))
+            .map((c) => c.packageId as string);
+
+    const readers: EnableDependentRule[] = [];
+    for (const [name, object] of served) {
+        const contributors = registry.getObjectContributors(name) as Contributor[];
+        const owner = contributors.find((c) => c.ownership === 'own');
+        if (!owner || isOff(owner.packageId)) continue;
+        const base = contributors.find((c) => c.ownership === 'overlay') ?? owner;
+        const layerOf = new Map<string, Contributor>();
+        for (const layer of [base, ...contributors.filter((c) => c.ownership === 'extend' && !isOff(c.packageId))]) {
+            for (const rule of declaredRulesOf(layer.definition)) {
+                if (typeof rule.name === 'string') layerOf.set(rule.name, layer);
+            }
+        }
+        const servedFields = object.fields ?? {};
+        for (const rule of declaredRulesOf(object)) {
+            if (rule.active === false || typeof rule.name !== 'string') continue;
+            const reads: RuleFieldReads = { own: new Set(), hops: new Map() };
+            addRuleFieldReads(rule, reads, 0);
+            const hit: string[] = [];
+            const withheldBy = new Set<string>();
+            const ownWithheld = withheldOf(name);
+            for (const field of reads.own) {
+                if (!ownWithheld.has(field)) continue;
+                hit.push(field);
+                for (const adder of addersOf(name, field)) withheldBy.add(adder);
+            }
+            for (const [ref, related] of reads.hops) {
+                const target = referenceTargetOf(servedFields[ref]);
+                if (target === undefined || !served.has(target)) continue;
+                const targetWithheld = withheldOf(target);
+                for (const field of related) {
+                    if (!targetWithheld.has(field)) continue;
+                    hit.push(`${ref}.${field}`);
+                    for (const adder of addersOf(target, field)) withheldBy.add(adder);
+                }
+            }
+            if (hit.length === 0) continue;
+            readers.push({
+                packageId: ruleLayerLabel(layerOf.get(rule.name) ?? base),
+                object: name,
+                rule: rule.name,
+                fields: [...new Set(hit)].sort(),
+                withheldBy: [...withheldBy].sort(),
+            });
+        }
+    }
+    return readers;
+}
+
+/** Every object of a fold, by name. */
+function foldByName(objects: unknown): Map<string, { fields?: Record<string, unknown>; validations?: unknown }> {
+    const byName = new Map<string, { fields?: Record<string, unknown>; validations?: unknown }>();
+    for (const object of (Array.isArray(objects) ? objects : []) as Array<{ name?: unknown }>) {
+        if (typeof object?.name === 'string') byName.set(object.name, object as { fields?: Record<string, unknown>; validations?: unknown });
+    }
+    return byName;
+}
+
+/**
+ * [#30756, the mirror of #30379 ruling A] The validation rules the enable of
+ * `packageId` would put into service reading a field that stays withheld:
+ * `PATCH /packages/:id/enable` (and the install door's `enableOnInstall: true`
+ * on an overwrite of a disabled row) refuses while this is not empty, because
+ * the rule validator fails closed on a field its object does not serve, so
+ * every write to that object would be refused from the moment of the enable.
+ *
+ * Judged on the fold the enable would leave, the registry's own
+ * (`getAllObjects(undefined, { asEnabled })`: this package's `extend`
+ * contributions folded in, every other disabled package's withheld), against
+ * the fold served now (`getAllObjects()`): a rule counts only when it reads a
+ * withheld field AFTER the enable and did not already BEFORE it, so an enable
+ * is never refused over a rule it does not bring into service. That covers the
+ * package's own `extend` rules (and a rule of its name that replaces a served
+ * one), the rules on the objects it owns, which come into service with them
+ * (other enabled packages' included), and nothing the tenant switched off
+ * through an overlay (`active: false` reads nothing, as on the disable side).
+ * A field the package itself adds stops being withheld, so a rule reading it
+ * is no dependent.
+ *
+ * Empty for a package that is not disabled (its enable changes no fold).
+ * Ordered by package, object and rule.
+ */
+function readEnableDependentRules(registry: any, packageId: string): EnableDependentRule[] {
+    if (typeof registry?.getObjectContributors !== 'function'
+        || typeof registry?.getAllObjects !== 'function'
+        || typeof registry?.getStorageObject !== 'function'
+        || typeof registry?.isPackageDisabled !== 'function') return [];
+    if (!registry.isPackageDisabled(packageId)) return [];
+    const offNow = (id: unknown): boolean => registry.isPackageDisabled(id);
+    const offAfter = (id: unknown): boolean => id !== packageId && registry.isPackageDisabled(id);
+
+    const after = readWithheldFieldReaders(registry, foldByName(registry.getAllObjects(undefined, { asEnabled: packageId })), offAfter);
+    if (after.length === 0) return [];
+    const keyOf = (d: DisableDependentRule): string => `${d.object}\u0000${d.rule}\u0000${d.fields.join(',')}`;
+    const before = new Set(readWithheldFieldReaders(registry, foldByName(registry.getAllObjects()), offNow).map(keyOf));
+    return after
+        .filter((d) => !before.has(keyOf(d)))
+        .sort((a, b) => a.packageId.localeCompare(b.packageId)
+            || a.object.localeCompare(b.object)
+            || a.rule.localeCompare(b.rule));
+}
+
+/**
+ * [#30756] The served state the enable door now refuses to enter, read as it
+ * stands: every active rule served right now that reads a field a disabled
+ * package withholds, on an object whose owner is enabled. Empty when no package
+ * is disabled. The boot reads it once its registry is complete
+ * (`AppPlugin`, `kernel:bootstrapped`): the environment's state file records
+ * only disables, so a reading package that boots enabled beside a disabled
+ * field package (a release that added the rule, or a state file written
+ * before the enable door judged this) lands here without passing any door.
+ * Ordered by package, object and rule.
+ */
+export function readServedWithheldFieldReaders(registry: any): EnableDependentRule[] {
+    if (typeof registry?.getObjectContributors !== 'function'
+        || typeof registry?.getAllObjects !== 'function'
+        || typeof registry?.getStorageObject !== 'function'
+        || typeof registry?.isPackageDisabled !== 'function'
+        || typeof registry?.getAllPackages !== 'function') return [];
+    const off = (id: unknown): boolean => registry.isPackageDisabled(id);
+    const packages = registry.getAllPackages() as Array<{ manifest?: { id?: unknown } }>;
+    if (!packages.some((pkg) => off(pkg?.manifest?.id))) return [];
+    return readWithheldFieldReaders(registry, foldByName(registry.getAllObjects()), off)
+        .sort((a, b) => a.packageId.localeCompare(b.packageId)
+            || a.object.localeCompare(b.object)
+            || a.rule.localeCompare(b.rule));
+}
+
+/**
+ * The boot's one sentence for {@link readServedWithheldFieldReaders}: what every
+ * write to the named objects now answers, every rule, and the remedies.
+ */
+export function servedWithheldFieldReadersMessage(readers: readonly EnableDependentRule[]): string {
+    const one = readers.length === 1;
+    const listed = readers
+        .map((d) => `${d.packageId} · ${d.object} · ${d.rule} (reads ${d.fields.join(', ')})`)
+        .join('; ');
+    const objects = [...new Set(readers.map((d) => d.object))].sort();
+    const adders = [...new Set(readers.flatMap((d) => d.withheldBy))].sort();
+    return `${one ? 'An active validation rule reads a field' : `${readers.length} active validation rules read fields`} `
+        + `that a disabled package adds through objectExtensions, so every write to ${objects.join(', ')} is refused `
+        + `(400 VALIDATION_FAILED) until this is resolved — ${listed}. Switch off or change ${one ? 'that rule' : 'those rules'}, `
+        + `disable the package that serves ${one ? 'it' : 'them'}, or enable `
+        + `${adders.length === 0 ? 'the package that adds the field' : adders.map((id) => `'${id}'`).join(', ')}.`;
+}
+
+/**
+ * The sentence an enable-side dependent-rule refusal carries: `lead` (what was
+ * refused), then every rule as `package · object · rule (reads FIELD, …)`, then
+ * the two remedies, the second naming the disabled packages that add the fields.
+ */
+function enableDependentRulesMessage(lead: string, dependents: readonly EnableDependentRule[]): string {
+    const one = dependents.length === 1;
+    const listed = dependents
+        .map((d) => `${d.packageId} · ${d.object} · ${d.rule} (reads ${d.fields.join(', ')})`)
+        .join('; ');
+    const adders = [...new Set(dependents.flatMap((d) => d.withheldBy))].sort();
+    const enableFirst = adders.length === 0
+        ? 'enable the package that adds the field first'
+        : `enable ${adders.map((id) => `'${id}'`).join(', ')} first`;
+    return `${lead}: ${one
+        ? 'an active validation rule the enable would serve reads a field'
+        : `${dependents.length} active validation rules the enable would serve read fields`} that a disabled package adds `
+        + `through objectExtensions, which ${one ? 'stays' : 'stay'} withheld — ${listed}. `
+        + `Switch off or change ${one ? 'that rule' : 'those rules'} first, or ${enableFirst}.`;
+}
+
+/**
  * [#14451] `POST /packages/:id/duplicate` — the SOURCE must be a BASE.
  *
  * ## The measurement
@@ -1280,7 +1499,7 @@ function requireDuplicableSource(
             + `(provided by code or an installed app), and duplicate clones a writable base's `
             + `stored metadata rows. A code package's metadata is delivered as code, so there are `
             + `no rows to clone and the copy would be empty (ADR-0070 D4 duplicates a BASE). `
-            + `Duplicate a base you own, or ${customizeInPairRemedy(id)} `
+            + `Duplicate a base you own, or ${customizeInPairRemedy(id, engine)} `
             + `For an editable copy of the whole package, install it unmanaged instead `
             + `(installMode 'unmanaged'), where its manifest's installModes permits that.`,
             422,
@@ -2277,11 +2496,26 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             // declaration carries no `.default()` for the key, so absence
             // survives the parse and is read as absence.
             const requestedEnabled = request?.enableOnInstall;
-            let installDisableRefusal: string | undefined;
+            let installLifecycleRefusal: string | undefined;
             if (requestedEnabled === true) {
-                const enabled = registry.enablePackage(pkgId);
-                if (enabled) pkg = enabled;
-                await summaryRefreshSettled(qlService);
+                // [#30756] The same refusal as `PATCH /packages/:id/enable`,
+                // asked of the state the install just left: only an overwrite
+                // of a DISABLED row reaches it (the scan is empty for a package
+                // that is not disabled). The install itself has landed, so the
+                // package stays DISABLED (the row and the state file below
+                // follow `pkg.enabled`) and the door answers the refusal
+                // instead of a 201 that claims an enable.
+                const dependents = readEnableDependentRules(registry, pkgId);
+                if (dependents.length > 0) {
+                    installLifecycleRefusal = enableDependentRulesMessage(
+                        `Package '${pkgId}' was installed and stays disabled: \`enableOnInstall: true\` cannot enable it`,
+                        dependents,
+                    );
+                } else {
+                    const enabled = registry.enablePackage(pkgId);
+                    if (enabled) pkg = enabled;
+                    await summaryRefreshSettled(qlService);
+                }
             } else if (requestedEnabled === false) {
                 // [#30379 ruling A, contract review should-fix] The same refusal
                 // as `PATCH /packages/:id/disable`, asked of the state the
@@ -2298,7 +2532,7 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                 // withhold nothing served, and land disabled as asked.
                 const dependents = overwritesEnabledRow ? readDisableDependentRules(registry, pkgId) : [];
                 if (dependents.length > 0) {
-                    installDisableRefusal = disableDependentRulesMessage(
+                    installLifecycleRefusal = disableDependentRulesMessage(
                         `Package '${pkgId}' was installed and stays enabled: \`enableOnInstall: false\` cannot disable it`,
                         dependents,
                     );
@@ -2355,11 +2589,11 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             } catch (err) {
                 console.warn('[handlePackages] failed to persist enableOnInstall', { id: pkgId, disabled: rowDisabled, error: (err as Error)?.message });
             }
-            if (installDisableRefusal !== undefined) {
+            if (installLifecycleRefusal !== undefined) {
                 return {
                     handled: true,
                     response: deps.error(
-                        installDisableRefusal,
+                        installLifecycleRefusal,
                         PACKAGE_DISABLE_RESTRICTED_BY_VALIDATION_RULE.status,
                         { code: PACKAGE_DISABLE_RESTRICTED_BY_VALIDATION_RULE.code },
                     ),
@@ -2383,6 +2617,27 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             // answers the refusal (`hostPackageStateRefused`). The file keeps
             // its best-effort `warn`, as before.
             if (!registry.getPackage(id)) return { handled: true, response: deps.error(`Package '${id}' not found`, 404) };
+            // [#30756, the mirror of #30379 ruling A] A rule the enable would
+            // put into service that reads a field a disabled package withholds
+            // refuses the enable: the rule validator fails closed on a field its
+            // object does not serve, so every write to that object would be
+            // refused for as long as the field's package stays off. Asked
+            // BEFORE the state write and `enablePackage`, so a refused enable
+            // leaves the row, the served objects and the environment's stored
+            // state exactly as they were. Same code and wire pair as the
+            // disable door: the refused state is the same one, a disabled
+            // package's withheld field under an active rule.
+            const dependents = readEnableDependentRules(registry, id);
+            if (dependents.length > 0) {
+                return {
+                    handled: true,
+                    response: deps.error(
+                        enableDependentRulesMessage(`Package '${id}' cannot be enabled`, dependents),
+                        PACKAGE_DISABLE_RESTRICTED_BY_VALIDATION_RULE.status,
+                        { code: PACKAGE_DISABLE_RESTRICTED_BY_VALIDATION_RULE.code },
+                    ),
+                };
+            }
             try {
                 await writePackageState(deps, _context, id, false);
             } catch (err) {
@@ -3734,8 +3989,8 @@ async function readPackageCustomizations(
 ): Promise<GetPackageCustomizationsResponse> {
     const overrides = await listServedOverrides({ packageId: baseId });
 
-    const pair = customizationPackageId(baseId);
     const registry = ql?.registry;
+    const pair = pairOf(baseId, installedManifestsOf(registry));
     type Extension = GetPackageCustomizationsResponse['extensions'][number];
     const extensions: Extension[] = [];
     if (pair.ok && typeof registry?.getAllObjects === 'function') {

@@ -13,7 +13,8 @@
 - ⛔ 它、赋值与 `cd … &&` 前缀都落分类器;多仓云会话首调单独裸 `cd /home/user/objectstack`。
 - 活着 = 工作流文件在 `main` 且 Actions 状态 `active`;维护者在 Actions UI 停用即整队回 `direct`。
 - dispatch 带会话令牌发往 objectstack;run 在 runner 上以逐次铸造、窄到目标仓的 App 令牌执行。
-- 闭合 op 表住 `fleet-write/ops.mjs`;读侧不走中继;批量恒走逐 op 工具,直调 `dispatch.mjs` 仅落地。
+- 闭合 op 表住 `fleet-write/ops.mjs`;读侧不走中继;批量恒走逐 op 工具。
+- 直调 `dispatch.mjs` 仅落地,与 PR 正文单笔 `issue_patch`(`seat-post-protocol.md` 正文行,不送页脚)。
 - 正文超 60,000 字节的那一笔 `post-stamped` 写走 `direct` 并印一行,身份是席位自己的用户。
 - run 失败记 5(post-stamped 4,close-cards 有步落地或读不回 4),UNCONFIRMED 6:只读,⛔ 永不重试。
 
@@ -39,7 +40,6 @@
 
 - ✓ 评论 `POST .../issues/{n}/comments`;改评论 `PATCH .../issues/comments/{id}`。
 - ✓ 标签加法 `POST .../issues/{n}/labels`,定向删 `DELETE .../issues/{n}/labels/{name}`;加法优先。
-- ⛔ `post-stamped`/`label-write` 永不接进管道再 `&&`:拒收读成 0;看尾先落文件或 `set -o pipefail`。
 - ⛔ 永不 MCP `issue_write`(锁 1 已拒);会话分类器拒改动 ⇒ 无通道,交有通道席位立卡。
 - ✓ 建卡带标签 `POST .../issues` · 改正文 `PATCH .../issues/{n}` · 认领 `POST .../issues/{n}/assignees`。
 - ✓ 该 `PATCH` 带 `state` 关卡/重开,`state_reason` 交付 `completed`、撤单 `not_planned`,走裸 REST。

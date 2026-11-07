@@ -3875,6 +3875,73 @@ export class AuthPlugin implements Plugin {
     });
 
     // ────────────────────────────────────────────────────────────────────
+    // [#30918] admin: the AI assistants (OAuth clients) another person has
+    // authorized, per organization, and when each was last used. Read only.
+    // The shared gate first, so a caller outside a platform administrator's
+    // reach gets one refusal whoever `userId` names and whether or not that
+    // person exists; then the closed query set { userId } (authorized-clients-read.ts).
+    rawApp.get(`${basePath}/admin/authorized-clients`, async (c: any) => {
+      try {
+        const actor = await gateAdmin(c);
+        if (actor instanceof Response) return actor;
+        const { authorizedClientsDepsFor, runAdminAuthorizedClientsRead } = await import('./authorized-clients-read.js');
+        const answer = await runAdminAuthorizedClientsRead(authorizedClientsDepsFor(this.authManager!), actor, {
+          queries: (c.req.queries() ?? {}) as Record<string, string[]>,
+        });
+        return c.json(answer.body, answer.status as any, answer.headers);
+      } catch (error) {
+        const err = error instanceof Error ? error : new Error(String(error));
+        ctx.logger.error('[AuthPlugin] admin/authorized-clients failed', err);
+        return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: 'The authorized clients could not be read.' } }, 500);
+      }
+    });
+
+    // ────────────────────────────────────────────────────────────────────
+    // [#30958] ADR-0134 — admin: mint and revoke the bearer credentials SCIM
+    // connections authenticate with. The SCIM plugin verifies against
+    // `sys_scim_connection_credential` rows, which the data API never creates
+    // or updates (engine-owned, list only), so these two mounts are the
+    // credential lifecycle's only door. Same family as `set-user-manager`: the
+    // shared platform-admin gate runs first, ahead of any body read, and the
+    // store writes are credited to the admin. The minted bearer is answered
+    // once, `no-store`, and kept nowhere; see `scim-connection-admin.ts`.
+    {
+      const scimCredentialDeps = (actor: PlatformAdminActor): import('./scim-connection-admin.js').ScimCredentialAdminDeps => ({
+        getDataEngine: () => this.authManager!.getDataEngine(),
+        isScimEnabled: () => this.authManager!.isScimWired(),
+        mint: (engine, input) => this.authManager!.mintScimConnectionCredential(engine, input),
+        attributed: (fn) => runAttributedToUser(actor, fn),
+        logger: { warn: (m) => ctx.logger.warn(m), error: (m) => ctx.logger.error(m) },
+      });
+      rawApp.post(`${basePath}/admin/scim/mint-credential`, async (c: any) => {
+        try {
+          const actor = await gateAdmin(c);
+          if (actor instanceof Response) return actor;
+          const { runMintScimCredential } = await import('./scim-connection-admin.js');
+          const { status, body, headers } = await runMintScimCredential(scimCredentialDeps(actor), actor, c.req.raw);
+          return c.json(body, status as any, headers);
+        } catch (error) {
+          const err = error instanceof Error ? error : new Error(String(error));
+          ctx.logger.error('[AuthPlugin] admin/scim/mint-credential failed', err);
+          return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: err.message } }, 500);
+        }
+      });
+      rawApp.post(`${basePath}/admin/scim/revoke-credential`, async (c: any) => {
+        try {
+          const actor = await gateAdmin(c);
+          if (actor instanceof Response) return actor;
+          const { runRevokeScimCredential } = await import('./scim-connection-admin.js');
+          const { status, body } = await runRevokeScimCredential(scimCredentialDeps(actor), actor, c.req.raw);
+          return c.json(body, status as any);
+        } catch (error) {
+          const err = error instanceof Error ? error : new Error(String(error));
+          ctx.logger.error('[AuthPlugin] admin/scim/revoke-credential failed', err);
+          return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: err.message } }, 500);
+        }
+      });
+    }
+
+    // ────────────────────────────────────────────────────────────────────
     // #2766 V1 — admin direct user management. `sys_user` CRUD is suppressed
     // (managedBy better-auth), and until now the only add-a-teammate path was
     // the email-dependent invite flow. These routes let a platform admin
@@ -4689,6 +4756,28 @@ export class AuthPlugin implements Plugin {
         const err = error instanceof Error ? error : new Error(String(error));
         ctx.logger.error('[AuthPlugin] sys-session/revoke failed', err);
         return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: err.message } }, 500);
+      }
+    });
+
+    // ────────────────────────────────────────────────────────────────────
+    // [#30918] The caller's own authorized AI assistants (OAuth consents),
+    // with each one's display name, scopes, organization, grant time and last
+    // verified MCP call. Keyed by the session's subject and nothing else: the
+    // query set is closed and empty, so `?userId=` is refused, never ignored.
+    // Outside `/admin/` because it admits every signed-in person; another
+    // person's grants are the admin door above. See authorized-clients-read.ts.
+    rawApp.get(`${basePath}/authorized-clients`, async (c: any) => {
+      try {
+        const { authorizedClientsDepsFor, runOwnAuthorizedClientsRead } = await import('./authorized-clients-read.js');
+        const answer = await runOwnAuthorizedClientsRead(authorizedClientsDepsFor(this.authManager!), {
+          headers: c.req.raw.headers,
+          queries: (c.req.queries() ?? {}) as Record<string, string[]>,
+        });
+        return c.json(answer.body, answer.status as any, answer.headers);
+      } catch (error) {
+        const err = error instanceof Error ? error : new Error(String(error));
+        ctx.logger.error('[AuthPlugin] authorized-clients failed', err);
+        return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: 'The authorized clients could not be read.' } }, 500);
       }
     });
 

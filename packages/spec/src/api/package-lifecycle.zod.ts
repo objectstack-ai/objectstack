@@ -405,6 +405,12 @@ export const ImportUnmanagedPackageRequestSchema = lazySchema(() => z.object({
   targetName: z.string().optional().describe(
     'Display name of the new base. Defaults to the source package\'s `name`.',
   ),
+  targetNamespace: z.string().optional().describe(
+    'The namespace the copy is renamed into: the new base\'s `namespace`, and the prefix every copied object name '
+    + 'takes in place of the source\'s, with every reference to a renamed name rewritten (the rename '
+    + '`duplicatePackage` applies). Judged by `manifest.namespace`\'s own declaration; a platform-reserved '
+    + 'namespace (`base`, `system`, `sys`) is refused. Absent, the copy keeps the source package\'s namespace.',
+  ),
 }).strict());
 
 /**
@@ -433,7 +439,12 @@ export const ImportUnmanagedPackageResponseSchema = lazySchema(() => z.object({
     'The new writable base that owns every copied item. Nothing is registered under the source id.',
   ),
   namespace: z.string().describe(
-    'The base\'s namespace — the SOURCE package\'s, kept so every copied object name stays valid.',
+    'The base\'s namespace — the request\'s `targetNamespace` when it named one, else the SOURCE package\'s, '
+    + 'kept so every copied object name stays valid.',
+  ),
+  sourceNamespace: z.string().optional().describe(
+    'The SOURCE package\'s namespace, present when the copy was renamed into `namespace` — the provenance of '
+    + 'every copied name. Absent when the copy kept the source\'s namespace.',
   ),
   copiedCount: z.number().describe('How many items were copied.'),
   copied: z.array(z.object({

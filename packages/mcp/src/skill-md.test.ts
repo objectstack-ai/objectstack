@@ -72,6 +72,7 @@ describe('renderSkillMarkdown', () => {
       'create_record',
       'update_record',
       'delete_record',
+      'delete_records',
       'list_actions',
       'run_action',
       'resume_run',

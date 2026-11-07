@@ -366,20 +366,34 @@ const OWNER_EMAIL = 'verify-parent-write-owner@objectstack.test';
  *   details read / create / edit: an edit and a create are expected allowed,
  *   and a delete refused by the detail's own permission (the master's
  *   all-records grant widens which rows, never which verbs).
+ *
+ * Every set also reads every record of each object a probed detail's
+ * required reference names outside its master chain: a write may name, in a
+ * `lookup` or `user` field, only a record the writer can read (#29029), and
+ * the create probe fills those references with records another principal
+ * owns.
  */
 function parentWriteReachPermissionSets(config: any): PermissionSet[] {
   const details = new Set<string>();
   const roots = new Set<string>();
-  for (const c of deriveParentWriteReachCases(config)) {
-    if (c.excluded || c.notDerivable) continue;
+  const cases = deriveParentWriteReachCases(config).filter((c) => !c.excluded && !c.notDerivable);
+  for (const c of cases) {
     details.add(c.object);
     c.hops.forEach((h, i) => (i === c.hops.length - 1 ? roots.add(h.master) : details.add(h.master)));
+  }
+  const crud = new Map<string, CrudCase>(deriveCrudCases(config).map((c) => [c.object, c]));
+  const referenced = new Set<string>();
+  for (const c of cases) {
+    for (const ref of crud.get(c.object)?.relationalRefs ?? []) {
+      if (ref.required && ref.field !== c.hops[0]!.field && !details.has(ref.target) && !roots.has(ref.target)) referenced.add(ref.target);
+    }
   }
   const set = (name: string, label: string, detail: Record<string, boolean>, root: Record<string, boolean>) =>
     ({
       name,
       label,
       objects: {
+        ...Object.fromEntries([...referenced].map((o) => [o, { allowRead: true, viewAllRecords: true }])),
         ...Object.fromEntries([...details].map((o) => [o, { ...detail }])),
         ...Object.fromEntries([...roots].map((o) => [o, { ...root }])),
       },

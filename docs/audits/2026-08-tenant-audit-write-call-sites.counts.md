@@ -33,17 +33,17 @@ silent, and `node scripts/tenant-audit-census.mjs --write` is the resolution.
 
 | Measure | Value |
 |---|---:|
-| Write call sites | 261 |
-| Object name statically decidable | 184 |
+| Write call sites | 265 |
+| Object name statically decidable | 188 |
 | Object name chosen at run time | 77 |
-| Against a tenancy-enabled object | 178 |
+| Against a tenancy-enabled object | 182 |
 | Against an object declaring tenancy off | 6 |
-| Threading a tenant context | 198 |
+| Threading a tenant context | 202 |
 | Provably carrying none | 8 |
 | …and decidably tenancy-enabled | 2 |
 | Options argument unreadable | 55 |
 | …and decidably tenancy-enabled | 29 |
-| Threading a decidably elevated context | 144 |
+| Threading a decidably elevated context | 148 |
 | Threading a decidably non-elevated context | 0 |
 | Threading a context of undecidable elevation | 109 |
 
@@ -90,14 +90,14 @@ holds still. They are required to be HERE and to say WHEN they were true;
 their values are not compared. The reasoning, and the measurement behind it,
 are in `scripts/check-tenant-audit-census.mjs`.
 
-Measured on 2026-11-05 at `e40e04854`.
+Measured on 2026-11-06 at `4addb47fd`.
 
 | corpus scale (not enforced) | count |
 | :--- | ---: |
-| tracked non-test sources scanned | 871 |
-| engine-shaped types recognised | 105 |
-| declared objects in the registry | 127 |
-| same-named calls subtracted as non-engine | 229 |
+| tracked non-test sources scanned | 1045 |
+| engine-shaped types recognised | 112 |
+| declared objects in the registry | 130 |
+| same-named calls subtracted as non-engine | 234 |
 
 ## Every site
 
@@ -120,6 +120,7 @@ Measured on 2026-11-05 at `e40e04854`.
 | `packages/plugins/plugin-audit/src/activity-changed-fields-backfill.ts` | `update` | `sys_activity` | enabled | elevated | 1 |
 | `packages/plugins/plugin-audit/src/auth-event-audit.ts` | `insert` | `sys_audit_log` | enabled | options unreadable | 1 |
 | `packages/plugins/plugin-audit/src/comment-parent-pair-backfill.ts` | `update` | `sys_comment` | enabled | elevated | 1 |
+| `packages/plugins/plugin-audit/src/data-export-audit.ts` | `insert` | `sys_audit_log` | enabled | elevated | 1 |
 | `packages/plugins/plugin-audit/src/mail-log-body-migration.ts` | `update` | `object` | undecidable | elevated | 1 |
 | `packages/plugins/plugin-audit/src/mail-log-body-migration.ts` | `update` | `object` | undecidable | options unreadable | 1 |
 | `packages/plugins/plugin-audit/src/read-audit.ts` | `insert` | `sys_audit_log` | enabled | options unreadable | 1 |
@@ -153,6 +154,7 @@ Measured on 2026-11-05 at `e40e04854`.
 | `packages/plugins/plugin-auth/src/forced-reset-revocation.ts` | `update` | `SystemObjectName.API_KEY` | undecidable | elevated | 1 |
 | `packages/plugins/plugin-auth/src/forced-reset-revocation.ts` | `update` | `SystemObjectName.SESSION` | undecidable | elevated | 1 |
 | `packages/plugins/plugin-auth/src/idp-locale-claim.ts` | `update` | `sys_user` | enabled | elevated | 1 |
+| `packages/plugins/plugin-auth/src/mcp-client-last-use.ts` | `update` | `sys_oauth_consent` | enabled | elevated | 1 |
 | `packages/plugins/plugin-auth/src/member-role-canonical.ts` | `update` | `MEMBER_OBJECT` | undecidable | elevated | 1 |
 | `packages/plugins/plugin-auth/src/membership-backfill-ledger.ts` | `insert` | `DATA_MIGRATION_FLAG_OBJECT` | undecidable | elevated | 1 |
 | `packages/plugins/plugin-auth/src/membership-ended-session.ts` | `update` | `SystemObjectName.SESSION` | undecidable | elevated | 2 |
@@ -166,7 +168,9 @@ Measured on 2026-11-05 at `e40e04854`.
 | `packages/plugins/plugin-auth/src/organization-delete.ts` | `delete` | `sys_team_member` | enabled | elevated | 1 |
 | `packages/plugins/plugin-auth/src/organization-delete.ts` | `delete` | `sys_user_permission_set` | enabled | elevated | 1 |
 | `packages/plugins/plugin-auth/src/reconcile-membership.ts` | `insert` | `sys_member` | enabled | context, elevation undecidable | 1 |
+| `packages/plugins/plugin-auth/src/scim-connection-admin.ts` | `insert` | `sys_audit_log` | enabled | elevated | 1 |
 | `packages/plugins/plugin-auth/src/scim-connection-service.ts` | `insert` | `sys_scim_connection_credential` | enabled | PROVABLY NONE | 1 |
+| `packages/plugins/plugin-auth/src/scim-connection-service.ts` | `update` | `sys_scim_connection_credential` | enabled | elevated | 1 |
 | `packages/plugins/plugin-auth/src/session-tombstone.ts` | `update` | `objectName` | undecidable | options unreadable | 1 |
 | `packages/plugins/plugin-auth/src/sso-client-secret.ts` | `update` | `sys_sso_provider` | disabled | elevated | 1 |
 | `packages/plugins/plugin-auth/src/sys-session-revoke.ts` | `update` | `SystemObjectName.SESSION` | undecidable | elevated | 1 |

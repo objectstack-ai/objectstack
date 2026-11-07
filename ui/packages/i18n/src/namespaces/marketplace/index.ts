@@ -5,9 +5,10 @@
  *
  * ## What this is
  *
- * The `marketplace.*` group of the ten language packs, moved out of them into
- * ten PARTIAL packs — `./<code>.ts`, each the same shape as
- * `../../locales/<code>.ts` with only the `marketplace` group in it — that are
+ * The `marketplace.*` group of the language packs, moved out of them into one
+ * PARTIAL pack per platform locale table tag — `./<tag>.ts`, each the same
+ * shape as `../../locales/<tag>.ts` with only the `marketplace` group in it
+ * (`./zh-Hant.ts` generated from `./zh-Hans.ts` by `gen:zh-hant`) — that are
  * fetched when a marketplace page mounts and deep-merged into the page's
  * i18next instance. The call sites do not change: they still ask
  * `t('marketplace.…')` of the default `translation` namespace, and the keys
@@ -43,14 +44,14 @@
  *
  * Unlike the packs (and unlike the `studio` namespace) nothing here is
  * resident: the pages that read these strings are themselves fetched on
- * demand, so there is no first frame that needs one synchronously. All ten
- * catalogues are one literal `() => import()` each — its own chunk
- * (`apps/console/vite.config.ts` names them `i18n-ns-marketplace-<code>`).
+ * demand, so there is no first frame that needs one synchronously. Every
+ * catalogue is one literal `() => import()` — its own chunk
+ * (`apps/console/vite.config.ts` names them `i18n-ns-marketplace-<tag>`).
  * ⛔ Never collapse the loaders into a template-literal `import()`; the
  * registry's header says why.
  *
  * The one exception is a host that made every catalogue resident on purpose:
- * `registerBuiltInLocales()` (the all-ten door, `@object-ui/i18n/locales`)
+ * `registerBuiltInLocales()` (the all-packs door, `@object-ui/i18n/locales`)
  * registers each language COMPLETE, namespace included, so a catalogue the
  * registry already holds is used as it stands and never fetched.
  *
@@ -64,18 +65,23 @@
  * Every i18n gate that reads pack keys reads these files as part of the
  * packs: `ui/scripts/check-i18n-call-site-keys.mjs` (`collectEnKeys`, so the
  * dead-keys report too) and `ui/scripts/check-i18n-en-drift.mjs` read
- * `./<code>.ts` beside `../../locales/<code>.ts` and refuse a key defined in
- * both. `../../locales/index.ts` (the all-ten door) hands out each language's
+ * `./<tag>.ts` beside `../../locales/<tag>.ts` and refuse a key defined in
+ * both. `../../locales/index.ts` (the all-packs door) hands out each language's
  * pack merged with its catalogue here, so `all-locales-key-parity.test.ts`
  * and every other suite that walks `builtInLocales` still walks these keys.
  * `../../__tests__/marketplace-namespace.test.ts` holds this module's own
- * shape: ten literal loaders, no static catalogue import, no key in both
+ * shape: one literal loader per table tag, no static catalogue import, no key in both
  * places.
  */
 import { useCallback, useContext, useEffect, useSyncExternalStore } from 'react';
 import type { i18n as I18nInstance } from 'i18next';
 import { I18nContext, getI18n } from 'react-i18next';
-import { DEFAULT_BUILT_IN_LANGUAGE, getLoadedBuiltInLocales, matchLanguageTag } from '../../locales/registry.js';
+import type { PlatformLocaleTag } from '@objectstack/spec/system';
+import {
+  DEFAULT_BUILT_IN_LANGUAGE,
+  getLoadedBuiltInLocales,
+  resolveBuiltInLanguage,
+} from '../../locales/registry.js';
 
 /** One language's catalogue: a partial pack holding the `marketplace` group. */
 export type MarketplaceCatalogue = Readonly<Record<string, unknown>>;
@@ -91,23 +97,28 @@ export const MARKETPLACE_NAMESPACE = 'marketplace';
 export const MARKETPLACE_NAMESPACE_PROBE_KEY = 'marketplace.title';
 
 /**
- * The ten catalogues, each fetched on demand — one literal specifier each, so
- * each one is a chunk of its own. ⛔ Read the header before touching the
- * spelling.
+ * The catalogues, each fetched on demand — one literal specifier each, so each
+ * one is a chunk of its own. ⛔ Read the header before touching the spelling.
+ *
+ * Keyed by platform locale table tag and typed on the table, as the packs'
+ * loaders are (`../../locales/registry.ts`): a tag the table gains without its
+ * catalogue here is a compile error.
  */
-const MARKETPLACE_LOADERS: Readonly<Record<string, () => Promise<{ default: MarketplaceCatalogue }>>> =
-  Object.freeze({
-    en: () => import('./en.js'),
-    zh: () => import('./zh.js'),
-    ja: () => import('./ja.js'),
-    ko: () => import('./ko.js'),
-    de: () => import('./de.js'),
-    fr: () => import('./fr.js'),
-    es: () => import('./es.js'),
-    pt: () => import('./pt.js'),
-    ru: () => import('./ru.js'),
-    ar: () => import('./ar.js'),
-  });
+const MARKETPLACE_LOADERS: Readonly<
+  Record<PlatformLocaleTag, () => Promise<{ default: MarketplaceCatalogue }>>
+> = Object.freeze({
+  en: () => import('./en.js'),
+  'zh-Hans': () => import('./zh-Hans.js'),
+  'zh-Hant': () => import('./zh-Hant.js'),
+  es: () => import('./es.js'),
+  ar: () => import('./ar.js'),
+  fr: () => import('./fr.js'),
+  'pt-BR': () => import('./pt-BR.js'),
+  ru: () => import('./ru.js'),
+  de: () => import('./de.js'),
+  ja: () => import('./ja.js'),
+  ko: () => import('./ko.js'),
+});
 
 /** Every language this namespace ships a catalogue for. */
 export const MARKETPLACE_LANGUAGE_CODES: readonly string[] = Object.freeze(Object.keys(MARKETPLACE_LOADERS));
@@ -115,15 +126,19 @@ export const MARKETPLACE_LANGUAGE_CODES: readonly string[] = Object.freeze(Objec
 const own = (record: object, key: string): boolean =>
   Object.prototype.hasOwnProperty.call(record, key);
 
-const hasMarketplaceCatalogue = (code: string): boolean => own(MARKETPLACE_LOADERS, code);
+const hasMarketplaceCatalogue = (code: string): code is PlatformLocaleTag => own(MARKETPLACE_LOADERS, code);
 
 /**
- * The code of the catalogue that serves `lang` — exact tag, then base language
- * (`zh-CN` → `zh`), the order the packs resolve in — or `null` when this
- * namespace has none for it, and `lang` is served by the `en` fallback.
+ * The tag of the catalogue that serves `lang`, read the way the packs resolve —
+ * through the platform locale table's read aliases (`zh-CN` → `zh-Hans`,
+ * `zh-TW` → `zh-Hant`, `pt` → `pt-BR`; `resolveBuiltInLanguage`) — or `null`
+ * when this namespace has none for it, and `lang` is served by the `en`
+ * fallback. Both sets are the table by type, so a pack's tag is always a
+ * catalogue here; the membership check keeps the answer honest if they part.
  */
 export function resolveMarketplaceLanguage(lang: string | undefined): string | null {
-  return matchLanguageTag(lang ?? '', hasMarketplaceCatalogue);
+  const tag = resolveBuiltInLanguage(lang ?? '');
+  return tag !== null && hasMarketplaceCatalogue(tag) ? tag : null;
 }
 
 const loaded: Record<string, MarketplaceCatalogue> = {};
@@ -196,8 +211,9 @@ export function loadMarketplaceCatalogue(code: string): Promise<MarketplaceCatal
 
 /**
  * The `[language key, catalogue code]` pairs an instance rendering `lang` needs:
- * the catalogue that serves `lang` (stored under its code, which is on i18next's
- * resolution path for every tag it serves), and `en`, the packs' fallback.
+ * the catalogue that serves `lang` (stored under its table tag, the key the
+ * packs' bundle has: an instance in a stored alias such as `zh-CN` reaches it
+ * through `fallbackLng`, as it reaches the pack), and `en`, the packs' fallback.
  */
 function catalogueTargets(lang: string): Array<readonly [string, string]> {
   const serving = resolveMarketplaceLanguage(lang);

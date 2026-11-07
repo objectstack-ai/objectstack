@@ -87,13 +87,14 @@ const REPO_READ_ENV: NodeJS.ProcessEnv = gitFreeEnv();
 
 // ── Declared version surfaces, per bundled template (#9264) ─────────────────
 //
-// Every bundled template declares the platform it targets in THREE places, and
+// Every bundled template declares the platform it targets in TWO places, and
 // each one is committed to git, shipped in the tarball and copied into every
 // scaffolded project: the `@objectstack/*` dependencies at the scaffolder's
-// EXACT version, `specVersion` at its major's range, and `engines.protocol` at
-// its protocol major. `scripts/sync-template-versions.mjs` re-stamps all three
-// at version time; these ratchets are the CI half, because that script runs on
-// a changesets/action release PR that gets no CI at all.
+// EXACT version, and `engines.protocol` at its protocol major.
+// `scripts/sync-template-versions.mjs` re-stamps both at version time; these
+// ratchets are the CI half, because that script runs on a changesets/action
+// release PR that gets no CI at all. (A third, the manifest's `specVersion`,
+// was retired under ADR-0049 (#31035): nothing read it.)
 //
 // The template list is DISCOVERED, not written down — the same directory walk
 // the sync script and `check-template-manifests.ts` both use. A hand-kept list
@@ -276,60 +277,14 @@ describe('bundled template declared version surfaces', () => {
       ).toBe(ownMajor);
     });
 
-    // The key #9264 is about. Required by TemplateManifestSchema, read by the
-    // template registry, and copied verbatim into every scaffolded project —
-    // `create-objectstack` rewrites name/displayName/namespace and drops
-    // description, and has never touched this one.
-    it('objectstack.manifest.json declares specVersion at the current @objectstack/spec range', () => {
+    // The key #9264 was about, retired under ADR-0049 (#31035): nothing read
+    // the manifest's `specVersion` — the protocol handshake is the
+    // `engines.protocol` stamp above, and the spec line is the exact
+    // dependency. `check:template-manifests` refuses it by parse; this pins
+    // that the version stamp did not put it back.
+    it('objectstack.manifest.json declares no specVersion (retired; engines.protocol carries the handshake)', () => {
       const manifest = JSON.parse(readTemplateFile('objectstack.manifest.json'));
-      expect(
-        typeof manifest.specVersion,
-        `${template}/objectstack.manifest.json must declare specVersion — it is REQUIRED by ` +
-          'TemplateManifestSchema (packages/spec/src/marketplace/template-manifest.zod.ts)',
-      ).toBe('string');
-
-      const match = /^\^(\d+)\.\d+\.\d+$/.exec(manifest.specVersion);
-      expect(
-        match,
-        `specVersion "${manifest.specVersion}" must be a ^<major>.0.0 package range — it is the ` +
-          'compatible @objectstack/spec range, not the protocol major that engines.protocol carries',
-      ).not.toBeNull();
-      expect(
-        Number(match![1]),
-        `${template} declares specVersion "${manifest.specVersion}" but create-objectstack is ` +
-          `v${ownMajor} — scripts/sync-template-versions.mjs re-stamps this at version time`,
-      ).toBe(ownMajor);
-    });
-
-    // The invariant that ties the two files together: the manifest's declared
-    // spec range and the dependency a scaffolded project actually installs
-    // must name the same line. Either alone can be self-consistently stale;
-    // only comparing them catches a stamp that covered one and not the other,
-    // which is the exact failure this card is about. They are no longer EQUAL
-    // — the dependency is an exact version, `specVersion` a range — so what is
-    // compared is the range the exact dependency's major implies.
-    it('specVersion is the range of the @objectstack/spec dependency the template installs', () => {
-      const manifest = JSON.parse(readTemplateFile('objectstack.manifest.json'));
-      const templatePkg = JSON.parse(readTemplateFile('package.json'));
-      const specDep =
-        templatePkg.dependencies?.['@objectstack/spec'] ??
-        templatePkg.devDependencies?.['@objectstack/spec'];
-
-      expect(
-        specDep,
-        `${template}/package.json must depend on @objectstack/spec for its manifest's ` +
-          'specVersion to be checkable against something',
-      ).toBeDefined();
-      const depMajor = /^(\d+)\.\d+\.\d+/.exec(String(specDep));
-      expect(
-        depMajor,
-        `${template}/package.json pins @objectstack/spec at "${String(specDep)}", which is not an exact version`,
-      ).not.toBeNull();
-      expect(
-        manifest.specVersion,
-        `${template} declares specVersion "${manifest.specVersion}" but installs ` +
-          `@objectstack/spec "${String(specDep)}" — the range must be ^${depMajor![1]}.0.0, the line the pin is on`,
-      ).toBe(`^${depMajor![1]}.0.0`);
+      expect(manifest).not.toHaveProperty('specVersion');
     });
   });
 });

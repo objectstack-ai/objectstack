@@ -330,6 +330,13 @@ const ja = {
       loadFailed: "一覧を読み込めませんでした。名前を直接入力できます。",
       notFound: "{{name}}（見つかりません）",
     },
+    preferenceOption: {
+      allTopics: "すべてのトピック（{{value}}）",
+      allChannels: "すべてのチャネル（{{value}}）",
+      notConfigured: "{{value}}（未設定）",
+      notInList: "{{value}}（一覧にありません）",
+      useTyped: "「{{value}}」を使用",
+    },
     recipient: {
       selectTypeFirst: "先に受信者タイプを選択してください。",
       loading: "読み込み中…",
@@ -2202,6 +2209,10 @@ const ja = {
       defaultValueHint: "デフォルト: {{value}}",
       envLockBadge: "環境変数でロック",
       envLockBadgeTitle: "環境変数で固定されているため、画面から編集できません。",
+      savedBeneathPin: "ここにも値が保存されています。環境変数の値が引き続き有効で、変数を削除すると保存された値が再び適用されます。",
+      clearSaved: "保存された値をクリア",
+      clearSavedConfirm: "ここに保存された値をクリアします。環境変数を削除しても、この値には戻りません。環境変数の値は引き続き有効です。",
+      savedCleared: "保存された値をクリアしました",
       deprecatedBadge: "非推奨",
       deprecatedBadgeReplacedBy: "非推奨 → {{replacedBy}}",
       unsupportedSpecifierType: "サポートされていない設定項目の種類: {{type}}",
@@ -3782,13 +3793,22 @@ const ja = {
     requiredFields: "必須項目: {{fields}}",
   },
   connectAgent: {
+    capabilities: {
+      title: '接続した AI アシスタントにできること',
+      body: '接続すると、AI アシスタントはあなたが扱えるレコードの検索・作成・変更・削除と、このシステムのアクションの実行ができます。常にあなたとして動作し、あなたの権限で許された範囲だけを参照・操作します。',
+      examplesTitle: 'アシスタントで試せる依頼',
+      example1: '私が見られるオブジェクトを一覧にして。',
+      example2: 'それぞれのオブジェクトにレコードが何件あるか数えて。',
+      example3: 'ここで実行できるアクションと、それぞれの内容を教えて。',
+      tryFirst: 'まず 1 つ目を試してください。普段使っているオブジェクトが返ってくれば、接続できています。',
+    },
     disabled: {
-      title: 'このデプロイメントでは MCP が無効です',
-      body: 'MCP サーフェスがオフになっています(OS_MCP_SERVER_ENABLED=false)。運用担当者に再有効化を依頼してください。',
+      title: 'このデプロイメントでは AI アシスタントの接続がオフです',
+      body: 'このデプロイメントでは AI アシスタントの接続がオフになっています(OS_MCP_SERVER_ENABLED=false)。運用担当者に再度オンにするよう依頼してください。',
     },
     url: {
-      title: 'このシステムの MCP エンドポイント',
-      body: 'MCP 対応の AI クライアントはこの URL で接続します。認証はセルフサービスです:デプロイメント自体が OAuth 2.1 認可サーバーなので、ブラウザでログインするだけ。すべての呼び出しはあなたの権限と行レベルセキュリティの下で実行されます。',
+      title: 'このシステムの接続アドレス',
+      body: 'AI アシスタントはこのアドレスで接続します。ブラウザであなた自身としてサインインするので、アシスタントの操作はすべてあなたの権限の範囲で実行されます。',
       downloadSkill: 'SKILL.md をダウンロード',
       skillHint: 'ポータブルなエージェントスキル:スキル対応エージェントにこのシステムの使い方を教えます。',
     },
@@ -3797,7 +3817,7 @@ const ja = {
       reachability: 'claude.ai(Web)は Anthropic のサーバーから接続するため、デプロイメントはパブリック HTTPS で到達可能である必要があります。Claude Desktop などのローカルクライアントはイントラネット環境にも接続できます。',
     },
     claudeCode: {
-      body: 'コマンド一つ — 初回利用時に OAuth ログインが自動で開きます:',
+      body: 'コマンド一つ — 初回利用時にブラウザでのサインインが自動で開きます:',
       plugin: 'または公式プラグインをインストール(ObjectStack スキルとガイド付き /objectstack:connect コマンドを追加):',
     },
     cursor: {
@@ -3811,21 +3831,21 @@ const ja = {
     },
     codex: {
       body: 'Codex アプリで 設定 → MCP サーバー → サーバーを追加 を開き、次のとおり入力します:',
-      hint: '保存し、案内に従って再起動したら、objectstack の横の Authenticate をクリックしてブラウザでサインインします。入力欄に /mcp と入力すると接続状況を確認できます。ブラウザでのサインインに対応していないバージョンでは、ヘッダー Authorization: Bearer <API キー> を追加してください(キーは下で作成)。',
+      hint: '保存し、案内に従って再起動したら、objectstack の横の Authenticate をクリックしてブラウザでサインインします。入力欄に /mcp と入力すると接続状況を確認できます。ブラウザでのサインインに対応していないバージョンでは、ヘッダー Authorization: Bearer <API キー> を追加してください(キーは下の「詳細設定：スクリプトと CI」で作成)。',
     },
     workbuddy: {
       body: 'コネクタ → カスタムコネクタ → MCP を設定 を開き、このエントリを mcpServers にマージします(保存先は ~/.workbuddy/mcp.json):',
-      hint: '保存後、objectstack コネクタで「信頼」をクリックします。信頼するまで有効になりません。サインインが表示されない場合は、リクエストヘッダー Authorization: Bearer <API キー> を追加してください(キーは下で作成)。',
+      hint: '保存後、objectstack コネクタで「信頼」をクリックします。信頼するまで有効になりません。サインインが表示されない場合は、リクエストヘッダー Authorization: Bearer <API キー> を追加してください(キーは下の「詳細設定：スクリプトと CI」で作成)。',
     },
     doubao: {
       title: 'Doubao Work',
       body: 'スキル · コネクタ → 新規 → カスタムコネクタを新規作成 を開き、次のとおり入力します:',
-      hint: '案内に従ってブラウザでサインインします。サインインが表示されない場合は、カスタムヘッダー Authorization: Bearer <API キー> を追加してください(キーは下で作成)。クラウドで実行するタスクには、公開 HTTPS で到達できるデプロイが必要です。',
+      hint: '案内に従ってブラウザでサインインします。サインインが表示されない場合は、カスタムヘッダー Authorization: Bearer <API キー> を追加してください(キーは下の「詳細設定：スクリプトと CI」で作成)。クラウドで実行するタスクには、公開 HTTPS で到達できるデプロイが必要です。',
     },
     qwenwork: {
       title: 'QwenWork',
       body: '拡張 → コネクタ → + 追加 → JSON 設定を貼り付け:',
-      hint: '手動で追加する場合は Streamable HTTP を選び、この URL を入力します。ブラウザでのサインインに対応していないバージョンでは、リクエストヘッダー Authorization: Bearer <API キー> を追加してください(キーは下で作成)。',
+      hint: '手動で追加する場合は Streamable HTTP を選び、この URL を入力します。ブラウザでのサインインに対応していないバージョンでは、リクエストヘッダー Authorization: Bearer <API キー> を追加してください(キーは下の「詳細設定：スクリプトと CI」で作成)。',
     },
     client: {
       title: 'どの AI アシスタントを使っていますか？',
@@ -3833,6 +3853,13 @@ const ja = {
     },
     advanced: {
       title: '詳細設定：スクリプトと CI',
+    },
+    unreachable: {
+      claudeWebTitle: 'claude.ai（Web 版）：このデプロイでは利用できません',
+      claudeWebReason: 'claude.ai は Anthropic のサーバーから接続するため、{{address}} には到達できません。到達できるのは公開 HTTPS アドレスだけです。',
+      doubaoCloudTitle: 'クラウドタスク：このデプロイでは利用できません',
+      doubaoCloudReason: 'Doubao Work のクラウドタスクは自社サーバーから実行されるため、{{address}} には到達できません。到達できるのは公開 HTTPS アドレスだけです。',
+      remedy: 'このシステムを公開 HTTPS アドレス（インターネットから到達できるドメインの https://）で提供すると利用できます。',
     },
     apiKey: {
       title: 'API キー',
@@ -3844,6 +3871,32 @@ const ja = {
       minting: '作成中…',
       showOnce: 'キー「{{name}}」を作成しました — 今すぐコピーしてください。再表示されません:',
       done: '完了 — 非表示にする',
+    },
+    // The list under the setup steps: what can act as the signed-in person.
+    access: {
+      title: 'あなたとして動作できるもの',
+      body: 'あなたが認可した AI アシスタントと、作成した API キーです。いずれもあなたの権限で動作します。',
+      assistants: '認可済みの AI アシスタント',
+      assistantsEmpty: 'まだ AI アシスタントを認可していません。',
+      unnamed: '名前のないアシスタント',
+      inOrganization: '{{name}} 内',
+      authorized: '{{date}} に認可',
+      lastUsedHour: '最終使用:{{time}} からの 1 時間以内',
+      notRecorded: '使用記録なし',
+      truncated: '新しいものだけを表示しています。認可済みのアシスタントはほかにもあります。',
+      withdrawLater: 'このページからアシスタントの認可を取り消す機能はまだありません。',
+      keys: 'あなたの API キー',
+      keysEmpty: 'API キーはありません。',
+      created: '{{date}} に作成',
+      keyLastUsed: '最終使用:{{time}}',
+      neverUsed: '未使用',
+      revoked: '失効済み',
+      expired: '期限切れ',
+      revoke: '失効させる',
+      revokeTitle: 'API キー「{{name}}」を失効させますか？',
+      revokeBody: 'このキーを使うものはすぐにアクセスできなくなります。元に戻せません。',
+      revoking: '失効処理中…',
+      loadFailed: 'この一覧を読み込めませんでした:{{message}}',
     },
   },
   excelImport: {

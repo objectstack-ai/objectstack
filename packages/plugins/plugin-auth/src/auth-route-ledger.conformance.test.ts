@@ -220,11 +220,20 @@ describe('auth route ledger hygiene', () => {
     // ruling of 2026-08-23).
     const own = AUTH_ROUTE_LEDGER.filter((e) => e.source === 'objectstack').map((e) => e.route).sort();
     expect(own).toEqual([
+      // [#30918] Both authorized-clients reads, on this pin's own terms:
+      // `auth-plugin.ts` mounts each itself (a `rawApp.get` on the
+      // `${basePath}/admin/authorized-clients` and
+      // `${basePath}/authorized-clients` templates, ahead of the catch-all),
+      // and the `live.has(route)` loop below holds them to the same proof —
+      // better-auth's own consent read is `/oauth2/get-consents`, a different
+      // path.
+      'GET /api/v1/auth/admin/authorized-clients',
       // [#30398] On this pin's own terms: `auth-plugin.ts` mounts it itself (a
       // `rawApp.get` on the `${basePath}/admin/client-address` template, ahead
       // of the catch-all), and the `live.has(route)` loop below holds it to the
       // same proof — better-auth serves no address read.
       'GET /api/v1/auth/admin/client-address',
+      'GET /api/v1/auth/authorized-clients',
       'GET /api/v1/auth/bootstrap-status',
       'GET /api/v1/auth/config',
       // On this pin's own terms: `auth-plugin.ts` mounts it itself (a
@@ -246,6 +255,13 @@ describe('auth route ledger hygiene', () => {
       // below holds it to the same proof — better-auth serves no roster.
       'POST /api/v1/auth/admin/list-platform-admins',
       'POST /api/v1/auth/admin/oauth2/toggle-disabled',
+      // [#30958] On this pin's own terms: `auth-plugin.ts` mounts both itself
+      // (`rawApp.post` on the `${basePath}/admin/scim/mint-credential` and
+      // `${basePath}/admin/scim/revoke-credential` templates, ahead of the
+      // catch-all), and the `live.has(route)` loop below holds them to the
+      // same proof — stable `@better-auth/scim` serves no credential endpoint.
+      'POST /api/v1/auth/admin/scim/mint-credential',
+      'POST /api/v1/auth/admin/scim/revoke-credential',
       // [#16678] The thirteenth, added on this pin's own terms exactly as the
       // set-initial-password row below was: `auth-plugin.ts` mounts it itself
       // (a `rawApp.post` on the `${basePath}/admin/set-user-manager`

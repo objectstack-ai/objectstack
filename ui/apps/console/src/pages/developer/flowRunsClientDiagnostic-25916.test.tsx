@@ -33,7 +33,7 @@ import { FlowRunsPage } from './FlowRunsPage';
 
 afterEach(() => cleanup());
 
-const { zh } = builtInLocales;
+const { 'zh-Hans': zh } = builtInLocales;
 const zhFlow = zh.console.developer.flowRuns;
 
 /** A client that serves one flow but has no automation surface at all. */

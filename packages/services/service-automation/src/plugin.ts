@@ -3,6 +3,7 @@
 import type { Plugin, PluginContext } from '@objectstack/core';
 import { effectiveTenancyPosture, isServiceNotRegisteredError, resolveLocalizationContext, resolveUserAuthzGrants } from '@objectstack/core';
 import type { IClusterService, IJobService, IPubSub } from '@objectstack/spec/contracts';
+import { installedManifestsOf, type InstalledPackageSource } from '@objectstack/metadata-core';
 import type { FlowFunctionEffect } from '@objectstack/spec/automation';
 import type {
     Connector,
@@ -578,6 +579,23 @@ export function nonHostDeclaringPackageOf(
     const name = (entry as { name?: unknown }).name;
     const declaration = typeof name === 'string' ? readers.registeredDeclaration!(name, stamp) : undefined;
     return declaresSameProviderBinding(entry, declaration, stamp) ? undefined : { packageId: stamp, why: 'stored' };
+}
+
+/**
+ * The package registry ObjectQL serves, read where it is used, or `undefined`
+ * when the host serves no ObjectQL: the installed manifests the customization
+ * pair lookup reads (`installedManifestsOf`). Without one, no package is
+ * installed, and every package is its own App. Absent is read the way this
+ * plugin's other optional `objectql` reads it (`flowHistoryReader`, the
+ * suspended-run store): a `getService` that throws is no service, whichever
+ * kernel spelled the refusal.
+ */
+function objectqlRegistryOf(ctx: PluginContext): InstalledPackageSource | undefined {
+    try {
+        return ctx.getService<{ registry?: InstalledPackageSource }>('objectql')?.registry;
+    } catch {
+        return undefined;
+    }
 }
 
 /**
@@ -5224,6 +5242,7 @@ export class AutomationServicePlugin implements Plugin {
             items,
             ctx.logger,
             engine ? (name) => engine.packagedFlowOwner(name) : undefined,
+            installedManifestsOf(objectqlRegistryOf(ctx)),
         );
     }
 

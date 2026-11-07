@@ -23,8 +23,9 @@
  * ## What it judges, and what it never reads
  *
  *  - **The row's own binding** — its `package_id` column — must be X's pair,
- *    `isCustomizationPairOf(package_id, X)` from `@objectstack/spec`, the one
- *    spelling of the `.custom` suffix (N-08). ⛔ Never a body stamp: a stored
+ *    `isPairOf(package_id, X)` from `@objectstack/metadata-core` — the pair of
+ *    the App that carries X, the `.custom` suffix spelled once in
+ *    `@objectstack/spec` (N-08). ⛔ Never a body stamp: a stored
  *    body can carry a `_packageId` copied from a read of the base, and that
  *    copy names the base while the row belongs to another package (the shape
  *    #28238 measured). A declaration from any package that is not X's pair —
@@ -46,12 +47,14 @@
  * before they ask this predicate (`declinesStoredRow`). Arming a flow override
  * is N-11's.
  *
- * Pure, synchronous and total: no I/O, no registry read, and `false` for any
- * input it cannot read as a declaring row. Whether the pair package is
+ * Pure, synchronous and total: no I/O, and `false` for any input it cannot
+ * read as a declaring row. Which App carries X is read through the caller's
+ * `installed` lookup (the registry it serves); whether the pair package is
  * INSTALLED is not its question.
  */
 
-import { isCustomizationPairOf, isOverridableMetadataType } from '@objectstack/spec/kernel';
+import { isOverridableMetadataType } from '@objectstack/spec/kernel';
+import { isPairOf, type InstalledManifestLookup } from '@objectstack/metadata-core';
 import { PLURAL_TO_SINGULAR } from '@objectstack/spec/shared';
 import { storedRowDocument } from './item-lock.js';
 
@@ -82,10 +85,14 @@ export interface ServedOverrideRow {
  * | `package_id: null`, body `_packageId: 'hotcrm.custom'`, `overrides.package: 'hotcrm'` | `hotcrm` | `false` — a body stamp binds nothing |
  * | `object`, `package_id: 'hotcrm.custom'`, `overrides.package: 'hotcrm'` | `hotcrm` | `false` — extended, never replaced |
  */
-export function isServedOverrideRowOf(row: ServedOverrideRow | null | undefined, basePackageId: unknown): boolean {
+export function isServedOverrideRowOf(
+    row: ServedOverrideRow | null | undefined,
+    basePackageId: unknown,
+    installed: InstalledManifestLookup,
+): boolean {
     if (row === null || row === undefined || typeof row !== 'object') return false;
     if (typeof basePackageId !== 'string' || basePackageId === '') return false;
-    if (!isCustomizationPairOf(row.package_id, basePackageId)) return false;
+    if (!isPairOf(row.package_id, basePackageId, installed)) return false;
     if (typeof row.type !== 'string' || !isOverridableMetadataType(PLURAL_TO_SINGULAR[row.type] ?? row.type)) {
         return false;
     }

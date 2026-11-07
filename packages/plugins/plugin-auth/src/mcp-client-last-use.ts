@@ -1,0 +1,266 @@
+// Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+
+/**
+ * [#30918] When an authorized AI assistant was last used: a coarse stamp the
+ * server writes on a verified MCP call, and nothing else ever writes.
+ *
+ * ## Where it lives
+ *
+ * `sys_oauth_consent.last_used_at`, an ObjectStack column on the
+ * better-auth-managed consent table. The consent is the right row for three
+ * reasons. It is the grant the person can see and withdraw, so the stamp is
+ * read beside it (`authorized-clients-read.ts`). It is held per organization
+ * (`reference_id`), so a client used in one organization never moves the
+ * stamp of its grant in another. And a withdrawn or revoked consent is a
+ * deleted row, so no usage record outlives the grant it describes. MCP access
+ * tokens are JWTs and are not stored, so there is no token row to stamp, and
+ * the refresh token moves only on a refresh.
+ *
+ * ## Who writes it, and when
+ *
+ * Only {@link McpClientLastUseStamper.record}, and only with the principal
+ * `AuthManager.verifyMcpAccessToken` has just verified: the token's subject,
+ * its `azp` client, its `organization_id` claim and its `iat`, every one read
+ * from a signature this server checked. The time is the server's clock. No
+ * request field, header or body reaches the stamp, and the consent doors
+ * better-auth serves (`/oauth2/consent`, `/oauth2/update-consent`) do not
+ * carry the column. A token with no `azp` names no client, so it stamps
+ * nothing.
+ *
+ * ## Only the consent that admitted the call
+ *
+ * The verifier admits a token only while the consent it was minted under
+ * stands (#30879, `mcp-token-revocation.ts` `mcpConsentAdmits`): the consent
+ * for (`azp`, `sub`, organization) exists and was created no later than the
+ * token's `iat`. The stamp picks its consent by that same rule
+ * ({@link consentForToken}), so it can only land on the consent that admitted
+ * the call. A revoked consent refuses the call, so it stamps nothing. A
+ * consent revoked and granted again belongs to the new grant: an old token is
+ * refused, and even when the re-grant lands between the verdict and the stamp
+ * (the stamp runs after the response), the new consent is newer than the old
+ * token and is not stamped with the old token's use. A consent deleted
+ * between the stamp's read and its write is a no-op (below). A server-only
+ * `skip_consent` client has no consent row, so it stamps nothing.
+ *
+ * ## How coarse, and why an hour
+ *
+ * The stored value is the START of the clock hour in which a verified call
+ * arrived, and a row is written only when its stored hour is older than the
+ * current one. So:
+ *
+ *  - **at most one write per consent per hour in each process**, however
+ *    many MCP calls the client makes in it. An assistant can make hundreds of tool calls a
+ *    minute; a per-request write would turn every one into a write on an
+ *    identity table. An hour is the granularity a person needs to answer
+ *    "is this laptop's assistant still acting as me?" and the granularity
+ *    an administrator can be shown without exposing a minute-by-minute
+ *    activity trail;
+ *  - **the answer says what it means**: "used during the hour starting at
+ *    X", never a precision the server did not keep.
+ *
+ * Each process also remembers, per (client, user, organization), the hour it
+ * last settled, so within an hour a busy client costs no I/O at all. The first
+ * verified call of an hour costs one read (and one write when no other
+ * process has stamped that hour yet); with several processes, each reads at
+ * most once an hour per consent and the row is written once, or a few times
+ * with the same value when first calls race. The memory is bounded
+ * ({@link MCP_CLIENT_LAST_USE_MEMO_CAP} entries, oldest dropped first).
+ *
+ * ## Off the request path
+ *
+ * The MCP request does not wait for the stamp: the manager schedules it after
+ * the response (`run-after-response.ts`). A failed read or write loses that
+ * hour's stamp and nothing else. Each DISTINCT failure (by its message) is
+ * reported once per process at `error`, because the reads keep answering an
+ * older stamp as if it were current, and the hour is retried in the next
+ * hour, not on the next call, so a store outage never becomes a write or a
+ * log line per request. Keying the report on the message, not on "the first
+ * failure", is what keeps one benign failure from silencing a later real
+ * one (the missing column, an unreachable store). The benign one is also
+ * not a failure at all: a consent withdrawn between the read and the write
+ * leaves nothing to stamp, so the real store answers that write's
+ * `RECORD_NOT_FOUND` as done.
+ */
+
+/** The stamp's granularity: one clock hour. */
+export const MCP_CLIENT_LAST_USE_GRANULARITY_MS = 60 * 60 * 1000;
+
+/** How many (client, user, organization) keys one process remembers. */
+export const MCP_CLIENT_LAST_USE_MEMO_CAP = 10_000;
+
+/**
+ * How many distinct failure messages one process reports. A bound, so a store
+ * whose error text varies per row cannot turn the report into a log line per
+ * consent; past it the stamper stays silent, as one consent's hour is.
+ */
+export const MCP_CLIENT_LAST_USE_FAILURE_REPORT_CAP = 16;
+
+/** The verified principal, as `verifyMcpAccessToken` returns it, plus the verified token's `iat`. */
+export interface VerifiedMcpPrincipal {
+  userId: string;
+  clientId?: string;
+  organizationId?: string;
+  /** The verified token's `iat`, in seconds. Without one, no consent admits the token, so nothing is stamped. */
+  issuedAt?: number;
+}
+
+/** One consent row, as the store reads it for the stamp. */
+export interface StampableConsent {
+  id: string;
+  /** The consent's organization, `null`/empty when it binds none. */
+  referenceId: string | null;
+  /** When the consent was granted, `null` when the row does not say. */
+  createdAt: Date | null;
+  /** The stored stamp, `null` when none has been written. */
+  lastUsedAt: Date | null;
+}
+
+/** The two store operations the stamp needs. {@link mcpClientLastUseStoreFor} wires the real ones. */
+export interface McpClientLastUseStore {
+  /** Every consent `userId` holds for `clientId`, across organizations. */
+  consentsFor(clientId: string, userId: string): Promise<StampableConsent[]>;
+  /** Write `at` as the consent's stamp. A consent that is gone by now is a no-op. */
+  stamp(consentId: string, at: Date): Promise<void>;
+}
+
+/**
+ * The consent a verified token was minted under, by the rule the verifier
+ * admits it by (`mcpConsentAdmits`, #30879): the consent bound to the token's
+ * organization when it carries one, otherwise the consent bound to none (the
+ * provider's own `findConsent` rule), and only when it was created no later
+ * than the token was issued, compared in whole seconds, the unit of `iat`. A
+ * newer consent is a later grant the token does not belong to.
+ */
+export function consentForToken(
+  consents: readonly StampableConsent[],
+  organizationId: string | undefined,
+  issuedAt: number | undefined,
+): StampableConsent | undefined {
+  const consent = organizationId
+    ? consents.find((row) => row.referenceId === organizationId)
+    : consents.find((row) => !row.referenceId);
+  if (!consent || typeof issuedAt !== 'number' || !Number.isFinite(issuedAt) || !consent.createdAt) return undefined;
+  return Math.floor(consent.createdAt.getTime() / 1000) <= issuedAt ? consent : undefined;
+}
+
+/** The start of the clock hour `nowMs` falls in. */
+export function lastUseHourOf(nowMs: number): number {
+  return Math.floor(nowMs / MCP_CLIENT_LAST_USE_GRANULARITY_MS) * MCP_CLIENT_LAST_USE_GRANULARITY_MS;
+}
+
+const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] } as const;
+
+/** The engine slice the real store reads and writes through. */
+interface StampEngine {
+  find(object: string, query: Record<string, unknown>, options?: unknown): Promise<unknown>;
+  update(object: string, doc: Record<string, unknown>, options?: unknown): Promise<unknown>;
+}
+
+const toDate = (value: unknown): Date | null => {
+  if (value == null || value === '') return null;
+  const date = value instanceof Date ? value : new Date(value as string | number);
+  return Number.isNaN(date.getTime()) ? null : date;
+};
+
+/**
+ * The real store: the data engine under a system context. A consent is a
+ * better-auth-managed row, and a system write passes the identity write guard
+ * by construction (ADR-0092 D2), so this is the platform's own server-side
+ * write, as the session tombstone is.
+ */
+export function mcpClientLastUseStoreFor(getEngine: () => unknown): McpClientLastUseStore {
+  const engine = (): StampEngine => {
+    const found = getEngine() as StampEngine | undefined;
+    if (!found) throw new Error('The data engine is not available.');
+    return found;
+  };
+  return {
+    async consentsFor(clientId, userId) {
+      const rows = await engine().find(
+        'sys_oauth_consent',
+        {
+          where: { client_id: clientId, user_id: userId },
+          fields: ['id', 'reference_id', 'created_at', 'last_used_at'],
+          // One consent per organization the person granted this client in.
+          limit: 1000,
+        },
+        { context: SYSTEM_CTX },
+      );
+      return (Array.isArray(rows) ? rows : []).map((row: Record<string, unknown>) => ({
+        id: String(row.id),
+        referenceId: typeof row.reference_id === 'string' && row.reference_id ? row.reference_id : null,
+        createdAt: toDate(row.created_at),
+        lastUsedAt: toDate(row.last_used_at),
+      }));
+    },
+    async stamp(consentId, at) {
+      try {
+        await engine().update('sys_oauth_consent', { id: consentId, last_used_at: at }, { context: SYSTEM_CTX });
+      } catch (error) {
+        // The consent was read a moment ago and withdrawn since (the person,
+        // or a revoke, deleted the row): there is no grant left to stamp, so
+        // the engine's by-id 404 (`recordNotFoundError`, `@objectstack/core`)
+        // is the stamp's done, not its failure.
+        if ((error as { code?: unknown } | null)?.code === 'RECORD_NOT_FOUND') return;
+        throw error;
+      }
+    },
+  };
+}
+
+/**
+ * Records verified MCP calls as coarse per-consent stamps. One instance per
+ * `AuthManager`, so the per-process memory is shared by every token it
+ * verifies.
+ */
+export class McpClientLastUseStamper {
+  /** (client, user, organization) → the hour start this process last settled. */
+  private readonly settled = new Map<string, number>();
+  /** The failure messages this process has already reported. */
+  private readonly reportedFailures = new Set<string>();
+
+  constructor(
+    private readonly store: McpClientLastUseStore,
+    private readonly opts: {
+      now?: () => number;
+      /** Told about each DISTINCT failure (by message) once in this process. */
+      onNewFailure?: (error: unknown) => void;
+    } = {},
+  ) {}
+
+  /**
+   * Stamp the consent `principal`'s token was minted under, unless this hour
+   * is already stamped. Resolves once the stamp is settled; never rejects.
+   */
+  async record(principal: VerifiedMcpPrincipal): Promise<void> {
+    const { userId, clientId, organizationId, issuedAt } = principal;
+    if (!userId || !clientId) return;
+    const hour = lastUseHourOf((this.opts.now ?? Date.now)());
+    const key = JSON.stringify([clientId, userId, organizationId ?? null]);
+    if (this.settled.get(key) === hour) return;
+    // Claimed BEFORE the I/O, so concurrent calls of the same hour skip it,
+    // and kept on failure, so an outage is retried next hour, not next call.
+    this.settled.delete(key);
+    this.settled.set(key, hour);
+    if (this.settled.size > MCP_CLIENT_LAST_USE_MEMO_CAP) {
+      const oldest = this.settled.keys().next().value;
+      if (oldest !== undefined) this.settled.delete(oldest);
+    }
+    try {
+      const consent = consentForToken(await this.store.consentsFor(clientId, userId), organizationId, issuedAt);
+      if (!consent) return;
+      if (consent.lastUsedAt && consent.lastUsedAt.getTime() >= hour) return;
+      await this.store.stamp(consent.id, new Date(hour));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (this.reportedFailures.has(message)) return;
+      if (this.reportedFailures.size >= MCP_CLIENT_LAST_USE_FAILURE_REPORT_CAP) return;
+      this.reportedFailures.add(message);
+      try {
+        this.opts.onNewFailure?.(error);
+      } catch {
+        // A report is best-effort; the stamp never becomes the caller's failure.
+      }
+    }
+  }
+}

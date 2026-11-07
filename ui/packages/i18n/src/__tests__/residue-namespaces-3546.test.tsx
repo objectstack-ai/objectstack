@@ -59,6 +59,7 @@
  * slice six, and it is not what this slice repairs.
  */
 import { describe, it, expect, beforeEach } from 'vitest';
+import { PLATFORM_LOCALE_TAGS } from '@objectstack/spec/system';
 import { renderHook } from '@testing-library/react';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -199,7 +200,7 @@ beforeEach(() => {
 
 describe('objectui#3546 slice seven — the ratchet residue', () => {
   it('covers all ten packs and all twenty-four paths (guards the loops from emptying)', () => {
-    expect(LANGS).toHaveLength(10);
+    expect(LANGS).toHaveLength(PLATFORM_LOCALE_TAGS.length);
     expect(MEASURED_KEYS).toHaveLength(17);
     expect(LINK_END_MEMBERS).toHaveLength(2);
     expect(STATUS_MEMBERS).toHaveLength(5);
@@ -477,8 +478,8 @@ describe('objectui#3546 slice seven — the ratchet residue', () => {
       expect(at(builtInLocales.de, 'gantt.linkType.fs')).toBe('Ende → Anfang');
       expect(at(builtInLocales.de, 'gantt.linkEnd.start')).toBe('Anfang');
       expect(at(builtInLocales.de, 'gantt.linkEnd.end')).toBe('Ende');
-      expect(at(builtInLocales.zh, 'gantt.linkType.fs')).toBe('完成 → 开始');
-      expect(at(builtInLocales.zh, 'gantt.linkEnd.start')).toBe('开始');
+      expect(at(builtInLocales['zh-Hans'], 'gantt.linkType.fs')).toBe('完成 → 开始');
+      expect(at(builtInLocales['zh-Hans'], 'gantt.linkEnd.start')).toBe('开始');
       expect(at(builtInLocales.ar, 'gantt.linkType.fs')).toBe('نهاية → بداية');
       expect(at(builtInLocales.ar, 'gantt.linkEnd.start')).toBe('بداية');
       expect(at(builtInLocales.ar, 'gantt.linkEnd.end')).toBe('نهاية');
@@ -552,13 +553,13 @@ describe('objectui#3546 slice seven — the ratchet residue', () => {
       expect(at(builtInLocales.fr, 'organization.invitations.status.accepted')).toBe('Acceptée');
       expect(at(builtInLocales.es, 'organization.accept.accepted')).toBe('Invitación aceptada');
       expect(at(builtInLocales.es, 'organization.invitations.status.accepted')).toBe('Aceptada');
-      expect(at(builtInLocales.pt, 'organization.accept.accepted')).toBe('Convite aceito');
-      expect(at(builtInLocales.pt, 'organization.invitations.status.accepted')).toBe('Aceito');
+      expect(at(builtInLocales['pt-BR'], 'organization.accept.accepted')).toBe('Convite aceito');
+      expect(at(builtInLocales['pt-BR'], 'organization.invitations.status.accepted')).toBe('Aceito');
       // …and `all`, the filter tab's own member, follows the same gender: the
       // noun it quantifies is "invitations".
       expect(at(builtInLocales.fr, 'organization.invitations.status.all')).toBe('Toutes');
       expect(at(builtInLocales.es, 'organization.invitations.status.all')).toBe('Todas');
-      expect(at(builtInLocales.pt, 'organization.invitations.status.all')).toBe('Todos');
+      expect(at(builtInLocales['pt-BR'], 'organization.invitations.status.all')).toBe('Todos');
       // `canceled` is the ORG withdrawing the invitation, not the invitee
       // declining it, so de takes `zurückgezogen` from its own cancel toast
       // rather than the generic `Abgebrochen`.
@@ -628,8 +629,8 @@ describe('objectui#3546 slice seven — the ratchet residue', () => {
         'Listo',
       );
     }
-    expect(at(builtInLocales.zh, 'approvalsInbox.statusPending')).toBe('待审批');
-    expect(at(builtInLocales.zh, 'organization.invitations.status.pending')).toBe('等待中');
+    expect(at(builtInLocales['zh-Hans'], 'approvalsInbox.statusPending')).toBe('待审批');
+    expect(at(builtInLocales['zh-Hans'], 'organization.invitations.status.pending')).toBe('等待中');
   });
 
   it('the concept neighbours are the ones this slice claims, and they still say so', () => {
@@ -642,8 +643,8 @@ describe('objectui#3546 slice seven — the ratchet residue', () => {
     expect(at(builtInLocales.en, 'home.welcomeAdminDescriptionNoAi')).toBe(
       'Set up your first application from the Administration menu on the left.',
     );
-    expect(at(builtInLocales.zh, 'home.welcomeAdminDescriptionNoAi')).toContain('「管理」菜单');
-    expect(at(builtInLocales.zh, 'layout.systemNav.administration')).toBe('管理');
+    expect(at(builtInLocales['zh-Hans'], 'home.welcomeAdminDescriptionNoAi')).toContain('「管理」菜单');
+    expect(at(builtInLocales['zh-Hans'], 'layout.systemNav.administration')).toBe('管理');
     expect(at(builtInLocales.de, 'home.welcomeAdminDescriptionNoAi')).toContain('Verwaltungsmenü');
     expect(at(builtInLocales.de, 'layout.systemNav.administration')).toBe('Verwaltung');
     expect(at(builtInLocales.ru, 'home.welcomeAdminDescriptionNoAi')).toContain('«Администрирование»');
@@ -686,9 +687,9 @@ describe('objectui#3546 slice seven — the ratchet residue', () => {
     // product name stays Latin in all ten, which is why `Studio` shows up in the
     // loanword check above.
     expect(at(builtInLocales.en, 'topbar.designInStudio')).toBe('Design in Studio');
-    expect(at(builtInLocales.zh, 'topbar.designInStudio')).toBe('在 Studio 中设计');
-    expect(at(builtInLocales.zh, 'common.edit')).toBe('编辑');
-    expect(at(builtInLocales.zh, 'common.editInStudio')).toBe('在 Studio 中编辑');
+    expect(at(builtInLocales['zh-Hans'], 'topbar.designInStudio')).toBe('在 Studio 中设计');
+    expect(at(builtInLocales['zh-Hans'], 'common.edit')).toBe('编辑');
+    expect(at(builtInLocales['zh-Hans'], 'common.editInStudio')).toBe('在 Studio 中编辑');
 
     // `on this instance` — ru and ar both render instance/deployment with their
     // own environment word, and have done so consistently.
@@ -697,7 +698,8 @@ describe('objectui#3546 slice seven — the ratchet residue', () => {
     expect(at(builtInLocales.en, 'auth.login.devAdminHint.title')).toBe('Local development instance');
     expect(at(builtInLocales.ru, 'approvalsInbox.recallUnavailable')).toBe('Отзыв недоступен в этой среде.');
     expect(at(builtInLocales.ru, 'workspace.multiOrgDisabled')).toContain('в этой среде');
-    expect(at(builtInLocales.ar, 'connectAgent.disabled.title')).toBe('MCP معطّل في هذا النشر');
+    // The Connect an AI Assistant page rewrote this title in plain words; it keeps the word.
+    expect(at(builtInLocales.ar, 'connectAgent.disabled.title')).toContain('في هذا النشر');
     expect(at(builtInLocales.ar, 'workspace.multiOrgDisabled')).toContain('في هذا النشر');
     // …and the "X ist disabled" sentence shape comes from the pack's own
     // `gantt.readOnlyHint`, not from a fresh construction.
@@ -870,13 +872,13 @@ describe('objectui#3546 slice seven — the ratchet residue', () => {
     // and this hole takes either a field label or the record label above. pt
     // alone diverges in sentence shape; `en` is unchanged, so the drift gate has
     // no event here.
-    expect(composed('pt')).toContain('mais recente que afeta este registro');
-    expect(composed('pt')).not.toContain('de este');
-    expect(at(builtInLocales.pt, 'detail.concurrentUpdateDescription')).toContain('que afeta {{field}}');
+    expect(composed('pt-BR')).toContain('mais recente que afeta este registro');
+    expect(composed('pt-BR')).not.toContain('de este');
+    expect(at(builtInLocales['pt-BR'], 'detail.concurrentUpdateDescription')).toContain('que afeta {{field}}');
     // The split contract the dialog depends on: exactly one hole, so
     // `split('{{field}}')` yields exactly the two halves it destructures.
     expect(
-      (at(builtInLocales.pt, 'detail.concurrentUpdateDescription') as string).split('{{field}}'),
+      (at(builtInLocales['pt-BR'], 'detail.concurrentUpdateDescription') as string).split('{{field}}'),
     ).toHaveLength(2);
   });
 
@@ -889,7 +891,7 @@ describe('objectui#3546 slice seven — the ratchet residue', () => {
     // (45 values against 25 single), everyone else mirrors en.
     for (const lang of LANGS) {
       const value = at(builtInLocales[lang], KEY) as string;
-      expect(value.includes(lang === 'zh' ? '——' : '—'), `${lang} ${KEY} dash`).toBe(true);
+      expect(value.includes(lang === 'zh-Hans' || lang === 'zh-Hant' ? '——' : '—'), `${lang} ${KEY} dash`).toBe(true);
     }
     // fr writes the straight apostrophe U+0027 (502 values against 21 curly) —
     // across every path, not just this one.
@@ -905,11 +907,11 @@ describe('objectui#3546 slice seven — the ratchet residue', () => {
     expect(at(builtInLocales.ru, 'empty.appNotFoundDescription')).toContain('учётной');
     // The quote style around `{{name}}` follows the sibling empty-state value in
     // the SAME pack: zh curly, ja corner brackets, the rest ASCII.
-    expect(at(builtInLocales.zh, 'empty.objectNotFoundDescription')).toContain('“{{name}}”');
-    expect(at(builtInLocales.zh, 'empty.interfacePageSourceMissing')).toContain('“{{name}}”');
+    expect(at(builtInLocales['zh-Hans'], 'empty.objectNotFoundDescription')).toContain('“{{name}}”');
+    expect(at(builtInLocales['zh-Hans'], 'empty.interfacePageSourceMissing')).toContain('“{{name}}”');
     expect(at(builtInLocales.ja, 'empty.objectNotFoundDescription')).toContain('「{{name}}」');
     expect(at(builtInLocales.ja, 'empty.interfacePageSourceMissing')).toContain('「{{name}}」');
-    for (const lang of ['ko', 'fr', 'es', 'pt', 'ru', 'ar'] as const) {
+    for (const lang of ['ko', 'fr', 'es', 'pt-BR', 'ru', 'ar'] as const) {
       expect(at(builtInLocales[lang], 'empty.interfacePageSourceMissing'), `${lang} quotes`).toContain('"{{name}}"');
     }
     // de WAS the deliberate divergence: at slice-seven time its sibling values
@@ -1034,7 +1036,7 @@ describe('objectui#3546 slice seven — the ratchet residue', () => {
       ).toBe(true);
     });
 
-    it.each(['en', 'zh'] as const)('%s resolves every sampled key from the pack', (lang) => {
+    it.each(['en', 'zh-Hans', 'zh-Hant'] as const)('%s resolves every sampled key from the pack', (lang) => {
       const { result } = renderHook(() => useObjectTranslation(), { wrapper: wrapperFor(lang) });
       for (const [key, owner] of SAMPLE) {
         const value = result.current.t(key);
@@ -1063,7 +1065,7 @@ describe('objectui#3546 slice seven — the ratchet residue', () => {
     it('both template families render every member, in en and in zh', () => {
       // Exercised the way the call sites build the key, so a family that resolves
       // in the abstract but not through the template would still fail.
-      for (const lang of ['en', 'zh'] as const) {
+      for (const lang of ['en', 'zh-Hans', 'zh-Hant'] as const) {
         window.localStorage.clear();
         const { result } = renderHook(() => useObjectTranslation(), { wrapper: wrapperFor(lang) });
         for (const member of LINK_END_MEMBERS) {

@@ -73,6 +73,14 @@
  *              payload check, step 1b (package id), the ADR-0131 D3
  *              walled-catalog refusal and step 1c (protocol handshake),
  *              none of which writes, and before any write.
+ *              [#30794] `targetNamespace` (optional) renames the copy into
+ *              a namespace of its own — the import's rename-on-install:
+ *              every copied object name takes it, every reference follows,
+ *              and the answer's `installedFrom.namespace` records the
+ *              source's. Absent, the copy keeps the package's namespace.
+ *          `targetNamespace` beside a `managed` install (or no `installMode`)
+ *          answers `400 INVALID_REQUEST` before anything is fetched: a
+ *          managed install is never renamed, it keeps its upgrade channel.
  *          A mode the package's `installModes` does not permit answers
  *          `422 INSTALL_MODE_NOT_PERMITTED`, before any write.
  *          Either mode reads the body's `withheldMaps` — the connector header
@@ -237,6 +245,10 @@ import {
     fieldPatchTargetRefusals,
     fieldPatchTargetRefusalMessage,
     type FieldPatchTargetRefusal,
+    // [ADR-0146 D3 · ruling record 6691022506] The installed manifests the
+    // override gate's pair lookup reads.
+    installedManifestsOf,
+    type InstalledManifestLookup,
 } from '@objectstack/metadata-core';
 import { resolveCloudUrl } from './cloud-url.js';
 import { resolveMarketplacePublicBaseUrl } from './marketplace-public-url.js';
@@ -1841,6 +1853,25 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             }, 400);
         }
 
+        // 0″. [#30794] ⭐ RENAME-ON-INSTALL IS UNMANAGED ONLY. A `targetNamespace`
+        //     renames the copy an `unmanaged` install writes; a MANAGED install
+        //     is the package itself, registered under the namespace it ships
+        //     and upgraded through it, so it is never renamed — refused here,
+        //     before the cloud round-trip, never ignored. The value itself is
+        //     judged by the import, against the manifest key's own declaration.
+        const targetNamespace: unknown = body?.targetNamespace;
+        if (targetNamespace !== undefined && installMode !== 'unmanaged') {
+            return c.json({
+                success: false,
+                error: {
+                    code: 'INVALID_REQUEST',
+                    message: '`targetNamespace` renames an unmanaged copy, and this install is managed: a managed install '
+                        + 'is never renamed — it keeps the package\'s namespace and its upgrade channel. Install with '
+                        + '`installMode: \'unmanaged\'` to take a copy under a namespace of its own, or omit `targetNamespace`.',
+                },
+            }, 400);
+        }
+
         // ── Offline path: an inline manifest was supplied (file import). ──
         // Bypass the cloud-fetch entirely; no OS_CLOUD_URL required.
         const inlineManifest = body?.manifest && typeof body.manifest === 'object' ? body.manifest : null;
@@ -2233,6 +2264,7 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                 userId,
                 withheldMaps,
                 protocolCheckSkipped,
+                ...(targetNamespace !== undefined ? { targetNamespace } : {}),
             });
         }
 
@@ -3803,7 +3835,7 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         // each under its own id. A delivered package is in no registry yet: its
         // dependencies and its items are read off the body, and it registers
         // read-only, so it is a base a sibling's closure can hold.
-        const delivered = new Map<string, { dependencies: string[]; items: OverrideWriteItem[] }>();
+        const delivered = new Map<string, { manifest: unknown; dependencies: string[]; items: OverrideWriteItem[] }>();
         const entries: Record<string, any>[] = Array.isArray(converted.packages)
             ? converted.packages
                 .map((entry: unknown) => (isPlainObject(entry) && isPlainObject(entry.manifest) ? entry.manifest : undefined))
@@ -3812,8 +3844,17 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         for (const body of entries) {
             const id = entries.length === 1 && !Array.isArray(converted.packages) ? manifestId : manifestIdOf(body);
             if (typeof id !== 'string' || id === '') continue;
-            delivered.set(id, { dependencies: dependencyIdsOf(declaredPackageManifest(body)), items: overrideWriteItemsOf(body) });
+            const manifest = declaredPackageManifest(body);
+            delivered.set(id, { manifest, dependencies: dependencyIdsOf(manifest), items: overrideWriteItemsOf(body) });
         }
+        // The manifests the pair lookup reads: a delivered package's own,
+        // else the installed one — who may declare an override of a base is
+        // its App's pair (`pairOf`).
+        const installedRegistry = installedManifestsOf(registry);
+        const manifestOf: InstalledManifestLookup = (id) => {
+            const local = delivered.get(id)?.manifest;
+            return isPlainObject(local) ? local : installedRegistry(id);
+        };
         const dependenciesOf = (id: string): string[] => delivered.get(id)?.dependencies
             ?? dependencyIdsOf((registry.getPackage?.(id) as { manifest?: unknown } | undefined)?.manifest);
         const closureOf = (id: string): string[] => {
@@ -3892,7 +3933,10 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                 }
                 const verdict = judgeOverrideWrite(
                     { type: item.type, name: item.name, packageId, item: item.item },
-                    { dependencies: closure, shippers, baseItemOf: (base) => shipped.get(base), baseItemsOf: (base) => listed.get(base) ?? [] },
+                    {
+                        dependencies: closure, shippers, baseItemOf: (base) => shipped.get(base),
+                        baseItemsOf: (base) => listed.get(base) ?? [], installed: manifestOf,
+                    },
                 );
                 if (verdict.verdict === 'refuse') {
                     refusals.push({
@@ -3918,7 +3962,7 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                     if (holding === undefined) continue;
                     const verdict = judgeOverrideWrite(
                         { type: item.type, name: item.name, packageId: dependent, item: holding },
-                        { dependencies: dependentClosure, shippers: [baseId] },
+                        { dependencies: dependentClosure, shippers: [baseId], installed: manifestOf },
                     );
                     if (verdict.verdict === 'refuse') {
                         collisions.push({ type: item.type, name: item.name, packageId: dependent, rule: verdict.rule, message: verdict.message });
@@ -4007,9 +4051,11 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             withheldMaps: readonly WithheldMap[];
             /** [#30326] The handshake admitted the package unchecked ({@link protocolCheckSkippedOf}). */
             protocolCheckSkipped: ProtocolCheckSkipped | undefined;
+            /** [#30794] The namespace the copy is renamed into, as the request wrote it; the import judges it. */
+            targetNamespace?: unknown;
         },
     ): Promise<Response> => {
-        const { manifest, manifestId, version, versionId, userId, withheldMaps, protocolCheckSkipped } = args;
+        const { manifest, manifestId, version, versionId, userId, withheldMaps, protocolCheckSkipped, targetNamespace } = args;
         let protocol: UnmanagedImporter | undefined;
         try { protocol = ctx.getService<UnmanagedImporter>('protocol'); } catch { /* no protocol service */ }
         if (!protocol || typeof protocol.importUnmanagedPackage !== 'function') {
@@ -4029,6 +4075,7 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         try {
             result = await protocol.importUnmanagedPackage({
                 manifest: packageBody,
+                ...(targetNamespace !== undefined ? { targetNamespace } : {}),
                 ...(userId ? { actor: userId } : {}),
             } as Parameters<NonNullable<UnmanagedImporter['importUnmanagedPackage']>>[0]);
         } catch (err: any) {
@@ -4059,13 +4106,20 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             }, resolved.status as any);
         }
 
+        // [#30794] A renamed copy's provenance carries the namespace its names
+        // came from beside the package and version: `installedFrom.namespace`
+        // → the answer's `namespace` is the mapping the rename applied.
+        // Omitted when the copy kept the source's namespace, so that answer's
+        // key set is unchanged.
         const installedFrom = {
             packageId: result.sourcePackageId,
             ...(result.sourceVersion !== undefined ? { version: result.sourceVersion } : {}),
+            ...(result.sourceNamespace !== undefined ? { namespace: result.sourceNamespace } : {}),
         };
         ctx.logger?.info?.(
             `[MarketplaceInstallLocal] installed ${manifestId} unmanaged: ${result.copiedCount} item(s) copied into the `
-            + `environment base '${result.targetPackageId}' (namespace '${result.namespace}'), installed from `
+            + `environment base '${result.targetPackageId}' (namespace '${result.namespace}'`
+            + `${result.sourceNamespace !== undefined ? `, renamed from '${result.sourceNamespace}'` : ''}), installed from `
             + `${installedFrom.packageId}${installedFrom.version ? `@${installedFrom.version}` : ''}`
             + `${userId ? ` by ${userId}` : ''}. Nothing is registered under '${manifestId}'; the copy follows no upgrade.`,
         );

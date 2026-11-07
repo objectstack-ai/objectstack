@@ -37,6 +37,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
           account_locked: "账户锁定",
           config_change: "配置变更",
           import: "导入",
+          export: "导出",
           platform_admin_standing_change: "平台管理员权限变更",
           action_invocation: "动作调用"
         }

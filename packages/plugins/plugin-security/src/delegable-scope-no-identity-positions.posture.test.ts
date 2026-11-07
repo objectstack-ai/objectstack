@@ -37,6 +37,7 @@ import { SysUserPermissionSet } from './objects/sys-user-permission-set.object.j
 import { RESERVED_IDENTITY_NAMES } from './objects/reserved-identity-names.js';
 import { defaultPermissionSets } from './objects/index.js';
 import { BUILTIN_IDENTITY_ORG_EXTERNAL } from '@objectstack/spec';
+import { provisionRigUsers } from './__tests__/rig-users.testkit.js';
 
 const SYS = { isSystem: true } as const;
 const ORG_A = 'org_a';
@@ -53,7 +54,12 @@ const PERMISSIONS = [
   {
     name: 'east_admin',
     label: 'East delegate',
-    objects: { sys_user_position: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true } },
+    // [#29029] With read on `sys_user`, the companion grant a delegate holds
+    // to pick people: the write names a holder its caller reads.
+    objects: {
+      sys_user_position: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true },
+      sys_user: { allowRead: true },
+    },
     adminScope: { businessUnit: 'east', includeSubtree: true, manageAssignments: true, assignablePermissionSets: ['field_user'] },
   },
 ];
@@ -62,20 +68,26 @@ const POSITIONS = [{ name: CONTROL, label: 'Field rep', permissionSets: ['field_
 type Posture = 'single' | 'group' | 'isolated';
 const POSTURES: Posture[] = ['single', 'group', 'isolated'];
 
+/**
+ * [#29029] Organization A's users as `org_user_ids`, which the runtime fills
+ * from `sys_member`: what the shipped sets' `sys_user` read rule reads.
+ */
+const ORG_USERS = ['u_delegate', 'u_org_admin', 'u_platform', 'u_target'];
+
 /** One caller per branch of the report, and how the report must name the branch it took. */
 const BRANCHES = {
   'tenant-level': {
-    context: { userId: 'u_platform', positions: [], permissions: ['admin_full_access'], posture: 'PLATFORM_ADMIN', tenantId: ORG_A, accessible_org_ids: [ORG_A] },
+    context: { userId: 'u_platform', positions: [], permissions: ['admin_full_access'], posture: 'PLATFORM_ADMIN', tenantId: ORG_A, accessible_org_ids: [ORG_A], org_user_ids: ORG_USERS },
     isTenantAdmin: true,
     scopes: [] as string[],
   },
   'organization-level': {
-    context: { userId: 'u_org_admin', positions: [], permissions: ['organization_admin'], tenantId: ORG_A, accessible_org_ids: [ORG_A] },
+    context: { userId: 'u_org_admin', positions: [], permissions: ['organization_admin'], tenantId: ORG_A, accessible_org_ids: [ORG_A], org_user_ids: ORG_USERS },
     isTenantAdmin: false,
     scopes: [] as string[],
   },
   delegated: {
-    context: { userId: 'u_delegate', positions: [], permissions: ['east_admin'], tenantId: ORG_A, accessible_org_ids: [ORG_A] },
+    context: { userId: 'u_delegate', positions: [], permissions: ['east_admin'], tenantId: ORG_A, accessible_org_ids: [ORG_A], org_user_ids: ORG_USERS },
     isTenantAdmin: false,
     scopes: ['east_admin'],
   },
@@ -88,6 +100,9 @@ const MEMBERSHIPS = [
   { id: 'm_delegate', user_id: 'u_delegate', role: 'member' },
   { id: 'm_target', user_id: 'u_target', role: 'member' },
 ];
+
+/** [#29029] Every user this suite's writes name or act as: each gets a `sys_user` row. */
+const RIG_USERS = ORG_USERS;
 
 const engines: ObjectQL[] = [];
 afterEach(async () => {
@@ -113,8 +128,10 @@ async function boot(posture: Posture) {
     objects: [SysUserPosition, SysUserPermissionSet, SysMember, SysBusinessUnit, SysBusinessUnitMember],
   } as any);
   await engine.syncSchemas();
-  // `sys_user` registered and unprovisioned, as in the sibling posture suites.
+  // [#29029] `sys_user` provisioned with a row for every user the writes name,
+  // as in the sibling posture suites.
   if (!engine.registry.getObject(SysUser.name)) engine.registry.registerObject(SysUser as never, 'qa.delegable-scope-identity');
+  await provisionRigUsers(engine, RIG_USERS);
   engines.push(engine);
 
   const services: Record<string, unknown> = {

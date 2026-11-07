@@ -65,6 +65,7 @@
  *   exists so the neighbourhood cannot be deleted for a green.
  */
 import { describe, it, expect } from 'vitest';
+import { PLATFORM_LOCALE_TAGS } from '@objectstack/spec/system';
 import { builtInLocales } from '../locales/index';
 
 type LocaleCode = keyof typeof builtInLocales;
@@ -108,7 +109,7 @@ describe('the dashboard empty-state placeholders are retired from the ten packs 
     // Guards the premise the rest of the file rests on: a pin that iterates an
     // empty pack list, or asserts absence inside a namespace that itself
     // vanished, is green for the wrong reason.
-    expect(LANGS).toHaveLength(10);
+    expect(LANGS).toHaveLength(PLATFORM_LOCALE_TAGS.length);
     for (const lang of LANGS) {
       const root = at(builtInLocales[lang], 'dashboard');
       expect(root, `${lang} lost the dashboard root`).toBeDefined();
