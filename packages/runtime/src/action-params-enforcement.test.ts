@@ -33,7 +33,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { enforceActionParams, type ActionExecutionDeps } from './action-execution.js';
+import { enforceActionParams, resolveDeclaredActionParams, type ActionExecutionDeps } from './action-execution.js';
 
 /** `enforceActionParams` reaches nothing on `deps` — it only forwards it. */
 const NO_DEPS = undefined as unknown as ActionExecutionDeps;
@@ -186,5 +186,30 @@ describe('enforceActionParams — the ADR-0104 D2 gate (#14864)', () => {
         expect(enforceActionParams(NO_DEPS, REQUIRES_TITLE, NO_OBJECT, {}, where)).toBeNull();
         expect(warn).toHaveBeenCalledTimes(1);
         expect(String(warn.mock.calls[0]?.[0])).toContain('OS_ALLOW_LAX_ACTION_PARAMS=1');
+    });
+});
+
+describe('[ADR-0106 D1 · ADR-0104 D2] resolveDeclaredActionParams — an objectOverride param inherits from the object it names', () => {
+    const OWN = { name: 'project', fields: { budget: { type: 'currency', required: true, label: 'Approved budget' } } };
+    const OTHER = { name: 'vendor', fields: { budget: { type: 'select', options: [{ value: 'low' }, { value: 'high' }], label: 'Vendor budget' } } };
+    const ACTION = { name: 'quote_vendor_budget', params: [{ field: 'budget', objectOverride: 'vendor' }] };
+    const objectOf = (name: string) => (name === 'vendor' ? OTHER : name === 'project' ? OWN : undefined);
+
+    it('reads the field of the object the override names, not the own object\'s same-named field', () => {
+        expect(resolveDeclaredActionParams(NO_DEPS, ACTION, OWN, objectOf)).toEqual([
+            { name: 'budget', type: 'select', multiple: undefined, required: false, options: OTHER.fields.budget.options },
+        ]);
+    });
+
+    it('a target the lookup does not resolve keeps the own object\'s same-named field, as before', () => {
+        expect(resolveDeclaredActionParams(NO_DEPS, ACTION, OWN, () => undefined)).toEqual([
+            { name: 'budget', type: 'currency', multiple: undefined, required: true, options: undefined },
+        ]);
+    });
+
+    it('with no lookup — the run doors\' call through enforceActionParams — the reading is unchanged', () => {
+        expect(resolveDeclaredActionParams(NO_DEPS, ACTION, OWN)).toEqual(resolveDeclaredActionParams(NO_DEPS, ACTION, OWN, () => undefined));
+        expect(enforceActionParams(NO_DEPS, ACTION, OWN, {}, { objectName: 'project', actionName: ACTION.name }))
+            .toBe('Invalid action params: Action param "budget" is required');
     });
 });

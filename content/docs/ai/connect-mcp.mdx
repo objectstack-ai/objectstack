@@ -401,7 +401,8 @@ drive this MCP server. Same word, different layer.
   scope name only the fields the caller can read, the same field set
   `GET /api/v1/meta/object/:name` serves that caller. `list_actions` follows
   the same projection: an action that object door withholds from the caller
-  (one whose param binds a field the caller cannot read) is not listed, and a
+  (one whose param binds a field the caller cannot read, judged on the object
+  the param names, so an object-less action too) is not listed, and a
   listed action's params carry no label, help text or options of such a
   field. Sparse results or denied
   writes usually mean governance is *working*, not that the connection is

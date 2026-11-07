@@ -170,7 +170,7 @@ import type { AuditMetaItemRequest, HistoryMetaItemRequest, PublishMetaItemReque
 import { canonicalMetaUrlType } from '@objectstack/spec/shared';
 import { handleRouteError, sendFieldVisibilityFault, thrownAnswerIsBareNotFound } from './error-response.js';
 import type { MetaRouteScope, TransportScopedMetaRequest } from './meta-collection-routes.js';
-import { META_ITEM_MEMBER_PARAM, META_ITEM_PUBLISHED_PARAMS, metaMemberSelector } from './meta-item-read-gate.js';
+import { META_ITEM_MEMBER_PARAM, META_ITEM_PUBLISHED_PARAMS, metaMemberSelector, projectMetaActionItem } from './meta-item-read-gate.js';
 import { refuseUnknownQueryParams } from './query-allowlist.js';
 import { refuseRepeatedQueryParams } from './query-multiplicity.js';
 import {
@@ -1094,6 +1094,8 @@ export interface MetaItemPublishedRouteHost {
     readonly objectQLProvider: RestServer['objectQLProvider'];
     resolveRequestEnvironmentId: RestServer['resolveRequestEnvironmentId'];
     resolveMetadataService: RestServer['resolveMetadataService'];
+    /** [ADR-0106 D1] The `object` list read the `action` projection reads its objects from. */
+    metaListSource: RestServer['metaListSource'];
 }
 
 /**
@@ -1245,6 +1247,25 @@ export function registerMetaItemPublishedRoute(this: MetaItemPublishedRouteHost,
                             served = masked.document;
                         } else if (publishedMaskPosture.kind === 'undetermined') {
                             res.header('Cache-Control', 'private, no-store');
+                        }
+                        // [ADR-0106 D1] An `action` is served as the object
+                        // door's projection serves it to this caller, as the
+                        // plain read serves it; a withheld one is this door's
+                        // answer for a name with nothing published behind it.
+                        if (publishedMetaType === 'action') {
+                            const projected = await projectMetaActionItem({
+                                ...this.metaListSource(gateProtocol, environmentId),
+                                resolveObjectMasker: () => this.resolveObjectMasker(environmentId, req, 'object'),
+                            }, served);
+                            if (projected.kind === 'withhold') {
+                                res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Not found' } });
+                                return;
+                            }
+                            if (projected.kind === 'fault') {
+                                sendFieldVisibilityFault(res, projected.object);
+                                return;
+                            }
+                            if (projected.cacheControl) res.header('Cache-Control', projected.cacheControl);
                         }
                         res.json(served);
                     };
