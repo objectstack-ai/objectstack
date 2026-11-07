@@ -68,6 +68,8 @@ import {
     resolveDiscoveryEnvironment,
 } from '@objectstack/spec/api';
 import type { ApiRoutes, CapabilityDescriptor, ServiceInfo, WellKnownCapabilities } from '@objectstack/spec/api';
+// [commit 376c70f98] The derived `version` this facet's `getDiscovery()` serves as the
+// `DiscoverySchema` "System Identity" field — never a literal again.
 import { resolveDiscoveryVersion } from './discovery-version.js';
 import { CORE_SERVICE_PROVIDER, serviceUnavailableMessage } from '@objectstack/spec/system';
 import { SERVICE_CONFIG } from './protocol-discovery-services.js';

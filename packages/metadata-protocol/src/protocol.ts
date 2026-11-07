@@ -10,8 +10,6 @@ import { IDataEngine, recordNotFoundError } from '@objectstack/core';
 import { resolveThrownHttpError } from '@objectstack/types';
 import { resolveQueryReadLimits } from '@objectstack/types';
 import { type TenancyPosture } from '@objectstack/spec/security';
-// [commit 376c70f98] The derived `version` this file's `getDiscovery()` serves as the
-// `DiscoverySchema` "System Identity" field — never a literal again.
 import type { MetadataHostEngine } from './host-engine.js';
 import {
     SDUI_MANIFEST_SERVICE,
