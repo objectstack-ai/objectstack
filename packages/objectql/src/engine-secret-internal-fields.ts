@@ -27,7 +27,11 @@
  * may only seal a new value or keep its own record's ref. `encryptSecretFields`
  * takes the write's own stored rows ({@link StoredRowsReader}) and refuses any
  * other ref with {@link SecretRefWriteError}; the system principal keeps the
- * pass-through.
+ * pass-through. The stored rows a non-system write is compared against are
+ * the rows as that caller's own read door serves them
+ * ({@link storedReferencesCallerReads}), which serves a `secret` column
+ * masked, so no stored ref is one a non-system write keeps: every ref it
+ * sends gets the same refusal, whatever the column holds.
  *
  * ## How the moved bodies reach the class
  *
@@ -40,7 +44,7 @@
  * (`_registry`, `cryptoProvider`, `txStore`, `logger`) go as GETTERS, so each
  * read happens when the body makes it: `setCryptoProvider` replaces the
  * provider at any time, and a body sees whatever is installed at the moment it
- * reads, as it did. The six methods they call (`getDriver`,
+ * reads, as it did. The seven methods they call (`find`, `getDriver`,
  * `transactionCoversDriverFor`, `isClosedUnitHandle`, `omitInternalFields`,
  * `privilegedReadDriverOptions`, `resolveSecret`) go as late-bound closures
  * over the instance, so a double or spy set on the engine — tests replace
@@ -74,6 +78,7 @@ import {
   SECRET_MASK,
 } from './secret-fields.js';
 import { isSearchCompanionRequested, stripSearchCompanion } from './search-companion.js';
+import { storedReferencesCallerReads } from './engine-referential-integrity.js';
 import type { ObjectQL } from './engine.js';
 
 /**
@@ -89,6 +94,7 @@ export interface SecretInternalFieldsHost {
   readonly cryptoProvider: ObjectQL['cryptoProvider'];
   readonly txStore: ObjectQL['txStore'];
   readonly logger: ObjectQL['logger'];
+  find: ObjectQL['find'];
   getDriver: ObjectQL['getDriver'];
   transactionCoversDriverFor: ObjectQL['transactionCoversDriverFor'];
   isClosedUnitHandle: ObjectQL['isClosedUnitHandle'];
@@ -124,7 +130,9 @@ export interface SecretHandleSlot {
  * insert (a new record holds no ref of its own), the pre-image for a by-id
  * update, the matched rows for a predicate update — and the reader is called
  * only when a non-system payload carries a ref, so every other write reads
- * nothing more than it did.
+ * nothing more than it did. The rows are compared only as the caller's own
+ * read door serves them ({@link storedReferencesCallerReads}), never as the
+ * call site read them.
  */
 export type StoredRowsReader = () => Promise<readonly (Record<string, unknown> | null | undefined)[] | null>;
 
@@ -140,9 +148,12 @@ export const SECRET_REF_WRITE_REFUSAL_STATUS = 400;
 
 /**
  * [#27582] Refusal of a `secret:` ref on a non-system write that is not the
- * value the record's own column already holds. Fail closed, with one answer:
- * the message names the column and never the ref, and nothing about the handle
- * the ref names is looked up, so the answer is the same whatever it names.
+ * value the record's own column holds as its caller reads it. Fail closed, with
+ * one answer: the message names the column and never the ref, and nothing about
+ * the handle the ref names is looked up, so the answer is the same whatever it
+ * names. The read door serves a `secret` column masked to every caller, so a
+ * non-system write that sends a ref always meets this refusal, whatever the
+ * column holds.
  */
 export class SecretRefWriteError extends Error {
   readonly code = SECRET_REF_WRITE_REFUSAL_CODE;
@@ -154,9 +165,10 @@ export class SecretRefWriteError extends Error {
   constructor(object: string, field: string) {
     super(
       `Stored-reference value refused for secret field "${object}.${field}": a value that starts with "secret:" `
-        + 'is read as a reference to a credential already stored, not as a credential, and a write may only keep '
-        + 'the reference this record already holds. To set the secret, send its value; to clear it, write null; '
-        + 'to leave it unchanged, omit the field. Nothing was written.',
+        + 'is read as a reference to a credential already stored, not as a credential, and a write keeps a '
+        + 'reference only where it is the value its caller reads in this column, which serves a secret masked. '
+        + 'To set the secret, send its value; to clear it, write null; to leave it unchanged, omit the field or '
+        + 'send back the mask it reads. Nothing was written.',
     );
     this.name = 'SecretRefWriteError';
     this.object = object;
@@ -200,18 +212,21 @@ export class SecretRefWriteError extends Error {
  *    a new value or keep its own record's ref. From the system principal
  *    (`context.isSystem === true`) it is left as-is, as it always was. From
  *    any other caller it is kept only when every row the write lands on
- *    already holds exactly that ref in that column — read from `storedRows`,
- *    which each call site supplies (none for an insert, the pre-image for a
- *    by-id update, the matched rows for a predicate update) — and then the
- *    key is dropped, as the echoed mask is. Any other ref is REFUSED with
+ *    holds exactly that ref in that column AS THE CALLER'S OWN READ DOOR
+ *    SERVES IT — `storedRows`, which each call site supplies (none for an
+ *    insert, the pre-image for a by-id update, the matched rows for a
+ *    predicate update), projected by {@link storedReferencesCallerReads} —
+ *    and then the key is dropped, as the echoed mask is. The read door serves
+ *    a `secret` column masked ({@link maskSecretFields}), never as stored, so
+ *    no stored ref is kept: every ref is REFUSED with
  *    {@link SecretRefWriteError} (ADR-0112 `VALIDATION_ERROR`/400), one
- *    answer whatever the ref names.
+ *    answer whatever the ref names and whatever the column holds.
  *  - **Fail-closed:** any other secret value with no CryptoProvider registered,
  *    or no reachable `sys_secret` store, THROWS — never persists cleartext.
  *    (A `password` field needs no CryptoProvider — it is stored as-is.)
  */
 export async function encryptSecretFields(
-  this: Pick<SecretInternalFieldsHost, '_registry' | 'cryptoProvider' | 'getDriver'>,
+  this: Pick<SecretInternalFieldsHost, '_registry' | 'cryptoProvider' | 'getDriver' | 'find' | 'logger'>,
   object: string,
   row: Record<string, unknown>,
   context: ExecutionContext | undefined,
@@ -256,7 +271,18 @@ export async function encryptSecretFields(
       // predicate that matches nothing) has nothing to keep. Kept, the key is
       // dropped, as the echoed mask is: the column is not rewritten at all, so
       // the verdict cannot go stale before the statement runs.
-      ownRows ??= (await storedRows()) ?? [];
+      // ⛔ The rows are compared only as this caller's own read door serves
+      // them, never as stored: the answer to a column the caller cannot read
+      // as stored must not depend on what it holds. The door serves a
+      // `secret` column masked, so no ref survives the projection and every
+      // ref this caller sends is refused alike.
+      ownRows ??= await storedReferencesCallerReads.call(
+        this,
+        object,
+        ((await storedRows()) ?? []).map((own) => (own && typeof own === 'object' ? own : {})),
+        secretFields,
+        context,
+      );
       const keepsOwn = ownRows.length > 0 && ownRows.every((own) => own?.[field] === value);
       if (!keepsOwn) throw new SecretRefWriteError(object, field);
       delete row[field];

@@ -23,8 +23,11 @@ import { type Dict, isDict } from '../shared.js';
  * Ruling B made the parse refuse a `controlled_by_parent` object without
  * exactly one `master_detail` declared `required: true`, and retired the
  * security runtime's second tier, which derived the master from ANY
- * `master_detail`. One shape inside that refusal has a producer at rest:
- * objectui's Studio adds a field as `{ type, label }` and its Required toggle
+ * `master_detail`. (Ruling A of #30905 later amended ADR-0055 §1 to admit an
+ * only `master_detail` declared `required: false` as an optional master; the
+ * omitted key this entry converts is unchanged by it.) One shape inside that
+ * refusal has a producer at rest: objectui's Studio adds a field as
+ * `{ type, label }` and its Required toggle
  * writes `required: true` or nothing, and the object's Settings tab offers
  * `controlled_by_parent`. So a Studio-authored detail can be stored with its
  * one master reference carrying no `required` key at all. Before protocol 18
@@ -53,9 +56,11 @@ import { type Dict, isDict } from '../shared.js';
  * authored object.
  *
  * **Deliberately narrow — exactly one shape, nothing else.**
- * - An explicit `required: false` is NOT converted. The builder refuses it
- *   loudly rather than forcing it (an authored contradiction, ADR-0032), so the
- *   stored pass does not overrule an author the builder would have stopped.
+ * - An explicit `required: false` is NOT converted. On the object's only
+ *   `master_detail` it is the OPTIONAL master (ADR-0055 §1 as amended, #30905
+ *   ruling A): the builder keeps it as written and the parse admits it, so the
+ *   stored pass keeps it too. Beside another `master_detail` there is no one
+ *   master to default (below), and the builder refuses it there.
  * - An object with two or more `master_detail` fields is NOT converted. Choosing
  *   which reference becomes the master is exactly the pick ADR-0055 §1 refuses.
  * - A required `lookup` (the retired third tier) is NOT converted. Turning it
@@ -64,9 +69,12 @@ import { type Dict, isDict } from '../shared.js';
  *   rule only.
  *
  * **Retired from the load path, from day one.** The authoring funnel does not
- * replay it, so a live author still meets the parse's refusal and its
- * prescription. A stored row, a built artifact inside its declared-floor window
- * and `os migrate meta --from 17` all replay it. Idempotent by construction: a
+ * replay it: a live author meets the builder's own force through
+ * `ObjectSchema.create()` and `os lint`'s `relationship/master-detail-required`
+ * at `error`. A raw parse cannot see the omission (the field default writes
+ * `false` first), so there the omitted key reads as the optional master. A
+ * stored row, a built artifact inside its declared-floor window and
+ * `os migrate meta --from 17` all replay it. Idempotent by construction: a
  * converted field carries `required`, which this transform never touches again.
  */
 const cbpMasterDetailRequiredDefaulted: MetadataConversion = {
@@ -107,7 +115,7 @@ const cbpMasterDetailRequiredDefaulted: MetadataConversion = {
           },
         },
         {
-          // An explicit `required: false` — refused by the builder, not converted here.
+          // An explicit `required: false` — the optional master, kept as written; not converted.
           name: 'cbpd_explicit',
           label: 'Explicit',
           sharingModel: 'controlled_by_parent',

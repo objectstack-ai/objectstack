@@ -878,6 +878,23 @@ export function setRuntimeObjectView(runtime: MCPServerRuntime, objects: McpObje
 }
 
 /**
+ * [ADR-0106] A coded refusal an object view raised (a schema whose field
+ * visibility could not be evaluated, refused by the stdio host's caller view),
+ * in the `{ error, code, status }` vocabulary the object resources answer a
+ * miss and an outage with; `undefined` for a throw with no code. `details` is
+ * withheld, as on the data tools.
+ */
+function objectResourceRefusal(err: unknown): { error: string; code: string; status?: number } | undefined {
+  const envelope = thrownRefusalEnvelope(err);
+  if (!envelope) return undefined;
+  return {
+    error: envelope.message,
+    code: envelope.code,
+    ...(envelope.status !== undefined ? { status: envelope.status } : {}),
+  };
+}
+
+/**
  * [#6055] Resolve the `objectstack://objects/{objectName}` answer for one call.
  *
  * The `agent_prompt` sibling of this fix, on the second occurrence of the same
@@ -906,7 +923,18 @@ export async function buildObjectSchemaResource(
 
   // [#25245] The object from `objects` ({@link McpObjectView}); the verdict
   // on a miss is still the metadata service's.
-  const objectDef = await objects.getObject(objectName);
+  // [ADR-0106] A coded refusal from the view (the stdio host's caller view
+  // refuses a schema whose field visibility it could not evaluate) answers
+  // in this resource's `{ error, code, status }` vocabulary
+  // ({@link objectResourceRefusal}); an uncoded throw travels, as before.
+  let objectDef: unknown;
+  try {
+    objectDef = await objects.getObject(objectName);
+  } catch (err) {
+    const refusal = objectResourceRefusal(err);
+    if (refusal) return body(refusal);
+    throw err;
+  }
 
   if (!objectDef) {
     const { degraded, errors } = await diagnoseEmptyRead(metadataService, 'object', objectName);
@@ -997,7 +1025,17 @@ export async function buildObjectListResource(
 ): Promise<ObjectSchemaResourceResult> {
   // [#25245] The items from `view` ({@link McpObjectView}); the verdict below
   // is still the metadata service's.
-  const objects = await view.listObjects();
+  // [ADR-0106] …and a coded refusal from it answers as on the schema resource.
+  let objects: unknown[];
+  try {
+    objects = await view.listObjects();
+  } catch (err) {
+    const refusal = objectResourceRefusal(err);
+    if (!refusal) throw err;
+    return {
+      contents: [{ uri: 'objectstack://objects', mimeType: 'application/json', text: JSON.stringify(refusal) }],
+    };
+  }
   const summary = ((objects ?? []) as ObjectDef[]).map(o => ({
     name: o.name,
     label: o.label ?? o.name,

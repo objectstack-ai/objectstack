@@ -33,7 +33,6 @@
 - 注册按克隆(`pnpm install` 的 prepare),服务端一个驱动都不跑 ⇒ 两侧答的不是同一个问题。
 - 驱动接手的路径上 exit 0 只说内容判断被推迟,⛔ 不是无冲突:它对内容什么都没说。
 - ⇒ 冲突证明探无驱动裸克隆,配方与读法见 `scripts/pm/os-regen-merge.sh`:exit 1 无树 id = 缺对象
-- ⛔ 永不用 `-c merge.os-regen.driver=` 覆盖:驱动不是被关掉而是跑失败,路由路径全报冲突。
 - 入队决策点才整对象 `get` 一次;挂了 flip 定点到点读,⛔ 不又查又等。
 - 状态核验用最小字段(search/list 加 `fields`)或等事件。
 - 聚合读数(`blocked`/`dirty`)只作阴性筛查再定位;放行按名定向读单条 job,⛔ 不拉全表。
@@ -288,6 +287,7 @@
 - 经 `rerun-failed.mjs` 重跑 PR `ci.yml` 失败 job 仅一次,先在 PR 或卡写明 flake 理由;二败即真红。
 - `run_rerun_failed` 只收 `ci.yml`;他 workflow 的 flake 走下两条,⛔ 永不空提交、永不关了重开。
 - `pr-automation.yml`(`Check Changeset` 取消无后继):席位改正文记下 flake 理由,其 `edited` 即重跑。
+- ⇒ 该正文改走 `seat-post-protocol.md` 的 PR 正文行,不送页脚。
 - `lint.yml`(检出超时):`main` 前进后中继 `pr_update_branch` 出真新 head 整套重跑;齐平即空操作。
 - 同一 head 上轻量兄弟 workflow `success` 加重量级载体 `cancelled` 是普通取代的预期签名。
 - 同名 `failure` 也会被带另一诊断的后一次 `failure` 取代 ⇒ 任何判定前先按名取最新一次。
@@ -310,7 +310,6 @@
 - doctype 开标记与 object 标签形状同触发;网页全文完好,⛔ 不修复只在 API 读短的卡。
 - 同坑第三条读路径:MCP `issue_read` 与 PR 读路径把行内反引号里的尖括号片段整个吃掉。
 - GitHub 存储字节完好、raw REST 一字不差 ⇒ ⛔ 不单凭 MCP 读判截断,先取 raw 或渲染页核对。
-- 否则 repair-first 被正确地应用到完好的卡上,重写毁掉的是正确内容。
 - 唤醒中继渲染会把 `{` `}` `<` 转义 ⇒ 判已发布产物按 `GET` 取存储体,⛔ 永不按中继正文。
 - 判据 = 数空的行内代码跨度:一个空跨度恰是短尖括号片段被吃掉的签名。
 - 判据是尖括号不是反引号:有的正文本来就把标识符不带尖括号写。
@@ -341,6 +340,7 @@
 - 该追加按面不按路由:`PATCH /issues/{n}` 打在 PR 上同样 +58 追加裸页脚,而 draft 位不动。
 - 页脚两拼写:裸版与 session-URL 版都要剥,漏剥的卡在正文中段,而 58 字节差照常。
 - ⇒ 代价是归属:裸形无 session id,按此剥净的 PR 正文不载明哪个会话写的;另置见 AGENTS.md。
+- 中继 `issue_patch` 不在此列:`dispatch.mjs` 读回 PR 正文存 = 送(`identical`),无追加。
 - 第四形:建 PR 两通道同判 —— 送出体尾部不是 `---` 加页脚块时,追加一条同形页脚。
 - 该追加是横线加一条 session-URL 形页脚,送出体是存储体的严格前缀;字节数非常量(90/91)。
 - 尾部已是该块则一字不追加,两通道各实测两向 ⇒ 建侧通道不是变量,判据是送出体尾部。

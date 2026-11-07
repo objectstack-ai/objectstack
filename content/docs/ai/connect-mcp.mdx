@@ -396,8 +396,12 @@ drive this MCP server. Same word, different layer.
 - **Every call runs as the caller.** The MCP bridge resolves the same
   `ExecutionContext` as a REST request, so RBAC, row-level security, and
   field-level security apply to the agent exactly as they do to a person in
-  the Console. Sparse results or denied writes usually mean governance is
-  *working*, not that the connection is broken.
+  the Console. Schema discovery is included: `describe_object`,
+  `list_objects`' `fieldCount` and the fields `validate_expression` puts in
+  scope name only the fields the caller can read, the same field set
+  `GET /api/v1/meta/object/:name` serves that caller. Sparse results or denied
+  writes usually mean governance is *working*, not that the connection is
+  broken.
 - **OAuth scopes narrow the toolset.** Tokens carry `data:read`,
   `data:write`, and `actions:execute` scopes — tools outside the granted
   scopes are not even registered for that session. API-key and session

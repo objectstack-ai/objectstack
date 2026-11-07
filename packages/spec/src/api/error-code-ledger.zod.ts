@@ -555,6 +555,14 @@ export const ERROR_CODE_LEDGER = {
     // standard member (`ARTIFACT`, `COLLECTION`, `SHAPE` are tokens none
     // carries).
     'MIXED_ARTIFACT_COLLECTION_SHAPE',
+    // [ADR-0106 D6 tier 3] The MCP object-schema reads over HTTP
+    // (`domains/mcp.ts`: `describe_object`, `list_objects`, option-field reads)
+    // answer 503 with this code when the caller's field visibility cannot be
+    // evaluated or the masked projection would leave no field, the same code
+    // and status the REST `/meta` object read answers. Rendered by the MCP
+    // tools' coded result. Second EMITTER of the code `@objectstack/rest`
+    // registers: provenance, not identity.
+    'FIELD_VISIBILITY_UNRESOLVED',
   ],
   '@objectstack/service-storage': [
     'ATTACHMENT_DELETE_DENIED',
@@ -1454,6 +1462,14 @@ export const ERROR_CODE_LEDGER = {
     // Second EMITTER of the code `@objectstack/runtime` registers for
     // `run_action`'s gate: provenance, not identity.
     'ACTION_CONFIRMATION_REQUIRED',
+    // [ADR-0106 D6 tier 3] The stdio data bridge's object-schema reads
+    // (`stdio-data-bridge.ts`, `callerObjectView`: `describe_object`,
+    // `list_objects`, the `objectstack://objects` resources) answer 503 with
+    // this code when the caller's field visibility cannot be evaluated or the
+    // masked projection would leave no field; `mcp-server-runtime.ts` renders
+    // it as the tool's coded result. Third EMITTER, after `@objectstack/rest`
+    // and `@objectstack/runtime`: provenance, not identity.
+    'FIELD_VISIBILITY_UNRESOLVED',
   ],
   '@objectstack/service-datasource': [
     'DATASOURCE_ADMIN_ERROR',      // lifecycle/validation refusal from the datasource-admin service

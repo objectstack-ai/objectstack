@@ -1400,6 +1400,9 @@ importers:
       '@objectstack/formula':
         specifier: workspace:*
         version: link:../formula
+      '@objectstack/metadata-core':
+        specifier: workspace:*
+        version: link:../metadata-core
       '@objectstack/spec':
         specifier: workspace:*
         version: link:../spec
@@ -1416,9 +1419,6 @@ importers:
       '@objectstack/lint':
         specifier: workspace:*
         version: link:../lint
-      '@objectstack/metadata-core':
-        specifier: workspace:*
-        version: link:../metadata-core
       '@types/node':
         specifier: ^26.6.5
         version: 26.6.5

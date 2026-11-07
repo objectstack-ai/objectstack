@@ -694,3 +694,212 @@ describe('export route — partial masking parity (#8993)', () => {
     for (const row of arr) expect(row.title).toBe('写**');
   });
 });
+
+// ===========================================================================
+// [#30955] The export door records every export it streams in the compliance
+// ledger: one event per export to the `audit` slot's `recordDataExport`
+// (plugin-audit's `data-export-audit.ts` owns the row and reduces the query
+// to names and operators — pinned there, and both halves together on the
+// showcase in the dogfood suite's `data-export-audit-row.dogfood.test.ts`).
+// Here: the real streaming door over the real engine, with the `audit`
+// provider handed to the constructor exactly as `rest-api-plugin.ts` does.
+// ===========================================================================
+describe('[#30955] export route — the ledger hears of every export it streams', () => {
+  const LEDGER = 'sys_audit_log';
+
+  /** A stand-in for the ledger the door must NOT skip: same name, a few rows. */
+  const LEDGER_OBJECT = {
+    name: LEDGER,
+    label: 'Audit Log',
+    systemFields: false,
+    fields: {
+      id: { name: 'id', type: 'text' as const, primaryKey: true },
+      action: { name: 'action', type: 'text' as const },
+      object_name: { name: 'object_name', type: 'text' as const },
+    },
+  };
+
+  async function bootAudited(opts: {
+    sink?: Record<string, unknown>;
+    canExport?: (object: string, context?: any) => Promise<boolean>;
+  } = {}) {
+    const engine = new ObjectQL();
+    liveEngines.push(engine);
+    engine.registerDriver(makeSqliteDriver(), true);
+    await engine.init();
+    engine.registry.registerObject(USER as any);
+    engine.registry.registerObject(TASK as any);
+    engine.registry.registerObject(LEDGER_OBJECT as any);
+    await engine.syncSchemas();
+    await engine.insert('user', { id: 'u1', name: '张三' });
+    await engine.insert('task', { id: '1', title: '写代码', done: true, priority: 'high', due: '2026-06-30T00:00:00.000Z', owner: 'u1' });
+    await engine.insert('task', { id: '2', title: '写文档', done: false, priority: 'low', due: '2026-07-01T00:00:00.000Z', owner: 'u1' });
+    for (const id of ['a1', 'a2', 'a3']) await engine.insert(LEDGER, { id, action: 'create', object_name: 'task' });
+    for (const o of [SysMetadataObject, SysMetadataHistoryObject, SysMetadataAuditObject, SysMetadataCommitObject]) {
+      if (!engine.registry.getObject(o.name)) engine.registry.registerObject(o as any);
+    }
+    const protocol = new ObjectStackProtocolImplementation(engine as any);
+    const events: any[] = [];
+    // The writer's stand-in: it records the event and, like the real writer,
+    // inserts a row into the ledger — so exporting the ledger is measured
+    // against a write into it.
+    const sink = opts.sink ?? {
+      recordDataExport: async (event: any) => {
+        events.push(event);
+        await engine.insert(LEDGER, { action: 'export', object_name: event.objectName });
+      },
+    };
+    const securityServiceProvider = opts.canExport ? async () => ({ canExport: opts.canExport }) : undefined;
+    const rest = new RestServer(
+      createMockServer() as any,
+      protocol as any,
+      { api: { requireAuth: false } } as any,
+      undefined, // kernelManager
+      undefined, // envRegistry
+      undefined, // defaultEnvironmentIdProvider
+      undefined, // authServiceProvider
+      undefined, // objectQLProvider
+      undefined, // emailServiceProvider
+      undefined, // sharingServiceProvider
+      undefined, // retired reports slot
+      undefined, // approvalsServiceProvider
+      undefined, // sharingRulesServiceProvider
+      undefined, // i18nServiceProvider
+      undefined, // analyticsServiceProvider
+      undefined, // settingsServiceProvider
+      undefined, // serviceExistsProvider
+      securityServiceProvider,
+      undefined, // requestEnvResolver
+      undefined, // metadataServiceProvider
+      undefined, // tenancyServiceProvider
+      async () => sink, // auditServiceProvider
+    );
+    (rest as any).resolveExecCtx = async () => ({ userId: 'test-user', tenantId: 'org_a' });
+    rest.registerRoutes();
+    const route = rest.getRoutes().find(
+      (r: any) => r.method === 'GET' && r.path === '/api/v1/data/:object/export',
+    )!;
+    const run = async (object: string, query: Record<string, unknown>) => {
+      const { res, chunks, getStatus, getJson } = makeRes();
+      await route.handler({ params: { object }, query } as any, res);
+      return { status: getStatus(), json: getJson(), text: chunks.join('') };
+    };
+    return { engine, events, run };
+  }
+
+  it.each(['csv', 'json', 'xlsx'] as const)('a completed %s export of an ordinary object hands ONE event with its format and row count', async (format) => {
+    const { events, run } = await bootAudited();
+    const answer = await run('task', { format });
+    expect(answer.status).toBe(200);
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({
+      objectName: 'task',
+      format,
+      rowCount: 2,
+      limit: 10_000,
+      requestedLimit: 10_000,
+      limitCap: 50_000,
+      truncated: false,
+      outcome: 'succeeded',
+      readQuery: {},
+    });
+    expect(events[0].context).toMatchObject({ userId: 'test-user', tenantId: 'org_a' });
+  });
+
+  it('an export of the ledger itself hands ONE event, and its file holds the rows that were there before its own', async () => {
+    const { engine, events, run } = await bootAudited();
+    const answer = await run(LEDGER, { format: 'json' });
+    expect(answer.status).toBe(200);
+    expect(JSON.parse(answer.text)).toHaveLength(3);
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ objectName: LEDGER, format: 'json', rowCount: 3, outcome: 'succeeded' });
+    // The export's own row lands AFTER the stream, so the next export sees it.
+    expect(await engine.count(LEDGER, {})).toBe(4);
+  });
+
+  it('records truncation at the row limit from the read\'s own page markers, and the cap clipping the request', async () => {
+    const { events, run } = await bootAudited();
+    await run('task', { format: 'csv', limit: '1' }); // 1 of 2 matching rows
+    await run('task', { format: 'csv', limit: '2' }); // exactly the 2 that match
+    await run('task', { format: 'csv', limit: '60000' }); // above the 50k cap
+    expect(events.map((e) => [e.rowCount, e.limit, e.requestedLimit, e.truncated])).toEqual([
+      [1, 1, 1, true],
+      [2, 2, 2, false],
+      [2, 50_000, 60_000, false],
+    ]);
+  });
+
+  it('hands the query as read — the writer, not the door, reduces it to names and operators', async () => {
+    const { events, run } = await bootAudited();
+    const filter = { done: true };
+    await run('task', { format: 'csv', filter: JSON.stringify(filter), search: '代码', searchFields: 'title' });
+    expect(events).toHaveLength(1);
+    expect(events[0].readQuery).toEqual({ filter, search: '代码', searchFields: ['title'] });
+    expect(events[0].rowCount).toBe(1);
+  });
+
+  it('a refused export (EXPORT_NOT_PERMITTED) is no export: 403, and no event', async () => {
+    const { events, run } = await bootAudited({ canExport: async () => false });
+    const answer = await run('task', { format: 'csv' });
+    expect(answer.status).toBe(403);
+    expect(answer.json?.code).toBe('EXPORT_NOT_PERMITTED');
+    expect(events).toEqual([]);
+  });
+
+  it('a request refused before reading (an unknown query parameter, a malformed filter) hands no event', async () => {
+    const { events, run } = await bootAudited();
+    expect((await run('task', { format: 'csv', bogus: '1' })).status).toBe(400);
+    expect((await run('task', { format: 'csv', filter: '{not json' })).status).toBe(400);
+    expect(events).toEqual([]);
+  });
+
+  it('the import template carries no record and hands no event', async () => {
+    const { events, run } = await bootAudited();
+    expect((await run('task', { template: 'true' })).status).toBe(200);
+    expect(events).toEqual([]);
+  });
+
+  it('an export whose read is refused after the gates hands ONE failed event with the status and code it answered', async () => {
+    const { events, run } = await bootAudited();
+    const answer = await run('task', { format: 'csv', filter: JSON.stringify({ no_such_field: 1 }) });
+    expect(answer.status).toBe(400);
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ objectName: 'task', outcome: 'failed', status: 400, rowCount: 0 });
+    expect(answer.json?.code).toBe('INVALID_FIELD');
+    expect(events[0].errorCode).toBe('INVALID_FIELD');
+  });
+
+  it('an export of an object name the registry does not know, past an export gate that let it through, is a refusal: 404 OBJECT_NOT_FOUND and no event', async () => {
+    // Seat decision on the contract review: no object, so no data moved, and
+    // the name is only the caller's path text — it is never written to the
+    // ledger as an `object_name`. Only a caller the export gate admits for
+    // that name reaches this branch.
+    const gateAsked: string[] = [];
+    const { events, run } = await bootAudited({
+      canExport: async (object) => { gateAsked.push(object); return true; },
+    });
+    const answer = await run('no_such_object', { format: 'csv' });
+    expect(answer.status).toBe(404);
+    expect(answer.json?.code ?? answer.json?.error?.code).toBe('OBJECT_NOT_FOUND');
+    expect(gateAsked).toEqual(['no_such_object']);
+    expect(events).toEqual([]);
+    // Control on the same boot: a known object still hands its event.
+    expect((await run('task', { format: 'csv' })).status).toBe(200);
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ objectName: 'task', outcome: 'succeeded' });
+  });
+
+  it('a sink that throws changes nothing about the file the caller gets', async () => {
+    const { run } = await bootAudited({ sink: { recordDataExport: async () => { throw new Error('ledger down'); } } });
+    const answer = await run('task', { format: 'csv' });
+    expect(answer.status).toBe(200);
+    expect(parseCsv(answer.text).slice(1)).toHaveLength(2);
+  });
+
+  it('a kernel with no audit writer on the slot exports exactly as before', async () => {
+    const { run } = await bootAudited({ sink: {} });
+    const answer = await run('task', { format: 'csv' });
+    expect(answer.status).toBe(200);
+    expect(parseCsv(answer.text).slice(1)).toHaveLength(2);
+  });
+});

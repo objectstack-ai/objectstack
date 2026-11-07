@@ -12,6 +12,9 @@ import type {
   IStorageService,
 } from '@objectstack/spec/contracts';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
+// The one reference this verb's caller-scoped insert vouches for: the file it
+// created in the same call (see step ⑤).
+import { vouchForReference } from '@objectstack/core';
 import { StorageMetadataStore, type StorageWriteContext } from './metadata-store.js';
 // The attach rule's one verdict (parent EDIT), asked here before a producer
 // spends work on a file it could not attach.
@@ -435,7 +438,18 @@ export class FileAttachmentService
             mime_type: request.mimeType,
             size,
           },
-          { context },
+          // As the caller, this insert names the one file this call created
+          // in ③ for the caller, after reading the parent as the caller: the
+          // call vouches for that file id and for no other value
+          // (`vouchForReference`, @objectstack/core). The write-time reference
+          // check then does not ask the caller's read door for it — a caller
+          // who may attach need not read `sys_file` — and still probes that it
+          // exists. Every other gate on the insert judges the caller as
+          // before: the object permission to create an attachment, the attach
+          // rule (parent EDIT), `enable.files`, the file-reference gate, RLS,
+          // FLS and the `uploaded_by` stamp. The system context is exempt from
+          // the read-door question already, so it carries no mark.
+          { context: caller ? vouchForReference(context, { object: 'sys_attachment', field: 'file_id', id: fileId }) : context },
         )) as { id?: unknown } | null | undefined;
         if (row?.id === undefined || row.id === null || row.id === '') {
           throw new Error('attachFile: the sys_attachment insert answered no row id, so the attachment cannot be named');

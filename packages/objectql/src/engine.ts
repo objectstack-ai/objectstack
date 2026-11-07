@@ -312,7 +312,7 @@ import {
 // hand each body the members it reads (`MasterDetailRelatedHost`). Imported after
 // every module those bodies import, so the engine's module evaluation order
 // is what it was.
-import { resolveOneHopRelated, resolvePredicateRelated, resolvePreviewParents, settleMasterDetailLanding } from './engine-master-detail-related.js';
+import { priorMasterIdsCallerReads, resolveOneHopRelated, resolvePredicateRelated, resolvePreviewParents, settleMasterDetailLanding } from './engine-master-detail-related.js';
 // [#25522 cut 15] The `ReadableIds` chain composition, the controlled-by-parent
 // boot screen, and the permission and formula resolutions an operation shares;
 // the methods of the same names below hand each body the members it reads
@@ -2843,6 +2843,20 @@ export class ObjectQL implements IObjectQLEngine {
     return resolvePreviewParents.call(host, schema, views, storedRows, context);
   }
 
+  private async priorMasterIdsCallerReads(
+    schema: unknown,
+    rows: ReadonlyArray<Record<string, unknown> | null | undefined>,
+    context: ExecutionContext | undefined,
+  ): Promise<Array<{ readonly id: string | number | undefined } | null>> {
+    // The body lives in `engine-master-detail-related.ts`, its docblock with it (see `MasterDetailRelatedHost`).
+    const readLogger = () => this.logger;
+    const host: ThisParameterType<typeof priorMasterIdsCallerReads> = {
+      find: (...a) => this.find(...a),
+      get logger() { return readLogger(); },
+    };
+    return priorMasterIdsCallerReads.call(host, schema, rows, context);
+  }
+
   private async resolvePredicateRelated(
     schema: any,
     rows: ReadonlyArray<Record<string, unknown> | undefined | null>,
@@ -3109,10 +3123,14 @@ export class ObjectQL implements IObjectQLEngine {
     // [#25522 cut 5] The body moved to `engine-secret-internal-fields.ts`, its docblock with it (see `SecretInternalFieldsHost`).
     const readRegistry = () => this._registry;
     const readCryptoProvider = () => this.cryptoProvider;
+    const readLogger = () => this.logger;
     const host: ThisParameterType<typeof encryptSecretFields> = {
       get _registry() { return readRegistry(); },
       get cryptoProvider() { return readCryptoProvider(); },
+      get logger() { return readLogger(); },
       getDriver: (...a) => this.getDriver(...a),
+      // A ref on a non-system write is compared against its own rows as the caller's read door serves them.
+      find: (...a) => this.find(...a),
     };
     return encryptSecretFields.call(host, object, row, context, driverOptions, storedRows);
   }
@@ -7711,15 +7729,29 @@ export class ObjectQL implements IObjectQLEngine {
                // and `evaluateValidationRules` reuses `parent` for both.
                // [#19853] "Actually moves" is asked of the view the write
                // stores: a repoint that never lands moves nothing.
+               // ⛔ And of the stored FK only as the caller's own read door
+               // serves it (`priorMasterIdsCallerReads`), asked only when the
+               // write names the FK: a FK the caller cannot read as stored
+               // leaves the prior master UNKNOWN, bound as the unresolved
+               // header (`null`), so whether the pre-check reads a second
+               // header, and which, never depends on what the column holds.
+               // A FK the caller reads, and a system write, are judged as
+               // before.
                const mdRel = schemaHasParentRequiredWhen ? resolveMasterDetailRelation(updateSchema as any) : null;
-               const priorMasterId = mdRel ? masterIdOf(mdRel.fk, null, priorRecord) : undefined;
+               const landingView = landing?.view ?? preRoWhen;
+               const namesMaster = mdRel != null && landingView != null && typeof landingView === 'object' && mdRel.fk in landingView;
+               const [priorMaster] = namesMaster
+                   ? await this.priorMasterIdsCallerReads(updateSchema, [priorRecord], opCtx.context)
+                   : [undefined];
                const repointsMaster =
                    mdRel != null &&
-                   priorMasterId != null &&
-                   masterIdOf(mdRel.fk, landing?.view ?? preRoWhen, priorRecord) !== priorMasterId;
-               const roWhenPreviousParent = repointsMaster
-                   ? await this.resolveMasterDetailParent(updateSchema, null, priorRecord, opCtx.context)
-                   : undefined;
+                   priorMaster?.id != null &&
+                   masterIdOf(mdRel.fk, landingView, null) !== priorMaster.id;
+               const roWhenPreviousParent = priorMaster === null
+                   ? null
+                   : repointsMaster
+                       ? await this.resolveMasterDetailParent(updateSchema, null, { [mdRel!.fk]: priorMaster!.id }, opCtx.context)
+                       : undefined;
                // [#9107] `suppliedValues` — the SAME entry snapshot the static
                // strip below consumes, now feeding the conditional one too, so
                // both strips answer "did the CALLER write this key?" from one
@@ -8102,11 +8134,23 @@ export class ObjectQL implements IObjectQLEngine {
                // resolved only when the payload REPOINTS the matched rows at
                // another master (see the single-id branch for why the stored
                // row's own header is the one that question needs).
+               // ⛔ Each matched row's stored FK only as the caller's own read
+               // door serves it, as on the by-id branch: a row whose FK the
+               // caller cannot read as stored binds the unresolved header
+               // (`null`), and its stored master is never read.
                const mdRelMulti = schemaHasParentRequiredWhenMulti ? resolveMasterDetailRelation(updateSchema as any) : null;
-               const previousParentForRow =
-                   mdRelMulti != null && masterIdOf(mdRelMulti.fk, landingMulti?.view ?? preRoWhenMulti, undefined) != null
-                       ? await this.resolveMasterDetailParents(updateSchema, null, priorRows, opCtx.context)
-                       : undefined;
+               let previousParentForRow: ((row: Record<string, unknown> | undefined) => Record<string, unknown> | null) | undefined;
+               if (mdRelMulti != null && masterIdOf(mdRelMulti.fk, landingMulti?.view ?? preRoWhenMulti, undefined) != null) {
+                   const matched = priorRows ?? [];
+                   const priorMasters = await this.priorMasterIdsCallerReads(updateSchema, matched, opCtx.context);
+                   const known = matched.flatMap((row, i) => {
+                       const prior = priorMasters[i];
+                       return prior ? [{ row, stored: { [mdRelMulti.fk]: prior.id } }] : [];
+                   });
+                   const headerOf = await this.resolveMasterDetailParents(updateSchema, null, known.map((k) => k.stored), opCtx.context);
+                   const previousByRow = new Map(known.map((k) => [k.row, headerOf(k.stored)]));
+                   previousParentForRow = (row) => (row ? previousByRow.get(row) ?? null : null);
+               }
                if (payloadHasReadonlyWhen) {
                    // [#9107] Same entry snapshot, same authorship gate as the
                    // by-id branch above — "both call sites" is the #3106 /

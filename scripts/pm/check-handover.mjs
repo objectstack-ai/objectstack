@@ -30,8 +30,8 @@
  *                         newer than it, and whose state labels (`PM_EXCLUSIVE_STATE_LABELS`, the six
  *                         mutually exclusive states of `SKILL.md`) are anything but `needs-user-decision` alone.
  *
- * The sign-off hand-back rule (`seat-post-protocol.md`, 收班) names one refusal inside (a) and narrows (a)'s
- * stay-behind (section below):
+ * The sign-off hand-back rule (`seat-post-protocol.md`, 交接收尾清单 step 2) names one refusal inside (a);
+ * `seat-lifecycle.md` 离任留守 narrows (a)'s stay-behind (section below):
  *
  *   (a′) NEEDS_DECISION   a card (a) holds whose NEWEST `os-dev-report` (`latestDevReport`, the patrol's newest-of
  *        HELD             reading) is newer than the claim and declares `"status": "needs_decision"`, while the card

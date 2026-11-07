@@ -8,6 +8,11 @@ import { SysAuditLog } from './index.js';
  * `sys_audit_log.action` enum (maintainer ruling 2026-08-12 on #7675, ADR-0049
  * enforce-or-remove, registered under ADR-0087 as `audit-log-action-enum-retired`).
  *
+ * #30955 — `export` came back WRITER-FIRST, by the rule the last paragraph of
+ * this docblock states: its writer is `data-export-audit.ts`, called by the
+ * REST export door, and its list view is `config_changes`. It moved from
+ * `RETIRED_ACTIONS` to `ACTIONS_WITH_WRITERS` in the same change.
+ *
  * #8315 — `restore` joins them, under the same ruling carried by triage and
  * registered as `audit-log-action-restore-retired`. It was the last unresolved
  * value from #7675's survey, and the least ambiguous of the three: `actionFor()`
@@ -44,12 +49,6 @@ const RETIRED_ACTIONS: ReadonlyArray<readonly [action: string, prescription: str
     'permission-object writes are already on the ledger as ordinary `create` / `update` '
       + 'rows written by the generic hook writer; a second semantically-duplicate row is '
       + 'not minted. Filter the permission objects by `object_name` instead.',
-  ],
-  [
-    'export',
-    'no export feature has ever written an audit row — `actionFor()` in audit-writers.ts '
-      + 'emits create/update/delete and nothing else. A filter on this value matched '
-      + 'nothing on every deployment that has ever run.',
   ],
   [
     'restore',
@@ -89,6 +88,12 @@ const ACTIONS_WITH_WRITERS: ReadonlyArray<readonly [action: string, writer: stri
   ],
   ['config_change', 'service-settings/src/config-change-audit.ts — CONFIG_CHANGE_ACTION (#8145)'],
   ['import', 'plugin-auth/src/admin-import-users.ts — run-level row, record_id null'],
+  [
+    'export',
+    'plugin-audit/src/data-export-audit.ts — createDataExportAuditWriter on the `audit` slot, run-level '
+      + 'row with record_id null; called by rest/src/data-action-routes.ts (GET /data/:object/export) '
+      + 'on every export it streams (#30955)',
+  ],
   [
     'platform_admin_standing_change',
     'plugin-security/src/bootstrap-platform-admin.ts — recordPlatformAdminStandingChange, '
