@@ -63,6 +63,9 @@ import { hashSpec, orderedMapKeys, ConflictError, readLegacyOrganizationRows } f
 // #4825 deliberately retired. See `@objectstack/metadata/errors` for why that
 // leaf subpath exists.
 import { isMissingTableError } from '@objectstack/metadata/errors';
+// [ruling 6677709817 (c)] The snapshot body both history writers store: the
+// written body without what the type's redactor marks not carried forward.
+import { historySnapshotBody } from '@objectstack/metadata/history-snapshot';
 import { readEnvWithDeprecation } from '@objectstack/types';
 import type {
   MetadataRepository,
@@ -1233,6 +1236,13 @@ export class SysMetadataRepository implements MetadataRepository {
 
       // Durable history append — same transaction, so the parent write
       // and the audit row commit together or roll back together.
+      //
+      // [ruling 6677709817 (c)] The snapshot withholds every position the
+      // type's redactor marks withheld AND not carried forward (a connector's
+      // undeclared `auth` keys), whatever produced this body — a save, a
+      // publish, a revert to an older snapshot — so no new history row keeps
+      // what the save drains from the live row. Every other body is stored as
+      // written; `checksum` keeps naming the live row's stamp.
       await this.engine.insert(
         this.historyTable,
         {
@@ -1242,7 +1252,7 @@ export class SysMetadataRepository implements MetadataRepository {
           name: ref.name,
           version,
           operation_type: op,
-          metadata: JSON.stringify(body),
+          metadata: JSON.stringify(historySnapshotBody(ref.type, body)),
           checksum: hash,
           previous_checksum: existingHash,
           change_note: opts.message,

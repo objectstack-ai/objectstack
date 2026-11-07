@@ -33,7 +33,7 @@ question's computed truth; a card that does not load is red in CI.
 | 1 | `prompt` | `{ short, detailed }`, each `{ zh?, en? }` with at least one language. |
 | 2 | `expect` | The structural expectation the deterministic scorer reads, field for field: `objects`, `minFieldsPerObject?`, `selectFields?` (`{ object, field, minOptions }`), `lookups?` (`{ object, field, to }`), `dashboards?`, `appNavTargets?`. The runner's build prompt states every row by name ([Build checks trace to the prompt](#build-checks-trace-to-the-prompt)). |
 | 3 | `capabilities`, `businessFunctions` | Tags `<area>.<name>`, where `<area>` is a closed set: the basenames of `docs/qa/platform-checklist/areas/*.json`, read from the tree. `businessFunctions` is the marketplace taxonomy's business-function facet, read from `@objectstack/spec/marketplace` (`MarketplaceBusinessFunctionsSchema`, defined once in `packages/spec/src/marketplace/taxonomy.zod.ts`): 1-3 distinct values, the primary one first — the card is classified the way the template it graduates into will be listed. |
-| 4 | `run.seed`, `run.questions`, `run.personas` | Seed rows per object; at least five read-only questions, each with a **declarative** truth spec; at least two personas, each a role, the objects or fields it must NOT see, and optionally a row `scope`. |
+| 4 | `run.seed`, `run.userHandleFields?`, `run.questions`, `run.personas` | Seed rows per object, and which seed fields hold a user handle; at least five read-only questions, each with a **declarative** truth spec; at least two personas, each a role, the objects or fields it must NOT see, and optionally a row `scope` and the person `record` it is. |
 | 5 | `run.operations`, `run.guardrails`, `run.agentActions?` | At least two writes, each acting as a persona and declaring its `outcome`; the five guardrail checks; optionally the agent-callable business actions. |
 | 6 | `iterate` | A one-sentence change request plus the `expectDelta` it should add to `expect`. |
 
@@ -159,7 +159,23 @@ one of three shapes: `{ kind: "scalar", value }`, `{ kind: "groups", groups: [{ 
 ## Personas, operations and guardrails
 
 A persona names at least one object or field it must not see; its references must resolve
-against `expect.objects` and the seed. An operation is a `create` (with `values`), an
+against `expect.objects` and the seed.
+
+**What a scope value names is declared, never inferred.** The field a `scope` rule ends on
+(the last hop of a path) is `id` or a declared lookup (the value names a row), a declared
+select (an option), or a **user-handle field**: a seed field listed in
+`run.userHandleFields` (`[{ "object": "account", "field": "owner" }]`), whose text
+(`u_sam`) stands for a user. The runner loads a handle field's cells with that user's id and
+never the text, and the run record lists the fields it rewrote (`seed.rewritten`). The loader
+refuses a scope rule ending on any other field, and a handle declaration on the row id, a
+declared lookup or select, or a field no seed row carries.
+
+**A scoped persona names the person it is.** `record: { "object": "employee", "id": "e06" }`
+is the seed row that is this person (an employee, an agent, a customer); the loader refuses
+one naming no seeded row. It is required on a persona with a `scope`, unless that persona is
+named through a handle instead (a direct scope rule on a declared user-handle field,
+`owner: u_sam`, as on the three controls), and optional on a global one. The person object's
+user field is `user`, fixed by name: no card chooses it. An operation is a `create` (with `values`), an
 `update` (with `target` and `values`) or a `delete` (with `target`); a target is a seeded row
 id, and every written field is one the seed carries. Every operation names the persona it
 acts for (`actingAs`) and declares its `outcome`, so grading reads it with code only:

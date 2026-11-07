@@ -117,26 +117,14 @@ export function personaHandles(card: Card): Map<string, string> {
 }
 
 /**
- * The scope fields whose seed values are user handles, `object.field`: a
- * field a persona's direct (non-path) `scope` rule names that the card does
- * not declare as a lookup or a select, and that is not `id`. In the crm card
- * that is `account.owner` (`u_sam`, `u_tia`). Every other direct scope field
- * holds a row id or an option value (`asset.custodian` = `e06`, an employee
- * row; `ticket_comment.visibility` = `public`), which the seed loads verbatim.
+ * The seed fields whose values are user handles, `object.field`: the card's
+ * declared `run.userHandleFields`, read and never inferred. In the crm card
+ * that is `account.owner` (`u_sam`, `u_tia`). Every other field holds a row id
+ * or an option value (`asset.custodian` = `e06`, an employee row;
+ * `ticket_comment.visibility` = `public`), which the seed loads verbatim.
  */
 export function userHandleFields(card: Card): Set<string> {
-  const declared = new Set([
-    ...(card.expect.lookups ?? []).map((l) => `${l.object}.${l.field}`),
-    ...(card.expect.selectFields ?? []).map((s) => `${s.object}.${s.field}`),
-  ]);
-  const out = new Set<string>();
-  for (const p of card.run.personas) {
-    for (const sc of p.scope ?? []) {
-      const key = `${sc.object}.${sc.field}`;
-      if (!sc.field.includes('.') && sc.field !== 'id' && !declared.has(key)) out.add(key);
-    }
-  }
-  return out;
+  return new Set((card.run.userHandleFields ?? []).map((h) => `${h.object}.${h.field}`));
 }
 
 /** The handles a seed row names in a {@link userHandleFields} field that no persona signs in as (`u_tia`): the seed loads each as the admin user. */

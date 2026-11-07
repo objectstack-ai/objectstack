@@ -848,6 +848,7 @@
       {
         "id": "requester",
         "role": "Requester (employee), Sales — e02",
+        "record": {"object": "employee", "id": "e02"},
         "hidden": {
           "fields": [{"object": "department", "field": "budget"}, {"object": "supplier", "field": "bank_account"}]
         },
@@ -862,6 +863,7 @@
       {
         "id": "dept_manager",
         "role": "Department manager, Sales — e13",
+        "record": {"object": "employee", "id": "e13"},
         "hidden": {"fields": [{"object": "supplier", "field": "bank_account"}]},
         "scope": [
           {"object": "department", "field": "id", "value": "dep_sales"},
