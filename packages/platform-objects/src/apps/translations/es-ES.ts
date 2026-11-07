@@ -86,6 +86,7 @@ export const esES: TranslationData = {
         nav_settings_sms: { label: 'Envío de SMS' },
         nav_settings_branding: { label: 'Marca' },
         nav_settings_auth: { label: 'Autenticación' },
+        nav_settings_access_policy: { label: 'Política de acceso' },
         nav_settings_storage: { label: 'Almacenamiento de archivos' },
         nav_settings_ai: { label: 'IA y Embedder' },
         nav_settings_knowledge: { label: 'Conocimiento' },

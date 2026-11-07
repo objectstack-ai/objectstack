@@ -1030,9 +1030,9 @@ describe('AuthPlugin', () => {
     });
 
     it('binds mfa_required and force-enables the twoFactor plugin (ADR-0069 D3)', async () => {
-      const { manager } = await bootWithAuthSettings({ mfa_required: { value: true, source: 'global' } });
+      const { manager } = await bootWithAuthSettings({ mfa_required: { value: 'everyone', source: 'global' } });
       const cfg = (manager as any).config;
-      expect(cfg.mfaRequired).toBe(true);
+      expect(cfg.mfaRequirement).toBe('everyone');
       expect(cfg.plugins?.twoFactor).toBe(true);
       expect((manager as any).isAuthGateActive()).toBe(true);
     });

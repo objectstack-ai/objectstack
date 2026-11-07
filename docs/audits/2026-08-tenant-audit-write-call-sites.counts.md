@@ -33,17 +33,17 @@ silent, and `node scripts/tenant-audit-census.mjs --write` is the resolution.
 
 | Measure | Value |
 |---|---:|
-| Write call sites | 268 |
-| Object name statically decidable | 190 |
+| Write call sites | 269 |
+| Object name statically decidable | 191 |
 | Object name chosen at run time | 78 |
-| Against a tenancy-enabled object | 184 |
+| Against a tenancy-enabled object | 185 |
 | Against an object declaring tenancy off | 6 |
-| Threading a tenant context | 204 |
+| Threading a tenant context | 205 |
 | Provably carrying none | 8 |
 | …and decidably tenancy-enabled | 2 |
 | Options argument unreadable | 56 |
 | …and decidably tenancy-enabled | 30 |
-| Threading a decidably elevated context | 148 |
+| Threading a decidably elevated context | 149 |
 | Threading a decidably non-elevated context | 0 |
 | Threading a context of undecidable elevation | 112 |
 
@@ -90,14 +90,14 @@ holds still. They are required to be HERE and to say WHEN they were true;
 their values are not compared. The reasoning, and the measurement behind it,
 are in `scripts/check-tenant-audit-census.mjs`.
 
-Measured on 2026-11-07 at `b93069eab`.
+Measured on 2026-11-07 at `a06983b5c`.
 
 | corpus scale (not enforced) | count |
 | :--- | ---: |
-| tracked non-test sources scanned | 1049 |
+| tracked non-test sources scanned | 1052 |
 | engine-shaped types recognised | 113 |
-| declared objects in the registry | 130 |
-| same-named calls subtracted as non-engine | 236 |
+| declared objects in the registry | 131 |
+| same-named calls subtracted as non-engine | 237 |
 
 ## Every site
 
@@ -140,6 +140,7 @@ Measured on 2026-11-07 at `b93069eab`.
 | `packages/plugins/plugin-auth/src/auth-manager-password-session-policy.ts` | `update` | `sys_two_factor` | enabled | options unreadable | 1 |
 | `packages/plugins/plugin-auth/src/auth-manager-password-session-policy.ts` | `update` | `sys_user` | enabled | options unreadable | 3 |
 | `packages/plugins/plugin-auth/src/auth-manager-sign-in-lockout.ts` | `update` | `sys_user` | enabled | options unreadable | 3 |
+| `packages/plugins/plugin-auth/src/auth-manager.ts` | `update` | `sys_session` | enabled | elevated | 1 |
 | `packages/plugins/plugin-auth/src/auth-manager.ts` | `delete` | `sys_verification` | enabled | elevated | 1 |
 | `packages/plugins/plugin-auth/src/auth-manager.ts` | `insert` | `sys_verification` | enabled | elevated | 1 |
 | `packages/plugins/plugin-auth/src/auth-plugin.ts` | `update` | `sys_oauth_application` | enabled | PROVABLY NONE | 1 |

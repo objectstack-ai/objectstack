@@ -36,7 +36,7 @@ const DECLARED_FIELDS = [
   'passwordMinClasses',
   'passwordHistoryCount',
   'passwordExpiryDays',
-  'mfaRequired',
+  'mfaRequirement',
   'mfaGracePeriodDays',
   'apiKeyDefaultExpiryDays',
   'apiKeyMaxExpiryDays',
@@ -88,7 +88,7 @@ export type AuthSettingRestore =
   /** A field of `session`, merged over the declared `session` object. */
   | { readonly via: 'session'; readonly field: 'expiresIn' | 'updateAge' }
   /** Enforced MFA: restored exactly as a save of the declared value would apply. */
-  | { readonly via: 'mfaRequired' }
+  | { readonly via: 'mfaRequirement' }
   /** One runtime value ruled by several keys: restored whole (see the module note for when). */
   | { readonly via: 'group'; readonly group: 'rateLimit' | 'google' | 'audience' };
 
@@ -109,7 +109,7 @@ export const AUTH_SETTING_RESTORE: Readonly<Record<string, AuthSettingRestore>> 
   password_min_classes: { via: 'patch', field: 'passwordMinClasses' },
   password_history_count: { via: 'patch', field: 'passwordHistoryCount' },
   password_expiry_days: { via: 'patch', field: 'passwordExpiryDays' },
-  mfa_required: { via: 'mfaRequired' },
+  mfa_required: { via: 'mfaRequirement' },
   mfa_grace_period_days: { via: 'patch', field: 'mfaGracePeriodDays' },
   api_key_default_expiry_days: { via: 'patch', field: 'apiKeyDefaultExpiryDays' },
   api_key_max_expiry_days: { via: 'patch', field: 'apiKeyMaxExpiryDays' },

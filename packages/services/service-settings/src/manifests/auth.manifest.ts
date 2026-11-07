@@ -281,14 +281,25 @@ const manifest = {
       required: false,
       description: 'Require members to protect their account with an authenticator app (TOTP).',
     },
+    // [ruling 「可以，按三档做（推荐）」, objectstack-ai/cloud#3668] Three levels.
+    // "Administrators" are ADR-0090 D12's three kinds — tenant-level,
+    // organization-level and delegated. This is the deployment's level: the
+    // default and the floor of every organization's own `access_policy`
+    // level, which can only be stronger. It was a toggle; plugin-auth rewrites
+    // a stored toggle as a level at boot (on → everyone).
     {
-      type: 'toggle',
+      type: 'select',
       key: 'mfa_required',
       label: 'Require multi-factor authentication',
       required: false,
-      default: false,
+      default: 'off',
+      options: [
+        { value: 'off', label: 'Off' },
+        { value: 'administrators', label: 'Administrators' },
+        { value: 'everyone', label: 'Everyone' },
+      ],
       description:
-        'Users without an authenticator enrolled are blocked from data once their grace period ends. Enabling this also turns on the two-factor feature so users can enroll.',
+        'Who must use an authenticator app: nobody, administrators (platform, organization and delegated administrators), or everyone. Those required who have not enrolled are blocked from data once their grace period ends. Any requirement also turns on the two-factor feature so people can enroll. Every organization is held to at least this level and may require more in its access policy.',
       visible: "${data.email_password_enabled !== false}",
     },
     {
@@ -300,7 +311,7 @@ const manifest = {
       min: 0,
       max: 90,
       description: 'How long users may defer enrollment before the hard block. 0 blocks immediately.',
-      visible: "${data.mfa_required === true}",
+      visible: "${data.mfa_required !== 'off'}",
     },
     {
       type: 'group',
@@ -337,7 +348,7 @@ const manifest = {
       default: 0,
       min: 0,
       max: 10080,
-      description: 'Sign a user out after this many minutes of inactivity. 0 disables.',
+      description: 'Sign a user out after this many minutes of inactivity. 0 disables. Every organization is held to at most this, and may set a shorter limit in its access policy.',
     },
     {
       type: 'number',
@@ -347,7 +358,7 @@ const manifest = {
       default: 0,
       min: 0,
       max: 8760,
-      description: 'Force re-authentication this many hours after sign-in, regardless of activity. 0 disables.',
+      description: 'Force re-authentication this many hours after sign-in, regardless of activity. 0 disables. Every organization is held to at most this, and may set a shorter limit in its access policy.',
     },
     {
       type: 'number',
@@ -357,7 +368,7 @@ const manifest = {
       default: 0,
       min: 0,
       max: 100,
-      description: 'Cap simultaneous signed-in sessions per user; the oldest are signed out past the cap. 0 = unlimited.',
+      description: 'Cap simultaneous signed-in sessions per user; the oldest are signed out past the cap. 0 = unlimited. Every organization is held to at most this, and may set a lower cap in its access policy.',
     },
 
     {
@@ -373,7 +384,7 @@ const manifest = {
       label: 'Allowed IP ranges',
       required: false,
       description:
-        'CIDR ranges or exact IPs (one per line, or comma-separated), e.g. 203.0.113.0/24. When set, sign-in from outside these ranges is rejected, and so is any request whose client address the server cannot establish. Empty = no restriction. The address judged is the one the connection comes from; behind a reverse proxy, the server must be configured to trust that proxy so the original client address is judged instead.',
+        'CIDR ranges or exact IPs (one per line, or comma-separated), e.g. 203.0.113.0/24. When set, sign-in from outside these ranges is rejected, and so is any request whose client address the server cannot establish. Empty = no restriction. The address judged is the one the connection comes from; behind a reverse proxy, the server must be configured to trust that proxy so the original client address is judged instead. Every organization is held to these ranges and may narrow them in its access policy.',
     },
     // [#23367, ruling A] The API-key lifecycle policy. Two readers, one
     // source: `bindAuthSettings` binds these into the auth service

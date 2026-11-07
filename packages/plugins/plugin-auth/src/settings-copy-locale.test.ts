@@ -11,12 +11,8 @@ import type { SettingsCopyLocale } from './settings-copy-locale.js';
 import { ALLOWED_IP_RANGES_REFUSAL_COPY, allowedIpRangesRefusalCopy } from './allowed-ip-ranges.js';
 import { SIGN_IN_FLOOR_COPY, signInFloorCopy } from './sign-in-method-floor.js';
 import { MFA_REQUIRED_ENROLLMENT_COPY, mfaRequiredEnrollmentCopy } from './mfa-required-enrollment-predicate.js';
-import {
-  ORGANIZATION_MFA_REFUSAL_COPY,
-  ORGANIZATION_MFA_REQUIRED_NOTICE_COPY,
-  organizationMfaRequiredNotice,
-  organizationMfaWithoutEnrollmentRefusal,
-} from './organization-mfa-enrollment-guard.js';
+import { ORGANIZATION_MFA_REFUSAL_COPY, organizationMfaRefusalCopy } from './organization-mfa-enrollment-guard.js';
+import { ACCESS_POLICY_FLOOR_COPY, accessPolicyFloorCopy } from './organization-access-policy.js';
 
 /** The key each platform table tag is served by. */
 const KEY_OF_TAG: Record<PlatformLocaleTag, SettingsCopyLocale> = {
@@ -47,16 +43,8 @@ const TABLES: Table[] = [
   { name: 'allowed IP ranges refusal', table: ALLOWED_IP_RANGES_REFUSAL_COPY, lookup: allowedIpRangesRefusalCopy },
   { name: 'sign-in method floor', table: SIGN_IN_FLOOR_COPY, lookup: signInFloorCopy },
   { name: 'auth.mfa_required refusal', table: MFA_REQUIRED_ENROLLMENT_COPY, lookup: mfaRequiredEnrollmentCopy },
-  {
-    name: 'organization MFA refusal',
-    table: ORGANIZATION_MFA_REFUSAL_COPY,
-    lookup: (locale) => organizationMfaWithoutEnrollmentRefusal(locale).message,
-  },
-  {
-    name: 'organization MFA notice',
-    table: ORGANIZATION_MFA_REQUIRED_NOTICE_COPY,
-    lookup: (locale) => organizationMfaRequiredNotice(7, locale),
-  },
+  { name: 'organization MFA refusal', table: ORGANIZATION_MFA_REFUSAL_COPY, lookup: organizationMfaRefusalCopy },
+  { name: 'organization access policy floor', table: ACCESS_POLICY_FLOOR_COPY, lookup: accessPolicyFloorCopy },
 ];
 
 /** What a lookup answered, as comparable text. */
@@ -68,7 +56,6 @@ function served(t: Table, locale: string | undefined): string {
 /** The text a lookup must answer when it serves `key`. */
 function expected(t: Table, key: SettingsCopyLocale): string {
   const entry = t.table[key];
-  if (t.name === 'organization MFA notice') return JSON.stringify((entry as (d: number) => string)(7));
   return JSON.stringify(typeof entry === 'string' ? entry : sentences(entry));
 }
 
@@ -110,17 +97,5 @@ describe.each(TABLES)('$name copy carries the eleven platform languages', (t) =>
     for (const code of ['xx', 'tlh', undefined]) {
       expect(served(t, code), String(code)).toBe(expected(t, 'en'));
     }
-  });
-});
-
-describe('organization MFA notice plurals', () => {
-  it('Russian and Arabic count days in the right form', () => {
-    expect(organizationMfaRequiredNotice(1, 'ru')).toContain('1 день');
-    expect(organizationMfaRequiredNotice(3, 'ru')).toContain('3 дня');
-    expect(organizationMfaRequiredNotice(11, 'ru')).toContain('11 дней');
-    expect(organizationMfaRequiredNotice(21, 'ru')).toContain('21 день');
-    expect(organizationMfaRequiredNotice(2, 'ar')).toContain('يومان');
-    expect(organizationMfaRequiredNotice(7, 'ar')).toContain('7 أيام');
-    expect(organizationMfaRequiredNotice(14, 'ar')).toContain('14 يومًا');
   });
 });

@@ -274,8 +274,9 @@ const PINS: { readonly [C in ExpressionRefusalCode]: readonly [Pin<C>, ...Pin<C>
       produce: () => onlyError('predicate', "pge.selectedProjectId != ''", { scope: 'record', roots: ['page'] }),
       params: { name: 'pge', roots: ['page'], suggestion: 'page' },
       message:
-        'unbound root `pge` — beyond the record this authoring surface binds `page`, and `pge` is none of them, ' +
-        'so `pge.…` resolves to nothing and the expression silently evaluates to null. Did you mean `page`?',
+        'unbound root `pge` — beyond the record this authoring surface binds `page`, and `pge` is none of them: ' +
+        '`pge.…` is an unknown variable, so the expression faults with `Unknown variable: pge` instead of reading it. ' +
+        'Did you mean `page`?',
     },
   ],
   'bare-reference': [
@@ -284,7 +285,9 @@ const PINS: { readonly [C in ExpressionRefusalCode]: readonly [Pin<C>, ...Pin<C>
       params: { name: 'amount' },
       message:
         'bare reference `amount` — a formula/validation expression binds the record as the `record` namespace, ' +
-        'not at top level, so `amount` resolves to nothing and the expression silently evaluates to null. Write `record.amount`.',
+        'not at top level, so `amount` is an unknown variable and the expression faults with `Unknown variable: amount` ' +
+        'instead of reading the field. The site\'s fault rule decides the outcome (a formula field reads null, an ' +
+        '`error` validation rule refuses the write, an action\'s `visible` hides the action). Write `record.amount`.',
     },
   ],
   'date-arithmetic': [

@@ -390,8 +390,10 @@ To compare against a field's previous value, reference `previous.<field>`
 (e.g. `record.stage != previous.stage`).
 
 > **Qualify your references.** A validation predicate binds only the `record`
-> namespace, so a bare `status == "won"` resolves to nothing and the rule
-> silently never fires — write `record.status == "won"`. `objectstack build`
+> namespace, so a bare `status == "won"` is an unknown variable and the rule
+> cannot be evaluated: an `error` rule then refuses every write it judges, and a
+> `warning` / `info` rule is skipped with a log line and never applied — write
+> `record.status == "won"`. `objectstack build`
 > flags bare references, unknown fields, and text/boolean fields misused in
 > arithmetic — see [Build-time validation](/docs/data-modeling/formulas#build-time-validation).
 
