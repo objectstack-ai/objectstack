@@ -275,6 +275,20 @@ const DEFAULT_GOVERNANCE: GovernanceSnapshot = {
   growthAlertRows: 0,
 };
 
+/**
+ * [#31241] The `lifecycle` settings this service indexes as maps — the `json`
+ * specifiers of `lifecycleSettingsManifest` — read through
+ * {@link LifecycleService.governanceMap}.
+ */
+const GOVERNANCE_MAP_KEYS: ReadonlySet<string> = new Set(['retention_overrides', 'quotas', 'quota_defaults']);
+
+/** A plain object (not an array, not a class instance): the shape a map setting persists. */
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  const proto = Object.getPrototypeOf(value);
+  return proto === Object.prototype || proto === null;
+}
+
 /** Cap on tenants scanned for per-tenant overrides each sweep. */
 const TENANT_SCAN_LIMIT = 200;
 
@@ -507,6 +521,12 @@ export class LifecycleService {
   private sweeping = false;
   /** Row counts from the previous sweep — baseline for growth alerts. */
   private lastCounts = new Map<string, number>();
+  /**
+   * [#31241] Map-valued settings already said about, `key|organization|text`,
+   * so {@link governanceMap} warns once per stored value rather than once per
+   * sweep.
+   */
+  private readonly governanceMapSaid = new Set<string>();
   /** Governance snapshot for the sweep in flight. */
   private governance: GovernanceSnapshot = DEFAULT_GOVERNANCE;
   /**
@@ -1126,6 +1146,63 @@ export class LifecycleService {
    *
    * [#21597] The scan asks the registry before it reads. An unregistered
    * `sys_organization` is never read, and answers "no tenant overrides". */
+  /**
+   * [#31241] The value of one map-valued `lifecycle` setting
+   * (`retention_overrides`, `quotas`, `quota_defaults`) as the map this service
+   * indexes, or `undefined` for "nothing configured".
+   *
+   * These keys are `json` specifiers, which persist an object (ADR-0007). Until
+   * #31241 the console's `json` field sent the textarea's TEXT and the settings
+   * save door stored it, so a deployment that saved this page holds a JSON
+   * string where the map belongs; indexing that string reads every override and
+   * quota as absent, with nothing logged. The save door refuses a string now,
+   * but rows already stored are not re-judged, so this reader repairs them in
+   * place rather than through a migration: a string that parses to a plain
+   * object IS the map its author typed, and it is applied, with one `warn` per
+   * stored value naming the key and the one-step fix (save the page again).
+   *
+   * Anything else that is not a plain object (text that does not parse, a
+   * scalar, an array) cannot be applied. That was already the outcome; what
+   * changes is that it is now said, once, at `error`: the setting looks saved
+   * from the outside while the platform enforces the declared windows instead.
+   */
+  private governanceMap(key: string, value: unknown, tenantId?: string): unknown {
+    if (value === null || typeof value === 'undefined') return undefined;
+    if (isPlainRecord(value)) return value;
+    const where = tenantId ? `organization ${tenantId}'s ` : '';
+    const said = `${key}|${tenantId ?? ''}|${typeof value === 'string' ? value : typeof value}`;
+    const first = !this.governanceMapSaid.has(said);
+    if (first) this.governanceMapSaid.add(said);
+    if (typeof value === 'string') {
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(value);
+      } catch {
+        parsed = undefined;
+      }
+      if (isPlainRecord(parsed)) {
+        if (first) {
+          this.opts.logger.warn(
+            `[lifecycle] ${where}lifecycle.${key} is stored as JSON text, not an object ` +
+              '(saved by a console that sent the text). It is read as the object it holds and applied. ' +
+              'Save the Data Lifecycle settings page again to store it as an object.',
+          );
+        }
+        return parsed;
+      }
+    }
+    if (first) {
+      const log = this.opts.logger.error ?? this.opts.logger.warn;
+      log.call(
+        this.opts.logger,
+        `[lifecycle] ${where}lifecycle.${key} is not an object (${typeof value === 'string' ? `a string of ${value.length} characters that is not a JSON object` : Array.isArray(value) ? 'an array' : `a ${typeof value}`}), ` +
+          'so none of it applies: the declared lifecycle windows and no quotas are enforced instead. ' +
+          'Set it again on the Data Lifecycle settings page.',
+      );
+    }
+    return undefined;
+  }
+
   private async loadGovernance(
     engine: LifecycleEngineLike,
     declared: LifecycleObjectLike[],
@@ -1136,7 +1213,10 @@ export class LifecycleService {
     const read = async <T>(key: string, fallback: T, ctx?: Record<string, unknown>): Promise<{ value: T; source?: string }> => {
       try {
         const r = await settings.get('lifecycle', key, ctx);
-        return { value: (r?.value ?? fallback) as T, source: r?.source };
+        const value = GOVERNANCE_MAP_KEYS.has(key)
+          ? this.governanceMap(key, r?.value, r?.source === 'tenant' ? (ctx?.tenantId as string | undefined) : undefined)
+          : r?.value;
+        return { value: (value ?? fallback) as T, source: r?.source };
       } catch {
         return { value: fallback };
       }

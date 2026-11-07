@@ -218,8 +218,49 @@ function missesDeclaredFormat(type: string, value: unknown): boolean {
   return !re.test(value.trim());
 }
 
-/** Why the page blocked a save on one key: an empty `required`, or a format miss. */
-type PreSaveBlock = { key: string; rule: 'required' | 'format'; type: string };
+/**
+ * The value a `json` key's draft stands for (objectstack#31241). The field is a
+ * textarea, so its draft is the TEXT the admin typed; ADR-0007 declares a
+ * `json` key persists an object, and the settings service refuses a string for
+ * one. The text is parsed here, at save: blank text is a clear (`null`, back to
+ * the default), text that does not parse is `{ ok: false }` and blocks the
+ * save. A draft that is not a string (nothing typed yet) passes through.
+ */
+function parseJsonDraft(value: unknown): { ok: true; value: unknown } | { ok: false } {
+  if (typeof value !== 'string') return { ok: true, value };
+  if (value.trim() === '') return { ok: true, value: null };
+  try {
+    return { ok: true, value: JSON.parse(value) };
+  } catch {
+    return { ok: false };
+  }
+}
+
+/**
+ * The patch a save sends: the draft, with every `json` key's text replaced by
+ * the value it parses to (objectstack#31241), so a `json` key never leaves the
+ * page as text. Called only after {@link preSaveBlocks} passed, which refuses
+ * text that does not parse; such a key would otherwise be sent unchanged and
+ * refused by the server.
+ */
+function outgoingSettingsPatch(
+  specifiers: ReadonlyArray<Specifier>,
+  draft: Record<string, unknown>,
+): Record<string, unknown> {
+  const patch: Record<string, unknown> = { ...draft };
+  for (const spec of specifiers) {
+    if (spec.type !== 'json' || !spec.key || !(spec.key in draft)) continue;
+    const parsed = parseJsonDraft(draft[spec.key]);
+    if (parsed.ok) patch[spec.key] = parsed.value;
+  }
+  return patch;
+}
+
+/**
+ * Why the page blocked a save on one key: an empty `required`, a format miss,
+ * or a `json` draft whose text does not parse (objectstack#31241).
+ */
+type PreSaveBlock = { key: string; rule: 'required' | 'format' | 'json'; type: string };
 
 /**
  * The visible keys a save is blocked on, in manifest order: a `required` key
@@ -250,7 +291,17 @@ function preSaveBlocks(
     if (!evalVisibility(spec.visible, liveValues)) continue;
     const resolved = values[key];
     if (resolved?.locked) continue;
-    const effective = key in draft ? draft[key] : resolved?.value;
+    let effective = key in draft ? draft[key] : resolved?.value;
+    // A `json` key's draft is judged as the value its text parses to, and
+    // only the draft: a value already stored is not this save's to block.
+    if (spec.type === 'json' && key in draft) {
+      const parsed = parseJsonDraft(draft[key]);
+      if (!parsed.ok) {
+        blocks.push({ key, rule: 'json', type: spec.type });
+        continue;
+      }
+      effective = parsed.value;
+    }
     if (spec.required && isEmptySettingValue(effective)) {
       blocks.push({ key, rule: 'required', type: spec.type });
     } else if (missesDeclaredFormat(spec.type, effective)) {
@@ -488,6 +539,7 @@ export function SettingsView() {
     if (blocked.length > 0) {
       const messageFor = ({ rule, type }: PreSaveBlock): string => {
         if (rule === 'required') return t('form.fieldRequired');
+        if (rule === 'json') return t('fields.object.invalidJson');
         if (type === 'email') return t('validation.email');
         if (type === 'url') return t('validation.url');
         if (type === 'phone') return t('console.settingsView.invalidPhone');
@@ -515,7 +567,7 @@ export function SettingsView() {
     // reflects THIS save's verdict rather than a stale one from a previous try.
     setCryptoRefusal(null);
     try {
-      const res = await saveSettingsNamespace(namespace, draft);
+      const res = await saveSettingsNamespace(namespace, outgoingSettingsPatch(manifest.specifiers, draft));
       setPayload({ ...payload, values: { ...values, ...res.values } });
       setDraft({});
       setFieldErrors({});
