@@ -568,6 +568,30 @@ describe('a refused grant holder the caller cannot read is answered as a holder 
     });
   }
 
+  it("a holder the caller cannot read is read only through the caller's own door, projected to its id, and no membership is read for it", async () => {
+    for (const store of STORES) {
+      const h = await bootWith(store);
+      const reads: Array<{ object: string; query: any }> = [];
+      const find = h.engine.find.bind(h.engine);
+      vi.spyOn(h.engine, 'find').mockImplementation(async (object: string, query?: any) => {
+        reads.push({ object, query });
+        return find(object, query);
+      });
+      expectMembershipRefusal(await refusalOf(() => h.engine.insert(
+        'sys_user_position', { user_id: HOLDER, position: 'qa_rep' }, { context: OWN_ROW_ADMIN_A } as any,
+      )), store);
+      const namesHolder = (q: any) => JSON.stringify(q?.where ?? null).includes(`"${HOLDER}"`);
+      const holderReads = reads.filter((r) => r.object === 'sys_user' && namesHolder(r.query));
+      expect(holderReads.length, store).toBeGreaterThan(0);
+      for (const r of holderReads) {
+        expect(r.query?.context?.isSystem, store).toBeFalsy();
+        expect(r.query?.context?.userId, store).toBe(OWN_ROW_ADMIN_A.userId);
+        expect(r.query?.fields, store).toEqual(['id']);
+      }
+      expect(reads.filter((r) => r.object === 'sys_member' && namesHolder(r.query)), store).toEqual([]);
+    }
+  });
+
   it('a holder the caller CAN read keeps the membership refusal; a readable member is admitted', async () => {
     const h = await bootWith('member elsewhere');
     // The caller's own row is readable, and the caller is no member of org_a.
