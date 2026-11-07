@@ -25,6 +25,7 @@ import { describe, it, expect, afterEach, vi } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { resolveThrownHttpError } from '@objectstack/types';
+import type { EngineAggregateOptions, EngineQueryOptions, FilterCondition } from '@objectstack/spec/data';
 import { SysUser, SysMember, SysBusinessUnit, SysBusinessUnitMember } from '@objectstack/platform-objects/identity';
 
 import { SecurityPlugin } from './security-plugin.js';
@@ -333,8 +334,9 @@ describe('[ADR-0090 D12, ruling of record 6663849489; #29029] a delegate reads t
 });
 
 /** [#30758] The unit ids the system context reads under `filter` — what a door that compiles its own statement returns. */
-async function unitsUnder(h: Awaited<ReturnType<typeof boot>>, filter: unknown): Promise<string[]> {
-  const rows = await h.engine.find('sys_business_unit', { ...(filter ? { where: filter } : {}), context: SYS } as any);
+async function unitsUnder(h: Awaited<ReturnType<typeof boot>>, filter: Record<string, unknown> | null | undefined): Promise<string[]> {
+  const query: EngineQueryOptions = { ...(filter ? { where: filter as FilterCondition } : {}), context: SYS };
+  const rows = await h.engine.find('sys_business_unit', query);
   return (Array.isArray(rows) ? rows : []).map((r: any) => String(r.id)).sort();
 }
 
@@ -342,10 +344,11 @@ async function unitsUnder(h: Awaited<ReturnType<typeof boot>>, filter: unknown):
 async function unitAggregate(
   h: Awaited<ReturnType<typeof boot>>,
   context: any,
-  query: { where?: unknown; groupBy: string[] },
+  query: { where?: FilterCondition; groupBy: string[] },
 ): Promise<string[] | { status: number; code?: string; forbiddenFields?: unknown }> {
   try {
-    const rows = await h.engine.aggregate('sys_business_unit', { ...query, aggregations: [{ function: 'count', alias: 'n' }] } as any, { context } as any);
+    const aggregate: EngineAggregateOptions = { ...query, aggregations: [{ function: 'count', alias: 'n' }] };
+    const rows = await h.engine.aggregate('sys_business_unit', aggregate, { context });
     return (Array.isArray(rows) ? rows : []).map((r: any) => `${String(r[query.groupBy[0]])}:${Number(r.n)}`).sort();
   } catch (e) {
     const r = resolveThrownHttpError(e);
@@ -380,7 +383,7 @@ describe('[ADR-0090 D12, ruling of record 6663849489; #30758] canReadObject and 
       it('security/explain of one unit: the units the scope covers are visible, the unit above it is not — asked by the delegate and by its organization administrator', async () => {
         const h = await boot(posture);
         await h.engine.insert('sys_user_permission_set',
-          { id: 'ups_delegate', user_id: 'u_delegate', permission_set: 'east_admin', organization_id: ORG_A }, { context: { isSystem: true, tenantId: ORG_A } } as any);
+          { id: 'ups_delegate', user_id: 'u_delegate', permission_set: 'east_admin', organization_id: ORG_A }, { context: { isSystem: true, tenantId: ORG_A } });
         for (const [asker, request] of [
           ['delegate', (recordId: string) => h.plugin.explainAccessForCaller({ object: 'sys_business_unit', operation: 'read', recordId }, NARROW)],
           ['organization administrator', (recordId: string) =>
