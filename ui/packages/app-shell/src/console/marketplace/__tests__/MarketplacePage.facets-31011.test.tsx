@@ -19,6 +19,8 @@
  *   Beta badge for `maturity: 'beta'` only.
  * - A value outside the spec's vocabulary is drawn nowhere, neither as a
  *   facet value nor as a badge: no raw spelling reaches the page.
+ * - A list column that is not an array (the proxy hands rows over unparsed)
+ *   reads as no values: its facet hides and the catalog still renders.
  *
  * Every click goes through the rendered buttons. `fetch` is stubbed by path
  * with the catalog body the proxy serves; the labels are the `en` pack's.
@@ -258,6 +260,23 @@ describe('Marketplace facets hide with no data (objectstack#31011)', () => {
     expect(screen.queryByTestId('marketplace-facets')).toBeNull();
     expect(screen.queryByTestId('marketplace-card-function')).toBeNull();
     expect(screen.queryByText('crm')).toBeNull();
+  });
+
+  it('a list column that is not an array reads as no values, and the catalog still renders', async () => {
+    await renderPage([
+      row('string', 'String Columns', { business_functions: 'sales', industries: 'retail' }),
+      row('object', 'Object Columns', { business_functions: { 0: 'hr' }, industries: 7 }),
+      row('array', 'Array Columns', { business_functions: ['legal'] }),
+    ]);
+
+    expect(shownCards()).toEqual(['com.acme.string', 'com.acme.object', 'com.acme.array']);
+    const fn = screen.getByRole('group', { name: L.facet.businessFunction });
+    expect(within(fn).getAllByRole('button').map((b) => b.getAttribute('data-testid'))).toEqual([
+      'marketplace-facet-businessFunction-legal',
+    ]);
+    expect(screen.queryByRole('group', { name: L.facet.industry })).toBeNull();
+    expect(within(screen.getByTestId('marketplace-card-com.acme.string')).queryByTestId('marketplace-card-function'))
+      .toBeNull();
   });
 });
 

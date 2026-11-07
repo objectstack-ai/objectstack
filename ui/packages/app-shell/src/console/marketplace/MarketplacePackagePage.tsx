@@ -115,7 +115,7 @@ import { ConnectorCredentialsStep } from './ConnectorCredentialsStep.js';
 import type { SuggestedBinding } from '../../services/suggestedBindingsApi.js';
 import { errorCodeIs } from '@object-ui/types';
 import { MarketplaceNamespaceGate } from './MarketplaceNamespaceGate.js';
-import { readListingTaxonomy } from './marketplaceTaxonomy.js';
+import { effectiveSolutionType, readListingTaxonomy } from './marketplaceTaxonomy.js';
 
 /**
  * Whether a cloud install lands in the environment this console renders, read
@@ -1463,14 +1463,16 @@ function MarketplacePackagePageBody() {
     : undefined;
 
   // The listing's taxonomy (`marketplaceTaxonomy.ts`): every business
-  // function in the listing's order, the industries, the solution type the
-  // listing declares, and Beta. Nothing is drawn for a facet it does not carry.
+  // function in the listing's order, the industries, the solution type, and
+  // Beta. An undeclared solution type reads as the spec's default, as the
+  // catalog page filters and counts it; the other facets draw nothing when the
+  // listing carries none.
   const taxonomy = readListingTaxonomy(pkg);
   const taxonomyGroups = [
-    taxonomy.solutionType && {
+    {
       key: 'solutionType',
       label: t('marketplace.facet.solutionType'),
-      values: [t(`marketplace.solutionType.${taxonomy.solutionType}`)],
+      values: [t(`marketplace.solutionType.${effectiveSolutionType(taxonomy)}`)],
     },
     taxonomy.businessFunctions.length > 0 && {
       key: 'businessFunction',
@@ -1615,24 +1617,22 @@ function MarketplacePackagePageBody() {
               </Badge>
             )}
           </div>
-          {taxonomyGroups.length > 0 && (
-            <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1.5" data-testid="marketplace-detail-taxonomy">
-              {taxonomyGroups.map((group) => (
-                <div
-                  key={group.key}
-                  role="group"
-                  aria-label={group.label}
-                  className="flex flex-wrap items-center gap-1.5"
-                  data-testid={`marketplace-detail-${group.key}`}
-                >
-                  <span className="text-xs text-muted-foreground" aria-hidden="true">{group.label}</span>
-                  {group.values.map((value) => (
-                    <Badge key={value} variant="outline" className="font-normal">{value}</Badge>
-                  ))}
-                </div>
-              ))}
-            </div>
-          )}
+          <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1.5" data-testid="marketplace-detail-taxonomy">
+            {taxonomyGroups.map((group) => (
+              <div
+                key={group.key}
+                role="group"
+                aria-label={group.label}
+                className="flex flex-wrap items-center gap-1.5"
+                data-testid={`marketplace-detail-${group.key}`}
+              >
+                <span className="text-xs text-muted-foreground" aria-hidden="true">{group.label}</span>
+                {group.values.map((value) => (
+                  <Badge key={value} variant="outline" className="font-normal">{value}</Badge>
+                ))}
+              </div>
+            ))}
+          </div>
           {localNotLoadedReason}
           {loc.description && (
             <p className="text-sm sm:text-base text-foreground/80 mt-3 max-w-2xl leading-relaxed">{loc.description}</p>

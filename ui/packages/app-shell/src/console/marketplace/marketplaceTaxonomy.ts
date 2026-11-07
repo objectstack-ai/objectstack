@@ -49,6 +49,13 @@ const isIndustry = isMember(INDUSTRIES);
 const isSolutionType = isMember(SOLUTION_TYPES);
 
 /**
+ * A list column as the console reads it: the catalog proxy hands rows over
+ * unparsed, so a column that is not an array reads as no values, and the facet
+ * it feeds hides, rather than failing the page.
+ */
+const listOf = (value: unknown): readonly unknown[] => (Array.isArray(value) ? value : []);
+
+/**
  * The row's taxonomy. A facet value is a spec value: the catalog stores the
  * facets as select fields whose options are the spec's, so a row cannot carry
  * another, and the console draws nothing for one rather than its raw spelling.
@@ -57,8 +64,8 @@ export function readListingTaxonomy(
   row: Pick<MarketplacePackageSummary, 'business_functions' | 'industries' | 'solution_type' | 'maturity'>,
 ): ListingTaxonomy {
   return {
-    businessFunctions: (row.business_functions ?? []).filter(isBusinessFunction),
-    industries: (row.industries ?? []).filter(isIndustry),
+    businessFunctions: listOf(row.business_functions).filter(isBusinessFunction),
+    industries: listOf(row.industries).filter(isIndustry),
     solutionType: isSolutionType(row.solution_type) ? row.solution_type : null,
     beta: row.maturity === 'beta',
   };
@@ -85,7 +92,7 @@ export type FacetName = 'businessFunctions' | 'industries' | 'solutionType';
  * spec's default (`app`) when it declares none — the spec's reading of an
  * absent key.
  */
-function effectiveSolutionType(taxonomy: ListingTaxonomy): MarketplaceSolutionType {
+export function effectiveSolutionType(taxonomy: ListingTaxonomy): MarketplaceSolutionType {
   return taxonomy.solutionType ?? DEFAULT_SOLUTION_TYPE;
 }
 

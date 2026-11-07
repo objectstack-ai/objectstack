@@ -9,9 +9,12 @@
  *
  * - Each facet the listing carries is one labelled group of badges, labelled
  *   from the pack.
+ * - The solution type is always drawn: an undeclared one reads as the spec's
+ *   default, `app`, as the catalog page filters and counts it.
  * - Beta shows for `maturity: 'beta'` only.
- * - A listing with no taxonomy draws no group and no Beta; a value outside the
- *   spec's vocabulary is drawn nowhere, never as its raw spelling.
+ * - A listing with no taxonomy draws only that default type and no Beta; a
+ *   value outside the spec's vocabulary is drawn nowhere, never as its raw
+ *   spelling; a list column that is not an array reads as no values.
  *
  * `marketplaceApi` is not mocked: one stubbed `fetch` answers by path with the
  * detail body the proxy serves.
@@ -129,12 +132,25 @@ describe('Details — the marketplace taxonomy (objectstack#31011)', () => {
     expect(screen.queryByTestId('marketplace-detail-beta')).toBeNull();
   });
 
-  it('a listing with no taxonomy, or only values outside the spec, draws none of it', async () => {
-    await renderDetail({ business_functions: ['crm'], industries: null, solution_type: 'theme' });
+  it('a listing with no taxonomy draws the default solution type and nothing else', async () => {
+    await renderDetail({});
 
-    expect(screen.queryByTestId('marketplace-detail-taxonomy')).toBeNull();
+    const type = screen.getByRole('group', { name: L.facet.solutionType });
+    expect(within(type).getByText(L.solutionType.app)).toBeInTheDocument();
+    expect(screen.queryByRole('group', { name: L.facet.businessFunction })).toBeNull();
+    expect(screen.queryByRole('group', { name: L.facet.industry })).toBeNull();
     expect(screen.queryByTestId('marketplace-detail-beta')).toBeNull();
+  });
+
+  it('values outside the spec, and list columns that are not arrays, are drawn nowhere', async () => {
+    await renderDetail({ business_functions: ['crm'], industries: 'retail', solution_type: 'theme' });
+
+    expect(within(screen.getByRole('group', { name: L.facet.solutionType })).getByText(L.solutionType.app))
+      .toBeInTheDocument();
+    expect(screen.queryByRole('group', { name: L.facet.businessFunction })).toBeNull();
+    expect(screen.queryByRole('group', { name: L.facet.industry })).toBeNull();
     expect(screen.queryByText('crm')).toBeNull();
     expect(screen.queryByText('theme')).toBeNull();
+    expect(screen.queryByText('retail')).toBeNull();
   });
 });
