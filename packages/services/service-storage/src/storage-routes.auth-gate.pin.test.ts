@@ -164,10 +164,11 @@ const UNHELD = { 'x-test-user': 'u_member' };
 const held = (posture: string) => ({ 'x-test-user': 'u_member', 'x-test-hold': posture });
 
 describe('the storage census — read off the composed mount', () => {
-  it('mounts exactly ten routes, the ledgered ones, and nothing a preflight or another verb could reach', async () => {
+  it('mounts exactly twelve routes, the ledgered ones, and nothing a preflight or another verb could reach', async () => {
     const { routes, other } = await mount('active');
-    // ⭐ A count, on purpose: an eleventh route has to come through this file.
-    expect(routes.size).toBe(10);
+    // ⭐ A count, on purpose: a thirteenth route has to come through this file.
+    // [#30892] Eleven and twelve: the single-use upload link's page and upload.
+    expect(routes.size).toBe(12);
     expect([...routes.keys()].sort()).toEqual(STORAGE_ROUTE_LEDGER.map((row) => row.route).sort());
     // No OPTIONS route, no middleware: a CORS preflight is the host's answer, held or not.
     expect(other).toEqual([]);

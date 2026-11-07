@@ -11,6 +11,7 @@ import type { AIToolDefinition } from '@objectstack/spec/contracts';
 
 import { MCPServerRuntime } from './mcp-server-runtime.js';
 import type { McpDataBridge, McpActionBridge } from './mcp-http-tools.js';
+import type { McpFileBridge } from './file-content.js';
 import type { McpAuthoringToolRegistry, ToolExecutionResult } from './types.js';
 import { renderSkillMarkdown } from './skill-md.js';
 
@@ -34,8 +35,8 @@ import { renderSkillMarkdown } from './skill-md.js';
  * tool to `mcp-http-tools.ts` without teaching the skill turns this red.
  */
 
-/** Minimal full-surface bridge: object + action methods present, all stubbed. */
-function makeFullBridge(): McpDataBridge & McpActionBridge {
+/** Minimal full-surface bridge: object + action + file methods present, all stubbed. */
+function makeFullBridge(): McpDataBridge & McpActionBridge & McpFileBridge {
   return {
     async listObjects() {
       return [];
@@ -68,6 +69,18 @@ function makeFullBridge(): McpDataBridge & McpActionBridge {
     // the surface this guard reads: a full host implements it.
     async resumeRun() {
       return {};
+    },
+    // [#30892] The file pair's members, so `read_file` / `create_upload_link`
+    // are on the surface this guard reads: a host with the storage plugin
+    // carries them, and its skill is rendered with `fileTools: true`.
+    async listRecordFiles() {
+      return [];
+    },
+    async readRecordFile() {
+      return { fileId: 'f', name: 'f', mimeType: null, size: null, maxBytes: 0, download: null };
+    },
+    async createUploadLink() {
+      return { url: 'https://x.test/u', expiresAt: '2026-01-01T00:00:00.000Z' };
     },
   };
 }
@@ -132,7 +145,7 @@ describe('SKILL.md ↔ native tool surface drift guard', () => {
     // Sanity: the harness must see the full surface, or the guard guards nothing.
     expect(registered.length).toBeGreaterThanOrEqual(9);
 
-    const md = renderSkillMarkdown();
+    const md = renderSkillMarkdown({ fileTools: true });
     const undocumented = registered.filter((name) => !md.includes(name));
     expect(undocumented, `tools registered but missing from SKILL.md — update packages/mcp/src/skill-md.ts: ${undocumented.join(', ')}`).toEqual([]);
   });
@@ -145,7 +158,7 @@ describe('SKILL.md ↔ native tool surface drift guard', () => {
     for (const t of AUTHORING_TOOLS) expect(registered).toContain(t.name);
 
     // The skill rendered for the SAME grant and the SAME registry names every one of them …
-    const md = renderSkillMarkdown({ grantedScopes: EVERY_SCOPE, authoringTools: registry.getAll() });
+    const md = renderSkillMarkdown({ grantedScopes: EVERY_SCOPE, authoringTools: registry.getAll(), fileTools: true });
     const undocumented = registered.filter((name) => !md.includes(name));
     expect(undocumented, `tools registered but missing from the authoring SKILL.md: ${undocumented.join(', ')}`).toEqual([]);
 

@@ -114,6 +114,12 @@ export const STORAGE_ROUTE_LEDGER: readonly StorageRouteLedgerEntry[] = [
   { route: 'GET /api/v1/storage/files/:fileId', family: 'download', disposition: 'server-only',
     note: 'stable 302 to the same signed URL. This is the value objectql stamps into file/image field payloads (engine.ts buildFileValue), followed verbatim by <img src>/<a href> — a browser URL, not an SDK call. The SDK resolves via the /url sibling above.' },
 
+  // ── single-use upload link (#30892) ───────────────────────────────────────
+  { route: 'GET /api/v1/storage/upload-links/:token', family: 'upload-link', disposition: 'server-only',
+    note: 'the page an upload link opens: a file picker that PUTs to the same address. Minted for a signed-in user by createUploadLinkAs (the MCP create_upload_link tool) and usable only by that user, signed in: no session answers 401 AUTH_REQUIRED (JSON), and a used, expired or unknown token, or another user\'s link, answers one 404 page. A usable one names no record, field or user. HTML, not the JSON envelope: a browser page, never an SDK call.' },
+  { route: 'PUT /api/v1/storage/upload-links/:token', family: 'upload-link', disposition: 'server-only',
+    note: 'spends the link on the request body, for the signed-in user it was minted for (no session: 401 AUTH_REQUIRED): one conditional write turns it from open to used, then the file lands where the link is bound, written as that user (re-resolved now). Answers { success: true, data: { fileId, size, field | attachmentId } }; a used, expired or unknown token, or another user\'s link, answers 404 RESOURCE_NOT_FOUND, the same for all.' },
+
   // ── local-driver loopback (LocalStorageAdapter presign targets) ───────────
   { route: 'PUT /api/v1/storage/_local/raw/:token', family: 'local-driver', disposition: 'server-only',
     note: 'the uploadUrl LocalStorageAdapter mints for its own presign tokens. storage.upload does PUT it, but opaquely — via fetchImpl on whatever uploadUrl came back, exactly as it would an S3 presigned URL. HMAC-token-authorized, adapter-internal, never a named SDK method. Answers { success: true, data: { key } }; the { ok: true, key } it used to answer retired when every storage route moved to the declared envelope, `ok` being a private second word for `success`.' },
