@@ -352,6 +352,8 @@ describe('[ADR-0106] HTTP MCP list_actions summarises an action against the obje
         member: { userId: 'usr_member', positions: [] as string[], permissions: ['mcp_act_member'], systemPermissions: [] as string[] },
         /** Denied nothing: the control. */
         staff: { userId: 'usr_staff', positions: [] as string[], permissions: ['mcp_act_staff'], systemPermissions: [] as string[] },
+        /** Denied every field of the project object. */
+        walled: { userId: 'usr_walled', positions: [] as string[], permissions: ['mcp_act_walled'], systemPermissions: [] as string[] },
     } as const;
 
     beforeAll(async () => {
@@ -404,6 +406,10 @@ describe('[ADR-0106] HTTP MCP list_actions summarises an action against the obje
                 fields: { [`${OBJ}.${DENIED}`]: deny, [`${OTHER}.${DENIED_OTHER}`]: deny },
             }),
             PermissionSetSchema.parse({ name: 'mcp_act_staff', label: 'Staff', objects: { '*': all } }),
+            PermissionSetSchema.parse({
+                name: 'mcp_act_walled', label: 'Walled', objects: { '*': all },
+                fields: Object.fromEntries(Object.keys((engine.getSchema(OBJ) as any).fields).map((f) => [`${OBJ}.${f}`, deny])),
+            }),
         ];
         const pluginServices: Record<string, unknown> = {
             manifest: { register: vi.fn() },
@@ -475,6 +481,14 @@ describe('[ADR-0106] HTTP MCP list_actions summarises an action against the obje
         expect(entry.params).toEqual([{ name: DENIED, type: 'string', required: false }]);
         expect(JSON.stringify(entry).includes(DENIED_LABEL)).toBe(false);
         expect(JSON.stringify(entry).includes(DENIED_HELP)).toBe(false);
+    });
+
+    it('a member denied every field of a listed action\'s object is refused, as list_objects refuses them', async () => {
+        const { bridge } = await bridgeFor(kernelOver(services), PERSONAS.walled);
+        const refused = await rejectionOf(() => bridge.listActions());
+        expect({ code: refused?.code, status: refused?.status }).toEqual(REFUSED);
+        const listed = await rejectionOf(() => bridge.listObjects());
+        expect({ code: listed?.code, status: listed?.status }).toEqual(REFUSED);
     });
 
     it('CONTROL — an unrestricted member is shown the full summary, byte-identical to a deployment with no security service', async () => {
