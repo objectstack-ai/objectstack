@@ -1857,7 +1857,7 @@ export class HonoHttpServer implements IHttpServer {
             this.server = server;
             // On the instance, so `server.close()` reaches it too: Node's
             // `httpServerPreClose` calls `server.closeIdleConnections()`.
-            if (typeof server.closeIdleConnections === 'function') {
+            if ('closeIdleConnections' in server) {
                 const sweepIdle: () => void = server.closeIdleConnections.bind(server);
                 server.closeIdleConnections = () => this.closeIdleConnectionsOnceFlushed(sweepIdle);
             }
