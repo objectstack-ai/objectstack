@@ -45,6 +45,18 @@ export interface ObjectStackUploadAdapterOptions {
    * declares (objectui#12055).
    */
   scope?: API.UploadScope;
+  /**
+   * Attach every upload from this adapter to this record, in the call that
+   * completes it: the completion request carries `attachTo`, and the server
+   * commits the file and writes its `sys_attachment` row as one unit, as the
+   * signed-in caller (the record attachments surface's attach verb). The
+   * result's `meta.attachmentId` names the new attachment. The server attaches
+   * only the caller's own pending upload in the `attachments` scope, so set
+   * `scope: 'attachments'` with it. A refused attach fails the upload with the
+   * server's refusal and leaves the file pending, never committed and
+   * unattached.
+   */
+  attachTo?: { parentObject: string; parentId: string };
   /** Override `fetch` (tests, ServiceWorker queues). */
   fetchImpl?: typeof fetch;
   /**
@@ -64,7 +76,8 @@ export interface ObjectStackUploadAdapterOptions {
  *   1. POST `/upload/presigned`   → `{ uploadUrl, fileId, downloadUrl }`
  *   2. PUT  `uploadUrl`           → uploads the raw bytes (HMAC token)
  *   3. POST `/upload/complete`    → marks the file ready and registers
- *                                   the `sys_file` record
+ *                                   the `sys_file` record — and, with
+ *                                   `attachTo`, attaches it to that record
  *
  * Falls back to a canonical (non-signed) download URL so the returned
  * `UploadResult.url` is stable across signed-URL expiry — components
@@ -136,14 +149,27 @@ export function createObjectStackUploadAdapter(
         credentials,
         headers: { 'Content-Type': 'application/json' },
         signal: options.signal,
-        body: JSON.stringify({ fileId }),
+        body: JSON.stringify(opts.attachTo ? { fileId, attachTo: opts.attachTo } : { fileId }),
       });
       if (!completeRes.ok) {
         const text = await completeRes.text().catch(() => '');
-        throw new Error(
-          `Upload completion failed (${completeRes.status}): ${text || completeRes.statusText}`,
+        // The server's refusal code and status ride on the error, so a caller
+        // maps a refused attach (`ATTACHMENT_PARENT_ACCESS`, `FILES_DISABLED`,
+        // `PERMISSION_DENIED`…) without parsing the message.
+        let code: string | undefined;
+        try {
+          const parsed = JSON.parse(text);
+          if (typeof parsed?.error?.code === 'string') code = parsed.error.code;
+        } catch {
+          // Not the declared envelope — the message keeps the raw text.
+        }
+        throw Object.assign(
+          new Error(`Upload completion failed (${completeRes.status}): ${text || completeRes.statusText}`),
+          { status: completeRes.status, ...(code ? { code } : {}) },
         );
       }
+      const completeBody = opts.attachTo ? await completeRes.json().catch(() => null) : null;
+      const attachmentId = (completeBody?.data ?? completeBody)?.attachmentId as string | undefined;
 
       // Use the canonical (stable) download endpoint as the field value
       // so a saved record keeps working past signed-URL expiry. This
@@ -156,7 +182,7 @@ export function createObjectStackUploadAdapter(
         name,
         size: file.size,
         mimeType,
-        meta: { fileId, scope: opts.scope },
+        meta: { fileId, scope: opts.scope, ...(attachmentId ? { attachmentId } : {}) },
       };
     },
   };
