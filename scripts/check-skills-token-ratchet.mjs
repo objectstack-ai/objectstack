@@ -795,8 +795,23 @@ export const CEILINGS = new Map([
   // units. On `origin/main` the file was 14722 bytes (3681 tokens, headroom
   // 6); the LANDED file is 14791 bytes -> 3698 tokens, ceiling +11, pinned AT
   // the measurement, zero headroom.
-  //   ceil($(wc -c < skills/objectstack-data/rules/security.md) / 4) == ceil(14791 / 4)
-  ['skills/objectstack-data/rules/security.md', 3698],
+  // 3698 -> 3768 (#31176, the docs-and-skill half of ruling A on #31129): the
+  // membership key with `valueField: 'id'` ("the person is a record": an
+  // `employee` roster's `my_employee_ids`, read by a `leave_request` policy as
+  // `employee in current_user.my_employee_ids`), what it does not do (grants
+  // nothing by itself; tested against a column not referencing the roster, or
+  // another object's `id`: `rls-predicate-membership-key-target`), and the
+  // correction of the false "nor `id`" clause on `valueField`. Same standing
+  // ruling, 2026-10-27, decision card 「skills 修复卡的教学和 eval 都撞 token
+  // 天花板,怎么付?」, tap A, verbatim and untranslated: 「A:先削重复,余额按实测提高」
+  // (record 6513306068). PAID DOWN FIRST: the three `- Source:` pointer lines
+  // (`security/permission.zod.ts`, `security/rls.zod.ts`, `data/field.zod.ts`),
+  // each path kept in the generated `references/_index.md`; 208 bytes. On
+  // `origin/main` the file was 14783 bytes (3696 tokens, headroom 2); the
+  // LANDED file is 15069 bytes -> 3768 tokens, ceiling +70, pinned AT the
+  // measurement, zero headroom.
+  //   ceil($(wc -c < skills/objectstack-data/rules/security.md) / 4) == ceil(15069 / 4)
+  ['skills/objectstack-data/rules/security.md', 3768],
   // 3024 -> 3109 (2026-08-31 app-repo-principles raise, see the block above).
   // Severity Levels listed the three values and left the CHOICE unstated: a
   // block rests on a judgement a person made, so a machine-inferred signal — a

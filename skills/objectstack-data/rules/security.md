@@ -23,7 +23,6 @@ export const salesUser = definePermissionSet({
 - Bits: `allowCreate` / `allowRead` / `allowEdit` / `allowDelete`, plus
   `allowTransfer` (ownership change), `viewAllRecords` / `modifyAllRecords`
   (super-user, bypass sharing).
-- Source: `node_modules/@objectstack/spec/src/security/permission.zod.ts`
 - **`isDefault: true` = the `everyone` baseline (ADR-0090 D5).** A published package
   declares **exactly one**, anchor-safe: `describeAnchorForbiddenBits(set, 'everyone')`
   (`@objectstack/spec/security`) returns `null`, else lint
@@ -109,7 +108,6 @@ bridge (warns). The compiler resolves these
 | `current_user.queues` | the ownership queues the caller sits in (for `IN`; ADR-0142 D3) |
 | `current_user.KEY` | the set an object's `membershipKeys.KEY` declares (for `IN`) |
 
-- Source: `node_modules/@objectstack/spec/src/security/rls.zod.ts`.
 - Prefer the built-in `member_default` owner scoping (`owner_only_writes` /
   `owner_only_deletes`) and the object's `sharingModel` (ADR-0056 D1) over
   hand-written policies for the common cases.
@@ -140,17 +138,23 @@ export default ObjectSchema.create({
 ```
 
 ```typescript
-// in the portal permission set — a policy reads the set with `in`
+// in a permission set — a policy reads the set with `in`
 rowLevelSecurity: [
   { name: 'portal_orders', object: 'order', operation: 'select', using: 'account in current_user.portal_account_ids' },
+  // the person is a record: roster `employee` declares
+  // my_employee_ids: { userField: 'user', valueField: 'id' }
+  { name: 'own_leave', object: 'leave_request', operation: 'select', using: 'employee in current_user.my_employee_ids' },
 ]
 ```
 
 - `userField`: the roster's user column (`user`, or a lookup to `sys_user`);
-  `valueField`: the reference column whose values form the set (never the
-  same column, nor `id`: `membership-key-value-field-invalid`);
+  `valueField`: the reference column whose values form the set, or `id`
+  (never the same column: `membership-key-value-field-invalid`);
   `filter`: optional canonical CEL over the roster's own
   columns, no `current_user.*`.
+- With `id` the set is the ids of the caller's own roster rows; it grants
+  nothing by itself. Tested against a column not referencing the roster, or another
+  object's `id`, it is refused (`rls-predicate-membership-key-target`).
 - One name per stack: a key on two objects, a kernel name (`id`,
   `organization_id`, `positions`, `org_user_ids`, `accessible_org_ids`,
   `email`, `queues`) and a key on an object extension are refused.
@@ -158,8 +162,9 @@ rowLevelSecurity: [
   read on the roster needed), at most 1,000 values; more, a failed read or a
   `filter` that does not compile matches **no rows**. Whoever writes roster
   rows grants the key.
-- **Choose by what the rows are keyed on:** the person → owner scoping; a
-  position → `positions` on the policy; a named record → a membership key;
+- **Choose by what the rows are keyed on:** the user → owner scoping; a
+  position → `positions` on the policy; a named record (the caller's own
+  roster row too) → a membership key;
   a parent's owner, parent optional → an optional master (relationships.md);
   one record, once → a sharing rule or a manual share; a team's records → a
   sharing rule whose `sharedWith: { type: 'queue', value: '<queue name>' }`
@@ -243,8 +248,6 @@ fields: {
   },
 }
 ```
-
-- Source: `node_modules/@objectstack/spec/src/data/field.zod.ts`
 
 ## Multi-tenancy
 
