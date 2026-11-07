@@ -92,6 +92,7 @@ import { userInfoLocaleClaim } from './oidc-userinfo-locale-claim.js';
 import { refuseGrantForBannedUser } from './oauth-grant-ban-refusal.js';
 import { refuseUserInfoForBannedUser } from './oauth-token-read-ban-refusal.js';
 import { buildTurnstileSignUpPlugin, reportHalfConfiguredTurnstile, resolveTurnstileKeys } from './turnstile-sign-up.js';
+import { readRequestClientAddress } from './request-client-address.js';
 
 /**
  * The `AuthManager` members the function below reads — every one of them, and
@@ -903,7 +904,7 @@ export async function buildPluginList(this: PluginListHost): Promise<any[]> {
   const dataEngine = this.config.dataEngine;
   if (dataEngine) {
     const { customSession } = await import('better-auth/plugins/custom-session');
-    plugins.push(customSession(async ({ user, session }) => {
+    plugins.push(customSession(async ({ user, session }, ctx?: any) => {
       if (!user?.id) return { user, session };
 
       // ADR-0068 D1/D2 (renamed ADR-0090 D3) — emit ONE canonical
@@ -996,7 +997,16 @@ export async function buildPluginList(this: PluginListHost): Promise<any[]> {
       // the transport seams to enforce. See computeAuthGate().
       // ADR-0069 D4 — session controls (idle / absolute). Best-effort;
       // revokes the session in place when exceeded (next request → 401).
-      await this.enforceSessionControls((session as any)?.id, (session as any)?.createdAt);
+      // [ADR-0069 TL;DR 6] Against the limits of the organization the session
+      // is scoped to, never below the deployment's.
+      // On a request through the HTTP auth door, the organization's IP list
+      // is judged again with the address that door established.
+      await this.enforceSessionControls(
+        (session as any)?.id,
+        (session as any)?.createdAt,
+        (session as any)?.activeOrganizationId ?? undefined,
+        ctx?.request ? { address: await readRequestClientAddress() } : undefined,
+      );
 
       // An impersonation session carries the administrator who started it
       // (`impersonatedBy`, written by the admin plugin's impersonation and

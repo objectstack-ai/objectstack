@@ -38,7 +38,7 @@
 import { readFileSync, readdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import type { Page } from '@objectstack/spec/ui';
+import { ComponentPropsMap, type Page } from '@objectstack/spec/ui';
 import { auditPageExpressionEnvelopes, renderBareExpressionFindings } from '@objectstack/lint';
 // The one answer this tree has to "comment, literal, or code". It is a plain
 // `.mjs`, but `scripts/js-comment-mask.d.mts` beside it is a hand-written
@@ -159,6 +159,30 @@ function declaredPageExports(): { name: string; file: string }[] {
   return out.sort((a, b) => a.name.localeCompare(b.name));
 }
 
+/**
+ * Console-registered widget types with no `ComponentPropsMap` row, each with
+ * the reason door 3 loses nothing on it (the detector's header: a consumer
+ * records such an exemption in its own assert, never by ignoring the
+ * channel). The reason is held, not only stated: every node of an exempted
+ * type must author an EMPTY `properties` bag, so there is no props-level
+ * expression key for door 3 to miss. A node that starts authoring props reds
+ * the test below, and then the type needs its props schema.
+ */
+const UNMAPPED_TYPE_EXEMPTIONS: Readonly<Record<string, string>> = {
+  'mcp:authorized-assistants':
+    'the user page\'s AI Assistants tab body (@object-ui/app-shell): the widget takes no props and reads '
+    + 'the bound sys_user record, so its authored `properties` is `{}` and holds no expression key',
+};
+
+/** The authored node at an audit path such as `regions[0].components[2].properties.items[10].children[0]`. */
+function nodeAt(page: Page, path: string): unknown {
+  let cur: unknown = page;
+  for (const seg of path.match(/[^.[\]]+/g) ?? []) {
+    cur = isRec(cur) || Array.isArray(cur) ? (cur as AnyRec)[seg] : undefined;
+  }
+  return cur;
+}
+
 const AUDITS = EXPORTED_PAGES.map(([exportName, page]) => ({
   exportName,
   page,
@@ -205,13 +229,26 @@ describe('platform Page exports serve canonical expression envelopes', () => {
     expect(audit.componentCount).toBeGreaterThan(0);
   });
 
-  it.each(AUDITS)('$exportName: every component type is declared in ComponentPropsMap (door 3 precondition)', ({ audit }) => {
+  it.each(AUDITS)('$exportName: every component type is declared in ComponentPropsMap (door 3 precondition)', ({ page, audit }) => {
+    const exempted = audit.unmappedTypes.filter(e => Object.hasOwn(UNMAPPED_TYPE_EXEMPTIONS, e.type));
+    for (const e of exempted) {
+      const node = nodeAt(page, e.path);
+      expect(isRec(node) && node.type === e.type, `${e.path} does not resolve to its ${e.type} node`).toBe(true);
+      expect((node as AnyRec).properties ?? {}, `${e.path} [${e.type}] authors props, so its exemption no longer holds`).toEqual({});
+    }
     expect(
-      audit.unmappedTypes.map(e => `${e.path} [${e.type}]`).join('\n'),
+      audit.unmappedTypes.filter(e => !exempted.includes(e)).map(e => `${e.path} [${e.type}]`).join('\n'),
       'door 3 has no props schema for these component types, so any expression key inside '
         + 'their `properties` is unread by this gate. Either declare the props schema, or '
         + 'record the exemption here with the reason.',
     ).toBe('');
+  });
+
+  it('every unmapped-type exemption is live: the type is still unmapped, and a shipped page still mounts it', () => {
+    for (const type of Object.keys(UNMAPPED_TYPE_EXEMPTIONS)) {
+      expect(Object.hasOwn(ComponentPropsMap, type), `${type} now has a ComponentPropsMap row: drop its exemption`).toBe(false);
+      expect(AUDITS.some(({ audit }) => audit.unmappedTypes.some(e => e.type === type)), `no shipped page mounts ${type}`).toBe(true);
+    }
   });
 
   it.each(AUDITS)('$exportName: every authored `properties` bag parses against its props schema (door 3 precondition)', ({ audit }) => {

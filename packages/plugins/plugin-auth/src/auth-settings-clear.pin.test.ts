@@ -198,23 +198,23 @@ describe('#30312 refusable pieces restore through the piece a save travels', () 
 
   it('mfa_required cleared returns to a declared off, and enrolled factors stay verifiable', async () => {
     const { svc, manager } = await boot();
-    await svc.set('auth', 'mfa_required', true, {});
-    await vi.waitFor(() => expect(running(manager).mfaRequired).toBe(true));
+    await svc.set('auth', 'mfa_required', 'everyone', {});
+    await vi.waitFor(() => expect(running(manager).mfaRequirement).toBe('everyone'));
     expect((running(manager).plugins as any)?.twoFactor).toBe(true);
 
     await svc.set('auth', 'mfa_required', null, {});
-    await vi.waitFor(() => expect(running(manager).mfaRequired).toBeUndefined());
+    await vi.waitFor(() => expect(running(manager).mfaRequirement).toBeUndefined());
     // As a save of off: the requirement goes, the enrollment path stays.
     expect((running(manager).plugins as any)?.twoFactor).toBe(true);
   });
 
   it('mfa_required cleared returns to a declared on as one piece with its enrollment path', async () => {
-    const { svc, manager } = await boot({ plugin: { mfaRequired: true } });
-    await svc.set('auth', 'mfa_required', false, {});
-    await vi.waitFor(() => expect(running(manager).mfaRequired).toBe(false));
+    const { svc, manager } = await boot({ plugin: { mfaRequirement: 'everyone' } });
+    await svc.set('auth', 'mfa_required', 'off', {});
+    await vi.waitFor(() => expect(running(manager).mfaRequirement).toBe('off'));
 
     await svc.set('auth', 'mfa_required', null, {});
-    await vi.waitFor(() => expect(running(manager).mfaRequired).toBe(true));
+    await vi.waitFor(() => expect(running(manager).mfaRequirement).toBe('everyone'));
     expect((running(manager).plugins as any)?.twoFactor).toBe(true);
   });
 

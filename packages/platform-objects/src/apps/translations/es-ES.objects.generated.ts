@@ -556,8 +556,8 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         help: "Metadatos de la organización serializados en JSON."
       },
       require_mfa: {
-        label: "Exigir autenticación multifactor",
-        help: "Si es true, todos los miembros de esta organización deben registrar una aplicación de autenticación para acceder a los datos. Requiere que la autenticación de dos factores esté activada en esta implementación (OS_AUTH_TWO_FACTOR=true); mientras esté desactivada, guardarlo como true se rechaza."
+        label: "Exigir autenticación multifactor (retirado)",
+        help: "Retirado. Define el requisito multifactor de esta organización en Ajustes → Política de acceso. Un valor que estaba activado aquí se trasladó allí como «Todos» y se borró."
       },
       timezone: {
         label: "Zona horaria",
@@ -2281,6 +2281,49 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
     _views: {
       all: {
         label: "Todas"
+      }
+    },
+    _actions: {
+      mint_scim_credential: {
+        label: "Emitir credencial",
+        description: "Emite una credencial de portador para una conexión SCIM. Entrégala al IdP como token SCIM; solo se muestra una vez.",
+        params: {
+          connectionId: {
+            label: "ID de conexión",
+            helpText: "Conexión SCIM que autentica esta credencial, p. ej., «okta-prod». Máximo 246 caracteres. Para rotarla, emite una segunda credencial para la misma conexión, cambia el IdP a ella y después revoca la anterior."
+          },
+          label: {
+            label: "Etiqueta",
+            helpText: "Opcional. Un nombre para esta credencial, p. ej., «rotation 2026-Q3»."
+          },
+          organizationId: {
+            label: "Organización",
+            helpText: "Opcional. La organización propietaria de la conexión. Déjalo vacío para usar la organización predeterminada."
+          },
+          provisioningDomainId: {
+            label: "Dominio de aprovisionamiento",
+            helpText: "Opcional. El límite que recibe los usuarios y grupos aprovisionados. Déjalo vacío para usar el ID de conexión."
+          },
+          expiresAt: {
+            label: "Caduca el",
+            helpText: "Opcional. Pasado este momento, la credencial se rechaza. Déjalo vacío para una credencial que no caduca."
+          }
+        },
+        resultDialog: {
+          title: "Credencial SCIM emitida",
+          description: "Copia el token ahora: solo se muestra una vez y no se puede recuperar. Pégalo en el IdP como token de portador SCIM. Si se filtra, revócalo y emite uno nuevo.",
+          acknowledge: "He guardado el token",
+          fields: {
+            token: "Token de portador",
+            connectionId: "ID de conexión",
+            expiresAt: "Caduca el"
+          }
+        }
+      },
+      revoke_scim_credential: {
+        label: "Revocar credencial",
+        confirmText: "¿Revocar esta credencial SCIM? El IdP que la usa se rechaza a partir de su siguiente solicitud. No se puede deshacer: para restablecer el aprovisionamiento, emite una credencial nueva.",
+        successMessage: "Credencial SCIM revocada"
       }
     }
   },

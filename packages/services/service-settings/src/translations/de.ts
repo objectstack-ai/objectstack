@@ -344,6 +344,7 @@ export const de: PlatformTranslationData = {
         },
         mfa_required: {
           label: 'Mehrfaktor-Authentifizierung verlangen',
+          options: { off: 'Aus', administrators: 'Administratoren', everyone: 'Alle' },
           help: 'Benutzer ohne registrierten Authenticator verlieren nach Ablauf ihrer Schonfrist den Zugriff auf Daten. Das Aktivieren schaltet auch die Zwei-Faktor-Funktion ein, damit Benutzer sich registrieren können.',
         },
         mfa_grace_period_days: {
@@ -404,6 +405,26 @@ export const de: PlatformTranslationData = {
         },
       },
     },
+    access_policy: {
+      title: 'Zugriffsrichtlinie',
+      description: 'Die Anmeldebeschränkungen dieser Organisation. Die Authentifizierungseinstellungen der Bereitstellung gelten immer; diese können sie nur ergänzen.',
+      groups: {
+        network: { title: 'Netzwerk', description: 'Von wo aus sich Mitglieder dieser Organisation anmelden dürfen.' },
+        sessions: { title: 'Sitzungen', description: 'Wie lange die Sitzung eines Mitglieds gültig bleibt. Jedes Limit kann nur kürzer sein als das der Bereitstellung.' },
+        multi_factor: { title: 'Multi-Faktor', description: 'Wer in dieser Organisation sein Konto mit einer Authenticator-App (TOTP) schützen muss.' },
+      },
+      keys: {
+        allowed_ip_ranges: { label: 'Erlaubte IP-Bereiche' },
+        session_idle_timeout_minutes: { label: 'Leerlauf-Zeitlimit (Minuten)' },
+        session_absolute_max_hours: { label: 'Maximale Sitzungsdauer (Stunden)' },
+        max_concurrent_sessions_per_user: { label: 'Max. gleichzeitige Sitzungen pro Benutzer' },
+        mfa_required: {
+          label: 'Multi-Faktor-Authentifizierung verlangen',
+          options: { off: 'Aus', administrators: 'Administratoren', everyone: 'Alle' },
+        },
+      },
+    },
+
     storage: {
       title: 'Dateispeicher',
       description: 'Backend für Anhänge, Exporte und Benutzer-Uploads.',

@@ -86,6 +86,7 @@ export const jaJP: TranslationData = {
         nav_settings_sms: { label: 'SMS 配信' },
         nav_settings_branding: { label: 'ブランディング' },
         nav_settings_auth: { label: '認証' },
+        nav_settings_access_policy: { label: 'アクセスポリシー' },
         nav_settings_storage: { label: 'ファイルストレージ' },
         nav_settings_ai: { label: 'AI と Embedder' },
         nav_settings_knowledge: { label: 'ナレッジ' },

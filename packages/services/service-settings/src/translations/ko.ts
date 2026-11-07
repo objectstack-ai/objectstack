@@ -271,6 +271,7 @@ export const ko: PlatformTranslationData = {
         rate_limit_window_seconds: { label: '인증 속도 제한: 창(초)', help: '위의 요청 상한을 세는 슬라이딩 창입니다.' },
         mfa_required: {
           label: '다단계 인증 요구',
+          options: { off: '끄기', administrators: '관리자', everyone: '모든 사람' },
           help: '인증 앱을 등록하지 않은 사용자는 유예 기간이 끝나면 데이터에 접근할 수 없습니다. 이 항목을 켜면 사용자가 등록할 수 있도록 2단계 인증 기능도 켜집니다.',
         },
         mfa_grace_period_days: { label: 'MFA 유예 기간(일)', help: '강제 차단 전까지 사용자가 등록을 미룰 수 있는 기간입니다. 0이면 즉시 차단합니다.' },
@@ -316,6 +317,26 @@ export const ko: PlatformTranslationData = {
         google_client_secret: { label: 'Google 클라이언트 보안 비밀', help: '암호화해 저장합니다. 서버 설정에서도 지정할 수 있습니다.' },
       },
     },
+    access_policy: {
+      title: '액세스 정책',
+      description: '이 조직의 로그인 제한입니다. 배포의 인증 설정은 항상 적용되며, 여기서는 제한을 추가하기만 할 수 있습니다.',
+      groups: {
+        network: { title: '네트워크', description: '이 조직의 구성원이 로그인할 수 있는 위치.' },
+        sessions: { title: '세션', description: '구성원 세션의 유효 기간. 각 한도는 배포의 한도보다 짧게만 설정할 수 있습니다.' },
+        multi_factor: { title: '다단계 인증', description: '이 조직에서 인증 앱(TOTP)으로 계정을 보호해야 하는 사람.' },
+      },
+      keys: {
+        allowed_ip_ranges: { label: '허용된 IP 범위' },
+        session_idle_timeout_minutes: { label: '유휴 시간 제한(분)' },
+        session_absolute_max_hours: { label: '최대 세션 유지 시간(시간)' },
+        max_concurrent_sessions_per_user: { label: '사용자당 최대 동시 세션 수' },
+        mfa_required: {
+          label: '다단계 인증 요구',
+          options: { off: '끄기', administrators: '관리자', everyone: '모든 사람' },
+        },
+      },
+    },
+
     storage: {
       title: '파일 저장소',
       description: '첨부 파일, 내보내기, 사용자 업로드에 쓰는 백엔드입니다.',
