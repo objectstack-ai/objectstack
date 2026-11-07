@@ -5,6 +5,9 @@ import { AppPlugin } from './app-plugin';
 import { SEED_SETTLEMENT_SERVICE, type ISeedSettlementService } from '@objectstack/spec/contracts';
 import { assertEngineFindOnePredicate, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 import type { PluginContext } from '@objectstack/core';
+// MODULE LOAD: AppPlugin imports it lazily, inside a clocked case
+// (`scripts/check-test-source-alias.mjs`, the clocked-window rule).
+import '@objectstack/metadata';
 
 /**
  * #23354 — AppPlugin publishes which rows its seed landed on.

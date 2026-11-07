@@ -4090,11 +4090,12 @@ export class SeedLoaderService implements ISeedLoaderService {
     if (cached) return cached;
     const keys = new Set<string>();
     try {
-      const rows = await this.engine.find(SEED_LANDED_KEY_OBJECT, {
+      const query: EngineQueryOptions = {
         where: { organization_id: ledger.organizationId, object_name: objectName },
         fields: ['seed_key'],
         context: { isSystem: true },
-      } as any);
+      };
+      const rows = await this.engine.find(SEED_LANDED_KEY_OBJECT, query);
       for (const row of rows || []) {
         const key = (row as { seed_key?: unknown } | null | undefined)?.seed_key;
         if (typeof key === 'string' && key !== '') keys.add(key);
