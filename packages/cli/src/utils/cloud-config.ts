@@ -191,7 +191,7 @@ export async function writeCloudConfig(config: CloudConfig): Promise<void> {
 
 /** Clear the cloud session; a recorded deploy target stays (see the header). */
 export async function deleteCloudConfig(): Promise<void> {
-  await writeCloudFile(deployTargetHalf(await readCloudFileForWrite()));
+  await writeCloudFile({ ...deployTargetHalf(await readCloudFileForWrite()) });
 }
 
 /** The deploy-target half as stored; `{}` when nothing is recorded. */
