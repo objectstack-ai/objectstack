@@ -94,19 +94,16 @@ describe('#15873 — better-auth keeps its own door for its own columns', () => 
   });
 });
 
-describe('#30411 — require_mfa\'s help says it needs two-factor on, in the source and in every locale', () => {
+describe('require_mfa is retired: its help sends the reader to the access policy, in the source and in every locale', () => {
   const bundles = { en: enObjects, 'zh-CN': zhCNObjects, 'ja-JP': jaJPObjects, 'es-ES': esESObjects };
 
-  it('the source description names the deployment switch the save is refused without', () => {
-    const description = SysOrganization.fields.require_mfa?.description;
-    expect(description).toMatch(/two-factor authentication on for this deployment/);
-    expect(description).toMatch(/OS_AUTH_TWO_FACTOR=true/);
+  it('the column is readonly, and its description names where the requirement lives now', () => {
+    expect(SysOrganization.fields.require_mfa?.readonly).toBe(true);
+    expect(SysOrganization.fields.require_mfa?.description).toMatch(/Access policy/);
   });
 
-  it.each(Object.entries(bundles))('%s: the generated help carries the condition', (_locale, bundle) => {
-    const help = (bundle as any).sys_organization?.fields?.require_mfa?.help;
-    expect(help).toEqual(expect.any(String));
-    expect(help).toMatch(/OS_AUTH_TWO_FACTOR=true/);
+  it.each(Object.entries(bundles))('%s: the generated help is present', (_locale, bundle) => {
+    expect((bundle as any).sys_organization?.fields?.require_mfa?.help).toEqual(expect.any(String));
   });
 
   it('the en bundle is the source, verbatim (the generator writes it)', () => {

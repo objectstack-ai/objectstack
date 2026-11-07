@@ -247,6 +247,23 @@ describe('[#30958] mint: the platform admin gets a bearer the SCIM plugin accept
     await expectSecretNowhereElse(token, credentialId);
   }, 30_000);
 
+  it('a mint on an impersonation session names the administrator at the keyboard in its audit row', async () => {
+    // The gate reads `impersonatedBy` off the session, never off the body.
+    session = { user: ADMIN.user, session: { impersonatedBy: 'usr_support_admin' } };
+    const minted = await door('mint-credential', { connectionId: 'okta-impersonated', impersonatedBy: 'usr_forged' });
+    expect(minted.status, JSON.stringify(minted.body)).toBe(200);
+    const { token, credentialId } = minted.body.data;
+    const audit = await auditRows(credentialId);
+    expect(audit).toHaveLength(1);
+    expect(audit[0]).toMatchObject({ action: 'create', user_id: ADMIN.user.id, actor: ADMIN.user.id });
+    expect(JSON.parse(String(audit[0].metadata))).toEqual({
+      event: 'scim_credential_minted',
+      connectionId: 'okta-impersonated',
+      impersonated_by: 'usr_support_admin',
+    });
+    await expectSecretNowhereElse(token, credentialId);
+  }, 30_000);
+
   it('the owning organization is the one the request names, which must exist', async () => {
     const named = await door('mint-credential', { connectionId: 'entra-other-org', organizationId: OTHER_ORG });
     expect(named.status, JSON.stringify(named.body)).toBe(200);

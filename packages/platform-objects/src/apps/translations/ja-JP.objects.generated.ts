@@ -556,8 +556,8 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         help: "JSON シリアライズされた組織メタデータ"
       },
       require_mfa: {
-        label: "多要素認証を必須化",
-        help: "true の場合、この組織のすべてのメンバーはデータにアクセスするために認証アプリの登録が必要になります。このデプロイで二要素認証がオンになっている必要があります（OS_AUTH_TWO_FACTOR=true）。オフの間は true で保存すると拒否されます。"
+        label: "多要素認証を必須化（廃止）",
+        help: "廃止されました。この組織の多要素認証の要件は「設定 → アクセスポリシー」で設定してください。ここでオンだった値は「全員」として移行され、クリアされました。"
       },
       timezone: {
         label: "タイムゾーン",
@@ -2281,6 +2281,49 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
     _views: {
       all: {
         label: "すべて"
+      }
+    },
+    _actions: {
+      mint_scim_credential: {
+        label: "資格情報を発行",
+        description: "SCIM 接続用のベアラー資格情報を発行します。SCIM トークンとして IdP に渡してください。一度しか表示されません。",
+        params: {
+          connectionId: {
+            label: "接続 ID",
+            helpText: "この資格情報が認証する SCIM 接続（例: 「okta-prod」）。最大 246 文字です。ローテーションするには、同じ接続に 2 つ目の資格情報を発行し、IdP をそちらに切り替えてから、古いものを失効させます。"
+          },
+          label: {
+            label: "ラベル",
+            helpText: "任意。この資格情報の名前（例: 「rotation 2026-Q3」）。"
+          },
+          organizationId: {
+            label: "組織",
+            helpText: "任意。この接続を所有する組織。空欄の場合は既定の組織になります。"
+          },
+          provisioningDomainId: {
+            label: "プロビジョニングドメイン",
+            helpText: "任意。プロビジョニングされたユーザーとグループを受け取る境界。空欄の場合は接続 ID が使われます。"
+          },
+          expiresAt: {
+            label: "有効期限",
+            helpText: "任意。この日時を過ぎると資格情報は拒否されます。空欄の場合は期限のない資格情報になります。"
+          }
+        },
+        resultDialog: {
+          title: "SCIM 資格情報を発行しました",
+          description: "今すぐトークンをコピーしてください。トークンは一度しか表示されず、後から取得することはできません。IdP に SCIM ベアラートークンとして貼り付けてください。漏えいした場合は失効させて新しく発行してください。",
+          acknowledge: "トークンを保存しました",
+          fields: {
+            token: "トークン",
+            connectionId: "接続 ID",
+            expiresAt: "有効期限"
+          }
+        }
+      },
+      revoke_scim_credential: {
+        label: "資格情報を失効",
+        confirmText: "この SCIM 資格情報を失効させますか？これを使っている IdP は次のリクエストから拒否されます。この操作は元に戻せません。プロビジョニングを再開するには新しい資格情報を発行してください。",
+        successMessage: "SCIM 資格情報を失効させました"
       }
     }
   },

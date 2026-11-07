@@ -556,8 +556,8 @@ export const zhHantObjects: NonNullable<TranslationData['objects']> = {
         help: "JSON 序列化的組織中繼資料"
       },
       require_mfa: {
-        label: "強制多因素驗證",
-        help: "開啟後，該組織的每位成員都必須先繫結身分驗證器 App，才能存取資料。需要本部署開啟雙重驗證（OS_AUTH_TWO_FACTOR=true）；雙重驗證關閉時，儲存為開啟會被拒絕。"
+        label: "強制多因素驗證（已停用）",
+        help: "已停用。請在「設定 → 存取原則」中設定本組織的多因素驗證要求。此處原為開啟的值已遷移為「所有人」並清除。"
       },
       timezone: {
         label: "時區",
@@ -2281,6 +2281,49 @@ export const zhHantObjects: NonNullable<TranslationData['objects']> = {
     _views: {
       all: {
         label: "全部"
+      }
+    },
+    _actions: {
+      mint_scim_credential: {
+        label: "簽發憑證",
+        description: "為 SCIM 連線簽發一個 Bearer 憑證。把它作為 SCIM 權杖交給 IdP；它只顯示一次。",
+        params: {
+          connectionId: {
+            label: "連線 ID",
+            helpText: "該憑證驗證的 SCIM 連線，例如「okta-prod」。最多 246 個字元。如需輪換，請為同一連線再簽發一個憑證，讓 IdP 改用它，然後撤銷舊憑證。"
+          },
+          label: {
+            label: "標籤",
+            helpText: "選填。該憑證的名稱，例如「rotation 2026-Q3」。"
+          },
+          organizationId: {
+            label: "組織",
+            helpText: "選填。擁有該連線的組織。留空則為預設組織。"
+          },
+          provisioningDomainId: {
+            label: "佈建網域",
+            helpText: "選填。接收所佈建使用者與群組的邊界。留空則使用連線 ID。"
+          },
+          expiresAt: {
+            label: "到期時間",
+            helpText: "選填。超過此時間後該憑證會被拒絕。留空則憑證永不到期。"
+          }
+        },
+        resultDialog: {
+          title: "SCIM 憑證已簽發",
+          description: "請立即複製權杖——它只顯示這一次，之後無法找回。請把它貼到 IdP 中作為 SCIM Bearer 權杖。如果洩露，請撤銷它並簽發新的憑證。",
+          acknowledge: "我已儲存權杖",
+          fields: {
+            token: "權杖",
+            connectionId: "連線 ID",
+            expiresAt: "到期時間"
+          }
+        }
+      },
+      revoke_scim_credential: {
+        label: "撤銷憑證",
+        confirmText: "確定要撤銷此 SCIM 憑證嗎？使用它的 IdP 從下一次請求起將被拒絕。此操作無法復原：如需恢復佈建，請簽發新的憑證。",
+        successMessage: "SCIM 憑證已撤銷"
       }
     }
   },

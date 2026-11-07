@@ -60,7 +60,8 @@ const TWO_FACTOR_OFFERED = P`has(features.twoFactor) && features.twoFactor == tr
  *  - The other tabs are **explicitly curated** to the related lists
  *    that matter on a user profile (Positions / Permission Sets / Business
  *    Units / Sessions / Linked Accounts / Organizations / OAuth Apps / API
- *    Keys / Preferences) plus a Security tab. The synthesized strip would
+ *    Keys / Preferences) plus a Security tab and, for platform
+ *    administrators only, an AI Assistants tab. The synthesized strip would
  *    carry a tab per object that has a FK to sys_user
  *    (sys_position.created_by, sys_email.updated_by,
  *    sys_email_template.created_by, …), dozens of noisy "查看全部" cards
@@ -608,6 +609,37 @@ export const SysUserDetailPage: Page = {
                       title: { en: 'API Keys', 'zh-CN': 'API 密钥', 'ja-JP': 'API キー', 'es-ES': 'Claves de API', 'zh-Hant': 'API 金鑰' },
                     },
                   },
+                ],
+              },
+              // ── AI Assistants ─────────────────────────────────────────
+              // The AI assistants (OAuth clients such as Claude Desktop) this
+              // person authorized, each with a confirm-first Revoke: where an
+              // administrator ends what acts as someone who cannot sign in to
+              // withdraw it themselves (a lost laptop, a departure). Beside API
+              // Keys, the other credential that acts as this user.
+              //
+              // The body is the console widget `mcp:authorized-assistants`
+              // (`@object-ui/app-shell`). It takes no props and reads the page's
+              // bound `sys_user` record; its list and its Revoke call
+              // `/api/v1/auth/admin/authorized-clients`, which refuses every
+              // caller below platform admin (the ADR-0068 platform-admin gate).
+              //
+              // So the tab item carries the ADR-0095 D3 PLATFORM_ADMIN rung, the
+              // standing that door admits, spelled as the object's platform-admin
+              // actions spell it: shown to anyone else, the tab could only draw
+              // the server's 403. An item-level `visibleWhen` omits the tab
+              // header AND panel, the mechanism the Security tab uses. ⛔ Never
+              // `'platform_admin' in current_user.positions`: standing is read
+              // from the key, and a tenant can write a position by that name.
+              // The gate widens and narrows nothing on the server, which refuses
+              // anyone else either way. Same `P` envelope as the Security tab:
+              // this raw `Page` literal reaches the wire verbatim.
+              {
+                label: { en: 'AI Assistants', 'zh-CN': 'AI 助手', 'ja-JP': 'AI アシスタント', 'es-ES': 'Asistentes de IA', 'zh-Hant': 'AI 助理' },
+                icon: 'bot',
+                visibleWhen: P`current_user.isPlatformAdmin == true`,
+                children: [
+                  { type: 'mcp:authorized-assistants', properties: {} },
                 ],
               },
               // ── Preferences ───────────────────────────────────────────

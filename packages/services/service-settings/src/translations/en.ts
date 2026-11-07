@@ -228,6 +228,26 @@ export const en: PlatformTranslationData = {
       },
     },
 
+    access_policy: {
+      title: 'Access policy',
+      description: 'This organization\'s sign-in restrictions. The deployment\'s authentication settings always apply; these can only add to them.',
+      groups: {
+        network: { title: 'Network', description: 'Where members of this organization may sign in from.' },
+        sessions: { title: 'Sessions', description: 'How long a member\'s session stays valid. Each limit can only be shorter than the deployment\'s.' },
+        multi_factor: { title: 'Multi-factor', description: 'Who in this organization must protect their account with an authenticator app (TOTP).' },
+      },
+      keys: {
+        allowed_ip_ranges: { label: 'Allowed IP ranges' },
+        session_idle_timeout_minutes: { label: 'Idle timeout (minutes)' },
+        session_absolute_max_hours: { label: 'Absolute session lifetime (hours)' },
+        max_concurrent_sessions_per_user: { label: 'Max concurrent sessions per user' },
+        mfa_required: {
+          label: 'Require multi-factor authentication',
+          options: { off: 'Off', administrators: 'Administrators', everyone: 'Everyone' },
+        },
+      },
+    },
+
     storage: {
       title: 'File Storage',
       description: 'Backend used for attachments, exports, and user uploads.',
