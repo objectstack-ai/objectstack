@@ -46,6 +46,7 @@
         {"id": "l5", "invoice": "i3", "product": "Gadget", "quantity": 3, "unit_price": 25, "amount": 75}
       ]
     },
+    "userHandleFields": [{"object": "invoice", "field": "owner"}],
     "questions": [
       {
         "id": "invoices_not_draft",

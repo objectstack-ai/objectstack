@@ -32,6 +32,8 @@
  *    so it is named here, as the profile's own docblock names it. A key that
  *    carries nothing (`functions: {}`, `plugins: []`) refuses nothing — the
  *    same `unmanagedInstallValueCarries` test that table's readers apply.
+ *    `devPlugins` is not read: `os build` leaves it out of the artifact, so it
+ *    never reaches a target (`NEVER_REACHES_TARGET` below).
  *  - `allowScheduledAutomation` — a flow of `type: 'schedule'` and every
  *    `jobs` entry (a job always carries a cron, interval or once `schedule`).
  *  - `allowedFlowNodeTypes` — every node of every flow, at every region depth
@@ -148,9 +150,20 @@ export function loadRestrictionProfile(
   return { profile: parsed.data, file };
 }
 
-/** The non-collection keys the spec classifies as code. */
+/**
+ * The keys the spec classifies as code that never reach a target, so
+ * `allowCode` does not read them. `devPlugins` is loaded only by a local
+ * development boot (`os dev` / `os serve --dev`, off the config it loads), and
+ * `os build` leaves it out of the artifact that `os package publish` and
+ * `os deploy` send — so a target never runs it, whatever its profile says.
+ * The spec table itself keeps `devPlugins: 'code'`: an unmanaged install still
+ * refuses it, which is a different question from what a target runs.
+ */
+const NEVER_REACHES_TARGET: ReadonlySet<string> = new Set(['devPlugins']);
+
+/** The non-collection keys the spec classifies as code, less the ones that never reach a target. */
 const CODE_KEYS: readonly string[] = Object.entries(UNMANAGED_INSTALL_KEY_DISPOSITIONS)
-  .filter(([, disposition]) => disposition === 'code')
+  .filter(([key, disposition]) => disposition === 'code' && !NEVER_REACHES_TARGET.has(key))
   .map(([key]) => key);
 
 type Bag = Record<string, unknown>;
@@ -180,9 +193,8 @@ function codeItems(key: string, value: unknown): Array<{ label: string; at: stri
     }
     if (isBag(value)) return Object.keys(value).map((name) => ({ label: `function '${name}'`, at: `functions.${name}` }));
   }
-  if ((key === 'plugins' || key === 'devPlugins') && Array.isArray(value)) {
-    const noun = key === 'plugins' ? 'plugin' : 'dev plugin';
-    return value.map((entry, i) => ({ label: `${noun} '${nameOf(entry, `${key}[${i}]`)}'`, at: `${key}[${i}]` }));
+  if (key === 'plugins' && Array.isArray(value)) {
+    return value.map((entry, i) => ({ label: `plugin '${nameOf(entry, `${key}[${i}]`)}'`, at: `${key}[${i}]` }));
   }
   return [{ label: `\`${key}\``, at: key }];
 }

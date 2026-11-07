@@ -132,6 +132,7 @@ import { GeolocationField } from '../widgets/GeolocationField';
 import { SignatureField } from '../widgets/SignatureField';
 import { QRCodeField } from '../widgets/QRCodeField';
 import { ObjectRefField } from '../widgets/ObjectRefField';
+import { ShareableObjectRefField } from '../widgets/ShareableObjectRefField';
 import { FilterConditionField } from '../widgets/FilterConditionField';
 import { RecipientPickerField } from '../widgets/RecipientPickerField';
 import {
@@ -189,6 +190,7 @@ const WIDGETS: Record<string, ComponentType<any>> = {
   signature: SignatureField,
   qrcode: QRCodeField,
   'object-ref': ObjectRefField,
+  'shareable-object-ref': ShareableObjectRefField,
   'filter-condition': FilterConditionField,
   'recipient-picker': RecipientPickerField,
   'position-ref': PositionRefField,
