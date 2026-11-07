@@ -25,8 +25,10 @@
 //   - CONTROL: a package declaring fresh names installs — and so does one
 //     overriding the platform's built-in `auth.password_reset` template, whose
 //     holder package is the overridable baseline: the send then renders the
-//     app's template, and the vocabulary's spelling of that package is the
-//     email plugin's own.
+//     app's template, and the vocabulary spells that package exactly as the
+//     email plugin registers the built-in templates on this boot (read back
+//     from the registry, so the two spellings are pinned together across the
+//     package boundary without either package importing the other).
 
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -36,7 +38,6 @@ import { type VerifyStack } from '@objectstack/verify';
 import { AppPlugin } from '@objectstack/runtime';
 import { MarketplaceInstallLocalPlugin } from '@objectstack/cloud-connection';
 import { OVERRIDABLE_BASELINE_PACKAGES } from '@objectstack/objectql';
-import { BUILTIN_EMAIL_TEMPLATES_PACKAGE_ID } from '@objectstack/plugin-email';
 import { defineStack } from '@objectstack/spec';
 import { PROTOCOL_MAJOR } from '@objectstack/spec/kernel';
 import { bootShowcase } from './showcase-boot.js';
@@ -149,6 +150,14 @@ describe('one package holder per flow, webhook, connector and email template nam
     return (await declared.declaredWebhookNamed(name))?.packageId;
   };
 
+  /** The package the email plugin registered the built-in `auth.password_reset` bundle under, read from the registry. */
+  const builtInTemplatePackage = (): string | undefined => {
+    const ql = (stack.kernel as any).getService('objectql');
+    const row = (ql.registry.listItems('email_template') as Array<{ name?: string; _packageId?: string }>)
+      .find((i) => i?.name === BUILT_IN_TPL && i._packageId !== 'com.qa.bare.epsilon');
+    return row?._packageId;
+  };
+
   beforeAll(async () => {
     storageDir = mkdtempSync(join(tmpdir(), 'dogfood-bare-name-flow-'));
     const booted = await captureOutput(() => bootShowcase({
@@ -180,9 +189,13 @@ describe('one package holder per flow, webhook, connector and email template nam
     for (const name of [FLOW, HOOK, CONN, TPL]) expect(line, `the rename of ${name}`).toContain(`"beta_${name}"`);
     expect(line).toContain('package "com.qa.bare.alpha"');
     expect(line).toContain('package "com.qa.bare.beta"');
-    // The platform's built-in templates beside the showcase's are no clash: the baseline holds nothing.
+    // The platform's built-in templates are the overridable baseline, and the vocabulary spells
+    // their package exactly as the email plugin registered them on this boot.
+    const baseline = builtInTemplatePackage();
+    expect(baseline, 'the built-in templates are registered under a package').toBeDefined();
+    expect([...OVERRIDABLE_BASELINE_PACKAGES.email_template]).toEqual([baseline]);
     expect(line).not.toContain(BUILT_IN_TPL);
-    expect(line).not.toContain(BUILTIN_EMAIL_TEMPLATES_PACKAGE_ID);
+    expect(line).not.toContain(baseline!);
     expect(await packageIds(), 'both packages booted').toEqual(expect.arrayContaining(['com.qa.bare.alpha', 'com.qa.bare.beta']));
     // Unchanged by the rule: the automation engine's precedence still arms one flow, naming both.
     expect(bootLines.some((l) => l.includes(`Flow name collision: '${FLOW}'`) && l.includes('com.qa.bare.alpha') && l.includes('com.qa.bare.beta'))).toBe(true);
@@ -223,7 +236,8 @@ describe('one package holder per flow, webhook, connector and email template nam
   });
 
   it('CONTROL — install-local of a package declaring fresh names, and overriding the built-in password-reset template, installs; the send renders the app\'s template', async () => {
-    expect([...OVERRIDABLE_BASELINE_PACKAGES.email_template], 'the vocabulary spells the email plugin\'s own package id').toEqual([BUILTIN_EMAIL_TEMPLATES_PACKAGE_ID]);
+    const baseline = builtInTemplatePackage();
+    expect([...OVERRIDABLE_BASELINE_PACKAGES.email_template], 'the vocabulary spells the package the email plugin registers the built-ins under').toEqual([baseline]);
     const { status, body } = await installLocal(inline('epsilon', {
       flows: [flow('epsilon', 'epsilon_flow')],
       webhooks: [webhook('epsilon', 'epsilon_hook')],
@@ -235,5 +249,7 @@ describe('one package holder per flow, webhook, connector and email template nam
     const email = (stack.kernel as any).getService('email');
     const rendered = await email.renderTemplate({ template: BUILT_IN_TPL, data: {} });
     expect(rendered?.subject).toBe('epsilon subject');
+    // The built-in bundle is still registered beside the override: overridden, not displaced.
+    expect(builtInTemplatePackage()).toBe(baseline);
   });
 });

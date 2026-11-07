@@ -344,6 +344,34 @@ describe('email_template — the name holds the bundle, and the built-in templat
     );
   });
 
+  it('a holder is read from its member key alone (no claim): a package registering a bundle member through the registry directly holds the name', async () => {
+    const registry = new SchemaRegistry();
+    registry.logLevel = 'silent';
+    registry.sealBareNameHolders();
+    // After the seal, alpha's first registration finds no holder and stores `com.acme.alpha:shared_tpl@zh-CN`.
+    expect(await caught(() => registry.registerItem('email_template', member('alpha', 'shared_tpl', 'zh-CN'), 'name', 'com.acme.alpha'))).toBeUndefined();
+    expect(registry.getPackage('com.acme.alpha'), 'no package record, so no claim: the slot is the only record').toBeUndefined();
+    expectRefusal(
+      await caught(() => registry.registerItem('email_template', member('direct', 'shared_tpl', 'en-US'), 'name', 'com.acme.direct')),
+      'com.acme.direct', { kind: 'package', packageId: 'com.acme.alpha' },
+    );
+    // CONTROL — the same package's second member is its own bundle, not a second holder.
+    expect(await caught(() => registry.registerItem('email_template', member('alpha', 'shared_tpl', 'en-US'), 'name', 'com.acme.alpha'))).toBeUndefined();
+  });
+
+  it('the cold boot reads a bundled clash from the member keys: two packages\' members of one name, registered directly, are one conflict on the name', () => {
+    const registry = new SchemaRegistry();
+    registry.logLevel = 'silent';
+    registry.registerItem('email_template', member('alpha', 'shared_tpl', 'en-US'), 'name', 'com.acme.alpha');
+    registry.registerItem('email_template', member('alpha', 'shared_tpl', 'zh-CN'), 'name', 'com.acme.alpha');
+    registry.registerItem('email_template', member('beta', 'shared_tpl', 'fr-FR'), 'name', 'com.acme.beta');
+    registry.registerItem('flow', body('flow', 'own_flow', 'alpha'), 'name', 'com.acme.alpha');
+    const conflicts = registry.sealBareNameHolders();
+    expect(conflicts.map((c) => `${c.type}/${c.name}: ${c.incomingPackageId} vs ${(c.existingHolder as Holder).packageId}`)).toEqual([
+      'email_template/shared_tpl: com.acme.beta vs com.acme.alpha',
+    ]);
+  });
+
   it('the vocabulary names the email service\'s package as the one baseline, for email templates only', () => {
     expect([...OVERRIDABLE_BASELINE_PACKAGES.email_template]).toEqual([EMAIL_SERVICE_PKG]);
     for (const type of BARE_NAME_ONE_HOLDER_TYPES) {
