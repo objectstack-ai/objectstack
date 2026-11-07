@@ -28,6 +28,9 @@ import { describe, it, expect, vi } from 'vitest';
 import { SchemaRegistry } from '@objectstack/objectql';
 import { HttpDispatcher } from '../http-dispatcher.js';
 import { PACKAGE_STATE_UNINSTALL_CLEANUP } from '../package-state-host-store.js';
+// Paid during collection, not inside a case's clock: the package-state store's
+// `standalone-stack.ts` loads it lazily.
+import '@objectstack/metadata';
 
 const PKG = 'com.acme.app';
 const SESSION_USER = 'u_author';

@@ -61,6 +61,9 @@ import {
 } from '@objectstack/metadata-core';
 import { PackageServicePlugin } from '@objectstack/service-package';
 import { HttpDispatcher } from './http-dispatcher.js';
+// Paid during collection, not inside a case's clock: the state store's
+// `standalone-stack.ts` loads it lazily.
+import '@objectstack/metadata';
 import { loadDisabledPackageIds } from './package-state-store.js';
 
 const PKG = 'com.acme.leave';
@@ -351,8 +354,7 @@ describe('[#31023] DELETE /packages/:id credits its metadata deletes to the sign
     expect(answer.status, JSON.stringify(answer.body)).toBe(200);
     const history = (await p.engine.find('sys_metadata_history', {
       where: { name: 'leave_list', operation_type: 'delete' },
-      context: { isSystem: true },
-    } as any)) as any[];
+    })) as any[];
     return { credited, recordedBy: history.map((r) => r.recorded_by ?? null) };
   }
 

@@ -29,6 +29,9 @@ import { join } from 'node:path';
 import { SchemaRegistry } from '@objectstack/objectql';
 import { unknownQueryParamRefusalMessage } from '@objectstack/rest';
 import { HttpDispatcher } from '../http-dispatcher.js';
+// Paid during collection, not inside a case's clock: the package-state store's
+// `standalone-stack.ts` loads it lazily.
+import '@objectstack/metadata';
 
 const PKG = 'com.acme.app';
 

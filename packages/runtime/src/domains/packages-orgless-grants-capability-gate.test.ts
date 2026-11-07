@@ -48,6 +48,9 @@ import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } 
 import { SchemaRegistry } from '@objectstack/objectql';
 import { HttpDispatcher } from '../http-dispatcher.js';
 import { bindCatalogFromTables } from '../security/security-catalog.testkit.js';
+// Paid during collection, not inside a case's clock: the package-state store's
+// `standalone-stack.ts` loads it lazily.
+import '@objectstack/metadata';
 
 const PKG = 'com.acme.crm';
 const ALPHA = 'org_alpha';

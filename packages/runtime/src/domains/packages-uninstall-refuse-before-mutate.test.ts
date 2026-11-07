@@ -67,6 +67,9 @@ import { SchemaRegistry } from '@objectstack/objectql';
 import { HttpDispatcher } from '../http-dispatcher.js';
 import { bindCatalogFromTables } from '../security/security-catalog.testkit.js';
 import { loadDisabledPackageIds, setPackageDisabled } from '../package-state-store.js';
+// Paid during collection, not inside a case's clock: the package-state store's
+// `standalone-stack.ts` loads it lazily.
+import '@objectstack/metadata';
 
 const PKG = 'com.acme.crm';
 /** `PKG`'s paired customization package (ADR-0146 D3): the id `customizationPackageId` derives. */
