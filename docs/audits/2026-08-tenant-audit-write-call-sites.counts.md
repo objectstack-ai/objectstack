@@ -33,19 +33,19 @@ silent, and `node scripts/tenant-audit-census.mjs --write` is the resolution.
 
 | Measure | Value |
 |---|---:|
-| Write call sites | 265 |
-| Object name statically decidable | 188 |
+| Write call sites | 266 |
+| Object name statically decidable | 189 |
 | Object name chosen at run time | 77 |
-| Against a tenancy-enabled object | 182 |
+| Against a tenancy-enabled object | 183 |
 | Against an object declaring tenancy off | 6 |
-| Threading a tenant context | 202 |
+| Threading a tenant context | 203 |
 | Provably carrying none | 8 |
 | …and decidably tenancy-enabled | 2 |
 | Options argument unreadable | 55 |
 | …and decidably tenancy-enabled | 29 |
 | Threading a decidably elevated context | 148 |
 | Threading a decidably non-elevated context | 0 |
-| Threading a context of undecidable elevation | 109 |
+| Threading a context of undecidable elevation | 110 |
 
 ## Subtractions the census could NOT defend — enforced
 
@@ -90,7 +90,7 @@ holds still. They are required to be HERE and to say WHEN they were true;
 their values are not compared. The reasoning, and the measurement behind it,
 are in `scripts/check-tenant-audit-census.mjs`.
 
-Measured on 2026-11-06 at `4addb47fd`.
+Measured on 2026-11-07 at `ce0325138`.
 
 | corpus scale (not enforced) | count |
 | :--- | ---: |
@@ -270,7 +270,7 @@ Measured on 2026-11-06 at `4addb47fd`.
 | `packages/services/service-storage/src/backfill-sys-file-organizations.ts` | `update` | `sys_file` | enabled | context, elevation undecidable | 1 |
 | `packages/services/service-storage/src/backfill-sys-file-public-scope.ts` | `update` | `sys_file` | enabled | context, elevation undecidable | 1 |
 | `packages/services/service-storage/src/file-attachment-service.ts` | `delete` | `sys_attachment` | enabled | context, elevation undecidable | 1 |
-| `packages/services/service-storage/src/file-attachment-service.ts` | `insert` | `sys_attachment` | enabled | context, elevation undecidable | 1 |
+| `packages/services/service-storage/src/file-attachment-service.ts` | `insert` | `sys_attachment` | enabled | context, elevation undecidable | 2 |
 | `packages/services/service-storage/src/file-reference-lifecycle.ts` | `insert` | `sys_file` | enabled | context, elevation undecidable | 1 |
 | `packages/services/service-storage/src/file-reference-lifecycle.ts` | `update` | `sys_file` | enabled | elevated | 2 |
 | `packages/services/service-storage/src/metadata-store.ts` | `delete` | `sys_file` | enabled | options unreadable | 1 |
