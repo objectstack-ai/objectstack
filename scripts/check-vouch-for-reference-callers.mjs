@@ -126,6 +126,19 @@ export const ALLOWED_CALLERS = Object.freeze({
 /** The trees the bare run reads; `--ts-only` reads the first alone. */
 export const SCAN_ROOTS = Object.freeze(['packages', 'examples', 'apps']);
 
+/**
+ * The same three roots in the spelling `scripts/pm/dispatch-gates.mjs` can
+ * read: it reads a gate's SOURCE TEXT for path literals and refuses a bare
+ * single-segment word as too generic, so `SCAN_ROOTS` alone would leave this
+ * gate in no dispatch brief while CI runs it on every PR. The census really
+ * does walk each root whole (every source extension, tests aside), so the
+ * subtree spelling is the true one — the declaration `check-org-identifier.mjs`
+ * makes over the same three roots. Nothing here reads this array; the
+ * self-test holds it equal to `SCAN_ROOTS` in both directions, so widening or
+ * renaming a root cannot leave it describing the old population.
+ */
+export const ROOT_DIR_WATCH_HINTS = Object.freeze(['packages/**', 'examples/**', 'apps/**']);
+
 const SOURCE_FILE = /\.(?:[cm]?ts|tsx|[cm]?js|jsx)$/;
 const TEST_FILE = /(?:\.test\.|\.spec\.|\.testkit\.|\/__tests__\/|\/__fixtures__\/)/;
 
@@ -359,8 +372,10 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'a call under examples/ on the full surface → RED': 1,
   'the same examples/ call under --ts-only → GREEN (outside its radius)': 1,
   'a rename on re-export → RED': 1,
+  'ROOT_DIR_WATCH_HINTS declares every scan root as its subtree': 1,
+  'ROOT_DIR_WATCH_HINTS declares no root the census does not walk, and no bare word': 1,
 });
-const SELF_TEST_BATTERY_FLOOR = 37;
+const SELF_TEST_BATTERY_FLOOR = 39;
 
 function selfTest() {
   const VERB = 'packages/services/demo/src/verb.ts';
@@ -413,12 +428,26 @@ function selfTest() {
     { label: 'a call under examples/ on the full surface → RED', files: [verb, { path: EXAMPLE, text: imp + call }], expect: 'red', names: EXAMPLE },
     { label: 'the same examples/ call under --ts-only → GREEN (outside its radius)', tsOnly: true, files: [verb, { path: EXAMPLE, text: imp + call }], expect: 'green' },
     { label: 'a rename on re-export → RED', files: other("export { vouchForReference as vouch } from '@objectstack/core';\n"), expect: 'red', names: `${OTHER}:1` },
+    { label: 'ROOT_DIR_WATCH_HINTS declares every scan root as its subtree', holds: () => SCAN_ROOTS.every((r) => ROOT_DIR_WATCH_HINTS.includes(`${r}/**`)) },
+    {
+      label: 'ROOT_DIR_WATCH_HINTS declares no root the census does not walk, and no bare word',
+      holds: () =>
+        ROOT_DIR_WATCH_HINTS.length === SCAN_ROOTS.length &&
+        ROOT_DIR_WATCH_HINTS.every((h) => h.endsWith('/**') && SCAN_ROOTS.includes(h.slice(0, -3))),
+    },
   ];
 
   const batterySeen = new Map();
   let failed = 0;
   for (const c of cases) {
     batterySeen.set(c.label, (batterySeen.get(c.label) ?? 0) + 1);
+    if (c.holds) {
+      if (!c.holds()) {
+        failed += 1;
+        console.error(`✗ ${c.label}\n    SCAN_ROOTS ${JSON.stringify(SCAN_ROOTS)}, ROOT_DIR_WATCH_HINTS ${JSON.stringify(ROOT_DIR_WATCH_HINTS)}`);
+      }
+      continue;
+    }
     const { problems } = verdict(c.files, c.allow ?? ALLOW, { tsOnly: c.tsOnly === true });
     const red = problems.length > 0;
     const ok =
