@@ -976,7 +976,11 @@ describe('[#31211] a verified MCP token is recorded as used only once this door 
       async find(object: string, opts: any) {
         if (object === faultOn) throw new Error('connection reset by peer');
         return bounded((tables[object] ?? []).filter((row) =>
-          Object.entries(opts?.where ?? {}).every(([k, v]) => row[k] === v),
+          Object.entries(opts?.where ?? {}).every(([k, v]) => {
+            if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`);
+            if (v !== null && typeof v === 'object') throw new Error(`fake driver: unsupported operator on '${k}'`);
+            return row[k] === v;
+          }),
         ), opts);
       },
     };
