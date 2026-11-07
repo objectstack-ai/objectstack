@@ -424,9 +424,9 @@ describe('[ADR-0090 D12, ruling of record 6663849489; #30758] canReadObject and 
         expect(layerOf(d, 'object_crud').contributors.map((c: any) => c.name)).toContain('organization_admin');
       });
 
-      it('CONTROL: the delegated read is the caller\'s own — no answer admits it on behalf of a user whose sets do not grant it, as the door does not', async () => {
+      it('CONTROL: the delegated read is the caller\'s own — acting on behalf of another user, even one who reads every unit, no answer admits it, as the door does not', async () => {
         const h = await boot(posture);
-        const onBehalf = { ...NARROW, principalKind: 'agent', onBehalfOf: { userId: 'u_writer' } };
+        const onBehalf = { ...NARROW, principalKind: 'agent', onBehalfOf: { userId: 'u_org_admin' } };
         expect(await unitsRead(h, onBehalf as any)).toEqual({ status: 403, code: 'PERMISSION_DENIED' });
         expect(await h.plugin.canReadObject('sys_business_unit', onBehalf)).toBe(false);
         const d: any = await h.plugin.explainAccessForCaller({ object: 'sys_business_unit', operation: 'read' }, onBehalf);
