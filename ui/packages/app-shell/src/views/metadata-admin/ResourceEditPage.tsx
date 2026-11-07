@@ -147,7 +147,7 @@ import { useRegisterAssistantEditor, type AssistantEditorContext } from '../../a
 import { useRegisteredMetadataInspector } from './inspector-registry.js';
 import { useRegisteredMetadataDefaultInspector } from './default-inspector-registry.js';
 import { InspectorReadOnlyReason } from './inspectors/_shared.js';
-import { useMetadataLocale, t, tFormat, translateMetadataType, translateSchemaIssue, translateValidationMessage } from './i18n.js';
+import { isZhLocale, useMetadataLocale, t, tFormat, translateMetadataType, translateSchemaIssue, translateValidationMessage } from './i18n.js';
 import { JsonSourceEditor } from '../item-tools/JsonSourceEditor.js';
 import { validateMetadataDraft, hasClientValidator, type DraftMode } from './clientValidation.js';
 import {
@@ -3056,7 +3056,7 @@ function MetadataResourceEditPageImpl({
                       rel="noopener noreferrer"
                       className="mt-1 inline-flex items-center gap-1 text-amber-800 underline hover:text-amber-900 dark:text-amber-200 dark:hover:text-amber-100"
                     >
-                      {locale === 'zh-CN' ? '查看文档' : 'View docs'} →
+                      {isZhLocale(locale) ? '查看文档' : 'View docs'} →
                     </a>
                   )}
                   {layered?.packageId && (

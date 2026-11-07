@@ -545,27 +545,28 @@ function collectExpectedKeys(config: any): ExpectedKey[] {
  *
  * Empty values do not count, matching {@link lookupKey}'s rule on the bundle
  * side — an empty translation is not a translation, whichever side it is
- * written on.
+ * written on. They are judged AFTER the resolver has picked, not before: the
+ * renderer shows an empty entry when it is the one its limbs reach, so a blank
+ * `zh-TW` beside `zh-CN` leaves a `zh-Hant` reader looking at nothing, and a
+ * blank exact `zh-CN` beside `zh` leaves a `zh-CN` reader the same. Dropping
+ * empties first would let the other entry stand in and report that reader
+ * covered (#31074).
  */
 export function inlineLocaleText(
   map: Readonly<Record<string, string>> | undefined,
   locale: string,
 ): string | undefined {
   if (!map) return undefined;
-  const read = (tag: string): string | undefined => {
-    if (!Object.prototype.hasOwnProperty.call(map, tag)) return undefined;
-    const value = map[tag];
-    return typeof value === 'string' && value.length > 0 ? value : undefined;
-  };
   const tag = (locale || 'en').trim();
   const base = tag.split('-')[0];
   const sameLanguage: Record<string, string> = {};
   for (const key of Object.keys(map)) {
-    const value = read(key);
-    if (value !== undefined && key.split('-')[0] === base) sameLanguage[key] = value;
+    const value = map[key];
+    if (typeof value === 'string' && key.split('-')[0] === base) sameLanguage[key] = value;
   }
   if (Object.keys(sameLanguage).length === 0) return undefined;
-  return resolveI18nLabel(sameLanguage, tag);
+  const shown = resolveI18nLabel(sameLanguage, tag);
+  return shown !== undefined && shown.length > 0 ? shown : undefined;
 }
 
 /**
