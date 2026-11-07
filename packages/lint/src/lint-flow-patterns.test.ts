@@ -33,6 +33,7 @@ import {
   FLOW_DEFAULT_EDGE_WITH_CONDITION,
   FLOW_MULTIPLE_DEFAULT_EDGES,
   FLOW_INERT_NODE_CONDITION,
+  FLOW_NODE_UNREACHABLE,
   FLOW_MULTI_WRITE_UNFILTERED,
   FLOW_LOOP_BODY_UNCONTAINED,
   FLOW_TRY_CATCH_WITHOUT_CATCH,
@@ -91,7 +92,7 @@ const filterFlow = (filter: unknown) => ({
       { id: 'start', type: 'start', config: { triggerType: 'schedule', schedule: 'cron:0 9 * * *' } },
       { id: 'query', type: 'get_record', config: { objectName: 'contract', filter } },
     ],
-    edges: [],
+    edges: [{ id: 'e1', source: 'start', target: 'query' }],
   }],
 });
 
@@ -220,7 +221,7 @@ describe('lintFlowPatterns — phantom aggregation capability (#1870)', () => {
         { id: 'start', type: 'start', config: {} },
         { id: 'sum', type: 'script', config },
       ],
-      edges: [],
+      edges: [{ id: 'e1', source: 'start', target: 'sum' }],
     }],
   });
 
@@ -250,7 +251,7 @@ const nodeFlow = (config: Record<string, unknown>) => ({
       { id: 'start', type: 'start', config: {} },
       { id: 'create', type: 'create_record', config },
     ],
-    edges: [],
+    edges: [{ id: 'e1', source: 'start', target: 'create' }],
   }],
 });
 const rules = (s: any) => lintFlowPatterns(s).map((f) => f.rule);
@@ -351,6 +352,7 @@ describe('lintFlowPatterns — approval revise loop (ADR-0044)', () => {
     const edges = [
       { source: 'start', target: 'mgr' },
       { source: 'mgr', target: 'ok', label: 'approve' },
+      { source: 'mgr', target: 'no', label: 'reject' },
       { source: 'mgr', target: 'wait', label: 'revise' },
     ];
     const fnds = lintFlowPatterns(approvalFlow(edges));
@@ -370,7 +372,11 @@ describe('lintFlowPatterns — approval revise loop (ADR-0044)', () => {
       { source: 'mgr', target: 'ok', label: 'approve' },
       { source: 'mgr', target: 'no', label: 'reject' },
     ];
-    expect(lintFlowPatterns(approvalFlow(edges))).toEqual([]);
+    // No revise edge, so no revise node either: one left in place with no edge
+    // into it would draw `flow-node-unreachable` (it could never run).
+    const stack = approvalFlow(edges) as any;
+    stack.flows[0].nodes = stack.flows[0].nodes.filter((n: any) => n.id !== 'wait');
+    expect(lintFlowPatterns(stack)).toEqual([]);
   });
 
   // #3823 — the shape ADR-0044 D3 prescribed until its 2026-07-28 amendment.
@@ -416,7 +422,7 @@ describe('lintFlowPatterns — user-less runAs unscoped (#1888 / ADR-0049 / ADR-
         { id: 'start', type: 'start', config: opts.startConfig ?? { triggerType: 'schedule', cron: '0 8 * * *' } },
         { id: 'op', type: opts.nodeType ?? 'create_record', config: { objectName: 'thing', fields: { a: 1 } } },
       ],
-      edges: [],
+      edges: [{ id: 'e1', source: 'start', target: 'op' }],
     }],
   });
 
@@ -528,7 +534,7 @@ describe('lintFlowPatterns — user-less runAs unscoped (#1888 / ADR-0049 / ADR-
             { id: 'start', type: 'start', config: { schedule: { type: 'interval', intervalMs: 60000 } } },
             { id: 'notify', type: 'notify', config: { topic: 'x' } },
           ],
-          edges: [],
+          edges: [{ id: 'e1', source: 'start', target: 'notify' }],
         }],
       })).toHaveLength(0);
     });
@@ -3708,5 +3714,132 @@ describe('[#22161] one-line fix — the twelve flow anti-pattern ids', () => {
       expect(text, `${rule} explanation names ${fact}`).toContain(fact);
       for (const hint of hints) expect(hint, `${rule} fix: line still says ${fact}`).not.toContain(fact);
     }
+  });
+});
+
+describe('lintFlowPatterns — a node no edge path from start reaches (flow-node-unreachable)', () => {
+  type Edge = { id: string; source: string; target: string; type?: string; condition?: string };
+  const reachFlow = (nodes: Array<Record<string, unknown>>, edges: Edge[]) => ({
+    flows: [{ name: 'orphan', type: 'autolaunched', nodes, edges }],
+  });
+  const START = { id: 'start', type: 'start', label: 'Start' };
+  const END = { id: 'end', type: 'end', label: 'End' };
+  const unreachable = (stack: unknown) =>
+    lintFlowPatterns(stack as never).filter((f) => f.rule === FLOW_NODE_UNREACHABLE);
+
+  it('refuses an action node no edge reaches, as an error that names it, why it never runs and the fix', () => {
+    const found = unreachable(reachFlow(
+      [START, { id: 'stamp', type: 'assignment', label: 'Stamp' }, END],
+      [{ id: 'e1', source: 'start', target: 'end' }],
+    ));
+    expect(found).toHaveLength(1);
+    expect(found[0]).toMatchObject({ rule: FLOW_NODE_UNREACHABLE, severity: 'error' });
+    expect(found[0].where).toBe("flow 'orphan' · node 'stamp' (assignment)");
+    expect(found[0].message).toMatch(/no edge path leads to this node from the start node 'start', so it never runs/);
+    expect(found[0].hint).toMatch(/Add an edge into it from a node that runs, or delete the node/);
+  });
+
+  it('refuses a node whose only in-edge comes from another unreached node (one finding each)', () => {
+    const found = unreachable(reachFlow(
+      [START, { id: 'a', type: 'assignment' }, { id: 'b', type: 'assignment' }, END],
+      [{ id: 'e1', source: 'start', target: 'end' }, { id: 'e2', source: 'a', target: 'b' }],
+    ));
+    expect(found.map((f) => f.where)).toEqual([
+      "flow 'orphan' · node 'a' (assignment)",
+      "flow 'orphan' · node 'b' (assignment)",
+    ]);
+  });
+
+  it('refuses a cycle cut off from start', () => {
+    const found = unreachable(reachFlow(
+      [START, { id: 'a', type: 'assignment' }, { id: 'b', type: 'assignment' }, END],
+      [
+        { id: 'e1', source: 'start', target: 'end' },
+        { id: 'e2', source: 'a', target: 'b' },
+        { id: 'e3', source: 'b', target: 'a', type: 'back' },
+      ],
+    ));
+    expect(found).toHaveLength(2);
+  });
+
+  describe('does NOT flag (controls)', () => {
+    it('a node reached over a conditional, fault or back edge (every edge type counts)', () => {
+      expect(unreachable(reachFlow(
+        [
+          START,
+          { id: 'call', type: 'http', config: { url: 'https://example.test' } },
+          { id: 'big', type: 'assignment' },
+          { id: 'recover', type: 'assignment' },
+          END,
+        ],
+        [
+          { id: 'e1', source: 'start', target: 'call' },
+          { id: 'e2', source: 'call', target: 'big', type: 'conditional', condition: 'true' },
+          { id: 'e3', source: 'call', target: 'recover', type: 'fault' },
+          { id: 'e4', source: 'big', target: 'end' },
+          { id: 'e5', source: 'recover', target: 'end' },
+        ],
+      ))).toEqual([]);
+    });
+
+    it('a boundary_event node and the nodes only it leads to (reached by attachment, not by an edge)', () => {
+      expect(unreachable(reachFlow(
+        [
+          START,
+          { id: 'task', type: 'wait', waitEventConfig: { eventType: 'timer', timerDuration: 'PT1H' } },
+          { id: 'timeout', type: 'boundary_event', config: { attachedToNodeId: 'task' } },
+          { id: 'escalate', type: 'assignment' },
+          END,
+        ],
+        [
+          { id: 'e1', source: 'start', target: 'task' },
+          { id: 'e2', source: 'task', target: 'end' },
+          { id: 'e3', source: 'timeout', target: 'escalate' },
+        ],
+      ))).toEqual([]);
+    });
+
+    it('a flow with no start node (a different defect, judged elsewhere)', () => {
+      expect(unreachable(reachFlow(
+        [{ id: 'a', type: 'assignment' }, END],
+        [],
+      ))).toEqual([]);
+    });
+
+    it('a flow with a dangling edge (the flow parse refuses that first; reachability is not guessed)', () => {
+      expect(unreachable(reachFlow(
+        [START, { id: 'a', type: 'assignment' }, END],
+        [{ id: 'e1', source: 'start', target: 'end' }, { id: 'e2', source: 'ghost', target: 'a' }],
+      ))).toEqual([]);
+    });
+
+    it('nodes inside a region body (a region is a single-entry DAG, so every node in it is reached)', () => {
+      expect(unreachable(reachFlow(
+        [
+          START,
+          {
+            id: 'each', type: 'loop',
+            config: {
+              collection: '{records}', iteratorVariable: 'r',
+              body: {
+                nodes: [{ id: 'x', type: 'assignment' }, { id: 'y', type: 'assignment' }],
+                edges: [{ id: 'b1', source: 'x', target: 'y' }],
+              },
+            },
+          },
+          END,
+        ],
+        [{ id: 'e1', source: 'start', target: 'each' }, { id: 'e2', source: 'each', target: 'end' }],
+      ))).toEqual([]);
+    });
+  });
+
+  it('is in the gating flow rule, so its error reaches os lint/build and the save and publish doors', () => {
+    const rule = AUTHORING_RULES.find((r) => r.name === 'lintFlowPatterns');
+    expect(rule, 'the authoring rule that runs lintFlowPatterns').toBeDefined();
+    expect(rule!.tier).toBe('gating');
+    expect(rule!.runtimeTypes).toContain('flow');
+    const served = rule!.run(reachFlow([START, { id: 'stamp', type: 'assignment' }, END], [{ id: 'e1', source: 'start', target: 'end' }]) as never);
+    expect(served).toContainEqual(expect.objectContaining({ rule: FLOW_NODE_UNREACHABLE, severity: 'error' }));
   });
 });
