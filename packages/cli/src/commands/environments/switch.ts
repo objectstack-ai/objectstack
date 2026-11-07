@@ -5,6 +5,7 @@ import { printError } from '../../utils/format.js';
 import { createControlPlaneApiClient, requireControlPlaneAuth } from '../../utils/api-client.js';
 import { readAuthConfig, writeAuthConfig } from '../../utils/auth-config.js';
 import { recordCloudActiveEnvironmentId } from '../../utils/active-environment.js';
+import { activateCloudDeployTarget } from '../../utils/runtime-target.js';
 
 /**
  * `os environments switch <id>` — set the active environment for this CLI session.
@@ -24,6 +25,11 @@ import { recordCloudActiveEnvironmentId } from '../../utils/active-environment.j
  * uuid. Two files, two servers, an active environment for each — the id is
  * never carried across, because it would not resolve on the other side. The
  * gate lives in `utils/active-environment.ts`.
+ *
+ * Recorded there, it also makes ObjectOS Cloud the deploy target again when
+ * `os environments use-runtime` had made a self-hosted runtime the target: the
+ * two commands are the two ways to pick where `os deploy` goes, and the one
+ * that ran last wins. The runtime stays remembered.
  */
 export default class EnvironmentsSwitch extends Command {
   static override description = 'Activate an environment for subsequent CLI calls';
@@ -70,6 +76,7 @@ export default class EnvironmentsSwitch extends Command {
       // runtime store below (a user who only ran `os cloud login` has no
       // `credentials.json` at all).
       const recordedForCloud = await recordCloudActiveEnvironmentId(environment.id, baseUrl);
+      const leftRuntime = recordedForCloud ? await activateCloudDeployTarget() : undefined;
 
       // Runtime store: the copy `createApiClient` reads, so the `data` / `meta`
       // families keep targeting the environment you just switched to. Skipped
@@ -87,6 +94,12 @@ export default class EnvironmentsSwitch extends Command {
       console.log(`  id: ${environment.id}`);
       if (recordedForCloud) {
         console.log('  (also recorded in cloud.json — `os package publish --install` will use it)');
+      }
+      if (leftRuntime !== undefined) {
+        console.log(
+          `  Deploy target: this environment again, not the self-hosted runtime${leftRuntime ? ` ${leftRuntime}` : ''} `
+          + '(still remembered; `os environments use-runtime <url>` to go back)',
+        );
       }
       if (!recordedForCloud && !cfg) {
         console.log('  ⚠ no local credential store to record it in — run `os login` or `os cloud login`');
