@@ -339,7 +339,8 @@ describe('[#20515] what the rule leaves unchanged', () => {
     it('the operator\'s uninstall proceeds naming no organization, and its disable lands — the positive control that makes `switchedOff` false above mean something', async () => {
         const r = rig();
         expect((await r.call('DELETE', 'admin', `/packages/${PKG}`)).status).toBe(200);
-        expect(r.deleteRequests).toEqual([{ packageId: PKG }]);
+        // [#31023] The signed-in operator is the actor; still no organization.
+        expect(r.deleteRequests).toEqual([{ packageId: PKG, actor: 'u_admin' }]);
         const d = rig();
         expect((await d.call('PATCH', 'admin', `/packages/${PKG}/disable`)).status).toBe(200);
         expect(switchedOff(d)).toBe(true);

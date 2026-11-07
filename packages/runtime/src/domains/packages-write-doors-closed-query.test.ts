@@ -168,8 +168,9 @@ describe('[#26857] DELETE /packages/:id — a misspelled keep-data flag is refus
     });
 
     it.each([
-        ['true', { packageId: PKG, keepData: true }],
-        ['1', { packageId: PKG, keepData: true }],
+        // [#31023] The signed-in caller rides as the actor (ADR-0146 D1).
+        ['true', { packageId: PKG, keepData: true, actor: AUTHOR.userId }],
+        ['1', { packageId: PKG, keepData: true, actor: AUTHOR.userId }],
     ])('preserves the declared `keepData=%s`: deletePackage receives %j', async (keepData, received) => {
         const { dispatcher, acts } = boot();
         const answer = await call(dispatcher, 'DELETE', `/packages/${PKG}`, undefined, { keepData });

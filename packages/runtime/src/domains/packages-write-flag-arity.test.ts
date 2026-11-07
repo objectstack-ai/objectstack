@@ -82,10 +82,11 @@ describe('[#23214] DELETE /packages/:id — `keepData` is one flag', () => {
     });
 
     it.each([
-        ['true', { packageId: PKG, keepData: true }],
-        ['1', { packageId: PKG, keepData: true }],
-        [['true'], { packageId: PKG, keepData: true }],
-        [undefined, { packageId: PKG }],
+        // [#31023] The signed-in caller rides as the actor (ADR-0146 D1).
+        ['true', { packageId: PKG, keepData: true, actor: AUTHOR.userId }],
+        ['1', { packageId: PKG, keepData: true, actor: AUTHOR.userId }],
+        [['true'], { packageId: PKG, keepData: true, actor: AUTHOR.userId }],
+        [undefined, { packageId: PKG, actor: AUTHOR.userId }],
     ])('preserves one `keepData` (%j): deletePackage receives %j', async (keepData, received) => {
         const { dispatcher, protocol } = boot();
         const answer = await call(dispatcher, 'DELETE', `/packages/${PKG}`, undefined, keepData === undefined ? {} : { keepData });
