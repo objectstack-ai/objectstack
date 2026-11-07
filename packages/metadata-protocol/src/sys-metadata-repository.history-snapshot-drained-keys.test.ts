@@ -52,14 +52,17 @@ function makeFakeEngine() {
   return {
     rows,
     historyRows,
-    async find(table: string, opts: { where: Record<string, unknown> }) {
-      if (table === 'sys_metadata_history') return historyRows.filter((h) => matchesHistory(h, opts.where));
-      return Array.from(rows.values()).filter((r) => {
-        if (opts.where.type && r.type !== opts.where.type) return false;
-        if (opts.where.organization_id !== undefined && r.organization_id !== opts.where.organization_id) return false;
-        if (opts.where.state && r.state !== opts.where.state) return false;
-        return true;
-      });
+    async find(table: string, opts: { where: Record<string, unknown>; limit?: number }) {
+      const found = table === 'sys_metadata_history'
+        ? historyRows.filter((h) => matchesHistory(h, opts.where))
+        : Array.from(rows.values()).filter((r) => {
+          if (opts.where.type && r.type !== opts.where.type) return false;
+          if (opts.where.organization_id !== undefined && r.organization_id !== opts.where.organization_id) return false;
+          if (opts.where.state && r.state !== opts.where.state) return false;
+          return true;
+        });
+      // The caller's bound, applied after the filter (check:objectql-double-limit).
+      return typeof opts?.limit === 'number' ? found.slice(0, opts.limit) : found;
     },
     async findOne(table: string, opts: { where: Record<string, unknown> }) {
       assertEngineFindOnePredicate(table, opts);
