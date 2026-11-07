@@ -10,10 +10,17 @@
  * that saved the Data Lifecycle page holds a string where the map belongs.
  * `loadGovernance` indexed that string, so every override and quota read as
  * absent, with nothing logged. The save door now refuses a string
- * (`service-settings`), but rows already stored are not re-judged: this reader
- * parses a string that holds a JSON object, applies it and warns once per
- * stored value; anything else that is not a plain object is ignored as before,
- * now said once at `error`.
+ * (`service-settings`), but rows already stored are not re-judged. This reader
+ * splits them by what the key drives:
+ *
+ *  - `quotas` / `quota_defaults` only alert: text that holds a JSON object is
+ *    applied, with one warning per stored value.
+ *  - `retention_overrides` drives deletion: its text is NOT applied (the
+ *    declared windows stay in force, no row is reaped on the old window) and
+ *    one error per stored value says how to apply it — save the page once.
+ *
+ * Anything else that is not a plain object is ignored as before, now said once
+ * at `error`.
  */
 
 import { describe, it, expect, vi } from 'vitest';
@@ -41,15 +48,27 @@ function settingsOf(global: Record<string, unknown>, tenant: Record<string, Reco
 }
 
 /** Engine double: one declared object, a counting driver, captured deletes and candidate reads. */
-function engineOf(rows = 1_500, organizations: string[] = []) {
+function engineOf(rows = 1_500, organizations: string[] = [], stored: Array<{ id: string; created_at: string }> = []) {
   const deletes: Array<{ where: unknown }> = [];
   const reads: Array<{ object: string; where: unknown }> = [];
+  /** Ids of `stored` rows a bulk delete's `created_at < cutoff` predicate removed. */
+  const reaped: string[] = [];
   const driver = { name: 'default', count: vi.fn(async () => rows) };
   const engine: any = {
     registry: { getAllObjects: () => [JOB_RUN] },
     async delete(_object: string, options: any) {
       deletes.push({ where: options?.where });
-      return { deletedCount: 1 };
+      const cutoff = options?.where?.created_at?.$lt as string | undefined;
+      let deletedCount = 0;
+      if (cutoff) {
+        for (const row of stored) {
+          if (row.created_at < cutoff && !reaped.includes(row.id)) {
+            reaped.push(row.id);
+            deletedCount += 1;
+          }
+        }
+      }
+      return { deletedCount };
     },
     getDriverForObject: () => driver,
     datasource() {
@@ -64,7 +83,7 @@ function engineOf(rows = 1_500, organizations: string[] = []) {
       return [{ id: typeof org === 'string' ? `${org}_row` : 'global_row' }];
     };
   }
-  return { engine, deletes, reads };
+  return { engine, deletes, reads, reaped };
 }
 
 function serviceOf(engine: unknown, settings: unknown) {
@@ -118,31 +137,69 @@ describe('[#31241] a map setting stored as JSON text', () => {
     expect(report.alerts).toEqual([{ type: 'quota-exceeded', object: 'sys_job_run', rowCount: 1_500, quota: 500 }]);
   });
 
-  it('a global retention override stored as text moves the window', async () => {
-    const { engine, deletes } = engineOf();
-    const { svc, logger } = serviceOf(engine, settingsOf({ retention_overrides: '{"sys_job_run": {"maxAge": "90d"}}' }));
+  /** A row 10 days old: inside the declared 30d window, past a 1d override. */
+  const TEN_DAYS_OLD = [{ id: 'row_10d', created_at: new Date(FIXED_NOW - 10 * 86_400_000).toISOString() }];
+
+  it('CONTROL: a retention override stored as an object reaps on its window', async () => {
+    const { engine, deletes, reaped } = engineOf(1_500, [], TEN_DAYS_OLD);
+    const { svc, logger } = serviceOf(engine, settingsOf({ retention_overrides: { sys_job_run: { maxAge: '1d' } } }));
 
     await svc.sweep();
 
-    expect(deletes).toEqual([{ where: { created_at: { $lt: isoCutoff('90d') } } }]);
-    expect(logger.warn.mock.calls[0][0]).toContain('lifecycle.retention_overrides is stored as JSON text');
+    expect(deletes).toEqual([{ where: { created_at: { $lt: isoCutoff('1d') } } }]);
+    expect(reaped).toEqual(['row_10d']);
+    expect(logger.error).not.toHaveBeenCalled();
   });
 
-  it("an organization's retention override stored as text runs that organization's pass on it", async () => {
+  it('a retention override stored as text is NOT applied: no row is reaped on it, and one error says how to apply it', async () => {
+    const { engine, deletes, reaped } = engineOf(1_500, [], TEN_DAYS_OLD);
+    const { svc, logger } = serviceOf(engine, settingsOf({ retention_overrides: '{"sys_job_run": {"maxAge": "1d"}}' }));
+
+    await svc.sweep();
+    await svc.sweep();
+
+    // The declared 30d window, not the old 1d text: the 10-day-old row stays.
+    expect(deletes.map((d) => d.where)).toEqual([
+      { created_at: { $lt: isoCutoff('30d') } },
+      { created_at: { $lt: isoCutoff('30d') } },
+    ]);
+    expect(reaped).toEqual([]);
+    expect(logger.error).toHaveBeenCalledTimes(1);
+    const line = logger.error.mock.calls[0][0] as string;
+    expect(line).toContain('lifecycle.retention_overrides is stored as JSON text, not an object');
+    expect(line).toContain('so it is NOT applied');
+    expect(line).toContain('Setup → Data Lifecycle');
+    expect(line).not.toContain('sys_job_run');
+    expect(logger.warn).not.toHaveBeenCalled();
+  });
+
+  it("an organization's retention override stored as text runs no pass of its own, and is named in the error", async () => {
     const { engine, reads } = engineOf(1_500, ['org_reg', 'org_plain']);
     const { svc, logger } = serviceOf(
       engine,
-      settingsOf({}, { org_reg: { retention_overrides: '{"sys_job_run": {"maxAge": "2y"}}' } }),
+      settingsOf({}, { org_reg: { retention_overrides: '{"sys_job_run": {"maxAge": "1d"}}' } }),
     );
+
+    await svc.sweep();
+
+    // One global pass on the declared window; no organization is carved out.
+    const passes = reads.filter((r) => r.object === 'sys_job_run').map((r) => r.where);
+    expect(passes).toEqual([{ created_at: { $lt: isoCutoff('30d') } }]);
+    expect(logger.error.mock.calls[0][0]).toContain("organization org_reg's lifecycle.retention_overrides");
+    expect(logger.error.mock.calls[0][0]).toContain('so it is NOT applied');
+  });
+
+  it("CONTROL: the same organization's override stored as an object runs that organization's pass", async () => {
+    const { engine, reads } = engineOf(1_500, ['org_reg', 'org_plain']);
+    const { svc } = serviceOf(engine, settingsOf({}, { org_reg: { retention_overrides: { sys_job_run: { maxAge: '1d' } } } }));
 
     await svc.sweep();
 
     const passes = reads.filter((r) => r.object === 'sys_job_run').map((r) => r.where);
     expect(passes).toEqual([
-      { created_at: { $lt: isoCutoff('2y') }, organization_id: 'org_reg' },
+      { created_at: { $lt: isoCutoff('1d') }, organization_id: 'org_reg' },
       { created_at: { $lt: isoCutoff('30d') }, organization_id: { $nin: ['org_reg'] } },
     ]);
-    expect(logger.warn.mock.calls[0][0]).toContain("organization org_reg's lifecycle.retention_overrides");
   });
 
   it('text that is not a JSON object applies nothing, and says so once at error', async () => {

@@ -282,6 +282,14 @@ const DEFAULT_GOVERNANCE: GovernanceSnapshot = {
  */
 const GOVERNANCE_MAP_KEYS: ReadonlySet<string> = new Set(['retention_overrides', 'quotas', 'quota_defaults']);
 
+/**
+ * [#31241] Map settings whose value stored as JSON text is NOT applied by
+ * {@link LifecycleService.governanceMap}: they drive deletion (the reaper and
+ * the archiver), so an old value waits for an administrator's save instead of
+ * taking effect on the first sweep after an upgrade.
+ */
+const LEGACY_TEXT_NOT_APPLIED_KEYS: ReadonlySet<string> = new Set(['retention_overrides']);
+
 /** A plain object (not an array, not a class instance): the shape a map setting persists. */
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
@@ -1157,9 +1165,20 @@ export class LifecycleService {
    * string where the map belongs; indexing that string reads every override and
    * quota as absent, with nothing logged. The save door refuses a string now,
    * but rows already stored are not re-judged, so this reader repairs them in
-   * place rather than through a migration: a string that parses to a plain
-   * object IS the map its author typed, and it is applied, with one `warn` per
-   * stored value naming the key and the one-step fix (save the page again).
+   * place rather than through a migration, split by what the key drives:
+   *
+   *  - `quotas` / `quota_defaults` only ALERT. A string that parses to a plain
+   *    object IS the map its author typed, and it is applied, with one `warn`
+   *    per stored value naming the key and the one-step fix (save the page
+   *    again). The worst an old value does is raise an alert.
+   *  - `retention_overrides` drives the reaper and the archiver, which DELETE.
+   *    A window nobody has seen enforced, possibly for years, must not start
+   *    deleting rows on the first sweep after an upgrade, so its text is NOT
+   *    applied: the declared windows stay in force, and one `error` per stored
+   *    value names the key and the fix. Saving the Data Lifecycle page is that
+   *    fix: the page shows the stored text and sends it as an object, so the
+   *    administrator's save is the explicit consent the old value never had
+   *    ({@link LEGACY_TEXT_NOT_APPLIED_KEYS}).
    *
    * Anything else that is not a plain object (text that does not parse, a
    * scalar, an array) cannot be applied. That was already the outcome; what
@@ -1179,6 +1198,18 @@ export class LifecycleService {
         parsed = JSON.parse(value);
       } catch {
         parsed = undefined;
+      }
+      if (isPlainRecord(parsed) && LEGACY_TEXT_NOT_APPLIED_KEYS.has(key)) {
+        if (first) {
+          const message =
+            `[lifecycle] ${where}lifecycle.${key} is stored as JSON text, not an object ` +
+            '(saved by a console that sent the text), so it is NOT applied: the declared retention windows ' +
+            'stay in force, and no row is reaped or archived on its windows. To apply it, open ' +
+            'Setup → Data Lifecycle, check the value and save the page once; it is then stored as an object.';
+          if (this.opts.logger.error) this.opts.logger.error(message);
+          else this.opts.logger.warn(message);
+        }
+        return undefined;
       }
       if (isPlainRecord(parsed)) {
         if (first) {
