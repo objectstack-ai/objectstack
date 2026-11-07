@@ -184,13 +184,13 @@ export const fr: TranslationData = {
   },
 
   datasets: {
-    sys_user_metrics: { measures: { user_count: { label: 'Utilisateurs' } } },
-    sys_organization_metrics: { measures: { org_count: { label: 'Organisations' } } },
-    sys_session_metrics: { measures: { session_count: { label: 'Sessions' } } },
-    sys_package_installation_metrics: { measures: { package_count: { label: 'Installations' } } },
+    sys_user_metrics: { measures: { user_count: { label: 'Nombre d’utilisateurs' } } },
+    sys_organization_metrics: { measures: { org_count: { label: 'Nombre d’organisations' } } },
+    sys_session_metrics: { measures: { session_count: { label: 'Nombre de sessions' } } },
+    sys_package_installation_metrics: { measures: { package_count: { label: 'Nombre d’installations' } } },
     sys_audit_log_metrics: {
-      dimensions: { action: { label: 'Action' }, user_id: { label: 'Utilisateur' } },
-      measures: { event_count: { label: 'Événements' } },
+      dimensions: { action: { label: 'Type d’action' }, user_id: { label: 'Utilisateur' } },
+      measures: { event_count: { label: 'Nombre d’événements' } },
     },
   },
 

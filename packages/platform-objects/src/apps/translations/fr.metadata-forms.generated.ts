@@ -97,7 +97,7 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         helpText: "Nom d’icône Lucide affiché à côté de l’en-tête sur la page de détail de l’enregistrement (par ex. « banknote »). Le formulaire de saisie ne l’affiche pas."
       },
       "fieldGroups.description": {
-        label: "Description",
+        label: "Description du groupe",
         helpText: "Texte affiché sous l’en-tête, sur le formulaire de saisie et la page de détail de l’enregistrement."
       },
       "fieldGroups.relatedList": {
@@ -214,7 +214,7 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Couleur"
       },
       "fields.options.description": {
-        label: "Description"
+        label: "Description de l’option"
       },
       "fields.options.kind": {
         label: "Nature",
@@ -334,7 +334,7 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         helpText: "Texte de la chronologie (par ex. « Affaire gagnée : {name} »). Un jeton {field_name} prend la valeur de l’enregistrement après la mise à jour, et le jeton d’un champ de recherche, maître-détail ou utilisateur affiche le titre de l’enregistrement référencé ; un jeton qui ne désigne aucun champ s’affiche vide."
       },
       "activityMilestones.type": {
-        label: "Type",
+        label: "Type de jalon",
         helpText: "Type d’activité de l’entrée de chronologie : une nature intégrée comme completed, ou votre propre mot, stocké tel quel. Non défini : updated."
       },
       datasource: {
@@ -354,7 +354,7 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         helpText: "Noms des colonnes de cet objet, dans l’ordre de la clé (par ex. status, owner). L’enregistrement ne les vérifie pas ; la publication et os validate refusent un nom qui n’est pas un champ de cet objet. Un champ qui n’est pas une colonne stockée (une formule, par exemple) fait ignorer l’index entier par le pilote SQL, avec une erreur dans le journal du serveur."
       },
       "indexes.unique": {
-        label: "Unique",
+        label: "Index unique",
         helpText: "Portée d’unicité (ADR-0120). Non défini : non unique. L’ancienne valeur nue true (qui signifie global) n’est pas proposée ; un index qui la porte la conserve jusqu’à ce que vous choisissiez une portée."
       },
       ownership: {
@@ -707,7 +707,7 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Valeur"
       },
       "options.description": {
-        label: "Description"
+        label: "Description de l’option"
       },
       "options.color": {
         label: "Couleur"
@@ -1226,10 +1226,10 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Libellé"
       },
       "userFilters.fields.type": {
-        label: "Type"
+        label: "Type de filtre"
       },
       "userFilters.fields.options": {
-        label: "Options"
+        label: "Options du filtre"
       },
       "userFilters.fields.showCount": {
         label: "Afficher le nombre"
@@ -1412,7 +1412,7 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         helpText: "Nom de la variable — exposé aux expressions sous la forme `page.<name>`"
       },
       "variables.type": {
-        label: "Type",
+        label: "Type de variable",
         helpText: "Type de valeur"
       },
       "variables.defaultValue": {
@@ -1583,7 +1583,7 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         helpText: "Afficher la description du tableau de bord dans l’en-tête"
       },
       "header.actions": {
-        label: "Actions",
+        label: "Boutons d’action",
         helpText: "Boutons d’action de l’en-tête"
       },
       "header.actions.label": {
@@ -1609,7 +1609,7 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Titre"
       },
       "widgets.description": {
-        label: "Description"
+        label: "Description du widget"
       },
       "widgets.type": {
         label: "Type de visualisation"
@@ -1636,7 +1636,7 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Jeu de données"
       },
       "widgets.dimensions": {
-        label: "Dimensions"
+        label: "Dimensions du widget"
       },
       "widgets.values": {
         label: "Valeurs"
@@ -1645,7 +1645,7 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Disposition"
       },
       "widgets.options": {
-        label: "Options"
+        label: "Options du widget"
       },
       "widgets.filterBindings": {
         label: "Liaisons de filtres"
@@ -1677,7 +1677,7 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Type de saisie"
       },
       "globalFilters.options": {
-        label: "Options"
+        label: "Options du filtre"
       },
       "globalFilters.optionsFrom": {
         label: "Options issues de"
@@ -1752,7 +1752,7 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         helpText: "Regrouper les éléments dans des zones repliables"
       },
       "areas.id": {
-        label: "ID"
+        label: "ID de la zone"
       },
       "areas.label": {
         label: "Libellé"
@@ -1761,10 +1761,10 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Icône"
       },
       "areas.description": {
-        label: "Description"
+        label: "Description de la zone"
       },
       "areas.navigation": {
-        label: "Navigation"
+        label: "Navigation de la zone"
       },
       defaultAgent: {
         label: "Agent par défaut",
@@ -1882,16 +1882,16 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Libellé"
       },
       "params.type": {
-        label: "Type"
+        label: "Type de paramètre"
       },
       "params.widget": {
-        label: "Widget"
+        label: "Contrôle de saisie"
       },
       "params.required": {
         label: "Obligatoire"
       },
       "params.options": {
-        label: "Options"
+        label: "Options proposées"
       },
       "params.placeholder": {
         label: "Espace réservé"
@@ -1903,7 +1903,7 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Valeur par défaut"
       },
       "params.multiple": {
-        label: "Multiple"
+        label: "Sélection multiple"
       },
       "params.accept": {
         label: "Types acceptés"
@@ -2132,7 +2132,7 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Libellé"
       },
       "blocks.description": {
-        label: "Description"
+        label: "Description du bloc"
       },
       "blocks.type": {
         label: "Type de bloc"
@@ -2233,7 +2233,7 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Champ"
       },
       "dimensions.type": {
-        label: "Type"
+        label: "Type de dimension"
       },
       "dimensions.dateGranularity": {
         label: "Granularité de date"
@@ -2261,7 +2261,7 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Filtre"
       },
       "measures.format": {
-        label: "Format"
+        label: "Format de la mesure"
       },
       "measures.currency": {
         label: "Devise"
@@ -2315,7 +2315,7 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         helpText: "⚠️ Envisagez d’utiliser l’éditeur visuel Flow Designer plutôt que le JSON"
       },
       "nodes.id": {
-        label: "ID"
+        label: "ID du nœud"
       },
       "nodes.type": {
         label: "Type de nœud"
@@ -2324,7 +2324,7 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Libellé"
       },
       "nodes.config": {
-        label: "Configuration"
+        label: "Configuration du nœud"
       },
       "nodes.connectorConfig": {
         label: "Action de connecteur"
@@ -2349,7 +2349,7 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         helpText: "Connexions entre les nœuds — utilisez Flow Designer pour une modification plus simple"
       },
       "edges.id": {
-        label: "ID"
+        label: "ID de la liaison"
       },
       "edges.source": {
         label: "Nœud de départ"
@@ -2358,7 +2358,7 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Nœud d’arrivée"
       },
       "edges.condition": {
-        label: "Condition"
+        label: "Condition de la liaison"
       },
       "edges.type": {
         label: "Type de connexion"
@@ -2377,7 +2377,7 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Nom"
       },
       "variables.type": {
-        label: "Type"
+        label: "Type de variable"
       },
       "variables.isInput": {
         label: "Entrée"
