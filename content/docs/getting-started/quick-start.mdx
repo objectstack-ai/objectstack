@@ -237,8 +237,8 @@ runtime-assembled manifests; `runtimeModule` is written by `objectstack build`);
 the stack rather than declare metadata items (`email` and `sms` carry no
 credentials — those stay in the environment or in Settings; `push` names each
 vendor secret by `credentialRef` and is read only when `requires` names `push`; `demoStaff` names the
-demo accounts a local `os dev` boot creates, and `os build` leaves it out of
-`objectstack.json`); and
+demo accounts a local `os dev` boot creates and `devPlugins` the plugins only a
+`--dev` boot loads, and `os build` leaves both out of `objectstack.json`); and
 `functions` and `onEnable` are code the runtime calls, not metadata it stores.
 
 ## How you verify
