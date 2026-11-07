@@ -63,6 +63,7 @@ import {
   createHostCryptoProvider,
   HostCryptoProviderRefusal,
   refuseTwoCryptoProviderPlugins,
+  refuseUnloadedCryptoProviderPlugins,
 } from './serve.js';
 
 // [#10126] Pay the first load of what `serve.ts` reaches through dynamic
@@ -445,6 +446,57 @@ describe('two registrations refuse at boot', () => {
   });
 });
 
+describe('a plugins entry that did not load refuses the boot unless it is ruled out as the crypto provider', () => {
+  const refusalOf = (unloaded: Parameters<typeof refuseUnloadedCryptoProviderPlugins>[0]): Error | undefined => {
+    try { refuseUnloadedCryptoProviderPlugins(unloaded); }
+    catch (err) { return err as Error; }
+    return undefined;
+  };
+
+  it('an entry that never materialized says nothing it provides, and is refused, named by its specifier', () => {
+    const refusal = refusalOf([{ index: 2, entry: '@acme/kms-crypto', error: new Error("Failed to import plugin '@acme/kms-crypto': not found") }]);
+    expect(refusal).toBeInstanceOf(HostCryptoProviderRefusal);
+    expect(refusal!.message).toContain("plugins[2] ('@acme/kms-crypto') did not load");
+    expect(refusal!.message).toContain(`'${CRYPTO_PROVIDER_SERVICE}'`);
+  });
+
+  it('an entry that materialized and declares the provider is refused, named by its plugin name', () => {
+    const plugin = providerPlugin('com.example.aws-kms-crypto', kmsProvider().provider);
+    const refusal = refusalOf([
+      { index: 0, entry: '@acme/aws-kms-crypto', materialized: plugin, error: new Error('Invalid semantic version') },
+    ]);
+    expect(refusal).toBeInstanceOf(HostCryptoProviderRefusal);
+    expect(refusal!.message).toContain("plugins[0] ('@acme/aws-kms-crypto')");
+    const inline = refusalOf([{ index: 1, entry: plugin, materialized: plugin, error: new Error('boom') }]);
+    expect(inline!.message).toContain("plugins[1] ('com.example.aws-kms-crypto') did not load (boom)");
+    expectNoKeyMaterial(inline!.message);
+  });
+
+  it('an object entry that failed before it materialized is judged by what the entry itself declares', () => {
+    const plugin = providerPlugin('com.example.vault-crypto', kmsProvider().provider);
+    expect(refusalOf([{ index: 0, entry: plugin, error: new Error('boom') }])).toBeInstanceOf(HostCryptoProviderRefusal);
+  });
+
+  it('CONTROL: an entry that declares other services, or none, is ruled out; nothing unloaded is not refused', () => {
+    expect(refusalOf([
+      { index: 0, entry: { name: 'com.example.widgets', providesServices: ['widgets'], init: async () => {} }, error: new Error('x') },
+      { index: 1, entry: '@acme/widgets', materialized: { name: 'com.example.plain', init: async () => {} }, error: new Error('y') },
+    ])).toBeUndefined();
+    expect(refusalOf([])).toBeUndefined();
+  });
+
+  it('every refused entry is named, and the ruled-out ones are not', () => {
+    const refusal = refusalOf([
+      { index: 0, entry: '@acme/one', error: new Error('a') },
+      { index: 1, entry: { name: 'com.example.widgets', providesServices: ['widgets'], init: async () => {} }, error: new Error('b') },
+      { index: 2, entry: '@acme/two', error: new Error('c') },
+    ]);
+    expect(refusal!.message).toContain("plugins[0] ('@acme/one')");
+    expect(refusal!.message).toContain("plugins[2] ('@acme/two')");
+    expect(refusal!.message).not.toContain('com.example.widgets');
+  });
+});
+
 describe('the deferred path: nothing is sealed by a provider the boot did not choose', () => {
   it('a credential bound before the post-start wiring is sealed by the registered provider', async () => {
     const kms = kmsProvider();
@@ -562,6 +614,15 @@ describe('the wiring inside run()', () => {
     // No consumer is handed a provider of its own any more.
     expect(SERVE).not.toMatch(/new LocalCryptoProvider\(/);
     expect(SERVE.match(/setCryptoProvider\(/g)).toHaveLength(1);
+  });
+
+  it('refuses an unloaded entry that may provide the crypto provider right after the plugins loop, before the host provider is built', () => {
+    const record = SERVE.indexOf('unloadedStackPlugins.push({ index, entry: plugin, materialized, error: e });');
+    const check = SERVE.indexOf('refuseUnloadedCryptoProviderPlugins(unloadedStackPlugins);');
+    const host = SERVE.indexOf('hostCrypto = createHostCryptoProvider(() => localCryptoProvider.resolve());');
+    expect(record).toBeGreaterThan(0);
+    expect(check).toBeGreaterThan(record);
+    expect(host).toBeGreaterThan(check);
   });
 
   it('checks the declared providers before the boot', () => {

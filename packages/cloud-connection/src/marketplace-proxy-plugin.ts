@@ -34,8 +34,20 @@ import {
 } from './marketplace-public-url.js';
 
 import type { IHttpServer } from '@objectstack/spec/contracts';
+import {
+    DEFAULT_SOLUTION_TYPE,
+    MarketplaceBusinessFunctionSchema,
+    MarketplaceIndustrySchema,
+    MarketplaceSolutionTypeSchema,
+    PackageMaturitySchema,
+    retiredCategoryGuidance,
+} from '@objectstack/spec/marketplace';
+import { repeatedQueryParamMessage } from '@objectstack/rest';
 
 const MARKETPLACE_PREFIX = '/api/v1/marketplace';
+
+/** The catalog list door: the one path whose query the proxy reads itself. */
+const CATALOG_LIST_PATH = `${MARKETPLACE_PREFIX}/packages`;
 
 /**
  * This plugin's own version, declared at module scope and read from there by
@@ -259,6 +271,22 @@ export class MarketplaceProxyPlugin implements Plugin {
 
                     const method = String(c.req.method ?? 'GET').toUpperCase();
 
+                    // The catalog list's facet filters are read here, BEFORE
+                    // either path, so a filter the catalog cannot answer is
+                    // refused the same way whether R2 or the cloud would
+                    // have served the list.
+                    let listQuery: CatalogListQuery | undefined;
+                    if (incomingUrl.pathname === CATALOG_LIST_PATH && (method === 'GET' || method === 'HEAD')) {
+                        const read = readCatalogListQuery(incomingUrl.searchParams);
+                        if (!read.ok) {
+                            return c.json({
+                                success: false,
+                                error: { code: 'VALIDATION_ERROR', message: read.message },
+                            }, 400);
+                        }
+                        listQuery = read.query;
+                    }
+
                     // ── Public R2 fast-path ─────────────────────────
                     // When OS_MARKETPLACE_PUBLIC_BASE_URL is configured,
                     // GETs for snapshot-backed paths fetch directly from
@@ -267,7 +295,7 @@ export class MarketplaceProxyPlugin implements Plugin {
                     // work even when cloud is asleep or completely down.
                     if (publicBaseUrl && (method === 'GET' || method === 'HEAD')) {
                         const r2Resp = await tryPublicMarketplaceFetch(
-                            publicBaseUrl, incomingUrl, method, c.req.header('accept'),
+                            publicBaseUrl, incomingUrl, listQuery, method, c.req.header('accept'),
                             ctx.logger,
                         );
                         if (r2Resp) return r2Resp;
@@ -381,6 +409,177 @@ export class MarketplaceProxyPlugin implements Plugin {
 }
 
 // ---------------------------------------------------------------------------
+// Catalog list query (module-private)
+// ---------------------------------------------------------------------------
+
+/**
+ * The catalog list's filters, as `GET /api/v1/marketplace/packages` reads them.
+ *
+ * The facet keys and their values are the spec's
+ * (`MarketplaceSearchRequestSchema` in `@objectstack/spec/marketplace`):
+ * `businessFunctions`, `industries` and `solutionTypes` — plural, each a list —
+ * and `maturity`, one value. The catalog's own `category` filter was retired
+ * with the listing's `category` (`MarketplaceSearchRequest.category` is a
+ * retired key in the spec); the facets replace it, and a `category` parameter
+ * is refused with the spec's own prescription rather than read as no filter.
+ */
+interface CatalogListQuery {
+    /** Lower-cased search text, matched against display name and manifest id. */
+    q: string;
+    businessFunctions?: ReadonlySet<string>;
+    industries?: ReadonlySet<string>;
+    solutionTypes?: ReadonlySet<string>;
+    maturity?: string;
+    limit: number;
+    offset: number;
+}
+
+type CatalogListQueryRead =
+    | { ok: true; query: CatalogListQuery }
+    | { ok: false; param: string; message: string };
+
+/** One facet: its query parameter, the catalog row column, the spec's values. */
+interface CatalogFacet {
+    param: 'businessFunctions' | 'industries' | 'solutionTypes';
+    noun: string;
+    nouns: string;
+    values: () => readonly string[];
+}
+
+const CATALOG_FACETS: readonly CatalogFacet[] = [
+    { param: 'businessFunctions', noun: 'business function', nouns: 'business functions', values: () => MarketplaceBusinessFunctionSchema.options },
+    { param: 'industries', noun: 'industry', nouns: 'industries', values: () => MarketplaceIndustrySchema.options },
+    { param: 'solutionTypes', noun: 'solution type', nouns: 'solution types', values: () => MarketplaceSolutionTypeSchema.options },
+];
+
+/**
+ * Read the list door's query. A facet is ONE comma-separated value
+ * (`?businessFunctions=sales,marketing`), the spelling every list-valued query
+ * parameter on this platform takes (`fields`, `names`); each value trimmed,
+ * blanks dropped, repeats folded. Refused, `400 VALIDATION_ERROR`:
+ *
+ * - `category`, the retired filter, with `retiredCategoryGuidance` — the
+ *   prescription a parse of `MarketplaceSearchRequestSchema` gives the same key,
+ *   so a caller still filtering by category learns which facet to send instead
+ *   of receiving the whole catalog as though it had matched;
+ * - a facet or `maturity` supplied more than once — a repeated key is not a
+ *   second spelling of a list, and the door will not pick one occurrence;
+ * - a facet that names no value (`?industries=`): a list of nothing is not a
+ *   filter, and reading it as every listing would answer a question nobody asked;
+ * - a value the spec does not declare for that facet: it can match no listing,
+ *   so an empty page would hide a misspelling.
+ *
+ * `q`, `limit` and `offset` read as they always have.
+ */
+function readCatalogListQuery(params: URLSearchParams): CatalogListQueryRead {
+    if (params.has('category')) {
+        return {
+            ok: false,
+            param: 'category',
+            message: `Query parameter 'category' is retired: ${retiredCategoryGuidance('MarketplaceSearchRequest.category')}`,
+        };
+    }
+    const query: CatalogListQuery = {
+        q: (params.get('q') ?? '').trim().toLowerCase(),
+        limit: Math.min(Math.max(Number(params.get('limit') ?? 50), 1), 100),
+        offset: Math.max(Number(params.get('offset') ?? 0), 0),
+    };
+    for (const facet of CATALOG_FACETS) {
+        const all = params.getAll(facet.param);
+        if (all.length === 0) continue;
+        if (all.length > 1) {
+            return { ok: false, param: facet.param, message: repeatedQueryParamMessage(facet.param, all.length) };
+        }
+        const raw = all[0] ?? '';
+        const picked = [...new Set(raw.split(',').map((v) => v.trim()).filter(Boolean))];
+        const declared = facet.values();
+        if (picked.length === 0) {
+            return {
+                ok: false,
+                param: facet.param,
+                message: `Query parameter '${facet.param}' names no ${facet.noun}; got ${JSON.stringify(raw)}. `
+                    + `The list was not served: a list of no values is not a filter. Name at least one, spelled `
+                    + `?${facet.param}=${declared.slice(0, 2).join(',')}, or leave the parameter out.`,
+            };
+        }
+        const unknown = picked.filter((v) => !declared.includes(v));
+        if (unknown.length > 0) {
+            return {
+                ok: false,
+                param: facet.param,
+                message: `Query parameter '${facet.param}' names ${unknown.map((v) => JSON.stringify(v)).join(', ')}, `
+                    + `which ${unknown.length === 1 ? `is not a ${facet.noun}` : `are not ${facet.nouns}`} `
+                    + `the marketplace declares. Use one or more of: ${declared.join(', ')}.`,
+            };
+        }
+        query[facet.param] = new Set(picked);
+    }
+    const maturity = params.getAll('maturity');
+    if (maturity.length > 1) {
+        return { ok: false, param: 'maturity', message: repeatedQueryParamMessage('maturity', maturity.length) };
+    }
+    if (maturity.length === 1) {
+        const value = (maturity[0] ?? '').trim();
+        const declared: readonly string[] = PackageMaturitySchema.options;
+        if (!declared.includes(value)) {
+            return {
+                ok: false,
+                param: 'maturity',
+                message: `Query parameter 'maturity' is ${JSON.stringify(maturity[0])}, which is not a maturity the `
+                    + `marketplace declares. Use one of: ${declared.join(', ')}.`,
+            };
+        }
+        query.maturity = value;
+    }
+    return { ok: true, query };
+}
+
+/**
+ * Whether the list is answered filtered and paged rather than as the verbatim
+ * snapshot: any facet or `maturity`, or `q` / `limit` / `offset` present at all.
+ */
+function catalogQueryFilters(query: CatalogListQuery, params: URLSearchParams): boolean {
+    return Boolean(query.businessFunctions || query.industries || query.solutionTypes || query.maturity)
+        || params.has('q') || params.has('limit') || params.has('offset');
+}
+
+const listColumn = (value: unknown): readonly unknown[] => (Array.isArray(value) ? value : []);
+
+/**
+ * Whether one catalog row passes the query. The row is the catalog's own
+ * (snake_case `business_functions`, `industries`, `solution_type`, `maturity`).
+ * OR inside a facet — the row carries any selected value — and AND across the
+ * facets, `maturity` and `q`. A row that declares no solution type is the
+ * spec's default (`app`), and one that declares no maturity is `stable`, the
+ * spec's reading of an absent key; a row without the facet columns at all
+ * passes no business-function or industry filter.
+ */
+function catalogRowMatches(row: any, query: CatalogListQuery): boolean {
+    if (query.q) {
+        const dn = String(row?.display_name ?? '').toLowerCase();
+        const mid = String(row?.manifest_id ?? '').toLowerCase();
+        if (!dn.includes(query.q) && !mid.includes(query.q)) return false;
+    }
+    const carries = (selected: ReadonlySet<string> | undefined, values: readonly unknown[]): boolean =>
+        !selected || values.some((v) => typeof v === 'string' && selected.has(v));
+    if (!carries(query.businessFunctions, listColumn(row?.business_functions))) return false;
+    if (!carries(query.industries, listColumn(row?.industries))) return false;
+    if (query.solutionTypes) {
+        const declared: readonly string[] = MarketplaceSolutionTypeSchema.options;
+        const own = row?.solution_type;
+        const effective = typeof own === 'string' && declared.includes(own) ? own : DEFAULT_SOLUTION_TYPE;
+        if (!query.solutionTypes.has(effective)) return false;
+    }
+    if (query.maturity) {
+        const declared: readonly string[] = PackageMaturitySchema.options;
+        const own = row?.maturity;
+        const effective = typeof own === 'string' && declared.includes(own) ? own : 'stable';
+        if (effective !== query.maturity) return false;
+    }
+    return true;
+}
+
+// ---------------------------------------------------------------------------
 // Public R2 fast-path (module-private)
 // ---------------------------------------------------------------------------
 
@@ -389,19 +588,21 @@ export class MarketplaceProxyPlugin implements Plugin {
  * the response shaped exactly like the cloud API endpoint would. The
  * snapshots are already in `{ success: true, data: ... }` shape so for
  * direct lookups we stream bytes verbatim. The list endpoint applies
- * query-string filters (q / category / limit / offset) client-side
- * from the full snapshot.
+ * the {@link CatalogListQuery} (q, the facets, maturity, limit/offset)
+ * to the full snapshot itself.
  *
  * Returns `null` for any of:
  *   - path is not snapshot-backed (e.g. featured / categories / etc.)
  *   - R2 returned 404 (snapshot not yet generated for this id)
  *   - network error fetching from R2
  *
- * On `null`, the caller falls back to the cloud proxy path.
+ * On `null`, the caller falls back to the cloud proxy path, which forwards
+ * the incoming query string to the cloud verbatim.
  */
 async function tryPublicMarketplaceFetch(
     publicBaseUrl: string,
     incomingUrl: URL,
+    listQuery: CatalogListQuery | undefined,
     method: string,
     acceptHeader: string | undefined,
     logger: any,
@@ -429,17 +630,12 @@ async function tryPublicMarketplaceFetch(
         return null;
     }
 
-    // List endpoint: apply optional q/category/limit/offset filters on
-    // the full snapshot. Detail + manifest snapshots stream verbatim.
+    // List endpoint: apply the list query on the full snapshot. Detail +
+    // manifest snapshots stream verbatim.
     const isList = key === 'packages.json';
-    const hasFilters = isList && (
-        incomingUrl.searchParams.has('q') ||
-        incomingUrl.searchParams.has('category') ||
-        incomingUrl.searchParams.has('limit') ||
-        incomingUrl.searchParams.has('offset')
-    );
+    const hasFilters = isList && listQuery !== undefined && catalogQueryFilters(listQuery, incomingUrl.searchParams);
 
-    if (!hasFilters) {
+    if (!hasFilters || !listQuery) {
         // Verbatim passthrough — preserve cache headers from R2 / CF.
         const headers = new Headers();
         const ct = resp.headers.get('content-type') ?? 'application/json; charset=utf-8';
@@ -462,22 +658,8 @@ async function tryPublicMarketplaceFetch(
     }
     const items: any[] = Array.isArray(snapshot?.data?.items) ? snapshot.data.items : [];
 
-    const q = (incomingUrl.searchParams.get('q') ?? '').trim().toLowerCase();
-    const category = (incomingUrl.searchParams.get('category') ?? '').trim();
-    const limit = Math.min(Math.max(Number(incomingUrl.searchParams.get('limit') ?? 50), 1), 100);
-    const offset = Math.max(Number(incomingUrl.searchParams.get('offset') ?? 0), 0);
-
-    let filtered = items;
-    if (q) {
-        filtered = filtered.filter((r) => {
-            const dn = String(r?.display_name ?? '').toLowerCase();
-            const mid = String(r?.manifest_id ?? '').toLowerCase();
-            return dn.includes(q) || mid.includes(q);
-        });
-    }
-    if (category) {
-        filtered = filtered.filter((r) => String(r?.category ?? '') === category);
-    }
+    const { limit, offset } = listQuery;
+    const filtered = items.filter((row) => catalogRowMatches(row, listQuery));
     const total = filtered.length;
     const page = filtered.slice(offset, offset + limit);
     const body = JSON.stringify({ success: true, data: { items: page, total, limit, offset } });

@@ -2323,6 +2323,12 @@ const pt = {
         done: "Há colegas que entraram ou foram convidados.",
         action: "Convidar",
       },
+      connectAssistant: {
+        title: 'Conectar um assistente de IA',
+        todo: 'Trabalhe neste sistema pelo Claude, Doubao e assistentes semelhantes, como você mesmo.',
+        done: 'Um assistente de IA ou uma chave de API sua está conectada.',
+        action: 'Conectar',
+      },
     },
     error: {
       connectionFailed: "Não é possível conectar ao servidor",
@@ -3294,6 +3300,12 @@ const pt = {
       message: "Defina uma senha de recuperação para conseguir entrar mesmo que o logon único fique indisponível.",
       cta: "Definir senha",
       dismiss: "Dispensar",
+    },
+    connectAssistant: {
+      title: 'Trabalhe aqui pelo seu assistente de IA',
+      body: 'Você pode consultar e alterar seus registros pelo Claude, Doubao e assistentes de IA semelhantes. Cada um age como você, com suas próprias permissões.',
+      action: 'Conectar um assistente de IA',
+      dismiss: 'Ocultar',
     },
     pendingDrafts: {
       // objectui#12602 — the drafts row in Home's "My work" section: the

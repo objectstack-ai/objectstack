@@ -933,6 +933,7 @@
       {
         "id": "employee",
         "role": "Employee (claimant), Sales, grade g2 — e02",
+        "record": {"object": "employee", "id": "e02"},
         "hidden": {"fields": [{"object": "department", "field": "travel_budget"}]},
         "scope": [
           {"object": "trip_request", "field": "traveler", "value": "e02"},
@@ -944,6 +945,7 @@
       {
         "id": "dept_manager",
         "role": "Department manager, Sales — e01",
+        "record": {"object": "employee", "id": "e01"},
         "hidden": {"fields": [{"object": "employee", "field": "bank_account"}]},
         "scope": [
           {"object": "department", "field": "id", "value": "dep_sales"},

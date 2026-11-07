@@ -43,7 +43,12 @@ import { fileURLToPath } from 'node:url';
 import { LocalCryptoProvider, settleKeyFileChannel } from '@objectstack/service-settings';
 // The one code/prose separator, typed by the hand-written `.d.mts` beside it.
 import { maskComments } from '../../../../scripts/js-comment-mask.mjs';
-import { oneShotSettingsPlugin, refusingCryptoProvider, resolveExistingDataKey } from './one-shot-settings.js';
+import { oneShotCrypto, refusingCryptoProvider, resolveExistingDataKey, type OneShotCrypto } from './one-shot-settings.js';
+
+// [#31007] Pay the first load of what the one-shot crypto composition reaches through
+// dynamic `import()`s (the host config reader and `serve.ts`) at MODULE LOAD, outside
+// any clocked case.
+import '@objectstack/core';
 
 /** …/packages/cli/src/utils */
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
@@ -136,6 +141,25 @@ function providerOf(plugin: unknown): { encrypt: (...a: unknown[]) => Promise<un
   return (plugin as { opts: { cryptoProvider: never } }).opts.cryptoProvider;
 }
 
+/** The settings service among a one-shot composition's plugins. */
+function settingsOf(crypto: OneShotCrypto): unknown {
+  return crypto.plugins.find((p) => (p as { opts?: { cryptoProvider?: unknown } }).opts?.cryptoProvider !== undefined);
+}
+
+/**
+ * [#31007] What the composition's host provider chooses once its boot is up,
+ * with no plugin registering a provider: its plugin's `init()` and
+ * `kernel:ready` hook, driven as a kernel drives them.
+ */
+async function chosenBy(crypto: OneShotCrypto): Promise<unknown> {
+  const host = crypto.plugins.find((p) => (p as { name?: unknown }).name === 'com.objectstack.cli.host-crypto-provider') as
+    { init(ctx: unknown): Promise<void> };
+  const ready: Array<() => unknown> = [];
+  await host.init({ getServices: () => new Map(), hook: (_name: string, handler: () => unknown) => ready.push(handler) });
+  for (const handler of ready) await handler();
+  return crypto.provider.resolve();
+}
+
 describe('[#21471] the one-shot helper never mints a data key', () => {
   it('the control: the default provider mints a key file in this posture and this home', () => {
     const minted = new LocalCryptoProvider();
@@ -149,10 +173,12 @@ describe('[#21471] the one-shot helper never mints a data key', () => {
     expect(typeof key.unavailable).toBe('string');
     expect(key.unavailable).not.toBe('');
 
-    const plugin = await oneShotSettingsPlugin();
-    const provider = providerOf(plugin);
-    expect(provider).toBeDefined();
-    expect(provider).not.toBeInstanceOf(LocalCryptoProvider);
+    const crypto = await oneShotCrypto();
+    const provider = providerOf(settingsOf(crypto));
+    // [#31007] The service holds `os serve`'s one host provider, which chooses
+    // the refusing one: no plugin registered a provider, and no key exists.
+    expect(provider).toBe(crypto.provider);
+    expect(await chosenBy(crypto)).not.toBeInstanceOf(LocalCryptoProvider);
     // The refusal carries why there is no key, so an operator reading it is told.
     await expect(provider.encrypt('x', { scope: 'settings', namespace: 'n', key: 'k' }))
       .rejects.toThrow(key.unavailable!);
@@ -161,22 +187,22 @@ describe('[#21471] the one-shot helper never mints a data key', () => {
     // Even with the auto-key opt-in present in the environment.
     process.env.OS_CRYPTO_AUTOKEY = '1';
     expect((await resolveExistingDataKey()).provider).toBeNull();
-    await oneShotSettingsPlugin();
+    await chosenBy(await oneShotCrypto());
     expect(readdirSync(home)).toEqual([]);
-  });
+  }, 60_000);
 
   it('a key file that exists is read, never rewritten, and is the one the service is handed', async () => {
     const file = join(home, 'dev-crypto-key');
     writeFileSync(file, Buffer.from(KEY_HEX, 'hex').toString('base64'), { mode: 0o600 });
     const before = readFileSync(file, 'utf8');
 
-    const key = await resolveExistingDataKey();
-    expect(key.provider?.keySource).toBe('file');
-    const plugin = await oneShotSettingsPlugin(key);
-    expect(providerOf(plugin)).toBe(key.provider);
+    const crypto = await oneShotCrypto();
+    expect(crypto.key?.provider?.keySource).toBe('file');
+    expect(providerOf(settingsOf(crypto))).toBe(crypto.provider);
+    expect(await chosenBy(crypto)).toBe(crypto.key?.provider);
     expect(readdirSync(home)).toEqual(['dev-crypto-key']);
     expect(readFileSync(file, 'utf8')).toBe(before);
-  });
+  }, 60_000);
 
   it('an env key is used, and the key home is never touched', async () => {
     process.env.OS_SECRET_KEY = KEY_HEX;

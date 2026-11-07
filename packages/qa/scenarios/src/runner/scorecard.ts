@@ -20,6 +20,13 @@
  *     degraded score: nothing after it ran. The author row shows every
  *     authoring turn's `resultSubtype`, the turns it took of the cap it ran
  *     under (`80/80 turns` beside `error_max_turns`), and its elapsed time.
+ *   - Model: the model each turn was SERVED, read off its stream, never the
+ *     one asked for. The author row names it, and the `Run · model` rows count
+ *     the question and operation turns per served model. A turn served another
+ *     model than it asked for (`--model`, `--author-model`, `--ask-model`) is
+ *     marked `⚠`: `asked for sonnet` on the author row, `⚠ N not sonnet` on a
+ *     Run row. Each turn in the record's `cardRun` carries `model`,
+ *     `requestedModel` and `modelMismatch`.
  *   - Run-问数: one turn per (question, persona); it passes when the answer is
  *     correct AND cited AND leaks nothing. Leaks are also counted apart, so a
  *     leaking answer shows up even when it is otherwise right.
@@ -48,14 +55,28 @@ export interface HalfScores {
     failedCommands: string[];
     /** The authoring turn did not finish (`BuildHalf.notMeasured`): 0 of 0, never degraded. */
     notMeasuredReason?: string;
-    /** The authoring turn: how it ended, the turns it took of the cap it ran under, and its wall-clock time. */
-    author?: { resultSubtype?: string; numTurns?: number; maxTurns?: number; elapsedMs?: number };
+    /** The authoring turn: how it ended, the turns it took of the cap it ran under, its wall-clock time, and the model it was served of the one it asked for. */
+    author?: { resultSubtype?: string; numTurns?: number; maxTurns?: number; elapsedMs?: number; model?: string; requestedModel?: string; modelMismatch?: true };
   };
   /** Rows the app took of the rows the runner sent. */
   seed?: { inserted: number; total: number; refused: number };
   ask?: Tally & { leaks: number; notMeasured: number };
   operations?: Tally & { notMeasured: number };
+  /** The models the half's question and operation turns were served ({@link modelTally}). */
+  models?: ModelTally;
 }
+
+/** The models a half's persona turns — every question and operation turn that ran — were served. */
+export interface ModelTally {
+  /** Turns per served model (`TurnSummary.model`); a turn whose stream named none counts under {@link MODEL_NOT_REPORTED}. */
+  served: Record<string, number>;
+  /** Every model the turns asked for (`--model` / `--ask-model`); empty ⇒ the login's default. */
+  requested: string[];
+  /** Turns served a model other than the one they asked for (`TurnSummary.modelMismatch`). */
+  mismatched: number;
+}
+
+export const MODEL_NOT_REPORTED = '(not reported)';
 
 export interface ModeScorecard {
   mode: 'scratch' | 'template';
@@ -84,6 +105,9 @@ export function buildTally(b: BuildHalf | undefined, expectCount: number): HalfS
         ...(b.author.numTurns !== undefined ? { numTurns: b.author.numTurns } : {}),
         ...(b.author.maxTurns !== undefined ? { maxTurns: b.author.maxTurns } : {}),
         ...(b.author.elapsedMs !== undefined ? { elapsedMs: b.author.elapsedMs } : {}),
+        ...(b.author.model ? { model: b.author.model } : {}),
+        ...(b.author.requestedModel ? { requestedModel: b.author.requestedModel } : {}),
+        ...(b.author.modelMismatch ? { modelMismatch: true as const } : {}),
       }
     : undefined;
   if (b.notMeasured) return { passed: 0, total: 0, degraded: false, failedCommands: [], notMeasuredReason: b.notMeasured, ...(author ? { author } : {}) };
@@ -117,6 +141,15 @@ export function opsTally(r: RunHalf | undefined): HalfScores['operations'] | und
   return { passed: measured.filter((o) => o.grade?.pass).length, total: measured.length, notMeasured: r.operations.length - measured.length };
 }
 
+export function modelTally(r: RunHalf | undefined): ModelTally | undefined {
+  const turns = [...(r?.questions ?? []), ...(r?.operations ?? [])].flatMap((x) => (x.turn ? [x.turn] : []));
+  if (turns.length === 0) return undefined;
+  const served: Record<string, number> = {};
+  for (const t of turns) served[t.model ?? MODEL_NOT_REPORTED] = (served[t.model ?? MODEL_NOT_REPORTED] ?? 0) + 1;
+  const requested = [...new Set(turns.flatMap((t) => (t.requestedModel ? [t.requestedModel] : [])))];
+  return { served, requested, mismatched: turns.filter((t) => t.modelMismatch).length };
+}
+
 /** An artifact-less build scores 0 of 1 — a degraded build is never "nothing to score". */
 const NO_ARTIFACT_TOTAL = 1;
 
@@ -142,6 +175,8 @@ export function modeScorecard(m: ModeRun): ModeScorecard {
   if (a) first.ask = a;
   const o = opsTally(m.run);
   if (o) first.operations = o;
+  const mt = modelTally(m.run);
+  if (mt) first.models = mt;
   const out: ModeScorecard = {
     mode: m.mode,
     first,
@@ -165,6 +200,8 @@ export function modeScorecard(m: ModeRun): ModeScorecard {
     if (ia) it.ask = ia;
     const io = opsTally(m.iterate.run);
     if (io) it.operations = io;
+    const imt = modelTally(m.iterate.run);
+    if (imt) it.models = imt;
     if (m.iterate.changeSize) it.changeSize = m.iterate.changeSize.total;
     out.iterate = it;
   }
@@ -189,10 +226,26 @@ const buildCell = (b: HalfScores['build']) =>
 /** `300/300 turns`; `?/300 turns` when no result line reported a count; `17 turns` on a recording without the cap; nothing when neither is known. */
 const turnsText = (a: { numTurns?: number; maxTurns?: number }): string | undefined =>
   a.maxTurns !== undefined ? `${a.numTurns ?? '?'}/${a.maxTurns} turns` : a.numTurns !== undefined ? `${a.numTurns} turn${a.numTurns === 1 ? '' : 's'}` : undefined;
+/** `claude-opus-5-5`; `claude-opus-5-5 ⚠ asked for sonnet`; `model not reported (asked for sonnet)`; nothing when neither is known. */
+const servedText = (a: { model?: string; requestedModel?: string; modelMismatch?: true }): string | undefined =>
+  a.model
+    ? `${a.model}${a.modelMismatch ? ` ⚠ asked for ${a.requestedModel}` : ''}`
+    : a.requestedModel
+      ? `model not reported (asked for ${a.requestedModel})`
+      : undefined;
 const authorCell = (b: HalfScores['build']) =>
   b?.author
-    ? [b.author.resultSubtype ?? '(no result)', turnsText(b.author), b.author.elapsedMs !== undefined ? elapsedText(b.author.elapsedMs) : 'elapsed not recorded'].filter(Boolean).join(' · ')
+    ? [b.author.resultSubtype ?? '(no result)', turnsText(b.author), b.author.elapsedMs !== undefined ? elapsedText(b.author.elapsedMs) : 'elapsed not recorded', servedText(b.author)]
+        .filter(Boolean)
+        .join(' · ')
     : '—';
+/** `claude-sonnet-4-5 ×20, claude-opus-5-5 ×4 ⚠ 4 not sonnet`; `—` when no turn named a model and none was asked for. */
+const modelCell = (t: ModelTally | undefined): string => {
+  if (!t) return '—';
+  const served = Object.entries(t.served).sort(([an, a], [bn, b]) => b - a || an.localeCompare(bn));
+  if (t.requested.length === 0 && served.every(([name]) => name === MODEL_NOT_REPORTED)) return '—';
+  return `${served.map(([name, n]) => `${name} ×${n}`).join(', ')}${t.mismatched ? ` ⚠ ${t.mismatched} not ${t.requested.join(' / ')}` : ''}`;
+};
 
 /** The scorecard as a markdown table: the modes side by side, one row per half. */
 export function renderScorecard(sc: CardScorecard): string {
@@ -209,11 +262,13 @@ export function renderScorecard(sc: CardScorecard): string {
   row('Seed', (m) => seedCell(m.first.seed));
   row('Run-问数', (m) => (m.first.ask ? `${cell(m.first.ask)}${m.first.ask.leaks ? ` ⚠ ${m.first.ask.leaks} leaking` : ''}` : '—'));
   row('Run-operations', (m) => cell(m.first.operations));
+  row('Run · model', (m) => modelCell(m.first.models));
   row('Iterate · Build', (m) => buildCell(m.iterate?.build));
   row('Iterate · author', (m) => authorCell(m.iterate?.build));
   row('Iterate · Seed', (m) => seedCell(m.iterate?.seed));
   row('Iterate · Run-问数', (m) => (m.iterate?.ask ? `${cell(m.iterate.ask)}${m.iterate.ask.leaks ? ` ⚠ ${m.iterate.ask.leaks} leaking` : ''}` : '—'));
   row('Iterate · Run-operations', (m) => cell(m.iterate?.operations));
+  row('Iterate · Run · model', (m) => modelCell(m.iterate?.models));
   row('AI change size (items)', (m) => (m.iterate?.changeSize !== undefined ? String(m.iterate.changeSize) : '—'));
   const tags = sc.modes.find((m) => m.tags.length)?.tags ?? [];
   if (tags.length) {

@@ -28,6 +28,7 @@ import {
   DEFAULT_AUTHOR_TIMEOUT_MIN,
   MissingRecordingError,
   RecordedDriver,
+  servedAsRequested,
   subscriptionOnlyEnv,
 } from '../../src/runner/driver.js';
 import {
@@ -106,6 +107,26 @@ describe('parseStreamJson', () => {
   });
 });
 
+describe('servedAsRequested — the model a turn was served against the one it asked for', () => {
+  it('an alias or a name is served as asked when the served name holds it as whole dash-separated parts; anything else is a mismatch', () => {
+    const cases: Array<[string, string, boolean]> = [
+      ['sonnet', 'claude-sonnet-4-5-20250929', true],
+      ['claude-sonnet-4-5', 'claude-sonnet-4-5-20250929', true],
+      ['claude-opus-4-1-20250805', 'claude-opus-4-1-20250805', true],
+      ['Opus', 'claude-opus-5-5', true],
+      ['sonnet[1m]', 'claude-sonnet-4-5-20250929[1m]', true],
+      ['sonnet', 'claude-opus-5-5', false],
+      ['opus', 'claude-sonnet-4-5-20250929', false],
+      ['claude-sonnet-4', 'claude-sonnet-4-5-20250929', true], // `4` is a whole part of the served name
+      ['claude-sonnet-4-1', 'claude-sonnet-4-5-20250929', false],
+      ['son', 'claude-sonnet-4-5-20250929', false], // a fragment of a part is not a part
+      ['default', 'claude-opus-5-5', false],
+      ['', 'claude-opus-5-5', false],
+    ];
+    expect(cases.map(([requested, served]) => [requested, served, servedAsRequested(requested, served)])).toEqual(cases);
+  });
+});
+
 describe('observedAnswer — the ordered rules', () => {
   const obj = 'contact';
   it('rows changed ⇒ applied, whatever the transcript says', () => {
@@ -127,9 +148,9 @@ describe('observedAnswer — the ordered rules', () => {
   it("no write call, and the object's last answer to a read was a coded refusal ⇒ refused with that code", () => {
     const denied = '{"error":{"code":"PERMISSION_DENIED","status":403}}';
     const read = (output: string, objectName = obj) => ({ name: 'query_records', input: { objectName }, output, isError: output !== '{"records":[]}' });
-    expect(observedAnswer(turnOf('I could not find the record.', [read(denied), read(denied)]), obj, 0)).toEqual({ kind: 'refused', code: 'PERMISSION_DENIED' });
+    expect(observedAnswer(turnOf('I could not find the record.', [read(denied), read(denied)]), obj, 0)).toEqual({ kind: 'refused', code: 'PERMISSION_DENIED', status: 403 });
     // The object's refusal is a door's answer: it outranks the reply's wording.
-    expect(observedAnswer(turnOf('Would you like me to ask an admin?', [read(denied)]), obj, 0)).toEqual({ kind: 'refused', code: 'PERMISSION_DENIED' });
+    expect(observedAnswer(turnOf('Would you like me to ask an admin?', [read(denied)]), obj, 0)).toEqual({ kind: 'refused', code: 'PERMISSION_DENIED', status: 403 });
     // Only the LAST answer counts: a mistyped read retried with success is not a refusal.
     const retried = turnOf('Shall I delete Chen Li?', [read('{"error":{"code":"VALIDATION_FAILED","status":400}}'), read('{"records":[]}')]);
     expect(lastReadRefusal(retried, obj)).toBeUndefined();
@@ -141,7 +162,7 @@ describe('observedAnswer — the ordered rules', () => {
     expect(observedAnswer(both, obj, 0)).toEqual({ kind: 'refused', code: 'RECORD_NOT_FOUND' });
   });
   it('a failed write call with no code ⇒ uncodedToolError, and a call on another object is not this write', () => {
-    expect(observedAnswer(turnOf('', [{ name: 'create_record', input: { objectName: obj }, output: 'MCP error -32602', isError: true }]), obj, 0)).toEqual({ kind: 'refused', code: uncodedToolError });
+    expect(observedAnswer(turnOf('', [{ name: 'create_record', input: { objectName: obj }, output: 'MCP error -32602', isError: true }]), obj, 0)).toEqual({ kind: 'refused', code: uncodedToolError, note: 'the door answered "MCP error -32602"' });
     expect(observedAnswer(turnOf('', [{ name: 'create_record', input: { objectName: 'account' }, output: '{}' }]), obj, 0)).toEqual({ kind: 'refused', code: noWriteAttempted });
     expect(asksToConfirm('确认删除吗')).toBe(true);
   });
@@ -210,19 +231,27 @@ describe('observeOperation → gradeCardOperation, on the real crm card', () => 
     expect(turn.toolCalls.map((c) => [c.name, refusalCodeOf(c.output)])).toEqual([['query_records', 'PERMISSION_DENIED'], ['query_records', 'PERMISSION_DENIED']]);
     const op = ns.card.run.operations.find((o) => o.id === 'partner_edits_account')!;
     const accounts = ns.card.run.seed.democrm_account!;
-    const obs = observeOperation({ op, turn, before: accounts, after: accounts, rowsByObject: { democrm_account: accounts } });
-    expect(obs.answer).toEqual({ kind: 'refused', code: 'PERMISSION_DENIED' });
+    // The overstep is probed (#31145 item 4): the runner's own write as the partner, refused too.
+    const probe = observeProbe(probeCall(op, op.values!), { output: '{"error":{"code":"PERMISSION_DENIED","status":403}}', isError: true }, accounts, accounts);
+    const obs = observeOperation({ op, turn, before: accounts, after: accounts, rowsByObject: { democrm_account: accounts }, probe });
+    expect(obs.answer).toEqual({ kind: 'refused', code: 'PERMISSION_DENIED', status: 403 });
     expect(gradeCardOperation(ns, 'partner_edits_account', obs)).toEqual({
       pass: true,
       checks: [
-        { check: 'answer:refused:PERMISSION_DENIED', pass: true, detail: 'refused PERMISSION_DENIED' },
+        { check: 'agent:refused:PERMISSION_DENIED-or-withheld', pass: true, detail: 'refused PERMISSION_DENIED (403)' },
         { check: 'no-write', pass: true, detail: '0 record(s) written' },
+        { check: 'platform:refused:PERMISSION_DENIED', pass: true, detail: "the runner's probe: refused PERMISSION_DENIED (403)" },
+        { check: 'platform:no-write', pass: true, detail: "0 record(s) written by the runner's probe" },
       ],
     });
-    // The same turn with nothing called on the object is still "no write attempted", and fails.
-    const silent = observeOperation({ op, turn: turnOf(turn.replyText), before: accounts, after: accounts, rowsByObject: { democrm_account: accounts } });
+    // The same turn with nothing called on the object is "no write attempted"; its reply declines, so the
+    // agent half passes as withheld, and the platform half is the probe's.
+    const silent = observeOperation({ op, turn: turnOf(turn.replyText), before: accounts, after: accounts, rowsByObject: { democrm_account: accounts }, probe });
     expect(silent.answer).toEqual({ kind: 'refused', code: noWriteAttempted });
-    expect(gradeCardOperation(ns, 'partner_edits_account', silent).pass).toBe(false);
+    expect(gradeCardOperation(ns, 'partner_edits_account', silent).pass).toBe(true);
+    // Without the probe the platform half is not observed, and the operation fails.
+    const unprobed = observeOperation({ op, turn: turnOf(turn.replyText), before: accounts, after: accounts, rowsByObject: { democrm_account: accounts } });
+    expect(gradeCardOperation(ns, 'partner_edits_account', unprobed).pass).toBe(false);
   });
 
   it('a delete the agent carried out instead of asking fails the pending-confirmation outcome', () => {
@@ -258,13 +287,13 @@ describe('the validation operation (#30883 item 2, ruled B): the agent half and 
 
   it('① the agent wrote and was refused VALIDATION_FAILED, and so was the probe, nothing written: passes', () => {
     const turn = turnOf('That was refused.', [{ name: 'create_record', input: { objectName: 'contact' }, output: refusedText, isError: true }]);
-    expect(validating).toEqual({ answer: { kind: 'refused', code: 'VALIDATION_FAILED' }, writes: 0 });
+    expect(validating).toEqual({ answer: { kind: 'refused', code: 'VALIDATION_FAILED', status: 400 }, writes: 0 });
     expect(grade(observe(turn))).toEqual({
       pass: true,
       checks: [
-        { check: 'agent:refused:VALIDATION_FAILED-or-withheld', pass: true, detail: 'refused VALIDATION_FAILED' },
+        { check: 'agent:refused:VALIDATION_FAILED-or-withheld', pass: true, detail: 'refused VALIDATION_FAILED (400)' },
         { check: 'no-write', pass: true, detail: '0 record(s) written' },
-        { check: 'platform:refused:VALIDATION_FAILED', pass: true, detail: "the runner's probe: refused VALIDATION_FAILED" },
+        { check: 'platform:refused:VALIDATION_FAILED', pass: true, detail: "the runner's probe: refused VALIDATION_FAILED (400)" },
         { check: 'platform:no-write', pass: true, detail: "0 record(s) written by the runner's probe" },
       ],
     });
@@ -276,7 +305,10 @@ describe('the validation operation (#30883 item 2, ruled B): the agent half and 
     expect(failing(obs)).toEqual(['platform:refused:VALIDATION_FAILED', 'platform:no-write']);
     expect(grade(obs).checks.slice(2).map((c) => c.detail)).toEqual(["the runner's probe: applied", "1 record(s) written by the runner's probe"]);
     // A door that failed the probe with no code, or with another code, is not the validation refusal either.
-    expect(observeProbe(call, { output: 'MCP error -32602', isError: true }, contacts, contacts)).toEqual({ answer: { kind: 'refused', code: uncodedToolError }, writes: 0 });
+    expect(observeProbe(call, { output: 'MCP error -32602', isError: true }, contacts, contacts)).toEqual({
+      answer: { kind: 'refused', code: uncodedToolError, note: 'the door answered "MCP error -32602"' },
+      writes: 0,
+    });
     const denied = observeProbe(call, { output: '{"error":{"code":"PERMISSION_DENIED","status":403}}', isError: true }, contacts, contacts);
     expect(failing(observe(turnOf(PRE_VALIDATED), denied))).toEqual(['platform:refused:VALIDATION_FAILED']);
   });
@@ -403,7 +435,7 @@ describe('prompts, seed order, template manifest and change size', () => {
     }
   });
 
-  it('a user-handle field is a scope field the card declares as neither lookup nor select; the contract says it is loaded with a user id', () => {
+  it('a user-handle field is one the card declares in `run.userHandleFields`; the contract says it is loaded with a user id', () => {
     const card = namespacedScenario(crm).card;
     expect([...userHandleFields(card)]).toEqual(['democrm_account.owner']);
     expect(unheldHandles(card)).toEqual(['u_tia']);
@@ -417,9 +449,40 @@ describe('prompts, seed order, template manifest and change size', () => {
     expect([...userHandleFields(desk.card)]).toEqual([]);
   });
 
+  it('reads the handle declaration, never infers it: a card that declares none has none, whatever its scope rules', () => {
+    const { userHandleFields: _declared, ...run } = crm.card.run;
+    expect([...userHandleFields({ ...crm.card, run })]).toEqual([]);
+    expect(unheldHandles({ ...crm.card, run })).toEqual([]);
+  });
+
+  it('across the nine cards the seed rewrites exactly the three handle fields it rewrote when they were inferred', () => {
+    const { cards, refusals } = loadScenarios(dirname(CARD_FILE), { areas: readCapabilityAreas(AREAS_DIR), library: 'open' });
+    expect(refusals.map(formatRefusal)).toEqual([]);
+    expect(cards).toHaveLength(9);
+    expect(cards.flatMap((c) => [...userHandleFields(c.card)]).sort()).toEqual(['account.owner', 'invoice.owner', 'task.assignee']);
+    // Every scoped persona names its person: a seed row (`record`), or a handle on a declared handle field.
+    const byRecord = cards.flatMap((c) => c.card.run.personas.filter((p) => p.record).map((p) => `${c.card.id}/${p.id}=${p.record!.object}:${p.record!.id}`));
+    expect(byRecord).toEqual([
+      'asset_lifecycle/employee=employee:e06',
+      'asset_lifecycle/dept_manager=employee:e05',
+      'leave_balances/employee=employee:e07',
+      'leave_balances/dept_manager=employee:e05',
+      'order_to_cash/sales_rep=employee:e03',
+      'order_to_cash/sales_manager=employee:e01',
+      'requisition_to_receipt/requester=employee:e02',
+      'requisition_to_receipt/dept_manager=employee:e13',
+      'service_desk/support_agent=agent:a02',
+      'service_desk/team_lead=agent:a04',
+      'service_desk/portal_customer=customer:cus_03',
+      'travel_expense/employee=employee:e02',
+      'travel_expense/dept_manager=employee:e01',
+    ]);
+  });
+
   it('a refused seed row takes out its children and what the card names on them, and nothing else', () => {
-    const card = namespacedScenario(crm).card;
-    const dep = seedDependence(card, [{ object: 'democrm_account', id: 'ac1' }]);
+    const scenario = namespacedScenario(crm);
+    const { card } = scenario;
+    const dep = seedDependence(scenario, [{ object: 'democrm_account', id: 'ac1' }]);
     expect([...dep.out.keys()].sort()).toEqual(['democrm_account/ac1', 'democrm_contact/ct1', 'democrm_contact/ct2']);
     const op = (id: string) => dep.operation(card.run.operations.find((o) => o.id === id)!);
     expect(op('partner_edits_account')).toBe('seed: needs democrm_account ac1, which the app refused'); // its target
@@ -427,10 +490,40 @@ describe('prompts, seed order, template manifest and change size', () => {
     expect(op('move_eli')).toBe('seed: needs democrm_account ac1, which the app refused'); // the account it writes
     expect(op('add_contact')).toBeUndefined();
     expect(op('contact_bad_email')).toBeUndefined();
-    const q = (id: string) => dep.question(card.run.questions.find((x) => x.id === id)!);
-    expect(q('tech_accounts')).toBe('seed: needs democrm_account ac1, which the app refused');
-    expect(q('unattached_contacts')).toBe('seed: needs democrm_contact ct1, a child of democrm_account ac1, which the app refused');
-    expect(seedDependence(card, []).out.size).toBe(0);
+    const q = (id: string, persona: string | null = null) => dep.question(card.run.questions.find((x) => x.id === id)!, persona);
+    expect(q('tech_accounts')).toBe('seed: its expected answer changes without democrm_account ac1, which the app refused'); // 2 tech accounts → 1
+    expect(q('contacts_per_account', 'sdr')).toBe('seed: its expected answer changes without democrm_account ac1, which the app refused');
+    expect(q('unattached_contacts')).toBeUndefined(); // ct4, the one unattached contact, is still held
+    expect(q('account_count', 'partner_user')).toBeUndefined(); // withheld either way
+    expect(q('acme_revenue')).toBeUndefined(); // unanswerable either way
+    expect(seedDependence(scenario, []).out.size).toBe(0);
+    expect(seedDependence(scenario, []).question(card.run.questions[0]!, null)).toBeUndefined();
+  });
+
+  it('decides dependence per turn: refusing ct4 leaves `contacts_per_account` as `sdr` measured, whose scope never reads it', () => {
+    const scenario = namespacedScenario(crm);
+    const dep = seedDependence(scenario, [{ object: 'democrm_contact', id: 'ct4' }]);
+    const turns = scenario.card.run.questions.flatMap((x) => (x.personas ?? [null]).map((p) => [x, p] as const));
+    const out = turns.filter(([x, p]) => dep.question(x, p) !== undefined).map(([x, p]) => `${x.id}/${p ?? '-'}`);
+    // ct4 is the one unattached contact: the unattached count (1 → 0) and the per-industry null group lose it; nothing else moves.
+    expect(out).toEqual(['unattached_contacts/-', 'contacts_by_industry/-']);
+    expect(dep.question(scenario.card.run.questions.find((x) => x.id === 'contacts_per_account')!, 'sdr')).toBeUndefined();
+    expect(dep.question(scenario.card.run.questions.find((x) => x.id === 'unattached_contacts')!, null)).toBe(
+      'seed: its expected answer changes without democrm_contact ct4, which the app refused',
+    );
+  });
+
+  it('a turn whose truth the rest of the seed no longer determines is not measured, and says so', () => {
+    const scenario = namespacedScenario(crm);
+    // An average over no rows is undefined: give the card one, then take every account away.
+    const card = structuredClone(scenario.card);
+    card.run.questions[0] = { ...card.run.questions[0]!, truth: { kind: 'avg', field: 'score' } };
+    for (const r of card.run.seed.democrm_account!) r.score = 3;
+    const withAvg: LoadedScenario = { ...scenario, card, truths: { ...scenario.truths, [card.run.questions[0]!.id]: { kind: 'scalar', value: 3 } } };
+    const dep = seedDependence(withAvg, ['ac1', 'ac2', 'ac3'].map((id) => ({ object: 'democrm_account', id })));
+    expect(dep.question(card.run.questions[0]!, null)).toBe(
+      'seed: its expected answer is not defined without democrm_account ac1, democrm_account ac2, democrm_account ac3, which the app refused',
+    );
   });
 
   it('chooses verify proofs from the tags, and seeds a lookup target before its referrer', () => {
@@ -626,7 +719,10 @@ describe("the seed's load plan — reference cycles found from the card's own lo
  * the prompt's first word — `HANG` waits to be killed (and exits 143 on
  * SIGTERM, as the real CLI was measured to), `CRASH` exits 1 with no result
  * line, `ARGV` answers its own argument list as JSON, anything else answers
- * one stream-json success saying what it read.
+ * one stream-json success saying what it read. Its init line names the model
+ * it serves, as the real CLI's does: `--model X` resolves to
+ * `claude-X-4-5-20250929`, except `retired`, which falls back to
+ * `claude-opus-5-5`; with no `--model` it serves `stand-in`.
  */
 const STAND_IN = `#!/usr/bin/env node
 process.on('SIGTERM', () => { process.stderr.write('stand-in: terminated\\n'); process.exit(143); });
@@ -643,7 +739,9 @@ process.stdin.on('end', () => {
   if (input.startsWith('CRASH')) { process.stderr.write('stand-in: could not start a session\\n'); process.exit(1); }
   const longest = Math.max(...args.map((a) => a.length));
   const text = input.startsWith('ARGV') ? JSON.stringify(args) : 'stdin ' + input.length + ' · longest argv ' + longest;
-  console.log(JSON.stringify({ type: 'system', subtype: 'init', model: 'stand-in' }));
+  const asked = args.indexOf('--model') === -1 ? undefined : args[args.indexOf('--model') + 1];
+  const served = asked === undefined ? 'stand-in' : asked === 'retired' ? 'claude-opus-5-5' : 'claude-' + asked + '-4-5-20250929';
+  console.log(JSON.stringify({ type: 'system', subtype: 'init', model: served }));
   console.log(JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text }] } }));
   console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, num_turns: 1 }));
 });
@@ -762,6 +860,67 @@ describe('the live driver against a stand-in `claude`: the prompt on stdin, and 
     expect(replay({ authorMaxTurns: 300 })).toMatch(/^--author-max-turns .*live driver only/);
     expect(replay({ askMaxTurns: 20 })).toMatch(/^--ask-max-turns .*live driver only/);
     expect(replay({ authorTimeoutMin: 90, authorMaxTurns: 300, askMaxTurns: 20 })).toMatch(/^--author-timeout, --author-max-turns, --ask-max-turns .*live driver only/);
+  });
+
+  /** The `--model` value on the argument list the stand-in was started with, or `undefined` when it was given none. */
+  const modelArg = (t: ParsedTurn): string | undefined => {
+    const argv = JSON.parse(t.replyText) as string[];
+    const at = argv.indexOf('--model');
+    return at === -1 ? undefined : argv[at + 1];
+  };
+
+  it('`--model` reaches the CLI’s argument list on every turn, `--author-model` / `--ask-model` set the two kinds apart, and each turn records the model it asked for beside the one it was served', async () => {
+    vi.stubEnv('PATH', `${dir}${delimiter}${process.env.PATH ?? ''}`);
+    const every = makeDriver('claude', parseArgs(['--model', 'sonnet']));
+    const built = (await every.author(task('ARGV', 'starter'))).turn;
+    const asked = await every.ask(ask('ARGV'));
+    for (const t of [built, asked]) {
+      expect([modelArg(t), t.meta.process!.requestedModel, t.meta.model]).toEqual(['sonnet', 'sonnet', 'claude-sonnet-4-5-20250929']);
+    }
+    expect(every.info()).toMatchObject({ authorModel: 'sonnet', askModel: 'sonnet' });
+
+    const apart = makeDriver('claude', parseArgs(['--model', 'sonnet', '--author-model', 'opus', '--ask-model', 'haiku']));
+    const authored = (await apart.author(task('ARGV'))).turn;
+    const persona = await apart.ask(ask('ARGV'));
+    expect([modelArg(authored), authored.meta.process!.requestedModel, authored.meta.model]).toEqual(['opus', 'opus', 'claude-opus-4-5-20250929']);
+    expect([modelArg(persona), persona.meta.process!.requestedModel, persona.meta.model]).toEqual(['haiku', 'haiku', 'claude-haiku-4-5-20250929']);
+    expect(apart.info()).toMatchObject({ authorModel: 'opus', askModel: 'haiku' });
+
+    // One kind set alone leaves the other on the login's default: no `--model` on its argument list, nothing requested.
+    const authorOnly = makeDriver('claude', parseArgs(['--author-model', 'opus']));
+    const defaulted = await authorOnly.ask(ask('ARGV'));
+    expect([modelArg((await authorOnly.author(task('ARGV'))).turn), modelArg(defaulted), defaulted.meta.process!.requestedModel, defaulted.meta.model]).toEqual(['opus', undefined, undefined, 'stand-in']);
+    expect(authorOnly.info().askModel).toBeUndefined();
+
+    // With no flag, no turn passes `--model`.
+    const plain = makeDriver('claude', parseArgs([]));
+    expect([modelArg((await plain.author(task('ARGV'))).turn), modelArg(await plain.ask(ask('ARGV')))]).toEqual([undefined, undefined]);
+    expect([plain.info().authorModel, plain.info().askModel]).toEqual([undefined, undefined]);
+
+    // A session that answered on another model than the one asked for keeps both names.
+    const retired = await makeDriver('claude', parseArgs(['--ask-model', 'retired'])).ask(ask('ARGV'));
+    expect([retired.meta.process!.requestedModel, retired.meta.model]).toEqual(['retired', 'claude-opus-5-5']);
+  });
+
+  it('a model flag with no name is refused, and a replay refuses every model flag', () => {
+    const refusal = (run: () => unknown): string | undefined => {
+      try {
+        run();
+      } catch (e) {
+        return (e as Error).message;
+      }
+      return undefined;
+    };
+    for (const flag of ['--model', '--author-model', '--ask-model']) {
+      expect(refusal(() => parseArgs([flag]))).toBe(`${flag} needs a value`);
+      for (const bad of ['', '  ', '--only']) {
+        const message = refusal(() => parseArgs([flag, bad]));
+        expect([flag, bad, message?.startsWith(`${flag} takes a model alias or name`), message?.endsWith(`\`${bad}\``)]).toEqual([flag, bad, true, true]);
+      }
+    }
+    const replay = (opts: Parameters<typeof makeDriver>[1]) => refusal(() => makeDriver('recorded:/nowhere.json', opts));
+    expect(replay({ model: 'sonnet' })).toMatch(/^--model applies to the live driver only/);
+    expect(replay({ authorModel: 'opus', askModel: 'haiku' })).toMatch(/^--author-model, --ask-model apply to the live driver only/);
   });
 });
 
