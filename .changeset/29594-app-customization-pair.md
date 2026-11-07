@@ -19,7 +19,7 @@ What changes for a caller:
 - A per-package pair an earlier version created for a module (`<module id>.custom`) stays installed and served: its declared overrides, list rows, translations and served-overrides census are read beside the App's pair (`pairsOf` / `isPairOf`). While it holds the App's pair namespace, the ensure door answers `409 RESOURCE_CONFLICT` naming it instead of creating the App's pair beside it (merge question 12).
 - A package that reaches several Apps and whose namespace picks none of them has no pair: the ensure door answers `409` (merge question 11).
 - The App's pair's write closure reaches every member of the App, so an override or an object extension of a module's item saved into the App's pair is admitted.
-- Uninstalling a module is no longer refused because the App's pair is installed; uninstalling the App still is.
+- The uninstall refusal for an installed pair reads the pair named for the package: uninstalling the App is refused while the App's pair is installed, uninstalling a module is not (its customizations are the App pair's), and a module whose own earlier per-package pair is installed is still refused naming that pair.
 - `os validate`'s `namespace-no-customization-pair` warning skips a member of a delivered App: its customizations land in the App's pair.
 
 TypeScript: `appOf` now answers `string | undefined` (`undefined` = no single App), and `pairOf`'s refusal union gains `no_single_app` (`PairOfRefusal`); `pairsOf` and the `AppOfRefusal` / `PairOfRefusal` types are new exports of `@objectstack/metadata-core`.
