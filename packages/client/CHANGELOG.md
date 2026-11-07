@@ -1,5 +1,194 @@
 # @objectstack/client
 
+## 18.4.0
+
+### Patch Changes
+
+- c17719d: feat(rest)!: the metadata list reads several items by name in one request (`?names=a,b,c`), and refuses a query parameter it does not read
+  
+  Clause-②: yes (narrowing) — `GET /api/v1/meta/:type` (and its environment-scoped twin, on both the REST server and the runtime dispatcher) declares its closed query-parameter set, `package`, `preview`, `object`, `include`, `id`, `names` and `locale`, and refuses any other name with `400 VALIDATION_ERROR`, where it ignored it and answered the whole list with `200`. The widening half: `?names=a,b,c` narrows every type's list but `package`'s to the items of those names, `@objectstack/client`'s `meta.getItems(type, { names })` sends it, and `@objectstack/rest` exports three new names, the list's query decision that both transports ask: `META_LIST_QUERY_PARAMS`, `metaListQueryRefusal` and `metaListNames`. Ruling 6580261740 assigns both halves to this one server change.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped: `GetMetaItemsRequestSchema.names` was already declared, and only its description loses the planned marker. What moves is the list route's answer to a query-string name it never read, and nothing at rest records that answer, so there is nothing for a migration to rewrite. -->
+  
+  **The batch by-names read.** `GET /api/v1/meta/:type?names=a,b,c` answers only the items of those names, among the items the list would answer without it, on every metadata type except `package`, whose items are keyed by id and carry no `name`: the `package` list refuses `?names=` with `400 VALIDATION_ERROR`. One comma-separated value, as the data routes spell `fields`; each name is trimmed and repeats count once. A name that matches no item is simply absent from the answer (no `404`). The names are handed to the store read (`GetMetaItemsRequest.names`), so `@objectstack/metadata-protocol`'s `getMetaItems` filters before it computes locks, governance and diagnostics, and the list's per-caller gate, object field mask and translation run on the named items only. A value that names no item (`?names=`, `?names=,`) is refused with `400 VALIDATION_ERROR` rather than read as every item; leave the key out to list every item. A repeated `?names=` is refused like the list's other single-valued parameters. Before, `?names=` was ignored, so a client that needed several objects paid one by-name request for each.
+  
+  **BREAKING** accept-set narrowing at the metadata list (`@objectstack/rest`, `@objectstack/runtime`): a query parameter the list does not read is refused instead of ignored.
+  
+  - **Before.** `GET /meta/object?name=account`, `?ids=a,b` or `?filter=x` answered `200` with every object, which reads the same as a filter that matched everything.
+  - **Now.** A name outside `package`, `preview`, `object`, `include`, `id`, `names`, `locale` is refused with `400` and the nested `{ "error": { "code": "VALIDATION_ERROR", "message" } }` body; the message names the parameter and lists the supported ones, and nothing is read. A bracketed `?package[]=`, and `?id[]=` on the app list or `?object[]=` on the view list, keep their own located refusal; any other bracketed key (`?names[]=`) is refused as a name the list does not read.
+  - **Who moves.** The Console and the client SDK send only declared names. A script that sends another name gets the 400.
+  
+  **The remedy.** Drop the parameter, or spell it as one of the supported names: `?names=a,b` for several items by name, `?id=APP` for one app, `?object=OBJECT` for one object's views, `?package=ID` for one package.
+- 2046d21: feat(objectql,rest)!: a new assignment to a banned user is refused, and a banned user's records can be counted and handed over in bulk (#30205)
+  
+  Clause-②: yes (narrowing) — the published `FieldErrorCode` enum gains the member `reference_user_banned`. A non-system create or update that sets a user field (the owner field, a `user` field, or a `lookup` to `sys_user`) to a user whose ban is in force is refused `400 VALIDATION_FAILED` with that field code, a write that answered `201` / `200` before. A value the row already stores is not judged, so a record that already holds the banned user stays editable. The two new routes and SDK methods are additions.
+  Metadata-protocol: none
+  Skills-docs: no move in `skills/**`, which teaches no user-assignment verdict; `content/docs/permissions/administrator-guide.mdx` gains "Handing over a banned user's work" and its offboarding quick path points at it.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any authorable schema is added, removed, renamed or re-shaped. What moves is the answer a data write gets when it names a banned user, and a record that already holds one is not judged, so nothing at rest needs rewriting. The new field code is a member of the response vocabulary FieldErrorCode, not of anything an author writes. -->
+  
+  **BREAKING** accept-set narrowing at every data write door (`POST` / `PATCH /api/v1/data/OBJECT`, batch, import, and a flow's elevated record write, which keeps the reference check): banning a user signs them out, but the records they own and are assigned stay where they were, and new work could still be handed to them.
+  
+  - **Before.** The Console's person picker hid a banned user, but `POST /api/v1/data/OBJECT` with `assignee` set to that user answered `201`, so new work landed on someone who cannot sign in.
+  - **Now.** The write-time reference check also asks whether a referenced user's ban is in force (`banned` is true and `ban_expires` is empty or still ahead) and refuses such a value with `reference_user_banned`, beside `reference_not_found`. It is read the way the existence probe reads, so a caller who cannot read the user object is refused the same way. A ban whose expiry has passed is not in force.
+  - **Unchanged.** A value every row of the write already stores (an edit form carries the whole record back), a system write the reference check already exempts (seed, install, restore), and a missing user (still `reference_not_found`).
+  - **New: the count.** `GET /api/v1/security/users/ID/assigned-work` (`client.security.assignedWork.count`) answers, per object and user field, how many records hold the user, counted under the caller's own context. Platform tables (`sys_*`), `managedBy` objects and `readonly` / `system` fields such as `created_by` are not counted; objects the caller cannot read are listed in `unreadable`; at most 200 fields are counted (`truncated`).
+  - **New: the hand-over.** `POST /api/v1/security/users/ID/assigned-work/transfer` (`client.security.assignedWork.transfer`) with `{ toUserId, objects? }` moves up to 500 records per call to an active user, each as an ordinary update under the caller's context, and answers per field what moved and what failed, plus how many remain. A banned, unknown or identical `toUserId` is refused before any write. Multi-valued user fields are counted but not transferred. Neither route touches the ban.
+  - **`@objectstack/spec`.** `FieldErrorCode` gains `reference_user_banned`, with its message in `en`, `zh-CN`, `ja-JP` and `es-ES`.
+  
+  **For a caller.** A write that names a banned user in a user field names an active one instead; the refusal names the field and the user. No stored metadata or row changes, so there is nothing for `objectstack migrate meta` to rewrite. An integration that reassigns work after a ban can call the transfer route and repeat it while `remaining` is above 0.
+- 0cba0ce: feat(rest, client): a tenant-admin REST door for the record-currency code backfill
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  An organization admin with no shell on the deployment can now run the record-currency code backfill (`os migrate record-currency-codes`) over HTTP: `POST /api/v1/meta/_migrate-record-currency-codes` with `{ object, field, code, apply? }`, or `client.meta.migrateRecordCurrencyCodes(...)` from the SDK.
+  
+  - It fills the codeless rows of **the caller's current organization only**. There is no environment-wide form, and the body takes no organization: `organizationId`, `allOrganizations` or any other key outside the four is refused with `VALIDATION_ERROR` / 400. A request with no current organization is refused `403 FORBIDDEN`.
+  - It requires `setup.write` in that organization (`403 FORBIDDEN` otherwise), and it is mounted behind `metadata.endpoints.maintenance` with the other maintenance routes.
+  - Preview unless `apply` is `true`. The answer is the report the CLI prints under `--json`, and the code, field and object refusals are the CLI's.
+  - The SDK method answers `unknown`: the report's named type lives in `@objectstack/objectql`.
+  - The 409 `destructive_change` finding `currency_mode_to_record` now names this route beside the CLI command.
+  - `@objectstack/objectql` now exports `RecordCurrencyBackfillOrganization` and `RecordCurrencyBackfillOrganizationsRefusal` from its entry.
+  - A backfill walk stopped by `--max-records` no longer prints "nothing to backfill" for rows it did not examine. It says the walk is incomplete, and an unscoped run says its organization check saw only the rows examined.
+  - A backfill row whose write a sandboxed hook refused now reports the hook's own sentence, not the `hook '<name>' threw:` debug wrapper, and a crashed hook's row reports the write doors' withheld fault sentence. The operator's log line keeps the whole text.
+- 6bd00d2: feat(client): `client.oauth.authorizedClients.list()` and `.listForUser(userId)` read the AI assistants a person has authorized and when each was last used
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  `list()` calls `GET /api/v1/auth/authorized-clients` with no parameter: the caller's own grants. `listForUser(userId)` calls `GET /api/v1/auth/admin/authorized-clients?userId=...` and is answered for a platform administrator only. Both unwrap the `{ success, data }` envelope to the new exported `AuthorizedClientsList` type, `{ clients: AuthorizedClient[]; truncated: boolean }`. `AuthorizedClient.lastUsedAt` is an hour start, `null` when no use has been recorded. A refusal throws, as every other method does. Nothing existing changes.
+- e11a575: feat(auth): withdraw an authorized AI assistant, for the person themself and for a platform administrator
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  Two new routes beside the authorized-clients reads, each keyed by the consent `id` those reads answer on every row:
+  
+  - `POST /api/v1/auth/authorized-clients/withdraw` with `{ "id": "…" }` withdraws one of the signed-in person's own authorized assistants. Only that person's grant is withdrawn: an id that names someone else's grant answers `404 RESOURCE_NOT_FOUND`, byte for byte the same as an id that names nothing, and leaves it in place.
+  - `POST /api/v1/auth/admin/authorized-clients/withdraw` with `{ "userId": "…", "id": "…" }` does the same for a person a platform administrator manages, behind the same gate as `GET /api/v1/auth/admin/authorized-clients`: anyone else is refused once (`401` anonymous, `403 PERMISSION_DENIED` otherwise), whoever the body names and whether or not the person or the grant exists.
+  
+  A withdraw revokes the grant the way `/oauth2/revoke` does: the consent row, then the client's refresh tokens. The assistant's token is refused on its next MCP call, and it must be authorized again to reconnect. Both routes take a closed body (an unknown key, or a missing or empty value, is `400 VALIDATION_ERROR`) and no query parameter, and answer `{ success: true, data: { id } }` with `Cache-Control: no-store`.
+  
+  `@objectstack/client` adds `oauth.authorizedClients.withdraw(id)` and `oauth.authorizedClients.withdrawForUser(userId, id)`, both answering `AuthorizedClientWithdrawal` (`{ id }`).
+  
+  better-auth's own `POST /api/v1/auth/oauth2/delete-consent` is unchanged and stays outside the SDK: it answers an unknown id and another person's id differently, and leaves the refresh tokens behind. Use the new routes instead.
+- Updated dependencies [8aa2e91]
+- Updated dependencies [c17719d]
+- Updated dependencies [b90a6f7]
+- Updated dependencies [e8dc483]
+- Updated dependencies [bcdb1db]
+- Updated dependencies [9ebca94]
+- Updated dependencies [140d8ce]
+- Updated dependencies [699ebd8]
+- Updated dependencies [4c2cd29]
+- Updated dependencies [4be8a2e]
+- Updated dependencies [471add3]
+- Updated dependencies [b5eb61d]
+- Updated dependencies [771b2db]
+- Updated dependencies [97e4249]
+- Updated dependencies [9037b13]
+- Updated dependencies [e3b56b2]
+- Updated dependencies [a52761f]
+- Updated dependencies [e8afd1e]
+- Updated dependencies [bd65cb6]
+- Updated dependencies [f19fbb8]
+- Updated dependencies [217ba78]
+- Updated dependencies [cde492d]
+- Updated dependencies [eee4149]
+- Updated dependencies [f3a52d3]
+- Updated dependencies [d59a1eb]
+- Updated dependencies [af3451b]
+- Updated dependencies [3a27208]
+- Updated dependencies [0c666c3]
+- Updated dependencies [38717d3]
+- Updated dependencies [ac890f5]
+- Updated dependencies [aa57c76]
+- Updated dependencies [fc869c2]
+- Updated dependencies [fef212b]
+- Updated dependencies [dc51811]
+- Updated dependencies [b77c160]
+- Updated dependencies [09720e2]
+- Updated dependencies [25fea77]
+- Updated dependencies [3da9a4c]
+- Updated dependencies [4be9734]
+- Updated dependencies [bb86ff9]
+- Updated dependencies [2046d21]
+- Updated dependencies [fd749a4]
+- Updated dependencies [d9d42d4]
+- Updated dependencies [9d939c5]
+- Updated dependencies [25e1c1a]
+- Updated dependencies [47226e6]
+- Updated dependencies [c7d1367]
+- Updated dependencies [f5aaa0b]
+- Updated dependencies [0005fec]
+- Updated dependencies [2d6402c]
+- Updated dependencies [77c203a]
+- Updated dependencies [8293c74]
+- Updated dependencies [29702d5]
+- Updated dependencies [a839020]
+- Updated dependencies [a7b8876]
+- Updated dependencies [f7afab8]
+- Updated dependencies [4dde0ae]
+- Updated dependencies [590724f]
+- Updated dependencies [38d416f]
+- Updated dependencies [d2e2f6f]
+- Updated dependencies [d5f3bc5]
+- Updated dependencies [e3948ae]
+- Updated dependencies [b55d6ab]
+- Updated dependencies [1c5cee6]
+- Updated dependencies [aad1603]
+- Updated dependencies [7145bf3]
+- Updated dependencies [55d9dd4]
+- Updated dependencies [af8aab1]
+- Updated dependencies [a59d00a]
+- Updated dependencies [4bf9a2d]
+- Updated dependencies [0c9aa82]
+- Updated dependencies [49c8568]
+- Updated dependencies [4564d6f]
+- Updated dependencies [f2ea193]
+- Updated dependencies [badf24d]
+- Updated dependencies [5268f50]
+- Updated dependencies [a30c4f4]
+- Updated dependencies [0cba0ce]
+- Updated dependencies [c893b3d]
+- Updated dependencies [677d542]
+- Updated dependencies [9bdeed2]
+- Updated dependencies [3479c33]
+- Updated dependencies [000a4c0]
+- Updated dependencies [f4d9c09]
+- Updated dependencies [c77dd17]
+- Updated dependencies [ebe0a98]
+- Updated dependencies [9038187]
+- Updated dependencies [f108e6d]
+- Updated dependencies [5cb7d7e]
+- Updated dependencies [468e0c1]
+- Updated dependencies [6106b73]
+- Updated dependencies [0f920b9]
+- Updated dependencies [33bc8ae]
+- Updated dependencies [a1afbb9]
+- Updated dependencies [150f740]
+- Updated dependencies [42eb126]
+- Updated dependencies [8cf1fd0]
+- Updated dependencies [a5cb4f1]
+- Updated dependencies [3c1eb63]
+- Updated dependencies [d57be87]
+- Updated dependencies [5d4f2aa]
+- Updated dependencies [f4cd4ec]
+- Updated dependencies [eca7cd2]
+- Updated dependencies [cf4b9bf]
+- Updated dependencies [e1dac19]
+- Updated dependencies [21510bb]
+- Updated dependencies [0fd363d]
+- Updated dependencies [5210acf]
+- Updated dependencies [d6b88f1]
+- Updated dependencies [4123865]
+- Updated dependencies [6ffe37e]
+- Updated dependencies [63a470a]
+  - @objectstack/spec@18.4.0
+  - @objectstack/core@18.4.0
+
 ## 18.3.0
 
 ### Minor Changes

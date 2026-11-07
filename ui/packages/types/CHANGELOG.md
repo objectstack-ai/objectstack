@@ -1,5 +1,224 @@
 # @object-ui/types
 
+## 18.4.0
+
+### Patch Changes
+
+- b5fd350: refactor(types)!: delete `ActionExecutor` and the Batch Operations pair nothing reads
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (runtime-export-retired @object-ui/types#ActionExecutor, @object-ui/types#BatchOperationConfig, @object-ui/types#BatchOperationSummary) the retired operands are TypeScript-only shapes declared in `ui-action.ts`: a function type for an action executor and a batch-operation config and summary pair that no renderer, adapter or host reads; nothing in the workspace or in hotcrm imports any of them from the package entry, they have no zod twin, they are not arms of `AnySchema`, and no packages/spec schema, registered node type, conversion surface or stored shape names them, so there is nothing for `objectstack migrate meta` to rewrite -->
+  
+  **BREAKING** for a host that imports any of these three types from `@object-ui/types`. None had an importer anywhere in the workspace or in hotcrm, so the Console and every `@object-ui/*` package are unaffected.
+  
+  They are **gone from the package, not only from the entry**: `src/ui-action.ts` no longer declares them. They were types only, so the built JavaScript is unchanged. The "Transaction Support" block beside them stays (`TransactionIsolationLevel`, `TransactionConfig`, `TransactionResult`; `@object-ui/core`'s `TransactionManager` reads them).
+  
+  What leaves, and what to write instead:
+  
+  - FROM `ActionExecutor` TO no replacement in this package. Actions run through `@object-ui/core`'s `ActionRunner`, which registers `ActionRunnerHandler` functions; a host that typed its own executor declares that signature locally.
+  - FROM `BatchOperationConfig` TO no replacement. No renderer or runner read a batch-operation config; a host that kept one declares it locally.
+  - FROM `BatchOperationSummary` TO no replacement. Nothing produced this summary; a host that kept one declares it locally.
+- ac5d0ce: refactor(types)!: delete the api-types module and its eight names nothing reads
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (runtime-export-retired @object-ui/types#HTTPMethod, @object-ui/types#APIRequest, @object-ui/types#APIConfig, @object-ui/types#DataFetchConfig, @object-ui/types#DataFetchableSchema, @object-ui/types#ExpressionContext, @object-ui/types#ExpressionNodeSchema, @object-ui/types#APISchema) the retired operands are TypeScript-only interfaces and unions for a data-fetching and expression-node dialect that no renderer, adapter or host reads; nothing in the workspace or in hotcrm imports any of them from the package entry, they have no zod twin, they are not arms of `AnySchema`, and no packages/spec schema, registered node type, conversion surface or stored shape names them, so there is nothing for `objectstack migrate meta` to rewrite -->
+  
+  **BREAKING** for a host that imports any of these eight types from `@object-ui/types`. None had an importer anywhere in the workspace or in hotcrm, so the Console and every `@object-ui/*` package are unaffected.
+  
+  They are **gone from the package, not only from the entry**: the whole `api-types.ts` module (the entry's "API and Events" block) is deleted. The objectui#6497 tombstone for `UIEventHandler` and `EventableSchema` it carried now stands in the entry where the block was; those two stay retired.
+  
+  What leaves, and what to write instead:
+  
+  - FROM `HTTPMethod`, `APIRequest`, `APIConfig`, `DataFetchConfig`, `DataFetchableSchema`, `APISchema` TO no replacement in this package. A component reads data through this package's `DataSource` interface; a host that kept its own request shape declares it locally.
+  - FROM `ExpressionContext`, `ExpressionNodeSchema` TO no replacement in this package. Expressions are `${…}` strings evaluated by `@object-ui/core`'s `ExpressionEvaluator` against its own `ExpressionContext` class.
+- 2cf269f: refactor(types)!: delete the fifteen driver and datasource interfaces nothing reads
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (runtime-export-retired @object-ui/types#SqlDriverInterface, @object-ui/types#ConnectionConfig, @object-ui/types#DriverQueryResult, @object-ui/types#BatchOperation, @object-ui/types#BatchResult, @object-ui/types#TransactionContext, @object-ui/types#CacheManager, @object-ui/types#ConnectionPool, @object-ui/types#DatasourceRegistration, @object-ui/types#DatasourceType, @object-ui/types#DatasourceMetric, @object-ui/types#DatasourceAlert, @object-ui/types#DatasourceManager, @object-ui/types#HealthCheckResult, @object-ui/types#DatasourceMetrics) the retired operands are TypeScript-only interfaces and unions for a server-side SQL driver and a datasource manager that no renderer, adapter or host implements; nothing in the workspace or in hotcrm imports any of them from the package entry, they have no zod twin, and no packages/spec schema, registered node type, conversion surface or stored shape names them, so there is nothing for `objectstack migrate meta` to rewrite -->
+  
+  **BREAKING** for a host that imports any of these fifteen types from `@object-ui/types`. None had an importer anywhere in the workspace or in hotcrm, so the Console and every `@object-ui/*` package are unaffected.
+  
+  They are **gone from the package, not only from the entry**: the "Phase 3.6" driver interfaces and the "Phase 3.7" datasource interfaces at the end of `data-protocol.ts` were read only by each other. Nothing implemented the driver interface and nothing constructed the datasource manager; the client talks to data through the `DataSource` interface instead. Every other name of `data-protocol.ts` stays exported unchanged, among them `DriverQueryConfig`, `SqlQueryAST`, the query-AST node types, `AdvancedFilterSchema` and `ObjectValidationRule` with its variants.
+  
+  What leaves, and what to write instead:
+  
+  - FROM `SqlDriverInterface`, `ConnectionConfig`, `DriverQueryResult`, `BatchOperation`, `BatchResult`, `TransactionContext`, `CacheManager`, `ConnectionPool` TO no replacement in this package. A client reads and writes data through `DataSource` (`BatchTransactionOperation` with `DataSource.batchTransaction` for a transactional batch); the platform's runtime driver contract is `DriverInterface` from `@objectstack/spec/data`.
+  - FROM `DatasourceRegistration`, `DatasourceType`, `DatasourceMetric`, `DatasourceAlert`, `DatasourceManager`, `HealthCheckResult`, `DatasourceMetrics` TO no replacement in this package. An authored datasource is `DatasourceSchema` from `@objectstack/spec/data`; a host that kept its own registry declares these shapes locally.
+- e396095: refactor(types)!: delete nine Spec Report Bridge names nothing reads
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (runtime-export-retired @object-ui/types#SpecReportChart, @object-ui/types#SpecReportChartInput, @object-ui/types#SpecReportChartSchema, @object-ui/types#SpecReportTypeEnum, @object-ui/types#SpecReportAggregate, @object-ui/types#QLAggregationFunction, @object-ui/types#mapAggregateToQL, @object-ui/types#JoinedSpecReport, @object-ui/types#isJoinedSpecReport) the retired operands are package re-exports of `@objectstack/spec/ui` symbols, two string unions, a helper function and a type guard that no renderer, adapter or host reads; nothing in the workspace or in hotcrm imports any of them from the package entry, they are not arms of `AnySchema`, and the spec schemas they re-exported stay where they are in `@objectstack/spec/ui`, so no stored shape, registered node type or conversion surface changes and there is nothing for `objectstack migrate meta` to rewrite -->
+  
+  **BREAKING** for a host that imports any of these nine names from `@object-ui/types`. None had an importer anywhere in the workspace or in hotcrm, so the Console and every `@object-ui/*` package are unaffected.
+  
+  They are **gone from the package, not only from the entry**: `src/spec-report.ts` no longer declares them. Two of them, `mapAggregateToQL` and `isJoinedSpecReport`, are runtime values, so the built `dist` loses them too. The rest of the Spec Report Bridge stays: `SpecReport`, `SpecReportInput`, `SpecReportTypeName`, `SpecReportDateGranularity`, `SpecReportSchema`, `LegacyReportPresentationLike`, `specReportToPresentation`, `isSpecReport` and `JoinedReportBlock`.
+  
+  What leaves, and what to write instead:
+  
+  - FROM `SpecReportChart` TO `ReportChartParsed` from `@objectstack/spec/ui`.
+  - FROM `SpecReportChartInput` TO `ReportChart` from `@objectstack/spec/ui`.
+  - FROM `SpecReportChartSchema` TO `ReportChartSchema` from `@objectstack/spec/ui`.
+  - FROM `SpecReportTypeEnum` TO `ReportType` from `@objectstack/spec/ui`.
+  - FROM `SpecReportAggregate`, `QLAggregationFunction`, `mapAggregateToQL` TO no replacement. A spec report is dataset-bound: its `values` name measures whose aggregation the dataset declares, so there is no per-column aggregate left to translate.
+  - FROM `JoinedSpecReport`, `isJoinedSpecReport` TO no replacement in this package. Test `isSpecReport(value) && value.type === 'joined'` and read `value.blocks`, each a `JoinedReportBlock`.
+- f810c34: refactor(types)!: delete `SubqueryNode` and the filter builder configuration pair nothing reads
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (runtime-export-retired @object-ui/types#SubqueryNode, @object-ui/types#FilterBuilderConfig, @object-ui/types#FilterFieldConfig) the retired operands are TypeScript-only interfaces declared in `data-protocol.ts`: a query-AST subquery node and a filter builder configuration pair that no query builder, renderer, adapter or host constructs or reads; nothing in the workspace or in hotcrm imports any of them from the package entry, they have no zod twin, they are not arms of `AnySchema`, and no packages/spec schema, registered node type, conversion surface or stored shape names them, so there is nothing for `objectstack migrate meta` to rewrite -->
+  
+  **BREAKING** for a host that imports any of these three types from `@object-ui/types`. None had an importer anywhere in the workspace or in hotcrm, so the Console and every `@object-ui/*` package are unaffected.
+  
+  They are **gone from the package, not only from the entry**: `src/data-protocol.ts` no longer declares them. They were types only, so the built JavaScript is unchanged. The other query-AST node types (`SelectNode`, `OffsetNode`, `AggregateNode`, …), `DateRangeFilter` and `FilterBuilderDateRangePreset` stay exported unchanged.
+  
+  What leaves, and what to write instead:
+  
+  - FROM `SubqueryNode` TO no replacement in this package. Nothing built or read a subquery node; a host that kept one declares it locally on top of `QueryASTNode` and `SqlQueryAST`, which stay.
+  - FROM `FilterBuilderConfig` TO no replacement. No filter builder read this configuration; a host that kept one declares it locally.
+  - FROM `FilterFieldConfig` TO no replacement. It was only the `fields` item of `FilterBuilderConfig`; a host that kept one declares it locally (`AdvancedFilterOperator`, which typed its `operators`, stays).
+- 7a5f73e: feat(types): `@object-ui/types` publishes the upload adapter contract, `UploadAdapter`, `UploadOptions` and `UploadResult`
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  The three interfaces the file, image and avatar widgets upload through, unchanged in shape from the `@object-ui/providers` package they leave. They live here, as `DataSource` does, because `@object-ui/fields` (whose `UploadProvider` reads an adapter) and `@object-ui/data-objectstack` (whose `createObjectStackUploadAdapter` builds one) do not depend on each other. A host that writes its own adapter types it from here. Nothing existing changes.
+- a52761f: fix(console): an action another package places on `sys_user` at `record_header` / `record_more` draws again on the user's record page, in the drawer and on the full page (#29951)
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **The header reads `placedActions: true`.** `page:header`'s `placedActions` (#30018) is now drawn by the console's header renderer (`PageHeaderActions` in `@object-ui/components`): `true` draws every action of the page's object whose `locations` include `record_header` or `record_more`, in declaration order, read from the object's metadata at render time, so an action an installed package adds to the object is drawn without editing the page. Omitted or `false`, an authored `actions` list is still the whole set (#11592). A `true` beside an authored list, which the spec refuses, draws none of the object's actions and is reported once in the console.
+  - **One placed-header reader.** `placedHeaderActions` (`@object-ui/types`) is the rule both headers read: the synthesized default record page's header in `RecordDetailView` and a `placedActions: true` header. The `page:header` registration publishes the `placedActions` input.
+  - **The platform record pages opt in.** `sys_user_detail` and `sys_organization_detail` (`@objectstack/platform-objects`) and `sys_approval_request_detail` (`@objectstack/plugin-approvals`) set `placedActions: true` in place of the id lists #27219 froze, which dropped every header action another package places on those objects. The tab strips are unchanged, and every action the lists named is placed at `record_header` / `record_more`, so each still draws.
+  - `@objectstack/spec`: the `placedActions` describe no longer opens with `[PLANNED — not yet rendered]`, and the `page` liveness record names the reader.
+- 5268f50: fix(types): the form face's currency `scale` refusal names the currency's CLDR fraction digits, the spec's wording
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `CURRENCY_FIELD_SCALE_REFUSAL` is held equal to `@objectstack/spec`'s currency `scale` refusal, which now says "the currency's CLDR fraction digits (2 for USD, 0 for JPY, 3 for KWD) decide how the amount displays" instead of naming the ISO 4217 minor unit. Words only: the same entries are refused at the same path.
+- b631573: feat(console): revoke an authorized AI assistant from Connect an Agent, and an administrator widget for a person's assistants
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - **`@object-ui/app-shell`**: each row in Connect an Agent's "Authorized AI assistants" list now has a Revoke. It asks first, naming the assistant, then withdraws the grant through `oauth.authorizedClients.withdraw(id)`: the assistant's token is refused on its next call and it has to be authorized again to reconnect. The list is read again after every withdraw, so a grant already withdrawn elsewhere leaves it too, and the refusal is named. The line saying withdrawing was not available yet is gone. New SDUI widget `mcp:authorized-assistants` for a `sys_user` record page: it reads the person from the bound record (no props), lists their authorized assistants through `oauth.authorizedClients.listForUser(userId)` with the same rows and confirm-first Revoke, which calls `withdrawForUser(userId, id)`. Those doors are for platform administrators; anyone else sees the server's refusal as a failed read. Off a `sys_user` record it renders nothing, and it is drawn only where a page names it.
+  - **`@object-ui/i18n`**: `connectAgent.access.withdrawTitle`, `withdrawBody`, `managedBody`, `managedEmpty` and `managedTruncated` added in all eleven packs; `connectAgent.access.withdrawLater` removed (net +4 keys per pack).
+  - **`@object-ui/types`**: `McpAuthorizedAssistantsSchema` (zod arm) and its TypeScript twin, so a page placing `{ type: 'mcp:authorized-assistants' }` validates. The widget reads only `className`: `properties` may only be `{}`, and `body` / `children` are refused by name.
+  - **`@object-ui/cli`**: `objectui check` knows the `mcp:authorized-assistants` type (the generated known-types list).
+- Updated dependencies [8aa2e91]
+- Updated dependencies [c17719d]
+- Updated dependencies [b90a6f7]
+- Updated dependencies [e8dc483]
+- Updated dependencies [bcdb1db]
+- Updated dependencies [9ebca94]
+- Updated dependencies [140d8ce]
+- Updated dependencies [699ebd8]
+- Updated dependencies [4c2cd29]
+- Updated dependencies [4be8a2e]
+- Updated dependencies [471add3]
+- Updated dependencies [b5eb61d]
+- Updated dependencies [97e4249]
+- Updated dependencies [9037b13]
+- Updated dependencies [e3b56b2]
+- Updated dependencies [a52761f]
+- Updated dependencies [e8afd1e]
+- Updated dependencies [bd65cb6]
+- Updated dependencies [217ba78]
+- Updated dependencies [cde492d]
+- Updated dependencies [eee4149]
+- Updated dependencies [f3a52d3]
+- Updated dependencies [d59a1eb]
+- Updated dependencies [af3451b]
+- Updated dependencies [3a27208]
+- Updated dependencies [0c666c3]
+- Updated dependencies [38717d3]
+- Updated dependencies [ac890f5]
+- Updated dependencies [aa57c76]
+- Updated dependencies [fc869c2]
+- Updated dependencies [fef212b]
+- Updated dependencies [dc51811]
+- Updated dependencies [b77c160]
+- Updated dependencies [09720e2]
+- Updated dependencies [25fea77]
+- Updated dependencies [3da9a4c]
+- Updated dependencies [4be9734]
+- Updated dependencies [bb86ff9]
+- Updated dependencies [2046d21]
+- Updated dependencies [fd749a4]
+- Updated dependencies [d9d42d4]
+- Updated dependencies [9d939c5]
+- Updated dependencies [25e1c1a]
+- Updated dependencies [47226e6]
+- Updated dependencies [c7d1367]
+- Updated dependencies [f5aaa0b]
+- Updated dependencies [0005fec]
+- Updated dependencies [2d6402c]
+- Updated dependencies [77c203a]
+- Updated dependencies [8293c74]
+- Updated dependencies [29702d5]
+- Updated dependencies [a839020]
+- Updated dependencies [a7b8876]
+- Updated dependencies [4dde0ae]
+- Updated dependencies [590724f]
+- Updated dependencies [38d416f]
+- Updated dependencies [d2e2f6f]
+- Updated dependencies [b55d6ab]
+- Updated dependencies [aad1603]
+- Updated dependencies [7145bf3]
+- Updated dependencies [55d9dd4]
+- Updated dependencies [af8aab1]
+- Updated dependencies [a59d00a]
+- Updated dependencies [4bf9a2d]
+- Updated dependencies [0c9aa82]
+- Updated dependencies [49c8568]
+- Updated dependencies [4564d6f]
+- Updated dependencies [f2ea193]
+- Updated dependencies [5268f50]
+- Updated dependencies [a30c4f4]
+- Updated dependencies [0cba0ce]
+- Updated dependencies [c893b3d]
+- Updated dependencies [677d542]
+- Updated dependencies [9bdeed2]
+- Updated dependencies [3479c33]
+- Updated dependencies [000a4c0]
+- Updated dependencies [f4d9c09]
+- Updated dependencies [c77dd17]
+- Updated dependencies [ebe0a98]
+- Updated dependencies [9038187]
+- Updated dependencies [f108e6d]
+- Updated dependencies [5cb7d7e]
+- Updated dependencies [468e0c1]
+- Updated dependencies [6106b73]
+- Updated dependencies [0f920b9]
+- Updated dependencies [33bc8ae]
+- Updated dependencies [a1afbb9]
+- Updated dependencies [150f740]
+- Updated dependencies [42eb126]
+- Updated dependencies [8cf1fd0]
+- Updated dependencies [a5cb4f1]
+- Updated dependencies [3c1eb63]
+- Updated dependencies [d57be87]
+- Updated dependencies [eca7cd2]
+- Updated dependencies [cf4b9bf]
+- Updated dependencies [e1dac19]
+- Updated dependencies [21510bb]
+- Updated dependencies [0fd363d]
+- Updated dependencies [d6b88f1]
+- Updated dependencies [4123865]
+- Updated dependencies [6ffe37e]
+- Updated dependencies [63a470a]
+  - @objectstack/spec@18.4.0
+
 ## 18.3.0
 
 ### Minor Changes

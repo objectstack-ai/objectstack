@@ -1,5 +1,130 @@
 # @object-ui/plugin-kanban
 
+## 18.4.0
+
+### Patch Changes
+
+- c580081: fix(ui): the console form page Edit, the kanban drop prompt and the Edit wizard judge a field's `requiredWhen` as the engine does, a transition gate against the stored record
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **`@object-ui/console` form page (`/forms/:name?recordId=`):** an Edit no longer refuses a record that already sits inside a `requiredWhen` gate without the value (for example a contract activated before its signed-copy rule existed). The field shows no required marker there, and an unrelated edit saves, as REST `PATCH` already accepts. Still refused: the edit that moves a record into the gate without the value, and clearing the value of a record that held it. A create form enforces as before.
+  - **`@object-ui/plugin-kanban` drop prompt:** dropping a card no longer asks for a field the engine lets rest. A record already inside the gate without the value moves between columns with no dialog; a drop that moves a compliant record into the gate still asks for the value first.
+  - **`@object-ui/plugin-form` Edit wizard:** the final submit's cross-step check no longer refuses a record that already sits inside a `requiredWhen` gate without the value; it asks `requiredWhenRestsOnStoredRecord` about the record as first read. The record reaches only that stored-record check, so a `visibleWhen` reading `previous` is still unevaluable at that check, as before. Moving a compliant record into the gate is still refused, and a Create wizard enforces as before.
+  
+  All three read the stored-record verdict `resolveFieldRuleState` already returns (`requiredWhenAtRest`, or its exported check `requiredWhenRestsOnStoredRecord`); no second rule.
+- 4ccd790: Clause-②: no
+  Metadata-protocol: none
+  
+  A kanban card move refused because the object's external datasource does not admit writes (`403 EXTERNAL_WRITE_FORBIDDEN`, ADR-0015) now says the table is read-only (`form.readOnlyExternalSource`) instead of "You are not authorized to perform this action.", which sent administrators looking through permission sets that can never unlock the table. The read-only check runs after an author-marked `userMessage` and before the permission check, the order the other write doors use; every other 403 keeps today's text.
+- Updated dependencies [7da99b7]
+- Updated dependencies [3214615]
+- Updated dependencies [4261169]
+- Updated dependencies [8fefefd]
+- Updated dependencies [ffeda13]
+- Updated dependencies [7a5f73e]
+- Updated dependencies [8fefefd]
+- Updated dependencies [b5fd350]
+- Updated dependencies [ac5d0ce]
+- Updated dependencies [2cf269f]
+- Updated dependencies [e396095]
+- Updated dependencies [f810c34]
+- Updated dependencies [7a5f73e]
+- Updated dependencies [1e6f542]
+- Updated dependencies [b379262]
+- Updated dependencies [7945a3b]
+- Updated dependencies [c2be734]
+- Updated dependencies [6e68d8f]
+- Updated dependencies [3461420]
+- Updated dependencies [9049be2]
+- Updated dependencies [a52761f]
+- Updated dependencies [6db9198]
+- Updated dependencies [df4c06e]
+- Updated dependencies [f68b47c]
+- Updated dependencies [f0ad1f7]
+- Updated dependencies [03be565]
+- Updated dependencies [7e9fa4b]
+- Updated dependencies [bc8945f]
+- Updated dependencies [42afac7]
+- Updated dependencies [a9fb14b]
+- Updated dependencies [6f095b9]
+- Updated dependencies [5f80129]
+- Updated dependencies [0c7e95a]
+- Updated dependencies [c1240a3]
+- Updated dependencies [5fa9375]
+- Updated dependencies [aa57c76]
+- Updated dependencies [c8e6d38]
+- Updated dependencies [d99cd3b]
+- Updated dependencies [b6caa14]
+- Updated dependencies [a77c2e9]
+- Updated dependencies [ff3f83b]
+- Updated dependencies [ea5807e]
+- Updated dependencies [4128213]
+- Updated dependencies [d3f23d2]
+- Updated dependencies [ff12aed]
+- Updated dependencies [6c48d48]
+- Updated dependencies [bff5ba2]
+- Updated dependencies [31260ca]
+- Updated dependencies [ef2ad31]
+- Updated dependencies [18870c9]
+- Updated dependencies [fa9c0aa]
+- Updated dependencies [5174603]
+- Updated dependencies [f6faf75]
+- Updated dependencies [fd749a4]
+- Updated dependencies [f5aaa0b]
+- Updated dependencies [77c203a]
+- Updated dependencies [648089d]
+- Updated dependencies [10ecafd]
+- Updated dependencies [b6f4c0e]
+- Updated dependencies [b4f4781]
+- Updated dependencies [042efb7]
+- Updated dependencies [48231b0]
+- Updated dependencies [0d54279]
+- Updated dependencies [8e5fabe]
+- Updated dependencies [ac56acf]
+- Updated dependencies [a91409c]
+- Updated dependencies [ab12a3b]
+- Updated dependencies [2b35374]
+- Updated dependencies [cd7f785]
+- Updated dependencies [7b10a30]
+- Updated dependencies [8b0fbb8]
+- Updated dependencies [ad2393f]
+- Updated dependencies [5bca14f]
+- Updated dependencies [062236c]
+- Updated dependencies [d996c38]
+- Updated dependencies [47c457b]
+- Updated dependencies [5268f50]
+- Updated dependencies [5268f50]
+- Updated dependencies [7b2e557]
+- Updated dependencies [115a43a]
+- Updated dependencies [c1da957]
+- Updated dependencies [b631573]
+- Updated dependencies [78d4fe9]
+- Updated dependencies [78eb352]
+- Updated dependencies [6ddf827]
+- Updated dependencies [d9d3eb7]
+- Updated dependencies [2ce2646]
+- Updated dependencies [bd1b768]
+- Updated dependencies [0f920b9]
+- Updated dependencies [584f7b8]
+- Updated dependencies [66b17a3]
+- Updated dependencies [3f61e4f]
+- Updated dependencies [51992df]
+- Updated dependencies [f84205b]
+- Updated dependencies [eca7cd2]
+- Updated dependencies [cf4b9bf]
+- Updated dependencies [614e831]
+- Updated dependencies [8a0516c]
+  - @object-ui/components@18.4.0
+  - @object-ui/core@18.4.0
+  - @object-ui/fields@18.4.0
+  - @object-ui/plugin-detail@18.4.0
+  - @object-ui/react@18.4.0
+  - @object-ui/types@18.4.0
+  - @object-ui/i18n@18.4.0
+  - @object-ui/permissions@18.4.0
+
 ## 18.3.0
 
 ### Minor Changes

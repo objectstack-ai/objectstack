@@ -1,5 +1,358 @@
 # @objectstack/core
 
+## 18.4.0
+
+### Minor Changes
+
+- 9ebca94: feat(push): `requires: ['push']` and the stack's `push` key turn mobile push on under `objectstack serve`, and a relay configuration is refused at boot
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  Skills-docs: follow-up owed — #29969 (skills/objectstack-platform/evals/config-plugins-ops.json: no eval asks for `requires: ['push']` or the `push` key); this diff teaches both in `skills/objectstack-platform/SKILL.md` (the top-level key enumeration and the `requires` table) and in the new `content/docs/kernel/runtime-services/push-service.mdx`
+  
+  A deployment that runs `objectstack serve` from a stack file can now turn on mobile push without host code. Before this, the only way to register a push service was a host that composed `PushServicePlugin` in code, so a `notify` node naming `push` had nothing to deliver through on a served stack.
+  
+  - **`@objectstack/spec`: the `push` capability token and the `push` stack key.** `push` joins `PLATFORM_CAPABILITY_TOKENS`, provided by `@objectstack/service-push` in the open edition. It is requested, never on the always-on slate. The stack definition gains a top-level `push` key beside `email` and `sms`: it is `PushServiceConfigSchema`, composed as a single value (`COMPOSE_KEY_DISPOSITIONS`). Authoring accepts a direct block, a relay block and absence; it refuses an inline secret, by key name (`key`, `privateKey`, `serviceAccount`, …) with `credentialRef` as the remedy, or pasted into a `credentialRef` (ADR-0143 D3). `PushServiceConfigSchema`'s docblock now names the stack key and `objectstack serve` as its reader; `PushRelayTransportConfigSchema` keeps its `[PLANNED — not yet served]` marker.
+  - **`@objectstack/core`: the `push` provider row and its argument.** `CAPABILITY_PROVIDERS.push` names `PushServicePlugin`, and `resolveCapabilityArgument('push', …)` builds its argument from the stack's `push` key through `resolvePushCapabilityArg`, read off the provider module as the `email` and `sms` readers are. Both `objectstack serve` and `@objectstack/verify`'s `bootStack` read this table, so an app's tests get the push service its server gets.
+  - **`@objectstack/service-push`: `resolvePushCapabilityArg`.** It parses the `push` key with `PushServiceConfigSchema` and refuses, before the kernel boots, two configurations: the relay transport (an absent key and `push: {}` read as it), whose sender has not shipped, with a message that says so and prescribes `transport: 'direct'` with an `apns` and/or `fcm` block; and anything the schema refuses, an inline secret first among them, naming each path and the schema's guidance and never the value. On a stack that declares `requires: ['push']` either refusal fails the boot as `Capability "push" (@objectstack/service-push) failed to start: …`.
+  - **`@objectstack/cli` and `@objectstack/verify`** depend on `@objectstack/service-push`, so the provider the token names resolves out of the box, as the open edition promises.
+  
+  To turn push on, add `requires: ['push']` and a direct block naming each vendor's secret by reference:
+  
+  ```ts
+  push: {
+    transport: 'direct',
+    apns: { teamId: 'ABCDE12345', keyId: 'KEY1234567', topic: 'com.example.app', environment: 'production', credentialRef: 'APNS_SIGNING_KEY' },
+    fcm: { projectId: 'example-app', credentialRef: 'FCM_SERVICE_ACCOUNT' },
+  },
+  ```
+  
+  In the open tier each `credentialRef` is the name of an environment variable holding the secret. A `push` key on a stack whose `requires` does not name `push` is not read, and `objectstack serve` logs one boot warning saying so. The runtime-services chapter has a new `services.push` page.
+- aa57c76: feat(spec): three forward date-range presets: `next_month`, `next_quarter` and `next_30_days`
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  The relative dates a dashboard date filter and the filter builder offer looked only backward. A forecast asks forward: what closes next month, next quarter, in the next 30 days. Those questions had to use a custom range, whose fixed dates go stale.
+  
+  `DATE_RANGE_PRESETS` now also declares `next_month` (the whole of next month), `next_quarter` (the whole of next quarter) and `next_30_days` (today and the 30 days after it, the mirror of `last_30_days`). Every place that accepts a preset accepts them: `dashboard.dateRange.defaultRange`, a date global filter's `defaultValue`, the filter builder's `between` row and `AnalyticsQuery.timeDimensions[].dateRange`. They sit beside the family they extend in the filter bar: `next_month` after `last_month`, `next_quarter` after `last_quarter`, `next_30_days` after `last_90_days`. Their `DATE_RANGE_PRESET_MACRO_WINDOWS` rows follow the inclusive last-day convention: `['{next_month_start}', '{next_month_end}']`, `['{next_quarter_start}', '{next_quarter_end}']` and `['{today}', '{30_days_from_now}']`. A preset name written as a bare filter comparand is refused with that window as the prescription, as for the other presets.
+  
+  `@objectstack/core`'s `resolveAnalyticsDateRangePreset` resolves the three in its half-open form. `next_30_days` stops before `{31_days_from_now}`. `next_month` and `next_quarter` stop before the month and the quarter after next, which no macro token names: the resolver reads `next_month_start` (or `next_quarter_start`) again from the start of the day it named, so the end is still a day the one token resolver computed. No macro token is added.
+  
+  In the console, the three presets have labels in all ten locale packs, and the client date-macro resolver now answers `{next_month_end}` and `{next_quarter_end}`, two spec tokens it did not resolve before. `@objectstack/verify`'s dashboard-window proof also writes fixture rows on a forward preset's future edges, so it judges the three new windows; the days it writes for the other presets are unchanged. `@objectstack/lint` changes documentation only.
+- af8aab1: fix(spec,core): the server locale resolvers read the platform locale table, so a `zh-TW` / `zh-HK` / `zh-MO` reader gets a registered `zh-Hant` bundle instead of Simplified Chinese
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: semantic
+  
+  `resolveBundleLocale` (`@objectstack/spec/system`) and `resolveLocale` (`@objectstack/core`) now run one ladder, the new `resolveLocaleAmong(requested, available)` export of `@objectstack/spec/system`: exact, case-insensitive, then **the same platform locale table language**, then base language, then the first registered variant. The new step maps the requested code and each available key through `platformLocaleTagOf` (the table's read aliases) and picks the key spelled as the table tag, else the first key the table maps to that tag.
+  
+  What changes for a reader: a request for `zh-TW`, `zh-HK` or `zh-MO` reaches a registered `zh-Hant` key, and `zh`, `zh-CN`, `zh-SG` or `zh-Hans` reaches `zh-CN` (or `zh-Hans`), whatever order the bundle registered them in. Before, the first registered `zh-*` key answered both, so a Traditional reader got the Simplified bundle (and with `zh-Hant` registered first, a Simplified reader got the Traditional one). A bare `zh` key now counts as Simplified for a `zh-TW` request, which the base-language step used to hand it. The step also applies to `ja` → `ja-JP`, `es` → `es-ES`, `en` → `en-US` and `pt` → `pt-BR`, which answer as before against today's alias-spelled bundles.
+  
+  `resolveOfferedLocale` (`@objectstack/core`, the matcher Setup's default-language options and the IdP locale claim use) now answers through the same ladder, so a Traditional request reaches an offered `zh-Hant`. Where a list offers two codes of one table language, the code spelled as the table tag wins over the first one offered: `zh` over `['zh-CN', 'zh-Hans']` answers `zh-Hans`, and `zh-HK` over `['zh-TW', 'zh-Hant']` answers `zh-Hant`.
+  
+  Unchanged: a code the table does not know (`es-MX`, `en-GB`, `pt-PT`) falls back through base language and variant expansion exactly as before, and a `zh-TW` request still reaches `zh-CN` when no Traditional key is registered. No call that matched before stops matching. Every caller of these functions moves with them, among them the i18n REST door, built-in validation and operation messages, email template locale folding, hook, flow and approval copy, and plugin-auth's refusal copy.
+- 21510bb: feat(plugin-security)!: under a walled tenancy posture every external object states its organization scope
+  
+  Clause-②: no (narrowing) — under the `isolated` and `group` postures an external object (an `external` block) that states no organization scope is refused by name when the boot completes, and one registered after the boot answers no row and accepts no write; nothing is widened, and the `single` posture is unchanged.
+  Metadata-protocol: narrowed
+  
+  <!-- adr-0087: registered external-object-organization-scope-declared -->
+  
+  **BREAKING** for a deployment running the `isolated` or `group` tenancy posture (`OS_TENANCY_POSTURE`) with an external object that states nothing about its organization scope.
+  
+  - **The rule (ADR-0015 §10 as amended, ADR-0095 D1).** The platform provisions no storage for an external object, so the `organization_id` it injects into the registered schema is a column the remote may not carry. Whose rows an external object serves — one organization's or every organization's — is a fact only its author knows, and under a walled posture the object states it, in one of three ways: its own `organization_id` field (the remote rows carry the organization column and the driver returns it; a remote column of another name is mapped onto it with `external.columnMap: { <remote column>: 'organization_id' }`); `tenancy: { enabled: false }` (shared by every organization); or `systemFields: { tenant: false }` (the same opt-out on the system fields). These are the wall's own two opt-out clauses and the one column it reads; the whole-block `systemFields: false` states nothing.
+  - **What the rule does.** `SecurityPlugin` refuses the boot from its `kernel:ready` handler, beside the ADR-0131 D5 refusal, naming every external object that states nothing and the three ways out (`ExternalObjectOrganizationScopeUndeclaredError`). An external object registered after the boot — a Studio import, a runtime datasource — that states nothing answers no row and accepts no write: the Layer 0 verdict is `deny` (`computeTenantLayer0Verdict`), the write wall refuses every insert, update and delete with a sentence naming the undeclared scope and the three ways out, and the plugin says so once in a warning. An object declaring its own `organization_id` is walled: a member of organization A reads only A's rows, through a driver that honours `where` and through one that ignores it (the engine's floor re-applies the predicate), and a row missing the column reads to no one. An object declaring `tenancy: { enabled: false }` or `systemFields: { tenant: false }` is shared.
+  - **`tenancy.tenantField` on an external object is closed the same way.** The organization wall keys on `organization_id` alone, and a declared tenant field is read only by storage the platform provisions, which an external object has none of; so on an external object a `tenantField` naming another column is refused at boot and denied after it, with the remedy spelled out (`external.columnMap` onto `organization_id`, or `tenancy: { enabled: false }`). Local objects are unchanged.
+  - **Who moves.** Every walled deployment with an external object stating nothing: declare one of the three and restart. The showcase's two federated analytics objects now declare `tenancy: { enabled: false }`. A `single`-posture deployment owes no declaration and behaves exactly as before.
+  - **`@objectstack/core`.** `TenantLayer0Input` gains the optional `externalOrganizationScopeUndeclared`; set, the verdict is `deny` under a walled posture, ahead of the platform-admin crossing. Omitted, every existing caller reads as before.
+  - **`@objectstack/spec`.** The ADR-0087 D3 entry `external-object-organization-scope-declared` tells an upgrading operator what to declare.
+  
+  Skills-docs: follow-up #29866 — `content/docs/data-modeling/virtual-objects.mdx` (a multi-organization section), `skills/objectstack-data/rules/datasources.md` (the three declarations), `docs/adr/0015-external-datasource-federation.md` (the §10 and D7 amendment); the sibling docs PR on `claude/sec-hardening-g-docs`, governed (Tier H), landed by the maintainer's hand.
+
+### Patch Changes
+
+- 771b2db: fix(core,service-messaging,service-queue): an idle dispatch loop wakes at the next due time, and a sole writer's loop no longer re-runs the idle ramp after every boot
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - **`@objectstack/core`: `DispatchLoop` wakes at the next due time.** A new optional `DispatchLoopOptions.nextDueAt()` answers the earliest instant work becomes claimable (a deferred row, a claim's expiry). The loop asks it once per idle streak, after the first empty tick, and never sleeps past the answer, so a deferred row goes out within one tick of coming due whatever `maxIdleIntervalMs` is. The answer is remembered rather than re-read on every ceiling tick, so an idle loop's steady-state cost is unchanged; the new `DispatchLoop.wakeAt(dueAtMs)` lets a producer in the same process announce a deferred row at no read. An answer at or before the tick that found nothing is not chased, and a rejected tick or read still counts as idle, so neither can make the loop spin.
+  - **`@objectstack/core`: `DispatchLoopOptions.soleWriter`** (default `false`). On a host where no other process writes the store, an empty tick sleeps straight to the next due time or the ceiling instead of re-running the ramp from `intervalMs`, which only ever bought latency on rows another process wrote. A fresh sole-writer loop over an empty store now ticks once in its first minute; before, every boot re-ran the ramp (six ticks in the first minute at the dispatchers' 500 ms base, five at the queue's 1 s).
+  - **`@objectstack/service-messaging`:** `INotificationOutbox.nextDueAt` / `IHttpOutbox.nextDueAt` (optional; both built-in stores implement it: two reads, the earliest future `next_attempt_at` / `next_retry_at` and the oldest `in_flight` claim plus the claim TTL), wired into `NotificationDispatcher` and `HttpDispatcher`; `soleWriter` on both dispatchers' options, and `dispatchSoleWriter` on `MessagingServicePlugin`. Retries, quiet hours, digest windows and a crashed node's claims are taken at their due time instead of up to `dispatchMaxIdleIntervalMs` late.
+  - **`@objectstack/service-queue`:** `DbQueueAdapter` reads the earliest future `scheduled_for` of its subscribed queues (one read per idle streak), a deferred `publish()` announces its due time to the loop through `wakeAt` instead of waiting out the backoff, and `DbQueueAdapterOptions.soleWriter` (reachable as `QueueServicePlugin` `db.soleWriter`) skips the ramp.
+  
+  Nothing changes for a host that sets neither `soleWriter` flag except the due-time wake: the ramp keeps its shape, cut short only when a due row is earlier, and an idle stretch costs one extra read at its start.
+- 97e4249: feat(service-push)!: push sends through the hosted push relay, authenticated by the server's cloud binding
+  
+  Clause-②: yes (narrowing) — the relay transport (`transport: 'relay'`, and the default `{}`), refused at init until now, is served; the relay wire narrows: `PushRelayPayloadSchema.data` refuses a key `PushDeliveryDataSchema` does not declare instead of stripping it, and a `RATE_LIMIT_EXCEEDED` relay error must not answer `retryable: false`; `PUSH_RELAY_NOT_SERVED_MESSAGE` leaves `@objectstack/service-push`.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (runtime-export-retired @objectstack/service-push#PUSH_RELAY_NOT_SERVED_MESSAGE) the retired export is the text of an init refusal that no longer happens; no packages/spec schema, registered node type, ADR-0087 conversion surface or stored shape names it. The two wire narrowings are on the server-to-relay request and the relay's error answer, which no metadata author writes and nothing stores, so there is nothing for objectstack migrate meta to rewrite -->
+  
+  **The hosted push relay is served.** A stack that requires `push` with a relay configuration (`transport: 'relay'`, `push: {}`, or no `push` key) now boots and sends each push to the cloud's push relay at `/api/v1/cloud/push/send` under the control-plane URL (`OS_CLOUD_URL`, else `https://cloud.objectos.ai`); a relay block's `endpoint` overrides it. Each request carries one ID-only delivery (the notification id, its same-server route, the server's origin and one generic line in the recipient's language); the title and body never leave the server.
+  
+  - **Authentication.** `@objectstack/cloud-connection` registers a new kernel service, `cloud-binding` (`ICloudBindingService` in `@objectstack/spec/contracts`: `credential()`, `bound()`, `controlPlaneUrl()`), and its own control-plane routes read the credential through it. The push service reads it on every send and puts it in the `Authorization` header only.
+  - **An unbound server boots.** It logs one warning at `kernel:ready`; until the server is bound on the Cloud connection setup page, the push service lists no vendor, so the push channel is suppressed as `transport_not_configured` and notifications reach users in the in-app inbox. The bind takes effect without a restart.
+  - **A deployment with no control plane** (`OS_CLOUD_URL=off`, `none`, `local` or `disabled`) refuses a relay configuration at boot, naming the in-app inbox and the direct transport as the two ways out. The direct transport is unchanged.
+  - **Answers.** `ok` is sent, `invalid` retires the device row, `retry` is retryable; a 401 fails the push without a retry, naming the lapsed binding; a 429 rate limit is retryable and a used-up quota is not.
+  - **The notice line.** The push channel picks the generic line by the recipient's language (`sys_user.locale`, then the deployment default, then English) and hands it to the push service as `PushMessage.notice`.
+  - `isControlPlaneDeclined` and the "no control plane" spellings move to `@objectstack/core`; `@objectstack/cloud-connection` re-exports `isControlPlaneDeclined` unchanged.
+  
+  **BREAKING — what narrows, and what to do:**
+  
+  - FROM `PUSH_RELAY_NOT_SERVED_MESSAGE` TO `PUSH_RELAY_AIR_GAPPED_MESSAGE` (both exported by `@objectstack/service-push`): the relay is no longer refused for being unserved, only on a deployment that declared it has no control plane. A test that matched the old text matches the new constant, or asserts that the relay boots.
+  - The relay payload's `data` is judged strictly: a sender puts only `notificationId`, `route` and `origin` in it. A content key such as `title` was stripped before and is now refused with the ID-only guidance.
+  - A relay's `RATE_LIMIT_EXCEEDED` error answers `retryable: true`, or leaves `retryable` out (it defaults to `true`). A relay that answered `retryable: false` on a rate limit is now refused by the wire schema.
+- f19fbb8: fix(core): a hook that aborts with free text answers `HOOK_ABORTED` on the import row too, not `IMPORT_ROW_FAILED`
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **Before.** A sandboxed hook body that aborts with free text (`throw new Error('…')`, no `code`) answers `/api/v1/data/:object`, `/createMany`, `/api/v1/batch` and every `POST /api/v1/data/:object/batch` row with `HOOK_ABORTED` and the hook's sentence. `POST /api/v1/data/:object/import` and the async import job answered the same abort as a row `{ ok: false, code: 'IMPORT_ROW_FAILED', error: <sentence> }`, so an import client branching on the row's `code` could not tell a business rule's refusal from any other failed row.
+  - **Now.** The import row answers `HOOK_ABORTED` (the `UNDECLARED_HOOK_REFUSAL_CODE` the other doors read), judged by `resolveThrownHttpError`, the resolver that declares that code. The value moves, from `IMPORT_ROW_FAILED` to `HOOK_ABORTED`, on every row the core import runner builds from a write failure: the synchronous import, the async import job's stored results, the create and update halves of an upsert, and every write path (single-row, batched, partial-success).
+  - **Unchanged.** A code the hook declared still wins, registered or not. The row's `error` is still the hook's sentence. A body that crashed, a refusal that declared a 5xx status, a driver fault and every other row failure keep the code they had. The row's `code` is an open string in `ImportRowResultSchema`, so no schema moves, and no error code is added: `HOOK_ABORTED` is the one the ledger already registers.
+- 2046d21: feat(objectql,rest)!: a new assignment to a banned user is refused, and a banned user's records can be counted and handed over in bulk (#30205)
+  
+  Clause-②: yes (narrowing) — the published `FieldErrorCode` enum gains the member `reference_user_banned`. A non-system create or update that sets a user field (the owner field, a `user` field, or a `lookup` to `sys_user`) to a user whose ban is in force is refused `400 VALIDATION_FAILED` with that field code, a write that answered `201` / `200` before. A value the row already stores is not judged, so a record that already holds the banned user stays editable. The two new routes and SDK methods are additions.
+  Metadata-protocol: none
+  Skills-docs: no move in `skills/**`, which teaches no user-assignment verdict; `content/docs/permissions/administrator-guide.mdx` gains "Handing over a banned user's work" and its offboarding quick path points at it.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any authorable schema is added, removed, renamed or re-shaped. What moves is the answer a data write gets when it names a banned user, and a record that already holds one is not judged, so nothing at rest needs rewriting. The new field code is a member of the response vocabulary FieldErrorCode, not of anything an author writes. -->
+  
+  **BREAKING** accept-set narrowing at every data write door (`POST` / `PATCH /api/v1/data/OBJECT`, batch, import, and a flow's elevated record write, which keeps the reference check): banning a user signs them out, but the records they own and are assigned stay where they were, and new work could still be handed to them.
+  
+  - **Before.** The Console's person picker hid a banned user, but `POST /api/v1/data/OBJECT` with `assignee` set to that user answered `201`, so new work landed on someone who cannot sign in.
+  - **Now.** The write-time reference check also asks whether a referenced user's ban is in force (`banned` is true and `ban_expires` is empty or still ahead) and refuses such a value with `reference_user_banned`, beside `reference_not_found`. It is read the way the existence probe reads, so a caller who cannot read the user object is refused the same way. A ban whose expiry has passed is not in force.
+  - **Unchanged.** A value every row of the write already stores (an edit form carries the whole record back), a system write the reference check already exempts (seed, install, restore), and a missing user (still `reference_not_found`).
+  - **New: the count.** `GET /api/v1/security/users/ID/assigned-work` (`client.security.assignedWork.count`) answers, per object and user field, how many records hold the user, counted under the caller's own context. Platform tables (`sys_*`), `managedBy` objects and `readonly` / `system` fields such as `created_by` are not counted; objects the caller cannot read are listed in `unreadable`; at most 200 fields are counted (`truncated`).
+  - **New: the hand-over.** `POST /api/v1/security/users/ID/assigned-work/transfer` (`client.security.assignedWork.transfer`) with `{ toUserId, objects? }` moves up to 500 records per call to an active user, each as an ordinary update under the caller's context, and answers per field what moved and what failed, plus how many remain. A banned, unknown or identical `toUserId` is refused before any write. Multi-valued user fields are counted but not transferred. Neither route touches the ban.
+  - **`@objectstack/spec`.** `FieldErrorCode` gains `reference_user_banned`, with its message in `en`, `zh-CN`, `ja-JP` and `es-ES`.
+  
+  **For a caller.** A write that names a banned user in a user field names an active one instead; the refusal names the field and the user. No stored metadata or row changes, so there is nothing for `objectstack migrate meta` to rewrite. An integration that reassigns work after a ban can call the transfer route and repeat it while `remaining` is above 0.
+- fd749a4: feat(audit): a write made while an administrator impersonates a user now records the administrator
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  An administrator who impersonates a user writes as that user, and until now nothing on the write said otherwise: the `sys_audit_log` row, the `sys_activity` row and the record were byte-identical to the user's own work. The session already knew (`sys_session.impersonated_by`); the write did not.
+  
+  - `ExecutionContext.impersonatedBy` (new, optional, attribution only) carries the administrator's `sys_user` id. The shared request-identity resolution sets it from the session read that admitted the caller, for a session credential only. `HookContext.provenance.impersonatedBy` hands it to hooks; it is never folded into `session`, so a hook that gates on the caller still sees the impersonated user.
+  - `userId`, `created_by`, ownership, `current_user.*` RLS and every permission stay the impersonated user's. Nothing in the authorization path reads the new field.
+  - The audit writer stamps `sys_audit_log.metadata.impersonated_by` on record writes and on `action_invocation` rows, and `impersonated_by` plus `impersonated_by_name` in the `sys_activity` row's metadata. Each key is present only on such a write; its absence means the user acted themselves. `user_id` and `actor` do not move.
+  - A flow started from such a session carries the administrator onto its own writes (`AutomationContext.impersonatedBy`), on both `runAs` arms: a record-triggered flow, a manual `POST /:name/trigger` and a `type: 'flow'` action alike. After an approval decision the decider's segment carries none.
+  - The console's record timeline and field history read 「Dev Admin 代王工操作」 (`detail.impersonatedActor`, in all ten console languages).
+  
+  No schema column and no migration: older rows simply carry no key.
+- f7afab8: fix(core,objectql): effective object permissions read the external write gate, so a read-only external object is no longer offered New, Import, Edit or Delete
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - **Behaviour.** On an object whose external write gate is closed (ADR-0015 §5.3 Gate 3: a federated datasource, and not both `datasource.external.allowWrites` and `object.external.writable`), every insert, update and delete is refused `403 EXTERNAL_WRITE_FORBIDDEN` for every caller. The effective object-permission map now says so: the entry grants no `allowCreate`, `allowEdit`, `allowDelete` or `allowTransfer`, a `modifyAllRecords` on it is lowered to the `viewAllRecords` read it implies, and `apiOperations` carries no write operation (`create`, `update`, `delete`, `upsert`, `bulk`, `import`, `restore`, `purge`). Read and export are unchanged. Both consumers move together: `/auth/me/permissions` (the console hides those doors with no client change) and `ISecurityService.getEffectiveObjectPermissions`, so `current_user.can(object, 'create' | 'edit' | 'delete' | 'transfer')` now answers `false` on such an object, as the write itself always did.
+  - **`@objectstack/objectql`: `ObjectQL.isExternalWriteForbidden(objectName)`**, the gate's verdict as a read-only question. The write gate (`assertWriteAllowed`) reads the same verdict, so the two cannot disagree.
+  - **`@objectstack/core`: `engineExternalWriteForbidden(engine)`** (the accessor over an engine, asked when the member is present) and the optional `isExternalWriteForbidden` accessor on `EffectiveObjectPermissionsSchemaSource`; `annotateEffectiveApiOperations` takes the same predicate as an optional third argument. A caller that hands over neither gets the map it got before.
+- d5f3bc5: fix(core): effective object permissions on a guarded managed object grant no edit, delete or transfer the write guard refuses, `modifyAllRecords` included
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  The managed write clamp behind `/auth/me/permissions` and `ISecurityService.getEffectiveObjectPermissions` cleared `allowEdit`, `allowCreate` and `allowDelete` on an object in a guarded `managedBy` bucket (`better-auth`, `engine-owned`, `append-only`) that does not opt the verb in through `userActions`, but left two grants the write guard refuses:
+  
+  - **`modifyAllRecords`**, which grants edit, delete and transfer on its own. A permission set naming such an object with `{ modifyAllRecords: true }` made `current_user.can(object, 'edit' | 'delete' | 'transfer')` answer `true` while every one of those writes was refused. Where the guard refuses `edit` or `delete`, it is now lowered to `viewAllRecords` (the read it implies, so read is unchanged), and each verb the object still opts in is kept as its plain bit: an object opting `edit` in (such as `sys_user`) keeps edit and transfer and loses delete; an object opting nothing in keeps read only. An object opting both `edit` and `delete` in keeps `modifyAllRecords`. The external write clamp lowers it through the same helper.
+  - **`allowTransfer`**, which now follows `edit`: an owner change is an update, refused unless `edit` is opted in. This also corrects a super-user wildcard admin, who was answered `can(object, 'transfer')` `true` on every guarded object that does not opt `edit` in.
+  
+  No write changes: the guard refused each of these before and still does. Only the served capability answer, and the console buttons that read it, now match it.
+- e3948ae: fix(platform-objects): an organization membership, a two-factor enrollment and the two SCIM join rows are named by the people and groups they point at, not raw ids
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **The record titles.** Four identity join objects built their title (`display_title`) by splicing stored lookup ids, so a record page's heading, a list's Title column and every reference to the row read ids. Each now reads names one hop through its lookups (ADR-0079 addendum, 2026-10-18), as `sys_business_unit_member` and `sys_team_member` do. A person is their `name`, or their `email` where the name is blank:
+    - `sys_member`: `Ada Lovelace (admin)`, or `Ada Lovelace` with no role;
+    - `sys_two_factor`: `Two-factor for Ada Lovelace`;
+    - `sys_scim_projection_grant`: `billing_admin → Ada Lovelace`;
+    - `sys_scim_group_member`: the provisioned user's `user_name` and the group's `display_name`, each its object's own title: `ada.lovelace@idp.example in Operations`.
+  
+    Every hop is read as the reader: a person, provisioned user or group the reader may not read, or one that no longer exists, leaves the title empty rather than showing an id. No column is stored, so a rename shows on the next read.
+  - **The authorization prelude reads no title.** `@objectstack/core`'s grant resolver reads `sys_member` three times (the caller's memberships, the active organization's first page of members, and the position-holder count). Each read now names the columns it decides on, as the `sys_user_permission_set` grant read already did, so the membership's title, which now reads a `sys_user` row, is never computed there. An authenticated request still pays the same reads and round trips as before.
+- 1c5cee6: fix(service-settings): an `OS_LOCALIZATION_LOCALE` naming a language the boot is still loading is no longer dropped, and Setup's default language accepts by the same locale matcher as the IdP locale claim (#30456)
+  
+  Clause-②: yes (widening) — `@objectstack/core` exports `resolveOfferedLocale(requested, offered)`; `SettingsService` gains `holdOptionSourceVerdicts()` and `sealOptionSources()`. The save of `localization.locale` (`PUT /api/settings/localization`, `SettingsService.setMany`) and an `OS_LOCALIZATION_LOCALE` override now also accept a region or base of an offered language (`fr-FR` where `fr` is offered, `fr` where `fr-FR` is) and another case of an offered code (`zh-cn` for `zh-CN`); nothing accepted before is refused. The IdP locale claim (`resolveIdpLocale`) lands a script or region spelling on the offered code the platform locale table says it means (`zh-TW` on `zh-Hant`, not on a `zh-Hans` listed first).
+  Metadata-protocol: none
+  
+  - **The boot window.** The deployment's locale list fills during the boot: the app's authored translations arrive at `kernel:ready`. A `kernel:ready` reader of `localization.locale` (auth's mail and SMS default language) could ask before the language an `OS_LOCALIZATION_LOCALE` override names was in the list; the override was then reported `IGNORED` and the reader kept the next layer's value, though the boot went on to offer that language. `SettingsServicePlugin` now holds the option verdict on a sourced key until `kernel:bootstrapped`: while held, an override the list does not admit yet is in force and not reported; at `kernel:bootstrapped` it is judged again, and one the list still does not admit is reported once, as before, and a settings change is emitted for `localization.locale` so a reader that applied it reads the key again. The other value checks (pattern, domain, bounds, format) are judged at once, as ever. A `SettingsService` constructed without the plugin judges at once, as it always has.
+  - **One matcher.** Setup's default language and the IdP locale claim now both ask `resolveOfferedLocale` (`@objectstack/core`): `resolveLocale`'s exact and case-insensitive steps, then the platform locale table's language (`zh-TW` is `zh-Hant`, `en-US` is `en`), then `resolveLocale`'s base-language and variant steps. A language one door takes, the other takes too.
+  - **Comment.** `AUTH_EMAIL_TEMPLATE_LOCALES` (plugin-auth) no longer claims to be the setting's options: since #30286 the setting offers the deployment's locale list, and the two ends agree through `normalizeAuthEmailLocale`'s pass-through and the email service's `en-US` fallback.
+- badf24d: fix(core): a banned user's assigned-work count and hand-over now include the platform's injected `owner_id`
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The field picker behind the assigned-work count and the bulk hand-over skipped every `system: true` user reference. The `owner_id` the platform injects on every business object is `system: true` (it is a platform column) but not `readonly` (ownership is transferable), so it was skipped: on any object whose author had not declared `owner_id` themselves, the records a banned user owned were counted as zero and never handed over. The picker now leaves out `readonly` user references only, so `created_by` / `updated_by` stay out and the injected `owner_id` is counted and handed over. Platform tables (`sys_*`), `managedBy` objects and injected columns with no storage stay excluded as before.
+- 5d4f2aa: fix(core)!: an API key authenticates only as an owner who exists
+  
+  Clause-②: yes (narrowing) — a request authenticated by an API key whose owner has no user record is answered as a key that does not exist (the generic `401 UNAUTHENTICATED`), at every door that accepts a key, and never falls through to a session sent beside it. The widening half: the exported `ApiKeyRefusalReason` union gains `'owner_absent'`.
+  Metadata-protocol: none
+  Skills-docs: updated here — `content/docs/permissions/authentication.mdx` states the rule; the dogfood pin `api-key-owner-exists.dogfood.test.ts` exercises it.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped and nothing at rest changes: the owner row the key admission already reads decides it, and no key row is revoked or rewritten. -->
+  
+  **BREAKING** accept-set narrowing at every key-admitting door (`@objectstack/core`): an API key authenticates only as an owner who exists.
+  
+  - **The rule.** An API key is a credential of the user who minted it. A key whose owner has no user record is a credential of no one: it is refused where a key becomes its owner (the shared key-admission seam), with the answer a key that does not exist gets, on the REST data door (read and write), the MCP door and every other door that resolves a key. It never falls through to a session sent beside it.
+  - **A store with no `sys_user` table refuses every API key.** No owner exists in such a store, so no key authenticates there. This is deliberate, and it is the same answer as a store whose `sys_user` table holds no row for the key's owner.
+  - **What the operator sees.** Each refused request logs one server-side line, `[security] API key refused (owner_absent)`, naming the key's row id and the owner id, so the key to revoke is named. The caller is told nothing beyond the generic `401`.
+  - **Unchanged.** A key's own lifecycle still answers first: a revoked, expired or inactive key keeps its located `403`. An owner read that fails still answers `503`. A key whose owner exists is unaffected, and no read is added: the decision uses the owner read the ban check already makes.
+  - **Who moves.** An integration running on a key whose owner has no user record gets `401`.
+  
+  **The remedy.** Mint a replacement key while signed in as an existing user, and revoke the orphan keys in **Setup → API Keys**.
+- f4cd4ec: fix(core)!: a banned user's credentials are refused while the ban holds, at every door that accepts an API key
+  
+  Clause-②: yes (narrowing) — while a user's ban holds, a request authenticated by an API key that user owns is answered as a key that does not exist (the generic `401 UNAUTHENTICATED`), at every door that accepts a key: the REST data door, the MCP door, and every other door that resolves a key through the shared key-admission seam. The widening half: `@objectstack/core` exports the one ban predicate, `isUserBanInForce` (with `USER_BAN_FIELDS` and the `UserBanFields` type), which the key-admission seam and plugin-auth's session-shaped refusals now share.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped and nothing at rest changes: the ban columns are read where a key becomes its owner, and no key row is revoked or rewritten. -->
+  
+  **BREAKING** accept-set narrowing at every key-admitting door (`@objectstack/core`): a banned user's API keys are refused while the ban holds.
+  
+  - **The rule.** A ban holds every credential of the user. Banning a user already ends their sessions and refuses their sign-in; their API keys now answer as a key that does not exist for as long as the ban holds. A ban with an expiry stops binding once the expiry has passed, exactly as sign-in does — no sign-in is needed to lapse it.
+  - **Not a revocation.** No key row is revoked or rewritten. Lifting the ban (or letting it expire) admits the same keys again, with nothing reissued, each still judged by its own lifecycle: a key left unused past the inactivity window during the ban answers as inactive (`API_KEY_INACTIVE`), and its remedy is a new key.
+  - **One anonymous entry.** A key refused for its owner (a ban) or for the tenancy posture (no organization under `isolated`) resolves to the same entry as a key that does not exist, on every composition: the guest's grants on a face that serves the guest, nothing elsewhere. It never falls through to a session.
+  - **Who moves.** An integration running on a key whose owner is banned gets `401` until the ban is lifted or expires.
+  
+  **The remedy.** Lift the ban, or mint a replacement key under a user who is not banned.
+- 5210acf: fix(service-storage): a member attaches a file through the attach verb again; the verb vouches for the one file it created
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A signed-in member who may attach files can attach one again through the server-side attach verb (`attachFileAs` on the `file-attachments` service), and so can a print to a record's attachments (`printRecordToFile`). Since the write-time reference check began judging a `lookup` value through the caller's own read door, the verb's `sys_attachment` insert — written as the caller — was refused over its `file_id`: a member who may attach need not read `sys_file`, so the file the verb had just created answered `reference_not_found` and the call failed.
+  
+  The rule now: a service verb that has created a record in the same call may vouch, on its own write, for the one reference to that record (`vouchForReference`, `@objectstack/core`). The write-time reference check does not ask the caller's read door for exactly that object, field and id, and still probes that the record exists. The attach verb vouches for its own `sys_attachment.file_id` and for nothing else; every other gate on the insert still judges the caller (the permission to create an attachment, the parent-edit attach rule, `enable.files`, the file-reference gate, row- and field-level security, and the `uploaded_by` stamp).
+  
+  Unchanged: no caller gains a read of `sys_file` or of anything else. A `sys_file` id sent through any data door — REST, MCP, a flow, an import — is judged through the caller's read door exactly as before, the file the verb attached included. The mark is a symbol-keyed context property that no request body, query, stored row or flow definition can spell.
+- d6b88f1: fix(service-storage): a member attaches a file from the browser again — the upload's own completion attaches it as them, restoring the Attachments panel after #31031
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  Skills-docs: updated here — `content/docs/permissions/attachments-access.mdx` and `content/docs/api/plugin-endpoints.mdx` state the `attachTo` key of the upload-complete request and its refusals; no file under `skills/**` teaches the upload-complete request (a `git grep` of `skills/` finds no `upload/complete` and no `CompleteUploadRequest`).
+  
+  A signed-in member who may attach files, and holds no read of `sys_file`, can attach a file from a record's Attachments panel again. Since the write-time reference check began judging a `lookup` value through the caller's own read door, the panel's second step — `POST /api/v1/data/sys_attachment` naming the file it had just uploaded — was refused `400 VALIDATION_FAILED` (`file_id`, `reference_not_found`) for such a member.
+  
+  The rule now: the upload-complete door (`POST /api/v1/storage/upload/complete`) takes an optional `attachTo: { parentObject, parentId }`. With it, the door runs every gate it already asked — the session, the upload ownership rule, the starting organization, the held bytes — and then hands the upload to the file-attachments service's `attachUploadAs`, which runs as the caller. That verb vouches for one `sys_file` only: a `pending` upload in the `attachments` scope that the caller uploaded, that no record holds yet, in the caller's write reach and in the parent's organization. It asks the attach authorization first (the permission to create an attachment, the parent-edit attach rule, `enable.files`), then writes the `sys_attachment` row and commits the file as one unit. The answer is the committed file with its new `attachmentId`. Another user's upload id, an id that names no file, a committed or already attached upload, and a record the caller may not attach to are refused, and the upload stays `pending`.
+  
+  The vouch is spent on that one write: a hook that runs under it — as the user or as the system — writes without the mark (`withoutVouchedReferences`, `@objectstack/core`), so a hook naming the same `file_id` is judged through the caller's read door.
+  
+  Unchanged: no caller gains a read of `sys_file` or of anything else. The generic data door keeps its rule — a `sys_attachment` create through `POST /api/v1/data/sys_attachment` naming a `sys_file` the caller cannot read is still refused `reference_not_found`. A completion without `attachTo` commits exactly as before. A mount with no file-attachments service bound refuses `attachTo` with `501 NOT_IMPLEMENTED`.
+  
+  The console's Attachments panel (`@object-ui/app-shell`) now completes its upload with `attachTo` and makes no second call, keeping its refusal messages; the upload adapter (`@object-ui/data-objectstack`) gains an `attachTo` option and returns the `attachmentId` it receives.
+- Updated dependencies [8aa2e91]
+- Updated dependencies [c17719d]
+- Updated dependencies [b90a6f7]
+- Updated dependencies [e8dc483]
+- Updated dependencies [bcdb1db]
+- Updated dependencies [9ebca94]
+- Updated dependencies [140d8ce]
+- Updated dependencies [699ebd8]
+- Updated dependencies [4c2cd29]
+- Updated dependencies [4be8a2e]
+- Updated dependencies [471add3]
+- Updated dependencies [b5eb61d]
+- Updated dependencies [97e4249]
+- Updated dependencies [9037b13]
+- Updated dependencies [e3b56b2]
+- Updated dependencies [a52761f]
+- Updated dependencies [e8afd1e]
+- Updated dependencies [bd65cb6]
+- Updated dependencies [217ba78]
+- Updated dependencies [cde492d]
+- Updated dependencies [eee4149]
+- Updated dependencies [f3a52d3]
+- Updated dependencies [d59a1eb]
+- Updated dependencies [af3451b]
+- Updated dependencies [3a27208]
+- Updated dependencies [0c666c3]
+- Updated dependencies [38717d3]
+- Updated dependencies [ac890f5]
+- Updated dependencies [aa57c76]
+- Updated dependencies [fc869c2]
+- Updated dependencies [fef212b]
+- Updated dependencies [dc51811]
+- Updated dependencies [b77c160]
+- Updated dependencies [09720e2]
+- Updated dependencies [25fea77]
+- Updated dependencies [3da9a4c]
+- Updated dependencies [4be9734]
+- Updated dependencies [bb86ff9]
+- Updated dependencies [2046d21]
+- Updated dependencies [fd749a4]
+- Updated dependencies [d9d42d4]
+- Updated dependencies [9d939c5]
+- Updated dependencies [25e1c1a]
+- Updated dependencies [47226e6]
+- Updated dependencies [c7d1367]
+- Updated dependencies [f5aaa0b]
+- Updated dependencies [0005fec]
+- Updated dependencies [2d6402c]
+- Updated dependencies [77c203a]
+- Updated dependencies [8293c74]
+- Updated dependencies [29702d5]
+- Updated dependencies [a839020]
+- Updated dependencies [a7b8876]
+- Updated dependencies [4dde0ae]
+- Updated dependencies [590724f]
+- Updated dependencies [38d416f]
+- Updated dependencies [d2e2f6f]
+- Updated dependencies [b55d6ab]
+- Updated dependencies [aad1603]
+- Updated dependencies [7145bf3]
+- Updated dependencies [55d9dd4]
+- Updated dependencies [af8aab1]
+- Updated dependencies [a59d00a]
+- Updated dependencies [4bf9a2d]
+- Updated dependencies [0c9aa82]
+- Updated dependencies [49c8568]
+- Updated dependencies [4564d6f]
+- Updated dependencies [f2ea193]
+- Updated dependencies [5268f50]
+- Updated dependencies [a30c4f4]
+- Updated dependencies [0cba0ce]
+- Updated dependencies [c893b3d]
+- Updated dependencies [677d542]
+- Updated dependencies [9bdeed2]
+- Updated dependencies [3479c33]
+- Updated dependencies [000a4c0]
+- Updated dependencies [f4d9c09]
+- Updated dependencies [c77dd17]
+- Updated dependencies [ebe0a98]
+- Updated dependencies [9038187]
+- Updated dependencies [f108e6d]
+- Updated dependencies [5cb7d7e]
+- Updated dependencies [468e0c1]
+- Updated dependencies [6106b73]
+- Updated dependencies [0f920b9]
+- Updated dependencies [33bc8ae]
+- Updated dependencies [293a85b]
+- Updated dependencies [a1afbb9]
+- Updated dependencies [150f740]
+- Updated dependencies [42eb126]
+- Updated dependencies [8cf1fd0]
+- Updated dependencies [a5cb4f1]
+- Updated dependencies [3c1eb63]
+- Updated dependencies [d57be87]
+- Updated dependencies [eca7cd2]
+- Updated dependencies [cf4b9bf]
+- Updated dependencies [e1dac19]
+- Updated dependencies [21510bb]
+- Updated dependencies [0fd363d]
+- Updated dependencies [d6b88f1]
+- Updated dependencies [4123865]
+- Updated dependencies [6ffe37e]
+- Updated dependencies [63a470a]
+  - @objectstack/spec@18.4.0
+  - @objectstack/types@18.4.0
+
 ## 18.3.0
 
 ### Minor Changes

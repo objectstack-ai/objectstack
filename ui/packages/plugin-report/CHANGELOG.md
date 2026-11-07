@@ -1,5 +1,115 @@
 # @object-ui/plugin-report
 
+## 18.4.0
+
+### Patch Changes
+
+- f4d568b: fix(plugin-report,plugin-dashboard): a report, chart, table or cross-tab drill on a filtered measure lists the records the number counted
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A drill used to list the clicked bucket AND the report or widget filter only. The number also carries the dataset's own `filter` and the measure's own `filter`, so a drill on a filtered measure listed a superset: on the app-showcase Revenue Pulse dashboard, the Paid Invoices cell of the Sent row reads 0 and its drill listed all 4 sent invoices. The drill now also ANDs in the answer's `drillScopes` entry for the measure it stands for (the server's per-measure list filter; `{}` adds nothing, so a drill on an unfiltered measure is unchanged).
+  
+  - **What a click stands for.** A chart mark stands for its series' measure (a pivoted chart for its one measure), a cross-tab or matrix cell for its column's measure, and a table row for every measure it holds.
+  - **A table row whose measures select different records drills cell by cell.** When the row's measures all share one scope (one measure, or several plain ones), the row drills as before. Otherwise each measure cell with a scope is its own drill target (test id `dataset-drill-cell`) and the row is not.
+  - **No list that does not match the number.** A measure with no `drillScopes` entry (a derived measure, or a scope naming a relationship path) offers no drill, and neither does any measure of an answer that carries no `drillScopes`. A comparison (`<measure>__compare`) series opens nothing. A chart none of whose drawn measures has an entry gets no click handler.
+  - **Unchanged:** a report answer with no `object` (a server older than ADR-0021 D2) still hands the host its group-key fallback drill.
+- Updated dependencies [7da99b7]
+- Updated dependencies [3214615]
+- Updated dependencies [4261169]
+- Updated dependencies [8fefefd]
+- Updated dependencies [7a5f73e]
+- Updated dependencies [8fefefd]
+- Updated dependencies [b5fd350]
+- Updated dependencies [ac5d0ce]
+- Updated dependencies [2cf269f]
+- Updated dependencies [e396095]
+- Updated dependencies [f810c34]
+- Updated dependencies [7a5f73e]
+- Updated dependencies [1e6f542]
+- Updated dependencies [b379262]
+- Updated dependencies [7945a3b]
+- Updated dependencies [c2be734]
+- Updated dependencies [9049be2]
+- Updated dependencies [a52761f]
+- Updated dependencies [6db9198]
+- Updated dependencies [f0ad1f7]
+- Updated dependencies [03be565]
+- Updated dependencies [7e9fa4b]
+- Updated dependencies [bc8945f]
+- Updated dependencies [42afac7]
+- Updated dependencies [a9fb14b]
+- Updated dependencies [6f095b9]
+- Updated dependencies [5f80129]
+- Updated dependencies [0c7e95a]
+- Updated dependencies [aa57c76]
+- Updated dependencies [c8e6d38]
+- Updated dependencies [d99cd3b]
+- Updated dependencies [b6caa14]
+- Updated dependencies [a77c2e9]
+- Updated dependencies [ea5807e]
+- Updated dependencies [d3f23d2]
+- Updated dependencies [ff12aed]
+- Updated dependencies [6c48d48]
+- Updated dependencies [bff5ba2]
+- Updated dependencies [31260ca]
+- Updated dependencies [ef2ad31]
+- Updated dependencies [18870c9]
+- Updated dependencies [fa9c0aa]
+- Updated dependencies [5174603]
+- Updated dependencies [f6faf75]
+- Updated dependencies [fd749a4]
+- Updated dependencies [f5aaa0b]
+- Updated dependencies [77c203a]
+- Updated dependencies [648089d]
+- Updated dependencies [10ecafd]
+- Updated dependencies [b6f4c0e]
+- Updated dependencies [b4f4781]
+- Updated dependencies [042efb7]
+- Updated dependencies [48231b0]
+- Updated dependencies [0d54279]
+- Updated dependencies [8e5fabe]
+- Updated dependencies [ac56acf]
+- Updated dependencies [a91409c]
+- Updated dependencies [ab12a3b]
+- Updated dependencies [2b35374]
+- Updated dependencies [7b10a30]
+- Updated dependencies [8b0fbb8]
+- Updated dependencies [ad2393f]
+- Updated dependencies [5bca14f]
+- Updated dependencies [062236c]
+- Updated dependencies [d996c38]
+- Updated dependencies [47c457b]
+- Updated dependencies [5268f50]
+- Updated dependencies [5268f50]
+- Updated dependencies [7b2e557]
+- Updated dependencies [115a43a]
+- Updated dependencies [c1da957]
+- Updated dependencies [b631573]
+- Updated dependencies [78d4fe9]
+- Updated dependencies [78eb352]
+- Updated dependencies [6ddf827]
+- Updated dependencies [d9d3eb7]
+- Updated dependencies [2ce2646]
+- Updated dependencies [bd1b768]
+- Updated dependencies [0f920b9]
+- Updated dependencies [584f7b8]
+- Updated dependencies [66b17a3]
+- Updated dependencies [3f61e4f]
+- Updated dependencies [51992df]
+- Updated dependencies [f84205b]
+- Updated dependencies [eca7cd2]
+- Updated dependencies [cf4b9bf]
+- Updated dependencies [614e831]
+  - @object-ui/components@18.4.0
+  - @object-ui/core@18.4.0
+  - @object-ui/fields@18.4.0
+  - @object-ui/react@18.4.0
+  - @object-ui/types@18.4.0
+  - @object-ui/i18n@18.4.0
+  - @object-ui/permissions@18.4.0
+
 ## 18.3.0
 
 ### Patch Changes

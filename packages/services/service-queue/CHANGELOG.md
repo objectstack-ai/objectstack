@@ -1,5 +1,167 @@
 # @objectstack/service-queue
 
+## 18.4.0
+
+### Patch Changes
+
+- 771b2db: fix(core,service-messaging,service-queue): an idle dispatch loop wakes at the next due time, and a sole writer's loop no longer re-runs the idle ramp after every boot
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - **`@objectstack/core`: `DispatchLoop` wakes at the next due time.** A new optional `DispatchLoopOptions.nextDueAt()` answers the earliest instant work becomes claimable (a deferred row, a claim's expiry). The loop asks it once per idle streak, after the first empty tick, and never sleeps past the answer, so a deferred row goes out within one tick of coming due whatever `maxIdleIntervalMs` is. The answer is remembered rather than re-read on every ceiling tick, so an idle loop's steady-state cost is unchanged; the new `DispatchLoop.wakeAt(dueAtMs)` lets a producer in the same process announce a deferred row at no read. An answer at or before the tick that found nothing is not chased, and a rejected tick or read still counts as idle, so neither can make the loop spin.
+  - **`@objectstack/core`: `DispatchLoopOptions.soleWriter`** (default `false`). On a host where no other process writes the store, an empty tick sleeps straight to the next due time or the ceiling instead of re-running the ramp from `intervalMs`, which only ever bought latency on rows another process wrote. A fresh sole-writer loop over an empty store now ticks once in its first minute; before, every boot re-ran the ramp (six ticks in the first minute at the dispatchers' 500 ms base, five at the queue's 1 s).
+  - **`@objectstack/service-messaging`:** `INotificationOutbox.nextDueAt` / `IHttpOutbox.nextDueAt` (optional; both built-in stores implement it: two reads, the earliest future `next_attempt_at` / `next_retry_at` and the oldest `in_flight` claim plus the claim TTL), wired into `NotificationDispatcher` and `HttpDispatcher`; `soleWriter` on both dispatchers' options, and `dispatchSoleWriter` on `MessagingServicePlugin`. Retries, quiet hours, digest windows and a crashed node's claims are taken at their due time instead of up to `dispatchMaxIdleIntervalMs` late.
+  - **`@objectstack/service-queue`:** `DbQueueAdapter` reads the earliest future `scheduled_for` of its subscribed queues (one read per idle streak), a deferred `publish()` announces its due time to the loop through `wakeAt` instead of waiting out the backoff, and `DbQueueAdapterOptions.soleWriter` (reachable as `QueueServicePlugin` `db.soleWriter`) skips the ramp.
+  
+  Nothing changes for a host that sets neither `soleWriter` flag except the due-time wake: the ramp keeps its shape, cut short only when a due row is earlier, and an idle stretch costs one extra read at its start.
+- 8b117c0: fix(service-queue): a job whose worker died mid-handler is reclaimed once its lease runs out, instead of staying `running` forever
+  
+  Clause-②: no — restores the documented `leaseMs` reclaim; no accept set or export widens
+  Metadata-protocol: none
+  
+  `DbQueueAdapterOptions.leaseMs` documented a lease "before another worker may reclaim", but the claim read only `pending` rows, so a worker that crashed, was OOM-killed or was redeployed mid-handler left its `sys_job_queue` row `running` for good: never retried, never dead-lettered.
+  
+  - **Reclaim.** A poll tick reads the table's `running` rows (one read for every queue, at most once per lease window) and returns each whose `locked_until` has passed to the retry path. The lost run counts as an attempt: the row goes back to `pending` on its backoff, or to `dlq` once `maxAttempts` is spent, with `last_error` saying the lease expired. The write is a compare-and-set on the expired lease, so a holder that renewed in the meantime keeps its run.
+  - **Renewal.** While a handler runs, its worker moves its lease a full window ahead every third of `leaseMs`, so a slow but live handler is never reclaimed and run twice. A handler must not block the event loop for most of a lease window.
+  - **Sole writer.** With `soleWriter` no other process claims rows, so the reclaim reads once per boot (finding what a crashed previous process left behind) and again only when one of this process's own claims was left unsettled by a failed write and its lease runs out. `nextDueAt` folds in those leases and the earliest live lease the last read saw, at no read of its own, so the loop wakes for them instead of at the idle ceiling.
+  - **Cost.** Without `soleWriter`, an idle queue pays one more indexed read per lease window (default 30 s): an idle hour at the defaults goes from 125 to 246 reads. With `soleWriter`, one more read per boot: a fresh kernel's first minute goes from 2 to 3 reads, and an idle hour carries no other.
+- Updated dependencies [8aa2e91]
+- Updated dependencies [c17719d]
+- Updated dependencies [b90a6f7]
+- Updated dependencies [e8dc483]
+- Updated dependencies [bcdb1db]
+- Updated dependencies [9ebca94]
+- Updated dependencies [140d8ce]
+- Updated dependencies [699ebd8]
+- Updated dependencies [4c2cd29]
+- Updated dependencies [4be8a2e]
+- Updated dependencies [471add3]
+- Updated dependencies [b5eb61d]
+- Updated dependencies [771b2db]
+- Updated dependencies [97e4249]
+- Updated dependencies [9037b13]
+- Updated dependencies [e3b56b2]
+- Updated dependencies [a52761f]
+- Updated dependencies [e8afd1e]
+- Updated dependencies [bd65cb6]
+- Updated dependencies [f19fbb8]
+- Updated dependencies [217ba78]
+- Updated dependencies [cde492d]
+- Updated dependencies [eee4149]
+- Updated dependencies [f3a52d3]
+- Updated dependencies [d59a1eb]
+- Updated dependencies [af3451b]
+- Updated dependencies [3a27208]
+- Updated dependencies [0c666c3]
+- Updated dependencies [38717d3]
+- Updated dependencies [ac890f5]
+- Updated dependencies [aa57c76]
+- Updated dependencies [fc869c2]
+- Updated dependencies [fef212b]
+- Updated dependencies [dc51811]
+- Updated dependencies [b77c160]
+- Updated dependencies [09720e2]
+- Updated dependencies [8fed00f]
+- Updated dependencies [25fea77]
+- Updated dependencies [86ae2ca]
+- Updated dependencies [3da9a4c]
+- Updated dependencies [4be9734]
+- Updated dependencies [bb86ff9]
+- Updated dependencies [977be38]
+- Updated dependencies [2046d21]
+- Updated dependencies [740edc5]
+- Updated dependencies [778aedf]
+- Updated dependencies [71318af]
+- Updated dependencies [fd749a4]
+- Updated dependencies [d9d42d4]
+- Updated dependencies [9d939c5]
+- Updated dependencies [25e1c1a]
+- Updated dependencies [47226e6]
+- Updated dependencies [c7d1367]
+- Updated dependencies [f5aaa0b]
+- Updated dependencies [0005fec]
+- Updated dependencies [2d6402c]
+- Updated dependencies [77c203a]
+- Updated dependencies [8293c74]
+- Updated dependencies [29702d5]
+- Updated dependencies [a839020]
+- Updated dependencies [a7b8876]
+- Updated dependencies [f7afab8]
+- Updated dependencies [4dde0ae]
+- Updated dependencies [e8e924f]
+- Updated dependencies [590724f]
+- Updated dependencies [35cd64c]
+- Updated dependencies [38d416f]
+- Updated dependencies [d2e2f6f]
+- Updated dependencies [d5f3bc5]
+- Updated dependencies [e3948ae]
+- Updated dependencies [b55d6ab]
+- Updated dependencies [1c5cee6]
+- Updated dependencies [aad1603]
+- Updated dependencies [eb68b98]
+- Updated dependencies [a11ef71]
+- Updated dependencies [7145bf3]
+- Updated dependencies [55d9dd4]
+- Updated dependencies [af8aab1]
+- Updated dependencies [a59d00a]
+- Updated dependencies [4bf9a2d]
+- Updated dependencies [0c9aa82]
+- Updated dependencies [49c8568]
+- Updated dependencies [4564d6f]
+- Updated dependencies [f2ea193]
+- Updated dependencies [badf24d]
+- Updated dependencies [5268f50]
+- Updated dependencies [a30c4f4]
+- Updated dependencies [0cba0ce]
+- Updated dependencies [c893b3d]
+- Updated dependencies [677d542]
+- Updated dependencies [9bdeed2]
+- Updated dependencies [3479c33]
+- Updated dependencies [000a4c0]
+- Updated dependencies [7569fb5]
+- Updated dependencies [f4d9c09]
+- Updated dependencies [c77dd17]
+- Updated dependencies [ebe0a98]
+- Updated dependencies [9038187]
+- Updated dependencies [f108e6d]
+- Updated dependencies [5cb7d7e]
+- Updated dependencies [78eb352]
+- Updated dependencies [2ce2646]
+- Updated dependencies [468e0c1]
+- Updated dependencies [6106b73]
+- Updated dependencies [0f920b9]
+- Updated dependencies [6bd00d2]
+- Updated dependencies [b5696b4]
+- Updated dependencies [33bc8ae]
+- Updated dependencies [a1afbb9]
+- Updated dependencies [150f740]
+- Updated dependencies [42eb126]
+- Updated dependencies [8cf1fd0]
+- Updated dependencies [cadd6aa]
+- Updated dependencies [a5cb4f1]
+- Updated dependencies [3c1eb63]
+- Updated dependencies [d57be87]
+- Updated dependencies [5d4f2aa]
+- Updated dependencies [f4cd4ec]
+- Updated dependencies [b3d2f4b]
+- Updated dependencies [eca7cd2]
+- Updated dependencies [cf4b9bf]
+- Updated dependencies [e1dac19]
+- Updated dependencies [7b2bb66]
+- Updated dependencies [a794e32]
+- Updated dependencies [21510bb]
+- Updated dependencies [0fd363d]
+- Updated dependencies [5210acf]
+- Updated dependencies [d6b88f1]
+- Updated dependencies [4123865]
+- Updated dependencies [bdbaf80]
+- Updated dependencies [6ffe37e]
+- Updated dependencies [63a470a]
+  - @objectstack/spec@18.4.0
+  - @objectstack/core@18.4.0
+  - @objectstack/platform-objects@18.4.0
+
 ## 18.3.0
 
 ### Patch Changes

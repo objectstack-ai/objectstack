@@ -1,5 +1,121 @@
 # @object-ui/plugin-calendar
 
+## 18.4.0
+
+### Patch Changes
+
+- a91409c: fix(core,react,i18n,components,app-shell,console): a write refused because the object's external datasource does not accept writes says the table is read-only, not "you don't have permission"
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - **`@object-ui/core`: `isExternalWriteRefusal(err)`**, re-exported from `@object-ui/react` beside the other write-refusal readers. True when the server refused a write with `EXTERNAL_WRITE_FORBIDDEN`, the ADR-0015 write gate's code for an object bound to an external datasource that does not admit writes (`datasource.external.allowWrites` and `object.external.writable` must both be true). Read from `code`, then `details.code`, like `isPermissionError`. The refusal is a 403, so `isPermissionError` answers true for it too: a caller asks this first.
+  - **`@object-ui/i18n`: `form.readOnlyExternalSource`**, in all ten packs: "This table is read-only. Its records come from an external data source that does not accept changes."
+  - **Every surface that met this refusal now says the table is read-only:** the console record form page and the record dialog (`@object-ui/components` form), which said "you don't have permission to save this record"; the record page delete, the list row delete and the record page inline edit, which showed the gate's raw diagnostic; and the calendar's drag-to-reschedule and the record path's stage change. A permission line sent an administrator through permission sets for a grant that cannot exist.
+- Updated dependencies [7da99b7]
+- Updated dependencies [3214615]
+- Updated dependencies [4261169]
+- Updated dependencies [ffeda13]
+- Updated dependencies [8fefefd]
+- Updated dependencies [b5fd350]
+- Updated dependencies [ac5d0ce]
+- Updated dependencies [2cf269f]
+- Updated dependencies [e396095]
+- Updated dependencies [f810c34]
+- Updated dependencies [7a5f73e]
+- Updated dependencies [a4c3e73]
+- Updated dependencies [1e6f542]
+- Updated dependencies [b379262]
+- Updated dependencies [7945a3b]
+- Updated dependencies [c2be734]
+- Updated dependencies [6e68d8f]
+- Updated dependencies [3461420]
+- Updated dependencies [9049be2]
+- Updated dependencies [a52761f]
+- Updated dependencies [6db9198]
+- Updated dependencies [df4c06e]
+- Updated dependencies [f68b47c]
+- Updated dependencies [f0ad1f7]
+- Updated dependencies [03be565]
+- Updated dependencies [7e9fa4b]
+- Updated dependencies [bc8945f]
+- Updated dependencies [42afac7]
+- Updated dependencies [a9fb14b]
+- Updated dependencies [6f095b9]
+- Updated dependencies [5f80129]
+- Updated dependencies [0c7e95a]
+- Updated dependencies [c1240a3]
+- Updated dependencies [5fa9375]
+- Updated dependencies [aa57c76]
+- Updated dependencies [c8e6d38]
+- Updated dependencies [d99cd3b]
+- Updated dependencies [b6caa14]
+- Updated dependencies [a77c2e9]
+- Updated dependencies [ff3f83b]
+- Updated dependencies [ea5807e]
+- Updated dependencies [4128213]
+- Updated dependencies [d3f23d2]
+- Updated dependencies [ff12aed]
+- Updated dependencies [6c48d48]
+- Updated dependencies [bff5ba2]
+- Updated dependencies [31260ca]
+- Updated dependencies [ef2ad31]
+- Updated dependencies [18870c9]
+- Updated dependencies [fa9c0aa]
+- Updated dependencies [5174603]
+- Updated dependencies [fd749a4]
+- Updated dependencies [f5aaa0b]
+- Updated dependencies [77c203a]
+- Updated dependencies [648089d]
+- Updated dependencies [10ecafd]
+- Updated dependencies [b6f4c0e]
+- Updated dependencies [b4f4781]
+- Updated dependencies [042efb7]
+- Updated dependencies [48231b0]
+- Updated dependencies [0d54279]
+- Updated dependencies [8e5fabe]
+- Updated dependencies [ac56acf]
+- Updated dependencies [a91409c]
+- Updated dependencies [ab12a3b]
+- Updated dependencies [2b35374]
+- Updated dependencies [cd7f785]
+- Updated dependencies [7b10a30]
+- Updated dependencies [8b0fbb8]
+- Updated dependencies [ad2393f]
+- Updated dependencies [5bca14f]
+- Updated dependencies [062236c]
+- Updated dependencies [d996c38]
+- Updated dependencies [47c457b]
+- Updated dependencies [5268f50]
+- Updated dependencies [7b2e557]
+- Updated dependencies [115a43a]
+- Updated dependencies [c1da957]
+- Updated dependencies [b631573]
+- Updated dependencies [78d4fe9]
+- Updated dependencies [78eb352]
+- Updated dependencies [6ddf827]
+- Updated dependencies [d9d3eb7]
+- Updated dependencies [2ce2646]
+- Updated dependencies [bd1b768]
+- Updated dependencies [0f920b9]
+- Updated dependencies [584f7b8]
+- Updated dependencies [66b17a3]
+- Updated dependencies [3f61e4f]
+- Updated dependencies [51992df]
+- Updated dependencies [f84205b]
+- Updated dependencies [eca7cd2]
+- Updated dependencies [cf4b9bf]
+- Updated dependencies [614e831]
+- Updated dependencies [8a0516c]
+  - @object-ui/components@18.4.0
+  - @object-ui/core@18.4.0
+  - @object-ui/plugin-detail@18.4.0
+  - @object-ui/react@18.4.0
+  - @object-ui/types@18.4.0
+  - @object-ui/mobile@18.4.0
+  - @object-ui/i18n@18.4.0
+  - @object-ui/permissions@18.4.0
+
 ## 18.3.0
 
 ### Minor Changes

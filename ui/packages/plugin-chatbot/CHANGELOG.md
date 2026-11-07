@@ -1,5 +1,228 @@
 # @object-ui/plugin-chatbot
 
+## 18.4.0
+
+### Patch Changes
+
+- 3b8b23c: refactor(plugin-chatbot)!: retire eight zero-consumer exports (the floating chatbot context hook and its three types, the message item props, one adapter helper and two display helpers)
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (runtime-export-retired @object-ui/plugin-chatbot#useFloatingChatbot, @object-ui/plugin-chatbot#FloatingChatbotState, @object-ui/plugin-chatbot#FloatingChatbotActions, @object-ui/plugin-chatbot#FloatingChatbotContextValue, @object-ui/plugin-chatbot#ChatMessageProps, @object-ui/plugin-chatbot#toRuntimeToolInvocation, @object-ui/plugin-chatbot#unwrapToolResult, @object-ui/plugin-chatbot#summarizeChatError) the retired operands are a React context hook with its state, actions and context-value types, the props interface of an internal message row, one authored-to-runtime tool-invocation converter and two tool-call display helpers; nothing in the workspace or in hotcrm imports any of them from the package entry, and no packages/spec schema, registered node type, conversion surface or stored shape names them, so there is nothing for `objectstack migrate meta` to rewrite -->
+  
+  **BREAKING** for a host that imports any of these eight names from `@object-ui/plugin-chatbot`. None had an importer anywhere in the workspace or in hotcrm, so the Console and every `@object-ui/*` package are unaffected. Every module stays in the package: `FloatingChatbotTrigger` and `FloatingChatbotPanel` keep reading the floating state through the hook, `toRuntimeMessages` keeps converting tool invocations, and `ChatbotEnhanced` keeps rendering tool results and error summaries with the two helpers. Only the entry stops publishing them. `FloatingChatbot`, `FloatingChatbotProvider`, `FloatingChatbotTrigger`, `FloatingChatbotPanel` and their `…Props` types, `toRuntimeMessages`, `authoredToRuntimeMessage`, `toRuntimeRole`, `toRuntimeTimestamp`, `toRuntimeToolState`, `humanizeToolName`, `TypingIndicator`, `emitAiUsageRefresh` and `AGENT_ALIAS_GROUPS` stay exported unchanged.
+  
+  What leaves, and what to write instead:
+  
+  - FROM `useFloatingChatbot`, `FloatingChatbotState`, `FloatingChatbotActions`, `FloatingChatbotContextValue` TO `FloatingChatbotTrigger` and `FloatingChatbotPanel` inside a `FloatingChatbotProvider`, which open, close and toggle the panel themselves; for a control of your own, hold the open state in your own component.
+  - FROM `ChatMessageProps` TO `ChatbotProps`: `Chatbot` renders the message rows itself.
+  - FROM `toRuntimeToolInvocation` TO `toRuntimeMessages` or `authoredToRuntimeMessage`, which convert every tool invocation of a message.
+  - FROM `unwrapToolResult`, `summarizeChatError` TO no replacement: `ChatbotEnhanced` applies both itself; keep a local copy if your own chat surface needs them.
+- fccde75: fix(plugin-chatbot,app-shell): after 确认 or 取消 on the chat's confirm card, the follow-up sent to the model no longer shows as the person's own message
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  After the operator confirmed or cancelled an action on the chat's confirm card, the chat sent the model a short follow-up («[HITL pa_…] The operator approved the `update_record` call … Acknowledge the outcome …») through the ordinary user-message channel, so the person saw it as their own bubble, after a reload too, and the conversation list showed it as the conversation's preview. The model still receives that follow-up unchanged. What changed is who reads it as the person's words: the chat transcript draws no bubble for it (live, after a reload, and on a shared transcript), the conversation list previews the person's last ask instead, and the conversation-language probe no longer reads it as the person's latest turn, which turned a Chinese conversation's outbound text English when the action's result carried no Chinese. The follow-up is recognised by its leading `[HITL <id>]` tag, the one part of a stored message that survives a reload; `@object-ui/plugin-chatbot` exports the reader as `isHitlContinuation` (also from `./core`). An ordinary message is sent, drawn and previewed as before.
+- eca7cd2: feat(plugin-chatbot): the record-write card — ONE record the chat proposes and the user confirms, with 确认 / 打开完整表单 / 取消 (cloud#3565)
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The cloud chat's `create_record` / `update_record` tools queue a HITL pending action in the user's name and answer the approval envelope plus the record: `{ status:'pending_approval', pendingActionId, recordWrite:{ operation, objectName, objectLabel, recordId?, label?, reason?, fields:[{ name, label, type, value, current? }], dropped } }`. The chat now draws that as a card instead of the generic Approve / Deny strip and the raw payload:
+  
+  - **New export** `detectRecordWrite(result)` (with the `RecordWrite` and `RecordWriteField` types), lifted onto `ChatbotEnhancedToolInvocation.recordWrite` by the live mapper beside `pendingActionId`. It reads the bare object, the persisted `{ type:'text', value }` wrapper and a JSON string; an envelope without the pending id or without a field to confirm is not a card.
+  - **The card** (`data-testid="record-write"`): the create or update title with the object's label, the record's label and reason, every field as a labelled row — an update shows the stored value struck through, then →, then the proposed one — the fields the server left out and why, and three buttons. 确认 calls `onToolApprove(toolCallId, true)` (the pending action's dispatcher writes as the user); 取消 calls it with `false` and `recordWriteCancelReason`; 打开完整表单 calls it with `false` and `recordWriteOpenFormReason` FIRST, then the new `onOpenRecordForm(write)` prop, so a record saved in the form is never written a second time from the card (disabled where the host passes no handler). After a decision the card says written (with the record's link through `onOpenRecord`, read from the dispatcher's `{ status:'written', objectName, recordId, label }` result), cancelled, or the server's refusal.
+  - **New props**: `onOpenRecordForm`, `recordWriteCreateTitle(objectLabel)`, `recordWriteUpdateTitle(objectLabel)`, `recordWriteConfirmLabel`, `recordWriteOpenFormLabel`, `recordWriteCancelLabel`, `recordWriteCancelReason`, `recordWriteOpenFormReason`, `recordWriteDroppedLabel`, `recordWriteSubmittingLabel`, `recordWriteWrittenLabel`, `recordWriteCancelledLabel`, all with English defaults.
+  - **「清理示例数据」** rides the same seam: `detectSampleDataCleanup(result)` (with the `SampleDataCleanup` type) lifts `{ status:'pending_approval', pendingActionId, sampleDataCleanup:{ tables:[{ objectName, label, count }], total, absent, edited } }` onto `sampleDataCleanup`, and the chat draws the tables and counts (`data-testid="sample-data-cleanup"`, title from the new `sampleDataCleanupTitleLabel` prop) above the generic Approve / Deny strip, with the raw payload hidden. The card always says the removal cannot be undone (`sampleDataCleanupIrreversibleLabel`, default "Removed rows cannot be recovered." — there is no recycle bin until objectstack#3146), says how many recorded rows it does not list when `absent` is above 0 (`sampleDataCleanupAbsentLabel(count)`) and how many stay because someone edited them when `edited` is above 0 (`sampleDataCleanupEditedLabel(count)`; an envelope without `edited` reads as 0).
+  - **`ToolDecisionState`** (widened, additive): every state may carry `decision: 'approved' | 'rejected'`, and an approved `success` may carry `result`, the dispatcher's answer. `useHitlInChat` sets both; the generic strip keeps reading `message` alone.
+- Updated dependencies [7da99b7]
+- Updated dependencies [3214615]
+- Updated dependencies [4261169]
+- Updated dependencies [8fefefd]
+- Updated dependencies [b5fd350]
+- Updated dependencies [ac5d0ce]
+- Updated dependencies [2cf269f]
+- Updated dependencies [e396095]
+- Updated dependencies [f810c34]
+- Updated dependencies [7a5f73e]
+- Updated dependencies [8aa2e91]
+- Updated dependencies [c17719d]
+- Updated dependencies [b90a6f7]
+- Updated dependencies [e8dc483]
+- Updated dependencies [bcdb1db]
+- Updated dependencies [9ebca94]
+- Updated dependencies [1e6f542]
+- Updated dependencies [140d8ce]
+- Updated dependencies [699ebd8]
+- Updated dependencies [b379262]
+- Updated dependencies [7945a3b]
+- Updated dependencies [4c2cd29]
+- Updated dependencies [4be8a2e]
+- Updated dependencies [471add3]
+- Updated dependencies [b5eb61d]
+- Updated dependencies [97e4249]
+- Updated dependencies [9037b13]
+- Updated dependencies [c2be734]
+- Updated dependencies [e3b56b2]
+- Updated dependencies [9049be2]
+- Updated dependencies [a52761f]
+- Updated dependencies [6db9198]
+- Updated dependencies [e8afd1e]
+- Updated dependencies [bd65cb6]
+- Updated dependencies [217ba78]
+- Updated dependencies [cde492d]
+- Updated dependencies [eee4149]
+- Updated dependencies [f3a52d3]
+- Updated dependencies [d59a1eb]
+- Updated dependencies [af3451b]
+- Updated dependencies [3a27208]
+- Updated dependencies [f0ad1f7]
+- Updated dependencies [03be565]
+- Updated dependencies [7e9fa4b]
+- Updated dependencies [bc8945f]
+- Updated dependencies [42afac7]
+- Updated dependencies [0c666c3]
+- Updated dependencies [38717d3]
+- Updated dependencies [a9fb14b]
+- Updated dependencies [6f095b9]
+- Updated dependencies [ac890f5]
+- Updated dependencies [5f80129]
+- Updated dependencies [0c7e95a]
+- Updated dependencies [aa57c76]
+- Updated dependencies [fc869c2]
+- Updated dependencies [fef212b]
+- Updated dependencies [c8e6d38]
+- Updated dependencies [d99cd3b]
+- Updated dependencies [dc51811]
+- Updated dependencies [b77c160]
+- Updated dependencies [09720e2]
+- Updated dependencies [b6caa14]
+- Updated dependencies [a77c2e9]
+- Updated dependencies [25fea77]
+- Updated dependencies [ea5807e]
+- Updated dependencies [d3f23d2]
+- Updated dependencies [ff12aed]
+- Updated dependencies [6c48d48]
+- Updated dependencies [3da9a4c]
+- Updated dependencies [4be9734]
+- Updated dependencies [bff5ba2]
+- Updated dependencies [bb86ff9]
+- Updated dependencies [31260ca]
+- Updated dependencies [ef2ad31]
+- Updated dependencies [2046d21]
+- Updated dependencies [18870c9]
+- Updated dependencies [fa9c0aa]
+- Updated dependencies [fd749a4]
+- Updated dependencies [d9d42d4]
+- Updated dependencies [9d939c5]
+- Updated dependencies [25e1c1a]
+- Updated dependencies [47226e6]
+- Updated dependencies [c7d1367]
+- Updated dependencies [f5aaa0b]
+- Updated dependencies [0005fec]
+- Updated dependencies [2d6402c]
+- Updated dependencies [77c203a]
+- Updated dependencies [8293c74]
+- Updated dependencies [648089d]
+- Updated dependencies [10ecafd]
+- Updated dependencies [b6f4c0e]
+- Updated dependencies [b4f4781]
+- Updated dependencies [042efb7]
+- Updated dependencies [48231b0]
+- Updated dependencies [0d54279]
+- Updated dependencies [8e5fabe]
+- Updated dependencies [ac56acf]
+- Updated dependencies [a91409c]
+- Updated dependencies [ab12a3b]
+- Updated dependencies [2b35374]
+- Updated dependencies [29702d5]
+- Updated dependencies [a839020]
+- Updated dependencies [a7b8876]
+- Updated dependencies [7b10a30]
+- Updated dependencies [8b0fbb8]
+- Updated dependencies [4dde0ae]
+- Updated dependencies [590724f]
+- Updated dependencies [38d416f]
+- Updated dependencies [d2e2f6f]
+- Updated dependencies [b55d6ab]
+- Updated dependencies [aad1603]
+- Updated dependencies [ad2393f]
+- Updated dependencies [5bca14f]
+- Updated dependencies [7145bf3]
+- Updated dependencies [55d9dd4]
+- Updated dependencies [af8aab1]
+- Updated dependencies [062236c]
+- Updated dependencies [a59d00a]
+- Updated dependencies [4bf9a2d]
+- Updated dependencies [d996c38]
+- Updated dependencies [0c9aa82]
+- Updated dependencies [49c8568]
+- Updated dependencies [47c457b]
+- Updated dependencies [4564d6f]
+- Updated dependencies [f2ea193]
+- Updated dependencies [5268f50]
+- Updated dependencies [5268f50]
+- Updated dependencies [7b2e557]
+- Updated dependencies [115a43a]
+- Updated dependencies [a30c4f4]
+- Updated dependencies [0cba0ce]
+- Updated dependencies [c893b3d]
+- Updated dependencies [677d542]
+- Updated dependencies [9bdeed2]
+- Updated dependencies [c1da957]
+- Updated dependencies [3479c33]
+- Updated dependencies [000a4c0]
+- Updated dependencies [f4d9c09]
+- Updated dependencies [c77dd17]
+- Updated dependencies [ebe0a98]
+- Updated dependencies [9038187]
+- Updated dependencies [f108e6d]
+- Updated dependencies [5cb7d7e]
+- Updated dependencies [b631573]
+- Updated dependencies [78d4fe9]
+- Updated dependencies [78eb352]
+- Updated dependencies [6ddf827]
+- Updated dependencies [d9d3eb7]
+- Updated dependencies [2ce2646]
+- Updated dependencies [bd1b768]
+- Updated dependencies [468e0c1]
+- Updated dependencies [6106b73]
+- Updated dependencies [0f920b9]
+- Updated dependencies [0f920b9]
+- Updated dependencies [33bc8ae]
+- Updated dependencies [584f7b8]
+- Updated dependencies [66b17a3]
+- Updated dependencies [a1afbb9]
+- Updated dependencies [150f740]
+- Updated dependencies [42eb126]
+- Updated dependencies [3f61e4f]
+- Updated dependencies [8cf1fd0]
+- Updated dependencies [51992df]
+- Updated dependencies [a5cb4f1]
+- Updated dependencies [3c1eb63]
+- Updated dependencies [d57be87]
+- Updated dependencies [f84205b]
+- Updated dependencies [eca7cd2]
+- Updated dependencies [eca7cd2]
+- Updated dependencies [cf4b9bf]
+- Updated dependencies [cf4b9bf]
+- Updated dependencies [614e831]
+- Updated dependencies [e1dac19]
+- Updated dependencies [21510bb]
+- Updated dependencies [0fd363d]
+- Updated dependencies [d6b88f1]
+- Updated dependencies [4123865]
+- Updated dependencies [6ffe37e]
+- Updated dependencies [63a470a]
+  - @object-ui/components@18.4.0
+  - @object-ui/core@18.4.0
+  - @object-ui/react@18.4.0
+  - @object-ui/types@18.4.0
+  - @objectstack/spec@18.4.0
+  - @object-ui/i18n@18.4.0
+
 ## 18.3.0
 
 ### Patch Changes

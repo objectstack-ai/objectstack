@@ -1,5 +1,594 @@
 # @objectstack/metadata-protocol
 
+## 18.4.0
+
+### Minor Changes
+
+- 486b0a9: feat(metadata-core, metadata-protocol, objectql, lint, runtime)!: an App and the modules that declare it share one customization pair
+  
+  Clause-②: yes (narrowing) — the ensure door refuses two asks it accepted: a package that reaches several Apps and whose namespace picks none of them (was `201` with its own pair, now `409`, merge question 11), and a module whose earlier per-package pair holds the App's pair namespace (was `201`/`200`, now `409 RESOURCE_CONFLICT` naming that pair, merge question 12); `appOf` now returns `string | undefined`. The widening half: a module of an App gets the App's pair (`200`, where it was `422 NAMESPACE_CONFLICT` when the App held the namespace), and `@objectstack/metadata-core` exports `pairsOf`, `AppOfRefusal` and `PairOfRefusal`. Ruling 6691022506; ADR-0146 D3 as amended by #31027.
+  Metadata-protocol: semantic
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and nothing at rest changes: a pair the ensure door created stays installed and served, and the two new refusals answer an ask without writing anything, so there is nothing for a migration to rewrite. -->
+  
+  The customization unit is the App (ADR-0146 D3 as amended, ruling record 6691022506). `appOf` in `@objectstack/metadata-core` now reads the installed manifests: a `type: 'app'` package is its own App; any other package's App is the installed `type: 'app'` package it declares in `manifest.dependencies`, directly or through its declared parents (where it reaches several, the one holding its namespace); a package that declares no App is its own unit; a kernel package (scope `system` / `cloud`) keeps its own answer, because no platform pair is created in this version.
+  
+  What changes for a caller:
+  
+  - `POST /api/v1/packages/:id/ensure-customization` asked for a module of an App answers the App's one pair, `<app id>.custom` (namespace `<app namespace>_custom`, a dependency on the App at `^<major>`): `201` on the first ask from any member, `200` after, never `422` for a package of the same App. The answer's `basePackageId` is the App. HotCRM: the App and its modules all answer `app.objectstack.hotcrm.custom`.
+  - `422 NAMESPACE_CONFLICT` stays for the pair namespace held by a package outside the App.
+  - A per-package pair an earlier version created for a module (`<module id>.custom`) stays installed and honoured as before: its declared overrides are served at the module's address (by name, in the list and in the layered read), its list rows, translations, bundle members it added, object extensions and the served-overrides census are read beside the App's pair (`pairsOf` / `isPairOf`), it may still declare and remove its own overrides of the module's items ("Restore package original" included, for a type with no overlay channel too), and the customizations read (`GET /api/v1/packages/:id/customizations`) does not list it as another package's contribution. No reader is App-pair-only. While it holds the App's pair namespace, the ensure door answers `409 RESOURCE_CONFLICT` naming it instead of creating the App's pair beside it (merge question 12).
+  - A package that reaches several Apps and whose namespace picks none of them has no pair: the ensure door answers `409` (merge question 11).
+  - The App's pair's write closure reaches every member of the App, so an override or an object extension of a module's item saved into the App's pair is admitted.
+  - The uninstall refusal for an installed pair reads the pair named for the package: uninstalling the App is refused while the App's pair is installed, uninstalling a module is not (its customizations are the App pair's), and a module whose own earlier per-package pair is installed is still refused naming that pair.
+  - `os validate`'s `namespace-no-customization-pair` warning skips a member of a delivered App: its customizations land in the App's pair.
+  
+  TypeScript: `appOf` now answers `string | undefined` (`undefined` = no single App), and `pairOf`'s refusal union gains `no_single_app` (`PairOfRefusal`); `pairsOf` and the `AppOfRefusal` / `PairOfRefusal` types are new exports of `@objectstack/metadata-core`.
+  
+  **BREAKING** accept-set narrowing at `POST /api/v1/packages/:id/ensure-customization` (`@objectstack/metadata-protocol`) and a return-type change in `@objectstack/metadata-core`.
+  
+  - **A package that reaches several Apps and whose namespace picks none.** Before: `201` with its own pair `<package id>.custom`. Now: `409 RESOURCE_CONFLICT` saying the package declares several Apps and its namespace picks no single one of them, and nothing is created. Remedy: declare the one App the package belongs to in `manifest.dependencies`, or give it the namespace of the App it belongs to.
+  - **A module whose earlier per-package pair holds the App's pair namespace.** Before: the module's own `<module id>.custom` (`201`, then `200`). Now: `409 RESOURCE_CONFLICT` naming that pair, from the App and from every member; the pair stays installed and its customizations stay served. Remedy: keep customizing in the existing pair (its id is in the refusal), or export it (`GET /api/v1/packages/<pair>/export`), delete it, and ensure again to get the App's pair.
+  - **`appOf` returns `string | undefined`** (was `string`). `undefined` means no single App. Remedy: handle `undefined` (`appOf(id, installed) ?? id` keeps the old reading); `pairOf`'s refusal reason may now also be `'no_single_app'` (`PairOfRefusal`).
+- 140d8ce: fix(spec,metadata-protocol,mcp)!: a field marked `sortable: false` is no longer offered or performed as a sort — the sortability projection reports it unsortable, and the Data API and the stdio MCP `query_records` refuse a sort on it with `400 INVALID_SORT` (#29896)
+  
+  Clause-②: yes (narrowing) — `GET /api/v1/data/:object` (and every request that reaches the same list door: `POST /api/v1/data/:object/query`, the export route, the RPC dispatcher, the record-page `related[].sort`) and the stdio MCP `query_records` refuse a sort on a field whose author declared `sortable: false`, which they used to answer sorted by the column; a stored list view `sort` or `record:related_list` `sort` naming such a field is now refused when it is read. The widening half: `@objectstack/spec/api` exports `FIELD_UNSORTABLE_AUTHOR_DECLARED`, and `FieldSortabilitySchema.reason` accepts `'author-declared'` beside `'virtual-type'`.
+  Metadata-protocol: narrowed
+  Skills-docs: none — `skills/**` names no `sortable` field key, and `content/docs/**` already teaches `sortable: false` as "do not allow sorting by this field" and `INVALID_SORT` as "the field must exist and have `sortable: true`", which is what the platform now does. The prescription ships in the refusal text and the upgrade-guide entry.
+  
+  <!-- adr-0087: registered field-sortable-false-sort-refused -->
+  
+  **BREAKING** accept-set narrowing at the Data API list door (`@objectstack/metadata-protocol`) and the stdio MCP `query_records` (`@objectstack/mcp`): a sort on a field marked `sortable: false` is refused.
+  
+  - **Before.** An author who marked a field `sortable: false` (a long text, an unindexed column on a large table) got nothing for it. The sortability projection served on `GET /api/v1/meta/object/NAME` reported the field `{ sortable: true }`, so the list header and the Sort picker offered it, `GET /api/v1/data/NAME?sort=FIELD` answered 200 sorted by it, and so did the stdio MCP `query_records` with that `orderBy`.
+  - **Now.** The projection reports `{ sortable: false, reason: 'author-declared' }` for that field, so the grid header and the Sort picker, which read the projection, stop offering it. The Data API judges the sort by the same projection and refuses it with `400 INVALID_SORT` before any read, the answer a sort on a `formula` field already gets; the stdio MCP `query_records` refuses it the same way before the engine runs. Only the literal `false` counts: a field with no `sortable` key, or with `sortable: true`, sorts as before. A `formula` field also marked `sortable: false` keeps its `reason: 'virtual-type'` answer.
+  - **Stored sorts.** A list view whose `sort` names such a field, or a page `record:related_list` block whose `sort` does, used to load sorted and is now refused when it is read. Lint does not yet judge these at authoring. The upgrade-guide entry `field-sortable-false-sort-refused` lists them.
+  - **Not changed.** In-process callers that reach `ObjectQL.find` directly (hooks, flows) keep sorting by the stored column: the engine door judges only whether a column is stored, and `sortable: false` governs what the platform offers callers, not what its storage can do.
+  
+  **The remedy.** Drop the sort on that field or sort by another one, in requests and in stored view and related-list sorts. An author who wants the field sortable removes `sortable: false` from it.
+- 699ebd8: fix(metadata-protocol)!: the metadata save and publish doors refuse a select field bound to a picklist no loaded package declares, instead of storing it and then refusing every write to the field (#29898)
+  
+  Clause-②: no (narrowing) — the metadata save door (draft and live), the per-item and package publish, and the restore doors refuse an `object` or `object_extension` whose field names a picklist no loaded package declares, a body they accepted before. Nothing is widened.
+  Metadata-protocol: narrowed
+  Skills-docs: no move — `skills/**` teaches no picklist reference verdict and `content/docs/**` carries no severity table for it; the prescription ships in the refusal text, the FROM → TO below and the upgrade-guide entry.
+  
+  <!-- adr-0087: registered picklist-binding-unknown-refused -->
+  
+  **BREAKING** accept-set narrowing at the metadata save and publish doors: `PUT /api/v1/meta/object/NAME` and `PUT /api/v1/meta/object_extension/NAME` (draft and live), `POST /api/v1/packages/PKG/publish-drafts`, the per-item publish, and the rollback / revert restore doors.
+  
+  - **Before.** A select (or multiselect) field with `picklist: 'nope_list'`, a name no loaded package declares, saved `200` with its draft reading `_diagnostics.valid: true`, and `publish-drafts` answered `outcome: published`. The field was then served with no options, and every create or update that set it answered `400 VALIDATION_FAILED` ("takes its values from picklist \"nope_list\", which no loaded package declares"). The boot and a late install already refuse the same shape for a package's own objects, and `os validate` / `os build` refuse it for a stack's own fields.
+  - **Now.** The doors refuse it `422 INVALID_METADATA`, one finding per unknown binding at `fields.FIELD.picklist`, naming the field and the list. A list is declared when the engine's registry resolves it, the same read that serves the field's options: the package's own, a dependency's, the base package's of a `.custom` pair, or any other package installed here.
+  - **Unchanged.** A binding the object already holds is not judged again on a re-save, so an object published before this release keeps saving; the stored-metadata healing pass (`os migrate meta --stored`) is not judged. A draft stored before this release is judged when it is published.
+  - **`@objectstack/spec`.** The upgrade guide entry `picklist-binding-unknown-refused` (a semantic migration: no automatic rewrite, because whether the author meant another list, one still to be declared or inline options is a judgement about the field).
+  - **`@objectstack/cli`.** A source comment in the `os validate` picklist judge no longer says the runtime write path is unjudged.
+  
+  **FROM → TO.** `fields.t: { type: 'select', picklist: 'nope_list' }` → `picklist: 'NAME'` of a list a package installed here declares, or declare `nope_list` in a code package (a `*.picklist.ts` file, or `defineStack({ picklists })`), or `options: [...]` in place of `picklist`.
+- e3b56b2: feat(spec): a lookup or master-detail field's related-list title is translatable
+  
+  Clause-②: yes
+  Metadata-protocol: added
+  
+  A related list the record page derives from a lookup or master-detail field is titled by the field's `relatedListTitle`, or by the child object's label when it has none. That title had no translation slot, so a zh-CN reader saw it in the authoring language, and `os i18n check` could not see the gap. A lookup from an object back to itself was the plainest case: with no title of its own, a contract's record page listed its renewals under 「合同」, the same word as the contract beside it.
+  
+  - `FieldTranslationSchema` declares `relatedListTitle`: `objects.<child>.fields.<field>.relatedListTitle`, on the child object whose field declares the title. `translateObject` overlays it on the served child object (`GET /meta/object`, and the app bundle's object members), which is what the console derives the related list's title from, on the side card and on the body table alike.
+  - It follows the packaged-base rule (ADR-0029 D9.2a): a title an org re-authored on top of the packaged declaration keeps its text. An authored `relatedListTitle` with no entry keeps its authored text; the child object's label is never substituted for it.
+  - `os i18n extract` scaffolds the key and `os i18n check` counts it under the field bucket. A field without a `relatedListTitle` is recorded without being demanded.
+  - The object save door puts a served (translated) `relatedListTitle` back to its source text, as it does for the field's other translated slots.
+- fdad178: fix(metadata-protocol,rest): a `.custom` pair's declared override of a page, dataset, app, book, dashboard, view or report is labelled in the ruled order on every `/meta` read — the pair's own translation, then the override's own label, then the base's translation (#30062)
+  
+  Clause-②: yes (widening) — `ObjectStackProtocolImplementation` gains six public methods: `getPackagedPageBase`, `getPackagedDatasetBase`, `getPackagedAppBase`, `getPackagedBookBase`, `servedOverrideBaseOf` and `getPairTranslationBundle` (measured on `packages/metadata-protocol/dist/index.d.ts`); `@objectstack/rest`'s exported `MetaBookTreeSources` accepts one more optional key, `resolveProtocol` (measured on `packages/rest/dist/index.d.ts`). No accepted key, value or answer is taken away.
+  Metadata-protocol: semantic
+  
+  - **Now.** A changed label on a declared override reads the pair's own translation of that key when the pair ships one, else the override's own text, in every locale, on `GET /meta/:type/:name`, `GET /meta/:type` and `GET /meta/book/:name/tree`. An unchanged label still reads the base's translation. Before, a page, dataset, app or book override read the base's translation over its own changed label, and no type read the pair's translation first.
+  - **The pair's translations.** They are the pair's own active `translation` rows (`package_id` = the pair). A `.custom` package has no code bundle, so it has no code translation source. A package-less authored row is in the deployment catalog but is not the pair's, so it does not rank first.
+  - **Object.** An object is extended, never replaced (ADR-0146 D10), so it has no declared override and no pair bundle: seven types take one.
+  - **The book tree.** `GET /meta/book/:name/tree` now judges a book against its packaged base as the list does, so the docs sidebar and the book list serve the same label (#26690).
+- 15f808a: fix(metadata-protocol): a mapping override is served, a pair's removal of its own override of any overridable type brings the base's item back, and an excluded type's `overrides` refusal names a remedy that works for it (#30062)
+  
+  Clause-②: no — ADR-0146 D2 says an item in the customization package replaces the base's item and removing it brings the base's back, and ADR-0146's revert ("Restore package original") is deleting the overriding item from `.custom` so the base's document is served again. The 403 on removing a pair's own doc or mapping override, and the unserved mapping override, refused what that text already admits. A removal that names the base still keeps today's answer.
+  Metadata-protocol: semantic
+  
+  - **A mapping override in `<base>.custom` is served.** A mapping item that declares `overrides: { package: '<base>', … }` in the base's customization package now replaces the base's mapping for the by-name read (no `?package`, `?package=<base>`), both lists and the layered read, as page, app, dataset, doc and book already did. The import door (`@objectstack/rest`'s `import-mapping.ts`) resolves a named mapping through that package-less by-name read, so it now gets the pair's mapping.
+  - **Removing a pair's own override works for every overridable type.** `DELETE` of a declared override the customization package holds (named with `?package=<base>.custom`) was admitted only for a flow; a doc or mapping override answered `403 NOT_OVERRIDABLE` on the environment kernel. The removal now admits the pair's row for every type `isOverridableMetadataType` names. The row is deleted and the base's item is served again under every address. A removal that names the base (`?package=<base>`) is unchanged: the pair's row stays and its override stays served.
+  - **An excluded type's refusal names a remedy that works for it.** A save of `overrides` on a type that takes no override now cites that type's own record (ADR-0146 D6 for the security catalog and code-only types, D1 for a datasource, D9 for a behavioural switch, D10 for a field, ADR-0126 §3 for one-shot types, D2 for the rest) and prescribes a door that exists for that type: a new item under a new name where the type may be created at runtime, the documented switch route for a sharing rule, Setup › Queues for a queue, Setup › Datasources for a datasource, an object extension for a field, and a new version of the base for a type defined only in package source. The error code and status are unchanged.
+  - **`@object-ui/app-shell`: the All metadata tile agrees with the Customize door.** On a read-only package, a type's tile reads 可定制 (Customizable) exactly where Studio offers a Customize door for it (flow and app included, whose overlay flag is off) and 只读 (Read-only) elsewhere (doc and mapping, which have no door yet). It no longer reads the overlay flag.
+  
+  The label precedence of a translated override (card item 3) is not in this change.
+- bcdf8d3: feat(metadata-protocol,objectql): a package's action can be customized by a declared override in its paired `.custom` package (ADR-0146 D9 `action`), and an override that widens who may run the action is refused
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  - **A declared action override is admitted.** An `action` saved, published or installed in a base's paired `<base>.custom` package with `overrides: { package: '<base>', basedOn: '<version>' }` was refused `403 NOT_OVERRIDABLE` ("action customization is not yet available"). It is now admitted by the save, publish and install doors, `os validate` and `os build`, like a flow override. It replaces the base's action whole, and every read of the base's action serves it under the base's name: the by-name and execution reads, the layered read's `effective` (with `code` still the base's), both lists, the object read's `actions` (what the list toolbar, row menu and record header are drawn from) and the engine's schema, which the REST `/actions` door and the MCP `run_action` bridge read the action from. Deleting the override serves the base's action again everywhere. The action activation switch keyed by the action's name turns the override off while it is armed, and the switch stays where it was when the base is restored. Only the pair declares: a dependent's declaration and the pair's undeclared same-named save stay refused, and a dependent's row is never served.
+  - **A script action's body is rebound.** The override's `body` runs in place of the base's handler after one resync (`kernel:ready`, `metadata:reloaded`, or the publish itself). Removing the override binds the base's handler again on the next resync, without re-registering the base. `@objectstack/objectql` adds `ObjectQL#registerActionOverride(objectName, actionName, handler, packageName)`, which binds a handler over the one registered under the key and keeps it beneath. `removeActionsByPackage(packageName)` now removes the package's entries from each key's stack, so the handler beneath is bound again. `registerAction` of another package's handler under a key an override holds takes the place beneath the override instead of replacing it: a marketplace-installed base binds its handlers in the install plugin's `kernel:ready` rehydrate, after the boot's resync bound the override, and after a restart the override still runs (and a restore runs the base's body).
+  - **An override may add a gate and never remove one (ADR-0066 D4).** The write gate refuses, with the new rule `declared_action_widens_access` (`403 NOT_OVERRIDABLE`), an action override that drops a capability the base's `requiredPermissions` names, sets `ai.exposed: true` on an action the base keeps off the agent surface, or drops the base's `ai.requiresConfirmation: true`. The refusal names each widened gate. Adding a capability or turning a gate on is admitted. Everything else (`label`, `type`, `target`, `body`, `params`, `visible` and the rest) is replaced whole, so an override can still change what runs, including a body that runs system-elevated, but only for people who could already run the action. `@objectstack/metadata-protocol` exports `actionOverrideWidening(baseItem, overrideItem)`, which returns the widened gates as clauses, and `OverrideWriteClosure.baseItemOf`, through which a door hands the judge the base's own item. `@objectstack/cli` (`os validate`) and `@objectstack/cloud-connection` (the managed install) pass it.
+  - The action switch route in the packaged-base refusal sentences is now spelled `POST /api/v1/actions/_activation/:object_or_global/:action`, which keeps the declared-save sentence within the REST door's 500-character message bound for long action names.
+  
+  Skills-docs: follow-up #30505
+- 59bcd22: fix(metadata-protocol, runtime)!: a package created at runtime is refused when it carries `navigationContributions`, which its install never registered (#30072)
+  
+  Clause-②: yes (narrowing) — `POST /api/v1/packages` (both install limbs, its no-protocol fallback included) and the protocol install primitive `installPackage` (and so the package duplicate and every in-process caller) refuse a manifest whose `navigationContributions` is a non-empty list with `400 VALIDATION_ERROR`, a manifest they stored and answered `201` for before. Widened: `@objectstack/metadata-protocol` publishes one new export, `runtimeNavigationContributionsRefusal`, the predicate both doors ask.
+  Metadata-protocol: narrowed
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed or renamed: ManifestSchema.navigationContributions keeps its shape and meaning, and a code package (a defineStack manifest loaded at boot, from the marketplace or by an artifact reload) registers its contributions exactly as before. Only the runtime install door refuses the key, and a refused contribution never reached any app's navigation, so there is no rewrite that keeps what the author meant; the author picks one of the two routes the refusal names. Rows already in sys_packages are data at rest and replay as stored. -->
+  
+  **BREAKING** accept-set narrowing at the runtime package install door (Studio, REST, MCP and AI authors creating a package at runtime). `os validate`, `os build` and code packages are unchanged.
+  
+  - **Before.** A package created through `POST /api/v1/packages` with `navigationContributions` targeting another app answered `201` and was stored, but no entry ever appeared in the target app, not after a restart either: only a code package's `registerApp` registers contributions, and neither the install nor the `sys_packages` replay at boot does. Nothing said why.
+  - **Now.** The same install is refused `400 VALIDATION_ERROR` before anything is stored, with a sentence that names the key and both routes that work. The refusal is asked ahead of the duplicate-id `409`, so the answer does not depend on whether the id is installed. A manifest with no `navigationContributions`, or an empty list, installs as before.
+  - **Not changed.** A code package's contributions (the Setup app's capability plugins, a multi-package artifact's modules, a marketplace package) are registered and served as before. A package already stored with the key keeps loading at boot, and its entries stay unregistered, as they always were.
+  
+  **What an author does.** To add an entry to an installed app's menu, save an override of that app in its customization package (the app copied with the entry added; Studio's navigation editor writes it). To contribute menu entries into another package's app, ship them in a code package's manifest, which registers them when it loads. Then install the runtime package without `navigationContributions`.
+- fc869c2: feat(spec)!: a seed is create-only by default — an omitted `mode` is `ignore`, so a restart, an install or an upgrade never writes a seeded value back over a customer's edit (#30081)
+  
+  Clause-②: yes (narrowing) — the declared default of `Seed.mode` (and of `SeedLoaderConfig.defaultMode`, now the same field) moves from `upsert` to `ignore`. The accept set is unchanged and every authored `mode` parses exactly as before; what narrows is what a replay does for a dataset that declares no mode: it no longer updates an existing row.
+  Metadata-protocol: semantic
+  
+  <!-- adr-0087: registered seed-mode-default-create-only -->
+  
+  **BREAKING** for a seed dataset that declares no `mode` and relies on a replay to write its values back onto existing rows.
+  
+  - **Before.** A seed with no `mode` replayed as `upsert`. A seed loads again on every single-tenant boot (production included, under `os start` and `os serve`), on every package install or upgrade and on every publish, so each replay wrote the shipped value back over a customer's edit to a seeded row, with no warning. Measured on a production boot before the change (card comment 6633189577): an API edit to a seeded row went back to the shipped value on the next restart, after a boot-artifact upgrade, and after an `os package install` upgrade.
+  - **Now.** `SeedSchema.mode` defaults to `ignore`: a replay inserts a record whose row is missing and leaves an existing row exactly as it is. A row nobody edited is not rewritten either, so its `updated_at` does not move, and a value changed in a later seed version reaches only a row the load creates. Maintainer ruling 6631016988 (option A).
+  - **One default, stated once.** `SeedLoaderConfig.defaultMode` is `SeedSchema`'s own `mode` field, default included. The six replay sites (`@objectstack/runtime`: the inline boot seed, the per-organization replayer, the dev hot reload and the published-seed apply; `@objectstack/metadata-protocol`: the publish batch; `@objectstack/cloud-connection`: install, reseed and the rehydrate healer) stop restating `defaultMode: 'upsert'`, and the save door reads the schema's default for a seed item that declares no mode.
+  - **Compiled artifacts.** `os build` stores the parsed seed, so a package built before this change carries a written `mode: "upsert"` on every dataset. The loader cannot tell that value from an authored one, and nothing converts it: such a package keeps today's replay until it is rebuilt.
+  - **Installed packages.** A package installed with `os package install` (`@objectstack/cloud-connection`'s install-local) keeps the body it was installed with in its install ledger, and the sample-data reseed (`POST /api/v1/marketplace/install-local/:manifestId/reseed-sample-data`) replays that body's datasets in their stored mode. So an entry installed from a pre-change artifact keeps writing the shipped values back over edited rows on every reseed until the **rebuilt artifact is re-installed**; rebuilding alone changes nothing for it. An entry installed from a rebuilt artifact reseeds create-only: it puts back the rows that are missing and leaves an edited row as it is. The ledger's other replays never overwrite: the boot rehydrate seeds nothing, the heal seeds only when every seeded object is empty, and the per-organization replay runs only for a new organization.
+  - **Stored `seed` items.** A `seed` metadata item stored with no `mode` is not rewritten either. Its next publish parses it to `ignore`, so that publish inserts only the rows it is missing where it used to write its values back over existing rows, with no signal.
+  - **Unchanged.** An explicit `mode: 'upsert'` still writes every declared column back on each replay, and `columns: { FIELD: { applyOn: 'create' } }` still exempts the columns a customer or a job owns. `insert`, `update` and `replace` behave as before.
+  
+  **The remedy.** Rebuild every package so its compiled artifact carries the mode its source declares, and re-install the rebuilt artifact wherever the package was installed with `os package install`, so its install ledger carries that mode too. To put an installed package's sample data back to the shipped values, purge it (`…/purge-sample-data`) and then reseed. For a dataset that is reference data the package must keep current, declare `mode: 'upsert'`, and mark the columns the customer or a job owns `applyOn: 'create'`. Leave `mode` unset for business and starter data the customer owns once it is loaded.
+- 0837fdc: fix(metadata-protocol): an email template at a locale the base does not ship keeps its package-less write on a fresh install; the named-base refusal names `os migrate packageless-overlays`
+  
+  Clause-②: no
+  Metadata-protocol: semantic
+  
+  - **An added locale is writable before the pair exists.** Both overlay-write closes (the package-less write, and the write naming the read-only base with `?package=<base>`) stay open where the fix they would name cannot be taken: an `email_template` member at a locale the base does not ship is refused as a declared override, so its write stays open (ADR-0146 D11). The close asked the override write gate about the pair; on a fresh install the pair is not ensured yet, the gate's closure read answers nothing for a package that does not exist, and the close read that "not concerned" as "admitted". So `PUT /api/v1/meta/email_template/<name>` with a zh-CN body beside a base that ships en-US only answered `403 NOT_OVERRIDABLE`, naming a pair write that was refused too (`declared_package_ships_no_such_item`). The close now judges a pair that is not installed with the closure the ensure door gives it (the base and what the base reaches), so the write is accepted, as it is once the pair exists. A member the base ships is closed exactly as before.
+  - **The named-base refusal names the ceremony.** `os migrate packageless-overlays` moves a row stored bound to the read-only base into the pair with its declaration. The sentence for a save, publish or rollback naming the base now says such a row "is served until moved by `os migrate packageless-overlays`, overridden by the pair, or deleted naming the base". One spelling, every door; the code and status (`403 NOT_OVERRIDABLE`) are unchanged.
+- 8fad7b1: fix(metadata-protocol,cli): `os migrate packageless-overlays` lists a package-less view container `cannot_declare` instead of `movable`, and `--apply` no longer attempts (and fails) it on every run
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: semantic
+  
+  - **`@objectstack/metadata-protocol`: the census gains the disposition `cannot_declare`** (`PackagelessOverlayDisposition`, reachable through the exported `PackagelessOverlayCensus`). A row lands there when the schema the save door judges its body by refuses an `overrides` key on it, so the declared save the move makes could never land. Of the five overlay types the ceremony moves, that is a view container (`list` / `listViews` / `form` / `formViews`): only a single view declares an override. Before, such a row was listed `movable` and every `--apply` reported it `failed` with `Unrecognized key(s) on this view container: overrides`, leaving the row where it was. Now `migratePackagelessOverlays` does not attempt it: no outcome, no failure, no pair ensured for it.
+  - **A view container's write onto a packaged name is accepted again.** `PUT /api/v1/meta/view/<object>` with a container body (`list` / `listViews` / `form` / `formViews`) over a name one installed read-only package ships, naming no package or naming that base with `?package=<base>`, and the matching `DELETE`, answered `403 NOT_OVERRIDABLE` with a fix (a declared save into the pair) that the container schema refuses. They now succeed, as they did before the ADR-0146 D11 closes; every other shape of the five overlay types is closed exactly as before.
+  - **The two closes read the same answer.** The package-less write close (`packagelessCloseSubject`) closes only what the ceremony moves, so a container's package-less save and delete stay open, as they were before the close: they are the one door such a row keeps. The close of a write naming the read-only base (`overlayPairFixAdmits`, the "the fix can be taken" predicate both closes ask) no longer names the pair as the fix for a container body, because that fix (a declared save into the pair) cannot be taken; that write keeps the answer it had before the close.
+  - **`@objectstack/cli`: `os migrate packageless-overlays`** prints the way out for a `cannot_declare` row under "left as they are": save each of the container's views into the pair as a single view named `<object>.<view>` (one the base ships declaring `overrides: { package, basedOn }`, a new one declaring nothing), then delete the container row with a delete naming no package (naming the base, for a row bound to it). In `--json`, the row carries `disposition: "cannot_declare"` and `outcome: "left"`, and `--apply` exits 0 for it.
+- a7b8876: feat(spec,metadata-protocol): the publish receipt's `seedApplied.landed` names the rows a seed created and the rows it only matched, per object, capped at 200 ids per list
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  - **`@objectstack/spec`: `seedApplied.landed`** on both publish responses (`PublishMetaItemResponseSchema`, `PublishPackageDraftsResponseSchema`), one shared schema `SeedAppliedLandedSchema`: per object, `inserted` (the rows this publish created) and `matched` (pre-existing rows a seed record's key matched: updated, left as they were, or refused an update), each a `SeedAppliedIdListSchema` `{ ids, total, truncated }`. `ids` carries at most `SEED_APPLIED_LANDED_IDS_CAP` (200) ids, in the loader's record order (datasets in load order, records as authored); past it `truncated` is `true` and `total` is the uncut count. Absent `landed` means "not reported" (a load that threw, or a producer that reports no ids), never "nothing landed". Only `inserted` names rows the seed created: a `matched` row may be a customer's own record that shares the seed's natural key, and under `ignore` (the default) such a row is matched without being written.
+  - **`@objectstack/spec`: `SeedLoadResult.insertedIds`**, the ids among `landedIds` whose row the load created. Per load: a row an earlier load inserted is matched on a replay, so a reader tracking a seed's rows across publishes accumulates `insertedIds` over every load. `landedIds`' TSDoc now says what each seed mode puts in it.
+  - **`@objectstack/metadata-protocol`**: `applySeedBodies` returns `landed`, so `publishPackageDrafts` and `publishMetaItem` both carry it; the loader records which landed rows it inserted. `seedAppliedLanded(results)` is exported, the one projection both receipt producers fold the loader's ids through.
+  - **`@objectstack/runtime`**: the package-publish door's fallback seed apply (for protocols that do not self-apply) reports the same `landed`.
+  - Accepted cost (objectstack-ai/cloud#3598 ruling A): row ids appear on the public publish responses, bounded by the cap.
+- 38d416f: fix(metadata-protocol,runtime): a seed load that throws part-way still reports `seedApplied.landed` for the datasets that finished before the throw
+  
+  Clause-②: yes (widening: a thrown load's receipt carries `landed` for the datasets that finished, where it carried none)
+  Metadata-protocol: semantic
+  
+  - **`@objectstack/spec`: `seedApplied.landed`** (both publish responses) now says what it covers on a load that threw part-way (`success: false` with `error`): only the datasets that FINISHED before the throw. The dataset that threw is not listed (its rows are in `inserted` / `updated`, its object in `error`). Absent `landed` now means the apply failed before any load ran, or the producer reports no ids; a throw before any dataset finished reports `landed: []`.
+  - **`@objectstack/metadata-protocol`**: `SeedLoadPartialWrites` gains `finished`, the finished datasets' `object` / `landedIds` / `insertedIds` in load order, and `applySeedBodies`' catch folds it through the same `seedAppliedLanded` projection (same two lists, same 200 cap) the returned path uses. `seedLoadPartialWrites` and `SeedLoadPartialWrites` are exported from the package root.
+  - **`@objectstack/runtime`**: the package-publish door's fallback seed apply reads the same `seedLoadPartialWrites` off a thrown load and reports the same `landed`, plus the `inserted` / `updated` counts the response schema requires (it reported neither before) and the object whose seed stopped the load in `error`, as `metadata-protocol`'s apply does.
+  - Why the dataset that threw is left out: its ids are only partly known when it throws. A batched insert whose response was lost may have committed rows whose ids never came back, so a list of the ids the loader did see would read as complete while missing rows.
+  
+  Supersedes, in the same release: `.changeset/30348-seed-receipt-landed-ids.md` says absent `landed` means "not reported (a load that threw, or a producer that reports no ids)". After this change a load that threw part-way reports `landed` for its finished datasets; absent now means no load ran, or a producer that reports no ids.
+- a91ad42: fix(metadata-protocol,cli,cloud-connection)!: an object extension that re-declares an owner's field in `fields` beyond its display properties is refused at the save and publish doors, at `os validate` and at the install door, with a prescription naming `fieldPatches` (ADR-0146 D10) (#30610)
+  
+  Clause-②: no (narrowing) — the `object_extension` save, publish and restore doors, `os validate` and `POST /api/v1/marketplace/install-local` refuse an `objectExtensions[].fields` entry naming a field the extended object's owner declares when it changes anything outside the display-property whitelist, a body they accepted before. Nothing is widened.
+  Metadata-protocol: narrowed
+  Skills-docs: no move — `skills/**` and `content/docs/**` already teach `fieldPatches` as the way to change a base field's display, and no page teaches taking an owner field over through `fields`; the prescription ships in the refusal text.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) A refused shape with no mechanical rewrite: which keys of a re-declared field were meant as display and which as a takeover is a judgement about the field, and no first-party artifact (examples, HotCRM) writes the shape. A stored row that already re-declares an owner field keeps registering with the registry's warning, and is judged when it is next saved or published. -->
+  
+  **BREAKING** accept-set narrowing at the metadata save and publish doors (`PUT /api/v1/meta/object_extension/NAME`, draft and live, the per-item and package publish, and the restore doors), at `os validate`, and at the marketplace install door.
+  
+  - **Before.** An extension written into `fields` with the name of a field the extended object's owner declares replaced the owner's field whole when the registry folded the object: a module package could turn the owner's `amount: number` into `text`, drop its `required`, or make it `readonly`, and every reader judged the field on the extension's definition. Only the registry's warning named it.
+  - **Now.** Such an entry is refused when it changes anything outside the display-property whitelist (`label`, `description`, `inlineHelpText`, `placeholder`, an option's `label`): `400 VALIDATION_ERROR` at the save and publish doors (located in `issues[]` at `fields.FIELD`), `422 VALIDATION_ERROR` at the install door (every entry in `details.refusals`), and exit 1 with the entry on `errors` at `os validate`. Each refusal names the keys the entry changes and prescribes `fieldPatches`. Both bodies are read through the field schema first, so a default the parse stamps is no change; options are compared by stored value, so a relabel or reorder is no change.
+  - **Unchanged.** A re-declaration that changes only display properties is admitted. An extension of an object its own package owns is not judged, nor is an added field. `os validate` judges an owner declared by another package of the same artifact; a target outside the artifact is judged at install, against the installed owner. The registry's warning on a re-declared field stays. `os build` does not yet run the check.
+  
+  **The remedy.** Move a display change of an owner's field into the extension's `fieldPatches` (the field name as its key, the whitelisted properties as its body), and add a behaviour of your own as a new field under a new name.
+- 4123865: fix(metadata-protocol,runtime): a seed row a person deleted is no longer inserted again under a new id by the next seed replay
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: semantic
+  
+  A seed replays long after its first load: on every boot of a single-tenant runtime (`objectstack serve`, `os start`) and per organization whenever a host replays the seed union, for example on a package upgrade. The create-only default (`mode` omitted, which is `ignore`) inserted every declared row it did not find, and `upsert` did the same. A row a person deleted therefore came back under a new id at the next replay.
+  
+  The seed loads AppPlugin runs now keep a per-organization record of which seed rows landed: the boot seed, the per-organization replay (the `seed-replayer` service) and the dev hot-reload seeder. The record is the new platform object `sys_seed_landed_key` (`SysSeedLandedKey`, registered by `PlatformObjectsPlugin`). It holds one row per landed key: the organization, the object, and the dataset's `externalId` fields with the values the row was matched by. The loader records every keyed row an `upsert` or `ignore` dataset lands, whether it inserted the row, updated it or matched it and left it alone. A row an earlier release seeded therefore counts as landed from the first load after the upgrade. A missing row is inserted only when its key never landed in that organization:
+  
+  - A deleted seed row stays deleted across reboots and upgrades. A row an upgrade adds to the seed still lands.
+  - An edited row is left as the person left it. Under `ignore` this includes a renamed key: the old name is not inserted again.
+  - A reference to a removed row is left as it is, and a row whose own key names a removed row is withdrawn with it. Nothing is reported unresolved for either, so a replay after a person's delete still loads clean.
+  - One `info` line per load says how many seed rows were not inserted again, and where.
+  
+  The deliberate re-seed is the `seed-replayer` service called with `{ reseed: true }`. It inserts every missing row, including the ones a person removed, and records them again. A new database starts with an empty record. Deleting an organization deletes its record.
+  
+  `SeedLoaderService` takes the record through a new constructor option, `landedKeys: 'honour' | 'reseed'`. A caller that does not pass it neither reads nor writes the record, so the package publish, marketplace install, reseed and purge doors behave as before. A load keeps no record when it seeds no organization, and says so at `info`. It also keeps none when the composition does not register `sys_seed_landed_key`, and says so at `warn`. A record write that fails is reported once at `error`. It fails neither the rows nor the load, and the next load records every row that is still present.
+  
+  `PLATFORM_OBJECTS_BY_PACKAGE['platform-objects']` in `@objectstack/spec` lists the new object, and so do `PLATFORM_PROVIDED_OBJECT_NAMES` and `isPlatformProvidedObjectName`, so a stack that references `sys_seed_landed_key` resolves it instead of drawing the unknown-platform-name advisory. `@objectstack/plugin-audit` leaves `sys_seed_landed_key` out of `sys_audit_log` and `sys_activity`: recording which seed rows landed writes no ledger row of its own, and the seeded rows stay audited. `os migrate organization-ownership` inventories the new table as organization-owned rows (fate 3, attribution), each written with the organization its load seeds.
+
+### Patch Changes
+
+- c17719d: feat(rest)!: the metadata list reads several items by name in one request (`?names=a,b,c`), and refuses a query parameter it does not read
+  
+  Clause-②: yes (narrowing) — `GET /api/v1/meta/:type` (and its environment-scoped twin, on both the REST server and the runtime dispatcher) declares its closed query-parameter set, `package`, `preview`, `object`, `include`, `id`, `names` and `locale`, and refuses any other name with `400 VALIDATION_ERROR`, where it ignored it and answered the whole list with `200`. The widening half: `?names=a,b,c` narrows every type's list but `package`'s to the items of those names, `@objectstack/client`'s `meta.getItems(type, { names })` sends it, and `@objectstack/rest` exports three new names, the list's query decision that both transports ask: `META_LIST_QUERY_PARAMS`, `metaListQueryRefusal` and `metaListNames`. Ruling 6580261740 assigns both halves to this one server change.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped: `GetMetaItemsRequestSchema.names` was already declared, and only its description loses the planned marker. What moves is the list route's answer to a query-string name it never read, and nothing at rest records that answer, so there is nothing for a migration to rewrite. -->
+  
+  **The batch by-names read.** `GET /api/v1/meta/:type?names=a,b,c` answers only the items of those names, among the items the list would answer without it, on every metadata type except `package`, whose items are keyed by id and carry no `name`: the `package` list refuses `?names=` with `400 VALIDATION_ERROR`. One comma-separated value, as the data routes spell `fields`; each name is trimmed and repeats count once. A name that matches no item is simply absent from the answer (no `404`). The names are handed to the store read (`GetMetaItemsRequest.names`), so `@objectstack/metadata-protocol`'s `getMetaItems` filters before it computes locks, governance and diagnostics, and the list's per-caller gate, object field mask and translation run on the named items only. A value that names no item (`?names=`, `?names=,`) is refused with `400 VALIDATION_ERROR` rather than read as every item; leave the key out to list every item. A repeated `?names=` is refused like the list's other single-valued parameters. Before, `?names=` was ignored, so a client that needed several objects paid one by-name request for each.
+  
+  **BREAKING** accept-set narrowing at the metadata list (`@objectstack/rest`, `@objectstack/runtime`): a query parameter the list does not read is refused instead of ignored.
+  
+  - **Before.** `GET /meta/object?name=account`, `?ids=a,b` or `?filter=x` answered `200` with every object, which reads the same as a filter that matched everything.
+  - **Now.** A name outside `package`, `preview`, `object`, `include`, `id`, `names`, `locale` is refused with `400` and the nested `{ "error": { "code": "VALIDATION_ERROR", "message" } }` body; the message names the parameter and lists the supported ones, and nothing is read. A bracketed `?package[]=`, and `?id[]=` on the app list or `?object[]=` on the view list, keep their own located refusal; any other bracketed key (`?names[]=`) is refused as a name the list does not read.
+  - **Who moves.** The Console and the client SDK send only declared names. A script that sends another name gets the 400.
+  
+  **The remedy.** Drop the parameter, or spell it as one of the supported names: `?names=a,b` for several items by name, `?id=APP` for one app, `?object=OBJECT` for one object's views, `?package=ID` for one package.
+- 9ed2ee1: refactor(metadata-core): the customization pair of a package is looked up through the App that carries it
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  `@objectstack/metadata-core` exports `pairOf(base)`, `isPairOf(pairId, base)` and `appOf(packageId)`: the pair of a package is `customizationPackageId(appOf(base))` (ADR-0146 D3, with the customization unit being the App per ruling record 6691022506). `appOf` is the identity today, so every package is still its own App for customization and every answer is the one `customizationPackageId` / `isCustomizationPairOf` gave before: the same pair ids, the same refusals, the same served overrides, write gates, list and layered reads, uninstall refusal, flow precedence remedy and datasource import landing.
+  
+  The served `/meta` reads and writes, the ensure-customization door and the package routes answer exactly as before. Code that asks "which pair customizes this package?" should call `pairOf` / `isPairOf` instead of the spec id rule directly; the parse direction (`customizationBasePackageId`, `isCustomizationPackage`) is unchanged.
+- 769adff: feat(metadata-protocol, metadata-core)!: the ensure door creates no customization pair for a kernel package, and every pair question carries the installed manifests
+  
+  Clause-②: yes (narrowing) — both arms. Narrowing: `POST /api/v1/packages/:id/ensure-customization` (and the protocol's `ensureCustomizationPackage`) answers a kernel base, a package of scope `system` or `cloud`, with `409 RESOURCE_CONFLICT` and a sentence saying kernel objects are not customizable in this version, where it created `<id>.custom`; `POST /api/v1/automation/:name/clone` of a flow a kernel package ships, with no `package` named, answers that `409` where it answered `200` with the copy in `<id>.custom`; and the exported `pairOf`, `isPairOf` and `appOf` (`@objectstack/metadata-core`), `isServedOverrideRowOf` and the `installed` member of `OverrideWriteClosure` (`@objectstack/metadata-protocol`), and `resolveFlowPrecedence` / `describeFlowContender` (`@objectstack/service-automation`) take the installed-manifest lookup as a required argument. Widening: five new exports, `installedManifestsOf`, `InstalledManifestLookup`, `AppLookupManifest` and `InstalledPackageSource` (`@objectstack/metadata-core`) and `kernelPackageScope` (`@objectstack/metadata-protocol`), and one new `noticeCode` value on the permission-set clone answer, `PERMISSION_SET_CLONE_ENVIRONMENT_WIDE_KERNEL_SOURCE`, for a copy of a kernel-shipped set that now lands environment-wide.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) no key of any schema is added, removed or re-shaped and no stored row is read differently, converted or dropped: the narrowing is one runtime refusal at one door, for one kind of base, whose remedy is that no pair exists to create; the existing pairs and the overrides in them stay served exactly as before. The retyped exports are runtime functions with no metadata surface, and the compiler names every caller that has not passed the new argument, so there is nothing for `objectstack migrate meta` to rewrite. -->
+  
+  **BREAKING** for a caller that ensures the customization pair of a kernel package — a platform package of scope `system` (users, organizations, security, settings and the rest of the platform suite) or `cloud` — and for a TypeScript importer of the pair helpers named above.
+  
+  - **Why (ruling records 6691022506 and 6691217245 on ADR-0146 D3).** The customization unit is the App, and the kernel is not an App a customer owns: it ships with the runtime, at the runtime's version (installing it whole is the goal ruling 6691022506 records, not yet what every `serve` tier does). In this version no kernel object is customizable, so the door creates no pair for one. Which kernel objects a later version opens (a whitelist) is that version's decision.
+  - **What the door answers.** `409 RESOURCE_CONFLICT`, the status and code the door already answers when a base's state rules the pair out (a writable base, no namespace, a version that is not SemVer). Nothing is created or written. Every other base is answered exactly as before.
+  - **A kernel pair that already exists stays.** An earlier version of the door may have created `<kernel id>.custom` on a deployment. It stays installed, the overrides inside it stay served by every read of the kernel item's name, and a further save into it is still admitted. Only the ensure call is refused.
+  - **A copy of a platform permission set.** `POST /api/v1/security/permission-sets/:name/clone` with no `package` named landed the copy of a kernel-shipped set (`member_default` and the platform's other sets) in `<kernel id>.custom`. It now saves the copy environment-wide, as it already does for a set authored in the environment, with the notice code `PERMISSION_SET_CLONE_ENVIRONMENT_WIDE_KERNEL_SOURCE` and a sentence naming the kernel package and `package`. A Console that does not know the new code shows that sentence as sent. Naming a writable package with `package` still lands the copy there. The flow clone door answers a kernel-shipped flow with the ensure door's sentence.
+  - **The closes stay shut on a kernel item.** A package-less write, or a write naming the kernel package, onto an item a kernel package ships is still refused `403 NOT_OVERRIDABLE` exactly where it was refused before (ADR-0146 D11). The sentence no longer names the pair as the fix, since there is none to ensure: it says kernel objects are not customizable in this version. A later version's kernel whitelist is what opens such an item.
+  - **The lookup.** Which pair customizes a package is asked through the installed manifests of the registry the caller serves (`installedManifestsOf(registry)`). Today the answer is unchanged for every package: `appOf` is still the identity. The argument is threaded through every site now so that resolving a module to its App is one change in `appOf`.
+  - **`os validate`'s customization-namespace advisory** now skips a package that is itself a pair through `isCustomizationPackage`, the one spelling of that question. An id ending in `.custom` that no base derives (`a.custom.custom`, a bare `.custom`) is now judged like any other package.
+  - **Who moves, and the fix.** A script or client that ensured a kernel package's pair drops that call: the kernel item is served as it ships, and an existing pair keeps serving what it holds. A vendor package that declares `scope: 'system'` or `'cloud'` in its own manifest is read as kernel here, as `isWritablePackage` already reads it; its remedy is to drop the scope, which belongs to the platform's own packages. A TypeScript importer of the helpers passes `installedManifestsOf(engine.registry)`, or `installedManifestsOf(undefined)` where it holds no registry.
+- 82142ed: fix(metadata-protocol,rest,runtime): `GET /meta/:type/:name/layers` serves the pending draft as stored, so an editor re-opens an author's draft without translations or injected columns (#29814)
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The layered view now serves the `draft` layer that `GetMetaItemLayeredResponseSchema` declares, on `RestServer` and on the runtime dispatcher, and on the deprecated `?layers=` spelling too. Before, the only read of a pending draft was `?state=draft`, which serves it translated for the caller's locale and governed (the platform's injected columns added), so an editor that built its buffer from it and saved it back wrote translations and platform columns into the author's draft.
+  
+  - **What `draft` is.** The row the `?state=draft` read serves, at the same address (`?package=` picks that package's draft), exactly as stored: converted like the `overlay` layer and credential-redacted like every layer, never translated, governed or stamped. `null` when no draft is pending. An edit buffer reads `draft ?? overlay ?? code`.
+  - **Who is served it.** Only a caller the draft-read admission already admits (the predicate every draft read asks: a system caller, `studio.access`, `setup.access` or `manage_metadata`). The per-caller gate judges it like the other layers: whole for whoever may write the item, pruned as `?state=draft` prunes it otherwise. Any other caller is answered the layers with no `draft` key, which says nothing about whether a draft exists, and a name with only a draft stays a `404` for them.
+  - **Unchanged.** `?state=draft` and every other read answer as before. A never-published name an admitted author holds a draft of is now answered `200` with only its `draft` layer, where it was a `404`.
+  - **Protocol.** `getMetaItemLayered(request, { withDraft: true })` reads the layer; without the option the answer carries no `draft` key, so its in-process readers read no draft.
+- 3b8c724: fix(objectql, metadata-protocol, runtime): a package's export carries the `objectExtensions` it was installed with, and the extended object's owner's export does not
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  A package installed through `POST /api/v1/marketplace/install-local` (what `os package install` sends, and how every entry of a whole-deployment export is restored) that extends another package's object exported without its `objectExtensions`: `GET /api/v1/packages/<id>/export` answered the package's other items and no extension, while the extension's fields were folded into the owner's export instead, as if the owner had shipped them. So a deployment restored from an export lost those fields on its next export, with no error, and a `.custom` pair installed from its export no longer exported its extension.
+  
+  - **The extending package's export** (and its entry in `GET /api/v1/packages/export`) now carries every extension it contributes as `objectExtensions`, however it was installed: an extension published through `/api/v1/meta/object_extension` (as before) or a manifest's `objectExtensions` entry (install-local, or a code package). A published extension is exported as it is stored; a manifest entry as it was registered, with `priority` written only when it is not the default `200`.
+  - **The extended object's owner's export** now carries the object as the owner declares it, without the fields, field patches or labels of ANY other package's extension. Until now only its own `.custom` pair's extension was left out; an extension from any other installed package was folded in.
+  - **Every served read is unchanged**: `GET /api/v1/meta/object/<name>`, the object list, the console and the data API keep serving the object with every extension folded in.
+  
+  `SchemaRegistry` gains `getObjectExtensionsOf(packageId)`, which reads a package's `extend` contributions back as the `objectExtensions` entries they were registered from (the inverse of `registerObjectExtension`). `listItems`, `getAllObjects` and `foldObjectExtendersOnto` take an `onlyExtensionsOf` option beside `withoutExtensionsOf`: each object is resolved with only that package's `extend` contributions folded in. The metadata protocol's per-package layer (the package export) now passes `onlyExtensionsOf`, naming the listed package, and no longer passes `withoutExtensionsOf`, which keeps its meaning for any other caller.
+  
+  Supersedes, in the same release: the `.custom` pair note for #29903 says an extension contributed by any other installed package is still folded into the base's object in the base's export. After this change it is not: the base's export leaves out every other package's extension, and that package's own export carries it.
+- 88cd0ab: fix(metadata-protocol): a hook that aborts with free text answers `HOOK_ABORTED` on the per-object batch row too, not `VALIDATION_ERROR`
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **Before.** Since #27597 (and #27672) a sandboxed hook body that aborts with free text (`throw new Error('…')`, no `code`) answers `/api/v1/data/:object`, `/createMany` and `/api/v1/batch` with `400 HOOK_ABORTED` and the hook's sentence. `POST /api/v1/data/:object/batch` answered the same abort as a row `{ code: 'VALIDATION_ERROR', message: <sentence> }`: the row mapper (`toRowApiError`) derived the code from the `400` the doors serve, so a bulk client branching on the code read a business refusal as malformed input.
+  - **Now.** The row answers `HOOK_ABORTED` (the `UNDECLARED_HOOK_REFUSAL_CODE` the other doors read). The value moves, from `VALIDATION_ERROR` to `HOOK_ABORTED`, on every row that shares the mapper: `POST /api/v1/data/:object/batch` with `operation` `create`, `update`, `upsert` or `delete`, in every mode (plain, `atomic`, `continueOnError`), and the per-row results of `updateManyData` / `deleteManyData`.
+  - **Unchanged.** A code the hook declared still wins (a registered code is its own row code; an unregistered one still gets the code its status derives). The row's `message` is still the hook's sentence and `httpStatus` is still absent when the body declared no status. A crashed body and a non-sandbox producer answer as before. No error code is added; `HOOK_ABORTED` is the one #27597 registered.
+- 5f47410: **Shipped in 18.3.0**, whose CHANGELOG missed this entry; listed here one release late.
+  
+  fix(objectql, metadata-protocol): a base package's own export carries its objects without its `.custom` pair's extension
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  After an administrator added a field to a vendor package's object through Studio's Customize (an extension published in `<base>.custom`, for example `region__c`, or a relabelled base field), `GET /api/v1/packages/<base>/export` carried that field and label inside the base's object, as if the vendor had shipped them. The pair's export carries the same extension as its `objectExtensions` entry, so installing the two exports elsewhere declared the customer's field twice, once as the vendor's. ADR-0146 D8 item 3 says the base's export carries the base unchanged.
+  
+  - **The base's export** (and its entry in `GET /api/v1/packages/export`) now carries each object as the base declares it, with no field, label or other patch from its pair's extension.
+  - **The pair's export** is unchanged: it carries the extension in `objectExtensions`.
+  - **Every served read is unchanged**: `GET /api/v1/meta/object/<name>`, the object list, the console and the data API keep serving the object with the pair's field and labels folded in.
+  
+  An extension contributed by any other installed package is still folded into the base's object in the base's export, as before.
+  
+  `SchemaRegistry.listItems` takes a `withoutExtensionsOf` option beside `includeDisabledPackages`, and `getAllObjects` and `foldObjectExtendersOnto` take the same option: each object is resolved with that package's `extend` contributions left out of the fold. Only the metadata protocol's per-package layer (the package export) passes it.
+- 07685ae: fix(metadata-protocol): `os migrate packageless-overlays --apply` heals the registry after it deletes the unbound row, as the delete door does
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **Now.** After the ceremony saves a row into its base's `<base>.custom` pair and reads it back, it deletes the unbound row through the protocol's one repository and then runs the delete door's registry heal for an active row. The unbound row's registration leaves with the row, and the pair's row is registered again, so the process serves what a restart serves. Before, the delete went through a second repository and no heal followed, so the unbound row stayed registered beside the base's entry until the next restart. The five reads of the item already served the pair's row, so no read answered differently.
+  - **Unchanged.** A draft row's removal heals nothing, as a draft discard does not. Outcomes, receipts and the rows written are the same.
+- 43faa22: refactor(metadata-protocol): the eight `ObjectStackProtocolImplementation` doors that kept an inferred return type spell it on the signature
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - `getDiscovery`, `findData`, `getData`, `cloneData`, `saveMetaItem`, `publishMetaItem`, `rollbackMetaItem` and `deleteMetaItem` now declare their return type, copied from the published declaration file it was inferred into. The built `index.d.ts` and `index.d.cts` are byte-equal before and after, and no behaviour changes; only the source maps move with the new lines. Nothing to do on upgrade.
+- bd81a7a: refactor(metadata-protocol): `getDiscovery` hands its body to its facet
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - `ObjectStackProtocolImplementation#getDiscovery` keeps its signature and return type on the class and delegates in one line to `ProtocolDiscoveryAndBasesFacet.getDiscovery`, which holds the body, moved unchanged except for the search probe: the class reads `this.searchAll` on the instance and hands it in, so `capabilities.search` still answers whether this protocol instance serves search. No behaviour changes and nothing to do on upgrade.
+  - The published `index.d.ts` and `index.d.cts` carry the same public surface.
+- 26f5719: refactor(metadata-protocol): nineteen more `protocol.ts` members hand their bodies to their facets
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - Nineteen members of `ObjectStackProtocolImplementation` that the facade gate still let keep a body (the overlay and runtime-create write gates, the code-only refusals, the registry hydration's view-expansion reconcile and four static type tables) now keep their signatures on the class and delegate in one line to their section's facet, which holds the body, moved unchanged. Four static tables moved to a new leaf module, `protocol-write-gates-tables.ts`. No behaviour changes and nothing to do on upgrade.
+  - The published `index.d.ts` and `index.d.cts` carry the same public surface; only docblocks of private members change, where a moved body took its docblock with it.
+- a545a04: fix(runtime, metadata-protocol): the permission-set clone door copies a platform set whose grants name an object this deployment does not install — `member_default` copies into its package's customization pair again on a boot without `@objectstack/plugin-audit`
+  
+  Clause-②: yes (widening) — `ObjectStackProtocolImplementation.saveMetaItem`'s request gains one optional key, `inheritedGrantObjects`, reachable from `@objectstack/metadata-protocol`'s `.` entry types
+  Metadata-protocol: none
+  
+  - **What failed:** cloning a set through `POST /api/v1/security/permission-sets/:name/clone` answered `422 INVALID_METADATA` when the source grants on an object no package registers here. The commonest source is the platform baseline `member_default`, which grants `sys_comment` and `sys_activity`. `@objectstack/plugin-audit` registers both objects, and it is an optional package: a deployment that does not install it could not clone `member_default` at all.
+  - **The rule it now follows:** the save door's unknown-grant refusal (#28990) already leaves alone a grant the set itself already holds, because that grant is not the current write's. A clone's grants are the source's, copied verbatim, so the same holds for a copy. The clone door now tells the save which grant keys the copy inherits (`inheritedGrantObjects`), and the refusal does not judge those.
+  - **Still refused:** an unknown object that the save does not say it inherits is this write's grant, and is refused exactly as before. That covers a `/meta` save, a re-save that adds a grant, and a draft's publish. No HTTP door forwards the new key.
+- 8fa738f: fix(metadata-protocol): duplicating a package copies a permission set that grants on an optional plugin's object not installed here, as the permission-set clone door does
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **Now.** `duplicatePackage` saves a copied permission set with the grant keys of its SOURCE row as stored passed as `inheritedGrantObjects`, so the save door's unknown-object refusal does not judge them (#30255's rule for the clone door). A platform set granting on `sys_comment` / `sys_activity` on a deployment without `@objectstack/plugin-audit` is copied; before, it was left in `failed[]` with the 422 finding and the duplicate answered `success: false`.
+  - **Still refused.** A grant the copy's rewrite renames onto the copy's own object (`SOURCE_NS_x` → `TARGET_NS_x`) is not the source's key and is judged as before: when that object did not copy, the set lands in `failed[]` naming that grant alone. The keys come from the stored row, never from the request.
+  - **Unchanged, by ruling.** `importUnmanagedPackage` still refuses such a set `422 INVALID_METADATA` and rolls the import back: the package is the request's body, not a stored row, so its permission sets are new writes and every grant is judged.
+- 4bf6e8f: fix(metadata-protocol): contributed navigation entries are translated again, the whole Setup sidebar among them
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `getPackagedAppBase(name)` now answers the app's packaged declaration with the code layer's navigation contributions folded in, by the one fold every served app read applies (`SchemaRegistry.applyNavContributions`, ADR-0029 D7). Before, it answered the declaration alone, so `translateApp` read every contributed entry's id as one a `.custom` override authored (ADR-0146 D2), skipped the catalog and served the source text: on a `zh-CN` deployment every Setup leaf entry (Users, Permission Set Assignment, Sharing Rules, API Keys and the rest) read English beside Chinese group headings, although the catalog carries their keys. Contributed entries now read the catalog's translation; the served app's shape is unchanged, only label values move. A navigation node a `.custom` override authors is in no contribution, so it still reads only the pair's translations, else its own text.
+- d8ed2e1: refactor(metadata-protocol): six `ObjectStackProtocolImplementation` doors hand their bodies to their facets
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - `getData`, `cloneData`, `saveMetaItem`, `publishMetaItem`, `rollbackMetaItem` and `deleteMetaItem` keep their signature and docblock on the class and delegate in one line to `ProtocolDataCrudFacet`, `ProtocolSaveFacet`, `ProtocolHistoryAndPublishFacet`, `ProtocolPackageCommitsFacet` and `ProtocolDiffDeleteLoadFacet`, which now hold the bodies, moved unchanged. The built `index.d.ts` and `index.d.cts` are byte-equal before and after, and no behaviour changes. Nothing to do on upgrade.
+- 7145bf3: refactor(metadata-protocol): `findData` hands its body to its facet
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - `ObjectStackProtocolImplementation#findData` keeps its signature and docblock on the class and delegates in one line to `ProtocolDataCrudFacet`, which now holds the body, moved unchanged. The built `index.d.ts` and `index.d.cts` are byte-equal before and after, and no behaviour changes. Nothing to do on upgrade.
+  - `getDiscovery` stays on the class: its body reads `typeof this.searchAll === 'function'`, which a forwarded host method would always answer true. The move tool now refuses a method read as a value.
+  - `@objectstack/spec`'s published liveness ledger (`liveness/query.json`) cites `findData` at its new file.
+- 63de248: fix(objectql, metadata-protocol, cloud-connection)!: a declared `.custom` action override is keyed and judged the same way at every door, and only its declared base's handler slots beneath it
+  
+  Clause-②: yes (narrowing) — the protocol door (save and publish) now refuses a declared action override whose `objectName` is not the base action's, with `403 NOT_OVERRIDABLE` and rule `declared_package_ships_no_such_item`, the refusal `os validate` and the managed install already gave it; the save door used to admit it. The managed install now admits a re-install of the pair whose override relaxes an earlier tightening back to the base's own gates, which it used to refuse with `declared_action_widens_access` while the save door admitted it. Every other input answers as before.
+  Metadata-protocol: none
+  Skills-docs: follow-up #30505 — the declared action override's docs card; it owes one sentence that an override keeps the base action's `objectName`.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped: the action schema and the `overrides` declaration keep their shapes. What moves is which door admits one declared override shape, so all three doors give one answer, and the refusal carries its own remedy; nothing at rest is rewritten. -->
+  
+  **BREAKING** accept-set narrowing at the protocol door (`@objectstack/metadata-protocol`, ADR-0146 D2/D9): a declared action override names its base's action by `<objectName>:<name>`, the identity `os validate` and the managed install key it on.
+  
+  - **Before.** The save and publish doors matched a declared action override's base by name alone, so an override in the base's `.custom` pair could move the base's action to another object. Its handler was not rebound there, and `os validate` and the install door refused the same body.
+  - **Now.** The save door refuses it as the other two doors do: the base ships no action of that name on that object. Keep the base action's `objectName` in the override, or remove `overrides` and add the action under the pair's own name.
+  
+  `@objectstack/cloud-connection`: the managed install judges a declared action override against the installed base's code artifact (`SchemaRegistry#getArtifactItem`), as the save door does. The protocol's per-package listing it read before serves an armed override under the base's envelope, so a re-install of the pair was judged against its own previous version.
+  
+  `@objectstack/objectql`: `ObjectQL#registerActionOverride` takes the package the override declares (`overrides.package`) as an optional fifth argument, and the authored-action resync passes it. `registerAction` under a key such an override holds slots the handler beneath it only when the registry's code artifact of the action belongs to that package, on that object; any other registration, one with no package included, replaces the override and is warned like every other handler collision. Before, any other package's registration slotted beneath it, so a row of another base's pair bound before the real base registered kept running after the real base's handler arrived, while every read served the real base's action; and a registration with no package slotted beneath it at `debug`, where the method's docblock promises a warning.
+- 1030a80: fix(metadata-protocol, cli, cloud-connection): a declared action override moved to another object is told which object the base ships the action on
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The `declared_package_ships_no_such_item` refusal (`403 NOT_OVERRIDABLE`) for a `.custom` action override whose `objectName` differs from the base action's used to say the base "ships no action named 'X'" and to "correct the name", though the name was right. It now names both objects and tells the author to keep the base action's `objectName`, at all three doors (the save and publish door, `os validate`, the managed install), from one sentence builder in `judgeOverrideWrite`. A name the base does not ship at all reads as before. The rule, code and status are unchanged.
+- 55a00ba: fix(metadata-protocol): an object save or publish whose storage sync the datasource refuses now says so on its answer
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `PUT /api/v1/meta/object/NAME` (a publish-mode save) and `POST /api/v1/meta/object/NAME/publish` sync the object's table after the item is written. When the datasource refused that sync, both answered `200` success with nothing about storage, and only the server log said the table was not created or altered. Both answers now carry one `warning` on their existing `advisories` key, with the rule id `object-storage-sync-refused`, naming the object and saying its storage did not follow. The datasource's own text is quoted when it declared a client refusal (a 4xx status); otherwise the advisory says the reason is in the server log, which keeps the `error` line it already printed. The status code and every other key are unchanged, the publish is still not failed, and an answer whose sync ran has no new key.
+  
+  A client that groups or suppresses advisories by rule id sees one new id. The package-draft batch publish (Studio's "publish whole app") still reports a refused sync in the server log only.
+- 0cba0ce: feat(rest, client): a tenant-admin REST door for the record-currency code backfill
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  An organization admin with no shell on the deployment can now run the record-currency code backfill (`os migrate record-currency-codes`) over HTTP: `POST /api/v1/meta/_migrate-record-currency-codes` with `{ object, field, code, apply? }`, or `client.meta.migrateRecordCurrencyCodes(...)` from the SDK.
+  
+  - It fills the codeless rows of **the caller's current organization only**. There is no environment-wide form, and the body takes no organization: `organizationId`, `allOrganizations` or any other key outside the four is refused with `VALIDATION_ERROR` / 400. A request with no current organization is refused `403 FORBIDDEN`.
+  - It requires `setup.write` in that organization (`403 FORBIDDEN` otherwise), and it is mounted behind `metadata.endpoints.maintenance` with the other maintenance routes.
+  - Preview unless `apply` is `true`. The answer is the report the CLI prints under `--json`, and the code, field and object refusals are the CLI's.
+  - The SDK method answers `unknown`: the report's named type lives in `@objectstack/objectql`.
+  - The 409 `destructive_change` finding `currency_mode_to_record` now names this route beside the CLI command.
+  - `@objectstack/objectql` now exports `RecordCurrencyBackfillOrganization` and `RecordCurrencyBackfillOrganizationsRefusal` from its entry.
+  - A backfill walk stopped by `--max-records` no longer prints "nothing to backfill" for rows it did not examine. It says the walk is incomplete, and an unscoped run says its organization check saw only the rows examined.
+  - A backfill row whose write a sandboxed hook refused now reports the hook's own sentence, not the `hook '<name>' threw:` debug wrapper, and a crashed hook's row reports the write doors' withheld fault sentence. The operator's log line keeps the whole text.
+- adf6ee0: fix(metadata-protocol): "publish whole app" now says when an object's storage sync was refused
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `POST /api/v1/packages/:id/publish-drafts` (Studio's "publish whole app") ran each published object's storage sync and dropped the answer, so a batch whose object table was not created or altered answered a plain success; only the server log said so. That object's `published[]` element now carries the same `object-storage-sync-refused` warning on its existing `advisories` that a publish-mode save and `POST /meta/object/NAME/publish` answer since #30635. The status and every other key are unchanged, the publish is not failed, and an element whose sync ran carries no `advisories` key.
+- bd5a443: fix(metadata-protocol): a refused `targetNamespace` on an unmanaged install answers `400 INVALID_REQUEST` with the reason, as documented
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  An unmanaged install whose `targetNamespace` the namespace rule refuses (`Acme`, `my-ns`, too long), or that names a shared namespace (`base`, `system`, `sys`), was refused with a 400 that carried no code. The boundary answered it as `VALIDATION_ERROR`, and the install-local door (`POST /api/v1/marketplace/install-local`) withheld the reason, answering only that it was in the server log.
+  
+  Both refusals now answer `400 INVALID_REQUEST`, the code the install-modes guide and the other rename refusals already give, with `details.targetNamespace`. Through the install-local door the answer now carries the reason, for example `Invalid package namespace 'Acme' on targetNamespace. ...`. Nothing else changes: the refusal still comes before anything is written, and a `targetPackageId` the id rule refuses still answers `VALIDATION_ERROR`.
+- f4d9c09: feat(metadata-protocol,cloud-connection): an unmanaged install can take a target namespace
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  - **An unmanaged copy can be installed under a namespace of its own.** `importUnmanagedPackage` and `POST /api/v1/marketplace/install-local` (with `installMode: 'unmanaged'`) take an optional `targetNamespace`. The copy's base takes it as its `namespace`, every copied object name takes it in place of the package's (a name without the package's prefix takes it in front), and every reference to a renamed name follows. Absent, the copy keeps the package's namespace exactly as before.
+  - **One rename, two doors.** The copy is renamed by the rules `duplicatePackage` already applies, now one function both doors call: view items and view containers follow their object, translations are named `<targetNamespace>_<locale>` with the object keys inside them renamed, a field keeps its key, and free text is renamed only at a whole prefixed object name.
+  - **Refused before anything is installed.** A `targetNamespace` the `manifest.namespace` rule refuses, or a platform-reserved one (`base`, `system`, `sys`), answers `400 INVALID_REQUEST`. So does a copy the names cannot make: an object whose copy name another object's copy takes, a copy name that is not a legal item name or is longer than its storage allows (63 characters for an object's table, 255 for an item name), and a renamed key that meets a key the item already holds — each item named. The same-name check (`409 RESOURCE_CONFLICT`) is judged on the renamed names, and a `targetNamespace` another package owns is refused `409`.
+  - **A managed install is never renamed.** `targetNamespace` beside a managed install (or no `installMode`) answers `400 INVALID_REQUEST` before anything is fetched.
+  - **The rename is recorded.** The import's answer carries `sourceNamespace`, and the install-local answer's `installedFrom` carries the package's own `namespace` beside its id and version. Neither appears when the copy kept the package's namespace.
+  - **A bare object's view container follows it on a duplicate too.** A view named by an object of the package takes that object's copy name, so `duplicatePackage` no longer leaves a bare object's container under the name the source's container holds.
+- 713beba: Clause-②: no
+  Metadata-protocol: none
+  
+  fix(metadata-protocol): the per-item rollback (`POST /api/v1/meta/:type/:name/rollback`) restores into the row the by-name read naming no package serves. A `.custom` pair's declared override stored beside a row bound to its read-only base (a row saved before the named-base close and not yet moved) is now rolled back in place, and the base row is left untouched; before, the door read a package-agnostic binding, addressed the base row, and was refused `403 NOT_OVERRIDABLE` naming a row the caller never meant. The door takes no new parameter. A rollback whose served row is the base's own is still refused by the named-base close.
+- Updated dependencies [8aa2e91]
+- Updated dependencies [c17719d]
+- Updated dependencies [b90a6f7]
+- Updated dependencies [486b0a9]
+- Updated dependencies [9ed2ee1]
+- Updated dependencies [769adff]
+- Updated dependencies [e8dc483]
+- Updated dependencies [bcdb1db]
+- Updated dependencies [9ebca94]
+- Updated dependencies [140d8ce]
+- Updated dependencies [699ebd8]
+- Updated dependencies [46d2b65]
+- Updated dependencies [4c2cd29]
+- Updated dependencies [4be8a2e]
+- Updated dependencies [471add3]
+- Updated dependencies [b5eb61d]
+- Updated dependencies [771b2db]
+- Updated dependencies [97e4249]
+- Updated dependencies [9037b13]
+- Updated dependencies [e3b56b2]
+- Updated dependencies [a52761f]
+- Updated dependencies [e8afd1e]
+- Updated dependencies [bd65cb6]
+- Updated dependencies [f19fbb8]
+- Updated dependencies [217ba78]
+- Updated dependencies [cde492d]
+- Updated dependencies [eee4149]
+- Updated dependencies [85a8fa0]
+- Updated dependencies [1756666]
+- Updated dependencies [f9e5bef]
+- Updated dependencies [0f3ee58]
+- Updated dependencies [f3a52d3]
+- Updated dependencies [d59a1eb]
+- Updated dependencies [af3451b]
+- Updated dependencies [3a27208]
+- Updated dependencies [29cbfcc]
+- Updated dependencies [cfb602c]
+- Updated dependencies [0c666c3]
+- Updated dependencies [38717d3]
+- Updated dependencies [ac890f5]
+- Updated dependencies [aa57c76]
+- Updated dependencies [fc869c2]
+- Updated dependencies [fef212b]
+- Updated dependencies [c045c34]
+- Updated dependencies [dc51811]
+- Updated dependencies [c133cfe]
+- Updated dependencies [b77c160]
+- Updated dependencies [09720e2]
+- Updated dependencies [25fea77]
+- Updated dependencies [3da9a4c]
+- Updated dependencies [3da9a4c]
+- Updated dependencies [3da9a4c]
+- Updated dependencies [4be9734]
+- Updated dependencies [bb86ff9]
+- Updated dependencies [2046d21]
+- Updated dependencies [778aedf]
+- Updated dependencies [fd749a4]
+- Updated dependencies [d9d42d4]
+- Updated dependencies [9d939c5]
+- Updated dependencies [25e1c1a]
+- Updated dependencies [67d5d53]
+- Updated dependencies [47226e6]
+- Updated dependencies [c7d1367]
+- Updated dependencies [f5aaa0b]
+- Updated dependencies [0005fec]
+- Updated dependencies [2d6402c]
+- Updated dependencies [77c203a]
+- Updated dependencies [54b491a]
+- Updated dependencies [8293c74]
+- Updated dependencies [ad0fbfd]
+- Updated dependencies [60fe44f]
+- Updated dependencies [29702d5]
+- Updated dependencies [a839020]
+- Updated dependencies [a7b8876]
+- Updated dependencies [f7afab8]
+- Updated dependencies [e760204]
+- Updated dependencies [4dde0ae]
+- Updated dependencies [590724f]
+- Updated dependencies [38d416f]
+- Updated dependencies [d2e2f6f]
+- Updated dependencies [d5f3bc5]
+- Updated dependencies [e3948ae]
+- Updated dependencies [b55d6ab]
+- Updated dependencies [1c5cee6]
+- Updated dependencies [aad1603]
+- Updated dependencies [482e089]
+- Updated dependencies [0e4747a]
+- Updated dependencies [7145bf3]
+- Updated dependencies [55d9dd4]
+- Updated dependencies [af8aab1]
+- Updated dependencies [a59d00a]
+- Updated dependencies [4bf9a2d]
+- Updated dependencies [0c9aa82]
+- Updated dependencies [e9731fc]
+- Updated dependencies [49c8568]
+- Updated dependencies [4564d6f]
+- Updated dependencies [f2ea193]
+- Updated dependencies [55cd927]
+- Updated dependencies [badf24d]
+- Updated dependencies [5268f50]
+- Updated dependencies [a30c4f4]
+- Updated dependencies [0cba0ce]
+- Updated dependencies [c893b3d]
+- Updated dependencies [677d542]
+- Updated dependencies [9bdeed2]
+- Updated dependencies [3479c33]
+- Updated dependencies [000a4c0]
+- Updated dependencies [b618224]
+- Updated dependencies [f4d9c09]
+- Updated dependencies [c77dd17]
+- Updated dependencies [ebe0a98]
+- Updated dependencies [9038187]
+- Updated dependencies [f108e6d]
+- Updated dependencies [8847e09]
+- Updated dependencies [5cb7d7e]
+- Updated dependencies [468e0c1]
+- Updated dependencies [6106b73]
+- Updated dependencies [0f920b9]
+- Updated dependencies [33bc8ae]
+- Updated dependencies [293a85b]
+- Updated dependencies [a1afbb9]
+- Updated dependencies [150f740]
+- Updated dependencies [42eb126]
+- Updated dependencies [8cf1fd0]
+- Updated dependencies [98583cd]
+- Updated dependencies [a5cb4f1]
+- Updated dependencies [3c1eb63]
+- Updated dependencies [d57be87]
+- Updated dependencies [5d4f2aa]
+- Updated dependencies [f4cd4ec]
+- Updated dependencies [eca7cd2]
+- Updated dependencies [cf4b9bf]
+- Updated dependencies [e1dac19]
+- Updated dependencies [3299873]
+- Updated dependencies [13227b5]
+- Updated dependencies [21510bb]
+- Updated dependencies [0fd363d]
+- Updated dependencies [5210acf]
+- Updated dependencies [d6b88f1]
+- Updated dependencies [4123865]
+- Updated dependencies [6ffe37e]
+- Updated dependencies [63a470a]
+  - @objectstack/spec@18.4.0
+  - @objectstack/metadata-core@18.4.0
+  - @objectstack/lint@18.4.0
+  - @objectstack/core@18.4.0
+  - @objectstack/formula@18.4.0
+  - @objectstack/types@18.4.0
+  - @objectstack/metadata@18.4.0
+  - @objectstack/sdui-parser@18.4.0
+
 ## 18.3.0
 
 ### Minor Changes

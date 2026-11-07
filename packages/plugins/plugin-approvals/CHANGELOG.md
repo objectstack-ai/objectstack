@@ -1,5 +1,240 @@
 # @objectstack/plugin-approvals
 
+## 18.4.0
+
+### Patch Changes
+
+- 13c0c5b: fix(plugin-approvals)!: an approval node refuses to open when a team or position approver's directory read fails, or a queue approver's expansion rejects, and the ownership-queue reads page to completion
+  
+  Clause-②: yes (narrowing) — an approval node no longer opens when a `team` or `position` approver (static, or an `expression` approver with `resolveAs` `team` / `position`) cannot be expanded because a directory read or the cross-organization read filter failed, or when a `queue` approver's expansion rejects. Under every `onEmptyApprovers` policy, the `fallbackApprovers` slate included, it now fails the node with a retryable `APPROVER_DIRECTORY_UNREADABLE:` error naming the read, where it used to open on the rest of the slate, on the fallback slate or on the administrators, or auto-approve. The registered ownership-queue service does not reject yet: a failed member read inside it still answers nobody until #29604 part 2 (#30251), so a `queue` approver refuses here only when `expandMembers` itself rejects. Every other input answers as before.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped: the approval node config, the approver types and the ownership-queue contract keep their shapes. What moves is the answer a node gives while a directory table cannot be read, and nothing at rest records that answer, so there is nothing for a migration to rewrite. -->
+  
+  **BREAKING** accept-set narrowing at the approval node (`@objectstack/plugin-approvals`): a failed directory read behind a `team` or `position` approver, or a `queue` approver whose expansion rejects, refuses the node instead of opening it on a slate that is missing people (ADR-0142 D6 as amended, ruling record 6599731698 on #29604).
+  
+  - **Before.** A `team` or `position` approver whose `sys_team_member`, `sys_user_position` or `sys_member` read failed kept its `type:value` literal slot, which nobody can act on, and logged the failure. A `queue` approver whose expansion threw answered "expanded to nobody" and added no slot. Either way the node went on as if those people did not exist: beside other approvers it opened on them alone, and on an otherwise empty slate the node's `onEmptyApprovers` policy acted, opening on the `fallbackApprovers` or the organization's administrators, or auto-approving.
+  - **Now.** The node does not open and writes no request, approver or action row. It fails with an `ApproverDirectoryUnreadableError` whose message starts `APPROVER_DIRECTORY_UNREADABLE:`, names the approver, the organization and the read that failed (a failure of the cross-organization read filter is named as that filter's read, on a static approver and on an `expression` one alike), and is retryable: the flow node's failure is a runtime one, so the run can be resumed once the directory can be read. A `fallbackApprovers` slate whose own `team` or `position` read fails refuses the same way. `department` / `business_unit`, `org_membership_level` and `manager` approvers are not named by the ruling and answer exactly as before.
+  - **Unchanged.** A decision on a request opened before the approver snapshot existed still re-reads its slate on the old path, which keeps the literal slot on a failed read, because the decision has already been recorded when that read happens.
+  - **Not yet.** The ownership-queue service shipped in `@objectstack/plugin-sharing` answers a failed `sys_queue` / `sys_queue_member`, team or position read with nobody (logged once) rather than rejecting, so a `queue` approver backed by it still adds no slot on such a failure. Its refusal arrives with #29604 part 2, once the contract can carry it (#30251).
+  
+  `@objectstack/plugin-sharing`: the ownership-queue service reads its `sys_queue` and `sys_queue_member` rows by id, page after page, to the end, where it read one page of 10,000 rows and answered on it. A queue's 10,001st member, an organization's 10,001st queue and the queues naming a recipient past that bound are now found. A read that fails partway answers as a failed read did before (that read contributes nobody, logged once, with the read's reason and without the walk's own "refuses instead" clause), never with the pages it had read.
+- fe835b4: fix(plugin-sharing)!: the ownership-queue service refuses a failed member read when the caller asks, and the approver slate and the sharing-recipient grant recompute ask
+  
+  Clause-②: yes (narrowing) — `expandMembers` and `isMember` of the registered ownership-queue service, called with `onFailedRead: 'refuse'`, now reject when a read behind the queue fails, where they answered nobody. The approver slate asks for that answer, so an approval node whose `queue` approver cannot be read refuses to open under every `onEmptyApprovers` policy, where it opened on the rest of the slate, on the fallback slate or on the administrators, or auto-approved. The sharing-rule recompute asks for it too, so a whole-rule pass (`evaluateRule`, the REST evaluate endpoint, the boot backfill), the recipient-axis revoke and the per-user pass on a `queue`-recipient rule reject on such a failure, where they completed by revoking the grants of the members who could not be read. Every call without the option, and every read that succeeds, answers as before.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped: the ownership-queue contract's `onFailedRead` option already exists, and the approval node config and the sharing rule keep their shapes. What moves is the answer two consumers get while a membership table cannot be read, and nothing at rest records that answer, so there is nothing for a migration to rewrite. -->
+  
+  **BREAKING** accept-set narrowing at the ownership-queue service's `'refuse'` answer and at its two recompute consumers (`@objectstack/plugin-sharing`, `@objectstack/plugin-approvals`): an empty expansion is a fact, a failed read is a fault (ADR-0142 D2 as amended), and the approver slate (D6) and the sharing-recipient grant recompute (D7) now get the fault instead of "nobody".
+  
+  - **The service.** `OwnershipQueueService.expandMembers(name, org, { onFailedRead: 'refuse' })` and `isMember(user, name, org, { onFailedRead: 'refuse' })` reject when the queue's `sys_queue` row, its `sys_queue_member` rows, or a member table one of its specifications reads (`sys_team_member`, `sys_user_position`, `sys_member`, `sys_business_unit_member`, `sys_business_unit`) cannot be read, or a paged read cannot vouch for completion. The rejection's message starts `[queue] queue '<name>' in organization '<org>' does not answer its members, because a read behind it failed:` and names that read; the read's own error rides along as `cause`. It never answers `[]`, a partial set or `false` instead. `isMember` still answers `true` when a read that succeeded reaches the user, and answers `false` only when every read behind it succeeded. An empty queue is still `[]`, and a name that resolves nowhere is still `[]` / `false`.
+  - **Unchanged: the default.** Without the option (`onFailedRead: 'nobody'`), a failed read still contributes nobody, logged once. The sitting-record access path (`queuesOf`), the claim admission and the assignment pool take that answer, so they deny on a failed read exactly as before. A failed read of the activation ledger (`sys_metadata_activation`) is not a failed read in this sense under either answer: it still reads "switched on" for that call, logged, the posture the sharing-rule service takes for its own position recipients.
+  - **The approver slate (D6).** A `queue` approver asks with `onFailedRead: 'refuse'` beside the addressing purpose. When the registered service rejects, the node fails with the retryable `APPROVER_DIRECTORY_UNREADABLE:` error that a failed team or position read already raises, naming the queue's failed read, and writes no request, approver or action row. Before, the registered service answered nobody, so the queue added no slot and the node's `onEmptyApprovers` policy acted on a slate missing those people.
+  - **The sharing-recipient grant recompute (D7).** A `queue`-recipient rule's expansion and its per-user membership check ask with `onFailedRead: 'refuse'`. A failed member read now rejects before any grant is diffed, so the rule's existing grants stay as they were until a pass can read the queue, and each recompute's caller logs it: the record pass and the object pass per rule (`record reconcile failed for rule`, `object reconcile failed for rule`), the queue-membership and business-unit write recomputes (`queue-membership revocation failed`, `queue-membership re-grant failed`, `business-unit revocation failed`, `business-unit re-grant failed`), the membership-row recompute (`recipient membership re-evaluation failed`) and the boot backfill (`boot rule backfill failed for rule`). A direct call to `evaluateRule`, `revokeRuleGrantsForRetiredRecipients` or `reconcileRuleForUser`, the REST evaluate endpoint included, rejects with the service's failure. Before, the failed read answered nobody and the pass revoked the grant of every member behind it. This is the answer a `team` or `position` recipient has given since its own reads began to refuse.
+  - **Supersedes the approval node's "Not yet".** The approval node's own entry in this release ("an approval node refuses to open when a team or position approver's directory read fails…") says, in its `Clause-②:` line and its **Not yet** bullet, that the registered ownership-queue service answers a failed member read with nobody rather than rejecting, so a `queue` approver backed by it refuses only when `expandMembers` itself rejects. That was true when it was written and is not after this change: the service now rejects on that failure when asked, and the slate asks, so a `queue` approver backed by it refuses on a failed `sys_queue`, `sys_queue_member`, team, position or business-unit read, as a `team` or `position` approver does. Read this bullet in place of those two sentences.
+- a52761f: fix(console): an action another package places on `sys_user` at `record_header` / `record_more` draws again on the user's record page, in the drawer and on the full page (#29951)
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **The header reads `placedActions: true`.** `page:header`'s `placedActions` (#30018) is now drawn by the console's header renderer (`PageHeaderActions` in `@object-ui/components`): `true` draws every action of the page's object whose `locations` include `record_header` or `record_more`, in declaration order, read from the object's metadata at render time, so an action an installed package adds to the object is drawn without editing the page. Omitted or `false`, an authored `actions` list is still the whole set (#11592). A `true` beside an authored list, which the spec refuses, draws none of the object's actions and is reported once in the console.
+  - **One placed-header reader.** `placedHeaderActions` (`@object-ui/types`) is the rule both headers read: the synthesized default record page's header in `RecordDetailView` and a `placedActions: true` header. The `page:header` registration publishes the `placedActions` input.
+  - **The platform record pages opt in.** `sys_user_detail` and `sys_organization_detail` (`@objectstack/platform-objects`) and `sys_approval_request_detail` (`@objectstack/plugin-approvals`) set `placedActions: true` in place of the id lists #27219 froze, which dropped every header action another package places on those objects. The tab strips are unchanged, and every action the lists named is placed at `record_header` / `record_more`, so each still draws.
+  - `@objectstack/spec`: the `placedActions` describe no longer opens with `[PLANNED — not yet rendered]`, and the `page` liveness record names the reader.
+- a0c68ae: feat(approvals,messaging): approval requests, reminders and outcomes also go by e-mail, linking to the request page; messaging gains a code-declared notification template tier
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - **`@objectstack/plugin-approvals`: `approval.requested`, `approval.reminder`, `approval.approved` and `approval.rejected` request the `inbox` and `email` channels** in one emit. Before, every approval notice named no channel, so messaging delivered it to the in-app inbox alone and nobody who does not watch the Console bell heard of it. Every other `approval.*` topic stays inbox-only, and delivery preferences filter the e-mail as they filter any channel. The inbox is unchanged. On a deployment with no mail transport the e-mail is whatever the `email` channel answers there.
+  - **The approval e-mail** is the notice's own title as its subject and its body (in the recipient's language, as the inbox renders it) followed by one line that opens the request, in `en`, `zh-CN`, `ja-JP` and `es-ES`. The link is a new payload member, `approvalUrl`: the request page (`/system/approvals?request=ID`) under the deployment's public origin. `actionUrl` stays relative, as the Console routes on it. It opens the request for a signed-in reader and decides nothing; no ADR-0043 action link or token is in any payload.
+  - **`publicBaseUrl` now resolves when the option is unset**: `OS_AUTH_URL` (legacy `BETTER_AUTH_URL`), then `OS_BASE_URL`, never a guessed `localhost`. With none of them set, or a value that is not an absolute `http(s)` URL, links stay relative and the plugin warns once at start, naming the variable to set. The same origin also prefixes ADR-0043's `actionLinkUrl`, as its option always documented. To give approval e-mails a working link, set `OS_BASE_URL` (or `OS_AUTH_URL`) to the deployment's address.
+  - **`@objectstack/service-messaging`: `MessagingService.registerBuiltinTemplates(templates)`** (and the `BuiltinNotificationTemplate` type) declares `(topic, channel, locale)` notification templates in code. The channels' template store reads them at every rung of its locale ladder after the recipient organization's own `sys_notification_template` row: the rung's row, else the rung's built-in, else the next rung, else the generic title and body. Nothing is written to the database (ADR-0131 §1.4), so an organization that authors a row overrides the built-in with nothing to migrate. A malformed template, or a `(topic, channel, locale)` already declared, is refused with a `TypeError`, and nothing from that call is kept.
+- 7c164cf: i18n(plugin-approvals): the approval objects, notifications, record page and e-mail link line ship in Traditional Chinese, Arabic, French and Brazilian Portuguese
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The approval objects (`sys_approval_request`, `sys_approval_action`, `sys_approval_delegation`), the approval notifications' sentences, the approval request record page (its label and its Details / Timeline tabs) and the line that opens an approval from its e-mail now carry `zh-Hant`, `ar`, `fr` and `pt-BR` beside the existing `en`, `zh-CN`, `ja-JP` and `es-ES`, so an approver or submitter in one of those languages reads the approval screens, notices and e-mails in their own language instead of English. Each new locale is registered under its platform-table tag with its source-hash companion, its page entry and its messages, and the package's extract command lists the tags, so the existing `check:i18n` bundle check covers them. The e-mail templates' shape, the template selection and `EMAIL_TEMPLATE_FLOOR_LOCALE` are unchanged; only the link line is added per locale. First half of package 9 of #30512; `ru`, `de` and `ko` follow in the second half.
+- ae82d05: i18n(plugin-approvals): the approval objects, notifications, record page and e-mail link line ship in Russian, German and Korean
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The approval objects (`sys_approval_request`, `sys_approval_action`, `sys_approval_delegation`), the approval notifications' sentences, the approval request record page (its label and its Details / Timeline tabs) and the line that opens an approval from its e-mail now carry `ru`, `de` and `ko` as well, so the package ships all eleven platform languages. Each new locale is registered under its platform-table tag with its source-hash companion, its page entry and its messages, and the package's extract command lists the tags, so the existing `check:i18n` bundle check covers them. The e-mail templates' shape, the template selection and `EMAIL_TEMPLATE_FLOOR_LOCALE` are unchanged; only the link line is added per locale. Second half of package 9 of #30512.
+- 9038187: fix(audit): name the impersonating administrator on identity writes and on an approval decided while impersonating
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  Two writes an administrator makes while impersonating a user still read as the user's own in the audit ledger. Both now carry the same attribution-only `impersonatedBy` a record write from that session already carries, recorded as `sys_audit_log.metadata.impersonated_by`. `user_id`, `actor` and every permission stay the impersonated user's.
+  
+  - **Identity-table writes (`@objectstack/plugin-auth`).** A write better-auth makes on the user's behalf (renaming the profile, changing an email, a membership change, an admin route such as set-user-manager) runs as the system and is credited to the user through `attributedUserId`. On an impersonation session it now also names the administrator, read from the session row's `impersonatedBy`, never from the request body. `authSystemWriteContext()` builds it, and the adapter's `withSystemContext` writes now use that same builder. `resolveAttributedActor()` (new) answers the user and the administrator together; `runAttributedToUser()` also accepts the admitted actor object, whose new optional `impersonatedBy` the platform-admin gate fills from the session.
+  - **The approval decider's segment (`@objectstack/spec`, `@objectstack/plugin-approvals`, `@objectstack/service-automation`).** `ResumeSignal.impersonatedBy` (new, optional) names the administrator when the decider decided from an impersonation session. It is honoured only beside `resumedBy`, on a signal carrying `RESUME_AUTHORITY_SERVICE`, so an HTTP body cannot set it. The approvals decision door fills it from the decision request's context, and a stranded decision's journal keeps it for the replay. The nodes after the decision now carry exactly the decision's administrator, and none when the decider acted in their own name. Before this, a trigger user deciding their own run kept the stamp of the write that started it, and a decider deciding while impersonated carried none.
+  
+  No schema column and no migration.
+- bdbaf80: fix: Setup's form help speaks to an administrator, and the queue pages, the mail status banner and the test-email toast read in Chinese on a zh-CN console
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - **Field help (English source and zh-CN):** the permission set and position assignment forms, the out-of-office (approval delegation) rule, and the business unit, organization and user forms no longer describe the implementation. Gone: "fail-closed", "half-open [from, until)", "agent grants", "graph semantics", "expanded by graph queries", "Null = root of tenant", "HRIS", "When true / When false" (zh-CN 「为 true 时」 now reads 「开启后」) and an HTTP status code. The help now says when an assignment starts and ends, what turning a switch on does, and what to fill in. Text only: no field name, key, option value or behaviour changes.
+  - **`@objectstack/plugin-sharing`:** `sys_queue` and `sys_queue_member` join the plugin's translation bundle, with zh-CN text, so the 队列 and 队列成员 pages, their columns, help and the 新建 button read in Chinese. ja-JP and es-ES carry English fills for now.
+  - **`@objectstack/plugin-email`:** the live-status statement at the top of Setup → Email and the "Send test email" answer (sent, failed, logged only) are written in the caller's display language, en and zh-CN today; another language gets English.
+  - **`@objectstack/service-settings`:** a settings action handler (`SettingsActionHandler`) receives an optional `locale`, the caller's display language read from the request the same way the live-status statement's is (`Accept-Language`, else `?locale`); `runAction` takes it as a fifth `display` argument. Existing handlers compile and behave unchanged.
+- Updated dependencies [8aa2e91]
+- Updated dependencies [c17719d]
+- Updated dependencies [b90a6f7]
+- Updated dependencies [486b0a9]
+- Updated dependencies [9ed2ee1]
+- Updated dependencies [769adff]
+- Updated dependencies [e8dc483]
+- Updated dependencies [bcdb1db]
+- Updated dependencies [9ebca94]
+- Updated dependencies [140d8ce]
+- Updated dependencies [699ebd8]
+- Updated dependencies [4c2cd29]
+- Updated dependencies [4be8a2e]
+- Updated dependencies [471add3]
+- Updated dependencies [b5eb61d]
+- Updated dependencies [771b2db]
+- Updated dependencies [97e4249]
+- Updated dependencies [9037b13]
+- Updated dependencies [e3b56b2]
+- Updated dependencies [a52761f]
+- Updated dependencies [e8afd1e]
+- Updated dependencies [bd65cb6]
+- Updated dependencies [f19fbb8]
+- Updated dependencies [217ba78]
+- Updated dependencies [cde492d]
+- Updated dependencies [eee4149]
+- Updated dependencies [0f3ee58]
+- Updated dependencies [f3a52d3]
+- Updated dependencies [d59a1eb]
+- Updated dependencies [af3451b]
+- Updated dependencies [3a27208]
+- Updated dependencies [29cbfcc]
+- Updated dependencies [0c666c3]
+- Updated dependencies [38717d3]
+- Updated dependencies [ac890f5]
+- Updated dependencies [aa57c76]
+- Updated dependencies [fc869c2]
+- Updated dependencies [fef212b]
+- Updated dependencies [dc51811]
+- Updated dependencies [b77c160]
+- Updated dependencies [09720e2]
+- Updated dependencies [8fed00f]
+- Updated dependencies [25fea77]
+- Updated dependencies [86ae2ca]
+- Updated dependencies [3da9a4c]
+- Updated dependencies [3da9a4c]
+- Updated dependencies [4be9734]
+- Updated dependencies [bb86ff9]
+- Updated dependencies [977be38]
+- Updated dependencies [2046d21]
+- Updated dependencies [740edc5]
+- Updated dependencies [778aedf]
+- Updated dependencies [71318af]
+- Updated dependencies [fd749a4]
+- Updated dependencies [d9d42d4]
+- Updated dependencies [9d939c5]
+- Updated dependencies [25e1c1a]
+- Updated dependencies [67d5d53]
+- Updated dependencies [47226e6]
+- Updated dependencies [c7d1367]
+- Updated dependencies [f5aaa0b]
+- Updated dependencies [0005fec]
+- Updated dependencies [2d6402c]
+- Updated dependencies [77c203a]
+- Updated dependencies [8293c74]
+- Updated dependencies [60fe44f]
+- Updated dependencies [29702d5]
+- Updated dependencies [a839020]
+- Updated dependencies [a7b8876]
+- Updated dependencies [f7afab8]
+- Updated dependencies [4dde0ae]
+- Updated dependencies [e8e924f]
+- Updated dependencies [590724f]
+- Updated dependencies [35cd64c]
+- Updated dependencies [38d416f]
+- Updated dependencies [d2e2f6f]
+- Updated dependencies [d5f3bc5]
+- Updated dependencies [e3948ae]
+- Updated dependencies [b55d6ab]
+- Updated dependencies [1c5cee6]
+- Updated dependencies [aad1603]
+- Updated dependencies [0e4747a]
+- Updated dependencies [eb68b98]
+- Updated dependencies [a11ef71]
+- Updated dependencies [7145bf3]
+- Updated dependencies [55d9dd4]
+- Updated dependencies [af8aab1]
+- Updated dependencies [a59d00a]
+- Updated dependencies [4bf9a2d]
+- Updated dependencies [0c9aa82]
+- Updated dependencies [49c8568]
+- Updated dependencies [4564d6f]
+- Updated dependencies [f2ea193]
+- Updated dependencies [badf24d]
+- Updated dependencies [5268f50]
+- Updated dependencies [a30c4f4]
+- Updated dependencies [0cba0ce]
+- Updated dependencies [c893b3d]
+- Updated dependencies [677d542]
+- Updated dependencies [9bdeed2]
+- Updated dependencies [3479c33]
+- Updated dependencies [000a4c0]
+- Updated dependencies [7569fb5]
+- Updated dependencies [f4d9c09]
+- Updated dependencies [c77dd17]
+- Updated dependencies [ebe0a98]
+- Updated dependencies [9038187]
+- Updated dependencies [f108e6d]
+- Updated dependencies [8847e09]
+- Updated dependencies [5cb7d7e]
+- Updated dependencies [78eb352]
+- Updated dependencies [2ce2646]
+- Updated dependencies [468e0c1]
+- Updated dependencies [6106b73]
+- Updated dependencies [0f920b9]
+- Updated dependencies [6bd00d2]
+- Updated dependencies [b5696b4]
+- Updated dependencies [33bc8ae]
+- Updated dependencies [293a85b]
+- Updated dependencies [a1afbb9]
+- Updated dependencies [150f740]
+- Updated dependencies [42eb126]
+- Updated dependencies [8cf1fd0]
+- Updated dependencies [98583cd]
+- Updated dependencies [cadd6aa]
+- Updated dependencies [a5cb4f1]
+- Updated dependencies [3c1eb63]
+- Updated dependencies [d57be87]
+- Updated dependencies [5d4f2aa]
+- Updated dependencies [f4cd4ec]
+- Updated dependencies [b3d2f4b]
+- Updated dependencies [eca7cd2]
+- Updated dependencies [cf4b9bf]
+- Updated dependencies [e1dac19]
+- Updated dependencies [3299873]
+- Updated dependencies [7b2bb66]
+- Updated dependencies [a794e32]
+- Updated dependencies [21510bb]
+- Updated dependencies [0fd363d]
+- Updated dependencies [5210acf]
+- Updated dependencies [d6b88f1]
+- Updated dependencies [4123865]
+- Updated dependencies [bdbaf80]
+- Updated dependencies [6ffe37e]
+- Updated dependencies [63a470a]
+  - @objectstack/spec@18.4.0
+  - @objectstack/metadata-core@18.4.0
+  - @objectstack/core@18.4.0
+  - @objectstack/formula@18.4.0
+  - @objectstack/platform-objects@18.4.0
+  - @objectstack/types@18.4.0
+
 ## 18.3.0
 
 ### Minor Changes

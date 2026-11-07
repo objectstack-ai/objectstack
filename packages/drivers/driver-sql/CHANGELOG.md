@@ -1,5 +1,171 @@
 # @objectstack/driver-sql
 
+## 18.4.0
+
+### Patch Changes
+
+- 8d7f906: fix(driver-sql): schema sync never drops an existing table that holds rows; a `_id`-keyed table with rows is refused, naming the table and the column
+  
+  Clause-②: yes (narrowing) — `SqlDriver.initObjects` / `syncSchema` refuse one more case that used to succeed: an existing table that has a `_id` column, no `id` column and at least one row. It used to be dropped and recreated empty; it is now refused with an `ExistingTableAdoptionRefusal` naming the table, the column and the row count, and nothing is changed.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no stored metadata changes: what moves is what schema sync does to a database table it finds, and the refused table is left exactly as it was, so there is nothing for a migration to rewrite. -->
+  
+  **BREAKING** accept-set narrowing in schema sync (`@objectstack/driver-sql`): a table the sync would have rebuilt is refused while it holds rows.
+  
+  - **Before.** Schema sync adopts an existing table by adding the columns the object declares and the table lacks, rows kept. A table keyed by `_id` with no `id` column (the storage key of the ObjectQL driver this one was ported from) was instead dropped and recreated as the object declares, whatever it held. Storing an object on a managed datasource over an existing database reached it: an object named after such a table deleted its rows, and the save answered success.
+  - **Now.** That rebuild runs only on an empty table, as before. A table that holds rows is refused before anything is written: no column is added, no index is built, no row is touched. The refusal is thrown from `initObjects` and reaches the caller of the sync. The metadata save, the boot sync and a datasource connect report a refused sync in the server log at `error`, followed by this message, as they do for any refused sync.
+  - **Who moves.** Only a deployment storing an object on a managed SQL datasource whose table of the same name is keyed by `_id` and holds rows. No platform table has that shape.
+  
+  **The remedy.** To keep the rows and use the table, rename its `_id` column to `id`, then save the object again (or restart). To read the table as it is, bind the object through a datasource whose `schemaMode` is `external`. If the rows are not needed, empty the table and save again; the sync then rebuilds it.
+- 6990b0d: fix(driver-sql,cli): `os migrate plan` previews a `_id`-keyed table as apply treats it, and one refused table no longer stops `os migrate apply`
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  An existing table keyed by `_id` with no `id` column is the one shape schema sync does not adopt by adding columns: it rebuilds it while it is empty and, since #30562, refuses it while it holds rows. `os migrate plan` listed it as a harmless `add_columns` step. The plan now lists it as `apply` treats it: a `rebuild_table` entry (in place) when the table is empty, and a `refuse_table` entry when it holds rows, naming the table, the `_id` column and the row count, with the refusal's own text (`refusal`, rendered by the same renderer the sync throws through). `isRefusedSchemaWork` is exported beside `isInPlaceSchemaWork`. For a driver-sql consumer this widens the published `PendingSchemaWorkKind` / `PendingSchemaWork`: a caller of `flushDeferredSchemaDdl()` must now treat a returned `refuse_table` entry (`isRefusedSchemaWork`) as a table that was refused and left as it is, not as performed work — where that call used to throw.
+  
+  `os migrate apply` used to hand every held-back object to one sync call, so one refused table stopped the batch: the tables after it got no DDL and the list of performed work was lost with the error. The refused table is now left out of that call and reported on its own: every other table gets its DDL, the run names the refused table with the refusal text, and ends PARTIAL with exit 1 (`--json`: `refused` beside `created`, `message: "partial"`).
+- f108e6d: feat(spec): a field declares the key or keys it was renamed from — `renamedFrom` on `FieldSchema`
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  Skills-docs: follow-up #30885 — `skills/**` does not teach the key yet: it is declared ahead of the upgrade step that carries the data (rename execution, #30885), and that step owns the skills line; this diff documents it in `content/docs/data-modeling/fields.mdx` and the generated references
+  
+  A package author can now say that a field was renamed, so that an upgrade knows a rename from a drop-and-add. On the new field, write the old key: `account_name: Field.text({ label: 'Account Name', renamedFrom: ['company'] })`. A field renamed twice lists both earlier keys. This is the manifest half of the rename mapping ruled on epic objectstack-ai/cloud#3652 (Q3 「默认拒绝，需显式映射（推荐）」, and on where the mapping lives, 「写进清单 renamedFrom」), and it supersedes item 5 of objectstack#24443's ruling A ("No rename spelling is added to the spec").
+  
+  - **`@objectstack/spec`: `FieldSchema.renamedFrom: string[]`, optional.** Each entry is an earlier key of this same field, in the field-key grammar (lowercase snake_case). The parse refuses, in one located issue naming the object, the field and the old key: an entry that is not a field key (judged by `FieldSchema`), and, in `ObjectSchema`'s refinement beside the stage-field check, an entry that is the field's own key, an entry repeated within one list, an entry that another field of the same object still declares (the old name is still in use), and an old key that two fields of the same object both claim. Type compatibility between the old column and the new field is not judged at parse: it depends on the installed version, so the upgrade plan judges it. An object that does not write the key parses exactly as before; nothing materializes.
+  - **Declared ahead of its readers.** Nothing in this release reads the key at upgrade or anywhere else. The upgrade plan (#30884) and the rename execution (#30885) read it; until the execution ships, no upgrade carries a column on this declaration. The liveness ledger records the row as `planned`, naming #30885 as the reader that flips it to `live`.
+  - **Publish-time consequence.** `FieldSchema` is strict, so an artifact that carries `renamedFrom` is refused, as an unrecognized key, by every runtime older than this release. A package that adds the key needs an installing runtime at this release or later; a package that does not write it is unaffected.
+  - **`@objectstack/driver-sql` and `@objectstack/metadata-core`: the key is classified in the two maps pinned exhaustive over `FieldSchema`.** The SQL driver's builtin-column classification files it as `storage` (on `id`, `created_at` or `updated_at` the platform's own column takes no data from an old one, so the builtin-column diagnostic reports it as discarded there). The field-level security scrub keeps it: the parse refuses any entry that names a live field, so no entry can name a field a caller is denied.
+- dcb5fb3: fix(driver-turso): the remote face joins a large `$and` / `$or` as balanced halves, so comment and attachment reads fit a hosted libSQL server's depth limit
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  On a remote Turso / libSQL database (`TursoDriver` with a `libsql://`, `https://` or `wss://` url and no `syncUrl`, as every hosted environment runs), every read of `sys_comment` and `sys_attachment` answered `500 DATABASE_ERROR` once the deployment registered roughly a hundred objects, as an installed app does. The driver's log named the cause: `Expression tree is too large (maximum depth 100)`. The comment and attachment read gates OR one `ReadableIds` branch per registered parent object, and the remote face's compiler joined a group's members into one flat chain, one expression level per member, while the hosted server refuses a tree deeper than 100.
+  
+  The local face (`SqlDriver`) has emitted such groups as balanced halves since #29888. The remote face compiles its SQL text itself, so that change never reached it. It now regroups by the same rule, shared from `@objectstack/driver-sql` as `joinBalancedGroup` (with `FLAT_GROUP_MAX_MEMBERS`): a group of at most 8 members compiles byte-identical to before, and a larger one as two parenthesised halves, recursively, so the depth it adds grows with the logarithm of its size. Measured on the gate's own shape with 134 branches and a three-level master chain: 162 levels before, 38 after.
+  
+  The regrouped expression selects exactly the rows the flat one did, on every dialect: `AND` and `OR` are associative over SQL's three-valued logic, the members keep their order, and so do their bind values. No gate, scope or tenant wall changes.
+- Updated dependencies [8aa2e91]
+- Updated dependencies [c17719d]
+- Updated dependencies [b90a6f7]
+- Updated dependencies [e8dc483]
+- Updated dependencies [bcdb1db]
+- Updated dependencies [9ebca94]
+- Updated dependencies [140d8ce]
+- Updated dependencies [699ebd8]
+- Updated dependencies [4c2cd29]
+- Updated dependencies [4be8a2e]
+- Updated dependencies [471add3]
+- Updated dependencies [b5eb61d]
+- Updated dependencies [771b2db]
+- Updated dependencies [97e4249]
+- Updated dependencies [9037b13]
+- Updated dependencies [e3b56b2]
+- Updated dependencies [a52761f]
+- Updated dependencies [e8afd1e]
+- Updated dependencies [bd65cb6]
+- Updated dependencies [f19fbb8]
+- Updated dependencies [217ba78]
+- Updated dependencies [cde492d]
+- Updated dependencies [eee4149]
+- Updated dependencies [f3a52d3]
+- Updated dependencies [d59a1eb]
+- Updated dependencies [af3451b]
+- Updated dependencies [3a27208]
+- Updated dependencies [0c666c3]
+- Updated dependencies [38717d3]
+- Updated dependencies [ac890f5]
+- Updated dependencies [aa57c76]
+- Updated dependencies [fc869c2]
+- Updated dependencies [fef212b]
+- Updated dependencies [dc51811]
+- Updated dependencies [b77c160]
+- Updated dependencies [09720e2]
+- Updated dependencies [25fea77]
+- Updated dependencies [3da9a4c]
+- Updated dependencies [4be9734]
+- Updated dependencies [bb86ff9]
+- Updated dependencies [2046d21]
+- Updated dependencies [fd749a4]
+- Updated dependencies [d9d42d4]
+- Updated dependencies [9d939c5]
+- Updated dependencies [25e1c1a]
+- Updated dependencies [47226e6]
+- Updated dependencies [c7d1367]
+- Updated dependencies [f5aaa0b]
+- Updated dependencies [0005fec]
+- Updated dependencies [2d6402c]
+- Updated dependencies [77c203a]
+- Updated dependencies [8293c74]
+- Updated dependencies [29702d5]
+- Updated dependencies [a839020]
+- Updated dependencies [a7b8876]
+- Updated dependencies [f7afab8]
+- Updated dependencies [4dde0ae]
+- Updated dependencies [590724f]
+- Updated dependencies [38d416f]
+- Updated dependencies [d2e2f6f]
+- Updated dependencies [d5f3bc5]
+- Updated dependencies [e3948ae]
+- Updated dependencies [b55d6ab]
+- Updated dependencies [1c5cee6]
+- Updated dependencies [aad1603]
+- Updated dependencies [7145bf3]
+- Updated dependencies [55d9dd4]
+- Updated dependencies [af8aab1]
+- Updated dependencies [a59d00a]
+- Updated dependencies [4bf9a2d]
+- Updated dependencies [0c9aa82]
+- Updated dependencies [49c8568]
+- Updated dependencies [4564d6f]
+- Updated dependencies [f2ea193]
+- Updated dependencies [badf24d]
+- Updated dependencies [5268f50]
+- Updated dependencies [a30c4f4]
+- Updated dependencies [0cba0ce]
+- Updated dependencies [c893b3d]
+- Updated dependencies [677d542]
+- Updated dependencies [9bdeed2]
+- Updated dependencies [3479c33]
+- Updated dependencies [000a4c0]
+- Updated dependencies [f4d9c09]
+- Updated dependencies [c77dd17]
+- Updated dependencies [ebe0a98]
+- Updated dependencies [9038187]
+- Updated dependencies [f108e6d]
+- Updated dependencies [5cb7d7e]
+- Updated dependencies [468e0c1]
+- Updated dependencies [6106b73]
+- Updated dependencies [0f920b9]
+- Updated dependencies [33bc8ae]
+- Updated dependencies [293a85b]
+- Updated dependencies [a1afbb9]
+- Updated dependencies [150f740]
+- Updated dependencies [42eb126]
+- Updated dependencies [8cf1fd0]
+- Updated dependencies [a5cb4f1]
+- Updated dependencies [3c1eb63]
+- Updated dependencies [d57be87]
+- Updated dependencies [5d4f2aa]
+- Updated dependencies [f4cd4ec]
+- Updated dependencies [eca7cd2]
+- Updated dependencies [cf4b9bf]
+- Updated dependencies [e1dac19]
+- Updated dependencies [21510bb]
+- Updated dependencies [0fd363d]
+- Updated dependencies [5210acf]
+- Updated dependencies [d6b88f1]
+- Updated dependencies [4123865]
+- Updated dependencies [6ffe37e]
+- Updated dependencies [63a470a]
+  - @objectstack/spec@18.4.0
+  - @objectstack/core@18.4.0
+  - @objectstack/types@18.4.0
+  - @objectstack/observability@18.4.0
+
 ## 18.3.0
 
 ### Minor Changes

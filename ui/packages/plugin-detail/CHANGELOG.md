@@ -1,5 +1,380 @@
 # @object-ui/plugin-detail
 
+## 18.4.0
+
+### Patch Changes
+
+- ffeda13: refactor(plugin-detail)!: retire twenty-one zero-consumer exports (record-page synthesis, layout, related-card and timeline helpers, one hook and three types)
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (runtime-export-retired @object-ui/plugin-detail#queueClaimAdmitted, @object-ui/plugin-detail#extractLookupId, @object-ui/plugin-detail#TEXTUAL_REF_FALLBACK_TYPES, @object-ui/plugin-detail#inferDetailColumns, @object-ui/plugin-detail#applyAutoSpan, @object-ui/plugin-detail#applyDetailAutoLayout, @object-ui/plugin-detail#DetailTabsProps, @object-ui/plugin-detail#buildDefaultDiscussion, @object-ui/plugin-detail#buildDefaultTimeline, @object-ui/plugin-detail#deriveStages, @object-ui/plugin-detail#RECORD_PAGE_WIDE_MIN_WIDTH, @object-ui/plugin-detail#recordPageColumnOfTab, @object-ui/plugin-detail#RecordPageColumn, @object-ui/plugin-detail#useDefaultRecordPage, @object-ui/plugin-detail#relatedCountTargetOf, @object-ui/plugin-detail#filterTimelineStream, @object-ui/plugin-detail#RELATED_CARD_NEW_BADGE_MS, @object-ui/plugin-detail#editRelatedArrangement, @object-ui/plugin-detail#relatedCardId, @object-ui/plugin-detail#relatedDefaultOrderHash, @object-ui/plugin-detail#RelatedArrangementEdit) the retired operands are pure helpers of the synthesized record page, its layout and its related cards, one React context hook, and three TypeScript types; nothing in the workspace or in hotcrm imports any of them from the package entry, and no packages/spec schema, registered node type, conversion surface or stored shape names them, so there is nothing for `objectstack migrate meta` to rewrite -->
+  
+  **BREAKING** for a host that imports any of these twenty-one names from `@object-ui/plugin-detail`. None had an importer anywhere in the workspace or in hotcrm, so the Console and every `@object-ui/*` package are unaffected. Every module stays in the package and keeps its in-package readers (the record page synthesizer, `DetailView`, `RecordPageColumns`, the related cards and the timeline stream); only the entry stops publishing them. Everything else on the entry, including `buildDefaultPageSchema`, `buildDefaultTabs`, `isWideFieldType`, `InlineFieldInput`, `recordSitsInQueue`, `DefaultRecordPageContext`, `prefetchRelatedCounts`, `relatedCountTargetsIn`, `mergeTimelineStream`, `resolveRelatedArrangement` and the `RelatedArrangement` / `RecordPageTier` / `DefaultPageColumns` types, stays exported unchanged.
+  
+  What leaves, and what to write instead:
+  
+  - FROM `buildDefaultDiscussion`, `buildDefaultTimeline`, `deriveStages` TO `buildDefaultPageSchema`, which builds the whole default record page including its discussion, timeline and stage path.
+  - FROM `RECORD_PAGE_WIDE_MIN_WIDTH`, `recordPageColumnOfTab`, `RecordPageColumn` TO `recordPageTierFor` and `buildDefaultPageColumns`, which place the page's tabs into columns for a width.
+  - FROM `inferDetailColumns`, `applyAutoSpan`, `applyDetailAutoLayout` TO `DetailView`, which lays out its sections itself; `isWideFieldType` stays.
+  - FROM `extractLookupId`, `TEXTUAL_REF_FALLBACK_TYPES` TO `InlineFieldInput`, which reads lookup values itself.
+  - FROM `queueClaimAdmitted` TO `useQueueClaimOffered`, which answers whether the Claim button shows.
+  - FROM `useDefaultRecordPage` TO `DefaultRecordPageContext` with `useContext`.
+  - FROM `relatedCountTargetOf` TO `relatedCountTargetsIn`.
+  - FROM `filterTimelineStream` TO `mergeTimelineStream`; the timeline panel applies its filter chips itself.
+  - FROM `RELATED_CARD_NEW_BADGE_MS`, `editRelatedArrangement`, `relatedCardId`, `relatedDefaultOrderHash`, `RelatedArrangementEdit` TO `resolveRelatedArrangement` with `relatedArrangementFromRecord` / `relatedArrangementToRecord`; the related cards edit and badge the arrangement themselves.
+  - FROM `DetailTabsProps` TO `DetailViewProps`: `DetailTabs` is not on the entry, `DetailView` renders it.
+- 6e68d8f: fix(plugin-detail): a record page's body tables total only the columns declared additive — a version number or an instalment number is no longer summed
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  **Visible behaviour change on a released page.** The 「Totals (this page)」 line under a body table of the default record page (a related list drawn full width in the details column) used to add up every `currency`, `number`, `integer` and `decimal` column. Ordinals were summed with the quantities: a contract's versions v1–v4 read 「版本号 10」, five instalments 「期次 15」. The line now totals:
+  
+  - a `currency` column, when every counted row is in one known currency, formatted in it. Each row's currency is the one its cell displays (`resolveFieldCurrency`): the field's code under `currencyMode: 'fixed'`, the tenant default under `dynamic`, the row's own code field under `record`. Rows in different currencies, or a row whose currency is unknown (a `record`-mode row with a blank code, a `dynamic` amount with no tenant default), give that column no total rather than a bare or wrong-currency sum. A `currencyConfig` without `currencyMode: 'fixed'` no longer formats in its `defaultCurrency`, which the spec does not read outside `fixed`; it shows the tenant default, as the column's cells do;
+  - a `number`, `integer` or `decimal` column only when the record's own object declares a `summary` field whose `summaryOperations` sums that child field (`function: 'sum'`, `object` naming the child). The roll-up is the author's statement that the column adds up. Without one, as for an amount stored as `number` with its currency on the parent, the column gets no total;
+  - nothing else. When no column qualifies the line is not drawn.
+- 3461420: fix(plugin-detail): an empty body table of the record page keeps its header (title, 0, New) with the empty sentence under it, instead of folding into one line that read the empty sentence before the table's title
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  **Visible behaviour change on a released page.** The default record page draws a body table (a related list drawn full width in the details column, or the Details tab) beside its sibling sections. Because the tables share that container, the related-list empty fold took them for a Related tab stack: once one table had rows, an empty one left its place and reappeared as a single line after the last table, reading 「暂无相关记录 · 偏离 · ＋ 新建」 (no related records · Deviations · New). A body table now never folds. An empty one keeps the header row its non-empty siblings draw (title, count 0, ⤢, New), and the empty sentence moves out of that row to the table's place under it.
+  
+  The fold of a record's Related tab, and the empty-panels line of the related column, are unchanged: only a list whose relationship is one of the page's body tables opts out.
+- 9049be2: fix(plugin-detail): a record page's body table that is wider than the details column says so — its first column stays pinned and ⤢ is offered as 「All columns」
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A body table of the default record page (a related list drawn in the details column) keeps its place in that column, as ADR-0085's role-based layout puts it. When its columns are wider than the column, it now makes the overflow obvious:
+  
+  - **The first column stays pinned** while the table scrolls sideways, so a scrolled row is still identifiable (the table's existing `frozenColumns: 1`, set only while the table overflows).
+  - **⤢ is offered in words.** The enlarge control in the card header, icon-only before, shows a visible 「All columns」 label (`detail.relatedCardAllColumns`, all ten locales) while the table overflows. It opens the same enlarged tab as before, where every column fits.
+  - **The right-edge shadow** while columns remain to the right is the table's own and unchanged; it clears when the table is scrolled to its end.
+  
+  A body table that fits shows none of these: no pinned column and the icon-only ⤢.
+  
+  `@object-ui/components`: a `data-table` header label carries its full text as a `title`, so a header the ellipsis cuts can be read on hover, and the table's scroll box carries a `data-table-scroll-box` marker a host can read the overflow from.
+- 6db9198: fix(ui): a greyed action's `disabledReason` tooltip wraps inside a phone-width viewport instead of running off-screen (#29954)
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The record action bar, the `record:quick_actions` button and the schema-driven `action:*` controls (button, icon, group, menu, through the shared disabled-reason trigger) rendered the authored `disabledReason` in a tooltip with no width bound, so a long reason sat on one line and was cut at the right edge of a 390px viewport. All three tooltips now carry the same `max-w-xs` bound the home page's disabled-reason tooltip uses, so the reason wraps.
+- df4c06e: fix(plugin-detail): the record page's activity feed names the record as the reader reads it, as the record's heading does, when the object is named by a formula
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  An activity summary quotes the record's name as its writer read it: `sys_activity.record_label`, and the same text inside `summary`, are stored when the write happens. The server composes the rest of the summary in the reader's language on read, but not the name. For an object whose name field is a formula over `label(record.FIELD)`, that name is in the writer's language, so an en-US reader of a review a zh-CN user created read `Created Review "法务 · Legal Counsel 1"` while the heading above it read `Legal · Legal Counsel 1`.
+  
+  Each activity row of the page's own record now names the record by the value of the object's name field on the record the page read, which is the heading's name. The change is made where the feed is drawn (`RecordActivityTimeline`), so the activity panel, the 动态 stream and the 动态 panel all read it. Only the name the summary quotes (`"…"`, or `「…」` in Japanese) is replaced.
+  
+  What stays as stored:
+  
+  - an object whose name field is a stored field (text and the like): the name a row stored is the name the record had then, and a rename does not rewrite older rows;
+  - a row about another record, a row that carries no `record_label`, and a summary that does not quote the stored name;
+  - a page with no record around the feed, or whose record has no name to show.
+- f68b47c: fix(plugin-detail): the related table leads with the record's name when the relation declares no columns
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A related list with no columns declared took its columns from the child object's `highlightFields`, which by design never list the record's title, so the related tab on a record page showed amounts and dates with no deal or contact name, and the only link in a row was its first value. The record's name (`nameField`, else the field the platform derives, ADR-0079) now leads that set, listed once even when a highlight names it, and the grid links that first column to the record. The field walk used when the child declares no `highlightFields` leads with the declared name the same way. The enlarged tab and the table in the record body read the same set. Columns an author declares on the relation are drawn exactly as declared. A `titleFormat`-only object leads with the field the platform derives, not the formatted title, which has no column behind it.
+- 5f80129: fix(plugin-detail): a record page's related table offers Export only to a reader the list page offers it to, and an export refusal reads in the Console's language
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **`@object-ui/plugin-detail`: the related table asks the list page's question.** The enlarged related list (the record page's active tab) drew Export whenever its data source could export. It now also reads the child object's effective API operation set (`/me/permissions` `apiOperations`) through `usePermissions()`, the source the list page's `exportPermitted` reads, and draws no Export when that set leaves `export` out. A missing set keeps the button, as on the list page. A reader who may export still exports this relation's rows alone.
+  - **Export refusals read in the Console's language.** When the export route still refuses (a 403, such as `EXPORT_NOT_PERMITTED`), the related table, the list page and the grid show the new `view.exportNotPermitted` sentence in the reader's language instead of the route's English text. Other export failures keep the server's sentence.
+  - **`@object-ui/i18n`: `view.exportNotPermitted`** in all ten locale packs.
+- c1240a3: feat(record page): the timeline's Changes chip holds the audit's field changes only, and is offered only while the record shows its field history
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **`@object-ui/plugin-detail`: what Changes holds.** The timeline stream's Changes chip, and the activity panel's `changes_only` filter, hold the field changes read from the audit log (each with its before and after values) and nothing else. The activity rows that share their look (created, updated, deleted, assigned, shared) are events, so they sit under Activity whether or not the record shows its field history; before, they sat under Changes and, on the panel, under `changes_only`.
+  - **`@object-ui/plugin-detail`: `RecordFieldHistoryContext`.** A host tells the record page's timeline stream whether it shows the record's field history; while it says `false`, the stream draws the All / Activity / Discussion chips and no Changes chip, and a stream left on Changes goes back to All. With no provider every chip draws, as before. `RecordActivityTimeline` takes the chips to offer as `streamFilters` (all four when absent).
+  - **The Console's record page** hands over its `enable.trackHistory` gate, so an object that does not opt in no longer offers a Changes chip on its timeline tab.
+  - **The CRM example** opens `enable.trackHistory` on `crm_lead`, `crm_account`, `crm_contact` and `crm_opportunity`, so their record pages show each field change with its before and after values. The flag stays opt-in for every other object.
+- 5fa9375: feat(plugin-detail): the default record page lets an editor move a record to another stage by pressing it on the stage path
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  **Visible behaviour change on a released page.** The record page the console synthesizes for an object with a stage field (no authored page) used to draw its stage path as a read-only progress rail, so moving a deal to its next stage took 编辑 → change the stage → 更新. That page's `record:path` now carries `allowStageChange: true`, the existing opt-in (no new metadata key):
+  
+  - **Who can press.** Unchanged from the opt-in: a reader the record page lets edit this record, on a stage field that is not read-only or computed, whose field edit grant holds for the stored row. Everyone else keeps the read-only path, and so does an editor while the record's inline edit holds unsaved changes.
+  - **Every press asks for confirmation**, then saves the stage through the record's ordinary update with the record's version, so the object's validation rules and `state_machine` decide. A refused move is shown under the path, naming any other field the move needs (for example a field made required by the new stage); nothing is written.
+  - **Only reachable stages are offered.** On every page with the opt-in, a stage the stage field's blocking `state_machine` cannot reach from the stored value is drawn as a readout, not a button, the same moves the record form, the grid's inline editor and the board offer. A field with no such rule offers every stage, and the server still judges each move.
+  - **Authored pages keep their own setting.** A page, or an authored `highlights` slot, that declares its own `record:path` keeps whatever it declares: `true`, `false`, or the key left out (a read-only rail).
+  
+  To keep a default record page's path read-only, assign the object an authored page (or a `highlights` slot) whose `record:path` leaves `allowStageChange` out or sets it `false`.
+- ff3f83b: fix(record page): one action reads as one timeline row, and every row of the timeline panel names who acted
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **One row per action.** When one action wrote both an activity row and an audit-log entry (same record, matching kind: create and created, update and updated, delete and deleted; same actor; stamped within `TIMELINE_PAIR_WINDOW_MS`, 5 seconds), the record page's timeline draws it once: the activity row keeps its actor and summary and shows the field changes, before and after, on the same row. A reader who cannot read the audit log sees the same single row without them. The Changes chip, and the panel's `changes_only`, still show each audit entry on its own. Rows that pair with nothing draw as before.
+  - **The 动态 panel's peek rows name the actor**, beside the time.
+  - The record page's 动态 count still comes from the server's `timeline` count, which the spec defines as an upper bound: for a record created with field history on it can still read one more than the rows drawn.
+- 4128213: fix(console): a nav entry with no icon draws its object's icon, record field labels read in one style, a count chart fits a small count, and a page whose entry failed to load retries (#30126)
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - **Navigation icons.** An app navigation entry of type `object` that names no `icon` now draws the icon its object declares, in the sidebar and in the `nav:menu` page block. Before, every such row drew the same generic page icon, so an app whose navigation names no icons showed one icon down the whole sidebar. The icon is read by object name from the metadata the console already holds, so no request is added and the navigation is not written to. An authored `icon` wins, and an object with no icon, a dashboard, page or report entry, and a host with no resolver keep the generic icon. `@object-ui/layout` exports `resolveNavItemIcon`, the types `NavIconTarget` and `NavTargetIconResolver`, and an optional `resolveTargetIcon` prop on `NavigationRenderer`, alongside the existing `resolveTargetLabel`.
+  - **Record field labels.** A record page's section field labels no longer carry an uppercase transform. Only Latin text took it, so in a zh console an untranslated label (`REPAIR COST`) read in capitals beside a translated one (`负责人`). Section labels now render as authored, in the style of the highlights strip above them.
+  - **Small count charts.** A count axis whose largest value is a small whole number (1 to 3) now tops out at that number, so a chart of one record draws its bar to the top of the axis instead of a quarter of the way up a 0–4 axis. An axis with an authored `min`, `max` or `stepSize`, fractional values, or a count of 4 or more draws as before.
+  - **Boot retry.** When the page's entry script fails to load before anything mounts (the server went away between serving the page and serving its entry, as during an `os dev` restart), the page now reloads itself, backing off from 1 second and doubling, at most five times per tab. Before, the loading splash stayed forever. The count is cleared on the first mount, and where `sessionStorage` cannot be read nothing retries.
+- 5174603: fix(ui): Setup record pages name a sharing rule's recipient and read its condition in words, and the audit list names a sign-in row's session by its user
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **`@object-ui/plugin-detail`.** The record page's highlights strip and details body hand each read face the record as `dependentValues`, as a list grid hands its row. A `recipient-picker` value is an id that means something only beside its `recipient_type`, so a sharing rule's page read the stored user id under 接收方 where its list read the user's name; it now reads the name.
+  - **`@object-ui/fields`.** `widget: 'filter-condition'` has a read face of its own: a list or detail cell draws the criteria through the widget's read-only display, which says it in the object's field and option labels ("Priority equals Urgent"; an OR group joined by its word, a boolean as a word). A criteria the builder cannot represent still reads as the stored JSON, and an empty one is the empty cell. A read-only widget no longer waits for its `object_name` to say anything: without it, the fields keep their api names.
+  - **`@object-ui/plugin-grid`.** A pointer cell (`referenceVia`) reads the target record with its name field expanded when that field is a reference the viewer may read, so a record named by a lookup reads as the referenced record's name: the audit list's sign-in rows name the session by its user instead of printing the user id. Any other name field is read as before, with no `$expand`.
+- fd749a4: feat(audit): a write made while an administrator impersonates a user now records the administrator
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  An administrator who impersonates a user writes as that user, and until now nothing on the write said otherwise: the `sys_audit_log` row, the `sys_activity` row and the record were byte-identical to the user's own work. The session already knew (`sys_session.impersonated_by`); the write did not.
+  
+  - `ExecutionContext.impersonatedBy` (new, optional, attribution only) carries the administrator's `sys_user` id. The shared request-identity resolution sets it from the session read that admitted the caller, for a session credential only. `HookContext.provenance.impersonatedBy` hands it to hooks; it is never folded into `session`, so a hook that gates on the caller still sees the impersonated user.
+  - `userId`, `created_by`, ownership, `current_user.*` RLS and every permission stay the impersonated user's. Nothing in the authorization path reads the new field.
+  - The audit writer stamps `sys_audit_log.metadata.impersonated_by` on record writes and on `action_invocation` rows, and `impersonated_by` plus `impersonated_by_name` in the `sys_activity` row's metadata. Each key is present only on such a write; its absence means the user acted themselves. `user_id` and `actor` do not move.
+  - A flow started from such a session carries the administrator onto its own writes (`AutomationContext.impersonatedBy`), on both `runAs` arms: a record-triggered flow, a manual `POST /:name/trigger` and a `type: 'flow'` action alike. After an approval decision the decider's segment carries none.
+  - The console's record timeline and field history read 「Dev Admin 代王工操作」 (`detail.impersonatedActor`, in all ten console languages).
+  
+  No schema column and no migration: older rows simply carry no key.
+- a91409c: fix(core,react,i18n,components,app-shell,console): a write refused because the object's external datasource does not accept writes says the table is read-only, not "you don't have permission"
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - **`@object-ui/core`: `isExternalWriteRefusal(err)`**, re-exported from `@object-ui/react` beside the other write-refusal readers. True when the server refused a write with `EXTERNAL_WRITE_FORBIDDEN`, the ADR-0015 write gate's code for an object bound to an external datasource that does not admit writes (`datasource.external.allowWrites` and `object.external.writable` must both be true). Read from `code`, then `details.code`, like `isPermissionError`. The refusal is a 403, so `isPermissionError` answers true for it too: a caller asks this first.
+  - **`@object-ui/i18n`: `form.readOnlyExternalSource`**, in all ten packs: "This table is read-only. Its records come from an external data source that does not accept changes."
+  - **Every surface that met this refusal now says the table is read-only:** the console record form page and the record dialog (`@object-ui/components` form), which said "you don't have permission to save this record"; the record page delete, the list row delete and the record page inline edit, which showed the gate's raw diagnostic; and the calendar's drag-to-reschedule and the record path's stage change. A permission line sent an administrator through permission sets for a grant that cannot exist.
+- cd7f785: fix(app-shell,plugin-detail): the record page offers its 变更 (Field changes) chip, and the activity panel its Field Changes option, only to a reader whose audit-log read answers
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  On an object with `enable.trackHistory`, the record page's 动态 (Activity) tab offered the chips 全部 / 活动 / 讨论 / 变更 whenever `sys_audit_log` was registered, whatever this reader was allowed to read. A member the server refuses the audit read to (403) got a 变更 chip that always showed nothing, which reads as "nobody changed this record". The page now offers 变更 only once this reader's `sys_audit_log` read has answered. A refused or failed read offers no 变更 chip, exactly as history off does, and the chip joins the others when the read answers. Nothing else waits on the read: the page payload still asks the field changes as before, and the stream's count already counts a refused audit read as no field change.
+  
+  The activity panel's filter dropdown follows the same rule: it offers Field Changes (`changes_only`) only when the stream would offer its 变更 chip. A host that says nothing keeps every option, as before. A `changes_only` filter that is no longer offered reads as All Activity.
+- ad2393f: fix(plugin-detail,app-shell): the related list, the reference rail and the packaged-actions table name a renamed object by the name the server serves
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - **The surfaces.** A `record:related_list` block and a `record:reference_rail` card with no authored `title` are headed with the related object's served plural label, else its served label, as the server translated it for the session (a `.custom` extension's rename included). They used to ask only the client translation bundle, which still held the base package's name. The bundle is asked only when the server serves neither.
+  - **Packaged actions.** Setup → Packaged Actions reads the object list in the session's language (`Accept-Language`), not the browser's, and its Object column draws that served label as given.
+  - **The widening.** The served-object-label rule now lives in `@object-ui/core`, which `@object-ui/plugin-detail` can import: new exports `servedObjectLabel`, `servedObjectPluralLabel`, `metadataText` and the types `ObjectLabelLookup` and `ObjectPluralLabelLookup`. app-shell's internal copy is now a re-export of these, so both packages read one rule.
+- 8a0516c: refactor(plugin-detail): the record timeline stream pairs audit entries with activity rows by the spec's `RECORD_TIMELINE_FOLDED_ACTIVITY_TYPES`
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The 动态 stream used to keep its own copy of the audit action to activity type pairs (`create`/`created`, `update`/`updated`, `delete`/`deleted`). It now reads `RECORD_TIMELINE_FOLDED_ACTIVITY_TYPES` from `@objectstack/spec/api`, the same set the server's `timeline` count steps aside, so the badge and the drawn rows cannot fold different types. No behaviour change: the same three pairs fold, and any other audit action (`restore`, an unknown action) pairs with no activity row.
+- Updated dependencies [7da99b7]
+- Updated dependencies [3214615]
+- Updated dependencies [4261169]
+- Updated dependencies [8fefefd]
+- Updated dependencies [7a5f73e]
+- Updated dependencies [8fefefd]
+- Updated dependencies [b5fd350]
+- Updated dependencies [ac5d0ce]
+- Updated dependencies [2cf269f]
+- Updated dependencies [e396095]
+- Updated dependencies [f810c34]
+- Updated dependencies [7a5f73e]
+- Updated dependencies [8aa2e91]
+- Updated dependencies [c17719d]
+- Updated dependencies [b90a6f7]
+- Updated dependencies [e8dc483]
+- Updated dependencies [bcdb1db]
+- Updated dependencies [9ebca94]
+- Updated dependencies [1e6f542]
+- Updated dependencies [140d8ce]
+- Updated dependencies [699ebd8]
+- Updated dependencies [b379262]
+- Updated dependencies [7945a3b]
+- Updated dependencies [4c2cd29]
+- Updated dependencies [4be8a2e]
+- Updated dependencies [471add3]
+- Updated dependencies [b5eb61d]
+- Updated dependencies [97e4249]
+- Updated dependencies [9037b13]
+- Updated dependencies [c2be734]
+- Updated dependencies [e3b56b2]
+- Updated dependencies [9049be2]
+- Updated dependencies [a52761f]
+- Updated dependencies [6db9198]
+- Updated dependencies [e8afd1e]
+- Updated dependencies [bd65cb6]
+- Updated dependencies [217ba78]
+- Updated dependencies [cde492d]
+- Updated dependencies [eee4149]
+- Updated dependencies [f3a52d3]
+- Updated dependencies [d59a1eb]
+- Updated dependencies [af3451b]
+- Updated dependencies [3a27208]
+- Updated dependencies [f0ad1f7]
+- Updated dependencies [03be565]
+- Updated dependencies [7e9fa4b]
+- Updated dependencies [bc8945f]
+- Updated dependencies [42afac7]
+- Updated dependencies [0c666c3]
+- Updated dependencies [38717d3]
+- Updated dependencies [a9fb14b]
+- Updated dependencies [6f095b9]
+- Updated dependencies [ac890f5]
+- Updated dependencies [5f80129]
+- Updated dependencies [0c7e95a]
+- Updated dependencies [aa57c76]
+- Updated dependencies [fc869c2]
+- Updated dependencies [fef212b]
+- Updated dependencies [c8e6d38]
+- Updated dependencies [d99cd3b]
+- Updated dependencies [dc51811]
+- Updated dependencies [b77c160]
+- Updated dependencies [09720e2]
+- Updated dependencies [b6caa14]
+- Updated dependencies [a77c2e9]
+- Updated dependencies [25fea77]
+- Updated dependencies [ea5807e]
+- Updated dependencies [d3f23d2]
+- Updated dependencies [ff12aed]
+- Updated dependencies [6c48d48]
+- Updated dependencies [3da9a4c]
+- Updated dependencies [4be9734]
+- Updated dependencies [bff5ba2]
+- Updated dependencies [bb86ff9]
+- Updated dependencies [31260ca]
+- Updated dependencies [ef2ad31]
+- Updated dependencies [2046d21]
+- Updated dependencies [18870c9]
+- Updated dependencies [fa9c0aa]
+- Updated dependencies [5174603]
+- Updated dependencies [f6faf75]
+- Updated dependencies [fd749a4]
+- Updated dependencies [d9d42d4]
+- Updated dependencies [9d939c5]
+- Updated dependencies [25e1c1a]
+- Updated dependencies [47226e6]
+- Updated dependencies [c7d1367]
+- Updated dependencies [f5aaa0b]
+- Updated dependencies [0005fec]
+- Updated dependencies [2d6402c]
+- Updated dependencies [77c203a]
+- Updated dependencies [8293c74]
+- Updated dependencies [648089d]
+- Updated dependencies [10ecafd]
+- Updated dependencies [b6f4c0e]
+- Updated dependencies [b4f4781]
+- Updated dependencies [042efb7]
+- Updated dependencies [48231b0]
+- Updated dependencies [0d54279]
+- Updated dependencies [8e5fabe]
+- Updated dependencies [ac56acf]
+- Updated dependencies [a91409c]
+- Updated dependencies [ab12a3b]
+- Updated dependencies [2b35374]
+- Updated dependencies [29702d5]
+- Updated dependencies [a839020]
+- Updated dependencies [a7b8876]
+- Updated dependencies [7b10a30]
+- Updated dependencies [8b0fbb8]
+- Updated dependencies [4dde0ae]
+- Updated dependencies [590724f]
+- Updated dependencies [38d416f]
+- Updated dependencies [d2e2f6f]
+- Updated dependencies [b55d6ab]
+- Updated dependencies [aad1603]
+- Updated dependencies [ad2393f]
+- Updated dependencies [5bca14f]
+- Updated dependencies [7145bf3]
+- Updated dependencies [55d9dd4]
+- Updated dependencies [af8aab1]
+- Updated dependencies [062236c]
+- Updated dependencies [a59d00a]
+- Updated dependencies [4bf9a2d]
+- Updated dependencies [d996c38]
+- Updated dependencies [0c9aa82]
+- Updated dependencies [49c8568]
+- Updated dependencies [47c457b]
+- Updated dependencies [4564d6f]
+- Updated dependencies [f2ea193]
+- Updated dependencies [5268f50]
+- Updated dependencies [5268f50]
+- Updated dependencies [5268f50]
+- Updated dependencies [7b2e557]
+- Updated dependencies [115a43a]
+- Updated dependencies [a30c4f4]
+- Updated dependencies [0cba0ce]
+- Updated dependencies [c893b3d]
+- Updated dependencies [677d542]
+- Updated dependencies [9bdeed2]
+- Updated dependencies [c1da957]
+- Updated dependencies [3479c33]
+- Updated dependencies [000a4c0]
+- Updated dependencies [f4d9c09]
+- Updated dependencies [c77dd17]
+- Updated dependencies [ebe0a98]
+- Updated dependencies [9038187]
+- Updated dependencies [f108e6d]
+- Updated dependencies [5cb7d7e]
+- Updated dependencies [b631573]
+- Updated dependencies [78d4fe9]
+- Updated dependencies [78eb352]
+- Updated dependencies [6ddf827]
+- Updated dependencies [d9d3eb7]
+- Updated dependencies [2ce2646]
+- Updated dependencies [bd1b768]
+- Updated dependencies [468e0c1]
+- Updated dependencies [6106b73]
+- Updated dependencies [0f920b9]
+- Updated dependencies [0f920b9]
+- Updated dependencies [33bc8ae]
+- Updated dependencies [584f7b8]
+- Updated dependencies [66b17a3]
+- Updated dependencies [a1afbb9]
+- Updated dependencies [150f740]
+- Updated dependencies [42eb126]
+- Updated dependencies [3f61e4f]
+- Updated dependencies [8cf1fd0]
+- Updated dependencies [51992df]
+- Updated dependencies [a5cb4f1]
+- Updated dependencies [3c1eb63]
+- Updated dependencies [d57be87]
+- Updated dependencies [f84205b]
+- Updated dependencies [eca7cd2]
+- Updated dependencies [eca7cd2]
+- Updated dependencies [cf4b9bf]
+- Updated dependencies [cf4b9bf]
+- Updated dependencies [614e831]
+- Updated dependencies [e1dac19]
+- Updated dependencies [21510bb]
+- Updated dependencies [0fd363d]
+- Updated dependencies [d6b88f1]
+- Updated dependencies [4123865]
+- Updated dependencies [6ffe37e]
+- Updated dependencies [63a470a]
+  - @object-ui/components@18.4.0
+  - @object-ui/core@18.4.0
+  - @object-ui/fields@18.4.0
+  - @object-ui/react@18.4.0
+  - @object-ui/types@18.4.0
+  - @objectstack/spec@18.4.0
+  - @object-ui/i18n@18.4.0
+  - @object-ui/permissions@18.4.0
+
 ## 18.3.0
 
 ### Minor Changes

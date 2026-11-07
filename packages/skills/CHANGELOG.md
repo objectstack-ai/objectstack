@@ -1,5 +1,338 @@
 # @objectstack/skills
 
+## 18.4.0
+
+### Minor Changes
+
+- d59a1eb: feat(spec): a `page:header` declares `placedActions: true`, the explicit opt-in to draw every action of the bound object placed at `record_header` / `record_more`, read live (#30018)
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  - **`placedActions`** on a `page:header` component's `properties` (`PageHeaderProps`, the `ComponentPropsMap['page:header']` row): `true` asks the header to draw every action of the page's object whose `locations` include `record_header` or `record_more`, read live from the object's metadata, in place of an authored `actions` id list. An action another package places on the object is then drawn without editing the page. Optional with no default: an unset key stays unset in the parsed output.
+  - **The `actions` list keeps its meaning.** An authored list is the whole set the header draws, and a header with neither `actions` nor `placedActions: true` draws none of the object's actions. `placedActions: false` beside a list is accepted and changes nothing.
+  - **Refused together.** `placedActions: true` beside an authored `actions` list, an empty one included, is refused at `properties.placedActions` by `os validate`, `os build`, `os lint` and the page save door (`component-props-invalid`, an error). The message names both keys and asks the author to keep one: `actions` for a curated list that is the whole set, or `placedActions: true` for every placed action. Nothing that parsed before is refused: until this release `placedActions` was an unknown key on the closed shape.
+  - **Declared ahead of its reader.** The console's header renderer does not read the key yet, so a header that sets it draws what the same header without it draws (none of the object's actions unless `actions` names them). The key's describe opens with `[PLANNED — not yet rendered]` until the renderer reads it.
+  - The published JSON Schema `ui/PageHeaderProps` still accepts the pair: the rule depends on the value `true`, which no projected refinement pattern states, so the parse refuses it and `dropped-refinements.baseline.json` records the site.
+  - `@objectstack/skills`: `objectstack-ui` `rules/pages.md` names the key in the component catalogue, marked not drawn yet, and drops a refused-shape clause from the print-page paragraph that the sentence before it already states.
+
+### Patch Changes
+
+- 1c34fd7: docs(skills): an objectstack-data eval checks that a vendor field is relabelled with `fieldPatches`, never redeclared in `fields`
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `skills/objectstack-data/evals/objects-fields-relationships.json` gains case 7: an author wants HotCRM's `crm_account.industry` to read "Sector" instead of "Industry". The accept set requires `fieldPatches` on a `defineObjectExtension` authored in `hotcrm.custom` (an option's label keyed by its stored value where the field declares its own options); it refuses `industry` redeclared in `fields`, which takes the field over and cuts it off from HotCRM's upgrades. No skill text changes.
+- 7c1eeb1: docs(skills): the objectstack-data skill now leads a hook author to the save notice
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The `objectstack-data` rule index described `rules/lifecycle.md` as retention-only, and `references/data-hooks.md` listed no `notice` member, so an author writing a save hook from this skill never found `ctx.notice(message)`. The index entry now names the save notice, and the sandbox `ctx.*` table and the `HookContext` listing each carry a `notice` row that points at `rules/lifecycle.md` § Save Notice. Growth is paid by same-file deletions of restated prose; both token-ratchet rows are re-locked down at the landed counts.
+- bc9eaf6: docs(skills): the automation skill's OAuth recipe teaches the installer-supplied client
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Recipe 6 of `objectstack-automation/references/integration-recipes.md` now shows `clientSource: 'installer'` beside a declared `clientId` + `credentialRef`, with when to use which: a declared client for an app its publisher deploys, the installer form for one installed on deployments the publisher never sees. The administrator registers a client with the vendor against the `redirectUri` the connection's status read answers, connects with `{ clientId, clientSecret }` (no secret for a public client; a reconnect naming no client keeps the stored one), and the connection reads back `client: { source: 'installer', clientId, hasSecret }`, never the secret.
+- 0d40aa1: docs(skills): with no `searchableFields` declared, a field marked `searchable: true` joins the default search set
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **Before.** `objectstack-data`, `objectstack-query` and the `objectstack-ui` list-views rule taught the record-search auto-default as type-only: the name field plus the text-like and `select` columns. A field marked `searchable: true` was described as doing nothing, and a `$searchFields` override naming one as refused.
+  - **Now.** Each says what the platform resolves: with no `searchableFields` declared, the set `search` scans, and the set a `$searchFields` override may name, is the type-based default plus every field marked `searchable: true`, of any type except `secret`, `password`, `vector` or a virtual `formula`. Each also says what does not change: `searchable: false`, the default, never removes a field the type default scans, and declaring `searchableFields` chooses the set. The enum half of the type default is spelled `select` alone, as the resolver has it.
+  - No schema, key or behaviour changes.
+- 89803c5: docs(skills): the platform skill teaches the `contributions` member of the package customizations read
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `skills/objectstack-platform/SKILL.md` now names `contributions` beside the overrides, extensions and switched-off items that `GET /packages/<id>/customizations` lists: one entry per item another package adds to the base, stamped with its `packageId`; a `field` or `flow` entry names the base's `object` it is on, a `nav` entry names the base's `app`, its `group` when it targets one, and the item id as `name`; `counts.contributions` counts items, not packages. The text is paid for by deleting three restatements in the same file, so the token ceiling is unchanged.
+- 322b6bf: docs(skills): objectstack-automation says a flow's record nodes treat a computed filter operand as a value, never as a query operator
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **Now.** § Filter operands states the rule from the service-automation change: a computed operand is a string, number, bigint, boolean or date, or at an `$in` / `$nin` / `$between` comparand a list of them with no empty entry. Anything else fails the node as a guard before the query runs. The fix: make the expression evaluate to the compared value (for a record, its `id`), and write conditions in the filter itself. The table of failures a `fault` edge does not route now names that refusal beside the `null` operand.
+  - `SKILL.md` stays under its token ceiling (no ceiling moves). No schema, key, command or behaviour changes.
+- dd9add6: docs(skills): objectstack-platform says the D11 close refuses a package-less write only where the row moves as a declared override, and an added email-template locale keeps that write
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **Before.** The ADR-0146 customization paragraph said a pre-D11 unbound Setup row's package-less save, reset and rollback are refused once it is movable. That is false for a row of an email-template locale the base does not ship: `os migrate packageless-overlays` moves it as the pair's own member (`addedMember`, no `overrides`), and the close judges only the declared-override move, so that row's package-less write stays open before and after its move. The clause also left out publish, which the close refuses too.
+  - **Now.** The clause says the close covers a row movable as a declared override, lists save, publish, reset and rollback, and says an email-template row at a locale the base does not ship moves as the pair's own member and keeps that write. The file stays at its token ceiling: a duplicate "CLI Commands" pointer section is cut, its home the Part 3 pointer to `references/operations.md`. No rule is removed; no schema or behaviour changes.
+- 987ff33: docs(skills): teach that a save and `os validate` refuse `titleFormat`
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - `objectstack-data` (object properties table) and `objectstack-formula` (template carriers) no longer call `titleFormat` deprecated: since #29499 the metadata save gate and `os validate` refuse an object that declares it (`title-format-retired`), and it moves to `nameField`. The formula skill drops the sentence that restated the template grammar cell beside it.
+  - ADR-0079 D3 gains a dated amendment note citing ruling 6574393684 and #29499; the decision is unchanged.
+- cde9a80: docs(skills): the automation skill teaches that an approval's decision outputs are enforced at the decision
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **Before.** `skills/objectstack-automation/references/state-machines-and-approvals.md` said only that a typed `decisionOutputs` entry renders the matching record picker in the decision dialog (`multiple` collects an id array). An agent writing an approval flow from it could read `type` and `multiple` as widget hints and not know that a value the next step cannot use is refused.
+  - **Now.** The *Recording a decision* section says what the approvals service enforces, on approve and reject alike and before any write: a picker value must resolve through the `expression` approver's resolvers (`user` by any account's record id, `department` by record id in the request's organization, `team` by record id not owned by another organization, `position` by the machine name of a position someone in that organization holds); `multiple: true` takes a list of distinct values for every kind, bare keys included, and without it one value; any other non-blank value is refused with `400 VALIDATION_FAILED` naming `outputs.KEY`. The Console sends a list for a `multiple: true` text output. The existing `lead_review` node is the example. The file stays within its token ceiling (5724 of 5730).
+- 3abe011: docs(skills): the automation skill's OAuth recipe names a stdio MCP server's credential route as `transport.credentialEnv`
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Recipe 6 of `objectstack-automation/references/integration-recipes.md` said a `stdio` server's credentials ride `transport.env` — the literal-in-metadata route the `connector-credential-literal` advisory warns against. It now says what the `mcp` provider does: the grant-bearing kinds stay `http` only; a `stdio` server takes a static `auth: { type: 'bearer', credentialRef }`, handed to the child process in the variable `transport.credentialEnv` names, never a literal in `transport.env`. Paid inside the file's token ceiling by dropping the opening paragraph's restatement of two facts that keep their homes: the packaged spec (SKILL.md § Integrations are declared, not coded) and where an `api` hook's secret goes (SKILL.md's `secretRef` row and recipe 4). No eval asserted the old route; none changes.
+- 6a4737a: docs(skills): objectstack-data teaches `relatedList` placement by each value's role, not by record-page tabs or columns
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **Before.** `rules/relationships.md` said `relatedList: 'primary'` draws "a full-width table in the details column after the first field section (in the Details tab, no tab of its own)" and that `true` / omitted is "a side card (the shared **Related** tab)". The spec's `relatedList` describe no longer names any tab or column, so the skill taught a page layout the record page does not draw.
+  - **Now.** The three bullets follow the spec describe: `'primary'` is part of the record's main content, a full-width table in the record's detail body (still the default for an inline-edited `master_detail` FK); `false` means the child object is not shown on the parent record page; `true` or omitted is an auxiliary panel on the record page. Layout stays ADR-0085's to define.
+  - The file gets smaller and stays under its token ceiling; no ceiling moves, no schema, key or behaviour changes.
+- 7bafab3: docs(skills): `objectstack-ui` no longer says `page:header`'s `placedActions: true` is not drawn, and an eval exercises it (#29951)
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - `rules/pages.md`: the component catalogue's `page:header` row says `placedActions: true` draws every placed action, read live. The console's header renderer reads the key since #29951's ui half, so the "not drawn yet" qualifier #30018 wrote is dropped.
+  - `evals/record-page.json`: a third case asks for a custom full record page whose header shows every action packages place on the object; the expected answer keeps the page and its tab strip and sets `placedActions: true` on the `page:header` node, with no `actions` id list beside it.
+- b83e1d0: test(skills): the platform skill's evals ask for push notifications on an `os serve` deployment
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `skills/objectstack-platform/evals/config-plugins-ops.json` gains case 12: the prompt asks to turn on push notifications for an `os serve` deployment, and the expected answer declares `requires: ['push']` with a top-level `push:` key on the stack definition and writes no secret inline (the APNs signing key and the Firebase service-account JSON are named by reference). The assertions stay with what `objectstack-platform/SKILL.md` teaches today, the `push` token and the top-level key; the push block's transport and vendor shape are not asserted until the skill teaches them.
+- 0ce44c9: docs(skills): the i18n skill lists a lookup or master-detail field's translatable `relatedListTitle`
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **Before.** The `objectstack-i18n` object-level table listed `label`, `help`, `placeholder`, `options` and `inlineTitle` under `fields.{field_name}`, so an author had no word that the related-list title on a parent's record page is translatable.
+  - **Now.** The row adds `relatedListTitle`: the title of the related list a `lookup` or `master_detail` field draws on its parent's record page. The key sits on the child object's field, and an untranslated title keeps its authored text, never the child's label.
+  - The paragraph under *Diff & Coverage Schemas* saying `getCoverage()` / `suggestTranslations()` have no shipped implementation is cut; *Service Contract* in the same file says the same, and the section's opening sentence now names the two schemas as those methods' return shapes. No schema, key or behaviour changes.
+- f9e5bef: feat(trigger-api): an `api` hook verifies the vendor signature its start node declares (`config.signature`)
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - **`@objectstack/trigger-api`.** `start()` reads the hook's one verifier with `apiTriggerVerifierOf(binding.config)` (`@objectstack/spec/automation`). A start node that declares its sender's scheme (`config.signature`: DocuSign Connect's base64 `X-DocuSign-Signature-1`, a Stripe-style `t=…,v1=…`, a GitHub-style `sha256=`) now admits a correctly signed post that was answered `401` before. That scheme REPLACES the `x-objectstack-signature` check for its hook: the declared header is read on both faces of the door (the self-hosted mount and `handleInboundHook`) with `Headers.get`, so a repeated field is its one joined value; the HMAC-SHA256 is computed under the key `config.secretRef` names (read at every post through the engine's reader, `503` while it has no value), over the raw body or `<t>.<raw body>`; each digest is decoded strictly to 32 bytes and compared with `timingSafeEqual`, any one of several `v1` elements matching (a key roll); and a timestamped scheme is held to `HTTP_SIGNATURE_TOLERANCE_SECONDS` from `@objectstack/core`. A body-only scheme has no replay window, as the contract states. A valid `x-objectstack-signature` admits nothing on such a hook, and a post without the declared header is refused. A declaration the spec answers `unusable` arms a hook that refuses every post before any secret is read and never falls back to `x-objectstack-signature`; a declared scheme bound without the engine's `config.secretRef` reader is refused at `start()`. Every failure is the same `401 INVALID_SIGNATURE` with its own cause in the server log (`declared-header-absent`, `declared-header-malformed`, `declared-prefix-missing`, `declared-no-digest`, `declared-mismatch`, `declared-outside-window`, `declared-unusable`), never the key, the header value or the body. A hook that declares no scheme is verified exactly as before.
+  - **`@objectstack/lint`.** `validateFlowApiTriggerSecret` grades an `api` hook by that same reader: a usable declaration is ready on its `config.secretRef` alone, and an unusable one is the new error `flow-api-trigger-signature-unusable` (with its `os explain` entry), located at the key the spec refuses. It fires only on a declaration the flow parse already refuses, so no stack that passed before is refused now.
+  - **`@objectstack/skills`.** The automation and api skills teach `config.signature` where they said a vendor-signed callback cannot be admitted.
+- 07595c0: docs(skills): the `page:header` title row drops the retired `breadcrumb` and names the live `placedActions: true`
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - `skills/objectui/guides/page-builder.md`: the `page:header` sentence named `breadcrumb` among the title row's keys. `PageHeaderProps.breadcrumb` is a `retiredKey` tombstone since @objectstack/spec 17 (ADR-0087 D2), and the props lint refuses an authored one. The row now lists `title`, `subtitle`, `actions` or `placedActions: true`; the last two are refused together.
+- 1f92c72: docs(skills): objectstack-platform teaches the stack's `push` block in `references/operations.md` (Mobile push): `transport: 'direct'` with `apns` / `fcm` blocks is the transport served today, each secret is named by `credentialRef` and never written inline, and the hosted relay (also what `{}` reads as) is refused at boot until its sender ships; the `requires` table points `push` at it, and the push eval case asserts the shape
+  
+  Clause-②: no
+  Metadata-protocol: none
+- 0e42aef: docs(skills): the platform skill names every type a pair's declared override is served for, and that removing the pair's item serves the base's again
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `skills/objectstack-platform/SKILL.md`, the "Customizing an installed package (ADR-0146)" paragraph: a `.custom` pair's declared override is served for a view, dashboard, report, email_template, translation, flow, page, app, dataset, doc, book or mapping (the paragraph named six), and removing the pair's item (`DELETE …?package=hotcrm.custom`) serves the base's document again (ADR-0146's revert, which the paragraph did not say). The package's evals gain a dataset-and-page override case and a removal case.
+- 83fc231: docs(skills): a `notify` node that writes no link opens the record that started the run
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **Before.** The `objectstack-automation` skill's `notify` example commented its click-through keys as "a PAIR, else dropped", so a record-triggered flow's notification looked like it linked nowhere unless the author wrote `sourceObject` + `sourceId: record.id`.
+  - **Now.** The example says what the runtime does: a node that writes none of `sourceObject`, `sourceId` and `actionUrl` links to the run's trigger record when it has one (a record change other than a delete, a time-relative sweep's row, an action started on a record). An explicit pair or `actionUrl` wins; half a pair is still dropped; a run with no trigger record links nowhere. A new eval asks for a record-triggered notification that opens its record and expects no source keys written.
+  - No schema, key or behaviour changes.
+- 43ae284: docs(skills): `objectstack-platform`'s plugin-development reference no longer teaches the removed `feature_flags` settings namespace
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The "Feature Flags" section listed a `feature_flags` settings manifest with `ai_enabled` / `beta_*` toggles and `OS_FEATURE_FLAGS_*` env overrides. That namespace was removed from `@objectstack/service-settings` (reading it is refused with `SETTINGS_UNKNOWN_NAMESPACE`, and the env vars do nothing). The bullet now gives the live answer: a plugin that needs an org toggle declares its own `SettingsManifest` and registers it on the `settings` service.
+- 4cfb351: docs(skills): an object extension that renames `label` without `pluralLabel` clears the base plural
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `objectstack-data` § Object Extension Model still says an extension can add but never remove, and now names the one exception the object fold has: an extension that sets a new `label` and no `pluralLabel` takes the base's `pluralLabel` off the served object unless a tenant authored that plural, so an author who renames an object sets both to keep a plural. An extension that repeats the label it extends removes nothing. The Lifecycle Hooks pointer line drops its second link to `references/data-hooks.md`, which the catalog list and the backfill paragraph already link. No schema, key or behaviour changes.
+- 6a983a1: docs(skills): the platform skill teaches the declared action override and its access-widening refusal
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **Before.** `objectstack-platform`'s customization paragraph (ADR-0146) listed the types a `.custom` pair's declared override is honoured for without `action`, and `content/docs/concepts/metadata-lifecycle.mdx` said an `action` override was not served yet. Both have been false since `action` opened (ADR-0146 D9).
+  - **Now.** The skill lists `action` and says what an action override may change: it keeps the base's `objectName` (the doors match the base's action as `OBJECT:NAME`, and moving it to another object is refused `declared_package_ships_no_such_item`), and it replaces the behaviour (`type`, `body`, `label`, `visible`, …) whole for whoever could already run the base. Dropping a `requiredPermissions` entry, turning `ai.exposed` on or `ai.requiresConfirmation` off is refused `403 NOT_OVERRIDABLE` with rule `declared_action_widens_access`. The docs page says the same, and the skill's evals gain a case for it.
+  - No schema, key or behaviour changes.
+- a4c3246: docs(skills): teach an action param's `widget` key in the action dialog
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - `objectui` (`rules/protocol.md`, inline params): the widget-config list gains `widget`. It names a registered field widget that draws the param instead of its `type` widget (`'permission-ref'` on a `text` param is the permission-set picker); an unregistered name keeps the `type` widget, and the selection bar's bulk dialog does not read it. The server still validates the submitted value by `type`.
+  - `objectstack-ui` (`rules/actions.md`, field-backed params): a field-backed param inherits the field's `widget` only while it keeps the field's `type` or restates it; a param that overrides `type` names its own `widget`.
+  - Paid inside the token ceilings by removing restatements in the same files. No schema, key or behaviour changes.
+- 6b2129f: docs(skills): the objectui project-setup guide names where uploads live now that `@object-ui/providers` is gone
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **Before.** `objectui/guides/project-setup.md` sent a third-party app to `@object-ui/providers` for `UploadProvider` / `useUpload`, in the provider-stack list and in the decision matrix. That package is retired and gets no further release.
+  - **Now.** `UploadProvider` / `useUpload` come from `@object-ui/fields`; the ObjectStack storage adapter `createObjectStackUploadAdapter` comes from `@object-ui/data-objectstack`; the `UploadAdapter` / `UploadOptions` / `UploadResult` contract is `@object-ui/types`'s, re-exported by `@object-ui/fields`.
+  - The troubleshooting section drops two monorepo-only tips (the Turbo cache block and the "downstream packages need built `dist/`" line), which a third-party app consuming published packages never needs.
+  - No schema, key or behaviour changes.
+- 254f2ec: docs(skills): objectstack-i18n teaches the five-step locale ladder that `resolveLocaleAmong` runs (exact, case-insensitive, same platform-table language, base language, first registered variant), so a `zh-TW` request is taught to reach a registered `zh-Hant` bundle rather than the first `zh-*` one
+  
+  Clause-②: no
+  Metadata-protocol: none
+- af1d59b: docs(skills): objectstack-api's Metadata API section teaches the `/meta/:type` list door's `?names=a,b,c` filter (one comma-separated value; an unknown name absent, an empty value refused `400`, the `package` list refuses the key) and its closed query set (`package`, `preview`, `object`, `include`, `id`, `names`, `locale`; any other key `400 VALIDATION_ERROR`)
+  
+  Clause-②: no
+  Metadata-protocol: none
+- dfa179a: docs(skills): the automation skill teaches the mail `option` formatter for a notice's select label, and that a user target owns a row only while an active member
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Two lines in `objectstack-automation/SKILL.md`, each following a platform change that landed before it. In the `notify` section: an option label in a notice is written in the mail `template` as `{{ stage | option:opportunity.stage }}`, which prints the label in each recipient's language and is mail-only (refused in an inline `title` / `message`) — never `label()` in `templateData`, which is evaluated once per run, before recipients fan out. In "Assignment rules": `assignTo: { type: 'user', value: '<id>' }` names an owner who holds the row only while an active member of its organization, else the row is written ownerless. Eval 15 of `evals/flows-triggers-approvals.json` grades the notice case. The docs page `automation/queues-and-assignment-rules` gains the organization-authored `sys_assignment_rule` rules beside the declared ones: evaluated first, by `sort_order` then name, first match wins, a failed read of the organization's rules routes nothing, and the active-member rule for a `user` target. Paid inside the skill by deleting the CRM Automation Blueprint section (the `src/flows` layout objectstack-platform's bootstrap reference carries) and two restatements.
+- 8ddb6b7: docs(skills): the `objectstack-data` record-currency backfill hint names `--org` and `--all-organizations`
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `skills/objectstack-data/rules/field-types.md` pointed an agent that switched a stored currency field to `'record'` at `os migrate record-currency-codes` with no flag. Since #30737 that command fills one organization's rows with `--org ID`, writes the one code into every organization only with `--all-organizations`, and refuses a run with neither on a database whose rows belong to more than one organization. The hint now says so. To stay inside the file's token ceiling, a sentence in the autonumber delimiter rule that restated the rule's own heading is removed.
+- 3479c33: docs(automation): the notify click-through default says a before-create run links to its record only when the caller wrote the id
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A `notify` node that writes none of `sourceObject`, `sourceId` and `actionUrl` links to the run's trigger record when the run has one. Four texts enumerated that run as "a record change other than a delete", which includes a before-create run (`record-before-create`, or the insert leg of `record-before-write`). On that run the record is the write's input, and the driver issues the id at the write, after the hook, so the input carries an id only when the caller wrote one; with no id the notification links nowhere. The runtime is unchanged. The texts now say "a record change other than a delete or a before-create", and that a before-create run links only when the caller wrote the id:
+  
+  - the `NotifyConfigSchema` docblock and the `sourceObject` / `sourceId` descriptions in `@objectstack/spec`, and the reference page generated from them;
+  - the `notify` node's docblock and config descriptions in `@objectstack/service-automation`, which is the wording source;
+  - the Flows guide and the automation skill's `notify` example.
+  
+  The same texts said that a `sourceId` evaluating to `null` "leaves the key unset". It is a written key: the node then writes a half pair, which is dropped rather than defaulted to the trigger record. The node's failure text, the guide and the schema say so.
+  
+  A test pins that a notify on a `beforeInsert` run whose record carries no id writes no `source_object` / `source_id`, and that one whose caller wrote the id links to it. No key, shape, default or refinement changes.
+- 1120389: docs(skills): objectstack-platform's `references/operations.md` spells `os package install`'s server flag `-u/--url` (in place of the removed `-r/--runtime`) and names the new `-t/--token` (env `OS_RUNTIME_TOKEN`) beside `--email/--password` as the target runtime's credential, matching the CLI
+  
+  Clause-②: no
+  Metadata-protocol: none
+- 0e73de8: docs(skills): the authoring skills teach one naming rule, every metadata name a package authors starts with its namespace
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **Before.** `objectstack-platform` stated the prefix rule for objects only, and claimed `os lint` warns on bare app, page, dashboard, flow, action, report and dataset names whenever a namespace is set. The examples across the skills named flows, actions, hooks, pages, dashboards, reports, datasets, queues, positions, permission sets, assignment rules, agents and skills bare (`lead_conversion`, `sales_rep`, `support_intake`).
+  - **Now.** `objectstack-platform` states the rule once, beside the object rule: every metadata name a package authors starts with its namespace (`crm_send_email`, `crm_sales_rep`). The exceptions are fields, object extensions, container views and translations (`<ns>_<locale>`). It also says what is enforced today: `defineStack` refuses a bare object name, `os build` refuses a bare doc name, and `os lint`'s `naming/namespace-prefix` warns only on a name one package declares twice. Every example and eval that showed or generated a bare non-object name now carries `crm_` (or its package's namespace where the snippet has one), cross-references included.
+  - Connector ids, the inbound api flow whose name is part of its webhook URL, and the datasource whose name keys its password variable keep their names. No schema, key or behaviour changes.
+- 253eab0: docs(skills): the data skill's Field Groups section teaches a group's `visibleWhen` and `requiresFeature`
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `skills/objectstack-data/references/examples-objects.md` now names the two ways a whole field group (header included) is hidden: `visibleWhen`, a CEL predicate over the record that hides the group when FALSE or when it faults, and `requiresFeature`, a deployment feature flag from the `PUBLIC_AUTH_FEATURES` set, refused when unknown, lowered at parse into the group's `visibleWhen` and stripped, AND-combined after an authored `visibleWhen`; both are presentation only. The real example is `sys_organization`'s Group Structure section, hidden on a single-organization deployment with `requiresFeature: 'multiOrgEnabled'`. The text is paid for by deleting restatements in the same file (the intro sentence, the migrations paragraph, the deprecated-flag aside, the strictness sentence under Metadata Protection, a dangling "see above" and a path comment), so the file's token ceiling moves down, not up.
+- 95ba410: docs(skills): the `objectstack-data` field-types formula row says a formula is no dataset or cube dimension (group key) either
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **Before.** The `formula` row of `skills/objectstack-data/rules/field-types.md` said a formula is virtual and not aggregatable, and that a dataset measure needs a stored field. It said nothing about grouping by one, so an AI author reading the row had nothing telling it not to declare a dataset or `analyticsCubes` dimension over a formula.
+  - **Now.** The row says a formula is neither aggregatable nor a dataset or cube dimension (group key), and that both need a stored field — what the platform refuses today: the authoring rule `dimension-virtual-field-refused`, the dataset compile's `400 DATASET_INVALID`, and every analytics query grouping by one, `400 INVALID_FIELD`.
+  - `skills/objectstack-ui/rules/dashboards.md` (Dataset-Bound Widgets, the row's pointer): the multi-value breakdown bullet now names a `formula` beside the multi-value types as refused for a dataset or cube dimension and `groupBy`, so the reader lands on the dimension refusal too.
+  - No schema, key or behaviour changes; the skill text only states refusals that already ship.
+- d0ebb8f: Clause-②: no
+  Metadata-protocol: none
+  
+  The platform skill's operations reference now says what the official image does on `main`: it refuses to start unless `OS_DATABASE_URL`, `OS_AUTH_SECRET` and `OS_SECRET_KEY` are set at runtime (an explicit `file:` URL on a mounted volume passes), and a Common ops pitfalls row tells an upgrade to keep the values an old container generated (`auth-secret`, `dev-crypto-key`, `data/objectstack.db` under `/home/node/.objectstack`) rather than set fresh ones, which would leave every saved credential unreadable.
+- dc3adf3: docs(skills): the `objectstack-ai` skill's MCP tools table now teaches that `delete_record` needs `confirm: true` — a call without it is refused with `ACTION_CONFIRMATION_REQUIRED` (428), so the agent asks the human first, then retries. The row said only that `delete_record` is annotated destructive, so an agent following it was refused since the MCP tool started requiring confirmation.
+  
+  Clause-②: no
+  Metadata-protocol: none
+- cef3b8f: docs(skills): three skills describe a bare field ref in a predicate as the fault it is today, not a silent `null`
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `objectstack-platform/references/operations.md`, `objectstack-data` and `objectstack-ui` said a bare field ref (`done` instead of `record.done`) "evaluates to `null`" and silently hides or never fires. It faults. On the server an `error` validation rule and a `requiredWhen` refuse the write and name the rule, an option `visibleWhen` refuses only a write that picks that option (forms still offer it), a `readonlyWhen` field stays editable on the form while the server drops the change with a warning and the save succeeds, and a formula reads `null` with a logged warning. In the console an action's `visible` hides it, its `disabled` greys it out, and a field `visibleWhen` shows the field, each with a console warning. The data skill no longer lists RLS / sharing predicates here: their compiler reads a bare name as the column. The prevention advice (`os validate` / `os build`, `record.<field>`) is unchanged. Growth is paid by same-file deletions of restated prose.
+- 33bc8ae: docs(skills): the `fieldPatches` example relabels HotCRM's `industry` and patches options only on a field that declares its own
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The `objectstack-data` skill's one `fieldPatches` example patched an option of `crm_account.industry`. HotCRM binds that field to the shared `industry` picklist, so a verbatim copy was refused at install and by `os validate` (`picklist-option`). The example now sets `industry`'s `label` only and patches an option of `type`, which declares its own `options` (`customer` → `Client`). The added bytes are paid by deleting a restatement in the same file: the `.custom` paragraph's closing clause "a base field changes only through `fieldPatches`", whose facts the relabel paragraph above it already states. No token ceiling moves. No schema, key or behaviour changes.
+- 0306761: docs(skills): objectstack-api no longer teaches that `DELETE` is a hard delete with no recycle bin: a by-id delete keeps a business object's rows in `sys_recycle_bin` (30 days by default; not `multi: true` deletes, platform rows or rows deleted before the bin existed), and nothing lists or restores it over the API yet; eval case 5 expects that teaching instead of a hard delete
+  
+  Clause-②: no
+  Metadata-protocol: none
+- 719a502: docs(skills): the objectstack-automation skill names the `save_notice` flow node and points to the save notice's one home
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `skills/objectstack-automation/SKILL.md` listed no `save_notice` node, so an author designing a "sent for approval" flow from this skill never found it. Its Data Operations table now carries a `save_notice` row that points at `objectstack-data` `rules/lifecycle.md` § Save Notice, which stays the one full teaching. That section gains what the code does and it lacked: a hook's `ctx.notice` message is shown untranslated; a `save_notice` message translates under `flows.<flow>.notices.<node_id>.message` in the saver's locale; the node refuses by name in a `subflow` / `map` child, and a flow with one after a `subflow` / `map` whose child can pause is not armed (`unboundCause: 'notice_after_suspending_subflow'`). `evals/flows-triggers-approvals.json` gains case 16. Growth in both files is paid by same-file deletions of restated text; no ratchet row moves.
+- aa3e21c: docs(skills): the data skill teaches `controlled_by_parent` with an optional master
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `objectstack-data` now teaches "a rep sees the contacts of the accounts they own; a contact need not have an account" as a `controlled_by_parent` detail whose only `master_detail` is declared `required: false` (an optional master), not as an owner field copied by hooks. A row with no master is its owner's: the owner or View All on the detail reads it, the owner or Modify All writes it, an insert naming no master is admitted, setting a master asks edit on it, emptying one asks edit on the stored master (`ownerMayEdit` does not cover that), and a chain hop with no master ends there under the same rule. The `relationship/master-detail-required` lint row names the optional master, and the membership-key notes say a `valueField` cannot be the roster's own `id` (`membership-key-value-field-invalid`). The platform behaviour shipped earlier in `@objectstack/spec`, `@objectstack/lint` and `@objectstack/plugin-security`; this release only teaches it.
+- 8acbfab: docs(skills): objectstack-ai's MCP tools table teaches `run_action` / `resume_run`'s confirmation gate and the `delete_records` tool
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The table taught the `confirm: true` gate for `delete_record` only. It now says that an action flagged `ai.requiresConfirmation` is refused by `run_action` and `resume_run` with `428 ACTION_CONFIRMATION_REQUIRED` unless the call sends `confirm: true`, and lists `delete_records`: up to 200 records of one object per call, by `where` or `recordIds`, whose unconfirmed call is the preview and deletes nothing, and which needs `data:read` and `data:write` over OAuth.
+- 226c988: docs(skills): the objectui i18n guide teaches the platform locale table's tags (`zh-Hans`, `zh-Hant`, `pt-BR`) for the built-in packs, a language switcher fed by `PLATFORM_LOCALES`, and the read aliases that keep a stored `zh` / `zh-CN` / `zh-TW` / `pt` resolving
+  
+  Clause-②: no
+  Metadata-protocol: none
+- e2b5773: docs(skills): objectstack-data's datasources rule states the organization scope an external object declares under a walled tenancy posture
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **Before.** The datasources rule taught `external` bindings, `columnMap`, auto-connect and credentials, and said nothing about what an external object's rows are to the organizations of a walled deployment.
+  - **Now.** One bullet under *Federated (external) objects*: under `OS_TENANCY_POSTURE` `isolated`/`group` every external object states its organization scope — its own `organization_id` field (or `columnMap` onto it), `tenancy: { enabled: false }` (shared), or `systemFields: { tenant: false }`; none refuses the boot by name, and `tenancy.tenantField` is refused there too. Paid within the file's token ceiling (910 → 908 of 911) by trimming the auto-connect footnote, the managed-datasource sentence and the credentials paragraph; no ceiling moves.
+- 2178d80: docs(skills): the objectstack-data seeds reference now teaches the seed modes the loader runs: `ignore` is the default (create-only), `replace` deletes nothing (it inserts into a table the caller cleared), and `insert` duplicates on each replay. It also says that AppPlugin's boot and organization replays do not re-insert a seed row a person deleted (a publish or package install keeps no record, so the row comes back there), and that `seed-replayer` with `{ reseed: true }` restores it. The data-modeling seed guide teaches the same rule and names the loads that keep no record.
+  
+  Clause-②: no
+  Metadata-protocol: none
+- cbe20ab: docs(skills): validation examples guard nullable fields, hooks teach `body`, the `requires:` table names `mailbox` and `package-registry`, `os generate` drops `agent`
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `objectstack-data` `rules/validation.md` now guards every ordering or arithmetic operand in its examples with `!= null` (the due-date, date-range, amount, discount and order-total predicates) and states the rule once: an unguarded `<` or `+` on a field with no `required: true` / `defaultValue` is refused at publish. Its external-validation hook and the `examples-objects.md` lifecycle hook are written as a sandboxed `body`, and the `SKILL.md` index names the inline `handler` only as the deprecated form; the validation section says a `body` has no outbound HTTP, so an external-API check goes through a Connector recipe. `objectstack-platform` lists `mailbox` (`@objectstack/service-mailbox`) and `package-registry` (`@objectstack/service-package`) in the `requires:` table, and `references/operations.md` no longer offers the retired `os generate agent`. The platform behaviour already shipped; this release only teaches it.
+- 658d84f: docs(skills): the platform skill's `requires:` table marks the always-on tokens
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `objectstack-platform`'s `### requires:` no longer calls every listed service opt-in. The table marks each token of `PLATFORM_ALWAYS_ON_CAPABILITIES` (`queue`, `job`, `cache`, `settings`, `email`, `storage`, `sms`, `sharing`, `messaging`, `analytics`, `package-registry`) with °, and the lead says every boot mounts them, listed or not, while `--preset minimal` drops exactly those. The `auth` → `email` rule now says it holds under `--preset minimal` too, and the `triggers` + `job` pairing is scoped to `--preset minimal`. The `queues` / `assignmentRules` paragraph no longer says `sharing` must be in `requires:`. The skill's evals for silent scheduled flows and notifications, and for an ownership queue, no longer expect `job`, `messaging` or `sharing` in `requires:`, and a new eval case asks whether an always-on service must be listed. The platform behaviour already shipped; this release only teaches it.
+- e0b8c2c: docs(skills): the platform skill teaches `os deploy`, the managed-package dev loop
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `objectstack-platform/references/operations.md` gains an `os deploy` row in "Environments & deploy": use it to see an edit on the organization's ObjectOS Cloud environment (also `npm run deploy` in a scaffolded project, or `d` in `os dev`); it builds, publishes `<manifest.version>-dev.<timestamp>`, installs that version and waits until the environment serves it. The row names how the environment is picked (`--env`, else the one `os environments switch` recorded, kept across `os cloud login`, else the organization's only one) and the `--no-wait` and `--wait-timeout` flags. A short paragraph reads an `os deploy` exit 1: a refusal before any write (with no environment at all, create one in the ObjectOS Cloud console), the environment's own build failure, and the wait timeout, each with the next step. `SKILL.md`'s Part 3 pointer names `os deploy`. Eval 17 of `evals/config-plugins-ops.json` asks how to see a change on the environment and expects `os deploy`. Paid inside `operations.md` by deleting four restatements (the `os dev` row's platform-admin sentence, the `os validate` row's gate summary, the "Both run the same gates:" lead-in, the Docker row's list of the official image's three required variables); the remainder raises that file's token ceiling by the measurement.
+- 620b6e6: docs(skills): drop the "separate objectui repo" teaching, list objectui in the catalog index, repair three dead anchors, and author `sharingModel` in the object examples
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - `objectui`: the README installs the skill from `@objectstack/skills` with the pinned `experimental_sync` command the catalog README teaches, instead of `npx skills add objectstack-ai/objectui`, and its source link and `page-builder.md`'s `plugin-gantt` link point at `ui/` in this repository. The catalog README's "Related repositories" entry points there too.
+  - The generated skill index in `skills/README.md` and the docs Skills reference now list `objectui` (eleven skills). The generator admits every skill directory with a `SKILL.md` that is not `metadata.internal`, instead of only `objectstack-*` names.
+  - Dead links fixed: `data-hooks.md`'s reference to a hooks section the data `SKILL.md` no longer has is removed, and `plugin-lifecycle.md` / `service-registry.md` point at `references/plugin-development.md`, where the Complete Plugin Example and the Well-Known Plugin Names table live.
+  - `bootstrap.md`'s starting `package.json` pins `18.3.0`, the version every skill now carries.
+  - Every complete `ObjectSchema.create` example in `relationships.md`, `lifecycle.md` and `datasources.md` authors `sharingModel`, because a publish without one is refused with `security-owd-unset`. Master-detail children use `controlled_by_parent`, and the read-only external object uses `public_read`.
+  - `indexing.md`: the tenant column is `organization_id`, injected by `systemFields.tenant`, not an authored `tenant_id`.
+  - `objectstack-query`: teaches `$empty`, the is-empty-by-declared-type operator that the view filters `is_empty` / `is_not_empty` lower to.
+  - `objectstack-upgrade`: the `skills remove` roster also removes a 17.x `objectui` install (sourced from `objectstack-ai/objectui`), and says `objectstack-pm-dispatch` is not in the 18 catalog.
+  - New eval cases cover the authored `sharingModel`, the `organization_id` tenant index and `$empty`. The touched files stay inside their token ceilings by removing restatements in the same files. No schema, key or behaviour changes.
+
 ## 18.3.0
 
 ### Minor Changes

@@ -1,5 +1,698 @@
 # @object-ui/i18n
 
+## 18.4.0
+
+### Minor Changes
+
+- aa57c76: feat(spec): three forward date-range presets: `next_month`, `next_quarter` and `next_30_days`
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  The relative dates a dashboard date filter and the filter builder offer looked only backward. A forecast asks forward: what closes next month, next quarter, in the next 30 days. Those questions had to use a custom range, whose fixed dates go stale.
+  
+  `DATE_RANGE_PRESETS` now also declares `next_month` (the whole of next month), `next_quarter` (the whole of next quarter) and `next_30_days` (today and the 30 days after it, the mirror of `last_30_days`). Every place that accepts a preset accepts them: `dashboard.dateRange.defaultRange`, a date global filter's `defaultValue`, the filter builder's `between` row and `AnalyticsQuery.timeDimensions[].dateRange`. They sit beside the family they extend in the filter bar: `next_month` after `last_month`, `next_quarter` after `last_quarter`, `next_30_days` after `last_90_days`. Their `DATE_RANGE_PRESET_MACRO_WINDOWS` rows follow the inclusive last-day convention: `['{next_month_start}', '{next_month_end}']`, `['{next_quarter_start}', '{next_quarter_end}']` and `['{today}', '{30_days_from_now}']`. A preset name written as a bare filter comparand is refused with that window as the prescription, as for the other presets.
+  
+  `@objectstack/core`'s `resolveAnalyticsDateRangePreset` resolves the three in its half-open form. `next_30_days` stops before `{31_days_from_now}`. `next_month` and `next_quarter` stop before the month and the quarter after next, which no macro token names: the resolver reads `next_month_start` (or `next_quarter_start`) again from the start of the day it named, so the end is still a day the one token resolver computed. No macro token is added.
+  
+  In the console, the three presets have labels in all ten locale packs, and the client date-macro resolver now answers `{next_month_end}` and `{next_quarter_end}`, two spec tokens it did not resolve before. `@objectstack/verify`'s dashboard-window proof also writes fixture rows on a forward preset's future edges, so it judges the three new windows; the days it writes for the other presets are unchanged. `@objectstack/lint` changes documentation only.
+
+### Patch Changes
+
+- 1e6f542: feat(studio): a contributed nav entry shows the label the live app shows, and a package that only contributes navigation says where it goes
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - **The label.** A navigation entry another package contributes to a base's app now shows the label the live app shows, with its id as a muted second line under it. Before, the row showed only the id. The label is looked up by `(app, id)` in the app row the Interfaces pillar already reads (`GET /meta/app?package=`), which serves the folded navigation: the served entries the app's published layer does not hold. No request is added and nothing is read from the contributor's manifest. An id the base also holds, or one two contributions share, keeps the bare id, so no label is guessed. A label-less entry reads what it inherits, through the rail's own resolver. A never-published app has no served row, so its contributed rows keep the id.
+  - **The contributor's empty state.** A package with no app of its own whose listed manifest declares `navigationContributions` now says what it adds: "This package has no app of its own. It adds 2 navigation entries to HotCRM's app.", with a button that opens that package. The declared app is an address only. Its owner comes from the served app read (`GET /meta/app/:app`), and the count comes from the owner's served customization read (`GET /packages/:owner/customizations`), counting the `nav` contributions stamped with this package for that app. That is at most two reads per declared target app, sent only on that empty state. When the package is disabled, the target app is missing, either read fails, or the count is 0, the text stays "This package has no app yet."
+  - **New strings.** `@object-ui/i18n`'s studio namespace gains five keys in `en` and `zh` (`engine.studio.if.noOwnApp`, `.noOwnAppTitle`, `.contributesOne`, `.contributesOther`, `.openOwner`).
+- b379262: fix(app-shell): the metadata editor's save-status chip says "Not saved" while a save is held, instead of promising an auto-save that never comes (#29901)
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  On the metadata editor page (Studio's All metadata item page, Setup's metadata pages) with auto-save on, a draft the server refused with `422 INVALID_METADATA` stays dirty, and the chip beside Save kept reading "Auto-saving…" although the auto-save is held until the refused part changes and no further save is sent. The same happened while the inspector holds a fault it reports (a CEL predicate that does not parse), which holds the auto-save the same way.
+  
+  The chip now has a held state: while either hold stands on a dirty draft it reads "Not saved — fix the errors to save" in the destructive tone, with the Save button's own explanation as its tooltip. It returns to the usual states as soon as the hold lifts: editing the part the server named, or fixing the inspector fault, lets the auto-save run and the chip reads "Auto-saving…", then "Saved". Nothing about when a save is sent or held changes. New string: `engine.edit.notSavedHeld` (en, zh).
+- 7945a3b: fix(app-shell): the Studio publish sheet names a batch of hooks or translations in words ("3 hooks", zh 「钩子 3」) instead of the raw type code ("3 hook") (#29902)
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - **`@object-ui/i18n`**: two new count families in every pack, `preview.changes.typeCount.hook` and `preview.changes.typeCount.translation`, with each CLDR slot the pack's language selects.
+  - **`@object-ui/app-shell`**: the Pending changes / publish sheet's summary line and group headings read those families for `hook` (authored in an object's Hooks tab) and `translation` (authored in Studio's "All metadata" form editor). A type with no family still shows its raw name.
+- 9049be2: fix(plugin-detail): a record page's body table that is wider than the details column says so — its first column stays pinned and ⤢ is offered as 「All columns」
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A body table of the default record page (a related list drawn in the details column) keeps its place in that column, as ADR-0085's role-based layout puts it. When its columns are wider than the column, it now makes the overflow obvious:
+  
+  - **The first column stays pinned** while the table scrolls sideways, so a scrolled row is still identifiable (the table's existing `frozenColumns: 1`, set only while the table overflows).
+  - **⤢ is offered in words.** The enlarge control in the card header, icon-only before, shows a visible 「All columns」 label (`detail.relatedCardAllColumns`, all ten locales) while the table overflows. It opens the same enlarged tab as before, where every column fits.
+  - **The right-edge shadow** while columns remain to the right is the table's own and unchanged; it clears when the table is scrolled to its end.
+  
+  A body table that fits shows none of these: no pinned column and the icon-only ⤢.
+  
+  `@object-ui/components`: a `data-table` header label carries its full text as a `title`, so a header the ellipsis cuts can be read on hover, and the table's scroll box carries a `data-table-scroll-box` marker a host can read the overflow from.
+- f0ad1f7: fix(app-shell): a flow bound to an object its package may not use is explained on the Problems list in the Console's language
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  When a package's flow triggers on, scans, or declares a start input of an object outside what the package may use (its own objects, the objects of the packages it declares as dependencies, and system objects), the publish refuses it, and the flow's Problems list showed the server's English sentence in packaging terms to a reader in any language. The Problems list now words that refusal from the served entry's rule id (`flow-trigger-unknown-object`, `flow-input-unknown-object`) and its path: it names the object the flow holds there, says which objects a package can use, and points at the two fixes, picking an object from the list or declaring a dependency on the package that defines it. The copy lives in the Studio string namespace in English and Chinese. Any other server entry, and any of these at a position the Console does not word, still shows the server's sentence as sent. The served shape does not change: the editor pages now keep each served error's `code` on the entries they hand the canvas, where it used to be dropped.
+- 03be565: fix(app-shell): New automation no longer saves a typed prefix as the trigger object (#30038)
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  In Studio's New automation dialog, typing part of an object name and pressing Enter committed the typed text itself, so the flow was created bound to an object that does not exist. The trigger-object picker there now takes objects only: Enter or leaving the field commits the object the text names exactly, else the only match left in the list, else no object, and the picker says no object is chosen. A record preset then keeps the dialog open until an object is picked.
+  
+  Every other object picker keeps its free text, because a flow reference may hold an expression.
+- 7e9fa4b: fix(app-shell): Studio on a zh-CN console reads in Chinese in the view, page and report panels, the publish sheet, the flow Problems tab and the save-notice / notify nodes, and calls a dashboard 仪表盘 everywhere
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The view, page and report property panels render the spec's authoring forms from the console's own copy of the spec, and only the dashboard form had a zh-CN overlay, so section headings such as Basics, Columns & filters and Navigation & sharing, their descriptions and schema-titled rows such as Searchable Fields read in English. The overlay now carries every `METADATA_FORM_REGISTRY` type, worded as the platform's own zh-CN metadata-forms bundle words them: view, page and report in full, the other types by field label, which is what the Pending changes sheet names a changed property by (a flow's `~ Status` now reads `~ 状态`). The sheet's summary line counts datasets as 数据集 instead of the raw type name.
+  
+  A flow whose trigger is not armed on this deployment showed the engine's developer sentence under 未在此运行, above 没有问题 —— 该流程结构有效. The note now says, from the engine's `unboundCause` code, what this deployment does not do and who can change it, keeps the engine's sentence as the hover detail, and the line below it says the structure checks found nothing to fix instead of "no problems". A cause the console has no row for still shows the engine's sentence.
+  
+  The palette names the save-notice node 保存提示, and the notify node's Template and Template data fields and the save-notice Message field read in Chinese. English consoles read the same English as before. zh-CN Console and Studio text uses 仪表盘 for dashboard throughout.
+- bc8945f: feat(app-shell): Studio Interfaces opens a list view from 不在导航中 on its object's page; the 视图 group lists only what no header dropdown reaches, and names a form view and its own type
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - **A list view opens on its object's page from every door.** A list view picked under 不在导航中 → 视图, and a link to the view itself (`?surface=view:OBJECT.KEY`, the All metadata door), now land on the object's page with its header dropdown (object / view ▾), on that view: the object's nav entry when it has one, else the object itself, with no entry (`?surface=object:OBJECT`, which a reload or a shared link opens again, `?view=` included). The panel there now also carries what only the view's own page offered: its conditional formatting (条件格式化), whose CEL verdicts hold the view's autosave as they held the view page's Save, and the sections of the spec's authoring form for a view, without the keys the panel already edits. A form view, and a view a read-only base's pair adds, still open as themselves.
+  - **The 视图 group lists what the dropdowns do not reach.** A list view whose object has a nav entry is no longer listed there, a view only drafted in the package included; the list views of an object with no entry stay listed.
+  - **Form views read as forms.** A form view is listed by its label, else as the object's name and the word for a form ("Lead form", 「线索表单」), never its item name (`crm_lead.form`); the group's heading says what it holds (表单视图, 视图, or 表单视图与列表视图). In the view inspector, a form view's 视图类型 offers the form layouts of the spec's `FormViewSchema.type` (simple, tabbed, wizard) and reads its own, where it read 「simple（未找到）」; a list view's picker is unchanged.
+  - **`@object-ui/i18n`: three Studio keys,** `engine.studio.if.offNav.viewForms`, `engine.studio.if.offNav.viewMixed` and `engine.studio.if.offNav.formName`, in en and zh.
+- 42afac7: feat(app-shell): Studio Interfaces picks an object's list view from the header title, object / view ▾, the way the running list does, and the open view stays in the address
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **The view switcher is in the header's title.** An `object` entry's header reads object / view ▾. The switcher is the running list's own dropdown (`ObjectViewTitleSwitcher`): the object's list views by label, a view only drafted in this package included, a search box, and New view, which opens the Create View dialog. Studio does not offer the reader's own features there: no ☆, no 📌, no recent views, no Save as my view. It shows when the object has one list view too, so New view is always one click away. A read-only package switches views and offers no New view.
+  - **The Properties panel no longer holds a view picker, Add view or "Back to …".** It keeps the open view's settings, and its title is the view's name as the switcher gives it (the label the object's served `listViews` carry). A view with no label is named "Default view" or by its key; the header names the object before it.
+  - **The open view is in the address.** Switching writes `?view=<object>.<key>` beside `?surface=` and `?nav=`; the entry's own view writes none. A reload or a shared link opens that view again, a view only drafted in this package included. A link naming a view of another object is not taken. A pending edit is still sent before a switch, and an edit that cannot be sent still asks first.
+  - **`ObjectViewTitleSwitcher`: the pin is optional.** `onPinnedViewChange`, `pinnedViewId` and `recentViewIds` may be left out; without `onPinnedViewChange` no row draws 📌 and no Pinned section is listed. The running list passes all three, so it is unchanged.
+  - **`@object-ui/i18n` (studio namespace):** adds `engine.studio.inspector.listView.defaultView`; removes `defaultTitle`, `namedTitle`, `addView`, `backToEntry`, `switchView` and `switchViewDraft`, which only the removed panel controls read.
+- a9fb14b: fix(app-shell): the Studio form designer lays out the form the app opens, so an object with a default form view no longer edits a layout users never see
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **Which layout.** Studio → Data → an object → Form asks the app's own resolver which form view New and Edit open (`selectRecordFormView`, over the shell's merged objects). With none, the designer edits the object's `fieldGroups`, as before. With one (an `isDefault` form view, or an `OBJECT.create` view for New), the designer shows that view's sections and every layout edit (moving fields, adding, renaming, moving and deleting sections) is saved to the view's draft, which the package publish publishes. A chip in the toolbar names the layout being edited ("Form view: OBJECT.form" or "Field groups").
+  - **New and Edit.** Where New and Edit open different form views, a New / Edit switch in the toolbar picks which one the designer and the Preview show. A pending edit of the shown view is sent before the other one loads.
+  - **Fields not on the form.** On a form view, a field the view lists in no section is not on the form; the designer keeps such fields in a "Not on this form" bucket, and dragging one into a section adds it. A field entry's own keys (`required`, `readonly`, …), a section's other keys, and entries the canvas does not show are written back as they were. A section that references a field group (`group`) keeps the reference until its members are changed.
+  - **Read-only base.** On a read-only base the view is customized, not edited: the edit is saved into the base's paired customization package as a declared override of the base's view (ADR-0146 D2), the same door list views use.
+  - **Preview.** The Form tab's Preview now lays the form out by the same form view (its sections, and the tabbed layout), as the dialog it previews does; before, it drew the object's field groups whatever form view the app opened.
+  - **`@object-ui/i18n`.** English and Chinese strings for the chip, the New / Edit switch and the "Not on this form" bucket.
+- 6f095b9: feat(studio): customize a read-only package's dataset in the All metadata area, see what uses it before publishing, and read a refused publish at the dataset
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - **Customize a dataset.** On a read-only base package, Studio's All metadata area opens a dataset in its form editor with the dataset designer and live preview, and offers Customize. The first saved edit copies the whole dataset into the base's paired `<base>.custom` package, declaring `overrides: { package, basedOn }`; the header's Publish applies it, and "Restore package original" on the override mark deletes the copy. On a writable package a dataset still opens the generic item page.
+  - **What uses it.** While a dataset is customized, the editor lists the dashboards, reports and other items that name it, read from the References read, so the person sees what a published change reaches. A failed read says it failed and offers to read again; it never reads as "nothing uses it".
+  - **A refused publish at the item.** A publish the server refuses for a dataset is placed on its measure or dimension and the designer's input (`Not published. Check Aggregate of the measure "Total Amount"`), in the Console's language, and shown at the dataset's editor as well as on its Pending changes entry. The server's own text stays under Details.
+  - **References read fixed.** `MetadataClient.references()` now reads the route's declared answer (`{ references: [{ type, name, label, path, kind }] }`) and maps each element to `MetadataReference` (`fromType`, `fromName`, new optional `fromLabel` and `kind`). It used to read a key the route never serves, so Setup's References tab and Studio's item tools showed "Nothing in the metadata graph points at this item. Safe to delete." for every item. An answer the declaration refuses is now a failed read.
+  - **Published surface.** `MetadataReference`, exported from `@object-ui/data-objectstack`, gains two optional fields, `fromLabel` (the referring item's label, when the server serves one) and `kind` (the served reference kind); existing fields are unchanged. `MetadataClient.references()` now accepts less: a `200` answer that `FindReferencesToMetaResponseSchema` refuses throws instead of resolving `[]`, so a caller must handle the rejection as it already does for a non-2xx answer; in this repository every caller reads it through `useReferencesScan`, which catches it and shows the failed-check state.
+- 5f80129: fix(plugin-detail): a record page's related table offers Export only to a reader the list page offers it to, and an export refusal reads in the Console's language
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **`@object-ui/plugin-detail`: the related table asks the list page's question.** The enlarged related list (the record page's active tab) drew Export whenever its data source could export. It now also reads the child object's effective API operation set (`/me/permissions` `apiOperations`) through `usePermissions()`, the source the list page's `exportPermitted` reads, and draws no Export when that set leaves `export` out. A missing set keeps the button, as on the list page. A reader who may export still exports this relation's rows alone.
+  - **Export refusals read in the Console's language.** When the export route still refuses (a 403, such as `EXPORT_NOT_PERMITTED`), the related table, the list page and the grid show the new `view.exportNotPermitted` sentence in the reader's language instead of the route's English text. Other export failures keep the server's sentence.
+  - **`@object-ui/i18n`: `view.exportNotPermitted`** in all ten locale packs.
+- 0c7e95a: fix(app-shell): Studio's rails mark a customized row with the word 定制 / Custom and an added row with 新增 / Added, no fill, instead of a filled square with a glyph that read as an add button (#30070)
+  
+  Clause-②: yes (widening) — new studio i18n key `engine.customizationMark.customizedShort` (en, zh)
+  Metadata-protocol: none
+  
+  The compact customization mark the pillar rails draw (and the Interfaces rail's navigation-override mark, which wraps it) now prints one short coloured word with no background. Its tooltip and accessible name are unchanged: the full text ("已定制（HotCRM）") followed by the sentence naming the customization package. It is not a control: a click on it is a click on its row.
+- c8e6d38: feat(app-shell): Studio adds an action to an installed app's object, saved in the base's customization package (#30088)
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  On a read-only (installed or code-shipped) package that has, or can get, its paired customization package (`<base>.custom`), the Data pillar's Actions view of the base's object now offers New. Before, it listed the vendor's actions with no New, so an operations person could not add a button such as "Mark qualified" to an installed app's leads, although the platform accepts the result.
+  
+  - New offers the same presets and the same action editor as on a writable package. The action is saved as its own `action` item in the pair, bound to the object by `objectName`, as a draft (the first write asks the ensure door for the pair). The base's object is never written.
+  - The vendor's actions stay read-only in the list. The added action is listed after them with the "added" customization mark, its edits autosave into its draft in the pair, and Delete removes its draft and its published item from the pair. An added action keeps the name it was created with: a rename is held with a line saying how to save.
+  - The action publishes with the pair's other drafts from Pending changes, and the Actions list's "only customizations" counts it and narrows the list to the pair's actions.
+  
+  A writable package's action editing is unchanged: its actions are still written into the object draft. No spec, server or metadata-type change.
+- d99cd3b: feat(app-shell): the Studio list-view panel configures the selection bar's actions (#30089)
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The list-view panel of an object's grid view gains a "Selection actions" section. It edits two keys the list view already declares, and no other:
+  
+  - `bulkActions`: pick the object's actions by label, plus the built-in Delete (`delete`). Each runs once per selected record, promoted with the action's own label and params.
+  - `bulkActionDefs`: add, edit or remove a field update (`operation: 'update'`): a button label, the fields the dialog asks for (one required param per field, carrying a select's options and a lookup's object) and an optional confirmation. A def is written only once it has a label and a field and `BulkActionDefSchema` accepts it.
+  
+  The section says what happens to the built-in Delete: shown while the view declares neither key, and kept once either is declared only when `bulkActions` names `delete`. A def of another kind (`delete`, an aggregate `custom` dispatch) is listed and can be removed; it is edited in metadata. An emptied key is removed, so a view that declares neither key saves as it was read. On an installed app's read-only view, the first edit goes through the same customization copy as every other setting of the panel. Strings are added in English and Chinese to the `studio` namespace of `@object-ui/i18n`.
+- b6caa14: fix(app-shell): Studio's publish review sheet says a customization lives in this environment's database and moves only by `os package export` (#30119)
+  
+  Clause-②: yes (widening) — new `@object-ui/i18n` key `preview.changes.customizationEnvironment` in every pack; `preview/savedToCustomization` gains `customizationEnvironmentText` and `PACKAGE_EXPORT_COMMAND`
+  Metadata-protocol: none
+  
+  Reviewing a read-only package's customizations, the sheet adds one line under "Saved to BASE's customizations": the changes are kept in this environment's database as items of the `.custom` package it names (the id the server answered for the base), not in the project's source, and they reach another environment only through `os package export`.
+- a77c2e9: feat(console): administrators of a production deployment that keeps its data on its own disk see a standing notice on the home page and System Overview
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **`@object-ui/app-shell`.** The home page and Setup's System Overview open with a notice, for workspace administrators the server also admits, when the deployment reports what it keeps on its own disk (`GET /api/settings/deployment/notice`): the database file, the generated sign-in secret and the data key file, each in business terms with its path and variable, then the lower-severity lines for local uploads and no email service. "Copy the settings" puts the variables to set on the clipboard, each with the value it takes (the file to carry the current value over from). "Hide" records the acknowledgement on the server's audit log and keeps the notice hidden for that administrator in that browser until the findings change; System Overview then keeps one small line with "Show again". No dialog; a member's browser never asks.
+  - **`@object-ui/i18n`.** A new `deploymentNotice` block (18 keys) in all ten packs.
+- ea5807e: fix(console): four copy and display details from a real-user walkthrough: Latin object names spaced in zh form titles, a title on the lookup's create dialog, a success toast that names the action, and money metrics at the currency's decimals
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - **zh form titles space a Latin object name.** `新建{{object}}`, `编辑{{object}}` and `查看{{object}}` (and the AI chat's record-write card titles) read `新建 Repair Ticket` when the object has no Chinese label, and still `新建联系人` when it has one. `createI18n` applies the spacing to those keys only, through an i18next post-processor; the packs keep the plain `{{object}}` spelling.
+  - **The lookup's "create the referenced record" dialog has a title.** A `{ objectName, mode: 'create' }` modal descriptor with no `title` now reads `form.createTitle` with the object's label, the title of the console's own New dialog. An authored title still wins.
+  - **The default success toast names the action.** An action with a `label` and no `successMessage` (and no matching `outcomeMessages` entry) toasts the new pack key `actions.completedNamed` (`Resolve completed`, zh `“解决”已完成`) instead of the generic `Action completed successfully`. An action with no label keeps the generic text.
+  - **Money metrics keep the currency's decimals.** A dataset metric over a currency measure with no `format`, and a static metric card with a `currency` and no `format`, show the currency's own minor-unit width (CNY `¥1,293.00`, JPY `¥1,293`), the width the list cell shows. Before, the dataset metric printed the shortest form (`¥1,293`, `¥1,280.5`) and the static card rounded to whole units. An authored `format` pattern still states its width.
+- ff12aed: fix(core): a compareTo widget on a forward date range (next month, next quarter, next 30 days) compares with the period just before it, not with itself
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **`@object-ui/core`: `shiftFilterByCompareTo`** with `kind: 'previousPeriod'` moved only `current_*` / `today` tokens, so a dashboard filtered to `next_month` or `next_quarter` compared the window with itself and the delta always read 0, and `next_30_days` (`{today}` … `{30_days_from_now}`) moved only its start and compared with a window that overlapped it on all but one day. A forward window now steps back one period: `{next_month_*}` becomes this month, `{next_quarter_*}` this quarter, and a `{today}` … `{N_days_from_now}` pair on one field becomes the N + 1 days that end yesterday (`{(N+1)_days_ago}` … `{yesterday}`), the same window the dataset executor computes for that range. Every other token, and the 13 backward presets, compare as before.
+  - **`@object-ui/core`: `compareToTrendLabelKey`** names that window: `vsThisMonth` for a forward month, `vsThisQuarter` for a forward quarter, and `vsPreviousPeriod` for a forward rolling window (it read `vsLastMonth`, `vsLastQuarter` and `vsYesterday`).
+  - **`@object-ui/i18n`:** `dashboard.trend.vsThisMonth` and `dashboard.trend.vsThisQuarter` in all ten locale packs (zh: 较本月, 较本季度).
+  - **`@object-ui/plugin-dashboard`, `@object-ui/plugin-charts`:** English fallbacks for the two keys in the metric tile and in the chart's comparison series label.
+- 6c48d48: fix(console): a person who verifies their email during the mobile sign-in hand-off gets a mail link that works, and the hand-off's refusal time survives the verification pages (#30157)
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  On a server that requires email verification, a person signing up from the mobile app's sign-in (the hand-off `redirect` on `/register`) got a verification mail whose link landed on a Console page that does not exist (`/_console/api/v1/auth/one-time-token/handoff?…`). The mail is usually opened in a browser that is not the app's sign-in window, and often on another device, so the link now returns to `/verify-email?handoff=verified`: the page says the address is confirmed and to go back to the app and sign in there. It offers no Console sign-in and hands out no sign-in token in that browser. The same holds for the "Resend verification email" mail. Every other `redirect` (an invitation, a Console page) keeps the link it had.
+  
+  The hand-off's refusal time (`handoff_refused_at`) is now carried through `/verify-email-prompt` on all three hops: `/login`'s "email not verified" branch, `/register`'s "verification required" branch, and "Back to login". Beside any other `redirect`, those links are unchanged.
+  
+  New string: `auth.verifyEmail.handoffSuccessDescription` (all ten locales).
+- ef2ad31: fix(app-shell): a dismissed or revoked default permission set in the suggested-bindings panel can be reconsidered (#30199)
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The suggested-bindings panel (the install dialog and Marketplace package page, and Studio's Access pillar) drew a dismissed suggestion, or a revoked acceptance, as a state line with no action. An administrator who chose Dismiss could only take it back by calling `POST /api/v1/security/suggested-bindings/:id/reopen` by hand, although the server has offered that door all along.
+  
+  Such a row now offers "Reconsider". It calls the re-open door, and the row comes back as a pending suggestion with Accept and Dismiss (a Guest row with Dismiss only, as before). Re-opening grants nothing: the set reaches the Everyone position only when it is accepted again, under the same checks. The button is shown to the same callers who see Accept and Dismiss: a caller without `manage_metadata` is refused the list and sees no panel. A refusal (the row is gone, the set is no longer suggested, or the deployment's security service has no re-open door) is shown with the server's own message, and the panel re-reads the list.
+  
+  New client call: `reopenSuggestedBinding(id)`, beside `dismissSuggestedBinding`. New strings: `marketplace.suggestedBindings.reopen`, `.reopening` and `.reopenedToast` in all ten locale packs, and `engine.studio.access.suggestReopen`, `.suggestReopening` and `.suggestReopenedToast` (en, zh).
+- 18870c9: feat(console)!: an administrator's first-run checklist on Home replaces the currency and time zone dialog, and a country typed by name is saved as its code (#30206)
+  
+  Clause-②: yes (narrowing) — the published `@object-ui/i18n` packs (all ten) drop the `console.workspaceTimezonePrompt.*` keys, which had no reader outside the removed dialog. The widening half: new console i18n keys `console.firstRunChecklist.*` and `console.settingsView.invalidFormat` / `.invalidFormatHelp` / `.invalidFormatPick` (all ten packs).
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (runtime-interface-only ui/packages/i18n/src/locales/en.ts#TranslationKeys) the key type of the console's own translation catalogue: no Zod schema, no spec declaration and no stored metadata reads it, so the compiler is the channel that reaches every caller -->
+  
+  The dialog that asked for the system timezone and default currency opened over the first page an administrator visited, before anything needed a currency, and once covered the toast that said how to share an invitation. It is gone. The same questions, and the other things a new workspace needs, are now rows of a checklist at the top of Home (`/home`):
+  
+  1. **Organization name**: done once the organization no longer carries the name the platform gave it ("Default Organization"). Links to Setup → Organization.
+  2. **Default language and country**, 3. **System timezone**, 4. **Default currency**: done once the setting is set (for language, country and timezone, set by someone rather than left at the platform default; for the currency, which has no default, holding any value). Each opens in place with the Settings page's own fields, pre-filled from the browser: language, country and currency from the browser's first language (so `zh-CN` offers 中文, China and CNY together), the timezone from the browser's zone. Nothing is written until the row's Confirm, which saves through the Settings page's own `PUT /api/settings/localization`.
+  5. **Email delivery**: done once mail can deliver (a provider other than `log`, a From address, and a host for SMTP). Shown only to a session that may write mail. Links to Setup → Mail Delivery.
+  6. **Invite colleagues**: done once there is a second member or a pending invitation. Links to Setup → Users.
+  
+  Each row's state is read from the real setting every time, never from a click. The checklist is shown only to a session that may write `localization`; a member sees nothing, and a member's Home sends no settings namespace read. It draws nothing once every row is done, and its close button hides it for that administrator in that workspace on that device, writing nothing to the server. The rules the dialog was built on still hold: the browser's zone and currency are never written without the administrator's Confirm, and an unset currency stays on the list until it is set.
+  
+  **BREAKING** (`@object-ui/i18n`, TypeScript only): the exported `TranslationKeys` (`typeof en`) loses the 14 `console.workspaceTimezonePrompt.*` keys, in all ten packs (ar, de, en, es, fr, ja, ko, pt, ru, zh). A `t()` call that names one still compiles, since its key is a `string`, and reads the key back. Nothing replaces them one for one; the fix is to delete the reference.
+  
+  | Removed key | Replacement |
+  |:---|:---|
+  | `console.workspaceTimezonePrompt.title`, `.description`, `.laterHint`, `.decline`, `.confirm`, `.saved`, `.notNow` | none: the dialog is retired; the timezone is a row of `console.firstRunChecklist` (`.timezone.*`) |
+  | `console.workspaceTimezonePrompt.currencyTitle`, `.currencyDescription`, `.currencyConfirm`, `.currencySaved` | none: the currency is a row of `console.firstRunChecklist` (`.currency.*`) |
+  | `console.workspaceTimezonePrompt.bothTitle`, `.bothConfirm`, `.bothSaved` | none: the checklist confirms each row on its own |
+  
+  Typing a country's name into a country picker now saves its code: 「中国」 typed into 默认国家, whose option reads 「中国 (CN)」, saves `CN` instead of being refused by the server's two-letter format check. Only a name exactly one option carries counts; any other text is sent as typed, as before. When the server does refuse a value for its format (`invalid_format`), the Settings page and the checklist now say so in the reader's language, naming the setting by its label: "Choose a value for Default country from the list." for a picker, and "Gateway model is not in a valid format. Use provider/model." (with the field's own help line) for a typed field. Every other refusal keeps the server's sentence.
+- fa9c0aa: fix(ui): Setup's everyone note and header tags speak to an administrator
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **Assigned users of a permission set:** a set the everyone position distributes now says 「所有登录成员都持有此权限集。」 / "Every signed-in member holds this set." It no longer names the everyone anchor.
+  - **Setup list header tags:** three tags now say what they mean for the administrator reading the page, in all ten language packs. Admin config becomes "Configured here" (zh 「在此配置」), Platform schema becomes "Built in · editable" (zh 「平台预置 · 可编辑」), and Identity becomes "Via identity service" (zh 「经身份服务写入」). The tooltip text and the rule for when a tag is drawn do not change.
+- fd749a4: feat(audit): a write made while an administrator impersonates a user now records the administrator
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  An administrator who impersonates a user writes as that user, and until now nothing on the write said otherwise: the `sys_audit_log` row, the `sys_activity` row and the record were byte-identical to the user's own work. The session already knew (`sys_session.impersonated_by`); the write did not.
+  
+  - `ExecutionContext.impersonatedBy` (new, optional, attribution only) carries the administrator's `sys_user` id. The shared request-identity resolution sets it from the session read that admitted the caller, for a session credential only. `HookContext.provenance.impersonatedBy` hands it to hooks; it is never folded into `session`, so a hook that gates on the caller still sees the impersonated user.
+  - `userId`, `created_by`, ownership, `current_user.*` RLS and every permission stay the impersonated user's. Nothing in the authorization path reads the new field.
+  - The audit writer stamps `sys_audit_log.metadata.impersonated_by` on record writes and on `action_invocation` rows, and `impersonated_by` plus `impersonated_by_name` in the `sys_activity` row's metadata. Each key is present only on such a write; its absence means the user acted themselves. `user_id` and `actor` do not move.
+  - A flow started from such a session carries the administrator onto its own writes (`AutomationContext.impersonatedBy`), on both `runAs` arms: a record-triggered flow, a manual `POST /:name/trigger` and a `type: 'flow'` action alike. After an approval decision the decider's segment carries none.
+  - The console's record timeline and field history read 「Dev Admin 代王工操作」 (`detail.impersonatedActor`, in all ten console languages).
+  
+  No schema column and no migration: older rows simply carry no key.
+- 77c203a: docs(spec,i18n): stop naming the removed feature-flags settings page
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The `feature_flags` settings namespace and its Setup page were removed from `@objectstack/service-settings` and `@objectstack/platform-objects`. Two shipped texts still pointed at it; both now say what is live.
+  
+  - **Settings hub subtitle (`@object-ui/i18n`).** `console.settingsHub.subtitle` no longer promises feature flags, in all ten language packs. English FROM "Configure your system, integrations, and feature flags." TO "Configure your system and integrations."; each other pack drops its own term the same way. No key is added or removed.
+  - **Spec doc comments (`@objectstack/spec`).** The kernel barrel and `PUBLIC_AUTH_FEATURES` docblocks no longer send readers to a `feature_flags` settings manifest or to `OS_FEATURE_FLAGS_*`. A setting a plugin reads is declared on that plugin's own settings manifest (ADR-0007, env-overridable as `OS_{NAMESPACE}_{KEY}`); capabilities a deployment advertises to clients are the `PUBLIC_AUTH_FEATURES` registry. The `SettingsManifestSchema` docblock (and its generated reference page) gives `mail`, `branding`, `localization` as example namespaces. No schema, type or export changes.
+- 648089d: feat(app-shell): Studio edits a translation item as a source-to-translation table with its gaps counted
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A `translation` item in Studio now opens on a table for its language: a row per string the package declares (objects, fields, options, apps, navigation, views, actions, dashboards and the rest), the source text beside the translation, grouped by item, with a count such as "37 of 120 untranslated" and an "Untranslated only" filter. The rows come from `collectExpectedEntries` in `@objectstack/lint`, the walk `os i18n extract` and `os lint` use, over the package's declared documents. The platform objects the package points at (for example the user object behind an owner lookup) are included, because their labels ship in a few languages only. A row also counts as translated when another bundle already serves the language at its key.
+  
+  - Saving writes the same `translation` item to the same place as before (the `.custom` pair on a read-only package): each cell writes the item's JSON at its key. The item's label, language and description stay in the form above the table, and its JSON stays available as an advanced view for what the table does not list (messages, settings UI, metadata forms).
+  - The "no custom renderer, editing as JSON" notice no longer appears on this page.
+  - The metadata item list labels an item in a code package's `.custom` pair as customer-written, not as shipped in a code package.
+  - Labels in English and Chinese.
+- 10ecafd: fix(app-shell,auth,i18n): the organization form says requiring MFA needs two-factor on, an accepted save says who must enroll and when, and the enrollment screen names a two-factor-off deployment in the user's language
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - **Organization form, before saving.** While two-factor is off on the deployment (`features.twoFactor: false` in `/api/v1/auth/config`), the `sys_organization` edit form says, under its title, that Require Multi-Factor Auth needs two-factor, that a save with it ticked is refused, and how to turn two-factor on (Require multi-factor authentication in Setup → Authentication, or `OS_AUTH_TWO_FACTOR=true`). When the save is refused, the server's refusal shows on the field, as before.
+  - **Organization form, after an accepted save.** A save that turns `require_mfa` on for a row that stored it off adds a line to the saved toast: every member without an authenticator app must set one up, and is blocked from data once the MFA grace period ends (7 days unless changed in Setup → Authentication), counted from their first use after the change. A save of a row that already required it says nothing new.
+  - **Enrollment screen.** `enrollTotp` and `verifyTotp` of `@object-ui/auth` now reject with the HTTP `status` and the server's `code` on the error (the message is unchanged). The authenticator step reads a `404` (the `/two-factor/*` endpoints are not mounted while two-factor is off) as a translated sentence saying enrollment is not available and who can turn it on, instead of `Two-factor enable failed (404)`, and `INVALID_PASSWORD` as the password screen's sentence. Any other refusal keeps the server's message.
+  - **The widening.** `@object-ui/i18n` gains `auth.remediation.mfa.unavailable`, `console.organizationMfa.needsTwoFactor` and `console.organizationMfa.nowRequired` in all ten language packs. The two enrollment rejections gain the optional `status` and `code` properties.
+- b6f4c0e: feat(console): the Allowed IP ranges setting shows the address the server judges before you save
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A save of `auth.allowed_ip_ranges` whose list leaves out the saving request's own address is refused, and until now the Authentication settings page only told the admin that address in the refusal. The page now reads `GET /api/v1/auth/admin/client-address` (the save check's own reading of the address, `server.trustProxy` included) and draws one line under the field: the address, and whether it came from a trusted proxy's forwarded headers or, with `trustProxy` off, from the connection itself (behind a proxy, the proxy's address). When the server cannot establish an address the line says a non-empty list cannot be saved from here. The line stays beside a refusal. A caller the route refuses (not a platform admin), or a server without the route, sees no line and the page is otherwise unchanged. `@object-ui/i18n` adds `console.settingsView.clientAddressDirect`, `clientAddressViaProxy` and `clientAddressUnknown` in all ten shipped locales.
+- b4f4781: feat(console): the install note says how many sample records an install loaded, and clears them in place
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **The install note.** After an install into this runtime, the package page's result now says how many sample records the install loaded, read from the install answer's own `data.seeded` report (`inserted + updated + skipped` of an `inline` run), with a "Purge sample data" button right there. An install over an existing one adds that installing again loads the sample data again, including any that was cleared. An install that loaded none (no seed datasets, a copy, a walled session with no active organization) shows nothing new. The success sentence is definite where the runtime answered that it loaded the app: "… is now in the app switcher."
+  - **The console's own confirm.** Purging sample data (from the install note, or the ⋯ menu, local or cloud) asks in the console's dialog instead of the browser's. When this session installed the package, the dialog says how many sample records will go at most: the number the install loaded. The clearing rule is unchanged: only rows that carry a seed record's key are deleted.
+  - **A reach from the app's own pages.** When the installer leaves the package page, a console banner (the `banner` notification `ConsoleLayout` draws above every page) says the app holds sample data, with a "Purge sample data" action that brings them back to the package page with the confirm open. Clearing withdraws it. It lasts for the console session; the runtime serves no count of sample rows after the install answer.
+  - **Types.** `LocalManagedInstallResult` and `LocalUnmanagedInstallResult` gain the optional `seeded` (`LocalInstallSeeded`).
+  - **Strings.** `@object-ui/i18n` gains `marketplace.detail.sampleDataLoaded`, `sampleDataReloaded`, `purgeConfirmAtMost` (count families), `sampleDataBannerTitle` and `sampleDataBannerMessage` in all 10 locales, and rewords `marketplace.install.localSuccess` in all 10.
+- 042efb7: feat(console): a marketplace app's Install confirms what it adds before it installs
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **The confirm.** Install on a marketplace package page (an install into this runtime) now opens a short confirm in the console's own dialog before anything is installed. It says how many objects, permission sets and sample records the package adds, and which permission sets it will suggest granting to all signed-in users (the Everyone position) once installed; nothing is granted until an administrator accepts. Its Install installs exactly as the button did before, so trying an app is still one more click; Cancel installs nothing. Sample data stays on.
+  - **Where the counts come from.** The package body the install itself installs: the catalog's version manifest the page already reads for the package's install modes, so the confirm adds no request. Objects and permission sets are counted across every package body it carries; sample records are the records of its seed datasets, shown as "up to N" when a dataset is scoped to some environments or locales and may not load here. If the manifest cannot be read, the confirm says so and Install still works; the install result says what loaded.
+  - **Strings.** `@object-ui/i18n` gains `marketplace.install.preview.*` (title, reinstallTitle, intro, reading, unreadable, objects, permissionSets, sampleRecords, atMost, sampleNote, suggestsEveryone) in all 10 languages, in the lazy `marketplace` namespace (`@object-ui/i18n/namespaces/marketplace`) that loads with the marketplace pages, so the eager language packs do not grow.
+- 48231b0: feat(console): the install result says when a package was installed without a protocol compatibility check
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - **What the administrator now reads.** `POST /api/v1/marketplace/install-local` answers `data.protocolCheckSkipped` when its protocol handshake admitted the package without checking it: the package declares no `engines.protocol` (`no-range`), or a range the runtime cannot read (`unparsed-range`). The three Console surfaces that show an install result now draw it as a caution line under the success sentence: the package page's Install result, the catalog's organization install message, and Setup → Packages → Import. The line names the package, the platform protocol it was installed under and, for `unparsed-range`, the range it declared, in the reader's locale. A `reason` this Console does not know shows the server's own `message`. An install whose range was checked shows nothing new.
+  - **Types.** `LocalManagedInstallResult` and `LocalUnmanagedInstallResult` gain the optional `protocolCheckSkipped`.
+  - **New strings.** `@object-ui/i18n` gains `marketplace.install.protocolCheckSkipped.noRange` and `.unparsedRange` in all 10 locales.
+- 0d54279: fix(app-shell): a new datasource starts on the External schema mode and says what each mode does; a driver box's default is a placeholder, not a value
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - **Starts on External.** Setup → Datasources → New datasource now starts on `schemaMode: 'external'` (sent with the `external: {}` block the schema requires) instead of `managed`. The page exists to connect a database that already holds tables and sync them in as objects, and only a federation source offers Sync. A managed datasource is ObjectStack's own storage: once an object is stored in it, the schema sync adds the object's columns to an existing table of the same name. The spec's own default (`managed` when a record declares none) is unchanged; only the dialog's starting choice moved.
+  - **The modes in business words.** The Schema mode select is ordered External, Managed, Validate only, its two main options are relabelled ("External: read an existing database", "Managed: ObjectStack creates and changes the tables"), and a sentence under it says what the chosen mode does to the database and which one to pick to read an existing database.
+  - **Why a managed row has no Sync.** A managed datasource's row (not the primary `default`) says it has no Sync objects because ObjectStack creates its tables, and how to read an existing database instead.
+  - **Box defaults are placeholders.** A driver's text or number box with a default (SQLite `Filename` `:memory:`, PostgreSQL `Host` `localhost` and `Port` `5432`, and so on) starts empty with the default as its placeholder, so a typed path is no longer appended to `:memory:`. A new datasource's Test and Create still send the default for a box left empty, so the request is what it was; an edit shows and sends the stored values. Switches and selects keep their defaults as values.
+  - **The widening.** Four new `studio` namespace rows in `@object-ui/i18n` (en and zh): `engine.datasource.schemaModeExternalHint`, `engine.datasource.schemaModeManagedHint`, `engine.datasource.schemaModeValidateOnlyHint` and `engine.datasource.noSyncManaged`; the en and zh text of `engine.datasource.schemaModeExternal` and `engine.datasource.schemaModeManaged` changes.
+- 8e5fabe: fix(app-shell): after Setup → Datasources syncs objects, the dialog links each new object and names the two steps left: add it to an app, and grant access
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - **The result.** When a Sync run creates at least one object, the dialog stays open on the result instead of closing behind a toast: the count line, one link per created object (label, with the name beside it when they differ) that opens the object under the app the page is in, and the two steps left before people can use it, adding it to an app and granting access in a permission set. A run that creates nothing closes the dialog as before. Refused tables are still reported in the error toast.
+  - **The widening.** Four new `studio` namespace rows in `@object-ui/i18n` (en and zh): `engine.datasource.syncNextStepsOne`, `engine.datasource.syncNextSteps`, `engine.datasource.syncNextStepApp` and `engine.datasource.syncNextStepAccess`.
+  - **Form labels.** A declared field with no `label` is drawn in the form under its name with the first letter capitalised and underscores as spaces (`part_no` → `Part no`), the rule the list already draws it under, so one field reads the same in both. An authored label is unchanged.
+- ac56acf: fix(console): a value set on a deployment-level settings page reads `Modified`, names the default, and offers Reset to default (#30329)
+  
+  Clause-②: yes (widening) — two published language-pack keys in every built-in pack: `console.settingsView.sourceBadgeModified` and `console.settingsView.defaultValueHint` (with `{{value}}`).
+  Metadata-protocol: none
+  
+  A settings page whose manifest declares `scope: 'global'` (Setup's Authentication page is one) writes the deployment's row. A value it had saved was badged `Inherited from Global`, as if it came from somewhere else, and had no Reset to default, so going back meant knowing the default or emptying the box.
+  
+  - The page now passes each row the scope its Save writes, resolved the way the server resolves it: the specifier's `scope`, else the manifest's, else the spec default `tenant`. A value whose effective layer is that scope reads `Modified`, names the default layer's value (`Default: 8`; an option's label, Yes or No for a toggle; never a secret's), and offers Reset to default. Reset puts `null` in the draft and Save sends it, like any other change.
+  - An env-locked value never gets Reset. A value from a layer above the page's scope still reads `Inherited from …`, and the organization and user pages keep their `Overrides …` badges unchanged.
+  - An unset number box now reads empty after Reset; it kept showing the last number.
+- a91409c: fix(core,react,i18n,components,app-shell,console): a write refused because the object's external datasource does not accept writes says the table is read-only, not "you don't have permission"
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - **`@object-ui/core`: `isExternalWriteRefusal(err)`**, re-exported from `@object-ui/react` beside the other write-refusal readers. True when the server refused a write with `EXTERNAL_WRITE_FORBIDDEN`, the ADR-0015 write gate's code for an object bound to an external datasource that does not admit writes (`datasource.external.allowWrites` and `object.external.writable` must both be true). Read from `code`, then `details.code`, like `isPermissionError`. The refusal is a 403, so `isPermissionError` answers true for it too: a caller asks this first.
+  - **`@object-ui/i18n`: `form.readOnlyExternalSource`**, in all ten packs: "This table is read-only. Its records come from an external data source that does not accept changes."
+  - **Every surface that met this refusal now says the table is read-only:** the console record form page and the record dialog (`@object-ui/components` form), which said "you don't have permission to save this record"; the record page delete, the list row delete and the record page inline edit, which showed the gate's raw diagnostic; and the calendar's drag-to-reschedule and the record path's stage change. A permission line sent an administrator through permission sets for a grant that cannot exist.
+- ab12a3b: fix(app-shell): Setup → Datasources names the objects that still use a datasource, in the console's language, before and after its delete
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - **The confirm.** Opening a datasource's delete reads object metadata and lists every object whose `datasource` names it (label, with the name beside it when they differ). While any is listed, the confirm says the datasource cannot be deleted yet and that each object must be deleted or moved to another datasource first. With none, or when the read fails, the confirm is unchanged.
+  - **The refusal.** A `400` from `DELETE /api/v1/datasources/:name` re-reads that list. When objects still name the datasource, the toast says, in the console's language, that it was not deleted, which objects still use it, and what to do next. Any other failure, and a `400` with no bound object, keep the server's message in the existing frame. No server text is matched.
+  - **The widening.** Three new `studio` namespace rows in `@object-ui/i18n` (en and zh): `engine.datasource.deleteBoundBody`, `engine.datasource.deleteBoundRefused` and `engine.datasource.boundObjectSeparator`.
+- 2b35374: fix(app-shell): a team made in Setup no longer reads as managed by an outside identity provider, and a header action's write shows on the page's related lists and their counts at once
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - The `better-auth` note (the Identity tag's tooltip, and the Setup record header's object-label note) read "Managed by the identity provider" / 「由身份提供方管理」, which told the maker of a hand-made team that the row came from elsewhere and was not theirs to change. It now reads "Written through the built-in identity service" / 「经内置身份服务写入」, and its body says these records are created and changed with the actions on the page or through sign-in, invitation and security flows, all of which go through that service. The values change in all ten language packs; no key is added or removed.
+  - A record-page action that declares `refreshAfter: true` (an `api` action such as a team's Add Member, a server action, a flow, a declared operation) now refreshes the record AND every related list the page shows: the lists refetch and their tab and card counts re-count. It used to refresh the record alone, so a team's members tab read 0 beside a list of 2 until a later row action on that list.
+  - Nothing to do on upgrade.
+- 7b10a30: fix(auth): the forgot-password page no longer says a reset link was sent on a deployment that sends no mail (#30366)
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  `GET /api/v1/auth/config` reports `features.emailDelivery`: `false` when no email service is wired or the stock `log` transport only writes mail to the server console. On such a deployment the forgot-password form used to answer every request with "Check your email — we've sent a password reset link", although no mail leaves. When the server reports `emailDelivery: false`, the success screen now says a reset link can't be emailed here and to ask an administrator, who can set a new password from Setup → Users.
+  
+  The text describes the deployment, never the address: it carries no address, and a known and an unknown address read the same, so the page adds no account-existence oracle. Only an explicit `false` changes it; a server that predates the flag (no `emailDelivery` key) or a failed config fetch keeps the "check your email" screen, since those deployments may well send mail.
+  
+  `ForgotPasswordFormLabels` gains `noDeliveryTitle` and `noDeliveryDescription`, and `AuthPublicConfig.features` gains `emailDelivery`. New strings `auth.forgotPassword.noDeliveryTitle` and `auth.forgotPassword.noDeliveryDescription` in all ten locales, passed by the Console's forgot-password page and `DefaultForgotPasswordPage`.
+- 5bca14f: feat(i18n)!: the Console's language packs are the platform locale table's, keyed by its tags, and Traditional Chinese (`zh-Hant`) ships, generated from Simplified (#30511)
+  
+  Clause-②: yes (narrowing) — widens: a `zh-Hant` pack (the `zhHant` export of `@object-ui/i18n/locales`, the `@object-ui/i18n/locales/zh-Hant` module), the `resolveBuiltInLanguage` export of `@object-ui/i18n`, and every stored or browser code the platform locale table reads as one of its tags (`zh-TW`, `zh-HK`, `zh-MO` → `zh-Hant`; `zh`, `zh-CN`, `zh-SG` → `zh-Hans`; `pt` → `pt-BR`). Narrows: the Simplified Chinese and Portuguese packs are keyed `zh-Hans` and `pt-BR`, no longer `zh` and `pt`, in `builtInLocales`, `BUILT_IN_LANGUAGE_CODES`, `getLoadedBuiltInLocales()` and `getAvailableLanguages()`, and their modules `@object-ui/i18n/locales/zh` and `@object-ui/i18n/locales/pt` are `@object-ui/i18n/locales/zh-Hans` and `@object-ui/i18n/locales/pt-BR`.
+  Metadata-protocol: none
+  Skills-docs: follow-up owed — `skills/objectui/guides/i18n.md` (its "Built-in locales" list names ten packs, with `zh` and `pt`)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata changes shape: no spec key, object definition, stored row or authorable spelling is added, removed or renamed, so `objectstack migrate meta` has nothing to rewrite and no ledger entry could project. The FROM/TO lines below are source rewrites for TypeScript and JavaScript consumers of `@object-ui/i18n`'s `./locales` subpath (two members of `builtInLocales`, two modules). That is the class `runtime-export-retired` exists for, but it reads a package's root entry only and refuses a subpath operand, and the root entry retires nothing here; so this category is held, and the gap is named here rather than left to the detector. -->
+  
+  **BREAKING** for code that reads a built-in pack by its old key or module path.
+  
+  - **Why.** The Console's packs follow the platform locale table (`PLATFORM_LOCALES` in `@objectstack/spec/system`, ruling F of #29349) instead of a list of their own: one pack per table tag, keyed by the tag, in the table's order. A language the table gains is a pack the parity and drift suites demand on the run that first sees it.
+  - **Traditional Chinese.** `src/locales/zh-Hant.ts` is generated from `zh-Hans.ts` by `pnpm --filter @object-ui/i18n gen:zh-hant` (OpenCC `s2twp`, pinned, with the phrase rules of the www.objectos.ai converter) and is never edited by hand; a package test fails when it is not what the generator writes. It carries no `console.ai.*` gate-only outbound keys, exactly as the other non-gate packs.
+  - **The marketplace namespace follows.** The lazy `marketplace` namespace keys its catalogues by the same tags (`@object-ui/i18n/namespaces/marketplace`'s `MARKETPLACE_LANGUAGE_CODES` and `resolveMarketplaceLanguage` answer `zh-Hans`, `zh-Hant`, `pt-BR`), ships a `zh-Hant` catalogue generated by the same command, and resolves a stored code through the table as the packs do, so a `zh-TW` reader's marketplace pages are Traditional too.
+  - **One locale ladder.** The Console picks which offered language renders a user's stored `sys_user.locale` with `resolveLocaleAmong` from `@objectstack/spec/system`, the order the server's `resolveLocale` uses, instead of a copy of it: a deployment offering both scripts renders a `zh-TW` row in its Traditional spelling, and a variant the table reads as the language itself (`es-ES` for `es`) is taken ahead of the first offered variant, as the server takes it.
+  - **Stored codes keep working.** A `sys_user.locale` value, a saved device language or an `Accept-Language` tag written before the table is read through the table's aliases: `zh-CN` still renders Simplified Chinese, `pt` Portuguese (Brazil), and `zh-TW` / `zh-HK` / `zh-MO` now render Traditional Chinese instead of Simplified. `loadBuiltInLocale`, `isBuiltInLanguage` and i18next's fallback chain accept every alias.
+  - **Studio.** The Studio namespace still ships `en` and `zh` only; a `zh-Hant` reader sees its Simplified catalogue there.
+  
+  The fix, for code that names a pack:
+  
+  - FROM `builtInLocales.zh` TO `builtInLocales['zh-Hans']`
+  - FROM `builtInLocales.pt` TO `builtInLocales['pt-BR']`
+  - FROM `import zh from '@object-ui/i18n/locales/zh'` TO `import zh from '@object-ui/i18n/locales/zh-Hans'`
+  - FROM `import pt from '@object-ui/i18n/locales/pt'` TO `import pt from '@object-ui/i18n/locales/pt-BR'`
+  - FROM comparing a code from `BUILT_IN_LANGUAGE_CODES`, `getAvailableLanguages()` or the keys of `getLoadedBuiltInLocales()` with `'zh'` or `'pt'` TO comparing `resolveBuiltInLanguage(code)` with `'zh-Hans'` or `'pt-BR'`
+- 062236c: fix(console): a link inside an app's doc keeps the app shell, and the docs chrome reads the session language
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A doc read inside an app (`/apps/APP/docs/BOOK/DOC`) rewrote its body cross-references to the portal's `/docs/NAME`, so following one left the app: no top bar, no app navigation. They now resolve under the app's own docs route, as the book sidebar already did, and the header's home link goes to the app's docs index. The header's "Documentation" label, the portal heading and the book sidebar's synthetic "Uncategorized" group title now read the new `help.documentation` and `help.uncategorized` keys, present in all ten locale packs; the group is titled by its key, and authored group labels keep the server's translation.
+- d996c38: perf(i18n, app-shell)!: the marketplace pages' strings leave the eager language packs for a lazy `marketplace` namespace
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (runtime-interface-only ui/packages/i18n/src/locales/en.ts#TranslationKeys) the key type of the console's own translation catalogue: no Zod schema, no spec declaration and no stored metadata reads it, so the compiler is the channel that reaches every caller -->
+  
+  The console loads one language pack eagerly, `en`, and its chunk had grown to 59,951 of the 60,000 gzipped bytes its ceiling allows. About 3 KB of it was the `marketplace.*` group, read only by the two marketplace pages, which are lazy routes. That group now lives in `@object-ui/i18n/namespaces/marketplace`: ten catalogues, one per built-in language, each its own chunk, fetched when a marketplace page opens. The console's `en` chunk reads 57,010 bytes.
+  
+  - **The pages wait for their text.** App-shell's marketplace catalogue and package pages render their load skeleton until the catalogue for the console's language (and `en`, the fallback) has arrived, and again after a language switch, so a visitor never sees English in a translated console or a raw key. A catalogue that cannot be fetched shows the console's own "Something went wrong" with Try again, which fetches it again.
+  - **`useMarketplaceNamespace()`** (from the new subpath) is the hook behind that frame: it answers `loading`, `ready` or `failed` with a `retry()`, merges the catalogues into the page's i18next instance without overwriting a host's own `resources`, and uses a catalogue already made resident by `registerBuiltInLocales()` without fetching it.
+  - **What stays in the packs.** Studio's packages page, outside the marketplace route, draws marketplace installs with the same components: their keys (`marketplace.installedAdditiveNote`, `marketplace.notLoaded.*`, `marketplace.action.uninstall`, `marketplace.action.uninstalling`, `marketplace.action.details`, `marketplace.uninstall.confirm`, `marketplace.uninstall.confirmNotLoaded`, `marketplace.uninstall.successInList`, `marketplace.uninstall.successNotLoaded`, `marketplace.install.dependencyMissing.*` and `marketplace.install.protocolCheckSkipped.*`) stay in every pack.
+  - **Every string still in every language.** No text changed. `@object-ui/i18n/locales` (the all-ten door) hands out each language complete, its pack merged with its namespace catalogue, so key parity and `registerBuiltInLocales()` still cover the moved keys.
+  
+  **BREAKING** (`@object-ui/i18n`, TypeScript and the pack modules): the package entry's `en`, the exported `TranslationKeys` (`typeof en`) and the pack modules `@object-ui/i18n/locales/<code>` no longer hold the moved `marketplace.*` keys. A `t()` call that names one still compiles, since its key is a `string`. A component outside app-shell's marketplace pages that reads one of those keys calls `useMarketplaceNamespace()` and renders it once the answer is `ready`; code that reads the catalogue objects directly reads them from `@object-ui/i18n/locales`, whose ten languages are complete.
+- 47c457b: feat(console): after a reload, the package page still says how many sample records a purge would delete
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **The count on any visit.** The package page of a local install now reads the runtime's count of the sample rows a purge would delete right now (`GET /api/v1/marketplace/install-local/:manifestId/sample-data`), on every visit and again after an install, a reseed or a purge. Before, the purge confirm and the banner that follows the installer to the app knew a count only for an install made in the same browser session; a reload lost it.
+  - **The confirm.** The local purge confirm draws that count. When it cannot be read (refused, failed), it draws the count this session's install answered, as before. A read that began before an install, reseed or purge of this session answered is older than that answer and is not used.
+  - **The banner.** A count above zero raises the sample-data banner on leaving the page, as an install of this session does. A count of `0` drops what the session knew: no banner, and no count line in the confirm.
+  - **Types.** `marketplaceApi` gains `countLocalSampleData` and `LocalSampleDataCount`.
+  - **Strings.** `@object-ui/i18n` rewords `marketplace.detail.purgeConfirmAtMost` (all plural forms) in all 10 locales: it no longer says the count is "the number this install loaded", which is not what the runtime's count is. It stays an upper bound ("Up to N sample records will be deleted."), true of both counts. No key is added.
+- 115a43a: feat(console): a settings field an environment variable pins offers to clear the value saved beneath the pin
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - **`@object-ui/console`:** on a Setup settings page, a field an `OS_*` environment variable pins still shows the lock badge and stays read-only. When the namespace read lists a value stored beneath the pin at the scope the page writes (a secret's as the read mask), the row also says that a value is saved there and that the environment value stays in force, and offers "Clear the saved value". The control asks first, then writes `null` for that one key, the one write the server lets through a pin; the page's unsaved edits are left as they are. After the clear the row still reads the environment value, and the saved value no longer comes back when the variable is removed. A pinned field with nothing stored at that scope, a field no variable pins, and the first-run checklist show no control.
+  - **`@object-ui/i18n`:** four new `console.settingsView` keys in all eleven packs: `savedBeneathPin`, `clearSaved`, `clearSavedConfirm` and `savedCleared`.
+- c1da957: feat(console): the Setup → Audit Log drawer opens the selected row's own record page, which lists the other changes to the same record
+  
+  Clause-②: yes (widening) — two new console keys (`console.system.auditLog.openEntryPage`, `console.system.auditLog.openEntryPageHint`) ship in every published `@object-ui/i18n` pack; nothing is narrowed.
+  Metadata-protocol: none
+  
+  The Audit Log drawer gains an "Open entry page" link to the console's record route for `sys_audit_log` and the row's id, under the app the page is mounted in, carrying the way back to the Audit Log. The platform's record page for the ledger lists every row with the same `record_id`, so from a settings write's `config_change` row, which carries only a digest, an administrator now reaches the CRUD mirror's rows that hold the old and new value. On a row that names a record the drawer says so under the link. `@object-ui/i18n` ships the two strings in all ten built-in languages (`console.system.auditLog.openEntryPage`, `console.system.auditLog.openEntryPageHint`).
+- b631573: feat(console): revoke an authorized AI assistant from Connect an Agent, and an administrator widget for a person's assistants
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - **`@object-ui/app-shell`**: each row in Connect an Agent's "Authorized AI assistants" list now has a Revoke. It asks first, naming the assistant, then withdraws the grant through `oauth.authorizedClients.withdraw(id)`: the assistant's token is refused on its next call and it has to be authorized again to reconnect. The list is read again after every withdraw, so a grant already withdrawn elsewhere leaves it too, and the refusal is named. The line saying withdrawing was not available yet is gone. New SDUI widget `mcp:authorized-assistants` for a `sys_user` record page: it reads the person from the bound record (no props), lists their authorized assistants through `oauth.authorizedClients.listForUser(userId)` with the same rows and confirm-first Revoke, which calls `withdrawForUser(userId, id)`. Those doors are for platform administrators; anyone else sees the server's refusal as a failed read. Off a `sys_user` record it renders nothing, and it is drawn only where a page names it.
+  - **`@object-ui/i18n`**: `connectAgent.access.withdrawTitle`, `withdrawBody`, `managedBody`, `managedEmpty` and `managedTruncated` added in all eleven packs; `connectAgent.access.withdrawLater` removed (net +4 keys per pack).
+  - **`@object-ui/types`**: `McpAuthorizedAssistantsSchema` (zod arm) and its TypeScript twin, so a page placing `{ type: 'mcp:authorized-assistants' }` validates. The widget reads only `className`: `properties` may only be `{}`, and `body` / `children` are refused by name.
+  - **`@object-ui/cli`**: `objectui check` knows the `mcp:authorized-assistants` type (the generated known-types list).
+- 78d4fe9: feat(console): Connect an Agent lists the AI assistants you authorized and your API keys
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - **`@object-ui/app-shell`**: under the setup steps on Connect an Agent (which sits in Account's AI Assistant group), a "What can act as you" card lists the assistants the signed-in person authorized on the OAuth consent page, read from `oauth.authorizedClients.list()`: the client's name (its client id beside a fallback when it declares none), each granted scope in the consent page's own words, when it was authorized, when it was last used (the server records the hour, so it reads "in the hour from …") or that no use is recorded, and the organization only when it is not the active one. Assistant rows carry no Revoke yet; the card says so. Below them, the person's own API keys (`sys_api_key` rows filtered to the signed-in user, so a platform administrator sees their own keys here too): name, prefix, created, last used or never used, and the revoked or expired state. An active key's Revoke asks first, naming the key, then writes `revoked: true`, which ends the key's access at once; the list re-reads in place, and a key minted on the same page appears without a reload.
+  - **`@object-ui/i18n`**: the new `connectAgent.access.*` strings in all eleven packs. Scope wording reuses the existing `oauth.consent.scope.*` keys.
+- 78eb352: feat: put Connect an AI Assistant where each person looks, and call it that
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The Connect an Agent page is now Connect an AI Assistant (连接 AI 助手, AI アシスタントを接続, Conectar un asistente de IA): the page title, its header and both of its navigation entries, in every shipped language. "Agent" already names the agents an author builds in Studio, and this page connects the AI assistant a person uses, such as Claude, Doubao or Cursor.
+  
+  Where to find it:
+  
+  - **Every signed-in person**: the avatar menu has a Connect an AI Assistant item, under Profile. In the Account app the entry has a group of its own, AI Assistant, open by default, instead of sitting inside the collapsed Developer group.
+  - **Platform administrators**: in Setup the entry is in the top group, Overview, under System Overview, instead of near the bottom of Integrations. Who sees it does not change: both groups need `manage_platform_settings`.
+  
+  All three doors appear only where the MCP server is enabled; with `OS_MCP_SERVER_ENABLED=false` the page, both menu entries and the avatar item are absent. The page address (`page/connect_agent`) and the nav item id (`nav_connect_agent`) are unchanged, so bookmarks and links keep working. The stdio start-up refusal and the API-key session refusal name the new page and paths.
+- 6ddf827: feat(app-shell): Connect an Agent asks which AI client you use and shows only that client's steps
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The Connect an Agent page no longer lays out every client at once. Under the endpoint and the SKILL.md download, which stay on top for everyone, the page asks which AI assistant you use (Claude, Codex, Cursor, WorkBuddy, Doubao Work, QwenWork) and shows that one's steps; switching is one click, and this browser remembers your choice (`os:pref:connect.client` in the console's workspace preference store). The API key form for scripts and CI moves out of the client list into a collapsed "Advanced: scripts and CI" section at the bottom. The three new strings ship in all ten console languages.
+- d9d3eb7: feat(app-shell): Connect an Agent marks claude.ai (web) and Doubao cloud tasks as not available on an address that is not public HTTPS
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  claude.ai on the web and Doubao Work's cloud tasks connect from their vendor's servers, which reach only a public HTTPS address. When the address Connect an Agent shows is an `http://` address, `localhost`, a single-label or `.local` host, or a private, loopback or link-local IP, those two ways in now carry a "not available for this deployment" note with the reason in one sentence (naming the address) and what makes them available (serving the system at a public HTTPS address). Claude Desktop, Claude Code, Codex, Cursor and the other clients stay as they are, and on a public HTTPS address nothing changes. The five new strings ship in every console language pack, Traditional Chinese generated from Simplified.
+- 2ce2646: feat(console): Connect an AI Assistant names the connected assistant and its last call; plain-words page subtitle
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - **`@object-ui/app-shell`**: once the signed-in person has connected, the line under the example requests on Connect an AI Assistant names what is connected and when it last made a call, the most recent call first: an authorized assistant by its name, with its last call "in the hour from" the recorded hour, or an API key by its name, with its last call as a moment; "no call yet" when none is recorded, and a pointer to the list at the bottom when more than one is connected. With nothing connected (or when it cannot be read) the line stays the try-first hint. It reads the records the "What can act as you" list reads (`oauth.authorizedClients.list()` and the person's own `sys_api_key` rows; a revoked or expired key is not a connection) through one hook, `useConnectedAccess`, and follows a Revoke made on the page.
+  - **`@object-ui/i18n`**: `connectAgent.capabilities.connected`, `connectedKey`, `lastCallHour`, `lastCallAt`, `noCallYet` and `moreConnected` added in all eleven packs.
+  - **`@objectstack/mcp`**: the Connect an AI Assistant page header no longer speaks of MCP-capable clients or row-level security: "Work in this system from Claude, Doubao and other AI assistants. Each one acts as you: it sees and changes only what your own permissions allow."
+  - **`@objectstack/platform-objects`**: `pages.connect_agent.subtitle` follows in en, es-ES, ja-JP, zh-CN and zh-Hant, with the source digests re-recorded.
+- bd1b768: feat(app-shell): Connect an AI Assistant opens with what a connected assistant can do, in plain words
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The page now opens with two plain sentences: once connected, your AI assistant can look up, create, change and delete the records you are allowed to, and run this system's actions, always as you. Three example requests follow, each with a copy button, plus a line on which one to try first to see that the connection works. The page cannot yet tell whether you have connected, so that line is shown to everyone. The address card and the Claude Code step no longer speak of MCP or OAuth. Protocol words stay only where a client's own menu or form uses them. The steps that fall back to an API key now point to the "Advanced: scripts and CI" section where the key is created. Seven new strings and the reworded ones ship in every console language pack, with Traditional Chinese generated from Simplified.
+- 0f920b9: fix(i18n): a Traditional Chinese session reads and edits the Traditional entry of an inline label map
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `pickLocalized`, `setLocalized` and `clearLocalized` now prefer an entry of the session's own script where the platform locale table splits a language by script. In a `zh-Hant` (or `zh-TW`, `zh-HK`) session, a label written as `{ en: 'Customer', 'zh-CN': '客户', 'zh-TW': '客戶' }` shows `客戶` and an edit replaces the `zh-TW` entry; before, both took the first `zh-*` key in authoring order, so a Traditional session showed the Simplified text and an edit overwrote it. A `zh-Hans`, `zh-CN` or bare `zh` session prefers the Simplified entry the same way.
+  
+  Which tag a key means comes from `platformLocaleTagOf` in `@objectstack/spec/system`, and the preference applies only to a language the table names more than once (`zh` today). A map without an entry of the session's script, and every other language, resolve exactly as before. What an author can write is unchanged.
+- 584f7b8: feat(app-shell): the Setup packages page shows a disable refused for a dependent validation rule whole, and its confirm dialog says such a refusal can happen
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  When `PATCH /api/v1/packages/:id/disable` answers `409 PACKAGE_DISABLE_RESTRICTED_BY_VALIDATION_RULE` (an active validation rule of an enabled package reads a field the package adds through `objectExtensions`), the package sheet now draws a heading in the reader's language over the server's whole sentence: every blocking rule as package · object · rule, then the remedy. Before, the message was cut to its first sentence and the remedy sat behind "More". Every other refusal is drawn as before. The Disable confirm dialog gains one line saying that such a rule can still refuse the disable, because the served `disableable` verdict says what the package allows and does not read rules elsewhere. Two new keys in the `@object-ui/i18n` `studio` namespace (`en` and `zh`): `engine.packages.detail.disableRestricted` and `engine.packages.detail.disableMayBeRefused`.
+- 66b17a3: feat(i18n): Studio strings for what the Delete package dialog removes
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  The `studio` namespace gains the `engine.packages.detail.delete*` strings (en and zh) the Delete package dialog now draws: its heading for what the package holds, each object's record count (one, other, unavailable), the pending-drafts line, and the warning shown when the author chooses to drop the data, that the tables are dropped permanently and do not go to the recycle bin.
+- 3f61e4f: feat(fields): Setup's notification topic and channel fields offer the served list and still take any typed value
+  
+  Clause-②: yes (widening) — five new `fields.preferenceOption.*` keys in every published `@object-ui/i18n` pack, and `field:notification-topic` / `field:notification-channel` join `@object-ui/fields`' registered widget keys (`RegisteredFieldWidgetType`); nothing is narrowed.
+  Metadata-protocol: none
+  
+  A notification preference's `topic` and `channel`, and a notification template's `topic`, already declare `widget: 'notification-topic'` / `'notification-channel'`. The record form now resolves both: `@object-ui/fields` registers `field:notification-topic` and `field:notification-channel`, a fillable arm of the registry-name picker (`RegistryRefField`).
+  
+  - **The list.** Read from `GET /api/v1/messaging/preference-options` through the host's authenticated fetch (`SchemaRendererContext.apiFetch`), once per page for every field that draws from it, and listed in the order the server sends: `*` first, shown as "All topics (*)" / "All channels (*)".
+  - **A typed value.** Typing in the picker's search box offers a row that commits the text exactly as typed. A stored value the list does not hold stays on screen as its own option, marked "not in the list". Nothing is refused or rewritten; the server stores what it is given, as before.
+  - **A channel that is not configured** is listed, labelled "(not configured)", and can be picked.
+  - **No list.** When the request fails, or answers an empty list, the field is the plain text box it was before, with no notice.
+  - **Strings.** Five new `fields.preferenceOption.*` keys in every built-in language pack (`zh-Hant` regenerated from `zh-Hans`).
+  
+  The template's `channel` field declares no widget and stays a text box.
+- 51992df: fix(i18n): an edit in a Chinese script the label lacks adds its own entry instead of overwriting the other script
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `setLocalized` and `clearLocalized` no longer treat the other Chinese script's entry as the editor's own. A `zh-Hant` (or `zh-TW`, `zh-HK`) edit of a label written as `{ en: 'Customer', zh: '客户' }` now adds a `zh-Hant` entry and keeps the Simplified text; before, it overwrote `zh` with Traditional text. A clear in that case removes nothing, because the box was showing the other script's text as a fallback. A Simplified editor over a Traditional-only map is handled the same way. Reading is unchanged: `pickLocalized` still shows the other script's entry until one of the reader's own script exists. Every other language, and every map that has an entry of the editor's script, writes exactly as before.
+- f84205b: feat(app-shell): the ban dialog says how many records the user holds, and offers one optional hand-over
+  
+  Clause-②: yes (widening) — 19 new `console.assignedWork.*` keys ship in every published `@object-ui/i18n` language pack, which publishes every key it carries.
+  Metadata-protocol: none
+  
+  Banning a user (the platform's `ban_user` action on `sys_user`) opens a dialog that now shows, above the ban reason, the records that person holds and lets the administrator hand them to someone else before confirming the ban.
+  
+  - **The counts.** Read from `security.assignedWork.count` of `@objectstack/client`, as the signed-in administrator: the total, how many the user owns (records whose `owner_id` names them) and how many they are assigned (every other user field), and one line per object and field. Objects the administrator cannot read are named as not counted; a count the server cut short says so; a multi-valued user field is counted and said not to be handed over here. The panel shows the server's answer as it came and computes no count of its own.
+  - **The hand-over.** Optional: pick an active person (banned users and the user being banned are not offered) and click Hand over. One click runs `security.assignedWork.transfer` once (the server moves at most 500 records per call), then reports how many moved, how many could not be moved with each record's reason, and how many still hold the user; when some remain, the button hands over the next batch. The counts are read again after each hand-over. A banned target is refused in the reader's language.
+  - **The ban never waits.** Confirm is still the ban and stays enabled while a count or a hand-over runs, or after either fails.
+  - **Where it is decided.** The dialog's host picks the panel from the platform action being run (`resolveParamDialogCompanion`); no authored metadata key selects it, and both param-dialog runtimes (`useConsoleActionRuntime` and the record page's) ask the same function.
+  - **Strings.** New `console.assignedWork.*` keys in all ten language packs.
+- eca7cd2: feat(i18n): `chatbot.tool.create_record` / `update_record` / `remove_sample_data` labels and the record-write card's `console.ai.recordWrite*` labels in all ten packs; `chatbot.tool.draft_record` retired
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The spec registry now lists the cloud chat agents' confirmed record write and the sample-data cleanup (cloud#3565) and drops `draft_record`, so the chatbot's tool timeline gets a sentence for each new step in every pack ("Create the record" / "新建记录", "Change the record" / "修改记录", "Remove the sample data" / "清理示例数据") and loses the retired one, keeping `toolLabels-locale-parity-7481` and `toolLabels-sentences-12724` green. The console's record-write card gets its eleven labels under `console.ai.recordWrite*`: the create and update titles (with the object's label), the three buttons 确认 / 打开完整表单 / 取消, the two stored reasons, the "not included" lead-in and the three states (writing, written, cancelled) — plus the 「清理示例数据」 card's four: `console.ai.sampleDataCleanupTitle` (its title over the seeded tables and counts), `console.ai.sampleDataCleanupIrreversible` (「删除后无法恢复」 — the removal cannot be undone, said on every card), and the two count families `console.ai.sampleDataCleanupAbsent` (the recorded rows the card does not list) and `console.ai.sampleDataCleanupEdited` (the rows kept because someone edited them), each with every plural slot its language selects (objectui#11445).
+- cf4b9bf: feat(i18n): `chatbot.tool.delete_package` label in every pack
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The spec registry now lists the cloud build agent's `delete_package` tool (cloud#3656), so the chatbot's tool timeline gets a sentence for that step in every pack ("Delete a package" / 「删除一个应用包」; the zh-Hant pack regenerated from zh-Hans as 「刪除一個應用包」), matching the sibling `delete_field` and `create_package` labels and keeping `toolLabels-locale-parity-7481` and `toolLabels-sentences-12724` green.
+- 614e831: feat(app-shell): Connect an Agent adds connect cards for WorkBuddy, Doubao Work and QwenWork, and drops the VS Code card
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The Connect an Agent page (Account → Developer, and Setup) now carries three more client cards, each filled in with the deployment's MCP URL, listed after the Claude, Codex and Cursor cards:
+  
+  - **WorkBuddy** — the `mcpServers` entry for Connectors → Custom connector → Configure MCP, with the `streamableHttp` transport spelling WorkBuddy reads, and the reminder that the connector stays inactive until it is trusted.
+  - **Doubao Work** — the name, transport and server URL to type into Skills · Connectors → New → New custom connector.
+  - **QwenWork** — the `mcpServers` JSON for Extensions → Connectors → Paste JSON config, with the `streamable-http` spelling QwenWork reads.
+  
+  Each of the three names the fallback for a client version without the browser sign-in: the request header `Authorization: Bearer <API key>`. A minted key is now revealed in that form as well as the existing `x-api-key` line.
+  
+  The claude.ai / Claude Desktop and Claude Code cards merge into one full-width Claude card with a half for each. The Codex CLI card becomes a Codex card for the Codex app: the name, transport and URL to enter under Settings → MCP servers → Add server, and where to sign in (new string `connectAgent.codex.hint`); it no longer shows a `config.toml` snippet. The VS Code / Copilot card is gone, with its string `connectAgent.vscode.body`; the generic `mcpServers` snippet on the Cursor card and the MCP URL at the top still serve any MCP client. The client cards and the API-key card form one list, the API-key card last. Long one-line snippets wrap instead of being clipped. The Doubao Work and QwenWork card titles are strings too (`connectAgent.doubao.title`, `connectAgent.qwenwork.title`), so the zh pack shows the products' own names, 豆包工作 and 千问办公. New strings live under `connectAgent.fields`, `connectAgent.workbuddy`, `connectAgent.doubao` and `connectAgent.qwenwork`, translated in all ten packs. Nothing on the server changes; `@objectstack/mcp` updates only its description of the page.
+- Updated dependencies [4261169]
+- Updated dependencies [8aa2e91]
+- Updated dependencies [c17719d]
+- Updated dependencies [b90a6f7]
+- Updated dependencies [e8dc483]
+- Updated dependencies [bcdb1db]
+- Updated dependencies [9ebca94]
+- Updated dependencies [140d8ce]
+- Updated dependencies [699ebd8]
+- Updated dependencies [4c2cd29]
+- Updated dependencies [4be8a2e]
+- Updated dependencies [471add3]
+- Updated dependencies [b5eb61d]
+- Updated dependencies [97e4249]
+- Updated dependencies [9037b13]
+- Updated dependencies [c2be734]
+- Updated dependencies [e3b56b2]
+- Updated dependencies [a52761f]
+- Updated dependencies [e8afd1e]
+- Updated dependencies [bd65cb6]
+- Updated dependencies [217ba78]
+- Updated dependencies [cde492d]
+- Updated dependencies [eee4149]
+- Updated dependencies [f3a52d3]
+- Updated dependencies [d59a1eb]
+- Updated dependencies [af3451b]
+- Updated dependencies [3a27208]
+- Updated dependencies [0c666c3]
+- Updated dependencies [38717d3]
+- Updated dependencies [ac890f5]
+- Updated dependencies [aa57c76]
+- Updated dependencies [fc869c2]
+- Updated dependencies [fef212b]
+- Updated dependencies [dc51811]
+- Updated dependencies [b77c160]
+- Updated dependencies [09720e2]
+- Updated dependencies [25fea77]
+- Updated dependencies [ea5807e]
+- Updated dependencies [d3f23d2]
+- Updated dependencies [ff12aed]
+- Updated dependencies [3da9a4c]
+- Updated dependencies [4be9734]
+- Updated dependencies [bff5ba2]
+- Updated dependencies [bb86ff9]
+- Updated dependencies [31260ca]
+- Updated dependencies [2046d21]
+- Updated dependencies [fd749a4]
+- Updated dependencies [d9d42d4]
+- Updated dependencies [9d939c5]
+- Updated dependencies [25e1c1a]
+- Updated dependencies [47226e6]
+- Updated dependencies [c7d1367]
+- Updated dependencies [f5aaa0b]
+- Updated dependencies [0005fec]
+- Updated dependencies [2d6402c]
+- Updated dependencies [77c203a]
+- Updated dependencies [8293c74]
+- Updated dependencies [a91409c]
+- Updated dependencies [29702d5]
+- Updated dependencies [a839020]
+- Updated dependencies [a7b8876]
+- Updated dependencies [4dde0ae]
+- Updated dependencies [590724f]
+- Updated dependencies [38d416f]
+- Updated dependencies [d2e2f6f]
+- Updated dependencies [b55d6ab]
+- Updated dependencies [aad1603]
+- Updated dependencies [ad2393f]
+- Updated dependencies [7145bf3]
+- Updated dependencies [55d9dd4]
+- Updated dependencies [af8aab1]
+- Updated dependencies [a59d00a]
+- Updated dependencies [4bf9a2d]
+- Updated dependencies [0c9aa82]
+- Updated dependencies [49c8568]
+- Updated dependencies [4564d6f]
+- Updated dependencies [f2ea193]
+- Updated dependencies [5268f50]
+- Updated dependencies [a30c4f4]
+- Updated dependencies [0cba0ce]
+- Updated dependencies [c893b3d]
+- Updated dependencies [677d542]
+- Updated dependencies [9bdeed2]
+- Updated dependencies [3479c33]
+- Updated dependencies [000a4c0]
+- Updated dependencies [f4d9c09]
+- Updated dependencies [c77dd17]
+- Updated dependencies [ebe0a98]
+- Updated dependencies [9038187]
+- Updated dependencies [f108e6d]
+- Updated dependencies [5cb7d7e]
+- Updated dependencies [468e0c1]
+- Updated dependencies [6106b73]
+- Updated dependencies [0f920b9]
+- Updated dependencies [33bc8ae]
+- Updated dependencies [a1afbb9]
+- Updated dependencies [150f740]
+- Updated dependencies [42eb126]
+- Updated dependencies [8cf1fd0]
+- Updated dependencies [a5cb4f1]
+- Updated dependencies [3c1eb63]
+- Updated dependencies [d57be87]
+- Updated dependencies [eca7cd2]
+- Updated dependencies [cf4b9bf]
+- Updated dependencies [e1dac19]
+- Updated dependencies [21510bb]
+- Updated dependencies [0fd363d]
+- Updated dependencies [d6b88f1]
+- Updated dependencies [4123865]
+- Updated dependencies [6ffe37e]
+- Updated dependencies [63a470a]
+  - @object-ui/core@18.4.0
+  - @objectstack/spec@18.4.0
+
 ## 18.3.0
 
 ### Minor Changes

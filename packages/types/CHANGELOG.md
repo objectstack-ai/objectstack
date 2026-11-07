@@ -1,5 +1,130 @@
 # @objectstack/types
 
+## 18.4.0
+
+### Patch Changes
+
+- 293a85b: feat(cli): `os serve` seals secrets with the crypto provider a plugin registers, so a KMS- or Vault-backed provider can hold the keys
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  A plugin supplies the host's secret crypto provider by registering an `ICryptoProvider` as the kernel service `crypto-provider` — `CRYPTO_PROVIDER_SERVICE`, new in `@objectstack/types` — with `ctx.registerService` in its `init()`, and declaring it in `providesServices`. `os serve` then hands that one provider to everything that seals a `sys_secret` row: the data engine (secret fields), the datasource secret binder (datasource credentials) and the default settings service (encrypted settings). Before, `os serve` built `LocalCryptoProvider` itself after every plugin hook and overwrote whatever a plugin had set.
+  
+  Without a registration nothing changes: the host keeps `LocalCryptoProvider`, keyed off `OS_SECRET_KEY` or the persisted key file exactly as before, and a production boot without a stable key still refuses at `kernel:ready` with the same message. The one difference is that the default settings service now shares that local provider instead of building a second one from the same key source; what either sealed, the other opens.
+  
+  The provider holds every secret's key, so the boot refuses rather than guess:
+  
+  - two plugins that both declare `providesServices: ['crypto-provider']` refuse before either initializes, both named (an undeclared second `registerService` is refused by the kernel, naming the service);
+  - a provider registered after plugin init, or the registered one replaced, refuses once the boot is up;
+  - a value registered under the name that is not an `ICryptoProvider` refuses, naming the missing methods;
+  - a secret sealed or opened while plugins are still initializing is refused, never sealed by a provider the boot has not chosen yet.
+  
+  No refusal prints a registered value.
+- Updated dependencies [8aa2e91]
+- Updated dependencies [c17719d]
+- Updated dependencies [b90a6f7]
+- Updated dependencies [e8dc483]
+- Updated dependencies [bcdb1db]
+- Updated dependencies [9ebca94]
+- Updated dependencies [140d8ce]
+- Updated dependencies [699ebd8]
+- Updated dependencies [4c2cd29]
+- Updated dependencies [4be8a2e]
+- Updated dependencies [471add3]
+- Updated dependencies [b5eb61d]
+- Updated dependencies [97e4249]
+- Updated dependencies [9037b13]
+- Updated dependencies [e3b56b2]
+- Updated dependencies [a52761f]
+- Updated dependencies [e8afd1e]
+- Updated dependencies [bd65cb6]
+- Updated dependencies [217ba78]
+- Updated dependencies [cde492d]
+- Updated dependencies [eee4149]
+- Updated dependencies [f3a52d3]
+- Updated dependencies [d59a1eb]
+- Updated dependencies [af3451b]
+- Updated dependencies [3a27208]
+- Updated dependencies [0c666c3]
+- Updated dependencies [38717d3]
+- Updated dependencies [ac890f5]
+- Updated dependencies [aa57c76]
+- Updated dependencies [fc869c2]
+- Updated dependencies [fef212b]
+- Updated dependencies [dc51811]
+- Updated dependencies [b77c160]
+- Updated dependencies [09720e2]
+- Updated dependencies [25fea77]
+- Updated dependencies [3da9a4c]
+- Updated dependencies [4be9734]
+- Updated dependencies [bb86ff9]
+- Updated dependencies [2046d21]
+- Updated dependencies [fd749a4]
+- Updated dependencies [d9d42d4]
+- Updated dependencies [9d939c5]
+- Updated dependencies [25e1c1a]
+- Updated dependencies [47226e6]
+- Updated dependencies [c7d1367]
+- Updated dependencies [f5aaa0b]
+- Updated dependencies [0005fec]
+- Updated dependencies [2d6402c]
+- Updated dependencies [77c203a]
+- Updated dependencies [8293c74]
+- Updated dependencies [29702d5]
+- Updated dependencies [a839020]
+- Updated dependencies [a7b8876]
+- Updated dependencies [4dde0ae]
+- Updated dependencies [590724f]
+- Updated dependencies [38d416f]
+- Updated dependencies [d2e2f6f]
+- Updated dependencies [b55d6ab]
+- Updated dependencies [aad1603]
+- Updated dependencies [7145bf3]
+- Updated dependencies [55d9dd4]
+- Updated dependencies [af8aab1]
+- Updated dependencies [a59d00a]
+- Updated dependencies [4bf9a2d]
+- Updated dependencies [0c9aa82]
+- Updated dependencies [49c8568]
+- Updated dependencies [4564d6f]
+- Updated dependencies [f2ea193]
+- Updated dependencies [5268f50]
+- Updated dependencies [a30c4f4]
+- Updated dependencies [0cba0ce]
+- Updated dependencies [c893b3d]
+- Updated dependencies [677d542]
+- Updated dependencies [9bdeed2]
+- Updated dependencies [3479c33]
+- Updated dependencies [000a4c0]
+- Updated dependencies [f4d9c09]
+- Updated dependencies [c77dd17]
+- Updated dependencies [ebe0a98]
+- Updated dependencies [9038187]
+- Updated dependencies [f108e6d]
+- Updated dependencies [5cb7d7e]
+- Updated dependencies [468e0c1]
+- Updated dependencies [6106b73]
+- Updated dependencies [0f920b9]
+- Updated dependencies [33bc8ae]
+- Updated dependencies [a1afbb9]
+- Updated dependencies [150f740]
+- Updated dependencies [42eb126]
+- Updated dependencies [8cf1fd0]
+- Updated dependencies [a5cb4f1]
+- Updated dependencies [3c1eb63]
+- Updated dependencies [d57be87]
+- Updated dependencies [eca7cd2]
+- Updated dependencies [cf4b9bf]
+- Updated dependencies [e1dac19]
+- Updated dependencies [21510bb]
+- Updated dependencies [0fd363d]
+- Updated dependencies [d6b88f1]
+- Updated dependencies [4123865]
+- Updated dependencies [6ffe37e]
+- Updated dependencies [63a470a]
+  - @objectstack/spec@18.4.0
+
 ## 18.3.0
 
 ### Minor Changes

@@ -1,5 +1,259 @@
 # @object-ui/core
 
+## 18.4.0
+
+### Minor Changes
+
+- aa57c76: feat(spec): three forward date-range presets: `next_month`, `next_quarter` and `next_30_days`
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  The relative dates a dashboard date filter and the filter builder offer looked only backward. A forecast asks forward: what closes next month, next quarter, in the next 30 days. Those questions had to use a custom range, whose fixed dates go stale.
+  
+  `DATE_RANGE_PRESETS` now also declares `next_month` (the whole of next month), `next_quarter` (the whole of next quarter) and `next_30_days` (today and the 30 days after it, the mirror of `last_30_days`). Every place that accepts a preset accepts them: `dashboard.dateRange.defaultRange`, a date global filter's `defaultValue`, the filter builder's `between` row and `AnalyticsQuery.timeDimensions[].dateRange`. They sit beside the family they extend in the filter bar: `next_month` after `last_month`, `next_quarter` after `last_quarter`, `next_30_days` after `last_90_days`. Their `DATE_RANGE_PRESET_MACRO_WINDOWS` rows follow the inclusive last-day convention: `['{next_month_start}', '{next_month_end}']`, `['{next_quarter_start}', '{next_quarter_end}']` and `['{today}', '{30_days_from_now}']`. A preset name written as a bare filter comparand is refused with that window as the prescription, as for the other presets.
+  
+  `@objectstack/core`'s `resolveAnalyticsDateRangePreset` resolves the three in its half-open form. `next_30_days` stops before `{31_days_from_now}`. `next_month` and `next_quarter` stop before the month and the quarter after next, which no macro token names: the resolver reads `next_month_start` (or `next_quarter_start`) again from the start of the day it named, so the end is still a day the one token resolver computed. No macro token is added.
+  
+  In the console, the three presets have labels in all ten locale packs, and the client date-macro resolver now answers `{next_month_end}` and `{next_quarter_end}`, two spec tokens it did not resolve before. `@objectstack/verify`'s dashboard-window proof also writes fixture rows on a forward preset's future edges, so it judges the three new windows; the days it writes for the other presets are unchanged. `@objectstack/lint` changes documentation only.
+- f5aaa0b: feat(ui): an action param's `widget` draws the named widget in the action dialog — `widget: 'permission-ref'` on a `text` param is the permission-set picker
+  
+  Clause-②: yes (widening) — `@object-ui/core`'s exported `ActionParamDef` gains one optional member, `widget?: string`; `@object-ui/fields`' `RawActionParam` gains the same optional member. No accepted key, value or answer is taken away.
+  Metadata-protocol: semantic
+  
+  `ActionParamSchema.widget` (declared by `@objectstack/spec` with the same key, vocabulary and meaning as `FieldSchema.widget`) was accepted and stored but read by nothing: the action dialog drew every param with its `type` widget. The console now reads it:
+  
+  - `resolveActionParams` copies the param's `widget` onto the resolved param. A field-backed param (`{ field }`) that inherits the field's `type` also inherits the field's `widget`; a param that overrides `type` does not, because the field's widget was chosen for the field's value. The param's own `widget` always wins.
+  - `paramToField` draws the named widget when it is registered, in place of the `type` widget. A name nothing registers keeps the `type` widget (a `textarea` param stays a textarea), and a registered widget on a lookup param without a target is drawn instead of the plain record-id text box.
+  - So `{ name: 'permissionSet', type: 'text', widget: 'permission-ref' }` opens the permission-set picker: the sets are listed by label beside their machine name, and the machine name is submitted. The server still validates the value by `type`, so the request body is unchanged.
+  
+  The spec's liveness ledger marks `params.widget` live, and its `.describe()` no longer says the key is not read yet.
+
+### Patch Changes
+
+- 4261169: refactor(core)!: retire forty-two zero-consumer entry exports, and delete the query-AST convenience pair nothing reads
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (runtime-export-retired @object-ui/core#buildQueryAST, @object-ui/core#defaultQueryASTBuilder, @object-ui/core#CANONICAL_COLUMN_IDENTITY_KEY, @object-ui/core#LEGACY_COLUMN_IDENTITY_KEYS, @object-ui/core#normalizeColumnIdentities, @object-ui/core#CANONICAL_COLUMN_LABEL_KEY, @object-ui/core#isOpenDomAttributeFamily, @object-ui/core#AffordanceGrantRow, @object-ui/core#normalizeObjectSortability, @object-ui/core#OBJECT_SORTABILITY_KEY, @object-ui/core#ACTION_SWITCHED_OFF_KEY, @object-ui/core#CASCADE_DELETE_OBJECTS_KEY, @object-ui/core#compareCellValues, @object-ui/core#SUBJECT_PERMISSIONS, @object-ui/core#SUBJECT_CAPABILITIES, @object-ui/core#ROW_PREDICATE_CANONICAL_ROOT, @object-ui/core#NAVIGATION_ALIAS_KEYS, @object-ui/core#HOST_DISPATCH_ACTION_KEYS, @object-ui/core#KNOWN_ACTION_KEYS, @object-ui/core#classifyActionKeys, @object-ui/core#hasDeprecatedObjectParams, @object-ui/core#warnOnDeprecatedObjectParams, @object-ui/core#isLegacyActionEnvelope, @object-ui/core#actionCopyText, @object-ui/core#fillTransitionalCopy, @object-ui/core#toCSSColor, @object-ui/core#generateTypographyVars, @object-ui/core#generateBorderRadiusVars, @object-ui/core#generateShadowVars, @object-ui/core#isElementDataSourceBlock, @object-ui/core#isErrorCode, @object-ui/core#formatErrorMessage, @object-ui/core#isDebugEnabled, @object-ui/core#ContextTokenName, @object-ui/core#isBuiltinAggregate, @object-ui/core#resolveMeasureLabel, @object-ui/core#resolveRelationshipTarget, @object-ui/core#resolveDimensionFieldOptions, @object-ui/core#INTEGER_AGGREGATES, @object-ui/core#isColorLiteral, @object-ui/core#buildFieldColorMap, @object-ui/core#FieldColorOption) the retired operands are client-side helpers, constants, symbol keys and three types of the UI core package; nothing in the workspace or in hotcrm imports any of them from the package entry, and no packages/spec schema, registered node type, conversion surface or stored shape names them, so there is nothing for `objectstack migrate meta` to rewrite -->
+  
+  **BREAKING** for a host that imports any of these forty-two names from `@object-ui/core`. None had an importer anywhere in the workspace or in hotcrm, so the Console and every `@object-ui/*` package are unaffected.
+  
+  Two of them are **gone from the package, not only from the entry**, because nothing inside the package read them either: `buildQueryAST` and the `defaultQueryASTBuilder` instance it wrapped are deleted from `query/query-ast.ts`.
+  
+  The other forty stay in their modules for the code and tests that read them and only leave the entry. Every other name the entry exported stays exported unchanged, among them `QueryASTBuilder`, `columnIdentity`, `columnHeader`, `normalizeColumnIdentity`, `toDomProps`, `pickDomProps`, `AFFORDANCE_GRANTS`, `attachObjectSortability`, `readObjectSortability`, `markSwitchedOffActions`, `isActionSwitchedOff`, `attachCascadeDeleteObjects`, `readCascadeDeleteObjects`, `getSortValue`, `compareSortValues`, `bindSubjectPermissions`, `subjectPermissionsOf`, `bindSubjectCapabilities`, `subjectCapabilitiesOf`, `detectNonCanonicalRowSpelling`, `ACTION_DEF_KEYS`, `SPEC_ACTION_KEYS`, `RETIRED_ACTION_KEYS`, `warnOnUnknownActionKeys`, `interpretActionResponse`, `readActionPayload`, `actionCopySource`, `fillTemplateHoles`, `generateThemeVars`, `generateColorVars`, `elementDataSourceBlock`, `ERROR_CODES`, `createError`, `ObjectUIError` with all its subclasses, `debugLog`, `parseDebugFlags`, `CONTEXT_TOKENS`, `resolveFilterPlaceholders`, `buildChartSeries`, `isIntegerAggregate`, `resolveDimensionFieldMeta` and `createFieldColorResolver`.
+  
+  What leaves, and what to write instead:
+  
+  - FROM `buildQueryAST(query)`, `defaultQueryASTBuilder` TO `new QueryASTBuilder().build(query)`.
+  - FROM `CANONICAL_COLUMN_IDENTITY_KEY`, `LEGACY_COLUMN_IDENTITY_KEYS`, `CANONICAL_COLUMN_LABEL_KEY` TO `columnIdentity(column)` / `columnHeader(column)`, which read the canonical key and its legacy spellings; FROM `normalizeColumnIdentities(columns)` TO `columns.map(normalizeColumnIdentity)`.
+  - FROM `isOpenDomAttributeFamily` TO `toDomProps` / `pickDomProps`, which already pass every `data-*` and `aria-*` key.
+  - FROM `AffordanceGrantRow` TO `AffordanceGrant`, or `(typeof AFFORDANCE_GRANTS)[ConsoleAffordance]` for one row.
+  - FROM `normalizeObjectSortability`, `OBJECT_SORTABILITY_KEY` TO `attachObjectSortability` / `readObjectSortability`.
+  - FROM `ACTION_SWITCHED_OFF_KEY` TO `markSwitchedOffActions` / `markSwitchedOffActionsByObject` / `isActionSwitchedOff`.
+  - FROM `CASCADE_DELETE_OBJECTS_KEY` TO `attachCascadeDeleteObjects` / `readCascadeDeleteObjects`.
+  - FROM `compareCellValues(a, b, options)` TO `compareSortValues(getSortValue(a, options), getSortValue(b, options))`.
+  - FROM `SUBJECT_PERMISSIONS`, `SUBJECT_CAPABILITIES` TO `bindSubjectPermissions` / `subjectPermissionsOf` and `bindSubjectCapabilities` / `subjectCapabilitiesOf`.
+  - FROM `ROW_PREDICATE_CANONICAL_ROOT` TO the literal `'record'`, or `detectNonCanonicalRowSpelling` to check a predicate.
+  - FROM `NAVIGATION_ALIAS_KEYS`, `HOST_DISPATCH_ACTION_KEYS`, `KNOWN_ACTION_KEYS`, `classifyActionKeys` TO `warnOnUnknownActionKeys`, which classifies an action against the same vocabulary, or `ACTION_DEF_KEYS` / `SPEC_ACTION_KEYS` for the authored key lists.
+  - FROM `hasDeprecatedObjectParams`, `warnOnDeprecatedObjectParams` TO nothing: `ActionRunner` warns about deprecated object params itself when it runs the action.
+  - FROM `isLegacyActionEnvelope` TO `interpretActionResponse` / `readActionPayload`, which unwrap the legacy envelope.
+  - FROM `actionCopyText`, `fillTransitionalCopy` TO `actionCopySource` with `hasTemplateHoles` / `fillTemplateHoles`.
+  - FROM `toCSSColor`, `generateTypographyVars`, `generateBorderRadiusVars`, `generateShadowVars` TO `generateThemeVars(theme)`, which emits all of those variables, or `generateColorVars` for the colour block alone.
+  - FROM `isElementDataSourceBlock` TO nothing a host needs: the component registry reads it when `elementDataSourceBlock` marks a renderer.
+  - FROM `isErrorCode(code)` TO `code in ERROR_CODES`; FROM `formatErrorMessage(error)` TO `error.message` with `ERROR_CODES[error.code]` for the suggestion and doc link.
+  - FROM `isDebugEnabled` TO `debugLog` / `debugTime`, which are no-ops when debug mode is off.
+  - FROM `ContextTokenName` TO `(typeof CONTEXT_TOKENS)[number]`.
+  - FROM `isBuiltinAggregate`, `resolveMeasureLabel` TO `buildChartSeries` with `builtinAggregateLabels`, which labels a built-in aggregate measure the same way; FROM `INTEGER_AGGREGATES` TO `isIntegerAggregate`.
+  - FROM `resolveDimensionFieldOptions(...)` TO `resolveDimensionFieldMeta(...)`, the same walk, reading each entry's `options`; FROM `resolveRelationshipTarget` TO `resolveDimensionFieldMeta`, which follows the relationship for a dotted path.
+  - FROM `isColorLiteral`, `buildFieldColorMap`, `FieldColorOption` TO `createFieldColorResolver(fieldDef)`, which builds the colour map and accepts colour literals as-is.
+- c2be734: fix(core): a successful `operation: 'update'` action now refreshes the record it wrote, with no `refreshAfter: true` (#29935)
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The spec fills in `refreshAfter: false` on an action authored without it, and that parsed shape is what the Console is served. The server-action dispatch (`createServerActionHandler`) refreshed only when `refreshAfter !== false`, so a declared update never refreshed: the route wrote the record and answered 200, the toast reported success, and the record page kept the old values and the action button whose `visible` predicate had turned false. The list the record came from kept it under a filter it no longer matched.
+  
+  A declared `operation: 'update'` writes the record it addresses by definition, so its success is now treated as a record change whatever `refreshAfter` says, the same way a client-side `dataSource.update` already reaches every reader. The record-scoped invalidation re-reads the record page (drawer and full page) and refetches every list of that object. `refreshAfter` keeps governing every other server action: a non-update action served with the default `refreshAfter: false` still sends no re-read. The spec default is unchanged.
+- ea5807e: fix(console): four copy and display details from a real-user walkthrough: Latin object names spaced in zh form titles, a title on the lookup's create dialog, a success toast that names the action, and money metrics at the currency's decimals
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - **zh form titles space a Latin object name.** `新建{{object}}`, `编辑{{object}}` and `查看{{object}}` (and the AI chat's record-write card titles) read `新建 Repair Ticket` when the object has no Chinese label, and still `新建联系人` when it has one. `createI18n` applies the spacing to those keys only, through an i18next post-processor; the packs keep the plain `{{object}}` spelling.
+  - **The lookup's "create the referenced record" dialog has a title.** A `{ objectName, mode: 'create' }` modal descriptor with no `title` now reads `form.createTitle` with the object's label, the title of the console's own New dialog. An authored title still wins.
+  - **The default success toast names the action.** An action with a `label` and no `successMessage` (and no matching `outcomeMessages` entry) toasts the new pack key `actions.completedNamed` (`Resolve completed`, zh `“解决”已完成`) instead of the generic `Action completed successfully`. An action with no label keeps the generic text.
+  - **Money metrics keep the currency's decimals.** A dataset metric over a currency measure with no `format`, and a static metric card with a `currency` and no `format`, show the currency's own minor-unit width (CNY `¥1,293.00`, JPY `¥1,293`), the width the list cell shows. Before, the dataset metric printed the shortest form (`¥1,293`, `¥1,280.5`) and the static card rounded to whole units. An authored `format` pattern still states its width.
+- d3f23d2: fix(core): the client date-macro resolver answers `{next_week_end}` and `{next_year_end}`
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `resolveDateMacros` now resolves `{next_week_end}` (Sunday of next week, Monday-start weeks) and `{next_year_end}` (Dec 31 of next year), the two fixed tokens `@objectstack/spec`'s `DATE_MACRO_TOKENS` declared that the Console passed through as raw text. A test now reads `DATE_MACRO_TOKENS` from the spec and fails on any token the client leaves unresolved, so the two lists cannot drift again.
+- ff12aed: fix(core): a compareTo widget on a forward date range (next month, next quarter, next 30 days) compares with the period just before it, not with itself
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **`@object-ui/core`: `shiftFilterByCompareTo`** with `kind: 'previousPeriod'` moved only `current_*` / `today` tokens, so a dashboard filtered to `next_month` or `next_quarter` compared the window with itself and the delta always read 0, and `next_30_days` (`{today}` … `{30_days_from_now}`) moved only its start and compared with a window that overlapped it on all but one day. A forward window now steps back one period: `{next_month_*}` becomes this month, `{next_quarter_*}` this quarter, and a `{today}` … `{N_days_from_now}` pair on one field becomes the N + 1 days that end yesterday (`{(N+1)_days_ago}` … `{yesterday}`), the same window the dataset executor computes for that range. Every other token, and the 13 backward presets, compare as before.
+  - **`@object-ui/core`: `compareToTrendLabelKey`** names that window: `vsThisMonth` for a forward month, `vsThisQuarter` for a forward quarter, and `vsPreviousPeriod` for a forward rolling window (it read `vsLastMonth`, `vsLastQuarter` and `vsYesterday`).
+  - **`@object-ui/i18n`:** `dashboard.trend.vsThisMonth` and `dashboard.trend.vsThisQuarter` in all ten locale packs (zh: 较本月, 较本季度).
+  - **`@object-ui/plugin-dashboard`, `@object-ui/plugin-charts`:** English fallbacks for the two keys in the metric tile and in the chart's comparison series label.
+- bff5ba2: fix(ui): the record Edit form judges a field's `requiredWhen` as the engine does, a transition gate against the stored record, so a record already inside the gate without the value saves an unrelated edit
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  This widens the public surface of `@object-ui/core`: the new export `requiredWhenRestsOnStoredRecord` and the new `requiredWhenAtRest` field in the return type of `resolveFieldRuleState`.
+  
+  - **`@object-ui/components` form renderer:** on an Edit form (`previousValues` set), a field's `requiredWhen` is required only when the stored record complied with it. A stored record that already violates it (the predicate holds over the stored record and its value is missing, as with a contract activated before its signed-copy rule existed) is not blocked any more: it saves an edit that leaves the field empty, as the engine and REST `PATCH` already accept. This follows `Field.requiredWhen`: the write is refused only when the merged record violates the requirement AND the pre-write record complied. Still refused: the edit that moves a record into the gate without the value, and clearing the value of a record that held it. A Create form enforces as before. The "Required to run" note under an empty field (the update-action heads-up) is no longer shown for such a stored record, because the engine judges the action's write against the same stored record.
+  - **`@object-ui/core`:** `resolveFieldRuleState` takes `statics.name` (the field's name) and returns `requiredWhenAtRest`. With `previous` and `statics.name` given, a stored record already violating `requiredWhen` resolves `required: false` and `requiredWhenAtRest: true`. A caller that passes no `name` keeps the plain verdict. New export `requiredWhenRestsOnStoredRecord(pred, name, stored, scope?)`, the stored-record check alone. A predicate that cannot be evaluated over the stored record counts it as compliant, as on the server.
+- 31260ca: fix(core): a compareTo widget on an already-past date range (yesterday, last week / month / quarter / year, last N days) compares with the period before it, and previousYear from 29 February stays in February
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **`shiftFilterByCompareTo`, `kind: 'previousPeriod'`.** `{yesterday}` and the `last_*` tokens were never moved, so a dashboard filtered to `yesterday`, `last_week`, `last_month`, `last_quarter` or `last_year` compared the window with itself and the delta always read 0. They now compare with the period before them: `{yesterday}` with `{2_days_ago}`, and `last_week_*` … `last_year_*` with the week, month, quarter or year before last. The macro vocabulary has no token for "two periods back", so those windows are computed: the `last_*` start is resolved in the display zone, moved back one period, and the end is the day before it.
+  - **Rolling windows.** `{N_days_ago}` … `{today}` (`last_7_days`, `last_30_days`, `last_90_days`; N + 1 days) moved only its end and compared with the N days ending yesterday, which overlap it. It now compares with the N + 1 days before it, `{(2N+1)_days_ago}` … `{(N+1)_days_ago}`, the same window the dataset executor computes.
+  - **`kind: 'previousYear'` from 29 February** re-resolved the filter at 1 March of the year before (`new Date(2027, 1, 29)`), so `this_month` compared with March. The day is now clamped to the month's last day, 28 February.
+  - **`compareToTrendLabelKey`** reads all of these as `vsPreviousPeriod` (they read `vsLastWeek`, `vsLastMonth`, `vsLastQuarter`, `vsLastYear` and `vsYesterday`); no `dashboard.trend.*` key names "the month before last". `today`, the `this_*` and the forward presets compare and label as before.
+- a91409c: fix(core,react,i18n,components,app-shell,console): a write refused because the object's external datasource does not accept writes says the table is read-only, not "you don't have permission"
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - **`@object-ui/core`: `isExternalWriteRefusal(err)`**, re-exported from `@object-ui/react` beside the other write-refusal readers. True when the server refused a write with `EXTERNAL_WRITE_FORBIDDEN`, the ADR-0015 write gate's code for an object bound to an external datasource that does not admit writes (`datasource.external.allowWrites` and `object.external.writable` must both be true). Read from `code`, then `details.code`, like `isPermissionError`. The refusal is a 403, so `isPermissionError` answers true for it too: a caller asks this first.
+  - **`@object-ui/i18n`: `form.readOnlyExternalSource`**, in all ten packs: "This table is read-only. Its records come from an external data source that does not accept changes."
+  - **Every surface that met this refusal now says the table is read-only:** the console record form page and the record dialog (`@object-ui/components` form), which said "you don't have permission to save this record"; the record page delete, the list row delete and the record page inline edit, which showed the gate's raw diagnostic; and the calendar's drag-to-reschedule and the record path's stage change. A permission line sent an administrator through permission sets for a grant that cannot exist.
+- ad2393f: fix(plugin-detail,app-shell): the related list, the reference rail and the packaged-actions table name a renamed object by the name the server serves
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - **The surfaces.** A `record:related_list` block and a `record:reference_rail` card with no authored `title` are headed with the related object's served plural label, else its served label, as the server translated it for the session (a `.custom` extension's rename included). They used to ask only the client translation bundle, which still held the base package's name. The bundle is asked only when the server serves neither.
+  - **Packaged actions.** Setup → Packaged Actions reads the object list in the session's language (`Accept-Language`), not the browser's, and its Object column draws that served label as given.
+  - **The widening.** The served-object-label rule now lives in `@object-ui/core`, which `@object-ui/plugin-detail` can import: new exports `servedObjectLabel`, `servedObjectPluralLabel`, `metadataText` and the types `ObjectLabelLookup` and `ObjectPluralLabelLookup`. app-shell's internal copy is now a re-export of these, so both packages read one rule.
+- Updated dependencies [b5fd350]
+- Updated dependencies [ac5d0ce]
+- Updated dependencies [2cf269f]
+- Updated dependencies [e396095]
+- Updated dependencies [f810c34]
+- Updated dependencies [7a5f73e]
+- Updated dependencies [8aa2e91]
+- Updated dependencies [c17719d]
+- Updated dependencies [b90a6f7]
+- Updated dependencies [e8dc483]
+- Updated dependencies [bcdb1db]
+- Updated dependencies [9ebca94]
+- Updated dependencies [140d8ce]
+- Updated dependencies [699ebd8]
+- Updated dependencies [4c2cd29]
+- Updated dependencies [4be8a2e]
+- Updated dependencies [471add3]
+- Updated dependencies [b5eb61d]
+- Updated dependencies [97e4249]
+- Updated dependencies [9037b13]
+- Updated dependencies [e3b56b2]
+- Updated dependencies [a52761f]
+- Updated dependencies [e8afd1e]
+- Updated dependencies [bd65cb6]
+- Updated dependencies [217ba78]
+- Updated dependencies [cde492d]
+- Updated dependencies [eee4149]
+- Updated dependencies [0f3ee58]
+- Updated dependencies [f3a52d3]
+- Updated dependencies [d59a1eb]
+- Updated dependencies [af3451b]
+- Updated dependencies [3a27208]
+- Updated dependencies [29cbfcc]
+- Updated dependencies [0c666c3]
+- Updated dependencies [38717d3]
+- Updated dependencies [ac890f5]
+- Updated dependencies [aa57c76]
+- Updated dependencies [fc869c2]
+- Updated dependencies [fef212b]
+- Updated dependencies [dc51811]
+- Updated dependencies [b77c160]
+- Updated dependencies [09720e2]
+- Updated dependencies [25fea77]
+- Updated dependencies [3da9a4c]
+- Updated dependencies [3da9a4c]
+- Updated dependencies [4be9734]
+- Updated dependencies [bb86ff9]
+- Updated dependencies [2046d21]
+- Updated dependencies [fd749a4]
+- Updated dependencies [d9d42d4]
+- Updated dependencies [9d939c5]
+- Updated dependencies [25e1c1a]
+- Updated dependencies [67d5d53]
+- Updated dependencies [47226e6]
+- Updated dependencies [c7d1367]
+- Updated dependencies [f5aaa0b]
+- Updated dependencies [0005fec]
+- Updated dependencies [2d6402c]
+- Updated dependencies [77c203a]
+- Updated dependencies [8293c74]
+- Updated dependencies [29702d5]
+- Updated dependencies [a839020]
+- Updated dependencies [a7b8876]
+- Updated dependencies [4dde0ae]
+- Updated dependencies [590724f]
+- Updated dependencies [38d416f]
+- Updated dependencies [d2e2f6f]
+- Updated dependencies [b55d6ab]
+- Updated dependencies [aad1603]
+- Updated dependencies [0e4747a]
+- Updated dependencies [7145bf3]
+- Updated dependencies [55d9dd4]
+- Updated dependencies [af8aab1]
+- Updated dependencies [a59d00a]
+- Updated dependencies [4bf9a2d]
+- Updated dependencies [0c9aa82]
+- Updated dependencies [49c8568]
+- Updated dependencies [4564d6f]
+- Updated dependencies [f2ea193]
+- Updated dependencies [5268f50]
+- Updated dependencies [5268f50]
+- Updated dependencies [a30c4f4]
+- Updated dependencies [0cba0ce]
+- Updated dependencies [c893b3d]
+- Updated dependencies [677d542]
+- Updated dependencies [9bdeed2]
+- Updated dependencies [3479c33]
+- Updated dependencies [000a4c0]
+- Updated dependencies [f4d9c09]
+- Updated dependencies [c77dd17]
+- Updated dependencies [ebe0a98]
+- Updated dependencies [9038187]
+- Updated dependencies [f108e6d]
+- Updated dependencies [5cb7d7e]
+- Updated dependencies [b631573]
+- Updated dependencies [468e0c1]
+- Updated dependencies [6106b73]
+- Updated dependencies [0f920b9]
+- Updated dependencies [33bc8ae]
+- Updated dependencies [a1afbb9]
+- Updated dependencies [150f740]
+- Updated dependencies [42eb126]
+- Updated dependencies [8cf1fd0]
+- Updated dependencies [98583cd]
+- Updated dependencies [a5cb4f1]
+- Updated dependencies [3c1eb63]
+- Updated dependencies [d57be87]
+- Updated dependencies [eca7cd2]
+- Updated dependencies [cf4b9bf]
+- Updated dependencies [e1dac19]
+- Updated dependencies [21510bb]
+- Updated dependencies [0fd363d]
+- Updated dependencies [d6b88f1]
+- Updated dependencies [4123865]
+- Updated dependencies [6ffe37e]
+- Updated dependencies [63a470a]
+  - @object-ui/types@18.4.0
+  - @objectstack/spec@18.4.0
+  - @objectstack/formula@18.4.0
+
 ## 18.3.0
 
 ### Minor Changes

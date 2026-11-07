@@ -1,5 +1,233 @@
 # @object-ui/plugin-form
 
+## 18.4.0
+
+### Patch Changes
+
+- c580081: fix(ui): the console form page Edit, the kanban drop prompt and the Edit wizard judge a field's `requiredWhen` as the engine does, a transition gate against the stored record
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **`@object-ui/console` form page (`/forms/:name?recordId=`):** an Edit no longer refuses a record that already sits inside a `requiredWhen` gate without the value (for example a contract activated before its signed-copy rule existed). The field shows no required marker there, and an unrelated edit saves, as REST `PATCH` already accepts. Still refused: the edit that moves a record into the gate without the value, and clearing the value of a record that held it. A create form enforces as before.
+  - **`@object-ui/plugin-kanban` drop prompt:** dropping a card no longer asks for a field the engine lets rest. A record already inside the gate without the value moves between columns with no dialog; a drop that moves a compliant record into the gate still asks for the value first.
+  - **`@object-ui/plugin-form` Edit wizard:** the final submit's cross-step check no longer refuses a record that already sits inside a `requiredWhen` gate without the value; it asks `requiredWhenRestsOnStoredRecord` about the record as first read. The record reaches only that stored-record check, so a `visibleWhen` reading `previous` is still unevaluable at that check, as before. Moving a compliant record into the gate is still refused, and a Create wizard enforces as before.
+  
+  All three read the stored-record verdict `resolveFieldRuleState` already returns (`requiredWhenAtRest`, or its exported check `requiredWhenRestsOnStoredRecord`); no second rule.
+- 8e5fabe: fix(app-shell): after Setup → Datasources syncs objects, the dialog links each new object and names the two steps left: add it to an app, and grant access
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - **The result.** When a Sync run creates at least one object, the dialog stays open on the result instead of closing behind a toast: the count line, one link per created object (label, with the name beside it when they differ) that opens the object under the app the page is in, and the two steps left before people can use it, adding it to an app and granting access in a permission set. A run that creates nothing closes the dialog as before. Refused tables are still reported in the error toast.
+  - **The widening.** Four new `studio` namespace rows in `@object-ui/i18n` (en and zh): `engine.datasource.syncNextStepsOne`, `engine.datasource.syncNextSteps`, `engine.datasource.syncNextStepApp` and `engine.datasource.syncNextStepAccess`.
+  - **Form labels.** A declared field with no `label` is drawn in the form under its name with the first letter capitalised and underscores as spaces (`part_no` → `Part no`), the rule the list already draws it under, so one field reads the same in both. An authored label is unchanged.
+- 8b0fbb8: fix(app-shell,fields,plugin-form,plugin-gantt,plugin-grid,components,console): record pages, forms, drawers and preview cards draw a served object label as served
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **Now.** The record page (its title, breadcrumbs, related-list titles, delete and access-denied copy), the record form page and the console's create/edit dialog (title, save toast, way back to the list), the record drawer, the record preview card, the hover card over a lookup, a record-pointer cell, an object-ref cell, the closed-form notice, the gantt name column, the page header's record chrome, a form view's heading, the AI dock's surface chip, the Activity row and the report index name an object by the label the server served, as given. The server has already translated it, by its label order for an overridden item, so a `.custom` object extension's rename is kept over the base package's translation. Before, the served label reached the client's catalog lookup only as its fallback, so the base package's translation of the old name won on these surfaces after the list and header were fixed.
+  - **Unchanged.** When no label is served, the catalog key is asked first and the machine name (or its humanized form) stays the last resort, as before. An unedited object shows the same text as before, because the server serves the catalog's translation for it. Related lists and reference rails that only know an object's name, and the packaged-actions table (its object list is read without the session's language), still look the name up in the catalog. English is unchanged.
+- 5268f50: fix(plugin-form): the warning for a `scale` on a currency inline grid column names the currency's CLDR fraction digits
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The console warning for an inline grid column that renders as `currency` and carries `scale` repeats the spec's refusal, which now says "the currency's CLDR fraction digits (2 for USD, 0 for JPY, 3 for KWD) decide how the cell displays the amount" instead of naming the ISO 4217 minor unit. Words only: the same columns are reported, and the column still renders at its currency's digits.
+- Updated dependencies [7da99b7]
+- Updated dependencies [3214615]
+- Updated dependencies [4261169]
+- Updated dependencies [8fefefd]
+- Updated dependencies [7a5f73e]
+- Updated dependencies [8fefefd]
+- Updated dependencies [b5fd350]
+- Updated dependencies [ac5d0ce]
+- Updated dependencies [2cf269f]
+- Updated dependencies [e396095]
+- Updated dependencies [f810c34]
+- Updated dependencies [7a5f73e]
+- Updated dependencies [8aa2e91]
+- Updated dependencies [c17719d]
+- Updated dependencies [b90a6f7]
+- Updated dependencies [e8dc483]
+- Updated dependencies [bcdb1db]
+- Updated dependencies [9ebca94]
+- Updated dependencies [1e6f542]
+- Updated dependencies [140d8ce]
+- Updated dependencies [699ebd8]
+- Updated dependencies [b379262]
+- Updated dependencies [7945a3b]
+- Updated dependencies [4c2cd29]
+- Updated dependencies [4be8a2e]
+- Updated dependencies [471add3]
+- Updated dependencies [b5eb61d]
+- Updated dependencies [97e4249]
+- Updated dependencies [9037b13]
+- Updated dependencies [c2be734]
+- Updated dependencies [e3b56b2]
+- Updated dependencies [9049be2]
+- Updated dependencies [a52761f]
+- Updated dependencies [6db9198]
+- Updated dependencies [e8afd1e]
+- Updated dependencies [bd65cb6]
+- Updated dependencies [217ba78]
+- Updated dependencies [cde492d]
+- Updated dependencies [eee4149]
+- Updated dependencies [f3a52d3]
+- Updated dependencies [d59a1eb]
+- Updated dependencies [af3451b]
+- Updated dependencies [3a27208]
+- Updated dependencies [f0ad1f7]
+- Updated dependencies [03be565]
+- Updated dependencies [7e9fa4b]
+- Updated dependencies [bc8945f]
+- Updated dependencies [42afac7]
+- Updated dependencies [0c666c3]
+- Updated dependencies [38717d3]
+- Updated dependencies [a9fb14b]
+- Updated dependencies [6f095b9]
+- Updated dependencies [ac890f5]
+- Updated dependencies [5f80129]
+- Updated dependencies [0c7e95a]
+- Updated dependencies [aa57c76]
+- Updated dependencies [fc869c2]
+- Updated dependencies [fef212b]
+- Updated dependencies [c8e6d38]
+- Updated dependencies [d99cd3b]
+- Updated dependencies [dc51811]
+- Updated dependencies [b77c160]
+- Updated dependencies [09720e2]
+- Updated dependencies [b6caa14]
+- Updated dependencies [a77c2e9]
+- Updated dependencies [25fea77]
+- Updated dependencies [ea5807e]
+- Updated dependencies [d3f23d2]
+- Updated dependencies [ff12aed]
+- Updated dependencies [6c48d48]
+- Updated dependencies [3da9a4c]
+- Updated dependencies [4be9734]
+- Updated dependencies [bff5ba2]
+- Updated dependencies [bb86ff9]
+- Updated dependencies [31260ca]
+- Updated dependencies [ef2ad31]
+- Updated dependencies [2046d21]
+- Updated dependencies [18870c9]
+- Updated dependencies [fa9c0aa]
+- Updated dependencies [5174603]
+- Updated dependencies [f6faf75]
+- Updated dependencies [fd749a4]
+- Updated dependencies [d9d42d4]
+- Updated dependencies [9d939c5]
+- Updated dependencies [25e1c1a]
+- Updated dependencies [47226e6]
+- Updated dependencies [c7d1367]
+- Updated dependencies [f5aaa0b]
+- Updated dependencies [0005fec]
+- Updated dependencies [2d6402c]
+- Updated dependencies [77c203a]
+- Updated dependencies [8293c74]
+- Updated dependencies [648089d]
+- Updated dependencies [10ecafd]
+- Updated dependencies [b6f4c0e]
+- Updated dependencies [b4f4781]
+- Updated dependencies [042efb7]
+- Updated dependencies [48231b0]
+- Updated dependencies [0d54279]
+- Updated dependencies [8e5fabe]
+- Updated dependencies [ac56acf]
+- Updated dependencies [a91409c]
+- Updated dependencies [ab12a3b]
+- Updated dependencies [2b35374]
+- Updated dependencies [29702d5]
+- Updated dependencies [a839020]
+- Updated dependencies [a7b8876]
+- Updated dependencies [7b10a30]
+- Updated dependencies [8b0fbb8]
+- Updated dependencies [4dde0ae]
+- Updated dependencies [590724f]
+- Updated dependencies [38d416f]
+- Updated dependencies [d2e2f6f]
+- Updated dependencies [b55d6ab]
+- Updated dependencies [aad1603]
+- Updated dependencies [ad2393f]
+- Updated dependencies [5bca14f]
+- Updated dependencies [7145bf3]
+- Updated dependencies [55d9dd4]
+- Updated dependencies [af8aab1]
+- Updated dependencies [062236c]
+- Updated dependencies [a59d00a]
+- Updated dependencies [4bf9a2d]
+- Updated dependencies [d996c38]
+- Updated dependencies [0c9aa82]
+- Updated dependencies [49c8568]
+- Updated dependencies [47c457b]
+- Updated dependencies [4564d6f]
+- Updated dependencies [f2ea193]
+- Updated dependencies [5268f50]
+- Updated dependencies [5268f50]
+- Updated dependencies [5268f50]
+- Updated dependencies [7b2e557]
+- Updated dependencies [115a43a]
+- Updated dependencies [a30c4f4]
+- Updated dependencies [0cba0ce]
+- Updated dependencies [c893b3d]
+- Updated dependencies [677d542]
+- Updated dependencies [9bdeed2]
+- Updated dependencies [c1da957]
+- Updated dependencies [3479c33]
+- Updated dependencies [000a4c0]
+- Updated dependencies [f4d9c09]
+- Updated dependencies [c77dd17]
+- Updated dependencies [ebe0a98]
+- Updated dependencies [9038187]
+- Updated dependencies [f108e6d]
+- Updated dependencies [5cb7d7e]
+- Updated dependencies [b631573]
+- Updated dependencies [78d4fe9]
+- Updated dependencies [78eb352]
+- Updated dependencies [6ddf827]
+- Updated dependencies [d9d3eb7]
+- Updated dependencies [2ce2646]
+- Updated dependencies [bd1b768]
+- Updated dependencies [468e0c1]
+- Updated dependencies [6106b73]
+- Updated dependencies [0f920b9]
+- Updated dependencies [0f920b9]
+- Updated dependencies [33bc8ae]
+- Updated dependencies [584f7b8]
+- Updated dependencies [66b17a3]
+- Updated dependencies [a1afbb9]
+- Updated dependencies [150f740]
+- Updated dependencies [42eb126]
+- Updated dependencies [3f61e4f]
+- Updated dependencies [8cf1fd0]
+- Updated dependencies [51992df]
+- Updated dependencies [a5cb4f1]
+- Updated dependencies [3c1eb63]
+- Updated dependencies [d57be87]
+- Updated dependencies [f84205b]
+- Updated dependencies [eca7cd2]
+- Updated dependencies [eca7cd2]
+- Updated dependencies [cf4b9bf]
+- Updated dependencies [cf4b9bf]
+- Updated dependencies [614e831]
+- Updated dependencies [e1dac19]
+- Updated dependencies [21510bb]
+- Updated dependencies [0fd363d]
+- Updated dependencies [d6b88f1]
+- Updated dependencies [4123865]
+- Updated dependencies [6ffe37e]
+- Updated dependencies [63a470a]
+  - @object-ui/components@18.4.0
+  - @object-ui/core@18.4.0
+  - @object-ui/fields@18.4.0
+  - @object-ui/react@18.4.0
+  - @object-ui/types@18.4.0
+  - @objectstack/spec@18.4.0
+  - @object-ui/i18n@18.4.0
+  - @object-ui/permissions@18.4.0
+
 ## 18.3.0
 
 ### Minor Changes
