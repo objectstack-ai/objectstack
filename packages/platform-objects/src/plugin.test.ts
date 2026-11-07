@@ -11,7 +11,7 @@ import { describe, it, expect } from 'vitest';
 import { assertEngineFindOnePredicate, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 import { ObjectSchema, RECYCLE_BIN_ENTRY_FIELDS, RECYCLE_BIN_OBJECT } from '@objectstack/spec/data';
 import { PlatformObjectsPlugin } from './plugin.js';
-import { SysExchangeRate, SysLifecycleState, SysMetadataActivation, SysMigration, SysMigrationJournal, SysRecycleBin, SysSecret, SysTrustedKey } from './system/index.js';
+import { SysExchangeRate, SysLifecycleState, SysMetadataActivation, SysMigration, SysMigrationJournal, SysRecycleBin, SysSecret, SysSeedLandedKey, SysTrustedKey } from './system/index.js';
 
 /**
  * Hand-rolled fake PluginContext (mirrors the service-plugin tests) — this
@@ -47,7 +47,7 @@ function makeCtx() {
 }
 
 describe('PlatformObjectsPlugin: platform-infrastructure object registration (#4243, #4270)', () => {
-  it('registers SysMigration, SysMigrationJournal, SysSecret, SysExchangeRate, SysTrustedKey, SysLifecycleState and SysRecycleBin through the manifest service', async () => {
+  it('registers SysMigration, SysMigrationJournal, SysSecret, SysExchangeRate, SysTrustedKey, SysLifecycleState, SysRecycleBin and SysSeedLandedKey through the manifest service', async () => {
     const ctx = makeCtx();
     const manifests: any[] = [];
     ctx.registerService('manifest', { register: (m: any) => manifests.push(m) });
@@ -57,7 +57,7 @@ describe('PlatformObjectsPlugin: platform-infrastructure object registration (#4
     const infra = manifests.find((m) => m.id === 'com.objectstack.platform-objects');
     expect(infra).toBeDefined();
     expect(infra.scope).toBe('system');
-    expect(infra.objects).toEqual([SysMigration, SysMigrationJournal, SysSecret, SysExchangeRate, SysTrustedKey, SysLifecycleState, SysRecycleBin]);
+    expect(infra.objects).toEqual([SysMigration, SysMigrationJournal, SysSecret, SysExchangeRate, SysTrustedKey, SysLifecycleState, SysRecycleBin, SysSeedLandedKey]);
     expect(infra.objects.map((o: any) => o.name)).toEqual([
       'sys_migration',
       // ADR-0119 D2 (#4617). Registered UNCONDITIONALLY, alongside the flag
@@ -81,8 +81,11 @@ describe('PlatformObjectsPlugin: platform-infrastructure object registration (#4
       // delete for any business object, so it registers with the engine's
       // infrastructure rather than with any one capability plugin.
       'sys_recycle_bin',
+      // [#31021] Which declared seed rows landed in each organization, read
+      // and written only by the seed loader, beside the rows it describes.
+      'sys_seed_landed_key',
     ]);
-    // ⛔ The seven above must NOT acquire the ledger's routing triple. They
+    // ⛔ The eight above must NOT acquire the ledger's routing triple. They
     // ride the project database today; moving them is a different question.
     expect(infra.defaultDatasource).toBeUndefined();
   });
