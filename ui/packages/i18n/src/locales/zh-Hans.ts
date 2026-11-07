@@ -340,6 +340,13 @@ const zh = {
       loadFailed: '列表加载失败。仍可直接输入名称。',
       notFound: '{{name}}（未找到）',
     },
+    preferenceOption: {
+      allTopics: '全部主题（{{value}}）',
+      allChannels: '全部渠道（{{value}}）',
+      notConfigured: '{{value}}（未配置）',
+      notInList: '{{value}}（不在列表中）',
+      useTyped: '使用“{{value}}”',
+    },
     recipient: {
       selectTypeFirst: '请先选择接收方类型。',
       loading: '加载中…',

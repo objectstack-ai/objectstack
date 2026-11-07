@@ -453,7 +453,11 @@ the source never reach the copy.
   package `<X>.custom`, the package that holds everything you changed about X.
   The pair is created on the first copy, by the same ensure door as
   `POST /api/v1/packages/:id/ensure-customization` (its only creation path),
-  and reused after. A copy of a set already in a writable package is
+  and reused after. A copy of a set the platform itself ships (a kernel
+  package of scope `system` or `cloud`, such as `member_default`) is saved
+  environment-wide, in no package: a kernel package has no paired
+  customization package in this version, and the notice says so
+  (`noticeCode` `PERMISSION_SET_CLONE_ENVIRONMENT_WIDE_KERNEL_SOURCE`). A copy of a set already in a writable package is
   saved in that package, and a copy of a set authored in this system stays
   environment-wide, in no package. With `package`, the copy is saved there: it
   must be an installed, writable package (else `422`

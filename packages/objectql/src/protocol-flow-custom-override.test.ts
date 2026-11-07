@@ -30,9 +30,12 @@ import {
     storedRowBindingOf,
     SysMetadataRepository,
 } from '@objectstack/metadata-protocol';
-import { SysMetadataAuditObject, SysMetadataCommitObject, SysMetadataHistoryObject } from '@objectstack/metadata-core';
+import { SysMetadataAuditObject, SysMetadataCommitObject, SysMetadataHistoryObject, installedManifestsOf } from '@objectstack/metadata-core';
 import { ObjectQL } from './engine.js';
 import { InMemoryActionActivationStore } from './action-activation.js';
+
+/** Nothing installed: the pair lookup reads no manifest while `appOf` is the identity. */
+const NOTHING_INSTALLED = installedManifestsOf(undefined);
 
 const BASE = 'com.example.showcase';
 const PAIR = 'com.example.showcase.custom';
@@ -249,7 +252,7 @@ describe('[#28412] a declared .custom flow override is the packaged flow, at eve
         await install(protocol, PAIR);
         await saveInto(protocol, PAIR, 'OVERRIDE', { overrides: { ...DECLARATION } });
         expect(rows().map((r) => [r.package_id, r.state])).toEqual([[PAIR, 'active']]);
-        expect(isServedOverrideRowOf(rows()[0] as any, BASE)).toBe(true);
+        expect(isServedOverrideRowOf(rows()[0] as any, BASE, NOTHING_INSTALLED)).toBe(true);
 
         for (const scope of [undefined, BASE]) {
             const item = await read(protocol, scope);

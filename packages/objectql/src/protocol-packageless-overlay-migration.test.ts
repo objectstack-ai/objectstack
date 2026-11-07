@@ -46,8 +46,11 @@ import {
     isServedOverrideRowOf,
     resetEnvWritableMetadataTypes,
 } from '@objectstack/metadata-protocol';
-import { SysMetadataAuditObject, SysMetadataCommitObject, SysMetadataHistoryObject } from '@objectstack/metadata-core';
+import { SysMetadataAuditObject, SysMetadataCommitObject, SysMetadataHistoryObject, installedManifestsOf } from '@objectstack/metadata-core';
 import { ObjectQL } from './engine.js';
+
+/** Nothing installed: the pair lookup reads no manifest while `appOf` is the identity. */
+const NOTHING_INSTALLED = installedManifestsOf(undefined);
 
 const BASE = 'com.example.showcase';
 const PAIR = 'com.example.showcase.custom';
@@ -279,7 +282,7 @@ describe('[#28413] the census and the move', () => {
         expect(rows(VIEW).slice().sort()).toEqual([[PAIR, 'active'], [PAIR, 'draft']]);
         for (const state of ['active', 'draft']) {
             const moved = rowOf(VIEW, PAIR, state)!;
-            expect(isServedOverrideRowOf(moved as any, BASE), state).toBe(true);
+            expect(isServedOverrideRowOf(moved as any, BASE, NOTHING_INSTALLED), state).toBe(true);
             expect(JSON.parse(String(moved.metadata)).overrides).toEqual({ package: BASE, basedOn: '1.2.0' });
         }
         expect(columnsOf(JSON.parse(String(rowOf(VIEW, PAIR, 'draft')!.metadata)))).toEqual(EDITED_COLUMNS);
@@ -422,7 +425,7 @@ describe('[#28576] after the close: a package-less write onto a packaged item is
             expectClosed(await refusalOf(protocol.saveMetaItem({ type: 'view', name: VIEW, item: body, packageId: null } as any)));
 
             expect(rows(VIEW)).toEqual([[PAIR, 'active']]);
-            expect(isServedOverrideRowOf(rowOf(VIEW, PAIR) as any, BASE)).toBe(true);
+            expect(isServedOverrideRowOf(rowOf(VIEW, PAIR) as any, BASE, NOTHING_INSTALLED)).toBe(true);
             expect(await fiveReads(protocol)).toEqual([UNBOUND_COLUMNS, UNBOUND_COLUMNS, UNBOUND_COLUMNS, UNBOUND_COLUMNS, UNBOUND_COLUMNS]);
         });
     }
@@ -454,7 +457,7 @@ describe('[#28576] after the close: a package-less write onto a packaged item is
             item: { ...listBody(VIEW, 'showcase_task', EDITED_COLUMNS), overrides: { package: BASE, basedOn: '1.2.0' } },
         } as any);
         expect(rows(VIEW)).toEqual([[PAIR, 'active']]);
-        expect(isServedOverrideRowOf(rowOf(VIEW, PAIR) as any, BASE)).toBe(true);
+        expect(isServedOverrideRowOf(rowOf(VIEW, PAIR) as any, BASE, NOTHING_INSTALLED)).toBe(true);
         expect(await fiveReads(protocol)).toEqual([EDITED_COLUMNS, EDITED_COLUMNS, EDITED_COLUMNS, EDITED_COLUMNS, EDITED_COLUMNS]);
 
         await protocol.deleteMetaItem({ type: 'view', name: VIEW, packageId: PAIR } as any);
@@ -507,7 +510,7 @@ describe('[#28576] after the close: a package-less write onto a packaged item is
             item: { ...listBody(VIEW, 'showcase_task', UNBOUND_COLUMNS), overrides: { package: BASE, basedOn: '1.2.0' } },
         } as any);
         expect(rows(VIEW)).toEqual([[PAIR, 'active']]);
-        expect(isServedOverrideRowOf(rowOf(VIEW, PAIR) as any, BASE)).toBe(true);
+        expect(isServedOverrideRowOf(rowOf(VIEW, PAIR) as any, BASE, NOTHING_INSTALLED)).toBe(true);
         expect(columnsOf(await read(protocol))).toEqual(UNBOUND_COLUMNS);
     });
 
@@ -688,7 +691,7 @@ describe('[#29392] the census and the move reach a row bound to the read-only ba
         expect(rows(VIEW).slice().sort()).toEqual([[PAIR, 'active'], [PAIR, 'draft']]);
         for (const state of ['active', 'draft']) {
             const moved = rowOf(VIEW, PAIR, state)!;
-            expect(isServedOverrideRowOf(moved as any, BASE), state).toBe(true);
+            expect(isServedOverrideRowOf(moved as any, BASE, NOTHING_INSTALLED), state).toBe(true);
             expect(JSON.parse(String(moved.metadata)).overrides).toEqual({ package: BASE, basedOn: '1.2.0' });
         }
         expect(columnsOf(JSON.parse(String(rowOf(VIEW, PAIR, 'draft')!.metadata)))).toEqual(EDITED_COLUMNS);

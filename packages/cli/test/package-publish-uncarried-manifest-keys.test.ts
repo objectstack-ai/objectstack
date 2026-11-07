@@ -5,15 +5,17 @@
  * hosted catalog stores, and names every key it does not send, instead of
  * dropping it silently.
  *
- * `TemplateManifestSchema` accepts `tags`, `publisher`, `isStarter`, `preview`
- * and `visibility`, so an author (or an AI agent) writes them and the file
- * validates. The hosted publish route validates and stores `tags`, so publish
+ * `TemplateManifestSchema` accepts `tags`, `publisher`, `isStarter` and
+ * `preview`, so an author (or an AI agent) writes them and the file validates. The hosted publish route validates and stores `tags`, so publish
  * sends them as written: the server owns the bounds, and its 400 is what the
  * author reads. `publisher` and `isStarter` are decided by the platform, so an
  * author's value has no effect and is not sent. `preview` still waits on what
  * the hosted side accepts (`CATALOG_SEND_ISSUE`). The top-level `tagline` has
  * no column on the hosted side: publish uses it as the `description` when none
- * is given, and otherwise does not send it.
+ * is given, and otherwise does not send it. The retired `visibility` is refused
+ * by name (the `--visibility` flag carries it), and the four retired keys
+ * nothing ever read (`name`, `specVersion`, `skills`, `scaffold`) are named for
+ * deletion without failing the publish.
  *
  * These cases drive the real command and read the request body it sends, pin
  * that the warning does not fail the publish (the blank template ships
@@ -28,7 +30,9 @@ import { join } from 'node:path';
 import { TemplateManifestSchema } from '@objectstack/spec/marketplace';
 import PackagePublish, {
   CATALOG_SEND_ISSUE,
+  RETIRED_INERT_MANIFEST_KEYS,
   UNCARRIED_MANIFEST_KEYS,
+  retiredVisibilityRefusal,
   uncarriedManifestKeys,
 } from '../src/commands/package/publish.js';
 
@@ -66,9 +70,9 @@ const SENT = [
  * Retired keys the schema still declares as tombstones: publish refuses them,
  * naming the replacement (`test/package-publish-taxonomy.test.ts`).
  */
-const REFUSED = ['category'] as const;
-/** Scaffold-time extras: read by `create-objectstack` or docs, never a publish key. */
-const SCAFFOLD_ONLY = ['name', 'specVersion', 'namespace', 'skills', 'scaffold'] as const;
+const REFUSED = ['category', 'visibility'] as const;
+/** Scaffold-time extras: read by `create-objectstack`, never a publish key. */
+const SCAFFOLD_ONLY = ['namespace'] as const;
 
 const DECLARES = 'objectstack.manifest.json declares';
 
@@ -116,7 +120,7 @@ describe('os package publish — manifest keys', () => {
 
   describe('tags', () => {
     it('sends the manifest’s tags as written, and does not warn about them', async () => {
-      const path = await projectWith({ name: 'acme-crm', specVersion: '^18.0.0', tags: ['crm', 'sales'] });
+      const path = await projectWith({ tags: ['crm', 'sales'] });
       const calls = stubCloud();
       const out = captureOutput();
 
@@ -129,7 +133,7 @@ describe('os package publish — manifest keys', () => {
     });
 
     it('sends a declared empty list, which clears the stored tags', async () => {
-      const path = await projectWith({ name: 'acme-crm', specVersion: '^18.0.0', tags: [] });
+      const path = await projectWith({ tags: [] });
       const calls = stubCloud();
       captureOutput();
 
@@ -139,7 +143,7 @@ describe('os package publish — manifest keys', () => {
     });
 
     it('sends no `tags` key when the manifest declares none, so the stored tags are left alone', async () => {
-      const path = await projectWith({ name: 'acme-crm', specVersion: '^18.0.0' });
+      const path = await projectWith({});
       const calls = stubCloud();
       captureOutput();
 
@@ -153,7 +157,7 @@ describe('os package publish — manifest keys', () => {
       // has no copy of those numbers, so the list reaches the wire unchanged
       // and the server's 400 is the author's answer.
       const tags = Array.from({ length: 21 }, (_, i) => `tag-${i}-${'x'.repeat(64)}`);
-      const path = await projectWith({ name: 'acme-crm', specVersion: '^18.0.0', tags });
+      const path = await projectWith({ tags });
       const refusal = 'tags: at most 20 tags of at most 64 characters each';
       const calls = stubCloud({
         status: 400,
@@ -177,7 +181,7 @@ describe('os package publish — manifest keys', () => {
 
   describe('top-level `tagline`', () => {
     it('is sent as the `description` when neither --description nor the manifest gives one', async () => {
-      const path = await projectWith({ name: 'acme-crm', specVersion: '^18.0.0', tagline: '  CRM for small teams  ' });
+      const path = await projectWith({ tagline: '  CRM for small teams  ' });
       const calls = stubCloud();
       const out = captureOutput();
 
@@ -190,7 +194,7 @@ describe('os package publish — manifest keys', () => {
 
     it('is not sent when the manifest gives a `description`, and a warning names it', async () => {
       const path = await projectWith({
-        name: 'acme-crm', specVersion: '^18.0.0', description: 'Customer records', tagline: 'CRM for small teams',
+        description: 'Customer records', tagline: 'CRM for small teams',
       });
       const calls = stubCloud();
       const out = captureOutput();
@@ -203,7 +207,7 @@ describe('os package publish — manifest keys', () => {
     });
 
     it('is not sent when --description is passed, and a warning names it', async () => {
-      const path = await projectWith({ name: 'acme-crm', specVersion: '^18.0.0', tagline: 'CRM for small teams' });
+      const path = await projectWith({ tagline: 'CRM for small teams' });
       const calls = stubCloud();
       const out = captureOutput();
 
@@ -216,7 +220,7 @@ describe('os package publish — manifest keys', () => {
 
     it('leaves the per-locale `translations.*.tagline` as it was', async () => {
       const path = await projectWith({
-        name: 'acme-crm', specVersion: '^18.0.0', translations: { 'zh-CN': { tagline: '小团队的 CRM' } },
+        translations: { 'zh-CN': { tagline: '小团队的 CRM' } },
       });
       const calls = stubCloud();
       captureOutput();
@@ -230,7 +234,7 @@ describe('os package publish — manifest keys', () => {
   describe('keys it does not send', () => {
     it('names `publisher` and `isStarter` as decided by the platform, and still publishes', async () => {
       const path = await projectWith({
-        name: 'acme-crm', specVersion: '^18.0.0', displayName: 'Acme CRM', publisher: 'community', isStarter: true,
+        displayName: 'Acme CRM', publisher: 'community', isStarter: true,
       });
       const calls = stubCloud();
       const out = captureOutput();
@@ -252,7 +256,7 @@ describe('os package publish — manifest keys', () => {
 
     it('names `preview` as not carried by the hosted catalog yet, with the tracking issue', async () => {
       const path = await projectWith({
-        name: 'acme-crm', specVersion: '^18.0.0', preview: { screenshots: ['shot.png'] },
+        preview: { screenshots: ['shot.png'] },
       });
       const calls = stubCloud();
       const out = captureOutput();
@@ -268,24 +272,30 @@ describe('os package publish — manifest keys', () => {
       expect('preview' in calls[0].body).toBe(false);
     });
 
-    it('names `visibility` separately, with the flag that does carry it', async () => {
-      const path = await projectWith({ name: 'acme-crm', specVersion: '^18.0.0', visibility: 'marketplace' });
+    it('names the retired keys nothing ever read for deletion, and still publishes', async () => {
+      // Every project scaffolded from the blank template before the retirement
+      // carries these, so naming them must not fail the publish.
+      const path = await projectWith({
+        name: 'acme-crm', specVersion: '^18.0.0', skills: ['objectstack-data'], scaffold: { variables: {} },
+      });
       const calls = stubCloud();
       const out = captureOutput();
 
       await PackagePublish.run([path]);
 
-      expect('visibility' in calls[0].body).toBe(false);
+      expect(calls).toHaveLength(2);
       const warnings = warningsIn(out);
       expect(warnings).toHaveLength(1);
-      expect(warnings[0]).toContain('`visibility`');
-      expect(warnings[0]).toContain('--visibility');
-      // `visibility` is not waiting on the hosted catalog: the flag carries it today.
+      for (const key of RETIRED_INERT_MANIFEST_KEYS) {
+        expect(warnings[0]).toContain(`\`${key}\``);
+        expect(key in calls[0].body).toBe(false);
+      }
+      expect(warnings[0]).toContain('removed in @objectstack/spec 18');
       expect(warnings[0]).not.toContain(CATALOG_SEND_ISSUE);
     });
 
     it('stays quiet when the manifest declares only keys it sends', async () => {
-      const path = await projectWith({ name: 'acme-crm', specVersion: '^18.0.0', displayName: 'Acme CRM', tags: ['crm'] });
+      const path = await projectWith({ displayName: 'Acme CRM', tags: ['crm'] });
       stubCloud();
       const out = captureOutput();
 
@@ -294,12 +304,46 @@ describe('os package publish — manifest keys', () => {
       expect(warningsIn(out)).toEqual([]);
     });
   });
+
+  describe('the retired `visibility`', () => {
+    it('is refused by name before any network call, naming the flag that carries it', async () => {
+      const path = await projectWith({ displayName: 'Acme CRM', visibility: 'marketplace' });
+      const calls = stubCloud();
+      const out = captureOutput();
+
+      let exitCode: number | undefined;
+      try {
+        await PackagePublish.run([path]);
+      } catch (err: any) {
+        exitCode = err?.oclif?.exit ?? err?.exitCode;
+      }
+
+      expect(exitCode).toBe(1);
+      expect(calls).toHaveLength(0);
+      const printed = out.join('\n');
+      expect(printed).toContain(retiredVisibilityRefusal());
+      expect(printed).toContain('--visibility');
+    });
+
+    it('control: the --visibility flag alone still sets it, with no refusal', async () => {
+      const path = await projectWith({ displayName: 'Acme CRM' });
+      const calls = stubCloud();
+      captureOutput();
+
+      await PackagePublish.run([path, '--visibility', 'marketplace']);
+
+      expect(calls).toHaveLength(2);
+      expect(calls[0].body.visibility).toBe('marketplace');
+    });
+  });
 });
 
-describe('every TemplateManifestSchema key is sent, warned about, refused, or scaffold-only', () => {
+describe('every TemplateManifestSchema key is sent, warned about, refused, retired, or scaffold-only', () => {
   it('partitions the schema keys exactly', () => {
     const schemaKeys = Object.keys(TemplateManifestSchema.shape).sort();
-    const classified = [...SENT, ...UNCARRIED_MANIFEST_KEYS, ...REFUSED, ...SCAFFOLD_ONLY].sort();
+    const classified = [
+      ...SENT, ...UNCARRIED_MANIFEST_KEYS, ...REFUSED, ...SCAFFOLD_ONLY, ...RETIRED_INERT_MANIFEST_KEYS,
+    ].sort();
     expect(classified).toEqual(schemaKeys);
     // No key sits in two buckets.
     expect(new Set(classified).size).toBe(classified.length);
@@ -308,8 +352,16 @@ describe('every TemplateManifestSchema key is sent, warned about, refused, or sc
   it('warns only about keys the schema accepts', () => {
     // A warned key the schema rejects would never reach publish; the list
     // would then be naming a key no valid file can carry.
-    const fixture = { name: 'acme-crm', specVersion: '^18.0.0', displayName: 'Acme CRM', tags: ['crm'], publisher: 'community', isStarter: true, preview: { demoUrl: 'https://demo.example.com' }, visibility: 'org' };
+    const fixture = { displayName: 'Acme CRM', tags: ['crm'], publisher: 'community', isStarter: true, preview: { demoUrl: 'https://demo.example.com' } };
     expect(TemplateManifestSchema.safeParse(fixture).success).toBe(true);
     expect(uncarriedManifestKeys(fixture)).toEqual([...UNCARRIED_MANIFEST_KEYS]);
+  });
+
+  it('names for deletion only keys the schema refuses', () => {
+    // Each retired key is a tombstone: a parse of the file refuses it, which
+    // is what the warning tells the author.
+    for (const key of RETIRED_INERT_MANIFEST_KEYS) {
+      expect(TemplateManifestSchema.safeParse({ [key]: 'x' }).success, key).toBe(false);
+    }
   });
 });

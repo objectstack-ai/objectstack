@@ -245,6 +245,10 @@ import {
     fieldPatchTargetRefusals,
     fieldPatchTargetRefusalMessage,
     type FieldPatchTargetRefusal,
+    // [ADR-0146 D3 · ruling record 6691022506] The installed manifests the
+    // override gate's pair lookup reads.
+    installedManifestsOf,
+    type InstalledManifestLookup,
 } from '@objectstack/metadata-core';
 import { resolveCloudUrl } from './cloud-url.js';
 import { resolveMarketplacePublicBaseUrl } from './marketplace-public-url.js';
@@ -3831,7 +3835,7 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         // each under its own id. A delivered package is in no registry yet: its
         // dependencies and its items are read off the body, and it registers
         // read-only, so it is a base a sibling's closure can hold.
-        const delivered = new Map<string, { dependencies: string[]; items: OverrideWriteItem[] }>();
+        const delivered = new Map<string, { manifest: unknown; dependencies: string[]; items: OverrideWriteItem[] }>();
         const entries: Record<string, any>[] = Array.isArray(converted.packages)
             ? converted.packages
                 .map((entry: unknown) => (isPlainObject(entry) && isPlainObject(entry.manifest) ? entry.manifest : undefined))
@@ -3840,8 +3844,17 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         for (const body of entries) {
             const id = entries.length === 1 && !Array.isArray(converted.packages) ? manifestId : manifestIdOf(body);
             if (typeof id !== 'string' || id === '') continue;
-            delivered.set(id, { dependencies: dependencyIdsOf(declaredPackageManifest(body)), items: overrideWriteItemsOf(body) });
+            const manifest = declaredPackageManifest(body);
+            delivered.set(id, { manifest, dependencies: dependencyIdsOf(manifest), items: overrideWriteItemsOf(body) });
         }
+        // The manifests the pair lookup reads: a delivered package's own,
+        // else the installed one — who may declare an override of a base is
+        // its App's pair (`pairOf`).
+        const installedRegistry = installedManifestsOf(registry);
+        const manifestOf: InstalledManifestLookup = (id) => {
+            const local = delivered.get(id)?.manifest;
+            return isPlainObject(local) ? local : installedRegistry(id);
+        };
         const dependenciesOf = (id: string): string[] => delivered.get(id)?.dependencies
             ?? dependencyIdsOf((registry.getPackage?.(id) as { manifest?: unknown } | undefined)?.manifest);
         const closureOf = (id: string): string[] => {
@@ -3920,7 +3933,10 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                 }
                 const verdict = judgeOverrideWrite(
                     { type: item.type, name: item.name, packageId, item: item.item },
-                    { dependencies: closure, shippers, baseItemOf: (base) => shipped.get(base), baseItemsOf: (base) => listed.get(base) ?? [] },
+                    {
+                        dependencies: closure, shippers, baseItemOf: (base) => shipped.get(base),
+                        baseItemsOf: (base) => listed.get(base) ?? [], installed: manifestOf,
+                    },
                 );
                 if (verdict.verdict === 'refuse') {
                     refusals.push({
@@ -3946,7 +3962,7 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                     if (holding === undefined) continue;
                     const verdict = judgeOverrideWrite(
                         { type: item.type, name: item.name, packageId: dependent, item: holding },
-                        { dependencies: dependentClosure, shippers: [baseId] },
+                        { dependencies: dependentClosure, shippers: [baseId], installed: manifestOf },
                     );
                     if (verdict.verdict === 'refuse') {
                         collisions.push({ type: item.type, name: item.name, packageId: dependent, rule: verdict.rule, message: verdict.message });

@@ -333,6 +333,13 @@ const fr = {
       loadFailed: "La liste n'a pas pu être chargée. Vous pouvez toujours saisir le nom.",
       notFound: "{{name}} (introuvable)",
     },
+    preferenceOption: {
+      allTopics: "Tous les sujets ({{value}})",
+      allChannels: "Tous les canaux ({{value}})",
+      notConfigured: "{{value}} (non configuré)",
+      notInList: "{{value}} (absent de la liste)",
+      useTyped: "Utiliser « {{value}} »",
+    },
     recipient: {
       selectTypeFirst: "Sélectionnez d'abord un type de destinataire.",
       loading: "Chargement…",

@@ -330,6 +330,13 @@ const ja = {
       loadFailed: "一覧を読み込めませんでした。名前を直接入力できます。",
       notFound: "{{name}}（見つかりません）",
     },
+    preferenceOption: {
+      allTopics: "すべてのトピック（{{value}}）",
+      allChannels: "すべてのチャネル（{{value}}）",
+      notConfigured: "{{value}}（未設定）",
+      notInList: "{{value}}（一覧にありません）",
+      useTyped: "「{{value}}」を使用",
+    },
     recipient: {
       selectTypeFirst: "先に受信者タイプを選択してください。",
       loading: "読み込み中…",

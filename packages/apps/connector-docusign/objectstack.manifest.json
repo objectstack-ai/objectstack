@@ -1,8 +1,6 @@
 {
   "$schema": "https://schemas.objectstack.dev/template-manifest.json",
   "manifestId": "app.objectstack.connector-docusign",
-  "name": "connector-docusign",
-  "specVersion": "^18.0.0",
   "displayName": "DocuSign eSignature",
   "description": "Send documents for signature, read envelopes and follow their signature status from flows, over DocuSign's eSignature OpenAPI document. Developer sandbox; your administrator registers their own DocuSign integration key.",
   "businessFunctions": ["collaboration", "legal"],

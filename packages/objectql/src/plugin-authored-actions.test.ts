@@ -19,6 +19,10 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { ObjectQLPlugin } from './plugin.js';
 import { ObjectQL } from './engine.js';
 import { isServedOverrideRowOf } from '@objectstack/metadata-protocol';
+import { installedManifestsOf } from '@objectstack/metadata-core';
+
+/** Nothing installed: the pair lookup reads no manifest while `appOf` is the identity. */
+const NOTHING_INSTALLED = installedManifestsOf(undefined);
 
 type AnyRecord = Record<string, any>;
 
@@ -448,7 +452,7 @@ describe('[#30065] a declared .custom action override rebinds the body, and rest
     expect(warn.mock.calls[0][1]).toMatchObject({ package: `app:${BASE}`, replacedPackage: 'metadata-service' });
     // The reads judge the row against the real base by the one served-override
     // predicate, and decline it: the run now agrees with them.
-    expect([isServedOverrideRowOf(row as any, BASE), isServedOverrideRowOf(row as any, OTHER)]).toEqual([false, true]);
+    expect([isServedOverrideRowOf(row as any, BASE, NOTHING_INSTALLED), isServedOverrideRowOf(row as any, OTHER, NOTHING_INSTALLED)]).toEqual([false, true]);
     // The next resync judges the row against the registered artifact and
     // leaves the base's handler bound.
     await resync([row]);
