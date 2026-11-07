@@ -59,7 +59,7 @@ describe('sys_scim_connection_credential: mint and revoke reach the platform-adm
     // The organization is picked, not typed: the mount refuses an id that names no organization.
     expect(params.find((p) => p.name === 'organizationId')).toMatchObject({ type: 'lookup', reference: 'sys_organization' });
     // The mint answers `{ success, data: { token, ... } }`; the reveal reads the inner payload.
-    expect(mint.resultDialog?.fields.find((f) => f.format === 'secret')?.path).toBe('token');
+    expect(mint.resultDialog?.fields?.find((f) => f.format === 'secret')?.path).toBe('token');
   });
 
   it('revoke POSTs the revoke mount from a credential row, sending the row id as credentialId', () => {
