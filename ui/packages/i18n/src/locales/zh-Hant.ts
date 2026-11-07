@@ -340,6 +340,13 @@ const zhHant = {
       loadFailed: '列表載入失敗。仍可直接輸入名稱。',
       notFound: '{{name}}（未找到）',
     },
+    preferenceOption: {
+      allTopics: '全部主題（{{value}}）',
+      allChannels: '全部渠道（{{value}}）',
+      notConfigured: '{{value}}（未配置）',
+      notInList: '{{value}}（不在列表中）',
+      useTyped: '使用“{{value}}”',
+    },
     recipient: {
       selectTypeFirst: '請先選擇接收方型別。',
       loading: '載入中…',

@@ -339,6 +339,13 @@ const ru = {
       loadFailed: "Не удалось загрузить список. Имя можно ввести вручную.",
       notFound: "{{name}} (не найдено)",
     },
+    preferenceOption: {
+      allTopics: "Все темы ({{value}})",
+      allChannels: "Все каналы ({{value}})",
+      notConfigured: "{{value}} (не настроен)",
+      notInList: "{{value}} (нет в списке)",
+      useTyped: "Использовать «{{value}}»",
+    },
     recipient: {
       selectTypeFirst: "Сначала выберите тип получателя.",
       loading: "Загрузка…",

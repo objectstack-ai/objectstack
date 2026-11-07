@@ -330,6 +330,13 @@ const de = {
       loadFailed: "Die Liste konnte nicht geladen werden. Sie können den Namen weiterhin eingeben.",
       notFound: "{{name}} (nicht gefunden)",
     },
+    preferenceOption: {
+      allTopics: "Alle Themen ({{value}})",
+      allChannels: "Alle Kanäle ({{value}})",
+      notConfigured: "{{value}} (nicht konfiguriert)",
+      notInList: "{{value}} (nicht in der Liste)",
+      useTyped: "„{{value}}“ verwenden",
+    },
     recipient: {
       selectTypeFirst: "Wählen Sie zuerst einen Empfängertyp.",
       loading: "Wird geladen…",

@@ -338,6 +338,13 @@ const es = {
       loadFailed: "No se pudo cargar la lista. Todavía puede escribir el nombre.",
       notFound: "{{name}} (no encontrado)",
     },
+    preferenceOption: {
+      allTopics: "Todos los temas ({{value}})",
+      allChannels: "Todos los canales ({{value}})",
+      notConfigured: "{{value}} (no configurado)",
+      notInList: "{{value}} (no está en la lista)",
+      useTyped: "Usar «{{value}}»",
+    },
     recipient: {
       selectTypeFirst: "Selecciona primero un tipo de destinatario.",
       loading: "Cargando…",
