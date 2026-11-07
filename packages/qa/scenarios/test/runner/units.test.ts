@@ -360,10 +360,10 @@ describe('the cost guard — no API-billed model, ever', () => {
     const dir = mkdtempSync(join(tmpdir(), 'rec-'));
     const turn: ParsedTurn = { replyText: '', toolCalls: [], meta: {} };
     const ok = new RecordedDriver({ driver: { driver: 'x', apiBilled: false }, turns: { 'c/scratch/build/author/-': turn }, files: { 'c/scratch/build/author/-': { 'src/a.ts': 'x' } } });
-    await ok.author({ card: 'c', mode: 'scratch', phase: 'build', step: 'author', cwd: dir, prompt: '' });
+    await ok.author({ card: 'c', mode: 'scratch', phase: 'build', step: 'author', cwd: dir, prompt: '', tier: 'control' });
     expect(readFileSync(join(dir, 'src/a.ts'), 'utf8')).toBe('x');
     const bad = new RecordedDriver({ driver: { driver: 'x', apiBilled: false }, turns: { 'c/scratch/build/author/-': turn }, files: { 'c/scratch/build/author/-': { '../escape.ts': 'x' } } });
-    await expect(bad.author({ card: 'c', mode: 'scratch', phase: 'build', step: 'author', cwd: dir, prompt: '' })).rejects.toThrow(/escapes/);
+    await expect(bad.author({ card: 'c', mode: 'scratch', phase: 'build', step: 'author', cwd: dir, prompt: '', tier: 'control' })).rejects.toThrow(/escapes/);
     expect(existsSync(join(dir, '..', 'escape.ts'))).toBe(false);
   });
 });
