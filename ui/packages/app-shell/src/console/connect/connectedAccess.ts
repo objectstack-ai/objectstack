@@ -26,6 +26,10 @@
  * found a connection: a failed read is never reported as "nothing connected".
  * `unknown` also covers a render without an adapter or a signed-in person.
  *
+ * Its readers: the Connected line on Connect an AI Assistant, the Home card
+ * that offers connecting one (hidden once connected), and the administrator's
+ * first-run checklist row (done once connected).
+ *
  * It reads again when either record changes on this page: the adapter's
  * mutation event (or the mint's `notifyDataChanged`) for `sys_api_key`, and the
  * assistants list's withdraw, which announces `sys_oauth_consent`.
@@ -111,10 +115,16 @@ export function combineConnectedReads(
   return { state: 'loading' };
 }
 
-export function useConnectedAccess(): ConnectedAccess {
+/**
+ * `enabled: false` reads nothing and answers `unknown`: a caller that may not
+ * need the answer (a dismissed Home card, a member's Home with no checklist)
+ * costs no request. Hooks cannot be called conditionally, so this is how a
+ * caller skips the read.
+ */
+export function useConnectedAccess({ enabled = true }: { enabled?: boolean } = {}): ConnectedAccess {
   const adapter = useAdapter();
   const { user } = useAuth();
-  const userId = user?.id ?? null;
+  const userId = enabled ? user?.id ?? null : null;
   const consentsNonce = useDataInvalidation('sys_oauth_consent');
   const keysNonce = useDataInvalidation('sys_api_key');
 
