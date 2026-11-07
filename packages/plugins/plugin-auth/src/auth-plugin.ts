@@ -3897,6 +3897,29 @@ export class AuthPlugin implements Plugin {
     });
 
     // ────────────────────────────────────────────────────────────────────
+    // [#31048] admin: withdraw one of the AI assistants another person
+    // authorized, by the consent id the read above answers. The read's own
+    // gate first, ahead of any body read, so a caller outside a platform
+    // administrator's reach gets one refusal whoever the body names and
+    // whether or not the person or the consent exists (authorized-clients-withdraw.ts).
+    rawApp.post(`${basePath}/admin/authorized-clients/withdraw`, async (c: any) => {
+      try {
+        const actor = await gateAdmin(c);
+        if (actor instanceof Response) return actor;
+        const { authorizedClientWithdrawDepsFor, runAdminAuthorizedClientWithdraw } = await import('./authorized-clients-withdraw.js');
+        const answer = await runAdminAuthorizedClientWithdraw(authorizedClientWithdrawDepsFor(this.authManager!), actor, {
+          raw: c.req.raw,
+          queries: (c.req.queries() ?? {}) as Record<string, string[]>,
+        });
+        return c.json(answer.body, answer.status as any, answer.headers);
+      } catch (error) {
+        const err = error instanceof Error ? error : new Error(String(error));
+        ctx.logger.error('[AuthPlugin] admin/authorized-clients/withdraw failed', err);
+        return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: 'The authorized client could not be withdrawn.' } }, 500);
+      }
+    });
+
+    // ────────────────────────────────────────────────────────────────────
     // [#30958] ADR-0134 — admin: mint and revoke the bearer credentials SCIM
     // connections authenticate with. The SCIM plugin verifies against
     // `sys_scim_connection_credential` rows, which the data API never creates
@@ -4778,6 +4801,28 @@ export class AuthPlugin implements Plugin {
         const err = error instanceof Error ? error : new Error(String(error));
         ctx.logger.error('[AuthPlugin] authorized-clients failed', err);
         return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: 'The authorized clients could not be read.' } }, 500);
+      }
+    });
+
+    // ────────────────────────────────────────────────────────────────────
+    // [#31048] Withdraw one of the caller's own authorized AI assistants, by
+    // the consent id the read above answers: the consent and the client's
+    // refresh family go, so the assistant's token is refused on its next MCP
+    // call. Only the session subject's own consent is withdrawn; an id naming
+    // no consent and one naming another person's read the same 404. Another
+    // person's grant is the admin door above. See authorized-clients-withdraw.ts.
+    rawApp.post(`${basePath}/authorized-clients/withdraw`, async (c: any) => {
+      try {
+        const { authorizedClientWithdrawDepsFor, runOwnAuthorizedClientWithdraw } = await import('./authorized-clients-withdraw.js');
+        const answer = await runOwnAuthorizedClientWithdraw(authorizedClientWithdrawDepsFor(this.authManager!), {
+          raw: c.req.raw,
+          queries: (c.req.queries() ?? {}) as Record<string, string[]>,
+        });
+        return c.json(answer.body, answer.status as any, answer.headers);
+      } catch (error) {
+        const err = error instanceof Error ? error : new Error(String(error));
+        ctx.logger.error('[AuthPlugin] authorized-clients/withdraw failed', err);
+        return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: 'The authorized client could not be withdrawn.' } }, 500);
       }
     });
 

@@ -4054,6 +4054,7 @@ const de = {
       create_record: "Den Datensatz anlegen",
       create_seed: "Beispieldaten für die Objekte erzeugen",
       delete_field: "Ein Feld löschen",
+      delete_package: "Ein Paket löschen",
       describe_metadata: "Die Metadaten ansehen",
       describe_object: "Die Struktur des Objekts ansehen",
       get_active_package: "Das aktive Paket prüfen",

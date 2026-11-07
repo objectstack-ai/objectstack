@@ -115,3 +115,16 @@ describe('clearLocalized — paired with setLocalized', () => {
     expect(clearLocalized(stored, 'en')).toEqual({ 'zh-CN': '收入', bogus: 42 });
   });
 });
+
+describe('clearLocalized — a script-split language clears the entry of its own script (#30910)', () => {
+  it('a zh-Hant clear removes zh-TW and keeps the Simplified entry, in either authoring order', () => {
+    expect(clearLocalized({ en: 'Customer', 'zh-CN': '客户', 'zh-TW': '客戶' }, 'zh-Hant')).toEqual({
+      en: 'Customer',
+      'zh-CN': '客户',
+    });
+    expect(clearLocalized({ en: 'Customer', 'zh-TW': '客戶', 'zh-CN': '客户' }, 'zh')).toEqual({
+      en: 'Customer',
+      'zh-TW': '客戶',
+    });
+  });
+});

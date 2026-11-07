@@ -4056,6 +4056,7 @@ const ja = {
       create_record: "レコードを作成する",
       create_seed: "オブジェクトのサンプルデータを生成する",
       delete_field: "項目を削除する",
+      delete_package: "パッケージを削除する",
       describe_metadata: "メタデータの内容を確認する",
       describe_object: "オブジェクトの構造を確認する",
       get_active_package: "現在のパッケージを確認する",

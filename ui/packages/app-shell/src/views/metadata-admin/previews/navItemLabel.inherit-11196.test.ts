@@ -26,10 +26,13 @@
 import { describe, it, expect } from 'vitest';
 import { resolveNavItemLabel, type NavTargetLabelResolver } from '@object-ui/layout';
 import type { NavigationItem } from '@object-ui/types';
+import { resolveI18nLabel, type I18nLabel } from '@objectstack/spec/ui';
 import {
   clearedLabel,
   inheritedNavEntryText,
   navEntryLabelText,
+  navItemLabelText,
+  renamedLabel,
   type NavEntryLike,
 } from './navItemLabel';
 
@@ -148,5 +151,59 @@ describe('objectui#11196 — clearedLabel restores inheritance, the inverse of r
 
   it('a map left with no text in any language clears to no key', () => {
     expect(clearedLabel({ 'zh-CN': '客户' }, 'zh-CN')).toBeUndefined();
+  });
+});
+
+/**
+ * #30910 — where the platform table splits a language by script, the resolver
+ * reads a sibling of the locale's own script over a bare language of the other
+ * one (`zh-TW` under `zh-Hant` in `{ zh, 'zh-TW' }`, bare `zh` meaning
+ * `zh-Hans`). The entry a rename writes and a clear deletes must be that same
+ * entry, or a Traditional editor overwrites the Simplified text while the
+ * Traditional text stays on screen. Pinned against `resolveI18nLabel` itself.
+ */
+describe('#30910 — renamedLabel and clearedLabel change the entry the resolver shows', () => {
+  /** `[map, designer locale, the key the resolver reads and an edit owns]` */
+  const OWNED: ReadonlyArray<readonly [Record<string, string>, string, string]> = [
+    [{ en: 'Customer', zh: '客户', 'zh-TW': '客戶' }, 'zh-Hant', 'zh-TW'],
+    [{ en: 'Customer', zh: '客户', 'zh-TW': '客戶' }, 'zh-TW', 'zh-TW'],
+    [{ en: 'Customer', zh: '客户', 'zh-HK': '客戶' }, 'zh-HK', 'zh-HK'],
+    [{ en: 'Customer', zh: '客户', 'zh-Hant': '客戶' }, 'zh-HK', 'zh-Hant'],
+    [{ en: 'Customer', 'zh-TW': '客戶', zh: '客户' }, 'zh-CN', 'zh'],
+    [{ en: 'Customer', 'zh-TW': '客戶', zh: '客户' }, 'zh-Hans', 'zh'],
+  ];
+
+  it.each(OWNED)('%j in %s: the resolver reads %s', (map, locale, key) => {
+    expect(resolveI18nLabel(map as I18nLabel, locale)).toBe(map[key]);
+  });
+
+  it.each(OWNED)('%j renamed in %s writes %s, shows the new text, and keeps every other entry', (map, locale, key) => {
+    const next = renamedLabel(map as I18nLabel, 'RENAMED', locale) as Record<string, string>;
+    expect(next[key]).toBe('RENAMED');
+    for (const other of Object.keys(map).filter((k) => k !== key)) expect(next[other]).toBe(map[other]);
+    expect(Object.keys(next)).toEqual(Object.keys(map));
+    expect(navItemLabelText(next as I18nLabel, locale)).toBe('RENAMED');
+  });
+
+  it.each(OWNED)('%j cleared in %s deletes %s and nothing else', (map, locale, key) => {
+    const rest = Object.fromEntries(Object.entries(map).filter(([k]) => k !== key));
+    expect(clearedLabel(map as I18nLabel, locale)).toEqual(rest);
+  });
+
+  /** Byte-identical controls: `[map, locale, what main's rename wrote]`. */
+  const UNCHANGED: ReadonlyArray<readonly [Record<string, string>, string, Record<string, string>]> = [
+    // Neither the exact tag nor the bare language: the exact tag is added, a sibling region is not owned.
+    [{ en: 'Customer', 'zh-CN': '客户', 'zh-TW': '客戶' }, 'zh-Hant', { en: 'Customer', 'zh-CN': '客户', 'zh-TW': '客戶', 'zh-Hant': 'RENAMED' }],
+    [{ en: 'Customer', 'zh-TW': '客戶' }, 'zh-Hant', { en: 'Customer', 'zh-TW': '客戶', 'zh-Hant': 'RENAMED' }],
+    // The bare language with no sibling of the locale's script: the bare language, as before.
+    [{ en: 'Customer', zh: '客户' }, 'zh-Hant', { en: 'Customer', zh: 'RENAMED' }],
+    [{ en: 'Customer', zh: '客户', 'zh-TW': '客戶' }, 'zh-CN', { en: 'Customer', zh: 'RENAMED', 'zh-TW': '客戶' }],
+    // Languages the table names once.
+    [{ en: 'Accounts', 'en-GB': 'Accounts (GB)' }, 'en-US', { en: 'RENAMED', 'en-GB': 'Accounts (GB)' }],
+    [{ pt: 'Contas', 'pt-PT': 'Contas (PT)' }, 'pt-BR', { pt: 'RENAMED', 'pt-PT': 'Contas (PT)' }],
+  ];
+
+  it.each(UNCHANGED)('%j renamed in %s writes exactly as before', (map, locale, expected) => {
+    expect(renamedLabel(map as I18nLabel, 'RENAMED', locale)).toEqual(expected);
   });
 });

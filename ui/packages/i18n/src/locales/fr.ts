@@ -4128,6 +4128,7 @@ const fr = {
       create_record: "Créer la fiche",
       create_seed: "Générer des données d’exemple pour les objets",
       delete_field: "Supprimer le champ",
+      delete_package: "Supprimer un paquet",
       describe_metadata: "Examiner les métadonnées",
       describe_object: "Examiner la structure de l’objet",
       get_active_package: "Vérifier le paquet actif",

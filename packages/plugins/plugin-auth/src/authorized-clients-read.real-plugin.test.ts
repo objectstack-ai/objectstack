@@ -28,7 +28,7 @@ import { describe, it, expect, vi, beforeEach, afterEach, afterAll } from 'vites
 import { Hono } from 'hono';
 import { ADMIN_FULL_ACCESS } from '@objectstack/spec/identity';
 import type { PluginContext } from '@objectstack/core';
-import { AuthManager } from './auth-manager';
+import { AuthManager, OAUTH_ORGANIZATION_CLAIM } from './auth-manager';
 import { AuthPlugin } from './auth-plugin';
 import { createMemoryEngine } from './impersonation-bearer-rotation.test';
 import { inviteForAudienceGate } from './audience-gate-test-support';
@@ -39,6 +39,14 @@ import {
   AUTHORIZED_CLIENTS_PATH,
   AUTHORIZED_CLIENTS_READ_CAP,
 } from './authorized-clients-read';
+import {
+  ADMIN_AUTHORIZED_CLIENT_WITHDRAW_PATH,
+  AUTHORIZED_CLIENT_WITHDRAW_NOT_FOUND_MESSAGE,
+  AUTHORIZED_CLIENT_WITHDRAW_PATH,
+  type AuthorizedClientWithdrawDeps,
+  runOwnAuthorizedClientWithdraw,
+} from './authorized-clients-withdraw';
+import { resolveAttributedActor } from './auth-actor-attribution';
 
 const SECRET = 'test-secret-at-least-32-chars-long-30918';
 const PASSWORD = 'S3cure!Passw0rd-authorized-clients';
@@ -261,7 +269,59 @@ const arrange = async () => {
     }
   };
 
-  return { engine, manager, ids, signIn, sessionUser, registerClient, grant, get, expectNoSecretMaterial };
+  /** A POST to one of the plugin's own mounts, with a JSON body (a string is sent as is). */
+  const post = (path: string, body: unknown, cookie?: string) =>
+    app.request(`${ORIGIN}${BASE}${path}`, {
+      method: 'POST',
+      headers: { origin: ORIGIN, 'content-type': 'application/json', ...(cookie ? { cookie } : {}) },
+      body: typeof body === 'string' ? body : JSON.stringify(body),
+    });
+
+  /**
+   * An MCP access token for this deployment, as the provider mints one under a
+   * grant: signed by the jwt plugin, `sub` the person, `azp` the client, the
+   * organization claim the consent's own (`reference_id`), `iat` now.
+   */
+  const mint = async (userId: string, clientId: string, organizationId?: string): Promise<string> => {
+    const api: any = await manager.getApi();
+    return (
+      await api.signJWT({
+        body: {
+          payload: {
+            iat: Math.floor(Date.now() / 1000),
+            sub: userId,
+            azp: clientId,
+            scope: 'data:read',
+            iss: manager.getAuthIssuer(),
+            aud: manager.getMcpResourceUrl(),
+            ...(organizationId ? { [OAUTH_ORGANIZATION_CLAIM]: organizationId } : {}),
+          },
+        },
+      })
+    ).token;
+  };
+
+  const consentIds = () => ((engine.tables.get('sys_oauth_consent') ?? []) as any[]).map((row) => String(row.id));
+  const refreshTokensOf = (userId: string, clientId: string) =>
+    ((engine.tables.get('sys_oauth_refresh_token') ?? []) as any[]).filter(
+      (row) => row.user_id === userId && row.client_id === clientId,
+    );
+
+  return {
+    engine,
+    manager,
+    ids,
+    signIn,
+    sessionUser,
+    registerClient,
+    grant,
+    get,
+    post,
+    mint,
+    consentIds,
+    refreshTokensOf,
+    expectNoSecretMaterial,
+  };
 };
 
 type Rig = Awaited<ReturnType<typeof arrange>>;
@@ -545,5 +605,230 @@ describe('#30918 GET /admin/authorized-clients — another person\'s grants', ()
     const answer = await readJson(await rig.get(`${ADMIN_AUTHORIZED_CLIENTS_PATH}?userId=${rig.ids.alice}`, admin));
     expect(answer.status, answer.text).toBe(200);
     expect(answer.body).toEqual({ success: true, data: { clients: [], truncated: false } });
+  });
+});
+
+describe('#31048 POST /authorized-clients/withdraw — the caller\'s own grant', () => {
+  it('a member withdraws their own grant: the row and its refresh family go, and that token is refused on its next call', async () => {
+    const rig = await arrange();
+    const bobGrants = await grantBob(rig);
+    const deskToken = await rig.mint(rig.ids.bob, 'client_desk', ORG_ACME);
+    const ideToken = await rig.mint(rig.ids.bob, 'client_ide', ORG_BETA);
+    expect(await rig.manager.verifyMcpAccessToken(deskToken), 'precondition: the grant admits its token').not.toBeNull();
+    expect(rig.refreshTokensOf(rig.ids.bob, 'client_desk'), 'precondition: the grant holds a refresh token').toHaveLength(1);
+
+    const bob = await rig.signIn(BOB_EMAIL);
+    const answer = await readJson(await rig.post(AUTHORIZED_CLIENT_WITHDRAW_PATH, { id: bobGrants.acme }, bob));
+    expect(answer.status, answer.text).toBe(200);
+    expect(answer.cacheControl).toBe('no-store');
+    expect(answer.body).toEqual({ success: true, data: { id: bobGrants.acme } });
+
+    expect(rig.consentIds()).not.toContain(bobGrants.acme);
+    expect(rig.refreshTokensOf(rig.ids.bob, 'client_desk')).toEqual([]);
+    expect(await rig.manager.verifyMcpAccessToken(deskToken), 'the withdrawn grant\'s token is refused').toBeNull();
+    // Nothing else moved: Bob's other grants, their token and their refresh family.
+    expect(await rig.manager.verifyMcpAccessToken(ideToken)).not.toBeNull();
+    expect(rig.refreshTokensOf(rig.ids.bob, 'client_ide')).toHaveLength(1);
+    const list = await readJson(await rig.get(AUTHORIZED_CLIENTS_PATH, bob));
+    expect(list.body.data.clients.map((row: any) => row.id)).toEqual([bobGrants.beta, bobGrants.none]);
+
+    // Withdrawn once, it is gone: the same id again is the one not-found answer.
+    const again = await readJson(await rig.post(AUTHORIZED_CLIENT_WITHDRAW_PATH, { id: bobGrants.acme }, bob));
+    expect(again.status, again.text).toBe(404);
+    expect(again.body).toEqual({
+      success: false,
+      error: { code: 'RESOURCE_NOT_FOUND', message: AUTHORIZED_CLIENT_WITHDRAW_NOT_FOUND_MESSAGE },
+    });
+  });
+
+  it('another person\'s id is refused with the SAME bytes as an id naming no grant, and their grant stays in place', async () => {
+    const rig = await arrange();
+    const bobGrants = await grantBob(rig);
+    const deskToken = await rig.mint(rig.ids.bob, 'client_desk', ORG_ACME);
+    const before = rig.consentIds();
+
+    // A member, and a platform administrator on the OWN door: it is keyed by
+    // the session's subject, so standing elsewhere widens nothing here.
+    for (const email of [ALICE_EMAIL, ADMIN_EMAIL]) {
+      const cookie = await rig.signIn(email);
+      const others = await readJson(await rig.post(AUTHORIZED_CLIENT_WITHDRAW_PATH, { id: bobGrants.acme }, cookie));
+      const unknown = await readJson(await rig.post(AUTHORIZED_CLIENT_WITHDRAW_PATH, { id: 'consent_nobody_31048' }, cookie));
+      expect(others.status, `${email}: ${others.text}`).toBe(404);
+      expect(others.body.error.code, email).toBe('RESOURCE_NOT_FOUND');
+      expect(others.text, `${email}: the answer says nothing about whether the id exists`).toBe(unknown.text);
+      expect(others.text).not.toContain(rig.ids.bob);
+      expect(others.text).not.toContain('client_desk');
+    }
+    expect(rig.consentIds()).toEqual(before);
+    expect(rig.refreshTokensOf(rig.ids.bob, 'client_desk')).toHaveLength(1);
+    expect(await rig.manager.verifyMcpAccessToken(deskToken), 'Bob\'s assistant still connects').not.toBeNull();
+  });
+
+  it('anonymous is 401; a query parameter, a foreign body key, a missing id or a non-object body is 400 VALIDATION_ERROR; unparseable JSON is 400 INVALID_REQUEST — and nothing moves', async () => {
+    const rig = await arrange();
+    const bobGrants = await grantBob(rig);
+    const before = rig.consentIds();
+
+    const anon = await readJson(await rig.post(AUTHORIZED_CLIENT_WITHDRAW_PATH, { id: bobGrants.acme }));
+    expect(anon.status, anon.text).toBe(401);
+    expect(anon.body.error.code).toBe('UNAUTHENTICATED');
+
+    const bob = await rig.signIn(BOB_EMAIL);
+    const cases: Array<[string, string, unknown]> = [
+      ['query parameter', `${AUTHORIZED_CLIENT_WITHDRAW_PATH}?userId=${rig.ids.alice}`, { id: bobGrants.acme }],
+      ['foreign body key', AUTHORIZED_CLIENT_WITHDRAW_PATH, { id: bobGrants.acme, userId: rig.ids.alice }],
+      ['missing id', AUTHORIZED_CLIENT_WITHDRAW_PATH, {}],
+      ['blank id', AUTHORIZED_CLIENT_WITHDRAW_PATH, { id: '  ' }],
+      ['non-string id', AUTHORIZED_CLIENT_WITHDRAW_PATH, { id: 42 }],
+      ['array body', AUTHORIZED_CLIENT_WITHDRAW_PATH, [bobGrants.acme]],
+    ];
+    for (const [label, path, body] of cases) {
+      const answer = await readJson(await rig.post(path, body, bob));
+      expect(answer.status, `${label}: ${answer.text}`).toBe(400);
+      expect(answer.body.error.code, label).toBe('VALIDATION_ERROR');
+    }
+    const malformed = await readJson(await rig.post(AUTHORIZED_CLIENT_WITHDRAW_PATH, `{"id": "${bobGrants.acme}"`, bob));
+    expect(malformed.status, malformed.text).toBe(400);
+    expect(malformed.body.error.code).toBe('INVALID_REQUEST');
+    expect(rig.consentIds()).toEqual(before);
+  });
+});
+
+describe('#31048 POST /admin/authorized-clients/withdraw — another person\'s grant', () => {
+  it('a platform administrator withdraws a managed person\'s grant, and that token is refused on its next call', async () => {
+    const rig = await arrange();
+    const bobGrants = await grantBob(rig);
+    const ideToken = await rig.mint(rig.ids.bob, 'client_ide', ORG_BETA);
+    const deskToken = await rig.mint(rig.ids.bob, 'client_desk', ORG_ACME);
+    expect(await rig.manager.verifyMcpAccessToken(ideToken), 'precondition: the grant admits its token').not.toBeNull();
+
+    const admin = await rig.signIn(ADMIN_EMAIL);
+    const answer = await readJson(
+      await rig.post(ADMIN_AUTHORIZED_CLIENT_WITHDRAW_PATH, { userId: rig.ids.bob, id: bobGrants.beta }, admin),
+    );
+    expect(answer.status, answer.text).toBe(200);
+    expect(answer.cacheControl).toBe('no-store');
+    expect(answer.body).toEqual({ success: true, data: { id: bobGrants.beta } });
+
+    expect(rig.consentIds()).not.toContain(bobGrants.beta);
+    expect(rig.refreshTokensOf(rig.ids.bob, 'client_ide')).toEqual([]);
+    expect(await rig.manager.verifyMcpAccessToken(ideToken), 'the withdrawn grant\'s token is refused').toBeNull();
+    expect(await rig.manager.verifyMcpAccessToken(deskToken), 'another grant of the person still admits').not.toBeNull();
+    const list = await readJson(await rig.get(`${ADMIN_AUTHORIZED_CLIENTS_PATH}?userId=${rig.ids.bob}`, admin));
+    expect(list.body.data.clients.map((row: any) => row.id)).toEqual([bobGrants.none, bobGrants.acme]);
+  });
+
+  it('a consent that is not the named person\'s is the same 404 as none, and stays; a userId naming no user is the read\'s 404', async () => {
+    const rig = await arrange();
+    const bobGrants = await grantBob(rig);
+    const before = rig.consentIds();
+    const admin = await rig.signIn(ADMIN_EMAIL);
+
+    const mismatched = await readJson(
+      await rig.post(ADMIN_AUTHORIZED_CLIENT_WITHDRAW_PATH, { userId: rig.ids.alice, id: bobGrants.acme }, admin),
+    );
+    const unknown = await readJson(
+      await rig.post(ADMIN_AUTHORIZED_CLIENT_WITHDRAW_PATH, { userId: rig.ids.alice, id: 'consent_nobody_31048' }, admin),
+    );
+    expect(mismatched.status, mismatched.text).toBe(404);
+    expect(mismatched.body).toEqual({
+      success: false,
+      error: { code: 'RESOURCE_NOT_FOUND', message: AUTHORIZED_CLIENT_WITHDRAW_NOT_FOUND_MESSAGE },
+    });
+    expect(mismatched.text).toBe(unknown.text);
+
+    const noUser = await readJson(
+      await rig.post(ADMIN_AUTHORIZED_CLIENT_WITHDRAW_PATH, { userId: 'usr_nobody_31048', id: bobGrants.acme }, admin),
+    );
+    expect(noUser.status, noUser.text).toBe(404);
+    expect(noUser.body).toEqual({
+      success: false,
+      error: { code: 'RESOURCE_NOT_FOUND', message: ADMIN_AUTHORIZED_CLIENTS_USER_NOT_FOUND_MESSAGE },
+    });
+
+    for (const [label, body] of [
+      ['missing userId', { id: bobGrants.acme }],
+      ['missing id', { userId: rig.ids.bob }],
+      ['foreign key', { userId: rig.ids.bob, id: bobGrants.acme, organizationId: ORG_ACME }],
+    ] as const) {
+      const answer = await readJson(await rig.post(ADMIN_AUTHORIZED_CLIENT_WITHDRAW_PATH, body, admin));
+      expect(answer.status, `${label}: ${answer.text}`).toBe(400);
+      expect(answer.body.error.code, label).toBe('VALIDATION_ERROR');
+    }
+    expect(rig.consentIds()).toEqual(before);
+  });
+
+  it('a member, an organization OWNER, an organization ADMIN and the person themself are refused with ONE answer, whether or not the person or the grant exists, and nothing moves', async () => {
+    const rig = await arrange();
+    const bobGrants = await grantBob(rig);
+    const deskToken = await rig.mint(rig.ids.bob, 'client_desk', ORG_ACME);
+    const before = rig.consentIds();
+    const callers = {
+      member: await rig.signIn(ALICE_EMAIL),
+      orgOwner: await rig.signIn(OWNER_EMAIL),
+      orgAdmin: await rig.signIn(ORG_ADMIN_EMAIL),
+      self: await rig.signIn(BOB_EMAIL),
+    };
+    for (const [who, cookie] of Object.entries(callers)) {
+      expect((await rig.sessionUser(cookie))?.isPlatformAdmin, `precondition: ${who} holds no platform standing`).toBe(false);
+      const existing = await readJson(
+        await rig.post(ADMIN_AUTHORIZED_CLIENT_WITHDRAW_PATH, { userId: rig.ids.bob, id: bobGrants.acme }, cookie),
+      );
+      const noPerson = await readJson(
+        await rig.post(ADMIN_AUTHORIZED_CLIENT_WITHDRAW_PATH, { userId: 'usr_nobody_31048', id: 'consent_nobody_31048' }, cookie),
+      );
+      const empty = await readJson(await rig.post(ADMIN_AUTHORIZED_CLIENT_WITHDRAW_PATH, {}, cookie));
+      expect(existing.status, `${who}: ${existing.text}`).toBe(403);
+      expect(existing.body.error.code, who).toBe('PERMISSION_DENIED');
+      expect(noPerson.text, who).toBe(existing.text);
+      expect(empty.text, who).toBe(existing.text);
+      expect(existing.text).not.toContain(rig.ids.bob);
+    }
+    const anon = await readJson(
+      await rig.post(ADMIN_AUTHORIZED_CLIENT_WITHDRAW_PATH, { userId: rig.ids.bob, id: bobGrants.acme }),
+    );
+    expect(anon.status, anon.text).toBe(401);
+    expect(anon.body.error.code).toBe('UNAUTHENTICATED');
+
+    expect(rig.consentIds()).toEqual(before);
+    expect(await rig.manager.verifyMcpAccessToken(deskToken), 'Bob\'s assistant still connects').not.toBeNull();
+  });
+});
+
+describe('#31048 the own withdraw credits the administrator at the keyboard of an impersonation session', () => {
+  /** The actor the revoke's writes are credited to, read inside the revoke as the adapter's writes read it. */
+  const creditOf = async (session: unknown) => {
+    let credited: unknown = 'revoke never ran';
+    const deps: AuthorizedClientWithdrawDeps = {
+      readCallerSession: async () => session as any,
+      findConsentOf: async (userId, id) => (id === 'consent_1' ? { clientId: 'client_1', userId } : null),
+      revokeGrant: async () => {
+        credited = await resolveAttributedActor();
+      },
+      userExists: async () => true,
+    };
+    const answer = await runOwnAuthorizedClientWithdraw(deps, {
+      raw: new Request(`${ORIGIN}${BASE}${AUTHORIZED_CLIENT_WITHDRAW_PATH}`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ id: 'consent_1' }),
+      }),
+      queries: {},
+    });
+    expect(answer.status, JSON.stringify(answer.body)).toBe(200);
+    return credited;
+  };
+
+  it('an impersonation session: the person, with the impersonating administrator beside them', async () => {
+    expect(
+      await creditOf({ user: { id: 'usr_person_31048' }, session: { impersonatedBy: 'usr_admin_31048' } }),
+    ).toEqual({ userId: 'usr_person_31048', impersonatedBy: 'usr_admin_31048' });
+  });
+
+  it('an ordinary session: the person alone, no impersonatedBy invented', async () => {
+    expect(await creditOf({ user: { id: 'usr_person_31048' }, session: {} })).toEqual({ userId: 'usr_person_31048' });
+    expect(
+      await creditOf({ user: { id: 'usr_person_31048' }, session: { impersonatedBy: '  ' } }),
+    ).toEqual({ userId: 'usr_person_31048' });
   });
 });

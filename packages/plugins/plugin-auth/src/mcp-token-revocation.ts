@@ -22,8 +22,9 @@
  *    this: a falsy value when the token is revoked, and callers fail CLOSED.
  *  - **`/oauth2/revoke` deletes it** ({@link answerMcpTokenRevocation}) and
  *    revokes the client's refresh family for that user.
- *  - **`/oauth2/delete-consent`** (the Console's withdraw) needs nothing here:
- *    it deletes the same row, and the read above refuses on the next request.
+ *  - **The Console's withdraw** (`authorized-clients-withdraw.ts`, the own and
+ *    the admin door) revokes a grant through {@link revokeMcpGrant} too, keyed
+ *    by the consent id; the read above refuses on the next request.
  *
  * No object, table or gate is added. The costs the ruling accepts: one
  * indexed read per MCP request (`client_id` and `user_id` are both indexed

@@ -1,11 +1,67 @@
+import { PLATFORM_LOCALE_TAGS, platformLocaleTagOf } from '@objectstack/spec/system';
+
+/**
+ * The platform table tag `lang` means, when the table splits its base language
+ * into more than one tag (`zh` into `zh-Hans` and `zh-Hant`), else `undefined`.
+ *
+ * Both readings are the spec's: which tag a code means is
+ * `platformLocaleTagOf` (`zh-TW` and `zh-HK` mean `zh-Hant`, `zh` and `zh-CN`
+ * mean `zh-Hans`), and whether a base is split is read off
+ * `PLATFORM_LOCALE_TAGS`. A base the table names once (`pt`, `en`) answers
+ * `undefined`, so its siblings keep resolving in authoring order.
+ */
+function splitScriptTagOf(lang: string): string | undefined {
+  const tag = platformLocaleTagOf(lang);
+  if (tag === undefined) return undefined;
+  const base = tag.split('-')[0];
+  return PLATFORM_LOCALE_TAGS.filter((t) => t.split('-')[0] === base).length > 1 ? tag : undefined;
+}
+
+/**
+ * The entry key the first three limbs pick for `lang` (already normalized),
+ * or `undefined` when none hits. ONE function for the read side
+ * ({@link pickLocalized}) and the write side ({@link localeWriteKey}), so the
+ * entry an author sees is the entry an edit replaces.
+ *
+ * 1. the exact tag;
+ * 2. the base language (`zh-CN` -> `zh`), when it means the session's language;
+ * 3. a sibling sharing the base that means the session's language: in a
+ *    `zh-Hant` session over `{ 'zh-CN', 'zh-TW' }` that is `zh-TW`, whatever the
+ *    authoring order. Applies only where {@link splitScriptTagOf} answers;
+ * 4. the base language, whatever it means;
+ * 5. the first sibling sharing the base, in authoring order.
+ *
+ * Limbs 2 and 3 only reorder entries of the session's own language ahead of
+ * the others. A map with no such entry, and every language whose base the
+ * table names once, resolve exactly as limbs 4 and 5 always did.
+ */
+function localizedEntryKey(
+  lang: string,
+  usable: (key: string) => boolean,
+  keys: readonly string[],
+): string | undefined {
+  if (usable(lang)) return lang;
+  const base = lang.split('-')[0];
+  const siblings = keys.filter((k) => k.split('-')[0] === base && usable(k));
+  const script = splitScriptTagOf(lang);
+  if (script !== undefined) {
+    if (usable(base) && platformLocaleTagOf(base) === script) return base;
+    const sameScript = siblings.find((k) => platformLocaleTagOf(k) === script);
+    if (sameScript !== undefined) return sameScript;
+  }
+  if (usable(base)) return base;
+  return siblings[0];
+}
+
 /**
  * Resolve a possibly-localized value to the best string for a language.
  *
  * Accepts a plain string (passed through) or an i18n object keyed by language
  * code — e.g. `{ en: 'Pricing', 'zh-CN': '定价', zh: '定价', default: 'Pricing' }`.
  * Resolution order: exact language -> base language (`zh-CN` -> `zh`) -> any
- * region-qualified key sharing the base (`zh` -> `zh-CN`) -> `default` -> `en`
- * -> first value. Unlike a `default`/`en`-only resolver this is genuinely
+ * region-qualified key sharing the base (`zh` -> `zh-CN`), an entry of the
+ * session's own script first (see {@link localizedEntryKey}) -> `default` ->
+ * `en` -> first value. Unlike a `default`/`en`-only resolver this is genuinely
  * locale-aware, so server-driven metadata (page text, action param labels) can
  * carry inline translations instead of rendering "[object Object]" or English.
  *
@@ -49,16 +105,13 @@ export function pickLocalized(value: unknown, language: string | undefined | nul
       return typeof entry === 'string' ? entry : undefined;
     };
     const lang = (language || 'en').trim();
-    const base = lang.split('-')[0];
     // Runtime language is often a bare base code ('zh') while metadata authors
-    // write full BCP-47 tags ('zh-CN') — upgrade to any key sharing the base.
+    // write full BCP-47 tags ('zh-CN') — upgrade to a key sharing the base.
     // `Object.keys` is already own-and-enumerable, so `read` here is uniformity
     // rather than a second guard.
-    const regional = Object.keys(o).find((k) => k.split('-')[0] === base && read(k) !== undefined);
+    const entry = localizedEntryKey(lang, (k) => read(k) !== undefined, Object.keys(o));
     const pick =
-      read(lang) ??
-      read(base) ??
-      (regional !== undefined ? read(regional) : undefined) ??
+      (entry !== undefined ? read(entry) : undefined) ??
       read('default') ??
       read('en') ??
       Object.values(o).find((v): v is string => typeof v === 'string');
@@ -71,8 +124,9 @@ export function pickLocalized(value: unknown, language: string | undefined | nul
  * The map key an edit made in `language` must be WRITTEN to — the write-side
  * twin of {@link pickLocalized}'s read limbs.
  *
- * It deliberately implements only the first three limbs (exact tag, base
- * language, region-qualified sibling) and then STOPS. `pickLocalized` continues
+ * It deliberately follows only the first three limbs (exact tag, base
+ * language, region-qualified sibling — one {@link localizedEntryKey} call, the
+ * very function the read side calls) and then STOPS. `pickLocalized` continues
  * into `default` -> `en` -> first value, and those last three limbs must never
  * be write targets: they are DISPLAY fallbacks that hand back *another*
  * locale's string. Following them would mean an author editing in `fr`, shown
@@ -95,12 +149,9 @@ function localeWriteKey(
   language: string | undefined | null,
 ): string {
   const lang = (language || 'en').trim() || 'en';
-  const base = lang.split('-')[0];
   const has = (key: string): boolean =>
     Object.prototype.hasOwnProperty.call(o, key) && typeof o[key] === 'string';
-  if (has(lang)) return lang;
-  if (has(base)) return base;
-  return Object.keys(o).find((k) => k.split('-')[0] === base && has(k)) ?? lang;
+  return localizedEntryKey(lang, has, Object.keys(o)) ?? lang;
 }
 
 /**
