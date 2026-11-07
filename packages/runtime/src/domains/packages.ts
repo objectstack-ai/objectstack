@@ -897,7 +897,9 @@ function isDisableablePackage(engine: unknown, id: string | undefined): boolean 
  * [#30379 ruling A, ADR-0141 Open items 4] The code `PATCH /packages/:id/disable`
  * answers, with `409`, while a validation rule of any enabled package (declared
  * dependent or not, an app's `.custom` pair included) reads a field the package
- * adds through `objectExtensions` ({@link readDisableDependentRules}). Registered
+ * adds through `objectExtensions` ({@link readDisableDependentRules}). [#30999]
+ * `DELETE /packages/:id` answers it too, on the same verdict: an uninstall
+ * withdraws those fields as a disable withholds them. Registered
  * under `@objectstack/runtime` in `ERROR_CODE_LEDGER` (#30724); asserted by value.
  * The refusal carries the code and a message naming every rule, and no
  * `error.details` beyond the code: a machine-readable shape for the
@@ -3756,6 +3758,32 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             // listing (and with it every object the package registers) until
             // the next restart.
             const readOnly = requireWritablePackage(deps, qlService, id, 'delete'); if (readOnly) return readOnly;
+            // [#30999, ADR-0141 Open items 4] The uninstall withdraws the
+            // package's `objectExtensions` fields from the served objects just
+            // as a disable withholds them, so it asks the disable door's
+            // verdict ({@link readDisableDependentRules}, never a second copy):
+            // while an active validation rule of any enabled package reads one
+            // of those fields, every write to the rule's object would be
+            // refused once the package is gone, with no package left to
+            // re-enable. Refused with the disable door's code and sentence
+            // ({@link disableDependentRulesMessage}) under an uninstall lead,
+            // BEFORE the protocol is resolved and `deletePackage`, the
+            // registry withdrawal and the disable-record clear below, so a
+            // refused uninstall leaves the stored rows, the running registry
+            // and the environment's state exactly as they were. A package
+            // already disabled withholds its fields already: the verdict is
+            // empty and the uninstall proceeds as before.
+            const dependents = readDisableDependentRules(registry, id);
+            if (dependents.length > 0) {
+                return {
+                    handled: true,
+                    response: deps.error(
+                        disableDependentRulesMessage(`Package '${id}' cannot be uninstalled`, dependents),
+                        PACKAGE_DISABLE_RESTRICTED_BY_VALIDATION_RULE.status,
+                        { code: PACKAGE_DISABLE_RESTRICTED_BY_VALIDATION_RULE.code },
+                    ),
+                };
+            }
             const protocol = await resolveProtocol(deps, _context);
             const persists = Boolean(protocol && typeof protocol.deletePackage === 'function');
 
