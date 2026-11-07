@@ -202,3 +202,126 @@ describe('AppPlugin publishes the rows its seed landed on (#23354)', () => {
         expect(read()!.seededRecordIds!('crm_case')).toEqual([]);
     });
 });
+
+/**
+ * #31021 — every seed load AppPlugin runs keeps, and honours, the record of
+ * which seed rows landed in the organization it seeds (`sys_seed_landed_key`):
+ * a row a person deleted is not inserted again by the next boot (`serve`'s
+ * inline seed) or the next per-organization replay (what a host runs on an
+ * upgrade), and the replayer's `{ reseed: true }` is the deliberate re-seed
+ * that brings it back.
+ *
+ * The record object is registered the way `@objectstack/platform-objects`
+ * registers it; the engine is the faithful double above, so every write the
+ * loader makes lands in `engine.store`.
+ */
+describe('AppPlugin seed loads honour the record of landed seed rows (#31021)', () => {
+    const OLD_BUDGET = process.env.OS_INLINE_SEED_BUDGET_MS;
+    const OLD_MULTI = process.env.OS_MULTI_ORG_ENABLED;
+
+    beforeEach(() => {
+        delete process.env.OS_MULTI_ORG_ENABLED;
+        process.env.OS_INLINE_SEED_BUDGET_MS = '8000';
+    });
+    afterEach(() => {
+        if (OLD_BUDGET === undefined) delete process.env.OS_INLINE_SEED_BUDGET_MS;
+        else process.env.OS_INLINE_SEED_BUDGET_MS = OLD_BUDGET;
+        if (OLD_MULTI === undefined) delete process.env.OS_MULTI_ORG_ENABLED;
+        else process.env.OS_MULTI_ORG_ENABLED = OLD_MULTI;
+    });
+
+    const LEDGER = 'sys_seed_landed_key';
+    const objects: Record<string, any> = {
+        ...OBJECTS,
+        sys_organization: { name: 'sys_organization', systemFields: { tenant: false }, fields: { name: { type: 'text' } } },
+        [LEDGER]: {
+            name: LEDGER,
+            fields: {
+                object_name: { type: 'text' },
+                seed_key: { type: 'textarea' },
+                organization_id: { type: 'lookup', reference: 'sys_organization' },
+            },
+        },
+    };
+    const metadata = {
+        getObject: vi.fn(async (name: string) => objects[name]),
+        listObjects: vi.fn(async () => Object.values(objects)),
+        get: vi.fn(async (_type: string, name: string) => objects[name]),
+        list: vi.fn(async () => []),
+        register: vi.fn(async () => {}),
+        unregister: vi.fn(async () => {}),
+        exists: vi.fn(async () => false),
+        listNames: vi.fn(async () => []),
+    };
+
+    function context(engine: any) {
+        const services = new Map<string, unknown>();
+        const ctx = {
+            logger: { info: vi.fn(), error: vi.fn(), warn: vi.fn(), debug: vi.fn() },
+            registerService: vi.fn((name: string, svc: unknown) => {
+                if (services.has(name)) throw new Error(`service '${name}' already registered`);
+                services.set(name, svc);
+            }),
+            getService: vi.fn((name: string) => {
+                if (name === 'objectql') return engine;
+                if (name === 'metadata') return metadata;
+                return services.get(name);
+            }),
+            getServices: vi.fn(() => new Map()),
+            hook: vi.fn(),
+            trigger: vi.fn(),
+        } as unknown as PluginContext;
+        return { ctx, services };
+    }
+
+    const cases = (engine: any, org: string) =>
+        (engine.store.crm_case ?? []).filter((r: any) => r.organization_id === org).map((r: any) => r.name).sort();
+    const upgraded = () => ({
+        ...bundle(),
+        data: [{ ...bundle().data[0], records: [...bundle().data[0].records, { name: 'CASE-3' }] }],
+    });
+
+    it("`serve`'s inline seed: a deleted row stays deleted across a reboot and an upgrade, whose new row lands", async () => {
+        const engine = createEngine();
+        // The `single` posture's Default Organization, created before seeds load.
+        engine.store.sys_organization = [{ id: 'org_default', name: 'Default' }];
+
+        await new AppPlugin(bundle()).start(context(engine).ctx);
+        expect(cases(engine, 'org_default')).toEqual(['CASE-1', 'CASE-2']);
+        expect(engine.store[LEDGER].map((r: any) => [r.organization_id, r.seed_key])).toEqual([
+            ['org_default', '[["name","CASE-1"]]'],
+            ['org_default', '[["name","CASE-2"]]'],
+        ]);
+
+        engine.store.crm_case = engine.store.crm_case.filter((r: any) => r.name !== 'CASE-2');
+        await new AppPlugin(bundle()).start(context(engine).ctx);
+        expect(cases(engine, 'org_default')).toEqual(['CASE-1']);
+
+        await new AppPlugin(upgraded()).start(context(engine).ctx);
+        expect(cases(engine, 'org_default')).toEqual(['CASE-1', 'CASE-3']);
+    });
+
+    it('the per-organization replay keeps it per organization, and `{ reseed: true }` is the door that brings a removed row back', async () => {
+        process.env.OS_MULTI_ORG_ENABLED = 'true';
+        const engine = createEngine();
+        const { ctx, services } = context(engine);
+        await new AppPlugin(bundle()).start(ctx);
+        const replayer = services.get('seed-replayer') as (orgId: string, options?: { reseed?: boolean }) => Promise<any>;
+
+        await replayer('org_a');
+        await replayer('org_b');
+        engine.store.crm_case = engine.store.crm_case.filter((r: any) => !(r.organization_id === 'org_a' && r.name === 'CASE-1'));
+
+        // The host's upgrade replay: org_a keeps its removal, org_b is untouched.
+        const replay = await replayer('org_a');
+        await replayer('org_b');
+        expect(cases(engine, 'org_a')).toEqual(['CASE-2']);
+        expect(cases(engine, 'org_b')).toEqual(['CASE-1', 'CASE-2']);
+        expect(replay).toMatchObject({ inserted: 0, skipped: 2, errors: [] });
+
+        // The deliberate re-seed.
+        const reseed = await replayer('org_a', { reseed: true });
+        expect(reseed).toMatchObject({ inserted: 1 });
+        expect(cases(engine, 'org_a')).toEqual(['CASE-1', 'CASE-2']);
+    });
+});
