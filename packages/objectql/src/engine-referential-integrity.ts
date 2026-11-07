@@ -52,7 +52,7 @@
 
 import { referenceTargetOf, type EngineQueryOptions } from '@objectstack/spec/data';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
-import { isUserBanInForce, keepsFlowWriteReferenceCheck, USER_BAN_FIELDS } from '@objectstack/core';
+import { isUserBanInForce, isVouchedReference, keepsFlowWriteReferenceCheck, USER_BAN_FIELDS } from '@objectstack/core';
 import { ValidationError, buildFieldError } from './validation/record-validator.js';
 import { servedAsStored } from './engine-top-level.js';
 import type { ObjectQL } from './engine.js';
@@ -219,6 +219,16 @@ export function referencesCheckedBeforeRules(context: unknown): boolean {
  * and a value the row already stores is not judged again (#29062). `tree`
  * keeps the elevated probe alone.
  *
+ * One value is not the caller's choice: a reference a service verb vouches for
+ * on its own write (`vouchForReference`, `@objectstack/core`), naming a record
+ * the same call authorized and created — the file-attachments writer's
+ * `sys_attachment.file_id`, inserted as the caller after its own attach check.
+ * For exactly that object, field and id the caller's read door is not asked;
+ * the elevated, tenant-kept existence probe still is. Every other value, field
+ * and object on the write is judged as above, and the mark comes from no
+ * request: it is a symbol-keyed context property no body, query or stored row
+ * can spell.
+ *
  * Fails OPEN when the target cannot be checked (unregistered object, no
  * driver, a probe that throws): an integrity check that cannot run must not
  * invent a rejection, and the alternative — refusing every write to an object
@@ -301,8 +311,12 @@ export async function assertReferencesResolve(
       if (v === null || v === undefined || v === '') continue;
       if (typeof v === 'object') continue;
       // [#22519, #29029] A master-detail header, a lookup target and a user
-      // must also be one the caller can read.
-      const callerReads = CALLER_READ_REFERENCE_TYPES.has(def?.type);
+      // must also be one the caller can read — except the one value a service
+      // verb vouches for on its own write: a record the same call authorized
+      // and created (`vouchForReference`, @objectstack/core). Its existence is
+      // still probed; nothing else on the write is admitted by it.
+      const callerReads = CALLER_READ_REFERENCE_TYPES.has(def?.type)
+        && !isVouchedReference(context, schema?.name, name, v);
       if (def?.type !== 'master_detail' && target === BAN_CHECKED_USER_OBJECT) {
         // [#30205] One probe answers both: the row's existence and its ban.
         // [#29029] The caller's read door comes first: a user it does not
