@@ -25,6 +25,7 @@ import { describe, it, expect, afterEach, vi } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { resolveThrownHttpError } from '@objectstack/types';
+import type { EngineAggregateOptions, EngineQueryOptions, FilterCondition } from '@objectstack/spec/data';
 import { SysUser, SysMember, SysBusinessUnit, SysBusinessUnitMember } from '@objectstack/platform-objects/identity';
 
 import { SecurityPlugin } from './security-plugin.js';
@@ -63,7 +64,11 @@ const PERMISSIONS = [
   // Carries an adminScope equal to the wide delegate's own: not strictly contained by it.
   { name: 'field_lead', label: 'Field lead (own name)', objects: CRUD, adminScope: eastScope(['field_user', 'field_rep', 'field_lead']) },
   // Narrow: allowlists the sets the positions LIST, not their own-name sets.
-  { name: 'east_admin', label: 'East delegate', objects: { ...CRUD, [UNIT_NOTE]: NOTE_CRUD }, adminScope: eastScope(['field_user']) },
+  // [#30758] It may not read `external_ref`, so the aggregate field guard (step 2.5b) has a field to refuse.
+  {
+    name: 'east_admin', label: 'East delegate', objects: { ...CRUD, [UNIT_NOTE]: NOTE_CRUD }, adminScope: eastScope(['field_user']),
+    fields: { 'sys_business_unit.external_ref': { readable: false } },
+  },
   // [#29029] A writer of the unit note with no admin scope at all.
   { name: 'note_writer', label: 'Note writer', objects: { [UNIT_NOTE]: NOTE_CRUD } },
   // Wide: also allowlists the own-name sets.
@@ -323,6 +328,121 @@ describe('[ADR-0090 D12, ruling of record 6663849489; #29029] a delegate reads t
         const h = await boot(posture);
         expect(await unitsRead(h, ORG_ADMIN)).toEqual(['bu_east', 'bu_east_field', 'bu_hq']);
         expect(await noteNaming(h, ORG_ADMIN, 'bu_hq')).toEqual({ status: 200 });
+      });
+    });
+  }
+});
+
+/** [#30758] The unit ids the system context reads under `filter` — what a door that compiles its own statement returns. */
+async function unitsUnder(h: Awaited<ReturnType<typeof boot>>, filter: Record<string, unknown> | null | undefined): Promise<string[]> {
+  const query: EngineQueryOptions = { ...(filter ? { where: filter as FilterCondition } : {}), context: SYS };
+  const rows = await h.engine.find('sys_business_unit', query);
+  return (Array.isArray(rows) ? rows : []).map((r: any) => String(r.id)).sort();
+}
+
+/** [#30758] An aggregate of `sys_business_unit` as `context`: the group names it counts, or the refusal. */
+async function unitAggregate(
+  h: Awaited<ReturnType<typeof boot>>,
+  context: any,
+  query: { where?: FilterCondition; groupBy: string[] },
+): Promise<string[] | { status: number; code?: string; forbiddenFields?: unknown }> {
+  try {
+    const aggregate: EngineAggregateOptions = { ...query, aggregations: [{ function: 'count', alias: 'n' }] };
+    const rows = await h.engine.aggregate('sys_business_unit', aggregate, { context });
+    return (Array.isArray(rows) ? rows : []).map((r: any) => `${String(r[query.groupBy[0]])}:${Number(r.n)}`).sort();
+  } catch (e) {
+    const r = resolveThrownHttpError(e);
+    return { status: r.status, code: r.code, forbiddenFields: (e as any)?.details?.forbiddenFields };
+  }
+}
+
+const layerOf = (decision: any, layer: string) => decision.layers.find((l: any) => l.layer === layer);
+
+describe('[ADR-0090 D12, ruling of record 6663849489; #30758] canReadObject and security/explain answer the delegated business-unit read as the read door does — three postures', () => {
+  const WRITER = delegateCtx('u_writer', 'note_writer');
+  const ORG_ADMIN = delegateCtx('u_org_admin', 'organization_admin');
+
+  for (const posture of POSTURES) {
+    describe(`posture '${posture}'`, () => {
+      it('canReadObject admits the delegate, and getReadFilter scopes a bypassing door to exactly the units the read door returns', async () => {
+        const h = await boot(posture);
+        const door = await unitsRead(h, NARROW);
+        expect(door).toEqual(['bu_east', 'bu_east_field']);
+        expect(await h.plugin.canReadObject('sys_business_unit', NARROW)).toBe(true);
+        expect(await unitsUnder(h, await h.plugin.getReadFilter('sys_business_unit', NARROW))).toEqual(door);
+      });
+
+      it('security/explain read: allowed, the object grant names the delegated scope, and its readFilter returns exactly the read door\'s units', async () => {
+        const h = await boot(posture);
+        const d: any = await h.plugin.explainAccessForCaller({ object: 'sys_business_unit', operation: 'read' }, NARROW);
+        expect(d.allowed).toBe(true);
+        expect(layerOf(d, 'object_crud').verdict).toBe('grants');
+        expect(await unitsUnder(h, d.readFilter)).toEqual(await unitsRead(h, NARROW));
+      });
+
+      it('security/explain of one unit: the units the scope covers are visible, the unit above it is not — asked by the delegate and by its organization administrator', async () => {
+        const h = await boot(posture);
+        await h.engine.insert('sys_user_permission_set',
+          { id: 'ups_delegate', user_id: 'u_delegate', permission_set: 'east_admin', organization_id: ORG_A }, { context: { isSystem: true, tenantId: ORG_A } });
+        for (const [asker, request] of [
+          ['delegate', (recordId: string) => h.plugin.explainAccessForCaller({ object: 'sys_business_unit', operation: 'read', recordId }, NARROW)],
+          ['organization administrator', (recordId: string) =>
+            h.plugin.explainAccessForCaller({ object: 'sys_business_unit', operation: 'read', userId: 'u_delegate', recordId }, ORG_ADMIN)],
+        ] as const) {
+          for (const unit of ['bu_east', 'bu_east_field']) {
+            const d: any = await request(unit);
+            expect(d.record?.visible, `${asker} · ${unit}`).toBe(true);
+          }
+          const above: any = await request('bu_hq');
+          expect(above.record?.visible, `${asker} · bu_hq`).toBe(false);
+        }
+      });
+
+      it('aggregate is the read door too: inside the scope it counts the covered units, outside it counts none, and the field guard still refuses an unreadable field', async () => {
+        const h = await boot(posture);
+        expect(await unitAggregate(h, NARROW, { groupBy: ['name'] })).toEqual(['east:1', 'east_field:1']);
+        expect(await unitAggregate(h, NARROW, { where: { id: 'bu_hq' }, groupBy: ['name'] })).toEqual([]);
+        expect(await unitAggregate(h, NARROW, { groupBy: ['external_ref'] }))
+          .toEqual({ status: 403, code: 'PERMISSION_DENIED', forbiddenFields: ['external_ref'] });
+        // CONTROL: the organization administrator counts every unit; a caller with no scope is refused the object.
+        expect(await unitAggregate(h, ORG_ADMIN, { groupBy: ['name'] })).toEqual(['east:1', 'east_field:1', 'hq:1']);
+        expect(await unitAggregate(h, WRITER, { groupBy: ['name'] })).toEqual({ status: 403, code: 'PERMISSION_DENIED', forbiddenFields: undefined });
+      });
+
+      it('CONTROL: a caller holding no scope is still refused by the door, canReadObject and explain alike', async () => {
+        const h = await boot(posture);
+        expect(await unitsRead(h, WRITER)).toEqual({ status: 403, code: 'PERMISSION_DENIED' });
+        expect(await h.plugin.canReadObject('sys_business_unit', WRITER)).toBe(false);
+        const d: any = await h.plugin.explainAccessForCaller({ object: 'sys_business_unit', operation: 'read' }, WRITER);
+        expect(d.allowed).toBe(false);
+        expect(layerOf(d, 'object_crud').verdict).toBe('denies');
+      });
+
+      it('CONTROL: an organization administrator\'s answers are unchanged — every unit, granted by its own set', async () => {
+        const h = await boot(posture);
+        expect(await h.plugin.canReadObject('sys_business_unit', ORG_ADMIN)).toBe(true);
+        expect(await unitsUnder(h, await h.plugin.getReadFilter('sys_business_unit', ORG_ADMIN))).toEqual(['bu_east', 'bu_east_field', 'bu_hq']);
+        const d: any = await h.plugin.explainAccessForCaller({ object: 'sys_business_unit', operation: 'read' }, ORG_ADMIN);
+        expect(d.allowed).toBe(true);
+        expect(layerOf(d, 'object_crud').contributors.map((c: any) => c.name)).toContain('organization_admin');
+      });
+
+      it('CONTROL: the delegated read is the caller\'s own — acting on behalf of another user, even one who reads every unit, no answer admits it, as the door does not', async () => {
+        const h = await boot(posture);
+        const onBehalf = { ...NARROW, principalKind: 'agent', onBehalfOf: { userId: 'u_org_admin' } };
+        expect(await unitsRead(h, onBehalf as any)).toEqual({ status: 403, code: 'PERMISSION_DENIED' });
+        expect(await h.plugin.canReadObject('sys_business_unit', onBehalf)).toBe(false);
+        const d: any = await h.plugin.explainAccessForCaller({ object: 'sys_business_unit', operation: 'read' }, onBehalf);
+        expect(d.allowed).toBe(false);
+      });
+
+      it('CONTROL: the delegated scope grants a read and nothing else — explain still denies create and export, as their doors do', async () => {
+        const h = await boot(posture);
+        for (const operation of ['create', 'export'] as const) {
+          const d: any = await h.plugin.explainAccessForCaller({ object: 'sys_business_unit', operation }, NARROW);
+          expect(d.allowed, operation).toBe(false);
+        }
+        expect(await h.plugin.canExport('sys_business_unit', NARROW)).toBe(false);
       });
     });
   }
