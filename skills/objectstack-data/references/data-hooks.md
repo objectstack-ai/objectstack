@@ -7,8 +7,8 @@
 - [Best Practices](#best-practices) · [Error Handling](#error-handling) · [References](#references)
 
 Reference companion to `objectstack-data/SKILL.md`, and the catalog's anchor for
-data hooks. Covers the lifecycle events, the inline `handler` and sandboxed
-`body` forms, the `HookContext` API, registration, and the canonical patterns
+data hooks. Covers the lifecycle events, the sandboxed `body` (and the deprecated
+inline `handler`), the `HookContext` API, registration, and the canonical patterns
 (delete guards, audit trails, cross-object writes, read masking).
 
 
@@ -81,7 +81,7 @@ carries defaults already materialized.
 
 ```typescript
 import { P } from '@objectstack/spec';
-import { defineHook, HookContext } from '@objectstack/spec/data';
+import { defineHook } from '@objectstack/spec/data';
 
 const myHook = defineHook({
   // Required: Unique identifier (snake_case)
@@ -93,9 +93,11 @@ const myHook = defineHook({
   // Required: Events to subscribe to
   events: ['beforeInsert', 'beforeUpdate'],
 
-  // Required: Handler function (inline or string reference)
-  handler: async (ctx: HookContext) => {
-    // Your logic here
+  // The logic: a sandboxed body (the inline `handler` is deprecated)
+  body: {
+    language: 'js',
+    source: `/* statements against ctx */`,
+    capabilities: [],  // the ctx APIs it may call — see Capabilities
   },
 
   // Optional: Execution priority (lower runs first)
@@ -105,7 +107,7 @@ const myHook = defineHook({
   async: false,
 
   // Optional: Conditional execution (CEL predicate over `record`)
-  condition: P`record.status == 'active' && record.amount > 1000`,
+  condition: P`record.status == 'active' && record.amount != null && record.amount > 1000`,
 
   // Optional: Human-readable description
   description: 'Validates account data before save',
@@ -152,23 +154,20 @@ events: ['beforeInsert', 'beforeUpdate']
 events: ['afterInsert', 'afterUpdate', 'afterDelete']
 ```
 
-#### `handler` — Implementation
+#### `body` — Implementation
 
-Handlers can be:
+A `source` of statements against `ctx`; a throw aborts the write
+([Sandboxed Hook Bodies](#sandboxed-hook-bodies-body--what-the-sandbox-ctx-can-call)):
 
-1. **Inline functions** (recommended for simple hooks):
-   ```typescript
-   handler: async (ctx: HookContext) => {
-     if (!ctx.input.email) {
-       throw new Error('Email is required');
-     }
-   }
-   ```
+```typescript
+body: {
+  language: 'js',
+  source: `if (ctx.input.email) ctx.input.email = ctx.input.email.trim().toLowerCase();`,
+}
+```
 
-2. **String references** (for registered handlers):
-   ```typescript
-   handler: 'my_plugin.validateAccount'
-   ```
+The deprecated `handler` takes an inline function or a registered function's
+name ([Registration Methods](#registration-methods)).
 
 #### `priority` — Execution Order
 
@@ -199,8 +198,6 @@ async: true
 
 **When to use async: true:**
 - Sending emails/notifications
-- Calling slow external APIs
-- Logging to external systems
 - Non-critical side effects
 
 **When to use async: false:**
@@ -210,13 +207,13 @@ async: true
 
 #### `condition` — Declarative Filtering
 
-Skip handler execution if the condition is false. Author it as a **CEL
+Skip the hook if the condition is false. Author it as a **CEL
 predicate** over `record` and `previous` (use `P\`...\`` from
 `@objectstack/spec`; SQL-style `=` / `AND` / `IN (...)` is not CEL):
 
 ```typescript
 // Only run for high-value accounts
-condition: P`record.annual_revenue > 1000000`
+condition: P`record.annual_revenue != null && record.annual_revenue > 1000000`
 
 // Only run for specific statuses
 condition: P`record.status in ['pending', 'in_review']`
@@ -236,7 +233,7 @@ in neither). So:
 
 - Reference **any** declared field, not just the ones this update touches —
   `record.done == true` works on an update that only sets `status`. (This is
-  unlike `ctx.input` / `ctx.result` inside the handler, which stay partial — see
+  unlike `ctx.input` / `ctx.result` inside the body, which stay partial — see
   Gotcha 1.)
 - `record` describes the record's **state**, not the diff. `record.done == true`
   fires on every update of an already-done record, not only on the update that
@@ -308,13 +305,12 @@ onError: 'log'
 
 ## Sandboxed Hook Bodies (`body`) — What the Sandbox `ctx` Can Call
 
-A hook can carry its logic in one of two shapes. Everything above this point
-showed the inline **`handler`** function; the section below documents the
-**`body`** form — the one a metadata-only runtime actually executes.
+A hook carries its logic as a **`body`** — the form a metadata-only runtime
+executes — or as the deprecated inline **`handler`**.
 
 ### `body` (sandboxed) vs `handler` (inline) — pick one
 
-| | **`body`** — sandboxed script | **`handler`** — inline function |
+| | **`body`** — sandboxed script | **`handler`** — inline function (deprecated) |
 |:--|:--|:--|
 | Shape | `body: { language, source, capabilities }` (pure metadata) | `handler: async (ctx) => { … }` |
 | Runs in | An isolated **QuickJS VM** (edge-safe, capability-gated) | The host process (**full Node**) |
@@ -386,10 +382,9 @@ org / user / transaction. Methods:
 | `findOne(opts)` | `api.read` | `findOne({ where: { id } })` → record \| `null` — needs a predicate or an `orderBy`, see below |
 | `count(opts)` | `api.read` | `count({ where: { … } })` → number |
 | `insert(data)` | `api.write` | `insert({ … })` |
-| `update(data, opts?)` | `api.write` | **`update({ id, ...fields })`** — put the id **inside** `data` |
-| `upsert(data, opts?)` | `api.write` | `upsert({ … })` |
-| `delete(opts)` | `api.write` | `delete({ where: { id } })` |
-| `aggregate` · `updateMany` · `deleteMany` | read · write · write | also installed; same `where` shape |
+| `update(data, opts?)` | `api.write` | **`update({ id, ...fields })`** — put the id **inside** `data`; bulk: `update(fields, { where, multi: true })` |
+| `delete(opts)` | `api.write` | `delete({ where: { id } })`; bulk: `delete({ where, multi: true })` |
+| `aggregate(opts)` | `api.read` | same `where` shape |
 
 **Query shape — the key is `where`.** It takes an object with `$`-operators, the
 same DSL as the [objectstack-query](../../objectstack-query/SKILL.md) skill:
@@ -439,13 +434,14 @@ set of legal tokens (`HookBodyCapability`) is exactly five:
 | Token | Unlocks |
 |:--|:--|
 | `api.read` | `ctx.api.object(n).find` / `findOne` / `count` / `aggregate`; also `ctx.title('<lookup field>')`, which reads that related record. Plain `ctx.title()` reads nothing and needs no token. |
-| `api.write` | `ctx.api.object(n).insert` / `update` / `delete` / `upsert` / `updateMany` / `deleteMany` |
+| `api.write` | `ctx.api.object(n).insert` / `update` / `delete` |
 | `api.transaction` | `ctx.api.transaction(async () => { … })` — runs the callback's `ctx.api` ops in **one driver transaction** (commit on return, rollback on throw). Pair it with `api.write`. |
 | `crypto.uuid` | `ctx.crypto.randomUUID()` |
 | `log` | `ctx.log.debug` / `info` / `warn` / `error(msg, data?)` |
 
 There is **no `http.fetch` capability** by design — outbound calls go through
-Connector recipes so they stay auditable and replayable.
+[Connector recipes](../../objectstack-automation/references/integration-recipes.md)
+(`connector_action` in a `record-before-*` flow) so they stay auditable and replayable.
 
 ### Sandbox restrictions
 
@@ -462,7 +458,7 @@ The body runs in an isolated QuickJS VM, **not** Node:
   `process`, `globalThis`, `eval`, `new Function`, and any **free identifier** —
   a name bound at module scope, e.g. a `const slugify = …` helper sitting next to
   the hook. A `body` must be **self-contained**: inline the helper, or keep that
-  hook as a bundled `handler`.
+  hook as a bundled (deprecated) `handler`.
 
 > **A deadline stamped from an hours table is calendar hours** — nights, weekends and
 > holidays count. Name it `*_CALENDAR_HOURS` (`SLA_CALENDAR_HOURS`, or its camelCase)
@@ -559,13 +555,13 @@ Register it like any hook — add it to `defineStack({ hooks: [fillPositionOnHir
 ## Hook Context API
 
 > **Sandbox vs in-process.** The `ctx` documented below is the **in-process
-> `handler`** context (full Node). A metadata-native **`body`** sees a
+> `handler`** context (full Node; `handler` is deprecated). A metadata-native **`body`** sees a
 > capability-gated *subset* of it inside an isolated VM — see
 > [Sandboxed Hook Bodies](#sandboxed-hook-bodies-body--what-the-sandbox-ctx-can-call)
 > for exactly what is and isn't available there, including the `where` query
 > shape and the `update({ id, … })` pattern.
 
-The `HookContext` passed to your handler provides:
+The engine's `HookContext` provides:
 
 ### Context Properties
 
@@ -735,25 +731,6 @@ same repository in both forms; the canonical query key is **`where`** (see
 for the full method + capability contract). In a sandboxed `body` these calls
 additionally require the `api.read` / `api.write` capabilities.
 
-```typescript
-handler: async (ctx: HookContext) => {
-  // Get API for another object
-  const users = ctx.api?.object('user');
-
-  // Query users — `where` is canonical (`filter` is a tolerated object alias)
-  const owner = await users.findOne({
-    where: { id: ctx.input.owner_id }
-  });
-
-  // Create related record
-  await ctx.api?.object('audit_log').insert({
-    action: 'account_created',
-    user_id: ctx.session?.userId,
-    record_id: ctx.input.id,
-  });
-}
-```
-
 ---
 
 ## Common Patterns
@@ -807,29 +784,31 @@ const createAuditTrail = defineHook({
 });
 ```
 
-### 3. Multi-Object Logic (inline `handler`)
+### 3. Multi-Object Logic (sandboxed `body`)
 
 ```typescript
 const cascadeAccountUpdate = defineHook({
   name: 'crm_cascade_account_updates',
   object: 'account',
   events: ['afterUpdate'],
-  handler: async (ctx) => {
-    // If account industry changed, update all contacts. The handler-side repo
-    // (`ObjectRepository`) exposes NO `updateMany` — a bulk update is
-    // update(data, { where, multi: true }). Only the sandbox `ctx.api` adds
-    // `updateMany`/`deleteMany` (see the capability table above).
-    if (ctx.input.industry && ctx.previous?.industry !== ctx.input.industry) {
-      await ctx.api?.object('contact').update(
-        { account_industry: ctx.input.industry },
-        { where: { account_id: ctx.input.id }, multi: true },
-      );
-    }
+  body: {
+    language: 'js',
+    source: `
+      // Industry changed → update every contact of the account in one bulk write.
+      if (ctx.input.industry && ctx.previous && ctx.previous.industry !== ctx.input.industry)
+        await ctx.api.object('contact').update(
+          { account_industry: ctx.input.industry },
+          { where: { account_id: ctx.input.id }, multi: true },
+        );
+    `,
+    capabilities: ['api.write'],
   },
 });
 ```
 
-### 4. Data Masking on Read
+### 4. Data Masking on Read (deprecated inline `handler`)
+
+A `body` cannot do this: it writes back only `ctx.input`, and its `ctx.result` is a snapshot.
 
 > For **static** field masking (a field is always hidden/masked for a permission
 > set or position), prefer declarative **field-level metadata** (secret/masked
@@ -881,7 +860,7 @@ const maskSensitiveData = defineHook({
 **1. Declarative — `defineStack({ hooks })`, the default.** `AppPlugin` auto-binds
 these at startup: no `register*Hook` boilerplate, and the declarative fields
 (`condition`, `async`, `retryPolicy`, `timeoutMs`, `onError`, `priority`) are honoured
-**only** on this path. A string-named `handler` resolves through the stack's
+**only** on this path. A string-named `handler` (deprecated) resolves through the stack's
 `functions` map.
 
 ```typescript
