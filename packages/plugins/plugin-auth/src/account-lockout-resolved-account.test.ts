@@ -21,6 +21,11 @@
 // The account events (`login_failed` / `account_locked`) name the account the
 // same resolution names, so the ledger and the lock never disagree.
 //
+// Only a refused CREDENTIAL moves the counter. A sign-in whose password passed
+// and that a policy then refused (the organization's allowed IP ranges, judged
+// when the session is scoped to it) neither counts nor clears: the last
+// `describe` below.
+//
 // ## Why the server here is the real one
 //
 // "Which account does this identifier name" is answered by the credential
@@ -74,13 +79,14 @@ function deployment() {
   return { engine, manager, events };
 }
 
-const post = (manager: AuthManager, path: string, body: unknown) =>
+const post = (manager: AuthManager, path: string, body: unknown, remoteAddress?: string) =>
   manager.handleRequest(
     new Request(`${BASE}${path}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     }),
+    remoteAddress ? { remoteAddress } : undefined,
   );
 
 async function signUp(manager: AuthManager): Promise<void> {
@@ -224,5 +230,83 @@ describe('ADR-0069 D2: the lockout counts and holds the account the credential c
     for (const identifier of unknown) expect(JSON.stringify(events)).not.toContain(identifier);
     // …and the real account still signs in.
     expect((await signIn(manager, EMAIL, PASSWORD)).status).toBe(200);
+  });
+});
+
+/** The organization the account belongs to, and the one network its own list admits. */
+const ORGANIZATION = 'org_lockout_policy';
+const INSIDE = '10.1.0.7';
+const OUTSIDE = '10.2.0.7';
+const NOT_ADMITTED = { status: 403, code: 'IP_NOT_ALLOWED' };
+
+/**
+ * {@link deployment}, with the account a member of an organization whose own
+ * allowed IP ranges admit only 10.1.0.0/16. The deployment sets no list of its
+ * own, so the organization's list is judged where the sign-in's session is
+ * scoped to it — after the password passed.
+ */
+async function organizationListDeployment() {
+  const { engine, manager, events } = deployment();
+  await signUp(manager);
+  const userId = String(accountRow(engine).id);
+  // Whatever membership the sign-up settled is replaced by the one under test.
+  engine.tables.set('sys_member', (engine.tables.get('sys_member') ?? []).filter((m: any) => m.user_id !== userId));
+  await engine.insert('sys_member', { user_id: userId, organization_id: ORGANIZATION, role: 'member', created_at: new Date() });
+  manager.setOrganizationAccessPolicySource({
+    read: async (id) => (id === ORGANIZATION ? { allowed_ip_ranges: '10.1.0.0/16' } : {}),
+    anyOrganizationRequiresMfa: async () => false,
+  });
+  return { engine, manager, events };
+}
+
+const signInFrom = (manager: AuthManager, password: string, remoteAddress: string) =>
+  post(manager, '/sign-in/email', { email: EMAIL, password }, remoteAddress);
+
+describe('ADR-0069 D2: a correct password the organization\'s IP list refuses neither counts nor clears', () => {
+  it('refusals past the threshold lock nothing, and the account signs in from inside the list', async () => {
+    const { engine, manager, events } = await organizationListDeployment();
+    events.length = 0;
+
+    for (let i = 0; i < THRESHOLD; i++) {
+      expect(await outcome(await signInFrom(manager, PASSWORD, OUTSIDE)), `attempt ${i + 1}`).toEqual(NOT_ADMITTED);
+      expect(Number(accountRow(engine).failed_login_count ?? 0), `attempt ${i + 1}`).toBe(0);
+    }
+    expect(isLocked(accountRow(engine))).toBe(false);
+    expect(events.some((e) => e.action === 'account_locked')).toBe(false);
+
+    const home = await signInFrom(manager, PASSWORD, INSIDE);
+    expect(home.status, await home.clone().text()).toBe(200);
+    expect(Number(accountRow(engine).failed_login_count ?? 0)).toBe(0);
+  });
+
+  it('the refusal leaves a count earned by wrong passwords where it stands', async () => {
+    const { engine, manager } = await organizationListDeployment();
+    for (let i = 0; i < THRESHOLD - 1; i++) {
+      expect(await outcome(await signInFrom(manager, WRONG_PASSWORD, INSIDE))).toEqual(REFUSED);
+    }
+    expect(Number(accountRow(engine).failed_login_count)).toBe(THRESHOLD - 1);
+
+    expect(await outcome(await signInFrom(manager, PASSWORD, OUTSIDE))).toEqual(NOT_ADMITTED);
+    expect(Number(accountRow(engine).failed_login_count)).toBe(THRESHOLD - 1);
+    expect(isLocked(accountRow(engine))).toBe(false);
+  });
+
+  it('a wrong password counts from either side of the list, and a correct one from inside clears', async () => {
+    const { engine, manager } = await organizationListDeployment();
+
+    // From outside the credential refuses first: the list is judged only once a session is created.
+    expect(await outcome(await signInFrom(manager, WRONG_PASSWORD, OUTSIDE))).toEqual(REFUSED);
+    expect(Number(accountRow(engine).failed_login_count)).toBe(1);
+    expect(await outcome(await signInFrom(manager, WRONG_PASSWORD, INSIDE))).toEqual(REFUSED);
+    expect(Number(accountRow(engine).failed_login_count)).toBe(2);
+
+    expect((await signInFrom(manager, PASSWORD, INSIDE)).status).toBe(200);
+    expect(Number(accountRow(engine).failed_login_count)).toBe(0);
+
+    for (let i = 0; i < THRESHOLD; i++) {
+      expect(await outcome(await signInFrom(manager, WRONG_PASSWORD, OUTSIDE))).toEqual(REFUSED);
+    }
+    expect(isLocked(accountRow(engine))).toBe(true);
+    expect(await outcome(await signInFrom(manager, PASSWORD, INSIDE))).toEqual(LOCKED);
   });
 });
