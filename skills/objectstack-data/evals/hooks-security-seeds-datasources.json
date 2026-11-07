@@ -34,7 +34,7 @@
     {
       "id": 4,
       "prompt": "Seed the `country` table for every environment; add demo `opportunity` rows (dev/test only) closing 45 days after install, owned by the installer. A nightly job advances `stage`; a seed replay must not reset it.",
-      "expected_output": "`defineSeed(Country, { externalId: 'code', mode: 'upsert', records })` for reference data; `defineSeed(Opportunity, { env: ['dev', 'test'], ... })` for demo rows — natural-key lookups, CEL values (`close_date: cel`daysFromNow(45)``, `owner_id: cel`os.user.id``), parents first; `columns: { stage: { applyOn: 'create' } }` so an `upsert` replay leaves the job-owned column.",
+      "expected_output": "`defineSeed(Country, { externalId: 'code', mode: 'upsert', records })` for reference data; `defineSeed(Opportunity, { env: ['dev', 'test'], ... })` for demo rows with no `mode` (the `ignore` default never writes a matched row, so a replay leaves `stage`) — natural-key lookups, CEL values (`close_date: cel`daysFromNow(45)``, `owner_id: cel`os.user.id``), parents first; on an `upsert` dataset, `columns: { stage: { applyOn: 'create' } }` leaves the job-owned column.",
       "files": [],
       "assertions": {
         "must_contain": ["defineSeed", "externalId", "upsert", "env:", "daysFromNow", "applyOn: 'create'"],
