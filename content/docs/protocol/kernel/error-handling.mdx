@@ -571,8 +571,10 @@ An **optional** master never answers this code. A `controlled_by_parent` object 
 `master_detail` is declared `required: false` has an optional master (ADR-0055 §1 as
 amended), and a stored empty reference on it is not an error: the row belongs to no master
 and is its owner's. Its owner (`owner_id`) and a holder of View All on the detail read it;
-its owner and a holder of Modify All on the detail update or delete it, and anyone else —
-View All included — is refused `403 PERMISSION_DENIED`. A row with no owner, or on an
+its owner and a holder of Modify All on the detail update or delete it. Everyone else who
+reaches the gate, View All included, is refused `403 PERMISSION_DENIED`; a principal who
+cannot read the row meets the read door first (`404 RECORD_NOT_FOUND`), as for every hidden
+row. A row with no owner, or on an
 object that carries no `owner_id` column, is read through View All and written through
 Modify All alone.
 
@@ -582,7 +584,7 @@ refuses first, and that depends on how the reference is declared:
 | Master reference declared as | Refused by | Status | `code` | `fields` |
 |---|---|:---:|---|:---:|
 | `master_detail` + `required: true`, not `readonly`/`system` | required-field validation | 400 | `VALIDATION_FAILED` | yes |
-| `master_detail` + `required: false` (the optional master), not `readonly`/`system` | not refused (see below) | — | — | — |
+| `master_detail` + `required: false` (the optional master), not `readonly`/`system` | an insert that leaves it out: not refused; an update that empties it: the master-access gate, by edit access on the master it leaves (see below) | — / **403** | — / `PERMISSION_DENIED` | — / absent |
 | `master_detail` (required or optional) + `readonly` | the master-access gate | **422** | `INVALID_METADATA` | **absent** |
 | `master_detail` (required or optional) + `system` | the master-access gate | **422** | `INVALID_METADATA` | **absent** |
 

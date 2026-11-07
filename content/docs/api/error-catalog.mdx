@@ -201,13 +201,15 @@ An optional master never answers this code. When the object's only `master_detai
 declared `required: false` (an optional master, ADR-0055 §1 as amended), a stored empty
 reference is not an error: the row belongs to no master and is its owner's. Its owner and a
 holder of View All on the detail read it; its owner and a holder of Modify All on the detail
-update or delete it, and anyone else is refused `403 PERMISSION_DENIED`.
+update or delete it. Everyone else who reaches the gate, View All included, is refused
+`403 PERMISSION_DENIED`; a principal who cannot read the row meets the read door first
+(`404 RECORD_NOT_FOUND`), as for every hidden row.
 
 A request that leaves the master reference out, or empties it, does not answer this code.
 On a `master_detail` that is `required: true` and neither `readonly` nor `system`, validation
 answers it with the documented `400 VALIDATION_FAILED` and `fields`. On an optional master
-nothing refuses it: an insert that names no master is admitted and its creator owns the row,
-and an update that empties the reference asks edit access on the master it leaves
+an insert that leaves it out is not refused, and its creator owns the row; an update that
+empties it is judged by the master it leaves, asking edit access on it
 (`403 PERMISSION_DENIED` without it). A master reference marked `readonly` or `system`,
 required or optional, is not one an author's write supplies, so it cannot be the master
 (ADR-0055 §1): `ObjectSchema` refuses that declaration at parse (`master-not-writable`), and
