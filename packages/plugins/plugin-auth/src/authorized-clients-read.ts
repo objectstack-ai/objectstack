@@ -47,9 +47,9 @@
  * crosses the tenant wall on better-auth-managed objects (ADR-0095 D1), so
  * the admin read lists the person's grants in every organization.
  *
- * Read only. Withdrawing a grant is the person's own door
- * (`POST /oauth2/delete-consent`, keyed by the row's `id`); an administrator
- * withdrawing another person's grant is not a door this module serves.
+ * Read only. Withdrawing a grant is `authorized-clients-withdraw.ts`, keyed
+ * by the row's `id`: `POST /authorized-clients/withdraw` for the person's own,
+ * `POST /admin/authorized-clients/withdraw` behind this read's admin gate.
  *
  * ## The answer
  *
@@ -118,7 +118,7 @@ export const ADMIN_AUTHORIZED_CLIENTS_USER_NOT_FOUND_MESSAGE = 'No user matches 
 
 /** One authorized client, as both reads answer it. */
 export interface AuthorizedClient {
-  /** The consent's id: the key `POST /oauth2/delete-consent` takes. */
+  /** The consent's id: the key `POST /authorized-clients/withdraw` takes. */
   id: string;
   clientId: string;
   /** The client's display name, `null` when it declares none. */
