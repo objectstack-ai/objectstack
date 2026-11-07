@@ -371,27 +371,21 @@ const UNATTRIBUTED_BATTERY = '(no battery open)';
  * is a property of the workflow, so the workflow is where it is read from: the
  * job's own step list, one grep away and never stale (#9103).
  *
- * ⛔ TOMBSTONE — `Dogfood Regression Gate` (ci.yml:dogfood-gate) and `Temporal
- * Conformance (live PG + MySQL)` (ci.yml:temporal-conformance), dropped by the
- * #22998 ruling (two-speed CI; ruling record 6120820653 on #22991): their legs
- * run in the FULL BATTERY only — `main`'s push, hourly and dispatch runs — so a
- * PR or queue build carries the fast set and these two contexts leave the
+ * ⛔ TOMBSTONE — `Temporal Conformance (live PG + MySQL)`
+ * (ci.yml:temporal-conformance), dropped by the
+ * #22998 ruling (two-speed CI; ruling record 6120820653 on #22991): its leg
+ * runs in the FULL BATTERY only — `main`'s push, hourly and dispatch runs — so a
+ * PR or queue build carries the fast set and the context left the
  * required set. The order is the #9325 two-step: the registry and the
- * instruction surfaces drop the rows in the PR, and the maintainer removes the
- * two contexts from the ruleset in the same sitting as the merge; until then
- * `--verify-required-set` reports them in direction B (required, pinned by no
+ * instruction surfaces drop the row in the PR, and the maintainer removes the
+ * context from the ruleset in the same sitting as the merge; until then
+ * `--verify-required-set` reports it in direction B (required, pinned by no
  * row), report-only, which is the sitting's own reminder. Prose and not a
  * RETIRED_CONTEXT_NAMES row, for the reason the `Build Docs` / `Console Pin
- * Gate` tombstone above gives: neither name is dead — both jobs still publish
- * these check-runs on every full-battery run, and the instruction files name
- * where each runs.
- * Since #30461 (ruling record 6663883327, letter B) the three dogfood shards
- * also run on `merge_group`, so a queue build publishes `Dogfood Regression
- * Gate` over their credentials; `Temporal Conformance` stays full-battery
- * only. The context stays out of this registry and of the ruleset for now: the
- * follow-up ruling on #30461 (A, in two steps, 6669982756) puts it back only
- * after a clean 24-hour reading of the queue builds, the row here landing
- * first and the ruleset edit after it.
+ * Gate` tombstone above gives: the name is not dead — the job still publishes
+ * this check-run on every full-battery run, and the instruction files name
+ * where it runs.
+ * Returned: `Dogfood Regression Gate` (ci.yml:dogfood-gate) left with it by #22998 and is back since #30461 (letter B 6663883327 put its shards on `merge_group`; letter A 6669982756 re-enrolled the row below).
  */
 export const REQUIRED_CONTEXTS = [
   {
@@ -496,6 +490,18 @@ export const REQUIRED_CONTEXTS = [
       'maintainer 「其他同意」 2026-10-28T08:22Z — this row is the repo half (#27154); the ruleset entry is the maintainer\'s, ' +
       'in the same sitting as the merge (#9325)',
     carries: 'the Console against a real workspace backend: the allowlisted `ui/e2e/live` specs',
+  },
+  {
+    workflow: 'ci.yml',
+    job: 'dogfood-gate',
+    context: 'Dogfood Regression Gate',
+    authorized:
+      '#30461 follow-up ruling 6669982756 (letter A, in two steps), maintainer 「同意」 2026-11-05T21:25Z — after the ' +
+      '24-hour queue reading 6707277208 met the step-3 threshold (zero flakes); this row is the repo half and merges ' +
+      'first, the ruleset entry is the maintainer\'s, the same day (#9325)',
+    carries:
+      'the sharded dogfood matrix, `Dogfood Regression Gate (k/3)`, read through the aggregate by check:shard-attestation, ' +
+      'and the `Dogfood Verify CLI` leg, which its `if:` skips on merge_group and pull_request',
   },
 ];
 
@@ -613,9 +619,10 @@ export const INSTRUCTION_SURFACES = [
     // contexts moved to the full battery). Then 5→7 by #25853 (the `ui/`
     // import's `Lint UI` and `Build & E2E UI`), 7→8 with `Type Check UI`
     // once bill item 49 closed (#25856), 8→9 with the `Test UI` aggregate
-    // (#26460), and 9→10 with `Live E2E UI` (#27154). The full set is pinned
-    // here so the corrected sentence cannot rot back — a rename in ANY of the
-    // ten reddens this gate instead.
+    // (#26460), 9→10 with `Live E2E UI` (#27154), and 10→11 with `Dogfood
+    // Regression Gate` back (#30461). The full set is pinned here so the
+    // corrected sentence cannot rot back — a rename in ANY of the eleven
+    // reddens this gate instead.
     file: 'AGENTS.md',
     statesTheSet: true,
     mustName: [
@@ -629,6 +636,7 @@ export const INSTRUCTION_SURFACES = [
       'Type Check UI',
       'Test UI',
       'Live E2E UI',
+      'Dogfood Regression Gate',
     ],
   },
   {
@@ -662,6 +670,7 @@ export const INSTRUCTION_SURFACES = [
       'Type Check UI',
       'Test UI',
       'Live E2E UI',
+      'Dogfood Regression Gate',
     ],
   },
   {
@@ -683,7 +692,7 @@ export const INSTRUCTION_SURFACES = [
  * of the six surfaces have one; `AGENTS.md` does not, because a repo-root FILE
  * has no separator to be found by — so an AGENTS.md card derived this gate not
  * at all, while that surface is the one carrying `mustName` for every
- * required context (widened 2→6 by #9677, 6→7 by #17798, 7→5 by #22998, 5→7 by #25853, 7→8, 8→9 by #26460, 9→10 by #27154). Editing the merge-queue
+ * required context (widened 2→6 by #9677, 6→7 by #17798, 7→5 by #22998, 5→7 by #25853, 7→8, 8→9 by #26460, 9→10 by #27154, 10→11 by #30461). Editing the merge-queue
  * paragraph there is precisely how this gate goes red, and it was reachable
  * only by judgment.
  *
@@ -2004,6 +2013,15 @@ async function selfTest() {
     renamedTestUi.problems.some((p) => p.includes("job 'test-ui-gate'") && p.includes("'Test UI'")),
     'growing a suffix on the bare `Test UI` name ⇒ red, naming the aggregate job and the required context',
   );
+  // The third (#30461): `Dogfood Regression Gate` is the bare name of
+  // `dogfood-gate`, back in the registry, and its shards are `… (k/3)`.
+  const renamedDogfood = fixture('rename Dogfood Regression Gate', 'ci.yml', (s) =>
+    s.replace('    name: Dogfood Regression Gate\n', '    name: Dogfood Regression Gate (aggregate)\n'),
+  );
+  assert(
+    renamedDogfood.problems.some((p) => p.includes("job 'dogfood-gate'") && p.includes("'Dogfood Regression Gate'")),
+    'growing a suffix on the bare `Dogfood Regression Gate` name ⇒ red, naming the aggregate job and the required context',
+  );
 
   // ── (2) the job disappearing entirely ─────────────────────────────────────
   // Re-pointed from `console-pin` to `temporal-conformance` when #9533 dropped
@@ -2168,6 +2186,20 @@ async function selfTest() {
   assert(
     sources['ci.yml'].includes(TEST_UI_SHARD_NAME),
     'the real suffixed Test UI shard name coexists with the bare `Test UI` gate name',
+  );
+  // The third live specimen (#30461): the `dogfood` shards and their
+  // `Dogfood Regression Gate` aggregate, the matrix width read the same way.
+  const DOGFOOD_SHARD_NAME = `name: Dogfood Regression Gate (\${{ matrix.shard }}/${shardTotal(sources['ci.yml'], 'dogfood')})`;
+  const collidedDogfood = fixture('collide the dogfood shard name with its gate name', 'ci.yml', (s) =>
+    s.replace(DOGFOOD_SHARD_NAME, 'name: Dogfood Regression Gate'),
+  );
+  assert(
+    collidedDogfood.problems.some((p) => p.includes("job 'dogfood'") && p.includes('published by ci.yml:dogfood-gate')),
+    'a dogfood shard wearing the bare `Dogfood Regression Gate` context name ⇒ red',
+  );
+  assert(
+    sources['ci.yml'].includes(DOGFOOD_SHARD_NAME),
+    'the real suffixed dogfood shard name coexists with the bare `Dogfood Regression Gate` gate name',
   );
 
   // ── (8) a registry that lists one context twice ──────────────────────────
@@ -2798,11 +2830,12 @@ async function selfTest() {
     assert(snapshot.strict === false, 'strict_required_status_checks_policy is read, not assumed');
     assert(snapshot.enforcing.length === 1 && !snapshot.noEnforcingRuleset, 'one active ruleset covers the default branch');
     // Direction B against the checked-in registry, derived for the same reason
-    // as direction A below: the 2026-08-18 reading still carries the two
-    // contexts #22998 dropped from the registry (`Dogfood Regression Gate`,
-    // `Temporal Conformance (live PG + MySQL)`), so the snapshot reports them
-    // as required-and-unpinned — exactly the reading the maintainer's
-    // settings half of that two-step clears.
+    // as direction A below: the 2026-08-18 reading still carries
+    // `Temporal Conformance (live PG + MySQL)`, which #22998 dropped from the
+    // registry, so the snapshot reports it as required-and-unpinned — exactly
+    // the reading the maintainer's settings half of that two-step clears.
+    // (`Dogfood Regression Gate`, dropped with it, is pinned again since
+    // #30461 and so no longer reads as unpinned here.)
     const pinned = new Set(REQUIRED_CONTEXTS.map((e) => e.context));
     const unpinnedNames = snapshot.unpinned.map((e) => e.context ?? e).sort();
     assert(

@@ -157,3 +157,34 @@ describe('os dev deploy key', () => {
     expect(dev).toMatch(/if \(!deployKey\) deployKey = startDevDeployKey\(binPath,/);
   });
 });
+
+describe('os dev deploy key — a self-hosted runtime as the active target (#30888)', () => {
+  it('names the runtime, and d runs `os deploy` with no cloud login asked for', async () => {
+    const terminal = new FakeTerminal();
+    const printed: string[] = [];
+    const runDeploy = vi.fn(async () => 0);
+    const runLogin = vi.fn(async () => 0);
+    const handle = attachDeployKey({
+      input: terminal,
+      print: (line) => printed.push(line),
+      isLoggedIn: async () => false,
+      runDeploy,
+      runLogin,
+      runtimeTarget: async () => 'http://runtime.test:8080',
+      onInterrupt: () => {},
+    });
+    await handle!.offer();
+    expect(printed[0]).toBe(deployKeyHint(false, 'http://runtime.test:8080'));
+    expect(printed[0]).toContain('to the self-hosted runtime http://runtime.test:8080');
+
+    terminal.press('d');
+    await handle!.current;
+    expect(runLogin).not.toHaveBeenCalled();
+    expect(runDeploy).toHaveBeenCalledTimes(1);
+  });
+
+  it('is wired to the remembered target in os dev', () => {
+    const source = readFileSync(resolve(HERE, '../src/utils/dev-deploy-key.ts'), 'utf8');
+    expect(source).toMatch(/runtimeTarget: async \(\) => \(await activeRuntimeTarget\(\)/);
+  });
+});
