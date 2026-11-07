@@ -2471,7 +2471,7 @@ export class ObjectStackProtocolImplementation implements
         return ProtocolDiscoveryAndBasesFacet.getProjectId(protocolHost(this));
     }
 
-    async getDiscovery(): Promise<{
+    async getDiscovery(searchAllOnInstance: unknown): Promise<{
         authFamilies?: {
             admin: boolean;
         } | undefined;
@@ -2820,7 +2820,7 @@ export class ObjectStackProtocolImplementation implements
             // differ — an empty slot with a served endpoint is today's normal
             // host — and `serviceUnavailableMessage('search')` now says so in
             // the same document, the way `ui` does for the same shape (#4146).
-            search: typeof this.searchAll === 'function',
+            search: typeof searchAllOnInstance === 'function',
             export: registeredServices.has('automation') || registeredServices.has('queue'),
             // [#5672] Serveability-gated, was presence-only. Two reasons, and
             // the second is the binding one:
