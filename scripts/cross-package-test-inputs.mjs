@@ -1098,9 +1098,18 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
     // re-run this package's suite. The `.d.mts` sibling is what gives
     // `maskComments` its type, so this package's typecheck verdict is a
     // function of it too.
+    //
+    // src/skill-md.test.ts imports the Console's "Download skill" mirror from
+    // source and pins it byte-identical to `renderSkillMarkdown`, the server's
+    // half of the drift pin ui/apps/console/src/pages/developer/
+    // objectstack-skill.test.ts carries (#31017). The Console's half runs only
+    // when Test UI does, which a diff confined to this package never starts;
+    // this half runs on every change to the render's inputs, and a change to
+    // the mirror has to re-run it too.
     globs: [
       'scripts/js-comment-mask.mjs',
       'scripts/js-comment-mask.d.mts',
+      'ui/apps/console/src/pages/developer/objectstack-skill.ts',
     ],
   },
   '@objectstack/metadata': {

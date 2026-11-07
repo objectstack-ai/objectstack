@@ -112,4 +112,15 @@ export interface McpAuthoringInjection {
   principal: McpTokenPrincipal;
   /** The environment the host dispatched this request for. */
   environmentId?: string;
+  /**
+   * The server instructions this request's `initialize` answers with — the
+   * text an MCP client puts in its model's context (where the authoring
+   * rules live, which ones exist). Read under the SAME grant that admits
+   * {@link registry}: a request whose grant registers the authoring family
+   * is answered with this text; any other request — a `data:read` token, an
+   * API key, a session — gets the runtime's configured or default
+   * instructions and never sees it. Omitted, the authoring request gets the
+   * configured or default instructions too.
+   */
+  instructions?: string;
 }

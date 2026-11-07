@@ -124,7 +124,6 @@ import { buildDriverOptions, driverReadScope, driverWriteTarget, engineLayer0Ver
 import { announceOpenMigrationGates, isOrganizationOwnershipCertified, isValueShapesMigrationVerified, noteAdmittedValueShapeViolation, readFileReferencesFlagRow, readMigrationFlagVerified, supplyTenantKeyCertifiedResolver, wasDatastoreCreatedFromEmpty } from './engine-migration-flags.js';
 import { ExecutionContext, type InstalledPackageSource } from '@objectstack/spec/kernel';
 // [#27884] The stored-row read gate, registered on the family's tables below.
-import { STORED_METADATA_TYPE_READ_GATE_OBJECTS, storedMetadataTypeReadGate } from './stored-metadata-type-read-gate.js';
 // Imported from spec directly rather than through `@objectstack/core`'s
 // re-export block: that block is labelled backward-compatibility, and this
 // contract is new (#5945).
@@ -138,7 +137,6 @@ import {
   type EngineTransactionInfo,
   type EngineTransactionOptions,
   Logger,
-  createLogger,
   type RetryOptions,
   recordNotFoundError,
   resolveUserAuthzGrants,
@@ -152,7 +150,7 @@ import {
   withoutDeletedSelfParents,
   type SummaryDescriptor,
 } from './summary-aggregate.js';
-import { refreshSummariesExtendedBy, startSummaryRefreshOnEnable, summaryRefreshesSettled, type SummaryEnableRefreshReport } from './summary-enable-refresh.js';
+import { refreshSummariesExtendedBy, summaryRefreshesSettled, type SummaryEnableRefreshReport } from './summary-enable-refresh.js';
 import { ReadonlyFieldRejectedError } from './readonly-strict-errors.js';
 import { HookTargetRebindError } from './hook-target-rebind-errors.js';
 import {
@@ -707,37 +705,9 @@ export class ObjectQL implements IObjectQLEngine {
   private _registry: SchemaRegistry = new SchemaRegistry();
 
   constructor(hostContext: Record<string, any> = {}) {
-    // Use provided logger or create a new one
-    this.logger = hostContext.logger || createLogger({ level: 'info', format: 'pretty' });
-    // [#30215] `registerApp` writes `manifests`; an uninstall withdraws the
-    // package through the registry's own verb, on every door, so the entry goes
-    // with the registry's record. Left behind, ADR-0070's `isWritablePackage`
-    // (which reads this map first) kept an uninstalled package read-only until
-    // a restart.
-    this._registry.onPackageUninstalled((packageId) => { this.manifests.delete(packageId); });
-    // [#30377] A roll-up a package adds by extension is withheld with it, so
-    // the child writes made during a disable recompute nothing: an enable
-    // recomputes it (`summary-enable-refresh.ts`), on every enable door.
-    this._registry.onPackageEnabled((packageId) => startSummaryRefreshOnEnable(this, this.logger, packageId));
-    // Pick up production hardening switches from env so deployers can
-    // enforce strict-body without code changes:
-    //   OBJECTQL_STRICT_HOOKS=1 → unresolved hooks throw at bind time
-    //   OBJECTQL_WARN_LEGACY_HANDLER=1 → log a deprecation per legacy bind
-    if (process?.env?.OBJECTQL_STRICT_HOOKS === '1') {
-      (this as any)._strictHookBinding = true;
-    }
-    if (process?.env?.OBJECTQL_WARN_LEGACY_HANDLER === '1') {
-      (this as any)._warnLegacyHandler = true;
-    }
-    // [#27884] The stored-row read gate: a caller-context read of a
-    // stored-metadata table serves a capability-gated type's documents only to
-    // holders of that capability — the row the `/meta` type gate reads. In the
-    // constructor, so no engine serves those tables without it. See
-    // `stored-metadata-type-read-gate.ts`.
-    for (const object of STORED_METADATA_TYPE_READ_GATE_OBJECTS) {
-      this.registerMiddleware(storedMetadataTypeReadGate, { object });
-    }
-    this.logger.info('ObjectQL Engine Instance Created');
+    // [#29986 codemod] The body moved to `engine-hooks-and-functions.ts` (see `HooksAndFunctionsHost`).
+    this.logger = HooksAndFunctionsFacet.constructLogger(hostContext);
+    HooksAndFunctionsFacet.construct.call(hooksAndFunctionsHost.of(this));
   }
 
   /**
@@ -9877,6 +9847,7 @@ export class ObjectQL implements IObjectQLEngine {
       set _defaultActionRunner(v) { engine._defaultActionRunner = v; },
       get _defaultBodyRunner() { return engine._defaultBodyRunner; },
       set _defaultBodyRunner(v) { engine._defaultBodyRunner = v; },
+      get _registry() { return engine._registry; },
       get defaultDriver() { return engine.defaultDriver; },
       get drivers() { return engine.drivers; },
       facade: engine,
@@ -9885,6 +9856,8 @@ export class ObjectQL implements IObjectQLEngine {
       get hooks() { return engine.hooks; },
       isClosedUnitHandle: (...a) => engine.isClosedUnitHandle(...a),
       get logger() { return engine.logger; },
+      get manifests() { return engine.manifests; },
+      registerMiddleware: (...a) => engine.registerMiddleware(...a),
       get residualOwnerSources() { return engine.residualOwnerSources; },
       get txStore() { return engine.txStore; },
     }));

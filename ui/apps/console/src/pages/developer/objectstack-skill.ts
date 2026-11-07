@@ -7,9 +7,20 @@
  * not browser-friendly to import here, so this is a mirror of what the server
  * serves to a caller with no OAuth scopes (an API key or a session): the data
  * skill, with no authoring section and no federation tools. It must stay
- * byte-identical to that render — `objectstack-skill.test.ts` imports the
- * canonical renderer from source and compares the two, so an edit to either
- * side without the other goes red there.
+ * byte-identical to that render, and two tests compare the two, each from its
+ * own side, so an edit to either side without the other goes red:
+ *   - `objectstack-skill.test.ts` beside this file imports the canonical
+ *     renderer from source; it runs when Test UI does;
+ *   - `packages/mcp/src/skill-md.test.ts` imports THIS file from source; it
+ *     runs in Test Core on every `packages/mcp` change, which never starts
+ *     Test UI (#31017).
+ *
+ * ⛔ So this file stays IMPORT-FREE. The mcp test, and the type-check program
+ * of `packages/mcp/tsconfig.test.json`, compile it as part of that package's
+ * tests, where none of the Console's aliases, dependencies or DOM types exist.
+ * An import added here must resolve from `packages/mcp`'s test program too,
+ * or Test Core goes red on every MCP change for a reason that has nothing to
+ * do with the drift it pins.
  *
  * Per ADR-0036 Amendment C this is ONE generic skill: it never enumerates a
  * tenant's schema (the agent discovers live via list_objects/describe_object);

@@ -3,7 +3,8 @@
   "id": "leave_balances",
   "code": "leave",
   "tier": "starter",
-  "title": "Leave and balances: leave types, yearly balances, requests with day lines and a route set by the days",
+  "origin": "generic",
+  "title": { "zh": "请假与假期余额:假期类型、年度余额、按天明细的请假单,按天数分级审批", "en": "Leave and balances: leave types, yearly balances, requests with day lines and a route set by the days" },
   "provenance": "Mid-tier scenario 请假与假期余额 (leave and balances) of the open library, written for this card from the domain alone: generic names, cities and dates, no customer-derived content. The seed follows the arithmetic rule in `$comment`, so each truth can be worked out by hand.",
   "prompt": {
     "short": {

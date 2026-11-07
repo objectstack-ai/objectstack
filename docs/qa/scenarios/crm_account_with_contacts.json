@@ -2,7 +2,8 @@
   "id": "crm_account_with_contacts",
   "code": "crm",
   "tier": "control",
-  "title": "CRM: accounts and independently-living contacts",
+  "origin": "generic",
+  "title": { "zh": "客户管理:客户及可独立维护的联系人", "en": "CRM: accounts and independently-living contacts" },
   "provenance": "Golden case `crm_account_with_contacts` of packages/cli/src/lint/corpus.ts; `expect` derived mechanically from its fixture (every object; minFieldsPerObject = the smallest object's field count; one selectFields row per select field with minOptions = its option count; one lookups row per lookup or master_detail field).",
   "prompt": {
     "short": {"en": "Build a simple CRM with accounts and contacts."},
