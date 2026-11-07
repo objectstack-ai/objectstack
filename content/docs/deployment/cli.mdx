@@ -2139,7 +2139,7 @@ can produce, because both supply a live one.
 | Types with no repository write path (`agent`) | Their write path records no history and would force a draft live — a half-write is worse than leaving the row to the read path |
 | Rows that still fail the current schema after conversion | That is a genuine contract violation, not chain-owned history. The write path's rejection is correct; fix the row in Studio |
 | A site the conversion chain leaves as stored because no lossless rewrite exists — above all a page filter carrying `$and` / `$or` / `$not` | Flattening a combinator changes which rows the page selects, so it is never done. Each site is printed as a `TODO` line under its row — path, block, and what blocks the rewrite — whatever the row's outcome; a row with nothing but TODOs is reported `skipped`. It does not fail the run, since no run of this pass can clear it: rewrite each site by hand |
-| A stored shape protocol 18 refuses and no conversion rewrites — a `controlled_by_parent` object without exactly one required `master_detail` (two masters, none, a required `lookup` only, an explicit `required: false`), a view bound to the retired view-level API data source or a page component whose `data` prop binds it (`object-grid`, `object-map`, `object-gantt`, `object-tree`), a flow value slot carrying a `{…}` token (a `get_record` / `update_record` / `delete_record` filter operand among them) | Each would need a choice only its owner can make — which master, which page, what an absent value should do — so it is never rewritten. Each site is printed as a `TODO` line under its row, naming the step-18 entry that refuses it, the object, view, page component or flow node, and the owner's choices; a binding's request headers are withheld. Until it is rewritten by hand, the row is refused: an object registers but derives no master, a view registers under `[metadata_spec_invalid]`, a page still loads, its next save is refused at the metadata save door (422), and `os validate`, `os build` and `os lint` refuse the binding in source, and a flow is not registered |
+| A stored shape protocol 18 refuses and no conversion rewrites — a `controlled_by_parent` object without exactly one master, which is one `master_detail` declared `required: true` or, with none, its only `master_detail` declared `required: false` (two masters, none, a required `lookup` only; an explicit `required: false` on the only `master_detail` is that optional master, admitted by `cbp-optional-master-admitted` and not listed), a view bound to the retired view-level API data source or a page component whose `data` prop binds it (`object-grid`, `object-map`, `object-gantt`, `object-tree`), a flow value slot carrying a `{…}` token (a `get_record` / `update_record` / `delete_record` filter operand among them) | Each would need a choice only its owner can make — which master, which page, what an absent value should do — so it is never rewritten. Each site is printed as a `TODO` line under its row, naming the step-18 entry that refuses it, the object, view, page component or flow node, and the owner's choices; a binding's request headers are withheld. Until it is rewritten by hand, the row is refused: an object registers but derives no master, a view registers under `[metadata_spec_invalid]`, a page still loads, its next save is refused at the metadata save door (422), and `os validate`, `os build` and `os lint` refuse the binding in source, and a flow is not registered |
 | Any other site `registerFlow` refuses in a stored flow the parse accepts — a text slot's template hole, a decision's `mode`, a malformed predicate, a plugin node's undeclared config key, an `api` flow with no secret | The flow's own definition is wrong, and no conversion rewrites it. Each site is printed as a `TODO registerFlow` line under its row, in the words `registerFlow` refuses it with; a site already listed under a step-18 entry is not repeated. Until it is fixed, the flow is not registered at boot and never runs. A flow the parse itself refuses is reported among the rows that could not be rewritten, in the parse's words |
 
 **One thing it lists and never writes: decision nodes that changed meaning at
@@ -2706,10 +2706,11 @@ os verify --dashboard-windows                  # Also prove each dashboard date 
    reported inconclusive, never proven.
    With `--parent-write-reach`, another fresh boot proves ADR-0055's write rule
    for every object declared `controlled_by_parent` (exactly one
-   `master_detail` field names its master): editing, deleting or creating a
-   detail is admitted exactly when the caller holds that verb on the detail's
-   object **and** can edit its master. The first half is read from the
-   server's effective permissions for the caller (`/auth/me/permissions`); the
+   `master_detail` field names its master, required or optional): editing,
+   deleting or creating a detail is admitted exactly when the caller holds
+   that verb on the detail's object **and** can edit its master. The first
+   half is read from the server's effective permissions for the caller
+   (`/auth/me/permissions`); the
    second is measured, by an empty update of the master as the caller, which
    runs every write gate the master has — for a master that is itself
    controlled by its parent, the gate above it too. The writes go through the
@@ -2726,9 +2727,15 @@ os verify --dashboard-windows                  # Also prove each dashboard date 
    answer disagrees fails the run, and so does a persona that could not be
    provisioned; a refusal that is not the platform's `403 PERMISSION_DENIED`
    naming the detail and the operation (a rule, a hook's own code, a refusal
-   on another object) is reported inconclusive, never proven. An object
-   with two `master_detail` fields, none, or a chain at the write gate's depth
-   bound is reported `excluded`. A detail two levels below its root master (a
+   on another object) is reported inconclusive, never proven. For an optional
+   master (its only `master_detail` declared `required: false`) the run also
+   proves the records that name no master: such a record is its owner's, so
+   its edit or delete is admitted exactly when the caller holds that verb on
+   the detail's object **and** owns the record (`owner_id`) or holds Modify All
+   on that object, and a create that names no master exactly when the caller
+   holds create on it; a null-master record the persona cannot read is not
+   probed. An object with two `master_detail` fields, none, or a chain at the
+   write gate's depth bound is reported `excluded`. A detail two levels below its root master (a
    line under a quote under an account) is answered the same way: its write is
    admitted exactly when the caller holds the verb on the detail and may update
    the middle master directly, which also needs edit access to the root, and
