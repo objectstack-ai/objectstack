@@ -32,6 +32,7 @@ import { serveStatic } from '@hono/node-server/serve-static';
 // — so terminating TLS needs no bridging code here: the same `fetch` handler,
 // the same drain, one different server factory. See {@link HttpsListenerMaterial}.
 import { createServer as createHttpsServer } from 'node:https';
+import type { IncomingMessage, ServerResponse } from 'node:http';
 import { matchesRoutePattern } from './route-pattern';
 import { readRequestBody, type RequestBodyReading, type RequestBodyRefusal } from './request-body';
 // The ADR-0112 wire vocabulary, read as DATA rather than restated: `ErrorCode`
@@ -577,6 +578,14 @@ export class HonoHttpServer implements IHttpServer {
     private app: Hono;
     private server: any;
     private listeningPort: number | undefined;
+    /**
+     * Set while {@link close} drains. Every response written from then on
+     * closes its connection when it ends instead of keeping it alive — see
+     * {@link trackForDrain}.
+     */
+    private draining = false;
+    /** Responses the listener is still writing, so {@link close} can reach the in-flight ones. */
+    private inFlightResponses = new Set<ServerResponse>();
     /**
      * Every `(method, pattern)` pair registered through this server, kept so
      * the `notFound` handler can answer "the path exists but the method is
@@ -1831,9 +1840,46 @@ export class HonoHttpServer implements IHttpServer {
                     resolve();
                 });
             this.server = server;
+            // Prepended so it runs before the Hono listener can write a
+            // synchronous response's headers.
+            server.prependListener('request', (_req: IncomingMessage, res: ServerResponse) => {
+                this.trackForDrain(server, res);
+            });
             server.on('error', (err: any) => {
                 reject(err);
             });
+        });
+    }
+
+    /**
+     * Keep the drain in {@link close} from waiting on a connection that has
+     * nothing left to send.
+     *
+     * `closeIdleConnections()` at the start of a drain cannot release a
+     * connection whose request is still running, and Node never runs it again.
+     * Left alone, that connection outlives its response as an idle keep-alive
+     * socket, and `server.close()` waits until the CLIENT drops it — measured
+     * at 3 s for `fetch` and 4 s for the `node:http(s)` agent, the server's
+     * `Keep-Alive: timeout=5` hint less each client's margin — or until the
+     * server's own keep-alive timer fires. So during a drain:
+     *
+     * - a response whose headers are not yet written goes out with
+     *   `Connection: close`, and Node ends the socket once it is sent. The
+     *   client is told, so it never reuses a socket that is about to close;
+     * - a response that had already written its keep-alive headers when the
+     *   drain began releases its socket through `closeIdleConnections()` once
+     *   it has ended. That call skips any socket still writing a response.
+     *
+     * Neither arm cuts a response short: both act only once it has ended.
+     */
+    private trackForDrain(server: any, res: ServerResponse) {
+        if (this.draining) res.shouldKeepAlive = false;
+        this.inFlightResponses.add(res);
+        const socket = res.socket;
+        res.once('close', () => {
+            this.inFlightResponses.delete(res);
+            if (!this.draining || !socket || socket.destroyed || socket.writableEnded) return;
+            if (typeof server.closeIdleConnections === 'function') server.closeIdleConnections();
         });
     }
 
@@ -1853,7 +1899,13 @@ export class HonoHttpServer implements IHttpServer {
         // requests finish rather than force-killing them mid-response.
         // `closeIdleConnections()` releases idle keep-alive sockets so the process
         // can exit promptly; active requests keep running until they complete or
-        // the drain window elapses.
+        // the drain window elapses, and each one's connection closes as soon as
+        // its response ends (`trackForDrain`), so the drain finishes with the
+        // last in-flight request rather than a keep-alive window after it.
+        this.draining = true;
+        for (const res of this.inFlightResponses) {
+            if (!res.headersSent) res.shouldKeepAlive = false;
+        }
         await new Promise<void>((resolve) => {
             let settled = false;
             const finish = () => { if (!settled) { settled = true; resolve(); } };
@@ -1875,5 +1927,7 @@ export class HonoHttpServer implements IHttpServer {
             if (typeof timer.unref === 'function') timer.unref();
         });
         this.server = undefined;
+        this.draining = false;
+        this.inFlightResponses.clear();
     }
 }
