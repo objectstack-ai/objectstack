@@ -136,7 +136,7 @@ describe('os package publish — the marketplace taxonomy', () => {
     });
 
     it('lists the business functions for a value the mapping does not know', () => {
-      expect(retiredCategoryRefusal('flag', 'travel-agency')).toMatch(/Business functions: sales, marketing, customer-service/);
+      expect(retiredCategoryRefusal('flag', 'travel-agency')).toMatch(/Business functions: sales, marketing, customer_service/);
     });
   });
 
@@ -144,7 +144,7 @@ describe('os package publish — the marketplace taxonomy', () => {
     it('sends every declared facet under its wire name', async () => {
       const path = await projectWith({
         ...BASE,
-        businessFunctions: ['sales', 'customer-service'],
+        businessFunctions: ['sales', 'customer_service'],
         industries: ['retail'],
         solutionType: 'app',
         maturity: 'beta',
@@ -154,7 +154,7 @@ describe('os package publish — the marketplace taxonomy', () => {
 
       expect(await run([path])).toBeUndefined();
       expect(calls[0].body).toMatchObject({
-        business_functions: ['sales', 'customer-service'],
+        business_functions: ['sales', 'customer_service'],
         industries: ['retail'],
         solution_type: 'app',
         maturity: 'beta',
