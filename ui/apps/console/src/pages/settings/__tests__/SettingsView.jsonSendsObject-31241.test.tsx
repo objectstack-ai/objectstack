@@ -131,14 +131,65 @@ describe('SettingsView — a `json` setting is sent as its parsed value (objects
     expect(toastSuccess).not.toHaveBeenCalled();
   });
 
-  it('a stored value that is not this save\'s does not block it', async () => {
-    // A deployment that saved through the old page holds the text; editing
-    // another key must still save.
-    getSettingsNamespace.mockResolvedValue(lifecyclePayload({ quota_defaults: '{ not json' }));
+  it('a locked stored value is not seeded and does not block an unrelated save', async () => {
+    // An env override pins the text; nothing on this page can change it, so it
+    // is neither put in the draft nor judged.
+    const payload = lifecyclePayload();
+    payload.values.quota_defaults = { value: '{ not json', source: 'env', locked: true };
+    getSettingsNamespace.mockResolvedValue(payload);
     renderView();
+    await screen.findByText('Row quotas');
+    expect(screen.queryByTestId('settings-unsaved-count')).toBeNull();
     await typeAndSave('quotas', '{"sys_job_run": 1}');
 
     await waitFor(() => expect(saveSettingsNamespace).toHaveBeenCalledTimes(1));
     expect(saveSettingsNamespace.mock.calls[0][1]).toEqual({ quotas: { sys_job_run: 1 } });
+  });
+});
+
+describe('SettingsView — a `json` value stored as text is offered for one save (objectstack#31241)', () => {
+  const STORED = '{"sys_audit_log": 1000}';
+  const noteIn = (key: string) => rowFor(key)?.querySelector('[data-testid="settings-field-note"]') ?? null;
+
+  it('shows the save bar on load with the stored text as one unsaved change, and a note on the row', async () => {
+    getSettingsNamespace.mockResolvedValue(lifecyclePayload({ quotas: STORED }));
+    renderView();
+
+    const bar = await screen.findByTestId('settings-unsaved-count');
+    // Provider-less, `t` answers the key; the count is the draft's size.
+    expect(bar.textContent).toMatch(/unsavedCount/);
+    expect(boxFor('quotas')!.value).toBe(STORED);
+    expect(noteIn('quotas')?.textContent).toMatch(/jsonStoredAsText/);
+    // A key stored as an object is neither seeded nor noted.
+    expect(noteIn('quota_defaults')).toBeNull();
+    expect(saveSettingsNamespace).not.toHaveBeenCalled();
+  });
+
+  it('clicking Save without touching the row PUTs the object the stored text holds', async () => {
+    // The load reads the text; the re-read after the save reads the object.
+    getSettingsNamespace
+      .mockResolvedValueOnce(lifecyclePayload({ quotas: STORED }))
+      .mockResolvedValue(lifecyclePayload({ quotas: { sys_audit_log: 1000 } }));
+    saveSettingsNamespace.mockResolvedValue({
+      values: { quotas: { value: { sys_audit_log: 1000 }, source: 'global', locked: false } },
+    });
+    renderView();
+    fireEvent.click(await screen.findByRole('button', { name: /save/i }));
+
+    await waitFor(() => expect(saveSettingsNamespace).toHaveBeenCalledTimes(1));
+    expect(saveSettingsNamespace.mock.calls[0]).toEqual(['lifecycle', { quotas: { sys_audit_log: 1000 } }]);
+    // Stored as an object now: the bar and the note are gone.
+    await waitFor(() => expect(screen.queryByTestId('settings-unsaved-count')).toBeNull());
+    expect(noteIn('quotas')).toBeNull();
+  });
+
+  it('stored text that does not parse is seeded too, and Save stops on its row', async () => {
+    getSettingsNamespace.mockResolvedValue(lifecyclePayload({ quota_defaults: '{ not json' }));
+    renderView();
+    fireEvent.click(await screen.findByRole('button', { name: /save/i }));
+
+    await waitFor(() => expect(alertIn('quota_defaults')).toBeTruthy());
+    expect(alertIn('quota_defaults')!.textContent).toMatch(/invalidJson|Invalid JSON/);
+    expect(saveSettingsNamespace).not.toHaveBeenCalled();
   });
 });

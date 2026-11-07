@@ -257,6 +257,35 @@ function outgoingSettingsPatch(
 }
 
 /**
+ * True when a `json` key's STORED value is text (objectstack#31241): a console
+ * before that fix saved the textarea's text, so the setting holds a string
+ * where ADR-0007 declares an object. A locked row is left alone: nothing on
+ * this page can change it.
+ */
+function isStoredJsonText(spec: Specifier, resolved: { value?: unknown; locked?: boolean } | undefined): boolean {
+  return spec.type === 'json' && !!resolved && !resolved.locked && typeof resolved.value === 'string';
+}
+
+/**
+ * The draft a freshly loaded namespace starts with (objectstack#31241): every
+ * `json` key whose stored value is text, with that text. The page only saves
+ * what is in the draft, so without this an administrator told to "save the
+ * page once" would find no Save at all and the text would stay text. Seeded,
+ * the row counts as one unsaved change, and Save sends it through
+ * {@link outgoingSettingsPatch} as the object it parses to. Text that does not
+ * parse is blocked on its row like any other draft.
+ */
+function storedJsonTextDraft(payload: SettingsNamespacePayload): Record<string, unknown> {
+  const draft: Record<string, unknown> = {};
+  for (const spec of payload.manifest.specifiers) {
+    if (!spec.key) continue;
+    const resolved = payload.values[spec.key];
+    if (isStoredJsonText(spec, resolved)) draft[spec.key] = resolved!.value;
+  }
+  return draft;
+}
+
+/**
  * Why the page blocked a save on one key: an empty `required`, a format miss,
  * or a `json` draft whose text does not parse (objectstack#31241).
  */
@@ -399,7 +428,7 @@ export function SettingsView() {
       try {
         const p = await getSettingsNamespace(namespace);
         setPayload(p);
-        setDraft({});
+        setDraft(storedJsonTextDraft(p));
         setFieldErrors({});
         setCryptoRefusal(null);
       } catch (err: any) {
@@ -806,7 +835,9 @@ export function SettingsView() {
                   namespace === CLIENT_ADDRESS_NAMESPACE &&
                   key === CLIENT_ADDRESS_KEY
                     ? clientAddressNote(judgedAddress, t)
-                    : undefined
+                    : isStoredJsonText(spec, resolved)
+                      ? t('console.settingsView.jsonStoredAsText')
+                      : undefined
                 }
                 // The scope the server writes this key at: the specifier's
                 // own, else the manifest's, else the spec's default `tenant`.
