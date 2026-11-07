@@ -246,6 +246,13 @@ const ADMITTED = [
   // ADR-0068 gate first, then the closed `{ userId }` query; no stored state
   // moves, so it has no individual effect pin below.
   'GET /api/v1/auth/admin/authorized-clients',
+  // #31048 — withdraw one of another person's authorized AI assistants: an
+  // ObjectStack raw mount whose FIRST statement is the ADR-0068 gate, then the
+  // closed `{ userId, id }` body. The probe names a consent the target does
+  // not hold, so the admin reaches the handler and gets 404 and nothing
+  // moves; the withdraw's effect is pinned in
+  // `authorized-client-withdraw.dogfood.test.ts`.
+  'POST /api/v1/auth/admin/authorized-clients/withdraw',
   'POST /api/v1/auth/admin/unlock-user',
   'POST /api/v1/auth/admin/import-users',
   'POST /api/v1/auth/admin/oauth2/toggle-disabled',
@@ -727,6 +734,9 @@ describe('#9482: what an ObjectStack platform admin gets from every /admin/ rout
       // `400 VALIDATION_ERROR` past the gate, which the `diedBeforeTheGate`
       // predicate below reads as a void reading.
       'GET /api/v1/auth/admin/authorized-clients': { query: `?userId=${targetUserId}` },
+      // #31048. Both body keys are required: with none the handler answers
+      // `400 VALIDATION_ERROR` past the gate, a void reading below.
+      'POST /api/v1/auth/admin/authorized-clients/withdraw': { body: { userId: targetUserId, id: 'standing-probe-consent' } },
       'POST /api/v1/auth/admin/oauth2/toggle-disabled': { body: { client_id: 'standing-probe-client', disabled: false } },
       'POST /api/v1/auth/admin/sso/register': {
         body: {

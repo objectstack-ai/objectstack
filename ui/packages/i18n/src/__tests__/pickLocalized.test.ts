@@ -180,7 +180,8 @@ describe('pickLocalized — controls: every real language tag is byte-identical 
     [{ en: 'Pricing', 'zh-CN': '定价' }, 'zh', '定价'],
     [{ en: 'Pricing', 'zh-CN': '定价' }, 'zh-TW', '定价'],
     [{ 'pt-BR': 'Preços' }, 'pt-PT', 'Preços'],
-    [{ 'zh-TW': '區域', 'zh-CN': '区域' }, 'zh', '區域'],
+    // `{ 'zh-TW', 'zh-CN' }` at `zh` moved to the script-preference block below:
+    // it holds an entry of the session's own script, so it now reads `zh-CN`.
     // Limb 4 — `default` outranks `en`.
     [{ default: 'D', en: 'E' }, 'fr', 'D'],
     // Limb 5 — `en`.
@@ -211,5 +212,77 @@ describe('pickLocalized — controls: every real language tag is byte-identical 
     // documented pass-through, and it is NOT what the value filter governs.
     expect(pickLocalized(42, 'en')).toBe('42');
     expect(pickLocalized(true, 'en')).toBe('true');
+  });
+});
+
+/**
+ * #30910 — where the platform table splits a language by script (`zh` into
+ * `zh-Hans` and `zh-Hant`), the base-language and sibling limbs prefer an entry
+ * of the session's own script, read through the spec's `platformLocaleTagOf`
+ * (`zh-TW`, `zh-HK` mean `zh-Hant`; `zh`, `zh-CN` mean `zh-Hans`), whatever the
+ * authoring order. Before, they took the FIRST `zh-*` key, so a `zh-Hant`
+ * console showed (and, through `localeWriteKey`, overwrote) the `zh-CN` entry.
+ */
+describe('pickLocalized — an entry of the session\'s own script first (#30910)', () => {
+  const SIMPLIFIED = ['zh-Hans', 'zh-CN', 'zh-SG', 'zh', 'zh-Hans-CN'] as const;
+  const TRADITIONAL = ['zh-Hant', 'zh-TW', 'zh-HK', 'zh-MO', 'zh-Hant-TW'] as const;
+
+  /** `[name, map]` — every map holds one Simplified and one Traditional entry. */
+  const BOTH_SCRIPTS: ReadonlyArray<readonly [string, Record<string, string>]> = [
+    ['zh-CN + zh-TW', { en: 'Customer', 'zh-CN': '客户', 'zh-TW': '客戶' }],
+    ['zh-TW + zh-CN (Traditional authored first)', { en: 'Customer', 'zh-TW': '客戶', 'zh-CN': '客户' }],
+    ['zh-Hans + zh-Hant', { en: 'Customer', 'zh-Hans': '客户', 'zh-Hant': '客戶' }],
+    ['zh-Hant + zh-Hans', { en: 'Customer', 'zh-Hant': '客戶', 'zh-Hans': '客户' }],
+    ['zh-CN + zh-HK', { en: 'Customer', 'zh-CN': '客户', 'zh-HK': '客戶' }],
+    ['bare zh + zh-TW', { en: 'Customer', zh: '客户', 'zh-TW': '客戶' }],
+  ];
+
+  for (const [name, map] of BOTH_SCRIPTS) {
+    it.each(TRADITIONAL)(`${name}: a %s session reads the Traditional entry`, (lang) => {
+      expect(pickLocalized(map, lang)).toBe('客戶');
+    });
+    it.each(SIMPLIFIED)(`${name}: a %s session reads the Simplified entry`, (lang) => {
+      expect(pickLocalized(map, lang)).toBe('客户');
+    });
+  }
+
+  it('the vector that used to read the first sibling now reads the session\'s script', () => {
+    // Before #30910 this answered '區域' — the first `zh-*` key in authoring
+    // order — though bare `zh` means `zh-Hans`.
+    expect(pickLocalized({ 'zh-TW': '區域', 'zh-CN': '区域' }, 'zh')).toBe('区域');
+  });
+
+  it('the bare base key still wins when it means the session\'s script', () => {
+    expect(pickLocalized({ zh: '基础', 'zh-CN': '区域', 'zh-TW': '區域' }, 'zh-CN')).toBe('区域');
+    expect(pickLocalized({ 'zh-Hans': '简体', zh: '基础' }, 'zh-CN')).toBe('基础');
+    expect(pickLocalized({ 'zh-Hans': '简体', zh: '基础' }, 'zh-Hans-SG')).toBe('基础');
+  });
+
+  /**
+   * Byte-identical controls: a map with no entry of the session's script, and
+   * every language the table names once. `[map, locale, answer on main]`.
+   */
+  const UNCHANGED: ReadonlyArray<readonly [Record<string, string>, string, string]> = [
+    // One script only — nothing to prefer, so the old limbs answer.
+    [{ en: 'Customer', 'zh-CN': '客户' }, 'zh-Hant', '客户'],
+    [{ en: 'Customer', 'zh-HK': '客戶' }, 'zh-Hans', '客戶'],
+    [{ en: 'Customer', 'zh-HK': '客戶' }, 'zh-CN', '客戶'],
+    [{ en: 'Customer', zh: '客户' }, 'zh-Hant', '客户'],
+    [{ en: 'Customer', zh: '客户' }, 'zh-TW', '客户'],
+    // A script-subtag spelling the alias table does not name is not guessed at.
+    [{ 'zh-CN': '客户', 'zh-Hant-US': '客戶' }, 'zh-Hant', '客户'],
+    // Languages the table names once keep authoring order on the sibling limb.
+    [{ 'pt-PT': 'PT', 'pt-BR': 'BR' }, 'pt', 'PT'],
+    [{ 'pt-PT': 'PT', 'pt-BR': 'BR' }, 'pt-BR', 'BR'],
+    [{ 'es-MX': 'MX', 'es-ES': 'ES' }, 'es', 'MX'],
+    [{ 'en-GB': 'GB', 'en-US': 'US' }, 'en', 'GB'],
+    [{ 'fr-CA': 'CA', 'fr-FR': 'FR' }, 'fr', 'CA'],
+    [{ 'ja-JP': 'J', en: 'E' }, 'ja', 'J'],
+    // The language subtag's case still decides the base limb.
+    [{ 'zh-CN': '客户', 'zh-TW': '客戶', en: 'Customer' }, 'ZH-HANT', 'Customer'],
+  ];
+
+  it.each(UNCHANGED)('resolves %j at %j to %j, exactly as before', (map, locale, expected) => {
+    expect(pickLocalized(map, locale)).toBe(expected);
   });
 });
