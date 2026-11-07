@@ -37,7 +37,11 @@ const SHIPPED = 'Service board (shipped)';
 const CUSTOMIZED = 'Service board (customized in the legacy pair)';
 const AUTHOR = { userId: 'u_author', isSystem: false, systemPermissions: ['manage_metadata'] };
 
+const GUIDE = 'crm_service_guide';
 const board = (label: string) => ({ name: BOARD, label, columns: 12, widgets: [] });
+// A doc opens no overlay channel: its removal passes the sealed-removal
+// refusal only as a pair's removal of its own declared override.
+const guide = (label: string) => ({ name: GUIDE, label, content: '# Service guide' });
 const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v));
 
 const liveEngines: ObjectQL[] = [];
@@ -79,6 +83,7 @@ async function boot() {
         dependencies: { [APP]: '^6.1.0' },
         objects: [{ name: 'crm_service_case', label: 'Case', fields: { subject: { name: 'subject', label: 'Subject', type: 'text' } } }],
         dashboards: [board(SHIPPED)],
+        docs: [guide(SHIPPED)],
     });
     // The per-package pair an earlier version's ensure door created for the module.
     engine.registry.installPackage({
@@ -159,5 +164,20 @@ describe('[#29594] merge question 12: a legacy per-package pair of an App\'s mod
         const after = await read(`/meta/dashboard/${BOARD}`, { package: MODULE });
         const layeredAfter = await read(`/meta/dashboard/${BOARD}/layers`, { package: MODULE });
         expect([labelOf(after.body), effectiveLabel(layeredAfter.body)]).toEqual([SHIPPED, SHIPPED]);
+    }, 60_000);
+
+    it('a doc (no overlay channel) the legacy pair overrides is served, and its removal passes the sealed-removal refusal as the pair\'s own', async () => {
+        const { protocol, read, remove } = await boot();
+        await protocol.saveMetaItem({
+            type: 'doc', name: GUIDE, packageId: LEGACY_PAIR,
+            item: { ...guide(CUSTOMIZED), overrides: { package: MODULE, basedOn: '6.1.0' } },
+        });
+        const byName = await read(`/meta/doc/${GUIDE}`, { package: MODULE });
+        expect([byName.status, labelOf(byName.body)], JSON.stringify(byName.body).slice(0, 400)).toEqual([200, CUSTOMIZED]);
+
+        const removed = await remove('doc', GUIDE, { package: LEGACY_PAIR });
+        expect(removed.status, JSON.stringify(removed.body).slice(0, 600)).toBe(200);
+        const after = await read(`/meta/doc/${GUIDE}`, { package: MODULE });
+        expect([after.status, labelOf(after.body)]).toEqual([200, SHIPPED]);
     }, 60_000);
 });
