@@ -4,8 +4,8 @@ import type { SemanticMigration } from '../../types.js';
 
 // ADR-0049 enforce-or-remove on `objectstack.manifest.json`: one family, one
 // entry. Five `TemplateManifest` keys are in `RETIRED_KEYS_BY_MAJOR[18]`.
-// `publisher` and `isStarter` are NOT in this family: a first-party publish
-// script sends both, so their fate is a maintainer decision.
+// `publisher` and `isStarter` are NOT in this family: they were retired as
+// their own, `marketplace-template-manifest-platform-decided-keys-retired`.
 export const entry: SemanticMigration = {
   id: 'marketplace-template-manifest-inert-keys-retired',
   surface:

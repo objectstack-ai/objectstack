@@ -22,6 +22,7 @@ An object on an external datasource binds to its remote table via `external`:
 ObjectSchema.create({
   name: 'ext_customer',
   datasource: 'warehouse',
+  sharingModel: 'public_read',
   external: {
     remoteName: 'customers',        // remote TABLE (object name may differ)
     // remoteSchema: 'public',      // optional schema/namespace (pg/mysql)
@@ -32,7 +33,7 @@ ObjectSchema.create({
 ```
 
 - ❌ **`field.columnName` does not exist — on ANY object.** Authoring it is a
-  parse error everywhere, not only on a federated object.
+  parse error everywhere.
 - **Walled posture (`OS_TENANCY_POSTURE` `isolated`/`group`): every external
   object states its organization scope** — its own `organization_id` field (or
   `columnMap` onto it), `tenancy: { enabled: false }` (shared), or

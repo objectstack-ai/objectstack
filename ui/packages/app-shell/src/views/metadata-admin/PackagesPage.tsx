@@ -77,6 +77,9 @@ import {
 import { useMetadataLocale, t, tFormat } from './i18n.js';
 import { useMetadataClient } from './useMetadata.js';
 import { PackageFormDialog } from './PackageFormDialog.js';
+import { readPackageRemovalContents, type PackageRemovalState } from './packageRemovalContents.js';
+import { PackageRemovalSummary } from './PackageRemovalSummary.js';
+import { useAdapter } from '@object-ui/react';
 import { PageHeader } from '../../layout/PageHeader.js';
 import { errorCodeIs } from '@object-ui/types';
 import { readEnvelopeFailureText } from '../../utils/apiErrorEnvelope.js';
@@ -554,6 +557,15 @@ export function PackageDetailSheet({
   const [disableOpen, setDisableOpen] = React.useState(false);
   const [deleteMode, setDeleteMode] = React.useState<DeleteMode>('');
   const [deleteTyped, setDeleteTyped] = React.useState('');
+  // objectstack#31025 — what the delete removes, read when its dialog opens.
+  const [removal, setRemoval] = React.useState<PackageRemovalState | null>(null);
+  // The count reads key on the package id alone (AGENTS.md #10): the adapter
+  // is read through a ref, kept current from an effect.
+  const adapter = useAdapter();
+  const adapterRef = React.useRef(adapter);
+  React.useEffect(() => {
+    adapterRef.current = adapter;
+  });
   const [discardOpen, setDiscardOpen] = React.useState(false);
   const [dupOpen, setDupOpen] = React.useState(false);
   const [dupName, setDupName] = React.useState('');
@@ -589,6 +601,43 @@ export function PackageDetailSheet({
       cancelled = true;
     };
   }, [open, pkg?.manifest.id]);
+
+  // objectstack#31025 — the Delete dialog states what goes: the export door's
+  // items (each object with the rows the data list counts), read each time
+  // the dialog opens (`openDelete` marks it loading).
+  const removalPackageId = deleteOpen ? pkg?.manifest.id : undefined;
+  React.useEffect(() => {
+    if (!removalPackageId) return;
+    let cancelled = false;
+    apiJson<unknown>(`${API}/${encodeURIComponent(removalPackageId)}/export`)
+      .then((manifest) => {
+        if (cancelled) return;
+        const contents = readPackageRemovalContents(manifest);
+        setRemoval({ status: 'ready', contents, counts: {} });
+        const source = adapterRef.current;
+        for (const { name } of contents.objects) {
+          const counted: Promise<number | null> =
+            source && typeof source.find === 'function'
+              ? source
+                  .find(name, { $top: 0 })
+                  .then((r) => (typeof r?.total === 'number' ? r.total : null))
+                  .catch(() => null)
+              : Promise.resolve(null);
+          void counted.then((count) => {
+            if (cancelled) return;
+            setRemoval((prev) =>
+              prev?.status === 'ready' ? { ...prev, counts: { ...prev.counts, [name]: count } } : prev,
+            );
+          });
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setRemoval({ status: 'failed' });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [removalPackageId]);
 
   if (!pkg) return null;
   const id = pkg.manifest.id;
@@ -813,6 +862,7 @@ export function PackageDetailSheet({
     startAction(() => {
       setDeleteMode('');
       setDeleteTyped('');
+      setRemoval({ status: 'loading' });
       setDeleteOpen(true);
     });
 
@@ -1290,6 +1340,12 @@ export function PackageDetailSheet({
                 </Label>
               </div>
             </RadioGroup>
+            <PackageRemovalSummary
+              state={removal}
+              draftCount={drafts?.length ?? 0}
+              dropsTables={deleteMode === 'all'}
+              locale={locale}
+            />
             <div className="grid gap-1.5">
               <Label htmlFor={`${fieldId}-delete-name`} className="text-sm font-medium">
                 {tFormat('engine.packages.detail.deleteTypeName', locale, { name: displayName })}

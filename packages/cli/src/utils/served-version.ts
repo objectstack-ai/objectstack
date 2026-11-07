@@ -144,26 +144,55 @@ export function interpretServedReport(
   return { kind: 'pending', observed };
 }
 
+/** One environment as its detail read answers it, reduced to what the CLI addresses it by. */
+export interface CloudEnvironmentAddress {
+  /** `https://` + `data.environment.hostname`; `undefined` when the row carries none. */
+  origin: string | undefined;
+  /** `data.environment.slug`, when the row carries one. */
+  slug: string | undefined;
+  /** `data.environment.display_name`, when the row carries one. */
+  displayName: string | undefined;
+}
+
+/**
+ * The control plane's environment read (`GET /api/v1/cloud/environments/{id}`),
+ * reduced to {@link CloudEnvironmentAddress}. Never throws: a network failure
+ * and a non-2xx are an `ok: false` naming the status, so a caller that cannot
+ * go on without the answer (`os mcp connect`) says why, and one that can
+ * ({@link fetchEnvironmentOrigin}) reads it as "no origin".
+ */
+export async function readCloudEnvironment(
+  target: Pick<ServedVersionTarget, 'baseUrl' | 'token' | 'environmentId'>,
+): Promise<({ ok: true } & CloudEnvironmentAddress) | { ok: false; status: number; error: string }> {
+  try {
+    const response = await fetch(
+      `${target.baseUrl}/api/v1/cloud/environments/${encodeURIComponent(target.environmentId)}`,
+      { headers: { Authorization: `Bearer ${target.token}` } },
+    );
+    const parsed: any = await response.json().catch(() => null);
+    if (!response.ok) return { ok: false, status: response.status, error: readErrorMessage(parsed, response) };
+    const row = (parsed?.data ?? parsed)?.environment;
+    const text = (value: unknown) => (typeof value === 'string' && value.trim() ? value.trim() : undefined);
+    const hostname = text(row?.hostname)?.replace(/\/+$/, '');
+    return {
+      ok: true,
+      origin: hostname ? (/^https?:\/\//i.test(hostname) ? hostname : `https://${hostname}`) : undefined,
+      slug: text(row?.slug),
+      displayName: text(row?.display_name),
+    };
+  } catch (err: any) {
+    return { ok: false, status: 0, error: err?.message ?? String(err) };
+  }
+}
+
 /**
  * The environment's own origin, from the control plane's environment read
  * (`data.environment.hostname`). `undefined` when it has none or the read
  * fails — the wait then cannot wake the build, and the caller says so.
  */
 export async function fetchEnvironmentOrigin(target: Pick<ServedVersionTarget, 'baseUrl' | 'token' | 'environmentId'>): Promise<string | undefined> {
-  try {
-    const response = await fetch(
-      `${target.baseUrl}/api/v1/cloud/environments/${encodeURIComponent(target.environmentId)}`,
-      { headers: { Authorization: `Bearer ${target.token}` } },
-    );
-    if (!response.ok) return undefined;
-    const parsed: any = await response.json().catch(() => null);
-    const hostname = (parsed?.data ?? parsed)?.environment?.hostname;
-    if (typeof hostname !== 'string' || !hostname.trim()) return undefined;
-    const trimmed = hostname.trim().replace(/\/+$/, '');
-    return /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
-  } catch {
-    return undefined;
-  }
+  const read = await readCloudEnvironment(target);
+  return read.ok ? read.origin : undefined;
 }
 
 /**

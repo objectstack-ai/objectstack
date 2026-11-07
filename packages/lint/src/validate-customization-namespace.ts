@@ -5,8 +5,9 @@
  * customization namespace — so its installers can never customize it — is
  * told so while it is still being authored.
  *
- * Every installed base gets one paired writable package, `<base>.custom`, the
- * first time an installer customizes it; its namespace is the base's followed
+ * Every installed App gets one paired writable package, `<app id>.custom`,
+ * the first time an installer customizes any of its packages (ADR-0146 D3 as
+ * amended, ruling record 6691022506); its namespace is the App's followed
  * by a suffix, and a base namespace too long for that suffix gets NO pair
  * namespace (the #28404 ruling, point 1: a named refusal, no truncation and no
  * hashing). The ensure door then refuses to create the pair, so the author of
@@ -36,6 +37,10 @@
  *  - A package that is itself a pair (`isCustomizationPackage`, the one
  *    spelling of "some base derives this id"): a pair is never paired again, and its
  *    namespace is the pair namespace, longer than a base's by construction.
+ *  - A member of a delivered App (`appOf`, `@objectstack/metadata-core`, read
+ *    over the delivered manifests): its customizations land in the App's pair,
+ *    whose namespace is the App's, so its own namespace has no pair to fit —
+ *    the App's row is judged instead.
  *  - The helper's other two refusals. A missing namespace is not this rule's
  *    question, and a namespace the manifest grammar refuses for another reason
  *    (an uppercase letter, a leading digit) is `os validate`'s refusal, with
@@ -55,6 +60,7 @@ import {
   customizationNamespace,
   isCustomizationPackage,
 } from '@objectstack/spec/kernel';
+import { appOf, installedManifestsOf } from '@objectstack/metadata-core';
 
 import type { AnyRec } from './page-walk.js';
 
@@ -104,8 +110,16 @@ export function validateCustomizationNamespace(stack: AnyRec): CustomizationName
   const findings: CustomizationNamespaceFinding[] = [];
   if (!isRec(stack)) return findings;
 
-  for (const { manifest, at } of deliveredManifests(stack)) {
+  const delivered = deliveredManifests(stack);
+  const installed = installedManifestsOf({
+    getPackage: (id: string) => {
+      const found = delivered.find(({ manifest }) => manifest.id === id);
+      return found ? { manifest: found.manifest } : undefined;
+    },
+  });
+  for (const { manifest, at } of delivered) {
     if (isCustomizationPackage(manifest.id)) continue;
+    if (typeof manifest.id === 'string' && manifest.id !== '' && appOf(manifest.id, installed) !== manifest.id) continue;
 
     const pairNamespace = customizationNamespace(manifest.namespace);
     if (pairNamespace.ok || pairNamespace.reason !== 'base_namespace_too_long') continue;

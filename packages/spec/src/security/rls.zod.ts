@@ -737,6 +737,15 @@ export const DefaultRowScopeSchema = lazySchema(() => {
  * > rows of X whose `userField` (U) equals the caller's user id and on which
  * > `filter` holds.
  *
+ * F is a reference column on X, whose values are ids of the object it
+ * references, or `id`, the roster row's own primary key (#31129 ruling A).
+ * With `id` the set is the caller's own rows of X, "the records I am": an
+ * `employee` roster declaring `my_employee_ids: { userField: 'user',
+ * valueField: 'id' }` lets a policy read `employee in
+ * current_user.my_employee_ids`. Such a key holds ids of X itself, so a
+ * policy compares it with a column that references X, or with X's own `id`.
+ * It grants nothing by itself: what a policy grants with it is the author's.
+ *
  * X is implied by the declaring object, as `defaultRowScope` implies its object.
  * The map is record-keyed (`ObjectSchema.membershipKeys`), so one object cannot
  * declare a key twice; `defineStack` and `composeStacks` refuse one key declared
@@ -757,7 +766,7 @@ export const DefaultRowScopeSchema = lazySchema(() => {
  *
  * Judged against the merged object at authoring and publish, not here
  * (refusals 3 at the runtime gate, 4, 5, 6, 7, 11, 12 and 13): whether U is a
- * single-valued user reference and F a reference column on X, whether `filter`
+ * single-valued user reference and F a reference column on X or X's `id`, whether `filter`
  * lowers and reads no `current_user.*`, a key a registered resolver also owns,
  * and how a policy compares the key.
  *
@@ -838,13 +847,16 @@ export const MembershipKeySchema = lazySchema(() => strictObject(
 
     /**
      * F: the column whose values form the set. A reference column on this
-     * object (`lookup`, `master_detail` or `user`); a multi-valued one is
-     * flattened and de-duplicated.
+     * object (`lookup`, `master_detail` or `user`), a multi-valued one
+     * flattened and de-duplicated; or `id`, this object's own primary key, so
+     * the set is the caller's own rows of this object (#31129 ruling A).
      */
     valueField: SnakeCaseIdentifierSchema.describe(
       'The column of this object whose values form the set: a reference (`lookup`, `master_detail` or '
-      + '`user`), multi-valued allowed. A policy compares the set with a column that references the same '
-      + 'object, or with `id` on that object. Never the same column as `userField`.',
+      + '`user`), multi-valued allowed, or `id` for the ids of the signed-in user\'s own rows of this object '
+      + '(an employee roster\'s "the employee records I am"). A policy compares the set with a column that '
+      + 'references the object the values belong to, or with `id` on that object. Never the same column as '
+      + '`userField`.',
     ).meta({ title: 'Value field' }),
 
     /**

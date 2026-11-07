@@ -176,7 +176,7 @@ export interface ProtocolHost {
     readonly packagelessDraftAddress: ObjectStackProtocolImplementation['packagelessDraftAddress'];
     readonly packagelessOverlayWriteRefusal: ObjectStackProtocolImplementation['packagelessOverlayWriteRefusal'];
     readonly packagelessReadAddress: ObjectStackProtocolImplementation['packagelessReadAddress'];
-    readonly pairOfAddedMember: ObjectStackProtocolImplementation['pairOfAddedMember'];
+    readonly pairsOfAddedMember: ObjectStackProtocolImplementation['pairsOfAddedMember'];
     readonly parseCommitItems: ObjectStackProtocolImplementation['parseCommitItems'];
     readonly permissionSetNameCollisionRefusal: ObjectStackProtocolImplementation['permissionSetNameCollisionRefusal'];
     readonly probeRecord: ObjectStackProtocolImplementation['probeRecord'];

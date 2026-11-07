@@ -8,7 +8,7 @@
 // are new. `protocol.ts` re-exports what it exported.
 import {
     itemDiscriminator,
-    pairOf,
+    pairsOf,
     type InstalledManifestLookup,
 } from '@objectstack/metadata-core';
 import { canonicalMetaUrlType } from '@objectstack/spec/shared';
@@ -95,14 +95,16 @@ interface StoredRowPlace {
  */
 export function servedOverlayRowCandidates(address: ServedOverlayAddress): ServedOverlayRowCandidate[] {
     const base = address.packageId;
-    const pair = address.servedOverride === true && typeof base === 'string' && base !== ''
-        ? pairOf(base, address.installed)
-        : undefined;
+    // [ADR-0146 D3 merge question 12] The App's pair first, then a per-package
+    // pair an earlier version created, while it is installed (`pairsOf`).
+    const pairs = address.servedOverride === true && typeof base === 'string' && base !== ''
+        ? pairsOf(base, address.installed)
+        : [];
     const places: ReadonlyArray<Pick<ServedOverlayRowCandidate, 'packageId' | 'overrideOf'>> = base === null
         ? [{ packageId: null }]
         : base
             ? [
-                ...(pair?.ok ? [{ packageId: pair.value, overrideOf: base }] : []),
+                ...pairs.map((pair) => ({ packageId: pair, overrideOf: base })),
                 { packageId: base },
                 { packageId: null },
             ]

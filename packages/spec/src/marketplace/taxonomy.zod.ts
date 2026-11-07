@@ -38,9 +38,11 @@ import type { InstallMode } from '../kernel/manifest.zod';
  * field — the cloud catalog's facet columns, a console filter — can carry the
  * facet as its options unchanged.
  *
- * Values are append-only. Renaming or removing one is an ADR-0087 retirement
- * with a data migration. Adding one needs a real listed package, or a ruled
- * scenario card, that needs it, and the console's labels in the same change.
+ * Released values are append-only. Renaming or removing a released value is
+ * an ADR-0087 retirement with a data migration; a value no release has
+ * shipped yet can still be respelled without one. Adding one needs a real
+ * listed package, or a ruled scenario card, that needs it, and the console's
+ * labels in the same change.
  * Keep each facet near a dozen values; merge before you grow.
  *
  * ## What is deliberately absent

@@ -31,6 +31,7 @@ describe('System Overview: the null-user bucket reads "System"', () => {
       'ja-JP': 'システム',
       'es-ES': 'Sistema',
       'zh-Hant': '系統',
+      ar: 'النظام',
     });
   });
 

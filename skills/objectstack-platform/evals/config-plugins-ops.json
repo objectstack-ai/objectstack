@@ -42,14 +42,13 @@
     {
       "id": 3,
       "prompt": "Our scheduled flows never launch, and `notify` reports success but nobody receives anything.",
-      "expected_output": "`requires: ['automation', 'triggers', 'job', 'messaging']` on the stack root: `triggers` alone arms record-change triggers, schedule and time-relative ones run on the `job` service, and without `messaging` notify returns success with `skipped: true`. Declaring is a demand (missing provider = hard boot error); `defineStack` rejects an unknown token at authoring time.",
+      "expected_output": "`requires: ['automation', 'triggers']` on the stack root: `triggers` arms the start bindings, and schedule and time-relative ones run on the `job` service. `job` and `messaging` are always-on: a default boot mounts both, listed or not. Only a `--preset minimal` boot drops them; there, list `job` too (else scheduled flows stay silent) and `messaging` (else notify returns success with `skipped: true`). Declaring is a demand (missing provider = hard boot error); `defineStack` rejects an unknown token at authoring time.",
       "files": [],
       "assertions": {
         "must_contain": [
           "requires",
-          "job",
-          "messaging",
-          "triggers"
+          "triggers",
+          "--preset minimal"
         ],
         "must_not_contain": [
           "plugins: [new ServiceJobPlugin",
@@ -148,14 +147,15 @@
     {
       "id": 9,
       "prompt": "Add a `crm_support_intake` queue staffed by the `crm_service_agent` position and route every new `crm_case` into it (`requires: ['automation', 'triggers']`).",
-      "expected_output": "Two stack collections: `queues: [defineQueue({ name: 'crm_support_intake', label: 'Support Intake', members: [{ type: 'position', value: 'crm_service_agent' }] })]` and `assignmentRules: [defineAssignmentRule(...)]` with one entry, `assignTo: { type: 'queue', value: 'crm_support_intake' }`; plus `'sharing'` in `requires`: the keys need `@objectstack/plugin-sharing`'s ownership-queue service (`queue` is the job queue), else the boot is refused.",
+      "expected_output": "Two stack collections: `queues: [defineQueue({ name: 'crm_support_intake', label: 'Support Intake', members: [{ type: 'position', value: 'crm_service_agent' }] })]` and `assignmentRules: [defineAssignmentRule(...)]` with one entry, `assignTo: { type: 'queue', value: 'crm_support_intake' }`; no `requires` change: the keys need `@objectstack/plugin-sharing`'s ownership-queue service (`queue` is the job queue), and `sharing` is always-on, so a default boot mounts it unlisted. Only under `--preset minimal` must `'sharing'` be listed, else the boot is refused.",
       "files": [],
       "assertions": {
         "must_contain": [
           "queues:",
           "assignmentRules:",
           "defineQueue",
-          "'sharing'"
+          "sharing",
+          "--preset minimal"
         ],
         "must_not_contain": [
           "assigned_to",
@@ -331,6 +331,20 @@
         ],
         "must_not_contain": [
           "defineAgent("
+        ]
+      }
+    },
+    {
+      "id": 20,
+      "prompt": "Uploads and settings must work in our app. Do I have to list `storage` and `settings` in `requires:`?",
+      "expected_output": "No. `storage` and `settings` are always-on (`PLATFORM_ALWAYS_ON_CAPABILITIES`): every boot mounts them, listed or not, and listing one is harmless. Only `--preset minimal` drops the always-on tokens, and there they must be listed. A token outside that set, such as `automation` or `mailbox`, mounts only when `requires:` lists it.",
+      "files": [],
+      "assertions": {
+        "must_contain": [
+          "--preset minimal"
+        ],
+        "must_not_contain": [
+          "requires: ['storage', 'settings']"
         ]
       }
     }

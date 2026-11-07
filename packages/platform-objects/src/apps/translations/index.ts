@@ -10,6 +10,7 @@ export { zhCN } from './zh-CN.js';
 export { jaJP } from './ja-JP.js';
 export { esES } from './es-ES.js';
 export { zhHant } from './zh-Hant.js';
+export { ar } from './ar.js';
 
 /**
  * The staleness mechanism (#8765 Option B, extended to the generated bundles by

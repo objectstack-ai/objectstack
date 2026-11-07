@@ -249,6 +249,17 @@ export type { KernelResolver } from './http-dispatcher.js';
 export { DomainHandlerRegistry } from './domain-handler-registry.js';
 export type { DomainRoute, DomainHandler, DomainRequest, DomainHandlerDeps } from './domain-handler-registry.js';
 export { MiddlewareManager } from './middleware.js';
+// The package disable door's dependent-rule verdict and its sentence, for a
+// host door that takes a package out of service another way: the validation
+// rules a disable would leave reading a withheld `objectExtensions` field, and
+// the `409 PACKAGE_DISABLE_RESTRICTED_BY_VALIDATION_RULE` message naming them.
+// The same two functions `PATCH /packages/:id/disable` asks: one scan, one
+// sentence. ⛔ Never re-spell either in a host.
+export {
+    readDisableDependentRules as readPackageDisableDependents,
+    disableDependentRulesMessage as formatPackageDisableDependents,
+} from './domains/packages.js';
+export type { DisableDependentRule } from './domains/packages.js';
 
 // ── Security primitives ───────────────────────────────────────────────
 // Adapter-agnostic helpers for response hardening (CSP/HSTS/XCTO/…) and

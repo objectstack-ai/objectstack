@@ -436,7 +436,8 @@
         "!coverage/**",
         "!.turbo/**",
         "$TURBO_ROOT$/scripts/js-comment-mask.mjs",
-        "$TURBO_ROOT$/scripts/js-comment-mask.d.mts"
+        "$TURBO_ROOT$/scripts/js-comment-mask.d.mts",
+        "$TURBO_ROOT$/ui/apps/console/src/pages/developer/objectstack-skill.ts"
       ]
     },
     "@objectstack/runtime#test": {

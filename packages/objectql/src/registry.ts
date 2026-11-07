@@ -45,7 +45,7 @@ import {
   // [ADR-0146 D3 · ruling record 6691022506] The pair of a package, looked up
   // through the App that carries it — the uninstall refusal's "is its pair
   // installed?" asks it, over this registry's installed manifests.
-  pairOf,
+  pairsOf,
   installedManifestsOf,
 } from '@objectstack/metadata-core';
 // [ADR-0029 D9.2a] `scalarOverridesPackagedBase` is the #8284 comparison, imported rather
@@ -56,7 +56,7 @@ import { SystemFieldName, scalarOverridesPackagedBase } from '@objectstack/spec/
 import { resolveTenancyPosture, resolveSearchPinyinEnabled } from '@objectstack/types';
 import { postureEnforcesWall } from '@objectstack/spec/security';
 import { provisionSearchCompanion, SEARCH_COMPANION_FIELD } from './search-companion.js';
-import { ObjectStackManifest, ManifestSchema, InstalledPackage, InstalledPackageSchema, InstalledPackageSourceSchema, type InstalledPackageSource, checkFieldCompleteness } from '@objectstack/spec/kernel';
+import { ObjectStackManifest, ManifestSchema, InstalledPackage, InstalledPackageSchema, InstalledPackageSourceSchema, type InstalledPackageSource, checkFieldCompleteness, customizationBasePackageId } from '@objectstack/spec/kernel';
 import { DEFAULT_FLOW_FUNCTION_EFFECT } from '@objectstack/spec/automation';
 import { AppSchema, ActionSchema } from '@objectstack/spec/ui';
 import { applyProtection } from '@objectstack/spec/shared';
@@ -3336,8 +3336,9 @@ const EXTENDED_OBJECTS_LISTED = 5;
  * so one answer is the whole way out rather than the first step of several.
  *
  * [#28408, ADR-0146 D3] …and the uninstall refusal of a base whose paired
- * customization package is installed: `<base>.custom`, the id
- * {@link pairOf} looks up, held by this registry. That package
+ * customization package is installed and named for it: the App's pair of an
+ * App, or the per-package pair an earlier version created for a package
+ * ({@link pairsOf}), held by this registry. That package
  * holds every customization of the base, so uninstalling the base under it
  * would strand them all, with nothing serving them and nothing saying why.
  * ADR-0146 puts this refusal in this family and this shape, so it is this
@@ -7352,8 +7353,9 @@ export class SchemaRegistry {
    * package is refused exactly when the first such object exists.
    *
    * [#28408, ADR-0146 D3] It also refuses while this registry holds the
-   * package's paired customization package — the id
-   * {@link pairOf} looks up for `packageId`, so the pair is
+   * package's paired customization package named for `packageId` — one
+   * of the ids {@link pairsOf} looks up for it (the App's pair is named for
+   * the App, not for a member) — so the pair is
    * found by id alone, whichever door created or installed it. The same
    * refusal, carrying both causes when both hold. Uninstalling the pair itself
    * asks nothing of this kind: a `.custom` id derives no pair of its own. An
@@ -7384,8 +7386,14 @@ export class SchemaRegistry {
         extended.push({ objectName: fqn, extenders: otherExtenders.map(c => String(c.packageId)) });
       }
     }
-    const pair = pairOf(packageId, installedManifestsOf(this));
-    const installedPair = pair.ok && this.getPackage(pair.value) !== undefined ? pair.value : undefined;
+    // [ADR-0146 D3 · merge questions 11, 12] The installed pair named for
+    // this package: the App's pair when this is the App (a member's
+    // uninstall keeps and marks its overrides in the App's pair, and is not
+    // refused for it), or the per-package pair an earlier version created
+    // for this package.
+    const installedPair = pairsOf(packageId, installedManifestsOf(this)).find(
+      (id) => customizationBasePackageId(id) === packageId && this.getPackage(id) !== undefined,
+    );
     if (extended.length > 0 || installedPair !== undefined) {
       throw new PackageUninstallExtendedError(packageId, extended, installedPair);
     }
