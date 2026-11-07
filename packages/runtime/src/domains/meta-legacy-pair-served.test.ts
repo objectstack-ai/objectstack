@@ -146,7 +146,7 @@ const effectiveLabel = (body: any) => (body?.data ?? body)?.effective?.label;
 // removal's pass past it — and a host-config kernel only the repository's
 // delete gate.
 for (const environmentId of [undefined, 'env_hotcrm'] as const) {
-        const topology = environmentId === undefined ? 'host-config kernel' : 'environment kernel';
+    const topology = environmentId === undefined ? 'host-config kernel' : 'environment kernel';
     describe(`[#29594] merge question 12 (${topology}): a legacy per-package pair of an App's module is honoured as before`, () => {
         it('the pair still saves a declared override of the module\'s item (the write gate admits it)', async () => {
             const { protocol, read } = await boot(environmentId);
