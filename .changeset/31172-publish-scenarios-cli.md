@@ -1,5 +1,5 @@
 ---
-'@objectstack/scenarios': minor
+'@objectstack/scenarios': patch
 ---
 
 feat(scenarios): `@objectstack/scenarios` is published, with an `objectstack-scenarios` command line: `npx @objectstack/scenarios run` runs the open scenario cards with no checkout of the platform
