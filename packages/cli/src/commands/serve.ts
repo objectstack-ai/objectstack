@@ -4712,15 +4712,21 @@ export default class Serve extends Command {
       // `materializeStackPlugin` — so the crypto-provider composition check
       // before `runtime.start()` reads what each one declares.
       const stackMountedPlugins: unknown[] = [];
+      // The entries that did not load, with what each materialized to (when it
+      // got that far), for `refuseUnloadedCryptoProviderPlugins` below.
+      const unloadedStackPlugins: UnloadedStackPlugin[] = [];
       if (plugins.length > 0) {
+        let index = -1;
         for (const plugin of plugins) {
+          index += 1;
+          let materialized: unknown;
           try {
             // [#22301] What an entry becomes — a string is a package specifier,
             // a plain bundle (no `init`) is wrapped into `AppPlugin`, an instance
             // is itself — is ONE rule, `materializeStackPlugin` (`@objectstack/
             // core`), which `@objectstack/verify`'s `bootStack` mounts the same
             // array by. Only the loading is this boot's own:
-            const pluginToLoad: any = await materializeStackPlugin(plugin, {
+            const pluginToLoad: any = materialized = await materializeStackPlugin(plugin, {
               // Host-anchored, NOT a bare `import()`: this specifier comes from
               // the served app's own config, so what the app DECLARES about it is
               // the contract (commit 9cc6777d3). The helper carries the failure wrapper too.
@@ -4752,9 +4758,13 @@ export default class Serve extends Command {
             trackPlugin(pluginName);
           } catch (e: any) {
             console.error(chalk.red(`  ✗ Failed to load plugin: ${e.message}`));
+            unloadedStackPlugins.push({ index, entry: plugin, materialized, error: e });
           }
         }
       }
+      // An entry that did not load and may provide the crypto provider refuses
+      // the boot, before any secret is sealed: see the function.
+      refuseUnloadedCryptoProviderPlugins(unloadedStackPlugins);
 
       // [ADR-0025 §3.5 M1] The plugins `os plugin install` installed for this
       // project and environment, verified again before any of their code is
@@ -6400,6 +6410,58 @@ export function refuseTwoCryptoProviderPlugins(composed: Iterable<unknown>): voi
       + "so exactly one plugin may provide it — keep one of them in the stack's plugins.",
     );
   }
+}
+
+/** A `plugins` entry `os serve` could not load: {@link refuseUnloadedCryptoProviderPlugins}. */
+export interface UnloadedStackPlugin {
+  /** Its position in the stack's `plugins`. */
+  index: number;
+  /** The entry as the config wrote it. */
+  entry: unknown;
+  /** What it materialized to before it failed; `undefined` when it never did. */
+  materialized?: unknown;
+  error: unknown;
+}
+
+/**
+ * Refuse a boot in which a `plugins` entry did not load and nothing rules out
+ * that it provides the crypto provider ({@link CRYPTO_PROVIDER_SERVICE}).
+ *
+ * The provider seals every secret field, datasource credential and encrypted
+ * setting, and the host chooses it once at `kernel:ready`
+ * ({@link createHostCryptoProvider}). A boot that goes on without the plugin
+ * that provides it would choose another one, so it does not go on. An entry is
+ * ruled out only by what it says it provides: the plugin it materialized to
+ * (or the entry itself, when it is an object) has a `providesServices`
+ * (ADR-0116) that does not name the provider. An entry that never
+ * materialized (a package specifier that does not resolve or import) says
+ * nothing, and is refused. Every other unloaded entry keeps the boot's
+ * existing handling: it is printed and the boot goes on without it.
+ *
+ * The one-shot secret commands keep the same rule over the same host config.
+ */
+export function refuseUnloadedCryptoProviderPlugins(unloaded: readonly UnloadedStackPlugin[]): void {
+  const refused = unloaded.filter(({ entry, materialized }) => {
+    const said = materialized && typeof materialized === 'object'
+      ? materialized
+      : entry && typeof entry === 'object' ? entry : undefined;
+    if (!said) return true;
+    const provides = (said as { providesServices?: unknown }).providesServices;
+    return Array.isArray(provides) && provides.includes(CRYPTO_PROVIDER_SERVICE);
+  });
+  if (refused.length === 0) return;
+  const label = ({ index, entry, materialized }: UnloadedStackPlugin): string => {
+    if (typeof entry === 'string') return `plugins[${index}] ('${entry}')`;
+    const name = (materialized as { name?: unknown } | null | undefined)?.name ?? (entry as { name?: unknown } | null)?.name;
+    return typeof name === 'string' ? `plugins[${index}] ('${name}')` : `plugins[${index}]`;
+  };
+  const reason = (error: unknown): string => (error instanceof Error ? error.message : String(error));
+  throw new HostCryptoProviderRefusal(
+    `Refusing to boot: ${refused.map((u) => `${label(u)} did not load (${reason(u.error)})`).join('; ')}, `
+    + `and nothing rules out that ${refused.length === 1 ? 'it provides' : 'one of them provides'} the crypto provider `
+    + `('${CRYPTO_PROVIDER_SERVICE}'). It seals every secret field, datasource credential and encrypted setting, `
+    + 'so this boot does not choose another one. Make the entry load, or remove it from the stack\'s plugins.',
+  );
 }
 
 /**

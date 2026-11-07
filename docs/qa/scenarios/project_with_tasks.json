@@ -48,6 +48,7 @@
         }
       ]
     },
+    "userHandleFields": [{"object": "task", "field": "assignee"}],
     "questions": [
       {
         "id": "open_tasks",

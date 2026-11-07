@@ -249,9 +249,43 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
   return (payload?.data ?? payload) as T;
 }
 
-export async function listMarketplacePackages(params: { q?: string; limit?: number; offset?: number } = {}): Promise<MarketplaceListResponse> {
+/**
+ * One read of the catalog list: the search text, the taxonomy filters and the
+ * page window, as `GET /api/v1/marketplace/packages` takes them.
+ *
+ * The filter keys are `MarketplaceSearchRequestSchema`'s
+ * (`@objectstack/spec/marketplace`): `businessFunctions`, `industries` and
+ * `solutionTypes` (plural, each a list) and `maturity` (one value). The server
+ * applies them OR inside one facet and AND across them, before it pages.
+ */
+export interface MarketplaceListParams {
+  q?: string;
+  limit?: number;
+  offset?: number;
+  businessFunctions?: readonly MarketplaceBusinessFunction[];
+  industries?: readonly MarketplaceIndustry[];
+  solutionTypes?: readonly MarketplaceSolutionType[];
+  maturity?: PackageMaturity;
+}
+
+/** The list-valued filters, each sent as one comma-joined parameter. */
+const LIST_FILTERS = ['businessFunctions', 'industries', 'solutionTypes'] as const;
+
+/**
+ * Read one page of the catalog. A list filter goes out as ONE comma-joined
+ * parameter (`?businessFunctions=sales,marketing`), and a filter that selects
+ * nothing is left out rather than sent empty: the door refuses an empty facet,
+ * a repeated facet key and the retired `category` with 400 `VALIDATION_ERROR`,
+ * and this read sends none of the three.
+ */
+export async function listMarketplacePackages(params: MarketplaceListParams = {}): Promise<MarketplaceListResponse> {
   const usp = new URLSearchParams();
   if (params.q) usp.set('q', params.q);
+  for (const key of LIST_FILTERS) {
+    const values = params[key];
+    if (values && values.length > 0) usp.set(key, values.join(','));
+  }
+  if (params.maturity) usp.set('maturity', params.maturity);
   if (params.limit != null) usp.set('limit', String(params.limit));
   if (params.offset != null) usp.set('offset', String(params.offset));
   const qs = usp.toString();

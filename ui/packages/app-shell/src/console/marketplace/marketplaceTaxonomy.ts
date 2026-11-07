@@ -8,9 +8,11 @@
  * (`marketplace-taxonomy-labels-31011.test.ts` in `@object-ui/i18n`), which iterates
  * the same `.options`.
  *
- * Filtering semantics are the spec's (`taxonomy.zod.ts`): OR inside one facet,
- * AND across facets. Maturity is a flag, not a facet: it draws a Beta badge and
- * filters nothing.
+ * Filtering is the catalog list door's (`GET /api/v1/marketplace/packages`),
+ * with the spec's semantics (`taxonomy.zod.ts`): OR inside one facet, AND across
+ * facets, applied on the server before it pages. The console sends the
+ * selection (`facetListParams`) and filters nothing itself. Maturity is a flag,
+ * not a facet: it draws a Beta badge, and the console selects no maturity.
  */
 
 import {
@@ -22,7 +24,7 @@ import {
   type MarketplaceIndustry,
   type MarketplaceSolutionType,
 } from '@objectstack/spec/marketplace';
-import type { MarketplacePackageSummary } from './marketplaceApi.js';
+import type { MarketplaceListParams, MarketplacePackageSummary } from './marketplaceApi.js';
 
 /** The spec's business functions, in the spec's order. */
 export const BUSINESS_FUNCTIONS: readonly MarketplaceBusinessFunction[] = MarketplaceBusinessFunctionSchema.options;
@@ -85,89 +87,59 @@ export const EMPTY_FACET_SELECTION: FacetSelection = {
   solutionType: null,
 };
 
-export type FacetName = 'businessFunctions' | 'industries' | 'solutionType';
-
 /**
- * The solution type a row is filtered and counted under: its own, or the
- * spec's default (`app`) when it declares none — the spec's reading of an
- * absent key.
+ * The solution type a row is read under: its own, or the spec's default
+ * (`app`) when it declares none — the spec's reading of an absent key, and the
+ * one the catalog list door filters by (a row without the column passes
+ * `solutionTypes=app`).
  */
 export function effectiveSolutionType(taxonomy: ListingTaxonomy): MarketplaceSolutionType {
   return taxonomy.solutionType ?? DEFAULT_SOLUTION_TYPE;
 }
 
 /**
- * Whether a row passes every facet except `skip`: OR inside a facet (the row
- * carries any selected value), AND across facets. `skip` is how a facet counts
- * its own values against the OTHER facets' selection.
+ * The list read's filters for a selection. The server filters and pages (OR
+ * inside a facet, AND across facets), so the selection travels as the query:
+ * each facet's values in the spec's order, and a facet with nothing selected
+ * left out — the door refuses an empty facet.
  */
-export function matchesFacets(taxonomy: ListingTaxonomy, selection: FacetSelection, skip?: FacetName): boolean {
-  if (skip !== 'businessFunctions' && selection.businessFunctions.size > 0
-    && !taxonomy.businessFunctions.some((v) => selection.businessFunctions.has(v))) return false;
-  if (skip !== 'industries' && selection.industries.size > 0
-    && !taxonomy.industries.some((v) => selection.industries.has(v))) return false;
-  if (skip !== 'solutionType' && selection.solutionType !== null
-    && effectiveSolutionType(taxonomy) !== selection.solutionType) return false;
-  return true;
-}
-
-/** One value of a facet as the filter row draws it. */
-export interface FacetOption<T extends string> {
-  value: T;
-  /** The rows carrying it, among those that pass the other facets' selection. */
-  count: number;
-}
-
-/** The facets the filter row draws; a facet no loaded row carries is `[]` and hides. */
-export interface FacetOptions {
-  businessFunctions: FacetOption<MarketplaceBusinessFunction>[];
-  industries: FacetOption<MarketplaceIndustry>[];
-  solutionType: FacetOption<MarketplaceSolutionType>[];
+export function facetListParams(
+  selection: FacetSelection,
+): Pick<MarketplaceListParams, 'businessFunctions' | 'industries' | 'solutionTypes'> {
+  const businessFunctions = BUSINESS_FUNCTIONS.filter((v) => selection.businessFunctions.has(v));
+  const industries = INDUSTRIES.filter((v) => selection.industries.has(v));
+  return {
+    ...(businessFunctions.length > 0 ? { businessFunctions } : {}),
+    ...(industries.length > 0 ? { industries } : {}),
+    ...(selection.solutionType !== null ? { solutionTypes: [selection.solutionType] } : {}),
+  };
 }
 
 /**
- * The facet values to draw, in the spec's order.
- *
- * - A value is drawn when any LOADED row carries it, or when it is selected,
- *   so the buttons do not come and go as the search box and the other facets
- *   narrow the set, and a selection never filters from a button that is gone.
- * - Its count is taken over the SEARCHED rows (those the search box keeps)
- *   that pass the other facets' selection: the rows selecting it would add.
- * - A facet no loaded row carries is empty and hides — every facet, until the
- *   catalog serves the taxonomy. The solution-type facet shows once some row
- *   declares a type; from then on a row that declares none is counted under
- *   the spec's default.
+ * Which facets the filter row draws. A facet is drawn once a row the catalog
+ * answered carries a value of it — the solution type once a row declares one —
+ * and stays drawn from then on, so a selection that narrows the page to rows
+ * without the facet does not take its buttons away. A catalog that does not
+ * serve the taxonomy yet draws no filter.
  */
-export function facetOptions(
-  loaded: readonly ListingTaxonomy[],
-  searched: readonly ListingTaxonomy[],
-  selection: FacetSelection,
-): FacetOptions {
-  const options = <T extends string>(
-    values: readonly T[],
-    carried: (row: ListingTaxonomy) => readonly T[],
-    selected: (value: T) => boolean,
-    facet: FacetName,
-  ): FacetOption<T>[] => {
-    const present = new Set<T>();
-    for (const row of loaded) for (const v of carried(row)) present.add(v);
-    const counts = new Map<T, number>();
-    for (const row of searched) {
-      if (!matchesFacets(row, selection, facet)) continue;
-      for (const v of new Set(carried(row))) counts.set(v, (counts.get(v) ?? 0) + 1);
-    }
-    return values
-      .filter((v) => present.has(v) || selected(v))
-      .map((value) => ({ value, count: counts.get(value) ?? 0 }));
+export interface ServedFacets {
+  businessFunctions: boolean;
+  industries: boolean;
+  solutionType: boolean;
+}
+
+export const NO_SERVED_FACETS: ServedFacets = { businessFunctions: false, industries: false, solutionType: false };
+
+/** `served`, widened by the facets `rows` carry; `served` itself when they add none. */
+export function widenServedFacets(served: ServedFacets, rows: readonly ListingTaxonomy[]): ServedFacets {
+  const next: ServedFacets = {
+    businessFunctions: served.businessFunctions || rows.some((row) => row.businessFunctions.length > 0),
+    industries: served.industries || rows.some((row) => row.industries.length > 0),
+    solutionType: served.solutionType || rows.some((row) => row.solutionType !== null),
   };
-  const typed = selection.solutionType !== null || loaded.some((row) => row.solutionType !== null);
-  return {
-    businessFunctions: options(
-      BUSINESS_FUNCTIONS, (row) => row.businessFunctions, (v) => selection.businessFunctions.has(v), 'businessFunctions',
-    ),
-    industries: options(INDUSTRIES, (row) => row.industries, (v) => selection.industries.has(v), 'industries'),
-    solutionType: typed
-      ? options(SOLUTION_TYPES, (row) => [effectiveSolutionType(row)], (v) => selection.solutionType === v, 'solutionType')
-      : [],
-  };
+  return next.businessFunctions === served.businessFunctions
+    && next.industries === served.industries
+    && next.solutionType === served.solutionType
+    ? served
+    : next;
 }
