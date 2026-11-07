@@ -40,13 +40,19 @@
 //     `Object.hasOwn` in a new test, which against a pre-ES2022 lib is TS2550,
 //     and the package's advertised `typecheck` said nothing while a full-closure
 //     build was the only thing that could see it.
-//   - `rootDir` is INHERITED (`./src`) and needs no widening, which is worth
-//     recording because `packages/cli`'s sibling had to widen its own. This
-//     package's tests all live under `src`. The one import that escapes the
-//     package —`src/canonical-expression-envelopes.test.ts` reaching
+//   - `rootDir` IS widened, to `../..` (the repo root), the shape
+//     `packages/cli`'s and `packages/client`'s siblings already use. This
+//     package's tests all live under `src`, and for a while that was enough:
+//     the first import to escape the package —
+//     `src/canonical-expression-envelopes.test.ts` reaching
 //     `../../../scripts/js-comment-mask.mjs` — lands on a checked-in
 //     `js-comment-mask.d.mts`, so it resolves as a declaration file and reports
-//     no TS6059. Measured, not reasoned: the raw program carries no TS6059.
+//     no TS6059. The second does not: `src/skill-md.test.ts` imports the
+//     Console's SKILL.md mirror (`ui/apps/console/src/pages/developer/
+//     objectstack-skill.ts`) as SOURCE to pin it byte-identical to the served
+//     render, and under the inherited `./src` that one import is 1 x TS6059,
+//     saying nothing about either file. ⛔ It widens the ROOT, never the
+//     strictness; the mirror compiles under this package's own rules.
 //   - ⛔ STRICTNESS IS UNTOUCHED. `strict`, `noUnusedLocals`,
 //     `noUnusedParameters`, `noImplicitReturns`, `noFallthroughCasesInSwitch`
 //     and `types: ["node"]` are inherited from `tsconfig.json` and through it
@@ -97,6 +103,7 @@
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "noEmit": true,
+    "rootDir": "../..",
     "lib": ["ES2022"]
   },
   "include": ["src/**/*"],
