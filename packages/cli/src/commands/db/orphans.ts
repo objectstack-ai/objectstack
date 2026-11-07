@@ -29,8 +29,10 @@ import type {
 } from '../../utils/orphan-detail-sweep.js';
 
 /**
- * `os db orphans` — the operator's door to the detail rows whose required
- * master-detail master does not exist (#24964).
+ * `os db orphans` — the operator's door to the detail rows whose master does
+ * not exist (#24964): a required master-detail, or the optional master of a
+ * controlled-by-parent object (#30976). A row of the latter that names no
+ * master is valid and is never listed.
  *
  * ## Why such a row needs a door, and why this is the one
  *
@@ -49,9 +51,8 @@ import type {
  *  1. An explicit operator command. ⛔ Nothing on any boot, upgrade, migrate
  *     or lifecycle-sweep path invokes it, and it must not grow such a caller
  *     (`orphans.no-auto-run.test.ts` holds it).
- *  2. The default run is a dry-run report: each detail row whose required
- *     master-detail master does not exist — object, record id, field, and the
- *     missing master id.
+ *  2. The default run is a dry-run report: each detail row whose master
+ *     does not exist — object, record id, field, and the missing master id.
  *  3. Deletion only behind `--delete`, and only of the rows the same run's
  *     report lists.
  *  4. A mandatory pre-delete export of every row the run deletes, written and
@@ -93,7 +94,7 @@ import type {
  */
 export default class DbOrphans extends Command {
   static override description =
-    'Report detail rows whose required master-detail master does not exist, and (only with --delete) delete them '
+    'Report detail rows whose master-detail reference names a master that does not exist, and (only with --delete) delete them '
     + 'with their cascade, after writing a pre-delete export. Report-only by default: it writes no row or table.';
 
   static override examples = [
@@ -410,7 +411,7 @@ async function confirm(question: string): Promise<boolean> {
 
 /** Render the plan for a human. */
 function renderPlan(plan: OrphanDetailPlan): void {
-  console.log(chalk.bold('\n  Detail rows whose required master does not exist'));
+  console.log(chalk.bold('\n  Detail rows whose master does not exist'));
   printInfo(
     `scanned ${plan.scanned} row(s) of ${plan.objects.length} object(s) · orphans ${plan.counts.orphans} · `
     + `deeper details ${plan.counts.deeperDetails} · withheld ${plan.counts.withheld}`,

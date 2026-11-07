@@ -71,6 +71,9 @@ export const zhCN: TranslationData = {
         // the rationale in `en.ts` (#6659). Wording matches this locale's
         // `sys_sso_provider.pluralLabel`.
         nav_sso_providers: { label: 'SSO 提供方' },
+        // Conditionally contributed by plugin-auth (only while SCIM is wired),
+        // the same case as the entry above; see `en.ts` (#31123).
+        nav_scim_credentials: { label: 'SCIM 凭据' },
         nav_api_keys: { label: 'API 密钥' },
 
         // 审批中心 = the Approvals Inbox component (#7234) — the surface with
@@ -195,7 +198,7 @@ export const zhCN: TranslationData = {
     },
     connect_agent: {
       label: '连接 AI 助手',
-      subtitle: '让任意支持 MCP 的 AI 客户端受控访问本系统——每次调用都在调用者自身的权限与行级安全范围内执行。',
+      subtitle: '在 Claude、豆包等 AI 助手里使用本系统。助手始终以你的身份操作：只能查看和修改你有权限的内容。',
     },
 
     // Platform record pages (#15743) -- see `en.ts` for the key set.

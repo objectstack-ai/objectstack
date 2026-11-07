@@ -22,11 +22,23 @@
  *                        half not measured
  *   --ask-max-turns N    the live driver's turn cap per question or operation
  *                        turn (default 12)
+ *   --model M            the model every live turn asks for, an alias (`sonnet`)
+ *                        or a name (`claude-sonnet-4-5`), as `claude --model`
+ *                        takes it (default: the login's own)
+ *   --author-model M     the model for authoring turns, build and iterate, in
+ *                        place of --model
+ *   --ask-model M        the model for question and operation turns, in place
+ *                        of --model; the record and the scorecard state the
+ *                        model each turn was served, and mark a mismatch
  *   --template F         a verified build (dist/objectstack.json) for template mode
  *   --no-iterate-run     skip the Run half after the iterate (scratch mode)
  *   --out DIR            where records go (default docs/qa/platform-checklist/runs, git-ignored)
  *   --work DIR           where projects are scaffolded (default: a temp dir)
  *   --create-version V   the create-objectstack version (default latest)
+ *   --packages P         where the @objectstack/* packages come from (`packages.ts`):
+ *                        `published` (default) — npm, what a customer gets;
+ *                        `workspace` — this checkout, built and packed as the
+ *                        release would publish it (unreleased; never exported)
  *
  * ⛔ No API-billed model: the live driver refuses to start when an API key is
  * configured (the cost ruling on cloud#3600).
@@ -42,6 +54,7 @@ import { formatRefusal, libraryOf, loadScenarios, readCapabilityAreas } from '..
 import { HttpApp } from './app.js';
 import { ClaudeCodeDriver, RecordedDriver, RecordingDriver, type AgentDriver } from './driver.js';
 import { minutesText, runCard, type ProjectOps } from './orchestrate.js';
+import { installedSpecVersion, PACKAGES_MODES, prepareWorkspacePackages, settleWorkspaceProject, workspaceScaffolder, type PackageSource, type PackagesMode } from './packages.js';
 import { bootDev, os, readArtifact, readNamespace, scaffold } from './project.js';
 import { cardScorecard, renderScorecard, runRecord } from './scorecard.js';
 
@@ -72,13 +85,21 @@ export interface CliArgs {
   authorMaxTurns?: number;
   /** Turns per question or operation turn (`--ask-max-turns`); the driver's default when absent. */
   askMaxTurns?: number;
+  /** The model every live turn asks for (`--model`); the login's default when absent. */
+  model?: string;
+  /** The model an authoring turn asks for (`--author-model`), in place of `model`. */
+  authorModel?: string;
+  /** The model a question or operation turn asks for (`--ask-model`), in place of `model`. */
+  askModel?: string;
   out?: string;
   work?: string;
   createVersion?: string;
+  /** `--packages`: where the `@objectstack/*` packages come from. */
+  packages: PackagesMode;
 }
 
 export function parseArgs(argv: readonly string[]): CliArgs {
-  const a: CliArgs = { modes: ['scratch', 'template'], driver: 'claude', iterateRun: true };
+  const a: CliArgs = { modes: ['scratch', 'template'], driver: 'claude', iterateRun: true, packages: 'published' };
   for (let i = 0; i < argv.length; i++) {
     const flag = argv[i]!;
     const val = () => {
@@ -91,6 +112,11 @@ export function parseArgs(argv: readonly string[]): CliArgs {
       const n = Number(raw);
       if (!Number.isInteger(n) || n <= 0) throw new Error(`${flag} takes a whole number of turns above 0, not \`${raw}\``);
       return n;
+    };
+    const model = () => {
+      const raw = val();
+      if (raw.trim() === '' || raw.startsWith('-')) throw new Error(`${flag} takes a model alias or name (sonnet, opus, claude-sonnet-4-5), not \`${raw}\``);
+      return raw;
     };
     if (flag === '--cards') a.cards = val();
     else if (flag === '--only') a.only = val().split(',');
@@ -110,10 +136,20 @@ export function parseArgs(argv: readonly string[]): CliArgs {
     }
     else if (flag === '--author-max-turns') a.authorMaxTurns = turns();
     else if (flag === '--ask-max-turns') a.askMaxTurns = turns();
+    else if (flag === '--model') a.model = model();
+    else if (flag === '--author-model') a.authorModel = model();
+    else if (flag === '--ask-model') a.askModel = model();
     else if (flag === '--out') a.out = val();
     else if (flag === '--work') a.work = val();
     else if (flag === '--create-version') a.createVersion = val();
-    else throw new Error(`unknown flag \`${flag}\``);
+    else if (flag === '--packages') {
+      const p = val();
+      if (!(PACKAGES_MODES as readonly string[]).includes(p)) throw new Error(`unknown --packages \`${p}\` (${PACKAGES_MODES.join(', ')})`);
+      a.packages = p as PackagesMode;
+    } else throw new Error(`unknown flag \`${flag}\``);
+  }
+  if (a.packages === 'workspace' && a.createVersion !== undefined) {
+    throw new Error('--create-version names a published create-objectstack; --packages workspace scaffolds with the one this checkout builds');
   }
   return a;
 }
@@ -121,22 +157,31 @@ export function parseArgs(argv: readonly string[]): CliArgs {
 /** The live driver's limits a run may set: `--author-timeout`, `--author-max-turns`, `--ask-max-turns`. */
 export type DriverLimits = Pick<CliArgs, 'authorTimeoutMin' | 'authorMaxTurns' | 'askMaxTurns'>;
 
-const LIMIT_FLAGS: ReadonlyArray<readonly [keyof DriverLimits, string]> = [
+/** The models a run may ask the live driver for: `--model`, `--author-model`, `--ask-model`. */
+export type DriverModels = Pick<CliArgs, 'model' | 'authorModel' | 'askModel'>;
+
+const LIVE_FLAGS: ReadonlyArray<readonly [keyof (DriverLimits & DriverModels), string]> = [
   ['authorTimeoutMin', '--author-timeout'],
   ['authorMaxTurns', '--author-max-turns'],
   ['askMaxTurns', '--ask-max-turns'],
+  ['model', '--model'],
+  ['authorModel', '--author-model'],
+  ['askModel', '--ask-model'],
 ];
 
-export function makeDriver(spec: string, opts: DriverLimits = {}): AgentDriver {
+export function makeDriver(spec: string, opts: DriverLimits & DriverModels = {}): AgentDriver {
   if (spec === 'claude') {
     return new ClaudeCodeDriver({
       ...(opts.authorTimeoutMin !== undefined ? { authorTimeoutMs: opts.authorTimeoutMin * 60_000 } : {}),
       ...(opts.authorMaxTurns !== undefined ? { authorMaxTurns: opts.authorMaxTurns } : {}),
       ...(opts.askMaxTurns !== undefined ? { askMaxTurns: opts.askMaxTurns } : {}),
+      ...(opts.model !== undefined ? { model: opts.model } : {}),
+      ...(opts.authorModel !== undefined ? { authorModel: opts.authorModel } : {}),
+      ...(opts.askModel !== undefined ? { askModel: opts.askModel } : {}),
     });
   }
   if (spec.startsWith('recorded:')) {
-    const given = LIMIT_FLAGS.filter(([key]) => opts[key] !== undefined).map(([, flag]) => flag);
+    const given = LIVE_FLAGS.filter(([key]) => opts[key] !== undefined).map(([, flag]) => flag);
     if (given.length) throw new Error(`${given.join(', ')} ${given.length === 1 ? 'applies' : 'apply'} to the live driver only: a replay re-reads each turn as it was recorded`);
     return RecordedDriver.fromFile(spec.slice('recorded:'.length));
   }
@@ -171,14 +216,30 @@ export async function main(argv: readonly string[]): Promise<number> {
     `driver: ${info.driver} ${info.version ?? ''} · login: ${info.authMethod ?? 'n/a'} · API-billed: no` +
       (info.authorTimeoutMs !== undefined ? ` · author timeout: ${minutesText(info.authorTimeoutMs)}` : '') +
       (info.authorMaxTurns ? ` · author max turns: ${Object.entries(info.authorMaxTurns).map(([tier, n]) => `${tier} ${n}`).join(', ')}` : '') +
-      (info.askMaxTurns !== undefined ? ` · ask max turns: ${info.askMaxTurns}` : ''),
+      (info.askMaxTurns !== undefined ? ` · ask max turns: ${info.askMaxTurns}` : '') +
+      (info.authorModel ? ` · author model: ${info.authorModel}` : '') +
+      (info.askModel ? ` · ask model: ${info.askModel}` : ''),
   );
 
+  // Built and packed once, before the first card: every scaffold of this run installs the same tarballs.
+  const workspace = args.packages === 'workspace' ? await prepareWorkspacePackages(repo, join(work, 'workspace-packages')) : undefined;
+  if (workspace) console.log(`packages: workspace @ ${workspace.source.commit}${workspace.source.uncommitted ? ' + uncommitted changes' : ''} — ${workspace.tarballs.size} packed under ${join(work, 'workspace-packages')}`);
+  /** The `@objectstack/spec` versions the current card's published scaffolds installed. */
+  let publishedVersions = new Set<string>();
+
   const ops: ProjectOps = {
-    scaffold: (name, under) => {
+    scaffold: async (name, under) => {
       const parent = join(work, under);
       mkdirSync(parent, { recursive: true });
-      return scaffold(parent, name, args.createVersion ? { version: args.createVersion } : {});
+      if (workspace) {
+        const done = await scaffold(parent, name, workspaceScaffolder(workspace));
+        if (done.result.exit !== 0) return done;
+        return { dir: done.dir, result: await settleWorkspaceProject(done.dir, workspace) };
+      }
+      const done = await scaffold(parent, name, args.createVersion ? { version: args.createVersion } : {});
+      const version = installedSpecVersion(done.dir);
+      if (version) publishedVersions.add(version);
+      return done;
     },
     os: (dir, a) => os(dir, a),
     readArtifact,
@@ -197,11 +258,13 @@ export async function main(argv: readonly string[]): Promise<number> {
 
   for (const scenario of chosen) {
     console.log(`\n▶ ${scenario.card.id} (${args.modes.join(' + ')})`);
+    publishedVersions = new Set();
     const cardRun = await runCard(scenario, driver, ops, { modes: args.modes, iterateRun: args.iterateRun, admin: ADMIN, ...(template ? { templateArtifact: template } : {}) });
-    const record = runRecord({ run: `${date}-scenario-${scenario.card.id}`, date, ...(framework ? { framework } : {}), driver: info, runner: 'scenario-runner', evidenceDir: work }, cardRun);
+    const packages: PackageSource = workspace ? workspace.source : { source: 'published', versions: [...publishedVersions].sort() };
+    const record = runRecord({ run: `${date}-scenario-${scenario.card.id}`, date, ...(framework ? { framework } : {}), packages, driver: info, runner: 'scenario-runner', evidenceDir: work }, cardRun);
     const file = join(outDir, `${date}-scenario-${scenario.card.id}.json`);
     writeFileSync(file, JSON.stringify(record, null, 2));
-    console.log(renderScorecard(cardScorecard(cardRun)));
+    console.log(renderScorecard(cardScorecard(cardRun, packages)));
     console.log(`record: ${file}`);
     if (driver instanceof RecordingDriver && args.record) driver.save(args.record);
   }

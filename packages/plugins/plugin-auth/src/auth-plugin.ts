@@ -932,6 +932,33 @@ export class AuthPlugin implements Plugin {
     // `AuthPluginOptions.registerOrganizationRecordPage`.
     const registerOrganizationRecordPage = this.options.registerOrganizationRecordPage !== false;
 
+    const accessControlNavItems = [
+      ...(this.authManager.isSsoWired()
+        ? [
+            {
+              id: 'nav_sso_providers',
+              type: 'object',
+              label: 'SSO Providers',
+              objectName: 'sys_sso_provider',
+              icon: 'log-in',
+              requiredPermissions: ['manage_platform_settings'],
+            },
+          ]
+        : []),
+      ...(this.authManager.isScimWired()
+        ? [
+            {
+              id: 'nav_scim_credentials',
+              type: 'object',
+              label: 'SCIM Credentials',
+              objectName: 'sys_scim_connection_credential',
+              icon: 'key-round',
+              requiredPermissions: ['manage_platform_settings'],
+            },
+          ]
+        : []),
+    ];
+
     ctx.getService<{ register(m: any): void }>('manifest').register({
       // The header, `objects` and `objectExtensions`, from the ONE builder
       // `IdentityObjectsPlugin` registers on its own in a reduced kernel, so the
@@ -975,13 +1002,25 @@ export class AuthPlugin implements Plugin {
       dashboards: [SystemOverviewDashboard],
       // ADR-0021 — datasets backing the System Overview dashboard's widgets.
       datasets: SystemOverviewDatasets,
-      // ADR-0135 D6 / cloud#551 — surface "SSO Providers" (sys_sso_provider) in the
-      // Setup app's Access Control group, but ONLY when the external-IdP RP is
-      // wired (self-host `OS_SSO_ENABLED`, or the cloud per-env `planAllowsSso`
-      // arriving via `plugins.sso`). Without the gate the entry would render an
-      // empty list + a "Register" button whose endpoint 404s when SSO is off.
-      // Owning-plugin-contributes pattern (ADR-0029 K2), mirroring plugin-security.
-      ...(this.authManager.isSsoWired()
+      // Setup > Access Control entries for the identity surfaces this plugin
+      // owns (owning-plugin-contributes, ADR-0029 K2, mirroring
+      // plugin-security). Each is contributed only while its capability is
+      // wired, so no entry opens a list whose actions can only fail:
+      // - ADR-0135 D6 / cloud#551 — "SSO Providers" (sys_sso_provider), only
+      //   when the external-IdP RP is wired (self-host `OS_SSO_ENABLED`, or the
+      //   cloud per-env `planAllowsSso` arriving via `plugins.sso`). Without
+      //   the gate the entry would render an empty list + a "Register" button
+      //   whose endpoint 404s when SSO is off.
+      // - [#31123] "SCIM Credentials" (sys_scim_connection_credential, where
+      //   the Mint / Revoke Credential actions live), only when SCIM is wired:
+      //   `isScimWired()` is the same answer the `/admin/scim/mint-credential`
+      //   door reads before refusing 503, so the entry and the door cannot
+      //   disagree. Same gate as SSO Providers; the doors keep their own.
+      // Both labels are translated in `@objectstack/platform-objects`
+      // (`apps.setup.navigation`), pinned there by
+      // `setup-nav-dead-key-tombstone.test.ts`'s conditional list, because no
+      // boot of `check:app-nav-i18n` merges a gated-off entry.
+      ...(accessControlNavItems.length > 0
         ? {
             navigationContributions: [
               {
@@ -989,16 +1028,7 @@ export class AuthPlugin implements Plugin {
                 group: 'group_access_control',
                 // After Roles/Permission-Sets (100) and Sharing (200), near API Keys (300).
                 priority: 250,
-                items: [
-                  {
-                    id: 'nav_sso_providers',
-                    type: 'object',
-                    label: 'SSO Providers',
-                    objectName: 'sys_sso_provider',
-                    icon: 'log-in',
-                    requiredPermissions: ['manage_platform_settings'],
-                  },
-                ],
+                items: accessControlNavItems,
               },
             ],
           }

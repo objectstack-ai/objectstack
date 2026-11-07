@@ -12,9 +12,10 @@
  *   0. on top, in plain words, what a connected assistant can do (look up,
  *      create, change and delete the records you may, run actions — always
  *      as you), a few example requests to paste into the client, and which
- *      one to try first to see the connection work. The page cannot tell
- *      whether you have connected (#30894 owns that read), so the hint is
- *      shown to everyone and never derived from a click. Protocol words
+ *      one to try first to see the connection work. Once the person has
+ *      connected, that line names the assistant (or API key) and when it last
+ *      made a call instead, read from the records themselves
+ *      (`useConnectedAccess`), never derived from a click. Protocol words
  *      (MCP, OAuth, Streamable HTTP) appear only where a client's own form
  *      or menu asks for them,
  *   1. the environment's MCP URL (from `/discovery` → `routes.mcp`) + copy,
@@ -77,6 +78,7 @@ import {
   Ban,
   Bot,
   Check,
+  CheckCircle2,
   ChevronRight,
   Copy,
   Download,
@@ -86,7 +88,7 @@ import {
   Sparkles,
 } from 'lucide-react';
 import { TokenStorage } from '@object-ui/auth';
-import { useObjectTranslation } from '@object-ui/i18n';
+import { formatDateTime, useObjectTranslation } from '@object-ui/i18n';
 import { ComponentRegistry } from '@object-ui/core';
 import { notifyDataChanged } from '@object-ui/react';
 import { useWorkspacePreference } from '../../utils/workspacePreference.js';
@@ -99,6 +101,7 @@ import {
 } from './connectClientPreference.js';
 import { isPublicHttpsAddress } from './deploymentReach.js';
 import { AuthorizedAccessList } from './AuthorizedAccessList.js';
+import { useConnectedAccess, type ConnectedEntry } from './connectedAccess.js';
 
 const SERVER_URL = (import.meta.env.VITE_SERVER_URL || '').replace(/\/$/, '');
 
@@ -203,6 +206,50 @@ const EXAMPLE_REQUEST_KEYS = [
   'connectAgent.capabilities.example2',
   'connectAgent.capabilities.example3',
 ] as const;
+
+/**
+ * Under the example requests: once the person has connected, which assistant
+ * (or API key) and when it last made a call, the most recent call first; with
+ * nothing connected, or when that cannot be read, which request to try first.
+ * Nothing while the read is out, so the line does not flip after a moment.
+ */
+function ConnectedStatus() {
+  const { t, language } = useObjectTranslation();
+  const access = useConnectedAccess();
+  if (access.state === 'loading') return null;
+  if (access.state === 'unknown' || !access.connected) {
+    return <p className="text-xs text-muted-foreground">{t('connectAgent.capabilities.tryFirst')}</p>;
+  }
+  const [latest, ...others] = access.entries;
+  return (
+    <div role="status" className="flex gap-2 rounded-md border px-3 py-2 text-xs" data-testid="connected-status">
+      <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-600 dark:text-emerald-400" />
+      <div className="space-y-0.5">
+        <p className="font-medium">{connectedSentence(latest, t)}</p>
+        <p className="text-muted-foreground">
+          {latest.lastUsedAt
+            ? t(
+                latest.lastUsedPrecision === 'hour'
+                  ? 'connectAgent.capabilities.lastCallHour'
+                  : 'connectAgent.capabilities.lastCallAt',
+                { time: formatDateTime(latest.lastUsedAt, { locale: language }) },
+              )
+            : t('connectAgent.capabilities.noCallYet')}
+        </p>
+        {others.length > 0 ? (
+          <p className="text-muted-foreground">{t('connectAgent.capabilities.moreConnected')}</p>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function connectedSentence(entry: ConnectedEntry, t: (key: string, options?: Record<string, unknown>) => string): string {
+  if (entry.kind === 'apiKey') {
+    return t('connectAgent.capabilities.connectedKey', { name: entry.name ?? entry.id });
+  }
+  return t('connectAgent.capabilities.connected', { name: entry.name ?? t('connectAgent.access.unnamed') });
+}
 
 /** The `mcpServers` JSON shape most clients import, with the client's own transport spelling. */
 function mcpServersJson(type: string | null, url: string): string {
@@ -353,7 +400,7 @@ export function ConnectAgent() {
               })}
             </ul>
           </div>
-          <p className="text-xs text-muted-foreground">{t('connectAgent.capabilities.tryFirst')}</p>
+          <ConnectedStatus />
         </CardContent>
       </Card>
 

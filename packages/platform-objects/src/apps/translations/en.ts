@@ -109,6 +109,13 @@ export const en: TranslationData = {
         // object's own `pluralLabel` per locale (`sys_sso_provider`), since the
         // entry opens that object's list view.
         nav_sso_providers: { label: 'SSO Providers' },
+        // `nav_scim_credentials` is the same case (#31123): plugin-auth
+        // contributes it only while SCIM is wired (`isScimWired()`, the answer
+        // the SCIM credential mint door reads), so no boot of
+        // `check:app-nav-i18n` merges it and the tombstone file's conditional
+        // list keeps it honest. It opens `sys_scim_connection_credential`'s
+        // list; the label is the short form of that object's `pluralLabel`.
+        nav_scim_credentials: { label: 'SCIM Credentials' },
         nav_api_keys: { label: 'API Keys' },
 
         // Approvals. `nav_approvals_inbox` is the working surface (#7234); the
@@ -290,8 +297,8 @@ export const en: TranslationData = {
     connect_agent: {
       label: 'Connect an AI Assistant',
       subtitle:
-        'Give any MCP-capable AI client governed access to this system — '
-        + "every call runs under the caller's own permissions and row-level security.",
+        'Work in this system from Claude, Doubao and other AI assistants. '
+        + 'Each one acts as you: it sees and changes only what your own permissions allow.',
     },
 
     // The platform's own record pages (`@objectstack/platform-objects/pages`,

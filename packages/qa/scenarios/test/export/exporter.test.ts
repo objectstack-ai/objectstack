@@ -310,6 +310,46 @@ describe('exportGallery — one passing, generic app', () => {
   });
 });
 
+describe('exportGallery — ⛔ only a run on published packages is exported or shown', () => {
+  it('a `--packages workspace` record that passed every half is refused, and nothing of it is written', async () => {
+    const fx = await runCrm({ packages: { source: 'workspace', commit: '1a2b3c4', uncommitted: false } });
+    expect(judgeRecord(asRecord(fx.record)).passed).toBe(true); // every half passed: the package source alone refuses it
+    const { out, opts } = await setup(fx);
+    const s = await exportGallery(opts());
+    expect(s.exported).toEqual([]);
+    expect(s.refused).toEqual([{ id: CARD_ID, reasons: [expect.stringMatching(/workspace @ 1a2b3c4.*only a run on published packages is exported or shown/)] }]);
+    expect(existsSync(join(out, 'apps', CARD_ID))).toBe(false);
+    expect(parseIndex(readFileSync(join(out, 'index.json'), 'utf8')).apps).toEqual([]);
+  });
+
+  it('a newer workspace record removes the published export it follows: the newest record decides', async () => {
+    const { out, runs, opts } = await setup();
+    expect((await exportGallery(opts())).exported.map((e) => e.id)).toEqual([CARD_ID]);
+    const later = await runCrm({ date: '2026-12-01', packages: { source: 'workspace', commit: '9f8e7d6', uncommitted: true } });
+    writeRecord(runs, later.record);
+    const s = await exportGallery(opts({ recordings: [later.recording] }));
+    expect(s.removed).toEqual([{ id: CARD_ID, why: expect.stringContaining('workspace @ 9f8e7d6') }]);
+    expect(existsSync(join(out, 'apps', CARD_ID))).toBe(false);
+  });
+
+  it('a record that states no package source, or published with no version, is refused', async () => {
+    const fx = await runCrm();
+    const { packages: _dropped, ...env } = fx.record.env as Record<string, unknown>;
+    const unstated = await setup({ ...fx, record: { ...fx.record, env } });
+    expect((await exportGallery(unstated.opts())).refused[0]!.reasons).toEqual([expect.stringContaining('does not state its package source')]);
+    const versionless = await setup({ ...fx, record: { ...fx.record, env: { ...env, packages: { source: 'published', versions: [] } } } });
+    expect((await exportGallery(versionless.opts())).refused[0]!.reasons).toEqual([expect.stringContaining('no version')]);
+  });
+
+  it('a published run exports, and its scorecard states the source on its first line', async () => {
+    const { out, opts } = await setup();
+    expect((await exportGallery(opts())).exported.map((e) => e.id)).toEqual([CARD_ID]);
+    const md = readFileSync(join(out, 'apps', CARD_ID, 'scorecard.md'), 'utf8').split('\n');
+    expect(md[2]).toBe('packages: published 18.3.0');
+    expect(JSON.parse(readFileSync(join(out, 'apps', CARD_ID, 'run-record.json'), 'utf8')).env.packagesLine).toBe('packages: published 18.3.0');
+  });
+});
+
 describe('⛔ no local path: every work directory that names the run is redacted', () => {
   /** Every file under `dir`, relative path → its text. */
   function texts(dir: string): Record<string, string> {

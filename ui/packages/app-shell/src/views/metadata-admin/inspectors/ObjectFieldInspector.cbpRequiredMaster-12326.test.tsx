@@ -8,11 +8,12 @@
  * Since `@objectstack/spec` 18 (objectstack#23100, ADR-0055 §1) such an object
  * derives its master from exactly one `master_detail` declared
  * `required: true`. Since ADR-0055 §1 as amended (objectstack#30905 ruling A)
- * the spec also reads an object's only `master_detail` that is not required as
- * an OPTIONAL master, whose rows may name none; the designer keeps writing
- * `required: true`, so the master it shows is one every row names. The
- * installed spec's `ObjectSchema` is the oracle for the object each edit
- * leaves behind.
+ * an object's ONLY `master_detail` may be declared `required: false`, an
+ * OPTIONAL master whose rows may name none. On that field the box stays free,
+ * clearing it writes `required: false`, and the help text explains the
+ * null-master owner rule (objectstack#30974). Beside another `master_detail`
+ * the lock stands. The installed spec's `ObjectSchema` is the oracle for the
+ * object each edit leaves behind.
  */
 
 import '@testing-library/jest-dom/vitest';
@@ -89,10 +90,29 @@ function mount(object: Row, selected: string) {
 const requiredBox = () => screen.getByRole('checkbox', { name: t('designer.field.required', 'en-US') });
 
 const REASON = t('designer.field.requiredCbpMaster', 'en-US');
+const OPTIONAL_HELP = t('designer.field.requiredCbpOptionalMaster', 'en-US');
 
 describe('ObjectFieldInspector — a controlled_by_parent master is required, locked (objectui#12326)', () => {
-  it('the Required box of the master is on and locked, with the reason', () => {
-    mount(
+  it('beside another master-detail, the Required box of the master is on and locked, with the reason', () => {
+    const { object } = mount(
+      {
+        name: 'crm_case',
+        sharingModel: 'controlled_by_parent',
+        fields: {
+          account: { type: 'master_detail', reference: 'crm_account', required: true },
+          contact: { type: 'master_detail', reference: 'crm_contact', required: false },
+        },
+      },
+      'account',
+    );
+    expect(ObjectSchema.safeParse(object()).success).toBe(true);
+    expect(requiredBox()).toBeChecked();
+    expect(requiredBox()).toBeDisabled();
+    expect(screen.getByTestId('field-required-cbp-master')).toHaveTextContent(REASON);
+  });
+
+  it('the only master-detail can be cleared to an optional master, written required: false (objectstack#30974)', () => {
+    const { object, field } = mount(
       {
         name: 'crm_case',
         sharingModel: 'controlled_by_parent',
@@ -101,11 +121,20 @@ describe('ObjectFieldInspector — a controlled_by_parent master is required, lo
       'account',
     );
     expect(requiredBox()).toBeChecked();
-    expect(requiredBox()).toBeDisabled();
-    expect(screen.getByTestId('field-required-cbp-master')).toHaveTextContent(REASON);
+    expect(requiredBox()).toBeEnabled();
+    expect(screen.getByTestId('field-required-cbp-master')).toHaveTextContent(OPTIONAL_HELP);
+    fireEvent.click(requiredBox());
+    expect(field().required).toBe(false);
+    expect(requiredBox()).not.toBeChecked();
+    const parsed = ObjectSchema.safeParse(object());
+    expect(parsed.success).toBe(true);
+    expect((parsed.data?.fields as Record<string, { required?: boolean }>).account.required).toBe(false);
+    // And back: ticking it makes the master required again.
+    fireEvent.click(requiredBox());
+    expect(field().required).toBe(true);
   });
 
-  it('a stored master without required can be ticked, and then no longer cleared', () => {
+  it('a stored master without required can be ticked, and cleared again to an optional master', () => {
     const { object, field } = mount(
       {
         name: 'crm_case',
@@ -123,10 +152,12 @@ describe('ObjectFieldInspector — a controlled_by_parent master is required, lo
     expect(requiredBox()).toBeEnabled();
     fireEvent.click(requiredBox());
     expect(field().required).toBe(true);
-    expect(requiredBox()).toBeDisabled();
+    expect(requiredBox()).toBeEnabled();
     const after = ObjectSchema.safeParse(object());
     expect(after.success).toBe(true);
     expect((after.data?.fields as Record<string, { required?: boolean }>).account.required).toBe(true);
+    fireEvent.click(requiredBox());
+    expect(field().required).toBe(false);
   });
 
   it('outside controlled_by_parent the box stays free and no reason is shown', () => {
@@ -175,6 +206,6 @@ describe('ObjectFieldInspector — a controlled_by_parent master is required, lo
     await userEvent.click(within(list).getByRole('option', { name: 'Master-Detail' }));
     expect(field()).toEqual({ type: 'master_detail', label: 'Account', reference: 'crm_account', required: true });
     expect(ObjectSchema.safeParse(object()).success).toBe(true);
-    expect(requiredBox()).toBeDisabled();
+    expect(requiredBox()).toBeChecked();
   });
 });

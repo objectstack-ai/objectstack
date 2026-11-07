@@ -250,6 +250,7 @@ import { resolvePasswordHasher } from './auth-manager-password-hasher.js';
 // after-hook (cut 12) and before-hook (cut 13) are now imported there, by the
 // two arrows that moved with it.
 import { createAuthInstance, type AuthInstanceHost } from './auth-manager-auth-instance.js';
+import { readSamlAcsLanding, runSsoCallbackScope, type SamlLandingContext, type SsoCallbackRequest } from './sso-oidc-refusal-cause.js';
 // [#25224 cut 16] The body of `buildPluginList`; the method of the same name
 // below hands it the members it reads (`PluginListHost`). The organization
 // plugin's factory (cut 15) is now imported there, by the arrow that moved
@@ -3938,14 +3939,36 @@ export class AuthManager {
    */
   handleRequest(request: Request, transport?: { remoteAddress?: string }): Promise<Response> {
     // [#25224 cut 10] The body moved to `auth-manager-request-routing.ts` (see `RequestRoutingHost`).
-    const host: Pick<RequestRoutingHost, 'betterAuthEndpointPath' | 'getOrCreateAuth' | 'resolveClientAddress' | 'runSubjectErasureAtomically' | 'answerOAuthTokenRevocation'> = {
+    const host: Pick<RequestRoutingHost, 'betterAuthEndpointPath' | 'getOrCreateAuth' | 'resolveClientAddress' | 'runSubjectErasureAtomically' | 'answerOAuthTokenRevocation' | 'runSsoCallback'> = {
       betterAuthEndpointPath: (...a) => this.betterAuthEndpointPath(...a),
       getOrCreateAuth: (...a) => this.getOrCreateAuth(...a),
       resolveClientAddress: (...a) => this.resolveClientAddress(...a),
       runSubjectErasureAtomically: (...a) => this.runSubjectErasureAtomically(...a),
       answerOAuthTokenRevocation: (...a) => this.answerOAuthTokenRevocation(...a),
+      runSsoCallback: (...a) => this.runSsoCallback(...a),
     };
     return handleRequest.call(host, request, transport);
+  }
+
+  /**
+   * Run one enterprise SSO callback inside the refusal scope
+   * (`sso-oidc-refusal-cause.ts`): an OIDC callback (`/sso/callback/:providerId`)
+   * whose refusal names its cause on the redirect's `error_description` and in
+   * one `warn` line on this manager's logger, and a SAML ACS
+   * (`/sso/saml2/sp/acs/:providerId`) whose refusal lands on the sign-in's error
+   * URL, read from the relay state before better-auth consumes it.
+   */
+  private runSsoCallback(callback: SsoCallbackRequest, run: () => Promise<Response>): Promise<Response> {
+    return runSsoCallbackScope(
+      callback,
+      this.config.logger,
+      async (saml) => {
+        const auth: any = await this.getOrCreateAuth();
+        const context = (await auth.$context) as SamlLandingContext;
+        return readSamlAcsLanding(context, saml.providerId, saml.request);
+      },
+      run,
+    );
   }
 
   /**

@@ -59,7 +59,7 @@ afterEach(async () => {
 
 /**
  * A real kernel with the app's real `todo_task` object: ObjectQL over an
- * in-process sqlite-wasm database (the same driver `test/mcp-actions.e2e.ts`
+ * in-process sqlite-wasm database (the same driver `test/mcp-actions.test.ts`
  * boots), the automation engine, and the record-change trigger. No test double
  * anywhere in the chain — #6882 was precisely a chain that looked correct in
  * the metadata and bound to nothing at runtime.

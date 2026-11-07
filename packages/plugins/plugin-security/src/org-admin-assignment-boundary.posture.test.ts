@@ -743,6 +743,25 @@ describe('[ADR-0090 D12; ruling of record 6649064874] an administrator\'s refuse
       row: { user_id: 'u_in_2', permission_set: 'admin_full_access' } },
   ] as const;
 
+  /**
+   * An explicit budget, sized to the measured work. Each posture boots a fresh
+   * real engine and SecurityPlugin. It then seeds four hidden-column rows and
+   * sends each an update and a delete from two delegates, rewrites one, and
+   * sends the organization branch six removals over two tables, reading the
+   * stored row back after each verdict. Every write is part of what the case
+   * claims, so none is cut.
+   *
+   * Readings: the slowest `Test Core` reading across the three postures is
+   * 2949 ms (`main` push and merge group runs, 2026-11-03..06, n=3 per
+   * posture); local idle, 624-694 ms.
+   *
+   * The rule is 3x the slowest reading, rounded up to the next second (the rule
+   * and why 3x: plugin-sharing's `share-link-password-webcontainer.test.ts`):
+   * 3 x 2949 = 8847, so the budget is 9000. If the rows or the postures grow,
+   * re-measure and re-size.
+   */
+  const HIDDEN_COLUMN_BUDGET_MS = 9_000;
+
   for (const posture of POSTURES) {
     it(`posture '${posture}': a column the caller's field rules hide is never named in the refusal, and a delegate is still judged on its stored value; an administrator who reads it is told the value`, async () => {
       const h = await boot(posture);
@@ -800,7 +819,7 @@ describe('[ADR-0090 D12; ruling of record 6649064874] an administrator\'s refuse
         expect(admitted, `${table}, inside the boundary: ${admitted.message}`).toEqual({ status: 200 });
         expect(await stored(h, table, { id: inId }), `${table}: the removal landed`).toHaveLength(0);
       }
-    });
+    }, HIDDEN_COLUMN_BUDGET_MS);
   }
 
   it("a partially masked column is never named either — neither its masked nor its stored value — and the delegate is still judged on the stored value", async () => {
