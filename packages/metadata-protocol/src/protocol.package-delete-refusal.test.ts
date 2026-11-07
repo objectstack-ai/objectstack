@@ -107,7 +107,11 @@ const thrownDatabaseError: StoreDelete = async () => {
 };
 
 /** One process over `world`. A second call over the same world is a restart. */
-function boot(world: World, storeDelete: StoreDelete = landed, opts: { uninstallRefusal?: Error } = {}) {
+function boot(
+  world: World,
+  storeDelete: StoreDelete = landed,
+  opts: { uninstallRefusal?: Error; audit?: unknown; environmentId?: string } = {},
+) {
   const rows = new Map<string, { manifest: Record<string, unknown>; status: string; enabled: boolean }>();
   const registry = {
     installPackage(manifest: Record<string, unknown>, source: string) {
@@ -150,6 +154,8 @@ function boot(world: World, storeDelete: StoreDelete = landed, opts: { uninstall
     },
   };
   const services = new Map<string, unknown>([
+    // [#31186] The `audit` slot, when the case composes one.
+    ...(opts.audit !== undefined ? [['audit', opts.audit] as [string, unknown]] : []),
     ['package', {
       publish: async () => ({ success: true }),
       delete: async (id: string) => {
@@ -158,7 +164,7 @@ function boot(world: World, storeDelete: StoreDelete = landed, opts: { uninstall
       },
     }],
   ]);
-  const impl = new ObjectStackProtocolImplementation(engine as never, () => services as never) as any;
+  const impl = new ObjectStackProtocolImplementation(engine as never, () => services as never, opts.environmentId) as any;
   vi.spyOn(impl, 'deleteMetaItem').mockImplementation(async (req: any) => {
     world.steps.push(`sys_metadata.delete ${req.type}/${req.name}/${req.state}`);
     world.sysMetadata = world.sysMetadata.filter(
@@ -321,5 +327,139 @@ describe('#21276 the restart — a fresh process over the same store holds the p
 
     expect(restarted.registry.getPackage(PKG)).toBeUndefined();
     expect(snapshot(world)).toEqual({ sysPackages: [], sysMetadata: [], grants: [] });
+  });
+});
+
+/**
+ * [#31186] The uninstall verb hands the `audit` slot ONE `package_uninstall`
+ * event per package it uninstalled, after the package's stored row is gone and
+ * its cleanups ran — and none for an uninstall it refused. plugin-audit owns
+ * the row that event becomes (`package-lifecycle-audit.test.ts` there); this
+ * pins the verb's half: when it calls, how often, and with what.
+ */
+describe('#31186 deletePackage — the package\'s own ledger event on the `audit` slot', () => {
+  /** An `audit` slot that records each event and the step it ran at. */
+  function recordingAudit(world: World) {
+    const events: unknown[] = [];
+    return {
+      events,
+      slot: {
+        async recordPackageLifecycleEvent(event: unknown) {
+          world.steps.push('audit.package_uninstall');
+          events.push(event);
+        },
+      },
+    };
+  }
+
+  it('an uninstall hands the slot one event naming the package, its version, the environment and the actor — last', async () => {
+    const world = makeWorld();
+    const audit = recordingAudit(world);
+    const { impl } = boot(world, landed, { audit: audit.slot, environmentId: 'env_31186' });
+
+    const res = await impl.deletePackage({ packageId: PKG, actor: 'u_admin', keepData: true });
+
+    expect(res).toMatchObject({ success: true, deletedCount: 2, failedCount: 0 });
+    expect(audit.events).toEqual([{
+      action: 'package_uninstall',
+      packageId: PKG,
+      version: '1.0.0',
+      environmentId: 'env_31186',
+      actor: 'u_admin',
+      keepData: true,
+      itemsRemoved: 2,
+      itemsFailed: 0,
+    }]);
+    // After the store delete, the item deletes, the withdrawal and the cleanups.
+    expect(world.steps[world.steps.length - 1]).toBe('audit.package_uninstall');
+    expect(world.steps.indexOf('sys_packages.delete')).toBeLessThan(world.steps.indexOf('audit.package_uninstall'));
+  });
+
+  it('a caller with no actor and a host bound to no environment: the event says neither, and still names the package', async () => {
+    const world = makeWorld();
+    const audit = recordingAudit(world);
+    const { impl } = boot(world, landed, { audit: audit.slot });
+
+    await impl.deletePackage({ packageId: PKG });
+
+    expect(audit.events).toEqual([{
+      action: 'package_uninstall', packageId: PKG, version: '1.0.0', itemsRemoved: 2, itemsFailed: 0,
+    }]);
+  });
+
+  it('a partial uninstall still records the package, with the item it left behind', async () => {
+    const world = makeWorld();
+    const audit = recordingAudit(world);
+    const { impl } = boot(world, landed, { audit: audit.slot });
+    vi.spyOn(impl, 'deleteMetaItem').mockImplementation(async (req: any) => {
+      if (req.type === 'view') throw Object.assign(new Error('locked'), { code: 'METADATA_LOCKED', status: 423 });
+      world.sysMetadata = world.sysMetadata.filter((r) => !(r.type === req.type && r.name === req.name));
+      return { success: true };
+    });
+
+    const res = await impl.deletePackage({ packageId: PKG, actor: 'u_admin' });
+
+    expect(res).toMatchObject({ success: false, deletedCount: 1, failedCount: 1 });
+    expect(audit.events).toEqual([expect.objectContaining({ packageId: PKG, itemsRemoved: 1, itemsFailed: 1 })]);
+  });
+
+  it.each(REFUSALS)('CONTROL: a %s store refusal hands the slot nothing', async (_label, _code, refusal) => {
+    const world = makeWorld();
+    const audit = recordingAudit(world);
+    const { impl } = boot(world, refusal, { audit: audit.slot });
+
+    await rejectionOf(impl.deletePackage({ packageId: PKG, actor: 'u_admin' }));
+
+    expect(audit.events).toEqual([]);
+  });
+
+  it('CONTROL: the registry\'s uninstall refusal and a retired request key hand the slot nothing', async () => {
+    const world = makeWorld();
+    const audit = recordingAudit(world);
+    const refused = boot(world, landed, { audit: audit.slot, uninstallRefusal: new Error('extended by com.example.addon') });
+    await rejectionOf(refused.impl.deletePackage({ packageId: PKG }));
+    const retired = boot(world, landed, { audit: audit.slot });
+    await rejectionOf(retired.impl.deletePackage({ packageId: PKG, organizationId: 'org_a' } as any));
+
+    expect(audit.events).toEqual([]);
+  });
+
+  it('CONTROL: an id that is not installed and binds no metadata is not a package — no event', async () => {
+    const world = makeWorld();
+    const audit = recordingAudit(world);
+    const { impl } = boot(world, landed, { audit: audit.slot });
+
+    const res = await impl.deletePackage({ packageId: 'com.example.absent' });
+
+    expect(res).toMatchObject({ deletedCount: 0, failedCount: 0 });
+    expect(audit.events).toEqual([]);
+  });
+
+  it('CONTROL: with no `audit` slot the uninstall completes exactly as before', async () => {
+    const world = makeWorld();
+    const { impl, registry } = boot(world);
+
+    const res = await impl.deletePackage({ packageId: PKG, actor: 'u_admin' });
+
+    expect(res).toMatchObject({ success: true, deletedCount: 2, failedCount: 0 });
+    expect(registry.getPackage(PKG)).toBeUndefined();
+  });
+
+  it('a slot that throws does not change the answer: the uninstall completes and the lost row is logged at error', async () => {
+    const world = makeWorld();
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const { impl } = boot(world, landed, {
+        audit: { recordPackageLifecycleEvent: async () => { throw new Error('ledger offline'); } },
+      });
+
+      const res = await impl.deletePackage({ packageId: PKG });
+
+      expect(res).toMatchObject({ success: true, deletedCount: 2 });
+      expect(errorSpy).toHaveBeenCalledTimes(1);
+      expect(String(errorSpy.mock.calls[0]?.[0])).toContain(PKG);
+    } finally {
+      errorSpy.mockRestore();
+    }
   });
 });
