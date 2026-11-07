@@ -158,12 +158,12 @@ describe('the restored event (ADR-0148 D2)', () => {
     expect(RECORD_RESTORED_EVENT).not.toBe('data.record.created');
   });
 
-  it('stays out of the emitted-event enums until the engine emits it', () => {
+  it('is a member of both emitted-event enums, since the engine emits it', () => {
     // The enums are the emitted set (realtime.test.ts pins them equal). The
-    // engine's restore adds the member to both in the change that emits it,
-    // and flips this pin then.
-    expect(DataEventType.options).not.toContain(RECORD_RESTORED_EVENT);
-    expect(RealtimeEventType.options).not.toContain(RECORD_RESTORED_EVENT);
+    // engine's restore (#30237) emits it, so both enums hold it, spelled as
+    // this constant's value.
+    expect(DataEventType.options).toContain(RECORD_RESTORED_EVENT);
+    expect(RealtimeEventType.options).toContain(RECORD_RESTORED_EVENT);
   });
 });
 

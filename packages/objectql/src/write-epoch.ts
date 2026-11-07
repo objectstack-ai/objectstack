@@ -139,9 +139,10 @@ export class WriteEpoch implements WriteEpochLike {
  * request, which reads as "the cache never hits" rather than as a failure.
  *
  * `purge` [#30237] is a write: the permanent delete removes rows, and purging
- * or emptying the recycle bin removes entries.
+ * or emptying the recycle bin removes entries. So is `restore`: it writes an
+ * entry's rows back and removes the entry.
  */
-export const WRITE_EPOCH_OPERATIONS = new Set(['insert', 'update', 'delete', 'purge']);
+export const WRITE_EPOCH_OPERATIONS = new Set(['insert', 'update', 'delete', 'purge', 'restore']);
 
 /** True when `operation` is a write the seam counts. */
 export function isWriteEpochOperation(operation: unknown): boolean {
