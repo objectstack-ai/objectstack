@@ -1,5 +1,5 @@
 ---
-'@objectstack/spec': minor
+'@objectstack/spec': patch
 ---
 
 feat(spec): declare the optional `ISecurityService.describeEffectiveAccess` and its `EffectiveAccess` answer types
