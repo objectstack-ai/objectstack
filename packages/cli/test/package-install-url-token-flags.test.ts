@@ -16,7 +16,10 @@
  *    request — the command never has to guess which one the caller meant.
  */
 
-import { describe, it, expect, afterEach, vi } from 'vitest';
+import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
+import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import PackageInstall from '../src/commands/package/install.js';
 
 interface Sent { url: string; method?: string; headers: Record<string, string>; body?: string }
@@ -137,5 +140,68 @@ describe('os package install -u/--url and -t/--token (#30126 row 13)', () => {
       + '(OS_RUNTIME_TOKEN counts as --token; OS_RUNTIME_EMAIL/OS_RUNTIME_PASSWORD count as --email/--password).',
     );
     expect(sent).toHaveLength(0);
+  });
+});
+
+describe('os package install falls back to the runtime `os environments use-runtime` remembered (#30888)', () => {
+  const REMEMBERED = 'http://remembered.test:8080';
+  let home = '';
+  beforeEach(async () => {
+    home = await mkdtemp(join(tmpdir(), 'os-30888-install-home-'));
+    await mkdir(join(home, '.objectstack'), { recursive: true });
+    vi.stubEnv('HOME', home);
+    vi.stubEnv('USERPROFILE', home);
+    for (const key of ['OS_RUNTIME_URL', 'OS_RUNTIME_TOKEN', 'OS_RUNTIME_EMAIL', 'OS_RUNTIME_PASSWORD']) vi.stubEnv(key, undefined);
+    // Remembered but NOT the active deploy target: install reads it either way.
+    await writeFile(join(home, '.objectstack', 'cloud.json'), JSON.stringify({
+      runtimeTarget: { url: REMEMBERED, token: 'osk_remembered', recordedAt: 'then' }, deployTarget: 'cloud',
+    }));
+  });
+  afterEach(async () => {
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+    vi.restoreAllMocks();
+    await rm(home, { recursive: true, force: true });
+  });
+
+  it('without -u/-t: installs into the remembered runtime with its key, and says where it came from', async () => {
+    const { sent } = stubRuntime();
+    const { out, exit } = await runInstall([]);
+    expect(exit, out).toBeUndefined();
+    expect(sent.map((s) => s.url)).toEqual([`${REMEMBERED}/api/v1/marketplace/install-local`]);
+    expect(sent[0].headers.Authorization).toBe('Bearer osk_remembered');
+    expect(out).toContain('remembered by `os environments use-runtime`');
+  });
+
+  it('-u naming the remembered runtime still takes its key', async () => {
+    const { sent } = stubRuntime();
+    await runInstall(['-u', `${REMEMBERED}/`]);
+    expect(sent[0].headers.Authorization).toBe('Bearer osk_remembered');
+  });
+
+  it('-u naming another server never receives the remembered key', async () => {
+    const { sent } = stubRuntime();
+    await runInstall(['-u', 'http://other.test']);
+    expect(sent[0].url).toBe('http://other.test/api/v1/marketplace/install-local');
+    expect(sent[0].headers).not.toHaveProperty('Authorization');
+  });
+
+  it('an explicit -t wins over the remembered key; --email/--password never mixes the two', async () => {
+    let { sent } = stubRuntime();
+    await runInstall(['-t', 'osk_explicit']);
+    expect(sent[0].headers.Authorization).toBe('Bearer osk_explicit');
+
+    vi.unstubAllGlobals();
+    ({ sent } = stubRuntime());
+    await runInstall(['--email', 'a@b.test', '--password', 'pw']);
+    expect(sent.every((s) => !('Authorization' in s.headers))).toBe(true);
+  });
+
+  it('nothing remembered: http://localhost:3000, as before', async () => {
+    await rm(join(home, '.objectstack', 'cloud.json'));
+    const { sent } = stubRuntime();
+    await runInstall([]);
+    expect(sent[0].url).toBe('http://localhost:3000/api/v1/marketplace/install-local');
+    expect(sent[0].headers).not.toHaveProperty('Authorization');
   });
 });
