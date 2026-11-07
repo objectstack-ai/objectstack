@@ -14,7 +14,9 @@
  * fails its Build half.
  */
 
-import { dirname, resolve } from 'node:path';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
@@ -22,7 +24,7 @@ import { describe, expect, it } from 'vitest';
 import { formatRefusal, loadScenarioFile, readCapabilityAreas, type LoadedScenario } from '../../src/loader.js';
 import { truthFigures } from '../../src/score/index.js';
 import type { AppHarness, HttpAnswer, PersonaAccount, ToolAnswer } from '../../src/runner/app.js';
-import { stepKey, type AgentDriver, type AskTask, type AuthorTask, type DriverInfo } from '../../src/runner/driver.js';
+import { RecordedDriver, RecordingDriver, stepKey, type AgentDriver, type AskTask, type AuthorTask, type DriverInfo } from '../../src/runner/driver.js';
 import { namespacedScenario } from '../../src/runner/namespace.js';
 import { runCard, seedApp, type ProjectOps } from '../../src/runner/orchestrate.js';
 import { cardScorecard, renderScorecard, runRecord } from '../../src/runner/scorecard.js';
@@ -883,5 +885,95 @@ describe('runCard — a build that makes both sides of a reference cycle require
     expect(sc.modes[0]!.findings).toEqual([]);
     expect(sc.modes[0]!.first.seed).toEqual({ inserted: 637, total: 637, refused: 0 });
     expect(renderScorecard(sc)).toContain('| Seed | 637/637 |');
+  });
+});
+
+// ── The model each turn was served ──────────────────────────────────────────
+
+/**
+ * A driver that answers as `inner` does, each turn stamped as the live driver
+ * stamps it: the model it asked for (`meta.process.requestedModel`, the
+ * `--model` it was given) and the model the stream says it was served
+ * (`meta.model`). `fallback` names the steps the session answered on another
+ * model than the one asked for.
+ */
+class ServedModels implements AgentDriver {
+  constructor(
+    private readonly inner: AgentDriver,
+    private readonly fallback: ReadonlySet<string>,
+  ) {}
+  info(): DriverInfo {
+    return { ...this.inner.info(), authorModel: 'opus', askModel: 'sonnet' };
+  }
+  private stamp(t: ParsedTurn, requestedModel: string, model: string): ParsedTurn {
+    return { ...t, meta: { ...t.meta, model, process: { elapsedMs: 1_000, exit: 0, timedOut: false, timeoutMs: 60_000, maxTurns: 12, requestedModel } } };
+  }
+  async author(task: AuthorTask) {
+    const r = await this.inner.author(task);
+    return { ...r, turn: this.stamp(r.turn, 'opus', 'claude-opus-4-1-20250805') };
+  }
+  async ask(task: AskTask): Promise<ParsedTurn> {
+    return this.stamp(await this.inner.ask(task), 'sonnet', this.fallback.has(task.step) ? 'claude-opus-5-5' : 'claude-sonnet-4-5-20250929');
+  }
+}
+
+describe('runCard — every turn states the model it was served, and a mismatch with the requested model shows up', () => {
+  it('the record carries the served and requested model per turn, the scorecard counts them per half, and a replay of the recording re-reads both', async () => {
+    const { scenario, ops, driver: scripted } = setup();
+    const fellBack = scenario.card.run.questions[0]!.id;
+    const driver = new RecordingDriver(new ServedModels(scripted, new Set([fellBack])));
+    const run = await runCard(scenario, driver, ops, { modes: ['scratch'], admin: ADMIN });
+    const scratch = run.modes[0]!;
+
+    // Per turn, in the run itself: the author turns asked for and got opus; the persona turns asked for sonnet.
+    expect(scratch.build!.author).toMatchObject({ model: 'claude-opus-4-1-20250805', requestedModel: 'opus' });
+    expect(scratch.build!.author!.modelMismatch).toBeUndefined();
+    const turns = [...scratch.run!.questions, ...scratch.run!.operations, ...scratch.iterate!.run!.questions, ...scratch.iterate!.run!.operations];
+    const mismatched = turns.filter((x) => x.turn!.modelMismatch);
+    expect(mismatched.length).toBeGreaterThan(0);
+    expect(mismatched.every((x) => 'question' in x && x.question === fellBack && x.turn!.model === 'claude-opus-5-5' && x.turn!.requestedModel === 'sonnet')).toBe(true);
+    expect(turns.filter((x) => !x.turn!.modelMismatch).every((x) => x.turn!.model === 'claude-sonnet-4-5-20250929')).toBe(true);
+    const firstFellBack = scratch.run!.questions.filter((q) => q.question === fellBack).length;
+    const firstTurns = scratch.run!.questions.length + scratch.run!.operations.length;
+
+    // The scorecard: the author rows name the served model, the Run rows count the persona turns per served model.
+    const sc = cardScorecard(run);
+    expect(sc.modes[0]!.first.models).toEqual({
+      served: { 'claude-sonnet-4-5-20250929': firstTurns - firstFellBack, 'claude-opus-5-5': firstFellBack },
+      requested: ['sonnet'],
+      mismatched: firstFellBack,
+    });
+    const table = renderScorecard(sc);
+    expect(table).toContain(' · claude-opus-4-1-20250805 |'); // the build's author row
+    expect(table).toContain(`| Run · model | claude-sonnet-4-5-20250929 ×${firstTurns - firstFellBack}, claude-opus-5-5 ×${firstFellBack} ⚠ ${firstFellBack} not sonnet |`);
+    expect(table).toMatch(/\| Iterate · Run · model \| claude-sonnet-4-5-20250929 ×\d+, claude-opus-5-5 ×\d+ ⚠ \d+ not sonnet \|/);
+
+    // The written record: the driver's requested models, every turn's served model, the mismatch.
+    const written = JSON.parse(JSON.stringify(runRecord({ run: 'r', date: '2026-11-07', packages: PUBLISHED, driver: driver.info(), runner: 'test', evidenceDir: '/tmp' }, run)));
+    expect(written.env.driver).toMatchObject({ authorModel: 'opus', askModel: 'sonnet' });
+    const writtenQuestion = written.cardRun.modes[0].run.questions.find((q: { question: string }) => q.question === fellBack);
+    expect(writtenQuestion.turn).toMatchObject({ model: 'claude-opus-5-5', requestedModel: 'sonnet', modelMismatch: true });
+    expect(written.scorecard.modes[0].first.models.mismatched).toBe(firstFellBack);
+
+    // The recording keeps both names on every turn, so a replay (`--driver recorded:F`) re-reads them as the run saw them.
+    const dir = mkdtempSync(join(tmpdir(), 'scenario-served-model-'));
+    try {
+      driver.save(join(dir, 'rec.json'));
+      const replay = RecordedDriver.fromFile(join(dir, 'rec.json'));
+      const persona = scenario.card.run.questions[0]!.personas?.[0];
+      const again = await replay.ask({ card: run.card, mode: 'scratch', phase: 'run', step: fellBack, ...(persona ? { persona } : {}), prompt: '', mcp: { url: '', apiKey: '' } });
+      expect([again.meta.model, again.meta.process?.requestedModel]).toEqual(['claude-opus-5-5', 'sonnet']);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('turns that named no model and asked for none leave the model rows empty, as before', async () => {
+    const { scenario, ops, driver } = setup();
+    const sc = cardScorecard(await runCard(scenario, driver, ops, { modes: ['scratch'], admin: ADMIN }));
+    expect(sc.modes[0]!.first.models).toEqual({ served: { '(not reported)': 14 }, requested: [], mismatched: 0 });
+    const table = renderScorecard(sc);
+    expect(table).toContain('| Run · model | — |');
+    expect(table).toContain('| Build · author | success · elapsed not recorded |');
   });
 });

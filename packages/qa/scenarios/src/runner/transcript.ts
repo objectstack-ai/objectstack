@@ -58,6 +58,11 @@ export interface TurnProcess {
    * `error_max_turns`. Absent on a turn recorded before the runner kept it.
    */
   maxTurns?: number;
+  /**
+   * The `--model` the CLI was given; absent ⇒ none, the login's default. The
+   * model it was served is the stream's own `meta.model`.
+   */
+  requestedModel?: string;
   /** The end of what the CLI wrote to stderr (at most 2,000 characters). */
   stderrTail?: string;
   /** The process could not be started or fed its prompt (`spawn ENOENT`, `write EPIPE`). */
@@ -69,6 +74,7 @@ export interface ParsedTurn extends RunTranscript {
   meta: {
     /** Set by the live driver, absent on a parse alone ({@link TurnProcess}). */
     process?: TurnProcess;
+    /** The model the session was served, from the stream's init line (`claude-sonnet-4-5-20250929`). */
     model?: string;
     /** MCP servers the session reported at init, with their connection status. */
     mcpServers?: Array<{ name: string; status: string }>;

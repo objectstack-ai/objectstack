@@ -28,6 +28,7 @@ import {
   DEFAULT_AUTHOR_TIMEOUT_MIN,
   MissingRecordingError,
   RecordedDriver,
+  servedAsRequested,
   subscriptionOnlyEnv,
 } from '../../src/runner/driver.js';
 import {
@@ -103,6 +104,26 @@ describe('parseStreamJson', () => {
     expect(refusalCodeOf('{"records":[]}')).toBeUndefined();
     expect(toolNameOf('mcp__my_app__get_record')).toBe('get_record');
     expect(toolNameOf('ToolSearch')).toBe('ToolSearch');
+  });
+});
+
+describe('servedAsRequested — the model a turn was served against the one it asked for', () => {
+  it('an alias or a name is served as asked when the served name holds it as whole dash-separated parts; anything else is a mismatch', () => {
+    const cases: Array<[string, string, boolean]> = [
+      ['sonnet', 'claude-sonnet-4-5-20250929', true],
+      ['claude-sonnet-4-5', 'claude-sonnet-4-5-20250929', true],
+      ['claude-opus-4-1-20250805', 'claude-opus-4-1-20250805', true],
+      ['Opus', 'claude-opus-5-5', true],
+      ['sonnet[1m]', 'claude-sonnet-4-5-20250929[1m]', true],
+      ['sonnet', 'claude-opus-5-5', false],
+      ['opus', 'claude-sonnet-4-5-20250929', false],
+      ['claude-sonnet-4', 'claude-sonnet-4-5-20250929', true], // `4` is a whole part of the served name
+      ['claude-sonnet-4-1', 'claude-sonnet-4-5-20250929', false],
+      ['son', 'claude-sonnet-4-5-20250929', false], // a fragment of a part is not a part
+      ['default', 'claude-opus-5-5', false],
+      ['', 'claude-opus-5-5', false],
+    ];
+    expect(cases.map(([requested, served]) => [requested, served, servedAsRequested(requested, served)])).toEqual(cases);
   });
 });
 
@@ -637,7 +658,10 @@ describe("the seed's load plan — reference cycles found from the card's own lo
  * the prompt's first word — `HANG` waits to be killed (and exits 143 on
  * SIGTERM, as the real CLI was measured to), `CRASH` exits 1 with no result
  * line, `ARGV` answers its own argument list as JSON, anything else answers
- * one stream-json success saying what it read.
+ * one stream-json success saying what it read. Its init line names the model
+ * it serves, as the real CLI's does: `--model X` resolves to
+ * `claude-X-4-5-20250929`, except `retired`, which falls back to
+ * `claude-opus-5-5`; with no `--model` it serves `stand-in`.
  */
 const STAND_IN = `#!/usr/bin/env node
 process.on('SIGTERM', () => { process.stderr.write('stand-in: terminated\\n'); process.exit(143); });
@@ -654,7 +678,9 @@ process.stdin.on('end', () => {
   if (input.startsWith('CRASH')) { process.stderr.write('stand-in: could not start a session\\n'); process.exit(1); }
   const longest = Math.max(...args.map((a) => a.length));
   const text = input.startsWith('ARGV') ? JSON.stringify(args) : 'stdin ' + input.length + ' · longest argv ' + longest;
-  console.log(JSON.stringify({ type: 'system', subtype: 'init', model: 'stand-in' }));
+  const asked = args.indexOf('--model') === -1 ? undefined : args[args.indexOf('--model') + 1];
+  const served = asked === undefined ? 'stand-in' : asked === 'retired' ? 'claude-opus-5-5' : 'claude-' + asked + '-4-5-20250929';
+  console.log(JSON.stringify({ type: 'system', subtype: 'init', model: served }));
   console.log(JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text }] } }));
   console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, num_turns: 1 }));
 });
@@ -773,6 +799,67 @@ describe('the live driver against a stand-in `claude`: the prompt on stdin, and 
     expect(replay({ authorMaxTurns: 300 })).toMatch(/^--author-max-turns .*live driver only/);
     expect(replay({ askMaxTurns: 20 })).toMatch(/^--ask-max-turns .*live driver only/);
     expect(replay({ authorTimeoutMin: 90, authorMaxTurns: 300, askMaxTurns: 20 })).toMatch(/^--author-timeout, --author-max-turns, --ask-max-turns .*live driver only/);
+  });
+
+  /** The `--model` value on the argument list the stand-in was started with, or `undefined` when it was given none. */
+  const modelArg = (t: ParsedTurn): string | undefined => {
+    const argv = JSON.parse(t.replyText) as string[];
+    const at = argv.indexOf('--model');
+    return at === -1 ? undefined : argv[at + 1];
+  };
+
+  it('`--model` reaches the CLI’s argument list on every turn, `--author-model` / `--ask-model` set the two kinds apart, and each turn records the model it asked for beside the one it was served', async () => {
+    vi.stubEnv('PATH', `${dir}${delimiter}${process.env.PATH ?? ''}`);
+    const every = makeDriver('claude', parseArgs(['--model', 'sonnet']));
+    const built = (await every.author(task('ARGV', 'starter'))).turn;
+    const asked = await every.ask(ask('ARGV'));
+    for (const t of [built, asked]) {
+      expect([modelArg(t), t.meta.process!.requestedModel, t.meta.model]).toEqual(['sonnet', 'sonnet', 'claude-sonnet-4-5-20250929']);
+    }
+    expect(every.info()).toMatchObject({ authorModel: 'sonnet', askModel: 'sonnet' });
+
+    const apart = makeDriver('claude', parseArgs(['--model', 'sonnet', '--author-model', 'opus', '--ask-model', 'haiku']));
+    const authored = (await apart.author(task('ARGV'))).turn;
+    const persona = await apart.ask(ask('ARGV'));
+    expect([modelArg(authored), authored.meta.process!.requestedModel, authored.meta.model]).toEqual(['opus', 'opus', 'claude-opus-4-5-20250929']);
+    expect([modelArg(persona), persona.meta.process!.requestedModel, persona.meta.model]).toEqual(['haiku', 'haiku', 'claude-haiku-4-5-20250929']);
+    expect(apart.info()).toMatchObject({ authorModel: 'opus', askModel: 'haiku' });
+
+    // One kind set alone leaves the other on the login's default: no `--model` on its argument list, nothing requested.
+    const authorOnly = makeDriver('claude', parseArgs(['--author-model', 'opus']));
+    const defaulted = await authorOnly.ask(ask('ARGV'));
+    expect([modelArg((await authorOnly.author(task('ARGV'))).turn), modelArg(defaulted), defaulted.meta.process!.requestedModel, defaulted.meta.model]).toEqual(['opus', undefined, undefined, 'stand-in']);
+    expect(authorOnly.info().askModel).toBeUndefined();
+
+    // With no flag, no turn passes `--model`.
+    const plain = makeDriver('claude', parseArgs([]));
+    expect([modelArg((await plain.author(task('ARGV'))).turn), modelArg(await plain.ask(ask('ARGV')))]).toEqual([undefined, undefined]);
+    expect([plain.info().authorModel, plain.info().askModel]).toEqual([undefined, undefined]);
+
+    // A session that answered on another model than the one asked for keeps both names.
+    const retired = await makeDriver('claude', parseArgs(['--ask-model', 'retired'])).ask(ask('ARGV'));
+    expect([retired.meta.process!.requestedModel, retired.meta.model]).toEqual(['retired', 'claude-opus-5-5']);
+  });
+
+  it('a model flag with no name is refused, and a replay refuses every model flag', () => {
+    const refusal = (run: () => unknown): string | undefined => {
+      try {
+        run();
+      } catch (e) {
+        return (e as Error).message;
+      }
+      return undefined;
+    };
+    for (const flag of ['--model', '--author-model', '--ask-model']) {
+      expect(refusal(() => parseArgs([flag]))).toBe(`${flag} needs a value`);
+      for (const bad of ['', '  ', '--only']) {
+        const message = refusal(() => parseArgs([flag, bad]));
+        expect([flag, bad, message?.startsWith(`${flag} takes a model alias or name`), message?.endsWith(`\`${bad}\``)]).toEqual([flag, bad, true, true]);
+      }
+    }
+    const replay = (opts: Parameters<typeof makeDriver>[1]) => refusal(() => makeDriver('recorded:/nowhere.json', opts));
+    expect(replay({ model: 'sonnet' })).toMatch(/^--model applies to the live driver only/);
+    expect(replay({ authorModel: 'opus', askModel: 'haiku' })).toMatch(/^--author-model, --ask-model apply to the live driver only/);
   });
 });
 
