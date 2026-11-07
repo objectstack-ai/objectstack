@@ -93,7 +93,8 @@ import { useFieldTranslation } from './useFieldTranslation.js';
  * (`./preferenceOptions.ts`), through the host's authenticated fetch — and
  * differs from the registry arm in exactly what an open list needs:
  *
- *  - FAILED, IDLE or an empty list: the plain text box, with no notice;
+ *  - FAILED, IDLE (no host fetch on `SchemaRendererContext`) or an empty
+ *    list: the plain text box, with no notice;
  *  - LOADED: a picker that lists the served values in the door's order (`*`
  *    first) and ALSO commits whatever the person types, verbatim;
  *  - a stored or typed value the list does not hold is kept, marked "not in
@@ -407,8 +408,9 @@ export function PreferenceOptionField({
 }: PreferenceOptionFieldProps) {
   const ctx = React.useContext(SchemaRendererContext);
   const { t } = useFieldTranslation();
-  const doFetch: ApiFetch | undefined = ctx?.apiFetch ?? (typeof fetch === 'function' ? fetch : undefined);
-  const catalog = useCatalog(PREFERENCE_READER, doFetch, preferenceList);
+  // The host's authenticated fetch only: a surface with none (a preview, a
+  // test that drives the widget bare) has no list to offer and is IDLE.
+  const catalog = useCatalog(PREFERENCE_READER, ctx?.apiFetch, preferenceList);
   const [open, setOpen] = React.useState(false);
   const [search, setSearch] = React.useState('');
   const current = typeof value === 'string' ? value : '';

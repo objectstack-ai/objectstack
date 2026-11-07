@@ -5230,6 +5230,8 @@ export const FIELD_WIDGET_LABELLING: Record<
   'recipient-picker': 'control',
   'position-ref': 'control',
   'permission-ref': 'control',
+  'notification-topic': 'control',
+  'notification-channel': 'control',
 };
 
 export function registerField(fieldType: string): void {

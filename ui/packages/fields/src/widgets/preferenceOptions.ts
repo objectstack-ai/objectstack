@@ -14,9 +14,9 @@
  * list of `{ value, wildcard, … }` with the `'*'` entry first; a channel also
  * says whether the deployment can send on it (`configured`).
  *
- * The read rides the host's AUTHENTICATED fetch, `SchemaRendererContext.apiFetch`
- * (the global fetch only where no host supplies one), the way every renderer
- * read of the host's own API does. One request per fetch function for the page
+ * The read rides the host's AUTHENTICATED fetch, `SchemaRendererContext.apiFetch`,
+ * and only that: a surface whose host supplies none offers no list, and the
+ * face is the plain text box. One request per fetch function for the page
  * session, shared by every field that draws from it (a preference form holds a
  * topic and a channel); a failed read is not kept, so the next field that
  * mounts asks again.

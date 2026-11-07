@@ -180,6 +180,21 @@ describe('notification-topic — the plain text box when there is no list (#3020
     expect(screen.queryByRole('status')).toBeNull();
   });
 
+  it('no host fetch gives the same text box, and nothing is read', async () => {
+    const globalFetch = vi.spyOn(globalThis, 'fetch');
+    const onChange = vi.fn();
+    render(
+      <SchemaRendererProvider dataSource={null}>
+        <NotificationTopicField value="*" onChange={onChange} field={{ name: 'topic' } as any} />
+      </SchemaRendererProvider>,
+    );
+    const box = screen.getByRole('textbox');
+    expect(box).toBeEnabled();
+    expect(box).toHaveValue('*');
+    expect(globalFetch).not.toHaveBeenCalled();
+    globalFetch.mockRestore();
+  });
+
   it('an empty list gives the same text box', async () => {
     const apiFetch = door(ok({ success: true, data: { topics: [], channels: [] } }));
     mount(NotificationTopicField, { apiFetch });

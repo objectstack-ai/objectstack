@@ -144,7 +144,12 @@ import { QRCodeField } from '../widgets/QRCodeField';
 import { ObjectRefField } from '../widgets/ObjectRefField';
 import { FilterConditionField } from '../widgets/FilterConditionField';
 import { RecipientPickerField } from '../widgets/RecipientPickerField';
-import { PositionRefField, PermissionRefField } from '../widgets/RegistryRefField';
+import {
+  PositionRefField,
+  PermissionRefField,
+  NotificationTopicField,
+  NotificationChannelField,
+} from '../widgets/RegistryRefField';
 
 /* ════════════════════════════════════════════════════════════════════════════
  * Every registered field widget, both hosts
@@ -207,6 +212,8 @@ const WIDGETS: Record<string, ComponentType<any>> = {
   'recipient-picker': RecipientPickerField,
   'position-ref': PositionRefField,
   'permission-ref': PermissionRefField,
+  'notification-topic': NotificationTopicField,
+  'notification-channel': NotificationChannelField,
 };
 
 /** Option widgets render an "unfillable" placeholder unless offered a list. */
