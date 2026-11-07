@@ -1213,12 +1213,28 @@ const MASTER_CHECKED_BY_ID_WRITES: ReadonlySet<string> = new Set(['update', 'del
 function masterWriteCheckRefusal(
   outcome: ControlledByParentWriteOutcome,
   verb: string,
+  /**
+   * [ADR-0055 §3 as amended · #30905 ruling A] The record's master reference
+   * key when its OPTIONAL master is empty ({@link nullMasterReferenceOf}):
+   * the check then judged the record by its owner rule, not by a master, and
+   * its `master_chain` refusal is narrated as that rule.
+   */
+  nullMasterFk?: string,
 ): { outcome: ExplainRecordAttribution['outcome']; detail: string } | undefined {
   switch (outcome?.outcome) {
     case 'allow':
     case 'not_applicable':
       return undefined;
     case 'deny':
+      if (nullMasterFk !== undefined && outcome.leg === 'master_chain') {
+        return {
+          outcome: 'excluded',
+          detail: `${MASTER_DERIVED} when it names one, and it names none: its master reference '${nullMasterFk}' is ` +
+            `empty, so the master-detail write check the by-id ${verb} runs admits only its owner and a holder of ` +
+            `Modify All on the object, and refuses this ${verb} on its 'master_chain' leg. ` +
+            `The ${verb} answers 403 PERMISSION_DENIED.`,
+        };
+      }
       return {
         outcome: 'excluded',
         detail: `${MASTER_DERIVED}: the master-detail write check the by-id ${verb} runs refuses this ${verb} on its ` +
@@ -2011,7 +2027,7 @@ async function applyRecordAttribution(
   const masterFault = masterOrFault === DEPENDENCY_FAULT;
   const masterRefusal = masterOrFault === undefined || masterOrFault === DEPENDENCY_FAULT
     ? undefined
-    : masterWriteCheckRefusal(masterOrFault, engineOp);
+    : masterWriteCheckRefusal(masterOrFault, engineOp, nullMasterReferenceOf(deps, object, record as Record<string, unknown>));
   // [ADR-0055] A record-grained read of a `controlled_by_parent` record meets
   // a master leg too: the read door ANDs the record's master-derived read scope
   // (the master ids the principal can read, the chain included) into the find,

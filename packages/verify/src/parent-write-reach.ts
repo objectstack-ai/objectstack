@@ -29,6 +29,27 @@
 // own parse of the object (`ObjectSchema`): `sharingModel:
 // 'controlled_by_parent'` and exactly one `master_detail` field (ADR-0055 §1).
 //
+// ## An optional master, and the record that names none
+//
+// ADR-0055 §1 and §3 as amended (maintainer ruling A on #30905): a detail whose
+// one `master_detail` is declared `required: false` has an OPTIONAL master, and
+// a detail record that names none belongs to no master. Such a record is its
+// owner's: the write gate admits its edit and delete for its owner and for a
+// holder of Modify All on the detail's object, and its create for anyone the
+// detail's own `create` grant admits. So for that population the family proves
+// both cases: the EXPLICIT-master case, exactly as for every detail, and the
+// NULL-master case, where the expected answer is
+//
+//   - edit / delete: P holds the verb on D's object AND (P owns D — its
+//     `owner_id` — OR P holds `modifyAllRecords` on D's object, read from the
+//     same effective permissions);
+//   - create (naming no master): P holds create on D's object.
+//
+// Ownership is the fixture's own fact (the seed writes `owner_id`), never
+// resolved. A null-master record the persona cannot READ (it owns it not and
+// holds no View All on the object) is outside its reach and is not probed, as
+// an unreadable master is not.
+//
 // ## The door, and who walks through it
 //
 // The engine's write as the signed-in principal: the handle's `hooks.run` with
@@ -65,7 +86,7 @@
 // Run it on a fresh stack of its own, booted with
 // `parentWriteReachSecurity(config)`: it writes, deletes and signs up.
 
-import { ObjectSchema, referenceCarrierOf } from '@objectstack/spec/data';
+import { ObjectSchema, controlledByParentMasterOf, referenceCarrierOf } from '@objectstack/spec/data';
 import { objectPermissionGrants, type PermissionSet } from '@objectstack/spec/security';
 import { SecurityPlugin, securityDefaultPermissionSets, appSecurityPluginOptions } from '@objectstack/plugin-security';
 import { declaredCollection } from './artifact-collections.js';
@@ -101,6 +122,14 @@ export interface ParentWriteReachCase {
    * its own rows.
    */
   hops: ParentWriteReachHop[];
+  /**
+   * `true` when the detail's own master is OPTIONAL — its one `master_detail`
+   * declared `required: false` (ADR-0055 §1 as amended), as the spec's
+   * `controlledByParentMasterOf` reads the parse — so a record of it may name
+   * no master, and the family probes that null-master case beside the
+   * explicit-master one. Absent otherwise.
+   */
+  optionalMaster?: true;
   /** Why the declaration states no master this family can compare against. */
   excluded?: string;
   /** Why no detail under its master chain can be built from the app's metadata. */
@@ -144,13 +173,26 @@ export interface ParentWriteReachProbeResult {
   detail?: string;
 }
 
-/** One persona against one master chain of one detail object. */
+/** One persona against one master chain of one detail object — or, for an optional master, against none. */
 export interface ParentWriteReachReach {
   persona: string;
-  /** Who owns the master chain. */
-  masters: ParentWriteReachOwner;
-  /** `unreadable` — the persona cannot read the master, so the detail is outside its reach (not probed). */
-  masterRead: 'readable' | 'unreadable' | 'unmeasured';
+  /**
+   * Who owns the master chain; `none` — the detail records written name no
+   * master (an OPTIONAL master left empty), so no master is read or edited and
+   * the expectation is the null-master record's owner rule.
+   */
+  masters: ParentWriteReachOwner | 'none';
+  /**
+   * `unreadable` — the persona cannot read the master, so the detail is outside its reach (not probed);
+   * `none` — there is no master to read (`masters: 'none'`).
+   */
+  masterRead: 'readable' | 'unreadable' | 'unmeasured' | 'none';
+  /**
+   * `masters: 'none'` only: the null-master records the persona cannot READ —
+   * by who owns them — and so did not probe (a write to a record the caller
+   * cannot read is the RLS family's subject).
+   */
+  unreadableDetails?: ParentWriteReachOwner[];
   /** The measured half: an empty update of the master as the persona. */
   masterEdit?: 'editable' | 'not-editable' | 'unmeasured';
   masterAnswer?: ParentWriteReachAnswer;
@@ -208,7 +250,11 @@ export interface ParentWriteReachReport {
     excluded: number;
     notDerivable: number;
     personas: { run: number; notRun: number };
-    /** Persona × master chain pairs: probed, outside the persona's read reach, or with an unmeasured master. */
+    /**
+     * Persona × master chain pairs (and, for an optional master, persona ×
+     * null-master reaches): probed, outside the persona's read reach, or with an
+     * unmeasured master.
+     */
     reaches: { probed: number; unreadable: number; unmeasured: number };
     /** Probes per verb. */
     probes: Record<ParentWriteReachVerb, number>;
@@ -287,6 +333,9 @@ export function deriveParentWriteReachCases(config: any): ParentWriteReachCase[]
     if (own.data.sharingModel !== 'controlled_by_parent') continue;
 
     const c: ParentWriteReachCase = { object: name, hops: [] };
+    // [ADR-0055 §1 as amended] The spec's own reading of which field is the
+    // master and whether it is optional, on the parsed field map.
+    if (controlledByParentMasterOf(own.data.fields)?.optional === true) c.optionalMaster = true;
     const visited = new Set<string>([name]);
     let current = name;
     let currentParsed = own.data;
@@ -696,6 +745,110 @@ export async function runParentWriteReachProofs(stack: VerifyStack, config: any)
 
   const row = async (object: string, id: string) => (await stack.rows(object, { id }))[0];
 
+  /**
+   * [ADR-0055 §3 as amended] One persona against the NULL-master records of
+   * an optional-master detail: a record another principal owns and one the
+   * persona owns, each naming no master, edited and deleted where the persona
+   * reads it; then a create that names none. The expectation is the owner
+   * rule (see the module header): the verb on the detail's object, and for an
+   * edit or a delete, ownership of the record or Modify All on the object.
+   */
+  async function nullMasterReach(
+    c: ParentWriteReachCase,
+    p: RunningPersona,
+    grants: Record<ParentWriteReachVerb, boolean>,
+  ): Promise<ParentWriteReachReach> {
+    const { field } = c.hops[0]!;
+    const reach: ParentWriteReachReach = { persona: p.name, masters: 'none', masterRead: 'none', grants, probes: [] };
+    const modifyAll = p.objects?.[c.object]?.modifyAllRecords === true;
+    const unreadable: ParentWriteReachOwner[] = [];
+    const expectNull = (verb: ParentWriteReachVerb, owns: boolean) => {
+      const holds = grants[verb];
+      const admitted = holds && (verb === 'create' || owns || modifyAll);
+      return {
+        verb,
+        expected: admitted ? ('allowed' as const) : ('refused' as const),
+        why:
+          `the persona ${holds ? 'holds' : 'lacks'} ${GRANT[verb]} on ${c.object}` +
+          (verb === 'create'
+            ? ', and the record it creates names no master'
+            : `, the record names no master, and the persona ${owns ? 'owns it' : 'does not own it'} and ` +
+              `${modifyAll ? 'holds' : 'lacks'} Modify All on ${c.object}`),
+      };
+    };
+
+    for (const detailOwner of hasOwnerColumn(c.object) ? (['other', 'own'] as const) : (['other'] as const)) {
+      const owns = detailOwner === 'own';
+      const d = await seedRecord(c.object, { [field]: null }, owns ? p.userId : ownerId);
+      if (!d.id) {
+        for (const verb of ['edit', 'delete'] as const) {
+          reach.probes.push({ verb, detailOwner, expected: expectNull(verb, owns).expected, outcome: 'not-run', detail: `the detail record: ${d.reason}` });
+        }
+        continue;
+      }
+      let readable: boolean | undefined;
+      let readFault: string | undefined;
+      try {
+        readable = (await stack.rows(c.object, { id: d.id }, { as: p.token })).length > 0;
+      } catch (e) {
+        const err = e as { code?: unknown; message?: unknown };
+        if (err?.code === 'PERMISSION_DENIED') readable = false;
+        else readFault = `the read of the ${c.object} record as the persona faulted: ${clip(err?.message ?? e, 160)}`;
+      }
+      if (readable === undefined) {
+        for (const verb of ['edit', 'delete'] as const) {
+          reach.probes.push({ verb, detailOwner, expected: expectNull(verb, owns).expected, outcome: 'not-run', detail: readFault });
+        }
+        continue;
+      }
+      if (!readable) {
+        unreadable.push(detailOwner);
+        continue;
+      }
+      {
+        const e = expectNull('edit', owns);
+        const before = await row(c.object, d.id);
+        const answer = await write(stack, p.token, c.object, 'update', { id: d.id });
+        const after = await row(c.object, d.id);
+        const stamp = before && 'updated_at' in before ? after?.updated_at !== before.updated_at : undefined;
+        reach.probes.push({ verb: 'edit', detailOwner, expected: e.expected, answer: plain(answer), ...judge(c, e, answer, stamp) });
+      }
+      {
+        const e = expectNull('delete', owns);
+        const answer = await write(stack, p.token, c.object, 'delete', { id: d.id });
+        const gone = !(await row(c.object, d.id));
+        reach.probes.push({ verb: 'delete', detailOwner, expected: e.expected, answer: plain(answer), ...judge(c, e, answer, gone) });
+      }
+    }
+    if (unreadable.length > 0) reach.unreadableDetails = unreadable;
+    {
+      const e = expectNull('create', true);
+      const cc = crud.get(c.object)!;
+      const ids = new Map<string, string>();
+      let reason: string | undefined;
+      for (const ref of cc.relationalRefs ?? []) {
+        if (!ref.required || ref.field === field) continue;
+        const dep = await baseRecord(ref.target);
+        if (!dep.id) {
+          reason = `required relation ${ref.field} → ${ref.target}: ${dep.reason}`;
+          break;
+        }
+        ids.set(ref.target, dep.id);
+      }
+      if (reason) {
+        reach.probes.push({ verb: 'create', expected: e.expected, outcome: 'not-run', detail: reason });
+      } else {
+        const refs = (cc.relationalRefs ?? []).filter((r) => r.field !== field);
+        const { body } = fillRelationalRefs({ ...cc, relationalRefs: refs }, ids);
+        const answer = await write(stack, p.token, c.object, 'insert', fixtureBody(body, objectDefs.get(c.object), ++counter, FIXTURE_TAG));
+        const made = answer.kind === 'written' && answer.id ? await row(c.object, answer.id) : undefined;
+        const landed = answer.kind === 'written' ? made !== undefined && made?.[field] == null : undefined;
+        reach.probes.push({ verb: 'create', expected: e.expected, answer: plain(answer), ...judge(c, e, answer, landed) });
+      }
+    }
+    return reach;
+  }
+
   // ── Probes ────────────────────────────────────────────────────────────────
   const results: ParentWriteReachObjectResult[] = [];
   for (const c of cases) {
@@ -827,6 +980,7 @@ export async function runParentWriteReachProofs(stack: VerifyStack, config: any)
           }
         }
       }
+      if (c.optionalMaster) reaches.push(await nullMasterReach(c, p, grants));
     }
     results.push({ object: c.object, hops: c.hops, ...objectStatus(reaches), reaches });
   }
@@ -898,7 +1052,7 @@ export function formatParentWriteReachReport(report: ParentWriteReachReport): st
       lines.push(`  ✗ ${r.object}${chain}  ${r.status === 'contradicted' ? 'CONTRADICTED' : 'FAULTED'} on ${bad.length} of ${probes.length} write(s):`);
       for (const p of bad.slice(0, 12)) {
         lines.push(
-          `      ${p.persona}, masters ${p.masters === 'own' ? 'its own' : "another's"}, ${p.verb}` +
+          `      ${p.persona}, masters ${p.masters === 'own' ? 'its own' : p.masters === 'none' ? 'none (the record names no master)' : "another's"}, ${p.verb}` +
             `${p.detailOwner ? ` (detail ${p.detailOwner === 'own' ? 'its own' : "another's"})` : ''}: ${clip(p.detail, 220)}`,
         );
       }

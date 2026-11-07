@@ -91,6 +91,7 @@ import {
   assertMasterRowEditable,
   checkControlledByParentWrite,
   controlledByParentPredicateWriteMasters,
+  type CbpPredicateWriteSelection,
   type CbpWriteGateHost,
 } from './security-plugin-cbp-write-gate.js';
 // [#25223 cut 4] The controlled-by-parent read leaf (ADR-0055 §2, ADR-0139 D6)
@@ -764,7 +765,9 @@ interface CbpRelation {
    * Read by the by-id `update` leg of
    * {@link SecurityPlugin.assertControlledByParentWrite} and by nothing else:
    * an insert, a delete, a predicate write and a delegated write keep the
-   * master-edit rule whatever this says.
+   * master-edit rule whatever this says, and so does an update whose body
+   * empties an {@link optional} master (#30905 ruling A: detaching a row from
+   * its master is that master's question).
    */
   ownerMayEdit: boolean;
   /**
@@ -775,8 +778,14 @@ interface CbpRelation {
    * that reached the registry without the parse is not it). A detail row whose
    * {@link fk} is empty then belongs to no master, and the read leaf
    * ({@link SecurityPlugin.computeControlledByParentFilter}) admits it through
-   * the owner arm alone. `false` for a required master: its rows are read
-   * through the master and nothing else, exactly as before.
+   * the owner arm alone. The write gate
+   * ({@link SecurityPlugin.assertControlledByParentWrite}, ADR-0055 §3 as
+   * amended) judges such a row by its owner rule — its owner, or Modify All on
+   * the object — on a by-id write, on each row a predicate write selects and on
+   * a hop of the chain walk; it admits an insert that names no master, and an
+   * update that empties the reference asks edit on the master it leaves.
+   * `false` for a required master: its rows are read and written through the
+   * master and nothing else, exactly as before.
    */
   optional: boolean;
   /**
@@ -5197,6 +5206,31 @@ export class SecurityPlugin implements Plugin {
    * refused `422` otherwise — after the stored masters' question, so a master
    * the caller may not edit is still the answer there.
    *
+   * [ADR-0055 §3 as amended · #30905 ruling A] …unless the master is OPTIONAL
+   * ({@link CbpRelation.optional}): a row may then name none, and is its
+   * owner's. The gate judges such a row instead of refusing it:
+   *
+   *  - an insert that names no master is admitted (the detail's own `create`
+   *    grant has been asked, and its creator becomes its owner);
+   *  - a write of a stored row that names none — a by-id write, each row a
+   *    predicate write selects, and a master on the chain walk whose own
+   *    master is empty — is admitted for the row's OWNER (`owner_id` equal to
+   *    the principal) and for a holder of Modify All on its object, and
+   *    refused `403 PERMISSION_DENIED` for every other principal, on the
+   *    `master_chain` leg; a row with no owner, and every row of an object
+   *    with no `owner_id` column, is Modify All's alone. On an on-behalf-of
+   *    write both passes ask it, each of its own principal;
+   *  - a body that NAMES a master on such a row asks edit on that master, as
+   *    re-pointing does; a body that EMPTIES an optional master asks edit on
+   *    the master it leaves (the §3 walk), and the opt-in owner leg
+   *    ({@link CbpRelation.ownerMayEdit}) never admits it.
+   *
+   * Step 2.7 hands the platform ownership floor of every by-id write of a
+   * `controlled_by_parent` detail to this gate (`masterGateCoversThisWrite`),
+   * null-master rows included, so the owner rule here is what refuses a
+   * principal who only reads such a row. A required master's answers are
+   * unchanged, byte for byte.
+   *
    * [#7474] SIX conditions refuse a write here, and they are NOT one verdict.
    * Three are genuine authorization answers (no object-level `update` on the
    * master, the master row outside the caller's write RLS, no `edit`-level
@@ -5212,6 +5246,8 @@ export class SecurityPlugin implements Plugin {
    *     ({@link DetailRecordNotFoundError})
    *   - the detail's master reference is empty, or an update's body empties
    *     it → `422 MISSING_REQUIRED_FIELD` ({@link MasterReferenceMissingError})
+   *     — for a REQUIRED master; an optional master's empty reference is a
+   *     verdict, the owner rule above
    *
    * [#8688] The last of those three has since NARROWED, by the maintainer
    * ruling of 2026-08-15: on an `insert` whose master FK is absent, this gate
@@ -5245,11 +5281,13 @@ export class SecurityPlugin implements Plugin {
     context: any,
   ): Promise<void> {
     // [#25223 cut 3] The body moved to `security-plugin-cbp-write-gate.ts` (see `CbpWriteGateHost`).
-    const host: Pick<CbpWriteGateHost, 'assertControlledByParentChainEditable' | 'controlledByParentPredicateWriteMasters' | 'declaresControlledByParent' | 'extractSingleId' | 'readRowById' | 'resolveCbpRelation'> = {
+    const readPermissionEvaluator = () => this.permissionEvaluator;
+    const host: Pick<CbpWriteGateHost, 'assertControlledByParentChainEditable' | 'controlledByParentPredicateWriteMasters' | 'declaresControlledByParent' | 'extractSingleId' | 'permissionEvaluator' | 'readRowById' | 'resolveCbpRelation'> = {
       assertControlledByParentChainEditable: (...a) => this.assertControlledByParentChainEditable(...a),
       controlledByParentPredicateWriteMasters: (...a) => this.controlledByParentPredicateWriteMasters(...a),
       declaresControlledByParent: (...a) => this.declaresControlledByParent(...a),
       extractSingleId: (...a) => this.extractSingleId(...a),
+      get permissionEvaluator() { return readPermissionEvaluator(); },
       readRowById: (...a) => this.readRowById(...a),
       resolveCbpRelation: (...a) => this.resolveCbpRelation(...a),
     };
@@ -5277,6 +5315,13 @@ export class SecurityPlugin implements Plugin {
    * passed in rather than rebuilt so every refusal, at every hop and for every
    * write shape, names the CALLER's object and operation (#7474's envelope)
    * and records its leg ({@link MASTER_EDIT_DENIAL_LEG}).
+   *
+   * [ADR-0055 §3 as amended · #30905 ruling A] A master that is itself
+   * `controlled_by_parent` with an OPTIONAL master of its own, and names none,
+   * ends the chain: the walk asks of it the owner rule a write of that row is
+   * asked (its owner, or Modify All on its object), and refuses on the
+   * `master_chain` leg otherwise. A required master left empty is refused on
+   * that leg as before.
    */
   private assertControlledByParentChainEditable(
     permissionSets: PermissionSet[],
@@ -5289,9 +5334,11 @@ export class SecurityPlugin implements Plugin {
     denyMasterEdit: (leg: ControlledByParentWriteDenialLeg, reason: string, recordId?: unknown) => never,
   ): Promise<void> {
     // [#25223 cut 3] The body moved to `security-plugin-cbp-write-gate.ts` (see `CbpWriteGateHost`).
-    const host: Pick<CbpWriteGateHost, 'assertMasterRowEditable' | 'declaresControlledByParent' | 'readRowById' | 'resolveCbpRelation'> = {
+    const readPermissionEvaluator = () => this.permissionEvaluator;
+    const host: Pick<CbpWriteGateHost, 'assertMasterRowEditable' | 'declaresControlledByParent' | 'permissionEvaluator' | 'readRowById' | 'resolveCbpRelation'> = {
       assertMasterRowEditable: (...a) => this.assertMasterRowEditable(...a),
       declaresControlledByParent: (...a) => this.declaresControlledByParent(...a),
+      get permissionEvaluator() { return readPermissionEvaluator(); },
       readRowById: (...a) => this.readRowById(...a),
       resolveCbpRelation: (...a) => this.resolveCbpRelation(...a),
     };
@@ -5332,14 +5379,21 @@ export class SecurityPlugin implements Plugin {
    * its one target row's: only the reference's value is needed, and a field
    * rule hiding it from the caller must not hide the master from this gate. A
    * row whose reference is empty answers the by-id leg's stored-row refusal
-   * ({@link MasterReferenceMissingError}, `422`).
+   * ({@link MasterReferenceMissingError}, `422`) when the master is required.
+   *
+   * [ADR-0055 §3 as amended · #30905 ruling A] When the master is OPTIONAL
+   * ({@link CbpRelation.optional}) such a row is not refused here: it is
+   * returned among `nullMasterRows`, with its `owner_id` read beside the
+   * reference where the object carries one, and the gate judges each by the
+   * owner rule a by-id write of it meets. The answer is the
+   * {@link CbpPredicateWriteSelection}: the distinct masters, and those rows.
    */
   private controlledByParentPredicateWriteMasters(
     object: string,
     operation: string,
     rel: CbpRelation,
     opCtx: any,
-  ): Promise<unknown[]> {
+  ): Promise<CbpPredicateWriteSelection> {
     // [#25223 cut 3] The body moved to `security-plugin-cbp-write-gate.ts` (see `CbpWriteGateHost`).
     const readQl = () => this.ql;
     const host: Pick<CbpWriteGateHost, 'ql'> = {
