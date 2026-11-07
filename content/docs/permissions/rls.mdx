@@ -239,7 +239,10 @@ Layer 1 (business RLS)       ─┘
 - A superuser bypasses business policies but **not** tenant isolation —
   crossing tenants requires a genuine platform admin.
 - Children of a master-detail parent with `sharingModel: 'controlled_by_parent'`
-  derive access from the master record instead.
+  derive access from the master record instead. A child whose master is
+  optional (`required: false`, ADR-0055 §1 as amended) and empty is read by its
+  owner and by View All on the child, and written by its owner and by Modify
+  All on the child.
 
 ## The fail-closed contract
 

@@ -73,7 +73,7 @@ the publish door rejects it before that:
 | `private` | owner only (widen with sharing rules, RLS, or `readScope`/`writeScope`) |
 | `public_read` | everyone reads; the owner writes |
 | `public_read_write` | everyone reads and writes |
-| `controlled_by_parent` | inherited from the master record (`master_detail` children) |
+| `controlled_by_parent` | inherited from the master record (`master_detail` children); a row with no (optional) master is its owner's |
 
 **Important optional properties:**
 
@@ -290,8 +290,6 @@ via the registered `ICryptoProvider`, masked on read, fail-closed, ADR-0100) —
 | Many-to-Many (simple) | multi-value `lookup` (`multiple: true`) — an **array column** of ids |
 | Many-to-Many (with attributes) | Junction object with two `lookup` fields |
 | Hierarchical | `tree` field (self-reference) |
-
-See [rules/relationships.md](./rules/relationships.md) for detailed examples.
 
 > **`multiple: true` lookup ≠ junction object.** A multi-value lookup
 > (`{ type: 'lookup', reference: 'x', multiple: true }`) is stored and read as an

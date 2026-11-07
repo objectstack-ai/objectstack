@@ -230,7 +230,7 @@ Complete security setup for a sales team:
 const OrganizationDefaults = {
   account: 'private',
   opportunity: 'private',
-  contact: 'controlled_by_parent',
+  contact: 'controlled_by_parent', // its master_detail to account; with required: false, a contact with no account is its owner's (ADR-0055 §1)
 };
 
 // 2. Positions (flat — the hierarchy lives on business units)

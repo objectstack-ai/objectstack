@@ -30,7 +30,7 @@ export const LeaveRequest = ObjectSchema.create({
 | `private` | Owner only (+ scope-depth grants and record shares) |
 | `public_read` | All users can read; writes stay owner-scoped |
 | `public_read_write` | All users can read and edit |
-| `controlled_by_parent` | Access follows the master record (master-detail children) |
+| `controlled_by_parent` | Access follows the master record (master-detail children); a row whose optional master is empty is its owner's, plus View All / Modify All on the object |
 
 > **The default is `private`, fail-closed (ADR-0090 D1).** A custom object
 > that declares **no `sharingModel`** — or that stores an unknown value — is
