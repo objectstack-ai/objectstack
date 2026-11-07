@@ -28,7 +28,9 @@ they reference record fields through the `record.` scope:
 
 ```ts
 // ✗ Wrong — `done` is a bare reference. It type-checks (it's just a string),
-//   but at runtime it resolves to null → the action is hidden on EVERY record.
+//   but at runtime it is an unknown variable, so the predicate faults on every
+//   record — and the Console hides an action whose `visible` faults: hidden on
+//   EVERY record.
 { name: 'mark_done', visible: '!done' }
 
 // ✓ Right
@@ -896,16 +898,19 @@ What the failure does depends on what the predicate guards:
 
 | Predicate | On failure |
 | :--- | :--- |
-| A field's `visibleWhen`, `readonlyWhen`, `requiredWhen`; a view's `visibleOn`; an option's `visibleWhen`; list conditional formatting | **Fail open**: the rule's safe default applies, so a broken rule never hides a field. A rule that never fires while its field stays visible is the symptom, usually a bare field name where `record.<field>` was meant |
+| A field's `visibleWhen`, `readonlyWhen`, `requiredWhen`; a view's `visibleOn`; an option's `visibleWhen`; list conditional formatting | **Fail open in the Console's rendering**: the rule's safe default applies, so a broken rule never hides a field. A rule that never fires while its field stays visible is the symptom, usually a bare field name where `record.<field>` was meant. This row is the Console's display only; the server judges `requiredWhen`, `readonlyWhen` and an option's `visibleWhen` again on the write (see below) |
 | An object field group's `visibleWhen` | **Fail closed**: the whole group is hidden on the form and the record page |
 | A page node's `visibleWhen` / `visible` / `hidden`, and a `page:tabs` item's `visibleWhen` | **Fail closed**: the node or tab is withheld; a withheld related list is not counted in its tab badge |
 | A navigation item's or area's `visible` | **Fail open**: the item renders for everyone, reported under `app-shell:visible` |
 
 At **submit** a broken field rule is refused, not passed. A field `visibleWhen` that
 cannot be evaluated refuses the submit on the client, with a message naming the field
-and the rule, because no server evaluates `visibleWhen`. A broken `requiredWhen` or
-`readonlyWhen` is refused by the server, and the form shows that refusal beside the
-input. A `visibleWhen` that reads `previous` cannot be evaluated on a create form, so
+and the rule, because no server evaluates a field's `visibleWhen`. A broken
+`requiredWhen` or `readonlyWhen`, or an option's `visibleWhen`, is refused by the
+server, and the form shows that refusal beside the input. One exception: a
+`readonlyWhen` that reads a name the write does not bind (a bare field name, or
+`parent` where no master-detail header was resolved) holds the lock instead: the
+server drops the incoming change to that field and the rest of the write lands. A `visibleWhen` that reads `previous` cannot be evaluated on a create form, so
 such a form is always refused.
 
 A **blank** rule (`''`, whitespace, or an envelope whose `source` is blank) is not "no
