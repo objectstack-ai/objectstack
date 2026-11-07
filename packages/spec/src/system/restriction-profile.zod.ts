@@ -66,6 +66,16 @@ export const RestrictionProfileSchema = lazySchema(() => strictObject(
      * named handler `functions`, and code plugins.
      *
      * `false` refuses every one of them; `true` allows them.
+     *
+     * ## Reader rule
+     *
+     * Besides `hooks`, a reader takes what is code from the spec's one
+     * classification of a package body's keys, `UNMANAGED_INSTALL_KEY_DISPOSITIONS`
+     * (`@objectstack/spec/kernel`, disposition `code`), and a key that carries
+     * nothing refuses nothing. `devPlugins` is read as code too: it loads only
+     * on a development boot, but `os build` still writes it into the artifact a
+     * publish uploads, so it reaches a target (#31264). A `script` flow node is
+     * also subject to this rule (see `allowedFlowNodeTypes`).
      */
     allowCode: z
       .boolean()
