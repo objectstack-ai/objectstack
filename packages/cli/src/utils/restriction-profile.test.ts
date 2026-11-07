@@ -11,7 +11,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { FLOW_BUILTIN_NODE_TYPES } from '@objectstack/spec/automation';
+import { FLOW_BUILTIN_NODE_TYPES, LOOP_NODE_TYPE, PARALLEL_NODE_TYPE, TRY_CATCH_NODE_TYPE } from '@objectstack/spec/automation';
 
 import {
   judgeRestrictionProfile,
@@ -133,6 +133,46 @@ describe('judgeRestrictionProfile — the reader rules', () => {
   it('start / end are always allowed, even by a profile that lists no node type', () => {
     const stack = { manifest: STACK.manifest, flows: [flow('rp_bare', [node('start', 'start'), node('end', 'end')])] };
     expect(rowsOf(profile({ allowedFlowNodeTypes: [] }), stack)).toEqual([]);
+  });
+
+  /** One flow holding both ADR-0031 containers that FlowNodeAction does not name, each with a node inside. */
+  const CONTAINERS = {
+    manifest: STACK.manifest,
+    flows: [flow('rp_blocks', [
+      node('start', 'start'),
+      node('fan', PARALLEL_NODE_TYPE, { config: { branches: [{ nodes: [node('send', 'notify')], edges: [] }] } }),
+      node('guard', TRY_CATCH_NODE_TYPE, {
+        config: { try: { nodes: [node('fetch', 'get_record')], edges: [] }, catch: { nodes: [node('warn', 'notify')], edges: [] } },
+      }),
+      node('end', 'end'),
+    ])],
+  };
+
+  it('parallel / try_catch are always allowed — by an empty list AND under allowCode: false — while their nodes are judged', () => {
+    expect(FLOW_BUILTIN_NODE_TYPES).not.toContain(PARALLEL_NODE_TYPE);
+    expect(FLOW_BUILTIN_NODE_TYPES).not.toContain(TRY_CATCH_NODE_TYPE);
+    const rows = rowsOf(profile({ allowCode: false, allowedFlowNodeTypes: ['get_record'] }), CONTAINERS);
+    expect(rows.filter((r) => r.where.endsWith(`(${PARALLEL_NODE_TYPE})`) || r.where.endsWith(`(${TRY_CATCH_NODE_TYPE})`))).toEqual([]);
+    expect(rows.map(({ rule, path }) => ({ rule, path }))).toEqual([
+      { rule: 'allowedFlowNodeTypes', path: 'flows[0].nodes[1].config.branches[0].nodes[0]' },
+      { rule: 'allowedFlowNodeTypes', path: 'flows[0].nodes[2].config.catch.nodes[0]' },
+    ]);
+    expect(rowsOf(profile({ allowCode: false, allowedFlowNodeTypes: ['get_record', 'notify'] }), CONTAINERS)).toEqual([]);
+  });
+
+  it('loop is a FlowNodeAction id, so allowedFlowNodeTypes judges it — it is not a structural container', () => {
+    expect(FLOW_BUILTIN_NODE_TYPES).toContain(LOOP_NODE_TYPE);
+    const stack = {
+      manifest: STACK.manifest,
+      flows: [flow('rp_each', [
+        node('start', 'start'),
+        node('each', LOOP_NODE_TYPE, { config: { body: { nodes: [node('send', 'notify')], edges: [] } } }),
+        node('end', 'end'),
+      ])],
+    };
+    expect(rowsOf(profile({ allowedFlowNodeTypes: ['notify'] }), stack)).toEqual([
+      { rule: 'allowedFlowNodeTypes', where: "flow 'rp_each' › node 'each' (loop)", path: 'flows[0].nodes[1]' },
+    ]);
   });
 
   it('a type outside FlowNodeAction is governed by allowCode: refused naming allowCode when it is false', () => {

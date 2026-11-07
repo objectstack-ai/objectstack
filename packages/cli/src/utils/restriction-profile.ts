@@ -41,7 +41,13 @@
  *
  *  1. `start` / `end` (`FLOW_STRUCTURAL_NODE_TYPES`) are always allowed: the
  *     engine handles them without an executor, and a profile that had to list
- *     them to allow any flow at all would be a trap.
+ *     them to allow any flow at all would be a trap. So are the ADR-0031
+ *     containers `parallel` and `try_catch` ({@link FLOW_CONTAINER_NODE_TYPES}):
+ *     engine built-ins that are not `FlowNodeAction` ids, so no profile could
+ *     name them, and reader rule 2 would otherwise refuse them as code. A
+ *     container only holds regions; every node inside it is still judged.
+ *     (`loop`, the third container, IS a `FlowNodeAction` id, so
+ *     `allowedFlowNodeTypes` judges it like any built-in.)
  *  2. A node type outside the spec's built-in registry (`FlowNodeAction` /
  *     `FLOW_BUILTIN_NODE_TYPES`) cannot be named by `allowedFlowNodeTypes`, so
  *     it is governed by `allowCode`, and its refusal names that rule.
@@ -57,6 +63,8 @@ import { isAbsolute, join, resolve } from 'node:path';
 import {
   FLOW_BUILTIN_NODE_TYPES,
   FLOW_STRUCTURAL_NODE_TYPES,
+  PARALLEL_NODE_TYPE,
+  TRY_CATCH_NODE_TYPE,
   collectFlowGraphs,
   type FlowNodeParsed,
 } from '@objectstack/spec/automation';
@@ -147,6 +155,14 @@ export function loadRestrictionProfile(
   }
   return { profile: parsed.data, file };
 }
+
+/**
+ * Reader rule 1, second half: the ADR-0031 containers the engine ships that
+ * `FlowNodeAction` does not name, read off the spec's own type-id constants.
+ * Structural like `start` / `end`: always allowed, while the nodes in their
+ * regions are judged (`collectFlowGraphs` walks into every region).
+ */
+const FLOW_CONTAINER_NODE_TYPES: readonly string[] = [PARALLEL_NODE_TYPE, TRY_CATCH_NODE_TYPE];
 
 /** The non-collection keys the spec classifies as code. */
 const CODE_KEYS: readonly string[] = Object.entries(UNMANAGED_INSTALL_KEY_DISPOSITIONS)
@@ -288,8 +304,8 @@ function judgeNodeType(
   allowCode: boolean,
   allowed: ReadonlySet<string>,
 ): { rule: RestrictionRule; message: string } | undefined {
-  // Reader rule 1: structural types are always allowed.
-  if (FLOW_STRUCTURAL_NODE_TYPES.includes(type)) return undefined;
+  // Reader rule 1: structural types and the ADR-0031 containers are always allowed.
+  if (FLOW_STRUCTURAL_NODE_TYPES.includes(type) || FLOW_CONTAINER_NODE_TYPES.includes(type)) return undefined;
   // Reader rule 3: a `script` node calls code; under `allowCode: false` that rule alone refuses it.
   if (type === 'script' && !allowCode) {
     return {
