@@ -159,7 +159,7 @@ import { parseBooleanParam } from '../query-param.js';
 import { setPackageDisabled } from '../package-state-store.js';
 // [#30962] The host seam for the same state: a store a host registers as the
 // `package-state-store` service replaces the file at every door below.
-import { asPackageStateStore, PACKAGE_STATE_STORE_SERVICE } from '../package-state-host-store.js';
+import { asPackageStateStore, PACKAGE_STATE_STORE_SERVICE, PACKAGE_STATE_UNINSTALL_CLEANUP } from '../package-state-host-store.js';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.js';
 import { readDispatchedBody } from '../deferred-request-body.js';
@@ -413,7 +413,8 @@ function requireManageMetadata(deps: DomainHandlerDeps, context: HttpProtocolCon
  * doors, so attribution cannot drift from authorization. [#28414] Every
  * package door that stamps history or a commit reads it: `publish-drafts`
  * (and its app re-save), `discard-drafts`, `commits/:commitId/revert`,
- * `rollback`, `adopt-orphans` and `duplicate`. A body `actor` is ignored, not
+ * `rollback`, `adopt-orphans` and `duplicate`, and [#31023] the package
+ * `DELETE`, whose verb credits each metadata delete. A body `actor` is ignored, not
  * refused, so a client still sending one keeps working and is recorded as
  * itself. No caller acts on behalf of another identity through these doors
  * (measured: the console and the SDK send none, the CLI calls none); one that
@@ -3791,12 +3792,21 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             //
             // [#20492] `protocol` is the one resolved above, before the registry
             // was touched.
+            //
+            // [#31023, ADR-0146 D1] The actor is the request's authenticated
+            // user, resolved as every sibling package write door resolves it
+            // (`resolvePackageWriteActor`), so each metadata delete the verb
+            // performs is credited to that user in `sys_audit_log` and
+            // `sys_metadata_history`. A caller with no user id sends no
+            // `actor`, and the deletes stay unattributed, as before.
             if (protocol && typeof protocol.deletePackage === 'function') {
                 try {
                     const keepData = query?.keepData === 'true' || query?.keepData === '1';
+                    const actor = resolvePackageWriteActor(_context);
                     persisted = await protocol.deletePackage({
                         packageId: id,
                         ...(keepData ? { keepData: true } : {}),
+                        ...(actor ? { actor } : {}),
                     });
                 } catch (e: any) {
                     // [#21276] Nothing was touched on this path: the registry
@@ -3859,7 +3869,19 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             // Same best-effort try/catch as the install arm above: the
             // uninstall itself already happened, so a state-store failure must
             // not turn it into a 500.
-            if (persists ? existed : registryRemoved) {
+            //
+            // [#31023] The verb clears the record itself when the runtime's
+            // uninstall cleanup is registered on its protocol
+            // (`ensurePackageStateUninstallCleanup`, from `AppPlugin.start`),
+            // so every in-process caller of `deletePackage` gets the clear,
+            // not only this door; its outcome rides on `persisted.cleanups`.
+            // The verb runs its cleanups for every id it is asked to
+            // uninstall, so with it a 404 here clears a record naming an id
+            // that is neither installed nor stored. This door writes the
+            // record only when the verb did not: a host with no persisted
+            // half, or a protocol on a kernel that registered no such cleanup.
+            const verbClearedState = persisted?.cleanups?.some((c) => c?.name === PACKAGE_STATE_UNINSTALL_CLEANUP) === true;
+            if (!verbClearedState && (persists ? existed : registryRemoved)) {
                 try {
                     await writePackageStateAfterChange(deps, _context, id, false);
                 } catch (err) {
