@@ -524,7 +524,7 @@ spelling moves: the copy-once import, full editability, no upgrade channel and t
   it is how a customer takes an app and makes it theirs wholesale — Salesforce's unmanaged package.
 
 > **Note (2026-11-07, #30794) — the copy may take a namespace of its own (Q3 on #15213, extended).**
-> Q3 (stage-0 ACCEPT, record `6108175106`) put the copied rows in a NEW writable base that keeps the
+> Q3 (a seat answer in the #15213 stage-0 ACCEPT, record `6108175106`; not this record's §6 Q3) put the copied rows in a NEW writable base that keeps the
 > source namespace. The base is still new, and the copy still never lands in an existing base: Q3's
 > reason, an existing base's namespace broken on export, is untouched. The namespace is now kept
 > *unless* the install names a `targetNamespace`
@@ -533,7 +533,7 @@ spelling moves: the copy-once import, full editability, no upgrade channel and t
 > The provenance recorded for information only gains the source namespace beside the package id and
 > version.
 >
-> Q6 (same record: a later managed install of the same package is refused at the door, before any
+> Q6 (the same record's, not this record's §6 Q6: a later managed install of the same package is refused at the door, before any
 > write, on both install branches, naming the copy base) **does not apply to a renamed copy**, by the
 > maintainer's ruling **B** of 2026-11-07 (record `6709037798` on #30794, 「B 不拒绝（推荐）」): a renamed
 > copy does not hold the source namespace, so a later managed install of the same source package is not

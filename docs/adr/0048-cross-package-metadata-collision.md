@@ -297,7 +297,7 @@ as future work, not part of this decision.
 > An unmanaged install ([ADR-0131](./0131-total-organization-ownership-no-null-organization-id.md) D6)
 > may name a `targetNamespace`. The copy's new base takes it as its `namespace`. Every copied object
 > name takes it in place of the package's, and a name that lacks the package's prefix takes it in front.
-> Every reference to a renamed name follows. That is the deep rewrite this section describes, done by
+> Every reference the engine reads follows (the first bullet below says where). That is the deep rewrite this section describes, done by
 > the one engine `duplicatePackage` already applies (ADR-0070 D4): `planNamespaceRename`,
 > `packages/metadata-protocol/src/package-namespace-rename.ts`. Both doors call it, so the two renames
 > cannot drift. The doors share the rename and nothing more: only the duplicate rebinds a permission
