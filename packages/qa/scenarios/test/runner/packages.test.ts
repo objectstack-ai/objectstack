@@ -32,6 +32,8 @@ import {
 import { scaffold } from '../../src/runner/project.js';
 
 const VERSION = '0.0.0-scenario-workspace-test';
+/** The pnpm this checkout runs (its root's pin). The temp workspace declares it as the real root does, so Corepack resolves it there too. */
+const PACKAGE_MANAGER = `pnpm@${execFileSync('pnpm', ['--version'], { cwd: import.meta.dirname, encoding: 'utf8' }).trim()}`;
 const MARKER = 'WORKSPACE-ONLY-SKILL-MARKER-7f3c';
 
 /** The stand-in scaffolder, in the real one's order: files, `pnpm install`, then the skills sync's copy of the installed catalog. */
@@ -57,7 +59,7 @@ function writeJson(file: string, value: unknown) {
 
 /** A git-committed pnpm workspace: the skills catalog, the scaffolder, and a private package the release never publishes. */
 function makeWorkspace(root: string) {
-  writeJson(join(root, 'package.json'), { name: 'scenario-workspace-test', private: true });
+  writeJson(join(root, 'package.json'), { name: 'scenario-workspace-test', private: true, packageManager: PACKAGE_MANAGER });
   writeFileSync(join(root, 'pnpm-workspace.yaml'), 'packages:\n  - packages/*\n');
   const skills = join(root, 'packages', 'skills');
   writeJson(join(skills, 'package.json'), { name: '@objectstack/skills', version: VERSION, files: ['dist'] });
@@ -93,7 +95,7 @@ describe('--packages workspace — the project installs the workspace build, the
     });
     mkdirSync(join(root, 'work'));
     const done = await scaffold(join(root, 'work'), 'demoapp', workspaceScaffolder(ws));
-    expect([done.result.exit, done.result.tail.slice(-400)]).toEqual([0, expect.any(String)]);
+    expect(done.result.exit, done.result.tail).toBe(0);
     project = done.dir;
     settled = await settleWorkspaceProject(project, ws);
   }, 120_000);
@@ -107,9 +109,15 @@ describe('--packages workspace — the project installs the workspace build, the
   });
 
   it('a marker present only in the workspace build is in .claude/skills/', () => {
-    expect([settled.exit, settled.tail.slice(-400)]).toEqual([0, expect.any(String)]);
+    expect(settled.exit, settled.tail).toBe(0);
     expect(readFileSync(join(project, PROJECT_SKILLS_DIR, 'objectstack-marker', 'SKILL.md'), 'utf8')).toContain(MARKER);
     expect(verifyWorkspaceInstall(project, ws)).toEqual([]);
+  });
+
+  it("every install ran the workspace's pinned pnpm, not whichever one the project's directory resolves", () => {
+    // The project pins no `packageManager`, so outside the checkout Corepack resolves the registry's latest, which
+    // read none of `npm_config_*` (pnpm 12 on 2026-11-07): the pnpmfile went unread and the install asked npm.
+    expect(readFileSync(join(project, 'node_modules', '.modules.yaml'), 'utf8')).toMatch(new RegExp(`"?packageManager"?: "?${PACKAGE_MANAGER.replace(/\./g, '\\.')}"?[,\\n]`));
   });
 
   it('from the tarball, as npm would serve it: no workspace link, no file outside `files`', () => {

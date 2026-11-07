@@ -27,7 +27,12 @@
  *      every `workspace:` range rewritten to the version. A link would let the
  *      project see files the package never ships.
  *   3. Scaffold with that `create-objectstack` tarball (`npx -y file:<tarball>`),
- *      untouched: its own install, its own skills sync, its own summary. Its
+ *      untouched: its own install, its own skills sync, its own summary. Every
+ *      `pnpm` it and step 4 run is the workspace's own (`pinnedPnpm`): the
+ *      project sits outside the checkout and pins no `packageManager`, so
+ *      Corepack would otherwise resolve the registry's `latest` there — pnpm 12
+ *      on 2026-11-07, which reads no `npm_config_*`, so the pnpmfile below went
+ *      unread and the install asked npm for an unreleased version. Its
  *      `pnpm install` is pointed at the tarballs by a global pnpmfile
  *      (`npm_config_global_pnpmfile`, the one pnpm 10 reads from the
  *      environment; `pnpm_config_*` is not read) whose `readPackage` hook
@@ -48,7 +53,7 @@
 
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs';
-import { join, relative } from 'node:path';
+import { delimiter, join, relative } from 'node:path';
 
 import { runCommand, type CommandResult } from './project.js';
 
@@ -173,6 +178,8 @@ export interface WorkspacePackages {
   tarballs: Map<string, string>;
   /** The global pnpmfile the scaffolder's install runs under. */
   pnpmfile: string;
+  /** A `PATH` led by `pinnedPnpm`'s shim: every `pnpm` of the project's scaffold and settle runs under it. */
+  env: { PATH: string };
   /** The workspace build of the skills catalog, which `.claude/skills/` must equal. */
   skillsCatalog: string;
 }
@@ -228,8 +235,41 @@ export async function prepareWorkspacePackages(repo: string, dest: string, opts:
 
   const pnpmfile = join(dest, 'workspace-packages.pnpmfile.cjs');
   writeFileSync(pnpmfile, pnpmfileSource(ordered));
+  const bin = await pinnedPnpm(repo, join(dest, 'bin'), run);
+  const env = { PATH: `${bin}${delimiter}${process.env.PATH ?? ''}` };
   const skillsDir = packages.find((p) => p.name === SKILLS_PACKAGE)!.dir;
-  return { source, tarballs: ordered, pnpmfile, skillsCatalog: join(skillsDir, SKILLS_CATALOG_DIR) };
+  return { source, tarballs: ordered, pnpmfile, env, skillsCatalog: join(skillsDir, SKILLS_CATALOG_DIR) };
+}
+
+/** The first executable `name` on `path`. */
+function onPath(name: string, path = process.env.PATH ?? ''): string | undefined {
+  for (const dir of path.split(delimiter)) {
+    const file = dir && join(dir, name);
+    if (file && existsSync(file) && statSync(file).isFile()) return file;
+  }
+  return undefined;
+}
+
+const shellQuote = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
+
+/**
+ * A directory whose `pnpm` is the workspace's own, wherever it is called from:
+ * it runs the `pnpm` on `PATH` from inside `repo` — where Corepack, or pnpm's
+ * own version management, resolves the root's `packageManager` pin — and points
+ * it at the caller's directory with `--dir`. Refused unless it answers the
+ * version `repo` itself does.
+ */
+export async function pinnedPnpm(repo: string, binDir: string, run: typeof runCommand = runCommand): Promise<string> {
+  const real = onPath('pnpm');
+  if (!real) throw new WorkspacePackagesError('no `pnpm` on PATH');
+  mkdirSync(binDir, { recursive: true });
+  const shim = join(binDir, 'pnpm');
+  writeFileSync(shim, `#!/bin/sh\nhere="$(pwd)"\ncd ${shellQuote(repo)} || exit 1\nexec ${shellQuote(real)} --dir "$here" "$@"\n`, { mode: 0o755 });
+  const [want, got] = await Promise.all([run('pnpm', ['--version'], repo), run(shim, ['--version'], binDir)]);
+  if (want.exit !== 0 || got.exit !== 0 || want.tail.trim() !== got.tail.trim()) {
+    throw new WorkspacePackagesError(`the pinned pnpm answers ${JSON.stringify(got.tail.trim())} where ${repo} answers ${JSON.stringify(want.tail.trim())}`);
+  }
+  return binDir;
 }
 
 /** Step 3's command and environment: the packed scaffolder, its install pointed at the tarballs. */
@@ -239,7 +279,7 @@ export function workspaceScaffolder(ws: WorkspacePackages): { createCommand: str
     // npx hands that to its child as `npm_config_package`, and the scaffolder's own `npx -y skills@…` then runs
     // `skills@…` as a bin of the scaffolder's tarball ("not found"), so no skill is installed.
     createCommand: ['npx', '-y', `file:${ws.tarballs.get(SCAFFOLDER_PACKAGE)!}`],
-    env: { npm_config_global_pnpmfile: ws.pnpmfile },
+    env: { ...ws.env, npm_config_global_pnpmfile: ws.pnpmfile },
   };
 }
 
@@ -316,7 +356,8 @@ export async function settleWorkspaceProject(projectDir: string, ws: WorkspacePa
   if (/^overrides\s*:/m.test(before)) return refuse(`${yamlFile} already declares \`overrides\`: the workspace tarballs cannot be added to it without rewriting the scaffold's own`);
   writeFileSync(yamlFile, `${before}${before === '' || before.endsWith('\n') ? '' : '\n'}${overridesBlock(ws.tarballs)}`);
   // The lockfile was written under the pnpmfile, and the overrides change it: never a frozen install (pnpm's default under `CI`).
-  const installed = await run('pnpm', ['install', '--no-frozen-lockfile'], projectDir);
+  // Without the pnpmfile, so the lockfile stops recording it and a later install, which runs without one, keeps it.
+  const installed = await run('pnpm', ['install', '--no-frozen-lockfile'], projectDir, undefined, ws.env);
   if (installed.exit !== 0) return installed;
   const problems = verifyWorkspaceInstall(projectDir, ws);
   if (problems.length) return refuse(`the project is not on the workspace packages:\n${problems.map((p) => `- ${p}`).join('\n')}`);
