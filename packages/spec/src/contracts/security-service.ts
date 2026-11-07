@@ -1098,7 +1098,9 @@ export interface ISecurityService {
    * record's owner (its stored `owner_id` is the caller's own `userId`), not on
    * behalf of another user, that does not empty an optional master, needs only
    * READ access to the master the record names, asked of the read door under
-   * the caller's own context, and walks no chain. Every other caller, and every
+   * the caller's own context, and walks no chain for that master; a body that
+   * re-points the row under another master still asks EDIT on that master, as
+   * every body naming a new master does. Every other caller, and every
    * insert, delete, predicate update and on-behalf-of write, keeps the edit
    * rule. The leg is part of the check, so such an owner who can read the
    * master gets `allow` here as on the update. This member exposes that check
