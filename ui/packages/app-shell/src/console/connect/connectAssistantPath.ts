@@ -23,15 +23,18 @@ export const CONNECT_ASSISTANT_PAGE = 'connect_agent';
  */
 export function navCarriesPage(items: unknown, pageName: string): boolean {
   if (!Array.isArray(items)) return false;
-  return items.some((item: any) =>
+  return items.some((item: { type?: unknown; pageName?: unknown; children?: unknown } | null | undefined) =>
     (item?.type === 'page' && item?.pageName === pageName)
     || navCarriesPage(item?.children, pageName));
 }
 
+type ServedApp = { name?: unknown; navigation?: unknown } & Record<string, unknown>;
+
 /** The Console path of Connect an AI Assistant, or `undefined` while the served Account app does not carry it. */
-export function connectAssistantPath(apps: readonly any[] | null | undefined): string | undefined {
-  const accountApp = (apps || []).find((a: any) => a?.name === 'account');
-  return accountApp && navCarriesPage((accountApp as any).navigation, CONNECT_ASSISTANT_PAGE)
-    ? `/apps/${appAddressSegment(apps, accountApp)}/page/${CONNECT_ASSISTANT_PAGE}`
+export function connectAssistantPath<T extends object>(apps: readonly T[] | null | undefined): string | undefined {
+  const served = (apps ?? []) as unknown as readonly ServedApp[];
+  const accountApp = served.find((a) => a?.name === 'account');
+  return accountApp && navCarriesPage(accountApp.navigation, CONNECT_ASSISTANT_PAGE)
+    ? `/apps/${appAddressSegment(served, accountApp)}/page/${CONNECT_ASSISTANT_PAGE}`
     : undefined;
 }
