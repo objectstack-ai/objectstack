@@ -654,6 +654,14 @@ describe('[ADR-0106 D1] a standalone or object-less action entry is served as th
     interface Wire { status: number; body: any; headers: Record<string, string> }
     const wireText = (w: Wire) => JSON.stringify(w);
 
+    /** A code/package store answering `/published` with each standalone fixture as declared, and nothing for any other name. */
+    const publishedStore = {
+        getPublished: async (type: string, name: string) => {
+            const found = type === 'action' ? STANDALONE.find((a) => a.name === name) : undefined;
+            return found ? structuredClone(found) : undefined;
+        },
+    };
+
     /** `RestServer`'s registered `/meta` handlers, under `persona`; `cached: false` is a deployment with the published-value cache off. */
     function restDoor(persona: Persona, opts: { cached: boolean; secured?: boolean }) {
         const noop = () => {};
@@ -663,8 +671,11 @@ describe('[ADR-0106 D1] a standalone or object-less action entry is served as th
         } as any);
         rest.resolveExecCtx = async () => JSON.parse(JSON.stringify(persona));
         rest.securityServiceProvider = async () => (opts.secured === false ? undefined : services.security);
+        rest.metadataServiceProvider = async () => publishedStore;
         rest.registerRoutes();
-        const read = async (routePath: string, params: Record<string, string>, headers: Record<string, string> = {}): Promise<Wire> => {
+        const read = async (
+            routePath: string, params: Record<string, string>, headers: Record<string, string> = {}, query: Record<string, string> = {},
+        ): Promise<Wire> => {
             const route = rest.getRoutes().find((r: any) => r.method === 'GET' && r.path === routePath);
             if (!route) throw new Error(`GET ${routePath} is not registered`);
             const res: any = { statusCode: 200, body: undefined, headers: {} as Record<string, string> };
@@ -675,25 +686,37 @@ describe('[ADR-0106 D1] a standalone or object-less action entry is served as th
             res.header = (k: string, v: string) => { res.headers[k] = v; return res; };
             res.setHeader = () => {};
             const path = `${META}/${params.type}${params.name ? `/${params.name}` : ''}`;
-            await route.handler({ method: 'GET', path, params, query: {}, body: {}, headers }, res);
+            await route.handler({ method: 'GET', path, params, query, body: {}, headers }, res);
             return { status: res.statusCode, body: res.body, headers: res.headers };
         };
         return {
             list: () => read(`${META}/:type`, { type: 'action' }),
             item: (name: string, headers?: Record<string, string>) => read(`${META}/:type/:name`, { type: 'action', name }, headers),
+            layers: (name: string) => read(`${META}/:type/:name/layers`, { type: 'action', name }),
+            legacyLayers: (name: string) => read(`${META}/:type/:name`, { type: 'action', name }, {}, { layers: 'true' }),
+            published: (name: string) => read(`${META}/:type/:name/published`, { type: 'action', name }),
         };
     }
 
     /** The runtime dispatcher's `/meta` door, under `persona`. */
     function dispatcherDoor(persona: Persona, opts: { secured?: boolean } = {}) {
-        const dispatcher = new HttpDispatcher(kernelOver({ ...services, ...(opts.secured === false ? { security: undefined } : {}) }), undefined, { enforceProjectMembership: false });
-        const read = async (path: string): Promise<Wire> => {
-            const answer = await dispatcher.handleMetadata(path, {
+        const deployment = { ...services, ...(opts.secured === false ? { security: undefined } : {}) };
+        const dispatcher = new HttpDispatcher(kernelOver(deployment), undefined, { enforceProjectMembership: false });
+        // `/published` over the code/package store; the other doors read no metadata service.
+        const publishing = new HttpDispatcher(kernelOver({ ...deployment, metadata: publishedStore }), undefined, { enforceProjectMembership: false });
+        const read = async (path: string, query?: Record<string, string>, via: HttpDispatcher = dispatcher): Promise<Wire> => {
+            const answer = await via.handleMetadata(path, {
                 request: {}, environmentId: undefined, executionContext: JSON.parse(JSON.stringify(persona)),
-            } as any, 'GET');
+            } as any, 'GET', undefined, query);
             return { status: answer.response?.status ?? 0, body: answer.response?.body, headers: (answer.response as any)?.headers ?? {} };
         };
-        return { list: () => read('/action'), item: (name: string) => read(`/action/${name}`) };
+        return {
+            list: () => read('/action'),
+            item: (name: string) => read(`/action/${name}`),
+            layers: (name: string) => read(`/action/${name}/layers`),
+            legacyLayers: (name: string) => read(`/action/${name}`, { layers: 'true' }),
+            published: (name: string) => read(`/action/${name}/published`, undefined, publishing),
+        };
     }
 
     const listedNames = (w: Wire): string[] => {
@@ -734,6 +757,27 @@ describe('[ADR-0106 D1] a standalone or object-less action entry is served as th
             }
         });
 
+        for (const sub of ['layers', 'legacyLayers', 'published'] as const) {
+            it(`${door}: the ${sub} read of a withheld action answers the member as for an unknown name; the staff is served it whole`, async () => {
+                const member = open(PERSONAS.member);
+                const unknown = await member[sub]('no_such_action');
+                expect(unknown.status, 'precondition: an unknown name is a 404').toBe(404);
+                for (const name of WITHHELD) {
+                    // The deprecated spelling's `Link` names the requested path, whatever the answer.
+                    expect(wireText(await member[sub](name)), `${name} answers as an absent name`)
+                        .toBe(wireText(unknown).split('no_such_action').join(name));
+                }
+                const staff = await open(PERSONAS.staff)[sub](ST_BUDGET.name);
+                expect(staff.status).toBe(200);
+                expect(wireText(staff)).toContain('Budget param label');
+                for (const name of [ST_RENAME.name, ST_PING.name, GL_VENDOR_BUDGET.name]) {
+                    const served = await member[sub](name);
+                    expect(served.status, `CONTROL ${name}`).toBe(200);
+                    expect(wireText(served), `CONTROL ${name}`).toBe(wireText(await open(PERSONAS.staff)[sub](name)));
+                }
+            });
+        }
+
         it(`${door}: CONTROL — a field-bound action the member can read, and one binding no field, are served to the member as to the staff`, async () => {
             for (const name of [ST_RENAME.name, ST_PING.name, GL_VENDOR_BUDGET.name]) {
                 const member = await open(PERSONAS.member).item(name);
@@ -743,15 +787,19 @@ describe('[ADR-0106 D1] a standalone or object-less action entry is served as th
         });
 
         it(`${door}: CONTROL — an exempt author and the system context are answered byte-identical to a deployment with no security service`, async () => {
-            const unsecured = door === 'dispatcher'
-                ? dispatcherDoor(PERSONAS.staff, { secured: false })
-                : restDoor(PERSONAS.staff, { cached: door === 'REST, cached arm', secured: false });
-            const baseList = wireText(await unsecured.list());
+            // The same caller with no security service: the draft-read admission
+            // (a `draft` key on the layered read) is the caller's, not the mask's.
+            const unsecuredFor = (persona: Persona) => (door === 'dispatcher'
+                ? dispatcherDoor(persona, { secured: false })
+                : restDoor(persona, { cached: door === 'REST, cached arm', secured: false }));
             for (const persona of [PERSONAS.author, PERSONAS.system]) {
                 const exempt = open(persona);
-                expect(wireText(await exempt.list()), persona.userId).toBe(baseList);
+                const unsecured = unsecuredFor(persona);
+                expect(wireText(await exempt.list()), persona.userId).toBe(wireText(await unsecured.list()));
                 for (const name of ALL_NAMES) {
-                    expect(wireText(await exempt.item(name)), `${persona.userId} ${name}`).toBe(wireText(await unsecured.item(name)));
+                    for (const sub of ['item', 'layers', 'legacyLayers', 'published'] as const) {
+                        expect(wireText(await exempt[sub](name)), `${persona.userId} ${sub} ${name}`).toBe(wireText(await unsecured[sub](name)));
+                    }
                 }
             }
         });

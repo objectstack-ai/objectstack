@@ -4733,6 +4733,12 @@ export type MetaLayeredAnswer =
  *  3. [ADR-0106 D5(4)] The mask on every layer — each is a full object schema —
  *     through {@link projectMetaObjectSchema} under the posture resolved before
  *     the read, and the `private, no-store` an undetermined posture owes.
+ *  3a. [ADR-0106 D1] `action` — every present layer as the object door's
+ *     projection serves it to this caller ({@link projectMetaActionForCaller},
+ *     over {@link MetaItemAnswerSources.resolveObjectMasker}; a layer that
+ *     names no `objectName` is judged on the one another layer names). Any
+ *     layer withheld answers the read `absent`, as step 1 answers a name with
+ *     nothing behind it.
  *
  * [#29814] `draft` — the pending draft row as stored
  * (`GetMetaItemLayeredResponseSchema.draft`) — is a layer like the other three
@@ -4751,7 +4757,7 @@ export type MetaLayeredAnswer =
  * answers that fault, ⛔ never a layered view with a layer missing.
  */
 export function createMetaLayeredAnswer(
-    sources: MetaItemReadGateSources,
+    sources: MetaItemReadGateSources & Pick<MetaItemAnswerSources, 'resolveObjectMasker'>,
     request: MetaLayeredRequest,
 ): (layered: unknown) => Promise<MetaLayeredAnswer> {
     const { metaType, name, packageId, member, maskPosture } = request;
@@ -4807,6 +4813,24 @@ export function createMetaLayeredAnswer(
             if (!masked.ok) return { kind: 'mask-fault', object: name };
             cacheControl ??= masked.cacheControl;
             if (masked.document !== document) served.set(layer, masked.document);
+        }
+
+        // 3a. [ADR-0106 D1] `action` — every present layer as the object door's
+        //     projection serves it to this caller; any layer withheld answers
+        //     the whole read `absent`, the answer step 1 gives a name with
+        //     nothing behind it, ⛔ never a layered view with a layer missing.
+        if (metaType === 'action') {
+            const actionSources = metaActionProjectionSources(sources, await sources.resolveObjectMasker());
+            const layerOwner = present.map((layer) => metaActionOwnerName(served.get(layer))).find((owner) => owner !== undefined);
+            for (const layer of present) {
+                const document = served.get(layer);
+                const projected = await projectMetaActionForCaller(
+                    actionSources, document, metaActionOwnerName(document) ?? layerOwner,
+                );
+                if (projected.kind === 'withhold') return { kind: 'refuse', refusal: { reason: 'absent' } };
+                if (projected.kind === 'fault') return { kind: 'mask-fault', object: projected.object };
+                cacheControl ??= projected.cacheControl;
+            }
         }
 
         let answer: unknown = raw;
