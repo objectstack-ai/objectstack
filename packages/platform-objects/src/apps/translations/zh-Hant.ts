@@ -95,6 +95,7 @@ export const zhHant: TranslationData = {
         nav_settings_sms: { label: '簡訊投遞' },
         nav_settings_branding: { label: '品牌' },
         nav_settings_auth: { label: '驗證' },
+        nav_settings_access_policy: { label: '存取原則' },
         nav_settings_storage: { label: '檔案儲存' },
         nav_settings_ai: { label: 'AI 與 Embedder' },
         nav_settings_knowledge: { label: '知識庫' },

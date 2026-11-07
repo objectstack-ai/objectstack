@@ -59,7 +59,7 @@ function makeEngine() {
 const SIBLINGS: Record<string, SettingEntry> = {
   password_min_length: { value: 12, source: 'global' }, // password policy — same emailAndPassword block
   password_require_complexity: { value: true, source: 'global' },
-  mfa_required: { value: true, source: 'global' }, // MFA (with its twoFactor plugin)
+  mfa_required: { value: 'everyone', source: 'global' }, // MFA (with its twoFactor plugin)
   rate_limit_max: { value: 5, source: 'global' }, // rate limits
   session_expiry_days: { value: 3, source: 'global' }, // session lifetime
   google_enabled: { value: true, source: 'global' }, // social providers
@@ -166,7 +166,7 @@ describe('auth settings pass — a refused key does not take its siblings with i
     expect(cfg.session?.expiresIn).toBe(sessionDays * 86_400);
     expect(cfg.emailAndPassword?.minPasswordLength).toBe(12);
     expect(cfg.passwordRequireComplexity).toBe(true);
-    expect(cfg.mfaRequired).toBe(true);
+    expect(cfg.mfaRequirement).toBe('everyone');
     expect(cfg.plugins?.twoFactor).toBe(true);
     expect(cfg.rateLimit?.max).toBe(5);
     expect(cfg.socialProviders?.google?.clientId).toBe('google-settings-client-id');
@@ -258,7 +258,7 @@ describe('auth settings pass — a refused key does not take its siblings with i
 
     await saveAndReapply({
       password_reject_breached: { value: true, source: 'global' },
-      mfa_required: { value: true, source: 'global' },
+      mfa_required: { value: 'everyone', source: 'global' },
       session_expiry_days: { value: 7, source: 'global' },
       password_min_length: { value: 12, source: 'global' },
       rate_limit_max: { value: 5, source: 'global' },
@@ -272,7 +272,7 @@ describe('auth settings pass — a refused key does not take its siblings with i
     // the twoFactor plugin that lets a gated user enroll.
     expect(cfg.plugins?.passwordRejectBreached).toBeUndefined();
     expect(cfg.plugins?.twoFactor).toBeUndefined();
-    expect(cfg.mfaRequired).toBeUndefined();
+    expect(cfg.mfaRequirement).toBeUndefined();
 
     const refused = refusalLines();
     expect(refused).toHaveLength(2);

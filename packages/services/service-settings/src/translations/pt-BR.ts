@@ -340,6 +340,7 @@ export const ptBR: PlatformTranslationData = {
         },
         mfa_required: {
           label: 'Exigir autenticação multifator',
+          options: { off: 'Desativado', administrators: 'Administradores', everyone: 'Todos' },
           help: 'Usuários sem um autenticador cadastrado perdem o acesso aos dados quando o período de carência termina. Ativar isto também liga o recurso de dois fatores para que os usuários possam se cadastrar.',
         },
         mfa_grace_period_days: {
@@ -400,6 +401,26 @@ export const ptBR: PlatformTranslationData = {
         },
       },
     },
+    access_policy: {
+      title: 'Política de acesso',
+      description: 'As restrições de login desta organização. As configurações de autenticação da implantação sempre se aplicam; estas só podem acrescentar restrições.',
+      groups: {
+        network: { title: 'Rede', description: 'De onde os membros desta organização podem fazer login.' },
+        sessions: { title: 'Sessões', description: 'Por quanto tempo a sessão de um membro permanece válida. Cada limite só pode ser menor que o da implantação.' },
+        multi_factor: { title: 'Multifator', description: 'Quem nesta organização deve proteger a conta com um aplicativo autenticador (TOTP).' },
+      },
+      keys: {
+        allowed_ip_ranges: { label: 'Faixas de IP permitidas' },
+        session_idle_timeout_minutes: { label: 'Tempo limite de inatividade (minutos)' },
+        session_absolute_max_hours: { label: 'Duração máxima da sessão (horas)' },
+        max_concurrent_sessions_per_user: { label: 'Máximo de sessões simultâneas por usuário' },
+        mfa_required: {
+          label: 'Exigir autenticação multifator',
+          options: { off: 'Desativado', administrators: 'Administradores', everyone: 'Todos' },
+        },
+      },
+    },
+
     storage: {
       title: 'Armazenamento de arquivos',
       description: 'Back-end usado para anexos, exportações e uploads dos usuários.',

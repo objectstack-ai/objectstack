@@ -96,7 +96,8 @@ const CASES: ReadonlyArray<{ rule: string; blindTo: readonly AuthoringCommand[];
     blindTo: ['lint'],
     stack: withBaseline({
       // The planted defect is the BARE `lead_score` (a record-scoped predicate
-      // binds fields under `record`, so this silently evaluates to null) — not
+      // binds fields under `record`, so `lead_score` is an unknown variable and
+      // the rule, `error` by default, refuses every write it judges) — not
       // the key it is written under. Spelled `condition`, which is the only key
       // `validation.zod.ts` declares: `expression` is one of the four names it
       // rejects outright, so a fixture using it planted TWO defects and let the
