@@ -53,6 +53,11 @@ export interface TurnProcess {
   /** The runner's own timeout (`timeoutMs`) killed it with SIGTERM. */
   timedOut: boolean;
   timeoutMs: number;
+  /**
+   * The `--max-turns` the CLI was given: a turn that reaches it ends
+   * `error_max_turns`. Absent on a turn recorded before the runner kept it.
+   */
+  maxTurns?: number;
   /** The end of what the CLI wrote to stderr (at most 2,000 characters). */
   stderrTail?: string;
   /** The process could not be started or fed its prompt (`spawn ENOENT`, `write EPIPE`). */

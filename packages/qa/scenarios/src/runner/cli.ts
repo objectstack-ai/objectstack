@@ -13,6 +13,13 @@
  *   --author-timeout MIN the live driver's budget per authoring turn, build and
  *                        iterate alike (default 60); a turn it kills leaves its
  *                        Build half not measured
+ *   --author-max-turns N the live driver's turn cap per authoring turn, build
+ *                        and iterate alike, on every card (default by the card's
+ *                        tier: control 80, starter 300, delivery 600); a turn
+ *                        that reaches it (`error_max_turns`) leaves its Build
+ *                        half not measured
+ *   --ask-max-turns N    the live driver's turn cap per question or operation
+ *                        turn (default 12)
  *   --template F         a verified build (dist/objectstack.json) for template mode
  *   --no-iterate-run     skip the Run half after the iterate (scratch mode)
  *   --out DIR            where records go (default docs/qa/platform-checklist/runs, git-ignored)
@@ -59,6 +66,10 @@ export interface CliArgs {
   iterateRun: boolean;
   /** Minutes per authoring turn (`--author-timeout`); the driver's default when absent. */
   authorTimeoutMin?: number;
+  /** Turns per authoring turn on every card (`--author-max-turns`); the card tier's default when absent. */
+  authorMaxTurns?: number;
+  /** Turns per question or operation turn (`--ask-max-turns`); the driver's default when absent. */
+  askMaxTurns?: number;
   out?: string;
   work?: string;
   createVersion?: string;
@@ -72,6 +83,12 @@ export function parseArgs(argv: readonly string[]): CliArgs {
       const v = argv[++i];
       if (v === undefined) throw new Error(`${flag} needs a value`);
       return v;
+    };
+    const turns = () => {
+      const raw = val();
+      const n = Number(raw);
+      if (!Number.isInteger(n) || n <= 0) throw new Error(`${flag} takes a whole number of turns above 0, not \`${raw}\``);
+      return n;
     };
     if (flag === '--cards') a.cards = val();
     else if (flag === '--only') a.only = val().split(',');
@@ -89,6 +106,8 @@ export function parseArgs(argv: readonly string[]): CliArgs {
       if (!Number.isFinite(min) || min <= 0) throw new Error(`--author-timeout takes a number of minutes above 0, not \`${raw}\``);
       a.authorTimeoutMin = min;
     }
+    else if (flag === '--author-max-turns') a.authorMaxTurns = turns();
+    else if (flag === '--ask-max-turns') a.askMaxTurns = turns();
     else if (flag === '--out') a.out = val();
     else if (flag === '--work') a.work = val();
     else if (flag === '--create-version') a.createVersion = val();
@@ -97,10 +116,26 @@ export function parseArgs(argv: readonly string[]): CliArgs {
   return a;
 }
 
-export function makeDriver(spec: string, opts: { authorTimeoutMin?: number } = {}): AgentDriver {
-  if (spec === 'claude') return new ClaudeCodeDriver(opts.authorTimeoutMin !== undefined ? { authorTimeoutMs: opts.authorTimeoutMin * 60_000 } : {});
+/** The live driver's limits a run may set: `--author-timeout`, `--author-max-turns`, `--ask-max-turns`. */
+export type DriverLimits = Pick<CliArgs, 'authorTimeoutMin' | 'authorMaxTurns' | 'askMaxTurns'>;
+
+const LIMIT_FLAGS: ReadonlyArray<readonly [keyof DriverLimits, string]> = [
+  ['authorTimeoutMin', '--author-timeout'],
+  ['authorMaxTurns', '--author-max-turns'],
+  ['askMaxTurns', '--ask-max-turns'],
+];
+
+export function makeDriver(spec: string, opts: DriverLimits = {}): AgentDriver {
+  if (spec === 'claude') {
+    return new ClaudeCodeDriver({
+      ...(opts.authorTimeoutMin !== undefined ? { authorTimeoutMs: opts.authorTimeoutMin * 60_000 } : {}),
+      ...(opts.authorMaxTurns !== undefined ? { authorMaxTurns: opts.authorMaxTurns } : {}),
+      ...(opts.askMaxTurns !== undefined ? { askMaxTurns: opts.askMaxTurns } : {}),
+    });
+  }
   if (spec.startsWith('recorded:')) {
-    if (opts.authorTimeoutMin !== undefined) throw new Error('--author-timeout applies to the live driver only: a replay re-reads each turn as it was recorded');
+    const given = LIMIT_FLAGS.filter(([key]) => opts[key] !== undefined).map(([, flag]) => flag);
+    if (given.length) throw new Error(`${given.join(', ')} ${given.length === 1 ? 'applies' : 'apply'} to the live driver only: a replay re-reads each turn as it was recorded`);
     return RecordedDriver.fromFile(spec.slice('recorded:'.length));
   }
   throw new Error(`unknown driver \`${spec}\` (claude, recorded:FILE)`);
@@ -124,12 +159,14 @@ export async function main(argv: readonly string[]): Promise<number> {
     return 2;
   }
 
-  const live = makeDriver(args.driver, args.authorTimeoutMin !== undefined ? { authorTimeoutMin: args.authorTimeoutMin } : {});
+  const live = makeDriver(args.driver, args);
   const driver = args.record ? new RecordingDriver(live) : live;
   const info = driver.info();
   console.log(
     `driver: ${info.driver} ${info.version ?? ''} · login: ${info.authMethod ?? 'n/a'} · API-billed: no` +
-      (info.authorTimeoutMs !== undefined ? ` · author timeout: ${minutesText(info.authorTimeoutMs)}` : ''),
+      (info.authorTimeoutMs !== undefined ? ` · author timeout: ${minutesText(info.authorTimeoutMs)}` : '') +
+      (info.authorMaxTurns ? ` · author max turns: ${Object.entries(info.authorMaxTurns).map(([tier, n]) => `${tier} ${n}`).join(', ')}` : '') +
+      (info.askMaxTurns !== undefined ? ` · ask max turns: ${info.askMaxTurns}` : ''),
   );
 
   const ops: ProjectOps = {

@@ -97,6 +97,8 @@ pnpm --filter @objectstack/scenarios run-scenarios --only service_desk --modes s
 pnpm --filter @objectstack/scenarios run-scenarios --record /tmp/rec.json  # also save every turn
 pnpm --filter @objectstack/scenarios run-scenarios --driver recorded:/tmp/rec.json  # replay, no model
 pnpm --filter @objectstack/scenarios run-scenarios --author-timeout 90       # minutes per authoring turn (default 60)
+pnpm --filter @objectstack/scenarios run-scenarios --author-max-turns 400    # turns per authoring turn, every card (default by tier)
+pnpm --filter @objectstack/scenarios run-scenarios --ask-max-turns 20        # turns per question or operation turn (default 12)
 ```
 
 Per card and mode the runner writes `docs/qa/platform-checklist/runs/<date>-scenario-<card>.json`
@@ -110,14 +112,22 @@ Per card and mode the runner writes `docs/qa/platform-checklist/runs/<date>-scen
 - **Driver** (`driver.ts`): the local `claude` CLI on your own login (`claude -p --output-format stream-json`, the
   prompt written to its stdin: a build prompt carries the whole seed, and one argv string over 128 KiB makes `spawn`
   fail with `E2BIG` on Linux). It refuses to start when `ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN` is set or the CLI
-  is logged in with an API key (the cost ruling on cloud#3600), and the record states the driver, the login and the
-  authoring timeout. Every turn records its process: elapsed time, and for a turn that did not finish its exit code or
-  signal, whether the runner's timeout killed it, and the end of its stderr. `RecordedDriver` replays a recording.
+  is logged in with an API key (the cost ruling on cloud#3600), and the record states the driver, the login, the
+  authoring timeout and the turn caps. Every turn records its process: elapsed time, the turn cap it ran under
+  (`--max-turns`), and for a turn that did not finish its exit code or signal, whether the runner's timeout killed it,
+  and the end of its stderr. `RecordedDriver` replays a recording, and refuses the three live-driver limits below.
+- **Turn caps** (`driver.ts`): an authoring turn, build and iterate alike, may take `DEFAULT_AUTHOR_MAX_TURNS` by the
+  card's `tier` — `control` 80, `starter` 300, `delivery` 600 — unless `--author-max-turns N` sets one cap for every
+  card; a question or operation turn takes 12 unless `--ask-max-turns N` says otherwise. The cap guards a looping turn
+  and `--author-timeout` a slow one, whichever comes first: the `starter` builds measured ran 11–18 s a turn, so the
+  60-minute default holds 200–325 of them and both limits bind at about the same point. A `delivery` card's 600 turns
+  outlast that default; raise `--author-timeout` with it.
 - **A build that did not finish is not measured** (`orchestrate.ts`): an authoring turn the timeout killed
   (`--author-timeout`, build and iterate alike) leaves its Build half **not measured: author timed out after N min**;
   one that ended with no result line or an error result (`error_max_turns`, `is_error`), or never ran, leaves it **not
   measured: author turn failed: …**. Never a degraded score, and nothing runs on it: no score, seed, Run or iterate. The
-  scorecard's author rows show every authoring turn's `resultSubtype` and elapsed time.
+  scorecard's author rows show every authoring turn's `resultSubtype`, the turns it took of its cap
+  (`error_max_turns · 300/300 turns`) and its elapsed time.
 - **Seed** (`seed.ts`): rows go in as the admin, a lookup's target before its referrer. Where the card's declared
   lookups lead back to where they start — `department.manager → employee` with `employee.department → department`, or a
   self-lookup naming a later row — the seed loads in two passes: every row first with each lookup naming a row not in
