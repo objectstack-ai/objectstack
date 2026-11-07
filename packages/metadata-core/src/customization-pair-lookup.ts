@@ -25,13 +25,27 @@
  *
  * Every question carries the caller's {@link InstalledManifestLookup} — the
  * installed manifests of the registry it serves ({@link installedManifestsOf}),
- * the only record of which App a member belongs to. Today {@link appOf} reads
- * none of it and is the identity: every package is its own App for
- * customization, so {@link pairOf} answers exactly what
- * `customizationPackageId` answers, refusals included. Resolving a member
- * package to its App from that lookup is the next change (ADR-0146 D3 as
- * amended, merge question 11), and it lands in {@link appOf} alone because
- * every caller already hands the lookup in.
+ * the only record of which App a member belongs to. {@link appOf} reads it the
+ * way ADR-0146 D3 merge question 11 says: a `type: 'app'` package is its own
+ * App; any other package's App is the installed `type: 'app'` package it
+ * declares in `manifest.dependencies`, directly or through its declared
+ * parents; a package that declares none is its own unit. A kernel package
+ * (scope `system` / `cloud`) is not resolved here: its pair would be the
+ * platform pair, which no door creates in this version (ruling record
+ * 6691217245), so it keeps the per-package answer its legacy pair is served
+ * under (merge question 12).
+ *
+ * Two questions, kept apart:
+ *
+ *   - {@link pairOf} — where a customization of the package LANDS: its App's
+ *     pair. Every door that writes or names "the pair" asks it.
+ *   - {@link isPairOf} / {@link pairsOf} — which packages' rows ARE the
+ *     package's customizations: its App's pair and, while one is installed,
+ *     the per-package pair an earlier version created for it (`<base>.custom`
+ *     of a member — ADR-0146 D3 merge question 12: such a pair is served as it
+ *     is until the migration ceremony re-identifies it, so nothing a customer
+ *     built goes dark on upgrade). Every read that serves or lists a package's
+ *     customizations asks these.
  *
  * Why this package: every caller that asks the question —
  * `@objectstack/metadata-protocol`, `@objectstack/objectql`,
@@ -44,6 +58,7 @@
 
 import {
   customizationPackageId,
+  isCustomizationPackage,
   type CustomizationDerivation,
   type CustomizationPackageIdRefusal,
 } from '@objectstack/spec/kernel';
@@ -93,35 +108,129 @@ export function installedManifestsOf(registry: InstalledPackageSource | null | u
 }
 
 /**
- * The App that carries `packageId` for customization: the id whose pair holds
- * every customization of `packageId`'s items, read through `installed` (the
- * registry the caller serves).
+ * The manifest scopes of a kernel package — the platform's own (`system`) and
+ * the control plane's (`cloud`). The same list as
+ * `@objectstack/metadata-protocol`'s `READ_ONLY_PACKAGE_SCOPES`, which depends
+ * on this package and so cannot be imported here; a pin in that package holds
+ * the two equal.
+ */
+const KERNEL_PACKAGE_SCOPES: readonly string[] = ['system', 'cloud'];
+
+/** Why {@link appOf} names no App: the package reaches several, and its namespace picks none or more than one. */
+export type AppOfRefusal = 'no_single_app';
+
+/** Why {@link pairOf} names no pair: the id rule's refusal, or {@link AppOfRefusal}. */
+export type PairOfRefusal = CustomizationPackageIdRefusal | AppOfRefusal;
+
+function isKernelManifest(manifest: AppLookupManifest): boolean {
+  return typeof manifest.scope === 'string' && KERNEL_PACKAGE_SCOPES.includes(manifest.scope);
+}
+
+function declaredDependencyIds(manifest: AppLookupManifest): string[] {
+  const dependencies = manifest.dependencies;
+  if (typeof dependencies !== 'object' || dependencies === null || Array.isArray(dependencies)) return [];
+  return Object.keys(dependencies);
+}
+
+/**
+ * The installed `type: 'app'` packages `manifest` declares, directly — or,
+ * when it declares none directly, through the closure of its declared
+ * dependencies (ADR-0146 D3 merge question 11): each package visited once, so
+ * a cycle ends; the walk stops at an App (an App's own dependencies are
+ * another App's business, ADR-0141 D1); a kernel package or a package not
+ * installed is skipped.
+ */
+function declaredApps(packageId: string, manifest: AppLookupManifest, installed: InstalledManifestLookup): string[] {
+  const isApp = (id: string): boolean => {
+    const m = installed(id);
+    return m !== undefined && m.type === 'app' && !isKernelManifest(m);
+  };
+  const direct = declaredDependencyIds(manifest).filter(isApp);
+  if (direct.length > 0) return direct;
+  const apps: string[] = [];
+  const visited = new Set<string>([packageId]);
+  const queue = declaredDependencyIds(manifest);
+  while (queue.length > 0) {
+    const id = queue.shift()!;
+    if (visited.has(id)) continue;
+    visited.add(id);
+    const m = installed(id);
+    if (m === undefined || isKernelManifest(m)) continue;
+    if (m.type === 'app') {
+      apps.push(id);
+      continue;
+    }
+    queue.push(...declaredDependencyIds(m));
+  }
+  return apps;
+}
+
+/**
+ * The App that carries `packageId` for customization — the id whose pair
+ * holds every customization of `packageId`'s items — read through
+ * `installed` (the registry the caller serves), or `undefined` when the
+ * package reaches several Apps and its namespace picks no single one of them
+ * (ADR-0146 D3 merge question 11: the readable verdict, never a guess and
+ * never an id prefix).
  *
- * Today the identity — every package is its own App for this purpose, and
- * `installed` is not read yet. The lookup is the seam the App-unit ruling
- * moves; its callers never assume the identity, and each already hands it the
- * registry it will read.
+ * | package | App |
+ * |:--|:--|
+ * | not installed, or a pair id | itself |
+ * | `type: 'app'` | itself |
+ * | a kernel package (scope `system` / `cloud`) | itself — see the module header |
+ * | declares one installed App, directly or through its declared parents | that App |
+ * | declares several | the one holding the package's namespace; none or several ⇒ `undefined` |
+ * | declares none | itself — its own unit |
  */
-export function appOf(packageId: string, installed: InstalledManifestLookup): string {
-  void installed;
-  return packageId;
+export function appOf(packageId: string, installed: InstalledManifestLookup): string | undefined {
+  const manifest = installed(packageId);
+  if (manifest === undefined || isCustomizationPackage(packageId)) return packageId;
+  if (manifest.type === 'app' || isKernelManifest(manifest)) return packageId;
+  const apps = declaredApps(packageId, manifest, installed);
+  if (apps.length === 0) return packageId;
+  if (apps.length === 1) return apps[0];
+  const namespace = manifest.namespace;
+  const holding = apps.filter((id) => typeof namespace === 'string' && installed(id)?.namespace === namespace);
+  return holding.length === 1 ? holding[0] : undefined;
 }
 
 /**
- * The paired customization package of `base`: the pair of the App that carries
- * it, or the refusal `customizationPackageId` names (`base_id_missing`,
- * `base_is_customization_package`, `base_id_invalid`).
+ * The paired customization package of `base` — where a customization of its
+ * items lands: the pair of the App that carries it, or the refusal
+ * `customizationPackageId` names (`base_id_missing`,
+ * `base_is_customization_package`, `base_id_invalid`), or `no_single_app`
+ * ({@link appOf}).
  */
-export function pairOf(base: unknown, installed: InstalledManifestLookup): CustomizationDerivation<CustomizationPackageIdRefusal> {
-  return customizationPackageId(typeof base === 'string' && base.length > 0 ? appOf(base, installed) : base);
+export function pairOf(base: unknown, installed: InstalledManifestLookup): CustomizationDerivation<PairOfRefusal> {
+  if (typeof base !== 'string' || base.length === 0) return customizationPackageId(base);
+  const own = customizationPackageId(base);
+  if (!own.ok) return own;
+  const app = appOf(base, installed);
+  if (app === undefined) return { ok: false, reason: 'no_single_app' };
+  return customizationPackageId(app);
 }
 
 /**
- * Whether `pairId` is THE paired customization package of `base` — the only
- * package that declares an override of `base`'s items (ADR-0146, ruling A on
- * its amendment card).
+ * Every package whose rows are `base`'s customizations: its App's pair
+ * ({@link pairOf}) first, then — while it is installed and is not that pair —
+ * the per-package pair `<base>.custom` an earlier version created for a
+ * member (ADR-0146 D3 merge question 12: served as it is until the migration
+ * ceremony re-identifies it). Empty when `base` has no pair of either kind.
+ */
+export function pairsOf(base: unknown, installed: InstalledManifestLookup): string[] {
+  const pairs: string[] = [];
+  const pair = pairOf(base, installed);
+  if (pair.ok) pairs.push(pair.value);
+  const legacy = customizationPackageId(base);
+  if (legacy.ok && !pairs.includes(legacy.value) && installed(legacy.value) !== undefined) pairs.push(legacy.value);
+  return pairs;
+}
+
+/**
+ * Whether `pairId` is a paired customization package of `base` — a package
+ * that may declare an override of `base`'s items (ADR-0146, ruling A on its
+ * amendment card): one of {@link pairsOf}.
  */
 export function isPairOf(pairId: unknown, base: unknown, installed: InstalledManifestLookup): boolean {
-  const pair = pairOf(base, installed);
-  return pair.ok && pair.value === pairId;
+  return typeof pairId === 'string' && pairsOf(base, installed).includes(pairId);
 }

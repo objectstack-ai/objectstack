@@ -71,6 +71,7 @@ import { PLATFORM_IDP_PROVIDER_ID, refuseImplicitAccountLink } from './implicit-
 import { isPlaceholderEmail } from './placeholder-email.js';
 import { logAfterResponseSendFailure, sendAfterResponseOnPublicDoor } from './run-after-response.js';
 import { isVisitorResendInEndpointContext } from './visitor-verification-resend.js';
+import { createBetterAuthLogSink } from './sso-oidc-refusal-cause.js';
 
 /** The path better-auth declares for the email sign-up endpoint. */
 const SIGN_UP_EMAIL_PATH = '/sign-up/email';
@@ -205,6 +206,12 @@ export async function createAuthInstance(this: AuthInstanceHost): Promise<Auth<a
     // issuer only when the instance is rebuilt (a config patch or a
     // restart), while auth emails call `getAppName()` on every send.
     appName: this.getAppName(),
+
+    // better-auth's own log lines go to this manager's logger, level for level,
+    // instead of the console. The sink is also where an enterprise OIDC
+    // callback's refused ID token is classified, because the vendor hands that
+    // error object to its logger and nowhere else (`sso-oidc-refusal-cause.ts`).
+    logger: createBetterAuthLogSink(() => this.config.logger),
 
     // Database adapter configuration
     database: await this.createDatabaseConfig(),

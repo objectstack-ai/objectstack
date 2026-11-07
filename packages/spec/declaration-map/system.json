@@ -384,6 +384,8 @@
     "ResolvedGroupSchema": "system/ResolvedGroup",
     "ResolvedSettingValue": "system/ResolvedSettingValue",
     "ResolvedSettingValueSchema": "system/ResolvedSettingValue",
+    "RestrictionProfile": "system/RestrictionProfile",
+    "RestrictionProfileSchema": "system/RestrictionProfile",
     "RouteHandlerMetadata": "system/RouteHandlerMetadata",
     "RouteHandlerMetadataSchema": "system/RouteHandlerMetadata",
     "RowLevelIsolationStrategy": "system/RowLevelIsolationStrategy",
