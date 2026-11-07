@@ -347,6 +347,9 @@ importers:
       '@objectstack/core':
         specifier: workspace:*
         version: link:../../packages/core
+      '@objectstack/plugin-auth':
+        specifier: workspace:*
+        version: link:../../packages/plugins/plugin-auth
       '@objectstack/service-automation':
         specifier: workspace:*
         version: link:../../packages/services/service-automation
