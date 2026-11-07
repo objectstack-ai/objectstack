@@ -164,12 +164,14 @@ class FakeApp implements AppHarness {
     for (const c of collections) out[c] = [...(this.platform[c] ?? []), ...(src[c] ?? [])];
     return out;
   }
-  /** Every MCP call the runner made itself (the validation probe), with the key it sent. */
+  /** Every MCP call the runner made itself (the probes), with the key it sent. */
   toolCalls: Array<{ apiKey: string; tool: string; args: Record<string, unknown> }> = [];
   /** A broken app: its write door stores the invalid write instead of refusing it. */
   storesInvalidWrites = false;
   async callTool(apiKey: string, tool: string, args: Record<string, unknown>): Promise<ToolAnswer> {
     this.toolCalls.push({ apiKey, tool, args });
+    // A faithful app: the partner may not edit an account (the card's overstep), and the bad email fails validation.
+    if (args.objectName === 'democrm_account') return { output: JSON.stringify({ error: { code: 'PERMISSION_DENIED', status: 403 } }, null, 2), isError: true };
     if (!this.storesInvalidWrites) return { output: JSON.stringify({ error: { code: 'VALIDATION_FAILED', status: 400 } }, null, 2), isError: true };
     const { objectName, recordId, data } = args as { objectName: string; recordId?: string; data: Record<string, unknown> };
     const rows = (this.rows[objectName] ??= []);
@@ -475,9 +477,11 @@ describe('runCard — the validation operation is probed by the runner itself (#
     const run = await runCard(scenario, driver, ops, { modes: ['scratch'], admin: ADMIN, iterateRun: false });
     expect(apps[0]!.toolCalls).toEqual([
       { apiKey: 'key-partner_user', tool: 'create_record', args: { objectName: 'democrm_contact', data: { full_name: 'Gil Ray', email: 'gil at acme' } } },
+      // The card's permission overstep is probed the same way (#31145 item 4).
+      { apiKey: 'key-partner_user', tool: 'update_record', args: { objectName: 'democrm_account', recordId: 'ac1', data: { industry: 'retail' } } },
     ]);
     const op = badEmail(run);
-    expect(op.observation!.probe).toEqual({ answer: { kind: 'refused', code: 'VALIDATION_FAILED' }, writes: 0 });
+    expect(op.observation!.probe).toEqual({ answer: { kind: 'refused', code: 'VALIDATION_FAILED', status: 400 }, writes: 0 });
     expect([op.grade!.pass, op.error]).toEqual([true, undefined]);
     expect(cardScorecard(run).modes[0]!.first.operations).toEqual({ passed: 5, total: 5, notMeasured: 0 });
   });

@@ -159,4 +159,4 @@ export function parseStreamJson(stream: string | readonly string[]): ParsedTurn 
 }
 
 /** A coded refusal inside a tool output: the scorer's reading, re-exported here where the runner reads it. */
-export { refusalCodeOf } from '../score/scenario-run-grade.js';
+export { refusalCodeOf, refusalOf } from '../score/scenario-run-grade.js';

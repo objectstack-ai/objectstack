@@ -181,7 +181,9 @@ export class FakeApp implements AppHarness {
     return out;
   }
   /** The validation probe's door: this double validates, so it refuses every write it is sent. */
-  async callTool(): Promise<ToolAnswer> {
+  async callTool(_apiKey: string, _tool: string, args: Record<string, unknown>): Promise<ToolAnswer> {
+    // A faithful app: the partner may not edit an account (the card's overstep), and the bad email fails validation.
+    if (args.objectName === 'democrm_account') return { output: JSON.stringify({ error: { code: 'PERMISSION_DENIED', status: 403 } }), isError: true };
     return { output: JSON.stringify({ error: { code: 'VALIDATION_FAILED', status: 400 } }), isError: true };
   }
 }

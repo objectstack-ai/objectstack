@@ -106,7 +106,7 @@ describe('gradeOperation — a validation operation, graded as the agent half an
   const INVALID: DeclaredOutcome = { kind: 'refused', code: 'VALIDATION_FAILED' };
   const REFUSED = { kind: 'refused', code: 'VALIDATION_FAILED' } as const;
   const PROBE_OK = { answer: REFUSED, writes: 0 };
-  const failedV = (obs: OperationObservation) => gradeOperation(INVALID, obs, { validation: true }).checks.filter((c) => !c.pass).map((c) => c.check);
+  const failedV = (obs: OperationObservation) => gradeOperation(INVALID, obs, { probed: true }).checks.filter((c) => !c.pass).map((c) => c.check);
 
   it('passes either way the agent half can pass, with the probe refused and nothing written by either', () => {
     expect(failedV({ answer: REFUSED, writes: 0, withheld: false, probe: PROBE_OK })).toEqual([]);
@@ -117,7 +117,7 @@ describe('gradeOperation — a validation operation, graded as the agent half an
   it('fails the agent half on another answer it did not withhold, and when withholding was not observed', () => {
     expect(failedV({ answer: { kind: 'refused', code: '(no write attempted)' }, writes: 0, withheld: false, probe: PROBE_OK })).toEqual(['agent:refused:VALIDATION_FAILED-or-withheld']);
     expect(failedV({ answer: { kind: 'applied' }, writes: 1, withheld: false, probe: PROBE_OK })).toEqual(['agent:refused:VALIDATION_FAILED-or-withheld', 'no-write']);
-    const unread = gradeOperation(INVALID, { answer: { kind: 'refused', code: '(no write attempted)' }, writes: 0, probe: PROBE_OK }, { validation: true });
+    const unread = gradeOperation(INVALID, { answer: { kind: 'refused', code: '(no write attempted)' }, writes: 0, probe: PROBE_OK }, { probed: true });
     expect(unread.checks[0]).toEqual({ check: 'agent:refused:VALIDATION_FAILED-or-withheld', pass: false, detail: 'refused (no write attempted); withholding not observed' });
   });
 
