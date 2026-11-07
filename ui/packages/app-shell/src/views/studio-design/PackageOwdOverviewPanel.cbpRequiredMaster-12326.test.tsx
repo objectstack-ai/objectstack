@@ -6,18 +6,13 @@
  *
  * Since `@objectstack/spec` 18 (objectstack#23100, ADR-0055 §1) the master is
  * the ONE `master_detail` declared `required: true`; zero or two or more derive
- * none. The row shows that master, or says there is none. Switching a row to
- * `controlled_by_parent` sets `required: true` on its `master_detail` fields in
- * the saved draft, as the per-object Settings tab does. The installed spec's
+ * none. ADR-0055 §1 as amended (objectstack#30905 ruling A) adds an OPTIONAL
+ * master: an object's only `master_detail` declared `required: false`. The row
+ * shows the master, required or optional, or says there is none. Switching a
+ * row to `controlled_by_parent` sets `required: true` on each `master_detail`
+ * that writes no `required`, as the per-object Settings tab does, and keeps an
+ * optional master as written (objectstack#30974). The installed spec's
  * `ObjectSchema` is the oracle for the saved body.
- *
- * ADR-0055 §1 as amended (objectstack#30905 ruling A) adds an OPTIONAL master:
- * an object's only `master_detail` declared `required: false`. The parse cannot
- * tell an omitted `required` from `false`, so it admits the omitted shape too.
- * This overview still names none for an omitted `required`, as the runtime
- * does for an object that reaches it unparsed (it reads `required: false`
- * literally, never its absence), and that row records the parse's answer
- * apart from the master shown.
  */
 
 import '@testing-library/jest-dom/vitest';
@@ -62,15 +57,14 @@ afterEach(cleanup);
 const cbp = (fields: Body): Body => ({ name: 'crm_case', label: 'Case', sharingModel: 'controlled_by_parent', fields });
 
 describe('PackageOwdOverviewPanel — the master shown is the one the runtime derives (objectui#12326)', () => {
-  // [label, fields, the master shown, whether the spec parse accepts it when
-  // that differs from "a master is shown"]
-  const SHAPES: Array<[string, Body, string | undefined, boolean?]> = [
+  // [label, fields, the master shown]
+  const SHAPES: Array<[string, Body, string | undefined]> = [
     ['one required master', { account: { type: 'master_detail', reference: 'crm_account', required: true } }, 'crm_account'],
+    ['one master without required', { account: { type: 'master_detail', reference: 'crm_account' } }, 'crm_account'],
     [
-      'one master without required (the parse reads it as an optional master; no master is shown)',
-      { account: { type: 'master_detail', reference: 'crm_account' } },
-      undefined,
-      true,
+      'one optional master (required: false)',
+      { account: { type: 'master_detail', reference: 'crm_account', required: false } },
+      'crm_account',
     ],
     [
       'two required masters',
@@ -82,10 +76,9 @@ describe('PackageOwdOverviewPanel — the master shown is the one the runtime de
     ],
   ];
 
-  it.each(SHAPES)('%s', async (_label, fields, master, parses) => {
-    // The oracle: the spec accepts the shapes a master is shown for, and the
-    // one row that says otherwise.
-    expect(ObjectSchema.safeParse(cbp(fields)).success).toBe(parses ?? master !== undefined);
+  it.each(SHAPES)('%s', async (_label, fields, master) => {
+    // The oracle: the spec accepts exactly the shapes a master is shown for.
+    expect(ObjectSchema.safeParse(cbp(fields)).success).toBe(master !== undefined);
     renderPanel({ crm_case: cbp(fields) });
     const cell = await screen.findByTestId('owd-master-crm_case');
     expect(cell).toHaveTextContent(
@@ -125,6 +118,30 @@ describe('PackageOwdOverviewPanel — switching a row to controlled_by_parent (o
     const parsed = ObjectSchema.safeParse(saved[0].body);
     expect(parsed.success).toBe(true);
     expect((parsed.data?.fields as Record<string, { required?: boolean }>).account.required).toBe(true);
+  });
+
+  it('keeps an optional master as written: the save never turns required: false required (objectstack#30974)', async () => {
+    const body: Body = {
+      name: 'crm_case',
+      label: 'Case',
+      sharingModel: 'private',
+      fields: { account: { type: 'master_detail', reference: 'crm_account', required: false } },
+    };
+    const { saved } = renderPanel({ crm_case: body });
+    await screen.findByTestId('owd-row-crm_case');
+    fireEvent.keyDown(screen.getByTestId('owd-internal-crm_case'), { key: 'ArrowDown' });
+    fireEvent.click(within(await screen.findByRole('listbox')).getByRole('option', { name: CBP_LABEL }));
+    expect(screen.getByTestId('owd-master-crm_case')).toHaveTextContent(
+      tFormat('engine.studio.owd.byParent', 'en-US', { master: 'crm_account' }),
+    );
+
+    fireEvent.click(screen.getByTestId('owd-save'));
+    await waitFor(() => expect(saved.length).toBe(1));
+    expect(saved[0].body.sharingModel).toBe('controlled_by_parent');
+    expect((saved[0].body.fields as Record<string, Body>).account.required).toBe(false);
+    const parsed = ObjectSchema.safeParse(saved[0].body);
+    expect(parsed.success).toBe(true);
+    expect((parsed.data?.fields as Record<string, { required?: boolean }>).account.required).toBe(false);
   });
 
   it('a row with two master-detail fields shows no master before the save', async () => {

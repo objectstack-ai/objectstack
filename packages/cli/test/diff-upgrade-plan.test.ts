@@ -153,4 +153,28 @@ describe('os diff — what the upgrade plan adds', () => {
       { type: 'modified', category: 'data', name: 'acme_region', breaking: false, detail: 'seed dataset changed: records; mode ignore' },
     ]);
   });
+
+  it('an insert dataset, added or changed, says a replay inserts its records again; ignore stays silent', () => {
+    const before = lead({}, [
+      { object: 'acme_source', mode: 'insert', records: [{ name: 'web' }] },
+      { object: 'acme_region', mode: 'ignore', records: [{ name: 'emea' }] },
+    ]);
+    const after = lead({}, [
+      { object: 'acme_source', mode: 'insert', records: [{ name: 'web' }, { name: 'event' }] },
+      { object: 'acme_region', mode: 'ignore', records: [{ name: 'apac' }] },
+      { object: 'acme_channel', mode: 'insert', records: [{ name: 'email' }] },
+    ]);
+    const insertNote = "a replay inserts these again, and a row the database refuses is that row's error";
+    expect(diffStacks(before, after)).toEqual([
+      {
+        type: 'added', category: 'data', name: 'acme_channel', breaking: false,
+        detail: `seed dataset added: 1 record(s); mode insert; ${insertNote}`,
+      },
+      {
+        type: 'modified', category: 'data', name: 'acme_source', breaking: false,
+        detail: `seed dataset changed: records; mode insert; ${insertNote}`,
+      },
+      { type: 'modified', category: 'data', name: 'acme_region', breaking: false, detail: 'seed dataset changed: records; mode ignore' },
+    ]);
+  });
 });
