@@ -200,7 +200,8 @@ permissions and row-level security:
 | `aggregate_records` | GROUP BY totals; registered only when the data bridge implements `aggregate` |
 | `validate_expression` | build-accurate CEL check before a formula is authored into metadata |
 | `create_record`, `update_record`, `delete_record` | writes; `delete_record` is refused with `ACTION_CONFIRMATION_REQUIRED` (428) unless it sends `confirm: true` — ask the human first, then retry |
-| `list_actions`, `run_action` | your AI-exposed business Actions — the same `ai.exposed` opt-in as above |
+| `delete_records` | up to 200 records of one object per call (fewer on a smaller read page size), by `where` or `recordIds`, not both; a call without `confirm: true` is the preview (match count, sample ids) and deletes nothing; over OAuth it needs `data:read` and `data:write` |
+| `list_actions`, `run_action`, `resume_run` | your AI-exposed business Actions — the same `ai.exposed` opt-in as above; an action flagged `ai.requiresConfirmation` (`list_actions` reports it) is refused with the same 428 unless the call sends `confirm: true`, and nothing runs; `resume_run` submits a paused screen flow's form under the same gates |
 
 ---
 
