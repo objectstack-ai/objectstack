@@ -153,23 +153,45 @@ export interface PositionGrantSummary {
 }
 
 /**
- * How a permission set reaches a user, in {@link EffectivePermissionSet}:
+ * How a permission set reaches a user, in {@link EffectivePermissionSet}. One
+ * kind per channel through which the resolver enforcement uses
+ * (`resolveUserAuthzGrants` in `@objectstack/core`, joined with the security
+ * service's human baseline) names a set for a user:
  *
+ * - `direct` — one of the user's own `sys_user_permission_set` grant rows
+ *   names it.
+ * - `position` — the definition of a position the user holds names it in
+ *   `permissionSets` (ADR-0131 D3/D4); `position` is that position's name. A
+ *   built-in identity position's static binding is such a definition too: an
+ *   external member's `external_default` is reported with
+ *   `{ kind: 'position', position: 'org_external' }`. `everyone` is never
+ *   reported here: its bindings are `default`.
  * - `default` — a default binding: the set is bound to the `everyone`
  *   audience anchor (the deployment baseline, an app's `isDefault` set, an
  *   accepted package default; ADR-0090 D5), or it is the human baseline the
- *   resolution adds for every authenticated member (`external_default` for an
- *   external member).
- * - `position` — the definition of a position the user holds names it in
- *   `permissionSets` (ADR-0131 D3/D4); `position` is that position's name.
- *   `everyone` is never reported here: its bindings are `default`.
- * - `direct` — one of the user's own `sys_user_permission_set` grant rows
- *   names it.
+ *   security service adds for every authenticated member (`external_default`
+ *   for an external member, so that set carries both its `position` and its
+ *   `default` origin).
+ * - `derived` — the resolver confers the name from the user's standing, with
+ *   no grant row and no position definition naming it. `source` says which
+ *   standing, and the vocabulary is closed:
+ *   - `platform_admin_config` — the user's own stored email matches the
+ *     deployment's configured platform administrators
+ *     (`OS_PLATFORM_OWNER_EMAIL`), which confers `admin_full_access` and
+ *     platform-admin standing (on a walled tenancy posture, the only anchor
+ *     of that standing);
+ *   - `ai_access` — the user's `sys_user.ai_access` flag is set, which
+ *     confers the `ai_seat` capability name.
+ *
+ * Only the user's own resolution is described: the sets an API key's scopes,
+ * an agent's ceiling or the anonymous `guest` anchor confer belong to a
+ * credential or principal kind, not to the user, and are not origins.
  */
 export type EffectivePermissionSetOrigin =
-  | { kind: 'default' }
+  | { kind: 'direct' }
   | { kind: 'position'; position: string }
-  | { kind: 'direct' };
+  | { kind: 'default' }
+  | { kind: 'derived'; source: 'platform_admin_config' | 'ai_access' };
 
 /** One permission set in {@link EffectiveAccess}. */
 export interface EffectivePermissionSet {
@@ -177,8 +199,8 @@ export interface EffectivePermissionSet {
   name: string;
   /**
    * Every way the set reaches the user, at least one. A set reached two ways
-   * is listed once, with both origins (a direct grant and a position, or two
-   * positions).
+   * is listed once, with both origins (a direct grant and a position, two
+   * positions, or a grant row and the configured platform administrator).
    */
   origins: EffectivePermissionSetOrigin[];
 }
@@ -192,9 +214,26 @@ export interface EffectiveAccess {
    * vetted for the described user as `explain` vets it. `null` with none.
    */
   organizationId: string | null;
-  /** The positions the user holds there, in force (the resolver's `positions`). */
+  /**
+   * The positions the user holds there, in force, exactly as the resolver
+   * lists them: the derived `platform_admin` first where it is held, then the
+   * positions projected from the user's membership (`org_owner`, `org_admin`,
+   * `org_member`, `org_external`) and the user's own position rows, then the
+   * `everyone` audience anchor for every member who is not external. A position
+   * the activation ledger switched off is not listed. `everyone` and
+   * `platform_admin` are listed although neither is ever an origin
+   * (`everyone`'s bindings are `default`; `platform_admin` names no set).
+   */
   positions: string[];
-  /** The permission sets in force for the user there, in resolution order. */
+  /**
+   * The permission sets in force for the user there, each once, in the
+   * resolver's order: the sets of the user's grant rows in grant order, then
+   * the position-bound sets in the order the held positions name them, then
+   * the `derived` names (`admin_full_access` from the configured platform
+   * administrators, then `ai_seat`), then the human baseline sets the
+   * security service adds. A set already listed keeps its first place and
+   * gains the later origin.
+   */
   permissionSets: EffectivePermissionSet[];
 }
 
@@ -1249,8 +1288,11 @@ export interface ISecurityService {
    * Gated as `explain` is: describing someone else requires `manage_users`,
    * organization administration of an organization that user is a member of,
    * or a delegated `adminScope` covering that user. A user who does not exist
-   * is refused exactly as one the caller may not manage, so the answer says
-   * nothing about which ids exist.
+   * is refused exactly as one the caller may not manage, for every caller, so
+   * the answer says nothing about which ids exist. This is where it departs
+   * from `explain`, which answers an admitted caller `404` for an id with no
+   * user row: an implementation sharing explain's gate must not carry that
+   * `404` over.
    *
    * **OPTIONAL, and absence is a defined state.** A security service that
    * predates it omits it; callers feature-detect

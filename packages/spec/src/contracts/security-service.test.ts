@@ -815,28 +815,36 @@ describe('Security Service Contract', () => {
     const answer: EffectiveAccess = {
       userId: 'u2',
       organizationId: 'org_1',
-      positions: ['sales_rep'],
+      positions: ['org_member', 'sales_rep', 'everyone'],
+      // The resolver's order: grant rows, position-bound sets, derived names, the human baseline.
       permissionSets: [
-        { name: 'member_default', origins: [{ kind: 'default' }] },
         { name: 'sales_user', origins: [{ kind: 'direct' }, { kind: 'position', position: 'sales_rep' }] },
+        { name: 'ai_seat', origins: [{ kind: 'derived', source: 'ai_access' }] },
+        { name: 'member_default', origins: [{ kind: 'default' }] },
       ],
     };
     const withIt = makeService({ describeEffectiveAccess: async () => answer });
     await expect(withIt.describeEffectiveAccess?.('u2', { userId: 'u1' })).resolves.toEqual(answer);
   });
 
-  it('EffectiveAccess: three closed origins, a position origin names its position, no organization is null (compile-time)', () => {
+  it('EffectiveAccess: four closed origins, a position names its position, a derived origin its closed source (compile-time)', () => {
     const everyOrigin: EffectivePermissionSetOrigin[] = [
-      { kind: 'default' },
-      { kind: 'position', position: 'sales_rep' },
       { kind: 'direct' },
+      { kind: 'position', position: 'sales_rep' },
+      { kind: 'default' },
+      { kind: 'derived', source: 'platform_admin_config' },
+      { kind: 'derived', source: 'ai_access' },
     ];
-    expect(everyOrigin).toHaveLength(3);
+    expect(everyOrigin).toHaveLength(5);
     // @ts-expect-error a `position` origin must name the position
     const positionWithoutName: EffectivePermissionSetOrigin = { kind: 'position' };
-    // @ts-expect-error the vocabulary is closed: a set reaches a user by default, position or direct grant
+    // @ts-expect-error the vocabulary is closed: direct, position, default or derived
     const notAnOrigin: EffectivePermissionSetOrigin = { kind: 'inherited' };
-    expect([positionWithoutName, notAnOrigin]).toHaveLength(2);
+    // @ts-expect-error a `derived` origin must name the standing that confers it
+    const derivedWithoutSource: EffectivePermissionSetOrigin = { kind: 'derived' };
+    // @ts-expect-error the derived sources are closed: the configured platform administrators or `sys_user.ai_access`
+    const notASource: EffectivePermissionSetOrigin = { kind: 'derived', source: 'api_key_scope' };
+    expect([positionWithoutName, notAnOrigin, derivedWithoutSource, notASource]).toHaveLength(4);
 
     expectTypeOf<EffectivePermissionSet>().toEqualTypeOf<{
       name: string;
@@ -852,23 +860,43 @@ describe('Security Service Contract', () => {
       (userId: string, callerContext?: SecurityContext) => Promise<EffectiveAccess>
     >();
 
-    // An exhaustive consumer: a fourth origin added to the union would stop
-    // this switch compiling at the `never` line.
+    // An exhaustive consumer: a fifth origin kind, or a third derived source,
+    // added to the union would stop this switch compiling at a `never` line.
+    const sourceLabel = (source: Extract<EffectivePermissionSetOrigin, { kind: 'derived' }>['source']): string => {
+      switch (source) {
+        case 'platform_admin_config':
+          return 'configured platform administrator';
+        case 'ai_access':
+          return 'AI seat';
+        default: {
+          const unhandled: never = source;
+          return unhandled;
+        }
+      }
+    };
     const label = (o: EffectivePermissionSetOrigin): string => {
       switch (o.kind) {
-        case 'default':
-          return 'default';
-        case 'position':
-          return `position:${o.position}`;
         case 'direct':
           return 'direct';
+        case 'position':
+          return `position:${o.position}`;
+        case 'default':
+          return 'default';
+        case 'derived':
+          return `derived:${sourceLabel(o.source)}`;
         default: {
           const unhandled: never = o;
           return unhandled;
         }
       }
     };
-    expect(everyOrigin.map(label)).toEqual(['default', 'position:sales_rep', 'direct']);
+    expect(everyOrigin.map(label)).toEqual([
+      'direct',
+      'position:sales_rep',
+      'default',
+      'derived:configured platform administrator',
+      'derived:AI seat',
+    ]);
   });
 
   it('reopenAudienceBindingSuggestion is OPTIONAL — absence leaves every dismissal standing (compile-time)', async () => {
