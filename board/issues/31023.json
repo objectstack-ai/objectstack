@@ -2,8 +2,8 @@
   "number": 31023,
   "kind": "issue",
   "title": "packages: DELETE /api/v1/packages/:id deletes unattributed (no actor), and the in-process deletePackage leaves the per-environment disable record behind",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,19 +13,23 @@
   "labels": [
     "bug",
     "domain:server",
-    "pm:queue",
-    "priority:p2",
-    "repo:cloud"
+    "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "marchtian"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-06T18:21:59Z",
-  "updated_at": "2026-11-06T18:57:27Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-07T17:34:16Z",
+  "closed_at": "2026-11-07T17:33:09Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/31023",
   "body": "repo:cloud#3 · hotlong · session_01Q4EjjRhUZjdy8VXs6Kkur2\n\nFiling gate: **(b) a defect with a named consumer**, measured by the objectstack-ai/cloud#3656 dev (PR objectstack-ai/cloud#3686, report on that card). Platform defects go to the platform: 「平台的问题应该在平台处理」 (objectstack#30765).\n\n## 维护者速读\n\n在 Studio 里删除一个应用时，审计日志记不下是谁删的：删除接口没有把操作人传下去，而发布、回滚等其他包操作都传了。另外，从平台内部调用删除（cloud 的 AI 工具、本地安装、导入都走这条路），不会清掉「此包在本环境已停用」的记录，以后重装同一个包时可能一装上就是停用状态。\n\n## Measured (pin `c50e0dfa`, code read)\n\n- `runtime/src/domains/packages.ts` ~3068: the DELETE arm calls `protocol.deletePackage({ packageId, keepData })` with no actor. `resolvePackageWriteActor` (`packages.ts:408`, ADR-0146 D1) is used by publish-drafts, discard-drafts, revert, rollback, adopt-orphans and duplicate. The `sys_packages` delete (package service `delete(id)`) carries no actor either.\n- `protocol.deletePackage` does not clear the per-environment disable record (`setPackageDisabled`); only the HTTP door clears it.\n\n## Expected\n\n- The DELETE door resolves the actor as its siblings do, and both the metadata deletes and the `sys_packages` delete are attributed in `sys_audit_log`.\n- Clearing the disable record moves into the uninstall verb, so every caller gets it.\n\n## Acceptance\n\n- Tests: a Studio delete writes audit rows naming the person; an in-process delete followed by a reinstall leaves the package enabled.\n\nConsumer: objectstack-ai/cloud#3656 (its tool passes an actor and calls the in-process verb).\n\nSuggested-grade: p2.\n\nDedupe (2026-11-06): `package delete actor audit` → 363 hits, the top 3 QA runs; `deletePackage disable` → 22, the top 3 closed (#28408, #27395, #26857 are other uninstall defects). None covers this."

@@ -2,8 +2,8 @@
   "number": 30932,
   "kind": "issue",
   "title": "Scenario cards: an explicit origin marker (generic / customer-derived / held-out) and a zh+en title, so the gallery exporter can export anything",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,20 +12,21 @@
   },
   "labels": [
     "domain:devx",
-    "pm:dispatched",
     "priority:p3"
   ],
-  "assignees": [
-    "marchtian"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-06T12:19:10Z",
-  "updated_at": "2026-11-07T13:21:10Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-07T15:35:21Z",
+  "closed_at": "2026-11-07T15:33:26Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30932",
   "body": "domain:devx#2 · marchtian · session_017ihL2ebbZkr2QAEG1x7UC8\n\nFiling gate: ② follow-up of #30349 (scenario library T8, the gallery exporter, draft PR #30930), from the dev report 6684611537. ⛔ Not a claim. Triage sets the grade and the lane.\n\n**Business reason.** The gallery (objectstack-ai/gallery) is the maintainer's main acquisition channel, and by the D1 ruling on cloud#3600 it may show only generic scenarios, never anything customer-derived. The exporter in PR #30930 enforces that by refusing any card that is not marked generic. No card carries such a marker today, so the exporter exports nothing. The gallery also promises a Chinese and an English title per app, but cards carry one title, so the index writes `title.zh: null`.\n\n## Where (`origin/main`)\n\n- `packages/qa/scenarios/src/schema.ts`: the card schema has no origin field. `provenance` is free prose, and the card's directory is not a marker, because the loader reads any directory, the private overlay included.\n- The card title is a single string.\n- PR #30930's `src/export/generic.ts`: `NO_GENERIC_MARKER` refuses every card until this lands.\n\n## Wanted\n\n1. A required card field, for example `origin: generic | customer-derived | held-out`. The loader refuses a card without it, and refuses a `generic` card that lives in the private overlay. Set it on all nine open-library cards in `docs/qa/scenarios/`.\n2. The card title becomes `{ zh, en }` text, and all nine cards get both.\n3. The exporter's guard reads `origin === 'generic'` in place of `NO_GENERIC_MARKER`, and the index fills `title.zh` from the card. If #30930 has landed by then, this is a one-file change there.\n\nSerial: `loader.ts`, `schema.ts` and two cards are in flight in #30846 (#30802). Start after it lands.\n\n**Level:** QA tooling and the scenario card format. `Clause-②: no`, `Metadata-protocol: none`.\n\nDedupe (open and closed): \"scenario card generic marker origin\" and \"scenario card title zh en\" turned up only #30349 itself and the closed T1a schema card #30289. **New.**\n\nRelated: #30349, PR #30930, #30289, #30846.\n\nReader: the `domain:devx` lane seat, from `pm:queue`, after #30846 lands."

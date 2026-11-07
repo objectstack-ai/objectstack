@@ -13,19 +13,18 @@
   "labels": [
     "domain:ui",
     "enhancement",
-    "pm:blocked",
-    "priority:p2",
-    "repo:cloud"
+    "pm:queue",
+    "priority:p2"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-06T18:22:47Z",
-  "updated_at": "2026-11-06T18:59:46Z",
+  "updated_at": "2026-11-07T17:40:25Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/31025",
   "body": "repo:cloud#3 · hotlong · session_01Q4EjjRhUZjdy8VXs6Kkur2\nBlocked-by: #31020\n\nFiling gate: **④ coordination child**, the UI half of objectstack-ai/cloud#3656 item 1. The maintainer's ask: delete an environment-built app from one place, after a confirmation stating what goes (objects and row counts, recycle bin or permanent). The cloud#3656 dev measured that Studio > Packages already offers Delete package but does not list what goes. Delete surfaces belong to the platform (self-hosted shares them): 「平台的问题应该在平台处理」 (objectstack#30765).\n\n## 维护者速读\n\nStudio 里已经有「删除应用」，但确认框只让你输名字、选是否保留数据，不告诉你会删掉哪些对象、各有多少行，也没说删表是永久的、进不了回收站。这张卡把这些写进确认框。另外，cloud 的 AI 工具会发起删除确认，聊天里也需要一张能看懂的确认卡，而不是通用的「批准 / 拒绝」。\n\n## Readings (cloud#3656 dev, pin `c50e0dfa`)\n\n- `ui` `PackagesPage.tsx` ~1209: a typed-name confirmation with a keep-records / drop-records choice; no object list, no counts.\n- Dropping a table is not a record delete, so the recycle bin (ADR-0148) does not receive it.\n- `AiChatPage.tsx` renders custom cards only for `recordWrite` / `sampleDataCleanup`; a `delete_package` pending action (payload `packageRemoval`) falls back to a generic card.\n\n## Expected\n\n1. Delete package dialog: each object with its row count, other items by type, and an explicit \"tables are dropped permanently (not the recycle bin)\" line when records are dropped. Read the counts from the server; the lane names the read.\n2. A chat confirm card for `packageRemoval`, following eca7cd2008's record-write card pattern.\n\n## Acceptance\n\n- Tests or stories: the dialog lists objects and counts; the permanent line shows only when records are dropped; the chat card renders the payload.\n\nSuggested-grade: p2.\n\nDedupe (2026-11-06): `delete package dialog row count` → 181 hits, the top 3 QA runs. None."

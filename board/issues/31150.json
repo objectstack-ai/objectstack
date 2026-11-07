@@ -1,0 +1,36 @@
+{
+  "number": 31150,
+  "kind": "pull_request",
+  "title": "refactor(plugin-auth): derive the SCIM connection-id cap from SCIM_SERVICE_PRINCIPAL_PREFIX",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [
+    "marchtian"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-07T14:48:35Z",
+  "updated_at": "2026-11-07T15:58:20Z",
+  "closed_at": "2026-11-07T15:58:18Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-07T15:58:18Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/31150",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"marchtian\"} -->\n_Requested by **田騏** · [project thread](https://claude.ai/code/project/chan_01VmuUhXU9SSUzqJYyXSmYSi?thread=cmsg_01VmuUhXU9SSUzqJYyXSmYSi9Hju7DThD7eoLKoJU9hnHj)_\n\nFixes #31033\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- **改了什么：** SCIM 凭证签发接口对 `connectionId` 的长度上限（246）原来把 `svc:scim:` 前缀再手写了一遍来计算，现在改为读取已导出的常量 `SCIM_SERVICE_PRINCIPAL_PREFIX` 的长度；本卡 changeset 另补一段 Exported，说明随 SCIM 凭证接口新增的两个公开 `AuthManager` 方法。\n- **为什么改：** 审计里 SCIM 连接的操作者标签就是用这个常量拼出来的；如果以后前缀改了而上限没跟着改，过长的连接 id 会让该连接每次请求的审计写入失败。现在两者只有一个来源。\n- **风险与回滚：** 行为不变（上限仍是 246，超长仍答 400 INVALID_REQUEST），只是 plugin-auth 的一处常量来源加一份 patch changeset；回滚即 revert。\n- **先看：** `packages/plugins/plugin-auth/src/scim-connection-admin.ts` 的 `MAX_SCIM_CONNECTION_ID`；`.changeset/31033-scim-connection-id-cap-from-prefix.md`。\n- **两分钟验证：** `pnpm --filter @objectstack/plugin-auth exec vitest run src/scim-connection-admin.test.ts`，预期 10 个用例全绿（含 246 可签发、247 被拒）。\n- **需要你做的：** 无，席位落地。\n\n## What changes\n\n- `packages/plugins/plugin-auth/src/scim-connection-admin.ts`: `MAX_SCIM_CONNECTION_ID` is now `MAX_TEXT - SCIM_SERVICE_PRINCIPAL_PREFIX.length` instead of `MAX_TEXT - 'svc:scim:'.length`, importing the constant from `scim-connection-service.ts` (already imported from there). The doc comment says why. Value unchanged: 246.\n- `.changeset/31033-scim-connection-id-cap-from-prefix.md`: `patch` on `@objectstack/plugin-auth`. It also carries the card's optional item: an Exported paragraph naming the two public `AuthManager` methods behind the SCIM credential routes (`isScimWired()`, `mintScimConnectionCredential(engine, input)`), which the pending #30958 release note does not name. That note itself is untouched (byte-identical to `main`).\n\n## Tests\n\n- No test edited: the existing pin in `scim-connection-admin.test.ts` (246 accepted, 247 refused, `9 + 246 === 255`) holds unchanged.\n- One-shot reverse proof that the cap now follows the constant (not kept as a test): with `SCIM_SERVICE_PRINCIPAL_PREFIX` mutated to a 10-character `svc:scimx:` via `scripts/ablation-replace.mjs`, the pin turns red: the 246-character mint answers `400` with \"at most 245 characters\". Restored; blob hash equals HEAD (`9557afe1`), `git status` clean, file rerun 10/10 green.\n\n## Acceptance notes\n\n- None.\n\n## Verification\n\n<details><summary>Local readings</summary>\n\n- Head `56589092`: `pnpm --filter @objectstack/plugin-auth test` 234/234 files, 4168 passed / 10 skipped, lock VERDICT command-exit 0; `pnpm --filter @objectstack/plugin-auth typecheck` VERDICT command-exit 0.\n- `eslint --no-inline-config` on the touched source file: exit 0 (plugin-auth has no own lint script; repo-wide `pnpm lint` is CI's).\n- `dispatch-gates --commands`: 55 families derived (same list at `1f6f18d2`, `cb24c94f` and `56589092`). All 55 run at `1f6f18d2` (2 first exited 3 for prerequisites and were rerun after the fixture fetch and a full packages build, both exit 0); `--ran` reconciliation: 55 run, 0 NOT-MEASURED. After `56589092` (changeset-only commit) the changeset and text families were rerun: `check-empty-changeset`, `check-changeset-no-major`, `check-adr-0087-registration` (all `--base origin/main`), `check:issue-citations`, `check:doc-authoring`, `check:nul-bytes`, each exit 0.\n\n</details>\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\n<!-- signed: domain:server#3 · marchtian · session_017ihL2bjuYso9Pes3WcUTEb -->\n"
+}

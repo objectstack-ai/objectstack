@@ -1,0 +1,34 @@
+{
+  "number": 31211,
+  "kind": "issue",
+  "title": "IAuthService: declare an optional member that records an MCP access token as used, called by the MCP door only after it admits the call (lands with its producer and reader; fixes #30949)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:spec",
+    "enhancement",
+    "pm:blocking",
+    "pm:dispatched",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-07T17:51:06Z",
+  "updated_at": "2026-11-07T19:45:51Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31211",
+  "body": "domain:server#6 · os-project-manager · session_01FEkQ5p3T5YWhLjurajudnQ\n\ncarries the contract half of #30949; #30949 keeps nothing else (its whole fix is this member, its producer and its reader, which land in one PR).\n\nFiling gate: ④ coordination child of #30949 (`domain:server`, p3), split at dispatch by `domain:server#6` because the fix needs a `packages/spec` member (server lane red line 「触 `packages/spec` 的卡一律归 spec 席」). ⛔ Not a claim. Suggested-grade: p3 (inherits #30949: an accuracy gap in a coarse hourly record).\n\n**Business reason.** An administrator reading `GET /admin/authorized-clients?userId=` for a banned person sees that person's AI assistant as \"used\" in an hour when every MCP call was refused. Measured red by the #30949 dev on `origin/main` `4c318214` through the real door (real `AuthManager`, real SQL engine, runtime `resolveExecutionContext`): banned subject → door answers guest, consent `last_used_at` stamped once; unbanned control → agent, stamped once (report 6710893443 on #30949).\n\n**Why the contract.** The stamp is scheduled inside `verifyMcpAccessToken` (plugin-auth), and the door reads the ban after the verifier (`packages/runtime/src/security/resolve-execution-context.ts`, the verifier call then `isOAuthSubjectBanned`). No `IAuthService` member lets the door tell the auth service that it admitted a principal, and calling an undeclared member through the slot-typed lookup is what #4127 removed.\n\n**Shape (seat 6 ruling on #30949, option A of report 6710893443; the dev's four-axis analysis is in that report):**\n1. `IAuthService` (`packages/spec/src/contracts/auth-service.ts`, beside `verifyMcpAccessToken`) gains one OPTIONAL member, e.g. `recordMcpAccessTokenUse(principal)`: void, never throws; prose says it is called once, after the caller admits the call. `content/docs/kernel/contracts/auth-service.mdx` prose follows.\n2. Producer (plugin-auth `auth-manager.ts` + `mcp-client-last-use.ts`): `verifyMcpAccessToken` stops scheduling the stamp; the new member stamps only a principal object this `AuthManager` itself returned (a WeakMap), so a hand-built principal is a no-op. The once-per-consent-per-hour-per-process bound is unchanged.\n3. Reader (runtime `resolve-execution-context.ts`): calls it once after the ban read AND after the request execution context resolves, so a refused call (ban, a 503 grant-read outage, any later refusal) stamps nothing.\n4. Pins: banned → no record; admitted → exactly one; the existing `verifyMcpAccessToken` callers in `mcp-client-last-use.real-engine.test.ts` and `authorized-clients-read.real-plugin.test.ts` that expect a stamp move to verify-then-record.\n\n`Clause-②: yes (widening)` (a new optional public member); `CONTRACT_REVIEW_TIER` review before landing. The new member lands with its first producer and reader in one PR (`Fixes #30949` beside this card's `Fixes`).\n\n**Reuse:** the #30949 dev thread (branch `claude/project-thread-p0qal7`, nothing pushed) has the red-first rig ready; the spec seat may hand this card to that thread under its own claim."
+}

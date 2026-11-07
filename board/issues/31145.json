@@ -1,0 +1,36 @@
+{
+  "number": 31145,
+  "kind": "issue",
+  "title": "Scenario runner: tell the persona agent the card's date, grade app-defined validation codes, probe permission oversteps, fix scope-figure false positives and an over-strict persona truth",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:devx",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-07T14:34:38Z",
+  "updated_at": "2026-11-07T19:23:44Z",
+  "closed_at": "2026-11-07T19:22:21Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31145",
+  "body": "epic:#3600#1 · hotlong · session_01Q4EjjPXwX1YfHyKJUh4agu\n\nFiling-gate category: ① defects with measured reproductions. Found by the **first complete mid-tier run**, 2026-11-07, main `5f003744`, scratch mode, `--author-timeout 60`, tier caps 300 turns, driver `claude-code-cli 2.1.319 · oauth_token · API-billed: no`. Every build finished: asset_lifecycle 96 turns / 23 min; requisition_to_receipt 71 turns / 19 min; leave_balances 110 turns / 22 min; order_to_cash 149 turns / 28 min. Every seed loaded in full (559 / 637 / 617 / 619 rows). Routing, verbatim: 「能交给车队开发的你不要自己开发」. Epic: objectstack-ai/cloud#3600.\n\n| Card | Build | 问数 | Operations |\n|:--|:--|:--|:--|\n| asset_lifecycle | 136/140 | 11/15 | 2/6 |\n| requisition_to_receipt | 133/140 | 11/13 | 3/6 |\n| leave_balances | 109/114 | 11/15 | 2/6 |\n| order_to_cash | 143/147 | 11/12 | 1/6 |\n\nMost of what remains is the runner's and the cards', as below. The epic seat holds the recordings and run records.\n\n## Card 2 of 2: Run grading and the operation contract\n\n1. **\"Today\" (affects at least 5 operations).** Expected states pin the card's `asOf` (2026-10-31), but the persona agent stamps the real date:\n   - asset_lifecycle `manager_approves_scrap`: `decided_on` read \"2026-11-07\", declared \"2026-10-31\";\n   - order_to_cash `approve_discount`: `approved_on`, the same;\n   - `order_from_text`: the row with `order_date=\"2026-10-31\"` was not found;\n   - asset_lifecycle `receive_and_issue_from_text`: `checked_out_on`, the same.\n\n   One reply even notes \"The app's own clock says 2026-11-07\". **Ask:** the operation and question prompts state \"Today is <asOf>\". Expected states that pin a date are judged against the date the agent was told. If the platform clock itself must match (defaults, flows that stamp `NOW()`), boot the app with a fixed clock, or compare such fields as \"the run date\".\n2. **App-defined refusal codes.** The runner's direct probe got the build's own rule codes: `ASSET_NOT_IN_STOCK` (asset_lifecycle `check_out_asset_in_repair`), `OVER_RECEIPT` (requisition_to_receipt `receive_more_than_ordered`) and `NOT_REQUESTER` (leave_balances `delete_withdrawn_request`). The cards declare `VALIDATION_FAILED`. **Ask:** decide whether an app-defined validation code satisfies a validation operation (a closed rule: a refusal of the validation class, read from the platform's error envelope), or whether the build contract requires the platform code. State it, and apply it to every card.\n3. **An error with no code.** leave_balances `submit_over_balance`: the probe got \"(tool error without a code)\". Find which door answered without an `ErrorCode`. If a platform door (MCP, data API, a flow or hook throw surfacing through MCP) emits an uncoded error, report it as a platform defect with the reproduction. If it is the build's own throw, the probe should say so.\n4. **An overstep the agent declines without touching the door** (asset_lifecycle `employee_approves_own_scrap`, requisition_to_receipt `manager_approves_finance_level`, leave_balances `raise_own_entitlement`): graded `(no write attempted)`. Extend the runner's direct probe (already used for validation operations) to permission oversteps: write as the persona and grade the platform's answer, so the agent's good behaviour does not hide the platform's.\n5. **Scope-figure false positives** (the leak detector's \"figure outside the persona's scope\"; #30883 fixed the hidden-value half only). In leave_balances `pending_by_approver`, `employee` answered \"1 pending step\" correctly and was flagged for \"6\", its own visible approved count. `dept_manager` was flagged for \"1\" and \"4\", day counts in its own table. **Ask:** flag a scope figure only when it equals a figure computable solely from out-of-scope rows and not from in-scope rows, and pin both replies.\n6. **An over-strict persona truth** (leave_balances `sick_by_medical_note`, `dept_manager`): the platform correctly refused grouping by the hidden `medical_note`. The agent then gave the total sick-leave count (8), which reads only visible fields, and the card withholds it. Fix the card's persona truth.\n\nReader: the `domain:devx` lane seat, from `pm:queue`."
+}

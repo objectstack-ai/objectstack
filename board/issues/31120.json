@@ -2,9 +2,9 @@
   "number": 31120,
   "kind": "pull_request",
   "title": "i18n(platform-objects): ship the platform objects, Setup, Studio and Account in Arabic",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
-  "draft": true,
+  "draft": false,
   "author": {
     "login": "objectstack-fleet[bot]",
     "id": 332303061,
@@ -12,19 +12,26 @@
   },
   "labels": [
     "documentation",
+    "pm:awaiting-merge",
     "size/xl",
     "tests",
     "tooling"
   ],
-  "assignees": [],
+  "assignees": [
+    "marchtian"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-07T13:04:53Z",
-  "updated_at": "2026-11-07T13:46:17Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
-  "comments": 4,
+  "updated_at": "2026-11-07T16:16:44Z",
+  "closed_at": "2026-11-07T16:16:41Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-07T16:16:41Z",
+  "comments": 8,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/31120",
   "body": "<!-- claude-projects-attribution: {\"github_login\":\"marchtian\"} -->\n_Requested by **田騏** · [project thread](https://claude.ai/code/project/chan_01VmuUhXU9SSUzqJYyXSmYSi?thread=cmsg_01VmuUhXU9SSUzqJYyXSmYSiP9RS1KjicEPyef7VNhFzFa)_\n\nPart of #30512\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n- 业务影响：阿拉伯语（ar）用户打开平台对象、Setup、Studio 和 Account 时，界面不再是英文。\n- 范围：只动 `@objectstack/platform-objects`，按 #30951 加 zh-Hant 的同一套路加 ar；spec、ui、邮件模板都不碰。\n- 翻译：从 main 的 en 源重新翻译 3078 个叶子，术语对齐 ui/packages/i18n 的 ar；只有 17 个标识符（JWKS、cron、JSON 示例等）保留英文。\n- 跨包对齐：审批、分配规则、各设置页的导航名与对应包的 ar 标题逐字一致，并由现有测试守住。\n- 风险：只新增语言与测试里的语言列表，不改任何既有语言的文本；新文本同样走 source-hash 回退。\n- 合并：生成文件让 PR 超过 3000 行，需要座位契约复审后由人工合并。\n\n## What changes\n- New `ar` bundles in `packages/platform-objects/src/apps/translations`: `ar.objects.generated.ts` (1676 leaves), `ar.metadata-forms.generated.ts` (1263 leaves), their provenance table `ar.source-hashes.generated.ts` (16 deliberate echoes), the hand-authored `ar.ts` (139 leaves) and `ar.source-hashes.ts` recording the `en` digest of every hand leaf.\n- Registration: the extract config's `--locales` docstring and `translations:` baseline, `setup.translation.ts`, the `apps` barrel, and `metadata-translations/index.ts`.\n- Inline maps: 35 in `sys-user.page.ts`, 6 in `sys-organization.page.ts`, and the System Overview null label in `system.datasets.ts`.\n- Wording pins: `nav_account_approvals` reads as plugin-approvals' `my_pending` label, `nav_assignment_rules` as `sys_assignment_rule`'s plural label, each `nav_settings_*` as its service-settings hub title, and the four #30935 keys (`grp_account_ai_assistant`, both `nav_connect_agent` entries, `pages.connect_agent.label`).\n- Changeset `.changeset/30512-platform-objects-ar.md` (patch).\n\n## Tests\n- `ar` added to the locale lists of the platform-objects tests that #30951 widened for zh-Hant (vocabulary, nav parity, dead-key tombstone, source-hash, copy tests, record-page tabs, plugin translation loads), plus plugin-approvals `approval-status-vocabulary`, plugin-security `people-org-assignment-nav-contribution` and service-settings `setup-nav-hub-parity`. The cli `platform-page-i18n-parity` LOCALE_KEY shape already accepts `ar`.\n\n## Acceptance notes\n- Every leaf is translated; the only byte copies of `en` are identifiers and code examples, and the extract records them in the provenance table.\n- Lists of Latin identifiers use the Arabic comma, and no proclitic `و` is glued to a Latin token.\n- `Position` on the add-record button is الموضع and the job position is المنصب; a hook's `Body` is المتن.\n\n## Verification\n- `os i18n extract ... --locales=zh-CN,ja-JP,es-ES,zh-Hant,ar --fill=default --source-hashes`: regenerates the ar files byte-identical and leaves the other locales unchanged.\n- `vitest run` in platform-objects: 117 files, 1683 tests passed. The plugin-approvals, plugin-security, service-settings and cli parity tests passed.\n- `dispatch-gates --ran`: 64 derived families, 64 run, 0 NOT-MEASURED, all exit 0 (including `check:i18n`).\n- `pnpm lint`, platform-objects `typecheck`, and all 57 commands of the \"Lint · docs & code guards\" lane (including `check:cli-command-ids`): exit 0.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"

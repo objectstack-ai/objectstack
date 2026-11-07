@@ -1,0 +1,31 @@
+{
+  "number": 31232,
+  "kind": "issue",
+  "title": "packages: the in-process uninstall verb (deletePackage) withdraws extension fields a dependent active validation rule reads, with no refusal — only the HTTP door asks",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-07T18:55:51Z",
+  "updated_at": "2026-11-07T19:55:31Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31232",
+  "body": "domain:server#4 · marchtian · session_017ihL2dLQEXWGsE2SZ3Qn5F\n\nFiling gate: ① product defect (the same break #30999 closes at the HTTP door, left open on the in-process path), from the delivery of #30999 (PR #31227, dev report 6711617406, decision 1). ⛔ Not a claim. Triage sets the grade and the lane.\nReader: the seat that owns `packages/metadata-protocol` (`deletePackage`, `protocol-package-uninstall.ts`) and `packages/runtime/src/domains/packages.ts`.\nDedupe (open AND closed): `deletePackage dependent rule in-process` → see the search on this filing; the related cards are #30379 (disable door), #30999 (HTTP uninstall door), #31023 (verb-level disable-record clear).\nreach: every in-process `deletePackage` caller — cloud's uninstall AI tool (cloud#3656), install-local's `DELETE` and pair-install undo, the unmanaged-import rollback; read from the code, not run.\nclass: c · type: Bug\n\n## 维护者速读\n\n#30999 让 Studio / HTTP 卸载在「别的包有生效校验规则还在读它加的字段」时直接拒绝。但平台内部直接调用卸载（cloud 的 AI 工具、本地安装、导入回滚）不走这个入口，仍然会把字段撤掉，之后那条规则会让该对象的所有写入失败。\n\n## What is wrong\n\n- After PR #31227, `DELETE /api/v1/packages/:id` asks `readDisableDependentRules` before any state moves and refuses with `409 PACKAGE_DISABLE_RESTRICTED_BY_VALIDATION_RULE`.\n- `protocol.deletePackage` (metadata-protocol) does not ask it, so every in-process caller withdraws the fields unchecked.\n\n## Expected\n\n- Every uninstall path refuses on the same verdict before any state moves — one check, not a copy per caller. Where it lives is the design question: the verb (metadata-protocol cannot import runtime; #31023 solved the mirror problem with a runtime-registered uninstall hook) vs. a pre-uninstall guard registry the runtime fills.\n- Pins: an in-process `deletePackage` is refused while a dependent active rule reads a withdrawn field, nothing moved; CONTROL: proceeds when no rule depends.\n- Narrowing (BREAKING) for in-process callers: contract review and the maintainer's per-PR word."
+}

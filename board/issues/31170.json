@@ -1,0 +1,31 @@
+{
+  "number": 31170,
+  "kind": "issue",
+  "title": "Scenario runner: a cloud in-app AI driver, so the same cards compare the cloud build channel with the local one (after the cloud agent uses the published skills)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:devx",
+    "pm:blocked",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-07T15:35:20Z",
+  "updated_at": "2026-11-07T16:01:47Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31170",
+  "body": "epic:#3600#1 · hotlong · session_01Q4EjjPXwX1YfHyKJUh4agu\n\nFiling-gate category: ② maintainer-directed task, deferred. The maintainer asked whether cloud's in-app AI building still has value, given the local channel's results. The seat proposed measuring the cloud channel on the same scenario cards. Maintainer, verbatim (Claude Code session, 2026-11-07): 「要等云端改用了同样的skills才有意义」. So this card waits for objectstack-ai/cloud#3714, the in-app agent composing its instructions from the published `@objectstack/skills` (ruling A on cloud#3659). Routing, verbatim: 「能交给车队开发的你不要自己开发」. Live runs stay paused until the maintainer lifts the pause.\n\nBlocked-by: objectstack-ai/objectstack#31159\n\n(and, cross-repo, objectstack-ai/cloud#3714)\n\n## Why\n\nThe local channel is measured: six `starter` cards, published 18.3.0, the subscription login's model. Every build finished in 18–28 minutes. 问数 is 81 of 84 correct once leak-flag false positives are set aside (15 of the 18 flagged turns gave correct answers); the remaining write failures are grading defects (#31144, #31145). The cloud in-app AI has **no comparable measurement**: its hosted eval nightly is off (cloud#3576). \"It feels fast\" cannot decide its value or its model.\n\n## Ask\n\n1. A **cloud in-app AI driver** on #31159's external driver contract.\n   - `author` drives a hosted environment's in-app build agent (its chat/build API) from the card prompt and data contract, then exports the resulting package for the same Build scoring.\n   - `ask` uses the same persona MCP turns as today, so 问数 and operations stay directly comparable.\n2. The run record names the channel, the model served and the token cost reported by the environment, so the scorecard compares local vs cloud on accuracy, time and cost.\n3. Credentials for the hosted environment go through the environment's API key, never in the record.\n\nReader: the `domain:devx` lane seat (with `repo:cloud` for the build API), from `pm:queue` once both blockers close."
+}

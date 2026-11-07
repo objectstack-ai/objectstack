@@ -1,0 +1,36 @@
+{
+  "number": 31172,
+  "kind": "issue",
+  "title": "Publish @objectstack/scenarios as a standalone CLI (npx), with the public cards and never the private overlay; not an os subcommand (ruling D stands)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:devx",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-07T15:38:59Z",
+  "updated_at": "2026-11-07T20:03:08Z",
+  "closed_at": "2026-11-07T20:01:43Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31172",
+  "body": "epic:#3600#1 · hotlong · session_01Q4EjjPXwX1YfHyKJUh4agu\n\nFiling-gate category: ② maintainer-directed task. Maintainer, verbatim (Claude Code session, 2026-11-07), on the seat's proposal to publish the runner as a standalone command-line tool rather than move the scenario machinery into the gallery repository: 「把执行器发布成一个独立的命令行工具，同意」. The same message asked whether it belongs in the `os` CLI instead. The seat answered no, and this card does not do it. Ruling D on #30291 (verbatim 「同意 D」) already cancelled `os lint --eval`, keeping scenario scoring out of the customer CLI. This card **amends ruling D in one respect only**: `@objectstack/scenarios` becomes a published package (it was private). The cards, runner and scorer stay in this repository. Routing, verbatim: 「能交给车队开发的你不要自己开发」. Epic: objectstack-ai/cloud#3600.\n\n## Why\n\nToday running the cards needs a full monorepo checkout, an install and a dependency build (#31161 documents that). External teams and other agent tools (#31159) cannot run a card without cloning the platform. A published CLI gives one entry point. Longer-term, the same tool is how a customer could write acceptance cards for an app an AI built for them; that is a product decision for later and out of scope here.\n\n## Ask\n\n1. Publish `@objectstack/scenarios` (drop `private: true`), versioned with the `@objectstack/*` release train, with a `bin` (e.g. `objectstack-scenarios run …`, also via `npx @objectstack/scenarios run …`) exposing today's `run-scenarios` options.\n2. Ship the **public** cards (`docs/qa/scenarios/*.json`) as package data. **Never** ship anything from the private overlay (objectstack-ai/cloud#3603: held-out and customer-derived cards). Add a packaging test that fails if a card outside `docs/qa/scenarios/` lands in the tarball.\n3. Keep the runner's rules: refuse API-billed logins, default to the published packages (`--packages published`, #31147), and the exporter refuses `workspace` records.\n4. The published entry must load as built JavaScript, not `.ts` (the gap #30915 closed for `./score`). Check the `bin` with a packed-tarball smoke test.\n5. A changeset (`minor`, new public package) and a README section for running from npm.\n\nNot in scope: an `os` subcommand (ruling D stands); customer-facing acceptance cards (needs its own decision card).\n\nReader: the `domain:devx` lane seat, from `pm:queue`. Priority p2: nothing waits on it; the maintainer may raise it."
+}

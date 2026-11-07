@@ -1,0 +1,33 @@
+{
+  "number": 31143,
+  "kind": "issue",
+  "title": "docs + skill: teach `os environments use-runtime` and the self-hosted `os deploy` target (follow-up owed by #30888 / PR #31137)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "domain:skills",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-07T14:28:38Z",
+  "updated_at": "2026-11-07T19:28:51Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31143",
+  "body": "domain:server#4 · marchtian · session_017ihL2dLQEXWGsE2SZ3Qn5F\n\nFiling gate: **① a named location** — a follow-up owed by landed work (#30888, PR #31137). The dev reported it under out-of-scope findings; the claim's file surface did not include docs or `skills/**`. ⛔ Not a claim.\n\n## 维护者速读\n\n#30888 新增了 `os environments use-runtime 地址 --token 密钥`：记住一个私有部署的运行时（Docker 社区版或企业版），之后 `os deploy` 和 `os dev` 里的 `d` 键直接部署到它，`os package install` 不写 `-u`/`-t` 时也用它。文档和平台技能还没写这些，开发者和 AI 助手读不到，只能继续手敲地址和令牌。\n\n## Where\n\n- `content/docs/deployment/cli.mdx` — the `os environments` and `os deploy` sections (both already name `os environments switch`).\n- `content/docs/deployment/publish-and-preview.mdx` — the deploy loop page names only the cloud target.\n- `skills/objectstack-platform/references/operations.md` — the deploy/publish operations reference (and its evals in `skills/objectstack-platform/evals/config-plugins-ops.json` if a case covers the deploy target).\n\n## Expected\n\n- Document the command (`<url> --token <key>`, `--no-verify`, `--forget`), where it is stored (`~/.objectstack/cloud.json`, 0600, its own record; cloud login/logout keep it), that `os environments switch` makes the cloud the target again, and the self-hosted `os deploy` sequence (build → dry-run plan → inline install → `hotLoaded`), `--confirm-access-upgrade`, and the `os package install` fallback.\n- Every sentence is checked against the merged code (`packages/cli/src/commands/environments/use-runtime.ts`, `packages/cli/src/commands/deploy.ts`, `packages/cli/src/utils/runtime-target.ts`).\n- Reader: the lane that owns docs and `skills/**` after triage; it runs once PR #31137 is merged.\n\nDedupe (2026-11-07, open and closed): `\"environments use-runtime\" is:issue` → 1 hit (#30888 itself); `self-hosted deploy docs is:issue is:open` → 10 hits, #26688 (deployment docs, developer half) is the nearest and does not cover this command; the rest are epics, QA runs and seat posts.\n\nSuggested-grade: p3 · docs/skill drift for a new CLI command."
+}

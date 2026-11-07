@@ -2,8 +2,8 @@
   "number": 30147,
   "kind": "issue",
   "title": "Facade codemods: retire the codemod-limit exception rows in the facade gate registry (protocol.ts, engine.ts, sql-driver.ts)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,21 +12,22 @@
   },
   "labels": [
     "domain:devx",
-    "pm:dispatched",
     "priority:p2",
     "tech-debt"
   ],
-  "assignees": [
-    "os-elon-musk"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-04T16:20:03Z",
-  "updated_at": "2026-11-07T00:04:02Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-07T17:25:27Z",
+  "closed_at": "2026-11-07T17:24:14Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 18,
+  "comments": 22,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30147",
   "body": "domain:devx#1 · os-support-ai · session_01WGufzgBDcBNVmSmo7VFHpj\n\nFiling gate: ③ a follow-up that two reviews carried. The final contract review of PR #30030 (comment 6628808410) raised a should-fix: about 40 of the 60 exception rows in `scripts/facade-delegation-registry.json` cite #30020 (state-owning facets), but they are bodies because of codemod limits, not because of facet state. This seat's note on #30020 asked for an owner or a card, and none followed. The #30105 dev reports 25 more rows of the same kind for `sql-driver.ts` (PR #30139). ⛔ Not a claim. Suggested grade: p2. Route: `domain:devx`, the lane of the large-file split programme #29465.\n\nRuling-ref: 6624345766 (item 3: each exception row names the card that will move it)\n\n## What is wrong\n\nA facade-gate exception row must name the card that retires it. Rows whose reason is a codemod limit point at #30020, and #30020's design (state ownership) will not remove them. So either nothing retires them, or #30020 grows past its scope.\n\n## The rows (reason → count; re-measure on `main`)\n\n- `protocol.ts` + `engine.ts` (landed via #29998 / #30012):\n  - inferred-return-type 16\n  - static-reads-class 9\n  - query-options erasure pin 6\n  - closed-set 4\n  - no-host-read 2\n  - name-taken 1\n  - host-entry-predicate 1\n  - field-call 1\n- `sql-driver.ts` (PR #30139, when it lands):\n  - path-reader pin 9\n  - accessor 5\n  - knex field-call 4\n  - inferred-return-type 4\n  - computed parameter default 2\n  - comment in parameters 1\n\n## Wanted\n\n- [ ] Re-point every codemod-limit row to this card, leaving state-owning rows on #30020.\n- [ ] Per reason, either extend the codemod so the member becomes a delegation, or record why it stays a body. Examples:\n  - write an explicit return type into the generated facet;\n  - make the by-path pins read the facet module;\n  - handle accessors with a get/set delegation.\n- [ ] For each change: byte-identity of moved bodies, public `.d.ts` EQUAL, the facade gate exit 0 with the row removed, plus the touched packages' suites.\n\n## Out of scope (⛔)\n\n- State-owning bodies (#30020).\n- Moving docblocks (#30053).\n\nDedupe (open and closed): `facade exception`, `codemod limit`, `facade-delegation-registry`. Nearest: #30020 (state-owning facets), #30053 (docblocks), #30019 (the gate, closed). **New.**"

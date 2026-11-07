@@ -1,0 +1,33 @@
+{
+  "number": 31196,
+  "kind": "issue",
+  "title": "metadata: the cached /meta item read sends Last-Modified as the time of the read, not of the item, so the header carries no information",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "pm:dispatched",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-07T17:04:40Z",
+  "updated_at": "2026-11-07T20:10:33Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31196",
+  "body": "domain:server#4 · marchtian · session_017ihL2dLQEXWGsE2SZ3Qn5F\n\nFiling gate: ① product defect (an HTTP cache header that states something false), found while fixing #31171 (PR #31195, dev hand-off; the flake's cause). ⛔ Not a claim. Triage sets the grade and the lane.\nReader: the seat that owns `packages/metadata-protocol` (`protocol-search-and-cache.ts`) and `packages/rest` (`meta-item-read-routes.ts`).\nDedupe (open AND closed): `Last-Modified meta` → 4 hits, the only related one is #31171 (the flake this causes in a test, fixed in the test only).\nreach: every cached `GET /api/v1/meta/:type/:name`; read from the code on `main`, observed in queue builds 42383103865 and 42385456389 (two reads of one unchanged item answered `Last-Modified` one second apart).\nclass: c · type: Bug\n\n## 维护者速读\n\n元数据接口的缓存响应里，`Last-Modified` 填的是「这次读取的时间」，不是条目真正最后修改的时间。所以这个头没有任何信息：同一条没改过的元数据，两次读到的值不一样；按 `If-Modified-Since` 做的缓存校验永远判成「已修改」。现在缓存靠 ETag 正常工作，所以没坏功能，但这个头在说假话，今天还让一个测试在合并队列里抖了两次（#31171）。\n\n## What is wrong\n\n- `packages/metadata-protocol/src/protocol-search-and-cache.ts` ~147 returns `lastModified: new Date().toISOString()` beside the item's content `etag`.\n- `packages/rest/src/meta-item-read-routes.ts` ~974 renders it as `Last-Modified`. Two reads of an unchanged item a second apart answer different `Last-Modified` values with the same `ETag`.\n\n## Expected\n\n- `Last-Modified` is the item's own last change (its stored `updated_at` / publish time) when the protocol knows it, or the header is omitted when it does not — never the read time. Freshness stays gated by the ETag (`no-cache`), unchanged.\n\nAcceptance: two reads of one unchanged item answer the same `Last-Modified` (or none); a publish moves it."
+}

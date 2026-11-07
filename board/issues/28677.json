@@ -1,7 +1,7 @@
 {
   "number": 28677,
   "kind": "issue",
-  "title": "[PM seat] domain:server · seat 5 — ⏳ vacant",
+  "title": "[PM seat] domain:server · seat 5 — 🟢 os-project-manager · 由 os-project-manager 账户的项目负责",
   "state": "open",
   "state_reason": null,
   "draft": null,
@@ -14,17 +14,17 @@
     "pm:seat"
   ],
   "assignees": [
-    "os-elon-musk"
+    "os-project-manager"
   ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-01T13:10:21Z",
-  "updated_at": "2026-11-06T17:16:54Z",
+  "updated_at": "2026-11-07T17:09:05Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 13,
+  "comments": 14,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/28677",
-  "body": "domain:server#5 · os-elon-musk · session_016WV4cyvF7SP65frVFAYLv7\n\n⚠️ **Seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/server.md` (⛔ not copied here). This is **`domain:server` seat 5**. Seat 1 is #6367, seat 2 is #20966, seat 3 is #26761, seat 4 is #27737 and seat 6 is #29908 (⛔ this post is none of them).\n\n## Current PM\n\n⏳ **vacant** since 2026-11-06T17:20Z. Previous PM: `os-elon-musk` · `session_016WV4cyvF7SP65frVFAYLv7` · seated 2026-11-05T21:34Z (project \"Objectstack\", thread \"Server 车道派发(席5 #28677)\"). Sign-off brief: the latest comment on this post by that session. Signed off on the maintainer's order, 2026-11-06T15:14Z: 「当前任务处理完，合并后就下班」. Successor: `/pm-dispatch 接手`, then read this post.\n\n## Handover ledger\n\n- **In flight:** none. Every claim of the session is landed (`check-handover.mjs --session=session_016WV4cyvF7SP65frVFAYLv7 --account=os-elon-musk` exit 0 at 2026-11-06T17:16Z).\n- **Stay-behind:** none.\n- **Queue snapshot:** read live (`pm:queue` + `domain:server`); ⛔ not copied here. #30758 stays in `pm:queue`, unclaimed (waits on draft PR #30747).\n- **Pointer:** canonical ledger = labels + assignee + `Claim:` comments carrying `Seat: domain:server#5` + `head:claude/` PRs.\n\n## Hot-file serial queue\n\n- **This seat holds:** nothing. Cross-seat note: #30991 (#30958, `domain:server#3`) owes the swap of its `svc:scim:` literal for `SCIM_SERVICE_PRINCIPAL_PREFIX` from #30989, which landed first.\n\n## Notes\n\n- **Mailbox:** PR #30661 closed at sign-off. **Patrol:** none (routine deleted at sign-off).\n- **Write path:** the relay (`post-stamped.mjs`, `label-write.mjs`, `fleet-write/dispatch.mjs`). ⛔ No GitHub MCP writes.\n- **Publication:** objectstack. A merge to `main` publishes nothing. The release is the Version Packages PR, a human act.\n\n<!-- signed: domain:server#5 · os-elon-musk · session_016WV4cyvF7SP65frVFAYLv7 -->\n"
+  "body": "domain:server#5 · os-project-manager · session_01FEkQ5o8PE7ZtVjcor51wBZ\n\n⚠️ **Seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/server.md` (⛔ not copied here). This is **`domain:server` seat 5**. Seat 1 is #6367, seat 2 is #20966, seat 3 is #26761, seat 4 is #27737 and seat 6 is #29908 (⛔ this post is none of them).\n\n<sub>Refreshed 2026-11-07T17:06Z (seated).</sub>\n\n## Current PM\n\n🟢 `os-project-manager` · `session_01FEkQ5o8PE7ZtVjcor51wBZ` (a Claude Code project thread, \"运行 server 席位 A\"), seated on the maintainer's 「server 再开两个座位」 and 「并发都是5」. 由 os-project-manager 账户的项目负责. Posture, ledger and round reports live in the project.\n\n## Handover ledger\n\n- **Inherited:** nothing. The previous PM (`os-elon-musk` · `session_016WV4cyvF7SP65frVFAYLv7`) signed off with brief 6690868173: in flight none, stay-behind none.\n- **Pointer:** canonical ledger = labels + assignee + `Claim:` comments carrying `Seat: domain:server#5` + `head:claude/` PRs.\n\n## Hot-file serial queue\n\n- **This seat holds:** nothing.\n\n## Notes\n\n- **Split:** seat 5 takes unclaimed `pm:queue` cards in the lane's full order, under the claim race with seats 1–4 and 6: re-read assignee and newest comments before every claim; the earlier claim wins. Up to 5 card threads.\n- **Patrol:** `trig_01HN9PigP24zkTGya8HbPfme` · `5 * * * *` (hourly, self-bound). **Mailbox:** PR #31199.\n- **Write path:** the relay (`post-stamped.mjs`, `label-write.mjs`, `fleet-write/dispatch.mjs`). ⛔ No GitHub MCP writes.\n- **Publication:** objectstack. A merge to `main` publishes nothing. The release is the Version Packages PR, a human act.\n\n<!-- signed: domain:server#5 · os-project-manager · session_01FEkQ5o8PE7ZtVjcor51wBZ -->\n"
 }

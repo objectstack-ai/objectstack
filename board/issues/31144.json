@@ -1,0 +1,36 @@
+{
+  "number": 31144,
+  "kind": "issue",
+  "title": "Scenario cards: Build checks must trace to the build prompt (dashboard/report names, option minimums, inline edit); approval tags conflict with cards that seed approval history as plain rows",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:devx",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-07T14:34:35Z",
+  "updated_at": "2026-11-07T17:25:48Z",
+  "closed_at": "2026-11-07T17:24:14Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31144",
+  "body": "epic:#3600#1 · hotlong · session_01Q4EjjPXwX1YfHyKJUh4agu\n\nFiling-gate category: ① defects with measured reproductions. Found by the **first complete mid-tier run**, 2026-11-07, main `5f003744`, scratch mode, `--author-timeout 60`, tier caps 300 turns, driver `claude-code-cli 2.1.319 · oauth_token · API-billed: no`. Every build finished: asset_lifecycle 96 turns / 23 min; requisition_to_receipt 71 turns / 19 min; leave_balances 110 turns / 22 min; order_to_cash 149 turns / 28 min. Every seed loaded in full (559 / 637 / 617 / 619 rows). Routing, verbatim: 「能交给车队开发的你不要自己开发」. Epic: objectstack-ai/cloud#3600.\n\n| Card | Build | 问数 | Operations |\n|:--|:--|:--|:--|\n| asset_lifecycle | 136/140 | 11/15 | 2/6 |\n| requisition_to_receipt | 133/140 | 11/13 | 3/6 |\n| leave_balances | 109/114 | 11/15 | 2/6 |\n| order_to_cash | 143/147 | 11/12 | 1/6 |\n\nMost of what remains is the runner's and the cards', as below. The epic seat holds the recordings and run records.\n\n## Card 1 of 2: Build checks the build was never told about\n\n**Principle to enforce:** every Build check must trace to text the build prompt carries. Otherwise a faithful build fails for not guessing a name.\n\n1. **Dashboard / report names (all four cards).** `expect` pins machine names, but the build prompt never states them:\n   - `demoorder_receivables_aging_report`: the build made `demoorder_receivables_dashboard`, report `demoorder_receivables_aging` and dataset `demoorder_receivables`;\n   - `demoasset_asset_value_by_category`: the build made `demoasset_asset_overview` and report `demoasset_asset_value_by_category_department`;\n   - `demoleave_leave_days_by_department`: the build made `demoleave_leave_overview` and reports `demoleave_approved_leave_by_department` and `…_lieu_accrued_by_department`.\n\n   The paired `nav:<name>->exists` checks fail with them. The build replies show the agent read the dashboard and report rules and built both. **Ask:** either state each expected dashboard or report name in the data contract (as persona permission sets already are: `<namespace>_<persona id>`), or check by function (a dashboard or report over the named object and measure). Choose one and apply it to every card.\n2. **Select option minimums** (`select:…>=Nopts` on requisition_to_receipt `supplier.category` / `supplier.rating`, leave_balances `leave_type.code`, asset_lifecycle `asset_category.depreciation_method`): state the minimum option counts in the contract, or drop the checks the card prose does not imply.\n3. **Approval tags vs the cards' own data model (all four):** `approval-binds-expected-object` / `dynamic-approver-binds-expected-object` / `multi-step-approval-binds-expected-object` fail. The cards **seed approval history as a plain object** (`approval_step` rows), and the builds followed that model: status fields, an `approval_step` object and flow-backed actions, not the platform's approval flow node. leave_balances has no flow at all. The tag rows (#30984) expect a platform approval flow bound to the object. **Ask:** decide the intent per card. Either the card exercises the platform approval engine (its seed and questions then cannot pre-load engine history as plain rows, and the prompt must say \"use the platform approval flow\"), or the card models approvals as data (the approval tags come off it). If neither keeps the cards' 问数 over approval history answerable, stop and report it as a decision instead of choosing.\n4. `master-detail-inline-edit` (order_to_cash): same principle. Say it in the prompt or drop it.\n\nReader: the `domain:devx` lane seat, from `pm:queue`."
+}

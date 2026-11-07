@@ -1,0 +1,33 @@
+{
+  "number": 31217,
+  "kind": "issue",
+  "title": "console: the sharing-rule object picker lists only shareable objects, business objects first",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:ui",
+    "enhancement",
+    "pm:dispatched",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-07T18:05:12Z",
+  "updated_at": "2026-11-07T19:20:49Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31217",
+  "body": "domain:server#3 · marchtian · session_017ihL2dFb2QdZEHEJ83cR2B\n\nFiling gate: ② missing capability, the console half of #30209 row 5 (option B). The server half is PR #31207, `GET /api/v1/sharing/shareable-objects`. ⛔ Not a claim. Triage sets the grade and the lane.\nReader: the `ui` seat for console field widgets (`ui/packages/fields`), plus a one-line object edit in `packages/plugins/plugin-sharing` (the `sys_sharing_rule.object_name` widget hint).\nDedupe (open AND closed): `sharing rule object picker` → 106 hits, `shareable objects` → 12; the only open match is #30209 (the source card). #30621 (closed) is the save-time refusal this list mirrors.\nreach: the console's 共享规则 new form, object field; read from the code on `main` and PR #31207, not run.\ntype: Enhancement\n\n## 维护者速读\n\n新建共享规则时，对象下拉框列出 86 个对象，大多是 `sys_*`，业务对象埋在里面，而且有些对象选了也存不进去。服务器已经有（或即将有，PR #31207）一个只列「规则能生效的对象」的接口，业务对象在前。本卡让下拉框改读这个接口。\n\n## What to build\n\n- A console picker widget that reads `GET /api/v1/sharing/shareable-objects` (admin-only; same admission as the rule doors) and shows its order as given: business objects, then platform objects, each by label.\n- Flip the widget hint on `sys_sharing_rule.object_name` to the new widget **in the same PR that registers it**. Today the field uses `object-ref`, which works; an unregistered hint degrades to a text box, so the hint must not move before the widget exists (#31207 deliberately left it).\n- Behaviour on refusal: 403/501 from the endpoint falls back to today's `object-ref` list rather than an empty picker.\n\n## Acceptance\n\n- The picker lists no object that a save would refuse with `SHARING_NOT_ENABLED`, and no credential or session object (`sys_session`, `sys_account`, `sys_api_key`, `sys_secret`, …).\n- Business objects come first.\n- CONTROL: an object that is shareable on `main` stays selectable and saves.\n\nDepends on: PR #31207 merged.\nSuggested-grade: p3 · from a Setup walkthrough (#30209)."
+}

@@ -1,0 +1,31 @@
+{
+  "number": 31176,
+  "kind": "issue",
+  "title": "skills(objectstack-data) + docs(rls): teach \"the person is a record\" — a membership key with `valueField: 'id'` yields the caller's own roster rows (#31129 follow-up)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "domain:skills",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-07T15:55:44Z",
+  "updated_at": "2026-11-07T17:18:53Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31176",
+  "body": "domain:spec#4 · marchtian · session_017ihL2eHDXrsKgGAUHq956U\n\nFiling gate: ④ coordination — the docs-and-skill half of the maintainer's ruling 6708428544 on #31129 (letter A, 「同意」), whose execution names it: \"`domain:skills` then adds the \"the person is a record\" example to the data skill and the RLS guide.\" ⛔ Not a claim. Triage sets the grade.\nReader: `domain:skills` — `skills/objectstack-data/rules/security.md` (+ its eval `skills/objectstack-data/evals/hooks-security-seeds-datasources.json`) and `content/docs/permissions/rls.mdx`, after PR #31174 merges.\nDedupe (open AND closed): \"membership key valueField id skill\" → 17 hits; none teaches `valueField: 'id'` (#25234 designed the keys, #26423 named them in the guide's context-variables section).\nBusiness reason: HR, service-desk and portal apps model the person as a row (`employee`, `agent`, `customer`). Once PR #31174 lands, an author can declare `my_employee_ids` with `userField: 'user'`, `valueField: 'id'` and write `employee in current_user.my_employee_ids`. Until the skill and the guide say so, an AI author still reaches for `owner_id` on every row or a junction table, which is what the ruling set out to end.\nBlocked-by: #31129\n\n## Owed\n\n1. `skills/objectstack-data/rules/security.md`: in the membership-key section, add the \"the person is a record\" example (roster `employee` with `userField: 'user'`, `valueField: 'id'`; a `leave_request` policy `employee in current_user.my_employee_ids`), and say what it does not do: it grants nothing by itself, and comparing the set with another object's column is still refused. Add or extend an eval prompt in `hooks-security-seeds-datasources.json` that exercises it.\n2. `content/docs/permissions/rls.mdx`: the same example beside the existing membership-key text.\n\nWording source: the merged `packages/spec/src/security/rls.zod.ts` membership-key docblock and the lint explanations `membership-key-value-field-invalid` / `rls-predicate-membership-key-target` from PR #31174.\n\n**Level:** docs and skill text; Tier H if `skills/**` is governed at landing (the dev checks `check-governed-merges`). Full Fable review per the maintainer's standing skills rule.\n\nRelated: #31129, PR #31174, #25234."
+}

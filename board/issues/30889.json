@@ -2,8 +2,8 @@
   "number": 30889,
   "kind": "issue",
   "title": "`os mcp connect`: register the active environment's MCP server with the developer's MCP client in one command, letting the client run the environment's own OAuth (epic cloud#3652; the single-authorization-server question stays on its Later decision card)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,9 +13,7 @@
   "labels": [
     "domain:server",
     "enhancement",
-    "pm:dispatched",
-    "priority:p3",
-    "repo:cloud"
+    "priority:p3"
   ],
   "assignees": [
     "marchtian"
@@ -23,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-06T09:08:24Z",
-  "updated_at": "2026-11-07T12:25:49Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-07T16:01:23Z",
+  "closed_at": "2026-11-07T15:59:55Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30889",
   "body": "repo:cloud#3 · hotlong · session_01Q4EjjRhUZjdy8VXs6Kkur2\n\nBlocked-by: #30871\n\nFiling gate: **③ a task on the maintainer's word.** Epic objectstack-ai/cloud#3652, coordinator session 2026-11-06, verbatim: 「我觉得先把受管软件包的开发循环走顺了」, then 「同意，然后第一步先解决我本地开发的软件包怎么能够方便地发布到云端」. Phase 2 lists \"`os mcp connect`: reuse the CLI login to run the environment's MCP OAuth in the same browser (platform SSO already signed in, one consent), then write the MCP client's config\". The epic's model: MCP reads the environment for context and does not write a managed package's content. Ruling Q1 on cloud#3652, verbatim: 「a 本地 os dev（推荐）」. Q3 does not apply.\n\nCarrier: objectstack. The CLI command is platform code. Cloud already serves everything an MCP client needs on a hosted environment (Today 3), so there is no cloud card.\n\n## 维护者速读\n\n现在要让 Claude Code 之类的工具连上云端环境的 MCP，开发者得自己找到环境地址、拼出 `claude mcp add` 命令。本地 `os dev` 会打印这行命令，云端环境没有。这张卡加一个 `os mcp connect`：自动找到当前环境，把它的 MCP 地址写进 MCP 客户端的配置，登录授权由客户端按环境自己的 OAuth 在浏览器里完成。「用云端登录直接免授权」要等以后「控制平面做唯一授权服务器」那张决策卡，这里不碰。\n\n## Today\n\n1. **No `os mcp` command exists.** `packages/cli/src/commands/` has no `mcp` topic (objectstack `origin/main` `c50e0dfa`, directory listing). (measured)\n2. **`os dev` prints a connect hint for the local server only**: Endpoint, Skill, and `claude mcp add --transport http objectstack <origin>/api/v1/mcp` (`packages/cli/src/commands/dev.ts:197-207`). The scaffold README has the same line for `localhost:3000` (`packages/create-objectstack/src/templates/blank/README.md:72`). Nothing in the CLI writes an MCP client config file: `.mcp.json` / `mcpServers` → 0 hits in `packages/cli/src`. (measured)\n3. **A hosted environment already serves MCP with OAuth discovery.** (measured, cloud `origin/main` `8f574b9e`)\n   - The kernel mounts the MCP server plugin (`packages/objectos-runtime/src/artifact-kernel-factory.ts:1284`).\n   - `/api/v1/mcp` answers 401 with `resource_metadata=\"https://ENV-HOST/.well-known/oauth-protected-resource\"`. Cloud's discovery proxy serves the protected-resource and authorization-server documents on the environment host (`oauth-discovery-proxy-plugin.ts:13-15`, `:39-43`).\n   - Dynamic client registration is open, with an edge limit of 5 per 60 s (`packages/cloudflare-shared/cloudflare/container-forward.ts:83`).\n   - A revoked grant stops opening `/api/v1/mcp` on the hosted path (`packages/objectos-runtime/src/mcp-revoked-grant.ts:3`, cloud#3431).\n4. **The environment is the authorization server.** objectstack's plugin-auth serves `/.well-known/oauth-authorization-server` and `/.well-known/oauth-protected-resource` (`packages/plugins/plugin-auth/src/auth-plugin.ts:4980`, `:5016`). The measured client path is DCR as a public client plus PKCE S256 with `resource` = the MCP URL (objectstack#30345 \"Measured\"). (measured)\n5. **Revocation is being fixed.** objectstack#30345 (p1, dispatched): an MCP JWT access token cannot be revoked today. (measured on the issue)\n6. **Whether the environment's sign-in page reuses the platform session** (the epic's \"platform SSO already signed in\") is not measured here.\n7. **The Later decision.** The epic lists \"the control plane as the single OAuth authorization server for CLI and MCP, with environments as resource servers\", to be filed after objectstack#30345 lands. Using the CLI's cloud login token as an MCP credential is that decision's question. (measured on the epic)\n\n## Expected\n\n1. `os mcp connect` resolves the target the deploy command uses (#30871: the organization's only environment, or the active one; `--url` for self-hosted or a local server) and derives its MCP URL.\n2. It registers that URL with the developer's MCP client:\n   - for Claude Code, by running or printing `claude mcp add --transport http <name> <url>`;\n   - otherwise by writing the client's config file;\n   - `--client` picks the client, and `--print` only prints.\n   - The server name is the environment's, so several environments can sit side by side.\n3. **The client runs the OAuth.** The CLI opens nothing and stores no MCP token. On first use the client follows the environment's discovery, registers, and the browser shows the environment's sign-in and consent.\n   - ⛔ No MCP access or refresh token is written into any config file: such a token expires in an hour and would bypass the client's refresh and the revocation fixed by #30345.\n4. It prints how to revoke the grant (the console's grant list). It also prints one line of the epic's model: MCP reads the environment for context, and a managed package's content changes through source and deploy, not through MCP.\n5. \"Reuse the CLI login for one consent\" is out of scope. It returns if the Later decision card rules the control plane the single authorization server.\n\n## Acceptance\n\n- Tests: with a stubbed control plane answering one environment, `os mcp connect --print` prints that environment's MCP URL and the `claude mcp add` line; `--url http://localhost:3000` prints the local one; several environments without `--env` → non-zero, as the deploy command refuses; no file the command writes contains a token.\n- Manual on staging: `os mcp connect` from a logged-in CLI, then Claude Code lists the environment's tools after one browser consent. Revoking the grant in the console makes the next call fail (after #30345 and its cloud half cloud#3606).\n\nSerial: after #30871, whose environment resolution this reuses (⛔ not a second copy). Recommended after objectstack#30345, so every connection this command creates is revocable.\n\nDedupe (2026-11-06), run as `gh api -X GET search/issues -f q=…`:\n- `repo:objectstack-ai/objectstack \"os mcp\" is:issue` → 751 hits (broad). The open ones shown are #30871 and #28937 (QA run). None is a connect command.\n- `repo:objectstack-ai/objectstack mcp connect cli oauth is:issue is:open` → 19 hits. #20791 (verify remote MCP + OAuth against ChatGPT connectors and Codex CLI) is related, not this. #27108 and #30813 are unrelated.\n- `repo:objectstack-ai/cloud mcp connect cli is:issue` → 34 hits. Open: #3600, #3353, #3652, #786 (connector-directory entry shape, related). None.\n- `repo:objectstack-ai/cloud authorization server control plane mcp is:issue is:open` → 3 hits: #2914, #3652, #786. The Later decision card is not filed yet.\n\nSuggested-grade: p3 · a convenience on top of a loop that already works by hand. Its credential half waits on a decision.\n\nClause-②: no · a CLI command and a local client config. No spec key, route or error code.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"

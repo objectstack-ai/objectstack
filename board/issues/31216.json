@@ -1,0 +1,32 @@
+{
+  "number": 31216,
+  "kind": "issue",
+  "title": "console: show a user's effective permission sets and where each comes from on the user page",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:access",
+    "domain:ui",
+    "enhancement",
+    "pm:blocked",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-07T18:04:47Z",
+  "updated_at": "2026-11-07T18:55:35Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31216",
+  "body": "domain:server#3 · marchtian · session_017ihL2dFb2QdZEHEJ83cR2B\n\nFiling gate: ② missing capability, split from #30209 row 1 during its delivery (PR #31207, dev report 6710717748). ⛔ Not a claim. Triage sets the grade and the lane.\nReader: the `ui` seat for the console widgets (`ui/packages/*`), plus a one-line page edit in `packages/platform-objects/src/pages/sys-user.page.ts`.\nDedupe (open AND closed): `\"effective access\"` → 20 hits, `\"permission set\" origin user page` → 518; the only open match is #30209 (the source card). #27433 (closed) is the add-user picker, not this tab.\nreach: the console's user record page, 权限集 tab; read from the code on `main`, not run.\ntype: Enhancement\n\n## 维护者速读\n\n用户记录页的「权限集」页签只列直接分配的行，所以通过默认权限集或岗位拿到权限的人显示为 0 条。本卡在这个页面放一个新组件，列出这个人实际生效的权限集，并注明每一个是默认、岗位还是直接分配来的。数据来自配套的 server 卡。\n\n## What to build\n\n- A console widget, for example `security:effective-access` (an unclaimed namespace). Precedent: `mcp:authorized-assistants` on the same page, whose zod arm lives in `ui/packages/types` and needs no `packages/spec` edit. A type inside a claimed namespace such as `record:` would need spec vocabulary; this one does not.\n- Place it on `sys-user.page.ts` next to, or instead of, the `record:related_list` over `sys_user_permission_set`, which can only list stored rows.\n- Each row: set label, origin (default / position name / direct). Direct rows can keep their remove action; the others link to where they come from.\n\n## Acceptance\n\n- A user with access only through the default binding and a position shows those sets, not 暂无相关记录.\n- A CONTROL user with one direct set shows exactly that set.\n\nBlocked-by: #31215\nSuggested-grade: p3 · from a Setup walkthrough (#30209)."
+}

@@ -1,0 +1,36 @@
+{
+  "number": 31169,
+  "kind": "issue",
+  "title": "spec: migration entry cbp-optional-master-admitted still says writes leaving the optional master empty are refused with 422 (the write gate admits them since #31082)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "domain:spec",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-07T15:34:05Z",
+  "updated_at": "2026-11-07T18:59:53Z",
+  "closed_at": "2026-11-07T18:58:37Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31169",
+  "body": "domain:devx#2 · marchtian · session_017ihL2ebbZkr2QAEG1x7UC8\n\nFiling gate: ① a defect, measured by reading the code. Found while writing the docs for #31095 (dev report 6709055161, PR #31164). ⛔ Not a claim. Triage sets the grade and the lane.\nReader: the `domain:spec` lane, file `packages/spec/src/migrations/entries/semantic/18.cbp-optional-master-admitted.ts`. Next PR: the same family as #31094 (spec text still describing the optional master as it was before #31082).\nDedupe (open AND closed): \"cbp-optional-master-admitted\" → 1 hit, #31095. That card is the docs pages, not this entry. #30977 (closed) is a different conversion. #31094 is `security-service.ts` jsdoc, not this entry.\nclass: b (release-text) · reach: every reader of the spec migration registry (`os migrate meta`, the release notes generated from entries).\n\n## What is wrong\n\nAt `main` `56baf78e0c`, the entry's `replacement` (lines 24–25) says:\n\n> Writes are unchanged by this entry: an insert or update that leaves the master reference empty is still refused with 422.\n\nSince `037371559b` (#31082, card #30906), the write gate admits those writes. A `controlled_by_parent` row whose **optional** master reference is empty is written by its owner (`owner_id`) or by a holder of Modify All on the detail. Everyone else gets `403 PERMISSION_DENIED`, not 422. Only a **required** master's empty reference is still `422 MISSING_REQUIRED_FIELD`. The header comment (lines 5–14) describes only the read side, so it is incomplete in the same way.\n\n## Wanted\n\n- Reword the `replacement` (and the header comment) to the current rule:\n  - a required master's empty reference is still refused with 422;\n  - an optional master's empty reference is written by the owner or Modify All on the detail, and refused with 403 for everyone else.\n- Cite #31082 where the entry cites the read side.\n- Take the wording that #31092's permissions pages and PR #31164's docs pages use, so the four texts agree.\n- Keep the entry's `id` and `surface`. Whether this needs an entry-text changeset is the spec lane's house rule."
+}

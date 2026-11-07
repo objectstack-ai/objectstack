@@ -1,0 +1,36 @@
+{
+  "number": 31156,
+  "kind": "issue",
+  "title": "One authoring source (cloud#3659 A), 2/4: a RestrictionProfile schema in spec, and os validate --target checks metadata against an environment's profile",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "domain:server",
+    "priority:p1"
+  ],
+  "assignees": [
+    "marchtian"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-07T14:57:40Z",
+  "updated_at": "2026-11-07T20:04:34Z",
+  "closed_at": "2026-11-07T20:01:44Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 9,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31156",
+  "body": "epic:#3600#1 · hotlong · session_01Q4EjjPXwX1YfHyKJUh4agu\n\nFiling-gate category: ② execution of a maintainer ruling. objectstack-ai/cloud#3659 was ruled **A** on 2026-11-06 (ruling comment by coordinator#1): one source of metadata-authoring knowledge for every build channel, the published `@objectstack/skills` + `@objectstack/spec`. Cloud keeps closed only the orchestration and differs only by a restriction profile. The ruling's \"Next\" split was never filed. The maintainer authorised this seat to file it, verbatim (Claude Code session, 2026-11-07): 「全部立卡并p1」. Routing, verbatim: 「能交给车队开发的你不要自己开发」. Four cards, filed together:\n- **card 1**: port the rules (objectstack `domain:skills`);\n- **card 2**: the profile schema and `os validate --target` (objectstack `domain:spec` + `domain:cli`);\n- **card 3**: the environment publishes its profile and versions (`repo:cloud`);\n- **card 4**: compose the in-app and MCP instructions from the published skills (`repo:cloud`).\n\nCard 2 of 4.\n\nClause-②: yes (a new spec schema).\n\n## Problem\n\nThe ruling says cloud differs from local only by a **restriction profile**, maintainer verbatim: 「云端搭建唯一的区别是有一些限制，比如写代码是否允许，定时任务是否允许，流程允许使用到什程度」. The environment publishes the profile as data. A local developer must be able to validate against a target environment's profile before deploying. There is no schema for it and no CLI path.\n\n## Ask\n\n1. **Spec**: a `RestrictionProfile` schema in `@objectstack/spec`, a closed shape covering:\n   - code allowed (hooks / code plugins);\n   - scheduled automation allowed;\n   - allowed flow node types (a closed list read from the spec's own node registry, never restated);\n   - the spec and skills versions the environment runs.\n\n   An absent profile means no restriction (local/open default).\n2. **CLI**: `os validate --target <environment URL or profile file>` fetches the target's published profile (card 3's endpoint) and refuses metadata the profile forbids, naming each item and the rule. It also warns when the local `@objectstack/spec` / `@objectstack/skills` version differs from the target's.\n3. Tests: one refusal per profile dimension, plus the version mismatch warning.\n\nReader: the `domain:spec` lane seat for item 1, then the `domain:cli` lane seat for item 2, from `pm:queue`."
+}

@@ -1,7 +1,7 @@
 {
   "number": 29908,
   "kind": "issue",
-  "title": "[PM seat] domain:server · seat 6 — ⏳ vacant",
+  "title": "[PM seat] domain:server · seat 6 — 🟢 os-project-manager · 由 os-project-manager 账户的项目负责",
   "state": "open",
   "state_reason": null,
   "draft": null,
@@ -15,17 +15,17 @@
     "pm:seat"
   ],
   "assignees": [
-    "os-bill"
+    "os-project-manager"
   ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-03T10:35:44Z",
-  "updated_at": "2026-11-05T19:19:17Z",
+  "updated_at": "2026-11-07T17:08:31Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 3,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29908",
-  "body": "domain:server#6 · os-bill · session_01Utp6CXCS98uhsFQYk64epE\n\n⚠️ **Seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/server.md` (⛔ not copied here). This is **`domain:server` seat 6**. Seat 1 is #6367, seat 2 is #20966, seat 3 is #26761, seat 4 is #27737 and seat 5 is #28677 (⛔ this post is none of them).\n\n## Current PM — ⏳ vacant\n\n- **Previous holder:** `os-bill` · `session_01Utp6CXCS98uhsFQYk64epE` · seated 2026-11-05T12:17Z, signed off 2026-11-05T19:20Z on the maintainer's word that the server lane keeps seat 2 only.\n- **Sign-off brief:** comment 6667003039. `check-handover.mjs` exit 0.\n- **Mailbox:** PR #30458 closed at sign-off; a successor reopens one at seating.\n- **Patrol:** routine `trig_01DftzhqHLvLWzWipo7ZiMhW` deleted at sign-off.\n- To seat: `/pm-dispatch 接手`, after reading this post and the brief.\n\n## Ledger\n\n- **In flight:** none. Stay-behind: none.\n- **Handed on:** #30038, #30412, #30172, #30209 (rows 4–6), #30210 (rows 3–4) in the decision inbox, each with its Release on the card; #30208 rows 5–6 (open, unclaimed; row 6 needs a ruling); #30609 and #30621 filed p3. Seat 2 (#20966) is the online sibling.\n- **Decision box:** read live (`needs-user-decision` + `domain:server`).\n\n## Hot-file serial queue\n\n- None held by this seat.\n\n## Notes\n\n- Write path: the relay (`post-stamped.mjs`, `label-write.mjs`, `fleet-write/dispatch.mjs`). ⛔ No GitHub MCP writes. PRs open only through the relay `pr_create`.\n- **Publication:** objectstack. A merge to `main` publishes nothing; the release is the Version Packages PR, a human act.\n\n<!-- signed: domain:server#6 · os-bill · session_01Utp6CXCS98uhsFQYk64epE -->\n"
+  "body": "domain:server#6 · os-project-manager · session_01FEkQ5p3T5YWhLjurajudnQ\n\n⚠️ **Project-seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/server.md` (⛔ not copied here). This is **`domain:server` seat 6**. Seat 1 is #6367, seat 2 is #20966, seat 3 is #26761, seat 4 is #27737 and seat 5 is #28677 (⛔ this post is none of them).\n\n<sub>Refreshed at seating 2026-11-07T17:07Z; the seating record is 6710406707.</sub>\n\n## Current PM — 🟢 os-project-manager\n\n- **Holder:** `os-project-manager` · `session_01FEkQ5p3T5YWhLjurajudnQ`. 由 os-project-manager 账户的项目负责 (project \"Objectstack devx spec ui\", thread \"运行 server 席位 B\"). Previous PM: `os-bill` · `session_01Utp6CXCS98uhsFQYk64epE`, sign-off brief 6667003039.\n- **Mailbox:** #31197. **Patrol:** `trig_017rCb4YTTXPTdJUXkPdZyeB` · hourly.\n- **Pointer:** posture and ledger live in the project. Lane ledger = labels + assignee + `Claim:` comments carrying `Seat: domain:server#6` + `head:claude/` PRs.\n\n## Hot-file serial queue\n\n- None held. ⛔ Re-derive from the live `Claim:` comments and each open PR's file list before every dispatch.\n\n## Notes\n\n- **Concurrency:** up to 5 card threads for this seat (the maintainer's per-seat cap in this project); card threads open through the project coordinator.\n- **Write path:** the relay (`post-stamped.mjs`, `label-write.mjs`, `fleet-write/dispatch.mjs`). ⛔ No GitHub MCP writes.\n- **Publication:** objectstack. A merge to `main` publishes nothing; the release is the Version Packages PR, a human act.\n\n<!-- signed: domain:server#6 · os-project-manager · session_01FEkQ5p3T5YWhLjurajudnQ -->\n"
 }

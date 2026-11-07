@@ -1,0 +1,33 @@
+{
+  "number": 31155,
+  "kind": "issue",
+  "title": "One authoring source (cloud#3659 A), 1/4: port cloud's private metadata-authoring rules into the published @objectstack/skills, keeping every regression",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "domain:skills",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-bob"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-07T14:57:37Z",
+  "updated_at": "2026-11-07T19:05:11Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31155",
+  "body": "epic:#3600#1 · hotlong · session_01Q4EjjPXwX1YfHyKJUh4agu\n\nFiling-gate category: ② execution of a maintainer ruling. objectstack-ai/cloud#3659 was ruled **A** on 2026-11-06 (ruling comment by coordinator#1): one source of metadata-authoring knowledge for every build channel, the published `@objectstack/skills` + `@objectstack/spec`. Cloud keeps closed only the orchestration and differs only by a restriction profile. The ruling's \"Next\" split was never filed. The maintainer authorised this seat to file it, verbatim (Claude Code session, 2026-11-07): 「全部立卡并p1」. Routing, verbatim: 「能交给车队开发的你不要自己开发」. Four cards, filed together:\n- **card 1**: port the rules (objectstack `domain:skills`);\n- **card 2**: the profile schema and `os validate --target` (objectstack `domain:spec` + `domain:cli`);\n- **card 3**: the environment publishes its profile and versions (`repo:cloud`);\n- **card 4**: compose the in-app and MCP instructions from the published skills (`repo:cloud`).\n\nCard 1 of 4.\n\n## Problem\n\nThe in-app AI builds from a private corpus in objectstack-ai/cloud `packages/service-ai-studio/src/skills/`: `metadata-authoring-skill.ts`, `solution-design-skill.ts`, `authoring-rule.ts` and their inline rules and rule index. That corpus never references `@objectstack/skills`. Local builders (Claude Code via `npm create objectstack`) get only the published skills (18.3.0, 11 skills in `.claude/skills/`). The same requirement entering from the two channels gets two different sets of rules.\n\n## Ask\n\n1. Port every rule of the private corpus that is **knowledge about writing valid, working metadata** into the published skills (`skills/`, the `@objectstack/skills` package), written tool-agnostic. That covers shapes, field types, view, flow and approval rules, and the \"stages clean but runtime-dead\" traps. Place each rule in the domain skill it belongs to (`objectstack-data`, `-ui`, `-automation`, `-formula`, `-ai`, …).\n2. **Leave out** orchestration (blueprint design, the build loop, tool routing, cost handling) and hosted-only rules (drafts / NOT LIVE, plan gates). They stay in cloud as the overlay.\n3. **Nothing may be lost.** Produce a mapping table in the PR: private rule id → skills file and section → the regression it keeps. The golden-journey and eval coverage the private rules carry must have an equivalent in `skills/evals/*.json`, or stay in cloud pointing at the moved text.\n4. `skills/**` is a governed surface: land it through the governed path. Split it per domain skill if the size calls for it.\n\nThe lane seat needs read access to objectstack-ai/cloud for the source corpus. The repo:cloud seat can export the rule list on request.\n\nReader: the `domain:skills` lane seat, from `pm:queue`."
+}

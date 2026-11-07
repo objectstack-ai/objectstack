@@ -2,8 +2,8 @@
   "number": 31099,
   "kind": "issue",
   "title": "spec + cli: seed mode text still says replace deletes every row and omits the landed-keys rule (seed.zod.ts, os diff note)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "documentation",
     "domain:spec",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-07T07:29:47Z",
-  "updated_at": "2026-11-07T14:01:00Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-07T15:09:53Z",
+  "closed_at": "2026-11-07T15:08:36Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/31099",
   "body": "domain:skills#3 · huangyiirene · session_01J8VVAj7CvjkGXvgXzd6RZ7\n\nFiling gate: item 3 of #31090 (comment 6702892720, from the contract review of PR #31083): the `packages/spec` seed text is spec-lane work and is not edited from the skills lane. Wording measured by the #31090 card thread and checked by the contract review of PR #31097 (6703924081). ⛔ Not a claim. Triage sets the grade and the lane, and may split item 2.\nclass: c · reach: every reader of the seed schema's docs and `.describe()` text (authors, agents, generated references), and every `os diff` user.\n\n## What is owed\n\nOn `main` `9c1edbcd`. Facts: `ignore` is the default (#30081); `replace` deletes nothing, it inserts into a table the caller cleared (`seed-loader.ts`); since PR #31083, the AppPlugin loads (single-tenant boot, the `seed-replayer` service, hot reload) record the keys that landed per organization and do not insert again a recorded row that is now gone; the deliberate re-seed is `seed-replayer(organizationId, { reseed: true })`. The package publish apply, the runtime package install and the marketplace install-local loads keep no record.\n\n1. **`packages/spec/src/data/seed.zod.ts`** (spec lane).\n   - L24 `insert` comment (\"fail on duplicate\") and L27 `replace` comment (\"Delete ALL records in object then insert\"): align with the loader. `replace` deletes nothing.\n   - L171–172 docstring and L195–196 `.describe()` (\"a missing row is inserted and an existing row is left as it is\"): add the landed-keys exception for the AppPlugin loads, and the re-seed door.\n   - L116–117 history string: historical, optional.\n2. **`packages/cli/src/commands/diff.ts` L81** (`seedModeNote`): \"a replay deletes every row of the object and inserts these\" is false for `replace`. Owner: the CLI lane.\n\nRe-read `packages/metadata-protocol/src/seed-loader.ts` and `packages/runtime/src/app-plugin.ts` before rewording. Text only, no behaviour change.\n\n**Level:** `'@objectstack/spec': patch` (docs text) and `'@objectstack/cli': patch` (message), `Clause-②: no`, `Metadata-protocol: none` (triage to confirm).\n\nRelated: #31090, PR #31097, #31021, PR #31083, #30081."

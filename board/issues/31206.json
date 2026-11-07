@@ -1,0 +1,31 @@
+{
+  "number": 31206,
+  "kind": "issue",
+  "title": "skills + spec: approval-flow edge conditions in state-machines-and-approvals.md and the HookSchema.condition example compare a nullable amount unguarded, which the publish-time null-guard rule refuses",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "domain:skills",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-07T17:31:06Z",
+  "updated_at": "2026-11-07T17:55:32Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31206",
+  "body": "domain:skills#3 · huangyiirene · session_01J8VVAj7CvjkGXvgXzd6RZ7\n\nFiling gate: other sites from the contract review of PR #31201 (comment 6710673767, card #31131), outside that card's claim. ⛔ Not a claim. Triage sets the grade and the lane.\nclass: c (metadata an AI writes from the text is refused at publish) · reach: every agent reading the published `objectstack-automation` skill, and every reader of the generated `hook` reference page.\n\n## What is wrong (re-read on `main` today)\n\nThe publish-time null-guard rule (`packages/lint/src/validate-null-guards.ts`) refuses a bare comparison on a declared-nullable field on the gated surfaces. These include flow edge `condition`s on a `record_change` flow and hook `condition`s. PRs #31127 and #31201 guard the same form in the data and formula skills, as `skills/objectstack-formula/SKILL.md` ≈L112-L122 teaches (`record.amount != null && …`). Still unguarded:\n\n1. `skills/objectstack-automation/references/state-machines-and-approvals.md`. In the approval flow example (`record-after-update` on `opportunity`), `condition: cel\\`record.amount > 100000\\`` appears at ≈L90 and again on edge `e1` (≈L128), and edges `e4` / `e5` have `record.amount > 500000` / `<= 500000` (≈L133, L135).\n2. `packages/spec/src/data/hook.zod.ts` ≈L524-526. The `HookSchema.condition` `@example` and `.describe()` read `record.status == 'closed' && record.amount > 1000`. That text is published to the generated `hook.mdx` reference (≈L39).\n\n## Owed\n\n- Item 1: guard each comparison the way the formula skill teaches (or declare the field required in the example and say so), run the os:check / skill-examples gate, and sweep `skills/objectstack-automation/evals/*.json` for a case that rewards the unguarded form. Pay growth by same-file deletion or the standing ruling. Level: `'@objectstack/skills': patch`.\n- Item 2: guard the example in the schema's jsdoc and describe text, then regenerate the reference docs. This is spec-lane text, with level `'@objectstack/spec': patch`.\n- Both: `Clause-②: no`, `Metadata-protocol: none`.\n\n## Dedupe (REST search, open and closed)\n\n- `state-machines-and-approvals unguarded` → 1, which is #31131's claim widening that names these sites as out of claim.\n\nRelated: #31131, PR #31201, #31113, PR #31127."
+}

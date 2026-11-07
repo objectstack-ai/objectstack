@@ -1,0 +1,37 @@
+{
+  "number": 31192,
+  "kind": "pull_request",
+  "title": "fix(cli): os diff says a replay inserts an insert seed dataset again, as it does for replace",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "marchtian"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-07T17:00:05Z",
+  "updated_at": "2026-11-07T17:53:03Z",
+  "closed_at": "2026-11-07T17:53:01Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-07T17:53:01Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/31192",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"marchtian\"} -->\n_Requested by **田騏** · [project thread](https://claude.ai/code/project/chan_01VmuUhXU9SSUzqJYyXSmYSi?thread=cmsg_01VmuUhXU9SSUzqJYyXSmYSiCWLkoGmW8Dzox677cXtnd4)_\n\nFixes #31139\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- **改了什么：** 只加一句提示。`os diff` 的升级计划对 `mode: 'insert'` 的种子数据集，现在和 `replace` 一样说明重放会怎样：\"a replay inserts these again, and a row the database refuses is that row's error\"。\n- **为什么改：** 加载器里 `insert` 和 `replace` 走的是同一条路：不查匹配，每次重放都把记录再插一遍。上一个 PR 只给 `replace` 加了提示，`insert` 数据集在计划里看起来像无害，同一种行为被说成两样。\n- **风险与回滚：** 无行为变化，只动一条 CLI 提示字符串、它的测试和一个 changeset。回滚即 revert。\n- **先看：** `packages/cli/src/commands/diff.ts` 的 `seedModeNote`（新增的 `insert` 一行）；`packages/cli/test/diff-upgrade-plan.test.ts` 新增的用例。\n- **两分钟验证：** `pnpm --filter @objectstack/cli exec vitest run --project unit test/diff-upgrade-plan.test.ts`，预期 8 个测试全过，新用例里 `insert` 数据集新增和修改两行都带这句提示，`ignore` 那行不带。\n- **需要你做的：** 无，席位落地。\n\n## What changes\n\nText only; no behaviour change.\n\n- `packages/cli/src/commands/diff.ts` `seedModeNote`: a dataset in mode `insert` now reads \"; a replay inserts these again, and a row the database refuses is that row's error\". The `replace` and `upsert`/`update` lines are unchanged.\n- Worded from the loader on `main`, not from the card: `SeedLoaderService.writeRecord` case `'insert'` calls `engine.insert` without looking at the existing-row match, and `decideWriteAction` answers `insert` for `insert`, `replace` and the default alike (`packages/metadata-protocol/src/seed-loader.ts`). A refused row goes to the load's errors while the rest land, the same fact the `SeedMode` comment in `seed.zod.ts` states since #31135.\n- `packages/cli/test/diff-upgrade-plan.test.ts`: one new case. An `insert` dataset added and an `insert` dataset changed both carry the note; an `ignore` dataset changed in the same plan stays silent (the control; an absent mode defaults to `ignore`, which the existing case already pins silent).\n- `.changeset/cli-diff-insert-seed-note.md`: `@objectstack/cli` patch.\n\n## Tests\n\n- `pnpm --filter @objectstack/cli exec vitest run --project unit test/diff-upgrade-plan.test.ts`: 1 file, 8 tests passed.\n- Ablation (the source is imported from `src`, so no build leg): `scripts/ablation-replace.mjs` deleted the new `insert` line (anchor 1 → 0, blob b02482c0 → 5a8ab9b9); the new case went red (\"Tests 1 failed | 7 passed (8)\"), the other seven stayed green. Restored: blob == HEAD and `git diff HEAD` empty.\n- `packages/cli` unit layer, whole (`vitest run --project unit`): 396 files passed; the 2 other files (`published-subpath-console.pin`, `published-subpath-hook-body.pin`) refused because `packages/cli/dist` was not built yet. After `pnpm --filter @objectstack/cli build` both passed (2 files, 29 tests). The integration layer is declared to CI: the diff touches no integration file or spawn entry.\n- `pnpm --filter @objectstack/cli typecheck`: exit 0.\n\n## Acceptance notes\n\n- No Fable review: the diff touches no spec, skills or ADR (rule of 2026-11-07 16:07Z).\n- Merged `origin/main` once before opening (1f5316d1); the incoming commits touch no `packages/cli` file.\n\n## Verification\n\n<details><summary>Derived gates (dispatch-gates --commands) — 62 families, all exit 0 on 1f5316d18a</summary>\n\n- `node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack --ran ran.txt` :: exit 0 — \"62 derived famil(ies) accounted for — 62 run, 0 NOT-MEASURED\".\n- First pass: 3 families exited 3 (PREREQUISITE NOT MET): `check-plugin-teardown-shape --self-test` (shallow clone), `check:dual-build-cjs-loads` and `check:i18n-coverage` (workspace packages not built). After `git fetch --unshallow origin main` and a full `turbo run build`, all 3 reran with exit 0; the other 59 exited 0 on the first pass.\n- `eslint` on `diff.ts` and `diff-upgrade-plan.test.ts` :: exit 0 (repo-wide `pnpm lint` is CI's).\n\n</details>\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_017ihL2bzGzPEiCJX3i1fYRj\n"
+}

@@ -1,0 +1,31 @@
+{
+  "number": 31241,
+  "kind": "issue",
+  "title": "settings: a `json` setting saved from the console is stored as a string, so retention overrides and row quotas silently do nothing",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-07T19:24:34Z",
+  "updated_at": "2026-11-07T19:57:20Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31241",
+  "body": "domain:server#2 · marchtian · session_017ihL2fBJ6xsLWJsnNJGMMx\n\nFiling gate **① a product defect with reach measured.** It was found while the card thread for #30208 row 5 did phase 0 (the shape analysis, comment 6711865649) and then measured it locally. Filed by the `domain:server` seat 2 (seat post #20966, `marchtian`, session `session_017ihL2fBJ6xsLWJsnNJGMMx`). ⛔ Not a claim. The grade is triage's.\n\n**Reader (who acts):** the `domain:server` seat 2 lane. The #30208 row 5 card thread (branch `claude/project-thread-4ntp5s`) takes it as its own PR, ahead of the row 5 shape PR and independent of that ruling. The console half (`ui/apps/console`) rides the same PR, because one save door spans both.\n\n**Business reason:** a platform admin who sets a row quota or a retention override in Setup → Data lifecycle gets \"saved\" and believes the platform now enforces it. Nothing is enforced and nothing is logged: tables grow past the quota with no `quota-exceeded` alert, and retention overrides never apply. The admin finds out only when storage or compliance goes wrong.\n\n## Declared\n\nADR-0007 (Accepted), specifier table (`docs/adr/0007-settings-manifest-and-kv-store.md:123`): \"`json` | code editor | object | for advanced/raw config\". A `json` setting persists an **object**.\n\n## Enforced\n\nMeasured on `origin/main` `733efbd43f` with a local vitest (deleted after the run). It used real ObjectQL on the memory driver, `SysSetting`/`SysPlatformSetting`, the real `SettingsService` with `registerSettingsRoutes`, and `lifecycleSettingsManifest` registered.\n\n- **Reach, at a public door.** An admin holding `manage_platform_settings` ran `PUT /api/settings/lifecycle` with the console's own flat draft shape: `{ \"quotas\": \"{\\n  \\\"sys_audit_log\\\": 1000\\n}\", \"quota_defaults\": \"{\\n  \\\"telemetry\\\": 500\\n}\" }`. The response was **200** with no error. `sys_platform_setting.value` came back with `typeof` `string`, and `SettingsService.get` returned a string too.\n- **Reader.** `LifecycleService.loadGovernance` (`packages/objectql/src/lifecycle/lifecycle-service.ts:1147-1150`) takes the string as the map. At `:1313`, `gov.quotas[obj.name] ?? gov.quotaDefaults[class]` is `undefined`, so no `quota-exceeded` alert fires, and nothing is thrown or logged. The control run, with the same values saved as objects, read 1000 and 500 and alerted.\n- **Producer.** The console's `json` field is a textarea. `ui/apps/console/src/pages/settings/SettingsField.tsx:1060/1062` calls `onChange(e.target.value)`, which hands back the raw text. `SettingsView.tsx:740` puts it in the draft, `:518` calls `saveSettingsNamespace(namespace, draft)`, and `api.ts:163` PUTs it unchanged. There is no `JSON.parse` anywhere in `pages/settings`.\n- **Door.** `SettingsService.validatePatch` (`packages/services/service-settings/src/settings-service.ts:3131`) has no type check for `json`, so a string is accepted where an object is declared.\n- **Measured scope.** `quotas` and `quota_defaults` were measured. `retention_overrides` uses the same textarea and the same read path (`:1147`, and at `:1186` `Object.entries` skips each entry on its `typeof` guard). It was read in code, not measured. SQL drivers were not measured.\n- These three are the only `json` specifiers in `packages/`.\n\nSeam: spec:SpecifierType `json` (ADR-0007:123, persists object) → renderer:`ui/apps/console/src/pages/settings/SettingsField.tsx:1062` → runtime:`packages/objectql/src/lifecycle/lifecycle-service.ts:1149-1150,1313`. service-settings `validatePatch` (`:3131`) does not refuse it.\n\n## The fix, as the seat reads it\n\n- **Console.** The `json` field parses on save and shows a parse error in place. It never sends text for a `json` key.\n- **Save door.** `validatePatch` refuses a `json` value that is not a JSON object or array (one `FieldError` per key, in the existing shape). The env door (`OS_LIFECYCLE_*`) is judged the same way.\n- **Values already stored as strings.** Deployments that saved through the console hold strings today. Either the reader parses a string once, with a warning, or a one-shot migration rewrites them. The PR names which one it picks.\n- **Pins.** A named negative pin goes through the save door and is ablation-verified, plus a lifecycle pin showing that a quota saved through the door alerts.\n- #30208 row 5 may replace these textareas with a row editor. That ruling is pending with the maintainer and does not fix the class: the door and the already-stored strings stay broken.\n\n## Dedupe\n\nMethod: semantic issue search, open and closed, on objectstack-ai/objectstack, for \"json specifier string\", \"settings json textarea\", \"quotas string\" and \"persists object\". 9 distinct hits, none on point. #30208 (open) asks for business-friendly fields, not storage. #24882 (closed) is the same class for `email`/`url`/`color` format checks, with no `json` branch. #5536 (closed) is about the setting source. **New.**\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

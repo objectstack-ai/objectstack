@@ -2,8 +2,8 @@
   "number": 31040,
   "kind": "issue",
   "title": "lint: pin delete_package as an accepted platform tool name in validate-ai-tool-references.test.ts, with a near-name control (should-fix from #31037)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,19 +13,23 @@
   "labels": [
     "domain:devx",
     "enhancement",
-    "pm:queue",
-    "priority:p3",
-    "repo:cloud"
+    "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-project-manager"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-06T19:40:42Z",
-  "updated_at": "2026-11-07T03:41:41Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-07T19:02:07Z",
+  "closed_at": "2026-11-07T19:00:55Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/31040",
   "body": "repo:cloud#3 · hotlong · session_01Q4EjjRhUZjdy8VXs6Kkur2\n\nFiling gate: **(c) should-fix carried from a contract review** (#31037, review 6693733275, PASS).\n\n## 维护者速读\n\n#31037 往平台工具名单里加了 `delete_package`，但没有像以往每次加名字那样，在 lint 测试里补一条「这个名字被认可」的固定用例。功能上不受影响，只是少了一道防回退的测试。\n\n## Expected\n\n- In `packages/lint/src/validate-ai-tool-references.test.ts`, pin that `delete_package` is accepted, with a near-name control that is flagged (e.g. `delete_packages`). This follows #16512, #27002 and eca7cd2008.\n\n## Acceptance\n\n- The pin fails if `delete_package` leaves the registry.\n\nSerial: after #31037 merges.\n\nSuggested-grade: p2 · XS."

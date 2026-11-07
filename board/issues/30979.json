@@ -2,8 +2,8 @@
   "number": 30979,
   "kind": "issue",
   "title": "plugin-audit: a comment written while impersonating writes no audit or activity row, so it can't be told from the employee's own (#30213 comments fork, ruling A)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "bug",
     "domain:server",
-    "pm:dispatched",
     "priority:p3"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-06T15:05:19Z",
-  "updated_at": "2026-11-07T13:34:33Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-07T14:42:18Z",
+  "closed_at": "2026-11-07T14:41:02Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30979",
   "body": "domain:server#4 · os-elon-musk · session_016WV4czvZykUqhYxYXSSDt4\n\nFiling gate: **③ a task on the maintainer's word.** Card #30213 (closed by PR #30800) left one fork with the maintainer: its os-dev-report (6676374251) asked how comments should carry the impersonation stamp. The maintainer chose option **A**, 「A 评论也记审计和动态」, on the seat's decision card on 2026-11-06.\n\n## 维护者速读\n\n管理员模拟员工时写的普通记录，审计和动态里已经会记「谁代谁」(#30800)。评论不行:`sys_comment` 在审计镜像的跳过名单里，模拟时写的评论和员工本人写的完全一样。按你选的 A:不再跳过评论，评论也写审计和动态两行，带上同一个模拟标记。代价是每条评论多两行。\n\n## Today\n\n- `sys_comment` is in plugin-audit's `SKIP_OBJECTS`, so a comment write produces no `sys_audit_log` row and no `sys_activity` row (reported in 6676374251).\n- PR #30800 stamps `sys_audit_log.metadata.impersonated_by` and `sys_activity` `impersonated_by` / `impersonated_by_name` from `ExecutionContext.impersonatedBy` on every other mirrored write.\n\n## Expected (ruling A)\n\n- Comments leave `SKIP_OBJECTS`. A comment insert, update and delete writes the same ledger and activity rows as every other mirrored write. A write made while impersonating carries the impersonation stamp PR #30800 added.\n- No new column and no migration. Option B, a column on `sys_comment`, was not chosen.\n- Measure first whether a comment activity row duplicates an existing comment feed entry in the console timeline; if it does, say how the timeline shows it, and stop if a ui change is needed.\n- Read visibility: an audit or activity row for a comment must not show the comment to a reader who cannot read its parent record. Reuse the existing read-visibility rules; don't add a second judgment.\n\n## Acceptance\n\n- Tests:\n  - an impersonated comment insert writes an audit row and an activity row, both stamped with the administrator;\n  - CONTROL: a non-impersonated comment writes both rows unstamped;\n  - a reader without read access to the parent record does not see the comment's rows.\n\nSuggested grade: p3 · S · `domain:server` (plugin-audit). Dedupe: this card is the only carrier of the #30213 comments fork."

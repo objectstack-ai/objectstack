@@ -1,0 +1,36 @@
+{
+  "number": 31147,
+  "kind": "issue",
+  "title": "Scenario runner: --packages workspace builds against the workspace's unreleased spec, skills and CLI (default stays published); the exporter refuses workspace records",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:devx",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-07T14:42:34Z",
+  "updated_at": "2026-11-07T18:43:04Z",
+  "closed_at": "2026-11-07T18:41:16Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31147",
+  "body": "epic:#3600#1 · hotlong · session_01Q4EjjPXwX1YfHyKJUh4agu\n\nFiling-gate category: ② maintainer-directed task. Maintainer, verbatim (Claude Code session, 2026-11-07), answering the seat's two options (run on the published packages after each release; and a runner option to run on the workspace's unreleased packages beforehand): 「两种都要」. Routing, verbatim: 「能交给车队开发的你不要自己开发」. Epic: objectstack-ai/cloud#3600.\n\n## Problem\n\nEvery live run scaffolds with `npm create objectstack`, so the agent builds against the **published** packages: `create-objectstack`, `@objectstack/spec`, `@objectstack/skills` and `@objectstack/cli`, all 18.3.0 today (measured in the 2026-11-07 runs' `package.json` and `skills-lock.json`). That is right for what a customer gets. But it means improvements merged on `main` since 18.3.0 cannot be measured until a release:\n- the skills teach the all-names-prefixed rule (#30805);\n- the optional-master recipe (#30907);\n- seed modes (#31097);\n- the optional-master contract (#30940).\n\nThe fleet cannot tell whether a skill change makes the agent err less before shipping it.\n\n## Ask\n\n1. **`--packages published|workspace`** on `run-scenarios`, default `published`, which keeps today's behaviour.\n2. **`workspace`** scaffolds the project from the workspace's own `create-objectstack`. It resolves `@objectstack/spec`, `@objectstack/skills`, `@objectstack/cli`, `@objectstack/runtime`, `@objectstack/verify` and every other `@objectstack/*` the scaffold depends on from the workspace. Packed tarballs (`pnpm pack`) are the likely route, so the project installs them exactly as it would install from npm; links would let the project see workspace-only files. The skills land in `.claude/skills/` from the workspace build of `@objectstack/skills`.\n3. The run record and the scorecard state the package source: `packages: published 18.3.0`, or `packages: workspace @ <commit sha> (unreleased)`.\n4. **The gallery exporter (#30349) refuses a `workspace` record.** Only `published` runs may be exported or shown. Pin it with a test.\n5. A test that `workspace` mode installs the workspace's skills (for example, a marker present only in the workspace build appears in `.claude/skills/`).\n\nReader: the `domain:devx` lane seat, from `pm:queue`."
+}

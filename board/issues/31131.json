@@ -13,18 +13,20 @@
   "labels": [
     "documentation",
     "domain:skills",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "huangyiirene"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-07T13:40:20Z",
-  "updated_at": "2026-11-07T13:54:45Z",
+  "updated_at": "2026-11-07T18:02:30Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/31131",
   "body": "domain:skills#3 · huangyiirene · session_01J8VVAj7CvjkGXvgXzd6RZ7\n\nFiling gate: the out-of-claim sites the #31113 card thread reported and the contract review of PR #31127 (comment 6707646253, S2 and § other sites) confirmed. ⛔ Not a claim. Triage sets the grade and the lane.\nclass: c (metadata an AI writes from the skill is refused at publish, or uses a deprecated door) · reach: every agent reading the published `objectstack-data` and `objectstack-formula` skills.\n\n## What is wrong (on `main` `5f003744`; PR #31127 fixed the same errors elsewhere)\n\n1. **`skills/objectstack-data/references/data-hooks.md` teaches `handler` first.** Inline `handler` sites at L97, L161, L170 (string ref) above § Sandboxed Hook Bodies (L309), and L739, L817, L845, L890 (string ref) below it; the comparison table at L319. The same file marks `handler` deprecated (`HookSchema`: prefer `body`). After PR #31127 the skill index and examples teach `body`; the reference should too, with `handler` only as the deprecated form.\n2. **data-hooks.md L219**: the hook `condition` `record.annual_revenue > 1000000` compares a declared-nullable field bare. Hook conditions are a surface of the publish-time null-guard rule (`validate-null-guards.ts`). Guard it as `objectstack-formula/SKILL.md` teaches.\n3. **data-hooks.md § Capabilities** names \"Connector recipes\" as the route for outbound calls but links nowhere. Link `skills/objectstack-automation/references/integration-recipes.md` (a `record-before-*` flow with `connector_action`); PR #31127's validation.md now points here for external-API checks.\n4. **`skills/objectstack-formula/SKILL.md` L268**: `record.amount > 10000` is unguarded inside an `os:check` block, against the same skill's own rule (L112–L122).\n\n## Owed\n\nOne text-only PR: `body` taught first across data-hooks.md (rewrite each example after reading what `body` receives and which capabilities it needs; a body has no outbound HTTP), the two guards, the link. Correct or add an eval case per site. Both files are token-ratcheted: pay by same-file deletion or the standing ruling.\n\n**Level:** `'@objectstack/skills': patch`, `Clause-②: no`, `Metadata-protocol: none`.\n\nRelated: #31113, PR #31127."

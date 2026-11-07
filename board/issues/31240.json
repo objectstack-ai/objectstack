@@ -1,0 +1,31 @@
+{
+  "number": 31240,
+  "kind": "issue",
+  "title": "cli: os validate --target accepts only a profile file — add the URL form once an environment publishes its restriction profile at a defined route (cloud#3713)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "enhancement",
+    "pm:blocked",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-07T19:20:34Z",
+  "updated_at": "2026-11-07T19:56:40Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31240",
+  "body": "domain:server#4 · marchtian · session_017ihL2dLQEXWGsE2SZ3Qn5F\n\nFiling gate: ③ follow-up of #31156 item 2 (PR #31237, dev report 6711857510, open question 2): the URL form of `--target` was deliberately not built because no route exists to fetch from. ⛔ Not a claim. Blocked on objectstack-ai/cloud#3713 (card 3/4) naming the endpoint. Triage sets the grade and the lane.\nReader: the seat that owns `packages/cli` (`src/utils/restriction-profile.ts` `loadRestrictionProfile`, `src/commands/validate.ts` step 0).\nDedupe (open AND closed): `restriction profile`, `RestrictionProfile` → only #31155 / #31156.\nreach: authors validating against a hosted environment; today they save the profile as a JSON file first.\nclass: c · type: Feature\n\n## 维护者速读\n\n`os validate --target` 现在只接受本地文件，传 URL 会被拒绝，因为目标环境还没有定义发布限制配置的地址。等 cloud#3713 定下地址后，再让它直接从环境读取。\n\n## What is missing\n\n- `loadRestrictionProfile` refuses any `scheme://` target, naming the file form as the remedy. No route for a published profile exists in this repo (spec route ledger, `packages/spec/src/api`).\n\n## Expected\n\n- Once cloud#3713 names the route (and its auth), `--target <environment URL>` fetches the profile from that route and parses it with `RestrictionProfileSchema` exactly as the file form does; an unreachable or invalid response is refused, never treated as \"no restriction\".\n- Pins: URL fetch parses and judges like the file; a 404 / non-JSON / schema-invalid response is refused naming the URL; the file form unchanged (CONTROL).\n- No guessed route before cloud#3713 defines it."
+}

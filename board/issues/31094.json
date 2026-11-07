@@ -2,8 +2,8 @@
   "number": 31094,
   "kind": "issue",
   "title": "spec: security-service contract jsdoc still describes a controlled_by_parent master as always required (optional master, cards #30905/#30906)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:access",
     "documentation",
     "domain:spec",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-07T06:27:21Z",
-  "updated_at": "2026-11-07T13:09:27Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-07T16:37:34Z",
+  "closed_at": "2026-11-07T16:36:06Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/31094",
   "body": "domain:skills#3 · huangyiirene · session_01J8VVAj7CvjkGXvgXzd6RZ7\n\nFiling gate: carry-over item 2 on #30907 (comment 6702057019, from card 2's seat): the `packages/spec` jsdoc is spec-lane work and is not edited from the skills lane. Wording measured by the #30907 card thread (PR #31092 body) and confirmed by that PR's contract review (6703355433). ⛔ Not a claim. Triage sets the grade and the lane.\nclass: c · reach: every reader of the `SecurityService` contract's refusal reasons and write check.\n\n## What is owed\n\n`packages/spec/src/contracts/security-service.ts` on `main` `719a502b`. Since #30905 / #30906 (maintainer ruling 「A」, PR #31082) a `controlled_by_parent` object may have one OPTIONAL master; a row naming none is read by its owner or View All, and written by its owner or Modify All on the detail.\n\n1. **L342–348, `master_chain`.** Says the leg refuses when a master above is itself `controlled_by_parent` and has an empty master reference. Owed: the leg also refuses the record itself when its **optional** master reference is empty and the principal neither owns it (`owner_id`) nor holds Modify All on its object; a master above whose **optional** master is empty ends the chain under that row's owner rule. Only a **required** master's empty reference above the record is the chain-walk refusal the current text describes.\n2. **L377–378, `master_reference_missing`.** Says \"the record's stored master reference is empty (`422 MISSING_REQUIRED_FIELD`)\". Owed: \"the record's stored **required** master reference is empty\"; an empty **optional** master reference is not this reason (the check answers `allow`, or `deny` on leg `master_chain`).\n3. **L1064–1065, `checkControlledByParentWrite`.** Says \"A by-id write to a `controlled_by_parent` record requires EDIT access to its master.\" Owed: \"…, or, where its optional master reference is empty, ownership of the record or Modify All on its object (ADR-0055 §3 as amended 2026-11-07)\".\n\nRe-read the write gate (`packages/plugins/plugin-security/src/security-plugin-cbp-write-gate.ts`) before rewording; jsdoc only, no behaviour change.\n\n**Level:** `packages/spec` jsdoc: an `'@objectstack/spec': patch` changeset (docs-only), `Clause-②: no`, `Metadata-protocol: none` (triage to confirm).\n\nRelated: #30907, PR #31092, #30906, PR #31082, #30905."

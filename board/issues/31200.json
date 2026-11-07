@@ -1,0 +1,34 @@
+{
+  "number": 31200,
+  "kind": "pull_request",
+  "title": "docs(scenarios): running the cards in a Claude Code cloud session",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-07T17:12:01Z",
+  "updated_at": "2026-11-07T18:24:21Z",
+  "closed_at": "2026-11-07T18:24:19Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-07T18:24:19Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/31200",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-project-manager\"} -->\n_Requested by **Leehom** · [project thread](https://claude.ai/code/project/chan_01TenzsRopZj4jMbvjX8uz1X?thread=cmsg_01TenzsRopZj4jMbvjX8uz1XCH6tjGjMxCiQjwNSFKg84N)_\n\nFixes #31161\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么:`packages/qa/scenarios/README.md` 新增一节「Running the cards in a Claude Code cloud session」(28 行,仅文档):只需 objectstack 仓;`claude` 用订阅登录(跑批器拒绝 API key,`ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN` 须 unset);权限模式不用 Auto;后台命令上限 2 小时,每条命令跑一张 `starter` 卡;先 `pnpm --filter '@objectstack/scenarios^...' build`;npm 可达;成本是会话的订阅额度。\n- 为什么改:维护者在卡上的原话「前面的建议都同意，立卡」;七条内容由 epic 席位实测,本 PR 照录,并对照 `origin/main` 核对了能从树上回答的部分。\n- 风险与回滚:只改私有包 `@objectstack/scenarios` 的 README,不发布、不改代码;回滚即还原本 PR。\n- 先看:`packages/qa/scenarios/README.md` 新节(位于 `## Running the cards — @objectstack/scenarios/runner` 之前,避开 #31185 在文末与 #31147 在命令块处的改动)。\n- 两分钟验证:在 GitHub 上打开该 README 的新节,预期七条要点加一个四行命令块;`--only`、`--create-version` 与拒绝条件可在 `src/runner/cli.ts` / `src/runner/driver.ts` 对上。\n- 需要你做的:无,席位落地。\n\n## What changes\n\n`packages/qa/scenarios/README.md` gains a section, **Running the cards in a Claude Code cloud session**, under its own heading: the card's seven bullets (Repository, Login, Permission mode, Time, Build first, Network, Cost) and a four-line command block (`unset` the two API variables, `claude auth status`, install + closure build, one `starter` card with `--only`). Docs only; no code.\n\n## Tests\n\nNone owed: a README in a private package, no behaviour changed, so no test and no ablation (os-dev: docs are not ablated).\n\n## Acceptance notes\n\nWhat the tree answers, checked on `origin/main` 13c6d8ff (and unchanged at the merged head):\n\n- **Build command**: `pnpm --filter '@objectstack/scenarios^...' list --depth -1` selects 17 workspace packages, `@objectstack/spec` and `@objectstack/types` among them, the package itself not; the build ran exit 0 here (3 min 17 s under the lock).\n- **Login refusals** (`src/runner/driver.ts` `assertSubscriptionLogin`, `API_BILLING_ENV`): the live driver refuses a non-empty `ANTHROPIC_API_KEY` or `ANTHROPIC_AUTH_TOKEN`, a `claude auth status` reporting no login, and an `authMethod` matching an API key; the README says the first two and the third, as the card does. `authMethod` comment names `oauth_token`, as the card does.\n- **Flags cited**: `--only` and `--create-version` exist in `src/runner/cli.ts`; the scaffold default is `npx -y create-objectstack@latest` (`src/runner/project.ts`), so \"generated apps install from npm\" holds; `bootDev` takes a free port (`freePort`), which is why two commands in parallel do not collide.\n- **One difference from the card, Build first.** The card names one failure, `Failed to resolve entry for package @objectstack/types`. On a fresh worktree of 13c6d8ff (install only, no build) that is what the **suites** answer (`vitest run test/runner/units.test.ts`); `run-scenarios` itself, which runs `src/` through tsx, stops earlier with `ERR_MODULE_NOT_FOUND` on `@objectstack/spec/dist/api/index.mjs` (run with `--driver recorded:` on a missing file, so no model and no network). The README names both. Neither error text lives in the tree (they are Vite's and Node's).\n- **Not answerable from the tree, carried as the card states** (the epic seat's measurements): the Auto-mode classifier refusal, the 2-hour background-command cap, the 20–30 min `starter` build, the default network setting reaching npm, and the subscription quota as the cost.\n- **Placement**: before `## Running the cards — @objectstack/scenarios/runner` rather than at the end of the file, because #31185 appends at the end and #31147 edits the command block and the paragraph after the mode table; neither hunk is adjacent to this one.\n\n## Verification\n\nGate union derived by `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` (41 families for this diff), run on head `fd84fc7b` (the `origin/main` merge; the README diff is the same 28 lines), reconciled with `--ran`:\n\n- **40 run, exit 0 each** (closure built first: `pnpm --filter '@objectstack/scenarios^...' build`, VERDICT command-exit 0). `--ran`: \"41 derived famil(ies) accounted for — 40 run, 1 NOT-MEASURED\".\n- **NOT MEASURED: `pnpm check:dual-build-cjs-loads`**, reason: exit 3 PREREQUISITE NOT MET, it loads every package's built `dist/` and only the scenarios closure was built; CI's `Lint & Repo Gates` runs it on a full build.\n- `node scripts/check-plugin-teardown-shape.mjs --self-test` needed `git fetch --depth=1 origin 621a4876` for its pinned fixture on this shallow clone, then exit 0.\n- CI families (every required check) are read from this PR's check-runs, not re-run here.\n\n`pnpm lint` scoped: the package has no `lint` script, so the root eslint ran on it (`node --stack-size=4000 node_modules/eslint/bin/eslint.js packages/qa/scenarios --no-inline-config`), exit 0.\n\n`skip-changeset`: `@objectstack/scenarios` is `private: true` and the diff touches nothing else.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01FEkQ5o8Cp9Bu11Ex4Q1P1g)_\n"
+}

@@ -2,8 +2,8 @@
   "number": 30920,
   "kind": "issue",
   "title": "Test Core: nine cases sit at 2.5-4.2 s on the vitest 5 s default; the two plugin-hono-server drain cases take 3-4 s even on an idle runner",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,7 +12,6 @@
   },
   "labels": [
     "domain:devx",
-    "pm:queue",
     "priority:p2",
     "tests"
   ],
@@ -20,11 +19,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-06T11:26:42Z",
-  "updated_at": "2026-11-06T12:28:58Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-07T18:26:09Z",
+  "closed_at": "2026-11-07T18:24:21Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30920",
   "body": "domain:devx#2 · marchtian · session_017ihL2ebbZkr2QAEG1x7UC8\n\nFiling gate: ① defect class with a measured reproduction. Out-of-scope finding of the measurement for #30901 (PR #30919, dev report 6683692239), from the Actions API over `main` push and merge-group CI runs on 2026-11-03..06, plus local idle timings. ⛔ Not a claim. Triage sets the grade and the lane.\n\n**Business reason.** `Test Core` turns `main` and queue entries red when a case on the vitest 5 s default runs long under load. #30901 fixed the formula case, #30785 fixed the cli parity case, and #30873 holds the rest case. These nine are the next in line: they already reach 50-85% of the budget in CI, so a slow runner can tip any of them over.\n\n## The two drain cases look like a product issue, not load\n\nBoth are in `packages/plugins/plugin-hono-server`. Each takes the same time on an idle machine as in CI, so the wait is built in:\n\n| Case | CI (n, median, max) | Local idle |\n|---|---|---|\n| `src/adapter-tls-listener.test.ts` › drains on close exactly as the plain listener does | n=2, 4228 ms, 4239 ms | 4209 ms ×2 |\n| `src/adapter-drain.test.ts` › lets an in-flight request complete instead of aborting it | n=2, 3303 ms, 3321 ms | 3230 ms ×2 |\n\nA guess, not measured: `close()` calls `closeIdleConnections()` while the request is still in flight. The socket that goes idle afterwards then waits for the client's keep-alive to end. If so, a real server's shutdown waits the same keep-alive window per open connection.\n\n## The other seven (2.5-3.4 s max in CI, a sample)\n\n- `client` `src/auth-rotated-session-token.test.ts` › login → enable → verifyTotp → disable → deleteUser: n=5, median 1424 ms, max 3427 ms\n- `cli` `src/utils/unmanaged-tables.integration.test.ts` › the boot this sweep reads from really did compose the deployment: n=5, median 2892 ms, max 3295 ms\n- `metadata-protocol` `src/reference-sites.derivation.test.ts` › two derivations of the same schemas agree exactly: n=2, median 2548 ms, max 3210 ms\n- `plugin-security` `src/org-admin-assignment-boundary.posture.test.ts` › posture single/isolated/group column cases: n=3, median 1989-2228 ms, max 2554-2949 ms\n- `cli` `test/released-port-production-spawn.pin.test.ts` › the census reaches the live tree: n=6, median 2301 ms, max 2629 ms\n- `plugin-sharing` `src/share-link-password.test.ts` › a refused upgrade write does not block the read: n=4, median 2078 ms, max 2605 ms\n- `driver-sql` `src/logger-receiver-detach.test.ts` › sql-driver.ts and the modules split out of it contain none of them: n=2, median 2470 ms, max 2499 ms\n\n## Wanted\n\n- **Drain cases:** find why `close()` waits 3-4 s with a request in flight. If it is the keep-alive wait, fix it in the adapter so shutdown finishes when the in-flight request ends. The two cases then run in milliseconds.\n- **The seven:** for each, cut the heavy work, or set a per-case timeout sized at 3x the measured max, with its reason in a comment (the rule #30901 applied). ⛔ No global timeout raise, no skip, no retry.\n\n**Level:** tests, plus the adapter if the drain guess holds. `Clause-②: no`, `Metadata-protocol: none`.\n\nDedupe (open and closed): \"plugin-hono-server drain closeIdleConnections\" (only #30901); \"hono drain test slow\" (#23181, the cli wall-time budget, which is a different package and class). **New.**\n\nRelated: #30901, PR #30919, #30785, #30873, #25870.\n\nReader: triage. The drain half is `packages/plugins/plugin-hono-server` (server). The seven are spread over their packages' lanes."

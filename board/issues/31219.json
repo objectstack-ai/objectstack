@@ -1,0 +1,34 @@
+{
+  "number": 31219,
+  "kind": "pull_request",
+  "title": "test(lint): pin delete_package as an accepted platform tool name",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-07T18:07:37Z",
+  "updated_at": "2026-11-07T19:00:56Z",
+  "closed_at": "2026-11-07T19:00:54Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-07T19:00:54Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/31219",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-project-manager\"} -->\n_Requested by **Leehom** · [project thread](https://claude.ai/code/project/chan_01TenzsRopZj4jMbvjX8uz1X?thread=cmsg_01TenzsRopZj4jMbvjX8uz1XKAC5tQPZVb9LXtmg8KGQm9)_\n\nFixes #31040\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么:`packages/lint/src/validate-ai-tool-references.test.ts` 新增一条用例(+18 行,仅测试):技能里写 `delete_package` 不被报为虚构工具;写近似名 `delete_packages` 仍被报出。\n- 为什么改:#31037 把 `delete_package` 加进平台工具名单时没补这条固定用例(其合约复审 6693733275 的 should-fix);以往每次加名字都配一条(#16512、#27002、记录写入那对)。\n- 风险与回滚:只加测试,不改名单也不改规则,`@objectstack/lint` 发布的 `files[]` 只含 `dist`/README/CHANGELOG,不发布任何东西;回滚即还原本 PR。\n- 先看:`packages/lint/src/validate-ai-tool-references.test.ts` 新用例「resolves the service-ai-studio package removal」(紧随记录写入那对之后)。\n- 两分钟验证:`pnpm --filter @objectstack/lint exec vitest run src/validate-ai-tool-references.test.ts`,预期 23 条全绿;从 spec 名单删掉 `delete_package` 并重建 spec,预期恰好这一条变红。\n- 需要你做的:无,席位落地。\n\n## What changes\n\nOne test case in `packages/lint/src/validate-ai-tool-references.test.ts`, placed after the record-write pair and shaped like the #16512 / #27002 pins:\n\n- a skill naming `delete_package` resolves (no findings);\n- the near-name control `delete_packages`, registered by nobody, is still reported: exactly one finding, at `skills[0].tools[1]`, naming `delete_packages`. Without the control the pin could not fail on a universe widened until everything resolves.\n\nNo change to the registry (`packages/spec/src/system/constants/platform-tool-names.ts`) or to the rule.\n\n## Tests\n\n- New file run on `ce48acb1`: Test Files 1 passed, Tests 23 passed (23).\n- Whole package, `pnpm --filter @objectstack/lint test`: Test Files 197 passed (197), Tests 8338 passed, 5 skipped; VERDICT command-exit 0.\n- `pnpm --filter @objectstack/lint typecheck` (`tsc --noEmit && check:test-typecheck`): VERDICT command-exit 0, test layer held at its 2 pinned debt signatures (unchanged).\n\n<details><summary>Ablation: the pin fails when delete_package leaves the registry</summary>\n\nThe lint suite reads `@objectstack/spec` from `dist/` (no vitest alias), so each leg rebuilt spec and proved the state of `dist/` before reading the run.\n\n- **Mutate leg** (`node scripts/ablation-replace.mjs --file packages/spec/src/system/constants/platform-tool-names.ts --anchor \"    'delete_package',\\n\" --delete`): anchor 1 -> 0, blob `66cd0267ea06` -> `1ed8917b09d8`; `pnpm --filter @objectstack/spec build` exit 0; `ablation-dist-preflight.mjs @objectstack/spec '\"delete_package\",' --absent --source-marker=\"'delete_package',\"`: marker absent from all 594 built files, exit 0. Run: `× resolves the service-ai-studio package removal`, `AssertionError: expected [ { severity: 'warning', …(5) } ] to deeply equal []`; Tests 1 failed, 22 passed (23); exit 1.\n- **Restore leg**: blob after restore == HEAD (`66cd0267ea06`), `git diff HEAD` empty; spec rebuilt exit 0; preflight (present mode): marker present in 2 built files, tree clean against HEAD, exit 0. Run: Tests 23 passed (23), exit 0.\n\n</details>\n\n## Acceptance notes\n\n- Card acceptance, \"The pin fails if `delete_package` leaves the registry\": measured above (red on exactly the new case, every other case green).\n- `skip-changeset`: `@objectstack/lint` `files[]` is `[\"dist\", \"README.md\", \"CHANGELOG.md\"]`; a `*.test.ts` under `src/` ships nothing.\n\n## Verification\n\nGate union derived by `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` (50 families for this diff), run on head `ce48acb1`, reconciled with `--ran`: \"50 derived famil(ies) accounted for — 48 run, 2 NOT-MEASURED\".\n\n- **48 run, exit 0 each** (closure built first: `pnpm --filter '@objectstack/lint^...' build`, VERDICT command-exit 0). `pnpm check:docs-transcript-drift` first answered exit 3 (it reads `packages/lint/dist`, not yet built); after `pnpm --filter @objectstack/lint build` it ran exit 0.\n- **NOT MEASURED: `pnpm check:dual-build-cjs-loads`**, reason: exit 3 PREREQUISITE NOT MET, it loads every package's built `dist/` and only the lint closure was built.\n- **NOT MEASURED: `pnpm check:lean-entry-closure`**, reason: exit 3 PREREQUISITE NOT MET, it reads `packages/objectql/dist`, outside the lint closure. CI's `Lint & Repo Gates` runs both on a full build.\n- `node scripts/check-plugin-teardown-shape.mjs --self-test` needed `git fetch --depth=1 origin 621a4876` for its pinned fixture on this shallow clone, then exit 0.\n- CI families (every required check) are read from this PR's check-runs, not re-run here.\n\n`pnpm lint` scoped: the package has no `lint` script, so the root eslint ran on it (`node --stack-size=4000 node_modules/eslint/bin/eslint.js packages/lint --no-inline-config`), exit 0.\n\n`skip-changeset`: `@objectstack/lint` `files[]` ships `dist`, `README.md` and `CHANGELOG.md` only; the diff is one `src/*.test.ts`.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01FEkQ5m4G8BbYuRmH2Ts8G4)_\n"
+}

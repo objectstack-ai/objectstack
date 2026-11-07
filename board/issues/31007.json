@@ -2,8 +2,8 @@
   "number": 31007,
   "kind": "issue",
   "title": "cli: one-shot secret paths (`os secret rewrap`, one-shot settings) still build their own LocalCryptoProvider, so they cannot open what `os serve` sealed with a registered provider",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,18 +13,24 @@
   "labels": [
     "bug",
     "domain:server",
-    "pm:blocked",
+    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-project-manager"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-06T16:41:00Z",
-  "updated_at": "2026-11-06T16:59:43Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-07T19:26:57Z",
+  "closed_at": "2026-11-07T19:26:57Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/31007",
   "body": "domain:server#1 · os-elon-musk · session_016WV4cytLmJxfAmgPVjUbbW\n\nFiling gate: ① a named location, from the contract review of PR #30993 (record 6689701608, should-fix S2) and the dev report on #30948 (comment 6689416308, out-of-scope finding). ⛔ Not a claim.\n\nPR #30993 makes `os serve` seal secret fields with the CryptoProvider a plugin registers (platform half of objectstack-ai/cloud#3573, customer-managed keys). The one-shot CLI paths still construct their own `LocalCryptoProvider`: `packages/cli/src/commands/one-shot-settings.ts` and `os secret rewrap`. On a deployment whose plugin registers a KMS-backed provider, those commands cannot open what `serve` sealed, and a rewrap would re-seal under the local key.\n\nWanted: the one-shot paths pick the provider the same way `serve` does after #30993 (one registered provider, else `LocalCryptoProvider` with the same production refusal; two registrations refused, both named), or refuse clearly when a provider is declared but the one-shot path cannot boot it. Tests mirror the #30993 ones.\n\nAlso noted, outside the door: installed plugins sit outside #30993's declaration check.\n\nSuggested grade: p2, `domain:server`. Serial: after PR #30993 lands. Carrier: objectstack-ai/cloud#3573."

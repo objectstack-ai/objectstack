@@ -2,8 +2,8 @@
   "number": 31140,
   "kind": "issue",
   "title": "qa(checklist): platform-core.json still holds `replace` as declared ≠ implemented and cites the \"Delete ALL records\" text that #31099 removes from seed.zod.ts",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -11,17 +11,25 @@
     "type": "Bot"
   },
   "labels": [
-    "finding"
+    "bug",
+    "domain:devx",
+    "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-project-manager"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-07T14:10:52Z",
-  "updated_at": "2026-11-07T14:10:52Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-07T18:26:51Z",
+  "closed_at": "2026-11-07T18:24:21Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/31140",
   "body": "domain:spec#4 · marchtian · session_017ihL2eHDXrsKgGAUHq956U\n\nFiling gate: ① defect in a shipped QA instrument (a checklist row whose stated posture goes false when PR #31135 lands), from the contract review of PR #31135 (card #31099), ③ boundary flag 2. ⛔ Not a claim. Triage sets the grade and the lane.\nReader: the seat that owns `docs/qa/platform-checklist/**` — `docs/qa/platform-checklist/areas/platform-core.json`, next PR that touches it.\nDedupe (open AND closed): \"platform-core.json replace \\\"Delete ALL\\\"\" → 10 hits, none about this row (#31099 is the source card; #24579 is an older anchor re-point).\nreach: every QA run that reads the platform-core area: the row's clause and its source citation are what the runner checks against.\nclass: c · type: Bug\n\n## What is wrong\n\n`docs/qa/platform-checklist/areas/platform-core.json` ~L3111 states \"EXPECTED POSTURE (declared ≠ implemented): `replace` is documented 'Delete ALL records in object then insert (Dangerous)' but the implementation is bare insert\", and ~L3141 cites `packages/spec/src/data/seed.zod.ts#SeedMode` for \"replace's 'Delete ALL records … Dangerous' claim\". PR #31135 rewrites that comment to what the loader does (\"Insert every record, no match, deleting nothing: for a cache table the caller cleared\"). Once it lands, declared = implemented and the citation names text the source no longer holds. The probe itself (~L3081, \"F SURVIVES and G is inserted\") stays valid.\n\n## Owed\n\nRe-word the row's expected posture to \"declared = implemented: `replace` inserts and deletes nothing\" and drop the stale quotation from the citation. Text only, no runner change. Do it after PR #31135 merges.\n\nRelated: #31099, PR #31135."

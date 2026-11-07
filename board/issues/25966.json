@@ -1,7 +1,7 @@
 {
   "number": 25966,
   "kind": "issue",
-  "title": "[PM seat] domain:ui · seat 1 — ⏳ vacant",
+  "title": "[PM seat] domain:ui · seat 1 — 🟢 os-project-manager · 由 os-project-manager 账户的项目负责",
   "state": "open",
   "state_reason": null,
   "draft": null,
@@ -13,16 +13,18 @@
   "labels": [
     "pm:seat"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-project-manager"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-26T06:24:48Z",
-  "updated_at": "2026-11-06T04:44:53Z",
+  "updated_at": "2026-11-07T20:03:51Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 19,
+  "comments": 20,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/25966",
-  "body": "domain:ui#1 · os-sales · session_01L6bhgWn6zhNa4LL7VB1rtL\n\n⚠️ **Seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/ui.md` (⛔ not copied here). This is **`domain:ui` seat 1**. Seat 2 is #25995, seat 3 is #27561, seat 4 is #26620, seat 5 is #26945, seat 6 is #30423.\n\n<sub>Refreshed 2026-11-06T04:43Z at sign-off.</sub>\n\n## Current PM — ⏳ vacant\n\n- **Last holder:** `os-sales` · `session_01L6bhgWn6zhNa4LL7VB1rtL`, signed off in 6677102093.\n- **Mailbox:** none (PR #30503 is closed). **Patrol:** none (deleted).\n- **Pointer:** Lane ledger = labels + assignee + `Claim:` comments carrying `Seat: domain:ui#1` + `head:claude/` PRs.\n\n## Ledger\n\n- In flight at sign-off: none. #29469 and #25921 were released to `pm:queue` with `Resume-from:` (#29469 Release 6675298252, #25921 Release 6677055028); #30743 landed.\n- **Stay-behind:** #30588 (PR #30640, ACCEPTed on `54db079b` with a same-head contract review PASS 6676626239; review requested from `os-zhuang` and `hotlong`, `pm:awaiting-merge`). On an APPROVED review the last holder relays `pr_ready` + `automerge_enable` and writes the landing note; nothing else.\n- Waiting on #30640, unclaimed at `pm:blocked`: #30206 (PR #30552), #30511 (PR #30595), #30325 (PR #30545), #30205 ui half (PR #30652).\n- Out of scope: every `pm:epic` subtree.\n\n## Hot-file serial queue\n\n- None held by this seat. ⛔ Re-derive from the live `Claim:` comments of every `domain:ui` seat before any dispatch.\n\n## Notes\n\n- Write path: the relay (`post-stamped.mjs`, `label-write.mjs`, `fleet-write/dispatch.mjs`). ⛔ No GitHub MCP writes.\n- Standing constraints carried from the previous holders: changesets for ui cards go to the root `.changeset/`; no PR on the objectui repository; cloud-touching cards go whole to the `repo:cloud` lane; `ui/.github/**` and the root `ci.yml` stay ⛔ out of bounds for ui cards.\n- **Publication:** a merge to `main` publishes nothing. The release is the Version Packages PR, a human act.\n"
+  "body": "domain:ui#1 · os-project-manager · session_01FEkQ5nLA7wiVY5YWjT9Svr\n\n⚠️ **Seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/ui.md` (⛔ not copied here). This is **`domain:ui` seat 1**. Seat 2 is #25995, seat 3 is #27561, seat 4 is #26620, seat 5 is #26945, seat 6 is #30423.\n\n<sub>Refreshed 2026-11-07T20:03Z (ledger).</sub>\n\n## Current PM — 🟢 os-project-manager\n\n- **Account / project:** `os-project-manager`, project \"Objectstack server\" (thread \"运行 ui 席位\"). **Session:** `session_01FEkQ5nLA7wiVY5YWjT9Svr`. **Seated:** 2026-11-07T15:31Z.\n- **Patrol:** `trig_01J7KBUiH15DjCfgX1M5koim` · `30 * * * *`. **Mailbox:** PR #31166 (subscribed).\n- **Pointer:** posture, ledger and round records live in the project; the lane ledger = labels + assignee + `Claim:` comments carrying `Seat: domain:ui#1` + `head:claude/` PRs.\n\n## Ledger\n\n- Round ledger (updated 2026-11-07T20:03Z):\n  - Landed: PR #31193 (`Part of #31025`, Expected 1) merged 2026-11-07T17:38Z, #31025 back to `pm:queue` for Expected 2 (6710790432); PR #31198 (`Fixes #30898`) 2026-11-07T17:50Z; PR #31202 (`Fixes #30974`) 2026-11-07T18:24Z; PR #31187 (`Fixes #31011`, Expected 5 on #31173) 2026-11-07T18:42Z; PR #31229 (`Fixes #30850`) 2026-11-07T19:15Z; PR #31236 (`Fixes #30895`) 2026-11-07T20:01Z.\n  - In work: #31217 (claim 6711902405, branch `claude/project-thread-vxpifh`, no PR yet).\n- Inherited from the previous holder's sign-off (6677102093): nothing open. Its stay-behind PR #30640 merged, and #30588, #30206, #30511, #30325, #30205 are closed (read at seating).\n- Out of scope: every `pm:epic` subtree.\n\n## Hot-file serial queue\n\n- None held by this seat. ⛔ Re-derive from the live `Claim:` comments of every `domain:ui` seat before any dispatch.\n\n## Notes\n\n- Write path: the relay (`post-stamped.mjs`, `label-write.mjs`, `fleet-write/dispatch.mjs`). ⛔ No GitHub MCP writes.\n- Standing constraints carried: changesets for ui cards go to the root `.changeset/`; no PR on the objectui repository; cloud-touching cards go whole to the `repo:cloud` lane; `ui/.github/**` and the root `ci.yml` stay ⛔ out of bounds for ui cards.\n- **Publication:** a merge to `main` publishes nothing. The release is the Version Packages PR, a human act.\n\n\n\n\n"
 }

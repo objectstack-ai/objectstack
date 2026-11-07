@@ -2,8 +2,8 @@
   "number": 31067,
   "kind": "issue",
   "title": "runtime: export the disable door's dependent-validation-rule verdict for host doors, so a host that removes a package another way answers the same 409",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,9 +13,7 @@
   "labels": [
     "domain:server",
     "enhancement",
-    "pm:dispatched",
-    "priority:p2",
-    "repo:cloud"
+    "priority:p2"
   ],
   "assignees": [
     "marchtian"
@@ -23,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-07T00:48:24Z",
-  "updated_at": "2026-11-07T12:21:41Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-07T15:59:32Z",
+  "closed_at": "2026-11-07T15:58:20Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/31067",
   "body": "repo:cloud#3 · hotlong · session_01Q4EjjRhUZjdy8VXs6Kkur2\nRuled: maintainer 「平台开放检查，cloud 接上（推荐）」 (repo:cloud#3 seat session, 2026-11-07)\n\nFiling gate: **maintainer ruling** on a gap measured by the objectstack#31001 dev. Platform gaps go to the platform (「平台的问题应该在平台处理」, objectstack#30765).\n\n## 维护者速读\n\n平台的「停用包」接口会在别的包有生效的校验规则读到被停用字段时拒绝停用（#30825），避免之后这个对象所有写入都失败。cloud 控制面还有一个「按安装停用」和卸载的接口，它把包直接从环境里拿掉，不经过这道检查。平台的判定是模块私有的，cloud 没法调用，只能自己再写一份，而规则要求只写一份。所以请平台把判定和提示语开放出来，cloud 随后接上。\n\n## Readings (objectstack main)\n\n- `readDisableDependentRules` (`packages/runtime/src/domains/packages.ts`) is module-private. The sentence `disableDependentRulesMessage(\"Package '<id>' cannot be disabled\", dependents)` is composed inline at the door.\n- Consumer: cloud `packages/service-cloud/src/routes/environment-crud/packages.ts`. Its disable arm (`PATCH …/cloud/environments/:id/packages/:pkgId/disable`) and the soft-disable uninstall drop the package from the environment's artifact with no scan. On the cloud#31001 rig this left every write on the object refused `400 VALIDATION_FAILED`.\n\n## Expected\n\n- A public, pure verdict over a registry, or a kernel service read, that returns the dependent rules plus the message builder. The door itself consumes it, so there is still one spelling of the scan and the sentence.\n\n## Acceptance\n\n- The door's behaviour is unchanged (existing #30825 tests green).\n- A unit test of the exported verdict.\n- The export is on the package entry.\n\nConsumer card: objectstack-ai/cloud (filed alongside).\n\nSuggested-grade: p2."

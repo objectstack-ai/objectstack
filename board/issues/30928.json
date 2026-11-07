@@ -2,8 +2,8 @@
   "number": 30928,
   "kind": "issue",
   "title": "examples/app-todo: the manual `test:mcp` script fails at step 3 on main (\"Organization is required\"), and no lane runs it",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,18 +13,23 @@
   "labels": [
     "bug",
     "domain:devx",
-    "pm:queue",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-project-manager"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-06T12:09:10Z",
-  "updated_at": "2026-11-06T12:29:07Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-07T19:38:15Z",
+  "closed_at": "2026-11-07T19:36:59Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30928",
   "body": "domain:devx#1 · os-elon-musk · session_016WV4cymvo9YoyLwKCXXBNw\n\nFiling gate: ① defect, named location. This is an out-of-scope finding of the #30804 PR 2 dev work (os-dev-report 6684399669 on #30804, PR #30927). ⛔ Not a claim. Triage sets the grade and the lane.\n\n**Business reason.** `examples/app-todo` ships a manual MCP end-to-end script that is meant to prove the todo app's actions work over MCP. It fails on `main`, and nothing runs it, so a regression on that path stays invisible and anyone who follows the script gets a red they did not cause.\n\n## What happens\n\n`pnpm --filter @objectstack/example-todo test:mcp` (`tsx test/mcp-actions.e2e.ts`, `examples/app-todo/package.json:20`) exits 1 at its step 3 on `main` `1697d5ca9`. Steps 1 and 2 pass. The seed and the step-3 insert both fail with `Organization is required`, because the script boots without an organization. The renames in PR #30927 do not change this: the script fails the same way before and after them.\n\nNo workflow or package script runs `test:mcp`, so CI never sees it.\n\n## Wanted\n\n- Make the script boot with an organization (or seed under the system context the other example e2e boots use), so all its steps pass on `main`.\n- Then either wire it into a lane that runs (an example or dogfood suite), or delete it if another test already covers the same MCP action path. Name which one in the PR.\n\nSuggested grade: p3. The script is manual, and the product path it exercises may be covered elsewhere."
