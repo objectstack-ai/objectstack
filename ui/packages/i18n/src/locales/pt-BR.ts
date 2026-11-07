@@ -1863,10 +1863,6 @@ const pt = {
     },
   },
   console: {
-    organizationMfa: {
-      needsTwoFactor: "Exigir autenticação multifator precisa da autenticação de dois fatores, que está desativada nesta implantação, então salvar com a opção marcada é recusado. Ative os dois fatores primeiro: ligue Exigir autenticação multifator em Configuração → Autenticação (vale para todas as organizações) ou defina OS_AUTH_TWO_FACTOR=true na implantação.",
-      nowRequired: "Todos os membros desta organização que ainda não configuraram um app autenticador precisam fazê-lo agora. Cada um perde o acesso aos dados quando termina o período de carência de MFA (7 dias, a menos que alterado em Configuração → Autenticação), contado a partir do primeiro uso após esta alteração. Membros que já usam um autenticador não são afetados.",
-    },
     studio: {
       title: "Studio",
       accessRequired: "Você precisa de acesso ao Studio para abrir o Studio. Um administrador pode concedê-lo com um conjunto de permissões em Configuração → Atribuição de conjuntos de permissões.",

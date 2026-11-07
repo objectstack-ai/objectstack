@@ -405,7 +405,10 @@ describe('objectui#3876 — de pack closes „ with “ and not with a straight 
     // `fields.preferenceOption.useTyped`, the picker row that commits the typed
     // topic or channel („{{value}}“ verwenden) — one interpolated span, runtime
     // data.
-    expect(okSpans, 'correctly paired spans').toBe(109);
+    // 108 once the organization form's notices over the retired `require_mfa`
+    // column were removed with `console.organizationMfa.needsTwoFactor` — one
+    // literal span fewer.
+    expect(okSpans, 'correctly paired spans').toBe(108);
   });
 
   it('keeps the count identity that replaces the card’s count(„) === count(“)', () => {
@@ -496,8 +499,11 @@ describe('objectui#3876 — de pack closes „ with “ and not with a straight 
     // one matched pair each. 108 / 108 / 0 after objectstack-ai/objectstack#30894
     // added `connectAgent.access.revokeTitle`, one more matched pair. 109 / 109 / 0
     // after objectstack-ai/objectstack#31062 added
-    // `fields.preferenceOption.useTyped`, one more matched pair.
-    expect({ open, close, rdq }).toEqual({ open: 109, close: 109, rdq: 0 });
+    // `fields.preferenceOption.useTyped`, one more matched pair. 108 / 108 / 0
+    // after `console.organizationMfa.needsTwoFactor` was removed with the
+    // organization form's notices over the retired `require_mfa` column, one
+    // matched pair fewer.
+    expect({ open, close, rdq }).toEqual({ open: 108, close: 108, rdq: 0 });
     // The durable shape: every „ closed by a “, every surplus “ an English
     // opener answered by a ”. Survived translating the two English values.
     expect(close).toBe(open + rdq);
