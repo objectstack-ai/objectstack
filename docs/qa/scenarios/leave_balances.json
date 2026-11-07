@@ -817,6 +817,7 @@
       {
         "id": "employee",
         "role": "Employee, Engineering, two years of service — e07",
+        "record": {"object": "employee", "id": "e07"},
         "hidden": {"fields": [{"object": "employee", "field": "personal_phone"}]},
         "scope": [
           {"object": "leave_request", "field": "employee", "value": "e07"},
@@ -828,6 +829,7 @@
       {
         "id": "dept_manager",
         "role": "Department manager, Engineering — e05",
+        "record": {"object": "employee", "id": "e05"},
         "hidden": {
           "fields": [
             {"object": "employee", "field": "personal_phone"},

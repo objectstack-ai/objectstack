@@ -47,6 +47,8 @@ import {
     withRowBinding,
 } from './protocol-package-bindings.js';
 import type { ServedOverrideRow } from './served-override.js';
+import { withServedRowChangedAt } from './served-row-changed-at.js';
+import { canonicalIsoInstant } from './sys-metadata-repository.js';
 
 /** The body of `ObjectStackProtocolImplementation#getMetaItem`; the method's docblock there is its contract. */
 export async function getMetaItem(host: Pick<ProtocolHost, 'readMetaItemFace'>, request: {
@@ -326,6 +328,10 @@ export async function readMetaItem(host: Pick<ProtocolHost, 'artifactLockLayerAt
     let draftChanges: ReturnType<typeof storedDraftChanges>;
     // [#26707] The draft row this read serves, for its publish verdict.
     let servedDraftRow: { metadata?: unknown; package_id?: string | null } | undefined;
+    // [#31196] When the stored row whose content the active read adopts last
+    // changed: the item's own `Last-Modified` ({@link withServedRowChangedAt}).
+    // Unset for an item no stored row serves.
+    let servedRowChangedAt: string | undefined;
     try {
         // [#28409, ADR-0146 D8 item 2] The active read serves the
         // package's name, so its declared override is the first candidate
@@ -389,6 +395,9 @@ export async function readMetaItem(host: Pick<ProtocolHost, 'artifactLockLayerAt
             if (readState === 'draft') {
                 draftChanges = storedDraftChanges((record as { draft_changes?: unknown }).draft_changes);
                 servedDraftRow = record as { metadata?: unknown; package_id?: string | null };
+            } else {
+                const stamped = record as { updated_at?: unknown; created_at?: unknown };
+                servedRowChangedAt = canonicalIsoInstant(stamped.updated_at ?? stamped.created_at);
             }
         }
     } catch (error) {
@@ -722,7 +731,10 @@ export async function readMetaItem(host: Pick<ProtocolHost, 'artifactLockLayerAt
     const cascadeDeleteObjects = !execution && decorated !== undefined && decorated !== null
         ? host.resolveCascadeDeleteObjects(request.type, request.name)
         : undefined;
-    return {
+    // [#31196] …and, off the record, when the stored row it serves last
+    // changed ({@link withServedRowChangedAt}), for the cached read's
+    // `lastModified`.
+    return withServedRowChangedAt({
         type: request.type,
         name: request.name,
         item: decorated,
@@ -753,5 +765,5 @@ export async function readMetaItem(host: Pick<ProtocolHost, 'artifactLockLayerAt
         ...(readRegistration ? { registration: readRegistration(request.name) } : {}),
         ...(readDisabledActions ? { disabledActions: readDisabledActions(decorated) } : {}),
         ...(cascadeDeleteObjects !== undefined ? { cascadeDeleteObjects } : {}),
-    };
+    }, servedRowChangedAt);
 }

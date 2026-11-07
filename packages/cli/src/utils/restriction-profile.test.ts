@@ -79,6 +79,13 @@ describe('judgeRestrictionProfile — one refusal per dimension', () => {
     expect(rowsOf(profile({ allowCode: false }), stack)).toEqual([]);
   });
 
+  it('allowCode: false — `devPlugins` never reaches a target, so it refuses nothing; `plugins` beside it still does', () => {
+    const stack = { manifest: STACK.manifest, plugins: ['@acme/rp-plugin'], devPlugins: ['@acme/rp-dev-only-plugin'] };
+    expect(rowsOf(profile({ allowCode: false }), stack)).toEqual([
+      { rule: 'allowCode', where: "plugin '@acme/rp-plugin'", path: 'plugins[0]' },
+    ]);
+  });
+
   it('allowCode: false — a code key on the manifest is refused under its manifest path', () => {
     const stack = { manifest: { ...STACK.manifest, main: 'dist/index.mjs' } };
     expect(rowsOf(profile({ allowCode: false }), stack)).toEqual([

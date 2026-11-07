@@ -319,3 +319,75 @@ describe('#30924: a sign-in that enforced MFA holds records the hold on its own 
     expect(JSON.stringify(mine)).not.toContain(HELD_PASSWORD);
   }, 120_000);
 });
+
+describe('#30924: a sign-in the IP allow-list refuses writes one login_failed row', () => {
+  // ADR-0069 D5 on a real boot: the deployment's `auth.allowed_ip_ranges`
+  // set through the settings service to a range no request here comes from
+  // (the harness injects requests with no socket, so the server establishes
+  // no client address, which the gate refuses like one outside the ranges).
+  // Read back through the engine under a system context: with the list set,
+  // every auth route refuses the harness too.
+  const MEMBER = 'refused.30924@example.com';
+  const MEMBER_PASS = 'Refused!Pass30924';
+  let stack: VerifyStack;
+  let ql: any;
+  let memberId: string;
+
+  const signInRaw = (email: string) =>
+    stack.api('/auth/sign-in/email', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', origin: 'http://localhost:3000', 'user-agent': 'dogfood/30924' },
+      body: JSON.stringify({ email, password: MEMBER_PASS }),
+    });
+
+  beforeAll(async () => {
+    stack = await bootShowcase({ extraPlugins: [new AuditPlugin()], orgContext: true });
+    ql = await stack.kernel.getServiceAsync<any>('objectql');
+    await stack.signIn();
+    await stack.signUp(MEMBER, MEMBER_PASS, 'Refused 30924');
+    const [member] = await findRows(ql, 'sys_user', { email: MEMBER }, 1);
+    memberId = String(member.id);
+    const settings = await stack.kernel.getServiceAsync<any>('settings');
+    await settings.setMany('auth', { allowed_ip_ranges: '203.0.113.0/24' });
+  }, 180_000);
+
+  afterAll(async () => {
+    await stack?.stop?.();
+  });
+
+  it('one row naming the account, the rule and the reason; a flood is bounded; no credential is written', async () => {
+    // The saved list reaches the gate through the settings apply, which is not
+    // synchronous with `setMany`: wait for the first refusal, which is the
+    // 1st counted, then send eleven more.
+    let first: Response | undefined;
+    for (let i = 0; i < 40 && first?.status !== 403; i += 1) {
+      if (i > 0) await new Promise((r) => setTimeout(r, 250));
+      first = await signInRaw(MEMBER);
+    }
+    expect(first?.status, 'the saved allow-list never refused a sign-in').toBe(403);
+    expect(((await first!.json()) as any)?.error?.code).toBe('IP_NOT_ALLOWED');
+    for (let i = 0; i < 11; i += 1) {
+      const res = await signInRaw(MEMBER);
+      expect(res.status).toBe(403);
+      expect(((await res.json()) as any)?.error?.code).toBe('IP_NOT_ALLOWED');
+    }
+
+    const rows = await waitForRows(
+      () => findRows(ql, 'sys_audit_log', { action: 'login_failed', user_id: memberId }),
+      (found) => found.length >= 2,
+      'the refused sign-ins wrote no login_failed rows',
+    );
+    // Twelve refusals from one (undetermined) address: rows at the 1st and 10th only.
+    expect(rows).toHaveLength(2);
+    const metadata = rows.map((r: any) => JSON.parse(String(r.metadata)));
+    expect(metadata.map((m: any) => m.attempts).sort((a: number, b: number) => a - b)).toEqual([1, 10]);
+    for (const [i, row] of rows.entries()) {
+      expect(metadata[i]).toMatchObject({ endpoint: '/sign-in/email', reason: 'IP_NOT_ALLOWED', rule: 'ip_allow_list' });
+      expect(row.object_name).toBe('sys_user');
+      expect(row.record_id).toBe(memberId);
+      expect(row.user_agent).toBe('dogfood/30924');
+    }
+    expect(JSON.stringify(rows)).not.toContain(MEMBER_PASS);
+    expect(JSON.stringify(rows)).not.toContain(MEMBER);
+  }, 120_000);
+});

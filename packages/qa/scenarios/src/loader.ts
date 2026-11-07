@@ -220,6 +220,112 @@ function loadOne(file: string, options: LoadOptions): { card?: LoadedScenario; r
 
 type Refuse = (path: IssuePath, message: string) => void;
 type Persona = ScenarioCard['run']['personas'][number];
+type Question = ScenarioCard['run']['questions'][number];
+type Seed = ScenarioCard['run']['seed'];
+
+/**
+ * How `seed` reads under the card's declared lookups: `object.field` → the
+ * lookup's target, each object's rows by id, a resolver for a field or
+ * relation path (a hop naming no row of `seed` reads `null`), and whether a
+ * persona's row scope holds for a row.
+ */
+function seedReader(card: ScenarioCard, seed: Seed) {
+  const objects = new Set(card.expect.objects);
+  const lookupFields = new Map<string, string>();
+  for (const l of card.expect.lookups ?? []) if (objects.has(l.to)) lookupFields.set(`${l.object}.${l.field}`, l.to);
+  const rowById = new Map(Object.entries(seed).map(([name, rows]) => [name, new Map(rows.map((r) => [r.id, r]))]));
+  const resolverFor = (object: string) => (row: SeedRow, path: string) => {
+    let cur = object;
+    let r: SeedRow | undefined = row;
+    const segs = path.split('.');
+    for (const seg of segs.slice(0, -1)) {
+      const to = lookupFields.get(`${cur}.${seg}`) as string;
+      const id: unknown = r[seg];
+      r = typeof id === 'string' ? rowById.get(to)?.get(id) : undefined;
+      if (r === undefined) return null;
+      cur = to;
+    }
+    const v = r[segs[segs.length - 1]];
+    return v === undefined ? null : v;
+  };
+  /** Whether `p` sees `row` of `object`: every row-scope rule it declares on that object holds. */
+  const inScope = (p: Persona, object: string, row: SeedRow): boolean => {
+    const resolve = resolverFor(object);
+    return (p.scope ?? []).filter((sc) => sc.object === object).every((sc) => resolve(row, sc.field) === sc.value);
+  };
+  return { lookupFields, rowById, resolverFor, inScope };
+}
+
+/** Whether `p` must not be told a truth that reads the `read` (object, field) pairs of `object`. */
+function withholds(p: Persona, object: string, read: ReadonlyArray<readonly [string, string]>): boolean {
+  const hiddenFields = new Set((p.hidden.fields ?? []).map((f) => `${f.object}.${f.field}`));
+  const hiddenObjects = new Set(p.hidden.objects ?? []);
+  return hiddenObjects.has(object) || read.some(([o, f]) => hiddenObjects.has(o) || hiddenFields.has(`${o}.${f}`));
+}
+
+/** The (object, field) pairs a loaded question's truth reads, through its relation paths. */
+function truthReads(q: Question, lookupFields: ReadonlyMap<string, string>): Array<[string, string]> {
+  const t = q.truth;
+  if (t.kind === 'unanswerable') return [];
+  const paths = [
+    ...(t.filter ?? []).map((f) => f.field),
+    ...(t.groupBy !== undefined ? [t.groupBy] : []),
+    ...('field' in t && t.field !== undefined ? [t.field] : []),
+    ...(t.kind === 'topN' && t.measure && 'field' in t.measure ? [t.measure.field] : []),
+  ];
+  const read: Array<[string, string]> = [];
+  for (const path of paths) {
+    let cur = q.object;
+    for (const seg of path.split('.')) {
+      read.push([cur, seg]);
+      cur = lookupFields.get(`${cur}.${seg}`) ?? cur;
+    }
+  }
+  return read;
+}
+
+/**
+ * Every question's truth — over all rows, and as each persona it lists — of a
+ * LOADED card, computed over `seed` instead of the card's own seed: the same
+ * rules the loader computes {@link LoadedScenario.truths} and
+ * {@link LoadedScenario.personaTruths} with. The runner hands it the seed less
+ * the rows the app refused, to tell which turns a refused row changes
+ * (`seedDependence`). A truth `seed` does not determine (an average over no
+ * rows, a ranking cut inside a tie) is absent, never approximated.
+ */
+export function truthsOver(card: ScenarioCard, seed: Seed): Pick<LoadedScenario, 'truths' | 'personaTruths'> {
+  const { lookupFields, resolverFor, inScope } = seedReader(card, seed);
+  const truths: Record<string, Truth> = {};
+  const personaTruths: Record<string, Record<string, Truth>> = {};
+  for (const q of card.run.questions) {
+    const rows = seed[q.object] ?? [];
+    const ctx = { resolve: resolverFor(q.object), asOf: card.asOf };
+    const evaluate = (scoped: readonly SeedRow[]): Truth | undefined => {
+      try {
+        return evaluateTruth(q.truth, scoped, ctx);
+      } catch (e) {
+        if (e instanceof TruthError) return undefined;
+        throw e;
+      }
+    };
+    const all = evaluate(rows);
+    if (all) truths[q.id] = all;
+    if (q.personas === undefined) continue;
+    const read = truthReads(q, lookupFields);
+    personaTruths[q.id] = {};
+    for (const id of q.personas) {
+      const p = card.run.personas.find((x) => x.id === id);
+      if (p === undefined) continue;
+      if (withholds(p, q.object, read) && q.truth.kind !== 'unanswerable') {
+        personaTruths[q.id][id] = { kind: 'withheld' };
+        continue;
+      }
+      const truth = evaluate(rows.filter((r) => inScope(p, q.object, r)));
+      if (truth) personaTruths[q.id][id] = truth;
+    }
+  }
+  return { truths, personaTruths };
+}
 
 /**
  * The two codes a faithful build answers an operation its acting persona
@@ -476,27 +582,28 @@ function checkCard(
     read.push([cur, last]);
     return read;
   };
-  const rowById = new Map(Object.entries(seed).map(([name, rows]) => [name, new Map(rows.map((r) => [r.id, r]))]));
-  const resolverFor = (object: string) => (row: SeedRow, path: string) => {
-    let cur = object;
-    let r: SeedRow | undefined = row;
-    const segs = path.split('.');
-    for (const seg of segs.slice(0, -1)) {
-      const to = lookupFields.get(`${cur}.${seg}`) as string;
-      const id: unknown = r[seg];
-      r = typeof id === 'string' ? rowById.get(to)?.get(id) : undefined;
-      if (r === undefined) return null;
-      cur = to;
-    }
-    const v = r[segs[segs.length - 1]];
-    return v === undefined ? null : v;
-  };
+  const { rowById, resolverFor, inScope } = seedReader(card, seed);
 
-  /** Whether `p` sees `row` of `object`: every row-scope rule it declares on that object holds. */
-  const inScope = (p: Persona, object: string, row: SeedRow): boolean => {
-    const resolve = resolverFor(object);
-    return (p.scope ?? []).filter((sc) => sc.object === object).every((sc) => resolve(row, sc.field) === sc.value);
-  };
+  // ── user-handle fields: declared, each a seeded field that is not a row id, lookup or select ──
+  const declaredLookups = new Set((expect.lookups ?? []).map((l) => `${l.object}.${l.field}`));
+  const declaredSelects = new Set((expect.selectFields ?? []).map((s) => `${s.object}.${s.field}`));
+  const handleFields = new Set<string>();
+  duplicates(run.userHandleFields ?? [], (h) => `${h.object}.${h.field}`, ['run', 'userHandleFields'], 'user-handle field', refuse);
+  (run.userHandleFields ?? []).forEach((h, i) => {
+    const at: IssuePath = ['run', 'userHandleFields', i];
+    const key = `${h.object}.${h.field}`;
+    if (!objects.has(h.object) || seed[h.object] === undefined) {
+      refuse([...at, 'object'], `\`${h.object}\` is not a seeded expected object`);
+      return;
+    }
+    if (!checkField(h.object, h.field, [...at, 'field'])) return;
+    const is = h.field === 'id' ? 'the row id' : declaredLookups.has(key) ? 'a declared lookup' : declaredSelects.has(key) ? 'a declared select' : undefined;
+    if (is !== undefined) {
+      refuse([...at, 'field'], `\`${key}\` is ${is}, not a user handle: a user-handle field holds text that stands for a user (\`u_sam\`), which the runner loads as that user's id`);
+      return;
+    }
+    handleFields.add(key);
+  });
 
   // ── personas: hidden refs and row scope resolve ──
   duplicates(run.personas, (p) => p.id, ['run', 'personas'], 'persona id', refuse);
@@ -516,8 +623,38 @@ function checkCard(
       if (!objects.has(sc.object) || seed[sc.object] === undefined) {
         refuse([...at, 'object'], `\`${sc.object}\` is not a seeded expected object`);
         unscoped.add(p.id);
-      } else if (checkPath(sc.object, sc.field, [...at, 'field']) === null) unscoped.add(p.id);
+        return;
+      }
+      const read = checkPath(sc.object, sc.field, [...at, 'field']);
+      if (read === null) {
+        unscoped.add(p.id);
+        return;
+      }
+      // What the rule's value names is read off the field it ends on, never
+      // guessed: a row (`id`, a lookup), an option (a select) or a user (a
+      // declared handle). Any other field leaves the runner to infer it.
+      const [o, f] = read[read.length - 1];
+      const key = `${o}.${f}`;
+      if (f !== 'id' && !declaredLookups.has(key) && !declaredSelects.has(key) && !handleFields.has(key)) {
+        refuse(
+          [...at, 'field'],
+          `\`${key}\` is neither a declared user-handle field nor a declared lookup or select, so nothing says what the scope value ${JSON.stringify(sc.value)} names: list it in \`run.userHandleFields\` when the value is a handle standing for a user (\`u_sam\`), or declare it in \`expect.lookups\` or \`expect.selectFields\``,
+        );
+        unscoped.add(p.id);
+      }
     });
+    // The person the persona IS: a seed row it names (`record`), or a user
+    // handle a direct scope rule on a declared handle field names (`owner: u_sam`).
+    if (p.record !== undefined) {
+      if (!(ids.get(p.record.object)?.has(p.record.id) ?? false)) {
+        refuse(['run', 'personas', i, 'record'], `no seeded \`${p.record.object}\` row has id \`${p.record.id}\`: a persona's \`record\` names the seed row that is this person`);
+      }
+    } else if (p.scope !== undefined && !p.scope.some((sc) => !sc.field.includes('.') && handleFields.has(`${sc.object}.${sc.field}`))) {
+      refuse(
+        ['run', 'personas', i, 'record'],
+        `\`${p.id}\` declares a row \`scope\` but names no person: add \`record: { object, id }\`, the seed row that is this person (an employee, an agent, a customer), or scope it by a direct rule on a declared user-handle field (\`run.userHandleFields\`)`,
+      );
+    }
   });
 
   // ── row scope is judged in the build: a scoped persona needs the row-scope tag ──
@@ -624,11 +761,7 @@ function checkCard(
       if (unscoped.has(id)) return;
       const p = run.personas.find((x) => x.id === id)!;
       scopeFigures[q.id][id] = figuresInScope(p, q.object);
-      const hiddenFields = new Set((p.hidden.fields ?? []).map((f) => `${f.object}.${f.field}`));
-      const hiddenObjects = new Set(p.hidden.objects ?? []);
-      const withheld =
-        hiddenObjects.has(q.object) || read.some(([o, f]) => hiddenObjects.has(o) || hiddenFields.has(`${o}.${f}`));
-      if (withheld && t.kind !== 'unanswerable') {
+      if (withholds(p, q.object, read) && t.kind !== 'unanswerable') {
         personaTruths[q.id][id] = { kind: 'withheld' };
         return;
       }

@@ -691,6 +691,7 @@
       {
         "id": "support_agent",
         "role": "Support agent, Billing group — a02",
+        "record": {"object": "agent", "id": "a02"},
         "hidden": {
           "fields": [{"object": "customer", "field": "contract_value"}, {"object": "agent", "field": "hourly_cost"}]
         },
@@ -703,6 +704,7 @@
       {
         "id": "team_lead",
         "role": "Team lead, Technical group — a04",
+        "record": {"object": "agent", "id": "a04"},
         "hidden": {"fields": [{"object": "agent", "field": "hourly_cost"}]},
         "scope": [
           {"object": "agent", "field": "group", "value": "grp_tech"},
@@ -714,6 +716,7 @@
       {
         "id": "portal_customer",
         "role": "Customer portal user, Harbor & Pine Foods — cus_03",
+        "record": {"object": "customer", "id": "cus_03"},
         "hidden": {
           "objects": ["escalation_rule"],
           "fields": [
