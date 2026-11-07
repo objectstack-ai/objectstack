@@ -1910,7 +1910,81 @@ export const FlowSchema = lazySchema(() => strictObject(
       });
     });
   }
+
+  for (const refusal of unreachableTopLevelNodeRefusals(flow.nodes, flow.edges)) {
+    ctx.addIssue({ code: 'custom', path: ['nodes', refusal.index], message: refusal.message });
+  }
 }));
+
+/**
+ * The top-level nodes no edge path from the `start` node reaches, each with
+ * the refusal an author meets at `nodes[i]`.
+ *
+ * The engine runs a flow from its first `start` node and follows out-edges
+ * from there (`service-automation`'s `executeNode` → `traverseNext`); nothing
+ * else ever schedules a top-level node. So a node no edge path reaches — an
+ * edge forgotten while wiring, a node left behind when its in-edge was
+ * deleted — parses, registers, publishes and never runs. Refused here so the
+ * author meets it at every door the endpoint refusal above reaches.
+ *
+ * Scope, declared rather than discovered:
+ *
+ *  - The TOP-LEVEL graph only. A region body (`loop` / `try_catch` /
+ *    `parallel`) is already single-entry and acyclic under ADR-0031
+ *    (`analyzeRegion`), and in a DAG with one source every node is reachable
+ *    from it, so a region cannot hold an unreachable node.
+ *  - A flow with no `start` node is not judged: it has no run to reach anything
+ *    from, and the engine refuses to run it (`FLOW_NO_START_NODE`).
+ *  - Every edge counts, whatever its `type` or `condition`: a `fault` edge or a
+ *    conditional edge is a path the engine can take.
+ *  - A graph holding an edge whose endpoint names no top-level node is not
+ *    judged: the endpoint rule above refuses that edge, and the node it was
+ *    meant to reach would otherwise be reported a second time, for the same
+ *    fault, under a cure (add an edge) that is not the one to apply.
+ *  - A `boundary_event` is exempt, and so is a node reached only through one:
+ *    it is attached to its host by `boundaryConfig.attachedToNodeId`, not
+ *    entered by an edge, and its own contract owns its refusal.
+ */
+function unreachableTopLevelNodeRefusals(
+  nodes: ReadonlyArray<{ id: string; type: string }>,
+  edges: ReadonlyArray<{ source: string; target: string }>,
+): Array<{ index: number; message: string }> {
+  const start = nodes.find((node) => node.type === 'start');
+  if (start === undefined) return [];
+  const ids = new Set(nodes.map((node) => node.id));
+  if (edges.some((edge) => !ids.has(edge.source) || !ids.has(edge.target))) return [];
+  const outgoing = new Map<string, string[]>();
+  for (const edge of edges) {
+    const targets = outgoing.get(edge.source) ?? [];
+    targets.push(edge.target);
+    outgoing.set(edge.source, targets);
+  }
+  const reached = new Set<string>();
+  const visit = (from: readonly string[]): void => {
+    const queue = [...from];
+    while (queue.length > 0) {
+      const id = queue.shift()!;
+      if (reached.has(id)) continue;
+      reached.add(id);
+      queue.push(...(outgoing.get(id) ?? []));
+    }
+  };
+  visit([start.id]);
+  visit(nodes.filter((node) => node.type === 'boundary_event').map((node) => node.id));
+  const refusals: Array<{ index: number; message: string }> = [];
+  nodes.forEach((node, index) => {
+    if (reached.has(node.id)) return;
+    refusals.push({
+      index,
+      message:
+        `Node \`${node.id}\` (\`${node.type}\`, \`nodes[${index}]\`) is not reachable: no edge path leads to it ` +
+        `from the start node \`${start.id}\`. A run starts at the start node and follows edges, so this node ` +
+        'never runs, while the flow registers and reports itself as configured. Add an edge into it from a ' +
+        'node that runs, or delete the node.',
+    });
+  });
+  return refusals;
+}
 
 /**
  * The edge list a `FlowGraph` was read from, as the author wrote it —

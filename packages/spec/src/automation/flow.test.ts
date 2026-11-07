@@ -2367,12 +2367,20 @@ describe('FlowSchema — top-level node ids are unique', () => {
   });
 
   it('accepts the same flow once the ids are unique, keeping the nodes in authored order', () => {
-    const unique = flowWith([
-      { id: 'start', type: 'start', label: 'Start' },
-      { id: 'n', type: 'assignment', label: 'Assign A' },
-      { id: 'n2', type: 'assignment', label: 'Assign B' },
-      { id: 'end', type: 'end', label: 'End' },
-    ]);
+    // `n2` is wired in: a node no edge reaches is refused at parse.
+    const unique = {
+      ...flowWith([
+        { id: 'start', type: 'start', label: 'Start' },
+        { id: 'n', type: 'assignment', label: 'Assign A' },
+        { id: 'n2', type: 'assignment', label: 'Assign B' },
+        { id: 'end', type: 'end', label: 'End' },
+      ]),
+      edges: [
+        { id: 'e1', source: 'start', target: 'n' },
+        { id: 'e2', source: 'n', target: 'n2' },
+        { id: 'e3', source: 'n2', target: 'end' },
+      ],
+    };
     const result = FlowSchema.safeParse(unique);
     expect(result.success).toBe(true);
     if (!result.success) return;
@@ -2645,15 +2653,23 @@ describe('FlowSchema — one node-id space across the top-level nodes[] and ever
   });
 
   it('accepts a flow whose ids are unique across the whole flow, keeping every region node in authored order', () => {
-    const unique = flowWith([
-      { id: 'start', type: 'start', label: 'Start' },
-      loopOver([step('sweep_first'), step('sweep_second')], [{ id: 'b1', source: 'sweep_first', target: 'sweep_second' }]),
-      {
-        id: 'p', type: 'parallel', label: 'Fan out',
-        config: { branches: [{ nodes: [step('left')] }, { nodes: [step('right')] }] },
-      },
-      { id: 'end', type: 'end', label: 'End' },
-    ]);
+    // `p` is wired in: a node no edge reaches is refused at parse.
+    const unique = {
+      ...flowWith([
+        { id: 'start', type: 'start', label: 'Start' },
+        loopOver([step('sweep_first'), step('sweep_second')], [{ id: 'b1', source: 'sweep_first', target: 'sweep_second' }]),
+        {
+          id: 'p', type: 'parallel', label: 'Fan out',
+          config: { branches: [{ nodes: [step('left')] }, { nodes: [step('right')] }] },
+        },
+        { id: 'end', type: 'end', label: 'End' },
+      ]),
+      edges: [
+        { id: 'e1', source: 'start', target: 'n' },
+        { id: 'e2', source: 'n', target: 'p' },
+        { id: 'e3', source: 'p', target: 'end' },
+      ],
+    };
     const result = FlowSchema.safeParse(unique);
     expect(result.success).toBe(true);
     if (!result.success) return;
@@ -2850,5 +2866,90 @@ describe('FlowSchema — an edge resolves in its own graph, and is followed once
     expect(result.data.edges.map((e) => e.id)).toEqual(['e1', 'e2', 'e3']);
     expect(() => validateControlFlow(result.data)).not.toThrow();
     expect(defineFlow(flow).edges.map((e) => e.id)).toEqual(['e1', 'e2', 'e3']);
+  });
+});
+
+describe('FlowSchema — every top-level node is reachable from the start node', () => {
+  // A run starts at the `start` node and follows edges; nothing else schedules
+  // a top-level node. A node no edge path reaches parsed, published and never
+  // ran. Refused at `nodes[i]`, for each such node.
+  const start: FlowNode = { id: 'start', type: 'start', label: 'Start' };
+  const end: FlowNode = { id: 'end', type: 'end', label: 'End' };
+  const step = (id: string): FlowNode => ({ id, type: 'assignment', label: id });
+  const flowOf = (nodes: FlowNode[], edges: FlowEdge[]): Flow => ({
+    name: 'reach_flow',
+    label: 'Reach flow',
+    type: 'autolaunched',
+    nodes,
+    edges,
+  });
+
+  it('refuses an action node with no in-edge, anchored at the node, naming it and the start node', () => {
+    const result = FlowSchema.safeParse(flowOf([start, step('orphan'), end], [
+      { id: 'e1', source: 'start', target: 'end' },
+    ]));
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues.map((i) => [i.code, i.path])).toEqual([['custom', ['nodes', 1]]]);
+    const [issue] = result.error.issues;
+    expect(issue.message).toContain('Node `orphan` (`assignment`, `nodes[1]`) is not reachable');
+    expect(issue.message).toContain('from the start node `start`');
+  });
+
+  it('refuses every node of a disconnected chain — an in-edge from an unreachable node is no path', () => {
+    const result = FlowSchema.safeParse(flowOf([start, step('a'), step('b'), end], [
+      { id: 'e1', source: 'start', target: 'end' },
+      { id: 'e2', source: 'a', target: 'b' },
+      { id: 'e3', source: 'b', target: 'end' },
+    ]));
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues.map((i) => i.path)).toEqual([['nodes', 1], ['nodes', 2]]);
+  });
+
+  it('refuses through every door that parses a flow — defineFlow throws', () => {
+    expect(() => defineFlow(flowOf([start, step('orphan'), end], [
+      { id: 'e1', source: 'start', target: 'end' },
+    ]))).toThrow(/Node `orphan`/);
+  });
+
+  it('CONTROL — a node reached only by a `fault` edge or a conditional edge is reachable', () => {
+    const result = FlowSchema.safeParse(flowOf([start, step('work'), step('recover'), step('big'), end], [
+      { id: 'e1', source: 'start', target: 'work' },
+      { id: 'e2', source: 'work', target: 'end' },
+      { id: 'e3', source: 'work', target: 'recover', type: 'fault' },
+      { id: 'e4', source: 'recover', target: 'end' },
+      { id: 'e5', source: 'start', target: 'big', condition: 'record.amount > 1' },
+      { id: 'e6', source: 'big', target: 'end' },
+    ]));
+    expect(result.success).toBe(true);
+  });
+
+  it('CONTROL — a `boundary_event`, and a node reached only through one, are not judged', () => {
+    const result = FlowSchema.safeParse(flowOf([
+      start,
+      step('work'),
+      {
+        id: 'on_error', type: 'boundary_event', label: 'On error',
+        boundaryConfig: { attachedToNodeId: 'work', eventType: 'error' },
+      },
+      step('recover'),
+      end,
+    ], [
+      { id: 'e1', source: 'start', target: 'work' },
+      { id: 'e2', source: 'work', target: 'end' },
+      { id: 'e3', source: 'on_error', target: 'recover' },
+      { id: 'e4', source: 'recover', target: 'end' },
+    ]));
+    expect(result.success).toBe(true);
+  });
+
+  it('CONTROL — a flow with no start node, and a graph with a dangling edge, are left to their own refusals', () => {
+    expect(FlowSchema.safeParse(flowOf([step('a'), end], [{ id: 'e1', source: 'a', target: 'end' }])).success)
+      .toBe(true);
+    const dangling = FlowSchema.safeParse(flowOf([start, end], [{ id: 'e1', source: 'start', target: 'node_1' }]));
+    expect(dangling.success).toBe(false);
+    if (dangling.success) return;
+    expect(dangling.error.issues.map((i) => i.path)).toEqual([['edges', 0, 'target']]);
   });
 });
