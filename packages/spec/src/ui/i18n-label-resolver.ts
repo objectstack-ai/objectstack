@@ -10,7 +10,7 @@
  * `I18nLabelSchema` (see `./i18n.zod`) authorizes two forms of a display label:
  * a plain string, and an inline locale map `{ en: 'Owner', 'zh-CN': '负责人' }`.
  * Until now only ONE end of the platform knew what the second form *means*:
- * objectui's `pickLocalized`. Every backend producer that had to put a label on
+ * the renderer's `pickLocalized` (then in objectui). Every backend producer that had to put a label on
  * the wire tested `typeof label === 'string'` and dropped anything else — so a
  * dataset that declared its dimension label the way the schema authorizes shipped
  * `fields[]` entries with **no label at all**, or with the machine name published
@@ -23,10 +23,10 @@
  * two enrichment sites and `dataset-compiler.ts:374/406` — is #6761 and is
  * deliberately NOT implemented here.
  *
- * ## Rule parity with objectui's `pickLocalized` is the contract
+ * ## Rule parity with the renderer's `pickLocalized` is the contract
  *
  * The ruling's acceptance hinge is not this function's shape but that it picks
- * **the same entry** objectui would, for the same map and the same locale. Two
+ * **the same entry** the renderer would, for the same map and the same locale. Two
  * resolvers that disagree render the same metadata differently on the two ends
  * with neither side erroring — the server-rendered column header and the
  * client-rendered one simply differ.
@@ -40,9 +40,9 @@
  * | 0 | plain string ⇒ itself | pass-through, `''` included |
  * | — | `locale` normalization | `(locale \|\| 'en').trim()`; **no** case folding |
  * | 1 | exact tag — `map[locale]` | `zh-CN` matches the key `zh-CN` |
+ * | 2–3 | before limbs 2 and 3, where the platform splits the base by script: the base or first sibling of the locale's own script | `zh-Hant` over `{ zh-CN, zh-TW }` → `zh-TW`; only `zh` splits today; see {@link scriptEntryKey} |
  * | 2 | base language — `map[base]` | `zh-CN` → `zh` |
  * | 3 | first region-qualified sibling sharing the base | `zh` → `zh-CN`; **key insertion order** decides |
- * | 2–3 | …an entry of the locale's own script first | `zh-Hant` over `{ zh-CN, zh-TW }` → `zh-TW`; see {@link scriptEntryKey} |
  * | 4 | `map.default` | the untagged entry `InlineLocaleMapSchema` admits |
  * | 5 | `map.en` | the platform's source language |
  * | 6 | first string value | insertion order again |
@@ -74,8 +74,8 @@
  * case — but parity with the reference is the ruled acceptance, and a resolver
  * that folded case would answer differently from the renderer for exactly the
  * inputs where it "improved". The asymmetry is pinned as-is, with vectors, in
- * `i18n-label-resolver.test.ts`; changing it is a two-repo decision, not a
- * detail to fix in passing.
+ * `i18n-label-resolver.test.ts`; changing it means changing both twins in this
+ * repository together (and their parity pins), not a detail to fix in passing.
  *
  * ## Rule departures — converged as of objectui#3907, zero remain
  *
@@ -137,7 +137,7 @@
  * `system/i18n-resolver.ts` resolves form **1** — a plain-string label plus a
  * translation *bundle*, addressed by convention
  * (`objects.<object>._views.<view>.label`). This module resolves form **2**, the
- * map the author inlined. They compose in that order at objectui's own call
+ * map the author inlined. They compose in that order at the renderer's own call
  * sites (`translateLabel(pickLocalized(label, language), …)`; read points
  * recorded in `liveness/page.json`, row `regions`): resolve the inline map
  * first, then look the resulting string up in the bundle.
@@ -200,7 +200,7 @@ function readEntry(map: Record<string, unknown>, key: string): string | undefine
  * Accepts either authorized form of {@link I18nLabel}: a plain string (returned
  * unchanged, `''` included — an author who wrote an empty label wrote a label)
  * or an inline locale map, resolved by the six-limb rule documented on this
- * module and shared verbatim with objectui's `pickLocalized`.
+ * module and shared verbatim with `pickLocalized` in `ui/packages/i18n`.
  *
  * ## The return shape, and why it is not `pickLocalized`'s
  *
