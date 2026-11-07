@@ -1192,13 +1192,18 @@ export class LifecycleService {
       }
     }
     if (first) {
-      const log = this.opts.logger.error ?? this.opts.logger.warn;
-      log.call(
-        this.opts.logger,
-        `[lifecycle] ${where}lifecycle.${key} is not an object (${typeof value === 'string' ? `a string of ${value.length} characters that is not a JSON object` : Array.isArray(value) ? 'an array' : `a ${typeof value}`}), ` +
-          'so none of it applies: the declared lifecycle windows and no quotas are enforced instead. ' +
-          'Set it again on the Data Lifecycle settings page.',
-      );
+      const shape =
+        typeof value === 'string'
+          ? `a string of ${value.length} characters that is not a JSON object`
+          : Array.isArray(value)
+            ? 'an array'
+            : `a ${typeof value}`;
+      const message =
+        `[lifecycle] ${where}lifecycle.${key} is not an object (${shape}), ` +
+        'so none of it applies: the declared lifecycle windows and no quotas are enforced instead. ' +
+        'Set it again on the Data Lifecycle settings page.';
+      if (this.opts.logger.error) this.opts.logger.error(message);
+      else this.opts.logger.warn(message);
     }
     return undefined;
   }
