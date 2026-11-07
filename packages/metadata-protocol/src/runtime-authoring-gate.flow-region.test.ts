@@ -21,14 +21,20 @@ const RULE = 'flow-region-shape-invalid';
 
 type Rec = Record<string, unknown>;
 
-/** start → the given nodes (unwired) → end; region cases need no top-level edges. */
-const flowOf = (name: string, nodes: Rec[]) => ({
-    name,
-    label: name,
-    type: 'autolaunched',
-    nodes: [{ id: 'start', type: 'start', label: 'Start' }, ...nodes, { id: 'end', type: 'end', label: 'End' }],
-    edges: [] as Rec[],
-});
+/**
+ * start → the given nodes → end, chained in order: a top-level node no edge
+ * reaches is refused at parse, and that is not the rule these cases judge.
+ */
+const flowOf = (name: string, nodes: Rec[]) => {
+    const ids = ['start', ...nodes.map((n) => String(n.id)), 'end'];
+    return {
+        name,
+        label: name,
+        type: 'autolaunched',
+        nodes: [{ id: 'start', type: 'start', label: 'Start' }, ...nodes, { id: 'end', type: 'end', label: 'End' }],
+        edges: ids.slice(1).map((target, i) => ({ id: `e${i}`, source: ids[i], target })) as Rec[],
+    };
+};
 
 const oneStep = (id: string) => ({ nodes: [{ id, type: 'assignment', label: id }], edges: [] });
 
