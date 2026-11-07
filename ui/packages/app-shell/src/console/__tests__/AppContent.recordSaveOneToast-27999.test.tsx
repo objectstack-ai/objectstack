@@ -31,6 +31,9 @@
  */
 
 import '@testing-library/jest-dom/vitest';
+// The console's preview and authoring code loads `@objectstack/lint` lazily;
+// warmed here so its first load is paid at import, not inside a test's clock.
+import '@objectstack/lint';
 import { describe, it, expect, vi, beforeEach, afterEach, afterAll } from 'vitest';
 import React from 'react';
 import { render, cleanup, waitFor } from '@testing-library/react';

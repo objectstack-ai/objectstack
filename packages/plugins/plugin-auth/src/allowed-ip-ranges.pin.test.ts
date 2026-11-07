@@ -46,6 +46,7 @@ import {
   builtinSettingsManifests,
   registerSettingsRoutes,
 } from '@objectstack/service-settings';
+import { AuthzStoreUnavailableError } from '@objectstack/core';
 import { AuthPlugin } from './auth-plugin.js';
 import type { AuthManager } from './auth-manager.js';
 import type { OrganizationAddressReaderContext } from './client-address-read.js';
@@ -532,7 +533,6 @@ describe('the organization administrator reads the address their access-policy s
   });
 
   it('an unreachable permission store is an outage, 503 SERVICE_UNAVAILABLE, never a refusal', async () => {
-    const { AuthzStoreUnavailableError } = await import('@objectstack/core');
     const res = await (await boot()).orgRead({ remoteAddress: '203.0.113.9' }, { caller: new AuthzStoreUnavailableError('sys_user_permission_set') });
     expect(res.status).toBe(503);
     expect(res.body.error.code).toBe('SERVICE_UNAVAILABLE');
