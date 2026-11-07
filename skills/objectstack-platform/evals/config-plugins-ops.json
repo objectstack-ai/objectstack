@@ -154,7 +154,8 @@
           "queues:",
           "assignmentRules:",
           "defineQueue",
-          "sharing"
+          "sharing",
+          "--preset minimal"
         ],
         "must_not_contain": [
           "assigned_to",
