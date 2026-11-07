@@ -9,7 +9,8 @@
  * item for every caller (maintainer ruling C on #30798, phase 1; ADR-0048 §3.4,
  * narrowed 2026-11-06). Each family of covered types joins in its own change
  * under #30803: the data family first, then the request family (`api`, the
- * object-less `action`, the engine's function registry).
+ * object-less `action`, the engine's function registry), then the flow family
+ * (`flow`, `webhook`, `connector`, `email_template`).
  *
  * ## The rule
  *
@@ -36,11 +37,27 @@
  *    the code that runs come from two packages;
  *  - `function` — the engine's function registry keeps one function per name,
  *    the last-registered, and a flow `script` node's `function` and an
- *    action's `target` resolve it with no package.
+ *    action's `target` resolve it with no package;
+ *  - `flow` — the automation engine keys its flow map by the bare name and
+ *    arms ONE flow per name, the lexicographically-first package's, whichever
+ *    registered first (it warns, naming both); `/meta/flow/NAME` serves the
+ *    FIRST-registered package's declaration, so the body the designer opens
+ *    and the body that runs can come from two packages;
+ *  - `webhook` — the dispatcher's declared-webhook reader keeps the
+ *    FIRST-registered package's declaration per name and never subscribes
+ *    the other, and `/meta/webhook/NAME` serves the same one;
+ *  - `connector` — `/meta/connector/NAME` (the by-name door the designer's
+ *    connector picker reads) serves the FIRST-registered package's
+ *    declaration; a provider-bound instance is the engine's one connector
+ *    per name, and a second one at boot already refuses the boot (ADR-0097);
+ *  - `email_template` — a send's `template: NAME` resolves the
+ *    FIRST-registered package's bundle, and `/meta/email_template/NAME`
+ *    serves the same one.
  *
  * Every one of them flips with registration order, and none says so (the
  * object-less action's handler bind warns that it replaces one, and names
- * neither package).
+ * neither package; the flow precedence warns, naming both, and arms one of
+ * them all the same).
  *
  * ⛔ An action bound to an object (`objectName`, or a collector's `object`) is
  * NOT covered: it is keyed `objectName:name` from declaration to handler, so
@@ -65,6 +82,15 @@
  * customization of that package's item — not a second holder. The registry's
  * bare slot (every `sys_metadata` hydration and write-through) is never read
  * here, and a registration with no package is never judged.
+ *
+ * ⛔ **Never an overridable baseline** ({@link OVERRIDABLE_BASELINE_PACKAGES}).
+ * The platform's built-in email templates are code-declared under the email
+ * service's own package, and the template loader serves any other package's
+ * item of the same `(name, locale)` over them by contract (ADR-0131 D6/D10:
+ * an app declaring `auth.password_reset` overrides the platform's copy). That
+ * package neither holds a template name nor is refused one: the first OTHER
+ * package to take the name holds it, and a second is refused naming the
+ * first. No other type has a baseline today.
  *
  * ## The cold boot
  *
@@ -96,6 +122,13 @@
  *  - An action bound to an object, and a hook's `handler` (above).
  *  - A direct `ObjectQL.registerFunction` call: the imperative registration a
  *    host's own code makes, outside any package's bind.
+ *  - The email service's built-in templates (above): the overridable baseline.
+ *  - A paired `.custom` package's declared override of a base package's flow
+ *    (ADR-0146 D9): a stored row bound to its pair, hydrated into the bare
+ *    slot — the environment catalog, never a package holder.
+ *  - A provider-bound connector instance two packages of ONE boot declare:
+ *    the automation service's own duplicate refusal (ADR-0097) stops that boot
+ *    before the seal; the doors here judge the install that follows a boot.
  *  - Every type not in {@link BARE_NAME_ONE_HOLDER_TYPES}: §3.4's coexistence
  *    stands for them (package-scoped resolution, a key that carries the object,
  *    the job key `appId:jobName`).
@@ -108,7 +141,10 @@ import { isObjectLessActionKey, standaloneActionOwnerKey } from './action-govern
  * A covered type the registry stores — its items reach the engine's package
  * door and the registry's item seam, keyed as the registry keys them.
  */
-export type BareNameRegistryType = 'picklist' | 'mapping' | 'dataset' | 'api' | 'action';
+export type BareNameRegistryType =
+  | 'picklist' | 'mapping' | 'dataset'
+  | 'api' | 'action'
+  | 'flow' | 'webhook' | 'connector' | 'email_template';
 
 /**
  * A covered type: a registry type, or `function` — the engine's function
@@ -116,20 +152,30 @@ export type BareNameRegistryType = 'picklist' | 'mapping' | 'dataset' | 'api' | 
  */
 export type BareNameOneHolderType = BareNameRegistryType | 'function';
 
-/** The covered registry types, in the order a refusal lists them. */
-export const BARE_NAME_REGISTRY_TYPES: readonly BareNameRegistryType[] = Object.freeze([
+/**
+ * Every covered type, in the order a refusal and a cold boot list them: one
+ * family after another, each in the order its change named them.
+ */
+export const BARE_NAME_ONE_HOLDER_TYPES: readonly BareNameOneHolderType[] = Object.freeze([
+  // the data family
   'picklist',
   'mapping',
   'dataset',
+  // the request family
   'api',
   'action',
+  'function',
+  // the flow family
+  'flow',
+  'webhook',
+  'connector',
+  'email_template',
 ]);
 
-/** Every covered type, in the order a refusal and a cold boot list them. */
-export const BARE_NAME_ONE_HOLDER_TYPES: readonly BareNameOneHolderType[] = Object.freeze([
-  ...BARE_NAME_REGISTRY_TYPES,
-  'function',
-]);
+/** The covered registry types, in the order a refusal lists them. */
+export const BARE_NAME_REGISTRY_TYPES: readonly BareNameRegistryType[] = Object.freeze(
+  BARE_NAME_ONE_HOLDER_TYPES.filter((type): type is BareNameRegistryType => type !== 'function'),
+);
 
 /** Is `type` one of the covered types? */
 export function isBareNameOneHolderType(type: unknown): type is BareNameOneHolderType {
@@ -162,6 +208,10 @@ const COLLECTION_KEY: Readonly<Record<BareNameRegistryType, string>> = Object.fr
   dataset: 'datasets',
   api: 'apis',
   action: 'actions',
+  flow: 'flows',
+  webhook: 'webhooks',
+  connector: 'connectors',
+  email_template: 'emailTemplates',
 });
 
 /**
@@ -177,7 +227,45 @@ export const BUILT_IN_BARE_NAMES: Readonly<Record<BareNameOneHolderType, Readonl
   api: new Set<string>(),
   action: new Set<string>(),
   function: new Set<string>(),
+  flow: new Set<string>(),
+  webhook: new Set<string>(),
+  connector: new Set<string>(),
+  email_template: new Set<string>(),
 });
+
+/**
+ * Per covered type, the packages whose items are an OVERRIDABLE BASELINE
+ * (module doc, "The holders"): the platform's copies, which that type's one
+ * consumer serves any other package's same-named item over, by contract. Such
+ * a package neither holds a name of that type nor is refused one — at the
+ * package door, the item seam and the cold boot alike.
+ *
+ * `email_template`: the email service declares the built-in auth templates
+ * under its own package id (`EmailServicePlugin.init`, `@objectstack/plugin-email`),
+ * and its template loader picks any other package's `(name, locale)` member
+ * before the built-in's (`BUILTIN_EMAIL_TEMPLATES_PACKAGE_ID` there — the
+ * same spelling, pinned together by the flow family's booted dogfood pin).
+ */
+export const OVERRIDABLE_BASELINE_PACKAGES: Readonly<Record<BareNameOneHolderType, ReadonlySet<string>>> = Object.freeze({
+  picklist: new Set<string>(),
+  mapping: new Set<string>(),
+  dataset: new Set<string>(),
+  api: new Set<string>(),
+  action: new Set<string>(),
+  function: new Set<string>(),
+  flow: new Set<string>(),
+  webhook: new Set<string>(),
+  connector: new Set<string>(),
+  email_template: new Set<string>(['com.objectstack.service.email']),
+});
+
+/**
+ * Is `packageId`'s item of `type` an overridable baseline
+ * ({@link OVERRIDABLE_BASELINE_PACKAGES}) — never a holder, never judged?
+ */
+export function isOverridableBaseline(type: BareNameOneHolderType, packageId: string | undefined): boolean {
+  return packageId !== undefined && OVERRIDABLE_BASELINE_PACKAGES[type].has(packageId);
+}
 
 /**
  * The prefix the runtime binds a package's handlers under
@@ -242,13 +330,19 @@ function itemName(item: unknown): string | undefined {
  * parent package — `ObjectQL.registerPlugin`), one level deep, arrays only.
  * An action bound to an object declares nothing here ({@link holdsBareName});
  * a function is never declared by a manifest — it is code, and its door is
- * the hook binder's bind.
+ * the hook binder's bind. A package that is a type's overridable baseline
+ * ({@link isOverridableBaseline}, by the manifest's own id) declares nothing
+ * of that type. A bundled type (`email_template`) declares its NAME: two
+ * members of one bundle are one declaration, read twice.
  */
 export function declaredBareNames(manifest: ObjectStackManifest | unknown): DeclaredBareName[] {
   const out: DeclaredBareName[] = [];
+  const selfId = (manifest as { id?: unknown } | null | undefined)?.id;
+  const packageId = typeof selfId === 'string' ? selfId : undefined;
   const read = (source: unknown) => {
     if (!source || typeof source !== 'object') return;
     for (const type of BARE_NAME_REGISTRY_TYPES) {
+      if (isOverridableBaseline(type, packageId)) continue;
       const items = (source as Record<string, unknown>)[COLLECTION_KEY[type]];
       if (!Array.isArray(items)) continue;
       for (const item of items) {
@@ -268,6 +362,7 @@ export function bareNameTypeLabel(type: BareNameOneHolderType): string {
   switch (type) {
     case 'api': return 'API';
     case 'action': return 'object-less action';
+    case 'email_template': return 'email template';
     default: return type;
   }
 }
@@ -283,6 +378,10 @@ const CONSUMER_CLAUSE: Readonly<Record<BareNameOneHolderType, string>> = Object.
   api: 'the endpoint matcher keeps one API per name',
   action: '`/actions/global/NAME` runs an object-less action by its name',
   function: 'a flow `script` node and an action `target` name a function',
+  flow: 'the automation engine arms one flow per name',
+  webhook: 'the webhook dispatcher subscribes one declared webhook per name',
+  connector: 'a flow `connector_action` node and the connector picker name a connector',
+  email_template: 'a send names its email template',
 });
 
 /** The noun a reason names a covered type by. */
@@ -293,6 +392,10 @@ const TYPE_NOUN: Readonly<Record<BareNameOneHolderType, string>> = Object.freeze
   api: 'an API',
   action: 'an object-less action',
   function: 'a function',
+  flow: 'a flow',
+  webhook: 'a webhook',
+  connector: 'a connector',
+  email_template: 'an email template',
 });
 
 const joinList = (parts: readonly string[]): string =>

@@ -90,6 +90,7 @@ import {
   handlerOwnerPackageId,
   holdsBareName,
   isBareNameRegistryType,
+  isOverridableBaseline,
   suggestedBareNameRename,
   type BareNameColdBootMode,
   type BareNameHolder,
@@ -4631,20 +4632,25 @@ export class SchemaRegistry {
    * recorded at install, or, for a function, at the hook binder's bind
    * ({@link claimBareNameFunctions}). ⛔ Never the bare slot: that is the
    * environment catalog (the ADR-0005 overlay), whatever `_packageId` its
-   * hydrated row wears.
+   * hydrated row wears. ⛔ Never a type's overridable baseline
+   * ({@link isOverridableBaseline}): the platform's copies, which the
+   * consumer serves another package's item over by contract. A bundled type's
+   * key carries its member (`pkg:name@locale`, `bundleBaseKey`): the NAME is
+   * what is held, so every member of one package's bundle is that one holder.
    */
   private bareNamePackageHolders(type: BareNameOneHolderType, name: string): string[] {
     const holders = new Set<string>();
     if (isBareNameRegistryType(type)) {
       const suffix = `:${name}`;
       for (const [key, item] of this.metadata.get(type) ?? []) {
-        if (key === name || !key.endsWith(suffix) || !holdsBareName(type, item)) continue;
+        const base = bundleBaseKey(key);
+        if (base === name || !base.endsWith(suffix) || !holdsBareName(type, item)) continue;
         const stamped = (item as { _packageId?: unknown } | null | undefined)?._packageId;
-        holders.add(typeof stamped === 'string' && stamped !== '' ? stamped : key.slice(0, -suffix.length));
+        holders.add(typeof stamped === 'string' && stamped !== '' ? stamped : base.slice(0, -suffix.length));
       }
     }
     for (const claimant of this.bareNameClaims.get(type)?.get(name) ?? []) holders.add(claimant);
-    return [...holders];
+    return [...holders].filter((packageId) => !isOverridableBaseline(type, packageId));
   }
 
   /**
@@ -4807,8 +4813,10 @@ export class SchemaRegistry {
       const candidates = new Set<string>();
       if (isBareNameRegistryType(type)) {
         for (const key of this.metadata.get(type)?.keys() ?? []) {
-          const sep = key.lastIndexOf(':');
-          if (sep > 0) candidates.add(key.slice(sep + 1));
+          // A bundled type's key ends `@<member>`: the NAME is the candidate.
+          const base = bundleBaseKey(key);
+          const sep = base.lastIndexOf(':');
+          if (sep > 0) candidates.add(base.slice(sep + 1));
         }
       }
       for (const name of this.bareNameClaims.get(type)?.keys() ?? []) candidates.add(name);
@@ -7619,17 +7627,20 @@ export class SchemaRegistry {
       }
     }
 
-    // One name, one package holder for a picklist, a mapping or a dataset —
-    // the item seam (`bare-name-one-holder.ts`; ADR-0048 §3.4 narrowed). Once
-    // the cold boot has sealed the holders, a package registering one under a
-    // name another package holds — and that it does not hold itself — is
-    // refused BEFORE anything below stamps or stores it. The package door has
-    // already judged what a manifest declares; this is the seam every OTHER
-    // package-bound registration reaches (a nested plugin's collections, a
-    // plugin registering through the registry directly). ⛔ A registration
-    // with no `packageId` is the environment catalog — the ADR-0005 overlay —
-    // and is never judged.
-    if (packageId && isBareNameRegistryType(type) && holdsBareName(type, item)) {
+    // One name, one package holder for the bare-name registry types (a
+    // picklist, a mapping, a dataset, an API, an object-less action, a flow, a
+    // webhook, a connector, an email template) — the item seam
+    // (`bare-name-one-holder.ts`; ADR-0048 §3.4 narrowed). Once the cold boot
+    // has sealed the holders, a package registering one under a name another
+    // package holds — and that it does not hold itself — is refused BEFORE
+    // anything below stamps or stores it. The package door has already judged
+    // what a manifest declares; this is the seam every OTHER package-bound
+    // registration reaches (a nested plugin's collections, a plugin
+    // registering through the registry directly). ⛔ A registration with no
+    // `packageId` is the environment catalog — the ADR-0005 overlay — and is
+    // never judged; nor is a type's overridable baseline (the email service's
+    // built-in templates), which holds nothing and is refused nothing.
+    if (packageId && isBareNameRegistryType(type) && holdsBareName(type, item) && !isOverridableBaseline(type, packageId)) {
       const holders = this.bareNameHoldersOtherThan(type, baseName, packageId, { builtIns: false });
       if (holders.length > 0) {
         const rename = this.bareNameRenameFor(packageId, baseName);
@@ -8667,9 +8678,10 @@ export class SchemaRegistry {
     // exactly as two strangers do.
     this.refuseDefaultRecordPageConflicts(manifest, selfId);
 
-    // One name, one package holder for a picklist, a mapping or a dataset —
-    // the names their consumers resolve with no package (ADR-0048 §3.4
-    // narrowed; maintainer ruling C on #30798, phase 1;
+    // One name, one package holder for the bare-name types — a picklist, a
+    // mapping, a dataset, an API, an object-less action, a flow, a webhook, a
+    // connector, an email template: the names their consumers resolve with no
+    // package (ADR-0048 §3.4 narrowed; maintainer ruling C on #30798, phase 1;
     // `bare-name-one-holder.ts`). Also ahead of every mutation, with no
     // co-owner exemption and no `collisionPolicy` downgrade, for the security
     // catalog's reasons. Judged only once the cold boot has sealed the holders:
@@ -8763,7 +8775,7 @@ export class SchemaRegistry {
     if (selfId !== undefined) this.recordSecurityCatalogClaims(selfId, manifest);
     // …and the default record pages it declares (see `defaultRecordPageClaims`).
     if (selfId !== undefined) this.recordDefaultRecordPageClaims(selfId, manifest);
-    // …and its picklist, mapping and dataset names (see `bareNameClaims`).
+    // …and its bare names of the covered types (see `bareNameClaims`).
     if (selfId !== undefined) this.recordBareNameClaims(selfId, manifest);
     this.log(`[Registry] Installed package: ${manifest.id} (${manifest.name})`);
     return pkg;
@@ -8932,7 +8944,7 @@ export class SchemaRegistry {
     // …and the default record pages it declared, so the next package may
     // declare a default for those objects.
     this.forgetDefaultRecordPageClaims(id);
-    // …and its picklist, mapping and dataset names.
+    // …and its bare names of the covered types.
     this.forgetBareNameClaims(id);
     // [#30581] …and the navigation entries it put into other packages' apps:
     // with no row left, the fold's disabled check cannot withhold them.
