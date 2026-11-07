@@ -58,6 +58,8 @@ import { resolveThrownHttpError } from '@objectstack/types';
 import { AppPlugin } from '../app-plugin.js';
 import { HttpDispatcher } from '../http-dispatcher.js';
 import { loadDisabledPackageIds, setPackageDisabled } from '../package-state-store.js';
+import * as runtime from '../index.js';
+import { disableDependentRulesMessage, readDisableDependentRules } from './packages.js';
 
 const ENVIRONMENT_ID = 'env_suite_extension_fields';
 const ADMIN = {
@@ -1130,5 +1132,103 @@ describe('[#30756] the enable door judges the rules on an object the package own
         const result: any = await enable(OWNER);
         expect(result.response?.status, String(result.response?.body?.error?.message)).toBe(200);
         expect(registry.getPackage(OWNER)?.enabled).toBe(true);
+    });
+});
+
+describe('[#31067] the verdict the disable door asks is the package entry\'s export', () => {
+    const OWNER = 'com.qa.verdict.owner';
+    const READER = 'com.qa.verdict.reader';
+    const EXTENDER = 'com.qa.verdict.flags';
+    const THING = 'qv_thing';
+    const FLAG = 'qv_flag';
+    const RULE = 'qv_flag_required';
+    const RULE_OFF = 'qv_flag_switched_off';
+    const CODE = 'PACKAGE_DISABLE_RESTRICTED_BY_VALIDATION_RULE';
+    const NAMESPACES: Record<string, string> = { [OWNER]: 'qv', [READER]: 'qw', [EXTENDER]: 'qx' };
+    const manifestOf = (id: string) => ({ id, name: id, namespace: NAMESPACES[id], version: '1.0.0', type: 'module' });
+
+    let previousHome: string | undefined;
+    beforeAll(() => {
+        previousHome = process.env.OS_HOME;
+        process.env.OS_HOME = mkdtempSync(join(home, 'disable-verdict-'));
+    });
+    afterAll(() => {
+        process.env.OS_HOME = previousHome;
+    });
+
+    /**
+     * The owner's object, the extender's field on it, and an ENABLED reader's two rules on it reading that field,
+     * one switched off: the extender's disable would withhold the field from the one active rule.
+     */
+    async function door() {
+        const registry = new SchemaRegistry({ multiTenant: false, collisionPolicy: 'error' } as any);
+        (registry as any).logLevel = 'silent';
+        const kernel: any = {
+            getService: (name: string) => (name === 'objectql' ? Promise.resolve({ registry }) : null),
+            context: { getService: () => null },
+        };
+        const dispatcher = new HttpDispatcher(kernel);
+        const context = {
+            request: {},
+            executionContext: { userId: 'u_admin', systemPermissions: ['manage_metadata', 'studio.access', 'setup.access'] },
+        } as any;
+        for (const id of [OWNER, READER, EXTENDER]) {
+            const installed = await dispatcher.handlePackages('', 'POST', { manifest: manifestOf(id) }, {}, context);
+            expect(installed.response?.status, `precondition: ${id} installs`).toBe(201);
+        }
+        registry.registerObject({ name: THING, label: 'Thing', fields: { name: { name: 'name', type: 'text', label: 'Name' } } } as any, OWNER);
+        registry.registerObject({ name: THING, fields: { [FLAG]: { name: FLAG, type: 'boolean', label: 'Flag' } } } as any, EXTENDER, undefined, 'extend');
+        registry.registerObject({
+            name: THING,
+            validations: [
+                { name: RULE, type: 'script', severity: 'error', message: 'Flag it', condition: `record.${FLAG} == null` },
+                { name: RULE_OFF, type: 'script', severity: 'error', message: 'Off', condition: `record.${FLAG} == true`, active: false },
+            ],
+        } as any, READER, undefined, 'extend');
+        const disable = (id: string) => dispatcher.handlePackages(`/${id}/disable`, 'PATCH', {}, {}, context);
+        return { registry, disable };
+    }
+
+    it('is the one function the door asks, exported on the package entry with its type beside it', () => {
+        expect(runtime.readPackageDisableDependents).toBe(readDisableDependentRules);
+        expect(runtime.formatPackageDisableDependents).toBe(disableDependentRulesMessage);
+    });
+
+    it('answers the active rules a disable would leave reading a withheld field, and writes nothing', async () => {
+        const { registry } = await door();
+        const dependents: runtime.DisableDependentRule[] = runtime.readPackageDisableDependents(registry, EXTENDER);
+        expect(dependents).toEqual([{ packageId: READER, object: THING, rule: RULE, fields: [FLAG] }]);
+        // Pure: the package stays enabled and the field stays served.
+        expect(registry.getPackage(EXTENDER)?.enabled).not.toBe(false);
+        expect(Object.keys(registry.getObject(THING)?.fields ?? {})).toContain(FLAG);
+        // A package that withholds nothing has no dependents; nor does a registry the verdict cannot read.
+        expect(runtime.readPackageDisableDependents(registry, READER)).toEqual([]);
+        expect(runtime.readPackageDisableDependents({}, EXTENDER)).toEqual([]);
+    });
+
+    it('the door answers 409 with exactly the sentence the exported builder spells over the exported verdict', async () => {
+        const { registry, disable } = await door();
+        const expected = runtime.formatPackageDisableDependents(
+            `Package '${EXTENDER}' cannot be disabled`,
+            runtime.readPackageDisableDependents(registry, EXTENDER),
+        );
+        expect(expected).toBe(
+            `Package '${EXTENDER}' cannot be disabled: an active validation rule reads a field it adds through objectExtensions, `
+            + `which the disable would withhold — ${READER} · ${THING} · ${RULE} (reads ${FLAG}). Switch off or change that rule first, `
+            + 'or keep the package enabled.',
+        );
+        const result: any = await disable(EXTENDER);
+        expect({ status: result.response?.status, code: result.response?.body?.error?.code }).toEqual({ status: 409, code: CODE });
+        expect(String(result.response?.body?.error?.message)).toBe(expected);
+        expect(registry.getPackage(EXTENDER)?.enabled).not.toBe(false);
+    });
+
+    it('control: once the reading package is disabled the verdict is empty, and the door proceeds', async () => {
+        const { registry, disable } = await door();
+        expect((await disable(READER)).response?.status).toBe(200);
+        expect(runtime.readPackageDisableDependents(registry, EXTENDER)).toEqual([]);
+        const result: any = await disable(EXTENDER);
+        expect(result.response?.status, String(result.response?.body?.error?.message)).toBe(200);
+        expect(registry.getPackage(EXTENDER)?.enabled).toBe(false);
     });
 });
