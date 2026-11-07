@@ -26,6 +26,9 @@ import { retiredCategoryGuidance } from './taxonomy.zod';
  * enforce-or-remove, #31035). Measured before retiring: no reader of the
  * file's value in `os package publish`, create-objectstack or any other
  * consumer; `visibility` was read only to warn that publish ignores it.
+ * `publisher` and `isStarter` were read only to warn that the platform
+ * decides them, and are retired as their own family: a trust claim does not
+ * belong in an author-editable file (maintainer ruling 6708417668).
  */
 const RETIRED_TEMPLATE_MANIFEST_KEY_REASONS = {
   name:
@@ -44,6 +47,12 @@ const RETIRED_TEMPLATE_MANIFEST_KEY_REASONS = {
   visibility:
     '`os package publish` never read it from this file. Delete the key and pass `--visibility` (`private`, '
     + '`org` or `marketplace`) to `os package publish`.',
+  publisher:
+    'the platform assigns a package\'s publisher trust tier from the publisher\'s credentials, so a value '
+    + 'written here never had an effect and `os package publish` never sent it. Delete the key.',
+  isStarter:
+    'the platform decides which packages are starters (honoured only on a first-party seed), so a value '
+    + 'written here never had an effect and `os package publish` never sent it. Delete the key.',
 } as const;
 
 function retiredTemplateManifestKeyGuidance(key: keyof typeof RETIRED_TEMPLATE_MANIFEST_KEY_REASONS): string {
@@ -164,6 +173,17 @@ export const TemplateManifestSchema = lazySchema(() =>
        * `--visibility` flag carries it) and now refuses it by name.
        */
       visibility: retiredKey(retiredTemplateManifestKeyGuidance('visibility')),
+      /**
+       * REMOVED — inherited from `CreatePackageRequestSchema` and re-declared
+       * here so this file refuses them (ADR-0049, #31035, ruling 6708417668).
+       * Both are platform decisions: `publisher` is the trust tier that gates
+       * listing privileges, assigned from the publisher's credentials, and the
+       * starter flag is honoured only on a first-party seed. `os package
+       * publish` never sent either from the file; it refuses `publisher` by
+       * name and names `isStarter` for deletion.
+       */
+      publisher: retiredKey(retiredTemplateManifestKeyGuidance('publisher')),
+      isStarter: retiredKey(retiredTemplateManifestKeyGuidance('isStarter')),
       readmePath: z.string().optional()
         .describe('Path (relative to manifest) to long-form README'),
     })

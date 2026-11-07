@@ -186,3 +186,11 @@ Per card and mode the runner writes `docs/qa/platform-checklist/runs/<date>-scen
 - **Persona contract**: the build is asked for one permission set per persona, named `<namespace>_<persona id>`. The runner
   grants it to that persona's user, and makes a seed row whose scope field names a persona's handle (`owner: u_sam`)
   owned by that persona's user.
+- **Structure contract** (`prompts.ts`): every Build check traces to text the build prompt carries, so a faithful build
+  never fails for not guessing a name. Besides the seed (objects and fields) and the persona sets, the contract states
+  each `expect` row the exact-name scorer checks by name: every lookup's target, every single-choice field with its
+  minimum option count, every dashboard and every app navigation target, and, on a card carrying
+  `records-forms.select-options`, that every other single-choice field offers two options or more. An iterate prompt
+  states its change's rows the same way: the new objects (with the card's field minimum), lookups, option fields,
+  dashboards and nav targets. `test/runner/prompt-trace.test.ts` reads the checks off the scorer itself and holds every
+  card to it.
