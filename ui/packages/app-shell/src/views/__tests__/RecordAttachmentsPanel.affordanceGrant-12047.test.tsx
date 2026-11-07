@@ -36,12 +36,17 @@ import { render, screen, waitFor, within, act } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MePermissionsProvider, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
 
-/** The fake presigned adapter: `upload` resolving means a `sys_file` was committed. */
+/** The fake presigned adapter: `upload` resolving means the file was committed and attached. */
 const adapterUpload = vi.fn();
+/** The options the panel built its adapter with — `attachTo` names the record. */
+const adapterOptions = vi.fn();
 
 vi.mock('@object-ui/data-objectstack', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
-  createObjectStackUploadAdapter: () => ({ upload: adapterUpload }),
+  createObjectStackUploadAdapter: (opts: unknown) => {
+    adapterOptions(opts);
+    return { upload: adapterUpload };
+  },
 }));
 
 import { RecordAttachmentsPanel } from '../RecordAttachmentsPanel';
@@ -174,20 +179,15 @@ describe('RecordAttachmentsPanel — write affordances follow the sys_attachment
   });
 
   it('CONTROL — with Upload shown and the server refusing the attach, the refusal message still appears', async () => {
-    adapterUpload.mockResolvedValue({
-      name: 'quote.pdf',
-      mimeType: 'application/pdf',
-      size: 10,
-      meta: { fileId: 'f-new' },
-    });
-    const dataSource = makeDataSource({
-      create: vi.fn(async () => {
-        throw Object.assign(new Error("[Security] Access denied: operation 'insert' on sys_attachment"), {
-          httpStatus: 403,
-          code: 'PERMISSION_DENIED',
-        });
+    // The attach is the upload's own completion (`attachTo`), so the server's
+    // refusal is the upload's.
+    adapterUpload.mockRejectedValue(
+      Object.assign(new Error('Upload completion failed (403): {"success":false,"error":{"code":"PERMISSION_DENIED"}}'), {
+        status: 403,
+        code: 'PERMISSION_DENIED',
       }),
-    });
+    );
+    const dataSource = makeDataSource();
     const { container } = renderWithGrant({ allowCreate: true }, dataSource);
     await rowsLoaded();
     expect(screen.getByRole('button', { name: 'Upload' })).toBeInTheDocument();
@@ -200,10 +200,11 @@ describe('RecordAttachmentsPanel — write affordances follow the sys_attachment
       expect(screen.getByRole('alert')).toHaveTextContent("You don't have permission to do that."),
     );
     expect(adapterUpload).toHaveBeenCalledTimes(1);
-    expect(dataSource.create).toHaveBeenCalledWith(
-      'sys_attachment',
-      expect.objectContaining({ parent_object: 'att_case', parent_id: 'r1', file_id: 'f-new' }),
+    expect(adapterOptions).toHaveBeenLastCalledWith(
+      expect.objectContaining({ scope: 'attachments', attachTo: { parentObject: 'att_case', parentId: 'r1' } }),
     );
+    // No `sys_attachment` create through the generic data door.
+    expect(dataSource.create).not.toHaveBeenCalled();
   });
 
   it('no flash while permissions load: a read-only answer never shows Upload, not even before it arrives', async () => {

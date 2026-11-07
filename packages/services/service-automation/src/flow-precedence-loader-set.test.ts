@@ -22,6 +22,10 @@ import { AutomationServicePlugin } from './plugin.js';
 import type { AutomationEngine, FlowContender } from './engine.js';
 import { resolveFlowPrecedence, describeFlowContender, renderFlowContender } from './flow-precedence.js';
 import { bindStoredRow } from '@objectstack/metadata-protocol';
+import { installedManifestsOf } from '@objectstack/metadata-core';
+
+/** Nothing installed: the pair lookup reads no manifest while `appOf` is the identity. */
+const NOTHING_INSTALLED = installedManifestsOf(undefined);
 
 const FLOW = 'order_sync';
 
@@ -59,29 +63,29 @@ const silent = () => ({ warn: vi.fn() });
 describe('[#20864] boot-time precedence classifies by the loader\'s set, not by body stamps', () => {
     it('a contender claiming a package ranks as tenant-authored when the set does not hold its name', () => {
         const claimed = loaderEntry();
-        expect(describeFlowContender(claimed, HOLDS_NOTHING)).toEqual({ source: 'runtime', packageId: 'crm' });
+        expect(describeFlowContender(claimed, HOLDS_NOTHING, NOTHING_INSTALLED)).toEqual({ source: 'runtime', packageId: 'crm' });
         // The set is keyed by NAME: holding another flow vouches for nothing here.
-        expect(describeFlowContender(claimed, setOf({ other_flow: 'crm' }))).toEqual({
+        expect(describeFlowContender(claimed, setOf({ other_flow: 'crm' }), NOTHING_INSTALLED)).toEqual({
             source: 'runtime',
             packageId: 'crm',
         });
         // The operator reads it as the tenant row it is; the claimed package
         // never reaches the sentence.
-        expect(renderFlowContender(describeFlowContender(claimed, HOLDS_NOTHING))).toBe(
+        expect(renderFlowContender(describeFlowContender(claimed, HOLDS_NOTHING, NOTHING_INSTALLED))).toBe(
             renderFlowContender({ source: 'runtime' }),
         );
     });
 
     it('the same contender ranks as packaged when the set holds its name', () => {
-        expect(describeFlowContender(loaderEntry(), HOLDS_FLOW)).toEqual({ source: 'package', packageId: 'crm' });
+        expect(describeFlowContender(loaderEntry(), HOLDS_FLOW, NOTHING_INSTALLED)).toEqual({ source: 'package', packageId: 'crm' });
     });
 
     it('a stored tenant row stays tenant-authored inside a name the set holds', () => {
-        expect(describeFlowContender(tenantRow(), HOLDS_FLOW)).toEqual({ source: 'runtime', packageId: 'app.ops' });
+        expect(describeFlowContender(tenantRow(), HOLDS_FLOW, NOTHING_INSTALLED)).toEqual({ source: 'runtime', packageId: 'app.ops' });
     });
 
     it('the same two bodies rank by the set: only a held name puts a packaged contender in the shadowing record', () => {
-        const held = resolveFlowPrecedence([loaderEntry(), tenantRow()], silent(), HOLDS_FLOW);
+        const held = resolveFlowPrecedence([loaderEntry(), tenantRow()], silent(), HOLDS_FLOW, NOTHING_INSTALLED);
         expect(held).toHaveLength(1);
         // [#20913, ADR-0126 §2] Inside a held name the loader's entry is armed.
         expect((held[0].definition as { label: string }).label).toBe('LOADER');
@@ -91,7 +95,7 @@ describe('[#20864] boot-time precedence classifies by the loader\'s set, not by 
             shadowed: [{ source: 'runtime', packageId: 'app.ops' }],
         });
 
-        const unheld = resolveFlowPrecedence([tenantRow(), loaderEntry()], silent(), HOLDS_NOTHING);
+        const unheld = resolveFlowPrecedence([tenantRow(), loaderEntry()], silent(), HOLDS_NOTHING, NOTHING_INSTALLED);
         expect(unheld[0].shadowing).toEqual({
             name: FLOW,
             armed: { source: 'runtime', packageId: 'app.ops' },
@@ -105,7 +109,7 @@ describe('[#20864] boot-time precedence classifies by the loader\'s set, not by 
             [tenantRow(), loaderEntry()],
         ]) {
             const logger = silent();
-            const [winner] = resolveFlowPrecedence(listed, logger, HOLDS_FLOW);
+            const [winner] = resolveFlowPrecedence(listed, logger, HOLDS_FLOW, NOTHING_INSTALLED);
             expect((winner.definition as { label: string }).label).toBe('LOADER');
             expect(winner.shadowing?.armed).toEqual({ source: 'package', packageId: 'crm' });
             expect(winner.shadowing?.shadowed).toEqual([{ source: 'runtime', packageId: 'app.ops' }]);
@@ -123,27 +127,27 @@ describe('[#20864] boot-time precedence classifies by the loader\'s set, not by 
         // Both tenant-ranked (the set holds nothing). By id alone the tenant
         // row would sort first; arrival order decides instead, so a claimed id
         // cannot buy the armed slot.
-        const first = resolveFlowPrecedence([loaderEntry(), tenantRow()], silent(), HOLDS_NOTHING);
+        const first = resolveFlowPrecedence([loaderEntry(), tenantRow()], silent(), HOLDS_NOTHING, NOTHING_INSTALLED);
         expect((first[0].definition as { label: string }).label).toBe('LOADER');
-        const second = resolveFlowPrecedence([tenantRow(), loaderEntry()], silent(), HOLDS_NOTHING);
+        const second = resolveFlowPrecedence([tenantRow(), loaderEntry()], silent(), HOLDS_NOTHING, NOTHING_INSTALLED);
         expect((second[0].definition as { label: string }).label).toBe('TENANT');
     });
 
     it('with no reader nothing is packaged: the engine\'s fail-closed answer', () => {
-        expect(describeFlowContender(loaderEntry())).toEqual({ source: 'runtime', packageId: 'crm' });
+        expect(describeFlowContender(loaderEntry(), undefined, NOTHING_INSTALLED)).toEqual({ source: 'runtime', packageId: 'crm' });
 
-        const [winner] = resolveFlowPrecedence([loaderEntry(), tenantRow()], silent());
+        const [winner] = resolveFlowPrecedence([loaderEntry(), tenantRow()], silent(), undefined, NOTHING_INSTALLED);
         const record = winner.shadowing!;
         expect([record.armed, ...record.shadowed].map((c) => c.source)).toEqual(['runtime', 'runtime']);
 
         // A reader answering an empty owner names no package either — the
         // normalization `AutomationEngine.packagedFlowOwner` applies.
-        expect(describeFlowContender(loaderEntry(), () => '')).toEqual({ source: 'runtime', packageId: 'crm' });
+        expect(describeFlowContender(loaderEntry(), () => '', NOTHING_INSTALLED)).toEqual({ source: 'runtime', packageId: 'crm' });
     });
 
     it('asks the set once per contested name, and never for an uncontested one', () => {
         const reader = vi.fn(HOLDS_FLOW);
-        resolveFlowPrecedence([flowBody('lonely_flow', 'L', CLAIMED), loaderEntry(), tenantRow()], silent(), reader);
+        resolveFlowPrecedence([flowBody('lonely_flow', 'L', CLAIMED), loaderEntry(), tenantRow()], silent(), reader, NOTHING_INSTALLED);
         expect(reader.mock.calls).toEqual([[FLOW]]);
     });
 });
@@ -170,14 +174,14 @@ describe('[#28412] the declared .custom override is armed over the loader\'s bod
         bindStoredRow(flowBody(FLOW, label, { ...body, _provenance: 'org' }), binding);
 
     it('classifies the pair\'s declared row as the override, by its stored binding', () => {
-        expect(describeFlowContender(stored(PAIR), HOLDS)).toEqual({ source: 'override', packageId: PAIR });
+        expect(describeFlowContender(stored(PAIR), HOLDS, NOTHING_INSTALLED)).toEqual({ source: 'override', packageId: PAIR });
         expect(renderFlowContender({ source: 'override', packageId: PAIR })).toBe(`the declared override in '${PAIR}' (sys_metadata)`);
     });
 
     it('arms the override in either arrival order, with no warning and no receipt', () => {
         for (const listed of [[base(), stored(PAIR)], [stored(PAIR), base()]]) {
             const logger = silent();
-            const winners = resolveFlowPrecedence(listed, logger, HOLDS);
+            const winners = resolveFlowPrecedence(listed, logger, HOLDS, NOTHING_INSTALLED);
             expect(winners).toHaveLength(1);
             expect((winners[0].definition as { label: string }).label).toBe('OVERRIDE');
             expect(winners[0].shadowing).toBeUndefined();
@@ -194,7 +198,7 @@ describe('[#28412] the declared .custom override is armed over the loader\'s bod
     ] as const) {
         it(`${label} is not armed: the loader's body is, and the remedy names the declaration, not a clone`, () => {
             const logger = silent();
-            const [winner] = resolveFlowPrecedence([row(), base()], logger, HOLDS);
+            const [winner] = resolveFlowPrecedence([row(), base()], logger, HOLDS, NOTHING_INSTALLED);
             expect((winner.definition as { label: string }).label).toBe('LOADER');
             expect(winner.shadowing?.armed).toEqual({ source: 'package', packageId: OWNER });
             expect(winner.shadowing?.shadowed.map((c) => c.source)).toEqual(['runtime']);
@@ -206,12 +210,12 @@ describe('[#28412] the declared .custom override is armed over the loader\'s bod
     }
 
     it('an unheld name: a declared row is tenant-authored, the set vouches for no override', () => {
-        expect(describeFlowContender(stored(PAIR), HOLDS_NOTHING).source).toBe('runtime');
+        expect(describeFlowContender(stored(PAIR), HOLDS_NOTHING, NOTHING_INSTALLED).source).toBe('runtime');
     });
 
     it('the override beside an undeclared stored row: the override is armed, the stored row shadowed and warned', () => {
         const logger = silent();
-        const [winner] = resolveFlowPrecedence([stored(null, {}, 'TENANT'), base(), stored(PAIR)], logger, HOLDS);
+        const [winner] = resolveFlowPrecedence([stored(null, {}, 'TENANT'), base(), stored(PAIR)], logger, HOLDS, NOTHING_INSTALLED);
         expect((winner.definition as { label: string }).label).toBe('OVERRIDE');
         expect(winner.shadowing).toEqual({
             name: FLOW,

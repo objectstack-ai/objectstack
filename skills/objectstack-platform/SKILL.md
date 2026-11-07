@@ -401,7 +401,7 @@ existing account on the boot banner.
 
 ---
 
-→ Part 3 — Operations: CLI, Testing, Deployment: [references/operations.md](./references/operations.md).
+→ Part 3 — Operations: CLI, Testing, Deployment (`os deploy` to see an edit on your Cloud environment): [references/operations.md](./references/operations.md).
 
 ---
 

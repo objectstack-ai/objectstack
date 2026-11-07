@@ -348,6 +348,13 @@ const ar = {
       loadFailed: "تعذّر تحميل القائمة. لا يزال بإمكانك كتابة الاسم.",
       notFound: "{{name}} (غير موجود)",
     },
+    preferenceOption: {
+      allTopics: "كل الموضوعات ({{value}})",
+      allChannels: "كل القنوات ({{value}})",
+      notConfigured: "{{value}} (غير مُهيّأة)",
+      notInList: "{{value}} (ليست في القائمة)",
+      useTyped: "استخدام «{{value}}»",
+    },
     recipient: {
       selectTypeFirst: "اختر نوع المستلم أولاً.",
       loading: "جارٍ التحميل…",
@@ -4356,6 +4363,7 @@ const ar = {
       create_record: "إنشاء السجل",
       create_seed: "توليد بيانات تجريبية للكائنات",
       delete_field: "حذف أحد الحقول",
+      delete_package: "حذف حزمة",
       describe_metadata: "مراجعة البيانات الوصفية",
       describe_object: "مراجعة بنية الكائن",
       get_active_package: "التحقق من الحزمة النشطة",

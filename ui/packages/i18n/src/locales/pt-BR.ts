@@ -333,6 +333,13 @@ const pt = {
       loadFailed: "Não foi possível carregar a lista. Você ainda pode digitar o nome.",
       notFound: "{{name}} (não encontrado)",
     },
+    preferenceOption: {
+      allTopics: "Todos os tópicos ({{value}})",
+      allChannels: "Todos os canais ({{value}})",
+      notConfigured: "{{value}} (não configurado)",
+      notInList: "{{value}} (fora da lista)",
+      useTyped: 'Usar "{{value}}"',
+    },
     recipient: {
       selectTypeFirst: "Selecione primeiro um tipo de destinatário.",
       loading: "Carregando…",
@@ -4120,6 +4127,7 @@ const pt = {
       create_record: "Criar o registro",
       create_seed: "Gerar dados de exemplo para os objetos",
       delete_field: "Excluir um campo",
+      delete_package: "Excluir um pacote",
       describe_metadata: "Revisar os metadados",
       describe_object: "Revisar a estrutura do objeto",
       get_active_package: "Verificar o pacote ativo",

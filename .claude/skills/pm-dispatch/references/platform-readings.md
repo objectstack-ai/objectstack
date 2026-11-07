@@ -287,7 +287,7 @@
 - 经 `rerun-failed.mjs` 重跑 PR `ci.yml` 失败 job 仅一次,先在 PR 或卡写明 flake 理由;二败即真红。
 - `run_rerun_failed` 只收 `ci.yml`;他 workflow 的 flake 走下两条,⛔ 永不空提交、永不关了重开。
 - `pr-automation.yml`(`Check Changeset` 取消无后继):席位改正文记下 flake 理由,其 `edited` 即重跑。
-- ⇒ 该正文改走 `seat-post-protocol.md` 的 PR 正文行,不送页脚。
+- ⇒ 该正文改走 `seat-post-protocol.md` 的 PR 正文行。
 - `lint.yml`(检出超时):`main` 前进后中继 `pr_update_branch` 出真新 head 整套重跑;齐平即空操作。
 - 同一 head 上轻量兄弟 workflow `success` 加重量级载体 `cancelled` 是普通取代的预期签名。
 - 同名 `failure` 也会被带另一诊断的后一次 `failure` 取代 ⇒ 任何判定前先按名取最新一次。

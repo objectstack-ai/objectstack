@@ -25,7 +25,7 @@
  * After the files land in `targetDir`, four files are rewritten with the
  * user-supplied project name:
  *   - package.json              .name
- *   - objectstack.manifest.json .name + .displayName
+ *   - objectstack.manifest.json .displayName (+ .namespace)
  *   - objectstack.config.ts     manifest.id and manifest.name string literals
  *   - README.md                 first H1
  *
@@ -78,6 +78,7 @@ import {
   readTemplateNamespace,
   rewriteObjectNamePrefix,
   findStaleNamespacePrefixes,
+  stripRetiredManifestKeys,
 } from './rewrite-identity.js';
 import { lookupTemplate, templateNames } from './template-registry.js';
 import { readResolvedCliVersion, pinRuntimeImage } from './runtime-image.js';
@@ -187,7 +188,11 @@ function rewriteProjectIdentity(
     }
   }
 
-  // objectstack.manifest.json — set .name, .displayName, .namespace, and DROP
+  // objectstack.manifest.json — set .displayName and .namespace, DROP every
+  // key @objectstack/spec 18 retired from the file (`category` #30980; `name`,
+  // `specVersion`, `skills`, `scaffold`, `visibility` #31035): a parse of the
+  // file refuses each, and publish refuses `category` and `visibility` — the
+  // list is RETIRED_TEMPLATE_MANIFEST_KEYS in rewrite-identity.ts), and DROP
   // .description (#9263). The template ships a generic line describing
   // ITSELF ("Minimal ObjectStack environment — a clean slate for building."),
   // not the project being scaffolded, and there is nothing but the project
@@ -202,7 +207,7 @@ function rewriteProjectIdentity(
   if (fs.existsSync(manifestPath)) {
     try {
       const m = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
-      m.name = projectName;
+      stripRetiredManifestKeys(m);
       m.displayName = title;
       if ('namespace' in m) m.namespace = namespace;
       delete m.description;

@@ -37,6 +37,7 @@
 import { isCurrentUserDefaultToken, isNowDefaultToken, missingFieldValues, parseAutonumberFormat, renderAutonumber, resolveAutonumberFormat } from '@objectstack/spec/data';
 import type { EngineQueryOptions } from '@objectstack/spec/data';
 import type { IDataEngine } from '@objectstack/core';
+import { withoutVouchedReferences } from '@objectstack/core';
 import { isUniqueViolationError, keysetWalk, uniqueViolationColumn } from '@objectstack/types';
 import type { KeysetPageQuery } from '@objectstack/types';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
@@ -202,7 +203,11 @@ export class DefaultsAndAutonumbersFacet {
    * is supplied (e.g. system-triggered hooks).
    */
   static buildHookApi(this: Pick<DefaultsAndAutonumbersHost, 'facade'>, execCtx?: ExecutionContext): ScopedContext {
-    const safeCtx: ExecutionContext = execCtx ?? ({ isSystem: true } as any);
+    // A reference a service verb vouched for on the write that fired this hook
+    // is spent on that write: no context a hook writes through carries it
+    // (`withoutVouchedReferences`, @objectstack/core). A context with no mark
+    // is handed through as the same object.
+    const safeCtx: ExecutionContext = withoutVouchedReferences(execCtx ?? ({ isSystem: true } as any));
     return new ScopedContext(safeCtx, this.facade as unknown as IDataEngine);
   }
 

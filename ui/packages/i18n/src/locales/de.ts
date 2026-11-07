@@ -330,6 +330,13 @@ const de = {
       loadFailed: "Die Liste konnte nicht geladen werden. Sie können den Namen weiterhin eingeben.",
       notFound: "{{name}} (nicht gefunden)",
     },
+    preferenceOption: {
+      allTopics: "Alle Themen ({{value}})",
+      allChannels: "Alle Kanäle ({{value}})",
+      notConfigured: "{{value}} (nicht konfiguriert)",
+      notInList: "{{value}} (nicht in der Liste)",
+      useTyped: "„{{value}}“ verwenden",
+    },
     recipient: {
       selectTypeFirst: "Wählen Sie zuerst einen Empfängertyp.",
       loading: "Wird geladen…",
@@ -4047,6 +4054,7 @@ const de = {
       create_record: "Den Datensatz anlegen",
       create_seed: "Beispieldaten für die Objekte erzeugen",
       delete_field: "Ein Feld löschen",
+      delete_package: "Ein Paket löschen",
       describe_metadata: "Die Metadaten ansehen",
       describe_object: "Die Struktur des Objekts ansehen",
       get_active_package: "Das aktive Paket prüfen",

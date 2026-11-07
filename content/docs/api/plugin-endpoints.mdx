@@ -154,7 +154,7 @@ other adapter.
 | Method | Endpoint | SDK | Description |
 |:-------|:---------|:----|:------------|
 | POST | `/storage/upload/presigned` | `storage.getPresignedUrl` | Step 1 — mint an upload target for a new `sys_file` row |
-| POST | `/storage/upload/complete` | `storage.upload` | Step 3 — commit the uploaded bytes |
+| POST | `/storage/upload/complete` | `storage.upload` | Step 3 — commit the uploaded bytes; with `attachTo`, also attach the file to a record as the caller |
 | POST | `/storage/upload/chunked` | `storage.initChunkedUpload` | Open a chunked / resumable session |
 | PUT | `/storage/upload/chunked/:uploadId/chunk/:chunkIndex` | `storage.uploadPart` | Send one chunk |
 | POST | `/storage/upload/chunked/:uploadId/complete` | `storage.completeChunkedUpload` | Assemble the parts |
@@ -168,6 +168,13 @@ other adapter.
 `PUT` in step 2. Step 1 refuses an empty `mimeType` with `400 INVALID_REQUEST`,
 so for a file whose type the browser does not know (`file.type === ''`) the
 helper sends `application/octet-stream`; a typed file keeps its own type.
+
+To attach the upload to a record's Attachments, send `attachTo: { parentObject,
+parentId }` with step 3 (and start the upload with `scope: 'attachments'`): the
+commit and the `sys_attachment` row are one unit, written as the signed-in
+caller, and the answer carries the `attachmentId`
+([attachment access](/docs/permissions/attachments-access)). A refused attach
+leaves the upload pending.
 
 A file field takes the `fileId` only after step 3. A signed-in record write
 that names a file whose upload was never completed is refused with `400

@@ -11,7 +11,7 @@ import {
 import { OWNERSHIP_QUEUE_SOURCE_SLOT, describeMissingOwnershipQueueService } from './assignment-rules.js';
 import { OWNERSHIP_QUEUE_SERVICE } from '@objectstack/spec/contracts';
 import { assembleMetadataProtocol, isServedOverrideRowOf } from '@objectstack/metadata-protocol';
-import { isTenantAuthored, readLegacyOrganizationRows } from '@objectstack/metadata-core';
+import { installedManifestsOf, isTenantAuthored, readLegacyOrganizationRows } from '@objectstack/metadata-core';
 import type { MetadataAuthoringChannel } from '@objectstack/metadata-protocol';
 import { Plugin, PluginContext } from '@objectstack/core';
 import { resolveArtifactPackageEntries, artifactPackageId, readDeploymentOrgScopingEntitlement } from '@objectstack/core';
@@ -65,8 +65,9 @@ import {
 // [ADR-0048 N.3] The security catalog's one-holder envelope, raised here by the
 // cold-boot check (see `refuseEnvironmentHeldSecurityCatalogNames`).
 import { SecurityCatalogNameConflictError, findEnvironmentHeldSecurityCatalogNames } from './registry.js';
-// One name, one package holder for a picklist, mapping or dataset — the cold
-// boot's seal and its one switch (`bare-name-one-holder.ts`, "The cold boot").
+// One name, one package holder for the bare-name types (a picklist, a mapping, a
+// dataset, an API, an object-less action, a function) — the cold boot's seal and
+// its one switch (`bare-name-one-holder.ts`, "The cold boot").
 import { sealBareNameHoldersAtColdBoot } from './registry.js';
 import { BARE_NAME_COLD_BOOT_MODE } from './bare-name-one-holder.js';
 import { planPackageUpgrade } from './package-upgrade-environment.js';
@@ -1226,9 +1227,10 @@ export class ObjectQLPlugin implements Plugin {
     ctx.hook('kernel:bootstrapped', async () => {
         // [#30803] Seal the bare-name holders (`bare-name-one-holder.ts`): every
         // package of this boot has registered by now — the AppPlugin bodies in
-        // `init()`, the install-local rehydrate at `kernel:ready` — so from here
-        // on the package door and the item seam refuse a NEW holder of a
-        // picklist, mapping or dataset name. A name the boot left held twice is
+        // `init()` and their functions in `start()`, the install-local rehydrate
+        // at `kernel:ready` — so from here on the package door, the item seam
+        // and the hook binder's function bind refuse a NEW holder of a covered
+        // name. A name the boot left held twice is
         // the switch's: warned once, naming both holders and the rename, or the
         // boot refused. Never sealed on a kernel that withholds the boot-phase
         // hooks: there the doors never refuse.
@@ -3839,14 +3841,15 @@ export class ObjectQLPlugin implements Plugin {
   private isDeclaredArtifactActionOverride(row: unknown, action: any): boolean {
     const registry: any = this.ql?.registry;
     if (!registry || typeof registry.getArtifactItem !== 'function') return false;
+    const installed = installedManifestsOf(registry);
     const artifact: any = registry.getArtifactItem('action', action.name);
     if (artifact === undefined || artifact === null) {
-      return isServedOverrideRowOf(row as any, action?.overrides?.package);
+      return isServedOverrideRowOf(row as any, action?.overrides?.package, installed);
     }
     const base = artifact?._packageId;
     if (typeof base !== 'string' || base === '') return false;
     if (standaloneActionOwnerKey(artifact) !== standaloneActionOwnerKey(action)) return false;
-    return isServedOverrideRowOf(row as any, base);
+    return isServedOverrideRowOf(row as any, base, installed);
   }
 
   /**

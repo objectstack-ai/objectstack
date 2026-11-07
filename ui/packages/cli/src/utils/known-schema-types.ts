@@ -146,6 +146,8 @@ export const KNOWN_SCHEMA_TYPES: readonly string[] = [
   'field:markdown',
   'field:master_detail',
   'field:multiselect',
+  'field:notification-channel',
+  'field:notification-topic',
   'field:number',
   'field:object',
   'field:object-ref',

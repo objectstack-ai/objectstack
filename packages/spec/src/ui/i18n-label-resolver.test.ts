@@ -14,13 +14,12 @@
  * ## How the expectations were derived
  *
  * `pickLocalizedReference` below is a VERBATIM copy of the reference
- * implementation, taken from
+ * implementation (with its two private helpers), taken from
  *
- *   repo   objectstack-ai/objectui
- *   path   packages/i18n/src/pickLocalized.ts
- *   rev    origin/main d8d0d665dceba53dada4994f1eeef9f83bf1cf91
- *   blob   30fcb0a86343b9b937432a1b2ea89e0a78321f46
- *   last touched by objectui PR #4359 / objectui#3907 (2026-08-11)
+ *   repo   objectstack-ai/objectstack
+ *   path   ui/packages/i18n/src/pickLocalized.ts
+ *   blob   37b88c07aebfca42ce375c1e5b653f8ea26765c8
+ *   last touched by #30910 (the script-preference limb)
  *
  * Copied rather than imported because `@objectstack/spec` must not take a
  * workspace dependency on objectui — spec sits UNDER objectui in the dependency
@@ -48,11 +47,37 @@
 import { describe, it, expect } from 'vitest';
 import { resolveI18nLabel } from './i18n-label-resolver';
 import type { I18nLabel } from './i18n.zod';
+import { PLATFORM_LOCALE_TAGS, platformLocaleTagOf } from '../system/platform-locales';
 
 // ---------------------------------------------------------------------------
 // The reference implementation — verbatim, see the header for provenance. Only
-// the NAME differs, so that a reader of a failing assertion can tell at a glance
-// which side is the copy.
+// the NAMES differ (a `Reference` suffix), so that a reader of a failing
+// assertion can tell at a glance which side is the copy.
+function splitScriptTagOfReference(lang: string): string | undefined {
+  const tag = platformLocaleTagOf(lang);
+  if (tag === undefined) return undefined;
+  const base = tag.split('-')[0];
+  return PLATFORM_LOCALE_TAGS.filter((t) => t.split('-')[0] === base).length > 1 ? tag : undefined;
+}
+
+function localizedEntryKeyReference(
+  lang: string,
+  usable: (key: string) => boolean,
+  keys: readonly string[],
+): string | undefined {
+  if (usable(lang)) return lang;
+  const base = lang.split('-')[0];
+  const siblings = keys.filter((k) => k.split('-')[0] === base && usable(k));
+  const script = splitScriptTagOfReference(lang);
+  if (script !== undefined) {
+    if (usable(base) && platformLocaleTagOf(base) === script) return base;
+    const sameScript = siblings.find((k) => platformLocaleTagOf(k) === script);
+    if (sameScript !== undefined) return sameScript;
+  }
+  if (usable(base)) return base;
+  return siblings[0];
+}
+
 function pickLocalizedReference(value: unknown, language: string | undefined | null): string {
   if (value == null) return '';
   if (typeof value === 'string') return value;
@@ -67,14 +92,11 @@ function pickLocalizedReference(value: unknown, language: string | undefined | n
       return typeof entry === 'string' ? entry : undefined;
     };
     const lang = (language || 'en').trim();
-    const base = lang.split('-')[0];
     // Runtime language is often a bare base code ('zh') while metadata authors
-    // write full BCP-47 tags ('zh-CN') — upgrade to any key sharing the base.
-    const regional = Object.keys(o).find((k) => k.split('-')[0] === base && readReference(k) !== undefined);
+    // write full BCP-47 tags ('zh-CN') — upgrade to a key sharing the base.
+    const entry = localizedEntryKeyReference(lang, (k) => readReference(k) !== undefined, Object.keys(o));
     const pick =
-      readReference(lang) ??
-      readReference(base) ??
-      (regional !== undefined ? readReference(regional) : undefined) ??
+      (entry !== undefined ? readReference(entry) : undefined) ??
       readReference('default') ??
       readReference('en') ??
       Object.values(o).find((v): v is string => typeof v === 'string');
@@ -123,9 +145,61 @@ const PARITY_VECTORS: readonly ParityVector[] = [
   { limb: '3 base key wins over the region upgrade', label: { zh: '基础', 'zh-CN': '区域' }, locale: 'zh', pick: '基础' },
   {
     limb: '3 first sibling in key order wins, not the "best" region',
+    label: { 'pt-PT': 'Proprietário (PT)', 'pt-BR': 'Proprietário' },
+    locale: 'pt',
+    pick: 'Proprietário (PT)',
+  },
+  {
+    limb: '3 first sibling in key order wins for a language the table names once (es-ES aliases es)',
+    label: { 'es-MX': 'Propietario (MX)', 'es-ES': 'Propietario' },
+    locale: 'es',
+    pick: 'Propietario (MX)',
+  },
+
+  // Limbs 2–3, script first (#30910) — where the platform table splits the
+  // language by script (`zh-Hans`, `zh-Hant`), an entry of the locale's own
+  // script wins over the other script, whatever the authoring order.
+  {
+    limb: '2–3 bare zh means zh-Hans: the Simplified sibling wins over an earlier Traditional one',
     label: { 'zh-TW': '擁有者', 'zh-CN': '负责人' },
     locale: 'zh',
+    pick: '负责人',
+  },
+  {
+    limb: '2–3 zh-Hant reads zh-TW over an earlier zh-CN',
+    label: { en: 'Owner', 'zh-CN': '负责人', 'zh-TW': '擁有者' },
+    locale: 'zh-Hant',
     pick: '擁有者',
+  },
+  {
+    limb: '2–3 zh-HK reads zh-Hant over an earlier zh-Hans',
+    label: { en: 'Owner', 'zh-Hans': '负责人', 'zh-Hant': '擁有者' },
+    locale: 'zh-HK',
+    pick: '擁有者',
+  },
+  {
+    limb: '2–3 zh-TW skips a bare zh key (it means zh-Hans) for zh-Hant',
+    label: { zh: '负责人', 'zh-Hant': '擁有者' },
+    locale: 'zh-TW',
+    pick: '擁有者',
+  },
+  {
+    limb: '2–3 zh-CN keeps the bare zh key when it means the same script',
+    label: { 'zh-Hans': '简体', zh: '负责人' },
+    locale: 'zh-CN',
+    pick: '负责人',
+  },
+  {
+    limb: '2–3 no entry of the locale\'s script ⇒ the old limbs answer',
+    label: { en: 'Owner', 'zh-CN': '负责人' },
+    locale: 'zh-Hant',
+    pick: '负责人',
+  },
+  {
+    limb: '2–3 a script-subtag spelling the alias table does not name is not guessed at',
+    label: { 'zh-CN': '负责人', 'zh-Hant-US': '擁有者' },
+    locale: 'zh-Hant',
+    pick: '负责人',
   },
   {
     limb: '3 runs BEFORE default — a wrong-region hit beats the untagged entry',

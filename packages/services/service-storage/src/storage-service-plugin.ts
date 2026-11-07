@@ -65,7 +65,12 @@ import { StorageMetadataStore, releasingRecordOf } from './metadata-store.js';
 import type { FileRecord } from './metadata-store.js';
 import type { TenancyPosture } from '@objectstack/spec/security';
 import { registerStorageFamily, DEFAULT_DOWNLOAD_TTL } from './storage-routes.js';
-import type { FileReadVerdict, StorageGatedSessionReader, StorageUploadSession } from './storage-routes.js';
+import type {
+  FileReadVerdict,
+  StorageGatedSessionReader,
+  StorageUploadAttacher,
+  StorageUploadSession,
+} from './storage-routes.js';
 import type { RecordFileAccessDeps, UploadLinkDoor } from './record-file-access.js';
 import { installAttachmentLifecycleHooks, createSysFileReapGuard, createUploadSessionReapGuard, findFileHolder, findHeldFiles } from './attachment-lifecycle.js';
 import { installFileReferenceHooks, type FileReferenceEngine } from './file-reference-lifecycle.js';
@@ -77,7 +82,11 @@ import {
   installAttachmentReadVisibility,
 } from './attachment-access-hooks.js';
 import { contributeAttachmentDeleteFloorAlternate } from './attachment-delete-floor-alternate.js';
-import { FileAttachmentService, type FileAttachmentEngine } from './file-attachment-service.js';
+import {
+  FileAttachmentService,
+  type FileAttachmentEngine,
+  type ICallerFileAttachmentService,
+} from './file-attachment-service.js';
 import { FieldFileService } from './field-file-service.js';
 import { SystemFile, SystemUploadSession } from './objects/index.js';
 // ADR-0052 §3 ownership: `sys_attachment` (a file↔record link) belongs with the
@@ -1196,6 +1205,7 @@ export function composeStorageRoutes(
   const resolveSession = buildAuthSessionResolver(registry);
   const readGatedSessionUser = buildAuthGateSessionReader(registry, engine);
   const authorizeFileRead = buildFileReadAuthorizer(registry, engine);
+  const attachUpload = buildUploadAttacher(registry, engine);
   const resolveFileHolder =
     engine && typeof (engine as any).find === 'function'
       ? (file: FileRecord) => findFileHolder(engine as any, file.id, file as any)
@@ -1228,6 +1238,8 @@ export function composeStorageRoutes(
     },
     // ADR-0069 — bound here with the other gates, so both mounts carry it.
     readGatedSessionUser,
+    // The commit door's `attachTo` arm — bound here with the other gates.
+    attachUpload,
     // [#30892] The upload-link doors, served by the `file-attachments`
     // service when the kernel has the storage plugin's.
     resolveUploadLinkDoor(registry),
@@ -1712,6 +1724,75 @@ function buildFileReadAuthorizer(
       if (isApiKeyLifecycleRefusalError(err)) throw err;
       return 'deny'; // fail closed
     }
+  };
+}
+
+/**
+ * The commit door's `attachTo` arm (`POST …/upload/complete`): attach the
+ * caller's own pending upload to a record and commit it, AS THE CALLER — the
+ * record attachments surface's attach verb, which the browser panel calls
+ * instead of a `sys_attachment` create through the generic data door.
+ *
+ * The caller is the request's FULL execution context, resolved through the one
+ * request-to-context composition with the download authorizer's parameters
+ * (the attach is a write judged by the caller's grants, RLS and sharing, so a
+ * bare `{ userId }` would not do), and the verb is the file-attachments
+ * service's caller-scoped `attachUploadAs`, looked up per request: it asks
+ * every check, and its `sys_attachment` insert vouches for that one file id
+ * and for nothing else. A request that resolves no user is refused
+ * `AUTH_REQUIRED` / `401`; a kernel whose file-attachments service is not
+ * registered, `SERVICE_UNAVAILABLE` / `503`. Everything else is the verb's own
+ * answer, thrown with its declared `code` and `status` for the door to relay.
+ *
+ * `undefined` — the door then refuses `attachTo` with `501` — when the kernel
+ * has no `auth` service or no data engine: there is no caller to attach as.
+ */
+function buildUploadAttacher(
+  registry: StorageGateRegistry,
+  engine: IDataEngine | null,
+): StorageUploadAttacher | undefined {
+  const authService = resolveGateAuthService(registry);
+  if (!authService || !engine) return undefined;
+  // Declared refusals (`refusal: true`): their text is written for the caller.
+  const refusal = (status: number, code: string, message: string) =>
+    Object.assign(new Error(message), { status, code, refusal: true });
+  return async (req, upload) => {
+    const headers = toWebHeaders(req);
+    // The download authorizer's parameters (see `buildFileReadAuthorizer`):
+    // the family's door has already asked the ADR-0069 gate on this request.
+    const context = headers
+      ? await resolveRequestExecutionContext({
+          headers,
+          ql: engine,
+          authService,
+          tenancy: tenancyServiceResolver(registry),
+          anonymous: 'fail-closed',
+          authGate: 'resolved',
+          credentials: 'api-key-and-session',
+          sessionApi: 'optional',
+          session: 'request',
+          localization: 'withhold',
+          requestLocale: undefined,
+          accessToken: 'carry',
+          oauth: undefined,
+          onAdmission: undefined,
+        })
+      : undefined;
+    if (!context?.userId) throw refusal(401, 'AUTH_REQUIRED', 'Authentication required to attach a file');
+    let service: Partial<ICallerFileAttachmentService> | undefined;
+    try {
+      service = registry.getService<Partial<ICallerFileAttachmentService>>('file-attachments');
+    } catch {
+      service = undefined;
+    }
+    if (!service || typeof service.attachUploadAs !== 'function') {
+      throw refusal(
+        503,
+        'SERVICE_UNAVAILABLE',
+        'The file-attachments service is not registered in this kernel, so an upload cannot be attached.',
+      );
+    }
+    return service.attachUploadAs(upload, context);
   };
 }
 

@@ -7,13 +7,29 @@
  */
 
 import React from 'react';
-import { AlertTriangle } from 'lucide-react';
-import { Combobox, EmptyValue, Input, cn } from '@object-ui/components';
-import { SchemaRendererContext } from '@object-ui/react';
+import { AlertTriangle, Check, ChevronsUpDown } from 'lucide-react';
+import {
+  Button,
+  Combobox,
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+  EmptyValue,
+  Input,
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+  cn,
+} from '@object-ui/components';
+import { SchemaRendererContext, type ApiFetch } from '@object-ui/react';
 import { AUDIENCE_ANCHOR_POSITIONS } from '@objectstack/spec';
 import { MCP_AGENT_PERMISSION_SETS } from '@objectstack/spec/ai';
 import type { FieldWidgetComponentProps } from './types.js';
-import { registryLister, type RegistryItemHeader } from './registryCatalog.js';
+import { registryLister, type RegistryItemHeader, type RegistryLister } from './registryCatalog.js';
+import { loadPreferenceOptions, type PreferenceList, type PreferenceOptionItem } from './preferenceOptions.js';
 import { toDomProps } from './toDomProps.js';
 import { useFieldTranslation } from './useFieldTranslation.js';
 
@@ -67,6 +83,24 @@ import { useFieldTranslation } from './useFieldTranslation.js';
  *
  * ⛔ No arm writes anything but a name the person picked or typed: no label,
  * no id, no first-item default.
+ *
+ * ## The fillable arm — `notification-topic` / `notification-channel`
+ *
+ * A notification preference's `topic` and `channel`, and a template's `topic`,
+ * are free text the server stores as written (#30208 row 6, ruling E on
+ * #30527): the list is a suggestion, never a closed set. So the same four-arm
+ * machinery reads a different catalog — the preference options door
+ * (`./preferenceOptions.ts`), through the host's authenticated fetch — and
+ * differs from the registry arm in exactly what an open list needs:
+ *
+ *  - FAILED, IDLE (no host fetch on `SchemaRendererContext`) or an empty
+ *    list: the plain text box, with no notice;
+ *  - LOADED: a picker that lists the served values in the door's order (`*`
+ *    first) and ALSO commits whatever the person types, verbatim;
+ *  - a stored or typed value the list does not hold is kept, marked "not in
+ *    the list" — never refused, never rewritten;
+ *  - a channel the door marks not configured is listed, labelled so, and
+ *    selectable.
  */
 
 export type { RegistryItemHeader };
@@ -123,47 +157,70 @@ function nonGrantableNames(type: string): ReadonlySet<string> {
   return NO_EXCLUSIONS;
 }
 
+/**
+ * Where a catalog is read from: whether an origin can answer at all, and the
+ * read. One module-level reader per arm, so the read's identity never moves
+ * between renders.
+ */
+interface CatalogReader<Origin> {
+  readerOf(origin: unknown): Origin | null;
+  read(origin: Origin, list: string): Promise<RegistryItemHeader[]>;
+}
+
+/** The registry arm: `DataSource.listMetadataItems(type)`. */
+const REGISTRY_READER: CatalogReader<RegistryLister> = {
+  readerOf: registryLister,
+  read: (source, type) => source.listMetadataItems(type),
+};
+
+/** The fillable arm: the preference options door, through the host's fetch. */
+const PREFERENCE_READER: CatalogReader<ApiFetch> = {
+  readerOf: (origin) => (typeof origin === 'function' ? (origin as ApiFetch) : null),
+  read: (doFetch, list) => loadPreferenceOptions(doFetch).then((options) => options[list as PreferenceList]),
+};
+
 /** A settled answer, with the inputs it answers for. */
 interface SettledCatalog {
-  dataSource: unknown;
-  type: string;
+  origin: unknown;
+  list: string;
   state: RegistryCatalogState;
 }
 
 /**
- * Load one registry type's catalog. Keyed on the data source and the type it
- * reads — the inputs the request is made from — and nothing memoised.
+ * Load one catalog. Keyed on the origin it is read from (the data source, or
+ * the host's fetch) and the list it reads — the inputs the request is made
+ * from — and nothing memoised.
  *
  * The arm is DERIVED from those inputs on every render rather than written
- * into state ahead of the request: no lister is IDLE, and a lister whose
- * answer for exactly these inputs has not settled is LOADING. So an answer to
- * an older data source or type can never be shown as the current one, and the
- * effect only ever writes a settled answer.
+ * into state ahead of the request: an origin that cannot answer is IDLE, and
+ * one whose answer for exactly these inputs has not settled is LOADING. So an
+ * answer to an older origin or list can never be shown as the current one, and
+ * the effect only ever writes a settled answer.
  */
-function useRegistryCatalog(dataSource: unknown, type: string): RegistryCatalogState {
+function useCatalog<Origin>(reader: CatalogReader<Origin>, origin: unknown, list: string): RegistryCatalogState {
   const [settled, setSettled] = React.useState<SettledCatalog | null>(null);
 
   React.useEffect(() => {
-    const source = registryLister(dataSource);
+    const source = reader.readerOf(origin);
     if (!source) return;
     let cancelled = false;
-    source.listMetadataItems(type).then(
+    reader.read(source, list).then(
       (items) => {
-        if (!cancelled) setSettled({ dataSource, type, state: { status: 'loaded', items } });
+        if (!cancelled) setSettled({ origin, list, state: { status: 'loaded', items } });
       },
       (err: unknown) => {
         if (!cancelled) {
-          setSettled({ dataSource, type, state: { status: 'error', message: failureMessage(err) } });
+          setSettled({ origin, list, state: { status: 'error', message: failureMessage(err) } });
         }
       },
     );
     return () => {
       cancelled = true;
     };
-  }, [dataSource, type]);
+  }, [reader, origin, list]);
 
-  if (!registryLister(dataSource)) return IDLE;
-  return settled && settled.dataSource === dataSource && settled.type === type ? settled.state : LOADING;
+  if (!reader.readerOf(origin)) return IDLE;
+  return settled && settled.origin === origin && settled.list === list ? settled.state : LOADING;
 }
 
 /** What one item reads as: its label beside its name, or the name alone. */
@@ -188,7 +245,7 @@ export function RegistryRefField({
   const ctx = React.useContext(SchemaRendererContext);
   const { t } = useFieldTranslation();
   const dataSource = props.dataSource ?? ctx?.dataSource ?? null;
-  const catalog = useRegistryCatalog(dataSource, registryType);
+  const catalog = useCatalog(REGISTRY_READER, dataSource, registryType);
   const excluded = nonGrantableNames(registryType);
   const current = typeof value === 'string' ? value : '';
   const testId = `registry-ref-${registryType}`;
@@ -302,6 +359,212 @@ export function PositionRefField(props: FieldWidgetComponentProps<string>) {
 /** `permission-ref`: names one permission set of the `permission` registry. */
 export function PermissionRefField(props: FieldWidgetComponentProps<string>) {
   return <RegistryRefField {...props} registryType="permission" />;
+}
+
+/** What one listed preference value reads as. */
+function preferenceText(
+  item: PreferenceOptionItem,
+  list: PreferenceList,
+  t: (key: string, params?: Record<string, unknown>) => string,
+): string {
+  if (item.wildcard) {
+    return t(list === 'topics' ? 'fields.preferenceOption.allTopics' : 'fields.preferenceOption.allChannels', {
+      value: item.name,
+    });
+  }
+  if (!item.configured) return t('fields.preferenceOption.notConfigured', { value: item.name });
+  return item.name;
+}
+
+interface FillableOption {
+  value: string;
+  label: string;
+  notConfigured: boolean;
+}
+
+function matchesSearch(option: FillableOption, needle: string): boolean {
+  if (!needle) return true;
+  const q = needle.toLowerCase();
+  return option.value.toLowerCase().includes(q) || option.label.toLowerCase().includes(q);
+}
+
+export interface PreferenceOptionFieldProps extends FieldWidgetComponentProps<string> {
+  /** Which of the preference options door's two lists this field offers. */
+  preferenceList: PreferenceList;
+}
+
+/**
+ * The fillable arm (see the file header): a value from the preference options
+ * list, or whatever the person types.
+ */
+export function PreferenceOptionField({
+  preferenceList,
+  value,
+  onChange,
+  readonly,
+  className,
+  error,
+  ...props
+}: PreferenceOptionFieldProps) {
+  const ctx = React.useContext(SchemaRendererContext);
+  const { t } = useFieldTranslation();
+  // The host's authenticated fetch only: a surface with none (a preview, a
+  // test that drives the widget bare) has no list to offer and is IDLE.
+  const catalog = useCatalog(PREFERENCE_READER, ctx?.apiFetch, preferenceList);
+  const [open, setOpen] = React.useState(false);
+  const [search, setSearch] = React.useState('');
+  const current = typeof value === 'string' ? value : '';
+  const testId = `preference-option-${preferenceList}`;
+
+  const listed = catalog.status === 'loaded' ? (catalog.items as PreferenceOptionItem[]) : null;
+  const entry = listed?.find((item) => item.name === current);
+  const notInList = listed !== null && listed.length > 0 && current !== '' && !entry;
+  const notInListText = t('fields.preferenceOption.notInList', { value: current });
+
+  if (readonly) {
+    if (!current) return <EmptyValue />;
+    return (
+      <span className={cn('text-sm', className)} data-testid={testId} data-not-in-list={notInList || undefined}>
+        {notInList ? notInListText : entry ? preferenceText(entry, preferenceList, t) : current}
+      </span>
+    );
+  }
+
+  const domProps = toDomProps(props);
+  const disabled = props.disabled;
+
+  if (catalog.status === 'loading') {
+    return (
+      <Input
+        {...domProps}
+        data-testid={`${testId}-input`}
+        value={current}
+        disabled
+        readOnly
+        placeholder={t('common.loading')}
+        className={className}
+        aria-invalid={!!error}
+      />
+    );
+  }
+
+  // A failed or empty answer is no list at all: the plain text box, with no
+  // notice, writing exactly what is typed.
+  if (!listed || listed.length === 0) {
+    return (
+      <Input
+        {...domProps}
+        data-testid={`${testId}-input`}
+        value={current}
+        onChange={(e) => onChange(e.target.value)}
+        disabled={disabled}
+        className={className}
+        aria-invalid={!!error}
+      />
+    );
+  }
+
+  const options: FillableOption[] = listed.map((item) => ({
+    value: item.name,
+    label: preferenceText(item, preferenceList, t),
+    notConfigured: !item.configured,
+  }));
+  // A stored value the list does not hold stays its own option, marked.
+  if (notInList) options.unshift({ value: current, label: notInListText, notConfigured: false });
+
+  const filtered = options.filter((option) => matchesSearch(option, search.trim()));
+  // The typed text is offered as written whenever it is not already a value.
+  const offerTyped = search.trim() !== '' && !options.some((option) => option.value === search);
+  const commit = (next: string) => {
+    onChange(next);
+    setOpen(false);
+    setSearch('');
+  };
+
+  // DOM pass-through onto the trigger, the widget's focusable control
+  // (objectui#3318). `name` is withheld: the trigger is a button, not a
+  // submission control (the `ObjectRefField` reasoning).
+  const { name: _domName, ...triggerDomProps } = domProps;
+  return (
+    <Popover
+      open={open}
+      onOpenChange={(next) => {
+        setOpen(next);
+        if (!next) setSearch('');
+      }}
+    >
+      <PopoverTrigger asChild>
+        <Button
+          type="button"
+          {...triggerDomProps}
+          variant="outline"
+          role="combobox"
+          aria-expanded={open}
+          aria-invalid={!!error}
+          data-testid={testId}
+          data-not-in-list={notInList || undefined}
+          disabled={disabled}
+          className={cn('w-full min-w-0 justify-between font-normal', className)}
+        >
+          <span className={cn('truncate', !current && 'text-muted-foreground')}>
+            {current ? (options.find((option) => option.value === current)?.label ?? current) : t('common.select')}
+          </span>
+          <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent className="w-[var(--radix-popover-trigger-width)] min-w-[200px] p-0">
+        <Command shouldFilter={false}>
+          <CommandInput
+            value={search}
+            onValueChange={setSearch}
+            placeholder={t('table.search')}
+            data-testid={`${testId}-search`}
+          />
+          <CommandList>
+            {!offerTyped && filtered.length === 0 ? <CommandEmpty>{t('common.noResults')}</CommandEmpty> : null}
+            {offerTyped ? (
+              <CommandGroup>
+                <CommandItem
+                  value={`typed:${search}`}
+                  onSelect={() => commit(search)}
+                  data-testid={`${testId}-use-typed`}
+                >
+                  {t('fields.preferenceOption.useTyped', { value: search })}
+                </CommandItem>
+              </CommandGroup>
+            ) : null}
+            {filtered.length > 0 ? (
+              <CommandGroup>
+                {filtered.map((option) => (
+                  <CommandItem
+                    key={option.value}
+                    value={`listed:${option.value}`}
+                    onSelect={() => commit(option.value)}
+                    data-not-configured={option.notConfigured || undefined}
+                  >
+                    <Check
+                      className={cn('mr-2 h-4 w-4', current === option.value ? 'opacity-100' : 'opacity-0')}
+                    />
+                    {option.label}
+                  </CommandItem>
+                ))}
+              </CommandGroup>
+            ) : null}
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+/** `notification-topic`: a notification topic, from the list or typed. */
+export function NotificationTopicField(props: FieldWidgetComponentProps<string>) {
+  return <PreferenceOptionField {...props} preferenceList="topics" />;
+}
+
+/** `notification-channel`: a notification channel, from the list or typed. */
+export function NotificationChannelField(props: FieldWidgetComponentProps<string>) {
+  return <PreferenceOptionField {...props} preferenceList="channels" />;
 }
 
 export default RegistryRefField;

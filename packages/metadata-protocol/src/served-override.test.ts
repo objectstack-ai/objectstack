@@ -10,6 +10,10 @@
  */
 import { describe, expect, it } from 'vitest';
 import { isServedOverrideRowOf, servedOverrideBaseOf } from './served-override.js';
+import { installedManifestsOf } from '@objectstack/metadata-core';
+
+/** Nothing installed: the pair lookup reads no manifest while `appOf` is the identity. */
+const NOTHING_INSTALLED = installedManifestsOf(undefined);
 
 const BASE = 'com.acme.crm';
 const PAIR = 'com.acme.crm.custom';
@@ -29,56 +33,56 @@ const row = (over: Record<string, unknown> = {}) => ({
 
 describe('[#28409] isServedOverrideRowOf', () => {
     it('a row of the pair, of an overridable type, declaring the base: the served override', () => {
-        expect(isServedOverrideRowOf(row(), BASE)).toBe(true);
+        expect(isServedOverrideRowOf(row(), BASE, NOTHING_INSTALLED)).toBe(true);
         // The body as stored, a JSON string, or already parsed.
-        expect(isServedOverrideRowOf(row({ metadata: body() }), BASE)).toBe(true);
+        expect(isServedOverrideRowOf(row({ metadata: body() }), BASE, NOTHING_INSTALLED)).toBe(true);
         // The type folds to its canonical singular, as the reads fold it.
-        expect(isServedOverrideRowOf(row({ type: 'views' }), BASE)).toBe(true);
+        expect(isServedOverrideRowOf(row({ type: 'views' }), BASE, NOTHING_INSTALLED)).toBe(true);
         // `basedOn` is recorded and never judged (ADR-0146 D2).
-        expect(isServedOverrideRowOf(row({ metadata: body({ overrides: { package: BASE } }) }), BASE)).toBe(true);
-        expect(isServedOverrideRowOf(row({ metadata: body({ overrides: { package: BASE, basedOn: '0.0.1' } }) }), BASE)).toBe(true);
+        expect(isServedOverrideRowOf(row({ metadata: body({ overrides: { package: BASE } }) }), BASE, NOTHING_INSTALLED)).toBe(true);
+        expect(isServedOverrideRowOf(row({ metadata: body({ overrides: { package: BASE, basedOn: '0.0.1' } }) }), BASE, NOTHING_INSTALLED)).toBe(true);
     });
 
     it('bound by the row\'s own `package_id`: another package\'s declaration is ignored (ruling A, #28390)', () => {
-        expect(isServedOverrideRowOf(row({ package_id: 'com.partner.ext' }), BASE)).toBe(false);
-        expect(isServedOverrideRowOf(row({ package_id: BASE }), BASE)).toBe(false);
-        expect(isServedOverrideRowOf(row({ package_id: 'com.other.custom' }), BASE)).toBe(false);
+        expect(isServedOverrideRowOf(row({ package_id: 'com.partner.ext' }), BASE, NOTHING_INSTALLED)).toBe(false);
+        expect(isServedOverrideRowOf(row({ package_id: BASE }), BASE, NOTHING_INSTALLED)).toBe(false);
+        expect(isServedOverrideRowOf(row({ package_id: 'com.other.custom' }), BASE, NOTHING_INSTALLED)).toBe(false);
         // The same row is the pair of one base only.
-        expect(isServedOverrideRowOf(row(), 'com.acme')).toBe(false);
+        expect(isServedOverrideRowOf(row(), 'com.acme', NOTHING_INSTALLED)).toBe(false);
     });
 
     it('never a body stamp: an unbound row whose body names the pair binds nothing', () => {
         const stamped = JSON.stringify(body({ _packageId: PAIR }));
-        expect(isServedOverrideRowOf(row({ package_id: null, metadata: stamped }), BASE)).toBe(false);
-        expect(isServedOverrideRowOf(row({ package_id: undefined, metadata: stamped }), BASE)).toBe(false);
-        expect(isServedOverrideRowOf(row({ package_id: '', metadata: stamped }), BASE)).toBe(false);
+        expect(isServedOverrideRowOf(row({ package_id: null, metadata: stamped }), BASE, NOTHING_INSTALLED)).toBe(false);
+        expect(isServedOverrideRowOf(row({ package_id: undefined, metadata: stamped }), BASE, NOTHING_INSTALLED)).toBe(false);
+        expect(isServedOverrideRowOf(row({ package_id: '', metadata: stamped }), BASE, NOTHING_INSTALLED)).toBe(false);
     });
 
     it('the declaration must name the base', () => {
-        expect(isServedOverrideRowOf(row({ metadata: JSON.stringify(body({ overrides: undefined })) }), BASE)).toBe(false);
-        expect(isServedOverrideRowOf(row({ metadata: body({ overrides: { package: 'com.other' } }) }), BASE)).toBe(false);
-        expect(isServedOverrideRowOf(row({ metadata: body({ overrides: { package: PAIR } }) }), BASE)).toBe(false);
-        expect(isServedOverrideRowOf(row({ metadata: body({ overrides: BASE }) }), BASE)).toBe(false);
-        expect(isServedOverrideRowOf(row({ metadata: body({ overrides: [BASE] }) }), BASE)).toBe(false);
-        expect(isServedOverrideRowOf(row({ metadata: body({ overrides: null }) }), BASE)).toBe(false);
+        expect(isServedOverrideRowOf(row({ metadata: JSON.stringify(body({ overrides: undefined })) }), BASE, NOTHING_INSTALLED)).toBe(false);
+        expect(isServedOverrideRowOf(row({ metadata: body({ overrides: { package: 'com.other' } }) }), BASE, NOTHING_INSTALLED)).toBe(false);
+        expect(isServedOverrideRowOf(row({ metadata: body({ overrides: { package: PAIR } }) }), BASE, NOTHING_INSTALLED)).toBe(false);
+        expect(isServedOverrideRowOf(row({ metadata: body({ overrides: BASE }) }), BASE, NOTHING_INSTALLED)).toBe(false);
+        expect(isServedOverrideRowOf(row({ metadata: body({ overrides: [BASE] }) }), BASE, NOTHING_INSTALLED)).toBe(false);
+        expect(isServedOverrideRowOf(row({ metadata: body({ overrides: null }) }), BASE, NOTHING_INSTALLED)).toBe(false);
     });
 
     it('a type a declaration never overrides: extended (object) or one name per deployment', () => {
         for (const type of ['object', 'objects', 'permission_set', 'position', 'capability']) {
-            expect(isServedOverrideRowOf(row({ type }), BASE), type).toBe(false);
+            expect(isServedOverrideRowOf(row({ type }), BASE, NOTHING_INSTALLED), type).toBe(false);
         }
-        expect(isServedOverrideRowOf(row({ type: undefined }), BASE)).toBe(false);
+        expect(isServedOverrideRowOf(row({ type: undefined }), BASE, NOTHING_INSTALLED)).toBe(false);
     });
 
     it('total: false for any input it cannot read as a declaring row', () => {
-        expect(isServedOverrideRowOf(null, BASE)).toBe(false);
-        expect(isServedOverrideRowOf(undefined, BASE)).toBe(false);
-        expect(isServedOverrideRowOf(row({ metadata: '{not json' }), BASE)).toBe(false);
-        expect(isServedOverrideRowOf(row({ metadata: '[]' }), BASE)).toBe(false);
-        expect(isServedOverrideRowOf(row({ metadata: null }), BASE)).toBe(false);
-        expect(isServedOverrideRowOf(row(), '')).toBe(false);
-        expect(isServedOverrideRowOf(row(), undefined)).toBe(false);
-        expect(isServedOverrideRowOf(row(), 42)).toBe(false);
+        expect(isServedOverrideRowOf(null, BASE, NOTHING_INSTALLED)).toBe(false);
+        expect(isServedOverrideRowOf(undefined, BASE, NOTHING_INSTALLED)).toBe(false);
+        expect(isServedOverrideRowOf(row({ metadata: '{not json' }), BASE, NOTHING_INSTALLED)).toBe(false);
+        expect(isServedOverrideRowOf(row({ metadata: '[]' }), BASE, NOTHING_INSTALLED)).toBe(false);
+        expect(isServedOverrideRowOf(row({ metadata: null }), BASE, NOTHING_INSTALLED)).toBe(false);
+        expect(isServedOverrideRowOf(row(), '', NOTHING_INSTALLED)).toBe(false);
+        expect(isServedOverrideRowOf(row(), undefined, NOTHING_INSTALLED)).toBe(false);
+        expect(isServedOverrideRowOf(row(), 42, NOTHING_INSTALLED)).toBe(false);
     });
 });
 

@@ -62,7 +62,10 @@ export const PLATFORM_TOOLS_BY_PACKAGE: Readonly<Record<string, readonly string[
    * two record-write proposals (`create_record`, `update_record`) and the
    * sample-data cleanup (`remove_sample_data`), which write ONE record or the
    * seeded rows only after the user confirms a card and as that user
-   * (cloud#3565; they replaced `draft_record`).
+   * (cloud#3565; they replaced `draft_record`), and the package removal
+   * (`delete_package`), which only stages the removal of a package built in
+   * the environment — a person confirms before anything is deleted
+   * (cloud#3656).
    */
   'service-ai-studio': [
     'add_field',
@@ -74,6 +77,7 @@ export const PLATFORM_TOOLS_BY_PACKAGE: Readonly<Record<string, readonly string[
     'create_record',
     'create_seed',
     'delete_field',
+    'delete_package',
     'describe_metadata',
     'describe_object',
     'get_active_package',

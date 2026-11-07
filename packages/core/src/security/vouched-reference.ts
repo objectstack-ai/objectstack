@@ -46,9 +46,18 @@
  * string, stored row or flow definition can spell a symbol, so no author can
  * set it; it is in no schema; `Symbol.for` keeps it one key across the ESM and
  * CJS builds; and, being undeclared, it does not survive
- * `ExecutionContextSchema.parse`. It rides a spread of the context as any own
- * property does, so a write a hook sets off under the vouched write carries it
- * too, and is admitted only for the same object, field and id.
+ * `ExecutionContextSchema.parse`.
+ *
+ * ## It is spent on the verb's own write — no hook inherits it
+ *
+ * The mark rides a spread of the context as any own property does, and every
+ * context a hook writes through is derived from the write that fired it. So
+ * the engine strips it where it builds a hook's api from the write's context
+ * (`buildHookApi`, objectql, via {@link withoutVouchedReferences}): a hook —
+ * app-authored or platform, `runAs: 'user'` or inherited — that writes the same
+ * object, field and id under the vouched write is judged through its caller's
+ * read door like any other write. The mark admits the one write the verb
+ * makes, and no write that write sets off.
  */
 
 /** The context key of the mark. See the module header. */
@@ -97,4 +106,17 @@ export function isVouchedReference(context: unknown, object: unknown, field: unk
       && (r as VouchedReference).field === field
       && (r as VouchedReference).id === value,
   );
+}
+
+/**
+ * `context` without the mark: the same object when it carries none, else a
+ * fresh copy with every other own property. The engine calls it where it hands
+ * a hook the write's context (see the module header), so the vouch is spent
+ * on the verb's own write.
+ */
+export function withoutVouchedReferences<T>(context: T): T {
+  if (context === null || typeof context !== 'object') return context;
+  if (!Object.prototype.hasOwnProperty.call(context, VOUCHED_REFERENCES)) return context;
+  const { [VOUCHED_REFERENCES]: _spent, ...rest } = context as T & { [VOUCHED_REFERENCES]?: unknown };
+  return rest as T;
 }

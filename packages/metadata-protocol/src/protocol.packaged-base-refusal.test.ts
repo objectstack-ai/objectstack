@@ -26,8 +26,10 @@
  * provenance). `@objectstack/objectql` cannot be imported here: it depends on
  * this package.
  */
+// Pays the lint root's first load at collection, never inside a clocked case.
+import './lint-root-preload.testkit.js';
 import { afterEach, describe, expect, it } from 'vitest';
-import { assertEngineDeleteDispatch, assertEngineFindOnePredicate, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
+import { assertEngineDeleteDispatch, assertEngineFindOnePredicate, assertEngineUpdateDispatch, installedManifestsOf } from '@objectstack/metadata-core';
 import { DEFAULT_METADATA_TYPE_REGISTRY, OVERRIDE_TYPE_CLASSIFICATION } from '@objectstack/spec/kernel';
 import { ObjectStackProtocolImplementation } from './protocol.js';
 import { judgeOverrideWrite } from './protocol-packaged-base-refusal.js';
@@ -999,7 +1001,7 @@ describe('[#30062] each excluded type\'s refusal names a remedy that works for i
     const refusalOf = (type: string): string => {
         const verdict = judgeOverrideWrite(
             { type, name: 'their_item', packageId: PAIR_ID, item: { name: 'their_item', overrides: { package: BASE_ID, basedOn: '1.0.0' } } },
-            { dependencies: [BASE_ID], shippers: [BASE_ID] },
+            { dependencies: [BASE_ID], shippers: [BASE_ID], installed: installedManifestsOf(undefined) },
         );
         expect(verdict, type).toMatchObject({ verdict: 'refuse', rule: 'declared_type_not_overridable' });
         return (verdict as { message: string }).message;

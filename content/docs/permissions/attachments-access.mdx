@@ -72,6 +72,39 @@ drops a non-system caller's `uploaded_by` and reports it in `droppedFields`,
 and the rest of the write lands. System-context writes keep the value they
 supply.
 
+### Attaching an upload from the browser
+
+The Attachments panel attaches a file in the call that completes its upload:
+the presigned upload's `POST /api/v1/storage/upload/complete` carries
+`attachTo: { parentObject, parentId }`, and the server commits the file and
+writes its `sys_attachment` row as one unit, **as the signed-in user**. Every
+check above judges that user: the permission to create an attachment, edit
+access to the record, the record object's `enable.files`, and the file
+reference itself. The answer carries the new `attachmentId`. A refused attach
+leaves the upload `pending` and attached to nothing, and the pending-upload
+retention reclaims it.
+
+The file must be the caller's own upload, still `pending`, in the
+`attachments` scope, attached to nothing and owned by no record field, with its
+bytes stored. Any other file id — another user's upload, an id that names no
+file — is refused before anything is written:
+
+| Code | Status | When |
+| --- | --- | --- |
+| `PERMISSION_DENIED` | 403 | The file is another user's upload (the commit door's uploader rule) |
+| `FILE_NOT_FOUND` | 404 | The id names no file |
+| `RESOURCE_CONFLICT` | 409 | The upload is already completed, already attached or owned by a field, or its bytes are not stored |
+| `INVALID_REQUEST` | 400 | `attachTo` is malformed, or the upload was not started in the `attachments` scope |
+| `NOT_IMPLEMENTED` | 501 | The deployment composes no auth service or no data engine, so there is no caller to attach as |
+
+This is how a member who may attach files but holds no read on `sys_file`
+attaches one: a `sys_attachment` create through the generic data API
+(`POST /api/v1/data/sys_attachment`) names its `file_id` as any other
+`lookup` value, which the caller must be able to read, and a file they cannot
+read is refused `400 VALIDATION_FAILED` (`reference_not_found` on `file_id`).
+The attach on completion vouches for that one file, in that one call, and
+grants no read of `sys_file` or of anything else.
+
 | Code | Status | When |
 | --- | --- | --- |
 | `RECORD_NOT_ACCESSIBLE` | 403 | The session names no signed-in user to record as the uploader |
@@ -224,6 +257,7 @@ can be shared across records). Reclamation is handled by the platform LifecycleS
 | Operation | Requirement | Deny code |
 | --- | --- | --- |
 | Attach (create) | parent object opts in (`enable.files`) | `FILES_DISABLED` (403) |
+| Attach on upload completion (`attachTo`) | the caller's own pending, unattached `attachments`-scope upload, then every create check | `PERMISSION_DENIED` (403) / `RESOURCE_CONFLICT` (409), then the create codes |
 | Attach (create), re-point | a by-id update of the parent record by the caller would be admitted | `ATTACHMENT_PARENT_ACCESS` (403); `OBJECT_NOT_FOUND` (404) when the parent object is not registered |
 | List / read | inherits parent read visibility | *(filtered out)* |
 | Delete | uploader or parent editor (+ RBAC delete grant) | `ATTACHMENT_DELETE_DENIED` (403); `PERMISSION_DENIED` (403) when the parent is not readable or no delete grant is held |

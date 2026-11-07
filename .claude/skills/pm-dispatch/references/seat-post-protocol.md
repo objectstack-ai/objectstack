@@ -29,6 +29,7 @@
 - 写侧刷新三时刻:派发、收班、暂停或交接前;时间戳恒取自 `scripts/pm/post-stamped.mjs`。
 - 帖与卡正文首行恒为署名 `LANE#N · ACCOUNT · SESSION`;缺即写工具拒发(`post-stamped.mjs` 头注)。
 - PR 正文末非空行署 `<!-- signed: LANE#N · ACCOUNT · SESSION -->`,整篇经 `dispatch.mjs` 的 `issue_patch`。
+- PR 正文不送页脚:中继 `issue_patch` 存 = 送、无追加(`platform-readings.md` 中继行)。
 - 刷新前回执敲门;`--body` 拦截:评论晚于末次戳 ⇒ `--ack-through=ID`;空座欠账无卡号 ⇒ 拒写。
 - 耐久状态只住正文或以 App 写入;正文守中继上限 60,000 字节,超大贴由半状态巡查浮出。
 - 协议升级迁移状态、或巡检发现正文不符时,当场改正文 + 审计评论。
@@ -60,7 +61,6 @@
 - `create_trigger` 开新会话的 Routine 拿不到 GitHub 工具、零产出;⛔ 不把它当座位 Routine 在跑。
 - 模型不能经 API 钉住,同样在 UI 钉;Routine 继承环境默认模型,环境默认变了它跟着变。
 - 创建后先手动 fire 一轮烟测,判据取 GitHub 上的产出:标签写入、审计评论、座位贴编辑。
-- ⛔ 不取会话看起来起来了;零产出即技术性失败。
 - 回滚 = `delete_trigger` + 清空座位登记 + 失败注记。
 - 档位按职责挑,⛔ 不按重要性挑;Routine 席的档位与 cron 是维护者在 UI 上的可调项。
 - 项目席巡查默认每小时(总监席无);存根记 `Patrol: TRIGGER_ID · CRON`、`Mailbox: PR #n`,放宽注由。

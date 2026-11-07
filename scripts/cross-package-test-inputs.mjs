@@ -283,6 +283,9 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
         'packages/spec/src/system/compliance-families-retirement.test.ts',
         'packages/spec/src/ui/view-data-api-provider-retirement.test.ts',
         'packages/spec/src/conversions/conversion-conflict-channel-retirement.test.ts',
+        // The template-manifest retirement's absence walk: every
+        // `objectstack.manifest.json` under `packages/` and `examples/`.
+        'packages/spec/src/marketplace/template-manifest-inert-keys-retirement.test.ts',
       ],
       'packages/**/*.md': [
         'packages/spec/src/system/compliance-families-retirement.test.ts',
@@ -308,6 +311,9 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
         'packages/spec/src/system/compliance-families-retirement.test.ts',
         'packages/spec/src/ui/view-data-api-provider-retirement.test.ts',
         'packages/spec/src/conversions/conversion-conflict-channel-retirement.test.ts',
+        // The template-manifest retirement's absence walk: every
+        // `objectstack.manifest.json` under `packages/` and `examples/`.
+        'packages/spec/src/marketplace/template-manifest-inert-keys-retirement.test.ts',
       ],
       'examples/**/*.md': [
         'packages/spec/src/system/compliance-families-retirement.test.ts',

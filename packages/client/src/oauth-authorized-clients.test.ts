@@ -1,14 +1,14 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#30918] `oauth.authorizedClients` — the URL each method builds and the
- * answer it hands back. The server half (who may read whose grants) is pinned
- * in plugin-auth's `authorized-clients-read.real-plugin.test.ts`; this file
- * pins only what the SDK puts on the wire and what it returns.
+ * [#30918, #31048] `oauth.authorizedClients` — the URL each method builds and
+ * the answer it hands back. The server half (who may read and withdraw whose
+ * grants) is pinned in plugin-auth's `authorized-clients-read.real-plugin.test.ts`;
+ * this file pins only what the SDK puts on the wire and what it returns.
  */
 
 import { describe, it, expect, expectTypeOf, vi } from 'vitest';
-import { ObjectStackClient, type AuthorizedClientsList } from './index';
+import { ObjectStackClient, type AuthorizedClientsList, type AuthorizedClientWithdrawal } from './index';
 
 const BASE = 'http://localhost:3000';
 
@@ -68,5 +68,50 @@ describe('#30918 oauth.authorizedClients', () => {
     const client = new ObjectStackClient({ baseUrl: BASE, fetch: vi.fn() as never });
     expectTypeOf(client.oauth.authorizedClients.list).returns.toEqualTypeOf<Promise<AuthorizedClientsList>>();
     expectTypeOf(client.oauth.authorizedClients.listForUser).returns.toEqualTypeOf<Promise<AuthorizedClientsList>>();
+  });
+});
+
+describe('#31048 oauth.authorizedClients withdraws', () => {
+  const WITHDRAWN: AuthorizedClientWithdrawal = { id: 'consent_1' };
+
+  it('withdraw(id) posts exactly { id } to the own door and unwraps the envelope', async () => {
+    const { client, fetchMock } = clientAnswering({ success: true, data: WITHDRAWN });
+    const answer = await client.oauth.authorizedClients.withdraw('consent_1');
+    expect(answer).toEqual(WITHDRAWN);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe(`${BASE}/api/v1/auth/authorized-clients/withdraw`);
+    expect(init.method).toBe('POST');
+    // The route refuses any other body key, so the method sends only the id.
+    expect(JSON.parse(String(init.body))).toEqual({ id: 'consent_1' });
+  });
+
+  it('withdrawForUser(userId, id) posts exactly { userId, id } to the admin door', async () => {
+    const { client, fetchMock } = clientAnswering({ success: true, data: WITHDRAWN });
+    const answer = await client.oauth.authorizedClients.withdrawForUser('user_2', 'consent_1');
+    expect(answer).toEqual(WITHDRAWN);
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe(`${BASE}/api/v1/auth/admin/authorized-clients/withdraw`);
+    expect(init.method).toBe('POST');
+    expect(JSON.parse(String(init.body))).toEqual({ userId: 'user_2', id: 'consent_1' });
+  });
+
+  it('a not-found or refused withdraw reaches the caller as a throw, never as a withdrawn answer', async () => {
+    const notFound = clientAnswering(
+      { success: false, error: { code: 'RESOURCE_NOT_FOUND', message: 'No authorized assistant you may withdraw matches the supplied id.' } },
+      404,
+    );
+    await expect(notFound.client.oauth.authorizedClients.withdraw('consent_x')).rejects.toThrow();
+    const refused = clientAnswering(
+      { success: false, error: { code: 'PERMISSION_DENIED', message: 'Platform administrator access required.' } },
+      403,
+    );
+    await expect(refused.client.oauth.authorizedClients.withdrawForUser('user_2', 'consent_1')).rejects.toThrow();
+  });
+
+  it('both withdraws are typed with the answer they unwrap', () => {
+    const client = new ObjectStackClient({ baseUrl: BASE, fetch: vi.fn() as never });
+    expectTypeOf(client.oauth.authorizedClients.withdraw).returns.toEqualTypeOf<Promise<AuthorizedClientWithdrawal>>();
+    expectTypeOf(client.oauth.authorizedClients.withdrawForUser).returns.toEqualTypeOf<Promise<AuthorizedClientWithdrawal>>();
   });
 });

@@ -98,7 +98,7 @@ describe('scaffolded project description (#9263)', () => {
     const manifest = JSON.parse(
       fs.readFileSync(path.join(projectDir, 'objectstack.manifest.json'), 'utf8'),
     );
-    expect(manifest.name).toBe('support-desk');
+    expect(manifest).not.toHaveProperty('name');
     expect(manifest.namespace).toBe('support_desk');
     expect(manifest.displayName).toBe('Support Desk');
   });

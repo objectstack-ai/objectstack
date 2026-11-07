@@ -272,8 +272,13 @@ describe('coverage reads the map the way the renderer does', () => {
     { 'zh-CN': '成员' },
     { default: 'Members', 'zh-CN': '成员' },
     { en: 'Members' },
+    // Both Chinese scripts, in either authoring order (#30910): the renderer
+    // reads the entry of the reader's own script, and so does coverage.
+    { en: 'Members', 'zh-CN': '成员', 'zh-TW': '成員' },
+    { en: 'Members', 'zh-TW': '成員', 'zh-CN': '成员' },
+    { en: 'Members', zh: '成员', 'zh-Hant': '成員' },
   ];
-  const locales = ['en', 'zh', 'zh-CN', 'zh-TW', 'ja-JP', 'es-ES'];
+  const locales = ['en', 'zh', 'zh-CN', 'zh-TW', 'zh-Hans', 'zh-Hant', 'zh-HK', 'ja-JP', 'es-ES'];
 
   it('a covered locale is the entry the renderer picks', () => {
     for (const map of maps) {
@@ -299,5 +304,12 @@ describe('coverage reads the map the way the renderer does', () => {
   it('same language, other region, counts — limb 3 of the shared rule', () => {
     expect(inlineLocaleText({ 'zh-CN': '成员' }, 'zh-TW')).toBe('成员');
     expect(inlineLocaleText({ zh: '成员' }, 'zh-CN')).toBe('成员');
+  });
+
+  it("a map with both Chinese scripts covers each reader with its own script's entry (#30910)", () => {
+    expect(inlineLocaleText({ 'zh-CN': '成员', 'zh-TW': '成員' }, 'zh-Hant')).toBe('成員');
+    expect(inlineLocaleText({ 'zh-TW': '成員', 'zh-CN': '成员' }, 'zh')).toBe('成员');
+    // An empty entry of the reader's script is no translation: the other script still covers.
+    expect(inlineLocaleText({ 'zh-CN': '成员', 'zh-TW': '' }, 'zh-Hant')).toBe('成员');
   });
 });

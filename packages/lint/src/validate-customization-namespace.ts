@@ -33,8 +33,8 @@
  *
  * ## Not judged here
  *
- *  - A package that is itself a pair (`customizationPackageId` answers
- *    `base_is_customization_package`): a pair is never paired again, and its
+ *  - A package that is itself a pair (`isCustomizationPackage`, the one
+ *    spelling of "some base derives this id"): a pair is never paired again, and its
  *    namespace is the pair namespace, longer than a base's by construction.
  *  - The helper's other two refusals. A missing namespace is not this rule's
  *    question, and a namespace the manifest grammar refuses for another reason
@@ -53,7 +53,7 @@ import {
   CUSTOMIZATION_NAMESPACE_SUFFIX,
   MAX_CUSTOMIZATION_BASE_NAMESPACE_LENGTH,
   customizationNamespace,
-  customizationPackageId,
+  isCustomizationPackage,
 } from '@objectstack/spec/kernel';
 
 import type { AnyRec } from './page-walk.js';
@@ -105,8 +105,7 @@ export function validateCustomizationNamespace(stack: AnyRec): CustomizationName
   if (!isRec(stack)) return findings;
 
   for (const { manifest, at } of deliveredManifests(stack)) {
-    const pairId = customizationPackageId(manifest.id);
-    if (!pairId.ok && pairId.reason === 'base_is_customization_package') continue;
+    if (isCustomizationPackage(manifest.id)) continue;
 
     const pairNamespace = customizationNamespace(manifest.namespace);
     if (pairNamespace.ok || pairNamespace.reason !== 'base_namespace_too_long') continue;

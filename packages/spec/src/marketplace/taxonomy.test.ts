@@ -16,6 +16,8 @@
  *       needs a declared connector.
  *   D2  `category` refused by name on every schema that carried it, with the
  *       prescription; both category defs gone; ADR-0087 registration.
+ *   id  every value of every taxonomy enum is a system identifier, so a select
+ *       field can carry it as an option value.
  *
  * On the assertion set: a schema refusal raises a `ZodError` whose issues
  * carry `code` and `path` but no ADR-0112 `status` — none of these shapes has
@@ -26,7 +28,9 @@
 import { describe, expect, it } from 'vitest';
 
 import { ALL_CONVERSIONS } from '../conversions/registry';
+import { SelectOptionSchema } from '../data/field.zod';
 import { MIGRATIONS_BY_MAJOR, RETIRED_DEFS_BY_MAJOR, RETIRED_KEYS_BY_MAJOR } from '../migrations/registry';
+import { SystemIdentifierSchema } from '../shared/identifiers.zod';
 import * as Marketplace from './index';
 import {
   MarketplaceListingSchema,
@@ -50,6 +54,7 @@ import {
   MarketplaceSolutionTypeSchema,
   PackageMaturitySchema,
 } from './taxonomy.zod';
+import * as Taxonomy from './taxonomy.zod';
 
 const D3_ID = 'marketplace-category-retired';
 
@@ -63,7 +68,7 @@ const PACKAGE_ROW = {
   createdBy: 'usr_1',
 };
 const CREATE_REQUEST = { manifestId: 'com.acme.crm', ownerOrgId: 'org_1', displayName: 'Acme CRM', createdBy: 'usr_1' };
-const TEMPLATE_MANIFEST = { name: 'acme-crm', specVersion: '^18.0.0', displayName: 'Acme CRM' };
+const TEMPLATE_MANIFEST = { displayName: 'Acme CRM' };
 const LISTING = {
   id: 'listing-001',
   packageId: 'com.acme.crm',
@@ -82,8 +87,8 @@ function issuesOf(result: { success: boolean; error?: { issues: Array<{ code: st
 describe('F1 businessFunctions — 1 to 3 distinct business functions, the first is primary', () => {
   it('accepts one to three values and keeps their order', () => {
     expect(MarketplaceBusinessFunctionsSchema.parse(['sales'])).toEqual(['sales']);
-    expect(MarketplaceBusinessFunctionsSchema.parse(['marketing', 'sales', 'customer-service']))
-      .toEqual(['marketing', 'sales', 'customer-service']);
+    expect(MarketplaceBusinessFunctionsSchema.parse(['marketing', 'sales', 'customer_service']))
+      .toEqual(['marketing', 'sales', 'customer_service']);
   });
 
   it('refuses an empty list', () => {
@@ -123,8 +128,8 @@ describe('F1 businessFunctions — 1 to 3 distinct business functions, the first
 describe('F2 industries — up to 3 distinct industries; absent means cross-industry', () => {
   it('accepts zero to three values', () => {
     expect(MarketplaceIndustriesSchema.parse([])).toEqual([]);
-    expect(MarketplaceIndustriesSchema.parse(['manufacturing', 'trade-distribution', 'retail']))
-      .toEqual(['manufacturing', 'trade-distribution', 'retail']);
+    expect(MarketplaceIndustriesSchema.parse(['manufacturing', 'trade_distribution', 'retail']))
+      .toEqual(['manufacturing', 'trade_distribution', 'retail']);
   });
 
   it('refuses a fourth value', () => {
@@ -317,5 +322,35 @@ describe('LEGACY_CATEGORY_MAPPING — what every old category value becomes', ()
 
   it('flags operations for review: one value held three functions', () => {
     expect(LEGACY_CATEGORY_MAPPING.operations).toMatchObject({ kind: 'mapped', businessFunctions: ['administration'], review: true });
+  });
+});
+
+describe('id — every taxonomy value is a system identifier a select can carry', () => {
+  // Found by walking the module, not listed by hand: an enum added to
+  // taxonomy.zod.ts later is judged here without anyone remembering to add it.
+  const enums = Object.entries(Taxonomy).flatMap(([name, schema]) => {
+    const options = (schema as { options?: unknown }).options;
+    return Array.isArray(options) && options.every((o) => typeof o === 'string')
+      ? [{ name, values: options as string[] }]
+      : [];
+  });
+
+  it('finds every facet enum and the maturity flag (a walk that finds nothing passes nothing)', () => {
+    expect(enums.map((e) => e.name)).toEqual(expect.arrayContaining([
+      'MarketplaceBusinessFunctionSchema',
+      'MarketplaceIndustrySchema',
+      'MarketplaceSolutionTypeSchema',
+      'PackageMaturitySchema',
+    ]));
+    expect(enums.reduce((n, e) => n + e.values.length, 0)).toBeGreaterThanOrEqual(26);
+  });
+
+  it('parses each value as SystemIdentifierSchema and as a select option value', () => {
+    for (const { name, values } of enums) {
+      for (const value of values) {
+        expect(SystemIdentifierSchema.safeParse(value).success, `${name}: ${value}`).toBe(true);
+        expect(SelectOptionSchema.safeParse({ label: value, value }).success, `${name}: ${value}`).toBe(true);
+      }
+    }
   });
 });

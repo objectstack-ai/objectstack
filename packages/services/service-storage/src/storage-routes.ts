@@ -12,6 +12,9 @@ import { InitiateChunkedUploadRequestSchema, UploadScopeSchema } from '@objectst
 // [#23174] A catch-all 5xx answers through `sendServerFault`: the route's
 // generic text on the wire, the caught error with its stack in the fault log.
 import { sendOk, sendError, sendServerFault } from '@objectstack/types';
+// The commit door's attach arm relays the attach verb's declared refusals as
+// the print door relays its service's: the producer's code and status.
+import { declaredRefusalMessage, demotedDeclaredCode, resolveThrownHttpError } from '@objectstack/types';
 // [#15999] The BRAND predicate, never `instanceof` — this error crosses package
 // boundaries and a monorepo resolves the same module through more than one path
 // (`src` under vitest aliases, `dist` under the published `exports`), so two
@@ -445,7 +448,8 @@ export interface StorageRoutesOptions {
  *
  * Routes:
  * - POST   /storage/upload/presigned               → get presigned upload URL
- * - POST   /storage/upload/complete                → mark upload as committed
+ * - POST   /storage/upload/complete                → mark upload as committed (and, with
+ *                                                   `attachTo`, attach it to a record as the caller)
  * - POST   /storage/upload/chunked                 → initiate chunked upload
  * - PUT    /storage/upload/chunked/:uploadId/chunk/:chunkIndex → upload a chunk
  * - POST   /storage/upload/chunked/:uploadId/complete          → complete chunked
@@ -478,6 +482,60 @@ export function registerStorageRoutes(
  */
 export type StorageGatedSessionReader = (req: IHttpRequest) => Promise<unknown>;
 
+/** What the commit door's `attachTo` names: the upload, and the record it is attached to. */
+export interface StorageUploadAttachment {
+  fileId: string;
+  parentObject: string;
+  parentId: string;
+  eTag?: string;
+}
+
+/**
+ * Package-internal: attach the request's caller's own pending upload to a
+ * record and commit it, as that caller — the commit door's `attachTo` arm.
+ * Resolves the request's FULL execution context (the one request-to-context
+ * composition, as the download authorizer does) and hands it to the
+ * file-attachments service's caller-scoped `attachUploadAs`, which asks every
+ * check and vouches for that one file. It throws what that verb throws, with
+ * its declared `code` and `status`.
+ *
+ * Bound by `composeStorageRoutes` alone, like every other storage gate, and a
+ * parameter of {@link registerStorageFamily} rather than a
+ * `StorageRoutesOptions` key, so no exported declaration moves and no host can
+ * hand the door an attacher of its own. `undefined` (no `auth` service, or no
+ * data engine): the door refuses an `attachTo` with `501`, and a completion
+ * without one is unchanged.
+ */
+export type StorageUploadAttacher = (
+  req: IHttpRequest,
+  upload: StorageUploadAttachment,
+) => Promise<{ attachmentId: string }>;
+
+/** The body keys of `attachTo` — `CompleteUploadRequestSchema.attachTo` (`@objectstack/spec/api`). */
+const ATTACH_TO_FIELDS = ['parentObject', 'parentId'] as const;
+
+/**
+ * The commit door's `attachTo`: `null` when the request carries none, the
+ * target when it is well formed, or the sentence a `400` answers.
+ */
+function attachTargetOf(value: unknown): { parentObject: string; parentId: string } | null | string {
+  if (value === undefined) return null;
+  const shape =
+    `attachTo is an object with the fields ${ATTACH_TO_FIELDS.join(' and ')}, each a non-empty string: ` +
+    'the record the upload is attached to.';
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return shape;
+  const fields = value as Record<string, unknown>;
+  const known = new Set<string>(ATTACH_TO_FIELDS);
+  const unknown = Object.keys(fields).filter((key) => !known.has(key));
+  if (unknown.length > 0) {
+    return `${unknown.map((k) => `'${k}'`).join(', ')} ${unknown.length === 1 ? 'is not a field' : 'are not fields'} of attachTo. ${shape}`;
+  }
+  const { parentObject, parentId } = fields;
+  if (typeof parentObject !== 'string' || parentObject.length === 0) return shape;
+  if (typeof parentId !== 'string' || parentId.length === 0) return shape;
+  return { parentObject, parentId };
+}
+
 /**
  * Package-internal: register the storage family through ONE door, which asks
  * the ADR-0069 gate before any route runs (see `mountFamilyRoute` below).
@@ -495,6 +553,7 @@ export function registerStorageFamily(
   store: StorageMetadataStore,
   opts: StorageRoutesOptions,
   readGatedSessionUser: StorageGatedSessionReader | undefined,
+  attachUpload: StorageUploadAttacher | undefined = undefined,
   getUploadLinkDoor?: () => UploadLinkDoor | undefined,
 ): void {
   const basePath = opts.basePath ?? '/api/v1/storage';
@@ -1064,9 +1123,15 @@ export function registerStorageFamily(
       // statement unscoped and raising `[tenant-audit]`.
       const session = await requireUploadSession(req, res);
       if (session === false) return;
-      const { fileId, eTag } = req.body ?? {};
+      const { fileId, eTag, attachTo } = req.body ?? {};
       if (!fileId) {
         sendError(res, 400, 'INVALID_REQUEST', 'fileId is required');
+        return;
+      }
+      // The attach arm's target, judged before anything is read.
+      const attach = attachTargetOf(attachTo);
+      if (typeof attach === 'string') {
+        sendError(res, 400, 'INVALID_REQUEST', attach);
         return;
       }
 
@@ -1093,6 +1158,43 @@ export function registerStorageFamily(
         return;
       }
 
+      // The attach arm: the record attachments surface's attach verb. The
+      // commit and the `sys_attachment` insert are one unit, run as the caller
+      // by the file-attachments service (`attachUploadAs`), which asks the
+      // ownership rule again, the upload's state and scope, the permission to
+      // create an attachment, the parent-EDIT attach rule and the parent read,
+      // and vouches for this one file on its own insert — so a member who may
+      // attach need not read `sys_file`. ⛔ The generic data door gets no such
+      // mark: a `sys_attachment` create through it naming a file the caller
+      // cannot read is still refused `reference_not_found`.
+      if (attach) {
+        if (!attachUpload || session === null) {
+          sendError(
+            res,
+            501,
+            'NOT_IMPLEMENTED',
+            'This storage mount cannot attach an upload as its caller: the kernel composes no auth service or no ' +
+              'data engine. Complete the upload without attachTo.',
+          );
+          return;
+        }
+        let attached: { attachmentId: string };
+        try {
+          attached = await attachUpload(req, {
+            fileId: String(fileId),
+            parentObject: attach.parentObject,
+            parentId: attach.parentId,
+            ...(eTag !== undefined && eTag !== null ? { eTag } : {}),
+          });
+        } catch (err) {
+          relayAttachFailure(res, err, `${basePath}/upload/complete`);
+          return;
+        }
+        const attachedFile = (await store.getFile(fileId)) ?? file;
+        sendOk(res, { ...committedFileMetadata(attachedFile, fileId), attachmentId: attached.attachmentId });
+        return;
+      }
+
       const updated = await store.updateFile(
         fileId,
         {
@@ -1102,19 +1204,7 @@ export function registerStorageFamily(
         writeContext,
       );
 
-      sendOk(res, {
-        // The opaque sys_file id — the value a file field stores as a
-        // reference (ADR-0104 D3). Previously omitted, so a caller could not
-        // learn the id to persist after committing an upload.
-        fileId: updated!.id ?? fileId,
-        path: updated!.key,
-        name: updated!.name,
-        size: updated!.size ?? 0,
-        mimeType: updated!.mime_type ?? 'application/octet-stream',
-        lastModified: updated!.updated_at ?? new Date().toISOString(),
-        created: updated!.created_at ?? new Date().toISOString(),
-        etag: updated!.etag,
-      });
+      sendOk(res, committedFileMetadata(updated!, fileId));
     } catch (err: any) {
       sendServerFault(res, 500, 'INTERNAL', 'Internal error', err);
     }
@@ -2086,8 +2176,12 @@ function judgeCompletion(session: UploadSessionRecord, listed: ReadonlyArray<Lis
  *
  * The eTag a completion may carry is not compared: no adapter's `getInfo`
  * reports the stored object's ETag, so there is nothing to compare it with.
+ *
+ * Package-internal (not re-exported from `index.ts`): exported so the attach
+ * verb's commit of an upload (`FileAttachmentService.attachUploadAs`) asks the
+ * same question before it commits.
  */
-async function heldBytesRefusal(storage: IStorageService, file: FileRecord): Promise<string | null> {
+export async function heldBytesRefusal(storage: IStorageService, file: FileRecord): Promise<string | null> {
   const remedy =
     'Send the file to its upload URL (start a new upload if that URL has expired), then complete again. ' +
     'The file stays pending until then.';
@@ -2103,6 +2197,54 @@ async function heldBytesRefusal(storage: IStorageService, file: FileRecord): Pro
     `This upload cannot be completed: the storage backend holds ${size} bytes for it, ` +
     `not the ${declared} bytes it declared. ${remedy}`
   );
+}
+
+/**
+ * The commit door's answer for a committed file — `FileUploadResponseSchema`'s
+ * `data` (`@objectstack/spec/api`).
+ */
+function committedFileMetadata(file: FileRecord, fileId: string): Record<string, unknown> {
+  return {
+    // The opaque sys_file id — the value a file field stores as a
+    // reference (ADR-0104 D3). Previously omitted, so a caller could not
+    // learn the id to persist after committing an upload.
+    fileId: file.id ?? fileId,
+    path: file.key,
+    name: file.name,
+    size: file.size ?? 0,
+    mimeType: file.mime_type ?? 'application/octet-stream',
+    lastModified: file.updated_at ?? new Date().toISOString(),
+    created: file.created_at ?? new Date().toISOString(),
+    etag: file.etag,
+  };
+}
+
+/**
+ * The commit door's relay for a refused or failed attach: a declared `4xx` —
+ * the attach verb's own refusals, the `sys_attachment` insert's gates (the
+ * permission to create, `ATTACHMENT_PARENT_ACCESS`, `FILES_DISABLED`, a
+ * `VALIDATION_FAILED` with its field details) — keeps its code, status,
+ * message and details; a declared `5xx` keeps its code and status with this
+ * door's generic text unless the producer declared the text for its caller;
+ * anything else is a fault.
+ */
+function relayAttachFailure(res: IHttpResponse, err: unknown, path: string): void {
+  const thrown = resolveThrownHttpError(err, 500);
+  if (thrown.status < 500) {
+    const declaredCode = demotedDeclaredCode(thrown);
+    sendError(res, thrown.status, thrown.code, thrown.message, {
+      ...(thrown.details ? { details: thrown.details } : {}),
+      ...(declaredCode !== undefined ? { declaredCode } : {}),
+      ...(thrown.userMessage !== undefined ? { userMessage: thrown.userMessage } : {}),
+    });
+    return;
+  }
+  const refusal = declaredRefusalMessage(err);
+  if (refusal !== undefined) {
+    sendError(res, thrown.status, thrown.code, refusal);
+    return;
+  }
+  sendServerFault(res, thrown.status, thrown.code, 'Internal error', err, { method: 'POST', path });
 }
 
 /**

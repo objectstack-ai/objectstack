@@ -333,6 +333,13 @@ const fr = {
       loadFailed: "La liste n'a pas pu être chargée. Vous pouvez toujours saisir le nom.",
       notFound: "{{name}} (introuvable)",
     },
+    preferenceOption: {
+      allTopics: "Tous les sujets ({{value}})",
+      allChannels: "Tous les canaux ({{value}})",
+      notConfigured: "{{value}} (non configuré)",
+      notInList: "{{value}} (absent de la liste)",
+      useTyped: "Utiliser « {{value}} »",
+    },
     recipient: {
       selectTypeFirst: "Sélectionnez d'abord un type de destinataire.",
       loading: "Chargement…",
@@ -4121,6 +4128,7 @@ const fr = {
       create_record: "Créer la fiche",
       create_seed: "Générer des données d’exemple pour les objets",
       delete_field: "Supprimer le champ",
+      delete_package: "Supprimer un paquet",
       describe_metadata: "Examiner les métadonnées",
       describe_object: "Examiner la structure de l’objet",
       get_active_package: "Vérifier le paquet actif",

@@ -339,6 +339,13 @@ const ru = {
       loadFailed: "Не удалось загрузить список. Имя можно ввести вручную.",
       notFound: "{{name}} (не найдено)",
     },
+    preferenceOption: {
+      allTopics: "Все темы ({{value}})",
+      allChannels: "Все каналы ({{value}})",
+      notConfigured: "{{value}} (не настроен)",
+      notInList: "{{value}} (нет в списке)",
+      useTyped: "Использовать «{{value}}»",
+    },
     recipient: {
       selectTypeFirst: "Сначала выберите тип получателя.",
       loading: "Загрузка…",
@@ -4212,6 +4219,7 @@ const ru = {
       create_record: "Создать запись",
       create_seed: "Сгенерировать примеры данных для объектов",
       delete_field: "Удалить одно поле",
+      delete_package: "Удалить пакет",
       describe_metadata: "Изучить метаданные",
       describe_object: "Изучить структуру объекта",
       get_active_package: "Проверить активный пакет",

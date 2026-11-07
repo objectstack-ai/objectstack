@@ -707,6 +707,24 @@ export function buildMcpBridge(
         return masked.document;
     };
 
+    /**
+     * [ADR-0106 D1] The object one action is summarised against, as THIS
+     * caller is served it — or `undefined` when the `/meta` object door's
+     * projection withholds the action from this caller. The action is
+     * projected as its object's only `actions` entry ({@link servedToCaller}),
+     * the position where that projection drops an action reading a field the
+     * caller cannot read: a param's `field` (one under `objectOverride` judged
+     * on the object it names), or any other position of the action. So one
+     * rule decides on both doors, and the object handed back is the projected
+     * one, which carries no field the caller cannot read. An action with no
+     * object definition carries no field of one, and is answered as declared.
+     */
+    const servedActionObject = async (action: any, obj: any): Promise<{ obj: any } | undefined> => {
+        if (!obj || typeof obj !== 'object') return { obj };
+        const served = await servedToCaller({ ...obj, actions: [action] });
+        return Array.isArray(served?.actions) && served.actions.length === 1 ? { obj: served } : undefined;
+    };
+
     /** {@link readServedObject}, as this caller is served it ({@link servedToCaller}). */
     const readObjectForCaller = async (name: string): Promise<any> => {
         const def: any = await readServedObject(name);
@@ -974,8 +992,12 @@ export function buildMcpBridge(
                 // that credential (a `sys_api_key` write under an API key),
                 // marked with that gate's own code and sentence.
                 const refusal = actionExec.apiForwardCredentialRefusal(context, action);
+                // [ADR-0106 D1] Summarised against the object as this caller is
+                // served it, and not listed where `/meta` withholds it.
+                const served = await servedActionObject(action, obj);
+                if (!served) continue;
                 out.push({
-                    ...actionExec.summarizeAction(deps, action, obj, objectName, flow ?? undefined),
+                    ...actionExec.summarizeAction(deps, action, served.obj, objectName, flow ?? undefined),
                     ...(refusal ? { unavailable: { code: refusal.code, reason: refusal.message } } : {}),
                 });
             }

@@ -45,7 +45,7 @@ import {
 } from './packaged-base-regime.js';
 import { SysMetadataRepository } from './sys-metadata-repository.js';
 import { OBJECT_EXTENSION_TYPE } from './protocol-object-extension-item.js';
-import { customizationPairEnsureRefusal, type PairRegistry } from './protocol-customization-package.js';
+import { customizationPairEnsureRefusal, kernelPackageScope, type PairRegistry } from './protocol-customization-package.js';
 import { resolveOverlaySchema } from './protocol-meta-type-schema.js';
 import { resolvePackageClosure } from '@objectstack/lint/runtime';
 import { overlayMemberField, overlayMemberOfBody, overlayMemberValue } from './migrations/overlay-index.js';
@@ -58,7 +58,8 @@ import {
 } from '@objectstack/spec/kernel';
 import { PLURAL_TO_SINGULAR } from '@objectstack/spec/shared';
 import { expandViewContainer, isAggregatedViewContainer } from '@objectstack/spec';
-import { ITEM_KEY_DISCRIMINATORS, isPairOf, itemDiscriminator, pairOf } from '@objectstack/metadata-core';
+import { ITEM_KEY_DISCRIMINATORS, isPairOf, itemDiscriminator, pairOf, type InstalledManifestLookup } from '@objectstack/metadata-core';
+import { installedManifestsOfEngine } from './installed-manifests.js';
 
 /**
  * The `ObjectStackProtocolImplementation` members the functions below read —
@@ -68,6 +69,7 @@ import { ITEM_KEY_DISCRIMINATORS, isPairOf, itemDiscriminator, pairOf } from '@o
  * here too, and naming a member the class does not have is a compile error.
  */
 export interface PackagedBaseRefusalHost {
+    readonly engine: ObjectStackProtocolImplementation['engine'];
     isSealedManagedItem: ObjectStackProtocolImplementation['isSealedManagedItem'];
     isWritablePackage: ObjectStackProtocolImplementation['isWritablePackage'];
     packagedBaseRefusal: ObjectStackProtocolImplementation['packagedBaseRefusal'];
@@ -78,7 +80,7 @@ export interface PackagedBaseRefusalHost {
 
 /** The body of `ObjectStackProtocolImplementation#refusePackagedBaseOverride`; the method's docblock there is its contract. */
 export function refusePackagedBaseOverride(
-    this: Pick<PackagedBaseRefusalHost, 'isSealedManagedItem' | 'isWritablePackage' | 'packagedArtifactOwner'>,
+    this: Pick<PackagedBaseRefusalHost, 'engine' | 'isSealedManagedItem' | 'isWritablePackage' | 'packagedArtifactOwner'>,
     request: { type: string; name: string; packageId?: string | null },
 ): void {
     if (this.isSealedManagedItem(request.type, request.name)) {
@@ -163,11 +165,12 @@ export function refusePackagedBaseOverride(
         // [#28412] A Regime C type the declared override opens (`flow`) names
         // the declaration in place of its clone path, keeping its switch.
         const owner = this.packagedArtifactOwner(request);
-        const declare = sealedDeclareOrRenameClause(request.type, owner, request.packageId);
+        const installed = installedManifestsOfEngine(this.engine);
+        const declare = sealedDeclareOrRenameClause(request.type, owner, request.packageId, installed);
         const err = new Error(
             (declare === undefined ? undefined : regimeCDeclaredSaveSentence(request.type, request.name, declare))
             ?? managedItemSealedSentence(request.type, request.name, 'save')
-                + sealedDeclareOrRenameTail(request.type, owner, request.packageId),
+                + sealedDeclareOrRenameTail(request.type, owner, request.packageId, installed),
         );
         (err as any).code = 'NOT_OVERRIDABLE';
         (err as any).status = 403;
@@ -189,10 +192,15 @@ export function refusePackagedBaseOverride(
  * when the shipping package has no pair id. [#28412] `flow` is open: its
  * sealed sentence names the declaration too, and so, [#30065], does `action`'s.
  */
-function sealedDeclareOrRenameTail(type: string, basePackageId: unknown, writerPackageId: unknown): string {
+function sealedDeclareOrRenameTail(
+    type: string,
+    basePackageId: unknown,
+    writerPackageId: unknown,
+    installed: InstalledManifestLookup,
+): string {
     const singular = PLURAL_TO_SINGULAR[type] ?? type;
     if (!isOpenOverrideType(singular) || typeof basePackageId !== 'string') return '';
-    const pair = pairOf(basePackageId);
+    const pair = pairOf(basePackageId, installed);
     if (!pair.ok) return '';
     const writer = typeof writerPackageId === 'string' && writerPackageId.length > 0 ? writerPackageId : undefined;
     if (writer !== undefined && writer !== pair.value) {
@@ -209,10 +217,15 @@ function sealedDeclareOrRenameTail(type: string, basePackageId: unknown, writerP
  * may declare from the pair or rename; any other named package may only
  * rename. `undefined` exactly where the tail is empty.
  */
-function sealedDeclareOrRenameClause(type: string, basePackageId: unknown, writerPackageId: unknown): string | undefined {
+function sealedDeclareOrRenameClause(
+    type: string,
+    basePackageId: unknown,
+    writerPackageId: unknown,
+    installed: InstalledManifestLookup,
+): string | undefined {
     const singular = PLURAL_TO_SINGULAR[type] ?? type;
     if (!isOpenOverrideType(singular) || typeof basePackageId !== 'string') return undefined;
-    const pair = pairOf(basePackageId);
+    const pair = pairOf(basePackageId, installed);
     if (!pair.ok) return undefined;
     const writer = typeof writerPackageId === 'string' && writerPackageId.length > 0 ? writerPackageId : undefined;
     if (writer !== undefined && writer !== pair.value) {
@@ -250,9 +263,12 @@ export type PackagelessWriteOperation = 'save' | 'publish' | 'delete' | 'rollbac
  */
 export function packagelessOverlayWriteRefusal(
     request: { type: string; name: string },
-    closed: { base: string; pair: string },
+    closed: OverlayWriteClose,
     operation: PackagelessWriteOperation,
 ): Error {
+    if (closed.kernelScope !== undefined) {
+        return kernelOverlayWriteRefusal(request, closed.base, closed.kernelScope, 'packageless', operation);
+    }
     const { item, shipped, pair, declared, writeInto, ceremony } = closedOverlayWriteClauses(request, closed);
     const rule = `A write naming no package is closed where ${ceremony} can move its row `
         + `(ADR-0146 D11); a package-less row stored before it is served until that command moves it into '${closed.pair}'.`;
@@ -295,6 +311,37 @@ function closedOverlayWriteClauses(
     const ceremony = '`os migrate packageless-overlays`';
     const boundRowServed = `is served until moved by ${ceremony}, overridden by the pair, or deleted naming the base.`;
     return { item, shipped, pair, declared, writeInto, ceremony, boundRowServed };
+}
+
+/**
+ * [#29594, ruling record 6691217245] Both closes' refusal of a write onto an
+ * item a kernel package ships ({@link OverlayWriteClose.kernelScope}). Kernel
+ * objects are not customizable in this version and the kernel has no pair, so
+ * the sentence names no pair and no fix: the write stays closed (ADR-0146 D11)
+ * where it was closed before the kernel verdict, under the same
+ * `403 NOT_OVERRIDABLE`, until a later version's kernel whitelist opens the
+ * item. A row stored before the close stays served; a row bound to the base
+ * is still removed by a delete naming it.
+ */
+function kernelOverlayWriteRefusal(
+    request: { type: string; name: string },
+    base: string,
+    kernelScope: string,
+    address: 'packageless' | 'named_base',
+    operation: PackagelessWriteOperation,
+): Error {
+    const type = PLURAL_TO_SINGULAR[request.type] ?? request.type;
+    const item = `'${type}/${request.name}' ships in kernel package '${base}' (scope '${kernelScope}')`;
+    const write = address === 'packageless'
+        ? (operation === 'delete' || operation === 'rollback'
+            ? `a ${operation} of its package-less row`
+            : 'a write naming no package')
+        : (operation === 'rollback' ? `a rollback of its row bound to '${base}'` : `a write naming '${base}'`);
+    const stored = address === 'packageless'
+        ? 'A package-less row stored before the close stays served.'
+        : `A row bound to '${base}' stored before the close stays served until a delete naming '${base}' removes it.`;
+    return closedOverlayWriteError(`${item}: kernel objects are not customizable in this version, so ${write} is `
+        + `refused (ADR-0146 D3, D11). ${stored}`);
 }
 
 /** `403 NOT_OVERRIDABLE`, the code and status the sealed write already answers, so neither close gains a code. */
@@ -344,9 +391,12 @@ export type NamedBaseWriteOperation = Exclude<PackagelessWriteOperation, 'delete
  */
 export function namedBaseOverlayWriteRefusal(
     request: { type: string; name: string },
-    closed: { base: string; pair: string },
+    closed: OverlayWriteClose,
     operation: NamedBaseWriteOperation,
 ): Error {
+    if (closed.kernelScope !== undefined) {
+        return kernelOverlayWriteRefusal(request, closed.base, closed.kernelScope, 'named_base', operation);
+    }
     const { item, shipped, pair, declared, writeInto, boundRowServed } = closedOverlayWriteClauses(request, closed);
     const message = operation === 'rollback'
         ? `${item} ${shipped}, and a rollback of its row bound to the read-only base is closed (ADR-0146 D1, D11): `
@@ -375,6 +425,27 @@ export interface OverlayPairFix {
      * about the write the fix takes.
      */
     readonly pendingPairScope?: WrittenPackageScope;
+    /**
+     * [#29594, ruling record 6691217245] The base's kernel scope (`system` /
+     * `cloud`), present only for a kernel base. In this version a kernel
+     * object is not customizable and the ensure door creates no pair for it,
+     * so this fix cannot be taken: a close that reads it still refuses the
+     * write, exactly where it refused it before that verdict, but with
+     * {@link kernelOverlayWriteRefusal}'s sentence, which names no pair. The
+     * kernel whitelist (a later version) is what reopens such a write.
+     */
+    readonly kernelScope?: string;
+}
+
+/**
+ * The subject an overlay-write close refuses ({@link packagelessOverlayWriteRefusal},
+ * {@link namedBaseOverlayWriteRefusal}): the base, its pair, and — for a
+ * kernel base — its kernel scope ({@link OverlayPairFix.kernelScope}).
+ */
+export interface OverlayWriteClose {
+    readonly base: string;
+    readonly pair: string;
+    readonly kernelScope?: string;
 }
 
 /** A written package and the closure of its declared dependencies, as `resolveWritePackageScope` answers it. */
@@ -398,7 +469,10 @@ export type OverrideWriteVerdictAsk = (request: OverrideWriteSubject, writtenSco
  *  - the base has a pair id ({@link pairOf}; an id ending in
  *    `.custom` has none);
  *  - the ensure door would answer or create the pair
- *    ({@link customizationPairEnsureRefusal});
+ *    ({@link customizationPairEnsureRefusal}), its kernel verdict left out:
+ *    [#29594] a kernel base answers a fix carrying its `kernelScope`, so
+ *    both closes keep refusing a kernel item where they did before that
+ *    verdict, naming no pair;
  *  - the base records a version (`basedOn`, its `manifest.version`, the value
  *    the ceremony records too).
  *
@@ -414,19 +488,22 @@ export function overlayPairFixOf(
     host: { readonly engine: ObjectStackProtocolImplementation['engine'] },
     base: string,
 ): OverlayPairFix | null {
-    const pairId = pairOf(base);
+    const pairId = pairOf(base, installedManifestsOfEngine(host.engine));
     if (!pairId.ok) return null; // no pair to name (the census's `no_pair`)
     const pair = pairId.value;
     const registry = (host.engine as { registry?: PairRegistry } | undefined)?.registry;
     if (!registry || typeof registry.getPackage !== 'function') return null;
-    if (customizationPairEnsureRefusal(host.engine, registry, base, pair) !== undefined) return null; // the ensure door would refuse
+    // The ensure door's other judgements; its kernel verdict is read below.
+    if (customizationPairEnsureRefusal(host.engine, registry, base, pair, { judgeKernel: false }) !== undefined) return null;
     const basedOn = registry.getPackage(base)?.manifest?.version;
     if (typeof basedOn !== 'string' || basedOn === '') return null; // no `basedOn` to declare
-    if (registry.getPackage(pair)) return { base, pair, basedOn };
+    const kernelScope = kernelPackageScope(host.engine, base);
+    const kernel = kernelScope === undefined ? {} : { kernelScope };
+    if (registry.getPackage(pair)) return { base, pair, basedOn, ...kernel };
     // The pair the ensure door would create: one dependency, the base.
     const baseClosure = resolvePackageClosure(base, (id) => registry.getPackage(id) as { manifest?: unknown } | undefined);
     const dependencies = [base, ...(baseClosure?.dependencies ?? []).filter((id) => id !== pair)];
-    return { base, pair, basedOn, pendingPairScope: { packageId: pair, dependencies } };
+    return { base, pair, basedOn, pendingPairScope: { packageId: pair, dependencies }, ...kernel };
 }
 
 /**
@@ -576,7 +653,7 @@ export interface NamedBaseWriteSubject {
 export function namedBaseCloseSubject(
     this: NamedBaseCloseHost,
     request: NamedBaseWriteSubject,
-): { base: string; pair: string } | null {
+): OverlayWriteClose | null {
     const base = typeof request.packageId === 'string' && request.packageId.length > 0 ? request.packageId : undefined;
     if (base === undefined) return null; // the package-less write: #28576's close
     // A body carrying `overrides` keeps its answer: the D2 gate refuses a
@@ -594,7 +671,7 @@ export function namedBaseCloseSubject(
         ? overlayMemberOfBody(type, written)
         : overlayMemberValue(type, request.member);
     if (!overlayPairFixAdmits(this, fix, { type, name: request.name, body: written, member })) return null;
-    return { base, pair: fix.pair };
+    return fix.kernelScope === undefined ? { base, pair: fix.pair } : { base, pair: fix.pair, kernelScope: fix.kernelScope };
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -674,12 +751,17 @@ function isOpenOverrideType(singular: string): boolean {
  * verdict. [#30065] `action` is open, so a pair's removal of its declared
  * action override is admitted and the base's action is served again.
  */
-export function isPairRowRemoval(type: string, basePackageId: unknown, packageId: unknown): boolean {
+export function isPairRowRemoval(
+    type: string,
+    basePackageId: unknown,
+    packageId: unknown,
+    installed: InstalledManifestLookup,
+): boolean {
     const singular = PLURAL_TO_SINGULAR[type] ?? type;
     if (!isOpenOverrideType(singular)) return false;
     if (typeof basePackageId !== 'string') return false;
     if (typeof packageId !== 'string' || packageId.length === 0) return false;
-    const pair = pairOf(basePackageId);
+    const pair = pairOf(basePackageId, installed);
     return pair.ok && pair.value === packageId;
 }
 
@@ -825,6 +907,13 @@ export interface OverrideWriteClosure {
      * answering none of that name, the refusal reads as before.
      */
     readonly baseItemsOf?: (basePackageId: string) => readonly unknown[];
+    /**
+     * The installed manifests the door reads (`installedManifestsOf` over its
+     * registry, or over the manifests an offline door holds): who may declare
+     * an override of a base is the pair of the App that carries the base
+     * (`pairOf`, `isPairOf` in `@objectstack/metadata-core`).
+     */
+    readonly installed: InstalledManifestLookup;
 }
 
 /** [#28834] The item door an `object_extension` is saved through (#28574), as the refusals name it. */
@@ -1071,8 +1160,8 @@ export function judgeOverrideWrite(
                 + 'override is refused (ADR-0146 D9). Remove `overrides` and rename the item.');
         }
         const base = declaration.base;
-        const pair = base === undefined ? undefined : pairOf(base);
-        if (base === undefined || pair === undefined || !pair.ok || !isPairOf(packageId, base)) {
+        const pair = base === undefined ? undefined : pairOf(base, closure.installed);
+        if (base === undefined || pair === undefined || !pair.ok || !isPairOf(packageId, base, closure.installed)) {
             const who = packageId === undefined ? 'a row bound to no package' : `package '${packageId}'`;
             const only = pair?.ok
                 ? `only '${pair.value}' may declare an override of '${base}'`
@@ -1211,7 +1300,7 @@ export function overrideWriteRefusalError(
  * write passes none.
  */
 export function overrideWriteVerdict(
-    this: Pick<PackagedBaseRefusalHost, 'isWritablePackage' | 'resolveWritePackageScope' | 'shippedArtifactsOf'>,
+    this: Pick<PackagedBaseRefusalHost, 'engine' | 'isWritablePackage' | 'resolveWritePackageScope' | 'shippedArtifactsOf'>,
     request: OverrideWriteSubject,
     writtenScope?: WrittenPackageScope,
 ): OverrideWriteVerdict {
@@ -1262,7 +1351,9 @@ export function overrideWriteVerdict(
     const baseItemsOf = (basePackageId: string): unknown[] => this.shippedArtifactsOf(request.type, request.name, undefined, member)
         .filter((a) => overrideWriteMemberOf(request.type, a) === member
             && (a as { _packageId?: unknown } | null | undefined)?._packageId === basePackageId);
-    return judgeOverrideWrite(request, { dependencies, shippers, baseItemOf, baseItemsOf });
+    return judgeOverrideWrite(request, {
+        dependencies, shippers, baseItemOf, baseItemsOf, installed: installedManifestsOfEngine(this.engine),
+    });
 }
 
 

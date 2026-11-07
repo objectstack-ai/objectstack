@@ -451,9 +451,9 @@
  *     The read runs after the packer and BEFORE the dry-run exit, so a dry run refuses what the send would; it
  *     needs the token and the proxy route the send needs, and the process re-execs for it the way the send does.
  *
- * `comment_edit` takes no trailer: a comment is a post, never a pull request body. The stored body is the
- * platform's, not this door's: an edit of a pull's body gets the bare footer block appended after the trailer
- * (`platform-readings.md`, the edit side), so send no footer of your own.
+ * `comment_edit` takes no trailer: a comment is a post, never a pull request body. Send no footer of your own: the
+ * read-back reads a pull's edited body `identical`, stored === sent, nothing appended (`platform-readings.md`, the
+ * relay `issue_patch` line), and a footer after the trailer leaves a body the second rule above refuses.
  *
  * ## Exit codes — capture them BEFORE any pipe
  *

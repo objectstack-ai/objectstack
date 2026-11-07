@@ -475,6 +475,13 @@ const en = {
       loadFailed: 'The list could not be loaded. You can still type the name.',
       notFound: '{{name}} (not found)',
     },
+    preferenceOption: {
+      allTopics: 'All topics ({{value}})',
+      allChannels: 'All channels ({{value}})',
+      notConfigured: '{{value}} (not configured)',
+      notInList: '{{value}} (not in the list)',
+      useTyped: 'Use "{{value}}"',
+    },
     recipient: {
       selectTypeFirst: 'Select a recipient type first.',
       loading: 'Loading…',
@@ -4884,6 +4891,7 @@ const en = {
       create_record: 'Create the record',
       create_seed: 'Generate sample data',
       delete_field: 'Delete a field',
+      delete_package: 'Delete a package',
       describe_metadata: 'Look at the metadata',
       describe_object: 'Look at the object structure',
       get_active_package: 'Check the active package',

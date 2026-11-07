@@ -4509,7 +4509,8 @@ export class AuthManager {
    * read, and when the read fails (fail closed). So revocation takes effect
    * on the next request: `/oauth2/revoke` deletes the consent and the
    * client's refresh family for that user (`answerOAuthTokenRevocation`), and
-   * the Console's `/oauth2/delete-consent` deletes the same row. A server-only
+   * the Console's withdraw (`authorized-clients-withdraw.ts`) revokes the same
+   * grant the same way. A server-only
    * `skip_consent` client has no consent row and is admitted without one.
    *
    * The caller (runtime dispatcher) maps the returned principal through

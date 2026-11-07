@@ -57,7 +57,7 @@ that replace its retired `category`):
 {
   "manifestId": "app.objectstack.hotcrm",
   "displayName": "HotCRM",
-  "businessFunctions": ["sales", "customer-service", "marketing"],
+  "businessFunctions": ["sales", "customer_service", "marketing"],
   "license": "Apache-2.0",
   "iconUrl": "https://raw.githubusercontent.com/objectstack-ai/hotcrm/main/assets/icon.svg",
   "homepageUrl": "https://github.com/objectstack-ai/hotcrm",
@@ -96,6 +96,9 @@ with no image to caption. The schema also accepts `publisher` and `isStarter`,
 but the platform decides both: an author's value has no effect, so
 `os package publish` never sends them and prints a warning naming each one the
 file declares. `tags` is different: it is sent as written (see the table above).
+The file no longer accepts `visibility` (pass `--visibility`; publish refuses the
+key by name) nor `name`, `specVersion`, `skills` or `scaffold`, which nothing
+ever read: publish names each one still present so you can delete it.
 Put the icon, the description, the tags, the tagline and the README where the
 table above says, and nothing else.
 </Callout>
@@ -139,10 +142,11 @@ npx os verify        # boots the app in-process and proves it through the real H
 npm run build        # os build -> dist/objectstack.json
 ```
 
-Two declarations name the platform major your app is authored against:
-`engines.protocol` in the `defineStack` manifest, and `specVersion` in
-`objectstack.manifest.json`. A runtime outside the `engines.protocol` range
-refuses the app rather than half-loading it. See
+One declaration names the platform major your app is authored against:
+`engines.protocol` in the `defineStack` manifest. A runtime outside that range
+refuses the app rather than half-loading it. (The `specVersion` an older
+scaffold wrote into `objectstack.manifest.json` was never read, and spec 18
+retired it: delete it.) See
 [Validating metadata](/docs/deployment/validating-metadata) for what the checks
 cover.
 
@@ -261,8 +265,8 @@ loaded, and the app's page shows **Not loaded** with the protocol range it
 targets.
 
 To move, run `os migrate meta --from <the major you authored against>` on your
-source, apply what it lists, update `engines.protocol` and `specVersion`,
-rebuild, and publish a new version. [Upgrading](/docs/upgrading#the-metadata-app)
+source, apply what it lists, update `engines.protocol`, rebuild, and publish a
+new version. [Upgrading](/docs/upgrading#the-metadata-app)
 owns the loop.
 
 ## Extras: dependencies and modules

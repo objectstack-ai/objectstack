@@ -330,6 +330,13 @@ const ko = {
       loadFailed: "목록을 불러오지 못했습니다. 이름을 직접 입력할 수 있습니다.",
       notFound: "{{name}} (찾을 수 없음)",
     },
+    preferenceOption: {
+      allTopics: "모든 주제 ({{value}})",
+      allChannels: "모든 채널 ({{value}})",
+      notConfigured: "{{value}} (구성되지 않음)",
+      notInList: "{{value}} (목록에 없음)",
+      useTyped: '"{{value}}" 사용',
+    },
     recipient: {
       selectTypeFirst: "먼저 수신자 유형을 선택하세요.",
       loading: "로딩 중…",
@@ -4046,6 +4053,7 @@ const ko = {
       create_record: "레코드 만들기",
       create_seed: "오브젝트 샘플 데이터 만들기",
       delete_field: "필드 삭제하기",
+      delete_package: "패키지 삭제하기",
       describe_metadata: "메타데이터 내용 확인하기",
       describe_object: "오브젝트 구조 살펴보기",
       get_active_package: "현재 패키지 확인하기",
