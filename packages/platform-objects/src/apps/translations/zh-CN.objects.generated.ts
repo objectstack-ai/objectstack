@@ -2282,6 +2282,49 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       all: {
         label: "全部"
       }
+    },
+    _actions: {
+      mint_scim_credential: {
+        label: "签发凭据",
+        description: "为 SCIM 连接签发一个 Bearer 凭据。把它作为 SCIM 令牌交给 IdP；它只显示一次。",
+        params: {
+          connectionId: {
+            label: "连接 ID",
+            helpText: "该凭据认证的 SCIM 连接，例如 “okta-prod”。最多 246 个字符。如需轮换，请为同一连接再签发一个凭据，让 IdP 改用它，然后撤销旧凭据。"
+          },
+          label: {
+            label: "标签",
+            helpText: "可选。该凭据的名称，例如 “rotation 2026-Q3”。"
+          },
+          organizationId: {
+            label: "组织",
+            helpText: "可选。拥有该连接的组织。留空则为默认组织。"
+          },
+          provisioningDomainId: {
+            label: "预配域",
+            helpText: "可选。接收所预配的用户和组的边界。留空则使用连接 ID。"
+          },
+          expiresAt: {
+            label: "过期时间",
+            helpText: "可选。超过此时间后该凭据会被拒绝。留空则凭据永不过期。"
+          }
+        },
+        resultDialog: {
+          title: "SCIM 凭据已签发",
+          description: "请立即复制令牌——它只显示这一次，之后无法找回。请把它粘贴到 IdP 中作为 SCIM Bearer 令牌。如果泄露，请撤销它并签发新的凭据。",
+          acknowledge: "我已保存令牌",
+          fields: {
+            token: "令牌",
+            connectionId: "连接 ID",
+            expiresAt: "过期时间"
+          }
+        }
+      },
+      revoke_scim_credential: {
+        label: "撤销凭据",
+        confirmText: "确定要撤销此 SCIM 凭据吗？使用它的 IdP 从下一次请求起将被拒绝。此操作无法撤销：如需恢复预配，请签发新的凭据。",
+        successMessage: "SCIM 凭据已撤销"
+      }
     }
   },
   sys_scim_group: {

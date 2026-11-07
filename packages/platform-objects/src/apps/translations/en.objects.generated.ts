@@ -2282,6 +2282,49 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       all: {
         label: "All"
       }
+    },
+    _actions: {
+      mint_scim_credential: {
+        label: "Mint Credential",
+        description: "Mint a bearer credential for a SCIM connection. Give it to the identity provider as the SCIM token; it is shown once.",
+        params: {
+          connectionId: {
+            label: "Connection ID",
+            helpText: "The SCIM connection this credential authenticates, e.g. \"okta-prod\". At most 246 characters. To rotate, mint a second credential for the same connection, move the identity provider to it, then revoke the old one."
+          },
+          label: {
+            label: "Label",
+            helpText: "Optional. A name for this credential, e.g. \"rotation 2026-Q3\"."
+          },
+          organizationId: {
+            label: "Organization",
+            helpText: "Optional. The organization that owns the connection. Leave empty for the Default Organization."
+          },
+          provisioningDomainId: {
+            label: "Provisioning Domain",
+            helpText: "Optional. The boundary that receives the provisioned users and groups. Leave empty to use the connection ID."
+          },
+          expiresAt: {
+            label: "Expires At",
+            helpText: "Optional. After this time the credential is refused. Leave empty for a credential that does not expire."
+          }
+        },
+        resultDialog: {
+          title: "SCIM credential minted",
+          description: "Copy the token now — it is shown only once and cannot be recovered. Paste it into the identity provider as the SCIM bearer token. If it leaks, revoke it and mint a new one.",
+          acknowledge: "I have saved the token",
+          fields: {
+            token: "Token",
+            connectionId: "Connection ID",
+            expiresAt: "Expires At"
+          }
+        }
+      },
+      revoke_scim_credential: {
+        label: "Revoke Credential",
+        confirmText: "Revoke this SCIM credential? The identity provider using it is refused from its next request on. This cannot be undone: to restore provisioning, mint a new credential.",
+        successMessage: "SCIM credential revoked"
+      }
     }
   },
   sys_scim_group: {
