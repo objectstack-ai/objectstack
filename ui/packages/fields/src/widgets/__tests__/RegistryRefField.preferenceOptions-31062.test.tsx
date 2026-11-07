@@ -28,8 +28,12 @@ import React from 'react';
 import { render, screen, fireEvent, cleanup, within } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import { SchemaRendererProvider } from '@object-ui/react';
+import { ComponentRegistry } from '@object-ui/core';
 import { NotificationTopicField, NotificationChannelField } from '../RegistryRefField';
 import { PREFERENCE_OPTIONS_URL } from '../preferenceOptions';
+// Module scope: the package entry registers every `field:<widget>` key the
+// record form resolves a field's `widget:` hint through.
+import { registerAllFields } from '../../index';
 
 const ANSWER = {
   success: true,
@@ -83,6 +87,28 @@ function optionTexts(): string[] {
 }
 
 afterEach(() => cleanup());
+
+describe('the record form reaches the arm through `field:<widget>` (#30208 row 6)', () => {
+  it.each([
+    ['notification-topic', 'preference-option-topics', 'All topics (*)'],
+    ['notification-channel', 'preference-option-channels', 'All channels (*)'],
+  ])('`%s` is registered and lists the door', async (widget, testId, wildcard) => {
+    registerAllFields();
+    const Widget = ComponentRegistry.get(`field:${widget}`);
+    expect(Widget).toBeDefined();
+
+    const apiFetch = door(ok(ANSWER));
+    render(
+      <SchemaRendererProvider dataSource={null} apiFetch={apiFetch}>
+        <React.Suspense fallback={null}>
+          {React.createElement(Widget!, { value: '', onChange: vi.fn(), field: { name: 'x', type: 'text' } })}
+        </React.Suspense>
+      </SchemaRendererProvider>,
+    );
+    fireEvent.click(await screen.findByTestId(testId));
+    expect(optionTexts()[0]).toBe(wildcard);
+  });
+});
 
 describe('notification-topic — the list renders from the door (#30208 row 6)', () => {
   it('reads the preference options door through the host fetch and lists its topics, `*` first', async () => {
