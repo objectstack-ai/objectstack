@@ -144,7 +144,8 @@ describe('the entry field contract (ADR-0148 D1)', () => {
 });
 
 describe('the restore refusals (ADR-0148 D2)', () => {
-  it('are three registered codes answering 409', () => {
+  it('are four registered codes answering 409', () => {
+    expect(Object.values(RECYCLE_BIN_RESTORE_REFUSAL_CODES)).toHaveLength(4);
     for (const code of Object.values(RECYCLE_BIN_RESTORE_REFUSAL_CODES)) {
       expect(REGISTERED_ERROR_CODES).toContain(code);
     }

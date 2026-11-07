@@ -22,16 +22,17 @@
  *
  * Every row of the entry comes back, the master first and its details after it
  * in the order the snapshot lists them, or none does. A restore that would
- * write something it should not refuses BEFORE it writes, with one of the three
+ * write something it should not refuses BEFORE it writes, with one of the four
  * 409 codes (`RECYCLE_BIN_RESTORE_REFUSAL_CODES`), and the entry stays:
  *
  *   - `RESTORE_PACKAGE_UNINSTALLED`: an object of the entry is no longer
  *     registered;
- *   - `RESTORE_PARENT_PURGED`: a row's master-detail parent is neither live nor
- *     a row of this entry. A parent that is the record of another entry refuses
- *     too, and the refusal says to restore that entry first: a detail is never
- *     written back under a parent that is not there (a known gap, see
- *     {@link parentInRecycleBinRefusal});
+ *   - `RESTORE_PARENT_PURGED`: a row's master-detail parent is neither live, nor
+ *     a row of this entry, nor the record of another entry;
+ *   - `RESTORE_PARENT_IN_RECYCLE_BIN`: a row's master-detail parent is not live
+ *     but is the record of another entry; the refusal names that entry, and
+ *     restoring it first lets this one through. Either way a detail is never
+ *     written back under a parent that is not there;
  *   - `RESTORE_UNIQUE_VALUE_TAKEN`: a live row now holds a unique value of a
  *     snapshotted row, or its id. The probe reads as the caller; a value held
  *     where the caller cannot read (a `unique: 'global'` field across
@@ -165,14 +166,10 @@ function parentPurgedRefusal(
 }
 
 /**
- * A row's master-detail parent is the record of ANOTHER recycle-bin entry: the
- * restore refuses, and says to restore that entry first.
- *
- * Known gap: none of the three refusal codes names this case. Until a ruling
- * gives it a code of its own (or widens `RESTORE_PARENT_PURGED`'s definition,
- * which reads "neither live nor in the bin"), it answers
- * `RESTORE_PARENT_PURGED`, fail-closed (seat ruling on #30237 PR 3, Q1 = A).
- * The code is stamped on the one line below and nowhere else.
+ * `RESTORE_PARENT_IN_RECYCLE_BIN`: a row's master-detail parent is not live but
+ * is the record of ANOTHER recycle-bin entry. Unlike the other three, the
+ * refusal is not permanent: it names that entry (`parentEntryId`), and
+ * restoring it first lets this one through (ruling 6710220841 on #30237).
  */
 function parentInRecycleBinRefusal(
   entryId: string,
@@ -182,7 +179,7 @@ function parentInRecycleBinRefusal(
   parentEntryId: string,
 ): Error {
   const err: any = new Error();
-  err.code = 'RESTORE_PARENT_PURGED';
+  err.code = 'RESTORE_PARENT_IN_RECYCLE_BIN';
   return stampRefusal(
     err,
     'This record cannot be restored yet: the record it belongs to is in the recycle bin. Restore that record first.',

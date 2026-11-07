@@ -5,7 +5,7 @@
  * an entry deleted through the engine's own delete is written back under its
  * original ids, master first, with no insert hook run; its cleared references
  * are re-linked while nothing has changed them; roll-ups recompute; one
- * `data.record.restored` is published per row; and the entry goes. The three
+ * `data.record.restored` is published per row; and the entry goes. The four
  * 409 refusals each write nothing and keep the entry.
  *
  * The driver keeps real rows and honours `options.tenantId` the way the SQL
@@ -15,7 +15,7 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
-import { RECYCLE_BIN_ENTRY_FIELDS, RECORD_RESTORED_EVENT } from '@objectstack/spec/data';
+import { RECYCLE_BIN_ENTRY_FIELDS, RECYCLE_BIN_RESTORE_REFUSAL_CODES, RECORD_RESTORED_EVENT } from '@objectstack/spec/data';
 import { ObjectQL } from '../engine.js';
 import { relinkedValue } from './restore.js';
 
@@ -379,7 +379,7 @@ describe('re-linking the references the delete cleared (ADR-0148 D2)', () => {
   });
 });
 
-describe('the three refusals (409, ADR-0148 D2): nothing is written and the entry stays', () => {
+describe('the four refusals (409, ADR-0148 D2): nothing is written and the entry stays', () => {
   it('RESTORE_PACKAGE_UNINSTALLED: an object of the entry is no longer registered', async () => {
     const { engine, driver } = await makeEngine();
     const entryId = await deleteAcme(engine, driver);
@@ -409,7 +409,7 @@ describe('the three refusals (409, ADR-0148 D2): nothing is written and the entr
     expect(entriesOf(driver)).toHaveLength(1);
   });
 
-  it('RESTORE_PARENT_PURGED (known gap): a detail whose master is the record of another entry; restoring that one first succeeds', async () => {
+  it('RESTORE_PARENT_IN_RECYCLE_BIN: a detail whose master is the record of another entry; restoring that one first succeeds', async () => {
     const { engine, driver } = await makeEngine();
     driver.seed('account', ACME);
     driver.seed('contact', { id: 'c1', name: 'Ann', account: 'acc1', organization_id: 'org_1' });
@@ -419,8 +419,10 @@ describe('the three refusals (409, ADR-0148 D2): nothing is written and the entr
     const accountEntry = entryOf(driver, 'acc1').id as string;
 
     await expect(engine.restore(contactEntry, ORG1_USER)).rejects.toMatchObject({
-      code: 'RESTORE_PARENT_PURGED', status: 409, parentObject: 'account', parentId: 'acc1', parentEntryId: accountEntry,
+      code: 'RESTORE_PARENT_IN_RECYCLE_BIN', status: 409, httpStatus: 409, object: 'contact', recordId: 'c1', field: 'account',
+      entryId: contactEntry, parentObject: 'account', parentId: 'acc1', parentEntryId: accountEntry,
     });
+    expect(RECYCLE_BIN_RESTORE_REFUSAL_CODES.parentInRecycleBin).toBe('RESTORE_PARENT_IN_RECYCLE_BIN');
     expect(driver.rowsOf('contact')).toHaveLength(0);
     expect(entriesOf(driver)).toHaveLength(2);
 

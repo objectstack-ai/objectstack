@@ -235,10 +235,11 @@ export const RecycleBinEntrySchema = z.object({
 export type RecycleBinEntry = z.input<typeof RecycleBinEntrySchema>;
 
 /**
- * The three reasons a restore refuses (ADR-0148 D2), each a code in the
+ * The four reasons a restore refuses (ADR-0148 D2), each a code in the
  * ADR-0112 envelope, registered under `@objectstack/objectql` in the
  * error-code ledger. A restore refuses with the reason and never forces a
- * write; each reason is permanent for that entry.
+ * write. The first three are permanent for that entry; the fourth clears once
+ * the parent's own entry is restored.
  *
  * - `RESTORE_UNIQUE_VALUE_TAKEN`: a unique value of a snapshotted row is held
  *   by a live row now.
@@ -246,17 +247,22 @@ export type RecycleBinEntry = z.input<typeof RecycleBinEntrySchema>;
  *   in the bin.
  * - `RESTORE_PACKAGE_UNINSTALLED`: an object of the entry no longer exists in
  *   the registry; its package was uninstalled.
+ * - `RESTORE_PARENT_IN_RECYCLE_BIN`: a row's master-detail parent is not live
+ *   but is the record of another bin entry; the refusal names that entry
+ *   (`parentEntryId`, beside `parentObject` and `parentId`), and restoring it
+ *   first lets this one through.
  *
- * All three answer HTTP 409: the entry is intact, and the live state conflicts
+ * All four answer HTTP 409: the entry is intact, and the live state conflicts
  * with writing it back.
  */
 export const RECYCLE_BIN_RESTORE_REFUSAL_CODES = Object.freeze({
   uniqueValueTaken: 'RESTORE_UNIQUE_VALUE_TAKEN',
   parentPurged: 'RESTORE_PARENT_PURGED',
   packageUninstalled: 'RESTORE_PACKAGE_UNINSTALLED',
+  parentInRecycleBin: 'RESTORE_PARENT_IN_RECYCLE_BIN',
 } as const);
 
-/** One of the three restore refusal codes. */
+/** One of the four restore refusal codes. */
 export type RecycleBinRestoreRefusalCode =
   (typeof RECYCLE_BIN_RESTORE_REFUSAL_CODES)[keyof typeof RECYCLE_BIN_RESTORE_REFUSAL_CODES];
 

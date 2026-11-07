@@ -13,7 +13,8 @@ Metadata-protocol: none
 The entry is the unit: every row comes back or none does. A restore that would write what it should not is refused `409` before anything is written, and the entry stays:
 
 - `RESTORE_PACKAGE_UNINSTALLED`: an object of the entry is no longer registered.
-- `RESTORE_PARENT_PURGED`: a row's master-detail parent is neither live nor a row of the entry. A parent that is the record of another recycle-bin entry is refused with the same code for now, and the refusal names that entry (`parentEntryId`) and says to restore it first.
+- `RESTORE_PARENT_PURGED`: a row's master-detail parent is neither live, nor a row of the entry, nor the record of another recycle-bin entry.
+- `RESTORE_PARENT_IN_RECYCLE_BIN`: a row's master-detail parent is not live but is the record of another recycle-bin entry. The refusal names that entry (`parentEntryId`, beside `parentObject` / `parentId`) and says to restore it first; unlike the other three, it clears once that entry is restored.
 - `RESTORE_UNIQUE_VALUE_TAKEN`: a live row holds the id or a unique value of a snapshotted row, found by a probe before the write or by the store's own unique constraint at it.
 
 The writes run in one transaction when every object involved is stored by the recycle bin's driver; otherwise each write already made is undone when a later one fails.
@@ -21,3 +22,5 @@ The writes run in one transaction when every object involved is stored by the re
 The restore is dispatched as the new `restore` operation on the business object, with no query AST and no id, like `purge(entryId)`. `beforeRestore` / `afterRestore` stay outside the engine's hook namespace, so registering them only warns, as before. `restore` advances the write epoch. Until `@objectstack/plugin-security` maps the verb to `allowRestoreOwnDeleted` / `manageRecycleBin`, its fail-closed backstop refuses every restore by a caller that is not the system.
 
 `@objectstack/spec`: `DataEventType` and `RealtimeEventType` gain `data.record.restored` (`RECORD_RESTORED_EVENT`), now that the engine emits it. A pure widening: a consumer that matches the event names it knows keeps working, and one that wants restores subscribes to the new name. A consumer keyed on `data.record.created` does not see a restore.
+
+`@objectstack/spec`: `RECYCLE_BIN_RESTORE_REFUSAL_CODES` gains `parentInRecycleBin` (`'RESTORE_PARENT_IN_RECYCLE_BIN'`), registered in the error-code ledger under `@objectstack/objectql`, 409 like the other three. Also a widening: a consumer that switches over the codes it knows keeps working and treats the new one as an unknown 409; one that wants to offer "restore the parent first" reads `parentEntryId`.

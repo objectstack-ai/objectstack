@@ -8372,7 +8372,8 @@ export class ObjectQL implements IObjectQLEngine {
    * The entry is the unit: a restore that would write over a live row, under
    * a parent that is not there, or into an object that no longer exists is
    * refused `409` (`RESTORE_UNIQUE_VALUE_TAKEN`, `RESTORE_PARENT_PURGED`,
-   * `RESTORE_PACKAGE_UNINSTALLED`) and writes nothing.
+   * `RESTORE_PARENT_IN_RECYCLE_BIN`, `RESTORE_PACKAGE_UNINSTALLED`) and writes
+   * nothing.
    *
    * Authorized as the `restore` operation on the object of the entry's master
    * row: until `@objectstack/plugin-security` maps it to its grants, every
