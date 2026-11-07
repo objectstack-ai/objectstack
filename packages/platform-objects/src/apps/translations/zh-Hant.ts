@@ -71,6 +71,9 @@ export const zhHant: TranslationData = {
         // the rationale in `en.ts` (#6659). Wording matches this locale's
         // `sys_sso_provider.pluralLabel`.
         nav_sso_providers: { label: 'SSO 提供方' },
+        // Conditionally contributed by plugin-auth (only while SCIM is wired),
+        // the same case as the entry above; see `en.ts` (#31123).
+        nav_scim_credentials: { label: 'SCIM 憑證' },
         nav_api_keys: { label: 'API 金鑰' },
 
         // 核准中心 = the Approvals Inbox component (#7234) — the surface with

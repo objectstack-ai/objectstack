@@ -557,6 +557,21 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata-protocol/src/protocol.cached-item-last-modified.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.cached-item-last-modified.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.cached-item-last-modified.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/metadata-protocol/src/protocol.capability-write-door.test.ts",
       "verb": "delete",
       "pinned": 1

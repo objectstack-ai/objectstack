@@ -395,7 +395,7 @@ describe('a switch of the active organization is judged against the target\'s li
     manager.setOrganizationAccessPolicySource({ read: async (id) => policies[id] ?? {}, anyOrganizationRequiresMfa: async () => false });
     await engine.insert('sys_session', {
       id: 's1', user_id: 'u1', active_organization_id: ORG_B,
-      created_at: new Date(Date.now() - 60 * MIN), last_activity_at: new Date(Date.now() - 30 * MIN),
+      created_at: new Date(Date.now() - 59 * MIN), last_activity_at: new Date(Date.now() - 30 * MIN),
       expires_at: new Date(Date.now() + 60 * MIN),
     });
     return { engine, manager };
@@ -418,7 +418,9 @@ describe('a switch of the active organization is judged against the target\'s li
     expect(await manager.judgeSessionSwitch('s1', ORG_A)).toBe('admitted');
     expect(row(engine).revoked_at).toBeUndefined();
     const strict = await deployment({ [ORG_A]: { session_absolute_max_hours: 1 } });
-    // 60 minutes old against a one-hour limit: not over yet.
+    // 59 minutes old against a one-hour limit: clearly not over yet. Never on the
+    // limit itself: the judgment reads its own clock after the fixture, so a session
+    // made exactly 60 minutes old is over the moment one millisecond passes.
     expect(await strict.manager.judgeSessionSwitch('s1', ORG_A)).toBe('admitted');
     row(strict.engine).created_at = new Date(Date.now() - 61 * MIN);
     expect(await strict.manager.judgeSessionSwitch('s1', ORG_A)).toBe('ended');

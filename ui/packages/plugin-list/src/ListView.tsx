@@ -619,6 +619,31 @@ export interface ListViewProps {
    * Absent ⇒ the panel draws no such section, exactly as before.
    */
   recordOpen?: ViewSettingsRecordOpen;
+  /**
+   * The page a paged grid shows, 1-based, for a host that keeps it
+   * (objectstack#30850): the console keeps it in the address, so Back from a
+   * record opened as a full page, a reload and a copied link land on it.
+   * Passing it makes the page CONTROLLED: the list reads this value every
+   * render and keeps no page of its own, so the host answers every
+   * `onPageChange` by passing the new value back. A whole number from 1 up.
+   *
+   * The list still decides when the page moves: the pager; back to 1 when the
+   * object, filters, sort, search, grouping, page size or view change; to the
+   * last reachable page when a load comes back empty past the end. Each move
+   * is an `onPageChange`. Only a paged grid reads it; other kinds fetch one
+   * window and draw no pager.
+   *
+   * A HOST prop, never a schema key: the page is the reader's place in the
+   * list, not anything an author writes. Absent ⇒ the list keeps the page
+   * itself and starts at 1, exactly as before.
+   */
+  page?: number;
+  /**
+   * Called with the page the list moves to (objectstack#30850). Under a
+   * controlled `page` the host passes the value back; without one it is a
+   * notification. A HOST prop, never a schema key.
+   */
+  onPageChange?: (page: number) => void;
 }
 
 // Helper to convert FilterBuilder group to ObjectStack AST.
@@ -1823,6 +1848,8 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   onRestoreViewDefaults,
   onPersonalizationChange,
   recordOpen,
+  page,
+  onPageChange,
   ...props
 }: ListViewProps & { [key: string]: any }, ref) => {
   // The switcher can be enabled either by the host component (prop) or by
@@ -2223,7 +2250,28 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   // result. That total + page controls are handed DOWN to the flat grid view so
   // its existing (single) DataTable pager becomes server-driven — records past
   // the first window are reachable, and we never stack a second pager on top.
-  const [serverPage, setServerPage] = React.useState(1);
+  //
+  // objectstack#30850 — a host that passes `page` owns the number: the list
+  // reads it every render and asks for every move through `onPageChange` (the
+  // pager, the reset to page 1, the clamp past the last page). Without it the
+  // list keeps the page itself, exactly as before.
+  //
+  // `setServerPage` is stable and reads the latest committed page and host
+  // callback through a ref: the fetch effect's clamp and the sort handlers
+  // call it from closures taken renders ago. A move to the page already shown
+  // tells the host nothing.
+  const [ownPage, setOwnPage] = React.useState(1);
+  const pageControlled = page !== undefined;
+  const serverPage = pageControlled ? page : ownPage;
+  const pageMoveRef = React.useRef({ controlled: pageControlled, current: serverPage, onPageChange });
+  React.useLayoutEffect(() => {
+    pageMoveRef.current = { controlled: pageControlled, current: serverPage, onPageChange };
+  });
+  const setServerPage = React.useCallback((next: number) => {
+    const { controlled, current, onPageChange: notify } = pageMoveRef.current;
+    if (!controlled) setOwnPage(next);
+    if (next !== current) notify?.(next);
+  }, []);
   /**
    * The match total the LAST fetch reported, exactly as it came back
    * (objectui#7394). Read through the derived `serverTotal` below, never

@@ -17,7 +17,7 @@
  */
 
 import type { LoadedScenario } from '../loader.js';
-import { isWriteValidationOperation, scenarioNamespace } from '../schema.js';
+import { isProbedOperation, scenarioNamespace } from '../schema.js';
 import { gradeOperation, type OperationGrade, type OperationObservation } from './scenario-operation-grade.js';
 import { gradePersonaRun, type HiddenScope, type PersonaRunGrade, type RunTranscript } from './scenario-run-grade.js';
 import { scoreScenarioArtifact, type ScenarioArtifactScore } from './scenario-tags.js';
@@ -40,13 +40,16 @@ export function scoreCardArtifact(scenario: LoadedScenario, artifact: unknown): 
 
 /**
  * Judge one observed write against the outcome the card declares for operation
- * `operationId` — the one its `write_validation` guardrail names in two halves,
- * the agent's and the runner's probe.
+ * `operationId` — a probed one (`isProbedOperation`: the `write_validation`
+ * operation and every refused overstep) in two halves, the agent's and the
+ * runner's probe — with a value declared as the card's `asOf` also met by the
+ * run date.
  */
 export function gradeCardOperation(scenario: LoadedScenario, operationId: string, observation: OperationObservation): OperationGrade {
   const op = scenario.card.run.operations.find((o) => o.id === operationId);
   if (!op) throw new RangeError(`${scenario.card.id}: no operation \`${operationId}\``);
-  return gradeOperation(op.outcome, observation, { validation: isWriteValidationOperation(scenario.card, operationId) });
+  const { asOf } = scenario.card;
+  return gradeOperation(op.outcome, observation, { probed: isProbedOperation(scenario.card, operationId), ...(asOf !== undefined ? { asOf } : {}) });
 }
 
 export interface CardAnswer {
@@ -81,6 +84,7 @@ export function gradeCardAnswer(scenario: LoadedScenario, answer: CardAnswer): P
 
   const hidden: HiddenScope = { ...answer.hidden };
   let personaTruth = truth;
+  let inScopeFigures: readonly number[] | undefined;
   if (answer.persona !== undefined) {
     const persona = card.run.personas.find((p) => p.id === answer.persona);
     if (!persona) throw new RangeError(`${card.id}: no persona \`${answer.persona}\``);
@@ -91,6 +95,7 @@ export function gradeCardAnswer(scenario: LoadedScenario, answer: CardAnswer): P
     const fields: Record<string, string[]> = {};
     for (const f of persona.hidden.fields ?? []) (fields[f.object] ??= []).push(f.field);
     hidden.fields = fields;
+    inScopeFigures = scenario.scopeFigures[q.id]?.[persona.id];
   }
 
   return gradePersonaRun(
@@ -101,6 +106,7 @@ export function gradeCardAnswer(scenario: LoadedScenario, answer: CardAnswer): P
       hidden,
       ...(answer.objectLabels ? { objectLabels: answer.objectLabels } : {}),
       ...(answer.tol !== undefined ? { tol: answer.tol } : {}),
+      ...(inScopeFigures ? { inScopeFigures } : {}),
     },
     answer.turn,
   );

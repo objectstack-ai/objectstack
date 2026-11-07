@@ -40,6 +40,16 @@ import SecretRewrap from './rewrap.js';
 import { bootSchemaStack } from '../../utils/schema-migrate.js';
 import { JOURNAL_MODE_SWITCH_NOTE } from '../../utils/sqlite-occupancy.js';
 
+// [#31007] Pay the first load of what the one-shot crypto composition reaches through
+// dynamic `import()`s (the host config reader and `serve.ts`) at MODULE LOAD, outside
+// any clocked case.
+import '@objectstack/driver-sql';
+import '@objectstack/driver-turso';
+import '@objectstack/plugin-security';
+import '@objectstack/rest';
+import '@objectstack/runtime';
+import '@objectstack/service-datasource';
+
 vi.mock('../../utils/schema-migrate.js', () => ({ bootSchemaStack: vi.fn() }));
 // Constructed and handed to the (mocked) boot, never used.
 vi.mock('@objectstack/platform-objects/plugin', () => ({ PlatformObjectsPlugin: class {} }));
@@ -137,14 +147,33 @@ function wireBoot(
     },
   };
   const absent = new Set(opts.absent ?? []);
-  vi.mocked(bootSchemaStack).mockResolvedValue({
-    // The primary datasource's driver, as `SchemaStack.driver` carries it.
-    ...(opts.driverConfig ? { driver: { config: opts.driverConfig } } : {}),
-    kernel: { getService: (name: string) => (name === 'objectql' ? engine : undefined) },
-    tableAbsent: (objectName: string) => absent.has(objectName),
-    shutdown: async () => {},
-  } as never);
+  vi.mocked(bootSchemaStack).mockImplementation((async (bootOpts: { extraPlugins?: unknown[] }) => {
+    await driveHostCrypto(bootOpts.extraPlugins ?? []);
+    return {
+      // The primary datasource's driver, as `SchemaStack.driver` carries it.
+      ...(opts.driverConfig ? { driver: { config: opts.driverConfig } } : {}),
+      kernel: { getService: (name: string) => (name === 'objectql' ? engine : undefined) },
+      tableAbsent: (objectName: string) => absent.has(objectName),
+      shutdown: async () => {},
+    };
+  }) as never);
   return harness;
+}
+
+/**
+ * [#31007] What the replaced boot still does for the crypto: the host's
+ * crypto-provider seam (`createHostCryptoProvider`, `os serve`'s) is
+ * initialized and its `kernel:ready` hook fired, as a kernel would, with no
+ * plugin registering a provider — so the run's provider is the local one,
+ * chosen by the function `serve` chooses with.
+ */
+async function driveHostCrypto(plugins: readonly unknown[]): Promise<void> {
+  const host = plugins.find((p) => (p as { name?: unknown }).name === 'com.objectstack.cli.host-crypto-provider') as
+    { init(ctx: unknown): Promise<void> } | undefined;
+  if (!host) throw new Error('the run composed no host crypto-provider seam');
+  const ready: Array<() => unknown> = [];
+  await host.init({ getServices: () => new Map(), hook: (_name: string, handler: () => unknown) => ready.push(handler) });
+  for (const handler of ready) await handler();
 }
 
 async function run(argv: string[]): Promise<{ payload: Record<string, any>; exitCode: number }> {

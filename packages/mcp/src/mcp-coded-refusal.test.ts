@@ -45,10 +45,11 @@
  * `plugin.record-resource-exposure.test.ts`.
  */
 
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { recordNotFoundError } from '@objectstack/core';
+import { mapDataError } from '@objectstack/types';
 import type { IMetadataService } from '@objectstack/spec/contracts';
 
 import { MCPServerRuntime } from './mcp-server-runtime.js';
@@ -84,6 +85,11 @@ interface Site {
    * change. The `details` pin below covers every other row.
    */
   actionDoor?: true;
+  /**
+   * [#31218] A record data tool: a code-less throw renders the `/data` door's
+   * answer (`dataDoorErrorResult`), not its bare message.
+   */
+  dataDoor?: true;
 }
 
 /** Every tool `wireBridgeTools` registers for {@link benignBridge}, each with the member it calls first. */
@@ -91,17 +97,23 @@ const SITES: readonly Site[] = [
   { tool: 'list_objects', args: {}, member: 'listObjects' },
   { tool: 'describe_object', args: { objectName: 'task' }, member: 'describeObject' },
   { tool: 'validate_expression', args: { objectName: 'task', expression: 'record.title' }, member: 'describeObject' },
-  { tool: 'query_records', args: { objectName: 'task' }, member: 'query' },
+  { tool: 'query_records', args: { objectName: 'task' }, member: 'query', dataDoor: true },
   {
     tool: 'aggregate_records',
     args: { objectName: 'task', aggregations: [{ function: 'count', alias: 'n' }] },
     member: 'aggregate',
+    dataDoor: true,
   },
-  { tool: 'get_record', args: { objectName: 'task', recordId: 't9' }, member: 'get' },
-  { tool: 'create_record', args: { objectName: 'task', data: { title: 'x' } }, member: 'create' },
-  { tool: 'update_record', args: { objectName: 'task', recordId: 't9', data: { title: 'x' } }, member: 'update' },
+  { tool: 'get_record', args: { objectName: 'task', recordId: 't9' }, member: 'get', dataDoor: true },
+  { tool: 'create_record', args: { objectName: 'task', data: { title: 'x' } }, member: 'create', dataDoor: true },
+  {
+    tool: 'update_record',
+    args: { objectName: 'task', recordId: 't9', data: { title: 'x' } },
+    member: 'update',
+    dataDoor: true,
+  },
   // `confirm: true` passes the confirmation gate, so the call reaches `remove`.
-  { tool: 'delete_record', args: { objectName: 'task', recordId: 't9', confirm: true }, member: 'remove' },
+  { tool: 'delete_record', args: { objectName: 'task', recordId: 't9', confirm: true }, member: 'remove', dataDoor: true },
   // [#30891] The selection read is the member a bulk delete calls first; a
   // refusal there refuses the whole call, rendered as the data tools render it.
   { tool: 'delete_records', args: { objectName: 'task', where: {}, confirm: true }, member: 'query' },
@@ -178,10 +190,23 @@ describe('MCP tools over HTTP /mcp: a coded refusal carries its code (#23509)', 
       });
     });
 
-    it(`${site.tool}: a code-less throw from ${String(site.member)} answers its bare message, as before`, async () => {
-      const result = await callTool(site, new Error('engine exploded'));
-      expect(result).toEqual({ content: [{ type: 'text', text: 'engine exploded' }], isError: true });
-    });
+    if (site.dataDoor) {
+      // [#31218] The record data tools answer the `/data` door's classification
+      // of a code-less throw; that door answers this one `500 INTERNAL_ERROR`
+      // and withholds its message. The cases live in the #31218 block below.
+      it(`${site.tool}: a code-less throw from ${String(site.member)} answers the /data door's 500, its message withheld`, async () => {
+        const result = await callTool(site, new Error('engine exploded'));
+        expect(result.isError).toBe(true);
+        expect(JSON.parse(result.content[0].text)).toEqual({
+          error: { code: 'INTERNAL_ERROR', message: 'Internal server error', status: 500 },
+        });
+      });
+    } else {
+      it(`${site.tool}: a code-less throw from ${String(site.member)} answers its bare message, as before`, async () => {
+        const result = await callTool(site, new Error('engine exploded'));
+        expect(result).toEqual({ content: [{ type: 'text', text: 'engine exploded' }], isError: true });
+      });
+    }
 
     if (!site.actionDoor) {
       it(`${site.tool}: a PERMISSION_DENIED answers code, message and status, and WITHHOLDS its details`, async () => {
@@ -201,6 +226,9 @@ describe('MCP tools over HTTP /mcp: a coded refusal carries its code (#23509)', 
 
   // One site is enough below: every catch renders through the one reader.
   const query = SITES.find((s) => s.tool === 'query_records')!;
+  // [#31218] …for the code-less throws, one site that is not a record data
+  // tool: those classify a code-less throw as the `/data` door does.
+  const listActions = SITES.find((s) => s.tool === 'list_actions')!;
 
   // [#23528] Moved to the coded rendering. This row pinned the gate's old
   // `{ statusCode: 404, message }` as its bare message. The gate now throws
@@ -242,7 +270,7 @@ describe('MCP tools over HTTP /mcp: a coded refusal carries its code (#23509)', 
       'a thrown string',
     ]) {
       const text = thrown instanceof Error ? thrown.message : String(thrown);
-      expect(await callTool(query, thrown), text).toEqual({ content: [{ type: 'text', text }], isError: true });
+      expect(await callTool(listActions, thrown), text).toEqual({ content: [{ type: 'text', text }], isError: true });
     }
   });
 
@@ -251,6 +279,148 @@ describe('MCP tools over HTTP /mcp: a coded refusal carries its code (#23509)', 
     expect(JSON.parse((await callTool(query, statusless)).content[0].text)).toEqual({
       error: { code: 'PERMISSION_DENIED', message: 'no status here' },
     });
+  });
+});
+
+/**
+ * [#31218] The record data tools classify a CODE-LESS throw as the
+ * `/api/v1/data` door does: through that door's own `mapDataError`
+ * (`@objectstack/types`), so the two doors give one answer for one throw.
+ *
+ * Each case asserts the literal wire answer AND that it equals the door's
+ * (`mapDataError` on the same throw), so the pin cannot pass by both sides
+ * agreeing on something nobody wrote down, nor by the door moving alone.
+ */
+describe('the record data tools: a code-less throw answers what the /data door answers (#31218)', () => {
+  const DATA_SITES = SITES.filter((s) => s.dataDoor);
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  /** The shape `runtime/src/sandbox/quickjs-runner.ts` throws for a hook body's own `throw`, as measured on the card. */
+  function sandboxAbort(inner: string, extra: Record<string, unknown> = {}): Error {
+    const err = new Error(`hook 'demoleave_leave_request_guard' threw: Error: ${inner}`);
+    err.name = 'SandboxError';
+    return Object.assign(err, { innerMessage: inner }, extra);
+  }
+
+  /** The tool's answer, parsed, after asserting it is a tool error. */
+  async function errorOf(site: Site, thrown: unknown): Promise<{ text: string; error: Record<string, unknown> }> {
+    const result = await callTool(site, thrown);
+    expect(result.isError).toBe(true);
+    expect(result.content).toHaveLength(1);
+    const text = String(result.content[0].text);
+    return { text, error: JSON.parse(text).error };
+  }
+
+  /** The `/data` door's answer to the same throw, in the tool's envelope spelling. */
+  function doorAnswer(thrown: unknown): Record<string, unknown> {
+    const door = mapDataError(thrown, 'task');
+    return {
+      ...(typeof door.body.code === 'string' ? { code: door.body.code } : {}),
+      message: door.body.error,
+      status: door.status,
+    };
+  }
+
+  it('the six record data tools are the rows this block drives', () => {
+    expect(DATA_SITES.map((s) => s.tool).sort()).toEqual(
+      ['aggregate_records', 'create_record', 'delete_record', 'get_record', 'query_records', 'update_record'],
+    );
+  });
+
+  for (const site of DATA_SITES) {
+    it(`${site.tool}: an undeclared sandboxed hook abort answers HOOK_ABORTED with the inner sentence, no wrapper, no hook name`, async () => {
+      const thrown = sandboxAbort('Not enough annual leave remaining');
+      const { text, error } = await errorOf(site, thrown);
+      expect(error).toEqual({ code: 'HOOK_ABORTED', message: 'Not enough annual leave remaining', status: 400 });
+      expect(error).toEqual(doorAnswer(thrown));
+      expect(text).not.toContain('demoleave_leave_request_guard');
+      expect(text).not.toContain('threw');
+    });
+  }
+
+  const update = DATA_SITES.find((s) => s.tool === 'update_record')!;
+
+  it('an abort whose SandboxError instance was lost (the wrapper text alone) answers HOOK_ABORTED too, as the door does', async () => {
+    const thrown = new Error("hook 'demoleave_leave_request_guard' threw: Error: Not enough annual leave remaining");
+    const { text, error } = await errorOf(update, thrown);
+    expect(error).toEqual({ code: 'HOOK_ABORTED', message: 'Not enough annual leave remaining', status: 400 });
+    expect(error).toEqual(doorAnswer(thrown));
+    expect(text).not.toContain('demoleave_leave_request_guard');
+  });
+
+  it('an abort that declared a 4xx status and no code keeps that status, with HOOK_ABORTED', async () => {
+    const thrown = sandboxAbort('Closed.', { status: 422 });
+    const { error } = await errorOf(update, thrown);
+    expect(error).toEqual({ code: 'HOOK_ABORTED', message: 'Closed.', status: 422 });
+    expect(error).toEqual(doorAnswer(thrown));
+  });
+
+  it('a 4xx refusal is not logged as a server fault', async () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    await errorOf(update, sandboxAbort('Not enough annual leave remaining'));
+    expect(log).not.toHaveBeenCalled();
+  });
+
+  it("a code hook's bare throw answers 500 INTERNAL_ERROR, its message withheld from the agent and logged once for the operator", async () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const thrown = new Error('Not enough annual leave remaining (code hook)');
+    const { text, error } = await errorOf(update, thrown);
+    expect(error).toEqual({ code: 'INTERNAL_ERROR', message: 'Internal server error', status: 500 });
+    expect(error).toEqual(doorAnswer(thrown));
+    expect(text).not.toContain('code hook');
+    expect(log).toHaveBeenCalledTimes(1);
+    const line = String(log.mock.calls[0]![0]);
+    expect(line).toMatch(/^\[5xx\] 500 tools\/call update_record task — /);
+    expect(line).toContain('Not enough annual leave remaining (code hook)');
+  });
+
+  it('a sandboxed body that CRASHED is a fault, not an abort: 500 INTERNAL_ERROR, no wrapper', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const thrown = sandboxAbort('TypeError: not a function');
+    const { text, error } = await errorOf(update, thrown);
+    expect(error).toEqual({ code: 'INTERNAL_ERROR', message: 'Internal server error', status: 500 });
+    expect(error).toEqual(doorAnswer(thrown));
+    expect(text).not.toContain('demoleave_leave_request_guard');
+  });
+
+  it("the runtime's `{ statusCode: 503, message }` (no data service) answers 503 with no code and its prose withheld", async () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const thrown = { statusCode: 503, message: 'Data service not available' };
+    const { text, error } = await errorOf(update, thrown);
+    expect(error).toEqual({ message: 'Internal server error', status: 503 });
+    expect(error).toEqual(doorAnswer(thrown));
+    expect(text).not.toContain('Data service not available');
+    expect(log).toHaveBeenCalledTimes(1);
+  });
+
+  it('a throw that declared a 4xx and no code answers that status and its own sentence, with no code invented', async () => {
+    const thrown = { statusCode: 400, message: 'aggregate requires at least one aggregation' };
+    const { error } = await errorOf(update, thrown);
+    expect(error).toEqual({ message: 'aggregate requires at least one aggregation', status: 400 });
+    expect(error).toEqual(doorAnswer(thrown));
+  });
+
+  it('CONTROL: a coded refusal renders exactly as the coded reader renders it, whatever the door would say', async () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    for (const site of DATA_SITES) {
+      const thrown = Object.assign(new Error('Record is locked'), { code: 'RECORD_LOCKED', status: 409 });
+      const { error } = await errorOf(site, thrown);
+      expect(error, site.tool).toEqual({ code: 'RECORD_LOCKED', message: 'Record is locked', status: 409 });
+    }
+    expect(log).not.toHaveBeenCalled();
+  });
+
+  it('CONTROL: the tools that are not record data tools still answer a code-less throw with its bare message', async () => {
+    for (const site of SITES.filter((s) => !s.dataDoor)) {
+      const result = await callTool(site, sandboxAbort('Not enough annual leave remaining'));
+      expect(result, site.tool).toEqual({
+        content: [{ type: 'text', text: "hook 'demoleave_leave_request_guard' threw: Error: Not enough annual leave remaining" }],
+        isError: true,
+      });
+    }
   });
 });
 

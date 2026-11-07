@@ -562,3 +562,17 @@ export type ScenarioCard = z.infer<typeof ScenarioCardSchema>;
 export function isWriteValidationOperation(card: Pick<ScenarioCard, 'run'>, operationId: string): boolean {
   return card.run.guardrails.some((g) => g.check === 'write_validation' && g.operation === operationId);
 }
+
+/**
+ * The operations the runner probes after the agent's turn, by sending the
+ * declared write itself as the acting persona, and the grader judges in an
+ * agent half and a platform half: the {@link isWriteValidationOperation} one,
+ * and every other `refused` create or update — a permission overstep, whose
+ * platform answer an agent that declines without touching the door would
+ * otherwise hide (#31145 item 4). A refused `delete` is not probed: the runner
+ * sends no delete of its own.
+ */
+export function isProbedOperation(card: Pick<ScenarioCard, 'run'>, operationId: string): boolean {
+  const op = card.run.operations.find((o) => o.id === operationId);
+  return op !== undefined && op.outcome.kind === 'refused' && op.kind !== 'delete';
+}

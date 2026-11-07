@@ -2040,6 +2040,12 @@ const zh = {
         done: '已有同事加入或已发出邀请。',
         action: '邀请',
       },
+      connectAssistant: {
+        title: '连接 AI 助手',
+        todo: '在 Claude、豆包等助手里以你自己的身份使用本系统。',
+        done: '你已连接了 AI 助手或 API 密钥。',
+        action: '连接',
+      },
     },
     error: {
       connectionFailed: '无法连接到服务器',
@@ -3350,6 +3356,12 @@ const zh = {
       message: '建议设置一个备用密码，这样即使单点登录不可用，你仍能直接登录。',
       cta: '设置密码',
       dismiss: '关闭',
+    },
+    connectAssistant: {
+      title: '在 AI 助手里使用本系统',
+      body: '你可以在 Claude、豆包等 AI 助手里查询和修改你的记录。助手始终以你的身份、按你的权限操作。',
+      action: '连接 AI 助手',
+      dismiss: '隐藏',
     },
     pendingDrafts: {
       // objectui#12602 — the drafts row in Home's "My work" section: the
