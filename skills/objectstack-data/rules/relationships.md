@@ -78,8 +78,8 @@ export default ObjectSchema.create({
 
 #### Owner edits under `controlled_by_parent` — `ownerMayEdit`
 
-A `controlled_by_parent` detail inherits the master's access: reads are scoped
-to accessible masters and **every write of a row naming a master needs edit on it**. To
+A `controlled_by_parent` detail row naming a master inherits its access: reads are scoped
+to accessible masters and **every write needs edit on the master**. To
 let a detail row's owner (`owner_id`) update that row with only *read* access
 to the master, opt in on the detail:
 
