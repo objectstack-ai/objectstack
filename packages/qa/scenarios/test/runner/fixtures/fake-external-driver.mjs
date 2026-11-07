@@ -15,11 +15,16 @@
  *     prints JSON of another shape, anything else echoes the call it read.
  *   - With `FAKE_DRIVER_LOG=FILE`, every call appends one line: its kind, its
  *     step and, for an ask, what it saw of the key — the config file's mode, a
- *     SHA-256 of the key it read there, and whether the key was also on argv,
- *     in the environment or on stdin.
+ *     fingerprint of the key it read there (FNV-1a, not the key), and whether
+ *     the key was also on argv, in the environment or on stdin.
+ *
+ * Every turn of a card run starts this file once, one after another, so its
+ * start-up is the e2e case's cost: it loads `node:fs` and `node:path` only.
+ * `node:crypto` added ~7 ms a start (41–45 ms against 35–39 ms for a bare
+ * node on the box that measured it), and the fingerprint only has to tell this
+ * run's few keys apart.
  */
 
-import { createHash } from 'node:crypto';
 import { appendFileSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
@@ -29,7 +34,12 @@ process.on('SIGTERM', () => {
 });
 
 const out = (v) => process.stdout.write(`${JSON.stringify(v)}\n`);
-const sha = (s) => createHash('sha256').update(s).digest('hex');
+/** FNV-1a (32-bit) as hex; `keyPrint` in external-driver.test.ts is the same function. */
+const keyPrint = (s) => {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 0x01000193) >>> 0;
+  return h.toString(16).padStart(8, '0');
+};
 
 let raw = '';
 process.stdin.on('data', (d) => (raw += d));
@@ -63,7 +73,7 @@ process.stdin.on('end', () => {
       fileMode: (statSync(file).mode & 0o777).toString(8),
       urlMatches: config.mcpServers.app.url === call.mcp.url,
       runsInConfigDir: process.cwd() === dirname(file),
-      keySha: sha(key),
+      keyPrint: keyPrint(key),
       keyOnArgv: process.argv.some((a) => a.includes(key)),
       keyInEnv: Object.values(process.env).some((v) => typeof v === 'string' && v.includes(key)),
       keyOnStdin: raw.includes(key),

@@ -9,7 +9,6 @@
  * in a 0600 file only, and no written artifact carrying it.
  */
 
-import { createHash } from 'node:crypto';
 import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -31,7 +30,12 @@ const COMMAND = `${process.execPath} ${FAKE}`;
 
 /** A key no other text in a run could hold by chance. */
 const KEY = 'sk-scenario-e2e-key-9f27c1d4';
-const sha = (s: string) => createHash('sha256').update(s).digest('hex');
+/** The stand-in's fingerprint of the key it read (FNV-1a, 32-bit, hex): enough to tell this run's keys apart without logging one. */
+const keyPrint = (s: string) => {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 0x01000193) >>> 0;
+  return h.toString(16).padStart(8, '0');
+};
 
 const author = (prompt: string, cwd = tempDir('ext-project')): AuthorTask => ({ card: 'c', mode: 'scratch', phase: 'build', step: 'author', cwd, prompt, tier: 'starter' });
 const ask = (prompt: string): AskTask => ({ card: 'c', mode: 'scratch', phase: 'run', step: 'q1', persona: 'sdr', prompt, mcp: { url: 'http://127.0.0.1:9/api/v1/mcp', apiKey: KEY } });
@@ -85,7 +89,7 @@ describe('the external driver contract — one process per call, JSON in on stdi
     const { input, argv, seen } = echoed(turn);
     expect(input).toMatchObject({ contract: EXTERNAL_DRIVER_CONTRACT, kind: 'ask', step: { card: 'c', mode: 'scratch', phase: 'run', step: 'q1', persona: 'sdr' }, prompt: 'ECHO how many accounts?', limits: { timeoutMs: 5 * 60_000 } });
     expect(Object.keys(input.mcp as object).sort()).toEqual(['configFile', 'url']);
-    expect(seen).toMatchObject({ fileMode: '600', urlMatches: true, runsInConfigDir: true, keySha: sha(KEY), keyOnArgv: false, keyInEnv: false, keyOnStdin: false });
+    expect(seen).toMatchObject({ fileMode: '600', urlMatches: true, runsInConfigDir: true, keyPrint: keyPrint(KEY), keyOnArgv: false, keyInEnv: false, keyOnStdin: false });
     expect(argv.join(' ')).not.toContain(KEY);
     expect(existsSync(seen!.configFile as string)).toBe(false);
     expect(existsSync(dirname(seen!.configFile as string))).toBe(false);
@@ -185,10 +189,11 @@ describe('the persona keys, end to end over the external driver — the record, 
     const calls = readFileSync(log, 'utf8').trim().split('\n').map((l) => JSON.parse(l) as { kind: string; seen?: Record<string, unknown> });
     const asks = calls.filter((c) => c.kind === 'ask');
     expect(asks.length).toBeGreaterThan(5);
-    const keys = new Set([`${KEY}admin`, ...fx.scenario.card.run.personas.map((p) => `${KEY}${p.id}`)].map(sha));
+    const keys = new Set([`${KEY}admin`, ...fx.scenario.card.run.personas.map((p) => `${KEY}${p.id}`)].map(keyPrint));
+    expect(keys.size).toBe(fx.scenario.card.run.personas.length + 1);
     for (const a of asks) {
       expect(a.seen).toMatchObject({ fileMode: '600', keyOnArgv: false, keyInEnv: false, keyOnStdin: false });
-      expect(keys.has(a.seen!.keySha as string)).toBe(true);
+      expect(keys.has(a.seen!.keyPrint as string)).toBe(true);
       expect(existsSync(a.seen!.configFile as string)).toBe(false);
     }
 
@@ -222,5 +227,12 @@ describe('the persona keys, end to end over the external driver — the record, 
     const page = readFileSync(join(out, 'apps', fx.scenario.card.id, 'README.md'), 'utf8');
     expect(page).toContain('- Driver: external:fake-agent 1.2.3 (re-graded from a recording of that run)\n');
     expect(page).not.toContain(runs);
-  });
+    // The budget is measured, not vitest's 5 s default. The run starts the
+    // stand-in once per turn, one after another: 45 starts (3 author calls,
+    // 42 asks over scratch run, scratch iterate-run and template iterate-run).
+    // Measured 2.2–2.5 s over 10 local runs at ~50 ms a start. On a Test Core
+    // shard one start took 212 ms (the info case) and this case was cut off
+    // at 5042 ms (merge-queue run 42414930416). 30 s is ~6x the slowest
+    // observed.
+  }, 30_000);
 });
