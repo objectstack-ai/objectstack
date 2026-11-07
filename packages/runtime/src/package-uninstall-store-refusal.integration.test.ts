@@ -149,8 +149,8 @@ async function boot(dir: string) {
     engine,
     protocol,
     destroy,
-    async call(method: string, path: string) {
-      const res = await dispatcher.handlePackages(path, method, undefined, {}, CALLER);
+    async call(method: string, path: string, caller: any = CALLER) {
+      const res = await dispatcher.handlePackages(path, method, undefined, {}, caller);
       const body = JSON.parse(JSON.stringify(res.response?.body ?? null));
       return { status: res.response?.status ?? 0, code: body?.error?.code as string | undefined, body };
     },
@@ -325,5 +325,50 @@ describe('#21276 the registry\'s uninstall refusal (an ADR-0029 extender) is dec
     const restarted = await boot(dir);
 
     expect((await restarted.call('GET', `/${PKG}`)).status).toBe(404);
+  });
+});
+
+/**
+ * [#31023, ADR-0146 D1] The door credits the request's authenticated user to
+ * every metadata delete the uninstall verb performs: the `afterDelete` hook on
+ * `sys_metadata` carries it as `provenance.attributedUserId`, the field the
+ * audit writer (`@objectstack/plugin-audit`) records as `sys_audit_log.user_id`,
+ * and the history tombstone records it as `recorded_by`. It used to send no
+ * actor, so a Studio delete left both blank. CONTROL: a caller with no user id
+ * (a system context) is credited to no one — no actor is invented.
+ */
+describe('[#31023] DELETE /packages/:id credits its metadata deletes to the signed-in user', () => {
+  async function deleteAs(caller: any) {
+    const p = await boot(newDir());
+    await seed(p);
+    const credited: Array<string | null> = [];
+    p.engine.registerHook('afterDelete', async (ctx: any) => {
+      credited.push(ctx?.provenance?.attributedUserId ?? null);
+    }, { object: 'sys_metadata' });
+
+    const answer = await p.call('DELETE', `/${PKG}`, caller);
+
+    expect(answer.status, JSON.stringify(answer.body)).toBe(200);
+    const history = (await p.engine.find('sys_metadata_history', {
+      where: { name: 'leave_list', operation_type: 'delete' },
+      context: { isSystem: true },
+    } as any)) as any[];
+    return { credited, recordedBy: history.map((r) => r.recorded_by ?? null) };
+  }
+
+  it('a signed-in admin\'s delete names the admin on the audited delete and on the history tombstone', async () => {
+    const { credited, recordedBy } = await deleteAs(CALLER);
+
+    expect(credited).toEqual(['u_admin']);
+    expect(recordedBy).toEqual(['u_admin']);
+  });
+
+  it('CONTROL: a system caller\'s delete names no one', async () => {
+    const system = { ...CALLER, executionContext: { isSystem: true, systemPermissions: [] } };
+
+    const { credited, recordedBy } = await deleteAs(system);
+
+    expect(credited).toEqual([null]);
+    expect(recordedBy).toEqual([null]);
   });
 });

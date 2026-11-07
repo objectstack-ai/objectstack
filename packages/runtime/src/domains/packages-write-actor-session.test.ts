@@ -27,6 +27,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { SchemaRegistry } from '@objectstack/objectql';
 import { HttpDispatcher } from '../http-dispatcher.js';
+import { PACKAGE_STATE_UNINSTALL_CLEANUP } from '../package-state-host-store.js';
 
 const PKG = 'com.acme.app';
 const SESSION_USER = 'u_author';
@@ -52,6 +53,12 @@ function boot(caller: Record<string, unknown>) {
         rollbackToPackageCommit: vi.fn(async (_r: any) => ({ success: true, revertedCommits: [], failed: [] })),
         reassignOrphanedMetadata: vi.fn(async (r: any) => ({ success: true, reassignedCount: 0, reassigned: [], targetPackageId: r.targetPackageId })),
         duplicatePackage: vi.fn(async (r: any) => ({ success: true, copiedCount: 0, failedCount: 0, targetPackageId: r.targetPackageId, copied: [], failed: [] })),
+        // [#31023] Its outcome names the runtime's disable-record cleanup, so the
+        // door leaves the record to the verb and writes no state file here.
+        deletePackage: vi.fn(async (_r: any) => ({
+            success: true, deletedCount: 1, failedCount: 0, deleted: [], failed: [],
+            cleanups: [{ name: PACKAGE_STATE_UNINSTALL_CLEANUP, success: true, removed: 0 }],
+        })),
     };
     const services: Record<string, unknown> = { objectql: { registry }, protocol };
     const get = (n: string) => services[n] ?? null;
@@ -147,5 +154,34 @@ describe('[#28414] the publish-drafts visibility flip re-saves each app as the s
     it('a system context keeps the actor-less fallback, whatever its body names', async () => {
         expect(await flip({ ...SYSTEM }, {})).not.toHaveProperty('actor');
         expect(await flip({ ...SYSTEM }, { actor: SPOOFED })).not.toHaveProperty('actor');
+    });
+});
+
+/**
+ * [#31023, ADR-0146 D1] `DELETE /packages/:id` hands the uninstall verb the
+ * session user, as its sibling doors do, so each metadata delete the verb
+ * performs is credited to that user. It sent no actor at all. Its query takes
+ * `keepData` alone, so no request-supplied name can reach the actor.
+ */
+describe('[#31023] DELETE /packages/:id hands the uninstall verb the session user', () => {
+    async function del(caller: Record<string, unknown>, query: Record<string, string> = {}) {
+        const { dispatcher, protocol } = boot(caller);
+        const res = await dispatcher.dispatch('DELETE', `/packages/${PKG}`, undefined, query, { request: { headers: {} } } as any);
+        const status = res.response?.status ?? (res.handled ? 200 : 0);
+        expect(status, `expected 200, got ${JSON.stringify(res.response)}`).toBe(200);
+        expect(protocol.deletePackage).toHaveBeenCalledTimes(1);
+        return protocol.deletePackage.mock.calls[0][0] as Record<string, unknown>;
+    }
+
+    it('a signed-in caller\'s delete names the caller', async () => {
+        expect(await del(AUTHOR)).toEqual({ packageId: PKG, actor: SESSION_USER });
+    });
+
+    it('beside keepData, the caller is still named', async () => {
+        expect(await del(AUTHOR, { keepData: 'true' })).toEqual({ packageId: PKG, keepData: true, actor: SESSION_USER });
+    });
+
+    it('CONTROL: a system context names no one — no actor is invented', async () => {
+        expect(await del(SYSTEM)).toEqual({ packageId: PKG });
     });
 });
