@@ -49,8 +49,6 @@ export { SysMetadataObject, SysMetadataHistoryObject } from '@objectstack/metada
 // Utils
 export { calculateChecksum, generateSimpleDiff, generateDiffSummary } from './utils/metadata-history-utils.js';
 export { HistoryCleanupManager } from './utils/history-cleanup.js';
-// [ruling 6677709817 (c)] The `sys_metadata_history` snapshot body, shared by both history writers.
-export { historySnapshotBody } from './utils/history-snapshot-body.js';
 
 // Serializers
 export { type MetadataSerializer, type SerializeOptions } from './serializers/serializer-interface.js';
