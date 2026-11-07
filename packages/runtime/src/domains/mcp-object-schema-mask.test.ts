@@ -324,16 +324,16 @@ describe('[ADR-0106] HTTP MCP list_actions summarises an action against the obje
 
     const ai = (description: string) => ({ exposed: true, description });
     /** Binds a field the member cannot read. */
-    const SET_BUDGET = { name: 'set_budget', label: 'Set budget', operation: 'update', params: [{ field: DENIED }], ai: ai('Set the budget.') };
+    const SET_BUDGET = { name: 'set_budget', label: 'Set budget', operation: 'update', params: [{ field: DENIED }], ai: ai('Set the approved budget of this project to a new amount.') };
     /** Binds a field of ANOTHER object the member cannot read (`objectOverride`, judged there). */
     const QUOTE_RATE = {
         name: 'quote_rate', label: 'Quote rate', operation: 'update',
-        params: [{ field: DENIED_OTHER, objectOverride: OTHER }], ai: ai('Quote a vendor rate.'),
+        params: [{ field: DENIED_OTHER, objectOverride: OTHER }], ai: ai('Quote the day rate of a vendor for this project.'),
     };
     /** Binds a field the member CAN read: the control. */
-    const RENAME = { name: 'rename_project', label: 'Rename', operation: 'update', params: [{ field: 'title' }], ai: ai('Rename the project.') };
+    const RENAME = { name: 'rename_project', label: 'Rename', operation: 'update', params: [{ field: 'title' }], ai: ai('Rename this project to the title the user gives.') };
     /** Binds no field at all. */
-    const CLOSE = { name: 'close_project', label: 'Close', operation: 'update', patch: { stage: 'closed' }, ai: ai('Close the project.') };
+    const CLOSE = { name: 'close_project', label: 'Close', operation: 'update', patch: { stage: 'closed' }, ai: ai('Close this project once the work on it is finished.') };
     const ALL_ACTIONS = [CLOSE.name, QUOTE_RATE.name, RENAME.name, SET_BUDGET.name];
     const READABLE_ACTIONS = [CLOSE.name, RENAME.name];
 
@@ -474,7 +474,7 @@ describe('[ADR-0106] HTTP MCP list_actions summarises an action against the obje
         for (const name of READABLE_ACTIONS) {
             expect(byName(member.listed, name), name).toEqual(byName(staff.listed, name));
         }
-        expect(byName(member.listed, RENAME.name).params).toEqual([{ name: 'title', type: 'string', required: true, description: 'Title' }]);
+        expect(byName(member.listed, RENAME.name).params).toEqual([{ name: 'title', type: 'string', required: false, description: 'Title' }]);
         expect(byName(member.listed, CLOSE.name)).not.toHaveProperty('params');
     });
 });
