@@ -51,6 +51,15 @@ import { isExitSignal } from '../../utils/format.js';
 import { bootSchemaStack } from '../../utils/schema-migrate.js';
 import DbOrphans from './orphans.js';
 
+// Pay the first load of what `bootSchemaStack` and the command reach through
+// dynamic `import()`s at MODULE LOAD, outside any clocked case.
+import '@objectstack/service-datasource';
+import '@objectstack/driver-turso';
+import '@objectstack/runtime';
+import '@objectstack/platform-objects/plugin';
+import '@objectstack/plugin-security';
+import '@objectstack/rest';
+
 const HERE = dirname(fileURLToPath(import.meta.url));
 const CLI_ROOT = resolve(HERE, '..', '..', '..');
 const CASE_TIMEOUT_MS = 120_000;
