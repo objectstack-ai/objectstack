@@ -63,6 +63,20 @@
  * class's own signature (below).
  *
  * Nothing re-exports this module, so the published surface does not move.
+ *
+ * ## Since the move
+ *
+ * [ADR-0055 §3 as amended · #30905 ruling A] The gate judges a row whose
+ * OPTIONAL master reference is empty ({@link CbpRelation.optional}) instead of
+ * refusing it `422`: such a row belongs to no master, and it is written by its
+ * owner and by a holder of Modify All on its object
+ * ({@link nullMasterRowWritable}), on every shape the gate judges — a by-id
+ * write, each row a predicate write selects, and a hop of the chain walk whose
+ * master names no master of its own. An insert that names no optional master
+ * is admitted (its creator becomes its owner), and an update that EMPTIES an
+ * optional master asks edit on the master it leaves, never the owner leg. A
+ * required master is answered byte for byte as before. The host hands the
+ * gate and the chain walk `permissionEvaluator` for the Modify All question.
  */
 
 import type { SecurityPlugin } from './security-plugin.js';
@@ -164,6 +178,71 @@ function writesMasterReference(operation: string, data: unknown, fk: string): bo
 type CbpRelation = NonNullable<ReturnType<SecurityPlugin['resolveCbpRelation']>>;
 
 /**
+ * [ADR-0055 §3 as amended · #30905 ruling A] What a predicate write selects,
+ * as {@link controlledByParentPredicateWriteMasters} answers it: the distinct
+ * masters of the selected rows that name one, and the selected rows that name
+ * none — only where the master is OPTIONAL ({@link CbpRelation.optional}); a
+ * required master's empty reference is refused there, as before. Each such row
+ * carries its `id`, its master reference and, where the object has one, its
+ * `owner_id`, read as system.
+ */
+export interface CbpPredicateWriteSelection {
+  masterIds: unknown[];
+  nullMasterRows: Array<Record<string, unknown>>;
+}
+
+/**
+ * [ADR-0055 §3 as amended · #30905 ruling A] May this principal write `row`, a
+ * row of `object` whose OPTIONAL master reference is empty?
+ *
+ * Such a row belongs to no master, so no master's edit access can be asked for
+ * it. Maintainer ruling 「A」 makes it the row of its owner — a contact with no
+ * account is a private contact — and this is the write-side twin of the read
+ * leaf's null-master arm (`computeControlledByParentFilter`), narrowed to the
+ * write bit the way every bypass narrows: View All reads such a row, Modify All
+ * writes it. Two ways in, and no other:
+ *
+ *  - the principal OWNS the row: its `owner_id` (the column the read arm
+ *    compares against, present when {@link CbpRelation.ownerColumn} says so) is
+ *    non-null and equal to the principal's `userId`. A row with no owner (an
+ *    ADR-0142 queue row), and every row of an object that carries no `owner_id`
+ *    column, admits nobody this way;
+ *  - the principal holds Modify All (`modifyAllRecords`) on `object`, asked of
+ *    the evaluator's one write-bypass predicate, the one the sharing service's
+ *    `canEdit` asks.
+ *
+ * Asked once per pass with that pass's principal: an on-behalf-of write runs
+ * the gate for the agent and then for the delegator (ADR-0090 D10), and each
+ * pass asks this of its own `userId` and sets. Ownership TRANSFER is not judged
+ * here: a body that moves `owner_id` stays gated by `allowTransfer` at the
+ * owner door, unchanged.
+ */
+function nullMasterRowWritable(
+  evaluator: CbpWriteGateHost['permissionEvaluator'],
+  permissionSets: PermissionSet[],
+  object: string,
+  rel: Pick<CbpRelation, 'ownerColumn'>,
+  row: Record<string, unknown>,
+  context: any,
+): boolean {
+  if (evaluator.hasSuperuserWriteBypass(object, permissionSets)) return true;
+  if (!rel.ownerColumn) return false;
+  const owner = row[OWNER_COLUMN];
+  return owner != null && context?.userId != null && String(owner) === String(context.userId);
+}
+
+/**
+ * Does this write's body EMPTY the master reference `fk` — carry it as an own
+ * property whose value is `null` or `undefined`? Read as
+ * {@link writesMasterReference} reads the key, on a single body only: an
+ * insert's empty master is answered by the insert branch, not here.
+ */
+function bodyEmptiesMasterReference(data: unknown, fk: string): boolean {
+  if (data == null || typeof data !== 'object' || Array.isArray(data)) return false;
+  return Object.prototype.hasOwnProperty.call(data, fk) && (data as Record<string, unknown>)[fk] == null;
+}
+
+/**
  * The `SecurityPlugin` members the functions below read — every one of them,
  * and no other; each function's `this` is the `Pick` of the members IT reads.
  * Each is typed AS the class member (an indexed access on the class), so a
@@ -225,7 +304,7 @@ export async function checkControlledByParentWrite(
 
 /** The body of `SecurityPlugin#assertControlledByParentWrite`; the method's docblock there is its contract. */
 export async function assertControlledByParentWrite(
-  this: Pick<CbpWriteGateHost, 'assertControlledByParentChainEditable' | 'controlledByParentPredicateWriteMasters' | 'declaresControlledByParent' | 'extractSingleId' | 'readRowById' | 'resolveCbpRelation'>,
+  this: Pick<CbpWriteGateHost, 'assertControlledByParentChainEditable' | 'controlledByParentPredicateWriteMasters' | 'declaresControlledByParent' | 'extractSingleId' | 'permissionEvaluator' | 'readRowById' | 'resolveCbpRelation'>,
   permissionSets: PermissionSet[],
   object: string,
   operation: string,
@@ -286,6 +365,27 @@ export async function assertControlledByParentWrite(
     throw new MasterReferenceNotWritableError(object, operation, rel.masterNotWritable);
   }
 
+  // [ADR-0055 §3 as amended · #30905 ruling A] The refusal of a row whose
+  // OPTIONAL master reference is empty, to a principal who neither owns it nor
+  // holds Modify All on this object ({@link nullMasterRowWritable}). An
+  // AUTHORIZATION verdict in this gate's own envelope (#7474): `403
+  // PERMISSION_DENIED`, named for the caller's object and operation and the
+  // row it judged. Its sentence is its own, because "requires edit access to
+  // its master record" would be false of a row that names none. Its leg is
+  // `master_chain`, the closed vocabulary's refusal for a chain that cannot be
+  // walked to a master that governs its own rows: this one ends at the row
+  // itself, with no master to walk to.
+  const nullMasterOwnerDenied = (recordId: unknown): PermissionDeniedError => {
+    const denial = new PermissionDeniedError(
+      `[Security] Access denied: ${operation} on '${object}' is permitted only to the record's owner or a ` +
+        `holder of Modify All on '${object}': the record names no master record ('${rel.fk}' is empty), so no ` +
+        "master's edit access can authorize it",
+      { operation, object, recordId },
+    );
+    MASTER_EDIT_DENIAL_LEG.set(denial, 'master_chain');
+    return denial;
+  };
+
   // [ADR-0055 §3 · #25044] Every master the write involves is asked, not one
   // of them. A body that names a master reference involves that master too,
   // so once the masters `judged` (the stored ones) have been asked, the SAME
@@ -303,13 +403,21 @@ export async function assertControlledByParentWrite(
   // pass refuses a required field the body sets to null), and refused here
   // otherwise, before anything is written. An insert never reaches here
   // with an empty master: the branch below has answered it.
+  //
+  // [ADR-0055 §3 as amended · #30905 ruling A] An OPTIONAL master may be
+  // emptied: the row then belongs to no master and follows the owner rule,
+  // which narrows who may write it and never widens it. Every caller of this
+  // function has, by then, asked the walk of each stored master the write
+  // leaves, so emptying one asks EDIT on it — never only the read the owner
+  // leg below asks (that leg steps aside for such a body) — and a row whose
+  // stored master was already empty was judged by the owner rule.
   const askBodyNamedMaster = async (judged: readonly unknown[]): Promise<void> => {
     const data = opCtx.data;
     if (data == null || typeof data !== 'object' || Array.isArray(data)) return;
     if (!Object.prototype.hasOwnProperty.call(data, rel.fk)) return;
     const named = (data as Record<string, unknown>)[rel.fk];
     if (named == null) {
-      if (operation !== 'update' || rel.omissionRefusedByValidation) return;
+      if (operation !== 'update' || rel.omissionRefusedByValidation || rel.optional) return;
       throw new MasterReferenceMissingError(object, operation, rel.fk);
     }
     if (judged.includes(named)) return;
@@ -364,15 +472,30 @@ export async function assertControlledByParentWrite(
           : operation === 'delete' &&
             resolveEngineDeleteDispatch(opCtx.options as EngineDeleteDispatchInput | undefined).kind === 'multi';
       if (!predicatePath) return;
-      const predicateMasters = await this.controlledByParentPredicateWriteMasters(object, operation, rel, opCtx);
+      const { masterIds: predicateMasters, nullMasterRows } =
+        await this.controlledByParentPredicateWriteMasters(object, operation, rel, opCtx);
       for (const predicateMasterId of predicateMasters) {
         await this.assertControlledByParentChainEditable(
           permissionSets, object, rel, predicateMasterId, context, opCtx, masterEditDenied, denyMasterEdit,
         );
       }
+      // [ADR-0055 §3 as amended · #30905 ruling A] Each selected row that
+      // names no OPTIONAL master is judged by the owner rule a by-id write of
+      // it meets, in row order, after the masters; the first it refuses is the
+      // answer and nothing is written. A verdict, never a scope, exactly as the
+      // masters' walk above: a write that selects one such row this principal
+      // may not write writes none of them.
+      for (const row of nullMasterRows) {
+        if (!nullMasterRowWritable(this.permissionEvaluator, permissionSets, object, rel, row, context)) {
+          throw nullMasterOwnerDenied(row.id);
+        }
+      }
       // [#25044] A write that selects no row the caller can read writes
-      // nothing, so it involves no master — the body's included.
-      if (predicateMasters.length > 0) await askBodyNamedMaster(predicateMasters);
+      // nothing, so it involves no master — the body's included. A write that
+      // selects only rows naming no master still writes them, so a master its
+      // body names is asked (re-pointing a row under a master is that master's
+      // question, whoever owns the row).
+      if (predicateMasters.length > 0 || nullMasterRows.length > 0) await askBodyNamedMaster(predicateMasters);
       return;
     }
     detailRecordId = targetId;
@@ -380,6 +503,37 @@ export async function assertControlledByParentWrite(
     if (!row) throw new DetailRecordNotFoundError(object, operation, targetId);
     masterId = row[rel.fk];
     detailRow = row;
+  }
+  // [ADR-0055 §3 as amended · #30905 ruling A] An OPTIONAL master
+  // ({@link CbpRelation.optional}) that the write leaves empty. Answered here,
+  // ahead of the frozen branch below, which this leaves byte for byte as it
+  // was: `optional` is `true` only for a master declared `required: false`, so
+  // none of that branch's three frozen shapes reaches this block — a master
+  // with no `required` resolves no relation at all (the `!rel` 422 above), and
+  // a `readonly` or `system` master, required or optional, is refused above on
+  // every write that sets it ({@link CbpRelation.masterNotWritable}).
+  //
+  //  • An INSERT — single, or a batch whose rows the loop above has read — is
+  //    admitted: a row that names no master is created by any principal the
+  //    detail's own object-level `create` admits (gate ①, before this step),
+  //    and the creator becomes its owner (the platform's owner stamp, step
+  //    3.5). Every master a batch's rows do name was asked above, and the
+  //    owner door's `allowTransfer` still judges a body naming another owner.
+  //  • A by-id write of a STORED row whose reference is empty — an update, a
+  //    delete, every verb step 2.8 lists — is judged by the owner rule
+  //    ({@link nullMasterRowWritable}): there is no master to ask, and the
+  //    platform's ownership floor was handed to this gate at step 2.7, so
+  //    without this nothing would refuse a principal who merely READS the row
+  //    (View All). Admitted, the body may still name a master: setting one
+  //    asks EDIT on it ({@link askBodyNamedMaster}), as re-pointing does.
+  if (masterId == null && rel.optional) {
+    if (operation === 'insert') return;
+    if (detailRow === null) throw new DetailRecordNotFoundError(object, operation, detailRecordId);
+    if (!nullMasterRowWritable(this.permissionEvaluator, permissionSets, object, rel, detailRow, context)) {
+      throw nullMasterOwnerDenied(detailRecordId);
+    }
+    await askBodyNamedMaster([]);
+    return;
   }
   if (masterId == null) {
     // [#8688] CONDITIONAL stand-down — maintainer ruling of 2026-08-15.
@@ -523,10 +677,20 @@ export async function assertControlledByParentWrite(
   // When any condition fails the write takes the §3 walk below and, refused,
   // carries the walk's own sentence — the owner leg adds no envelope of its
   // own, so nothing new reaches a response body.
+  //
+  // [ADR-0055 §3 as amended · #30905 ruling A] A fifth: the body does not
+  // EMPTY an OPTIONAL master. Emptying it detaches the row from its master and
+  // makes it private to its owner, so it is the master's question and asks
+  // EDIT on the master it leaves: an owner who only reads that master may not
+  // take the row out from under it. Such a body takes the §3 walk below. A
+  // required master is unchanged here: a body that empties it meets
+  // {@link askBodyNamedMaster}'s refusal, or required-field validation, as
+  // before.
   if (
     operation === 'update' &&
     detailRow !== null &&
     rel.ownerMayEdit &&
+    !(rel.optional && bodyEmptiesMasterReference(opCtx.data, rel.fk)) &&
     !opCtx?.context?.onBehalfOf?.userId &&
     context?.userId != null &&
     detailRow[OWNER_COLUMN] != null &&
@@ -549,7 +713,7 @@ export async function assertControlledByParentWrite(
 
 /** The body of `SecurityPlugin#assertControlledByParentChainEditable`; the method's docblock there is its contract. */
 export async function assertControlledByParentChainEditable(
-  this: Pick<CbpWriteGateHost, 'assertMasterRowEditable' | 'declaresControlledByParent' | 'readRowById' | 'resolveCbpRelation'>,
+  this: Pick<CbpWriteGateHost, 'assertMasterRowEditable' | 'declaresControlledByParent' | 'permissionEvaluator' | 'readRowById' | 'resolveCbpRelation'>,
   permissionSets: PermissionSet[],
   object: string,
   rel: CbpRelation,
@@ -634,6 +798,22 @@ export async function assertControlledByParentChainEditable(
       );
     }
     const nextMasterId = masterRow[nextRel.fk];
+    // [ADR-0055 §3 as amended · #30905 ruling A] A master whose own OPTIONAL
+    // master is empty belongs to no master above it, so the chain ends at it,
+    // and the walk asks of it what a write of that row itself is asked: the
+    // owner rule ({@link nullMasterRowWritable}), on its own object, for this
+    // pass's principal. The three legs above already ran on it. Refused, it is
+    // this walk's `master_chain` refusal, named for the caller's object; a
+    // REQUIRED master left empty is refused below exactly as before.
+    if (nextMasterId == null && nextRel.optional) {
+      if (nullMasterRowWritable(this.permissionEvaluator, permissionSets, masterObject, nextRel, masterRow, context)) break;
+      throw masterEditDenied(
+        'master_chain',
+        `master '${masterObject}' record '${String(hopMasterId)}' names no master of its own ('${nextRel.fk}' is ` +
+          `empty), so only its owner or a holder of Modify All on '${masterObject}' may write under it`,
+        hopMasterId,
+      );
+    }
     if (nextMasterId == null) {
       throw masterEditDenied(
         'master_chain',
@@ -653,7 +833,7 @@ export async function controlledByParentPredicateWriteMasters(
   operation: string,
   rel: CbpRelation,
   opCtx: any,
-): Promise<unknown[]> {
+): Promise<CbpPredicateWriteSelection> {
   if (typeof this.ql?.find !== 'function') {
     // Unreachable in a real deployment — `start()` registers no security
     // middleware at all without a query engine — but a non-conforming engine
@@ -680,23 +860,32 @@ export async function controlledByParentPredicateWriteMasters(
   const ids = rows
     .map((r) => (r && typeof r === 'object' ? (r as { id?: unknown }).id : undefined))
     .filter((id) => id !== undefined && id !== null);
-  if (ids.length === 0) return [];
+  if (ids.length === 0) return { masterIds: [], nullMasterRows: [] };
+  // [ADR-0055 §3 as amended · #30905 ruling A] An OPTIONAL master's row may
+  // name none, and is then judged by its owner, so the owner column is read
+  // beside the reference where the object carries one.
+  const ownerRead = rel.optional && rel.ownerColumn;
   const stored = await this.ql.find(object, {
     where: { id: { $in: ids } },
-    fields: ['id', rel.fk],
+    fields: ownerRead ? ['id', rel.fk, OWNER_COLUMN] : ['id', rel.fk],
     limit: ids.length,
     context: { isSystem: true },
   });
   const masterIds = new Set<unknown>();
+  const nullMasterRows: Array<Record<string, unknown>> = [];
   for (const row of Array.isArray(stored) ? stored : []) {
     if (!row || typeof row !== 'object') continue;
     const masterId = (row as Record<string, unknown>)[rel.fk];
     if (masterId == null) {
+      if (rel.optional) {
+        nullMasterRows.push(row as Record<string, unknown>);
+        continue;
+      }
       throw new MasterReferenceMissingError(object, operation, rel.fk, (row as { id?: unknown }).id);
     }
     masterIds.add(masterId);
   }
-  return [...masterIds];
+  return { masterIds: [...masterIds], nullMasterRows };
 }
 
 /** The body of `SecurityPlugin#assertMasterRowEditable`; the method's docblock there is its contract. */
