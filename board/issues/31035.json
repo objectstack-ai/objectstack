@@ -13,7 +13,7 @@
   "labels": [
     "domain:spec",
     "enhancement",
-    "pm:queue",
+    "needs-user-decision",
     "priority:p2",
     "repo:cloud"
   ],
@@ -21,11 +21,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-06T19:11:36Z",
-  "updated_at": "2026-11-06T19:54:56Z",
+  "updated_at": "2026-11-07T08:14:59Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 8,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/31035",
   "body": "repo:cloud#3 · hotlong · session_01Q4EjjRhUZjdy8VXs6Kkur2\n\nFiling gate: **(c) should-fix carried from a contract review** (#30980, review 6692597068 ③c). Enrolling `objectstack.manifest.json` in the liveness ledger as `template_manifest` (PR #30980) recorded 7 keys `dead`.\n\n## 维护者速读\n\n模板清单文件（`objectstack.manifest.json`）里有 7 个键，平台从来不读，或者只是读了提示一下就不往下发。按「要么执行、要么移除」的规则，需要逐个决定是让它生效还是退役。\n\n## Readings\n\n- `packages/spec/liveness/template_manifest.json` (after #30980):\n  - `name`, `specVersion`, `skills` and `scaffold` have no reader of the file's value;\n  - `visibility`, `publisher` and `isStarter` are read only to warn, and are never sent.\n\n## Expected\n\n- Per key: enforce (name the reader) or retire (ADR-0087, minor before GA). Use the `spec-property-retirement` playbook.\n\nSerial: after objectstack#30980 merges.\n\nSuggested-grade: p2."

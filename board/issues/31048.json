@@ -1,0 +1,37 @@
+{
+  "number": 31048,
+  "kind": "issue",
+  "title": "Auth: the console cannot withdraw an authorized AI assistant: /oauth2/delete-consent has no ledger row or client method, and no admin door",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "domain:server",
+    "enhancement",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-tesla"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-06T21:03:16Z",
+  "updated_at": "2026-11-07T03:05:02Z",
+  "closed_at": "2026-11-07T03:03:07Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31048",
+  "body": "domain:ui#3 · os-tesla · session_01L9qibxW6qraU2Z3mwupUGp\n\nFiling gate: ③ the maintainer's order that names this work: #30894 (「都同意，立卡」, 2026-11-06), whose Expected asks for \"a Revoke action … An administrator can see and revoke them for a person they manage\", and whose triage audit 6682129286 says the server door the page needs, if one is missing, is filed to `domain:server` first. The withdraw itself is the maintainer's cloud#3606 ruling A (「撤销或撤回时删掉这条记录 … 控制台的撤回也随之真正生效」), quoted in `packages/plugins/plugin-auth/src/mcp-token-revocation.ts`. ⛔ Not a claim. Triage sets the grade and the lane. Suggested grade: p1 (#30894's grade; it is the half its Revoke needs).\n\n**Business reason.** The consent page promises 「您可以随时在账户设置中撤销访问权限。」. Since #30946 the console can list the assistants a person authorized (and an admin can list them for a person), but it has no ledgered door to withdraw one, so the list would show a lost laptop's Claude Desktop with no way to turn it off.\n\n**Reader.** The `domain:server` seat (`@objectstack/plugin-auth`: the route ledger, the client, an admin door), then the `domain:ui` seat holding #30894.\n\n**Dedupe.** `delete-consent` (86 hits; the auth ones are #30345 and #30918, both closed, neither ledgers the withdraw), `withdraw consent` (12: #30918, #30345), `authorized-clients revoke` (1: #30918). **New.**\n\n## What is on `origin/main` `115a43ad16`\n\n- `POST /api/v1/auth/oauth2/delete-consent` is published by better-auth (`BETTER_AUTH_MOUNTED_SURFACE`, `auth-route-ledger.ts` ~L430) but has **no `AUTH_ROUTE_LEDGER` row** and **no `@objectstack/client` method**. Its neighbours `oauth2/consent`, `create-client`, `delete-client`, `get-client(s)` and `public-client` all carry `disposition: 'sdk'` rows (~L173-178).\n- `mcp-token-revocation.ts` already names it \"the Console's withdraw\": it deletes the consent row, and since #30879 `mcpConsentAdmits` refuses the token on its next request. So the effect is there; the door the console may call is not.\n- The client's `oauth.authorizedClients.list()` doc says \"Withdraw a grant with `POST /oauth2/delete-consent` and the row's `id`\" (`packages/client/src/index.ts` ~L5006), pointing at an unledgered route.\n- An administrator: `GET /api/v1/auth/admin/authorized-clients?userId=` (#30946) lists a person's grants, but nothing withdraws one for them; `delete-consent` acts for the session user only.\n\n## Wanted\n\n- [ ] A ledgered, client-exposed withdraw of one of the session user's own authorized assistants, by the row `id` `authorized-clients` answers (the lane picks: ledger `delete-consent` as `sdk`, or an ObjectStack mount beside `authorized-clients`). After it, that assistant's token is refused on its next MCP call.\n- [ ] The same withdraw for a person a platform administrator manages, behind the same gate as `admin/authorized-clients` (security#1's rules on #30918), refused for anyone else with one indistinguishable answer.\n- [ ] Tests on the real plugin: a member withdraws only their own (another's id is refused and leaves it in place); an admin withdraws a managed person's; the withdrawn token is refused next call.\n\nUnblocks: the Revoke half of #30894. Related: #30918 (PR #30946), #30345 (PR #30879), cloud#3606."
+}

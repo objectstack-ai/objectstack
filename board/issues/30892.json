@@ -2,8 +2,8 @@
   "number": 30892,
   "kind": "issue",
   "title": "MCP cannot read or attach files: no tool downloads an attachment (e.g. a policy PDF to analyse) and none attaches one (e.g. a photographed invoice) to a record",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -24,9 +24,13 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-06T09:25:54Z",
-  "updated_at": "2026-11-06T19:38:17Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-07T08:08:09Z",
+  "closed_at": "2026-11-07T08:08:09Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
   "comments": 10,
   "locked": false,

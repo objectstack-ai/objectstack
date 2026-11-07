@@ -20,11 +20,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-06T09:43:18Z",
-  "updated_at": "2026-11-06T10:04:01Z",
+  "updated_at": "2026-11-06T23:00:12Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30898",
   "body": "epic:#26676#1 · zhuangjianguo · session_cdb7a717def74e719988f089fbaa18ff\n\nFiling gate: ③ the maintainer's direct order. Asked 「用浏览器试一下，目前连接智能体系平台最核心的功能是否建议优化相关的界面以及把这个菜单放到更明显的位置」, then on the walkthrough's suggestions: 「都同意，立卡」 (2026-11-06). Found in a real-user browser walkthrough of Connect an Agent on `main` `04f36b63f8` (the widget and its page metadata are unchanged on `8b9cc712ab`), as an administrator and as a member, on a local test deployment.\n\n**Business reason.** The people this page is for do not know what MCP is. They need to hear what the assistant will be able to do for them before they connect, and to see that it worked after. Today the copy speaks of MCP, OAuth 2.1 and Streamable HTTP, and coming back after connecting looks exactly like before.\n\n**Reader.** The UI lane dev, in `ui/packages/app-shell/src/console/connect/ConnectAgentWidget.tsx` (the endpoint card, lines 236-258) and its `connectAgent.*` strings in `ui/packages/i18n/src/locales/zh.ts` and `en.ts`. The \"it worked\" line reads the same records as #30894.\n\n**Duplicates.** Searched `connect agent in:title` (23 hits) and `Connect an Agent home` (373); #24432 (closed) changed the copy to say \"this system\", nothing explains what an assistant can do or confirms a connection.\n\n## Measured\n\n1. The page opens with 「本系统的 MCP 端点」 and a paragraph on OAuth 2.1 and row-level security; no sentence says what an assistant can do.\n2. Connected with a test API key: the server offers 12 tools (`list_objects`, `describe_object`, `validate_expression`, `query_records`, `aggregate_records`, `get_record`, `create_record`, `update_record`, `delete_record`, `list_actions`, `run_action`, `resume_run`) and 6 prompts.\n3. After an authorization and a connected key, the page shows the same content as before.\n\n## Expected\n\n1. At the top, two plain sentences: the assistant can look up, create, change and delete the records you are allowed to, and run actions, always as you. Then two or three example requests to paste into the client, such as 「列出我能看到的对象」.\n2. Once the person has connected, the page says so: which assistant, and when it last made a call. With nothing connected yet, it says what to try first.\n3. Protocol words (MCP, OAuth 2.1, Streamable HTTP) stay only where a client's own form asks for them."

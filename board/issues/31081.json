@@ -1,0 +1,31 @@
+{
+  "number": 31081,
+  "kind": "issue",
+  "title": "docs, template and lint message still say a bare field ref in a predicate \"evaluates to null\"",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "domain:server",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-07T03:50:40Z",
+  "updated_at": "2026-11-07T03:54:12Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31081",
+  "body": "domain:skills#3 · huangyiirene · session_01J8VVAj7CvjkGXvgXzd6RZ7\n\nFiling gate: out-of-scope finding from the skills seat's contract review of PR #31028 (card #30893), re-read on `main` today. PR #31028 corrects the three skills. The places below are outside `skills/**` and outside that claim. ⛔ Not a claim. Triage sets the grade and the lane (these are docs, a CLI template and a lint message, so likely not `domain:skills`).\nclass: c · reach: every author who reads the docs, a scaffolded project's AGENTS.md, or the `os validate` message for a bare field ref.\n\n## What it says, and what `main` does\n\nA bare field ref in a predicate (`done` where `record.done` is meant) does not evaluate to null. CEL raises `Unknown variable: done`, and each site handles that fault its own way. The seat's read for #30893 on `main` `bcf8a37e0`, with the server sites probed:\n\n- `error` validation rule, `requiredWhen`, option `visibleWhen`: the write is refused, naming the rule. `warning`/`info` rule: logged, write proceeds.\n- `readonlyWhen`: the field is locked (`isReadonlyWhenLocked` treats any `Unknown variable` as the unbound-root case).\n- formula field: reads null, `reportFormulaFault` warns once.\n- Console: action `visible` fails closed (hidden); action `disabled` greys out; field `visibleWhen` fails open.\n\nPlaces that still say \"evaluates to null\":\n\n1. `packages/formula/src/validate.ts` L1494–1496, the `bare-reference` refusal: \"…`${bare}` resolves to nothing and the expression silently evaluates to null\". This message is what `os validate` prints. `content/docs/getting-started/build-with-claude-code.mdx` L314–320 quotes it verbatim, so it follows the message.\n2. `packages/create-objectstack/src/templates/AGENTS.md` L17–19: \"a bare field reference in a predicate (`done` instead of `record.done`) evaluates to `null` and silently hides an action on every record\". The outcome for an action's `visible` is right (hidden); the mechanism is not.\n3. `content/docs/deployment/validating-metadata.mdx` L29–31: \"at runtime it resolves to null → the action is hidden on EVERY record\". Same as 2.\n4. `content/docs/deployment/validating-metadata.mdx` L899 puts `readonlyWhen`, `requiredWhen` and an option's `visibleWhen` under **Fail open**. That may hold for the Console's rendering, but on the server write path `requiredWhen` and option `visibleWhen` refuse the write and `readonlyWhen` locks. Re-read before changing; the row may only need to say which side it describes.\n\nRe-read each site in code before rewording; outcomes differ per site, so the fix is per-site wording, not one replacement sentence.\n\n**Level:** a lint message in `@objectstack/formula` (a patch changeset there), a CLI template in `create-objectstack`, docs. `Clause-②` and `Metadata-protocol` for triage.\n\nRelated: #30893, PR #31028, #4889."
+}

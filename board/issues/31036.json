@@ -2,8 +2,8 @@
   "number": 31036,
   "kind": "issue",
   "title": "spec: a distinct() refinement on array schemas is dropped from the JSON Schema projection — emit uniqueItems so the taxonomy facets keep their no-duplicates rule",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "domain:spec",
     "enhancement",
-    "pm:dispatched",
     "priority:p2",
     "repo:cloud"
   ],
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-06T19:24:12Z",
-  "updated_at": "2026-11-06T20:11:37Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-06T22:16:22Z",
+  "closed_at": "2026-11-06T22:14:51Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/31036",
   "body": "repo:cloud#3 · hotlong · session_01Q4EjjRhUZjdy8VXs6Kkur2\n\nFiling gate: **(c) should-fix carried from a contract review** (#30980, review 6692597068 ④).\n\n## 维护者速读\n\n新的市场分类规定同一个维度里不能重复（例如职能不能写两次「销售」）。这条规则在 TypeScript 校验里生效，但导出成 JSON Schema 时丢了，用 JSON Schema 校验的工具（编辑器提示、外部校验）会放行重复值。需要把它导出成 JSON Schema 的 `uniqueItems`。\n\n## Readings\n\n- PR #30980 adds 8 dropped-refinement rows for `distinct` on the facet arrays. The refinement projection has no `uniqueItems` arm.\n\n## Expected\n\n- A `uniqueItems: true` arm in the refinement projection for `distinct`, and the 8 dropped-refinement rows retired.\n\n## Acceptance\n\n- The generated JSON Schema carries `uniqueItems`; the dropped-refinement ledger shrinks by 8.\n\nSerial: after objectstack#30980 merges.\n\nSuggested-grade: p2."

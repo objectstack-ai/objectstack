@@ -1,7 +1,7 @@
 {
   "number": 25995,
   "kind": "issue",
-  "title": "[PM seat] domain:ui · seat 2 — 🟢 os-tesla · 由 os-tesla 账户的项目负责",
+  "title": "[PM seat] domain:ui · seat 2 — ⏳ vacant",
   "state": "open",
   "state_reason": null,
   "draft": null,
@@ -13,18 +13,16 @@
   "labels": [
     "pm:seat"
   ],
-  "assignees": [
-    "os-tesla"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-26T08:21:41Z",
-  "updated_at": "2026-11-06T05:00:45Z",
+  "updated_at": "2026-11-07T07:52:23Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 20,
+  "comments": 21,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/25995",
-  "body": "domain:ui#2 · os-tesla · session_01L9qibw7DekEe3wx5f3zphf\n\n⚠️ **Project-seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/ui.md` (⛔ not copied here). This is **`domain:ui` seat 2**. Seat 1 is #25966, seat 3 is #27561, seat 4 is #26620, seat 5 is #26945, seat 6 is #30423 (⛔ this post is none of them).\n\n<sub>Refreshed 2026-11-06T04:58Z at seating.</sub>\n\n## Current PM — 🟢 os-tesla\n\n- **Holder:** `os-tesla` · `session_01L9qibw7DekEe3wx5f3zphf` · project \"Objectstack security ui\" (os-tesla account) · seated in 6677295802.\n- **Mailbox:** PR #30817. **Patrol:** `trig_01QfiKCNcDtEEjrv4w2T8QKs` · hourly.\n- **Pointer:** posture ledger lives in the project; the lane ledger = labels + assignee + `Claim:` comments carrying `Seat: domain:ui#2` + `head:claude/` PRs.\n\n## Ledger\n\n- **Inherited from 6659434008 (`os-bill`):** in flight none, stay-behind none. Queue and decision box are read live.\n\n## Hot-file serial queue\n\n- None held by this seat. ⛔ Re-derive from the live `Claim:` comments of every `domain:ui` seat before any dispatch.\n\n## Notes\n\n- **Standing constraints (maintainer, carried):** ui changesets go to the root `.changeset/`. No PR goes to the objectui repository. `node scripts/check-sdui-manifest.mjs` gates every ui card. A `CONTRACT_REVIEW_TIER` review goes before any decision reaches the maintainer. Cloud-touching cards go whole to the `repo:cloud` lane.\n- **BREAKING:** a PR enters the merge queue only after the maintainer's own word in the seat thread, because once queued it cannot be pulled.\n- **Write path:** the relay (`post-stamped.mjs`, `label-write.mjs`, `fleet-write/dispatch.mjs`). ⛔ No GitHub MCP writes. PRs open only through the relay `pr_create`.\n- **Publication:** objectstack. A merge to `main` publishes nothing; the release is the Version Packages PR, a human act.\n"
+  "body": "domain:ui#2 · os-tesla · session_01L9qibw7DekEe3wx5f3zphf\n\n⚠️ **Project-seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/ui.md` (⛔ not copied here). This is **`domain:ui` seat 2**. Seat 1 is #25966, seat 3 is #27561, seat 4 is #26620, seat 5 is #26945, seat 6 is #30423 (⛔ this post is none of them).\n\n<sub>Refreshed 2026-11-07T07:50Z at sign-off.</sub>\n\n## Current PM — ⏳ vacant\n\n- **Last holder:** `os-tesla` · `session_01L9qibw7DekEe3wx5f3zphf`, signed off in brief 6704105763 on the maintainer's 「当前任务处理完，合并后就下班」 (2026-11-07T07:46Z).\n- **Mailbox:** none (PR #30817 is closed). **Patrol:** none (deleted).\n- **Pointer:** the lane ledger = labels + assignee + `Claim:` comments carrying `Seat: domain:ui#2` + `head:claude/` PRs.\n\n## Ledger\n\n- In flight at sign-off: none. **Stay-behind:** none. 21 PRs landed this tenure (listed in the brief).\n- Unclaimed in `pm:queue`, unblocked by PR #31084: #30898 Expected 2 + the `connect-ui.ts` subtitle, and #30895 part 2 (Expected 2 and 3). They share one read, so one card thread can carry both.\n- `pm:blocked`: #30514 on server card #30512. Also waiting: #29800 (mobile shell), #25918 (maintainer).\n- Out of scope: every `pm:epic` subtree.\n\n## Hot-file serial queue\n\n- None held by this seat. ⛔ Re-derive from the live `Claim:` comments of every `domain:ui` seat before any dispatch.\n\n## Notes\n\n- **Standing constraints (maintainer, carried):** ui changesets go to the root `.changeset/`. No PR goes to the objectui repository. `node scripts/check-sdui-manifest.mjs` gates every ui card. A `CONTRACT_REVIEW_TIER` review goes before any decision reaches the maintainer. Cloud-touching cards go whole to the `repo:cloud` lane.\n- **Dev-thread cap:** the maintainer's latest is 「后续并发不超过3」 (2026-11-07T04:51Z), project-wide; ask the coordinator for a slot first.\n- **BREAKING:** a PR enters the merge queue only after the maintainer's own word in the seat thread, because once queued it cannot be pulled.\n- **Write path:** the relay (`post-stamped.mjs`, `label-write.mjs`, `fleet-write/dispatch.mjs`). ⛔ No GitHub MCP writes. PRs open only through the relay `pr_create`.\n- **Publication:** objectstack. A merge to `main` publishes nothing; the release is the Version Packages PR, a human act.\n"
 }

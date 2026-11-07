@@ -1,0 +1,37 @@
+{
+  "number": 31074,
+  "kind": "issue",
+  "title": "Studio designs a Traditional Chinese session in Simplified, so its label edits land on the Simplified entry",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:i18n",
+    "bug",
+    "domain:ui",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-tesla"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-07T02:31:29Z",
+  "updated_at": "2026-11-07T06:27:54Z",
+  "closed_at": "2026-11-07T06:07:48Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31074",
+  "body": "domain:ui#2 · os-tesla · session_01L9qibw7DekEe3wx5f3zphf\n\nFiling gate: ① product defect, named location. Found in the live `zh-Hant` check of PR #31068 (card #30910), plus two should-fixes left out of that PR by its contract reviews (6700222070 S3, 6700837928 new finding 2). ⛔ Not a claim. Triage sets the grade and the lane.\nclass: a · reach: every Traditional Chinese (Taiwan, Hong Kong) administrator who edits an inline label in Studio after #30902 made `zh-Hant` a console language.\n\n## Business reason\n\nA Traditional Chinese administrator opens Studio. The Studio chrome comes up in Simplified (界面 / 权限), and the nav designer lists an item labelled `{ en, zh: '简体项目', 'zh-TW': '繁體專案' }` as 简体项目, although the sidebar of the same session shows 繁體專案. A rename they make there overwrites the Simplified authors' `zh` text, and the Traditional entry their users see stays stale. The tenant loses text on save and sees mixed scripts on one screen.\n\n## Where\n\n1. `ui/packages/app-shell/src/views/metadata-admin/i18n.ts` `useMetadataLocale` (L~955 on `main`): `/^zh/i.test(language) ? 'zh-CN' : 'en-US'`. Studio's designer locale has two values, so every Chinese session designs as `zh-CN`. `navItemLabel.renamedLabel` then correctly writes the `zh` entry for the locale it is given (pinned in PR #31068). Measured live by the #30910 dev on PR #31068's head `6e8b6389`.\n2. Write side on a ONE-script map (S3 of 6700222070): a `zh-Hant` edit over `{ en, 'zh-CN' }` or `{ en, zh }` writes Traditional text into the Simplified key. PR #31068 pins these as unchanged controls.\n3. `packages/cli/src/utils/i18n-coverage.ts` `inlineLocaleText` (6700837928, finding 2): `{ 'zh-CN': '成员', 'zh-TW': '' }` at `zh-Hant` counts as covered by `成员`, while the renderer shows the empty `zh-TW`. A blank Traditional label is reported as translated. The same hole exists on `main` in exact-tag form.\n\n## Expected\n\n- Studio's designer locale follows the session's script: a `zh-Hant` session designs as `zh-Hant`, through the same locale resolution as the console (`resolveBuiltInLanguage`), and the nav designer reads and writes the entry the sidebar shows.\n- An edit in a script the map lacks adds its own script's key rather than overwriting the other script's. The exact shape is the dev's to propose (for example, `zh-Hant` over `{ en, zh }` adds `zh-Hant`).\n- An empty own-script or own-tag entry counts as a coverage gap.\n\n## Duplicates\n\nSearched `useMetadataLocale OR \"designer locale\" zh-Hant` (open): only #30910 (the read side, landing in PR #31068), #30911 (skills guide) and #29428 (tracking). None covers the Studio designer locale.\n\nRelated: #30910, PR #31068, #30902, #29428."
+}

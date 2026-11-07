@@ -2,8 +2,8 @@
   "number": 30906,
   "kind": "issue",
   "title": "controlled_by_parent admits an optional master (2/3): the write gate judges null-master rows (owner or modify-all), clearing a master needs edit on it, and the verify proof",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,23 @@
     "area:access",
     "domain:server",
     "pm:blocking",
-    "pm:queue",
     "priority:p1"
   ],
-  "assignees": [],
+  "assignees": [
+    "sunhaolin"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-06T10:17:58Z",
-  "updated_at": "2026-11-06T18:32:11Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-07T04:53:36Z",
+  "closed_at": "2026-11-07T04:52:39Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30906",
   "body": "epic:#3600#1 · hotlong · session_01Q4EjjPXwX1YfHyKJUh4agu\n\nFiling-gate category: ② maintainer-directed task. Maintainer ruling, verbatim (Claude Code session, 2026-11-06): 「A」. The ruling: `controlled_by_parent` admits an optional master, and a detail row with no master is visible only to its owner (Salesforce parity: a contact without an account is a private contact). Rejected: B, a membership key collecting its object's own id; C, one-hop RLS traversal; D, no platform change. Routing, verbatim: 「能交给车队开发的你不要自己开发」. The plan was re-read by an isolated contract-review-tier reviewer before filing (PASS WITH FIXES, fixes folded in). It lands in three serial cards (this one and its two siblings), each safe on its own.\n\n## Why (measured 2026-11-06, the first live scenario run, objectstack-ai/cloud#3600)\n\nThe rule \"a rep sees the contacts of accounts they own; a contact need not have an account\" has no declarative form in spec 18.3.0:\n- RLS `account.owner == current_user.id` is refused: `rls-predicate-unenforceable` (`packages/lint/src/validate-rls-predicate-enforceability.ts:316`).\n- A membership key with `valueField: 'id'` is refused: `membership-key-value-field-invalid` (`validate-membership-key-declarations.ts:80`).\n- `controlled_by_parent` with `required: false` on the master is refused at two doors: `ObjectSchema.create()` (`packages/spec/src/data/object.zod.ts:4406-4417`) and the parse refinement, shape `master-not-required` (`object.zod.ts:2743-2752`, `controlled-by-parent-master.ts:178-185`).\n\nThe only working route today is a copied owner field plus two hooks. The AI-built app took that route, and its hook failed `verify`.\n\nClause-②: yes. Card 2 of 3: write gate and proof.\n\nBlocked-by: #30905\n\n## Ask\n\n1. **Null-master writes inside the vouched gate.** Step 2.7 of the authz middleware drops the platform ownership floor for every cbp detail on the vouch that the master gate covers the write (`security-plugin-authz-middleware.ts:1103`, `security-plugin.ts:4153-4158`, `platform-ownership-policies.ts:326-337`). So the null-master rule must be judged by `assertControlledByParentWrite` itself:\n   - **update / delete** of a null-master row: admit only when `owner_id` is non-null and equals the caller's `userId`, or the caller holds `modifyAllRecords` on the detail. Deny otherwise, including when the object has no `owner_id` column;\n   - the predicate path (`controlledByParentPredicateWriteMasters`, `cbp-write-gate.ts:694`) applies the same rule per selected null-master row instead of throwing;\n   - the on-behalf-of path runs it on both passes.\n2. **Create** with a null master: allowed with create on the detail; the creator becomes the owner (today: 422 `MasterReferenceMissingError`, `cbp-write-gate.ts:384-477`).\n3. **Setting a master** (null → M, M1 → M2): the existing gate, judged on the new master.\n4. **Clearing a master** (M → null): the §3 walk with edit on the stored master. **A body that sets the master to null is not covered by the `ownerMayEdit` leg** (`:526-540`; `askBodyNamedMaster` returns early on a null value, `:311-313`). Without this, an owner with read-only access to the account could detach a contact and make it private to themselves. After clearing, the row follows the owner rule, which narrows and never widens.\n5. **Chains, write side.** A hop whose master row has a null master ends the chain there. The caller must satisfy item 1 on that row (today the walk denies `master_chain` on a null FK, `:636-643`).\n6. Ownership transfer stays gated by `allowTransfer` (`permission-evaluator.ts:57-59`); no change.\n7. **Proof (ADR-0054).** `@objectstack/verify` synthesis already skips non-required relations (`parent-write-reach.ts:643,793`), so it produces null-master details by default. Prove both an explicit-master case and a null-master case.\n8. **Tests**: each write case, the `ownerMayEdit` clearing refusal, the chain hop, the on-behalf-of pass, the predicate path.\n\nReader: the `domain:server` lane seat, from `pm:queue` once card 1 closes. Contract-tier review owed."

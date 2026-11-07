@@ -1,0 +1,37 @@
+{
+  "number": 31050,
+  "kind": "issue",
+  "title": "pm-dispatch: three more PR-body rewrites and the rest-channel landing rule do not name the issue_patch body door",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "domain:skills",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-06T21:16:15Z",
+  "updated_at": "2026-11-06T23:56:57Z",
+  "closed_at": "2026-11-06T23:56:57Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31050",
+  "body": "domain:skills#3 · huangyiirene · session_01J8VVAj7CvjkGXvgXzd6RZ7\n\nFiling gate: out-of-scope should-fixes S2–S4 of the contract review of PR #31049 (card #29285). They fall outside that PR's claimed files. ⛔ Not a claim. Triage sets the grade and the lane.\nclass: c · reach: every seat that rewrites a pull request body, and every reader of the handover gate's header.\n\n## What is left after PR #31049\n\nPR #31049 teaches the PR-body door (a relay `issue_patch` through `scripts/pm/fleet-write/dispatch.mjs`, signed by the trailer on the last non-empty line) in `.claude/skills/pm-dispatch/references/seat-post-protocol.md` and the claim template's `Metadata-protocol:` row in `SKILL.md`. Its contract review found four places outside those two files that still disagree or stay silent:\n\n1. **`references/rest-channel.md` L16** says 「直调 `dispatch.mjs` 仅落地」 (a direct `dispatch.mjs` call is for landing only). `SKILL.md` L87 places landing after ACCEPT, but the PR-body rewrite happens before ACCEPT (`owed — FILES` → `#N`, a round-2 body update, a flake note). The rule needs an explicit exception for the single-op PR-body `issue_patch`, or a pointer to `seat-post-protocol.md`'s PR-body line.\n2. **`scripts/pm/check-handover.mjs` header (≈L33)** still names `seat-post-protocol.md` 收班 as the home of the sign-off hand-back rule that narrows (a)'s stay-behind. PR #31049 deletes that line as a restatement; its surviving home is `references/seat-lifecycle.md` L44 (and the handover checklist step 2 / L38 for the default hand-back). Repoint the header.\n3. **`references/platform-readings.md` L290** (the seat edits a PR body to record a flake reason, and its `edited` reruns `Check Changeset`) and **`.claude/agents/os-dev.md` L66** (席位代写 of a report-named body change) are PR-body rewrites that name no door. Point each at `seat-post-protocol.md`'s PR-body line.\n4. **No-footer rule reach (delta review of PR #31049, D2).** `seat-post-protocol.md`'s PR-body line names the trailer and the door but not \"send no footer\" (`platform-readings.md` L336–341). Only `SKILL.md` L313 points to that reading. A rewrite reached through item 3's pointers would miss it, so the pointer (or the PR-body line) should carry it. While there, reconcile `platform-readings.md` L341 (\"a 58 B bare footer\" appended on a PR-body `PATCH`) with the live reading in #29145 and PR #31049's own body, which ended with the trailer and no appended footer.\n\n**Level:** internal agent tooling (`.claude/**` and `scripts/pm/**` comment only), `skip-changeset`, `Clause-②: no`, `Metadata-protocol: none`.\n\nRelated: #29285, PR #31049, #29145, PR #29225.\n"
+}

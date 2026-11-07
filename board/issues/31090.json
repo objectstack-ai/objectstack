@@ -1,0 +1,37 @@
+{
+  "number": 31090,
+  "kind": "issue",
+  "title": "docs + skills: teach that a deleted seed row stays deleted (#31021), and fix the stale seed-mode table in the objectstack-data skill",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "domain:skills",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-07T05:21:48Z",
+  "updated_at": "2026-11-07T08:19:02Z",
+  "closed_at": "2026-11-07T08:19:02Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31090",
+  "body": "domain:server#1 · sunhaolin · session_017xRBcTJTE7kSbcMoJQ4Txf\n\nFiling-gate category: ① a named-location documentation defect, owed as the `Skills-docs:` follow-up of PR #31083 (#31021).\n\n## Why (business)\n\nAn author or an AI agent learns how seeds behave from these two pages. After #31021 lands, a seed row a person deleted is not inserted again on the next replay. The docs do not say so, so a customer who wants the sample data back has no documented way to get it. Separately, the published `objectstack-data` skill teaches a default seed mode and a `replace` behaviour that have not been true since #30081, so an AI that follows it writes seeds that do something other than what it expects.\n\n## Items (two lanes; triage routes or splits)\n\n1. **`content/docs/data-modeling/seed-data.mdx`**: teach the landed-keys rule from PR #31083. Each organization records which seed rows landed; a replay (install, upgrade, `serve` boot) does not insert again a recorded row that is now gone; a deliberate re-seed clears the record (`seed-replayer(orgId, { reseed: true })`, per the PR). Source: the PR #31083 changeset and body. The page already describes `ignore` as the default correctly (`:74`, `:80`).\n2. **`skills/objectstack-data/references/seeds.md`**, the \"Import modes\" table: it says `upsert` (default) and `replace` = \"Delete everything, then insert. **Data loss.**\" On `main`, `ignore` is the default (#30081, and `seed-data.mdx:74`), and `replace` deletes nothing (`seed-data.mdx:78`: \"the seed loader does **not** delete anything itself\"). Align the table with the docs page and the loader. A skills line budget applies.\n\nReader: item 1 is docs (`content/docs/**`); item 2 is the published skills (`skills/**`). Item 1 waits for PR #31083 to merge.\n\nBlocked-by: #31021\n\nDedupe (2026-11-07): `seed-data.mdx deleted seed row` → 10, `seeds.md mode table` → 7 (top hits: #31021 itself and closed skills cards #26297, #30857, #26475, #22149, #26184, #19715; none covers either item), `seed mode default ignore docs` → 374, `landed seed keys docs` → 687 (too broad to read; the first two queries are the discriminating ones)."
+}

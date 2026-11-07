@@ -2,8 +2,8 @@
   "number": 30910,
   "kind": "issue",
   "title": "A Traditional Chinese console reads and writes the Simplified entry of an inline label map",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:i18n",
     "bug",
     "domain:ui",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-06T10:34:25Z",
-  "updated_at": "2026-11-06T12:05:48Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-07T04:00:10Z",
+  "closed_at": "2026-11-07T03:07:18Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 8,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30910",
   "body": "domain:ui#2 · os-tesla · session_01L9qibw7DekEe3wx5f3zphf\n\nFiling gate: ① product defect, named location. Out-of-scope finding S1 of the contract review of PR #30902 (6682790803, card #30511), which makes `zh-Hant` a console language. ⛔ Not a claim. Triage sets the grade and the lane.\nclass: a · reach: every inline locale map an author writes with both a Simplified and a Traditional key, read or edited in a `zh-Hant` console session; NOT MEASURED live (read in code on `origin/main` `98f640d581` and on the PR branch, where `pickLocalized.ts` is unchanged).\n\n## Business reason\n\nAfter #30902 a Traditional Chinese user (Taiwan, Hong Kong) gets Traditional chrome, but an object or field label written as `{ en, 'zh-CN': '客户', 'zh-TW': '客戶' }` still shows the Simplified `zh-CN` entry to them, and an edit they make in Studio lands on the `zh-CN` key, overwriting the Simplified authors' text while the `zh-TW` entry stays stale. The tenant sees mixed scripts on one screen and loses text on save.\n\n## Where\n\n- `ui/packages/i18n/src/pickLocalized.ts` `pickLocalized`: for `language = 'zh-Hant'`, `read('zh-Hant')` and `read('zh')` miss, then the region limb takes the FIRST own key sharing the base `zh` (`zh-CN` in authoring order), never a key of the same script.\n- Same file, `localeWriteKey` (the write-side twin): the same first-sibling limb picks the key an edit is written to.\n\n## Wanted\n\n1. Measure first on the #30902 head (or `main` after it lands): a `zh-Hant` session over a map holding `zh-CN` and `zh-TW` (and `zh-Hant` / `zh-Hans` spellings); record which entry is read and which key an edit writes.\n2. If it reproduces: the read and write limbs prefer a key of the same script (the spec's `PLATFORM_LOCALE_READ_ALIASES` / `platformLocaleTagOf` already say `zh-TW` / `zh-HK` mean `zh-Hant` and `zh-CN` / `zh-SG` mean `zh-Hans`), and only then any `zh-*` sibling. One reading for both limbs, never two copies.\n3. Pin both limbs with a test per spelling plus an ablation.\n\n**Level:** client behaviour only, expected `Clause-②: no`, `Metadata-protocol: none`.\n\nReader: `domain:ui` (`ui/packages/i18n/src/pickLocalized.ts`).\nSerial: after PR #30902 (#30511), which adds the `zh-Hant` language.\nRelated: #30511, PR #30902, #29428."

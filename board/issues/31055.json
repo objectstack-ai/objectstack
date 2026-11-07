@@ -1,0 +1,34 @@
+{
+  "number": 31055,
+  "kind": "pull_request",
+  "title": "docs(spec): say what the optional master did to the cbp-master-detail-required-defaulted notes",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "protocol:data",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-06T22:42:47Z",
+  "updated_at": "2026-11-06T23:37:42Z",
+  "closed_at": "2026-11-06T23:37:40Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-06T23:37:40Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/31055",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-tesla\"} -->\n_Requested by **Tesla** · [project thread](https://claude.ai/code/project/chan_01AXsQkLFKRdQCqQ3RTr6Jao?thread=cmsg_01AXsQkLFKRdQCqQ3RTr6JaoSzxEPRq7jQs3PC2g7nYmoh)_\n\nClause-②: no\nMetadata-protocol: none\n\nFixes #30977\n\nClaim: 6697140710 · Branch: `claude/project-thread-kujw5c`\n\n## 维护者速读\n\n- 改了什么：只改注释。协议 18 的转换 `cbp-master-detail-required-defaulted` 和构建器 `forceCbpMasterDetailRequired` 的说明里，还写着「显式 `required: false` 的主表会被构建器和解析拒绝」，现在改成按 #30940 之后的实际规则来写。\n- 为什么改：#30940（#30905 裁决 A）落地后，`controlled_by_parent` 对象唯一的 `master_detail` 写 `required: false` 是合法的可选主表；旧注释会让下一个改这个转换的人按已经不存在的规则推理。\n- 对作者的影响：没有。转换行为不变：省略 `required` 仍补成 `true`，显式 `required: false` 仍不转换。\n- 风险与回滚：零运行时风险，无行为改动；`apply` 与 fixture 形状一字未动。回滚即撤本 PR。\n- 不在范围：文档和技能里的同类说法归 #30907（卡 3/3），本 PR 不碰。\n- 发布：注释不进发布内容，打 `skip-changeset`。\n\n## Stale sentences found, and how each was resolved\n\n| # | Where (on `origin/main` 81deb548) | Stale claim | Resolution |\n|---|---|---|---|\n| 1 | `conversions/entries/18/cbp-master-detail-required-defaulted.ts:56-58` | \"An explicit `required: false` … The builder refuses it loudly … an author the builder would have stopped\" | Rewritten: on the only `master_detail` it is the optional master (ADR-0055 §1 as amended, #30905 ruling A), kept by the builder and admitted by the parse, so the stored pass keeps it too; beside another `master_detail` the builder still refuses it. |\n| 2 | same file `:66-68` | \"a live author still meets the parse's refusal and its prescription\" | Rewritten: a live author meets the builder's force through `ObjectSchema.create()` and `os lint`'s `relationship/master-detail-required` at `error`; a raw parse reads the omitted key as the optional master (the field default writes `false` first). |\n| 3 | same file `:110` (fixture comment) | \"refused by the builder, not converted here\" | Now \"the optional master, kept as written; not converted\". Fixture shape untouched. |\n| 4 | same file `:23-26` | \"Ruling B made the parse refuse … without exactly one `master_detail` declared `required: true`\" | True as history; kept, with one parenthesis noting ruling A's amendment and that the omitted key this entry converts is unchanged by it. |\n| 5 | `data/object.zod.ts` `forceCbpMasterDetailRequired` docblock, closing paragraph | \"the RULE — exactly one required `master_detail` … so a raw parse of a `master_detail` without `required: true` is refused rather than forced\" | Rewritten: the rule includes the only `master_detail` as the optional master, and a raw parse is never forced (it reads an omitted `required` after its `false` default). The paragraphs above it already carry #30940's \"⚠️ Amended\" note and were left. |\n\nRead and left as is:\n- `summary` string (`:79-82`): every clause is still true (\"an explicit `required: false` … not converted\"), so it did not change, and no printed text moved.\n- `migrations/entries/semantic/18.cbp-master-relation-tiers-retired.ts` (`:50-51`, `:69-70`, `:76`): its text on an explicit `required: false` is outdated, but #30940 added `18.cbp-optional-master-admitted`, whose `reason` says in so many words that it \"supersedes what `cbp-master-relation-tiers-retired` and `cbp-master-detail-required-forced` say of it … everything else they say stands\". The D3 record is superseded by a later entry, not edited, and its strings are printed to authors; left for that reason.\n- `data/controlled-by-parent-master.ts` and `conversions/refused-shapes.test.ts`: already updated by #30940; nothing stale.\n\n## Verification\n\n- `dispatch-gates --commands`: 68 derived, 68 run, all exit 0. `dispatch-gates --ran`: 68 accounted, 0 NOT-MEASURED. 11 of them first exited 3 (not measured) on a fresh worktree; they went green after `pnpm build`, and `check-plugin-teardown-shape --self-test` after fetching its pinned fixture commit on this shallow clone.\n- `vitest run src/conversions src/data/controlled-by-parent-master.test.ts` in `packages/spec`: 24 files, 842 tests passed.\n- Open PRs touching these files: none found (#31044, the one search hit, touches only skills).\n- Diff: 2 files, +24 / −15, comments only.\n\n## Acceptance notes\n\n- No behaviour change: `apply`, `summary`, `surface` and the fixture objects are byte-identical.\n- No changeset: comments only, nothing published moves (`skip-changeset`).\n- Docs and skills untouched (#30907).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01L9qibzpwEPquNhPcgrrjew\n"
+}

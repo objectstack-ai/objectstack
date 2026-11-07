@@ -1,0 +1,31 @@
+{
+  "number": 31100,
+  "kind": "issue",
+  "title": "[Decision] read_file on a shared cloud: how PDF text extraction is bounded so one tenant cannot slow everyone",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:cloud",
+    "needs-user-decision",
+    "priority:p1",
+    "repo:cloud"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-07T07:50:46Z",
+  "updated_at": "2026-11-07T07:54:39Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31100",
+  "body": "domain:server#2 · os-tesla · session_01L9qibzuTqmB5hqFYmMATiY\n\n立卡门:② 只有维护者能做的决定 + ③ 维护者直派。维护者原话(2026-11-07,项目线程):「立一张 cloud 车道的决策卡」。前一问原话:「read_file 这个服务端转换需要消耗很多算力吗？比如我们是共享云」。\n\n- 业务理由：共享云上所有租户共用同一批服务进程。#30892 / PR #31009 让 AI 助手通过 MCP `read_file` 读记录上的 PDF,文字抽取在服务进程里同步完成；抽取期间同一进程的其他请求全部等待。不定上限，一个租户的助手连续读大 PDF 就会拖慢其他租户的页面和 API。\n- 动手的读者:cloud PM 席(`repo:cloud`,#24145)按裁定定共享云的取值;平台代码由 server 席位 2 执行(#31009 合并前写进该 PR,或紧随其后一张 server 卡)。\n- 查重(含已关):`read_file PDF is:issue` → 1(#30892 本卡源);`pdf extraction concurrency is:issue` → 8,均为 QA 轮报与已关附件卡，无同题;`MCP rate limit tenant is:issue` → 117,无同题;`label:domain:cloud label:needs-user-decision is:issue` → 0。\n\n## 维护者速读\n\n- 要裁什么：共享云上 `read_file` 的 PDF 抽取怎么限量，以及这件事在 #31009 合并前做还是合并后做。\n- 推荐 **B**:平台给每次抽取定一个 CPU 时间预算和全进程并发上限(取值由宿主配置,cloud 定自己的值),第二期把抽取移出请求线程。第一期写进 #31009 合并前。\n- 不裁的话：照现状合并,`read_file` 上线后没有任何限量，靠事后观测。\n\n## 背景\n\n`read_file`(`packages/mcp/src/file-content.ts`,PR #31009 head `da6a24cb`)的上限今天全是**单次**上限：文件超过 10 MiB 不读;PDF 最多 200 页或 10 万字;Word 解压后最多 32 MiB;图片原样转交、不转换。没有并发上限、没有时间预算、没有按租户限流。\n\n实测(本机 4 核,`unpdf` 1.9.1,与 `extractPdfText` 同参数，每例 3 次取稳定值):\n\n| 文件 | 大小 | 读到 | CPU | 期间事件循环被占住 |\n|---|---:|---|---:|---:|\n| 200 页、每页少量文字 | 0.14 MiB | 200 页 / 8.7 万字 | 约 80 ms | 全程(约 75 ms) |\n| 200 页、大量绘图指令 + 少量文字 | 9.25 MiB | 200 页 / 2.9 万字 | 约 320 ms | 全程(约 300 ms) |\n| 200 页、密排文字 | 0.64 MiB | 35 页即到 10 万字上限 | 约 65 ms | 全程(约 50 ms) |\n\n「全程」的读法：抽取期间一个 1 ms 的定时器一次都没能触发，即同一进程的其他请求在这段时间里全部排队。单次不重，但它是**串行独占**的：同一进程同时来 10 个大 PDF,就是 3 秒左右谁都动不了。\n\na security item is with the maintainer.\n\n## Governing text\n\n- `docs/adr/0102-sandbox-cpu-budget-and-engine-variant.md` D1:租户提供的脚本按**每次调用的 CPU 时间预算**计费，墙钟只作单独的上限。这是平台对「租户提供的输入在共享进程里跑」的既有口径。\n- 检索 `grep -rlniE \"event loop|worker_threads|concurrency (cap|limit)|noisy neighbo\" docs/adr content/docs` → 只命中 ADR-0102;文件抽取没有专门条文。\n\n协议声明:Metadata-protocol: none。四个选项都不改 spec、不改 `/meta`。\n\n## 前提(带复核命令)\n\n1. 抽取没有并发上限和时间预算:`grep -cE \"concurren|semaphore|timeout|AbortSignal|deadline\" packages/mcp/src/file-content.ts` → 0(head `da6a24cb`)。\n2. 抽取在请求线程上同步占住事件循环：上表最后一列。复测：照 `extractPdfText` 的参数调 `unpdf.getDocumentProxy` + 逐页 `getTextContent`,同时挂一个 1 ms `setInterval` 计触发次数。\n3. 仓内没有 worker 线程池先例:`grep -rln \"worker_threads\\|new Worker(\" packages --include=*.ts | grep -v test` → 1 个无关文件。\n\n## 具体问题\n\n共享云上，一个租户的助手读文件，会不会、以及允许多大程度上，拖慢别的租户?\n\n## 选项\n\n| 选项 | 做什么 | 客户能感到的后果 | 工作量 |\n|---|---|---|---|\n| A | 平台加两道闸：每次抽取的 CPU 时间预算(到时停，返回已读部分 + \"其余请下载\")和全进程并发上限(满了答\"稍后再试\")。取值由宿主环境变量配置 | 普通文件无感;极端文件只拿到部分文字;高峰时偶尔要重试。别的租户不再被长时间卡住，但每次抽取仍会占住进程几百毫秒 | server · 1 PR(可并入 #31009)· 无同形先例 |\n| B | A 的两道闸 + 第二期把抽取移到独立 worker 线程池，请求线程不再被占 | 同 A,且读文件完全不拖慢同进程的其他请求 | server · 2 PR(第一期同 A,第二期 worker 池)· 无先例 |\n| C | 平台不动,cloud 控制面按租户限 `read_file` 次数或计量 | 限住\"量\",限不住\"单次多重\";同一进程里的别人仍会被卡 | cloud · 1 PR · 无先例 |\n| D | 维持现状，上线后看监控再定 | 出事之前无感，出事时是全进程变慢，客户看到的是\"系统卡\" | 无 |\n\n业务含义直译:\n- A:给每台复印机装一个\"单次最多印多久\"的计时器，加一个排队号。\n- B:A 加上把复印机搬出前台，排队的人不再挡住柜台。\n- C:每家公司每天限印几次，但一家印一本厚书时柜台照样被堵。\n- D:先不管，等有人投诉再说。\n\n## 四棱\n\n<!-- os-decision-facets -->\n- ① 项目长远合理性：两年后该能力的样子是：文件抽取跑在请求线程之外、每次有 CPU 预算、取值由宿主配置，和 ADR-0102 的沙箱同一口径。主流平台(Salesforce 的 Apex governor limits、Cloudflare Workers 的每请求 CPU 上限)都是\"平台定机制、按次计 CPU\"。B 收敛到这一个口径;A 是 B 的一半;C 把平台该有的机制挪到应用仓，扩大特例;D 不收敛。\n- ② 实际业务拉动：今天没人撞上(`read_file` 未上线)。但共享云是默认部署形态，上线即每个开了 MCP 的租户都能触发，拉动来自上线本身。\n- ③ 防 AI 犯错:AI 助手会照用户的话连读多份文件，不会自己节流。A/B 出错时是响亮的(\"稍后再试\"或\"只读了一部分，请下载\");D 出错时是静默的(别的租户变慢，没人知道原因)。\n- ④ 创业阶段不扩散:A/B 各新增 1–2 个宿主环境变量，是永久义务;C 新增一套 cloud 配额模型，义务更大;D 零新增。\nPrior rulings read: read_file PDF / pdf extraction concurrency / MCP rate limit tenant / domain:cloud+needs-user-decision → 1 / 8 / 117 / 0 hits; ADR-0102 D1; thread: 项目线程(本卡来源)\n\n## 推荐\n\n**B**,分两期：第一期(时间预算 + 并发上限)写进 #31009,合并前落地，这样 `read_file` 从上线第一天就有闸;第二期 worker 线程池另立 server 卡，在第一期之后。\n\n- 不取 A:它解决\"卡多久\",不解决\"卡住\"本身;作为 B 的第一期已全部包含。\n- 不取 C:应用仓不自建平台该有的机制;按租户计量可以以后在 B 之上加，不替代它。\n- 不取 D:出事时的症状是全进程变慢，排查成本远高于现在加两道闸。\n\n置信缺口：第二期 worker 池的工作量无先例，我的估计是 1 个 PR;实测只在本机 4 核做了，生产机型的数字会不同，但\"全程占住事件循环\"这一点与机型无关。\n\n自检行：只看①选 B;②③④ 是否翻转：否(②只影响时序，已体现在分期;④的新增环境变量 A 与 B 相同)。\n\nAnalysis-tier: seat (Opus), not the ceiling tier.\n\n## 裁后执行\n\n- 裁 B 或 A:server 席位 2 在 #31009 上加第一期(每次抽取的 CPU 预算 + 全进程并发上限，两个宿主环境变量，默认值写进 `content/docs/ai/connect-mcp.mdx`),带消融测试;cloud PM 席在 cloud 部署配置里定共享云的取值。裁 B 时 server 席位 2 同笔另立第二期 worker 池卡，`Blocked-by:` #31009。\n- 裁 C:#31009 照现状合并;cloud PM 席在 cloud 仓立配额卡。\n- 裁 D:#31009 照现状合并，本卡关闭为 not_planned。\n\n## 相关\n\n- #30892(卡源)· PR #31009(`read_file` / `create_upload_link`,待经 os-zhuang 批准)· ADR-0102 · cloud PM 席 #24145"
+}

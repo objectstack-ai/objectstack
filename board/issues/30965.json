@@ -21,11 +21,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-06T14:30:52Z",
-  "updated_at": "2026-11-06T15:18:01Z",
+  "updated_at": "2026-11-07T04:33:26Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 2,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30965",
   "body": "repo:cloud#3 · hotlong · session_01Q4EjjRhUZjdy8VXs6Kkur2\n\nFiling gate: **(b) a contract gap with a named consumer**. The cloud#3666 dev measured it with offline mock OIDC and SAML IdPs driving a real licensed objectos-ee serve (report 6687166444 on objectstack-ai/cloud#3666; draft PR objectstack-ai/cloud#3673; repro in `apps/objectos-ee/test/sso-mock-idp.e2e.test.ts`). Platform gaps go to the platform (「平台的问题应该在平台处理」, objectstack#30765); the maintainer gave Enterprise work priority (「cloud 多了几个企业版的任务，优先处理」). Consumer: objectstack-ai/cloud#3666 (Enterprise SSO with Okta / Entra ID).\n\n## 维护者速读\n\n企业客户接 SSO 时，任何一处配置错误（受众不对、令牌过期、签名证书换了、签发方不对）在平台上都显示成同一句含糊的错误，服务器日志也只有一行「验证失败」。管理员没法自己排查，只能找支持。需要平台按原因给出可操作的错误码和日志。\n\n## Measured (cloud pin `2ffdb649` on the serve; `@better-auth/sso` 1.7.12)\n\n- OIDC callback → `error=invalid_provider&error_description=token_not_verified`, identical for a wrong audience, an expired token, a foreign issuer and a retired signing key.\n- SAML ACS → `error=saml_error&error_description=Invalid SAML response`, identical for an expired assertion and an unknown signing key. The server logs only `SAML response validation failed`. A wrong audience is the only SAML refusal that names its cause.\n\n## Expected\n\n- A distinct, documented reason per refusal class: audience, expiry / clock skew, issuer, signing key unknown or retired, replay. It goes in the redirect's error code and in one structured server log line with the provider id. It must not leak token contents or say which accounts exist.\n- The closed error-code vocabulary is extended through its normal door (`check:error-code-casing` and docs error-code gates).\n\n## Acceptance\n\n- Tests: each refusal class yields its own code and log line, for OIDC and for SAML. The cloud#3666 `it.todo` cases flip to live.\n\nSuggested-grade: p2 · Enterprise priority (maintainer).\n\nDedupe (2026-11-06): `token_not_verified` → 0; `Invalid SAML response` → 1 (#6015, the triage seat post). None."

@@ -2,8 +2,8 @@
   "number": 31021,
   "kind": "issue",
   "title": "seed loader: a declared seed row a person deleted comes back under a new id at the next seed replay — record landed keys per organization and skip the ones now absent",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,19 +13,25 @@
   "labels": [
     "bug",
     "domain:server",
-    "pm:queue",
+    "pm:blocking",
     "priority:p1",
     "repo:cloud"
   ],
-  "assignees": [],
+  "assignees": [
+    "sunhaolin"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-06T18:20:28Z",
-  "updated_at": "2026-11-06T18:58:36Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-07T06:03:48Z",
+  "closed_at": "2026-11-07T06:02:57Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/31021",
   "body": "repo:cloud#3 · hotlong · session_01Q4EjjRhUZjdy8VXs6Kkur2\n\nFiling gate: **(b) a defect with a named consumer**, measured by the objectstack-ai/cloud#3657 dev (report on that card; PR objectstack-ai/cloud#3685). Platform defects go to the platform: 「平台的问题应该在平台处理」 (objectstack#30765).\n\n## 维护者速读\n\n用户删掉的示例数据，下次装包或升级、种子数据有变化时，平台会按新 id 重新插回来。cloud 实测 3 次，结果都一样。自托管的 `objectstack serve` 每次启动都会重跑种子，按代码看也是同样的问题。需要平台记住每个组织哪些种子行已经落过地，之后被删掉的就不再插回。\n\n## Measured (cloud tenant-kernel rig: real `ArtifactKernelFactory` on SQLite with the framework seed-replayer; pin `c50e0dfa`; 3 runs, default and upsert modes)\n\n- **Per-row delete, then an upgrade that changes the seed union:** the deleted row returns under a NEW id. Run 1: Globex `k6Gf2KcO40siHUPg` came back as `YkNS7s5N5l9jFMbn`.\n- **The sanctioned cleanup with one edited row kept:** `deleted=4`, then the upgrade put all 4 back.\n- **A full cleanup while `data[]` is still served** (an environment's own app): everything returned.\n- **Re-inserting code:** the framework `SeedLoaderService` inserts any declared row it does not find (create-only rule, #30081). `runtime/src/app-plugin.ts` builds the `SeedLoaderRequestSchema` with no exclusion; `SeedLoaderConfigSchema` has no skip or tombstone option. `objectstack serve` re-runs its inline seed create-only on every boot (read, not measured).\n\n## Expected (shape A, chosen under the standing rule)\n\n- The framework keeps a durable per-organization record of which seed rows landed (object + `externalId` value). The seed loader skips a key recorded as landed that is now absent. One fix covers `objectstack serve` and hosted; cloud adds nothing, or only passes the organization.\n- A deliberate re-seed (a reset or \"restore sample data\" action) can clear the record. The lane names the door.\n\n## Acceptance\n\n- Tests: delete a seeded row → a union change or reboot does not bring it back; an edited row is untouched; a new seed row added by an upgrade still lands; a reset re-seeds.\n\nConsumer: objectstack-ai/cloud#3657 item 2, which stays open on this card.\n\nSuggested-grade: p1.\n\nDedupe (2026-11-06): `seed loader tombstone` → 53 hits, `seed replay deleted row` → 188, `create-only seed deleted` → 225; the top hits are QA runs and closed lint cards. None covers this."

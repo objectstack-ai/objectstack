@@ -2,8 +2,8 @@
   "number": 29469,
   "kind": "issue",
   "title": "Tests grow 2.5 times faster than source: measure the per-fix test weight and the #25911 pilot, then roll the shared-setup merge out to the heaviest components or retire it",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,7 +12,6 @@
   },
   "labels": [
     "domain:ui",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -21,11 +20,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-02T15:54:54Z",
-  "updated_at": "2026-11-06T20:04:40Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-07T00:00:55Z",
+  "closed_at": "2026-11-06T23:37:42Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 35,
+  "comments": 41,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29469",
   "body": "director#1 · os-support-ai · session_01WGufzg12BtjFc5rHp7YD1J\n\nRuled: 6583487846 · Q1 A · Q2 A · 2026-11-02T17:17Z\n\n**Filing gate ③, a task the maintainer set.** After the director's project assessment reported test lines growing 2.5 times faster than source lines, the maintainer answered 「同意」 to filing this card. ⛔ Not a claim. **Reader who acts:** the `domain:devx` seat. Follows #25911 (closed), whose own plan said 「先量 setup 与断言的占比再决定推广」.\n\n## Measured (`origin/main`, 2026-10-26 → 11-02, `git log --numstat` over `packages` and `ui`)\n\n| class of file | added | removed | net |\n|:--|--:|--:|--:|\n| test files (`.test.`, `.spec.`, `__tests__`, `test/`, `e2e`) | 352,859 | 43,250 | +309,609 |\n| source | 236,290 | 114,716 | +121,574 |\n| generated, JSON, fixtures | 8,155 | 3,789 | +4,366 |\n\n- #25911 (2026-10-24): 3,263 of 5,773 spec files (56.5 %) were per-issue pins, 52.5 % of measured suite time; the pilot folded `StudioDesignSurface.*` pins into shared files (PR #26309) and split `cli-bin.test.ts` (PR #26333).\n- Slowest `Test Core` shard on five recent successful `pull_request` CI runs (ci.yml, 2026-11-02): 13 min 45 s, 18 min 28 s, 13 min 53 s, 12 min 22 s, 20 min 58 s. #25870's fix brought it down from ~28 min; at a net 300,000 test lines a week the suite will grow back.\n- Example of the per-fix weight: PR #29299 changes 20 source lines and adds a 191-line test file.\n\n## Ask\n\n1. Measure, on the last 7 days' merged `fix(` PRs: test lines added per source line changed (median and p90), and how many new test files each adds.\n2. Measure the #25911 pilot: suite time of the folded `StudioDesignSurface.*` files before and after.\n3. Report both on this card. If the pilot saved time without losing a pin, roll the shared-setup merge out to the next four components #25911 named (`ListView*`, `ObjectView*`, `RecordDetailView*`, `ObjectGantt*`), one PR each; if it did not, close the pattern and say so.\n4. ⛔ No new gate and no ratio ceiling in CI: a guidance line in the test discipline of `AGENTS.md` is the most this card may propose, and it goes to the maintainer as a proposal, not a change.\n\n## Done when\n\nThe two measurements are on this card with their commands, and either the four rollout PRs have merged or the card records why the pattern stops.\n"

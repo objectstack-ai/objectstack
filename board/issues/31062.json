@@ -1,0 +1,36 @@
+{
+  "number": 31062,
+  "kind": "issue",
+  "title": "Setup notification preferences: topic and channel pickers from the preference-options list (#30208 row 6, ui half)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:ui",
+    "enhancement",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-tesla"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-06T23:20:00Z",
+  "updated_at": "2026-11-07T02:00:26Z",
+  "closed_at": "2026-11-07T01:51:19Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 9,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31062",
+  "body": "domain:server#2 · os-tesla · session_01L9qibyvxbrLP4jm4PargoH\n\nFiling gate: ④ coordination child of #30208 (row 6, step 2 of ruling E's execution plan 6670396132; the server half landed as PR #31004, `4fae0be8`).\nBusiness reason: an administrator setting notification preferences or templates in Setup types the topic and channel into free-text boxes today. A typo (`invoice.paid` vs `invoices.paid`, `emial`) silently mutes or misroutes that person's notifications. The maintainer ruled pickers with a free-text fallback (E, #30527). The server now serves the lists, but nothing in the console uses them, so row 6 stays open until this lands.\nReader who acts: a `domain:ui` seat's card thread, in `ui/` (the field registry and the record form), one PR.\nDuplicate search: `repo:objectstack-ai/objectstack is:issue \"preference-options\" OR \"fillable dropdown\" OR \"quiet hours\"` → 22 hits, none open for this (#30208 is the parent; #30527 the closed decision; #25346 the closed original report).\n\n## What exists now (server half, #31004)\n\n- `GET /api/v1/messaging/preference-options` answers `{ success: true, data: { topics, channels } }`. `*` comes first. Topics are the platform's fixed topics, the literal topics in this environment's flow notify steps, and the topics this organization has already sent. Channels are every known channel, with those whose service is not configured marked \"not configured\". It is scoped to the caller's organization: a topic stored in another organization is never listed.\n- `sys_notification_preference.topic` declares `widget: 'notification-topic'`, `.channel` declares `widget: 'notification-channel'`, and `sys_notification_template.topic` declares `widget: 'notification-topic'`. `FieldSchema.widget` is an existing free string, so an unregistered widget falls back to the text box. That is today's behaviour.\n\n## Ask (ruling E, step 2)\n\n1. Register the two widgets as fillable dropdowns: a fillable arm on `RegistryRefField`, or a new field beside `FlowReferenceField`. The thread picks one and says why.\n2. Each one reads its list from the route above. If the route fails or answers an empty list, it falls back to the plain text box.\n3. A typed value that is not in the list is stored as typed and shown marked \"not in the list\". It is never refused and never rewritten.\n4. A channel marked \"not configured\" is listed, labelled as such, and still selectable.\n5. The template's `channel` keeps `channel_renders_template` as it is today. It is not in scope.\n\n## Acceptance\n\n- In Setup → Notification Preferences and Notification Templates, the topic and channel fields open a dropdown with the served list, `*` first, and still accept a typed value.\n- Tests: the list renders from the route; the fallback to the text box when the route fails; a value outside the list is saved and marked; a \"not configured\" channel is shown labelled.\n- On merge, row 6 of #30208 closes (`Part of #30208`). Quiet hours (step 3) and row 5 are not in this card."
+}

@@ -1,0 +1,37 @@
+{
+  "number": 31071,
+  "kind": "issue",
+  "title": "pm-dispatch: three pointers still spell the no-footer rule that seat-post-protocol L32 now carries",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "domain:skills",
+    "pm:dispatched",
+    "priority:p3"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-07T01:22:47Z",
+  "updated_at": "2026-11-07T03:39:00Z",
+  "closed_at": "2026-11-07T03:39:00Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31071",
+  "body": "domain:skills#3 · huangyiirene · session_01J8VVAj7CvjkGXvgXzd6RZ7\n\nFiling gate: out-of-scope should-fix S1 of the contract review of PR #31070 (card #31059). It falls outside that PR's claimed lines. ⛔ Not a claim. Triage sets the grade and the lane.\nclass: c · reach: every reader of the PR-body door's pointers.\n\n## What is left\n\nPR #31070 gives the no-footer rule a home on the PR-body door: `.claude/skills/pm-dispatch/references/seat-post-protocol.md` L32 (「PR 正文不送页脚…」) sits under the door line L31. Three pointers to that door still carry their own copy of the rule:\n\n1. `.claude/skills/pm-dispatch/references/rest-channel.md` L17: `(`seat-post-protocol.md` 正文行,不送页脚)`.\n2. `.claude/skills/pm-dispatch/references/platform-readings.md` L290: `⇒ 该正文改走 `seat-post-protocol.md` 的 PR 正文行,不送页脚。`\n3. `.claude/skills/pm-dispatch/SKILL.md` L313 (the `Metadata-protocol:` row): `…through the PR-body line of `references/seat-post-protocol.md`, with no footer (`references/platform-readings.md`)`.\n\nEach copy can drop its own spelling and only point to the door, so the rule has one home (AGENTS.md, one home per rule). All three edits shorten lines and change no line count. This finishes S1 of the PR #31058 review.\n\nLine numbers are as on `main` after PR #31070 lands; re-read before editing.\n\n**Level:** internal agent tooling (`.claude/**`), `skip-changeset`, `Clause-②: no`, `Metadata-protocol: none`.\n\nRelated: #31059, PR #31070, #31050, PR #31058."
+}

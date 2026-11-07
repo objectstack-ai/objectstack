@@ -2,8 +2,8 @@
   "number": 30982,
   "kind": "issue",
   "title": "Scenario runner: the seed cannot load a reference cycle (department ↔ employee) in every mid-tier card, and a failed build author turn leaves no trace",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,18 +13,23 @@
   "labels": [
     "area:devpath",
     "domain:devx",
-    "pm:queue",
     "priority:p1"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-lizheng"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-06T15:13:59Z",
-  "updated_at": "2026-11-06T16:01:04Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-07T07:05:26Z",
+  "closed_at": "2026-11-07T07:01:23Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30982",
   "body": "epic:#3600#1 · hotlong · session_01Q4EjjPXwX1YfHyKJUh4agu\n\nFiling-gate category: ① defect with a measured reproduction. Found by the 8-card live run, 2026-11-06 (main `d8b22954`, scratch mode, driver `claude-code-cli 2.1.318 · oauth_token · API-billed: no`, maintainer go-ahead verbatim 「跑」). Routing, verbatim: 「能交给车队开发的你不要自己开发」. Epic: objectstack-ai/cloud#3600.\n\n## Defect 1 (blocker for every mid-tier card): the seed cannot load a reference cycle\n\nEvery mid-tier card has `department.manager → employee` and `employee.department → department`. The runner inserts rows object by object, so whichever object loads first refuses every row, and the rest cascade:\n\n| Card | Seed loaded | First refusals |\n|:--|:--|:--|\n| requisition_to_receipt | 6 / 637 | `demopurchase_department` \"Manager: no demopurchase_employee record has id \"e13\"\"; `demopurchase_employee` \"Department: no … id \"dep_sales\"\" |\n| asset_lifecycle | 4 / 559 | same pair (`dep_eng` / `e01`) |\n| leave_balances | 3 / 617 | same pair (`dep_sales` / `e05`) |\n\nThe Run halves of these cards are therefore all \"not measured\". `travel_expense` cannot be read at all (Defect 2).\n\n**Ask:**\n1. Load the seed in two passes. First insert every row with each lookup that closes a cycle left null; then update those lookups. Find the cycles from the card's seed references (a lookup to an object loaded later in topological order), not from a hand list.\n2. A build that makes **both** sides of a cycle required cannot be seeded. The build prompt's data contract (`prompts.ts` `dataContract`) must say so (\"at least one side of a reference cycle must be optional\"), and the runner reports such a build as a Build finding naming the cycle.\n3. Pin it with a test from `requisition_to_receipt`'s seed.\n\n## Defect 2: a build author turn that fails leaves no trace\n\n`travel_expense`: the run record's `build.author` is `null` and the recording has no `travel_expense/scratch/build/author/-` turn. The build then scored 0/42 and every seed row answered `OBJECT_NOT_FOUND`. The objects on disk (`trip`, `expense_claim`, `expense_line`, `travel_advance`) were written later by the iterate turn, from the iterate prompt alone. It was the first card of a lane started in parallel with another lane, so a CLI start-up or usage-limit failure is the likely cause, but the record cannot say.\n\n**Ask:** record a failed or missing author turn with its exit code, `resultSubtype` and the CLI's stderr tail. Mark the Build half \"not measured: author turn failed\" instead of scoring an empty project, and do not run the iterate turn on a build whose author turn failed.\n\n## Verification\n\nRe-run `requisition_to_receipt`, `asset_lifecycle`, `leave_balances` and `travel_expense` in scratch mode after the fix. The seed must load fully before any Run half is read. The epic seat holds the recordings and run records.\n\nReader: the `domain:devx` lane seat, from `pm:queue`. p1, because it blocks every mid-tier Run measurement."

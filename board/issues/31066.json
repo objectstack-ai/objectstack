@@ -1,0 +1,37 @@
+{
+  "number": 31066,
+  "kind": "issue",
+  "title": "spec taxonomy: respell the seven hyphenated facet values as identifiers (customer_service, supply_chain, …) before release, so a select can carry them",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:spec",
+    "enhancement",
+    "priority:p1",
+    "repo:cloud"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-07T00:47:44Z",
+  "updated_at": "2026-11-07T04:14:57Z",
+  "closed_at": "2026-11-07T04:11:46Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31066",
+  "body": "repo:cloud#3 · hotlong · session_01Q4EjjRhUZjdy8VXs6Kkur2\nRuled: maintainer 「spec 改成下划线（推荐）」 (repo:cloud#3 seat session `session_01Q4EjjRhUZjdy8VXs6Kkur2`, 2026-11-07)\n\nFiling gate: **maintainer ruling** on a contract gap measured by the objectstack-ai/cloud#3661 dev (PR objectstack-ai/cloud#3689). **Release-gating:** the next CLI release is already held on cloud#3661 (「等 cloud 上线再发 CLI（推荐）」, #30904), and this respell must ship in the same release.\n\n## 维护者速读\n\n#30980 定义的市场分类里，有 7 个值带连字符（例如 customer-service、real-estate-construction），而平台规定下拉选项的值只能用小写字母、数字、下划线和点，所以 cloud 没法把「职能」「行业」做成带选项的下拉。按你的裁决，趁还没发版，把这 7 个值改成下划线写法。\n\n## Measured (objectstack `90523379`)\n\n- 7 of 21 taxonomy values fail `SystemIdentifierSchema` (`^[a-z][a-z0-9_.]*$`), which is `SelectOptionSchema.value`: `customer-service`, `supply-chain`, `trade-distribution`, `professional-services`, `financial-services`, `public-sector`, `real-estate-construction`.\n- `ObjectSchema.safeParse` refuses `customer-service` as a select option value. That parse runs at the metadata save door and in `os validate`.\n\n## Expected\n\n- In `packages/spec/src/marketplace/taxonomy.zod.ts`, respell the seven values with underscores. Follow in the same PR:\n  - `LEGACY_CATEGORY_MAPPING`;\n  - the three connector manifests and the scenario cards (`docs/qa/scenarios/*.json`) that carry them;\n  - the CLI publish path and its tests;\n  - generated docs and reference pages; the liveness ledger.\n- The values are unreleased (#30980 merged `468e0c16`, and no release has carried it), so this is a correction inside the same unreleased narrowing, not a new retirement. State the declaration lines accordingly and let Check Changeset judge.\n- Add a guard test: every taxonomy enum value parses as `SystemIdentifierSchema`, so a future value cannot reintroduce the gap.\n\n## Acceptance\n\n- Spec, CLI, scenarios and connector suites green; the guard test fails if a value contains `-`.\n- objectstack-ai/cloud#3661's follow-up then moves the pin and turns `business_functions` / `industries` into selects with options and translations.\n\nSerial: before the next objectstack release. The console card #31011 keys its labels by `.options`, so it follows this card.\n\nSuggested-grade: p1."
+}

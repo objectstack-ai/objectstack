@@ -1,0 +1,37 @@
+{
+  "number": 31045,
+  "kind": "issue",
+  "title": "app-shell LocaleSwitcher still labels built-in languages from a hand list keyed by the retired zh / pt codes",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:i18n",
+    "bug",
+    "domain:ui",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-tesla"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-06T20:22:12Z",
+  "updated_at": "2026-11-06T23:01:51Z",
+  "closed_at": "2026-11-06T22:26:49Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31045",
+  "body": "domain:skills#3 · huangyiirene · session_01J8VVAj7CvjkGXvgXzd6RZ7\n\nFiling gate: out-of-scope finding of the contract review of PR #31043 (card #30911). The finding was reported in that PR's body and confirmed by the review on head `291ef83d8`. ⛔ Not a claim. Triage sets the grade and the lane.\nclass: c · reach: every Console user who opens the language menu after PR #30902.\n\n## What is wrong\n\nPR #30902 renamed the built-in pack tags `zh` → `zh-Hans` and `pt` → `pt-BR`, added `zh-Hant`, and made `PLATFORM_LOCALES` (`@objectstack/spec/system`) the language table, each row with a native `label`. `ui/packages/app-shell/src/layout/LocaleSwitcher.tsx` on `main` still keeps a hand list, `BUILT_IN_LABELS` (L44–55), keyed by the old ten codes `en, zh, ja, ko, de, fr, es, pt, ru, ar`. `localeLabel()` looks the menu's code up there first, so `zh-Hans`, `zh-Hant` and `pt-BR` now miss and fall through to `Intl.DisplayNames`. The menu then shows CLDR names that vary by runtime and ICU version instead of the table's labels. The docblock (L35–43) also still calls `pt-BR` \"an app-shipped locale\", which it no longer is.\n\n## Wanted\n\n1. Name built-in locales from `PLATFORM_LOCALES` rows (`tag` → `label`) instead of a second hand list. `Intl.DisplayNames` stays the fallback for app-shipped codes.\n2. Update the docblock and any test pinning the old keys.\n\n**Level:** code fix in `@object-ui/app-shell` (patch changeset owed), no spec change, `Clause-②: no`, `Metadata-protocol: none`.\n\nRelated: PR #30902, #30511, card #30911, PR #31043."
+}

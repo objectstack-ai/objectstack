@@ -12,18 +12,20 @@
   },
   "labels": [
     "domain:skills",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "huangyiirene"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-04T14:47:15Z",
-  "updated_at": "2026-11-06T07:55:33Z",
+  "updated_at": "2026-11-07T07:55:22Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 3,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30114",
   "body": "repo:cloud#2 · os-zhuang · session_0123kRqqdpAJWYMgsgdAJX4G\n\nFiling gate ③, a task on the maintainer's word. Sam, 2026-11-04 14:45Z in the cloud seat 2 thread: 「cloud 私有仓库可以直接用带 security 标签的普通 issue，立卡修改 skills」.\n\nReader: the `domain:skills` lane (`.claude/skills/pm-dispatch/references/security-findings.md`, plus any file that points to it). Suggested priority p2; triage decides.\n\n## 维护者速读\n\n现在 pm-dispatch 规定，安全发现「永不立卡」，只能写成仓库的草稿安全公告。但中继对 cloud 建公告会返回 404，所以 cloud 的发现一直是在对话里口头交给你，修复走无卡派发令。你的裁定是：cloud 这类私有仓库，直接用带 `security` 标签的普通 issue。这张卡就是把 skill 里的规则改成这样。\n\n## Ruling to encode\n\nFor a finding whose affected repository is **private** (today: `objectstack-ai/cloud`):\n- The private record is an **ordinary issue** in that repository, carrying the `security` label. It is filed through the relay's `issue-create` like any card, and it holds the mechanism.\n- The fix is dispatched from that issue like any card, at effort `xhigh`. It needs no card-less ORDER and no draft advisory.\n\nUnchanged for **public** repositories (objectstack, objectui, hotcrm, the docs and site repos): a draft advisory through the relay, never an issue (§2–§3 as written).\n\n## Work\n\n1. **`security-findings.md`.** Add the private-repository branch above. Name how a seat tells the two cases apart: the repository's `private` flag, read from the API at filing time, never recalled. Update §2's \"⛔ 不立 issue\" and §3's fallback A so they apply to public repositories only, and keep §8 (\"一处成文\"). `security` already exists as a label on cloud, so no new label is needed.\n2. **What still stays rule-level on a private repository.** Pick one answer and write it down, because a private repository can be made public later and its history goes with it. Recommended: the issue holds the mechanism; PR titles, PR bodies, commit messages and changesets still state only the rule (§6), and link the issue.\n3. **The relay log.** `fleet-write` runs on this public repository. Before the rule ships, confirm that an `issue-create` stroke's body never reaches the public run log (the validator, the executor rows and the summary), and pin that with a test in `scripts/pm/fleet-write`. If any part of the body can reach the log, the rule must say how the mechanism gets into the issue without passing through it.\n4. Update every file that points to `security-findings.md` (gate, lanes, `os-dev`, `checklist-test`) only where a pointer's wording would now be wrong. Restate nothing.\n\n## Done when\n\n- `security-findings.md` carries the private-repository branch, and the skill's line and byte limits pass.\n- The relay-log question is answered and pinned by a test.\n- A cloud seat that reads the skill files a cloud finding as a `security` issue.\n\n## Dedupe\n\n`repo:objectstack-ai/objectstack is:issue security-findings private`: 166 hits. None of them changes where a private repository's finding is recorded. The nearest are:\n- #30110 (the relay publishes advisories): about public advisories, not private repositories.\n- #29402 (`advisory_report` 403s): a relay defect.\n- #29111 and #29731 (closed): the rule this card amends.\n\nThe security seat (#29740, `security#1`) owns findings end to end, so tell it about this change."

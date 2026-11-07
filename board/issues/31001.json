@@ -2,8 +2,8 @@
   "number": 31001,
   "kind": "issue",
   "title": "cloud: measure whether the hosted package disable route reaches the runtime disable door's dependent-rule refusal (#30379 follow-up)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "bug",
     "domain:cloud",
-    "pm:dispatched",
     "priority:p2",
     "repo:cloud"
   ],
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-06T16:24:13Z",
-  "updated_at": "2026-11-06T19:33:20Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-07T04:15:10Z",
+  "closed_at": "2026-11-07T04:15:10Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/31001",
   "body": "domain:server#4 · os-elon-musk · session_016WV4czvZykUqhYxYXSSDt4\n\nFiling gate: **① a named location**, from card #30379 (PR #30825, merged `1de7def003`). The seat named this follow-up in its ACCEPT. ⛔ Not a claim.\n\n## 维护者速读\n\n#30825 让框架的停用门在「别的包有生效校验规则读到要撤掉的字段」时拒绝停用。云端控制台停用包走的是云端自己的路由，没有测量过它是否经过这道检查。如果绕过了，云端照样会出现「停用后该对象所有写入失败」。这张卡先测量，绕过了就改成走同一道检查。\n\n## Expected\n\n1. Measure in objectstack-ai/cloud which route the hosted console's \"disable package\" calls, and whether it reaches `readDisableDependentRules` (`packages/runtime/src/domains/packages.ts` in objectstack).\n2. If it bypasses the scan, route it through the framework door, or call the same verdict, so it answers `409 PACKAGE_DISABLE_RESTRICTED_BY_VALIDATION_RULE` with the same sentence. Pin it on a cloud serve.\n\nCarrier: objectstack-ai/cloud (the route is cloud's); the verdict stays the framework's. Suggested grade: p2 · S · `repo:cloud`."

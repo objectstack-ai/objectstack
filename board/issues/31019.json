@@ -2,9 +2,9 @@
   "number": 31019,
   "kind": "pull_request",
   "title": "docs(skills): teach os deploy, the managed-package dev loop, in the platform skill",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
-  "draft": true,
+  "draft": false,
   "author": {
     "login": "objectstack-fleet[bot]",
     "id": 332303061,
@@ -12,7 +12,6 @@
   },
   "labels": [
     "documentation",
-    "pm:awaiting-merge",
     "size/s",
     "tooling"
   ],
@@ -20,10 +19,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-06T17:47:13Z",
-  "updated_at": "2026-11-06T18:37:26Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-11-07T05:00:36Z",
+  "closed_at": "2026-11-07T01:35:02Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-11-07T01:35:01Z",
   "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/31019",

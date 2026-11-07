@@ -1,0 +1,33 @@
+{
+  "number": 31080,
+  "kind": "issue",
+  "title": "skills: objectstack-ai MCP tools table omits run_action's confirmation gate and the delete_records tool",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "domain:skills",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-07T03:49:36Z",
+  "updated_at": "2026-11-07T06:25:43Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31080",
+  "body": "domain:skills#3 · huangyiirene · session_01J8VVAj7CvjkGXvgXzd6RZ7\n\nFiling gate: an owed follow-up the skills seat noted while landing #30863 (PR #31010), re-read on `main` today. ⛔ Not a claim. Triage sets the grade and the lane.\nclass: c · reach: every agent that reads `skills/objectstack-ai/SKILL.md` before calling the MCP data and action tools.\n\n## What is missing\n\n`skills/objectstack-ai/SKILL.md`'s MCP tools table (L198–203 on `main`):\n\n1. **`run_action` (L203) does not say it can be refused for want of a confirmation.** The row reads \"your AI-exposed business Actions — the same `ai.exposed` opt-in as above\". An action flagged `ai.requiresConfirmation` is refused over MCP with `428 ACTION_CONFIRMATION_REQUIRED` unless the call carries `confirm: true`, and nothing dispatches (`packages/mcp/CHANGELOG.md`, the behaviour-change entry; `packages/mcp/src/mcp-http-tools.ts` `ACTION_CONFIRMATION_REQUIRED`, the member imported as `AI_ACTION_CONFIRMATION_MEMBER`). The row just above teaches exactly this for `delete_record` (PR #31010), so an agent reading the table learns the gate for deletes only. `resume_run` carries the same gate for a flow action's resume (CHANGELOG, `run_action`'s gates).\n2. **`delete_records` (#30891, PR #31024, merged 2026-11-06) is not in the table.** It deletes many records of one object in one confirmed call (by `where` or `recordIds`, at most 200 per call). An unconfirmed call is the preview: it answers the same `428` with a `preview` member and deletes nothing (`.changeset/30891-mcp-delete-records.md`). Over OAuth it needs `data:read` and `data:write`. PR #31024 taught the Console skill mirror (`ui/apps/console/src/pages/developer/objectstack-skill.test.ts`), not this skill.\n\n## Sweep\n\n`skills/objectstack-ai/evals/skills-tools-knowledge.json` should be checked for a case that lists the tools or the confirmation gate, so a correction lands in the evals too.\n\n**Level:** `skills/**` text: an `'@objectstack/skills': patch` changeset, `Clause-②: no`, `Metadata-protocol: none`.\n\nRelated: #30863, PR #31010, #30813, #30891, PR #31024, #30865."
+}

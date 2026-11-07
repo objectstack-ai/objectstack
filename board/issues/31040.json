@@ -13,7 +13,7 @@
   "labels": [
     "domain:devx",
     "enhancement",
-    "pm:blocked",
+    "pm:queue",
     "priority:p3",
     "repo:cloud"
   ],
@@ -21,7 +21,7 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-06T19:40:42Z",
-  "updated_at": "2026-11-06T19:54:07Z",
+  "updated_at": "2026-11-07T03:41:41Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,

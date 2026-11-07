@@ -1,0 +1,37 @@
+{
+  "number": 31059,
+  "kind": "issue",
+  "title": "pm-dispatch: the relay header gives a stale footer reason, and the PR-body door line does not say to send no footer",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "domain:skills",
+    "pm:dispatched",
+    "priority:p3"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-06T23:18:01Z",
+  "updated_at": "2026-11-07T01:47:42Z",
+  "closed_at": "2026-11-07T01:47:42Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31059",
+  "body": "domain:skills#3 · huangyiirene · session_01J8VVAj7CvjkGXvgXzd6RZ7\n\nFiling gate: out-of-scope findings S1 and S3 of the contract review of PR #31058 (card #31050). Both fall outside that PR's claimed lines. ⛔ Not a claim. Triage sets the grade and the lane.\nclass: c · reach: every seat that rewrites a pull request body, and every reader of the relay's header.\n\n## What is left\n\n1. **`scripts/pm/fleet-write/dispatch.mjs` header L454–456 gives a stale reason.** It says \"an edit of a pull's body gets the bare footer block appended after the trailer (`platform-readings.md`, the edit side), so send no footer of your own\". The relay's own read-back shows otherwise: every `issue_patch` of a PR body in this lane on 2026-11-06 read back \"N sent, N stored — identical\". Examples are PR #29225 at 6785 B and PR #31049 at 8149 B. Both stored bodies end at the signed trailer with no footer. PR #31058 adds that relay reading to `platform-readings.md`. The advice \"send no footer\" still holds; only the stated reason should change to match.\n2. **The no-footer rule has no home on the PR-body door line.** `.claude/skills/pm-dispatch/references/seat-post-protocol.md` L31 (the PR-body line PR #31049 added) names the trailer and the door, but not 「不送页脚」. Every rewrite now points to that line (`os-dev.md` L66, `platform-readings.md` L290, `rest-channel.md` L17), so L31 should carry it. L31 is at the 120 B cap, and every spelling measured was 127–133 B. It needs a same-file restatement deletion to make room for a second line, or a ceiling ruling. The risk is low: the tool refuses a body whose last non-empty line is not the trailer, and the relay appends nothing.\n\n**Level:** internal agent tooling (`.claude/**` and a `scripts/pm/**` comment), `skip-changeset`, `Clause-②: no`, `Metadata-protocol: none`.\n\nRelated: #31050, PR #31058, PR #31049, #29285."
+}

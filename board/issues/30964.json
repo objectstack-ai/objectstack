@@ -21,11 +21,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-06T14:29:02Z",
-  "updated_at": "2026-11-06T14:54:31Z",
+  "updated_at": "2026-11-06T21:39:05Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30964",
   "body": "repo:cloud#1 · os-baozhoutao · session_013w7BrxKc6dUYe6Rw6tQW4G\n\nFiling gate: **④ coordination**, a framework half of objectstack-ai/cloud#3624. Ruling A, record objectstack-ai/cloud#3624 comment 6686728844, maintainer 「A + 两边审计 + 转发安装人（推荐）」.\n\n**Business reason.** A hosted environment must be able to install an unmanaged-capable package as the customer's own copy, with both halves audited and the control-plane audit row naming a person.\n\n**Reader who acts.** The lane owning `packages/cloud-connection` (triage sets lane and grade).\n\n**Sequencing (from the ruling):** \"The framework halves of #30794 (namespace), #30808 (seed copy) and this card all change the same import door. Serialize them after #30794.\"\n\nBlocked-by: #30794\n\n**Dedupe:** `CloudConnectionPlugin installMode` and `forward installer cloud-connection` → no card.\n\n## Measured (pin `c50e0dfa`)\n\n- `cloud-connection-plugin.ts` `/cloud-connection/install` forwards `package_id` and `seed_sample_data` only.\n- The environment → control-plane call is service-mode and carries no user (the ruling cites `cloud-connection-plugin.ts:957-961`).\n- `importUnmanagedPackage` is the environment kernel's protocol-service verb (`marketplace-install-local-plugin.ts`).\n\n## Ask, each item from the ruling\n\n1. Forward `installMode` (and the namespace once #30794 lands) to the control plane.\n2. Forward the installing environment user, so the control-plane audit row names a person rather than the environment's service principal.\n3. On an unmanaged grant, run `importUnmanagedPackage` in the environment as the installing user. Load no sample data (framework parity). When #30808 lands, copied seed rows belong to the installer.\n4. **Environment audit:** record the copy's result (`targetPackageId`, namespace, copied count, success or failure). Only the environment knows whether the copy succeeded.\n\nThe control-plane judgement and its audit row are cloud's (objectstack-ai/cloud#3624)."

@@ -2,8 +2,8 @@
   "number": 31014,
   "kind": "issue",
   "title": "docs(adr): ADR-0146 D3 amendment — one `.custom` pair per App, and one platform pair for the kernel suite (ruling 6691022506 on #29594)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "documentation",
     "domain:spec",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-06T17:28:33Z",
-  "updated_at": "2026-11-06T19:52:56Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-07T08:09:45Z",
+  "closed_at": "2026-11-07T08:08:09Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/31014",
   "body": "domain:spec#1 · os-tesla · session_01L9qibzzqHZdAVqgBAvxXKB\n\nFiling gate: **③ a task on the maintainer's word.** Ruling 6691022506 on #29594 (director seat, batch #437 item 1). The maintainer, verbatim, 2026-11-06T17:17Z: 「① 定制单位 = App；同意 ② 内核作为平台套件、版本随运行时、总是全套安装，我理解是事实吧，元数据app运行时引用的平台都是统一版本号的呀，平台发版本也是统一版本号的。这个应该你负责确认。」. The ruling's own execution line: \"the spec seat files the ADR-0146 D3 amendment as its own Tier H card (os-zhuang reviewer)\".\n\n**Business reason.** Today D3 gives one `.custom` pair per read-only package. Every kernel package shares namespace `sys`, so only the first can get a pair; the rest answer 422 `NAMESPACE_CONFLICT` (#29594). A suite like HotCRM (one App plus three modules, one version) would also get four pairs, while the customer thinks of one product. Without this amendment, the server lane's ensure-door change (`pairOf(base)` by App) has no ADR text to cite. Studio would keep sending a customer's HotCRM changes to four places.\n\n**Hands-on reader.** spec seat 1 (`domain:spec#1`) dispatches this card to a Fable card thread. The draft PR goes to `os-zhuang`. The server lane's ensure-door PR cites the merged text.\n\n**Lane.** The pm-dispatch lane table puts `docs/adr/**` under `domain:skills` (`.claude/skills/pm-dispatch/SKILL.md:161`). The ruling's Workload line gives \"ADR-0146 D3 amendment, Tier H\" to `domain:spec`, so this card carries `domain:spec` on the ruling's word.\n\n**Governed surface.** `docs/adr/**` is Tier H (AGENTS.md Prime Directive 14; `check-governed-merges`). The PR stays draft. It lands only by the maintainer's hand, or by an APPROVED review from `os-zhuang` followed by the seat's landing.\n\n## 维护者速读\n\n按你 ① 的裁决，这张卡只改 ADR-0146 D3 的文字：\n- 定制单位从「每个只读包一个 `.custom`」改为「每个 App 一个 `.custom`」，HotCRM → `app.objectstack.hotcrm.custom`。\n- 内核整体算一个平台套件，只有一个平台 pair，名字由修订写定。\n- 平台 pair 的依赖是平台版本 `^18`，不看各内核包 manifest 自己的 version。\n- 某个内核包没装时，它的覆盖保留并标记，不拒绝安装。\n- ③（内核白名单）未裁前，内核对象仍不可定制。\n- 代码改动走 server 车道，不在这张卡里。\n\n## Today (objectstack `origin/main` `69e133ea`)\n\nIn `docs/adr/0146-studio-designs-setup-administers-one-editor-per-item-paired-customize-package.md`:\n- **D3** (`:284-340`): \"Every installed base gets a paired `<base>.custom` package … one per base\". Namespace `<base namespace>_custom` (Q4, `:300`). Dependency `^<major>` of the base's `manifest.version` (\"Merge question 1\").\n- **Q4 row** (`:597`) and **Consequences** (`:620`, \"one per base, folded under each in Studio\") repeat the per-package unit.\n- The code spelling of the same rule is `packages/spec/src/kernel/customization-package.ts` (`customizationPackageId` :94, `customizationNamespace` :166, `customizationDependencyRange` :205). It changes on the server lane's cards, not here.\n\n## Expected (ADR text only)\n\n1. **A dated status-line amendment**, in the house form \"**Amended in place** (2026-11-…, ruling 6691022506 on #29594, maintainer, verbatim: 「① 定制单位 = App；同意」)\". It links the ruling comment.\n2. **D3's unit becomes the App** (ADR-0019 D1–D4; ADR-0130 D1/D6: one artifact, one version):\n   - One pair per App: `<app id>.custom`, e.g. HotCRM → `app.objectstack.hotcrm.custom`.\n   - Namespace = the App package's own namespace + `_custom`.\n   - Dependency = `^<major>` of the App.\n   - A module never owns a pair. A customization on any object of any member of the App lands in the App's pair.\n   - The ensure door returns the App's existing pair (200), not 422.\n   - 422 `NAMESPACE_CONFLICT` stays only for a namespace held by a package outside the App's artifact.\n3. **One platform pair for the kernel suite.** The amendment **names its id**. The id must satisfy `MANIFEST_ID_PATTERN`, be held by no real package, and be one `customizationBasePackageId` inverts. The namespace is `sys_custom`. The PR body states the chosen id and the alternatives weighed.\n4. **The platform pair's dependency is the platform version** `^<major>` (18 today: the changeset `fixed` group ships one version; `resolveRuntimeVersion()` in `packages/runtime/src/runtime-version.ts:80`). It is never a kernel manifest's own `version` (0.1.0–3.x, unrelated to release).\n5. **Orphan tolerance** (② as recorded in the ruling): the platform pair tolerates an absent kernel package. Its overrides are kept and marked, never refusing the install. This is the same handling as a module removed in a later App version, and the amendment states that case too. The `customizable` verdict is served for the packages present.\n6. **(b) stays**, one sentence: the package list row and the ensure door serve a readable `customizable` verdict, and the pair a Customize would land in.\n7. **Until ruling ③ (kernel whitelist)**, kernel objects stay NOT customizable. The amendment says so in one line and points at #29594 for the second ruling comment.\n8. **Not taken**, recorded so silence is not consent: (a) a pair per package; (c) N pairs sharing `<ns>_custom`; (e) an explicit split key. ADR-0019 and ADR-0130 are not amended.\n9. The Q4 row, the Consequences line (`:620`) and any other \"one per base\" sentence follow the new unit or are shown unchanged on purpose.\n10. `pnpm adr:index` is regenerated in the same PR. No other ADR is touched.\n\n## Acceptance\n\n- The diff touches only `docs/adr/0146-…md` and the generated `docs/adr/README.md`.\n- The ADR lint step and `pnpm check:pm-governed-prose` pass.\n- Every passage under Today either states the App unit or is shown unchanged on purpose.\n- The PR is opened **as a draft**, says \"Tier H\", and requests `os-zhuang`. ⛔ No seat readies, queues or arms it before an authorized APPROVED review.\n- Contract review at `CONTRACT_REVIEW_TIER` before the hand-off.\n\nSerial: none. The server lane's ensure-door PR cites this record once it merges. Its first PR (the lookup refactor, no behaviour change) does not wait.\n\nDedupe (2026-11-06), run as `gh api -X GET search/issues`:\n- `repo:objectstack-ai/objectstack \"ADR-0146\" D3 in:title,body is:issue` → 34 hits. The ADR-0146 cards are #28407 (ensure door), #28408 (uninstall refusal) and #30881 (`basedOn` advisory amendment), all closed and other clauses. None.\n- `repo:objectstack-ai/objectstack is:issue \"platform pair\" OR \"customization unit\" OR \"app.objectstack.hotcrm.custom\"` → 109 hits. The only match is #29594 itself, the parent. None.\n\nSuggested-grade: p2 (the parent's grade) · Clause-②: no (ADR text only; no spec key, route or error code) · Metadata-protocol: none.\n\nRuling-ref: 6691022506 on #29594.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"

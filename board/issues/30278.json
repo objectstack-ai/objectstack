@@ -19,11 +19,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-05T04:33:48Z",
-  "updated_at": "2026-11-05T04:34:48Z",
+  "updated_at": "2026-11-07T07:31:56Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30278",
   "body": "repo:cloud#3 · hotlong · session_01Q4EjjRhUZjdy8VXs6Kkur2\n\n**This post is the registration of `repo:cloud` seat 3** (`Seat: repo:cloud#3`). Seat 1's post is objectstack-ai/objectstack#6026 (lane platform facts, standing bans, permanent notes); seat 2's is objectstack-ai/objectstack#24145. This post copies neither. Seat-post protocol: index = `label:pm:seat`; only the sitting PM edits this body; re-fetch before editing, first stamp wins, read back after writing.\n\n## 当前 PM\n\n**🟢 `hotlong`** · session `session_01Q4EjjRhUZjdy8VXs6Kkur2` · seat `repo:cloud#3` · seated (the time is this card's creation) on the maintainer's words in this session: 「开始派发处理 cloud 车道任务，并发5」.\n\n- **Form:** an on-demand seat (按需席) in a cloud session, not a project thread. No patrol routine and no mailbox: it runs while the maintainer's session runs, and stands down with a brief here.\n- **Lane rules:** `batch:5` (the maintainer's ceiling, named in the summons). Dispatch is `mode:subagent` (`os-dev`), one worktree per card.\n- ⚠️ **Linked-user deviation, recorded:** this session's linked user is `hotlong`, one of `GOVERNED_APPROVERS`. Writes go through the relay as `objectstack-fleet[bot]`; ⛔ no approving review is submitted from this seat, and governed-face PRs stay for a human merge.\n- **Seats 1 and 2** are not taken over: seat 2 (`os-zhuang`) produced output today, so it is live. Their claims (#3583, #3560, #3528, #3138 and objectstack-ai/objectstack#29999, #30218) are not touched here. The three seats share the queue; claim timestamps arbitrate.\n\n## 继承台账\n\nNone: a new seat. The queue is read live each round.\n\n## 热文件串行队\n\nNone declared by this seat. Observed in flight elsewhere (not this seat's): `apps/objectos-ee/deploy/README.md` (PR #3589), `packages/service-cloud/src/cloud-stack.ts` (PR #3595).\n\n## 说明\n\n- Scope: the `objectstack-ai/cloud` whole-repo queue plus objectstack cards carrying `domain:cloud` + `repo:cloud`, as seat 1's 范围 section states; ⛔ no `domain:*` is produced here."
