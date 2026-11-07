@@ -220,11 +220,18 @@ export function effectiveSharingModel(schema: any): 'private' | 'read' | 'public
   if (m === 'private') return 'private';
   if (m === 'public_read') return 'read';
   if (m === 'public_read_write' || m === 'controlled_by_parent') return 'public';
-  if (m == null) {
-    const isSystem = schema?.isSystem === true || String(schema?.name ?? '').startsWith('sys_');
-    return isSystem ? 'public' : 'private';
-  }
+  if (m == null) return isPlatformObjectSchema(schema) ? 'public' : 'private';
   return 'private';
+}
+
+/**
+ * A platform (system) object: one the registry marks `isSystem`, or one named
+ * with the platform's `sys_` prefix. The one spelling of that test, read by
+ * {@link effectiveSharingModel}'s default and by the sharing-rule object
+ * picker's ordering (`shareable-objects.ts`).
+ */
+export function isPlatformObjectSchema(schema: any): boolean {
+  return schema?.isSystem === true || String(schema?.name ?? '').startsWith('sys_');
 }
 
 /**

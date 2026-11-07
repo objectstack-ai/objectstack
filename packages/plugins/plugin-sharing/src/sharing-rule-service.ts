@@ -52,6 +52,7 @@ import { TeamGraphService, teamHasMember } from './team-graph.js';
 import { PositionGraphService } from './position-graph.js';
 import { BusinessUnitGraphService } from './business-unit-graph.js';
 import type { DeclaredSharingRule, DeclaredSharingRuleSource } from './declared-sharing-rules.js';
+import { listShareableObjects, type ShareableObject, type ShareableObjectsEngine } from './shareable-objects.js';
 
 /**
  * System-elevated context for the rule evaluator's own reconcile writes.
@@ -948,6 +949,27 @@ export class SharingRuleService implements ISharingRuleService {
     const orgId = this.callerOrgId(context);
     if (!orgId) return where; // system context / platform operator — asserted upstream
     return { ...where, organization_id: orgId };
+  }
+
+  /**
+   * [#30209 row 5 B] The objects a sharing rule can take effect on, for
+   * Setup's object picker (`GET /api/v1/sharing/shareable-objects`).
+   *
+   * Admitted as every other verb of this surface admits
+   * ({@link assertCanManageRules}: `manage_sharing`, or the legacy
+   * `manage_platform_settings`, with a resolvable organization), so the list
+   * names nothing the caller could not author a rule on. Listed by the save
+   * doors' own verdict ({@link SharingService.sharingRuleObjectRefusal}) —
+   * handed to {@link listShareableObjects}, never restated — so an object
+   * listed here is one `defineRule` and the `/data` door admit, and one left
+   * out is one they refuse with `SHARING_NOT_ENABLED`.
+   */
+  listShareableObjects(context: ExecutionContext): ShareableObject[] {
+    this.assertCanManageRules(context); // [ADR-0111 D6]
+    return listShareableObjects(
+      this.engine as SharingEngine & ShareableObjectsEngine,
+      (object) => this.sharing.sharingRuleObjectRefusal(object),
+    );
   }
 
   async listRules(
