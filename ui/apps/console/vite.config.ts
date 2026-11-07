@@ -1187,7 +1187,7 @@ export default defineConfig({
             // (lifting `framework` above these two) is still refused, for the
             // reason it gave.
             //
-            // ## Why there are ELEVEN i18n groups and not one (objectui#7479)
+            // ## Why there is one i18n group PER CATALOGUE and not one (objectui#7479)
             //
             // objectui#7399 gave the catalogues one `i18n-locales` chunk so the
             // `framework` ceiling stopped budgeting them. That chunk held all
@@ -1200,8 +1200,10 @@ export default defineConfig({
             // would be real in the source and absent in the bundle, which is
             // the failure mode this whole card exists to avoid.
             //
-            // So: one group per catalogue, ten single-module chunks, plus a
-            // group for the i18n RUNTIME (provider, hooks, formatters) which
+            // So: one group per catalogue — one per tag of the platform locale
+            // table (`PLATFORM_LOCALES` in `@objectstack/spec/system`; the file
+            // is named for its tag, objectstack#30511), each a single-module
+            // chunk — plus a group for the i18n RUNTIME (provider, hooks, formatters) which
             // stays eager and is a hundredth of the size. The names are the
             // gate's handle — `scripts/check-eager-locale-catalogues.mjs` reads
             // `i18n-locale-<code>` out of the BUILT `eager-closure.json` and
@@ -1213,15 +1215,16 @@ export default defineConfig({
             // `scripts/__tests__/check-eager-closure-budget.test.ts` that pins
             // this attribution.
             { name: 'i18n-locale-en', test: /[\\/]packages[\\/]i18n[\\/]src[\\/]locales[\\/]en\.ts$/, priority: 84 },
-            { name: 'i18n-locale-zh', test: /[\\/]packages[\\/]i18n[\\/]src[\\/]locales[\\/]zh\.ts$/, priority: 84 },
+            { name: 'i18n-locale-zh-Hans', test: /[\\/]packages[\\/]i18n[\\/]src[\\/]locales[\\/]zh-Hans\.ts$/, priority: 84 },
+            { name: 'i18n-locale-zh-Hant', test: /[\\/]packages[\\/]i18n[\\/]src[\\/]locales[\\/]zh-Hant\.ts$/, priority: 84 },
+            { name: 'i18n-locale-es', test: /[\\/]packages[\\/]i18n[\\/]src[\\/]locales[\\/]es\.ts$/, priority: 84 },
+            { name: 'i18n-locale-ar', test: /[\\/]packages[\\/]i18n[\\/]src[\\/]locales[\\/]ar\.ts$/, priority: 84 },
+            { name: 'i18n-locale-fr', test: /[\\/]packages[\\/]i18n[\\/]src[\\/]locales[\\/]fr\.ts$/, priority: 84 },
+            { name: 'i18n-locale-pt-BR', test: /[\\/]packages[\\/]i18n[\\/]src[\\/]locales[\\/]pt-BR\.ts$/, priority: 84 },
+            { name: 'i18n-locale-ru', test: /[\\/]packages[\\/]i18n[\\/]src[\\/]locales[\\/]ru\.ts$/, priority: 84 },
+            { name: 'i18n-locale-de', test: /[\\/]packages[\\/]i18n[\\/]src[\\/]locales[\\/]de\.ts$/, priority: 84 },
             { name: 'i18n-locale-ja', test: /[\\/]packages[\\/]i18n[\\/]src[\\/]locales[\\/]ja\.ts$/, priority: 84 },
             { name: 'i18n-locale-ko', test: /[\\/]packages[\\/]i18n[\\/]src[\\/]locales[\\/]ko\.ts$/, priority: 84 },
-            { name: 'i18n-locale-de', test: /[\\/]packages[\\/]i18n[\\/]src[\\/]locales[\\/]de\.ts$/, priority: 84 },
-            { name: 'i18n-locale-fr', test: /[\\/]packages[\\/]i18n[\\/]src[\\/]locales[\\/]fr\.ts$/, priority: 84 },
-            { name: 'i18n-locale-es', test: /[\\/]packages[\\/]i18n[\\/]src[\\/]locales[\\/]es\.ts$/, priority: 84 },
-            { name: 'i18n-locale-pt', test: /[\\/]packages[\\/]i18n[\\/]src[\\/]locales[\\/]pt\.ts$/, priority: 84 },
-            { name: 'i18n-locale-ru', test: /[\\/]packages[\\/]i18n[\\/]src[\\/]locales[\\/]ru\.ts$/, priority: 84 },
-            { name: 'i18n-locale-ar', test: /[\\/]packages[\\/]i18n[\\/]src[\\/]locales[\\/]ar\.ts$/, priority: 84 },
             //
             // The Studio designer's `studio` namespace (objectstack#25922): the
             // same one-group-per-catalogue rule, for the same reason. Its `zh`
@@ -1236,9 +1239,10 @@ export default defineConfig({
             { name: 'i18n-ns-studio-zh', test: /[\\/]packages[\\/]i18n[\\/]src[\\/]namespaces[\\/]studio[\\/]zh\.ts$/, priority: 84 },
             //
             // The `marketplace` namespace (objectstack#30588): the pack group the
-            // two marketplace pages read, moved out of the ten packs so the
-            // eager `i18n-locale-en` chunk stops carrying it. All ten catalogues
-            // are `import()`ed by `packages/i18n/src/namespaces/marketplace/index.ts`
+            // two marketplace pages read, moved out of the packs so the eager
+            // `i18n-locale-en` chunk stops carrying it. Every catalogue (one per
+            // platform locale table tag, as the packs above)
+            // is `import()`ed by `packages/i18n/src/namespaces/marketplace/index.ts`
             // when a marketplace page mounts, none is resident, so one group per
             // catalogue for the rule above. The loader module gets a group too:
             // without one it would fall to `i18n-runtime` below and be eager,
@@ -1259,20 +1263,21 @@ export default defineConfig({
             //     the eager Studio packages page (`MarketplaceRowActions.tsx` and
             //     the refusal readers), which is EAGER by that co-tenancy, and
             //     pulled the loader into the eager closure with it (+1,281 B gz).
-            // With both, the loader, the frame and the ten catalogues are lazy,
+            // With both, the loader, the frame and the catalogues are lazy,
             // the shared chunk is the one the base build emits, and the only
             // change to the eager closure is `i18n-locale-en`'s.
             { name: 'i18n-ns-marketplace', test: /[\\/]packages[\\/]i18n[\\/]src[\\/]namespaces[\\/]marketplace[\\/]index\.ts$/, priority: 84, includeDependenciesRecursively: false },
             { name: 'i18n-ns-marketplace-en', test: /[\\/]packages[\\/]i18n[\\/]src[\\/]namespaces[\\/]marketplace[\\/]en\.ts$/, priority: 84 },
-            { name: 'i18n-ns-marketplace-zh', test: /[\\/]packages[\\/]i18n[\\/]src[\\/]namespaces[\\/]marketplace[\\/]zh\.ts$/, priority: 84 },
+            { name: 'i18n-ns-marketplace-zh-Hans', test: /[\\/]packages[\\/]i18n[\\/]src[\\/]namespaces[\\/]marketplace[\\/]zh-Hans\.ts$/, priority: 84 },
+            { name: 'i18n-ns-marketplace-zh-Hant', test: /[\\/]packages[\\/]i18n[\\/]src[\\/]namespaces[\\/]marketplace[\\/]zh-Hant\.ts$/, priority: 84 },
+            { name: 'i18n-ns-marketplace-es', test: /[\\/]packages[\\/]i18n[\\/]src[\\/]namespaces[\\/]marketplace[\\/]es\.ts$/, priority: 84 },
+            { name: 'i18n-ns-marketplace-ar', test: /[\\/]packages[\\/]i18n[\\/]src[\\/]namespaces[\\/]marketplace[\\/]ar\.ts$/, priority: 84 },
+            { name: 'i18n-ns-marketplace-fr', test: /[\\/]packages[\\/]i18n[\\/]src[\\/]namespaces[\\/]marketplace[\\/]fr\.ts$/, priority: 84 },
+            { name: 'i18n-ns-marketplace-pt-BR', test: /[\\/]packages[\\/]i18n[\\/]src[\\/]namespaces[\\/]marketplace[\\/]pt-BR\.ts$/, priority: 84 },
+            { name: 'i18n-ns-marketplace-ru', test: /[\\/]packages[\\/]i18n[\\/]src[\\/]namespaces[\\/]marketplace[\\/]ru\.ts$/, priority: 84 },
+            { name: 'i18n-ns-marketplace-de', test: /[\\/]packages[\\/]i18n[\\/]src[\\/]namespaces[\\/]marketplace[\\/]de\.ts$/, priority: 84 },
             { name: 'i18n-ns-marketplace-ja', test: /[\\/]packages[\\/]i18n[\\/]src[\\/]namespaces[\\/]marketplace[\\/]ja\.ts$/, priority: 84 },
             { name: 'i18n-ns-marketplace-ko', test: /[\\/]packages[\\/]i18n[\\/]src[\\/]namespaces[\\/]marketplace[\\/]ko\.ts$/, priority: 84 },
-            { name: 'i18n-ns-marketplace-de', test: /[\\/]packages[\\/]i18n[\\/]src[\\/]namespaces[\\/]marketplace[\\/]de\.ts$/, priority: 84 },
-            { name: 'i18n-ns-marketplace-fr', test: /[\\/]packages[\\/]i18n[\\/]src[\\/]namespaces[\\/]marketplace[\\/]fr\.ts$/, priority: 84 },
-            { name: 'i18n-ns-marketplace-es', test: /[\\/]packages[\\/]i18n[\\/]src[\\/]namespaces[\\/]marketplace[\\/]es\.ts$/, priority: 84 },
-            { name: 'i18n-ns-marketplace-pt', test: /[\\/]packages[\\/]i18n[\\/]src[\\/]namespaces[\\/]marketplace[\\/]pt\.ts$/, priority: 84 },
-            { name: 'i18n-ns-marketplace-ru', test: /[\\/]packages[\\/]i18n[\\/]src[\\/]namespaces[\\/]marketplace[\\/]ru\.ts$/, priority: 84 },
-            { name: 'i18n-ns-marketplace-ar', test: /[\\/]packages[\\/]i18n[\\/]src[\\/]namespaces[\\/]marketplace[\\/]ar\.ts$/, priority: 84 },
             { name: 'marketplace-namespace-gate', test: /[\\/]packages[\\/]app-shell[\\/]src[\\/]console[\\/]marketplace[\\/](?:MarketplaceNamespaceGate\.tsx|marketplaceFrameHolding\.ts)$/, priority: 84, includeDependenciesRecursively: false },
             //
             // ⛔ `i18n-runtime` takes `includeDependenciesRecursively: false`

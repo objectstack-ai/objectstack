@@ -18,7 +18,7 @@ D1/D2). Modules, plugins and other contributions ship **inside** that App — se
 [Extras](#extras-dependencies-and-modules) below.
 
 The listing is a package row in the catalog plus its versions: the row carries
-the name, description, category, icon, README and translations, and each
+the name, description, business functions and other taxonomy facets, icon, README and translations, and each
 version is a snapshot of your compiled artifact.
 
 ## The listing file: `objectstack.manifest.json`
@@ -34,7 +34,10 @@ the declared keys below are the ones publish actually sends.
 | `manifestId` | The package id (reverse-domain, immutable once published) | `--manifest-id` |
 | `displayName` | The name on the card | `--display-name` |
 | `description` | The short description | `--description` |
-| `category` | The catalog category slug (`crm`, `hr`, `finance`, …) | `--category` |
+| `businessFunctions` | The business functions the app serves: 1-3 values, the primary one first (the values: [Marketplace Taxonomy reference](/docs/references/marketplace/taxonomy)) | — |
+| `industries` | Up to 3 industries the app is built for; leave it out for a cross-industry app | — |
+| `solutionType` | `app` (you keep upgrading it), `template` (the customer's to change — needs the `unmanaged` install mode) or `connector` (needs a declared connector); publish checks it against your built package. Left out: `app` | — |
+| `maturity` | `beta` or `stable`; left out: `stable` | — |
 | `tags` | The listing tags, sent as written. The catalog validates and stores them and refuses a bad list with a 400, which publish prints as it is; `[]` clears the stored tags, and leaving the key out keeps them | — |
 | `iconUrl` | A public http(s) icon URL | `--icon-url`, or `--icon-file` to upload one |
 | `homepageUrl` | Your project or docs URL | `--homepage-url` |
@@ -42,16 +45,19 @@ the declared keys below are the ones publish actually sends.
 | `readmePath` | A markdown file, relative to the manifest, read at publish time | `--readme-file`, `--readme` |
 | `translations` | Per-locale `displayName`, `description`, `tagline`, `readme` and `screenshotCaptions` | — |
 
+The four taxonomy keys are defined once, in `@objectstack/spec/marketplace`. Publish validates them and sends them; the hosted catalog's facet filters, its submission rule (at least one business function) and the console's facet chips and Beta badge arrive as each side adopts the taxonomy, so until then a value you declare is accepted and not yet shown.
+
 An official ObjectStack listing's `manifestId` is `app.objectstack.<app>` (`app.objectstack.hotcrm`, `app.objectstack.connector-github`); a partner listing uses its own reverse domain, `app.<partner>.<app>`.
 
 [HotCRM](https://github.com/objectstack-ai/hotcrm/blob/main/objectstack.manifest.json)
-is a worked example for the keys it carries:
+is a worked example for the keys it carries (shown with the business functions
+that replace its retired `category`):
 
 ```json
 {
   "manifestId": "app.objectstack.hotcrm",
   "displayName": "HotCRM",
-  "category": "crm",
+  "businessFunctions": ["sales", "customer_service", "marketing"],
   "license": "Apache-2.0",
   "iconUrl": "https://raw.githubusercontent.com/objectstack-ai/hotcrm/main/assets/icon.svg",
   "homepageUrl": "https://github.com/objectstack-ai/hotcrm",
@@ -90,6 +96,9 @@ with no image to caption. The schema also accepts `publisher` and `isStarter`,
 but the platform decides both: an author's value has no effect, so
 `os package publish` never sends them and prints a warning naming each one the
 file declares. `tags` is different: it is sent as written (see the table above).
+The file no longer accepts `visibility` (pass `--visibility`; publish refuses the
+key by name) nor `name`, `specVersion`, `skills` or `scaffold`, which nothing
+ever read: publish names each one still present so you can delete it.
 Put the icon, the description, the tags, the tagline and the README where the
 table above says, and nothing else.
 </Callout>
@@ -133,10 +142,11 @@ npx os verify        # boots the app in-process and proves it through the real H
 npm run build        # os build -> dist/objectstack.json
 ```
 
-Two declarations name the platform major your app is authored against:
-`engines.protocol` in the `defineStack` manifest, and `specVersion` in
-`objectstack.manifest.json`. A runtime outside the `engines.protocol` range
-refuses the app rather than half-loading it. See
+One declaration names the platform major your app is authored against:
+`engines.protocol` in the `defineStack` manifest. A runtime outside that range
+refuses the app rather than half-loading it. (The `specVersion` an older
+scaffold wrote into `objectstack.manifest.json` was never read, and spec 18
+retired it: delete it.) See
 [Validating metadata](/docs/deployment/validating-metadata) for what the checks
 cover.
 
@@ -189,7 +199,7 @@ the detail.
 
 1. **Finding the app.** In the Console, **Setup → Browse Marketplace** opens the
    **App Marketplace** page, which lists the approved apps; clicking one opens
-   its page with the README, version, category and license. A runtime started
+   its page with the README, version, business functions and license. A runtime started
    with `OS_CLOUD_URL=off` shows **App Marketplace is turned off** instead —
    [Cloud connection](/docs/deployment/cloud-connection) covers connecting one.
 2. **Installing.** Into a cloud environment, **Install to cloud…** opens a
@@ -230,7 +240,8 @@ the detail.
    `PATCH /api/v1/packages/:id/disable` with `422 WRITABLE_PACKAGE_REQUIRED`.
    A disable that would leave a validation rule reading a field the package
    adds is refused with `409 PACKAGE_DISABLE_RESTRICTED_BY_VALIDATION_RULE`
-   ([below](#disabling-a-module)).
+   ([below](#disabling-a-module)), and so is an enable that would serve a
+   rule reading a field a still-disabled package adds.
    To take an installed app away, uninstall it.
 8. **Upgrading.** You publish a new version; nothing running changes. An
    environment installed through the cloud shows **Update available → v…** and
@@ -254,8 +265,8 @@ loaded, and the app's page shows **Not loaded** with the protocol range it
 targets.
 
 To move, run `os migrate meta --from <the major you authored against>` on your
-source, apply what it lists, update `engines.protocol` and `specVersion`,
-rebuild, and publish a new version. [Upgrading](/docs/upgrading#the-metadata-app)
+source, apply what it lists, update `engines.protocol`, rebuild, and publish a
+new version. [Upgrading](/docs/upgrading#the-metadata-app)
 owns the loop.
 
 ## Extras: dependencies and modules
@@ -320,6 +331,14 @@ its data is kept.
   enabled module with `enableOnInstall: false` that would leave it disabled in
   that state answers the same `409`, and the module stays enabled; a fresh
   install with `enableOnInstall: false` lands disabled, as before.
+- **Enabling a rule over a disabled module's field.** The mirror order is
+  refused too: while the module is disabled, enabling a package whose
+  validation rule reads one of the module's fields (or one on an object that
+  package owns) answers the same `409`, naming each rule and the module to
+  enable first; nothing changes. Enable the module first, or switch the rule
+  off on the customer's copy of the object. A boot that lands in that state
+  anyway (the stored choice records only disables, so a newly shipped rule
+  boots enabled) logs one warning naming every rule and the remedies.
 
 **What your app's own code meets.** A hook of your app that reads or writes a
 module's object through `ctx.api.object('<object>')` runs inside the server,

@@ -130,7 +130,7 @@ describe('objectstack#27487 — console runtime: a flow-backed api action reads 
     const out = await runRecalc();
 
     expect(authFetchSpy).toHaveBeenCalledTimes(1);
-    expect(out).toEqual({ success: false, error: builtInLocales.zh.form.noPermissionToSave });
+    expect(out).toEqual({ success: false, error: builtInLocales['zh-Hans'].form.noPermissionToSave });
   });
 
   it('CONTROL: a 4xx that is not FLOW_FAILED reads its own message', async () => {

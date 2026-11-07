@@ -51,14 +51,16 @@
  * {@link ServedOverridesHost} members.
  */
 
-import { customizationPackageId } from '@objectstack/spec/kernel';
+import { pairOf } from '@objectstack/metadata-core';
 import { PLURAL_TO_SINGULAR } from '@objectstack/spec/shared';
 import { storedRowDocument } from './item-lock.js';
 import type { ObjectStackProtocolImplementation } from './protocol.js';
 import { isServedOverrideRowOf } from './served-override.js';
+import { installedManifestsOfEngine } from './installed-manifests.js';
 
 /** The class members {@link listServedOverrides} reads, typed as the class declares them. */
 export interface ServedOverridesHost {
+    readonly engine: ObjectStackProtocolImplementation['engine'];
     readonly findEnvironmentRows: ObjectStackProtocolImplementation['findEnvironmentRows'];
     readonly declinesStoredRow: ObjectStackProtocolImplementation['declinesStoredRow'];
     readonly rethrowUnlessMetadataStoreUnprovisioned: ObjectStackProtocolImplementation['rethrowUnlessMetadataStoreUnprovisioned'];
@@ -91,11 +93,12 @@ export interface ServedOverrideEntry {
  *         An unprovisioned table answers `[]`.
  */
 export async function listServedOverrides(
-    this: Pick<ServedOverridesHost, 'findEnvironmentRows' | 'declinesStoredRow' | 'rethrowUnlessMetadataStoreUnprovisioned'>,
+    this: Pick<ServedOverridesHost, 'engine' | 'findEnvironmentRows' | 'declinesStoredRow' | 'rethrowUnlessMetadataStoreUnprovisioned'>,
     request: { packageId: string },
 ): Promise<ServedOverrideEntry[]> {
     const base = request.packageId;
-    const pair = customizationPackageId(base);
+    const installed = installedManifestsOfEngine(this.engine);
+    const pair = pairOf(base, installed);
     if (!pair.ok) return [];
     let rows: any[] = [];
     try {
@@ -112,7 +115,7 @@ export async function listServedOverrides(
     const entries = new Map<string, ServedOverrideEntry>();
     for (const row of rows ?? []) {
         if (typeof row?.name !== 'string' || row.name === '') continue;
-        if (!isServedOverrideRowOf(row, base)) continue;
+        if (!isServedOverrideRowOf(row, base, installed)) continue;
         const type = PLURAL_TO_SINGULAR[row.type] ?? row.type;
         if (this.declinesStoredRow(type, row.name, row)) continue;
         const member = typeof row.bundle_member === 'string' && row.bundle_member !== '' ? row.bundle_member : undefined;

@@ -194,8 +194,13 @@ function makeCountingDriver() {
       // non-function declaration it cannot supply — `reads` among them — and
       // arithmetic on that stub throws before the body can be judged at all,
       // which files the double as UNJUDGED rather than as conforming.
+      // [#29029] The write's own reference check reads each lookup / user
+      // value it names through the caller's read door, projected to `id`
+      // alone: that read is the write's, not this plugin's, so it is not
+      // counted here.
+      const referenceCheckRead = Array.isArray(ast?.fields) && ast.fields.length === 1 && ast.fields[0] === 'id';
       const prior = reads.findOn[object];
-      reads.findOn[object] = (typeof prior === 'number' ? prior : 0) + 1;
+      if (!referenceCheckRead) reads.findOn[object] = (typeof prior === 'number' ? prior : 0) + 1;
       const matched = Array.from(storeFor(object).values())
         .filter((r) => matches(r, ast?.where));
       // The caller's bound: applied by PRESENCE (so `limit: 0` returns nothing),

@@ -19,7 +19,7 @@
  * `@objectstack/spec/kernel` (`customization-package.ts`), ⛔ never a local
  * spelling:
  *
- *   - id — {@link customizationPackageId}: `<base>.custom`;
+ *   - id — `customizationPackageId`, asked through {@link pairOf}: `<base>.custom`;
  *   - namespace — {@link customizationNamespace}: `<base namespace>_custom`, SET
  *     EXPLICITLY on the manifest so `installPackage`'s id-derived default
  *     (`deriveNamespaceFromPackageId('hotcrm.custom')` = `custom`) never runs
@@ -60,7 +60,10 @@
  *   - `400` — the request is malformed, or the base id has no pair (it is
  *     itself a pair, or `<base>.custom` is not a valid package id);
  *   - `404` — the base is not installed;
- *   - `409` — the base's state rules the pair out: the base is writable
+ *   - `409` — the base's state rules the pair out: the base is a kernel
+ *     package ({@link kernelPackageScopeOf}), whose objects are not
+ *     customizable in this version (ruling record 6691217245 on ADR-0146 D3);
+ *     the base is writable
  *     (customize it directly), declares no namespace, or has a namespace whose
  *     pair namespace fails the manifest grammar (longer than
  *     {@link MAX_CUSTOMIZATION_BASE_NAMESPACE_LENGTH}, no truncation and no
@@ -89,7 +92,7 @@
  */
 
 import type { ObjectStackProtocolImplementation } from './protocol.js';
-import { isWritablePackage } from './package-writability.js';
+import { isWritablePackage, READ_ONLY_PACKAGE_SCOPES } from './package-writability.js';
 import { EnsureCustomizationPackageRequestSchema } from '@objectstack/spec/api';
 import type {
     EnsureCustomizationPackageRequest,
@@ -101,8 +104,9 @@ import {
     customizationBasePackageId,
     customizationDependencyRange,
     customizationNamespace,
-    customizationPackageId,
 } from '@objectstack/spec/kernel';
+import { pairOf } from '@objectstack/metadata-core';
+import { installedManifestsOfEngine } from './installed-manifests.js';
 import type { CustomizationNamespaceRefusal } from '@objectstack/spec/kernel';
 
 /** The HTTP route that serves the door — named by every refusal that points at it. */
@@ -141,7 +145,37 @@ interface PairPackageRow {
         version?: unknown;
         namespace?: unknown;
         dependencies?: unknown;
+        scope?: unknown;
     };
+}
+
+/**
+ * [ADR-0146 D3, ruling record 6691217245] The kernel scope of an installed
+ * package — `system` or `cloud`, the scopes the platform delivers
+ * ({@link READ_ONLY_PACKAGE_SCOPES}) — or `undefined` for any other package.
+ * The kernel is one suite that ships with the runtime at the runtime's version
+ * (installing it whole is the goal ruling 6691022506 records), so it is no
+ * customer's unit to customize: in
+ * this version every kernel object is served as not customizable, and the
+ * ensure door creates no pair for a kernel package. Which kernel objects a
+ * later version opens to customization (a whitelist) is that version's
+ * question, not this predicate's.
+ */
+function kernelPackageScopeOf(row: PairPackageRow | undefined): string | undefined {
+    const scope = row?.manifest?.scope;
+    return typeof scope === 'string' && READ_ONLY_PACKAGE_SCOPES.includes(scope) ? scope : undefined;
+}
+
+/**
+ * [ruling record 6691217245] The kernel scope of `packageId` as `engine`'s
+ * registry holds it ({@link kernelPackageScopeOf}), or `undefined` for a
+ * package that is not a kernel package or is not installed. The door's own
+ * reading, for the callers that land something in a package's pair and must
+ * know beforehand that a kernel package has none (the "new similar" doors).
+ */
+export function kernelPackageScope(engine: unknown, packageId: string): string | undefined {
+    const manifest = installedManifestsOfEngine(engine)(packageId);
+    return kernelPackageScopeOf(manifest === undefined ? undefined : { manifest });
 }
 
 /**
@@ -252,7 +286,7 @@ export async function ensureCustomizationPackage(
     }
     const baseId = declared.data.basePackageId;
 
-    const pair = customizationPackageId(baseId);
+    const pair = pairOf(baseId, installedManifestsOfEngine(this.engine));
     if (!pair.ok) {
         throw refusal(400, pair.reason === 'base_is_customization_package'
             ? `Package '${baseId}' is itself a paired customization package, and a pair is never paired again: `
@@ -304,11 +338,33 @@ export function customizationPairEnsureRefusal(
     registry: PairRegistry,
     baseId: string,
     pairId: string,
+    options: {
+        /**
+         * `false` asks every other judgement of the door with the kernel
+         * verdict left out: the overlay-write closes read it so that a
+         * kernel item stays closed exactly where it was closed before the
+         * verdict (`overlayPairFixOf`). The door itself always judges it.
+         */
+        readonly judgeKernel?: boolean;
+    } = {},
 ): Error | undefined {
     const base = registry.getPackage(baseId);
     if (!base) {
         return refusal(404, `Package '${baseId}' not found: a paired customization package is ensured for an installed `
             + 'base.');
+    }
+    // [ruling record 6691217245] A kernel package has no pair in this
+    // version, ensured or created — the door's verdict, before anything else
+    // about the base is judged. It refuses the ENSURE only: a pair an earlier
+    // version of this door created for a kernel package stays installed, and
+    // the overrides inside it stay served and writable (the override gate and
+    // the served-override read never ask this door).
+    const kernelScope = options.judgeKernel === false ? undefined : kernelPackageScopeOf(base);
+    if (kernelScope !== undefined) {
+        return refusal(409, `Package '${baseId}' is a kernel package (scope '${kernelScope}'): kernel objects are not `
+            + `customizable in this version, so '${baseId}' has no paired customization package and '${pairId}' is `
+            + 'not ensured. A pair an earlier version created stays installed, and the overrides in it stay served '
+            + '(ADR-0146 D3).');
     }
     // ADR-0070 D2's one predicate. A writable base is the customer's own and
     // takes their changes directly; the pair exists for a base the customer

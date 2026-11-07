@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { PLATFORM_LOCALE_TAGS } from '@objectstack/spec/system';
 
 // Plain-JS CI helper; its types are INFERRED from the .mjs source by
 // `tsconfig.scripts.json` (`allowJs`) — same arrangement as
@@ -42,7 +43,7 @@ function reportWith(names: readonly string[]) {
   };
 }
 
-/** The ten emitted catalogue chunk files a healthy build writes. */
+/** The emitted catalogue chunk files a healthy build writes, one per code. */
 const ALL_EMITTED = BUILT_IN_LANGUAGE_CODES.map(
   (code: string) => `${CATALOGUE_CHUNK_PREFIX}${code}-Hash1.js`,
 );
@@ -54,21 +55,31 @@ describe('the population this gate looks for', () => {
    * look for. That duplication is only safe while something reds when the two
    * disagree, and this is that something.
    */
-  it('matches `BUILT_IN_LANGUAGE_CODES` in the i18n registry, code for code', () => {
-    const declared = /export const BUILT_IN_LANGUAGE_CODES[\s\S]*?\]\);/.exec(registrySource);
+  it('matches the platform locale table and the i18n registry, code for code', () => {
+    // The registry's `BUILT_IN_LANGUAGE_CODES` is the table's tags spread
+    // (objectstack#30511), so the table is the population to agree with.
+    const declared = /export const BUILT_IN_LANGUAGE_CODES[^\n]*\[\.\.\.PLATFORM_LOCALE_TAGS\]/.exec(
+      registrySource,
+    );
     expect(declared).not.toBeNull();
+    expect([...BUILT_IN_LANGUAGE_CODES]).toEqual([...PLATFORM_LOCALE_TAGS]);
 
-    // The registry spells the resident one as `DEFAULT_BUILT_IN_LANGUAGE` and
-    // spreads the other nine out of the loader table, so the codes are read
-    // from the two places they are actually written.
-    const resident = /export const DEFAULT_BUILT_IN_LANGUAGE = '([a-z-]+)';/.exec(registrySource);
+    // And the catalogues actually written: the resident one as
+    // `DEFAULT_BUILT_IN_LANGUAGE`, every other one as a loader-table entry,
+    // read from the two places they are spelled.
+    const resident = /export const DEFAULT_BUILT_IN_LANGUAGE = '([A-Za-z-]+)';/.exec(registrySource);
     expect(resident?.[1]).toBe(ACTIVE_CATALOGUE);
 
-    const loaderTable = /const LAZY_LOCALE_LOADERS[\s\S]*?\n {2}\}\);/.exec(registrySource);
+    const loaderTable = /const LAZY_LOCALE_LOADERS[\s\S]*?\n\}\);/.exec(registrySource);
     expect(loaderTable).not.toBeNull();
-    const lazyCodes = [...(loaderTable?.[0] ?? '').matchAll(/^\s{4}([a-z-]+): \(\) => import\(/gm)].map(
-      (m) => m[1],
-    );
+    const lazyCodes = [
+      ...(loaderTable?.[0] ?? '').matchAll(/^\s{2}'?([A-Za-z-]+)'?: \(\) => import\('\.\/([A-Za-z-]+)\.js'\)/gm),
+    ].map((m) => {
+      // A catalogue file is named for its tag; a loader that imports another
+      // tag's file would chunk under the wrong `i18n-locale-<code>` name.
+      expect(m[2]).toBe(m[1]);
+      return m[1];
+    });
     // Counter-probe: a regex that stopped matching would make the comparison
     // below `[resident] === [resident]` and agree with any registry at all.
     expect(lazyCodes.length).toBeGreaterThan(0);
@@ -77,8 +88,10 @@ describe('the population this gate looks for', () => {
   });
 
   it('reads a chunk name and a file name back to the same code', () => {
-    expect(catalogueCodeOfChunkName(`${CATALOGUE_CHUNK_PREFIX}zh`)).toBe('zh');
-    expect(catalogueCodeOfFileName(`assets/${CATALOGUE_CHUNK_PREFIX}zh-Bx9f1.js`)).toBe('zh');
+    expect(catalogueCodeOfChunkName(`${CATALOGUE_CHUNK_PREFIX}zh-Hans`)).toBe('zh-Hans');
+    expect(catalogueCodeOfFileName(`assets/${CATALOGUE_CHUNK_PREFIX}zh-Hans-Bx9f1.js`)).toBe('zh-Hans');
+    expect(catalogueCodeOfFileName(`assets/${CATALOGUE_CHUNK_PREFIX}zh-Hant-Bx9f1.js`)).toBe('zh-Hant');
+    expect(catalogueCodeOfFileName(`assets/${CATALOGUE_CHUNK_PREFIX}pt-BR-Bx9f1.js`)).toBe('pt-BR');
   });
 
   it('reads a hash that CONTAINS a hyphen — rolldown names chunks in base64url', () => {
@@ -91,7 +104,11 @@ describe('the population this gate looks for', () => {
     // shipped: the suite could not tell the two spellings apart.
     expect(catalogueCodeOfFileName('assets/i18n-locale-de-cTrdGXD-.js')).toBe('de');
     expect(catalogueCodeOfFileName('assets/i18n-locale-fr-CH3jagZ-.js')).toBe('fr');
-    expect(catalogueCodeOfFileName('assets/i18n-locale-zh-Ixe-DTac.js')).toBe('zh');
+    // The third measured name is the retired `zh` code's chunk: since
+    // objectstack#30511 the pack is `zh-Hans`, so that name is no code's at
+    // all, and the same hash on the renamed chunk reads as the new code.
+    expect(catalogueCodeOfFileName('assets/i18n-locale-zh-Ixe-DTac.js')).toBeNull();
+    expect(catalogueCodeOfFileName('assets/i18n-locale-zh-Hans-Ixe-DTac.js')).toBe('zh-Hans');
     // An underscore is in the same alphabet and was never exercised either.
     expect(catalogueCodeOfFileName('assets/i18n-locale-ja-Ab_c-1D2.js')).toBe('ja');
   });
@@ -105,8 +122,8 @@ describe('the population this gate looks for', () => {
       expect(catalogueCodeOfFileName(`assets/${CATALOGUE_CHUNK_PREFIX}${code}-Ab-cD.js`)).toBe(code);
     }
     // A hash has to actually follow the code.
-    expect(catalogueCodeOfFileName(`assets/${CATALOGUE_CHUNK_PREFIX}zh.js`)).toBeNull();
-    expect(catalogueCodeOfFileName(`assets/${CATALOGUE_CHUNK_PREFIX}zh-.js`)).toBeNull();
+    expect(catalogueCodeOfFileName(`assets/${CATALOGUE_CHUNK_PREFIX}zh-Hans.js`)).toBeNull();
+    expect(catalogueCodeOfFileName(`assets/${CATALOGUE_CHUNK_PREFIX}zh-Hans-.js`)).toBeNull();
   });
 
   it('claims nothing it should not — the matcher must be able to say no', () => {
@@ -135,14 +152,14 @@ describe('the verdict', () => {
     const verdict = evaluateEagerCatalogues(
       reportWith([
         `${CATALOGUE_CHUNK_PREFIX}${ACTIVE_CATALOGUE}`,
-        `${CATALOGUE_CHUNK_PREFIX}zh`,
+        `${CATALOGUE_CHUNK_PREFIX}zh-Hant`,
         `${CATALOGUE_CHUNK_PREFIX}ru`,
       ]),
       ALL_EMITTED,
     );
     expect(verdict.status).toBe('fail');
-    expect(verdict.eager).toEqual(['ru', 'zh']);
-    expect(verdict.message).toContain('ru, zh');
+    expect(verdict.eager).toEqual(['ru', 'zh-Hant']);
+    expect(verdict.message).toContain('ru, zh-Hant');
     // ⛔ The remedy must never read as "raise a ceiling": this failure is about
     // composition, and a byte ceiling cannot fix it.
     expect(verdict.message).toContain('Raising a byte ceiling does not address this');
@@ -187,10 +204,10 @@ describe('the counter-probes — a gate that cannot run must be LOUDER than one 
   it('errors when a catalogue was emitted under no chunk of its own', () => {
     const verdict = evaluateEagerCatalogues(
       reportWith([`${CATALOGUE_CHUNK_PREFIX}${ACTIVE_CATALOGUE}`]),
-      ALL_EMITTED.filter((f: string) => !f.includes(`${CATALOGUE_CHUNK_PREFIX}zh-`)),
+      ALL_EMITTED.filter((f: string) => !f.includes(`${CATALOGUE_CHUNK_PREFIX}zh-Hant-`)),
     );
     expect(verdict.status).toBe('error');
-    expect(verdict.message).toContain('zh');
+    expect(verdict.message).toContain('zh-Hant');
     expect(verdict.message).toContain('matching nothing agrees with everything');
   });
 

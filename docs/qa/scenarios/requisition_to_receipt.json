@@ -74,7 +74,7 @@
     "ai.ask-data",
     "ai.agent-actions"
   ],
-  "category": "operations",
+  "businessFunctions": ["supply_chain"],
   "run": {
     "seed": {
       "department": [

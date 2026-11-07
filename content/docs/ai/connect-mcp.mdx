@@ -245,7 +245,7 @@ decision.
 
 ## What the agent gets
 
-Twelve tools, generated from your metadata:
+Thirteen tools, generated from your metadata:
 
 | Tool | What it does |
 |:---|:---|
@@ -254,6 +254,7 @@ Twelve tools, generated from your metadata:
 | `query_records` / `get_record` | Read data (list queries are capped at 50 rows per page by default) |
 | `aggregate_records` | Grouped aggregation (registered when the active driver supports it) |
 | `create_record` / `update_record` / `delete_record` | Write data |
+| `delete_records` | Delete many records of one object, by a filter or an id list, at most 200 per call (an OAuth token needs both `data:read` and `data:write`) |
 | `list_actions` / `run_action` | Discover and invoke your business actions by name |
 | `resume_run` | Finish a flow action that paused on a screen, by submitting the screen's values |
 
@@ -360,8 +361,16 @@ drive this MCP server. Same word, different layer.
 - **Every call runs as the caller.** The MCP bridge resolves the same
   `ExecutionContext` as a REST request, so RBAC, row-level security, and
   field-level security apply to the agent exactly as they do to a person in
-  the Console. Sparse results or denied writes usually mean governance is
-  *working*, not that the connection is broken.
+  the Console. Schema discovery is included: `describe_object`,
+  `list_objects`' `fieldCount` and the fields `validate_expression` puts in
+  scope name only the fields the caller can read, the same field set
+  `GET /api/v1/meta/object/:name` serves that caller. `list_actions` follows
+  the same projection: an action that object door withholds from the caller
+  (one whose param binds a field the caller cannot read) is not listed, and a
+  listed action's params carry no label, help text or options of such a
+  field. Sparse results or denied
+  writes usually mean governance is *working*, not that the connection is
+  broken.
 - **OAuth scopes narrow the toolset.** Tokens carry `data:read`,
   `data:write`, and `actions:execute` scopes — tools outside the granted
   scopes are not even registered for that session. API-key and session
@@ -371,6 +380,21 @@ drive this MCP server. Same word, different layer.
   person publishes in the UI); it is served only to a token that carries it,
   never to an API key or a session, and every authoring call is still checked
   against the caller's own metadata permission.
+- **A person can withdraw an assistant they authorized, at any time.**
+  `GET /api/v1/auth/authorized-clients` lists the assistants the signed-in
+  person authorized (each row's `id` is the grant), and
+  `POST /api/v1/auth/authorized-clients/withdraw` with `{ "id": "…" }` revokes
+  one: the grant and the client's refresh tokens are deleted, so the
+  assistant's token is refused on its very next call and the assistant must
+  be authorized again to reconnect. Only the person's own grant is withdrawn;
+  an id that is someone else's answers `404`, exactly as one that names
+  nothing. A platform administrator does the same for a person with
+  `GET /api/v1/auth/admin/authorized-clients?userId=…` and
+  `POST /api/v1/auth/admin/authorized-clients/withdraw` with
+  `{ "userId": "…", "id": "…" }`; a request with no session is refused
+  `401`, and anyone else who is signed in is refused `403`. The SDK
+  spells them `oauth.authorizedClients.list()` / `withdraw(id)` and
+  `listForUser(userId)` / `withdrawForUser(userId, id)`.
 - **Action bodies run as trusted app code** once invoked (the `ai.exposed`
   gate and `requiredPermissions` are checked at *invoke* time). Treat writing
   an action as a code-review-worthy act — that's the real security boundary.
@@ -383,6 +407,25 @@ drive this MCP server. Same word, different layer.
   with `confirm: true`; the flag asserts an approval, it does not obtain one.
   REST `DELETE /api/v1/data/:object/:id` and `update_record` take no
   confirmation.
+- **`delete_records` takes the same gate, and its refusal is the preview.** A
+  call without `confirm: true` reads the selection as the caller and deletes
+  nothing: the same `428` refusal (`details.actionName` naming
+  `delete_records`) arrives with a `preview` beside it, saying how many records
+  match, how many a confirmed call attempts and a sample of their ids, for the
+  agent to show its human. A confirmed call deletes at most 200 records, each
+  exactly as `delete_record` would: under the caller's permissions and
+  row-level security, and through the object's delete rules (a package's
+  locking hook, a restricted relation), which no caller bypasses, an
+  administrator included. Records a rule refuses stay, and the answer counts
+  them grouped by reason with their ids; when more than 200 match it says how
+  many remain, and the next call continues. On a deployment whose read page
+  size or row budget (`OS_DATA_MAX_PAGE_SIZE`, `OS_DATA_QUERY_ROW_BUDGET`) is
+  under 200, one call runs at that size instead, and the answer's `cap` says
+  so. A fault (a store error, a crash)
+  is not a refusal: it stops the call, and the error names the record it
+  stopped at and how many were already deleted. Because the preview reads ids
+  and a count, an OAuth token is offered the tool only when it carries both
+  `data:read` and `data:write`.
 
 ## Verify the connection
 
@@ -411,7 +454,7 @@ call '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":
 # → {"result":{"serverInfo":{"name":"objectstack",...},"capabilities":{"tools":{...},"prompts":{}}},...}
 
 call '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' | grep -o '"name":"[a-z_]*"'
-# → the twelve tools, list_objects … resume_run
+# → the thirteen tools, list_objects … resume_run
 
 call '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"query_records","arguments":{"objectName":"crm_opportunity","limit":3}}}'
 # → {"result":{"content":[{"type":"text","text":"{ \"object\": \"crm_opportunity\", \"records\": [ ... ], \"total\": 23, \"hasMore\": true }"}]}}
@@ -450,7 +493,7 @@ skill and a guided `/objectstack:connect` command.
 | stdio won't start / boot fails closed | `OS_MCP_STDIO_ENABLED=true` but `OS_MCP_STDIO_API_KEY` is missing, unknown, revoked, or expired — fail-closed by design (ADR-0101). Set a valid `osk_` key; there is no unscoped or `system` fallback |
 | `401` on every call | Anonymous or invalid credentials. Interactive clients: complete the browser login (the `WWW-Authenticate` header advertises the OAuth metadata). Headless: check the `osk_` key and header spelling |
 | `403 insufficient_scope` | The OAuth token lacks the scope for that tool family (e.g. writes without `data:write`) — reconnect and grant the scope |
-| An action is missing from `list_actions` | `ai.exposed` is not `true`, `ai.description` is shorter than 40 characters, the type isn't headless-callable here (`script` with a body/handler, `flow` with an automation service, and `api` with a same-origin `target` are — `url`, `modal`, `form`, and an `api` action whose `target` is on another origin never appear), it targets `sys_metadata` / `sys_metadata_history` (refused even when flagged — use the metadata API), or the caller fails its `requiredPermissions` |
+| An action is missing from `list_actions` | `ai.exposed` is not `true`, `ai.description` is shorter than 40 characters, the type isn't headless-callable here (`script` with a body/handler, `flow` with an automation service, and `api` with a same-origin `target` are — `url`, `modal`, `form`, and an `api` action whose `target` is on another origin never appear), it targets `sys_metadata` / `sys_metadata_history` (refused even when flagged — use the metadata API), or the caller fails its `requiredPermissions`, or one of its params binds a field the caller cannot read |
 | Reads return few rows / writes denied | Working as designed — the caller's permissions and RLS apply. Verify with the same user in the Console |
 
 ## Related

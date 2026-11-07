@@ -1,0 +1,156 @@
+---
+title: Taxonomy — Marketplace Protocol reference
+navTitle: Taxonomy
+description: "Marketplace taxonomy — the ONE classification of a listed package. Reference for every Taxonomy property with its type and default."
+---
+
+{/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
+
+Marketplace taxonomy — the ONE classification of a listed package.
+
+A package used to carry a single `category`, and that one value had to say
+two different things at once: who the package is FOR (a business function)
+and what it IS (a full app, a template, a connector). The platform declared
+it as a closed enum on the listing (`MarketplaceCategorySchema`) and as an
+open string on the package (`PackageCategorySchema`), the cloud catalog kept
+a third list, and the scenario library copied the third — four lists that
+agreed on five values. A connector filed under `integrations` lost the
+business function it served; one `operations` value held three functions.
+
+The maintainer's ruling replaced it with three facets and one separate flag,
+defined here once and read by every surface — the CLI publish path, the cloud
+catalog and the console marketplace — so there is no second list to drift:
+
+| Facet | Key | Arity | Required |
+|:--|:--|:--|:--|
+| Business function | `businessFunctions` | 1–3, ordered, the first is primary | to submit to the marketplace |
+| Industry | `industries` | 0–3 | never — absent means cross-industry |
+| Solution type | `solutionType` | one | no — absent means `app` |
+| Maturity (not a facet) | `maturity` | one | no — absent means `stable` |
+
+Filtering semantics the catalog applies: OR inside one facet, AND across
+facets. Free-text `tags` stay for search only and generate no filter.
+
+## Growing a facet
+
+Every value is a lowercase identifier (`SystemIdentifierSchema`, the grammar
+of `SelectOptionSchema.value`): words joined by `_`, never `-`, so a select
+field — the cloud catalog's facet columns, a console filter — can carry the
+facet as its options unchanged.
+
+Values are append-only. Renaming or removing one is an ADR-0087 retirement
+with a data migration. Adding one needs a real listed package, or a ruled
+scenario card, that needs it, and the console's labels in the same change.
+Keep each facet near a dozen values; merge before you grow.
+
+## What is deliberately absent
+
+- No `general` / `cross-industry` industry: absence already means that, and a
+  catch-all value is the one every author (an AI author first) would tick.
+- No `theme` solution type: ADR-0019 lists only apps, and a theme ships
+  inside one.
+- No company-size facet: nothing in the catalog or the scenario library uses
+  one.
+- No `other` value anywhere: an unclassifiable package is a question for its
+  author, never a bucket.
+
+<Callout type="info">
+**Source:** `packages/spec/src/marketplace/taxonomy.zod.ts`
+</Callout>
+
+## TypeScript Usage
+
+```typescript
+import { MarketplaceBusinessFunctionSchema, MarketplaceBusinessFunctionsSchema, MarketplaceIndustriesSchema, MarketplaceIndustrySchema, MarketplaceSolutionTypeSchema, PackageMaturitySchema } from '@objectstack/spec/marketplace';
+import type { MarketplaceBusinessFunction, MarketplaceBusinessFunctions, MarketplaceIndustries, MarketplaceIndustry, MarketplaceSolutionType, PackageMaturity } from '@objectstack/spec/marketplace';
+
+// Validate data
+const result = MarketplaceBusinessFunctionSchema.parse(data);
+```
+
+---
+
+## MarketplaceBusinessFunction
+
+Business function a marketplace package serves
+
+### Allowed Values
+
+* `sales`
+* `marketing`
+* `customer_service`
+* `finance`
+* `hr`
+* `supply_chain`
+* `administration`
+* `project`
+* `legal`
+* `it`
+* `collaboration`
+
+
+---
+
+## MarketplaceBusinessFunctions
+
+Business functions the package serves: 1-3 distinct values, the first is primary
+
+**Type:** `Enum<'sales' | 'marketing' | 'customer_service' | 'finance' | 'hr' | 'supply_chain' | 'administration' | 'project' | 'legal' | 'it' | 'collaboration'>[]`
+
+
+---
+
+## MarketplaceIndustries
+
+Industries the package is built for: up to 3 distinct values; absent means cross-industry
+
+**Type:** `Enum<'manufacturing' | 'trade_distribution' | 'retail' | 'logistics' | 'professional_services' | 'financial_services' | 'healthcare' | 'education' | 'public_sector' | 'real_estate_construction'>[]`
+
+
+---
+
+## MarketplaceIndustry
+
+Industry a marketplace package is built for
+
+### Allowed Values
+
+* `manufacturing`
+* `trade_distribution`
+* `retail`
+* `logistics`
+* `professional_services`
+* `financial_services`
+* `healthcare`
+* `education`
+* `public_sector`
+* `real_estate_construction`
+
+
+---
+
+## MarketplaceSolutionType
+
+What a marketplace package is: a managed app, an unmanaged template, or a connector
+
+### Allowed Values
+
+* `app`
+* `template`
+* `connector`
+
+
+---
+
+## PackageMaturity
+
+Package maturity: beta shows a badge on the listing; absent means stable
+
+### Allowed Values
+
+* `beta`
+* `stable`
+
+
+---
+

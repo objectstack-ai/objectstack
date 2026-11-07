@@ -407,6 +407,10 @@ const DURABILITY_CRITICAL_CALLEES = new Map([
         'The compliance audit row for a business-action invocation was never written — the action itself answered exactly as it would have without the ledger, so the API, the data and every counter read clean, while the `sys_audit_log` row recording WHICH DOOR (REST or MCP) invoked it, and who called it, is simply absent and nothing retries it. An administrator asking whether an agent or a person ran it finds no answer (#27908, the #5226 shape on the action seam).',
     ],
     [
+        'persistDataExportAuditRow',
+        'The compliance audit row for a data export was never written — the export itself was served and the caller holds the file, so the API, the download and every counter read clean, while the `sys_audit_log` row recording WHO exported WHICH object, how many rows and under which filter is simply absent and nothing retries it. The shipped `config_changes` list view and the Enterprise audit export read exactly those rows, so an auditor asking who took the data out finds no answer (#30955, the #5226 shape on the export seam).',
+    ],
+    [
         'deleteMetaItemFromLoader',
         'The metadata definition was never deleted from the authoritative store — `unregister()` still resolves and still announces `deleted`, the in-memory registry entry is gone, and the surviving row is read straight back out of storage by the very next `list()`/`get()`, so the "deleted" item reappears and survives every restart. Nothing retries it (#5259).',
     ],

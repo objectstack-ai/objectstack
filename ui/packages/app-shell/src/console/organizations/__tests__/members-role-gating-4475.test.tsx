@@ -185,6 +185,7 @@ vi.mock('lucide-react', async (importOriginal) => {
 import { builtInLocales } from '@object-ui/i18n/locales';
 import { MembersPage } from '../manage/MembersPage';
 import { InvitationsPage } from '../manage/InvitationsPage';
+import { PLATFORM_LOCALE_TAGS } from '@objectstack/spec/system';
 
 // ── Harness ──────────────────────────────────────────────────────────────────
 
@@ -394,13 +395,13 @@ describe('#4475 — the invitations tab gates copy-link and cancel', () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// #4474's channel: one new string, present in all ten packs
+// #4474's channel: one new string, present in every pack
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('#4475 — the new note is translatable in every pack', () => {
-  it('all ten packs define organization.members.inviteRestrictedNote', () => {
+  it('every pack defines organization.members.inviteRestrictedNote', () => {
     const langs = Object.keys(builtInLocales) as Array<keyof typeof builtInLocales>;
-    expect(langs.length).toBe(10);
+    expect(langs.length).toBe(PLATFORM_LOCALE_TAGS.length);
     for (const lang of langs) {
       const value = (builtInLocales[lang] as any).organization?.members?.inviteRestrictedNote;
       expect(typeof value, `${lang}.organization.members.inviteRestrictedNote`).toBe('string');

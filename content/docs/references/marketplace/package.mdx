@@ -29,8 +29,8 @@ See `docs/adr/0003-package-as-first-class-citizen.md` for the full rationale.
 ## TypeScript Usage
 
 ```typescript
-import { CreatePackageRequestSchema, PackageSchema, PackageCategorySchema, PackageLocaleSchema, PackagePublisherSchema, PackageTranslationSchema, PackageTranslationsSchema, PackageVisibilitySchema, UpdatePackageRequestSchema } from '@objectstack/spec/marketplace';
-import type { CreatePackageRequest, Package, PackageCategory, PackageLocale, PackagePublisher, PackageTranslation, PackageTranslations, PackageVisibility, UpdatePackageRequest } from '@objectstack/spec/marketplace';
+import { CreatePackageRequestSchema, PackageSchema, PackageLocaleSchema, PackagePublisherSchema, PackageTranslationSchema, PackageTranslationsSchema, PackageVisibilitySchema, UpdatePackageRequestSchema } from '@objectstack/spec/marketplace';
+import type { CreatePackageRequest, Package, PackageLocale, PackagePublisher, PackageTranslation, PackageTranslations, PackageVisibility, UpdatePackageRequest } from '@objectstack/spec/marketplace';
 
 // Validate data
 const result = CreatePackageRequestSchema.parse(data);
@@ -52,7 +52,11 @@ Register a new package in the Control Plane
 | **displayName** | `string` | ✅ | Display name shown in Studio and Marketplace |
 | **description** | `string` | optional | Short package description |
 | **visibility** | `Enum<'private' \| 'org' \| 'marketplace'>` | optional | Package visibility: private = owner org only; org = all envs in owner org; marketplace = public registry |
-| **category** | `string` | optional | Package category for marketplace discovery (e.g. "crm", "hr", "finance", "devtools") |
+| **category** | `never` | optional | [REMOVED] `CreatePackageRequest.category` was removed in @objectstack/spec 18 (ADR-0087) — one category had to say both who a package is for and what it is, and the platform and the cloud catalog spelled it from lists that disagreed. Delete the key. Declare `businessFunctions` (1-3 business functions, the primary one first), optionally `industries` (up to 3; absent means cross-industry) and `solutionType` (`app`, `template` or `connector`; absent means `app`). `LEGACY_CATEGORY_MAPPING` in @objectstack/spec/marketplace gives the facets for every old category value. |
+| **businessFunctions** | `Enum<'sales' \| 'marketing' \| 'customer_service' \| 'finance' \| 'hr' \| 'supply_chain' \| 'administration' \| 'project' \| 'legal' \| 'it' \| 'collaboration'>[]` | optional | Business functions the package serves: 1-3 distinct values, the first is primary |
+| **industries** | `Enum<'manufacturing' \| 'trade_distribution' \| 'retail' \| 'logistics' \| 'professional_services' \| 'financial_services' \| 'healthcare' \| 'education' \| 'public_sector' \| 'real_estate_construction'>[]` | optional | Industries the package is built for: up to 3 distinct values; absent means cross-industry |
+| **solutionType** | `Enum<'app' \| 'template' \| 'connector'>` | optional | What a marketplace package is: a managed app, an unmanaged template, or a connector |
+| **maturity** | `Enum<'beta' \| 'stable'>` | optional | Package maturity: beta shows a badge on the listing; absent means stable |
 | **tags** | `string[]` | optional |  |
 | **iconUrl** | `string` | optional |  |
 | **homepageUrl** | `string` | optional |  |
@@ -91,7 +95,11 @@ Per-locale overrides for a package listing
 | **description** | `string` | optional | Short package description |
 | **readme** | `string` | optional | Long-form package documentation (markdown) |
 | **visibility** | `Enum<'private' \| 'org' \| 'marketplace'>` | optional (default: `"org"`) | Package visibility: private = owner org only; org = all envs in owner org; marketplace = public registry |
-| **category** | `string` | optional | Package category for marketplace discovery (e.g. "crm", "hr", "finance", "devtools") |
+| **category** | `never` | optional | [REMOVED] `Package.category` was removed in @objectstack/spec 18 (ADR-0087) — one category had to say both who a package is for and what it is, and the platform and the cloud catalog spelled it from lists that disagreed. Delete the key. Declare `businessFunctions` (1-3 business functions, the primary one first), optionally `industries` (up to 3; absent means cross-industry) and `solutionType` (`app`, `template` or `connector`; absent means `app`). `LEGACY_CATEGORY_MAPPING` in @objectstack/spec/marketplace gives the facets for every old category value. |
+| **businessFunctions** | `Enum<'sales' \| 'marketing' \| 'customer_service' \| 'finance' \| 'hr' \| 'supply_chain' \| 'administration' \| 'project' \| 'legal' \| 'it' \| 'collaboration'>[]` | optional | Business functions the package serves: 1-3 distinct values, the first is primary |
+| **industries** | `Enum<'manufacturing' \| 'trade_distribution' \| 'retail' \| 'logistics' \| 'professional_services' \| 'financial_services' \| 'healthcare' \| 'education' \| 'public_sector' \| 'real_estate_construction'>[]` | optional | Industries the package is built for: up to 3 distinct values; absent means cross-industry |
+| **solutionType** | `Enum<'app' \| 'template' \| 'connector'>` | optional (default: `"app"`) | What a marketplace package is: a managed app, an unmanaged template, or a connector |
+| **maturity** | `Enum<'beta' \| 'stable'>` | optional (default: `"stable"`) | Package maturity: beta shows a badge on the listing; absent means stable |
 | **tags** | `string[]` | optional | Search and filter tags |
 | **iconUrl** | `string` | optional | Package icon URL |
 | **homepageUrl** | `string` | optional | Package homepage URL |
@@ -114,15 +122,6 @@ Per-locale overrides for a package listing
 | **readme** | `string` | optional | Localized long-form readme (markdown) |
 | **tagline** | `string` | optional | Localized short tagline (marketplace listing only) |
 | **screenshotCaptions** | `Record<string, string>` | optional | Per-index screenshot caption overrides |
-
-
----
-
-## PackageCategory
-
-Package category for marketplace discovery (e.g. "crm", "hr", "finance", "devtools")
-
-**Type:** `string`
 
 
 ---
@@ -201,7 +200,11 @@ Update mutable package metadata
 | **description** | `string` | optional | Short package description |
 | **readme** | `string` | optional | Long-form package documentation (markdown) |
 | **visibility** | `Enum<'private' \| 'org' \| 'marketplace'>` | optional | Package visibility: private = owner org only; org = all envs in owner org; marketplace = public registry |
-| **category** | `string` | optional | Package category for marketplace discovery (e.g. "crm", "hr", "finance", "devtools") |
+| **category** | `never` | optional | [REMOVED] `UpdatePackageRequest.category` was removed in @objectstack/spec 18 (ADR-0087) — one category had to say both who a package is for and what it is, and the platform and the cloud catalog spelled it from lists that disagreed. Delete the key. Declare `businessFunctions` (1-3 business functions, the primary one first), optionally `industries` (up to 3; absent means cross-industry) and `solutionType` (`app`, `template` or `connector`; absent means `app`). `LEGACY_CATEGORY_MAPPING` in @objectstack/spec/marketplace gives the facets for every old category value. |
+| **businessFunctions** | `Enum<'sales' \| 'marketing' \| 'customer_service' \| 'finance' \| 'hr' \| 'supply_chain' \| 'administration' \| 'project' \| 'legal' \| 'it' \| 'collaboration'>[]` | optional | Business functions the package serves: 1-3 distinct values, the first is primary |
+| **industries** | `Enum<'manufacturing' \| 'trade_distribution' \| 'retail' \| 'logistics' \| 'professional_services' \| 'financial_services' \| 'healthcare' \| 'education' \| 'public_sector' \| 'real_estate_construction'>[]` | optional | Industries the package is built for: up to 3 distinct values; absent means cross-industry |
+| **solutionType** | `Enum<'app' \| 'template' \| 'connector'>` | optional | What a marketplace package is: a managed app, an unmanaged template, or a connector |
+| **maturity** | `Enum<'beta' \| 'stable'>` | optional | Package maturity: beta shows a badge on the listing; absent means stable |
 | **tags** | `string[]` | optional |  |
 | **iconUrl** | `string` | optional |  |
 | **homepageUrl** | `string` | optional |  |

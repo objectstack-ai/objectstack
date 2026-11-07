@@ -11,7 +11,7 @@
 import { describe, it, expect } from 'vitest';
 import { builtInLocales } from '../locales';
 
-const sentence = (lang: 'en' | 'zh') =>
+const sentence = (lang: 'en' | 'zh-Hans') =>
   (builtInLocales[lang] as unknown as { console: { studio: { accessRequired: string } } }).console.studio.accessRequired;
 
 describe('the Studio access refusal names who grants it (objectstack#27521)', () => {
@@ -22,7 +22,7 @@ describe('the Studio access refusal names who grants it (objectstack#27521)', ()
   });
 
   it('zh: 管理员，在「设置 → 权限集分配」', () => {
-    expect(sentence('zh')).toMatch(/管理员/u);
-    expect(sentence('zh')).toMatch(/设置 → 权限集分配/u);
+    expect(sentence('zh-Hans')).toMatch(/管理员/u);
+    expect(sentence('zh-Hans')).toMatch(/设置 → 权限集分配/u);
   });
 });

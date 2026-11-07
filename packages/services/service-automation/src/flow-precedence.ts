@@ -85,13 +85,12 @@
 // tsup config externalises only `dependencies`/`peerDependencies` the bundler
 // answered it by inlining objectql's implementation into this package's dist.
 // `pnpm check:undeclared-dep-imports` is the gate over that class.
-import { isCodeArtifactBody } from '@objectstack/metadata-core';
+import { isCodeArtifactBody, pairOf, type InstalledManifestLookup } from '@objectstack/metadata-core';
 // [#28412, ADR-0146 D9 item 1] The one served-override predicate (N-10) and
 // the stored row's own binding the protocol's hydration records — never a
 // second spelling of "is this the declared override", and never the body's
 // `_packageId`.
 import { isServedOverrideRowOf, storedRowBindingOf } from '@objectstack/metadata-protocol';
-import { customizationPackageId } from '@objectstack/spec/kernel';
 import type { FlowContender, FlowShadowingRecord, PackagedFlowSource } from './engine.js';
 
 /** One flow name's resolved winner, plus the receipt when it displaced others. */
@@ -141,13 +140,13 @@ function loaderSetOwner(packagedFlowOwner: PackagedFlowSource | undefined, name:
  * `runtime` contender keeps a body's id for display only —
  * {@link renderFlowContender} never prints it.
  */
-function classifyContender(item: unknown, owner: string | undefined): FlowContender {
+function classifyContender(item: unknown, owner: string | undefined, installed: InstalledManifestLookup): FlowContender {
     const packageId = (item as { _packageId?: unknown } | null | undefined)?._packageId;
     // [#28412, ADR-0146 D9 item 1] Asked FIRST, and only inside a held name:
     // the owner's declared override, by its stored binding (see the header).
     if (owner !== undefined) {
         const binding = storedRowBindingOf(item);
-        if (isServedOverrideRowOf({ type: 'flow', package_id: binding, metadata: item }, owner)) {
+        if (isServedOverrideRowOf({ type: 'flow', package_id: binding, metadata: item }, owner, installed)) {
             return { source: 'override', packageId: binding as string };
         }
     }
@@ -182,9 +181,13 @@ function classifyContender(item: unknown, owner: string | undefined): FlowConten
  * cannot tell a tenant overlay bound to a package from a code artifact (see
  * `isTenantAuthored` in `@objectstack/metadata-core`, and cloud#970).
  */
-export function describeFlowContender(item: unknown, packagedFlowOwner?: PackagedFlowSource): FlowContender {
+export function describeFlowContender(
+    item: unknown,
+    packagedFlowOwner: PackagedFlowSource | undefined,
+    installed: InstalledManifestLookup,
+): FlowContender {
     const name = (item as { name?: unknown } | null | undefined)?.name;
-    return classifyContender(item, loaderSetOwner(packagedFlowOwner, name));
+    return classifyContender(item, loaderSetOwner(packagedFlowOwner, name), installed);
 }
 
 /**
@@ -255,8 +258,8 @@ function precedenceRank(contender: FlowContender): number {
  * ⛔ No longer "clone": the clone is a second flow beside the base, and both
  * run.
  */
-function undeclaredRemedy(owner: string | undefined): string {
-    const pair = owner === undefined ? undefined : customizationPackageId(owner);
+function undeclaredRemedy(owner: string | undefined, installed: InstalledManifestLookup): string {
+    const pair = owner === undefined ? undefined : pairOf(owner, installed);
     const where = pair?.ok
         ? `declare it as an override in '${pair.value}' (overrides: { package: '${owner}', basedOn })`
         : 'declare it as an override in the shipping package\'s paired .custom package';
@@ -305,11 +308,16 @@ function undeclaredRemedy(owner: string | undefined): string {
  * @param logger             warned once per colliding name, naming both contenders
  * @param packagedFlowOwner  the loader's set — the boot pull passes the engine's
  *                           `packagedFlowOwner`; absent, no contender is packaged
+ * @param installed          the installed manifests of the registry the flows
+ *                           come from: the declared override of a shipped flow
+ *                           is its App's pair's (`pairOf` in
+ *                           `@objectstack/metadata-core`)
  */
 export function resolveFlowPrecedence(
     items: readonly unknown[],
-    logger?: { warn(message: string, meta?: unknown): void },
-    packagedFlowOwner?: PackagedFlowSource,
+    logger: { warn(message: string, meta?: unknown): void } | undefined,
+    packagedFlowOwner: PackagedFlowSource | undefined,
+    installed: InstalledManifestLookup,
 ): FlowPrecedenceWinner[] {
     // Group by bare name, remembering arrival order for a stable tie-break.
     const groups = new Map<string, Array<{ definition: unknown; index: number }>>();
@@ -337,7 +345,7 @@ export function resolveFlowPrecedence(
         const owner = loaderSetOwner(packagedFlowOwner, name);
         const group = members.map((member) => ({
             ...member,
-            contender: classifyContender(member.definition, owner),
+            contender: classifyContender(member.definition, owner, installed),
         }));
         const ranked = [...group].sort((a, b) => {
             const byRank = precedenceRank(a.contender) - precedenceRank(b.contender);
@@ -381,7 +389,7 @@ export function resolveFlowPrecedence(
                     ? ' by package id'
                     : ' by arrival order';
         const remedy = sealedOverStored
-            ? undeclaredRemedy(owner)
+            ? undeclaredRemedy(owner, installed)
             : 'Rename one of them.';
         logger?.warn(
             `[Automation] Flow name collision: '${name}' is claimed by ${group.length} definitions ` +

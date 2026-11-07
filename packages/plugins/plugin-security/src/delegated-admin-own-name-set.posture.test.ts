@@ -43,6 +43,9 @@ const eastScope = (allow: string[]) => ({
   assignablePermissionSets: allow,
 });
 const CRUD = { sys_user_position: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true } };
+/** [#29029] A plain object whose `unit` lookup names a business unit. */
+const UNIT_NOTE = 'qa_unit_note';
+const NOTE_CRUD = { allowRead: true, allowCreate: true, allowEdit: true };
 
 /**
  * The catalog. `field_rep` and `field_lead` each list only `field_user`, and
@@ -60,7 +63,9 @@ const PERMISSIONS = [
   // Carries an adminScope equal to the wide delegate's own: not strictly contained by it.
   { name: 'field_lead', label: 'Field lead (own name)', objects: CRUD, adminScope: eastScope(['field_user', 'field_rep', 'field_lead']) },
   // Narrow: allowlists the sets the positions LIST, not their own-name sets.
-  { name: 'east_admin', label: 'East delegate', objects: CRUD, adminScope: eastScope(['field_user']) },
+  { name: 'east_admin', label: 'East delegate', objects: { ...CRUD, [UNIT_NOTE]: NOTE_CRUD }, adminScope: eastScope(['field_user']) },
+  // [#29029] A writer of the unit note with no admin scope at all.
+  { name: 'note_writer', label: 'Note writer', objects: { [UNIT_NOTE]: NOTE_CRUD } },
   // Wide: also allowlists the own-name sets.
   { name: 'east_admin_wide', label: 'East delegate (wide)', objects: CRUD, adminScope: eastScope(['field_user', 'field_rep', 'field_lead']) },
 ];
@@ -74,8 +79,10 @@ const POSITIONS = [
 type Posture = 'single' | 'group' | 'isolated';
 const POSTURES: Posture[] = ['single', 'group', 'isolated'];
 
+/** The users of `ORG_A`, as the runtime resolves them onto every session's context from `sys_member`. */
+const ORG_USER_IDS = ['u_delegate', 'u_delegate_wide', 'u_target', 'u_writer', 'u_org_admin'];
 const delegateCtx = (userId: string, set: string) =>
-  ({ userId, positions: [], permissions: [set], tenantId: ORG_A, accessible_org_ids: [ORG_A] });
+  ({ userId, positions: [], permissions: [set], tenantId: ORG_A, accessible_org_ids: [ORG_A], org_user_ids: ORG_USER_IDS });
 const NARROW = delegateCtx('u_delegate', 'east_admin');
 const WIDE = delegateCtx('u_delegate_wide', 'east_admin_wide');
 
@@ -100,11 +107,22 @@ async function boot(posture: Posture) {
     version: '1.0.0',
     type: 'plugin',
     scope: 'system',
-    objects: [SysUserPosition, SysUserPermissionSet, SysMember, SysBusinessUnit, SysBusinessUnitMember],
+    // [#29029] `sys_user` provisioned: an assignment's `user_id` names a user
+    // the caller must be able to read, so the table the read door asks exists.
+    objects: [
+      SysUser, SysUserPosition, SysUserPermissionSet, SysMember, SysBusinessUnit, SysBusinessUnitMember,
+      {
+        name: UNIT_NOTE,
+        label: 'Unit note',
+        sharingModel: 'public_read_write',
+        fields: {
+          name: { name: 'name', type: 'text' },
+          unit: { name: 'unit', type: 'lookup', reference: 'sys_business_unit' },
+        },
+      },
+    ],
   } as any);
   await engine.syncSchemas();
-  // `sys_user` registered and unprovisioned, as in the sibling posture suite.
-  if (!engine.registry.getObject(SysUser.name)) engine.registry.registerObject(SysUser as never, 'qa.delegated-own-name');
   engines.push(engine);
 
   const services: Record<string, unknown> = {
@@ -140,8 +158,10 @@ async function boot(posture: Posture) {
     { id: 'bu_east', name: 'east', parent_business_unit_id: 'bu_hq', organization_id: ORG_A },
     { id: 'bu_east_field', name: 'east_field', parent_business_unit_id: 'bu_east', organization_id: ORG_A },
   ], sys);
-  for (const userId of ['u_delegate', 'u_delegate_wide', 'u_target']) {
-    await engine.insert('sys_member', { id: `m_${userId}`, user_id: userId, organization_id: ORG_A, role: 'member' }, sys);
+  for (const userId of ORG_USER_IDS) {
+    await engine.insert('sys_user', { id: userId, email: `${userId}@example.test`, name: userId }, sys);
+    const role = userId === 'u_org_admin' ? 'admin' : 'member';
+    await engine.insert('sys_member', { id: `m_${userId}`, user_id: userId, organization_id: ORG_A, role }, sys);
   }
   await engine.insert('sys_business_unit_member',
     { id: 'bum_target', user_id: 'u_target', business_unit_id: 'bu_east_field', organization_id: ORG_A }, sys);
@@ -232,6 +252,77 @@ describe('[ADR-0090 D12, amended 2026-10-17; #24757] a delegate is judged on exa
             }
           }
         }
+      });
+    });
+  }
+});
+
+/** [#29029] Every unit id `context` reads, sorted, or the refusal's status and code. */
+async function unitsRead(h: Awaited<ReturnType<typeof boot>>, context: ReturnType<typeof delegateCtx>): Promise<string[] | { status: number; code?: string }> {
+  try {
+    const rows = await h.engine.find('sys_business_unit', { context });
+    return (Array.isArray(rows) ? rows : []).map((r: any) => String(r.id)).sort();
+  } catch (e) {
+    const r = resolveThrownHttpError(e);
+    return { status: r.status, code: r.code };
+  }
+}
+
+/** [#29029] A unit note naming `unit`, written as `context`: the outcome, and the refused field's code. */
+async function noteNaming(h: Awaited<ReturnType<typeof boot>>, context: any, unit: string) {
+  try {
+    await h.engine.insert(UNIT_NOTE, { name: `note on ${unit}`, unit }, { context } as any);
+    return { status: 200 };
+  } catch (e) {
+    const r = resolveThrownHttpError(e);
+    const fields = ((e as any)?.fields ?? []) as Array<{ field?: string; code?: string }>;
+    return { status: r.status, code: r.code, fields: fields.map((f) => `${f.field}:${f.code}`) };
+  }
+}
+
+async function storedNotes(h: Awaited<ReturnType<typeof boot>>): Promise<string[]> {
+  const rows = await h.engine.find(UNIT_NOTE, { context: SYS });
+  return (Array.isArray(rows) ? rows : []).map((r: any) => String(r.unit)).sort();
+}
+
+describe('[ADR-0090 D12, ruling of record 6663849489; #29029] a delegate reads the business units its scope covers, and no other — three postures', () => {
+  const WRITER = delegateCtx('u_writer', 'note_writer');
+  const ORG_ADMIN = delegateCtx('u_org_admin', 'organization_admin');
+
+  for (const posture of POSTURES) {
+    describe(`posture '${posture}'`, () => {
+      it('the delegate reads exactly the units its scope covers: the scope root and its subtree, not the unit above it', async () => {
+        const h = await boot(posture);
+        expect(await unitsRead(h, NARROW)).toEqual(['bu_east', 'bu_east_field']);
+        const above = await h.engine.findOne('sys_business_unit', { where: { id: 'bu_hq' }, context: NARROW });
+        expect(above ?? null).toBeNull();
+        expect(await h.engine.count('sys_business_unit', { context: NARROW })).toBe(2);
+      });
+
+      it('the delegate assigns a position in a unit its scope covers, and the assignment is stored', async () => {
+        const h = await boot(posture);
+        expect(await assign(h, NARROW, 'field_rep')).toEqual({ status: 200 });
+        expect(await storedPositions(h)).toEqual(['field_rep']);
+      });
+
+      it('a unit outside the scope is a unit the delegate cannot read: a reference to it answers reference_not_found, and one inside is admitted', async () => {
+        const h = await boot(posture);
+        expect(await noteNaming(h, NARROW, 'bu_hq')).toEqual({ status: 400, code: 'VALIDATION_FAILED', fields: ['unit:reference_not_found'] });
+        expect(await noteNaming(h, NARROW, 'bu_east_field')).toEqual({ status: 200 });
+        expect(await storedNotes(h)).toEqual(['bu_east_field']);
+      });
+
+      it('CONTROL: a caller holding no scope still reads no unit, and cannot name one', async () => {
+        const h = await boot(posture);
+        expect(await unitsRead(h, WRITER)).toEqual({ status: 403, code: 'PERMISSION_DENIED' });
+        expect(await noteNaming(h, WRITER, 'bu_east')).toEqual({ status: 400, code: 'VALIDATION_FAILED', fields: ['unit:reference_not_found'] });
+        expect(await storedNotes(h)).toEqual([]);
+      });
+
+      it('CONTROL: an organization administrator reads and names every unit of its organization, as before', async () => {
+        const h = await boot(posture);
+        expect(await unitsRead(h, ORG_ADMIN)).toEqual(['bu_east', 'bu_east_field', 'bu_hq']);
+        expect(await noteNaming(h, ORG_ADMIN, 'bu_hq')).toEqual({ status: 200 });
       });
     });
   }

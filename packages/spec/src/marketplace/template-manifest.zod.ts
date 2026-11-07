@@ -3,8 +3,8 @@
 /**
  * `objectstack.manifest.json` — on-disk descriptor for a template / package
  * source tree. Strict projection of `CreatePackageRequestSchema` (server-
- * managed fields excluded) plus scaffold-time extras (name slug,
- * specVersion, namespace, skills, preview, scaffold, readmePath), with
+ * managed fields excluded) plus scaffold-time extras (namespace, preview,
+ * readmePath), with
  * `manifestId` locally relaxed to OPTIONAL — this file is a source tree, not
  * a publish request (#7319; the field's own TSDoc carries the measurement).
  *
@@ -16,7 +16,40 @@
 
 import { z } from 'zod';
 import { lazySchema } from '../shared/lazy-schema';
+import { retiredKey } from '../shared/retired-key';
 import { CreatePackageRequestSchema } from './package.zod';
+import { retiredCategoryGuidance } from './taxonomy.zod';
+
+/**
+ * Why each retired `objectstack.manifest.json` key was inert, and what to do
+ * instead — the second half of each tombstone's prescription (ADR-0049
+ * enforce-or-remove, #31035). Measured before retiring: no reader of the
+ * file's value in `os package publish`, create-objectstack or any other
+ * consumer; `visibility` was read only to warn that publish ignores it.
+ */
+const RETIRED_TEMPLATE_MANIFEST_KEY_REASONS = {
+  name:
+    'nothing read it: `os package publish` addresses the package by `manifestId` (or derives one from the '
+    + 'compiled artifact), and a project\'s slug is its `package.json` `name`. Delete the key.',
+  specVersion:
+    'nothing read it. Delete the key. The protocol a package needs is `manifest.engines.protocol` in '
+    + '`objectstack.config.ts` (the handshake the runtime checks), and the spec release it builds against is the '
+    + '`@objectstack/spec` version in `package.json`.',
+  skills:
+    'nothing read it: create-objectstack installs the whole `@objectstack/skills` catalog whatever this file '
+    + 'lists. Delete the key.',
+  scaffold:
+    'nothing read it: create-objectstack never prompted for `scaffold.variables` nor ran '
+    + '`scaffold.postInstall`. Delete the key.',
+  visibility:
+    '`os package publish` never read it from this file. Delete the key and pass `--visibility` (`private`, '
+    + '`org` or `marketplace`) to `os package publish`.',
+} as const;
+
+function retiredTemplateManifestKeyGuidance(key: keyof typeof RETIRED_TEMPLATE_MANIFEST_KEY_REASONS): string {
+  return `\`TemplateManifest.${key}\` was removed in @objectstack/spec 18 (ADR-0049) — `
+    + RETIRED_TEMPLATE_MANIFEST_KEY_REASONS[key];
+}
 
 export const TemplateManifestSchema = lazySchema(() =>
   CreatePackageRequestSchema
@@ -79,9 +112,12 @@ export const TemplateManifestSchema = lazySchema(() =>
       manifestId: CreatePackageRequestSchema.shape.manifestId.optional().describe(
         'Optional declarative default for the published package id (reverse-domain, e.g. com.acme.crm). Absent on a template source tree: `objectstack package publish` falls back to --manifest-id and then to a derived `local.<slug>`. NOT optional on the publish request itself'
       ),
-      name: z.string().regex(/^[a-z][a-z0-9-]*$/)
-        .describe('CLI slug (kebab-case, no namespace prefix)'),
-      specVersion: z.string().describe('Compatible @objectstack/spec semver range'),
+      // REMOVED (ADR-0049 enforce-or-remove, #31035) — `name`, `specVersion`,
+      // `skills`, `scaffold` and `visibility` below are retiredKey tombstones:
+      // nothing read the file's value of any of them. The prescription is the
+      // tombstone's guidance (see `retiredTemplateManifestKeyGuidance`).
+      name: retiredKey(retiredTemplateManifestKeyGuidance('name')),
+      specVersion: retiredKey(retiredTemplateManifestKeyGuidance('specVersion')),
       /**
        * The template's OWN metadata namespace — a scaffold-time value, not a
        * publish-time claim.
@@ -106,16 +142,28 @@ export const TemplateManifestSchema = lazySchema(() =>
       namespace: CreatePackageRequestSchema.shape.namespace.describe(
         'Scaffold-only: the template’s own metadata namespace, rewritten by create-objectstack at scaffold time and read back as the fallback source for the template’s original namespace. NOT the publish namespace — publish reads that off the compiled artifact’s manifest.namespace (ADR-0048 addendum §A.2)'
       ),
-      skills: z.array(z.string()).optional()
-        .describe('Skill ids exercised by this template (for docs / picker)'),
+      /**
+       * REMOVED — re-declared only so the refusal names the file an author
+       * writes: the tombstone it inherits from `CreatePackageRequestSchema`
+       * names the publish request. Declare `businessFunctions`, `industries`
+       * and `solutionType` instead (inherited from the create request).
+       * `pnpm --filter @objectstack/spec check:template-manifests` parses every
+       * shipped manifest against this schema, so none can still carry it.
+       */
+      category: retiredKey(retiredCategoryGuidance('TemplateManifest.category')),
+      skills: retiredKey(retiredTemplateManifestKeyGuidance('skills')),
       preview: z.object({
         screenshots: z.array(z.string()).optional(),
         demoUrl: z.string().url().optional(),
       }).optional(),
-      scaffold: z.object({
-        variables: z.record(z.string(), z.any()).optional(),
-        postInstall: z.array(z.string()).optional(),
-      }).optional(),
+      scaffold: retiredKey(retiredTemplateManifestKeyGuidance('scaffold')),
+      /**
+       * REMOVED — inherited from `CreatePackageRequestSchema`, where the publish
+       * request's `visibility` stays live; re-declared here so this file refuses
+       * it. `os package publish` never read it from the file (the
+       * `--visibility` flag carries it) and now refuses it by name.
+       */
+      visibility: retiredKey(retiredTemplateManifestKeyGuidance('visibility')),
       readmePath: z.string().optional()
         .describe('Path (relative to manifest) to long-form README'),
     })

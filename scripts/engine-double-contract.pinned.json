@@ -97,6 +97,21 @@
       "pinned": 1
     },
     {
+      "file": "packages/mcp/src/mcp-delete-records.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/mcp/src/mcp-delete-records.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/mcp/src/mcp-delete-records.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/mcp/src/mcp-stdio-tools.test.ts",
       "verb": "delete",
       "pinned": 1

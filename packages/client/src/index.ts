@@ -1231,6 +1231,51 @@ export interface OAuthConsentResult {
 }
 
 /**
+ * One AI assistant (OAuth client) a person has authorized: a consent they
+ * granted on the consent page, as `oauth.authorizedClients.list()` and
+ * `oauth.authorizedClients.listForUser()` answer it.
+ *
+ * Exactly these members. Nothing here identifies or reconstructs a token: no
+ * access-token, refresh-token or authorization-code value or id, no client
+ * secret, no session.
+ */
+export interface AuthorizedClient {
+    /** The consent's own id — the key `oauth.authorizedClients.withdraw()` takes to withdraw it. */
+    id: string;
+    /** The OAuth client the grant is for. */
+    clientId: string;
+    /** The client's display name; `null` when it declares none. */
+    name: string | null;
+    /** What the person granted. */
+    scopes: string[];
+    /** The organization the grant is held in; `null` when none was active when it was granted. */
+    organizationId: string | null;
+    /** When the grant was made (ISO 8601); `null` when the row carries no readable time. */
+    authorizedAt: string | null;
+    /**
+     * The START of the most recent clock hour in which the client made a
+     * verified MCP call under this grant (ISO 8601) — the server records it at
+     * hour granularity, so it means "used during the hour starting at", never a
+     * precise moment. `null` when no use has been recorded.
+     */
+    lastUsedAt: string | null;
+}
+
+/** What both `oauth.authorizedClients` reads answer. */
+export interface AuthorizedClientsList {
+    /** Newest grant first. */
+    clients: AuthorizedClient[];
+    /** `true` when the person holds more grants than the server answers in one read (200). */
+    truncated: boolean;
+}
+
+/** What both `oauth.authorizedClients` withdraws answer: the consent that was withdrawn. */
+export interface AuthorizedClientWithdrawal {
+    /** The consent id the request named. */
+    id: string;
+}
+
+/**
  * The user object better-auth puts on the wire from the `auth.*` routes that
  * echo one — `changePassword`, `verifyEmail` (on a change-email verification),
  * `twoFactor.verifyTotp` and `twoFactor.verifyBackupCode`. Served BARE by
@@ -4950,6 +4995,82 @@ export class ObjectStackClient {
         body: JSON.stringify(req),
       });
       return res.json();
+    },
+
+    /**
+     * The AI assistants (OAuth clients) a person has authorized, and when each
+     * was last used. ObjectStack routes under the auth route, answered in the
+     * `{ success, data }` envelope this unwraps.
+     */
+    authorizedClients: {
+      /**
+       * The signed-in person's own authorized assistants.
+       * GET /api/v1/auth/authorized-clients
+       *
+       * Keyed by the session and nothing else: the route takes no parameter,
+       * and refuses one (`400`) rather than ignoring it, so this method sends
+       * none. Withdraw a grant with `withdraw()` and the row's `id`.
+       */
+      list: async (): Promise<AuthorizedClientsList> => {
+        const route = this.getRoute('auth');
+        const res = await this.fetch(`${this.baseUrl}${route}/authorized-clients`);
+        return this.unwrapResponse<AuthorizedClientsList>(res);
+      },
+
+      /**
+       * Another person's authorized assistants, in every organization they
+       * granted in (each row names its `organizationId`).
+       * GET /api/v1/auth/admin/authorized-clients?userId=...
+       *
+       * Platform administrators only, gated as the admin session doors are:
+       * anyone else is refused `403` whoever `userId` names. A `userId` that
+       * names no user answers `404`. Read only.
+       */
+      listForUser: async (userId: string): Promise<AuthorizedClientsList> => {
+        const route = this.getRoute('auth');
+        const res = await this.fetch(
+          `${this.baseUrl}${route}/admin/authorized-clients?userId=${encodeURIComponent(userId)}`,
+        );
+        return this.unwrapResponse<AuthorizedClientsList>(res);
+      },
+
+      /**
+       * Withdraw one of the signed-in person's own authorized assistants, by
+       * the `id` `list()` answers on its row.
+       * POST /api/v1/auth/authorized-clients/withdraw
+       *
+       * The grant is revoked: the assistant's token is refused on its next
+       * call, and it must be authorized again to reconnect. Only the person's
+       * own grant is withdrawn: an id that names another person's grant
+       * answers `404` exactly as one that names none, and changes nothing.
+       */
+      withdraw: async (id: string): Promise<AuthorizedClientWithdrawal> => {
+        const route = this.getRoute('auth');
+        const res = await this.fetch(`${this.baseUrl}${route}/authorized-clients/withdraw`, {
+          method: 'POST',
+          body: JSON.stringify({ id }),
+        });
+        return this.unwrapResponse<AuthorizedClientWithdrawal>(res);
+      },
+
+      /**
+       * Withdraw one of another person's authorized assistants, by the `id`
+       * `listForUser()` answers on its row.
+       * POST /api/v1/auth/admin/authorized-clients/withdraw
+       *
+       * Platform administrators only, behind the same gate as
+       * `listForUser()`: anyone else is refused `403` whoever the request
+       * names. A `userId` that names no user, or an `id` that is not that
+       * person's grant, answers `404`.
+       */
+      withdrawForUser: async (userId: string, id: string): Promise<AuthorizedClientWithdrawal> => {
+        const route = this.getRoute('auth');
+        const res = await this.fetch(`${this.baseUrl}${route}/admin/authorized-clients/withdraw`, {
+          method: 'POST',
+          body: JSON.stringify({ userId, id }),
+        });
+        return this.unwrapResponse<AuthorizedClientWithdrawal>(res);
+      },
     },
   };
 

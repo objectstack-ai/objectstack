@@ -42,6 +42,7 @@
  * is where that pack's automation sentence is kept.
  */
 import { describe, it, expect } from 'vitest';
+import { PLATFORM_LOCALE_TAGS } from '@objectstack/spec/system';
 import { builtInLocales } from '../locales';
 
 type LocaleCode = keyof typeof builtInLocales;
@@ -75,11 +76,12 @@ const chipsOf = (lang: LocaleCode) =>
  */
 const BANNED: Record<LocaleCode, readonly string[]> = {
   en: ['alert', 'remind', 'notif', 'automat', 'workflow', 'trigger', 'schedule', 'approv'],
-  zh: ['提醒', '预警', '警报', '自动', '流转', '通知', '触发', '定时', '审批'],
+  'zh-Hans': ['提醒', '预警', '警报', '自动', '流转', '通知', '触发', '定时', '审批'],
+  'zh-Hant': ['提醒', '預警', '警報', '自動', '流轉', '通知', '觸發', '定時', '審批'],
   de: ['automat', 'erinner', 'warnung', 'alarm', 'benachrichtig', 'workflow', 'auslös', 'ablauf', 'freigabe', 'genehmig'],
   fr: ['automat', 'alerte', 'rappel', 'notifi', 'workflow', 'flux', 'déclench', 'approbation', 'approuv'],
   es: ['automat', 'alerta', 'recordar', 'recordatorio', 'notifi', 'flujo', 'disparador', 'aprob'],
-  pt: ['automa', 'alerta', 'lembr', 'notifi', 'fluxo', 'gatilho', 'aprova'],
+  'pt-BR': ['automa', 'alerta', 'lembr', 'notifi', 'fluxo', 'gatilho', 'aprova'],
   ru: ['автомат', 'оповещ', 'уведомл', 'напомин', 'триггер', 'процесс', 'поток', 'согласован', 'утвержд'],
   ja: ['自動', '通知', 'アラート', 'リマイン', 'ワークフロー', 'フロー', 'トリガー', '承認'],
   ko: ['자동', '알림', '알람', '워크플로', '흐름', '트리거', '승인'],
@@ -88,7 +90,7 @@ const BANNED: Record<LocaleCode, readonly string[]> = {
 
 /** Every banned term this text hits, lower-cased for the case-insensitive scripts. */
 function bannedHits(lang: LocaleCode, text: string): string[] {
-  const haystack = text.toLocaleLowerCase(lang === 'zh' ? 'zh' : undefined);
+  const haystack = text.toLocaleLowerCase(lang === 'zh-Hans' || lang === 'zh-Hant' ? lang : undefined);
   return BANNED[lang].filter((term) => haystack.includes(term.toLocaleLowerCase()));
 }
 
@@ -99,11 +101,12 @@ function bannedHits(lang: LocaleCode, text: string): string[] {
  */
 const RETIRED: Record<LocaleCode, string> = {
   en: 'Add an automation — an approval, a status flow, or a notification.',
-  zh: '加一个自动化 —— 审批、状态流转或通知。',
+  'zh-Hans': '加一个自动化 —— 审批、状态流转或通知。',
+  'zh-Hant': '加一個自動化 —— 審批、狀態流轉或通知。',
   de: 'Füge eine Automatisierung hinzu — eine Freigabe, einen Statusablauf oder eine Benachrichtigung.',
   fr: 'Ajoute une automatisation — une approbation, un flux de statuts ou une notification.',
   es: 'Añade una automatización — una aprobación, un flujo de estados o una notificación.',
-  pt: 'Adicione uma automação — uma aprovação, um fluxo de status ou uma notificação.',
+  'pt-BR': 'Adicione uma automação — uma aprovação, um fluxo de status ou uma notificação.',
   ru: 'Добавь автоматизацию — согласование, процесс статусов или уведомление.',
   ja: '自動化を追加してください — 承認、ステータスフロー、または通知。',
   ko: '자동화를 추가해 주세요 — 승인, 상태 흐름 또는 알림.',
@@ -112,7 +115,7 @@ const RETIRED: Record<LocaleCode, string> = {
 
 describe('maker edit-mode chips — every shipped pack carries all four (objectui#7709)', () => {
   it('covers all ten built-in packs', () => {
-    expect(LANGS).toHaveLength(10);
+    expect(LANGS).toHaveLength(PLATFORM_LOCALE_TAGS.length);
   });
 
   it.each(LANGS)('%s defines a non-empty string for every chip', (lang) => {
@@ -152,6 +155,6 @@ describe('maker edit-mode chips — none promises autonomous behaviour (objectui
 
   it('the replaced chip asks for DATA, in the two languages the card quoted', () => {
     expect(chipsOf('en')!.addSampleData).toContain('sample records');
-    expect(chipsOf('zh')!.addSampleData).toContain('示例数据');
+    expect(chipsOf('zh-Hans')!.addSampleData).toContain('示例数据');
   });
 });

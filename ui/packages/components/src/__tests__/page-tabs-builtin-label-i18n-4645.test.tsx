@@ -44,6 +44,9 @@ import { SchemaRenderer } from '@object-ui/react';
 // cold transform is billed to `hookTimeout`. See
 // object-ui/no-dynamic-import-in-test-hook (objectui#3010/#3021).
 import '../renderers';
+// The page's react runtime chunk, imported here so its cold transform is paid
+// during collection, not inside a case's bounded wait.
+import '@object-ui/react-runtime';
 
 /**
  * The tokens `buildDefaultPageSchema` writes onto its tab nodes (Details,
@@ -133,10 +136,10 @@ describe('page:tabs — built-in record-detail labels speak the session locale (
   });
 
   /**
-   * `zh-TW` has no pack of its own — i18next resolves it to the Simplified
-   * `zh` resource — so the exact-locale dict is the ONLY source of Traditional
-   * forms for these tokens. It therefore stays AHEAD of the pack lookup, and
-   * this is the assertion that says so.
+   * The exact-locale dict stays AHEAD of the pack lookup. It was written while
+   * `zh-TW` had no pack and i18next served it the Simplified one; the
+   * generated `zh-Hant` pack (objectstack#30511) now carries the same words for
+   * these tokens, so this pins that the Traditional rows still win.
    */
   it('keeps the zh-TW Traditional forms the dict is the only source of', () => {
     const { container } = renderSynthesizedStrip('zh-TW');
@@ -149,6 +152,54 @@ describe('page:tabs — built-in record-detail labels speak the session locale (
     expect(texts).not.toContain('详情');
     expect(texts).not.toContain('相关');
     expect(texts).not.toContain('动态');
+  });
+
+  /**
+   * objectstack#30511: a session in the table's Traditional tag (or a region
+   * the table reads as it) reads the Traditional rows, never the Simplified
+   * ones its base language `zh` used to fall back to. `Notes` and `Overview`
+   * are dict-only tokens: no pack carries them, so only the dict can answer.
+   */
+  it.each(['zh-Hant', 'zh-HK', 'zh-MO'])('a %s session reads the Traditional rows, dict-only tokens included', (language) => {
+    const { container } = render(
+      <I18nProvider config={{ defaultLanguage: language, detectBrowserLanguage: false }}>
+        <SchemaRenderer
+          schema={{
+            type: 'page:tabs',
+            id: 'tabs',
+            properties: {
+              items: ['Details', 'Notes', 'Overview'].map((label) => ({
+                label,
+                value: label.toLowerCase(),
+                children: textChild(label),
+              })),
+            },
+          }}
+        />
+      </I18nProvider>,
+    );
+    expect(tabTexts(container)).toEqual(['詳情', '備註', '概覽']);
+  });
+
+  it.each(['zh-Hans', 'zh-SG'])('CONTROL: a %s session reads the Simplified rows', (language) => {
+    const { container } = render(
+      <I18nProvider config={{ defaultLanguage: language, detectBrowserLanguage: false }}>
+        <SchemaRenderer
+          schema={{
+            type: 'page:tabs',
+            id: 'tabs',
+            properties: {
+              items: ['Details', 'Notes', 'Overview'].map((label) => ({
+                label,
+                value: label.toLowerCase(),
+                children: textChild(label),
+              })),
+            },
+          }}
+        />
+      </I18nProvider>,
+    );
+    expect(tabTexts(container)).toEqual(['详情', '备注', '概览']);
   });
 
   /**

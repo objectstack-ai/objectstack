@@ -111,7 +111,9 @@ capability changes only with a new version of the package that declares it. An
 sentence names that type's own route. What the reads then serve is in
 [Metadata lifecycle](/docs/concepts/metadata-lifecycle#customizing-an-installed-package-the-paired-custom-override-adr-0146).
 `POST /packages/hotcrm/ensure-customization` creates the pair when absent (Studio calls
-it on the first change), and `GET /packages/hotcrm/customizations` lists its overrides,
+it on the first change); a kernel package (scope `system` or `cloud`) has no pair in this
+version and answers `409 RESOURCE_CONFLICT`, though a pair an earlier version created keeps
+serving what it holds. `GET /packages/hotcrm/customizations` lists its overrides,
 extensions and switched-off items in one read, beside `contributions`: the fields (kind `field`)
 and flows (kind `flow`) other installed packages contribute to `hotcrm`'s objects, and the
 navigation items (kind `nav`) they contribute to `hotcrm`'s apps, each entry naming its package.
@@ -177,6 +179,20 @@ before.
 ### `PATCH /packages/:id/enable`
 
 Enable a disabled package.
+
+The mirror of the disable door's refusal below: the enable is refused
+`409 PACKAGE_DISABLE_RESTRICTED_BY_VALIDATION_RULE` while a validation rule it
+would put into service (the package's own, or one on an object it owns) reads a
+field that another, still disabled package adds through `objectExtensions`:
+that field stays withheld, and every write to the object would fail the rule.
+The message names each rule as `package · object · rule (reads FIELD)` and the
+disabled package to enable first, and nothing changes. A rule is judged as the
+object will serve it once the package is enabled: one rule per name, a tenant
+overlay's switch honoured. A rule the enable does not bring into service is not
+counted. `POST /packages` answers the same `409` for an overwrite of a disabled
+package with `enableOnInstall: true`; the overwrite lands and the package stays
+disabled. A boot whose stored state leaves such a rule served (the state records
+only disables) logs one warning naming every rule and the remedies.
 
 ### `PATCH /packages/:id/disable`
 

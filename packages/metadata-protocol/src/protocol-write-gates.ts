@@ -37,9 +37,10 @@ import { resolveTenancyPosture } from '@objectstack/types';
 import { envWritableMetadataTypes } from './sys-metadata-repository.js';
 import { managedItemSealedSentence } from './packaged-base-regime.js';
 import type { StoredOverlayRow } from './item-lock.js';
-import { itemDiscriminator } from '@objectstack/metadata-core';
+import { itemDiscriminator, pairOf } from '@objectstack/metadata-core';
+import { installedManifestsOfEngine } from './installed-manifests.js';
 import { PLURAL_TO_SINGULAR } from '@objectstack/spec/shared';
-import { DEFAULT_METADATA_TYPE_REGISTRY, customizationPackageId } from '@objectstack/spec/kernel';
+import { DEFAULT_METADATA_TYPE_REGISTRY } from '@objectstack/spec/kernel';
 import { baseAddressServesMember, readOnlyShippingPackages, shippingPackageIds } from './protocol-environment-rows.js';
 import { canonicalMetaType, canonicalizeMetaRequestType } from './protocol-meta-type-schema.js';
 import { boundPackageOf } from './protocol-package-bindings.js';
@@ -637,10 +638,11 @@ export class ProtocolWriteGatesFacet {
      * `item` is. The one member-grain answer the env-wide list, the list
      * scoped to `base` and the by-name reads give.
      */
-    static baseServesBundleMember(host: Pick<ProtocolHost, 'shippedArtifactsOf'>, type: string, name: string, base: string, item: unknown, shipping: ShippingPackages): boolean {
+    static baseServesBundleMember(host: Pick<ProtocolHost, 'engine' | 'shippedArtifactsOf'>, type: string, name: string, base: string, item: unknown, shipping: ShippingPackages): boolean {
         const member = itemDiscriminator(canonicalMetaType(type), item);
         const baseShipsMember = shippingPackageIds(host.shippedArtifactsOf(type, name, shipping, member)).has(base);
-        return baseAddressServesMember(base, boundPackageOf((item as { _packageId?: unknown } | null | undefined)?._packageId), baseShipsMember);
+        return baseAddressServesMember(base, boundPackageOf((item as { _packageId?: unknown } | null | undefined)?._packageId), baseShipsMember,
+            installedManifestsOfEngine(host.engine));
     }
 
     /**
@@ -649,11 +651,11 @@ export class ProtocolWriteGatesFacet {
      * pair can add on `base`'s address: `base` ships the name and not that
      * member. Else `undefined`, and the by-name read serves as before.
      */
-    static pairOfAddedMember(host: Pick<ProtocolHost, 'shippedArtifactsOf' | 'shippingPackagesOf' | 'shipsBundleName'>, type: string, name: string, base: string, member: string): string | undefined {
+    static pairOfAddedMember(host: Pick<ProtocolHost, 'engine' | 'shippedArtifactsOf' | 'shippingPackagesOf' | 'shipsBundleName'>, type: string, name: string, base: string, member: string): string | undefined {
         const shipping = host.shippingPackagesOf(type);
         if (!host.shipsBundleName(type, name, base, shipping)) return undefined;
         if (shippingPackageIds(host.shippedArtifactsOf(type, name, shipping, member)).has(base)) return undefined;
-        const pair = customizationPackageId(base);
+        const pair = pairOf(base, installedManifestsOfEngine(host.engine));
         return pair.ok ? pair.value : undefined;
     }
 

@@ -37,7 +37,8 @@ import { storedRowDocument } from './item-lock.js';
 import { bumpWriteEpoch } from './meta-overlay-cache.js';
 import { PLURAL_TO_SINGULAR } from '@objectstack/spec/shared';
 import type { IObjectQLEngine, IPubSub } from '@objectstack/spec/contracts';
-import { isCustomizationPairOf } from '@objectstack/spec/kernel';
+import { isPairOf } from '@objectstack/metadata-core';
+import { installedManifestsOfEngine } from './installed-manifests.js';
 import { overrideWriteRefusalError } from './protocol-packaged-base-refusal.js';
 import { OBJECT_EXTENSION_TYPE, registrableObjectExtension } from './protocol-object-extension-item.js';
 import type { ObjectExtensionRegistry } from './protocol-object-extension-item.js';
@@ -182,13 +183,13 @@ export class ProtocolClassHeadFacet {
      * caller's `artifactBacked` decides the intent, and the body writer is
      * {@link restoredBodyWriter}'s alone.
      */
-    static restoreWriteFor(host: Pick<ProtocolHost, 'overrideWriteVerdict' | 'packagedArtifactOwner' | 'restoredBodyWriter'>, singularType: string,
+    static restoreWriteFor(host: Pick<ProtocolHost, 'engine' | 'overrideWriteVerdict' | 'packagedArtifactOwner' | 'restoredBodyWriter'>, singularType: string,
             name: string,
             binding: string | null,
             artifactBacked: boolean,
             source: string,): { intent: 'override-artifact' | 'runtime-only'; deriveRestoredBody: (historyBody: unknown) => Promise<unknown> } {
         const owner = artifactBacked ? host.packagedArtifactOwner({ type: singularType, name }) : undefined;
-        const pairRow = owner !== undefined && isCustomizationPairOf(binding, owner);
+        const pairRow = owner !== undefined && isPairOf(binding, owner, installedManifestsOfEngine(host.engine));
         const intent: 'override-artifact' | 'runtime-only' = artifactBacked && !pairRow ? 'override-artifact' : 'runtime-only';
         const writeRestored = host.restoredBodyWriter(singularType, name, binding, source);
         const deriveRestoredBody = pairRow

@@ -8,9 +8,10 @@
 // are new. `protocol.ts` re-exports what it exported.
 import {
     itemDiscriminator,
+    pairOf,
+    type InstalledManifestLookup,
 } from '@objectstack/metadata-core';
 import { canonicalMetaUrlType } from '@objectstack/spec/shared';
-import { customizationPackageId } from '@objectstack/spec/kernel';
 import { isServedOverrideRowOf } from './served-override.js';
 import {
     listSlotNameOf,
@@ -92,26 +93,10 @@ interface StoredRowPlace {
  * It decides content only. The lock is selected separately, from every row in
  * scope (`resolveOverlayLockLayer` in `item-lock.ts`, #21761).
  */
-export function servedOverlayRowCandidates(address: {
-    /**
-     * [#23715] `null` addresses the package-unbound row alone: the strict
-     * draft read naming no package, at the draft its `version` names
-     * ({@link ObjectStackProtocolImplementation.strictDraftReadAddress}).
-     */
-    readonly packageId: string | null | undefined;
-    /**
-     * [#28409, ADR-0146 D8 item 2] Whether the address's declared override
-     * is a candidate: the reads that SERVE a package's name (the active
-     * by-name read and its draft preview, the layered read, the list's merges)
-     * pass `true`. A read that answers a write's address (the strict draft
-     * read, the view container expansion's package order) passes nothing: a
-     * save naming the base writes the base's own partition, never its pair's.
-     */
-    readonly servedOverride?: boolean;
-}): ServedOverlayRowCandidate[] {
+export function servedOverlayRowCandidates(address: ServedOverlayAddress): ServedOverlayRowCandidate[] {
     const base = address.packageId;
     const pair = address.servedOverride === true && typeof base === 'string' && base !== ''
-        ? customizationPackageId(base)
+        ? pairOf(base, address.installed)
         : undefined;
     const places: ReadonlyArray<Pick<ServedOverlayRowCandidate, 'packageId' | 'overrideOf'>> = base === null
         ? [{ packageId: null }]
@@ -125,6 +110,39 @@ export function servedOverlayRowCandidates(address: {
     return (['canonical', 'other'] as const).flatMap((spelling) =>
         places.map((place) => ({ spelling, ...place })));
 }
+
+/**
+ * The address {@link servedOverlayRowCandidates} orders the rows of. A read
+ * that may serve a declared override names the registry it serves
+ * (`installed`), because the address's pair is the pair of the App that
+ * carries its package (`pairOf`); a read that never serves one names neither,
+ * so `servedOverride` without `installed` does not compile.
+ */
+export type ServedOverlayAddress =
+    | {
+        /**
+         * [#23715] `null` addresses the package-unbound row alone: the strict
+         * draft read naming no package, at the draft its `version` names
+         * ({@link ObjectStackProtocolImplementation.strictDraftReadAddress}).
+         */
+        readonly packageId: string | null | undefined;
+        readonly servedOverride?: undefined;
+        readonly installed?: undefined;
+    }
+    | {
+        readonly packageId: string | null | undefined;
+        /**
+         * [#28409, ADR-0146 D8 item 2] Whether the address's declared override
+         * is a candidate: the reads that SERVE a package's name (the active
+         * by-name read and its draft preview, the layered read, the list's merges)
+         * pass `true`. A read that answers a write's address (the strict draft
+         * read, the view container expansion's package order) passes nothing: a
+         * save naming the base writes the base's own partition, never its pair's.
+         */
+        readonly servedOverride: boolean | undefined;
+        /** The installed manifests of the registry the read serves, read for the address's pair. */
+        readonly installed: InstalledManifestLookup;
+    };
 
 /**
  * [#24371] Whether a stored row read by
@@ -261,16 +279,24 @@ export function mergePackageAwareOverlay(
     records: Array<{ data: unknown; packageId: string | undefined; stored?: StoredRowPlace; standIn?: boolean }>,
     transform?: (data: any, prev: any) => any,
     unseated?: WeakSet<object>,
-    options: {
-        /**
-         * [#28409, ADR-0146 D8 item 2] Serve each package's declared override
-         * over its slot ({@link servedOverlayRowCandidates}' `servedOverride`):
-         * the effective list's merges pass `true`; the per-package layer
-         * ({@link ObjectStackProtocolImplementation.getMetaItemsPerPackage})
-         * and the MetadataService merge pass nothing.
-         */
-        readonly servedOverride?: boolean;
-    } = {},
+    options:
+        | { readonly servedOverride?: undefined; readonly installed?: undefined }
+        | {
+            /**
+             * [#28409, ADR-0146 D8 item 2] Serve each package's declared override
+             * over its slot ({@link servedOverlayRowCandidates}' `servedOverride`):
+             * the effective list's merges pass `true`; the per-package layer
+             * ({@link ObjectStackProtocolImplementation.getMetaItemsPerPackage})
+             * and the MetadataService merge pass nothing.
+             */
+            readonly servedOverride: boolean | undefined;
+            /**
+             * The installed manifests of the registry the list serves: the
+             * declared override of a package's slot is its App's pair's
+             * ({@link servedOverlayRowCandidates}).
+             */
+            readonly installed: InstalledManifestLookup;
+        } = {},
 ): unknown[] {
     // Per-SLOT, layer-ordered contributions; `pkg: undefined` = package-less.
     // `stored` marks a contribution that is a stored row the caller read;
@@ -298,7 +324,9 @@ export function mergePackageAwareOverlay(
         list: readonly Contribution[],
         real: string | undefined,
     ): { item: any; overrideOf?: string } | undefined => {
-        for (const candidate of servedOverlayRowCandidates({ packageId: real, servedOverride: options.servedOverride })) {
+        for (const candidate of servedOverlayRowCandidates(options.installed !== undefined
+            ? { packageId: real, servedOverride: options.servedOverride, installed: options.installed }
+            : { packageId: real })) {
             const hit = list.find((c) => c.stored !== undefined
                 && (c.stored.type === type ? 'canonical' : 'other') === candidate.spelling
                 && (candidate.packageId === undefined || (c.pkg ?? null) === candidate.packageId)
@@ -308,6 +336,7 @@ export function mergePackageAwareOverlay(
                 // and its body, never on a stamp the body carries.
                 && (candidate.overrideOf === undefined || isServedOverrideRowOf(
                     { type: c.stored.type, package_id: c.pkg, metadata: c.item }, candidate.overrideOf,
+                    options.installed!,
                 )));
             if (hit) return candidate.overrideOf === undefined ? { item: hit.item } : { item: hit.item, overrideOf: candidate.overrideOf };
         }

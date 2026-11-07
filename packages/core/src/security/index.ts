@@ -537,6 +537,17 @@ export {
   keepsFlowWriteReferenceCheck,
 } from './flow-write-reference-check.js';
 
+// The mark a service verb's own write carries for one reference to a record
+// the same call authorized and created. Set by service-storage's
+// file-attachments writer, read by objectql's write-time reference check.
+export {
+  VOUCHED_REFERENCES,
+  vouchForReference,
+  isVouchedReference,
+  withoutVouchedReferences,
+  type VouchedReference,
+} from './vouched-reference.js';
+
 // #30205 — a banned user's open work: the per-object counts, the optional bulk
 // hand-over (both read and written as the caller), and the ban-in-force
 // predicate objectql's write-time reference check refuses a new assignment by.

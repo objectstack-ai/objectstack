@@ -960,29 +960,28 @@ export type {
 // Authoritative report protocol from @objectstack/spec, re-exported under
 // `Spec*` names so they coexist with the legacy presentation `ReportComponentSchema`.
 // See `./spec-report.ts` for the layering rationale.
+//
+// #25921 (batch 10): nine names of this block are DELETED, nothing in this
+// workspace or in hotcrm read them: `SpecReportChart`, `SpecReportChartInput`,
+// `SpecReportChartSchema` and `SpecReportTypeEnum` (import `ReportChartParsed`,
+// `ReportChart`, `ReportChartSchema` and `ReportType` from `@objectstack/spec/ui`),
+// and `SpecReportAggregate`, `QLAggregationFunction`, `mapAggregateToQL`,
+// `JoinedSpecReport` and `isJoinedSpecReport` (no replacement). The changeset
+// carries the FROM/TO.
 // ---------------------------------------------------------------------------
 export type {
   SpecReportInput,
-  SpecReportChart,
-  SpecReportChartInput,
   SpecReportTypeName,
-  SpecReportAggregate,
   SpecReportDateGranularity,
-  QLAggregationFunction,
   LegacyReportPresentationLike,
   JoinedReportBlock,
-  JoinedSpecReport,
 } from './spec-report.js';
 
 export {
   SpecReportSchema,
-  SpecReportChartSchema,
-  SpecReportTypeEnum,
   SpecReport,
-  mapAggregateToQL,
   specReportToPresentation,
   isSpecReport,
-  isJoinedSpecReport,
 } from './spec-report.js';
 
 // Workflow / Flow Designer schemas removed in 9.0 — they backed the retired
@@ -1253,9 +1252,9 @@ export type {
   // The `undo` payload of `ActionResult`, moved down from `@object-ui/core`'s
   // `UndoManager` with it (objectui#6349, batch 4); core re-exports it.
   UndoableOperation,
-  ActionExecutor,
-  BatchOperationConfig,
-  BatchOperationSummary,
+  // `ActionExecutor` / `BatchOperationConfig` / `BatchOperationSummary` were
+  // retired here (objectstack#25921, batch 11) — see the note at the end of
+  // `ui-action.ts`.
   TransactionIsolationLevel,
   TransactionConfig,
   TransactionResult,

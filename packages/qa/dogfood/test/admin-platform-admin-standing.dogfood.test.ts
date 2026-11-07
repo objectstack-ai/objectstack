@@ -241,6 +241,18 @@ const ADMITTED = [
   // mount carrying the ADR-0068 gate first; no body or query parameter is
   // read and no stored state moves, so it has no individual effect pin below.
   'GET /api/v1/auth/admin/client-address',
+  // #30918 — another person's authorized AI assistants (OAuth consents) and
+  // when each was last used. A READ: an ObjectStack raw mount carrying the
+  // ADR-0068 gate first, then the closed `{ userId }` query; no stored state
+  // moves, so it has no individual effect pin below.
+  'GET /api/v1/auth/admin/authorized-clients',
+  // #31048 — withdraw one of another person's authorized AI assistants: an
+  // ObjectStack raw mount whose FIRST statement is the ADR-0068 gate, then the
+  // closed `{ userId, id }` body. The probe names a consent the target does
+  // not hold, so the admin reaches the handler and gets 404 and nothing
+  // moves; the withdraw's effect is pinned in
+  // `authorized-client-withdraw.dogfood.test.ts`.
+  'POST /api/v1/auth/admin/authorized-clients/withdraw',
   'POST /api/v1/auth/admin/unlock-user',
   'POST /api/v1/auth/admin/import-users',
   'POST /api/v1/auth/admin/oauth2/toggle-disabled',
@@ -249,6 +261,14 @@ const ADMITTED = [
   'POST /api/v1/auth/admin/sso/register-saml',
   'POST /api/v1/auth/admin/sso/request-domain-verification',
   'POST /api/v1/auth/admin/sso/verify-domain',
+  // #30958 — the SCIM connection credential door: ObjectStack raw mounts whose
+  // FIRST statement is the ADR-0068 gate. SCIM is on at this boot
+  // (`OS_SCIM_ENABLED`), so the mint reaches a 200 and stores a credential;
+  // the revoke of an id that does not exist reaches the handler and answers
+  // 404. Their stored effects (the bearer provisions, is refused once revoked,
+  // and is audited) are pinned in `admin-identity-audit-trail.dogfood.test.ts`.
+  'POST /api/v1/auth/admin/scim/mint-credential',
+  'POST /api/v1/auth/admin/scim/revoke-credential',
 ] as const;
 
 /**
@@ -710,6 +730,13 @@ describe('#9482: what an ObjectStack platform admin gets from every /admin/ rout
       // #28793. No body is read; the empty one is what the console's action
       // sends besides the `organizationId` it adds, which the handler ignores.
       'POST /api/v1/auth/admin/list-platform-admins': { body: {} },
+      // #30918. The one parameter the read takes: with none the handler answers
+      // `400 VALIDATION_ERROR` past the gate, which the `diedBeforeTheGate`
+      // predicate below reads as a void reading.
+      'GET /api/v1/auth/admin/authorized-clients': { query: `?userId=${targetUserId}` },
+      // #31048. Both body keys are required: with none the handler answers
+      // `400 VALIDATION_ERROR` past the gate, a void reading below.
+      'POST /api/v1/auth/admin/authorized-clients/withdraw': { body: { userId: targetUserId, id: 'standing-probe-consent' } },
       'POST /api/v1/auth/admin/oauth2/toggle-disabled': { body: { client_id: 'standing-probe-client', disabled: false } },
       'POST /api/v1/auth/admin/sso/register': {
         body: {
@@ -731,6 +758,10 @@ describe('#9482: what an ObjectStack platform admin gets from every /admin/ rout
       },
       'POST /api/v1/auth/admin/sso/request-domain-verification': { body: { providerId: 'standing-probe-oidc' } },
       'POST /api/v1/auth/admin/sso/verify-domain': { body: { providerId: 'standing-probe-oidc' } },
+      // #30958. A connection id is the only required field; the revoke names a
+      // credential id that does not exist, so it moves nothing.
+      'POST /api/v1/auth/admin/scim/mint-credential': { body: { connectionId: 'standing-probe-scim' } },
+      'POST /api/v1/auth/admin/scim/revoke-credential': { body: { credentialId: 'standing-probe-credential' } },
       'POST /api/v1/auth/admin/ban-user': { body: { userId: targetUserId, banReason: 'sweep' } },
       'POST /api/v1/auth/admin/unban-user': { body: { userId: targetUserId } },
       'POST /api/v1/auth/admin/impersonate-user': { body: { userId: targetUserId } },

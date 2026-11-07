@@ -1,17 +1,8 @@
 {
   "$schema": "https://schemas.objectstack.dev/template-manifest.json",
-  "name": "blank",
   "namespace": "blank",
-  "specVersion": "^18.0.0",
   "displayName": "Blank Starter",
   "description": "Minimal ObjectStack environment with a single object — a clean slate for building.",
-  "category": "starter",
   "isStarter": true,
-  "skills": ["objectstack-platform", "objectstack-data"],
-  "readmePath": "README.md",
-  "scaffold": {
-    "variables": {
-      "appName": { "type": "string", "prompt": "Application name", "default": "my-app" }
-    }
-  }
+  "readmePath": "README.md"
 }

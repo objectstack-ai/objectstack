@@ -191,3 +191,49 @@ describe('setLocalized ∘ pickLocalized — what you write is what you read', (
     expect(Object.keys(written)).toEqual(Object.keys(stored));
   });
 });
+
+/**
+ * #30910 — the write side takes the same script-preference limb as the read
+ * side (one `localizedEntryKey` in `pickLocalized.ts`). A `zh-Hant` edit over
+ * `{ 'zh-CN', 'zh-TW' }` used to overwrite the Simplified authors' `zh-CN` text
+ * and leave `zh-TW` stale.
+ */
+describe('setLocalized — a script-split language writes the entry of its own script (#30910)', () => {
+  /** `[map, language, the key the edit must replace]` */
+  const WRITES: ReadonlyArray<readonly [Record<string, string>, string, string]> = [
+    [{ en: 'Customer', 'zh-CN': '客户', 'zh-TW': '客戶' }, 'zh-Hant', 'zh-TW'],
+    [{ en: 'Customer', 'zh-CN': '客户', 'zh-TW': '客戶' }, 'zh-HK', 'zh-TW'],
+    [{ en: 'Customer', 'zh-TW': '客戶', 'zh-CN': '客户' }, 'zh-Hans', 'zh-CN'],
+    [{ en: 'Customer', 'zh-TW': '客戶', 'zh-CN': '客户' }, 'zh', 'zh-CN'],
+    [{ en: 'Customer', 'zh-Hans': '客户', 'zh-Hant': '客戶' }, 'zh-TW', 'zh-Hant'],
+    [{ en: 'Customer', 'zh-Hans': '客户', 'zh-Hant': '客戶' }, 'zh-CN', 'zh-Hans'],
+    [{ en: 'Customer', zh: '客户', 'zh-TW': '客戶' }, 'zh-Hant', 'zh-TW'],
+    [{ en: 'Customer', zh: '客户', 'zh-TW': '客戶' }, 'zh-CN', 'zh'],
+  ];
+
+  it.each(WRITES)('%j edited in %s replaces %s and nothing else', (map, language, key) => {
+    const written = setLocalized(map, language, 'WRITTEN') as Record<string, unknown>;
+    expect(written[key]).toBe('WRITTEN');
+    for (const other of Object.keys(map).filter((k) => k !== key)) {
+      expect(written[other]).toBe(map[other]);
+    }
+    expect(Object.keys(written)).toEqual(Object.keys(map));
+    expect(pickLocalized(written, language)).toBe('WRITTEN');
+  });
+
+  /** Byte-identical controls: `[map, language, the key main writes]`. */
+  const UNCHANGED: ReadonlyArray<readonly [Record<string, string>, string, string]> = [
+    [{ en: 'Customer', 'zh-CN': '客户' }, 'zh-Hant', 'zh-CN'],
+    [{ en: 'Customer', zh: '客户' }, 'zh-TW', 'zh'],
+    [{ en: 'Customer', 'zh-HK': '客戶' }, 'zh-Hans', 'zh-HK'],
+    [{ 'pt-PT': 'PT', 'pt-BR': 'BR' }, 'pt', 'pt-PT'],
+    [{ 'en-GB': 'GB', 'en-US': 'US' }, 'en', 'en-GB'],
+    [{ 'es-MX': 'MX', 'es-ES': 'ES' }, 'es', 'es-MX'],
+    [{ en: 'Customer' }, 'zh-Hant', 'zh-Hant'],
+  ];
+
+  it.each(UNCHANGED)('%j edited in %s still writes %s, exactly as before', (map, language, key) => {
+    const written = setLocalized(map, language, 'WRITTEN') as Record<string, unknown>;
+    expect(written[key]).toBe('WRITTEN');
+  });
+});

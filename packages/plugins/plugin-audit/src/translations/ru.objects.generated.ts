@@ -37,6 +37,7 @@ export const ruObjects: NonNullable<TranslationData['objects']> = {
           account_locked: "Учётная запись заблокирована",
           config_change: "Изменение конфигурации",
           import: "Импорт",
+          export: "Экспорт",
           platform_admin_standing_change: "Изменение статуса администратора платформы",
           action_invocation: "Вызов действия"
         }

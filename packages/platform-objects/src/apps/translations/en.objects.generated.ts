@@ -1873,6 +1873,10 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       updated_at: {
         label: "Updated At"
+      },
+      last_used_at: {
+        label: "Last Used At",
+        help: "Start of the most recent hour in which the client made a verified MCP call under this consent; empty when none has been recorded"
       }
     }
   },

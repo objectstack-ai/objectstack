@@ -38,6 +38,7 @@ import {
 import { isMissingTableError } from '@objectstack/metadata/errors';
 import { PLURAL_TO_SINGULAR } from '@objectstack/spec/shared';
 import { isServedOverrideRowOf } from './served-override.js';
+import { installedManifestsOfEngine } from './installed-manifests.js';
 import type { ServedOverrideRow } from './served-override.js';
 import { REFERENCE_SITES } from './reference-sites.js';
 import { computeMetadataDiagnostics } from './metadata-diagnostics.js';
@@ -426,6 +427,7 @@ export class ProtocolDiffDeleteLoadFacet {
         // is ({@link isPairRowRemoval}).
         const pairRowRemoval = isPairRowRemoval(
             request.type, host.packagedArtifactOwner({ type: request.type, name: request.name }), request.packageId,
+            installedManifestsOfEngine(host.engine),
         );
         // Two-tier authorization for delete (mirrors saveMetaItem).
         //  • Artifact-backed item → delete becomes a tombstone overlay,
@@ -1164,6 +1166,7 @@ export class ProtocolDiffDeleteLoadFacet {
                             && !isServedOverrideRowOf(
                                 record as ServedOverrideRow,
                                 host.packagedArtifactOwner({ type: normalizedType, name: String(record.name) }),
+                                installedManifestsOfEngine(host.engine),
                             )
                         ) {
                             sealedOverlays.push({ type: normalizedType, name: String(record.name) });

@@ -31,7 +31,7 @@ function keyPaths(node: unknown, prefix = ''): string[] {
 
 describe('en ↔ zh key parity', () => {
   const en = keyPaths(builtInLocales.en);
-  const zh = keyPaths(builtInLocales.zh);
+  const zh = keyPaths(builtInLocales['zh-Hans']);
 
   it('flattens a realistic number of keys', () => {
     // Guard against the walker silently returning nothing and the two

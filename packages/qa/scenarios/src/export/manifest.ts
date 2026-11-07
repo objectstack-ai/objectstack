@@ -14,7 +14,9 @@
 
 import { z } from 'zod';
 
-import { CategorySchema, MachineNameSchema } from '../schema.js';
+import { MarketplaceBusinessFunctionSchema } from '@objectstack/spec/marketplace';
+
+import { MachineNameSchema } from '../schema.js';
 
 export const GALLERY_INDEX_SCHEMA_VERSION = 1;
 
@@ -40,8 +42,12 @@ export const GalleryAppSchema = z.strictObject({
   namespace: z.string().regex(/^demo[a-z]{2,8}$/),
   /** `apps/<id>`. */
   path: z.string().regex(/^apps\/[a-z][a-z0-9_]*$/),
-  /** The business function: the card's `category` (the marketplace taxonomy). */
-  function: CategorySchema,
+  /**
+   * The business function: the card's PRIMARY one (`businessFunctions[0]`),
+   * from the marketplace taxonomy's business-function facet in
+   * `@objectstack/spec/marketplace` — the one a listing card shows.
+   */
+  function: MarketplaceBusinessFunctionSchema,
   /** `en` is the card's `title`; the card schema has no Chinese title, so `zh` is `null` until it does. */
   title: z.strictObject({ en: z.string().min(1), zh: z.string().min(1).nullable() }),
   /** The card's one-sentence requirement (`prompt.short`), in the languages it has. */

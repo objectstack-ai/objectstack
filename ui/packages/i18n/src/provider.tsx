@@ -13,6 +13,7 @@ import {
   isBuiltInLanguage,
   loadBuiltInLocale,
   matchLanguageTag,
+  resolveBuiltInLanguage,
 } from './locales/registry.js';
 
 /**
@@ -702,19 +703,27 @@ export function I18nProvider({
   // (which already merged the catalogue), or for a catalogue that was resident
   // when the instance was created, the write would add nothing and still
   // re-render every reader.
+  //
+  // The catalogue is written under its platform locale table TAG, the bundle
+  // `createI18n` keyed it by, never under the code the instance runs in
+  // (objectstack#30511). An instance in a stored alias (`zh`, `zh-TW`, `pt`)
+  // reads that bundle through `fallbackLng`; writing the catalogue under the
+  // alias would add a second copy of a catalogue that was already resident and
+  // re-render every reader for it, the very write the paragraph above forbids.
   useEffect(() => {
     const currentLang = i18nInstance.language || 'en';
-    if (!isBuiltInLanguage(currentLang)) return;
+    const tag = resolveBuiltInLanguage(currentLang);
+    if (tag === null) return;
     let cancelled = false;
-    void loadBuiltInLocale(currentLang)
+    void loadBuiltInLocale(tag)
       .then((catalogue) => {
         if (cancelled || !catalogue) return;
-        const bundle: unknown = i18nInstance.getResourceBundle(currentLang, 'translation');
+        const bundle: unknown = i18nInstance.getResourceBundle(tag, 'translation');
         if (isNested(bundle)) {
           if (!mergeAddsKeys(bundle, catalogue)) return;
-          i18nInstance.addResourceBundle(currentLang, 'translation', catalogue, true, false);
+          i18nInstance.addResourceBundle(tag, 'translation', catalogue, true, false);
         } else {
-          i18nInstance.addResourceBundle(currentLang, 'translation', catalogue);
+          i18nInstance.addResourceBundle(tag, 'translation', catalogue);
         }
       })
       .catch((err) => {
@@ -835,15 +844,19 @@ export function I18nProvider({
         // `changeLanguage`) — and that re-renders every reader once, in the
         // new language. An `added` event here would re-render each of them in
         // the OLD language first ({@link STORE_WRITES_RERENDER}).
-        const builtIn = await loadBuiltInLocale(lang).catch((err) => {
+        //
+        // The catalogue goes under its table tag, as on mount above: a switch
+        // to `zh-TW` reads the `zh-Hant` bundle through `fallbackLng`.
+        const tag = resolveBuiltInLanguage(lang);
+        const builtIn = tag === null ? null : await loadBuiltInLocale(tag).catch((err) => {
           console.warn(`[i18n] Failed to load the built-in catalogue for '${lang}':`, err);
           return null;
         });
-        if (builtIn) {
-          if (i18nInstance.hasResourceBundle(lang, 'translation')) {
-            i18nInstance.addResourceBundle(lang, 'translation', builtIn, true, false, SILENT_WRITE);
+        if (tag !== null && builtIn) {
+          if (i18nInstance.hasResourceBundle(tag, 'translation')) {
+            i18nInstance.addResourceBundle(tag, 'translation', builtIn, true, false, SILENT_WRITE);
           } else {
-            i18nInstance.addResourceBundle(lang, 'translation', builtIn, false, false, SILENT_WRITE);
+            i18nInstance.addResourceBundle(tag, 'translation', builtIn, false, false, SILENT_WRITE);
           }
         }
         // Dynamic language pack loading (v2.0.7)

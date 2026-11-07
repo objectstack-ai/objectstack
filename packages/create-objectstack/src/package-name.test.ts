@@ -163,6 +163,8 @@ describe('the CLI refuses an illegal project name before writing anything', () =
       fs.readFileSync(path.join(projectDir, 'objectstack.manifest.json'), 'utf8'),
     );
     expect(pkg.name).toBe(name);
-    expect(manifest.name).toBe(name);
+    // `objectstack.manifest.json` carries no `name`: the key is retired, and
+    // the slug lives in package.json alone.
+    expect(manifest).not.toHaveProperty('name');
   }, 30_000);
 });

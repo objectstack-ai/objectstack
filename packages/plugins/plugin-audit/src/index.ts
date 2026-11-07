@@ -24,6 +24,23 @@ export type {
   ActionInvocationBranch,
   ActionInvocationOutcome,
 } from './action-invocation-audit.js';
+// [#30955] The run-level `export` row writer the REST export door reaches
+// through the `audit` slot.
+export {
+  buildDataExportAuditRow,
+  createDataExportAuditWriter,
+  DATA_EXPORT_AUDIT_ACTION,
+  EXPORT_FILTER_SUMMARY_MAX_TERMS,
+  summarizeExportFilter,
+} from './data-export-audit.js';
+export type {
+  DataExportAuditEvent,
+  DataExportAuditWriter,
+  DataExportAuditWriterOptions,
+  DataExportOutcome,
+  ExportFilterSummary,
+  ExportFilterTerm,
+} from './data-export-audit.js';
 export {
   createReadAuditBatcher,
   extractDetailReadId,

@@ -101,7 +101,7 @@ type Pack = {
 };
 /** The packs, read by key — see the header on why nothing is written out. */
 const EN = builtInLocales.en as unknown as Pack;
-const ZH = builtInLocales.zh as unknown as Pack;
+const ZH = builtInLocales['zh-Hans'] as unknown as Pack;
 
 const fill = (template: string, vars: Record<string, string>) =>
   template.replace(/\{\{(\w+)\}\}/g, (_m, k: string) => vars[k]);

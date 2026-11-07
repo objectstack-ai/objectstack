@@ -29,7 +29,7 @@
  *  - `multi_shipped` — several packages ship it: listed for the administrator,
  *    never guessed.
  *  - `no_pair` — the one package that ships it has an id no pair can be
- *    formed from (`customizationPackageId` refuses it): listed, not moved.
+ *    formed from (`pairOf` refuses it): listed, not moved.
  *
  * "Ships" counts read-only code packages only, as the write gate does: a
  * writable package's item is edited in place (ADR-0070), and the pair itself
@@ -135,8 +135,8 @@
 import {
     OVERRIDABLE_METADATA_TYPES,
     customizationBasePackageId,
-    customizationPackageId,
 } from '@objectstack/spec/kernel';
+import { pairOf, type InstalledManifestLookup } from '@objectstack/metadata-core';
 import { PLURAL_TO_SINGULAR, SINGULAR_TO_PLURAL } from '@objectstack/spec/shared';
 import { storedRowDocument } from './item-lock.js';
 import { OVERLAY_MEMBER_COLUMN, overlayMemberOfBody, overlayMemberValue } from './migrations/overlay-index.js';
@@ -144,12 +144,14 @@ import type { ObjectStackProtocolImplementation } from './protocol.js';
 import {
     overlayPairFixAdmits,
     overlayPairFixOf,
+    type OverlayWriteClose,
     overrideDeclarationRefusedByShape,
     overrideWriteMemberOf,
     type OverrideWriteVerdictAsk,
 } from './protocol-packaged-base-refusal.js';
 import { readOnlyShippingPackages, shippingPackageIds } from './protocol-environment-rows.js';
 import { isServedOverrideRowOf } from './served-override.js';
+import { installedManifestsOfEngine } from './installed-manifests.js';
 
 /** The class members this module reads, typed as the class declares them. */
 export interface PackagelessOverlayMigrationHost {
@@ -377,10 +379,11 @@ export function classifyPackagelessRow(
     shippers: readonly string[],
     body: Record<string, unknown> | undefined,
     shadowOf: (pair: string) => unknown,
+    installed: InstalledManifestLookup,
 ): Pick<PackagelessOverlayRow, 'disposition' | 'base' | 'pair' | 'shadowDeclares'> {
     if (shippers.length > 1) return { disposition: 'multi_shipped' };
     const base = shippers[0]!;
-    const pairId = customizationPackageId(base);
+    const pairId = pairOf(base, installed);
     if (!pairId.ok) return { base, disposition: 'no_pair' };
     const pair = pairId.value;
     if (body !== undefined && overrideDeclarationRefusedByShape(type, body)) return { base, pair, disposition: 'cannot_declare' };
@@ -391,7 +394,7 @@ export function classifyPackagelessRow(
     }
     const shadow = shadowOf(pair);
     if (shadow !== undefined) {
-        return { base, pair, disposition: 'shadowed', shadowDeclares: isServedOverrideRowOf(shadow, base) };
+        return { base, pair, disposition: 'shadowed', shadowDeclares: isServedOverrideRowOf(shadow, base, installed) };
     }
     return { base, pair, disposition: 'movable' };
 }
@@ -405,7 +408,7 @@ export function classifyPackagelessRow(
  *         classifies it; an unprovisioned table answers an empty census.
  */
 export async function listPackagelessOverlays(
-    this: Pick<PackagelessOverlayMigrationHost, 'overlayTypes' | 'findEnvironmentRows' | 'rethrowUnlessMetadataStoreUnprovisioned' | 'shippedArtifactsOf' | 'isWritablePackage'>,
+    this: Pick<PackagelessOverlayMigrationHost, 'engine' | 'overlayTypes' | 'findEnvironmentRows' | 'rethrowUnlessMetadataStoreUnprovisioned' | 'shippedArtifactsOf' | 'isWritablePackage'>,
 ): Promise<PackagelessOverlayCensus> {
     const rows = await overlayRows.call(this);
     // What every pair holds, per item identity and state.
@@ -456,7 +459,7 @@ export async function listPackagelessOverlays(
         const body = bodyOf(row);
         // A row bound to the base names its base: the binding is its one shipper.
         const classified = classifyPackagelessRow(type, binding !== undefined ? [binding] : shippers, body,
-            (pair) => shadowOf(pair, type, name, member, state));
+            (pair) => shadowOf(pair, type, name, member, state), installedManifestsOfEngine(this.engine));
         const addedMember = classified.disposition === 'movable' && classified.base !== undefined
             ? addedMemberOf(this, type, name, classified.base, body)
             : undefined;
@@ -473,7 +476,7 @@ export async function listPackagelessOverlays(
     for (const row of await environmentRowsOfTypes.call(this, OVERRIDABLE_TYPE_SPELLINGS)) {
         if (isUnbound(row)) continue;
         const base = customizationBasePackageId(row.package_id);
-        if (base === null || !isServedOverrideRowOf(row, base)) continue;
+        if (base === null || !isServedOverrideRowOf(row, base, installedManifestsOfEngine(this.engine))) continue;
         const basedOn = (bodyOf(row) as { overrides?: { basedOn?: unknown } } | undefined)?.overrides?.basedOn;
         if (typeof basedOn === 'string' && basedOn !== '') continue;
         const member = memberOf(row);
@@ -611,7 +614,7 @@ export async function migratePackagelessOverlays(
             // Step 3: read back — the pair's row must be the served override,
             // or, for an added member, that member's own row declaring nothing.
             const written = await storedPairRow(this, row, row.pair);
-            if (addedMember === undefined ? !isServedOverrideRowOf(written, row.base) : !isOwnMemberRow(written)) {
+            if (addedMember === undefined ? !isServedOverrideRowOf(written, row.base, installedManifestsOfEngine(this.engine)) : !isOwnMemberRow(written)) {
                 const kept = bound ? `the row bound to '${row.base}' is kept` : 'the unbound row is kept';
                 fail(addedMember === undefined
                     ? `The row saved into '${row.pair}' does not read back as the declared override of '${row.base}'; ${kept}.`
@@ -674,7 +677,7 @@ export async function migratePackagelessOverlays(
             } as never);
             const written = await storedPairRow(this, decl, decl.pair);
             const recorded = (bodyOf(written) as { overrides?: { basedOn?: unknown } } | undefined)?.overrides?.basedOn;
-            if (!isServedOverrideRowOf(written, decl.base) || recorded !== basedOn) {
+            if (!isServedOverrideRowOf(written, decl.base, installedManifestsOfEngine(this.engine)) || recorded !== basedOn) {
                 fail(`The row of '${decl.pair}' does not read back with basedOn '${basedOn}'.`);
                 continue;
             }
@@ -754,7 +757,11 @@ export interface PackagelessWriteSubject {
  *    locale the base does not ship is refused there (#28777) and stays open:
  *    the ceremony moves such a row as the pair's own member, declaring
  *    nothing (#28904), and the close reaches only the declared-override
- *    moves, so its package-less write is the one it had before the close.
+ *    moves, so its package-less write is the one it had before the close;
+ *  - [#29594] an item a kernel package ships stays closed where it was
+ *    before the kernel verdict, though the ensure door creates no pair for
+ *    it: the subject carries the base's `kernelScope`, and the refusal says
+ *    kernel objects are not customizable in this version, naming no pair.
  *
  * Registry reads first; the one store read (the item's rows) only for a name
  * the registry has not already left open.
@@ -762,7 +769,7 @@ export interface PackagelessWriteSubject {
 export async function packagelessCloseSubject(
     this: PackagelessCloseHost,
     request: PackagelessWriteSubject,
-): Promise<{ base: string; pair: string } | null> {
+): Promise<OverlayWriteClose | null> {
     if (typeof request.packageId === 'string' && request.packageId.length > 0) return null;
     const type = PLURAL_TO_SINGULAR[request.type] ?? request.type;
     const shippers = this.overlayBaseShippers(request.type, request.name);
@@ -796,10 +803,10 @@ export async function packagelessCloseSubject(
     const classified = classifyPackagelessRow(type, shippers, body, (p) => (stored === undefined
         ? undefined
         : ofItem.find((row) => row.package_id === p && stateOf(row) === request.state)
-            ?? ofItem.find((row) => row.package_id === p)));
+            ?? ofItem.find((row) => row.package_id === p)), installedManifestsOfEngine(this.engine));
     if (classified.disposition !== 'movable') return null;
 
     // Step 2's gate: the declared body, into the pair.
     if (!overlayPairFixAdmits(this, fix, { type, name: request.name, body, member })) return null;
-    return { base, pair: fix.pair };
+    return fix.kernelScope === undefined ? { base, pair: fix.pair } : { base, pair: fix.pair, kernelScope: fix.kernelScope };
 }

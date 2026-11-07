@@ -8,8 +8,8 @@ description: "objectstack.manifest.json — on-disk descriptor for a template / 
 
 `objectstack.manifest.json` — on-disk descriptor for a template / package
 source tree. Strict projection of `CreatePackageRequestSchema` (server-
-managed fields excluded) plus scaffold-time extras (name slug,
-specVersion, namespace, skills, preview, scaffold, readmePath), with
+managed fields excluded) plus scaffold-time extras (namespace, preview,
+readmePath), with
 `manifestId` locally relaxed to OPTIONAL — this file is a source tree, not
 a publish request (#7319; the field's own TSDoc carries the measurement).
 
@@ -44,8 +44,12 @@ objectstack.manifest.json — template / package source descriptor
 | :--- | :--- | :--- | :--- |
 | **displayName** | `string` | ✅ | Display name shown in Studio and Marketplace |
 | **description** | `string` | optional | Short package description |
-| **visibility** | `Enum<'private' \| 'org' \| 'marketplace'>` | optional | Package visibility: private = owner org only; org = all envs in owner org; marketplace = public registry |
-| **category** | `string` | optional | Package category for marketplace discovery (e.g. "crm", "hr", "finance", "devtools") |
+| **visibility** | `never` | optional | [REMOVED] `TemplateManifest.visibility` was removed in @objectstack/spec 18 (ADR-0049) — `os package publish` never read it from this file. Delete the key and pass `--visibility` (`private`, `org` or `marketplace`) to `os package publish`. |
+| **category** | `never` | optional | [REMOVED] `TemplateManifest.category` was removed in @objectstack/spec 18 (ADR-0087) — one category had to say both who a package is for and what it is, and the platform and the cloud catalog spelled it from lists that disagreed. Delete the key. Declare `businessFunctions` (1-3 business functions, the primary one first), optionally `industries` (up to 3; absent means cross-industry) and `solutionType` (`app`, `template` or `connector`; absent means `app`). `LEGACY_CATEGORY_MAPPING` in @objectstack/spec/marketplace gives the facets for every old category value. |
+| **businessFunctions** | `Enum<'sales' \| 'marketing' \| 'customer_service' \| 'finance' \| 'hr' \| 'supply_chain' \| 'administration' \| 'project' \| 'legal' \| 'it' \| 'collaboration'>[]` | optional | Business functions the package serves: 1-3 distinct values, the first is primary |
+| **industries** | `Enum<'manufacturing' \| 'trade_distribution' \| 'retail' \| 'logistics' \| 'professional_services' \| 'financial_services' \| 'healthcare' \| 'education' \| 'public_sector' \| 'real_estate_construction'>[]` | optional | Industries the package is built for: up to 3 distinct values; absent means cross-industry |
+| **solutionType** | `Enum<'app' \| 'template' \| 'connector'>` | optional | What a marketplace package is: a managed app, an unmanaged template, or a connector |
+| **maturity** | `Enum<'beta' \| 'stable'>` | optional | Package maturity: beta shows a badge on the listing; absent means stable |
 | **tags** | `string[]` | optional |  |
 | **iconUrl** | `string` | optional |  |
 | **homepageUrl** | `string` | optional |  |
@@ -54,12 +58,12 @@ objectstack.manifest.json — template / package source descriptor
 | **isStarter** | `boolean` | optional |  |
 | **translations** | `Record<string, { displayName?: string; description?: string; readme?: string; tagline?: string; … }>` | optional | Locale-keyed overrides; missing keys fall back to base columns |
 | **manifestId** | `string` | optional | Optional declarative default for the published package id (reverse-domain, e.g. com.acme.crm). Absent on a template source tree: `objectstack package publish` falls back to --manifest-id and then to a derived `local.<slug>`. NOT optional on the publish request itself |
-| **name** | `string` | ✅ | CLI slug (kebab-case, no namespace prefix) |
-| **specVersion** | `string` | ✅ | Compatible @objectstack/spec semver range |
+| **name** | `never` | optional | [REMOVED] `TemplateManifest.name` was removed in @objectstack/spec 18 (ADR-0049) — nothing read it: `os package publish` addresses the package by `manifestId` (or derives one from the compiled artifact), and a project's slug is its `package.json` `name`. Delete the key. |
+| **specVersion** | `never` | optional | [REMOVED] `TemplateManifest.specVersion` was removed in @objectstack/spec 18 (ADR-0049) — nothing read it. Delete the key. The protocol a package needs is `manifest.engines.protocol` in `objectstack.config.ts` (the handshake the runtime checks), and the spec release it builds against is the `@objectstack/spec` version in `package.json`. |
 | **namespace** | `string` | optional | Scaffold-only: the template’s own metadata namespace, rewritten by create-objectstack at scaffold time and read back as the fallback source for the template’s original namespace. NOT the publish namespace — publish reads that off the compiled artifact’s manifest.namespace (ADR-0048 addendum §A.2) |
-| **skills** | `string[]` | optional | Skill ids exercised by this template (for docs / picker) |
+| **skills** | `never` | optional | [REMOVED] `TemplateManifest.skills` was removed in @objectstack/spec 18 (ADR-0049) — nothing read it: create-objectstack installs the whole `@objectstack/skills` catalog whatever this file lists. Delete the key. |
 | **preview** | `{ screenshots?: string[]; demoUrl?: string }` | optional |  |
-| **scaffold** | `{ variables?: Record<string, any>; postInstall?: string[] }` | optional |  |
+| **scaffold** | `never` | optional | [REMOVED] `TemplateManifest.scaffold` was removed in @objectstack/spec 18 (ADR-0049) — nothing read it: create-objectstack never prompted for `scaffold.variables` nor ran `scaffold.postInstall`. Delete the key. |
 | **readmePath** | `string` | optional | Path (relative to manifest) to long-form README |
 
 ### Nested Shape: `TemplateManifest.translations[string]`

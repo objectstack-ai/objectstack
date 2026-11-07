@@ -53,6 +53,15 @@ const repoRoot = join(pkgRoot, '..', '..');
  */
 const TEMPLATE_ROOT = join(repoRoot, 'packages/create-objectstack/src/templates');
 
+/**
+ * The first-party marketplace apps (`packages/apps/connector-*`) ship the same
+ * file outside the template tree (#31035), so they are walked too. Each root
+ * must yield at least one manifest: a root that moved must not go quiet.
+ */
+const APPS_ROOT = join(repoRoot, 'packages/apps');
+
+const MANIFEST_ROOTS = [TEMPLATE_ROOT, APPS_ROOT];
+
 const MANIFEST_FILENAME = 'objectstack.manifest.json';
 
 /** The `$schema` these files claim. Verifying the claim is half the point. */
@@ -106,7 +115,7 @@ export function checkManifest(path: string): string[] {
   const problems: string[] = [];
 
   // The gate's authority comes from the FILENAME — every `objectstack.manifest.json`
-  // under the template root is judged against `TemplateManifestSchema`. So a file
+  // under a manifest root is judged against `TemplateManifestSchema`. So a file
   // claiming some other `$schema` is not an exemption, it is a contradiction: one
   // of the two statements is wrong and a reader cannot tell which. Absent is fine
   // (the claim is optional); present and different is not.
@@ -153,9 +162,7 @@ function selfTest(): never {
 
     const base = {
       $schema: TEMPLATE_MANIFEST_SCHEMA_URL,
-      name: 'blank',
       namespace: 'blank',
-      specVersion: '^6.0.0',
       displayName: 'Blank Starter',
     };
 
@@ -203,6 +210,14 @@ function selfTest(): never {
       'wrong-schema fixture: a manifest claiming a different $schema must FAIL',
     );
 
+    // RED — a retired key is refused with its prescription (#31035): the
+    // tombstone, not a silent strip, is what this gate reports.
+    const retired = write('retired-key', { ...base, specVersion: '^18.0.0' });
+    check(
+      checkManifest(retired).some((p) => p.startsWith('specVersion:') && p.includes('was removed')),
+      `retired-key fixture: a retired key must FAIL with its prescription; got ${JSON.stringify(checkManifest(retired))}`,
+    );
+
     // RED — malformed JSON is a finding, not a skip.
     const broken = write('broken', '{ not json');
     check(
@@ -213,8 +228,8 @@ function selfTest(): never {
     // Discovery walks recursively and finds exactly the manifests written above.
     const discovered = findManifests(dir);
     check(
-      discovered.length === 7,
-      `discovery: expected 7 fixture manifests, found ${discovered.length}`,
+      discovered.length === 8,
+      `discovery: expected 8 fixture manifests, found ${discovered.length}`,
     );
 
     // The vacuous-green guard's input: an empty tree yields zero, which `main`
@@ -237,7 +252,7 @@ function selfTest(): never {
   console.log(
     '✅  self-test: accepts a manifest with no manifestId (#7319) and one with a well-formed id,\n' +
       '    rejects a malformed manifestId / namespace (#6861), a missing required key, a\n' +
-      '    contradictory $schema and malformed JSON; discovery walks the template tree.',
+      '    retired key, a contradictory $schema and malformed JSON; discovery walks the template tree.',
   );
   process.exit(0);
 }
@@ -247,19 +262,23 @@ function main(): void {
 
   console.log(`🧪 Parsing every shipped ${MANIFEST_FILENAME} against TemplateManifestSchema...\n`);
 
-  const manifests = findManifests(TEMPLATE_ROOT);
-
-  // Vacuous-green guard. Zero files is far more likely to mean "the templates
-  // moved" than "we ship no templates", and a gate that checked nothing must not
-  // report success.
-  if (manifests.length === 0) {
-    console.error(
-      `✗ No ${MANIFEST_FILENAME} found under ${rel(TEMPLATE_ROOT)}.\n\n` +
-        `  Every bundled template ships one, so this is almost certainly a moved\n` +
-        `  directory rather than an empty one — point TEMPLATE_ROOT at wherever the\n` +
-        `  templates live now. A gate that parses nothing must not report success.\n`,
-    );
-    process.exit(1);
+  const manifests: string[] = [];
+  for (const root of MANIFEST_ROOTS) {
+    const found = findManifests(root);
+    // Vacuous-green guard, per root. Zero files is far more likely to mean "the
+    // templates (or apps) moved" than "we ship none", and a gate that checked
+    // nothing under a root must not report success for it.
+    if (found.length === 0) {
+      console.error(
+        `✗ No ${MANIFEST_FILENAME} found under ${rel(root)}.\n\n` +
+          `  Every bundled template and first-party marketplace app ships one, so this is\n` +
+          `  almost certainly a moved directory rather than an empty one — point\n` +
+          `  MANIFEST_ROOTS at wherever they live now. A gate that parses nothing must not\n` +
+          `  report success.\n`,
+      );
+      process.exit(1);
+    }
+    manifests.push(...found);
   }
 
   let bad = 0;

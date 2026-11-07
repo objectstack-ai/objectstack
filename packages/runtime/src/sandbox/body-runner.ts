@@ -62,9 +62,10 @@ import {
   resolveRelatedTitleTarget,
   resolveServedRecordTitle,
   servedRecordTitle,
+  refuseAppAuthoredPermanentDelete,
   type FormulaServingChannel,
 } from '@objectstack/objectql';
-import { refuseStoredMetadataBodyReads, refuseStoredMetadataBodyWrites } from '../stored-metadata-reader-seam.js';
+import { deriveThroughSeam, refuseStoredMetadataBodyReads, refuseStoredMetadataBodyWrites } from '../stored-metadata-reader-seam.js';
 import { answerLandedWritesDespiteStaleSummary } from '../landed-write-answer.js';
 import { isStoredMetadataBodyObject } from '@objectstack/spec/kernel';
 import {
@@ -1161,12 +1162,46 @@ function buildEngineRepoFacade(ql: any, objectName: string, context?: any) {
  * the API is built from: the body runs on to its own result. An action's
  * host-built `api` already answers so (`buildActionApi`); the layer is
  * idempotent.
+ *
+ * [ADR-0148 D3, ruling A recorded in 6691358077] Above every layer, a body's
+ * `delete` that asks for `permanent` is refused
+ * ({@link refuseBodyPermanentDeletes}): app-authored code cannot purge, so its
+ * deletes enter the recycle bin, whatever envelope the body runs under.
  */
 function buildSandboxApi(engineCtx: any, ql: any, errLabel: string) {
-  return refuseStoredMetadataBodyWrites(
-    refuseStoredMetadataBodyReads(
-      answerLandedWritesDespiteStaleSummary(buildSandboxApiSource(engineCtx, ql, errLabel), errLabel),
+  return refuseBodyPermanentDeletes(
+    refuseStoredMetadataBodyWrites(
+      refuseStoredMetadataBodyReads(
+        answerLandedWritesDespiteStaleSummary(buildSandboxApiSource(engineCtx, ql, errLabel), errLabel),
+      ),
     ),
+    errLabel,
+  );
+}
+
+/** Marks a scoped API whose permanent deletes are already refused for a body. */
+const BODY_PERMANENT_DELETES_REFUSED = Symbol.for('objectstack.runtime.bodyPermanentDeletesRefused');
+
+/**
+ * [ADR-0148 D3, ruling A recorded in 6691358077] The scoped API a sandboxed
+ * BODY (a hook, action or job body) holds, with the permanent delete refused:
+ * app-authored code cannot purge a record, so its deletes always enter the
+ * recycle bin. A job body runs under a fresh `{ isSystem: true, tenantId }`
+ * envelope and the system is never refused the engine's `purge` verb, so the
+ * rule is held here, at the one place every body face gets its API, and not by
+ * the engine's `delete`, whose `delete(…, { permanent: true })` stays open to
+ * every caller that is not app-authored. Every context the API derives
+ * (`object(name)`, `sudo()`, `withRunAs(...)`, a transaction's context) is
+ * refused the same way. Idempotent.
+ *
+ * The refusal itself is objectql's `refuseAppAuthoredPermanentDelete`, the
+ * same one the engine's `ScopedContext.object()` applies to an app-authored
+ * hook's api, so a hook's in-process `handler` and every body are refused with
+ * one code and one sentence.
+ */
+function refuseBodyPermanentDeletes<T>(api: T, errLabel: string): T {
+  return deriveThroughSeam(api, BODY_PERMANENT_DELETES_REFUSED, (name, repo) =>
+    refuseAppAuthoredPermanentDelete(name, repo, errLabel),
   );
 }
 

@@ -30,6 +30,7 @@ import { installAuditWriters, type AuditI18nSurface, type MessagingEmitSurface }
 import { installReadAuditWriter, type ReadAuditWriterHandle } from './read-audit.js';
 import { createAuthEventAuditSink } from './auth-event-audit.js';
 import { createActionInvocationAuditWriter } from './action-invocation-audit.js';
+import { createDataExportAuditWriter } from './data-export-audit.js';
 import { installCommentAccessHooks, installCommentReadVisibility } from './comment-access-hooks.js';
 import {
   COMMENT_REACTION_REMOVE_ROUTE,
@@ -320,6 +321,11 @@ export class AuditPlugin implements Plugin {
     // (`recordActionInvocation`): the two action doors in `@objectstack/runtime`
     // resolve it per request and hand it one event per invocation, naming the
     // door it came through (ruling 6513869839 on #27681, parameter 3).
+    //
+    // [#30955] And the data-export writer (`recordDataExport`): the REST
+    // export door resolves it per request and hands it one event per export
+    // it streamed, so every export of every object, this ledger included,
+    // leaves a run-level `export` row (`data-export-audit.ts`).
     const getLedgerEngine = (): IDataEngine | undefined => {
       try {
         return ctx.getService<IDataEngine>('objectql');
@@ -336,6 +342,7 @@ export class AuditPlugin implements Plugin {
     ctx.registerService('audit', {
       ...createAuthEventAuditSink({ getEngine: getLedgerEngine, logger: ctx.logger }),
       ...createActionInvocationAuditWriter({ getEngine: getLedgerEngine, logger: ctx.logger }),
+      ...createDataExportAuditWriter({ getEngine: getLedgerEngine, logger: ctx.logger }),
     });
 
     // ADR-0029 D8 — contribute this plugin's object translations to the i18n

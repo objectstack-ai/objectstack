@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { Auth, BetterAuthOptions } from 'better-auth';
-import type { JSONWebKeySet } from 'jose';
+import { decodeJwt, type JSONWebKeySet } from 'jose';
 import type { SCIMIdentityState, SCIMTransactionContext } from '@better-auth/scim';
 // better-auth value imports (betterAuth + plugins) are deferred via dynamic
 // import() in getOrCreateAuth() / buildPluginList() so that disabled plugins
@@ -224,6 +224,9 @@ import {
   verifyMcpAccessTokenClaims,
   type McpAccessTokenHost,
 } from './auth-manager-mcp-access-token.js';
+// [#30918] The coarse last-use stamp a verified MCP call writes on its consent.
+import { McpClientLastUseStamper, mcpClientLastUseStoreFor } from './mcp-client-last-use.js';
+import { runAfterResponse } from './run-after-response.js';
 // [objectstack-ai/cloud#3606, ruling A] `/oauth2/revoke` for an MCP access
 // token: the answer `handleRequest` gives after the provider's, through
 // `answerOAuthTokenRevocation` below.
@@ -254,6 +257,7 @@ import { createAuthInstance, type AuthInstanceHost } from './auth-manager-auth-i
 import { buildPluginList, type PluginListHost } from './auth-manager-plugin-list.js';
 import { resolveTurnstileKeys } from './turnstile-sign-up.js';
 import { assertTrustedAppSchemes, registeredAppSchemesOf } from './one-time-token-handoff.js';
+import type { MintScimConnectionCredentialInput, MintedScimConnectionCredential } from './scim-connection-service.js';
 
 /**
  * Detect WebContainer (StackBlitz) environment.
@@ -4585,7 +4589,8 @@ export class AuthManager {
    * read, and when the read fails (fail closed). So revocation takes effect
    * on the next request: `/oauth2/revoke` deletes the consent and the
    * client's refresh family for that user (`answerOAuthTokenRevocation`), and
-   * the Console's `/oauth2/delete-consent` deletes the same row. A server-only
+   * the Console's withdraw (`authorized-clients-withdraw.ts`) revokes the same
+   * grant the same way. A server-only
    * `skip_consent` client has no consent row and is admitted without one.
    *
    * The caller (runtime dispatcher) maps the returned principal through
@@ -4603,6 +4608,14 @@ export class AuthManager {
    * caller vets it on every request by the rule that vets a session's active
    * organization (`vetOrganizationClaim`, `@objectstack/core`), as the
    * `IAuthService` contract states.
+   *
+   * [#30918] A token that verifies also schedules, AFTER the verdict and off
+   * the request's path, the coarse last-use stamp on the consent it was minted
+   * under (`mcp-client-last-use.ts`): at most one write per consent per hour
+   * in each process, from this verified token and the server's clock, and
+   * only on the consent that admitted it (the consent read above, by the same
+   * rule). The stamp reads and writes nothing the verdict depends on, and its
+   * failure is never this method's failure.
    */
   verifyMcpAccessToken(
     token: string,
@@ -4616,7 +4629,66 @@ export class AuthManager {
       rereadKeyringForUnknownKey: (...a) => this.rereadKeyringForUnknownKey(...a),
       getAuthContext: (...a) => this.getAuthContext(...a),
     };
-    return verifyMcpAccessToken.call(host, token);
+    // [#30918] A token that verified is a verified MCP call: its consent's
+    // coarse last-use stamp is settled after the response, never awaited here,
+    // and from the verified token only (`mcp-client-last-use.ts`). The
+    // verifier has just admitted the token by its consent (#30879,
+    // `mcpConsentAdmits`), so a revoked consent refuses the call and stamps
+    // nothing; the stamp picks its consent by the same rule.
+    return verifyMcpAccessToken.call(host, token).then((principal) => {
+      if (principal) this.scheduleMcpClientLastUse(principal, token);
+      return principal;
+    });
+  }
+
+  /** [#30918] The per-manager stamper, built on first use. */
+  private mcpClientLastUse?: McpClientLastUseStamper;
+
+  /**
+   * [#30918] Settle the last-use stamp of the consent `principal`'s token was
+   * minted under, after the response (`run-after-response.ts`). At most one
+   * write per consent per hour in each process, from the verified principal
+   * and the server's clock alone; each distinct failure is reported once per
+   * process at `error`
+   * (`error` when the host logger carries it, else `warn`, called through the
+   * property — see {@link audienceLogError}; `console.error` when the manager
+   * was given no logger, so the report is never silent).
+   */
+  private scheduleMcpClientLastUse(
+    principal: { userId: string; clientId?: string; organizationId?: string },
+    token: string,
+  ): void {
+    if (!principal.clientId) return;
+    // The token has just verified, so its payload is the one the signature
+    // covers: its `iat` is what the verifier admitted the consent against.
+    let issuedAt: number | undefined;
+    try {
+      const iat = decodeJwt(token).iat;
+      issuedAt = typeof iat === 'number' ? iat : undefined;
+    } catch {
+      issuedAt = undefined;
+    }
+    const stamper = (this.mcpClientLastUse ??= new McpClientLastUseStamper(
+      mcpClientLastUseStoreFor(() => this.getDataEngine()),
+      {
+        onNewFailure: (error) => {
+          const message =
+            '[AuthManager] The last-use time of authorized AI assistants could not be recorded: '
+            + 'the authorized-clients reads keep answering the last stamp that landed as if it were current. '
+            + 'Check that schema sync has added sys_oauth_consent.last_used_at and that the data engine is reachable; '
+            + 'each consent is retried once an hour, and each distinct failure is reported once per process.';
+          const meta = { error: error instanceof Error ? error.message : String(error) };
+          if (this.config.logger) this.audienceLogError(message, meta);
+          else console.error(message, meta);
+        },
+      },
+    ));
+    runAfterResponse(
+      () => stamper.record({ ...principal, ...(issuedAt !== undefined ? { issuedAt } : {}) }),
+      () => {
+        // `record` never rejects; its own failure report is above.
+      },
+    );
   }
 
   /**
@@ -6499,6 +6571,32 @@ export class AuthManager {
   /** Whether this deployment declared `server.trustProxy` ({@link AuthManagerOptions.trustProxy}). */
   public trustsForwardedHeaders(): boolean {
     return this.config.trustProxy === true;
+  }
+
+  /**
+   * [#30958] Is the SCIM 2.0 service provider mounted on this deployment? The
+   * same decision `buildPluginList` mounts `@better-auth/scim` on
+   * ({@link resolveScimEnabled}), so the credential door's "SCIM is off"
+   * refusal can never disagree with the `/scim/v2` routes actually served.
+   */
+  public isScimWired(): boolean {
+    return resolveScimEnabled(this.config.plugins);
+  }
+
+  /**
+   * [#30958] Mint a SCIM connection bearer with this deployment's auth secret,
+   * the key the mounted SCIM plugin's verifier digests with
+   * (`buildPluginList`), so the bearer is one that plugin accepts. The secret
+   * never leaves the manager. The only caller is the platform-admin
+   * `/admin/scim/mint-credential` mount (`scim-connection-admin.ts`), which
+   * hands the engine to write through.
+   */
+  public async mintScimConnectionCredential(
+    engine: IDataEngine,
+    input: MintScimConnectionCredentialInput,
+  ): Promise<MintedScimConnectionCredential> {
+    const { mintScimConnectionCredential } = await import('./scim-connection-service.js');
+    return mintScimConnectionCredential(engine as never, this.resolveAuthSecret(), input);
   }
 
   /**

@@ -1235,55 +1235,6 @@ export interface ActionResult {
   undo?: UndoableOperation;
 }
 
-/**
- * Action executor function type
- */
-export type ActionExecutor = (
-  action: UIActionSchema,
-  context: ActionContext,
-  params?: Record<string, any>
-) => Promise<ActionResult>;
-
-// ============================================================================
-// Batch Operations (Q2 2026 - Spec v2.0.1 Enhancement)
-// ============================================================================
-
-/** Batch operation configuration */
-export interface BatchOperationConfig {
-  /** Operation name */
-  name: string;
-  /** Display label */
-  label: string;
-  /** Target action to execute on each record */
-  action: string;
-  /** Whether to run in parallel */
-  parallel?: boolean;
-  /** Maximum concurrent operations */
-  concurrency?: number;
-  /** Whether to continue on error */
-  continueOnError?: boolean;
-  /** Progress callback expression */
-  onProgress?: string;
-  /** Completion callback expression */
-  onComplete?: string;
-}
-
-/** Batch operation result */
-export interface BatchOperationSummary {
-  /** Total items processed */
-  total: number;
-  /** Successfully processed count */
-  succeeded: number;
-  /** Failed count */
-  failed: number;
-  /** Individual results */
-  results: Array<{
-    recordId: string;
-    success: boolean;
-    error?: string;
-  }>;
-}
-
 // ============================================================================
 // Transaction Support (Q2 2026 - Spec v2.0.1 Enhancement)
 // ============================================================================
@@ -1323,6 +1274,11 @@ export interface TransactionResult {
   rolledBack?: boolean;
 }
 
+// `ActionExecutor` and the "Batch Operations" pair (`BatchOperationConfig`,
+// `BatchOperationSummary`) are retired (objectstack#25921, batch 11): nothing in
+// this workspace or in hotcrm read them. `@object-ui/core`'s `ActionRunner` is
+// the executor; it registers `ActionRunnerHandler` functions, not this type.
+//
 // The undo/redo trio this file used to declare (`UndoRedoEntry`,
 // `UndoRedoConfig`, `UndoRedoState`) is retired (objectui#6349, batch 5): when
 // it was removed nothing in the repository read or wrote any of the three, and
