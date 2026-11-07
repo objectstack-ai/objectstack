@@ -145,19 +145,11 @@ export interface SsoRefusalHostLogger {
 }
 
 /**
- * The one shape a vendor log argument reaches the host logger in. An `Error`
- * becomes its name, message and string `code`, and nothing else: a `jose`
- * claim error carries the token's whole claim set on `payload`, which must
- * never be logged.
+ * The text of a vendor line. A message that is an error object is rendered as
+ * its name and message, as better-auth's own console logger rendered it: a
+ * `jose` claim error carries the token's whole claim set on `payload`, which
+ * must never reach a log line.
  */
-function describeLogValue(value: unknown): unknown {
-  if (value instanceof Error) {
-    const code = (value as { code?: unknown }).code;
-    return { name: value.name, message: value.message, ...(typeof code === 'string' ? { code } : {}) };
-  }
-  return value;
-}
-
 function messageText(message: unknown): string {
   if (typeof message === 'string') return message;
   if (message instanceof Error) return `${message.name}: ${message.message}`;
@@ -168,7 +160,7 @@ function messageText(message: unknown): string {
  * Forward one vendor log line to the host logger, level for level: better-auth
  * already chose `error` or `warn` for its own lines, and moving them onto the
  * kernel logger does not regrade them. With no host logger, the lines go to the
- * console exactly as they did before a sink existed.
+ * console, as they did before a sink existed.
  */
 function forwardVendorLine(
   host: SsoRefusalHostLogger | undefined,
@@ -177,9 +169,9 @@ function forwardVendorLine(
   args: unknown[],
 ): void {
   const text = `[better-auth] ${messageText(message)}`;
-  const details = [message instanceof Error ? describeLogValue(message) : undefined, ...args.map(describeLogValue)]
-    .filter((v) => v !== undefined);
-  const meta = details.length === 0 ? undefined : details.length === 1 ? details[0] : { details };
+  // Further arguments are the vendor's own context (an error it caught, a
+  // `{ providerId }` record) and pass through as it wrote them.
+  const meta = args.length === 0 ? undefined : args.length === 1 ? args[0] : { details: args };
   if (!host) {
     const write = level === 'error' ? console.error : level === 'warn' ? console.warn : console.log;
     if (meta === undefined) write(text);
