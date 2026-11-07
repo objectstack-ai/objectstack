@@ -2723,9 +2723,9 @@ jobs:
           overwrite: true
 
   dogfood-gate:
-    # Stable check name for a SHARDED job (#3622 follow-up). A required context
-    # again since #30461 (THE TWO SPEEDS above `jobs:`). On a
-    # PR both legs skip and this gate counts zero expected attestations; on a
+    # Stable check name for a SHARDED job (#3622 follow-up), a required
+    # context again since #30461 (THE TWO SPEEDS above `jobs:`). On a PR both
+    # legs skip and this gate counts zero expected attestations; on a
     # queue build (since #30461) the three dogfood shards run and are counted,
     # while `dogfood-verify` skips and is judged with zero expected; the full
     # battery runs and counts both. The history below is why the name and the
