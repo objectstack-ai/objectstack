@@ -1,91 +1,65 @@
 # ObjectStack Roadmap
 
-> **Last updated:** 2026-06-06
-> **Source of truth:** [docs/NORTH-STAR.md](docs/NORTH-STAR.md), the one North Star, for product direction and priority, ADRs for architectural decisions, and code for shipped behavior.
+> **Last updated:** 2026-11-08
+> **Source of truth:** the *Features on the road* table in
+> [docs/NORTH-STAR.md](docs/NORTH-STAR.md). That table is the roadmap: its order is the
+> priority, and editing it is editing priority. This page is a short public summary of it
+> and decides nothing on its own. Where the two disagree, the North Star wins.
 
-This roadmap tracks the current framework repository. Historical Cloud/ObjectOS
-milestone plans that referred to `apps/cloud`, `apps/objectos`,
-`@objectstack/service-tenant`, `sys_project`, or `/api/v1/cloud/projects/*`
-have been retired. Cloud control-plane distribution work now lives outside this
-repo; this repo owns the framework runtime, protocol schemas, CLI, examples,
-docs, adapters, services, plugins, and the bundled console integration.
+ObjectStack is measured by one road: a new AI developer, with a human accepting, starts
+from `npm create objectstack`, writes metadata, runs it locally, has verification reject
+what is wrong, publishes and installs it into an environment, connects an agent over MCP
+to complete one real business operation, and iterates once on a customer request. The
+road is walked every week; the first step that breaks is the current P0. Security and
+data integrity come first and do not wait for the road.
 
----
+## Now
 
-## Current Architecture
+The first three steps of the road, where an application is written, run and checked:
 
-- **Runtime:** `@objectstack/runtime` boots standalone/local hosts and exposes
-  Cloud-aware seams such as environment registry, runtime config, marketplace
-  proxy, and environment artifact loading.
-- **Environment identity:** current docs and runtime paths use
-  `environment`, not `project`: `OS_ENVIRONMENT_ID`,
-  `X-Environment-Id`, `/api/v1/environments/:environmentId`, and
-  `environment_id`.
-- **Console UI:** framework serves the ObjectUI console bundle from
-  `packages/console`; its source is the `ui/` workspace of this repository
-  (`ui/apps/console` and the `@object-ui/*` packages), and `pnpm console:build`
-  builds it into `packages/console`.
-- **Cloud publishing:** CLI publish/rollback target
-  `/api/v1/cloud/environments/:environment/...` endpoints when pointed at an
-  ObjectOS Cloud control plane.
-- **Generated references:** `content/docs/references/` is generated from Zod
-  descriptions. Update `packages/spec/src/**/*.zod.ts`, then regenerate.
+- **Set out.** One command scaffolds a project that installs, verifies and paints its
+  first screen; the build is the author's first gate; objects, views, forms, record pages
+  and custom pages are built without writing code, draft first and then published.
+- **Run it locally and see it.** Every capability a business user needs, working in the
+  running application: records and forms, list views, kanban, calendar and Gantt,
+  permissions that hold on both sides, sharing, sign-in and identity, approvals and
+  flows, reports and dashboards, files, the customer's language, and an API others can
+  call.
+- **Verify.** `objectstack verify`, lint and the health check loudly refuse what is wrong,
+  with a prescription, and let through what is right.
 
----
+## Next
 
-## Near-Term Priorities
+- **Publish and install into an environment.** Packages with an enforced manifest,
+  install with or without a control plane, migrations that show their plan first, and an
+  ontology you own: diffable in your repository and exportable to run without us.
+- **Connect an agent.** The MCP surface exposes what the application really can do,
+  fails closed, and says plainly what the open edition does not include.
 
-| Priority | Work | Why |
-|:---|:---|:---|
-| P0 | Keep public docs aligned with the environment rename. | Prevent users from copying stale `project` route/header/env examples. |
-| P0 | Keep CLI/docs/examples aligned with actual scripts: `pnpm dev`, `pnpm dev:crm`, `os dev`, `os start`, `os serve`, `os publish`. | Avoid broken onboarding. |
-| P0 | Remove references to deleted app/service packages from current docs. | `apps/cloud`, `apps/objectos`, `apps/studio`, and `service-tenant` no longer exist in this repo. |
-| ~~P1~~ done | ~~Document Flow-first automation and workflow state-machine semantics.~~ Flow automation is documented in [guides/metadata/flow](content/docs/automation/flows.mdx) (triggers, nodes, structured control flow, durable pause/resume, parallel + batch approval, run observability) and the ADR-0019/0031/0039 series; state-machine semantics in [guides/metadata/workflow](content/docs/automation/workflows.mdx) + [validation](content/docs/data-modeling/validation.mdx). | Old Workflow Rule docs implied a retired Salesforce-style rule engine. |
-| P1 | Document explicit AI action opt-in via action metadata. | AI tool exposure is no longer automatic for every action. |
-| P1 | Document implemented formula, summary, autonumber, notifications, and master-detail behavior. | Recent runtime work is under-documented and older status pages still mark it missing. |
-| P2 | Regenerate reference docs after Zod description updates. | Keeps generated schema pages consistent without hand-editing them. |
+## Later
 
----
+- **Iterate on a customer request.** The first-run loop end to end with zero code and zero
+  restarts, bringing the customer's existing data in, and structural changes that a dev
+  boot heals safely while production takes no liberties.
 
-## Documentation Rules
+The order above follows the table. Which step is P0 at any moment is decided by the
+weekly walk, not by this page.
 
-- Do not hand-edit `content/docs/references/`.
-- When adding guide pages, update the nearest `meta.json`.
-- Use `environment` for runtime/deployment identity.
-- Use `project` only for npm/monorepo/project-folder meaning, or when quoting
-  historical ADR text.
-- Link to UI work by its path under `ui/`, never the archived ObjectUI
-  repository, `../objectui` or `apps/studio`.
+## Commercial editions
 
----
+ObjectOS Cloud and ObjectOS Enterprise are the commercial editions built on this
+framework. Their roadmap is published at [objectos.ai](https://objectos.ai), not here.
 
-## ObjectUI (`ui/`)
+## Where the details live
 
-The view layer is planned and tracked like the rest of this repository; plans and
-their status live where they are tracked, not in this file:
-
-- **Open work:** [issues](https://github.com/objectstack-ai/objectstack/issues),
-  filtered by the `area:*` labels for one feature axis and by `priority:*` for order.
+- **Open work:** [issues](https://github.com/objectstack-ai/objectstack/issues), filtered
+  by the `area:*` labels for one feature axis and by `priority:*` for order.
 - **Release targets:** [milestones](https://github.com/objectstack-ai/objectstack/milestones)
   and the `target:*` labels.
-- **What has shipped:** each `@object-ui/*` package's own `CHANGELOG.md`;
-  [ui/CHANGELOG.md](ui/CHANGELOG.md) is the frozen history of ObjectUI's own releases.
-- **Design decisions:** the ADRs in [ui/docs/adr](ui/docs/adr) for the view layer.
-
-ObjectUI's long-form roadmap stopped at v3.3.2 (May 2026); it is in the git history of
-`ui/ROADMAP.md`.
-
----
-
-## Verification
-
-For doc-only updates, prefer targeted checks:
-
-```bash
-pnpm --filter @objectstack/docs build
-pnpm --filter @objectstack/spec gen:docs
-rg "X-Project-Id|OS_PROJECT_ID|/api/v1/projects|sys_project|apps/studio|service-tenant" README.md content/docs docs/design docs/handoff packages/spec/src
-```
-
-Run the full `pnpm test` suite when documentation changes accompany runtime or
-schema behavior changes.
+- **What has shipped:** each package's own `CHANGELOG.md`; for the view layer under `ui/`,
+  each `@object-ui/*` package's `CHANGELOG.md`, with [ui/CHANGELOG.md](ui/CHANGELOG.md) as
+  the frozen history of ObjectUI's own releases.
+- **What each feature must do, and how it is verified:**
+  [docs/qa/platform-checklist/](docs/qa/platform-checklist/).
+- **Design decisions:** the ADRs in [docs/adr](docs/adr), and in [ui/docs/adr](ui/docs/adr)
+  for the view layer.

@@ -336,16 +336,30 @@ export function LoginForm({
     };
   }, [getAuthConfig]);
 
+  // A phone way in the server advertises: phone+password, or phone OTP.
+  const phoneSignInOffered = phonePasswordEnabled || phoneOtpEnabled;
   // Under enforced mode, and when the server has turned the password door off,
   // the password form is collapsed until the user opts into the break-glass
-  // path; otherwise it's always shown.
-  const passwordFormCollapsed = ssoEnforced || passwordSignInOff;
+  // path; otherwise it's always shown. One exception: the password door shut
+  // with no single sign-on offered but a phone way in. The form then holds the
+  // way in (phone+password, phone OTP), so it is drawn on first paint; a
+  // collapsed view there would be a single sign-on view with no single
+  // sign-on in it.
+  const passwordFormCollapsed =
+    ssoEnforced || (passwordSignInOff && (ssoEnabled || !phoneSignInOffered));
   const passwordFormVisible = !passwordFormCollapsed || showPasswordFallback;
   // The break-glass link reveals the password form, so it is offered only
   // while that form holds a password door the server accepts: email+password
   // itself, or phone+password sign-in. The SSO button needs no link: the
   // SSO-only view draws it on first paint (`ssoEmailFormVisible` below).
   const breakGlassOffered = !passwordSignInOff || phonePasswordEnabled;
+  // The form's mode as drawn: with no password door the server accepts, the
+  // only way the form can hold is phone OTP, so it opens there and offers no
+  // switch back to a password form the server refuses.
+  const formMode = breakGlassOffered ? mode : 'phone-otp';
+  // The identifier field names only what the server accepts: with email
+  // sign-in refused, a phone number is the one identifier left.
+  const phoneOnlyIdentifier = passwordSignInOff && phonePasswordEnabled;
   // Nothing the server advertises lets anyone in: say so, instead of SSO copy
   // with no SSO affordance and a password link the server refuses.
   const noSignInMethod =
@@ -407,7 +421,7 @@ export function LoginForm({
     // that the server rejects as "Invalid email" (#3238) — trim before use.
     const identifier = email.trim();
     try {
-      if (mode === 'phone-otp') {
+      if (formMode === 'phone-otp') {
         await signInWithPhoneOtp(phone.trim(), otpCode.trim());
       } else if (phonePasswordEnabled && looksLikePhoneIdentifier(identifier)) {
         // Unified identifier: a phone-shaped entry routes to phone+password.
@@ -570,7 +584,10 @@ export function LoginForm({
                 ? ssoOnlyCopy
                   ? l.ssoOnlyDescription
                   : undefined
-                : description
+                : passwordSignInOff
+                  ? // The password-form copy names a door the server refuses.
+                    undefined
+                  : description
           }
         />
       )}
@@ -607,7 +624,7 @@ export function LoginForm({
         />
 
         {passwordFormVisible ? (
-        mode === 'phone-otp' ? (
+        formMode === 'phone-otp' ? (
         /* Phone-OTP sign-in (framework#2780): request a code, then verify.
            Server-side the number is guarded by a per-number cooldown +
            hourly cap — the resend button mirrors it with a countdown. */
@@ -674,13 +691,15 @@ export function LoginForm({
             {isLoading ? l.submittingButton : l.submitButton}
           </button>
 
-          <button
-            type="button"
-            onClick={() => switchMode('password')}
-            className={`w-full text-center text-xs text-muted-foreground underline-offset-4 transition-colors hover:text-primary hover:underline ${AUTH_TOUCH_TARGET_CLASS}`}
-          >
-            {l.usePasswordSignInText}
-          </button>
+          {breakGlassOffered && (
+            <button
+              type="button"
+              onClick={() => switchMode('password')}
+              className={`w-full text-center text-xs text-muted-foreground underline-offset-4 transition-colors hover:text-primary hover:underline ${AUTH_TOUCH_TARGET_CLASS}`}
+            >
+              {l.usePasswordSignInText}
+            </button>
+          )}
         </form>
         ) : (
         <form onSubmit={handleSubmit} className="space-y-4">
@@ -691,15 +710,26 @@ export function LoginForm({
 
           <div className="space-y-2">
             <label htmlFor="login-email" className={AUTH_FIELD_LABEL_CLASS}>
-              {phonePasswordEnabled ? l.emailOrPhoneLabel : l.emailLabel}
+              {phoneOnlyIdentifier
+                ? l.phoneLabel
+                : phonePasswordEnabled
+                  ? l.emailOrPhoneLabel
+                  : l.emailLabel}
             </label>
             <input
               id="login-email"
               // `text` (not `email`) when a phone number is also accepted, so the
-              // browser doesn't reject a phone-shaped value on native validation.
-              type={phonePasswordEnabled ? 'text' : 'email'}
-              inputMode={phonePasswordEnabled ? 'text' : 'email'}
-              placeholder={phonePasswordEnabled ? l.emailOrPhonePlaceholder : l.emailPlaceholder}
+              // browser doesn't reject a phone-shaped value on native validation;
+              // `tel` when it is the only identifier the server accepts.
+              type={phoneOnlyIdentifier ? 'tel' : phonePasswordEnabled ? 'text' : 'email'}
+              inputMode={phoneOnlyIdentifier ? 'tel' : phonePasswordEnabled ? 'text' : 'email'}
+              placeholder={
+                phoneOnlyIdentifier
+                  ? l.phonePlaceholder
+                  : phonePasswordEnabled
+                    ? l.emailOrPhonePlaceholder
+                    : l.emailPlaceholder
+              }
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               required
@@ -783,8 +813,12 @@ export function LoginForm({
             </button>
           )}
 
-          {/* Break-glass form was opened under enforced mode — let the user
-              collapse back to the SSO-only view. */}
+          {/* Break-glass form was opened from the collapsed view — let the
+              user collapse back to it. The form is collapsed only where single
+              sign-on is enforced or offered (a shut password door with a phone
+              way in and no SSO draws the form on first paint), and the link
+              that opens it is offered only with a password door, so there is
+              always single sign-on to go back to. */}
           {passwordFormCollapsed && showPasswordFallback && (
             <button
               type="button"
@@ -854,7 +888,9 @@ export function LoginForm({
         )}
       </div>
 
-      {registerUrl && !passwordFormCollapsed && (
+      {/* Sign-up is an email+password door too: not offered while the server
+          refuses that door, whether or not the form is collapsed. */}
+      {registerUrl && !passwordFormCollapsed && !passwordSignInOff && (
         <p className="px-8 text-center text-[13px] text-muted-foreground">
           {l.noAccountText}{' '}
           <LinkComp href={registerUrl} className={AUTH_LINK_CLASS}>

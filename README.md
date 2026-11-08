@@ -192,8 +192,8 @@ tests excluded, at commit `95294be3`).
 
 **Everything needed to run an app is in this repository** — protocol,
 microkernel, SDK, CLI, the production runtime and Console, permissions, audit,
-and MCP. ObjectOS Cloud and Enterprise add hosting and multi-environment
-operations, Build & Ask, SSO, and support.
+and MCP — single sign-on (OIDC / SAML) included, free. ObjectOS Cloud and
+Enterprise add hosting, Build & Ask, and support.
 This repository is Apache-2.0, except `ui/` (the Console and `@object-ui/*`), which is MIT — both permissive
 ([LICENSING.md](./LICENSING.md)). The definition lives in your repository as
 ordinary TypeScript, versioned in your VCS and reviewable as a diff — not a

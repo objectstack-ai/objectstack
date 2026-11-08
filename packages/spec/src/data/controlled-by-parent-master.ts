@@ -157,7 +157,13 @@ export interface ControlledByParentMaster {
  *   declared `required: false`, that field is the optional master;
  * - anything else (two required masters, two `master_detail` fields none of
  *   them required, one whose `required` is not written, a required `lookup`
- *   only, nothing) names no master: `undefined`.
+ *   only, nothing) names no master: `undefined`. "Not written" holds only on
+ *   a map read as written (an authored or stored body no parse has touched).
+ *   On a PARSED map the omission has already defaulted to `false`, so through
+ *   a raw parse (`ObjectSchema.safeParse`, an object written directly in
+ *   `defineStack`, a save door) that field IS the optional master, as
+ *   maintainer ruling A on #30905 (record 6687830530) reads it; the builder
+ *   (`ObjectSchema.create()`) forces it to `true` first, the required master.
  *
  * Judges the master only. Whether the one master is writable (`readonly` /
  * `system`) is {@link controlledByParentMasterRefusal}'s question, and the
