@@ -266,12 +266,14 @@ describe('judgeRestrictionProfile — allowCode and allowSandboxedJs, judged by 
       { name: 'rp_js', object: 'rp_doc', events: ['beforeInsert'], body: JS },
       { name: 'rp_expr', object: 'rp_doc', events: ['beforeInsert'], body: EXPR },
       { name: 'rp_fn', object: 'rp_doc', events: ['beforeInsert'], handler: 'rp_fn' },
+      { name: 'rp_inert', object: 'rp_doc', events: ['beforeInsert'] },
       { name: 'rp_both', object: 'rp_doc', events: ['beforeInsert'], handler: 'rp_fn', body: JS },
     ],
     actions: [
       { name: 'rp_act_js', label: 'Js', type: 'script', body: JS },
       { name: 'rp_act_expr', label: 'Expr', type: 'script', body: EXPR },
       { name: 'rp_act_url', label: 'Url', type: 'url', target: 'https://example.com' },
+      { name: 'rp_act_stale', label: 'Stale', type: 'url', target: 'https://example.com', body: JS },
     ],
     objects: [{ name: 'rp_doc', actions: [{ name: 'rp_obj_js', label: 'Obj', type: 'script', body: JS }] }],
     jobs: [
@@ -295,7 +297,7 @@ describe('judgeRestrictionProfile — allowCode and allowSandboxedJs, judged by 
   it('allowSandboxedJs: false refuses every js body — hook (body over handler), action, embedded action, job — naming that rule', () => {
     expect(rowsOf(profile({ allowSandboxedJs: false }), BODIES)).toEqual([
       { rule: 'allowSandboxedJs', where: "hook 'rp_js'", path: 'hooks[0]' },
-      { rule: 'allowSandboxedJs', where: "hook 'rp_both'", path: 'hooks[3]' },
+      { rule: 'allowSandboxedJs', where: "hook 'rp_both'", path: 'hooks[4]' },
       { rule: 'allowSandboxedJs', where: "action 'rp_act_js'", path: 'actions[0]' },
       { rule: 'allowSandboxedJs', where: "action 'rp_obj_js'", path: 'objects[0].actions[0]' },
       { rule: 'allowSandboxedJs', where: "job 'rp_job_js'", path: 'jobs[0]' },
@@ -310,7 +312,7 @@ describe('judgeRestrictionProfile — allowCode and allowSandboxedJs, judged by 
     ]);
   });
 
-  it('an expression body is governed by neither code key, and a pull job by neither', () => {
+  it('an expression body, a pull job, a hook with no body and no handler, and a body on a non-script action are judged by neither code key', () => {
     const rows = rowsOf(profile({ allowCode: false, allowSandboxedJs: false }), BODIES);
     expect(rows.map((r) => r.where)).toEqual([
       "hook 'rp_js'",

@@ -42,7 +42,10 @@ const SPEC_DECLARED_PLUGIN_NODE_TYPES = [APPROVAL_NODE_TYPE, APPROVAL_REVISE_NOD
 export const RestrictionProfileNodeType = z.enum([
   ...FlowNodeAction.options,
   ...SPEC_DECLARED_PLUGIN_NODE_TYPES,
-]);
+]).describe(
+  'Flow node types a restriction profile can list: every FlowNodeAction id plus the spec-declared plugin node '
+  + 'types approval and approval_revise',
+);
 export type RestrictionProfileNodeType = z.input<typeof RestrictionProfileNodeType>;
 
 /**
@@ -124,11 +127,11 @@ export const RestrictionProfileSchema = lazySchema(() => strictObject(
      * `body` is in-process code. Besides those, a reader takes what is code
      * from the spec's one classification of a package body's keys,
      * `UNMANAGED_INSTALL_KEY_DISPOSITIONS` (`@objectstack/spec/kernel`,
-     * disposition `code`), and a key that carries nothing refuses nothing. `devPlugins` is not judged by `allowCode`: it
-     * is loaded only by a local development boot, and `os build` leaves it out
-     * of the artifact a target installs, so it never reaches a target;
-     * `UNMANAGED_INSTALL_KEY_DISPOSITIONS` still classifies it as `code` for an
-     * unmanaged install. A `script` flow node is also subject to this rule (see
+     * disposition `code`), and a key that carries nothing refuses nothing.
+     * `devPlugins` is not judged by `allowCode`: it is loaded only by a local
+     * development boot, and `os build` leaves it out of the artifact a target
+     * installs, so it never reaches a target; `UNMANAGED_INSTALL_KEY_DISPOSITIONS`
+     * still classifies it as `code` for an unmanaged install. A `script` flow node is also subject to this rule (see
      * `allowedFlowNodeTypes`).
      */
     allowCode: z

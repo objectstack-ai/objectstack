@@ -24,21 +24,20 @@
  * ## What each dimension reads — the spec's vocabulary, never a list of ours
  *
  *  - `allowCode` — what `RestrictionProfileSchema` itself says it covers:
- *    in-process code — a `hooks` entry with no `body` (its `handler` runs),
- *    a `jobs` entry with no `body` that names a `handler`, named handler
- *    `functions` and code plugins. The
- *    non-collection keys are read from the spec's one classification of what
- *    is code, `UNMANAGED_INSTALL_KEY_DISPOSITIONS` (`@objectstack/spec/kernel`,
- *    disposition `code`), the table `defineStack`'s unmanaged-install refusal
- *    and the install door's planner already share; `hooks` and `jobs` are
- *    collections, so they are named here, as the profile's own docblock names
- *    them. A key that
- *    carries nothing (`functions: {}`, `plugins: []`) refuses nothing — the
+ *    in-process code — a `hooks` or `jobs` entry with no `body` that names a
+ *    `handler` (the handler runs), named handler `functions` and code
+ *    plugins. The non-collection keys are read from the spec's one
+ *    classification of what is code, `UNMANAGED_INSTALL_KEY_DISPOSITIONS`
+ *    (`@objectstack/spec/kernel`, disposition `code`), the table
+ *    `defineStack`'s unmanaged-install refusal and the install door's planner
+ *    already share; `hooks` and `jobs` are collections, so they are named
+ *    here, as the profile's own docblock names them. A key that carries nothing (`functions: {}`, `plugins: []`) refuses nothing — the
  *    same `unmanagedInstallValueCarries` test that table's readers apply.
  *    `devPlugins` is not read: `os build` leaves it out of the artifact, so it
  *    never reaches a target (`NEVER_REACHES_TARGET` below).
  *  - `allowSandboxedJs` — every sandboxed JavaScript body (`language: 'js'`):
- *    a `hooks[].body`, an `actions[].body` (top-level and embedded on
+ *    a `hooks[].body`, an `actions[].body` on a `type: 'script'` action (the
+ *    only type the runtime runs a body for; top-level and embedded on
  *    `objects[].actions`) and a `jobs[].body`. A body wins over `handler`, as
  *    at bind, so a hook or job is judged by its body when it has one. An
  *    expression body (`language: 'expression'`) is a pure formula: neither
@@ -270,7 +269,8 @@ export function judgeRestrictionProfile(
               message: `An object lifecycle hook's \`body\` is sandboxed JavaScript, and ${SANDBOX_OFF}.`,
             });
           }
-        } else if (language === undefined && !profile.allowCode) {
+        } else if (language === undefined && isBag(hook) && hook.handler !== undefined && !profile.allowCode) {
+          // A handler may still be an inline function before `os build`, so presence is the test.
           rows.push({
             rule: 'allowCode',
             where,
@@ -307,6 +307,8 @@ export function judgeRestrictionProfile(
         if (!Array.isArray(list)) continue;
         list.forEach((action, i) => {
           if (bodyLanguage(action) !== 'js') return;
+          // The runtime binds an action body only for `type: 'script'` (the schema's default type).
+          if (isBag(action) && action.type !== undefined && action.type !== 'script') return;
           if (owner !== undefined && bound.has(`${owner}:${nameOf(action, '')}`)) return;
           rows.push({
             rule: 'allowSandboxedJs',
