@@ -193,6 +193,9 @@ const ja = {
     requiredForAction: "「{{action}}」の実行に必須です。",
     aiSuggested: "AI の提案",
     aiDraftNotice: "チャットの内容から「AI の提案」と表示された項目を AI が入力しました。確認して保存するまで何も保存されません。",
+    aiBefore: "変更前: {{value}}",
+    aiBeforeEmpty: "空",
+    aiRevert: "元に戻す",
     maxFileSize: "最大サイズ: {{size}}",
     masterDetail: {
       loadingColumns: "列を読み込み中…",

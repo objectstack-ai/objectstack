@@ -76,6 +76,7 @@ import {
   readUnlessRefused,
 } from './security-plugin.js';
 import { withoutOperationPrivateKeys } from '@objectstack/core';
+import { rlsOperationForVerb } from './lifecycle-verb-rls-operation.js';
 import {
   resolveEngineDeleteDispatch,
   resolveEngineUpdateDispatch,
@@ -107,7 +108,10 @@ export function addressedByIdWriteId(
     const route = resolveEngineUpdateDispatch(data as EngineUpdateDispatchData, opCtx.options);
     return route.kind === 'by-id' ? route.id : undefined;
   }
-  if (opCtx.operation === 'delete') {
+  // [#30237] `purge` is a delete (`rlsOperationForVerb`): the permanent
+  // delete addresses its row by `where.id` exactly as a delete does, while
+  // `purge(entryId)` / `empty(object)` carry no `where` and resolve no row.
+  if (rlsOperationForVerb(opCtx.operation) === 'delete') {
     const route = resolveEngineDeleteDispatch(opCtx.options as EngineDeleteDispatchInput | undefined);
     return route.kind === 'by-id' ? route.id : undefined;
   }
@@ -126,7 +130,7 @@ export function addressedPredicateWrite(
     if (data == null || typeof data !== 'object') return false;
     return resolveEngineUpdateDispatch(data as EngineUpdateDispatchData, opCtx.options).kind === 'multi';
   }
-  if (opCtx.operation === 'delete') {
+  if (rlsOperationForVerb(opCtx.operation) === 'delete') {
     return resolveEngineDeleteDispatch(opCtx.options as EngineDeleteDispatchInput | undefined).kind === 'multi';
   }
   return false;

@@ -195,6 +195,9 @@ const pt = {
     requiredForAction: "Obrigatório para executar «{{action}}».",
     aiSuggested: "Sugestão da IA",
     aiDraftNotice: "A IA preencheu a partir do chat os campos marcados como «Sugestão da IA». Nada é salvo até você revisar e salvar.",
+    aiBefore: "Antes: {{value}}",
+    aiBeforeEmpty: "vazio",
+    aiRevert: "Restaurar",
     maxFileSize: "Tamanho máximo: {{size}}",
     masterDetail: {
       loadingColumns: "Carregando colunas…",

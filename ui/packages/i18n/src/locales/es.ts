@@ -200,6 +200,9 @@ const es = {
     requiredForAction: "Obligatorio para ejecutar «{{action}}».",
     aiSuggested: "Sugerencia de IA",
     aiDraftNotice: "La IA rellenó desde el chat los campos marcados como «Sugerencia de IA». No se guarda nada hasta que los revise y guarde.",
+    aiBefore: "Antes: {{value}}",
+    aiBeforeEmpty: "vacío",
+    aiRevert: "Restaurar",
     maxFileSize: "Tamaño máximo: {{size}}",
     masterDetail: {
       loadingColumns: "Cargando columnas…",

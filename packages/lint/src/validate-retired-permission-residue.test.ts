@@ -266,8 +266,8 @@ describe('[#22161] one-line fixes — permission-retired-lifecycle-residue', () 
 
   it('`os explain` says what deleting the key leaves, and names no tracker id', () => {
     const text = explainRule(PERMISSION_RETIRED_LIFECYCLE_RESIDUE)!.paragraphs.join('\n');
-    expect(text).toContain('stays denied fail-closed by the permission evaluator\'s destructive-operation backstop');
-    expect(text).toContain('the M2 lifecycle initiative');
+    expect(text).toContain('the key granted nothing when it was retired');
+    expect(text).toContain('`allowRestoreOwnDeleted` and `manageRecycleBin`');
     expect(text).not.toMatch(/os migrate meta --from/);
     expect(text).not.toMatch(/#\d{3,}/);
   });

@@ -205,6 +205,9 @@ const zh = {
     requiredForAction: '执行「{{action}}」时必填。',
     aiSuggested: 'AI 建议',
     aiDraftNotice: 'AI 已根据聊天预填标为「AI 建议」的字段。检查并保存之前不会写入任何内容。',
+    aiBefore: '原值：{{value}}',
+    aiBeforeEmpty: '空',
+    aiRevert: '还原',
     maxFileSize: '最大文件大小：{{size}}',
     masterDetail: {
       loadingColumns: '正在加载列…',

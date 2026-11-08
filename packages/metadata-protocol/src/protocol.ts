@@ -3371,6 +3371,10 @@ export class ObjectStackProtocolImplementation implements
      * ⛔ Never call this from a door that answers a caller — HTTP, MCP, an
      * export, a log line. Every such exit serves {@link getMetaItems}, whose
      * redaction is the whole reason this method has to exist separately.
+     *
+     * [#31399] "The stored body" holds with one exception: an item whose body
+     * states no name is handed back carrying its row's `name`, as the served
+     * list carries it (see `SERVED_ROW_NAME`, `protocol-overlay-merge.ts`).
      */
     async getMetaItemsForExecution(request: { type: string; packageId?: string; previewDrafts?: boolean }) {
         // [#25467 E1] The body moved to `protocol-meta-list-reads.ts`; it reaches this class through `protocol-host.ts`.

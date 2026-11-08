@@ -2048,6 +2048,14 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
         label: "Configuração SAML",
         help: "JSON: entryPoint, cert, identifierFormat, mapping (gerenciado pelo better-auth)"
       },
+      allow_idp_initiated: {
+        label: "Permitir login iniciado pelo IdP",
+        help: "Aceita um login que começa no provedor de identidade (uma resposta SAML não solicitada ou um callback OIDC sem state) em vez de neste sistema. Desativado por padrão: uma resposta SAML iniciada pelo IdP não está vinculada a nenhuma solicitação feita por este sistema. Altere em “Editar opções de login”."
+      },
+      allow_jit: {
+        label: "Permitir provisionamento just-in-time",
+        help: "Na política de público somente por convite, cria uma conta para quem faz login por este provedor sem conta nem convite. Desativado por padrão: essa pessoa é recusada. As demais políticas provisionam como antes. Altere em “Editar opções de login”."
+      },
       user_id: {
         label: "Registrado por",
         help: "Usuário que registrou este provedor"
@@ -2168,6 +2176,10 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
         label: "Excluir provedor de SSO",
         description: "Excluir este provedor de SSO? Os usuários do domínio dele não poderão mais entrar por meio dele.",
         successMessage: "Provedor de SSO excluído"
+      },
+      edit_sso_sign_in_options: {
+        label: "Editar opções de login",
+        successMessage: "Opções de login salvas"
       }
     }
   },

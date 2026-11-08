@@ -27,7 +27,7 @@ import {
     resolveItemLock,
     resolveOverlayLockLayer,
 } from './item-lock.js';
-import { decorateMetadataItems } from './metadata-diagnostics.js';
+import { decorateMetadataItem } from './metadata-diagnostics.js';
 import {
     isActionWithheldByDisabledPackage,
     isItemOfDisabledPackage,
@@ -35,7 +35,7 @@ import {
 import { soleShippingPackage } from './protocol-environment-rows.js';
 import type { ProtocolHost } from './protocol-host.js';
 import { canonicalizeMetaRequestType } from './protocol-meta-type-schema.js';
-import { mergePackageAwareOverlay, servedViewExpansion } from './protocol-overlay-merge.js';
+import { mergePackageAwareOverlay, servedViewExpansion, withoutServedRowName } from './protocol-overlay-merge.js';
 import {
     type ShippingPackages,
     boundPackageOf,
@@ -75,6 +75,20 @@ export async function getMetaItemsForExecution(host: Pick<ProtocolHost, 'readFla
 export async function getMetaItemsPerPackage(host: Pick<ProtocolHost, 'readFlattenedMetaItems'>, request: { type: string; packageId?: string; previewDrafts?: boolean }) {
     // The same #4432 fold {@link getMetaItems} applies, for the same reason.
     return host.readFlattenedMetaItems(canonicalizeMetaRequestType(request), 'served', 'per-package');
+}
+
+/**
+ * [#31399] One listed item, decorated for the served face. An item the merge
+ * served its row's `name` (a body that states none, a `seed`) is judged as the
+ * row stores it, without that `name` its schema does not declare, which is the
+ * verdict the by-name read gives the same row; it is served with the name.
+ * Every other item is decorated as before ({@link decorateMetadataItem}).
+ */
+function decorateListedItem(type: string, item: unknown): unknown {
+    const stored = withoutServedRowName(item);
+    if (stored === undefined) return decorateMetadataItem(type, item);
+    const { _diagnostics, ...served } = decorateMetadataItem(type, stored);
+    return { ...served, name: (item as { name: string }).name, ...(_diagnostics !== undefined ? { _diagnostics } : {}) };
 }
 
 /** The body of `ObjectStackProtocolImplementation#readFlattenedMetaItems`; the method's docblock there is its contract. */
@@ -235,23 +249,25 @@ export async function readFlattenedMetaItems(host: Pick<ProtocolHost, 'artifactL
             // spelling), so the merge picks a package's slot by the
             // served-row resolution the by-name read takes
             // ({@link servedOverlayRowCandidates}), not by row order.
-            const placed = mergeable.map(({ data, packageId: recPkg, type: recType }) => ({
-                data, packageId: recPkg, stored: { type: recType },
+            // [#31399] …and its row's `name`, which slots a body that states
+            // none ({@link mergePackageAwareOverlay}).
+            const placed = mergeable.map(({ name, data, packageId: recPkg, type: recType }) => ({
+                data, packageId: recPkg, stored: { type: recType, name },
             }));
             // [#21817] The package-less rows, placed the same way, as
             // stand-ins: the same parse and the same stored-row rule.
             const standIns = host.storedOverlayEntries(request, standInRows)
                 .filter((entry) => !host.declinesStoredRow(request.type, (entry.data as { name?: unknown } | null)?.name, storedEntryRow(entry)))
-                .map(({ data, type: recType }) => ({
-                    data, packageId: undefined, stored: { type: recType }, standIn: true,
+                .map(({ name, data, type: recType }) => ({
+                    data, packageId: undefined, stored: { type: recType, name }, standIn: true,
                 }));
             // [#28409] The pair's rows, placed the same way and bound to
             // the pair, as stand-ins: the merge serves one only where it
             // declares the override of the slot's package.
             const overrideStandIns = host.storedOverlayEntries(request, overrideRows)
                 .filter((entry) => !host.declinesStoredRow(request.type, (entry.data as { name?: unknown } | null)?.name, storedEntryRow(entry)))
-                .map(({ data, packageId: recPkg, type: recType }) => ({
-                    data, packageId: recPkg, stored: { type: recType }, standIn: true,
+                .map(({ name, data, packageId: recPkg, type: recType }) => ({
+                    data, packageId: recPkg, stored: { type: recType, name }, standIn: true,
                 }));
             items = mergePackageAwareOverlay(request.type, items, [...placed, ...standIns, ...overrideStandIns], (data, prev) => {
                 if (isView && data && typeof data === 'object') {
@@ -554,7 +570,11 @@ export async function readFlattenedMetaItems(host: Pick<ProtocolHost, 'artifactL
                     // by-name read's preview arm serves, in any row order.
                     // [ADR-0131 D6/D7] Every row read here is the
                     // environment's (filtered at the read).
-                    const stored = { type: String(record.type ?? request.type) };
+                    // [#31399] …with its row's `name` (see the active arm).
+                    const stored = {
+                        type: String(record.type ?? request.type),
+                        ...(typeof record.name === 'string' ? { name: record.name } : {}),
+                    };
                     return { data, packageId: recPkg, stored };
                 };
                 const drafts = [
@@ -923,7 +943,9 @@ export async function readFlattenedMetaItems(host: Pick<ProtocolHost, 'artifactL
         type: request.type,
         // [#20552] Served: diagnostics + per-type credential redaction.
         // Execution: the stored bodies — see `getMetaItemsForExecution`.
-        items: audience === 'served' ? decorateMetadataItems(request.type, governed) : governed,
+        // [#31399] An item served its row's `name` (a body that states none)
+        // is judged as stored, without it, then served with it.
+        items: audience === 'served' ? governed.map((it) => decorateListedItem(request.type, it)) : governed,
         // [#23316] Served only: the engine's verdict on each listed flow —
         // see {@link flowRegistrationsOf}. The execution face is the
         // engine's own read, so it carries none.

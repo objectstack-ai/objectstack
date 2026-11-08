@@ -82,6 +82,8 @@ export const OBJECT_EXTENSION_ITEM_SCHEMA = z.preprocess(withoutProtectionEnvelo
  * stored under (one extension per package per target). The body is not
  * given a `name`: a read serves it as it is stored, so what a GET answers
  * PUTs back through the strict schema. `undefined` = not addressable.
+ * [#31399] The list read's one exception, a body that states no name served
+ * with its row's, is stated at `SERVED_ROW_NAME` (`protocol-overlay-merge.ts`).
  */
 export function listSlotNameOf(canonicalType: string, item: unknown): unknown {
     if (!isRecord(item)) return undefined;

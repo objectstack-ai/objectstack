@@ -284,6 +284,12 @@ const en = {
     // the person edits the field, and the page notice above such a form.
     aiSuggested: 'AI suggestion',
     aiDraftNotice: 'AI filled in the fields marked “AI suggestion” from the chat. Nothing is saved until you check them and save.',
+    // objectstack#28106 — on an edit form opened on an AI chat update's
+    // proposed values: the stored value each change replaces, the word for
+    // an empty one, and the per-field revert.
+    aiBefore: 'Was: {{value}}',
+    aiBeforeEmpty: 'empty',
+    aiRevert: 'Revert',
     // The size-limit hint the flat `ObjectForm` appends to a `file` or `image`
     // field's description when the field declares `maxSize` (objectui#12156).
     // `{{size}}` is the formatted limit ("10.0 MB"); only the words translate.
