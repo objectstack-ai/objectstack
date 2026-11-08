@@ -62,6 +62,7 @@ export interface ClassHeadHost {
   buildDateBucketExpr: SqlDriverClass['buildDateBucketExpr'];
   readonly config: SqlDriverClass['config'];
   readonly isMysql: SqlDriverClass['isMysql'];
+  readonly isOracle: SqlDriverClass['isOracle'];
   readonly isPostgres: SqlDriverClass['isPostgres'];
   readonly isSqlite: SqlDriverClass['isSqlite'];
   readonly knex: SqlDriverClass['knex'];
@@ -119,7 +120,7 @@ export class ClassHeadFacet {
   }
 
   /** The body of `SqlDriver#dateGranularityCapabilities`; the method's docblock there is its contract. */
-  static dateGranularityCapabilities(this: Pick<ClassHeadHost, 'isMysql' | 'isPostgres' | 'isSqlite'>): Record<string, boolean> {
+  static dateGranularityCapabilities(this: Pick<ClassHeadHost, 'isMysql' | 'isOracle' | 'isPostgres' | 'isSqlite'>): Record<string, boolean> {
     if (this.isPostgres) {
       return { day: true, month: true, quarter: true, year: true, week: true };
     }
@@ -134,6 +135,11 @@ export class ClassHeadFacet {
       // Measured: better-sqlite3 13.0.3 runs 3.53.4, `@libsql/client` 0.18.0
       // runs 3.45.1 (where `%V` answers NULL), sql.js 1.14.2
       // (`driver-sqlite-wasm`) runs 3.49.1. The expression runs on all three.
+      return { day: true, month: true, quarter: true, year: true, week: true };
+    }
+    // Oracle: `TO_CHAR` with `YYYY` / `YYYY-MM` / `YYYY-MM-DD` / `Q` / the ISO
+    // `IYYY-IW` week, every one of them in Oracle since before 12c R1.
+    if (this.isOracle) {
       return { day: true, month: true, quarter: true, year: true, week: true };
     }
     return {};
@@ -516,6 +522,13 @@ export class ClassHeadFacet {
   /** The body of `SqlDriver#assertDialectEmits`; the method's docblock there is its contract. */
   static assertDialectEmits(this: Pick<ClassHeadHost, 'config'>, operation: string): void {
     const client = SqlDriver.clientSpelling(this.config);
+    // Oracle is federation-only (ADR-0015 §4.6): read and the double-opt-in
+    // write path, never a table built or altered. Refused by name, with its own
+    // reason — it is not a Postgres-wire database and the escape hatch the
+    // wire refusal names is not the one that applies.
+    if (SqlDriver.ORACLE_CLIENTS.has(client)) {
+      throw new UnsupportedDialectEmissionError(client, operation, SqlDriver.emissionClients(), 'federation-only');
+    }
     if (!SqlDriver.POSTGRES_WIRE_ONLY_CLIENTS.has(client)) return;
     throw new UnsupportedDialectEmissionError(client, operation, SqlDriver.emissionClients());
   }

@@ -182,7 +182,7 @@ describe('the one-slot invariant the planner is built on', () => {
   it('the drivers that DO declare a slot are the ones whose connect path reads the injected secret', () => {
     // Pins the table in this module's header against the real contracts: the
     // planner may only move a key the connect path substitutes `spec.secret`
-    // for. postgres/mysql/mongodb take it as `password`; turso reads it ahead
+    // for. postgres/mysql/mongodb/oracle take it as `password`; turso reads it ahead
     // of `config.authToken` (#8152); the file-backed drivers take none.
     const slots = Object.fromEntries(
       BUILTIN_DRIVER_IDS.map((id) => [id, refusedCredentialKeys(id).join(',')]),
@@ -195,6 +195,7 @@ describe('the one-slot invariant the planner is built on', () => {
       mysql: 'password',
       mongodb: 'password',
       turso: 'authToken',
+      oracle: 'password',
     });
   });
 });

@@ -2802,7 +2802,7 @@ const ja = {
         twoFactorTooManyAttempts: "誤ったコードの入力が多すぎます。パスワードでもう一度サインインしてください。",
         twoFactorExpired: "このサインインは期限切れです。パスワードでもう一度サインインしてください。",
         twoFactorLocked: "失敗した試行が多すぎるため、アカウントが一時的にロックされています。しばらくしてからもう一度お試しください。",
-        invalidCredentials: "メールアドレスまたはパスワードが正しくありません。再試行してください。",
+        invalidCredentials: "メールアドレスまたはパスワードが正しくありません。失敗が続くと、サインインはしばらく一時停止されます。パスワードをお忘れの場合は、リセットするとすぐにサインインできます。",
         emailNotVerified: "サインインする前にメールアドレスを確認してください。",
       },
       // objectui#3546 slice three — phone/OTP sign-in. `{seconds}` is LoginForm's own

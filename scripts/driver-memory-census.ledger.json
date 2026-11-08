@@ -118,6 +118,24 @@
       "kind": "mock",
       "axis": "mock-replacement",
       "why": "the suite boots the admin plugin with its own counting driver factory, so the default factory's `memory` arm is unreachable at run time; the mock only answers check:test-source-alias's static reach (#30909) without loading the real driver."
+    },
+    {
+      "file": "packages/services/service-datasource/src/__tests__/datasource-admin-plugin.test.ts",
+      "kind": "mock",
+      "axis": "mock-replacement",
+      "why": "no case builds a memory datasource (the suite drives prebuilt and counting factories), so the default factory's `memory` arm is unreachable at run time; the mock only answers check:test-source-alias's static reach (#31328) without loading the real driver."
+    },
+    {
+      "file": "packages/services/service-datasource/src/__tests__/missing-driver-client-boot-refusal.test.ts",
+      "kind": "mock",
+      "axis": "mock-replacement",
+      "why": "every case boots a pg / mysql / sqlite / oracle default through the real factory, never a memory one, so the factory's `memory` arm is unreachable at run time; the mock only answers check:test-source-alias's static reach (#31328) without loading the real driver."
+    },
+    {
+      "file": "packages/services/service-datasource/src/__tests__/oracle-datasource-driver-factory.test.ts",
+      "kind": "mock",
+      "axis": "mock-replacement",
+      "why": "the suite constructs only oracle datasources through the real factory, so its `memory` arm is unreachable at run time; the mock only answers check:test-source-alias's static reach (#31328) without loading the real driver."
     }
   ],
 

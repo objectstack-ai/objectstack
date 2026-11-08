@@ -203,7 +203,7 @@ Drivers are the storage layer:
 | **SQL** | `@objectstack/driver-sql` | Production (PostgreSQL, MySQL, SQLite) | `SqlDriver` — Knex.js under the hood (`pg` / `mysql` / `better-sqlite3` clients) |
 | **MongoDB** | `@objectstack/driver-mongodb` | Production (document store) | `MongoDBDriver` |
 | **SQLite WASM** | `@objectstack/driver-sqlite-wasm` | Browser / WebContainer | `SqliteWasmDriver` — in-process, no server |
-| **Turso** | `@objectstack/driver-turso` | Edge, serverless, multi-tenant | **Cloud / EE only** — ships with the ObjectStack cloud / enterprise distribution, not the open framework. The open-core CLI recognizes `libsql://` URLs but **fails loudly** (`UnsupportedDriverError`) |
+| **Turso** | `@objectstack/driver-turso` | Edge, serverless, multi-tenant | **Cloud / EE only**. The open-core CLI recognizes `libsql://` URLs but **fails loudly** (`UnsupportedDriverError`) |
 
 ### Wiring a driver — you usually do not
 
@@ -293,7 +293,7 @@ CLI: `os serve` / `os dev`
 ### `requires:` — which service plugins boot
 
 Step 4's list is the fixed core. Tokens marked ° are always-on: every boot
-mounts them, listed or not, and `--preset minimal` drops exactly those. Every
+mounts them, listed or not, and `--preset minimal` drops them; `email`, `approvals` or `auth` keeps `job` and `queue`. Every
 other service plugin is opt-in (`requires: [...]` on the stack root turns it on) but the host defaults, mounted under every preset: `mcp` unless `OS_MCP_SERVER_ENABLED=false`, and `pinyin-search` when `i18n` names a `zh-*` locale (`OS_SEARCH_PINYIN_ENABLED` overrides). The CLI expands each
 token through the `CAPABILITY_PROVIDERS` registry in
 `@objectstack/core`:
@@ -363,7 +363,7 @@ The stack's `data:` collection is authored with `defineSeed()`, which
 **objectstack-data** owns — go there for `externalId` matching, `env:` scoping,
 and which keys are derived.
 
-`mode` (`upsert` default · `insert` · `update` · `ignore` · `replace` ⚠️ **data
+`mode` (`ignore` default · `upsert` · `insert` · `update` · `replace` ⚠️ **data
 loss**) decides what a replay does to rows that already exist —
 [Import modes](../objectstack-data/references/seeds.md#import-modes).
 

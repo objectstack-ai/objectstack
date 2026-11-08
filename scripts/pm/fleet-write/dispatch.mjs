@@ -306,7 +306,15 @@
  *     stderr, a log, a file or `--json`, which carries its byte count and
  *     field names alone. A run that failed (a fence refused the read, the
  *     seal failed or did not fit) is exit 5; a read writes nothing, so it may
- *     be re-sent with a fresh key.
+ *     be re-sent with a fresh key;
+ *   - `advisory_list` is the same path end to end — the table derives it
+ *     into `ADVISORY_READ_OPS` because it requires a `public_key` — and has
+ *     NO byte read-back either: its key pair is armed, its parts read back,
+ *     reassembled and opened exactly as a read's, under `advisorySealAad`,
+ *     which binds the op in place of an advisory's id. Its plaintext is the
+ *     padded listing (`ops.mjs`, "The one row that LISTS advisories"); the
+ *     open stays byte for byte on it, and `--reveal` alone prints it with its
+ *     padding trimmed (`advisoryListDisplay`), that op's display alone.
  *
  * ## The started run — the one outcome only the seat can name
  *
@@ -525,7 +533,9 @@ import {
   SESSION_SHAPE,
   TRANSPORTS,
   TRANSPORT_ENV,
+  advisoryListDisplay,
   advisoryReadAad,
+  advisorySealAad,
   openAdvisoryRead,
 } from './ops.mjs';
 import { EVENT_PATH_ENV, refusalText, validatePayload } from './validate.mjs';
@@ -1094,6 +1104,7 @@ export const RUN_READ_BACK_WINDOW_MS = 60_000;
 // ⛔ No locator for `advisory_read`: it has NO byte read-back, because it writes nothing — no body, no object. Its
 // read-back is the seat opening the sealed answer the run's notices carry with the key only this process holds
 // (`openRunAdvisoryReads`); an answer that does not open is `unverified` (header, "How the callers").
+// ⛔ Nor for `advisory_list`, the same shape: it writes nothing; opening its sealed listing is its read-back.
 // ⛔ No locator for `advisory_report`, on purpose — nor for `advisory_create`, the same shape: its prose rides `summary`
 // and `description`, never `body`, so it is not in `BODY_OPS`, and a byte-for-byte read-back cannot apply to it — the seat cannot read a private report before it
 // is a collaborator, and the executor must not print the answer that holds the stored bytes. Its confirmation is the
@@ -1406,7 +1417,7 @@ export function openRunAdvisoryReads(payload, parts, keys = new Map()) {
     if (!privateKey) return shut("this process holds no key for it — a read opens only in the process that made its key");
     let plaintext;
     try {
-      plaintext = openAdvisoryRead({ sealed: r.sealed, privateKey, aad: advisoryReadAad({ requestId: payload.request_id, action: r.action, ghsaId: payload.actions[r.action - 1].ghsa_id }) });
+      plaintext = openAdvisoryRead({ sealed: r.sealed, privateKey, aad: advisorySealAad({ requestId: payload.request_id, action: r.action, op: r.op, ghsaId: payload.actions[r.action - 1].ghsa_id }) });
     } catch (e) {
       return shut(e.message);
     }
@@ -2093,12 +2104,13 @@ const SELF_TEST_BATTERIES = Object.freeze({
   "the advisory rows at the seat: a report, a draft, an advisory's collaborators, its versions and its state each pack as ONE action in a stroke of its own and travel in ONE dispatch; beside another action, with a malformed id, package or versions entry, a state the relay names no move to or a key that carries content, refused before anything is sent and never echoing a value; the report and the draft create content but carry no body, so nothing is read back — by construction, said where the read-back is decided — and each one's id comes back as an advisory annotation the seat reads and hands on, as does a publish's; the id rows that never publish read nothing back; a run that failed is exit 5 after ONE dispatch, never re-sent": 17,
   "retired lane aliases at the seat's door: a domain:engine / services / cli / rest label on labels_add, issue_create or pr_create is written as domain:server and said on stderr, a dry run included; a live domain:* label, a non-lane label and labels_remove pass untouched; the rewrite never refuses": 13,
   "advisory_read at the seat: the key pair made in this process per read — its public half in the action, its private half a KeyObject never exported, written or printed, and a key from the file refused; no byte read-back, said where the read-back is decided; the run's notice parts read back exactly, reassembled 1..n once each and opened with that key byte for byte, end to end through the real executor; what does not open is UNVERIFIED (6) with nothing printed; the text reaches this process's stdout on --reveal alone, never stderr or --json": 17,
+  "advisory_list at the seat: derived from the table into the sealed-read path, so its key pair is made here and a key from the file refused, with no byte read-back, said where the read-back is decided; the real executor's ten notice parts read back, reassembled and opened under the listing's own associated data — never a read's — byte for byte on the padded plaintext; what does not open is UNVERIFIED (6) with nothing printed; --reveal alone prints it, its pad trimmed for that op's display alone, never on stderr or --json": 9,
 });
 // Raised 21 → 22 with the run_rerun_failed seat battery, 22 → 23 with the signature battery, 23 → 24 with the
 // hierarchy link seat battery, 24 → 25 with the pull request body battery, 25 → 26 with the advisory rows' seat
-// battery, 26 → 27 with advisory_read's seat battery, 27 → 28 with the retired lane aliases battery: one battery,
-// one row.
-const SELF_TEST_BATTERY_FLOOR = 29;
+// battery, 26 → 27 with advisory_read's seat battery, 27 → 28 with the retired lane aliases battery, 29 → 30 with
+// advisory_list's seat battery: one battery, one row.
+const SELF_TEST_BATTERY_FLOOR = 30;
 const UNATTRIBUTED_BATTERY = '(unattributed)';
 
 const batteryCases = new Map();
@@ -3022,7 +3034,7 @@ export async function selfTest() {
       t("⛔ a public_key already in the actions file is REFUSED, never used — a key made elsewhere means a private key kept elsewhere — and the refusal never echoes it", [supplied.refused.length, supplied.keys.size, supplied.refused[0]?.includes('actions[0].public_key is set in the actions file'), supplied.refused.some((l) => l.includes('ADVISORY MARKER'))], [1, 0, true, false]);
       // Derived from the table.
       const stroke = packRequest({ repo: REPO, session: SESSION, actions: [armed.actions[0]], requestId: 'fw-test-1' }).payload;
-      t('derived from the table: advisory_read is the one op whose answer comes back sealed — no body op, no run op, no content, no card or advisory annotation, no read-back locator or target, and ZERO writes in its stroke', [ADVISORY_READ_OPS, [BODY_OPS, RUN_OPS, CONTENT_CREATING_OPS, ADVISORY_ANNOTATED_OPS].map((list) => list.includes('advisory_read')), Object.hasOwn(ANNOTATED_OPS, 'advisory_read'), 'advisory_read' in READ_BACK_LOCATORS, readBackTargets(stroke), strokePacing(stroke).writes], [['advisory_read'], [false, false, false, false], false, false, [], 0]);
+      t('derived from the table: advisory_read and advisory_list are the ops whose answer comes back sealed — the read no body op, no run op, no content, no card or advisory annotation, no read-back locator or target, and ZERO writes in its stroke', [ADVISORY_READ_OPS, [BODY_OPS, RUN_OPS, CONTENT_CREATING_OPS, ADVISORY_ANNOTATED_OPS].map((list) => list.includes('advisory_read')), Object.hasOwn(ANNOTATED_OPS, 'advisory_read'), 'advisory_read' in READ_BACK_LOCATORS, readBackTargets(stroke), strokePacing(stroke).writes], [['advisory_read', 'advisory_list'], [false, false, false, false], false, false, [], 0]);
       const at = own.indexOf('export const READ_BACK_LOCATORS');
       t("⛔ that advisory_read has NO byte read-back is said WHERE the read-back is decided, and in the header's account of the callers", [own.slice(Math.max(0, at - 1200), at).includes('No locator for `advisory_read`: it has NO byte read-back, because it writes nothing'), own.includes('`advisory_read` has NO byte read-back either, and needs none: it writes')], [true, true]);
       // The parts: one spelling, read back exactly.
@@ -3115,6 +3127,96 @@ export async function selfTest() {
       writeFileSync(join(dir, 'comment-reveal.json'), JSON.stringify([{ op: 'comment', issue: 19701, body: 'x' }]), 'utf8');
       const misplaced = await cli(['--repo', REPO, '--actions-file', join(dir, 'comment-reveal.json'), '--request-id', 'fw-test-1', '--reveal']);
       t('⛔ refused before anything is sent, exit 2: a public_key in the actions file (never echoed), and --reveal on a stroke carrying no advisory_read', [keyed.code, keyed.seen.length, keyed.errs.some((l) => l.includes('ADVISORY MARKER')), misplaced.code, misplaced.seen.length], [EXIT_USAGE, 0, false, EXIT_USAGE, 0]);
+    }
+
+    // ── advisory_list at the seat ───────────────────────────────────────────
+    battery("advisory_list at the seat: derived from the table into the sealed-read path, so its key pair is made here and a key from the file refused, with no byte read-back, said where the read-back is decided; the real executor's ten notice parts read back, reassembled and opened under the listing's own associated data — never a read's — byte for byte on the padded plaintext; what does not open is UNVERIFIED (6) with nothing printed; --reveal alone prints it, its pad trimmed for that op's display alone, never on stderr or --json");
+    {
+      const REPO = 'objectstack-ai/objectstack';
+      const MARKER = 'ADVISORY MARKER: never in a seat line';
+      const { executeFleetWrite } = await import('./execute.mjs');
+      const { ADVISORY_LIST_PADDED_BYTES, ADVISORY_LIST_STATES, ADVISORY_READ_OPEN_FAILED, advisoryListPagePath, advisoryListPadded, advisoryListPlaintext, advisoryReadParts, sealAdvisoryRead } = await import('./ops.mjs');
+      const LIST = { op: 'advisory_list' };
+      // Made-up ids: the fixture names no real advisory.
+      const idOf = (k) => `GHSA-${k.toString(36).padStart(4, '0')}-2345-wxyz`;
+      const item = (k, state) => ({ ghsa_id: idOf(k), state, severity: 'low', created_at: '2026-11-01T00:00:00Z', updated_at: '2026-11-02T00:00:00Z', summary: MARKER, description: MARKER, vulnerabilities: [{ package: { ecosystem: 'npm', name: MARKER } }] });
+      const pages = { triage: [item(1, 'triage')], draft: [item(2, 'draft'), item(3, 'draft')], closed: [] };
+      const listed = advisoryListPlaintext([...pages.triage, ...pages.draft]);
+      const armed = armAdvisoryReads([LIST]);
+      t("the key pair is made HERE for a listing too — derived from the table, because the row requires a public_key: the listing gains a key the validator accepts, the private half a KeyObject in the map; a key from the file is refused", [ADVISORY_READ_OPS.includes('advisory_list'), Object.keys(armed.actions[0]), validatePayload({ request_id: 'fw-test-1', repo: REPO, session: SESSION, actions: armed.actions }).ok, [...armed.keys.keys()], armed.keys.get(1)?.asymmetricKeyType, armAdvisoryReads([{ ...LIST, public_key: MARKER }]).refused.length], [true, ['op', 'public_key'], true, [1], 'x25519', 1]);
+      const stroke = packRequest({ repo: REPO, session: SESSION, actions: armed.actions, requestId: 'fw-test-1' }).payload;
+      const own = readReal(SELF_PATH, 'utf8');
+      const at = own.indexOf('export const READ_BACK_LOCATORS');
+      t("no body op, no run op, no content, no annotation, no locator or read-back target, ZERO writes — and that it has no byte read-back is said WHERE the read-back is decided and in the header's account of the callers", [[BODY_OPS, RUN_OPS, CONTENT_CREATING_OPS, ADVISORY_ANNOTATED_OPS].map((l) => l.includes('advisory_list')), Object.hasOwn(ANNOTATED_OPS, 'advisory_list'), 'advisory_list' in READ_BACK_LOCATORS, readBackTargets(stroke), strokePacing(stroke).writes, own.slice(Math.max(0, at - 1400), at).includes('Nor for `advisory_list`, the same shape: it writes nothing'), own.includes('`advisory_list` is the same path end to end')], [[false, false, false, false], false, false, [], 0, true, true]);
+      t("a listing's part is the read's one spelling under its own op, read back exactly — and the reader takes no op the table does not derive", [parseRelayAdvisoryReadAnnotation(relayAdvisoryReadAnnotationMessage({ action: 1, op: 'advisory_list', part: 3, of: 10, sealed: 'AA' })), parseRelayAdvisoryReadAnnotation(relayAdvisoryReadAnnotationMessage({ action: 1, op: 'advisory_lists', part: 1, of: 1, sealed: 'AA' }))], [{ action: 1, op: 'advisory_list', part: 3, of: 10, sealed: 'AA' }, null]);
+      // ⭐ End to end: the REAL executor walks, projects, pads and seals; its notices become the run's annotations.
+      const PERM_A = `GET /repos/${REPO}/collaborators/os-dev-a/permission`;
+      const executed = async (payload) => {
+        const lines = [];
+        const answers = { [PERM_A]: { status: 200, json: { permission: 'write', role_name: 'write' } }, ...Object.fromEntries(ADVISORY_LIST_STATES.map((st) => [`GET ${advisoryListPagePath(REPO, st)}`, { status: 200, json: pages[st] }])) };
+        const r = await executeFleetWrite({ payload, sender: 'os-dev-a', token: TOKEN }, {
+          fetch: async (url, init) => {
+            const u = new URL(url);
+            const a = answers[`${init?.method ?? 'GET'} ${u.pathname}${u.search}`] ?? { status: 404, json: { message: 'Not Found' } };
+            return { status: a.status, headers: new Headers({ 'x-ratelimit-remaining': '4999' }), json: async () => a.json };
+          },
+          log: (l) => lines.push(l),
+        });
+        const notes = lines.filter((l) => l.startsWith('::notice ')).map((l) => ({ path: '.github', annotation_level: 'notice', title: 'fleet-write advisory_list', message: l.slice(l.indexOf('::', 2) + 2) }));
+        return { ...r, notes };
+      };
+      const relayed = await executed(stroke);
+      const runOf = (notes, keys = armed.keys) => drive({ runs: () => [RUN('completed', 'success')], notes: () => notes }, { stroke, keys });
+      const ok = await runOf({ status: 200, json: [RUNNER_NOTICE, ...relayed.notes] });
+      const padded = advisoryListPadded(listed);
+      t("⭐ END TO END — the real executor's ten parts opened by the key this process made: success, exit 0, the plaintext BYTE FOR BYTE the padded listing, its fields count and advisories, and no marker in it", [relayed.exit, relayed.notes.length, ok.state, exitForResult(ok), ok.reads?.map((r) => [r.action, r.op, r.state, r.parts, r.bytes, r.fields]), ok.reads?.[0]?.plaintext === padded, ok.reads?.[0]?.plaintext.includes('ADVISORY MARKER')], [EXIT_OK, 10, 'success', EXIT_OK, [[1, 'advisory_list', 'opened', 10, ADVISORY_LIST_PADDED_BYTES, ['count', 'advisories']]], true, false]);
+      t('⛔ …and the seat\'s lines say the counts and the field names — never the marker, never a listed id', [ok.logs.some((l) => l.includes("action 1 advisory_list's sealed answer in 10 part(s)") && l.includes('fields count, advisories')), ok.logs.some((l) => l.includes('ADVISORY MARKER') || [1, 2, 3].some((k) => l.includes(idOf(k))))], [true, false]);
+      // ⛔ The listing's own associated data — never a read's.
+      const asRead = (() => {
+        const sealed = sealAdvisoryRead({ plaintext: padded, publicKey: armed.actions[0].public_key, aad: advisoryReadAad({ requestId: 'fw-test-1', action: 1 }) });
+        return advisoryReadParts(sealed).map((chunk, k) => ({ path: '.github', annotation_level: 'notice', title: 'fleet-write advisory_list', message: relayAdvisoryReadAnnotationMessage({ action: 1, op: 'advisory_list', part: k + 1, of: 10, sealed: chunk }) }));
+      })();
+      const stranger = armAdvisoryReads([LIST]);
+      const otherSeal = await executed(packRequest({ repo: REPO, session: SESSION, actions: stranger.actions, requestId: 'fw-test-1' }).payload);
+      const tampered = relayed.notes.map((n, k) => (k === 4 ? { ...n, message: n.message.replace(/sealed=(.)/, (m, c) => `sealed=${c === 'A' ? 'B' : 'A'}`) } : n));
+      const unread = [await runOf({ status: 200, json: asRead }), await runOf({ status: 200, json: tampered }), await runOf({ status: 200, json: otherSeal.notes }), await runOf({ status: 200, json: relayed.notes }, new Map()), await runOf({ status: 200, json: relayed.notes.slice(1) })];
+      t("⛔ UNVERIFIED, exit 6, nothing printed: the padded listing sealed under a READ's associated data, a part tampered with, parts sealed to another seat's key, no key in this process, and a part missing", unread.map((r) => [r.state, exitForResult(r), r.reads?.[0]?.state, r.reads?.[0]?.plaintext ?? null, r.logs.some((l) => l.includes('ADVISORY MARKER'))]), unread.map(() => ['unverified', EXIT_UNCONFIRMED, 'unverified', null, false]));
+      t('…the first three with the one sentence an answer that does not open earns', unread.slice(0, 3).map((r) => r.reads[0].why), [ADVISORY_READ_OPEN_FAILED, ADVISORY_READ_OPEN_FAILED, ADVISORY_READ_OPEN_FAILED]);
+      // The CLI: --reveal alone prints it, the pad trimmed for this op's display alone.
+      writeFileSync(join(dir, 'advisory-list.json'), JSON.stringify([LIST]), 'utf8');
+      const cli = async (args) => {
+        let nowMs = T0;
+        const clock = { now: () => nowMs, elapsed: () => nowMs - T0 };
+        const seen = [];
+        const notes = () => {
+          const sent = seen.find((s) => s.call === DISPATCH)?.body?.client_payload;
+          const action = sent?.actions?.[0];
+          if (!action?.public_key) return { status: 200, json: [] };
+          const sealed = sealAdvisoryRead({ plaintext: padded, publicKey: action.public_key, aad: advisorySealAad({ requestId: sent.request_id, action: 1, op: 'advisory_list' }) });
+          return { status: 200, json: advisoryReadParts(sealed).map((chunk, k) => ({ path: '.github', annotation_level: 'notice', title: 'fleet-write advisory_list', message: relayAdvisoryReadAnnotationMessage({ action: 1, op: 'advisory_list', part: k + 1, of: 10, sealed: chunk }) })) };
+        };
+        const out = [];
+        const errs = [];
+        const [log, err] = [console.log, console.error];
+        console.log = (l) => out.push(String(l));
+        console.error = (l) => errs.push(String(l));
+        let code;
+        try {
+          code = await main(args, {
+            env: { GITHUB_TOKEN: TOKEN, [SESSION_ENV]: SESSION },
+            send: { fetch: platform({ runs: () => [RUN('completed', 'success')], notes }, seen, clock), pace: paceFor(join(dir, `pace-cli-${paceCase++}.jsonl`)), now: clock.now, sleep: async (ms) => { nowMs += ms; }, log: (l) => errs.push(String(l)), ceilings: { startMs: 90_000, ceilingMs: 300_000, pollMs: 5_000, notes: [] } },
+          });
+        } finally {
+          [console.log, console.error] = [log, err];
+        }
+        return { code, out, errs, seen };
+      };
+      const base = ['--repo', REPO, '--actions-file', join(dir, 'advisory-list.json'), '--request-id', 'fw-test-1'];
+      const quiet = await cli([...base, '--json']);
+      const quietJson = quiet.out.length ? JSON.parse(quiet.out[quiet.out.length - 1]) : null;
+      t('⛔ the CLI without --reveal: exit 0, ONE --json line whose advisory_reads carry the op, the state, the padded byte count, ten parts and the field names alone — no listed id anywhere, stdout or stderr', [quiet.code, quiet.out.length, quietJson?.advisory_reads?.map((r) => [r.op, r.state, r.bytes, r.parts, r.fields]), [...quiet.out, ...quiet.errs].some((l) => [1, 2, 3].some((k) => l.includes(idOf(k))))], [EXIT_OK, 1, [['advisory_list', 'opened', ADVISORY_LIST_PADDED_BYTES, 10, ['count', 'advisories']]], false]);
+      const loud = await cli([...base, '--reveal']);
+      t("⭐ the CLI with --reveal: THIS process's stdout is the listing's JSON with its pad trimmed — exactly the projected listing, not one trailing space — and never a stderr line", [loud.code, loud.out, advisoryListDisplay(padded) === listed, loud.errs.some((l) => l.includes(idOf(2)))], [EXIT_OK, [listed], true, false]);
     }
 
     // ── the hierarchy link at the seat ──────────────────────────────────────
@@ -3725,7 +3827,8 @@ export async function selfTest() {
       "a batched stroke waited for as long as the runner is told to pause, and one the relay job cannot hold refused before it leaves; " +
       "an advisory report or draft never read back, by construction, its id handed on from the run's advisory annotation, and a publish's id read off the same annotation; " +
       "an advisory read whose one-time key pair this process made and never let out, its sealed answer reassembled from the run's notices and opened byte for byte, " +
-      'UNVERIFIED (6) when it does not open, and printed to stdout on --reveal alone; ' +
+      'UNVERIFIED (6) when it does not open, and printed to stdout on --reveal alone; an advisory listing opened the same way under its own associated data, ' +
+      'its pad trimmed for its --reveal display alone; ' +
       'and every relay sender, discovered from the source, answering an accepted dispatch with no run, or none completed, UNCONFIRMED (6) with ZERO direct writes, under auto as under dispatch (the no-run conformance).',
   );
   selfTestReachedVerdict = true;
@@ -3776,6 +3879,7 @@ const USAGE = [
   '  node scripts/pm/fleet-write/dispatch.mjs --repo owner/name --actions-file actions.json [--session session_…] [--request-id id] [--json]',
   '  node scripts/pm/fleet-write/dispatch.mjs --repo owner/name --actions-file actions.json --dry-run',
   '  node scripts/pm/fleet-write/dispatch.mjs --repo owner/name --actions-file read.json [--reveal]   # one advisory_read: { op, ghsa_id }',
+  '  node scripts/pm/fleet-write/dispatch.mjs --repo owner/name --actions-file list.json [--reveal]   # one advisory_list: { op }',
   '  node scripts/pm/fleet-write/dispatch.mjs --route        # ONE JSON line: the transport this environment resolves to, and why',
   '  node scripts/pm/fleet-write/dispatch.mjs --self-test',
   '',
@@ -3789,7 +3893,8 @@ const USAGE = [
   '  read from the platform, a dry run included — an issue refused (2), an unread target refused (3).',
   '  An advisory_read names ghsa_id alone: this process makes its one-time key pair, sends the public half, and opens',
   '  the sealed answer with the private half, which never leaves memory. --reveal prints the opened text to stdout, and',
-  '  nothing else ever prints it; a public_key in the actions file is refused (2).',
+  '  nothing else ever prints it; a public_key in the actions file is refused (2). An advisory_list names nothing at all',
+  '  and is sealed and opened the same way: the triage, draft and closed advisories, five fields each.',
   `  Exits: ${EXIT_OK} run succeeded, every body reads back as sent and every started run is listed · ${EXIT_USAGE} usage / payload refused · ${EXIT_PREREQUISITE} prerequisite ·`,
   `         ${EXIT_NOT_STORED} NOT STORED (the run succeeded, a body reads back otherwise — go READ, never retry) · ${EXIT_PLATFORM_REFUSAL} dispatch refused or run failed ·`,
   `         ${EXIT_UNCONFIRMED} UNCONFIRMED (no run, no completion within the ceiling, a body not read back, or a started run not listed) · ${EXIT_WRITE_PACE_REFUSED} throttle refused`,
@@ -3883,7 +3988,7 @@ export async function main(argv, deps = {}) {
     return EXIT_USAGE;
   }
   if (opts.reveal && armed.keys.size === 0) {
-    console.error("fleet-write/dispatch: --reveal prints an advisory_read's opened answer, and this stroke carries no advisory_read. Nothing was sent.");
+    console.error(`fleet-write/dispatch: --reveal prints a sealed read's opened answer (${ADVISORY_READ_OPS.join(', ')}), and this stroke carries none. Nothing was sent.`);
     return EXIT_USAGE;
   }
   actions = armed.actions;
@@ -3963,7 +4068,8 @@ export async function main(argv, deps = {}) {
   const tool = 'scripts/pm/fleet-write/dispatch.mjs';
   const result = await sendFleetWrite(packed.payload, { token, advisoryReadKeys: armed.keys, reveal: opts.reveal, ...(deps.send ?? {}) });
   // ⛔ The opened text reaches THIS process's stdout, and only on --reveal — never stderr, a log, a file or --json.
-  if (opts.reveal) for (const r of result.reads ?? []) if (r.state === 'opened') console.log(r.plaintext);
+  // A listing's opened text is padded to the channel's size: its display alone trims the pad (`advisoryListDisplay`).
+  if (opts.reveal) for (const r of result.reads ?? []) if (r.state === 'opened') console.log(r.op === 'advisory_list' ? advisoryListDisplay(r.plaintext) : r.plaintext);
   if (!result.ok && (result.state === 'no-run' || result.state === 'timeout')) console.error(unconfirmedText(result, tool));
   if (result.notStored) console.error(notStoredText(result, tool));
   if (result.state === 'unverified') console.error(unverifiedText(result, tool));
