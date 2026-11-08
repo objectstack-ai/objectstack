@@ -289,7 +289,8 @@ async function revokeSsoProjectedGrants(
     const writer: IDataEngine = withSystemContext(engine);
     const users = new Set<string>();
     for (const grant of Array.isArray(grants) ? (grants as Record<string, unknown>[]) : []) {
-      await writer.delete(GRANT_OBJECT, { where: { id: text(grant.id) } });
+      // The grant's organization is the write's tenant, as on the sign-in's own writes.
+      await writer.delete(GRANT_OBJECT, { where: { id: text(grant.id) }, context: { isSystem: true, tenantId: organizationId } });
       users.add(text(grant.user_id));
     }
     return { reprojected: true, reconciledUsers: users.size };
