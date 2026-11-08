@@ -30,7 +30,7 @@ import { mergeSeedDatasets, readSeedDatasets, registerSeedReplayerOnce } from '.
 import { describeSeedLocale, resolveSeedLocaleForLoad } from './seed-locale.js';
 import { declareSeedSource, recordOrganizationReplay, type SeedLandingReport } from './seed-settlement.js';
 import { loadDisabledPackageIds } from './package-state-store.js';
-import { readServedWithheldFieldReaders, servedWithheldFieldReadersMessage } from './domains/packages.js';
+import { ensureDependentRulesUninstallGuard, readServedWithheldFieldReaders, servedWithheldFieldReadersMessage } from './domains/packages.js';
 import { asPackageStateStore, ensurePackageStateUninstallCleanup, PACKAGE_STATE_STORE_PLUGIN_NAME } from './package-state-host-store.js';
 import type { IFieldFileService, IMetadataService, IObjectQLEngine, II18nService } from '@objectstack/spec/contracts';
 import { FIELD_FILE_SERVICE } from '@objectstack/spec/contracts';
@@ -1401,6 +1401,11 @@ export class AppPlugin implements Plugin {
         // return: an empty env is where every package arrives by hydration or
         // install, and is deleted the same way.
         ensurePackageStateUninstallCleanup(ctx, this.projectContext?.environmentId);
+        // [#31232] …and refuses, before anything moves, an uninstall that would
+        // withdraw a field an active validation rule of another enabled
+        // package reads: the package doors' verdict, asked by the verb itself
+        // so every in-process caller is refused on it too.
+        ensureDependentRulesUninstallGuard(ctx);
         if (this.empty) {
             ctx.logger.debug('[AppPlugin] empty env — no app payload, skipping start', {
                 pluginName: this.name,

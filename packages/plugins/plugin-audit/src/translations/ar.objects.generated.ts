@@ -39,7 +39,8 @@ export const arObjects: NonNullable<TranslationData['objects']> = {
           import: "استيراد",
           export: "تصدير",
           platform_admin_standing_change: "تغيير صلاحية مسؤول المنصّة",
-          action_invocation: "استدعاء إجراء"
+          action_invocation: "استدعاء إجراء",
+          package_uninstall: "إلغاء تثبيت حزمة"
         }
       },
       user_id: {
