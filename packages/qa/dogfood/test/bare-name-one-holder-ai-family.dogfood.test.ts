@@ -154,7 +154,7 @@ describe('one package holder per agent, skill and tool name, on a booted showcas
     if (storageDir) rmSync(storageDir, { recursive: true, force: true });
   });
 
-  it('the cold boot of a deployment holding the clash boots, and warns once naming the agent and the skill, both packages and the rename for each', async () => {
+  it('the cold boot of a deployment holding the clash boots, and warns once naming the agent, the skill and the tool, both packages and the rename for each', async () => {
     const warnings = bootLines.filter((l) => l.includes('Bare-name conflict at boot'));
     expect(warnings, 'one warning line').toHaveLength(1);
     const line = warnings[0]!;
