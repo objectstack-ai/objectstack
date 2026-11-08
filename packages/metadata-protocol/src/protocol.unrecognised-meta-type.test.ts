@@ -51,6 +51,11 @@
  * `protocol.code-only-types.test.ts` uses. A gate INSIDE `saveMetaItem` cannot
  * be measured against a harness that mocks `saveMetaItem`.
  */
+// `@objectstack/lint` is reached through the save door's author-time gate, a
+// dynamic `import()` (`metadata-diagnostics.ts`). Paid here, at collection, so no
+// case's `testTimeout` window pays that first load
+// (`scripts/check-test-source-alias.mjs`, "The source reach").
+import '@objectstack/lint';
 import { describe, expect, it } from 'vitest';
 // [#5619] The producer's OWN write-verb dispatch decisions, so the fake engine
 // below cannot accept a call ObjectQL itself refuses.
@@ -176,6 +181,18 @@ describe('#8421 — an unrecognised `/meta` type is refused instead of minted', 
         const { protocol, rows } = makeProtocol();
         await expect(
             protocol.saveMetaItem({ type: 'theme', name: 'dark', item: { name: 'dark', label: 'Dark', colors: { primary: '#3b82f6' } } }),
+        ).rejects.toMatchObject({ code: 'INVALID_REQUEST', status: 400 });
+        expect(metaRows(rows).length).toBe(0);
+    });
+
+    it('`rag_pipeline` is on the refused side too — its listing row was retired', async () => {
+        // The same exit as `theme`: `rag_pipeline` was a URL-map-only kind with no
+        // schema, so this door stored any JSON under it. Its `ragPipelines` fold
+        // left `PLURAL_TO_SINGULAR` (ADR-0049 — no stack could declare the
+        // collection), so it now earns the same refusal, and nothing is stored.
+        const { protocol, rows } = makeProtocol();
+        await expect(
+            protocol.saveMetaItem({ type: 'rag_pipeline', name: 'my_pipeline', item: { name: 'my_pipeline', label: 'Test' } }),
         ).rejects.toMatchObject({ code: 'INVALID_REQUEST', status: 400 });
         expect(metaRows(rows).length).toBe(0);
     });

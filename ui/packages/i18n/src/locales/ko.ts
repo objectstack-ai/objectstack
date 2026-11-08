@@ -3588,6 +3588,7 @@ const ko = {
       organizationExists: '해당 조직이 이미 존재합니다.',
       slugTaken: '해당 슬러그는 이미 사용 중입니다.',
       notAllowedToCreate: '새 조직을 만들 권한이 없습니다.',
+      organizationLimitReached: '만들 수 있는 조직 수의 한도에 도달했습니다. 초대받아 참여한 조직은 한도에 포함되지 않습니다.',
       notTheRecipient: '이 초대의 수신자가 아닙니다.',
       invitationNotFound: '이 초대는 더 이상 존재하지 않거나 만료되었습니다.',
       unknown: '문제가 발생했습니다. 다시 시도해 주세요.',

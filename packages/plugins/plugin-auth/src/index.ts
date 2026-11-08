@@ -40,6 +40,18 @@ export {
 // kept; the call never throws. The pure steps of the rule stay unexported, so
 // the rule keeps one owner.
 export type { IdpLocaleClaim } from './idp-locale-claim.js';
+// The mobile sign-in hand-off, for a host that forwards `/api/v1/auth/*` to a
+// kernel's AuthManager it did not mount (a per-environment kernel with no HTTP
+// server): that host answers `GET /one-time-token/handoff` with this, the same
+// body AuthPlugin's own mount runs. Only the whole answer is published: the
+// token must be minted inside the hand-off's challenge scope, so the seams it
+// is built from stay unexported and no host can mint outside it.
+export {
+  answerOneTimeTokenHandoff,
+  type OneTimeTokenHandoffManager,
+  type OneTimeTokenHandoffServing,
+  type HandoffAnswer,
+} from './one-time-token-handoff.js';
 export * from './ensure-default-organization.js';
 // [ADR-0131 D3 / D10 fate 3] The Default Organization's boot invariant, for the
 // v18 organization-ownership ceremony (`os migrate organization-ownership
