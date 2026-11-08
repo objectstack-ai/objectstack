@@ -535,8 +535,11 @@ interface DataDoorAnswer {
  * wrapper, and `Internal server error` for a fault. `object`, `field` and the
  * other context keys the door adds are not read, as `details` is not
  * ({@link errorResultWithCode}).
+ *
+ * [#31270] Exported for the record resource (`MCPServerRuntime.bridgeResources`),
+ * which answers a code-less throw with the same read; not on the package entry.
  */
-function dataDoorAnswerOf(err: unknown, objectName: string): DataDoorAnswer {
+export function dataDoorAnswerOf(err: unknown, objectName: string): DataDoorAnswer {
   const door = mapDataError(err, objectName);
   const code = typeof door.body.code === 'string' && door.body.code !== '' ? door.body.code : undefined;
   const message = typeof door.body.error === 'string' && door.body.error !== '' ? door.body.error : messageOf(err);

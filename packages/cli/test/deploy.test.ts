@@ -575,6 +575,23 @@ describe('os deploy — a self-hosted runtime as the active target (os environme
     expect(sent[1].body.confirmAccessUpgrade).toBe('fs_123');
   });
 
+  it("the schema upgrade refusal's retry names os deploy --confirm-upgrade, and the token passes through", async () => {
+    const schemaRefusal = refused(409, 'SCHEMA_UPGRADE_CONFIRMATION_REQUIRED', 'confirm', {
+      findings: [{ describe: 'acme_lead.company (text) is removed while acme_lead.account_name (text) is added' }],
+      findingSet: 'schema-upgrade:abc',
+    });
+    let sent = stubRuntime({ install: schemaRefusal });
+    expect(await deploy()).toBe(1);
+    expect(sent).toHaveLength(2);
+    expect(text()).toContain('os deploy --confirm-upgrade schema-upgrade:abc');
+
+    vi.unstubAllGlobals();
+    sent = stubRuntime({});
+    expect(await deploy(['--confirm-upgrade', 'schema-upgrade:abc']), text()).toBeUndefined();
+    expect(sent[0].body.confirmSchemaUpgrade).toBeUndefined();
+    expect(sent[1].body.confirmSchemaUpgrade).toBe('schema-upgrade:abc');
+  });
+
   it('a package the running kernel could not load is not called live: exit 1', async () => {
     stubRuntime({ install: ok({ ...INSTALLED, hotLoaded: false, hotLoadError: 'boom' }) });
 
@@ -597,6 +614,15 @@ describe('os deploy — a self-hosted runtime as the active target (os environme
     const sent = stubRuntime({});
 
     expect(await deploy(['--confirm-access-upgrade', 'fs_123'])).toBe(1);
+    expect(sent).toHaveLength(0);
+    expect(compileForDeploy).not.toHaveBeenCalled();
+  });
+
+  it('--confirm-upgrade is refused when the target is ObjectOS Cloud, before anything is sent', async () => {
+    await writeFile(join(home, '.objectstack', 'cloud.json'), JSON.stringify({ url: CLOUD_PLANE, token: 'cloud_tok', createdAt: 'now' }));
+    const sent = stubRuntime({});
+
+    expect(await deploy(['--confirm-upgrade', 'schema-upgrade:abc'])).toBe(1);
     expect(sent).toHaveLength(0);
     expect(compileForDeploy).not.toHaveBeenCalled();
   });

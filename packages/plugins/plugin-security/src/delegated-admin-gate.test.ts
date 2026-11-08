@@ -928,6 +928,55 @@ describe('DelegatedAdminGate — the anchor is picked by organization, not by ar
   });
 });
 
+// ── A delegated subtree is one organization's, on a driver that scopes NOTHING ─
+//
+// [ADR-0090 D12] The harness `ql` ignores `context`, so the walk's child read
+// hands every organization's units to the gate and the row-level bound is the
+// only thing standing; the delegate's context names no organization. The
+// posture rig (`delegated-admin-own-name-set.posture.test.ts`) pins the rule
+// through the doors on a real engine; this half also pins the organization-less
+// root, which a real table cannot hold (its tenant column is NOT NULL,
+// ADR-0131 D1).
+describe("DelegatedAdminGate — a delegated subtree is one organization's, with no organization on the context", () => {
+  /**
+   * Stamp every unit with `organizationId` (none: leave them organization-less),
+   * then link a unit of `linkedOrganization`, and one below it, under the scope
+   * root `bu_east`.
+   */
+  function linkUnderScopeRoot(organizationId: string | null, linkedOrganization: string | null) {
+    if (organizationId) for (const r of h.tables.sys_business_unit) r.organization_id = organizationId;
+    h.tables.sys_business_unit.push(
+      { id: 'bu_linked', name: 'linked', parent_business_unit_id: 'bu_east', organization_id: linkedOrganization },
+      { id: 'bu_linked_child', name: 'linked_child', parent_business_unit_id: 'bu_linked', organization_id: linkedOrganization },
+    );
+  }
+  const placeable = async () => [...(await h.gate.describeDelegableScope(
+    await (h.gate as any).deps.resolveSets({ principal: 'delegate' }),
+    h.ctxOf('delegate'),
+  )).placeableBusinessUnitIds].sort();
+  const assignAt = (business_unit_id: string) =>
+    insertAssignment(h.ctxOf('delegate'), { user_id: 'u_east_1', position: 'sales_rep', business_unit_id });
+
+  for (const [label, root] of [['a stamped scope root', 'org_a'], ['an organization-less scope root', null]] as const) {
+    it(`${label}: the subtree stops at a unit stamped with another organization`, async () => {
+      linkUnderScopeRoot(root, 'org_b');
+      expect(await placeable()).toEqual(['bu_east', 'bu_es']);
+      for (const unit of ['bu_linked', 'bu_linked_child']) {
+        const err = await refusalOf(() => assignAt(unit));
+        expect([err.code, err.status], `${unit}: ${err.message}`).toEqual(['DELEGATION_SCOPE_VIOLATION', 403]);
+      }
+      // CONTROL: inside the subtree the same write is admitted.
+      await expect(assignAt('bu_es')).resolves.toBeUndefined();
+    });
+
+    it(`CONTROL — ${label}: a unit of the root's own organization under the same link is inside the subtree`, async () => {
+      linkUnderScopeRoot(root, root);
+      expect(await placeable()).toEqual(['bu_east', 'bu_es', 'bu_linked', 'bu_linked_child']);
+      await expect(assignAt('bu_linked_child')).resolves.toBeUndefined();
+    });
+  }
+});
+
 // ── A position is the security catalog's definition, not an organization's row ─
 // [ADR-0131 D3/D4] The two position-keyed authority decisions (delegatable;
 // bound sets) read the position's DEFINITION from the environment catalog by

@@ -45,7 +45,7 @@
  * A formula over the field does not refuse the disable: it answers `null`.
  */
 
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -1194,6 +1194,18 @@ describe('[#31067] the verdict the disable door asks is the package entry\'s exp
         expect(runtime.formatPackageDisableDependents).toBe(disableDependentRulesMessage);
     });
 
+    it('[#30999] the builder\'s uninstall form changes only the effect and the remedy; the default is the disable form', () => {
+        const dependents = [{ packageId: READER, object: THING, rule: RULE, fields: [FLAG] }];
+        const disable = runtime.formatPackageDisableDependents('LEAD', dependents);
+        expect(runtime.formatPackageDisableDependents('LEAD', dependents, { operation: 'disable' })).toBe(disable);
+        expect(runtime.formatPackageDisableDependents('LEAD', dependents, { operation: 'uninstall' })).toBe(
+            disable
+                .replace('which the disable would withhold', 'which the uninstall would withdraw')
+                .replace('or keep the package enabled.', 'or keep the package installed.'),
+        );
+        expect(disable).toContain('which the disable would withhold');
+    });
+
     it('answers the active rules a disable would leave reading a withheld field, and writes nothing', async () => {
         const { registry } = await door();
         const dependents: runtime.DisableDependentRule[] = runtime.readPackageDisableDependents(registry, EXTENDER);
@@ -1230,5 +1242,130 @@ describe('[#31067] the verdict the disable door asks is the package entry\'s exp
         const result: any = await disable(EXTENDER);
         expect(result.response?.status, String(result.response?.body?.error?.message)).toBe(200);
         expect(registry.getPackage(EXTENDER)?.enabled).toBe(false);
+    });
+});
+
+/**
+ * [#30999] `DELETE /packages/:id` withdraws the package's `objectExtensions`
+ * fields from the served object, as a disable withholds them, so it asks the
+ * disable door's verdict and answers its refusal: `409`
+ * `PACKAGE_DISABLE_RESTRICTED_BY_VALIDATION_RULE`, the sentence the exported
+ * builder spells over the exported verdict under an uninstall lead, BEFORE the
+ * uninstall verb is reached. Measured before this change on this rig: the
+ * uninstall answered `200`, the field left the served object, and every write
+ * to the object then answered `400 VALIDATION_FAILED`, the rule failing closed
+ * on the withdrawn field with no package left to re-enable.
+ *
+ * Two writable packages (installed as authored, so the door may delete them)
+ * extend the app's object with one field each; a third package's active rule
+ * reads the first one's field. The uninstall verb is the real one, spied on
+ * and passed through, so "the verb was never reached" and "the verb was handed
+ * the session user" are read off the request it received.
+ */
+describe('[#30999] the uninstall door refuses while an enabled package\'s validation rule reads a field the package adds', () => {
+    const TIERS = 'com.qa.uninstall.tiers';
+    const NOTES = 'com.qa.uninstall.notes';
+    const READER = 'com.qa.uninstall.reader';
+    const TIER = 'qx_tier';
+    const NOTE = 'qx_note';
+    const RULE = 'qx_tier_known';
+    const CODE = 'PACKAGE_DISABLE_RESTRICTED_BY_VALIDATION_RULE';
+    const manifestOf = (id: string) => ({ id, name: id, version: '1.0.0', type: 'module' });
+
+    let root: string;
+    let booted: Booted | undefined;
+    let accountId: string;
+    let deletePackage: ReturnType<typeof vi.spyOn>;
+
+    beforeAll(async () => {
+        root = mkdtempSync(join(tmpdir(), 'os-suite-ext-uninstall-'));
+        writeFileSync(join(root, '.keep'), '');
+        process.env.OS_HOME = mkdtempSync(join(home, 'uninstall-'));
+        booted = await bootKernel(root);
+        const { kernel, engine } = booted;
+        for (const id of [TIERS, NOTES, READER]) engine.registry.installPackage(manifestOf(id) as any, 'authored');
+        engine.registry.registerObject({ name: ACCOUNT, fields: { [TIER]: { name: TIER, type: 'text', label: 'Tier' } } } as any, TIERS, undefined, 'extend');
+        engine.registry.registerObject({ name: ACCOUNT, fields: { [NOTE]: { name: NOTE, type: 'text', label: 'Note' } } } as any, NOTES, undefined, 'extend');
+        engine.registry.registerObject({
+            name: ACCOUNT,
+            validations: [{ name: RULE, type: 'script', severity: 'error', message: 'Unknown tier', condition: `record.${TIER} == 'unknown'` }],
+        } as any, READER, undefined, 'extend');
+        await engine.syncSchemas();
+        const created = await dispatchAs(kernel, 'POST', `/data/${ACCOUNT}`, { name: 'Acme', [TIER]: 'gold', [NOTE]: 'n' });
+        expect(created.status, `precondition: the account is written (${String(created.message)})`).toBe(201);
+        accountId = idOf(created);
+        deletePackage = vi.spyOn(kernel.getService<any>('protocol'), 'deletePackage');
+    }, 120_000);
+    afterAll(async () => {
+        deletePackage?.mockRestore();
+        await shutdown(booted);
+        rmSync(root, { recursive: true, force: true });
+    }, 60_000);
+
+    it('answers 409 with the disable door\'s code and sentence under an uninstall lead, and nothing moves', async () => {
+        const { kernel, engine } = booted!;
+        const disabledBefore = [...loadDisabledPackageIds(ENVIRONMENT_ID)].sort();
+        const expected = disableDependentRulesMessage(
+            `Package '${TIERS}' cannot be uninstalled`,
+            readDisableDependentRules(engine.registry, TIERS),
+            { operation: 'uninstall' },
+        );
+        // The uninstall form says what the uninstall would do and which remedy
+        // keeps the field served; keeping the package ENABLED would not.
+        expect(expected).toBe(
+            `Package '${TIERS}' cannot be uninstalled: an active validation rule reads a field it adds through objectExtensions, `
+            + `which the uninstall would withdraw — ${READER} · ${ACCOUNT} · ${RULE} (reads ${TIER}). Switch off or change that rule first, `
+            + 'or keep the package installed.',
+        );
+
+        const refused = await dispatchAs(kernel, 'DELETE', `/packages/${TIERS}`);
+        expect({ status: refused.status, code: refused.code }).toEqual({ status: 409, code: CODE });
+        expect(String(refused.message)).toBe(expected);
+        expect(refused.details).toBeUndefined();
+
+        // Nothing moved: the verb was never reached, the package and its field
+        // stay served, the state file is as it was, and writes still land.
+        expect(deletePackage).not.toHaveBeenCalled();
+        expect(engine.registry.getPackage(TIERS)?.enabled).not.toBe(false);
+        expect(await servedFieldNames(kernel)).toEqual(expect.arrayContaining([TIER, NOTE]));
+        expect([...loadDisabledPackageIds(ENVIRONMENT_ID)].sort()).toEqual(disabledBefore);
+        const written = await dispatchAs(kernel, 'PATCH', `/data/${ACCOUNT}/${accountId}`, { [TIER]: 'silver' });
+        expect(written.status, String(written.message)).toBe(200);
+        expect(await readAccount(kernel, accountId)).toMatchObject({ [TIER]: 'silver' });
+    });
+
+    it('control: a package no rule depends on uninstalls as before, the verb handed the session user and the disable record cleared', async () => {
+        const { kernel, engine } = booted!;
+        // Disabled first, so the uninstall has a disable record to clear. The
+        // reader's rule stays active on the same object: it reads another field.
+        expect((await dispatchAs(kernel, 'PATCH', `/packages/${NOTES}/disable`)).status).toBe(200);
+        expect(loadDisabledPackageIds(ENVIRONMENT_ID).has(NOTES), 'precondition: the disable is recorded').toBe(true);
+
+        const uninstalled = await dispatchAs(kernel, 'DELETE', `/packages/${NOTES}`);
+        expect(uninstalled.status, String(uninstalled.message)).toBe(200);
+        expect(deletePackage).toHaveBeenCalledTimes(1);
+        expect(deletePackage).toHaveBeenCalledWith(expect.objectContaining({ packageId: NOTES, actor: ADMIN.userId }));
+        expect(engine.registry.getPackage(NOTES)).toBeUndefined();
+        expect(loadDisabledPackageIds(ENVIRONMENT_ID).has(NOTES)).toBe(false);
+        expect(await servedFieldNames(kernel)).not.toContain(NOTE);
+    });
+
+    it('control: proceeds once the reading rule is switched off through the tenant overlay, and writes still land', async () => {
+        const { kernel, engine } = booted!;
+        engine.registry.registerObject({
+            name: ACCOUNT, label: 'Account', fields: { name: { name: 'name', type: 'text', label: 'Name' } },
+            validations: [{ name: RULE, type: 'script', message: 'Switched off by the tenant', condition: 'true', active: false }],
+            _provenance: 'org',
+        } as any, APP, undefined, 'overlay');
+        const served = ((engine.registry.getObject(ACCOUNT) as any)?.validations ?? []) as Array<{ name?: string; active?: unknown }>;
+        expect(served.find((r) => r.name === RULE)?.active, 'precondition: the reader\'s rule is served, switched off').toBe(false);
+
+        const uninstalled = await dispatchAs(kernel, 'DELETE', `/packages/${TIERS}`);
+        expect(uninstalled.status, String(uninstalled.message)).toBe(200);
+        expect(deletePackage).toHaveBeenLastCalledWith(expect.objectContaining({ packageId: TIERS, actor: ADMIN.userId }));
+        expect(engine.registry.getPackage(TIERS)).toBeUndefined();
+        expect(await servedFieldNames(kernel)).not.toContain(TIER);
+        const written = await dispatchAs(kernel, 'PATCH', `/data/${ACCOUNT}/${accountId}`, { name: 'Acme Ltd' });
+        expect(written.status, String(written.message)).toBe(200);
     });
 });
