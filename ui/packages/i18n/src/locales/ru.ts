@@ -738,6 +738,7 @@ const ru = {
       noSavedTemplates: "Нет сохранённых шаблонов",
       noneOption: "— Нет —",
       saveCurrent: "Сохранить текущий",
+      saveCurrentNeedsMapping: "Сопоставьте хотя бы один столбец, чтобы сохранить шаблон.",
       templateName: "Название шаблона",
       save: "Сохранить",
       deleteTemplate: "Удалить шаблон",

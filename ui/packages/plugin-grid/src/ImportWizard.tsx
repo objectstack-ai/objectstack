@@ -9,6 +9,7 @@ import {
   Dialog, DialogContent, DialogHeader, DialogFooter, DialogTitle, DialogDescription, DIALOG_VIEWPORT_GUTTER,
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
+  Tooltip, TooltipContent, TooltipProvider, TooltipTrigger,
 } from '@object-ui/components';
 import { Upload, FileSpreadsheet, CheckCircle2, AlertCircle, XCircle, X, ArrowRight, ArrowLeft, Save, Trash2, ClipboardPaste, Download, Undo2 } from 'lucide-react';
 import { useObjectTranslation, notifyDataChanged } from '@object-ui/react';
@@ -80,6 +81,7 @@ export const IMPORT_DEFAULT_TRANSLATIONS: Record<string, string> = {
   'grid.import.noSavedTemplates': 'No saved templates',
   'grid.import.noneOption': '— None —',
   'grid.import.saveCurrent': 'Save current',
+  'grid.import.saveCurrentNeedsMapping': 'Map at least one column to save a template.',
   'grid.import.templateName': 'Template name',
   'grid.import.save': 'Save',
   'grid.import.deleteTemplate': 'Delete template',
@@ -1490,11 +1492,26 @@ const TemplateBar: React.FC<{
   onSelect: (id: string) => void;
   onSaveAs: (name: string) => void;
   onDelete: () => void;
-  disabled?: boolean;
-}> = ({ templates, selectedId, onSelect, onSaveAs, onDelete, disabled }) => {
+  /** No column is mapped yet, so there is nothing to save as a template. */
+  nothingMapped: boolean;
+}> = ({ templates, selectedId, onSelect, onSaveAs, onDelete, nothingMapped }) => {
   const { t } = useImportTranslation();
   const [savingName, setSavingName] = useState('');
   const [showSave, setShowSave] = useState(false);
+  const saveReasonId = React.useId();
+  const saveCurrent = (
+    <Button
+      type="button"
+      variant="outline"
+      size="sm"
+      onClick={() => setShowSave(true)}
+      disabled={nothingMapped}
+      aria-describedby={nothingMapped ? saveReasonId : undefined}
+      data-testid="import-template-save-btn"
+    >
+      {t('grid.import.saveCurrent')}
+    </Button>
+  );
   return (
     <div
       className="mb-3 flex flex-wrap items-center gap-2 rounded-md border bg-muted/30 p-2"
@@ -1519,16 +1536,29 @@ const TemplateBar: React.FC<{
         </SelectContent>
       </Select>
       {!showSave ? (
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          onClick={() => setShowSave(true)}
-          disabled={disabled}
-          data-testid="import-template-save-btn"
-        >
-          {t('grid.import.saveCurrent')}
-        </Button>
+        nothingMapped ? (
+          // The Next button's pattern below (objectui#12303, after
+          // `DeclaredActionsBar`, objectui#11811): a natively disabled button
+          // takes no pointer or focus events, so the wrapping span is the tab
+          // stop and the tooltip trigger, and the reason is also a persistent
+          // description of both, read with the tooltip closed.
+          <TooltipProvider delayDuration={200}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span
+                  tabIndex={0}
+                  aria-describedby={saveReasonId}
+                  data-disabled-reason=""
+                  className="inline-flex rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                >
+                  {saveCurrent}
+                  <span id={saveReasonId} className="sr-only">{t('grid.import.saveCurrentNeedsMapping')}</span>
+                </span>
+              </TooltipTrigger>
+              <TooltipContent className="max-w-xs">{t('grid.import.saveCurrentNeedsMapping')}</TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+        ) : saveCurrent
       ) : (
         <div className="flex items-center gap-1">
           <Input
@@ -1543,7 +1573,7 @@ const TemplateBar: React.FC<{
             type="button"
             size="sm"
             onClick={() => { if (savingName.trim()) { onSaveAs(savingName.trim()); setSavingName(''); setShowSave(false); } }}
-            disabled={!savingName.trim() || disabled}
+            disabled={!savingName.trim() || nothingMapped}
             data-testid="import-template-confirm-save"
           >
             {t('grid.import.save')}
@@ -1727,7 +1757,7 @@ const StepMapping: React.FC<{
         onSelect={onSelectTemplate}
         onSaveAs={onSaveTemplate}
         onDelete={onDeleteTemplate}
-        disabled={Object.keys(mapping).length === 0}
+        nothingMapped={Object.keys(mapping).length === 0}
       />
       {autoMatchedCount > 0 && (
         <p className="mb-2 flex items-center gap-1.5 text-xs text-muted-foreground" data-testid="import-automatch-summary">

@@ -594,6 +594,7 @@ const zh = {
       noSavedTemplates: '暂无保存的模板',
       noneOption: '— 无 —',
       saveCurrent: '保存当前映射',
+      saveCurrentNeedsMapping: '请至少映射一列，才能保存为模板。',
       templateName: '模板名称',
       save: '保存',
       deleteTemplate: '删除模板',

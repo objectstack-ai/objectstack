@@ -369,8 +369,12 @@ describe('#11550 — the client-keyed tables now derive from one source', () => 
     // POSTGRES_WIRE_CLIENTS, or the emission set as a union of these tables,
     // which would grant both databases SQL-emission identity as a refactor side
     // effect and re-answer a ruling that has already been made.
+    // #31327 added `mssql` — a deliberate membership change, and the one row
+    // that does NOT derive from an emission set: SQL Server is federation-only,
+    // so it emits no managed DDL, but a federated connection still needs its
+    // connect timeout bounded (tedious spells it `connectionTimeout`).
     expect(Object.keys(table()).sort()).toEqual(
-      ['cockroachdb', 'mysql', 'mysql2', 'pg', 'pgnative', 'postgres', 'postgresql', 'redshift'],
+      ['cockroachdb', 'mssql', 'mysql', 'mysql2', 'pg', 'pgnative', 'postgres', 'postgresql', 'redshift'],
     );
     // The extension set is the only literal, and it holds exactly the two
     // databases #11756 ruled on — never `mariadb`, which stays out of scope.

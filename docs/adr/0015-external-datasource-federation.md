@@ -4,7 +4,7 @@
 **Deciders**: ObjectStack Protocol Architects
 **Builds on**: [ADR-0005](./0005-metadata-customization-overlay.md) (one Zod source of truth per metadata type)
 **Consumers**: `@objectstack/spec`, `@objectstack/runtime`, `@objectstack/objectql`, `@objectstack/plugins/driver-sql`, `@objectstack/services/service-ai`, `@objectstack/cli`, `../objectui`
-**Amended by**: [ADR-0143](./0143-outbound-connector-auth-is-open-tier.md) (2026-10-27), attribution only — see the note below. D7 (2026-10-29, ruling 6486136301 on #27298) — an API-backed datasource may borrow a declared connector instance's credential through `external.connector`; see the D7 note below. #27688 (2026-10-30), example only — §8's `credentialsRef` is a `sys_secret:` handle, the only form the shipped secret binder resolves; see the note under §8. #27917 (2026-10-30), dialect list only — §4.6 names the `odata` vocabulary the matrix gained with #27745. #28208 (2026-10-31, ruling 6525963988 on #27687) — a datasource defined in code reads its credential at connect from `OS_DATASOURCE_<NAME>_PASSWORD`, behind the host switch `OS_DATASOURCE_ENV_CREDENTIALS`; see the note under §10 and the correction in the D7 note. 2026-11-03 (maintainer ruling in the security channel, D1 = B, D2 = (c2)+(a)) — under a walled tenancy posture every external object states its organization scope, or the boot is refused by name; see the note under §10 and the sentence added to the D7 note. #31328 (2026-11-08) — §4.6 names the `oracle` vocabulary, with how `NUMBER(p,s)` and `RAW(16)` are read, and its federation-only scope; §5.1 gains the federation-only arm of the DDL gate.
+**Amended by**: [ADR-0143](./0143-outbound-connector-auth-is-open-tier.md) (2026-10-27), attribution only — see the note below. D7 (2026-10-29, ruling 6486136301 on #27298) — an API-backed datasource may borrow a declared connector instance's credential through `external.connector`; see the D7 note below. #27688 (2026-10-30), example only — §8's `credentialsRef` is a `sys_secret:` handle, the only form the shipped secret binder resolves; see the note under §8. #27917 (2026-10-30), dialect list only — §4.6 names the `odata` vocabulary the matrix gained with #27745. #28208 (2026-10-31, ruling 6525963988 on #27687) — a datasource defined in code reads its credential at connect from `OS_DATASOURCE_<NAME>_PASSWORD`, behind the host switch `OS_DATASOURCE_ENV_CREDENTIALS`; see the note under §10 and the correction in the D7 note. 2026-11-03 (maintainer ruling in the security channel, D1 = B, D2 = (c2)+(a)) — under a walled tenancy posture every external object states its organization scope, or the boot is refused by name; see the note under §10 and the sentence added to the D7 note. #31328 (2026-11-08) — §4.6 names the `oracle` vocabulary, with how `NUMBER(p,s)` and `RAW(16)` are read, and its federation-only scope; §5.1 gains the federation-only arm of the DDL gate. #31327 (2026-11-08) — a second federation-only driver, SQL Server (`mssql`): §4.6 names the `mssql` vocabulary and its one dialect-only lossy rule, and the two dialects' lossy moves share one table; §5.1's federation-only arm names both drivers.
 
 > **Amendment note D7 (2026-10-29, ruling 6486136301, letter A) — a second credential channel.**
 > §10 says credentials reach a datasource only through `credentialsRef`. That stays true for a
@@ -416,7 +416,7 @@ A pure module `packages/spec/src/data/type-compat.ts` maps SQL types
 ObjectStack field types, and exposes `isCompatible(remoteSqlType,
 fieldType): boolean | 'lossy'`. The matrix is dialect-aware
 (`postgres`, `mysql`, `sqlite`, `snowflake`, `bigquery`, `mongo`, `odata`,
-`oracle`). New dialects extend the matrix; the matrix is unit-tested
+`oracle`, `mssql`). New dialects extend the matrix; the matrix is unit-tested
 independently. `mongo` and `odata` are the two vocabularies that are not SQL:
 `DIALECT_ALIASES.mongo` maps BSON type names, and `DIALECT_ALIASES.odata` maps
 the EDM primitive types an OData service's `$metadata` declares, except
@@ -424,7 +424,8 @@ the EDM primitive types an OData service's `$metadata` declares, except
 leaves unmapped so a draft flags them for review.
 
 `oracle` is the one dialect whose type PARAMETERS change the answer, so they are
-read before the matrix strips them. A `NUMBER` with scale > 0 is `decimal`; an
+read before the matrix strips them (SQL Server's `(max)` length does not: an
+`nvarchar(max)` is text like any `nvarchar`). A `NUMBER` with scale > 0 is `decimal`; an
 integral `NUMBER(p)` / `NUMBER(p,0)` (a negative scale counts its `p − s`
 digits) is `integer` up to nine digits and `bigint` beyond, `NUMBER(*,0)` —
 Oracle's `INTEGER` — included; a bare `NUMBER` is `decimal`. `RAW(16)` is
@@ -432,11 +433,20 @@ Oracle's `INTEGER` — included; a bare `NUMBER` is `decimal`. `RAW(16)` is
 judged `'lossy'`, not exact, because the driver reads it as a UUID string but
 cannot yet bind that string back to `RAW` for a filter or a write (#31390). `DATE` carries a time of day, so it is
 `datetime`. A pre-23ai flag column (`NUMBER(1)` / `CHAR(1)`) is judged as the
-integer or text it is, never coerced to `boolean`. The `oracle` driver id serves
-federation only: a datasource naming it with `schemaMode: 'managed'` is refused
-at authoring, because the SQL driver models Oracle for reads and the
-double-opt-in write path only and emits no Oracle DDL, so a managed sync would
-have nothing to send.
+integer or text it is, never coerced to `boolean`. The `oracle` and `mssql` driver ids
+serve federation only: a datasource naming either with `schemaMode: 'managed'`
+is refused at authoring, because the SQL driver models those databases for reads
+and the double-opt-in write path only and emits no DDL for them, so a managed
+sync would have nothing to send.
+
+`mssql` is SQL Server: `DIALECT_ALIASES.mssql` reads `INFORMATION_SCHEMA` type
+names, and maps `timestamp` to binary, because on SQL Server it is the
+`rowversion` counter and not a date-time. A dialect moves a pairing to
+`'lossy'` in one table, `DIALECT_LOSSY_RULES`, and only ever toward `'lossy'`:
+`oracle` demotes the exact pairings of `uuid` (above), and `mssql` adds one, a
+text column backing a `json`, `tags` or `multiselect` field, because SQL Server
+keeps JSON in `nvarchar(max)` and the SQL driver stores those fields there as
+JSON text (#31327).
 
 ---
 
@@ -468,7 +478,7 @@ guard at the top. The `applyMigrations` implementation (forthcoming
 in `service-migration` per ADR-0008) also calls this guard.
 
 **Federation-only dialects** (#31328) — a second arm, after the
-`schemaMode` check. A driver row §4.6 marks federation-only (`oracle`) has no
+`schemaMode` check. A driver row §4.6 marks federation-only (`oracle`, `mssql`) has no
 schema-emission path at all, so a DDL operation that passes the check above
 (the driver runs `managed`) is still refused on that knex client, with
 `UnsupportedDialectEmissionError`, reason `'federation-only'` (code
@@ -476,8 +486,10 @@ schema-emission path at all, so a DDL operation that passes the check above
 `managed` datasource on such a driver (§4.6); this arm is the driver-layer
 floor for a `SqlDriver` that reaches DDL without passing that check (one
 constructed directly, say), and it names the supported clients and the `schemaMode: 'external'`
-fix. A non-managed oracle datasource meets the first arm, as every other
-driver does.
+fix. A non-managed datasource on either driver meets the first arm, as every
+other driver does, so DDL on a federation-only driver is refused in every mode.
+No boot host offers such a driver as the platform database either: the
+selection tables are built without its row (#31327).
 
 ### 5.2 Gate 2 — Boot validation (runtime layer)
 
