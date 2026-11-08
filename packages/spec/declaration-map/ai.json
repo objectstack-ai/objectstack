@@ -88,6 +88,7 @@
     "MCPToolBindingSchema": "ai/MCPToolBinding",
     "MCPTransport": "ai/MCPTransport",
     "MCPTransportSchema": "ai/MCPTransport",
+    "McpActionNamespace": "ai/McpActionNamespace",
     "McpActionNamespaceSchema": "ai/McpActionNamespace",
     "McpListedActionAddress": "ai/McpListedActionAddress",
     "McpListedActionAddressSchema": "ai/McpListedActionAddress",
