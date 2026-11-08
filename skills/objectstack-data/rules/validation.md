@@ -21,8 +21,8 @@ The **complete** set of `type` discriminators accepted by `ValidationRuleSchema`
 
 There is no other type. In particular:
 
-- **No `unique` type** (removed from the spec) — enforce uniqueness
-  with a **unique index** ([see below](#uniqueness--use-unique-indexes)).
+- **No `unique` type** — enforce uniqueness with a **unique index**
+  ([see below](#uniqueness--use-unique-indexes)).
 - **No `async` / `custom` type** — see [External / Custom Validation](#external--custom-validation--lifecycle-hooks).
 
 ## Expression Syntax
@@ -107,6 +107,7 @@ validations: [
     name: 'status_flow',
     type: 'state_machine',
     field: 'status',
+    initialStates: ['draft'],   // the one state a record may be CREATED in
     transitions: {
       draft: ['submitted', 'cancelled'],
       submitted: ['in_review', 'cancelled'],
