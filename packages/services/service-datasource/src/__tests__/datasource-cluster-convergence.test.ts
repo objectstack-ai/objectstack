@@ -40,11 +40,13 @@ import {
   assertEngineUpdateDispatch,
 } from '@objectstack/metadata-core';
 import type { IDataDriver, IPubSub } from '@objectstack/spec/contracts';
-// The plugin under test loads both drivers lazily, inside a function body;
+// The plugin under test loads the SQL driver lazily, inside a function body;
 // pay that first load here, during collection, not inside a clocked case
-// (`pnpm check:test-source-alias`, "The source reach").
+// (`pnpm check:test-source-alias`, "The source reach"). The memory driver
+// it also loads lazily resolves to source through this package's vitest
+// alias instead: a module binding of it would be a new arrival in
+// `pnpm check:driver-memory-census`.
 import '@objectstack/driver-sql';
-import '@objectstack/driver-memory';
 import { DatasourceAdminServicePlugin } from '../datasource-admin-plugin.js';
 import {
   DatasourceAdminService,
