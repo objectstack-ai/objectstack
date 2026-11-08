@@ -3787,6 +3787,7 @@ const ko = {
     sharedObject: '공유된 {{object}}',
     redactedFields: '일부 필드는 소유자가 숨겼습니다: {{fields}}',
     linkedRecord: '연결된 레코드',
+    linkedUser: '연결된 사용자',
   },
   publicForm: {
     submit: "제출",

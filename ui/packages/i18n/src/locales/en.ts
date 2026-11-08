@@ -4593,6 +4593,7 @@ const en = {
     sharedObject: 'Shared {{object}}',
     redactedFields: 'Some fields are hidden by the owner: {{fields}}',
     linkedRecord: 'Linked record',
+    linkedUser: 'Linked user',
   },
   publicForm: {
     submit: 'Submit',

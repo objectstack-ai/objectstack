@@ -326,7 +326,7 @@ validations: [
     type: 'script',
     severity: 'error',
     message: 'Order amount must be positive',
-    condition: 'record.amount <= 0',
+    condition: 'record.amount != null && record.amount <= 0',
     events: ['insert', 'update'],
     priority: 10,
   },
