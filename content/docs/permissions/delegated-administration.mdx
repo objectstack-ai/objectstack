@@ -134,7 +134,7 @@ const scope = await client.security.describeDelegableScope();
 }
 ```
 
-Three properties worth knowing:
+Four properties worth knowing:
 
 - **It narrows; it does not decide.** The lists are computed by the same
   helpers the write gate enforces with, so an option here is one the gate
@@ -145,8 +145,13 @@ Three properties worth knowing:
   withheld, exactly as the write gate would refuse it.
 - **Strictly self-scoped** — there is no target-user parameter, so it
   discloses nothing beyond the authority you already hold. A tenant-level
-  admin comes back `isTenantAdmin: true` with everything enumerated, so
-  consumers render one uniform picker rather than special-casing.
+  admin comes back `isTenantAdmin: true` with every unit of its active
+  organization enumerated, so consumers render one uniform picker rather than
+  special-casing.
+- **No active organization, no units.** Business units belong to one
+  organization, so a caller whose context names no organization is offered
+  no placeable unit — a tenant-level admin included — and a delegated scope
+  it holds covers nothing.
 
 Scoped invitations (ADR-0105 D8) are the first consumer: the invitation form
 narrows its unit/position pickers with this, and the invitation's placement
