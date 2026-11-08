@@ -1752,11 +1752,31 @@ export class DelegatedAdminGate {
    *  state on a stamped store, `organization-scope.ts`, so met only on a store
    *  whose units carry no organization at all): organization-less descendants
    *  only, so a stamped unit is never reached from one, nor one from a stamped
-   *  root. */
+   *  root.
+   *
+   *  [ADR-0105 D6, red line 2: BU trees remain org-internal] The ROOT is held
+   *  to the same bound as its descendants: it is read under the bound's own
+   *  context, and a root whose row is not a unit of `organizationId` (`null`:
+   *  an organization-less unit) covers nothing — a walk never starts at a unit
+   *  outside the organization it is bounded to, whichever caller names the
+   *  id. */
   private async resolveSubtreeById(rootId: string, organizationId: string | null): Promise<Set<string>> {
     const ids = new Set<string>();
     const ql = this.deps.ql;
     if (!ql?.find || !rootId) return ids;
+    let roots: any[] = [];
+    try {
+      roots = await ql.find('sys_business_unit', {
+        where: { id: String(rootId) },
+        limit: 1, // `id` is the key: one unit or none
+        context: organizationScopedCtx(organizationId ?? undefined),
+      });
+    } catch { roots = []; }
+    // The descendants' predicate, applied to the root: whatever a driver
+    // returned, a unit outside the bound's organization roots no subtree.
+    const rootInOrganization = (Array.isArray(roots) ? roots : [])
+      .some((r: any) => String(r?.id ?? '') === String(rootId) && rowOrganizationId(r) === organizationId);
+    if (!rootInOrganization) return ids;
     ids.add(String(rootId));
     let frontier: string[] = [String(rootId)];
     for (let depth = 0; depth < MAX_TREE_DEPTH && frontier.length > 0; depth++) {
@@ -1788,7 +1808,11 @@ export class DelegatedAdminGate {
    *  resolves the depth anchor to the holder's own membership). A self-delegated
    *  `business_unit_id` anchor must fall inside this set. Fail-closed:
    *  unresolvable holdings/memberships contribute nothing, so an anchor that
-   *  can't be proven inside the delegator's range is refused upstream. */
+   *  can't be proven inside the delegator's range is refused upstream.
+   *
+   *  Every subtree in the union is one organization's, the caller's, its root
+   *  included ({@link resolveSubtreeById}): a holding's anchor or a membership
+   *  that is not a unit of the caller's organization contributes nothing. */
   private async delegatorAnchorSubtree(
     userId: string,
     directHoldings: Array<{ businessUnitId: string | null }>,
