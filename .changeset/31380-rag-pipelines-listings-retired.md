@@ -5,7 +5,7 @@
 '@objectstack/runtime': minor
 ---
 
-refactor(spec): retire the `ragPipelines` collection listings no stack can declare, and with them the `rag_pipeline` metadata type at the `/meta` door (#31380)
+refactor(spec)!: retire the `ragPipelines` collection listings no stack can declare, and with them the `rag_pipeline` metadata type at the `/meta` door (#31380)
 
 Clause-②: no (narrowing) — `PLURAL_TO_SINGULAR` (a published `@objectstack/spec` export, typed `Record<string, string>`) loses its `ragPipelines` row, so `/meta/rag_pipeline` leaves the URL-spelling contract and a write there is refused where it was stored before. Nothing is widened.
 Metadata-protocol: narrowed
