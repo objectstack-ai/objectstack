@@ -111,7 +111,7 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { isEntrypoint } from '../invoked-as.mjs';
-import { authHint, isUsableToken, parseRunTitle } from './qa-rollup.mjs';
+import { authHint, isUsableToken, onPathOf, parseRunTitle } from './qa-rollup.mjs';
 
 // ── The self-test's own battery roster and floor ────────────────────────────
 //
@@ -655,13 +655,6 @@ async function listAll(client, first) {
     url = next ? onPathOf(url, next[1]) : null;
   }
   return out;
-}
-
-/** `next`'s query on `current`'s path: the `/repositories/ID` path GitHub links to is refused here. */
-export function onPathOf(current, next) {
-  const moved = new URL(current);
-  moved.search = new URL(next).search;
-  return moved.toString();
 }
 
 /** sha8 → committer time: the local clone first, the REST commits endpoint second. */
