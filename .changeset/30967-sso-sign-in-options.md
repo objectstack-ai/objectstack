@@ -1,6 +1,7 @@
 ---
 '@objectstack/plugin-auth': minor
 '@objectstack/platform-objects': minor
+'@objectstack/spec': patch
 ---
 
 feat(plugin-auth,platform-objects): per-provider SSO sign-in options for IdP-initiated sign-in and just-in-time accounts, and `invite_only` now refuses an SSO sign-in by someone who was not invited
