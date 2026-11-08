@@ -81,9 +81,23 @@
  *              every copied object name takes it, every reference follows,
  *              and the answer's `installedFrom.namespace` records the
  *              source's. Absent, the copy keeps the package's namespace.
+ *              [#30808] `seedSampleData: true` (optional, off by default)
+ *              copies the package's sample data too: each seed dataset is
+ *              written into the new base as one `seed` item — the copy's seed
+ *              receipt in the environment ledger, its `object` following the
+ *              rename and its records verbatim — inside the import's
+ *              all-or-nothing copy, and the rows are then loaded from those
+ *              stored bodies, in load order, owned by the installer
+ *              (`owner_id` / `created_by`, ordinary permissions; #30324, #30680).
+ *              The answer's `seeded` reports the load. The purge door then
+ *              removes exactly those rows for the base's id. Off, the copy
+ *              loads none and says so (`seeded.mode: 'skipped'`).
  *          `targetNamespace` beside a `managed` install (or no `installMode`)
  *          answers `400 INVALID_REQUEST` before anything is fetched: a
  *          managed install is never renamed, it keeps its upgrade channel.
+ *          So does `seedSampleData` beside one — a managed install always
+ *          loads its sample data — and a `seedSampleData` that is not a
+ *          boolean.
  *          A mode the package's `installModes` does not permit answers
  *          `422 INSTALL_MODE_NOT_PERMITTED`, before any write.
  *          Either mode reads the body's `withheldMaps` — the connector header
@@ -300,7 +314,13 @@ import {
 import { ConnectionCredentialStore } from './connection-credential-store.js';
 import { readJsonRequestBody } from './request-json-body.js';
 import { MARKETPLACE_INSTALLED_UI_BUNDLE } from './marketplace-ui.js';
-import { countSeedRows, matchSeedRows, purgeSeedRows, type PurgeSeedDataset } from './marketplace-install-local-purge.js';
+import { countSeedRows, matchSeedRows, purgeSeedRows, seedDatasetOfReceiptItem, type PurgeSeedDataset } from './marketplace-install-local-purge.js';
+import {
+    UnmanagedCopyRecord,
+    readUnmanagedCopyInstance,
+    type UnmanagedCopyInstance,
+    type UnmanagedCopyPackageStore,
+} from './marketplace-install-local-unmanaged-copies.js';
 import {
     isStampableOwner,
     stampSeedOwner,
@@ -313,6 +333,7 @@ import type {
 } from '@objectstack/spec/contracts';
 import type {
     DeletePackageRequest,
+    UninstallCleanup,
     UninstallCleanupOutcome,
     UninstallDeclared,
     ObjectStackProtocolImplementation,
@@ -881,6 +902,36 @@ function describeAccessFindings(report: Extract<AccessUpgradeCheckAnswer, { outc
 type UnmanagedImporter = {
     importUnmanagedPackage?: ObjectStackProtocolImplementation['importUnmanagedPackage'];
 };
+
+/**
+ * [#30808] The protocol's by-name read, asked for each item of an unmanaged
+ * copy's seed receipt — typed from the producer's own method, asked as a
+ * capability question at the call site, as {@link UnmanagedImporter} is.
+ *
+ * Not the list read: a `seed` body declares no `name` (`SeedSchema` is
+ * closed and has none), and the list keys every stored item by its body's
+ * `name`, so `getMetaItems({ type: 'seed' })` serves no stored seed item at
+ * all. The by-name read serves each one.
+ */
+type UnmanagedCopySeedReader = {
+    getMetaItem?: ObjectStackProtocolImplementation['getMetaItem'];
+};
+
+/**
+ * [#30808] The store read that names the seed items an unmanaged copy's base
+ * holds, for a purge, which has no import answer to name them from.
+ */
+type UnmanagedCopySeedNameStore = Pick<IObjectQLEngine, 'find'>;
+
+/**
+ * [#30808] The metadata type an unmanaged copy's seed receipt is stored as:
+ * `seed`, the registry's seed-data type (`DEFAULT_METADATA_TYPE_REGISTRY`),
+ * which the import writes each dataset as.
+ */
+const UNMANAGED_COPY_SEED_TYPE = 'seed';
+
+/** [#30808] The uninstall cleanup that removes the door's record of a copy ({@link UnmanagedCopyRecord}). */
+const UNMANAGED_COPY_RECORD_UNINSTALL_CLEANUP = 'install-local:unmanaged-copy-record';
 
 /**
  * [ADR-0146 D2 / D3, #30106] The three verbs a pair install composes, typed
@@ -1547,10 +1598,18 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
      */
     private readonly refusedAtRehydrate = new Map<string, { installedAt: string; marker: NotLoadedMarker }>();
 
+    /**
+     * [#30808] The unmanaged copies this door made, beside the ledger
+     * ({@link UnmanagedCopyRecord}): the only bases its purge reaches without
+     * a ledger entry.
+     */
+    private readonly unmanagedCopies: UnmanagedCopyRecord;
+
     constructor(config: MarketplaceInstallLocalPluginConfig = {}) {
         this.cloudUrl = resolveCloudUrl(config.controlPlaneUrl);
         this.ledger = new LocalManifestSource(config.storageDir);
         this.storageDir = this.ledger.dir;
+        this.unmanagedCopies = new UnmanagedCopyRecord(this.storageDir);
         this.credentials = new ConnectionCredentialStore();
     }
 
@@ -1576,6 +1635,9 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
 
             // 1. Rehydrate previously installed packages so they survive restart.
             await this.rehydrate(ctx);
+
+            // [#30808] An uninstalled copy leaves the door's record of it.
+            this.registerUnmanagedCopyCleanup(ctx);
 
             // 2. Mount HTTP endpoints.
             // [#4251] Read canonical-first with a REAL per-name fallback:
@@ -2178,6 +2240,32 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             }, 400);
         }
 
+        // 0‴. [#30808] THE SAMPLE-DATA COPY IS UNMANAGED ONLY, and asked for.
+        //     A managed install loads the package's sample data on every
+        //     install, so a switch beside one would be a key that changes
+        //     nothing — refused, never ignored, as `targetNamespace` is.
+        const seedSampleData: unknown = body?.seedSampleData;
+        if (seedSampleData !== undefined && typeof seedSampleData !== 'boolean') {
+            return c.json({
+                success: false,
+                error: {
+                    code: 'INVALID_REQUEST',
+                    message: `\`seedSampleData\` must be true or false, received ${JSON.stringify(seedSampleData)}. Nothing was installed or written.`,
+                },
+            }, 400);
+        }
+        if (seedSampleData !== undefined && installMode !== 'unmanaged') {
+            return c.json({
+                success: false,
+                error: {
+                    code: 'INVALID_REQUEST',
+                    message: '`seedSampleData` chooses whether an unmanaged copy takes the package\'s sample data, and this '
+                        + 'install is managed: a managed install always loads it. Install with `installMode: \'unmanaged\'` '
+                        + 'to take a copy, or omit `seedSampleData`. Nothing was installed or written.',
+                },
+            }, 400);
+        }
+
         // ── Offline path: an inline manifest was supplied (file import). ──
         // Bypass the cloud-fetch entirely; no OS_CLOUD_URL required.
         const inlineManifest = body?.manifest && typeof body.manifest === 'object' ? body.manifest : null;
@@ -2571,6 +2659,7 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                 withheldMaps,
                 protocolCheckSkipped,
                 ...(targetNamespace !== undefined ? { targetNamespace } : {}),
+                seedSampleData: seedSampleData === true,
             });
         }
 
@@ -4636,10 +4725,14 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
      *  - translation bundles are COPIED by the verb as `translation` items, so
      *    they reload at every boot with the environment's translations — this
      *    install writes no ledger entry for a rehydrate to replay;
-     *  - seed data is NOT loaded: it is data, not metadata, and the
-     *    reseed / purge doors act on ledger entries this install never
-     *    writes, so seeded rows would be rows nothing here could clear. The
-     *    answer says so (`seeded.mode: 'skipped'`) when the package declares any;
+     *  - seed data is loaded only when the request asks (`seedSampleData`,
+     *    #30808). Asked, the verb writes each dataset into the base as a
+     *    `seed` item — the seed receipt — and this door loads the rows from
+     *    those stored bodies ({@link loadUnmanagedCopySeeds}), owned by the
+     *    installer; the purge door removes exactly them by the same receipt,
+     *    since the reseed / purge doors' install-ledger entry is one this
+     *    install never writes. Not asked, nothing is loaded and the answer
+     *    says so (`seeded.mode: 'skipped'`) when the package declares any;
      *  - `installedFrom` — the source package id and version, for information
      *    only (ADR-0131 D6: "provenance recorded for information only") — is
      *    on the answer and on the operator log line, at `info`;
@@ -4663,9 +4756,11 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             protocolCheckSkipped: ProtocolCheckSkipped | undefined;
             /** [#30794] The namespace the copy is renamed into, as the request wrote it; the import judges it. */
             targetNamespace?: unknown;
+            /** [#30808] The request asked for the package's sample data. */
+            seedSampleData: boolean;
         },
     ): Promise<Response> => {
-        const { manifest, manifestId, version, versionId, userId, withheldMaps, protocolCheckSkipped, targetNamespace } = args;
+        const { manifest, manifestId, version, versionId, userId, withheldMaps, protocolCheckSkipped, targetNamespace, seedSampleData } = args;
         let protocol: UnmanagedImporter | undefined;
         try { protocol = ctx.getService<UnmanagedImporter>('protocol'); } catch { /* no protocol service */ }
         if (!protocol || typeof protocol.importUnmanagedPackage !== 'function') {
@@ -4687,6 +4782,8 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                 manifest: packageBody,
                 ...(targetNamespace !== undefined ? { targetNamespace } : {}),
                 ...(userId ? { actor: userId } : {}),
+                // [#30808] Door-stated, like `actor`: the sample data, as `seed` items.
+                ...(seedSampleData ? { seedData: true } : {}),
             } as Parameters<NonNullable<UnmanagedImporter['importUnmanagedPackage']>>[0]);
         } catch (err: any) {
             const resolved = resolveThrownHttpError(err, 500);
@@ -4734,7 +4831,53 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             + `${userId ? ` by ${userId}` : ''}. Nothing is registered under '${manifestId}'; the copy follows no upgrade.`,
         );
         if (withheldMaps.length > 0) ctx.logger?.warn?.(withheldMapsLogLine(manifestId, 'unmanaged', withheldMaps));
+        // [#30808] The door's record of this copy, in the same act — before
+        // any row is loaded, so a load that fails partway is still purgeable —
+        // tied to the base instance the package store now holds
+        // ({@link UnmanagedCopyRecord}). A record that cannot be written
+        // leaves the copy unreachable by the purge (its 404), never reachable
+        // by mistake; the installer is told in the answer (`copyRecord`), the
+        // operator in the log.
+        let copyRecordFailure: string | undefined;
+        let copyRecordSaid: string | undefined;
+        const tie = await this.unmanagedCopyInstance(ctx, result.targetPackageId);
+        if ('failure' in tie) {
+            copyRecordFailure = tie.failure;
+            copyRecordSaid = 'the package store did not answer with the new base\'s row';
+        } else {
+            try {
+                this.unmanagedCopies.write({
+                    baseId: result.targetPackageId,
+                    sourcePackageId: result.sourcePackageId,
+                    ...(result.sourceVersion !== undefined ? { sourceVersion: result.sourceVersion } : {}),
+                    seeded: seedSampleData,
+                    copiedAt: new Date().toISOString(),
+                    ...(userId ? { copiedBy: userId } : {}),
+                    ...(tie.instance !== undefined ? { instance: tie.instance } : {}),
+                });
+            } catch (err: any) {
+                copyRecordFailure = `it could not be written under ${this.unmanagedCopies.dir}: ${err?.message ?? err}`;
+                copyRecordSaid = `it could not be written under ${this.unmanagedCopies.dir}`;
+            }
+        }
+        if (copyRecordFailure !== undefined) {
+            ctx.logger?.warn?.(
+                `[MarketplaceInstallLocal] the record of the unmanaged copy '${result.targetPackageId}' was not kept: `
+                + `${copyRecordFailure}. Its sample data cannot be purged through this door.`,
+            );
+        }
         const declaresSeeds = unmanagedInstallValueCarries(packageBody.data);
+        // [#30808] Asked for: the rows, from the receipt the verb just wrote.
+        const seeded = seedSampleData
+            ? await this.loadUnmanagedCopySeeds(c, ctx, {
+                manifest, targetPackageId: result.targetPackageId, copied: result.copied, userId,
+            })
+            : declaresSeeds
+                ? {
+                    mode: 'skipped' as const,
+                    reason: 'an unmanaged install copies metadata, not data: the package\'s sample data was not loaded',
+                }
+                : undefined;
         return c.json({
             success: true,
             data: {
@@ -4755,11 +4898,16 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                 ...(withheldMaps.length > 0 ? { withheldMaps: [...withheldMaps] } : {}),
                 // [#30326] Omitted when the handshake checked the package's range.
                 ...(protocolCheckSkipped !== undefined ? { protocolCheckSkipped } : {}),
-                ...(declaresSeeds
+                ...(seeded !== undefined ? { seeded } : {}),
+                // [#30808] Omitted when the door's record of the copy was
+                // kept, so that answer's key set is unchanged.
+                ...(copyRecordFailure !== undefined
                     ? {
-                        seeded: {
-                            mode: 'skipped',
-                            reason: 'an unmanaged install copies metadata, not data: the package\'s sample data was not loaded',
+                        copyRecord: {
+                            written: false,
+                            message: `This door's record of the copy '${result.targetPackageId}' was not kept (${copyRecordSaid}), `
+                                + 'so its sample data cannot be purged through `POST /marketplace/install-local/:id/purge-sample-data`. '
+                                + 'The copy itself is installed.',
                         },
                     }
                     : {}),
@@ -4767,6 +4915,138 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                     + 'and it follows no upgrade. Refresh the console to see it.',
             },
         }, 200);
+    };
+
+    /**
+     * [#30808] The seed receipt of an unmanaged copy: the `seed` items its base
+     * holds in the environment ledger — what the import wrote when the install
+     * asked for the sample data ({@link installUnmanaged}) — each projected to
+     * the dataset it declares (the members `SeedSchema` declares, so the
+     * served envelope's keys never reach the loader).
+     *
+     * `names` are the receipt's item names: the import's own answer on an
+     * install, or {@link unmanagedCopySeedNames} on a purge. Each body is read
+     * through the protocol's by-name read, scoped to the base. `failure` says
+     * why the receipt could not be read whole — an item that is not served, or
+     * not a dataset, fails it — and is never folded into "no sample data".
+     */
+    private readUnmanagedCopySeedReceipt = async (
+        ctx: PluginContext,
+        packageId: string,
+        names: readonly string[],
+    ): Promise<{ datasets: PurgeSeedDataset[]; failure?: undefined } | { datasets?: undefined; failure: string }> => {
+        let protocol: UnmanagedCopySeedReader | undefined;
+        try { protocol = ctx.getService<UnmanagedCopySeedReader>('protocol'); } catch { /* no protocol service */ }
+        if (!protocol || typeof protocol.getMetaItem !== 'function') {
+            return { failure: 'the metadata protocol is not available on this runtime' };
+        }
+        const datasets: PurgeSeedDataset[] = [];
+        for (const name of names) {
+            let answer: unknown;
+            try {
+                answer = await protocol.getMetaItem({ type: UNMANAGED_COPY_SEED_TYPE, name, packageId });
+            } catch (err: any) {
+                return { failure: `the seed item '${name}' of the base '${packageId}' could not be read: ${err?.message ?? err}` };
+            }
+            const dataset = seedDatasetOfReceiptItem((answer as { item?: unknown } | null)?.item);
+            if (!dataset) return { failure: `the base '${packageId}' serves no dataset under the seed item '${name}'` };
+            datasets.push(dataset);
+        }
+        return { datasets };
+    };
+
+    /**
+     * [#30808] The names of the `seed` items an unmanaged copy's base holds —
+     * its active rows in the environment's metadata store, read as the system
+     * (the purge door already authorized the caller). Only the names: each
+     * body is read through the protocol ({@link readUnmanagedCopySeedReceipt}).
+     */
+    private unmanagedCopySeedNames = async (
+        ctx: PluginContext,
+        packageId: string,
+    ): Promise<{ names: string[]; failure?: undefined } | { names?: undefined; failure: string }> => {
+        let store: UnmanagedCopySeedNameStore | undefined;
+        try { store = ctx.getService<UnmanagedCopySeedNameStore>('objectql'); } catch { /* no data engine */ }
+        if (!store || typeof store.find !== 'function') return { failure: 'the data engine is not available on this runtime' };
+        try {
+            const rows = await store.find('sys_metadata', {
+                where: { type: UNMANAGED_COPY_SEED_TYPE, package_id: packageId, state: 'active' },
+                fields: ['name'],
+                context: { isSystem: true },
+            });
+            const list: unknown[] = Array.isArray(rows) ? rows : Array.isArray((rows as any)?.records) ? (rows as any).records : [];
+            return { names: [...new Set(list.map((row: any) => row?.name).filter((n): n is string => typeof n === 'string'))] };
+        } catch (err: any) {
+            return { failure: `the base's seed items could not be listed: ${err?.message ?? err}` };
+        }
+    };
+
+    /**
+     * [#30808 · #30324 option C · #30680 answer A] The rows of an unmanaged
+     * copy's sample data, loaded from the seed receipt the import just wrote
+     * ({@link readUnmanagedCopySeedReceipt}) — the stored bodies, so the rows
+     * are exactly what the purge later matches — through the one seed run the
+     * managed install takes ({@link runInlineSeed}): multi-pass, so a lookup
+     * between seeded rows resolves in load order, and the rows it creates
+     * owned by the installer (`owner_id` / `created_by`), ordinary
+     * permissions, no sample-data read rule. Rows the package wrote for
+     * different personas collapse to that one owner.
+     *
+     * Never throws: the copy already landed, so a load that could not run is
+     * reported in the answer's `seeded` (`mode: 'skipped'` with the reason, or
+     * `'refused'` for a walled session with no active organization), as the
+     * managed install reports its own.
+     */
+    private loadUnmanagedCopySeeds = async (
+        c: any,
+        ctx: PluginContext,
+        args: { manifest: Record<string, any>; targetPackageId: string; copied: ReadonlyArray<{ type: string; name: string }>; userId: string | null },
+    ): Promise<{ mode: 'inline' | 'skipped' | 'refused'; inserted?: number; updated?: number; skipped?: number; errors?: number; reason?: string; errorSample?: string }> => {
+        const { manifest, targetPackageId, copied, userId } = args;
+        const appId = String(manifest?.id ?? targetPackageId);
+        const receiptNames = copied.filter((item) => item.type === UNMANAGED_COPY_SEED_TYPE).map((item) => item.name);
+        if (receiptNames.length === 0) return { mode: 'skipped', reason: 'no-datasets' };
+        const receipt = await this.readUnmanagedCopySeedReceipt(ctx, targetPackageId, receiptNames);
+        if (receipt.failure !== undefined) {
+            const reason = receipt.failure;
+            ctx.logger?.warn?.(`[MarketplaceInstallLocal] ${appId}: the unmanaged copy's sample data was not loaded — ${reason}`);
+            return { mode: 'skipped', reason: `seed-receipt-unread: ${reason}` };
+        }
+        let organizationId: string | undefined;
+        if (organizationWallActive(ctx)) {
+            const resolved = await this.resolveActiveOrgId(c, ctx);
+            if (!resolved) {
+                const reason = noActiveOrganizationRefusal('install');
+                ctx.logger?.warn?.(`[MarketplaceInstallLocal] ${appId}: ${reason}`);
+                return { mode: 'refused', reason };
+            }
+            organizationId = resolved;
+        }
+        try {
+            const s = await this.runInlineSeed(ctx, receipt.datasets, organizationId, {
+                ...(userId ? { userId } : {}),
+                app: manifest,
+            }, {
+                userId,
+                door: 'unmanaged install',
+                none: 'the request names no person',
+            });
+            ctx.logger?.info?.(
+                `[MarketplaceInstallLocal] sample data of the unmanaged copy '${targetPackageId}'${organizationId ? ` (org=${organizationId})` : ''}: `
+                + `inserted=${s.inserted} updated=${s.updated} skipped=${s.skipped} errors=${s.errors}`,
+            );
+            return {
+                mode: 'inline',
+                inserted: s.inserted,
+                updated: s.updated,
+                skipped: s.skipped,
+                errors: s.errors,
+                ...(s.errorSample !== undefined ? { errorSample: s.errorSample } : {}),
+            };
+        } catch (err: any) {
+            ctx.logger?.warn?.(`[MarketplaceInstallLocal] seed run failed for the unmanaged copy '${targetPackageId}': ${err?.message ?? err}`);
+            return { mode: 'skipped', reason: `seed-error: ${err?.message ?? err}` };
+        }
     };
 
     /**
@@ -5340,8 +5620,40 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         if (!manifestId) {
             return c.json({ success: false, error: { code: 'INVALID_REQUEST', message: 'manifestId path param required.' } }, 400);
         }
+        // [#30808] An unmanaged copy writes no install-ledger entry: its base
+        // holds the seed receipt instead, and the purge deletes by it — for a
+        // base this door copied ({@link UnmanagedCopyRecord}) and no other.
         if (!this.ledger.has(manifestId)) {
-            return c.json({ success: false, error: { code: 'RESOURCE_NOT_FOUND', message: `No marketplace install for ${manifestId}.` } }, 404);
+            const copy = await this.unmanagedCopyPurgeDatasets(ctx, manifestId);
+            if (copy === null) {
+                return c.json({ success: false, error: { code: 'RESOURCE_NOT_FOUND', message: `No marketplace install for ${manifestId}.` } }, 404);
+            }
+            if ('notSeeded' in copy) {
+                return c.json({
+                    success: false,
+                    error: {
+                        code: 'NOTHING_TO_PURGE',
+                        message: `No sample data was copied into '${manifestId}': it was installed unmanaged without `
+                            + '`seedSampleData`. Nothing was deleted.',
+                    },
+                }, 400);
+            }
+            if ('failure' in copy) {
+                ctx.logger?.warn?.(`[MarketplaceInstallLocal] purge of the unmanaged copy ${manifestId} refused: ${copy.failure}`);
+                // [#30808] The door's own record names the local file to
+                // repair; a receipt or a base row the stores did not answer
+                // names no file, and a retry is the remedy.
+                const message = copy.recordFile !== undefined
+                    ? `The sample data of '${manifestId}' cannot be purged now: this door's record of the copy could not be `
+                        + `read (${copy.failure}). Repair ${copy.recordFile}; removing it leaves this copy out of the purge's `
+                        + 'reach. Nothing was deleted.'
+                    : `The sample data of '${manifestId}' cannot be purged now: its seed items or its base's row could not `
+                        + 'be read, and a receipt that was not read is never taken for "no sample data". Nothing was deleted. '
+                        + 'Retry once the metadata and package stores answer.';
+                return c.json({ success: false, error: { code: 'SERVICE_UNAVAILABLE', message } }, 503);
+            }
+            return this.purgeSeedDatasets(c, ctx, manifestId, copy.datasets, null,
+                `The sample data receipt of '${manifestId}' holds no seed item any more, so no row can be matched. Nothing was deleted.`);
         }
         // #5426 — same shape as reseed: `has()` said the file is there, so a
         // missing entry here is an unreadable one, and the operator gets the
@@ -5355,12 +5667,120 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         const incompatible = this.refuseProtocolIncompatibleEntry(c, entry);
         if (incompatible) return incompatible;
 
-        const datasets = seedDatasetsOf(entry.manifest);
+        return this.purgeSeedDatasets(c, ctx, manifestId, seedDatasetsOf(entry.manifest), entry);
+    };
+
+    /**
+     * [#30808] Remove the door's record of a copy when its base is uninstalled
+     * (the protocol's uninstall cleanups, which `deletePackage` runs), so a
+     * later base under the same id is never taken for the copy. A protocol
+     * without the cleanup registry leaves the records as they are; the purge
+     * still answers 404 for a record whose base is gone.
+     */
+    private registerUnmanagedCopyCleanup = (ctx: PluginContext): void => {
+        let protocol: { registerUninstallCleanup?: (name: string, cleanup: UninstallCleanup) => void } | undefined;
+        try { protocol = ctx.getService<typeof protocol>('protocol'); } catch { return; /* no protocol service */ }
+        if (!protocol || typeof protocol.registerUninstallCleanup !== 'function') return;
+        protocol.registerUninstallCleanup(UNMANAGED_COPY_RECORD_UNINSTALL_CLEANUP, async ({ packageId }) => {
+            try {
+                return { success: true, removed: this.unmanagedCopies.remove(packageId) ? 1 : 0 };
+            } catch (err: any) {
+                return { success: false, removed: 0, error: String(err?.message ?? err) };
+            }
+        });
+    };
+
+    /**
+     * [#30808] The datasets a purge of an UNMANAGED COPY deletes by: its
+     * base's seed receipt ({@link readUnmanagedCopySeedReceipt}). `null` —
+     * the purge's 404, as for no install at all — when `packageId` is no
+     * installed writable base (asked first, so a removed base never reaches
+     * its record), is no copy this door made ({@link UnmanagedCopyRecord}),
+     * or is a later base under the copy's id (the package store's row is gone
+     * or carries another `created_at`); `notSeeded` for a copy made without
+     * the sample data; `failure` when the record (`recordFile` set), the
+     * package store, or the receipt could not be read. The package store's
+     * `get` answers `null` for an ordinary driver error (it logs it and throws
+     * only its seam-unreadable refusal), so a passing store error is a 404
+     * here, not a 503: the purge fails closed and deletes nothing.
+     */
+    private unmanagedCopyPurgeDatasets = async (
+        ctx: PluginContext,
+        packageId: string,
+    ): Promise<{ datasets: PurgeSeedDataset[] } | { notSeeded: true } | { failure: string; recordFile?: string } | null> => {
+        let ql: NamespaceHoldingEngine | undefined;
+        try { ql = ctx.getService<NamespaceHoldingEngine>('objectql'); } catch { return null; /* no data engine — no base */ }
+        if (!ql?.registry?.getPackage?.(packageId) || !isWritablePackage(ql, packageId)) return null;
+        const record = this.unmanagedCopies.read(packageId);
+        if (record.failure !== undefined) return { failure: record.failure, recordFile: this.unmanagedCopies.fileOf(packageId) };
+        if (record.entry === null) return null;
+        const recorded = record.entry.instance;
+        if (recorded !== undefined) {
+            let store: Partial<UnmanagedCopyPackageStore> | undefined;
+            try { store = ctx.getService<Partial<UnmanagedCopyPackageStore>>('package'); } catch { return null; /* no package store — the instance cannot be shown */ }
+            if (typeof store?.get !== 'function') return null;
+            let held: UnmanagedCopyInstance | null | undefined;
+            try {
+                held = await readUnmanagedCopyInstance(store as UnmanagedCopyPackageStore, packageId, recorded.version);
+            } catch (err: any) {
+                return { failure: `the package store could not be read for '${packageId}' (${err?.message ?? err})` };
+            }
+            if (!held || held.createdAt !== recorded.createdAt) return null;
+        }
+        if (!record.entry.seeded) return { notSeeded: true };
+        const listed = await this.unmanagedCopySeedNames(ctx, packageId);
+        if (listed.failure !== undefined) return { failure: listed.failure };
+        const receipt = await this.readUnmanagedCopySeedReceipt(ctx, packageId, listed.names);
+        return receipt.failure !== undefined ? { failure: receipt.failure } : { datasets: receipt.datasets };
+    };
+
+    /**
+     * [#30808] The base instance a new copy's record is tied to: the package
+     * store's row of `baseId` ({@link readUnmanagedCopyInstance}). No
+     * `instance` on a runtime with no `package` service (the record's reach is
+     * then by id alone — the residual its module docblock states); a
+     * `failure`, and so no record, when the store holds no readable row —
+     * which is also what a passing store error reads as, since the store
+     * answers `null` for it. That copy stays unrecorded (`copyRecord` says
+     * so); no door records it later (#31425).
+     */
+    private unmanagedCopyInstance = async (
+        ctx: PluginContext,
+        baseId: string,
+    ): Promise<{ instance?: UnmanagedCopyInstance } | { failure: string }> => {
+        let store: Partial<UnmanagedCopyPackageStore> | undefined;
+        try { store = ctx.getService<Partial<UnmanagedCopyPackageStore>>('package'); } catch { return {}; /* no package store */ }
+        if (typeof store?.get !== 'function') return {};
+        let held: UnmanagedCopyInstance | null | undefined;
+        try {
+            held = await readUnmanagedCopyInstance(store as UnmanagedCopyPackageStore, baseId);
+        } catch (err: any) {
+            return { failure: `the package store could not be read for '${baseId}': ${err?.message ?? err}` };
+        }
+        if (held === null) return { failure: `the package store holds no row of '${baseId}'` };
+        if (held === undefined) return { failure: `the package store's row of '${baseId}' carries no readable version and created_at` };
+        return { instance: held };
+    };
+
+    /**
+     * The purge of `datasets` in the install's scope ({@link handlePurge}):
+     * the matcher and the deletes of {@link purgeSeedRows}, then, for a
+     * ledger `entry`, the ledger's sample-data flags. An unmanaged copy
+     * (`entry` null) has no ledger entry to flag.
+     */
+    private purgeSeedDatasets = async (
+        c: any,
+        ctx: PluginContext,
+        manifestId: string,
+        datasets: PurgeSeedDataset[],
+        entry: InstalledEntry | null,
+        nothingToPurge = 'This package declares no seed datasets.',
+    ): Promise<Response> => {
 
         if (datasets.length === 0) {
             return c.json({
                 success: false,
-                error: { code: 'NOTHING_TO_PURGE', message: 'This package declares no seed datasets.' },
+                error: { code: 'NOTHING_TO_PURGE', message: nothingToPurge },
             }, 400);
         }
 
@@ -5407,11 +5827,13 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         // Flip flag so UI reflects the empty baseline. `sampleDataPurged`
         // additionally tells the rehydrate-time healer this emptiness is
         // deliberate — demo rows must not come back on the next restart.
-        try {
-            entry.withSampleData = false;
-            entry.sampleDataPurged = true;
-            this.ledger.write(entry);
-        } catch { /* non-fatal */ }
+        if (entry) {
+            try {
+                entry.withSampleData = false;
+                entry.sampleDataPurged = true;
+                this.ledger.write(entry);
+            } catch { /* non-fatal */ }
+        }
 
         ctx.logger?.info?.(`[MarketplaceInstallLocal] purged ${manifestId}${organizationId ? ` (org=${organizationId})` : ''}: deleted=${deleted} skipped=${skipped} errors=${errors}`);
         return c.json({
