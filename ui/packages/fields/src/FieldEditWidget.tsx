@@ -190,7 +190,7 @@ export const INLINE_EXCLUDED_FIELD_TYPES = new Set<string>([
   // sibling fields / a loaded object catalog), not inline in a grid cell.
   'object-ref', 'shareable-object-ref', 'filter-condition', 'recipient-picker',
   'position-ref', 'permission-ref',
-  'notification-topic', 'notification-channel',
+  'notification-topic', 'notification-channel', 'quiet-hours',
 ]);
 
 /** Field types whose value is chosen in one discrete gesture (no free typing). */

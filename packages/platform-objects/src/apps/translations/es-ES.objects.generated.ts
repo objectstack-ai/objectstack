@@ -1160,9 +1160,10 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       revoked_reason: {
         label: "Motivo de la revocación",
-        help: "Se registra cuando el restablecimiento forzado de la contraseña por parte de un administrador revocó esta clave. Solo un administrador de la plataforma puede restaurar una clave así; su propietario crea una nueva. Se borra cuando la clave se restaura. Vacío para una clave revocada desde la lista de claves de API.",
+        help: "Por qué se revocó la clave, cuando eso decide quién puede restaurarla. Restablecimiento forzado de la contraseña por un administrador: solo un administrador de la plataforma puede restaurar la clave. Fin de la pertenencia a la organización: el propietario dejó la organización y nadie puede restaurar la clave; un miembro crea una nueva. Se borra cuando la clave se restaura. Vacío para una clave revocada desde la lista de claves de API.",
         options: {
-          admin_password_reset: "Restablecimiento forzado de la contraseña por un administrador"
+          admin_password_reset: "Restablecimiento forzado de la contraseña por un administrador",
+          organization_membership_ended: "Fin de la pertenencia a la organización"
         }
       },
       key: {
