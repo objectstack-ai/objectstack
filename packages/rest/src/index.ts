@@ -157,6 +157,9 @@ export { DATA_RECORD_READ_PARAMS } from './rest-server.js';
 // with its arity as one decision (`metaListQueryRefusal`), and the one reading
 // of its batch by-names filter (`metaListNames`, `?names=a,b`), which both
 // transports push down to the store read.
+//
+// [#31490] …and `_drafts`' closed query set (`META_DRAFTS_QUERY_PARAMS`), asked
+// with its arity as one decision (`metaDraftsQueryRefusal`) by the dispatcher.
 export {
     createMetaBookTreeAnswer,
     createMetaItemAnswer,
@@ -168,6 +171,8 @@ export {
     META_TYPE_READ_CAPABILITIES,
     META_TYPE_WRITE_CAPABILITIES,
     metaCallerOrganizationId,
+    META_DRAFTS_QUERY_PARAMS,
+    metaDraftsQueryRefusal,
     metaItemLayersDeprecationHeaders,
     metaItemQueryRefusal,
     META_LIST_QUERY_PARAMS,
