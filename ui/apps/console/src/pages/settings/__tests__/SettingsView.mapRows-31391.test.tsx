@@ -156,7 +156,8 @@ describe('SettingsView — a `map` setting draws its stored rows (objectstack#31
     expect(entryKeys('quotas')).toEqual(['sys_job_run', 'sys_audit_log']);
     expect(cell('quotas', 'sys_audit_log', 'Max rows').value).toBe('1000000');
     // The key cell shows the served label, the header the declared key column.
-    expect(within(entryRow('quotas', 'sys_audit_log')!).getByRole('combobox').textContent).toContain('Audit log');
+    const keyPicker = within(entryRow('quotas', 'sys_audit_log')!).getByRole('combobox', { name: 'Object' });
+    expect(keyPicker.textContent).toContain('Audit log');
     expect(within(rowFor('quotas')).getByRole('columnheader', { name: 'Object' })).toBeTruthy();
     // The row is drawn as keyed rows, never as the unsupported-type fallback.
     expect(rowFor('quotas').textContent).not.toMatch(/unsupportedSpecifierType/);
@@ -288,7 +289,7 @@ describe('SettingsView — a refused map save marks the row it names (objectstac
 
     await waitFor(() => expect(entryRow('quotas', 'sys_audit_logs')!.dataset.invalid).toBe('true'));
     expect(entryRow('quotas', 'sys_job_run')!.dataset.invalid).toBeUndefined();
-    const keyPicker = within(entryRow('quotas', 'sys_audit_logs')!).getByRole('combobox');
+    const keyPicker = within(entryRow('quotas', 'sys_audit_logs')!).getByRole('combobox', { name: 'Object' });
     expect(keyPicker.getAttribute('aria-invalid')).toBe('true');
     const alert = rowFor('quotas').querySelector('[role="alert"]')!;
     expect(alert.textContent).toBe(sentence);
@@ -318,7 +319,7 @@ describe('SettingsView — a refused map save marks the row it names (objectstac
     expect(cell('retention_overrides', 'sys_job_run', 'Expire rows after').getAttribute('aria-invalid')).toBe('true');
     expect(cell('retention_overrides', 'sys_job_run', 'Keep rows for').getAttribute('aria-invalid')).toBeNull();
     expect(
-      within(entryRow('retention_overrides', 'sys_job_run')!).getByRole('combobox', { name: /Job run/ }).getAttribute('aria-invalid'),
+      within(entryRow('retention_overrides', 'sys_job_run')!).getByRole('combobox', { name: 'Object' }).getAttribute('aria-invalid'),
     ).toBeNull();
   });
 
@@ -357,7 +358,8 @@ describe('SettingsView — a locked map (objectstack#31391)', () => {
     await screen.findByText('Row quotas');
 
     expect(cell('quotas', 'sys_audit_log', 'Max rows').disabled).toBe(true);
-    expect((within(entryRow('quotas', 'sys_audit_log')!).getByRole('combobox') as HTMLButtonElement).disabled).toBe(true);
+    const keyPicker = within(entryRow('quotas', 'sys_audit_log')!).getByRole('combobox', { name: 'Object' });
+    expect((keyPicker as HTMLButtonElement).disabled).toBe(true);
     expect((addPicker('quotas') as HTMLButtonElement).disabled).toBe(true);
     const remove = within(rowFor('quotas')).getByRole('button', { name: /mapRemoveRow/ }) as HTMLButtonElement;
     expect(remove.disabled).toBe(true);

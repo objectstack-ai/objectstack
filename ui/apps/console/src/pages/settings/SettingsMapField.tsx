@@ -296,6 +296,9 @@ export function SettingsMapField({
   const unused = served.filter((o) => !usedKeys.has(o.value));
   const keyHeader = pickLocalized(spec.keyColumn?.label, language);
   const columnLabels = columns.map((c) => pickLocalized(c.label, language));
+  // Each row's key picker is named by the key column's header: a combobox
+  // takes its name from its label, never from the option it shows.
+  const keyHeaderId = `${labelId}-key`;
   const searchText = t('console.settingsView.mapSearchKey');
   const emptyText = t('common.noResults');
 
@@ -304,7 +307,7 @@ export function SettingsMapField({
       <Table aria-describedby={errorAt ? undefined : describedBy}>
         <TableHeader>
           <TableRow>
-            <TableHead>{keyHeader}</TableHead>
+            <TableHead id={keyHeaderId}>{keyHeader}</TableHead>
             {columns.map((c, i) => (
               <TableHead key={c.name} title={c.description}>
                 {columnLabels[i]}
@@ -346,6 +349,7 @@ export function SettingsMapField({
                       disabled={disabled}
                       searchPlaceholder={searchText}
                       emptyText={emptyText}
+                      aria-labelledby={keyHeaderId}
                       aria-invalid={keyMarked || undefined}
                       aria-describedby={keyMarked ? describedBy : undefined}
                       className={cn('w-56', keyMarked && 'border-destructive')}
@@ -409,6 +413,7 @@ export function SettingsMapField({
         value=""
         disabled={disabled || unused.length === 0}
         placeholder={t('console.settingsView.mapAddRow')}
+        aria-label={t('console.settingsView.mapAddRow')}
         searchPlaceholder={searchText}
         emptyText={emptyText}
         className="w-56"
