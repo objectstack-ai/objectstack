@@ -1,0 +1,19 @@
+// SCRATCH — objectstack#26986 step 1: probe which contribution shapes a module may already author onto an app object.
+/* eslint-disable @typescript-eslint/no-explicit-any */
+import { Field } from '@objectstack/spec/data';
+const on = (k: string) => (process.env.HOTCRM_PROBE ?? '').split(',').includes(k);
+export const probeCollections = (): Record<string, any> => {
+  const out: Record<string, any> = {};
+  if (on('ext')) out.objectExtensions = [{ extend: 'crm_opportunity', fields: { probe_campaign: Field.lookup('crm_campaign', { label: 'Probe Campaign' }) } }];
+  if (on('action')) out.extraActions = [{ name: 'probe_enroll_from_opp', label: 'Probe Enroll', objectName: 'crm_opportunity', type: 'flow', target: 'campaign_lead_member_enroll', locations: ['record_more'] }];
+  if (on('flow')) out.extraFlows = [{
+    name: 'probe_module_flow_on_app_object', label: 'Probe module flow on app object', type: 'record_change', status: 'active', runAs: 'system', variables: [],
+    nodes: [
+      { id: 'start', type: 'start', label: 'Start', config: { objectName: 'crm_opportunity', triggerType: 'record-after-update' } },
+      { id: 'end', type: 'end', label: 'End' },
+    ],
+    edges: [{ id: 'e1', source: 'start', target: 'end', type: 'default' }],
+  }];
+  if (on('hook')) out.extraHooks = [{ name: 'probe_module_hook_on_app_object', object: 'crm_opportunity', events: ['afterUpdate'], handler: async () => {} }];
+  return out;
+};

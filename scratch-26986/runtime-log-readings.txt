@@ -1,0 +1,51 @@
+# Runtime readings (boot logs, filtered)
+
+## boot-revenue-main.log
+  (fallback resolution also failed: Cannot find package '@objectstack/service-i18n' imported from /home/user/objectstack/packages/cli/dist/commands/serve.js)
+    2026-11-08T02:28:54.908Z WARN [SeedLoader] 1 row(s) triggered advisory rule 'related_to_required' (warning) on 'crm_task': At least one related record should be selected — advisory rules are authoring guidance for interactive writes; they never block a seed load and nothing here failed. {"object":"crm_task","rule":"related_to_required","severity":"warning","rows":1,"message":"At least one re
+2026-11-08T02:29:06.340Z WARN Insert operation failed {"object":"crm_contact","error":{"message":"Account is required","stack":"…"}}
+2026-11-08T02:29:17.978Z WARN Update operation failed {"object":"crm_opportunity","error":{"message":"Win Reason is required","stack":"…"}}
+2026-11-08T02:29:48.728Z ERROR Trigger-fired run of flow 'billing_handoff_closed_won' failed (trigger 'record_change') — no caller holds this result and nothing retries the run; the terminal failure is recorded in the flow's run history, and the run's failure envelope is in this record's meta. {"error":"Node 'load_line_items' failed: get_record(crm_opportunity_line_item) failed: Object 'crm_oppo
+2026-11-08T02:30:02.883Z ERROR Trigger-fired run of flow 'billing_handoff_contract_activated' failed (trigger 'record_change') — no caller holds this result and nothing retries the run; the terminal failure is recorded in the flow's run history, and the run's failure envelope is in this record's meta. {"error":"Node 'load_line_items' failed: get_record(crm_opportunity_line_item) failed: Object '
+
+## boot-marketing-main.log
+  (fallback resolution also failed: Cannot find package '@objectstack/service-i18n' imported from /home/user/objectstack/packages/cli/dist/commands/serve.js)
+2026-11-08T02:30:29.053Z ERROR [hook] handler failed (onError=log; suppressing) {"hook":"campaign_attribution_refresh","object":"crm_opportunity","event":"afterInsert","error":"Object 'crm_campaign_member' not found"}
+2026-11-08T02:30:29.053Z ERROR [hook] handler failed (onError=log; suppressing) {"hook":"campaign_attribution_refresh","object":"crm_opportunity","event":"afterInsert","error":"Object 'crm_campaign_member' not found"}
+2026-11-08T02:30:29.053Z ERROR [hook] handler failed (onError=log; suppressing) {"hook":"campaign_attribution_refresh","object":"crm_opportunity","event":"afterInsert","error":"Object 'crm_campaign_member' not found"}
+2026-11-08T02:30:29.053Z ERROR [hook] handler failed (onError=log; suppressing) {"hook":"campaign_attribution_refresh","object":"crm_opportunity","event":"afterInsert","error":"Object 'crm_campaign_member' not found"}
+2026-11-08T02:30:29.054Z ERROR [hook] handler failed (onError=log; suppressing) {"hook":"campaign_attribution_refresh","object":"crm_opportunity","event":"afterInsert","error":"Object 'crm_campaign_member' not found"}
+2026-11-08T02:30:29.733Z ERROR [hook] handler failed (onError=log; suppressing) {"hook":"campaign_attribution_refresh","object":"crm_opportunity","event":"afterUpdate","error":"Object 'crm_campaign_member' not found"}
+2026-11-08T02:30:29.735Z ERROR [hook] handler failed (onError=log; suppressing) {"hook":"campaign_attribution_refresh","object":"crm_opportunity","event":"afterUpdate","error":"Object 'crm_campaign_member' not found"}
+2026-11-08T02:30:29.736Z ERROR [hook] handler failed (onError=log; suppressing) {"hook":"campaign_attribution_refresh","object":"crm_opportunity","event":"afterUpdate","error":"Object 'crm_campaign_member' not found"}
+2026-11-08T02:30:29.743Z ERROR [hook] handler failed (onError=log; suppressing) {"hook":"campaign_attribution_refresh","object":"crm_opportunity","event":"afterUpdate","error":"Object 'crm_campaign_member' not found"}
+2026-11-08T02:30:29.744Z ERROR [hook] handler failed (onError=log; suppressing) {"hook":"campaign_attribution_refresh","object":"crm_opportunity","event":"afterUpdate","error":"Object 'crm_campaign_member' not found"}
+2026-11-08T02:30:29.745Z ERROR [hook] handler failed (onError=log; suppressing) {"hook":"campaign_attribution_refresh","object":"crm_opportunity","event":"afterUpdate","error":"Object 'crm_campaign_member' not found"}
+    2026-11-08T02:30:29.896Z WARN [SeedLoader] 1 row(s) triggered advisory rule 'related_to_required' (warning) on 'crm_task': At least one related record should be selected — advisory rules are authoring guidance for interactive writes; they never block a seed load and nothing here failed. {"object":"crm_task","rule":"related_to_required","severity":"warning","rows":1,"message":"At least one re
+2026-11-08T02:30:55.273Z ERROR [hook] handler failed (onError=log; suppressing) {"hook":"campaign_lead_conversion_refresh","object":"crm_lead","event":"afterUpdate","error":"Object 'crm_campaign_member' not found"}
+
+## boot-disabled-main.log
+  (fallback resolution also failed: Cannot find package '@objectstack/service-i18n' imported from /home/user/objectstack/packages/cli/dist/commands/serve.js)
+    2026-11-08T02:31:26.800Z WARN [SeedLoader] 1 row(s) triggered advisory rule 'related_to_required' (warning) on 'crm_task': At least one related record should be selected — advisory rules are authoring guidance for interactive writes; they never block a seed load and nothing here failed. {"object":"crm_task","rule":"related_to_required","severity":"warning","rows":1,"message":"At least one re
+
+## boot-probe-main.log
+  (fallback resolution also failed: Cannot find package '@objectstack/service-i18n' imported from /home/user/objectstack/packages/cli/dist/commands/serve.js)
+2026-11-08T02:34:16.307Z ERROR [SeedLoader] Failed to write crm_opportunity_line_item record #0 (crm_opportunity+crm_product=): Opportunity is required {"recordIndex":0,"error":{"message":"Opportunity is required","stack":"…"}}
+2026-11-08T02:34:16.307Z ERROR [SeedLoader] Failed to write crm_opportunity_line_item record #1 (crm_opportunity+crm_product=): Opportunity is required {"recordIndex":1,"error":{"message":"Opportunity is required","stack":"…"}}
+2026-11-08T02:34:16.307Z ERROR [SeedLoader] Failed to write crm_opportunity_line_item record #2 (crm_opportunity+crm_product=): Opportunity is required {"recordIndex":2,"error":{"message":"Opportunity is required","stack":"…"}}
+2026-11-08T02:34:16.307Z ERROR [SeedLoader] Failed to write crm_opportunity_line_item record #3 (crm_opportunity+crm_product=): Opportunity is required {"recordIndex":3,"error":{"message":"Opportunity is required","stack":"…"}}
+2026-11-08T02:34:16.307Z ERROR [SeedLoader] Failed to write crm_opportunity_line_item record #4 (crm_opportunity+crm_product=): Opportunity is required {"recordIndex":4,"error":{"message":"Opportunity is required","stack":"…"}}
+2026-11-08T02:34:16.307Z ERROR [SeedLoader] Failed to write crm_opportunity_line_item record #5 (crm_opportunity+crm_product=): Opportunity is required {"recordIndex":5,"error":{"message":"Opportunity is required","stack":"…"}}
+2026-11-08T02:34:16.307Z ERROR [SeedLoader] Failed to write crm_opportunity_line_item record #6 (crm_opportunity+crm_product=): Opportunity is required {"recordIndex":6,"error":{"message":"Opportunity is required","stack":"…"}}
+2026-11-08T02:34:16.307Z ERROR [SeedLoader] Failed to write crm_opportunity_line_item record #7 (crm_opportunity+crm_product=): Opportunity is required {"recordIndex":7,"error":{"message":"Opportunity is required","stack":"…"}}
+2026-11-08T02:34:16.307Z ERROR [SeedLoader] Failed to write crm_opportunity_line_item record #8 (crm_opportunity+crm_product=): Opportunity is required {"recordIndex":8,"error":{"message":"Opportunity is required","stack":"…"}}
+2026-11-08T02:34:16.307Z ERROR [SeedLoader] Failed to write crm_opportunity_line_item record #9 (crm_opportunity+crm_product=): Opportunity is required {"recordIndex":9,"error":{"message":"Opportunity is required","stack":"…"}}
+2026-11-08T02:34:16.307Z ERROR [SeedLoader] Failed to write crm_opportunity_line_item record #10 (crm_opportunity+crm_product=): Opportunity is required {"recordIndex":10,"error":{"message":"Opportunity is required","stack":"…"}}
+2026-11-08T02:34:16.307Z ERROR [SeedLoader] Failed to write crm_opportunity_line_item record #11 (crm_opportunity+crm_product=): Opportunity is required {"recordIndex":11,"error":{"message":"Opportunity is required","stack":"…"}}
+2026-11-08T02:34:16.308Z ERROR [SeedLoader] Failed to write crm_opportunity_line_item record #12 (crm_opportunity+crm_product=): Opportunity is required {"recordIndex":12,"error":{"message":"Opportunity is required","stack":"…"}}
+2026-11-08T02:34:16.308Z ERROR [SeedLoader] Failed to write crm_opportunity_line_item record #13 (crm_opportunity+crm_product=): Opportunity is required {"recordIndex":13,"error":{"message":"Opportunity is required","stack":"…"}}
+2026-11-08T02:34:16.308Z ERROR [SeedLoader] Failed to write crm_opportunity_line_item record #14 (crm_opportunity+crm_product=): Opportunity is required {"recordIndex":14,"error":{"message":"Opportunity is required","stack":"…"}}
+2026-11-08T02:34:16.308Z ERROR [SeedLoader] Failed to write crm_opportunity_line_item record #15 (crm_opportunity+crm_product=): Opportunity is required {"recordIndex":15,"error":{"message":"Opportunity is required","stack":"…"}}
+2026-11-08T02:34:16.308Z ERROR [SeedLoader] Failed to write crm_opportunity_line_item record #16 (crm_opportunity+crm_product=): Opportunity is required {"recordIndex":16,"error":{"message":"Opportunity is required","stack":"…"}}
+2026-11-08T02:34:16.308Z ERROR [SeedLoader] Failed to write crm_opportunity_line_item record #17 (crm_opportunity+crm_product=): Opportunity is required {"recordIndex":17,"error":{"message":"Opportunity is required","stack":"…"}}
+2026-11-08T02:34:16.308Z ERROR [SeedLoader] Failed to write crm_opportunity_line_item record #18 (crm_opportunity+crm_product=): Opportunity is required {"recordIndex":18,"error":{"message":"Opportunity is required","stack":"…"}}

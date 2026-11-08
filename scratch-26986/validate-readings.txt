@@ -1,0 +1,154 @@
+# G1/G2 readings — objectstack main 604a2b3b linked into hotcrm main 6961ab1 (scratch worktree)
+# command: HOTCRM_ABSENT=<m> HOTCRM_PEEL=<peel> node node_modules/@objectstack/cli/bin/run.js validate
+
+## v-control-main.log
+  ✓ Validation passed (3093ms)
+
+## v-revenue--main.log
+  ✗ defineStack cross-reference validation failed (21 issues):
+  ✗ Permission 'crm_user' grants on object 'crm_product' which is not defined in objects.
+  ✗ Permission 'sales_manager' grants on object 'crm_quote' which is not defined in objects.
+  ✗ Permission 'sales_manager' grants on object 'crm_product' which is not defined in objects.
+  ✗ Permission 'sales_manager' grants on object 'crm_price_book' which is not defined in objects.
+  ✗ Permission 'sales_manager' grants on object 'crm_price_book_entry' which is not defined in objects.
+  ✗ Permission 'sales_manager' grants on object 'crm_opportunity_line_item' which is not defined in objects.
+  ✗ Permission 'sales_manager' grants on object 'crm_quote_line_item' which is not defined in objects.
+  ✗ Permission 'sales_rep' grants on object 'crm_quote' which is not defined in objects.
+  ✗ Permission 'sales_rep' grants on object 'crm_product' which is not defined in objects.
+  ✗ Permission 'sales_rep' grants on object 'crm_price_book' which is not defined in objects.
+  ✗ Permission 'sales_rep' grants on object 'crm_price_book_entry' which is not defined in objects.
+  ✗ Permission 'sales_rep' grants on object 'crm_opportunity_line_item' which is not defined in objects.
+  ✗ Permission 'sales_rep' grants on object 'crm_quote_line_item' which is not defined in objects.
+  ✗ Permission 'service_agent' grants on object 'crm_product' which is not defined in objects.
+  ✗ Permission 'system_admin' grants on object 'crm_quote' which is not defined in objects.
+  ✗ Permission 'system_admin' grants on object 'crm_product' which is not defined in objects.
+  ✗ Permission 'system_admin' grants on object 'crm_price_book' which is not defined in objects.
+  ✗ Permission 'system_admin' grants on object 'crm_opportunity_line_item' which is not defined in objects.
+  ✗ Permission 'system_admin' grants on object 'crm_quote_line_item' which is not defined in objects.
+  ✗ Permission 'system_admin' grants on object 'crm_price_book_entry' which is not defined in objects.
+  ✗ Action 'generate_quote' references flow 'quote_generation' which is not defined in flows.
+
+## v-revenue-perms,i18n,actions-main.log
+  ✗ Author-time rules failed (1 issue)
+  • dashboard "crm_overview_dashboard" › widget "top_products": dataset "product_metrics" does not resolve to a declared dataset.
+      rule: widget-dataset-unknown  at dashboards[1].widgets[6]
+
+## v-revenue-perms,i18n,refs-main.log
+  ✓ Validation passed (2710ms)
+
+## v-revenue-perms,i18n,widgets-main.log
+  ✗ defineStack cross-reference validation failed (1 issue):
+  ✗ Action 'generate_quote' references flow 'quote_generation' which is not defined in flows.
+
+## v-revenue-perms,i18n-main.log
+  ✗ defineStack cross-reference validation failed (1 issue):
+  ✗ Action 'generate_quote' references flow 'quote_generation' which is not defined in flows.
+
+## v-revenue-perms-main.log
+  ✗ defineStack cross-reference validation failed (1 issue):
+  ✗ Action 'generate_quote' references flow 'quote_generation' which is not defined in flows.
+
+## v-marketing--main.log
+  ✗ defineStack cross-reference validation failed (11 issues):
+  ✗ Permission 'crm_user' grants on object 'crm_campaign' which is not defined in objects.
+  ✗ Permission 'marketing_user' grants on object 'crm_campaign' which is not defined in objects.
+  ✗ Permission 'marketing_user' grants on object 'crm_campaign_member' which is not defined in objects.
+  ✗ Permission 'sales_manager' grants on object 'crm_campaign' which is not defined in objects.
+  ✗ Permission 'sales_manager' grants on object 'crm_campaign_member' which is not defined in objects.
+  ✗ Permission 'sales_rep' grants on object 'crm_campaign' which is not defined in objects.
+  ✗ Permission 'sales_rep' grants on object 'crm_campaign_member' which is not defined in objects.
+  ✗ Permission 'system_admin' grants on object 'crm_campaign' which is not defined in objects.
+  ✗ Permission 'system_admin' grants on object 'crm_campaign_member' which is not defined in objects.
+  ✗ Action 'add_contact_to_campaign' references flow 'campaign_contact_member_enroll' which is not defined in flows.
+  ✗ Action 'create_campaign' references flow 'campaign_lead_member_enroll' which is not defined in flows.
+
+## v-marketing-flowtarget-main.log
+  ✗ Author-time rules failed (4 issues)
+  • action "add_contact_to_campaign" · param "campaignId": field-backed param object "crm_campaign_member" resolves to no object defined in this stack. The reference is inert at runtime — nothing reports the miss.
+      rule: object-reference-unknown  at actions[3].params[0].objectOverride — `os explain object-reference-unknown` for how an object name resolves, and what a miss costs
+  • action "create_campaign" · param "campaignId": field-backed param object "crm_campaign_member" resolves to no object defined in this stack. The reference is inert at runtime — nothing reports the miss.
+      rule: object-reference-unknown  at actions[10].params[0].objectOverride — `os explain object-reference-unknown` for how an object name resolves, and what a miss costs
+  • object "crm_contact" · action "add_contact_to_campaign" · param "campaignId": field-backed param object "crm_campaign_member" resolves to no object defined in this stack. The reference is inert at runtime — nothing reports the miss.
+      rule: object-reference-unknown  at objects[1].actions[0].params[0].objectOverride — `os explain object-reference-unknown` for how an object name resolves, and what a miss costs
+  • object "crm_lead" · action "create_campaign" · param "campaignId": field-backed param object "crm_campaign_member" resolves to no object defined in this stack. The reference is inert at runtime — nothing reports the miss.
+      rule: object-reference-unknown  at objects[6].actions[1].params[0].objectOverride — `os explain object-reference-unknown` for how an object name resolves, and what a miss costs
+
+## v-marketing-perms,i18n,actions-main.log
+  ✗ Author-time rules failed (1 issue)
+  • object "crm_opportunity" · field "crm_campaign": lookup target "crm_campaign" resolves to no object defined in this stack. The reference is inert at runtime — nothing reports the miss.
+      rule: object-reference-unknown  at objects[7].fields.crm_campaign.reference — `os explain object-reference-unknown` for how an object name resolves, and what a miss costs
+
+## v-marketing-perms,i18n,refs-main.log
+  ✓ Validation passed (2690ms)
+
+## v-marketing-perms,i18n-main.log
+  ✗ defineStack cross-reference validation failed (2 issues):
+  ✗ Action 'add_contact_to_campaign' references flow 'campaign_contact_member_enroll' which is not defined in flows.
+  ✗ Action 'create_campaign' references flow 'campaign_lead_member_enroll' which is not defined in flows.
+
+## v-service--main.log
+  ✗ defineStack cross-reference validation failed (16 issues):
+  ✗ Permission 'crm_user' grants on object 'crm_knowledge_article' which is not defined in objects.
+  ✗ Permission 'guest_portal' grants on object 'crm_case' which is not defined in objects.
+  ✗ Permission 'marketing_user' grants on object 'crm_article_feedback' which is not defined in objects.
+  ✗ Permission 'marketing_user' grants on object 'crm_knowledge_article' which is not defined in objects.
+  ✗ Permission 'sales_manager' grants on object 'crm_case' which is not defined in objects.
+  ✗ Permission 'sales_manager' grants on object 'crm_article_feedback' which is not defined in objects.
+  ✗ Permission 'sales_manager' grants on object 'crm_knowledge_article' which is not defined in objects.
+  ✗ Permission 'sales_rep' grants on object 'crm_case' which is not defined in objects.
+  ✗ Permission 'sales_rep' grants on object 'crm_article_feedback' which is not defined in objects.
+  ✗ Permission 'sales_rep' grants on object 'crm_knowledge_article' which is not defined in objects.
+  ✗ Permission 'service_agent' grants on object 'crm_case' which is not defined in objects.
+  ✗ Permission 'service_agent' grants on object 'crm_article_feedback' which is not defined in objects.
+  ✗ Permission 'service_agent' grants on object 'crm_knowledge_article' which is not defined in objects.
+  ✗ Permission 'system_admin' grants on object 'crm_case' which is not defined in objects.
+  ✗ Permission 'system_admin' grants on object 'crm_article_feedback' which is not defined in objects.
+  ✗ Permission 'system_admin' grants on object 'crm_knowledge_article' which is not defined in objects.
+
+## v-service-perms,i18n,actions-main.log
+  ✗ Author-time rules failed (2 issues)
+  • object "crm_event" · field "related_to_case": lookup target "crm_case" resolves to no object defined in this stack. The reference is inert at runtime — nothing reports the miss. Did you mean "crm_task"?
+      rule: object-reference-unknown  at objects[3].fields.related_to_case.reference — `os explain object-reference-unknown` for how an object name resolves, and what a miss costs
+  • object "crm_task" · field "related_to_case": lookup target "crm_case" resolves to no object defined in this stack. The reference is inert at runtime — nothing reports the miss. Did you mean "crm_task"?
+      rule: object-reference-unknown  at objects[8].fields.related_to_case.reference — `os explain object-reference-unknown` for how an object name resolves, and what a miss costs
+
+## v-service-perms,i18n,refs-main.log
+  ✗ Package docs validation failed (5 issues)
+  • docs/crm_admin_automation: Doc "crm_admin_automation" links to "./crm_service_cases.md" but no doc named "crm_service_cases" exists in this package.
+      rule: docs/broken-link
+  • docs/crm_analytics_metrics: Doc "crm_analytics_metrics" links to "./crm_service_cases.md" but no doc named "crm_service_cases" exists in this package.
+      rule: docs/broken-link
+  • docs/crm_analytics_metrics: Doc "crm_analytics_metrics" links to "./crm_service_knowledge.md" but no doc named "crm_service_knowledge" exists in this package.
+      rule: docs/broken-link
+  • docs/crm_overview: Doc "crm_overview" links to "./crm_service_cases.md" but no doc named "crm_service_cases" exists in this package.
+      rule: docs/broken-link
+  • docs/crm_overview: Doc "crm_overview" links to "./crm_service_knowledge.md" but no doc named "crm_service_knowledge" exists in this package.
+      rule: docs/broken-link
+
+## v-service-perms,i18n-main.log
+  ✗ Author-time rules failed (2 issues)
+  • object "crm_event" · field "related_to_case": lookup target "crm_case" resolves to no object defined in this stack. The reference is inert at runtime — nothing reports the miss. Did you mean "crm_task"?
+      rule: object-reference-unknown  at objects[3].fields.related_to_case.reference — `os explain object-reference-unknown` for how an object name resolves, and what a miss costs
+  • object "crm_task" · field "related_to_case": lookup target "crm_case" resolves to no object defined in this stack. The reference is inert at runtime — nothing reports the miss. Did you mean "crm_task"?
+      rule: object-reference-unknown  at objects[8].fields.related_to_case.reference — `os explain object-reference-unknown` for how an object name resolves, and what a miss costs
+
+## v-probe-action-main.log
+  ✗ defineStack cross-reference validation failed (1 issue):
+  ✗ Action 'probe_enroll_from_opp' references object 'crm_opportunity' which is not defined in objects.
+
+## v-probe-ext,action,flow-main.log
+  ✓ Validation passed (2937ms)
+  ⚠ package 'app.objectstack.hotcrm.marketing' — flow "probe_module_flow_on_app_object" › start node: targets object 'crm_opportunity', which this stack does not define — if the name is wrong, the flow will never fire (and the runtime stays silent about it).
+    rule: flow-trigger-unknown-object  at flows[4].nodes[0].config.objectName — `os explain flow-trigger-unknown-object` for why an unknown trigger object warns, and when it refuses
+
+## v-probe-ext-main.log
+  ✓ Validation passed (2918ms)
+
+## v-probe-flow-main.log
+  ✓ Validation passed (2808ms)
+  ⚠ package 'app.objectstack.hotcrm.marketing' — flow "probe_module_flow_on_app_object" › start node: targets object 'crm_opportunity', which this stack does not define — if the name is wrong, the flow will never fire (and the runtime stays silent about it).
+    rule: flow-trigger-unknown-object  at flows[4].nodes[0].config.objectName — `os explain flow-trigger-unknown-object` for why an unknown trigger object warns, and when it refuses
+
+## v-probe-hook-main.log
+  ✗ defineStack cross-reference validation failed (1 issue):
+  ✗ Hook 'probe_module_hook_on_app_object' references object 'crm_opportunity' which is not defined in objects.

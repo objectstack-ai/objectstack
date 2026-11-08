@@ -1,0 +1,71 @@
+diff --git a/objectstack.composition.ts b/objectstack.composition.ts
+index 53a2863..543bed7 100644
+--- a/objectstack.composition.ts
++++ b/objectstack.composition.ts
+@@ -597,7 +597,9 @@ export const marketingStack = createHotCrmMarketingStack({ data: seedData.market
+ export const o2cStack = createHotCrmO2cStack();
+ 
+ /** The four module stacks, in the order the artifact lists them. */
+-export const moduleStacks = [serviceStack, revenueStack, marketingStack, o2cStack];
++import { dropAbsent, peelApp } from './scratch-absence.js';
++const __split = dropAbsent([serviceStack, revenueStack, marketingStack, o2cStack]);
++export const moduleStacks = __split.kept;
+ 
+ /**
+  * `app.objectstack.hotcrm` — see `src/sales/index.ts`, including why it is
+@@ -606,7 +608,7 @@ export const moduleStacks = [serviceStack, revenueStack, marketingStack, o2cStac
+  * a module's flow).
+  */
+ export const appStack = createHotCrmAppStack(
+-  {
++  peelApp({
+     objects: appObjects,
+     // Shared option lists (#2000, objectstack#18164). Each select field that
+     // offers one names it — `Field.select({ picklist: 'industry' })` — and the
+@@ -659,7 +661,7 @@ export const appStack = createHotCrmAppStack(
+     // role hierarchy's parent links are gone (hierarchy belongs to the
+     // business-unit tree, which this app does not model).
+     positions: CrmPositions,
+-  },
++  }, __split.gone),
+   {
+     artifactObjects: moduleStacks.flatMap((stack) => (stack.objects ?? []).map((object) => object.name)),
+     artifactFlows: moduleStacks.flatMap((stack) => (stack.flows ?? []).map((flow) => flow.name)),
+diff --git a/src/marketing/index.ts b/src/marketing/index.ts
+index df6b17e..155956a 100644
+--- a/src/marketing/index.ts
++++ b/src/marketing/index.ts
+@@ -1,3 +1,4 @@
++import { probeCollections } from './scratch-probe.js';
+ // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+ 
+ import { defineStack, type ObjectStackDefinition, type ObjectStackDefinitionInput } from '@objectstack/spec';
+@@ -59,7 +60,7 @@ export type HotCrmMarketingCollections = Pick<ObjectStackDefinitionInput, 'data'
+  */
+ export const createHotCrmMarketingStack = (
+   collections: HotCrmMarketingCollections,
+-): ObjectStackDefinition => defineStack({
++): ObjectStackDefinition => { const probe = probeCollections(); return defineStack({
+   manifest: {
+     id: 'app.objectstack.hotcrm.marketing',
+     name: 'HotCRM Marketing',
+@@ -111,14 +112,15 @@ export const createHotCrmMarketingStack = (
+   requires: ['automation', 'triggers', 'sharing'],
+ 
+   objects: [Campaign, CampaignMember],
+-  hooks: marketingHooks,
++  ...(probe.objectExtensions ? { objectExtensions: probe.objectExtensions } : {}),
++  hooks: [...marketingHooks, ...(probe.extraHooks ?? [])],
+   views: [CampaignViews],
+-  flows: marketingFlows,
+-  actions: [EnrollLeadsAction, MarkRespondedAction],
++  flows: [...marketingFlows, ...(probe.extraFlows ?? [])],
++  actions: [EnrollLeadsAction, MarkRespondedAction, ...(probe.extraActions ?? [])],
+   sharingRules: marketingSharingRules,
+   // Its manual (#2330), over `src/marketing/docs/`. See the book's own note.
+   books: [CrmMarketingManual],
+   translations: [MarketingTranslations],
+ 
+   ...collections,
+-});
++}); };

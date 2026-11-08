@@ -1,0 +1,103 @@
+// SCRATCH — measurement knob for objectstack#26986 step 1. Never pushed to hotcrm main.
+// HOTCRM_ABSENT=revenue|marketing|service  drops that module stack.
+// HOTCRM_PEEL=perms,i18n,refs              peels the app referrers whose refusal is already recorded.
+/* eslint-disable @typescript-eslint/no-explicit-any */
+
+const ids: Record<string, string> = {
+  revenue: 'app.objectstack.hotcrm.revenue',
+  marketing: 'app.objectstack.hotcrm.marketing',
+  service: 'app.objectstack.hotcrm.service',
+};
+
+export const absentKey = process.env.HOTCRM_ABSENT ?? '';
+const peels = new Set((process.env.HOTCRM_PEEL ?? '').split(',').filter(Boolean));
+if (peels.has('refs')) ['actions', 'widgets', 'lookups'].forEach((p) => peels.add(p));
+const log = (...a: unknown[]) => { if (process.env.HOTCRM_PEEL_LOG) console.error('[peel]', ...a); };
+
+export function dropAbsent<T extends { manifest?: any }>(stacks: T[]): { kept: T[]; gone: T[] } {
+  const id = ids[absentKey];
+  return { kept: stacks.filter((s) => s.manifest?.id !== id), gone: stacks.filter((s) => s.manifest?.id === id) };
+}
+
+export function peelApp(collections: Record<string, any>, gone: any[]): Record<string, any> {
+  if (gone.length === 0 || peels.size === 0) return collections;
+  const objs = new Set<string>(gone.flatMap((s) => (s.objects ?? []).map((o: any) => o.name)));
+  const flows = new Set<string>(gone.flatMap((s) => (s.flows ?? []).map((f: any) => f.name)));
+  const datasets = new Set<string>(gone.flatMap((s) => (s.datasets ?? []).map((d: any) => d.name)));
+  const navIds = new Set<string>(gone.flatMap((s) =>
+    (s.manifest?.navigationContributions ?? []).flatMap((c: any) => (c.items ?? []).map((i: any) => i.id))));
+  const books = new Set<string>(gone.flatMap((s) => (s.books ?? []).map((b: any) => b.name)));
+  const out = { ...collections };
+
+  if (peels.has('perms')) {
+    out.permissions = (out.permissions ?? []).map((set: any) => {
+      const next = { ...set };
+      if (next.objects) next.objects = Object.fromEntries(Object.entries(next.objects).filter(([k]) => !objs.has(k)));
+      if (next.fields) next.fields = Object.fromEntries(Object.entries(next.fields).filter(([k]) => !objs.has(k.split('.')[0])));
+      return next;
+    });
+    log('perms: dropped grants on', [...objs]);
+  }
+
+  const peeledActions = new Set<string>();
+  if (peels.has('flowtarget')) {
+    // Re-point a flow action at an app flow ONLY to get past G1, so G2 judges the rest of the action (objectOverride).
+    const appFlow = (out.flows ?? [])[0]?.name;
+    const retarget = (a: any) => (a?.type === 'flow' && flows.has(a.target) ? (log('flowtarget', a.name), { ...a, target: appFlow }) : a);
+    out.actions = (out.actions ?? []).map(retarget);
+    out.objects = (out.objects ?? []).map((o: any) => (Array.isArray(o.actions) ? { ...o, actions: o.actions.map(retarget) } : o));
+  }
+  if (peels.has('actions') || peels.has('widgets') || peels.has('lookups')) {
+    const A = peels.has('actions'), W = peels.has('widgets'), L = peels.has('lookups');
+    const mentions = (a: any) => {
+      if (a?.type === 'flow' && flows.has(a.target)) return true;
+      const s = JSON.stringify(a ?? {});
+      return [...objs].some((o) => s.includes(`"objectOverride":"${o}"`));
+    };
+    out.actions = (out.actions ?? []).filter((a: any) => (A && mentions(a) ? (peeledActions.add(a.name), false) : true));
+    out.objects = (out.objects ?? []).map((o: any) => {
+      const next = { ...o };
+      if (Array.isArray(next.actions)) next.actions = next.actions.filter((a: any) => (A && mentions(a) ? (peeledActions.add(a.name), false) : true));
+      if (next.fields) {
+        next.fields = Object.fromEntries(Object.entries(next.fields).map(([k, f]: [string, any]) =>
+          (L && f && (f.type === 'lookup' || f.type === 'master_detail') && objs.has(f.reference))
+            ? (log(`refs: demote ${o.name}.${k} → text`), [k, { ...f, type: 'text', reference: undefined }])
+            : [k, f]));
+      }
+      return next;
+    });
+    out.datasets = (out.datasets ?? []).filter((d: any) => !objs.has(d.object));
+    out.dashboards = (out.dashboards ?? []).map((d: any) => ({
+      ...d, widgets: (d.widgets ?? []).filter((w: any) => (W && datasets.has(w.dataset) ? (log('refs: widget', w.id), false) : true)),
+    }));
+    const scrub = (v: any): any => {
+      if (Array.isArray(v)) {
+        return v.filter((x) => !(typeof x === 'string' && peeledActions.has(x))
+          && !(x && typeof x === 'object' && (peeledActions.has(x.name) || peeledActions.has(x.action)))).map(scrub);
+      }
+      if (v && typeof v === 'object') return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, scrub(x)]));
+      return v;
+    };
+    out.pages = scrub(out.pages);
+    out.views = scrub(out.views);
+    log('refs: peeled actions', [...peeledActions]);
+  }
+
+  if (peels.has('i18n')) {
+    const drop = (path: string[], k: string) =>
+      (['objects', 'flows', 'datasets'].includes(path.at(-1) ?? '') && (objs.has(k) || flows.has(k) || datasets.has(k)))
+      || (path.at(-1) === 'navigation' && navIds.has(k))
+      || (path.at(-1) === 'books' && books.has(k))
+      || (path.at(-1) === '_actions' && peeledActions.has(k))
+      || (path.at(-1) === 'widgets' && k === 'top_products' && absentKey === 'revenue' && peels.has('widgets'));
+    const walk = (v: any, path: string[]): any => {
+      if (Array.isArray(v)) return v.map((x) => walk(x, path));
+      if (v && typeof v === 'object') {
+        return Object.fromEntries(Object.entries(v).filter(([k]) => !drop(path, k)).map(([k, x]) => [k, walk(x, [...path, k])]));
+      }
+      return v;
+    };
+    out.translations = walk(out.translations, []);
+  }
+  return out;
+}
