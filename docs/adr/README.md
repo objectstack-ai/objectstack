@@ -13,11 +13,11 @@
 
 ## Summary
 
-150 records under `docs/adr/` (145 numbers), 11 under `ui/docs/adr/` (listed separately below).
+151 records under `docs/adr/` (146 numbers), 11 under `ui/docs/adr/` (listed separately below).
 
 | Status | Records |
 |---|---|
-| Accepted | 132 |
+| Accepted | 133 |
 | Proposed | 4 |
 | Superseded | 4 |
 | Draft | 3 |
@@ -26,7 +26,7 @@
 | Amended | 1 |
 | Partially implemented | 1 |
 | Revised | 1 |
-| **Total** | **150** |
+| **Total** | **151** |
 
 ## Shared numbers
 
@@ -217,6 +217,7 @@ A bare `ADR-0006` names the decision; its current text is [0006-project-environm
 | [ADR-0147](./0147-membership-scoped-rls-lowers-to-an-engine-internal-org-member-semi-join-leaf.md) | Membership-scoped RLS (`FIELD in currentuser.orguserids`) lowers to an engine-internal organization-member se… | Proposed — 2026-11-02. `docs/adr/` is Tier H (Prime Directive #14): the re… | 2026-11-02 | — | — |
 | [ADR-0148](./0148-recycle-bin-separate-store-restore-under-original-ids-retention-in-days.md) | The recycle bin is a separate store — one entry per delete operation, restore under the original ids, retenti… | Accepted — 2026-11-05, recording the maintainer's ruling of 2026-11-04 on… | 2026-11-05 | — | — |
 | [ADR-0149](./0149-ai-answers-business-questions-through-the-dataset-semantic-layer.md) | The AI answers business questions through the dataset semantic layer — synonyms and descriptions on measures… | Accepted — 2026-11-08, recording two rulings of the maintainer: the placem… | 2026-11-08 | — | — |
+| [ADR-0152](./0152-scim-group-grants-only-an-ordinary-permission-set-through-a-per-connection-mapping.md) | A SCIM group grants only an ordinary permission set, through a per-connection mapping row a platform administ… | Accepted — implemented, 2026-11-08, recording the maintainer's ruling of 2… | 2026-11-08 | — | — |
 
 ## ObjectUI registry — `ui/docs/adr/` (`ui-` prefix)
 
