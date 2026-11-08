@@ -55,8 +55,10 @@
  *     seam-unreadable refusal is thrown. So a passing store error reads as
  *     "no row": at purge the copy answers 404 (the purge refuses, nothing is
  *     deleted), and at install no record is written and `copyRecord` says so;
- *     no door writes that record later (re-recording is #31425). Both fail
- *     closed. Only the seam refusal reaches the purge as a 503.
+ *     no door writes that record later: the record's proof is the door's own
+ *     act at install, and neither the base row nor its receipt marks a base as
+ *     a copy (#31425). Both fail closed. Only the seam refusal reaches the
+ *     purge as a 503.
  */
 
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';

@@ -24,6 +24,7 @@
 
 import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import type { ObjectCalendarSchema, DataSource, CalendarConfig } from '@object-ui/types';
+import { errorCodeIs } from '@object-ui/types';
 import { CalendarView, type CalendarViewEvent } from './CalendarView';
 import { getVisibleDateRange } from './visibleDays';
 import {
@@ -38,6 +39,7 @@ import {
   useNavigationOverlay,
   useSafeTranslate,
   useObjectTranslation,
+  useSafeFieldLabel,
   extractWriteErrorMessage,
   isPermissionError,
   isExternalWriteRefusal,
@@ -496,6 +498,19 @@ interface UnscheduledRecord {
   title: string;
 }
 
+/**
+ * A write the server refused because the record is not there for this
+ * session: `404 RECORD_NOT_FOUND`, which a deleted row and a row row-level
+ * security no longer shows this user both answer. Read from the error and its
+ * `details`, the pair the adapter boundary parks the envelope in.
+ */
+function isRecordNotFound(err: unknown): boolean {
+  if (!err || typeof err !== 'object') return false;
+  const e = err as { httpStatus?: unknown; status?: unknown; statusCode?: unknown; details?: unknown };
+  if (errorCodeIs(e, 'RECORD_NOT_FOUND') || errorCodeIs(e.details, 'RECORD_NOT_FOUND')) return true;
+  return (e.httpStatus ?? e.status ?? e.statusCode) === 404;
+}
+
 export const ObjectCalendar: React.FC<ObjectCalendarComponentProps> = ({
   schema,
   dataSource,
@@ -519,6 +534,9 @@ export const ObjectCalendar: React.FC<ObjectCalendarComponentProps> = ({
   // the provider-less fallback the same way (objectui#6219), so the label is
   // correct whether or not an `I18nProvider` is mounted.
   const { t } = useObjectTranslation();
+  // The app's translation of the object label, for a refusal toast that names
+  // the object when the served schema carries no label of its own.
+  const labels = useSafeFieldLabel();
   // The locale the quick-create dialog formats its date and time with: the
   // month grid's own rule (`CalendarView`'s `effectiveLocale`), so the dialog
   // never disagrees with the cell it opened from. A set `locale` prop is the
@@ -1345,10 +1363,31 @@ export const ObjectCalendar: React.FC<ObjectCalendarComponentProps> = ({
             ? tt('form.readOnlyExternalSource', 'This table is read-only. Its records come from an external data source that does not accept changes.')
             : isPermissionError(err)
             ? tt('errors.unauthorized', 'You are not authorized to perform this action.')
+            // The row is gone for this session: deleted, or no longer visible
+            // to it. The server's sentence carries the record id and the
+            // object's machine name, so it is never shown; the object is named
+            // by its label (objectstack#31494).
+            : isRecordNotFound(err)
+            ? rescheduleNotFoundMessage()
             : extractWriteErrorMessage(err) ?? tt('table.saveFailed', 'Save failed')),
       );
     }
-  }, [calendarConfig, schema.objectName, dataSource, data, tt, objectSchema]);
+
+    function rescheduleNotFoundMessage(): string {
+      // The label the server serves, already translated (objectstack#30390),
+      // else the app's translation of it, else no name at all: a machine name
+      // is never the fallback.
+      const served = typeof objectSchema?.label === 'string' ? objectSchema.label.trim() : '';
+      const object = served
+        || ('objectLabel' in labels ? labels.objectLabel({ name: schema.objectName as string, label: '' }) : '');
+      return object
+        ? t('calendar.rescheduleNotFound', {
+            object,
+            defaultValue: 'This {{object}} record no longer exists, or you no longer have access to it.',
+          })
+        : tt('form.recordNotFoundOrHidden', "This record doesn't exist, or you don't have access to it.");
+    }
+  }, [calendarConfig, schema.objectName, dataSource, data, tt, t, labels, objectSchema]);
 
   // Quick-create state: clicking an empty day cell opens a small dialog
   // pre-filled with that date. On submit, dataSource.create() inserts a

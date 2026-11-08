@@ -778,6 +778,7 @@ const de = {
     eventTitlePlaceholder: "Worum geht es bei diesem Termin?",
     creating: "Wird erstellt…",
     titleRequired: "Titel ist erforderlich",
+    rescheduleNotFound: "Dieser Datensatz ({{object}}) existiert nicht mehr, oder Sie haben keinen Zugriff mehr darauf.",
     a11y: {
       region: "Kalender",
       grid: "Kalenderraster",
