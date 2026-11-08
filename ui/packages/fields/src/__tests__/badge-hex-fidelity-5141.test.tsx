@@ -34,8 +34,8 @@ import {
   getBadgeHexAppearance,
   getDotHexAppearance,
   getSemanticColorName,
-  deriveHexBadgePalette,
 } from '../index';
+import { deriveHexBadgePalette } from '../hexBadgePalette';
 
 /* ---------------------------------------------------------------- colour math */
 
