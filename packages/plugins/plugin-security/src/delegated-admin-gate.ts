@@ -112,9 +112,13 @@ const DEFAULT_DELEGATION_CEILING_MS = 30 * 24 * 60 * 60 * 1000;
  * Under the `single` posture this is the Default Organization: since ADR-0131
  * C1 it exists from boot, and every session on a stock `single` deployment —
  * the administrator's and a delegate's alike — carries it as its active
- * organization. Undefined only for a context carrying no organization at all,
- * where a by-name anchor is read organization-less and the subtree under it
- * stays inside that anchor's own organization (`resolveSubtree`).
+ * organization. Undefined only for a context carrying no organization at all —
+ * ADR-0123 D1's authenticated session with no active organization — and such
+ * a context holds no delegated scope: no subtree, no covered or placeable unit,
+ * no user it covers, and a write it would authorize is refused naming the
+ * missing active organization (`resolveHeldScopes`, {@link NO_ACTIVE_ORGANIZATION}).
+ * There is no "every organization" mode, here or in the resolver that loads
+ * the caller's sets (`grantAppliesInTenant`, `@objectstack/core`).
  *
  * Under the `group` posture (ADR-0105 D2) this is the ACTIVE organization, not
  * the caller's whole membership set. That is the narrower of the two, which is
@@ -125,6 +129,14 @@ function callerOrganizationId(context: any): string | undefined {
   const id = context?.organizationId ?? context?.tenantId;
   return typeof id === 'string' && id !== '' ? id : undefined;
 }
+
+/**
+ * [ADR-0123 D2/D4] The reason an administrator's write is refused for a
+ * context that names no organization: the one wording the organization-level
+ * branch and a delegated scope's refusal share, so the refusal names what is
+ * missing — the active organization — and not a permission the caller holds.
+ */
+const NO_ACTIVE_ORGANIZATION = 'the request carries no active organization to administer';
 
 /**
  * Does a `sys_user_position` row take effect in `organizationId`?
@@ -272,7 +284,7 @@ interface HeldScope {
   /** The set that carries the scope (for error messages). */
   setName: string;
   /**
-   * The scope as `resolveHeldScopes` NORMALISES it, not as it was authored:
+   * The scope as `adminScopesCarriedBy` NORMALISES it, not as it was authored:
    * every flag there is forced to a boolean (`!== false` / `=== true`) and the
    * allowlist to a string[]. So this names the PARSED shape (ADR-0122) — the
    * authored one, which arrives as raw JSON and may state none of them, is
@@ -299,6 +311,31 @@ function rowsOf(opCtx: any): any[] {
 function parseMaybeJson(v: unknown): any {
   if (typeof v !== 'string') return v;
   try { return JSON.parse(v); } catch { return undefined; }
+}
+
+/**
+ * Every `adminScope` the caller's resolved sets carry, normalised as
+ * {@link HeldScope.scope} describes, with no business unit resolved: what the
+ * caller holds, before the question of what it covers.
+ */
+function adminScopesCarriedBy(sets: PermissionSet[]): Array<Pick<HeldScope, 'setName' | 'scope'>> {
+  const out: Array<Pick<HeldScope, 'setName' | 'scope'>> = [];
+  for (const ps of sets) {
+    const raw = parseMaybeJson((ps as any).adminScope ?? (ps as any).admin_scope);
+    if (!raw || typeof raw !== 'object' || typeof raw.businessUnit !== 'string') continue;
+    out.push({
+      setName: (ps as any).name ?? '?',
+      scope: {
+        businessUnit: raw.businessUnit,
+        includeSubtree: raw.includeSubtree !== false,
+        manageAssignments: raw.manageAssignments === true,
+        assignablePermissionSets: Array.isArray(raw.assignablePermissionSets)
+          ? raw.assignablePermissionSets.filter((n: unknown): n is string => typeof n === 'string')
+          : [],
+      },
+    });
+  }
+  return out;
 }
 
 /** ADR-0066 tenant-level admin: a resolved set whose '*' entry carries modifyAllRecords. */
@@ -697,6 +734,19 @@ export class DelegatedAdminGate {
         { operation: opCtx.operation, object: opCtx.object, ...organizationFailure.meta },
       );
     }
+    // [ADR-0123 D2/D4] A delegated scope held in a context that names no
+    // organization covers nothing (`resolveHeldScopes` resolved none of the
+    // scopes the caller's sets carry), so its write is refused here, naming
+    // the missing active organization — the organization-level branch's
+    // refusal of the same state, in the same words and class.
+    if (!organizationId && adminScopesCarriedBy(sets).length > 0) {
+      throw new PermissionDeniedError(
+        `[Security] Access denied: delegated administrator '${opCtx.operation}' on '${opCtx.object}' ` +
+          `rejected — ${NO_ACTIVE_ORGANIZATION} (ADR-0090 D12; ADR-0123 D2 — a delegated scope covers ` +
+          `units of the active organization only).`,
+        { operation: opCtx.operation, object: opCtx.object, userId: ctx.userId },
+      );
+    }
     if (held.length === 0) {
       throw new PermissionDeniedError(
         `[Security] Access denied: '${opCtx.operation}' on '${opCtx.object}' requires tenant-level ` +
@@ -740,9 +790,9 @@ export class DelegatedAdminGate {
    * the report is read-only. Fail-closed: unresolvable scopes/memberships
    * cover nothing.
    *
-   * `callerContext` supplies the organization the scopes resolve in. Omitting
-   * it resolves on the organization-less surface — correct for a `single`
-   * posture, and never wider than what this method answered before it existed.
+   * `callerContext` supplies the organization the scopes resolve in. Omitted,
+   * or naming no organization, it covers nobody: a delegated scope held in a
+   * context that names no organization covers nothing ({@link resolveHeldScopes}).
    */
   async scopesCoverUser(
     sets: PermissionSet[],
@@ -800,8 +850,9 @@ export class DelegatedAdminGate {
    * `callerContext` supplies the organization every unit id in the report is
    * resolved in — without it a business unit was named by NAME across
    * organizations, so a picker could offer (and this report could disclose)
-   * another organization's unit ids. Omitting it resolves on the
-   * organization-less surface, correct for a `single` posture.
+   * another organization's unit ids. Omitted, or naming no organization, it
+   * reports no delegated scope, no unit placeable through one and no position
+   * assignable through one ({@link resolveHeldScopes}).
    *
    * A tenant-level admin (ADR-0066 superuser wildcard) is unconstrained;
    * the report says so AND enumerates everything the write path admits, so a
@@ -991,7 +1042,7 @@ export class DelegatedAdminGate {
   ): Promise<OrganizationFailure | null> {
     const op = String(opCtx.operation);
     if (!organizationId) {
-      return { reason: 'the request carries no active organization to administer', meta: {} };
+      return { reason: NO_ACTIVE_ORGANIZATION, meta: {} };
     }
     if (op !== 'insert' && op !== 'delete') {
       return {
@@ -1236,9 +1287,13 @@ export class DelegatedAdminGate {
 
   /**
    * The ids of `organizationId`'s business units (narrowed to `onlyId` when
-   * given) — never another organization's, whatever a driver returns. An
-   * organization-less caller (`single` posture without an organization) is not
-   * filtered, as before. Fail-closed: an unreadable table yields none.
+   * given) — never another organization's, whatever a driver returns. A call
+   * naming no organization is not filtered; the organization-level callers
+   * never make one (each runs only with an active organization), and no
+   * delegated scope reads here (`resolveHeldScopes`). Not a `single`-posture
+   * surface: since ADR-0131 C1 every `single` session carries the Default
+   * Organization (D11: "`single` is never a reason for a row to be org-less").
+   * Fail-closed: an unreadable table yields none.
    */
   private async organizationBusinessUnitIds(organizationId: string | undefined, onlyId?: string): Promise<string[]> {
     const ql = this.deps.ql;
@@ -1666,25 +1721,27 @@ export class DelegatedAdminGate {
   }
 
   /** Resolve every adminScope carried by the actor's resolved sets, inside the
-   *  caller's own organization ({@link callerOrganizationId}). */
+   *  caller's own organization ({@link callerOrganizationId}).
+   *
+   *  [ADR-0123 D1/D2] A delegated scope held in a context that names no
+   *  organization covers nothing: with no organization, no scope is resolved
+   *  and no business unit is read — so no subtree, no covered unit
+   *  ({@link scopedBusinessUnitIds}), no delegable scope or placeable unit
+   *  ({@link describeDelegableScope}), no user covered
+   *  ({@link scopesCoverUser}), and the write gate refuses naming the missing
+   *  active organization ({@link NO_ACTIVE_ORGANIZATION}). A subtree is one
+   *  organization's units, and a context that names none has no organization
+   *  to resolve one in — the rule the resolver applies to the grants that
+   *  carry the scope (`grantAppliesInTenant`, `@objectstack/core`). */
   private async resolveHeldScopes(
     sets: PermissionSet[],
     organizationId?: string,
   ): Promise<HeldScope[]> {
+    if (!organizationId) return [];
     const out: HeldScope[] = [];
-    for (const ps of sets) {
-      const raw = parseMaybeJson((ps as any).adminScope ?? (ps as any).admin_scope);
-      if (!raw || typeof raw !== 'object' || typeof raw.businessUnit !== 'string') continue;
-      const scope = {
-        businessUnit: raw.businessUnit,
-        includeSubtree: raw.includeSubtree !== false,
-        manageAssignments: raw.manageAssignments === true,
-        assignablePermissionSets: Array.isArray(raw.assignablePermissionSets)
-          ? raw.assignablePermissionSets.filter((n: unknown): n is string => typeof n === 'string')
-          : [],
-      };
+    for (const { setName, scope } of adminScopesCarriedBy(sets)) {
       const subtree = await this.resolveSubtree(scope.businessUnit, scope.includeSubtree, organizationId);
-      out.push({ setName: (ps as any).name ?? '?', scope, subtree });
+      out.push({ setName, scope, subtree });
     }
     return out;
   }
@@ -1710,14 +1767,17 @@ export class DelegatedAdminGate {
    *
    * Fail closed on both axes: a name that resolves to no row of the caller's
    * own organization approves nothing, exactly as a misconfigured scope does.
-   * An organization-less caller (`single` posture) keeps the by-name answer
-   * for the ROOT; the subtree under it is still one organization's — the
-   * root row's own ({@link resolveSubtreeById}).
+   * `organizationId` is required: a context that names no organization holds
+   * no scope ({@link resolveHeldScopes}) and never reaches this read, so the
+   * by-name read always carries an organization and the candidates are always
+   * reduced to that organization's own row — the organization-less arm of
+   * {@link resolveOwnOrganizationRow}, a seeding pass's, never answers a
+   * delegation boundary.
    */
   private async resolveSubtree(
     businessUnitName: string,
     includeSubtree: boolean,
-    organizationId?: string,
+    organizationId: string,
   ): Promise<Set<string>> {
     const ql = this.deps.ql;
     if (!ql?.find) return new Set<string>();
@@ -1734,10 +1794,9 @@ export class DelegatedAdminGate {
     // nothing (fail closed).
     if (!root?.id) return new Set<string>();
     if (!includeSubtree) return new Set<string>([String(root.id)]);
-    // The organization the subtree is bounded to: the caller's when its context
-    // names one (the root was resolved inside it above), otherwise the root
-    // row's own — never "any organization".
-    return this.resolveSubtreeById(String(root.id), organizationId ?? rowOrganizationId(root));
+    // The subtree is bounded to the caller's organization, the one the root
+    // was resolved inside above — never "any organization".
+    return this.resolveSubtreeById(String(root.id), organizationId);
   }
 
   /** BU id → covered BU-id set (root id + all descendants). Subtree is always
