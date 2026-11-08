@@ -219,7 +219,7 @@ One of the largest consumers of the flag;
 
 ### 6. Reads that only carry the flag onward
 
-Not behaviours: these three sites read the flag solely to copy it into another
+Not behaviours: these four sites read the flag solely to copy it into another
 context or envelope. They are listed because the census counts them, and because
 a reader tracing where elevation travels needs them.
 
@@ -228,6 +228,7 @@ a reader tracing where elevation travels needs them.
 | 63 | `buildSession` | objectql | Propagates `isSystem` into the hook session so hooks can tell engine self-writes from user writes |
 | 64 | `isSystem` | objectql | `ScopedContext.isSystem` getter — re-exposes the underlying execution context's flag |
 | 65 | `executionContextFromHook` | runtime | Rebuilds an `ExecutionContext` from a hook session, carrying the flag across |
+| 66 | `toolCallPrincipalOf` | mcp | Projects the host's resolved `ExecutionContext` into the frozen principal an installed MCP tool-call interceptor reads, carrying `isSystem: true` only for a system caller. It decides nothing: the tool still runs under its own context |
 
 ---
 
@@ -397,7 +398,7 @@ restates none of its figures:
 | Of those reads: reads of one of the unrelated metadata fields | subtracted — the collision this page opens with |
 | Of those reads: reads of `ExecutionContext.isSystem` | **the census answer**: every one sits in a symbol a row above names |
 | — behaviour-bearing (rows 1–62 above) | sections 1 to 5 |
-| — carry the flag onward only (rows 63–65 above) | section 6 |
+| — carry the flag onward only (rows 63–66 above) | section 6 |
 
 `node scripts/isystem-census.mjs` prints how many appearances fell in each
 syntactic slot, the subtraction, the answer and the packages and files that
@@ -532,6 +533,7 @@ and CI refuses one that differs from what the tree produces.
 |:---|--:|:---|
 | `packages/core/src/security/anonymous-deny.ts#shouldDenyAnonymous` | 1 | 10 |
 | `packages/mcp/src/stdio-data-bridge.ts#enforceApiExposure` | 1 | 15 |
+| `packages/mcp/src/tool-call-interceptor.ts#toolCallPrincipalOf` | 2 | 66 |
 | `packages/metadata-core/src/meta-write-capability.ts#metaWriteCapabilityVerdict` | 1 | 51 |
 | `packages/metadata-core/src/meta-write-capability.ts#walledCatalogWriteVerdict` | 1 | 55b |
 | `packages/metadata-core/src/object-schema-fls.ts#isObjectSchemaMaskExempt` | 1 | 8 |
