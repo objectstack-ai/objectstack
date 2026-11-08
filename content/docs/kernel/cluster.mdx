@@ -86,10 +86,12 @@ These four are the minimum sufficient set. Higher-level facilities
   the primitives instead — today it ships memory and DB adapters only and does
   not consume the cluster service.
 - **No native cache primitive.** Caches are `KV + PubSub` (read the value,
-  subscribe to the invalidation channel). `service-cache` is expected to build
-  on the primitives instead — today it ships a memory adapter plus a Redis
-  adapter skeleton that throws `RedisCacheAdapter not yet implemented`, and it
-  does not consume the cluster service either.
+  subscribe to the invalidation channel). `service-cache` does not build on the
+  primitives: it ships a memory adapter and a Redis adapter, and in a declared
+  multi-node deployment over the `redis` driver it runs the Redis adapter on a
+  connection duplicated from the driver's — the only thing it takes from the
+  cluster service. Over any other driver it stays per-process and says so at
+  boot.
 - **No native stream/Kafka primitive.** Streaming is intentionally out of
   scope for v1. It can be added as a fifth primitive later without changing
   the four above.

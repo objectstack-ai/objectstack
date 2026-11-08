@@ -63,9 +63,10 @@
  * unedited, now also answering the token's `iat`) and
  * {@link verifyMcpAccessToken}, which adds the consent read
  * (`mcp-token-revocation.ts` `mcpConsentAdmits`) through better-auth's own
- * storage adapter, reached as `getAuthContext`. `/oauth2/revoke` verifies
- * through the claims half alone, because it must still find the grant of a
- * token whose consent is already gone.
+ * storage adapter, reached as `getAuthContext`. The same read refuses a token
+ * whose client is disabled (objectstack-ai/cloud#3820, card 2).
+ * `/oauth2/revoke` verifies through the claims half alone, because it must
+ * still find the grant of a token whose consent is already gone.
  */
 
 import type { JSONWebKeySet } from 'jose';
@@ -202,9 +203,10 @@ export async function verifyMcpAccessTokenClaims(
 
 /**
  * The body of `AuthManager#verifyMcpAccessToken`; the method's docblock there
- * is its contract. {@link verifyMcpAccessTokenClaims}, then the consent read:
- * the token's grant must still stand (`mcpConsentAdmits`), read through
- * better-auth's storage adapter, the one the provider writes consents through.
+ * is its contract. {@link verifyMcpAccessTokenClaims}, then the grant read:
+ * the token's client must still be enabled and its grant must still stand
+ * (`mcpConsentAdmits`), read through better-auth's storage adapter, the one
+ * the provider writes clients and consents through.
  * The read is keyed by `azp`, the client the provider mints into every
  * access token, so a token without one is refused. A store error, or no
  * adapter at all, is a refusal: fail closed.

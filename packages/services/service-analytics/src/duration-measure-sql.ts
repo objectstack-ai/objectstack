@@ -86,11 +86,17 @@ export function durationMeasureIn(
 }
 
 /** The dialects {@link durationOperandSql} has an arm for. */
-export type DurationSqlDialect = Exclude<AnalyticsSqlDialect, 'unknown'>;
+export type DurationSqlDialect = Extract<AnalyticsSqlDialect, 'sqlite' | 'postgres' | 'mysql'>;
 
-/** Whether {@link durationOperandSql} can spell a duration on `dialect`. */
+/**
+ * Whether {@link durationOperandSql} can spell a duration on `dialect`.
+ *
+ * [#31394] Asked by membership, not as "not `unknown`": `'mssql'` is a dialect
+ * this package names (for the text-match arms) and has no duration arm for, so
+ * it declines here exactly as it did while it still read as `'unknown'`.
+ */
 export function hasDurationSql(dialect: AnalyticsSqlDialect): dialect is DurationSqlDialect {
-  return dialect !== 'unknown';
+  return dialect === 'sqlite' || dialect === 'postgres' || dialect === 'mysql';
 }
 
 /** Seconds from `fromSql` to `toSql`, both column references, on `dialect`. */

@@ -53,6 +53,8 @@
 - 开放 = 未派发(无 `pm:dispatched`、无 assignee);在飞的 P0/P1 不挡任何候选,只余取卡全序。
 - 取卡全序:维护者直派插队卡(出处三件)> 契约面卡(判据见 `references/lanes/spec.md`)> 标签序。
 - 标签序:`priority:p0` > `pm:blocking` > 功能点位次 > `target:` 板上项 > p1 > p2 > p3 > 无级。
+- 云车道企业版卡:取卡序 = `cloud/ROADMAP.md` 的档位与行序,⛔ 席位不在单卡上另调顺序。
+- 改序即改该表,由维护者或代其改并链裁决;改法见其「Maintaining this file」,⛔ 不抄表行。
 - `pm:blocking` 级内先按解锁扇出(从 `Blocked-by:` 反向索引现算,⛔ 扇出数不落标签)。
 - 全序每级现读/现算,零逐卡维护;无级/缺 `Path:` 轮报记分诊缺口。
 - 同级先非车队卡(作者非 `Bot` 且首行非席位签名),再 `Bug`、卡龄;⛔ 不升级、不越 p0。
@@ -68,7 +70,6 @@
 ## 认领(先认领后动工)
 
 - 归属 = session ID,⛔ 不认作者字段;`Account:` 派生自 assignee,不等即半态、持卡席下笔补正。
-- 卡 assignee 归 PM,dev 恒不写;PR 派认领账号,交棒同笔改;在飞 PR = `head:claude/` 正文点名本卡。
 - 部分落地(PR 带 `Refs #N (item k)`,⛔ 不 `Fixes`)即一笔释放:`Release:`+回 `pm:queue`+清 assignee。
 - `Release:` 行点名已落与余项;余项整落 `ui/**` 外他席树 ⇒ 点名其改标,拆分加 `pm:retriage`。
 - 派发原子对一笔 `label-write`:① `--assign` @me 加 `pm:dispatched` 摘 `pm:queue`,`--comment-file` 带②。
@@ -138,7 +139,6 @@
 - 多仓项目线程不加载仓 `settings.json` deny,此行即唯一防线;两数 = 写预算与 `mcp_calls`。
 - 清单、路径、行号在派发那一刻从树上取,⛔ 不从卡片/上次派发/记忆抄。
 - 建包单:派发令点名目录与 npm 名,dev 动笔前先测同类包先例;命名规则见 AGENTS.md 角色表。
-- 门禁清单取 `dispatch-gates --commands --repo 仓` 逐条跑,退出码先落盘,`--ran` 对账;被拒即手推。
 - 派发令里关于代码的危害断言必须有读数(点名 call site / 路径 / 迁移)。
 - 搬自任何工件(含己文)本轮未亲测计数/零命中/文件面:重测或注「未验证」点名来源。
 - PM 测不了的危害 ⇒ 写成给 dev 的问题,⛔ 不写成栅栏;人工地板栅栏关于流程,免测量。

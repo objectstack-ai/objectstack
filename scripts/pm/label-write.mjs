@@ -118,6 +118,13 @@
  *            `pm:dispatched` off, every assignee off. The holder's seat post
  *            is not an action here and cannot become one — every action
  *            names the card.
+ *   judged   the composed comment — the operator's text, the resume line and
+ *            the clock reading — by post-stamped's `judgeBody` in comment mode,
+ *            the ONE path `--comment-file` and post-stamped's own `--comment`
+ *            take (`composeReleaseBody`): the stamp contract, the signature
+ *            first line, the comment-mode keyed-line readers. An unsigned text
+ *            is exit 2 with zero writes, before the stroke, its refusal
+ *            post-stamped's own text naming this tool.
  *   read-back the card's labels and assignees against the ② target, and the
  *            release comment located on the board by its stored bytes
  *            (post-stamped's `pickRelayComment`). A board that disagrees is
@@ -170,6 +177,17 @@
  * ⛔ RELAY-ONLY, as `--release`: a fold exists only where a stroke does, so a route that resolves to `direct`
  * is exit 3 with zero writes — send the comment through post-stamped and the labels here, as before. A comment
  * with nothing to fold beside it is refused (exit 2): that write is post-stamped's.
+ *
+ * ## The read-back judge is HANDED to `sendFleetWrite`, never loaded by it
+ *
+ * Every send from this file passes `judge` (`readBackJudge`: post-stamped's `classifyReadBack` and
+ * `sentBodyLanded`). Without it `sendFleetWrite` loads the judge with a dynamic `import('../post-stamped.mjs')`
+ * once a stroke that carries a body has run, and that import never settles here: this file, post-stamped and
+ * `fleet-write/dispatch.mjs` import one another, so the three evaluate as ONE cycle whose completion waits on
+ * this file's top-level `await main(…)` — the very await the import sits under. Node then drains its event loop
+ * and exits 13 ("unsettled top-level await") after the relay run succeeded, with no `④` line printed, and a seat
+ * that re-runs posts the comment twice. The self-test drives both comment strokes through the REAL
+ * `sendFleetWrite` (`realTransport`: only fetch, clock, sleeps and throttle file are fake) to pin it.
  *
  * ## A retired lane alias is written as its lane
  *
@@ -248,7 +266,9 @@
 
 import process from 'node:process';
 import { spawnSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { isEntrypoint } from '../invoked-as.mjs';
@@ -275,13 +295,28 @@ import {
 // reaches this file through `fleet-write/dispatch.mjs`, so a module-scope use
 // here would read a binding that has not been initialised yet when
 // post-stamped is the entrypoint.
-import { PLATFORM_COMMENT_FOOTER, judgeBody, pickRelayComment, readBackVerdict as commentReadBackVerdict, relayAction, renderBody, substitutionSummary } from './post-stamped.mjs';
+import {
+  PLATFORM_COMMENT_FOOTER,
+  classifyReadBack,
+  judgeBody,
+  pickRelayComment,
+  readBackVerdict as commentReadBackVerdict,
+  relayAction,
+  sentBodyLanded,
+  substitutionSummary,
+} from './post-stamped.mjs';
 
 const SELF_PATH = fileURLToPath(import.meta.url);
 const REPO_ROOT = new URL('../../', import.meta.url);
 const API = 'https://api.github.com';
 const TOKEN = process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN ?? '';
 const PROXY_REARM_GUARD = 'OS_LABEL_WRITE_PROXY_REARMED';
+
+/**
+ * The read-back judge every `sendFleetWrite` from this file is HANDED (header: the read-back judge). Built at
+ * call time, ⛔ never at module scope — the bindings are post-stamped's, unread until its evaluation is done.
+ */
+const readBackJudge = () => ({ classifyReadBack, sentBodyLanded });
 
 export const EXIT_OK = 0;
 export const EXIT_USAGE = 2;
@@ -705,9 +740,12 @@ export function releaseTextRefusal(text) {
 
 /**
  * The release comment as sent: the operator's text, then the resume line and
- * the clock reading this tool measured, rendered through post-stamped's stamp
- * contract (`{{NOW}}` substituted, its refusals applied). Pure given the
- * instants.
+ * the clock reading this tool measured, judged by post-stamped's `judgeBody` in
+ * comment mode — the ONE path `--comment-file` and post-stamped's own
+ * `--comment` take: the stamp contract (`{{NOW}}` substituted, its refusals
+ * applied), the signature first line, and the comment-mode keyed-line readers.
+ * Returns `judgeBody`'s answer: `{ ok: true, rendered }` or `{ ok: false,
+ * rendered, text }`. Pure given the instants.
  */
 export function composeReleaseBody({ text, resume, knock, serverNow, age, nowMs } = {}) {
   // Both instants are READINGS taken off the board by this act, so they are
@@ -718,7 +756,7 @@ export function composeReleaseBody({ text, resume, knock, serverNow, age, nowMs 
     `Released by \`label-write.mjs --release\`: re-check ${knock.id} ({{WAS:${seconds(knock.created_at)}}}) unanswered for ` +
     `${formatHoursMinutes(age.ageMs)} on the server clock {{WAS:${seconds(serverNow)}}}, at or past \`RECLAIM_AFTER_HOURS = ${RECLAIM_AFTER_HOURS}\`.`;
   const raw = `${String(text).replace(/\s+$/, '')}\n\n${resume.line}\n${provenance}`;
-  return renderBody(raw, nowMs);
+  return judgeBody(raw, { mode: 'comment' }, nowMs, 'label-write');
 }
 
 /**
@@ -1080,7 +1118,7 @@ export async function runLabelWrite(options, deps = {}) {
       return result(EXIT_USAGE, { stoppedAt: 3, labels, assignees, transport: route.transport });
     }
     record(`[${stamp()}] ③ 写 (relay) — ONE dispatch, request ${packed.payload.request_id}: ${actions.map((a) => a.op).join(' · ')}`);
-    const sent = await send(packed.payload, { token: TOKEN, log: (line) => record(`      ${line}`) });
+    const sent = await send(packed.payload, { token: TOKEN, judge: readBackJudge(), log: (line) => record(`      ${line}`) });
     httpCalls.push({ op: 'relay', call: `dispatch ${packed.payload.request_id}`, status: sent.status, verdict: sent.state, detail: sent.run?.url ?? sent.detail ?? '' });
     if (sent.ok) {
       relay = sent;
@@ -1274,7 +1312,7 @@ async function foldStroke(c) {
     return done(EXIT_OK, { dryRun: true, payload: packed.payload });
   }
   const sentAt = c.clock().getTime();
-  const sent = await c.send(packed.payload, { token: TOKEN, log: (line) => record(`      ${line}`) });
+  const sent = await c.send(packed.payload, { token: TOKEN, judge: readBackJudge(), log: (line) => record(`      ${line}`) });
   c.httpCalls.push({ op: 'relay', call: `dispatch ${packed.payload.request_id}`, status: sent.status, verdict: sent.state, detail: sent.run?.url ?? sent.detail ?? '' });
   if (sent.state === 'no-run' || sent.state === 'timeout') {
     // ⛔ Under EVERY transport request: the stroke's first action is a comment, so a replay is a second comment.
@@ -1511,12 +1549,14 @@ export async function runRelease(options, deps = {}) {
   }
   const why = releaseTextRefusal(text);
   if (why) return refuse(why, { stoppedAt: 2 });
-  const rendered = composeReleaseBody({ text, resume, knock: { id: knock.id, created_at: knock.created_at }, serverNow, age, nowMs: clock().getTime() });
-  if (!rendered.ok) {
-    record(`[${stamp()}] REFUSED — ${rendered.error}`);
+  // Judged on post-stamped's path, as `--comment-file` is (header): an unsigned body is exit 2 here, before the stroke.
+  const judged = composeReleaseBody({ text, resume, knock: { id: knock.id, created_at: knock.created_at }, serverNow, age, nowMs: clock().getTime() });
+  if (!judged.ok) {
+    record(judged.text);
     record(nothing());
-    return result(EXIT_USAGE, { stoppedAt: 2, refusal: rendered.kind });
+    return result(EXIT_USAGE, { stoppedAt: 2, refusal: judged.rendered.ok ? 'comment' : judged.rendered.kind });
   }
+  const { rendered } = judged;
   const body = rendered.body;
 
   // ── ③ RELAY-ONLY: one dispatch, or nothing ────────────────────────────────
@@ -1549,7 +1589,7 @@ export async function runRelease(options, deps = {}) {
     return result(EXIT_OK, { dryRun: true, labels, assignees, payload: packed.payload, transport: route.transport });
   }
   const sentAt = clock().getTime();
-  const sent = await send(packed.payload, { token: TOKEN, log: (line) => record(`      ${line}`) });
+  const sent = await send(packed.payload, { token: TOKEN, judge: readBackJudge(), log: (line) => record(`      ${line}`) });
   httpCalls.push({ op: 'relay', call: `dispatch ${packed.payload.request_id}`, status: sent.status, verdict: sent.state, detail: sent.run?.url ?? sent.detail ?? '' });
   if (sent.state === 'no-run' || sent.state === 'timeout') {
     // ⛔ Under EVERY transport request: the stroke's first action is the Release: comment, so a replay of a
@@ -1828,6 +1868,61 @@ function fakeRelay(board, outcome = 'success', sent = []) {
   };
 }
 
+/**
+ * The REAL transport shape: fleet-write's own `sendFleetWrite` — its dispatch POST, its run poll, its body
+ * read-back with whatever judge this file hands it — over a fake `fetch` that answers from THE SAME fake board
+ * (the dispatch applies the stroke as the executor would, through `fakeRelay`). Only the network, the clock, the
+ * sleeps and the throttle file are fake, so a read-back that cannot settle under the real send cannot settle
+ * here either. Every send is raced against a wall-clock ceiling: an unsettled promise answers `never-settled`
+ * instead of draining the event loop.
+ */
+const REAL_TRANSPORT_CEILING_MS = 15_000;
+function realTransport(board, sent = []) {
+  const apply = fakeRelay(board, 'success', []);
+  const at = board.serverNow ?? Date.UTC(2026, 10, 8, 15, 0, 0);
+  const dir = mkdtempSync(join(tmpdir(), 'label-write-real-transport-'));
+  let requestId = null;
+  const headers = new Headers({ 'x-ratelimit-remaining': '4999' });
+  const answer = (status, json) => ({ status, headers, json: async () => json });
+  const RUN = () => ({ id: 42, display_title: `fleet-write ${requestId}`, name: 'Fleet Write', html_url: 'https://github.test/run/42', status: 'completed', conclusion: 'success' });
+  const fetchImpl = async (url, init = {}) => {
+    const u = new URL(url);
+    const method = init.method ?? 'GET';
+    if (method === 'POST' && u.pathname.endsWith('/dispatches')) {
+      const payload = JSON.parse(init.body).client_payload;
+      requestId = payload.request_id;
+      await apply(payload);
+      return answer(204, null);
+    }
+    if (method !== 'GET') return answer(405, { message: 'self-test: the real transport writes nothing but the dispatch' });
+    if (u.pathname.endsWith('/actions/runs')) return answer(200, { total_count: 1, workflow_runs: [RUN()] });
+    if (/\/actions\/runs\/42$/u.test(u.pathname)) return answer(200, RUN());
+    if (/\/issues\/\d+\/comments$/u.test(u.pathname)) return answer(200, Number(u.searchParams.get('page') ?? '1') > 1 ? [] : board.comments);
+    return answer(404, { message: 'Not Found' });
+  };
+  const send = async (payload, opts = {}) => {
+    sent.push(payload);
+    let timer;
+    const ceiling = new Promise((resolve) => {
+      timer = setTimeout(() => resolve({ state: 'never-settled', ok: false, requestId: payload.request_id, run: null, status: 204, verdict: 'ok', detail: `sendFleetWrite did not settle within ${REAL_TRANSPORT_CEILING_MS} ms` }), REAL_TRANSPORT_CEILING_MS);
+    });
+    const real = sendFleetWrite(payload, {
+      ...opts,
+      fetch: fetchImpl,
+      now: () => at,
+      sleep: async () => {},
+      ceilings: { startMs: 90_000, ceilingMs: 300_000, pollMs: 5_000, notes: [] },
+      pace: { file: join(dir, 'pace.jsonl'), env: { OS_PM_WRITE_MIN_GAP_MS: '0' }, log: () => {}, exit: (code) => { throw new Error(`self-test: the throttle refused with exit ${code}`); } },
+    });
+    try {
+      return await Promise.race([real, ceiling]);
+    } finally {
+      clearTimeout(timer);
+    }
+  };
+  return { send, sent, cleanup: () => rmSync(dir, { recursive: true, force: true }) };
+}
+
 async function driveOffline(argv, boardInit = {}, extra = {}) {
   const fake = fakeBoard(boardInit);
   const parsed = parseOptions(argv);
@@ -1851,9 +1946,12 @@ const hoursAfterKnock = (h) => Date.parse(KNOCK_AT) + h * 3_600_000;
 const RELEASE_BRANCH = 'claude/issue-7-silent';
 const RELEASE_TIP = 'abcdef1234567890abcdef1234567890abcdef12';
 const RELEASE_FILE = '/tmp/self-test/release.md';
-const RELEASE_TEXT =
+/** The operator's text WITHOUT its signature line — `judgeBody` refuses it before the stroke. */
+const RELEASE_TEXT_UNSIGNED =
   'Release: session `session_01TRIAGE000000000000000000` · reason: a silent claim — the owned-24h re-check 200 has had no answer · destination `pm:queue`\n\n' +
   'Provenance, three items: the triage duties text (the reclaim clock); verbatim 「敲门后 `RECLAIM_AFTER_HOURS = 12` 小时无答复 ⇒ 一笔中继释放」; said in `triage-duties.md`. Stamped {{NOW}}.';
+/** The text a triage seat sends: its signature line, then the `Release:` line (#27113). */
+const RELEASE_TEXT = `triage#1 · os-justin · session_01TRIAGE000000000000000000\n${RELEASE_TEXT_UNSIGNED}`;
 /** A silent card: claimed, knocked ~24 h later, nothing since. `serverNow` is what the fixture varies. */
 const silentCard = (serverNowHoursAfterKnock, extra = {}) => ({
   number: 7,
@@ -1871,7 +1969,7 @@ const silentCard = (serverNowHoursAfterKnock, extra = {}) => ({
 const RELEASE_ARGV = ['--repo', 'objectstack-ai/objectstack', '--issue', '7', '--release', '--recheck-comment', '200', '--comment-file', RELEASE_FILE, '--resume-from', `${RELEASE_BRANCH}@abcdef1234`];
 
 async function driveRelease(argv, boardInit, extra = {}) {
-  const fake = fakeBoard(boardInit);
+  const fake = extra.board ?? fakeBoard(boardInit);
   const parsed = parseOptions(argv);
   if (!parsed.ok) return { parsed, exit: EXIT_USAGE, fake, out: [], sent: [], text: '' };
   const out = [];
@@ -1910,6 +2008,7 @@ export async function relayMissProbe({ route, send }) {
 // that stops registering cases is the bug; a pinned TOTAL would hide it the
 // moment a sibling battery grows (#13489, the shape post-stamped.mjs carries).
 const FOLD_BATTERY = "the fold: a claim (comment + labels + assignee) and a verdict (comment + pr_ready + automerge_enable) as ONE relay stroke, the comment judged on post-stamped's path, every part read back on its own line, a part that fails read-back exit 4 and never repaired, RELAY-ONLY";
+const REAL_TRANSPORT_BATTERY = "the real transport: a comment-bearing stroke (a fold, a release) through fleet-write's own sendFleetWrite — fake fetch, real dispatch, real read-back — settles, exit 0, every ④ line printed";
 const KIND_BATTERY = 'the kind rule: no pm state added to a pull request, no `pm:awaiting-merge` added to an issue, a removal never refused, an unreadable kind refused — on both write paths, before the transport';
 const SELF_TEST_BATTERIES = Object.freeze({
   'the re-exec guard: the name this tool sets, and the patrol name that must not silence it': 11,
@@ -1924,10 +2023,11 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the retired lane aliases: an --add of domain:engine / services / cli / rest is written as domain:server before the target, step ② says so, the read-back is clean on either transport; --remove and a live domain:* label pass untouched': 8,
   'the CLI: what a typo must never be allowed to mean': 8,
   'the relay transport: ONE dispatch carrying the whole stroke, the same read-back, and an accepted dispatch with no run UNCONFIRMED under auto too — never a direct write': 14,
-  'the release: a silent claim reclaimed in ONE relay stroke — Release: comment → pm:queue on → pm:dispatched off → unassign — on the knock\'s SERVER-clock age, RELAY-ONLY, never a direct write': 32,
+  'the release: a silent claim reclaimed in ONE relay stroke — Release: comment → pm:queue on → pm:dispatched off → unassign — on the knock\'s SERVER-clock age, RELAY-ONLY, never a direct write': 34,
   [FOLD_BATTERY]: 24,
+  [REAL_TRANSPORT_BATTERY]: 5,
 });
-const SELF_TEST_BATTERY_FLOOR = 14;
+const SELF_TEST_BATTERY_FLOOR = 15;
 const UNATTRIBUTED_BATTERY = '(unattributed)';
 
 const batteryCases = new Map();
@@ -2262,7 +2362,7 @@ export async function selfTest() {
     // One leading signature line (#27113) stands ABOVE the first-line key, never in its place.
     const SIG = 'domain:skills#2 · os-justin · session_01ABCDEFGHJKMNPQRSTVWXYZ';
     t('a signed knock reads by the key on the line after its signature; a key on a later line, or under a near-miss signature, still does not', [isRecheckComment(`${SIG}\nOwned-24h re-check: x`), isRecheckComment(`${SIG}\n\n## Owned-24h re-check: x`), isRecheckComment(`${SIG}\nTriage\nOwned-24h re-check: x`), isRecheckComment('domain:skills#2 - os-justin - session_01ABCDEFGHJKMNPQRSTVWXYZ\nOwned-24h re-check: x')], [true, true, false, false]);
-    t('…and a signed release text is judged by its `Release:` line: accepted signed as unsigned, refused when no `Release:` line follows the signature', [releaseTextRefusal(`${SIG}\n${RELEASE_TEXT}`) === releaseTextRefusal(RELEASE_TEXT), typeof releaseTextRefusal(`${SIG}\nnote\nRelease: x`)], [true, 'string']);
+    t('…and a signed release text is judged by its `Release:` line: accepted signed as unsigned, refused when no `Release:` line follows the signature', [releaseTextRefusal(`${SIG}\n${RELEASE_TEXT_UNSIGNED}`) === releaseTextRefusal(RELEASE_TEXT_UNSIGNED), typeof releaseTextRefusal(`${SIG}\nnote\nRelease: x`)], [true, 'string']);
 
     // The fixture card the protocol names, younger than the clock.
     const young = await driveRelease(RELEASE_ARGV, silentCard(5));
@@ -2278,8 +2378,22 @@ export async function selfTest() {
     t('…in ONE dispatch carrying comment → labels_add → labels_remove → unassign, every action on the card', [old.sent.length, old.sent[0].actions.map((a) => a.op), old.sent[0].actions.every((a) => a.issue === 7)], [1, ['comment', 'labels_add', 'labels_remove', 'unassign'], true]);
     t('…and this process made ZERO direct writes — reads only', old.direct, []);
     const landed = old.fake.board.comments.at(-1);
-    t('…the Release: comment landed with the resume line and the measured clock appended', [landed.body.startsWith('Release: session'), landed.body.includes(`\nResume-from: ${RELEASE_BRANCH}@abcdef1234\n`), landed.body.includes('unanswered for 13h 0m'), landed.body.includes(`RECLAIM_AFTER_HOURS = ${RECLAIM_AFTER_HOURS}`)], [true, true, true, true]);
+    t('…the Release: comment landed under its signature line, with the resume line and the measured clock appended', [landed.body.startsWith('triage#1 · os-justin · session_01TRIAGE000000000000000000\nRelease: session'), landed.body.includes(`\nResume-from: ${RELEASE_BRANCH}@abcdef1234\n`), landed.body.includes('unanswered for 13h 0m'), landed.body.includes(`RECLAIM_AFTER_HOURS = ${RECLAIM_AFTER_HOURS}`)], [true, true, true, true]);
     t('…{{NOW}} in the operator text was stamped, and the read-back found the comment by its stored bytes', [landed.body.includes('{{NOW}}'), old.res.comment, old.text.includes('④ MATCHES — released')], [false, landed.id, true]);
+    // The comment is judged on post-stamped's path (`judgeBody`, comment mode), as `--comment-file`'s is.
+    const unsignedRelease = await driveRelease(RELEASE_ARGV, silentCard(13), { files: { [RELEASE_FILE]: RELEASE_TEXT_UNSIGNED } });
+    t('⭐ an UNSIGNED release text is refused by post-stamped\'s own judge BEFORE the stroke: exit 2, no dispatch, zero writes, the sender named', [unsignedRelease.exit, unsignedRelease.res.stoppedAt, unsignedRelease.sent.length, unsignedRelease.direct, unsignedRelease.text.includes('label-write: REFUSED'), unsignedRelease.text.includes('opens with no signature line'), unsignedRelease.text.includes('NOTHING WAS WRITTEN')], [EXIT_USAGE, 2, 0, [], true, true, true]);
+    {
+      const own = readFileSync(SELF_PATH, 'utf8');
+      const composeSource = own.slice(own.indexOf('export function composeReleaseBody('), own.indexOf('export function releaseActions('));
+      const releaseSource = own.slice(own.indexOf('export async function runRelease('), own.indexOf('function reportPrerequisite('));
+      t('structural: --release judges its composed body with post-stamped\'s judgeBody before it packs the stroke, and label-write defines no reader of its own', [
+        /return judgeBody\(raw, \{ mode: 'comment' \}, nowMs, 'label-write'\)/u.test(composeSource),
+        releaseSource.indexOf('composeReleaseBody(') > 0 && releaseSource.indexOf('composeReleaseBody(') < releaseSource.indexOf('packRequest('),
+        /\brenderBody\(/u.test(own),
+        /function\s+(renderBody|signatureRefusal|claimKeyedLineRefusals|recordKeyedLineRefusals|decisionFacetRefusals|vacantLedgerRefusals)\b/u.test(own),
+      ], [true, true, false, false]);
+    }
     const none = await driveRelease([...RELEASE_ARGV.slice(0, -1), 'none'], silentCard(13));
     t('`--resume-from none` releases without a branch or pull read, writing `Resume-from: none`', [none.exit, none.fake.calls.some((c) => c.op === 'branch-read' || c.op === 'pulls-list'), none.fake.board.comments.at(-1).body.includes('\nResume-from: none\n')], [EXIT_OK, false, true]);
 
@@ -2404,6 +2518,45 @@ export async function selfTest() {
     const duties = readFileSync(new URL('.claude/skills/pm-dispatch/references/execution-duties.md', REPO_ROOT), 'utf8');
     const landing = readFileSync(new URL('.claude/skills/pm-dispatch/references/landing-operations.md', REPO_ROOT), 'utf8');
     t('↔ the procedure text sends a claim and a landing through the fold, so a seat reads ONE stroke where it used to read two', [duties.includes('--comment-file'), landing.includes('--land')], [true, true]);
+  }
+
+  // ── the real transport ───────────────────────────────────────────────────
+  battery(REAL_TRANSPORT_BATTERY);
+  {
+    const SESSION = 'session_01ABCDEFGHJKMNPQRSTVWXYZ';
+    const route = { requested: 'auto', transport: 'dispatch', reason: 'self-test: dispatch', error: null, session: SESSION };
+    const SIG = `domain:skills#2 · os-justin · ${SESSION}`;
+    const CLAIM_FILE = '/tmp/self-test/claim.md';
+    const CLAIM = `${SIG}\nClaim: PM loop round 1 · {{NOW}}\nSession: \`${SESSION}\`\nBranch: \`claude/issue-7-fold\`\nSeat: \`domain:skills#2\`\nClause-②: no\n`;
+    const at = Date.UTC(2026, 10, 8, 15, 0, 0);
+    const claimArgv = ['--repo', 'objectstack-ai/objectstack', '--issue', '7', '--add', 'pm:dispatched', '--remove', 'pm:queue', '--assign', 'dev', '--comment-file', CLAIM_FILE];
+    const board = fakeBoard({ labels: ['pm:queue', 'domain:skills'], assignees: [], serverNow: at });
+    const wire = realTransport(board.board);
+    const out = [];
+    let fold;
+    try {
+      const parsed = parseOptions(claimArgv);
+      fold = await runLabelWrite(parsed.options, { call: board.call, log: (l) => out.push(l), route, send: wire.send, readText: () => CLAIM, now: () => new Date(at) });
+    } finally {
+      wire.cleanup();
+    }
+    const text = out.join('\n');
+    t('⭐ a FOLD through the real sendFleetWrite SETTLES: its read-back of the comment completes, ONE dispatch, exit 0', [fold.relay?.state, fold.exit, wire.sent.length], ['success', EXIT_OK, 1], text.slice(-600));
+    t('…and label-write\'s own ④ lines print after it, the comment found by its stored bytes', ['④ labels ✓', '④ assignees ✓', '④ comment ✓', '④ MATCHES'].map((l) => text.includes(l)), [true, true, true, true]);
+
+    const releaseBoard = fakeBoard(silentCard(13));
+    const releaseWire = realTransport(releaseBoard.board);
+    let rel;
+    try {
+      rel = await driveRelease(RELEASE_ARGV, silentCard(13), { send: releaseWire.send, board: releaseBoard });
+    } finally {
+      releaseWire.cleanup();
+    }
+    t('⭐ a RELEASE through the real sendFleetWrite SETTLES too: ONE dispatch, exit 0', [rel.res?.relay?.state, rel.exit, releaseWire.sent.length], ['success', EXIT_OK, 1], rel.text.slice(-600));
+    const own = readFileSync(SELF_PATH, 'utf8');
+    const sends = own.match(/\bsend\(packed\.payload, \{[^}]*\}/gu) ?? [];
+    t('structural: every send from this file hands sendFleetWrite the read-back judge, so it never imports one under this file\'s top-level await', [sends.length, sends.every((call) => call.includes('judge: readBackJudge()'))], [3, true]);
+    t('…and its ④ read-back prints after it, the release comment found by its stored bytes', [rel.text.includes('④ MATCHES — released'), rel.res?.comment === releaseBoard.board.comments.at(-1)?.id], [true, true], rel.text.slice(-600));
   }
 
   // ── the floor, BEFORE the verdict ────────────────────────────────────────
