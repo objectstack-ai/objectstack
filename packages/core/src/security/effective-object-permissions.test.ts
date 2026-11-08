@@ -206,9 +206,15 @@ describe('[#20083] plain wildcard coverage', () => {
     );
     // Seeded all-false, then folded: the super-user entry shape, not the wildcard's own key
     // order — [#20134] with `allowTransfer`, which `modifyAllRecords` grants, appended by the
-    // per-set fold (the wildcard's own `allowTransfer: false` grants nothing and is not copied).
-    expect(Object.keys(map.crm_account)).toEqual(['allowCreate', 'allowRead', 'allowEdit', 'allowDelete', 'allowTransfer', 'apiOperations']);
+    // per-set fold (the wildcard's own `allowTransfer: false` grants nothing and is not copied),
+    // and [#30237 PR 4] the two recycle-bin keys, which `modifyAllRecords` implies (Q5 = A).
+    expect(Object.keys(map.crm_account)).toEqual([
+      'allowCreate', 'allowRead', 'allowEdit', 'allowDelete', 'allowTransfer',
+      'allowRestoreOwnDeleted', 'manageRecycleBin', 'apiOperations',
+    ]);
     expect(map.crm_account.allowTransfer).toBe(true);
+    expect(map.crm_account.allowRestoreOwnDeleted).toBe(true);
+    expect(map.crm_account.manageRecycleBin).toBe(true);
     // …and the private object is the seed's, as before.
     expect(map.crm_secret).toMatchObject({ allowRead: true, allowEdit: true });
   });
