@@ -200,6 +200,9 @@ const ru = {
     requiredForAction: "Обязательно для выполнения «{{action}}».",
     aiSuggested: "Предложение ИИ",
     aiDraftNotice: "ИИ заполнил по чату поля с пометкой «Предложение ИИ». Ничего не сохраняется, пока вы их не проверите и не сохраните.",
+    aiBefore: "Было: {{value}}",
+    aiBeforeEmpty: "пусто",
+    aiRevert: "Вернуть",
     maxFileSize: "Максимальный размер: {{size}}",
     masterDetail: {
       loadingColumns: "Загрузка столбцов…",
@@ -735,6 +738,7 @@ const ru = {
       noSavedTemplates: "Нет сохранённых шаблонов",
       noneOption: "— Нет —",
       saveCurrent: "Сохранить текущий",
+      saveCurrentNeedsMapping: "Сопоставьте хотя бы один столбец, чтобы сохранить шаблон.",
       templateName: "Название шаблона",
       save: "Сохранить",
       deleteTemplate: "Удалить шаблон",
@@ -818,6 +822,7 @@ const ru = {
     eventTitlePlaceholder: "О чём это событие?",
     creating: "Создание…",
     titleRequired: "Укажите название",
+    rescheduleNotFound: "Эта запись ({{object}}) больше не существует, или у вас больше нет к ней доступа.",
     a11y: {
       region: "Календарь",
       grid: "Сетка календаря",

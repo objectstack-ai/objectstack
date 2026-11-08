@@ -195,6 +195,9 @@ const pt = {
     requiredForAction: "Obrigatório para executar «{{action}}».",
     aiSuggested: "Sugestão da IA",
     aiDraftNotice: "A IA preencheu a partir do chat os campos marcados como «Sugestão da IA». Nada é salvo até você revisar e salvar.",
+    aiBefore: "Antes: {{value}}",
+    aiBeforeEmpty: "vazio",
+    aiRevert: "Restaurar",
     maxFileSize: "Tamanho máximo: {{size}}",
     masterDetail: {
       loadingColumns: "Carregando colunas…",
@@ -716,6 +719,7 @@ const pt = {
       noSavedTemplates: "Sem modelos salvos",
       noneOption: "— Nenhum —",
       saveCurrent: "Salvar atual",
+      saveCurrentNeedsMapping: "Mapeie pelo menos uma coluna para salvar um modelo.",
       templateName: "Nome do modelo",
       save: "Salvar",
       deleteTemplate: "Excluir modelo",
@@ -795,6 +799,7 @@ const pt = {
     eventTitlePlaceholder: "Sobre o que é este evento?",
     creating: "Criando…",
     titleRequired: "O título é obrigatório",
+    rescheduleNotFound: "Este registro de {{object}} não existe mais ou você não tem mais acesso a ele.",
     a11y: {
       region: "Calendário",
       grid: "Grade do calendário",

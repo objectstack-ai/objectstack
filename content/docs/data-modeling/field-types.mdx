@@ -1139,6 +1139,20 @@ has none, the list is empty, or the load fails, the field is a text box that
 takes the typed name; a failure is shown with its cause, and the box stays
 editable.
 
+### Notification preference inputs (`notification-topic`, `notification-channel`, `quiet-hours`)
+
+The platform's notification preference (`sys_notification_preference`) declares three
+widgets, so the record form offers choices instead of a bare box:
+
+| Widget | Field | Draws | Stores |
+|---|---|---|---|
+| `notification-topic` | `topic` (`text`; also on `sys_notification_template`) | a pick-or-type list from `GET /api/v1/messaging/preference-options` | the topic as written, `*` for all |
+| `notification-channel` | `channel` (`text`) | the same list, marking a known channel whose service is not configured | the channel id as written, `*` for all |
+| `quiet-hours` | `quiet_hours` (`json`) | a time-zone picker and two times | `{ tz?, start: 'HH:MM', end: 'HH:MM' }` |
+
+A typed topic or channel the list does not hold is still stored. Like every `widget` value,
+a name no host registers falls back to the type's default input.
+
 ### A widget's face on the record heading
 
 A `text` field that declares `widget: 'recipient-picker'` or `widget: 'object-ref'` is drawn

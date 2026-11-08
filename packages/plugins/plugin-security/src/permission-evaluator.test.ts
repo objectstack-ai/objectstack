@@ -44,10 +44,18 @@ const OPERATION_FOR: Record<Verb, string> = {
   allowDelete: 'delete',
   allowTransfer: 'transfer',
   allowExport: 'export',
+  allowRestoreOwnDeleted: 'restore',
+  manageRecycleBin: 'purge',
 };
 
-type Verb = 'allowRead' | 'allowCreate' | 'allowEdit' | 'allowDelete' | 'allowTransfer' | 'allowExport';
+type Verb =
+  | 'allowRead' | 'allowCreate' | 'allowEdit' | 'allowDelete' | 'allowTransfer' | 'allowExport'
+  | 'allowRestoreOwnDeleted' | 'manageRecycleBin';
+/** The verbs the 3-state sweep over {@link FOLD_BITS} asks. */
 const VERBS: Verb[] = ['allowRead', 'allowCreate', 'allowEdit', 'allowDelete', 'allowTransfer', 'allowExport'];
+/** [#30237 PR 4] The recycle-bin keys, asked by `restore` and `purge`. */
+const BIN_VERBS: Verb[] = ['allowRestoreOwnDeleted', 'manageRecycleBin'];
+const ALL_VERBS: Verb[] = [...VERBS, ...BIN_VERBS];
 
 const FOLD_BITS = [
   'allowCreate', 'allowDelete', 'allowEdit', 'allowExport',
@@ -67,24 +75,37 @@ function referenceFold(p: Record<string, unknown>, verb: Verb): boolean {
     case 'allowDelete': return read && (p.allowDelete === true || modifyAll);
     case 'allowTransfer': return p.allowTransfer === true || modifyAll;
     case 'allowExport': return p.allowExport === true && read;
+    // [#30237 Q5 = A] Bounded by read; Modify All implies both; the manager
+    // bit implies restoring your own; allowDelete implies neither.
+    case 'manageRecycleBin': return read && (p.manageRecycleBin === true || modifyAll);
+    case 'allowRestoreOwnDeleted':
+      return read && (p.allowRestoreOwnDeleted === true || p.manageRecycleBin === true || modifyAll);
   }
 }
 
-function enumerateEntries(): Array<Record<string, unknown>> {
+function enumerateEntries(
+  bits: readonly string[] = FOLD_BITS,
+  states: ReadonlyArray<boolean | undefined> = BIT_STATES,
+): Array<Record<string, unknown>> {
   const out: Array<Record<string, unknown>> = [];
-  const total = BIT_STATES.length ** FOLD_BITS.length;
+  const total = states.length ** bits.length;
   for (let i = 0; i < total; i++) {
     const entry: Record<string, unknown> = {};
     let n = i;
-    for (const bit of FOLD_BITS) {
-      const s = BIT_STATES[n % BIT_STATES.length];
-      n = Math.floor(n / BIT_STATES.length);
+    for (const bit of bits) {
+      const s = states[n % states.length];
+      n = Math.floor(n / states.length);
       if (s !== undefined) entry[bit] = s;
     }
     out.push(entry);
   }
   return out;
 }
+
+/** [#30237 PR 4] Every bit the recycle-bin keys' fold reads, plus the one it must NOT read (allowDelete). */
+const BIN_FOLD_BITS = [
+  'allowDelete', 'allowRead', 'allowRestoreOwnDeleted', 'manageRecycleBin', 'modifyAllRecords', 'viewAllRecords',
+] as const;
 
 describe('checkObjectPermission — the one fold, asked (#18785)', () => {
   it('named cells: the fold as the rule states it', () => {
@@ -144,12 +165,14 @@ describe('checkObjectPermission — the one fold, asked (#18785)', () => {
     // and DESTRUCTIVE_OPERATIONS. Holding the fold to it is what makes a future
     // destructive operation added to the map go red in the spec instead of
     // silently losing its bypass (#1883).
-    expect([...MODIFY_ALL_WRITE_KEYS].sort()).toEqual(['allowDelete', 'allowEdit', 'allowTransfer']);
+    expect([...MODIFY_ALL_WRITE_KEYS].sort()).toEqual([
+      'allowDelete', 'allowEdit', 'allowRestoreOwnDeleted', 'allowTransfer', 'manageRecycleBin',
+    ]);
     const mad = { modifyAllRecords: true };
     for (const key of MODIFY_ALL_WRITE_KEYS) {
       expect(evaluator.checkObjectPermission(OPERATION_FOR[key as Verb], OBJ, [set('ps', { [OBJ]: mad })])).toBe(true);
     }
-    for (const verb of VERBS.filter((v) => !MODIFY_ALL_WRITE_KEYS.has(v as never) && v !== 'allowRead')) {
+    for (const verb of ALL_VERBS.filter((v) => !MODIFY_ALL_WRITE_KEYS.has(v as never) && v !== 'allowRead')) {
       expect(evaluator.checkObjectPermission(OPERATION_FOR[verb], OBJ, [set('ps', { [OBJ]: mad })])).toBe(false);
     }
   });
@@ -190,10 +213,85 @@ describe('checkObjectPermission — the one fold, asked (#18785)', () => {
 
   it('the unmapped-operation posture is untouched by the convergence', () => {
     const grant = set('ps', { [OBJ]: { allowRead: true, allowEdit: true, modifyAllRecords: true } });
-    // Destructive but unmapped ⇒ denied unconditionally, bypass never consulted.
-    expect(evaluator.checkObjectPermission('restore', OBJ, [grant])).toBe(false);
-    expect(evaluator.checkObjectPermission('purge', OBJ, [grant])).toBe(false);
+    // [#30237 PR 4] `restore` and `purge` are MAPPED now, so Modify All answers them.
+    expect(evaluator.checkObjectPermission('restore', OBJ, [grant])).toBe(true);
+    expect(evaluator.checkObjectPermission('purge', OBJ, [grant])).toBe(true);
     // Non-destructive unknown ⇒ default-allow, as before.
     expect(evaluator.checkObjectPermission('customReadSideOp', OBJ, [grant])).toBe(true);
   });
+
+  it('[#30237 PR 4] restore asks allowRestoreOwnDeleted and purge asks manageRecycleBin (Q5 = A, named cells)', () => {
+    const ask = (entry: Record<string, unknown>, op: 'restore' | 'purge') =>
+      evaluator.checkObjectPermission(op, OBJ, [set('ps', { [OBJ]: entry })]);
+
+    // The grants, each bounded by read.
+    expect(ask({ allowRead: true, allowRestoreOwnDeleted: true }, 'restore')).toBe(true);
+    expect(ask({ allowRestoreOwnDeleted: true }, 'restore')).toBe(false);
+    expect(ask({ allowRead: false, allowRestoreOwnDeleted: true }, 'restore')).toBe(false);
+    expect(ask({ allowRead: true, manageRecycleBin: true }, 'purge')).toBe(true);
+    expect(ask({ manageRecycleBin: true }, 'purge')).toBe(false);
+    expect(ask({ viewAllRecords: true, manageRecycleBin: true }, 'purge')).toBe(true);
+
+    // The manager bit implies restoring your own; restoring your own implies no purge.
+    expect(ask({ allowRead: true, manageRecycleBin: true }, 'restore')).toBe(true);
+    expect(ask({ allowRead: true, allowRestoreOwnDeleted: true }, 'purge')).toBe(false);
+
+    // Modify All implies both; View All implies neither.
+    expect(ask({ modifyAllRecords: true }, 'restore')).toBe(true);
+    expect(ask({ modifyAllRecords: true }, 'purge')).toBe(true);
+    expect(ask({ viewAllRecords: true }, 'restore')).toBe(false);
+    expect(ask({ viewAllRecords: true }, 'purge')).toBe(false);
+
+    // allowDelete implies neither: deleting a record is not taking it back, nor destroying it for good.
+    expect(ask({ allowRead: true, allowDelete: true }, 'restore')).toBe(false);
+    expect(ask({ allowRead: true, allowDelete: true }, 'purge')).toBe(false);
+    expect(ask({ allowRead: true, allowEdit: true, allowDelete: true, allowTransfer: true }, 'restore')).toBe(false);
+
+    // The bin keys widen no other verb.
+    const binOnly = { allowRead: true, allowRestoreOwnDeleted: true, manageRecycleBin: true };
+    for (const op of ['insert', 'update', 'delete', 'transfer', 'export']) {
+      expect(evaluator.checkObjectPermission(op, OBJ, [set('ps', { [OBJ]: binOnly })])).toBe(false);
+    }
+  });
+
+  it('[#30237 PR 4] exhaustively matches the bin keys\' fold over every combination of the bits it reads', () => {
+    const entries = enumerateEntries(BIN_FOLD_BITS);
+    expect(entries.length).toBe(3 ** BIN_FOLD_BITS.length);
+    const mismatches: string[] = [];
+    for (const entry of entries) {
+      const sets = [set('ps', { [OBJ]: entry })];
+      for (const verb of BIN_VERBS) {
+        const got = evaluator.checkObjectPermission(OPERATION_FOR[verb], OBJ, sets);
+        const want = referenceFold(entry, verb);
+        if (got !== want) mismatches.push(`${JSON.stringify(entry)} × ${verb}: door=${got} rule=${want}`);
+      }
+    }
+    expect(mismatches).toEqual([]);
+  });
+
+  it('[#30237 PR 4] no bit widens another verb: every verb over every present/absent combination of all ten bits', () => {
+    const entries = enumerateEntries([...FOLD_BITS, 'allowRestoreOwnDeleted', 'manageRecycleBin'], [true, undefined]);
+    expect(entries.length).toBe(2 ** 10);
+    const mismatches: string[] = [];
+    for (const entry of entries) {
+      const sets = [set('ps', { [OBJ]: entry })];
+      for (const verb of ALL_VERBS) {
+        const got = evaluator.checkObjectPermission(OPERATION_FOR[verb], OBJ, sets);
+        const want = referenceFold(entry, verb);
+        if (got !== want) mismatches.push(`${JSON.stringify(entry)} × ${verb}: door=${got} rule=${want}`);
+      }
+    }
+    expect(mismatches).toEqual([]);
+  });
+
+  for (const [verb, op] of [['allowRestoreOwnDeleted', 'restore'], ['manageRecycleBin', 'purge']] as const) {
+    it(`[#30237 PR 4] ${op}: the read half may arrive from a different set, as delete's does`, () => {
+      const reader = set('reader', { [OBJ]: { allowRead: true } });
+      const binner = set('binner', { [OBJ]: { [verb]: true } });
+      expect(evaluator.checkObjectPermission(op, OBJ, [reader, binner])).toBe(true);
+      expect(evaluator.checkObjectPermission(op, OBJ, [binner, reader])).toBe(true);
+      expect(evaluator.checkObjectPermission(op, OBJ, [binner])).toBe(false);
+      expect(evaluator.checkObjectPermission(op, OBJ, [reader])).toBe(false);
+    });
+  }
 });

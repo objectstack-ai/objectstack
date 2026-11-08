@@ -205,6 +205,9 @@ const zh = {
     requiredForAction: '执行「{{action}}」时必填。',
     aiSuggested: 'AI 建议',
     aiDraftNotice: 'AI 已根据聊天预填标为「AI 建议」的字段。检查并保存之前不会写入任何内容。',
+    aiBefore: '原值：{{value}}',
+    aiBeforeEmpty: '空',
+    aiRevert: '还原',
     maxFileSize: '最大文件大小：{{size}}',
     masterDetail: {
       loadingColumns: '正在加载列…',
@@ -591,6 +594,7 @@ const zh = {
       noSavedTemplates: '暂无保存的模板',
       noneOption: '— 无 —',
       saveCurrent: '保存当前映射',
+      saveCurrentNeedsMapping: '请至少映射一列，才能保存为模板。',
       templateName: '模板名称',
       save: '保存',
       deleteTemplate: '删除模板',
@@ -797,6 +801,7 @@ const zh = {
     eventTitlePlaceholder: '这个事件是关于什么的？',
     creating: '创建中…',
     titleRequired: '请填写标题',
+    rescheduleNotFound: '这条{{object}}记录已不存在，或者您已无权访问它。',
     a11y: {
       region: '日历',
       grid: '日历网格',

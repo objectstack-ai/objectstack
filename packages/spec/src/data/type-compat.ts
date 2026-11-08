@@ -39,7 +39,8 @@ export type SqlDialect =
   | 'bigquery'
   | 'mongo'
   | 'odata'
-  | 'oracle';
+  | 'oracle'
+  | 'mssql';
 
 /**
  * Result of a compatibility check:
@@ -155,6 +156,27 @@ const DIALECT_ALIASES: Partial<Record<SqlDialect, Record<string, CanonicalSqlTyp
     raw: 'binary', 'long raw': 'binary', blob: 'binary', bfile: 'binary',
     boolean: 'boolean', json: 'json',
   },
+  // Microsoft SQL Server, as `INFORMATION_SCHEMA.COLUMNS.DATA_TYPE` spells it
+  // (the parameter strip turns `nvarchar(max)` into `nvarchar`). Two entries
+  // OVERRIDE the base map rather than restate it: `timestamp` on SQL Server is
+  // the `rowversion` synonym, an 8-byte binary counter and never a date-time,
+  // and `bit` is the dialect's only boolean. `xml` is text, which is what the
+  // tedious client reads it as. Not mapped, so a draft flags them for review:
+  // `sql_variant` (a value of any type), `hierarchyid` and the
+  // `geography` / `geometry` spatial types (CLR types the client reads as bytes).
+  mssql: {
+    nvarchar: 'text', nchar: 'text', ntext: 'text', varchar: 'text', char: 'text', text: 'text',
+    xml: 'text', sysname: 'text',
+    bit: 'boolean',
+    tinyint: 'integer', smallint: 'integer', int: 'integer', bigint: 'bigint',
+    decimal: 'decimal', numeric: 'decimal', money: 'decimal', smallmoney: 'decimal',
+    float: 'float', real: 'float',
+    date: 'date', time: 'time',
+    datetime: 'datetime', datetime2: 'datetime', smalldatetime: 'datetime', datetimeoffset: 'datetime',
+    uniqueidentifier: 'uuid',
+    varbinary: 'binary', binary: 'binary', image: 'binary',
+    timestamp: 'binary', rowversion: 'binary',
+  },
 };
 
 /**
@@ -187,7 +209,7 @@ const DIALECT_ALIASES: Partial<Record<SqlDialect, Record<string, CanonicalSqlTyp
  * `RAW(16)` is the conventional Oracle column for a UUID / GUID (`SYS_GUID()`
  * returns one), so it maps to `uuid`; every other width is `binary`. The
  * field pairings over it are `'lossy'` on oracle, not exact: see
- * {@link DIALECT_DEMOTED_TO_LOSSY}.
+ * {@link DIALECT_LOSSY_RULES}.
  *
  * `undefined` for any other spelling — the caller then strips parameters and
  * reads the alias tables as for every dialect.
@@ -399,17 +421,38 @@ export function suggestFieldTypeForSqlType(rawType: string, dialect?: SqlDialect
 }
 
 /**
- * Canonical types whose EXACT pairings one dialect can only half-serve, so the
- * matrix answers them `'lossy'` there and a draft carries a `// REVIEW:` marker.
+ * The ONE place a dialect moves a pairing to `'lossy'` that the
+ * dialect-agnostic {@link CANONICAL_TO_FIELD} answers otherwise. Two moves,
+ * one rule per (dialect, canonical type), and both only ever toward `'lossy'`
+ * — never exact, never suggested — so a draft carries a `// REVIEW:` marker
+ * and validation warns instead of passing silently or failing:
  *
- * - `oracle` / `uuid`: a `RAW(16)` column reads back as a UUID string, but the
+ * - `demoteExact` — the canonical type's EXACT pairings, which this dialect
+ *   can only half-serve, answer `'lossy'` here.
+ *   `oracle` / `uuid`: a `RAW(16)` column reads back as a UUID string, but the
  *   driver binds a string comparand or write value as text, and Oracle refuses
  *   text against RAW. A field over it (a `lookup` keyed by a `SYS_GUID()`
  *   column included) displays correctly and cannot yet be filtered or written
  *   by its value. Binding through `HEXTORAW` is #31390.
+ * - `addLossy` — field types the base row answers `false` for, which this
+ *   dialect's column can carry with loss.
+ *   `mssql` / `text`: SQL Server (before its 2025 `json` type) keeps JSON in
+ *   `nvarchar(max)`, and the SQL driver writes a `json` field and a
+ *   multi-value field (`tags`, `multiselect`) there as JSON text and parses it
+ *   back on read. Lossy, because the column does not enforce JSON, and because
+ *   JSON-array membership (`$contains`) and `$empty` on a multi-value field
+ *   are refused on this dialect rather than approximated. Without the rule,
+ *   validation reported every such field as a type mismatch on the very
+ *   column shape the driver relies on (#31327).
  */
-const DIALECT_DEMOTED_TO_LOSSY: Partial<Record<SqlDialect, Partial<Record<CanonicalSqlType, true>>>> = {
-  oracle: { uuid: true },
+interface DialectLossyRule {
+  readonly demoteExact?: true;
+  readonly addLossy?: readonly FieldType[];
+}
+
+const DIALECT_LOSSY_RULES: Partial<Record<SqlDialect, Partial<Record<CanonicalSqlType, DialectLossyRule>>>> = {
+  oracle: { uuid: { demoteExact: true } },
+  mssql: { text: { addLossy: ['json', 'tags', 'multiselect'] } },
 };
 
 /**
@@ -424,10 +467,9 @@ export function isCompatible(
 ): Compatibility {
   const canonical = canonicalizeSqlType(rawType, dialect);
   const entry = CANONICAL_TO_FIELD[canonical];
-  if (entry.exact.includes(fieldType)) {
-    return dialect && DIALECT_DEMOTED_TO_LOSSY[dialect]?.[canonical] ? 'lossy' : true;
-  }
-  if (entry.lossy.includes(fieldType)) return 'lossy';
+  const rule = dialect ? DIALECT_LOSSY_RULES[dialect]?.[canonical] : undefined;
+  if (entry.exact.includes(fieldType)) return rule?.demoteExact ? 'lossy' : true;
+  if (entry.lossy.includes(fieldType) || rule?.addLossy?.includes(fieldType)) return 'lossy';
   // Unknown remote types are permissive-but-lossy against text/json only,
   // already encoded in CANONICAL_TO_FIELD.unknown.
   return false;

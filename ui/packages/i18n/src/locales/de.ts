@@ -193,6 +193,9 @@ const de = {
     requiredForAction: "Erforderlich, um „{{action}}“ auszuführen.",
     aiSuggested: "KI-Vorschlag",
     aiDraftNotice: "Die KI hat die mit „KI-Vorschlag“ markierten Felder aus dem Chat ausgefüllt. Gespeichert wird erst, wenn Sie sie prüfen und speichern.",
+    aiBefore: "Vorher: {{value}}",
+    aiBeforeEmpty: "leer",
+    aiRevert: "Zurücksetzen",
     maxFileSize: "Maximale Größe: {{size}}",
     masterDetail: {
       loadingColumns: "Spalten werden geladen…",
@@ -700,6 +703,7 @@ const de = {
       noSavedTemplates: "Keine gespeicherten Vorlagen",
       noneOption: "— Keine —",
       saveCurrent: "Aktuelle speichern",
+      saveCurrentNeedsMapping: "Ordnen Sie mindestens eine Spalte zu, um eine Vorlage zu speichern.",
       templateName: "Vorlagenname",
       save: "Speichern",
       deleteTemplate: "Vorlage löschen",
@@ -775,6 +779,7 @@ const de = {
     eventTitlePlaceholder: "Worum geht es bei diesem Termin?",
     creating: "Wird erstellt…",
     titleRequired: "Titel ist erforderlich",
+    rescheduleNotFound: "Dieser Datensatz ({{object}}) existiert nicht mehr, oder Sie haben keinen Zugriff mehr darauf.",
     a11y: {
       region: "Kalender",
       grid: "Kalenderraster",

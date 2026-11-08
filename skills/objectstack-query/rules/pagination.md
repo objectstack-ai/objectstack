@@ -1,6 +1,6 @@
 # Pagination Rules
 
-Guide for implementing pagination in ObjectStack queries.
+Fragments and ❌/✅ pairs are left out of `check:skill-examples`; the ❌ half is wrong on purpose.
 
 ## Strategies Overview
 
@@ -15,24 +15,26 @@ Guide for implementing pagination in ObjectStack queries.
 
 ## Offset Pagination
 
+<!-- os:check -->
 ```typescript
+import type { QueryInput } from '@objectstack/spec/data';
 // Page 1 (first 20 records)
-{
+const page1: QueryInput = {
   object: 'post',
   where: { published: true },
   orderBy: [{ field: 'created_at', order: 'desc' }],
   limit: 20,
   offset: 0
-}
+};
 
 // Page 3 (records 41–60)
-{
+const page3: QueryInput = {
   object: 'post',
   where: { published: true },
   orderBy: [{ field: 'created_at', order: 'desc' }],
   limit: 20,
   offset: 40
-}
+};
 ```
 
 ### OData Compatibility
@@ -51,21 +53,23 @@ Keyset pagination uses the last record's sort key value to fetch the next
 page. Because the `cursor` property was removed (see above), express the
 keyset as a `where` filter on the sort field:
 
+<!-- os:check -->
 ```typescript
+import type { QueryInput } from '@objectstack/spec/data';
 // First page
-{
+const first: QueryInput = {
   object: 'post',
   orderBy: [{ field: 'created_at', order: 'desc' }],
   limit: 20
-}
+};
 
 // Next page — filter past the last record's sort key value
-{
+const next: QueryInput = {
   object: 'post',
   where: { created_at: { $lt: '2025-01-15T10:30:00Z' } },  // last seen value
   orderBy: [{ field: 'created_at', order: 'desc' }],
   limit: 20
-}
+};
 ```
 
 **⚠️ CRITICAL:** The keyset `where` field MUST match the `orderBy` field, and
@@ -114,16 +118,18 @@ duplicate key values can skip or repeat rows at page boundaries.
 
 ### Multi-field Sorting
 
+<!-- os:check -->
 ```typescript
+import type { QueryInput } from '@objectstack/spec/data';
 // Sort by status (asc), then by created date (newest first)
-{
+const query: QueryInput = {
   object: 'task',
   orderBy: [
     { field: 'status', order: 'asc' },
     { field: 'created_at', order: 'desc' }
   ],
   limit: 50
-}
+};
 ```
 
 ## REST API Pagination Pattern
@@ -197,7 +203,10 @@ When building paginated REST endpoints:
 > `QueryBuilder.distinct()` is gone with it. Group by the fields instead: each
 > unique combination becomes one result row.
 
+<!-- os:check -->
 ```typescript
+import type { IDataEngine } from '@objectstack/spec/contracts';
+declare const engine: IDataEngine;
 // ✅ groupBy collapses duplicates
 const rows = await engine.aggregate('order', {
   groupBy: ['customer_id', 'product_category'],

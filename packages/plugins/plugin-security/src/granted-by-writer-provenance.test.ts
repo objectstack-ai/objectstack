@@ -155,6 +155,11 @@ async function boot(opts: { security: boolean } = { security: true }): Promise<R
     { id: 'bu_east', name: 'east', parent_business_unit_id: 'bu_hq' },
   ], SYS);
   await engine.insert('sys_business_unit_member', [{ id: 'bum_target', user_id: TARGET, business_unit_id: 'bu_east' }], SYS);
+  // The target is a member of the organization the delegate's session names, so
+  // a grant written in it names a holder the organization holds.
+  await engine.insert('sys_member', [
+    { id: 'mem_target_default', user_id: TARGET, organization_id: 'org_default', role: 'member', created_at: new Date().toISOString() },
+  ], SYS);
   await engine.insert('sys_permission_set', [
     { id: 'ps_plain', name: 'qa_plain', label: 'Plain', active: true },
     { id: 'ps_oa', name: 'organization_admin', label: 'Organization admin', active: true },
@@ -202,7 +207,10 @@ async function boot(opts: { security: boolean } = { security: true }): Promise<R
 
 const CALLERS = {
   'a tenant-level admin': { userId: ADMIN, positions: [], permissions: ['qa_tenant_admin'] },
-  'a scoped delegate': { userId: DELEGATE_USER, positions: [], permissions: ['qa_delegate'] },
+  // A delegated scope covers units of the active organization only (ADR-0123
+  // D2): the delegate's session carries the Default Organization the fixture
+  // rows were stamped with, as every `single` session does (ADR-0131 C1).
+  'a scoped delegate': { userId: DELEGATE_USER, positions: [], permissions: ['qa_delegate'], tenantId: 'org_default' },
 } as const;
 
 /** Each grant table, and a row on it every caller above may write. */

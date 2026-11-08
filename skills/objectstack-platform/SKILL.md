@@ -363,8 +363,8 @@ The stack's `data:` collection is authored with `defineSeed()`, which
 **objectstack-data** owns — go there for `externalId` matching, `env:` scoping,
 and which keys are derived.
 
-`mode` (`ignore` default · `upsert` · `insert` · `update` · `replace` ⚠️ **data
-loss**) decides what a replay does to rows that already exist —
+`mode` (`ignore` default · `upsert` · `insert` · `update` · `replace` ⚠️ never
+deletes, duplicates) decides what a replay does to existing rows:
 [Import modes](../objectstack-data/references/seeds.md#import-modes).
 
 ### Demo accounts — `demoStaff` vs `devLogins`

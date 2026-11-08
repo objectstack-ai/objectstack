@@ -25,7 +25,7 @@ import {
   ACTION_SUCCESS_TEMPLATE_ROOTS,
   actionConfirmTemplateRoots,
 } from './index';
-import { ActionSchema } from './action.zod';
+import { ActionSchema, InlineActionSchema } from './action.zod';
 import { ActionButtonPropsSchema, ActionGroupPropsSchema, ActionIconPropsSchema } from './component.zod';
 
 const KEYS = ['confirmText', 'successMessage', 'errorMessage'] as const;
@@ -111,7 +111,9 @@ describe('ActionSchema description / params[].helpText / outcomeMessages joined 
   /** Each slot: how to write a value into it, how to read it back, its refusal's slot name, and whether it keeps a locale map. */
   const SLOTS = [
     ['description', (v: unknown) => ({ description: v }), (d: Record<string, any>) => d.description, "An action's `description`", true],
-    ['params[].helpText', (v: unknown) => ({ params: [{ name: 'reason', type: 'text', helpText: v }] }), (d: Record<string, any>) => d.params[0].helpText, "An action param's `helpText`", false],
+    // #28266: the hint took the map its siblings keep, so an inline action's
+    // param dialog can be written per locale in every sentence.
+    ['params[].helpText', (v: unknown) => ({ params: [{ name: 'reason', type: 'text', helpText: v }] }), (d: Record<string, any>) => d.params[0].helpText, "An action param's `helpText`", true],
     ['outcomeMessages entry', (v: unknown) => ({ outcomeMessages: { paused: v } }), (d: Record<string, any>) => d.outcomeMessages.paused, "An action's `outcomeMessages` entry", true],
   ] as const;
 
@@ -168,5 +170,35 @@ describe('the roots are what the runner binds', () => {
     expect(ACTION_SUCCESS_RESULT_ROOT).toBe('result');
     expect([...ACTION_SUCCESS_TEMPLATE_ROOTS]).toEqual(['result', 'record']);
     expect([...ACTION_ERROR_TEMPLATE_ROOTS]).toEqual([]);
+  });
+});
+
+// #28266: a page button's inline action (`InlineActionSchema`, the pick an
+// `element:button` carries) has no translation bundle, so the locale map is
+// the only way to write its param dialog per locale. Its `helpText` now takes
+// the map beside `label`, `description`, the option labels and the toast.
+describe('an inline action writes its param helpText per locale (#28266)', () => {
+  it('parses a field-backed role param whose helpText is a locale map, keeping the map', () => {
+    const helpText = { en: 'Owner: full control of the organization.', 'zh-CN': '所有者：完全控制组织。' };
+    const r = InlineActionSchema.safeParse({
+      type: 'api',
+      label: { en: 'Invite members', 'zh-CN': '邀请成员' },
+      target: '/api/v1/auth/organization/invite-member',
+      params: [{ field: 'role', objectOverride: 'sys_member', required: true, helpText }],
+    });
+    expect(r.success, r.success ? '' : r.error.issues.map((i) => i.message).join('\n')).toBe(true);
+    if (!r.success) return;
+    expect((r.data as Record<string, any>).params[0].helpText).toEqual(helpText);
+  });
+
+  it('a map whose key is not a language tag is refused with the slot\'s own sentence', () => {
+    const r = InlineActionSchema.safeParse({
+      type: 'api',
+      target: '/x',
+      params: [{ name: 'reason', type: 'text', helpText: { key: 'help.reason', defaultValue: 'Why' } }],
+    });
+    expect(r.success).toBe(false);
+    if (r.success) return;
+    expect(r.error.issues.map((i) => i.message).join('\n')).toContain("An action param's `helpText` is a template-typed slot");
   });
 });

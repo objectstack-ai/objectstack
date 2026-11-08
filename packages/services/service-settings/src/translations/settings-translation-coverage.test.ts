@@ -12,10 +12,11 @@
  * This test pins each shipped non-English locale to full coverage of every
  * manifest's structural strings — namespace title/description, each group
  * title, each field label, each `info_banner`'s title and text (keyed by
- * the banner's `id` under `settings.<namespace>.banners`), and each
+ * the banner's `id` under `settings.<namespace>.banners`), each
  * `action_button`'s label (keyed by the button's `id` under
- * `settings.<namespace>.actions`). Dropdown *option* labels are intentionally
- * excluded: several must not be "translated" (the `timezone` option "UTC" is a
+ * `settings.<namespace>.actions`), and each `map` setting's table headers
+ * (`keys.<key>.keyColumn.label`, `keys.<key>.columns.<name>.label`).
+ * Dropdown *option* labels are intentionally excluded: several must not be "translated" (the `timezone` option "UTC" is a
  * code; each `locale` option names its language in that language), and
  * option-level parity is filled per-locale on a best-effort basis.
  */
@@ -94,6 +95,14 @@ function missingFor(data: { settings?: Record<string, any> }, m: SettingsManifes
       if (s.confirmOffText !== undefined && tr?.keys?.[s.key]?.confirmOffText == null) {
         missing.push(`key:${s.key}.confirmOffText`);
       }
+      // A map's table headers are the map's own copy, held to the label's
+      // coverage: an untranslated one heads the table in English (#31453).
+      if (s.type === 'map') {
+        if (s.keyColumn && tr?.keys?.[s.key]?.keyColumn?.label == null) missing.push(`key:${s.key}.keyColumn`);
+        for (const c of s.columns ?? []) {
+          if (tr?.keys?.[s.key]?.columns?.[c.name]?.label == null) missing.push(`key:${s.key}.columns.${c.name}`);
+        }
+      }
     }
   }
   return missing;
@@ -116,6 +125,7 @@ function undeclaredIn(data: { settings?: Record<string, any> }): string[] {
     const groups = new Set<string>();
     const keys = new Set<string>();
     const confirmsOff = new Set<string>();
+    const mapColumns = new Map<string, Set<string>>();
     const banners = new Set<string>();
     const actions = new Set<string>();
     for (const s of m.specifiers) {
@@ -128,6 +138,7 @@ function undeclaredIn(data: { settings?: Record<string, any> }): string[] {
       } else if (s.key) {
         keys.add(s.key);
         if (s.confirmOffText !== undefined) confirmsOff.add(s.key);
+        if (s.type === 'map') mapColumns.set(s.key, new Set((s.columns ?? []).map((c) => c.name)));
       }
     }
     for (const g of Object.keys(tr?.groups ?? {})) if (!groups.has(g)) extra.push(`${ns}.group:${g}`);
@@ -135,6 +146,15 @@ function undeclaredIn(data: { settings?: Record<string, any> }): string[] {
     for (const [k, v] of Object.entries(tr?.keys ?? {})) {
       if (keys.has(k) && (v as { confirmOffText?: unknown })?.confirmOffText != null && !confirmsOff.has(k)) {
         extra.push(`${ns}.key:${k}.confirmOffText`);
+      }
+      // Headers for a setting that is not a map, or for a column the map does
+      // not declare, head no table.
+      const entry = v as { keyColumn?: unknown; columns?: Record<string, unknown> };
+      if (!keys.has(k)) continue;
+      const declared = mapColumns.get(k);
+      if (entry?.keyColumn != null && !declared) extra.push(`${ns}.key:${k}.keyColumn`);
+      for (const c of Object.keys(entry?.columns ?? {})) {
+        if (!declared?.has(c)) extra.push(`${ns}.key:${k}.columns.${c}`);
       }
     }
     for (const b of Object.keys(tr?.banners ?? {})) if (!banners.has(b)) extra.push(`${ns}.banner:${b}`);

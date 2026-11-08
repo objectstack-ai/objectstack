@@ -195,6 +195,9 @@ const fr = {
     requiredForAction: "Requis pour exécuter « {{action}} ».",
     aiSuggested: "Suggestion de l'IA",
     aiDraftNotice: "L'IA a rempli depuis la discussion les champs marqués « Suggestion de l'IA ». Rien n'est enregistré tant que vous ne les avez pas vérifiés et enregistrés.",
+    aiBefore: "Avant : {{value}}",
+    aiBeforeEmpty: "vide",
+    aiRevert: "Rétablir",
     maxFileSize: "Taille maximale : {{size}}",
     masterDetail: {
       loadingColumns: "Chargement des colonnes…",
@@ -716,6 +719,7 @@ const fr = {
       noSavedTemplates: "Aucun modèle enregistré",
       noneOption: "— Aucun —",
       saveCurrent: "Enregistrer le modèle actuel",
+      saveCurrentNeedsMapping: "Faites correspondre au moins une colonne pour enregistrer un modèle.",
       templateName: "Nom du modèle",
       save: "Enregistrer",
       deleteTemplate: "Supprimer le modèle",
@@ -795,6 +799,7 @@ const fr = {
     eventTitlePlaceholder: "De quoi s'agit-il ?",
     creating: "Création…",
     titleRequired: "Le titre est obligatoire",
+    rescheduleNotFound: "Cet enregistrement ({{object}}) n'existe plus, ou vous n'y avez plus accès.",
     a11y: {
       region: "Calendrier",
       grid: "Grille du calendrier",

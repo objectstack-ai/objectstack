@@ -264,8 +264,13 @@ export function registerEmailEndpoints(this: EmailRouteHost, basePath: string): 
                     return;
                 }
 
-                const body = req.body ?? {};
-                if (!body || typeof body !== 'object') {
+                // An absent body is the empty message, for the service to
+                // judge. A body that is present must be a JSON object: an
+                // array is `typeof 'object'` and a JSON `null` is present, and
+                // neither is a message, so both take this route's own 400
+                // before the service is reached.
+                const body = req.body === undefined ? {} : req.body;
+                if (!isPlainObject(body)) {
                     res.status(400).json({ code: 'INVALID_REQUEST', error: 'JSON body required' });
                     return;
                 }

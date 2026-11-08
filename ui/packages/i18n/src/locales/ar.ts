@@ -207,6 +207,9 @@ const ar = {
     requiredForAction: "مطلوب لتنفيذ «{{action}}».",
     aiSuggested: "اقتراح الذكاء الاصطناعي",
     aiDraftNotice: "ملأ الذكاء الاصطناعي من المحادثة الحقول المميّزة بـ«اقتراح الذكاء الاصطناعي». لا يُحفظ شيء حتى تراجعها وتحفظها.",
+    aiBefore: "السابق: {{value}}",
+    aiBeforeEmpty: "فارغ",
+    aiRevert: "استعادة",
     maxFileSize: "الحجم الأقصى: {{size}}",
     masterDetail: {
       loadingColumns: "جارٍ تحميل الأعمدة…",
@@ -770,6 +773,7 @@ const ar = {
       noSavedTemplates: "لا قوالب محفوظة",
       noneOption: "— لا شيء —",
       saveCurrent: "حفظ الحالي",
+      saveCurrentNeedsMapping: "عيّن عمودًا واحدًا على الأقل لحفظ قالب.",
       templateName: "اسم القالب",
       save: "حفظ",
       deleteTemplate: "حذف القالب",
@@ -861,6 +865,7 @@ const ar = {
     eventTitlePlaceholder: "ما موضوع هذا الحدث؟",
     creating: "جارٍ الإنشاء…",
     titleRequired: "العنوان مطلوب",
+    rescheduleNotFound: "سجل {{object}} هذا لم يعد موجودًا، أو لم يعد لديك إذن للوصول إليه.",
     a11y: {
       region: "التقويم",
       grid: "شبكة التقويم",

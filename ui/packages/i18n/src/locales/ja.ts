@@ -193,6 +193,9 @@ const ja = {
     requiredForAction: "「{{action}}」の実行に必須です。",
     aiSuggested: "AI の提案",
     aiDraftNotice: "チャットの内容から「AI の提案」と表示された項目を AI が入力しました。確認して保存するまで何も保存されません。",
+    aiBefore: "変更前: {{value}}",
+    aiBeforeEmpty: "空",
+    aiRevert: "元に戻す",
     maxFileSize: "最大サイズ: {{size}}",
     masterDetail: {
       loadingColumns: "列を読み込み中…",
@@ -700,6 +703,7 @@ const ja = {
       noSavedTemplates: "保存されたテンプレートはありません",
       noneOption: "— なし —",
       saveCurrent: "現在を保存",
+      saveCurrentNeedsMapping: "テンプレートを保存するには、列を 1 つ以上マッピングしてください。",
       templateName: "テンプレート名",
       save: "保存",
       deleteTemplate: "テンプレートを削除",
@@ -775,6 +779,7 @@ const ja = {
     eventTitlePlaceholder: "この予定の内容は？",
     creating: "作成中…",
     titleRequired: "タイトルは必須です",
+    rescheduleNotFound: "この{{object}}レコードは存在しないか、アクセス権がなくなりました。",
     a11y: {
       region: "カレンダー",
       grid: "カレンダーグリッド",

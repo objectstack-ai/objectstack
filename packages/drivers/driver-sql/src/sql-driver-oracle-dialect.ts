@@ -343,7 +343,12 @@ export function oracleUpsertUnsupportedError(object: string): Error {
  *  - JSON membership has no construct, and the caller refuses it on Oracle
  *    rather than falling back to a substring test over the JSON text
  *    (`applyJsonMembership`).
+ *
+ * SQL Server (#31327, also federation-only) maps to `'unknown'` too, but meets
+ * neither construct that way: its aggregand takes its own arm first
+ * (`mssqlAggregandOperandSql` — a `bit` must be cast before SUM / AVG), and
+ * JSON membership is refused on it the same way as on Oracle.
  */
 export function coreSqlDialectOf(dialect: SqlDialectName): 'sqlite' | 'postgres' | 'mysql' | 'unknown' {
-  return dialect === 'oracle' ? 'unknown' : dialect;
+  return dialect === 'oracle' || dialect === 'mssql' ? 'unknown' : dialect;
 }

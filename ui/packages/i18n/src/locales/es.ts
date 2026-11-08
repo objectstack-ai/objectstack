@@ -200,6 +200,9 @@ const es = {
     requiredForAction: "Obligatorio para ejecutar «{{action}}».",
     aiSuggested: "Sugerencia de IA",
     aiDraftNotice: "La IA rellenó desde el chat los campos marcados como «Sugerencia de IA». No se guarda nada hasta que los revise y guarde.",
+    aiBefore: "Antes: {{value}}",
+    aiBeforeEmpty: "vacío",
+    aiRevert: "Restaurar",
     maxFileSize: "Tamaño máximo: {{size}}",
     masterDetail: {
       loadingColumns: "Cargando columnas…",
@@ -721,6 +724,7 @@ const es = {
       noSavedTemplates: "Sin plantillas guardadas",
       noneOption: "— Ninguno —",
       saveCurrent: "Guardar actual",
+      saveCurrentNeedsMapping: "Asigne al menos una columna para guardar una plantilla.",
       templateName: "Nombre de la plantilla",
       save: "Guardar",
       deleteTemplate: "Eliminar plantilla",
@@ -800,6 +804,7 @@ const es = {
     eventTitlePlaceholder: "¿De qué trata este evento?",
     creating: "Creando…",
     titleRequired: "El título es obligatorio",
+    rescheduleNotFound: "Este registro de {{object}} ya no existe o ya no tienes acceso a él.",
     a11y: {
       region: "Calendario",
       grid: "Cuadrícula del calendario",

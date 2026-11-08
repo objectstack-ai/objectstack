@@ -222,15 +222,23 @@ export type ObservedWriteOutcome =
 export interface ObservedWrite {
   /** The object written, as the engine resolved its name. */
   readonly object: string;
-  readonly operation: 'insert' | 'update' | 'delete';
+  /**
+   * [#30237] `purge` is the recycle bin's removal verb: a permanent delete
+   * (`delete(…, { permanent: true })`, whose `where` names the row), a
+   * `purge(entryId)` or an `empty(object)` (neither carries a `where`).
+   * `restore` writes a recycle-bin entry's rows back (`restore(entryId)`, no
+   * `where`). The entry an operation acts on is not on the record; the
+   * engine's answer is (`outcome`).
+   */
+  readonly operation: 'insert' | 'update' | 'delete' | 'purge' | 'restore';
   /**
    * The payload (one row, or the rows of a batch insert), copied when the
    * write reached the observer: what the write gates handed on, their own
    * fills (an `owner_id`) included, the field defaults and the hooks' changes
-   * not yet. `undefined` for a delete.
+   * not yet. `undefined` for a delete, a purge and a restore.
    */
   readonly data: EngineRow | EngineRow[] | undefined;
-  /** The selection an update or a delete was handed (`where`); `undefined` for an insert. */
+  /** The selection an update, a delete or a permanent delete was handed (`where`); `undefined` otherwise. */
   readonly where: EngineRow | undefined;
   /** `true` for a predicate write (`multi: true`). */
   readonly multi: boolean;
@@ -508,7 +516,9 @@ export interface VerifyHandle {
    * on: it changes no payload, no answer and no error. So what it sees is
    * fixed by where it sits, after the write gates the boot registered:
    *
-   * - **Seen:** every insert, update and delete those gates let through, from
+   * - **Seen:** every insert, update and delete those gates let through, and
+   *   [#30237] every recycle-bin `purge` (a permanent delete, `purge`,
+   *   `empty`) and `restore`, from
    *   any door (`hooks.run`, `seed`, a flow, a route, a hook's `ctx.api`), and
    *   every refusal the engine raises past them, such as a declared
    *   validation rule (`VALIDATION_FAILED`), a hook's throw, or a unique
@@ -593,9 +603,14 @@ function callShapeRefusal(message: string): Error & { code: string; status: numb
 /** [#22301] How long `WriteObservation.settled` waits when the caller names no `timeoutMs`. */
 const SETTLED_DEFAULT_TIMEOUT_MS = 2_000;
 
-/** [#22301] The three operations `observeWrites` records; every other operation passes unrecorded. */
+/**
+ * [#22301] The operations `observeWrites` records: every write the engine
+ * dispatches, [#30237] the recycle bin's `purge` and `restore` included (the
+ * engine's `WRITE_EPOCH_OPERATIONS`). Every other operation passes unrecorded.
+ */
 function isObservedOperation(operation: OperationContext['operation']): operation is ObservedWrite['operation'] {
-  return operation === 'insert' || operation === 'update' || operation === 'delete';
+  return operation === 'insert' || operation === 'update' || operation === 'delete' ||
+    operation === 'purge' || operation === 'restore';
 }
 
 /** [#22301] A row copied on entry, so a later change to the engine's payload cannot rewrite the record. */

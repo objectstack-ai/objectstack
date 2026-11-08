@@ -604,10 +604,17 @@ export const SpecifierSchema = lazySchema(() => z.object({
    * key against it, and every manifest read serves them as this specifier's
    * `options`. Without a source, a declared `options` table is the fallback,
    * as for a `select`; without either, any key is admitted.
+   *
+   * Translated under `settings.<namespace>.keys.<key>.keyColumn` (`label`, and
+   * `description` as `help`), beside the map's own `label`.
    */
   keyColumn: SpecifierMapKeyColumnSchema.optional().describe('Key column (map)'),
 
-  /** `map`: the value columns, in display order. See {@link keyColumn} for the stored shape. */
+  /**
+   * `map`: the value columns, in display order. See {@link keyColumn} for the
+   * stored shape. Translated under `settings.<namespace>.keys.<key>.columns.<name>`
+   * (`label`, and `description` as `help`), keyed by each column's `name`.
+   */
   columns: z.array(SpecifierMapColumnSchema).optional().describe('Value columns (map): one stores a scalar per key, several an object'),
 
   /**

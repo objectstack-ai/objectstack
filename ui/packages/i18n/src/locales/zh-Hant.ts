@@ -205,6 +205,9 @@ const zhHant = {
     requiredForAction: '執行「{{action}}」時必填。',
     aiSuggested: 'AI 建議',
     aiDraftNotice: 'AI 已根據聊天預填標為「AI 建議」的欄位。檢查並儲存之前不會寫入任何內容。',
+    aiBefore: '原值：{{value}}',
+    aiBeforeEmpty: '空',
+    aiRevert: '還原',
     maxFileSize: '最大檔案大小：{{size}}',
     masterDetail: {
       loadingColumns: '正在載入列…',
@@ -591,6 +594,7 @@ const zhHant = {
       noSavedTemplates: '暫無儲存的模板',
       noneOption: '— 無 —',
       saveCurrent: '儲存當前對映',
+      saveCurrentNeedsMapping: '請至少對映一列，才能儲存為模板。',
       templateName: '模板名稱',
       save: '儲存',
       deleteTemplate: '刪除模板',
@@ -797,6 +801,7 @@ const zhHant = {
     eventTitlePlaceholder: '這個事件是關於什麼的？',
     creating: '建立中…',
     titleRequired: '請填寫標題',
+    rescheduleNotFound: '這條{{object}}記錄已不存在，或者您已無權訪問它。',
     a11y: {
       region: '日曆',
       grid: '日曆網格',

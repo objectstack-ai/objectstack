@@ -395,7 +395,9 @@ export function isAudiencePosture(value: unknown): value is AudiencePosture {
  * their own act, with no per-user operator act). `invite_only` does not —
  * admission there comes only from an explicit operator-side act (a pending
  * invitation, admin create/import, SCIM provisioning, an operator-registered
- * identity provider).
+ * identity provider). An enterprise SSO provider (`@better-auth/sso`, OIDC or
+ * SAML) admits a person with no account and no invitation only when that
+ * provider sets `allowJit`; it is off by default.
  */
 export function audiencePermitsSelfRegistration(posture: AudiencePosture): boolean {
   return posture === 'email_domain' || posture === 'open';
@@ -426,6 +428,10 @@ export const AudienceConfigSchema = lazySchema(() => z.object({
    *   existence only through an operator-side act — a pending invitation
    *   (which admits the invitee's own sign-up), admin create-user / bulk
    *   import, SCIM provisioning, or an operator-registered identity provider.
+   *   An enterprise SSO provider (`@better-auth/sso`, OIDC or SAML) admits a
+   *   person with no account and no invitation only when that provider sets
+   *   `allowJit` (`sys_sso_provider.allow_jit`, off by default); a configured
+   *   `oidcProviders` entry admits as before.
    * - `email_domain`: self-registration is open ONLY to addresses whose domain
    *   is on {@link allowedEmailDomains}. Email verification is forced on, with
    *   no opt-out.

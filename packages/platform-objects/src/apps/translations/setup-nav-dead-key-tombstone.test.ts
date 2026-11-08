@@ -111,8 +111,9 @@ import { ar } from './ar.js';
 import { fr } from './fr.js';
 import { ptBR } from './pt-BR.js';
 import { ru } from './ru.js';
+import { de } from './de.js';
 
-const LOCALES = { en, 'zh-CN': zhCN, 'ja-JP': jaJP, 'es-ES': esES, 'zh-Hant': zhHant, ar, fr, 'pt-BR': ptBR, ru } as const;
+const LOCALES = { en, 'zh-CN': zhCN, 'ja-JP': jaJP, 'es-ES': esES, 'zh-Hant': zhHant, ar, fr, 'pt-BR': ptBR, ru, de } as const;
 
 /** Removed Setup nav ids. Delete a line here only together with its nav item. */
 const DEAD_SETUP_NAV_IDS = [

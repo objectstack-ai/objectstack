@@ -48,6 +48,39 @@ interface ServedOverlayRowCandidate {
  */
 interface StoredRowPlace {
     readonly type: string;
+    /**
+     * [#31399] The row's own `name` column: the name the by-name read finds
+     * the row under. The merge slots a stored body by it when the body states
+     * no name of its own ({@link mergePackageAwareOverlay}).
+     */
+    readonly name?: string;
+}
+
+/**
+ * [#31399] Marks a listed body that carries its row's `name` because it states
+ * none of its own ({@link mergePackageAwareOverlay}). A symbol key: object
+ * spreads along the list keep it, and it never reaches the wire. The list's
+ * served exit judges such a body's `_diagnostics` without that `name`
+ * ({@link withoutServedRowName}), since the document's schema does not
+ * declare it: the verdict is the one the by-name read gives the same row.
+ *
+ * ⚠️ The one exception to {@link listSlotNameOf}'s "the body is not given a
+ * `name`, so what a GET answers PUTs back through the strict schema": a body
+ * the list served its row's name (a `seed`; or any stored body that states no
+ * name, such as a legacy row saved before its schema declared one) carries a
+ * `name` the strict schema refuses, so a listed item PUT back verbatim is
+ * refused. The by-name read serves the body as stored, without it.
+ */
+export const SERVED_ROW_NAME: unique symbol = Symbol('metadata-protocol.servedRowName');
+
+/**
+ * [#31399] The body a listed item was stored as, when the list served it its
+ * row's `name` ({@link SERVED_ROW_NAME}); otherwise `undefined`.
+ */
+export function withoutServedRowName(item: unknown): Record<string, unknown> | undefined {
+    if (item === null || typeof item !== 'object' || (item as Record<PropertyKey, unknown>)[SERVED_ROW_NAME] !== true) return undefined;
+    const { name: _name, [SERVED_ROW_NAME]: _mark, ...stored } = item as Record<PropertyKey, unknown>;
+    return stored as Record<string, unknown>;
 }
 
 /**
@@ -357,8 +390,23 @@ export function mergePackageAwareOverlay(
         }
     }
     for (const { data, packageId, stored, standIn } of records) {
-        const body = data as any;
-        const bodyName = listSlotNameOf(canonicalType, body);
+        // [#31399] A stored body that states no name of its own (a `seed`:
+        // `SeedSchema` declares none, the name lives on the row) is slotted by
+        // its row's `name` column, the name the by-name read finds it under,
+        // and served carrying that name, as every listed item carries its own.
+        // Before, the merge skipped it, so `GET /meta/seed` listed no stored
+        // seed while `GET /meta/seed/:name` served each one. A body that states
+        // a name keeps it; the stored body is never written.
+        const ownName = listSlotNameOf(canonicalType, data);
+        const rowName = ownName === undefined && stored?.name !== undefined && stored.name !== ''
+            && data !== null && typeof data === 'object' && !Array.isArray(data)
+            ? stored.name
+            : undefined;
+        const body = (rowName !== undefined ? { ...(data as object), name: rowName, [SERVED_ROW_NAME]: true } : data) as any;
+        // A body whose own `name` is null still states one: it is listed under
+        // it (with `_diagnostics` flagging it), as before; only an absent name
+        // falls to the row's.
+        const bodyName = ownName !== undefined ? ownName : rowName;
         if (bodyName === undefined) continue;
         // The base row this record shadows at its own slot (for view-identity
         // healing): a same-package row, else a package-less one, else any

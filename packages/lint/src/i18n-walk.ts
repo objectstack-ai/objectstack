@@ -644,10 +644,10 @@ function pushDerived(
 }
 
 /**
- * [#24814, #27948] An action's `confirmText` / `successMessage` /
- * `description` / `outcomeMessages` entry is a `template` slot that also takes
- * an inline locale map, and a param's `helpText` one without it: a bare
- * string, the parsed
+ * [#24814, #27948, #28266] An action's `confirmText` / `successMessage` /
+ * `description` / `outcomeMessages` entry and a param's `helpText` are
+ * `template` slots that also take an inline locale map: a bare string, the
+ * parsed
  * `{ dialect: 'template', source }` envelope, or the map. The envelope and the
  * string are the same authored sentence, so the envelope is read through the
  * template judge's one reader and seeded like the string; anything else (the
