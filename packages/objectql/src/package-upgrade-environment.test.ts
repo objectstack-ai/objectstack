@@ -209,10 +209,11 @@ describe("the `manifest` service's planUpgrade", () => {
 describe('overrides of the base, as advice (ADR-0146 D2, as amended)', () => {
   const BASE = 'com.acme.crm';
   const LEAD = { name: 'acme_lead', fields: { name: { type: 'text' } } };
-  const view = (label: string) => ({ name: 'acme_lead_list', object: 'acme_lead', viewKind: 'list', label, columns: ['name'] });
+  // A view container, as a package ships it: its list view `all` is the item `acme_lead.all`.
+  const view = (label: string) => ({ object: 'acme_lead', listViews: { all: { type: 'grid', label, columns: ['name'] } } });
   const crm = (version: string, views: unknown[], extra: Record<string, unknown> = {}) =>
     ({ id: BASE, version, objects: [LEAD], views, ...extra });
-  const override = (basedOn: string) => ({ type: 'view', name: 'acme_lead_list', basedOn });
+  const override = (basedOn: string) => ({ type: 'view', name: 'acme_lead.all', basedOn });
   const reader = (entries: Array<Record<string, unknown>>) => vi.fn(async (_packageId: string) => entries as any);
 
   it('v1 → v2 changes an overridden view: one finding that hides the change; the schema plan is untouched', async () => {
@@ -223,7 +224,7 @@ describe('overrides of the base, as advice (ADR-0146 D2, as amended)', () => {
 
     expect(listOverrides).toHaveBeenCalledWith(BASE);
     expect(environment.overrides?.hidesChange).toEqual([expect.objectContaining({
-      package: BASE, type: 'view', name: 'acme_lead_list', basedOn: '1.0.0', installedVersion: '1.0.0', incomingVersion: '2.0.0', change: 'changed',
+      package: BASE, type: 'view', name: 'acme_lead.all', basedOn: '1.0.0', installedVersion: '1.0.0', incomingVersion: '2.0.0', change: 'changed',
     })]);
     expect(environment.overrides?.hidesChange[0].next).toMatch(/Studio/);
     expect(environment.overrides?.stale).toEqual([]);
@@ -246,18 +247,17 @@ describe('overrides of the base, as advice (ADR-0146 D2, as amended)', () => {
     });
     expect(environment.overrides?.hidesChange).toEqual([]);
     expect(environment.overrides?.stale).toEqual([expect.objectContaining({
-      package: BASE, type: 'view', name: 'acme_lead_list', basedOn: '1.0.0', installedVersion: '1.2.0', incomingVersion: '2.0.0',
+      package: BASE, type: 'view', name: 'acme_lead.all', basedOn: '1.0.0', installedVersion: '1.2.0', incomingVersion: '2.0.0',
     })]);
     expect(environment.overrides?.stale[0]).not.toHaveProperty('change');
   });
 
-  it('a view item of an aggregated container, and a base item the new version removes', async () => {
+  it('the container itself, overridden under its object, and a base item the new version removes', async () => {
     const engine = await makeEngine([LEAD], {});
-    const container = (label: string) => ({ object: 'acme_lead', list: { type: 'grid', label, columns: ['name'] } });
     const { environment } = await planPackageUpgrade(
       engine,
-      crm('1.0.0', [container('Leads')], { dashboards: [{ name: 'acme_home', label: 'Home', widgets: [] }] }),
-      crm('2.0.0', [container('All leads')]),
+      crm('1.0.0', [view('Leads')], { dashboards: [{ name: 'acme_home', label: 'Home', widgets: [] }] }),
+      crm('2.0.0', [view('All leads')]),
       { listOverrides: reader([{ type: 'view', name: 'acme_lead' }, { type: 'dashboard', name: 'acme_home', basedOn: '1.0.0' }]) },
     );
     expect(environment.overrides?.hidesChange.map((f) => `${f.type}:${f.name}:${f.change}`)).toEqual([
@@ -290,7 +290,7 @@ describe('overrides of the base, as advice (ADR-0146 D2, as amended)', () => {
 describe("the `manifest` service's planUpgrade reads the protocol's served overrides", () => {
   it('a protocol registered after the engine is asked when the plan is, for each base the artifact delivers', async () => {
     const listServedOverrides = vi.fn(async ({ packageId }: { packageId: string }) =>
-      packageId === 'com.acme.crm' ? [{ type: 'view', name: 'acme_lead_list', basedOn: '1.0.0' }] : []);
+      packageId === 'com.acme.crm' ? [{ type: 'view', name: 'acme_lead.all', basedOn: '1.0.0' }] : []);
     const kernel = new ObjectKernel({ logger: { level: 'silent' }, gracefulShutdown: false });
     await kernel.use(new ObjectQLPlugin({ registerProtocol: false } as any));
     await kernel.use({
@@ -302,7 +302,7 @@ describe("the `manifest` service's planUpgrade reads the protocol's served overr
       const ql = kernel.getService<ObjectQL>('objectql');
       ql.registerDriver(makeDriver({}) as any, true);
       const artifact = (version: string, label: string) => ({
-        packages: [{ manifest: { id: 'com.acme.crm', name: 'crm', version, type: 'app', views: [{ name: 'acme_lead_list', object: 'acme_lead', viewKind: 'list', label }] } }],
+        packages: [{ manifest: { id: 'com.acme.crm', name: 'crm', version, type: 'app', views: [{ object: 'acme_lead', listViews: { all: { type: 'grid', label, columns: ['name'] } } }] } }],
       });
 
       const manifest = kernel.getService<{ planUpgrade(a: unknown, b: unknown): ReturnType<typeof planPackageUpgrade> }>('manifest');
@@ -310,7 +310,7 @@ describe("the `manifest` service's planUpgrade reads the protocol's served overr
 
       expect(listServedOverrides).toHaveBeenCalledWith({ packageId: 'com.acme.crm' });
       expect(environment.overrides?.hidesChange.map((f) => `${f.package} ${f.type}:${f.name} ${f.installedVersion}→${f.incomingVersion}`))
-        .toEqual(['com.acme.crm view:acme_lead_list 1.0.0→2.0.0']);
+        .toEqual(['com.acme.crm view:acme_lead.all 1.0.0→2.0.0']);
     } finally {
       await kernel.shutdown();
     }

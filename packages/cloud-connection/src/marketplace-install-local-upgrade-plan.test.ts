@@ -196,11 +196,11 @@ describe('dryRun: true answers the upgrade plan and writes nothing', () => {
  * install refuses on it, and no finding-set token covers it.
  */
 describe('the advisory overrides: shown by the dry run, never a refusal', () => {
-    const VIEW = (label: string) => ({ name: 'acme_lead_list', object: 'acme_lead', viewKind: 'list', label, columns: ['company'] });
+    const VIEW = (label: string) => ({ object: 'acme_lead', listViews: { all: { type: 'grid', label, columns: ['company'] } } });
     const withView = (body: Row, label: string): Row => ({ ...body, views: [VIEW(label)] });
     const ADVISORY = {
         hidesChange: [{
-            package: VENDOR, type: 'view', name: 'acme_lead_list', basedOn: '1.0.0',
+            package: VENDOR, type: 'view', name: 'acme_lead.all', basedOn: '1.0.0',
             installedVersion: '1.0.0', incomingVersion: '2.0.0', change: 'changed', next: 'Open it in Studio.',
         }],
         stale: [],
@@ -233,7 +233,7 @@ describe('the advisory overrides: shown by the dry run, never a refusal', () => 
         expect(res.status).toBe(409);
         expect(res.payload.error.details.findingSet).toBe(plainToken);
         expect(res.payload.error.details.findings.map((f: any) => f.kind)).toEqual(['suspected_rename']);
-        expect(JSON.stringify(res.payload.error)).not.toContain('acme_lead_list');
+        expect(JSON.stringify(res.payload.error)).not.toContain('acme_lead.all');
     });
 });
 
