@@ -407,6 +407,12 @@ describe('#31390 a RAW(16) uuid comparand binds as HEXTORAW(?) over its hex digi
     expect(bindings).toEqual([UUID_HEX, UUID_2_HEX]);
   });
 
+  it('the 32 hex digits undashed (the RAWTOHEX form) bind the same bytes', async () => {
+    const { sql, bindings } = (await primed()).compileWhere('acct', { id: UUID_HEX.toLowerCase() });
+    expect(sql).toBe('select * from "ACCT" where "ACCT_ID" = HEXTORAW(?)');
+    expect(bindings).toEqual([UUID_HEX]);
+  });
+
   it('$ne keeps its null-safe shape around the bound comparand', async () => {
     const { sql, bindings } = (await primed()).compileWhere('ord', { account: { $ne: UUID } });
     expect(sql).toBe('select * from "ORD" where ("ACCT_REF" is null or "ACCT_REF" <> HEXTORAW(?))');
@@ -438,11 +444,11 @@ describe('#31390 a comparand that is not uuid text is INVALID_FILTER, never sent
     ['$eq with valid hex of another length', { account: { $eq: '0f8fad5b' } }],
     ['$in holding one bad member', { account: { $in: [UUID, 'nope'] } }],
     ['$ne with a number', { account: { $ne: 42 } }],
-    ['the key, undashed', { id: UUID_HEX }],
+    ['31 hex digits', { id: UUID_HEX.slice(1) }],
   ] as const) {
     it(`${label}: INVALID_FILTER / 400`, async () => {
       const p = await primed();
-      const err = caught(() => p.compileWhere(label === 'the key, undashed' ? 'acct' : 'ord', where as FilterCondition));
+      const err = caught(() => p.compileWhere(label === '31 hex digits' ? 'acct' : 'ord', where as FilterCondition));
       expect(err.code).toBe('INVALID_FILTER');
       expect(err.status).toBe(400);
     });
@@ -501,16 +507,18 @@ describe('#31390 a written RAW(16) uuid value binds as HEXTORAW(?)', () => {
     ]);
   });
 
-  it('create reads its row back by the HEXTORAW key, matching an upper-case written id to the lower-case read', async () => {
-    const p = await primed();
-    p.respond = (obj) => (obj.sql.startsWith('select') ? [{ ORD_ID: UUID, ACCT_REF: UUID_2, NOTE: 'x' }] : []);
-    const row = await p.create('ord', { id: UUID.toUpperCase(), account: UUID_2, note: 'x' });
-    expect(p.sent.map((s) => s.sql)).toEqual([
-      'insert into "ORD" ("ACCT_REF", "NOTE", "ORD_ID") values (HEXTORAW(:1), :2, HEXTORAW(:3))',
-      'select * from "ORD" where "ORD_ID" in (HEXTORAW(:1))',
-    ]);
-    expect(row).toMatchObject({ id: UUID, account: UUID_2, note: 'x' });
-  });
+  for (const [label, written] of [['upper-case', UUID.toUpperCase()], ['undashed', UUID_HEX]] as const) {
+    it(`create reads its row back by the HEXTORAW key, matching a ${label} written id to the read form`, async () => {
+      const p = await primed();
+      p.respond = (obj) => (obj.sql.startsWith('select') ? [{ ORD_ID: UUID, ACCT_REF: UUID_2, NOTE: 'x' }] : []);
+      const row = await p.create('ord', { id: written, account: UUID_2, note: 'x' });
+      expect(p.sent.map((s) => s.sql)).toEqual([
+        'insert into "ORD" ("ACCT_REF", "NOTE", "ORD_ID") values (HEXTORAW(:1), :2, HEXTORAW(:3))',
+        'select * from "ORD" where "ORD_ID" in (HEXTORAW(:1))',
+      ]);
+      expect(row).toMatchObject({ id: UUID, account: UUID_2, note: 'x' });
+    });
+  }
 });
 
 describe('#31390 which columns: read from the catalog, once per object', () => {

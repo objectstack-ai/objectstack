@@ -139,10 +139,20 @@ export function oracleRaw16AsUuid(value: unknown): unknown {
 }
 
 /**
- * Uuid text as the column reads it back ({@link oracleRaw16AsUuid}): 8-4-4-4-12
- * hexadecimal digits, either case.
+ * Uuid text: the form the column reads back as ({@link oracleRaw16AsUuid}),
+ * 8-4-4-4-12 hexadecimal digits, or the same 32 digits undashed (the column's
+ * own hex form, which Oracle's `RAWTOHEX` prints) — either case.
  */
-const UUID_TEXT = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const UUID_TEXT = /^(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9a-f]{32})$/i;
+
+/**
+ * Uuid text (either accepted form) as the column reads it back: lowercase and
+ * hyphenated, what {@link oracleRaw16AsUuid} answers for the same 16 bytes.
+ */
+export function oracleUuidReadForm(text: string): string {
+  const hex = text.replace(/-/g, '').toLowerCase();
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
 
 /** Where an {@link oracleUuidRawBinding} value goes: a WHERE comparand or a written column. */
 export type OracleUuidBindingRole = 'comparand' | 'write';
@@ -183,7 +193,8 @@ export function oracleUuidRawBinding(
   }
   const why =
     'is not a uuid. The column is a RAW(16) uuid on an Oracle table, and only uuid text ' +
-    '(8-4-4-4-12 hexadecimal digits, the form the column reads back as) can be bound to it.';
+    '(8-4-4-4-12 hexadecimal digits, the form the column reads back as, or the same 32 digits undashed) ' +
+    'can be bound to it.';
   if (role === 'comparand') {
     throw withheldFilterError(
       `This filter compares a uuid column with a value that ${why} The field is withheld from the message; ` +

@@ -38,6 +38,7 @@ import {
   isUnresolvableColumnError,
 } from './sql-driver-top-level.js';
 import type { SqlDriver } from './sql-driver.js';
+import { oracleUuidReadForm } from './sql-driver-oracle-dialect.js';
 
 /**
  * The `SqlDriver` members the bodies of {@link CrudFacet} read — every one of
@@ -439,10 +440,10 @@ export class CrudFacet {
     const builder = this.getBuilder(writeTable, options);
     this.applyTenantScope(builder, object, scopeOptions);
     // [#31390] On Oracle a RAW(16) uuid key binds each id as `HEXTORAW(?)`, and
-    // reads back as lowercase uuid text whatever case it was written in.
+    // reads back in the lowercase hyphenated form whatever form it was written in.
     const keys = written.map((row) => this.oracleUuidBinding(object, 'id', row.id, 'comparand'));
     const writtenKey = (row: Record<string, any>, i: number): string =>
-      keys[i] === row.id ? String(row.id) : String(row.id).toLowerCase();
+      keys[i] === row.id ? String(row.id) : oracleUuidReadForm(String(row.id));
     const stored: Record<string, any>[] = await builder.whereIn(idColumn, keys as any[]);
     const byId = new Map<string, Record<string, any>>();
     for (const row of stored) byId.set(String(row[idColumn]), row);
