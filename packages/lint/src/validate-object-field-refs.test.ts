@@ -575,13 +575,79 @@ describe('validateObjectFieldRefs — summaryOperations.filter (addresses the CH
     ]);
   });
 
-  it('passes child fields, operators, and a relationship path through the child', () => {
+  it('passes child fields with operators, and the nested one-level relation form the engine serves', () => {
     expect(validateObjectFieldRefs(rollup({
       total: { $gt: 0 },
       issued_on: { $gte: '2026-01-01' },
       region: { $in: ['emea', 'apac'] },
-      'account.status': 'active',
+      account: { status: 'active', industry: { $in: ['saas'] } },
     }))).toEqual([]);
+  });
+
+  it('REFUSES the dotted spelling of a relation path, with the nested spelling as the cure', () => {
+    const findings = validateObjectFieldRefs(rollup({ 'account.status': 'active' }));
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatchObject({
+      severity: 'error',
+      rule: OBJECT_FIELD_REF_UNKNOWN,
+      path: 'objects[0].fields.billed.summaryOperations.filter.account.status',
+    });
+    expect(findings[0]!.message).toContain('dotted path through the relation "account"');
+    expect(findings[0]!.message).toContain('every recompute fails');
+    expect(findings[0]!.hint).toBe('Nest the condition beneath the relation field: { account: { status: VALUE } }.');
+  });
+
+  it('REFUSES a dotted path into a scalar field, and judges a dotted key whose head is unknown as unknown', () => {
+    const findings = validateObjectFieldRefs(rollup({ 'region.code': 'x', 'regoin.code': 'y' }));
+    expect(findings.map((f) => f.path)).toEqual([
+      'objects[0].fields.billed.summaryOperations.filter.region.code',
+      'objects[0].fields.billed.summaryOperations.filter.regoin.code',
+    ]);
+    expect(findings[0]!.message).toContain('a dotted path into "region", a text field');
+    expect(findings[0]!.hint).toContain('Denormalise the value onto the child object');
+    expect(findings[1]!.message).toContain('"regoin" is not a field on object "crm_invoice"');
+  });
+
+  it('REFUSES a child field computed on read (formula), at the top level and one level down', () => {
+    const stack = rollup({ is_big: true, account: { score_band: 'a' } }) as any;
+    stack.objects[1].fields.is_big = { type: 'formula', expression: 'total > 100' };
+    stack.objects[0].fields.score_band = { type: 'formula', expression: "'a'" };
+    const findings = validateObjectFieldRefs(stack);
+    expect(findings.map((f) => f.path)).toEqual([
+      'objects[0].fields.billed.summaryOperations.filter.is_big',
+      'objects[0].fields.billed.summaryOperations.filter.account.score_band',
+    ]);
+    expect(findings[0]!.message).toContain('a formula field of "crm_invoice", computed on read');
+    for (const f of findings) expect(f.hint).toContain('Denormalise the value onto the child object');
+  });
+
+  it('REFUSES what the nested form cannot serve: an unknown related key, a dotted one, a second relation level, an empty condition', () => {
+    const stack = rollup({
+      $and: [
+        { account: { statsu: 'active' } },
+        { account: { 'parent.name': 'x' } },
+        { account: { parent: { name: 'x' } } },
+        { account: {} },
+      ],
+    }) as any;
+    stack.objects[0].fields.parent = { type: 'lookup', reference: 'crm_account' };
+    const findings = validateObjectFieldRefs(stack);
+    expect(findings.map((f) => f.path)).toEqual([
+      'objects[0].fields.billed.summaryOperations.filter.$and[0].account.statsu',
+      'objects[0].fields.billed.summaryOperations.filter.$and[1].account.parent.name',
+      'objects[0].fields.billed.summaryOperations.filter.$and[2].account.parent',
+      'objects[0].fields.billed.summaryOperations.filter.$and[3].account',
+    ]);
+    expect(findings[0]!.message).toContain('"statsu" is not a field on object "crm_account"');
+    expect(findings[1]!.message).toContain('reaches one level only');
+    expect(findings[2]!.message).toContain('is itself a relation of "crm_account"');
+    expect(findings[3]!.message).toContain('names no field of "crm_account"');
+  });
+
+  it('judges only a `summary` field', () => {
+    const stack = rollup({ regoin: 'emea' }) as any;
+    stack.objects[0].fields.billed.type = 'number';
+    expect(validateObjectFieldRefs(stack)).toEqual([]);
   });
 
   it('does not judge a filter whose child the stack does not define, or a roll-up with no filter', () => {
