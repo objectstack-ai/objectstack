@@ -55,3 +55,5 @@ export { SysScimIdentityTombstone } from './sys-scim-identity-tombstone.object.j
 export { SysScimProjectionGrant } from './sys-scim-projection-grant.object.js';
 export { SysScimSubject } from './sys-scim-subject.object.js';
 export { SysScimUser } from './sys-scim-user.object.js';
+// The identity-provider group → permission-set mapping the SCIM projection reads.
+export { SysIdpGroupMapping } from './sys-idp-group-mapping.object.js';
