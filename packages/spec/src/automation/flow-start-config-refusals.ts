@@ -26,7 +26,11 @@ import { ScheduleSchema } from '../system/job.zod';
  *      - an object that carries `type` is judged against the published
  *        {@link ScheduleSchema} (the discriminant, a cron `timezone` that is a
  *        member of `iana_time_zone`, a positive integer `intervalMs`, an ISO
- *        `at`), and then, as an untyped one is, for being readable at all;
+ *        `at`), and then, as an untyped one is, for being readable at all.
+ *        By ruling, the typed aliases the reader happens to bind
+ *        (`{ type: 'cron', cron }`, `{ type: 'interval', every }`) are refused
+ *        too, because the published schema does not declare those keys; the
+ *        refusal names the declared spelling (`expression`, `intervalMs`);
  *      - any other value is refused only when the reader reads nothing from it
  *        ({@link flowStartScheduleReadsNothing}). The untyped aliases the
  *        reader accepts (`{ cron }`, `{ expression }`, `{ every }`,
@@ -76,6 +80,24 @@ export function flowStartScheduleReadsNothing(raw: unknown): boolean {
   return true;
 }
 
+/**
+ * The key a typed schedule spells another way. `normalizeSchedule` reads the
+ * untyped aliases `cron` and `every` inside its typed branches too, but the
+ * published {@link ScheduleSchema} declares only `expression` and
+ * `intervalMs` on a typed object (ruling 6717636410 §2), so the refusal names
+ * the declared spelling.
+ */
+function typedAliasHint(raw: Record<string, unknown>): string {
+  const has = (k: string) => Object.prototype.hasOwnProperty.call(raw, k);
+  if (raw.type === 'cron' && has('cron') && !has('expression')) {
+    return " A typed cron schedule names its cron in `expression`, not `cron`: write `{ type: 'cron', expression: '…' }`.";
+  }
+  if (raw.type === 'interval' && has('every') && !has('intervalMs')) {
+    return " A typed interval schedule names its period in `intervalMs`, not `every`: write `{ type: 'interval', intervalMs: … }`.";
+  }
+  return '';
+}
+
 function scheduleRefusal(raw: unknown): string | undefined {
   if (raw == null || typeof raw === 'string') {
     return typeof raw === 'string' && flowStartScheduleReadsNothing(raw)
@@ -90,7 +112,9 @@ function scheduleRefusal(raw: unknown): string | undefined {
       const issue = parsed.error.issues[0];
       const at = issue && issue.path.length > 0 ? ` at \`schedule.${issue.path.join('.')}\`` : '';
       return (
-        `The start node's \`config.schedule\` is not a schedule${at}: ${issue?.message ?? 'refused'}. The schedule ` +
+        `The start node's \`config.schedule\` is not a schedule${at}: ${issue?.message ?? 'refused'}.` +
+        typedAliasHint(raw) +
+        ' The schedule ' +
         'readers cannot use it, so a schedule flow stays unbound and a time-relative sweep falls back to daily ' +
         "08:00 UTC. Write `{ type: 'cron', expression: '0 8 * * *', timezone: 'UTC' }`, " +
         "`{ type: 'interval', intervalMs: 60000 }` or `{ type: 'once', at: '<ISO datetime>' }`, or a bare cron string."
@@ -114,7 +138,11 @@ export function flowStartConfigRefusals(flow: unknown): FlowStartConfigRefusal[]
   flow.nodes.forEach((node, index) => {
     if (!isRecord(node) || node.type !== 'start' || !isRecord(node.config)) return;
     const config = node.config;
-    if (config.timeRelative !== undefined && Object.prototype.hasOwnProperty.call(config, 'filter')) {
+    // A sweep is a start node whose `timeRelative` is a non-null object, the
+    // exact test the trigger-kind resolver (`flow-trigger-kind.ts`) routes by,
+    // so `timeRelative: null` is not judged as a sweep.
+    const isSweep = config.timeRelative != null && typeof config.timeRelative === 'object';
+    if (isSweep && Object.prototype.hasOwnProperty.call(config, 'filter')) {
       out.push({
         path: ['nodes', index, 'config', 'filter'],
         message:

@@ -45,6 +45,11 @@ describe('flow start config — `filter` beside `timeRelative` (#31224 B1)', () 
     expect(flowStartConfigRefusals(flowWith({ timeRelative: { ...TIME_RELATIVE, filter: { status: 'active' } } }))).toEqual([]);
     expect(flowStartConfigRefusals(flowWith({ triggerType: 'schedule', schedule: '0 8 * * *', filter: { a: 1 } }))).toEqual([]);
   });
+
+  it('judges no `filter` beside `timeRelative: null`: the trigger-kind resolver does not route that start node as a sweep', () => {
+    expect(flowStartConfigRefusals(flowWith({ timeRelative: null, filter: { status: 'active' } }))).toEqual([]);
+    expect(startIssues({ timeRelative: null, filter: { status: 'active' } })).toEqual([]);
+  });
 });
 
 describe('flow start config — `schedule` (#31224 B1, ruling option (a))', () => {
@@ -91,6 +96,24 @@ describe('flow start config — `schedule` (#31224 B1, ruling option (a))', () =
       expect(found, JSON.stringify(schedule)).toHaveLength(1);
       expect(found[0]!.message).toMatch(/schedule flow stays unbound and a time-relative sweep falls back to daily 08:00 UTC/);
     }
+  });
+
+  it('refuses the typed aliases the published ScheduleSchema does not declare, naming the declared spelling', () => {
+    const cron = startIssues({ triggerType: 'schedule', schedule: { type: 'cron', cron: '0 8 * * *' } });
+    expect(cron).toHaveLength(1);
+    expect(cron[0]!.path).toBe('nodes.0.config.schedule');
+    expect(cron[0]!.message).toMatch(/is not a schedule at `schedule\.expression`/);
+    expect(cron[0]!.message).toMatch(/names its cron in `expression`, not `cron`/);
+
+    const every = startIssues({ triggerType: 'schedule', schedule: { type: 'interval', every: 60000 } });
+    expect(every).toHaveLength(1);
+    expect(every[0]!.path).toBe('nodes.0.config.schedule');
+    expect(every[0]!.message).toMatch(/is not a schedule at `schedule\.intervalMs`/);
+    expect(every[0]!.message).toMatch(/names its period in `intervalMs`, not `every`/);
+
+    // Without the alias key, no alias hint.
+    const bare = flowStartConfigRefusals(flowWith({ triggerType: 'schedule', schedule: { type: 'cron' } }));
+    expect(bare[0]!.message).not.toMatch(/not `cron`/);
   });
 
   it('refuses a typed cron whose expression is an envelope: it passes the schema, and the reader reads nothing', () => {
