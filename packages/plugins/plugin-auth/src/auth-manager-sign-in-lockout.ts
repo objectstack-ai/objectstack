@@ -109,9 +109,35 @@ function sameInstant(stored: unknown, at: Date): boolean {
   return new Date(stored as string | number | Date).getTime() === at.getTime();
 }
 
-/** Whether a predicate write landed: an engine that reports no count is read as landed. */
-function writeLanded(result: unknown): boolean {
+/**
+ * The compare-and-set write on an account's counter that reserving an attempt
+ * and handing one back share: `patch` lands only while `failed_login_count`
+ * still holds `expected`. `multi: true` because the by-id path binds only the
+ * primary key and would drop the rest of the predicate (the shape
+ * `db-queue-adapter.ts` gives for its own compare-and-set writes). Resolves
+ * whether it landed; an engine that reports no count is read as landed.
+ */
+async function writeCounterIfUnchanged(
+  engine: IDataEngine,
+  userId: string,
+  expected: unknown,
+  patch: Record<string, unknown>,
+): Promise<boolean> {
+  const result: unknown = await engine.update('sys_user', patch, {
+    where: { id: userId, failed_login_count: expected },
+    multi: true,
+    context: LOCKOUT_SYSTEM_CTX,
+  } as any);
   return typeof result === 'number' ? result > 0 : true;
+}
+
+/** Zero an account's counter and lift its lock: the write a successful sign-in and a completed reset share. */
+async function writeLockoutCleared(engine: IDataEngine, userId: string): Promise<void> {
+  await engine.update(
+    'sys_user',
+    { id: userId, failed_login_count: 0, locked_until: null },
+    { context: LOCKOUT_SYSTEM_CTX } as any,
+  );
 }
 
 /**
@@ -154,14 +180,7 @@ async function reserveSignInAttempt(
       patch.locked_until = lockedUntil;
       lockStamped = { userId: row.id, lockedUntil, threshold };
     }
-    // `multi: true` because the by-id path binds only the primary key and
-    // would drop the rest of the predicate (the shape `db-queue-adapter.ts`
-    // gives for its own compare-and-set writes).
-    const landed = writeLanded(await engine.update('sys_user', patch, {
-      where: { id: row.id, failed_login_count: priorCount },
-      multi: true,
-      context: LOCKOUT_SYSTEM_CTX,
-    } as any));
+    const landed = await writeCounterIfUnchanged(engine, row.id, priorCount, patch);
     if (locked) {
       return { identifier, userId: row.id, verdict: 'locked', priorCount, reservedCount: landed ? reservedCount : Number(priorCount) || 0, priorLockedUntil };
     }
@@ -310,13 +329,7 @@ export async function settleSignInAttempt(
   if (outcome === 'succeeded') {
     try {
       const u = await this.findSignInAccount(engine, email, ['failed_login_count', 'locked_until']);
-      if (u && ((Number(u.failed_login_count) || 0) !== 0 || u.locked_until)) {
-        await engine.update(
-          'sys_user',
-          { id: u.id, failed_login_count: 0, locked_until: null },
-          { context: LOCKOUT_SYSTEM_CTX } as any,
-        );
-      }
+      if (u && ((Number(u.failed_login_count) || 0) !== 0 || u.locked_until)) await writeLockoutCleared(engine, u.id);
     } catch (e) {
       this.logDurabilityDegradation(
         'AuthManager: a successful sign-in did NOT clear the sign-in lockout counter — the user '
@@ -368,12 +381,7 @@ async function releaseReservation(
       ) {
         patch.locked_until = attempt.priorLockedUntil ?? null;
       }
-      const landed = writeLanded(await engine.update('sys_user', patch, {
-        where: { id: attempt.userId, failed_login_count: row.failed_login_count ?? null },
-        multi: true,
-        context: LOCKOUT_SYSTEM_CTX,
-      } as any));
-      if (landed) return;
+      if (await writeCounterIfUnchanged(engine, attempt.userId, row.failed_login_count ?? null, patch)) return;
     }
   } catch (e) {
     this.logDurabilityDegradation(
@@ -402,11 +410,7 @@ export async function clearSignInLockout(
       context: LOCKOUT_SYSTEM_CTX,
     } as any);
     if (!row || ((Number(row.failed_login_count) || 0) === 0 && !row.locked_until)) return;
-    await engine.update(
-      'sys_user',
-      { id: userId, failed_login_count: 0, locked_until: null },
-      { context: LOCKOUT_SYSTEM_CTX } as any,
-    );
+    await writeLockoutCleared(engine, userId);
   } catch (e) {
     // The new password is already written and the reset answers success.
     this.logDurabilityDegradation(
