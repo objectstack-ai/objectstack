@@ -306,7 +306,7 @@ for (const cell of CELLS) {
           new Request(`${AUTH}/sign-up/email`, {
             method: 'POST',
             headers: { 'content-type': 'application/json', origin: BASE },
-            body: JSON.stringify({ email: 'first@corp.example', password: PASSWORD, name: 'First Member' }),
+            body: JSON.stringify({ email: 'first@corp.example', password: PASSWORD, name: 'First Member', invitationId: 'inv_first' }),
           }),
         );
         expect(first.status, `the setup sign-up must succeed: ${await first.clone().text()}`).toBe(200);
@@ -320,7 +320,7 @@ for (const cell of CELLS) {
             new Request(`${AUTH}/sign-up/email`, {
               method: 'POST',
               headers: { 'content-type': 'application/json', origin: BASE },
-              body: JSON.stringify({ email: 'second@corp.example', password: PASSWORD, name: S }),
+              body: JSON.stringify({ email: 'second@corp.example', password: PASSWORD, name: S, invitationId: 'inv_second' }),
             }),
           );
           responses.signUp = { status: signUp.status, body: await signUp.text() };

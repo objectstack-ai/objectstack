@@ -88,12 +88,12 @@ async function serve(deployment: { trustProxy?: boolean }) {
       { incoming: { socket: { remoteAddress: peer } } },
     );
 
-  await inviteForAudienceGate(manager, EMAIL);
+  const invitationId = await inviteForAudienceGate(manager, EMAIL);
   const signUp = await manager.handleRequest(
     new Request(`${ORIGIN}${BASE}/sign-up/email`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', origin: ORIGIN },
-      body: JSON.stringify({ email: EMAIL, password: PASSWORD, name: 'Session Capture Member' }),
+      body: JSON.stringify({ email: EMAIL, password: PASSWORD, name: 'Session Capture Member', invitationId }),
     }),
   );
   expect(signUp.status, `sign-up: ${await signUp.clone().text()}`).toBe(200);

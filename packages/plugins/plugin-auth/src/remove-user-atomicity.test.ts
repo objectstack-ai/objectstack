@@ -268,8 +268,8 @@ const post = (manager: AuthManager, path: string, body: unknown, cookie?: string
 const signUp = async (manager: AuthManager, engine: MemoryEngine, email: string) => {
   // [#11739] default posture invite_only: fixture users beyond the first
   // enter through the invitation carve-out (see audience-gate-test-support).
-  inviteForAudienceGate(engine, email);
-  const res = await post(manager, '/sign-up/email', { email, password: PASSWORD, name: email });
+  const invitationId = await inviteForAudienceGate(engine, email);
+  const res = await post(manager, '/sign-up/email', { email, password: PASSWORD, name: email, invitationId });
   expect(res.status, await res.clone().text()).toBe(200);
   const user = (engine.tables.get('sys_user') ?? []).find((u: any) => u.email === email);
   expect(user, `sign-up did not create ${email}`).toBeDefined();

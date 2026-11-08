@@ -69,12 +69,13 @@ server, not by your browser: the code request, the polling, the connection
 itself and the disconnect. The server needs outbound HTTPS to the control-plane
 URL. Your browser only opens the approval link.
 
-**The server's working directory is persistent.** The connection is stored in
-a file under the server's working directory,
-`.objectstack/cloud-connection.json` (see
-[What the server stores](#what-the-server-stores)). In the official runtime
-image the working directory is `/srv/app`. If that directory lives on the
-container's own filesystem, replacing the container loses the connection, and
+**The server's home is persistent.** The connection is stored in one file,
+`cloud-connection.json` in the server's home directory (`OS_HOME`), or
+`.objectstack/cloud-connection.json` under the working directory when
+`OS_HOME` is not set (see [What the server stores](#what-the-server-stores)).
+Point `OS_HOME` at a persistent volume, as the rest of the server's state
+already requires: if the file lives on the container's own filesystem,
+replacing the container (not just restarting it) loses the connection, and
 the server reads as not connected until you connect it again.
 
 **The right people on each side.**
@@ -157,8 +158,17 @@ simply expires.
 
 ## What the server stores [#what-the-server-stores]
 
-The connection lives in one file, `.objectstack/cloud-connection.json` under
-the server's working directory, written with mode `0600`:
+The connection lives in one file, written with mode `0600`:
+`OS_HOME/cloud-connection.json` when `OS_HOME` is set, otherwise
+`.objectstack/cloud-connection.json` under the server's working directory.
+
+**Upgrading from a release that kept it under the working directory.** On the
+first start with `OS_HOME` set, the server moves
+`.objectstack/cloud-connection.json` from its working directory into
+`OS_HOME`, keeps mode `0600`, and logs both paths once. If a file is already in
+`OS_HOME`, that one is the connection and the old file is left untouched. A
+server started with `os dev --fresh` keeps its connection inside that run's
+temporary home and never moves the project's file.
 
 | Field | What it is |
 |:---|:---|
@@ -207,8 +217,8 @@ every replica reads:
   If the read fails, the replica starts as an unconnected one would.
 
 **Scaling out a server that is already connected.** The first start with
-several replicas declared moves the credential from
-`.objectstack/cloud-connection.json` into the row, when the row is still
+several replicas declared moves the credential from the server's
+connection file into the row, when the row is still
 empty, and logs where it moved it from. The file stays where it was but is
 not read again while replicas are declared. Scaling back to a single replica
 reads the file again, and the file does not follow connects or disconnects
@@ -263,8 +273,8 @@ What disconnecting **keeps**:
 
 - **The runtime id.** Connecting again sends it along, so the cloud can attach
   the new connection to the same registration rather than a new one. To start
-  over as a brand-new server, delete `.objectstack/cloud-connection.json`
-  after disconnecting.
+  over as a brand-new server, delete the connection file
+  ([What the server stores](#what-the-server-stores)) after disconnecting.
 - **Everything installed.** Disconnecting touches only the connection file.
   Packages already installed into this server stay installed and keep working.
 
