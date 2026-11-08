@@ -2203,8 +2203,8 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             throw err;
         }
         if (!answer.ok && !call.audited) {
-            const code = await refusalCodeOf(answer, 'PLUGIN_INSTALL_FAILED');
-            await this.recordUnmanagedImport(c, ctx, grantRefusalEvent(grant, code, answer.status));
+            const errorCode = (await refusalCodeOf(answer)) ?? 'PLUGIN_INSTALL_FAILED';
+            await this.recordUnmanagedImport(c, ctx, grantRefusalEvent(grant, errorCode, answer.status));
         }
         return answer;
     };

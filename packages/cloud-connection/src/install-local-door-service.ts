@@ -102,15 +102,16 @@ export interface UnmanagedImportAuditSurface {
     recordPackageLifecycleEvent?(event: UnmanagedImportAuditEvent): unknown;
 }
 
-/** The logger slice {@link recordUnmanagedImportEvent} writes to. */
+/** The logger slice {@link recordUnmanagedImportEvent} writes to: `error`, or `warn` where a host sink has none. */
 interface ErrorLogger {
+    warn(message: string): unknown;
     error?(message: string): unknown;
 }
 
 /**
  * Hand `audit` one {@link UnmanagedImportAuditEvent}. No audit slot, or one
  * without the member, means no ledger, and the call is skipped; a slot that
- * throws is logged at `error` under `source`, never thrown: the install's
+ * throws is logged at `error` (`warn` on a sink without one) under `source`, never thrown: the install's
  * answer is the install's, whatever the ledger does.
  */
 export async function recordUnmanagedImportEvent(
@@ -124,11 +125,11 @@ export async function recordUnmanagedImportEvent(
     try {
         await record.call(audit, event);
     } catch (err: any) {
-        logger?.error?.(
-            `[${source}] the unmanaged install of ${event.packageId} (${event.outcome}) was answered, but the `
+        const message = `[${source}] the unmanaged install of ${event.packageId} (${event.outcome}) was answered, but the `
             + 'audit service refused its `package_unmanaged_import` row, so the compliance ledger does not record it: '
-            + `${err?.message ?? err}`,
-        );
+            + `${err?.message ?? err}`;
+        if (logger?.error) logger.error(message);
+        else logger?.warn(message);
     }
 }
 
@@ -150,14 +151,14 @@ export function grantRefusalEvent(grant: InstallLocalDoorGrant, errorCode: strin
     };
 }
 
-/** [#31481] The `error.code` of a refusal `Response`, read from a clone; `fallback` when it names none. */
-export async function refusalCodeOf(answer: Response, fallback: string): Promise<string> {
+/** [#31481] The `error.code` of a refusal `Response`, read from a clone; `undefined` when it names none. */
+export async function refusalCodeOf(answer: Response): Promise<string | undefined> {
     try {
         const body: any = await answer.clone().json();
-        const code = body?.error?.code;
-        return typeof code === 'string' && code !== '' ? code : fallback;
+        const named = body?.error?.code;
+        return typeof named === 'string' && named !== '' ? named : undefined;
     } catch {
-        return fallback;
+        return undefined;
     }
 }
 
