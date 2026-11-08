@@ -138,10 +138,13 @@ import type {
 import { JobSchema } from '@objectstack/spec/system';
 import { ScheduleOrganizationSchema } from '@objectstack/spec/automation';
 import {
+    readScheduledWorkPolicy,
     resolveScheduledWorkEnabled,
     resolveScheduledWorkPolicy,
     SCHEDULED_WORK_DISABLED_REASON,
+    scheduledWorkDisabledReason,
     type ScheduledWorkPolicy,
+    type ScheduledWorkPolicySource,
 } from '@objectstack/types';
 import { SEMCONV } from '@objectstack/observability';
 import { QuickJSScriptRunner } from './sandbox/quickjs-runner.js';
@@ -629,16 +632,34 @@ export interface AppArtifactJobSchedulingOptions {
     ql: IObjectQLEngine | undefined;
     /** Who is scheduling, for the log lines — `'AppPlugin'`, `'MarketplaceInstallLocal'`. */
     source?: string;
+    /**
+     * [#31382] THIS kernel's scheduled-work policy, as its host decided it — the
+     * jobs half of #19834, the same source the automation engine and both
+     * schedule triggers take. Present, it is read ONCE per call in place of
+     * both zero-argument deployment reads: `enabled` gates the call, and
+     * `requiresActingOrganization` / `runOwnership` are the per-job
+     * organization rule. Off, nothing is scheduled, the app's previously
+     * scheduled jobs are cancelled, and the info line carries
+     * `scheduledWorkDisabledReason(policy)` — the host's own reason when it
+     * gave one (#21110).
+     *
+     * Absent (the default), `resolveScheduledWorkEnabled()` and
+     * `resolveScheduledWorkPolicy()` are read exactly as before:
+     * `OS_AUTOMATION_SCHEDULED_WORK_ENABLED` keeps its meaning. Hand the
+     * engine and the triggers of the same kernel the same policy.
+     */
+    scheduledWorkPolicy?: ScheduledWorkPolicySource;
 }
 
 /** What one {@link scheduleAppArtifactJobs} call scheduled. */
 export interface AppArtifactJobScheduling {
     /**
      * Set when nothing was scheduled for a reason that holds for every job:
-     * the deployment does not run package-authored scheduled work (#17396), no
-     * job service is registered, or (#20281 stage ③) the deployment's
-     * scheduled-work policy could not be read — an unrecognized tenancy
-     * posture, so whether a job must declare its organization is unknown.
+     * the deployment does not run package-authored scheduled work (#17396) —
+     * or (#31382) the host's per-kernel policy turned it off — no job service
+     * is registered, or (#20281 stage ③) the scheduled-work policy could not
+     * be read — an unrecognized tenancy posture, or a host resolver that
+     * threw, so whether a job must declare its organization is unknown.
      */
     withheld?: 'scheduled-work-disabled' | 'no-job-service' | 'scheduled-work-policy-unreadable';
     /** Jobs scheduled to run their sandboxed `body`. */
@@ -764,8 +785,29 @@ export async function scheduleAppArtifactJobs(
     // normal-but-broken. Said once per app with the job count, rather than once
     // per job — the remedy is one variable, and repeating it N times is how a
     // line stops being read.
-    if (!resolveScheduledWorkEnabled()) {
-        logger.info(`${tag} declarative jobs NOT scheduled — ${SCHEDULED_WORK_DISABLED_REASON}`, {
+    //
+    // [#31382] A host-handed policy is read here, ONCE, and answers both the
+    // gate and the posture half below — a resolver that moves between two
+    // reads must not pair one reading's verdict with another's rule. A
+    // resolver that throws fails CLOSED, as the deployment read below does.
+    let hostPolicy: ScheduledWorkPolicy | undefined;
+    if (options.scheduledWorkPolicy !== undefined) {
+        try {
+            hostPolicy = readScheduledWorkPolicy(options.scheduledWorkPolicy);
+        } catch (err: any) {
+            logger.error(
+                `${tag} declarative jobs NOT scheduled — the scheduled-work policy this kernel's host handed could not be `
+                + 'read, so whether scheduled work runs here, and whether each job must declare its `organization`, is unknown.',
+                err as Error,
+                { appId, jobCount: jobs.length },
+            );
+            if (svc) out.cancelled = await retireAppJobs(svc, appId, new Set(), logger, tag);
+            return { ...out, withheld: 'scheduled-work-policy-unreadable' };
+        }
+    }
+    if (hostPolicy ? !hostPolicy.enabled : !resolveScheduledWorkEnabled()) {
+        const reason = hostPolicy ? scheduledWorkDisabledReason(hostPolicy) : SCHEDULED_WORK_DISABLED_REASON;
+        logger.info(`${tag} declarative jobs NOT scheduled — ${reason}`, {
             appId,
             jobCount: jobs.length,
         });
@@ -786,7 +828,7 @@ export async function scheduleAppArtifactJobs(
     // scheduled, and the reason is said at `error`.
     let policy: ScheduledWorkPolicy;
     try {
-        policy = resolveScheduledWorkPolicy();
+        policy = hostPolicy ?? resolveScheduledWorkPolicy();
     } catch (err: any) {
         logger.error(
             `${tag} declarative jobs NOT scheduled — the deployment's scheduled-work policy could not be read, so whether `
