@@ -35,6 +35,8 @@
  * package. Each group is the exact set that package registers.
  */
 export const PLATFORM_OBJECTS_BY_PACKAGE: Readonly<Record<string, readonly string[]>> = {
+  /** `@objectstack/cloud-connection` — the cloud binding credential every replica reads, registered only when several replicas are declared over the Redis cluster driver. */
+  'cloud-connection': ['sys_cloud_binding_credential'],
   /** `@objectstack/metadata-core` — metadata storage & commit history. */
   'metadata-core': [
     'sys_metadata',

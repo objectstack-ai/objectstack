@@ -49,7 +49,7 @@ import { whereContainsMembershipSql } from '../contains-membership-sql.js';
 // [#25778] The per-row operand of a dataset duration measure, per dialect.
 import { durationMeasureIn, durationMeasureKey, durationOperandSql, hasDurationSql } from '../duration-measure-sql.js';
 import { scopedMeasureFilter } from '../scoped-measure-key.js';
-import { isJsonStoredShape } from '../contains-membership-sql.js';
+import { hasJsonMembershipSql, isJsonStoredShape } from '../contains-membership-sql.js';
 import { expandEmptyOperator } from '@objectstack/spec/data';
 import { resolveAnalyticsDateRangeString } from '@objectstack/core';
 import { dateRangeWindowBounds } from '../dataset-executor.js';
@@ -59,7 +59,7 @@ import { AGGREGATE_ANSWER_KIND, presentAsNumber } from '@objectstack/core';
 // [#21042] What each aggregate's operand accumulates in, the PostgreSQL
 // boolean-aggregand cast, and the one column-class predicate both read — the
 // operand rule `driver-sql`'s own `aggregate()` applies, defined once in core.
-import { aggregandColumnClass, aggregandOperandSql } from '@objectstack/core';
+import { aggregandColumnClass, aggregandOperandSql, type AggregandSqlDialect } from '@objectstack/core';
 import { emptyGroupValueFor, isVirtualSearchField } from '@objectstack/spec/data';
 import { explicitDateRangeWindow } from '../date-range-array-arm.js';
 
@@ -219,6 +219,9 @@ const OFFSET_ONLY_LIMIT_SQL: Readonly<Record<AnalyticsSqlDialect, string | null>
   mysql: 'LIMIT 18446744073709551615',
   postgres: null,
   unknown: 'LIMIT 9223372036854775807',
+  // [#31394] Named for the text-match arms only; the window keeps the spelling
+  // it had while SQL Server still read as `unknown`.
+  mssql: 'LIMIT 9223372036854775807',
 };
 
 /**
@@ -251,6 +254,16 @@ export function windowClauseSql(
 }
 
 /**
+ * [#31394] The dialect `@objectstack/core`'s aggregand policies are asked with.
+ * `'mssql'` is named in this package for the text-match arms; the policies
+ * state none for it, so it is handed on as `'unknown'` — aggregated as stored,
+ * exactly as it was while SQL Server still read as `'unknown'` here.
+ */
+function aggregandDialectOf(dialect: AnalyticsSqlDialect): AggregandSqlDialect {
+  return dialect === 'mssql' ? 'unknown' : dialect;
+}
+
+/**
  * [#25907] The NULL placement an `ORDER BY` key states, per dialect — `null`
  * where the dialect has no spelling for it, so the driver's placement stands.
  *
@@ -277,6 +290,8 @@ const NULLS_LAST_SQL: Readonly<Record<AnalyticsSqlDialect, string | null>> = {
   postgres: 'NULLS LAST',
   mysql: null,
   unknown: null,
+  // [#31394] As `unknown`, which SQL Server read as until it was named.
+  mssql: null,
 };
 
 /**
@@ -978,7 +993,7 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
     type Target = { object: string; field: string } | undefined;
     const needsJson = (target: Target, op: string): boolean => {
       if (!target || (op !== '$contains' && op !== '$notContains' && op !== '$empty')) return false;
-      if (sqlDialectFor(ctx, target.object) !== 'unknown') return false;
+      if (hasJsonMembershipSql(sqlDialectFor(ctx, target.object))) return false;
       const shape = declaredValueShapeResolver(ctx, target.object)?.(target.field);
       if (op === '$empty') return shape !== undefined && expandEmptyOperator(shape).arm === 'multi_value';
       return isJsonStoredShape(shape);
@@ -1890,7 +1905,7 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
           target
             ? aggregandColumnClass(declaredValueShapeResolver(ctx, target.object)?.(target.field))
             : undefined,
-          sqlDialectFor(ctx, parentTable),
+          aggregandDialectOf(sqlDialectFor(ctx, parentTable)),
           column,
         );
 

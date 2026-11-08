@@ -173,6 +173,55 @@ call, so a connection made while the server is running takes effect without a
 restart, and so does a disconnect. Keep the file on persistent storage and
 protect it like any other secret.
 
+### Several replicas [#several-replicas]
+
+A file on one replica's disk is invisible to the others. So when the server
+declares several replicas (`OS_CLUSTER_REPLICAS` above 1, or
+`OS_EXPECT_MULTI_NODE=true`) **and** its [cluster driver](/docs/kernel/cluster)
+is Redis (`OS_CLUSTER_DRIVER=redis`), the connection is kept in the database
+instead, as the one row of the `sys_cloud_binding_credential` object, which
+every replica reads:
+
+- **The credential is encrypted.** `runtime_token` is a secret field: the
+  platform crypto provider encrypts it before it is stored, and the row holds
+  only a reference to the encrypted value. With no crypto provider configured
+  the server refuses to connect rather than store it in clear text. Every
+  replica needs the same key to read it (`OS_SECRET_KEY` with the local
+  provider).
+- **Connect and disconnect work from any replica.** Both write that one row.
+  Every request to `/api/v1/cloud-connection/*` reads the row first, on
+  whichever replica serves it; anything else that presents the credential to
+  the cloud, such as an online licence check, sees a change within 30 seconds.
+- **The database, not the cluster store, holds it.** The cluster store is a
+  cache: flushing it, or running it without persistence, must never
+  disconnect the server. The row lives in the server's default database, the
+  same one that holds its encrypted secrets, even when another datasource
+  (such as one named `cloud`) is configured.
+- **It can be read before the server starts.** The multi-node licence check
+  runs before startup, so a host reads the row once at that point with
+  `readCloudBindingCredentialBeforeBoot` from `@objectstack/cloud-connection`.
+  The read opens one connection, starts closing it again before startup
+  continues, and never writes. The open, the read and the close share one
+  time limit, 3 seconds by default: if the database has not answered by then
+  the read gives up, and a close that is slow to finish is not waited for.
+  If the read fails, the replica starts as an unconnected one would.
+
+**Scaling out a server that is already connected.** The first start with
+several replicas declared moves the credential from
+`.objectstack/cloud-connection.json` into the row, when the row is still
+empty, and logs where it moved it from. The file stays where it was but is
+not read again while replicas are declared. Scaling back to a single replica
+reads the file again, and the file does not follow connects or disconnects
+made meanwhile: disconnect and connect again after scaling down.
+
+A single server, a server whose cluster driver is the in-process `memory`
+one or any driver other than Redis, and a server with no cluster service keep
+the file exactly as described above, and nothing is added to the database.
+Replicas declared over Redis without the data engine composed cannot share
+the row: the
+server logs an `error` at start that says so, and each replica keeps its own
+file.
+
 ## Rename [#rename]
 
 The name your server is known by is its **host name** at the moment you

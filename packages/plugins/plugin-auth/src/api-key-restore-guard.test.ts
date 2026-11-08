@@ -39,7 +39,11 @@ import { MANAGED_EXTENSION_EDITABLE_FIELDS } from './managed-extension-fields.js
 import { SYS_USER_PROFILE_EDIT_FIELDS } from './sys-user-writable-fields.js';
 import { FORCED_RESET_REVOKE_REASON, revokeSessionsAndApiKeys } from './forced-reset-revocation.js';
 import { MEMBERSHIP_ENDED_REVOKE_REASON } from './membership-ended-session.js';
-import { API_KEY_RESTORE_GUARD_PRIORITY, registerApiKeyRestoreGuard } from './api-key-restore-guard.js';
+import {
+  ADMINISTRATOR_SUSPENDED_REVOKE_REASON,
+  API_KEY_RESTORE_GUARD_PRIORITY,
+  registerApiKeyRestoreGuard,
+} from './api-key-restore-guard.js';
 import { AuthPlugin } from './auth-plugin.js';
 
 const SYS = { context: { isSystem: true } } as any;
@@ -500,6 +504,137 @@ describe('a key revoked because its owner\'s membership ended is restored by no 
     expect(verdict.code).toBe('API_KEY_REVOKED');
     expect(verdict.message).toMatch(/membership in the organization ended, and it cannot be restored/);
     expect(verdict.message).not.toMatch(/can restore it/);
+  });
+});
+
+describe('[objectstack-ai/cloud#3820, card 2] a platform administrator\'s revoke of someone else\'s key holds against its owner', () => {
+  const SUSPENDED = ADMINISTRATOR_SUSPENDED_REVOKE_REASON;
+  /** The host's write when it stops a key itself (an administrator console acting in the system context). */
+  const suspendAsHost = (engine: ObjectQL, id: string) =>
+    engine.update('sys_api_key', { id, revoked: true, revoked_reason: SUSPENDED }, SYS);
+
+  it('⭐ the revoke records administrator_suspended; the owner\'s restore is refused; a platform administrator restores it and the key works again', async () => {
+    const engine = await rig();
+    const raw = await mint(engine, 'key_agent');
+    expect((await door(engine, raw)).outcome, 'the control: the key works').toBe('admitted');
+
+    await engine.update('sys_api_key', { id: 'key_agent', revoked: true }, asAdmin);
+
+    expect(await row(engine, 'key_agent')).toEqual({ revoked: true, revoked_reason: SUSPENDED });
+    const verdict = await door(engine, raw);
+    expect(verdict.code, 'refused on the very next call').toBe('API_KEY_REVOKED');
+    expect(verdict.message).toMatch(/suspended by a platform administrator\. Only a platform administrator can restore it/);
+
+    const err = await refusalOf(engine.update('sys_api_key', { id: 'key_agent', revoked: false }, asOwner));
+    expect({ code: err?.code, status: err?.status }).toEqual({ code: 'PERMISSION_DENIED', status: 403 });
+    expect(String(err.message)).toContain('suspended by a platform administrator');
+    expect(String(err.message)).toContain('POST /api/v1/keys');
+    expect(await row(engine, 'key_agent'), 'refused, not reported: the row is as the administrator left it')
+      .toEqual({ revoked: true, revoked_reason: SUSPENDED });
+    expect((await door(engine, raw)).code).toBe('API_KEY_REVOKED');
+
+    await engine.update('sys_api_key', { id: 'key_agent', revoked: false }, asAdmin);
+
+    expect(await row(engine, 'key_agent')).toEqual({ revoked: false, revoked_reason: null });
+    expect((await door(engine, raw)).outcome, 'resumed, the same key works with no re-issue').toBe('admitted');
+  });
+
+  it('CONTROL: a platform administrator\'s revoke of their OWN key records no reason, as the owner\'s does', async () => {
+    const engine = await rig();
+    await mint(engine, 'key_admin_own', ADMIN);
+
+    await engine.update('sys_api_key', { id: 'key_admin_own', revoked: true }, asAdmin);
+
+    expect(await row(engine, 'key_admin_own')).toEqual({ revoked: true, revoked_reason: null });
+  });
+
+  it('a key its owner revoked, revoked again by a platform administrator, is suspended: the owner can no longer restore it', async () => {
+    const engine = await rig();
+    await mint(engine, 'key_plain');
+    await engine.update('sys_api_key', { id: 'key_plain', revoked: true }, asOwner);
+    expect(await row(engine, 'key_plain')).toEqual({ revoked: true, revoked_reason: null });
+
+    await engine.update('sys_api_key', { id: 'key_plain', revoked: true }, asAdmin);
+
+    expect(await row(engine, 'key_plain')).toEqual({ revoked: true, revoked_reason: SUSPENDED });
+    const err = await refusalOf(engine.update('sys_api_key', { id: 'key_plain', revoked: false }, asOwner));
+    expect({ code: err?.code, status: err?.status }).toEqual({ code: 'PERMISSION_DENIED', status: 403 });
+  });
+
+  it('the owner re-revoking a suspended key keeps the reason, and a smuggled clear is not a write the owner may make', async () => {
+    const engine = await rig();
+    await mint(engine, 'key_agent');
+    await engine.update('sys_api_key', { id: 'key_agent', revoked: true }, asAdmin);
+
+    await engine.update('sys_api_key', { id: 'key_agent', revoked: true }, asOwner);
+    await engine.update('sys_api_key', { id: 'key_agent', revoked: true, revoked_reason: null }, asOwner);
+
+    expect(await row(engine, 'key_agent')).toEqual({ revoked: true, revoked_reason: SUSPENDED });
+    const err = await refusalOf(engine.update('sys_api_key', { id: 'key_agent', revoked: false }, asOwner));
+    expect({ code: err?.code, status: err?.status }).toEqual({ code: 'PERMISSION_DENIED', status: 403 });
+  });
+
+  it('an administrator\'s revoke never replaces a reason the key already carries: revoked for a membership end stays final', async () => {
+    const engine = await rig();
+    await mint(engine, 'key_left');
+    await engine.update('sys_api_key', { id: 'key_left', revoked: true, revoked_reason: MEMBERSHIP_ENDED_REVOKE_REASON }, SYS);
+    await mint(engine, 'key_reset');
+    await revokeSessionsAndApiKeys(engine as any, OWNER);
+
+    await engine.update('sys_api_key', { id: 'key_left', revoked: true }, asAdmin);
+    await engine.update('sys_api_key', { id: 'key_reset', revoked: true }, asAdmin);
+
+    expect(await row(engine, 'key_left')).toEqual({ revoked: true, revoked_reason: MEMBERSHIP_ENDED_REVOKE_REASON });
+    expect(await row(engine, 'key_reset')).toEqual({ revoked: true, revoked_reason: FORCED_RESET_REVOKE_REASON });
+    const err = await refusalOf(engine.update('sys_api_key', { id: 'key_left', revoked: false }, asAdmin));
+    expect({ code: err?.code, status: err?.status }, 'still restored by no one from a user context')
+      .toEqual({ code: 'PERMISSION_DENIED', status: 403 });
+  });
+
+  it('a host\'s system-context suspension is stored as written and holds the same way', async () => {
+    const engine = await rig();
+    const raw = await mint(engine, 'key_agent');
+
+    await suspendAsHost(engine, 'key_agent');
+
+    expect(await row(engine, 'key_agent')).toEqual({ revoked: true, revoked_reason: SUSPENDED });
+    expect((await door(engine, raw)).code).toBe('API_KEY_REVOKED');
+    const err = await refusalOf(engine.update('sys_api_key', { id: 'key_agent', revoked: false }, asOwner));
+    expect({ code: err?.code, status: err?.status }).toEqual({ code: 'PERMISSION_DENIED', status: 403 });
+    await engine.update('sys_api_key', { id: 'key_agent', revoked: false }, asAdmin);
+    expect((await door(engine, raw)).outcome).toBe('admitted');
+  });
+
+  it('a platform administrator\'s multi-row revoke of plain keys suspends every row it matches', async () => {
+    const engine = await rig();
+    await mint(engine, 'key_a');
+    await mint(engine, 'key_b');
+
+    await engine.update('sys_api_key', { revoked: true }, { where: { user_id: OWNER }, multi: true, ...asAdmin });
+
+    expect([await row(engine, 'key_a'), await row(engine, 'key_b')]).toEqual([
+      { revoked: true, revoked_reason: SUSPENDED },
+      { revoked: true, revoked_reason: SUSPENDED },
+    ]);
+  });
+
+  it('a multi-row revoke matching a plain key and a key that carries a reason is refused whole, whichever row comes first', async () => {
+    for (const [first, second] of [['key_a_left', 'key_b_plain'], ['key_a_plain', 'key_b_left']]) {
+      const engine = await rig();
+      const left = first.endsWith('_left') ? first : second;
+      const plain = first.endsWith('_plain') ? first : second;
+      await mint(engine, first);
+      await mint(engine, second);
+      await engine.update('sys_api_key', { id: left, revoked: true, revoked_reason: MEMBERSHIP_ENDED_REVOKE_REASON }, SYS);
+
+      const err = await refusalOf(engine.update('sys_api_key', { revoked: true }, { where: { user_id: OWNER }, multi: true, ...asAdmin }));
+
+      expect({ order: [first, second], code: err?.code, status: err?.status })
+        .toEqual({ order: [first, second], code: 'VALIDATION_ERROR', status: 400 });
+      expect(String(err.message)).toContain('Revoke those keys separately');
+      expect(await row(engine, left), 'the reason the key carried is kept').toEqual({ revoked: true, revoked_reason: MEMBERSHIP_ENDED_REVOKE_REASON });
+      expect(await row(engine, plain), 'and nothing else moved').toEqual({ revoked: false, revoked_reason: null });
+    }
   });
 });
 

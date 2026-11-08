@@ -22,7 +22,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { ScreenFieldSpec } from '@objectstack/spec/contracts';
 
-import { validateScreenInputs } from './screen-input-contract.js';
+import { judgeHeadlessScreen, validateScreenInputs } from './screen-input-contract.js';
 
 const ALWAYS_VISIBLE = () => true;
 
@@ -170,9 +170,69 @@ describe('validateScreenInputs — `currency` and `percent` are numeric value do
   }
 
   it('does not widen past the numeric kinds — `rating`, `slider`, `progress`, `text` and untyped still take a string', () => {
+    // `text` is a value domain since #31491, but its domain IS a string.
     for (const type of ['rating', 'slider', 'progress', 'text', undefined]) {
       const field: ScreenFieldSpec = { name: 'discount', type, min: 0, max: 60 };
       expect(validateScreenInputs([field], { discount: '75' }, ALWAYS_VISIBLE), `type ${String(type)}`).toEqual([]);
     }
+  });
+});
+
+// [#31491, ruling A+ 2026-11-08] The five string kinds joined the value domain
+// on one predicate. Before it, an object or a number under a `text` field
+// passed this door, the resume consumed the suspension, and the record write
+// after it refused the object (the run failed, a corrected resume found no
+// pause) or stored the number as text the caller never sent.
+describe('validateScreenInputs — `text`, `textarea`, `email`, `url` and `phone` are string value domains (#31491)', () => {
+  const STRING_KINDS = ['text', 'textarea', 'email', 'url', 'phone'] as const;
+  for (const type of STRING_KINDS) {
+    const field: ScreenFieldSpec = { name: 'answer', type };
+    const codes = (value: unknown, visibility: () => boolean | undefined = ALWAYS_VISIBLE) =>
+      validateScreenInputs([field], { answer: value }, visibility).map((i) => i.code);
+
+    it(`refuses a present non-string on a \`${type}\` field — an object, a number, a boolean, an array`, () => {
+      for (const value of [{ x: 1 }, 42, 0, true, ['a']]) {
+        expect(codes(value), `value ${JSON.stringify(value)}`).toEqual(['invalid_type']);
+      }
+      const [issue] = validateScreenInputs([field], { answer: { x: 1 } }, ALWAYS_VISIBLE);
+      expect(issue!.field).toBe('answer');
+      expect(issue!.message).toBe('Screen field "answer" must be a string');
+    });
+
+    it(`admits any string on a \`${type}\` field — its format is not judged here`, () => {
+      for (const value of ['alice', '42', 'not an email', 'x']) {
+        expect(codes(value), `value ${JSON.stringify(value)}`).toEqual([]);
+      }
+    });
+
+    it(`leaves an absent value and a hidden \`${type}\` field alone`, () => {
+      expect(codes(undefined)).toEqual([]);
+      expect(codes(null)).toEqual([]);
+      expect(codes('')).toEqual([]);
+      const conditional: ScreenFieldSpec = { ...field, visibleWhen: 'asked == true' };
+      expect(validateScreenInputs([conditional], { answer: 42 }, () => false)).toEqual([]);
+      expect(validateScreenInputs([conditional], { answer: 42 }, () => undefined)).toEqual([]);
+      // …and the control, or the two readings above prove nothing.
+      expect(validateScreenInputs([conditional], { answer: 42 }, () => true).map((i) => i.code))
+        .toEqual(['invalid_type']);
+    });
+  }
+
+  it('a headless caller that supplies a non-string for a `text` field has not answered it: the screen stays interactive', () => {
+    // The same contract the resume door enforces (`judgeHeadlessScreen` judges
+    // with `validateScreenInputs`), so a run that would be refused on resume
+    // does not continue past the screen on the value either.
+    const field: ScreenFieldSpec = { name: 'answer', type: 'text', required: true };
+    const ctx = { params: { answer: 42 }, callerParamKeys: ['answer'] };
+    expect(judgeHeadlessScreen([field], new Map<string, unknown>([['answer', 42]]), ctx))
+      .toEqual({ satisfied: false, supplied: ['answer'], missing: ['answer'] });
+    // …and the control: a string answers it.
+    expect(judgeHeadlessScreen([field], new Map<string, unknown>([['answer', '42']]), { params: { answer: '42' }, callerParamKeys: ['answer'] }))
+      .toEqual({ satisfied: true, supplied: ['answer'], missing: [] });
+  });
+
+  it('a missing required string field is still `required` alone, not a shape issue', () => {
+    const field: ScreenFieldSpec = { name: 'answer', type: 'text', required: true };
+    expect(validateScreenInputs([field], {}, ALWAYS_VISIBLE).map((i) => i.code)).toEqual(['required']);
   });
 });

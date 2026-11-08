@@ -4667,6 +4667,10 @@ export class AuthManager {
    * the Console's withdraw (`authorized-clients-withdraw.ts`) revokes the same
    * grant the same way. A server-only
    * `skip_consent` client has no consent row and is admitted without one.
+   * The same read refuses a token whose client is disabled, or whose client
+   * row is gone (objectstack-ai/cloud#3820, card 2): disabling a client
+   * refuses its outstanding tokens on their next call, as the provider
+   * already refuses it new ones, and enabling it again serves them again.
    *
    * The caller (runtime dispatcher) maps the returned principal through
    * `resolveAuthzContext` — the single shared authorization resolver — so
