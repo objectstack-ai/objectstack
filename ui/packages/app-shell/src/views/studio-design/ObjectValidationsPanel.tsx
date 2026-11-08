@@ -995,6 +995,17 @@ export function ObjectValidationsPanel({
   const reportCel = React.useCallback((ruleName: string, count: number) => {
     setCelErrors((prev) => (prev[ruleName] === count ? prev : { ...prev, [ruleName]: count }));
   }, []);
+  // objectstack#27482 — a rename moves the rule's verdict to its new name. The
+  // guard's editor reports only when its count CHANGES, so a verdict left under
+  // the old name is pruned below and never reported again: a rule whose name
+  // follows its message would autosave a guard the server refuses.
+  const renameCel = React.useCallback((from: string, to: string) => {
+    setCelErrors((prev) => {
+      if (from === to || !Object.prototype.hasOwnProperty.call(prev, from)) return prev;
+      const { [from]: count, ...rest } = prev;
+      return { ...rest, [to]: count };
+    });
+  }, []);
   const liveRuleNames = React.useMemo(
     () => new Set(rules.map((r) => r.name ?? '')),
     [rules],
@@ -1059,6 +1070,7 @@ export function ObjectValidationsPanel({
   };
 
   const patchRule = (name: string, patch: Partial<ValidationRuleDraft>) => {
+    if (typeof patch.name === 'string') renameCel(name, patch.name);
     const pending = unsaved.find((r) => r.name === name);
     if (pending) {
       settleUnsaved(name, { ...pending, ...patch });

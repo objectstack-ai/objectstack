@@ -192,7 +192,7 @@ describe('controls: what held, saved and read before still does (objectui#13113)
     typeUsing('organization_id ==');
 
     await waitFor(() =>
-      expect(screen.getByTestId('perm-autosave-held')).toHaveTextContent('Fix the CEL syntax errors before saving.'),
+      expect(screen.getByTestId('perm-autosave-held')).toHaveTextContent('Fix the expression errors before saving.'),
     );
     await pause(PAST_THE_PAUSE);
     expect(server.sent).toHaveLength(0);

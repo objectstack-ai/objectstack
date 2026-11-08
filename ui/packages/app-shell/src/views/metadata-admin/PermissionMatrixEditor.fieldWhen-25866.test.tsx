@@ -185,7 +185,7 @@ describe('a field row offers a row condition on its edit vote (objectstack#25866
 
     fireEvent.change(screen.getByLabelText(WHEN_LABEL), { target: { value: 'status ==' } });
     const held = await screen.findByTestId('perm-autosave-held', {}, { timeout: 3000 });
-    expect(held).toHaveTextContent('Fix the CEL syntax errors before saving.');
+    expect(held).toHaveTextContent('Fix the expression errors before saving.');
     // Longer than the autosave's pause: the held edit does not land.
     await new Promise((r) => setTimeout(r, 2000));
     expect(saved).toHaveLength(1);

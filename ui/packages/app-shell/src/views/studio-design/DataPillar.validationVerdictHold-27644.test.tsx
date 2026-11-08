@@ -274,3 +274,67 @@ describe('a server error at a validation rule\'s path holds the Data pillar auto
     expect(screen.queryByText(REFUSAL)).toBeNull();
   });
 });
+
+/**
+ * objectstack#27482 — a rule the panel minted takes its name from its message
+ * (`patchMessage`), so editing the message renames it. The panel keeps each
+ * rule's verdict by name and the guard's editor reports only when its count
+ * changes, so the verdict has to move with the name: left behind, it was
+ * pruned with the old name and the refused guard autosaved on every edit.
+ */
+describe('a rename keeps the served verdict\'s hold on the rule (objectstack#27482)', () => {
+  /** New → "Reject the save when…": a minted rule whose name follows its message. */
+  async function newRejectWhenRule() {
+    fireEvent.click(await screen.findByTestId('data-tab-flat-rules'));
+    await screen.findByText('Amount cap');
+    fireEvent.click(screen.getByText('New'));
+    fireEvent.click(await screen.findByTestId('rule-preset-reject_when'));
+  }
+
+  it('(a) the minted rule: its first save goes out, and the message edit that renames it is held', async () => {
+    mount(objectWith(ACCEPTED));
+    await newRejectWhenRule();
+    // The card's flow: the guard first, then the message, which settles the rule into the draft.
+    fireEvent.change(await rawGuard(), { target: { value: REFUSED } });
+    editMessage('Over the cap');
+
+    // No client copy of the rule: the first save goes out and its re-read brings the verdict.
+    await waitFor(() => expect(server.sent).toHaveLength(1), AUTOSAVE);
+    const first = server.sent[0]!.validations as Array<{ name?: string; condition?: string }>;
+    expect(first[2]).toMatchObject({ name: 'over_the_cap', condition: REFUSED });
+    expect(await screen.findByText(REFUSAL, {}, AUTOSAVE)).toBeInTheDocument();
+
+    // The next message edit renames the rule; the guard still shows the judged text.
+    editMessage('Over the cap now');
+    expect(screen.getByDisplayValue('over_the_cap_now')).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByTestId('studio-held-message')).toHaveTextContent('over_the_cap_now'), AUTOSAVE);
+    await pause();
+    expect(server.sent).toHaveLength(1);
+  });
+
+  it('(b) a rename through the name input is held the same way', async () => {
+    mount(objectWith(REFUSED));
+    await openRule();
+    await screen.findByText(REFUSAL);
+
+    fireEvent.change(screen.getByDisplayValue('amount_cap'), { target: { value: 'amount_limit' } });
+
+    await waitFor(() => expect(screen.getByTestId('studio-held-message')).toHaveTextContent('Amount cap'), AUTOSAVE);
+    await pause();
+    expect(server.sent).toHaveLength(0);
+  });
+
+  it('control: a rename does not hold a rule the verdict does not judge', async () => {
+    mount(objectWith(REFUSED));
+    fireEvent.click(await screen.findByTestId('data-tab-flat-rules'));
+    fireEvent.click(await screen.findByText('Status set'));
+    await screen.findByDisplayValue('x');
+
+    fireEvent.change(screen.getByDisplayValue('status_set'), { target: { value: 'status_needed' } });
+
+    // The refused rule beside it was never opened, so nothing holds this edit.
+    await waitFor(() => expect(server.sent).toHaveLength(1), AUTOSAVE);
+    const sent = server.sent[0]!.validations as Array<{ name?: string }>;
+    expect(sent[0]!.name).toBe('status_needed');
+  });
+});
