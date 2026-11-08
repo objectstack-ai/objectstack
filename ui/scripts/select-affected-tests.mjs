@@ -42,9 +42,8 @@
  *
  *  2. ALWAYS-ON TEST FILES. A test the package graph cannot place is selected
  *     on every run, whatever changed:
- *       - it lives outside every workspace package (`scripts/**`,
- *         `eslint-rules/**`): no package owns it, so no package change
- *         reaches it;
+ *       - it lives outside every workspace package and every owner
+ *         directory (item 2c): nothing owns it, so no change reaches it;
  *       - it, or a module it reaches through RELATIVE imports, reads the disk
  *         or spawns a process (`fs`, `child_process`, `import.meta.glob`) with
  *         a radius item 2b cannot bound: its input is the tree, and the tree
@@ -74,6 +73,29 @@
  *     packages, exactly as a relative reach does in 2a. Anything the walker
  *     cannot name -- an unread argument, a spawn, `process.cwd()`, an async or
  *     glob read, a walk from an unnamed root -- keeps the test always-on.
+ *
+ *  2c. OWNER DIRECTORIES. `scripts/` and `eslint-rules/` own the tests under
+ *     them as a package owns its own (`OWNER_DIRS`): a change to a file in one
+ *     selects that directory's tests, and a test elsewhere that imports or
+ *     reads into one counts the directory among its input packages. An owner
+ *     directory declares no dependencies, so every workspace package its tests
+ *     import is an input package (item 2a). A change to the path walker
+ *     (`PATH_WALKER_FILE`, outside the tree) selects `scripts/`, the directory
+ *     of the selector that imports it. Its tests stay always-on exactly where
+ *     a package's would: a spawn, a tree walk, a read item 2b cannot bound.
+ *     `scripts/invoked-as.mjs`, which nearly every script imports, is the one
+ *     module whose disk use is not a test input (`BENIGN_DISK_MODULES`). An
+ *     owner directory is never a workspace package: the full-run reach in
+ *     item 3 is still computed against the workspace alone.
+ *
+ *  2d. LIBRARY PROGRAMS. A module that imports a library which reads the disk
+ *     on its caller's behalf (`LIBRARY_DISK_READERS`) reads the disk whether or
+ *     not it imports `fs`: a TypeScript program follows `tsconfig` and every
+ *     import through `ts.sys`. Only the in-memory parts are free
+ *     (`libraryReadsDisk`): TypeScript's parser, node tests and enums,
+ *     ESLint's `RuleTester` and `Linter`, Tailwind's core `compile`. Any other
+ *     runtime use is a disk read with a radius nothing states
+ *     (objectstack#31520).
  *
  *  3. FULL RUN instead, when the change reaches something every test runs
  *     through:
@@ -207,6 +229,50 @@ const BOUNDED_FS_READS = ['readFileSync', 'readdirSync', 'statSync', 'lstatSync'
  */
 const LIBRARY_DISK_READERS = new Set(['typescript', 'ts-morph', 'eslint', 'vite', 'esbuild', 'rollup', 'tailwindcss', 'postcss']);
 const FS_NON_READS = ['writeFileSync', 'appendFileSync', 'mkdirSync', 'mkdtempSync', 'rmSync', 'rmdirSync', 'unlinkSync'];
+
+/**
+ * TypeScript's members that run in memory: the parser, node tests and walks,
+ * and the enums a parse is configured with. A capitalised member is a type or
+ * an enum and runs nothing. Anything else -- `sys`, `createProgram`,
+ * `createCompilerHost`, `readConfigFile`, `resolveModuleName`, a member this
+ * list has not met -- is a read of the disk (item 2d).
+ */
+const TS_IN_MEMORY = /^(?:is[A-Z]\w*|forEachChild|findAncestor|createSourceFile|getModifiers|canHaveModifiers|getLeadingCommentRanges|getTrailingCommentRanges|getJSDocCommentsAndTags|getTextOfJSDocComment|tokenToString|flattenDiagnosticMessageText|parseConfigFileTextToJson|transpileModule|factory|[A-Z]\w*)$/;
+/**
+ * The in-memory entry points of the other libraries, by library. ESLint's
+ * `ESLint` reads config files and globs; its `RuleTester` and `Linter` take
+ * the code they lint as a string. Tailwind's core `compile` loads a
+ * stylesheet only through the `loadStylesheet` its caller passes, so the read,
+ * if any, is the caller's own `fs` call. A library not listed here has no
+ * in-memory part.
+ */
+const LIBRARY_IN_MEMORY = new Map([
+  ['eslint', new Set(['RuleTester', 'Linter'])],
+  ['tailwindcss', new Set(['compile'])],
+]);
+
+/**
+ * Directories outside every workspace package that own their own tests, as
+ * a package does (item 2c). Each is a dependency-free pseudo-package named
+ * `<dir:NAME>`.
+ */
+export const OWNER_DIRS = Object.freeze(['scripts', 'eslint-rules']);
+export const ownerDirName = (dir) => `<dir:${dir}>`;
+
+/**
+ * Modules whose disk use is not a test input, with the exact `fs` and
+ * `child_process` bindings that use is spelled with. `invoked-as.mjs`
+ * realpaths `process.argv[1]` to answer "was I run?", and its own `selfTest`
+ * writes, links and spawns files in a temp directory it makes. A module whose
+ * disk imports differ from the pinned list by one binding is not exempt: a new
+ * read has to be imported, so the exemption cannot widen unseen.
+ */
+export const BENIGN_DISK_MODULES = Object.freeze({
+  'scripts/invoked-as.mjs': Object.freeze({
+    'node:child_process': ['spawnSync'],
+    'node:fs': ['existsSync', 'mkdirSync', 'mkdtempSync', 'realpathSync', 'rmSync', 'symlinkSync', 'writeFileSync'],
+  }),
+});
 
 const DEPENDENCY_FIELDS = ['dependencies', 'devDependencies', 'peerDependencies', 'optionalDependencies'];
 const RUNTIME_DEPENDENCY_FIELDS = DEPENDENCY_FIELDS.filter((field) => field !== 'devDependencies');
@@ -362,6 +428,84 @@ export function workspaceNameOf(specifier, names) {
   return names.has(head) ? head : null;
 }
 
+/** The library a bare specifier names, as `LIBRARY_DISK_READERS` lists them. */
+const libraryOf = (spec) => (spec.startsWith('@') ? spec.split('/').slice(0, 2).join('/') : spec.split('/')[0]);
+
+/**
+ * Does `source` run a disk-reading library beyond its in-memory parts (item
+ * 2d)? A type-only import runs nothing. A dynamic import, a `require`, or a
+ * binding used other than as `ts.member` is a read: what it calls is not
+ * spelled here.
+ *
+ * @param {string} rawSource
+ */
+export function libraryReadsDisk(rawSource) {
+  // Comments name libraries nothing runs -- a JSDoc `{import('eslint').Rule}`,
+  // a CSS `@import 'tailwindcss'` in prose. Dropped: a `/* ... */` closed on
+  // its own line, and whole `//`, `/*` or `*` lines that close no block. A
+  // line that closes a block keeps whatever follows it.
+  const source = rawSource
+    .split('\n')
+    .map((line) => line.replace(/\/\*.*?\*\//g, ' '))
+    .filter((line) => !/^\s*(?:\/\/|\/\*|\*)/.test(line) || (/^\s*(?:\/\*|\*)/.test(line) && line.includes('*/')))
+    .join('\n');
+  const libs = moduleSpecifiers(source).specifiers.filter((sp) => LIBRARY_DISK_READERS.has(libraryOf(sp)));
+  if (libs.length === 0) return false;
+  const importRe = /\bimport\s+(type\s+)?([^'";]*?)\s+from\s+['"]([^'"]+)['"]/g;
+  const statics = new Set();
+  for (const m of source.matchAll(importRe)) {
+    const lib = libraryOf(m[3]);
+    if (!LIBRARY_DISK_READERS.has(lib)) continue;
+    statics.add(m[3]);
+    if (m[1]) continue;
+    const clause = m[2].trim();
+    const named = (clause.match(/\{([^}]*)\}/)?.[1] ?? '')
+      .split(',')
+      .map((part) => part.trim())
+      .filter((part) => part && !part.startsWith('type '));
+    const head = clause.replace(/\{[^}]*\}/, '').replace(/,/g, ' ').trim();
+    const binding = head.match(/^(?:\*\s+as\s+)?([A-Za-z_$][\w$]*)$/)?.[1];
+    if (head && !binding) return true;
+    const inMemory = LIBRARY_IN_MEMORY.get(lib);
+    if (inMemory) {
+      if (binding || named.some((n) => !inMemory.has(n.split(/\s+as\s+/)[0]))) return true;
+      continue;
+    }
+    if (lib !== 'typescript') return true;
+    if (named.some((n) => !TS_IN_MEMORY.test(n.split(/\s+as\s+/)[0]))) return true;
+    if (binding) {
+      const body = source.replace(importRe, '');
+      const uses = body.matchAll(new RegExp(`(?<![\\w$.])${binding.replace(/\$/g, '\\$')}(?![\\w$])(?:\\s*\\.\\s*([\\w$]+))?`, 'g'));
+      for (const u of uses) if (!u[1] || !TS_IN_MEMORY.test(u[1])) return true;
+    }
+  }
+  // A library reached without a static import -- `import('vite')`, `require`.
+  return libs.some((sp) => !statics.has(sp));
+}
+
+/**
+ * Is `rel` a `BENIGN_DISK_MODULES` entry whose disk imports are still exactly
+ * the pinned ones?
+ *
+ * @param {string} rel
+ * @param {string} source
+ */
+export function isBenignDiskModule(rel, source) {
+  const pinned = BENIGN_DISK_MODULES[rel];
+  if (!pinned) return false;
+  const seen = {};
+  for (const m of source.matchAll(/\bimport\s+([^'";]*?)\s+from\s+['"]([^'"]+)['"]/g)) {
+    if (!DISK_SPECIFIERS.has(m[2])) continue;
+    const braces = m[1].trim().match(/^\{([^}]*)\}$/);
+    if (!braces) return false;
+    seen[m[2]] = [...(seen[m[2]] ?? []), ...braces[1].split(',').map((x) => x.trim()).filter(Boolean)];
+  }
+  const { specifiers } = moduleSpecifiers(source);
+  if (specifiers.some((sp) => DISK_SPECIFIERS.has(sp) && !(sp in pinned))) return false;
+  return Object.entries(pinned).every(([sp, names]) => JSON.stringify([...(seen[sp] ?? [])].sort()) === JSON.stringify([...names].sort()))
+    && Object.keys(seen).every((sp) => sp in pinned);
+}
+
 /**
  * Item 2b: the package directories a disk-reading module reads, or `null` when
  * any of its reads has a radius this selector cannot bound. Fail-closed: the
@@ -384,7 +528,7 @@ export function readRadius({ rel, source, packages, prefix, walker }) {
   const { specifiers, globsTheTree } = moduleSpecifiers(source);
   if (globsTheTree) return null;
   if (specifiers.some((s) => DISK_SPECIFIERS.has(s) && s !== 'fs' && s !== 'node:fs')) return null;
-  if (specifiers.some((s) => LIBRARY_DISK_READERS.has(s.startsWith('@') ? s.split('/').slice(0, 2).join('/') : s.split('/')[0]))) {
+  if (specifiers.some((s) => LIBRARY_DISK_READERS.has(libraryOf(s)))) {
     return null;
   }
   if (/\bprocess\.cwd\s*\(|\bcreateRequire\b|\brequire\.resolve\b|\brequire\(\s*['"](?:node:)?fs['"]/.test(source)) return null;
@@ -500,6 +644,10 @@ export function closureSummaries(root, seeds, names, dirOf, radiusOf = () => nul
       const name = workspaceNameOf(spec, names);
       if (name) node.packageNames.add(name);
     }
+    // Item 2d: a library program reads the disk with or without `fs`.
+    if (!touchesDisk && /\.(?:[cm]?[jt]sx?)$/.test(rel) && libraryReadsDisk(source)) touchesDisk = true;
+    // Item 2c: a module whose disk use is pinned as no test input.
+    if (touchesDisk && !node.readsDisk && isBenignDiskModule(rel, source)) touchesDisk = false;
     if (touchesDisk && !node.readsDisk) {
       const radius = radiusOf(rel, source);
       if (radius === null) node.readsDisk = true;
@@ -747,7 +895,12 @@ export function readHeavyProject(configText) {
  * @returns {{ mode: 'full', reasons: string[] } | { mode: 'affected', changedPackages: string[], affectedPackages: string[], heavyEdge: string[], alwaysOn: Array<{ file: string, why: string }>, attributed: Array<{ file: string, via: string[] }>, filters: string[], testFileCount: number, selectedTestFileCount: number }}
  */
 export function selectAffectedTests({ root = REPO_ROOT, changed, outside = [], tracked = trackedFiles(root), walker = PATH_WALKER }) {
-  const packages = listWorkspacePackages(root);
+  const workspacePackages = listWorkspacePackages(root);
+  // Item 2c: the owner directories join the graph as dependency-free packages.
+  const packages = [
+    ...workspacePackages,
+    ...OWNER_DIRS.filter((d) => !workspacePackages.some((p) => p.dir === d)).map((d) => ({ name: ownerDirName(d), dir: d, deps: [] })),
+  ];
   const names = new Set(packages.map((p) => p.name));
   const { dependencyClosure, dependentClosure } = packageClosures(packages);
   const dirOf = (rel) => owningPackage(rel, packages)?.dir ?? '';
@@ -787,7 +940,9 @@ export function selectAffectedTests({ root = REPO_ROOT, changed, outside = [], t
   const heavySetupPackages = reach([heavy.setupFile]).pkgs;
   for (const file of configFiles) {
     const r = reach([file]);
-    for (const f of r.files) if (!owningPackage(f, packages)) configReach.add(f);
+    // Against the workspace alone: a file the root config reaches is a
+    // full-run trigger whether or not an owner directory holds it.
+    for (const f of r.files) if (!owningPackage(f, workspacePackages)) configReach.add(f);
     // A setup file that loads the heavy one is part of the heavy family; the
     // root config names every package the setups do only through them.
     if (file === heavy.setupFile || r.files.has(heavy.setupFile) || ROOT_TEST_CONFIG.includes(file)) continue;
@@ -808,6 +963,8 @@ export function selectAffectedTests({ root = REPO_ROOT, changed, outside = [], t
 
   const reasons = outsideTreeReasons({ root, outside });
   const changedPackages = new Set();
+  // The selector imports the walker at run time, an edge no test states.
+  if (outside.includes(PATH_WALKER_FILE) && names.has(ownerDirName('scripts'))) changedPackages.add(ownerDirName('scripts'));
   for (const rel of changed) {
     const base = rel.split('/').pop() ?? rel;
     if (FULL_RUN_BASENAME.test(base)) {
@@ -831,7 +988,7 @@ export function selectAffectedTests({ root = REPO_ROOT, changed, outside = [], t
       reasons.push(`${rel}: a dependency patch changes what is installed for every test`);
       continue;
     }
-    // Anything else outside a package -- `scripts/`, `eslint-rules/`, docs,
+    // Anything else outside a package and an owner directory -- docs,
     // workflows, skills -- reaches tests only through the always-on set below.
   }
 
