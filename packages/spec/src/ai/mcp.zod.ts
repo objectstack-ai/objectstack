@@ -188,7 +188,8 @@ export const McpActionNamespaceSchema = lazySchema(() => z
   })
   .describe('Manifest namespace of the package that holds the action; absent for an environment-authored action'));
 
-export type McpActionNamespace = z.infer<typeof McpActionNamespaceSchema>;
+export type McpActionNamespace = z.input<typeof McpActionNamespaceSchema>;
+export type McpActionNamespaceParsed = z.infer<typeof McpActionNamespaceSchema>;
 
 /**
  * The address a `list_actions` row carries (ADR-0150 D5): the action name,
@@ -205,7 +206,8 @@ export const McpListedActionAddressSchema = lazySchema(() => z.object({
   [MCP_ACTION_NAMESPACE_MEMBER]: McpActionNamespaceSchema.optional(),
 }).describe('The address of one action a `list_actions` row lists'));
 
-export type McpListedActionAddress = z.infer<typeof McpListedActionAddressSchema>;
+export type McpListedActionAddress = z.input<typeof McpListedActionAddressSchema>;
+export type McpListedActionAddressParsed = z.infer<typeof McpListedActionAddressSchema>;
 
 /**
  * The one-sentence consent copy an OAuth consent screen renders for each MCP
