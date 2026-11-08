@@ -473,8 +473,10 @@ function errorResult(message: string) {
  * body name and no native text, and an unregistered code is demoted to
  * `declaredCode` beside the closed `code`, as the door serves it. The lines
  * the door prints for the operator (the full wrapper, the fault line) are
- * printed here under `request`. A thrown `details` still rides as before; a
- * throw without one carries the door's (`fields`, `issues`).
+ * printed here under `request`. `details` is unchanged: a thrown `details`
+ * rides as before, and the context the door adds (`fields`, `issues`, the
+ * unique arm's `object` / `field`) is not served, as on every other tool
+ * ({@link errorResultWithCode} says why).
  *
  * ⚠️ A driver string code (`SQLITE_BUSY`) answers what `/actions` answers,
  * `400 VALIDATION_ERROR` with `declaredCode`, where `/api/v1/data` answers
@@ -491,8 +493,7 @@ function errorResultFromThrown(err: unknown, request: string, objectName?: strin
     ...(answer.userMessage !== undefined ? { userMessage: answer.userMessage } : {}),
   };
   if (answer.code === StandardErrorCode.enum.PERMISSION_DENIED) return codedErrorResult(envelope);
-  const thrownDetails = (err as { details?: unknown } | null | undefined)?.details;
-  const details = thrownDetails !== undefined ? thrownDetails : answer.details;
+  const details = (err as { details?: unknown } | null | undefined)?.details;
   return codedErrorResult({ ...envelope, ...(details !== undefined ? { details } : {}) });
 }
 
