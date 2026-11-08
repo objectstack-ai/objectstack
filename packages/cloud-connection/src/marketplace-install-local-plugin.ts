@@ -103,12 +103,23 @@
  *          answers `503 SERVICE_UNAVAILABLE`. Under a wall only the operator
  *          reaches this step (ADR-0131 D12 items 7–8).
  *
- *          [epic cloud#3652 Q3, #30884] After that check, the same managed
- *          RE-install is compared with the installed version (its ledger
- *          entry) by the package upgrade plan, before any write. A field
- *          rename the package declares (`renamedFrom`) answers
- *          `501 NOT_IMPLEMENTED`, naming each: this runtime cannot yet carry a
- *          renamed field's values to its new key. A stored field removed while
+ *          [epic cloud#3652 D3, #30885] After that check, a field rename the
+ *          package declares (`renamedFrom`) is read against the physical
+ *          table, before any write: each old column is carried to its new
+ *          key right before the new version registers (and put back if the
+ *          register fails), and the answer names each in `renamesCarried`. A
+ *          declaration the carry cannot honour — the old key a platform
+ *          column or still live, claimed twice, both columns present, two old
+ *          columns, a destructive type change, an index that cannot follow,
+ *          a transport that renames no column, or an extension naming a key
+ *          its own package never contributed — answers `422
+ *          VALIDATION_ERROR` with `details.refusals`, naming the field, the
+ *          old key and the reason. A rename this runtime cannot read the
+ *          table for answers `503 SERVICE_UNAVAILABLE`.
+ *
+ *          [epic cloud#3652 Q3, #30884] Then the same managed RE-install is
+ *          compared with the installed version (its ledger entry) by the
+ *          package upgrade plan, before any write. A stored field removed while
  *          one is added with nothing linking them (a suspected rename), or a
  *          type change the drift categories call `needs_confirm` or
  *          `destructive`, answers `409 SCHEMA_UPGRADE_CONFIRMATION_REQUIRED`
@@ -121,7 +132,7 @@
  *          orphan's registry row carrying none), answers the same 409 with one
  *          finding naming it (`installed_record_unreadable` /
  *          `installed_record_missing`): no comparison ran, and its token admits
- *          the re-install — unless the version declares a rename, still 501.
+ *          the re-install.
  *          Removed fields, `safe` type changes and seed changes are refused by
  *          nothing.
  *
@@ -279,7 +290,6 @@ import {
     comparePackageVersions,
     type PackageUpgradeSide,
     type PackageUpgradePlan,
-    type UpgradePlanDeclaredRename,
     type UpgradeDriftCategory,
 } from '@objectstack/metadata-core';
 import { resolveCloudUrl } from './cloud-url.js';
@@ -305,6 +315,13 @@ import {
     type SeedOwnerStampResult,
 } from './marketplace-install-local-seed-owner.js';
 import { planCustomizationPairInstall, type PairInstallItem } from './marketplace-install-local-customization-pair.js';
+import {
+    carryInstallDeclaredRenames,
+    planInstallDeclaredRenames,
+    reverseInstallDeclaredRenames,
+    type InstallRenameEngine,
+    type InstallRenameTable,
+} from './marketplace-install-declared-renames.js';
 import type {
     AuthSessionApi, ConnectorCredentialRef, IAuthService, IAutomationService, IHttpServer, IMetadataService, IObjectQLEngine,
 } from '@objectstack/spec/contracts';
@@ -597,13 +614,14 @@ type SchemaUpgradeFinding =
 /**
  * [epic cloud#3652 Q3, #30884] The verdict step 2c′ gives, read from the
  * pure comparison alone (ruling record 6709061297, C3): which declared renames
- * this runtime cannot carry yet, which findings need the installer's
- * confirmation, and the token of that finding set. Nothing here reads the
+ * which findings need the installer's confirmation, and the token of that
+ * finding set. Nothing here reads the
  * environment: whether an upgrade is refused is decided by the two package
  * bodies, never by a reading that could fail.
  *
- * - A declared rename (`renamedFrom`) is listed on its own: no token answers
- *   it (C2).
+ * - A declared rename (`renamedFrom`) is no finding: the column is carried
+ *   (#30885, {@link planInstallDeclaredRenames}), or the install is refused
+ *   before this verdict is asked (step 2c″).
  * - A suspected rename always needs confirming.
  * - A type change needs confirming when its category is `needs_confirm` or
  *   `destructive` — on a declared rename too: a declared rename never stands
@@ -617,7 +635,6 @@ type SchemaUpgradeFinding =
  * change to the finding set yields another.
  */
 function schemaUpgradeVerdict(manifestId: string, plan: PackageUpgradePlan): {
-    declaredRenames: UpgradePlanDeclaredRename[];
     findings: SchemaUpgradeFinding[];
     findingSet: string;
 } {
@@ -653,7 +670,7 @@ function schemaUpgradeVerdict(manifestId: string, plan: PackageUpgradePlan): {
                 + `changes type ${t.from} → ${t.to} (${t.category}): ${what}.`,
         });
     }
-    return { declaredRenames: plan.declaredRenames, findings, findingSet: schemaUpgradeFindingSet(manifestId, findings) };
+    return { findings, findingSet: schemaUpgradeFindingSet(manifestId, findings) };
 }
 
 /**
@@ -688,16 +705,15 @@ function schemaUpgradeFindingSet(manifestId: string, findings: readonly SchemaUp
  * missing, and its token admits the re-install — the re-install that rewrites
  * the record — confirmed and recorded, one round trip, never silently.
  *
- * A rename the incoming version declares is read from that version alone
- * ({@link declaredRenamesOfIncoming}) and still answers 501 (ruling record
- * 6709061297, C2): the token admits an unchecked re-install, never a rename
- * this runtime cannot carry.
+ * A rename the incoming version declares is judged before this verdict
+ * (step 2c″), on the physical table: with no installed record it is taken as
+ * pending, so a transport that cannot carry it refuses, and an extension's
+ * rename is refused, since whose earlier key it names cannot be told.
  */
 function installedRecordUnavailableVerdict(
     manifestId: string,
     failure: { file: string; cause: unknown } | undefined,
-    incoming: PackageUpgradeSide,
-): { declaredRenames: UpgradePlanDeclaredRename[]; findings: SchemaUpgradeFinding[]; findingSet: string } {
+): { findings: SchemaUpgradeFinding[]; findingSet: string } {
     const consequence = 'so this upgrade cannot be checked for fields it renames or retypes: confirming installs it '
         + 'unchecked, and the install rewrites the record.';
     const finding: SchemaUpgradeFinding = failure
@@ -714,40 +730,9 @@ function installedRecordUnavailableVerdict(
                 + `nor the registry carries one), ${consequence}`,
         };
     return {
-        declaredRenames: declaredRenamesOfIncoming(incoming),
         findings: [finding],
         findingSet: schemaUpgradeFindingSet(manifestId, [finding]),
     };
-}
-
-/**
- * [epic cloud#3652 Q3, #30884] The renames the incoming version declares,
- * read from it alone, for the verdict without an installed side: each field
- * whose `renamedFrom` names a key the same object no longer declares, as its
- * first such key ({@link comparePackageVersions} takes the first that the
- * installed version has; with no installed version, the first is the claim).
- * There is no `fromType`: the installed type is the unknown.
- */
-function declaredRenamesOfIncoming(incoming: PackageUpgradeSide): UpgradePlanDeclaredRename[] {
-    const renames: UpgradePlanDeclaredRename[] = [];
-    for (const object of incoming.objects ?? []) {
-        const o = object as { name?: unknown; fields?: unknown } | null;
-        if (!o || typeof o.name !== 'string' || o.name === '' || !o.fields || typeof o.fields !== 'object') continue;
-        const fields = o.fields as Record<string, unknown>;
-        for (const [key, def] of Object.entries(fields)) {
-            const d = def as { renamedFrom?: unknown; type?: unknown } | null;
-            if (!d || !Array.isArray(d.renamedFrom)) continue;
-            const from = d.renamedFrom.find((k): k is string => typeof k === 'string' && k !== '' && !(k in fields));
-            if (from === undefined) continue;
-            renames.push({
-                object: o.name,
-                from,
-                to: key,
-                ...(typeof d.type === 'string' && d.type !== '' ? { toType: d.type } : {}),
-            });
-        }
-    }
-    return renames;
 }
 
 /** One side of the comparison, a multi-package artifact folded as `planUpgrade` folds it. */
@@ -2766,13 +2751,30 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             accessUpgradeConfirmation = access.confirmation;
         }
 
+        // 2c″. [epic cloud#3652 D3 「写进清单 renamedFrom」, #30885] ⭐ A DECLARED
+        //      RENAME CARRIES ITS VALUES, OR IS REFUSED BEFORE ANY WRITE. Each
+        //      field this package declares `renamedFrom` on is read against
+        //      the physical table by the driver's own rule
+        //      ({@link evaluateDeclaredRenames}); a declaration it cannot
+        //      honour is refused `422 VALIDATION_ERROR`, naming the field, the
+        //      old key and the reason. Asked before 2c′, so a refusal no token
+        //      answers is never preceded by a 409 asking for one. The carry
+        //      itself runs right before step 3, the last moment the running
+        //      version still serves the old key.
+        const declaredRenames = await this.evaluateDeclaredRenames(
+            ctx,
+            manifestId,
+            converted,
+            conflict === 'marketplace' ? this.installedPackageSide(ctx, manifestId, previousLookup) : null,
+        );
+        if (declaredRenames.refusal) return c.json(declaredRenames.refusal.body, declaredRenames.refusal.status);
+
         // 2c′. [epic cloud#3652 Q3 「默认拒绝，需显式映射（推荐）」, #30884;
         //      ruling record 6709061297] ⭐ AN UPGRADE NEVER CHANGES A STORED
         //      FIELD SILENTLY. On a managed re-install, the package upgrade
         //      plan of the installed version (its ledger entry) against this
         //      one decides, before any write: a declared rename (`renamedFrom`)
-        //      is refused `501 NOT_IMPLEMENTED` while this runtime cannot carry
-        //      the column (lifted by card 01b, #30885); an undeclared
+        //      is step 2c″'s, above, and no finding here; an undeclared
         //      suspected rename, a record of the installed version this step
         //      cannot read, or a `needs_confirm`
         //      / `destructive` type change is refused `409
@@ -2844,6 +2846,55 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             }, UNRUNNABLE_REFUSAL_STATUS);
         }
 
+        // 2f. [cloud#3652 D3, #30885] Carry each declared rename step 2c″
+        //     planned: the old column renamed to the new key, values and all,
+        //     one call per table through the driver (one transaction, or one
+        //     atomic ALTER on MySQL). A table that fails puts back the tables
+        //     already carried, and nothing was installed: the version that
+        //     serves finds its columns where it left them. A register that
+        //     fails below puts them back too.
+        let carried: Awaited<ReturnType<typeof carryInstallDeclaredRenames>> = [];
+        const reverseFailed = (t: InstallRenameTable, err: unknown): void => {
+            ctx.logger?.error?.(
+                `[MarketplaceInstallLocal] could not put back the declared rename(s) carried on ${t.table} for ${manifestId}: `
+                + `${t.carries.map((r) => `${r.from} → ${r.to}`).join(', ')} stay carried — ${String((err as Error)?.message ?? err)}`,
+            );
+        };
+        if (declaredRenames.tables.length > 0) {
+            try {
+                carried = await carryInstallDeclaredRenames(declaredRenames.tables, reverseFailed);
+            } catch (err: any) {
+                const refusals = Array.isArray(err?.refusals) ? err.refusals as Array<Record<string, unknown>> : undefined;
+                if (refusals) {
+                    return c.json({
+                        success: false,
+                        error: {
+                            code: UNRUNNABLE_REFUSAL_CODE,
+                            message: `Upgrading "${manifestId}" is refused: ${String(err.message)}`,
+                            details: { manifestId, refusals },
+                        },
+                    }, UNRUNNABLE_REFUSAL_STATUS);
+                }
+                return c.json({
+                    success: false,
+                    error: {
+                        code: 'INTERNAL_ERROR',
+                        message: `Installing "${manifestId}" failed while carrying its declared rename(s): `
+                            + `${String(err?.message ?? err)}. Each table's carry is all or none, and the tables already `
+                            + 'carried were put back: nothing was installed, and the installed version serves as before.',
+                    },
+                }, 500);
+            }
+        }
+        const renamesCarried = carried.flatMap(({ table, carries }) =>
+            carries.map((r) => ({ object: table.object, table: r.table, from: r.from, to: r.to })));
+        for (const r of renamesCarried) {
+            ctx.logger?.info?.(
+                `[MarketplaceInstallLocal] ${manifestId}: carried the declared rename ${r.object}.${r.from} → ${r.object}.${r.to} `
+                + `(table ${r.table}): the values now serve '${r.to}'`,
+            );
+        }
+
         // 3. Hot-register FIRST so a malformed inline manifest fails the
         //    install loudly rather than persisting a broken record that
         //    would also fail on every subsequent rehydrate.
@@ -2872,6 +2923,10 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             // failure (don't persist). Cloud installs historically tolerated
             // this (the on-disk record survives a restart), so keep that path
             // lenient for backwards compatibility.
+            // [#30885] Whatever the branch, the version that still serves is
+            // the installed one: the columns step 2f carried go back to it.
+            await reverseInstallDeclaredRenames(carried, reverseFailed);
+            renamesCarried.length = 0;
             if (inlineManifest) {
                 return c.json({
                     success: false,
@@ -3040,6 +3095,10 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                 // undeclared, that this version now ships (step 2d). Omitted when
                 // there are none, so that answer's key set is unchanged.
                 ...(overrideGate.collisions.length > 0 ? { overrideCollisions: overrideGate.collisions } : {}),
+                // [cloud#3652 D3, #30885] Each declared rename step 2f carried:
+                // the object, its table, the old key and the new. Omitted when
+                // none was, so that answer's key set is unchanged.
+                ...(renamesCarried.length > 0 ? { renamesCarried } : {}),
                 translationsLoaded: seededSummary.translationsLoaded,
                 seeded: seededSummary.seeded,
                 // #6721: the RESOLVED ledger directory on THIS host — the same
@@ -3861,6 +3920,93 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
     };
 
     /**
+     * [epic cloud#3652 Q3, #30884] The installed version's body, converted
+     * forward as the registry reads it: the ledger entry's; for an orphaned
+     * install (no ledger file, the registry still serves the package —
+     * findConflict step 3) the body the registry serves. `undefined` when
+     * neither holds one: a ledger file that will not parse, an entry or a
+     * registry row carrying no body.
+     */
+    private installedPackageSide = (
+        ctx: PluginContext,
+        manifestId: string,
+        previous: ReturnType<LocalManifestSource['read']>,
+    ): unknown => {
+        const installedBody = previous.entry?.manifest
+            ?? (previous.entry === null && previous.failure === undefined ? this.registeredPackageBody(ctx, manifestId) : undefined);
+        return installedBody ? this.convertPackageBodyForward(ctx, installedBody) : undefined;
+    };
+
+    /**
+     * [epic cloud#3652 D3, #30885] Step 2c″ of {@link handleInstall}: the
+     * declared renames this install carries, read before any write
+     * ({@link planInstallDeclaredRenames}: the driver's rule on the physical
+     * table, and the door's own on whose key it is). `installed` is the
+     * installed version's body (`null` on a fresh install, `undefined` when
+     * none can be read).
+     *
+     * - **A refusal**: `422 VALIDATION_ERROR` (this door's body refusal),
+     *   each in `details.refusals` with its object, field, old key(s) and
+     *   reason. No token answers it: the package must change.
+     * - **A reading that failed** (the table could not be read): `503
+     *   SERVICE_UNAVAILABLE`, never taken for "nothing to carry".
+     * - Otherwise the tables to carry, which step 2f carries.
+     */
+    private evaluateDeclaredRenames = async (
+        ctx: PluginContext,
+        manifestId: string,
+        converted: unknown,
+        installed: unknown,
+    ): Promise<{ refusal?: { body: Record<string, unknown>; status: 422 | 503 }; tables: InstallRenameTable[] }> => {
+        let engine: InstallRenameEngine | undefined;
+        try { engine = ctx.getService('objectql') as InstallRenameEngine | undefined; } catch { /* no data engine */ }
+        const typeChanges = installed === null || installed === undefined
+            ? []
+            : comparePackageVersions(packageUpgradeSideOf(installed), packageUpgradeSideOf(converted)).typeChanges;
+        let plan: Awaited<ReturnType<typeof planInstallDeclaredRenames>>;
+        try {
+            plan = await planInstallDeclaredRenames({ manifestId, incoming: converted, installed, engine, typeChanges });
+        } catch (err: any) {
+            return {
+                tables: [],
+                refusal: {
+                    status: 503,
+                    body: {
+                        success: false,
+                        error: {
+                            code: 'SERVICE_UNAVAILABLE',
+                            message: `Installing "${manifestId}" is stopped: the tables its declared rename(s) carry could not `
+                                + `be read (${String(err?.message ?? err)}), so whether each old column is there to carry `
+                                + 'cannot be told. Nothing was installed or written. Retry once the database answers.',
+                        },
+                    },
+                },
+            };
+        }
+        if (plan.refusals.length === 0) return { tables: plan.tables };
+        ctx.logger?.warn?.(
+            `[MarketplaceInstallLocal] install of ${manifestId} refused: ${plan.refusals.length} declared rename(s) `
+            + `cannot be carried (${plan.refusals.map((r) => `${r.object}.${r.field}: ${r.reason}`).join(', ')})`,
+        );
+        return {
+            tables: [],
+            refusal: {
+                status: UNRUNNABLE_REFUSAL_STATUS,
+                body: {
+                    success: false,
+                    error: {
+                        code: UNRUNNABLE_REFUSAL_CODE,
+                        message: `Installing "${manifestId}" is refused: ${plan.refusals.length} declared field rename(s) `
+                            + `cannot be carried. ${plan.refusals.map((r) => r.message).join(' ')} Nothing was installed or `
+                            + 'written: no column was renamed, added or dropped.',
+                        details: { manifestId, refusals: plan.refusals },
+                    },
+                },
+            },
+        };
+    };
+
+    /**
      * [epic cloud#3652 Q3, #30884] Step 2c′ of {@link handleInstall}: the
      * schema upgrade verdict ({@link schemaUpgradeVerdict}) of the installed
      * version — its ledger entry, converted forward as the registry reads it —
@@ -3874,13 +4020,10 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
      *   comparison can run, and one that did not run is never taken for "no
      *   finding" — the 409 below with one finding, `installed_record_unreadable`
      *   (its `file` and `cause`) or `installed_record_missing`. Its token admits
-     *   the re-install, which rewrites the record, confirmed and recorded — but
-     *   a rename the incoming version declares still answers the 501 below.
-     * - **A declared rename**: `501 NOT_IMPLEMENTED`, naming each — no token
-     *   answers it while this runtime cannot carry a renamed field's column to
-     *   its new key (ruling record 6709061297, C2). Card 01b (#30885), which
-     *   carries the column, lifts this answer. The findings a token would
-     *   still have to confirm are listed beside it.
+     *   the re-install, which rewrites the record, confirmed and recorded.
+     * - **A declared rename** is no finding here: step 2c″
+     *   ({@link evaluateDeclaredRenames}), asked first, carries its column or
+     *   refuses it (#30885, lifting #30884's interim 501).
      * - **No finding**: the upgrade proceeds unchanged.
      * - **Findings**: `409 SCHEMA_UPGRADE_CONFIRMATION_REQUIRED`, naming each,
      *   unless `body.confirmSchemaUpgrade` is the finding set's token. A token
@@ -3899,7 +4042,7 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         body: any,
         userId: string,
     ): Promise<{
-        refusal?: { body: Record<string, unknown>; status: 409 | 501 };
+        refusal?: { body: Record<string, unknown>; status: 409 };
         confirmation?: InstalledEntry['schemaUpgradeConfirmation'];
     }> => {
         // The installed side: the ledger entry's body; for an orphaned install
@@ -3907,19 +4050,16 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         // step 3) the body the registry serves. With neither — a ledger file
         // that will not parse, an entry or a registry row carrying no body —
         // the verdict is the one finding that says so, confirmable like any
-        // other, never "no finding"; a rename the incoming version declares
-        // still answers 501.
-        const installedBody = previous.entry?.manifest
-            ?? (previous.entry === null && previous.failure === undefined ? this.registeredPackageBody(ctx, manifestId) : undefined);
-        const installed = installedBody ? this.convertPackageBodyForward(ctx, installedBody) : undefined;
+        // other, never "no finding".
+        const installed = this.installedPackageSide(ctx, manifestId, previous);
         const verdict = installed === undefined
-            ? installedRecordUnavailableVerdict(manifestId, previous.failure, packageUpgradeSideOf(converted))
+            ? installedRecordUnavailableVerdict(manifestId, previous.failure)
             : schemaUpgradeVerdict(manifestId, comparePackageVersions(packageUpgradeSideOf(installed), packageUpgradeSideOf(converted)));
-        const { declaredRenames, findingSet } = verdict;
-        if (declaredRenames.length === 0 && verdict.findings.length === 0) return {};
+        const { findingSet } = verdict;
+        if (verdict.findings.length === 0) return {};
 
         const token = body?.confirmSchemaUpgrade;
-        if (declaredRenames.length === 0 && typeof token === 'string' && token === findingSet) {
+        if (typeof token === 'string' && token === findingSet) {
             const confirmedAt = new Date().toISOString();
             ctx.logger?.warn?.(
                 `[MarketplaceInstallLocal] upgrade of ${manifestId} confirmed by ${userId} over its schema findings `
@@ -3941,44 +4081,6 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                 ...(held !== null ? { describe: `${f.describe} ${held} row(s) hold a value in ${key}.` } : {}),
             };
         });
-
-        if (declaredRenames.length > 0) {
-            const renames = declaredRenames.map((r) => ({
-                object: r.object,
-                from: r.from,
-                to: r.to,
-                ...(r.fromType !== undefined ? { fromType: r.fromType } : {}),
-                ...(r.toType !== undefined ? { toType: r.toType } : {}),
-                ...(rows?.has(`${r.object}.${r.from}`) ? { rows: rows.get(`${r.object}.${r.from}`) ?? null } : {}),
-            }));
-            ctx.logger?.warn?.(
-                `[MarketplaceInstallLocal] upgrade of ${manifestId} refused: ${renames.length} declared rename(s) this `
-                + 'runtime cannot carry yet',
-            );
-            return {
-                refusal: {
-                    status: 501,
-                    body: {
-                        success: false,
-                        error: {
-                            code: 'NOT_IMPLEMENTED',
-                            message: `Upgrading "${manifestId}" is refused: it declares ${renames.length} field rename(s) `
-                                + `(${renames.map((r) => `${r.object}.${r.from} → ${r.object}.${r.to}`).join(', ')}), and this `
-                                + 'runtime cannot yet move a renamed field\'s stored values to its new key — installed now, '
-                                + 'the new field would start empty while the values stay in the old column. Nothing was '
-                                + 'installed or written. Install this version once the runtime carries declared renames; or, '
-                                + 'to install it now without moving the values, remove the `renamedFrom` declaration, '
-                                + 'rebuild, and confirm what the next refusal lists (a suspected rename, or the '
-                                + 'installed record it could not read).'
-                                + (findings.length > 0
-                                    ? ` That refusal will also ask to confirm ${findings.length} other finding(s), listed here.`
-                                    : ''),
-                            details: { manifestId, declaredRenames: renames, findings },
-                        },
-                    },
-                },
-            };
-        }
 
         const stale = token !== undefined
             ? ' The confirmation sent does not confirm these findings: a confirmation is the finding set\'s token from '

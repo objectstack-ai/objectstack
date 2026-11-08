@@ -89,23 +89,7 @@ export class DeclaredRenameFacet {
     opts: { liveKeys?: Iterable<string> } = {},
   ): Promise<DeclaredRenamePlan> {
     const fields = object.fields ?? {};
-    const declaring = Object.entries(fields).filter(([, def]) => renamedFromOf(def).length > 0);
-    if (declaring.length === 0) return { carries: [], refusals: [] };
-
-    const limit = this.declaredRenameLimit();
-    if (limit !== null) {
-      return {
-        carries: [],
-        refusals: declaring.map(([field, def]) => ({
-          table: tableName,
-          field,
-          from: renamedFromOf(def),
-          reason: 'transport' as const,
-          message: `${tableName}.${field} declares \`renamedFrom\` ${renamedFromOf(def).map((k) => `'${k}'`).join(', ')}, `
-            + `and ${limit}.`,
-        })),
-      };
-    }
+    if (!Object.values(fields).some((def) => renamedFromOf(def).length > 0)) return { carries: [], refusals: [] };
 
     const exists = await this.knex.schema.hasTable(tableName);
     const physical = new Set<string>(exists ? Object.keys(await this.knex(tableName).columnInfo()) : []);
@@ -118,6 +102,27 @@ export class DeclaredRenameFacet {
       ...(opts.liveKeys !== undefined ? { liveKeys: opts.liveKeys } : {}),
     });
     if (plan.carries.length === 0) return plan;
+
+    // A transport that renames no column refuses each carry it would owe, by
+    // name — only when there is one: a declaration whose rename is long done
+    // (no old column left) asks nothing of it.
+    const limit = this.declaredRenameLimit();
+    if (limit !== null) {
+      return {
+        carries: [],
+        refusals: [
+          ...plan.refusals,
+          ...plan.carries.map((c) => ({
+            table: tableName,
+            field: c.to,
+            from: [c.from],
+            reason: 'transport' as const,
+            message: `${tableName}.${c.to} declares \`renamedFrom\` '${c.from}', and the table still has the column `
+              + `'${c.from}' to carry, but ${limit}. Nothing was changed.`,
+          })),
+        ],
+      };
+    }
 
     // The old column, read under the new declaration: a change the drift
     // categories call `destructive` is refused, as the upgrade plan lists it.

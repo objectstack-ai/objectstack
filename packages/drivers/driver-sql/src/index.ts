@@ -25,8 +25,10 @@ export { recoverUnencodedJsonText } from './unencoded-json-text.js';
 export { FLAT_GROUP_MAX_MEMBERS, joinBalancedGroup } from './sql-driver-balanced-group.js';
 // [cloud#3652 D3] The declared-rename refusal the sync throws before any DDL,
 // and its renderer, so a host reporting a refused sync (the install door, `os
-// migrate apply`) reads the structured refusals rather than parsing the text.
-export { DeclaredRenameRefusal, renderDeclaredRenameRefusal } from './declared-rename.js';
+// migrate apply`) reads the structured refusals rather than parsing the text;
+// and the pure planner, so a subclass whose transport reads its own catalog
+// (driver-turso's remote face) judges a declaration by the same rule.
+export { DeclaredRenameRefusal, planDeclaredRenames, renderDeclaredRenameRefusal } from './declared-rename.js';
 export type {
   DeclaredRenameCarry,
   DeclaredRenamePlan,

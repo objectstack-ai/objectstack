@@ -32,8 +32,12 @@ import {
   SqlDriver,
   GLOBAL_TENANT,
   applyIndexKeyParts,
+  DeclaredRenameRefusal,
   isIndexDriftOp,
   parseIndexDdl,
+  planDeclaredRenames,
+  type DeclaredRenameCarry,
+  type DeclaredRenamePlan,
   type DriftOp,
   type IntrospectedColumn,
   type IntrospectedSchema,
@@ -821,6 +825,23 @@ function remotePhysicalIndexes(
  * could not judge, beside the backfill and verify reports and the flag it
  * recorded. Nothing is planned, no statement is sent, and nothing is stamped.
  */
+/**
+ * [cloud#3652 D3] `reverseDeclaredRenames` and `retireIndexesNamedForOldKeys`
+ * on the REMOTE face: each follows a carry, and this face carries none (its
+ * plan refuses every one), so a call names that gap — NOT_IMPLEMENTED/501 —
+ * rather than reaching the connection-less Knex.
+ */
+function refuseRemoteDeclaredRenameFollowUp(member: string): never {
+  const err = new Error(
+    `\`${member}\` is not supported by the Turso REMOTE transport (this datasource's transport mode is \`remote\`): `
+    + 'it follows a declared rename\'s column carry, and this transport renames no column, so there is nothing to '
+    + 'reverse or retire. Nothing ran.',
+  ) as Error & { code?: string; status?: number };
+  err.code = StandardErrorCode.enum.NOT_IMPLEMENTED;
+  err.status = 501;
+  throw err;
+}
+
 function refuseRemoteMediaColumnMove(): never {
   const err = new Error(
     'Planning the ADR-0104 media column move is not supported by the Turso REMOTE transport ' +
@@ -1102,6 +1123,17 @@ export const REMOTE_FACE_ANSWERS = {
   detectManagedDrift: 'remote',
   applyMigrationEntries: 'remote',
   planMediaColumnMove: 'refused',
+  // [cloud#3652 D3] Declared renames: this face renames no column (the
+  // transport has no `RENAME COLUMN` door). The limit names that; the plan
+  // reads the remote catalog and answers every carry it would owe as a
+  // `transport` refusal; the carry throws that refusal, and every remote
+  // schema door asks it first, so no door adds the new key beside the old
+  // column. Reversing and retiring only follow a carry, which never runs here.
+  declaredRenameLimit: 'remote',
+  planDeclaredRenames: 'remote',
+  carryDeclaredRenames: 'remote',
+  reverseDeclaredRenames: 'refused',
+  retireIndexesNamedForOldKeys: 'refused',
   // `false`, the method's own "not taken" answer: only the Knex `initObjects`
   // asks the resolver, so on this face it would never be asked.
   setFileColumnsMovedResolver: 'remote',
@@ -4198,9 +4230,101 @@ export class TursoDriver extends SqlDriver {
     return super.planMediaColumnMove();
   }
 
+  /**
+   * [cloud#3652 D3] The REMOTE face renames no column: the libSQL transport
+   * runs the additive DDL only. The local and embedded-replica faces inherit
+   * the Knex answer (`null`: SQLite renames a column).
+   */
+  override declaredRenameLimit(): string | null {
+    if (this.isRemote) return 'the Turso REMOTE transport (this datasource\'s transport mode is `remote`) renames no column';
+    return super.declaredRenameLimit();
+  }
+
+  /**
+   * [cloud#3652 D3] On the REMOTE face the plan reads the remote catalog
+   * (`pragma_table_info`) and answers each carry it would owe as a
+   * `transport` refusal naming the field and the old key: nothing on this
+   * face carries one. A declaration whose old column is gone asks nothing.
+   */
+  override async planDeclaredRenames(
+    tableName: string,
+    object: { fields?: Record<string, any>; indexes?: any[] },
+    opts: { liveKeys?: Iterable<string> } = {},
+  ): Promise<DeclaredRenamePlan> {
+    if (!this.isRemote) return super.planDeclaredRenames(tableName, object, opts);
+    const fields = object.fields ?? {};
+    if (!Object.values(fields).some((def) => Array.isArray((def as { renamedFrom?: unknown } | null)?.renamedFrom))) {
+      return { carries: [], refusals: [] };
+    }
+    const columns = await this.remoteCatalogRead(REMOTE_TABLE_INFO_SQL, [tableName]);
+    const plan = planDeclaredRenames({
+      table: tableName,
+      fields,
+      physicalColumns: new Set(columns.map((c) => String(c.name))),
+      tenantField: this.resolveTenantField(tableName),
+      ...(opts.liveKeys !== undefined ? { liveKeys: opts.liveKeys } : {}),
+    });
+    const limit = this.declaredRenameLimit();
+    return {
+      carries: [],
+      refusals: [
+        ...plan.refusals,
+        ...plan.carries.map((c) => ({
+          table: tableName,
+          field: c.to,
+          from: [c.from],
+          reason: 'transport' as const,
+          message: `${tableName}.${c.to} declares \`renamedFrom\` '${c.from}', and the table still has the column `
+            + `'${c.from}' to carry, but ${limit}. Nothing was changed.`,
+        })),
+      ],
+    };
+  }
+
+  /** [cloud#3652 D3] On the REMOTE face: the plan's refusal, thrown, or nothing to carry. */
+  override async carryDeclaredRenames(
+    tableName: string,
+    object: { fields?: Record<string, any>; indexes?: any[] },
+    opts: { liveKeys?: Iterable<string> } = {},
+  ): Promise<DeclaredRenameCarry[]> {
+    if (!this.isRemote) return super.carryDeclaredRenames(tableName, object, opts);
+    const plan = await this.planDeclaredRenames(tableName, object, opts);
+    if (plan.refusals.length > 0) throw new DeclaredRenameRefusal(tableName, plan.refusals);
+    return [];
+  }
+
+  /** [cloud#3652 D3] Refused on the REMOTE face: it follows a carry, and none runs there. */
+  override async reverseDeclaredRenames(carries: ReadonlyArray<DeclaredRenameCarry>): Promise<void> {
+    if (this.isRemote) refuseRemoteDeclaredRenameFollowUp('reverseDeclaredRenames');
+    return super.reverseDeclaredRenames(carries);
+  }
+
+  /** [cloud#3652 D3] Refused on the REMOTE face: it follows a carry, and none runs there. */
+  override async retireIndexesNamedForOldKeys(
+    tableName: string,
+    object: { fields?: Record<string, any>; indexes?: any[] },
+    tenantField: string | null,
+  ): Promise<string[]> {
+    if (this.isRemote) refuseRemoteDeclaredRenameFollowUp('retireIndexesNamedForOldKeys');
+    return super.retireIndexesNamedForOldKeys(tableName, object, tenantField);
+  }
+
+  /**
+   * [cloud#3652 D3] Every remote schema door asks this first: a declared
+   * rename this face would owe is refused by name before any DDL, rather
+   * than the additive sync adding the new key as an empty column beside the
+   * old one.
+   */
+  private async refuseRemoteDeclaredRenames(schemas: ReadonlyArray<{ table: string; schema: unknown }>): Promise<void> {
+    for (const { table, schema } of schemas) {
+      await this.carryDeclaredRenames(table, (schema ?? {}) as { fields?: Record<string, any> });
+    }
+  }
+
   override async syncSchema(object: string, schema: unknown, options?: DriverOptions): Promise<void> {
     this.assertRemoteTransactionUnsupported(options, 'syncSchema');
     if (this.isRemote) {
+      await this.refuseRemoteDeclaredRenames([{ table: object, schema }]);
       await this.remoteTransport!.syncSchema(object, schema);
       // Registration + canonical backfill, see completeRemoteSchemaSync(). Key
       // strictly by `object` (what find()/formatOutput look up) — never let a
@@ -4244,6 +4368,7 @@ export class TursoDriver extends SqlDriver {
   ): Promise<void> {
     if (this.isRemote) {
       if (objects.length === 0) return;
+      await this.refuseRemoteDeclaredRenames(objects.map((obj) => ({ table: obj.name, schema: obj })));
       await this.remoteTransport!.syncSchemasBatch(
         objects.map((obj) => ({ object: obj.name, schema: obj })),
       );
@@ -4273,6 +4398,7 @@ export class TursoDriver extends SqlDriver {
   async syncSchemasBatch(schemas: Array<{ object: string; schema: unknown }>, options?: DriverOptions): Promise<void> {
     this.assertRemoteTransactionUnsupported(options, 'syncSchemasBatch');
     if (this.isRemote) {
+      await this.refuseRemoteDeclaredRenames(schemas.map(({ object, schema }) => ({ table: object, schema })));
       await this.remoteTransport!.syncSchemasBatch(schemas);
       // Key strictly by `object`, as syncSchema() does: it is the name the
       // engine hands every later read and write for this table.
