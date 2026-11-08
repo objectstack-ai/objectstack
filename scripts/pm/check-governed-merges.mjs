@@ -473,8 +473,9 @@
  *   H by DIFF (C2) — an added or changed `permissions:`; a `secrets` or
  *      job-token line (`github.token` in any case, any `github[…]` index,
  *      `toJSON(github)`) added, changed or moved;
- *      `pull_request_target`; a `uses:` (or image) not already used at the
- *      base; a deleted job, a changed literal check-run name or a changed
+ *      `pull_request_target`; a `uses:` (or image) no workflow uses at the
+ *      base (`.github/actions/**` vouches for nothing: no register row
+ *      governs it); a deleted job, a changed literal check-run name or a changed
  *      `needs:`; a new `continue-on-error`; an `if:` the base does not hold for
  *      the same owner with the same text, unless its job is new on the head.
  *   S otherwise — a contract-review PASS on the current head, every check
@@ -495,7 +496,13 @@
  *
  * Known limit, S by the ruling: the TEXT of a `run:` or `shell:` edit is not
  * judged beyond a dropped gate token or an added risky pattern, so
- * `echo "pnpm check:x"`, `|| :` or `shell: bash {0}` read S. The contract
+ * `echo "pnpm check:x"`, `|| :` or `shell: bash {0}` read S. A gate token is
+ * one `WORKFLOW_INVOCATIONS` spelling: `check:*`, a `scripts/` path, vitest,
+ * eslint, tsc, playwright, lychee, `turbo run X`, `pnpm X`, `git diff
+ * --exit-code` / `--quiet` with its arguments, `npx X`, or `node` / `bash` /
+ * `sh` on a file path. A gate spelled any other way (`python3 -c`,
+ * `/bin/bash x.sh`, an inline `test` / `[`, a bin `pnpm exec` names) is not
+ * tracked per job, so moving it out of its job reads S. The contract
  * review of record is the control there.
  *
  * `readWorkflowDiff` is the one reader; the queue guard calls it per queued
@@ -1085,7 +1092,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '⭐ the argv is CLOSED: a flag the mode does not read, or a second repository beside a bare --pr, is refused': 22,
   'the per-row repository scope (ruled B2, 2026-10-13)': 20,
   'the nested `ui/` workspace rows, on the register (#25712)': 16,
-  '⭐ the workflows split: Tier H by path or by C2 trigger, else Tier S (ruling record 6722205630)': 66,
+  '⭐ the workflows split: Tier H by path or by C2 trigger, else Tier S (ruling record 6722205630)': 75,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -1633,13 +1640,20 @@ export const WORKFLOW_TIER_H_FILES = Object.freeze([
 const WORKFLOW_RISKY_LINE = /\|\|\s*true\b|\bset\s+\+e\b|\bexit\s+0\b|\bOS_(?:SKIP|DISABLE|ALLOW)_[A-Z0-9_]+/;
 /** `secrets`, or the job's token: `github.token` in any case, any `github[…]` index, or `toJSON(github)` whole. */
 const WORKFLOW_CREDENTIAL = /\bsecrets\b|\bgithub\s*(?:\.\s*token\b|\[)|\btojson\s*\(\s*github\s*\)/i;
-/** The gate invocations a run block carries, each as a token; one dropped from a file is Tier H (biased: a removed check). */
+/**
+ * The gate invocations a run block carries, each as a token; one dropped from a file is Tier H (biased: a removed check).
+ * `git diff --exit-code` / `--quiet` keeps its arguments (a narrowed pathspec is a narrowed gate); `npx` drops the
+ * package's `@version` (a bump is not a lost gate); `node` / `bash` / `sh` take the first file path after them.
+ */
 const WORKFLOW_INVOCATIONS = Object.freeze([
   [/check:[A-Za-z0-9:._-]+/g, (m) => m[0]],
   [/scripts\/[A-Za-z0-9._/-]+\.(?:mjs|cjs|js|mts|ts|sh|py)/g, (m) => m[0]],
   [/\b(vitest|eslint|tsc|playwright|lychee)\b/g, (m) => m[1]],
   [/\bturbo\s+run\s+([A-Za-z0-9:._-]+)/g, (m) => `turbo run ${m[1]}`],
   [/\bpnpm(?:\s+--?[A-Za-z][\w-]*(?:[= ](?!-)\S+)?)*\s+(?:run\s+)?([A-Za-z][\w:.-]*)/g, (m) => `pnpm ${m[1]}`],
+  [/\bgit\s+diff\b(?=[^;&|)\n]*\s--(?:exit-code|quiet)\b)[^;&|)\n]*/g, (m) => m[0].replace(/\s+/g, ' ').trim()],
+  [/\bnpx(?:\s+--?[A-Za-z][\w-]*(?:=\S+)?)*\s+["']?(@?[A-Za-z0-9][\w.-]*(?:\/[\w.-]+)?)/g, (m) => `npx ${m[1]}`],
+  [/(?<![\w./-])(node|bash|sh)\s[^;&|\n]*?["']?(?:\.\/)?((?:[\w.@-]+\/)*[\w@-][\w.@-]*\.(?:mjs|cjs|js|mts|ts|sh|py))\b/g, (m) => `${m[1]} ${m[2]}`],
 ]);
 
 const unquote = (value) => {
@@ -1930,8 +1944,9 @@ export function workflowFacts(text) {
 }
 
 /**
- * What a base tree already uses and names, across every workflow and local
- * action: the `uses:` / image identities a head may use without Tier H, and
+ * What a base tree already uses and names, across every workflow (the files
+ * `readWorkflowDiff` hands in, never `.github/actions/**`, which is no register
+ * row): the `uses:` / image identities a head may use without Tier H, and
  * the job names a NEW job may not take (two jobs, one check-run name). An
  * unparseable file still contributes its `uses:` lines, read by pattern.
  */
@@ -2071,7 +2086,8 @@ export function readWorkflowDiff({ paths, base, head, inventoryBase = base, git,
     const show = (rev, path) => git(['show', `${rev}:${path}`]);
     let inventory = cache?.get(inventoryBase) ?? null;
     if (inventory === null) {
-      const files = listAt(inventoryBase, '.github/workflows', '.github/actions').filter((p) => /\.ya?ml$/.test(p));
+      // Workflows only: `.github/actions/**` is no register row, so an action used there alone vouches for nothing.
+      const files = listAt(inventoryBase, WORKFLOWS_PREFIX).filter((p) => /\.ya?ml$/.test(p));
       inventory = workflowInventory(files.map((p) => ({ path: p, text: show(inventoryBase, p) })));
       cache?.set(inventoryBase, inventory);
     }
@@ -5284,6 +5300,24 @@ async function selfTest() {
     }
     const addedNeeds = tierOf(edit('    needs: [build]', '    needs: [build, opt-in]'));
     assert('⛔ S1-a-needs-added-on-an-existing-job-is-H', isH(addedNeeds, /`needs:` changed: `shards` \[build\] → \[build, opt-in\]/), show(addedNeeds));
+    // The review nits N5: gate spellings WORKFLOW_INVOCATIONS did not see — each moved out of its job is H.
+    const GATE_LINE = '          node scripts/check-required-contexts.mjs\n';
+    for (const [spelling, token] of [
+      ['git diff --exit-code -- packages/spec/json-schema', 'git diff --exit-code -- packages/spec/json-schema'],
+      ['if ! git diff --quiet -- sdui.manifest.json; then exit 1; fi', 'git diff --quiet -- sdui.manifest.json'],
+      ['npx --yes publint@0.3.2 --strict', 'npx publint'],
+      ['npx -y "@arethetypeswrong/cli@0.17.0" --pack .', 'npx @arethetypeswrong/cli'],
+      ['node ui/e2e/check-gate.mjs --strict', 'node ui/e2e/check-gate.mjs'],
+      ['bash ./tools/verify.sh "$RUNNER_TEMP"', 'bash tools/verify.sh'],
+    ]) {
+      const base = edit(GATE_LINE, `${GATE_LINE}          ${spelling}\n`);
+      const moved = tierOf(`${base.replace(`          ${spelling}\n`, '')}  gate2:\n    if: false\n    runs-on: ubuntu-latest\n    steps:\n      - run: ${spelling}\n`, { base });
+      const re = new RegExp(`an existing job no longer holds \`${token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\`: \`build\``);
+      assert(`⛔ N5-a-gate-spelled-${token}-moved-out-of-its-job-is-H`, isH(moved, re), show(moved));
+    }
+    const npxBase = edit(GATE_LINE, `${GATE_LINE}          npx --yes publint@0.3.2 --strict\n          node ./tools/gate.mjs\n`);
+    const npxBumped = tierOf(npxBase.replace('publint@0.3.2', 'publint@0.3.3').replace('node ./tools/gate.mjs', 'node tools/gate.mjs'), { base: npxBase });
+    assert('N5-near-miss-an-npx-version-bump-and-a-dropped-dot-slash-are-S', isS(npxBumped), show(npxBumped));
 
     // The near-misses: each is Tier S.
     const BUILD_RUN = '        run: pnpm turbo run build --filter=@objectstack/spec';
@@ -5313,7 +5347,8 @@ async function selfTest() {
     assert('closed-a-new-a-deleted-and-a-non-yaml-file-are-H', isH(tierOf(BASE_WF, { base: null }), /new workflow file/) && isH(tierOf(null), /deleted workflow file/) && isH(tierOf('x', { path: `${WORKFLOWS_PREFIX}notes.md` }), /not a `.yml`/));
     assert('closed-no-inventory-is-H', isH(tierOf(edit('timeout-minutes: 20', 'timeout-minutes: 30'), { inventory: null }), /no inventory/));
     const fakeGit = (tree) => (argv) => {
-      if (argv[0] === 'ls-tree') return Object.keys(tree[argv[3]] ?? (() => { throw new Error(`unknown revision ${argv[3]}`); })()).join('\n');
+      // ls-tree honours its pathspecs (argv after `--`), as git does: the inventory's directory list is under test.
+      if (argv[0] === 'ls-tree') return Object.keys(tree[argv[3]] ?? (() => { throw new Error(`unknown revision ${argv[3]}`); })()).filter((p) => argv.slice(5).some((d) => p.startsWith(d.endsWith('/') ? d : `${d}/`))).join('\n');
       const [rev, path] = argv[1].split(':');
       if (tree[rev]?.[path] === undefined) throw new Error(`fatal: path '${path}' does not exist in '${rev}'`);
       return tree[rev][path];
@@ -5322,6 +5357,15 @@ async function selfTest() {
     const readS = readWorkflowDiff({ paths: [WF, 'README.md'], base: 'b', head: 'h', git: fakeGit(TREES) });
     const readH = readWorkflowDiff({ paths: [WF], base: 'b', head: 'x', git: fakeGit(TREES) });
     assert('readWorkflowDiff-classifies-only-the-workflow-paths-it-read', readS.measured === true && readS.files.length === 1 && readS.files[0].tier === GOVERNED_TIER_S && readH.files[0].tier === GOVERNED_TIER_H, JSON.stringify(readS));
+    // The review nit N3: an action used only under `.github/actions/**` (no register row) vouches for nothing.
+    const ACTION = '.github/actions/setup/action.yml';
+    const ACTION_TEXT = "name: setup\nruns:\n  using: composite\n  steps:\n    - uses: someone/composite-only@v1\n";
+    const ADOPT = (u) => edit('      - uses: actions/checkout@v7\n', `      - uses: actions/checkout@v7\n      - uses: ${u}\n`);
+    const ADOPTING = { b: { [WF]: BASE_WF, [ACTION]: ACTION_TEXT }, n: { [WF]: ADOPT('someone/composite-only@v1'), [ACTION]: ACTION_TEXT }, c: { [WF]: ADOPT('actions/cache@v4'), [ACTION]: ACTION_TEXT } };
+    const adopted = readWorkflowDiff({ paths: [WF], base: 'b', head: 'n', git: fakeGit(ADOPTING) });
+    assert('⛔ N3-a-workflow-adopting-an-action-used-only-under-github-actions-on-the-base-is-H', adopted.measured === true && isH(adopted.files[0], /not used anywhere on the base tree: `someone\/composite-only`/), JSON.stringify(adopted.files));
+    const reused = readWorkflowDiff({ paths: [WF], base: 'b', head: 'c', git: fakeGit(ADOPTING) });
+    assert('N3-control-an-action-a-base-workflow-already-uses-is-S', reused.measured === true && isS(reused.files[0]), JSON.stringify(reused.files));
     const noBase = readWorkflowDiff({ paths: [WF], base: null, head: 'h', git: fakeGit(TREES) });
     const badRev = readWorkflowDiff({ paths: [WF], base: 'gone', head: 'h', git: fakeGit(TREES) });
     assert('closed-a-missing-base-or-a-git-failure-is-UNMEASURED', noBase.measured === false && /no base commit/.test(noBase.reason) && badRev.measured === false && /unknown revision gone/.test(badRev.reason), JSON.stringify([noBase.reason, badRev.reason]));
