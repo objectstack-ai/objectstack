@@ -36,17 +36,14 @@ import { useAdapter, useDataInvalidation, useMetadata, useRecordContext } from '
 import type { ObjectStackAdapter } from '@object-ui/data-objectstack';
 import { AlertCircle, ShieldCheck } from 'lucide-react';
 import { catalogEntries } from '../../views/setup/peopleAssignments.js';
-
-type Translate = (key: string, options?: Record<string, unknown>) => string;
-
-type DescribeEffectiveAccess = ReturnType<ObjectStackAdapter['getClient']>['security']['describeEffectiveAccess'];
-/** The answer (`EffectiveAccess` of `@objectstack/spec/contracts`, through the client). */
-export type EffectiveAccessAnswer = Awaited<ReturnType<DescribeEffectiveAccess>>;
-/** One way a set reaches the person (`EffectivePermissionSetOrigin`). */
-export type EffectiveAccessOrigin = EffectiveAccessAnswer['permissionSets'][number]['origins'][number];
-
-/** The object whose record pages this widget belongs on. */
-export const EFFECTIVE_ACCESS_OBJECT = 'sys_user';
+import {
+  EFFECTIVE_ACCESS_OBJECT,
+  describeOrigin,
+  failureText,
+  httpStatusOf,
+  originKey,
+  type EffectiveAccessAnswer,
+} from './effectiveAccess.js';
 
 /** The registry type the set labels are read from. */
 const PERMISSION_SET_TYPE = 'permission';
@@ -57,45 +54,6 @@ type Read =
   | { state: 'refused' }
   | { state: 'unserved' }
   | { state: 'failed'; message: string };
-
-/** The status the client stamps on a refused call (`httpStatus`, from `res.status`). */
-function httpStatusOf(err: unknown): number | undefined {
-  const status = (err as { httpStatus?: unknown } | null | undefined)?.httpStatus;
-  return typeof status === 'number' ? status : undefined;
-}
-
-function failureText(err: unknown): string {
-  const message = (err as { message?: unknown } | null | undefined)?.message;
-  return typeof message === 'string' && message ? message : String(err);
-}
-
-/** Where one origin says the set comes from. */
-export function describeOrigin(origin: EffectiveAccessOrigin, t: Translate): string {
-  switch (origin.kind) {
-    case 'direct':
-      return t('effectiveAccess.origin.direct');
-    case 'position':
-      return t('effectiveAccess.origin.position', { position: origin.position });
-    case 'default':
-      return t('effectiveAccess.origin.default');
-    case 'derived':
-      return origin.source === 'platform_admin_config'
-        ? t('effectiveAccess.origin.derivedPlatformAdmin')
-        : t('effectiveAccess.origin.derivedAiAccess');
-  }
-}
-
-/** A stable key for one origin of a row. */
-function originKey(origin: EffectiveAccessOrigin): string {
-  switch (origin.kind) {
-    case 'position':
-      return `position-${origin.position}`;
-    case 'derived':
-      return `derived-${origin.source}`;
-    default:
-      return origin.kind;
-  }
-}
 
 export interface UserEffectiveAccessProps {
   /** Carries the scope class of the node's `responsiveStyles`. */

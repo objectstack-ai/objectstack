@@ -54,7 +54,8 @@ import {
   SchemaRenderer,
   type MetadataContextValue,
 } from '@object-ui/react';
-import { describeOrigin, type EffectiveAccessAnswer } from './UserEffectiveAccess';
+import './UserEffectiveAccess';
+import { describeOrigin, type EffectiveAccessAnswer } from './effectiveAccess';
 
 const NODE = { type: 'security:effective-access', properties: {} };
 
