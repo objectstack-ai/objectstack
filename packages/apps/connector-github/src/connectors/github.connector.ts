@@ -21,6 +21,15 @@ import { defineConnector } from '@objectstack/spec/integration';
  * `include` narrows those to the two this app's flows call. An `include`
  * entry the server does not list is refused at materialization, never
  * silently dropped.
+ *
+ * `toolsSnapshot` pins every included tool (ruling 6556740185, letter B: an
+ * MCP app on the shelf ships one pin per tool it includes, and its listing's
+ * sha256 is the digest of this pin set). Each value is `mcpToolDigest` of the
+ * tool as GitHub's server listed it, measured on 2026-11-06; the README's
+ * Provenance section records who measured them, with what token, and the
+ * pin-set digest. A server that rewrites or stops serving a pinned tool
+ * degrades the instance with `CONNECTOR_UPSTREAM_CHANGED`: that is the signal
+ * to re-measure, re-pin and re-publish, never to drop the pin.
  */
 export const GitHubMcpConnector = defineConnector({
   name: 'github_mcp',
@@ -37,6 +46,10 @@ export const GitHubMcpConnector = defineConnector({
       headers: { 'X-MCP-Readonly': 'true' },
     },
     include: ['search_issues', 'issue_read'],
+    toolsSnapshot: {
+      search_issues: '443421e063c9330d4504a88b57def74d1f1e3d0793479068073630a1846eaeb0',
+      issue_read: '380e96f3d78b5c893668ab48a2d72191a3906bdc4e5e5c89f9e92c3e9de6c392',
+    },
   },
   auth: { type: 'bearer', credentialRef: 'GITHUB_MCP_TOKEN' },
 });
