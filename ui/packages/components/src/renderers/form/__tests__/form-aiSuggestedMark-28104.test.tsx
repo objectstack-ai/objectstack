@@ -221,6 +221,7 @@ describe('form — AI-proposed changes on an edit form (objectstack#28106)', () 
 
   it('the person\'s own edit takes the mark away and keeps their value', async () => {
     renderEdit(new Map([['phone', '13800000000']]));
+    expect(markOf('Phone')?.textContent).toBe(MARK);
     fireEvent.change(screen.getByLabelText('Phone'), { target: { value: '13700000000' } });
     await waitFor(() => expect(markOf('Phone')).toBeNull());
     expect(screen.getByLabelText('Phone')).toHaveValue('13700000000');
