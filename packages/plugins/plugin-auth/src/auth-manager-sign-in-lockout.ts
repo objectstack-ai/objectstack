@@ -131,6 +131,16 @@ async function writeCounterIfUnchanged(
   return typeof result === 'number' ? result > 0 : true;
 }
 
+/** Read an account's lockout state by id: the read handing a reservation back and a completed reset share. */
+async function readLockoutRow(engine: IDataEngine, userId: string): Promise<Record<string, any> | null> {
+  const query: EngineQueryOptions = {
+    where: { id: userId },
+    fields: ['id', 'failed_login_count', 'locked_until'],
+    context: LOCKOUT_SYSTEM_CTX,
+  };
+  return engine.findOne('sys_user', query);
+}
+
 /** Zero an account's counter and lift its lock: the write a successful sign-in and a completed reset share. */
 async function writeLockoutCleared(engine: IDataEngine, userId: string): Promise<void> {
   await engine.update(
@@ -370,11 +380,7 @@ async function releaseReservation(
 ): Promise<void> {
   try {
     for (let round = 0; round < RESERVATION_ROUNDS; round++) {
-      const row = await engine.findOne('sys_user', {
-        where: { id: attempt.userId },
-        fields: ['id', 'failed_login_count', 'locked_until'],
-        context: LOCKOUT_SYSTEM_CTX,
-      } as any);
+      const row = await readLockoutRow(engine, attempt.userId);
       if (!row) return;
       const current = Number(row.failed_login_count) || 0;
       if (current <= 0) return;
@@ -409,11 +415,7 @@ export async function clearSignInLockout(
   const engine = this.getDataEngine();
   if (!engine || !userId) return;
   try {
-    const row = await engine.findOne('sys_user', {
-      where: { id: userId },
-      fields: ['id', 'failed_login_count', 'locked_until'],
-      context: LOCKOUT_SYSTEM_CTX,
-    } as any);
+    const row = await readLockoutRow(engine, userId);
     if (!row || ((Number(row.failed_login_count) || 0) === 0 && !row.locked_until)) return;
     await writeLockoutCleared(engine, userId);
   } catch (e) {
