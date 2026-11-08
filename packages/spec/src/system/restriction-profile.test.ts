@@ -1,16 +1,20 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 //
 // The restriction profile a target environment publishes: a closed shape of
-// four required dimensions, whose node vocabulary is the spec's own built-in
-// node registry. An absent profile means no restriction.
+// five required dimensions, whose node vocabulary is derived from the spec's
+// own built-in node registry and its declared plugin node contracts. An absent
+// profile means no restriction.
 
 import { describe, it, expect } from 'vitest';
-import { RestrictionProfileSchema, type RestrictionProfile } from './restriction-profile.zod';
-import { FLOW_BUILTIN_NODE_TYPES, FlowNodeAction } from '../automation/flow.zod';
-import { RestrictionProfileSchema as FromSystemEntry } from './index';
+import { RestrictionProfileNodeType, RestrictionProfileSchema, type RestrictionProfile } from './restriction-profile.zod';
+import { FLOW_BUILTIN_NODE_TYPES, FLOW_STRUCTURAL_NODE_TYPES, FlowNodeAction } from '../automation/flow.zod';
+import { APPROVAL_NODE_TYPE, APPROVAL_REVISE_NODE_TYPE } from '../automation/approval.zod';
+import { PARALLEL_NODE_TYPE, TRY_CATCH_NODE_TYPE } from '../automation/control-flow.zod';
+import { RestrictionProfileSchema as FromSystemEntry, RestrictionProfileNodeType as NodeTypeFromSystemEntry } from './index';
 
 const PROFILE: RestrictionProfile = {
   allowCode: false,
+  allowSandboxedJs: true,
   allowScheduledAutomation: false,
   allowedFlowNodeTypes: ['start', 'end', 'decision', 'assignment', 'create_record', 'update_record'],
   versions: { spec: '18.4.0', skills: '18.4.0-beta.1' },
@@ -31,9 +35,42 @@ describe('RestrictionProfileSchema', () => {
     expect(RestrictionProfileSchema.parse(none)).toEqual(none);
   });
 
-  it('reads its node vocabulary from the registry, not from a second list', () => {
+  it('reads its node vocabulary from the derived profile vocabulary, not from a second list', () => {
     const element = RestrictionProfileSchema.shape.allowedFlowNodeTypes.element;
-    expect(element).toBe(FlowNodeAction);
+    expect(element).toBe(RestrictionProfileNodeType);
+  });
+
+  describe('the profile node vocabulary (RestrictionProfileNodeType)', () => {
+    it('is every FlowNodeAction id plus the spec-declared approval pair, and nothing else', () => {
+      expect(RestrictionProfileNodeType.options).toEqual([
+        ...FlowNodeAction.options,
+        APPROVAL_NODE_TYPE,
+        APPROVAL_REVISE_NODE_TYPE,
+      ]);
+    });
+
+    it('does not widen FlowNodeAction: the approval pair stays outside the boot seed set', () => {
+      expect(FLOW_BUILTIN_NODE_TYPES).not.toContain(APPROVAL_NODE_TYPE);
+      expect(FLOW_BUILTIN_NODE_TYPES).not.toContain(APPROVAL_REVISE_NODE_TYPE);
+    });
+
+    it('is disjoint from the ADR-0031 containers a reader always allows', () => {
+      expect(RestrictionProfileNodeType.options).not.toContain(PARALLEL_NODE_TYPE);
+      expect(RestrictionProfileNodeType.options).not.toContain(TRY_CATCH_NODE_TYPE);
+    });
+
+    it('still carries start / end, the structural FlowNodeAction ids', () => {
+      for (const type of FLOW_STRUCTURAL_NODE_TYPES) expect(RestrictionProfileNodeType.options).toContain(type);
+    });
+
+    it('accepts a profile that lists the approval pair under allowCode: false', () => {
+      const team = { ...PROFILE, allowedFlowNodeTypes: ['start', 'end', APPROVAL_NODE_TYPE, APPROVAL_REVISE_NODE_TYPE] };
+      expect(RestrictionProfileSchema.parse(team)).toEqual(team);
+    });
+
+    it('is published from the system entry point', () => {
+      expect(NodeTypeFromSystemEntry).toBe(RestrictionProfileNodeType);
+    });
   });
 
   it('is published from the system entry point', () => {
@@ -54,16 +91,17 @@ describe('RestrictionProfileSchema', () => {
       expect(missing).toEqual(
         expect.arrayContaining([
           { code: 'invalid_type', path: ['allowCode'] },
+          { code: 'invalid_type', path: ['allowSandboxedJs'] },
           { code: 'invalid_type', path: ['allowScheduledAutomation'] },
           { code: 'invalid_type', path: ['allowedFlowNodeTypes'] },
           { code: 'invalid_type', path: ['versions'] },
         ]),
       );
-      expect(missing).toHaveLength(4);
+      expect(missing).toHaveLength(5);
     });
   });
 
-  it.each(['allowCode', 'allowScheduledAutomation', 'allowedFlowNodeTypes', 'versions'] as const)(
+  it.each(['allowCode', 'allowSandboxedJs', 'allowScheduledAutomation', 'allowedFlowNodeTypes', 'versions'] as const)(
     'requires %s',
     (key) => {
       const { [key]: _dropped, ...rest } = PROFILE;
@@ -91,6 +129,18 @@ describe('RestrictionProfileSchema', () => {
     expect(issue!.message).toContain('allowCode');
   });
 
+  it.each(['allowSandboxedHooks', 'allowScriptBodies'])(
+    'refuses %s, naming allowSandboxedJs as the key it meant',
+    (key) => {
+      const parsed = RestrictionProfileSchema.safeParse({ ...PROFILE, [key]: true });
+      expect(parsed.success).toBe(false);
+      expect(parsed.error!.issues).toHaveLength(1);
+      const [issue] = parsed.error!.issues;
+      expect(issue).toMatchObject({ code: 'unrecognized_keys', keys: [key], path: [] });
+      expect(issue!.message).toContain('allowSandboxedJs');
+    },
+  );
+
   it('refuses an unknown key inside versions', () => {
     const parsed = RestrictionProfileSchema.safeParse({
       ...PROFILE,
@@ -105,8 +155,8 @@ describe('RestrictionProfileSchema', () => {
     });
   });
 
-  it.each(['approval', 'http_request', 'my_plugin_node', 'Decision'])(
-    'refuses node type %j (not a built-in FlowNodeAction id)',
+  it.each(['http_request', 'my_plugin_node', 'Decision', PARALLEL_NODE_TYPE, TRY_CATCH_NODE_TYPE])(
+    'refuses node type %j (not in the profile vocabulary)',
     (type) => {
       const parsed = RestrictionProfileSchema.safeParse({
         ...PROFILE,
@@ -137,6 +187,7 @@ describe('RestrictionProfileSchema', () => {
 
   it.each([
     ['allowCode', 'false'],
+    ['allowSandboxedJs', 'true'],
     ['allowScheduledAutomation', 0],
   ] as const)('refuses a non-boolean %s', (key, value) => {
     const parsed = RestrictionProfileSchema.safeParse({ ...PROFILE, [key]: value });
