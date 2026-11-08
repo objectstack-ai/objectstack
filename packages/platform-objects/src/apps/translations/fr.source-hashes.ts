@@ -100,6 +100,7 @@ export const frSourceHashes: Readonly<Record<string, string>> = {
   'apps.setup.navigation.nav_queue_members.label': '46715e86f5231603',
   'apps.setup.navigation.nav_assignment_rules.label': '1779fe384b23954f',
   'apps.setup.navigation.nav_sso_providers.label': '7b06b6a6abf53ba4',
+  'apps.setup.navigation.nav_scim_credentials.label': '2d94a32c33ca2957',
   'apps.setup.navigation.nav_api_keys.label': '8cda9851248b0490',
   'apps.setup.navigation.nav_approvals_inbox.label': '0a9269b20d0266c9',
   'apps.setup.navigation.nav_approval_requests.label': 'aafd0f7c6a376f55',
