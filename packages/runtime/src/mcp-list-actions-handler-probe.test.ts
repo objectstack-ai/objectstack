@@ -9,7 +9,8 @@
  * candidates over the engine's handler Map. The listing used to admit a script
  * action on DECLARATION presence (`target || body`), so a declaration nothing
  * had bound — measured: an `os package install`ed package — was advertised by
- * `list_actions` and refused by `run_action` ("No handler registered"), the
+ * `list_actions` and refused by `run_action` (then "No handler registered";
+ * now the coded routing miss REST `/actions` answers, `404`), the
  * NEG1 failure of the `ai.mcp-run-action-exposure-gate` checklist item.
  *
  * The listing now asks `registeredActionHandlerProbe`, which reads the engine's
@@ -85,7 +86,7 @@ describe('#21321: list_actions advertises a script action only when run_action c
     it('THE DEFECT — a declared body action with no registered handler is not advertised, and run_action refuses it', async () => {
         const bridge = makeBridge([]);
         expect(await listedNames(bridge), 'advertised an action the run door cannot dispatch').not.toContain('complete_task');
-        await expect(bridge.runAction('complete_task', { recordId: 'r1' })).rejects.toThrow(/No handler registered/);
+        await expect(bridge.runAction('complete_task', { recordId: 'r1' })).rejects.toMatchObject({ code: 'RESOURCE_NOT_FOUND', status: 404 });
     });
 
     it('CONTROL — the same action, bound by name, is advertised and runs', async () => {
@@ -99,7 +100,7 @@ describe('#21321: list_actions advertises a script action only when run_action c
         // Registered under a key no candidate derives: the run door misses it, so the listing must too.
         const stray = makeBridge([['tasks_app_task', 'reopenTaskV2']]);
         expect(await listedNames(stray)).not.toContain('reopen_task');
-        await expect(stray.runAction('reopen_task', { recordId: 'r1' })).rejects.toThrow(/No handler registered/);
+        await expect(stray.runAction('reopen_task', { recordId: 'r1' })).rejects.toMatchObject({ code: 'RESOURCE_NOT_FOUND', status: 404 });
     });
 
     it('the probe walks the run door’s OBJECT rotation — a handler on the object-less key counts', async () => {
