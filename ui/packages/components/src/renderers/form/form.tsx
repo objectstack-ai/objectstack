@@ -47,7 +47,7 @@ import { createSafeTranslation } from '@object-ui/i18n';
 import type { RendererHostProps } from '../../lib/renderer-host-props';
 import { currencyCodeFieldNames, useUsedCurrencyCodes, withUsedCurrencyCodes } from './usedCurrencyCodes';
 import { usePatchingUpdateActions } from './actionRequirements';
-import { SuggestedFieldsContext } from './suggested-fields-context';
+import { SuggestedFieldChangesContext, SuggestedFieldsContext } from './suggested-fields-context';
 
 /**
  * A submit refusal as the banner and the toast draw it: one string as itself,
@@ -520,6 +520,14 @@ const useSafeFormTranslation = createSafeTranslation(
     // chat draft suggested (see `SuggestedFieldsContext`). Byte-identical to
     // the `en` pack.
     'form.aiSuggested': 'AI suggestion',
+    // objectstack#28106 — beside that mark on an EDIT form: the stored value
+    // the AI-proposed change replaces, and the per-field revert. Byte-identical
+    // to the `en` pack.
+    'form.aiBefore': 'Was: {{value}}',
+    'form.aiBeforeEmpty': 'empty',
+    'form.aiRevert': 'Revert',
+    'common.yes': 'Yes',
+    'common.no': 'No',
   },
   'common.selectOption',
 );
@@ -1205,6 +1213,33 @@ const HORIZONTAL_FIELD_ITEM_CLASS =
   'sm:grid sm:grid-cols-[minmax(0,10rem)_minmax(0,1fr)] sm:items-baseline sm:gap-x-4 sm:gap-y-2 sm:space-y-0 sm:[&>:not(label)]:col-start-2';
 
 /**
+ * objectstack#28106 — the stored value an AI-proposed change replaces, as the
+ * one line "Was: …" under the field reads it. An option field reads its option
+ * label, a lookup read back expanded its record's name, a list its items
+ * joined; an empty value says so rather than drawing nothing.
+ */
+function formatSuggestionBefore(
+  value: unknown,
+  options: readonly SelectOption[] | undefined,
+  t: (key: string, params?: Record<string, unknown>) => string,
+): string {
+  const one = (v: unknown): string => {
+    if (typeof v === 'boolean') return t(v ? 'common.yes' : 'common.no');
+    const option = options?.find((o) => valuesEqualForDirty(o?.value, v));
+    if (option) return String(option.label ?? option.value);
+    if (v && typeof v === 'object') {
+      const r = v as Record<string, unknown>;
+      const named = r.name ?? r.label ?? r.title ?? r.display_name ?? r.id ?? r._id;
+      if (named !== undefined && named !== null && typeof named !== 'object') return String(named);
+      try { return JSON.stringify(v); } catch { return String(v); }
+    }
+    return String(v);
+  };
+  if (isEmptyish(value)) return t('form.aiBeforeEmpty');
+  return Array.isArray(value) ? value.map(one).join(', ') : one(value);
+}
+
+/**
  * The help line under one field: its authored `description`, and the
  * "set automatically when saved" hint when the caller passes one
  * (objectui#12108).
@@ -1228,6 +1263,7 @@ function renderFieldDescription(
   serverDefaultHint: string | undefined,
   actionRequirementHints: readonly string[] = [],
   suggestedHint?: string,
+  suggestedBefore?: string,
 ): React.ReactNode {
   if (!description && !serverDefaultHint && actionRequirementHints.length === 0 && !suggestedHint) return null;
   return (
@@ -1242,6 +1278,13 @@ function renderFieldDescription(
           data-ai-suggested="true"
         >
           {suggestedHint}
+        </span>
+      )}
+      {/* objectstack#28106 — on an edit form, the stored value the suggestion
+          replaces: the control shows the after, this line the before. */}
+      {suggestedHint && suggestedBefore && (
+        <span className="mb-0.5 mr-1.5 inline-block text-xs" data-ai-before="true">
+          {suggestedBefore}
         </span>
       )}
       {description}
@@ -1662,6 +1705,11 @@ ComponentRegistry.register('form',
     // objectstack#28104 — the fields the host says AI suggested the opening
     // value of; each is marked while it still holds that value.
     const suggestedFields = React.useContext(SuggestedFieldsContext);
+    // objectstack#28106 — on an edit form, the changes the host says AI
+    // proposed (field name → value): applied once over the record the form
+    // opens on, as unsaved edits, then marked while the field still holds one.
+    const suggestedChanges = React.useContext(SuggestedFieldChangesContext);
+    const suggestedChangesAppliedRef = React.useRef(false);
     // Prefix for the label ids the GROUP-labelled fields need (objectui#3961).
     // Owned here, not derived from `<FormItem>`'s own `useId()`: that id lives in
     // a context published INSIDE `FormItem`, and this renderer builds the label
@@ -2437,6 +2485,22 @@ ComponentRegistry.register('form',
       return m;
     }, [fields]);
 
+    /**
+     * objectstack#28106 — the fields an AI-proposed change may be applied to:
+     * drawn by this form, and open to the person's own edit by their static
+     * config (not hidden, read-only or disabled), so the person sees every
+     * change and can undo it. A proposal for any other field is left out.
+     */
+    const changeableFieldNames = React.useMemo(() => {
+      const names = new Set<string>();
+      for (const f of fields as FormFieldConfig[]) {
+        if (!f?.name || f.type === 'section-divider') continue;
+        if (f.hidden || (f as any).readonly === true || f.disabled === true) continue;
+        names.add(f.name);
+      }
+      return names;
+    }, [fields]);
+
     /** Field name → the tab that owns it (first claim wins). */
     const tabKeyByFieldName = React.useMemo(() => {
       const m = new Map<string, string>();
@@ -2847,11 +2911,27 @@ ComponentRegistry.register('form',
       }
       // Fresh values, so last attempt's rejected-field markers no longer apply.
       setRejectedFieldNames([]);
+      // objectstack#28106 — the AI-proposed changes, applied ONCE, on the first
+      // reset that brings the record the edit form opens on, and AFTER the
+      // reset window: they are changes to that record, so the dirty check, the
+      // value channels and the save payload see them exactly as the person's
+      // own edits. Never re-applied: a later reset (a re-read after the person
+      // reverted every one) keeps what the person decided.
+      let appliedChanges = 0;
+      if (suggestedChanges && !suggestedChangesAppliedRef.current && Object.keys(incoming).length > 0) {
+        suggestedChangesAppliedRef.current = true;
+        for (const [name, value] of suggestedChanges) {
+          if (!changeableFieldNames.has(name) || valuesEqualForDirty(incoming[name], value)) continue;
+          form.setValue(name, value, { shouldValidate: false, shouldDirty: true });
+          appliedChanges += 1;
+        }
+      }
       // A reset that carried nothing is by definition pristine — clear any stale
       // dirty signal (e.g. an edit-mode record that just finished loading). One
-      // that carried input is genuinely dirty against the caller's defaults, and
-      // the host's discard guard has to keep hearing so.
-      onDirtyChangeProp?.(carried.length > 0);
+      // that carried input, or applied an AI-proposed change, is genuinely dirty
+      // against the caller's defaults, and the host's discard guard has to keep
+      // hearing so.
+      onDirtyChangeProp?.(carried.length > 0 || appliedChanges > 0);
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [defaultValues]);
 
@@ -3705,6 +3785,14 @@ ComponentRegistry.register('form',
       const optionGroupGated = cascade?.gated ?? false;
       const dependsOnFields = cascade?.dependsOnFields ?? [];
       const effectiveOptions = cascade ? cascade.options : rawOptions;
+      // objectstack#28106 — whether this field shows an AI-proposed change:
+      // the host proposed one that differs from the stored value, and the
+      // control still holds it. Read off the live value, so the person's own
+      // edit or the revert takes the mark, the before line and the revert away.
+      const suggestedChangeShown = (value: unknown): boolean =>
+        !!suggestedChanges?.has(name) &&
+        !valuesEqualForDirty(defaultValues?.[name], suggestedChanges.get(name)) &&
+        valuesEqualForDirty(suggestedChanges.get(name), value);
       // Same i18n key the option widgets fall back to (`fields.options.
       // selectFirst`, objectui#3231): one sentence, two callers — this one
       // interpolates the controlling fields' LABELS, a standalone widget its
@@ -4123,10 +4211,33 @@ ComponentRegistry.register('form',
                 // the same empty-ish comparison the dirty check uses, so a
                 // widget normalizing on mount does not read as an edit. The
                 // person's first change takes the mark away.
-                suggestedFields?.has(name) &&
-                  valuesEqualForDirty(defaultValues?.[name], formField.value)
+                (suggestedFields?.has(name) &&
+                  valuesEqualForDirty(defaultValues?.[name], formField.value)) ||
+                  suggestedChangeShown(formField.value)
                   ? t('form.aiSuggested')
                   : undefined,
+                // objectstack#28106 — and on an edit form, the stored value
+                // that proposed change replaces (before → after).
+                suggestedChangeShown(formField.value)
+                  ? t('form.aiBefore', {
+                      value: formatSuggestionBefore(defaultValues?.[name], effectiveOptions, t),
+                    })
+                  : undefined,
+              )}
+              {/* objectstack#28106 — the per-field revert: the stored value back,
+                  as an edit, which takes the mark and this button away. */}
+              {suggestedChangeShown(formField.value) && (
+                <button
+                  type="button"
+                  className="self-start text-xs font-medium text-primary underline-offset-2 hover:underline disabled:opacity-50"
+                  data-ai-revert="true"
+                  disabled={isSubmitting}
+                  onClick={() =>
+                    form.setValue(name, defaultValues?.[name] ?? null, { shouldValidate: true, shouldDirty: true })
+                  }
+                >
+                  {t('form.aiRevert')}
+                </button>
               )}
               <FormMessage />
             </FormItem>

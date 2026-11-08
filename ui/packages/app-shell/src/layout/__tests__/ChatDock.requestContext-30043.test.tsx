@@ -272,3 +272,16 @@ describe('console dock — the request names the selected app and the page in vi
     });
   });
 });
+
+describe('console dock — a record open in a list drawer is sent as the record in view (objectstack#28106)', () => {
+  it('the body names the drawer record, and closing the drawer moves the next turn back to the object', async () => {
+    mount('/apps/crm_app/account?recordId=rec_7');
+    expect((await send('change its phone to 123')).surface).toEqual({
+      artifact: { type: 'object', name: 'account' },
+      selection: { kind: 'record', id: 'rec_7' },
+    });
+
+    act(() => nav.go('/apps/crm_app/account'));
+    expect((await send('how many accounts?')).surface).toEqual({ artifact: { type: 'object', name: 'account' } });
+  });
+});

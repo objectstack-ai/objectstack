@@ -195,6 +195,9 @@ const fr = {
     requiredForAction: "Requis pour exécuter « {{action}} ».",
     aiSuggested: "Suggestion de l'IA",
     aiDraftNotice: "L'IA a rempli depuis la discussion les champs marqués « Suggestion de l'IA ». Rien n'est enregistré tant que vous ne les avez pas vérifiés et enregistrés.",
+    aiBefore: "Avant : {{value}}",
+    aiBeforeEmpty: "vide",
+    aiRevert: "Rétablir",
     maxFileSize: "Taille maximale : {{size}}",
     masterDetail: {
       loadingColumns: "Chargement des colonnes…",
