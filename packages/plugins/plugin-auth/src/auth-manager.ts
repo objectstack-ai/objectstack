@@ -251,6 +251,7 @@ import { resolvePasswordHasher } from './auth-manager-password-hasher.js';
 // two arrows that moved with it.
 import { createAuthInstance, type AuthInstanceHost } from './auth-manager-auth-instance.js';
 import { readSamlAcsLanding, runSsoCallbackScope, type SamlLandingContext, type SsoCallbackRequest } from './sso-oidc-refusal-cause.js';
+import { readSsoProviderSignInOptions, runWithSamlIdpInitiated } from './sso-sign-in-options.js';
 // [#25224 cut 16] The body of `buildPluginList`; the method of the same name
 // below hands it the members it reads (`PluginListHost`). The organization
 // plugin's factory (cut 15) is now imported there, by the arrow that moved
@@ -2705,7 +2706,7 @@ export class AuthManager {
   private validateAudienceAdmission(
     data: {
       user?: Record<string, unknown>;
-      source?: { action?: string; method?: string; oauth?: { providerId?: string } };
+      source?: { action?: string; method?: string; oauth?: { providerId?: string }; sso?: { providerId?: string } };
     },
     ctx?: unknown,
   ): Promise<{ error: string; errorDescription?: string } | undefined> {
@@ -3959,6 +3960,20 @@ export class AuthManager {
    * URL, read from the relay state before better-auth consumes it.
    */
   private runSsoCallback(callback: SsoCallbackRequest, run: () => Promise<Response>): Promise<Response> {
+    // A SAML ACS request runs with its provider's IdP-initiated toggle in
+    // scope: the vendor's one plugin-wide option answers it per provider
+    // (`sso-sign-in-options.ts`, ruling record 6718355623).
+    const scoped =
+      callback.protocol === 'saml'
+        ? async (): Promise<Response> => {
+            const engine = this.config.dataEngine;
+            const options = await readSsoProviderSignInOptions(
+              engine ? (withSystemReadContext(engine) as never) : undefined,
+              callback.providerId,
+            );
+            return runWithSamlIdpInitiated(options.allowIdpInitiated, run);
+          }
+        : run;
     return runSsoCallbackScope(
       callback,
       this.config.logger,
@@ -3967,7 +3982,7 @@ export class AuthManager {
         const context = (await auth.$context) as SamlLandingContext;
         return readSamlAcsLanding(context, saml.providerId, saml.request);
       },
-      run,
+      scoped,
     );
   }
 

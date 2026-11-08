@@ -33,16 +33,20 @@
  * - `operator` (never gated): `admin` (create-user / bulk import) and `scim`
  *   (IdP-driven provisioning) — these ARE the invite/provisioning mechanisms
  *   the closed postures point operators at.
- * - `provider` (never gated): JIT provisioning through an OPERATOR-REGISTERED
- *   identity authority — `sso-oidc` / `sso-saml` (@better-auth/sso providers;
+ * - `provider`: JIT provisioning through an OPERATOR-REGISTERED identity
+ *   authority — `sso-oidc` / `sso-saml` (@better-auth/sso providers;
  *   registration is platform-admin-only, #10009) and `oauth` whose providerId
  *   is a configured `oidcProviders` entry (enterprise SSO incl. the cloud
  *   platform IdP, whose OP side additionally enforces app-assignment, D5.1).
- *   Registering an IdP is the operator declaring "this directory is my
- *   audience"; and the closed vocabulary could not express the standard
- *   enterprise combo (self-registration closed + IdP JIT on) any other way —
- *   gating these under `invite_only` would hard-brick every SSO-enforced
- *   deployment whose entire user base arrives via the IdP.
+ *   Never gated under `email_domain` or `open`, and an `oidcProviders` entry is
+ *   never gated at all. Under `invite_only` an `@better-auth/sso` provider
+ *   (`AudienceAdmissionInput.ssoProvider`) admits a person with no account and
+ *   no invitation ONLY when that provider's `allowJit` toggle is on (maintainer
+ *   ruling A, record 6718355623): `invite_only` means by invitation, and the
+ *   enterprise combo "self-registration closed + IdP JIT on" is stated per
+ *   provider instead of implied by registering one. Off by default, so an
+ *   unknown SSO user is refused `SELF_REGISTRATION_CLOSED` like any
+ *   uninvited sign-up; the invitation and bootstrap carve-outs below apply.
  *
  * Only `action: 'create-user'` is judged: `link-account` and provider
  * `sign-in` concern an EXISTING user's identity, not audience admission.
@@ -465,7 +469,20 @@ export interface AudienceAdmissionInput {
    * fresh install must never lock its operator out.
    */
   isBootstrap: boolean;
+  /**
+   * Present when a `provider`-class creation came through a registered
+   * `@better-auth/sso` provider (`sso-oidc` / `sso-saml`): that provider's
+   * `allowJit` toggle (`sso-sign-in-options.ts`). Absent for every other
+   * creation, an `oidcProviders` entry included.
+   */
+  ssoProvider?: { allowJit: boolean };
 }
+
+/** The refusal message for an unknown user arriving through an SSO provider under `invite_only`. */
+const SSO_JIT_CLOSED_MESSAGE =
+  'This single sign-on provider does not create accounts for people who were not invited ' +
+  '(audience posture invite_only). Ask an administrator for an invitation, or ask them to turn on ' +
+  'just-in-time provisioning (allowJit) for this provider.';
 
 /**
  * THE admission decision — pure, so the posture × method matrix is a table of
@@ -473,9 +490,18 @@ export interface AudienceAdmissionInput {
  * guard (fail closed) → posture semantics.
  */
 export function decideAudienceAdmission(input: AudienceAdmissionInput): AudienceAdmission {
-  const { audience, creationClass, email, hasPendingInvitation, isBootstrap } = input;
-  if (creationClass === 'operator' || creationClass === 'provider') {
+  const { audience, creationClass, email, hasPendingInvitation, isBootstrap, ssoProvider } = input;
+  if (creationClass === 'operator') {
     return { admit: true, grantPermissionSet: false };
+  }
+  if (creationClass === 'provider') {
+    // An SSO provider under a VALID `invite_only` posture admits an unknown
+    // user only by its `allowJit` toggle, an invitation, or the bootstrap
+    // carve-out (module doc, `provider`). Every other provider creation, and
+    // every other posture, admits as before.
+    const gated = ssoProvider !== undefined && !ssoProvider.allowJit && !audience.invalid && audience.posture === 'invite_only';
+    if (!gated || isBootstrap || hasPendingInvitation) return { admit: true, grantPermissionSet: false };
+    return { admit: false, code: SELF_REGISTRATION_CLOSED, message: SSO_JIT_CLOSED_MESSAGE };
   }
   if (isBootstrap) {
     return { admit: true, grantPermissionSet: false };

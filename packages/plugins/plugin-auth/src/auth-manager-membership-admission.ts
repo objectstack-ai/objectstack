@@ -64,6 +64,7 @@ import {
 import { GRANT_SET_NAME_FIELD } from './grant-set-name.js';
 import { withSystemReadContext } from './objectql-adapter.js';
 import { reconcileMembership, type ReconcileOutcome } from './reconcile-membership.js';
+import { readSsoProviderSignInOptions, ssoProviderIdOfSource } from './sso-sign-in-options.js';
 import { shouldStampOwnerVerifiedAtCreation } from './walled-owner-operator-stamp.js';
 
 /**
@@ -119,7 +120,7 @@ export async function validateAudienceAdmission(
   this: Pick<MembershipAdmissionHost, 'audienceLogError' | 'config' | 'enterpriseOAuthProviderIds' | 'getAudience' | 'hasPendingInvitationFor' | 'isBootstrapCreation' | 'isOperatorProvisioning' | 'selfRegistrationSetResolvable' | 'stageOwnerVerifiedStamp' | 'stageSelfRegistrationGrant'>,
   data: {
     user?: Record<string, unknown>;
-    source?: { action?: string; method?: string; oauth?: { providerId?: string } };
+    source?: { action?: string; method?: string; oauth?: { providerId?: string }; sso?: { providerId?: string } };
   },
   ctx?: unknown,
 ): Promise<{ error: string; errorDescription?: string } | undefined> {
@@ -148,10 +149,25 @@ export async function validateAudienceAdmission(
       : classifyCreationMethod(data?.source, {
           enterpriseOAuthProviderIds: this.enterpriseOAuthProviderIds(),
         });
+    // An SSO provider's own JIT toggle, read only where it can decide: a
+    // provider-class creation through `@better-auth/sso` under `invite_only`
+    // (`sso-sign-in-options.ts`; unreadable ⇒ off, so the posture applies).
+    const ssoProviderId = creationClass === 'provider' ? ssoProviderIdOfSource(data?.source) : undefined;
+    const ssoProvider =
+      ssoProviderId !== undefined && audience.posture === 'invite_only' && !audience.invalid
+        ? {
+            allowJit: (
+              await readSsoProviderSignInOptions(
+                this.config.dataEngine ? (withSystemReadContext(this.config.dataEngine) as never) : undefined,
+                ssoProviderId,
+              )
+            ).allowJit,
+          }
+        : undefined;
     let isBootstrap = false;
     let hasPendingInvitation = false;
-    if (creationClass === 'self-serve') {
-      // Only the gated class pays for the probes.
+    if (creationClass === 'self-serve' || (ssoProvider !== undefined && !ssoProvider.allowJit)) {
+      // Only the gated creations pay for the probes.
       isBootstrap = await this.isBootstrapCreation();
       if (!isBootstrap && email) hasPendingInvitation = await this.hasPendingInvitationFor(email);
     }
@@ -161,6 +177,7 @@ export async function validateAudienceAdmission(
       email,
       hasPendingInvitation,
       isBootstrap,
+      ...(ssoProvider ? { ssoProvider } : {}),
     });
     if (!verdict.admit) {
       if (verdict.code === AUDIENCE_CONFIG_ERROR) {
@@ -225,8 +242,8 @@ export async function validateAudienceAdmission(
     return undefined;
   } catch (error) {
     // Fail CLOSED: an admission question this gate cannot answer must not
-    // admit. Operator/provider classes never reach I/O, so they cannot land
-    // here.
+    // admit. The operator class never reaches I/O, and the SSO provider
+    // read answers OFF rather than throwing, so neither lands here.
     const message = 'audience admission could not be evaluated — self-registration refused.';
     this.audienceLogError(`[audience] ${message}`, {
       error: (error as Error)?.message ?? String(error),

@@ -82,6 +82,7 @@ import {
   buildTwoFactorPluginSchema,
 } from './auth-schema-config.js';
 import { isPlaceholderEmail } from './placeholder-email.js';
+import { SSO_PROVIDER_SIGN_IN_FIELDS, ssoSamlOptions } from './sso-sign-in-options.js';
 import { logAfterResponseSendFailure, sendAfterResponseOnPublicDoor } from './run-after-response.js';
 import {
   ONE_TIME_TOKEN_EXPIRES_IN_MINUTES,
@@ -763,9 +764,17 @@ export async function buildPluginList(this: PluginListHost): Promise<any[]> {
     // external IdP's email domain be DNS-verified before it may complete a
     // login — preventing an org admin from registering a provider for a domain
     // they don't control. Off by default to preserve the register→login flow.
+    //
+    // Per-provider sign-in options (ruling record 6718355623, `sso-sign-in-options.ts`):
+    // `allowIdpInitiated` and `allowJit` are provider additional fields, both
+    // OFF by default, so the vendor's own register / update-provider doors
+    // write them. `saml` hands the vendor its one IdP-initiated option as a
+    // getter that answers the ACS request's own provider.
     return sso({
       organizationProvisioning: { defaultRole: 'member' },
       ...(enabled.ssoDomainVerification ? { domainVerification: { enabled: true } } : {}),
+      saml: ssoSamlOptions(),
+      schema: { ssoProvider: { additionalFields: SSO_PROVIDER_SIGN_IN_FIELDS } },
     });
     });
   }
