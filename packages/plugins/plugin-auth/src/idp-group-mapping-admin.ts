@@ -28,7 +28,10 @@
  * boundary, and the save is refused `503`.
  *
  * The grant's organization is the one that owns the connection (its credential
- * rows' `organization_id`), never a value the caller names.
+ * rows' `organization_id`), never a value the caller names. A connection with a
+ * credential that names no organization, or with credentials in two, is refused
+ * (`rule_violation` on `connectionId`): a mapping always names exactly one
+ * organization, so the projection never writes an organization-less grant.
  *
  * ## After a save or delete
  *
@@ -231,10 +234,13 @@ export async function runSetIdpGroupMapping(
   if (!connection.found) {
     return refuseFields([{ field: 'connectionId', code: 'reference_not_found', message: `No SCIM connection '${connectionId}' exists: mint its credential first.` }]);
   }
+  if (connection.organizations.includes('')) {
+    return refuseFields([{ field: 'connectionId', code: 'rule_violation', message: `SCIM connection '${connectionId}' has a credential owned by no organization, so a grant it makes would belong to no organization. Mint the connection's credential in an organization first.` }]);
+  }
   if (connection.organizations.length > 1) {
     return refuseFields([{ field: 'connectionId', code: 'rule_violation', message: `SCIM connection '${connectionId}' has credentials owned by more than one organization, so the organization a grant belongs to is ambiguous. Revoke the stray credentials first.` }]);
   }
-  const organizationId = connection.organizations[0] ?? '';
+  const organizationId = connection.organizations[0];
 
   const judge = await deps.boundary();
   if (!judge) {
@@ -254,7 +260,7 @@ export async function runSetIdpGroupMapping(
     source_id: connectionId,
     ...(groupExternalId ? { group_external_id: groupExternalId } : { group_display_name: groupDisplayName }),
     permission_set: permissionSet,
-    ...(organizationId ? { organization_id: organizationId } : {}),
+    organization_id: organizationId,
   };
   const sameRows = await engine.find(
     IDP_GROUP_MAPPING_OBJECT,

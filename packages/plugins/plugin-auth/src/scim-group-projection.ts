@@ -17,12 +17,15 @@
  *   `group_display_name` against the group's `displayName`. An unmapped group
  *   maps to nothing and grants nothing.
  * - `roles.exists` confirms a slug still names a mapping row of that
- *   connection whose set is still inside the organization boundary. A set
- *   whose definition grew an administrator bit after the mapping was saved is
- *   not granted (said once, at `warn`): an identity provider's group never
- *   confers administrator standing.
+ *   connection that names an organization and whose set is still inside the
+ *   organization boundary. A set whose definition grew an administrator bit
+ *   after the mapping was saved is not granted (said once, at `warn`): an
+ *   identity provider's group never confers administrator standing.
  * - `reconcileUser` receives the user's COMPLETE desired grant set and makes
- *   `sys_user_permission_set` agree with it, idempotently.
+ *   `sys_user_permission_set` agree with it, idempotently. It asks the same
+ *   question as `exists` again before every insert, so the boundary does not
+ *   depend on the vendor having called `exists` on that path, and it never
+ *   writes a grant without an organization.
  *
  * ## Which grants are the projection's
  *
@@ -81,7 +84,7 @@ export interface ScimGroupProjectionDeps {
   warn: (message: string) => void;
 }
 
-interface MappingRow {
+export interface MappingRow {
   id?: unknown;
   source_id?: unknown;
   group_external_id?: unknown;
@@ -97,7 +100,7 @@ function registered(engine: IDataEngine, object: string): boolean {
   return typeof getSchema !== 'function' || Boolean(getSchema.call(engine, object));
 }
 
-async function rowsOf(result: unknown): Promise<Record<string, unknown>[]> {
+function rowsOf(result: unknown): Record<string, unknown>[] {
   return Array.isArray(result) ? (result as Record<string, unknown>[]) : [];
 }
 
@@ -128,6 +131,36 @@ export function createScimGroupProjection(deps: ScimGroupProjectionDeps): SCIMPr
     return engine;
   };
 
+  /**
+   * May mapping `row` grant now? Only a row that names an organization and a set
+   * still inside the organization boundary. Asked by `roles.exists` AND again by
+   * `reconcileUser` before every insert, so the boundary holds on any vendor
+   * path, whether or not it consulted `exists` first. A refusal grants nothing
+   * and is warned once per mapping.
+   */
+  const admits = async (row: MappingRow): Promise<boolean> => {
+    const mappingId = text(row.id);
+    let refusal: string | null;
+    if (!text(row.organization_id)) {
+      refusal = 'it names no organization, so its grant would belong to no organization. Delete the mapping and '
+        + 'save it again once the connection\'s credential belongs to an organization';
+    } else {
+      const judge = await deps.boundary();
+      const failure = judge
+        ? await judge.organizationBoundaryFailure(text(row.permission_set))
+        : 'the security service is not composed, so no set can be shown to be inside the organization boundary';
+      refusal = failure === null
+        ? null
+        : `${failure}. An identity provider group never grants administrator standing. Delete the mapping, or map an ordinary permission set`;
+    }
+    if (refusal === null) return true;
+    if (!warned.has(mappingId)) {
+      warned.add(mappingId);
+      deps.warn(`[auth] SCIM group mapping ${mappingId} (connection '${text(row.source_id)}') grants nothing: ${refusal}.`);
+    }
+    return false;
+  };
+
   return {
     roles: {
       async map(input) {
@@ -137,34 +170,25 @@ export function createScimGroupProjection(deps: ScimGroupProjectionDeps): SCIMPr
       async exists(input) {
         const rows = await connectionMappings(engineOrThrow(), input.connectionId);
         const row = rows.find((r) => text(r.id) === input.role);
-        if (!row) return false;
-        const set = text(row.permission_set);
-        const judge = await deps.boundary();
-        const failure = judge
-          ? await judge.organizationBoundaryFailure(set)
-          : 'the security service is not composed, so no set can be shown to be inside the organization boundary';
-        if (failure === null) return true;
-        if (!warned.has(input.role)) {
-          warned.add(input.role);
-          deps.warn(
-            `[auth] SCIM group mapping ${input.role} (connection '${input.connectionId}') grants nothing: ${failure}. `
-              + 'An identity provider group never grants administrator standing. Delete the mapping, or map an '
-              + 'ordinary permission set.',
-          );
-        }
-        return false;
+        return row ? admits(row) : false;
       },
     },
-    reconcileUser: (state) => reconcileProjectedGrants(engineOrThrow(), state),
+    reconcileUser: (state) => reconcileProjectedGrants(engineOrThrow(), state, admits),
   };
 }
 
 /**
  * Make the user's projected grants for this provisioning domain equal the
  * vendor's desired set. Reads first, then inserts, then deletes; every write
- * joins the SCIM request's transaction.
+ * joins the SCIM request's transaction. A mapping `admits` refuses (no
+ * organization, or a set outside the organization boundary) is not desired,
+ * so its grant is not written, and one this projection made earlier is removed.
  */
-export async function reconcileProjectedGrants(engine: IDataEngine, state: SCIMProjectedUserState): Promise<void> {
+export async function reconcileProjectedGrants(
+  engine: IDataEngine,
+  state: SCIMProjectedUserState,
+  admits: (row: MappingRow) => Promise<boolean>,
+): Promise<void> {
   const reason = scimGroupProjectionReason(state.provisioningDomainId);
   const mappingIds = [...new Set(state.grants.map((grant) => grant.role))];
   const grantTable = registered(engine, GRANT_OBJECT);
@@ -178,15 +202,16 @@ export async function reconcileProjectedGrants(engine: IDataEngine, state: SCIMP
   const key = (set: string, org: string) => `${set}\u0000${org}`;
   const desired = new Map<string, { set: string; org: string }>();
   if (mappingIds.length > 0) {
-    const mappings = await rowsOf(await reader.find(IDP_GROUP_MAPPING_OBJECT, { where: { id: { $in: mappingIds } } }));
+    const mappings = rowsOf(await reader.find(IDP_GROUP_MAPPING_OBJECT, { where: { id: { $in: mappingIds } } }));
     for (const row of mappings as MappingRow[]) {
       const set = text(row.permission_set);
       const org = text(row.organization_id);
-      if (set) desired.set(key(set, org), { set, org });
+      if (!set || !(await admits(row))) continue;
+      desired.set(key(set, org), { set, org });
     }
   }
 
-  const held = await rowsOf(
+  const held = rowsOf(
     await reader.find(GRANT_OBJECT, {
       where: { user_id: state.userId },
       fields: ['id', 'permission_set', 'organization_id', 'reason'],
@@ -199,7 +224,7 @@ export async function reconcileProjectedGrants(engine: IDataEngine, state: SCIMP
     await writer.insert(GRANT_OBJECT, {
       user_id: state.userId,
       permission_set: set,
-      ...(org ? { organization_id: org } : {}),
+      organization_id: org,
       reason,
     });
   }
