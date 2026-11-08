@@ -1067,8 +1067,11 @@ export const FlowEdgeSchema = lazySchema(() => strictObject(
  *     // Conditions are bare CEL (ADR-0032). Reference fields directly —
  *     // `record.amount`, `previous.status`, `<var>.field` — and DO NOT wrap them
  *     // in `{…}` template braces: `{amount}` parses as a CEL map literal and fails.
- *     { id: "e2", source: "check_amount", target: "auto_approve", condition: "record.amount < 500" },
- *     { id: "e3", source: "check_amount", target: "submit_for_approval", condition: "record.amount >= 500" }
+ *     // An optional field reads `null` when unset, and `<` / `>=` on null aborts
+ *     // the condition: test `!= null` (or `== null`) first — `has()` does not do it.
+ *     // Here an order with no amount goes to review rather than being auto-approved.
+ *     { id: "e2", source: "check_amount", target: "auto_approve", condition: "record.amount != null && record.amount < 500" },
+ *     { id: "e3", source: "check_amount", target: "submit_for_approval", condition: "record.amount == null || record.amount >= 500" }
  *   ]
  * }
  */
