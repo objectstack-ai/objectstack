@@ -1,5 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
-// test-budget: 40 — spawns `os serve` (src, via runServe) once per single-cause fixture: four boots, two refused and two that reach the ready banner; budget to be re-measured
+// test-budget: 40 — spawns `os serve` (src, via runServe) once per single-cause fixture: five boots, three refused and two that reach the ready banner; budget to be re-measured
 
 /**
  * `os serve` refuses to boot when a `plugins` entry fails to load and it cannot
@@ -14,6 +14,8 @@
  *    nothing says what it provides, so the boot is refused;
  *  - an entry that materializes, declares the crypto provider in
  *    `providesServices`, and is refused by the kernel: refused;
+ *  - under `--dev`, a `devPlugins` entry that does not materialize: refused,
+ *    named by the list it was written in (`devPlugins[0]`);
  *  - CONTROL: an entry that materializes, declares nothing of the kind, and is
  *    refused by the kernel: the boot goes on, as before, and says so;
  *  - CONTROL: a config whose every entry loads boots.
@@ -63,6 +65,12 @@ const CONFIGS = {
   ${OBJECT}
 };
 `,
+  devUnresolvable: `export default {
+  plugins: [{ name: 'com.acme.host', version: '1.0.0', init: async () => {} }, '@acme/not-installed-crypto-provider'],
+  devPlugins: ['@acme/not-installed-dev-crypto-provider'],
+  ${OBJECT}
+};
+`,
   allLoad: `export default {
   plugins: [{ name: 'com.acme.fine', version: '1.0.0', init: async () => {} }],
   ${OBJECT}
@@ -84,8 +92,8 @@ afterAll(() => {
   for (const dir of Object.values(dirs)) if (dir) rmSync(dir, { recursive: true, force: true });
 });
 
-const boot = async (key: keyof typeof CONFIGS) => {
-  const run = await runServe(dirs[key]!, [], { waitFor: SETTLED, timeoutMs: 150_000 });
+const boot = async (key: keyof typeof CONFIGS, args: string[] = []) => {
+  const run = await runServe(dirs[key]!, args, { waitFor: SETTLED, timeoutMs: 150_000 });
   return { ...run, output: run.stdout + run.stderr };
 };
 
@@ -104,6 +112,14 @@ describe('os serve — a plugins entry that fails to load and may provide the cr
     expect(output).toContain('Failed to load plugin');
     expect(output, output).toMatch(REFUSED);
     expect(output).toContain('com.acme.kms-crypto-provider');
+    expect(port).toBeUndefined();
+  }, 180_000);
+
+  it('under --dev, a devPlugins entry that does not materialize is refused, named by its own list', async () => {
+    const { output, port } = await boot('devUnresolvable', ['--dev']);
+    expect(output, output).toMatch(REFUSED);
+    expect(output).toContain("devPlugins[0] ('@acme/not-installed-dev-crypto-provider') did not load");
+    expect(output).toContain("plugins[1] ('@acme/not-installed-crypto-provider') did not load");
     expect(port).toBeUndefined();
   }, 180_000);
 
