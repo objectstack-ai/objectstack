@@ -881,15 +881,24 @@ export default class OrganizationOwnershipCeremony extends Command {
                 .filter((name): name is string => typeof name === 'string' && name.length > 0)
                 .map((name) => StorageNameMapping.resolveTableName({ name })),
             );
+            const nullability = new Map<string, ReturnType<typeof readColumnNullability>>();
             return applyNotNullThroughDrift(
               {
                 isDeclared: (table) => declared.has(rotationBaseOf(table) ?? table),
                 shardBaseOf: (table) => rotationBaseOf(table) ?? null,
-                // [ADR-0131 D1] A shard the driver created NOT NULL is reported
-                // so, never as one the ceremony could not tighten.
+                // [ADR-0131 D1] A column already NOT NULL — a shard the driver
+                // created so, or a table an earlier run tightened — is reported
+                // so, never handed to the door again. One catalog read per
+                // database per call: each table is read before it is tightened.
                 isNotNull: async (table, column, database) => {
-                  const read = await readColumnNullability(driverFor(database), [column], normalizeRows);
-                  return 'detail' in read ? null : read.tables.get(table)?.get(column) ?? null;
+                  const key = `${database ?? ''}|${column}`;
+                  let read = nullability.get(key);
+                  if (!read) {
+                    read = readColumnNullability(driverFor(database), [column], normalizeRows);
+                    nullability.set(key, read);
+                  }
+                  const answer = await read;
+                  return 'detail' in answer ? null : answer.tables.get(table)?.get(column) ?? null;
                 },
                 driverFor: (database) => driverFor(database) as never,
               },
