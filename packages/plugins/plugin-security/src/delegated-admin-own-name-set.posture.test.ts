@@ -32,6 +32,7 @@ import { SecurityPlugin } from './security-plugin.js';
 import { SysUserPosition } from './objects/sys-user-position.object.js';
 import { SysUserPermissionSet } from './objects/sys-user-permission-set.object.js';
 import { defaultPermissionSets } from './objects/index.js';
+import { installDefaultOrganization } from './default-organization.testkit.js';
 
 const SYS = { isSystem: true } as const;
 const ORG_A = 'org_a';
@@ -99,7 +100,13 @@ afterEach(async () => {
   }
 });
 
-async function boot(posture: Posture) {
+/**
+ * `defaultOrganization`: also give the engine the organization object holding the
+ * Default Organization, as every real `single` install has — so a write whose
+ * context names no organization is stamped with it instead of being refused for
+ * having none (`default-organization.testkit.ts`).
+ */
+async function boot(posture: Posture, opts: { defaultOrganization?: boolean } = {}) {
   const engine = new ObjectQL();
   engine.registerDriver(
     new SqlDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true }),
@@ -128,6 +135,7 @@ async function boot(posture: Posture) {
     ],
   } as any);
   await engine.syncSchemas();
+  if (opts.defaultOrganization) await installDefaultOrganization(engine as any);
   engines.push(engine);
 
   const services: Record<string, unknown> = {
@@ -446,4 +454,111 @@ describe('[ADR-0090 D12, ruling of record 6663849489; #30758] canReadObject and 
       });
     });
   }
+});
+
+/**
+ * [ADR-0090 D12, ruling of record 6663849489] The subtree a delegated scope
+ * covers is ONE organization's, whether or not the caller's context names an
+ * organization: a unit stamped with another organization is outside it even
+ * where its parent link names a unit inside the scope, and so is everything
+ * below it. Every answer that reads the subtree is asked — the gate's covered
+ * units (what the read door confines a delegated read to), the delegable-scope
+ * report, the explain coverage of a user, the write gate — and the read and
+ * write doors themselves.
+ */
+describe('[ADR-0090 D12, ruling of record 6663849489] a delegated business-unit subtree never crosses an organization boundary, whether or not the caller\'s context names an organization — three postures', () => {
+  const ORG_B = 'org_b';
+  /** The delegate's context with no organization on it at all. */
+  const NO_ORGANIZATION: any = { userId: 'u_delegate', positions: [], permissions: ['east_admin'] };
+  /** The same, carrying the users it may name — an assignment's `user_id` is a reference it must read. */
+  const NO_ORGANIZATION_NAMING_USERS: any = { ...NO_ORGANIZATION, org_user_ids: ORG_USER_IDS };
+  const IN_SCOPE = ['bu_east', 'bu_east_field'];
+
+  /** Another organization's unit whose parent link names the scope root `bu_east`, a unit below it, and a member of it. */
+  async function linkOtherOrganization(h: Awaited<ReturnType<typeof boot>>) {
+    const asOrgB = { context: { isSystem: true, tenantId: ORG_B } } as any;
+    await h.engine.insert('sys_business_unit', [
+      { id: 'bu_b_linked', name: 'b_linked', parent_business_unit_id: 'bu_east', organization_id: ORG_B },
+      { id: 'bu_b_linked_child', name: 'b_linked_child', parent_business_unit_id: 'bu_b_linked', organization_id: ORG_B },
+    ], asOrgB);
+    await h.engine.insert('sys_user', { id: 'u_b_member', email: 'u_b_member@example.test', name: 'u_b_member' }, asOrgB);
+    await h.engine.insert('sys_business_unit_member',
+      { id: 'bum_b_member', user_id: 'u_b_member', business_unit_id: 'bu_b_linked', organization_id: ORG_B }, asOrgB);
+  }
+
+  /** What the gate itself answers for `context`: covered units, placeable units, and whether it covers the other organization's member. */
+  async function gateAnswers(h: Awaited<ReturnType<typeof boot>>, context: any) {
+    const security = h.plugin as any;
+    const sets = await security.resolvePermissionSetsForContext(context);
+    const gate = security.delegatedAdminGate;
+    return {
+      covered: [...(await gate.scopedBusinessUnitIds(sets, context)) as Set<string>].sort(),
+      placeable: [...(await gate.describeDelegableScope(sets, context)).placeableBusinessUnitIds as string[]].sort(),
+      coversOtherMember: await gate.scopesCoverUser(sets, 'u_b_member', context),
+    };
+  }
+
+  /** The write gate's verdict on an insert of `data` into `object` as `context`. */
+  const gateInsert = (h: Awaited<ReturnType<typeof boot>>, context: any, object: string, data: Record<string, unknown>) =>
+    outcome(() => (h.plugin as any).delegatedAdminGate.assert({ object, operation: 'insert', data, context }));
+
+  for (const posture of POSTURES) {
+    describe(`posture '${posture}'`, () => {
+      it("ground truth: the store holds another organization's units under a parent link that names the scope root", async () => {
+        const h = await boot(posture);
+        await linkOtherOrganization(h);
+        const rows = await h.engine.find('sys_business_unit', { where: { organization_id: ORG_B }, context: SYS });
+        expect((Array.isArray(rows) ? rows : []).map((r: any) => [r.id, r.parent_business_unit_id]).sort())
+          .toEqual([['bu_b_linked', 'bu_east'], ['bu_b_linked_child', 'bu_b_linked']]);
+      });
+
+      it("the gate covers the scope's own organization's units only — with no organization on the context, and with one", async () => {
+        const h = await boot(posture);
+        await linkOtherOrganization(h);
+        for (const [label, context] of [['no organization', NO_ORGANIZATION], ['its organization', NARROW]] as const) {
+          expect(await gateAnswers(h, context), label).toEqual({ covered: IN_SCOPE, placeable: IN_SCOPE, coversOtherMember: false });
+        }
+      });
+
+      it('the read door returns no unit of another organization to a context naming no organization', async () => {
+        const h = await boot(posture);
+        await linkOtherOrganization(h);
+        // `single` has no tenancy layer, so the delegated scope is the read's
+        // only bound; under `group`/`isolated` that layer reads nothing for a
+        // context naming no organization.
+        expect(await unitsRead(h, NO_ORGANIZATION)).toEqual(posture === 'single' ? IN_SCOPE : []);
+        // CONTROL: the context naming its organization reads its scope, as before.
+        expect(await unitsRead(h, NARROW)).toEqual(IN_SCOPE);
+      });
+
+      it("the write gate refuses an assignment anchored in, and a direct grant to a member of, another organization's unit — and admits one inside the scope", async () => {
+        const h = await boot(posture);
+        await linkOtherOrganization(h);
+        for (const [label, context] of [['no organization', NO_ORGANIZATION], ['its organization', NARROW]] as const) {
+          for (const unit of ['bu_b_linked', 'bu_b_linked_child']) {
+            const r = await gateInsert(h, context, 'sys_user_position', { user_id: 'u_target', position: 'field_rep', business_unit_id: unit });
+            expect([r.status, r.code], `${label} · ${unit}: ${r.message}`).toEqual([403, 'DELEGATION_SCOPE_VIOLATION']);
+          }
+          const grant = await gateInsert(h, context, 'sys_user_permission_set', { user_id: 'u_b_member', permission_set: 'field_user' });
+          expect([grant.status, grant.code], `${label} · grant: ${grant.message}`).toEqual([403, 'DELEGATION_SCOPE_VIOLATION']);
+          // CONTROL: the gate has not gone dark — inside the scope it admits.
+          const inside = await gateInsert(h, context, 'sys_user_position', { user_id: 'u_target', position: 'field_rep', business_unit_id: 'bu_east_field' });
+          expect(inside, label).toEqual({ status: 200 });
+        }
+      });
+    });
+  }
+
+  it("posture 'single' with its Default Organization: the write door refuses an assignment anchored in another organization's unit for a context naming no organization, and stores one inside the scope", async () => {
+    const h = await boot('single', { defaultOrganization: true });
+    await linkOtherOrganization(h);
+    const assignAt = (unit: string) => outcome(() => h.engine.insert('sys_user_position',
+      { user_id: 'u_target', position: 'field_rep', business_unit_id: unit }, { context: NO_ORGANIZATION_NAMING_USERS } as any));
+    const refused = await assignAt('bu_b_linked');
+    expect([refused.status, refused.code], refused.message).toEqual([403, 'DELEGATION_SCOPE_VIOLATION']);
+    expect(await storedPositions(h)).toEqual([]);
+    // CONTROL: the same door, context and position, inside the scope.
+    expect(await assignAt('bu_east_field')).toEqual({ status: 200 });
+    expect(await storedPositions(h)).toEqual(['field_rep']);
+  });
 });

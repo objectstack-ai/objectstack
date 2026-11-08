@@ -113,7 +113,8 @@ const DEFAULT_DELEGATION_CEILING_MS = 30 * 24 * 60 * 60 * 1000;
  * C1 it exists from boot, and every session on a stock `single` deployment —
  * the administrator's and a delegate's alike — carries it as its active
  * organization. Undefined only for a context carrying no organization at all,
- * where a by-name anchor is read organization-less and nothing here changes.
+ * where a by-name anchor is read organization-less and the subtree under it
+ * stays inside that anchor's own organization (`resolveSubtree`).
  *
  * Under the `group` posture (ADR-0105 D2) this is the ACTIVE organization, not
  * the caller's whole membership set. That is the narrower of the two, which is
@@ -1629,8 +1630,9 @@ export class DelegatedAdminGate {
    *
    * Fail closed on both axes: a name that resolves to no row of the caller's
    * own organization approves nothing, exactly as a misconfigured scope does.
-   * An organization-less caller (`single` posture) keeps the by-name answer —
-   * there is no other organization for it to cross into.
+   * An organization-less caller (`single` posture) keeps the by-name answer
+   * for the ROOT; the subtree under it is still one organization's — the
+   * root row's own ({@link resolveSubtreeById}).
    */
   private async resolveSubtree(
     businessUnitName: string,
@@ -1652,14 +1654,26 @@ export class DelegatedAdminGate {
     // nothing (fail closed).
     if (!root?.id) return new Set<string>();
     if (!includeSubtree) return new Set<string>([String(root.id)]);
-    return this.resolveSubtreeById(String(root.id), organizationId);
+    // The organization the subtree is bounded to: the caller's when its context
+    // names one (the root was resolved inside it above), otherwise the root
+    // row's own — never "any organization".
+    return this.resolveSubtreeById(String(root.id), organizationId ?? rowOrganizationId(root));
   }
 
   /** BU id → covered BU-id set (root id + all descendants). Subtree is always
    *  walked: the delegator's readScope depth is not known on the delegation
    *  path, so the whole subtree is the containment bound — matching the D12
-   *  admin subtree check. Fail-closed on unresolvable ids (empty set). */
-  private async resolveSubtreeById(rootId: string, organizationId?: string): Promise<Set<string>> {
+   *  admin subtree check. Fail-closed on unresolvable ids (empty set).
+   *
+   *  Bounded to ONE organization, `organizationId`, which every caller names:
+   *  a descendant stamped with any other organization is outside the subtree
+   *  and is not walked through, whether or not the caller's context names an
+   *  organization. `null` is the bound of an organization-less root (invalid
+   *  state on a stamped store, `organization-scope.ts`, so met only on a store
+   *  whose units carry no organization at all): organization-less descendants
+   *  only, so a stamped unit is never reached from one, nor one from a stamped
+   *  root. */
+  private async resolveSubtreeById(rootId: string, organizationId: string | null): Promise<Set<string>> {
     const ids = new Set<string>();
     const ql = this.deps.ql;
     if (!ql?.find || !rootId) return ids;
@@ -1671,15 +1685,15 @@ export class DelegatedAdminGate {
         children = await ql.find('sys_business_unit', {
           where: { parent_business_unit_id: { $in: frontier } },
           limit: 5000,
-          context: organizationScopedCtx(organizationId),
+          context: organizationScopedCtx(organizationId ?? undefined),
         });
       } catch { children = []; }
       const next: string[] = [];
       for (const c of Array.isArray(children) ? children : []) {
         // A parent link is not an organization predicate: whatever a driver
-        // returned, a descendant outside the caller's organization never
+        // returned, a descendant outside the subtree's organization never
         // widens the subtree a delegation is judged against.
-        if (organizationId && rowOrganizationId(c) !== organizationId) continue;
+        if (rowOrganizationId(c) !== organizationId) continue;
         const id = String((c as any)?.id ?? '');
         if (id && !ids.has(id)) { ids.add(id); next.push(id); }
       }
@@ -1701,6 +1715,10 @@ export class DelegatedAdminGate {
     organizationId?: string,
   ): Promise<Set<string>> {
     const allowed = new Set<string>();
+    // A holding takes effect only in its own organization
+    // ({@link holdingTakesEffectIn}), so a context naming none holds nothing
+    // to anchor a delegation in, and there is no organization to bound a walk to.
+    if (!organizationId) return allowed;
     let memberSubtreeResolved = false;
     for (const h of directHoldings) {
       if (h.businessUnitId) {
