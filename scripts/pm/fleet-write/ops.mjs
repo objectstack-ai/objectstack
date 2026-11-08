@@ -192,9 +192,9 @@
  * re-run (`run_rerun_failed`), both below, are `actions: write`, the two rows
  * spending it; the five advisory rows that write (`advisory_report`,
  * `advisory_create`, `advisory_collaborators_add`, `advisory_versions` and
- * `advisory_state`, below) are `repository-advisories: write`, and the one
- * that reads (`advisory_read`, below) spends the same grant at `read` alone
- * (its row's `grant`), the six rows spending it; the sender gate's
+ * `advisory_state`, below) are `repository-advisories: write`, and the two
+ * that read (`advisory_read` and `advisory_list`, below) spend the same grant
+ * at `read` alone (each row's `grant`), the seven rows spending it; the sender gate's
  * `GET /repos/{o}/{r}/collaborators/{login}/permission` is `metadata: read`.
  * `PERMISSIONS` is that set and nothing wider. The workflow declares the five
  * grants every stroke gets as literal `permission-*` inputs on
@@ -460,14 +460,18 @@
  * (the endpoint creates a draft and takes none), the versions row's is its
  * entries alone, and the other two PATCH bodies are the executor's
  * (`validate.mjs --self-test` pins every one). Editing an advisory's summary or
- * description, listing advisories, removing a collaborator, the CVE request and
- * the temporary fork are out of reach of every row, and reading an advisory's text
- * is one row's alone, which seals it (`advisory_read`, the next section):
+ * description, removing a collaborator, the CVE request and the temporary fork
+ * are out of reach of every row; reading an advisory's text is one row's alone,
+ * which seals it (`advisory_read`, the next section); and listing advisories is
+ * one row's alone too, narrowed to three states and five fields per advisory
+ * and sealed the same way (`advisory_list`, the section after it):
  * `REFUSED_PATH_FAMILIES` refuses each `security-advisories` path but one
  * advisory's (`ADVISORY_PATH_SHAPE`), the reports endpoint
- * (`ADVISORY_REPORTS_PATH_SHAPE`) and the bare collection
- * (`ADVISORY_CREATE_PATH_SHAPE`), and the self-test pins that the
- * collection is reached by `advisory_create`'s `POST` alone, never a `GET`.
+ * (`ADVISORY_REPORTS_PATH_SHAPE`), the bare collection
+ * (`ADVISORY_CREATE_PATH_SHAPE`) and the listing's own page of it
+ * (`ADVISORY_LIST_PAGE_PATH_SHAPE`), and the self-test pins that the
+ * collection is reached by `advisory_create`'s `POST` and `advisory_list`'s
+ * `GET` alone.
  * A draft names its affected packages and nothing else of them: each is one
  * `vulnerabilities` entry, the npm ecosystem and the name
  * (`ADVISORY_CREATE_ECOSYSTEM`, `NPM_PACKAGE_SHAPE`), with no version range,
@@ -663,6 +667,74 @@
  * unmeasured; one hypothesis is that the read-grant answer omits
  * `collaborating_users`. The table holds that one value, and any other, the
  * retired `collaborator` among them, fails closed with nothing sealed.
+ *
+ * ## The one row that LISTS advisories — `advisory_list`, sealed the same way
+ *
+ * Without it a seat learns an advisory's id only from the maintainer, a
+ * finder's doorbell or a relay run, and a draft no one rang for never reaches
+ * the seat's ledger. The maintainer's words, verbatim as the body of issue
+ * 31368 records them: 「你应该能自主读到所有的安全问题才是合理的」.
+ *
+ *   row             request                                                                    the payload carries
+ *   `advisory_list` `GET …/security-advisories?state=S&per_page=100[&after=C]`, and nothing else  `public_key` alone
+ *
+ * The caller names NO state and NO query parameter: the row lists every state
+ * in `ADVISORY_LIST_STATES` (`triage`, `draft` and `closed`, every unpublished
+ * state the endpoint filters by) on every run, one walk each, and the executor
+ * spells every page's path (`advisoryListPagePath`, in
+ * `ADVISORY_LIST_PAGE_PATH_SHAPE`). The endpoint pages by CURSOR, not by page
+ * number: GitHub's REST description gives it `before`, `after`, `per_page` (at
+ * most 100), `state`, `sort` and `direction`, and no `page` (read 2026-11-08,
+ * operation `security-advisories/list-repository-advisories`). A walk asks
+ * `ADVISORY_LIST_PAGE_SIZE` a page and ends on a short page, or on a full page
+ * whose `Link` header names no `rel="next"`. On a full page that names one it
+ * takes that link's `after` cursor and nothing else, and only when the link's
+ * origin and path are the relay's own API and this collection, its `state` the
+ * walk's own, and the cursor one value in `ADVISORY_LIST_CURSOR_SHAPE`
+ * (`advisoryListNextCursor`); the next path is the relay's own spelling with
+ * that cursor, never the link. A link that is none of these, a page that is not
+ * a list of advisories in the state asked for, and an advisory listed twice are
+ * each a FAILED action. A walk still pending after `ADVISORY_LIST_PAGE_CAP`
+ * pages is FAILED too: a truncated listing is a SUBSET, never an answer. In
+ * each, nothing is sealed or emitted.
+ *
+ * Projected BEFORE the seal: each advisory crosses as `ADVISORY_LIST_FIELDS`
+ * (`ghsa_id`, `state`, `severity`, `created_at`, `updated_at`) as the platform
+ * answered them, and nothing else — no summary, description, vulnerability or
+ * credit, not even as ciphertext (`advisoryListPlaintext`: `{ count,
+ * advisories }`, in state order, then the platform's). The JSON is then padded
+ * with trailing spaces to exactly `ADVISORY_LIST_PADDED_BYTES`
+ * (`advisoryListPadded`), so every sealed listing is exactly
+ * `ADVISORY_READ_MAX_SEALED_CHARS` characters in `ADVISORY_READ_MAX_PARTS`
+ * parts, and the public ciphertext's length and part count say nothing of the
+ * count. The cap that binds first is that one: 29,939 bytes of JSON, about 240
+ * advisories at about 125 bytes each (the self-test measures it with fake
+ * items), far under `ADVISORY_LIST_PAGE_CAP` pages of 100 for each of three
+ * states. A listing over it is FAILED with nothing emitted, ⛔ never a cut list.
+ *
+ * Sealed and emitted exactly as `advisory_read`'s answer: `sealAdvisoryRead` to
+ * the action's one-time `public_key`, notice parts the seat reassembles, opens
+ * (`openAdvisoryRead`) and prints on `--reveal` alone, its padding trimmed for
+ * that display only. The associated data is `advisorySealAad`'s, binding the
+ * request id, the action's index and the op; `advisory_read`'s is unchanged
+ * under that helper, byte for byte. It writes nothing, so `dispatch.mjs` has
+ * no byte read-back for it: opening the parts IS its read-back.
+ *
+ * ⛔ What crosses the public run: that the listing landed or failed, the HTTP
+ * status, `advisoryListCall` (the call, its states in braces) and the padded
+ * ciphertext. NEVER an id, a count, a state, a severity, a cursor, a page
+ * number, or a byte or part count of the listing.
+ *
+ * The grant and the gate are `advisory_read`'s. Its `grant` is `read` on the
+ * stroke-scoped `repository-advisories`, so the validator writes
+ * `permission_repository_advisories=read` for its stroke through the
+ * workflow's existing input; it travels `alone`; and its `senderGate` is
+ * `target-write` from `ADVISORY_READ_SENDER_GATES`: write, maintain or admin on
+ * the target, which every stroke passes before its first request. A row naming
+ * any other gate is refused before the first GET. The first live run measures
+ * what the read grant lists and the form of the `Link` cursor. A refusal there
+ * is a FAILED action carrying `ADVISORY_LIST_ACCESS_REMEDY`, ⛔ never a retry
+ * under a wider token.
  *
  * ## The platform's `client_payload` ceilings — pinned, with their source
  *
@@ -1026,7 +1098,8 @@ export const ADVISORY_PATH_SHAPE = /\/security-advisories\/GHSA(-[0-9a-z]{4}){3}
 export const ADVISORY_REPORTS_PATH_SHAPE = /\/security-advisories\/reports$/;
 /**
  * The collection itself — the third, `advisory_create`'s POST, which creates a DRAFT. The same path answers the list
- * to a `GET`; no row spells that verb on it (`validate.mjs --self-test` pins the verbs every row sends here).
+ * to a `GET`, which `advisory_list` alone sends, on its own page of it (`ADVISORY_LIST_PAGE_PATH_SHAPE`;
+ * `validate.mjs --self-test` pins the verbs every row sends here).
  */
 export const ADVISORY_CREATE_PATH_SHAPE = /^\/repos\/[^/]+\/[^/]+\/security-advisories$/;
 /** The one ecosystem a draft's `vulnerabilities` entry names: every package this fleet ships is an npm package. */
@@ -1700,6 +1773,159 @@ export function advisoryReadLandedText({ plaintextBytes, sealedChars, parts }) {
   return `sealed ${plaintextBytes} byte(s) of the answer to the seat's one-time key — ${sealedChars} character(s) in ${parts} notice part(s), which only that seat's process opens`;
 }
 
+// ---------------------------------------------------------------------------
+// `advisory_list` (header: "The one row that LISTS advisories") — the states, the walk, the cursor, the projection,
+// the pad, the associated data.
+// ---------------------------------------------------------------------------
+
+/** The states `advisory_list` lists — every unpublished state the endpoint filters by, all three on every run. */
+export const ADVISORY_LIST_STATES = Object.freeze(['triage', 'draft', 'closed']);
+/** The page size a walk asks for — the endpoint's maximum `per_page`. A page shorter than this ends the walk. */
+export const ADVISORY_LIST_PAGE_SIZE = 100;
+/** The most pages one state's walk reads: a walk still pending after this is FAILED, never a truncated answer. */
+export const ADVISORY_LIST_PAGE_CAP = 3;
+/** The fields of each listed advisory that cross, projected BEFORE the seal — nothing else, not even as ciphertext. */
+export const ADVISORY_LIST_FIELDS = Object.freeze(['ghsa_id', 'state', 'severity', 'created_at', 'updated_at']);
+/** The longest `after` cursor a walk follows, in characters, decoded. */
+export const ADVISORY_LIST_CURSOR_MAX_CHARS = 256;
+/** An `after` cursor a walk follows, decoded: the base64 and base64url alphabets and their pad, one to the cap. */
+export const ADVISORY_LIST_CURSOR_SHAPE = new RegExp(`^[A-Za-z0-9+/=_-]{1,${ADVISORY_LIST_CURSOR_MAX_CHARS}}$`);
+/** The query of a listing page, as a regex source: one listed state, the page size, and optionally one encoded cursor. */
+const ADVISORY_LIST_QUERY_SOURCE = `\\?state=(?:${ADVISORY_LIST_STATES.join('|')})&per_page=${ADVISORY_LIST_PAGE_SIZE}(?:&after=(?:[A-Za-z0-9_-]|%2B|%2F|%3D){1,${ADVISORY_LIST_CURSOR_MAX_CHARS}})?`;
+/** A listing page's path — the collection, then exactly that query. The one `security-advisories` query any row reaches. */
+export const ADVISORY_LIST_PAGE_PATH_SHAPE = new RegExp(`^/repos/[^/?]+/[^/?]+/security-advisories${ADVISORY_LIST_QUERY_SOURCE}$`);
+
+/** The path of one listing page: the state, the page size and, after the first page, the cursor. Pure. */
+export function advisoryListPagePath(repo, state, after = null) {
+  return `/repos/${repo}/security-advisories?state=${state}&per_page=${ADVISORY_LIST_PAGE_SIZE}${after === null ? '' : `&after=${encodeURIComponent(after)}`}`;
+}
+
+/** The call a listing's row and log print — its states in braces, ⛔ never a cursor. Pure. */
+export function advisoryListCall(repo) {
+  return `GET /repos/${repo}/security-advisories?state={${ADVISORY_LIST_STATES.join(',')}}&per_page=${ADVISORY_LIST_PAGE_SIZE}`;
+}
+
+/** Why a `Link` header gives a walk no cursor it may follow — one sentence, ⛔ never the link or the cursor. */
+export const ADVISORY_LIST_CURSOR_REFUSED =
+  "a full page's Link header names a next page the relay does not follow — not exactly one rel=\"next\" link, or one off this API's " +
+  'collection or this state, or a cursor that is not exactly one value in its declared shape — so nothing was sealed or emitted';
+
+/**
+ * The next cursor of a full page (header): `{ after }` — `null` when the `Link` header names no `rel="next"`, which ends
+ * the walk — or `{ fail }` with `ADVISORY_LIST_CURSOR_REFUSED`. A next link is followed only when there is exactly one,
+ * its origin is `api`'s and its path is exactly `repo`'s collection, its `state` is exactly the walk's, and it carries
+ * exactly one `after` in `ADVISORY_LIST_CURSOR_SHAPE`. Pure; never throws.
+ */
+export function advisoryListNextCursor(link, { api, repo, state }) {
+  if (link === null || link === undefined || link === '') return { after: null };
+  if (typeof link !== 'string') return { fail: ADVISORY_LIST_CURSOR_REFUSED };
+  const nexts = [];
+  for (const m of link.matchAll(/<([^>]*)>((?:\s*;\s*[^;,]*)*)/g)) {
+    const rel = /;\s*rel\s*=\s*"?([^";]*)"?/i.exec(m[2]);
+    if (rel && rel[1].trim().split(/\s+/).includes('next')) nexts.push(m[1]);
+  }
+  if (nexts.length === 0) return { after: null };
+  if (nexts.length > 1) return { fail: ADVISORY_LIST_CURSOR_REFUSED };
+  let url;
+  let base;
+  try {
+    url = new URL(nexts[0]);
+    base = new URL(api);
+  } catch {
+    return { fail: ADVISORY_LIST_CURSOR_REFUSED };
+  }
+  if (url.origin !== base.origin || url.pathname !== `/repos/${repo}/security-advisories`) return { fail: ADVISORY_LIST_CURSOR_REFUSED };
+  const states = url.searchParams.getAll('state');
+  const afters = url.searchParams.getAll('after');
+  if (states.length !== 1 || states[0] !== state || afters.length !== 1 || !ADVISORY_LIST_CURSOR_SHAPE.test(afters[0])) return { fail: ADVISORY_LIST_CURSOR_REFUSED };
+  return { after: afters[0] };
+}
+
+/**
+ * Why one listing page fails its fences, or null when it holds (header): the page answered 200 with a list, and every
+ * item is an advisory — an object whose `ghsa_id` is in `GHSA_ID_SHAPE` — in the state the walk asked for. ⛔ The
+ * sentence carries the status alone: no id, no state, no count, no field. Pure.
+ */
+export function advisoryListPageFailure(answer, state) {
+  if (answer?.status !== 200) return `a page of the listing answered HTTP ${answer?.status ?? 'none'}`;
+  if (!Array.isArray(answer.json)) return 'a page of the listing answered HTTP 200 with no list';
+  const ok = answer.json.every((item) => advisoryShaped(item) && typeof item.ghsa_id === 'string' && GHSA_ID_SHAPE.test(item.ghsa_id) && item.state === state);
+  return ok ? null : 'a page of the listing lists an item that is not an advisory in the state the page asked for';
+}
+
+/** One listed advisory as it crosses: `ADVISORY_LIST_FIELDS` it carries, in that order, as the platform answered them. Pure. */
+export function advisoryListProjection(item) {
+  const picked = {};
+  for (const field of ADVISORY_LIST_FIELDS) if (Object.hasOwn(item, field)) picked[field] = item[field];
+  return picked;
+}
+
+/** What is sealed, before its pad: `{ count, advisories }` — each advisory projected, in the order walked. Pure. */
+export function advisoryListPlaintext(items) {
+  return JSON.stringify({ count: items.length, advisories: items.map(advisoryListProjection) });
+}
+
+/** The exact plaintext size of every sealed listing: the largest answer the run's notices carry, 29,939 bytes. */
+export const ADVISORY_LIST_PADDED_BYTES = (ADVISORY_READ_MAX_SEALED_CHARS * 3) / 4 - ADVISORY_READ_SEAL_OVERHEAD;
+
+/**
+ * The listing's JSON padded with trailing spaces to exactly `ADVISORY_LIST_PADDED_BYTES` (header), so its sealed form
+ * is always `ADVISORY_READ_MAX_SEALED_CHARS` characters in `ADVISORY_READ_MAX_PARTS` parts and says nothing of the
+ * count; null when the JSON alone is over that size. JSON reads the same with trailing whitespace. Pure.
+ */
+export function advisoryListPadded(json) {
+  const bytes = Buffer.byteLength(json, 'utf8');
+  return bytes > ADVISORY_LIST_PADDED_BYTES ? null : json + ' '.repeat(ADVISORY_LIST_PADDED_BYTES - bytes);
+}
+
+/** What the seat prints of an opened listing on `--reveal`: the JSON, its pad trimmed. Display only — the open stays byte for byte. Pure. */
+export function advisoryListDisplay(plaintext) {
+  return plaintext.trimEnd();
+}
+
+/**
+ * The associated data a sealed answer is bound to, for either row that seals one — the ONE spelling the executor
+ * seals under and the seat opens under: `advisory_read`'s is `advisoryReadAad`, byte for byte (the request id, the
+ * action's index and the advisory's id); `advisory_list`'s binds the request id, the action's index and the op.
+ * Throws for any other op, with a message naming no value. Pure.
+ */
+export function advisorySealAad({ requestId, action, op, ghsaId }) {
+  if (op === 'advisory_read') return advisoryReadAad({ requestId, action, ghsaId });
+  if (op === 'advisory_list') return Buffer.from(`${ADVISORY_READ_INFO} request=${requestId} action=${action} op=advisory_list`, 'utf8');
+  throw new Error('no sealed answer is bound for this op');
+}
+
+/** What a refused listing prints after its status: the grant is the first live run's to measure, ⛔ never widened by hand. */
+export const ADVISORY_LIST_ACCESS_REMEDY =
+  "the relay token carries repository-advisories READ for this stroke alone, and what it lists is the first live run's to " +
+  'measure; put this reading to the maintainer — ⛔ never re-send it under a wider or un-narrowed token';
+
+/** What a listing whose row names an unknown sender gate prints: refused before any request. */
+export const ADVISORY_LIST_SENDER_REFUSED =
+  'REFUSED before any request: the row names no sender gate the table knows, so nothing was read, sealed or emitted';
+
+/** What a listing whose GET never reached the platform prints — ⛔ never the exception's message, which carries the path. */
+export const ADVISORY_LIST_UNREACHED =
+  "REFUSED: a page of the listing did not reach the platform (the runner's call threw before any answer), so nothing was sealed or " +
+  'emitted — re-send the listing with a fresh key';
+
+/** What a walk that hit its page cap prints: no count, no state. */
+export const ADVISORY_LIST_CAP_HIT =
+  `a walk reached its ${ADVISORY_LIST_PAGE_CAP}-page cap with more pending — a truncated listing is a SUBSET, so nothing was sealed or ` +
+  'emitted; put the reading to the maintainer';
+
+/** What a walk that met one advisory twice prints: the cursor did not advance cleanly. */
+export const ADVISORY_LIST_REPEATED = 'one advisory appears twice across the pages, so the walk is not one listing — nothing was sealed or emitted';
+
+/** What a listing too large for the channel prints: the cap, and ⛔ nothing of the listing — no count, no byte count. */
+export const ADVISORY_LIST_OVER_CAP =
+  `the projected listing is over the ${ADVISORY_LIST_PADDED_BYTES} bytes the run's ${ADVISORY_READ_MAX_PARTS} notices carry — nothing was ` +
+  'emitted; ⛔ the listing never leaves cut or another way, put the reading to the maintainer';
+
+/** The row a landed listing prints — ⛔ no id, no count, no state, no byte or part count. */
+export const ADVISORY_LIST_LANDED =
+  "sealed the listing to the seat's one-time key, padded to the run's full notice size so its length says nothing — only that seat's process opens it";
+
 /** The seat-side transport selector and its three values. */
 export const TRANSPORT_ENV = 'OS_FLEET_TRANSPORT';
 export const TRANSPORTS = Object.freeze(['direct', 'dispatch', 'auto']);
@@ -1857,16 +2083,16 @@ export const FIELDS = Object.freeze({
  * only for a stroke carrying one of them (`STROKE_SCOPED_PERMISSIONS`).
  * `repository-advisories: write` is spent by the five advisory rows that
  * write alone, and minted only for a stroke carrying one of them, the same
- * way; `advisory_read` spends that grant at `read` (its row's `grant`), so a
- * read's stroke is minted the lower level and never write.
+ * way; `advisory_read` and `advisory_list` spend that grant at `read` (each
+ * row's `grant`), so a read's stroke is minted the lower level and never write.
  */
 export const PERMISSIONS = Object.freeze({ issues: 'write', 'pull-requests': 'write', contents: 'write', workflows: 'write', metadata: 'read', actions: 'write', 'repository-advisories': 'write' });
 
 /**
  * The permissions minted ONLY for a stroke carrying an op that spends them —
  * `actions: write`, the `workflow_dispatch` and `run_rerun_failed` rows'
- * alone, and `repository-advisories`, the six advisory rows' alone — at
- * write, or at the row's `grant` (`advisory_read`'s `read`); each of those
+ * alone, and `repository-advisories`, the seven advisory rows' alone — at
+ * write, or at the row's `grant` (`advisory_read`'s and `advisory_list`'s `read`); each of those
  * rows travels alone in its stroke. `validate.mjs`
  * computes a stroke's permission set (`tokenPermissionsOf`) and writes each of
  * these to `$GITHUB_OUTPUT` as `permission_<name>=<level>` or empty (a hyphen
@@ -1973,10 +2199,10 @@ export function transferRemedy(source, target) {
  * The closed op list. Each row:
  *   `permission`  the App permission the row spends (a key of `PERMISSIONS`);
  *   `grant`       (optional) the level the row spends it at, when lower than
- *                 `PERMISSIONS` holds — `advisory_read`'s `read` alone, on a
+ *                 `PERMISSIONS` holds — `advisory_read`'s and `advisory_list`'s `read`, on a
  *                 stroke-scoped permission (header above);
  *   `senderGate`  (optional) the sender gate a read is held to —
- *                 `advisory_read`'s, a key of `ADVISORY_READ_SENDER_GATES`
+ *                 `advisory_read`'s and `advisory_list`'s, a key of `ADVISORY_READ_SENDER_GATES`
  *                 (header above); any other value fails closed;
  *   `required`    keys that must be present;
  *   `optional`    keys that may be; anything else on the action is refused;
@@ -1986,7 +2212,7 @@ export function transferRemedy(source, target) {
  *   `alone`       (optional) true for a row whose stroke carries exactly that
  *                 one action — `workflow_dispatch`'s and `run_rerun_failed`'s,
  *                 the two rows spending `actions: write`, and
- *                 the six advisory rows', the ones spending
+ *                 the seven advisory rows', the ones spending
  *                 `repository-advisories` (header above);
  *   `closedInputs` (optional) the per-workflow closed inputs —
  *                 `WORKFLOW_DISPATCH_INPUTS`, `workflow_dispatch`'s alone: the
@@ -2343,6 +2569,20 @@ export const OPS = Object.freeze({
     alone: true,
     requests: (a, repo) => [{ verb: 'GET', path: `/repos/${repo}/security-advisories/${a.ghsa_id}`, advisoryRead: { ghsaId: a.ghsa_id, publicKey: a.public_key } }],
   }),
+  // The one row that LISTS advisories — see the header. The collection's GET for each of ADVISORY_LIST_STATES, walked
+  // by the executor page by page on the platform's own cursor, nothing written; each advisory projected to
+  // ADVISORY_LIST_FIELDS, the listing padded to the channel's full size and sealed to the seat's one-time key, and
+  // nothing of it printed, not even a count. The caller names no state and no query: `public_key` alone. Its grant
+  // and its gate are advisory_read's: `read`, alone, `target-write` — any other gate refused before the first GET.
+  advisory_list: Object.freeze({
+    permission: 'repository-advisories',
+    grant: 'read',
+    senderGate: 'target-write',
+    required: Object.freeze(['public_key']),
+    optional: Object.freeze([]),
+    alone: true,
+    requests: (a, repo) => [{ verb: 'GET', path: `/repos/${repo}/security-advisories`, advisoryList: { publicKey: a.public_key } }],
+  }),
 });
 
 export const OP_NAMES = Object.freeze(Object.keys(OPS));
@@ -2392,11 +2632,12 @@ export const REFUSED_PATH_FAMILIES = Object.freeze([
   /\/actions\/(secrets|variables|permissions|runners|oidc)/,
   /\/releases/,
   // Every `security-advisories` path but exactly ONE advisory's (`ADVISORY_PATH_SHAPE`), the private-report endpoint
-  // (`ADVISORY_REPORTS_PATH_SHAPE`) and the bare collection (`ADVISORY_CREATE_PATH_SHAPE`, the create of a draft):
-  // anything after the collection but those two, an advisory's CVE request and its temporary fork stay out of reach
-  // of any row. The collection's list is the same path under `GET`, which no row sends (the self-test pins the verbs);
-  // the one GET a row sends is `advisory_read`'s, of one advisory's path.
-  /\/security-advisories(?!\/(?:GHSA(-[0-9a-z]{4}){3}|reports)$|$)/,
+  // (`ADVISORY_REPORTS_PATH_SHAPE`), the bare collection (`ADVISORY_CREATE_PATH_SHAPE`, the create of a draft) and the
+  // listing's own page of it (`ADVISORY_LIST_PAGE_PATH_SHAPE`: one listed state, the page size, at most one cursor):
+  // anything after the collection but those two, any other query on it, an advisory's CVE request and its temporary
+  // fork stay out of reach of any row. The GETs a row sends are `advisory_read`'s, of one advisory's path, and
+  // `advisory_list`'s, of the collection's listing pages (the self-test pins the verbs).
+  new RegExp(`/security-advisories(?!/(?:GHSA(-[0-9a-z]{4}){3}|reports)$|$|${ADVISORY_LIST_QUERY_SOURCE}$)`),
   /^\/orgs\//,
   /^\/admin\//,
   /\/collaborators\//,

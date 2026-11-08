@@ -299,6 +299,38 @@
  * parts back to the GET's fields byte for byte; the ablation is recorded in
  * the pull request that landed this.
  *
+ * ## The listing — `advisory_list`, projected, padded and sealed before anything leaves (`advisoryListAction`)
+ *
+ * The row's gate first: a `senderGate` other than `target-write` (the gate
+ * this stroke already passed) is a FAILED action with ZERO requests. Then,
+ * for each state of `ADVISORY_LIST_STATES` in order, one walk of the
+ * collection's GETs (`advisoryListPagePath`), nothing written: a page fails
+ * its fences (`advisoryListPageFailure`: 200, a list, every item an advisory
+ * in the state asked for) ⇒ FAILED, naming the status alone, with
+ * `ADVISORY_LIST_ACCESS_REMEDY` on a refusal; a page that never reached the
+ * platform ⇒ FAILED with `ADVISORY_LIST_UNREACHED` and the row status
+ * `not reached`; a short page, or a full one whose `Link` names no next page,
+ * ends the walk; a full page with a next link is followed only on the cursor
+ * `advisoryListNextCursor` admits, ⛔ never the link itself, and a link it
+ * refuses ⇒ FAILED; an advisory met twice ⇒ FAILED; a walk still pending
+ * after `ADVISORY_LIST_PAGE_CAP` pages ⇒ FAILED, never a truncated answer.
+ * Otherwise it projects each advisory to `ADVISORY_LIST_FIELDS`
+ * (`advisoryListPlaintext`), pads the JSON to `ADVISORY_LIST_PADDED_BYTES`
+ * (`advisoryListPadded`: over it ⇒ FAILED, nothing emitted), seals it to the
+ * action's `public_key` under `advisorySealAad` and emits exactly
+ * `ADVISORY_READ_MAX_PARTS` notice parts — a seal that throws, is not
+ * base64url or is not exactly the channel's size ⇒ FAILED with
+ * `ADVISORY_READ_SEAL_FAILED` and no part. Every failure seals and emits
+ * nothing. `rest` hands the answer's `Link` header back for this walk.
+ *
+ * ⛔ What this path prints — the row, the log line, the step summary — is
+ * `advisoryListCall`, the last page's HTTP status and one fixed sentence:
+ * `ADVISORY_LIST_LANDED` or the failure's. Never an id, a count, a state, a
+ * severity, a cursor, a page number, or a byte or part count. The self-test
+ * serves items carrying a summary, a description, vulnerabilities and a
+ * marker in each, and finds the marker in no line, row, summary or
+ * annotation, nor in the opened plaintext.
+ *
  * ## The assignees and labels legs — `pr_create` with `assignees` / `labels`, the requests that read an earlier answer
  *
  * The op table spells each leg's path with a placeholder and `fromAnswer:
@@ -437,6 +469,31 @@ import {
   ADVISORY_READ_UNREACHED,
   ADVISORY_READ_UNREACHED_STATUS,
   advisoryReadAad,
+  advisorySealAad,
+  ADVISORY_LIST_ACCESS_REMEDY,
+  ADVISORY_LIST_CAP_HIT,
+  ADVISORY_LIST_CURSOR_REFUSED,
+  ADVISORY_LIST_FIELDS,
+  ADVISORY_LIST_LANDED,
+  ADVISORY_LIST_OVER_CAP,
+  ADVISORY_LIST_PAGE_CAP,
+  ADVISORY_LIST_PAGE_SIZE,
+  ADVISORY_LIST_PADDED_BYTES,
+  ADVISORY_LIST_REPEATED,
+  ADVISORY_LIST_SENDER_REFUSED,
+  ADVISORY_LIST_STATES,
+  ADVISORY_LIST_UNREACHED,
+  ADVISORY_READ_MAX_PARTS,
+  ADVISORY_READ_MAX_SEALED_CHARS,
+  ADVISORY_READ_SENDER_GATES,
+  advisoryListCall,
+  advisoryListDisplay,
+  advisoryListNextCursor,
+  advisoryListPadded,
+  advisoryListPageFailure,
+  advisoryListPagePath,
+  advisoryListPlaintext,
+  advisoryListProjection,
   advisoryReadCall,
   advisoryReadFenceFailures,
   advisoryReadFenceText,
@@ -1127,7 +1184,7 @@ export async function advisoryReadAction(req, { payload, index, api, t, seal = s
   const plaintext = advisoryReadPlaintext(r.json);
   let sealed;
   try {
-    sealed = seal({ plaintext, publicKey, aad: advisoryReadAad({ requestId: payload.request_id, action: index, ghsaId }) });
+    sealed = seal({ plaintext, publicKey, aad: advisorySealAad({ requestId: payload.request_id, action: index, op: 'advisory_read', ghsaId }) });
   } catch {
     return { ok: false, status: r.status, why: ADVISORY_READ_SEAL_FAILED, notes: [] };
   }
@@ -1138,6 +1195,64 @@ export async function advisoryReadAction(req, { payload, index, api, t, seal = s
   if (!parts) return { ok: false, status: r.status, why: advisoryReadOverCapText({ plaintextBytes, sealedChars }), notes: [] };
   const notes = parts.map((chunk, k) => ({ action: index, op: 'advisory_read', part: k + 1, of: parts.length, sealed: chunk }));
   return { ok: true, status: r.status, result: advisoryReadLandedText({ plaintextBytes, sealedChars, parts: parts.length }), notes };
+}
+
+/**
+ * The listing (header: "The listing"): the gate, the walks, the projection, the pad, the seal and the parts. Returns
+ * `{ ok, status, result, why, notes }` in `advisoryReadAction`'s shape. ⛔ No string it returns carries an id, a count,
+ * a state, a severity, a cursor, a page number or a byte or part count: every sentence is a fixed one or names a status
+ * alone. `seal` and `senderGate` are the self-test's doors; the CLI passes neither. Never throws.
+ */
+export async function advisoryListAction(req, { payload, index, api, t, seal = sealAdvisoryRead, senderGate = OPS.advisory_list.senderGate }) {
+  const { publicKey } = req.advisoryList;
+  // The gate is judged BEFORE the first GET: `target-write` was the stroke's, every other value is closed.
+  if (!Object.hasOwn(ADVISORY_READ_SENDER_GATES, senderGate) || senderGate !== 'target-write') return { ok: false, status: 'not sent', why: ADVISORY_LIST_SENDER_REFUSED, notes: [] };
+  const items = [];
+  const seen = new Set();
+  let status = null;
+  for (const state of ADVISORY_LIST_STATES) {
+    let after = null;
+    let ended = false;
+    for (let page = 1; page <= ADVISORY_LIST_PAGE_CAP && !ended; page++) {
+      const r = await rest(api, advisoryListPagePath(payload.repo, state, after), { method: 'GET' }, t);
+      // Status 0 is `rest`'s word for a call that threw: ⛔ never its message, which carries the path and so a cursor.
+      if (r.status === 0) return { ok: false, status: ADVISORY_READ_UNREACHED_STATUS, why: ADVISORY_LIST_UNREACHED, notes: [] };
+      status = r.status;
+      const failed = advisoryListPageFailure(r, state);
+      if (failed) {
+        const refused = !(r.status >= 200 && r.status < 300);
+        return { ok: false, status: r.status, why: `REFUSED at the relay's fence on the listing, nothing sealed or emitted — ${failed}${refused ? `${advisoryPlatformText(r.detail)}; ${ADVISORY_LIST_ACCESS_REMEDY}` : ''}`, notes: [] };
+      }
+      for (const item of r.json) {
+        if (seen.has(item.ghsa_id)) return { ok: false, status: r.status, why: ADVISORY_LIST_REPEATED, notes: [] };
+        seen.add(item.ghsa_id);
+        items.push(item);
+      }
+      if (r.json.length < ADVISORY_LIST_PAGE_SIZE) {
+        ended = true;
+        break;
+      }
+      const next = advisoryListNextCursor(r.link ?? null, { api, repo: payload.repo, state });
+      if (next.fail) return { ok: false, status: r.status, why: next.fail, notes: [] };
+      if (next.after === null) ended = true;
+      else after = next.after;
+    }
+    if (!ended) return { ok: false, status, why: ADVISORY_LIST_CAP_HIT, notes: [] };
+  }
+  const padded = advisoryListPadded(advisoryListPlaintext(items));
+  if (padded === null) return { ok: false, status, why: ADVISORY_LIST_OVER_CAP, notes: [] };
+  let sealed;
+  try {
+    sealed = seal({ plaintext: padded, publicKey, aad: advisorySealAad({ requestId: payload.request_id, action: index, op: 'advisory_list' }) });
+  } catch {
+    return { ok: false, status, why: ADVISORY_READ_SEAL_FAILED, notes: [] };
+  }
+  // A sealed listing is exactly the channel's size, so its length says nothing; anything else is a seal that failed.
+  if (typeof sealed !== 'string' || !/^[A-Za-z0-9_-]+$/.test(sealed) || sealed.length !== ADVISORY_READ_MAX_SEALED_CHARS) return { ok: false, status, why: ADVISORY_READ_SEAL_FAILED, notes: [] };
+  const parts = advisoryReadParts(sealed);
+  if (!parts || parts.length !== ADVISORY_READ_MAX_PARTS) return { ok: false, status, why: ADVISORY_READ_SEAL_FAILED, notes: [] };
+  const notes = parts.map((chunk, k) => ({ action: index, op: 'advisory_list', part: k + 1, of: parts.length, sealed: chunk }));
+  return { ok: true, status, result: ADVISORY_LIST_LANDED, notes };
 }
 
 /** The one thing a seat needs from an answer: the id / number / url of what was written — or that a bodiless 204 accepted it. */
@@ -1291,7 +1406,8 @@ async function rest(api, path, { method = 'GET', body = null } = {}, deps = {}) 
       paceDeps,
     );
   }
-  return { status: res.status, json, detail: scrub(typeof json?.message === 'string' ? json.message : '', [token]), call: `${method} ${path}` };
+  // `link` is the answer's `Link` header, read by the listing's walk alone (header: "The listing"); ⛔ never printed.
+  return { status: res.status, json, detail: scrub(typeof json?.message === 'string' ? json.message : '', [token]), call: `${method} ${path}`, link: res.headers.get('link') };
 }
 
 /**
@@ -1527,6 +1643,23 @@ export async function executeFleetWrite({ payload: raw, sender, token, api = DEF
         }
         continue;
       }
+      // The listing (header): its gate, its walks, its projection, pad and seal — and nothing of it printed, not even a count.
+      if (req.advisoryList) {
+        const call = advisoryListCall(payload.repo);
+        const listed = await advisoryListAction(req, { payload, index: i + 1, api, t, ...(deps.advisoryList ?? {}) });
+        rows.push({ action: i + 1, op: action.op, call, status: listed.status, result: listed.ok ? scrub(listed.result, [token]) : `FAILED: ${scrub(listed.why, [token])}` });
+        if (!listed.ok) {
+          stoppedAt = { action: i + 1, op: action.op, why: scrub(listed.why, [token]) };
+          log(`  ✗ action ${i + 1} ${action.op}: ${call} -> ${stoppedAt.why}`);
+          break;
+        }
+        log(`  ✓ action ${i + 1} ${action.op}: ${call} -> HTTP ${listed.status} · ${rows[rows.length - 1].result}`);
+        for (const note of listed.notes) {
+          annotations.push(note);
+          log(annotationCommand(note));
+        }
+        continue;
+      }
       // The advisory PATCHes (header): the advisory's fences, judged HERE on its own GET before the PATCH — refused, NOT SENT.
       const adv = req.advisoryCollaborators || req.advisoryVersions || req.advisoryState ? await advisoryPreflight(req, payload, api, t) : null;
       if (adv?.fail) {
@@ -1653,11 +1786,12 @@ const SELF_TEST_BATTERIES = Object.freeze({
   "the mailbox branch delete: the pull's own answer, the open pulls on its head and the ref read immediately before ONE DELETE of the ref under the App token — an open, unlabelled, other-headed or forked pull, an open pull on that head, a ref moved off the pull's head, or a read that does not answer is zero writes with every failing fence named; the DELETE lands only when the ref reads back absent, a ref already gone an idempotent landing and one still there FAILED; and mailbox-open's close stroke — comment, close, delete — leaves no branch, while a head outside claude/mailbox-* sends no DELETE": 7,
   "an issue_create's title and body on a private repository: they reach no log line, row, step summary or annotation when the stroke lands, when the platform refuses it with a message quoting either — the row keeps the status, withholds that message and prints one that quotes nothing —, when the transport fails, or when the payload is refused for an over-cap or ill-typed body — the refusal names the key and the byte count alone": 8,
   "advisory_read: ONE GET after the sender gate and nothing written; the read, advisory and sender fences judged on that answer — target-write by the maintainer's ruling, a sender off the advisory's collaborators sealed for, one without write refused before the GET, any other gate closed — then the answer sealed to the seat's key and emitted as notice parts the reader parses back, opening byte for byte for that key and read alone; a failed or unsealed seal and an over-cap answer FAILED with nothing emitted; ⛔ the marker in the summary, description and vulnerabilities, and the advisory's id, reach no log line, row, step summary or annotation, and the sealed answer alone carries no marker": 18,
+  "advisory_list: the row's gate before any request, then one walk per listed state on the platform's own cursor, nothing written; a short page or a full one with no next link ends a walk; a refused, unreached or off-shape page, a next link off this API's collection, a repeated advisory, the page cap and the channel's cap each FAILED with nothing emitted; each advisory projected to five fields, the JSON padded and sealed to the seat's key as exactly ten notice parts the reader parses back and opens; ⛔ the marker, every listed id, the cursor and the count reach no log line, row, step summary or annotation, and the row reads the same whatever the count": 19,
 });
 // Raised 17 → 18 with the governed-review follow-up battery, 18 → 19 with the run_rerun_failed battery, 19 → 20 with the
 // hierarchy link battery, 20 → 21 with the advisory rows' battery, 21 → 22 with advisory_read's, 22 → 23 with the mailbox
-// branch delete's, 23 → 24 with the private-repository issue body's: one battery, one row.
-const SELF_TEST_BATTERY_FLOOR = 24;
+// branch delete's, 23 → 24 with the private-repository issue body's, 24 → 25 with advisory_list's: one battery, one row.
+const SELF_TEST_BATTERY_FLOOR = 25;
 const UNATTRIBUTED_BATTERY = '(unattributed)';
 
 const batteryCases = new Map();
@@ -2876,7 +3010,7 @@ export async function selfTest() {
       })();
       t('⭐ the seat\'s key opens the parts to the GET answer BYTE FOR BYTE — the summary, the description and the vulnerabilities as the platform answered them, CJK, an emoji, a newline, a quote and a backslash among them', [opened === picked(served.json), Buffer.compare(Buffer.from(opened, 'utf8'), Buffer.from(picked(served.json), 'utf8')), ['summary', 'description', 'vulnerabilities'].map((f) => JSON.stringify(openedJson?.[f]) === JSON.stringify(served.json[f])), Object.keys(openedJson ?? {})], [true, 0, [true, true, true], [...ADVISORY_READ_FIELDS]]);
       const parsedBack = notices(landed).map((l) => parseRelayAdvisoryReadAnnotation(l.slice(l.indexOf('::', 2) + 2)));
-      t("the parts are notice commands titled `fleet-write advisory_read`, the reader's own parser reads back exactly what was emitted, and each message is inside the runner's 4,096-character cut", [notices(landed).map((l) => l.slice(0, l.indexOf('::', 2) + 2)), parsedBack, notices(landed).every((l) => l.length - l.indexOf('::', 2) - 2 <= 4096), ADVISORY_READ_OPS], [['::notice title=fleet-write advisory_read::'], landed.annotations, true, ['advisory_read']]);
+      t("the parts are notice commands titled `fleet-write advisory_read`, the reader's own parser reads back exactly what was emitted, and each message is inside the runner's 4,096-character cut", [notices(landed).map((l) => l.slice(0, l.indexOf('::', 2) + 2)), parsedBack, notices(landed).every((l) => l.length - l.indexOf('::', 2) - 2 <= 4096), ADVISORY_READ_OPS], [['::notice title=fleet-write advisory_read::'], landed.annotations, true, ['advisory_read', 'advisory_list']]);
       const sealedText = sealedOf(landed);
       t('⛔ the sealed answer ALONE carries none of the marker — not in its characters, not in its decoded bytes — though the text it opens to does (the positive control)', [sealedText.includes('ADVISORY'), Buffer.from(sealedText, 'base64url').includes(Buffer.from('ADVISORY MARKER')), opened.includes('ADVISORY MARKER')], [false, false, true]);
       t("⛔ it opens for the seat's key and THIS read alone: another key pair, another action index and another advisory id are each refused", [opens(landed, { key: pair().privateKey }), opens(landed, { action: 2 }), opens(landed, { ghsaId: OTHER })].map((x) => x.startsWith('refused: ')), [true, true, true]);
@@ -2951,6 +3085,152 @@ export async function selfTest() {
       t("⛔ …and the real processes: the validator accepting a read — its output minting repository-advisories READ, actions nothing — and refusing one, and the executor stopping at its prerequisite and its refusal, print neither the marker nor the id NOWHERE — stdout, stderr, GITHUB_OUTPUT or the step summary", [cliRuns.map((r) => [r.status, r.text.includes('ADVISORY MARKER'), r.text.includes(GHSA)]), cliRuns[0].output.includes('permission_repository_advisories=read\n'), cliRuns[0].output.includes('permission_actions=\n')], [[[EXIT_OK, false, false], [EXIT_REFUSED, false, false], [EXIT_PREREQUISITE, false, false], [EXIT_REFUSED, false, false]], true, true], cliRuns.map((r) => r.text.slice(0, 200)).join(' | '));
     }
 
+    // ── advisory_list ───────────────────────────────────────────────────────
+    battery("advisory_list: the row's gate before any request, then one walk per listed state on the platform's own cursor, nothing written; a short page or a full one with no next link ends a walk; a refused, unreached or off-shape page, a next link off this API's collection, a repeated advisory, the page cap and the channel's cap each FAILED with nothing emitted; each advisory projected to five fields, the JSON padded and sealed to the seat's key as exactly ten notice parts the reader parses back and opens; ⛔ the marker, every listed id, the cursor and the count reach no log line, row, step summary or annotation, and the row reads the same whatever the count");
+    {
+      const { generateKeyPairSync } = await import('node:crypto');
+      // Spaces and punctuation: prose, never an id's, a state's or a cursor's shape.
+      const MARKER = 'ADVISORY MARKER: how the flaw is reached, never to be logged';
+      // A made-up cursor, in the base64 alphabet a platform cursor may use: it must reach no output.
+      const CURSOR = 'Y3Vyc29yOnYyOpK0+Zm9v/YmFy==';
+      const API = 'https://api.test';
+      const CALL = advisoryListCall(REPO);
+      const pair = () => {
+        const k = generateKeyPairSync('x25519');
+        return { privateKey: k.privateKey, spki: k.publicKey.export({ format: 'der', type: 'spki' }).toString('base64') };
+      };
+      const SEAT = pair();
+      const list = (extra = {}) => ({ op: 'advisory_list', public_key: SEAT.spki, ...extra });
+      const pageKey = (state, after = null) => `GET ${advisoryListPagePath(REPO, state, after)}`;
+      // Made-up ids: `GHSA-<k in base 36>-2345-wxyz`, naming no real advisory.
+      const idOf = (k) => `GHSA-${k.toString(36).padStart(4, '0')}-2345-wxyz`;
+      // A listed advisory carrying the marker in every field but the five that cross.
+      const item = (k, state, extra = {}) => ({
+        ghsa_id: idOf(k), state, severity: 'high', created_at: '2026-11-01T00:00:00Z', updated_at: '2026-11-02T00:00:00Z',
+        cve_id: MARKER, summary: `${MARKER} — the summary`, description: `${MARKER} — the description`, html_url: `https://github.test/${REPO}/security/advisories/${idOf(k)}#${MARKER}`,
+        vulnerabilities: [{ package: { ecosystem: 'npm', name: MARKER }, vulnerable_version_range: MARKER }], credits: [{ login: 'os-dev-z', type: MARKER }],
+        collaborating_users: [{ login: 'os-dev-z', name: MARKER }], private_fork: { full_name: MARKER },
+        ...extra,
+      });
+      const items = (from, n, state) => Array.from({ length: n }, (_, j) => item(from + j, state));
+      const pageOf = (json, link = null) => ({ status: 200, json, ...(link ? { headers: { link } } : {}) });
+      const nextLink = (state, after) => `<${API}/repos/${REPO}/security-advisories?state=${state}&per_page=100&after=${encodeURIComponent(after)}>; rel="next"`;
+      const empty = Object.fromEntries(ADVISORY_LIST_STATES.map((st) => [pageKey(st), pageOf([])]));
+      const sealedOf = (r) => (r.annotations ?? []).filter((n) => n.op === 'advisory_list').sort((a, b) => a.part - b.part).map((n) => n.sealed).join('');
+      const opens = (r, { key = SEAT.privateKey, aad = advisorySealAad({ requestId: 'fw-test-1', action: 1, op: 'advisory_list' }) } = {}) => {
+        try {
+          return openAdvisoryRead({ sealed: sealedOf(r), privateKey: key, aad });
+        } catch (e) {
+          return `refused: ${e.message}`;
+        }
+      };
+      const notices = (r) => r.logs.filter((l) => l.startsWith('::notice '));
+      // This battery's platform keys an answer by its path AND query: the listing's pages differ by query alone.
+      const queried = (answers, seen) => {
+        const served = new Map();
+        return async (url, init) => {
+          const u = new URL(url);
+          const call = `${init?.method ?? 'GET'} ${u.pathname}${u.search}`;
+          seen.push({ call, body: init?.body ? JSON.parse(init.body) : null, auth: init?.headers?.authorization ?? '' });
+          const declared = answers[call];
+          const nth = served.get(call) ?? 0;
+          served.set(call, nth + 1);
+          const a = (Array.isArray(declared) ? declared[Math.min(nth, declared.length - 1)] : declared) ?? { status: 404, json: { message: 'Not Found' } };
+          if (a.throws) throw new Error(a.throws);
+          return { status: a.status, headers: new Headers({ 'x-ratelimit-remaining': '4999', ...(a.headers ?? {}) }), json: async () => a.json };
+        };
+      };
+      const swept = [];
+      const listRun = async (actions, answers, { sender = 'os-support-ai', ...extra } = {}) => {
+        const seen = [];
+        const logs = [];
+        const paceLines = [];
+        const file = join(dir, `pace-list-${paceCase++}.jsonl`);
+        const r = await executeFleetWrite({ payload: base(actions), sender, token: TOKEN, api: API }, { fetch: queried(answers, seen), pace: { ...paceFor(file), log: (l) => paceLines.push(l) }, log: (l) => logs.push(l), ...extra });
+        const out = { ...r, seen, logs };
+        swept.push({ r: out, paceLines, answers });
+        return out;
+      };
+      // ⭐ Landed: three walks, one short page each.
+      const served = { ...allowed, [pageKey('triage')]: pageOf(items(1, 2, 'triage')), [pageKey('draft')]: pageOf(items(3, 3, 'draft')), [pageKey('closed')]: pageOf([]) };
+      const landed = await listRun([list()], served);
+      t("⭐ a listing is the sender gate, then ONE GET per listed state under the App token — triage, draft, closed, each its own page path — ZERO writes, exit 0; its row prints the call with the states in braces, status 200 and the one fixed landed sentence", [landed.exit, landed.seen.map((s) => s.call), landed.seen.every((s) => s.auth === `Bearer ${TOKEN}`), writes(landed.seen).length, landed.rows.map((x) => [x.op, x.call, x.status, x.result])], [EXIT_OK, [PERM, pageKey('triage'), pageKey('draft'), pageKey('closed')], true, 0, [['advisory_list', CALL, 200, ADVISORY_LIST_LANDED]]]);
+      const opened = opens(landed);
+      const openedJson = (() => {
+        try {
+          return JSON.parse(opened);
+        } catch {
+          return null;
+        }
+      })();
+      t("⭐ the seat's key opens the parts to the padded listing, exactly the channel's size: the count beside every advisory in walk order, each exactly the five fields as the platform answered them — and the marker NOWHERE in it; the display alone trims the pad", [Buffer.byteLength(opened, 'utf8'), openedJson?.count, openedJson?.advisories?.map((a) => Object.keys(a).join(',')), openedJson?.advisories?.map((a) => a.ghsa_id), opened.includes('ADVISORY MARKER'), JSON.stringify(openedJson) === advisoryListDisplay(opened)], [ADVISORY_LIST_PADDED_BYTES, 5, Array.from({ length: 5 }, () => ADVISORY_LIST_FIELDS.join(',')), [1, 2, 3, 4, 5].map(idOf), false, true]);
+      const parsedBack = notices(landed).map((l) => parseRelayAdvisoryReadAnnotation(l.slice(l.indexOf('::', 2) + 2)));
+      t("the parts are exactly ten notice commands titled `fleet-write advisory_list`, each 4,000 characters, numbered 1..10 of 10, read back exactly by the reader's own parser", [notices(landed).length, [...new Set(notices(landed).map((l) => l.slice(0, l.indexOf('::', 2) + 2)))], landed.annotations.map((n) => n.sealed.length), landed.annotations.map((n) => `${n.part}/${n.of}`), parsedBack], [ADVISORY_READ_MAX_PARTS, ['::notice title=fleet-write advisory_list::'], Array.from({ length: 10 }, () => 4000), Array.from({ length: 10 }, (_, k) => `${k + 1}/10`), landed.annotations]);
+      t("⛔ it opens for the seat's key and THIS listing alone: another key pair, another action index, and a read's associated data are each refused", [opens(landed, { key: pair().privateKey }), opens(landed, { aad: advisorySealAad({ requestId: 'fw-test-1', action: 2, op: 'advisory_list' }) }), opens(landed, { aad: advisoryReadAad({ requestId: 'fw-test-1', action: 1, ghsaId: idOf(1) }) })].map((x) => x.startsWith('refused: ')), [true, true, true]);
+      // The walk on the platform's cursor.
+      const paged = await listRun([list()], { ...allowed, ...empty, [pageKey('draft')]: pageOf(items(10, 100, 'draft'), nextLink('draft', CURSOR)), [pageKey('draft', CURSOR)]: pageOf(items(110, 5, 'draft')) });
+      t("⭐ a full page whose Link names this collection's next page is followed on its cursor alone, re-spelled on the relay's own path — and the walk ends on the short page: 105 listed", [paged.exit, paged.seen.map((s) => s.call), JSON.parse(opens(paged)).count], [EXIT_OK, [PERM, pageKey('triage'), pageKey('draft'), pageKey('draft', CURSOR), pageKey('closed')], 105]);
+      const exact = await listRun([list()], { ...allowed, ...empty, [pageKey('closed')]: pageOf(items(10, 100, 'closed')) });
+      t('a full page whose Link names no next page ends its walk too: 100 listed, no second GET', [exact.exit, exact.seen.map((s) => s.call), JSON.parse(opens(exact)).count], [EXIT_OK, [PERM, pageKey('triage'), pageKey('draft'), pageKey('closed')], 100]);
+      // ⭐ One sealed size whatever the count — the row and the log read the same.
+      const none = await listRun([list()], { ...allowed, ...empty });
+      const many = await listRun([list()], { ...allowed, ...empty, [pageKey('triage')]: pageOf(items(10, 100, 'triage'), nextLink('triage', CURSOR)), [pageKey('triage', CURSOR)]: pageOf(items(110, 50, 'triage')) });
+      const unnoticed = (r) => [...r.logs.filter((l) => !l.startsWith('::notice ')), JSON.stringify(r.rows), r.summary].join('\n');
+      t("⭐ zero, five and 150 advisories seal to ONE length in ten parts each — and every line, row and summary but the ciphertext is byte-identical across the three: nothing on the run says how many", [[none, landed, many].map((r) => [r.exit, sealedOf(r).length, r.annotations.length, JSON.parse(opens(r)).count]), unnoticed(none) === unnoticed(landed) && unnoticed(none) === unnoticed(many)], [[[EXIT_OK, 40000, 10, 0], [EXIT_OK, 40000, 10, 5], [EXIT_OK, 40000, 10, 150]], true]);
+      // ⛔ The page cap, the cursor's fences, a repeated advisory, the channel's cap.
+      const capped = await listRun([list()], { ...allowed, ...empty, [pageKey('draft')]: pageOf(items(10, 100, 'draft'), nextLink('draft', 'AAAA')), [pageKey('draft', 'AAAA')]: pageOf(items(110, 100, 'draft'), nextLink('draft', 'BBBB')), [pageKey('draft', 'BBBB')]: pageOf(items(210, 100, 'draft'), nextLink('draft', 'CCCC')), [pageKey('draft', 'CCCC')]: pageOf(items(310, 1, 'draft')) });
+      t('⛔ a walk still pending after its 3-page cap is FAILED — exactly 3 pages of that state read, the next state never asked, nothing sealed, no part — never a truncated listing', [capped.exit, capped.seen.filter((s) => s.call.includes('state=draft')).length, capped.seen.some((s) => s.call.includes('state=closed')), capped.annotations.length, notices(capped).length, capped.rows[0]?.result], [EXIT_ACTION_FAILED, ADVISORY_LIST_PAGE_CAP, false, 0, 0, `FAILED: ${ADVISORY_LIST_CAP_HIT}`]);
+      const offLinks = [`<https://evil.test/repos/${REPO}/security-advisories?state=draft&per_page=100&after=${CURSOR}>; rel="next"`, `<${API}/repositories/1/security-advisories?state=draft&per_page=100&after=${CURSOR}>; rel="next"`, nextLink('closed', CURSOR), nextLink('draft', `${CURSOR} ${MARKER}`)];
+      const off = [];
+      for (const link of offLinks) {
+        const r = await listRun([list()], { ...allowed, ...empty, [pageKey('draft')]: pageOf(items(10, 100, 'draft'), link) });
+        off.push([r.exit, r.seen.filter((s) => s.call.includes('state=draft')).length, r.annotations.length, r.rows[0]?.result]);
+      }
+      t("⛔ a next link off this API's collection — another host, the numeric repository path, another state, a cursor outside its shape — is FAILED with the one sentence: no second page asked, nothing sealed, no part", off, offLinks.map(() => [EXIT_ACTION_FAILED, 1, 0, `FAILED: ${ADVISORY_LIST_CURSOR_REFUSED}`]));
+      const twice = await listRun([list()], { ...allowed, ...empty, [pageKey('draft')]: pageOf(items(10, 100, 'draft'), nextLink('draft', CURSOR)), [pageKey('draft', CURSOR)]: pageOf(items(109, 5, 'draft')) });
+      t('⛔ an advisory listed twice across the pages is FAILED — the walk is not one listing — nothing sealed, no part', [twice.exit, twice.annotations.length, twice.rows[0]?.result], [EXIT_ACTION_FAILED, 0, `FAILED: ${ADVISORY_LIST_REPEATED}`]);
+      const huge = await listRun([list()], { ...allowed, ...empty, [pageKey('triage')]: pageOf(items(10, 100, 'triage'), nextLink('triage', 'AAAA')), [pageKey('triage', 'AAAA')]: pageOf(items(110, 100, 'triage'), nextLink('triage', 'BBBB')), [pageKey('triage', 'BBBB')]: pageOf(items(210, 50, 'triage')) });
+      t("⛔ a listing over the channel's cap (250 advisories) is FAILED with the cap sentence alone — every page read, nothing sealed, no part, ⛔ never a cut list", [huge.exit, huge.seen.length, huge.annotations.length, notices(huge).length, huge.rows[0]?.result], [EXIT_ACTION_FAILED, 6, 0, 0, `FAILED: ${ADVISORY_LIST_OVER_CAP}`]);
+      // ⛔ A page's fences, and a GET that never reached the platform.
+      const forbidden = await listRun([list()], { ...allowed, ...empty, [pageKey('triage')]: { status: 403, json: { message: 'Resource not accessible by integration', documentation_url: MARKER } } });
+      const stranger = await listRun([list()], { ...allowed, ...empty, [pageKey('draft')]: pageOf([item(1, 'draft'), item(2, 'published')]) });
+      const notList = await listRun([list()], { ...allowed, ...empty, [pageKey('closed')]: pageOf({ message: MARKER }) });
+      t('⛔ fence page: a 403 (the platform\'s known message and the read remedy, no further page), an advisory in another state, and an answer that is no list — each FAILED, naming the status alone, nothing sealed, no part', [[forbidden, stranger, notList].map((r) => [r.exit, r.annotations.length, r.rows[0]?.status]), forbidden.seen.length, forbidden.rows[0]?.result, stranger.rows[0]?.result, notList.rows[0]?.result], [[[EXIT_ACTION_FAILED, 0, 403], [EXIT_ACTION_FAILED, 0, 200], [EXIT_ACTION_FAILED, 0, 200]], 2, `FAILED: REFUSED at the relay's fence on the listing, nothing sealed or emitted — a page of the listing answered HTTP 403 (the platform: Resource not accessible by integration); ${ADVISORY_LIST_ACCESS_REMEDY}`, "FAILED: REFUSED at the relay's fence on the listing, nothing sealed or emitted — a page of the listing lists an item that is not an advisory in the state the page asked for", "FAILED: REFUSED at the relay's fence on the listing, nothing sealed or emitted — a page of the listing answered HTTP 200 with no list"]);
+      const unreached = await listRun([list()], { ...allowed, ...empty, [pageKey('draft')]: { throws: `fetch failed for ${advisoryListPagePath(REPO, 'draft', CURSOR)} holding ${MARKER}` } });
+      const unreachedText = [...unreached.logs, unreached.summary ?? '', JSON.stringify(unreached.rows)].join('\n');
+      t("⛔ a page that never reached the platform is FAILED saying so — status `not reached`, no grant remedy, nothing sealed, and the exception's message (its path, its cursor, the marker) printed nowhere", [unreached.exit, unreached.rows.map((x) => [x.status, x.result]), unreached.annotations.length, unreachedText.includes('fetch failed'), unreachedText.includes(ADVISORY_LIST_ACCESS_REMEDY)], [EXIT_ACTION_FAILED, [[ADVISORY_READ_UNREACHED_STATUS, `FAILED: ${ADVISORY_LIST_UNREACHED}`]], 0, false, false]);
+      // ⛔ The row's gate: judged before the first GET.
+      const gates = [];
+      for (const senderGate of ['anyone', 'collaborator', 'toString', '']) {
+        const r = await listRun([list()], { ...allowed, ...empty }, { advisoryList: { senderGate } });
+        gates.push([r.exit, r.seen.map((s) => s.call), r.annotations.length, r.rows[0]?.result]);
+      }
+      t('⛔ any gate but target-write is refused BEFORE the first GET — a made-up one, the retired collaborator, a prototype key, empty: the permission read alone, nothing sealed, no part', gates, gates.map(() => [EXIT_ACTION_FAILED, [PERM], 0, `FAILED: ${ADVISORY_LIST_SENDER_REFUSED}`]));
+      const PERM_B = `GET /repos/${REPO}/collaborators/os-dev-b/permission`;
+      const triageB = await listRun([list()], { [PERM_B]: { status: 200, json: { permission: 'read', role_name: 'triage', user: { login: 'os-dev-b' } } }, ...empty }, { sender: 'os-dev-b' });
+      t("⛔ …and the stroke's own gate first: a sender with triage on the target is refused before any listing GET — exit 4, no row, no part", [triageB.exit, triageB.seen.map((s) => s.call), triageB.rows.length, (triageB.annotations ?? []).length], [EXIT_SENDER_REFUSED, [PERM_B], 0, 0]);
+      // ⛔ A failed seal.
+      const seals = [];
+      for (const seal of [() => { throw new Error(`seal blew up holding ${MARKER}`); }, ({ plaintext }) => plaintext, () => 'A'.repeat(4000), () => 'A'.repeat(40_001)]) {
+        const r = await listRun([list()], served, { advisoryList: { seal } });
+        seals.push([r.exit, r.annotations.length, notices(r).length, r.rows[0]?.result]);
+      }
+      t("⛔ a seal that throws, hands back the plaintext, or returns ciphertext of any length but the channel's is FAILED with the one fixed sentence — no part, no notice, the exception's message printed nowhere", seals, seals.map(() => [EXIT_ACTION_FAILED, 0, 0, `FAILED: ${ADVISORY_READ_SEAL_FAILED}`]));
+      // ⛔ Refused before any request.
+      const gated = [];
+      for (const actions of [[list({ state: 'published' })], [list({ ghsa_id: idOf(1) })], [list({ after: CURSOR })], [list({ public_key: MARKER })], [list(), { op: 'comment', issue: 1, body: 'x' }], [list(), list({ public_key: pair().spki })], [{ op: 'advisory_list' }]]) {
+        const r = await listRun(actions, served);
+        gated.push([r.exit, r.seen.length]);
+      }
+      t('⛔ refused before ANY request, the sender gate included: a state, an advisory id, a cursor, a key that is prose, a listing beside a comment, two listings, and a listing with no key — exit 2', gated, gated.map(() => [EXIT_REFUSED, 0]));
+      // ⛔ The sweep: every run above, every channel this file emits on.
+      const emitted = swept.map(({ r, paceLines }) => [...(r.logs ?? []), ...(r.lines ?? []), r.summary ?? '', JSON.stringify(r.rows ?? []), ...(r.annotations ?? []).map((n) => relayAdvisoryReadAnnotationMessage(n)), ...paceLines].join('\n'));
+      const ids = Array.from({ length: 400 }, (_, k) => idOf(k));
+      const leaks = emitted.map((text, i) => (text.includes('ADVISORY MARKER') || ids.some((id) => text.includes(id)) || text.includes(CURSOR) || text.includes(encodeURIComponent(CURSOR)) ? i : null)).filter((i) => i !== null);
+      t("⛔ THE MARKER TEST: across every run of this battery — landed, paged, exact, empty and large, capped, off-link, repeated, over-cap, fenced, unreached, gated, unsealed, refused — the marker, every listed advisory's id and the cursor reach NO log line, row, step summary, annotation or pace-log line", [swept.length, leaks], [32, []], leaks.map((i) => emitted[i].split('\n').find((l) => l.includes('ADVISORY MARKER') || ids.some((id) => l.includes(id)) || l.includes(CURSOR))).join(' | '));
+      t('…positive control: the answers served carried the marker, the ids and the cursor, the cursor reached the platform on the second page — where it belongs — and the generic row printer, given a served item, WOULD print the marker and its id', [JSON.stringify(served).includes('ADVISORY MARKER') && JSON.stringify(served).includes(idOf(1)), paged.seen.some((s) => s.call.includes(encodeURIComponent(CURSOR))), resultOf({}, item(1, 'draft')).includes('ADVISORY MARKER') && resultOf({}, item(1, 'draft')).includes(idOf(1))], [true, true, true]);
+    }
+
     // ── the CLI ─────────────────────────────────────────────────────────────
     battery('the CLI: the event file, environment inputs, the payload refusal, the exit ladder');
     {
@@ -3023,7 +3303,9 @@ export async function selfTest() {
       "the payload read from the event file, five advisory rows — a report landed on the id it was given, a draft on its id reading state draft, collaborators, versions and a state fenced on the advisory's own read and landed on the PATCH answer, a publish only through the versions fence, read back with its versions and annotated with its id — " +
       'whose marker in a summary, a description and a vulnerability reached no log line, row, summary or annotation, ' +
       "an advisory read fenced on its GET — its sender held to write on the target, by the maintainer's ruling — and sealed to the seat's one-time key, its notice parts opening byte for byte " +
-      'for that key and read alone, no part on a failed seal, the marker and the id on no public surface and the marker not in the sealed answer, one summary row per request, ' +
+      'for that key and read alone, no part on a failed seal, the marker and the id on no public surface and the marker not in the sealed answer, ' +
+      "an advisory listing gated before its first GET, walked per state on the platform's own cursor under a page cap, projected to five fields, padded and sealed as exactly ten parts, " +
+      'every failure emitting nothing and no id, count or cursor on any public surface, one summary row per request, ' +
       "one annotation per created or moved card carrying the number the platform answered, read back by the reader's own parser, a stroke at or " +
       'above the batch threshold announced as ONE rule ⑤ batch and paced at the batch gap (one the job cannot hold refused with zero requests), and a known ' +
       'token that came back out of NO summary, log or error.',
