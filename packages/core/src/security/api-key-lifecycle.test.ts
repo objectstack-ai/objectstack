@@ -368,4 +368,22 @@ describe('[#23944] the revoked refusal agrees with the declared restore action',
     expect(endedMessage).not.toMatch(/can restore it/);
     expect(endedMessage).toContain('POST /api/v1/keys');
   });
+
+  it('a key a platform administrator suspended names a platform administrator as its only restorer', async () => {
+    // `revoked_reason: administrator_suspended` is stamped by plugin-auth's
+    // restore guard when a platform administrator revokes a key they do not
+    // own, or written by a host that stops a key itself, and the restore door
+    // refuses the owner on that reason. The text follows the door. Code,
+    // status and every carried field stay those of any revoked key.
+    const suspended = await resolveApiKeyAdmission(
+      makeQl({ revoked: true, revoked_reason: 'administrator_suspended' }), headers(), NOW, undefined, undefined, policy(),
+    );
+
+    expect(suspended.outcome === 'lifecycle' && suspended.refusal).toMatchObject({ code: 'API_KEY_REVOKED', keyId: KEY_ID, userId: OWNER });
+    const suspendedMessage = suspended.outcome === 'lifecycle' ? suspended.refusal.message : '';
+    expect(suspendedMessage).toMatch(/was suspended by a platform administrator\. Only a platform administrator can restore it/);
+    expect(suspendedMessage).not.toMatch(/owner/i);
+    expect(suspendedMessage).toContain('Restore API Key');
+    expect(suspendedMessage).toContain('POST /api/v1/keys');
+  });
 });

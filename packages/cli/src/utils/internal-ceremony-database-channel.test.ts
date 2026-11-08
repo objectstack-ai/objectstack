@@ -19,11 +19,16 @@
  *  - the channel is owned by the parent: set when named, deleted otherwise.
  */
 
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
+  INTERNAL_CEREMONY_AUTH_TOKEN_FROM_FLAG_ENV,
+  INTERNAL_CEREMONY_DATABASE_DRIVER_ENV,
   INTERNAL_CEREMONY_DATABASE_URL_ENV,
   ceremonyDatabaseUrl,
+  readCeremonyConnectionChannel,
   readCeremonyDatabaseChannel,
+  writeCeremonyConnectionChannel,
   writeCeremonyDatabaseChannel,
 } from './internal-ceremony-database-channel.js';
 
@@ -63,3 +68,38 @@ describe('the ceremony-database channel to the serve child', () => {
     expect(readCeremonyDatabaseChannel({ [INTERNAL_CEREMONY_DATABASE_URL_ENV]: '' })).toBeUndefined();
   });
 });
+
+describe('#31547 — the driver and the token flag, carried beside the URL', () => {
+  it('⭐ --database-driver is carried by value, --database-auth-token only as "the flag gave it": its value is never written', () => {
+    const env: NodeJS.ProcessEnv = {};
+    writeCeremonyConnectionChannel(env, { databaseDriver: 'turso', databaseAuthToken: 'tok-s3cret-31547' });
+    expect(env[INTERNAL_CEREMONY_DATABASE_DRIVER_ENV]).toBe('turso');
+    expect(env[INTERNAL_CEREMONY_AUTH_TOKEN_FROM_FLAG_ENV]).toBe('1');
+    expect(JSON.stringify(env)).not.toContain('s3cret');
+    // Shaped as the guard's options, so `serve` spreads it as it is.
+    expect(readCeremonyConnectionChannel(env)).toEqual({ databaseDriver: 'turso', databaseAuthTokenFromFlag: true });
+  });
+
+  it('is owned by the parent: no flag, no variable — an inherited copy never speaks', () => {
+    const env: NodeJS.ProcessEnv = {
+      [INTERNAL_CEREMONY_DATABASE_DRIVER_ENV]: 'pg',
+      [INTERNAL_CEREMONY_AUTH_TOKEN_FROM_FLAG_ENV]: '1',
+    };
+    writeCeremonyConnectionChannel(env, { databaseDriver: undefined, databaseAuthToken: undefined });
+    expect(INTERNAL_CEREMONY_DATABASE_DRIVER_ENV in env).toBe(false);
+    expect(INTERNAL_CEREMONY_AUTH_TOKEN_FROM_FLAG_ENV in env).toBe(false);
+    expect(readCeremonyConnectionChannel(env)).toEqual({});
+    // An empty flag value put nothing in the child's environment either (`start` / `dev` test truthiness).
+    writeCeremonyConnectionChannel(env, { databaseDriver: '', databaseAuthToken: '' });
+    expect(readCeremonyConnectionChannel(env)).toEqual({});
+  });
+
+  it('⭐ `os dev` writes both channels from its own resolution, as `os start` does: one hand-off, no second resolver', () => {
+    for (const command of ['start', 'dev']) {
+      const source = readFileSync(new URL(`../commands/${command}.ts`, import.meta.url), 'utf8');
+      expect(source, command).toMatch(/writeCeremonyDatabaseChannel\(localEnv, ceremonyDatabaseUrl\(resolvedDb, \{ homeFlag: /);
+      expect(source, command).toMatch(/writeCeremonyConnectionChannel\(localEnv, \{\s*databaseDriver: flags\['database-driver'\],\s*databaseAuthToken: flags\['database-auth-token'\],/);
+    }
+  });
+});
+

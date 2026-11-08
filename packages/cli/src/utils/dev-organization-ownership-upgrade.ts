@@ -227,10 +227,15 @@ function discardedStamps(planFile: string): Array<{ object: string; rows: number
  */
 export function upgradeDevelopmentDatabase(input: DevelopmentUpgradeInput): DevelopmentUpgradeResult {
   // The way on, when os dev does not upgrade the database itself: the ceremony,
-  // run by hand (18.x step 6 opened it).
+  // run by hand (18.x step 6 opened it). [#31547] By the two commands the
+  // guard's refusal printed just above, never a second spelling of them here:
+  // those name the database this boot opened (`-d`), with its driver and
+  // token, and keep a credential out of the output; a bare
+  // `os migrate organization-ownership --dev` plans the project's default
+  // database instead.
   const manual =
-    'Run `os migrate organization-ownership --dev` (review its plan), then the same command with --apply ' +
-    '--plan-file FILE --backup-taken, and start os dev again.';
+    "Run the two commands the boot guard's refusal above names, first the plan (review it), then the apply, " +
+    'and start os dev again.';
   if (!input.sqliteFile) {
     return {
       ok: false,

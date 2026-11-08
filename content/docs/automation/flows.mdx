@@ -816,6 +816,14 @@ coerced** into `25` and does not reach the bound; it is rejected as the wrong
 shape. The bound then compares numbers only, which is all a bound can do. The
 console renders all three kinds as a numeric input, which posts a number.
 
+The string kinds are held to their shape the same way. On a `type: 'text'`,
+`'textarea'`, `'email'`, `'url'` or `'phone'` field, a submitted value that is
+not a JSON string (an object, a number, a boolean, an array) is **refused** on
+resume with `invalid_type`; `42` is **not coerced** into `"42"`. Only the shape
+is checked, not the format of an email address, URL or phone number. A refused
+resume leaves the run paused, so the caller can correct the value and resume
+again.
+
 **What these keys refuse:**
 
 - **A bound that is not a number.** `max: '20'` is refused at parse time
@@ -1365,9 +1373,9 @@ POST /api/v1/automation/{flow}/runs/{runId}/resume
 
 These conditions are refused, all reported at once and all with
 `code: 'INVALID_SCREEN_INPUT'` (the value shapes of the numeric kinds
-`number` / `currency` / `percent` and of `type: 'file'`, and the `min` / `max`
-bounds, are described with those fields
-above):
+`number` / `currency` / `percent`, of the string kinds `text` / `textarea` /
+`email` / `url` / `phone` and of `type: 'file'`, and the `min` / `max` bounds,
+are described with those fields above):
 
 - a **`required` field the caller was actually asked for** is missing (an empty
   or blank string counts as missing);

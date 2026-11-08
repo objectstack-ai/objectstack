@@ -13,9 +13,10 @@
 # Environment in, `$RUNNER_TEMP/turbo-ls.json` out (a `turbo ls --output=json`
 # payload, ready for partition-test-shards.mjs), `::warning::` lines out for
 # every fallback. Exit 0 on every decided outcome -- a fallback to the full
-# list is a decision, not a failure; exit 2 on a usage error; and a failing
-# `turbo ls` exits with turbo's own status, exactly as it did under `bash -e`
-# when this text lived inline in ci.yml (see below).
+# list is a decision, not a failure; exit 2 on a usage error; exit 1 when the
+# checkout is shallow and HEAD's history cannot be fetched (#22034, below); and
+# a failing `turbo ls` exits with turbo's own status, exactly as it did under
+# `bash -e` when this text lived inline in ci.yml (see below).
 #
 # ## What decides the set, per event (#16453)
 #
@@ -99,13 +100,40 @@ PUSH_BEFORE_SHA="${OS_SHARD_PUSH_BEFORE_SHA:-}"
 # zeroes, and this value decides whether a run tests the workspace or a diff.
 ZERO_SHA='0000000000000000000000000000000000000000'
 
+# ── A SHALLOW CHECKOUT IS DEEPENED FIRST, OR THE STEP FAILS (#22034) ───────
+# The jobs that run this script check out at depth 1 and fetch HEAD's history
+# and the base branch in their own step ("Fetch this commit's history and the
+# base branch" in ci.yml), instead of `fetch-depth: 0`'s every head and tag.
+# This is the guard for the day that step is missing. On a shallow clone the
+# readers below do not fail, they answer wrong: with the base present but the
+# path from HEAD to it cut by the graft, `turbo ls --affected` printed "unable
+# to detect git range, assuming all files have changed" and selected every
+# package, exit 0 (measured on turbo 2.11.10, a depth-1 merge ref, 131
+# packages), and the pull_request merge-base takes the full-list fallback.
+#
+# So every event that diffs deepens HEAD here, by its sha, without tags. A
+# deepen that fails exits 1 with an `::error::`, not the full-list fallback:
+# on a shallow clone that fallback would be the same wrong answer, read as a
+# decision. The full-battery events read no history and are left alone.
+case "$EVENT_NAME" in
+  pull_request | merge_group | push)
+    if [ "$(git rev-parse --is-shallow-repository)" = true ]; then
+      echo "This checkout is shallow: fetching HEAD's history (no tags) before choosing a diff base (#22034)."
+      if ! git fetch --no-tags --quiet --unshallow origin "$(git rev-parse HEAD)"; then
+        echo "::error::This checkout is shallow and HEAD's history could not be fetched, so no diff base can be trusted here: on a shallow clone \`turbo ls --affected\` selects every package without failing. Refusing to select (#22034)."
+        exit 1
+      fi
+    fi
+    ;;
+esac
+
 SCM_BASE=''
 if [ "$EVENT_NAME" = "pull_request" ]; then
   if [ -z "$BASE_REF" ]; then
     echo "::warning::This pull_request event carries no base branch, so the affected-set diff base cannot be computed."
   else
-    # `fetch-depth: 0` above already makes this resolve — the fetch is
-    # the guard for the day that changes, not the normal path.
+    # The job's own fetch step already makes this resolve (#22034) — the
+    # fetch is the guard for the day that changes, not the normal path.
     #
     # `git cat-file -e` rather than the more idiomatic strict
     # `git rev-parse --verify` spelling. That is history rather than
@@ -151,8 +179,9 @@ if [ "$EVENT_NAME" = "merge_group" ]; then
   if [ -z "$MERGE_GROUP_BASE_SHA" ]; then
     echo "::warning::This merge_group event carries no base_sha, so the affected-set diff base cannot be computed."
   else
-    # The checkout's `fetch-depth: 0` already makes this resolve -- the fetch
-    # is the guard for the day that changes, exactly as it is above. Fetched
+    # HEAD's history (the job's fetch step, or the deepen above) already
+    # holds it -- the fetch is the guard for the day that changes, exactly as
+    # it is above. Fetched
     # by sha, not by ref: a merge group's base is a commit, and the queue
     # branch it sits on is transient.
     if ! git cat-file -e "$MERGE_GROUP_BASE_SHA^{commit}" 2>/dev/null; then
@@ -184,7 +213,7 @@ if [ "$EVENT_NAME" = "push" ]; then
   elif [ "$PUSH_BEFORE_SHA" = "$ZERO_SHA" ]; then
     echo "::warning::This push event's before sha is all zeroes -- the branch's first push, or a force-push that rewrote history -- so there is no previous commit to diff from."
   else
-    # `fetch-depth: 0` already makes this resolve; the fetch is the guard for
+    # HEAD's history already holds it (#22034); the fetch is the guard for
     # the day that changes. By sha, as on merge_group: after a force-push the
     # previous tip may be unreachable from any ref.
     if ! git cat-file -e "$PUSH_BEFORE_SHA^{commit}" 2>/dev/null; then

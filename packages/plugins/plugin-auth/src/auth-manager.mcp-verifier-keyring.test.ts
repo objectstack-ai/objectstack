@@ -111,6 +111,13 @@ async function verifierRig() {
     { client_id: CLIENT, user_id: USER, scopes: JSON.stringify(['data:read']), created_at: new Date(Date.now() - 60_000) },
     SYS,
   );
+  // [objectstack-ai/cloud#3820, card 2] …and the client it was granted to,
+  // enabled: the verifier reads the client row before the consent.
+  await (engine as any).insert(
+    'sys_oauth_application',
+    { id: `app_${CLIENT}`, client_id: CLIENT, name: 'Keyring Probe', redirect_uris: JSON.stringify(['http://localhost:56789/cb']) },
+    SYS,
+  );
 
   /**
    * A token for this deployment's MCP resource, signed by the jwt plugin with
@@ -259,10 +266,11 @@ describe('[#24186] the bound on the fresh read an unknown key earns', () => {
       },
     } as any);
     // The consent these tokens are minted under (ruling A): a standing grant,
-    // so each leg counts key-set reads and nothing else decides its answer.
+    // under an enabled client (cloud#3820 card 2: the client row is read
+    // first), so each leg counts key-set reads and nothing else decides its answer.
     const consent = { clientId: CLIENT, userId: USER, referenceId: null, createdAt: new Date(Date.now() - 60_000) };
     vi.spyOn(manager, 'getAuthContext').mockResolvedValue({
-      adapter: { findMany: async () => [{ ...consent }], findOne: async () => null },
+      adapter: { findMany: async () => [{ ...consent }], findOne: async () => ({ clientId: CLIENT, disabled: false }) },
     });
     const token = (privateKey: CryptoKey, kid: string) => {
       const now = Math.floor(Date.now() / 1000);

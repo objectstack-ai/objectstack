@@ -87,8 +87,11 @@ function twoScreenFlow(secondField: string) {
                 id: 'review', type: 'screen', label: 'Review',
                 // All-optional and single-field: no `required` can force this
                 // pause, so "it paused" means exactly "nothing was judged
-                // caller-supplied".
-                config: { title: 'Review', fields: [{ name: secondField, label: 'Review', type: 'text' }] },
+                // caller-supplied". Untyped on purpose: since #31491 a `text`
+                // field is a string value domain, so the ARRAY column this file
+                // measures would be refused for its shape — a second reason to
+                // pause that is not the provenance verdict under test.
+                config: { title: 'Review', fields: [{ name: secondField, label: 'Review' }] },
             },
             { id: 'end', type: 'end', label: 'End' },
         ],

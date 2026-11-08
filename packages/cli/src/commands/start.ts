@@ -23,7 +23,11 @@ import {
 import { ServeRestartCoordinator } from '../utils/dev-restart.js';
 import { readEnvWithDeprecation } from '@objectstack/types';
 import { writeAuthSecretFileChannel } from '../utils/internal-auth-secret-channel.js';
-import { ceremonyDatabaseUrl, writeCeremonyDatabaseChannel } from '../utils/internal-ceremony-database-channel.js';
+import {
+  ceremonyDatabaseUrl,
+  writeCeremonyConnectionChannel,
+  writeCeremonyDatabaseChannel,
+} from '../utils/internal-ceremony-database-channel.js';
 import { applyCryptoKeyFileChannel } from '../utils/internal-crypto-key-file-channel.js';
 import { resolveStartHome } from '../utils/start-home.js';
 // The ONE port contract, shared with `dev` and with the `serve` child this
@@ -507,6 +511,12 @@ export default class Start extends Command {
     // child names it in both commands, read from the resolution above — the
     // one this boot serves — never re-resolved.
     writeCeremonyDatabaseChannel(localEnv, ceremonyDatabaseUrl(resolvedDb, { homeFlag: flags.home }));
+    // [#31547] The driver and the token the two flags above put in the child's
+    // environment only: the commands set them in front, the token by reference.
+    writeCeremonyConnectionChannel(localEnv, {
+      databaseDriver: flags['database-driver'],
+      databaseAuthToken: flags['database-auth-token'],
+    });
     // NODE_ENV is only forced to production when the user has not set it.
     // Allows `NODE_ENV=development objectstack start` to work for debugging.
     //

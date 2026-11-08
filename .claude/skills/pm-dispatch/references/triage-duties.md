@@ -7,6 +7,7 @@
 - 查重缓存住席内:新会话全量拉,其后 `since` 增量;⛔ 不建分支、不共享、不依赖备份。
 - 每日一 fire 跑两仓全量对账(`objectstack-ai/objectstack`、`objectstack-ai/cloud`)并归集日频职责;
 - 选层按 fire 时刻 ⛔ 不用计数器,简报写明层;cloud 卡首触归 `repo:cloud` 席自巡,见多仓协调。
+- 每日看板的车道一节展示 devx 六项度量;清单住 `lanes/devx.md` 范围节度量行,⛔ 不另抄。
 - 每条枚举比对返回数与 `totalCount`,不等 ⇒ 报 `sweep INCOMPLETE` 点名缺口,⛔ 永不报干净。
 - 轮次记录按车道计欠审逾一轮的 head 数并点名车道(`check-owed-reviews.mjs`),只报 ⛔ 不接审。
 - 轮次记录分写「决策卡 N」与「待您审合 PR M」,不合计;后者 = open `pm:awaiting-merge` PR。
@@ -63,15 +64,15 @@
 - 路由属分诊技术判断,⛔ 不升级哪个仓的问题;父单永不派发,`pm:epic` 卡 `pm:retriage` 即答。
 - 算涉 cloud:亦含托管面(objectos-runtime)、`Blocked-by:` cloud 卡、病因在 cloud。
 - 不算涉 cloud:只在 cloud 测得而修复与验收全在本仓;仅引 cloud 卡作历史。
-- 父单已有子结构的:父单队列标签即可,分诊逐个展开路由、补 `Blocked-by:` 排序。
-- 跨层功能点(≥2 层)立父单带 `area:*`+`pm:epic`+清单项级,逐层子单按 `Blocked-by:` 排。
+- 父单已有子结构的:父单挂 `tracking`,分诊逐个展开子卡路由、补 `Blocked-by:` 排序。
+- 跨层功能点(≥2 层)立父单带 `area:*`+`tracking`+清单项级,逐层子单按 `Blocked-by:` 排。
 - 每张留一条英文审计评论(`Triage: lands in …; rationale: …`),可选带 `Size/model suggestion:` 行。
 - 改作者可写面(种类非 `none` 或带 `(narrowing)`)的卡,首触 done-when 写 skills + docs + eval 三项。
 - 查重/shadow 检查先按文件/机制查本仓与姊妹仓 open 卡(含 `pm:dispatched`),再跟引用与关键词。
 - 同文件同机制 = 同一发现,不分车道即并:证据搬先卡,后卡经中继 `issue_patch` 关 `duplicate`。
 - 同族发现并入收口卡,不开单点卡;在飞(assignee/open PR)永不并,`Blocked-by:` 不派;完工查过期。
 - 执行席 ⛔ 不并卡,疑重复挂 `pm:retriage` 写明哪两张同文件同机制;同 assignee 者自关后卡。
-- 关重复卡须目标具名且新读重叠;追踪父单 `Part of #n` 子卡全关、无 open 工作 ⇒ `completed`。
+- 关重复卡须目标具名且新读重叠;追踪父单 sub-issue 全关、无 open 工作 ⇒ `completed`。
 - 关卡先贴签名评论点名裁决与证据;⛔ 是非关、活认领卡、安全卡不在此权,归维护者。
 - 首触答责任三问:谁的代码出险/有正路否/谁可达且有人用否;据答改卡范围、域与路由。
 - 三类外不可逆或有硬时限(发版即固化、只被消费的文件、过窗不可补)⇒ 不关,报维护者。

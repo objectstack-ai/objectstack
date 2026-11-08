@@ -157,13 +157,13 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 | 标签 | 包家族 |
 |:--|:--|
 | `domain:server` | 服务端:引擎 + 服务插件 + CLI/运行时;`objectql core formula metadata* platform-objects drivers/* services/* connectors/* triggers/* plugin-* embedder-openai knowledge-* cli runtime verify types rest mcp observability client* cloud-connection create-objectstack adapters/*`;详见 `references/lanes/server.md` |
-| `domain:devx` | `sdui-parser`、`packages/qa`、`content/docs`、`apps/docs`、`docs/qa`、`.githooks`、`.github/workflows/**`(接线、CI 性能)、`docker/README.md`、`examples/**` 仅测试基建面;`packages/lint`、`scripts`(门禁类)按锚定规则归 spec,门禁按 SUBJECT:governed 面归 skills,代码/文档质量归本域 |
+| `domain:devx` | `sdui-parser`、`packages/qa`、`apps/docs`、`docs/qa`、`.githooks`、`.github/workflows/**`、`docker/README.md`、`content/docs` 横切与 `examples/**` 测试基建(见 `lanes/devx.md`);`packages/lint`、`scripts`(门禁类)按锚定规则归 spec,门禁按 SUBJECT:受管面归 skills,代码/文档质量归本域 |
 | `domain:skills` | 规则文本:`AGENTS.md`+`CLAUDE.md`+`.claude/**`(含本文件)+`skills/**`+`docs/adr/**`+`docs/NORTH-STAR.md`;非门禁的 `scripts/pm/**`(PM 循环工具);governed 面的治理执行文件:`.github/CODEOWNERS` + SUBJECT 是 governed 面本身的门禁/审计(现为 `scripts/pm/check-governed-merges.mjs`) |
 | `domain:spec` | `packages/spec` 整包:schema 形状、`contracts/**`、退役行为半边、strictness 台账;describe/JSDoc/墓碑散文/错误 guidance 与 alias 表;`packages/spec/scripts/**`、`packages/spec/docs/**` 及按锚定规则的例外归本域的工具链(域边界枚举与席内分派见 `references/lanes/spec.md`) |
 | `domain:ui` | `ui/**` 全部代码:`@object-ui/*` 库与 `ui/apps/*`、`ui/packages/types` 与 schema 语料、`ui/scripts` 与门禁工具、文档随所记录的面走;`packages/console`(dist 由 `pnpm console:build` 生成 ⛔ 不手改);协议恒归 `domain:spec`,受管面归 `domain:skills`;详见 `references/lanes/ui.md` |
 | `domain:cloud` | 涉 cloud 即整卡归 cloud PM(`repo:cloud` 席,同挂 `repo:cloud`):读或改 cloud 代码、生产方、事实或带 cloud 半边;本仓车道 ⛔ 不认领;cloud PM 跟到关卡,余下纯本仓活由它写明 cloud 事实后另立卡;判据见 `references/cross-repo-coordination.md` |
 | `security` · `review`(车道,无 `domain:*` 标签) | 本仓安全公告(无文件面;修复落在归属包;私有仓卡归该仓车道,cloud 即上行);席位 `security#N` 与职责见 `references/lanes/security.md`;永不公开的规则只住 `references/security-findings.md`。复核席 `review#N` 见 `references/lanes/review.md` |
-| (无固定归属,按落点分诊) | `packages/apps/*`、`examples/*`(归它演练的子系统)、`docs/audits/**` |
+| (无固定归属,按落点分诊) | `packages/apps/*`、`examples/*`(归它演练的子系统,测试基建见 devx 行)、`docs/audits/**` |
 
 - 表未覆盖的包首次分诊时归类并走 PR 更新本表;新增或退役 `domain:*` 必须同批改本表。
 - 退役 `domain:*` 只退流通,对象保留;`domain:engine`/`domain:services`/`domain:cli` 读作 `domain:server`。
@@ -172,7 +172,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - 跨域例外路径:拆不动的跨域单 PR 由分诊席指定一个车道 PM 认领,认领评论申报文件面。
 - 派发前在飞检查:读 `pm:dispatched` 卡认领评论申报的文件面,本地求交、不另发查询。
 - 跨域例外路径的范围加上该单文件面触及各域的在飞单;相交 ⇒ 排该 PR 之后串行或让行。
-- 越界只四通道:跨域例外路径、认领席跟到底的越界面、接手无主阻塞项、main-red 锚卡。
+- 越界只五通道:跨域例外路径、跟到底的越界面、无主阻塞项、main-red 锚卡、spec.md 搭车。
 - 合并队列是共享串行资源:车道买到的是并行编写,不是并行落地。
 - 谁发现 flake 谁修或立单,⛔ 不绕行。
 
@@ -310,7 +310,7 @@ Seat: `domain:<x>#<n>` (the seat number this PM sits on; absent = seat 1)
 File surface: `<预期触碰的目录>` (stop on breach; explain in the report)
 Container & model: `<S 级机械卡 / M / L>`, `mode:subagent | mode:cloud | mode:thread`, `model: <档位词,引当次 --tier 输出;天花板拼 CONTRACT_REVIEW_TIER,同行引其 MANDATORY 路径行或 reason:(逐卡裁决,或常设档位令的 id 与时刻);⛔ 不抄模型 id>`, `effort: <medium | high | xhigh | max,按卡难度定>`
 Clause-②: yes | no
-Metadata-protocol: added | narrowed | semantic | none (the kind of change to what a metadata author can write; the level table is AGENTS.md's Post-Task Checklist step 3; the dev copies it beside `Clause-②:` into the PR body and every changeset body; a kind other than `none`, or a `(narrowing)` arm, owes the PR body a third line the dev writes from the diff: `Skills-docs: updated here | follow-up owed — FILES | follow-up #N | none — REASON`; `updated here` = this diff teaches it in `skills/**` or the docs and the package's evals exercise it; the seat files the owed card and rewrites `owed — FILES` to `#N` before ACCEPT, through the PR-body line of `references/seat-post-protocol.md`)
+Metadata-protocol: added | narrowed | semantic | none (the kind of change to what a metadata author can write; levels: AGENTS.md's Post-Task Checklist step 3; the dev copies it beside `Clause-②:` into the PR body and each changeset body; a kind other than `none` or a `(narrowing)` arm owes the PR body a third line, from the diff: `Skills-docs: updated here | follow-up owed — FILES | follow-up #N | none — REASON`; `updated here` = the diff teaches it in the docs (in `skills/**` only on `domain:skills` PRs, else `follow-up #N`) and its evals exercise it; the seat files the owed card, rewriting `owed — FILES` to `#N` before ACCEPT via `references/seat-post-protocol.md`'s PR-body line)
 Responsibility: `<whose code produces the risk, and the repo it lives in (objectstack ⇒ a platform card carries the fix, references/cross-repo-coordination.md rule 1) | the platform path that already covers it, or none | who reaches it, and whether anyone uses it today>` (defect cards and cards whose premise is a failing behaviour, else `n/a — not a defect card`; the dispatch prompt's ruling section repeats the three answers)
 Thread-read: <id of the newest comment on the card at the moment this claim is written, or none>
 Premise: holds | corrected <comment id> | inbox (the pre-dispatch premise reading, dispatch-runbook.md 派发前置)

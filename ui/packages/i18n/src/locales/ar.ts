@@ -773,6 +773,7 @@ const ar = {
       noSavedTemplates: "لا قوالب محفوظة",
       noneOption: "— لا شيء —",
       saveCurrent: "حفظ الحالي",
+      saveCurrentNeedsMapping: "عيّن عمودًا واحدًا على الأقل لحفظ قالب.",
       templateName: "اسم القالب",
       save: "حفظ",
       deleteTemplate: "حذف القالب",

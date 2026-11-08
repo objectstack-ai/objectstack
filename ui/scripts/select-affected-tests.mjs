@@ -42,12 +42,12 @@
  *
  *  2. ALWAYS-ON TEST FILES. A test the package graph cannot place is selected
  *     on every run, whatever changed:
- *       - it lives outside every workspace package (`scripts/**`,
- *         `eslint-rules/**`): no package owns it, so no package change
- *         reaches it;
+ *       - it lives outside every workspace package and every owner
+ *         directory (item 2c): nothing owns it, so no change reaches it;
  *       - it, or a module it reaches through RELATIVE imports, reads the disk
- *         or spawns a process (`fs`, `child_process`, `import.meta.glob`):
- *         its input is the tree, and the tree is not a package;
+ *         or spawns a process (`fs`, `child_process`, `import.meta.glob`) with
+ *         a radius item 2b cannot bound: its input is the tree, and the tree
+ *         is not a package;
  *       - it reaches, through relative imports, a file outside every
  *         workspace package (`scripts/`, the tree root): no package change
  *         reaches that file.
@@ -65,6 +65,36 @@
  *     change to a package one of those reads is selected too. Declaring the
  *     edge instead would make the test's whole package a dependent of the
  *     target, and three of those edges on this tree would be cycles
+ *     (objectstack#31520).
+ *
+ *  2b. BOUNDED DISK READERS. A disk-reading module whose every read the
+ *     monorepo's path walker resolves to a named file or directory inside a
+ *     workspace package (`readRadius`) adds those packages to the test's input
+ *     packages, exactly as a relative reach does in 2a. Anything the walker
+ *     cannot name -- an unread argument, a spawn, `process.cwd()`, an async or
+ *     glob read, a walk from an unnamed root -- keeps the test always-on.
+ *
+ *  2c. OWNER DIRECTORIES. `scripts/` and `eslint-rules/` own the tests under
+ *     them as a package owns its own (`OWNER_DIRS`): a change to a file in one
+ *     selects that directory's tests, and a test elsewhere that imports or
+ *     reads into one counts the directory among its input packages. An owner
+ *     directory declares no dependencies, so every workspace package its tests
+ *     import is an input package (item 2a). A change to the path walker
+ *     (`PATH_WALKER_FILE`, outside the tree) selects `scripts/`, the directory
+ *     of the selector that imports it. Its tests stay always-on exactly where
+ *     a package's would: a spawn, a tree walk, a read item 2b cannot bound.
+ *     `scripts/invoked-as.mjs`, which nearly every script imports, is the one
+ *     module whose disk use is not a test input (`BENIGN_DISK_MODULES`). An
+ *     owner directory is never a workspace package: the full-run reach in
+ *     item 3 is still computed against the workspace alone.
+ *
+ *  2d. LIBRARY PROGRAMS. A module that imports a library which reads the disk
+ *     on its caller's behalf (`LIBRARY_DISK_READERS`) reads the disk whether or
+ *     not it imports `fs`: a TypeScript program follows `tsconfig` and every
+ *     import through `ts.sys`. Only the in-memory parts are free
+ *     (`libraryReadsDisk`): TypeScript's parser, node tests and enums,
+ *     ESLint's `RuleTester` and `Linter`, Tailwind's core `compile`. Any other
+ *     runtime use is a disk read with a radius nothing states
  *     (objectstack#31520).
  *
  *  3. FULL RUN instead, when the change reaches something every test runs
@@ -123,9 +153,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { isEntrypoint } from './invoked-as.mjs';
+import { stripComments } from './js-comment-mask.mjs';
 import {
   nestedPrefix,
   parseWorkspaceGlobs,
@@ -135,6 +166,25 @@ import {
 } from './workspace-root.mjs';
 
 export const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+
+/**
+ * The path walker of the monorepo's cross-package gate
+ * (`scripts/check-cross-package-test-inputs.mjs`, `scanPathExpressions`), the
+ * one reader in either tree that resolves a test's `fs` path arguments to the
+ * files they name. Imported, never copied: two walkers would disagree the day
+ * one learns a spelling. It exists only nested as `ui/` of objectstack; in a
+ * standalone tree, or if the export is missing, this is `null` and every disk
+ * reader stays always-on -- the answer before item 2b existed.
+ */
+export const PATH_WALKER_FILE = 'scripts/check-cross-package-test-inputs.mjs';
+async function loadPathWalker() {
+  if (!nestedPrefix(REPO_ROOT)) return null;
+  const file = path.join(workspaceRoot(REPO_ROOT), PATH_WALKER_FILE);
+  if (!fs.existsSync(file)) return null;
+  const mod = await import(pathToFileURL(file).href);
+  return typeof mod.scanPathExpressions === 'function' ? mod.scanPathExpressions : null;
+}
+export const PATH_WALKER = await loadPathWalker();
 
 /** The root files every test run is configured by. Their relative closure is a full-run trigger. */
 export const ROOT_TEST_CONFIG = Object.freeze(['vitest.config.mts']);
@@ -162,6 +212,68 @@ const DISK_SPECIFIERS = new Set([
   'globby',
   'tinyglobby',
 ]);
+
+/**
+ * The `fs` calls item 2b can bound. The reads are the walker's path-argument
+ * reads (`globSync` aside, which is a glob); the rest write or clean up and read
+ * nothing back. Any other `fs` member -- an async read, `realpathSync`, a
+ * stream -- is a read whose radius the walker never sees.
+ */
+const BOUNDED_FS_READS = ['readFileSync', 'readdirSync', 'statSync', 'lstatSync', 'existsSync', 'opendirSync'];
+/**
+ * Libraries that read the disk on their caller's behalf: a TypeScript program
+ * follows `tsconfig` and every import through `ts.sys`, a bundler or linter
+ * reads its config and inputs. A disk-reading module that imports one has a
+ * radius no `fs` argument states. Measured on objectstack#31520: a `types` test
+ * building a `ts.createProgram` read the tree's root `tsconfig.json` and
+ * `@objectstack/spec` through `typescript`, with no `fs` call naming either.
+ */
+const LIBRARY_DISK_READERS = new Set(['typescript', 'ts-morph', 'eslint', 'vite', 'esbuild', 'rollup', 'tailwindcss', 'postcss']);
+const FS_NON_READS = ['writeFileSync', 'appendFileSync', 'mkdirSync', 'mkdtempSync', 'rmSync', 'rmdirSync', 'unlinkSync'];
+
+/**
+ * TypeScript's members that run in memory: the parser, node tests and walks,
+ * and the enums a parse is configured with. A capitalised member is a type or
+ * an enum and runs nothing. Anything else -- `sys`, `createProgram`,
+ * `createCompilerHost`, `readConfigFile`, `resolveModuleName`, a member this
+ * list has not met -- is a read of the disk (item 2d).
+ */
+const TS_IN_MEMORY = /^(?:is[A-Z]\w*|forEachChild|findAncestor|createSourceFile|getModifiers|canHaveModifiers|getLeadingCommentRanges|getTrailingCommentRanges|getJSDocCommentsAndTags|getTextOfJSDocComment|tokenToString|flattenDiagnosticMessageText|parseConfigFileTextToJson|transpileModule|factory|[A-Z]\w*)$/;
+/**
+ * The in-memory entry points of the other libraries, by library. ESLint's
+ * `ESLint` reads config files and globs; its `RuleTester` and `Linter` take
+ * the code they lint as a string. Tailwind's core `compile` loads a
+ * stylesheet only through the `loadStylesheet` its caller passes, so the read,
+ * if any, is the caller's own `fs` call. A library not listed here has no
+ * in-memory part.
+ */
+const LIBRARY_IN_MEMORY = new Map([
+  ['eslint', new Set(['RuleTester', 'Linter'])],
+  ['tailwindcss', new Set(['compile'])],
+]);
+
+/**
+ * Directories outside every workspace package that own their own tests, as
+ * a package does (item 2c). Each is a dependency-free pseudo-package named
+ * `<dir:NAME>`.
+ */
+export const OWNER_DIRS = Object.freeze(['scripts', 'eslint-rules']);
+export const ownerDirName = (dir) => `<dir:${dir}>`;
+
+/**
+ * Modules whose disk use is not a test input, with the exact `fs` and
+ * `child_process` bindings that use is spelled with. `invoked-as.mjs`
+ * realpaths `process.argv[1]` to answer "was I run?", and its own `selfTest`
+ * writes, links and spawns files in a temp directory it makes. A module whose
+ * disk imports differ from the pinned list by one binding is not exempt: a new
+ * read has to be imported, so the exemption cannot widen unseen.
+ */
+export const BENIGN_DISK_MODULES = Object.freeze({
+  'scripts/invoked-as.mjs': Object.freeze({
+    'node:child_process': ['spawnSync'],
+    'node:fs': ['existsSync', 'mkdirSync', 'mkdtempSync', 'realpathSync', 'rmSync', 'symlinkSync', 'writeFileSync'],
+  }),
+});
 
 const DEPENDENCY_FIELDS = ['dependencies', 'devDependencies', 'peerDependencies', 'optionalDependencies'];
 const RUNTIME_DEPENDENCY_FIELDS = DEPENDENCY_FIELDS.filter((field) => field !== 'devDependencies');
@@ -317,11 +429,166 @@ export function workspaceNameOf(specifier, names) {
   return names.has(head) ? head : null;
 }
 
+/** The library a bare specifier names, as `LIBRARY_DISK_READERS` lists them. */
+const libraryOf = (spec) => (spec.startsWith('@') ? spec.split('/').slice(0, 2).join('/') : spec.split('/')[0]);
+
+/**
+ * Does `source` run a disk-reading library beyond its in-memory parts (item
+ * 2d)? A type-only import runs nothing. A dynamic import, a `require`, or a
+ * binding used other than as `ts.member` is a read: what it calls is not
+ * spelled here.
+ *
+ * @param {string} rawSource
+ */
+export function libraryReadsDisk(rawSource) {
+  // Comments only add specifiers, so a source naming no library anywhere is
+  // answered before it is tokenised. A comment names a library nothing runs:
+  // a JSDoc `{import('eslint').Rule}`, a CSS `@import 'tailwindcss'` in prose.
+  if (!moduleSpecifiers(rawSource).specifiers.some((sp) => LIBRARY_DISK_READERS.has(libraryOf(sp)))) return false;
+  const source = stripComments(rawSource);
+  const libs = moduleSpecifiers(source).specifiers.filter((sp) => LIBRARY_DISK_READERS.has(libraryOf(sp)));
+  if (libs.length === 0) return false;
+  const importRe = /\bimport\s+(type\s+)?([^'";]*?)\s+from\s+['"]([^'"]+)['"]/g;
+  const statics = new Set();
+  for (const m of source.matchAll(importRe)) {
+    const lib = libraryOf(m[3]);
+    if (!LIBRARY_DISK_READERS.has(lib)) continue;
+    statics.add(m[3]);
+    if (m[1]) continue;
+    const clause = m[2].trim();
+    const named = (clause.match(/\{([^}]*)\}/)?.[1] ?? '')
+      .split(',')
+      .map((part) => part.trim())
+      .filter((part) => part && !part.startsWith('type '));
+    const head = clause.replace(/\{[^}]*\}/, '').replace(/,/g, ' ').trim();
+    const binding = head.match(/^(?:\*\s+as\s+)?([A-Za-z_$][\w$]*)$/)?.[1];
+    if (head && !binding) return true;
+    const inMemory = LIBRARY_IN_MEMORY.get(lib);
+    if (inMemory) {
+      if (binding || named.some((n) => !inMemory.has(n.split(/\s+as\s+/)[0]))) return true;
+      continue;
+    }
+    if (lib !== 'typescript') return true;
+    if (named.some((n) => !TS_IN_MEMORY.test(n.split(/\s+as\s+/)[0]))) return true;
+    if (binding) {
+      const body = source.replace(importRe, '');
+      const uses = body.matchAll(new RegExp(`(?<![\\w$.])${binding.replace(/\$/g, '\\$')}(?![\\w$])(?:\\s*\\.\\s*([\\w$]+))?`, 'g'));
+      for (const u of uses) if (!u[1] || !TS_IN_MEMORY.test(u[1])) return true;
+    }
+  }
+  // A library reached without a static import -- `import('vite')`, `require`.
+  return libs.some((sp) => !statics.has(sp));
+}
+
+/**
+ * Is `rel` a `BENIGN_DISK_MODULES` entry whose disk imports are still exactly
+ * the pinned ones?
+ *
+ * @param {string} rel
+ * @param {string} source
+ */
+export function isBenignDiskModule(rel, source) {
+  const pinned = BENIGN_DISK_MODULES[rel];
+  if (!pinned) return false;
+  const seen = {};
+  for (const m of source.matchAll(/\bimport\s+([^'";]*?)\s+from\s+['"]([^'"]+)['"]/g)) {
+    if (!DISK_SPECIFIERS.has(m[2])) continue;
+    const braces = m[1].trim().match(/^\{([^}]*)\}$/);
+    if (!braces) return false;
+    seen[m[2]] = [...(seen[m[2]] ?? []), ...braces[1].split(',').map((x) => x.trim()).filter(Boolean)];
+  }
+  const { specifiers } = moduleSpecifiers(source);
+  if (specifiers.some((sp) => DISK_SPECIFIERS.has(sp) && !(sp in pinned))) return false;
+  return Object.entries(pinned).every(([sp, names]) => JSON.stringify([...(seen[sp] ?? [])].sort()) === JSON.stringify([...names].sort()))
+    && Object.keys(seen).every((sp) => sp in pinned);
+}
+
+/**
+ * Item 2b: the package directories a disk-reading module reads, or `null` when
+ * any of its reads has a radius this selector cannot bound. Fail-closed: the
+ * answer is `null` for a module outside every package, an unloaded walker, a
+ * process spawn, an async or glob read, `fs-extra`, a library that reads the
+ * disk itself (`LIBRARY_DISK_READERS`), `process.cwd()`, the module resolver, an `fs` import aliased or used other than as `fs.READ(...)`, a
+ * directory walk from a root the walker cannot name, and any read whose
+ * argument the walker could not read, could not name, or named outside a
+ * workspace package of this tree (`node_modules` included).
+ *
+ * @param {{ rel: string, source: string, packages: Array<{ name: string, dir: string }>, prefix: string, walker: Function | null }} input
+ *   `prefix` is the tree's own path under the workspace root (`ui/` nested,
+ *   `''` standalone), the coordinate the walker names files in
+ * @returns {Set<string> | null}
+ */
+export function readRadius({ rel, source, packages, prefix, walker }) {
+  if (!walker) return null;
+  const owner = owningPackage(rel, packages);
+  if (!owner) return null;
+  const { specifiers, globsTheTree } = moduleSpecifiers(source);
+  if (globsTheTree) return null;
+  if (specifiers.some((s) => DISK_SPECIFIERS.has(s) && s !== 'fs' && s !== 'node:fs')) return null;
+  if (specifiers.some((s) => LIBRARY_DISK_READERS.has(libraryOf(s)))) {
+    return null;
+  }
+  if (/\bprocess\.cwd\s*\(|\bcreateRequire\b|\brequire\.resolve\b|\brequire\(\s*['"](?:node:)?fs['"]/.test(source)) return null;
+
+  // Every `fs` use must be a call the walker reads, or a write.
+  const known = new Set([...BOUNDED_FS_READS, ...FS_NON_READS]);
+  const importRe = /\bimport\s+([^'";]*?)\s+from\s+['"](?:node:)?fs['"]\s*;?/g;
+  const bindings = [];
+  const named = [];
+  for (const m of source.matchAll(importRe)) {
+    const clause = m[1].trim();
+    const braces = clause.match(/\{([^}]*)\}/);
+    if (braces) {
+      for (const part of braces[1].split(',').map((s) => s.trim()).filter(Boolean)) {
+        if (/\bas\b/.test(part) || !known.has(part.replace(/^type\s+/, ''))) return null;
+        if (!part.startsWith('type ')) named.push(part);
+      }
+    }
+    const head = clause.replace(/\{[^}]*\}/, '').replace(/,/g, ' ').trim();
+    const ns = head.match(/\*\s+as\s+([A-Za-z_$][\w$]*)/);
+    if (ns) bindings.push(ns[1]);
+    else if (/^[A-Za-z_$][\w$]*$/.test(head)) bindings.push(head);
+    else if (head) return null;
+  }
+  const body = source.replace(importRe, '');
+  for (const b of bindings) {
+    const uses = [...body.matchAll(new RegExp(`(?<![\\w$.])${b.replace(/\$/g, '\\$')}(?![\\w$])(\\.([\\w$]+)\\s*\\()?`, 'g'))];
+    if (uses.some((u) => !u[2] || !known.has(u[2]))) return null;
+  }
+  // A named binding passed or re-bound (`[x].map(readFileSync)`,
+  // `const r = readFileSync`) reads where no call is spelled, so every use
+  // must be a direct call, as the default binding's already must.
+  for (const n of named) {
+    const uses = [...body.matchAll(new RegExp(`(?<![\\w$.])${n.replace(/\$/g, '\\$')}(?![\\w$])(\\s*\\()?`, 'g'))];
+    if (uses.some((u) => !u[1])) return null;
+  }
+
+  const hereDepth = path.posix.relative(owner.dir, path.posix.dirname(rel)).split('/').filter(Boolean).length;
+  const scan = walker(source, hereDepth, `${prefix}${rel}`.split('/'), owner.name);
+  if (!Array.isArray(scan?.reads) || scan.walkRoots.size > 0) return null;
+  // The walker skips a read whose argument list it cannot balance; a count
+  // below the calls spelled here is that, and it costs the attribution.
+  const spelled = [...source.matchAll(new RegExp(`\\b(?:${BOUNDED_FS_READS.join('|')}|globSync)\\s*\\(`, 'g'))].length;
+  if (scan.reads.length !== spelled) return null;
+  const dirs = new Set();
+  for (const { fn, info } of scan.reads) {
+    if (fn === 'globSync' || !info || info.vendored || !info.segs) return null;
+    const name = info.segs.join('/');
+    if (!name.startsWith(prefix)) return null;
+    const pkg = owningPackage(name.slice(prefix.length), packages);
+    if (!pkg) return null;
+    dirs.add(pkg.dir);
+  }
+  return dirs;
+}
+
 /**
  * The relative-import graph reachable from `seeds`, and for every node what
  * its WHOLE closure touches: the workspace packages it names, the package
- * directories (or the repository root, as `''`) its files sit in, and whether
- * anything in it reads the disk. Bare specifiers are not followed: a workspace
+ * directories (or the repository root, as `''`) its files sit in, whether
+ * anything in it reads the disk with a radius `radiusOf` cannot bound
+ * (`readsDisk`), and the package directories the bounded reads land in
+ * (`readDirs`). Bare specifiers are not followed: a workspace
  * package is the package graph's business, and `node_modules` the lockfile's.
  *
  * One pass of Tarjan's strongly-connected components over the graph, then one
@@ -332,10 +599,12 @@ export function workspaceNameOf(specifier, names) {
  * @param {string[]} seeds  repository-relative files
  * @param {Set<string>} names  workspace package names
  * @param {(rel: string) => string} dirOf  the package directory a file sits in, or `''`
- * @returns {Map<string, { packageNames: Set<string>, dirs: Set<string>, readsDisk: boolean, files: number }>}
+ * @param {(rel: string, source: string) => Set<string> | null} [radiusOf]  a disk-reading
+ *   file's read radius, `null` when unbounded; absent, every disk read is unbounded
+ * @returns {Map<string, { packageNames: Set<string>, dirs: Set<string>, readsDisk: boolean, readDirs: Set<string>, files: number }>}
  */
-export function closureSummaries(root, seeds, names, dirOf) {
-  /** @type {Map<string, { edges: string[], packageNames: Set<string>, readsDisk: boolean }>} */
+export function closureSummaries(root, seeds, names, dirOf, radiusOf = () => null) {
+  /** @type {Map<string, { edges: string[], packageNames: Set<string>, readsDisk: boolean, readDirs: Set<string> }>} */
   const nodes = new Map();
   const resolved = new Map();
   const queue = [...new Set(seeds)];
@@ -349,10 +618,11 @@ export function closureSummaries(root, seeds, names, dirOf) {
       source = '';
     }
     const info = /\.(?:[cm]?[jt]sx?)$/.test(rel) ? moduleSpecifiers(source) : { specifiers: [], globsTheTree: false };
-    const node = { edges: [], packageNames: new Set(), readsDisk: info.globsTheTree };
+    const node = { edges: [], packageNames: new Set(), readsDisk: info.globsTheTree, readDirs: new Set() };
+    let touchesDisk = info.globsTheTree;
     for (const spec of info.specifiers) {
       if (DISK_SPECIFIERS.has(spec)) {
-        node.readsDisk = true;
+        touchesDisk = true;
         continue;
       }
       if (spec.startsWith('.')) {
@@ -370,6 +640,15 @@ export function closureSummaries(root, seeds, names, dirOf) {
       }
       const name = workspaceNameOf(spec, names);
       if (name) node.packageNames.add(name);
+    }
+    // Item 2d: a library program reads the disk with or without `fs`.
+    if (!touchesDisk && /\.(?:[cm]?[jt]sx?)$/.test(rel) && libraryReadsDisk(source)) touchesDisk = true;
+    // Item 2c: a module whose disk use is pinned as no test input.
+    if (touchesDisk && !node.readsDisk && isBenignDiskModule(rel, source)) touchesDisk = false;
+    if (touchesDisk && !node.readsDisk) {
+      const radius = radiusOf(rel, source);
+      if (radius === null) node.readsDisk = true;
+      else for (const d of radius) node.readDirs.add(d);
     }
     nodes.set(rel, node);
   }
@@ -433,18 +712,20 @@ export function closureSummaries(root, seeds, names, dirOf) {
   // component points at has already been emitted, so one forward fold is exact.
   const sccSummary = [];
   for (let c = 0; c < sccs.length; c++) {
-    const summary = { packageNames: new Set(), dirs: new Set(), readsDisk: false, files: 0 };
+    const summary = { packageNames: new Set(), dirs: new Set(), readsDisk: false, readDirs: new Set(), files: 0 };
     for (const member of sccs[c]) {
       const node = nodes.get(member);
       summary.files++;
       summary.dirs.add(dirOf(member));
       if (node.readsDisk) summary.readsDisk = true;
+      for (const d of node.readDirs) summary.readDirs.add(d);
       for (const n of node.packageNames) summary.packageNames.add(n);
       for (const e of node.edges) {
         const d = sccOf.get(e);
         if (d === c) continue;
         const child = sccSummary[d];
         if (child.readsDisk) summary.readsDisk = true;
+        for (const d of child.readDirs) summary.readDirs.add(d);
         for (const n of child.packageNames) summary.packageNames.add(n);
         for (const x of child.dirs) summary.dirs.add(x);
         summary.files += child.files;
@@ -605,13 +886,18 @@ export function readHeavyProject(configText) {
 /**
  * The verdict for one change.
  *
- * @param {{ root?: string, changed: string[], outside?: string[], tracked?: string[] }} input
+ * @param {{ root?: string, changed: string[], outside?: string[], tracked?: string[], walker?: Function | null }} input
  *   `changed` relative to `root`; `outside` the changed files outside the tree,
  *   relative to the workspace root (`changedOutsideTree`)
  * @returns {{ mode: 'full', reasons: string[] } | { mode: 'affected', changedPackages: string[], affectedPackages: string[], heavyEdge: string[], alwaysOn: Array<{ file: string, why: string }>, attributed: Array<{ file: string, via: string[] }>, filters: string[], testFileCount: number, selectedTestFileCount: number }}
  */
-export function selectAffectedTests({ root = REPO_ROOT, changed, outside = [], tracked = trackedFiles(root) }) {
-  const packages = listWorkspacePackages(root);
+export function selectAffectedTests({ root = REPO_ROOT, changed, outside = [], tracked = trackedFiles(root), walker = PATH_WALKER }) {
+  const workspacePackages = listWorkspacePackages(root);
+  // Item 2c: the owner directories join the graph as dependency-free packages.
+  const packages = [
+    ...workspacePackages,
+    ...OWNER_DIRS.filter((d) => !workspacePackages.some((p) => p.dir === d)).map((d) => ({ name: ownerDirName(d), dir: d, deps: [] })),
+  ];
   const names = new Set(packages.map((p) => p.name));
   const { dependencyClosure, dependentClosure } = packageClosures(packages);
   const dirOf = (rel) => owningPackage(rel, packages)?.dir ?? '';
@@ -651,7 +937,9 @@ export function selectAffectedTests({ root = REPO_ROOT, changed, outside = [], t
   const heavySetupPackages = reach([heavy.setupFile]).pkgs;
   for (const file of configFiles) {
     const r = reach([file]);
-    for (const f of r.files) if (!owningPackage(f, packages)) configReach.add(f);
+    // Against the workspace alone: a file the root config reaches is a
+    // full-run trigger whether or not an owner directory holds it.
+    for (const f of r.files) if (!owningPackage(f, workspacePackages)) configReach.add(f);
     // A setup file that loads the heavy one is part of the heavy family; the
     // root config names every package the setups do only through them.
     if (file === heavy.setupFile || r.files.has(heavy.setupFile) || ROOT_TEST_CONFIG.includes(file)) continue;
@@ -672,6 +960,8 @@ export function selectAffectedTests({ root = REPO_ROOT, changed, outside = [], t
 
   const reasons = outsideTreeReasons({ root, outside });
   const changedPackages = new Set();
+  // The selector imports the walker at run time, an edge no test states.
+  if (outside.includes(PATH_WALKER_FILE) && names.has(ownerDirName('scripts'))) changedPackages.add(ownerDirName('scripts'));
   for (const rel of changed) {
     const base = rel.split('/').pop() ?? rel;
     if (FULL_RUN_BASENAME.test(base)) {
@@ -695,7 +985,7 @@ export function selectAffectedTests({ root = REPO_ROOT, changed, outside = [], t
       reasons.push(`${rel}: a dependency patch changes what is installed for every test`);
       continue;
     }
-    // Anything else outside a package -- `scripts/`, `eslint-rules/`, docs,
+    // Anything else outside a package and an owner directory -- docs,
     // workflows, skills -- reaches tests only through the always-on set below.
   }
 
@@ -714,7 +1004,10 @@ export function selectAffectedTests({ root = REPO_ROOT, changed, outside = [], t
     const owner = owningPackage(f, packages);
     return owner && !affected.has(owner.name);
   });
-  const summaries = closureSummaries(root, placed, names, dirOf);
+  const prefix = nestedPrefix(root);
+  const summaries = closureSummaries(root, placed, names, dirOf, (rel, source) =>
+    readRadius({ rel, source, packages, prefix, walker }),
+  );
   const nameOfDir = new Map(packages.map((p) => [p.dir, p.name]));
   const alwaysOn = [];
   /** @type {Array<{ file: string, via: string[] }>} */
@@ -738,7 +1031,7 @@ export function selectAffectedTests({ root = REPO_ROOT, changed, outside = [], t
     // Item 2a: every edge past the owner's declared closure is an input
     // package; one of them affected selects the file.
     const allowed = dependencyClosure.get(owner.name) ?? new Set();
-    const inputs = new Set([...closure.dirs].map((d) => nameOfDir.get(d)));
+    const inputs = new Set([...closure.dirs, ...closure.readDirs].map((d) => nameOfDir.get(d)));
     for (const n of closure.packageNames) if (!allowed.has(n)) inputs.add(n);
     inputs.delete(owner.name);
     const via = [...inputs].filter((n) => affected.has(n)).sort();
