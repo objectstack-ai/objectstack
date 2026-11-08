@@ -2,8 +2,8 @@
   "number": 31380,
   "kind": "issue",
   "title": "spec/engine: `ragPipelines` is listed in PLURAL_TO_SINGULAR, METADATA_ARRAY_KEYS and two runtime maps, yet no stack can declare it — retire the listings (or implement the collection)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,7 +12,6 @@
   },
   "labels": [
     "domain:spec",
-    "pm:dispatched",
     "priority:p2",
     "tech-debt"
   ],
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-08T05:11:29Z",
-  "updated_at": "2026-11-08T06:50:35Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-08T10:40:03Z",
+  "closed_at": "2026-11-08T10:38:48Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/31380",
   "body": "domain:server#3 · os-project-manager · session_01FEkQ5pXkgNXVpCn2GZDjyy\nFiling gate: ① a declared-but-unreachable collection (declared ≠ enforced), carried from contract review 6717571232 on PR #31375 (out-of-scope finding, escalated to the seat).\nReach: measured by that review on PR #31375's head: `defineStack({ ragPipelines: … })` is refused (the stack schema declares no `ragPipelines` key), while four registries list it. The gate `scripts/check-stack-collection-maps.mjs` waives it as \"DRIFT, recorded not blessed (#6242 row 2)\" — and #6242 is closed, so the drift has no open carrier.\nDedupe (open AND closed): `ragPipelines` → 10 hits, `rag_pipeline` → 7 hits; the only open hit is #30803 (bare-name phase 1, unrelated). #6242 (closed) and #2657 (closed, kinds B/C) are the history.\nReader: the lane triage assigns (the listings sit in `packages/spec` and `packages/objectql`, so the spec red line applies); dispatched from `pm:queue`.\n\n## 维护者速读\n\n- **问题：** `ragPipelines` 被四张表当成一种可声明的元数据集合（spec 的复数→单数映射、引擎的集合键表、metadata 插件和 runtime 各一份），但 `defineStack` 根本不接受这个键，作者写不出来。声明了却到不了，是「声明 ≠ 兑现」。\n- **影响面：** 今天没有用户受害（写不进去）；风险在于 AI 或作者读到这些表，以为平台支持 RAG 管道集合。\n- **需要您做的：** 无。按「零拉动 ⇒ 退役」默认走退役；若您希望实现成真正的集合，那是新能力，会另立决策卡。\n\n## Today (`origin/main` `d0512c2f`+, measured by `git grep -n ragPipelines`)\n\n- `packages/spec/src/meta-spelling/manifest-collection-spelling.ts:93` — `ragPipelines: 'rag_pipeline'` in `PLURAL_TO_SINGULAR` (a published spec export), and its generated copy `meta-url-data.generated.ts:40`.\n- `packages/objectql/src/engine-top-level.ts:4078` — `'ragPipelines'` in `METADATA_ARRAY_KEYS`.\n- `packages/metadata/src/plugin.ts:197` — `ragPipelines: 'rag_pipeline'`.\n- `packages/runtime/src/app-plugin.ts:507` — `'ragPipelines'` in the app-payload probe list.\n- `scripts/check-stack-collection-maps.mjs` — four waiver rows naming `ragPipelines` (`:528`, `:610`, `:645`, `:716`).\n- `packages/spec/src/kernel/metadata-type-schemas.ts:232` — \"`rag_pipeline` is deliberately NOT bound: it has no stack collection to take a schema from\".\n\n## Task (retire route, the default under zero pull)\n\n- [ ] Remove `ragPipelines` from every listing above (and regenerate the generated spelling file); drop the four waiver rows so the gate holds the maps to the schema with no exception for it.\n- [ ] Measure first that nothing reads `rag_pipeline` as a live kind (a `/meta/rag_pipeline` read, a stored item, the URL-spelling contract); if anything does, stop and report — that becomes a decision card (implement vs retire), not this card.\n- [ ] Changeset per published package touched; removing a key from a published spec export is a narrowing, so the PR owes a contract-review-tier review before the queue.\n\n`Clause-②: no (narrowing)` · `Metadata-protocol: narrowed` (only if the dev's measurement shows a reachable reader; otherwise `none`, since no stack can carry the key today).\n\nSuggested-grade: p3 · inert today (no stack reaches it), costs only a misleading declaration.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"

@@ -1,0 +1,34 @@
+{
+  "number": 31527,
+  "kind": "issue",
+  "title": "design(metadata): address behavioural metadata by package — key flows, actions, jobs and other non-object types by (package, name); re-open ADR-0028 (replaces #30806 phase 3 renames)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:server",
+    "enhancement",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-08T13:14:53Z",
+  "updated_at": "2026-11-08T13:19:18Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31527",
+  "body": "domain:server#5 · os-project-manager · session_01FEkQ5o8PE7ZtVjcor51wBZ\n\nFiling gate: ② execution of a maintainer ruling. ⛔ Not a claim.\nRuling-ref:\n- the decision card cmsg_01TenzsRopZj4jMbvjX8uz1XATexDjYzJB6TpMhGjoRmoe, where the maintainer tapped A 「转向包寻址」 at 2026-11-08T13:12:35Z;\n- his message cmsg_01TenzsRopZj4jMbvjX8uz1XJTUSUfKPA7PtpFv3yqsrYs at 2026-11-08T13:13:39Z: 「流程等行为元数据按软件包寻址，立决策卡，现在就所有的元数据类型然后和我沟通。」\n- the context, his message cmsg_01TenzsRopZj4jMbvjX8uz1X1G8FxhmCSVkgRa8qnd66DS: 「你不能只考虑现状，还要考虑长远的合理性；我说的流程不是url挂到对象下，而是挂到软件包下」.\n- The seat's record of the ruling on #30806 is 6721941146.\n\nReader: server seat 5 (`domain:server#5`) drives it. The design PR is Tier H: an ADR under `docs/adr/`, approved and merged by the maintainer only.\nDedupe (open AND closed): `package-scoped addressing`, `ADR-0028 re-open`, `(package, name) metadata identity` → #30806 (phase 3, which this card replaces for behavioural types), #30803, #25403 (ADR-0141 amendment), #31514, #31515.\nreach: every package author, every installed environment, and every by-name reader of behavioural metadata: REST `/meta/*`, actions, MCP, the client SDK, Studio and cloud AI tools.\nclass: d · type: Feature (design)\nGrade: p1, self-graded by the server seat (Ruling-ref: 「定级你可以自己决定」). It replaces #30806 phase 3, which is p1 and `pm:blocking`.\n\n## 维护者速读\n\n按裁决（A「转向包寻址」），流程、动作、作业、共享规则等行为元数据改为按 (软件包, 名称) 寻址，不再要求名字里写前缀；对象仍保留字面前缀（表名）。本卡重开 ADR-0028，产出一份设计 ADR（Tier H，由你审批合并）和执行计划。#30806 第三阶段的改名（S1/S5）撤回，S3 改为\"存储引用加 package 列并回填\"。逐类型的范围表待你按类型裁决后写入本卡。\n\n## Decision already made (not reopened here)\n\n1. **Behavioural metadata is keyed (package, name).** Authors write short names; the package is the namespace. No behavioural name is rewritten, so #30806's S1 and S5 are withdrawn.\n2. **Objects stay literal-prefixed** (ADR-0129 D2): the object name is the physical table name. The ADR must say **why the two tiers differ**.\n3. **Bare-name resolution:**\n   - the same package first;\n   - else a unique holder in the declared dependency closure (ADR-0141);\n   - else a refusal, reusing phase 1's one-holder refusal shape (#30806 phase 1).\n4. **URLs.** By-name URLs gain a package segment. A bare name still resolves when it is unique in the environment, and answers `409` with the candidates otherwise.\n5. **Stored references.** Stored by-name references gain a package column, backfilled from the overlay binding. This replaces #30806 S3's name rewrite.\n6. **Phase 1's backstop stays** as the safety net until this lands.\n\n## Per-type scope\n\n**Pending the maintainer's per-type ruling.** He asked for every metadata type to be evaluated now. That evaluation is in progress with him, and the table (type → keyed by (package, name), or literal-prefixed like objects, or environment-scoped) is written into this card body when he has ruled. ⛔ The design does not pick a type's tier before then.\n\n## What the design must answer (the ADR's sections)\n\n- **Identity:** the ADR-0028 model (`namespace` as an identity dimension) narrowed to the behavioural tier. ADR-0028's Deferred status and its re-open trigger are answered by the ruling.\n- **Every reader and writer of a by-name key**, with the package coordinate each one gains:\n  - the activation ledger's `(type, name)` key;\n  - ADR-0048 §6's runtime key `objectName:name` for object-bound actions and hooks;\n  - `ActionNavItem`, which carries no object or package;\n  - `/meta/:type/:name`, `/actions/:object/:action`, MCP `list_actions` / `run_action` / `agent_prompt` (#31514), the client SDK, Studio's editors and drafts;\n  - cloud's AI tool names (#31515).\n- **Stored references:** the 17 kinds measured in #30806's plan §2 (`/mnt/project-files/pm-orders/server/30806-plan.md`), each with its package column and backfill source, and what happens to a reference whose holder is ambiguous. Ambiguous references are never rewired silently.\n- **Overlays and customizations:** how `<base>.custom` and org overlays (ADR-0005) carry the package coordinate.\n- **Upgrade and an already-deployed app:** what a customer's existing metadata app sees, with no rename and no alias window. Under the startup rule an alias spelling retires immediately unless a named external user needs it.\n- **Execution plan:** slices in PR order, replacing #30806's S1–S5, each with its Clause-② and narrowing arm.\n\n## Inputs\n\n- #30806: the plan 6719833098, the seat records 6721537981, 6721596287 and 6721941146, and the S1 measurements (`/mnt/project-files/pm-orders/server/30806-s1-measurements.md`);\n- ADR-0028, ADR-0048, ADR-0129, ADR-0141;\n- the design thread's evaluation, which the seat hands to the dev.\n\n## Out of scope\n\n- Objects' naming (ADR-0129 stands).\n- Shipping code. This card produces the ADR and the execution plan; each slice is its own card.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_\n"
+}

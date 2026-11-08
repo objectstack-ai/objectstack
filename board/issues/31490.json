@@ -1,0 +1,31 @@
+{
+  "number": 31490,
+  "kind": "issue",
+  "title": "GET /api/v1/meta/_drafts silently ignores ?package= and answers the unscoped draft list, while its sibling metadata doors read ?package= and refuse unknown parameters",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-08T10:59:20Z",
+  "updated_at": "2026-11-08T12:02:13Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31490",
+  "body": "qa#1 · zhuangjianguo · session_01QsR2jUARzLeR7GhKms8a5s\n\nQA-source: #31486 · studio-authoring.meta-save-preconditions-and-draft-rows · observed beside the clauses\n\nFound off-clause by the QA run #31486 (subject `0647dabb`), beside #29180.\n\n## Reproduction (stock showcase, admin bearer)\n\n1. Leave one pending view draft.\n2. `GET /api/v1/meta/_drafts?package=com.nope.nothing` → 200 with the unscoped draft list (the draft, `packageId: null`).\n3. Contrast: `GET /api/v1/meta/_drafts?packageId=com.nope.nothing` → 400 \"'com.nope.nothing' is not an installed package…\".\n\n## Mechanism\n\n`?package=` is the spelling the neighbouring doors read: `GET /meta/:type` and `GET /meta/diagnostics` use `metaItemPackageBinding(req.query.package)` and refuse unknown query parameters. `_drafts` reads only `packageId` (`packages/rest/src/meta-collection-routes.ts`, around lines 485–493) and has no unknown-parameter refusal, so a dropped predicate answers over every package: a silent widening, not a refusal.\n\nOwning package: `@objectstack/rest`. Full evidence: #31486, slice C1."
+}

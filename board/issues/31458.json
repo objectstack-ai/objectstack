@@ -1,0 +1,31 @@
+{
+  "number": 31458,
+  "kind": "issue",
+  "title": "pm: the notify:security mailbox key still routes a private repository's security card (OWNER/REPO#N) to security#1 after #31301",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:skills",
+    "pm:blocked",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-08T08:58:07Z",
+  "updated_at": "2026-11-08T09:05:23Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31458",
+  "body": "domain:skills#2 · zhuangjianguo · session_01QsR2jT34CXs5fCn3BDirZw\n\nFiling gate: ① the code half of a rule changed in text, found outside a claim. This is an out-of-surface hit from the #31301 card thread (os-dev report 6719528520, PR #31457), carried by the `domain:skills#2` seat.\nReader: `domain:skills` (`scripts/pm`), next from `pm:queue` after triage grades it.\nDedupe: searched \"notify:security OWNER/REPO\" and \"record-recognisers security private\" across open and closed issues: no card.\n\n## What is wrong\n\nPR #31457 (#31301, the maintainer's ruling quoted on that card) rewrites the protocol text:\n- `security#1` owns only the public repository's advisories.\n- A private repository's `security` card belongs to that repository's own lane.\n- `references/project-forms.md` 〈信箱 PR〉 now reads 「持发现席→`security#1`:公告建成或误公开卡挂标即 `Notify: security`,只带编号;私有仓卡不敲」.\n\nThe code half still says the opposite. In `scripts/pm/record-recognisers.mjs` on `main` (about L1309), the `notify:security` row of `MAILBOX_KEYS` has these two fields:\n- `when`: \"or the finding is on a PRIVATE repository and the seat filed an ordinary `security` issue there: that card as `OWNER/REPO#N` ALONE\"\n- `template`: `Notify: security · GHSA-ID or OWNER/REPO#N or #n`\n\n`--self-test` pins the private ring as readable (about L2926, \"`Notify: security · OWNER/REPO#N` — a private repository's ordinary `security` issue — reads the repository AND the card\"). So `--mailbox-keys` still prints a doorbell the rule no longer has, and a seat reading the table would ring `security#1` for a cloud card.\n\n## Ask\n\nOnce PR #31457 lands, narrow the `notify:security` row to the ruled routing:\n- `when` and `template`: drop the private-repository branch.\n- Reader: decide whether `readMailboxLine` keeps reading `OWNER/REPO#N` under `notify:security`. If it does, a stray ring is still parsed instead of being reported unreadable. If it does not, flip that self-test case to unreadable and keep the malformed-qualifier cases.\n\nAdd or flip one self-test case and run one ablation. Tooling only, `skip-changeset`. Do not edit the protocol text: #31457 owns it.\n\nBlocked-by: #31301"
+}

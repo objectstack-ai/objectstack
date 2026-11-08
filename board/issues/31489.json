@@ -1,0 +1,34 @@
+{
+  "number": 31489,
+  "kind": "pull_request",
+  "title": "docs(qa): start QA rounds on the maintainer's word and add the scenario half",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-08T10:59:02Z",
+  "updated_at": "2026-11-08T11:19:43Z",
+  "closed_at": "2026-11-08T11:19:41Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-08T11:19:41Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/31489",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"zhuangjianguo\"} -->\n_Requested by **Steedos** · [project thread](https://claude.ai/code/project/chan_018ETKaNwMZCNRYD7D8Q9Ubb?thread=cmsg_018ETKaNwMZCNRYD7D8Q9Ubb9R81zJBEnwtS9WxYnDKFP7)_\n\nFixes #31434\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么：QA 席不再按每周定时跑，改为你说「一波开发完了」才开一轮；每轮在清单回归之外加跑场景库的 `starter` 卡（用本仓未发布的包）。\n- 为什么改：照你在 QA 席会话里的两句裁决「也不需要每周跑，一波开发完了，我会和你说」与「纳入，本轮一起跑，立卡交 skills 车道」。\n- 风险与回滚：只改三份内部规则文本，不动任何脚本、选择器（`owed:weekly` 原样）或产品代码；回滚即 revert 本 PR。\n- 先看：`.claude/skills/pm-dispatch/references/lanes/qa.md`（〈每轮〉新增四行场景半边）、`.claude/skills/checklist-test/SKILL.md` §6、`lanes/skills.md` 第 25 行。\n- 两分钟验证：`pnpm check:pm-skill-ratchet`，预期三份文件行数都在上限内、全绿（qa.md 29/29，SKILL.md 279/279，skills.md 32/33）。\n- 需要你做的：无，席位落地（Tier S，契约复审归总监席）。\n\n## What changes\n\n- `lanes/qa.md` 〈座位与唤醒〉: the weekly Routine fire is gone; a round opens when the maintainer says a development wave is done, and a post-release round still runs the npm smoke. The \"first round, then every fire\" line is removed (its content is the next section's first line).\n- `lanes/qa.md` 〈每轮〉: the scenario half, four lines: the `starter` cards of `docs/qa/scenarios` with `--modes scratch --packages workspace` (a wave is unreleased); one card per command (`--only ID`, the 2-hour background cap) and at most two in parallel per container, citing `packages/qa/scenarios/README.md` 〈Running the cards in a Claude Code cloud session〉 for the subscription `oauth_token` login, the two API variables left unset and a permission mode other than Auto (named, not restated); the scorecard goes in the round report, not a `qa-run` record; a failing half judged a product defect is extracted like a checklist `fail`, its `QA-source:` line pointing at the round.\n- `lanes/qa.md` 〈边界〉: a QA wave (release-candidate full run, maintainer-named target) stays maintainer-triggered and distinct from the wave-end rounds; the seat runs the section 6 routines plus the scenario half.\n- `checklist-test` section 6 points at `lanes/qa.md` for when a round opens (one written copy of the cadence); \"weekly / last week\" become \"routine / last round\" in section 6 and in retest trigger 4 of section 5.\n- `lanes/skills.md` line 25: the section 6 routines and the scenario half run per development wave and are not a QA wave.\n\nLine budget, paid inside each file (no re-wrap): `qa.md` 29 → 29 (four scenario lines paid by deleting the first-round line, folding the `retest-owed` line into the four-record line, and replacing the three restated section 5 lines on closing and Supersede with one pointer); `checklist-test/SKILL.md` 279 → 279; `lanes/skills.md` 32 → 32. Every changed line is at most 120 bytes.\n\nFacts checked against `main` before writing: the six `starter` cards are the top-level `tier` of `asset_lifecycle`, `leave_balances`, `order_to_cash`, `requisition_to_receipt`, `service_desk` and `travel_expense`; `--only`, `--modes scratch` and `--packages workspace` are parsed in `packages/qa/scenarios/src/runner/cli.ts`; the API-billing refusal is `API_BILLING_ENV` in `driver.ts`. No script reads `owed:weekly` (`git grep` hits only the two rule files), so no selector moves.\n\n## Why\n\nThe maintainer's two rulings quoted above, recorded on the card.\n\n## Verification\n\n17 derived gates on head `7d0c77e4`, every one exit 0, reconciled with `dispatch-gates --ran` (17 derived, 17 run, 0 NOT-MEASURED); after merging `main` (head `d983bdef`, no overlap with these files) `check:pm-skill-ratchet` and `check:pm-skill-id-lint` re-ran, exit 0.\n\n<details><summary>Gate commands</summary>\n\n```text\nnode scripts/check-closing-keyword-parity.mjs :: exit 0\nnode scripts/check-closing-keyword-parity.mjs --self-test :: exit 0\nnode scripts/check-comment-mask-corpus.mjs :: exit 0\nnode scripts/pm/check-harness-current.mjs --self-test :: exit 0\npnpm --filter @objectstack/lint run check:doc-formula-expressions :: exit 0\npnpm check:agent-test-spelling :: exit 0\npnpm check:cross-package-test-inputs :: exit 0\npnpm check:doc-authoring :: exit 0\npnpm check:driver-memory-census :: exit 0\npnpm check:gitlink-declared :: exit 0\npnpm check:nul-bytes :: exit 0\npnpm check:pm-governed-merges :: exit 0\npnpm check:pm-skill-id-lint :: exit 0\npnpm check:pm-skill-ratchet :: exit 0\npnpm check:refd-timer-probe :: exit 0\npnpm check:skill-frame-sync :: exit 0\npnpm check:watch-hint-literal :: exit 0\n```\n\n</details>\n\n## Acceptance notes\n\n- `skip-changeset`: `.claude/**` only, nothing publishes.\n- Governed surface `.claude/**` (Tier S): lands on a contract-review record for the current head.\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic. (n/a)\n- [x] 2. Every name I added uses the casing for its kind. (n/a)\n- [x] 3. No formatter ran; `pnpm lint` passes. (no code)\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset. (publishes nothing)\n- [x] 6. `packages/spec` touched: its generated artifacts are regenerated and committed. (n/a)\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01QsR2jUgpaxRFL1ara3J4y8)_\n"
+}

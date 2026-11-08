@@ -1,0 +1,36 @@
+{
+  "number": 31453,
+  "kind": "issue",
+  "title": "settings translations: a columns group so a map setting's key and column headers translate (item 7 of #31391)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:spec",
+    "enhancement",
+    "priority:p3"
+  ],
+  "assignees": [
+    "marchtian"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-08T08:37:50Z",
+  "updated_at": "2026-11-08T11:50:52Z",
+  "closed_at": "2026-11-08T11:49:21Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31453",
+  "body": "domain:ui#3 · zhuangjianguo · session_01QsR2jVEjiYrK7onirxUGyo\n\ncarries item 7 of #31391; #31391 keeps items 1–6 and 8 (PR #31451).\n\nFiling gate: **④ coordination child**, the spec layer of #31391 item 7, under #30208 row 5 (ruling record 6715997428, option A).\nBusiness reason: an administrator using Setup in Chinese (or any non-English locale) sees Data Lifecycle's map tables headed in English (`Object`, `Keep rows for`, `Expire rows after`, `Max rows`, `Lifecycle class`) beside translated labels and help text. Until this lands, those five headers cannot be translated by any bundle.\nReader: a `domain:spec` seat first (the translation schema), then the `domain:ui` seat (the console reads the new group; a small follow-up in `ui/apps/console/src/pages/settings/SettingsMapField.tsx`).\nDedupe (open AND closed): `map specifier columns translation`, `keyColumn label translation` → #31391 and #30208 only; none is this group.\nreach: Setup → Data Lifecycle in any non-English locale, once PR #31451 draws the map tables (the headers render `keyColumn.label` / `columns[].label` as served).\n\n## 维护者速读\n\n数据生命周期的三张 map 表（保留期覆盖、行数配额、按类默认配额）表头是英文字面量，现在没有地方可以翻译。要在设置的翻译结构里给每个键加一个 `columns` 分组（键列 + 各值列的标签），控制台再读它。存储与保存门不变。\n\n## Readings (`origin/main` `216b18a6c`)\n\n- The literals: `packages/objectql/src/lifecycle/lifecycle-settings.ts` ~L51–80 (`keyColumn: { label: 'Object' }`, `{ name: 'maxAge', label: 'Keep rows for' }`, `{ name: 'expireAfter', label: 'Expire rows after' }`, `{ name: 'max_rows', label: 'Max rows' }`, `keyColumn: { label: 'Lifecycle class' }`).\n- The settings `keys.<key>` translation entry in `packages/spec/src/system/translation.zod.ts` has no `columns` group (the card #31391 body, item 7: \"Translating them needs a `columns` group in the settings `keys.<key>` translation entry … and ui's copies of that schema\").\n- PR #31451 renders the headers through `pickLocalized`, so an inline locale map would already show; a bundle-keyed group is what is missing.\n\n## Expected\n\n1. Spec: the settings `keys.<key>` translation entry gains an optional `columns` group (the key column's label and each value column's label, by column `name`), with the strictness the sibling groups use.\n2. The lifecycle settings' zh-CN (and other shipped) bundles carry the five headers.\n3. Console: the map control reads the group (ui follow-up on this card or a child, as the spec seat cuts it).\n\nRefs #31391, #30208"
+}

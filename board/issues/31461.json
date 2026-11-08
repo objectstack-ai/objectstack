@@ -1,0 +1,31 @@
+{
+  "number": 31461,
+  "kind": "pull_request",
+  "title": "docs(skills): seed replace deletes nothing; minimal preset still mounts job and queue",
+  "state": "open",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "pm:awaiting-merge",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-08T09:14:32Z",
+  "updated_at": "2026-11-08T09:46:04Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/31461",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"zhuangjianguo\"} -->\n_Requested by **Steedos** · [project thread](https://claude.ai/code/project/chan_018ETKaNwMZCNRYD7D8Q9Ubb?thread=cmsg_018ETKaNwMZCNRYD7D8Q9Ubb1MwwZcM4s82KjfqCmKfFrE)_\n\nFixes #31379\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- **改了什么**:平台技能 Seed Data 一行不再把种子模式 `replace` 标成「数据丢失」,改为「从不删除、会重复」;`PLATFORM_ALWAYS_ON_CAPABILITIES` 的注释补全 `--preset minimal` 下仍会挂载 `job`/`queue`/`email` 的情形。\n- **为什么改**:实测加载器的 `replace` 只做插入,一行都不删;旧文案吓退本该可用的场景,却漏说真正的风险(重复行)。注释原说 minimal「完全退出」,与 `resolveServedCapabilities` 实际行为不符。\n- **风险与回滚**:仅教学文字与代码注释,无行为变化;回滚即 revert 本 PR。\n- **先看**:`skills/objectstack-platform/SKILL.md`(Seed Data 段两行)、`packages/spec/src/kernel/platform-capabilities.ts`(L347-351 注释)。\n- **两分钟验证**:`node scripts/check-skills-token-ratchet.mjs`,预期平台 SKILL.md 仍为 5994 tokens(上限 6011),退出码 0。\n- **需要你做的**:审阅并批准(技能面属 Tier H,需维护者落地)。\n\n## What changes\n\n- `skills/objectstack-platform/SKILL.md` § Seed Data: `replace` ⚠️ **data loss** becomes `replace` ⚠️ never deletes, duplicates. Every `SeedMode` member stays named (the `seed-modes` liveness binding). The growth is paid in the same paragraph (\"rows that already exist —\" becomes \"existing rows:\"), on the same two lines.\n- `packages/spec/src/kernel/platform-capabilities.ts` TSDoc on `PLATFORM_ALWAYS_ON_CAPABILITIES`: `--preset minimal` opts out of the slate, but `resolveServedCapabilities` (`packages/core/src/capability-composition.ts`) still mounts `job` and `queue` first when `email`, `approvals` or `auth` is present (`NEEDS_JOB_AND_QUEUE`), and mounts `email` whenever `auth` is. Comment only.\n- `.changeset/31379-seed-replace-minimal-preset-text.md`: `'@objectstack/skills': patch`. No `@objectstack/spec` entry: the Check Changeset job requires a changeset, not one per moved package, and the spec edit is a comment.\n\nThe `SeedMode` comment in `packages/spec/src/data/seed.zod.ts` and `skills/objectstack-data/references/seeds.md` were already right and are unchanged.\n\n## Tests\n\nThe loader measurement that decided which text was wrong, on `0c4f621e`'s parent `4941c40b`:\n\n<details><summary>Seed loader <code>replace</code> over existing rows (throwaway probe, not committed)</summary>\n\nThe real `SeedLoaderService` over an in-memory engine double holding two rows, `gold` (matched by the dataset's `externalId: 'name'`) and `legacy` (not in the dataset). Dataset: `mode: 'replace'`, records `gold` and `silver`.\n\n```\nmultiPass=false before=2 after=4 deleteCalls=0 updateCalls=0 totalInserted=2\n  rows: pre-1:gold:1, pre-2:legacy:9, gen-1:gold:2, gen-2:silver:3\nmultiPass=true  before=4 after=6 deleteCalls=0 updateCalls=0 totalInserted=2\n  rows: + gen-3:gold:2, gen-4:silver:3\n```\n\n`replace` deleted nothing (the row outside the dataset survives), left the matched row as it was, and inserted every record again on each load. Code: `writeRecord`'s `case 'replace'` only calls `engine.insert`, and `decideWriteAction` groups `replace` with `insert`.\n</details>\n\n- `pnpm --filter @objectstack/spec exec vitest run --maxWorkers=2 src/kernel/platform-capabilities.test.ts`: 35/35 passed.\n- `pnpm --filter @objectstack/spec typecheck` under the verify lock: VERDICT command-exit 0.\n\n## Acceptance notes\n\n- `skills/**` readings, origin/main `4941c40b` vs head: `skills/objectstack-platform/SKILL.md` 411 → 411 lines, 23994 → 23993 bytes, 5994 → 5994 tokens (ceiling 6011); all SKILL.md files 4553 → 4553 lines; bundle total 237077 → 237077 tokens.\n- The order's file surface names `skills/objectstack-platform/references/seeds.md`, which does not exist; the seeds reference is `skills/objectstack-data/references/seeds.md`, already correct and untouched.\n\n## Verification\n\n<details><summary>Derived gates: 93 derived, 92 exit 0, 1 NOT MEASURED</summary>\n\n`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` at `0c4f621e`: 93 commands; 92 exit 0. `pnpm check:dual-build-cjs-loads` exit 3 (PREREQUISITE NOT MET: needs every package's dist; left to CI). `--ran` reconciliation: 93 accounted, 92 run, 1 NOT-MEASURED, 0 UNRUN.\n\nAfter merging `origin/main` (head `ded443ab`, no incoming change to a touched file), re-run: `check-skills-token-ratchet`, `check:skill-identifier-liveness`, `check:skill-links`, `check-changeset-no-major`, `check-empty-changeset`, spec `check:docs`, `check:nul-bytes`, all exit 0.\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01QsR2jT9oVmjxA38pKor1tX)_\n"
+}

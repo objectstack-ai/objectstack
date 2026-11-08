@@ -2,7 +2,7 @@
   "number": 31432,
   "kind": "pull_request",
   "title": "feat(scripts): skills link/anchor gate and three liveness-exhaustive sections",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -14,7 +14,6 @@
     "ci/cd",
     "dependencies",
     "documentation",
-    "pm:awaiting-merge",
     "size/l",
     "tooling"
   ],
@@ -22,10 +21,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-08T07:50:59Z",
-  "updated_at": "2026-11-08T08:17:00Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-11-08T08:36:54Z",
+  "closed_at": "2026-11-08T08:35:52Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-11-08T08:35:52Z",
   "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/31432",

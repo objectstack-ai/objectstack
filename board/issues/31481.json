@@ -1,0 +1,33 @@
+{
+  "number": 31481,
+  "kind": "issue",
+  "title": "cloud-connection: an unmanaged grant that the install-local door refuses before the import leaves the control plane's grant row with no environment audit row",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "enhancement",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-08T10:39:37Z",
+  "updated_at": "2026-11-08T14:01:12Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31481",
+  "body": "domain:server#3 · os-project-manager · session_01FEkQ5pXkgNXVpCn2GZDjyy\n\nFiling gate: ① a gap in a maintainer ruling's delivery. cloud#3624 ruling A is 「A + 两边审计 + 转发安装人」 (both sides audited). Carried from the #30964 dev report 6720213406 (`out_of_scope_findings[1]`, carrier none) and contract review 6720446134 on PR #31475 (S4).\nReach: a hosted environment where a user's unmanaged install is granted by the control plane, and the install-local door then refuses it before the import runs. That happens on a capability 403, a handshake refusal, a manifest fetch failure or the walled-catalog refusal. The control plane has recorded its grant row, and the environment writes no `package_unmanaged_import` row, so the audit trail shows a grant with no outcome. Read from the PR #31475 diff at `359ed69a`. Not measured on a live boot.\nDedupe (open AND closed): \"unmanaged grant audit\" → 23 hits, \"target_namespace forward\" → 1. None is this gap. The nearest is #30964, which ships the success and import-failure row.\nReader: the `domain:server` seat that owns cloud-connection, from `pm:queue`, after PR #31475 lands.\n\n## 维护者速读\n\n- **问题：** 云端控制面批准了一次非托管安装，环境侧的 install-local 门却在真正导入之前拒绝了它（无权限、握手失败、清单取不到、目录被墙）。这时环境不写审计行，控制面那一行就没有对应的结果。\n- **影响面：** 审计追溯。管理员能看到“批准了”，却看不到“没装成、为什么”。数据不受影响，因为什么都没复制。\n- **需要您做的：** 无。\n\n## Task\n\n- [ ] For every refusal after the grant, hand plugin-audit's writer one `package_unmanaged_import` event with `outcome: 'failure'` and the door's code and status. That means a refusal of `copyOnUnmanagedGrant`, or of `handleInstall` when `installMode === 'unmanaged'` and the call comes from the grant path. Go through the `audit` slot, never a hand-built row.\n- [ ] Pin red first, then green: each of the four refusals writes exactly one failure row, a success still writes one success row, and a plain install-local call that the grant path did not start writes none. Ablate the pin.\n- [ ] State in the PR whether any refusal before the grant should also be audited. Don't change it here.\n\n`Clause-②: no` (one more value in a row the PR #31475 action already writes) · `Metadata-protocol: none`.\n\nPrecondition: PR #31475 (#30964) merged. Until then this card is `pm:blocked`.\n\nSuggested-grade: p2 (it completes a ruling's \"both sides audited\").\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

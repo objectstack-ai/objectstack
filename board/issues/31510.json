@@ -1,0 +1,36 @@
+{
+  "number": 31510,
+  "kind": "pull_request",
+  "title": "chore(changeset): declare the delete_package tool-name widening of #31037 as minor / added",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xs",
+    "tooling"
+  ],
+  "assignees": [
+    "marchtian"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-08T12:00:50Z",
+  "updated_at": "2026-11-08T12:33:59Z",
+  "closed_at": "2026-11-08T12:33:57Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-08T12:33:57Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/31510",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"marchtian\"} -->\n_Requested by **田騏** · [project thread](https://claude.ai/code/project/chan_01VmuUhXU9SSUzqJYyXSmYSi?thread=cmsg_01VmuUhXU9SSUzqJYyXSmYSi5J6nJimd74SxqQG1aJ98pr)_\n\nFixes #31471\n\nClause-②: yes (widening)\nMetadata-protocol: added\n\n## 维护者速读\n\n- **改了什么**：只改一个尚未发版的 changeset（`.changeset/cloud-3656-spec-delete-package-tool-name.md`）的三行申报：`@objectstack/spec` 从 patch 改为 minor，`Clause-②` 从 no 改为 yes (widening)，`Metadata-protocol` 从 none 改为 added。正文不动，不改任何代码。\n- **为什么改**：#31037 把 `delete_package` 加进平台工具名登记表后，技能的 `tools[]` 写 `delete_package` 从「被 lint 报为虚构工具」变成「通过」，这是一次放宽，却按 patch 申报；下次发版的版本号和发版说明会因此写错。同一登记表此前的 `read_package_doc`、`draft_record` 都按 minor / added 申报。\n- **风险与回滚**：无运行时变化，只影响下次发版 `@objectstack/spec` 升 minor 而非 patch、以及发版说明的分类；回滚即还原本 PR。\n- **先看**：`.changeset/cloud-3656-spec-delete-package-tool-name.md` 的 frontmatter 和两行申报。\n- **两分钟验证**：`node scripts/check-changeset-no-major.mjs --base origin/main` 应退出 0；`check-empty-changeset` 会按设计红（改了别人的待发 note），这是本 PR 申报的 DELIBERATE CORRECTION。\n- **需要你做的**：无，席位落地。\n\n## What changes\n\nOne pending changeset, three declaration lines. The body sentence is unchanged.\n\n```diff\n-'@objectstack/spec': patch\n+'@objectstack/spec': minor\n-Clause-②: no\n-Metadata-protocol: none\n+Clause-②: yes (widening)\n+Metadata-protocol: added\n```\n\n## Why\n\n#31037 added `delete_package` to `PLATFORM_TOOLS_BY_PACKAGE['service-ai-studio']`, so `PLATFORM_PROVIDED_TOOL_NAMES` carries it. A skill whose `tools[]` names `delete_package` was refused by the ADR-0109 reference-integrity lint before and is accepted now: one more accepted `skill.tools[]` value, which is a widening of what a metadata author can write (`Metadata-protocol: added`, at least `minor` per AGENTS.md Post-Task Checklist item 3). The same registry's earlier additions were declared this way: `packages/spec/CHANGELOG.md` entries 0fb0dda (`read_package_doc`, `search_package_docs`) and 99a6a78 (`draft_record`).\n\n## DELIBERATE CORRECTION\n\nThis PR rewrites a pending release note it did not add: `.changeset/cloud-3656-spec-delete-package-tool-name.md` (from #31037). It is unconsumed on `main`, so the correction reaches the next release. `check-empty-changeset` refuses a foreign changeset edit and stays red by design; restoring the note from the base would put the false declaration back. The corrected sentences, before → after:\n\n- `'@objectstack/spec': patch` → `'@objectstack/spec': minor`\n- `Clause-②: no` → `Clause-②: yes (widening)`\n- `Metadata-protocol: none` → `Metadata-protocol: added`\n\nThe prose paragraph (`The cloud build agent gains a delete_package tool …`) is byte-identical. The dispatching seat confirms this by its ACCEPT (text-only diff).\n\n## Verification\n\nEvery command `node scripts/pm/dispatch-gates.mjs --commands` derives for this diff, run after `pnpm install --frozen-lockfile`, at head on base `7d0b47ca`:\n\n<details><summary>19 commands: 18 exit 0, 1 designed red</summary>\n\n```\nnode scripts/check-adr-0087-registration.mjs --base origin/main :: exit 0\nnode scripts/check-adr-0087-registration.mjs --self-test :: exit 0\nnode scripts/check-changeset-no-major.mjs --base origin/main :: exit 0\nnode scripts/check-closing-keyword-parity.mjs :: exit 0\nnode scripts/check-closing-keyword-parity.mjs --self-test :: exit 0\nnode scripts/check-comment-mask-corpus.mjs :: exit 0\nnode scripts/check-empty-changeset.mjs --base origin/main :: exit 1   (DELIBERATE CORRECTION, designed red)\nnode scripts/check-empty-changeset.mjs --self-test :: exit 0\nnode scripts/ci/snapshot-next.mjs --self-test :: exit 0\nnode scripts/pm/release-rehearsal-clone.mjs --self-test :: exit 0\nnode scripts/release-pending-publish.mjs --self-test :: exit 0\npnpm check:changeset-gate-self-tests :: exit 0\npnpm check:closed-ceremony-text :: exit 0\npnpm check:driver-memory-census :: exit 0\npnpm check:gitlink-declared :: exit 0\npnpm check:nul-bytes :: exit 0\npnpm check:published-files :: exit 0\npnpm check:refd-timer-probe :: exit 0\npnpm check:watch-hint-literal :: exit 0\n```\n\n</details>\n\nNo package source is touched, so there is nothing for `pnpm lint` or `pnpm test` to judge. No Fable review: the order rules this a declaration-only changeset correction that the seat checks in its ACCEPT.\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic. (No schema touched.)\n- [x] 2. Every name I added uses the casing for its kind. (No name added.)\n- [x] 3. No formatter ran; `pnpm lint` passes. (No linted source touched.)\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset.\n- [x] 6. `packages/spec` touched: its generated artifacts are regenerated and committed. (Not touched.)\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English (the 维护者速读 block is the repo's own Chinese reader section).\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_017ihL2ewcqUbQzXVAqunoky\n\n<!-- signed: domain:spec#4 · marchtian · session_017ihL2eAG5J8aqAyPZif4BJ -->\n"
+}

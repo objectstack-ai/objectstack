@@ -1,0 +1,33 @@
+{
+  "number": 31508,
+  "kind": "issue",
+  "title": "permission: four texts still say allowRestore / allowPurge \"return with M2\" after #30237 PR 4 corrected the tombstones (migration entry 18, conversion entry 18, ui permission slice, metadata plugin comment)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "domain:spec",
+    "pm:dispatched",
+    "priority:p3"
+  ],
+  "assignees": [
+    "marchtian"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-08T11:58:06Z",
+  "updated_at": "2026-11-08T13:52:14Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31508",
+  "body": "domain:server#3 · os-project-manager · session_01FEkQ5pXkgNXVpCn2GZDjyy\n\nFiling gate: ③ stale prose. #30237 PR 4 (PR #31438) corrects the `allowRestore` / `allowPurge` tombstone texts under the maintainer's consent (card #30237 comment 6720657486): restore and purge exist (ADR-0148), and their grants are `allowRestoreOwnDeleted` / `manageRecycleBin`. Four more texts outside that consent still say the keys \"return with M2\". The card thread listed them in its round-1 handback.\nReach:\n- `packages/spec/src/conversions/entries/18/permission-allow-restore-purge-removed.ts`: its `summary`, which `os migrate meta` prints to authors upgrading old metadata.\n- `packages/spec/src/migrations/entries/semantic/18.permission-restore-purge-bits-retired.ts`, plus its generated row in `packages/spec/src/migrations/registry.ts`.\n- `ui/packages/app-shell/src/views/metadata-admin/permission-slice.ts`: code comments.\n- `packages/metadata/src/plugin.ts` (~:1207): a code comment.\nDedupe (open AND closed): `\"M2\" allowRestore` found no card for these texts. The nearest are #30237 and #30847 (skills docs).\nReader: the spec lane (`domain:spec`), after PR #31438 merges. The ui comment can ride along or go to the ui lane.\n\n## 维护者速读\n\n- **问题：** 旧权限键 `allowRestore` / `allowPurge` 的墓碑文字已在 PR #31438 中改成「操作已存在，请改用 `allowRestoreOwnDeleted` / `manageRecycleBin`」。另有四处仍写「随 M2 回归」，其中第 18 号转换条目的摘要会由 `os migrate meta` 打印给作者看。\n- **影响面：** 升级旧元数据的作者会读到错误指引；另外两处只是代码注释。\n- **需要您做的：** 第 18 号迁移和转换条目是历史版本记录。spec 车道会先判断这类条目能不能改文字，如果需要您同意，会经评估线程问您。\n\n## Task\n\n- [ ] Decide whether a released migration or conversion entry's prose may be reworded. Look for an immutability pin or a precedent. If it may, point the `summary` and the semantic entry at `allowRestoreOwnDeleted` / `manageRecycleBin` (ADR-0148) and regenerate the registry. If it may not, record why on this card.\n- [ ] Fix the two code comments (metadata `plugin.ts`, ui `permission-slice.ts`).\n- [ ] Prose only. No accept-set, conversion behaviour or tombstone change.\n\n`Clause-②: no` · `Metadata-protocol: none`.\n\nPrecondition: PR #31438 merged. Until then this card is `pm:blocked`.\n\nSuggested-grade: p3.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 31496,
+  "kind": "issue",
+  "title": "POST /api/v1/email/send with a JSON array body answers 400 VALIDATION_FAILED instead of the INVALID_REQUEST the route gives every other non-object body",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "pm:dispatched",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-08T11:02:43Z",
+  "updated_at": "2026-11-08T13:03:10Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31496",
+  "body": "qa#1 · zhuangjianguo · session_01QsR2jUARzLeR7GhKms8a5s\n\nQA-source: #31486 · integration-system.email-template-render · acceptance[7]\n\nFound by the QA run #31486 (subject `0647dabb`) while driving `integration-system.email-template-render` acceptance[7]. The runner scored that clause on the ledgered 400; the code mismatch is carded here.\n\n## Reproduction (stock showcase, admin holding manage_platform_settings)\n\n`POST /api/v1/email/send` with the body `[1,2]` → 400 VALIDATION_FAILED \"subject is required\".\n\nExpected (the clause, and the route's own contract): a non-object body → 400 INVALID_REQUEST \"JSON body required\", before the message reaches the email service.\n\n## Mechanism\n\n`packages/rest/src/email-routes.ts` line 268: `if (!body || typeof body !== 'object')`. An array is `typeof 'object'`, so it passes the route's own check and the service then refuses it as a bad message shape. The same file's address reader (line 130) already excludes arrays with `Array.isArray(value)`.\n\nOwning package: `@objectstack/rest`. Full evidence: #31486, slice C3a."
+}

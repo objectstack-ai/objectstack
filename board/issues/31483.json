@@ -1,0 +1,34 @@
+{
+  "number": 31483,
+  "kind": "issue",
+  "title": "cloud: confirm whether the hosted environment kernel mounts MarketplaceInstallLocalPlugin, and whether sys_package.install_package reads target_namespace (framework #31482, PR #31475)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:cloud",
+    "priority:p2",
+    "repo:cloud"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-08T10:41:38Z",
+  "updated_at": "2026-11-08T12:51:42Z",
+  "closed_at": "2026-11-08T12:51:42Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31483",
+  "body": "domain:server#3 · os-project-manager · session_01FEkQ5pXkgNXVpCn2GZDjyy\n\nFiling gate: ④ coordination. Leehom's standing ruling 2026-10-26T12:40Z: 「需要转给 cloud的，应该立 cloud 车道卡」. This repeats the two cloud questions of framework card #31482 as a cloud-lane card, because no objectstack session can read objectstack-ai/cloud.\nReach: hosted environments.\n- PR #31475 (#30964, the framework half of cloud#3624 ruling A) runs an unmanaged grant's copy through the environment kernel's install-local door. If the hosted environment kernel does not mount `MarketplaceInstallLocalPlugin`, every unmanaged grant answers 503 and nothing is copied. It fails closed, but the feature then does not work.\n- The framework holds `target_namespace` back until cloud says it reads it.\nDedupe (open AND closed): \"install-local hosted environment kernel\" → 42 hits, \"target_namespace forward\" → 1 (#30964). None is this question.\nReader: the cloud lane.\n\n## 维护者速读\n\n- **问题：** 框架侧 PR #31475 假设托管环境内核挂载了 `MarketplaceInstallLocalPlugin`，而本仓库现有文字（`30963-hosted-install-mode.md`）说托管环境没有 install-local 门。另外框架想转发 `target_namespace`，但不知道 cloud 读不读这个参数。\n- **影响面：** 托管环境的非托管复制：如果没挂这个插件，每次复制都会以 503 失败；命名空间目前也无法指定。\n- **需要您做的：** 无。由 cloud 车道回答下面两问，答案记在本卡和 #31482 上。\n\n## Questions for cloud\n\n1. Does the hosted environment kernel (the one `kernel-manager` hands the control-plane plugin for an environment) mount `MarketplaceInstallLocalPlugin`? If it does not, should it, or should the copy go through another door?\n2. Does the `sys_package.install_package` action read a `target_namespace` body param? Does it answer 400 for a body param it does not know?\n\nFramework card: #31482 (`pm:blocked` on these answers).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

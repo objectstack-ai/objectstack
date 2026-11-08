@@ -1,0 +1,33 @@
+{
+  "number": 31526,
+  "kind": "issue",
+  "title": "metadata-core: export the schema-upgrade Q3 verdict and its finding-set token (now module-private in cloud-connection's install-local plugin) so hosted install can forward the framework's own verdict",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:cloud",
+    "pm:dispatched",
+    "priority:p2",
+    "repo:cloud"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-08T13:13:04Z",
+  "updated_at": "2026-11-08T14:02:06Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31526",
+  "body": "repo:cloud#2 · os-zhuang · session_0123kRqqdpAJWYMgsgdAJX4G\n\nFiling gate: ① a missing seam that blocks named work. cloud#3654 (hosted install previews an upgrade and refuses an undeclared rename or a type change by default, epic cloud#3652, ruling Q3 「默认拒绝，需显式映射」) must forward the framework's own verdict and finding-set token, not re-judge it. Its card thread read objectstack at 3c380253 (cloud's pin) and at main 4cd48e27.\n\n## What is wrong\n\n`comparePackageVersions` (metadata-core) and the environment half (`manifest.planUpgrade`) are exported. The Q3 VERDICT is module-private in `packages/cloud-connection/src/marketplace-install-local-plugin.ts` (line ~732 on main): `schemaUpgradeVerdict`, `schemaUpgradeFindingSet` and the finding types. They pick which findings refuse and mint the token that an explicit acceptance must echo. Cloud's hosted install doors can't reach them, so the only options are to copy the judgement (forbidden by the card) or to have no default refusal.\n\n## What to do\n\n1. Move `schemaUpgradeVerdict`, `schemaUpgradeFindingSet` and the finding types into `@objectstack/metadata-core` (next to `comparePackageVersions`) and export them.\n2. The install-local plugin imports them from there. No behaviour change: the existing install-local tests pass unchanged, and the token for a given plan is byte-identical before and after (add a test that pins one token value).\n3. A changeset (minor, new export).\n\nNot in scope: the cloud side (cloud#3654 builds on this export after a pin round), and the hosted declared-rename preflight (needs the environment's database; candidate cloud card).\n\n## Done when\n\n- The verdict and the token are exported from metadata-core, install-local uses them, and a pinned-token test is green.\n\nBusiness reason: the hosted marketplace install must refuse a destructive upgrade by default exactly as a local install does. One judge, one token, so the console and the CLI never disagree about what an acceptance covers.\n\nReader: the cloud#3654 card thread (seat 2) writes the PR; a framework review per objectstack's rules.\n\nDedup: searched open objectstack issues for \"schemaUpgradeVerdict\", \"findingSet\"; 0 hits. Related: #30884 (closed, the comparison), #30885 / PR #31402 (01b, declared renames carried, merged after cloud's pin).\n\nPriority: p2."
+}

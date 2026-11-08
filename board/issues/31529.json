@@ -1,0 +1,33 @@
+{
+  "number": 31529,
+  "kind": "pull_request",
+  "title": "feat(metadata-core): export the schema upgrade verdict and its finding set token, so a host's install door forwards the platform's own verdict",
+  "state": "open",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-08T13:18:01Z",
+  "updated_at": "2026-11-08T13:57:16Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/31529",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-zhuang\"} -->\n_Requested by **Sam** · [project thread](https://claude.ai/code/project/chan_01GsBogozeZG5sdpAARrN7HP?thread=cmsg_01GsBogozeZG5sdpAARrN7HP1hxu6zzAV6eVFttJkDXKPW)_\n\nFixes #31526\n\n## What changes\n\n- **`@objectstack/metadata-core`** gains `src/package-upgrade-verdict.ts`, exported from the index next to `package-upgrade-plan.ts`. It contains:\n  - `schemaUpgradeVerdict(packageId, plan)` → `{ findings, findingSet }`. These need confirming:\n    - a suspected rename, always;\n    - a type change in the `needs_confirm` or `destructive` drift category, including on a declared rename.\n\n    These are not findings: a declared rename, a removed field or object, a `safe` type change, a seed change.\n  - `installedRecordUnavailableVerdict(packageId, finding)`: the verdict for a door that has no installed side to compare. It returns one confirmable finding, never \"no finding\". The finding's sentence stays the door's own.\n  - `schemaUpgradeFindingSet(packageId, findings)`: the token. It is `schema-upgrade:` followed by 32 hex characters of a SHA-256 over the package id and the findings' sorted identities.\n  - Constants: `SCHEMA_UPGRADE_CONFIRMATION_REQUIRED`, `SCHEMA_UPGRADE_CONFIRMATION_STATUS`, `SCHEMA_UPGRADE_TOPIC`, `SCHEMA_UPGRADE_CONFIRMED_CATEGORIES`.\n  - Types: `SchemaUpgradeFinding`, `SchemaUpgradeUnavailableFinding`, `SchemaUpgradeVerdict`.\n- **`@objectstack/cloud-connection`**: the install-local door now imports all of the above, and the moved code is verbatim. The door keeps only `ledgerRecordUnavailableVerdict`, its sentence for an install record that is unreadable or missing; that function now calls the exported `installedRecordUnavailableVerdict`. `createHash` and three type imports the door no longer uses are dropped.\n- **`@objectstack/spec`**: one `PROVENANCE_WAIVERS` entry, because the provenance gate attributes a constant to the package that defines it. `SCHEMA_UPGRADE_CONFIRMATION_REQUIRED` is now defined in metadata-core but stays registered under `@objectstack/cloud-connection`, whose door puts it on the wire. This follows the `UPDATE_ID_MISMATCH` shape. No ledger row is added or moved.\n\n## Why\n\ncloud#3654 (epic cloud#3652, ruling Q3 「默认拒绝，需显式映射（推荐）」) has the hosted install door refuse an undeclared rename or a type change \"with the framework's code and finding-set token\". Its card forbids cloud from re-judging.\n\nBefore this PR, the verdict and the token were private to `marketplace-install-local-plugin.ts`, so the hosted door could only copy the judgement or refuse nothing. With the export, both doors apply one rule and mint one token: the same pair of versions gets the same findings and the same token, whichever door installs it.\n\nThe hosted consumer is cloud#3861.\n\n## Verification\n\nRun in a worktree at `origin/main` `4cd48e27` plus this branch. The workspace dependencies' `dist/` were borrowed from a build of objectstack `3c380253` (27 commits behind main), and `metadata-core` was rebuilt from this branch.\n\n- `packages/metadata-core`: `vitest run src/package-upgrade-verdict.test.ts src/package-upgrade-plan.test.ts` gives 2 files, 27 tests passed. The new test file pins two token values, both computed with the door's original digest before the move, so the test pins byte identity:\n  - `schema-upgrade:a168d8927e7a5afc25f947ee715fa848`: a one-field suspected rename on `com.acme.deals`;\n  - `schema-upgrade:c29494e0b3b3e33a84adf0c2188baa37`: the empty set.\n- `packages/cloud-connection`: `vitest run` on the three install-local suites that exercise the gate (`marketplace-install-local-upgrade-plan`, `-corrupt-ledger`, `-declared-rename`) gives 3 files, 47 tests passed, unchanged.\n- `packages/spec`: `check:error-code-provenance` OK (11 waivers, all live). `src/api/error-code-ledger.test.ts` gives 26 tests passed.\n- `tsc --noEmit` is clean in `metadata-core` (both configs) and in `cloud-connection`. eslint is clean on the changed source files.\n- `check-changeset-fixed`, `check-empty-changeset`, `check-adr-0087-registration`, `check-changeset-no-major` and `check-doc-authoring` all pass.\n- Docs drift comment: the two pages it names (`data-modeling/fields.mdx` and `deployment/cli.mdx`) describe the install-local refusal and `renamedFrom`. Their behaviour is unchanged by a verbatim move, so neither needs an edit.\n\nClause-②: yes (widening)\nMetadata-protocol: none\n\nThis is widening only: `@objectstack/metadata-core` gains the exports listed above. No request, answer, key or error code changes on any door. The changeset is graded `patch`, since the protocol kind is none.\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic. (`packages/spec` gains one data entry in `PROVENANCE_WAIVERS`.)\n- [x] 2. Every name I added uses the casing for its kind.\n- [x] 3. No formatter ran; `pnpm lint` passes. (eslint on the changed files)\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset.\n- [x] 6. `packages/spec` touched: one ledger waiver entry. No schema, key or export changes.\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English.\n- [ ] The *Before Submitting* list in CONTRIBUTING.md is done. (A full `pnpm test` was not run in this container; CI carries it.)\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01QUs3BsJ2E2byCWsBstMjAJ)_"
+}

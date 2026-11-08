@@ -1,0 +1,38 @@
+{
+  "number": 31523,
+  "kind": "pull_request",
+  "title": "docs(spec): the optional-master entry and docblock name the raw-parse door's reading of an omitted required",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "protocol:data",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "marchtian"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-08T12:52:40Z",
+  "updated_at": "2026-11-08T13:47:00Z",
+  "closed_at": "2026-11-08T13:46:57Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-08T13:46:57Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/31523",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"marchtian\"} -->\n_Requested by **田騏** · [project thread](https://claude.ai/code/project/chan_01VmuUhXU9SSUzqJYyXSmYSi?thread=cmsg_01VmuUhXU9SSUzqJYyXSmYSiMiP5QfRf2t6EvZJ7zdWomo)_\n\nFixes #31470\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- **改了什么：** 只改文字和一个测试，不改任何行为。语义迁移条目 `cbp-optional-master-admitted` 的 `replacement` 和 `acceptanceCriteria`、以及 `controlledByParentMasterOf` 的 docblock，补上「原始解析入口」的读法；另加一个测试把三个入口并排钉住。\n- **为什么改：** 子对象唯一的 `master_detail` 不写 `required` 时，`ObjectSchema.create()` 读成必填主字段，而 `ObjectSchema.safeParse` / `defineStack` / 保存入口读成可选主字段。这个分歧是你在 #30905 裁定的（ruling record 6687830530，选 A「放行为可选主字段」），但条目和 docblock 只写了 `create()` 和存储行，读者会以为省略永远等于必填。座位据此对本卡选 B（只改文字），不是 A（A 会推翻现行裁决）。\n- **风险与回滚：** 没有运行时风险：无 schema、类型、导出或运行时答案变化。条目文字随 `@objectstack/spec` 的 `./migrations` 发布（`os migrate` 会读），所以带 patch changeset。回滚即还原这三个文件和 changeset。\n- **先看：** `packages/spec/src/migrations/entries/semantic/18.cbp-optional-master-admitted.ts` 里 `replacement` 末句和 `acceptanceCriteria` 末句。\n- **两分钟验证：** `pnpm --filter @objectstack/spec exec vitest run --project local src/data/controlled-by-parent-master.test.ts`，看新测试「the three doors on an omitted required」：`create()` 给必填主字段，`safeParse` 与 `defineStack` 给可选主字段。\n- **需要你做的：** 无，座位做契约复核后落地。\n\n## What changes\n\nCard #31470 asked to pick A (refuse an omitted `required` at the raw parse and in `defineStack`) or B (keep the reading and say so). The seat picked **B**: maintainer ruling A on #30905 (ruling record 6687830530) already decided that at the raw parse doors (an object written directly in `defineStack`, the save doors) an omitted `required` on a `controlled_by_parent` object's only `master_detail` is read as the optional master, and it explicitly did not take \"refuse the omission at every door\". Option A on this card would reverse that ruling. What was wrong is the prose, which named only the doors that see the omission.\n\n- **`18.cbp-optional-master-admitted.ts` (semantic migration entry).**\n  - `replacement`: after \"an omitted `required` keeps meaning required through `ObjectSchema.create()` and on stored rows\", it now says that through a raw parse (an object written directly in `defineStack`, or saved through a save door) `required` defaults to `false` before the object is judged, so the omission is read as the optional master, as the maintainer ruled rather than refusing it at every door. `os lint` still reports the omission at `error`.\n  - `acceptanceCriteria`: the last sentence gains the same clause: through `ObjectSchema.safeParse`, `defineStack` or a save door, the omission is admitted as the optional master, its field parsed as `required: false`.\n  - The header comment names the ruling record. `id`, `surface` and `reason` are unchanged.\n- **`controlledByParentMasterOf` (JSDoc).** \"One whose `required` is not written names no master\" holds only on a map read as written (an authored or stored body no parse has touched). On a parsed map the omission has already defaulted to `false`, so through a raw parse that field is the optional master; the builder forces it to `true` first. \"Reads `required` as written\" is kept.\n\n## Tests\n\nOne new `it` in `packages/spec/src/data/controlled-by-parent-master.test.ts`, citing the ruling record, pins the three doors on one omitted `required`:\n\n- `ObjectSchema.create()`: `required: true`, `controlledByParentMasterOf` gives `{ field: 'order', optional: false }`;\n- `ObjectSchema.safeParse`: success, `required: false`, `{ field: 'order', optional: true }`;\n- `defineStack`: `required: false`, `{ field: 'order', optional: true }`.\n\nMeasured first: no existing test pinned all three in one place. `controlled-by-parent-master.test.ts` (the omitted-required case) pins `create()` and `safeParse`; `defineStack` is pinned separately in `conversions/cbp-master-detail-required-defaulted.test.ts` and `data/object.test.ts`.\n\n## Acceptance notes\n\n- **Changeset, not `skip-changeset`:** the entry ships. `@objectstack/spec` exports `./migrations` from `dist`, and `os migrate` prints the entry's `replacement`. Patch changeset `.changeset/31470-cbp-omitted-required-raw-parse-door.md`.\n- **The D2 conversion docblock** the ruling called stale under A (`conversions/entries/18/cbp-master-detail-required-defaulted.ts`) was already fixed on `main` by #31055 (`f1206610a9`): it says a raw parse reads the omitted key as the optional master. Nothing owed here.\n- **ADR-0055** already states the raw-parse reading (its \"An omitted `required` keeps meaning required where the omission is visible\" bullet); not touched.\n- **\"Save door\" wording** is taken from ruling record 6687830530, which names the save doors among the raw-parse doors. This PR did not re-measure the save door's conversion order.\n\n## Verification\n\nBefore the merge of `origin/main` (head `425cef8315`):\n\n- `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` derived 85 commands for this 4-file diff; all 85 ran and exit 0.\n- `NODE_OPTIONS=--max-old-space-size=6144 pnpm --filter @objectstack/spec run typecheck` :: exit 0 (the default heap OOMs in `check:test-typecheck`).\n- `pnpm --filter @objectstack/spec exec eslint` on the three touched source/test files :: exit 0.\n- `vitest run --project local` on `controlled-by-parent-master.test.ts`, `cbp-master-detail-required-defaulted.test.ts` and `src/migrations` :: 7 files, 252 tests passed.\n\nAfter `git merge origin/main` (merge commit `5e9d2802a6`, the PR head):\n\n- spec `gen:schema && gen:docs` :: exit 0, no tree change. `pnpm --filter @objectstack/spec run check:generated` :: exit 0 (14 artifacts current, after a spec rebuild; the first run read a pre-merge `dist`).\n- `dispatch-gates --commands` derived the same 85 commands; after a `packages/*` build all 85 ran and exit 0.\n- `dispatch-gates --ran`: `85 derived famil(ies) accounted for — 85 run, 0 NOT-MEASURED`, exit 0.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_017ihL2diS4EEKVj8TfNEQAs\n<!-- signed: domain:spec#4 · marchtian · session_017ihL2eAG5J8aqAyPZif4BJ -->\n"
+}

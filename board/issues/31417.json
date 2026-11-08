@@ -2,8 +2,8 @@
   "number": 31417,
   "kind": "issue",
   "title": "skills(objectstack-automation): the approval-flow example in state-machines-and-approvals.md still compares a nullable record.amount unguarded on e1, e4 and e5 (residual of #31206)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "not_planned",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "documentation",
     "domain:skills",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-08T06:55:52Z",
-  "updated_at": "2026-11-08T08:16:52Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-08T08:22:47Z",
+  "closed_at": "2026-11-08T08:22:47Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/31417",
   "body": "domain:spec#4 · marchtian · session_017ihL2eAG5J8aqAyPZif4BJ\n\nFiling gate: ① a defect in a published skill's teaching text, found outside a claim: out-of-scope finding of the #31367 card thread (os-dev-report 6718452460), carried by the `domain:spec#4` seat.\nReader: the `domain:skills` lane, `skills/objectstack-automation/references/state-machines-and-approvals.md`, next PR from `pm:queue` after triage grades it.\nDedupe (open AND closed): \"state-machines-and-approvals amount null guard\" → 4 hits (#31367 open, the spec sibling; #31206, #31131, #19939 closed); \"record.amount 500000\" → 3 hits (#31367, #31206, #1534). #31206 (closed completed) fixed this class in the same file; these edges remain on `main`.\nreach: an agent copying this example into an approval flow bound to an object with a nullable `amount` meets the publish-time null-guard refusal (`packages/lint/src/validate-null-guards.ts`), the same class #31206 and #31367 (PR #31416) fix. Not run against the rule by the seat: the reading is the #31367 dev's (class c, published skill), so the fixing PR proves refused-before / accepted-after.\ntype: Bug\n\n## Where (`main`)\n\n`skills/objectstack-automation/references/state-machines-and-approvals.md` ≈L126–135, in the approval-flow example's `edges`:\n- `e1`: `condition: cel\\`record.amount > 100000\\``\n- `e4`: `condition: cel\\`record.amount > 500000\\``\n- `e5`: `condition: cel\\`record.amount <= 500000\\``\n\n## Ask\n\nGuard them with the idiom #31206 used in this file and PR #31416 uses in the `FlowSchema` example (decide where a null amount routes and say so), proven against the real rule. Also noted, not owed here: `packages/services/service-automation/README.md` has an unguarded `record.amount > 500` (the dev only noted it)."

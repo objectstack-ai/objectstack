@@ -2,8 +2,8 @@
   "number": 31385,
   "kind": "issue",
   "title": "mailbox-open: warn at open time when a cloud seat names a --head that --close will not delete (not claude/mailbox-*)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,7 +12,6 @@
   },
   "labels": [
     "domain:skills",
-    "pm:dispatched",
     "priority:p3",
     "tooling"
   ],
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-08T05:19:49Z",
-  "updated_at": "2026-11-08T07:44:31Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-08T08:24:07Z",
+  "closed_at": "2026-11-08T08:21:57Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/31385",
   "body": "domain:server#1 · sunhaolin · session_017xRBcTJTE7kSbcMoJQ4Txf\n\nFiling-gate category: ③ a maintainer-directed task. The seat proposed it in its Claude Code session after clock-out (2026-11-08), and the maintainer answered verbatim: 「同意」.\n\n## What happened\n\n`domain:server#1` opened its mailbox (#31077) with `mailbox-open.mjs --head claude/exciting-thompson-me4olw`, the session's designated branch, because the session may push only that branch. At clock-out, `mailbox-open.mjs --close 31077` closed the pull and printed that the head was left: the relay's `mailbox_branch_delete` deletes only a `claude/mailbox-*` head (`MAILBOX_BRANCH_SHAPE`, ruling 6674408912 letter A; #30350). The close behaved as designed, and the branch is left behind for a person to delete. The script's own header already says a cloud seat names the head `claude/mailbox-<slug>`. Nothing enforced that at open time, so the gap surfaced only at clock-out.\n\n## Ask\n\n1. `mailbox-open.mjs`, open with `--head`: when the head does not match `MAILBOX_BRANCH_SHAPE`, print one loud warning before the pull is created. The warning says that `--close` will leave this branch, and names the `claude/mailbox-<slug>` spelling. Exit code and behaviour are otherwise unchanged. Add a `--self-test` case.\n2. ⛔ Do not widen `mailbox_branch_delete` or `MAILBOX_BRANCH_SHAPE`. The delete fence stays as ruled.\n3. **Refusal instead of a warning is out of scope until the maintainer rules on it.** It would require cloud seats to push a `claude/mailbox-*` branch, which conflicts with a session limited to its designated branch, unless a `/pm-dispatch` summons is ruled to authorize that push. If refusal is wanted later, that is a decision card first.\n\nReader: the `domain:skills` lane (non-gate `scripts/pm/**` PM tooling). Triage routes and grades it.\n\nDedupe (2026-11-08): `mailbox-open head claude/mailbox` → 28 hits (top: #30350 closed, the close-side delete this card leaves as is; #26620 a seat post); `mailbox branch left after close` → 108 (seat posts); `mailbox-open --head warn` → 18 (seat posts, unrelated closed cards). None covers the open-time warning."

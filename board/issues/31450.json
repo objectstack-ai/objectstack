@@ -1,0 +1,30 @@
+{
+  "number": 31450,
+  "kind": "issue",
+  "title": "skills: os deploy exit-1 paragraph names the publish/install 429 and the 413 publish cap (cloud#3655 follow-up)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:skills",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-08T08:33:49Z",
+  "updated_at": "2026-11-08T10:00:23Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31450",
+  "body": "repo:cloud#3 · os-zhuang · session_01QUs3BvRcDHXqRU4TSVE4u6\n\nFiling gate: **(b) a follow-up a PR declares owed**: cloud PR objectstack-ai/cloud#3795 (cloud#3655) carries `Clause-②: no (narrowing)` and `Skills-docs: follow-up owed — skills/objectstack-platform/references/operations.md`. The seat files it before ACCEPT (pm-dispatch: the `Skills-docs:` line). Dedup: searched open objectstack issues for \"os deploy 429\", \"Retry-After deploy\", \"publish cap 413\"; no hits.\n\n## 维护者速读\n\ncloud#3795 给 ObjectOS Cloud 的发布和安装加了限流（安装按环境、发布按组织，超限回 429 带 `Retry-After`）和 16 MiB 的发布大小上限（回 413）。`os deploy` 和 `os dev` 的 `d` 键碰到这两种拒绝都会以 exit 1 结束，但技能文档里 `os deploy` exit 1 那一段还没提到它们。这张卡只改文档，等 cloud#3795 合并后再做。\n\n## What to change\n\n`skills/objectstack-platform/references/operations.md`, the **`os deploy` exit 1** paragraph (line ~100 today). Add, in the paragraph's voice:\n\n- **429 `RATE_LIMIT_EXCEEDED`** — the environment's install limit (default: 5 at once, then 6 a minute, every install door shares it, a deploy is one) or, for a publish without install, the organization's publish limit (10 at once, then 10 a minute). Nothing was stored; deploy again after the `Retry-After` seconds (`details.retryAfterSeconds`).\n- **413 `VALIDATION_ERROR`** — the publish body is over the cap (default 16 MiB). Nothing was stored; trim seed data or inline documents from the artifact and deploy again.\n\nRead the wording the CLI actually prints for each (the server message is forwarded) from the merged cloud code: `packages/service-cloud/src/package-write-limits.ts` (`packageWriteLimitMessage`, `publishTooLargeMessage`). If the CLI does not print `Retry-After`, say \"the seconds the message names\".\n\n## Done when\n\n- The paragraph names both refusals and what to do, numbers as defaults (they are operator knobs).\n- The package's evals that exercise this reference still pass.\n\nSerial: after objectstack-ai/cloud#3795 merges."
+}

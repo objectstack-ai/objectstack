@@ -2,8 +2,8 @@
   "number": 31407,
   "kind": "issue",
   "title": "mcp: the record data tools keep an unregistered declared-4xx code and drop a refusal's userMessage, where /data answers the closed code with declaredCode and serves userMessage (LEAVE_EXHAUSTED / 409)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:ai",
     "bug",
     "domain:server",
-    "pm:dispatched",
     "priority:p3"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-08T06:21:10Z",
-  "updated_at": "2026-11-08T07:46:10Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-08T08:34:37Z",
+  "closed_at": "2026-11-08T08:33:27Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/31407",
   "body": "domain:server#6 · os-project-manager · session_01FEkQ5p3T5YWhLjurajudnQ\n\n## What is wrong\n\nThe MCP record data faces (`query_records`, `aggregate_records`, `get_record`, `create_record`, `update_record`, `delete_record`, `delete_records`' selection read, and the `objectstack://objects/{name}/records/{id}` resource) answer a coded throw that the `/data` door treats as a refusal through their own coded envelope (`thrownRefusalEnvelope`), not through the door's answer. Measured on `03533d2c` by the #31373 dev:\n\n1. An app's own, unregistered code with a declared 4xx, for example `Object.assign(new Error('No leave days left this year.'), { code: 'LEAVE_EXHAUSTED', status: 409 })`. `/api/v1/data` (`mapDataError`) answers `409 RESOURCE_CONFLICT` with `declaredCode: 'LEAVE_EXHAUSTED'`. The record faces answer `code: 'LEAVE_EXHAUSTED'`, a code outside the registered vocabulary, and no `declaredCode`.\n2. A status-less code the door refuses, carrying a producer `userMessage` (for example `PERMISSION_DENIED` + `userMessage`). `/data` answers 403 with the `userMessage`. The record faces render the coded envelope and drop the `userMessage`.\n\nMCP `run_action` / `resume_run` already answer case 1 as `/actions` does (closed code + `declaredCode`, #31271), and since #31373 the record faces serve `declaredCode` / `userMessage` on the door-answer path (declared 5xx, code-less throws). The envelope path is now the one place on these faces that differs from `/data`.\n\n## Expected\n\nThe record data faces answer these throws with what `/data` answers: the closed code, `declaredCode` and `userMessage` as the door serves them, read from the door's own answer (`dataDoorAnswerOf` / `mapDataError`), never a copy. The coded sandboxed refusal answer that #31246 pins (code, inner sentence, status) is kept.\n\n## Where to start\n\n- `packages/mcp/src/mcp-http-tools.ts`: `dataDoorRefusalEnvelope`, `dataDoorAnswerOf`, `dataDoorErrorResult`; the record resource catch in `mcp-server-runtime.ts`.\n- `mcp-coded-refusal.test.ts`: the CONTROL rows that keep a declared-below-500 coded envelope byte for byte move with this card.\n\n## Provenance\n\n`out_of_scope_findings` 1 and 2 in the #31373 dev's report 6718161334 (PR #31405). Filed by the seat as their carrier. A third finding there (`delete_records`' outer catch renders a code-less throw as its bare message) is the #31218 / #31246 design and is not part of this card."

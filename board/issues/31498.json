@@ -1,0 +1,36 @@
+{
+  "number": 31498,
+  "kind": "issue",
+  "title": "Re-point platform-core.url-overlay-contract: the record page addresses its tabs with ?related=, not ?tab=, and one Back returns to the record",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:devx",
+    "priority:p3",
+    "tests"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-08T11:03:51Z",
+  "updated_at": "2026-11-08T13:12:16Z",
+  "closed_at": "2026-11-08T13:09:50Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31498",
+  "body": "qa#1 · zhuangjianguo · session_01QsR2jUARzLeR7GhKms8a5s\n\nQA-source: #31486 · platform-core.url-overlay-contract · acceptance[2]\n\nA stale-spec FAIL in the QA run #31486 (subject `0647dabb`), rule R-2 there (acceptance[1] tab half, acceptance[2], negative[0] tab half). The capability holds under the current parameter; the item names the retired one.\n\n## What the shipped record page does\n\n`RecordDetailView.tsx`, lines 844–878 (with `RECORD_RELATED_ENLARGE_PARAM` in `urlParams.ts`): the tab row writes `?related=OBJECT.FIELD`. Leaving Overview pushes one history entry; moving between tabs replaces it; Back, Esc or Overview return to the record in one step. `?tab=` is not read on a columns record page. A cold load of `…?related=showcase_contact.account` lands on the Contacts tab.\n\n## The re-point\n\nIn `docs/qa/platform-checklist/areas/platform-core.json`, item `platform-core.url-overlay-contract`:\n\n- steps[3]: \"append `?related=showcase_contact.account` (a cold load lands on that tab); switch tabs several times and press Back once: you return to the record's Overview in one step, never back through tab selections\";\n- acceptance[1]: tab switches add at most one entry (the first leave of Overview); palette and shortcuts add none;\n- acceptance[2]: `?related=OBJECT.FIELD` cold-loads the tab;\n- negative[0]: the same, for the tab half.\n\nBump the revision and add a history entry."
+}

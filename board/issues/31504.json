@@ -1,0 +1,35 @@
+{
+  "number": 31504,
+  "kind": "pull_request",
+  "title": "docs(spec): the unmanaged-install data door comment names the seed copy #30808 added",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "marchtian"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-08T11:26:03Z",
+  "updated_at": "2026-11-08T12:15:28Z",
+  "closed_at": "2026-11-08T12:15:26Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-08T12:15:26Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/31504",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"marchtian\"} -->\n_Requested by **田騏** · [project thread](https://claude.ai/code/project/chan_01VmuUhXU9SSUzqJYyXSmYSi?thread=cmsg_01VmuUhXU9SSUzqJYyXSmYSi7C6yU7FGfMPUfvLt3HYbkq)_\n\nFixes #31427\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- **改了什么：** 只改 `packages/spec/src/kernel/unmanaged-install.ts` 里 `data: 'door'` 那一行上方的注释（2 行换成 6 行）；处置值、类型、测试都不动。\n- **为什么改：** 旧注释说「种子数据不是元数据，元数据副本带不走它们」。非托管安装加了 `seedSampleData` 开关后，副本会把每个种子数据集作为环境里的 `seed` 元数据项写进 base，这句话已经不对。新注释写明由安装门决定：要样例数据时，`importUnmanagedPackage` 把它们复制成 `seed` 项（即副本的种子回执），门再据此载入数据行；不要时不复制，包里有种子数据时应答以 `seeded.mode: 'skipped'` 说明。\n- **风险与回滚：** 没有运行时风险。该文件不在 spec 包的发布面（包只发运 `src/**/*.zod.ts`），回滚即还原这段注释。\n- **先看：** `packages/spec/src/kernel/unmanaged-install.ts` 的 `// ── The install door's ──` 小节（约第 111–118 行）。\n- **两分钟验证：** `git diff origin/main --stat` 只列出这一个文件，`+6 / -2`，全是注释行。\n- **需要你做的：** 无，席位落地。\n\n## What changes\n\nThe comment on the `data: 'door'` row of `UNMANAGED_INSTALL_KEY_DISPOSITIONS` said a metadata copy cannot carry seed datasets. Since #30808 (PR #31398, `1ff99441d8`) that is false. The new text says the door, not the import, decides what happens to them, using the names the implementation on `main` uses:\n\n- asked for the sample data (`seedSampleData: true` on `POST /marketplace/install-local`), the door has the `importUnmanagedPackage` verb copy each dataset into the base as one environment `seed` item (`UNMANAGED_SEED_TYPE`), the copy's seed receipt, and loads the rows from it;\n- not asked, nothing is copied, and when the package declares datasets the door's answer says so (`seeded.mode: 'skipped'`).\n\nThe disposition stays `'door'`. No type, value or test changes.\n\n## Tests\n\nNone added: the diff is a comment. Spec typecheck and lint on the file are listed under Verification.\n\n## Acceptance notes\n\n- `skip-changeset`: the file is not a `*.zod.ts`, and the spec package publishes `src/**/*.zod.ts` only, so nothing published changes.\n- Names measured on `main` at `c65599fa`: `seedSampleData` (`packages/cloud-connection/src/marketplace-install-local-plugin.ts`), the verb's door-stated `seedData` and `UNMANAGED_SEED_TYPE = 'seed'` (`packages/metadata-protocol/src/package-unmanaged-install.ts`), and the skipped answer `seeded: { mode: 'skipped', reason }` (the same plugin file).\n\n## Verification\n\nLocal gates, measured on this branch (gates at `cb136d4896`, the comment commit; then `origin/main` merged as `2163119f0a`, which adds no change of this PR's own):\n\n- `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` derived 68 commands for this diff. All 68 ran and exit 0. Four first answered exit 3 (PREREQUISITE NOT MET: an unbuilt workspace and a shallow clone) and were rerun green after `git fetch --unshallow` and `pnpm build` (exit 0): `check-plugin-teardown-shape --self-test`, `@objectstack/lint check:doc-formula-expressions`, `check:dual-build-cjs-loads`, `check:lean-entry-closure`.\n- `dispatch-gates --ran`: `68 derived famil(ies) accounted for`, exit 0.\n- `pnpm --filter @objectstack/spec run typecheck` :: exit 0. `pnpm --filter @objectstack/spec exec eslint src/kernel/unmanaged-install.ts` :: exit 0.\n- After the merge: spec `build && gen:schema && gen:docs` :: exit 0, no tree change; `pnpm --filter @objectstack/spec run check:generated` :: exit 0 (14 artifacts current).\n- `git diff origin/main --stat`: `packages/spec/src/kernel/unmanaged-install.ts | 8 ++++++--`, comment lines only.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_017ihL2cCLnFWgFEuZvjguSF\n<!-- signed: domain:spec#4 · marchtian · session_017ihL2eAG5J8aqAyPZif4BJ -->\n"
+}

@@ -1,0 +1,36 @@
+{
+  "number": 31494,
+  "kind": "issue",
+  "title": "Calendar: a failed reschedule toasts the raw server sentence \"Record ID not found in OBJECT_NAME\", untranslated, with the machine object name and the record id",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:ui",
+    "priority:p2"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-08T11:01:48Z",
+  "updated_at": "2026-11-08T13:55:45Z",
+  "closed_at": "2026-11-08T13:54:41Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31494",
+  "body": "qa#1 · zhuangjianguo · session_01QsR2jUARzLeR7GhKms8a5s\n\nQA-source: #31486 · ux-conventions.labels-over-machine-names · acceptance[0]\n\nThe failing clause of `ux-conventions.labels-over-machine-names` in the QA run #31486 (subject `0647dabb`), rule R-4 there, met while running `records-forms.calendar-interactions` acceptance[1] (which itself passes: the card rolls back). Reproduced twice.\n\n## Reproduction (stock showcase)\n\n1. Mint a contributor-bound member and assign it a task: `PATCH /api/v1/data/showcase_task/ID {\"assignee\": MEMBER_EMAIL}`. The member switches the language to 中文 in the avatar menu.\n2. As the member open `/_console/apps/com.example.showcase/showcase_task/view/calendar`.\n3. As admin reassign the task away: `PATCH /api/v1/data/showcase_task/ID {\"assignee\":\"ada@example.com\"}`.\n4. As the member drag that card to another day.\n\nExpected: a translated message that names the object by its label (任务 / Task), with no raw id.\n\nActual: the PATCH answers 404, the card rolls back correctly, and the toast reads `Record WB5z1sLAsWgE1tXL not found in showcase_task`: English on a zh-CN session, the machine object name, the raw record id.\n\n## Mechanism\n\n`ui/packages/plugin-calendar/src/ObjectCalendar.tsx`, around line 1346: the error toast takes `declaredUserMessage(err)`, then a permission branch (`isPermissionError`), then `extractWriteErrorMessage(err)`. A 404 RECORD_NOT_FOUND is not a permission error, so the toast shows the server's `error` text, built by `packages/core/src/utils/record-not-found.ts` line 55 (`Record ${id} not found in ${object}`). A 404 on reschedule (the row was deleted or is no longer visible) has no translated, labelled branch. The shared `extractWriteErrorMessage` may be the better place for the fix.\n\nOwning package: `@object-ui/plugin-calendar`. Full evidence: #31486, slice C3b."
+}

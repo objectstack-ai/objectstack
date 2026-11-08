@@ -1,0 +1,36 @@
+{
+  "number": 31463,
+  "kind": "pull_request",
+  "title": "fix(plugin-kanban): a lane count waits for the records, so a board in flight no longer reads 0 on every lane",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-08T09:25:19Z",
+  "updated_at": "2026-11-08T09:55:17Z",
+  "closed_at": "2026-11-08T09:55:15Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-08T09:55:15Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/31463",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-zhuang\"} -->\n_Requested by **Sam** · [project thread](https://claude.ai/code/project/chan_01GsBogozeZG5sdpAARrN7HP?thread=cmsg_01GsBogozeZG5sdpAARrN7HPCbLjakXLAmCo2Z8MK5yy7a)_\n\nCloses objectstack-ai/objectstack#30431\n\n## What changes\n\nA kanban lane no longer states a count before the board's records have settled. Every header that writes one (the flat board's badge, the swimlane layout's column titles and lane rows) shows a small pending marker instead, the lane carries `aria-busy` meanwhile, and the lane total waits too. The signal is `recordsSettled`, the one the board's \"No cards\" state already waits on (objectui#8827); no new string, no spec change.\n\n- `ui/packages/plugin-kanban/src/KanbanImpl.tsx`: `LaneCountPending`, and the three count sites read `useKanbanRecordsSettled()`.\n- `ui/packages/plugin-kanban/src/KanbanRecordsSettled.ts`: one paragraph on the context's doc saying the counts wait on it too.\n- Tests: a new describe in `ObjectKanban.lanePaging-12619.test.tsx` (board level) and one in `app-shell/src/__tests__/listKanbanEveryRecord-12619.test.tsx` (the real `ListView` over the real board).\n\n## Why\n\nReproduced on cloud's hosted-shaped two-plane rig (`scripts/dev-local/run-stack.sh --prod-like --with-ui`: control plane on :4000, multi-tenant runtime on :5050; cloud `ac69aac`, framework pin `98583cd6`, console built from `ui/` at the pin; zh-CN). The card's 客服工单 package (12 tickets, 2 / 4 / 2 / 3 / 1) was built through the env's MCP door (`apply_blueprint`, drafts only), published in Studio › Changes, and the board 工单看板 opened from the app nav.\n\n- Lanes answering at local speed: the first open is correct (Studio publish then in-app nav, a fresh tab, and nav concurrent with the publish).\n- 300 ms of emulated network latency: footer 「12 条记录」 over lanes 待处理 0 / 处理中 0 / 等待客户 0 / 已解决 0, then the right counts.\n- Lane answers held for 6 s: the same state every time. Network order: the list's own count (`top=0`, total 12) and window (12 rows) answer first, so the footer is drawn; the board's six lane queries (one per lane plus the records in no lane) leave after them and answer later. In between, every lane reads 0. After: 2 / 4 / 2 / 3.\n\nThe cause is in the board. Under a list view the footer and the lanes answer from different queries. Before the lane answers land, `lanePages` is `null` and the board's rows are `[]`, so each header counted 0 cards. The empty state was already withheld for exactly this window (objectui#8827), so the lanes drew no \"No cards\", but the count badge still claimed `0`. A pending lane and an empty lane were the same pixels.\n\nWhat staging differs in, as far as the rig can say: how long the first lane queries take right after publish (a cold env kernel, a remote database, each lane query carrying its `populate`). That is an inference; staging was not measured here. If staging's lane queries in fact answered 0 rows rather than answering slowly, this change does not fix that. It does make the two tell apart: after it, a lane reading `0` is a lane whose query answered 0.\n\n## Verification\n\n- `plugin-kanban`: 85 files, 554 tests green; `type-check` (src and tests) clean.\n- Tests outside the package that mount the real board (app-shell, plugin-list, plugin-form, plugin-calendar, i18n, console): 10 files, 229 tests green.\n- `eslint` on the changed files with the root config and `--no-inline-config`: 0 errors.\n- `check:empty-changeset`, `check:changeset-fixed`, `check:cross-package-test-inputs`: green.\n- Ablations with `scripts/ablation-replace.mjs`, each restored to the HEAD blob:\n  - `const countPending = !useKanbanRecordsSettled()` → `const countPending = false`: the board test and the list-view test go red with `expected '0' to be ''`; every other test stays green.\n  - the swimlane column-title gate → the unconditional count: the swimlane test goes red with `expected 'Open(0)Won(0)Lost(0)' not to match /\\(\\d+\\+?\\)/`.\n- The reverse test pins that a lane that really holds nothing still reads `0` once its query answers, so withholding the count forever cannot pass.\n\nClause-②: no\nMetadata-protocol: none\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic.\n- [x] 2. Every name I added uses the casing for its kind.\n- [x] 3. No formatter ran; `pnpm lint` passes. (Run on the changed files with the root config; CI runs it whole.)\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset.\n- [ ] 6. `packages/spec` touched: its generated artifacts are regenerated and committed. (Not applicable: `packages/spec` is not touched.)\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English.\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01QUs3Bt8hvKRjPf7fmpY12X\n"
+}

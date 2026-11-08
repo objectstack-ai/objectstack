@@ -2,8 +2,8 @@
   "number": 31411,
   "kind": "issue",
   "title": "cli: os migrate and the ownership ceremony do not compose the AI plugin that os serve auto-injects, so ai_* tables are invisible to them on such hosts",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -22,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-08T06:28:59Z",
-  "updated_at": "2026-11-08T07:14:09Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-08T09:48:43Z",
+  "closed_at": "2026-11-08T09:48:43Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/31411",
   "body": "domain:server#5 · os-project-manager · session_01FEkQ5o8PE7ZtVjcor51wBZ\n\nFiling gate: ② split from #31374 item B, which PR #31409 (item A) leaves out. The order said to stop after A if B grew past a small change. The dev measured that it did: report 6718215186, `open_questions`, `needs_decision`. ⛔ Not a claim.\nReader: the seat that owns `packages/cli/src/utils/schema-migration-plugins.ts` (`composeServedPlatform`) and `packages/cli/src/commands/serve.ts` (the AI auto-inject rule).\nDedupe (open AND closed): `composeServedPlatform ai auto-inject`, `os migrate service-ai serve parity` → only #31374.\nreach: a host that leaves the AI plugin out of its config and relies on `serve` to auto-inject `@objectstack/service-ai` (`requires: ['ai']` or a declared dependency). On such a host, `os migrate plan` / `apply` and the ownership ceremony do not see the `ai_*` tables. cloud mounts the plugin explicitly since cloud#3744, so no measured host depends on this today.\nclass: a · type: Bug\nGrade: p2, as #31374 graded item B. Self-graded by the server seat (Ruling-ref: the maintainer, 「定级你可以自己决定」).\n\n## 维护者速读\n\n`os serve` 在配置里没挂 AI 插件、但声明了 `requires: ['ai']`（或依赖了该包）时，会自动注入 `@objectstack/service-ai`。`os migrate plan` / `apply` 和所有权仪式用的 `composeServedPlatform` 不跟这条规则走，于是这类宿主的 `ai_*` 表对迁移和仪式不可见。cloud 已经显式挂载（cloud#3744），目前没有实测宿主受影响。怎么修需要维护者拍板，见下方三个选项。\n\n## Options (from the dev's report 6718215186)\n\n- **A: share serve's rule.** Extract one exported reading of the required / auto / off rule, used by both `serve.ts` and `composeServedPlatform`. The ceremony composes the AI plugin(s) for declarations only, through a host import. A required plugin that is missing fails the plan, the same way it fails boot. Cost: about 150 to 250 lines, a fake host-package fixture, and a `serve.ts` seam. That seam waits for PR #31377, which also touches `serve.ts`.\n- **B: refuse.** `os migrate plan` / `apply` refuses with a named reason when serve would auto-inject AI and the config mounts none. The remedy is to mount the AI plugin explicitly. Cost: about 40 lines plus a test. It narrows what `os migrate` accepts, so it owes a `Clause-②: no (narrowing)` review.\n- **C: note only.** A plan warning plus docs. The plan still silently leaves out the `ai_*` tables.\n\nThe dev recommends A. **Blocked on the maintainer's pick.** The evaluation thread will put it to him.\n\nRefs #31374"

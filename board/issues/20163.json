@@ -1,7 +1,7 @@
 {
   "number": 20163,
   "kind": "issue",
-  "title": "[PM seat] domain:devx · seat 2 — ⏳ vacant",
+  "title": "[PM seat] domain:devx · seat 2 — 🟢 zhuangjianguo · 由 zhuangjianguo 账户的项目负责",
   "state": "open",
   "state_reason": null,
   "draft": null,
@@ -13,16 +13,18 @@
   "labels": [
     "pm:seat"
   ],
-  "assignees": [],
+  "assignees": [
+    "zhuangjianguo"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-27T04:07:54Z",
-  "updated_at": "2026-11-07T18:32:26Z",
+  "updated_at": "2026-11-08T11:10:53Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 101,
+  "comments": 103,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/20163",
-  "body": "domain:devx#2 · marchtian · session_017ihL2ebbZkr2QAEG1x7UC8\n\n⚠️ **Seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/devx.md` (⛔ not copied here). This is **`domain:devx` seat 2**. Seat 1 is #6023 and seat 3 is #26373 (⛔ this post is neither).\n\n<sub>Refreshed 2026-11-07T18:28Z (clocked out).</sub>\n\n## Current PM\n\n⏳ **vacant**. The previous session was `session_017ihL2ebbZkr2QAEG1x7UC8` (`marchtian`), clocked out at 2026-11-07T18:28Z on the maintainer's order 「devx spec 当前任务处理完，合并后就下班」 (2026-11-07T15:28Z). Every card it held has landed. `check-handover.mjs` exited 0.\n\n- **Patrol:** `trig_01QMoynCzdxyLKQ5eZS4X6W5` deleted in this clock-out.\n- **Mailbox:** PR #30515 closed in this clock-out. A successor opens a new seat-keyed mailbox.\n- **Stay-behind:** none.\n- **Sibling online:** `domain:devx#3` · `os-project-manager` (mailbox #31167), seated 2026-11-07T15:35Z.\n\n## Ledger (pointers only)\n\n- **Landed this term (since re-seating 2026-11-07T12:52Z):**\n  - #30461 (PR #31133)\n  - #30932 (#31136)\n  - #31017 (#31138)\n  - #31095 (#31164)\n  - #30147 (#31177, taken over from devx#1)\n  - #30920 (#31189)\n  - #30832 (#30862, the previous term)\n- **Released to `pm:queue`:**\n  - #30461: only the maintainer's ruleset edit is left (`Dogfood Regression Gate` → ruleset `main`). A seat reads it back, then closes the card.\n  - #31144: not started.\n- **Serial order on the scenario cards (ruling on #30913):** #30914, then #30913. #31121 and #31122 (gallery) are unblocked: #30932 has landed, and objectstack-ai/gallery is now in the project's repositories.\n- **Filed this term, `finding`, untriaged:** #31169 (spec migration-entry text), #31190 (AGENTS.md `pr_create` assignee), #31208 (hono `close()` start truncates a flushing response).\n- **Queue snapshot (`domain:devx` + `pm:queue`):** #31159, #31158, #31122, #31121, #30916, #30914, #30763, #30461, #25452.\n\n## Hot-file serial queue\n\n- None held by this seat.\n\n## Notes\n\n- **Publication:** objectstack. A merge to `main` publishes nothing; the release is the Version Packages PR, a human act.\n- Review rule since 2026-11-07T16:07Z (maintainer): Fable reviews only spec/skills/ADR changes plus the code that implements them; the rest is Opus self-review. A delta re-review runs only after a must-fix or should-fix.\n- Write path: the relay (`post-stamped.mjs`, `label-write.mjs`, `issue-create.mjs`, `fleet-write/dispatch.mjs`). ⛔ No GitHub MCP writes.\n- Successor: `/pm-dispatch 接手`; read this post first.\n"
+  "body": "domain:devx#2 · zhuangjianguo · session_01QsR2jTo666XXx9e1Gm21C6\n\n⚠️ **Project-seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/devx.md` (⛔ not copied here). This is **`domain:devx` seat 2**. Seat 1 is #6023 and seat 3 is #26373; ⛔ this post is neither.\n\n<sub>Refreshed 2026-11-08T11:10Z at seating.</sub>\n\n## Current PM — 🟢 zhuangjianguo\n\n- **Holder:** `zhuangjianguo` · `session_01QsR2jTo666XXx9e1Gm21C6` · seated 2026-11-08T11:07Z · 由 zhuangjianguo 账户的项目负责 (project \"objectstack ui skills devx\", thread \"Run devx lane seat\"). Previous PM: `marchtian` · `session_017ihL2ebbZkr2QAEG1x7UC8`, vacant since its clock-out brief 6711382936.\n- **Mailbox:** PR #31501 (subscribed). **Patrol:** `trig_01T9EpbZycpuRzY2szapsFJK` · `13 * * * *`.\n- **Effort:** this session runs below `high`; the account owner is asked to raise it (`seat-lifecycle.md`).\n- **Pointer:** posture, ledger and round reports live in the project. Lane ledger = labels + assignee + `Claim:` comments carrying `Seat: domain:devx#2` + `head:claude/` PRs.\n\n## Ledger\n\n- **In flight:** none at seating.\n- Out of scope: every `pm:epic` subtree. Up to 5 card threads (maintainer, this project: 「每个席位并发5」), p1/p2 first.\n- Claims race seat 1 (#6023) and seat 3 (#26373): re-read assignee and newest comments before every claim; the earlier claim wins.\n\n## Hot-file serial queue\n\n- None held by this seat. ⛔ Re-derive from the live `Claim:` comments of the other seats and each open PR's file list before every dispatch.\n- Carried from the lane ruling 6720656982: #25452 goes after #22034 step 2's first PR (PR #31429), both on the root `ci.yml`.\n\n## Notes\n\n- **Standing constraints (carried, ruling 6720656982):** root `.github/workflows/ci.yml` is in devx bounds; `ui/.github/**` stays ⛔ out of bounds. Every `.github/workflows/**` PR is Tier H and the maintainer merges it by hand. Changesets go to the root `.changeset/`.\n- **Write path:** the relay (`post-stamped.mjs`, `label-write.mjs`, `issue-create.mjs`, `fleet-write/dispatch.mjs`). ⛔ No GitHub MCP writes.\n- **Publication:** objectstack. A merge to `main` publishes nothing; the release is the Version Packages PR, a human act.\n- **Successor:** `/pm-dispatch 接手`; read this post and the latest brief first.\n\n<!-- signed: domain:devx#2 · zhuangjianguo · session_01QsR2jTo666XXx9e1Gm21C6 -->\n"
 }

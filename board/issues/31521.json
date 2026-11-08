@@ -1,0 +1,34 @@
+{
+  "number": 31521,
+  "kind": "issue",
+  "title": "ci(glue): Fleet Write starts about 4,600 runs a day and every CI completion starts a Merge Queue Triage and a Scheduled Full Run Card run — measure which senders can fold their writes and narrow the workflow_run triggers",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:devx",
+    "pm:dispatched",
+    "priority:p1",
+    "tooling"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-08T12:47:17Z",
+  "updated_at": "2026-11-08T14:02:15Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31521",
+  "body": "coordinator#1 · os-steve · session_01ADHkmRWWb3MUYRQZiCKQcX\n\nFiling gate ③, a task the maintainer directed. This is recommendation 8 of the 2026-11-08 CI assessment (window 2026-11-01..07), the last of its list. The maintainer answered it in the project thread, verbatim: 「同意，立卡」 · 「高优先」 (2026-11-08T12:30Z). ⛔ Not a claim.\n\n**Business reason.** The Actions run list is what a seat or the maintainer reads when CI looks wrong. Glue runs bury the `CI` and `Lint` runs there, and Fleet Write alone spends about 37 runner-hours a day. Standard runners on a public repo are not billed, so the gain is a readable Actions page and runner capacity. It is the smallest gain in the assessment.\n\n**Reader who acts.** The `domain:devx` seat measures (step 1) and narrows the two `workflow_run` workflows. Changing how relay senders fold writes is `fleet-write` relay work, `domain:skills`' and governed; the devx seat files that half there with the readings.\n\n## Measured (assessment window)\n\n- `fleet-write.yml` ran about 4,600 times a day at about 0.5 min each.\n- `merge-queue-triage.yml` triggers on `workflow_run: workflows: [CI], types: [completed]`: one run per `CI` run of any event, filtered later by its job `if:`.\n- `scheduled-full-run-card.yml` triggers on `workflow_run` of the listed workflows the same way.\n\n## Wanted\n\n1. Read one day of Fleet Write runs by sender (the relay envelope's session and op list): how many strokes carry one action, and which senders send many single-action strokes in a row that one stroke could carry (strokes already take up to 20 writes, #24755).\n2. Narrow the two `workflow_run` workflows where GitHub allows it (`branches:` on the triggering run, the event they care about), and keep the job `if:` as the authority.\n3. ⛔ No write loses its pacing, read-back or signature; no triage or card-filing behaviour changes.\n\n## Acceptance\n\n- Runs per day of the three workflows, before and after, on this card.\n- Each workflow's self-test and the relay's conformance stay green.\n\n**Size:** S–M. **Clause-②:** no. **Metadata-protocol:** none.\n\n## Dedupe\n\nSearch 2026-11-08 12:3xZ, open and closed: \"\\\"Fleet Write\\\" runs\" 3,211 hits (seat posts and relay cards on the first pages), \"workflow_run \\\"Merge Queue Triage\\\"\" 8, \"fleet-write batch runner\" 298. Nearest: #24755 (closed; stroke batching at the write gap) and #31403 (open; a new relay op). Neither is about run volume. **New.**"
+}

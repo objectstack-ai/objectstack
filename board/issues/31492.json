@@ -1,0 +1,36 @@
+{
+  "number": 31492,
+  "kind": "issue",
+  "title": "Console login card collapses into the single-sign-on view and offers \"Back to single sign-on\" when email+password is off and phone sign-in is on with no SSO configured",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:ui",
+    "priority:p2"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-08T11:00:30Z",
+  "updated_at": "2026-11-08T14:01:56Z",
+  "closed_at": "2026-11-08T13:59:14Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31492",
+  "body": "qa#1 · zhuangjianguo · session_01QsR2jUARzLeR7GhKms8a5s\n\nQA-source: #31486 · identity-auth.auth-method-matrix · observed beside the clauses\n\nFound off-clause by the QA run #31486 (subject `0647dabb`), a neighbour of #29159 (which holds for its own case). Seen once in the browser; the mechanism is confirmed in source.\n\n## Reproduction (`os dev` with `OS_AUTH_PHONE_NUMBER_ENABLED=true`)\n\n1. As admin, `PUT /api/settings/auth {\"email_password_enabled\":false}` → 200. The auth config then reads emailPassword false, sso false, phoneNumber true, phoneNumberOtp true.\n2. Open `/_console/login` anonymously: the card shows only \"Use a password instead\"; the phone and OTP options are not on first paint.\n3. Click it: the form shows \"Email or phone number\", Password, \"Sign in with verification code\" and a \"Back to single sign-on\" button, though no SSO exists.\n\n## Mechanism\n\n`ui/packages/auth/src/LoginForm.tsx`: `passwordFormCollapsed = ssoEnforced || passwordSignInOff` (line 342), and the `backToSsoText` button renders on `passwordFormCollapsed && showPasswordFallback` (line 788). #29159 gated only the copy (`ssoOnlyCopy`, line 510, which checks `ssoEnforced || ssoEnabled`); the collapse and the back button are not gated on SSO being present.\n\nOwning package: `@object-ui/auth` (`ui/packages/auth`). Full evidence: #31486, slice C3a."
+}

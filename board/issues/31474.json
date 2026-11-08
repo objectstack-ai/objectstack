@@ -1,0 +1,34 @@
+{
+  "number": 31474,
+  "kind": "pull_request",
+  "title": "docs(pm-dispatch): pin the cloud unlock probe and have triage complete a freeze itself",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-08T10:06:02Z",
+  "updated_at": "2026-11-08T10:38:48Z",
+  "closed_at": "2026-11-08T10:38:46Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-08T10:38:46Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/31474",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"zhuangjianguo\"} -->\n_Requested by **Steedos** · [project thread](https://claude.ai/code/project/chan_018ETKaNwMZCNRYD7D8Q9Ubb?thread=cmsg_018ETKaNwMZCNRYD7D8Q9UbbDeGPLQrs5C3RsEmkP8cErv)_\n\nFixes #31353\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么:pm-dispatch 两条规则说清楚了。一是 cloud 解锁探针:写明在 objectstack 检出里跑,第一个 sha 是修复在 `main` 上的 squash 合并 commit,第二个是 cloud 仓 `.objectstack-sha` 文件里写的 sha;二是分诊入队前遇到冻结/hold,由分诊自己同笔挂 `pm:on-hold` 加引原文的 `Restart-when:`,写不出可执行判据才挂 `pm:retriage` 问所属车道。\n- 为什么改:PR #31347 合约复核 6716750908 的两条 should-fix。探针原文三处可误读(在哪跑、pin sha 从哪来、写的是修复 sha 而非合并 sha);冻结规则原文让分诊挂一个由分诊自己回答的标签,等于没说答案。两处误读都只会多挡卡,不会误放。\n- 风险与回滚:只改 `.claude/` 下两份参考文档,无代码、无发布面。每份文件的新增一行都用同文件删除一条在别处已写明的规则来付,行数上限不动。回滚即 revert 本 PR。\n- 先看:`.claude/skills/pm-dispatch/references/triage-duties.md` L40–41(冻结规则);`.claude/skills/pm-dispatch/references/cross-repo-coordination.md` L28–29(探针);两处被删的行(cross-repo 原 L41、triage-duties 原 L100)。\n- 两分钟验证:`pnpm check:pm-skill-ratchet`,应看到两份文件 47/47 与 100/100 行、headroom 0,退出码 0。\n- 需要你做的:无,`.claude/**` 属 Tier S,席位在总监席契约复核 PASS 后落地。\n\n## What changes\n\n`.claude/skills/pm-dispatch/references/cross-repo-coordination.md`\n- L28–29: the cloud unlock probe is `git merge-base --is-ancestor 合入sha PIN_SHA` (the file spells the placeholders in angle brackets), run in an objectstack checkout; 合入sha is the squash merge commit on `main` (a fix PR's own head is never an ancestor of the pin), and pin sha is the sha written inside `objectstack-ai/cloud`'s `.objectstack-sha`, not the file.\n- Paid by deleting old L41 (`复核记录带 Implemented-by:/Reviewed-by:;改路由…只对未派发卡`). Both halves are already stated elsewhere: `references/lanes/review.md` L19 and `references/contract-review.md` L43 carry the `Implemented-by:`/`Reviewed-by:` pair; `SKILL.md` L112 (`定车道与改路由限未派发卡`) and `references/execution-duties.md` L10 (`席改标限未派发卡`) carry the undispatched-only rule.\n\n`.claude/skills/pm-dispatch/references/triage-duties.md`\n- L40–41: before a move into `pm:queue`, triage reads the latest transition comment; on a hold, freeze or ruling it lands `pm:on-hold` plus a `Restart-when:` quoting it in one write (`state-machine.md` L16), and files `pm:retriage` to ask the owning lane only when it cannot write an executable `Restart-when:`.\n- Paid by deleting old L100 (`推送维护者只照 lanes/triage.md 推送清单;…`), a pointer whose rule `references/lanes/triage.md` L8–14 states in full (push only what needs the maintainer, the rest only into the seat post's round record).\n\n`state-machine.md` is unchanged.\n\n## Tests\n\nDocs-only diff under `.claude/**`; no package moves, no test owed. Line widths re-measured: every touched line is at most 120 bytes (widest 120).\n\n## Acceptance notes\n\n- Nit 1 (the ratchet comment on the `triage-duties.md` ceiling still describes the main-green doorbell as two lines) is not taken: that comment lives in `scripts/pm/check-skill-line-ratchet.mjs`, outside this card's two-file surface.\n- Nit 2 (cross-repo L38 lost \"immediately\") is not taken: the shortest wording that restores it (`…贴上注明;有主即停。`) measures 125 bytes against the 120-byte line cap, so it is not line-neutral.\n- The fallback clause (`pm:retriage` to the owning lane) keeps `state-machine.md` L40's remover: triage still removes the label, after the lane's answer supplies the `Restart-when:`.\n\n## Verification\n\n<details><summary>Derived gates at 6baaf5a9 (19 of 19 exit 0)</summary>\n\n```\nnode scripts/check-closing-keyword-parity.mjs :: exit 0\nnode scripts/check-closing-keyword-parity.mjs --self-test :: exit 0\nnode scripts/check-comment-mask-corpus.mjs :: exit 0\nnode scripts/pm/check-harness-current.mjs --self-test :: exit 0\npnpm --filter @objectstack/lint run check:doc-formula-expressions :: exit 0\npnpm check:agent-test-spelling :: exit 0\npnpm check:cross-package-test-inputs :: exit 0\npnpm check:doc-authoring :: exit 0\npnpm check:driver-memory-census :: exit 0\npnpm check:gitlink-declared :: exit 0\npnpm check:nul-bytes :: exit 0\npnpm check:pm-governed-merges :: exit 0\npnpm check:pm-half-states :: exit 0\npnpm check:pm-label-write :: exit 0\npnpm check:pm-skill-id-lint :: exit 0\npnpm check:pm-skill-ratchet :: exit 0\npnpm check:refd-timer-probe :: exit 0\npnpm check:skill-frame-sync :: exit 0\npnpm check:watch-hint-literal :: exit 0\ndispatch-gates --ran: 19 derived famil(ies) accounted for — 19 run, 0 NOT-MEASURED\n```\n\n</details>\n\n<details><summary>Ratchet reading</summary>\n\n```\ncheck-skill-line-ratchet: .claude/skills/pm-dispatch/references/cross-repo-coordination.md is 47 lines (ceiling 47; headroom 0).\ncheck-skill-line-ratchet: .claude/skills/pm-dispatch/references/triage-duties.md is 100 lines (ceiling 100; headroom 0).\n```\n\n</details>\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01QsR2jSJweEchb2oqYvkbgR)_\n"
+}

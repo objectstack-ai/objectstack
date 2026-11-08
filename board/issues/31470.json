@@ -1,0 +1,36 @@
+{
+  "number": 31470,
+  "kind": "issue",
+  "title": "spec: an omitted `required` on the sole master_detail of a controlled_by_parent object reads as a required master through ObjectSchema.create() but as an optional master through defineStack and a raw parse",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:spec",
+    "priority:p1"
+  ],
+  "assignees": [
+    "marchtian"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-08T09:58:00Z",
+  "updated_at": "2026-11-08T13:48:10Z",
+  "closed_at": "2026-11-08T13:46:59Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31470",
+  "body": "domain:spec#4 · marchtian · session_017ihL2eAG5J8aqAyPZif4BJ\n\nFiling gate: ① a defect in merged spec text, found by the post-hoc spec review #31467 (`Reviewed:` line on that card for PR #30940 / #30905). The finding is from an independent Fable reader and was checked by the seat against the hunk's own tests.\nReader: the `domain:spec` lane (`packages/spec/src/conversions/controlled-by-parent-master.ts`, `packages/spec/src/data/object.zod.ts`, semantic entry `18.cbp-optional-master-admitted`). Triage grades it; the seat suggests p1, because the spec as merged ships in the next release and the optional reading opens plugin-security's owner arm.\nDedupe (open AND closed): \"master_detail required omitted defineStack optional master\" → #30905 (closed, the source card) only.\nreach: a stack author who writes a `controlled_by_parent` object whose sole `master_detail` field omits `required`. Before #30940, `defineStack` refused that object. Now it parses as the OPTIONAL master (`required: false`). `ObjectSchema.create()` still reads the same omission as REQUIRED. plugin-security opens the owner arm on `rel.optional` (`security-plugin-cbp-relation.ts:170-172`, `security-plugin-cbp-write-gate.ts:529`), so the door the object entered by decides who may write orphan rows. Only `os lint` (`relationship/master-detail-required`, `packages/lint/src/data-model-rules.ts:433`) reports it.\ntype: Bug\n\n## Readings (`origin/main` 3c380253e)\n\n- `controlledByParentMasterOf` reads `required === false` (`controlled-by-parent-master.ts` ≈L136-168, hunk ≈L881-893). The object refinement runs on the parsed map, where an omitted `required` has already defaulted to `false`.\n- The hunk's own tests pin both readings:\n  - `ObjectSchema.safeParse` admits the omission as `{ field: 'order', optional: true }`, while `create()` yields `optional: false` (`controlled-by-parent-master.test.ts` ≈L674-688).\n  - `defineStack` with an omitted `required` returns `required: false` where it threw before (`conversions/cbp-master-detail-required-defaulted.test.ts:117-129`).\n- The semantic entry `migrations/entries/semantic/18.cbp-optional-master-admitted.ts:39-41, 63` and the #30905 changeset say an omitted `required` \"keeps meaning required through `ObjectSchema.create()` and on stored rows\". They never name the `defineStack` / raw-parse door.\n\n## Ask (pick one and say why; it is a spec contract choice)\n\n- **A (seat's lean):** make only an explicit `required: false` the optional master. The object refinement must see whether `required` was authored (as `create()` does), so an omitted `required` on the sole `master_detail` of a `controlled_by_parent` object is refused at parse and `defineStack` again, with guidance naming `required: true` / `required: false`. This is a narrowing of what #30940 widened, so declare `Clause-②: no (narrowing)` and check hotcrm/gallery stacks for omissions first.\n- **B:** keep the reading and amend the semantic entry, the changeset prose and the `controlledByParentMasterOf` docblock to say that through `defineStack` / raw parse an omitted `required` IS the optional master, and that only lint reports it.\n\nEither way, the proof is one test per door (create, raw parse, `defineStack`) asserting the same answer."
+}

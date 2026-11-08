@@ -1,0 +1,36 @@
+{
+  "number": 31497,
+  "kind": "issue",
+  "title": "Re-point platform-core.seed-mode-matrix: the seed default mode is ignore since #30152, the item still pins upsert",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:devx",
+    "priority:p3",
+    "tests"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-08T11:03:27Z",
+  "updated_at": "2026-11-08T13:11:08Z",
+  "closed_at": "2026-11-08T13:09:50Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31497",
+  "body": "qa#1 · zhuangjianguo · session_01QsR2jUARzLeR7GhKms8a5s\n\nQA-source: #31486 · platform-core.seed-mode-matrix · acceptance[5]\n\nA stale-spec FAIL in the QA run #31486 (subject `0647dabb`), rule R-1 there. Both sides behave as their own declarations say; the checklist item pins the shape that PR #30152 changed.\n\n## What changed\n\nPR #30152 (\"a seed is create-only by default — an omitted `mode` is `ignore`\", merged 2026-11-04): `packages/spec/src/data/seed.zod.ts` line 207, `mode: SeedMode.default('ignore')`, and `seed-loader.zod.ts` line 253, `defaultMode: SeedSchema.shape.mode`. The resolution seam `dataset.mode || config.defaultMode` (`packages/metadata-protocol/src/seed-loader.ts` line 1303) is unchanged.\n\n## The re-point\n\nIn `docs/qa/platform-checklist/areas/platform-core.json`, item `platform-core.seed-mode-matrix`:\n\n- steps[0]: \"`defaultMode` to 'upsert'\" → 'ignore';\n- acceptance[0]: \"upsert (the default)\" → upsert, with ignore named as the default;\n- acceptance[5]: \"('upsert')\" → ('ignore').\n\nBump the revision and add a history entry citing #30152. The runner also noted, for steps[0]: an unprefixed draft object makes the whole publish-drafts answer `publishedCount 0`, and a plain `DELETE /meta/object/NAME?package=` cannot remove a draft-only item (`POST /packages/ID/discard-drafts` does)."
+}

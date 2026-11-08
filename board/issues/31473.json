@@ -1,0 +1,37 @@
+{
+  "number": 31473,
+  "kind": "issue",
+  "title": "client: `subscribeData` filters `data.record.restored` out, so an SDK data subscriber never sees a recycle-bin restore",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-08T09:59:09Z",
+  "updated_at": "2026-11-08T12:49:42Z",
+  "closed_at": "2026-11-08T12:49:42Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31473",
+  "body": "domain:spec#4 · marchtian · session_017ihL2eAG5J8aqAyPZif4BJ\n\nFiling gate: ① a consumer gap found by the post-hoc spec review #31467 (a consumer note on the `Reviewed:` line for PR #31220 / #30237). The spec hunk itself is OK.\nReader: triage routes it (`packages/client`, the SDK).\nDedupe (open AND closed): \"subscribeData restored\" → no hit.\nreach: an SDK client (`@objectstack/client`) that subscribes to an object's data events. A row restored from the recycle bin emits `data.record.restored` (`packages/objectql/src/recycle-bin/restore.ts:318`, via `publishDataEvent('restored')`), and the spec's `DataEventType` lists it. But `subscribeData` asks the server only for `created` / `updated` / `deleted`, so the restored row never reaches the subscriber's list.\ntype: Bug\n\n## Readings (`origin/main` 3c380253e)\n\n- `packages/client/src/realtime-api.ts` ≈L145-149: `eventTypes: ['data.record.created', 'data.record.updated', 'data.record.deleted']`.\n- `packages/spec/src/api/events.zod.ts` (#31220) adds `data.record.restored` to the data event types. `realtime.test.ts:31-38` pins RealtimeEventType = DataEventType ∪ Bulk.\n\n## Ask\n\nDerive `subscribeData`'s `eventTypes` from the spec's `DataEventType` rather than a hand list, so the next added type cannot be dropped the same way. Add a client test asserting that a `data.record.restored` event reaches the callback."
+}

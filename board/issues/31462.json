@@ -1,0 +1,30 @@
+{
+  "number": 31462,
+  "kind": "issue",
+  "title": "ui: marketplace card and detail page show which languages an app ships (with coverage), and the catalog gets a languages filter (objectstack#30284 console half)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:ui",
+    "pm:blocked",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-08T09:23:23Z",
+  "updated_at": "2026-11-08T09:58:55Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31462",
+  "body": "repo:cloud#3 · os-zhuang · session_01QUs3BvRcDHXqRU4TSVE4u6\n\nFiling gate: **(b) a split a dev report names**: objectstack#30284's cloud half is draft PR objectstack-ai/cloud#3803 (`Refs #30284`); its report names the console half as the split. The maintainer ordered the card (「立卡」 2026-11-05). Dedup: searched open objectstack issues for \"marketplace languages\", \"supported_locales\", \"locale_coverage\"; no hits.\n\nSerial: after objectstack-ai/cloud#3803 merges and the cloud deploy that carries it (the fields below are served only from then). This card's landing closes objectstack#30284 together with it.\n\n## 维护者速读\n\ncloud#3803 让控制面在发布时测量每个版本实际带了哪些语言、每种语言翻译了多少，并在应用市场接口里返回，还加了 `?languages=` 筛选。这张卡做控制台这一半：应用市场卡片和详情页显示「中文 100% · 日本語 60%」，没有语言信息的旧版本显示「无语言信息」（绝不显示成\"仅英文\"），目录加一个语言筛选。\n\n## What the API serves (cloud#3803)\n\nOn every served version (`latest_version` on a catalog item, and the version on the detail page), both keys always present:\n\n- `locale_coverage`: `null` or `{ default_locale, expected_keys, locales: [{ locale, translated, coverage_percent }] }` (`coverage_percent` rounded to one decimal, the CLI's `coveragePercent`).\n- `supported_locales`: `null` or the locales that carry text, the default first (BCP-47 as the app declares them, `zh-CN`).\n- Catalog filter: `?languages=zh-CN,ja-JP` (OR inside the facet, AND with the other facets), and the facet counts under `languages`, keyed on the latest approved release. A package with no language information counts in no language; it is still listed when no language filter is set.\n\nRead the merged cloud code for the exact shapes before building: `packages/service-cloud/src/package-locale-coverage.ts`, `routes/marketplace.ts`, `marketplace-catalog-filter.mjs`.\n\n## Expected\n\n- The marketplace card shows the shipped languages, by native name, with coverage (for example 中文 100% · 日本語 60%); the detail page shows the full list.\n- `null` renders as \"no language information\" (translated), never as English only.\n- A languages facet control beside the existing taxonomy facets, wired to `?languages=`.\n- New strings in every locale pack the console ships.\n\n## Done when\n\n- Card, detail and facet render against a catalog with a measured version, an old (null) version and a filtered query, each pinned by a test; the console's i18n gates stay green."
+}

@@ -1,0 +1,34 @@
+{
+  "number": 31513,
+  "kind": "pull_request",
+  "title": "fix(console): register the push device without an origin the spec refuses",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-08T12:08:04Z",
+  "updated_at": "2026-11-08T12:49:42Z",
+  "closed_at": "2026-11-08T12:49:40Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-08T12:49:40Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/31513",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"zhuangjianguo\"} -->\n_Requested by **Steedos** · [project thread](https://claude.ai/code/project/chan_018ETKaNwMZCNRYD7D8Q9Ubb?thread=cmsg_018ETKaNwMZCNRYD7D8Q9Ubb6etUG8W3NiG1863Cn9e1Ry)_\n\nFixes #31472\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- **改了什么**:Console 注册移动端推送设备时，只有当发布的 `RegisterDeviceRequestSchema` 的 `origin` 成员接受 `window.location.origin` 才带上它；否则不带 `origin` 照常注册。\n- **为什么改**:主机名带下划线(内网/compose 服务名)或末尾带点的自托管 Console，原来发出的 origin 被服务端整体拒收(400)，这台设备收不到任何推送；spec 文档块写的是「此时生产者不带 origin」。\n- **风险与回滚**:风险低，只影响这两类主机，其余主机照旧带 origin;回滚即还原 `nativePushRegistration.ts` 一个函数。\n- **先看**:`ui/apps/console/src/nativePushRegistration.ts` 的 `registrationOrigin()`;其次是测试文件末尾新增的 describe。\n- **两分钟验证**:`cd ui && pnpm exec vitest run apps/console/src/__tests__/nativePushRegistration-29042.test.tsx`,预期 20 个用例全绿。\n- **需要你做的**:无，席位落地。\n\n## What changes\n\n- `registrationOrigin()` in `ui/apps/console/src/nativePushRegistration.ts` keeps the page origin only when `RegisterDeviceRequestSchema.shape.origin.safeParse(location.origin).success`, with the schema imported from `@objectstack/spec/api`. That is the schema the runtime door parses the whole registration body with, so the producer and the door cannot disagree. No regex is copied and no spec export is added: `PUSH_SERVER_ORIGIN_PATTERN` is internal to `@objectstack/spec` (route recorded in claim amendment 6720762259).\n- A host with an underscore (`http://my_svc:3000`) or a trailing dot (`https://crm.example.com.`) now registers its device without `origin`, as the `push-server-origin.ts` docblock says; its pushes carry no origin. Every other http or https host still sends its origin, and a non-http(s) page still sends none.\n- One root changeset, `.changeset/31472-push-origin-underscore-host.md` (`@object-ui/console` patch).\n\n## Tests\n\n- New top-level describe in the shared harness `ui/apps/console/src/__tests__/nativePushRegistration-29042.test.tsx`: an underscore host and a trailing-dot host answer no origin, a normal host with a port and a dotted IPv4 host keep theirs; and, with the page URL moved to each refused host, the full registration flow sends a body with no `origin` that `RegisterDeviceRequestSchema` accepts, while the same body naming the page origin is refused.\n- CONTROL: the existing registration and unregister tests in that file and `App.nativeShellMode-29039.test.tsx` stay green (2 files, 37 tests).\n- Ablation (`scripts/ablation-replace.mjs`, guard line replaced by `return location.origin;`): the 3 new cases go red, the other 17 in the file stay green; restore verified blob == HEAD and `git diff HEAD` empty.\n\n## Acceptance notes\n\n- `registrationOrigin()` keeps its explicit http/https check ahead of the schema judge; the schema alone would also refuse `\"null\"`, so the check is documentation of intent rather than a second rule.\n\n## Verification\n\nAll readings on objectstack `claude/project-thread-4wp8tl`; the derived gates at `075c3ef6`, the re-runs at merged head `16fff1a7` (main `2ae3e301` plus 4 commits, none touching these files).\n\n<details><summary>Derived gates: 36 of 36 exit 0 (dispatch-gates --ran: 0 NOT-MEASURED, 0 UNRUN)</summary>\n\n`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` derived 36 families for the 3 changed paths (65 changed lines). Every one exited 0, including `node scripts/check-sdui-manifest.mjs` (+ `--self-test`), `check-changeset-no-major --base origin/main`, `check-adr-0087-registration --base origin/main`, `check-closing-keyword-parity` (on this body), `check:type-check-debt` (under the verify lock), `check:nul-bytes`, `check:cross-package-test-inputs`, `check:test-source-alias` and `pnpm --dir ui exec vitest run scripts/` (170 files passed, 2 skipped; 4997 tests). `--ran` reconciliation: 36 derived, 36 run.\n\n</details>\n\n<details><summary>Console type-check and tests</summary>\n\n- `pnpm exec turbo run type-check --filter=@object-ui/console` (console task a cache miss, `tsc --noEmit` covers test files): exit 0 at `075c3ef6` and again at `16fff1a7`.\n- `nativePushRegistration-29042.test.tsx` + `App.nativeShellMode-29039.test.tsx`: 2 files, 37 tests passed.\n- Every console test file importing `App` or `nativePushRegistration` (11 files, 68 tests): passed at `075c3ef6` and at `16fff1a7`. `App.tsx` already imports `@objectstack/spec/api` at runtime through `components/FormPage.tsx`, so the new import adds no entry to the Console's module graph.\n- Ablation at `075c3ef6`: anchor 1 to 0, blob `79894a6a` to `acf23d1c`; 3 failed, 17 passed; restored blob equals HEAD, `git diff HEAD` empty.\n\n</details>\n\nDogfood battery: n/a, no `!` in the title and no (narrowing) arm.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01QsR2jS8ohBnEAnxBKpZcag)_\n"
+}

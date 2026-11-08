@@ -1,0 +1,33 @@
+{
+  "number": 31505,
+  "kind": "issue",
+  "title": "新增 AI 评测车道（eval）：长期运行场景卡、产品内问数基线、托管聊天评测集与 AI 写数据五道关卡，接手 cloud#3600 建成后的例行运行",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "enhancement",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-08T11:29:04Z",
+  "updated_at": "2026-11-08T12:51:46Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31505",
+  "body": "立卡门类别：③ 维护者直派的任务（增改 pm 规则，维护者点名）\n\n来源会话：https://claude.ai/code/session_01QUs3BtJS4Mo9P8YT2DhgB8\n\n## 维护者原话（2026-11-08，会话中）\n\n- 「#3600 专题 是临时任务， 场景卡和你说的基线是要长期运行的，是否应该开一个车道？」\n- 「同意开 AI 评测 车道」\n\n（#3600 指 objectstack-ai/cloud#3600 场景库专题；\"基线\"指 objectstack-ai/cloud#3825 的产品内问数准确率基线。）\n\n## 维护者速读\n\n新增一个无 `domain:*` 标签的常驻车道 `eval`，与 `security`、`review` 同类。它专门负责 AI 能力的长期回归：\n\n- 场景卡：Claude Code 通过 MCP 跑；\n- 产品内问数准确率；\n- 托管聊天评测集；\n- AI 写数据的五道关卡。\n\ncloud#3600 负责把场景库、跑分器和运行器建完；建完后的例行运行交给本车道，#3600 关闭。\n\n需要维护者另行确认的只有一项：本车道的 **API 预算参数**（见下方\"成本规则\"）。\n\n## 业务理由\n\n- **谁受益：** 维护者和各车道（每次发版都知道 AI 能力是变好还是变差）；销售（能向企业客户讲清\"我们如何保证 AI 的质量和安全\"）。\n- **什么场景：** \"AI 编写、AI 操作\"是产品的核心承诺，但今天 AI 能力没有例行回归：\n  - 场景库只有 #3600 这个临时项目在跑；\n  - 产品内问数从未测过线上准确率（cloud#3578 只交付了确定性层，cloud#3576 搁置）；\n  - AI 写数据的五道关卡（cloud#3567）没人跑。\n- **不做会怎样：** 基线跑一次就被遗忘；模型、提示词、工具的改动造成的回归要等客户发现。\n\n## 为什么不并入 QA 车道\n\n| | QA 车道（`lanes/qa.md`） | AI 评测车道 |\n|---|---|---|\n| 测什么 | 产品功能，测试清单逐项过 | AI 答得准不准、做得对不对 |\n| 结果 | 确定性的，通过或不通过 | 概率性的，多次运行取比例，看趋势 |\n| 成本 | 基本不花模型费用 | 场景卡走订阅；产品内评测要花 API 费用，需要预算管控 |\n| 专门知识 | checklist-test、RUNNER | 跑分器、题库维护、模型对比、评分误判排查 |\n\n## 车道章程草案（落 `references/lanes/eval.md`，并在 SKILL.md〈域车道〉表登记一行）\n\n**座位与唤醒**\n- 席位 `eval#N`，首席 `eval#1`；签名、座位贴、信箱同他席；无 `domain:*` 标签。\n- 节奏由维护者在 Routines 中设定，本席不自建、不改频率。建议：每周一轮场景卡；每次发版一轮产品内问数基线。\n\n**评测范围**\n1. **场景卡**（cloud#3600 建成的场景库）：Claude Code 通过 MCP 跑搭建和运行两半，确定性打分。\n2. **产品内问数基线**：cloud `packages/service-ai-studio/src/evals/run-ask-accuracy-cli.ts`，对本地 objectos-ee 运行，按\"正确、有引用、无泄露\"三项评分。\n3. **托管聊天评测集**：cloud#3576 的 13 个场景，仓库密钥配齐后纳入。\n4. **AI 写数据五道关卡**：cloud#3567 建成后纳入例行。\n\n**成本规则**\n- 默认走 Claude Code 订阅，遵守维护者成本原则（「目前阶段尽量不要用云端的token，api的更贵」）。\n- 产品内 AI 的评测（第 2、3 项）必须调用 API，只在维护者批准的预算内运行。\n- 每轮记录模型和花费，三周读数进座位贴。\n- **建议参数，待维护者确认：**\n  - 低成本模型，或与托管默认一致的模型；\n  - 首次每题 1 次（30 轮）；\n  - 正式基线每题 5 次（150 轮）；\n  - 每次发版跑一次；\n  - 不做每晚回归。\n\n**产出**\n- 每轮一份评分卡，附与上一轮的趋势对比。\n- 发现的产品缺陷按立卡门交给对应车道。\n- 评分误判交给跑分器维护者（参照 objectstack#31144、#31145）。\n\n**边界**\n- 不派 `os-dev`、不改产品代码、不开 PR；技能文本归 `domain:skills`，本席见文本问题以 `finding` 报。\n- 安全发现（含任何泄露）只照 `security-findings.md`；评分卡里的泄露只写\"有泄露\"，不写内容（与 `run-ask-accuracy-cli.ts` 的约定一致）。\n- 不对外发布准确率数字；对外口径由维护者决定。\n\n**地盘**\n- objectstack：`docs/qa/scenarios/**`、`packages/qa/`、`packages/cli/src/lint/` 下的跑分器文件。\n- cloud：`packages/service-ai-studio/src/evals/`（运行与题库维护；代码修改仍走对应车道）。\n\n## 交接\n\n- **cloud#3600：** 建设阶段（场景库、运行器、跑分器）完成后，例行运行移交本车道，#3600 关闭。\n- **cloud#3825：** 首个问数基线由本车道在本地执行。\n- **cloud#3576、#3567：** 就绪后纳入本车道的例行范围。\n\n## 动手的读者\n\n`domain:skills` 车道：新增 `references/lanes/eval.md`，在 `SKILL.md`〈域车道〉表登记，必要时在 `seat-lifecycle.md` 补唤醒说明。席位开席由维护者按惯例召唤。\n\n## 查重\n\n| 查询 | 命中 |\n|---|---|\n| `repo:objectstack-ai/objectstack is:issue \"lanes/qa.md\"` | 3 条（#31433 QA 席位贴、#31434 QA 章程修订、#31305 QA 决策），均为 QA 车道，不同题 |\n| 本仓 `references/lanes/` 现有：devx、director、hotlong、mobile、qa、review、security、server、skills、spec、triage、ui | 无评测类车道 |\n\n## 相关\n\nobjectstack-ai/cloud#3600、objectstack-ai/cloud#3825、objectstack-ai/cloud#3576、objectstack-ai/cloud#3567、objectstack-ai/cloud#3578、`references/lanes/qa.md`"
+}

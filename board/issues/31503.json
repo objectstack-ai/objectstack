@@ -1,0 +1,34 @@
+{
+  "number": 31503,
+  "kind": "issue",
+  "title": "设计卡：让 AI 读懂 dataset 语义层——业务术语与同义词、AI 按数据集指标查询（问数与 MCP 共用一套口径）",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "area:ai",
+    "domain:spec",
+    "enhancement",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "marchtian"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-08T11:16:56Z",
+  "updated_at": "2026-11-08T13:45:56Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31503",
+  "body": "立卡门类别：③ 维护者直派的任务\n\n来源会话：https://claude.ai/code/session_01QUs3BtJS4Mo9P8YT2DhgB8\n\n## 维护者原话与裁定\n\nobjectstack-ai/cloud#3825「待裁 2：业务语义层的归属」，维护者 2026-11-08 在会话中裁定：「同意放 objectstack」，即**选项 A：业务语义层是平台能力，建在 objectstack，cloud 的问数作为第一个使用方**。\n\n## 维护者速读\n\n平台其实已经有语义层：ADR-0021 的 `dataset`，定义了维度和指标，报表、仪表盘都从它取数，已经交付。缺的是 **AI 不用它**：\n- 产品内问数和 MCP 都直接查对象，靠关键词去猜\"营收\"指哪个字段；\n- dataset 的指标只有显示名（`label`），没有同义词，也没有给 AI 看的说明。\n\n本卡要设计的是：让 AI 以 dataset 指标为准来回答业务问题，同一个\"营收\"在问数、报表、外部 AI 里永远是同一个数。\n\n## 业务理由\n\n- **谁受益：** 用问数的业务人员和管理层；通过 MCP 接入的外部 AI；搭报表的管理员。\n- **什么场景：** 用户问\"本月营收多少\"。今天问数可能把报价中、已丢单的订单金额也加进去，或者找到合同对象上的另一个金额字段，各部门问出不同的数。有了本卡，AI 直接用管理员定义的\"营收 = 已赢单金额合计，按成交日期归月\"。\n- **不做会怎样：** 问数的准确率卡在关键词匹配上（cloud#3578 的基线：修复前 30 道题里 16 道找错对象）。管理员已在 dataset 里定义的口径，对 AI 毫无作用，口径在报表和 AI 之间漂移。这正是 ADR-0021 要消灭的\"指标漂移\"。\n\n## 现状（已核对）\n\n- **语义层已存在：** `docs/adr/0021-analytics-dataset-semantic-layer.md`（Accepted & shipped），`packages/spec/src/ui/dataset.zod.ts`：数据集 = 基础对象 + 关联 + 维度 + 指标。由 `packages/services/service-analytics`（dataset-compiler、dataset-executor）执行。\n- **指标与维度只有 `label`：** `description` 只在数据集上（`dataset.zod.ts:182-183, 394-395` 的别名提示），没有同义词或业务术语字段。\n- **AI 不读数据集：**\n  - cloud 的问数工具（`service-ai/src/tools/query-data.tool.ts`、`data-tools.ts`）按对象查询，找对象靠关键词打分（`schema-retriever.ts`）；\n  - 出图走推断出来的数据立方，不走作者定义的数据集指标（`chart-copy.ts:30-40` 写明两条路径的区别）；\n  - `packages/mcp/src` 中没有读取数据集的工具。\n- **ADR-0021 的运行时限制：** 修订记载 joins、having 等并未完全执行（ADR-0021 \"Correction 2026-05-31\"）。设计时需确认当前状态，避免 AI 依赖尚未执行的能力。\n\n## 要设计的内容（本卡产出：一份设计或 ADR，裁定后拆实施卡）\n\n1. **元数据：给指标和维度加业务语义。** 至少包括：\n   - 同义词，例如\"营收\"的同义词\"收入、销售额\"；\n   - 给 AI 的简短说明。\n\n   按 ADR-0049「enforce-or-remove」，新键必须有运行时消费方，本设计中的消费方就是 AI 工具。需要说明它们与现有 `label`、数据集级 `description` 的关系，以及校验规则。\n2. **AI 工具：按数据集回答。** 为 AI 提供\"列出数据集与指标\"和\"按数据集查询\"两类工具：\n   - 走现有 dataset-executor，权限沿用数据集的访问门；\n   - 产品内 AI 的工具注册表与 MCP 共用同一套工具，外部 AI 也能用到同一口径。\n3. **选择规则：** 问题里的术语命中某个指标或同义词时，AI 优先使用该指标；没有命中时，再退回按对象查询。回答的\"来源\"写明\"指标：营收（数据集：销售分析）\"。\n4. **权限：** 确认按数据集查询时，行级、字段级权限与共享规则在所有分组路径上都生效（cloud#3825 第一步第 2 项的同一问题）。\n5. **评测：** 在 cloud 的 `ask-accuracy` 题库中加入\"业务术语\"类题目，用来衡量本设计带来的提升。\n\n## 动手的读者\n\n- 设计与 spec：spec 席位（domain:spec）出设计或 ADR 草案，经维护者确认。\n- 实施：service-analytics 与 mcp 的工具实现（domain:services）；cloud 问数接入由 cloud#3825 第 3 项承接。\n\n## 查重\n\n| 查询 | 命中 | 结论 |\n|---|---|---|\n| `repo:objectstack-ai/objectstack is:issue \"semantic layer\"` | 4 条，均已关闭 | 文档与引用修正，不同题 |\n| `\"metric definition\"` | 4 条，均已关闭 | 不同题 |\n| `\"指标\"` | 4 条（1 条开放，为 PM 席位贴） | 不同题 |\n| `\"synonym\"`、`\"business term\"` | 各 4 条，均不相关 | — |\n\n## 相关\n\nobjectstack-ai/cloud#3825（问数质量专题，本卡的第一个使用方）、objectstack-ai/cloud#3578、ADR-0021、ADR-0049、`packages/spec/src/ui/dataset.zod.ts`、`packages/services/service-analytics`"
+}

@@ -1,0 +1,34 @@
+{
+  "number": 31520,
+  "kind": "issue",
+  "title": "ci(test-ui): an empty diff still selects 691 of 6,657 UI test files (394 because they read the disk or spawn a process), so any UI change starts all 16 Test UI shards — shrink the always-on set",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:ui",
+    "pm:dispatched",
+    "priority:p1",
+    "tooling"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-08T12:46:31Z",
+  "updated_at": "2026-11-08T14:12:26Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31520",
+  "body": "coordinator#1 · os-steve · session_01ADHkmRWWb3MUYRQZiCKQcX\n\nFiling gate ③, a task the maintainer directed. This is recommendation 7 of the 2026-11-08 CI assessment (window 2026-11-01..07). The maintainer answered it in the project thread, verbatim: 「同意，立卡」 · 「高优先」 (2026-11-08T12:30Z). ⛔ Not a claim.\n\n**Business reason.** A one-line UI fix pays for the whole Test UI battery: 16 shard runners, about 70 runner-minutes per run on the 2026-11-06 sample, on its PR run and again in the queue. A smaller always-on set lets small UI changes start fewer shards and finish sooner.\n\n**Reader who acts.** The `domain:ui` seat: the selector is `ui/scripts/select-affected-tests.mjs`, and each always-on test is a ui-package test. A `ci.yml` edit is not expected; if one is needed, the PR is Tier H.\n\n## Measured (`main` e516cf22, 2026-11-08)\n\n`node ui/scripts/select-affected-tests.mjs --base HEAD --explain` on an empty diff:\n\n- `changed packages: (none)` and still `always-on test files (the package graph cannot place them): 691`, so 691 of 6,657 tracked test files are selected.\n- Reasons, from the `--explain` lines:\n  - 394 \"reads the disk or spawns a process\"\n  - 183 \"outside every workspace package\"\n  - 16 \"imports @object-ui/plugin-map, which @object-ui/core does not depend on\"\n  - 13 \"imports @object-ui/i18n, which @object-ui/core does not depend on\"\n  - 12 \"reaches packages/plugin-detail outside packages/app-shell\"\n  - the rest are smaller groups of the same two kinds (an undeclared import, a reach outside the owning package).\n- #26084 read 556 always-on files on 2026-10-27, so the set grew by about 135 in twelve days. It also found 0 of 336 Test UI shards empty: affected mode never empties a shard.\n\n## Wanted\n\n1. Classify the 691 by fix:\n   - (a) an undeclared dependency or a cross-package reach: declare the dependency, or move the test into the package it tests, so the graph can place it;\n   - (b) a disk or process reader that is really scoped to one package: give the selector a way to attribute it (a declared owner, or a narrower reason test), with a self-test case;\n   - (c) a test that truly guards everything: it stays always-on, with a one-line reason.\n2. Land (a) and (b) in slices, smallest first. A selector change carries a positive and a negative control in the selector's tests.\n3. ⛔ No test skipped, quarantined or moved out of Test UI. The `--shard k/16` denominator is unchanged here (it is pinned through `scripts/ci-shard-matrix.mjs`).\n\n## Acceptance\n\n- The empty-diff always-on count is on this card before and after each slice. Target: under 200.\n- Three real one-package UI PRs after landing: how many Test UI shards each started, on this card.\n\n**Size:** M–L in slices. **Clause-②:** no. **Metadata-protocol:** none.\n\n## Dedupe\n\nSearch 2026-11-08 12:3xZ, open and closed: \"Test UI always-on\" 161 hits, \"always-on files test-ui\" 50, \"select-affected-tests always\" 4. Nearest: #26084 (closed; measured the empty-shard problem and left this half open), #25868 (closed; wired affected mode). Nothing open. **New.**"
+}

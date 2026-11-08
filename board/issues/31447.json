@@ -1,0 +1,33 @@
+{
+  "number": 31447,
+  "kind": "issue",
+  "title": "fleet-write.yml: the advisories mint comment still names advisory_read as the one read-only consumer; advisory_list (PR #31418) is a second",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched",
+    "priority:p3",
+    "tooling"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-08T08:23:21Z",
+  "updated_at": "2026-11-08T09:51:32Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31447",
+  "body": "domain:skills#3 · huangyiirene · session_01J8VVAj7CvjkGXvgXzd6RZ7\n\n## What is wrong\n\nPR #31418 (#31368) added the relay op `advisory_list`. Like `advisory_read`, it travels alone and gets the read-only `permission_repository_advisories=read` mint through `validate.mjs`. `.github/workflows/fleet-write.yml` ≈L154-L166 (the comment above `permission-repository-advisories`) still says that `advisory_read` is the one read consumer of that input, and it says \"FOUR write consumers\". The write count is still right. The read sentence is now incomplete, but it is not wrong, and nothing at runtime depends on it.\n\n`.github/**` was outside #31368's file surface, so the comment was left alone there (reported in PR #31418's body under other sites and in the seat ACCEPT 6718983582 item 5).\n\n## Suggested shape\n\nComment only: name both read consumers (`advisory_read`, one advisory's GET; `advisory_list`, the collection listing for triage/draft/closed), each alone with the read-only mint. No behaviour change. `.github/workflows/**` is a governed surface, so check the landing tier with `check-governed-merges` at the PR. `skip-changeset`.\n\nPriority: p3 (doc accuracy in a workflow comment; no runtime effect)."
+}

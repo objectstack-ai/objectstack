@@ -1,0 +1,34 @@
+{
+  "number": 31536,
+  "kind": "pull_request",
+  "title": "docs(pm-dispatch): merge main before landing a label PR when a new locale landed under it",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-08T13:36:25Z",
+  "updated_at": "2026-11-08T13:59:14Z",
+  "closed_at": "2026-11-08T13:59:12Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-08T13:59:12Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/31536",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"zhuangjianguo\"} -->\n_Requested by **Steedos** · [project thread](https://claude.ai/code/project/chan_018ETKaNwMZCNRYD7D8Q9Ubb?thread=cmsg_018ETKaNwMZCNRYD7D8Q9UbbPFKx9sEPgbmNpwJBY4DMwx)_\n\nFixes #31512\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么:在落地规则里加一条:新增或修改显示标签的 PR,如果它最后一次绿的 PR 检查之后 main 上又落了一个新语种的翻译包,席位在挂自动合并或入队之前必须先合入 main 并重跑检查。\n- 为什么改:今天 pt-BR 和 ru 两个新语种包先后落地,压在两个标签 PR 底下;这两个 PR 自己的检查是绿的,进队列后翻译门禁变红,连带后面排队的 PR 被踢出 6 次。\n- 风险与回滚:只改席位落地手册的一个文件,不动代码、门禁与仓库设置;回滚即撤销本提交。为守住行数上限,删了两行在别处已有原文的旧规则。\n- 先看:`.claude/skills/pm-dispatch/references/landing-operations.md` 第 29 行与第 33–34 行(新规则),以及被删的两行(第 57、65 行旧位)。\n- 两分钟验证:`pnpm check:pm-skill-ratchet`,预期 landing-operations.md 为 102 行、上限 102、退出码 0。\n- 需要你做的:无,席位落地。\n\n## What changes\n\n- `landing-operations.md` §入队与落地:\n  - The stale-base branch of the queue-red disposition (L29, \"基上缺已合修复 ⇒ merge main\") now names the case: a new locale bundle landing under the PR, which reds the translation gates, belongs to that branch (re-running cannot clear it).\n  - New pair at the end of that section: a label PR whose last green PR run predates a new locale bundle on `main` merges `main` and re-runs before auto-merge is armed or it is enqueued. This is an exception to the platform-readings rule that a `behind` PR enqueues as usual. \"Label\" means the display labels the two translation gates count, named by their `lint.yml` step ids `check-generated-translation-bundles` (L6361) and `check-no-new-untranslated-declared-labels` (L6378): platform-objects objects, settings manifests, spec-declared labels.\n- Line ratchet: the file is 102/102 with headroom 0, so the two new lines are paid by deleting two lines whose content is already stated elsewhere. Nothing was re-wrapped, and every touched line is at most 120 bytes.\n  - Deleted the `mergeable_state` `dirty` re-read before arming. The same file states it at the PR-open-to-MERGED read (\"dirty ⇒ 当即合 origin/main 推新提交\") and in the zero-enqueued check ①; `platform-readings.md` states \"dirty 即入队否决\"; the generated-artifact half is the next line (\"非零 ⇒ 按 A 的固定序\").\n  - Deleted the post-merge `closed_by_pull_requests` read. `platform-readings.md` §闭合关键词解析 states it (\"消费侧检查 = 合并后读 closed_by_pull_requests\"), and this file keeps the open-card reconciliation line, which checks the same mis-close.\n- Not done: the optional `check:i18n-coverage` derivation beside `check:i18n` in `scripts/pm/dispatch-gates.data.mjs`. It is not a one-row change. The row's self-test pin counts the section's lines (`i18nHit.length === 3`), so that pin and the docblock on the two i18n entries would also move. The gate also needs a full `pnpm build` before it reads anything, which every platform-objects card would then pay. And open PR #31454 edits the same self-test file. A local run would also sit on the same stale base, so it would not have caught either red.\n- An option the card raised, which is not written as a rule here: the repository setting \"require branches to be up to date before merging\" would also cover this. That is the maintainer's call.\n\n## Tests\n\nNone: this is a prose rule in a `.claude/**` reference, with no tested behaviour to ablate.\n\n## Acceptance notes\n\n- Evidence for the cause is on the card: the seat's premise reading (comment 6721491029), the dev report, and the triage retriage answer. #31440 (pt-BR) landed after #31435's last green run, and the 08:40Z group went red. #31466 (ru) landed after #31448's last green run, and the 11:11Z group went red.\n- `platform-readings.md` L88 (\"behind 的 PR 照常入队 … ⛔ 不为它先发 pr_update_branch\") is not edited, because it is outside this card's file surface. The new line names itself as the exception to it.\n\n## Verification\n\n<details><summary>Derived gates at head b65ebb6f (17 of 17, all exit 0)</summary>\n\n`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` derived 17 commands. Each one exited 0, and `--ran` reconciled 17 derived, 17 run, 0 NOT-MEASURED. Prerequisite: a locked `turbo run build --filter=@objectstack/formula --filter=@objectstack/lint` (VERDICT command-exit 0).\n\n`check:pm-skill-ratchet`: landing-operations.md is 102 lines (ceiling 102, headroom 0), and its widest table row is 0 bytes (pin 0).\n\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01QsR2jRG212pSNYcqZAmR1Q)_\n"
+}

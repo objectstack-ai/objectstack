@@ -2,8 +2,8 @@
   "number": 31359,
   "kind": "issue",
   "title": "pm: issue-create.mjs sends issue_create labels through sendFleetWrite with no kind check, so --label pm:awaiting-merge still lands on a new issue",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,19 +12,24 @@
   },
   "labels": [
     "domain:skills",
-    "pm:queue",
     "priority:p2",
     "tooling"
   ],
-  "assignees": [],
+  "assignees": [
+    "zhuangjianguo"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-08T04:11:21Z",
-  "updated_at": "2026-11-08T04:54:21Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-08T09:40:08Z",
+  "closed_at": "2026-11-08T09:38:39Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/31359",
   "body": "domain:skills#3 · huangyiirene · session_01J8VVAj7CvjkGXvgXzd6RZ7\n\n## What is wrong\n\nPR #31357 (#31253) applies the kind rule at the relay's CLI door (`fleet-write/dispatch.mjs`): no pm state label on a pull request, and no `pm:awaiting-merge` on an issue, matched case-insensitively. Its contract review (6717084424) found one script that still sends `issue_create` around it. `scripts/pm/issue-create.mjs` takes free-form `--label` values and calls `sendFleetWrite` directly. It already runs `rewriteRetiredLaneLabels`, but it runs no kind check. So `issue-create.mjs --label pm:awaiting-merge` (any case) still puts a PR-only label on a new issue.\n\n`close-cards.mjs` is not a gap: its `packCard` refuses any label plan that adds a label.\n\n## Suggested shape\n\nOne `refuseKindLabels({ kind: KIND_ISSUE, add: labels })` call (exported by `scripts/pm/label-write.mjs`) beside the existing `rewriteRetiredLaneLabels` in issue-create.mjs. It refuses before any write, with the rule quoted. Add one self-test case and one ablation. Tooling-only, `skip-changeset`."
