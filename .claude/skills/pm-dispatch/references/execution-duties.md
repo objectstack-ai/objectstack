@@ -18,6 +18,8 @@
 - 工作项面:卡片、裁决与分诊评论列的工作项逐条对树核验是否仍未完成,⛔ 不对卡核验。
 - `batch` 等待不填槽,四态见 SKILL.md 该行;同批独立按文件面不相交判,⛔ 不按包或 check 名。
 - 软顶:本席已验收等人批的 Tier H PR 逾 5 ⇒ 停派 Tier H,S/非受管照常,轮报列积压;两周复测。
+- 每轮按现 head 核本席终局四件套 PR:席位记录/`pm:awaiting-merge`/请审/终版速读,缺件同轮补。
+- 四件读数器:本地 `node scripts/pm/check-half-states.mjs` H43/H48 只读受管 H;超行无受管 PR 自读。
 - single-writer 路径 = `SINGLE_CLAIM_PATHS` 所枚举;共享其它路径是普通并发,后落地方解冲突。
 - 第 N 单派发前读 `scripts/pm/os-verify-lock.sh --status`:到达深度 ≥ `LOCK_DEPTH_HOLD`(= 2)即等。
 - 到达深度 = `queue N:` 行数 + 1(待派 dev 的运行算作到达);`state:` holder 与 `parked` 行不计。
@@ -177,12 +179,10 @@
 
 - 你是记录在案的复核人:对 GitHub 核验,⛔ 不对报告的自述核验。
 - 逐项判据展开在 `references/review-checklist.md`,每份报告对着它过。
-- PR 改已有 `.changeset/*.md` ⛔ 不打 `skip-changeset`;确认件只认派发席记录(`landing-operations.md`)。
 - 绿色输出≠ 该绿证明了被测风险:拒收断言、全绿方向与时序、pin 翻转、边界后收益。
 - 触 `skills/**` 的 PR 加问整包价值密度:从整包加载的客户 agent 座位读,⛔ 不从作者座位读。
 - 超派发预算或小功能大扩写 ⇒ REWORK,⛔ 不因已经写好了放行。
 - 判决 ACCEPT:PR 评论 `## 席位核对`,清单结论+抽查读数+偏差,⛔ 不复述其叙事;卡留指针行。
-- `mcp_calls` 点名写工具(`settings.json` deny 清单 + `update_pull_request`)⇒ 拒收,⛔ 不带注放行。
 - 判决 REWORK:逐项反馈,同认领重派;补丁轮优先 SendMessage 续派原 dev;最多 2 轮,第三次升级。
 - 判决 ESCALATE:见〈升级与决策〉;熔断任一命中亦判,PR 暂停,答复前 ⛔ 不派下一轮。
 - 熔断三条:独立安全复审连续 2 轮不过;diff 超首次复核规模 2 倍;上轮修复引入新 HIGH。
