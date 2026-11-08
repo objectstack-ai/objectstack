@@ -427,7 +427,13 @@ export function registerRecordPageEndpoints(this: RecordPageRouteHost, basePath:
 
                 const answerExplain = async () => {
                     const out: Record<string, unknown> = {};
-                    const security = await this.resolveSecurityService(environmentId, req);
+                    // Resolved once, inside each operation's own `try`: a
+                    // security service that cannot be resolved is each
+                    // operation's refusal (the `503` `GET /security/explain`
+                    // answers), as the fieldAccess part's is its own, and the
+                    // page still answers. Asked after the caller check, in the
+                    // order that door asks.
+                    let resolvingSecurity: ReturnType<RecordPageRouteHost['resolveSecurityService']> | undefined;
                     for (const operation of new Set(body.explain ?? [])) {
                         try {
                             // `POST /security/explain` answers only an
@@ -436,6 +442,7 @@ export function registerRecordPageEndpoints(this: RecordPageRouteHost, basePath:
                                 out[operation] = { error: { code: 'UNAUTHORIZED', status: 401, message: 'The access-explanation endpoint requires an authenticated caller.' } };
                                 continue;
                             }
+                            const security = await (resolvingSecurity ??= this.resolveSecurityService(environmentId, req));
                             if (typeof security?.explain !== 'function') {
                                 out[operation] = { error: { code: 'NOT_IMPLEMENTED', status: 501, message: 'Access explanation is not available on this deployment.' } };
                                 continue;

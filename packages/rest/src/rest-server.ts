@@ -6287,13 +6287,12 @@ export class RestServer {
     private registerSecurityExplainEndpoints(basePath: string): void {
         // [#23050 slice 6] The body moved to `security-routes.ts`. This literal
         // hands it every member it reads — the list IS its dependency on this
-        // class (see `SecurityExplainRouteHost`, and that module's header for why
-        // `securityServiceProvider` is a getter).
-        const readSecurityServiceProvider = () => this.securityServiceProvider;
+        // class (see `SecurityExplainRouteHost`). The `security` slot is read through
+        // {@link resolveSecurityService}, the server's one resolver, so this
+        // family classifies a rejection exactly as every other door does.
         const host: SecurityExplainRouteHost = {
             routeManager: this.routeManager,
-            get securityServiceProvider() { return readSecurityServiceProvider(); },
-            resolveRequestEnvironmentId: (...a) => this.resolveRequestEnvironmentId(...a),
+            resolveSecurityService: (...a) => this.resolveSecurityService(...a),
             resolveExecCtx: (...a) => this.resolveExecCtx(...a),
             enforceAuth: (...a) => this.enforceAuth(...a),
         };
@@ -6425,13 +6424,12 @@ export class RestServer {
     private registerSecurityEndpoints(basePath: string): void {
         // [#23050 slice 6] The body moved to `security-routes.ts`. This literal
         // hands it every member it reads — the list IS its dependency on this
-        // class (see `SecurityRouteHost`, and that module's header for why
-        // `securityServiceProvider` is a getter).
-        const readSecurityServiceProvider = () => this.securityServiceProvider;
+        // class (see `SecurityRouteHost`). The `security` slot is read through
+        // {@link resolveSecurityService}, the server's one resolver, so this
+        // family classifies a rejection exactly as every other door does.
         const host: SecurityRouteHost = {
             routeManager: this.routeManager,
-            get securityServiceProvider() { return readSecurityServiceProvider(); },
-            resolveRequestEnvironmentId: (...a) => this.resolveRequestEnvironmentId(...a),
+            resolveSecurityService: (...a) => this.resolveSecurityService(...a),
             resolveExecCtx: (...a) => this.resolveExecCtx(...a),
             enforceAuth: (...a) => this.enforceAuth(...a),
         };

@@ -36,12 +36,15 @@
  *   `register` calls, all of which run while registration runs, and the
  *   class's one `routeManager` reassignment wraps
  *   `registerMetadataEndpointsInner`, never these registrars.
- * - `securityServiceProvider` (read by both) goes as a GETTER. Each body's
- *   `resolveService` reads it at REQUEST time, and the field is not
- *   `readonly`, so a value copied at registration could part from it. The
- *   getter reads the field the handler read, when it read it. (`kernelManager`
- *   went the same way, for the explain body, until #30192 moved the
- *   environment-kernel lookup into the provider itself.)
+ * - `resolveSecurityService` (read by both) goes as a closure, like every
+ *   method: each body's `resolveService` asks the server's ONE security
+ *   resolver at request time, so a door whose environment's security service
+ *   cannot be resolved refuses rather than proceeds here exactly as it does at
+ *   every other door — a service that is not registered is `undefined` (each
+ *   family's `501`), any other rejection is `AuthzStoreUnavailableError`, the
+ *   family's `503 SERVICE_UNAVAILABLE`. (Both bodies read the provider field
+ *   through a getter, and the request's environment through
+ *   `resolveRequestEnvironmentId`, until they took the server's resolver.)
  *
  * Module-level helpers stay where they were and are imported from the modules
  * `rest-server.ts` imports them from; the bodies read nothing declared in
@@ -55,7 +58,11 @@
 import { sendError as sendEnvelopeError } from '@objectstack/types';
 // [#7678] ADR-0090 D5/D9 suggested-binding `?status=` vocabulary — the one
 // owner, shared with the runtime dispatcher's `/security` domain.
-import { isAudienceBindingSuggestionStatus, unknownAudienceBindingSuggestionStatusMessage } from '@objectstack/core';
+// …and the outage an unreadable authorization input raises (the security
+// service the server's resolver could not resolve among them), by brand.
+import {
+    isAudienceBindingSuggestionStatus, unknownAudienceBindingSuggestionStatusMessage, isAuthzStoreUnavailableError,
+} from '@objectstack/core';
 // [#8073] The closed ADR-0112 error vocabulary, so the explain family's single
 // refusal emitter types its `code` parameter as the vocabulary rather than as
 // `string` — an invented code is a compile error at the call site instead of a
@@ -67,7 +74,9 @@ import type { ErrorCode } from '@objectstack/spec/api';
 // envelope declares `code` REQUIRED while the flat classification it re-dresses
 // legitimately carries none.
 import { standardErrorCodeForHttpStatus } from '@objectstack/spec/api';
-import { classifiedRefusalAnswer, nestedRefusalEnvelope, sandboxFaultAnswer } from './error-response.js';
+import {
+    classifiedRefusalAnswer, logUnexpectedRouteError, mapDataError, nestedRefusalEnvelope, sandboxFaultAnswer,
+} from './error-response.js';
 import { logError } from './log.js';
 import { unknownQueryParamRefusalMessage } from './query-allowlist.js';
 import { refuseRepeatedQueryParams } from './query-multiplicity.js';
@@ -78,13 +87,12 @@ import type { RestServer } from './rest-server.js';
  * every one of them, and no other. Each is typed AS the class member (an
  * indexed access on the class), so a change to a member's signature on the
  * class is a change here too, and naming a member the class does not have is a
- * compile error. See the module header for why `securityServiceProvider` is
- * a getter.
+ * compile error. See the module header for why the `security` slot is read
+ * through `resolveSecurityService`.
  */
 export interface SecurityExplainRouteHost {
     readonly routeManager: RestServer['routeManager'];
-    readonly securityServiceProvider: RestServer['securityServiceProvider'];
-    resolveRequestEnvironmentId: RestServer['resolveRequestEnvironmentId'];
+    resolveSecurityService: RestServer['resolveSecurityService'];
     resolveExecCtx: RestServer['resolveExecCtx'];
     enforceAuth: RestServer['enforceAuth'];
 }
@@ -92,12 +100,12 @@ export interface SecurityExplainRouteHost {
 /**
  * The `RestServer` members {@link registerSecurityEndpoints} reads — every one
  * of them, and no other, typed as {@link SecurityExplainRouteHost}'s are. See
- * the module header for why `securityServiceProvider` is a getter.
+ * the module header for why the `security` slot is read through
+ * `resolveSecurityService`.
  */
 export interface SecurityRouteHost {
     readonly routeManager: RestServer['routeManager'];
-    readonly securityServiceProvider: RestServer['securityServiceProvider'];
-    resolveRequestEnvironmentId: RestServer['resolveRequestEnvironmentId'];
+    resolveSecurityService: RestServer['resolveSecurityService'];
     resolveExecCtx: RestServer['resolveExecCtx'];
     enforceAuth: RestServer['enforceAuth'];
 }
@@ -130,19 +138,15 @@ export function registerSecurityExplainEndpoints(this: SecurityExplainRouteHost,
     // The ENVIRONMENT's security service — its resolver / evaluator / RLS
     // compiler are bound to the env kernel's own data engine.
     //
-    // [#30192] The provider resolves the environment's kernel itself now, as
-    // the analytics door's does, so this asks it for the REQUEST's environment
-    // (the shared resolver's answer) and nothing else. The host provider is no
-    // longer a fallback: when the environment's kernel carries no security
-    // service, or could not be acquired, the answer is the 501 below.
-    const resolveService = async (environmentId: string | undefined, req: any) => {
-        if (!this.securityServiceProvider) return undefined;
-        try {
-            const envId = await this.resolveRequestEnvironmentId(environmentId, req);
-            return await this.securityServiceProvider(envId);
-        }
-        catch { return undefined; }
-    };
+    // [#30192] Asked for the REQUEST's environment and nothing else; the host's
+    // occupant is never a fallback. Through the server's ONE security resolver
+    // (`RestServer#resolveSecurityService`): a door whose environment's
+    // security service cannot be resolved refuses rather than proceeds. A
+    // service that is not registered answers `undefined`, each handler's `501`
+    // below; any other rejection is `AuthzStoreUnavailableError`, answered by
+    // {@link respondUnresolvable} in each handler's `catch`.
+    const resolveService = (environmentId: string | undefined, req: any) =>
+        this.resolveSecurityService(environmentId, req);
 
     /**
      * [#8073] The ONE refusal emitter for this route family — every arm of
@@ -181,6 +185,24 @@ export function registerSecurityExplainEndpoints(this: SecurityExplainRouteHost,
         res, status, code, message,
         details === undefined ? undefined : { details },
     );
+
+    /**
+     * The family's answer to an authorization input that could not be read —
+     * the security service {@link resolveService} could not resolve, or the
+     * caller's context: the `/data` door's own `503 SERVICE_UNAVAILABLE`
+     * (`mapDataError`, its message withheld as every 5xx there is), the answer
+     * the record page's explain part carries for the same fact, through this
+     * family's ONE emitter. Answers `true` when it sent that answer; every other
+     * throw stays the handler's own arms'.
+     */
+    const respondUnresolvable = (res: any, error: unknown): boolean => {
+        if (!isAuthzStoreUnavailableError(error)) return false;
+        const mapped = mapDataError(error);
+        logUnexpectedRouteError(error, mapped);
+        const nested = nestedRefusalEnvelope(mapped);
+        respondError(res, nested.status, nested.code, nested.message);
+        return true;
+    };
 
     const handler = async (req: any, res: any) => {
         try {
@@ -306,6 +328,7 @@ export function registerSecurityExplainEndpoints(this: SecurityExplainRouteHost,
             // order, same length, duplicates answered per position.
             res.json({ ...decision, records: recordIds.map((id) => verdictById.get(id)) });
         } catch (error: any) {
+            if (respondUnresolvable(res, error)) return;
             const msg = String(error?.message ?? error ?? '');
             if (
                 error?.code === 'PERMISSION_DENIED' ||
@@ -439,6 +462,7 @@ export function registerSecurityExplainEndpoints(this: SecurityExplainRouteHost,
 
             res.json(await svc.describeDelegableScope(context));
         } catch (error: any) {
+            if (respondUnresolvable(res, error)) return;
             const msg = String(error?.message ?? error ?? '');
             logError('[REST] Delegable scope error:', error);
             respondError(res, 500, 'DELEGABLE_SCOPE_FAILED', msg.slice(0, 500));
@@ -497,6 +521,7 @@ export function registerSecurityExplainEndpoints(this: SecurityExplainRouteHost,
 
             res.json(await svc.describeEffectiveAccess(String(req.params?.id ?? ''), context));
         } catch (error: any) {
+            if (respondUnresolvable(res, error)) return;
             const msg = String(error?.message ?? error ?? '');
             if (error?.code === 'PERMISSION_DENIED' || error?.name === 'PermissionDeniedError') {
                 return respondError(res, 403, 'PERMISSION_DENIED', msg.slice(0, 1000));
@@ -543,13 +568,15 @@ export function registerSecurityEndpoints(this: SecurityRouteHost, basePath: str
     // (a hostname-routed request arrives here with no id at all). Passing the
     // raw `undefined` on the unscoped mount is how a hosted environment's
     // suggestions were asked of the host kernel, which answered 501.
+    //
+    // Through the server's ONE security resolver (`RestServer#resolveSecurityService`):
+    // a door whose environment's security service cannot be resolved refuses
+    // rather than proceeds. Not registered (or without the suggestion verbs) →
+    // `undefined`, the family's `501`; any other rejection is
+    // `AuthzStoreUnavailableError`, which `handleError` answers `503`.
     const resolveService = async (environmentId: string | undefined, req: any) => {
-        if (!this.securityServiceProvider) return undefined;
-        try {
-            const envId = await this.resolveRequestEnvironmentId(environmentId, req);
-            const svc = await this.securityServiceProvider(envId);
-            return svc && typeof svc.listAudienceBindingSuggestions === 'function' ? svc : undefined;
-        } catch { return undefined; }
+        const svc = await this.resolveSecurityService(environmentId, req);
+        return svc && typeof svc.listAudienceBindingSuggestions === 'function' ? svc : undefined;
     };
     /**
      * The ONE refusal emitter for this route family (#7981) — every arm
@@ -570,6 +597,16 @@ export function registerSecurityEndpoints(this: SecurityRouteHost, basePath: str
         res, 501, 'NOT_IMPLEMENTED', 'Security service is not configured on this deployment',
     );
     const handleError = (err: any, res: any, defaultCode: string) => {
+        // An authorization input that could not be read — the security service
+        // `resolveService` could not resolve, or the caller's context — is the
+        // `/data` door's own `503 SERVICE_UNAVAILABLE` (`mapDataError`, message
+        // withheld as every 5xx there is), never this family's `500`.
+        if (isAuthzStoreUnavailableError(err)) {
+            const mapped = mapDataError(err);
+            logUnexpectedRouteError(err, mapped);
+            const nested = nestedRefusalEnvelope(mapped);
+            return respondError(res, nested.status, nested.code, nested.message);
+        }
         const status = typeof err?.statusCode === 'number' ? err.statusCode : 500;
         if (status !== 500) {
             // The typed arm: plugin-security's PermissionDeniedError (403),

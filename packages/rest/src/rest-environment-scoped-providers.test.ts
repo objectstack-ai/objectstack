@@ -983,8 +983,11 @@ describe('[#30218] single kernel: the data engine is the plugin\'s own kernel\'s
  *
  * Four doors ask the server's one security resolver, each driven on both
  * mounts: the export, the import template's gate, the template's column
- * projection, and the object-schema mask of `GET /meta/object/:name`. Each
- * environment answers the slot one way:
+ * projection, and the object-schema mask of `GET /meta/object/:name`. So do
+ * the record page, whose explain and field-access parts each carry the refusal
+ * while the page still answers, and the `/security` doors (the access
+ * explanation, the suggested bindings), which keep their `501` for a service
+ * that is not registered. Each environment answers the slot one way:
  *
  *  - `ENV_SEC_OK` — a healthy occupant, the control: export and create are
  *    denied on `deal`, a `memo` template is projected to its writable columns,
@@ -1030,7 +1033,10 @@ function postureProtocol(env: string, reached: Reached[]): unknown {
     };
 }
 
-/** A healthy `security` occupant: export denied, create denied on `deal`, `secret` unreadable. */
+/**
+ * A healthy `security` occupant: export denied, create denied on `deal`,
+ * `secret` unreadable, and one pending audience-binding suggestion.
+ */
 function postureSecurity(env: string, reached: Reached[]): unknown {
     const rec = (op: string, answer: (...args: any[]) => unknown) => async (...args: any[]) => {
         reached.push({ env, op });
@@ -1041,6 +1047,9 @@ function postureSecurity(env: string, reached: Reached[]): unknown {
         explain: rec('security.explain', (request: { object?: string }) => ({ allowed: request?.object === 'memo' })),
         getWritableFields: rec('security.getWritableFields', () => ['name']),
         getReadableFields: rec('security.getReadableFields', () => ['id', 'name']),
+        listAudienceBindingSuggestions: rec('security.listAudienceBindingSuggestions', () => [
+            { id: `sugg_${env}`, permissionSet: 'crm_user', packageId: 'app.objectstack.hotcrm', status: 'pending' },
+        ]),
     };
 }
 
@@ -1120,9 +1129,11 @@ async function bootSecurityPosture(): Promise<PostureHosted> {
 }
 
 interface PostureDoor {
+    method?: 'GET' | 'POST';
     path: string;
     params: Record<string, string>;
     query: Record<string, string>;
+    body?: unknown;
 }
 
 const POSTURE_DOORS = {
@@ -1132,21 +1143,33 @@ const POSTURE_DOORS = {
     mask: { path: '/meta/:type/:name', params: { type: 'object', name: 'deal' }, query: {} },
 } satisfies Record<string, PostureDoor>;
 
+/** The doors whose own resolution reads the same slot: the record page's parts and the `/security` doors. */
+const POSTURE_SECURITY_DOORS = {
+    recordPage: {
+        method: 'POST', path: '/data/:object/:id/page', params: { object: 'deal', id: '1' }, query: {},
+        body: { explain: ['update'], fieldAccess: true },
+    },
+    explain: { path: '/security/explain', params: {}, query: { object: 'deal', operation: 'read' } },
+    suggestions: { path: '/security/suggested-bindings', params: {}, query: {} },
+} satisfies Record<string, PostureDoor>;
+
 async function drivePosture(h: PostureHosted, door: PostureDoor, mount: Mount, env: string, rejectFrom = 1) {
     h.securityStep.count = 0;
     h.securityStep.rejectFrom = rejectFrom;
     h.reached.length = 0;
-    const key = `GET ${mount === 'scoped' ? SCOPED : BASE}${door.path}`;
+    const method = door.method ?? 'GET';
+    const key = `${method} ${mount === 'scoped' ? SCOPED : BASE}${door.path}`;
     const handler = h.table.get(key);
     if (!handler) throw new Error(`route not mounted: ${key}`);
     const concrete = door.path.replace(/:(\w+)/g, (_m, k: string) => door.params[k] ?? `:${k}`);
     const url = mount === 'scoped' ? `${BASE}/environments/${env}${concrete}` : `${BASE}${concrete}`;
     const req: any = {
-        method: 'GET',
+        method,
         path: url,
         url,
         params: { ...door.params, ...(mount === 'scoped' ? { environmentId: env } : {}) },
         query: { ...door.query },
+        body: door.body,
         headers: {
             host: mount === 'scoped' ? 'unbound.example.test' : HOST_OF[env],
             cookie: 'session=whatever',
@@ -1265,6 +1288,53 @@ describe('a door whose environment\'s security service cannot be resolved refuse
             // projection that follows it was never asked.
             expect(h.reached).toEqual([{ env: ENV_SEC_ACQ, op: 'security.explain' }]);
         }, 60_000);
+
+        it(`control (${mount}): a healthy security service answers the record page's explain part, the access explanation and the suggested bindings`, async () => {
+            const page = await drivePosture(h, POSTURE_SECURITY_DOORS.recordPage, mount, ENV_SEC_OK);
+            expect(page.status, JSON.stringify(page.body)).toBe(200);
+            expect(page.body?.data?.explain).toEqual({ update: { allowed: false } });
+
+            const explained = await drivePosture(h, POSTURE_SECURITY_DOORS.explain, mount, ENV_SEC_OK);
+            expect(explained.status, JSON.stringify(explained.body)).toBe(200);
+            expect(h.reached).toEqual([{ env: ENV_SEC_OK, op: 'security.explain' }]);
+
+            const listed = await drivePosture(h, POSTURE_SECURITY_DOORS.suggestions, mount, ENV_SEC_OK);
+            expect(listed.status, JSON.stringify(listed.body)).toBe(200);
+            expect(h.reached).toEqual([{ env: ENV_SEC_OK, op: 'security.listAudienceBindingSuggestions' }]);
+        }, 60_000);
+
+        it(`no security service registered (${mount}): the record page's explain part, the access explanation and the suggested bindings answer 501, as before`, async () => {
+            const page = await drivePosture(h, POSTURE_SECURITY_DOORS.recordPage, mount, ENV_SEC_NONE);
+            expect(page.status, JSON.stringify(page.body)).toBe(200);
+            expect(page.body?.data?.explain?.update?.error).toMatchObject({ code: 'NOT_IMPLEMENTED', status: 501 });
+
+            for (const door of [POSTURE_SECURITY_DOORS.explain, POSTURE_SECURITY_DOORS.suggestions]) {
+                const out = await drivePosture(h, door, mount, ENV_SEC_NONE);
+                expect(out.status, `${door.path} ${JSON.stringify(out.body)}`).toBe(501);
+                expect(out.body?.error?.code).toBe('NOT_IMPLEMENTED');
+            }
+            expect(h.reached).toEqual([]);
+        }, 60_000);
+
+        for (const { env, how } of UNRESOLVABLE) {
+            it(`the record page (${mount}) still answers when the environment's security service ${how}, and its explain and field-access parts each carry the refusal`, async () => {
+                const page = await drivePosture(h, POSTURE_SECURITY_DOORS.recordPage, mount, env);
+                expect(page.status, JSON.stringify(page.body)).toBe(200);
+                expect(page.body?.data?.record).toBeDefined();
+                expect(page.body?.data?.explain?.update?.error).toMatchObject({ code: 'SERVICE_UNAVAILABLE', status: 503 });
+                expect(page.body?.data?.fieldAccess?.error).toMatchObject({ code: 'SERVICE_UNAVAILABLE', status: 503 });
+                expect(h.reached).toEqual([]);
+            }, 60_000);
+
+            it(`the access explanation and the suggested bindings (${mount}) refuse when the environment's security service ${how}`, async () => {
+                for (const door of [POSTURE_SECURITY_DOORS.explain, POSTURE_SECURITY_DOORS.suggestions]) {
+                    const out = await drivePosture(h, door, mount, env);
+                    expect(out.status, `${door.path} ${JSON.stringify(out.body)}`).toBe(503);
+                    expect(out.body?.error?.code).toBe('SERVICE_UNAVAILABLE');
+                }
+                expect(h.reached).toEqual([]);
+            }, 60_000);
+        }
 
         it(`every acquisition rejecting (${mount}) still fails the request before any door serves`, async () => {
             for (const door of Object.values(POSTURE_DOORS)) {
