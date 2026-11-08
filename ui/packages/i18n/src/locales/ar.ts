@@ -4092,6 +4092,7 @@ const ar = {
     noMessages: 'لا تحتوي هذه المحادثة على رسائل بعد.',
     sharedObject: '{{object}} مشترك',
     redactedFields: 'أخفى المالك بعض الحقول: {{fields}}',
+    linkedRecord: 'سجل مرتبط',
   },
   publicForm: {
     submit: "إرسال",

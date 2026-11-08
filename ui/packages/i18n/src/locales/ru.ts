@@ -3950,6 +3950,7 @@ const ru = {
     noMessages: 'В этом диалоге пока нет сообщений.',
     sharedObject: 'Общий доступ: {{object}}',
     redactedFields: 'Некоторые поля скрыты владельцем: {{fields}}',
+    linkedRecord: 'Связанная запись',
   },
   publicForm: {
     submit: "Отправить",
