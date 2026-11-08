@@ -96,7 +96,7 @@ describe('the live preview under the amount, through the form (ADR-0144 D5)', ()
     );
     await waitFor(() => {
       const line = document.querySelector('[data-field="amount"] [data-testid="home-amount-preview"]');
-      expect(line?.textContent?.replace(/ /g, ' ')).toBe('≈ CN¥71,994.24 at 0.1389 on Nov 1, 2026');
+      expect(line?.textContent?.replace(/\u00a0/g, ' ')).toBe('≈ CN¥71,994.24 at 0.1389 on Nov 1, 2026');
     }, { timeout: 5000 });
     expect(finds).toEqual(['sys_exchange_rate']);
   });

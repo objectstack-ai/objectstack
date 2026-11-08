@@ -27,7 +27,7 @@ afterEach(cleanup);
 
 const HOME_AMOUNT = { field: 'amount_home', rateDate: 'invoice_date', rateField: 'amount_rate' };
 const AMOUNT = { name: 'amount', type: 'currency', currencyConfig: { currencyMode: 'record', currencyField: 'currency_code', homeAmount: HOME_AMOUNT } } as any;
-const text = (s: string | null | undefined) => (s ?? '').replace(/ /g, ' ');
+const text = (s: string | null | undefined) => (s ?? '').replace(/\u00a0/g, ' ');
 
 /** A data source answering rate rows like the engine's rate table, counting its reads. */
 function rates(table: Record<string, Array<[string, unknown]>>, fail?: unknown) {
