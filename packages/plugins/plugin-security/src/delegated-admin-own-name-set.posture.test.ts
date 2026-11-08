@@ -588,6 +588,9 @@ describe('[ADR-0090 D12, ruling of record 6663849489] a delegated business-unit 
         // A context that names no organization holds nothing — a tenant-level administrator's included.
         const unnamed = await h.security.describeDelegableScope({ userId: 'u_org_admin', positions: [], permissions: ['admin_full_access'] });
         expect([unnamed.isTenantAdmin, unnamed.scopes, unnamed.placeableBusinessUnitIds]).toEqual([true, [], []]);
+        // CONTROL: the positions it may assign are listed for both contexts, unchanged.
+        expect([...unnamed.assignablePositions].sort()).toEqual([...report.assignablePositions].sort());
+        expect(report.assignablePositions.length).toBeGreaterThan(0);
       });
 
       it('the write gate refuses every write of a context naming no organization — inside the scope too — naming the missing active organization', async () => {
