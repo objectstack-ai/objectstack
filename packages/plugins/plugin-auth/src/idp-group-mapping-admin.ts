@@ -6,6 +6,14 @@
  * `POST /api/v1/auth/admin/scim/delete-group-mapping` (ADR-0134 D4's group
  * seam, filled for ordinary permission sets).
  *
+ * ## Two sources, one door
+ *
+ * A mapping's group arrives either through a SCIM connection (`connectionId`)
+ * or as an SSO provider's sign-in claim (`providerId`; maintainer ruling A,
+ * record 6718355623, item 3: the same mapping object, no second model). A save
+ * names exactly one. Everything below holds for both; where they differ it
+ * says so.
+ *
  * ## Who may use it
  *
  * The platform administrator only, the same population that mints the SCIM
@@ -31,7 +39,9 @@
  * rows' `organization_id`), never a value the caller names. A connection with a
  * credential that names no organization, or with credentials in two, is refused
  * (`rule_violation` on `connectionId`): a mapping always names exactly one
- * organization, so the projection never writes an organization-less grant.
+ * organization, so the projection never writes an organization-less grant. For
+ * an SSO provider it is the provider row's `organization_id`, and a provider
+ * that names none is refused the same way (`rule_violation` on `providerId`).
  *
  * ## After a save or delete
  *
@@ -40,6 +50,14 @@
  * set now rather than at their next SCIM change. A failed re-projection does
  * not undo the saved row; the answer says so, and the next SCIM change of each
  * member applies it.
+ *
+ * An SSO provider pushes nothing between sign-ins, so who is in a group is only
+ * known at a member's sign-in: a save applies at each member's next sign-in
+ * (the answer says `reprojected: false`). A delete removes at once the grants
+ * that provider projected for the mapping's set in its organization, unless
+ * another of the provider's mappings still names that set there (then each
+ * member's next sign-in decides); `reconciledUsers` counts the users whose
+ * grant went.
  */
 
 import type { IDataEngine } from '@objectstack/spec/contracts';
@@ -47,9 +65,13 @@ import { withSystemContext } from './objectql-adapter.js';
 import type { PlatformAdminActor } from './platform-admin-gate.js';
 import { readJsonRequestBody } from './request-json-body.js';
 import { SCIM_CREDENTIAL_OBJECT, scimCredentialIsLive } from './scim-connection-service.js';
+import { SSO_PROVIDER_OBJECT } from './sso-client-secret.js';
 import {
   IDP_GROUP_MAPPING_OBJECT,
   SCIM_MAPPING_SOURCE_KIND,
+  SSO_MAPPING_SOURCE_KIND,
+  ssoGroupProjectionReason,
+  type IdpGroupMappingSourceKind,
   type OrganizationBoundaryJudge,
 } from './scim-group-projection.js';
 
@@ -59,7 +81,8 @@ export const IDP_GROUP_MAPPING_DELETE_PATH = '/admin/scim/delete-group-mapping';
 const SYSTEM_CTX = { isSystem: true } as const;
 const MAX_TEXT = 255;
 const MAX_SET_NAME = 100;
-const SET_BODY_KEYS = new Set(['connectionId', 'groupExternalId', 'groupDisplayName', 'permissionSet']);
+const SET_BODY_KEYS = new Set(['connectionId', 'providerId', 'groupExternalId', 'groupDisplayName', 'permissionSet']);
+const GRANT_OBJECT = 'sys_user_permission_set';
 
 interface FieldRefusal {
   field: string;
@@ -77,6 +100,8 @@ export interface IdpGroupMappingAdminResult {
 export interface IdpGroupMappingAdminDeps {
   getDataEngine: () => IDataEngine | null | undefined;
   isScimEnabled: () => boolean;
+  /** Is the SSO plugin wired? Absent reads as no: an SSO mapping is then refused 503. */
+  isSsoEnabled?: () => boolean;
   /** The `security` service's boundary predicate, resolved per call. */
   boundary: () => Promise<OrganizationBoundaryJudge | undefined>;
   /** Re-project one provisioning domain (`AuthManager.reconcileScimProjectionDomain`). */
@@ -154,7 +179,7 @@ async function readConnection(
 async function writeMappingAudit(
   deps: IdpGroupMappingAdminDeps,
   engine: IDataEngine,
-  entry: { action: 'create' | 'delete'; actor: PlatformAdminActor; mappingId: string; event: string; connectionId: string; permissionSet: string },
+  entry: { action: 'create' | 'delete'; actor: PlatformAdminActor; mappingId: string; event: string; source: MappingSource; permissionSet: string },
 ): Promise<void> {
   if (!registered(engine, 'sys_audit_log')) return; // plugin-audit uninstalled: a declared skip
   try {
@@ -168,7 +193,7 @@ async function writeMappingAudit(
         record_id: entry.mappingId,
         metadata: JSON.stringify({
           event: entry.event,
-          connectionId: entry.connectionId,
+          ...(entry.source.kind === SSO_MAPPING_SOURCE_KIND ? { providerId: entry.source.id } : { connectionId: entry.source.id }),
           permissionSet: entry.permissionSet,
           ...(entry.actor.impersonatedBy ? { impersonated_by: entry.actor.impersonatedBy } : {}),
         }),
@@ -177,8 +202,8 @@ async function writeMappingAudit(
     );
   } catch (error) {
     deps.logger?.warn(
-      `[AuthPlugin] the sys_audit_log row for IdP group mapping ${entry.mappingId} (${entry.event}, connection `
-        + `'${entry.connectionId}') was NOT written — the change itself SUCCEEDED and nothing retries the row. `
+      `[AuthPlugin] the sys_audit_log row for IdP group mapping ${entry.mappingId} (${entry.event}, ${sourceWord(entry.source)} `
+        + `'${entry.source.id}') was NOT written — the change itself SUCCEEDED and nothing retries the row. `
         + 'Remedy: restore write access to sys_audit_log, then treat this line as the audit record. '
         + `Cause: ${(error as Error)?.message ?? String(error)}`,
     );
@@ -201,7 +226,85 @@ async function reproject(deps: IdpGroupMappingAdminDeps, connectionId: string, d
   }
 }
 
-/** `POST /admin/scim/set-group-mapping` — save one group → permission-set mapping for a SCIM connection. */
+/** Where a mapping's group arrives from. */
+interface MappingSource {
+  kind: IdpGroupMappingSourceKind;
+  id: string;
+}
+
+/** How a message names a source. */
+function sourceWord(source: MappingSource): string {
+  return source.kind === SSO_MAPPING_SOURCE_KIND ? 'SSO provider' : 'SCIM connection';
+}
+
+/** The answer's member naming the source: `providerId` for an SSO provider, `connectionId` for a SCIM connection. */
+function sourceMember(source: MappingSource): Record<string, string> {
+  return source.kind === SSO_MAPPING_SOURCE_KIND ? { providerId: source.id } : { connectionId: source.id };
+}
+
+/** The organization that owns an SSO provider: its row's `organization_id`. */
+async function readSsoProviderOrganization(
+  engine: IDataEngine,
+  providerId: string,
+): Promise<{ found: false } | { found: true; organizationId: string }> {
+  const row = (await engine.findOne(
+    SSO_PROVIDER_OBJECT,
+    { where: { provider_id: providerId }, fields: ['organization_id'] },
+    { context: SYSTEM_CTX } as never,
+  )) as Record<string, unknown> | null;
+  return row ? { found: true, organizationId: text(row.organization_id) } : { found: false };
+}
+
+/**
+ * Remove the grants an SSO provider projected for (`permissionSet`, `organizationId`),
+ * unless another of its mappings still names that set there. Each removal goes
+ * through the engine, so its write guards judge it; a failure is reported,
+ * never thrown (the row change stands).
+ */
+async function revokeSsoProjectedGrants(
+  deps: IdpGroupMappingAdminDeps,
+  engine: IDataEngine,
+  providerId: string,
+  permissionSet: string,
+  organizationId: string,
+): Promise<Record<string, unknown>> {
+  try {
+    const remaining = await engine.find(
+      IDP_GROUP_MAPPING_OBJECT,
+      { where: { source_kind: SSO_MAPPING_SOURCE_KIND, source_id: providerId, permission_set: permissionSet } },
+      { context: SYSTEM_CTX } as never,
+    );
+    const stillNamed = (Array.isArray(remaining) ? (remaining as Record<string, unknown>[]) : []).some(
+      (r) => text(r.organization_id) === organizationId,
+    );
+    if (stillNamed || !registered(engine, GRANT_OBJECT)) return { reprojected: false, reconciledUsers: 0 };
+    const grants = await engine.find(
+      GRANT_OBJECT,
+      {
+        where: { reason: ssoGroupProjectionReason(providerId), permission_set: permissionSet, organization_id: organizationId },
+        fields: ['id', 'user_id'],
+      },
+      { context: SYSTEM_CTX } as never,
+    );
+    const writer: IDataEngine = withSystemContext(engine);
+    const users = new Set<string>();
+    for (const grant of Array.isArray(grants) ? (grants as Record<string, unknown>[]) : []) {
+      // The grant's organization is the write's tenant, as on the sign-in's own writes.
+      await writer.delete(GRANT_OBJECT, { where: { id: text(grant.id) }, context: { isSystem: true, tenantId: organizationId } });
+      users.add(text(grant.user_id));
+    }
+    return { reprojected: true, reconciledUsers: users.size };
+  } catch (error) {
+    deps.logger?.error(
+      `[AuthPlugin] IdP group mapping for SSO provider '${providerId}' was DELETED, but removing the grants of `
+        + `'${permissionSet}' it projected FAILED, so those users keep the set until their next sign-in through that `
+        + `provider. Remedy: remove the grants by hand, or have each user sign in again. Cause: ${(error as Error)?.message ?? String(error)}`,
+    );
+    return { reprojected: false, reconciledUsers: 0 };
+  }
+}
+
+/** `POST /admin/scim/set-group-mapping` — save one group → permission-set mapping for a SCIM connection or an SSO provider. */
 export async function runSetIdpGroupMapping(
   deps: IdpGroupMappingAdminDeps,
   actor: PlatformAdminActor,
@@ -214,44 +317,69 @@ export async function runSetIdpGroupMapping(
   const refusals: FieldRefusal[] = [];
   for (const key of Object.keys(body)) {
     if (!SET_BODY_KEYS.has(key)) {
-      refusals.push({ field: key, code: 'unknown_field', message: `${key} is not a field of a group mapping (connectionId, groupExternalId, groupDisplayName, permissionSet).` });
+      refusals.push({ field: key, code: 'unknown_field', message: `${key} is not a field of a group mapping (connectionId, providerId, groupExternalId, groupDisplayName, permissionSet).` });
     }
   }
   const connectionId = readText(body, 'connectionId', MAX_TEXT, refusals);
+  const providerId = readText(body, 'providerId', MAX_TEXT, refusals);
   const groupExternalId = readText(body, 'groupExternalId', MAX_TEXT, refusals);
   const groupDisplayName = readText(body, 'groupDisplayName', MAX_TEXT, refusals);
   const permissionSet = readText(body, 'permissionSet', MAX_SET_NAME, refusals);
-  if (!connectionId) refusals.push({ field: 'connectionId', code: 'required', message: 'connectionId is required: the SCIM connection the group arrives through.' });
+  if (!connectionId && !providerId) {
+    refusals.push({ field: 'connectionId', code: 'required', message: 'connectionId is required: the SCIM connection the group arrives through (or providerId: the SSO provider whose sign-in carries it).' });
+  } else if (connectionId && providerId) {
+    refusals.push({ field: 'providerId', code: 'rule_violation', message: 'Name the source by connectionId (a SCIM connection) or by providerId (an SSO provider), not both.' });
+  }
   if (!permissionSet) refusals.push({ field: 'permissionSet', code: 'required', message: 'permissionSet is required: the permission set a member of the group is granted.' });
   if (!groupExternalId && !groupDisplayName) {
     refusals.push({ field: 'groupExternalId', code: 'required', message: 'Name the group by groupExternalId or by groupDisplayName.' });
   } else if (groupExternalId && groupDisplayName) {
     refusals.push({ field: 'groupDisplayName', code: 'rule_violation', message: 'Name the group by groupExternalId or by groupDisplayName, not both.' });
   }
-  if (refusals.length > 0 || !connectionId || !permissionSet) return refuseFields(refusals);
+  if (refusals.length > 0 || !permissionSet) return refuseFields(refusals);
+  const source: MappingSource = providerId
+    ? { kind: SSO_MAPPING_SOURCE_KIND, id: providerId }
+    : { kind: SCIM_MAPPING_SOURCE_KIND, id: connectionId! };
 
-  if (!deps.isScimEnabled()) {
+  if (source.kind === SCIM_MAPPING_SOURCE_KIND && !deps.isScimEnabled()) {
     return fail(503, 'SERVICE_UNAVAILABLE', 'SCIM provisioning is not enabled on this deployment, so no group can arrive to be mapped. Enable it (OS_SCIM_ENABLED=true, or plugins.scim) and save again.');
+  }
+  if (source.kind === SSO_MAPPING_SOURCE_KIND && !deps.isSsoEnabled?.()) {
+    return fail(503, 'SERVICE_UNAVAILABLE', 'SSO is not enabled on this deployment, so no sign-in can carry a group to be mapped. Enable it (OS_SSO_ENABLED=true, or plugins.sso) and save again.');
   }
   const engine = deps.getDataEngine();
   if (!engine || !registered(engine, IDP_GROUP_MAPPING_OBJECT)) {
     return fail(503, 'SERVICE_UNAVAILABLE', 'The data engine or the sys_idp_group_mapping object is unavailable.');
   }
 
-  const connection = await readConnection(engine, connectionId);
-  if (!connection.found) {
-    return refuseFields([{ field: 'connectionId', code: 'reference_not_found', message: `No SCIM connection '${connectionId}' exists: mint its credential first.` }]);
+  let organizationId: string;
+  let domains: string[] = [];
+  if (source.kind === SSO_MAPPING_SOURCE_KIND) {
+    const provider = await readSsoProviderOrganization(engine, source.id);
+    if (!provider.found) {
+      return refuseFields([{ field: 'providerId', code: 'reference_not_found', message: `No SSO provider '${source.id}' exists: register it first.` }]);
+    }
+    if (!provider.organizationId) {
+      return refuseFields([{ field: 'providerId', code: 'rule_violation', message: `SSO provider '${source.id}' belongs to no organization, so a grant its sign-in makes would belong to no organization. Register the provider in an organization first.` }]);
+    }
+    organizationId = provider.organizationId;
+  } else {
+    const connection = await readConnection(engine, source.id);
+    if (!connection.found) {
+      return refuseFields([{ field: 'connectionId', code: 'reference_not_found', message: `No SCIM connection '${source.id}' exists: mint its credential first.` }]);
+    }
+    if (connection.organizations.length === 0) {
+      return refuseFields([{ field: 'connectionId', code: 'rule_violation', message: `SCIM connection '${source.id}' has no live credential (every one is revoked or expired), so no organization owns it. Mint a credential for it first.` }]);
+    }
+    if (connection.organizations.includes('')) {
+      return refuseFields([{ field: 'connectionId', code: 'rule_violation', message: `SCIM connection '${source.id}' has a credential owned by no organization, so a grant it makes would belong to no organization. Mint the connection's credential in an organization first.` }]);
+    }
+    if (connection.organizations.length > 1) {
+      return refuseFields([{ field: 'connectionId', code: 'rule_violation', message: `SCIM connection '${source.id}' has credentials owned by more than one organization, so the organization a grant belongs to is ambiguous. Revoke the stray credentials first.` }]);
+    }
+    organizationId = connection.organizations[0];
+    domains = connection.domains;
   }
-  if (connection.organizations.length === 0) {
-    return refuseFields([{ field: 'connectionId', code: 'rule_violation', message: `SCIM connection '${connectionId}' has no live credential (every one is revoked or expired), so no organization owns it. Mint a credential for it first.` }]);
-  }
-  if (connection.organizations.includes('')) {
-    return refuseFields([{ field: 'connectionId', code: 'rule_violation', message: `SCIM connection '${connectionId}' has a credential owned by no organization, so a grant it makes would belong to no organization. Mint the connection's credential in an organization first.` }]);
-  }
-  if (connection.organizations.length > 1) {
-    return refuseFields([{ field: 'connectionId', code: 'rule_violation', message: `SCIM connection '${connectionId}' has credentials owned by more than one organization, so the organization a grant belongs to is ambiguous. Revoke the stray credentials first.` }]);
-  }
-  const organizationId = connection.organizations[0];
 
   const judge = await deps.boundary();
   if (!judge) {
@@ -267,29 +395,30 @@ export async function runSetIdpGroupMapping(
   }
 
   const row = {
-    source_kind: SCIM_MAPPING_SOURCE_KIND,
-    source_id: connectionId,
+    source_kind: source.kind,
+    source_id: source.id,
     ...(groupExternalId ? { group_external_id: groupExternalId } : { group_display_name: groupDisplayName }),
     permission_set: permissionSet,
     organization_id: organizationId,
   };
   const sameRows = await engine.find(
     IDP_GROUP_MAPPING_OBJECT,
-    { where: { source_kind: SCIM_MAPPING_SOURCE_KIND, source_id: connectionId, permission_set: permissionSet } },
+    { where: { source_kind: source.kind, source_id: source.id, permission_set: permissionSet } },
     { context: SYSTEM_CTX } as never,
   );
   const sameKey = (Array.isArray(sameRows) ? (sameRows as Record<string, unknown>[]) : []).filter(
     (r) => text(r.group_external_id) === (groupExternalId ?? '') && text(r.group_display_name) === (groupExternalId ? '' : groupDisplayName ?? ''),
   );
-  // A same-key row saved while another organization owned the connection is
-  // not this mapping: its row and its grants stay in that organization. Never
+  // A same-key row saved while another organization owned the source is not
+  // this mapping: its row and its grants stay in that organization. Never
   // answer an organization the row does not carry, and never write a twin.
   const elsewhere = sameKey.find((r) => text(r.organization_id) !== organizationId);
   if (elsewhere) {
+    const owner = source.kind === SSO_MAPPING_SOURCE_KIND ? 'provider' : 'connection';
     return fail(
       409,
       'RESOURCE_CONFLICT',
-      `IdP group mapping '${text(elsewhere.id)}' already maps this group to '${permissionSet}' for SCIM connection '${connectionId}' in organization '${text(elsewhere.organization_id)}', but the connection now belongs to organization '${organizationId}'. Delete mapping '${text(elsewhere.id)}' first (POST /admin/scim/delete-group-mapping), then save again.`,
+      `IdP group mapping '${text(elsewhere.id)}' already maps this group to '${permissionSet}' for ${sourceWord(source)} '${source.id}' in organization '${text(elsewhere.organization_id)}', but the ${owner} now belongs to organization '${organizationId}'. Delete mapping '${text(elsewhere.id)}' first (POST /admin/scim/delete-group-mapping), then save again.`,
     );
   }
   const existing = sameKey.find((r) => text(r.organization_id) === organizationId);
@@ -300,14 +429,17 @@ export async function runSetIdpGroupMapping(
     const writer: IDataEngine = withSystemContext(engine);
     const inserted = (await deps.attributed(() => writer.insert(IDP_GROUP_MAPPING_OBJECT, row))) as Record<string, unknown>;
     mappingId = text(inserted?.id);
-    await writeMappingAudit(deps, engine, { action: 'create', actor, mappingId, event: 'idp_group_mapping_saved', connectionId, permissionSet });
+    await writeMappingAudit(deps, engine, { action: 'create', actor, mappingId, event: 'idp_group_mapping_saved', source, permissionSet });
   }
-  const applied = await deps.attributed(() => reproject(deps, connectionId, connection.domains));
+  // An SSO provider pushes nothing between sign-ins: the mapping applies at each member's next sign-in.
+  const applied = source.kind === SSO_MAPPING_SOURCE_KIND
+    ? { reprojected: false, reconciledUsers: 0 }
+    : await deps.attributed(() => reproject(deps, source.id, domains));
   return {
     status: 200,
     body: {
       success: true,
-      data: { mappingId, created: !existing, connectionId, permissionSet, organizationId: organizationId || null, ...applied },
+      data: { mappingId, created: !existing, ...sourceMember(source), permissionSet, organizationId: organizationId || null, ...applied },
     },
   };
 }
@@ -334,12 +466,20 @@ export async function runDeleteIdpGroupMapping(
     { context: SYSTEM_CTX } as never,
   )) as Record<string, unknown> | null;
   if (!row) return fail(404, 'RESOURCE_NOT_FOUND', `No IdP group mapping '${mappingId}' exists`);
-  const connectionId = text(row.source_id);
+  const source: MappingSource = {
+    kind: text(row.source_kind) === SSO_MAPPING_SOURCE_KIND ? SSO_MAPPING_SOURCE_KIND : SCIM_MAPPING_SOURCE_KIND,
+    id: text(row.source_id),
+  };
   const permissionSet = text(row.permission_set);
   const writer: IDataEngine = withSystemContext(engine);
   await deps.attributed(() => writer.delete(IDP_GROUP_MAPPING_OBJECT, { where: { id: mappingId } }));
-  await writeMappingAudit(deps, engine, { action: 'delete', actor, mappingId, event: 'idp_group_mapping_deleted', connectionId, permissionSet });
-  const connection = deps.isScimEnabled() ? await readConnection(engine, connectionId) : ({ found: false } as const);
-  const applied = connection.found ? await deps.attributed(() => reproject(deps, connectionId, connection.domains)) : { reprojected: false, reconciledUsers: 0 };
-  return { status: 200, body: { success: true, data: { mappingId, connectionId, permissionSet, deleted: true, ...applied } } };
+  await writeMappingAudit(deps, engine, { action: 'delete', actor, mappingId, event: 'idp_group_mapping_deleted', source, permissionSet });
+  let applied: Record<string, unknown>;
+  if (source.kind === SSO_MAPPING_SOURCE_KIND) {
+    applied = await deps.attributed(() => revokeSsoProjectedGrants(deps, engine, source.id, permissionSet, text(row.organization_id)));
+  } else {
+    const connection = deps.isScimEnabled() ? await readConnection(engine, source.id) : ({ found: false } as const);
+    applied = connection.found ? await deps.attributed(() => reproject(deps, source.id, connection.domains)) : { reprojected: false, reconciledUsers: 0 };
+  }
+  return { status: 200, body: { success: true, data: { mappingId, ...sourceMember(source), permissionSet, deleted: true, ...applied } } };
 }

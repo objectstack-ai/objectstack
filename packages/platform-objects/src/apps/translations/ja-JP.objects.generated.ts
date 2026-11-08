@@ -2660,14 +2660,15 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       source_kind: {
         label: "ソース種別",
-        help: "グループを送信するもの：SCIM 接続。",
+        help: "グループを送信するもの：SCIM 接続、またはサインイン時の SSO プロバイダー。",
         options: {
-          scim: "SCIM 接続"
+          scim: "SCIM 接続",
+          sso: "SSO プロバイダー"
         }
       },
       source_id: {
         label: "ソース ID",
-        help: "グループが届く SCIM 接続の ID（例：\"okta-prod\"）。"
+        help: "グループが届く SCIM 接続の ID または SSO プロバイダーの ID（例：\"okta-prod\"）。"
       },
       group_external_id: {
         label: "グループ外部 ID",
@@ -2683,7 +2684,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       organization_id: {
         label: "組織",
-        help: "付与が行われる組織：SCIM 接続を所有する組織。"
+        help: "付与が行われる組織：SCIM 接続または SSO プロバイダーを所有する組織。"
       },
       created_at: {
         label: "作成日時"
