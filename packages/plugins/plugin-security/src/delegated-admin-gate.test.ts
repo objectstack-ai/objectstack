@@ -2130,7 +2130,7 @@ describe('[ADR-0090 D12] a delegated scope covers a user for the explain doors o
   });
 
   it('a context that names no organization covers nobody, and asks the read door nothing', async () => {
-    for (const state of [...TARGET_STATES, READABLE_INSIDE]) {
+    for (const state of [...TARGET_STATES, READABLE_INSIDE] as TargetState[]) {
       const harness = harnessWith(state);
       const noOrganization = { principal: 'delegate', userId: 'u_delegate', positions: ['delegate'] };
       expect(await covers(harness, noOrganization), state).toBe(false);

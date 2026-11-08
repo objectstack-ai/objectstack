@@ -867,7 +867,7 @@ describe("[ADR-0090 D12] a delegated answer about a user the caller cannot read 
   for (const posture of POSTURES) {
     describe(`posture '${posture}'`, () => {
       it('ground truth: the delegate reads the subject exactly in the states where it is a user the delegate may read', async () => {
-        for (const state of [...STATES, CONTROL]) {
+        for (const state of [...STATES, CONTROL] as State[]) {
           const h = await bootWith(posture, state);
           const rows = await h.engine.find('sys_user', { where: { id: SUBJECT }, fields: ['id'], context: delegateFor(state) } as any);
           const reads = (Array.isArray(rows) ? rows : []).some((r: any) => r.id === SUBJECT);
