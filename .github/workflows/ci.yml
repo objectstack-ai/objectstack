@@ -1335,17 +1335,23 @@ jobs:
       # On a push whose every commit the queue ran green (`queue-verdict`), this
       # shard keeps its seed and runs no test: the plan and the closure build
       # above (replayed from the remote cache the queue wrote under the same
-      # task hashes), then the prune and the save. The three steps that carry
-      # `needs.queue-verdict.outputs.covered != 'true'` are skipped: this slice
-      # build (its own build is not in the closure seed), the tests, and the
-      # attestation pair, so no credential says a test ran. The report steps
-      # between them find no test log and no run summary and say so. `Test
-      # Core` skips on that push too, so nothing counts the missing credential.
+      # task hashes), then the prune and the save. This slice build (its own
+      # build is not in the closure seed) and the tests exit at their top on
+      # `OS_SEED_ONLY`, as an empty shard does, and the attestation pair is
+      # skipped, so no credential says a test ran. The report steps between
+      # them find no test log and no run summary and say so. `Test Core` skips
+      # on that push too, so nothing counts the missing credential. An exit
+      # rather than a step `if:`, so the step stays the one CI and the gate
+      # derivation read for this shard's suite.
       - name: Build the sliced package's dependency closure
-        if: needs.queue-verdict.outputs.covered != 'true'
         env:
+          OS_SEED_ONLY: ${{ needs.queue-verdict.outputs.covered == 'true' }}
           NODE_OPTIONS: --report-on-signal --report-signal=SIGUSR2 --report-directory=${{ runner.temp }}/stall-reports
         run: |
+          if [ "$OS_SEED_ONLY" = 'true' ]; then
+            echo "Seed-only leg (#31519): the queue ran this push's tests green — no slice build."
+            exit 0
+          fi
           if [ ! -s "$RUNNER_TEMP/shard-packages.txt" ]; then
             echo "No packages on this shard — nothing to build."
             exit 0
@@ -1410,8 +1416,8 @@ jobs:
       # `<pkg>:test:` prefixes stream order emits (a pinned parseSummaries
       # branch), so attribution survives.
       - name: Run this shard's tests
-        if: needs.queue-verdict.outputs.covered != 'true'
         env:
+          OS_SEED_ONLY: ${{ needs.queue-verdict.outputs.covered == 'true' }}
           NODE_OPTIONS: --report-on-signal --report-signal=SIGUSR2 --report-directory=${{ runner.temp }}/stall-reports
           # The `e2e` and `live` filename tiers run NIGHTLY on main
           # (test-nightly-tiers.yml), not here: `queue` is the per-PR and
@@ -1422,6 +1428,10 @@ jobs:
           # it reach vitest under strict env mode at all.
           OS_TEST_TIERS: queue
         run: |
+          if [ "$OS_SEED_ONLY" = 'true' ]; then
+            echo "Seed-only leg (#31519): the queue ran this push's tests green — nothing to test."
+            exit 0
+          fi
           if [ ! -s "$RUNNER_TEMP/shard-packages.txt" ]; then
             echo "No packages on this shard — nothing to test."
             exit 0
@@ -2735,12 +2745,16 @@ jobs:
       # Dogfood boots real engines in-process — exactly the population #4250's
       # stalls came from. NODE_OPTIONS + --report-dir arm the stall forensics
       # (SIGUSR2 stack harvest) — see the Test Core comment.
-      # Skipped on a seed-only leg (#31519); see Test Core's.
+      # Exits at its top on a seed-only leg (#31519); see Test Core's.
       - name: Boot example apps and exercise real user flows
-        if: needs.queue-verdict.outputs.covered != 'true'
         env:
+          OS_SEED_ONLY: ${{ needs.queue-verdict.outputs.covered == 'true' }}
           NODE_OPTIONS: --report-on-signal --report-signal=SIGUSR2 --report-directory=${{ runner.temp }}/stall-reports
         run: |
+          if [ "$OS_SEED_ONLY" = 'true' ]; then
+            echo "Seed-only leg (#31519): the queue ran this push's dogfood tests green — nothing to test."
+            exit 0
+          fi
           # Bound vitest's INNER worker pool (#11958). A no-op on a runner with
           # <= 5 cores (it only ever LOWERS vitest's own `cores - 1` default);
           # it exists so a larger runner cannot multiply turbo's outer
