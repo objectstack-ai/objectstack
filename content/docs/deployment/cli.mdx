@@ -3130,6 +3130,7 @@ spells them, so one consumer reads both commands.
 | `os environments create` | Provision a new environment. With `--activate` (the default) the new environment becomes the active one, recorded in `~/.objectstack/cloud.json` as well when the control plane it talked to is the one `os cloud login` recorded — so [`os package publish --install`](#os-package-publish) can install into it with no `switch` in between |
 | `os environments switch <id>` | Set the active environment for later CLI calls. Recorded in `~/.objectstack/cloud.json` as well when the control plane it talked to is the one `os cloud login` recorded, so [`os package publish --install`](#os-package-publish) can use it |
 | `os environments bind <id>` | Bind a compiled local artifact to an existing environment |
+| `os environments use-runtime <url> --token <key>` | Make a self-hosted runtime the deploy target instead of an ObjectOS Cloud environment — see [Deploy to a self-hosted runtime](#deploy-to-a-self-hosted-runtime) |
 
 #### Create an environment from a local artifact
 
@@ -3156,12 +3157,53 @@ os environments bind <environment-id> --artifact ./dist/objectstack.json --build
 is reserved for the server-side reseed endpoint; use it only when that endpoint
 is available in your deployment.
 
+#### Deploy to a self-hosted runtime
+
+`os environments use-runtime` remembers a runtime you operate — ObjectStack's
+Docker image, Community or Enterprise — as the deploy target, so
+[`os deploy`](#to-a-self-hosted-runtime), the `d` key in [`os dev`](#os-dev) and
+[`os package install`](#os-package-install) stop asking for its URL and key.
+
+```bash
+os environments use-runtime http://localhost:8080 --token osk_…
+OS_RUNTIME_TOKEN=osk_… os environments use-runtime https://objectos.example.com
+os environments use-runtime --forget          # deploy to ObjectOS Cloud again
+```
+
+The key is an API key the runtime issued (its **Setup → API Keys**); `-t, --token`
+reads `OS_RUNTIME_TOKEN`. The URL is the runtime's http(s) base URL, with no query
+or fragment. Before anything is written, the key is tried on the runtime's
+install-local endpoint (`GET /api/v1/marketplace/install-local`, which answers
+only an authenticated caller): a key the runtime rejects (`401` / `403`), a
+runtime that does not serve the endpoint (`404`), or one that cannot be reached
+is refused, naming why, and nothing is recorded. `--no-verify` records it anyway,
+for a container that is not up yet.
+
+The URL and key are stored in `~/.objectstack/cloud.json` (mode `0600`), the file
+`os cloud login` writes, as their own record: no cloud request reads the key, and
+it is sent only to that runtime's URL. `os cloud logout` keeps the record, and so
+does a new `os cloud login`.
+
+Whichever of `use-runtime` and `os environments switch` ran last is the target
+`os deploy` uses. `os environments switch <id>`, when it records the environment
+in `cloud.json` (see the table above), makes ObjectOS Cloud the target again and
+keeps the remembered runtime, so `os package install` still falls back to it.
+`--forget` drops the record.
+
+| Flag | Env equivalent | Purpose |
+|---|---|---|
+| `url` (positional) | — | Base URL of the self-hosted runtime (e.g. `http://localhost:8080`) |
+| `-t, --token <key>` | `OS_RUNTIME_TOKEN` | An API key the runtime issued; sent only to this runtime |
+| `--no-verify` | — | Record the runtime without trying the key on it first |
+| `--forget` | — | Forget the remembered runtime; ObjectOS Cloud is the deploy target again. Takes no `url` |
+
 ### Deploy
 
 #### `os deploy`
 
 Puts the app in the current directory on your ObjectOS Cloud environment, with
-no flags. It builds the app (the compile [`os build`](#os-compile) runs),
+no flags (or on a [self-hosted runtime](#to-a-self-hosted-runtime) you made the
+target). It builds the app (the compile [`os build`](#os-compile) runs),
 publishes it as `<manifest.version>-dev.<YYYYMMDDHHMMSS>` — a UTC semver
 pre-release, so deploying again never needs a version bump — installs that
 version into your organization's environment, and waits until the environment
@@ -3199,9 +3241,89 @@ is its production, so a deploy is always a deliberate act.
 | `--wait-timeout <seconds>` | — | How long to wait for the environment to serve the new version (default `600`) |
 | `-s, --server <url>` | `OS_CLOUD_URL` | Control-plane URL. Default `https://cloud.objectos.ai`, or the URL recorded by `os cloud login` |
 | `-t, --token <key>` | `OS_CLOUD_API_KEY` | Bearer token; `$OS_TOKEN` and `~/.objectstack/cloud.json` are the fallbacks |
+| `--confirm-access-upgrade <token>` | — | Self-hosted target only: confirm the upgrade's access findings with the finding-set token the runtime's refusal printed (as [`os package install`](#os-package-install)). Refused when the target is ObjectOS Cloud |
 
 `os package publish` stays the command for a **release**: it publishes the
 version the manifest declares, with `--install` optional.
+
+##### To a self-hosted runtime
+
+When [`os environments use-runtime`](#deploy-to-a-self-hosted-runtime) made a
+self-hosted runtime the active target, `os deploy` with no flags deploys there
+instead; `--env` still names an ObjectOS Cloud environment and deploys to it.
+There is no catalog and no version to mint: the build is sent inline to the
+runtime's install-local endpoint by [`os package install`](#os-package-install),
+run in the same process with the remembered URL and key, so its refusals and
+answers are the ones printed.
+
+1. **Build** — the same compile as above. A failed build prints its errors, and
+   nothing is installed.
+2. **Dry run** — the runtime's upgrade plan of the installed version against this
+   build is printed; nothing is installed. A runtime that refuses it, or does not
+   serve install-local, stops the deploy with exit `1`. A runtime that predates the
+   dry run ignores it and installs: the command says so and exits `1`.
+3. **Install** — with `--confirm-access-upgrade` passed through. The endpoint's
+   refusals (an access upgrade to confirm, a package the running kernel cannot
+   register, …) stop the deploy with exit `1`.
+4. **Live** — install-local registers the package in the running kernel before it
+   answers, so the answer is the verdict: `hotLoaded` prints `Live: … now serves …`
+   and exits `0`.
+
+The `d` key in [`os dev`](#os-dev) runs the same `os deploy`, so it deploys to the
+runtime too and asks for no cloud login.
+
+### MCP
+
+#### `os mcp connect`
+
+Registers your environment's MCP server with your MCP client in one command. The
+client then runs the environment's own OAuth: on first use it follows the
+server's OAuth discovery, registers itself, and your browser shows the
+environment's sign-in and consent.
+
+```bash
+os mcp connect
+os mcp connect --print                     # print the endpoint and the `claude mcp add` line, run nothing
+os mcp connect --env env_abc123            # your account reaches several environments
+os mcp connect --url http://localhost:3000 # a self-hosted or local server
+```
+
+The ObjectOS Cloud environment is resolved exactly as [`os deploy`](#os-deploy)
+resolves it: `--env`, then the active environment for this control plane, then
+your organization's only environment; none or several is refused, naming
+`--env`. A self-hosted runtime `os environments use-runtime` remembered is not
+consulted; name it with `--url`. Its MCP URL is the environment's address, read
+from the control plane, plus `/api/v1/mcp`, and the server is registered under
+the environment's own name (its slug, else its display name, else its id,
+lower-cased with every run of other characters turned into one `-`), so several
+environments can be registered side by side. `--url` skips ObjectOS Cloud: it
+takes the base URL of a self-hosted or local server (the command adds
+`/api/v1/mcp` itself and refuses a URL that already ends in it) and registers it
+as `objectstack`, the name `os dev`'s banner gives it. `--name` overrides either
+name.
+
+For Claude Code — the only `--client` value, and the default — the command runs
+`claude mcp add --transport http NAME URL`. `--print` prints the endpoint and that
+line and runs nothing, which is also how to connect any other client: add the
+endpoint as a remote HTTP MCP server in its settings. Then, in Claude Code, run
+`/mcp` and authenticate the server. If `claude` is not on your `PATH`, or
+`claude mcp add` fails (for a name already registered, `claude mcp remove NAME` or
+pick another `--name`), the command exits non-zero.
+
+**No token is stored.** The command hands the client the URL alone and writes no
+token into a client config. `-t, --token` (or the `os cloud login` session) is
+used only to find the environment and is never handed to the client. To revoke
+the grant, use the environment's console: **Account → Connect an AI Assistant**.
+
+| Flag | Env equivalent | Purpose |
+|---|---|---|
+| `--env <id>` | `OS_ENVIRONMENT_ID` | Environment to connect to (default: the active one for this control plane, then your organization's only one) |
+| `--url <url>` | — | Base URL of a self-hosted or local server; skips ObjectOS Cloud |
+| `--name <name>` | — | Server name in the client: letters, digits, `-` and `_` (default: the environment's name; `objectstack` with `--url`) |
+| `--client <client>` | — | `claude-code`, the default and only value |
+| `--print` | — | Print the endpoint and the command that registers it; run nothing |
+| `-s, --server <url>` | `OS_CLOUD_URL` | Control-plane URL. Default `https://cloud.objectos.ai`, or the URL recorded by `os cloud login` |
+| `-t, --token <key>` | `OS_CLOUD_API_KEY` | Bearer token, used only to find the environment; `$OS_TOKEN` and `~/.objectstack/cloud.json` are the fallbacks |
 
 ### Packages
 
@@ -3389,13 +3511,14 @@ write `-u URL` instead.
 | Flag | Env equivalent | Purpose |
 |---|---|---|
 | `package` (positional, required) | — | Package manifest id (`com.acme.crm`) **or** a path to a compiled artifact JSON |
-| `-u, --url <url>` | `OS_RUNTIME_URL` | Base URL of the runtime to install **into** (default `http://localhost:3000`) |
+| `-u, --url <url>` | `OS_RUNTIME_URL` | Base URL of the runtime to install **into** (default: the runtime [`os environments use-runtime`](#deploy-to-a-self-hosted-runtime) remembered, else `http://localhost:3000`) |
 | `-v, --version <semver>` | — | Version to install in catalog mode (default `latest`). Air-gapped mode takes the version from the artifact |
-| `-t, --token <token>` | `OS_RUNTIME_TOKEN` | A token the target runtime issued (an API key); instead of `--email` / `--password` |
+| `-t, --token <token>` | `OS_RUNTIME_TOKEN` | A token the target runtime issued (an API key); instead of `--email` / `--password`. Default: the key `os environments use-runtime` remembered, when the URL is that runtime's and no `--email` / `--password` is given |
 | `--email <email>` | `OS_RUNTIME_EMAIL` | Account email on the target runtime |
 | `--password <password>` | `OS_RUNTIME_PASSWORD` | Account password on the target runtime |
 | `--confirm-global-uniques` | — | Affirm this app's installation-wide `unique` constraints are genuinely platform-wide — see below |
 | `--confirm-access-upgrade <token>` | — | Confirm an upgrade's access findings with the finding-set token the runtime's refusal printed — see below |
+| `--confirm-upgrade <token>` | — | Confirm an upgrade's schema findings (a suspected rename, a type change that is not safe) with the finding-set token the runtime's refusal printed — see below |
 | `--timeout <ms>` | `OS_CLOUD_TIMEOUT_MS` | HTTP timeout in milliseconds, default `120000`. `0` disables it |
 
 **`--confirm-global-uniques` answers a stop; it does not force one past.**
@@ -3426,6 +3549,25 @@ The token is not a standing yes — once the findings change it no longer matche
 and the upgrade stops again with the new set; the confirmation is recorded in
 the install's ledger entry. Under `group` and `isolated` only the platform
 operator reaches this check. A fresh install is never checked.
+
+**`--confirm-upgrade <token>` confirms exactly the schema findings it names.**
+Upgrading an installed package stops with `SCHEMA_UPGRADE_CONFIRMATION_REQUIRED`
+when the new version would change a stored field in a way the schema sync does
+not carry: a field removed while another is added with no `renamedFrom` linking
+them (if it is a rename, the new field starts empty and the values stay in the
+old column), or a type change that keeps or drops a stored column
+(`needs_confirm` or `destructive`). It also stops when the runtime cannot read
+its record of the installed version, since nothing could be compared. Nothing is
+installed. The command prints each finding and the exact retry, carrying the
+finding set's token. If a field was renamed, declare its old key in the new
+field's `renamedFrom` and rebuild instead; a declared rename is refused with
+`501 NOT_IMPLEMENTED` until the runtime can carry the column's values to the new
+key. As with `--confirm-access-upgrade`, the token stops matching once the
+findings change, and the confirmation is recorded in the install's ledger entry.
+A type change on a field that had no stored column, a removed field and a seed
+data change are never refused; `--dry-run` lists them. `os deploy` passes
+`--confirm-upgrade` through to a self-hosted runtime. A fresh install is never
+checked.
 
 A `404` means the target runtime does not mount `MarketplaceInstallLocalPlugin`
 (from `@objectstack/cloud-connection`). The endpoint is opt-in, so a runtime

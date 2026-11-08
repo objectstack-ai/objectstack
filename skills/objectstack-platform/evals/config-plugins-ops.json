@@ -347,6 +347,36 @@
           "requires: ['storage', 'settings']"
         ]
       }
+    },
+    {
+      "id": 21,
+      "prompt": "We run ObjectStack's Docker image on our own server at https://objectos.example.com. How do I deploy my app there from the project without typing its URL and key every time?",
+      "expected_output": "Remember the runtime once: `os environments use-runtime https://objectos.example.com --token <key>`, with an API key that runtime issued. The key is tried on the runtime before anything is recorded (`--no-verify` skips that), then kept in `~/.objectstack/cloud.json` (0600), across cloud login and logout. From then on `os deploy` (or `d` in `os dev`) deploys there: it builds, prints the runtime's dry-run upgrade plan, installs the build inline, and reports it live when the runtime answers `hotLoaded`; `--confirm-access-upgrade <token>` confirms the access findings a refusal printed. `os package install` falls back to that runtime when `-u` is not given. `os environments use-runtime --forget` or `os environments switch <id>` makes ObjectOS Cloud the target again.",
+      "files": [],
+      "assertions": {
+        "must_contain": [
+          "os environments use-runtime",
+          "--token"
+        ],
+        "must_not_contain": [
+          "os deploy --url"
+        ]
+      }
+    },
+    {
+      "id": 22,
+      "prompt": "Connect Claude Code to our ObjectOS Cloud environment's MCP server, and to my local `os dev` server too.",
+      "expected_output": "Run `os mcp connect`: it runs `claude mcp add --transport http <name> <url>` for the environment `os deploy` would pick on ObjectOS Cloud (`--env <id>`, else the active one, else your organization's only one), named after that environment. For the local server, `os mcp connect --url http://localhost:3000` registers it as `objectstack`. `--name` overrides the name; `--print` prints the endpoint and the line and runs nothing, which is how to connect another client. No token is stored: in Claude Code run `/mcp` and authenticate, and the server's own sign-in and consent open in the browser.",
+      "files": [],
+      "assertions": {
+        "must_contain": [
+          "os mcp connect",
+          "--url"
+        ],
+        "must_not_contain": [
+          "--client cursor"
+        ]
+      }
     }
   ]
 }

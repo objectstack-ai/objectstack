@@ -50,7 +50,7 @@ import { StandardErrorCode, type ErrorCode } from '@objectstack/spec/api';
 // [#23701] The one key every door that translates the engine's unique-violation
 // envelope asks (the registered code AND the class name, never message text),
 // and the one classification whose arm states the wire code for it.
-import { earnedAnswerOf, isEngineDuplicateRecordEnvelope, isServerFault, logServerFault, mapDataError, resolveQueryReadLimits, sandboxBusinessMessage, staleSummaryAnswerLines, structuredCodeAnswer, type SummaryRecomputeRefusal } from '@objectstack/types';
+import { earnedAnswerOf, isEngineDuplicateRecordEnvelope, isSandboxCrash, isServerFault, logServerFault, mapDataError, resolveQueryReadLimits, sandboxBusinessMessage, staleSummaryAnswerLines, structuredCodeAnswer, type SummaryRecomputeRefusal } from '@objectstack/types';
 import {
   MCP_OAUTH_SCOPE_DATA_READ,
   MCP_OAUTH_SCOPE_DATA_WRITE,
@@ -535,8 +535,11 @@ interface DataDoorAnswer {
  * wrapper, and `Internal server error` for a fault. `object`, `field` and the
  * other context keys the door adds are not read, as `details` is not
  * ({@link errorResultWithCode}).
+ *
+ * [#31270] Exported for the record resource (`MCPServerRuntime.bridgeResources`),
+ * which answers a code-less throw with the same read; not on the package entry.
  */
-function dataDoorAnswerOf(err: unknown, objectName: string): DataDoorAnswer {
+export function dataDoorAnswerOf(err: unknown, objectName: string): DataDoorAnswer {
   const door = mapDataError(err, objectName);
   const code = typeof door.body.code === 'string' && door.body.code !== '' ? door.body.code : undefined;
   const message = typeof door.body.error === 'string' && door.body.error !== '' ? door.body.error : messageOf(err);
@@ -1131,10 +1134,24 @@ export interface ThrownRefusalEnvelope {
  * reader, never a copy of its logic here, and never a strip of the wrapper's
  * prose: a non-sandbox refusal keeps its own message byte for byte. The code
  * and status are unchanged.
+ *
+ * ## A sandboxed body that crashed is not a coded refusal (#31269)
+ *
+ * A body that CRASHED while declaring a code (`throw Object.assign(new
+ * TypeError('boom'), { code, status })`) is a fault: the doors ask
+ * `isSandboxCrash` (`@objectstack/types`) before any code-gated arm and answer
+ * `500 INTERNAL_ERROR`, because a declared code is the author's statement
+ * about a failure mode they handled, and a crash is not one. This reader asks
+ * the same predicate and answers `undefined`, so every face renders the crash
+ * as it renders the same crash with no code: the record data tools answer the
+ * `/data` door's fault ({@link dataDoorErrorResult}), and no face serves the
+ * declared code, its business status or the runner's wrapper as a refusal.
+ * ⛔ One predicate, never a copy of the crash read here.
  */
 export function thrownRefusalEnvelope(err: unknown): ThrownRefusalEnvelope | undefined {
   const thrownCode = (err as { code?: unknown } | null | undefined)?.code;
   if (typeof thrownCode !== 'string' || thrownCode.length === 0) return undefined;
+  if (isSandboxCrash(err)) return undefined;
   const status = (err as { status?: unknown }).status;
   return {
     code: wireCodeOf(err, thrownCode),

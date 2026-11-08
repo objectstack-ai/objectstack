@@ -553,11 +553,159 @@ describe('the record resource: a coded refusal adds its code beside the unchange
     );
   });
 
-  it('a code-less throw answers `{ error }` byte-identically', async () => {
-    expect(await readRefused(new Error('engine exploded'))).toBe(JSON.stringify({ error: 'engine exploded' }));
-    expect(await readRefused('a thrown string')).toBe(JSON.stringify({ error: 'a thrown string' }));
-    expect(await readRefused(Object.assign(new Error('empty code'), { code: '' }))).toBe(
-      JSON.stringify({ error: 'empty code' }),
+  it('[#31269] a coded sandboxed CRASH answers what the same crash with no code answers; its code and status are not served', async () => {
+    const crash = (extra: Record<string, unknown> = {}) => Object.assign(
+      new Error("hook 'demo_crash_guard' threw: TypeError: boom"),
+      { name: 'SandboxError', innerMessage: 'TypeError: boom' },
+      extra,
     );
+    const coded = await readRefused(crash({ code: 'RECORD_LOCKED', status: 409 }));
+    expect(coded).toBe(await readRefused(crash()));
+    expect(coded).not.toContain('RECORD_LOCKED');
+  });
+
+  /**
+   * [#31270] A code-less throw answers what the record data tools answer since
+   * #31218: the `/api/v1/data` door's answer (`mapDataError`, the GET by-id
+   * door), in this resource's `{ error, code, status }` members. It used to
+   * answer `{ error }` with the thrown message, so a sandboxed hook's abort
+   * reached the client as the runner's wrapper naming the hook and a fault's
+   * own text reached it verbatim.
+   */
+  describe('a code-less throw answers the /data door\'s answer (#31270)', () => {
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    /** The `SandboxError` the QuickJS runner raises for a hook body's throw (measured on the real runner). */
+    const sandboxed = (inner: string, extra: Record<string, unknown> = {}) => Object.assign(
+      new Error(`hook 'demo_resource_guard' threw: ${inner}`),
+      { name: 'SandboxError', innerMessage: inner.replace(/^Error: /, '') },
+      extra,
+    );
+
+    /** The door's answer to `thrown`, in this resource's member order. */
+    function doorBody(thrown: unknown): Record<string, unknown> {
+      const door = mapDataError(thrown, 'task');
+      return {
+        error: door.body.error,
+        ...(typeof door.body.code === 'string' ? { code: door.body.code } : {}),
+        status: door.status,
+      };
+    }
+
+    it('an undeclared sandboxed hook abort: HOOK_ABORTED, the inner sentence, 400; no hook name', async () => {
+      const thrown = sandboxed('Error: Not enough leave');
+      const text = await readRefused(thrown);
+      expect(JSON.parse(text)).toEqual({ error: 'Not enough leave', code: 'HOOK_ABORTED', status: 400 });
+      expect(JSON.parse(text)).toEqual(doorBody(thrown));
+      expect(text).not.toContain('demo_resource_guard');
+      expect(text).not.toContain('threw');
+    });
+
+    it('a bare Error: the sanitised 500, its message withheld and logged once for the operator', async () => {
+      const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const thrown = new Error('socket hang up');
+      const text = await readRefused(thrown);
+      expect(text).toBe(JSON.stringify({ error: 'Internal server error', code: 'INTERNAL_ERROR', status: 500 }));
+      expect(JSON.parse(text)).toEqual(doorBody(thrown));
+      expect(log).toHaveBeenCalledTimes(1);
+      const line = String(log.mock.calls[0]![0]);
+      expect(line).toMatch(/^\[5xx\] 500 resources\/read objectstack:\/\/objects\/task\/records\/t1 — /);
+      expect(line).toContain('socket hang up');
+    });
+
+    it('a sandboxed body that CRASHED, with or without a declared code: the sanitised 500, no hook name, no native text', async () => {
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+      for (const thrown of [sandboxed('TypeError: boom'), sandboxed('TypeError: boom', { code: 'RECORD_LOCKED', status: 409 })]) {
+        const text = await readRefused(thrown);
+        expect(text, thrown.message).toBe(JSON.stringify({ error: 'Internal server error', code: 'INTERNAL_ERROR', status: 500 }));
+        expect(text).not.toContain('demo_resource_guard');
+        expect(text).not.toContain('TypeError');
+      }
+    });
+
+    it('a thrown string and an empty `code` are no code: the door\'s answer', async () => {
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+      for (const thrown of ['a thrown string', Object.assign(new Error('empty code'), { code: '' })]) {
+        expect(JSON.parse(await readRefused(thrown)), String(thrown)).toEqual(doorBody(thrown));
+      }
+    });
+
+    it('CONTROL: a coded sandboxed refusal keeps the #31246 answer, and a coded non-sandbox refusal its own; neither is logged', async () => {
+      const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+      expect(JSON.parse(await readRefused(sandboxed('Error: Locked.', { code: 'RECORD_LOCKED', status: 409 })))).toEqual(
+        { error: 'Locked.', code: 'RECORD_LOCKED', status: 409 },
+      );
+      expect(await readRefused(Object.assign(new Error('The period is closed.'), { code: 'RECORD_LOCKED', status: 409 }))).toBe(
+        JSON.stringify({ error: 'The period is closed.', code: 'RECORD_LOCKED', status: 409 }),
+      );
+      expect(log).not.toHaveBeenCalled();
+    });
+  });
+});
+
+/**
+ * [#31269] A sandboxed body that CRASHED while declaring a code (a hook body's
+ * `throw Object.assign(new TypeError('boom'), { code: 'RECORD_LOCKED', status: 409 })`)
+ * is a fault, not a refusal. The doors classify it first (`isSandboxCrash`,
+ * `@objectstack/types`) and answer `500 INTERNAL_ERROR`; MCP's coded path read
+ * the declared code and status and the runner's wrapper, so an agent saw the
+ * hook's name and the native error text at a business status.
+ *
+ * `thrownRefusalEnvelope` now asks that same predicate, so a coded crash is no
+ * coded refusal and each face renders it as it renders the same crash with no
+ * code: the record data tools answer the `/data` door's fault, every other
+ * face its own uncoded rendering (those faces' code-less renderings are
+ * #31270–#31272's, and this card does not touch them).
+ */
+describe('a coded sandboxed CRASH is a fault on every face, never a refusal at its declared status (#31269)', () => {
+  const CRASH_TEXT = "hook 'demo_crash_guard' threw: TypeError: boom";
+
+  /** The `SandboxError` the QuickJS runner raises for the crash above (measured on the real runner). */
+  function crash(extra: Record<string, unknown> = {}): Error {
+    return Object.assign(new Error(CRASH_TEXT), { name: 'SandboxError', innerMessage: 'TypeError: boom' }, extra);
+  }
+  const codedCrash = () => crash({ code: 'RECORD_LOCKED', status: 409 });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  for (const site of SITES.filter((s) => s.dataDoor)) {
+    it(`${site.tool}: 500 INTERNAL_ERROR, the /data door's answer, logged once; no hook name, no native text`, async () => {
+      const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const thrown = codedCrash();
+      const result = await callTool(site, thrown);
+      expect(result.isError).toBe(true);
+      const error = JSON.parse(result.content[0].text).error;
+      expect(error).toEqual({ code: 'INTERNAL_ERROR', message: 'Internal server error', status: 500 });
+      const door = mapDataError(thrown, 'task');
+      expect(error).toEqual({ code: door.body.code, message: door.body.error, status: door.status });
+      expect(result.content[0].text).not.toContain('demo_crash_guard');
+      expect(result.content[0].text).not.toContain('TypeError');
+      expect(log).toHaveBeenCalledTimes(1);
+      expect(String(log.mock.calls[0]![0])).toMatch(new RegExp(`^\\[5xx\\] 500 tools/call ${site.tool} task — `));
+    });
+  }
+
+  for (const site of SITES.filter((s) => !s.dataDoor)) {
+    it(`${site.tool}: answers what it answers for the same crash with no code; its declared code and status are not served`, async () => {
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+      const coded = await callTool(site, codedCrash());
+      expect(coded).toEqual(await callTool(site, crash()));
+      expect(coded.content[0].text).not.toContain('RECORD_LOCKED');
+      expect(coded.content[0].text).not.toContain('409');
+    });
+  }
+
+  // CONTROL: a coded sandboxed REFUSAL keeps the #31246 answer on every face.
+  it('CONTROL: a coded sandboxed refusal keeps its code, inner sentence and status', async () => {
+    const refusal = crash({ innerMessage: 'Locked.', code: 'RECORD_LOCKED', status: 409 });
+    for (const site of SITES) {
+      expect(JSON.parse((await callTool(site, refusal)).content[0].text), site.tool).toEqual({
+        error: { code: 'RECORD_LOCKED', message: 'Locked.', status: 409 },
+      });
+    }
   });
 });

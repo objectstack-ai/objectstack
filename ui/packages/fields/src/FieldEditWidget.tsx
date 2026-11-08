@@ -188,7 +188,7 @@ export const INLINE_EXCLUDED_FIELD_TYPES = new Set<string>([
   'object', 'grid', 'vector',
   // Widget-hint-only pickers — authored in the record form (they depend on
   // sibling fields / a loaded object catalog), not inline in a grid cell.
-  'object-ref', 'filter-condition', 'recipient-picker',
+  'object-ref', 'shareable-object-ref', 'filter-condition', 'recipient-picker',
   'position-ref', 'permission-ref',
   'notification-topic', 'notification-channel',
 ]);
