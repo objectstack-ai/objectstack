@@ -1,0 +1,19 @@
+---
+'@objectstack/core': patch
+'@objectstack/metadata-core': patch
+'@objectstack/lint': patch
+'@objectstack/metadata-protocol': patch
+'@objectstack/objectql': patch
+---
+
+feat(core, metadata-core, objectql): the package-scoped resolution rule and its closure walk move where every reader reaches them, and engine functions resolve in their referrer's package (ADR-0150 D3/D4)
+
+Clause-②: no
+Metadata-protocol: none
+
+- **`@objectstack/core`** exports `resolvePackageScopedHolders`, the ADR-0150 D3 rule as a pure function: a caller of package P is answered P's own item, else the unique holder in P's resolution closure, else a refusal naming every candidate; a caller with no package the environment's own item, else the unique package holder, else the refusal. The holders come from a `PackageScopedHolderSource` the caller supplies (`packageScopedHolderSource` builds one from `(package, item)` pairs, a `null` package being the environment's own item), and the closure from a function the caller supplies. The refusal vocabulary moves with it: `PACKAGE_SCOPED_TYPES`, `ENGINE_FUNCTION_TYPE`, `PLATFORM_REQUESTED_BARE_NAMES_BY_TYPE`, `OVERRIDABLE_BASELINE_PACKAGES`, `BARE_NAME_ONE_HOLDER_TYPES`, `describeBareNameHolder` and the refusal and resolution types.
+- **`@objectstack/metadata-core`** exports the one closure walk: `resolvePackageClosure` (moved from `@objectstack/lint`), `widenPairClosureToAppMembers` and `packageDependencyClosure` (moved from `@objectstack/metadata-protocol`), and `packageResolutionClosure` with `KERNEL_NAMESPACE` (moved from `@objectstack/objectql`): the declared dependency closure plus every `sys` package.
+- **`@objectstack/lint`**, **`@objectstack/metadata-protocol`** and **`@objectstack/objectql`** re-export every moved name under the name they published, so no import changes. objectql's `resolvePackageScopedName` keeps its signature and answers, now as the rule's call over the registry's holders.
+- **`@objectstack/objectql`** adds `resolvePackageScopedFunction`, the rule's call over the engine's function holders, and `ObjectQL#functionHoldersOf(name)`: every package that registered a function of that name (the owner `app:PACKAGE_ID` read as the package id), with its own entry, and an owner-less registration as the environment's own item.
+
+Nothing changes for a running deployment: no reader calls the rule yet, `resolveFunction` and `resolveFunctionEntry` keep answering the one last-registered function per name, the save door admits and refuses exactly what it did, and phase 1's one-holder refusal stays in force.

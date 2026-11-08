@@ -20,12 +20,15 @@
  * covered type exactly as `getItem` does, so wiring a reader to it later
  * changes no answer a release gives today.
  *
- * Child R2 (#31716) adds the entry over a caller-supplied holder set
- * (`resolvePackageScopedHolders`) and the engine's function holders
- * (`ObjectQL#functionHoldersOf`): the `R2` blocks at the end. Their parity
- * block holds the new entry, over the registry's holders, to exactly
- * `resolvePackageScopedName`'s answer; their red-line pins were ablated the
- * same way, readings in the PR body.
+ * Child R2 (#31716) moved the rule into `@objectstack/core`
+ * (`resolvePackageScopedHolders`, over a holder set and a closure the caller
+ * supplies) and the closure walk into `@objectstack/metadata-core`, so this
+ * module is two adapters: the registry's (`resolvePackageScopedName`, every
+ * case above unchanged) and the engine functions' (`resolvePackageScopedFunction`
+ * over `ObjectQL#functionHoldersOf`): the `R2` blocks at the end. Their parity
+ * block holds the core, over the registry's holders and the one walk, to
+ * exactly the adapter's answer; their red-line pins were ablated the same
+ * way, readings in the PR body.
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
@@ -33,6 +36,7 @@ import { SchemaRegistry } from './registry.js';
 import { BARE_NAME_REGISTRY_TYPES, type BareNameRegistryType } from './bare-name-one-holder.js';
 import {
   resolvePackageScopedName,
+  resolvePackageScopedFunction,
   resolvePackageScopedHolders,
   packageScopedHolderSource,
   packageResolutionClosure,
@@ -45,6 +49,8 @@ import {
   type PackageScopedType,
 } from './package-scoped-resolver.js';
 import { ObjectQL } from './engine.js';
+import * as metadataCore from '@objectstack/metadata-core';
+import * as core from '@objectstack/core';
 import { packageDependencyClosure } from '@objectstack/metadata-protocol';
 
 const A = 'com.acme.alpha';
@@ -459,7 +465,7 @@ const registryPairs = (type: PackageScopedType, name: string): Array<[string | n
   return pairs;
 };
 
-describe('R2 parity — the holder-set entry over the registry\'s holders answers as `resolvePackageScopedName`', () => {
+describe('R2 parity — the core rule over the registry\'s holders and the one walk answers as `resolvePackageScopedName`', () => {
   const CALLERS = [undefined, null, '', 'sys_metadata', A, B, C, MID, P, SYS, 'com.acme.not_installed'];
 
   it('every caller, every arm: own, closure, unique holder, environment, baseline, platform-requested, ambiguous, outside, not-found', () => {
@@ -494,7 +500,11 @@ describe('R2 parity — the holder-set entry over the registry\'s holders answer
     for (const [type, name] of names) {
       for (const callerPackageId of CALLERS) {
         const expected = resolvePackageScopedName(registry, { type, name, callerPackageId });
-        const actual = resolvePackageScopedHolders(registry, { type, name, callerPackageId }, packageScopedHolderSource(registryPairs(type, name)));
+        const actual = resolvePackageScopedHolders(
+          { type, name, callerPackageId },
+          packageScopedHolderSource(registryPairs(type, name)),
+          (caller) => metadataCore.packageResolutionClosure(registry, caller),
+        );
         expect(actual, `${type} ${name} for ${String(callerPackageId)}`).toEqual(expected);
         seen.add(expected.status === 'resolved' ? expected.via : expected.status === 'refused' ? expected.reason : 'not-found');
       }
@@ -506,7 +516,7 @@ describe('R2 parity — the holder-set entry over the registry\'s holders answer
     ]);
   });
 
-  it('a bundled type: the holder-set entry answers the member the source serves', () => {
+  it('a bundled type: the core answers the member the source serves', () => {
     install(A);
     install(P, [A]);
     ship('email_template', 'welcome', A);
@@ -517,7 +527,7 @@ describe('R2 parity — the holder-set entry over the registry\'s holders answer
         packageItem: (id) => registry.getPackageScopedItem('email_template', 'welcome', id, member),
         environmentItem: () => registry.getEnvironmentScopedItem('email_template', 'welcome', member),
       };
-      expect(resolvePackageScopedHolders(registry, { type: 'email_template', name: 'welcome', callerPackageId: P }, source))
+      expect(resolvePackageScopedHolders({ type: 'email_template', name: 'welcome', callerPackageId: P }, source, (caller) => packageResolutionClosure(registry, caller)))
         .toEqual(resolvePackageScopedName(registry, { type: 'email_template', name: 'welcome', callerPackageId: P, member }));
     }
   });
@@ -542,7 +552,7 @@ describe('R2 — the holder source and the types the entry resolves', () => {
     install(A);
     install(P, [A]);
     const source = packageScopedHolderSource([[A, 'alpha fn']]);
-    expect(resolvePackageScopedHolders(registry, { type: ENGINE_FUNCTION_TYPE, name: 'score', callerPackageId: P }, source))
+    expect(resolvePackageScopedHolders({ type: ENGINE_FUNCTION_TYPE, name: 'score', callerPackageId: P }, source, (caller) => packageResolutionClosure(registry, caller)))
       .toMatchObject({ status: 'resolved', item: 'alpha fn', via: 'closure', holder: { kind: 'package', packageId: A } });
     expect(() => resolve('function' as PackageScopedType, 'score', P)).toThrow(TypeError);
   });
@@ -550,7 +560,7 @@ describe('R2 — the holder source and the types the entry resolves', () => {
   it('positions and objects are not resolved over a supplied source either', () => {
     const source = packageScopedHolderSource([[A, 'x']]);
     for (const type of ['position', 'object']) {
-      expect(() => resolvePackageScopedHolders(registry, { type: type as PackageScopedResolvableType, name: 'n' }, source)).toThrow(TypeError);
+      expect(() => resolvePackageScopedHolders({ type: type as PackageScopedResolvableType, name: 'n' }, source, () => new Set())).toThrow(TypeError);
     }
   });
 });
@@ -559,8 +569,7 @@ describe('R2 — engine functions resolve in their referrer\'s package (ADR-0150
   let engine: ObjectQL;
   const fn = (tag: string) => Object.assign(() => tag, { tag });
   const installOn = (id: string, deps: string[] = [], namespace?: string) => engine.registry.installPackage(manifest(id, deps, namespace), 'code');
-  const resolveFn = (name: string, callerPackageId?: string | null) =>
-    resolvePackageScopedHolders(engine.registry, { type: ENGINE_FUNCTION_TYPE, name, callerPackageId }, engine.functionHoldersOf(name));
+  const resolveFn = (name: string, callerPackageId?: string | null) => resolvePackageScopedFunction(engine, { name, callerPackageId });
   const tagOf = (r: PackageScopedResolution) =>
     r.status === 'resolved' ? ((r.item as { handler: { tag?: string } }).handler.tag) : undefined;
 
@@ -670,5 +679,20 @@ describe('R2 — engine functions resolve in their referrer\'s package (ADR-0150
     const holders = engine.functionHoldersOf('score');
     engine.registerFunction('score', fn('beta'), `app:${B}`);
     expect(holders.packageHolders).toEqual([A]);
+  });
+});
+
+describe('R2 — one rule, one walk: objectql re-exports them, it computes neither', () => {
+  it('the rule and its vocabulary are `@objectstack/core`\'s own', () => {
+    expect(resolvePackageScopedHolders).toBe(core.resolvePackageScopedHolders);
+    expect(packageScopedHolderSource).toBe(core.packageScopedHolderSource);
+    expect(PACKAGE_SCOPED_TYPES).toBe(core.PACKAGE_SCOPED_TYPES);
+    expect(PLATFORM_REQUESTED_BARE_NAMES_BY_TYPE).toBe(core.PLATFORM_REQUESTED_BARE_NAMES_BY_TYPE);
+    expect(BARE_NAME_REGISTRY_TYPES.every((type) => core.BARE_NAME_ONE_HOLDER_TYPES.includes(type))).toBe(true);
+  });
+
+  it('the closure is `@objectstack/metadata-core`\'s one walk', () => {
+    expect(packageResolutionClosure).toBe(metadataCore.packageResolutionClosure);
+    expect(packageDependencyClosure).toBe(metadataCore.packageDependencyClosure);
   });
 });

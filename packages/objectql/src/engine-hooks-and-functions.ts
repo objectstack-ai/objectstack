@@ -39,7 +39,7 @@ import { driverSupportsTransactions } from '@objectstack/spec/data';
 import type { HookContext } from '@objectstack/spec/data';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { STORED_METADATA_TYPE_READ_GATE_OBJECTS, storedMetadataTypeReadGate } from './stored-metadata-type-read-gate.js';
-import { createLogger } from '@objectstack/core';
+import { createLogger, packageScopedHolderSource, type PackageScopedHolderSource } from '@objectstack/core';
 import { hookStoppedRefusal } from './summary-errors.js';
 import { startSummaryRefreshOnEnable } from './summary-enable-refresh.js';
 import { HookTargetRebindError } from './hook-target-rebind-errors.js';
@@ -54,7 +54,6 @@ import {
 } from './engine-top-level.js';
 import type { FunctionEntry, FunctionRegistrationOptions, HookEntry, HookHandler } from './engine-top-level.js';
 import { handlerOwnerPackageId } from './bare-name-one-holder.js';
-import type { PackageScopedHolderSource } from './package-scoped-resolver.js';
 import type { ObjectQL } from './engine.js';
 
 /**
@@ -302,16 +301,8 @@ export class HooksAndFunctionsFacet {
 
   /** The body of `ObjectQL#functionHoldersOf`; the method's docblock there is its contract. */
   static functionHoldersOf(this: Pick<HooksAndFunctionsHost, 'functionHolders'>, name: string): PackageScopedHolderSource<Readonly<FunctionEntry>> {
-    // A snapshot: a registration after this call is not in it. Built here, not
-    // by the resolver module's `packageScopedHolderSource`, because this
-    // module is in the lean `./core` entry and the resolver module is not
-    // (it reads `@objectstack/metadata-protocol`, ADR-0076 D2).
-    const holders = new Map(this.functionHolders.get(name) ?? []);
-    return Object.freeze({
-      packageHolders: Object.freeze([...holders.keys()].filter((id): id is string => id !== null)),
-      packageItem: (packageId: string) => holders.get(packageId),
-      environmentItem: () => holders.get(null),
-    });
+    // A snapshot: a registration after this call is not in it.
+    return packageScopedHolderSource<Readonly<FunctionEntry>>(this.functionHolders.get(name) ?? []);
   }
 
   /** The body of `ObjectQL#bindHooks`; the method's docblock there is its contract. */
