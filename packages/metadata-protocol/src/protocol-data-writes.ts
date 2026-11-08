@@ -263,7 +263,10 @@ export async function updateData(host: Pick<ProtocolHost, 'assertObjectRegistere
 export async function deleteData(host: Pick<ProtocolHost, 'assertObjectRegistered' | 'assertVersionMatch' | 'engine'>, request: { object: string, id: string, expectedVersion?: string, context?: any }) {
     host.assertObjectRegistered(request.object); // [#3770]
     await host.assertVersionMatch(request.object, request.id, request.expectedVersion, request.context);
-    const opts: any = { where: { id: request.id } };
+    // [#30237, ADR-0148] The engine tells the recycle-bin entry this delete
+    // wrote, so the answer can name the entry a client offers to undo.
+    let recycleBinEntryId: string | undefined;
+    const opts: any = { where: { id: request.id }, onRecycleBinEntry: (entryId: string) => { recycleBinEntryId = entryId; } };
     if (request.context !== undefined) opts.context = request.context;
     // [#28661] The row is gone even when a roll-up could not recompute
     // after it: the answer rides the refusal (see `createData`).
@@ -308,10 +311,11 @@ export async function deleteData(host: Pick<ProtocolHost, 'assertObjectRegistere
     // Everything else keeps its #4435 reading, including an off-contract
     // `undefined` from a third-party driver: only a POSITIVE zero is read
     // as "not removed".
-    const answer = {
+    const answer: { object: string; id: string; success: boolean; recycleBinEntryId?: string } = {
         object: request.object,
         id: request.id,
-        success: deleted !== 0
+        success: deleted !== 0,
+        ...(recycleBinEntryId !== undefined ? { recycleBinEntryId } : {}),
     };
     if (stale) throw withEarnedAnswer(stale, answer);
     return answer;

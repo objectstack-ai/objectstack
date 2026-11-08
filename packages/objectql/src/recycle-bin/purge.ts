@@ -112,6 +112,13 @@ export function recycleBinWallDenies(
 export interface RecycleBinRemovalOptions {
   /** The caller; it scopes the entries to its organization and is authorized for `purge`. */
   context?: ExecutionContext;
+  /**
+   * `purge(entryId)` only: the object the caller addresses the entry under
+   * (the REST door's `/data/:object/recycle-bin/:entryId`). When given, an
+   * entry of another object is not found: the purge answers `false` and
+   * dispatches nothing.
+   */
+  object?: string;
 }
 
 /** How many entry ids one page of {@link emptyRecycleBin}'s fallback reads. */
@@ -129,8 +136,8 @@ export function recycleBinCallRefusal(message: string, developerMessage: string,
   return err;
 }
 
-/** The refusal for a platform object, whose deletes the bin never takes. */
-function platformObjectRefusal(object: string, param: string, what: string): Error {
+/** The refusal for a platform object, whose deletes the bin never takes (`list.ts` shares it). */
+export function recycleBinPlatformObjectRefusal(object: string, param: string, what: string): Error {
   return recycleBinCallRefusal(
     `'${object}' is a platform object: its deletes never enter the recycle bin, so ${what}.`,
     `${what.charAt(0).toUpperCase()}${what.slice(1)}: the recycle bin takes no object in the platform namespaces ` +
@@ -178,7 +185,7 @@ export function readPermanentDelete(
       'permanent',
     );
   }
-  if (!recycleBinTakesObject(object)) throw platformObjectRefusal(object, 'permanent', "'permanent' has nothing to skip");
+  if (!recycleBinTakesObject(object)) throw recycleBinPlatformObjectRefusal(object, 'permanent', "'permanent' has nothing to skip");
   return true;
 }
 
@@ -216,6 +223,7 @@ export async function purgeRecycleBinEntry(
   )) ?? []) as Array<Record<string, unknown>>;
   const entry = rows[0];
   if (entry?.id == null || typeof entry.object_name !== 'string' || entry.object_name === '') return false;
+  if (options?.object !== undefined && entry.object_name !== options.object) return false;
   const opCtx: OperationContext = { object: entry.object_name, operation: 'purge', options: { context }, context };
   return (await this.executeWithMiddleware(opCtx, async () => {
     const recordedVerdict = opCtx.tenantLayer0Verdict;
@@ -252,7 +260,7 @@ export async function emptyRecycleBin(
       'object',
     );
   }
-  if (!recycleBinTakesObject(object)) throw platformObjectRefusal(object, 'object', 'there is nothing to empty');
+  if (!recycleBinTakesObject(object)) throw recycleBinPlatformObjectRefusal(object, 'object', 'there is nothing to empty');
   if (!this._registry.getObject(RECYCLE_BIN_OBJECT)) return 0;
   const context = options?.context;
   if (recycleBinWallDenies.call(this, context)) return 0;
