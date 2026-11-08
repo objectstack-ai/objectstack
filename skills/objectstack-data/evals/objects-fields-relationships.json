@@ -172,7 +172,7 @@
     {
       "id": 10,
       "prompt": "Our package's `lead` object has a `company` text field with data in production. Rename it to `account_name` in the next version without losing the values.",
-      "expected_output": "Key the field `account_name` and declare `renamedFrom: ['company']` on it, removing `company` from the object: on the upgrade the schema sync renames the column, values and all. Without `renamedFrom` the new key is a new, empty column and the upgrade stops on a suspected rename. Keep the entry while any installed version may still carry `company`.",
+      "expected_output": "Key the field `account_name` and declare `renamedFrom: ['company']` on it, removing `company` from the object: on the upgrade the schema sync renames the column, values and all. Without `renamedFrom`, the install-local upgrade stops on a suspected rename before any column changes, and a restart on the new version adds `account_name` as a new, empty column beside `company`, values left behind. Keep the entry while any installed version may still carry `company`.",
       "files": [],
       "assertions": {
         "must_contain": [

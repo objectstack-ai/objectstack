@@ -37,9 +37,11 @@
  * - `both_columns` — the old column and the new one both exist: a half-done
  *   state no rule can resolve without choosing which values to keep;
  * - `several_old_columns` — two old keys in one list both still have columns;
- * - `destructive_type` — the old column, read under the new declaration, is a
- *   change the drift categories call `destructive` (the driver's own
- *   {@link diffManagedTable}, judged by the caller that can read the column);
+ * - `destructive_type` — the declaring field stores no column (a formula, a
+ *   summary) while the old column stands, or the old column, read under the
+ *   new declaration, is a change the drift categories call `destructive` (the
+ *   driver's own {@link diffManagedTable}, judged by the caller that can read
+ *   the column);
  * - `index_cannot_follow` — an index keyed on the old column cannot follow it
  *   (a MySQL hash-shadow carrier: its generated column references the old
  *   column by name, and MySQL refuses to rename such a column).
@@ -138,9 +140,23 @@ export function planDeclaredRenames(args: {
     const entries = renamedFromOf(def);
     if (entries.length === 0) continue;
     // A builtin key is never a field the sync materialises (the builtin
-    // collision warning says so), and a virtual field has no column to carry
-    // values into: neither is a rename target.
-    if (BUILTIN_COLUMNS.has(field) || !fieldHasColumn((def ?? {}) as Record<string, any>)) continue;
+    // collision warning says so): not a rename target.
+    if (BUILTIN_COLUMNS.has(field)) continue;
+    // A virtual field (a formula, a summary) has no column to carry values
+    // into. With an old column still on the table, passing over it would leave
+    // that column orphaned in silence, so it is refused by name — the same
+    // refusal the install door gives a renamed field turned to a type that
+    // stores no column.
+    if (!fieldHasColumn((def ?? {}) as Record<string, any>)) {
+      const stranded = entries.filter((old) => !isPlatformOwnedColumn(old, tenantField) && !live.has(old) && physicalColumns.has(old));
+      if (stranded.length > 0) {
+        refuse(field, stranded, 'destructive_type',
+          `'${field}' is a field that stores no column, so the values the column ${quote(stranded)} holds would have `
+          + 'nowhere to go. Nothing was changed. Keep a stored type for the renamed field, or carry the values by hand '
+          + 'and drop the old column.');
+      }
+      continue;
+    }
 
     const usable: string[] = [];
     let refused = false;

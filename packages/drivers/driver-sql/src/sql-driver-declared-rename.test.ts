@@ -68,9 +68,18 @@ describe('planDeclaredRenames — the rule, read from the new metadata and the p
     expect(plan({ b: { type: 'text', renamedFrom: ['a0', 'a'] } }, ['a']).carries).toEqual([{ table: 't', from: 'a', to: 'b' }]);
   });
 
-  it('a virtual field (no column) and a builtin key are not rename targets', () => {
-    expect(plan({ b: { type: 'formula', renamedFrom: ['a'] }, created_at: { type: 'datetime', renamedFrom: ['a'] } }, ['a']))
-      .toEqual({ carries: [], refusals: [] });
+  it('a builtin key is not a rename target', () => {
+    expect(plan({ created_at: { type: 'datetime', renamedFrom: ['a'] } }, ['a'])).toEqual({ carries: [], refusals: [] });
+  });
+
+  it('refuses `destructive_type` for a virtual target while the old column stands — never passed over in silence', () => {
+    const p = plan({ b: { type: 'formula', expression: '1', renamedFrom: ['a'] } }, ['a']);
+    expect(reasons(p)).toEqual(['destructive_type']);
+    expect(p.carries).toEqual([]);
+    expect(p.refusals[0]!.message).toContain("t.b declares `renamedFrom` 'a'");
+    expect(p.refusals[0]!.message).toContain('stores no column');
+    // Once the old column is gone there is nothing left to strand: no refusal.
+    expect(plan({ b: { type: 'formula', expression: '1', renamedFrom: ['a'] } }, [])).toEqual({ carries: [], refusals: [] });
   });
 
   it('refuses `platform_column`: the record id, an audit column, the tenant column', () => {
@@ -299,6 +308,7 @@ function declareDeclaredRenameSuite(cell: DialectCell): void {
       ['platform_column', { name: 't', fields: { a: { type: 'text' }, b: { type: 'text', renamedFrom: ['created_at'] }, n: { type: 'number' } } }, null],
       ['live_key', { name: 't', fields: { a: { type: 'text' }, b: { type: 'text', renamedFrom: ['a'] }, n: { type: 'number' } } }, null],
       ['claimed_twice', { name: 't', fields: { b: { type: 'text', renamedFrom: ['a'] }, c: { type: 'text', renamedFrom: ['a'] }, n: { type: 'number' } } }, null],
+      ['destructive_type', { name: 't', fields: { b: { type: 'formula', expression: '1', renamedFrom: ['a'] }, n: { type: 'number' } } }, null],
     ] as const) {
       it(`refuses \`${reason}\` before any DDL: no column renamed, added or dropped, every row kept`, async () => {
         const table = `os30885_r_${reason}`;
