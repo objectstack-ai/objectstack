@@ -81,7 +81,8 @@ function widenedMatch(namespace: string): string {
  * Redis-backed `ICacheService` — the cache every node of a multi-node
  * deployment reaches, so a counter kept in it (better-auth's sign-in rate
  * limits through `rateLimit.customStorage`, the inbound API budget, the OTP
- * send budget) is ONE counter across nodes rather than one per node
+ * send budget, the daily SMS quota, the `notify` node's per-address email
+ * limit) is ONE counter across nodes rather than one per node
  * (ADR-0069 D2).
  *
  * Semantics match `MemoryCacheAdapter` where the contract speaks:

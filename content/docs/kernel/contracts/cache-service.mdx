@@ -195,7 +195,8 @@ left unset:
 | Multi-node declared over another driver | memory, with a `warn` |
 
 A counter kept in the cache — better-auth's sign-in rate limits through
-`rateLimit.customStorage`, the inbound API budget — is one counter per cache, so on a
+`rateLimit.customStorage`, the inbound API budget, the daily SMS quota, the `notify` node's
+per-address email limit — is one counter per cache, so on a
 per-process cache N replicas admit N times the declared limit. The Redis adapter makes it
 one counter. It never becomes better-auth's `secondaryStorage`: sessions stay in
 `sys_session` (see the top of this page).

@@ -2820,6 +2820,15 @@ importers:
       '@objectstack/refd-timer-testkit':
         specifier: workspace:*
         version: link:../../qa/refd-timer-testkit
+      '@objectstack/service-cache':
+        specifier: workspace:*
+        version: link:../service-cache
+      '@objectstack/service-cluster':
+        specifier: workspace:*
+        version: link:../service-cluster
+      '@objectstack/service-cluster-redis':
+        specifier: workspace:*
+        version: link:../service-cluster-redis
       '@objectstack/service-job':
         specifier: workspace:*
         version: link:../service-job
@@ -2832,6 +2841,9 @@ importers:
       '@types/node':
         specifier: ^26.6.5
         version: 26.6.5
+      ioredis-mock:
+        specifier: ^8.13.1
+        version: 8.13.1(@types/ioredis-mock@8.2.7(ioredis@6.0.0))(ioredis@6.0.0)
       tsx:
         specifier: ^4.23.15
         version: 4.23.15(patch_hash=4d1d35da1809be2a945519cb26890e48107810b9b66c6913a6a89abb5ad6a1e6)
@@ -3301,12 +3313,24 @@ importers:
         specifier: workspace:*
         version: link:../../spec
     devDependencies:
+      '@objectstack/service-cache':
+        specifier: workspace:*
+        version: link:../service-cache
+      '@objectstack/service-cluster':
+        specifier: workspace:*
+        version: link:../service-cluster
+      '@objectstack/service-cluster-redis':
+        specifier: workspace:*
+        version: link:../service-cluster-redis
       '@objectstack/service-settings':
         specifier: workspace:*
         version: link:../service-settings
       '@types/node':
         specifier: ^26.6.5
         version: 26.6.5
+      ioredis-mock:
+        specifier: ^8.13.1
+        version: 8.13.1(@types/ioredis-mock@8.2.7(ioredis@6.0.0))(ioredis@6.0.0)
       typescript:
         specifier: ^6.0.3
         version: 6.0.3

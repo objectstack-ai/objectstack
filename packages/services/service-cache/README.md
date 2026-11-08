@@ -41,7 +41,8 @@ Leave `adapter` unset and the deployment's topology decides, at `init`:
 | Multi-node declared over any other driver, or with no cluster service | `MemoryCacheAdapter`, plus one `warn` line saying cache-backed limits multiply by the replica count. |
 
 Why it matters: a counter kept in the cache — better-auth's sign-in rate limits through
-`rateLimit.customStorage`, the inbound API budget, the OTP send budget — is one counter
+`rateLimit.customStorage`, the inbound API budget, the OTP send budget, the daily SMS
+quota, the `notify` node's per-address email limit — is one counter
 per cache. On a per-process cache, N replicas each count alone and admit N times the
 declared limit.
 

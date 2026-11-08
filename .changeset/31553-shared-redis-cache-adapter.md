@@ -13,7 +13,7 @@ Metadata-protocol: none
 
 **BREAKING** for one configuration only: a host that passes `adapter: 'memory'` explicitly AND declares multi-node over the redis cluster driver. Single-node boots, and every boot that leaves `adapter` unset, are unaffected.
 
-- **Before.** `CacheServicePlugin` registered an in-process `MemoryCacheAdapter` on every node. `RedisCacheAdapter` threw `not yet implemented` from every method, and `adapter: 'redis'` threw at `init`. On N replicas every counter kept in the cache counted per process: better-auth's sign-in limits (through `rateLimit.customStorage`), the inbound API budget and the OTP send budget each admitted N times the declared limit, and nothing at boot said so.
+- **Before.** `CacheServicePlugin` registered an in-process `MemoryCacheAdapter` on every node. `RedisCacheAdapter` threw `not yet implemented` from every method, and `adapter: 'redis'` threw at `init`. On N replicas every counter kept in the cache counted per process: better-auth's sign-in limits (through `rateLimit.customStorage`), the inbound API budget, the OTP send budget, the daily SMS quota and the `notify` node's per-address email limit each admitted N times the declared limit, and nothing at boot said so.
 - **Now (`@objectstack/service-cache`).** With `adapter` unset, the deployment's topology decides at `init`:
   - single node (no multi-node declaration): `MemoryCacheAdapter`, the same boot as before; the cluster service is not read;
   - multi-node declared over the `redis` cluster driver: `RedisCacheAdapter`, on a connection duplicated from the driver's (same Redis, same key prefix), closed at `kernel:shutdown`. Boot logs `registered redis cache adapter — one cache for every node on this Redis`;

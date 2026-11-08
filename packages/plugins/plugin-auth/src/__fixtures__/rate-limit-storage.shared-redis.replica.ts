@@ -1,7 +1,8 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * ONE replica, as its own OS process, for `rate-limit-storage.shared-redis.test.ts`.
+ * ONE replica, as its own OS process, for `../rate-limit-storage.shared-redis.test.ts`.
+ * Under `__fixtures__/` because it is test code that imports devDependencies.
  *
  * Boots the composition a replica's sign-in limit really runs on — the redis
  * cluster driver against the Redis URL in `argv[2]`, then
@@ -30,8 +31,8 @@ import { ClusterServicePlugin } from '@objectstack/service-cluster';
 // Registers the `redis` cluster driver with `defineCluster()`.
 import '@objectstack/service-cluster-redis';
 
-import { resolveKernelCache } from './kernel-cache.js';
-import { createLazyCacheRateLimitStorage } from './rate-limit-storage.js';
+import { resolveKernelCache } from '../kernel-cache.js';
+import { createLazyCacheRateLimitStorage } from '../rate-limit-storage.js';
 
 type Inbound =
   | { type: 'consume'; id: number; key: string; window: number; max: number }

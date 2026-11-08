@@ -52,7 +52,7 @@ import { createLazyCacheRateLimitStorage } from './rate-limit-storage.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const PKG = resolve(HERE, '..');
-const FIXTURE = resolve(HERE, 'rate-limit-storage.shared-redis.fixture.ts');
+const FIXTURE = resolve(HERE, '__fixtures__', 'rate-limit-storage.shared-redis.replica.ts');
 
 const RULE = { window: 60, max: 5 } as const;
 const ATTEMPTS = 10;
