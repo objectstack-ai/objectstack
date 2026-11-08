@@ -2426,8 +2426,9 @@ function resolveBaselineWithoutMergeBase(
   committed: AuthorableSurfaceBase | null,
 ): { rev: string; why: string } | { refusal: string } {
   const remedy =
-    `   A checkout with walkable history anchors on the merge base instead: in CI the\n` +
-    `   checkout step needs \`fetch-depth: 0\`; locally, \`git fetch --unshallow origin\`.`;
+    `   A checkout with walkable history anchors on the merge base instead: in CI, run the\n` +
+    `   step \`Fetch this commit's history and the base branch\` before this build (ci.yml), or\n` +
+    `   give the checkout \`fetch-depth: 0\` (lint.yml); locally, \`git fetch --unshallow origin\`.`;
   if (!committed) {
     return {
       refusal:

@@ -293,6 +293,20 @@ const DOORS: readonly Door[] = [
       Object.defineProperty(driver, 'isOracle', { get: () => true, configurable: true });
     },
   },
+  // ── #31390: a RAW(16) uuid column's comparand must be uuid text ──────────
+  {
+    builder: 'assertOracleUuidComparand',
+    where: () => ({ [POLICY_COL]: SECRET }),
+    secrets: [POLICY_COL],
+    klass: 'compares a uuid column with a value that is not a uuid',
+    // The fixture is SQLite; the refusal reads the dialect and the catalog's
+    // RAW(16) reading for the object, both set here.
+    setup: (driver) => {
+      Object.defineProperty(driver, 'isOracle', { get: () => true, configurable: true });
+      (driver as unknown as { oracleRawUuidFieldsByObject: Map<string, ReadonlySet<string>> })
+        .oracleRawUuidFieldsByObject.set('deal', new Set([POLICY_COL]));
+    },
+  },
   // ── #31327: JSON-array membership on SQL Server, refused rather than guessed ──
   {
     builder: 'jsonMembershipUnsupportedDialectError',
