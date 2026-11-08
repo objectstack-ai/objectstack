@@ -1,6 +1,9 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+// Paid at collection, not inside a case's clocked window: the dispatcher's
+// reach loads `@objectstack/metadata` lazily (`check:test-source-alias`).
+import '@objectstack/metadata';
 
 import { HttpDispatcher } from './http-dispatcher.js';
 
