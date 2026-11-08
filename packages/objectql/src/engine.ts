@@ -9075,9 +9075,9 @@ export class ObjectQL implements IObjectQLEngine {
                     this.buildDriverOptions(object, writeContext, hookContext.input.options as any),
                   );
                   // Told only for a row the driver says it removed: `false`
-                  // (not found) and a count of 0 (kept) name no deletion an
-                  // undo could reverse.
-                  if (removed !== false && removed !== 0) binEntryId = entry?.id;
+                  // (not found) and an off-contract count of 0 (kept) name no
+                  // deletion an undo could reverse.
+                  if (removed !== false && (removed as unknown) !== 0) binEntryId = entry?.id;
                   return removed;
                 } catch (e) {
                   await entry?.compensate();

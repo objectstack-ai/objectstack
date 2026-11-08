@@ -640,6 +640,7 @@ A write-path strip event: caller-supplied fields legally dropped from the payloa
 | **object** | `string` | ✅ | Object name |
 | **id** | `string` | ✅ | Deleted record ID |
 | **success** | `boolean` | ✅ | Whether deletion succeeded |
+| **recycleBinEntryId** | `string` | optional | The recycle-bin entry this delete wrote, to restore it; absent when the delete wrote none |
 
 
 ---
