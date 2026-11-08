@@ -951,13 +951,23 @@ export class ObjectQLPlugin implements Plugin {
         if (this.picklistVocabularySealed) {
           const declared = new Set<string>();
           for (const manifest of ordered) for (const name of collectManifestPicklistNames(manifest)) declared.add(name);
-          const known = (name: string) => declared.has(name) || ql.registry.resolvePicklistOptions(name) !== undefined;
+          // [ADR-0150 D3, child E6] A registered list is reached the way the
+          // served field will reach it: from the package that writes the
+          // reference, through the package-scoped resolver. A reference it
+          // refuses — the environment's own list included (D3 (a)) — is
+          // refused here, loudly, naming every candidate.
+          const judge = <R extends { picklist: string; packageId: string | undefined }>(ref: R): R & { refusal?: string } | undefined => {
+            if (declared.has(ref.picklist)) return undefined;
+            const verdict = ql.registry.picklistReferenceVerdict(ref.picklist, ref.packageId, ordered);
+            if (verdict.status === 'resolved') return undefined;
+            return verdict.status === 'refused' ? { ...ref, refusal: verdict.message } : ref;
+          };
           const unresolved = ordered
             .flatMap((manifest) => collectManifestPicklistReferences(manifest, artifactPackageId(manifest)))
-            .filter((ref) => !known(ref.picklist));
+            .flatMap((ref) => judge(ref) ?? []);
           const orphans = ordered
             .flatMap((manifest) => collectManifestPicklistExtensions(manifest, artifactPackageId(manifest)))
-            .filter((ext) => !known(ext.picklist));
+            .flatMap((ext) => judge(ext) ?? []);
           const refusal = describeUnresolvedPicklistReferences(unresolved, orphans);
           if (refusal) throw refusal;
         }
@@ -1200,6 +1210,27 @@ export class ObjectQLPlugin implements Plugin {
             this.ql?.registry.findOrphanPicklistExtensions() ?? [],
         );
         if (unresolvedPicklists) throw unresolvedPicklists;
+        // [ADR-0150 D3 (a), child E6] A packaged reference whose ONLY holder
+        // is an environment-authored list is refused by the package-scoped
+        // resolver: the field is served with no options and the record
+        // validator refuses its values. That is the declared narrowing — a
+        // refused REFERENCE, never a refused boot — so it is named here, once
+        // per reference, in the resolver's own words, and the boot goes on.
+        const environmentHeld = this.ql?.registry.findEnvironmentHeldPicklistReferences();
+        for (const ref of environmentHeld?.fields ?? []) {
+            ctx.logger.warn(
+                `[ObjectQLPlugin] Field '${ref.object}.${ref.field}' of package '${ref.packageId}' is served with no `
+                + `options and refuses every value: ${ref.refusal}`,
+                { object: ref.object, field: ref.field, packageId: ref.packageId, picklist: ref.picklist },
+            );
+        }
+        for (const ext of environmentHeld?.extensions ?? []) {
+            ctx.logger.warn(
+                `[ObjectQLPlugin] A \`picklistExtensions\` entry of package '${ext.packageId}' adds its options to `
+                + `nothing: ${ext.refusal}`,
+                { packageId: ext.packageId, picklist: ext.picklist },
+            );
+        }
         this.picklistVocabularySealed = true;
         // [#24400] A top-level action bound by `objectName` to an object no
         // package registers fails the boot, naming the action, its package and

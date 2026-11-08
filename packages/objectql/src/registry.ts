@@ -134,7 +134,19 @@ import {
   type PicklistContribution,
   type PicklistOptionLike,
   type PicklistReference,
+  type UnresolvedPicklistExtension,
+  type UnresolvedPicklistReference,
 } from './picklist-resolution.js';
+// [ADR-0150 D3, child E6] The ONE answer to "which package's list does this
+// bare picklist name mean, for this referrer" — R's. ⛔ No second closure walk
+// and no first-registered fallback here: every picklist read below asks it.
+import {
+  resolvePackageScopedName,
+  type PackageScopedHolder,
+  type PackageScopedRefusal,
+  type PackageScopedRegistry,
+  type PackageScopedResolution,
+} from './package-scoped-resolver.js';
 import { standaloneActionOwnerKey, isObjectLessActionKey } from './action-governance.js';
 import { recordCurrencySummaryRefusal } from './record-currency-aggregate-door.js';
 
@@ -554,6 +566,61 @@ const isPlainRecord = (v: unknown): v is Record<string, unknown> =>
  */
 function fieldPatchYieldKey(field: string, key: string, option?: string): string {
   return option === undefined ? `${field}\u0000${key}` : `${field}\u0000options\u0000${option}\u0000${key}`;
+}
+
+/** A picklist item as the registry stores it: the two keys the merge reads. */
+type PicklistItemLike = { options?: PicklistOptionLike[]; _packageId?: string };
+
+/**
+ * [ADR-0150 D3, child E6] Who wrote one field's picklist reference: the
+ * package the reference resolves from, or `null` for a caller with no package.
+ */
+type PicklistReferrer = (field: string | undefined, picklist: string) => string | null;
+
+/** Every reference is the environment's: a body no packaged layer declares. */
+const NO_PACKAGE_REFERRER: PicklistReferrer = () => null;
+
+/** Are two package-scoped holders the same one? */
+function sameHolder(a: PackageScopedHolder, b: PackageScopedHolder): boolean {
+  return a.kind === 'environment' ? b.kind === 'environment' : b.kind === 'package' && a.packageId === b.packageId;
+}
+
+/** The `picklist` a body's field declares (name-keyed or array-spelled), when it declares one. */
+function declaredPicklistOf(body: unknown, field: string): string | undefined {
+  const fields = isPlainRecord(body) ? body.fields : undefined;
+  let declared: unknown;
+  if (Array.isArray(fields)) {
+    declared = fields.find((f) => isPlainRecord(f) && f.name === field);
+  } else if (isPlainRecord(fields) && Object.prototype.hasOwnProperty.call(fields, field)) {
+    declared = fields[field];
+  }
+  const picklist = isPlainRecord(declared) ? declared.picklist : undefined;
+  return typeof picklist === 'string' && picklist !== '' ? picklist : undefined;
+}
+
+/**
+ * [ADR-0150 D3, child E6] The referrer of each picklist reference a served
+ * body carries, read from the contributors that fold into it: the LAST
+ * packaged layer, in fold order (the owner, then each extension), whose own
+ * declaration names that same list on that field. A reference no packaged
+ * layer writes came from an environment-authored body — a tenant overlay, a
+ * stored row, an object created in this environment — and resolves as the
+ * environment's (`null`), never from the package that body customizes (D3).
+ */
+function picklistReferrerOf(contributors: readonly ObjectContributor[] | undefined): PicklistReferrer {
+  if (!contributors || contributors.length === 0) return NO_PACKAGE_REFERRER;
+  const packaged = [
+    ...contributors.filter((c) => c.ownership === 'own'),
+    ...contributors.filter((c) => c.ownership === 'extend'),
+  ].filter((c) => !isTenantAuthored(c.definition));
+  return (field, picklist) => {
+    if (field === undefined) return null;
+    let referrer: string | null = null;
+    for (const c of packaged) {
+      if (declaredPicklistOf(c.definition, field) === picklist) referrer = c.packageId ?? null;
+    }
+    return referrer;
+  };
 }
 
 /** A field of an object body's name-keyed `fields`, when it is a record. */
@@ -5564,7 +5631,7 @@ export class SchemaRegistry {
     // A picklist-bound field is served with its list's options resolved onto
     // it — here, in the fold every object read and the write door share, so
     // the set a client is offered and the set a write is judged by are one.
-    return this.finishServedObject(merged, layer);
+    return this.finishServedObject(merged, layer, picklistReferrerOf(contributors));
   }
 
   /**
@@ -5726,8 +5793,12 @@ export class SchemaRegistry {
    *    packages' alone: a tenant's action is not something a code package
    *    ships, and `getArtifactItem('object')` answers exactly that question.
    */
-  private finishServedObject<T>(body: T, layer: ServedObjectLayer = 'served'): T {
-    return this.attachBoundActions(this.resolvePicklistFields(body), layer);
+  private finishServedObject<T>(
+    body: T,
+    layer: ServedObjectLayer = 'served',
+    referrerOf: PicklistReferrer = NO_PACKAGE_REFERRER,
+  ): T {
+    return this.attachBoundActions(this.resolvePicklistFields(body, referrerOf), layer);
   }
 
   /**
@@ -6282,7 +6353,7 @@ export class SchemaRegistry {
     const contributors = withheld?.kept ?? listed;
     const served = withheld ? withoutWithheldMembers(base as unknown as ServiceObject, withheld) : base as unknown as ServiceObject;
     if (!contributors || !contributors.some((c) => c.ownership === 'extend')) {
-      return this.finishServedObject(served as unknown as T);
+      return this.finishServedObject(served as unknown as T, 'served', picklistReferrerOf(contributors));
     }
     return this.foldExtendersOntoDefinition(
       contributors,
@@ -9558,7 +9629,7 @@ export class SchemaRegistry {
       if (option && typeof option === 'object' && option.value !== undefined) merged.set(String(option.value), option);
     }
     const candidate: PicklistContribution = { packageId, kind: 'extension', options: [...merged.values()] };
-    const others = this.picklistContributions(target).filter(
+    const others = this.picklistContributions(target, packageId).filter(
       (c) => !(c.kind === 'extension' && (c.packageId ?? '') === packageKey),
     );
     // The candidate's own list first: a value repeated INSIDE this one entry
@@ -9578,19 +9649,72 @@ export class SchemaRegistry {
 
   /**
    * The resolved options of a picklist — its own, then every extension's, in
-   * registration order — or `undefined` when no picklist of that name is
-   * registered. Extensions held for an unregistered list resolve nothing on
-   * their own: a list exists only once its owner declares it.
+   * registration order — or `undefined` when the name reaches no list.
+   * Extensions held for an unregistered list resolve nothing on their own: a
+   * list exists only once its owner declares it.
+   *
+   * [ADR-0150 D3/D4, child E6] The name is resolved by R's package-scoped
+   * resolver from `callerPackageId`, the package that WROTE the reference: its
+   * own list, else the unique holder in its declared dependency closure (plus
+   * `sys`), else nothing — a refusal ({@link picklistReferenceVerdict} says
+   * which). Omitted, `null` or `''` is a caller with no package (an
+   * environment-authored body, a context-free door): the environment's own
+   * list first, else the unique package holder. That is what the bare read
+   * answered while phase 1 keeps one holder per name, so every caller-less
+   * reader keeps its answer.
    */
-  resolvePicklistOptions(name: string): PicklistOptionLike[] | undefined {
-    const contributions = this.picklistContributions(name);
+  resolvePicklistOptions(name: string, callerPackageId?: string | null): PicklistOptionLike[] | undefined {
+    const contributions = this.picklistContributions(name, callerPackageId);
     if (!contributions.some((c) => c.kind === 'picklist')) return undefined;
     return mergePicklistOptions(contributions);
   }
 
   /**
-   * Every field of every packaged object that names a picklist no registered
-   * package declares — the load-time audit's input.
+   * [ADR-0150 D3, child E6] R's verdict on one picklist reference: `resolved`,
+   * `not-found` (nothing holds the name) or `refused` (holders exist and none
+   * is reachable from `callerPackageId`, or more than one is). The audits
+   * below read it, so the boot, the install door and the served field share
+   * one answer.
+   */
+  picklistReferenceVerdict(
+    name: string,
+    callerPackageId?: string | null,
+    pendingManifests?: readonly unknown[],
+  ): PackageScopedResolution<PicklistItemLike> {
+    const registry = pendingManifests && pendingManifests.length > 0 ? this.withPendingManifests(pendingManifests) : this;
+    return resolvePackageScopedName<PicklistItemLike>(registry, { type: 'picklist', name, callerPackageId });
+  }
+
+  /**
+   * The registry as R reads it once `manifests` (an artifact the install door
+   * is judging, not yet registered) are installed: each manifest answers
+   * `getPackage` for its own id — its `dependencies` and `namespace`, which is
+   * all the closure reads — ahead of an installed version of it. Holders and
+   * items stay the registry's: the artifact's own lists are the door's to
+   * count. ⛔ No closure is computed here; R computes it from this view.
+   */
+  private withPendingManifests(manifests: readonly unknown[]): PackageScopedRegistry {
+    const pending = new Map<string, InstalledPackage>();
+    for (const manifest of manifests) {
+      const id = artifactPackageId(manifest);
+      if (id !== undefined) pending.set(id, { manifest } as unknown as InstalledPackage);
+    }
+    return {
+      getPackage: (id) => pending.get(id) ?? this.getPackage(id),
+      getAllPackages: () => [
+        ...this.getAllPackages().filter((row) => !pending.has(artifactPackageId(row.manifest) ?? '')),
+        ...pending.values(),
+      ],
+      packageScopedHoldersOf: (type, name) => this.packageScopedHoldersOf(type, name),
+      getPackageScopedItem: (type, name, packageId, member) => this.getPackageScopedItem(type, name, packageId, member),
+      getEnvironmentScopedItem: (type, name, member) => this.getEnvironmentScopedItem(type, name, member),
+    };
+  }
+
+  /**
+   * Every field of every packaged object whose picklist reference reaches no
+   * list from the package that declares the field — the load-time audit's
+   * input, with the resolver's refusal sentence where it refused.
    *
    * Judged over the PACKAGED contributors only (`own` and `extend`), never an
    * `overlay` and never a tenant-authored body: those come out of
@@ -9598,46 +9722,136 @@ export class SchemaRegistry {
    * tenant field naming an unknown list is still never served options and
    * never accepts a value — the fold drops whatever options it carried and
    * the record validator refuses the field.
+   *
+   * ⛔ Leaves out a reference whose ONLY candidate is an environment-authored
+   * list (ADR-0150 D3 (a)): {@link findEnvironmentHeldPicklistReferences}
+   * names those, and the boot warns instead of refusing (epic seat ruling on
+   * the E6 card): the declared narrowing is a refused reference, not a
+   * refused boot.
    */
-  findUnresolvedPicklistReferences(): PicklistReference[] {
-    const unresolved: PicklistReference[] = [];
+  findUnresolvedPicklistReferences(): UnresolvedPicklistReference[] {
+    return this.auditPicklistReferences().unresolved;
+  }
+
+  /**
+   * Every `picklistExtensions` entry whose target list reaches no list from
+   * the extending package — the second half of the load-time audit. Held
+   * extensions are legal while the boot fills; once it is sealed, one still
+   * held adds its options to nothing. The environment-only arm is left out,
+   * as above.
+   */
+  findOrphanPicklistExtensions(): UnresolvedPicklistExtension[] {
+    return this.auditPicklistExtensions().unresolved;
+  }
+
+  /**
+   * [ADR-0150 D3 (a), child E6] The packaged references — fields and
+   * `picklistExtensions` — whose name only an environment-authored list holds.
+   * The resolver refuses them (`outside-closure`, the environment its one
+   * candidate): the field is served with no options and the record validator
+   * refuses its values. The boot names each one (a warning carrying the
+   * refusal's sentence) and the D10 upgrade report lists them; it does not
+   * refuse the boot.
+   */
+  findEnvironmentHeldPicklistReferences(): {
+    fields: UnresolvedPicklistReference[];
+    extensions: UnresolvedPicklistExtension[];
+  } {
+    return {
+      fields: this.auditPicklistReferences().environmentHeld,
+      extensions: this.auditPicklistExtensions().environmentHeld,
+    };
+  }
+
+  /** The field half of the audit, split by the resolver's verdict (above). */
+  private auditPicklistReferences(): {
+    unresolved: UnresolvedPicklistReference[];
+    environmentHeld: UnresolvedPicklistReference[];
+  } {
+    const unresolved: UnresolvedPicklistReference[] = [];
+    const environmentHeld: UnresolvedPicklistReference[] = [];
     for (const [fqn, contributors] of this.objectContributors) {
       for (const contributor of contributors) {
         if (contributor.ownership === 'overlay' || isTenantAuthored(contributor.definition)) continue;
         for (const ref of collectPicklistReferences(fqn, contributor.definition, contributor.packageId)) {
-          if (this.resolvePicklistOptions(ref.picklist) === undefined) unresolved.push(ref);
+          const judged = this.judgePicklistReference(ref.picklist, ref.packageId);
+          if (judged === 'resolved') continue;
+          const entry = judged.refusal ? { ...ref, refusal: judged.refusal.message } : ref;
+          (judged.environmentOnly ? environmentHeld : unresolved).push(entry);
         }
       }
     }
-    return unresolved;
+    return { unresolved, environmentHeld };
+  }
+
+  /** The extension half of the audit, split the same way. */
+  private auditPicklistExtensions(): {
+    unresolved: UnresolvedPicklistExtension[];
+    environmentHeld: UnresolvedPicklistExtension[];
+  } {
+    const unresolved: UnresolvedPicklistExtension[] = [];
+    const environmentHeld: UnresolvedPicklistExtension[] = [];
+    for (const [target, byPackage] of this.picklistExtensionContributions) {
+      for (const entry of byPackage.values()) {
+        const judged = this.judgePicklistReference(target, entry.packageId);
+        if (judged === 'resolved') continue;
+        const orphan: UnresolvedPicklistExtension = judged.refusal
+          ? { picklist: target, packageId: entry.packageId, refusal: judged.refusal.message }
+          : { picklist: target, packageId: entry.packageId };
+        (judged.environmentOnly ? environmentHeld : unresolved).push(orphan);
+      }
+    }
+    return { unresolved, environmentHeld };
   }
 
   /**
-   * Every `picklistExtensions` entry whose target list no registered package
-   * declares — the second half of the load-time audit. Held extensions are
-   * legal while the boot fills; once it is sealed, one still held adds its
-   * options to nothing.
+   * One reference, judged: `'resolved'` when the name reaches a list from
+   * `callerPackageId`, else what it is — the refusal (when the resolver
+   * refused) and whether its only candidate is the environment's own list
+   * (D3 (a)).
    */
-  findOrphanPicklistExtensions(): Array<{ picklist: string; packageId: string | undefined }> {
-    const orphans: Array<{ picklist: string; packageId: string | undefined }> = [];
-    for (const [target, byPackage] of this.picklistExtensionContributions) {
-      if (this.resolvePicklistOptions(target) !== undefined) continue;
-      for (const entry of byPackage.values()) orphans.push({ picklist: target, packageId: entry.packageId });
-    }
-    return orphans;
+  private judgePicklistReference(
+    name: string,
+    callerPackageId: string | undefined,
+  ): 'resolved' | { refusal?: PackageScopedRefusal; environmentOnly: boolean } {
+    const verdict = this.picklistReferenceVerdict(name, callerPackageId);
+    if (verdict.status === 'resolved') return 'resolved';
+    if (verdict.status !== 'refused') return { environmentOnly: false };
+    const environmentOnly = verdict.reason === 'outside-closure'
+      && verdict.candidates.length === 1
+      && verdict.candidates[0].kind === 'environment';
+    return { refusal: verdict, environmentOnly };
   }
 
-  /** The owning list's options (when registered) followed by every extension's. */
-  private picklistContributions(name: string): PicklistContribution[] {
+  /**
+   * The list `name` reaches from `callerPackageId` (its options, when that is
+   * one), followed by every extension of the SAME list: an extension's own
+   * package resolves its `extend` target by the same rule, and adds to the
+   * list it reaches, never to another one.
+   */
+  private picklistContributions(name: string, callerPackageId?: string | null): PicklistContribution[] {
     const contributions: PicklistContribution[] = [];
-    const base = this.getItem<{ options?: PicklistOptionLike[]; _packageId?: string }>('picklist', name);
+    const resolution = this.picklistReferenceVerdict(name, callerPackageId);
+    const base = resolution.status === 'resolved' ? resolution : undefined;
     if (base) {
-      contributions.push({ packageId: base._packageId, kind: 'picklist', options: Array.isArray(base.options) ? base.options : [] });
+      const item = base.item;
+      contributions.push({
+        packageId: item?._packageId,
+        kind: 'picklist',
+        options: Array.isArray(item?.options) ? item.options : [],
+      });
     }
     for (const entry of this.picklistExtensionContributions.get(name)?.values() ?? []) {
+      if (base && !this.extensionReaches(name, entry.packageId, base.holder)) continue;
       contributions.push({ packageId: entry.packageId, kind: 'extension', options: [...entry.options.values()] });
     }
     return contributions;
+  }
+
+  /** Does an extension from `packageId` reach the list `holder` holds (its own resolution of `name`)? */
+  private extensionReaches(name: string, packageId: string | undefined, holder: PackageScopedHolder): boolean {
+    const reached = this.picklistReferenceVerdict(name, packageId);
+    return reached.status === 'resolved' && sameHolder(reached.holder, holder);
   }
 
   /**
@@ -9650,7 +9864,10 @@ export class SchemaRegistry {
     picklist: { options?: PicklistOptionLike[] },
     packageId: string | undefined,
   ): void {
-    const extensions = this.picklistContributions(name).filter((c) => c.kind === 'extension');
+    // The list is not registered yet, so no resolution reaches it: judged
+    // against every extension held for the name, as the additive rule reads.
+    const extensions: PicklistContribution[] = [...(this.picklistExtensionContributions.get(name)?.values() ?? [])]
+      .map((entry) => ({ packageId: entry.packageId, kind: 'extension' as const, options: [...entry.options.values()] }));
     const duplicate = findDuplicatePicklistValue([
       { packageId, kind: 'picklist', options: Array.isArray(picklist?.options) ? picklist.options : [] },
       ...extensions,
@@ -9658,9 +9875,17 @@ export class SchemaRegistry {
     if (duplicate) throw duplicatePicklistValueError(name, duplicate);
   }
 
-  /** Resolve every picklist-bound field of a body (by reference when there is none). */
-  private resolvePicklistFields<T>(body: T): T {
-    return resolvePicklistFieldsOnto(body, (picklist) => this.resolvePicklistOptions(picklist));
+  /**
+   * Resolve every picklist-bound field of a body (by reference when there is
+   * none). [ADR-0150 D3, child E6] Each field's list is resolved from the
+   * package that WROTE that field's reference (`referrerOf`): the packaged
+   * layer whose own declaration carries it, else no package — a reference
+   * only an environment-authored body (a tenant overlay, a stored row) writes
+   * is the environment's reference, never the package's it customizes (D3).
+   */
+  private resolvePicklistFields<T>(body: T, referrerOf: PicklistReferrer = NO_PACKAGE_REFERRER): T {
+    return resolvePicklistFieldsOnto(body, (picklist, field) =>
+      this.resolvePicklistOptions(picklist, referrerOf(field, picklist)));
   }
 
   /** Drop a package's `picklistExtensions`; `true` when it had any. */
