@@ -433,6 +433,35 @@ describe('a key revoked because its owner\'s membership ended is restored by no 
     expect(await row(engine, 'key_left')).toEqual(MEMBERSHIP_ENDED_ROW);
   });
 
+  it('a write of the reason alone (no `revoked` key) is refused to the owner and to both platform administrators, so no restore follows it', async () => {
+    // The two-step road around a guard that judges un-revokes only: clear the
+    // reason first, then restore a key that no longer carries one. The first
+    // step never reaches the restore guard: `revoked_reason` is readonly and
+    // off the ADR-0092 D2 whitelist, so the D2 guard strips it and refuses the
+    // payload it leaves empty.
+    const engine = await rig();
+    const raw = await mint(engine, 'key_left');
+    await revokeForMembershipEnd(engine, 'key_left');
+    await declareOperator(engine);
+    const callers: Array<[string, any]> = [
+      ['owner', asOwner],
+      ['platform administrator by grant', await contextOf(engine, ADMIN)],
+      ['platform administrator by email anchor', await contextOf(engine, OPERATOR)],
+    ];
+
+    for (const [who, caller] of callers) {
+      const clear = await refusalOf(engine.update('sys_api_key', { id: 'key_left', revoked_reason: null }, caller));
+      expect({ who, code: clear?.code, status: clear?.status }).toEqual({ who, code: 'PERMISSION_DENIED', status: 403 });
+      expect(await row(engine, 'key_left')).toEqual(MEMBERSHIP_ENDED_ROW);
+
+      const restore = await refusalOf(engine.update('sys_api_key', { id: 'key_left', revoked: false }, caller));
+      expect({ who, code: restore?.code, status: restore?.status }).toEqual({ who, code: 'PERMISSION_DENIED', status: 403 });
+      expect(String(restore.message)).toContain('membership in the organization ended');
+      expect(await row(engine, 'key_left')).toEqual(MEMBERSHIP_ENDED_ROW);
+    }
+    expect((await door(engine, raw)).code).toBe('API_KEY_REVOKED');
+  });
+
   it('a platform administrator\'s batch restore that includes such a key is refused whole: no row moves', async () => {
     const engine = await rig();
     await mint(engine, 'key_left');
