@@ -903,7 +903,7 @@
       "title": "Form-view gallery: every FormViewSchema layout type renders and submits",
       "since": "v15",
       "status": "active",
-      "revision": 6,
+      "revision": 7,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -912,7 +912,7 @@
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "showcase_task's default form (type simple — the `form` key) and its formViews tabbed / wizard / split / quick — examples/app-showcase/src/ui/views/task.view.ts. Since spec 18.3.0 a form view's `type` is its layout only, simple | tabbed | wizard (ADR-0050, packages/spec/src/ui/view.zod.ts#FormViewSchema): the showcase's `split` entry is now a two-section tabbed form and `quick` a simple one, and the type values split, drawer and modal are refused by name (FORM_VIEW_TYPE_RETIRED). The console reads ONLY the default (objectDef.form ?? formViews.default — RecordFormPage through selectRecordFormView), so a named formViews entry is reachable from no console door: each page-level variant is reached by overlaying the object's default form with that variant's type + sections (view is org-overridable, ADR-0005) and reverting afterwards. The overlay recipe: PUT /api/v1/meta/view/showcase_task.form?mode=draft with the ViewItem {name:'showcase_task.form', object:'showcase_task', viewKind:'form', isDefault:true, config:{type:<variant>, sections:<that variant's sections>}}, then POST /api/v1/meta/view/showcase_task.form/publish. Each variant's sections can be read from its own served view item — the container serves formViews as showcase_task.tabbed / .wizard / .split / .quick (GET /api/v1/meta/view/showcase_task.<variant>, QA run #24572). ⚠ Item-level isDefault:true is REQUIRED: the console takes an object's default form — what /new and /edit render — ONLY from a form ViewItem that carries it (objectui packages/app-shell/src/providers/MetadataProvider.tsx applyViewItem, objectui#11539). Without it the publish succeeds, the flag is gone from the served row, and the page falls back to the all-fields layout, which reads like 'the variant does not render'",
+          "showcase_task's default form (type simple — the `form` key) and its formViews tabbed / wizard / split / quick — examples/app-showcase/src/ui/views/task.view.ts. Since spec 18.3.0 a form view's `type` is its layout only, simple | tabbed | wizard (ADR-0050, packages/spec/src/ui/view.zod.ts#FormViewSchema): the showcase's `split` entry is now a two-section tabbed form and `quick` a simple one, and the type values split, drawer and modal are refused by name (FORM_VIEW_TYPE_RETIRED). The console reads ONLY the default (objectDef.form ?? formViews.default — RecordFormPage through selectRecordFormView), so a named formViews entry is reachable from no console door: each page-level variant is reached by overlaying the object's default form with that variant's type + sections (view is org-overridable, ADR-0005) and reverting afterwards. The overlay recipe goes through the customization pair (ADR-0146 D11; the package-less overlay PUT is the older shape): POST /api/v1/packages/com.example.showcase/ensure-customization, then PUT /api/v1/meta/view/showcase_task.form?package=com.example.showcase.custom&mode=draft with the ViewItem {name:'showcase_task.form', object:'showcase_task', viewKind:'form', isDefault:true, config:{type:<variant>, sections:<that variant's sections>}} carrying overrides: { package: 'com.example.showcase', basedOn: <the showcase's version> }, then POST /api/v1/packages/com.example.showcase.custom/publish-drafts; revert with DELETE on the pair (DELETE /api/v1/meta/view/showcase_task.form?state=draft&package=com.example.showcase.custom, then the same without state). Once the pair exists, Studio Publish on the showcase leaves its read-only posture (#28562), so ux-conventions.disabled-control-reason variants[1] runs before this item creates it, or on a boot without it. Each variant's sections can be read from its own served view item — the container serves formViews as showcase_task.tabbed / .wizard / .split / .quick (GET /api/v1/meta/view/showcase_task.<variant>, QA run #24572). ⚠ Item-level isDefault:true is REQUIRED: the console takes an object's default form — what /new and /edit render — ONLY from a form ViewItem that carries it (objectui packages/app-shell/src/providers/MetadataProvider.tsx applyViewItem, objectui#11539). Without it the publish succeeds, the flag is gone from the served row, and the page falls back to the all-fields layout, which reads like 'the variant does not render'",
           "examples/app-showcase/src/ui/pages/task-desk.page.ts — the presentation surface: a JSX page whose ObjectForm opens with formType=\"drawer\" (edit, a side panel) and formType=\"modal\" (create, a dialog) over the task list"
         ],
         "knownGaps": [
@@ -1026,6 +1026,12 @@
           "date": "2026-10-31",
           "change": "variants, steps[3], steps[4], acceptance[0] (clause and verify), negative[1], fixtures.requires[0], knownGaps[0] and [1], and source[0], [1], [3] and [4] follow spec 18.3.0's form view `type`, and acceptance[5] is new. From QA run #27441 (W3-C3b, at c4c515ad; wave anchor #27377, wave-3 accuracy slice S1). ADR-0050 made `type` the layout only, simple | tabbed | wizard (#27305): split, drawer and modal are refused by name (view.zod.ts FORM_VIEW_TYPE_RETIRED), and the run measured a default-form overlay carrying one answer 422. The split variant is dropped, and steps[3] scores the three retired values as that refusal in acceptance[5], appended so that no clause index moves. The text no longer says the record-form page renders an overlaid drawer/modal as simple, because no form view can declare either. The drawer and modal presentations stay on task-desk.page.ts, whose React ObjectForm keeps both containers. Re-read at base a0f865491d: view.zod.ts, task.view.ts (formViews.split is now tabbed, quick simple), coverage.ts FORM_VIEW_TYPES (3), RecordFormPage.tsx (selectRecordFormView). steps[0] and steps[6] are untouched: the run's 'in-app navigation only' finding waits on a re-measure after #28066. A prior verdict on the split variant does not carry",
           "ref": "#27441"
+        },
+        {
+          "revision": 7,
+          "date": "2026-11-08",
+          "change": "fixtures.requires[0]'s overlay recipe moves to the customization pair (ADR-0146 D11): ensure-customization, a draft PUT into com.example.showcase.custom carrying overrides, publish-drafts, and DELETE on the pair to revert; the package-less overlay PUT is the older shape. Checklist-accuracy finding of QA run #31486 (owed:weekly, at 0647dabb). Read at base 4894cfe1",
+          "ref": "#31499"
         }
       ]
     },
@@ -3590,7 +3596,7 @@
       "title": "Select-all-matching covers every matching id across pages (server total, not the rendered page); clear resets both selection sources",
       "since": "v16",
       "status": "active",
-      "revision": 7,
+      "revision": 8,
       "priority": "P2",
       "surface": "browser",
       "personas": [
@@ -3615,7 +3621,7 @@
         "cross-check the collected id count against a direct API count for the same search: GET /api/v1/data/showcase_task?$search=…&$top=0 (or the response total)",
         "confirm the AGGREGATE action (showcase_recalc_selection) carries every matching id in `_selectedIds` — it is an api-type action, so the ONE request is the action door, POST /api/v1/actions/showcase_task/showcase_recalc_selection with body {params:{_selectedIds:[…]}} (the grid hands them to the action runner as params._selectedIds, ui/packages/plugin-grid/src/ObjectGrid.tsx; since #27611 the console sends a declared same-origin api action through the door, and the server forwards the params flat to /api/v1/apps/showcase/recalc in-process, buildApiActionRequest in packages/runtime/src/action-execution.ts); the run dialog then reads 'N / 55 processed' for ~15 s (QA run #24616); a per-record action (showcase_mark_done) fans out one dispatch per matching id",
         "click clear; confirm both selection sources reset (the toolbar empties AND the row checkboxes clear)",
-        "cap leg (acceptance[5]): provision more than 5000 matching scratch tasks — POST /api/v1/data/showcase_task/createMany with a bare JSON array of at most 200 records per call (the batch doors' default maxBatchSize; a 201-record call answers 400 BATCH_TOO_LARGE), e.g. 26 calls of 200 sharing one prefix — then repeat steps[1] and steps[2] and screenshot the banner and the selected count before and after Select all; delete the rows afterwards (deleteMany, at most 200 ids per call)"
+        "cap leg (acceptance[5]): provision more than 5000 matching scratch tasks — POST /api/v1/data/showcase_task/createMany with a bare JSON array of at most 200 records per call (the batch doors' default maxBatchSize; a 201-record call answers 400 BATCH_TOO_LARGE), e.g. 26 calls of 200 sharing one prefix — then repeat steps[1] and steps[2] and screenshot the banner and the selected count before and after Select all; delete the rows afterwards (POST /api/v1/data/showcase_task/deleteMany with {\"ids\": [...]}, at most 200 ids per call; a bare array answers 400)"
       ],
       "acceptance": [
         {
@@ -3715,6 +3721,12 @@
           "date": "2026-11-04",
           "change": "steps[5] and acceptance[2].clause corrected from QA run #29890 (W5-FAIL, at 589049b0): the aggregate action's one request is the action door, POST /api/v1/actions/showcase_task/showcase_recalc_selection with {params:{_selectedIds}} (since #27611), not a top-level _selectedIds POST to /api/v1/apps/showcase/recalc, which the server reaches in-process (buildApiActionRequest). Read at base f68b47ca",
           "ref": "#29906"
+        },
+        {
+          "revision": 8,
+          "date": "2026-11-08",
+          "change": "steps[7]: deleteMany takes {\"ids\": [...]}; a bare array answers 400. Checklist-accuracy finding of QA run #31486 (owed:weekly, at 0647dabb). Read at base 4894cfe1",
+          "ref": "#31499"
         }
       ]
     },

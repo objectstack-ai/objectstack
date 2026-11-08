@@ -109,8 +109,12 @@ export const UNMANAGED_INSTALL_KEY_DISPOSITIONS: Readonly<Record<string, Unmanag
   translations: 'converted',
 
   // ── The install door's ──
-  // Seed datasets are data, never metadata items, so a copy of the metadata
-  // cannot carry them; the door states what it did with them.
+  // [#30808] The door, not the import, decides what happens to the seed
+  // datasets. Asked for the sample data (`seedSampleData: true`), the door
+  // has the `importUnmanagedPackage` verb copy each dataset into the base as
+  // one environment `seed` item, the copy's seed receipt, and loads the rows
+  // from it. Not asked, nothing is copied, and when the package declares any
+  // the door's answer says so (`seeded.mode: 'skipped'`).
   data: 'door',
   // Read by the door to judge the requested mode; the base is the
   // environment's own package and makes no promise about how it installs.

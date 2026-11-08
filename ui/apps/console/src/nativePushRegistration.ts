@@ -41,6 +41,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { ObjectStackClient } from '@objectstack/client';
+import { RegisterDeviceRequestSchema } from '@objectstack/spec/api';
 import { createAuthenticatedFetch, registerBeforeSignOut, useAuth } from '@object-ui/auth';
 import {
   NATIVE_PUSH_TOKEN_CHANGED_EVENT,
@@ -134,12 +135,18 @@ function platformOf(host: ObjectStackNative): 'ios' | 'android' | null {
 
 /**
  * The `origin` a registration sends: the page's origin, only when it was loaded
- * over http or https. A sandboxed or `about:blank` / `data:` page reads the
- * opaque `"null"`, which the request grammar refuses, and that would refuse the
- * whole registration; such a page sends no `origin`.
+ * over http or https and the registration's own `origin` member accepts it. A
+ * refused member refuses the whole registration, so a page whose origin the
+ * request grammar cannot carry sends no `origin` and the device still
+ * registers. That covers a sandboxed or `about:blank` / `data:` page, which
+ * reads the opaque `"null"`, and a host the spec's DNS-label pattern is
+ * narrower than: an underscore (`http://my_svc:3000`) or a trailing dot
+ * (`https://crm.example.com.`). The judge is the published request schema the
+ * server parses the body with, so the two cannot disagree.
  */
 export function registrationOrigin(location: Pick<Location, 'protocol' | 'origin'>): string | undefined {
-  return location.protocol === 'http:' || location.protocol === 'https:' ? location.origin : undefined;
+  if (location.protocol !== 'http:' && location.protocol !== 'https:') return undefined;
+  return RegisterDeviceRequestSchema.shape.origin.safeParse(location.origin).success ? location.origin : undefined;
 }
 
 function isPushToken(value: unknown): value is NativePushToken {

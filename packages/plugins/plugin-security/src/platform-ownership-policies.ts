@@ -51,6 +51,7 @@
 import type { RowLevelSecurityPolicy } from '@objectstack/spec/security';
 
 import { defaultPermissionSets } from './objects/default-permission-sets.js';
+import { rlsOperationForVerb } from './lifecycle-verb-rls-operation.js';
 
 /**
  * The predicate that makes a shipped policy an OWNERSHIP floor. Used ONLY to
@@ -355,5 +356,7 @@ export function masterGovernsRowWrites(schema: unknown): boolean {
  * child under an editable master already worked).
  */
 export function masterGateCoversOperation(operation: string): boolean {
-  return operation === 'update' || operation === 'delete';
+  // [#30237] A lifecycle verb asks as its write class (`rlsOperationForVerb`).
+  const rlsOperation = rlsOperationForVerb(operation);
+  return rlsOperation === 'update' || rlsOperation === 'delete';
 }

@@ -112,8 +112,8 @@ const explainAs = (d: ExplainEngineDeps, operation: ExplainOperation, recordId: 
  *    gate (`EDITOR` holds update, delete and transfer), so the check decides
  *    the record.
  *  - `master_checked_object_gate_first`: a by-id write step 2.8 lists, which
- *    the object gate refuses for every principal (the restore and purge grants
- *    are retired until the lifecycle batch returns them). The check is still
+ *    the object gate refuses for this principal (`EDITOR` holds neither
+ *    recycle-bin key, `allowRestoreOwnDeleted` / `manageRecycleBin`). The check is still
  *    asked, so the report stays the door's on the day the verb is grantable,
  *    and the object-level CRUD layer decides first.
  *  - `read_door_asked`: a read, and an export, which streams the same find.
