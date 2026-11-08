@@ -28,6 +28,7 @@
  * evaluation cycle. `index.ts` re-exports nothing from this module.
  */
 
+import { oracleDayBinding } from './sql-driver-oracle-dialect.js';
 import {
   AUDIT_TIMESTAMP_COLUMNS, canonicalTimeOfDay, normalizeSqliteDatetimeOutput, presentAuditTimestampOutput,
 } from './sql-driver-top-level.js';
@@ -47,6 +48,7 @@ export interface SqliteSerialisationHost {
   readonly datetimeFields: SqlDriver['datetimeFields'];
   readonly fileColumnsMoved: SqlDriver['fileColumnsMoved'];
   readonly isMysql: SqlDriver['isMysql'];
+  readonly isOracle: SqlDriver['isOracle'];
   readonly isSqlite: SqlDriver['isSqlite'];
   readonly jsonFields: SqlDriver['jsonFields'];
   readonly mediaFields: SqlDriver['mediaFields'];
@@ -62,7 +64,7 @@ export interface SqliteSerialisationHost {
 /** The bodies of the "SQLite serialisation" section of `SqlDriver`: a stateless facet, called by the class's stubs. */
 export class SqliteSerialisationFacet {
   /** The body of `SqlDriver#formatInput`; the method's docblock there is its contract. */
-  static formatInput(this: Pick<SqliteSerialisationHost, 'dateFields' | 'datetimeFields' | 'fileColumnsMoved' | 'isSqlite' | 'jsonFields' | 'mediaFields' | 'storageDatetimeValue' | 'timeFields' | 'toDateOnly' | 'undeclaredAuditTimestampFields'>, object: string, data: any): any {
+  static formatInput(this: Pick<SqliteSerialisationHost, 'dateFields' | 'datetimeFields' | 'fileColumnsMoved' | 'isOracle' | 'isSqlite' | 'jsonFields' | 'mediaFields' | 'storageDatetimeValue' | 'timeFields' | 'toDateOnly' | 'undeclaredAuditTimestampFields'>, object: string, data: any): any {
     let copy: any = data;
     let copied = false;
 
@@ -145,7 +147,9 @@ export class SqliteSerialisationFacet {
       for (const field of dateFields) {
         const v = copy[field];
         if (v == null) continue;
-        const normalized = this.toDateOnly(v);
+        const day = this.toDateOnly(v);
+        // Oracle binds the day as its UTC-midnight instant — `oracleDayBinding`.
+        const normalized = this.isOracle ? oracleDayBinding(day) : day;
         if (normalized !== v) {
           if (!copied) { copy = { ...copy }; copied = true; }
           copy[field] = normalized;
@@ -271,7 +275,7 @@ export class SqliteSerialisationFacet {
   }
 
   /** The body of `SqlDriver#formatOutput`; the method's docblock there is its contract. */
-  static formatOutput(this: Pick<SqliteSerialisationHost, 'booleanFields' | 'columnFieldByObject' | 'dateFields' | 'datetimeFields' | 'isMysql' | 'isSqlite' | 'jsonFields' | 'mediaFields' | 'numericFields' | 'numericValueFields' | 'timeFields' | 'toDateOnly' | 'toTimeOnly'>, object: string, data: any): any {
+  static formatOutput(this: Pick<SqliteSerialisationHost, 'booleanFields' | 'columnFieldByObject' | 'dateFields' | 'datetimeFields' | 'isMysql' | 'isOracle' | 'isSqlite' | 'jsonFields' | 'mediaFields' | 'numericFields' | 'numericValueFields' | 'timeFields' | 'toDateOnly' | 'toTimeOnly'>, object: string, data: any): any {
     if (!data) return data;
 
     // External columnMap (ADR-0015): rename physical remote-column keys to local
@@ -493,7 +497,10 @@ export class SqliteSerialisationFacet {
     // answering `true`/`false` on the other two dialects — and, once #11635
     // presented `min`/`max` everywhere, `find()` and `aggregate()` gave
     // OPPOSITE answers for the same column on the same MySQL connection.
-    if (this.isSqlite || this.isMysql) {
+    // Oracle joins for its pre-23ai `NUMBER(1)` flag columns (node-oracledb
+    // hands back a JS number); a 23ai `BOOLEAN` already arrives as a boolean,
+    // which `Boolean()` leaves as it is.
+    if (this.isSqlite || this.isMysql || this.isOracle) {
       const booleanFields = this.booleanFields[object];
       if (booleanFields && booleanFields.length > 0) {
         for (const field of booleanFields) {

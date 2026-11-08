@@ -36,7 +36,8 @@
  *     `Error` is `VALIDATION_ERROR` with its own sentence.
  *
  * Arms 3 and 7 answer the way the runtime dispatcher answers a thrown value
- * (`HttpDispatcher.errorFromThrown`): the resolver's closed `code`, the
+ * (`HttpDispatcher.errorFromThrown`), through the one composition both read,
+ * {@link thrownAnswerOf} (#31319): the resolver's closed `code`, the
  * engine's unique-constraint class at its wire spelling with the REST arm's
  * context ({@link structuredCodeAnswer}), the demoted spelling as
  * `declaredCode` ({@link demotedDeclaredCode}), a declared `userMessage`, and a
@@ -79,6 +80,15 @@ export interface ActionsDoorAnswer {
    */
   operatorLines: readonly string[];
 }
+
+/**
+ * [#31319] The runtime dispatcher's answer to a thrown value at a fallback
+ * status: {@link actionsDoorAnswerOf}'s arms 3 and 7, and every other
+ * dispatcher domain's exit (`HttpDispatcher.errorFromThrown` in
+ * `@objectstack/runtime`, through `deps.errorFromThrown`). See
+ * {@link thrownAnswerOf}.
+ */
+export type ThrownAnswer = Omit<ActionsDoorAnswer, 'operatorLines'>;
 
 /**
  * The `/api/v1/actions` door's answer to `err`, thrown while running an action
@@ -371,8 +381,38 @@ function faultAnswer(operatorLines: string[]): ActionsDoorAnswer {
   return { status: 500, code: standardErrorCodeForHttpStatus(500), message: INTERNAL_ERROR_MESSAGE, operatorLines };
 }
 
-/** Arms 3 and 7: the dispatcher's answer to a thrown value at `fallbackStatus`. */
+/** Arms 3 and 7: {@link thrownAnswerOf}, with the door's operator lines. */
 function thrownAnswer(err: unknown, fallbackStatus: number, operatorLines: string[]): ActionsDoorAnswer {
+  return { ...thrownAnswerOf(err, fallbackStatus), operatorLines };
+}
+
+/**
+ * [#31319] The ONE composition of the dispatcher's answer to a thrown value at
+ * `fallbackStatus`: the status, the closed `code`, the sentence, and the
+ * declared siblings, read off {@link resolveThrownHttpError}.
+ *
+ * Two exits used to compose it term by term: this file's arms 3 and 7 (since
+ * #31271), and `HttpDispatcher.errorFromThrown` (`@objectstack/runtime`),
+ * which every other dispatcher domain answers a throw through. They agreed,
+ * and nothing tied them, so a change to one would have left the other behind.
+ * The dispatcher now builds its envelope from this function, so one
+ * composition serves every door that answers a thrown value this way.
+ *
+ *  - `code`: the resolver's closed code, except the engine's unique-constraint
+ *    class ({@link isEngineDuplicateRecordEnvelope}: the registered code AND
+ *    the class name, never message text), which crosses HTTP as the one ruled
+ *    wire spelling read off `RestServer`'s arm ({@link structuredCodeAnswer},
+ *    #23686, #23714). A producer that merely speaks `DUPLICATE_RECORD` keeps
+ *    its own code.
+ *  - `details`: the resolver's (`issues`, `fields`, a non-string `code`), plus
+ *    that arm's context (`developerMessage`, `object`, `field`) when the arm
+ *    agrees with the envelope's status and code. Disagreeing, it adds nothing.
+ *  - `message`: the thrown one, withheld as {@link INTERNAL_ERROR_MESSAGE} on a
+ *    5xx that {@link looksLikeInternalErrorLeak} recognises (#3867).
+ *  - `declaredCode`: {@link demotedDeclaredCode} (#9106, #12509).
+ *  - `userMessage`: the resolver's (`declaredUserMessage`'s rule).
+ */
+export function thrownAnswerOf(err: unknown, fallbackStatus: number): ThrownAnswer {
   const thrown = resolveThrownHttpError(err, fallbackStatus);
   // The engine's unique-constraint class crosses HTTP as the REST arm's wire
   // spelling, with that arm's context beside it when the arm agrees with the
@@ -394,6 +434,5 @@ function thrownAnswer(err: unknown, fallbackStatus: number, operatorLines: strin
     ...(declaredCode !== undefined ? { declaredCode } : {}),
     ...(thrown.userMessage !== undefined ? { userMessage: thrown.userMessage } : {}),
     ...(details !== undefined ? { details } : {}),
-    operatorLines,
   };
 }

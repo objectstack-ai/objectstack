@@ -254,6 +254,11 @@ the detail.
    from the running kernel and revokes its permission sets and their grants. The
    answer's `note` and `cleanups` say whether any part stays loaded until the
    next restart. **Records stored in the app's objects stay in the database.**
+   An uninstall that would withdraw a field an active validation rule of
+   another enabled package reads is refused with
+   `409 PACKAGE_DISABLE_RESTRICTED_BY_VALIDATION_RULE`, naming the rule, and
+   nothing is removed — the same refusal `DELETE /api/v1/packages/:id` answers.
+   A completed uninstall is recorded in the audit log (`package_uninstall`).
 
 ## Staying current with platform versions
 

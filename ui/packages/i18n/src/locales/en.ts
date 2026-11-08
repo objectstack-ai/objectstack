@@ -2378,6 +2378,23 @@ const en = {
       deprecatedBadge: 'Deprecated',
       deprecatedBadgeReplacedBy: 'Deprecated → {{replacedBy}}',
       unsupportedSpecifierType: 'Unsupported specifier type: {{type}}',
+      // The `map` control (objectstack#31391): keyed rows over the keys the server
+      // serves. `mapAddRow` is the picker that adds a row by its key, `{{key}}` in
+      // `mapRemoveRow` the row's key as shown; `mapKeyNotOffered` marks a stored key
+      // the server no longer offers, with `mapKeyNotOfferedHint` as its title;
+      // `mapUnitLabel` names a duration cell's unit select, `{{column}}` its header,
+      // and `mapUnitHours`..`mapUnitYears` are the h, d, w and y units it offers.
+      mapAddRow: 'Add a row',
+      mapRemoveRow: 'Remove {{key}}',
+      mapKeyNotOffered: 'Not offered',
+      mapKeyNotOfferedHint: 'This key is not one the setting admits now. Saving refuses it until the row is removed or given another key.',
+      mapNoRows: 'No rows',
+      mapSearchKey: 'Search…',
+      mapUnitLabel: '{{column}} unit',
+      mapUnitHours: 'hours',
+      mapUnitDays: 'days',
+      mapUnitWeeks: 'weeks',
+      mapUnitYears: 'years',
       // A settings value that misses its type's declared format blocks Save
       // (objectui#13287). `email` and `url` reuse `validation.email` and
       // `validation.url`; these two name what a phone number and a colour take.
@@ -3418,7 +3435,7 @@ const en = {
         signIn: 'Sign in as dev admin',
       },
       errors: {
-        invalidCredentials: 'Invalid email or password. Please try again.',
+        invalidCredentials: 'Invalid email or password. After several failed attempts, sign-in is paused for a while. Forgot your password? Reset it to sign in right away.',
         emailNotVerified: 'Please verify your email address before signing in.',
         oauthCallbackFailed: 'Single sign-on could not be completed — the sign-in link expired or was already used. Please try again.',
         // objectstack#29105 — refusals of the two-factor sign-in step, by the

@@ -17,6 +17,7 @@ import { esESObjects } from './es-ES.objects.generated.js';
 import { zhHantObjects } from './zh-Hant.objects.generated.js';
 import { arObjects } from './ar.objects.generated.js';
 import { frObjects } from './fr.objects.generated.js';
+import { ptBRObjects } from './pt-BR.objects.generated.js';
 
 const LOCALES = [
   { name: 'en', objs: enObjects as Record<string, any>, old: /\bDepartment\b/ },
@@ -26,6 +27,7 @@ const LOCALES = [
   { name: 'zh-Hant', objs: zhHantObjects as Record<string, any>, old: /部門/ },
   { name: 'ar', objs: arObjects as Record<string, any>, old: /قسم/ },
   { name: 'fr', objs: frObjects as Record<string, any>, old: /Département/ },
+  { name: 'pt-BR', objs: ptBRObjects as Record<string, any>, old: /Departamento/ },
 ];
 const OBJECTS = ['sys_business_unit', 'sys_business_unit_member'];
 

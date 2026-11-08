@@ -19,12 +19,12 @@
     },
     "src/auth-manager.test.ts": {
       "TS18048: 'arg' is possibly 'undefined'.": 3,
-      "TS18048: 'patch' is possibly 'undefined'.": 15,
+      "TS18048: 'patch' is possibly 'undefined'.": 5,
       "TS18048: 'wrote' is possibly 'undefined'.": 1,
       "TS2339: Property 'data' does not exist on type 'undefined'.": 3,
       "TS2493: Tuple type '…' of length '0' has no element at index '0'.": 3,
-      "TS2493: Tuple type '…' of length '0' has no element at index '1'.": 13,
-      "TS2532: Object is possibly 'undefined'.": 5
+      "TS2493: Tuple type '…' of length '0' has no element at index '1'.": 8,
+      "TS2532: Object is possibly 'undefined'.": 4
     },
     "src/auth-plugin.test.ts": {
       "TS2322: Type '…' is not assignable to type '…'.": 11,
