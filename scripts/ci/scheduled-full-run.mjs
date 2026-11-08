@@ -7,7 +7,12 @@
 //   node scripts/ci/scheduled-full-run.mjs --check-concurrency
 //   node scripts/ci/scheduled-full-run.mjs --release-gate --release-commit <sha> [--require-distance-zero] [--json]
 //   node scripts/ci/scheduled-full-run.mjs --snapshot-commit --from <sha> [--json]
+//   node scripts/ci/scheduled-full-run.mjs --queue-verdict --before <sha> --after <sha>
 //   node scripts/ci/scheduled-full-run.mjs --self-test
+//
+// Half 4 (#31519) is the probe a `push` run of ci.yml asks first: when the merge
+// queue already ran every pushed commit green on its first parent, the push
+// borrows that verdict and runs only what the queue never runs. See HALF 4.
 //
 // Half 3 (#22998) is the READER the full battery gained when PR and queue runs
 // became the fast set: release.yml's `full-battery` job runs `--release-gate`
@@ -974,7 +979,9 @@ export function renderSnapshotCardBody({ identity, kind, reason, runUrl, commit,
 // later `main` head tested a different tree. ⚠️ A `push` run's Test Core is
 // affected-only (#16467), so a push run is a narrower verdict than a scheduled
 // one; the ruled rule reads both events, and that narrowing is recorded on
-// #22998 rather than decided here.
+// #22998 rather than decided here. A push run that BORROWED the queue's
+// verdict (HALF 4, #31519) is read through the borrowed path in
+// `releaseGateVerdict`.
 
 // The workflows whose full-battery runs the release reads, by file (the API's
 // stable key) and by the name a reader sees.
