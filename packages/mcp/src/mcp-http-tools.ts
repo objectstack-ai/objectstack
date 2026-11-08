@@ -50,7 +50,7 @@ import { StandardErrorCode, type ErrorCode } from '@objectstack/spec/api';
 // [#23701] The one key every door that translates the engine's unique-violation
 // envelope asks (the registered code AND the class name, never message text),
 // and the one classification whose arm states the wire code for it.
-import { earnedAnswerOf, isEngineDuplicateRecordEnvelope, mapDataError, resolveQueryReadLimits, staleSummaryAnswerLines, structuredCodeAnswer, type SummaryRecomputeRefusal } from '@objectstack/types';
+import { earnedAnswerOf, isEngineDuplicateRecordEnvelope, isSandboxCrash, isServerFault, logServerFault, mapDataError, resolveQueryReadLimits, sandboxBusinessMessage, staleSummaryAnswerLines, structuredCodeAnswer, type SummaryRecomputeRefusal } from '@objectstack/types';
 import {
   MCP_OAUTH_SCOPE_DATA_READ,
   MCP_OAUTH_SCOPE_DATA_WRITE,
@@ -475,11 +475,13 @@ function errorResultFromThrown(err: unknown) {
 }
 
 /**
- * [#23509] The data tools' and `list_actions`' tool error: a thrown coded
- * refusal renders its `code` and `status` beside the message, in
- * {@link errorResultFromThrown}'s shape. A throw with no code renders as
- * `errorResult(messageOf(err))`, byte-identical to what every one of these
- * catches answered before.
+ * [#23509] The metadata tools', `list_actions`' and `delete_records`' tool
+ * error, and the coded half of the record data tools' ({@link dataDoorErrorResult}):
+ * a thrown coded refusal renders its `code` and `status` beside the message, in
+ * {@link errorResultFromThrown}'s shape. A throw with no code renders here as
+ * `errorResult(messageOf(err))`, byte-identical to what these catches answered
+ * before; the record data tools classify it as the `/data` door does instead
+ * (#31218).
  *
  * These catches used to answer the message alone, so a client never read the
  * code it is meant to branch on. The affected refusals: a key whose owner is
@@ -502,20 +504,108 @@ function errorResultWithCode(err: unknown) {
 }
 
 /**
+ * The tools whose throw the `/api/v1/data` door classifies: the record reads
+ * and writes, each the MCP face of one `/data` route. {@link dataDoorErrorResult}
+ * renders their catches.
+ */
+type DataDoorTool =
+  | 'query_records'
+  | 'aggregate_records'
+  | 'get_record'
+  | 'create_record'
+  | 'update_record'
+  | 'delete_record';
+
+/** What the `/data` door answers a thrown value with, read off {@link mapDataError}. */
+interface DataDoorAnswer {
+  code?: string;
+  message: string;
+  status: number;
+}
+
+/**
+ * The `/api/v1/data` door's answer to a thrown value: `mapDataError`
+ * (`@objectstack/types`), the classifier that door answers with, read as the
+ * `code`, sentence and status it would put on the wire. ⛔ Never a second
+ * classification: this file asks the door's own function, so the two doors
+ * cannot drift apart on a throw.
+ *
+ * The sentence is the door's `error` text, which is the caller-addressed one:
+ * a sandboxed hook body's inner sentence without the `<kind> '<name>' threw:`
+ * wrapper, and `Internal server error` for a fault. `object`, `field` and the
+ * other context keys the door adds are not read, as `details` is not
+ * ({@link errorResultWithCode}).
+ */
+function dataDoorAnswerOf(err: unknown, objectName: string): DataDoorAnswer {
+  const door = mapDataError(err, objectName);
+  const code = typeof door.body.code === 'string' && door.body.code !== '' ? door.body.code : undefined;
+  const message = typeof door.body.error === 'string' && door.body.error !== '' ? door.body.error : messageOf(err);
+  return { ...(code !== undefined ? { code } : {}), message, status: door.status };
+}
+
+/**
+ * [#31218] The record data tools' tool error: a CODED throw renders exactly as
+ * {@link errorResultWithCode} renders it, and a throw with NO code renders the
+ * answer the `/api/v1/data` door gives the same throw ({@link dataDoorAnswerOf}),
+ * as `{ error: { code, message, status } }` with `isError`.
+ *
+ * Those catches used to answer a code-less throw as its bare message. Measured
+ * on `MCPServerRuntime`: a sandboxed hook body's `throw new Error('…')` (the
+ * QuickJS runner's `SandboxError`, which carries no `code`) reached the agent
+ * as `hook '<name>' threw: Error: …`, the debug wrapper with the hook's name and
+ * no code, where `/data` answers `400 HOOK_ABORTED` with the inner sentence. The
+ * family is answered the same way, each as the door answers it:
+ *
+ * - an undeclared sandboxed abort: `HOOK_ABORTED`, the door's 4xx, the inner
+ *   sentence only;
+ * - a code hook's bare `throw new Error`, a driver error: `500 INTERNAL_ERROR`,
+ *   `Internal server error`. The thrown message is WITHHELD, as the door
+ *   withholds it, and reaches the operator instead, through the one 5xx log
+ *   line every door prints (`logServerFault`);
+ * - a throw that declared a status and no code (the runtime's
+ *   `{ statusCode: 503, message }` when no data service is registered): the
+ *   status, and no code, since the door invents none. A declared 5xx's prose is
+ *   withheld there too.
+ *
+ * ⛔ The coded path is read FIRST and is unchanged: a thrown `code` keeps
+ * {@link thrownRefusalEnvelope}'s rendering byte for byte, its unique-violation
+ * spelling included.
+ *
+ * Only these six tools. `delete_records` groups its rows through the same door
+ * ({@link rowRefusalOf}); its outer catch also renders this file's own
+ * code-less sentences, which the door's message heuristics would misread, so
+ * it keeps {@link errorResultWithCode}.
+ */
+function dataDoorErrorResult(err: unknown, tool: DataDoorTool, objectName: string) {
+  const envelope = thrownRefusalEnvelope(err);
+  if (envelope) return codedErrorResult({ ...envelope });
+  const door = dataDoorAnswerOf(err, objectName);
+  if (isServerFault(door.status)) {
+    logServerFault({
+      status: door.status,
+      error: err,
+      ...(door.code !== undefined ? { code: door.code } : {}),
+      request: { method: 'tools/call', path: `${tool} ${objectName}` },
+    });
+  }
+  return codedErrorResult(door);
+}
+
+/**
  * [#28782, #28844, #28856] A write tool's answer to a throw: a write the engine
  * stored but whose parent roll-up it could not recompute (`ERR_SUMMARY_RECOMPUTE`,
  * "the triggering records WERE written") answers the write it is, read off
  * #28781's carrier the bridge attached, with the stale column logged once at
  * `error`. An agent that read an error would apply the write again. Any other
  * throw, including every refusal raised before the write, renders through
- * `otherwise` exactly as before: {@link errorResultWithCode} for the data tools,
+ * `otherwise`: {@link dataDoorErrorResult} for the data tools,
  * {@link errorResultFromThrown} for `run_action`, whose answer the runtime
  * composed and attached.
  */
 function landedWriteResultOrError(
   err: unknown,
   objectName: string | undefined,
-  otherwise: (err: unknown) => ReturnType<typeof errorResultWithCode> = errorResultWithCode,
+  otherwise: (err: unknown) => ReturnType<typeof errorResultWithCode>,
 ) {
   const earned = earnedAnswerOf(err);
   if (earned === undefined) return otherwise(err);
@@ -523,7 +613,7 @@ function landedWriteResultOrError(
   return textResult(earned);
 }
 
-function codedErrorResult(error: ThrownRefusalEnvelope & { details?: unknown }) {
+function codedErrorResult(error: { code?: string; message: string; status?: number; details?: unknown }) {
   return {
     content: [{ type: 'text' as const, text: jsonText({ error }) }],
     isError: true as const,
@@ -828,13 +918,11 @@ interface DeleteEachOutcome {
  * `400 HOOK_ABORTED` and the code hook's bare throw `500 INTERNAL_ERROR`.
  */
 function rowRefusalOf(err: unknown, objectName: string): Omit<DeleteRefusalGroup, 'count' | 'recordIds'> | undefined {
-  const door = mapDataError(err, objectName);
-  if (door.status >= 500) return undefined;
+  const door = dataDoorAnswerOf(err, objectName);
+  if (isServerFault(door.status)) return undefined;
   const envelope = thrownRefusalEnvelope(err);
   if (envelope) return { code: envelope.code, status: envelope.status ?? door.status, reason: envelope.message };
-  const code = typeof door.body.code === 'string' ? door.body.code : undefined;
-  const reason = typeof door.body.error === 'string' && door.body.error !== '' ? door.body.error : messageOf(err);
-  return { ...(code !== undefined ? { code } : {}), status: door.status, reason };
+  return { ...(door.code !== undefined ? { code: door.code } : {}), status: door.status, reason: door.message };
 }
 
 /**
@@ -1030,14 +1118,41 @@ export interface ThrownRefusalEnvelope {
  * (`developerMessage`, `object`, `field`) in their envelope's context slot;
  * this envelope has none. It is `code`, `message` and `status`, and the data
  * tools withhold `details` by design ({@link errorResultWithCode}).
+ *
+ * ## The caller-addressed sentence of a sandboxed refusal (#31246)
+ *
+ * A QuickJS hook or action body that throws with a declared `code` and
+ * `status` leaves the runner as a `SandboxError` whose `.message` is the
+ * `<kind> '<name>' threw: Error: …` debug wrapper, naming the hook, and whose
+ * `.innerMessage` is the sentence the author addressed to the caller. The
+ * `message` here is `sandboxBusinessMessage` (`@objectstack/types`), the read
+ * the `/api/v1/data` door makes for the same throw, and `.message` only when
+ * that read declines: not a sandbox refusal, or a body that crashed. ⛔ One
+ * reader, never a copy of its logic here, and never a strip of the wrapper's
+ * prose: a non-sandbox refusal keeps its own message byte for byte. The code
+ * and status are unchanged.
+ *
+ * ## A sandboxed body that crashed is not a coded refusal (#31269)
+ *
+ * A body that CRASHED while declaring a code (`throw Object.assign(new
+ * TypeError('boom'), { code, status })`) is a fault: the doors ask
+ * `isSandboxCrash` (`@objectstack/types`) before any code-gated arm and answer
+ * `500 INTERNAL_ERROR`, because a declared code is the author's statement
+ * about a failure mode they handled, and a crash is not one. This reader asks
+ * the same predicate and answers `undefined`, so every face renders the crash
+ * as it renders the same crash with no code: the record data tools answer the
+ * `/data` door's fault ({@link dataDoorErrorResult}), and no face serves the
+ * declared code, its business status or the runner's wrapper as a refusal.
+ * ⛔ One predicate, never a copy of the crash read here.
  */
 export function thrownRefusalEnvelope(err: unknown): ThrownRefusalEnvelope | undefined {
   const thrownCode = (err as { code?: unknown } | null | undefined)?.code;
   if (typeof thrownCode !== 'string' || thrownCode.length === 0) return undefined;
+  if (isSandboxCrash(err)) return undefined;
   const status = (err as { status?: unknown }).status;
   return {
     code: wireCodeOf(err, thrownCode),
-    message: messageOf(err),
+    message: sandboxBusinessMessage(err) ?? messageOf(err),
     ...(typeof status === 'number' ? { status } : {}),
   };
 }
@@ -1798,7 +1913,7 @@ export function registerObjectTools(
           if (!diagnosed?.narrowed || !diagnosed.statement) return textResult(result);
           return textResult(withDelegationNotice(result, diagnosed.statement));
         } catch (err) {
-          return errorResultWithCode(err);
+          return dataDoorErrorResult(err, 'query_records', objectName);
         }
       },
     );
@@ -1893,7 +2008,7 @@ export function registerObjectTools(
               ...(truncated ? { truncated: true } : {}),
             });
           } catch (err) {
-            return errorResultWithCode(err);
+            return dataDoorErrorResult(err, 'aggregate_records', objectName);
           }
         },
       );
@@ -1920,7 +2035,7 @@ export function registerObjectTools(
           if (record == null) return errorResult(`Record "${recordId}" not found in "${objectName}"`);
           return textResult(record);
         } catch (err) {
-          return errorResultWithCode(err);
+          return dataDoorErrorResult(err, 'get_record', objectName);
         }
       },
     );
@@ -1949,7 +2064,7 @@ export function registerObjectTools(
         try {
           return textResult(await bridge.create(objectName, data));
         } catch (err) {
-          return landedWriteResultOrError(err, objectName);
+          return landedWriteResultOrError(err, objectName, (e) => dataDoorErrorResult(e, 'create_record', objectName));
         }
       },
     );
@@ -1983,7 +2098,7 @@ export function registerObjectTools(
         try {
           return textResult(await bridge.update(objectName, recordId, data));
         } catch (err) {
-          return landedWriteResultOrError(err, objectName);
+          return landedWriteResultOrError(err, objectName, (e) => dataDoorErrorResult(e, 'update_record', objectName));
         }
       },
     );
@@ -2026,7 +2141,7 @@ export function registerObjectTools(
         try {
           return textResult(await bridge.remove(objectName, recordId));
         } catch (err) {
-          return landedWriteResultOrError(err, objectName);
+          return landedWriteResultOrError(err, objectName, (e) => dataDoorErrorResult(e, 'delete_record', objectName));
         }
       },
     );

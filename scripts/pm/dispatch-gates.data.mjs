@@ -936,6 +936,13 @@ export const ESCAPABLE_LITERAL_LEDGER_ROWS = Object.freeze([
  *     each test "really" reads does NOT qualify: that map is a second thing
  *     that goes stale, and the run is cheap enough not to need one (measured
  *     below).
+ *   - population-net entries (#31257, fifteen): when the gate's own source
+ *     declares a population this derivation can MATCH (a subtree it really
+ *     walks, beside a filter the derivation reads), the ordinary path match
+ *     names it and the entry is redundant. ⛔ Re-deciding a REFUSE-WIDE row to
+ *     make a path match possible does NOT qualify (it takes a ruling), and ⛔
+ *     neither does the net going quiet on a card: the net is the gate's own
+ *     first filter, so a quiet net is a quiet gate, not a cleared one.
  *
  *
  *   Delete an entry the day its criterion is met, not before.
@@ -1062,6 +1069,30 @@ export const CHANGE_KIND_ROWS = [
         name: 'check:dispatcher-error-vocabulary',
         why: 'it sweeps the non-test TypeScript sources under the package root for every site that stamps an error code, and reports each value the registered vocabulary (StandardErrorCode joined with ERROR_CODE_LEDGER) does not contain — so a code arriving through a quoted literal, a SCREAMING_SNAKE constant, a typeof reference to one, or a template moves it. This is the gate no path derivation can name: it computes its own population from a bare top-level root, which the bare-root ledger records as REFUSE-WIDE at 39% of the tracked tree, so it scores the same quiet silence for every card and #12843 paid a CI round trip for that silence. It needs NO build — a source scan, one pass, whole tree, and it names the file and line. Repair by REGISTERING the code where the vocabulary is declared, never by widening a consumer to tolerate it; reconciliation runs BOTH ways, so a table row whose site is gone fails too, and a pending-registration row whose code has since been registered fails as the discharge it is. ⚠ This lead is deliberately WIDE — it fires on a file that merely carries a code-shaped value, not only one that adds a new one — because the wasted run is one cheap gate and the miss is a CI round trip',
       },
+      {
+        name: 'check:error-code-provenance',
+        why: "the vocabulary gate's population-disjoint sibling: it reads the SAME stamp sites in every package's non-test src, keeps only the codes the vocabulary DOES register, and fails when the stamping package's own owner key in the ADR-0112 ledger does not list the code and no PROVENANCE_WAIVERS entry names the owner that holds it instead. So a registered code stamped in a package that never stamped it before moves it, and so does a constant BOUND to one (a constant is read at its definition, whatever its name, even one that is only ever compared against). No path derivation names it: its only declared literals are the ledger file, so the derivation files it under the artifact rosters and scores it silent for every card, and PR #31214 paid a CI round trip for that silence on a scenarios-package constant. It needs NO build, being one source scan over the whole tree, and it names the package, the code and the site. Repair by listing the code under the stamping package's owner key, or by not stamping it (compare against the catalogue's spelling instead of holding it in a constant); a waiver is a recorded ruling, never a quick fix. ⚠ The lead is this entry's predicate, wide for the vocabulary gate's reason: at fe97d85b it reached all 162 files holding one of the gate's 513 registered-code sites",
+      },
+    ],
+  },
+  {
+    kind: 'adds or edits a file carrying a CLI command-id literal outside the CLI package, or a CLI command module or manifest (judged from CONTENT — no path derivation can name this gate)',
+    matches: 'cli-command-literal',
+    gates: [
+      {
+        name: 'check:cli-command-ids',
+        why: "every quoted run that opens with a CLI binary name and a space (a command id such as the migrate-apply one, and just as much the Portuguese word for administrators after that binary name in a translated message) in non-test source outside the CLI package must resolve to a real oclif command id or topic; and every module the CLI emits under its commands directory must default-export a command class. So a new or edited literal anywhere in package source moves it, and so does renaming, adding or deleting a command module. No path derivation names it: the literal population is a `src/` path SEGMENT in any package, a shape no subtree spelling covers, and its only declared root is `scripts/**`, so it scored silent for package source and for the commands directory alike, and PR #30734 paid a CI round trip for that silence on a pt-BR string fragment. It needs NO build, about 22 seconds, and it names the file, the line and the literal. Repair by spelling the real command id (or, for prose that merely starts with the binary's word, rephrasing so the binary name is not the first thing in the quotes); the exemption ledger is for a checker's own fixtures and filed real defects, never a quick fix. Derived by CONTENT rather than for every diff: the gate is unconditional in CI but not cheap enough to name on a card that cannot move it",
+      },
+    ],
+  },
+  {
+    kind: 'edits a file an ADR anchors by symbol, or moves or deletes a file an ADR anchors at all (read from the ADR corpus — no path derivation can name this gate)',
+    matches: 'adr-anchored-file',
+    gates: [
+      {
+        name: 'check:adr-symbol-anchors',
+        why: "every `path#Symbol` anchor in docs/adr/** must still resolve to a declaration (or a literal) of that name in that file, and every file-level anchor to a tracked file. So removing or renaming an anchored declaration reds it, and so does moving or deleting any anchored file, from a diff that never touches an ADR. No path derivation names it for those diffs: its declared population is docs/adr/** alone, and PR #30749 paid a CI round trip and a landing tier for that silence when it retired a constant ADR-0012 anchored. It needs NO build, about 7 seconds, and it names the record, the line and the anchor. Repair by re-anchoring the ADR where the mechanism now lives, or by keeping the symbol; ⚠ if the ADR SENTENCE has become untrue, that is its own card, and ⛔ an `anchor-exempt` marker is MAINTAINER-ONLY. ⚠ The symbol limb fires on any edit of a symbol-anchored file, not only one that removes the declaration, because the wasted run is one cheap gate and the miss is a CI round trip",
+      },
     ],
   },
   {
@@ -1093,6 +1124,156 @@ export const CHANGE_KIND_ROWS = [
         ciJob: 'Test UI',
         ciRunner: 'pnpm --dir ui exec vitest run',
         why: "the 178 test files under ui/scripts/__tests__ belong to no package and run only in CI's 16 Test UI shards, where the affected-test selector adds them to every run, so no package suite and no check family covers them: they pin turbo build inputs, the skill-examples floor, the SchemaRenderer channel keys and the other facts a change under ui package source, the ui apps, skills/objectui or ui/scripts moves. The whole suite, never a subset: measured at about five minutes on a 4-vCPU container (284 s and 286 s, 178 files passing, import-bound), against the CI round trip of about 25 minutes it saves. It needs the seven @objectstack packages Test UI builds first, or about twenty files red on an import of a missing dist — build them exactly as the job does: pnpm exec turbo run build --filter=@objectstack/spec... --filter=@objectstack/client... --filter=@objectstack/core... --filter=@objectstack/formula... --filter=@objectstack/lint... --filter=@objectstack/sdui-parser... --filter=@objectstack/types... . Positional filter, no bare `--`, from the repo root: ui/scripts/vitest-invocation-guard.mjs refuses every other spelling",
+      },
+    ],
+  },
+  {
+    kind: "reaches a plugin init-time service lookup or a providesServices declaration (the init-service gate's own pre-filter over non-test package TypeScript, read from CONTENT)",
+    matches: 'init-service-lookup',
+    gates: [
+      {
+        name: 'check:init-service-contract',
+        why: "every init()-time service lookup (getService and its two siblings) a plugin unit makes must name a service its own declarations order ahead of it, against the providers the whole tree declares in providesServices. So adding a lookup, dropping a dependency, or removing or renaming a provider moves it. Its population is a whole root, so it printed in the declared-WIDE block and no card was handed it (#31257); this row reaches it through a population net, the gate's own walk plus its own first filter, measured against the gate's own pass (217 of 4498 files; its --list names 31, none missed). It needs NO build, about 3 seconds. Repair by declaring the provider in dependencies or optionalDependencies, or by moving the lookup to start() or a ready hook; never by deleting the declaration that made it pass",
+      },
+    ],
+  },
+  {
+    kind: "reaches a settings read or a hook emit before the settings bind window (the settings bind-window gate's own pre-filter over non-test package TypeScript, read from CONTENT)",
+    matches: 'settings-bind-read',
+    gates: [
+      {
+        name: 'check:settings-bind-window',
+        why: "a plugin may not read the settings service from a hook that fires before settings binds, and the pinned list of pre-bind hooks is re-derived from every trigger() site. So a new settings read, a new early emit, or a provider change moves it. Its population is a whole root, so it printed in the declared-WIDE block and no card was handed it (#31257); this row reaches it through a population net, the gate's own walk plus its own first filter, measured against the gate's own pass (657 of 4498 files; its --list names 11, none missed). ⚠ It follows a hook name through an import, and the net reads the judged file only. It needs NO build, about 4 seconds. Repair by reading settings from a phase at or after the bind, or by declaring the settings provider; the shrink-only ledger is not a quick fix",
+      },
+    ],
+  },
+  {
+    kind: "reaches a startup-time service-registry probe, an open capability registry or a providesServices declaration (the startup-registry gate's own pre-filter over non-test package TypeScript, read from CONTENT)",
+    matches: 'startup-registry-probe',
+    gates: [
+      {
+        name: 'check:startup-registry-verdict',
+        why: "a constructor or init() that probes the service registry (getService, tryGetService, hasService and kin) or enumerates an open capability registry may not record a final verdict the boot can still contradict, judged against the providers the whole tree declares. So a new probe, a new recorded verdict, or a provider change moves it. Its population is a whole root, so it printed in the declared-WIDE block and no card was handed it (#31257); this row reaches it through a population net, the gate's own walk plus its own first filter, measured against the gate's own pass (222 of 4498 files; its --list names 29, none missed). It needs NO build, about 4 seconds. Repair by deferring the verdict past the boot (or declaring the provider so it is final); a baseline row is a recorded debt, never a quick fix",
+      },
+    ],
+  },
+  {
+    kind: "declares a logger-shaped sink or calls a log channel (the optional-error-sink gate's own CHANNEL_PREFILTER over non-test package TypeScript, read from CONTENT)",
+    matches: 'optional-error-sink',
+    gates: [
+      {
+        name: 'check:optional-error-sink',
+        why: "every sink type that declares an optional `error` channel must also guarantee a `warn` fallback, so a degraded durability report cannot be printed into silence; the baseline is shrink-only and a baselined sink that turned green fails as stale. So a new or reshaped logger type moves it. Its population is a whole root, so it printed in the declared-WIDE block and no card was handed it (#31257); this row reaches it through a population net, the gate's own walk plus its own first filter, measured against the gate's own pass (1070 of 4498 files, the gate's own pre-filter is that wide; its --list names 204, none missed). It needs NO build, about 5 seconds. Repair by making `warn` required beside the optional `error`, or `error` required; never by baselining a new sink",
+      },
+    ],
+  },
+  {
+    kind: "calls defineActionDescriptor (the resume-authority gate's own pre-filter over shipped package and example TypeScript, read from CONTENT)",
+    matches: 'action-descriptor',
+    gates: [
+      {
+        name: 'check:resume-authority-declared',
+        why: "every defineActionDescriptor() literal that can pause a flow must declare its resumeAuthority, and the scan must find at least one descriptor. So a new or edited descriptor moves it. Its population is a whole root, so it printed in the declared-WIDE block and no card was handed it (#31257); this row reaches it through a population net, the gate's own walk plus its own first filter, measured against the gate's own pass (19 of 4691 files; its --list names 16, none missed). It needs NO build, about 1 second. Repair by declaring resumeAuthority on the descriptor",
+      },
+    ],
+  },
+  {
+    kind: "adds or edits a route module or a response writer: a -routes.ts file, a named off-convention module, a dispatcher domain, or any non-test package TypeScript calling .json( (the route-envelope gate's own discovery, read from the PATH and CONTENT)",
+    matches: 'route-response-writer',
+    gates: [
+      {
+        name: 'check:route-envelope',
+        why: "every module that answers REST must be declared in its MODULES table with the envelope it writes, and every Hono or Express response writer its walk discovers outside that table fails as NOT DECLARED; the dispatcher domains are enumerated exhaustively. So a new route module, a new writer or a reshaped body moves it, and so does one the table names going away. Its population is a whole root, so it printed in the declared-WIDE block and no card was handed it (#31257); this row reaches it through a population net, the gate's own walk plus its own first filter, measured against the gate's own pass (160 of 4498 files; all 56 files the MODULES table names are inside it). It needs NO build, about 4 seconds. Repair by declaring the module (or the writer) with the envelope it really writes; the closed non-conforming list only shrinks",
+      },
+    ],
+  },
+  {
+    kind: "calls a guarded verify stand-in helper, or edits the verify package source that declares them (the verify stand-in gate's own census pre-filter, read from CONTENT)",
+    matches: 'verify-stand-in-call',
+    gates: [
+      {
+        name: 'check:verify-stand-in',
+        why: "every exported verify helper whose first parameter is a published stand-in interface must be classified (guarded in eslint.config.mjs VERIFY_STAND_IN_CHECKS, or exempt with a reason), and no call site of a guarded helper may erase the driver argument's type with an assertion. So a new helper in packages/verify/src, or a new or edited call site anywhere in packages or examples, moves it. Its population is a whole root, so it printed in the declared-WIDE block and no card was handed it (#31257); this row reaches it through a population net, the gate's own walk plus its own first filter, measured against the gate's own pass (83 of 12003 files: the guarded names, read from the ESLint config the gate imports, plus the verify source). It needs NO build, about 2 seconds. Repair by passing a driver that satisfies the stand-in without a cast, or by classifying a new helper",
+      },
+    ],
+  },
+  {
+    kind: "mounts a wildcard route (a quoted pattern ending in /*, the wildcard gate's own pre-filter over non-test package TypeScript, read from CONTENT)",
+    matches: 'wildcard-mount',
+    gates: [
+      {
+        name: 'check:wildcard-fallthrough',
+        why: "every handler mounted on a wildcard namespace must be declared in its MOUNTS table as yielding (it takes next and calls it), exempt with a reason, or ratcheted against an issue, and a declared mount that is gone fails as stale. So a new or edited wildcard mount moves it. Its population is a whole root, so it printed in the declared-WIDE block and no card was handed it (#31257); this row reaches it through a population net, the gate's own walk plus its own first filter, measured against the gate's own pass (143 of 4498 files; its --list names 7, none missed). It needs NO build, about 2 seconds. Repair by yielding to the next handler, or by declaring the mount; never by leaving one unaudited",
+      },
+    ],
+  },
+  {
+    kind: "names a live test database URL (OS_TEST_MYSQL_URL or OS_TEST_POSTGRES_URL, the live-db gate's own marker for a live suite, read from CONTENT)",
+    matches: 'live-db-suite',
+    gates: [
+      {
+        name: 'check:live-db-isolation',
+        why: "no live suite anywhere in packages, apps or examples may name its database or schema with a constant, because CI points every live leg at one shared server and every suite drops what it created; at least two live suites must be found. So a new live suite, or a renamed database in one, moves it. Its population is a whole root, so it printed in the declared-WIDE block and no card was handed it (#31257); this row reaches it through a population net, the gate's own walk plus its own first filter, measured against the gate's own pass (101 of 12010 files, test files included as the gate reads them; all 65 live suites inside it). It needs NO build, about 6 seconds. Repair by deriving the name from the test file, as the driver-sql matrix does",
+      },
+    ],
+  },
+  {
+    kind: "reads a test-runner variable (TEST, VITEST or JEST_WORKER_ID) in product source under packages, apps or examples (judged by the runner-env gate's OWN reader, imported, read from CONTENT)",
+    matches: 'runner-env-read',
+    gates: [
+      {
+        name: 'check:runner-env-posture',
+        why: "product source (under a src segment, not a test, not generated) must not branch on a test-runner variable. This row asks the gate's own isProductSource and findRunnerEnvReads, imported rather than copied, so it fires exactly on a file the gate would flag. Its population is a whole root, so it printed in the declared-WIDE block and no card was handed it (#31257); this row reaches it through a population net, the gate's own walk plus its own first filter, measured against the gate's own pass. It needs NO build, about 9 seconds. Repair by injecting the behaviour the test needs instead of sniffing the runner",
+      },
+    ],
+  },
+  {
+    kind: "adds or edits non-test source under packages/rest/src (the meta-type gate's whole population, read from the PATH)",
+    matches: 'meta-type-route-source',
+    gates: [
+      {
+        name: 'check:meta-type-normalized',
+        why: "no decision in the REST package may be made on the RAW /meta/:type route param, because the plural spelling is canonical and a raw comparison is the authorization bypass it already was three times. So any non-test source there moves it. Its population is one directory, but its declared-WIDE reason is the test-file filter no glob spells, so it printed in the declared-WIDE block and no card was handed it (#31257); this row names that whole population by path: 56 files, the gate's own count. It needs NO build, under a second. Repair by normalising once with RestServer.metaTypeSingular and comparing that local",
+      },
+    ],
+  },
+  {
+    kind: "adds, edits, moves or deletes a sql-driver seam module directly under the driver-sql package source (the tenant gate's own directory listing, read from the PATH)",
+    matches: 'sql-driver-seam-module',
+    gates: [
+      {
+        name: 'check:tenant-chokepoint',
+        why: "every read query builder in the SQL drivers must route through applyTenantScope, and the gate judges the three driver files plus every sql-driver-*.ts module it LISTS from the driver-sql source directory at run time. Its watch hints spell the modules that exist, so a NEW seam module (the next split of the driver) printed in the artifact-roster block and no card was handed it (#31257); this row names the listed population by path (36 modules). It needs NO build, about 1 second. Repair by routing the builder through applyTenantScope, or by recording the unscoped one where the gate says",
+      },
+    ],
+  },
+  {
+    kind: "reads both authorization grant tables in non-test package TypeScript (the authz-resolver gate's own question, read from CONTENT)",
+    matches: 'grant-table-reader',
+    gates: [
+      {
+        name: 'check:authz-resolver',
+        why: "request-context grant aggregation must live only in the shared core resolver: any non-test package file that queries every grant table (sys_user_position and sys_user_permission_set) and is not allow-listed with a reason fails as a possible duplicate resolver. So a new file reading both tables moves it. It printed in the artifact-roster block: it spells the files it already knows, and the walk that finds the next one is a whole root, so no card touching an unlisted file was handed it (#31257); this row reaches it through a population net, the gate's own walk plus its own first filter (62 of 4489 files name both tables). It needs NO build, about 2 seconds. Repair by delegating to resolveAuthzContext; an ALLOW entry needs a reason a reader can check",
+      },
+    ],
+  },
+  {
+    kind: "stamps a lowercase error code in package TypeScript (judged by the error-code-casing gate's OWN reader, imported, read from CONTENT)",
+    matches: 'lowercase-error-code',
+    gates: [
+      {
+        name: 'check:error-code-casing',
+        why: "an error code in a code position (an emission, assignment, comparison, union member or fallback) must be SCREAMING_SNAKE (ADR-0112). This row asks the gate's own findViolations, imported rather than copied, so it fires exactly on a file the gate would flag (today 4 files, all on its exempt list). It printed in the artifact-roster block: it spells the files it already knows, and the walk that finds the next one is a whole root, so no card touching an unlisted file was handed it (#31257); this row reaches it through a population net, the gate's own walk plus its own first filter. It needs NO build, about 13 seconds. Repair by spelling the code in upper case; the exempt list is for files that are not error surfaces, never a quick fix",
+      },
+    ],
+  },
+  {
+    kind: "declares a class, or casts through any, in package source (the object-def param-keys gate's own subjects, read from CONTENT)",
+    matches: 'object-def-class',
+    gates: [
+      {
+        name: 'check:object-def-param-keys',
+        why: "an object-definition parameter must declare every key read off it, an override may not narrow the base class's inline parameter type, and neither may escape through an index signature or an opaque annotation. Its corpus is every tracked .ts under a package src, so a class anywhere (a base or an override, in any package) or an `as any` cast read moves it. It printed in the artifact-roster block: it spells the files it already knows, and the walk that finds the next one is a whole root, so no card touching an unlisted file was handed it (#31257); this row reaches it through a population net, the gate's own walk plus its own first filter (1248 of 4236 files; its --list names 244, none missed). It needs NO build, about 7 seconds. Repair by declaring the key on the parameter type (and on every override); the arm-C ledger is a maintainer's call",
       },
     ],
   },

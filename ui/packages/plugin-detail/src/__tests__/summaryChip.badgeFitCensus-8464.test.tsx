@@ -162,6 +162,9 @@ const CENSUS: ReadonlyArray<readonly [type: string, text: string, verdict: Verdi
   // cell's face: the coerced name, plain inline text.
   ['object-ref', 'Acme Corp', 'fit'],
   ['recipient-picker', 'Acme Corp', 'fit'],
+  // The sharing-rule object picker's key (objectstack#31217): `object-ref`'s
+  // default text face, the coerced name.
+  ['shareable-object-ref', 'Acme Corp', 'fit'],
   // The registry-name read faces (objectstack#27861): no data source lists a
   // registry here, so both draw the coerced name, plain inline text.
   ['position-ref', 'Acme Corp', 'fit'],
@@ -348,14 +351,15 @@ describe('objectui#8464 — the Badge-fit census: A is not free, and here is whi
     }
   });
 
-  it('THE FIT SIDE IS LOAD-BEARING — the 41 fitting kinds draw text and no artefact', async () => {
+  it('THE FIT SIDE IS LOAD-BEARING — the 42 fitting kinds draw text and no artefact', async () => {
     // Refusing EVERY type also satisfies every refusal assertion above; this is
     // the half that is red for it.
     const fitting = CENSUS.filter(([, , v]) => v === 'fit');
     // 36 → 38: `object-ref` and `recipient-picker` joined the fit side
     // (objectui#12613); 38 → 40: `position-ref` and `permission-ref`
-    // (objectstack#27861); 40 → 41: `filter-condition` (objectstack#30209).
-    expect(fitting.length, 'the fitting side is not empty').toBe(41);
+    // (objectstack#27861); 40 → 41: `filter-condition` (objectstack#30209);
+    // 41 → 42: `shareable-object-ref` (objectstack#31217).
+    expect(fitting.length, 'the fitting side is not empty').toBe(42);
 
     for (const [type] of fitting) {
       const { container } = renderChip(type);

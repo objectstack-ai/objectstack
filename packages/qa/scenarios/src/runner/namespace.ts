@@ -15,8 +15,8 @@
  * the namespace is the card's own: `demo` + its `code` ({@link scenarioNamespace},
  * `democrm`), in both modes, so a scored build's names are the same on every
  * run and every machine. The card's object `account` is `democrm_account` — in
- * `expect`, the seed, questions, personas, operations, guardrails and the
- * iterate delta. Every other item the card names carries the prefix too, since
+ * `expect`, the seed, its user-handle fields, questions, personas (with their
+ * person records), operations, guardrails and the iterate delta. Every other item the card names carries the prefix too, since
  * a gallery app prefixes every item name (the scorer reports a bare one,
  * `score/scenario-naming.ts`): the expected dashboards and nav targets, the
  * agent actions, and each persona's permission set ({@link permissionSetName}).
@@ -76,6 +76,7 @@ export function namespacedScenario(scenario: LoadedScenario): LoadedScenario {
     run: {
       ...c.run,
       seed: Object.fromEntries(Object.entries(c.run.seed).map(([k, rows]) => [o(k), rows])),
+      ...(c.run.userHandleFields ? { userHandleFields: c.run.userHandleFields.map((h) => ({ ...h, object: o(h.object) })) } : {}),
       questions: c.run.questions.map((q) => ({ ...q, object: o(q.object) })),
       personas: c.run.personas.map((p) => ({
         ...p,
@@ -84,6 +85,7 @@ export function namespacedScenario(scenario: LoadedScenario): LoadedScenario {
           ...(p.hidden.fields ? { fields: p.hidden.fields.map((f) => ({ ...f, object: o(f.object) })) } : {}),
         },
         ...(p.scope ? { scope: p.scope.map((s) => ({ ...s, object: o(s.object) })) } : {}),
+        ...(p.record ? { record: { ...p.record, object: o(p.record.object) } } : {}),
       })),
       operations: c.run.operations.map((op) => ({
         ...op,

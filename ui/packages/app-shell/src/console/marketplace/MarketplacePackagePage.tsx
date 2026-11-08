@@ -115,6 +115,7 @@ import { ConnectorCredentialsStep } from './ConnectorCredentialsStep.js';
 import type { SuggestedBinding } from '../../services/suggestedBindingsApi.js';
 import { errorCodeIs } from '@object-ui/types';
 import { MarketplaceNamespaceGate } from './MarketplaceNamespaceGate.js';
+import { effectiveSolutionType, readListingTaxonomy } from './marketplaceTaxonomy.js';
 
 /**
  * Whether a cloud install lands in the environment this console renders, read
@@ -1461,9 +1462,29 @@ function MarketplacePackagePageBody() {
     ? data.versions.find((v) => v.version === dialogUpdate.to && !!v.release_notes?.trim())
     : undefined;
 
-  const categoryLabel = pkg.category
-    ? t(`marketplace.category.${pkg.category}` as any, { defaultValue: pkg.category })
-    : null;
+  // The listing's taxonomy (`marketplaceTaxonomy.ts`): every business
+  // function in the listing's order, the industries, the solution type, and
+  // Beta. An undeclared solution type reads as the spec's default, as the
+  // catalog page filters and counts it; the other facets draw nothing when the
+  // listing carries none.
+  const taxonomy = readListingTaxonomy(pkg);
+  const taxonomyGroups = [
+    {
+      key: 'solutionType',
+      label: t('marketplace.facet.solutionType'),
+      values: [t(`marketplace.solutionType.${effectiveSolutionType(taxonomy)}`)],
+    },
+    taxonomy.businessFunctions.length > 0 && {
+      key: 'businessFunction',
+      label: t('marketplace.facet.businessFunction'),
+      values: taxonomy.businessFunctions.map((v) => t(`marketplace.businessFunction.${v}`)),
+    },
+    taxonomy.industries.length > 0 && {
+      key: 'industry',
+      label: t('marketplace.facet.industry'),
+      values: taxonomy.industries.map((v) => t(`marketplace.industry.${v}`)),
+    },
+  ].filter((g): g is { key: string; label: string; values: string[] } => !!g);
 
   // ADR-0131 D6 — the install modes the manifest permits, as the operator's
   // choice: drawn only where it permits more than one. A package that permits
@@ -1578,7 +1599,9 @@ function MarketplacePackagePageBody() {
             {pkg.publisher && pkg.publisher !== 'private' && (
               <Badge variant={pkg.publisher === 'objectstack' ? 'default' : 'secondary'}>{pkg.publisher}</Badge>
             )}
-            {categoryLabel && <Badge variant="outline">{categoryLabel}</Badge>}
+            {taxonomy.beta && (
+              <Badge variant="secondary" data-testid="marketplace-detail-beta">{t('marketplace.maturity.beta')}</Badge>
+            )}
             {pkg.license && <Badge variant="outline" className="font-normal">{pkg.license}</Badge>}
             {localInstalledBadge}
             {!localInstall && cloudInstalledVersion && (
@@ -1593,6 +1616,22 @@ function MarketplacePackagePageBody() {
                 {t('marketplace.detail.updateAvailable', { defaultValue: 'Update available' })} → v{latestVersion}
               </Badge>
             )}
+          </div>
+          <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1.5" data-testid="marketplace-detail-taxonomy">
+            {taxonomyGroups.map((group) => (
+              <div
+                key={group.key}
+                role="group"
+                aria-label={group.label}
+                className="flex flex-wrap items-center gap-1.5"
+                data-testid={`marketplace-detail-${group.key}`}
+              >
+                <span className="text-xs text-muted-foreground" aria-hidden="true">{group.label}</span>
+                {group.values.map((value) => (
+                  <Badge key={value} variant="outline" className="font-normal">{value}</Badge>
+                ))}
+              </div>
+            ))}
           </div>
           {localNotLoadedReason}
           {loc.description && (

@@ -456,6 +456,16 @@ import { GOVERNED_REPOS, HUMAN_MERGE_LINE_THRESHOLD, SELF_REPO_ID, parseNumstat,
 // published source and which are its tests — never respelled here (#19936). See
 // SUSPECT_TIER_GLOBS for why this predicate and not one of the repo's others.
 import { isTestPath } from '../check-undeclared-dep-imports.mjs';
+// The ADR anchor gate's corpus registration and the shared extractor it sweeps
+// with: the change kind that reads them (#30763) reads exactly the anchors that
+// gate judges, never a respelling of them. Both modules are dependency-free, so
+// this tool still runs in a checkout with no install.
+import { CORPUS as ADR_ANCHOR_CORPUS } from '../check-adr-symbol-anchors.mjs';
+import { extractAnchors } from '../symbol-anchors.mjs';
+// The two whole-root gates whose per-file reader the population nets IMPORT rather than copy (#31257):
+// a file the net reaches is a file the gate itself flags. Both modules are dependency-free.
+import { SCANNED_ROOTS as RUNNER_ENV_SCANNED_ROOTS, findRunnerEnvReads, isProductSource as isRunnerEnvProductSource } from '../check-runner-env-posture.mjs';
+import { findViolations as findErrorCodeCasingViolations } from '../check-error-code-casing.mjs';
 // The hand-written tables — ledgers, marker grammars, the change-kind roster, the tier globs — are
 // DATA, and live beside this file; this engine loads them, matches paths against them and derives.
 // Every table is re-exported under the name it always had, so no consumer moved.
@@ -10802,6 +10812,415 @@ export function guardsADurabilityCriticalCall(path, readSource = readTrackedSour
 }
 
 /**
+ * Does this path carry a CLI command-id literal outside the CLI package, or sit
+ * on a CLI's own command surface? This is the content trigger for
+ * `check:cli-command-ids` (#30763), the fourth CONTENT predicate.
+ *
+ * ## Why no path derivation names this gate
+ *
+ * The gate judges two populations. Its literal duty reads every non-test JS/TS
+ * source outside each oclif package whose path has a `src` SEGMENT anywhere,
+ * plus the whole `scripts` root. Only the second is spelled as a root it can
+ * declare, so a card touching package source scored silent. Its command duty
+ * reads each CLI's commands directory, which it spells as a package-relative
+ * constant no hint can anchor, so a card renaming a command scored silent too.
+ * PR #30734 paid a CI round trip for the first silence: a pt-BR string fragment
+ * opening with the binary's word, in plugin-auth source.
+ *
+ * ## Why by content, and not for every diff
+ *
+ * The step is unconditional in lint.yml, so "always" would be true. It is not
+ * cheap: about 22 seconds at fe97d85b, against about 7 for the ADR anchor gate
+ * and 6 for the provenance gate. So this predicate reads what the gate reads:
+ *
+ *   - LITERAL: a non-test JS/TS file outside every CLI package holding a quote
+ *     followed by a declared binary name, a space and a lowercase word or digit.
+ *     That is a net around the gate's own literal reader, never a copy of it:
+ *     it skips no comment line and resolves no id, so a shape the gate adds
+ *     later is already inside it.
+ *   - SURFACE: any path under a CLI package's commands source directory, and
+ *     the CLI manifest itself. Judged from the PATH, so a deleted or renamed
+ *     command module still counts.
+ *
+ * ⛔ The gate's own reader is NOT imported here: its module loads `typescript`
+ * at import time, and this tool runs in checkouts with no install. The
+ * self-test holds the net against that reader instead, in a child process: the
+ * binary names must agree, and every file in which the gate's reader finds a
+ * literal must be inside this net. A narrowing that loses one fails there.
+ *
+ * Measured at fe97d85b over 7002 non-test JS/TS files outside the CLI package:
+ * the gate's population holds a literal in 390 of them, and this net reaches
+ * all 390 and 34 more (19 under the `scripts` root the path derivation already
+ * names, 15 test helpers and lint scripts outside the gate's population).
+ *
+ * ## What it cannot see
+ *
+ * A file with nothing on disk answers false on the literal limb, as in the
+ * three predicates above. Deleting a literal can only stale an exemption, and
+ * every exempted file sits under the `scripts` root the path derivation
+ * already matches.
+ */
+const OCLIF_COMMANDS_SOURCE = ['src', 'commands'].join('/');
+const CLI_POPULATION_EXTENSION = /\.(?:ts|tsx|js|mjs|cjs)$/;
+const CLI_POPULATION_TEST = /\.(?:test|spec)\.[tj]sx?$/;
+const COMMENT_LINE_START = /^\s*(?:\/\/|\*|\/\*)/;
+
+/**
+ * The binary names a CLI manifest declares for itself: `oclif.bin` plus every
+ * `bin` key. The gate's own rule as its header states it, read wide (no name
+ * shape filter); the self-test holds it equal to the gate's reader.
+ */
+export function cliBinaryNames(pkg) {
+  const bin = pkg?.oclif?.bin;
+  if (typeof bin !== 'string' || bin === '') return [];
+  const keys = pkg.bin && typeof pkg.bin === 'object' && !Array.isArray(pkg.bin) ? Object.keys(pkg.bin) : [];
+  return [...new Set([bin, ...keys])];
+}
+
+let cliSurfaces = null;
+/**
+ * Every CLI package in the tree as `{ dir, bins }`, read from the tracked
+ * manifests that declare `oclif.bin` (the gate's rule for what a CLI is),
+ * memoised. A manifest that does not parse is skipped, as the gate skips one.
+ */
+export function cliCommandSurfaces(files = null) {
+  if (!files && cliSurfaces) return cliSurfaces;
+  const surfaces = [];
+  for (const file of files ?? trackedFiles()) {
+    if (!/(?:^|\/)package\.json$/.test(file)) continue;
+    let pkg;
+    try {
+      pkg = JSON.parse(readFileSync(nodePath.join(ROOT, file), 'utf8'));
+    } catch {
+      continue;
+    }
+    const bins = cliBinaryNames(pkg);
+    if (bins.length > 0) surfaces.push({ dir: nodePath.posix.dirname(file), bins });
+  }
+  if (!files) cliSurfaces = surfaces;
+  return surfaces;
+}
+
+const escapeRegExp = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+export function carriesACliCommandLiteral(path, readSource = readTrackedSource, surfaces = cliCommandSurfaces) {
+  const rel = path.replace(/^\.\//, '');
+  const clis = surfaces();
+  const own = clis.find((c) => c.dir !== '.' && rel.startsWith(`${c.dir}/`));
+  if (own) return rel === `${own.dir}/package.json` || rel.startsWith(`${own.dir}/${OCLIF_COMMANDS_SOURCE}/`);
+  if (!CLI_POPULATION_EXTENSION.test(rel)) return false;
+  if (CLI_POPULATION_TEST.test(rel) || rel.includes('/__tests__/')) return false;
+  const bins = [...new Set(clis.flatMap((c) => c.bins))];
+  // An empty alternation would match a quote and a space anywhere, so no
+  // declared binary must answer false rather than reach every file.
+  if (bins.length === 0) return false;
+  const source = readSource(rel);
+  if (source === null || source === undefined) return false;
+  const literal = new RegExp(`['"\`](?:${bins.map(escapeRegExp).join('|')}) [a-z0-9]`);
+  if (!literal.test(source)) return false;
+  // A line that OPENS as a comment is prose the gate does not read, and jsdoc
+  // that cites a command in backticks is most of what the net would catch
+  // otherwise. A trailing comment on a code line stays in, as it does there.
+  return source.split('\n').some((line) => !COMMENT_LINE_START.test(line) && literal.test(line));
+}
+
+/**
+ * Would a diff on this path break an ADR anchor? This is the trigger for
+ * `check:adr-symbol-anchors` (#30763), read from the ADR corpus rather than
+ * from the path's own content.
+ *
+ * ## Why no path derivation names this gate
+ *
+ * The gate's declared population is the ADR directory, and that is all a card
+ * touching an ADR needs. But an anchor reds from the OTHER end too: a
+ * `path#Symbol` anchor reds when its file stops declaring the symbol, and any
+ * anchor reds when its file moves or goes. PR #30749 retired a constant an ADR
+ * anchored and learned of it in CI, because its diff touched no ADR.
+ *
+ * ## What it matches
+ *
+ * The anchors are extracted by the shared extractor, with the gate's own corpus
+ * registration (its roots, document pattern, projection and grammar options),
+ * so this reads exactly the anchors the gate sweeps. Cross-repo anchors are
+ * left out, as the gate leaves them out of its red verdicts.
+ *
+ *   - SYMBOL: a path some `path#Symbol` anchor names. Any edit counts, not only
+ *     one that removes the declaration: deciding that needs the old and new
+ *     text, and the wasted run is one seven-second gate.
+ *   - FILE: a path any anchor names that has nothing on disk. That is a move or
+ *     a delete, the only way a file-level anchor can red.
+ *
+ * Measured at fe97d85b: 3204 anchors across 150 records, naming 292 files by
+ * symbol and 1281 more at file level only.
+ */
+let adrTargets = null;
+export function adrAnchorTargets(corpus = ADR_ANCHOR_CORPUS, root = ROOT) {
+  if (corpus === ADR_ANCHOR_CORPUS && root === ROOT && adrTargets) return adrTargets;
+  const symbolFiles = new Set();
+  const anchoredFiles = new Set();
+  const docs = [];
+  const walkDocs = (rel) => {
+    let entries;
+    try {
+      entries = readdirSync(nodePath.join(root, rel), { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const e of entries) {
+      const child = `${rel}/${e.name}`;
+      if (e.isDirectory()) {
+        if (!(corpus.excludeDirs ?? []).includes(e.name)) walkDocs(child);
+      } else if (corpus.docPattern.test(e.name)) docs.push(child);
+    }
+  };
+  for (const docRoot of corpus.docRoots) walkDocs(docRoot);
+  if (docs.length === 0) {
+    throw new Error(
+      `dispatch-gates: the ADR anchor corpus (${corpus.docRoots.join(', ')}) yielded no document, so the anchored files ` +
+        'cannot be read. The corpus moved: re-point this reader with it',
+    );
+  }
+  for (const doc of docs) {
+    const raw = readFileSync(nodePath.join(root, doc), 'utf8');
+    const { anchors } = extractAnchors(corpus.docProjection ? corpus.docProjection(raw) : raw, {
+      unspannedAnchors: corpus.unspannedAnchors ?? false,
+      pathlessLineCitations: corpus.pathlessLineCitations ?? false,
+      tildeRangeCitations: corpus.tildeRangeCitations ?? false,
+    });
+    for (const a of anchors) {
+      if (a.repo || !a.path) continue;
+      anchoredFiles.add(a.path);
+      if (a.symbol) symbolFiles.add(a.path);
+    }
+  }
+  const targets = { symbolFiles, anchoredFiles, docs: docs.length };
+  if (corpus === ADR_ANCHOR_CORPUS && root === ROOT) adrTargets = targets;
+  return targets;
+}
+
+export function breaksAnAdrAnchor(path, targets = adrAnchorTargets, onDisk = (p) => existsSync(nodePath.join(ROOT, p))) {
+  const rel = path.replace(/^\.\//, '');
+  const { symbolFiles, anchoredFiles } = targets();
+  if (symbolFiles.has(rel)) return true;
+  return anchoredFiles.has(rel) && !onDisk(rel);
+}
+
+/**
+ * The POPULATION NETS (#31257): for fifteen lint gates that walk a whole root,
+ * the gate's own population and the gate's own first filter, so a diff that can
+ * move the gate derives it and a diff that cannot does not.
+ *
+ * ## Why these gates reached no card
+ *
+ * Eleven of them declare `wide-population`: their walk is a bare root (every
+ * non-test source under `packages`, and sometimes `apps` or `examples` too), the
+ * bare-root ledger refuses that declaration as REFUSE-WIDE, so they print in the
+ * declared-WIDE block and never in `--commands`. Four more sit in the
+ * artifact-roster block: they spell the files they already know, while the walk
+ * that finds the next one is a whole root or a directory listing. The seat ruling
+ * on #30763 keeps both blocks out of `--commands` wholesale, so each family is
+ * closed here, one net per gate.
+ *
+ * ## What a net is
+ *
+ * The POPULATION half is the gate's walk, read off its source: the roots, the
+ * file names it keeps, the names and directories it skips. The CONTENT half is
+ * the gate's own first filter, where it has one: the cheap pre-filter most of
+ * these gates run before their AST pass (`PREFILTER_TOKENS`, `CHANNEL_PREFILTER`,
+ * `text.includes(FACTORY)`, `source.includes('.json(')`), so a file the net skips
+ * is a file the gate skips too. Two gates expose their per-file reader and carry
+ * no ledger, so they are IMPORTED instead of copied: `check:runner-env-posture`
+ * (`isProductSource`, `findRunnerEnvReads`) and `check:error-code-casing`
+ * (`findViolations`). Both modules are dependency-free, so this tool still runs
+ * in a checkout with no install. The other nets are copies, and the self-test
+ * holds each copy to the gate's source and, where the gate has `--list`, to the
+ * files its own pass names.
+ *
+ * A PATH limb counts with nothing read: a file the gate keeps by NAME (a
+ * `-routes.ts` module, a seam module the tenant gate lists from its directory),
+ * and the two nets whose whole population is narrow enough to name outright.
+ *
+ * A population file with nothing on disk is judged on the content it HAD: the
+ * blob at HEAD for an uncommitted delete, else the blob before the commit that
+ * deleted it. A move or a delete can strand a ledger row, a provider a consumer
+ * was declared against, or a vacuity floor, so a file that passed the net before
+ * it went still counts. A path git never held (a surface not written yet) does
+ * not: nothing was there to strand.
+ *
+ * Measured at 07559ce5 (net hits / population, and recall against the gate's
+ * own `--list` where it has one, every listed file inside the net):
+ *
+ *   init-service-contract      217 / 4498   --list 31 files, 0 missed
+ *   settings-bind-window       657 / 4498   --list 11 files, 0 missed
+ *   startup-registry-verdict   222 / 4498   --list 29 files, 0 missed
+ *   optional-error-sink       1070 / 4498   --list 204 files, 0 missed
+ *   resume-authority-declared   19 / 4691   --list 16 files, 0 missed
+ *   route-envelope             160 / 4498   MODULES 56 files, 0 missed
+ *   verify-stand-in             83 / 12003  (the census prefilter itself)
+ *   wildcard-fallthrough       143 / 4498   --list 7 files, 0 missed
+ *   live-db-isolation          101 / 12010  65 live suites, 0 missed
+ *   runner-env-posture           0 / 4357   (the gate's own reader; tree clean)
+ *   meta-type-normalized        56 / 56     (path only: the gate's 56 files)
+ *   tenant-chokepoint           36 / 36     (path only: the listed seam modules)
+ *   authz-resolver              62 / 4489   (both grant tables named)
+ *   error-code-casing            4 / 11748  (the gate's own reader; 4 exempt)
+ *   object-def-param-keys     1248 / 4236   --list 244 files, 0 missed
+ *
+ * ## What a net cannot see
+ *
+ * A gate that follows an IMPORT out of the file it judges (settings-bind-window
+ * resolves a hook name through one) can be moved by the imported file alone; the
+ * net reads the judged file only. And a net is a copy: a new token in the gate's
+ * pre-filter widens the gate and not the net until the self-test reds on it.
+ */
+const NET_STANDARD_SKIP_DIRS = ['node_modules', 'dist', 'build', '.turbo', '.next', 'coverage'];
+const NET_NON_TEST_TS = /\.d\.ts$|\.(?:test|spec|conformance)\./;
+const NET_SERVICE_LOOKUPS = ['getService', 'getServiceAsync', 'getServiceScoped'];
+
+let verifyGuarded = null;
+/**
+ * The stand-in helpers the verify gate guards: the keys of the ESLint config's
+ * `VERIFY_STAND_IN_CHECKS`, which the gate imports. Read as TEXT here, because
+ * the config module imports ESLint plugins and this tool runs with no install.
+ * An object this reader cannot find THROWS: an empty set would reach nothing.
+ */
+export function verifyStandInGuarded(source = null) {
+  if (source === null && verifyGuarded) return verifyGuarded;
+  const text = source ?? readTrackedSource('eslint.config.mjs') ?? '';
+  const block = /export const VERIFY_STAND_IN_CHECKS = \{([^}]*)\}/.exec(text);
+  const names = block ? [...block[1].matchAll(/^\s*([A-Za-z_$][\w$]*)\s*:/gm)].map((m) => m[1]) : [];
+  if (names.length === 0) {
+    throw new Error(
+      'dispatch-gates: eslint.config.mjs declares no VERIFY_STAND_IN_CHECKS entry this reader can see, so the ' +
+        'verify stand-in net would reach nothing. The table moved: re-point this reader with it',
+    );
+  }
+  if (source === null) verifyGuarded = names;
+  return names;
+}
+
+export const POPULATION_NETS = Object.freeze({
+  'init-service-lookup': {
+    gate: 'check:init-service-contract', script: 'scripts/check-init-service-contract.mjs',
+    roots: ['packages'], file: /\.ts$/, skip: NET_NON_TEST_TS, skipDirs: NET_STANDARD_SKIP_DIRS,
+    tokens: [...NET_SERVICE_LOOKUPS, 'providesServices'],
+  },
+  'settings-bind-read': {
+    gate: 'check:settings-bind-window', script: 'scripts/check-settings-bind-window.mjs',
+    roots: ['packages'], file: /\.ts$/, skip: NET_NON_TEST_TS, skipDirs: NET_STANDARD_SKIP_DIRS,
+    tokens: [...NET_SERVICE_LOOKUPS, 'providesServices', 'trigger'],
+  },
+  'startup-registry-probe': {
+    gate: 'check:startup-registry-verdict', script: 'scripts/check-startup-registry-verdict.mjs',
+    roots: ['packages'], file: /\.ts$/, skip: NET_NON_TEST_TS, skipDirs: [...NET_STANDARD_SKIP_DIRS, '.git', '.cache'],
+    tokens: ['providesServices', 'getService', 'getServiceAsync', 'getServiceOptional', 'tryGetService', 'hasService', 'nodeExecutors', 'actionDescriptors'],
+  },
+  'optional-error-sink': {
+    gate: 'check:optional-error-sink', script: 'scripts/check-optional-error-sink-contract.mjs',
+    roots: ['packages'], file: /\.ts$/, skip: /\.d\.ts$|\.(?:test|spec)\.ts$/, skipDirs: NET_STANDARD_SKIP_DIRS,
+    tokens: ['error', 'warn', 'info', 'debug', 'log', 'fatal', 'trace', 'verbose', 'silly'],
+    pattern: /\b(?:error|warn|info|debug|log|fatal|trace|verbose|silly)\s*\??\s*[:(]/,
+  },
+  'action-descriptor': {
+    gate: 'check:resume-authority-declared', script: 'scripts/check-resume-authority-declared.mjs',
+    roots: ['packages', 'examples'], file: /\.(?:ts|tsx|mts)$/, skip: /\.d\.ts$|\.(?:test|spec)\.(?:ts|tsx|mts)$/,
+    skipDirs: ['node_modules', 'dist', '.git', '.cache'], tokens: ['defineActionDescriptor'],
+  },
+  'route-response-writer': {
+    gate: 'check:route-envelope', script: 'scripts/check-route-envelope.mjs',
+    roots: ['packages'], file: /\.ts$/, skip: /\.d\.ts$|\.(?:test|conformance)\./, skipDirs: NET_STANDARD_SKIP_DIRS,
+    tokens: ['.json('],
+    offConvention: ['i18n-service-plugin.ts', 'rest-server.ts', 'error-response.ts'],
+    domainDir: 'packages/runtime/src/domains',
+    path(rel) {
+      const name = rel.slice(rel.lastIndexOf('/') + 1);
+      return name.endsWith('-routes.ts') || this.offConvention.includes(name) || rel.startsWith(`${this.domainDir}/`);
+    },
+  },
+  'verify-stand-in-call': {
+    gate: 'check:verify-stand-in', script: 'scripts/check-verify-stand-in-erasure.mjs',
+    roots: ['packages', 'examples'], file: /\.(?:ts|tsx|mts|cts)$/, skip: /\.d\.ts$/, skipDirs: NET_STANDARD_SKIP_DIRS,
+    skipDotDirs: true, tokens: () => verifyStandInGuarded(),
+    path: (rel) => rel.startsWith('packages/verify/src/'),
+  },
+  'wildcard-mount': {
+    gate: 'check:wildcard-fallthrough', script: 'scripts/check-wildcard-fallthrough.mjs',
+    roots: ['packages'], file: /\.ts$/, skip: /\.d\.ts$|\.(?:test|conformance)\./, skipDirs: NET_STANDARD_SKIP_DIRS,
+    tokens: ['/*`', "/*'", '/*"'],
+  },
+  'live-db-suite': {
+    gate: 'check:live-db-isolation', script: 'scripts/check-live-db-isolation.mjs',
+    roots: ['packages', 'apps', 'examples'], file: /\.m?ts$/, skip: /\.d\.ts$/, skipDirs: NET_STANDARD_SKIP_DIRS,
+    skipDotDirs: true, tokens: ['OS_TEST_MYSQL_URL', 'OS_TEST_POSTGRES_URL'],
+  },
+  'runner-env-read': {
+    gate: 'check:runner-env-posture', script: 'scripts/check-runner-env-posture.mjs',
+    roots: RUNNER_ENV_SCANNED_ROOTS, file: /./, skip: /^$/, skipDirs: [...NET_STANDARD_SKIP_DIRS, '.git'],
+    keep: isRunnerEnvProductSource, content: (source) => findRunnerEnvReads(source).length > 0,
+  },
+  'meta-type-route-source': {
+    gate: 'check:meta-type-normalized', script: 'scripts/check-meta-type-normalized.mjs',
+    roots: ['packages/rest/src'], file: /\.(?:m|c)?tsx?$/, skip: /\.(?:test|spec)\.(?:m|c)?tsx?$/,
+    skipDirs: ['node_modules', 'dist'], pathOnly: true,
+  },
+  'sql-driver-seam-module': {
+    gate: 'check:tenant-chokepoint', script: 'scripts/check-tenant-chokepoint.mjs',
+    roots: ['packages/drivers/driver-sql/src'], flat: true, file: /^sql-driver-.+\.ts$/, skip: /\.(?:test|spec)\.ts$|\.d\.ts$/,
+    skipDirs: [], pathOnly: true,
+  },
+  'grant-table-reader': {
+    gate: 'check:authz-resolver', script: 'scripts/check-single-authz-resolver.mjs',
+    roots: ['packages'], file: /\.[mc]?ts$/, skip: /\.(?:test|d)\.[mc]?ts$/, skipDirs: ['node_modules', 'dist', '__tests__'],
+    tokens: ['sys_user_position', 'sys_user_permission_set'], every: true,
+  },
+  'lowercase-error-code': {
+    gate: 'check:error-code-casing', script: 'scripts/check-error-code-casing.mjs',
+    roots: ['packages'], file: /\.(?:ts|tsx)$/, skip: /\.d\.ts$/, skipDirs: ['node_modules', 'dist', '.turbo', 'coverage'],
+    content: (source, rel) => findErrorCodeCasingViolations(source, rel).length > 0,
+  },
+  'object-def-class': {
+    gate: 'check:object-def-param-keys', script: 'scripts/check-object-def-param-keys.mjs',
+    roots: ['packages'], file: /\.ts$/, skip: /\.(?:test|spec)\.ts$/, skipDirs: [], keep: (rel) => rel.includes('/src/'),
+    content: (source) => /\bclass\s/.test(source) || /\bas\s+any\b/.test(source),
+  },
+});
+
+/** Is this repo-relative path inside the net's POPULATION — the gate's own walk? */
+export function inNetPopulation(rel, net) {
+  const root = net.roots.find((r) => rel.startsWith(`${r}/`));
+  if (!root) return false;
+  const dirs = rel.slice(root.length + 1).split('/');
+  const name = dirs.pop();
+  if (net.flat && dirs.length > 0) return false;
+  if (dirs.some((d) => net.skipDirs.includes(d) || (net.skipDotDirs && d.startsWith('.')))) return false;
+  if (!net.file.test(name) || net.skip.test(name)) return false;
+  return net.keep ? net.keep(rel) : true;
+}
+
+/** The content a deleted path last had: HEAD's blob, else the blob before the commit that deleted it. */
+function readDeletedSource(rel) {
+  const head = runGit(['show', `HEAD:${rel}`], ROOT);
+  if (head.status === 0) return head.stdout;
+  const deleting = runGit(['rev-list', '-n', '1', 'HEAD', '--', rel], ROOT).stdout.trim();
+  if (!deleting) return null;
+  const before = runGit(['show', `${deleting}^:${rel}`], ROOT);
+  return before.status === 0 ? before.stdout : null;
+}
+
+export function reachesPopulationNet(path, net, readSource = readTrackedSource, readPrior = readDeletedSource) {
+  const rel = path.replace(/^\.\//, '');
+  if (!inNetPopulation(rel, net)) return false;
+  if (net.pathOnly || net.path?.(rel)) return true;
+  let source = readSource(rel);
+  if (source === null || source === undefined) source = existsSync(nodePath.join(ROOT, rel)) ? null : readPrior(rel);
+  if (source === null || source === undefined) return false;
+  if (net.content) return net.content(source, rel);
+  if (net.pattern) return net.pattern.test(source);
+  const tokens = typeof net.tokens === 'function' ? net.tokens() : net.tokens;
+  return net.every ? tokens.every((t) => source.includes(t)) : tokens.some((t) => source.includes(t));
+}
+
+/**
  * Is this path inside the ROOT package's tsc program — the population the
  * root's `typecheck:root` script checks (until the root graduated, the
  * `@objectstack/spec-monorepo` entry of `check:type-check-debt`)?
@@ -11117,7 +11536,11 @@ const CHANGE_KIND_PREDICATES = Object.freeze({
   'error-code-literal': stampsAnErrorCodeLiteral,
   'http-status-emit': emitsAnHttpStatus,
   'durability-seam': guardsADurabilityCriticalCall,
+  'cli-command-literal': (path) => carriesACliCommandLiteral(path),
+  'adr-anchored-file': (path) => breaksAnAdrAnchor(path),
   'ui-scripts-suite-input': (path) => readByUiScriptsSuite(path),
+  // One per population net (#31257), each bound to its own net.
+  ...Object.fromEntries(Object.entries(POPULATION_NETS).map(([key, net]) => [key, (path) => reachesPopulationNet(path, net)])),
 });
 
 export function bindChangeKindRows(rows, predicates = CHANGE_KIND_PREDICATES) {

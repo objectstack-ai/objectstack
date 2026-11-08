@@ -238,6 +238,8 @@ describe('inline-edit type coverage — every type has exactly one decision (#42
         // (objectstack#31062).
         'permission-ref', 'position-ref',
         'recipient-picker', 'record', 'repeater', 'richtext', 'secret',
+        // objectstack#31217: the sharing-rule object picker, an `object-ref` arm.
+        'shareable-object-ref',
         'summary', 'vector',
       ],
       // `owner` stood between `number` and `percent` until objectui#4814

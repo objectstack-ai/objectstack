@@ -191,7 +191,9 @@ describe('removed Setup nav ids stay removed (#6660)', () => {
 // bugs. If the CONTRIBUTION is ever retired, this list loses its entry in the
 // same commit that removes the nav item, and the id moves up to
 // `DEAD_SETUP_NAV_IDS` — the two lists are the two halves of one ledger.
-const CONDITIONAL_SETUP_NAV_IDS = ['nav_sso_providers'] as const;
+// `nav_scim_credentials` (#31123) is the same shape: plugin-auth contributes it
+// only while SCIM is wired (`authManager.isScimWired()`).
+const CONDITIONAL_SETUP_NAV_IDS = ['nav_sso_providers', 'nav_scim_credentials'] as const;
 
 describe('conditionally-contributed Setup nav ids stay labelled (#6659)', () => {
   for (const [locale, data] of Object.entries(LOCALES)) {

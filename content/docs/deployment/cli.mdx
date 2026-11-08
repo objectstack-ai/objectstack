@@ -82,7 +82,7 @@ predicate/schema/binding mistakes that fail silently at runtime), and `os dev --
 | `os dev [package]` | | Start development mode with hot reload |
 | `os serve [config]` | | Start the ObjectStack server with plugin auto-detection |
 | `os db clean` | | Reclaim SQLite free space with a one-time `VACUUM` (ADR-0057) |
-| `os db orphans` | | Report detail rows whose required master-detail master does not exist; delete them only with `--delete` |
+| `os db orphans` | | Report detail rows whose master-detail reference names a master that does not exist; delete them only with `--delete` |
 
 #### `os init`
 
@@ -445,8 +445,11 @@ os db clean --database file:./data/app.db        # explicit target
 
 #### `os db orphans`
 
-Reports the detail rows whose **required** `master_detail` master does not exist, and —
-only behind `--delete` — deletes them. **Report-only by default: without `--delete` it
+Reports the detail rows whose `master_detail` master does not exist, and — only behind
+`--delete` — deletes them. The master is a **required** `master_detail`, or the
+**optional** master of a `controlled_by_parent` object (its one `master_detail`, declared
+`required: false`); a row whose optional master is empty names no master, is valid, and
+is never listed. **Report-only by default: without `--delete` it
 writes no row or table and creates no file.** It is never run for you; nothing on any
 boot, upgrade, migrate or lifecycle path invokes it.
 
@@ -459,7 +462,7 @@ where an operator acts on that report.
 The report lists each orphan's object, record id, field and missing master id, and the
 deeper detail rows its delete removes with it (the master-detail's own cascade). It
 also names, without ever deleting them, the dangling references on those objects that
-are not a required master-detail, and counts the references whose target could not be
+are not on such a master, and counts the references whose target could not be
 checked at all: unknown is not missing, and none of those rows is listed or deleted.
 
 ```bash

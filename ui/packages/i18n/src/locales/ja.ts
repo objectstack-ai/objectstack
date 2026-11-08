@@ -2268,6 +2268,12 @@ const ja = {
         done: "同僚が参加済みか、招待済みです。",
         action: "招待",
       },
+      connectAssistant: {
+        title: 'AI アシスタントを接続',
+        todo: 'Claude や Doubao などのアシスタントから、あなた自身としてこのシステムを使えます。',
+        done: 'あなたの AI アシスタントまたは API キーが接続されています。',
+        action: '接続',
+      },
     },
     error: {
       connectionFailed: "サーバーに接続できません",
@@ -3236,6 +3242,12 @@ const ja = {
       message: "シングルサインオンが利用できないときでもサインインできるよう、リカバリーパスワードを設定してください。",
       cta: "パスワードを設定",
       dismiss: "閉じる",
+    },
+    connectAssistant: {
+      title: 'AI アシスタントからこのシステムを使う',
+      body: 'Claude や Doubao などの AI アシスタントから、レコードの参照や変更ができます。アシスタントは常にあなたとして、あなたの権限で動作します。',
+      action: 'AI アシスタントを接続',
+      dismiss: '非表示',
     },
     pendingDrafts: {
       // objectui#12602 — the drafts row in Home's "My work" section: the

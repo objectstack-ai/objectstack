@@ -14,7 +14,9 @@
  * fails its Build half.
  */
 
-import { dirname, resolve } from 'node:path';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
@@ -22,13 +24,15 @@ import { describe, expect, it } from 'vitest';
 import { formatRefusal, loadScenarioFile, readCapabilityAreas, type LoadedScenario } from '../../src/loader.js';
 import { truthFigures } from '../../src/score/index.js';
 import type { AppHarness, HttpAnswer, PersonaAccount, ToolAnswer } from '../../src/runner/app.js';
-import { stepKey, type AgentDriver, type AskTask, type AuthorTask, type DriverInfo } from '../../src/runner/driver.js';
+import { RecordedDriver, RecordingDriver, stepKey, type AgentDriver, type AskTask, type AuthorTask, type DriverInfo } from '../../src/runner/driver.js';
 import { namespacedScenario } from '../../src/runner/namespace.js';
 import { runCard, seedApp, type ProjectOps } from '../../src/runner/orchestrate.js';
 import { cardScorecard, renderScorecard, runRecord } from '../../src/runner/scorecard.js';
+import type { PackageSource } from '../../src/runner/packages.js';
 import type { ParsedTurn } from '../../src/runner/transcript.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
+const PUBLISHED: PackageSource = { source: 'published', versions: ['18.3.0'] };
 const CARD_FILE = resolve(HERE, '../../../../../docs/qa/scenarios/crm_account_with_contacts.json');
 const AREAS_DIR = resolve(HERE, '../../../../../docs/qa/platform-checklist/areas');
 
@@ -162,12 +166,14 @@ class FakeApp implements AppHarness {
     for (const c of collections) out[c] = [...(this.platform[c] ?? []), ...(src[c] ?? [])];
     return out;
   }
-  /** Every MCP call the runner made itself (the validation probe), with the key it sent. */
+  /** Every MCP call the runner made itself (the probes), with the key it sent. */
   toolCalls: Array<{ apiKey: string; tool: string; args: Record<string, unknown> }> = [];
   /** A broken app: its write door stores the invalid write instead of refusing it. */
   storesInvalidWrites = false;
   async callTool(apiKey: string, tool: string, args: Record<string, unknown>): Promise<ToolAnswer> {
     this.toolCalls.push({ apiKey, tool, args });
+    // A faithful app: the partner may not edit an account (the card's overstep), and the bad email fails validation.
+    if (args.objectName === 'democrm_account') return { output: JSON.stringify({ error: { code: 'PERMISSION_DENIED', status: 403 } }, null, 2), isError: true };
     if (!this.storesInvalidWrites) return { output: JSON.stringify({ error: { code: 'VALIDATION_FAILED', status: 400 } }, null, 2), isError: true };
     const { objectName, recordId, data } = args as { objectName: string; recordId?: string; data: Record<string, unknown> };
     const rows = (this.rows[objectName] ??= []);
@@ -309,7 +315,7 @@ describe('runCard — the crm card, both modes, a clean agent', () => {
     expect(driver.seen).toContain('crm_account_with_contacts/template/iterate-run/remove_ben/sdr');
     expect(driver.seen).not.toContain('crm_account_with_contacts/scratch/run/account_count/-'); // persona-scoped: asked as its personas
 
-    const record = runRecord({ run: 'r', date: '2026-11-05', driver: driver.info(), runner: 'test', evidenceDir: '/tmp' }, run);
+    const record = runRecord({ run: 'r', date: '2026-11-05', packages: PUBLISHED, driver: driver.info(), runner: 'test', evidenceDir: '/tmp' }, run);
     const results = record.results as Array<{ id: string; verdict: string }>;
     expect(results.find((r) => r.id === 'crm_account_with_contacts.scratch.run-operations')!.verdict).toBe('pass');
     expect(results.find((r) => r.id === 'crm_account_with_contacts.template.build')!.verdict).toBe('not-run'); // template mode builds nothing first
@@ -364,7 +370,7 @@ describe('runCard — the seed against a build whose owner field is a user looku
     const { scenario, ops, driver, apps } = setup({ app: () => new UserLookupApp() });
     const run = await runCard(scenario, driver, ops, { modes: ['scratch'], admin: ADMIN, iterateRun: false });
     const seed = run.modes[0]!.run!.seed;
-    expect(seed).toEqual({ inserted: 8, refused: [], handlesAsAdmin: ['u_tia'] });
+    expect(seed).toEqual({ inserted: 8, refused: [], handlesAsAdmin: ['u_tia'], rewritten: ['democrm_account.owner'] }); // the record lists the field it rewrote
     const owners = Object.fromEntries(apps[0]!.rows.democrm_account!.map((r) => [r.id, [r.owner, r.owner_id]]));
     expect(owners).toEqual({ ac1: ['u-sdr', 'u-sdr'], ac2: ['u-admin', 'u-admin'], ac3: ['u-sdr', 'u-sdr'] });
     expect(apps[0]!.rows.democrm_contact!.map((r) => r.id)).toEqual(['ct1', 'ct2', 'ct3', 'ct4', 'ct5', 'new-add_contact']); // the five seeded, then the sdr's add
@@ -473,9 +479,11 @@ describe('runCard — the validation operation is probed by the runner itself (#
     const run = await runCard(scenario, driver, ops, { modes: ['scratch'], admin: ADMIN, iterateRun: false });
     expect(apps[0]!.toolCalls).toEqual([
       { apiKey: 'key-partner_user', tool: 'create_record', args: { objectName: 'democrm_contact', data: { full_name: 'Gil Ray', email: 'gil at acme' } } },
+      // The card's permission overstep is probed the same way (#31145 item 4).
+      { apiKey: 'key-partner_user', tool: 'update_record', args: { objectName: 'democrm_account', recordId: 'ac1', data: { industry: 'retail' } } },
     ]);
     const op = badEmail(run);
-    expect(op.observation!.probe).toEqual({ answer: { kind: 'refused', code: 'VALIDATION_FAILED' }, writes: 0 });
+    expect(op.observation!.probe).toEqual({ answer: { kind: 'refused', code: 'VALIDATION_FAILED', status: 400 }, writes: 0 });
     expect([op.grade!.pass, op.error]).toEqual([true, undefined]);
     expect(cardScorecard(run).modes[0]!.first.operations).toEqual({ passed: 5, total: 5, notMeasured: 0 });
   });
@@ -535,53 +543,63 @@ describe('runCard — a seed insert that throws keeps the partial tally in the r
     const run = await runCard(scenario, driver, ops, { modes: ['scratch'], admin: ADMIN, iterateRun: false });
     const half = run.modes[0]!.run!;
     expect(half.error).toContain('connection reset while seeding');
-    expect(half.seed).toEqual({ inserted: 2, refused: [{ object: 'democrm_account', id: 'ac2', code: 'VALIDATION_FAILED', message: 'democrm_account ac2 refused' }], handlesAsAdmin: ['u_tia'] });
+    expect(half.seed).toEqual({ inserted: 2, refused: [{ object: 'democrm_account', id: 'ac2', code: 'VALIDATION_FAILED', message: 'democrm_account ac2 refused' }], handlesAsAdmin: ['u_tia'], rewritten: ['democrm_account.owner'] });
     expect(half.questions).toEqual([]);
     expect(cardScorecard(run).modes[0]!.first.seed).toEqual({ inserted: 2, total: 3, refused: 1 }); // total counts the rows the tally reached
   });
 });
 
 describe('runCard — a refused seed row makes what reads it not measured, never a fail', () => {
-  it('shows ⚠ seed: 1 refused, leaves the questions on that object unasked and unscored, and grades the rest as usual', async () => {
+  it('shows ⚠ seed: 1 refused, leaves only the turns whose answer ct4 feeds unasked and unscored, and grades the rest as usual', async () => {
     const { scenario, ops, driver } = setup({ app: () => new RefusingApp(new Set(['democrm_contact/ct4'])) });
     const run = await runCard(scenario, driver, ops, { modes: ['scratch'], admin: ADMIN, iterateRun: false });
     const half = run.modes[0]!.run!;
     expect(half.seed).toMatchObject({ inserted: 7, refused: [{ object: 'democrm_contact', id: 'ct4', code: 'VALIDATION_FAILED' }] });
 
-    // Every contact question is out (its object lost ct4); the account questions are asked and graded.
+    // Only the turns whose expected answer ct4 (the one unattached contact) feeds are out; the other contact
+    // questions, `contacts_per_account` as `sdr` among them (its scope never reads ct4), are asked and graded.
     const out = half.questions.filter((q) => q.notMeasured).map((q) => `${q.question}/${q.persona ?? '-'}`);
-    expect(out).toEqual(['contacts_per_account/sdr', 'unattached_contacts/-', 'best_covered_account/-', 'tech_contacts/-', 'contacts_by_industry/-']);
-    expect(half.questions.find((q) => q.notMeasured)!.notMeasured).toBe('seed: needs democrm_contact ct4, which the app refused');
+    expect(out).toEqual(['unattached_contacts/-', 'contacts_by_industry/-']);
+    expect(half.questions.find((q) => q.notMeasured)!.notMeasured).toBe('seed: its expected answer changes without democrm_contact ct4, which the app refused');
     expect(half.questions.filter((q) => q.notMeasured).every((q) => q.grade === undefined && q.turn === undefined)).toBe(true);
-    expect(driver.seen).not.toContain('crm_account_with_contacts/scratch/run/tech_contacts/-');
+    expect(driver.seen).not.toContain('crm_account_with_contacts/scratch/run/unattached_contacts/-');
+    expect(driver.seen).toContain('crm_account_with_contacts/scratch/run/contacts_per_account/sdr');
     expect(half.operations.filter((o) => o.notMeasured)).toEqual([]); // no operation names ct4
 
     const sc = cardScorecard(run);
     expect(sc.modes[0]!.first.seed).toEqual({ inserted: 7, total: 8, refused: 1 });
-    expect(sc.modes[0]!.first.ask).toEqual({ passed: 4, total: 4, leaks: 0, notMeasured: 5 });
+    expect(sc.modes[0]!.first.ask).toEqual({ passed: 7, total: 7, leaks: 0, notMeasured: 2 });
     expect(sc.modes[0]!.first.operations).toEqual({ passed: 5, total: 5, notMeasured: 0 });
     const table = renderScorecard(sc);
     expect(table).toContain('| Seed | 7/8 ⚠ seed: 1 refused |');
-    expect(table).toContain('| Run-问数 | 4/4 · 5 not measured |');
-    const record = runRecord({ run: 'r', date: '2026-11-06', driver: driver.info(), runner: 'test', evidenceDir: '/tmp' }, run);
+    expect(table).toContain('| Run-问数 | 7/7 · 2 not measured |');
+    const record = runRecord({ run: 'r', date: '2026-11-06', packages: PUBLISHED, driver: driver.info(), runner: 'test', evidenceDir: '/tmp' }, run);
     const ask = (record.results as Array<{ id: string; verdict: string; notes: string }>).find((r) => r.id === 'crm_account_with_contacts.scratch.run-ask')!;
-    expect(ask).toMatchObject({ verdict: 'pass', notes: '4/4 · 5 not measured' });
+    expect(ask).toMatchObject({ verdict: 'pass', notes: '7/7 · 2 not measured' });
   });
 
-  it('an operation whose target hangs off a refused row is not run; a half with nothing measured is not-run, not fail', async () => {
+  it('an operation whose target hangs off a refused row is not run; a turn no refused row feeds is still asked; a half with nothing measured is not-run, not fail', async () => {
     const { scenario, ops, driver } = setup({ app: () => new RefusingApp(new Set(['democrm_account/ac1', 'democrm_account/ac2', 'democrm_account/ac3'])) });
     const run = await runCard(scenario, driver, ops, { modes: ['scratch'], admin: ADMIN, iterateRun: false });
     const half = run.modes[0]!.run!;
     expect(half.seed.inserted).toBe(5); // the double does not cascade; the runner still takes the contacts out
     expect(half.operations.filter((o) => !o.notMeasured).map((o) => o.operation)).toEqual(['contact_bad_email']);
-    expect(half.questions.every((q) => q.notMeasured)).toBe(true);
+    // Only the turns no account feeds stay measured: ct4 (unattached) is still the one unattached contact, an
+    // unanswerable question stays unanswerable, and a persona that may not read accounts still declines.
+    expect(half.questions.filter((q) => !q.notMeasured).map((q) => `${q.question}/${q.persona ?? '-'}`)).toEqual(['unattached_contacts/-', 'account_count/partner_user', 'acme_revenue/-']);
     const sc = cardScorecard(run);
-    expect(sc.modes[0]!.first.ask).toEqual({ passed: 0, total: 0, leaks: 0, notMeasured: 9 });
+    expect(sc.modes[0]!.first.ask).toEqual({ passed: 3, total: 3, leaks: 0, notMeasured: 6 });
     expect(renderScorecard(sc)).toContain('| Seed | 5/8 ⚠ seed: 3 refused |');
-    const record = runRecord({ run: 'r', date: '2026-11-06', driver: driver.info(), runner: 'test', evidenceDir: '/tmp' }, run);
-    const verdict = (id: string) => (record.results as Array<{ id: string; verdict: string }>).find((r) => r.id === id)!.verdict;
-    expect(verdict('crm_account_with_contacts.scratch.run-ask')).toBe('not-run');
-    expect(verdict('crm_account_with_contacts.scratch.run-operations')).toBe('pass');
+    const record = runRecord({ run: 'r', date: '2026-11-06', packages: PUBLISHED, driver: driver.info(), runner: 'test', evidenceDir: '/tmp' }, run);
+    const verdict = (r: typeof record, id: string) => (r.results as Array<{ id: string; verdict: string }>).find((x) => x.id === id)!.verdict;
+    expect(verdict(record, 'crm_account_with_contacts.scratch.run-ask')).toBe('pass');
+    expect(verdict(record, 'crm_account_with_contacts.scratch.run-operations')).toBe('pass');
+    // The same half with every turn not measured is not-run, never fail.
+    const none = structuredClone(run);
+    none.modes[0]!.run!.questions = half.questions.map((q) => ({ question: q.question, persona: q.persona, notMeasured: 'seed: its expected answer changes without democrm_account ac1, which the app refused' }));
+    expect(cardScorecard(none).modes[0]!.first.ask).toEqual({ passed: 0, total: 0, leaks: 0, notMeasured: 9 });
+    const noneRecord = runRecord({ run: 'r', date: '2026-11-06', packages: PUBLISHED, driver: driver.info(), runner: 'test', evidenceDir: '/tmp' }, none);
+    expect(verdict(noneRecord, 'crm_account_with_contacts.scratch.run-ask')).toBe('not-run');
   });
 });
 
@@ -608,7 +626,7 @@ const OUT_OF_TURNS: ParsedTurn = {
 describe('runCard — an authoring turn that does not finish leaves its build not measured, never a degraded score', () => {
   const results = (run: Awaited<ReturnType<typeof runCard>>, driver: ScriptedDriver) =>
     Object.fromEntries(
-      (runRecord({ run: 'r', date: '2026-11-07', driver: driver.info(), runner: 'test', evidenceDir: '/tmp' }, run).results as Array<{ id: string; verdict: string; notes: string }>).map((r) => [
+      (runRecord({ run: 'r', date: '2026-11-07', packages: PUBLISHED, driver: driver.info(), runner: 'test', evidenceDir: '/tmp' }, run).results as Array<{ id: string; verdict: string; notes: string }>).map((r) => [
         r.id.replace('crm_account_with_contacts.', ''),
         `${r.verdict} · ${r.notes}`,
       ]),
@@ -691,7 +709,7 @@ describe('runCard — an authoring turn that does not finish leaves its build no
     const sc = cardScorecard(run);
     expect(sc.modes[0]!.first.build!.author).toEqual({ resultSubtype: 'error_max_turns', numTurns: 80, maxTurns: 80, elapsedMs: 1_414_000 });
     expect(renderScorecard(sc)).toContain('| Build · author | error_max_turns · 80/80 turns · 23m 34s |');
-    const written = JSON.parse(JSON.stringify(runRecord({ run: 'r', date: '2026-11-07', driver: driver.info(), runner: 'test', evidenceDir: '/tmp' }, run)));
+    const written = JSON.parse(JSON.stringify(runRecord({ run: 'r', date: '2026-11-07', packages: PUBLISHED, driver: driver.info(), runner: 'test', evidenceDir: '/tmp' }, run)));
     expect([written.cardRun.modes[0].build.author.maxTurns, written.scorecard.modes[0].first.build.author.maxTurns]).toEqual([80, 80]);
   });
 
@@ -877,5 +895,95 @@ describe('runCard — a build that makes both sides of a reference cycle require
     expect(sc.modes[0]!.findings).toEqual([]);
     expect(sc.modes[0]!.first.seed).toEqual({ inserted: 637, total: 637, refused: 0 });
     expect(renderScorecard(sc)).toContain('| Seed | 637/637 |');
+  });
+});
+
+// ── The model each turn was served ──────────────────────────────────────────
+
+/**
+ * A driver that answers as `inner` does, each turn stamped as the live driver
+ * stamps it: the model it asked for (`meta.process.requestedModel`, the
+ * `--model` it was given) and the model the stream says it was served
+ * (`meta.model`). `fallback` names the steps the session answered on another
+ * model than the one asked for.
+ */
+class ServedModels implements AgentDriver {
+  constructor(
+    private readonly inner: AgentDriver,
+    private readonly fallback: ReadonlySet<string>,
+  ) {}
+  info(): DriverInfo {
+    return { ...this.inner.info(), authorModel: 'opus', askModel: 'sonnet' };
+  }
+  private stamp(t: ParsedTurn, requestedModel: string, model: string): ParsedTurn {
+    return { ...t, meta: { ...t.meta, model, process: { elapsedMs: 1_000, exit: 0, timedOut: false, timeoutMs: 60_000, maxTurns: 12, requestedModel } } };
+  }
+  async author(task: AuthorTask) {
+    const r = await this.inner.author(task);
+    return { ...r, turn: this.stamp(r.turn, 'opus', 'claude-opus-4-1-20250805') };
+  }
+  async ask(task: AskTask): Promise<ParsedTurn> {
+    return this.stamp(await this.inner.ask(task), 'sonnet', this.fallback.has(task.step) ? 'claude-opus-5-5' : 'claude-sonnet-4-5-20250929');
+  }
+}
+
+describe('runCard — every turn states the model it was served, and a mismatch with the requested model shows up', () => {
+  it('the record carries the served and requested model per turn, the scorecard counts them per half, and a replay of the recording re-reads both', async () => {
+    const { scenario, ops, driver: scripted } = setup();
+    const fellBack = scenario.card.run.questions[0]!.id;
+    const driver = new RecordingDriver(new ServedModels(scripted, new Set([fellBack])));
+    const run = await runCard(scenario, driver, ops, { modes: ['scratch'], admin: ADMIN });
+    const scratch = run.modes[0]!;
+
+    // Per turn, in the run itself: the author turns asked for and got opus; the persona turns asked for sonnet.
+    expect(scratch.build!.author).toMatchObject({ model: 'claude-opus-4-1-20250805', requestedModel: 'opus' });
+    expect(scratch.build!.author!.modelMismatch).toBeUndefined();
+    const turns = [...scratch.run!.questions, ...scratch.run!.operations, ...scratch.iterate!.run!.questions, ...scratch.iterate!.run!.operations];
+    const mismatched = turns.filter((x) => x.turn!.modelMismatch);
+    expect(mismatched.length).toBeGreaterThan(0);
+    expect(mismatched.every((x) => 'question' in x && x.question === fellBack && x.turn!.model === 'claude-opus-5-5' && x.turn!.requestedModel === 'sonnet')).toBe(true);
+    expect(turns.filter((x) => !x.turn!.modelMismatch).every((x) => x.turn!.model === 'claude-sonnet-4-5-20250929')).toBe(true);
+    const firstFellBack = scratch.run!.questions.filter((q) => q.question === fellBack).length;
+    const firstTurns = scratch.run!.questions.length + scratch.run!.operations.length;
+
+    // The scorecard: the author rows name the served model, the Run rows count the persona turns per served model.
+    const sc = cardScorecard(run);
+    expect(sc.modes[0]!.first.models).toEqual({
+      served: { 'claude-sonnet-4-5-20250929': firstTurns - firstFellBack, 'claude-opus-5-5': firstFellBack },
+      requested: ['sonnet'],
+      mismatched: firstFellBack,
+    });
+    const table = renderScorecard(sc);
+    expect(table).toContain(' · claude-opus-4-1-20250805 |'); // the build's author row
+    expect(table).toContain(`| Run · model | claude-sonnet-4-5-20250929 ×${firstTurns - firstFellBack}, claude-opus-5-5 ×${firstFellBack} ⚠ ${firstFellBack} not sonnet |`);
+    expect(table).toMatch(/\| Iterate · Run · model \| claude-sonnet-4-5-20250929 ×\d+, claude-opus-5-5 ×\d+ ⚠ \d+ not sonnet \|/);
+
+    // The written record: the driver's requested models, every turn's served model, the mismatch.
+    const written = JSON.parse(JSON.stringify(runRecord({ run: 'r', date: '2026-11-07', packages: PUBLISHED, driver: driver.info(), runner: 'test', evidenceDir: '/tmp' }, run)));
+    expect(written.env.driver).toMatchObject({ authorModel: 'opus', askModel: 'sonnet' });
+    const writtenQuestion = written.cardRun.modes[0].run.questions.find((q: { question: string }) => q.question === fellBack);
+    expect(writtenQuestion.turn).toMatchObject({ model: 'claude-opus-5-5', requestedModel: 'sonnet', modelMismatch: true });
+    expect(written.scorecard.modes[0].first.models.mismatched).toBe(firstFellBack);
+
+    // The recording keeps both names on every turn, so a replay (`--driver recorded:F`) re-reads them as the run saw them.
+    const dir = mkdtempSync(join(tmpdir(), 'scenario-served-model-'));
+    try {
+      driver.save(join(dir, 'rec.json'));
+      const replay = RecordedDriver.fromFile(join(dir, 'rec.json'));
+      const persona = scenario.card.run.questions[0]!.personas?.[0];
+      const again = await replay.ask({ card: run.card, mode: 'scratch', phase: 'run', step: fellBack, ...(persona ? { persona } : {}), prompt: '', mcp: { url: '', apiKey: '' } });
+      expect([again.meta.model, again.meta.process?.requestedModel]).toEqual(['claude-opus-5-5', 'sonnet']);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('turns that named no model and asked for none leave the model rows empty, as before', async () => {
+    const { scenario, ops, driver } = setup();
+    const sc = cardScorecard(await runCard(scenario, driver, ops, { modes: ['scratch'], admin: ADMIN }));
+    expect(sc.modes[0]!.first.models).toEqual({ served: { '(not reported)': 14 }, requested: [], mismatched: 0 });
+    const table = renderScorecard(sc);
+    expect(table).toContain('| Run · model | — |');
+    expect(table).toContain('| Build · author | success · elapsed not recorded |');
   });
 });

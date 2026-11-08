@@ -260,6 +260,12 @@ export const FieldRefSchema = z.strictObject({
   field: MachineNameSchema,
 });
 
+/**
+ * The field of a persona's person record (`personas[].record`) that holds the
+ * persona's user: fixed by name, so no card chooses it.
+ */
+export const PERSON_USER_FIELD = 'user';
+
 export const PersonaSchema = z
   .strictObject({
     id: MachineNameSchema,
@@ -271,12 +277,24 @@ export const PersonaSchema = z
     /**
      * ROW scope: of each named object the persona sees only the rows whose
      * `field` (a field or relation path) equals `value` — a rep sees their own
-     * rows (`owner`), a manager their department's (`owner.department`).
+     * rows (`owner`), a manager their department's (`owner.department`). The
+     * field a rule ends on is `id`, a declared lookup or select, or a declared
+     * user-handle field (`run.userHandleFields`); the loader refuses any other.
      */
     scope: z
       .array(z.strictObject({ object: MachineNameSchema, field: FieldPathSchema, value: ScalarSchema }))
       .min(1)
       .optional(),
+    /**
+     * The seed row that IS this person (`{ object: 'employee', id: 'e06' }`):
+     * the person record the persona signs in as. Required for a persona with a
+     * `scope`, unless that persona is named through a user-handle field instead
+     * (a direct scope rule on a `run.userHandleFields` field, `owner: u_sam`);
+     * optional for a global one. The loader refuses a record naming no seed row.
+     * The person object's user field is `user` by name ({@link PERSON_USER_FIELD}),
+     * never chosen per card.
+     */
+    record: z.strictObject({ object: MachineNameSchema, id: z.string().min(1) }).optional(),
   })
   .refine((p) => (p.hidden.objects?.length ?? 0) + (p.hidden.fields?.length ?? 0) > 0, {
     path: ['hidden'],
@@ -541,6 +559,13 @@ export const ScenarioCardSchema = z.strictObject({
   businessFunctions: BusinessFunctionsSchema,
   run: z.strictObject({
     seed: z.record(MachineNameSchema, z.array(SeedRowSchema).min(1)),
+    /**
+     * The seed fields whose values are user HANDLES (`account.owner` = `u_sam`):
+     * the text stands for a user, so the runner loads each such cell with that
+     * user's id and never the text. Declared, never inferred: a field neither
+     * listed here nor a declared lookup or select holds its seed value verbatim.
+     */
+    userHandleFields: z.array(FieldRefSchema).min(1).optional(),
     questions: z.array(QuestionSchema).min(5),
     personas: z.array(PersonaSchema).min(2),
     operations: z.array(OperationSchema).min(2),
@@ -561,4 +586,18 @@ export type ScenarioCard = z.infer<typeof ScenarioCardSchema>;
  */
 export function isWriteValidationOperation(card: Pick<ScenarioCard, 'run'>, operationId: string): boolean {
   return card.run.guardrails.some((g) => g.check === 'write_validation' && g.operation === operationId);
+}
+
+/**
+ * The operations the runner probes after the agent's turn, by sending the
+ * declared write itself as the acting persona, and the grader judges in an
+ * agent half and a platform half: the {@link isWriteValidationOperation} one,
+ * and every other `refused` create or update — a permission overstep, whose
+ * platform answer an agent that declines without touching the door would
+ * otherwise hide (#31145 item 4). A refused `delete` is not probed: the runner
+ * sends no delete of its own.
+ */
+export function isProbedOperation(card: Pick<ScenarioCard, 'run'>, operationId: string): boolean {
+  const op = card.run.operations.find((o) => o.id === operationId);
+  return op !== undefined && op.outcome.kind === 'refused' && op.kind !== 'delete';
 }
