@@ -1,8 +1,9 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * Who may restore an API key that an administrator's forced password reset
- * revoked, driven through the real write path: a real `ObjectQL` engine over
+ * Who may restore an API key revoked with a `revoked_reason` (an
+ * administrator's forced password reset, or the end of its owner's membership
+ * in the organization), driven through the real write path: a real `ObjectQL` engine over
  * SQLite, the real `SecurityPlugin` with the shipped permission sets (the owner
  * resolves `member_default` and its `sys_api_key_self` row scope, the platform
  * administrator holds the unscoped `admin_full_access` grant
@@ -19,10 +20,16 @@
  * it must name.
  */
 
-import { describe, it, expect, afterEach, vi } from 'vitest';
+import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
-import { hashApiKey, resetPlatformAdminEmailMemo, resolveApiKeyAdmission } from '@objectstack/core';
+import {
+  hashApiKey,
+  hasPlatformAdminStanding,
+  resetPlatformAdminEmailMemo,
+  resolveApiKeyAdmission,
+  resolveUserAuthzGrants,
+} from '@objectstack/core';
 import { SecurityPlugin, bootstrapPlatformAdmin } from '@objectstack/plugin-security';
 import type { PluginContext } from '@objectstack/core';
 
@@ -31,6 +38,7 @@ import { registerIdentityWriteGuard, registerManagedUpdateWhitelist } from './id
 import { MANAGED_EXTENSION_EDITABLE_FIELDS } from './managed-extension-fields.js';
 import { SYS_USER_PROFILE_EDIT_FIELDS } from './sys-user-writable-fields.js';
 import { FORCED_RESET_REVOKE_REASON, revokeSessionsAndApiKeys } from './forced-reset-revocation.js';
+import { MEMBERSHIP_ENDED_REVOKE_REASON } from './membership-ended-session.js';
 import { API_KEY_RESTORE_GUARD_PRIORITY, registerApiKeyRestoreGuard } from './api-key-restore-guard.js';
 import { AuthPlugin } from './auth-plugin.js';
 
@@ -300,6 +308,169 @@ describe('system-context writes are never refused', () => {
 
     await engine.update('sys_api_key', { id: 'key_reset', revoked: false }, SYS);
     expect(await row(engine, 'key_reset')).toEqual({ revoked: false, revoked_reason: null });
+  });
+});
+
+describe('a key revoked because its owner\'s membership ended is restored by no one from a user context', () => {
+  // The host's write (a control plane removing someone from the organization):
+  // `revoked: true` with the reason, in the system context. The platform never
+  // writes this reason itself.
+  const revokeForMembershipEnd = (engine: ObjectQL, id: string) =>
+    engine.update('sys_api_key', { id, revoked: true, revoked_reason: MEMBERSHIP_ENDED_REVOKE_REASON }, SYS);
+
+  /** The engine context a transport builds for a user: the grants `resolveUserAuthzGrants` answers. */
+  const contextOf = async (engine: ObjectQL, userId: string): Promise<any> => {
+    const grants = await resolveUserAuthzGrants(engine, userId);
+    return { context: { userId, positions: grants.positions, permissions: grants.permissions } };
+  };
+
+  // The second platform-admin anchor (ADR-0068 D2 as widened): a verified
+  // `sys_user` whose email the deployment declares in OS_PLATFORM_OWNER_EMAIL.
+  // It holds no `admin_full_access` grant row of its own.
+  const OPERATOR = 'usr_operator';
+  const OPERATOR_EMAIL = 'operator@keys.example';
+  const OWNER_EMAIL_ENV = 'OS_PLATFORM_OWNER_EMAIL';
+  let ambientOwnerEmail: string | undefined;
+  beforeEach(() => {
+    ambientOwnerEmail = process.env[OWNER_EMAIL_ENV];
+    delete process.env[OWNER_EMAIL_ENV];
+  });
+  afterEach(() => {
+    if (ambientOwnerEmail === undefined) delete process.env[OWNER_EMAIL_ENV];
+    else process.env[OWNER_EMAIL_ENV] = ambientOwnerEmail;
+    resetPlatformAdminEmailMemo();
+  });
+  async function declareOperator(engine: ObjectQL): Promise<void> {
+    process.env[OWNER_EMAIL_ENV] = OPERATOR_EMAIL;
+    resetPlatformAdminEmailMemo();
+    await engine.insert(
+      'sys_user',
+      { id: OPERATOR, email: OPERATOR_EMAIL, name: OPERATOR, created_at: '2025-06-01T00:00:00.000Z', email_verified: true, banned: false },
+      SYS,
+    );
+  }
+
+  const MEMBERSHIP_ENDED_ROW = { revoked: true, revoked_reason: MEMBERSHIP_ENDED_REVOKE_REASON };
+
+  it('the host\'s system write is stored with the reason, and the key stops working', async () => {
+    const engine = await rig();
+    const raw = await mint(engine, 'key_left');
+
+    await revokeForMembershipEnd(engine, 'key_left');
+
+    expect(await row(engine, 'key_left')).toEqual(MEMBERSHIP_ENDED_ROW);
+    expect((await door(engine, raw)).code).toBe('API_KEY_REVOKED');
+  });
+
+  it('the owner\'s restore is refused 403 PERMISSION_DENIED, naming the reason and the new-key road', async () => {
+    const engine = await rig();
+    const raw = await mint(engine, 'key_left');
+    await revokeForMembershipEnd(engine, 'key_left');
+
+    const err = await refusalOf(engine.update('sys_api_key', { id: 'key_left', revoked: false }, asOwner));
+
+    expect({ code: err?.code, status: err?.status }).toEqual({ code: 'PERMISSION_DENIED', status: 403 });
+    expect(String(err.message)).toContain('membership in the organization ended');
+    expect(String(err.message)).toContain('POST /api/v1/keys');
+    expect(await row(engine, 'key_left')).toEqual(MEMBERSHIP_ENDED_ROW);
+    expect((await door(engine, raw)).code).toBe('API_KEY_REVOKED');
+  });
+
+  it('a platform administrator by grant (admin_full_access) is refused too, while the same caller restores a reset-revoked key', async () => {
+    const engine = await rig();
+    const raw = await mint(engine, 'key_left');
+    await revokeForMembershipEnd(engine, 'key_left');
+    const admin = await contextOf(engine, ADMIN);
+    expect(await hasPlatformAdminStanding(engine, ADMIN)).toBe(true);
+
+    const err = await refusalOf(engine.update('sys_api_key', { id: 'key_left', revoked: false }, admin));
+
+    expect({ code: err?.code, status: err?.status }).toEqual({ code: 'PERMISSION_DENIED', status: 403 });
+    expect(String(err.message)).toContain('membership in the organization ended');
+    expect(await row(engine, 'key_left')).toEqual(MEMBERSHIP_ENDED_ROW);
+    expect((await door(engine, raw)).code).toBe('API_KEY_REVOKED');
+
+    // CONTROL: the refusal is the reason's, not a caller who cannot reach the row.
+    await mint(engine, 'key_reset');
+    await engine.update('sys_api_key', { id: 'key_reset', revoked: true, revoked_reason: FORCED_RESET_REVOKE_REASON }, SYS);
+    await engine.update('sys_api_key', { id: 'key_reset', revoked: false }, admin);
+    expect(await row(engine, 'key_reset')).toEqual({ revoked: false, revoked_reason: null });
+  });
+
+  it('a platform administrator by the declared-owner email anchor is refused too, while the same caller restores a reset-revoked key', async () => {
+    const engine = await rig();
+    const raw = await mint(engine, 'key_left');
+    await revokeForMembershipEnd(engine, 'key_left');
+    await declareOperator(engine);
+    const operator = await contextOf(engine, OPERATOR);
+    expect(await hasPlatformAdminStanding(engine, OPERATOR)).toBe(true);
+
+    const err = await refusalOf(engine.update('sys_api_key', { id: 'key_left', revoked: false }, operator));
+
+    expect({ code: err?.code, status: err?.status }).toEqual({ code: 'PERMISSION_DENIED', status: 403 });
+    expect(String(err.message)).toContain('membership in the organization ended');
+    expect(await row(engine, 'key_left')).toEqual(MEMBERSHIP_ENDED_ROW);
+    expect((await door(engine, raw)).code).toBe('API_KEY_REVOKED');
+
+    // CONTROL: the same caller reaches the row and holds the standing.
+    await mint(engine, 'key_reset');
+    await engine.update('sys_api_key', { id: 'key_reset', revoked: true, revoked_reason: FORCED_RESET_REVOKE_REASON }, SYS);
+    await engine.update('sys_api_key', { id: 'key_reset', revoked: false }, operator);
+    expect(await row(engine, 'key_reset')).toEqual({ revoked: false, revoked_reason: null });
+  });
+
+  it('re-revoking keeps the reason, and a smuggled clear is not a write the owner may make', async () => {
+    const engine = await rig();
+    await mint(engine, 'key_left');
+    await revokeForMembershipEnd(engine, 'key_left');
+
+    await engine.update('sys_api_key', { id: 'key_left', revoked: true }, asOwner);
+    await engine.update('sys_api_key', { id: 'key_left', revoked: true, revoked_reason: null }, asOwner);
+    expect(await row(engine, 'key_left')).toEqual(MEMBERSHIP_ENDED_ROW);
+
+    const err = await refusalOf(engine.update('sys_api_key', { id: 'key_left', revoked: false }, asOwner));
+    expect({ code: err?.code, status: err?.status }).toEqual({ code: 'PERMISSION_DENIED', status: 403 });
+    expect(await row(engine, 'key_left')).toEqual(MEMBERSHIP_ENDED_ROW);
+  });
+
+  it('a platform administrator\'s batch restore that includes such a key is refused whole: no row moves', async () => {
+    const engine = await rig();
+    await mint(engine, 'key_left');
+    await revokeForMembershipEnd(engine, 'key_left');
+    await mint(engine, 'key_plain');
+    await engine.update('sys_api_key', { id: 'key_plain', revoked: true }, asOwner);
+    const admin = await contextOf(engine, ADMIN);
+
+    const err = await refusalOf(engine.update(
+      'sys_api_key', { revoked: false }, { where: { user_id: OWNER, revoked: true }, multi: true, ...admin },
+    ));
+
+    expect({ code: err?.code, status: err?.status }).toEqual({ code: 'PERMISSION_DENIED', status: 403 });
+    expect(await row(engine, 'key_left')).toEqual(MEMBERSHIP_ENDED_ROW);
+    expect(await row(engine, 'key_plain')).toEqual({ revoked: true, revoked_reason: null });
+  });
+
+  it('a system-context un-revoke (the host re-admitting the key) lands and clears the reason', async () => {
+    const engine = await rig();
+    const raw = await mint(engine, 'key_left');
+    await revokeForMembershipEnd(engine, 'key_left');
+
+    await engine.update('sys_api_key', { id: 'key_left', revoked: false }, SYS);
+
+    expect(await row(engine, 'key_left')).toEqual({ revoked: false, revoked_reason: null });
+    expect((await door(engine, raw)).outcome).toBe('admitted');
+  });
+
+  it('the key door says the key cannot be restored and names no restorer', async () => {
+    const engine = await rig();
+    const raw = await mint(engine, 'key_left');
+    await revokeForMembershipEnd(engine, 'key_left');
+
+    const verdict = await door(engine, raw);
+
+    expect(verdict.code).toBe('API_KEY_REVOKED');
+    expect(verdict.message).toMatch(/membership in the organization ended, and it cannot be restored/);
+    expect(verdict.message).not.toMatch(/can restore it/);
   });
 });
 

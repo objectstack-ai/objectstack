@@ -117,9 +117,14 @@ describe('sys_api_key Revoke / Restore switch with `revoked`', () => {
   });
 
   it('a revoked key is offered Restore and not Revoke, whatever the reason', () => {
-    // Who may restore a key a forced password reset revoked is the server's
-    // (plugin-auth `api-key-restore-guard.ts`), not this predicate's.
-    for (const row of [{ revoked: true }, { revoked: true, revoked_reason: 'admin_password_reset' }]) {
+    // Who may restore a key revoked with a reason is the server's (plugin-auth
+    // `api-key-restore-guard.ts`), not this predicate's: it refuses every
+    // user-context restore of a membership-ended key, with the reason.
+    for (const row of [
+      { revoked: true },
+      { revoked: true, revoked_reason: 'admin_password_reset' },
+      { revoked: true, revoked_reason: 'organization_membership_ended' },
+    ]) {
       expect(offered(restore, row), JSON.stringify(row)).toBe(true);
       expect(offered(revoke, row), JSON.stringify(row)).toBe(false);
     }
