@@ -70,7 +70,7 @@ import {
 import { FILE_REFERENCE_TYPES, isMaskedOnReadFieldType, isVirtualSearchField } from '@objectstack/spec/data';
 import { ASSEMBLED_VIEW_ITEMS_KEY, expandViewContainer, isAggregatedViewContainer } from '@objectstack/spec';
 import { pluralToSingular } from '@objectstack/spec/shared';
-import { METADATA_ARRAY_KEYS, resolveMetadataItemName } from './engine-top-level.js';
+import { METADATA_ARRAY_KEYS, registersManifestAsApp, resolveMetadataItemName } from './engine-top-level.js';
 
 /** Why a column is read: what the upgrade does to it. */
 export type UpgradeColumnReason = 'removed' | 'renamed' | 'suspected_rename' | 'type_change';
@@ -510,8 +510,16 @@ function itemText(item: Bag): string {
  * Every item one package body ships, by the identity the registry keys it
  * by: the collections and the name the engine's own registration reads
  * (`METADATA_ARRAY_KEYS`, `resolveMetadataItemName`), an aggregated view
- * container both under its object and as the view items it expands to, and
- * the assembled `viewItems` channel.
+ * container both under its object and as the view items it expands to, the
+ * assembled `viewItems` channel, and the apps `registerApp` files through a
+ * verb of its own: each of `apps[]` by `name` (or `id`), and the body itself
+ * as an app when the engine registers it as one ({@link registersManifestAsApp}).
+ * The body-as-app document is the body, compared without its `version`, which
+ * names the release and differs on every upgrade.
+ *
+ * `translation` is an overridable type with no item seam here: the engine
+ * registers no `translation` item from a package body, so an override of one
+ * earns no finding.
  */
 function packageItemTexts(body: Bag): Map<string, string> {
   const out = new Map<string, string>();
@@ -535,6 +543,15 @@ function packageItemTexts(body: Bag): Map<string, string> {
         }
       }
     }
+  }
+  for (const app of Array.isArray(body.apps) ? body.apps : []) {
+    if (!isBag(app)) continue;
+    const name = app.name || app.id;
+    if (typeof name === 'string' && name !== '') put('app', name, app);
+  }
+  if (registersManifestAsApp(body) && typeof body.name === 'string') {
+    const { version: _version, ...asApp } = body;
+    put('app', body.name, asApp);
   }
   const assembled = body[ASSEMBLED_VIEW_ITEMS_KEY];
   for (const item of Array.isArray(assembled) ? assembled : []) {

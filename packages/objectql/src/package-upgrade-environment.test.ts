@@ -265,6 +265,28 @@ describe('overrides of the base, as advice (ADR-0146 D2, as amended)', () => {
     ]);
   });
 
+  it('an overridden app of apps[] that v2 changes: one finding; an unchanged one: none', async () => {
+    const engine = await makeEngine([LEAD], {});
+    const app = (label: string) => ({ name: 'acme_sales', label, navigation: [{ id: 'leads', type: 'object', objectName: 'acme_lead' }] });
+    const listOverrides = reader([{ type: 'app', name: 'acme_sales', basedOn: '1.0.0' }]);
+    const changed = await planPackageUpgrade(engine, crm('1.0.0', [], { apps: [app('Sales')] }), crm('2.0.0', [], { apps: [app('Sales hub')] }), { listOverrides });
+    expect(changed.environment.overrides?.hidesChange.map((f) => `${f.type}:${f.name}:${f.change}`)).toEqual(['app:acme_sales:changed']);
+    const same = await planPackageUpgrade(engine, crm('1.0.0', [], { apps: [app('Sales')] }), crm('2.0.0', [], { apps: [app('Sales')] }), { listOverrides });
+    expect(same.environment.overrides).toEqual({ hidesChange: [], stale: [] });
+  });
+
+  it('a body the engine registers as its own app: a changed navigation is one finding, the version bump alone is none', async () => {
+    const engine = await makeEngine([LEAD], {});
+    const selfApp = (version: string, label: string) => ({
+      id: BASE, name: 'acme_crm', version, objects: [LEAD], navigation: [{ id: 'leads', type: 'object', objectName: 'acme_lead', label }],
+    });
+    const listOverrides = reader([{ type: 'app', name: 'acme_crm', basedOn: '1.0.0' }]);
+    const changed = await planPackageUpgrade(engine, selfApp('1.0.0', 'Leads'), selfApp('2.0.0', 'All leads'), { listOverrides });
+    expect(changed.environment.overrides?.hidesChange.map((f) => `${f.type}:${f.name}:${f.change}`)).toEqual(['app:acme_crm:changed']);
+    const bumped = await planPackageUpgrade(engine, selfApp('1.0.0', 'Leads'), selfApp('2.0.0', 'Leads'), { listOverrides });
+    expect(bumped.environment.overrides).toEqual({ hidesChange: [], stale: [] });
+  });
+
   it('loader stamps that name the version an item came with are not a change', async () => {
     const engine = await makeEngine([LEAD], {});
     const stamped = (version: string) => ({ ...view('Leads'), _packageId: BASE, _packageVersion: version });

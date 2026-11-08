@@ -47,7 +47,7 @@ import { createExternalDriverFloor, isExternalDriverFloor, needsExternalDriverFl
 import {
   METADATA_ARRAY_KEYS, assembledViewItemRefusal, noteRegistrationStamp, packageBodyCollectionRefusal,
   packageBodyObjectAndAppOwnerStampRefusal, packageBodySeedDataRefusal, registerAppNotingStamp,
-  resolveMetadataItemName, stampObjectPackage, stampPackage,
+  registersManifestAsApp, resolveMetadataItemName, stampObjectPackage, stampPackage,
 } from './engine-top-level.js';
 import type { DatasourceDef } from './engine-top-level.js';
 import type { ObjectQL } from './engine.js';
@@ -108,7 +108,7 @@ export class RegistrationFacet {
       {
           const refusal = packageBodyObjectAndAppOwnerStampRefusal(manifest, id, {
               apps: true,
-              selfAsApp: Boolean(manifest.name && manifest.navigation && !manifest.apps?.length),
+              selfAsApp: registersManifestAsApp(manifest),
           });
           if (refusal) throw refusal;
           // …and each nested plugin's objects and plugin-as-app (step 7, which
@@ -308,7 +308,7 @@ export class RegistrationFacet {
 
       // 4. If manifest itself looks like an App (has navigation), also register as app
       //    This handles the case where the manifest IS the app definition (legacy/simple packages)
-      if (manifest.name && manifest.navigation && !manifest.apps?.length) {
+      if (registersManifestAsApp(manifest)) {
           const resolved = namespace ? this.resolveNavObjectNames(manifest, namespace) : manifest;
           registerAppNotingStamp(this._registry, resolved, id, version);
           this.logger.debug('Registered manifest-as-app', { app: manifest.name, from: id });

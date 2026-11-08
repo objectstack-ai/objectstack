@@ -2,6 +2,7 @@
 '@objectstack/objectql': patch
 '@objectstack/cli': patch
 '@objectstack/spec': patch
+'@objectstack/metadata-protocol': patch
 ---
 
 feat(objectql): the package upgrade plan lists, as advice, each `.custom` override that hides a change of the upgrade, and each override already stale
@@ -18,4 +19,4 @@ The plan's environment reading gains an advisory class, `environment.overrides` 
 
 Each finding names the type, the name, the bundle member where the type has one, `basedOn`, the installed and the incoming base version, and the next step in Studio: open the item, compare, re-base it, or restore the package original. Advice only: nothing is refused on it, no confirmation token covers it, and nothing is merged or rebased; the upgrade installs exactly as before. `null` means the overrides could not be read (no protocol service, or the read failed), never "none". `os package install --dry-run` prints both lists after the schema plan.
 
-The `overrides.basedOn` description (`@objectstack/spec`, and the generated reference pages) no longer says no upgrade diff reads it: it never gates, and the upgrade plan reads it as advice.
+The `overrides.basedOn` description (`@objectstack/spec`, and the generated reference pages) and the published declarations of `@objectstack/metadata-protocol` (`judgeOverrideWrite`'s JSDoc) no longer say no upgrade diff reads it: it never gates, and the upgrade plan reads it as advice.
