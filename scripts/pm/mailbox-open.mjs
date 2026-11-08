@@ -77,7 +77,10 @@
  *      exists instead (a thread's own pushed branch, as #25392 used) and skips
  *      the push; it must be ahead of `<base>`, because GitHub refuses a pull
  *      with no commits. A cloud seat names it `claude/mailbox-<slug>`, the one
- *      head `--close` deletes.
+ *      head `--close` deletes. Any other `--head` opens as before, after ONE
+ *      warning on stderr (`headLeftWarning`, dry run included) that `--close`
+ *      will leave that branch — a warning, never a refusal: a session limited
+ *      to its designated branch can push no other name.
  *   ③ ONE relay stroke: `pr_create` (draft is forced by the relay) with labels
  *      `pm:mailbox`, `pinned` and `skip-changeset`, sent through
  *      `fleet-write/dispatch.mjs` as `objectstack-fleet[bot]`. `pinned` is
@@ -293,6 +296,16 @@ export function planOpen({ repo, seat, login, head = null, base = 'main', sessio
   return { kind: 'open', repo, seat: s, login, branch, base, push: head === null, actions, errors: validateStroke(repo, actions) };
 }
 
+/**
+ * The warning an open prints before the pull is created when its `--head` is not `MAILBOX_BRANCH_SHAPE` — the one
+ * head `--close` deletes (`planClose`) — naming the `claude/mailbox-<slug>` spelling; null for a pushed default
+ * branch or a matching head. It changes no exit code and no stroke. Pure.
+ */
+export function headLeftWarning(plan) {
+  if (plan?.kind !== 'open' || plan.push || !plan.seat || MAILBOX_BRANCH_SHAPE.test(String(plan.branch ?? ''))) return null;
+  return `⚠️  mailbox-open: --head ${plan.branch} is not a claude/mailbox-* branch, so --close will LEAVE it behind for a person to delete — the relay deletes only that shape. Name the head claude/mailbox-${plan.seat.slug} to have --close delete it.`;
+}
+
 /** `head` is the pull's head as read live; a `claude/mailbox-*` one is deleted in the same stroke, after the close (header). */
 export function planClose({ repo, pull, head = null }) {
   const branch = typeof head === 'string' && MAILBOX_BRANCH_SHAPE.test(head) ? head : null;
@@ -496,6 +509,8 @@ export async function main(argv, { env = process.env } = {}) {
     console.error('  Nothing was sent.');
     return EXIT_USAGE;
   }
+  const headWarning = headLeftWarning(plan);
+  if (headWarning) console.error(headWarning);
   if (opts.dryRun) {
     console.log(planText(plan));
     return EXIT_OK;
@@ -512,13 +527,13 @@ let selfTestReachedVerdict = false;
 const SELF_TEST_BATTERIES = Object.freeze({
   'arguments: the two modes and every refusal': 14,
   'the seat: canonical key, ref slug, and the per-seat branch': 11,
-  'the open plan: branch, labels, body, and the relay validator': 11,
+  'the open plan: branch, labels, body, and the relay validator': 12,
   'the close plan: comment then close, then the delete of a claude/mailbox-* head, judged by the validator': 7,
   'whose mailbox a pull is: the seat on the body line or the head, a legacy login, neither': 8,
   "finding a seat's open mailbox: by seat, never by login": 10,
   'refusing to close what is not an open mailbox': 4,
   'the ledger exclusion and the footer': 4,
-  'the CLI: dry run prints the actions file and sends nothing': 7,
+  'the CLI: dry run prints the actions file and sends nothing': 8,
   'paging: a three-page read through the loop equals the slurped array': 4,
 });
 const SELF_TEST_BATTERY_FLOOR = 10;
@@ -591,6 +606,7 @@ async function selfTest() {
   const ph = planOpen({ repo: 'o/r', seat: 'triage', login: 'os-bill', head: 'claude/project-thread-x' });
   t('--head names the branch and skips the push; the body still names the seat', [ph.branch, ph.push, ph.actions[0].head, ph.actions[0].body.split('\n')[0]], ['claude/project-thread-x', false, 'claude/project-thread-x', 'Mailbox-of: triage#1 · os-bill']);
   t('no draft key is sent — the relay forces draft itself', 'draft' in p.actions[0], false);
+  t('⭐ a --head --close will leave warns, naming the claude/mailbox-<slug> spelling; a claude/mailbox-* head, the pushed default and a close do not', [/--head claude\/project-thread-x is not a claude\/mailbox-\* branch, so --close will LEAVE it/.test(headLeftWarning(ph)), headLeftWarning(ph).includes('claude/mailbox-triage-1'), headLeftWarning(planOpen({ repo: 'o/r', seat: 'triage', login: 'os-bill', head: 'claude/mailbox-triage-1' })), headLeftWarning(p), headLeftWarning(planClose({ repo: 'o/r', pull: 1 }))], [true, true, null, null, null]);
   const pe = planOpen({ repo: 'objectstack-ai/objectstack', seat: 'Epic:#27293#1', login: 'sunhaolin' });
   t('⭐ an epic seat\'s plan: its branch, its Mailbox-of line, its To: line, and the validator accepts it', [pe.branch, pe.actions[0].title, pe.actions[0].body.split('\n')[0], pe.actions[0].body.includes('the line `To: epic:#27293#1`'), pe.errors], ['mailbox/sunhaolin/epic-27293-1', 'pm:mailbox — epic:#27293#1 · sunhaolin', 'Mailbox-of: epic:#27293#1 · sunhaolin', true, []]);
 
@@ -680,6 +696,7 @@ async function selfTest() {
   t('close dry run exits 0 and prints both actions', [cli(['--repo', 'o/r', '--close', '7', '--dry-run']).status, (cli(['--repo', 'o/r', '--close', '7', '--dry-run']).stdout.match(/"op":/g) ?? []).length], [EXIT_OK, 2]);
   t('a usage error is exit 2 — an open with no --seat among them', [cli(['--repo', 'o/r']).status, cli(['--repo', 'o/r', '--login', 'os-bill', '--dry-run']).status], [EXIT_USAGE, EXIT_USAGE]);
   t('--help is exit 0', cli(['--help']).status, EXIT_OK);
+  t('⭐ a dry run on a --head --close will leave prints the warning once on stderr and still exits 0 with the same stroke; a claude/mailbox-* head prints none', (() => { const OPEN_H = ['--repo', 'o/r', '--seat', 'domain:skills#2', '--login', 'zhuangjianguo', '--dry-run', '--head']; const w = cli([...OPEN_H, 'claude/project-thread-a81t4h']); const m = cli([...OPEN_H, 'claude/mailbox-skills-2']); return [w.status, (w.stderr.match(/--close will LEAVE it/g) ?? []).length, w.stderr.includes('claude/mailbox-skills-2'), w.stdout.includes('"head": "claude/project-thread-a81t4h"'), m.status, /LEAVE/.test(m.stderr)]; })(), [EXIT_OK, 1, true, true, EXIT_OK, false]);
   t('an epic seat\'s dry run exits 0 and pushes its own branch; a malformed epic is exit 2', (() => { const e = cli(['--repo', 'o/r', '--seat', 'epic:#27293#1', '--login', 'sunhaolin', '--dry-run']); return [e.status, e.stdout.includes('refs/heads/mailbox/sunhaolin/epic-27293-1'), cli(['--repo', 'o/r', '--seat', 'epic:27293', '--login', 'sunhaolin', '--dry-run']).status]; })(), [EXIT_OK, true, EXIT_USAGE]);
 
   const floor = [];
