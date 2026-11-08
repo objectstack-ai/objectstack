@@ -163,7 +163,7 @@ describe('[#30237] GET {data}/:object/recycle-bin', () => {
     expect(res.body.data.entries[0]).not.toHaveProperty('snapshot');
   });
 
-  it.each([
+  it.each<[Record<string, unknown>, string]>([
     [{ object: 'account' }, 'an unknown parameter'],
     [{ limit: ['1', '2'] }, 'a repeated parameter'],
   ])('refuses %j (%s), 400, and lists nothing', async (query) => {
@@ -175,7 +175,7 @@ describe('[#30237] GET {data}/:object/recycle-bin', () => {
     expect(engine.listRecycleBin).not.toHaveBeenCalled();
   });
 
-  it.each([
+  it.each<[Record<string, string>, string, string]>([
     [{ limit: 'ten' }, 'limit', 'a limit that is not a number'],
     [{ limit: '1.5' }, 'limit', 'a limit that is not whole'],
     [{ limit: '0' }, 'limit', 'a limit under 1'],

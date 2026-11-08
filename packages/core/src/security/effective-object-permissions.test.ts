@@ -433,7 +433,7 @@ describe('[#20135] apiOperations says what the REST door serves', () => {
     expect(map.crm_hidden_lead.apiOperations).toEqual([]);
     // The controls: the export axis alone, which takes `export` and nothing else.
     expect(map.crm_account.apiOperations).toEqual(
-      ['get', 'list', 'create', 'update', 'delete', 'upsert', 'bulk', 'aggregate', 'search', 'import'],
+      ['get', 'list', 'create', 'update', 'delete', 'upsert', 'bulk', 'aggregate', 'search', 'restore', 'purge', 'import'],
     );
     expect(map.crm_lead.apiOperations).toEqual(['get', 'list', 'aggregate', 'search']);
   });
@@ -451,7 +451,7 @@ describe('[#20135] apiOperations says what the REST door serves', () => {
       source,
     );
     expect(map.crm_secret.apiOperations).toEqual(
-      ['get', 'list', 'create', 'update', 'delete', 'upsert', 'bulk', 'aggregate', 'search', 'import'],
+      ['get', 'list', 'create', 'update', 'delete', 'upsert', 'bulk', 'aggregate', 'search', 'restore', 'purge', 'import'],
     );
     // The public objects the plain wildcard DOES cover keep `export` — an unrestricted one keeps its whole closure.
     expect(map.crm_account).not.toHaveProperty('apiOperations');

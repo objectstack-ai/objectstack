@@ -317,7 +317,7 @@ describe('delete(…, { onRecycleBinEntry }) tells the entry the delete wrote (#
     expect(told).toEqual([]);
   });
 
-  it.each([
+  it.each<[boolean | number, string]>([
     [false, 'not found'],
     [0, 'kept'],
   ])('does not call back when the driver answers %j (%s): no deletion an undo could reverse', async (answer) => {
