@@ -696,3 +696,55 @@ describe('R2 — one rule, one walk: objectql re-exports them, it computes neith
     expect(packageDependencyClosure).toBe(metadataCore.packageDependencyClosure);
   });
 });
+
+describe('R2 — a bundle addition is no holder of its base\'s name for a bare read (#28802)', () => {
+  const D = 'com.acme.addon';
+  const member = (packageId: string, locale: string, tag: string) =>
+    registry.registerItem('email_template', { ...body('email_template', 'welcome', tag), locale }, 'name' as never, packageId);
+  /** A dependent's stored row, as the save door hydrates it: the bare slot, stamped with the dependent. */
+  const storedMember = (packageId: string, locale: string, tag: string) =>
+    registry.registerItem('email_template', { ...body('email_template', 'welcome', tag), locale, _packageId: packageId, _provenance: 'org' }, 'name' as never);
+
+  beforeEach(() => {
+    install(A);
+    install(D, [A]);
+    install(P, [A]);
+    ship('email_template', 'welcome', A);
+  });
+
+  for (const [how, add] of [['in its composite slot', member], ['as a stored row', storedMember]] as const) {
+    it(`a dependent's locale its base does not ship (${how}) adds no holder: the base's name still resolves`, () => {
+      add(D, 'fr-FR', 'addon-fr');
+      expect(registry.packageScopedHoldersOf('email_template', 'welcome')).toEqual([A]);
+      for (const caller of [undefined, P, D]) {
+        expect(label(resolve('email_template', 'welcome', caller))).toBe('alpha template');
+      }
+      // The addition is still the dependent's member, read naming the dependent.
+      expect(registry.getPackageScopedItem<{ label: string }>('email_template', 'welcome', D, 'fr-FR')?.label).toBe('addon-fr template');
+      // The base's address does not serve it.
+      expect(resolve('email_template', 'welcome', undefined, 'fr-FR')).toEqual({ status: 'not-found' });
+    });
+  }
+
+  it('red line 1: a dependent holding a member its base holds is a holder, and the bare read refuses', () => {
+    member(D, 'en-US', 'addon-en');
+    expect(registry.packageScopedHoldersOf('email_template', 'welcome')).toEqual([A, D]);
+    expect(resolve('email_template', 'welcome')).toMatchObject({
+      status: 'refused', reason: 'ambiguous-in-environment',
+      candidates: [{ kind: 'package', packageId: A }, { kind: 'package', packageId: D }],
+    });
+  });
+
+  it('red line 1: a package that does not declare the holder is a holder, whatever members it adds', () => {
+    install(B);
+    member(B, 'fr-FR', 'beta-fr');
+    expect(registry.packageScopedHoldersOf('email_template', 'welcome')).toEqual([A, B]);
+    expect(resolve('email_template', 'welcome')).toMatchObject({ status: 'refused', reason: 'ambiguous-in-environment' });
+  });
+
+  it('only a bundled type has additions: a dependent\'s same-named flow is a holder', () => {
+    ship('flow', 'send_email', A);
+    ship('flow', 'send_email', D);
+    expect(registry.packageScopedHoldersOf('flow', 'send_email')).toEqual([A, D]);
+  });
+});

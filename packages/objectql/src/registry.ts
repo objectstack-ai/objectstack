@@ -47,6 +47,9 @@ import {
   // installed?" asks it, over this registry's installed manifests.
   pairsOf,
   installedManifestsOf,
+  // [ADR-0150 D3, #28802] The one closure walk: a dependent's bundle addition
+  // under a dependency's name is no holder of that name for a bare read.
+  packageDependencyClosure,
 } from '@objectstack/metadata-core';
 // [ADR-0029 D9.2a] `scalarOverridesPackagedBase` is the #8284 comparison, imported rather
 // than re-spelled: the object FOLD asks the same question one layer down (has
@@ -8305,6 +8308,16 @@ export class SchemaRegistry {
    * Every package, overridable baselines included: the resolver ranks them
    * (`package-scoped-resolver.ts`). An object is not addressed by package
    * (ADR-0150 D1 bucket 1) and answers `[]`.
+   *
+   * [#28802, epic #31527 child R2] A bundle ADDITION holds no name: a
+   * package whose members of a bundled type's name are all members another
+   * holder in its declared dependency closure does not hold (a dependent's
+   * locale its base does not ship, which the write gate admits and which
+   * stays under the dependent) adds to that holder's bundle, so it is no
+   * second holder of the name for a bare read. The addition is still the
+   * dependent's member: {@link getPackageScopedItem} naming the dependent
+   * reads it. A package holding a member its dependency also holds is a
+   * holder (a clash, refused by the resolver, never folded away).
    */
   packageScopedHoldersOf(type: string, name: string): string[] {
     const collection = this.metadata.get(type);
@@ -8316,7 +8329,42 @@ export class SchemaRegistry {
       const bound = this.overlaySlotBinding(item, name, collection, compositeSet);
       if (typeof bound === 'string') holders.add(bound);
     }
-    return [...holders];
+    const disc = ITEM_KEY_DISCRIMINATORS[type];
+    if (!disc || holders.size < 2) return [...holders];
+    const membersOf = new Map<string, Set<string>>();
+    for (const id of holders) membersOf.set(id, this.bundleMembersHeldBy(type, collection, name, id, compositeSet, disc));
+    return [...holders].filter((id) => !this.isBundleAddition(id, membersOf));
+  }
+
+  /**
+   * [#28802] The members (discriminator values) of `name`'s bundle that
+   * `packageId` holds: its composite group's, and the bare-slot entries that
+   * bind to it ({@link overlaySlotBinding}).
+   */
+  private bundleMembersHeldBy(type: string, collection: Map<string, any>, name: string, packageId: string,
+    holders: ReadonlySet<string>, disc: { field: string; canonical: string }): Set<string> {
+    const { local } = collectBundle(collection, name, disc, packageId);
+    const bound = this.bareSlotEntriesOf(type, collection, name)
+      .filter(({ item }) => this.overlaySlotBinding(item, name, collection, holders) === packageId);
+    return new Set([...local, ...bound].map((e) => discriminatorValue(e.item, disc.field) || disc.canonical));
+  }
+
+  /**
+   * [#28802] Whether `packageId`'s holding of a bundle's name is an addition
+   * to another holder's bundle: some other holder is in `packageId`'s declared
+   * dependency closure (the save door's walk), `packageId` is not in that
+   * holder's, and none of `packageId`'s members is one that holder holds.
+   */
+  private isBundleAddition(packageId: string, membersOf: ReadonlyMap<string, ReadonlySet<string>>): boolean {
+    const own = membersOf.get(packageId)!;
+    const reach = new Set(packageDependencyClosure(packageId, this)?.dependencies ?? []);
+    for (const [base, baseMembers] of membersOf) {
+      if (base === packageId || !reach.has(base)) continue;
+      if (packageDependencyClosure(base, this)?.dependencies.includes(packageId)) continue;
+      if ([...own].some((m) => baseMembers.has(m))) continue;
+      return true;
+    }
+    return false;
   }
 
   /**

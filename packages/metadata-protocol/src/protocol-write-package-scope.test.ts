@@ -8,6 +8,9 @@
  * identity, so no second closure can be computed here and still read green.
  */
 import { describe, expect, it } from 'vitest';
+// The package root reaches `@objectstack/lint` by a dynamic import; pay its load
+// at collection, never inside a case's clocked window (`check:test-source-alias`).
+import '@objectstack/lint';
 import * as metadataCore from '@objectstack/metadata-core';
 import * as lintRuntime from '@objectstack/lint/runtime';
 import { packageDependencyClosure, widenPairClosureToAppMembers } from './protocol-write-package-scope.js';
