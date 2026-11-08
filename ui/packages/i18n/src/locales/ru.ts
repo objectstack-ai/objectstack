@@ -3951,6 +3951,7 @@ const ru = {
     sharedObject: 'Общий доступ: {{object}}',
     redactedFields: 'Некоторые поля скрыты владельцем: {{fields}}',
     linkedRecord: 'Связанная запись',
+    linkedUser: 'Связанный пользователь',
   },
   publicForm: {
     submit: "Отправить",

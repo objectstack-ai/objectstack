@@ -197,6 +197,7 @@ describe('DataEventSchema', () => {
       'data.record.created',
       'data.record.updated',
       'data.record.deleted',
+      'data.record.restored',
     ]);
     expect(() => DataEventSchema.parse({
       id: '4b4720e8-97c3-4a12-9b70-b70a3d2314a3',

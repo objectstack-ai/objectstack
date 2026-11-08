@@ -388,7 +388,16 @@ describe('#21321: an install-local package runs its script actions and body hook
       it('list_actions does not advertise a declared action run_action cannot run', () => {
         const p = phases[name]!;
         expect(p.ghostRun.isError, 'precondition: ghost_task has no handler anywhere').toBe(true);
-        expect(String(p.ghostRun.payload)).toMatch(/No handler registered/);
+        // [#31271] `run_action` answers a throw through the `/actions` door's
+        // reader (`actionsDoorAnswerOf`), so the bridge's uncoded "No handler
+        // registered" throw arrives as that door's 400 rejection envelope, its
+        // sentence intact. (`POST /api/v1/actions` answers the same ghost action
+        // from its own routing-miss branch, a 404, before any throw.)
+        expect(p.ghostRun.payload?.error, JSON.stringify(p.ghostRun.payload)).toMatchObject({
+          code: 'VALIDATION_ERROR',
+          status: 400,
+          message: expect.stringMatching(/No handler registered/),
+        });
         expect(p.listed, 'advertised an action the run door refuses').not.toContain('ghost_task');
       });
     });

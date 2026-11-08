@@ -210,6 +210,12 @@
  * kind. The labels are the imported vocabulary (`PM_EXCLUSIVE_STATE_LABELS`,
  * `GOVERNED_PR_AWAITING_MERGE_LABEL`); the self-test pins each quoted rule as a
  * substring of SKILL.md, so a reworded rule reds here rather than drifting.
+ *
+ * Both refusals — this one and the ONE-OF one — compare pm labels the way GitHub
+ * matches label names, case-insensitively (`labelKey`): `Needs-User-Decision`
+ * applies the existing `needs-user-decision`, so it is refused like it. The
+ * relay's own adding ops (`fleet-write/dispatch.mjs`: `labels_add`, `pr_create`,
+ * `issue_create`) ask this same `refuseKindLabels` before they send.
  */
 
 import process from 'node:process';
@@ -340,6 +346,15 @@ export function computeAssigneeTarget({ current = [], assign = [], unassign = []
 }
 
 /**
+ * A label as GitHub MATCHES it: label names compare case-insensitively, so adding `Needs-User-Decision`
+ * applies the existing `needs-user-decision`. Every pm-label refusal here (`refuseTwoStates`,
+ * `refuseKindLabels`) asks the vocabulary through this key, never by exact spelling.
+ */
+export function labelKey(label) {
+  return typeof label === 'string' ? label.toLowerCase() : label;
+}
+
+/**
  * H29's finding, asked of a TARGET rather than of a board: would this write
  * leave two ONE-OF state claims standing? Returns the sentence, or null.
  *
@@ -350,7 +365,8 @@ export function computeAssigneeTarget({ current = [], assign = [], unassign = []
  * still one keystroke from correct.
  */
 export function refuseTwoStates(target = []) {
-  const present = PM_EXCLUSIVE_STATE_LABELS.filter((l) => (target ?? []).includes(l));
+  const keys = new Set((target ?? []).map(labelKey));
+  const present = PM_EXCLUSIVE_STATE_LABELS.filter((l) => keys.has(labelKey(l)));
   if (present.length < 2) return null;
   const named = present.map((l) => `\`${l}\` (${PM_STATE_CLAIM[l]})`).join(' + ');
   return (
@@ -394,10 +410,22 @@ export function readTargetKind(card) {
  */
 export function refuseKindLabels({ kind, why = null, add = [], ref = 'the card' } = {}) {
   const adds = dedupe(add ?? []);
-  const states = PM_EXCLUSIVE_STATE_LABELS.filter((l) => adds.includes(l));
-  const awaiting = adds.includes(GOVERNED_PR_AWAITING_MERGE_LABEL);
+  const keys = new Set(adds.map(labelKey));
+  const states = PM_EXCLUSIVE_STATE_LABELS.filter((l) => keys.has(labelKey(l)));
+  const awaiting = keys.has(labelKey(GOVERNED_PR_AWAITING_MERGE_LABEL));
   if (!states.length && !awaiting) return null;
   const tick = (ls) => ls.map((l) => `\`${l}\``).join(', ');
+  const said = refuseKindText({ kind, why, states, awaiting, ref, tick });
+  if (said === null) return null;
+  // An add the refusal names, spelled other than the vocabulary, is named as written: the seat sees why it matched.
+  const named = kind === KIND_PULL ? states : kind === KIND_ISSUE ? [GOVERNED_PR_AWAITING_MERGE_LABEL] : [...states, ...(awaiting ? [GOVERNED_PR_AWAITING_MERGE_LABEL] : [])];
+  const byKey = new Map(named.map((l) => [labelKey(l), l]));
+  const respelt = adds.filter((l) => byKey.has(labelKey(l)) && byKey.get(labelKey(l)) !== l);
+  if (!respelt.length) return said;
+  return `${said} GitHub matches label names case-insensitively: ${respelt.map((l) => `\`${l}\` is \`${byKey.get(labelKey(l))}\``).join(', ')}.`;
+}
+
+function refuseKindText({ kind, why, states, awaiting, ref, tick }) {
   const statesRule = `its 状态模型 lists the six states as 「${KIND_RULE_STATES_ON_ISSUES}」 and says 「${KIND_RULE_AWAITING_MERGE_PR_ONLY}」`;
   const decisionRule = states.includes(DECISION_INBOX_LABEL) ? `, and of \`${DECISION_INBOX_LABEL}\` 「${KIND_RULE_DECISION_NEVER_ON_PR}」` : '';
   const never = 'removing a label is never refused.';
@@ -1676,13 +1704,13 @@ const KIND_BATTERY = 'the kind rule: no pm state added to a pull request, no `pm
 const SELF_TEST_BATTERIES = Object.freeze({
   'the re-exec guard: the name this tool sets, and the patrol name that must not silence it': 11,
   'the arithmetic: union, difference, and the two idempotent no-ops': 12,
-  'the ONE-OF refusal, and the one declared exception': 6,
+  'the ONE-OF refusal, and the one declared exception': 8,
   'the read-back verdict: three buckets, three different meanings': 7,
   'the classifier: a 404 that is success, and a 403 that must not fall back': 12,
   'the four steps, end to end against a fake board': 10,
   'the fallback: one PATCH, and the assignee echo that makes it survivable': 7,
   'the remaining exits: refusal, mismatch, the ONE-OF block and the dry run': 5,
-  [KIND_BATTERY]: 21,
+  [KIND_BATTERY]: 25,
   'the retired lane aliases: an --add of domain:engine / services / cli / rest is written as domain:server before the target, step ② says so, the read-back is clean on either transport; --remove and a live domain:* label pass untouched': 8,
   'the CLI: what a typo must never be allowed to mean': 8,
   'the relay transport: ONE dispatch carrying the whole stroke, the same read-back, and an accepted dispatch with no run UNCONFIRMED under auto too — never a direct write': 14,
@@ -1758,6 +1786,8 @@ export async function selfTest() {
   t('two ONE-OF states are REFUSED', typeof two === 'string' && two.length > 0);
   t('…and the refusal names what each one claims, not just that two are present', two.includes(PM_STATE_CLAIM['pm:queue']) && two.includes(PM_STATE_CLAIM['pm:dispatched']));
   t('…needs-user-decision is one of the states, not a side label', typeof refuseTwoStates(['needs-user-decision', 'pm:blocked']) === 'string');
+  t('⭐ a state spelled in another case IS that state — GitHub matches label names case-insensitively — so two are still REFUSED', [typeof refuseTwoStates(['pm:queue', 'PM:Dispatched']) === 'string', typeof refuseTwoStates(['Needs-User-Decision', 'pm:blocked']) === 'string'], [true, true]);
+  t('…while one state in two spellings is ONE state, not a pair', refuseTwoStates(['pm:queue', 'PM:QUEUE']), null);
   t('the vocabulary is IMPORTED, never restated here', PM_EXCLUSIVE_STATE_LABELS.length, 6);
   t('a closed card carrying in-flight residue is NOTED, never blocked', typeof residueNote({ state: 'closed', target: ['pm:dispatched'] }), 'string');
 
@@ -1919,6 +1949,13 @@ export async function selfTest() {
     t('⛔ a --release on a PULL REQUEST (its stroke adds `pm:queue`) is refused before the comment, zero sends, zero writes', [releasePull.exit, releasePull.sent.length, releasePull.direct, releasePull.text.includes('is a pull request'), releasePull.text.includes('for issues only')], [EXIT_USAGE, 0, [], true, true]);
     const releasePullQueued = await driveRelease(RELEASE_ARGV, silentCard(13, { kind: 'pull', labels: ['pm:dispatched', 'pm:queue', 'domain:skills'] }));
     t('…and so is one on a PR that ALREADY carries `pm:queue` — the rule asks what the release adds, not what it would newly POST', [releasePullQueued.exit, releasePullQueued.sent.length, releasePullQueued.direct, releasePullQueued.text.includes('`pm:queue` is a pm card STATE and objectstack-ai/objectstack#7 is a pull request')], [EXIT_USAGE, 0, [], true]);
+    const mixedPull = await driveOffline(['--repo', 'o/r', '--issue', '7', '--add', 'Needs-User-Decision'], { kind: 'pull' });
+    t('⭐ a state in MIXED CASE on a PULL REQUEST is refused like the lower-case name: exit 2, zero writes, its spelling named as written', [mixedPull.exit, writes(mixedPull), said(mixedPull).includes('`needs-user-decision` is a pm card STATE'), said(mixedPull).includes('`Needs-User-Decision` is `needs-user-decision`')], [EXIT_USAGE, [], true, true]);
+    const mixedIssue = await driveOffline(['--repo', 'o/r', '--issue', '7', '--add', 'PM:Awaiting-Merge'], { labels: ['pm:dispatched'] });
+    t('⭐ `pm:awaiting-merge` in MIXED CASE on an ISSUE is refused the same way', [mixedIssue.exit, writes(mixedIssue), said(mixedIssue).includes('o/r#7 is an issue'), said(mixedIssue).includes('`PM:Awaiting-Merge` is `pm:awaiting-merge`')], [EXIT_USAGE, [], true, true]);
+    const mixedRemove = await driveOffline(['--repo', 'o/r', '--issue', '7', '--remove', 'Needs-User-Decision'], { kind: 'pull', labels: [DECISION_INBOX_LABEL] });
+    t('a MIXED-CASE removal is never refused', [mixedRemove.exit, mixedRemove.res.refusal ?? null], [EXIT_OK, null]);
+    t('control: mixed case does not widen the rule — `PM:Awaiting-Merge` on a PR and `PM:Queue` on an issue pass', [refuseKindLabels({ kind: KIND_PULL, add: ['PM:Awaiting-Merge'] }), refuseKindLabels({ kind: KIND_ISSUE, add: ['PM:Queue'] })], [null, null]);
     t('the unreadable-kind sentence agrees in number with the labels it names', [refuseKindLabels({ kind: null, why: 'x', add: ['pm:queue'] }).includes('`pm:queue` is legal'), refuseKindLabels({ kind: null, why: 'x', add: ['pm:queue', GOVERNED_PR_AWAITING_MERGE_LABEL] }).includes('`pm:queue`, `pm:awaiting-merge` are legal')], [true, true]);
   }
 
