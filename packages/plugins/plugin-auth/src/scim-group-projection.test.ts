@@ -231,6 +231,13 @@ function observeGrantWrites(h: Harness): Array<{ op: string; actor: unknown }> {
   return writes;
 }
 
+/** The id a successful save answered (the case fails here if the save was refused). */
+function mappingIdOf(saved: Awaited<ReturnType<typeof runSetIdpGroupMapping>>): string {
+  expect(saved.status, JSON.stringify(saved.body)).toBe(200);
+  if (!saved.body.success) throw new Error('the mapping save was refused');
+  return String(saved.body.data.mappingId);
+}
+
 /** The state the vendor hands `reconcileUser` for one user whose one group maps to `mappingId`. */
 function projectedState(userId: string, mappingId: string) {
   return {
@@ -354,7 +361,7 @@ describe('SCIM group push → mapped permission set', () => {
     expect(saved.status, JSON.stringify(saved.body)).toBe(200);
     expect(await grantsOf(h, erin.userId)).toEqual([projected(SALES)]);
 
-    const mappingId = (saved.body as { data: { mappingId: string } }).data.mappingId;
+    const mappingId = mappingIdOf(saved);
     const deleted = await runDeleteIdpGroupMapping(
       h.door,
       ADMIN,
@@ -387,7 +394,7 @@ describe('SCIM group push → mapped permission set', () => {
   it('(S1) the projection never writes a grant without an organization, whatever a mapping row holds', async () => {
     const h = await boot();
     const saved = await saveMapping(h, { connectionId: CONNECTION, groupExternalId: 'okta-grp-sales', permissionSet: SALES });
-    const mappingId = (saved.body as { data: { mappingId: string } }).data.mappingId;
+    const mappingId = mappingIdOf(saved);
     const frank = await provision(h, 'frank');
     const warn = vi.fn();
     const projection = createScimGroupProjection({
@@ -407,7 +414,7 @@ describe('SCIM group push → mapped permission set', () => {
     const h = await boot();
     const saved = await saveMapping(h, { connectionId: CONNECTION, groupExternalId: 'okta-grp-sales', permissionSet: SALES });
     expect(saved.status, JSON.stringify(saved.body)).toBe(200);
-    const mappingId = (saved.body as { data: { mappingId: string } }).data.mappingId;
+    const mappingId = mappingIdOf(saved);
     const gina = await provision(h, 'gina');
     catalogPermissions = catalogPermissions.map((p) => (p.name === SALES ? { ...p, adminScope: { businessUnits: ['*'] } } : p));
     expect(await h.judge.organizationBoundaryFailure(SALES), 'the redefined set is outside the boundary').not.toBeNull();
