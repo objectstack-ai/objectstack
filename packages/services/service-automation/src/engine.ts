@@ -2619,9 +2619,10 @@ export interface ConnectorCredentialDoor {
     /**
      * The `cluster.resync` answer: reconcile from the shared rows after a
      * cluster outage lost peer writes — see
-     * {@link AutomationEngine.resyncConnectorCredentialPubSub}.
+     * {@link AutomationEngine.resyncConnectorCredentialPubSub}. Optional, so a
+     * door written before it still attaches; without it a resync does nothing.
      */
-    resyncFromCluster(): Promise<void>;
+    resyncFromCluster?(): Promise<void>;
 }
 
 /**
@@ -5041,7 +5042,7 @@ export class AutomationEngine implements IAutomationService {
      * the outage re-materializes. A no-op until a transport is attached.
      */
     async resyncConnectorCredentialPubSub(): Promise<void> {
-        await this.requireConnectorCredentialDoor('resyncConnectorCredentialPubSub()').resyncFromCluster();
+        await this.requireConnectorCredentialDoor('resyncConnectorCredentialPubSub()').resyncFromCluster?.();
     }
 
     /** [#27237] `IAutomationService.listConnectorCredentialRefs` — references and states, never a value. */
