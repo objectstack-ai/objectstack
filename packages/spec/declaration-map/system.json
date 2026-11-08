@@ -385,6 +385,7 @@
     "ResolvedSettingValue": "system/ResolvedSettingValue",
     "ResolvedSettingValueSchema": "system/ResolvedSettingValue",
     "RestrictionProfile": "system/RestrictionProfile",
+    "RestrictionProfileNodeType": "system/RestrictionProfileNodeType",
     "RestrictionProfileSchema": "system/RestrictionProfile",
     "RouteHandlerMetadata": "system/RouteHandlerMetadata",
     "RouteHandlerMetadataSchema": "system/RouteHandlerMetadata",

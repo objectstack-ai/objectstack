@@ -1001,6 +1001,7 @@
     "system/ResolvedSettingValue:source",
     "system/ResolvedSettingValue:value",
     "system/RestrictionProfile:allowCode",
+    "system/RestrictionProfile:allowSandboxedJs",
     "system/RestrictionProfile:allowScheduledAutomation",
     "system/RestrictionProfile:allowedFlowNodeTypes",
     "system/RestrictionProfile:versions",
