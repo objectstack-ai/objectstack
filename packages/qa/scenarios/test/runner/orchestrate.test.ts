@@ -817,6 +817,72 @@ describe('seedApp — the requisition_to_receipt seed loads whole through its de
   });
 });
 
+const DESK_FILE = resolve(HERE, '../../../../../docs/qa/scenarios/service_desk.json');
+
+/** One account per persona of `scenario`, as `FakeApp.createPersona` mints them (`u-<persona>`). */
+function accountsOf(scenario: LoadedScenario): PersonaAccount[] {
+  return scenario.card.run.personas.map((p) => ({ persona: p.id, userId: `u-${p.id}`, email: `${p.id}@scenario.test`, apiKey: `key-${p.id}`, permissionSet: { name: `x_${p.id}`, assigned: true } }));
+}
+
+/** `owner_id` → how many rows of `object` the seed loaded with it (`-` for none: the inserter keeps the row). */
+function ownerTally(app: FakeApp, object: string): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const r of app.rows[object] ?? []) out[String(r.owner_id ?? '-')] = (out[String(r.owner_id ?? '-')] ?? 0) + 1;
+  return out;
+}
+
+describe('seedApp — the service_desk seed owns a row only by a person it names (personas[].record)', () => {
+  const desk = namespacedScenario(load(DESK_FILE));
+  const seeded = async () => {
+    const app = new FakeApp();
+    const seed = await seedApp(desk, app, accountsOf(desk));
+    return { app, seed };
+  };
+
+  it('no public comment is the portal customer’s: a comment is owned only by the agent who wrote it (`author`)', async () => {
+    const { app } = await seeded();
+    const comments = app.rows.demohelpdesk_ticket_comment!;
+    expect(comments.filter((c) => c.visibility === 'public')).toHaveLength(237);
+    expect(comments.filter((c) => c.owner_id === 'u-portal_customer')).toEqual([]); // was 237, 197 of them on other customers’ tickets
+    expect(ownerTally(app, 'demohelpdesk_ticket_comment')).toEqual({ 'u-support_agent': 15, '-': comments.length - 15 });
+    expect(comments.filter((c) => c.owner_id === 'u-support_agent').every((c) => c.author === 'a02')).toBe(true);
+  });
+
+  it('a ticket naming two persons goes to the first in run.personas order; a group names nobody', async () => {
+    const { app } = await seeded();
+    const tickets = Object.fromEntries(app.rows.demohelpdesk_ticket!.map((t) => [t.id, t.owner_id]));
+    expect(tickets.t009).toBe('u-support_agent'); // assignee a02 (support_agent) and customer cus_03 (portal_customer)
+    expect(tickets.t008).toBe('u-portal_customer'); // customer cus_03; its group grp_tech is no person
+    expect(ownerTally(app, 'demohelpdesk_ticket')).toEqual({ 'u-support_agent': 15, 'u-portal_customer': 15, '-': app.rows.demohelpdesk_ticket!.length - 30 });
+    expect(app.rows.demohelpdesk_ticket!.filter((t) => t.owner_id === 'u-team_lead')).toEqual([]); // was 78, through `group`
+  });
+
+  it('each person row is its persona’s, with that persona’s user in its `user` field; no other row carries one', async () => {
+    const { app } = await seeded();
+    const person = (object: string, id: string) => app.rows[object]!.find((r) => r.id === id)!;
+    expect(person('demohelpdesk_customer', 'cus_03')).toMatchObject({ owner_id: 'u-portal_customer', user: 'u-portal_customer' });
+    expect(person('demohelpdesk_agent', 'a02')).toMatchObject({ owner_id: 'u-support_agent', user: 'u-support_agent' });
+    expect(person('demohelpdesk_agent', 'a04')).toMatchObject({ owner_id: 'u-team_lead', user: 'u-team_lead' });
+    const withUser = Object.values(app.rows).flat().filter((r) => r.user !== undefined).map((r) => r.id);
+    expect(withUser.sort()).toEqual(['a02', 'a04', 'cus_03']);
+    expect(ownerTally(app, 'demohelpdesk_agent')).toEqual({ 'u-support_agent': 1, 'u-team_lead': 1, '-': app.rows.demohelpdesk_agent!.length - 2 }); // was 4 to team_lead, through `group`
+  });
+
+  it('without persona accounts (the gallery’s screenshot boot) no row is owned and no `user` field is set', async () => {
+    const app = new FakeApp();
+    await seedApp(desk, app, []);
+    expect(Object.values(app.rows).flat().filter((r) => r.owner_id !== undefined || r.user !== undefined)).toEqual([]);
+  });
+
+  it('a department lookup names nobody, its manager does: requisition_to_receipt’s dep_sales is the dept_manager’s (e13)', async () => {
+    const rtr = namespacedScenario(load(RTR_FILE));
+    const app = new FakeApp();
+    await seedApp(rtr, app, accountsOf(rtr));
+    expect(app.rows.demopurchase_department!.find((d) => d.id === 'dep_sales')!.owner_id).toBe('u-dept_manager');
+    expect(app.rows.demopurchase_employee!.filter((e) => e.department === 'dep_sales' && e.owner_id !== undefined).map((e) => e.id)).toEqual(['e02', 'e13']); // only the two person rows (requester e02, dept_manager e13), never by `department`
+  });
+});
+
 describe('runCard — a build that makes both sides of a reference cycle required is a Build finding naming the cycle', () => {
   const original = load(RTR_FILE);
   const card = namespacedScenario(original).card;

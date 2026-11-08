@@ -2273,6 +2273,7 @@ const pt = {
       unsupportedSpecifierType: "Tipo de configuração não suportado: {{type}}",
       invalidPhone: "Insira um número de telefone usando apenas dígitos, espaços e + ( ) - .",
       invalidColor: "Insira uma cor hexadecimal, como #1a2b3c",
+      jsonStoredAsText: "Este valor está salvo como texto, não como objeto JSON. Salve para armazená-lo como objeto; a página o marcou como alteração não salva.",
       clientAddressDirect: "Seu endereço, como o servidor o avalia: {{address}}. Uma lista que não o inclua não pode ser salva daqui. Este servidor não confia em cabeçalhos de proxy, então, atrás de um proxy, este é o endereço do proxy.",
       clientAddressViaProxy: "Seu endereço, como o servidor o avalia: {{address}}, lido dos cabeçalhos encaminhados pelo proxy em que este servidor confia. Uma lista que não o inclua não pode ser salva daqui.",
       clientAddressUnknown: "O servidor não consegue determinar seu endereço, então uma lista não vazia não pode ser salva daqui.",

@@ -342,11 +342,13 @@ token implies the other:
 |:--|:--|:--|
 | `automation` | the flow engine + node executors | flows never execute |
 | `triggers` + `automation` | `record-*` / schedule / `api` start bindings | auto-launched flow refused: `STACK_TRIGGER_CAPABILITY_REQUIRED` |
-| `job` | cron cadence + the `timeRelative` sweep | scheduled flows never launch |
-| `queue` | the inbound-webhook consumer | inbound POST answers **503** |
+| `job`° | cron cadence + the `timeRelative` sweep | scheduled flows never launch |
+| `queue`° | the inbound-webhook consumer | inbound POST answers **503** |
 | `approvals` | `approval` / `approval_revise` (`plugin-approvals`) | no executor for the node type |
-| `messaging` | `notify` delivery to inbox (`sys_inbox_message`) | **silent:** success with `skipped: true` |
+| `messaging`° | `notify` delivery to inbox (`sys_inbox_message`) | **silent:** success with `skipped: true` |
 | `webhooks` + `realtime` | `defineStack({ webhooks })` outbound dispatch | declared webhook refused: `STACK_WEBHOOK_CAPABILITY_REQUIRED` |
+
+° Always-on, so list it only under `--preset minimal` (**objectstack-platform** § `requires:`).
 
 ### Inbound webhook (`api`) triggers (ADR-0041 Tier 1)
 
@@ -399,9 +401,6 @@ owns `label`, `type`, `nodes` and the `edges` `FlowSchema` requires):
 > **guard** one that writes its own object, or it re-triggers itself. A
 > `record-before-*` flow that throws silently blocks the write — give it a
 > user-facing message.
-
-> `previous` (before the change) vs `record` (after) in an update trigger's
-> condition: see [objectstack-formula](../objectstack-formula/SKILL.md) §5.
 
 → [references/examples-flows.md](./references/examples-flows.md) § Time-relative triggers — scheduled per-record date sweep.
 

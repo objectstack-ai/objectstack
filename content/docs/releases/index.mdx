@@ -5,9 +5,10 @@ description: Release notes for the ObjectStack platform — framework packages a
 
 ObjectStack ships as a single release train: all `@objectstack/*` packages are
 version-locked, so one version number describes the whole platform. The
-Console UI (built from the [objectui](https://github.com/objectstack-ai/objectui)
-repository) is frozen into `@objectstack/console` at release time, so each
-release note here also covers what changed in Studio/Console. ObjectStack
+Console UI is built from this repository's [`ui/`](https://github.com/objectstack-ai/objectstack/tree/main/ui)
+workspace, whose `@object-ui/*` packages version in the same lockstep group,
+and is frozen into `@objectstack/console` at release time, so each release
+note here also covers what changed in Studio/Console. ObjectStack
 Cloud (the hosted service) versions independently and deploys continuously —
 developer-facing Cloud changes are summarized in the release note for the
 framework version they accompany.
@@ -37,8 +38,11 @@ These pages are curated summaries. For exhaustive, per-package detail:
 - **Framework packages** — every package ships a `CHANGELOG.md` generated from
   [changesets](https://github.com/changesets/changesets), visible on npm and in
   the [framework repository](https://github.com/objectstack-ai/objectstack).
-- **Console UI** — the [objectui CHANGELOG](https://github.com/objectstack-ai/objectui/blob/main/CHANGELOG.md)
-  follows Keep a Changelog.
+- **Console UI** — every `@object-ui/*` package under `ui/` ships its own
+  `CHANGELOG.md`, generated from the same changesets in the same release, as
+  does `@objectstack/console`. Console changes released before 18.2.0, when
+  the Console was still built from the separate objectui repository, are
+  summarized on the release pages for their versions.
 - **Design decisions** — breaking changes reference their
   [ADRs](https://github.com/objectstack-ai/objectstack/tree/main/docs/adr), which
   record the rationale.

@@ -294,6 +294,11 @@ import {
   POPULATION_NETS,
   inNetPopulation,
   reachesPopulationNet,
+  README_CODE_LANGUAGES,
+  declaredNameCounts,
+  publishedReadmeReach,
+  readmeClaims,
+  takesAReadmeClaim,
   verifyStandInGuarded,
 } from './dispatch-gates.mjs';
 import { SCANNED_ROOTS as RUNNER_ENV_ROOTS, isProductSource as runnerEnvIsProductSource } from '../check-runner-env-posture.mjs';
@@ -5182,6 +5187,144 @@ export function selfTest({ tier = 'full' } = {}) {
     }
   });
 
+  // ── The published-README claim net (#31292) ──────────────────────────────
+  //
+  // The family #31257 left: the gate reads built types of 68 packages, so it is
+  // reached through what the documents CLAIM, matched against what the diff
+  // removes. Each limb through injected base/head readers, the reader held to
+  // the gate's own (spawned: the gate loads typescript), recall measured on the
+  // live tree, then the rendered row.
+  const RM_GATE = 'check:published-readme-exports';
+  const rmReach = publishedReadmeReach();
+  const rmIo = (base, head) => ({ readBase: () => base, readHead: () => head });
+  const rmCoreDir = rmReach.byName.get('@objectstack/core')?.dir ?? '';
+  const RM_KERNEL = ['export class ObjectKernel {', '  use(plugin) {}', '  start() {}', '}', ''].join('\n');
+  const rmSrc = `${rmCoreDir}/src/kernel-fixture.ts`;
+  t(`the README reader finds the gate's population on the live tree (${rmReach.docs.size} documents, ${rmReach.claimed.size} reached packages)`,
+    rmReach.docs.size > 100 && rmReach.claimed.size > 50 && rmCoreDir !== '' && rmReach.watched.get(rmCoreDir)?.has('ObjectKernel') && rmReach.watched.get(rmCoreDir)?.has('use'));
+  t('MEMBER: renaming a claimed class is a hit', takesAReadmeClaim(rmSrc, rmIo(RM_KERNEL, RM_KERNEL.replace('class ObjectKernel', 'class Kernel'))));
+  t('MEMBER: removing a claimed method is a hit', takesAReadmeClaim(rmSrc, rmIo(RM_KERNEL, RM_KERNEL.replace('  use(plugin) {}\n', ''))));
+  t('MEMBER: deleting a file that declared a claimed name is a hit', takesAReadmeClaim(rmSrc, rmIo(RM_KERNEL, null)));
+  t('MEMBER: dropping an `export * from` line is a hit', takesAReadmeClaim(`${rmCoreDir}/src/index.ts`, rmIo("export * from './a';\nexport * from './b';\n", "export * from './a';\n")));
+  t('MEMBER: adding a method is not a hit', !takesAReadmeClaim(rmSrc, rmIo(RM_KERNEL, RM_KERNEL.replace('  start() {}', '  start() {}\n  drain() {}'))));
+  t('MEMBER: a new file is not a hit', !takesAReadmeClaim(rmSrc, rmIo(null, RM_KERNEL)));
+  t('MEMBER: removing an unclaimed name is not a hit', !takesAReadmeClaim(rmSrc, rmIo(`${RM_KERNEL}export const internalOnlyFixtureName = 1;\n`, RM_KERNEL)));
+  t('MEMBER: a claimed name dropped from a comment only is not a hit', !takesAReadmeClaim(rmSrc, rmIo(`${RM_KERNEL}// ObjectKernel use()\n`, RM_KERNEL)));
+  t('MEMBER: a test file and a dist file are outside the walk', !takesAReadmeClaim(`${rmCoreDir}/src/kernel-fixture.test.ts`, rmIo(RM_KERNEL, null))
+    && !takesAReadmeClaim(`${rmCoreDir}/dist/index.d.ts`, rmIo(RM_KERNEL, null)));
+  t('MEMBER: a path in no reached package is not a hit', !takesAReadmeClaim('scripts/kernel-fixture.ts', rmIo(RM_KERNEL, null)));
+  const rmDoc = [...rmReach.docs].find((d) => readmeClaims(readFileSync(nodePath.join(ROOT, d), 'utf8'), (n) => rmReach.byName.has(n)).size > 0) ?? '';
+  const rmDocText = rmDoc ? readFileSync(nodePath.join(ROOT, rmDoc), 'utf8') : '';
+  const rmFence = (lines) => `\n${'```'}ts\n${lines.join('\n')}\n${'```'}\n`;
+  t(`DOCUMENT: a live published document with claims exists (${rmDoc || 'none'})`, rmDoc !== '');
+  t('DOCUMENT: a new scoped import is a hit', takesAReadmeClaim(rmDoc, rmIo(rmDocText, rmDocText + rmFence(["import { NotThere } from '@objectstack/core';"]))));
+  t('DOCUMENT: a new member call on a built receiver is a hit',
+    takesAReadmeClaim(rmDoc, rmIo(rmDocText, rmDocText + rmFence(["import { ObjectKernel } from '@objectstack/core';", 'const k = new ObjectKernel();', 'k.notThere();']))));
+  t('DOCUMENT: a prose-only edit is not a hit', !takesAReadmeClaim(rmDoc, rmIo(rmDocText, `${rmDocText}\nMore prose.\n`)));
+  t('DOCUMENT: a foreign-scope import is not a hit', !takesAReadmeClaim(rmDoc, rmIo(rmDocText, rmDocText + rmFence(["import { z } from 'zod';"]))));
+  t('DOCUMENT: a deleted document is not a hit', !takesAReadmeClaim(rmDoc, rmIo(rmDocText, null)));
+  t('MANIFEST: a changed `exports` is a hit', takesAReadmeClaim(`${rmCoreDir}/package.json`, rmIo('{"name":"a","exports":{".":"./x.js"}}', '{"name":"a","exports":{}}')));
+  t('MANIFEST: a version bump is not a hit', !takesAReadmeClaim(`${rmCoreDir}/package.json`, rmIo('{"name":"a","version":"1.0.0"}', '{"name":"a","version":"1.0.1"}')));
+  t('MANIFEST: the workspace globs are a hit, its overrides are not',
+    takesAReadmeClaim('pnpm-workspace.yaml', rmIo('packages:\n  - packages/*\n', 'packages:\n  - packages/*\n  - extra/*\n'))
+      && !takesAReadmeClaim('pnpm-workspace.yaml', rmIo('packages:\n  - packages/*\noverrides:\n  a: 1\n', 'packages:\n  - packages/*\noverrides:\n  a: 2\n')));
+  t('declarations: each shape the reader counts', (() => {
+    const c = declaredNameCounts(['export interface A { b?: string; c(): void }', 'export { d as e } from "./f";', 'export default g;', 'export * as h from "./i";',
+      'const j = { k: 1 };', 'type T = { o: number; l(m: string): void };', 'export * from "./n";'].join('\n'));
+    return ['A', 'b', 'c', 'd', 'e', 'default', 'h', 'j', 'k', 'l', 'o', 'T', '* from ./n'].every((n) => c.get(n) > 0);
+  })());
+  const rmTmp = mkdtempSync(nodePath.join(tmpdir(), 'readme-claim-'));
+  try {
+    mkdirSync(nodePath.join(rmTmp, 'pkgs', 'a'), { recursive: true });
+    writeFileSync(nodePath.join(rmTmp, 'pnpm-workspace.yaml'), 'packages:\n  - pkgs/*\n');
+    writeFileSync(nodePath.join(rmTmp, 'pkgs', 'a', 'package.json'), '{"name":"@objectstack/a","files":["dist"]}');
+    t('a tree with no published document THROWS rather than reaching nothing', throwsNaming(() => publishedReadmeReach(rmTmp), 'published-README reader'));
+  } finally {
+    rmSync(rmTmp, { recursive: true, force: true });
+  }
+  // The gate's own reader, over the live tree: its document set and every
+  // (package, name) claim its two halves check, a superset of nothing.
+  const rmProbe = spawnSync(
+    process.execPath,
+    [
+      '--input-type=module',
+      '-e',
+      `const g = await import(${JSON.stringify(pathToFileURL(nodePath.join(ROOT, 'scripts/check-published-readme-exports.mjs')).href)});
+       const { byName, docs } = g.outsideUiTree(g.publishedDocs());
+       const claims = {};
+       for (const doc of docs) {
+         const locals = new Map();
+         for (const imp of g.extractImports(doc.text)) {
+           const s = g.splitSpecifier(imp.specifier);
+           if (!s || !byName.has(s.name)) continue;
+           claims[s.name] ??= [];
+           for (const n of imp.named) { claims[s.name].push(n.imported); locals.set(n.local, s.name); }
+           if (imp.defaultLocal) { claims[s.name].push('default'); locals.set(imp.defaultLocal, s.name); }
+           if (imp.namespaceLocal) locals.set(imp.namespaceLocal, s.name);
+         }
+         const { bound } = g.extractLocalBindings(doc.text, [...locals.keys()]);
+         for (const [l, { source }] of bound) if (!locals.has(l)) locals.set(l, locals.get(source));
+         for (const c of g.extractMemberCalls(doc.text, [...locals.keys()])) claims[locals.get(c.object)].push(...c.path, c.member);
+       }
+       console.log(JSON.stringify({ docs: docs.map((d) => d.file), claims }));`,
+    ],
+    { encoding: 'utf8', cwd: ROOT, maxBuffer: 1 << 26 },
+  );
+  let rmTruth = null;
+  try {
+    rmTruth = JSON.parse((rmProbe.stdout ?? '').trim());
+  } catch {
+    /* rmTruth stays null and the cases below fail loudly */
+  }
+  t(`the gate's own reader ran over the live tree (exit ${rmProbe.status}${rmProbe.status === EXIT_PREREQUISITE_NOT_MET ? ': install the workspace first' : ''})`,
+    rmProbe.status === 0 && rmTruth !== null && rmTruth.docs.length > 100);
+  const rmDocDiff = (rmTruth?.docs ?? []).filter((d) => !rmReach.docs.has(d)).concat([...rmReach.docs].filter((d) => !(rmTruth?.docs ?? []).includes(d)));
+  t(`the net reads exactly the gate's documents (differing: ${rmDocDiff.slice(0, 5).join(', ') || 'none'})`, rmTruth !== null && rmDocDiff.length === 0);
+  const rmPairs = Object.entries(rmTruth?.claims ?? {}).flatMap(([pkg, names]) => [...new Set(names)].map((n) => [pkg, n]));
+  const rmUnclaimed = rmPairs.filter(([pkg, n]) => !rmReach.claimed.get(pkg)?.has(n)).map(([pkg, n]) => `${pkg} ${n}`);
+  t(`every claim the gate checks is a claim the net reads (${rmPairs.length} gate claims; missed: ${rmUnclaimed.slice(0, 5).join(', ') || 'none'})`,
+    rmPairs.length > 300 && rmUnclaimed.length === 0);
+  t("the gate's source still spells what the net copies", [
+    "const MARKDOWN_EXCLUDED = new Set(['CHANGELOG.md']);",
+    "const SKIP_DIRS = new Set(['node_modules', 'dist', '.git', '.turbo', 'coverage', 'build']);",
+    String.raw`const rx = /(?<![\w$.'"` + '`' + String.raw`])([A-Za-z_$][\w$]*)((?:\s*\.\s*[A-Za-z_$][\w$]*)+)\s*\(/g;`,
+    String.raw`const DECLARATION = /^\s*(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*(?::\s*[^=]+?)?\s*=\s*(.+)$/;`,
+    'if (!manifest.name || manifest.private === true) continue;',
+    "const UI_TREE = 'ui';",
+  ].every((s) => readFileSync(nodePath.join(ROOT, 'scripts/check-published-readme-exports.mjs'), 'utf8').includes(s)));
+  t("…and its fence languages are exactly the net's", (() => {
+    const block = /const CODE_LANGUAGES = new Set\(\[([\s\S]*?)\]\);/.exec(readFileSync(nodePath.join(ROOT, 'scripts/check-published-readme-exports.mjs'), 'utf8'))?.[1] ?? '';
+    const own = [...block.matchAll(/'([^']*)'/g)].map((m) => m[1]).sort();
+    return own.length > 5 && JSON.stringify(own) === JSON.stringify([...README_CODE_LANGUAGES].sort());
+  })());
+  const rmEntry = CHANGE_KIND_GATES.filter((k) => k.gates.some((g) => g.name === RM_GATE));
+  t(`exactly one entry names ${RM_GATE}, bound to the claim net`,
+    rmEntry.length === 1 && rmEntry[0].gates.length === 1 && CHANGE_KIND_ROWS.filter((r) => r.gates.some((g) => g.name === RM_GATE)).map((r) => r.matches).join() === 'published-readme-claim');
+  const rmLine = changeKindLines([rmSrc], resolved, rmEntry.map((k) => ({ ...k, matches: (p) => takesAReadmeClaim(p, rmIo(RM_KERNEL, null)) })))
+    .find((l) => l.includes(`- pnpm ${RM_GATE}   —`)) ?? '';
+  t('the rendered lead names the gate runnably, its build prerequisite, and exit 3 as NOT MEASURED',
+    rmLine.includes('turbo run build --filter=./packages/* --filter=./packages/*/*') && /exits 3/.test(rmLine) && /NOT MEASURED/.test(rmLine) && /#31292/.test(rmLine));
+  t('…and the build prerequisite covers every package directory the documents reach',
+    [...rmReach.watched.keys()].every((d) => /^packages\/[^/]+(?:\/[^/]+)?$/.test(d)));
+  t('a docs-only page and an unrelated script derive no README gate through the whole table',
+    !['content/docs/ai/agents.mdx', 'scripts/pm/dispatch-gates.mjs'].some((p) => changeKindLines([p], resolved).some((l) => l.includes(`- pnpm ${RM_GATE}   —`))));
+
+  slow('the README claim net: every name the gate checks is declared in its package closure, so removing it is a hit', () => {
+    const declared = new Map();
+    for (const f of trackedFiles()) {
+      if (!/\.[mc]?tsx?$/.test(f)) continue;
+      let dir = null;
+      for (const d of rmReach.watched.keys()) if (f.startsWith(`${d}/`) && (dir === null || d.length > dir.length)) dir = d;
+      if (dir === null || isTestPath(f.slice(dir.length + 1)) || f.slice(dir.length + 1).split('/').some((s) => ['node_modules', 'dist', 'build'].includes(s))) continue;
+      if (!declared.has(dir)) declared.set(dir, new Set());
+      for (const n of declaredNameCounts(readFileSync(nodePath.join(ROOT, f), 'utf8')).keys()) declared.get(dir).add(n);
+    }
+    const undeclared = rmPairs.filter(([pkg, n]) => ![...(rmReach.closure.get(pkg) ?? [])].some((q) => declared.get(rmReach.byName.get(q).dir)?.has(n)))
+      .map(([pkg, n]) => `${pkg} ${n}`);
+    t(`each of the gate's ${rmPairs.length} claims has a declaration the net reads (undeclared: ${undeclared.slice(0, 5).join(', ') || 'none'})`,
+      rmPairs.length > 300 && undeclared.length === 0);
+  });
+
   // ── The ui/scripts/__tests__ suite (#26318) ─────────────────────────────────
   //
   // The 178 files run only in CI's Test UI shards, so no family named them and a
@@ -7937,7 +8080,8 @@ export function selfTest({ tier = 'full' } = {}) {
       // 736 -> 738 (#26318): the data import and its re-export each gained UI_SCRIPTS_SUITE_ROOTS.
       // 738 -> 744 (#30763): the ADR anchor corpus import and its comment.
       // 744 -> 748 (#31257): the two imported gate readers and their comment.
-      'scripts/pm/dispatch-gates.mjs:748 inherited-population',
+      // 748 -> 751 (#31292): the workspace-enumerator import and its comment.
+      'scripts/pm/dispatch-gates.mjs:751 inherited-population',
       // Ninth row, added with the declaration it names: the recogniser's mailbox
       // doorbell battery pins the seven key templates verbatim in the pm-dispatch
       // references' project-forms.md, a population claim on a governed file, so

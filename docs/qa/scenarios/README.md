@@ -175,7 +175,13 @@ is the seed row that is this person (an employee, an agent, a customer); the loa
 one naming no seeded row. It is required on a persona with a `scope`, unless that persona is
 named through a handle instead (a direct scope rule on a declared user-handle field,
 `owner: u_sam`, as on the three controls), and optional on a global one. The person object's
-user field is `user`, fixed by name: no card chooses it. An operation is a `create` (with `values`), an
+user field is `user`, fixed by name: no card chooses it. The runner loads that row's `user` with the
+persona's user id, and owns (`owner_id`) a seed row by a persona's user only when the row is that
+persona's `record`, a declared lookup on it holds the record's id, or a handle field on it holds the
+persona's handle; the first persona in `run.personas` order the row names wins. A scope on an
+option (`visibility: public`) or on a lookup to a row that is no person (a department, a group)
+gives that persona no rows: the build reaches them by its own means (a read policy, a
+parent-controlled child). An operation is a `create` (with `values`), an
 `update` (with `target` and `values`) or a `delete` (with `target`); a target is a seeded row
 id, and every written field is one the seed carries. Every operation names the persona it
 acts for (`actingAs`) and declares its `outcome`, so grading reads it with code only:

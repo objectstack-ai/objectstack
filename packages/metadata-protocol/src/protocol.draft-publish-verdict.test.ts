@@ -481,6 +481,24 @@ const CASES: Array<{ rule: string; type: string; item: { name: string } & Record
         },
     },
     {
+        // A step no edge path from start reaches: it saved, read valid:true and
+        // PUBLISHED, and never ran. Refused by lint rather than the flow parse,
+        // so the draft below still saves.
+        rule: 'flow-node-unreachable',
+        type: 'flow',
+        item: {
+            name: 'orphan_step',
+            label: 'Orphan Step',
+            type: 'autolaunched',
+            nodes: [
+                { id: 'start', type: 'start', label: 'Start' },
+                { id: 'stamp', type: 'assignment', label: 'Stamp' },
+                { id: 'end', type: 'end', label: 'End' },
+            ],
+            edges: [{ id: 'e1', source: 'start', target: 'end' }],
+        },
+    },
+    {
         // [#29233] A loop whose body closes on itself (body a → b → a, the
         // card's reproduction). It saved, read valid:true and PUBLISHED, and
         // the engine's region check then refused to register it.

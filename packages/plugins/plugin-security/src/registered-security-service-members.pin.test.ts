@@ -76,6 +76,7 @@ const DECLARED_MEMBERS = {
   checkControlledByParentWrite: 'optional',
   explain: 'required',
   describeDelegableScope: 'required',
+  describeEffectiveAccess: 'optional',
   listAudienceBindingSuggestions: 'required',
   confirmAudienceBindingSuggestion: 'required',
   dismissAudienceBindingSuggestion: 'required',

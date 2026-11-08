@@ -576,7 +576,6 @@ export type {
 export type {
   BaseFieldMetadata,
   FieldDependsOn,
-  VisibilityCondition,
   FieldValidationFunction,
   TextFieldMetadata,
   TextareaFieldMetadata,
@@ -616,7 +615,6 @@ export type {
   SignatureFieldMetadata,
   QRCodeFieldMetadata,
   AddressFieldMetadata,
-  GeolocationFieldMetadata,
   SliderFieldMetadata,
   RatingFieldMetadata,
   MasterDetailFieldMetadata,
@@ -626,6 +624,8 @@ export type {
   ObjectIndex,
   GridFieldRetiredKey,
 } from './field-types.js';
+// `VisibilityCondition` and `GeolocationFieldMetadata` were retired from this
+// list (objectstack#25921, batch 13) — see the notes in `field-types.ts`.
 // objectui#11610 — the `grid` field's retired snake_case field-level keys, each
 // mapped to its camelCase replacement: the one list the form-field zod mirror's
 // alias refusals and the `grid` widget's named refusal both read.
