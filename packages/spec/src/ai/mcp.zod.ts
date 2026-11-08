@@ -2,6 +2,7 @@
 
 import { z } from 'zod';
 import { lazySchema } from '../shared/lazy-schema';
+import { NAMESPACE_PATTERN } from '../kernel/address-grammar';
 
 /**
  * Model Context Protocol (MCP) — Reference & Binding Primitives
@@ -153,6 +154,56 @@ export const MCP_OAUTH_SCOPES = [
 ] as const;
 
 export type McpOauthScope = (typeof MCP_OAUTH_SCOPES)[number];
+
+/**
+ * [ADR-0150 D5] The package-coordinate member of the business-action tools: an
+ * optional `namespace` beside `objectName` on `run_action`'s input, and on
+ * every `list_actions` row.
+ *
+ * Declared once here and mixed into each tool's own shape by the server that
+ * enforces it (`@objectstack/mcp`, child G2), as `confirm` is
+ * (`AI_ACTION_CONFIRMATION_MEMBER`). The value is the manifest namespace of
+ * the package that holds the action — what an author and an AI already know,
+ * and what the install gate keeps unique per environment.
+ *
+ * - **Absent on `run_action`**: the action name resolves by the one bare-name
+ *   rule (D3) — the environment's own action first, else the unique package
+ *   holder, else a refusal that names the candidates. Never a pick.
+ * - **Present on `run_action`**: the action of that namespace, and only it.
+ *   A namespace that holds no such action is refused, naming the holders.
+ * - **On a `list_actions` row**: the namespace of the package that holds the
+ *   row's action; absent for an environment-authored action, which has none.
+ */
+export const MCP_ACTION_NAMESPACE_MEMBER = 'namespace';
+
+/**
+ * The value of {@link MCP_ACTION_NAMESPACE_MEMBER}: the manifest namespace
+ * grammar (`NAMESPACE_PATTERN`, `kernel/address-grammar.ts`), so a value the
+ * tool accepts is always one a manifest can declare.
+ */
+export const McpActionNamespaceSchema = lazySchema(() => z
+  .string()
+  .regex(NAMESPACE_PATTERN, {
+    message: 'namespace must be a package manifest namespace: 2-20 chars, a lowercase letter, then lowercase letters, digits or underscores',
+  })
+  .describe('Manifest namespace of the package that holds the action; absent for an environment-authored action'));
+
+/**
+ * The address a `list_actions` row carries (ADR-0150 D5): the action name,
+ * the object it is bound to, and the namespace of its holder. The three
+ * members are the ones `run_action` takes back — `name` as its `actionName`,
+ * `objectName` and {@link MCP_ACTION_NAMESPACE_MEMBER} as themselves — so a
+ * listed action is always callable by exactly the address it was listed
+ * under. The row's other members (label, params, confirmation) are the
+ * server's own.
+ */
+export const McpListedActionAddressSchema = lazySchema(() => z.object({
+  name: z.string().describe('Action name, passed back to `run_action` as `actionName`'),
+  objectName: z.string().optional().describe('The object the action is bound to; absent for an object-less action'),
+  [MCP_ACTION_NAMESPACE_MEMBER]: McpActionNamespaceSchema.optional(),
+}).describe('The address of one action a `list_actions` row lists'));
+
+export type McpListedActionAddress = z.infer<typeof McpListedActionAddressSchema>;
 
 /**
  * The one-sentence consent copy an OAuth consent screen renders for each MCP
