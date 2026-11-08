@@ -159,7 +159,12 @@ async function boot(opts: { posture?: 'single' | 'isolated' } = {}): Promise<Boo
   };
   const protocol = new ObjectStackProtocolImplementation(engine as never, () => new Map(), undefined);
   const services: Record<string, unknown> = {
-    manifest: { register: vi.fn() },
+    // [ADR-0150 D3, #31674] The manifest service registers the plugin's own
+    // permission sets into the engine registry under the plugin's package, as
+    // a booted kernel does, so a built-in position resolves them as its own.
+    manifest: { register: vi.fn((m: { id: string; permissions?: Array<Record<string, unknown>> }) => {
+      for (const ps of m.permissions ?? []) (engine as any).registry.registerItem('permission', structuredClone(ps), 'name', m.id);
+    }) },
     objectql: engine,
     metadata,
     protocol,
