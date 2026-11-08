@@ -66,7 +66,7 @@ describe('authored sections: the home field (ADR-0144 D5)', () => {
       const row = await rows(mode, host);
       const home = row('amount_home');
       expect(home.querySelector('input')).toBeNull();
-      expect(home.textContent?.replace(/ /g, ' ')).toContain('CN¥71,994.24');
+      expect(home.textContent?.replace(/\u00a0/g, ' ')).toContain('CN¥71,994.24');
       expect(home.querySelector('[data-testid="home-amount-hint"]')?.textContent).toBe('Converted at 0.1389 on Nov 1, 2026');
     });
   }

@@ -47,7 +47,7 @@ describe('DetailSection: the home field (ADR-0144 D5)', () => {
   it('a foreign amount: the home row says the rate and date, and only the home row', () => {
     const c = page({ currency_code: 'EUR', invoice_date: '2026-11-01', amount: 10000, amount_home: 71994.24, amount_rate: 0.1389, total: 3 });
     expect(hints(c)).toEqual(['Converted at 0.1389 on Nov 1, 2026']);
-    expect(c.textContent?.replace(/ /g, ' ')).toContain('CN¥71,994.24');
+    expect(c.textContent?.replace(/\u00a0/g, ' ')).toContain('CN¥71,994.24');
   });
 
   it('an amount already in the home currency: rate 1', () => {
