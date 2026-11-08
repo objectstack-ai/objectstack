@@ -54,6 +54,9 @@ import {
 } from '@objectstack/spec/data';
 import { resolveStandaloneDatabase } from '@objectstack/runtime';
 import { resolveDriverType, resolveStorageDefinition, UnsupportedDriverError } from './storage-driver.js';
+// Paid at collection, not inside a clocked case: `storage-driver.ts` reaches
+// this optional driver through a dynamic import (check:test-source-alias).
+import '@objectstack/driver-turso';
 
 /** A URL whose scheme matches each canonical kind, so only the SPELLING varies. */
 const URL_FOR: Readonly<Record<string, string>> = {

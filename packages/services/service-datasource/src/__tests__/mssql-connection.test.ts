@@ -12,6 +12,10 @@
 
 import { describe, expect, it } from 'vitest';
 import { createDefaultDatasourceDriverFactory } from '../default-datasource-driver-factory.js';
+// Paid at collection, not inside a clocked case: the factory reaches both
+// drivers through dynamic imports (check:test-source-alias).
+import '@objectstack/driver-sql';
+import '@objectstack/driver-memory';
 
 const factory = () => createDefaultDatasourceDriverFactory({ dev: false });
 
