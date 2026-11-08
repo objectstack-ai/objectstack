@@ -83,7 +83,7 @@ export interface RegistrationHost {
 /** The bodies of the "Package, app, plugin, driver and datasource registration" section of `ObjectQL`: a stateless facet, called by the class's stubs. */
 export class RegistrationFacet {
   /** The body of `ObjectQL#registerApp`; the method's docblock there is its contract. */
-  static registerApp(this: Pick<RegistrationHost, '_registry' | 'convertPackageBodyForward' | 'invalidateSummaryIndex' | 'logger' | 'manifests' | 'registerDatasourceDef' | 'registerPackageBody'>, registeredBody: any, scope?: ArtifactInstallScope, source: Exclude<InstalledPackageSource, 'authored'> = 'code'): void {
+  static registerApp(this: Pick<RegistrationHost, '_registry' | 'applyExternalDriverFloor' | 'convertPackageBodyForward' | 'datasourceDefs' | 'invalidateSummaryIndex' | 'logger' | 'manifests' | 'registerDatasourceDef' | 'registerPackageBody'>, registeredBody: any, scope?: ArtifactInstallScope, source: Exclude<InstalledPackageSource, 'authored'> = 'code'): void {
       // The CONVERTED body, for everything below — the package record, the
       // live manifest, every item it registers (see {@link convertPackageBodyForward}).
       // [#23972] Refused before anything registers — see the docblock: an
@@ -143,6 +143,14 @@ export class RegistrationFacet {
           }
       }
       this.invalidateSummaryIndex(); // new objects may add/change summary fields
+      // [#31564] Inside a run another caller opened — the `manifest` service
+      // registers every package of one artifact in one run — a refusal of a
+      // LATER package puts this one back too. Its writes outside the registry
+      // are recorded for that run below, before each first write; the summary
+      // index, dropped above, is dropped again once the registry is put back.
+      // Outside such a run nothing is recorded (see
+      // {@link SchemaRegistry.recordRestoreOnRefusal}).
+      this._registry.recordRestoreOnRefusal('summaryIndex', () => () => this.invalidateSummaryIndex());
       this.logger.debug('Registering package manifest', { id, namespace });
 
       // [#28697] What remains can only be refused part-way, by the registry's
@@ -163,6 +171,14 @@ export class RegistrationFacet {
 
       // Store manifest for defaultDatasource lookup
       if (id) {
+        this._registry.recordRestoreOnRefusal(`manifest\u0000${id}`, () => {
+          const had = this.manifests.has(id);
+          const held = this.manifests.get(id);
+          return () => {
+            if (had) this.manifests.set(id, held);
+            else this.manifests.delete(id);
+          };
+        });
         this.manifests.set(id, manifest);
       }
 
@@ -174,7 +190,19 @@ export class RegistrationFacet {
           ? manifest.datasources
           : Object.entries(manifest.datasources).map(([name, def]) => ({ name, ...(def as any) }));
         for (const ds of dsList) {
-          if (ds?.name) this.registerDatasourceDef(ds);
+          if (!ds?.name) continue;
+          const name: string = ds.name;
+          // Put back with the definition: the driver floor it decides
+          // (`applyExternalDriverFloor`, which `registerDatasourceDef` runs).
+          this._registry.recordRestoreOnRefusal(`datasourceDef\u0000${name}`, () => {
+            const held = this.datasourceDefs.get(name);
+            return () => {
+              if (held) this.datasourceDefs.set(name, held);
+              else this.datasourceDefs.delete(name);
+              this.applyExternalDriverFloor(name);
+            };
+          });
+          this.registerDatasourceDef(ds);
         }
       }
 

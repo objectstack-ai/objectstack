@@ -117,6 +117,17 @@ async function rig() {
   const manager = makeManager();
   const api: any = await manager.getApi();
 
+  // [objectstack-ai/cloud#3820, card 2] The clients these tokens name, as the
+  // provider stores them, enabled: the verifier reads the client row before
+  // the consent, and a client with no row admits nothing.
+  const authCtx = await manager.getAuthContext();
+  for (const clientId of [CLIENT, OTHER_CLIENT]) {
+    await authCtx.adapter.create({
+      model: 'oauthClient',
+      data: { clientId, name: 'Desk Assistant', scopes: ['openid', 'data:read'], redirectUris: ['http://localhost:56789/cb'] },
+    });
+  }
+
   // Every write of the consent table, and every read the STAMP makes of it
   // (the one that selects `last_used_at`), counted at the engine. The
   // verifier's own per-call consent read (#30879) goes through better-auth's
@@ -410,11 +421,7 @@ describe('[#30918] nothing a client sends reaches the stamp', () => {
       .filter(Boolean)
       .join('; ');
 
-    const ctx = await r.manager.getAuthContext();
-    await ctx.adapter.create({
-      model: 'oauthClient',
-      data: { clientId: CLIENT, name: 'Desk Assistant', scopes: ['openid', 'data:read'], redirectUris: ['http://localhost:56789/cb'] },
-    });
+    // The client row is the rig's own (`CLIENT`, 'Desk Assistant').
     const id = await r.consent({ userId });
 
     const res = await r.manager.handleRequest(

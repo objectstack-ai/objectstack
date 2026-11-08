@@ -1,6 +1,9 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+// Paid at collection, not inside a case's clocked window: the dispatcher's
+// reach loads `@objectstack/metadata` lazily (`check:test-source-alias`).
+import '@objectstack/metadata';
 
 import { HttpDispatcher } from './http-dispatcher.js';
 
@@ -328,5 +331,49 @@ describe('HttpDispatcher.handleMcpSkill (GET /mcp/skill)', () => {
     expect(text).toContain('https://canonical.example.com/api/v1/mcp');
     expect(text).not.toContain('acme.example.com');
     void services;
+  });
+});
+
+describe('[#31605] handleMcp hands the MCP runtime the caller it admitted', () => {
+  const prev = process.env.OS_MCP_SERVER_ENABLED;
+  beforeEach(() => {
+    process.env.OS_MCP_SERVER_ENABLED = 'true';
+  });
+  afterEach(() => {
+    if (prev === undefined) delete process.env.OS_MCP_SERVER_ENABLED;
+    else process.env.OS_MCP_SERVER_ENABLED = prev;
+  });
+
+  it('passes the resolved ExecutionContext and the dispatched environment, never a header', async () => {
+    const { kernel, mcpService } = makeKernel({ withMcp: true });
+    const d = new HttpDispatcher(kernel, undefined, { enforceProjectMembership: false });
+    const executionContext = {
+      userId: 'u_agent',
+      tenantId: 'org_acme',
+      principalKind: 'agent',
+      onBehalfOf: { userId: 'u_agent' },
+      performedBy: { clientId: 'oauth_app_1' },
+      isSystem: false,
+      positions: [],
+      permissions: [],
+    };
+    const request = new Request('http://localhost/api/v1/mcp', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        accept: 'application/json, text/event-stream',
+        'x-user-id': 'u_mallory',
+        'x-environment-id': 'env_other',
+        'x-organization-id': 'org_other',
+      },
+      body: '{}',
+    });
+    const res = await d.handleMcp(
+      { jsonrpc: '2.0', id: 1, method: 'tools/list' },
+      makeContext({ request, executionContext, environmentId: 'env_prod' }),
+    );
+    expect(res.response?.status).toBe(200);
+    expect(mcpService.lastOpts.caller).toEqual({ executionContext, environmentId: 'env_prod' });
+    expect(mcpService.lastOpts.caller.executionContext).toBe(executionContext);
   });
 });
