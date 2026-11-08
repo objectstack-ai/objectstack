@@ -1,0 +1,35 @@
+{
+  "number": 31332,
+  "kind": "issue",
+  "title": "pm-dispatch: no seat gives objectstack-ai/cloud cards a first touch, frozen cards slip back into the queue, and the cloud unlock scan has no pin-ancestry probe",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p1"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-08T02:23:21Z",
+  "updated_at": "2026-11-08T03:57:23Z",
+  "closed_at": "2026-11-08T03:56:29Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31332",
+  "body": "repo:cloud#2 · os-zhuang · session_0123kRqqdpAJWYMgsgdAJX4G\n\n## 维护者速读\n\n- 11-08 盘点 cloud：110 张开放卡（cloud 88 + objectstack `domain:cloud` 22），能派的却很少。查下来有三个 skills 缺口，不是哪个座位偷懒。\n- ① 没人给 cloud 仓的新卡做首次分诊：分诊职责写「两仓」，那是 objectui 还在时的写法，分诊例行轮只跑 objectstack。cloud 有 6 张卡一直没有 `pm:*` 标签，最早的是 11-03。\n- ② 冻结只写在评论里、没有标签：ADR-0025 M2–M5 和 SDK 契约卡 10-28 冻结（「M1 做完，其余冻结」），后来一轮分诊把它们放回了 `pm:queue`（p1），差一点就被派发。\n- ③ 跨仓解锁没有可执行的探针：规则写「消费方可安装」才算解锁，但没写 cloud 怎么验。实际卡住的就是这一步：上游已关，修复却还不在 cloud 的 pin 里。\n- 改动只动 pm-dispatch 的 skills 文本，三条各一两行，不改脚本。\n\nFiling gate: ① a defect with a named location (the skill text below). Raised by the maintainer, verbatim, in the cloud seat-2 thread, 2026-11-08 02:02Z: 「这些问题问什么分诊没处理？你处理完要和分诊沟通」 / 「是 skills 的问题吗？」.\n\n**Reader who acts:** the `domain:skills` lane, as one PR on `.claude/skills/pm-dispatch/**`.\n\n**Dedupe:** I searched `label:domain:skills triage cloud` (8 open, none on this) and `两仓 triage-duties` (#15671 recorded the alternating-repo pickup and is closed; #25490 is closed). There are no hits for a cloud first-touch or a pin probe.\n\n## The three gaps, as measured on 2026-11-08\n\n### 1. Cloud cards get no first touch\n\n- **Where:** `references/triage-duties.md:8` says 「每日一 fire 跑两仓全量对账」, and lines 12–13 define the bare-card disjunct ① (全裸). Neither line names the repositories. The triage seat post #6015 and its round records cover `objectstack` only. Every record says \"Next fire: objectstack\", and R973 and R974 are objectstack rounds.\n- **Measured:** these cloud cards had no `pm:*` label until the seat self-triaged them today:\n  - cloud#3519, open since 11-03. It was a ruled decision whose execution cards were all closed.\n  - cloud#3549, open since 11-03.\n  - cloud#3552, open since 11-04. Its blocker cloud#3551 had been closed since 11-05.\n  - cloud#3567, cloud#3635 and cloud#3659.\n- **Fix:** name the repositories in `triage-duties.md:8`: `objectstack-ai/objectstack` and `objectstack-ai/cloud` (objectui is archived). Then pick one of two:\n  - (a) Run disjunct ① over cloud too. Triage only routes; it adds `priority:*` and `pm:queue`, because every cloud card belongs to the cloud lane.\n  - (b) Say in SKILL.md that the cloud lane patrol owns first touch for its own repository.\n  The cloud seat runs (b) from today in its hourly patrol, so writing (b) down costs nothing. (a) adds a second reader.\n\n### 2. A freeze recorded only in a comment is undone by a later round\n\n- **Where:** `references/state-machine.md:14-15` says a hold is legal only with `pm:on-hold` plus a `Restart-when:` line. The 10-28 freeze of objectstack#27124, #27125, #27284, #27285 and #27287 was posted as a **Frozen** comment, with no label and no `Restart-when:`. The cards kept `status:parked`, and a later triage round put them in `pm:queue`.\n- **Measured:** five p1 cards sat in `pm:queue` against a standing freeze. The seat moved them to `pm:on-hold` with `Restart-when:` today.\n- **Fix:**\n  - (i) One line in `state-machine.md`: a freeze or 冻结 ruling lands as `pm:on-hold` + `Restart-when:` in the same write. A comment alone is a half state.\n  - (ii) One line in `triage-duties.md`: before triage puts a card into `pm:queue`, it reads the latest state-transition comment (`dispatch-runbook.md:59` already defines how to find it). If that comment is a hold, freeze or ruling, triage files `pm:retriage` to the lane instead of re-queueing.\n\n### 3. Cross-repo unlock for cloud has no probe\n\n- **Where:** `references/state-machine.md` (「跨仓解锁判据是消费方可安装 …」) names the rule, and `SKILL.md:109` says a cross-repo close is never released automatically. Neither says how the cloud lane checks it.\n- **Measured:**\n  - cloud#3654 and cloud#3693 had every `Blocked-by:` closed. Their fixes, objectstack#31243 `40eaae7f` and #31157 `4bf30da1`, are not ancestors of cloud's pin `90523379`, so cloud cannot install them yet.\n  - cloud#3413's blockers are in the pin, and it was unlocked today.\n- **Fix:** one line for the cloud lane's unlock scan. The probe is `git merge-base --is-ancestor <fix-merge-sha> $(cat .objectstack-sha)` in the objectstack checkout. Until it passes, the card's `Blocked-by:` moves to the pin-round card that will carry the fix.\n\n## Acceptance\n\n- One PR on `.claude/skills/pm-dispatch/**` with the three edits, and any `--self-test` or lint the skill tree runs is green.\n- The PR body quotes this card's gap numbers.\n- The triage seat post #6015 gets one line naming the new scope.\n\nRefs: objectstack#6015 (triage seat post)"
+}

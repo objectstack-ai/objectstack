@@ -1,0 +1,37 @@
+{
+  "number": 31428,
+  "kind": "pull_request",
+  "title": "docs(skills): name the installation-wide uniques stop for a self-hosted os deploy",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "pm:awaiting-merge",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-08T07:28:23Z",
+  "updated_at": "2026-11-08T08:03:07Z",
+  "closed_at": "2026-11-08T08:03:04Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-11-08T08:03:04Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/31428",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-project-manager\"} -->\n_Requested by **Leehom** · [project thread](https://claude.ai/code/project/chan_01TenzsRopZj4jMbvjX8uz1X?thread=cmsg_01TenzsRopZj4jMbvjX8uz1XMLQfnXzBGuGxWQMXHib8KU)_\n\nPart of #31338\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么：平台技能 `operations.md` 中 `use-runtime` 目标的退出码 1 段，在「安装被拒」一项里补上全局唯一约束停止：约束确属全平台时用 `--confirm-global-uniques` 重跑，否则改成 `unique: 'organization'`。\n- 为什么改：PR #31369（#31338）已让 `os deploy` 在自托管运行时接受 `--confirm-global-uniques`，但技能只教了两个升级确认，agent 读技能时不知道这个停止和开关。\n- 风险与回滚：纯技能文字；token 棘轮先删同文件两处重复（-67 字节），余额 +19 tokens 按常设裁定 6513306068 抬高该行（3375 → 3394）；发版 `@objectstack/skills` patch；回滚即 revert。\n- 两分钟验证：`node scripts/check-skills-token-ratchet.mjs`（3394 / 3394）；对照 `packages/cli/src/commands/package/install.ts` L445-L456 的停止文案。\n- 需要你做的：Tier H（`skills/**`），合并前需席位契约复核与 `os-zhuang` 或 `hotlong` 批准。\n\n## What changes\n\n`skills/objectstack-platform/references/operations.md`, the `use-runtime` target paragraph (added by #31335, merged). Its install-refusal clause listed the access and schema upgrade confirmations only. It now also names the installation-wide uniques stop (`UNIQUE_SCOPE_CONFIRMATION_REQUIRED`, ADR-0120 D5e), whose printed retry is `os deploy --confirm-global-uniques`, and the stop's other way on:\n\n```diff\n-… an install refusal (rerun with the `--confirm-access-upgrade` / `--confirm-upgrade <token>` it printed); installed but not loaded …\n+… an install refusal (rerun with the `--confirm-access-upgrade` / `--confirm-upgrade <token>` it printed, or `--confirm-global-uniques` if its installation-wide `unique` constraints are meant platform-wide, else set them `unique: 'organization'`); installed but not loaded …\n```\n\nSource on `main` (`405a78ea`): `packages/cli/src/commands/package/install.ts` L445-L456 (the stop prints `${retry} --confirm-global-uniques` and \"…or edit the app's metadata to `unique: 'organization'` and rebuild\"); `packages/cli/src/commands/deploy.ts` L100 (`CONFIRMATION_FLAGS`) and L160 (the flag, self-hosted target only). `os deploy` rebuilds, so \"and rebuild\" is the deploy itself.\n\n## Why\n\nPR #31369's acceptance notes left this line to the skills lane (\"Not edited here … the line it needs is in the report's `out_of_scope_findings`\"). Without it, an agent reading the platform skill meets the stop with no taught way on.\n\n## Token readings (`scripts/check-skills-token-ratchet.mjs`, tokens = ceil(bytes / 4))\n\n| File | `main` `e6a0b72a90` | This PR | Ceiling |\n|:--|:--|:--|:--|\n| `skills/objectstack-platform/references/operations.md` | 13500 B = 3375 | 13574 B = 3394 | 3375 → 3394 |\n\n**Deletions, each with its surviving home (-67 bytes):**\n\n1. Health & observability, Logs bullet: the example `new ObjectKernel({ logger: { level: 'info', format: 'json' } })` becomes \"(`new ObjectKernel({ logger })`)\" (-36 B). Home of the shape: `references/plugin-development.md` § ObjectKernel Configuration (`logger: { level: 'info', format: 'json' }`). The bullet's own fact (a kernel construction option, not a `defineStack` key) stays.\n2. Metrics bullet: \"(per-plugin startup durations)\" (-31 B). Home: `references/plugin-development.md` § Health Monitoring, `kernel.getPluginMetrics();  // Map<name, startup ms>`.\n\nNo eval pins either (`skills/objectstack-platform/evals/*.json` swept for `getPluginMetrics`, `logger`, `format`).\n\nAdded: +141 B. Net +74 B → 3394 tokens; headroom was 0, so the remainder, +19 measured, raises that one row, pinned at the measurement, under the standing maintainer ruling 2026-10-27, verbatim and untranslated: 「A:先削重复,余额按实测提高」 (ruling record 6513306068 on #27847). No rewrap: every untouched line is byte-identical.\n\n## Not edited\n\n- `skills/objectstack-platform/evals/config-plugins-ops.json` case 21 names only `--confirm-access-upgrade` (already listed in #31335's \"Other sites found\").\n\n## Verification\n\nHead `da7c715974` (one commit on `main` `e6a0b72a90`). `node scripts/pm/dispatch-gates.mjs --commands` derived 62 commands for the 3 paths: **57 × exit 0**; 5 NOT MEASURED (exit 3, prerequisite: a build): `check:dts-closure`, `check:dual-build-cjs-loads`, `check:lean-entry-closure`, `check:sourcemap-no-sources-content` read every package's dist, and no package is touched; `@objectstack/lint check:doc-formula-expressions` needs the formula and lint builds and this diff adds no formula. Those go to CI. Per-command record: project file `pm-orders/server/31338-skills-gates-ran.txt`.\n\n- `node scripts/check-skills-token-ratchet.mjs`: exit 0, 3394 / 3394; `--self-test` exit 0.\n- `node scripts/check-empty-changeset.mjs --base origin/main`, `check-changeset-no-major.mjs`: exit 0.\n- `node scripts/check-commit-card-trailers.mjs --range origin/main..HEAD`: exit 0.\n\nChangeset `.changeset/31338-platform-skill-global-uniques-stop.md`: `@objectstack/skills` patch, both declaration lines.\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic. (not touched)\n- [x] 2. Every name I added uses the casing for its kind. (none added)\n- [x] 3. No formatter ran; `pnpm lint` passes. (no lintable source touched; CI)\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset.\n- [x] 6. `packages/spec` touched: n/a.\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English. (the 维护者速读 block follows the project's PR convention)\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01FEkQ5oBgusQkTutB9LsDed)_"
+}

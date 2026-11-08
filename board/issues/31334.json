@@ -1,0 +1,36 @@
+{
+  "number": 31334,
+  "kind": "issue",
+  "title": "docs: nullable `record.amount` compared unguarded in gated positions on nine more docs pages and the validation spec example (after #31206)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "domain:devx",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-08T02:29:05Z",
+  "updated_at": "2026-11-08T05:05:39Z",
+  "closed_at": "2026-11-08T05:04:08Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31334",
+  "body": "domain:skills#3 · huangyiirene · session_01J8VVAj7CvjkGXvgXzd6RZ7\n\n## What is wrong\n\nPR #31322 (#31206) guards the nullable `amount` in the automation skill's approval flow and in the `HookSchema.condition` example. The publish-time null-guard rule (`packages/lint/src/validate-null-guards.ts`) refuses an unguarded comparison on a nullable field in a gated position, and the formula skill teaches the guard (`record.amount != null && …`, `skills/objectstack-formula/SKILL.md` ≈L112-L122; flow start conditions ≈L404). The PR's dev grep and its contract review (6715980957) found these sites outside that card's claim. Read on `main`:\n\n| Site | Surface | Gated? |\n|:--|:--|:--|\n| `content/docs/getting-started/common-patterns.mdx` L371-L372, edges `e2`/`e3` (`record.amount < 100` / `>= 100`) | `record_change` flow on `expense_report`; `amount` is `{ type: 'currency' }` with no required/default (L312) and the start condition does not guard it | Yes, refused as written |\n| `content/docs/automation/approvals.mdx` L145, start `condition` (`record.amount >= 50000 && …`) | `record_change` flow start condition on `opportunity` | Yes, if `amount` is nullable |\n| `content/docs/automation/hook-bodies.mdx` L74 (`record.status == \"open\" && record.amount > 1000`) | hook `condition` | Yes, if `amount` is nullable |\n| `content/docs/data-modeling/formulas.mdx` L119, L356 (`requiredWhen: P\\`record.amount > 10000\\``) | field `requiredWhen` (fail-open: silently enforces nothing) | Yes, if `amount` is nullable |\n| `content/docs/data-modeling/formulas.mdx` L394 (`record.amount <= 0`) | validation rule | Yes, if `amount` is nullable |\n| `content/docs/data-modeling/validation.mdx` L329 (`record.amount <= 0`) | validation rule fragment | Yes, if `amount` is nullable |\n| `content/docs/automation/flows.mdx` L2473 (`record.amount > 500`, start-node `condition` in the syntax table) | flow start condition | Yes on a `record_change` flow, if nullable |\n| `packages/spec/src/data/validation.zod.ts` L180, generated into `content/docs/references/data/validation.mdx` L170/L291/L505/L571 (`record.amount < 0`) | validation `condition` | Yes, if nullable (spec example; regenerate, never hand-edit) |\n| `ui/packages/app-shell/src/views/metadata-admin/SchemaForm.erasedArmMark-9830.test.tsx` L110 | hand-copies the old `HookSchema.condition` describe string | Not gated; the test reads its own constant and passes, but lags the served text once #31322 lands |\n\nNot a site: `content/docs/data-modeling/validation.mdx` L51 (`amount` is `required: true` at L31). Release notes and CHANGELOGs are left alone.\n\n## Evidence\n\nPR #31322 body § Other sites found; contract review 6715980957 ③.\n\n## Suggested shape\n\nWhere an example declares its object, guard as the formula skill teaches, or declare the field `required: true` if that is the honest fix. Where it does not, guard anyway. A flow's start-condition guard covers its edges and `decision` branches (validate-expressions.ts L2967-L2976), so guard the start condition rather than each edge. The spec example rides with a spec-lane note and a regenerated reference page. The UI test fixture is the UI lane's."
+}

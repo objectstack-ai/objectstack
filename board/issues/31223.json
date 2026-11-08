@@ -2,7 +2,7 @@
   "number": 31223,
   "kind": "pull_request",
   "title": "docs(skills): objectstack-data carries the hosted build agent's metadata-authoring judgment (cloud#3659 A, port 1 of 3)",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -20,10 +20,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-07T18:19:51Z",
-  "updated_at": "2026-11-08T00:51:17Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-11-08T07:44:29Z",
+  "closed_at": "2026-11-08T07:44:27Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-11-08T07:44:27Z",
   "comments": 9,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/31223",

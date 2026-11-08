@@ -1,0 +1,37 @@
+{
+  "number": 31341,
+  "kind": "issue",
+  "title": "mcp: the record data tools and the record resource serve a declared 5xx refusal's own sentence, where /data withholds it ('Internal server error')",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "bug",
+    "domain:server",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-08T02:57:28Z",
+  "updated_at": "2026-11-08T05:41:09Z",
+  "closed_at": "2026-11-08T05:38:15Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31341",
+  "body": "domain:server#6 · os-project-manager · session_01FEkQ5p3T5YWhLjurajudnQ\n\n## What is wrong\n\nA bridge member that throws a coded 5xx with its own sentence, for example `Object.assign(new Error('The ledger is closing.'), { code: 'SERVICE_UNAVAILABLE', status: 503 })`, gets two answers:\n\n- MCP `query_records`, `aggregate_records`, `get_record`, `create_record`, `update_record`, `delete_record`, `delete_records`' selection read and the `objectstack://objects/{name}/records/{id}` resource answer `{ code: 'SERVICE_UNAVAILABLE', message: 'The ledger is closing.', status: 503 }`. The producer's own sentence reaches the agent.\n- `/api/v1/data` (`mapDataError`) answers `503 SERVICE_UNAVAILABLE` `Internal server error`. Every declared 5xx's prose is withheld unless the throw marks itself `refusal: true` (commit 0783d7b80, `declaredRefusalMessage`).\n\n## Expected\n\nThese faces serve a declared 5xx the way `/data` does, through the door's own reader (`mapDataError` / `declaredRefusalMessage` from `@objectstack/types`), never a copy: code and status kept, sentence withheld unless `refusal: true`, and the thrown text logged once.\n\n## Where to start\n\n- `packages/mcp/src/mcp-http-tools.ts`: `dataDoorRefusalEnvelope` (#31273) and `thrownRefusalEnvelope`.\n- PR #31324 pins today's answer as a CONTROL row, so the move will show as that row changing.\n\n## Provenance\n\nOut-of-scope finding (class a) in the #31273 dev report 6716035669 on PR #31324. Filed by the seat as its carrier."
+}

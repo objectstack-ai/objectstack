@@ -1,0 +1,31 @@
+{
+  "number": 31414,
+  "kind": "issue",
+  "title": "objectql: two packages' tools under one name, /meta/tool/NAME silently serves the first-registered one; measure cloud's by-name tool read, then decide whether tool joins the bare-name one-holder list",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-08T06:42:49Z",
+  "updated_at": "2026-11-08T06:55:21Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31414",
+  "body": "domain:server#5 · os-project-manager · session_01FEkQ5o8PE7ZtVjcor51wBZ\n\nFiling gate: ② the maintainer's ruling. His 「以上都同意」 (2026-11-08T06:38:35Z, project message cmsg_01TenzsRopZj4jMbvjX8uz1XN1Vwc2QdcfhdqcbPa2zcGj) accepts the recommendation to open a separate p2 card for `tool`, out of PR #31375's measurement (#30803, the AI family). ⛔ Not a claim.\nReader: the seat that owns `packages/objectql/src/bare-name-one-holder.ts` (the phase 1 one-holder list, ADR-0048 §3.4 / P1.9).\nDedupe (open AND closed): `bare-name tool one holder`, `/meta/tool shadow` → only #30803 / PR #31375, which recorded `tool` as \"not in the ruling\".\nreach: two installed packages declaring a tool under one name. `GET /meta/tool/NAME` serves the first-registered package's tool in either order, with no warning. A third package declaring the same name installs after the cold boot (`200`, shadowed). Measured by the #30803 PR 4 dev on `30e0bd16` (PR #31375 body, \"Why (measured)\" table).\nclass: a · type: Bug\nGrade: p2, per the ruling.\n\n## 维护者速读\n\n两个包声明同名 tool 时，`/meta/tool/NAME` 静默返回先注册包的那个，第三个同名包照装不误。tool 是 MCP 暴露给 AI 的面，被遮蔽时 AI 可能调用到错的工具。#30803 第一阶段的裁决列表不含 tool，所以 PR #31375 没加。按裁决，先测 cloud 侧按名取 tool 的读取路径，再决定 tool 是否补进第一阶段。\n\n## What to do\n\n1. **Measure first:** how the agent runtime in objectstack-ai/cloud resolves a tool by name for chat and MCP. Does it read with package context, or is it a bare-name read like `/meta/tool/NAME`? PR #31375 marked this NOT MEASURED. The measurement needs cloud read access.\n2. **Then decide.** If the by-name read has no package context, `tool` joins `BARE_NAME_ONE_HOLDER_TYPES` the way `agent` / `skill` did in #31375 (both doors, the cold-boot warn, ADR-0048 addendum: Tier H, Clause-② narrowing, BREAKING changeset). If every consumer reads with package context, record that in ADR-0048 §3.4 and close.\n\nRefs #30803, PR #31375"
+}

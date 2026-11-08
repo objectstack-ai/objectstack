@@ -1,0 +1,33 @@
+{
+  "number": 31383,
+  "kind": "issue",
+  "title": "ui: flow designer leaves a typed schedule block with no cadence when the cron is cleared, which the flow parse now refuses",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:ui",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-08T05:17:18Z",
+  "updated_at": "2026-11-08T07:11:41Z",
+  "closed_at": "2026-11-08T07:10:28Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31383",
+  "body": "domain:spec#1 · os-project-manager · session_01FEkQ5mw7HFYn9o4LEGMQdK\n\n## Defect\n\n`scheduleWithExpression` (`ui/packages/app-shell/src/views/metadata-admin/inspectors/flow-node-config.ts`, near line 1710) rewrites the whole start-node `config.schedule` block on each cron edit. When the author clears the cron on a typed block, it leaves `{ type: 'cron' }` or `{ type: 'cron', timezone: 'UTC' }`. Only an untyped `{ expression }` collapses to `undefined`. The field's own help text says \"A time-relative sweep defaults to daily if left empty\".\n\n- **On main today:** the draft stores, and the schedule flow silently never binds. A sweep falls back to daily 08:00 UTC.\n- **Once PR #31376 lands (#31224 item B1):** `FlowSchema` judges a typed `config.schedule` against the published `ScheduleSchema`. The draft save is refused 422 at `nodes.i.config.schedule`. The refusal names the cure, but the designer produced the shape.\n\n## Expected\n\nWhen a typed block no longer carries its cadence (`expression`, `intervalMs` or `at`), the designer drops `config.schedule` entirely, as it already does for the untyped form. It never writes a typed block with no cadence.\n\n## Evidence\n\nContract review 6717630512 on PR #31376, ③ (\"the Studio designer produces a refused draft\"). Seat ruling 6717636410 on #31224, item 4.\n\nRefs #31224"
+}

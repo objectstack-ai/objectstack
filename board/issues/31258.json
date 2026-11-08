@@ -2,7 +2,7 @@
   "number": 31258,
   "kind": "pull_request",
   "title": "feat(plugin-auth)!: an organization administrator reads their judged client address; the console's retired MFA notices are gone",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -20,10 +20,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-07T20:08:23Z",
-  "updated_at": "2026-11-08T02:07:02Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-11-08T02:31:43Z",
+  "closed_at": "2026-11-08T02:31:41Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-08T02:31:41Z",
   "comments": 15,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/31258",

@@ -1,0 +1,37 @@
+{
+  "number": 31349,
+  "kind": "pull_request",
+  "title": "fix(driver-sql): by-id writes, aggregate() and distinct() honour external.columnMap",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "marchtian"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-08T03:27:07Z",
+  "updated_at": "2026-11-08T04:21:47Z",
+  "closed_at": "2026-11-08T04:21:45Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-08T04:21:45Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/31349",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"marchtian\"} -->\n_Requested by **田騏** · [project thread](https://claude.ai/code/project/chan_01VmuUhXU9SSUzqJYyXSmYSi?thread=cmsg_01VmuUhXU9SSUzqJYyXSmYSiCJSKjyyyiryKpcYHe8ewtb)_\n\nFixes #31340\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么:外部对象用 `external.columnMap` 把主键映射到远端列(如 `CUST_NO: 'id'`)时,`update()`、`delete()`、`bulkDelete()` 现在按映射后的列匹配行,不再写死 `WHERE \"id\" = ?`;`aggregate()`(分组、日期分桶、聚合字段)和 `distinct()` 也改为按远端列取值,输出键和展示仍用本地字段名。\n- 为什么改:远端表恰好另有一个叫 `id` 的普通列时,旧语句在 SQLite / PostgreSQL / MySQL 上按错误的列匹配:更新返回空,删除会删掉没人指定的行,而且不报错。聚合和去重则直接报「列不存在」。\n- 风险与回滚:没有 `columnMap` 的对象和轮转分片,生成的 SQL 与之前完全一致。只改 `packages/drivers/driver-sql`,两个 patch changeset。回滚就是还原这个 PR。\n- 先看:`sql-driver-sequence-semantics.ts` 的 `update` / `delete`,`sql-driver-bulk-operations.ts` 的 `bulkDelete`;`sql-driver-aggregation.ts` 的 `columnOf`;两个新测试文件。\n- 两分钟验证:`pnpm --filter @objectstack/driver-sql exec vitest run src/sql-driver-external-columnmap-writes.test.ts src/sql-driver-external-columnmap-aggregate.test.ts`,预期 13 个用例全部通过。\n- 需要你做的:无,席位落地。`upsert` 同样没走映射,已另立 #31342,不在本 PR。\n\n## What changes\n\nTwo defects, one commit and one patch changeset each. Both fixes were first written on the Oracle federation card's branch; this PR lands them alone off `main`, with nothing Oracle-specific (no spec change, no dialect arm).\n\n**By-id writes.** `update()` (the statement and its read-back), `delete()` and `bulkDelete()` resolve the key column through `remoteColumn(object, 'id', 'id')`, the same mapping `create()`'s read-back and the write payload (`applyWriteColumnMap`) already use. Rotation shards are never federated and keep `id`.\n\n**Analytic reads.** `aggregate()` spells every identifier (GROUP BY, the structured group key, the date-bucket expression, the aggregand) as the remote column, and `distinct()` selects and reads back the remote column. Output keys, presentation (`readPresentationKind`, `presentReadValue`) and the per-field registries stay keyed by the FIELD. `buildDateBucketExpr` gains an optional `column` parameter: the field still drives `temporalFieldKind` and the SQLite repair, and the bindings name the column.\n\nAn object without a `columnMap` compiles the statement it compiled before.\n\n## Why\n\nADR-0015 federation maps a local field to a remote column; `find()`, `count()` and every WHERE honoured that, these five doors did not. The silent half: a remote table with its own unmapped `id` column, where the unmapped `WHERE \"id\" = ?` matched the surrogate, so an update answered `null` and a delete removed a row nobody named.\n\n## Verification\n\nMeasured on this branch (sqlite, the in-tree driver), before the merge of main at 0ceca395 and re-run on the merge head:\n\n- New pins red with the fix reverted, green with it applied:\n  - `sql-driver-external-columnmap-writes.test.ts`: 5 of 5 fail with `sql-driver-sequence-semantics.ts` and `sql-driver-bulk-operations.ts` restored to `origin/main`; 5 pass with the fix.\n  - `sql-driver-external-columnmap-aggregate.test.ts`: 8 of 8 fail with `sql-driver-aggregation.ts`, `sql-driver-distinct.ts` and `sql-driver-date-bucket.ts` restored to `origin/main`; 8 pass with the fix.\n- `pnpm --filter @objectstack/driver-sql test`: 240 files passed, 12 skipped; 3880 tests passed, 218 skipped (the live PG and MySQL cells, which run in `Temporal Conformance (live PG + MySQL)` on `main`).\n- `pnpm --filter @objectstack/driver-sql run typecheck`: exit 0.\n- eslint over the eight changed source and test files: exit 0.\n- `dispatch-gates --commands`: 68 derived; all 68 run, every one exit 0; `dispatch-gates --ran`: 68 accounted, 0 NOT-MEASURED, 0 UNRUN.\n\nOut of scope, measured and filed: `upsert()` on a columnMap-ed object uses the unmapped `id` as its conflict target and read-back key (#31342).\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic. (`packages/spec` not touched.)\n- [x] 2. Every name I added uses the casing for its kind.\n- [x] 3. No formatter ran; `pnpm lint` passes. (eslint over the changed files, exit 0.)\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset. (`@objectstack/driver-sql` patch, two changesets.)\n- [x] 6. `packages/spec` touched: its generated artifacts are regenerated and committed. (Not touched.)\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English.\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_017ihL2euiyuLXizr6FW32R3)_\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

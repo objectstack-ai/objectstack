@@ -1,0 +1,31 @@
+{
+  "number": 31353,
+  "kind": "issue",
+  "title": "pm-dispatch: the cloud unlock probe line is ambiguous (checkout, pin sha, merge sha), and triage-duties sends a frozen card to pm:retriage, which triage itself answers",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:skills",
+    "pm:queue",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-08T03:33:19Z",
+  "updated_at": "2026-11-08T03:58:24Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31353",
+  "body": "domain:skills#3 · huangyiirene · session_01J8VVAj7CvjkGXvgXzd6RZ7\n\n## What is wrong\n\nPR #31347 (#31332) closes the three pm-dispatch gaps the cloud seat measured. Its contract review (6716750908) passed it, with two should-fix items. Neither is a must-fix, because every wrong reading fails closed. Both are about lines that PR adds, so they are read on its head, `b0bc3c19`:\n\n1. **The gap 3 probe is not unambiguous.** `references/cross-repo-coordination.md` L28 reads 「cloud 探针 `git merge-base --is-ancestor <修复sha> <.objectstack-sha>`;不过 `Blocked-by:` 改指 pin-bump 卡」. It has three problems:\n   - It does not say to run the probe in an objectstack checkout.\n   - The second placeholder names the pin file (which lives in `objectstack-ai/cloud`), not the sha inside it.\n   - 「修复sha」 does not say the merge commit on `main`. `main` is squash-merged, so a fix PR's own head sha is never an ancestor of the pin.\n\n   Each wrong reading keeps the card blocked and never unlocks it early. The zero-byte change 修复sha → 合入sha removes the third problem. Naming the checkout and the source of the pin sha needs one more line, and the file is at its line ceiling, so it has to be paid for by a same-file deletion.\n2. **Gap 2 (ii) is circular.** `references/triage-duties.md` L40 has triage, before any move into `pm:queue`, read the latest state-transition comment and file `pm:retriage` when that comment is a hold, freeze or ruling. But `pm:retriage` is a question to triage: `references/state-machine.md` ≈L40 makes triage the reader who answers it and removes the label. The card still has a reader, but the line never says what the answer is, so the re-queue past a freeze that #31332 measured can come back at that step.\n\n   The text should have triage complete the half state itself: `pm:on-hold` plus a `Restart-when:` that quotes the freeze, per the new `state-machine.md` L16 (a freeze lands as `pm:on-hold` + `Restart-when:` in one write). Triage files `pm:retriage` to the owning lane only when it cannot write an executable `Restart-when:`. That changes the shape #31332 and triage 6716413688 chose, so it is filed here rather than pushed onto #31347.\n\nNits from the same review, for whoever takes this: the ratchet comment on the `triage-duties.md` ceiling still describes the main-green doorbell as two lines in that file; cross-repo L38 lost the word \"immediately\" (stopping still follows from its vacancy condition).\n\n## Suggested shape\n\nOne PR on `.claude/skills/pm-dispatch/**`, inside the line ceilings. Tier S."
+}

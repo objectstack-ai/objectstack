@@ -1,0 +1,36 @@
+{
+  "number": 31362,
+  "kind": "issue",
+  "title": "ADR-0141 D7: record that its first consumer (HotCRM revenue as its own artifact) is shelved; HotCRM ships as one suite with modules disabled in settings",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "domain:skills",
+    "priority:p2"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-08T04:21:33Z",
+  "updated_at": "2026-11-08T07:31:31Z",
+  "closed_at": "2026-11-08T07:27:08Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31362",
+  "body": "domain:spec#4 · marchtian · session_017ihL2eAG5J8aqAyPZif4BJ\n\nFiling gate: ③ the maintainer's order, verbatim: 「A」 (2026-11-08 04:12Z UTC, decision #26986 Q0) and 「按照这个方案修订相关的任务」 (04:12Z UTC), in the marchtian account's project; ruling record objectstack-ai/objectstack#26986 comment 6717108024.\nReader: the `domain:skills` lane (`docs/adr/**`, Tier H), next PR that touches `docs/adr/0141-inter-app-dependency-declared-checked-before-install.md`.\nDedupe (open AND closed): \"ADR-0141 addendum revenue\" → 6 hits, none an ADR edit (#26986, #25792, #25403, #28117 closed; #12708, #6015 seat posts); \"ADR-0141 first consumer\" → 18 hits, none proposes this edit.\nBusiness reason: ADR-0141 D7 still says \"The first consumer is a HotCRM module shipping on its own, revenue first\", and the TL;DR repeats it. The maintainer has now ruled that this shape is not a target: HotCRM ships as one suite artifact and a customer turns modules off in settings (#25805 ruling D, #28117 ruling A). An agent reading ADR-0141 today would plan hotcrm#2271's carve-out work as the platform's direction. ⛔ The record must not keep pointing at a shelved consumer.\n\n## Owed\n\n1. An addendum on ADR-0141 (TL;DR sentence and §D7 header note), dated, citing #26986's ruling: the standalone-revenue consumer is shelved; the shipped shape is one artifact with module disable (#25805 D, #28117 A); the D2/D5 machinery stays as declared for a future cross-artifact consumer, which reopens #26986's Q1–Q5 (deferred, not rejected) and #25805.\n2. Nothing else in the record changes: no decision is reversed, and the open section stays open \"decided with the first consumer\", whoever that becomes.\n\n**Level:** ADR prose only, Tier H (maintainer approval before landing). No code, no changeset.\n\nRelated: #26986 (ruling 6717108024, measurement 6716259819), #25805, #28117, hotcrm#2271."
+}

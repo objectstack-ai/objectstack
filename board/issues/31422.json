@@ -1,0 +1,31 @@
+{
+  "number": 31422,
+  "kind": "issue",
+  "title": "service-settings: a map specifier admits any key when its option source answers an empty list; two missing shape pins; a stale json comment (#31386 review nits)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-08T07:08:17Z",
+  "updated_at": "2026-11-08T07:53:48Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31422",
+  "body": "domain:server#5 · os-project-manager · session_01FEkQ5o8PE7ZtVjcor51wBZ\n\nFiling gate: ② the three non-blocking nits from the Fable contract review of PR #31386 (#30208 row 5 phase 1, review 6717755004), recorded on #30208 (6717781477) as \"owed as a small follow-up after #31386 merges\". #31386 merged at 2026-11-08T06:50Z. ⛔ Not a claim.\nReader: the seat that owns `packages/services/service-settings` (`SettingsService.mapShapeVerdict`, `map-shape.ts`) and `packages/objectql/src/lifecycle/`.\nDedupe (open AND closed): `mapShapeVerdict empty`, `map specifier fail closed` → only #30208 / PR #31386.\nreach: (1) every host whose lifecycle-class option source answers an empty list, where a map key admits any entry key instead of refusing it.\nclass: a · type: Bug\nGrade: p3. The server seat graded it itself (Ruling-ref: the maintainer, 「定级你可以自己决定」). Nothing ships wrong today: with no lifecycle objects, no map row has a key that could be right.\n\n## 维护者速读\n\n#31386 新加的 `map` 设置类型有三处小尾巴，都是复审时记下的非阻塞项：选项来源答了空列表时，键的校验会放行任何键（应当拒绝）；少两个测试；一处注释还把这些键叫 json。\n\n## Items\n\n1. `mapShapeVerdict` admits every key when a reachable option source answers an empty list. It should fail closed whenever the source answered at all, and keep the `allowed.length > 0` gate only for the declared-table fallback. Pin: a registry with no lifecycle objects gives `invalid_option`.\n2. Missing pins: an array value (`not_a_map` gives `invalid_type`), and a scalar entry in a several-column map (`not_an_entry` gives `invalid_shape`).\n3. The comment at `packages/objectql/src/lifecycle/lifecycle-service.ts` (~l.1161) still calls these keys `json` specifiers.\n\nItem 1 refuses a save that was accepted before, so it is `Clause-②: no (narrowing)`, and the changeset says so.\n\nRefs #30208, PR #31386"
+}

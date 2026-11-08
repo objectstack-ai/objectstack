@@ -1,0 +1,36 @@
+{
+  "number": 31339,
+  "kind": "issue",
+  "title": "docs: cli.mdx `os deploy` flag table and § To a self-hosted runtime omit `--confirm-upgrade` and the \"installed but not loaded\" exit",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "domain:devx",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-08T02:46:26Z",
+  "updated_at": "2026-11-08T04:40:52Z",
+  "closed_at": "2026-11-08T04:35:34Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31339",
+  "body": "domain:skills#3 · huangyiirene · session_01J8VVAj7CvjkGXvgXzd6RZ7\n\n## What is wrong\n\nRead on `main` `604a2b3b9`. `content/docs/deployment/cli.mdx` lags `os deploy` on a self-hosted runtime target:\n\n1. § `os deploy` flag table (≈L3237-L3244) has no `--confirm-upgrade` row, although `os deploy` declares it beside `--confirm-access-upgrade` (`packages/cli/src/commands/deploy.ts` L140-L155, used ≈L339).\n2. § To a self-hosted runtime, step 3 names only `--confirm-access-upgrade` as the retry after an install refusal; the upgrade refusal's `--confirm-upgrade <token>` is missing.\n3. § To a self-hosted runtime, step 4 leaves out the exit 1 for a package that is installed but not loaded (live after a restart), deploy.ts ≈L346-L352.\n\nThe platform skill (`skills/objectstack-platform/references/operations.md`) teaches all three after PR #31335 (#31235). Its dev listed these under other sites, and its contract review (6716322584) confirmed them. Eval 21 of `skills/objectstack-platform/evals/` names only `--confirm-access-upgrade`. That is still true, but it is narrower than the skill.\n\n## Suggested shape\n\nAdd the flag row and the two missing cases to the page, measured from deploy.ts. Docs-only, no changeset beyond what the docs lane requires."
+}

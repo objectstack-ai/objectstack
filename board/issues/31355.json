@@ -1,0 +1,34 @@
+{
+  "number": 31355,
+  "kind": "pull_request",
+  "title": "docs(cli): os deploy names --confirm-upgrade and the not-loaded exit on a self-hosted runtime",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-08T03:52:14Z",
+  "updated_at": "2026-11-08T04:35:35Z",
+  "closed_at": "2026-11-08T04:35:33Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-08T04:35:32Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/31355",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-project-manager\"} -->\n_Requested by **Leehom** · [project thread](https://claude.ai/code/project/chan_01TenzsRopZj4jMbvjX8uz1X?thread=cmsg_01TenzsRopZj4jMbvjX8uz1X1GGrF9tzymWcNoSkgF6BYA)_\n\ndomain:devx#3 · os-project-manager · session_01FEkQ5kuCuTK9UtGmuBcaPR\n\nFixes #31339\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么:只改 `content/docs/deployment/cli.mdx` 的 `os deploy` 一节:参数表加 `--confirm-upgrade TOKEN` 一行;「To a self-hosted runtime」第 3 步写明两个确认参数都会透传,以及两种升级拒绝各自打印的重试命令;第 4 步补上「运行时记录了包、但运行中的内核加载不了」时退出 1(重启后才生效)。\n- 为什么改:`os deploy` 早已声明并透传 `--confirm-upgrade`,也已对未热加载的安装退出 1,文档只写了 `--confirm-access-upgrade`、只写了退出 0 的成功路径,读者照文档走会找不到 schema 升级拒绝的出路。\n- 风险与回滚:纯文档,不改任何包、不发布;回滚即还原本 PR。\n- 先看:`content/docs/deployment/cli.mdx` 约 3245 行新表格行,和约 3266–3276 行第 3、4 步。\n- 两分钟验证:`grep -n \"confirm-upgrade\" content/docs/deployment/cli.mdx`,预期在参数表、第 3 步、`os package install` 节都能看到它。\n- 需要你做的:无,席位落地。\n\n## What changes\n\n`content/docs/deployment/cli.mdx`, section `os deploy` only. Every fact is read from `packages/cli/src/commands/deploy.ts` on `main` 436394555:\n\n1. **Flag table.** A `--confirm-upgrade` row beside `--confirm-access-upgrade`: self-hosted target only, confirms the upgrade's schema findings (a suspected rename, a type change that is not safe) with the finding-set token the runtime's refusal printed, refused when the target is ObjectOS Cloud. Source: the flag's `description` (deploy.ts L149-L154) and the cloud-target refusal loop over both flags (L169-L177).\n2. **Step 3, Install.** Both `--confirm-access-upgrade` and `--confirm-upgrade` are passed through (L336-L340), a schema upgrade to confirm joins the listed refusals, and the step names each refusal's retry: `os deploy --confirm-access-upgrade TOKEN` for access findings, `os deploy --confirm-upgrade TOKEN` for schema findings. The retry spelling is `PackageInstall.retryCommand = 'os deploy'` (deploy.ts L321) as printed by `packages/cli/src/commands/package/install.ts` L468 and L489.\n3. **Step 4, Live.** A package the runtime recorded but its running kernel could not load is not live: the command prints that it loads when the runtime restarts and exits `1` (deploy.ts L346-L353, `!outcome.hotLoaded`).\n\n## Why\n\nCard #31339: the page lagged `os deploy` on a self-hosted runtime target on these three points. Rulings from the order: docs only, every fact measured from `deploy.ts`; p3 by triage 6716396816.\n\n## Tests\n\nNone owed: docs text only, no behaviour changed, so no test and no ablation.\n\n## Acceptance notes\n\n- **Eval 21 left alone.** The order lets `skills/objectstack-platform/evals/` eval 21 ride this PR only if PR #31335 (#31235) had merged at start. Read at start: PR #31335 is `open`, `merged: false`. The eval is untouched.\n- **Docs census and transcript gates.** `pnpm check:docs-transcript-drift`, `pnpm check:cli-examples-parity`, `pnpm check:doc-anchors` and the rest of the derived union read this file and stay green with no move, so no census row changes in this PR.\n- **Step 3's \"a package the running kernel cannot register\" refusal** is kept as written: install-local refuses an inline manifest whose register throws (`422 PLUGIN_REGISTER_FAILED`, install.ts comment at L648-L657), which `os deploy` reads as a non-installed outcome and exits `1` (deploy.ts L341-L345). The new step 4 sentence covers the other answer, `hotLoaded: false`.\n- **Governed surface.** `node scripts/pm/check-governed-merges.mjs --branch HEAD` on head ef2c1811, exit 0: \"0 of 1 path(s) hit the register … NOT governed — ordinary queue landing applies\".\n- `node scripts/pm/dispatch-gates.mjs --tier`: no path-derived model mandate for this surface.\n\n## Verification\n\nGate union derived by `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` (44 families for this diff), run on head `ef2c1811`, each exit code captured before any pipe:\n\n- **44 run, exit 0 each.** `--ran`: \"44 derived famil(ies) accounted for — 44 run, 0 NOT-MEASURED\".\n- `pnpm --filter @objectstack/spec run check:skill-examples` first answered exit 3 (PREREQUISITE NOT MET: `packages/client-react/dist` unbuilt). After `pnpm --filter \"@objectstack/client-react...\" build` it answered exit 0: \"285 prose examples type-check across 3 surface(s)\". The recorded code is the second run.\n- Builds before the union, through `scripts/pm/os-verify-lock.sh`: `@objectstack/spec...` and `@objectstack/lint...` (VERDICT command-exit 0), then `@objectstack/client-react...` (VERDICT command-exit 0).\n- `pnpm lint`: the diff touches no package, so there is no scoped package lint.\n- CI's own steps the derivation names as NOT MEASURED locally (`ci.yml` Build Docs, Plan Test Core shards, the type-check lanes) are read from this PR's check-runs, not re-run here.\n\n`skip-changeset`: `content/docs/**` is published by no package.\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic. (not touched)\n- [x] 2. Every name I added uses the casing for its kind. (no names added)\n- [x] 3. No formatter ran; `pnpm lint` passes. (no package touched)\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset. (publishes nothing: `skip-changeset`)\n- [x] 6. `packages/spec` touched: its generated artifacts are regenerated and committed. (not touched)\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English. (the 维护者速读 block is the lane's required Chinese summary)\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01FEkQ5kuCuTK9UtGmuBcaPR\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01FEkQ5kuCuTK9UtGmuBcaPR)_\n"
+}

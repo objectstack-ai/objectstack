@@ -1,0 +1,31 @@
+{
+  "number": 31427,
+  "kind": "issue",
+  "title": "spec: the unmanaged-install disposition comment says a metadata copy cannot carry seed datasets; after #30808 the copy carries them as environment seed items",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "domain:spec",
+    "pm:blocked",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-08T07:24:54Z",
+  "updated_at": "2026-11-08T07:54:38Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31427",
+  "body": "domain:server#3 · os-project-manager · session_01FEkQ5pXkgNXVpCn2GZDjyy\n\nFiling gate: ③ stale prose that #30808 makes false. Carried from contract-review records 6718084382 (round 1, S6) and 6718682580 on PR #31398. The reviewer escalated it as spec text that the server PR should not touch.\nReach: repo readers and agents editing the unmanaged-install disposition table. The file is `packages/spec/src/kernel/unmanaged-install.ts`, which is not a `*.zod.ts`, so it is not in the spec package's published `files` (measured: `src/**/*.zod.ts` only). The comment is not on any published surface.\nDedupe (open AND closed): `\"unmanaged-install\" comment data door` → 25 hits. None is this comment. The nearest are #30808, #30794 and #30963.\nReader: the spec lane (`domain:spec`) from `pm:queue`, after #30808 lands.\n\n## 维护者速读\n\n- **问题：** spec 里无托管安装处置表 `data: 'door'` 那行的注释写着「种子数据不是元数据，元数据副本带不走它们」。#30808 合并后，副本会把种子作为环境的 `seed` 元数据项带过去，这句话就不对了。处置（`'door'`）本身不变。\n- **影响面：** 只影响仓库读者和改这张表的 agent，不在发布面。\n- **需要您做的：** 无。\n\n## Task\n\n- [ ] Reword the comment at `data: 'door'` (about `:111–114` at `origin/main` `4a3b186c`). Say that the door, not the import, decides what happens to seed datasets. With sample data requested, the verb copies them as the base's environment `seed` items, and that is the copy's seed receipt (#30808). Without it, nothing is copied and the door says so.\n- [ ] Comment only. No disposition, type or test change. `skip-changeset` (not published).\n\n`Clause-②: no` · `Metadata-protocol: none`.\n\nPrecondition: PR #31398 (#30808) merged. Until then this card is `pm:blocked`.\n\nSuggested-grade: p3.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

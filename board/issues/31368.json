@@ -1,0 +1,33 @@
+{
+  "number": 31368,
+  "kind": "issue",
+  "title": "security#1 seat cannot list the repository's security advisories, so a draft no seat rang for never reaches its ledger",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:skills",
+    "pm:dispatched",
+    "priority:p1",
+    "tooling"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-08T04:41:17Z",
+  "updated_at": "2026-11-08T08:00:09Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31368",
+  "body": "security#1 · sunhaolin · session_017xRBcT1w3zpekijraHJE4f\n\n## Why this card exists\n\nThe maintainer, in this seat's session (`session_017xRBcT1w3zpekijraHJE4f`), verbatim (2026-11-08):\n\n> 所以 你的skills 还是有问题，应该立卡优化\n\n> 你应该能自主读到所有的安全问题才是合理的\n\nSo the target is this: the security#1 seat can list every non-published advisory on this repository by itself, without the maintainer or a doorbell naming each id.\n\n## What was measured (2026-11-08, `origin/main` `d0512c2fbe`)\n\n- **Direct read.** The session account holds `admin` on the repository (`GET /repos/objectstack-ai/objectstack` answers `permissions.admin: true`). Even so, `GET /repos/objectstack-ai/objectstack/security-advisories` answers 4 items, all `published`. With `state=draft`, `state=triage` or `state=closed` it answers 0 items. `GET …/security-advisories/{a draft's id}` answers 403 \"Resource not accessible by integration\". The cloud session's token is an integration token with no repository-advisories permission, so the account's role does not reach it.\n- **The relay.** It reads one advisory by id (`advisory_read`, sealed). It refuses any `GET` on the collection by design: `scripts/pm/fleet-write/ops.mjs` lists \"listing advisories\" among the things \"out of reach of every row\", and `ADVISORY_CREATE_PATH_SHAPE` reaches the collection by `advisory_create`'s `POST` alone. The lane charter (`.claude/skills/pm-dispatch/references/lanes/security.md`) records the consequence: ids come only from the maintainer, a doorbell, or a relay measurement.\n- **The gap this left.** The maintainer's advisories page showed 19 drafts. The seat ledger (#29740) knew 10 of them, plus 1 with its id pending. **8 had no ledger row.** They were drafted by at least four different seats and threads, and none of them rang a doorbell that reached the seat (the seat was vacant for part of that time and its mailbox closed). The seat learned of them only because the maintainer pasted the list.\n\n## Rule wanted\n\nAt every patrol fire, the seat reads the full set of `triage`, `draft` and `closed` advisory ids with their states, and diffs it against the ledger. An id on the platform with no ledger row is `received` that fire. A ledger row whose platform state disagrees is corrected that fire. The ledger then stops depending on every finder ringing the doorbell.\n\n## Suggested route (the skills lane decides)\n\n- A read-grant relay row that `GET`s the collection for those states. The executor projects each item to `ghsa_id`, `state`, `severity`, `created_at` and `updated_at` BEFORE sealing, so no summary or description crosses even as ciphertext and the answer fits the notice-part cap. It seals that the way `advisory_read` does (one-time key, ciphertext only in the public run). It pages to a short page and returns the count beside the ids.\n- The charter's 〈接收与台账〉 replaces 「编号只来自维护者、门铃或中继实测」 with the listing, and the patrol diff becomes one of the seat's standby items.\n- Whether the read grant on the collection needs the maintainer's naming (as `advisory_read`'s sender gate did) is a question for the lane.\n\n## Acceptance\n\n- One relay run lists every non-published advisory id with its state.\n- The count matches the advisories page.\n- The patrol reports ids missing from the ledger, and stale ledger states, with no human input.\n- No advisory text, summary or package appears in any public run log or on GitHub."
+}

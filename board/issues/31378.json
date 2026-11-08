@@ -1,0 +1,37 @@
+{
+  "number": 31378,
+  "kind": "pull_request",
+  "title": "fix(driver-sql): upsert() and paged reads honour a columnMap-ed key",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "marchtian"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-08T05:01:51Z",
+  "updated_at": "2026-11-08T05:52:09Z",
+  "closed_at": "2026-11-08T05:52:07Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-08T05:52:07Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/31378",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"marchtian\"} -->\n_Requested by **田騏** · [project thread](https://claude.ai/code/project/chan_01VmuUhXU9SSUzqJYyXSmYSi?thread=cmsg_01VmuUhXU9SSUzqJYyXSmYSiCJSKjyyyiryKpcYHe8ewtb)_\n\nFixes #31342\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么:外部对象用 `external.columnMap` 映射主键时,`upsert()` 的冲突目标(默认的和调用方显式传的 `conflictKeys`)、MySQL 的预检与落点探测、以及写完后的回读,现在都按映射后的远端列名生成;分页读取在调用方排序之后,用映射后的主键列做唯一的兜底排序。\n- 为什么改:以前 upsert 写的是 `ON CONFLICT (\"id\")`。远端表没有 `id` 列时每次都报错;远端表另有一个不是主键的 `id` 列时,已存在的键会报主键冲突而不是合并,新插入的行回读时会读到另一行,而且不报错。分页没有兜底排序时,并列的行在页与页之间可能重复或丢失。\n- 风险与回滚:没有 `columnMap` 的对象生成的 SQL 与之前完全一致;没有映射主键的外部对象分页行为不变,不猜列。只改 `packages/drivers/driver-sql`,两个 patch changeset。回滚就是还原这个 PR。\n- 先看:`sql-driver-sequence-semantics.ts` 里 `upsert` 的 `conflictColumns`;`sql-driver-field-mapping.ts` 的 `paginationTieBreaker`;`sql-driver-external-columnmap-writes.test.ts` 末尾两个 upsert 的 describe;`sql-driver-external-columnmap-paging.test.ts`。\n- 两分钟验证:`pnpm --filter @objectstack/driver-sql exec vitest run src/sql-driver-external-columnmap-writes.test.ts src/sql-driver-external-columnmap-paging.test.ts`,预期 13 个用例全部通过。\n- 需要你做的:无,席位落地。\n\n## What changes\n\nTwo defects, one commit and one patch changeset each, following #31349 on the same federated-key mapping. Nothing Oracle-specific: the paging fix is a port of the Oracle card's branch commit with its Oracle prose removed.\n\n**Upsert.** `upsert()` derives `conflictColumns` (each conflict key through `remoteColumn`) and the key column once, and uses them wherever the statement or a probe names a column: the `ON CONFLICT` target, the no-op merge fallback, the plain-INSERT backing check, the MySQL pre-flight (`assertConflictTargetHonoured`, which compares against physical indexes), the MySQL fence and identity probes (`assertMergeLandedInWrittenOrganization`, `assertMergeLandedOnSuppliedIdentity`), and the read-back. The payload was already in column form (`applyWriteColumnMap`), and `insertOnlyUpsertColumns` already mapped the key. Refusals keep naming the fields the caller passed.\n\n**Paged reads.** `paginationTieBreaker` returns `id` for a federated object whose `columnMap` maps a remote column to `id`, so a paged `find()` breaks ties on the mapped key after the caller's keys, as a managed table does. A federated object with no mapped key is unchanged: no column is guessed.\n\n## Why\n\nADR-0015 federation maps a field to a remote column. After #31349 the by-id doors and the analytic reads honoured it; `upsert()` and the pagination tie-breaker still did not. Measured on SQLite before the fix: on a table keyed `CUST_NO`, every upsert failed with `no such column: id`; on a table with its own surrogate `id` beside the mapped key `CODE`, upserting an existing key raised a primary-key violation, and upserting key `1` inserted it but answered the row whose surrogate is 1.\n\n## Verification\n\nMeasured on this branch (sqlite, the in-tree driver) at a6b16b4e3, and the pins re-run on the merge head cd627ef9:\n\n- New pins red with the fix reverted, green with it applied:\n  - upsert, 5 pins in `sql-driver-external-columnmap-writes.test.ts`: 5 of 5 fail with `sql-driver-sequence-semantics.ts` restored to the commit before the fix; the 5 by-id pins in that file stay green as controls.\n  - paging, `sql-driver-external-columnmap-paging.test.ts`: 2 of 3 fail with `sql-driver-field-mapping.ts` restored to `origin/main`; the third is the no-mapped-key control and passes both ways.\n  - All 21 columnMap pins (writes, paging, aggregate) pass with the fix.\n- `pnpm --filter @objectstack/driver-sql test`: 241 files passed, 12 skipped; 3888 tests passed, 218 skipped (the live PG and MySQL cells, which run in `Temporal Conformance (live PG + MySQL)` on `main`).\n- `pnpm --filter @objectstack/driver-sql run typecheck`: exit 0. (The first run caught `Array#at` in the ported test, TS2550 under this package's lib; replaced.)\n- eslint over the five changed source and test files: exit 0.\n- `dispatch-gates --commands`: 68 derived; all 68 run, every one exit 0; `dispatch-gates --ran`: 68 accounted, 0 NOT-MEASURED, 0 UNRUN.\n\nNot measured locally: the MySQL-only probes now name the mapped key column; no MySQL server here, and the existing MySQL cells run on `main`.\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic. (`packages/spec` not touched.)\n- [x] 2. Every name I added uses the casing for its kind.\n- [x] 3. No formatter ran; `pnpm lint` passes. (eslint over the changed files, exit 0.)\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset. (`@objectstack/driver-sql` patch, two changesets.)\n- [x] 6. `packages/spec` touched: its generated artifacts are regenerated and committed. (Not touched.)\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English.\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_017ihL2euiyuLXizr6FW32R3)_\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

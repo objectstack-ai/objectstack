@@ -1,0 +1,35 @@
+{
+  "number": 31396,
+  "kind": "pull_request",
+  "title": "fix(runtime): the environment-membership check judges the principal the request resolved",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-08T05:58:05Z",
+  "updated_at": "2026-11-08T07:45:23Z",
+  "closed_at": "2026-11-08T07:45:22Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-08T07:45:21Z",
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/31396",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-project-manager\"} -->\n_Requested by **Leehom** · [project thread](https://claude.ai/code/project/chan_01TenzsRopZj4jMbvjX8uz1X?thread=cmsg_01TenzsRopZj4jMbvjX8uz1X1zG3Xn4JonaKvDLLr5gnjL)_\n\nRefs #28284\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- **改了什么**：多环境主机上，dispatcher 的环境成员检查(`403 PROJECT_MEMBERSHIP_REQUIRED`)现在判断的是请求解析出的主体。由 API key 或 OAuth access token 接纳的主体，按 key 的所有者或 token 的用户判断(同时带了别人 cookie 也一样)，平台组织豁免使用解析时核验过的组织。由 session cookie 接纳的主体，判断方式与原来完全相同。\n- **为什么改**：QA 第三轮发现的安全加固(细节按披露裁决不公开)\n- **风险与回滚**：只改 `@objectstack/runtime`(patch)。单环境主机，以及关闭了该检查的主机(`api.enforceProjectMembership: false`)不受影响。会被新拒绝的只有：多环境主机上，以 API key 或 OAuth token 访问某环境作用域路由、但不是该环境成员的调用方。回滚即 revert 本 PR。\n- **先看**：`packages/runtime/src/http-dispatcher.ts` 的 `enforceProjectMembership`，session 读取之后按 `admittingCredentialKind` 新增的分支；以及新文件 `packages/runtime/src/security/admitting-credential.ts`。\n- **两分钟验证**：`pnpm --filter @objectstack/runtime exec vitest run src/http-dispatcher-membership-resolved-principal.test.ts`，预期 8/8。\n- **需要你做的**：无，席位做 contract review 后落地。\n\n## What changes\n\n- **New `admittingCredentialKind(request)`** (`packages/runtime/src/security/admitting-credential.ts`) is the one reading of which credential admitted a request's caller.\n  - It answers `oauth` when the resolved context carries OAuth scopes.\n  - Otherwise it answers what the identity step's admission recorded: `api_key` or `session`.\n  - It answers `undefined` when nothing was recorded.\n  - `apiForwardCredentialKind` (action execution) now delegates to it, so the api-action forward and the membership check cannot disagree.\n- **`HttpDispatcher.enforceProjectMembership`**: when that reading is `api_key` or `oauth`, the check judges the principal `resolveRequestScope` resolved.\n  - That principal is `executionContext.userId`: the key's owner or the token's user. This holds even when a session cookie for another user rides beside it.\n  - The platform-organization bypass reads `executionContext.tenantId`, the organization the resolution vetted.\n- **A session-admitted principal** keeps today's path exactly: the check's own session read, the session's active organization, and the fail-open when that read throws.\n- **Unchanged:**\n  - hosts without environment scoping (no `kernel-resolver`, so no `environmentId`);\n  - hosts that turn the check off;\n  - the control-plane, share-link, approval-action and inbound-hook exemptions.\n\n## Why\n\nQA 第三轮发现的安全加固(细节按披露裁决不公开)\n\n## Verification\n\nReadings on head `44a099f05`: two commits on `main` at `c2bc76e3e`. The second answers the contract review: one shared credential reader, and a pin on a scoped data route.\n\n<details><summary>Pins, red-first and restore</summary>\n\n- New `packages/runtime/src/http-dispatcher-membership-resolved-principal.test.ts` (8): a multi-tenant host with a stub resolver and `sys_environment_member`, driven through `dispatch()`.\n  - These are refused, and the refusal names the judged user:\n    - a non-member admitted by an OAuth access token on `/mcp`;\n    - the same token sent beside a member's cookie;\n    - a non-member admitted by an API key on `/mcp`;\n    - a non-member admitted by an API key on the scoped data route `/data/task`.\n  - CONTROLs:\n    - A cookie non-member is refused as before.\n    - A member admitted by a token passes. So does a member admitted by a key. Each makes one membership read for that user.\n    - A request with no credential is not judged here.\n- Red-first: with `http-dispatcher.ts` set back to its `main` blob, the file read 6 failed | 2 passed (8).\n  - The four refusal cases failed.\n  - The two member CONTROLs failed only because no membership read was made.\n  - The cookie and no-credential CONTROLs stayed green.\n- Restored (blob equal to HEAD): 8 passed (8).\n\n</details>\n\n<details><summary>Package suite and typecheck</summary>\n\n- `tsc --noEmit` in `packages/runtime`: exit 0.\n- `pnpm --filter @objectstack/runtime test` under the verify lock: Test Files 556 passed (556), Tests 8965 passed | 19 skipped (8984), `VERDICT command-exit 0`.\n  - An earlier cut of this change judged any resolved principal that differed from the check's own session read. This suite's `domains/meta-read-principal-filtering.measurement.test.ts` caught it, because the two reads can disagree for a session principal.\n  - The arm is now keyed on the admitting credential, and that file is green.\n  - The action-execution forward tests are green on the shared reader.\n\n</details>\n\n<details><summary>Derived gates</summary>\n\n- `node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack --commands` derives 69 families on this diff. Every one ran and exited 0; `check:type-check-debt` ran under the verify lock.\n- `--ran` reconciliation: 69 derived, 69 run, 0 NOT-MEASURED, 0 UNRUN.\n- `eslint --no-inline-config` on the changed source files: exit 0.\n\n</details>\n\nNot measured:\n- An end-to-end multi-environment boot. No `kernel-resolver` ships in this repository, so the pins drive `dispatch()` with a stub resolver.\n- The dogfood battery. Its single-environment boots set no `environmentId`, so they never reach this check.\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic. (No `packages/spec` change.)\n- [x] 2. Every name I added uses the casing for its kind.\n- [x] 3. No formatter ran; `eslint --no-inline-config` on the changed files: exit 0.\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset.\n- [x] 6. `packages/spec` touched: not touched.\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English, except the maintainer summary the lane's PRs carry.\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01FEkQ5mgePB9NQ4PNhvYVxk)_"
+}

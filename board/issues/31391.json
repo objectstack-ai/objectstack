@@ -1,0 +1,33 @@
+{
+  "number": 31391,
+  "kind": "issue",
+  "title": "Console: draw the `map` settings specifier as a table of keyed rows (Data Lifecycle retention overrides and quotas)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:ui",
+    "enhancement",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-08T05:33:35Z",
+  "updated_at": "2026-11-08T07:12:03Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31391",
+  "body": "domain:server#2 · marchtian · session_017ihL2fBJ6xsLWJsnNJGMMx\n\nFiling gate: ④ — the per-layer child of #30208 row 5 (ruling A, record 6715997428: \"spec 加一个带列定义的映射类型 … 另开 ui 控件卡\"); the server half is PR #31386.\nBusiness reason: a business administrator sets retention windows and row quotas per object as checked rows instead of hand-written JSON. Until this lands, Setup → Data Lifecycle shows the three keys as an unsupported specifier type and they can only be set through the API or `OS_LIFECYCLE_*`.\nReader: the `domain:ui` seat, the console settings renderer (`ui/apps/console/src/pages/settings/SettingsField.tsx`), next PR after #31386 merges.\nDedupe (open AND closed): \"map specifier console settings\" → 30 hits, \"retention_overrides console\" → 7 hits; none is this control (#30208 is the parent, #31241 the closed json-as-text defect).\nSpec contract gate: `SpecifierType` `map` with `keyColumn` / `columns`, from #31386; no new spec surface is asked here (column-label translations are named in step 7).\n\n## Console: draw the `map` settings specifier as a table of keyed rows\n\nFollows #30208 row 5 (ruling record 6715997428, option A; Fable review 6717755004 settled the name `map`). The server half adds a `map` member to `SpecifierType` and moves `lifecycle.retention_overrides`, `lifecycle.quotas` and `lifecycle.quota_defaults` to it. Until this card lands, Setup → Data Lifecycle draws those three rows as \"Unsupported specifier type: map\" (`console.settingsView.unsupportedSpecifierType`). Env overrides and the settings API are unaffected.\n\n### The contract the control renders (from `packages/spec/src/system/settings-manifest.zod.ts`)\n\n- `type: 'map'`, `key`, `label`, `description`, `default` (an object, `{}` for the three lifecycle keys), `scope`, the usual lock and source badges.\n- `keyColumn: { label, description? }`: the header over the key column.\n- `columns: [{ name, label, description?, kind }]`, at least one, in display order. `kind` is `'duration'` or `'positive_integer'`.\n- `options` (served, not declared): the namespace read (`GET /api/settings/:namespace`) serves the keys the map admits as the specifier's `options` (`[{ value, label }]`), from a runtime option source (the objects that declare a lifecycle class other than `record`; the lifecycle classes other than `record` for `quota_defaults`). The manifest declares no list.\n\n### Stored value (unchanged from what these keys store today)\n\n- One value column: `Record<key, value>`, e.g. `{ \"sys_audit_log\": 1000000 }`. The column's `name` is not stored.\n- Several value columns: `Record<key, { [column.name]: value }>`, e.g. `{ \"sys_job_run\": { \"maxAge\": \"1y\", \"expireAfter\": \"30d\" } }`. An entry carries at least one declared column and no other property; an empty cell is left out of the entry.\n\n### What to build\n\n1. **Rows.** One row per entry of the effective value, in the order stored; add a row and remove a row. The control keeps a local draft with stable row ids (the starting point is `ui/packages/app-shell/src/views/metadata-admin/inspectors/FlowKeyValueField.tsx`, which already has a local draft, stable row ids and a searchable key picker, `keysByLabel`).\n2. **Key picker.** A searchable picker over the served `options` (`value`, shown by `label`). A key already used by another row is not offered again. A stored key that is no longer in `options` stays on its row, marked as not offered, so the save door's `invalid_option` refusal is explained before Save.\n3. **Duration input** for a `duration` column: a whole number plus a unit select (`h`, `d`, `w`, `y`), stored as the literal (`'90d'`, `'7y'`). The server judges it against `LIFECYCLE_DURATION_REGEX` (`/^\\d+(h|d|w|y)$/`).\n4. **Positive-integer input** for a `positive_integer` column: whole numbers above 0, sent as a number, never as text.\n5. **Save** sends the object (never JSON text), through the page's existing patch. A cleared map sends `null`.\n6. **Errors.** The save door answers one `FieldError` for the key, with `constraint: { type: 'map', entry, column?, kind?, allowed? }`. Codes: `invalid_type` (the value is not an object), `invalid_option` (a key not admitted), `unknown_field` (a property no column declares), `invalid_shape` (an entry or a cell not in its column's form). Mark the row named by `entry` and the cell named by `column`; the message is the server's English sentence until the codes get console translations.\n7. **Column labels.** `keyColumn.label` and `columns[].label` are English literals in the manifest. Translating them needs a `columns` group in the settings `keys.<key>` translation entry (`packages/spec/src/system/translation.zod.ts`) and ui's copies of that schema; it belongs to this card if the console translates the headers.\n8. **Unsupported fallback** stays for any other unknown type.\n\n### Tests to carry\n\nA map with one column and with several renders its rows from the stored value; the key picker lists the served options and hides used keys; a duration typed as number + unit is stored as `'90d'`; Save PUTs the object; an `invalid_option` answer marks the row; a locked (env) map renders read-only.\n\nOut of scope: any server change. The server half is the #30208 row 5 phase 1 PR."
+}

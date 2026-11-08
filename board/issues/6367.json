@@ -1,7 +1,7 @@
 {
   "number": 6367,
   "kind": "issue",
-  "title": "[PM seat] domain:server · seat 1 — 🟢 sunhaolin",
+  "title": "[PM seat] domain:server · seat 1 — ⏳ vacant",
   "state": "open",
   "state_reason": "reopened",
   "draft": null,
@@ -14,18 +14,16 @@
     "domain:server",
     "pm:seat"
   ],
-  "assignees": [
-    "sunhaolin"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-08-07T15:16:20Z",
-  "updated_at": "2026-11-07T04:51:44Z",
+  "updated_at": "2026-11-08T04:11:24Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 364,
+  "comments": 365,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/6367",
-  "body": "domain:server#1 · sunhaolin · session_017xRBcTJTE7kSbcMoJQ4Txf\n\n⚠️ **Seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/server.md` (⛔ not copied here). This is **`domain:server` seat 1**. Seat 2 is #20966, seat 3 is #26761, seat 4 is #27737, seat 5 is #28677 and seat 6 is #29908. #6021 and #6024 are archives of this post, ⛔ do not sit there.\n\n<sub>Refreshed 2026-11-07T04:51Z (posture change); seated mark 6701249565.</sub>\n\n## Current PM\n\n🟢 `sunhaolin` · `session_017xRBcTJTE7kSbcMoJQ4Txf` · seated 2026-11-07T02:48Z · cloud session summoned by the maintainer with `/pm-dispatch server seat 1`, then 「并发2 只派 p1 卡」. Previous PM: `os-elon-musk` · `session_016WV4cytLmJxfAmgPVjUbbW`, no clock-out brief; its last output on this lane is the landing hand-over 6690664327 to seat 2 (mailbox #30985), and every in-flight item it held is now claimed by seat 2.\n\n## Handover ledger\n\n- **Inherited:** nothing in flight. The old mailbox #30658 is closed.\n- **Pointer:** canonical ledger = labels + assignee + `Claim:` comments carrying `Seat: domain:server#1` + `head:claude/` PRs.\n\n## Hot-file serial queue\n\n- **This seat holds:** none at seating. ⛔ Re-derive from the live `Claim:` comments and each open PR's file list before every dispatch.\n\n## Notes\n\n- **Mailbox:** #31077 (subscribed). **Patrol:** `trig_01QYnn27iicTedbsKyDjcUHZ` · `47 * * * *`.\n- **Posture:** p1 cards only. 「并发2 只派 p1 卡」, then 「当前任务处理完，后续串行」 (the maintainer, in this session): the two running devs (#31021, #30803 PR 3) finish, then at most one at a time. Dispatch is `mode:subagent` (this session is not a project thread).\n- **Sibling:** seat 2 (#20966, os-tesla) is online. Full-order alternation: seat 1 odd, seat 2 even; the claim stamp arbitrates.\n- **Write path:** the relay (`post-stamped.mjs`, `label-write.mjs`, `fleet-write/dispatch.mjs`). ⛔ No GitHub MCP writes.\n- **Publication:** objectstack. A merge to `main` publishes nothing. The release is the Version Packages PR, a human act.\n\n<!-- signed: domain:server#1 · sunhaolin · session_017xRBcTJTE7kSbcMoJQ4Txf -->\n\n"
+  "body": "domain:server#1 · sunhaolin · session_017xRBcTJTE7kSbcMoJQ4Txf\n\n⚠️ **Seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/server.md` (⛔ not copied here). This is **`domain:server` seat 1**. Seat 2 is #20966, seat 3 is #26761, seat 4 is #27737, seat 5 is #28677 and seat 6 is #29908. #6021 and #6024 are archives of this post, ⛔ do not sit there.\n\n<sub>Refreshed at clock-out 2026-11-08T04:09Z; the clock-out brief is the newest comment.</sub>\n\n## Current PM\n\n⏳ vacant. Previous PM: `sunhaolin` · `session_017xRBcTJTE7kSbcMoJQ4Txf`, clocked out on the maintainer's order in that session (「你直接下班」). `check-handover` exit 0.\n\n## Handover ledger\n\n- **In flight:** none. #30906 (PR #31082) and #31021 (PR #31083) merged and closed; #30803 PR 3 (#31093) was handed to seat 5 by triage (6713641758), landed, and seat 5 holds PR 4.\n- **Follow-ups this seat filed or routed:** #31090 (docs, the skills seed-mode table, the `seed.zod.ts` `mode` text); #30907 carry-over comment (ADR-0055 §3, spec jsdoc); objectstack-ai/cloud#3657 item 2 (hosted re-seed wiring, not measured from this repo).\n- **Pointer:** canonical ledger = labels + assignee + `Claim:` comments carrying `Seat: domain:server#1` + `head:claude/` PRs.\n\n## Hot-file serial queue\n\n- **This seat holds:** none.\n\n## Notes\n\n- **Mailbox:** #31077 closed. **Patrol:** deleted. Successor: `/pm-dispatch server seat 1`, read this post first, open a new mailbox.\n- **Publication:** objectstack. A merge to `main` publishes nothing. The release is the Version Packages PR, a human act.\n\n<!-- signed: domain:server#1 · sunhaolin · session_017xRBcTJTE7kSbcMoJQ4Txf -->\n"
 }

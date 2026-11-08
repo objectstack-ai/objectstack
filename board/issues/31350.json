@@ -1,0 +1,34 @@
+{
+  "number": 31350,
+  "kind": "issue",
+  "title": "Share page: a user field shows its raw sys_user id to an anonymous visitor — render the neutral placeholder instead",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:ui",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-08T03:28:17Z",
+  "updated_at": "2026-11-08T05:21:18Z",
+  "closed_at": "2026-11-08T05:20:05Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31350",
+  "body": "domain:ui#1 · os-project-manager · session_01FEkQ5nLA7wiVY5YWjT9Svr\n\nFiling gate: ② out-of-scope finding from #31326 (PR #31346, dev report 6716683769: \"a user-type field still prints its sys_user id on the share page\", code reading only), filed by `domain:ui#1`. ⛔ Not a claim. Grade p3, self-graded under the 2026-11-01 ruling (「定级你可以自己决定」): the same display defect class as #31326, an id an anonymous visitor cannot use.\n\n## 维护者速读\n\n分享链接页（`/s/TOKEN`）上，查找字段已改为显示「已关联记录」（#31326）。但「用户」类型字段存的也是一个内部 ID（`sys_user` 的 id），页面仍把这串 ID 原样显示给外部访客。改法与 #31326 相同：有值时显示中性占位，不显示 ID，也不读取用户记录。\n\n## What is wrong\n\n- The spec `FieldType` `user` stores a `sys_user` id (`packages/spec/src/data/field.zod.ts`, the comment beside `'user'`).\n- After PR #31346, `SharedRecordFields` (`ui/apps/console/src/pages/SharedRecordFields.tsx`) shows the placeholder only for `lookup` and `master_detail`. A filled `user` field still falls through to the text path and prints the id. This was read in code by the #31326 dev and is not yet measured on a rendered page.\n\n## Expected\n\n- On the share page, a filled `user` field renders a neutral, localized placeholder (reuse `sharedRecord.linkedRecord` if the wording fits, or add one key); an empty one renders empty, as today. The id is never shown.\n- No change to the resolve answer, and no read of `sys_user` (showing the person's name is the same security-boundary question as option B on #27200).\n- Pins: a filled user field shows the placeholder and no id; CONTROL: a text field renders as today. Measure first that the resolve projection serves `type: 'user'` for such a field.\n\nLane: `domain:ui`. Related: #31326, PR #31346, #27200.\n"
+}

@@ -13,20 +13,22 @@
   "labels": [
     "domain:cloud",
     "enhancement",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p2",
     "repo:cloud",
     "security"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-zhuang"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-31T09:25:50Z",
-  "updated_at": "2026-11-07T17:05:08Z",
+  "updated_at": "2026-11-08T07:58:37Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/28387",
   "body": "repo:cloud#2 · os-zhuang · session_0123kRqqdpAJWYMgsgdAJX4G\n\nFiling gate ①: a follow-up from PR objectstack-ai/cloud#3423 (cloud#3403, merged 2026-10-31 09:22Z). It came out of the pre-GA security pass, cloud#3390.\n\n## 维护者速读\n\ncloud 现在会在成员被移出组织时吊销他在各环境里的 API key。但环境管理员可以通过 Restore 操作把这个 key 恢复。框架里 `sys_api_key.revoked_reason` 目前只接受 `admin_password_reset` 一个值，所以恢复入口分辨不出这是「成员离开组织」导致的吊销。\n\n## Expected\n\n- `revoked_reason` accepts `organization_membership_ended`. That is the framework's own word, already used for sessions as `revoke_reason`.\n- The Restore action refuses a key revoked for that reason, or is hidden for it.\n- cloud's `/_admin/environments/:id/revoke-identity` then writes the reason.\n\n## Reader who acts\n\nFramework triage (spec plus the `sys_api_key` actions). This is a spec widening, so it goes through the contract-review tier. The cloud half is a one-line write once it lands.\n\n## Dedup\n\nI searched objectstack issues for \"revoked_reason membership api key restore\": no open card."

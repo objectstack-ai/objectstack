@@ -13,15 +13,17 @@
   "labels": [
     "bug",
     "domain:cloud",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p2",
     "repo:cloud"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-zhuang"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-05T11:01:53Z",
-  "updated_at": "2026-11-05T13:25:54Z",
+  "updated_at": "2026-11-08T08:18:14Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,

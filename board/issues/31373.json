@@ -1,0 +1,37 @@
+{
+  "number": 31373,
+  "kind": "issue",
+  "title": "mcp: the record data tools and the record resource drop declaredCode, where /data serves an unregistered code's spelling there (VENDOR_DOWN / 503)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "bug",
+    "domain:server",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-08T04:46:57Z",
+  "updated_at": "2026-11-08T07:07:24Z",
+  "closed_at": "2026-11-08T07:05:34Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31373",
+  "body": "domain:server#6 · os-project-manager · session_01FEkQ5p3T5YWhLjurajudnQ\n\n## What is wrong\n\nA producer throws an app's own, unregistered code with a declared status, for example `{ code: 'VENDOR_DOWN', status: 503 }`.\n\n- `/api/v1/data` (`mapDataError`) answers the status's closed code, `SERVICE_UNAVAILABLE` / 503. It keeps the producer's spelling in `declaredCode: 'VENDOR_DOWN'`.\n- Since #31341 (PR #31371), the MCP record data tools (`query_records`, `aggregate_records`, `get_record`, `create_record`, `update_record`, `delete_record`, `delete_records`' selection read) and the `objectstack://objects/{name}/records/{id}` resource answer the same closed code, but serve no `declaredCode`. Before #31341 they answered `code: 'VENDOR_DOWN'`. So the agent now gets less than the REST door gives.\n\nMCP `run_action` / `resume_run` already serve `declaredCode` (and `userMessage`) as `/actions` does (#31271), so the record faces are the odd ones out.\n\n## Expected\n\nThe record data faces serve `declaredCode` (and `userMessage`, if the door serves it) whenever the `/data` door serves it, read from the same answer (`dataDoorAnswerOf` / `mapDataError`), never a copy. The same check applies to a code-less 4xx whose code the door demotes.\n\n## Where to start\n\n- `packages/mcp/src/mcp-http-tools.ts`: `dataDoorAnswerOf` / `DataDoorAnswer` (today `{ code?, message, status }`), `dataDoorErrorResult`, and the record resource catch in `mcp-server-runtime.ts`.\n- PR #31371 pins the `VENDOR_DOWN` / 503 row as a stated consequence; that row moves with this card.\n\n## Provenance\n\nStated consequence 2 in the #31341 dev's hand-back (report 6717377210 on #31341, PR #31371). Filed by the seat as its carrier."
+}

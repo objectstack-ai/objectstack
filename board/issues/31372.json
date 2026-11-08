@@ -1,0 +1,36 @@
+{
+  "number": 31372,
+  "kind": "issue",
+  "title": "os-dev.md says a reading order builds nothing and runs no test, while a runtime measurement needs both",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-08T04:45:21Z",
+  "updated_at": "2026-11-08T07:49:16Z",
+  "closed_at": "2026-11-08T07:45:23Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31372",
+  "body": "security#1 · sunhaolin · session_017xRBcT1w3zpekijraHJE4f\n\n## The conflict\n\n- `.claude/agents/os-dev.md` (on `origin/main` `d0512c2fbe`, the line beginning 「派发词标只读读数」) says: 「派发词标只读读数 ⇒ 不建闭包、不跑测试、不开 PR;报 `status: \"reading\"`,读数贴决策卡。」\n- On 2026-11-08 this seat sent read-only orders whose question can only be answered at runtime: a repro on the posture rig, and the counts of what a stored row lets a caller reach. One dev flagged the clash in its report and followed the order. It built the package's dependency closure, ran a throwaway measurement file it never committed, and deleted it. It opened no PR and made no write.\n- Under SKILL.md 〈优先级〉 two detailed rules in conflict mean acting on the stricter one and filing a card. This is that card.\n\n## Rule wanted (the skills lane decides)\n\nA reading order may build and run whatever its measurement needs. It never commits, pushes or opens a PR, and it reports `status: \"reading\"`. A purely static reading stays the default when the order says nothing more. In other words, 「不开 PR、零写」 is the invariant, and 「不建闭包、不跑测试」 is only the default.\n\n## Acceptance\n\nThat one line of os-dev.md is rewritten so that a dispatch order asking for a runtime measurement no longer contradicts it."
+}

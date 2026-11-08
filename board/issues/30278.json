@@ -1,7 +1,7 @@
 {
   "number": 30278,
   "kind": "issue",
-  "title": "[PM seat] repo:cloud · seat 3 — 🟢 hotlong · on-demand",
+  "title": "[PM seat] repo:cloud · seat 3 — 🟢 os-zhuang",
   "state": "open",
   "state_reason": null,
   "draft": null,
@@ -14,17 +14,17 @@
     "pm:seat"
   ],
   "assignees": [
-    "hotlong"
+    "os-zhuang"
   ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-05T04:33:48Z",
-  "updated_at": "2026-11-07T07:31:56Z",
+  "updated_at": "2026-11-08T04:41:06Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 2,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30278",
-  "body": "repo:cloud#3 · hotlong · session_01Q4EjjRhUZjdy8VXs6Kkur2\n\n**This post is the registration of `repo:cloud` seat 3** (`Seat: repo:cloud#3`). Seat 1's post is objectstack-ai/objectstack#6026 (lane platform facts, standing bans, permanent notes); seat 2's is objectstack-ai/objectstack#24145. This post copies neither. Seat-post protocol: index = `label:pm:seat`; only the sitting PM edits this body; re-fetch before editing, first stamp wins, read back after writing.\n\n## 当前 PM\n\n**🟢 `hotlong`** · session `session_01Q4EjjRhUZjdy8VXs6Kkur2` · seat `repo:cloud#3` · seated (the time is this card's creation) on the maintainer's words in this session: 「开始派发处理 cloud 车道任务，并发5」.\n\n- **Form:** an on-demand seat (按需席) in a cloud session, not a project thread. No patrol routine and no mailbox: it runs while the maintainer's session runs, and stands down with a brief here.\n- **Lane rules:** `batch:5` (the maintainer's ceiling, named in the summons). Dispatch is `mode:subagent` (`os-dev`), one worktree per card.\n- ⚠️ **Linked-user deviation, recorded:** this session's linked user is `hotlong`, one of `GOVERNED_APPROVERS`. Writes go through the relay as `objectstack-fleet[bot]`; ⛔ no approving review is submitted from this seat, and governed-face PRs stay for a human merge.\n- **Seats 1 and 2** are not taken over: seat 2 (`os-zhuang`) produced output today, so it is live. Their claims (#3583, #3560, #3528, #3138 and objectstack-ai/objectstack#29999, #30218) are not touched here. The three seats share the queue; claim timestamps arbitrate.\n\n## 继承台账\n\nNone: a new seat. The queue is read live each round.\n\n## 热文件串行队\n\nNone declared by this seat. Observed in flight elsewhere (not this seat's): `apps/objectos-ee/deploy/README.md` (PR #3589), `packages/service-cloud/src/cloud-stack.ts` (PR #3595).\n\n## 说明\n\n- Scope: the `objectstack-ai/cloud` whole-repo queue plus objectstack cards carrying `domain:cloud` + `repo:cloud`, as seat 1's 范围 section states; ⛔ no `domain:*` is produced here."
+  "body": "repo:cloud#3 · os-zhuang · session_01QUs3BvRcDHXqRU4TSVE4u6\n\n**This post is the registration of `repo:cloud` seat 3** (`Seat: repo:cloud#3`). Seat 1's post is objectstack-ai/objectstack#6026 (lane platform facts, standing bans, permanent notes); seat 2's is objectstack-ai/objectstack#24145. This post copies neither. Seat-post protocol: index = `label:pm:seat`; only the sitting PM edits this body; re-fetch before editing, first stamp wins, read back after writing.\n\n## 当前 PM\n\n**🟢 `os-zhuang`** · session `session_01QUs3BvRcDHXqRU4TSVE4u6` · seat `repo:cloud#3` · seated 2026-11-08T04:37Z on the maintainer's words in the `cloud` Claude project: 「在开一个 cloud 座位」 (2026-11-08T04:32Z). Project seat (a project thread; card threads open through the project coordinator). Posture, ledger and round reports live in the project; this post is the stub other accounts read.\n\n- **Takeover basis:** the newest event on this post was `hotlong`'s stand-down brief 6703951339 (no claim of that shift left with a running dev, no stay-behind), so the seat was taken at once.\n- **Lane rules (the maintainer, 2026-11-08):** every priority is dispatchable, p1 then p2 first; no fable-tier cards for now. Concurrency is capped at 5 card threads; whether that 5 is per seat or shared with seat 2 is asked of the maintainer, and until answered this seat stays under the shared cap.\n- ⚠️ **Linked-user deviation, recorded:** this session's linked user is `os-zhuang`, one of `GOVERNED_APPROVERS`. Writes go through the relay as `objectstack-fleet[bot]`; ⛔ no approving review is submitted from this seat, and governed-face PRs stay for a human merge.\n- **Seats 1 and 2** are live and not taken over: seat 1 (`os-bob`, objectstack-ai/objectstack#6026) and seat 2 (`os-zhuang`, objectstack-ai/objectstack#24145, mailbox objectstack-ai/objectstack#31364). Their claims are not touched here. The seats share the queue; the split is agreed by mailbox (`Notify: split`), and claim timestamps arbitrate.\n- **Patrol:** `trig_01Nvfhi8kwToGQsJNSyrvVmz` · `37 * * * *` (hourly, self-bound to the seat session).\n- **Mailbox:** objectstack-ai/objectstack#31366 (subscribed by the seat session).\n\n## 继承台账\n\nNone carried as obligations: `hotlong`'s stand-down brief 6703951339 is the record of the previous shift. Its \"next round\" list is read live, not from here.\n\n## 热文件串行队\n\nNone declared by this seat.\n\n## 说明\n\n- Scope: the `objectstack-ai/cloud` whole-repo queue plus objectstack cards carrying `domain:cloud` + `repo:cloud`, as seat 1's 范围 section states; ⛔ no `domain:*` is produced here.\n- Previous body: `hotlong`'s on-demand shift (seated 2026-11-05, stood down 2026-11-07T07:31Z); it is this post's revision before this edit.\n"
 }

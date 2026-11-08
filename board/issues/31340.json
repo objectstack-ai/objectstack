@@ -1,0 +1,37 @@
+{
+  "number": 31340,
+  "kind": "issue",
+  "title": "driver-sql: update(), delete() and bulkDelete() key on literal \"id\", and aggregate()/distinct() on local field names, ignoring external.columnMap — a write can hit the wrong row on a federated table that also has its own \"id\" column",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:data",
+    "bug",
+    "domain:server",
+    "priority:p1"
+  ],
+  "assignees": [
+    "marchtian"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-08T02:54:20Z",
+  "updated_at": "2026-11-08T04:23:24Z",
+  "closed_at": "2026-11-08T04:21:47Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31340",
+  "body": "epic:#27261#1 · marchtian · session_017ihL2c5z3q4h8inrn5kwqV\nFiling gate: ③ out-of-scope of the #31328 card thread (Oracle federation dialect), which measured both defects while building the Oracle write and aggregate paths.\nRuling-ref: ADR-0015 (external datasource federation; `external.columnMap`)\nDedupe (open AND closed): \"columnMap aggregate\", \"columnMap distinct\", \"columnMap groupBy\", \"columnMap update delete id\" → none.\nReader: the epic PM dispatches it.\ntype: Bug\n\n## 维护者速读\n\n- **问题：** 外部对象用 `columnMap` 把本地字段映射到远端列名时，driver-sql 有两处没走映射：\n  1. `update()`、`delete()`、`bulkDelete()` 的条件写死了 `WHERE \"id\" = ?`。如果远端表的主键映射到别的列，同时表里又恰好有一个叫 `id` 的普通列，PostgreSQL、MySQL、SQLite 上会按错误的列匹配：更新返回空，删除会删掉没人指定的行。这个问题不报错。\n  2. `aggregate()` 和 `distinct()` 按本地字段名分组、取值，会报「列不存在」。这个问题报错，不会悄悄出错。\n- **影响面：** 只影响开启了写入的外部对象（写入需要两处都打开），而且主键做了映射。条件窄，但第 1 条会删错数据，所以单独快速落地，不等 Oracle 那张卡的契约复核。\n- **需要您做的：** 无。\n\n## Task\n\n- [ ] Resolve the key column through `remoteColumn(object, 'id', 'id')` in `update()` (the write and its read-back), `delete()` (sharded and unsharded) and `bulkDelete()`, at `packages/drivers/driver-sql/src/sql-driver.ts`, as `create()`'s read-back already does.\n- [ ] Map `groupBy`, the aggregand, date buckets and `distinct` through `remoteColumn` (`sql-driver-aggregation.ts`, `sql-driver-distinct.ts`).\n- [ ] Pins on sqlite: a mapped key over a table that also has its own `id` column, where update and delete touch the named row only; aggregate and distinct over renamed columns. Red before the fix, green after.\n- [ ] Out of scope: `upsert` on a columnMap-ed object (conflict target). Measure it and file a card if it misses the map too.\n- [ ] One patch changeset per defect, naming every SQL dialect.\n\n`Clause-②: no` · `Metadata-protocol: none`. The fix commits already exist on the #31328 branch (`de3cc9da6d` aggregate/distinct and a write-key commit). This card lands them alone off `main`, and #31328 then merges main."
+}

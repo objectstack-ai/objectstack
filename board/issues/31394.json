@@ -1,0 +1,32 @@
+{
+  "number": 31394,
+  "kind": "issue",
+  "title": "service-analytics: the native-SQL face emits plain LIKE for mssql, so a dashboard's text filter on a SQL Server federated object does not keep #6518's case-exact / case-folded contract the driver keeps",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:data",
+    "bug",
+    "domain:server",
+    "pm:blocked",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-08T05:55:02Z",
+  "updated_at": "2026-11-08T06:54:41Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31394",
+  "body": "epic:#27261#1 · marchtian · session_017ihL2c5z3q4h8inrn5kwqV\nFiling gate: ③ escalation of the CONTRACT_REVIEW_TIER record on PR #31381 (#31327). #6518's text-match contract holds on the driver face only.\nRuling-ref: #6518 (case-exact and case-folded text match)\nDedupe (open AND closed): \"analytics native sql mssql LIKE\", \"service-analytics COLLATE\" → none.\nBlocked-by: #31327\nReader: the epic PM dispatches it after #31327 lands.\ntype: Bug\n\n## 维护者速读\n\n- **问题：** SQL Server 联邦对象上，driver-sql 的文本匹配已按 #6518 区分「大小写精确」和「忽略大小写」两种（用 BIN2 排序规则）。但仪表盘走的 service-analytics 原生 SQL 那条路径仍然生成普通 `LIKE`，结果跟随库的默认排序规则，和同一个过滤条件在列表页的结果可能不一致。Oracle 是否有同样的问题需要一起测一下。\n- **需要您做的：** 无。\n\n## Task\n\n- [ ] Measure first: the same text filter through the driver face and through service-analytics' native-SQL face, on a case-insensitive SQL Server collation, gives different rows. Measure Oracle the same way.\n- [ ] Make the native-SQL face emit the dialect's text-match arms. Reuse driver-sql's emitters; don't copy them.\n- [ ] Pin it: compile-level for every arm, and a live cell when a URL is present.\n\n`Clause-②: no` expected · `Metadata-protocol: none`."
+}

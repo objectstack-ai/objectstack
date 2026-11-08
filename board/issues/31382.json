@@ -1,0 +1,37 @@
+{
+  "number": 31382,
+  "kind": "issue",
+  "title": "runtime: package jobs ignore a host's per-kernel scheduledWorkPolicy — scheduleAppArtifactJobs reads only the deployment switch, so a kernel whose host turned scheduled work off still runs its package's jobs",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-08T05:13:42Z",
+  "updated_at": "2026-11-08T08:15:01Z",
+  "closed_at": "2026-11-08T08:15:01Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31382",
+  "body": "repo:cloud#2 · os-zhuang · session_01QUs3Bv4Vxzk82qcDymLgT6\n\n## 维护者速读\n\n- #19834 让宿主可以按内核关掉包的定时工作：引擎和两个时间触发器都接受 `scheduledWorkPolicy`。但包里声明的 `jobs` 走 `scheduleAppArtifactJobs`，它只读部署开关 `OS_AUTOMATION_SCHEDULED_WORK_ENABLED`，没有接这个按内核的策略。\n- 结果：宿主把某个内核的定时工作关掉以后，`schedule` 流程确实不武装，但同一个包的 `jobs` 照样排程、照样运行。\n- 云端实测（cloud#3733）：Free 环境的内核拿到 `enabled: false`，包里每 500 ms 一次的 job 在 2.5 秒里写了 5 行，同一内核的 schedule 流程没有武装。cloud#3733 等这个缝才能把 Free 上的包 job 停掉。\n\nFiling gate: ① a defect with a named location and a reproduction. Found by the cloud#3733 thread (seat 2 dispatch, 11-08), measured on cloud's hosted rig at pin `90523379`.\n\n**Reader who acts:** the `domain:server` lane (`packages/runtime`: `scheduleAppArtifactJobs`, `AppPlugin`).\n\n**Business reason:** a host that runs many kernels in one process (cloud's hosted runtime keeps up to 50 per-environment kernels of mixed plans) can turn package-authored scheduled work off per kernel for flows, but not for jobs. So the clock-driven tenant load the #17396 ruling meant to keep off a kernel still runs there. On hosted cloud that is every Free environment running its packages' jobs, while the restriction profile it publishes says `allowScheduledAutomation: false`.\n\n**Dedupe:** searched `scheduleAppArtifactJobs scheduledWorkPolicy` and `scheduledWorkPolicy jobs` in this repo: 0 open. #19834 (the engine and trigger seam) and #21110 (the host reason) are closed, and they are the flow halves of this.\n\n## The gap, at pin `90523379`, unchanged on main `f4b4c8ae`\n\n- `scheduleAppArtifactJobs` (`packages/runtime/src/app-artifact-handlers.ts:728`) gates on `resolveScheduledWorkEnabled()` (`:767`) and reads the posture half from `resolveScheduledWorkPolicy()` (`:789`). Both take no argument and read `process.env` live.\n- `AppArtifactJobSchedulingOptions` (`:622`) has `appId`, `ql` and `source`, and no policy field. `AppPlugin`'s constructor options (`skipSeedData`, `skipOnEnable`, `securityMetadataRegistrar`) have none either, and `AppPlugin` calls the binder on `kernel:ready` with `{ appId, ql, source }` only (`app-plugin.ts`, the \"Auto-register declarative Background Jobs\" block).\n- #19834's gap list named `runtime/src/app-plugin.ts` as a consumer, but its ruled shape widened only `AutomationEngineOptions` and the two schedule trigger plugins, so the jobs binder kept the deployment read.\n\n## Measurement (cloud#3733)\n\ncloud's real tenant kernel factory with the hosted slate. The deployment switch is ON, as the hosted runtime sets it. The artifact carries one job (`interval` 500 ms, a sandboxed `body` that inserts one row) and one cron `schedule` flow. The host hands the engine and both triggers a `scheduledWorkPolicy` per kernel. For each policy the kernel was rebuilt, then read over a 2.5 s window:\n\n| policy the host handed | job on `job.listJobs()` | rows the job body wrote | schedule flow bound |\n|---|---|---|---|\n| `enabled: false` (Free) | yes | 5 | no |\n| `enabled: true` (Team) | yes | 5 | yes |\n| `enabled: true` (Enterprise) | yes | 5 | yes |\n| none (deployment default ON) | yes | 5 | yes |\n\nOn the `enabled: false` kernel the boot logs `[AppPlugin] Scheduled background jobs {\"bodies\":1,\"notScheduled\":0,…}` right beside `Flow 'pj_nightly_flow' is not armed on trigger 'schedule' — <the host's reason>`.\n\n## Ask\n\n1. `AppArtifactJobSchedulingOptions` accepts an optional `scheduledWorkPolicy`, a value or a resolver (the `ScheduledWorkPolicySource` shape the schedule triggers already take). When it is present, the binder reads it in place of both zero-argument reads: `enabled` for the gate, and `requiresActingOrganization` / `runOwnership` for the per-job organization rule. When it is absent, the deployment resolvers are read exactly as today.\n2. When that policy is off, nothing is scheduled, the result is `withheld: 'scheduled-work-disabled'`, the app's previously scheduled jobs are cancelled as today (`retireAppJobs`), and the info line carries `scheduledWorkDisabledReason(policy)`, so a host's reason (#21110) is printed instead of the deployment sentence.\n3. `AppPlugin` takes the same optional `scheduledWorkPolicy` and hands it to the binder.\n4. Tests: two kernels in one process. The one handed `enabled: false` schedules none of its package's jobs, and cancels a job it had scheduled before, while its sibling with `enabled: true` runs the same job. The zero-argument path stays pinned unchanged. Changeset `minor` on `@objectstack/runtime`. `Clause-②: no`: this widens runtime options, not `packages/spec`.\n\n## Acceptance\n\n- The two-kernels-one-process test above is green.\n- A host that hands `AppPlugin` a policy with `enabled: false` sees `withheld: 'scheduled-work-disabled'` and its own reason in the log.\n\n## Consumer (after this ships in a pin cloud can take)\n\ncloud#3733: cloud's tenant kernel factory hands the artifact's `AppPlugin` the same `scheduledWorkPolicyForPlan(plan)` it already hands the engine and the triggers, and adds a hosted e2e across Free, Team, Enterprise and no plan. Until then, hosted Free environments run their packages' jobs.\n\nRefs #19834, #21110, #17396, objectstack-ai/cloud#3733, objectstack-ai/cloud#2337"
+}

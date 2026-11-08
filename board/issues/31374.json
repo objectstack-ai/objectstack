@@ -1,0 +1,37 @@
+{
+  "number": 31374,
+  "kind": "issue",
+  "title": "organization-ownership ceremony: the not-null step checkpoints with the tables it skipped as notDeclared, so a re-run under a composition that declares them never adds NOT NULL; and composeServedPlatform skips serve's AI auto-inject",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-08T04:47:54Z",
+  "updated_at": "2026-11-08T07:12:40Z",
+  "closed_at": "2026-11-08T07:12:40Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31374",
+  "body": "repo:cloud#2 · os-zhuang · session_0123kRqqdpAJWYMgsgdAJX4G\n\n## 维护者速读\n\n- 所有权仪式里加 NOT NULL 的那一步，第一次跑时会跳过内核组合里没声明的表（notDeclared），但仍然把这一步标记为完成。之后换成声明了这些表的组合再跑，这一步直接跳过，那些表永远加不上 NOT NULL。仪式自己的提示说「在声明了这些表的组合里重跑就能补上」，实际做不到。\n- 影响企业版围墙部署的恢复流程：先 apply、再修数据、再 plan/apply，这样认证通过，但部分 AI 表的 `organization_id` 仍可为空。引擎层仍按组织隔离（cloud#3594），所以不是泄漏，只是库层面缺了约束，而且没有补救路径。\n- 目前还没有 4.2.x 的围墙库走完过仪式（4.3.0 全拒了），所以现在没人处在这个状态。cloud 会在发 ee-v4.3.1 前把组合修好（cloud#3744），但恢复路径还是要靠这张卡。\n\nFiling gate: ① a defect, measured. Found by the cloud#3739 thread on PR cloud#3744 (findings A and B in its body).\n\n**Reader who acts:** `domain:server`, which owns the organization-ownership ceremony (`os migrate organization-ownership`, its not-null step and its checkpoints) and `composeServedPlatform`.\n\n## A. A checkpoint records skipped tables as done (p1)\n\n**Measured** on cloud#3744: a database was certified under a composition with 8 tables `notDeclared`. Plan and apply were then re-run under a composition that declares them. Output: `✓ not-null checkpointed {\"applied\":45,…,\"notDeclared\":8}`, and the 8 stayed nullable. The same thing happens on the documented walled recovery path:\n1. apply;\n2. fix the legacy rows;\n3. plan again, which prints NOT NULL for the fixed tables;\n4. the resumed apply skips the step, so the tables certify nullable.\n\n**Fix:** either leave the not-null step un-checkpointed while any table is `notDeclared` or still held by legacy rows, or re-evaluate the step's pending tables on resume. The step's advice line must then hold.\n\n**Acceptance:** a test certifies with N tables `notDeclared`, re-runs under a composition that declares them, and ends with NOT NULL on all of them. A second test runs the walled recovery path (apply, fix rows, plan, apply) and ends with NOT NULL on the fixed tables.\n\n## B. `composeServedPlatform` does not mirror `serve`'s AI auto-inject (p2)\n\n`serve` injects `@objectstack/service-ai` when there is `requires: ['ai']` (or a declared dependency) and no AI plugin in the config. `composeServedPlatform`, which `os migrate plan` / `apply` and the ceremony use, skips the `ai` tier token, so a host that relies on the auto-inject declares no `ai_*` objects to the ceremony. cloud mounts the plugin explicitly after cloud#3744, so no cloud host depends on this. Other hosts may.\n\n**Fix:** compose the same AI plugin set `serve` would, or refuse with a clear message when a required tier is only auto-injected.\n\nRefs cloud#3739, cloud#3744, cloud#3588"
+}

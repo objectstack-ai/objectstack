@@ -1,0 +1,26 @@
+{
+  "number": 31434,
+  "kind": "issue",
+  "title": "QA seat charter: runs on the maintainer's word after each development wave (no weekly cadence), and adds the scenario library beside the checklist owed list",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-08T07:52:30Z",
+  "updated_at": "2026-11-08T07:52:30Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31434",
+  "body": "qa#1 · zhuangjianguo · session_01QsR2jUARzLeR7GhKms8a5s\n\n## What the rule text says today\n\n- `.claude/skills/pm-dispatch/references/lanes/qa.md` 〈座位与唤醒〉: the QA seat is a Routine seat with a weekly fire the maintainer creates, plus one round after each release.\n- `.claude/skills/checklist-test/SKILL.md` §6: the standing regression is four weekly `qa-run` records (`owed:weekly`, `touched:`, `priority:P0`, `surface:api`) plus the post-release npm smoke.\n- Neither text names the scenario library (`docs/qa/scenarios`, runner `packages/qa/scenarios`, `run-scenarios`). The QA seat's round today has no scenario half.\n\n## What the maintainer ruled (in the QA seat's session `session_01QsR2jUARzLeR7GhKms8a5s`, 2026-11-08, verbatim)\n\n1. 「也不需要每周跑，一波开发完了，我会和你说」: no weekly cadence. A QA round starts when the maintainer says a development wave is done.\n2. 「纳入，本轮一起跑，立卡交 skills 车道」: the scenario library joins the QA seat's duties and runs in every round; the charter change is this card.\n\n## The change this card asks for\n\n- `lanes/qa.md` 〈座位与唤醒〉 and 〈每轮〉: replace the weekly Routine fire with \"a round starts on the maintainer's word that a development wave is done\"; keep the post-release npm smoke as it is unless the maintainer says otherwise.\n- `lanes/qa.md` 〈每轮〉: add the scenario half: the `starter` cards of `docs/qa/scenarios`, `--modes scratch --packages workspace` (a wave is unreleased, so `published` would test the last release, not the wave), one card per command (the 2-hour background cap, `packages/qa/scenarios/README.md` 〈Running the cards in a Claude Code cloud session〉), at most two in parallel per container. Where the scorecard goes (the round report, not a `qa-run` record, since it is not a checklist selector), and that a failing half judged a product defect is extracted as a defect card with a `QA-source:` line that points at the round, the same as a checklist `fail`.\n- `lanes/qa.md` 〈每轮〉: the scenario runner's own constraints the seat must plan for: a subscription `oauth_token` login with neither `ANTHROPIC_API_KEY` nor `ANTHROPIC_AUTH_TOKEN` set, and a permission mode other than Auto (Auto's classifier refuses the headless `claude -p` the runner spawns).\n- checklist-test §6: the weekly wording becomes \"per development wave, on the maintainer's word\", or §6 points at `lanes/qa.md` for the cadence.\n- `skills.md` line 25 (「checklist-test §6 两条例行按期由 `qa#1` 跑」) follows the same change.\n\n## Governing text\n\n- `.claude/skills/pm-dispatch/SKILL.md` 〈优先级〉: a maintainer ruling outranks the rule text; until this card lands, the QA seat follows the rulings above and records them on its seat post.\n- `lanes/qa.md` 〈边界〉: the QA seat does not edit skill text; the text belongs to `domain:skills`.\n\nRoute: `domain:skills` (`.claude/**` rule text). Governed surface `.claude/**` (Tier S)."
+}

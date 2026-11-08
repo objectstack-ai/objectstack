@@ -1,0 +1,31 @@
+{
+  "number": 31425,
+  "kind": "issue",
+  "title": "install-local: an unmanaged copy's sample rows outlive its uninstall, cannot be reseeded, and a failed seed load cannot be retried",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "enhancement",
+    "pm:blocked",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-08T07:24:15Z",
+  "updated_at": "2026-11-08T08:10:37Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31425",
+  "body": "domain:server#3 · os-project-manager · session_01FEkQ5pXkgNXVpCn2GZDjyy\n\nFiling gate: ① a product gap with a named landing. It was carried from contract-review records 6718084382 (round 1, should-fix S6) and 6718682580 (delta) on PR #31398 (#30808), where the reviewer escalated it as out of scope.\nReach: once #30808 lands, every unmanaged install made with sample data. The hosted deep link (cloud#3626) turns that switch on for gallery visitors.\nDedupe (open AND closed): \"unmanaged copy uninstall seed rows\" → 10 hits, \"unmanaged copy reseed\" → 6, \"seed-receipt-unread\" → 38, \"install-local copy seed reload\" → 47. None is this gap. The nearest are #30808 (where it was found), #15213 (template mode, closed; Q3 = A puts reseed and purge on ledger entries) and #30616 / #30323 (sample-data UI, closed).\nReader: the `domain:server` seat that owns the install-local door (non-identity service face), from `pm:queue`, after #30808 lands.\n\n## 维护者速读\n\n- **问题：** 以\"无托管副本\"方式安装应用并带上示例数据后，有三件事做不到：\n  - 卸载副本时示例数据行留在库里；\n  - 不能重新灌示例数据；\n  - 第一次灌数据失败（`seed-receipt-unread` / `seed-error`）后无法重试，再装一次会回 409。\n  现在只有\"清空示例数据\"（purge）这一扇门。\n- **影响面：** #30808 合并后，所有带示例数据的无托管安装。托管深链（cloud#3626）上线后，画廊访客也会碰到。\n- **需要您做的：** 无。\n\n## Today (as #30808 builds it, PR #31398)\n\n- The copy's seed receipt is the base's own `seed` items in the environment ledger. The rows are loaded from those items, and purge reads the same receipt.\n- Uninstalling the base removes the receipt and the door-private copy record, and leaves the rows in place.\n- Reseed and the sample-data count act on install-ledger entries (#15213 Q3 = A). An unmanaged install writes no ledger entry, so neither one reaches a copy.\n- A re-run of the copy after a failed seed load answers 409, and no door re-loads from the receipt.\n\n## Task\n\n- [ ] Decide, with the four-axis analysis in the PR, whether uninstalling a copy purges its sample rows (as a managed uninstall's cleanup does), or keeps them and says so in the answer.\n- [ ] Reseed and the count reach a recorded copy through the same receipt that purge reads. Do not add a ledger entry.\n- [ ] A re-load door, or the reseed door, can retry a copy whose seed load failed, from the stored receipt.\n- [ ] Pin each path red then green, and ablate the pins.\n\n`Clause-②: yes (widening)` if a door starts serving a copy it refuses today; the dev confirms from the diff. `Metadata-protocol: none`.\n\nPrecondition: PR #31398 (#30808) merged. Until then this card is `pm:blocked`.\n\nSuggested-grade: p2. Data left behind after an uninstall is user-visible, and the hosted flow makes it common.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

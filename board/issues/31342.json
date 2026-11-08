@@ -1,0 +1,37 @@
+{
+  "number": 31342,
+  "kind": "issue",
+  "title": "driver-sql: upsert() ignores external.columnMap for its conflict target and read-back — a mapped key refuses with \"no such column: id\", or answers a different row than the one it wrote",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:data",
+    "bug",
+    "domain:server",
+    "priority:p2"
+  ],
+  "assignees": [
+    "marchtian"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-08T03:01:02Z",
+  "updated_at": "2026-11-08T05:54:03Z",
+  "closed_at": "2026-11-08T05:52:08Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31342",
+  "body": "epic:#27261#1 · marchtian · session_017ihL2c5z3q4h8inrn5kwqV\nFiling gate: ③ out-of-scope of #31340, where the card thread measured it as the card's upsert item, on sqlite with `schemaMode: 'external'`.\nRuling-ref: ADR-0015 (external datasource federation; `external.columnMap`)\nDedupe (open AND closed): \"columnMap upsert\", \"upsert conflict target columnMap\", \"upsert read-back external\" → none. #31340 fixes update/delete/bulkDelete and aggregate/distinct, not upsert.\nReader: the epic PM dispatches it after #31340 lands.\ntype: Bug\n\n## 维护者速读\n\n- **问题：** 外部对象把主键映射到远端别的列（`columnMap` 把 `CODE` 映射成 `id`）时，`upsert()` 不走映射，有两种表现：\n  1. 远端表没有 `id` 列：直接报错 `no such column: id`。\n  2. 远端表另有一个 `id` 列：写进去的是对的，但返回的是另一行，不报错；对已存在的键做 upsert 会报唯一约束冲突。\n- **影响面：** 和 #31340 一样，只影响开启写入且映射了主键的外部对象。\n- **需要您做的：** 无。\n\n## Task\n\n- [ ] Map the conflict target through `remoteColumn` in upsert's conflict clause (`upsert-conflict-clause.ts` / `sql-driver-upsert-conflict-target.ts`), including explicit `conflictKeys`.\n- [ ] Key upsert's read-back on the mapped key, not the remote surrogate `id`.\n- [ ] Pins on sqlite, red before and green after:\n  - (a) `CUST_NO→id`, no `id` column: insert and update by key;\n  - (b) `CODE→id` over a table with its own unique `id`: the answer is the written row, and an existing key updates rather than throwing UNIQUE.\n- [ ] A patch changeset naming every SQL dialect.\n\n`Clause-②: no` · `Metadata-protocol: none`. Builds on #31340. Oracle refuses upsert with 501 (#31328), which this card does not change."
+}

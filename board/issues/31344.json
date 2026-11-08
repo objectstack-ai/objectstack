@@ -1,0 +1,36 @@
+{
+  "number": 31344,
+  "kind": "issue",
+  "title": "spec: a restriction profile cannot list the approval / approval_revise nodes a hosted Team engine runs, and allowCode is one boolean that also refuses sandboxed lifecycle hooks",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:spec",
+    "priority:p1"
+  ],
+  "assignees": [
+    "marchtian"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-08T03:16:37Z",
+  "updated_at": "2026-11-08T07:28:25Z",
+  "closed_at": "2026-11-08T07:27:08Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31344",
+  "body": "repo:cloud#2 · os-zhuang · session_0123kRqqdpAJWYMgsgdAJX4G\n\n## 维护者速读\n\n- 云端第一次真实发布限制档案（cloud#3713，PR cloud#3732）时发现两处 spec 表达不了托管环境的实际能力。如果不改，`os validate --target` 会拒掉 Team 上本来能跑的东西。\n- ① 审批节点 `approval` / `approval_revise`：Team 套餐的托管引擎能跑（cloud#3497），但它们不是 `FlowNodeAction` 的 id，档案列不进去。读取方于是按 `allowCode` 判，而托管环境的 `allowCode` 是 false，结果被拒。#31239（PR #31277）修的是同类的 `parallel` / `try_catch`，没有包括审批这一对。\n- ② `allowCode` 只有一个开关：托管内核上，已发布包里带沙箱 `body` 的生命周期 hook 照样会绑定，但 `allowCode: false` 让读取方把所有 hook 都拒了。要不要把这个维度拆开，是 spec 层面的问题。\n\nFiling gate: ① a defect found by measurement. It was found by the cloud#3713 thread (seat 2 dispatch, 11-08), which implemented the publishing side. This is part of the cloud#3659 ruling A execution (「全部立卡并p1」).\n\n**Reader who acts:** the `domain:spec` lane (`RestrictionProfileSchema`, `os validate --target` reader rules).\n\n**Dedupe:** I searched `approval_revise FlowNodeAction` (0 open). #31239 is the closest. It is in flight on PR #31277 and covers `parallel` / `try_catch` and devPlugins only, so the approval pair is filed here instead of widening that PR.\n\n## Items\n\n1. **Approval nodes.** Let the profile admit `approval` and `approval_revise`, either by putting them in the `FlowNodeAction` set or by using the same container or allow-list mechanism #31277 picks for `parallel` / `try_catch`. Then `os validate --target` against a Team environment accepts a flow that uses them.\n2. **`allowCode` granularity.** Decide whether a sandboxed lifecycle hook `body` counts as \"code\" for the reader. If it does not, split the dimension, for example `allowCode` versus `allowSandboxedHooks`, so a hosted profile can say what its kernel actually binds. If it does, document that hosted kernels binding sandboxed hooks is the gap, and file that against the runtime.\n\n## Acceptance\n\n- A spec test shows a profile with `allowCode: false` that admits approval nodes, and `os validate --target` passes a Team-shaped stack with an approval flow.\n- Item 2 lands as a schema change with a test, or as a written ruling in the schema docblock.\n- After this lands, cloud's profile (cloud#3713) lists the approval pair on Team. That is a cloud follow-up for the cloud seat.\n\nRefs cloud#3713, cloud#3659, #31239"
+}

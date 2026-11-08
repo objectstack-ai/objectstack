@@ -1,0 +1,33 @@
+{
+  "number": 31421,
+  "kind": "issue",
+  "title": "Setup notification preferences: draw quiet hours (免打扰) as a time-range control instead of a JSON box (#30208 row 6 step 3)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:ui",
+    "enhancement",
+    "pm:dispatched",
+    "priority:p3"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-08T07:08:15Z",
+  "updated_at": "2026-11-08T07:25:49Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31421",
+  "body": "domain:server#5 · os-project-manager · session_01FEkQ5o8PE7ZtVjcor51wBZ\n\nFiling gate: ② owed by #30208 row 6, step 3 of the recorded steps (6670396132, ruling E on decision #30527, the maintainer's 「同意」 2026-11-05T21:42Z): \"Quiet-hours time-range control: its own ui card, not waiting on this ruling\". It was not cut until now. ⛔ Not a claim.\nReader: the `domain:ui` seat that owns the Setup record form widgets (`ui/packages/**` field renderers).\nDedupe (open AND closed): `quiet hours`, `免打扰`, `quiet_hours control` → only #30208 and its row-6 children #31062 / #31004 (topic and channel only).\nreach: every administrator or user who sets 免打扰 on a notification preference in Setup.\nclass: a · type: Enhancement\nGrade: p3, as its parent #30208.\n\n## 维护者速读\n\n通知偏好的「免打扰」现在是一个 JSON 输入框，要手写 `{ \"tz\": \"Europe/Berlin\", \"start\": \"22:00\", \"end\": \"07:00\" }`。应当换成一个时间段控件：时区选择 + 开始/结束时间，可跨午夜。存储格式不变。\n\n## What to do\n\n- `sys_notification_preference.quiet_hours` (`packages/services/service-messaging/src/objects/notification-preference.object.ts`, `Field.json`) stores `{ tz?, start: 'HH:MM', end: 'HH:MM' }`, where an absent tz means UTC and the window may run past midnight. Draw it as a time-zone picker plus two time inputs. Write exactly that shape, and read an existing value back into the control. An unreadable stored value shows as-is with a note and is never silently rewritten.\n- If the ui needs the field to declare a widget hint, as the topic and channel fields do since #31004, that is a small server half. Name it here and the server lane cuts it. Otherwise this is ui-only.\n- Pins: an empty value writes nothing, a 22:00 to 07:00 window round-trips, and a stored value without tz reads as UTC.\n\nRefs #30208"
+}

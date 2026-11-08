@@ -1,0 +1,31 @@
+{
+  "number": 31399,
+  "kind": "issue",
+  "title": "metadata-protocol: getMetaItems({ type: \"seed\" }) lists no stored seed item, because a seed body has no `name` and the list keys items by it",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-08T06:04:58Z",
+  "updated_at": "2026-11-08T06:53:21Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31399",
+  "body": "domain:server#3 · os-project-manager · session_01FEkQ5pXkgNXVpCn2GZDjyy\nFiling gate: ① a product defect with a named landing, carried from the #30808 card thread's os-dev-report (comment 6718021188, out-of-scope finding, class a).\nReach: measured by that thread on a real showcase boot. Protocol `getMetaItems({ type: 'seed' })`, the method behind `GET /api/v1/meta/:type`, answered 0 items while `sys_metadata` held 5 active seed rows, and `getMetaItem` served each of them by name. The HTTP door itself was NOT measured; the first step below measures it.\nDedupe (open AND closed): \"getMetaItems seed\" → 73 hits, \"meta list seed items empty\" → 396, \"/meta/seed\" → 765. None is this defect; the nearest are #27393 and #28952 (seed publish, closed) and #30808 (where it was found).\nReader: the `domain:server` seat that owns metadata-protocol (engine face), from `pm:queue`.\n\n## 维护者速读\n\n- **问题：** 环境里存着的种子（seed）元数据，按类型列出时一条都列不出来，但按名字单独读能读到。原因：种子的正文没有 `name` 字段，而列表合并按正文里的 `name` 归并，于是全部被丢掉。\n- **影响面：** 任何按类型列种子的读者（Studio 的元数据列表、`GET /meta/seed`、按类型枚举的工具）都看不到环境里的种子。#30808 的拷贝因此改成逐条按名读。\n- **需要您做的：** 无。\n\n## Today (measured by the #30808 thread)\n\n- `SeedSchema` is closed and declares no `name`. The stored item's name lives on the `sys_metadata` row, not in the body.\n- The list merge in metadata-protocol keys every stored item by its body's `name`, so a seed item has no key and is never listed.\n- `getMetaItem('seed', NAME)` serves the same rows, so this is a list-path gap, not a storage gap.\n\n## Task\n\n- [ ] Measure the HTTP door first: `GET /api/v1/meta/seed` on a boot with environment seed rows. If it lists them, write down why the protocol method and the door differ, and narrow this card to the method.\n- [ ] The list keys a stored item by its row's name when the body has none, the way the by-name read already finds it. Locate by symbol; no `SeedSchema` change (that would be the spec lane).\n- [ ] Pin red then green: N stored seed rows → N listed, with names, and no duplicates against package-shipped seeds of the same name. Ablate the pin.\n- [ ] Re-read #30808's install-local seed receipt, which reads by name because of this gap. Note in the PR whether it can go back to a list read; don't change it here.\n\n`Clause-②: no` · `Metadata-protocol: none` (a list read starts serving what is already stored; no accept-set change).\n\nSuggested-grade: p3 · a read-path gap with a by-name workaround; nobody is reported blocked.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}
