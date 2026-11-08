@@ -58,7 +58,15 @@ export {
   ContextMenuSubTrigger,
   ContextMenuTrigger,
 } from './context-menu';
-export * from './dialog';
+export {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from './dialog';
 export {
   Drawer,
   DrawerClose,
@@ -69,7 +77,22 @@ export {
   DrawerTitle,
   DrawerTrigger,
 } from './drawer';
-export * from './dropdown-menu';
+export {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSeparator,
+  DropdownMenuShortcut,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
+  DropdownMenuTrigger,
+} from './dropdown-menu';
 export {
   Form,
   FormControl,
@@ -101,8 +124,39 @@ export {
   SelectValue,
 } from './select';
 export * from './separator';
-export * from './sheet';
-export * from './sidebar';
+export {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetFooter,
+  SheetHeader,
+  SheetOverlay,
+  SheetTitle,
+  SheetTrigger,
+} from './sheet';
+export {
+  Sidebar,
+  SidebarContent,
+  SidebarFooter,
+  SidebarGroup,
+  SidebarGroupContent,
+  SidebarGroupLabel,
+  SidebarHeader,
+  SidebarInput,
+  SidebarInset,
+  SidebarMenu,
+  SidebarMenuAction,
+  SidebarMenuButton,
+  SidebarMenuItem,
+  SidebarMenuSub,
+  SidebarMenuSubButton,
+  SidebarMenuSubItem,
+  SidebarProvider,
+  SidebarRail,
+  SidebarTrigger,
+  useOptionalSidebar,
+  useSidebar,
+} from './sidebar';
 export * from './skeleton';
 export * from './slider';
 export * from './sonner';
