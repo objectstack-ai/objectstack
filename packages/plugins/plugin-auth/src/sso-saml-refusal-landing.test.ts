@@ -20,6 +20,7 @@ import { inflateRawSync } from 'node:zlib';
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AuthManager } from './auth-manager';
 import { createMemoryEngine } from './impersonation-bearer-rotation.test';
+import { inviteForAudienceGate } from './audience-gate-test-support';
 import {
   landSamlRefusal,
   readSamlAcsLanding,
@@ -110,7 +111,14 @@ interface Rp {
   info: ReturnType<typeof vi.fn>;
 }
 
-async function makeRp(): Promise<Rp> {
+interface RpOptions {
+  /** Extra provider-row fields, written through the vendor's adapter (e.g. `allowJit`). */
+  provider?: Record<string, unknown>;
+  /** Extra `AuthManager` config (e.g. `audience`). */
+  config?: Record<string, unknown>;
+}
+
+async function makeRp(opts: RpOptions = {}): Promise<Rp> {
   const engine = createMemoryEngine();
   const warn = vi.fn();
   const error = vi.fn();
@@ -122,6 +130,7 @@ async function makeRp(): Promise<Rp> {
     trustedOrigins: [BASE],
     plugins: { sso: true },
     logger: { warn, error, info },
+    ...opts.config,
   } as unknown as ConstructorParameters<typeof AuthManager>[0]);
   // The provider, written through the vendor's own adapter in the shape the
   // Register SAML Provider bridge stores (`register-sso-provider.ts`).
@@ -142,6 +151,7 @@ async function makeRp(): Promise<Rp> {
         idpMetadata: { entityID: IDP_ENTITY },
         spMetadata: { entityID: SP_ENTITY },
       }),
+      ...opts.provider,
     },
   });
   return { manager, engine, warn, error, info };
@@ -372,5 +382,114 @@ describe('putting an ACS answer on its landing', () => {
     expect(await runSsoCallbackScope(saml, undefined, async () => { throw new Error('store down'); }, async () => vendor)).toBe(vendor);
     const landed = await runSsoCallbackScope(saml, undefined, async () => landingOf, async () => vendor);
     expect(landed.headers.get('location')).toBe(`${FAILED}?error=account_not_linked`);
+  });
+});
+
+// ── Per-provider sign-in options (`sso-sign-in-options.ts`) ─────────────────
+
+/** A human who is not the newcomer, so no case below rides the zero-user bootstrap carve-out. */
+const seedAdmin = async (rp: Rp) => {
+  await rp.engine.insert('sys_user', { id: 'usr_admin', email: 'admin@acme.com', name: 'Admin', email_verified: true });
+};
+
+/** An IdP-initiated Response: the IdP posts an assertion no AuthnRequest asked for (no InResponseTo, no RelayState). */
+async function idpInitiated(rp: Rp, email: string): Promise<Response> {
+  const spMetadata = await (await rp.manager.handleRequest(
+    new Request(`${AUTH}/sso/saml2/sp/metadata?providerId=${PROVIDER_ID}`),
+  )).text();
+  const sp = samlify.ServiceProvider({ metadata: spMetadata });
+  const idp = samlify.IdentityProvider({
+    entityID: IDP_ENTITY,
+    privateKey: idpKeyPem,
+    signingCert: idpCert,
+    nameIDFormat: [EMAIL_FORMAT],
+    singleSignOnService: [{ Binding: 'urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect', Location: IDP_SSO }],
+  });
+  const { context } = await idp.createLoginResponse(sp, {}, 'post', { email });
+  expect(Buffer.from(context, 'base64').toString('utf8')).not.toMatch(/InResponseTo="[^"]+"/);
+  return rp.manager.handleRequest(
+    new Request(ACS, {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ SAMLResponse: context }).toString(),
+    }),
+  );
+}
+
+describe('SAML IdP-initiated sign-in is a per-provider toggle, off by default', () => {
+  it('off (the default): an unsolicited Response is refused 302 error=unsolicited_response, and signs nobody in', async () => {
+    const rp = await makeRp({ provider: { allowJit: true } });
+    await seedAdmin(rp);
+    const res = await idpInitiated(rp, 'new.person@acme.com');
+    expect(res.status).toBe(302);
+    expect(landing(res).error).toBe('unsolicited_response');
+    expect(cookiesOf(res)).not.toMatch(/session_token=[^;]/);
+  });
+
+  it('on: the same Response signs the person in', async () => {
+    const rp = await makeRp({ provider: { allowIdpInitiated: true, allowJit: true } });
+    await seedAdmin(rp);
+    const res = await idpInitiated(rp, 'new.person@acme.com');
+    expect(res.status, res.headers.get('location') ?? '').toBe(302);
+    expect(landing(res).error).toBeNull();
+    expect(cookiesOf(res)).toMatch(/session_token=[^;]/);
+  });
+
+  it("another provider's toggle does not open this one", async () => {
+    const rp = await makeRp({ provider: { allowJit: true } });
+    await seedAdmin(rp);
+    const auth: any = await rp.manager.getAuthInstance();
+    const ctx = await auth.$context;
+    await ctx.adapter.create({
+      model: 'ssoProvider',
+      data: { providerId: 'other-idp', issuer: 'https://other.example/entity', domain: 'other.example', allowIdpInitiated: true },
+    });
+    const res = await idpInitiated(rp, 'new.person@acme.com');
+    expect(landing(res).error).toBe('unsolicited_response');
+  });
+
+  it('CONTROL: an SP-initiated sign-in is answered as before with the toggle off', async () => {
+    const rp = await makeRp({ provider: { allowJit: true } });
+    await seedAdmin(rp);
+    const res = await signInThroughIdp(rp, 'new.person@acme.com');
+    expect(res.headers.get('location')).toBe(AFTER);
+    expect(cookiesOf(res)).toMatch(/session_token=/);
+  });
+});
+
+describe('invite_only refuses an unknown SAML user unless the provider allows JIT', () => {
+  it('invite_only (the default) + no account + no invitation: refused 302 error=SELF_REGISTRATION_CLOSED on the error URL, no user created', async () => {
+    const rp = await makeRp();
+    await seedAdmin(rp);
+    const res = await signInThroughIdp(rp, 'new.person@acme.com');
+    expect(res.status).toBe(302);
+    expect(landing(res)).toEqual({ base: FAILED, error: 'SELF_REGISTRATION_CLOSED' });
+    expect(cookiesOf(res)).not.toMatch(/session_token=[^;]/);
+    expect(rp.engine.tables.get('sys_user')?.map((u: any) => u.email)).toEqual(['admin@acme.com']);
+  });
+
+  it('the provider allows JIT: the same person is provisioned and signed in', async () => {
+    const rp = await makeRp({ provider: { allowJit: true } });
+    await seedAdmin(rp);
+    const res = await signInThroughIdp(rp, 'new.person@acme.com');
+    expect(res.headers.get('location')).toBe(AFTER);
+    expect(cookiesOf(res)).toMatch(/session_token=/);
+  });
+
+  it('CONTROL: an invited person is provisioned with JIT off', async () => {
+    const rp = await makeRp();
+    await seedAdmin(rp);
+    await inviteForAudienceGate(rp.engine, 'new.person@acme.com');
+    const res = await signInThroughIdp(rp, 'new.person@acme.com');
+    expect(res.headers.get('location')).toBe(AFTER);
+    expect(cookiesOf(res)).toMatch(/session_token=/);
+  });
+
+  it('CONTROL: posture open provisions with JIT off, as before', async () => {
+    const rp = await makeRp({ config: { audience: { posture: 'open', selfRegistrationPermissionSet: 'member_default' } } });
+    await seedAdmin(rp);
+    const res = await signInThroughIdp(rp, 'new.person@acme.com');
+    expect(res.headers.get('location')).toBe(AFTER);
+    expect(cookiesOf(res)).toMatch(/session_token=/);
   });
 });

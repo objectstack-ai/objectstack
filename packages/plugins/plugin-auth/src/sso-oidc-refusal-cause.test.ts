@@ -26,6 +26,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { SignJWT, exportJWK, generateKeyPair, type JWK } from 'jose';
 import { AuthManager } from './auth-manager';
 import { createMemoryEngine } from './impersonation-bearer-rotation.test';
+import { inviteForAudienceGate } from './audience-gate-test-support';
 import {
   SSO_OIDC_REFUSAL_CAUSES,
   SSO_OIDC_UNCLASSIFIED_REFUSAL,
@@ -140,7 +141,14 @@ interface Rp {
   info: ReturnType<typeof vi.fn>;
 }
 
-async function makeRp(): Promise<Rp> {
+interface RpOptions {
+  /** Extra provider-row fields, written through the vendor's adapter (e.g. `allowJit`). */
+  provider?: Record<string, unknown>;
+  /** Extra `AuthManager` config (e.g. `audience`). */
+  config?: Record<string, unknown>;
+}
+
+async function makeRp(opts: RpOptions = {}): Promise<Rp> {
   const engine = createMemoryEngine();
   // The host's secret store: the adapter lifts `clientSecret` out of the
   // provider row on write (`sso-client-secret.ts`) and reads it back through
@@ -156,6 +164,7 @@ async function makeRp(): Promise<Rp> {
     trustedOrigins: [BASE, IDP],
     plugins: { sso: true },
     logger: { warn, error, info },
+    ...opts.config,
   } as unknown as ConstructorParameters<typeof AuthManager>[0]);
   // The provider, written through the vendor's own adapter so it is stored the
   // way `/sso/register` stores it. All endpoints are declared, so the callback
@@ -180,6 +189,7 @@ async function makeRp(): Promise<Rp> {
         scopes: ['openid', 'email', 'profile'],
         mapping: { id: 'sub', email: 'email', name: 'name' },
       }),
+      ...opts.provider,
     },
   });
   return { manager, engine, warn, error, info };
@@ -377,5 +387,116 @@ describe('the redirect rewrite', () => {
     sink.log('warn', 'a warning', { providerId: 'p1' });
     expect(h.error).toHaveBeenCalledTimes(1);
     expect(h.warn).toHaveBeenCalledWith('[better-auth] a warning', { providerId: 'p1' });
+  });
+});
+
+// ── 3. Per-provider sign-in options (`sso-sign-in-options.ts`) ──────────────
+
+/** A human who is not the newcomer, so no case below rides the zero-user bootstrap carve-out. */
+const seedAdmin = async (rp: Rp) => {
+  await rp.engine.insert('sys_user', { id: 'usr_admin', email: 'admin@acme.com', name: 'Admin', email_verified: true });
+};
+
+/**
+ * An IdP-initiated OIDC sign-in: the IdP sends the browser to the callback
+ * with a `code` and no `state`. Answers the callback's response, and — when
+ * the vendor restarted the flow — the response of finishing it at the IdP.
+ */
+async function idpInitiated(rp: Rp, token: string): Promise<{ first: Response; finished?: Response }> {
+  const first = await rp.manager.handleRequest(new Request(`${AUTH}/sso/callback/${PROVIDER_ID}?code=idp-code`));
+  const location = first.headers.get('location') ?? '';
+  if (!location.startsWith(`${IDP}/authorize`)) return { first };
+  const state = new URL(location).searchParams.get('state');
+  const restore = stubIdp(token);
+  try {
+    const finished = await rp.manager.handleRequest(
+      new Request(`${AUTH}/sso/callback/${PROVIDER_ID}?code=idp-code&state=${encodeURIComponent(state!)}`, {
+        headers: { cookie: cookiesOf(first) },
+      }),
+    );
+    return { first, finished };
+  } finally {
+    restore();
+  }
+}
+
+describe('OIDC IdP-initiated sign-in is a per-provider toggle, off by default', () => {
+  it('off (the default): a stateless callback is refused 302 error=state_not_found, and signs nobody in', async () => {
+    const rp = await makeRp({ provider: { allowJit: true } });
+    await seedAdmin(rp);
+    const { first, finished } = await idpInitiated(rp, await idToken());
+    expect(first.status).toBe(302);
+    expect(errorParams(first).error).toBe('state_not_found');
+    expect(finished).toBeUndefined();
+    expect(cookiesOf(first)).not.toMatch(/session_token=[^;]/);
+  });
+
+  it('on: the vendor restarts the flow at the IdP with a fresh state, and finishing it signs the person in', async () => {
+    const rp = await makeRp({ provider: { allowIdpInitiated: true, allowJit: true } });
+    await seedAdmin(rp);
+    const { first, finished } = await idpInitiated(rp, await idToken());
+    expect(first.status).toBe(302);
+    expect(new URL(first.headers.get('location')!).searchParams.get('state')).toBeTruthy();
+    expect(finished?.status).toBe(302);
+    expect(errorParams(finished!).error).toBeNull();
+    expect(cookiesOf(finished!)).toMatch(/session_token=[^;]/);
+  });
+
+  it('the toggle is the column alone: a value smuggled into the stored OIDC blob is not read, and is never written', async () => {
+    const rp = await makeRp({ provider: { allowJit: true } });
+    await seedAdmin(rp);
+    const row = rp.engine.tables.get('sys_sso_provider')![0];
+    row.oidc_config = JSON.stringify({ ...JSON.parse(row.oidc_config), allowIdpInitiated: true });
+    const { first } = await idpInitiated(rp, await idToken());
+    expect(errorParams(first).error).toBe('state_not_found');
+
+    // A write that carries the blob back (update-provider merges what it read) stores none.
+    const auth: any = await rp.manager.getAuthInstance();
+    const ctx = await auth.$context;
+    await ctx.adapter.update({
+      model: 'ssoProvider',
+      where: [{ field: 'providerId', value: PROVIDER_ID }],
+      update: { oidcConfig: JSON.stringify({ issuer: IDP, clientId: CLIENT_ID, allowIdpInitiated: true }) },
+    });
+    expect(JSON.parse(rp.engine.tables.get('sys_sso_provider')![0].oidc_config)).not.toHaveProperty('allowIdpInitiated');
+  });
+});
+
+describe('invite_only refuses an unknown OIDC user unless the provider allows JIT', () => {
+  it('invite_only (the default) + no account + no invitation: refused 302 error=SELF_REGISTRATION_CLOSED, no user created', async () => {
+    const rp = await makeRp();
+    await seedAdmin(rp);
+    const res = await signInThroughIdp(rp, await idToken());
+    expect(res.status).toBe(302);
+    expect(errorParams(res)).toMatchObject({ base: FAILED, error: 'SELF_REGISTRATION_CLOSED' });
+    expect(cookiesOf(res)).not.toMatch(/session_token=[^;]/);
+    expect(rp.engine.tables.get('sys_user')?.map((u: any) => u.email)).toEqual(['admin@acme.com']);
+  });
+
+  it('the provider allows JIT: the same person is provisioned and signed in', async () => {
+    const rp = await makeRp({ provider: { allowJit: true } });
+    await seedAdmin(rp);
+    const res = await signInThroughIdp(rp, await idToken());
+    expect(res.headers.get('location')).toBe(AFTER);
+    expect(cookiesOf(res)).toMatch(/session_token=/);
+  });
+
+  it('CONTROL: an invited person is provisioned with JIT off', async () => {
+    const rp = await makeRp();
+    await seedAdmin(rp);
+    await inviteForAudienceGate(rp.engine, EMAIL);
+    const res = await signInThroughIdp(rp, await idToken());
+    expect(res.headers.get('location')).toBe(AFTER);
+    expect(cookiesOf(res)).toMatch(/session_token=/);
+  });
+
+  it('CONTROL: posture email_domain provisions with JIT off, as before', async () => {
+    const rp = await makeRp({
+      config: { audience: { posture: 'email_domain', allowedEmailDomains: ['other.example'], selfRegistrationPermissionSet: 'member_default' } },
+    });
+    await seedAdmin(rp);
+    const res = await signInThroughIdp(rp, await idToken());
+    expect(res.headers.get('location')).toBe(AFTER);
+    expect(cookiesOf(res)).toMatch(/session_token=/);
   });
 });

@@ -80,6 +80,17 @@ export interface SsoProviderSignInOptions {
 
 const ALL_OFF: SsoProviderSignInOptions = { allowIdpInitiated: false, allowJit: false };
 
+/**
+ * A toggle column read below better-auth: the adapter runs with
+ * `supportsBooleans: false`, so better-auth stores a boolean as `1` / `0` and
+ * converts it back only on its own reads (the same carrier
+ * `auth-manager-password-session-policy.ts` reads `two_factor_enabled` in).
+ * Anything else, missing included, is OFF.
+ */
+function storedOn(value: unknown): boolean {
+  return value === true || value === 1;
+}
+
 /** The engine surface {@link readSsoProviderSignInOptions} needs. */
 export interface SsoProviderReader {
   find(object: string, query: Record<string, unknown>): Promise<unknown[]>;
@@ -88,7 +99,7 @@ export interface SsoProviderReader {
 /**
  * Read one provider's options by its `provider_id`, through `reader` (the
  * caller hands a system-context reader). No row, a failed read, or a column
- * that is not exactly `true` ⇒ OFF.
+ * that does not read ON ⇒ OFF.
  */
 export async function readSsoProviderSignInOptions(
   reader: SsoProviderReader | undefined,
@@ -100,8 +111,8 @@ export async function readSsoProviderSignInOptions(
     const row = Array.isArray(rows) ? (rows[0] as Record<string, unknown> | undefined) : undefined;
     if (!row || row.provider_id !== providerId) return ALL_OFF;
     return {
-      allowIdpInitiated: row[SSO_ALLOW_IDP_INITIATED_FIELD] === true,
-      allowJit: row[SSO_ALLOW_JIT_FIELD] === true,
+      allowIdpInitiated: storedOn(row[SSO_ALLOW_IDP_INITIATED_FIELD]),
+      allowJit: storedOn(row[SSO_ALLOW_JIT_FIELD]),
     };
   } catch {
     return ALL_OFF;
@@ -151,7 +162,7 @@ export function applyIdpInitiatedToOidcConfigOnRead(objectName: string, row: unk
   const record = row as Record<string, unknown>;
   const parsed = parseBlob(record[SSO_OIDC_CONFIG_FIELD]);
   if (!parsed) return;
-  parsed.config[OIDC_IDP_INITIATED_KEY] = record[SSO_ALLOW_IDP_INITIATED_FIELD] === true;
+  parsed.config[OIDC_IDP_INITIATED_KEY] = storedOn(record[SSO_ALLOW_IDP_INITIATED_FIELD]);
   record[SSO_OIDC_CONFIG_FIELD] = serialize(parsed);
 }
 
