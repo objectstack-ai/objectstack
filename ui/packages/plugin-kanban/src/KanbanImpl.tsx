@@ -676,6 +676,35 @@ function laneCountLabel(count: number, countsAreWindowed?: boolean): string {
 }
 
 /**
+ * What a lane header shows IN PLACE OF its count while the board's records
+ * have not settled (objectstack#30431).
+ *
+ * A lane count is a claim about the data, the same claim "No cards" makes, and
+ * before the records settle the only number this board holds is the length of
+ * an array nothing has filled yet. Drawn, that number is `0` on every lane.
+ * Measured on cloud's two-plane stack: a board opened right after publish,
+ * under a list view whose own count had already answered, showed footer
+ * 「12 条记录」 over lanes reading 0 / 0 / 0 / 0 for as long as its lane
+ * queries were in flight, then 2 / 4 / 2 / 3. "Pending" and "this lane holds
+ * nothing" were the same pixels.
+ *
+ * So the count waits for what the empty state waits for — `recordsSettled`
+ * (objectui#8827) — at every header that writes one. The badge itself stays,
+ * at its size, so the header does not reflow when the number lands. The
+ * marker is decorative (`aria-hidden`); the lane it sits in carries
+ * `aria-busy`, which is what assistive technology reads. No new string.
+ */
+function LaneCountPending() {
+  return (
+    <span
+      aria-hidden="true"
+      data-kanban-lane-count-pending=""
+      className="inline-block h-2 w-2.5 rounded-sm bg-muted-foreground/30 animate-pulse"
+    />
+  )
+}
+
+/**
  * A column's total of the view's `summarizeField`, painted beside its count
  * (objectui#11629). Renders nothing when the board declares no
  * `summarizeField` (no provider), so every other header is unchanged.
@@ -796,9 +825,13 @@ function KanbanColumnView({
   const lanePaging = useKanbanLanePaging()
   const lanePage = lanePaging?.pages[String(column.id)]
   const pagedCount = lanePage ? laneCount(lanePage, safeCards.length) : null
-  const laneCountText = pagedCount
-    ? `${pagedCount.count}${pagedCount.atLeast ? '+' : ''}`
-    : laneCountLabel(safeCards.length, countsAreWindowed)
+  // objectstack#30431 — no count before the records settle; see `LaneCountPending`.
+  const countPending = !useKanbanRecordsSettled()
+  const laneCountText = countPending
+    ? <LaneCountPending />
+    : pagedCount
+      ? `${pagedCount.count}${pagedCount.atLeast ? '+' : ''}`
+      : laneCountLabel(safeCards.length, countsAreWindowed)
   // A lane total over a lane that holds more than it drew is a total of what
   // it drew, so it carries the `+` the windowed count carries.
   const laneTotalPartial = countsAreWindowed || lanePage?.hasMore === true
@@ -822,6 +855,7 @@ function KanbanColumnView({
       ref={setNodeRef}
       role="group"
       aria-label={column.title}
+      aria-busy={countPending || undefined}
       aria-disabled={dropBlocked || undefined}
       data-kanban-drop-blocked={dropBlocked ? "" : undefined}
       title={dropBlocked ? dropBlockedReason : undefined}
@@ -869,7 +903,8 @@ function KanbanColumnView({
                 Full
               </Badge>
             )}
-            {!isCollapsed && <LaneTotal cards={safeCards} countsAreWindowed={laneTotalPartial} />}
+            {/* A total over cards that have not arrived is the same false `0`. */}
+            {!isCollapsed && !countPending && <LaneTotal cards={safeCards} countsAreWindowed={laneTotalPartial} />}
           </div>
         </div>
       </div>
@@ -988,9 +1023,12 @@ function KanbanBoardInner({ columns, onCardMove, onCardClick, className, dnd, qu
    * default). It gates the two places below that say "No cards", because both
    * of them are assertions ABOUT THE DATA and this component is reachable —
    * through `KanbanRenderer`'s `React.lazy` boundary — before the data exists.
-   * ⛔ It gates nothing else: lanes, headers, counts and drop targets all keep
-   * rendering while the rows are in flight. The full argument, the measured
-   * reproduction and the settle contract live on the context.
+   * It gates the lane COUNTS for the same reason (objectstack#30431): every
+   * header that writes a count writes `LaneCountPending` instead until the
+   * records settle, since the number it holds before then is a `0` nobody
+   * answered. ⛔ It gates nothing else: lanes, headers, cards and drop targets
+   * all keep rendering while the rows are in flight. The full argument, the
+   * measured reproduction and the settle contract live on the context.
    */
   const recordsSettled = useKanbanRecordsSettled()
 
@@ -1719,10 +1757,14 @@ function KanbanBoardInner({ columns, onCardMove, onCardClick, className, dnd, qu
                     onToggle={() => toggleColumnCollapse(col.id, !collapsed)}
                     className=" text-xs sm:text-sm font-semibold tracking-wider text-primary/90 uppercase"
                   />
+                  {/* objectstack#30431 — the count, and the total, wait for the
+                      records like the flat header's do (`LaneCountPending`). */}
                   {!collapsed && (
-                    <span className="ml-2 text-xs text-muted-foreground">({laneCountLabel(col.cards.length, countsAreWindowed)})</span>
+                    <span className="ml-2 text-xs text-muted-foreground">
+                      {recordsSettled ? `(${laneCountLabel(col.cards.length, countsAreWindowed)})` : <LaneCountPending />}
+                    </span>
                   )}
-                  {!collapsed && (
+                  {!collapsed && recordsSettled && (
                     <LaneTotal cards={col.cards} countsAreWindowed={countsAreWindowed} className="ml-2" />
                   )}
                 </div>
@@ -1748,7 +1790,9 @@ function KanbanBoardInner({ columns, onCardMove, onCardClick, className, dnd, qu
                 >
                   <span className={cn("transition-transform text-xs", isCollapsed ? "" : "rotate-90")}>▶</span>
                   <span className=" text-xs font-semibold text-muted-foreground uppercase tracking-wider">{laneLabel}</span>
-                  <span className=" text-xs text-muted-foreground">({laneCountLabel(laneCardCount, countsAreWindowed)})</span>
+                  <span className=" text-xs text-muted-foreground">
+                    {recordsSettled ? `(${laneCountLabel(laneCardCount, countsAreWindowed)})` : <LaneCountPending />}
+                  </span>
                 </button>
 
                 {/* Lane content */}
