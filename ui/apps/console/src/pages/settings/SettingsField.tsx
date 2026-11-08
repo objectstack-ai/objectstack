@@ -815,6 +815,24 @@ export function SettingsField(props: SettingsFieldProps) {
     return labels.optionLabel(spec.key, String(opt.value), literal);
   };
 
+  // A `map` header's shown text: the setting's `keyColumn` slot for the key
+  // column, its `columns.<name>` slot for a value column (objectstack#31453).
+  const renderMapHeader = (
+    column: string | undefined,
+    leaf: 'label' | 'help',
+    literal: string | undefined,
+  ): string | undefined => {
+    if (!spec.key || !labels) return literal;
+    if (column === undefined) {
+      return leaf === 'label'
+        ? labels.mapKeyColumnLabel(spec.key, literal ?? '')
+        : labels.mapKeyColumnHelp(spec.key, literal);
+    }
+    return leaf === 'label'
+      ? labels.mapColumnLabel(spec.key, column, literal ?? '')
+      : labels.mapColumnHelp(spec.key, column, literal);
+  };
+
   // The default a `Modified` row names. A secret's default is never shown,
   // and a value with no plain spelling (an object) is left unnamed.
   const describeDefault = (raw: unknown): string | null => {
@@ -1081,6 +1099,7 @@ export function SettingsField(props: SettingsFieldProps) {
           disabled={disabled}
           labelId={labelId}
           optionLabel={renderOptionLabel}
+          headerText={renderMapHeader}
           errorAt={error ? errorAt : undefined}
         />,
         undefined,

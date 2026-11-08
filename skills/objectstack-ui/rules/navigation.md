@@ -72,12 +72,11 @@ navigation pointing at objects. Escalate only on explicit signals:
   author a view for it; a slice graduates to a named view only when it is
   curated and reused. Values support `{current_user_id}` / `{current_org_id}`.
   Never treat it as security: the surface shows what row-level permissions
-  allow. (objectui ADR-0055: "parameterized bare data
-  surface".)
-- **Interface page** — persona split ("sales reps see…", customer portal,
-  给业务部门的简化界面); capability narrowing ("users must not change views",
-  "only filter by X"); curation language (workspace / 工作台 / "Airtable
-  interface-like").
+  allow.
+- **Interface page** — persona split ("sales reps see…", customer portal, "a
+  simplified screen for the business team"); capability narrowing ("users must
+  not change views", "only filter by X"); curation language (workspace /
+  workbench / "Airtable interface-like").
 
 Ambiguity resolves to **no page and no view** — data mode is a functional
 superset; a missing page costs polish, a superfluous page (or a view authored

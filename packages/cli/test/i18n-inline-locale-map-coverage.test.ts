@@ -330,3 +330,65 @@ describe('coverage reads the map the way the renderer does', () => {
     expect(inlineLocaleText({ 'zh-CN': '成员' }, 'zh-TW')).toBe('成员');
   });
 });
+
+// ─── An action param's `helpText` map (objectstack#28266) ─────────────
+
+/**
+ * A param's `helpText` took the inline locale map its siblings keep
+ * (`description`, `outcomeMessages`, a param's `label`), so an inline action —
+ * a page button's, which no bundle reaches — can write its dialog hint per
+ * locale. The walker reads it as it reads a `description` map: authored, its
+ * locales covered, and never scaffolded into a bundle row.
+ */
+const actionParamHelpMap = (): any => ({
+  i18n: { defaultLocale: 'en', supportedLocales: LOCALES },
+  objects: [{ name: 'member', label: 'Member', fields: { email: { label: 'Email' } } }],
+  actions: [
+    {
+      name: 'pause_member',
+      label: 'Pause',
+      objectName: 'member',
+      type: 'api',
+      target: '/api/v1/pause',
+      params: [
+        {
+          name: 'reason',
+          label: 'Reason',
+          type: 'text',
+          helpText: { en: 'Why the member is paused', 'zh-CN': '暂停该成员的原因', 'ja-JP': 'メンバーを一時停止する理由' },
+        },
+      ],
+    },
+  ],
+});
+
+describe("an action param's helpText map is authored text too (#28266)", () => {
+  const key = (config: any) => walkedKeys(config).find((k) => k.endsWith('.params.reason.helpText'));
+
+  it('records the map at the param key and counts every locale it holds as covered', () => {
+    const at = key(actionParamHelpMap());
+    expect(at).toBeDefined();
+    const entry = collectExpectedEntries(actionParamHelpMap()).find((e) => e.path.join('.') === at);
+    expect(entry!.inlineLocales).toEqual({
+      en: 'Why the member is paused',
+      'zh-CN': '暂停该成员的原因',
+      'ja-JP': 'メンバーを一時停止する理由',
+    });
+    expect(gaps(computeI18nCoverage(actionParamHelpMap(), { locales: LOCALES }), at!)).toEqual([]);
+  });
+
+  it('a partial map still reports the locale it omits', () => {
+    const partial = actionParamHelpMap();
+    delete partial.actions[0].params[0].helpText['ja-JP'];
+    const at = key(partial)!;
+    expect(gaps(computeI18nCoverage(partial, { locales: LOCALES }), at)).toEqual(['ja-JP']);
+  });
+
+  it('scaffolds no bundle row for the map, in any locale', () => {
+    const result = extractTranslations(actionParamHelpMap(), { defaultLocale: 'en', locales: LOCALES });
+    for (const locale of LOCALES) {
+      expect(JSON.stringify(result.bundles[locale] ?? {}), locale).not.toContain('暂停该成员的原因');
+      expect(JSON.stringify(result.bundles[locale] ?? {}), locale).not.toContain('Why the member is paused');
+    }
+  });
+});
