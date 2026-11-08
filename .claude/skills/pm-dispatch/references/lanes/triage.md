@@ -17,4 +17,4 @@
 - 每轮扫 `pm:dispatched` 卡与非信箱 open PR,进展=head 提交/非分诊评论/其席改标,非 `updated_at`。
 - 进展逾 3h 即敲认领席 `Request: progress`,下轮读答复,无答列轮次记录;两轮无答视为掉线。
 - 掉线或下班席的项归在线兄弟席(`seat-lifecycle.md`),下轮敲兄弟席一次;⛔ 分诊永不释放。
-- 安全发现:即推 ① 后转交 `security#1` 席即止(`security.md`);有公开卡只定 `security`+p1,余不判。
+- 安全发现:即推 ① 后转交归属席即止(`security.md` 座位);有公开卡只定 `security`+p1,余不判。
