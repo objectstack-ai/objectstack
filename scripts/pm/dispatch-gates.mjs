@@ -466,6 +466,9 @@ import { extractAnchors } from '../symbol-anchors.mjs';
 // a file the net reaches is a file the gate itself flags. Both modules are dependency-free.
 import { SCANNED_ROOTS as RUNNER_ENV_SCANNED_ROOTS, findRunnerEnvReads, isProductSource as isRunnerEnvProductSource } from '../check-runner-env-posture.mjs';
 import { findViolations as findErrorCodeCasingViolations } from '../check-error-code-casing.mjs';
+// The workspace parse the README claim net (#31292) reads its population through, the one the gate itself imports.
+// Dependency-free, and it declares no path population of its own.
+import { WORKSPACE_FILE, parseWorkspaceGlobs, workspacePackageDirs } from '../workspace-enumerator.mjs';
 // The hand-written tables — ledgers, marker grammars, the change-kind roster, the tier globs — are
 // DATA, and live beside this file; this engine loads them, matches paths against them and derives.
 // Every table is re-exported under the name it always had, so no consumer moved.
@@ -11221,6 +11224,371 @@ export function reachesPopulationNet(path, net, readSource = readTrackedSource, 
 }
 
 /**
+ * The PUBLISHED-README CLAIM net (#31292): the one whole-tree family #31257 left,
+ * `check:published-readme-exports`, derived from the names its documents claim.
+ *
+ * ## Why no path net could do it
+ *
+ * The gate reads 129 published markdown documents (outside `ui/`) and, through
+ * their 248 resolving import statements, the BUILT type entries of 68 packages.
+ * A diff that removes or renames an exported member in one of those packages can
+ * red it, so a path net over them is close to "every package source" and would
+ * hand a build-requiring gate to nearly every card. So this net reads what the
+ * documents CLAIM, and asks whether the diff takes one of those claims away.
+ *
+ * ## The three limbs
+ *
+ *   - DOCUMENT: a published document (the gate's own definition: `private`
+ *     unset, a non-empty `files`, a markdown file one of its patterns matches,
+ *     never a CHANGELOG) whose fenced code makes a claim the merge-base blob did
+ *     not: a new import of a scoped or workspace specifier, a new name on one, or
+ *     a new `receiver.path.member(` site. A prose-only edit is not a hit.
+ *   - MANIFEST: a workspace member's `package.json` whose `name`, `private`,
+ *     `files`, `exports`, `types` or `typings` differ from the merge base, and
+ *     the workspace file when its `packages:` globs do. Those move the document
+ *     population, a specifier's resolution or a type entry.
+ *   - MEMBER: a non-test TypeScript source in a package some document reaches
+ *     (the imported package or anything in its workspace dependency closure,
+ *     because a type entry re-exports and returns types from there), which
+ *     declares one of the names those documents claim FEWER times than the
+ *     merge-base blob did, or drops an `export * from` line. That is a removal
+ *     or a rename of a claimed name; adding or editing around it is not a hit.
+ *
+ * The names are the gate's own, read by copies of its extraction (`readFences`,
+ * `extractImports`, `memberCallSites`, the one-hop `const x = [await] [new]
+ * Name(` receivers), kept WIDER where a copy must choose: every candidate
+ * receiver is kept where the gate drops a shadowed one. A declaration is read
+ * textually, comments masked: a `class|interface|type|enum|function|namespace|
+ * const|let|var` binding, a line-leading member or key (`name(`, `name:`,
+ * `name =`, with modifiers), an inline `{ name:`, `, name:` or `; name:` key, an
+ * inline `{ name(` or `; name(` member, an export
+ * specifier on either side of `as`, `export default`, and `export * as name`.
+ *
+ * ## The base
+ *
+ * The merge base of the default base ref and HEAD, the base the change set
+ * itself is derived from; HEAD when that cannot be computed. The working tree is
+ * the head, so an uncommitted removal counts. On a dispatch-time surface (no
+ * diff yet) the document and member limbs therefore find nothing to compare and
+ * stay quiet: the claim is the dev's re-derivation on the real diff.
+ *
+ * Measured at 7c523aa1 (recall against the gate's own reader, run in the
+ * self-test's child): the gate checks 364 (package, name) claims across the
+ * 129 documents; the net's copy reads 377, a superset, every one of the 364
+ * included; each of the 364 names is declared in its package's closure as the
+ * declaration reader sees it, so its removal there is a hit. Replayed over the
+ * last 500 first-parent commits on main: 303 touched a reached package's
+ * TypeScript, and 17 derive the gate (10 by a removed claimed name, 7 by a
+ * manifest field, 3 by a new document claim; some commits hit two limbs).
+ *
+ * ## What the net cannot see
+ *
+ * A file MOVED within a package reads as a removal from the old path (a wasted
+ * run, the safe direction). A claimed member a type gains from outside the
+ * workspace (a third-party type it extends) is not a workspace declaration. And
+ * a build config that stops emitting an entry is neither a manifest field nor a
+ * declaration.
+ */
+export const README_CODE_LANGUAGES = new Set(['', 'js', 'jsx', 'javascript', 'ts', 'tsx', 'typescript', 'mjs', 'cjs', 'mts', 'cts', 'diff']);
+const README_SKIP_DIRS = new Set(['node_modules', 'dist', '.git', '.turbo', 'coverage', 'build']);
+const README_OWN_SCOPE = '@objectstack/';
+const README_MANIFEST_FIELDS = ['name', 'private', 'files', 'exports', 'types', 'typings'];
+const README_SOURCE = /\.(?:[mc]?tsx?)$/;
+const IDENT_RE = /^[A-Za-z_$][\w$]*$/;
+
+/** The code-fence lines of a markdown document, `diff` fences without their `-` lines: the gate's `readFences`. */
+export function readmeFenceLines(markdown) {
+  const out = [];
+  let open = null;
+  for (const raw of markdown.split(/\r?\n/)) {
+    if (open === null) {
+      const opener = raw.match(/^(\s*)(`{3,}|~{3,})\s*([^\s`]*)/);
+      if (opener) open = { marker: opener[2][0], length: opener[2].length, lang: opener[3].toLowerCase(), lines: [] };
+      continue;
+    }
+    const closer = raw.match(/^\s*(`{3,}|~{3,})\s*$/);
+    if (closer && closer[1][0] === open.marker && closer[1].length >= open.length) {
+      if (README_CODE_LANGUAGES.has(open.lang)) out.push(...open.lines);
+      open = null;
+      continue;
+    }
+    if (open.lang === 'diff') {
+      if (!/^\s*-/.test(raw)) open.lines.push(raw.replace(/^(\s*)\+/, '$1'));
+      continue;
+    }
+    open.lines.push(raw);
+  }
+  if (open !== null && README_CODE_LANGUAGES.has(open.lang)) out.push(...open.lines);
+  return out;
+}
+
+/** Every fenced import: its specifier, the names it imports (`default` for a default import), and the locals it binds. */
+export function readmeImports(markdown) {
+  const out = [];
+  const text = readmeFenceLines(markdown).join('\n');
+  for (const m of text.matchAll(/^\s*import\s+([\s\S]*?)\s+from\s*['"]([^'"]+)['"]/gm)) {
+    const clause = m[1].trim().replace(/^type\s+/, '');
+    const imp = { specifier: m[2], names: [], locals: [] };
+    const at = clause.indexOf('{');
+    const head = (at === -1 ? clause : clause.slice(0, at)).replace(/,\s*$/, '').trim();
+    const ns = head.match(/^\*\s+as\s+([A-Za-z_$][\w$]*)$/);
+    if (ns) imp.locals.push(ns[1]);
+    else if (IDENT_RE.test(head)) imp.names.push('default'), imp.locals.push(head);
+    if (at !== -1) {
+      const close = clause.lastIndexOf('}');
+      for (const piece of clause.slice(at + 1, close === -1 ? undefined : close).split(',')) {
+        const spec = piece.trim().replace(/^type\s+/, '');
+        const alias = spec.match(/^([A-Za-z_$][\w$]*|"[^"]*"|'[^']*')\s+as\s+([A-Za-z_$][\w$]*)$/);
+        if (alias) imp.names.push(alias[1].replace(/^['"]|['"]$/g, '')), imp.locals.push(alias[2]);
+        else if (IDENT_RE.test(spec)) imp.names.push(spec), imp.locals.push(spec);
+      }
+    }
+    out.push(imp);
+  }
+  return out;
+}
+
+/** Every fenced `receiver.p1….member(` site, any receiver: the gate's `memberCallSites`, undeduped. */
+export function readmeCallSites(markdown) {
+  const out = [];
+  for (const line of readmeFenceLines(markdown)) {
+    if (/^\s*(import\b|\/\/|\*|\/\*)/.test(line)) continue;
+    for (const m of line.matchAll(/(?<![\w$.'"`])([A-Za-z_$][\w$]*)((?:\s*\.\s*[A-Za-z_$][\w$]*)+)\s*\(/g)) {
+      out.push({ object: m[1], segments: m[2].split('.').map((s) => s.trim()).filter(Boolean) });
+    }
+  }
+  return out;
+}
+
+/**
+ * The receivers a document's call sites can be typed through: each import-bound local, plus one hop of
+ * `const x = [await] [new] Local(` — the gate's `extractLocalBindings` DECLARATION shape. Every candidate is
+ * kept (the gate drops a shadowed or twice-declared one), so this is a superset of what the gate reads.
+ *
+ * @param {Map<string, Set<string>>} localPackages import-bound local → the packages it was imported from
+ */
+export function readmeReceivers(markdown, localPackages) {
+  const out = new Map(localPackages);
+  for (const line of readmeFenceLines(markdown)) {
+    if (/^\s*(import\b|\/\/|\*|\/\*)/.test(line)) continue;
+    const decl = line.match(/^\s*(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*(?::\s*[^=]+?)?\s*=\s*(.+)$/);
+    const source = decl?.[2].trim().replace(/^await\s+/, '').match(/^(?:new\s+)?([A-Za-z_$][\w$]*)\s*\(/);
+    if (!source || !localPackages.has(source[1])) continue;
+    out.set(decl[1], new Set([...(out.get(decl[1]) ?? []), ...localPackages.get(source[1])]));
+  }
+  return out;
+}
+
+/** What a document's fenced code claims, as comparable strings: each scoped or member import name, and each call site. */
+export function readmeClaims(markdown, isMember = () => false) {
+  const claims = new Set();
+  for (const imp of readmeImports(markdown)) {
+    const name = readmePackageName(imp.specifier);
+    if (!name || !(name.startsWith(README_OWN_SCOPE) || isMember(name))) continue;
+    claims.add(`import ${imp.specifier}`);
+    for (const n of imp.names) claims.add(`import ${imp.specifier} ${n}`);
+  }
+  if (claims.size === 0) return claims;
+  for (const site of readmeCallSites(markdown)) claims.add(`call ${site.object}.${site.segments.join('.')}`);
+  return claims;
+}
+
+/** `@objectstack/spec/data` → `@objectstack/spec`; a relative specifier → null. The gate's `splitSpecifier`. */
+export function readmePackageName(specifier) {
+  if (specifier.startsWith('.') || specifier.startsWith('/')) return null;
+  const parts = specifier.split('/');
+  return specifier.startsWith('@') ? parts.slice(0, 2).join('/') : parts[0];
+}
+
+/** A `files` pattern as the gate reads it: a bare path (a file, or a directory taken whole) or a glob. */
+export function readmeFilesMatcher(pattern) {
+  const clean = pattern.replace(/^\.\//, '').replace(/\/$/, '');
+  let src = '';
+  for (let i = 0; i < clean.length; i++) {
+    const c = clean[i];
+    if (c === '*' && clean[i + 1] === '*') {
+      const spansSlash = clean[i + 2] === '/';
+      src += spansSlash ? '(?:[^/]*/)*' : '.*';
+      i += spansSlash ? 2 : 1;
+    } else if (c === '*') src += '[^/]*';
+    else if (c === '?') src += '[^/]';
+    else src += /[.+^${}()|[\]\\]/.test(c) ? `\\${c}` : c;
+  }
+  const rx = new RegExp(`^${src}$`);
+  const prefix = `${clean}/`;
+  return (rel) => rx.test(rel) || rel.startsWith(prefix);
+}
+
+function walkReadmeMarkdown(absDir, prefix, out) {
+  for (const entry of readdirSync(absDir, { withFileTypes: true })) {
+    if (README_SKIP_DIRS.has(entry.name)) continue;
+    const rel = prefix ? `${prefix}/${entry.name}` : entry.name;
+    if (entry.isDirectory()) walkReadmeMarkdown(nodePath.join(absDir, entry.name), rel, out);
+    else if (rel.toLowerCase().endsWith('.md')) out.push(rel);
+  }
+  return out;
+}
+
+/**
+ * The gate's population and what it claims, from the working tree, memoised for `ROOT`.
+ *
+ * @returns {{ docs: Set<string>, claimed: Map<string, Set<string>>, closure: Map<string, Set<string>>,
+ *             watched: Map<string, Set<string>>, memberDirs: Set<string>, byName: Map<string, {dir: string, manifest: object}> }}
+ *   `claimed` is package name → the names its documents claim, `closure` package name → itself and its workspace
+ *   dependencies (transitively), `watched` package DIRECTORY → every claimed name whose package's closure holds it.
+ */
+let readmeReachMemo = null;
+export function publishedReadmeReach(root = ROOT) {
+  if (root === ROOT && readmeReachMemo) return readmeReachMemo;
+  const members = workspacePackageDirs(root)
+    .filter((dir) => dir !== 'ui' && !dir.startsWith('ui/'))
+    .map((dir) => ({ dir, manifest: JSON.parse(readFileSync(nodePath.join(root, dir, 'package.json'), 'utf8')) }));
+  const byName = new Map(members.filter((m) => m.manifest.name).map((m) => [m.manifest.name, m]));
+  const docs = new Set();
+  const claimed = new Map();
+  for (const { dir, manifest } of members) {
+    if (!manifest.name || manifest.private === true) continue;
+    const matchers = (Array.isArray(manifest.files) ? manifest.files : []).map(readmeFilesMatcher);
+    if (matchers.length === 0) continue;
+    for (const rel of walkReadmeMarkdown(nodePath.join(root, dir), '', [])) {
+      if (rel.split('/').pop() === 'CHANGELOG.md' || !matchers.some((m) => m(rel))) continue;
+      docs.add(`${dir}/${rel}`);
+      const markdown = readFileSync(nodePath.join(root, dir, rel), 'utf8');
+      const localPackages = new Map();
+      for (const imp of readmeImports(markdown)) {
+        const name = readmePackageName(imp.specifier);
+        if (!byName.has(name)) continue;
+        if (!claimed.has(name)) claimed.set(name, new Set());
+        for (const n of imp.names) claimed.get(name).add(n);
+        for (const local of imp.locals) localPackages.set(local, new Set([...(localPackages.get(local) ?? []), name]));
+      }
+      if (localPackages.size === 0) continue;
+      const receivers = readmeReceivers(markdown, localPackages);
+      for (const site of readmeCallSites(markdown)) {
+        for (const pkg of receivers.get(site.object) ?? []) for (const seg of site.segments) claimed.get(pkg).add(seg);
+      }
+    }
+  }
+  if (docs.size === 0 || claimed.size === 0) {
+    throw new Error(
+      `dispatch-gates: the published-README reader found ${docs.size} document(s) and ${claimed.size} reached package(s), ` +
+        'so the claim net would reach nothing. The gate\'s population moved: re-point this reader with it',
+    );
+  }
+  const dependencies = (name) => {
+    const m = byName.get(name)?.manifest ?? {};
+    return Object.keys({ ...m.dependencies, ...m.peerDependencies }).filter((d) => byName.has(d));
+  };
+  const closure = new Map();
+  for (const name of claimed.keys()) {
+    const seen = new Set([name]);
+    const queue = [name];
+    while (queue.length > 0) for (const d of dependencies(queue.shift())) if (!seen.has(d)) seen.add(d), queue.push(d);
+    closure.set(name, seen);
+  }
+  const watched = new Map();
+  for (const [name, reach] of closure) {
+    for (const q of reach) {
+      const dir = byName.get(q).dir;
+      if (!watched.has(dir)) watched.set(dir, new Set());
+      for (const n of claimed.get(name)) watched.get(dir).add(n);
+    }
+  }
+  const result = { docs, claimed, closure, watched, memberDirs: new Set(members.map((m) => m.dir)), byName };
+  if (root === ROOT) readmeReachMemo = result;
+  return result;
+}
+
+/** How many times a TypeScript source declares each name, as the claim net reads a declaration (comments masked). */
+export function declaredNameCounts(source) {
+  const text = maskComments(source);
+  const counts = new Map();
+  const add = (n) => counts.set(n, (counts.get(n) ?? 0) + 1);
+  for (const m of text.matchAll(/\b(?:class|interface|type|enum|function\*?|namespace|const|let|var)\s+([A-Za-z_$][\w$]*)/g)) add(m[1]);
+  for (const m of text.matchAll(/^[ \t]*(?:(?:public|private|protected|static|readonly|async|abstract|declare|override|accessor|get|set)\s+)*\*?[ \t]*['"]?([A-Za-z_$][\w$]*)['"]?[ \t]*[?!]?[ \t]*(?:[:(<]|=(?![=>]))/gm)) {
+    if (m[1] !== 'default') add(m[1]);
+  }
+  for (const m of text.matchAll(/[{,;][ \t]*([A-Za-z_$][\w$]*)[ \t]*\??[ \t]*:/g)) add(m[1]);
+  for (const m of text.matchAll(/[{;][ \t]*(?:(?:readonly|static|async|get|set)\s+)*([A-Za-z_$][\w$]*)[ \t]*\??[ \t]*[(<]/g)) add(m[1]);
+  for (const m of text.matchAll(/\bexport\s+(?:type\s+)?\{([^}]*)\}/g)) {
+    for (const piece of m[1].split(',')) for (const side of piece.replace(/^\s*type\s+/, '').split(/\s+as\s+/)) if (IDENT_RE.test(side.trim())) add(side.trim());
+  }
+  for (let n = (text.match(/\bexport\s+default\b/g) ?? []).length; n > 0; n--) add('default');
+  for (const m of text.matchAll(/\bexport\s+\*\s+as\s+([A-Za-z_$][\w$]*)/g)) add(m[1]);
+  for (const m of text.matchAll(/\bexport\s+\*\s+from\s*['"]([^'"]+)['"]/g)) add(`* from ${m[1]}`);
+  return counts;
+}
+
+/** The names `before` declares more often than `after`: a removal or a rename, never an addition. */
+export function removedDeclarations(before, after) {
+  const b = declaredNameCounts(before ?? '');
+  const a = declaredNameCounts(after ?? '');
+  return [...b].filter(([n, k]) => (a.get(n) ?? 0) < k).map(([n]) => n);
+}
+
+let readmeBaseMemo;
+/** The blob a path had at the change set's base (see above), or null when it had none. */
+function readReadmeNetBase(rel) {
+  if (readmeBaseMemo === undefined) {
+    const mb = runGit(['merge-base', DEFAULT_BASE_REF, 'HEAD'], ROOT);
+    readmeBaseMemo = mb.status === 0 && mb.stdout.trim() ? mb.stdout.trim() : 'HEAD';
+  }
+  const shown = runGit(['show', `${readmeBaseMemo}:${rel}`], ROOT);
+  return shown.status === 0 ? shown.stdout : null;
+}
+
+const pickManifest = (text) => {
+  try {
+    const m = JSON.parse(text);
+    return JSON.stringify(README_MANIFEST_FIELDS.map((f) => m?.[f] ?? null));
+  } catch {
+    return null;
+  }
+};
+
+/**
+ * Can this path take away a claim a published README makes? The trigger for `check:published-readme-exports`.
+ *
+ * @param {string} path repo-relative
+ * @param {{ reach?: () => ReturnType<typeof publishedReadmeReach>, readHead?: (rel: string) => string|null,
+ *           readBase?: (rel: string) => string|null }} [io] injectable for the self-test
+ */
+export function takesAReadmeClaim(path, { reach = publishedReadmeReach, readHead = readTrackedSource, readBase = readReadmeNetBase } = {}) {
+  const rel = path.replace(/^\.\//, '');
+  const { docs, watched, memberDirs, byName } = reach();
+  if (docs.has(rel)) {
+    const head = readHead(rel);
+    if (head === null || head === undefined) return false;
+    const before = readmeClaims(readBase(rel) ?? '', (n) => byName.has(n));
+    return [...readmeClaims(head, (n) => byName.has(n))].some((c) => !before.has(c));
+  }
+  if (rel === WORKSPACE_FILE) {
+    const globs = (text) => {
+      try {
+        return JSON.stringify(text === null || text === undefined ? null : parseWorkspaceGlobs(text));
+      } catch {
+        return null;
+      }
+    };
+    return globs(readHead(rel)) !== globs(readBase(rel));
+  }
+  const slash = rel.lastIndexOf('/');
+  if (rel.endsWith('/package.json') && memberDirs.has(rel.slice(0, slash))) {
+    const head = readHead(rel);
+    const base = readBase(rel);
+    return (head ?? null) !== (base ?? null) && pickManifest(head ?? '') !== pickManifest(base ?? '');
+  }
+  if (!README_SOURCE.test(rel)) return false;
+  let dir = null;
+  for (const d of watched.keys()) if (rel.startsWith(`${d}/`) && (dir === null || d.length > dir.length)) dir = d;
+  if (dir === null) return false;
+  const inPackage = rel.slice(dir.length + 1);
+  if (inPackage.split('/').some((seg) => README_SKIP_DIRS.has(seg)) || isTestPath(inPackage)) return false;
+  const names = watched.get(dir);
+  return removedDeclarations(readBase(rel), readHead(rel)).some((n) => n.startsWith('* from ') || names.has(n));
+}
+
+/**
  * Is this path inside the ROOT package's tsc program — the population the
  * root's `typecheck:root` script checks (until the root graduated, the
  * `@objectstack/spec-monorepo` entry of `check:type-check-debt`)?
@@ -11541,6 +11909,7 @@ const CHANGE_KIND_PREDICATES = Object.freeze({
   'ui-scripts-suite-input': (path) => readByUiScriptsSuite(path),
   // One per population net (#31257), each bound to its own net.
   ...Object.fromEntries(Object.entries(POPULATION_NETS).map(([key, net]) => [key, (path) => reachesPopulationNet(path, net)])),
+  'published-readme-claim': (path) => takesAReadmeClaim(path),
 });
 
 export function bindChangeKindRows(rows, predicates = CHANGE_KIND_PREDICATES) {
