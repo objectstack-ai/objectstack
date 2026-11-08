@@ -39,7 +39,8 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
           import: "インポート",
           export: "エクスポート",
           platform_admin_standing_change: "プラットフォーム管理者権限の変更",
-          action_invocation: "アクション実行"
+          action_invocation: "アクション実行",
+          package_uninstall: "パッケージのアンインストール"
         }
       },
       user_id: {

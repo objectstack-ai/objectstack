@@ -109,6 +109,13 @@
  * quota. Deliberately NOT the search API (30/min) and NOT GraphQL, whose quota
  * was measurably under pressure in this repo (2699/5000 remaining) when this
  * was written. Comments are never paginated — the bodies are not parsed at all.
+ *
+ * Each next page is read on the `/repos/OWNER/REPO/...` path the listing
+ * started from, carrying only the `rel="next"` link's query (`onPathOf`):
+ * GitHub's link names `/repositories/ID/...`, which a cloud seat's egress
+ * proxy refuses (measured: 403), so following it verbatim read page 1 and
+ * threw on page 2 once the corpus passed 100 records. `retest-owed.mjs` reads
+ * its listings through the same helper.
  */
 
 import { execFileSync } from 'node:child_process';
@@ -153,11 +160,12 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'freshness is three-valued': 8,
   'latest-per-selector wins': 4,
   'the render must never hide a record': 19,
+  'a listing stays on the repository path': 4,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 11;
+const SELF_TEST_BATTERY_FLOOR = 12;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -753,17 +761,19 @@ export function readShaFacts(root, sha, targetSha) {
 }
 
 /**
- * Fetch every `qa-run` record. REST core quota, paginated by Link header.
+ * Fetch every `qa-run` record. REST core quota, paginated by Link header, each
+ * next page read on the starting `/repos/...` path (header, `onPathOf`).
  * Returns the raw issues plus the call count, so the view can report its cost.
+ * `fetchImpl` is the network seam the self-test feeds a fake `Link` header through.
  */
-async function fetchRunRecords(repo, token) {
+export async function fetchRunRecords(repo, token, fetchImpl = fetch) {
   const out = [];
   let calls = 0;
   let url = `https://api.github.com/repos/${repo}/issues?labels=qa-run&state=all&per_page=100`;
   while (url) {
     const headers = { Accept: 'application/vnd.github+json', 'User-Agent': 'objectstack-qa-rollup' };
     if (isUsableToken(token)) headers.Authorization = `Bearer ${token}`;
-    const res = await fetch(url, { headers });
+    const res = await fetchImpl(url, { headers });
     calls += 1;
     if (!res.ok) {
       throw new Error(`GitHub API ${res.status} ${res.statusText} for ${url}\n${authHint(res.status, token)}`);
@@ -775,9 +785,16 @@ async function fetchRunRecords(repo, token) {
     }
     const link = res.headers.get('link') ?? '';
     const next = /<([^>]+)>;\s*rel="next"/.exec(link);
-    url = next ? next[1] : null;
+    url = next ? onPathOf(url, next[1]) : null;
   }
   return { issues: out, calls };
+}
+
+/** `next`'s query on `current`'s path: the `/repositories/ID` path GitHub links to is refused here. */
+export function onPathOf(current, next) {
+  const moved = new URL(current);
+  moved.search = new URL(next).search;
+  return moved.toString();
 }
 
 /**
@@ -1246,6 +1263,27 @@ async function selfTest() {
     failures,
   );
   checked += assert(emptyMd.includes('#7627'), 'the legacy record is still listed when the table is empty', failures);
+
+  // --- a listing stays on the repository path ------------------------------
+  // Offline: a fake fetch answers page 1 with GitHub's real next-link shape,
+  // which names the numeric `/repositories/ID` path a cloud seat's proxy refuses,
+  // and answers that path 403 the way the proxy does.
+  battery('a listing stays on the repository path');
+  const asked = [];
+  const issue = (number) => ({ number, title: 'QA run · x (1/1) · e4e5c6e3 · 2026-11-08 · 1 PASS', state: 'open' });
+  const fakeFetch = async (url) => {
+    asked.push(url);
+    const u = new URL(url);
+    const ok = (body, link) => ({ ok: true, status: 200, statusText: 'OK', json: async () => body, headers: new Headers(link ? { link } : {}) });
+    if (u.pathname.startsWith('/repositories/')) return { ok: false, status: 403, statusText: 'Forbidden', json: async () => ({}), headers: new Headers() };
+    if (u.searchParams.get('page') === '2') return ok([issue(3)]);
+    return ok([issue(1), issue(2)], '<https://api.github.com/repositories/42/issues?labels=qa-run&state=all&per_page=100&page=2>; rel="next", <https://api.github.com/repositories/42/issues?labels=qa-run&state=all&per_page=100&page=2>; rel="last"');
+  };
+  const listed = await fetchRunRecords('o/r', '', fakeFetch).catch((e) => ({ error: e.message }));
+  checked += assert(!listed.error, `page 2 is read, not refused: ${listed.error ?? ''}`, failures);
+  checked += assert(listed.issues?.map((i) => i.number).join() === '1,2,3', 'both pages land, in order', failures);
+  checked += assert(asked.length === 2 && new URL(asked[1]).pathname === '/repos/o/r/issues', 'the next page is asked on the /repos path, never /repositories/ID', failures);
+  checked += assert(asked.length === 2 && new URL(asked[1]).searchParams.get('page') === '2' && new URL(asked[1]).searchParams.get('labels') === 'qa-run', 'the next link\'s page and filters are carried over', failures);
 
   // The floor runs BEFORE the verdict below, so a success line can only be
   // printed by a run in which every declared battery registered its cases.
