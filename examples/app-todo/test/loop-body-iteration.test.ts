@@ -34,9 +34,20 @@
  * real flow by deleting `config.body` and re-wiring the flat edges, still dies
  * at `update_priority`. Without it a green suite could not distinguish "the
  * loop body ran" from "nothing in this harness can fail".
+ *
+ * ONE KERNEL PER FILE, CLEAN STATE PER CASE. The boot is ~80% of a case's wall
+ * (measured locally: ~250 ms of boot against ~25 ms of `execute`), and booting
+ * it inside every case put a whole kernel under vitest's 5 s per-test default:
+ * on loaded Test Core shards the first case was cut off at 5011–5033 ms. So the
+ * kernel boots once in `beforeAll`, under its own measured budget (below), and
+ * `beforeEach` gives every case the state a fresh boot would: no `todo_task`
+ * rows (deleted through the driver, so no hook or flow observes the reset) and
+ * no captured notices. The only registration a case adds — CONTROL's fixture
+ * flow — is removed in its own `finally`. Each case still passes alone and in
+ * shuffled order.
  */
 
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, beforeAll, beforeEach, afterAll } from 'vitest';
 import { ObjectKernel } from '@objectstack/core';
 import { ObjectQLPlugin } from '@objectstack/objectql';
 import { SqliteWasmDriver } from '@objectstack/driver-sqlite-wasm';
@@ -55,13 +66,6 @@ interface CapturedEmit {
   source?: { object: string; id: string };
 }
 
-const openDrivers: Array<{ disconnect?: () => Promise<void> }> = [];
-afterEach(async () => {
-  while (openDrivers.length) {
-    try { await openDrivers.pop()?.disconnect?.(); } catch { /* noop */ }
-  }
-});
-
 /** `n` whole days before today, as a `Field.date` string (UTC); negative = future. */
 function daysAgoIso(n: number): string {
   const d = new Date();
@@ -74,11 +78,14 @@ function daysAgoIso(n: number): string {
  * A real kernel with the app's real `todo_task` over in-process sqlite-wasm,
  * the real automation engine, and a capturing `messaging` service.
  */
-async function bootTodoKernel(): Promise<{
+interface TodoKernel {
   automation: AutomationEngine & Record<string, any>;
   data: any;
+  driver: any;
   emits: CapturedEmit[];
-}> {
+}
+
+async function bootTodoKernel(): Promise<TodoKernel> {
   const emits: CapturedEmit[] = [];
   const messaging = {
     async emit(input: CapturedEmit) {
@@ -107,7 +114,6 @@ async function bootTodoKernel(): Promise<{
   const driver: any = new SqliteWasmDriver({ filename: ':memory:' });
   await driver.connect();
   objectql.registerDriver(driver, true);
-  openDrivers.push(driver);
   objectql.registry.registerObject(Task, 'todo', 'todo');
   await objectql.syncSchemas();
   // A real `single` install's Default Organization: the system writes below
@@ -116,8 +122,32 @@ async function bootTodoKernel(): Promise<{
 
   automation.registerFlow(OverdueEscalationFlow.name, OverdueEscalationFlow);
   automation.registerFlow(TaskReminderFlow.name, TaskReminderFlow);
-  return { automation, data, emits };
+  return { automation, data, driver, emits };
 }
+
+/**
+ * The boot budget is measured, not vitest's 10 s hook default. Locally one boot
+ * (kernel, sqlite-wasm connect, schema sync, Default Organization, flows) took
+ * 230–330 ms idle and ~650 ms with 8 CPU-bound processes beside the suite on 4
+ * cores. On Test Core shards the old first case — this boot plus one
+ * `execute` — was cut off at 5011, 5015 and 5033 ms (jobs 128519296820,
+ * 128555004931, 128565270519), and one warm case took 4620 ms, so the shard's
+ * slowdown has reached ~20x the idle reading. 30 s is 6x the 5 s the shards
+ * already exceeded.
+ */
+const BOOT_BUDGET_MS = 30_000;
+
+let k: TodoKernel;
+beforeAll(async () => { k = await bootTodoKernel(); }, BOOT_BUDGET_MS);
+afterAll(async () => { await k?.driver.disconnect?.(); });
+
+/** The state a fresh boot leaves: no task rows, no captured notices. */
+beforeEach(async () => {
+  for (const row of await k.driver.find('todo_task', { where: {} })) {
+    await k.driver.delete('todo_task', row.id);
+  }
+  k.emits.length = 0;
+});
 
 const SYSTEM = { context: { isSystem: true } };
 
@@ -132,7 +162,7 @@ async function seedOverdueTask(data: any, subject: string, days: number, owner =
 
 describe('#19206 — the loop body runs and binds `currentTask`', () => {
   it('ESCALATION: the run reaches `notify_owner` and the notice renders the real day count', async () => {
-    const { automation, data, emits } = await bootTodoKernel();
+    const { automation, data, emits } = k;
     const id = await seedOverdueTask(data, 'Renew the domain', 5);
 
     const result: any = await automation.execute('todo_overdue_escalation');
@@ -158,7 +188,7 @@ describe('#19206 — the loop body runs and binds `currentTask`', () => {
   });
 
   it('EVERY item is processed, and each one carries its own values', async () => {
-    const { automation, data, emits } = await bootTodoKernel();
+    const { automation, data, emits } = k;
     await seedOverdueTask(data, 'Alpha', 4, 'usr_a');
     await seedOverdueTask(data, 'Bravo', 9, 'usr_b');
     await seedOverdueTask(data, 'Charlie', 12, 'usr_c');
@@ -184,7 +214,7 @@ describe('#19206 — the loop body runs and binds `currentTask`', () => {
   });
 
   it('CONTAINMENT: one un-notifiable row does not end the sweep', async () => {
-    const { automation, data, emits } = await bootTodoKernel();
+    const { automation, data, emits } = k;
     await seedOverdueTask(data, 'Alpha', 4, 'usr_a');
     // `notify` refuses an empty resolved recipient set (`notify-node.ts`), so
     // this row's iteration fails INSIDE the body's `try_catch`.
@@ -200,7 +230,7 @@ describe('#19206 — the loop body runs and binds `currentTask`', () => {
   });
 
   it('REMINDER: the second loop in the file binds its iterator too', async () => {
-    const { automation, data, emits } = await bootTodoKernel();
+    const { automation, data, emits } = k;
     await data.insert('todo_task', {
       subject: 'Pay the invoice', status: 'not_started', priority: 'high',
       due_date: daysAgoIso(-1), owner: 'usr_test_owner',
@@ -216,7 +246,7 @@ describe('#19206 — the loop body runs and binds `currentTask`', () => {
   });
 
   it('CONTROL: the pre-fix body-less shape still dies at `update_priority`', async () => {
-    const { automation, data, emits } = await bootTodoKernel();
+    const { automation, data, emits } = k;
     await seedOverdueTask(data, 'Renew the domain', 5);
 
     // The pre-#19206 shape, rebuilt from the real flow so it cannot drift: the
@@ -237,7 +267,12 @@ describe('#19206 — the loop body runs and binds `currentTask`', () => {
     ];
     automation.registerFlow(legacy.name, legacy);
 
-    const result: any = await automation.execute(legacy.name);
+    let result: any;
+    try {
+      result = await automation.execute(legacy.name);
+    } finally {
+      automation.unregisterFlow(legacy.name);
+    }
     expect(result.success).toBe(false);
     // Loud rather than catastrophic: the filter operand reads `currentTask`,
     // which the body-less shape never binds, and the operand envelope fails the
