@@ -279,3 +279,94 @@ describe('[#30208] the env door judges a lifecycle map the same way', () => {
     expect(errors[0]).toContain('must be an object of keyed rows');
   });
 });
+
+describe('[#31422] a key source that answered an empty list admits no key', () => {
+  /** As `ObjectQLPlugin` registers them, over a registry with no lifecycle-declared object. */
+  const bootWith = (registry: () => LifecycleKeyRegistryLike | undefined) =>
+    bootSettingsDoor(lifecycleSettingsManifest, {
+      before: (svc: SettingsService) => {
+        svc.registerOptionSource('lifecycle', 'quotas', lifecycleObjectKeySource(registry));
+        svc.registerOptionSource('lifecycle', 'retention_overrides', lifecycleObjectKeySource(registry));
+      },
+    });
+  const NO_LIFECYCLE_OBJECTS: LifecycleKeyRegistryLike = {
+    getAllObjects: () => [{ name: 'account', label: 'Account', lifecycle: { class: 'record' } }, { name: 'contact' }],
+  };
+
+  it('the save door refuses every key: invalid_option, naming the entry; nothing stored', async () => {
+    const { save, stored } = await bootWith(() => NO_LIFECYCLE_OBJECTS);
+
+    const st = await save({ quotas: { sys_audit_log: 1000 } });
+
+    expect(st.status).toBe(400);
+    const fields = st.body.error.details.fields as Fields;
+    expect(fields).toHaveLength(1);
+    expect(fields[0]).toMatchObject({ field: 'quotas', code: 'invalid_option', constraint: { type: 'map', entry: 'sys_audit_log' } });
+    expect(fields[0].message).toBe("Row quotas: 'sys_audit_log' is not a key this setting admits.");
+    expect(stored('quotas')).toBeUndefined();
+  });
+
+  it('the env door does not put such a map in force either', async () => {
+    const errors: string[] = [];
+    const svc = new SettingsService({
+      env: { OS_LIFECYCLE_QUOTAS: '{"sys_audit_log": 1000}' },
+      logger: { error: (m: string) => void errors.push(m), warn: () => {} } as any,
+    });
+    svc.registerOptionSource('lifecycle', 'quotas', lifecycleObjectKeySource(() => NO_LIFECYCLE_OBJECTS));
+    svc.registerManifest(lifecycleSettingsManifest);
+
+    const got = await svc.get('lifecycle', 'quotas');
+
+    expect(got.source).not.toBe('env');
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain("'sys_audit_log' is not a key this setting admits.");
+  });
+
+  it('CONTROL: an empty map still saves (a map with no entry names no key)', async () => {
+    const { save, stored } = await bootWith(() => NO_LIFECYCLE_OBJECTS);
+
+    const st = await save({ quotas: {} });
+
+    expect(st.status).toBe(200);
+    expect(stored('quotas')?.value).toEqual({});
+  });
+
+  it('CONTROL: a source that could not answer (no registry) leaves the declared table, which declares no key: any key passes', async () => {
+    const { save, stored } = await bootWith(() => undefined);
+
+    const st = await save({ quotas: { sys_audit_log: 1000 } });
+
+    expect(st.status).toBe(200);
+    expect(stored('quotas')?.value).toEqual({ sys_audit_log: 1000 });
+  });
+});
+
+describe('[#31422] the two shape misses #30208 left unpinned', () => {
+  it('an array is not a map: invalid_type (not_a_map), naming what was sent', async () => {
+    const { save, stored } = await boot();
+
+    const st = await save({ quotas: [1000] });
+
+    expect(st.status).toBe(400);
+    const fields = st.body.error.details.fields as Fields;
+    expect(fields).toHaveLength(1);
+    expect(fields[0]).toMatchObject({ field: 'quotas', code: 'invalid_type', constraint: { type: 'map' } });
+    expect(String(fields[0].message)).toMatch(/^Row quotas must be an object of keyed rows, such as .*, not an array/);
+    expect(stored('quotas')).toBeUndefined();
+  });
+
+  it('a scalar entry in a several-column map: invalid_shape (not_an_entry), naming the entry and the columns', async () => {
+    const { save, stored } = await boot();
+
+    const st = await save({ retention_overrides: { sys_job_run: '1y' } });
+
+    expect(st.status).toBe(400);
+    const fields = st.body.error.details.fields as Fields;
+    expect(fields).toHaveLength(1);
+    expect(fields[0]).toMatchObject({ field: 'retention_overrides', code: 'invalid_shape', constraint: { type: 'map', entry: 'sys_job_run' } });
+    expect(String(fields[0].message)).toMatch(
+      /^Retention overrides: 'sys_job_run' must be an object with at least one of maxAge, expireAfter, such as .*, not a string of 2 characters\.$/,
+    );
+    expect(stored('retention_overrides')).toBeUndefined();
+  });
+});
