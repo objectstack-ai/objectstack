@@ -68,3 +68,60 @@ later node.
   and the connector allowlists two of them.
 - The token is a static personal token. Signing in with GitHub (OAuth) is not
   offered.
+
+## Provenance
+
+This app packages no vendor document: its upstream is GitHub's MCP server
+itself, and what it pins is the definition of each tool it includes. The
+listing's three provenance fields are:
+
+- **upstream**: `https://api.githubcopilot.com/mcp/`, the server the
+  `github_mcp` connector dials, with `X-MCP-Readonly: true`.
+- **commit**: the commit of this repository (`objectstack-ai/objectstack`)
+  the package is published from. A file cannot name the commit that contains
+  it, so the publisher records it.
+- **sha256**: the digest of the pin set below, pin-set sha256
+  `e922e2420b05707fb3ec9df270009da30d57177c297a6d7c3ee0b4ccbbad7516`.
+
+The connector's `providerConfig.toolsSnapshot` pins both included tools. Each
+pin is the sha256, in lowercase hex, of the tool's `{ name, description,
+inputSchema }` from the server's `tools/list` answer, written as canonical JSON
+(the `mcpToolDigest` recipe of `@objectstack/connector-mcp`):
+
+| Tool | Pin |
+|:---|:---|
+| `search_issues` | `443421e063c9330d4504a88b57def74d1f1e3d0793479068073630a1846eaeb0` |
+| `issue_read` | `380e96f3d78b5c893668ab48a2d72191a3906bdc4e5e5c89f9e92c3e9de6c392` |
+
+The maintainer measured them on 2026-11-06 at 17:27 UTC, on their own machine,
+by calling `initialize` and `tools/list` on the server with
+`X-MCP-Readonly: true` (the script and its full output are in
+[objectstack-ai/objectstack#30116](https://github.com/objectstack-ai/objectstack/issues/30116#issuecomment-6691107153)).
+The token was the maintainer's local GitHub CLI token, which carries broader
+scopes than this app needs, not a token made read-only for the run. GitHub's
+server can serve a different tool set to a token with other scopes, so if a
+read-only token is served different definitions, the connector says so on its
+first connection (below). The tool definitions that output carried are
+`test/fixtures/github-mcp-tools.json`; the package's tests recompute both pins
+from them and fail when a pin, this record or the fixture disagree, with no
+call to GitHub.
+
+**The pin-set digest**, for anyone who recomputes it, such as the
+marketplace's ingestion: serialize the `toolsSnapshot` record as JSON with its
+keys sorted (UTF-16 code-unit order, as JavaScript's default sort) and no
+whitespace, which for a record of strings is its RFC 8785 (JCS) form; then
+take the sha256 of those UTF-8 bytes, in lowercase hex. For the pins above:
+
+```bash
+printf '%s' '{"issue_read":"380e96f3d78b5c893668ab48a2d72191a3906bdc4e5e5c89f9e92c3e9de6c392","search_issues":"443421e063c9330d4504a88b57def74d1f1e3d0793479068073630a1846eaeb0"}' | sha256sum
+# e922e2420b05707fb3ec9df270009da30d57177c297a6d7c3ee0b4ccbbad7516  -
+```
+
+**When GitHub changes a tool.** On every connection the connector hashes the
+tools the server lists and compares them with the pins. A pinned tool the
+server serves with a different description or input schema leaves
+`github_mcp` degraded with `CONNECTOR_UPSTREAM_CHANGED`, naming the tool. (A
+pinned tool the server no longer lists takes the path under Credentials
+instead, since a token's scopes can hide a tool too.) A changed tool is the
+signal to measure again, update the pins, this section and the fixture in the
+same change, and publish again. Never drop a pin to clear it.

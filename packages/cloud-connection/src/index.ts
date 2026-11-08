@@ -85,5 +85,29 @@ export type { RuntimeTelemetryPosture, ClientErrorReportingConfig } from './tele
 // persists the oscc_ bearer here; forwards present it to the control plane).
 export { ConnectionCredentialStore, DEFAULT_CONNECTION_CREDENTIAL_PATH } from './connection-credential-store.js';
 export type { StoredConnectionCredential } from './connection-credential-store.js';
+// [#31554] Where the binding credential lives for this boot: the file above on a
+// single node, the shared encrypted database row when several replicas are
+// declared over the Redis cluster driver. A reader outside the plugin asks
+// CLOUD_BINDING_CREDENTIAL_SERVICE, never the file.
+export {
+    CLOUD_BINDING_CREDENTIAL_OBJECT,
+    CLOUD_BINDING_CREDENTIAL_SERVICE,
+    CLOUD_BINDING_SHARED_CLUSTER_DRIVER,
+    SHARED_CREDENTIAL_REFRESH_MS,
+    SharedConnectionCredentialLedger,
+    SharedCredentialUnavailableError,
+    fileCredentialLedger,
+    sharesCloudBindingCredential,
+} from './connection-credential-ledger.js';
+export type {
+    BindingCredentialEngine,
+    CloudBindingCredentialReader,
+    ConnectionCredentialLedger,
+} from './connection-credential-ledger.js';
+// The one read before the kernel: the host's config reads the shared row for
+// the multi-node licence gate, bounded, read-only, and soft on failure.
+export { PREBOOT_CREDENTIAL_TIMEOUT_MS, readCloudBindingCredentialBeforeBoot } from './connection-credential-preboot.js';
+export type { CloudBindingCredentialBeforeBoot, CloudBindingCredentialBeforeBootOptions } from './connection-credential-preboot.js';
+export { SysCloudBindingCredential } from './sys-cloud-binding-credential.object.js';
 export { CloudConnectionSettingsPage, CLOUD_CONNECTION_UI_BUNDLE } from './cloud-connection-ui.js';
 export { MARKETPLACE_BROWSE_UI_BUNDLE, MARKETPLACE_INSTALLED_UI_BUNDLE } from './marketplace-ui.js';

@@ -11,9 +11,19 @@ import type {
   McpAuthoringInjection,
   McpAuthoringToolContext,
   McpTokenPrincipal,
+  McpToolCallPrincipal,
+  McpToolInterceptor,
   ToolRegistry,
   ToolExecutionResult,
 } from './types.js';
+import {
+  EMPTY_TOOL_CALL_PRINCIPAL,
+  routeToolCallsThrough,
+  toolCallPrincipalOf,
+  toolExecutionContextOf,
+  type McpCallerExecutionContext,
+} from './tool-call-interceptor.js';
+import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { wireBridgeTools, grantsAuthoringTools, thrownRefusalEnvelope, dataDoorAnswerOf, dataDoorRefusalEnvelope } from './mcp-http-tools.js';
 import { isServerFault, logServerFault } from '@objectstack/types';
 import type {
@@ -526,6 +536,14 @@ async function diagnoseListRead(
 export interface McpMergedMetadataRead {
   /** The protocol's merged listing for one metadata type. */
   getMetaItems(request: { type: string }): Promise<unknown>;
+  /**
+   * [#31514] The protocol's by-name read, the one `GET /api/v1/meta/TYPE/NAME`
+   * serves. `agent_prompt` resolves an agent through it where the host has it
+   * ({@link buildAgentPromptResult}), so an agent a package ships, which lives
+   * in the registry this read consults and has no copy in the metadata
+   * service, is served by name the way the REST read serves it.
+   */
+  getMetaItem?(request: { type: string; name: string }): Promise<unknown>;
 }
 
 /**
@@ -698,6 +716,60 @@ export interface AgentPromptResult {
   messages: Array<{ role: 'user' | 'assistant'; content: { type: 'text'; text: string } }>;
 }
 
+/**
+ * [#31514] Read one agent by name through the protocol's by-name read, the read
+ * `GET /api/v1/meta/agent/NAME` serves, where this host has one; the metadata
+ * service otherwise, as before. Which of the two is {@link agentReadOf}'s
+ * decision, the one the roster takes too. ONE reader per host, never both:
+ * the defect this closes is that the two disagree (an agent a package ships
+ * lives in the registry the protocol reads, and the metadata service holds no
+ * copy of it), so a lookup that tried one and then the other would keep both
+ * answers alive.
+ *
+ * The protocol answers `{ type, name, item }`, with `item` absent on a miss,
+ * and throws `SERVICE_UNAVAILABLE` (503) when the metadata service behind it
+ * could not be read and the whole chain resolved nothing: that is the #6055
+ * outage, reported as {@link DiagnosedRead.degraded}. Any other throw travels
+ * to the caller, as a throw of the metadata service's read always did.
+ */
+async function readAgentByName(
+  metadataService: IMetadataService,
+  protocol: McpMergedMetadataRead | undefined,
+  name: string,
+): Promise<DiagnosedRead> {
+  const read = agentReadOf(protocol);
+  if (!read?.getMetaItem) {
+    return diagnosedGet(metadataService, 'agent', name);
+  }
+  let envelope: unknown;
+  try {
+    envelope = await read.getMetaItem({ type: 'agent', name });
+  } catch (err) {
+    if ((err as { code?: unknown } | null)?.code === METADATA_UNAVAILABLE_CODE) {
+      return { data: undefined, degraded: true, errors: [err instanceof Error ? err.message : String(err)] };
+    }
+    throw err;
+  }
+  return { data: (envelope as { item?: unknown } | null | undefined)?.item, degraded: false, errors: [] };
+}
+
+/**
+ * [#31514] The ONE decision, per host, of which layer `agent_prompt` reads:
+ * the protocol when the host's read carries both the merged listing and the
+ * by-name read, the metadata service (`undefined` here) otherwise. The roster
+ * ({@link readAgentRoster}) and the get ({@link readAgentByName}) both take
+ * this answer, so they cannot split: a read with the listing but no by-name
+ * read would otherwise advertise a package agent that the get, left on the
+ * metadata service, answers "not found", the #28940 defect again.
+ */
+function agentReadOf(mergedRead: McpMergedMetadataRead | undefined): McpMergedMetadataRead | undefined {
+  return mergedRead
+    && typeof mergedRead.getMetaItems === 'function'
+    && typeof mergedRead.getMetaItem === 'function'
+    ? mergedRead
+    : undefined;
+}
+
 /** An `Error: …` answer on the prompt surface — this file's existing shape. */
 function promptError(text: string): AgentPromptResult {
   return { messages: [{ role: 'user' as const, content: { type: 'text' as const, text } }] };
@@ -727,18 +799,24 @@ function promptError(text: string): AgentPromptResult {
  * `degraded` only decides the answer once the read has resolved NOTHING, i.e.
  * only when the answer would otherwise have been the unfounded "not found".
  * A read that answered a body is served as it always was.
+ *
+ * [#31514] The agent is read through `protocol`, the read
+ * `GET /api/v1/meta/agent/NAME` serves, where the host has both its reads
+ * ({@link agentReadOf}, {@link readAgentByName}); the three states above are
+ * unchanged.
  */
 export async function buildAgentPromptResult(
   metadataService: IMetadataService,
   args: { agentName?: unknown; objectName?: unknown; recordId?: unknown; viewName?: unknown },
   logger?: Logger,
+  protocol?: McpMergedMetadataRead,
 ): Promise<AgentPromptResult> {
   const agentName = String(args.agentName ?? '');
   if (!agentName) {
     return promptError('Error: agentName argument is required');
   }
 
-  const read = await diagnosedGet(metadataService, 'agent', agentName);
+  const read = await readAgentByName(metadataService, protocol, agentName);
 
   if (read.data === undefined || read.data === null) {
     if (read.degraded) {
@@ -799,17 +877,26 @@ type AgentRoster =
  * [#28940] Read which agents this boot holds, for the `agent_prompt`
  * advertisement.
  *
- * The roster is read from the metadata service — the same layer
- * {@link buildAgentPromptResult} resolves a name from — so the names the
- * argument teaches are names a `prompts/get` can answer. `agent` is a
- * code-only type (ADR-0063 §2 closes `*.agent.ts` to third parties, and the
- * save door refuses a runtime create), so no runtime write grows the set after
- * boot, and the merged overlay read the skill snapshot uses has nothing to add.
+ * The roster is read from the same layer {@link buildAgentPromptResult}
+ * resolves a name from, so the names the argument teaches are names a
+ * `prompts/get` can answer. [#31514] That layer is the protocol where the host
+ * has both its reads ({@link agentReadOf}, the decision the get takes too):
+ * its merged listing, `GET /api/v1/meta/agent`'s read
+ * ({@link mergedDiagnosedList}), which holds the agents a package ships. The
+ * metadata service holds no copy of those, so a roster read from it alone told
+ * a boot whose only agent a package ships that it held none, and the prompt
+ * was not advertised. The completeness verdict is still the metadata
+ * service's, as for the skill listing. `agent` is a code-only type (ADR-0063 §2
+ * closes `*.agent.ts` to third parties, and the save door refuses a runtime
+ * create), so no runtime write grows the set after boot.
  */
-async function readAgentRoster(metadataService: IMetadataService): Promise<AgentRoster> {
+async function readAgentRoster(
+  metadataService: IMetadataService,
+  mergedRead: McpMergedMetadataRead | undefined,
+): Promise<AgentRoster> {
   let read: DiagnosedListRead;
   try {
-    read = await diagnosedList(metadataService, 'agent');
+    read = await mergedDiagnosedList(metadataService, agentReadOf(mergedRead), 'agent');
   } catch (err) {
     return { state: 'unknown', errors: [err instanceof Error ? err.message : String(err)] };
   }
@@ -868,6 +955,28 @@ export type McpObjectView = Pick<IMetadataService, 'listObjects' | 'getObject'>;
  * runtime and its view are collected together.
  */
 const runtimeObjectViews = new WeakMap<MCPServerRuntime, McpObjectView>();
+
+/**
+ * [#31605] The long-lived server's principal: the `OS_MCP_STDIO_API_KEY`
+ * identity the plugin resolves per call (ADR-0101), bound by the plugin once
+ * it has one. Read at each call, never captured — the plugin bridges the AI
+ * tools before it resolves the key, and a runtime nobody binds keeps serving
+ * exactly as before. Package-internal, like {@link setRuntimeObjectView}.
+ */
+const runtimeStdioPrincipals = new WeakMap<MCPServerRuntime, () => Promise<ExecutionContext>>();
+
+/**
+ * [#31605] Bind the long-lived server's principal. Two readers: the bridged AI
+ * tools run with it as their execution context ({@link MCPServerRuntime.bridgeTools}),
+ * and a tool-call interceptor reads it as the principal of every stdio call.
+ * Package-internal; not re-exported from `index.ts`.
+ */
+export function setRuntimeStdioPrincipal(
+  runtime: MCPServerRuntime,
+  resolvePrincipal: () => Promise<ExecutionContext>,
+): void {
+  runtimeStdioPrincipals.set(runtime, resolvePrincipal);
+}
 
 /**
  * [#25245] Give `runtime`'s two object resources `objects` to read in place of
@@ -1308,6 +1417,18 @@ function authoringInstructions(
 }
 
 /**
+ * [#31605] Who an HTTP request was admitted as, as the HOST resolved it — the
+ * input `handleHttpRequest` projects every tool call's interceptor principal
+ * from. Only the members {@link McpCallerExecutionContext} names are read.
+ */
+export interface McpHttpCaller {
+  /** The request's resolved `ExecutionContext` (the credential's, never a header's). */
+  executionContext?: McpCallerExecutionContext;
+  /** The environment the host dispatched this request for. */
+  environmentId?: string;
+}
+
+/**
  * MCPServerRuntime — Bridges ObjectStack kernel services to the Model Context Protocol.
  *
  * Responsibilities:
@@ -1332,6 +1453,8 @@ export class MCPServerRuntime {
   private readonly config: Required<Pick<MCPServerRuntimeConfig, 'name' | 'version'>> & MCPServerRuntimeConfig;
   private transport: StdioServerTransport | undefined;
   private started = false;
+  /** [#31605] The host-installed tool-call interceptor; single slot. */
+  private toolInterceptor: McpToolInterceptor | undefined;
 
   constructor(config: MCPServerRuntimeConfig = {}) {
     this.config = {
@@ -1386,6 +1509,21 @@ export class MCPServerRuntime {
         instructions: this.config.instructions ?? 'ObjectStack MCP Server — access data objects, AI tools, and agent prompts.',
       },
     );
+
+    // [#31605] Before any tool registers: every tool on the long-lived server
+    // (bridged AI tools, the data tools, a plugin's own on `mcp:ready`) runs
+    // through the interceptor slot. `start()` attaches only the stdio
+    // transport, so its calls are stamped `stdio`; their principal is the key
+    // the plugin bound, resolved at the call.
+    routeToolCallsThrough(this.mcpServer, {
+      transport: 'stdio',
+      interceptor: () => this.toolInterceptor,
+      principal: async () => {
+        const resolve = runtimeStdioPrincipals.get(this);
+        return resolve ? toolCallPrincipalOf(await resolve()) : EMPTY_TOOL_CALL_PRINCIPAL;
+      },
+      logger: this.config.logger,
+    });
   }
 
   /** The underlying McpServer instance (for advanced use cases). */
@@ -1396,6 +1534,33 @@ export class MCPServerRuntime {
   /** Whether the server is currently connected and running. */
   get isStarted(): boolean {
     return this.started;
+  }
+
+  // ── Tool-call interceptor ──────────────────────────────────────
+
+  /**
+   * [#31605] Install the interceptor every MCP tool call passes through, on
+   * both transports and every registration path (see
+   * {@link McpToolInterceptor} for the allow / deny / replace contract).
+   * Single slot: installing replaces any previous interceptor. Read at each
+   * call, so it applies to tools already registered and to every later
+   * per-request server.
+   *
+   * Neutral: the runtime holds no policy. With none installed, every tool call
+   * runs exactly as it did before this seam existed.
+   */
+  setToolInterceptor(interceptor: McpToolInterceptor): void {
+    this.toolInterceptor = interceptor;
+  }
+
+  /** [#31605] Remove the installed tool-call interceptor, if any. */
+  clearToolInterceptor(): void {
+    this.toolInterceptor = undefined;
+  }
+
+  /** [#31605] Whether a tool-call interceptor is installed. */
+  hasToolInterceptor(): boolean {
+    return this.toolInterceptor !== undefined;
   }
 
   // ── Tool Bridge ────────────────────────────────────────────────
@@ -1409,16 +1574,31 @@ export class MCPServerRuntime {
    * for `inputSchema`. Its safety annotations come from what the definition
    * declares — see {@link safetyAnnotations}. The handler delegates to the
    * ToolRegistry's execute path.
+   *
+   * [#31605] Once the plugin has bound the stdio principal
+   * ({@link setRuntimeStdioPrincipal}), each call resolves it and passes it as
+   * the registry's execution context — the key's user as `actor` — so a
+   * registry runs the tool as that user and a governed one sees an actor. The
+   * principal is resolved per call (ADR-0101: a revoked key stops working on
+   * the next call), and a key that no longer resolves refuses the call. A
+   * runtime with no principal bound calls `execute(call)` with one argument,
+   * as before.
    */
   bridgeTools(toolRegistry: ToolRegistry): void {
     const tools = toolRegistry.getAll();
     const logger = this.config.logger;
+    const execute = async (call: ToolCallPart): Promise<ToolExecutionResult> => {
+      const resolvePrincipal = runtimeStdioPrincipals.get(this);
+      if (!resolvePrincipal) return toolRegistry.execute(call);
+      return toolRegistry.execute(call, toolExecutionContextOf(await resolvePrincipal()));
+    };
 
     for (const tool of tools) {
-      // The long-lived (stdio) bridge: the registry's own `execute(call)`,
-      // one argument, exactly as before [#26464] moved the registration body
-      // out of this class so the HTTP authoring bridge could share it.
-      registerToolFromDefinition(this.mcpServer, tool, (call) => toolRegistry.execute(call), logger);
+      // The long-lived (stdio) bridge: the registry's own `execute`, with the
+      // stdio principal as its context once one is bound — the registration
+      // body is the one [#26464] moved out of this class so the HTTP
+      // authoring bridge could share it.
+      registerToolFromDefinition(this.mcpServer, tool, execute, logger);
     }
 
     logger?.info(`[MCP] Bridged ${tools.length} tools from ToolRegistry`);
@@ -1708,11 +1888,15 @@ export class MCPServerRuntime {
     // once the transport attaches. A roster read that cannot say (degraded, or
     // it threw) keeps the prompt, which then answers the honest #6055 outage
     // text at get time.
-    const roster = await readAgentRoster(metadataService);
+    // [#31514] Through the protocol where the host has both its reads, the
+    // metadata service otherwise: one decision ({@link agentReadOf}) that the
+    // get below takes too.
+    const agentRead = agentReadOf(mergedRead);
+    const roster = await readAgentRoster(metadataService, agentRead);
     if (roster.state === 'none') {
       logger?.info(
         '[MCP] agent_prompt not advertised — this boot registers no agent, so nothing could answer it. '
-          + 'It is listed on a boot whose metadata service holds at least one agent.',
+          + 'It is listed on a boot that holds at least one agent, one a package ships included.',
       );
     } else {
       if (roster.state === 'unknown') {
@@ -1743,8 +1927,9 @@ export class MCPServerRuntime {
         },
         async (args) =>
           // [#6055] Outage vs. miss lives in the builder — see
-          // {@link buildAgentPromptResult}.
-          buildAgentPromptResult(metadataService, args, logger),
+          // {@link buildAgentPromptResult}. [#31514] The agent is read through
+          // the protocol's by-name read where `agentRead` is the protocol.
+          buildAgentPromptResult(metadataService, args, logger, agentRead),
       );
 
       logger?.info('[MCP] Agent prompts bridged');
@@ -1974,6 +2159,9 @@ export class MCPServerRuntime {
    * @param opts.authoring    [#26464] The host's authoring registry plus the token principal and environment
    *                          that become each call's provenance; registered only for a `metadata:write` grant.
    *                          [#31022] Its optional `instructions` answer `initialize` under that same grant.
+   * @param opts.caller       [#31605] The `ExecutionContext` the host admitted this request as and the
+   *                          environment it dispatched it for: the principal a tool-call interceptor reads
+   *                          for every call on this request. Read only when an interceptor is installed.
    */
   async handleHttpRequest(
     request: Request,
@@ -1983,6 +2171,7 @@ export class MCPServerRuntime {
       authInfo?: unknown;
       toolOptions?: RegisterObjectToolsOptions & RegisterActionToolsOptions;
       authoring?: McpAuthoringInjection;
+      caller?: McpHttpCaller;
     } = {},
   ): Promise<Response> {
     // [#25759] This transport answers POST and nothing else. It is stateless
@@ -2043,6 +2232,19 @@ export class MCPServerRuntime {
           'ObjectStack MCP Server — query and modify your app\'s data objects as tools.',
       },
     );
+
+    // [#31605] Before any tool registers on this request's server. The
+    // principal is projected from the host's `caller` alone — `request` is not
+    // in reach of it, so no header can name another user, client, organization
+    // or environment — once per request, and only if an interceptor asks.
+    const caller = opts.caller;
+    let callerPrincipal: McpToolCallPrincipal | undefined;
+    routeToolCallsThrough(server, {
+      transport: 'http',
+      interceptor: () => this.toolInterceptor,
+      principal: () => (callerPrincipal ??= toolCallPrincipalOf(caller?.executionContext, caller?.environmentId)),
+      logger: this.config.logger,
+    });
 
     if (skillBridge) {
       registerSkillPrompts(server, skillBridge);

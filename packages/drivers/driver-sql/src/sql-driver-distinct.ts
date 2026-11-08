@@ -44,7 +44,9 @@ export interface DistinctHost {
   coercionKey: SqlDriver['coercionKey'];
   distinctBackendFault: SqlDriver['distinctBackendFault'];
   getBuilder: SqlDriver['getBuilder'];
+  readonly isMssql: SqlDriver['isMssql'];
   presentReadValue: SqlDriver['presentReadValue'];
+  primeMssqlGuidColumns: SqlDriver['primeMssqlGuidColumns'];
   readPresentationKind: SqlDriver['readPresentationKind'];
   remoteColumn: SqlDriver['remoteColumn'];
 }
@@ -52,7 +54,9 @@ export interface DistinctHost {
 /** The bodies of the "Distinct" section of `SqlDriver`: a stateless facet, called by the class's stubs. */
 export class DistinctFacet {
   /** The body of `SqlDriver#distinct`; the method's docblock there is its contract. */
-  static async distinct(this: Pick<DistinctHost, 'applyFilters' | 'applyTenantScope' | 'coercionKey' | 'distinctBackendFault' | 'getBuilder' | 'presentReadValue' | 'readPresentationKind' | 'remoteColumn'>, object: string, field: string, filters?: FilterCondition, options?: DriverOptions): Promise<any[]> {
+  static async distinct(this: Pick<DistinctHost, 'applyFilters' | 'applyTenantScope' | 'coercionKey' | 'distinctBackendFault' | 'getBuilder' | 'isMssql' | 'presentReadValue' | 'primeMssqlGuidColumns' | 'readPresentationKind' | 'remoteColumn'>, object: string, field: string, filters?: FilterCondition, options?: DriverOptions): Promise<any[]> {
+    // [#31395] SQL Server: which columns are GUIDs, before a text operator compiles.
+    if (this.isMssql) await this.primeMssqlGuidColumns(object, filters);
     const builder = this.getBuilder(object, options);
     // The third read door that skipped the chokepoint, and the one #6792 does
     // NOT name — the card asserts the opposite ("called at 13 sites — …,

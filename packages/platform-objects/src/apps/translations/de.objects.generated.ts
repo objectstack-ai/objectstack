@@ -1160,10 +1160,11 @@ export const deObjects: NonNullable<TranslationData['objects']> = {
       },
       revoked_reason: {
         label: "Widerrufsgrund",
-        help: "Warum der Schlüssel widerrufen wurde, sofern das entscheidet, wer ihn wiederherstellen kann. Passwortzurücksetzung durch Administrator: Nur ein Plattformadministrator kann den Schlüssel wiederherstellen. Mitgliedschaft in der Organisation beendet: Der Eigentümer hat die Organisation verlassen, und niemand kann den Schlüssel wiederherstellen; ein Mitglied legt einen neuen an. Wird beim Wiederherstellen des Schlüssels gelöscht. Leer bei einem Schlüssel, der in der Liste der API-Schlüssel widerrufen wurde.",
+        help: "Warum der Schlüssel widerrufen wurde, sofern das entscheidet, wer ihn wiederherstellen kann. Passwortzurücksetzung durch Administrator: Nur ein Plattformadministrator kann den Schlüssel wiederherstellen. Mitgliedschaft in der Organisation beendet: Der Eigentümer hat die Organisation verlassen, und niemand kann den Schlüssel wiederherstellen; ein Mitglied legt einen neuen an. Von einem Administrator gesperrt: Ein Plattformadministrator hat einen Schlüssel widerrufen, der ihm nicht gehört, und nur ein Plattformadministrator kann ihn wiederherstellen. Wird beim Wiederherstellen des Schlüssels gelöscht. Leer bei einem Schlüssel, den sein Eigentümer in der Liste der API-Schlüssel widerrufen hat.",
         options: {
           admin_password_reset: "Passwortzurücksetzung durch Administrator",
-          organization_membership_ended: "Mitgliedschaft in der Organisation beendet"
+          organization_membership_ended: "Mitgliedschaft in der Organisation beendet",
+          administrator_suspended: "Von einem Administrator gesperrt"
         }
       },
       key: {
@@ -2635,6 +2636,55 @@ export const deObjects: NonNullable<TranslationData['objects']> = {
       order_key: {
         label: "Sortierschlüssel",
         help: "Abgeleiteter Schlüssel für stabile Paginierung, gepflegt von @better-auth/scim; nicht direkt beschreiben."
+      },
+      created_at: {
+        label: "Erstellt am"
+      },
+      updated_at: {
+        label: "Aktualisiert am"
+      }
+    },
+    _views: {
+      all: {
+        label: "Alle"
+      }
+    }
+  },
+  sys_idp_group_mapping: {
+    label: "IdP-Gruppenzuordnung",
+    pluralLabel: "IdP-Gruppenzuordnungen",
+    description: "Ordnet eine Gruppe des Identitätsanbieters dem Berechtigungssatz zu, den ihre Mitglieder erhalten",
+    fields: {
+      id: {
+        label: "ID"
+      },
+      source_kind: {
+        label: "Quellart",
+        help: "Was die Gruppe überträgt: eine SCIM-Verbindung oder ein SSO-Anbieter bei der Anmeldung.",
+        options: {
+          scim: "SCIM-Verbindung",
+          sso: "SSO-Anbieter"
+        }
+      },
+      source_id: {
+        label: "Quell-ID",
+        help: "Die ID der SCIM-Verbindung oder des SSO-Anbieters, über die die Gruppe eintrifft, z. B. \"okta-prod\"."
+      },
+      group_external_id: {
+        label: "Externe Gruppen-ID",
+        help: "Die externalId der Gruppe, wie der Identitätsanbieter sie sendet. Legen Sie diese oder den Anzeigenamen fest, nicht beides."
+      },
+      group_display_name: {
+        label: "Gruppen-Anzeigename",
+        help: "Der displayName der Gruppe, exakt abgeglichen. Wird verwendet, wenn die Zuordnung keine externe ID nennt."
+      },
+      permission_set: {
+        label: "Berechtigungssatz",
+        help: "Der Berechtigungssatz, den ein Mitglied der Gruppe erhält. Administratorsätze werden abgelehnt."
+      },
+      organization_id: {
+        label: "Organisation",
+        help: "Die Organisation, in der die Berechtigung erteilt wird: die Organisation, der die SCIM-Verbindung oder der SSO-Anbieter gehört."
       },
       created_at: {
         label: "Erstellt am"

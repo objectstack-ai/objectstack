@@ -30,6 +30,7 @@
 - 新签名 ⇒ ⛔ 不重投,PR 与其 `Fixes` 卡各留完整签名与初判;下条三事实全立可重投一次。
 - 三事实:失败文件 import 闭包与 diff 不相交、队列基座同 shard 绿、首错是超时非断言。
 - 每次处置留审计评论,重投写签名与台账依据或三行回执;同签名再弹即停,交下一席重诊。
+- PR 侧红(非队列)同在本窗口处置:义务与三步只住 `platform-readings.md`「红检查先读日志」。
 - 挂 auto-merge/入队前读 K = `git rev-list --count --first-parent PRBASE..origin/main`。
 - PRBASE = 末次绿 PR 跑 Test Core 所印 `Affected-set diff base`,⛔ 不取该跑起始时刻。
 - K ≥ 15,或标签 PR 的 PRBASE 后 main 落新语种包(任何 K)⇒ 先 merge main 等重跑绿,`behind` 例外。
@@ -42,19 +43,18 @@
 - 四步序已机械化 `bash scripts/pm/os-regen-merge.sh`,步骤以脚本为权威;⛔ 禁 rebase 与 force-push。
 - 重生成后断言所有兄弟单的条目都还在。
 - 更硬的旁证是查上一单的实现体完好:`git grep` 带引号精确名对 `origin/main` 与实现文件。
-- 锚点断言的正确措辞:断言 `pnpm --filter @objectstack/spec check:authorable-surface` 绿即可。
 
 ## B. 跟到 MERGED 为止;入队后的看护归车道 PM 落地窗口
 
 - 车道 PM 的权责三件:验收(复核清单)、首次入队、确认 MERGED;落地执行在案判决,非自批。
 - 首次入队:ACCEPT 后挂 6–9 分钟 flip 定点,到点核门禁 job 结论。
-- 绿即经中继 op `pr_ready` + `automerge_enable` 落地,拼写见 `rest-channel.md`;未绿按阶梯重挂定点。
+- 绿即落地评论与 `pr_ready`+`automerge_enable` 一笔中继:`label-write --land`;未绿按阶梯重挂定点。
 - 写节流拒(exit 10) ⇒ 待 `node scripts/pm/write-pace.mjs --status` 现空槽再重试。
 - CI success webhook 不可靠:⛔ 不坐等,也 ⛔ 不忙轮询;定点文本照定时器写法纪律。
-- undraft 撞 429 ⇒ 落地入等 `resets at` 态:该刻记卡,到点一次重试;⛔ 不报阻塞、不自定节奏。
+- undraft 429 ⇒ 卡记 `resets at`,到点一次重试裸 op(`rest-channel.md`),⛔ 不重发评论、不报阻塞。
 - 落地遭分类器拒 ⇒ 停手、报维护者、卡上记命令与拒因;⛔ 不换拼法、不退回 ccr 绕过。
 - 落地评论 = 两个读数的探针表 + 一行状态变更(摘标/关卡/收口),⛔ 不复述 `## 席位核对`。
-- 转 ready/入队前跑 `check-governed-merges.mjs --pr N`:受管面照两层;>3000 行(含生成物)照 Tier H。
+- 转 ready/入队前跑 `check-governed-merges.mjs --pr N`,判定读全文 ⛔ 不 tail/head;四件套照 SKILL.md。
 - ⛔ 两层不由席位批准;清标即落地同受此闸,漏判会被队列守卫在 merge group 里拒收。
 - 挂 auto-merge 的同一动作里重测生成物漂移,⛔ 不复用更早的零;非零 ⇒ 按 A 的固定序。
 - ready + 全绿 ≠ 已入队:队列从不主动拉 PR,入队是显式动作。

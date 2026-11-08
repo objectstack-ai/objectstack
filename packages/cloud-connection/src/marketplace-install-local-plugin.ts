@@ -394,7 +394,7 @@ import {
     type ObjectOwnerDeclaration,
     type RedeclaredOwnerFieldRefusal,
 } from '@objectstack/metadata-protocol';
-import { resolveThrownHttpError } from '@objectstack/types';
+import { resolveThrownHttpError, type ThrownHttpError } from '@objectstack/types';
 import { unknownQueryParamRefusalMessage } from '@objectstack/rest';
 
 /** What the auth service's in-process session read answers, as `AuthSessionApi` declares it. */
@@ -1209,19 +1209,34 @@ function seedDatasetsOf(manifest: any): PurgeSeedDataset[] {
 }
 
 /**
- * [#21822] The marker the GET listing puts on a ledger entry this boot's
- * `kernel:ready` rehydrate refused to load: the refusal's `code` and the range
- * the package declares.
+ * [#21822, #31566] The marker the GET listing puts on a ledger entry this
+ * boot's `kernel:ready` rehydrate refused to load. A CLOSED union, one arm per
+ * refusal the rehydrate records, each arm's members named one by one:
  *
- * CLOSED: exactly these two members, named one by one from the handshake's own
- * diagnostic, the way `protocolIncompatibleAnswer` names its `details`. ⛔ Not a
- * spread of the diagnostic: a member added to it later does not reach the
- * listing without a decision here.
+ *   - [#21822] ADR-0087 D1's handshake refused the entry's declared protocol
+ *     range: the refusal's `code` and the range the package declares, from the
+ *     handshake's own diagnostic, the way `protocolIncompatibleAnswer` names
+ *     its `details`;
+ *   - [#31566] the engine refused the entry's register
+ *     ({@link isDeclaredRegisterRefusal}): the refusal's `code` (the resolver's
+ *     ADR-0112 vocabulary member — the engine's own code when it is
+ *     registered, otherwise the code its declared status derives, never one
+ *     coined here) and its sentence. A refusal judges before any of the
+ *     artifact's writes stand, so nothing of the entry is loaded.
+ *
+ * ⛔ Not a spread of the diagnostic or the error: a member added to either
+ * later does not reach the listing without a decision here, and neither does a
+ * third arm.
  */
-interface NotLoadedMarker {
-    code: ProtocolIncompatibleDiagnostic['code'];
-    requiredRange: ProtocolIncompatibleDiagnostic['requiredRange'];
-}
+type NotLoadedMarker =
+    | {
+        code: ProtocolIncompatibleDiagnostic['code'];
+        requiredRange: ProtocolIncompatibleDiagnostic['requiredRange'];
+    }
+    | {
+        code: ThrownHttpError['code'];
+        message: ThrownHttpError['message'];
+    };
 
 /**
  * [ADR-0093 D4/D5, ADR-0105 D1 / #5262] Is an organization wall actually IN
@@ -1429,9 +1444,10 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
      */
     private readonly bootUserCodeIds = new Set<string>();
     /**
-     * [#21822] What this boot's `kernel:ready` rehydrate refused to load under
-     * ADR-0087 D1's handshake, keyed by manifest id: the refused entry's
-     * `installedAt` and the marker the GET listing serves for it.
+     * [#21822, #31566] What this boot's `kernel:ready` rehydrate refused to
+     * load — under ADR-0087 D1's handshake, or because the engine refused its
+     * register — keyed by manifest id: the refused entry's `installedAt` and
+     * the marker the GET listing serves for it ({@link NotLoadedMarker}).
      *
      * The record of what the rehydrate DID, written by it alone, never a second
      * judgement of the ledger: the listing does not re-run the handshake.
@@ -1613,7 +1629,28 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                 // `packages[]` bundle included, whatever its entry states
                 // ([#28534], {@link asMarketplaceRegistration}), a ledger entry
                 // written before that rule included.
-                await manifestService!.register(asMarketplaceRegistration(converted), { source: 'marketplace' });
+                try {
+                    await manifestService!.register(asMarketplaceRegistration(converted), { source: 'marketplace' });
+                } catch (err: unknown) {
+                    // [#31566] A register the engine REFUSED (a declared 4xx,
+                    // {@link isDeclaredRegisterRefusal}) is a ledger entry an
+                    // earlier build wrote before the install door refused it
+                    // (#31478). It meets the same refusal at every boot, and
+                    // nothing of it is loaded — a refused artifact registers
+                    // none of its members — so it is recorded where #21822's
+                    // refusal is, and the listing marks it not loaded instead
+                    // of installed. A fault (no 4xx declared) is not recorded:
+                    // the next boot can load it. Either way the catch below
+                    // logs it, as before.
+                    if (isDeclaredRegisterRefusal(err)) {
+                        const refusal = resolveThrownHttpError(err);
+                        this.refusedAtRehydrate.set(entry.manifestId, {
+                            installedAt: entry.installedAt,
+                            marker: { code: refusal.code, message: refusal.message },
+                        });
+                    }
+                    throw err;
+                }
                 // Sync schemas so the driver creates tables for the newly-
                 // registered objects (idempotent — already-synced tables
                 // are no-ops).
@@ -3220,6 +3257,12 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
      *   { …, "installedAt": "…", "notLoaded": { "code": "OS_PROTOCOL_INCOMPATIBLE", "requiredRange": "^16" } }
      *
      * read from what the rehydrate recorded ({@link refusedAtRehydrate}).
+     * [#31566] An entry whose register the engine refused at the rehydrate (an
+     * earlier build ledgered it) is marked the same way, with that refusal's
+     * code and sentence ({@link NotLoadedMarker}):
+     *
+     *   { …, "notLoaded": { "code": "INVALID_METADATA", "message": "Page \"…\" of package \"…\": …" } }
+     *
      * `notLoaded` stands in place of `withSampleData`: none of the package's
      * objects are registered, so no seed row is read for it and the listing
      * makes no claim about its rows — omitted, not `false`, for the reason
@@ -4869,10 +4912,10 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         // operator in the log.
         let copyRecordFailure: string | undefined;
         let copyRecordSaid: string | undefined;
-        const tie = await this.unmanagedCopyInstance(ctx, result.targetPackageId);
+        const tie = this.unmanagedCopyInstance(ctx, result.targetPackageId, result.baseInstance);
         if ('failure' in tie) {
             copyRecordFailure = tie.failure;
-            copyRecordSaid = 'the package store did not answer with the new base\'s row';
+            copyRecordSaid = 'the import did not answer with the new base\'s stored row';
         } else {
             try {
                 this.unmanagedCopies.write({
@@ -5892,34 +5935,32 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
     };
 
     /**
-     * [#30808] The base instance a new copy's record is tied to: the package
-     * store's row of `baseId` ({@link readUnmanagedCopyInstance}). No
-     * `instance` on a runtime with no `package` service (the record's reach is
-     * then by id alone — the residual its module docblock states); a
-     * `failure`, and so no record, when the store holds no readable row —
-     * which is also what a passing store error reads as, since the store
-     * answers `null` for it. That copy stays unrecorded (`copyRecord` says
-     * so); no door records it later. The copy is still installed, and
-     * reseed, count and purge answer 404 for it (#31425 measured: the store's
-     * `null` cannot be told from "no row" here; a follow-up has the import
-     * answer the base row's stamp itself).
+     * [#30808, #31530] The base instance a new copy's record is tied to: the
+     * base's `sys_packages` row (`version`, `created_at`) as the import's own
+     * write answered it (`baseInstance`), never a read of the store after
+     * the import. A read could meet a passing store fault, which the store's
+     * `get` answers as `null`, and leave the copy unrecorded for good (#31425).
+     * No `instance` on a runtime with no `package` service (the record's
+     * reach is then by id alone: the residual its module docblock states). A
+     * `failure`, and so no record, when there is a `package` service but the
+     * import named no stored row (a package service that states no stamp):
+     * the copy then stays unrecorded and `copyRecord` says so, failing closed
+     * as before. The purge, reseed and count doors read the row again and
+     * compare it with this instance ({@link readUnmanagedCopyInstance}).
      */
-    private unmanagedCopyInstance = async (
+    private unmanagedCopyInstance = (
         ctx: PluginContext,
         baseId: string,
-    ): Promise<{ instance?: UnmanagedCopyInstance } | { failure: string }> => {
+        stored: { version?: unknown; createdAt?: unknown } | undefined,
+    ): { instance?: UnmanagedCopyInstance } | { failure: string } => {
+        if (typeof stored?.version === 'string' && stored.version !== ''
+            && typeof stored.createdAt === 'string' && stored.createdAt !== '') {
+            return { instance: { version: stored.version, createdAt: stored.createdAt } };
+        }
         let store: Partial<UnmanagedCopyPackageStore> | undefined;
         try { store = ctx.getService<Partial<UnmanagedCopyPackageStore>>('package'); } catch { return {}; /* no package store */ }
         if (typeof store?.get !== 'function') return {};
-        let held: UnmanagedCopyInstance | null | undefined;
-        try {
-            held = await readUnmanagedCopyInstance(store as UnmanagedCopyPackageStore, baseId);
-        } catch (err: any) {
-            return { failure: `the package store could not be read for '${baseId}': ${err?.message ?? err}` };
-        }
-        if (held === null) return { failure: `the package store holds no row of '${baseId}'` };
-        if (held === undefined) return { failure: `the package store's row of '${baseId}' carries no readable version and created_at` };
-        return { instance: held };
+        return { failure: `the import named no stored row of '${baseId}' (its package store stated no version and created_at)` };
     };
 
     /**

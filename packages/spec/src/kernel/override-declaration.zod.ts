@@ -93,10 +93,11 @@ export const OverrideDeclarationSchema = strictObject({
   basedOn: z.string()
     .min(1)
     .describe(
-      'Recorded, never judged: the base package\'s `manifest.version` this override was taken from (e.g. "3.2.0"), '
+      'Recorded, never a gate: the base package\'s `manifest.version` this override was taken from (e.g. "3.2.0"), '
       + 'not a history version of the item. '
-      + 'No door compares it with the installed base, no upgrade diff is produced from it, and nothing is '
-      + 'refused on it; it tells a person re-basing the override where it started (ADR-0146 D2).',
+      + 'Nothing is refused, merged or rebased on it; it tells a person re-basing the override where it started. '
+      + 'One reader, as advice: a base\'s upgrade plan lists an override whose `basedOn` is not the installed base '
+      + 'version as stale, beside each override whose base item the upgrade changes (ADR-0146 D2, as amended).',
     ),
 }).describe(
   'Override declaration (ADR-0146 D2): this item, of the base\'s paired "<base>.custom" package and bearing a '
@@ -134,10 +135,11 @@ export type OverrideDeclarationParsed = z.infer<typeof OverrideDeclarationSchema
 export const OverrideDeclarationFields = {
   /**
    * Declares that this item replaces the base package's item of the same name
-   * (ADR-0146 D2). `basedOn` is recorded and never judged.
+   * (ADR-0146 D2). `basedOn` is recorded and never gates; a base's upgrade
+   * plan reads it only as advice (ADR-0146 D2, as amended).
    */
   overrides: OverrideDeclarationSchema.optional().describe(
     'Override declaration (ADR-0146 D2): `{ package, basedOn }` — this item of "<base>.custom" replaces the '
-    + 'base package\'s same-named item whole. `basedOn` is recorded and never judged.',
+    + 'base package\'s same-named item whole. `basedOn` is recorded and never gates; a base\'s upgrade plan reads it only as advice.',
   ),
 } as const;

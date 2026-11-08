@@ -57,6 +57,9 @@
  */
 
 import { describe, it, expect, vi, beforeAll, afterAll, type MockInstance } from 'vitest';
+// Pays `@objectstack/objectql`'s first load at collection, never inside a clocked case
+// (the route modules import it lazily).
+import '@objectstack/objectql';
 import { RestServer } from './rest-server.js';
 import { mountAndRecordDirectRoutes } from './direct-mount-composition.js';
 import { REST_ROUTE_LEDGER } from './rest-route-ledger.js';
@@ -176,6 +179,11 @@ function boot(error: () => Error, protocol: Record<string, Fn> = {}): Booted {
         getObject: (name: string) => (name === OBJECT ? { name, fields: RECORD_CURRENCY_FIELDS } : undefined),
         count: async () => 0,
         update: async () => { calls.push('engine.update'); throw error(); },
+        // [#30237] The recycle bin's doors call the engine's own verbs.
+        listRecycleBin: async () => ({ object: OBJECT, entries: [], hasMore: false }),
+        restore: async () => { calls.push('engine.restore'); throw error(); },
+        purge: async () => { calls.push('engine.purge'); throw error(); },
+        empty: async () => { calls.push('engine.empty'); throw error(); },
     };
     const rest = new RestServer(
         server,
@@ -383,6 +391,10 @@ const ANSWERS_THE_SENTENCE: Record<string, Driver> = {
         called: 'engine.update', body: { toUserId: 'u2' },
         answer: (res) => res.body?.data?.objects?.[0]?.failures?.[0]?.message,
     },
+    // [#30237] The recycle bin's write doors: the engine's verb is what the refusal reaches.
+    'POST /api/v1/data/:object/recycle-bin/:entryId/restore': { called: 'engine.restore' },
+    'DELETE /api/v1/data/:object/recycle-bin/:entryId': { called: 'engine.purge' },
+    'DELETE /api/v1/data/:object/recycle-bin': { called: 'engine.empty' },
     'POST /api/v1/data/:object/:id/shares': { called: 'sharing.grant', body: {} },
     'DELETE /api/v1/data/:object/:id/shares/:shareId': { called: 'sharing.revoke' },
     'POST /api/v1/batch': {

@@ -780,24 +780,49 @@ Authorization: Bearer <token>
 
 **Success Response (HTTP 200):**
 
-Delete returns a `DeleteDataResponse`: the `object` name, the record `id`, and a
-`success` flag.
+Delete returns a `DeleteDataResponse`: the `object` name, the record `id`, a
+`success` flag, and `recycleBinEntryId` when the delete kept the record in the recycle
+bin: the entry to restore to undo the delete.
 
 ```json
 {
   "object": "account",
   "id": "acc_123",
-  "success": true
+  "success": true,
+  "recycleBinEntryId": "rb_7f3a9c"
 }
 ```
 
-<Callout type="warn">
-There is **no soft-delete / recycle-bin runtime**: `DELETE` performs a hard delete and
-returns the `{ object, id, success }` shape above. Records are removed permanently —
-there are no `deleted_at` / `deleted_by` fields and no restore semantics. The
-`enable.trash` flag that once promised this was removed in v17 (#2377, ADR-0049
-enforce-or-remove): authoring it is now a parse error rather than a silent no-op.
+<Callout type="info">
+A delete of a business record by its id enters the **recycle bin** (ADR-0148): the record
+and the records its delete cascades to are kept as one entry until the retention ends
+(30 days by default), and the entry can be restored under the original ids. Platform
+objects (`sys_`, `cloud_`, `ai_`) and deletes by filter do not enter the bin. See
+[Recycle Bin](#recycle-bin) below for the doors that list, restore and purge entries.
 </Callout>
+
+### Recycle Bin
+
+Four doors serve an object's recycle bin, under the data surface. Each answers the shared
+envelope (`{ success, data }` / `{ success: false, error: { code, message } }`) and refuses
+an unknown or repeated query parameter with `400 VALIDATION_ERROR`.
+
+| Method & path | What it does | Who may |
+| :--- | :--- | :--- |
+| `GET /api/v1/data/{object}/recycle-bin?limit=&offset=` | One page of the object's entries, newest first (`limit` 1 to 200, default 50) | `manageRecycleBin` on the object |
+| `POST /api/v1/data/{object}/recycle-bin/{entryId}/restore` | Write the entry back under its original ids | `allowRestoreOwnDeleted` for an entry you deleted; `manageRecycleBin` for anyone else's |
+| `DELETE /api/v1/data/{object}/recycle-bin/{entryId}` | Purge one entry: it can no longer be restored | `manageRecycleBin` |
+| `DELETE /api/v1/data/{object}/recycle-bin` | Empty the object's bin: purge every entry of your organization | `manageRecycleBin` |
+
+Each listed entry carries `id`, `recordId`, `recordCount`, `deletedBy`, `deletedAt`,
+`retentionDays`, `purgeAfter` and `rows`: every record the entry holds, with only the
+fields you may see on its object (a field you see masked is left out). An entry addressed
+under an object it does not belong to answers `404 RECORD_NOT_FOUND`.
+
+A restore that cannot write the entry back answers `409` with the reason and writes
+nothing: `RESTORE_UNIQUE_VALUE_TAKEN`, `RESTORE_PARENT_PURGED`,
+`RESTORE_PACKAGE_UNINSTALLED`, or `RESTORE_PARENT_IN_RECYCLE_BIN`, whose `details` name
+the parent's entry (`parentEntryId`) so it can be restored first.
 
 **Constraint Violations:**
 Database constraint failures are surfaced as structured errors. For example, a

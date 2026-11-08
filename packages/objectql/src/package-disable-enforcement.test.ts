@@ -419,7 +419,7 @@ const READERS: Array<{
       ((await protocol.listDrafts())?.drafts ?? []).some((d: any) => d?.packageId === PKG),
   },
   {
-    reader: 'listDrafts({ packageId }) — GET /meta/_drafts?packageId=',
+    reader: 'listDrafts({ packageId }) — GET /meta/_drafts?package=',
     enforces: true,
     why: '[#24210] naming the package does not bring its drafts back',
     serves: async ({ protocol }) =>

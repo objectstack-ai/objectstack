@@ -76,7 +76,7 @@ import { SecurityCatalogNameConflictError, findEnvironmentHeldSecurityCatalogNam
 // (`bare-name-one-holder.ts`, "The cold boot").
 import { sealBareNameHoldersAtColdBoot } from './registry.js';
 import { BARE_NAME_COLD_BOOT_MODE } from './bare-name-one-holder.js';
-import { planPackageUpgrade } from './package-upgrade-environment.js';
+import { planPackageUpgrade, type UpgradeServedOverride } from './package-upgrade-environment.js';
 // [ADR-0029 D3] The registry's own refusal of a second owner — read, never
 // re-derived, when a residual object's name is already owned.
 import { ObjectOwnershipConflictError, collectManifestBoundActions, collectManifestObjectNames, describeBoundActionCollision, describeUnboundActionTargets, FIND_BOUND_ACTION_COLLISIONS, type BoundActionCollision } from './registry.js';
@@ -979,33 +979,51 @@ export class ObjectQLPlugin implements Plugin {
           if (refusal) throw refusal;
         }
 
-        for (const { manifest, source } of entries as Array<{ manifest: any; source?: 'code' | 'marketplace' }>) {
-          ql.registerApp(manifest, scope, source ?? options?.source);
-          ctx.logger.debug('Manifest registered via manifest service', {
-            id: manifest.id || manifest.name
-          });
-        }
-        // [ADR-0130 D4] The residual's objects, AFTER every body — the order
-        // the metadata door registers the same stack in — under the id the
-        // residual rule names, through the registry verb a body's own objects
-        // take (`registerApp` step 2). There is no package record for that id:
-        // the residual is not a package, and when the id names one of the
-        // bodies (a composed stack keeps one member's manifest) that body's
-        // record must not be replaced.
-        // [#28534] …and the door's statement of where that owner came from,
-        // recorded before anything of it registers: no package row answers the
-        // id, and a reader of an item's origin must tell the host's own
-        // residual from an installed bundle's (`ObjectQL.recordResidualOwner`).
-        // The residual is not an artifact entry, so it states no source of its
+        // [#31564] The whole artifact registers in ONE restore run: every
+        // package body and then the residual. A refusal anywhere in it — a
+        // later member refused by a registry verb part-way or by a judge that
+        // reads its body alone, or the residual refused after every body —
+        // puts back every entry ANY of them wrote, in the registry and in the
+        // engine's own maps (`SchemaRegistry.restoringOnRefusal`, which each
+        // `registerApp` joins), and the refusal propagates unchanged. A first
+        // install leaves no member registered; an upgrade leaves the installed
+        // version of every member serving. Before this, each body put back
+        // only itself, so the members registered before a refused one stayed
+        // in the running kernel while the install door answered the refusal
+        // and ledgered nothing. A single-package artifact is the one-body run
+        // `registerApp` opens on its own, answered as before.
+        ql.registry.restoringOnRefusal(() => {
+          for (const { manifest, source } of entries as Array<{ manifest: any; source?: 'code' | 'marketplace' }>) {
+            ql.registerApp(manifest, scope, source ?? options?.source);
+            ctx.logger.debug('Manifest registered via manifest service', {
+              id: manifest.id || manifest.name
+            });
+          }
+          // [ADR-0130 D4] The residual's objects, AFTER every body — the order
+          // the metadata door registers the same stack in — under the id the
+          // residual rule names, through the registry verb a body's own objects
+          // take (`registerApp` step 2). There is no package record for that id:
+          // the residual is not a package, and when the id names one of the
+          // bodies (a composed stack keeps one member's manifest) that body's
+          // record must not be replaced.
+          if (residual) this.registerUnclaimedTopLevelObjects(ctx, residual, ordered);
+          // [ADR-0015 D7, ADR-0130 D4] Every other residual item, the same way
+          // and in the same place: after every body, under the residual rule's
+          // id, through the registration a body's own item of that type takes.
+          // See {@link registerUnclaimedTopLevelItems}.
+          if (residualItems) this.registerUnclaimedTopLevelItems(ctx, residualItems);
+        });
+        // [#28534] …and the door's statement of where the residual's owner
+        // came from: no package row answers the id, and a reader of an item's
+        // origin must tell the host's own residual from an installed bundle's
+        // (`ObjectQL.recordResidualOwner`). Recorded once the artifact has
+        // registered whole — a refused one records nothing, since a recorded
+        // `marketplace` origin is never taken back — and before anything reads
+        // it (the bridge below, every reader after the door answers). The
+        // residual is not an artifact entry, so it states no source of its
         // own; the door's word, `code` when it states none, is its origin.
         const residualOwnerId = residual?.ownerId ?? residualItems?.ownerId;
         if (residualOwnerId !== undefined) ql.recordResidualOwner(residualOwnerId, options?.source ?? 'code');
-        if (residual) this.registerUnclaimedTopLevelObjects(ctx, residual, ordered);
-        // [ADR-0015 D7, ADR-0130 D4] Every other residual item, the same way
-        // and in the same place: after every body, under the residual rule's
-        // id, through the registration a body's own item of that type takes.
-        // See {@link registerUnclaimedTopLevelItems}.
-        if (residualItems) this.registerUnclaimedTopLevelItems(ctx, residualItems);
         // [#24472] The boot reported every same-name pair it found
         // (`kernel:ready`, below); an artifact arriving later is judged once it
         // has registered, for the pairs naming one of its packages on either
@@ -1042,12 +1060,22 @@ export class ObjectQLPlugin implements Plugin {
       // environment knows: rows in each column the upgrade touches and rows a
       // customer edited that the seed replay overwrites. Read-only; the install
       // door's dry run and a host's install door call it. See
-      // {@link planPackageUpgrade}.
-      planUpgrade: (installed: unknown, incoming: unknown) =>
-        planPackageUpgrade(ql, installed, incoming, {
+      // {@link planPackageUpgrade}. [ADR-0146 D2, as amended] Its advisory
+      // class reads the base's served overrides through the protocol's one
+      // list, resolved when the plan is asked (the protocol may register
+      // after this service); a runtime without it answers that class `null`.
+      planUpgrade: (installed: unknown, incoming: unknown) => {
+        let protocol: { listServedOverrides?: (request: { packageId: string }) => Promise<UpgradeServedOverride[]> } | undefined;
+        try { protocol = ctx.getService('protocol') as typeof protocol; } catch { /* no protocol service */ }
+        const listServedOverrides = protocol?.listServedOverrides;
+        return planPackageUpgrade(ql, installed, incoming, {
           getObject: (name) => ql.registry.getObject(name),
           warn: (message, meta) => ctx.logger.warn(message, meta),
-        }),
+          ...(typeof listServedOverrides === 'function'
+            ? { listOverrides: (packageId: string) => listServedOverrides.call(protocol, { packageId }) }
+            : {}),
+        });
+      },
     });
 
     ctx.logger.info('ObjectQL engine registered', {

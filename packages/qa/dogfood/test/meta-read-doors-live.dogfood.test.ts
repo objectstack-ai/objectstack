@@ -265,15 +265,15 @@ describe('[#26572] the v18 /meta read doors, over HTTP on a booted showcase', ()
     });
   });
 
-  // The same class on `_drafts`' own filters: `?packageId[]=` / `?type[]=`
+  // The same class on `_drafts`' own filters: `?package[]=` / `?type[]=`
   // reached the door under the key as spelled, so the list was not narrowed
   // and an author who asked for one package's (or one type's) drafts got
   // every draft. Each is refused: 400 VALIDATION_ERROR naming the key, no list.
-  describe('GET /meta/_drafts with a bracketed `packageId` or `type` key is refused', () => {
+  describe('GET /meta/_drafts with a bracketed `package` or `type` key is refused', () => {
     const draftsOf = (body: any): any[] => body?.drafts ?? body?.data?.drafts ?? [];
 
     for (const [key, value, names] of [
-      ['packageId[]', PKG, 'package'], ['packageId[0]', PKG, 'package'],
+      ['package[]', PKG, 'package'], ['package[0]', PKG, 'package'],
       ['type[]', 'view', 'metadata type'], ['type[0]', 'view', 'metadata type'],
     ] as const) {
       it(`/meta/_drafts?${key}=…: 400 VALIDATION_ERROR naming the key, for the admin`, async () => {
@@ -287,7 +287,7 @@ describe('[#26572] the v18 /meta read doors, over HTTP on a booted showcase', ()
     }
 
     it('CONTROLS — the plain spellings narrow, and a member is still refused at the capability gate first', async () => {
-      const scoped = await stack.apiAs(admin, 'GET', `/meta/_drafts?packageId=${encodeURIComponent(PKG)}`);
+      const scoped = await stack.apiAs(admin, 'GET', `/meta/_drafts?package=${encodeURIComponent(PKG)}`);
       expect(scoped.status).toBe(200);
       const inPackage = draftsOf(await scoped.json());
       expect(inPackage.every((d: any) => d?.packageId === PKG), JSON.stringify(inPackage).slice(0, 400)).toBe(true);
@@ -297,7 +297,7 @@ describe('[#26572] the v18 /meta read doors, over HTTP on a booted showcase', ()
       const views = draftsOf(await typed.json());
       expect(views.every((d: any) => d?.type === 'view'), JSON.stringify(views).slice(0, 400)).toBe(true);
 
-      const member = await stack.apiAs(liaison, 'GET', `/meta/_drafts?packageId[]=${encodeURIComponent(PKG)}`);
+      const member = await stack.apiAs(liaison, 'GET', `/meta/_drafts?package[]=${encodeURIComponent(PKG)}`);
       expect(member.status).toBe(403);
     });
   });

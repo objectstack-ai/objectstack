@@ -1203,13 +1203,15 @@ export class MetadataClient {
    * just-built app package looks empty there; this surfaces the drafts so the
    * console can show a "pending changes" view and draft-aware package contents.
    * Optionally narrow by `packageId` and/or `type`. Returns light headers
-   * (no body) carrying `packageId` for grouping.
+   * (no body) carrying `packageId` for grouping. `packageId` goes on the wire
+   * as `?package=`, the spelling every `/meta` read takes; the server refuses
+   * the retired `?packageId=`.
    */
   async listDrafts(
     options: { packageId?: string; type?: string } = {},
   ): Promise<MetadataDraftHeader[]> {
     const params: string[] = [];
-    if (options.packageId) params.push(`packageId=${encodeURIComponent(options.packageId)}`);
+    if (options.packageId) params.push(`package=${encodeURIComponent(options.packageId)}`);
     if (options.type) params.push(`type=${encodeURIComponent(options.type)}`);
     const qs = params.length ? `?${params.join('&')}` : '';
     const url = `${this.base}/_drafts${qs}`;

@@ -339,6 +339,8 @@ import {
 } from './security-routes.js';
 // [#30205] A user's assigned work: the per-object counts and the bounded hand-over.
 import { registerUserWorkEndpoints, type UserWorkRouteHost } from './user-work-routes.js';
+// [#30237] The recycle bin's doors under `{data}/:object/recycle-bin`.
+import { registerRecycleBinEndpoints, type RecycleBinRouteHost } from './recycle-bin-routes.js';
 // [#23050 slice 7] The discovery and OpenAPI routes' bodies moved to one module — see its header.
 import {
     registerDiscoveryEndpoints,
@@ -5015,6 +5017,13 @@ export class RestServer {
             // no greedy 2-segment `:object/:id` routes (only literal actions and
             // deeper `:id/clone`, `:id/shares` paths), so it cannot shadow any
             // CRUD literal.
+            // [#30237] The recycle bin's doors: `GET` / `DELETE
+            // {data}/:object/recycle-bin` are two-segment literals beside the
+            // greedy `{data}/:object/:id`, so they register before the CRUD
+            // routes, as the data actions do. Served with the CRUD surface.
+            if (this.config.api.enableCrud) {
+                this.registerRecycleBinEndpoints(bp);
+            }
             this.registerDataActionEndpoints(bp);
             // [#27627] `POST /data/:object/:id/page` — a deeper literal under
             // `:id`, like `:id/clone`, so it shadows no CRUD route either way.
@@ -6326,6 +6335,37 @@ export class RestServer {
             enforceAuth: (...a) => this.enforceAuth(...a),
         };
         registerUserWorkEndpoints.call(host, basePath);
+    }
+
+    /**
+     * [#30237, ADR-0148] Register the recycle bin's doors under the data
+     * surface: list and empty an object's bin, restore and purge one entry.
+     *
+     *   GET    {basePath}/data/:object/recycle-bin
+     *   DELETE {basePath}/data/:object/recycle-bin
+     *   POST   {basePath}/data/:object/recycle-bin/:entryId/restore
+     *   DELETE {basePath}/data/:object/recycle-bin/:entryId
+     *
+     * Each calls the engine's own verb as the caller. Answers 501 when the
+     * environment's engine has no recycle bin.
+     */
+    private registerRecycleBinEndpoints(basePath: string): void {
+        // The body lives in `recycle-bin-routes.ts`. This literal hands it
+        // every member it reads (see `RecycleBinRouteHost`); the engine
+        // provider FIELD goes as a getter, read when a handler reads it.
+        const readObjectQLProvider = () => this.objectQLProvider;
+        const host: RecycleBinRouteHost = {
+            config: this.config,
+            routeManager: this.routeManager,
+            get objectQLProvider() { return readObjectQLProvider(); },
+            resolveProtocol: (...a) => this.resolveProtocol(...a),
+            resolveRequestEnvironmentId: (...a) => this.resolveRequestEnvironmentId(...a),
+            resolveExecCtx: (...a) => this.resolveExecCtx(...a),
+            enforceAuth: (...a) => this.enforceAuth(...a),
+            enforceApiAccess: (...a) => this.enforceApiAccess(...a),
+            resolveSecurityService: (...a) => this.resolveSecurityService(...a),
+        };
+        registerRecycleBinEndpoints.call(host, basePath);
     }
 
     /**

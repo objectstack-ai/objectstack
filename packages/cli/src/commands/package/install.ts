@@ -178,6 +178,22 @@ export function renderUpgradePlan(data: any): string[] {
         : ` — ${o.editedRows} row(s) a customer edited would be overwritten${o.editedKeys?.length ? ` (${o.editedKeys.join(', ')})` : ''}`}`),
   ]);
   if (lines.length === 0) lines.push('  No change to objects, fields or seed datasets.');
+
+  // [ADR-0146 D2, as amended] The advisory class: overrides of the base in
+  // its paired `.custom` package. Advice only: nothing here stops the
+  // install, and no confirmation covers it. `null` = the runtime could not
+  // read them; a runtime that predates the key carries none and prints none.
+  const overrides = env.overrides;
+  if (overrides === null) {
+    lines.push('  Overrides (advisory): the customizations of this package could not be read.');
+  } else if (overrides && typeof overrides === 'object') {
+    const named = (f: any) => `${f.type} '${f.name}'${f.member ? ` (${f.member})` : ''}`;
+    const baseDoes = (change: unknown) => (change === 'removed' ? 'no longer ships it' : change === 'added' ? 'now ships it' : 'changes it');
+    section('Overrides that hide a change in this upgrade (advisory; the upgrade installs either way)', list(overrides.hidesChange).map((f: any) =>
+      `${named(f)}: the base ${baseDoes(f.change)}${f.basedOn ? `; the override was taken from ${f.basedOn}` : ''}. ${f.next ?? ''}`.trimEnd()));
+    section('Overrides taken from another version than the installed one (advisory)', list(overrides.stale).map((f: any) =>
+      `${named(f)}: taken from ${f.basedOn}, installed ${f.installedVersion ?? 'unknown'}. ${f.next ?? ''}`.trimEnd()));
+  }
   return lines;
 }
 

@@ -23,6 +23,12 @@
  * convention to get a valid declaration. Nothing here guesses a code or a
  * pointer: an unpicked pointer stays absent and the spec's own refusal says so
  * on save.
+ *
+ * A stored `record`-mode amount may also declare `homeAmount` (ADR-0144 D5):
+ * the home field, document date and rate field the engine writes the amount's
+ * home-currency conversion into. The three pickers list what the spec's object
+ * judge accepts; the judge stays the authority, and the tests hold every
+ * offered pick to it by parsing the object.
  */
 
 import * as React from 'react';
@@ -39,10 +45,90 @@ export const CURRENCY_CODE_FIELD_NAME = 'currency_code';
 
 export type CurrencyMode = 'dynamic' | 'fixed' | 'record';
 
+/** `homeAmount` as authored: each pointer absent until picked (the spec refuses a partial one on save). */
+export interface HomeAmountDraft {
+  field?: string;
+  rateDate?: string;
+  rateField?: string;
+}
+
 export interface CurrencyConfigDraft {
   currencyMode?: CurrencyMode;
   defaultCurrency?: string;
   currencyField?: string;
+  homeAmount?: HomeAmountDraft;
+}
+
+/** The fields each `homeAmount` pointer may name, from {@link homeAmountCandidates}. */
+export interface HomeAmountCandidates {
+  field: string[];
+  rateDate: string[];
+  rateField: string[];
+}
+
+/** The scale an exchange rate carries; a rate field declaring less would show it rounded. */
+const RATE_SCALE = 12;
+
+/** Written by the engine alone: `readonly: true` and no `expression` (ADR-0144 D5). */
+const isEngineWritten = (def: Record<string, unknown> | undefined): boolean =>
+  def?.readonly === true && def.expression === undefined;
+
+const homeAmountOf = (def: Record<string, unknown> | undefined): HomeAmountDraft | undefined => {
+  const config = def?.currencyConfig as CurrencyConfigDraft | undefined;
+  return config?.currencyMode === 'record' && config.homeAmount && typeof config.homeAmount === 'object'
+    ? config.homeAmount
+    : undefined;
+};
+
+/**
+ * The fields of `entries` each `homeAmount` pointer of the amount `self` may
+ * name: a stored `dynamic` `currency` field no other amount stores its home
+ * amount in; a `date` / `datetime` document date; a `number` rate field with
+ * scale 12 or none, not shared with an amount in another code field or on
+ * another document date. The home and rate fields are engine-written.
+ */
+export function homeAmountCandidates(entries: readonly FieldEntry[], self: string): HomeAmountCandidates {
+  const own = entries.find((e) => e.name === self)?.def;
+  const ownConfig = own?.currencyConfig as CurrencyConfigDraft | undefined;
+  const others = entries.filter((e) => e.name !== self && homeAmountOf(e.def));
+  const homeTaken = new Set(others.map((e) => homeAmountOf(e.def)!.field));
+  const rateDate = ownConfig?.homeAmount?.rateDate;
+  const rateTaken = new Set(
+    others
+      .filter((e) => {
+        const config = e.def.currencyConfig as CurrencyConfigDraft;
+        return config.currencyField !== ownConfig?.currencyField || config.homeAmount!.rateDate !== rateDate;
+      })
+      .map((e) => homeAmountOf(e.def)!.rateField),
+  );
+  const rest = entries.filter((e) => e.name !== self);
+  return {
+    field: rest
+      .filter((e) => e.def.type === 'currency' && isEngineWritten(e.def) && !homeTaken.has(e.name))
+      .filter((e) => ((e.def.currencyConfig as CurrencyConfigDraft | undefined)?.currencyMode ?? 'dynamic') === 'dynamic')
+      .map((e) => e.name),
+    rateDate: rest.filter((e) => e.def.type === 'date' || e.def.type === 'datetime').map((e) => e.name),
+    rateField: rest
+      .filter((e) => e.def.type === 'number' && isEngineWritten(e.def) && !rateTaken.has(e.name))
+      .filter((e) => typeof e.def.scale !== 'number' || e.def.scale >= RATE_SCALE)
+      .map((e) => e.name),
+  };
+}
+
+/**
+ * `config` with one `homeAmount` pointer set, or deleted when `value` is
+ * empty; `homeAmount` itself is deleted once no pointer is left.
+ */
+export function setHomeAmountPointer(
+  config: CurrencyConfigDraft,
+  key: keyof HomeAmountDraft,
+  value: string,
+): CurrencyConfigDraft {
+  const { homeAmount, ...rest } = config;
+  const next: HomeAmountDraft = { ...homeAmount };
+  if (value) next[key] = value;
+  else delete next[key];
+  return Object.keys(next).length > 0 ? { ...rest, homeAmount: next } : rest;
 }
 
 /** Whether a field def is a record-currency code field: `text` + the ISO 4217 domain. */
@@ -75,7 +161,12 @@ export function switchCurrencyMode(prev: CurrencyConfigDraft | undefined, mode: 
     return { currencyMode: 'fixed', ...(prev?.defaultCurrency ? { defaultCurrency: prev.defaultCurrency } : {}) };
   }
   if (mode === 'record') {
-    return { currencyMode: 'record', ...(prev?.currencyField ? { currencyField: prev.currencyField } : {}) };
+    return {
+      currencyMode: 'record',
+      ...(prev?.currencyField ? { currencyField: prev.currencyField } : {}),
+      // `homeAmount` is read only under `record`, so only a record config carries one over.
+      ...(prev?.currencyMode === 'record' && prev.homeAmount ? { homeAmount: prev.homeAmount } : {}),
+    };
   }
   return { currencyMode: 'dynamic' };
 }
@@ -92,6 +183,7 @@ export function newCurrencyCodeFieldDef(label: string): Record<string, unknown> 
 export function CurrencyConfigField({
   config,
   candidates,
+  homeCandidates,
   onCommit,
   onCreateCodeField,
   disabled,
@@ -100,6 +192,11 @@ export function CurrencyConfigField({
   config: CurrencyConfigDraft | undefined;
   /** {@link currencyCodeFieldCandidates} of the object this field belongs to. */
   candidates: readonly string[];
+  /**
+   * {@link homeAmountCandidates} of the object; absent where `homeAmount` is
+   * refused (a `formula` amount, never written, is never converted at write).
+   */
+  homeCandidates?: HomeAmountCandidates;
   /** Write the whole config. */
   onCommit: (next: CurrencyConfigDraft) => void;
   /** Append a record-currency code field and point this amount at it, in one write. */
@@ -147,7 +244,15 @@ export function CurrencyConfigField({
             // Unpicking DELETES the pointer: the spec refuses a `record` config
             // without one on save, which is the honest answer, rather than a
             // pointer at a field the author never chose.
-            onCommit={(v) => onCommit(v ? { currencyMode: 'record', currencyField: v } : { currencyMode: 'record' })}
+            // Re-picking the code field keeps an authored `homeAmount`: it
+            // names other fields, which the new pointer does not move.
+            onCommit={(v) =>
+              onCommit({
+                currencyMode: 'record',
+                ...(v ? { currencyField: v } : {}),
+                ...(config?.homeAmount ? { homeAmount: config.homeAmount } : {}),
+              })
+            }
             required
             disabled={disabled}
           />
@@ -163,6 +268,31 @@ export function CurrencyConfigField({
             {tr('designer.field.currency.createCodeField')}
           </Button>
           <p className="text-xs text-muted-foreground">{tr('designer.field.currency.recordHint')}</p>
+          {homeCandidates && (
+            <div className="space-y-2 pt-2" data-testid="currency-config-home-amount">
+              <p className="text-xs font-medium">{tr('designer.field.currency.homeAmount')}</p>
+              {(
+                [
+                  ['field', 'homeField', 'homeFieldNone'],
+                  ['rateDate', 'rateDate', 'rateDateNone'],
+                  ['rateField', 'rateField', 'rateFieldNone'],
+                ] as const
+              ).map(([key, label, none]) => (
+                <InspectorSelectField
+                  key={key}
+                  label={tr(`designer.field.currency.${label}`)}
+                  value={config?.homeAmount?.[key] ?? ''}
+                  options={[
+                    { value: '', label: tr(`designer.field.currency.${none}`) },
+                    ...homeCandidates[key].map((name) => ({ value: name, label: name })),
+                  ]}
+                  onCommit={(v) => onCommit(setHomeAmountPointer(config ?? { currencyMode: 'record' }, key, v))}
+                  disabled={disabled}
+                />
+              ))}
+              <p className="text-xs text-muted-foreground">{tr('designer.field.currency.homeAmountHint')}</p>
+            </div>
+          )}
         </>
       )}
     </div>

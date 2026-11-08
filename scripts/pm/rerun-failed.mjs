@@ -2,7 +2,8 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * rerun-failed — re-run the FAILED jobs of one `ci.yml` pull-request run, ONCE, as
+ * rerun-failed — re-run the FAILED jobs of one pull-request run of a listed workflow
+ * (`RERUN_FAILED_WORKFLOWS` in `fleet-write/ops.mjs`: `ci.yml` and read-only checks), ONCE, as
  * `objectstack-fleet[bot]`, through the fleet-write relay's `run_rerun_failed` op.
  *
  *   node scripts/pm/rerun-failed.mjs --run 39713789453                       # a run on the board repo
@@ -14,9 +15,10 @@
  * ## When a seat may run it
  *
  * pm-dispatch `references/platform-readings.md` carries the rule. A seat may
- * re-run a PR's failed `ci.yml` jobs ONCE through this tool. It may do so only
- * after it has written down, on the PR or the card, why it judges the failure a
- * flake, and a second failure is real. ⛔ A dev never re-runs.
+ * re-run a PR's failed jobs of a listed workflow ONCE through this tool. It may
+ * do so only after it has read the log and written down, on the PR or the card,
+ * why it judges the failure a flake (a check whose log says it measured nothing),
+ * and a second failure is real. ⛔ A dev never re-runs.
  *
  * ## What it does, in order
  *
@@ -87,6 +89,7 @@ import {
   RELAY_REPO,
   RERUN_FAILED_ATTEMPT,
   RERUN_FAILED_RERUN_STATES,
+  RERUN_FAILED_WORKFLOWS,
   TARGET_REPO_SHAPE,
   failedJobNames,
   rerunFailedFenceFailures,
@@ -391,8 +394,8 @@ export async function relayMissProbe({ route, send }) {
 
 const SELF_TEST_BATTERIES = Object.freeze({
   'the command line: --run a positive integer, --repo in the one organization, the board repo by default, anything else refused': 6,
-  // 8 → 11 with the head fence: a stale head, a run naming no pull, a pull that cannot be read.
-  "the fences at the seat, advisory: the measured run passes all five, its head the pull's current head by the pull's own answer; each failing fence refused by name with nothing sent — a stale head and a run naming no pull among them; a run, pull or job list that cannot be read, or one with no failed job, sends nothing": 11,
+  // 8 → 11 with the head fence: a stale head, a run naming no pull, a pull that cannot be read; 12 with a run of each listed workflow.
+  "the fences at the seat, advisory: the measured run passes all five, its head the pull's current head by the pull's own answer; each failing fence refused by name with nothing sent — a stale head and a run naming no pull among them; a run, pull or job list that cannot be read, or one with no failed job, sends nothing": 12,
   'relay-only: a direct route, or a route that errs, refuses with zero writes and no dispatch; the dispatch route packs ONE action, run_id alone; --dry-run prints it and sends nothing': 5,
   "the outcomes: a success run is read back at the seat naming attempt 2's re-run job ids; a failed run re-reads the run and names what the fences say now, exit 5; no run or none completed is UNCONFIRMED, exit 6; never a second dispatch": 6,
   'the wiring: this file issues no write of its own, imports the fences rather than restating them, and declares itself relay-only': 3,
@@ -461,6 +464,12 @@ export async function selfTest() {
       const r = await drive({}, { board: { run, ...board } });
       return [r.exit, r.sent.length, r.calls.length, r.text.includes(`fence \`${fence}\``) && r.text.includes('Nothing sent')];
     };
+    const listed = [];
+    for (const path of RERUN_FAILED_WORKFLOWS) {
+      const r = await drive({}, { board: { run: { path } } });
+      listed.push([path, r.exit, r.sent.length]);
+    }
+    t('accepted: a run of each listed workflow passes at the seat and is dispatched once — check-links.yml among them, lint.yml not', [listed, RERUN_FAILED_WORKFLOWS.includes('.github/workflows/check-links.yml'), RERUN_FAILED_WORKFLOWS.includes('.github/workflows/lint.yml')], [RERUN_FAILED_WORKFLOWS.map((path) => [path, EXIT_OK, 1]), true, false]);
     t('⛔ fence workflow, refused at the seat: a run of lint.yml — exit 2, no dispatch, no further read', await fenced({ path: '.github/workflows/lint.yml' }, 'workflow'), [EXIT_USAGE, 0, 2, true]);
     t('⛔ fence event, refused at the seat: a merge_group run', await fenced({ event: 'merge_group' }, 'event'), [EXIT_USAGE, 0, 2, true]);
     t('⛔ fence once, refused at the seat: a run already at attempt 2 — a second failure is real', await fenced({ run_attempt: 2 }, 'once'), [EXIT_USAGE, 0, 2, true]);
@@ -517,7 +526,7 @@ export async function selfTest() {
     const own = readFileSync(SELF_PATH, 'utf8');
     const code = own.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
     t('⛔ no write verb in this file\'s code — its one write is the dispatch, which sendFleetWrite sends and paces', /\b(?:method|verb)\s*:\s*'(?:POST|PATCH|PUT|DELETE)'/.test(code), false);
-    t('the fences are the relay table\'s, imported — no fence predicate or allowlist is spelled here', [/\brerunFailedFenceFailures\b/.test(own), /RERUN_FAILED_WORKFLOWS\s*=/.test(code), /'\.github\/workflows\/ci\.yml'\]/.test(code)], [true, false, false]);
+    t('the fences are the relay table\'s, imported — no fence predicate or allowlist is spelled here', [/\brerunFailedFenceFailures\b/.test(own), /RERUN_FAILED_WORKFLOWS\s*=/.test(code), /\[\s*'\.github\/workflows\/[^']+'(?:\s*,\s*'[^']+')*\s*\]/.test(code)], [true, false, false]);
     t('the relay-only declaration the conformance reads is set', relayOnly, true);
   }
 
@@ -567,7 +576,7 @@ const USAGE = [
   '  node scripts/pm/rerun-failed.mjs --run <run id> [--repo objectstack-ai/<name>] [--dry-run] [--json]',
   '  node scripts/pm/rerun-failed.mjs --self-test',
   '',
-  '  Re-runs the FAILED jobs of one ci.yml pull-request run, once, through the fleet-write relay (relay-only).',
+  '  Re-runs the FAILED jobs of one pull-request run of a listed workflow, once, through the fleet-write relay (relay-only).',
   '  Only after the seat has written on the PR or the card why it judges the failure a flake; a second failure is real.',
   `  Exits: ${EXIT_OK} re-run started (or dry run) · ${EXIT_USAGE} usage / a fence refused / payload refused · ${EXIT_PREREQUISITE} prerequisite ·`,
   `         ${EXIT_PLATFORM_REFUSAL} dispatch refused or the relay run failed · ${EXIT_UNCONFIRMED} UNCONFIRMED · 10 throttle refused`,

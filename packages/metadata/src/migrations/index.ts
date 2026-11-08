@@ -12,6 +12,15 @@ export {
     type ProjectIdToEnvironmentIdResult,
 } from './migrate-project-id-to-environment-id.js';
 export { dropProjectionTables, type DropProjectionResult } from './drop-projection-tables.js';
+// Ruling 6677709817 step (b), first half: the read-only count of the history
+// snapshots the drained-key scrub would rewrite (its rewrite mode waits on the
+// maintainer's confirmation of that count).
+export {
+    scrubHistoryDrainedKeys,
+    type HistoryDrainedKeysMode,
+    type HistoryDrainedKeysOptions,
+    type HistoryDrainedKeysCount,
+} from './history-drained-keys.js';
 
 /**
  * ⚰️ TOMBSTONE — `addSysMetadataOverlayIndex` / `add-sys-metadata-overlay-index.ts`

@@ -81,6 +81,7 @@ import {
     createMetaLayeredAnswer,
     createMetaListAnswer,
     isPublicAudienceRead,
+    metaDraftsQueryRefusal,
     metaItemLayersDeprecationHeaders,
     metaItemPackageBinding,
     metaItemQueryRefusal,
@@ -2089,7 +2090,7 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
         }
     }
     
-    // GET /metadata/_drafts?packageId=&type=  (ADR-0033 pending-changes list)
+    // GET /metadata/_drafts?package=&type=  (ADR-0033 pending-changes list)
     // Surfaces draft-state metadata the active-only `getMetaItems` list hides,
     // so the console can show what an AI authored but nobody published yet.
     // `_drafts` is intercepted before the generic `:type` handler below so it
@@ -2124,8 +2125,11 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
             // [#23214] One package and one type narrow the list: a repeat would
             // reach `listDrafts` as an array. Asked where `RestServer` asks it,
             // after the capability gate and the capability probe.
-            const arity = metaQueryArityRefusal('drafts', query);
-            if (arity) return queryRefusalAnswer(deps, arity);
+            // [#31490] …after recognition: a name outside `_drafts`' closed
+            // set (the retired `packageId` among them) is refused, as
+            // `RestServer`'s door refuses it, rather than dropped.
+            const refusal = metaDraftsQueryRefusal(query);
+            if (refusal) return queryRefusalAnswer(deps, refusal);
             try {
                 // [#29180] A `type` naming no metadata type is refused by the
                 // list branch's verdict, as `RestServer`'s `_drafts` asks it,
@@ -2135,8 +2139,9 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
                 if (draftsType) await refuseUnknownMetaListType(protocol, draftsType);
                 // [ADR-0131 D6] No organization, as `RestServer`'s `_drafts`:
                 // every draft is saved environment-wide.
+                // [#31490] `?package=`, through the list branch's binding.
                 const data = await protocol.listDrafts({
-                    packageId: query?.packageId || undefined,
+                    packageId: metaItemPackageBinding(query?.package),
                     type: draftsType,
                 });
                 return { handled: true, response: deps.success(data) };

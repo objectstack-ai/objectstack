@@ -26,6 +26,9 @@ const FIELD_DEFAULTS: Record<string, string> = {
   'fields.currencyCode.noResults': 'No currency found',
   'fields.currencyCode.available': 'Available',
   'fields.currencyCode.all': 'All currencies (ISO 4217)',
+  // ADR-0144 D5 — the home field's read-only hint (`HomeAmountHint`).
+  'fields.currencyHome.convertedAt': 'Converted at {{rate}} on {{date}}',
+  'fields.currencyHome.homeCurrency': 'In the home currency (rate 1)',
   'fields.boolean.offBadge': '{{label}} — Off',
   'fields.boolean.completed': 'Completed',
   'fields.boolean.notCompleted': 'Not completed',

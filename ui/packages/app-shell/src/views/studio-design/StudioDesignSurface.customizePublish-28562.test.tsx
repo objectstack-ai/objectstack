@@ -113,6 +113,9 @@ vi.mock('../../preview/DraftChangesPanel', () => ({
   ),
 }));
 
+// The console's preview and authoring code loads `@objectstack/lint` lazily;
+// warmed here so its first load is paid at import, not inside a test's clock.
+import '@objectstack/lint';
 import { StudioDesignSurface } from './StudioDesignSurface';
 import { registerMetadataPreview } from '../metadata-admin/preview-registry';
 import { t } from '../metadata-admin/i18n';
@@ -214,7 +217,7 @@ beforeEach(() => {
         });
       }
       if (path === '/api/v1/meta/_drafts') {
-        const scope = url.searchParams.get('packageId');
+        const scope = url.searchParams.get('package');
         return json({ drafts: !scope || scope === PAIR ? draftRows() : [] });
       }
       if (path === '/api/v1/meta/app') return json([{ name: 'crm_app', label: 'CRM' }]);
@@ -274,7 +277,7 @@ describe('a read-only base with its pair listed: Pending, the panel and Publish 
     await waitFor(() => expect(panelPackage()).toBe(PAIR), { timeout: 8000 });
     // objectstack#29691 — the sheet names the base the pair's drafts are saved for.
     expect(panelCustomizationOf()).toBe('HotCRM');
-    await waitFor(() => expect(srv.reads).toContain(`/api/v1/meta/_drafts?packageId=${encodeURIComponent(PAIR)}`));
+    await waitFor(() => expect(srv.reads).toContain(`/api/v1/meta/_drafts?package=${encodeURIComponent(PAIR)}`));
     await waitFor(() => expect(publishButton()).toBeEnabled(), { timeout: 8000 });
     expect(publishButton().parentElement).not.toHaveAttribute('data-disabled-reason');
 

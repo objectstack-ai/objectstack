@@ -90,6 +90,9 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
+// Pays `@objectstack/objectql`'s first load at collection, never inside a clocked case
+// (the route modules import it lazily).
+import '@objectstack/objectql';
 import { RestServer } from './rest-server';
 
 function createMockServer() {
@@ -244,6 +247,9 @@ const CASES: Array<{ path: string; removes: string[] }> = [
         removes: [
             `DELETE ${DATA}/:id`, `GET ${DATA}`, `GET ${DATA}/:id`,
             `PATCH ${DATA}/:id`, `POST ${DATA}`, `POST ${DATA}/query`,
+            // [#30237] The recycle-bin doors register inside the same switch.
+            `DELETE ${DATA}/recycle-bin`, `DELETE ${DATA}/recycle-bin/:entryId`,
+            `GET ${DATA}/recycle-bin`, `POST ${DATA}/recycle-bin/:entryId/restore`,
         ],
     },
     {

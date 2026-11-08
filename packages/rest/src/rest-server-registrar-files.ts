@@ -82,6 +82,9 @@ export const REST_SERVER_REGISTRAR_FILES = [
     // backfill door. New, not a moved slice, and a `/meta` group — see
     // {@link REST_SERVER_META_ROUTE_FILES}.
     'meta-record-currency-backfill-route.ts',
+    // [#30237] `registerRecycleBinEndpoints`' body, the recycle bin's doors under
+    // `{data}/:object/recycle-bin`. New, not a moved slice.
+    'recycle-bin-routes.ts',
 ] as const;
 
 /** One file on {@link REST_SERVER_REGISTRAR_FILES}. */

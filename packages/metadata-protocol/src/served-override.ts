@@ -33,7 +33,8 @@
  *    write gate refuses it at publish (N-09), and this predicate is the read's
  *    second line of defence behind that gate.
  *  - **The declaration** — the body's `overrides.package` must name X.
- *    `overrides.basedOn` is recorded and never judged (ADR-0146 D2).
+ *    `overrides.basedOn` is not read here: it never gates, and its one
+ *    reader is a base's upgrade plan, as advice (ADR-0146 D2, as amended).
  *  - **The type** — the row's type, folded to its canonical singular, must be
  *    one a declared override applies to (`isOverridableMetadataType`, the
  *    closed `OVERRIDE_TYPE_CLASSIFICATION`). An `object` is extended, never
