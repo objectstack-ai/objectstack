@@ -428,8 +428,8 @@ export function timingModeNote(event) {
 // slices cut from measured per-file times, falls from ~1164s to ~977s (the
 // model reads ~10% high on today's 4/8). Its job median goes ~19.4 -> ~16.4
 // min; that shard stays the slowest, ~1.5 min above runtime's 3/8.
-// 4 and 5 would close that gap and pin 3c refuses both ("Lower it to 3"),
-// because it reads a slice beside the other packages' heaviest task rather than
+// 4 and 5 would close that gap and pin 3c refuses both (4: "Lower it to 3";
+// 5: "Lower it to 4"), because it reads a slice beside the other packages' heaviest task rather than
 // after the shard's whole leg; re-grounding the pin is a ruled gate's change,
 // not this count's.
 //
