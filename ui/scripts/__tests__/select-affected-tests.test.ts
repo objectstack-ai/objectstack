@@ -443,8 +443,22 @@ describe("the root ci.yml's Test UI job wires the selector fail-open (objectui#1
     expect(step).not.toMatch(/\$\(node ui\/scripts\/select-affected-tests\.mjs/);
   });
 
-  it('checks out the history the diff base needs', () => {
-    expect(job).toMatch(/uses: actions\/checkout@\S+\n\s+with:\n\s+fetch-depth: 0\n/);
+  // objectstack#22034: the checkout is depth 1 and a step of its own fetches
+  // HEAD's whole ancestry and the base branch, not `fetch-depth: 0`'s every
+  // head and tag. Without it the select step below finds no origin/<base> and
+  // no merge base, and quietly runs the full suite.
+  it('fetches the history the diff base needs before it selects', () => {
+    const checkout = job.indexOf('uses: actions/checkout@');
+    const fetch = job.indexOf("- name: Fetch this commit's history and the base branch");
+    const select = job.indexOf('- name: Select the tests this change affects');
+    expect(checkout).toBeGreaterThan(-1);
+    expect(fetch).toBeGreaterThan(checkout);
+    expect(select).toBeGreaterThan(fetch);
+    const step = job.slice(fetch, select);
+    expect(step).toContain('deepen=(--unshallow)');
+    expect(step).toContain('git fetch --no-tags "${deepen[@]}" origin "$head" "${refspecs[@]}"');
+    expect(step).toContain("refspecs=('+refs/heads/main:refs/remotes/origin/main')");
+    expect(step).toContain('refspecs+=("+refs/heads/$PR_BASE_REF:refs/remotes/origin/$PR_BASE_REF")');
   });
 
   it('keeps the matrix width and the full-suite command for the full battery', () => {
