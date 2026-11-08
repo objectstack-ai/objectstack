@@ -1814,10 +1814,6 @@ const de = {
     },
   },
   console: {
-    organizationMfa: {
-      needsTwoFactor: "Mehrstufige Authentifizierung erzwingen setzt die Zwei-Faktor-Authentifizierung voraus, die in dieser Bereitstellung deaktiviert ist; Speichern mit gesetztem Häkchen wird daher abgelehnt. Aktivieren Sie zuerst die Zwei-Faktor-Authentifizierung: Schalten Sie unter Einrichtung → Authentifizierung „Mehrstufige Authentifizierung verlangen“ ein (gilt für alle Organisationen), oder setzen Sie OS_AUTH_TWO_FACTOR=true in der Bereitstellung.",
-      nowRequired: "Alle Mitglieder dieser Organisation, die noch keine Authenticator-App eingerichtet haben, müssen das jetzt tun. Jedes wird vom Datenzugriff ausgeschlossen, sobald die MFA-Kulanzfrist endet (7 Tage, sofern unter Einrichtung → Authentifizierung nicht geändert), gerechnet ab der ersten Nutzung nach dieser Änderung. Mitglieder, die bereits einen Authenticator verwenden, sind nicht betroffen.",
-    },
     studio: {
       title: "Studio",
       accessRequired: "Sie benötigen Studio-Zugriff, um Studio zu öffnen. Ein Administrator kann ihn unter Einrichtung → Berechtigungssatz-Zuweisung mit einem Berechtigungssatz erteilen.",
@@ -2216,6 +2212,7 @@ const de = {
       unsupportedSpecifierType: "Nicht unterstützter Einstellungstyp: {{type}}",
       invalidPhone: "Geben Sie eine Telefonnummer nur mit Ziffern, Leerzeichen und + ( ) - . ein",
       invalidColor: "Geben Sie eine Hex-Farbe ein, z. B. #1a2b3c",
+      jsonStoredAsText: "Dieser Wert ist als Text gespeichert, nicht als JSON-Objekt. Speichern Sie, um ihn als Objekt zu speichern; die Seite hat ihn als ungespeicherte Änderung markiert.",
       clientAddressDirect: "Ihre Adresse, wie der Server sie beurteilt: {{address}}. Eine Liste ohne diese Adresse kann von hier aus nicht gespeichert werden. Dieser Server vertraut keinen Proxy-Headern, hinter einem Proxy ist dies also die Adresse des Proxys.",
       clientAddressViaProxy: "Ihre Adresse, wie der Server sie beurteilt: {{address}}, gelesen aus den Weiterleitungs-Headern des Proxys, dem dieser Server vertraut. Eine Liste ohne diese Adresse kann von hier aus nicht gespeichert werden.",
       clientAddressUnknown: "Der Server kann Ihre Adresse nicht ermitteln, daher kann von hier aus keine nicht leere Liste gespeichert werden.",

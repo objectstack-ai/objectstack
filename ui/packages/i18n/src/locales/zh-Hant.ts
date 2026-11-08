@@ -1881,10 +1881,6 @@ const zhHant = {
     },
   },
   console: {
-    organizationMfa: {
-      needsTwoFactor: '“強制多因素認證”需要雙重驗證，而本部署未開啟雙重驗證，因此勾選後儲存會被拒絕。請先開啟雙重驗證：在“設定 → 認證”中開啟“要求多因素認證”（對所有組織生效），或在部署上設定 OS_AUTH_TWO_FACTOR=true。',
-      nowRequired: '本組織所有尚未繫結身份驗證器的成員現在都必須繫結。每位成員從此次變更後第一次使用起開始計算 MFA 寬限期（預設 7 天，可在“設定 → 認證”中修改），寬限期結束後將無法訪問資料，直到完成繫結。已使用身份驗證器的成員不受影響。',
-    },
     studio: {
       title: 'Studio',
       accessRequired: '你需要 Studio 訪問權限才能開啟 Studio。管理員可以在“設定 → 權限集分配”中通過權限集授予。',
@@ -1990,6 +1986,7 @@ const zhHant = {
       unsupportedSpecifierType: '不支援的設定項型別:{{type}}',
       invalidPhone: '請輸入僅由數字、空格和 + ( ) - . 組成的電話號碼',
       invalidColor: '請輸入十六進位制顏色，例如 #1a2b3c',
+      jsonStoredAsText: '該值以文本形式儲存，而不是 JSON 物件。儲存後將改存為物件；頁面已將其標記為未儲存的更改。',
       clientAddressDirect: '伺服器判定的你的地址：{{address}}。不包含該地址的列表無法在此儲存。此伺服器不信任代理轉發頭，若部署在代理之後，這裡顯示的是代理的地址。',
       clientAddressViaProxy: '伺服器判定的你的地址：{{address}}，取自此伺服器所信任代理的轉發頭。不包含該地址的列表無法在此儲存。',
       clientAddressUnknown: '伺服器無法確定你的地址，因此無法在此儲存非空的列表。',

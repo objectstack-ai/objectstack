@@ -39,7 +39,8 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
           import: "Importar",
           export: "Exportar",
           platform_admin_standing_change: "Cambio de acceso de administrador de plataforma",
-          action_invocation: "Invocación de acción"
+          action_invocation: "Invocación de acción",
+          package_uninstall: "Desinstalación de paquete"
         }
       },
       user_id: {

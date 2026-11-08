@@ -14,7 +14,7 @@ import type {
   ToolRegistry,
   ToolExecutionResult,
 } from './types.js';
-import { wireBridgeTools, grantsAuthoringTools, thrownRefusalEnvelope, dataDoorAnswerOf } from './mcp-http-tools.js';
+import { wireBridgeTools, grantsAuthoringTools, thrownRefusalEnvelope, dataDoorAnswerOf, dataDoorRefusalEnvelope } from './mcp-http-tools.js';
 import { isServerFault, logServerFault } from '@objectstack/types';
 import type {
   McpDataBridge,
@@ -1577,8 +1577,11 @@ export class MCPServerRuntime {
             // sentence; a fault (a bare `Error`, a crash) is the sanitised 500,
             // its thrown text withheld from the client and logged once, as the
             // door logs it.
+            // [#31273] …and so does a driver's own code (`SQLITE_BUSY`), which
+            // the door answers as a fault, not a refusal
+            // (`dataDoorRefusalEnvelope`).
             const uri = `objectstack://objects/${objectName}/records/${recordId}`;
-            const envelope = thrownRefusalEnvelope(err);
+            const envelope = dataDoorRefusalEnvelope(err, objectName);
             let body: { error: string; code?: string; status?: number };
             if (envelope) {
               body = {
