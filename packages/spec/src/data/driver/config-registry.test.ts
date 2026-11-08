@@ -316,6 +316,10 @@ describe('the `oracle` row: federation only', () => {
       const issue = parsed.error!.issues.find((i) => i.path.join('.') === 'schemaMode');
       expect(issue?.message, ds.driver).toContain("the 'oracle' driver serves federation only");
       expect(issue?.message, ds.driver).toContain("schemaMode: 'external'");
+      // The managed alternatives are the boot-selection face, derived — every
+      // selectable id is named, and no federation-only one.
+      const managed = /can be managed \(([^)]*)\)/.exec(issue?.message ?? '')?.[1] ?? '';
+      expect(managed.split(/, | or /).sort()).toEqual([...DATABASE_DRIVER_SELECTION_IDS].sort());
     }
   });
 

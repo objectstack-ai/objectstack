@@ -6,6 +6,7 @@ import { strictObject } from '../shared/strict-object';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 import { CODE_DEFINED_CREDENTIAL_ROUTE, urlUserinfoUsername } from './driver/common.zod';
 import {
+  DATABASE_DRIVER_SELECTION_IDS,
   isFederationOnlyDriver,
   RETIRED_DRIVER_ID_GUIDANCE,
   resolveDriverId,
@@ -607,13 +608,23 @@ const CONNECTOR_ON_MANAGED_REFUSED =
  * otherwise send `CREATE TABLE` / `ALTER TABLE` to a database whose tables
  * another system owns.
  */
+/**
+ * The drivers that can hold a managed datasource, as a prose list. Derived from
+ * the boot-selection face of the driver table, never hand-listed, so a driver
+ * that joins or leaves that face is named here the day it does.
+ */
+function managedDriverList(): string {
+  const ids = [...DATABASE_DRIVER_SELECTION_IDS];
+  return ids.length > 1 ? `${ids.slice(0, -1).join(', ')} or ${ids[ids.length - 1]}` : ids.join('');
+}
+
 function federationOnlyDriverOnManagedRefusal(driverId: string): string {
   return `the '${driverId}' driver serves federation only: ObjectStack reads the tables an existing `
     + `${driverId} database already holds (and writes them only where \`external.allowWrites\` and the `
     + "object's `external.writable` both allow it), and never creates or alters one there, so it cannot "
     + 'hold a managed datasource. Set `schemaMode: \'external\'` (or `\'validate-only\'` to warn on drift '
     + "instead of failing) and declare the `external` block. To keep the platform's own tables, "
-    + 'use a driver that can be managed (postgres, mysql or sqlite).';
+    + `use a driver that can be managed (${managedDriverList()}).`;
 }
 
 /**
