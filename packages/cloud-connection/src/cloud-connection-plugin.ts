@@ -155,7 +155,10 @@ import { CLOUD_CONNECTION_CAPABILITY, CLOUD_CONNECTION_UI_BUNDLE } from './cloud
 import { readJsonRequestBody } from './request-json-body.js';
 // [#30964] The install mode's one declaration, read by reference: never a copy of its two spellings.
 import { InstallModeSchema, type InstallMode } from '@objectstack/spec/kernel';
-import { INSTALL_LOCAL_DOOR_SERVICE, type InstallLocalDoor } from './install-local-door-service.js';
+import {
+    INSTALL_LOCAL_DOOR_SERVICE, grantRefusalEvent, recordUnmanagedImportEvent,
+    type InstallLocalDoor, type InstallLocalDoorGrant, type UnmanagedImportAuditSurface,
+} from './install-local-door-service.js';
 
 const CLOUD_CONNECTION_PREFIX = '/api/v1/cloud-connection';
 
@@ -1046,7 +1049,7 @@ export class CloudConnectionPlugin implements Plugin {
                     const json: any = await resp.json().catch(() => ({ success: false, error: 'install failed (no body)' }));
                     // [#30964] A control-plane refusal, and every managed answer, is relayed as it was.
                     if (installMode !== 'unmanaged' || !resp.ok || json?.success === false) return c.json(json, resp.status as any);
-                    return await copyOnUnmanagedGrant(c, { environmentId, packageId, seedSampleData, grant: json });
+                    return await copyOnUnmanagedGrant(c, { environmentId, packageId, seedSampleData, installerUserId: session.userId, grant: json });
                 } catch (err: any) {
                     ctx.logger?.error?.('[CloudConnectionPlugin] install failed', err instanceof Error ? err : new Error(String(err)));
                     return c.json({ success: false, error: { code: 'PLUGIN_INSTALL_FAILED', message: String(err?.message ?? err) } }, 502);
@@ -1069,14 +1072,47 @@ export class CloudConnectionPlugin implements Plugin {
              * cloud branch always has. Fail closed: an answer that does not echo
              * the mode, or names no version, copies nothing (502). A
              * `data.manifest` in the answer is never read.
+             *
+             * [#31481, ruling A「两边审计」] Every refusal after the grant leaves
+             * the environment's `package_unmanaged_import` failure row beside
+             * the control plane's grant row, through the environment's `audit`
+             * slot: this door's own two (the grant it cannot read, 502; no
+             * install-local door, 503) here, and the door's, which it audits
+             * itself when handed the grant ({@link InstallLocalDoor.install}).
              */
             const copyOnUnmanagedGrant = async (
                 c: any,
-                args: { environmentId: string; packageId: string; seedSampleData: boolean; grant: any },
+                args: { environmentId: string; packageId: string; seedSampleData: boolean; installerUserId: string; grant: any },
             ): Promise<Response> => {
-                const { environmentId, packageId, seedSampleData, grant } = args;
+                const { environmentId, packageId, seedSampleData, installerUserId, grant } = args;
                 const data = grant?.data;
                 const versionId = typeof data?.version_id === 'string' ? data.version_id.trim() : '';
+                const granted: InstallLocalDoorGrant = {
+                    packageId,
+                    ...(typeof data?.version === 'string' && data.version.trim() !== '' ? { version: data.version.trim() } : {}),
+                    environmentId,
+                    actor: installerUserId,
+                };
+                // The environment's own services: its kernel's, multi-tenant; the host's, single-environment.
+                let kernel: EnvironmentKernel | undefined;
+                if (!this.cfg.singleEnvironment) {
+                    try {
+                        kernel = await ctx.getService<EnvironmentKernelManager>('kernel-manager')?.getOrCreate?.(environmentId);
+                    } catch { /* no environment kernel */ }
+                }
+                const environmentService = async <T>(name: string): Promise<T | undefined> => {
+                    if (this.cfg.singleEnvironment) {
+                        try { return ctx.getService<T>(name); } catch { return undefined; }
+                    }
+                    let found: T | undefined;
+                    try { found = await kernel?.getServiceAsync?.<T>(name); } catch { /* not registered */ }
+                    if (!found) { try { found = kernel?.getService?.<T>(name); } catch { /* not registered */ } }
+                    return found;
+                };
+                const auditRefusal = async (errorCode: string, status: number): Promise<void> => {
+                    const audit = await environmentService<UnmanagedImportAuditSurface>('audit');
+                    await recordUnmanagedImportEvent(audit, ctx.logger, 'CloudConnectionPlugin', grantRefusalEvent(granted, errorCode, status));
+                };
                 // An answer with no `install_mode` at all may come from a control
                 // plane that does not read the param, and so may already have
                 // installed the package MANAGED; the refusal says so, so the
@@ -1094,6 +1130,7 @@ export class CloudConnectionPlugin implements Plugin {
                         `[CloudConnectionPlugin] the unmanaged install of ${packageId} in ${environmentId} was not copied: `
                         + `the control plane's grant could not be read (${unread}).${managedNote}`,
                     );
+                    await auditRefusal('PLUGIN_INSTALL_FAILED', 502);
                     return c.json({
                         success: false,
                         error: {
@@ -1103,18 +1140,9 @@ export class CloudConnectionPlugin implements Plugin {
                         },
                     }, 502);
                 }
-                let door: InstallLocalDoor | undefined;
-                try {
-                    if (this.cfg.singleEnvironment) {
-                        door = ctx.getService<InstallLocalDoor>(INSTALL_LOCAL_DOOR_SERVICE);
-                    } else {
-                        const kernels = ctx.getService<EnvironmentKernelManager>('kernel-manager');
-                        const kernel = await kernels?.getOrCreate?.(environmentId);
-                        try { door = await kernel?.getServiceAsync?.<InstallLocalDoor>(INSTALL_LOCAL_DOOR_SERVICE); } catch { /* not registered */ }
-                        if (!door) { try { door = kernel?.getService?.<InstallLocalDoor>(INSTALL_LOCAL_DOOR_SERVICE); } catch { /* not registered */ } }
-                    }
-                } catch { /* no door */ }
+                const door = await environmentService<InstallLocalDoor>(INSTALL_LOCAL_DOOR_SERVICE);
                 if (!door || typeof door.install !== 'function') {
+                    await auditRefusal('SERVICE_UNAVAILABLE', 503);
                     return c.json({
                         success: false,
                         error: {
@@ -1137,7 +1165,8 @@ export class CloudConnectionPlugin implements Plugin {
                         ...(seedSampleData ? { seedSampleData: true } : {}),
                     }),
                 });
-                const answer = await door.install(request);
+                // The grant rides beside the request, so the door audits its own refusals of it.
+                const answer = await door.install(request, { grant: granted });
                 const body = await answer.json().catch(() => ({
                     success: false,
                     error: { code: 'PLUGIN_INSTALL_FAILED', message: `The unmanaged copy of '${packageId}' answered no body.` },
