@@ -174,7 +174,7 @@ describe('a typed cron stores a descriptor that resolves to it (objectui#12779)'
   });
 });
 
-describe('clearing never leaves a typed schedule block with no cadence (objectstack#31383)', () => {
+describe('clearing never leaves a schedule block with no cadence (objectstack#31383)', () => {
   // A typed block is judged by the published `ScheduleSchema`, which refuses a
   // `type: 'cron'` with no `expression`; the engine binds nothing from it.
   const typedCleared: Array<[string, Record<string, unknown>, unknown]> = [
@@ -193,8 +193,21 @@ describe('clearing never leaves a typed schedule block with no cadence (objectst
     });
   }
 
+  it('clearing an untyped { expression } beside a timezone removes the whole schedule', () => {
+    // `{ timezone }` alone binds nothing, and the flow parse reads nothing from it.
+    expect(normalizeScheduleCadence({ timezone: 'UTC' })).toBeNull();
+    expect(scheduleWithExpression({ expression: '0 4 * * *', timezone: 'UTC' }, '')).toBeUndefined();
+  });
+
   it('CONTROL: clearing an untyped { expression } still removes the whole schedule', () => {
     expect(scheduleWithExpression({ expression: '0 4 * * *' }, '')).toBeUndefined();
+  });
+
+  it('CONTROL: a cadence the cron stood in front of is kept when the cron is cleared', () => {
+    // The engine resolves `expression` ahead of `intervalMs`; with the cron gone the interval binds.
+    const stored = scheduleWithExpression({ expression: '0 4 * * *', intervalMs: 60000 }, '');
+    expect(stored).toEqual({ intervalMs: 60000 });
+    expect(normalizeScheduleCadence(stored)).toEqual({ type: 'interval', intervalMs: 60000 });
   });
 
   it('CONTROL: a cron typed over a typed block keeps its type and the other keys', () => {
