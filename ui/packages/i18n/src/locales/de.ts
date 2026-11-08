@@ -703,6 +703,7 @@ const de = {
       noSavedTemplates: "Keine gespeicherten Vorlagen",
       noneOption: "— Keine —",
       saveCurrent: "Aktuelle speichern",
+      saveCurrentNeedsMapping: "Ordnen Sie mindestens eine Spalte zu, um eine Vorlage zu speichern.",
       templateName: "Vorlagenname",
       save: "Speichern",
       deleteTemplate: "Vorlage löschen",
