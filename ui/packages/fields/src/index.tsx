@@ -3697,6 +3697,7 @@ const TEXTUAL_BASE_TYPES = new Set(['text', 'textarea', 'string', 'longtext', ''
  */
 const WIDGET_CELL_RENDERER_TYPES: ReadonlySet<string> = new Set([
   'object-ref',
+  'shareable-object-ref',
   'recipient-picker',
   'filter-condition',
   'position-ref',
@@ -4439,6 +4440,9 @@ registerFieldRenderer(RECORD_POINTER_CARD_TYPE, RecordPointerTextCellRenderer);
 // in `scripts/check-eager-closure-budget.mjs` has no room for a label reader;
 // the host loads its faces lazily, off the eager closure.
 registerFieldRenderer('object-ref', TextCellRenderer);
+// The sharing-rule object picker stores the same object name `object-ref` does,
+// so its read face is the same one.
+registerFieldRenderer('shareable-object-ref', TextCellRenderer);
 registerFieldRenderer('recipient-picker', TextCellRenderer);
 // The registry-name keys draw their label in this package: the reader is the
 // edit widget's own `listMetadataItems` catalog, one shared read per data
@@ -4877,9 +4881,13 @@ const fieldWidgetMap = {
   // bare field `type`). They render a *picker* over machine data an admin would
   // otherwise have to type — used by sys_sharing_rule (ADR-0056 P2 pattern):
   //   object-ref       → choose a registered object by name
+  //   shareable-object-ref → choose an object a sharing rule can take effect
+  //                      on, from `GET /api/v1/sharing/shareable-objects`
+  //                      (`object-ref` when that door does not answer the list)
   //   filter-condition → visual criteria builder scoped to the chosen object
   //   recipient-picker → record picker whose target follows a sibling type
   'object-ref': () => import('./widgets/ObjectRefField.js').then(m => ({ default: m.ObjectRefField })),
+  'shareable-object-ref': () => import('./widgets/ShareableObjectRefField.js').then(m => ({ default: m.ShareableObjectRefField })),
   'filter-condition': () => import('./widgets/FilterConditionField.js').then(m => ({ default: m.FilterConditionField })),
   'recipient-picker': () => import('./widgets/RecipientPickerField.js').then(m => ({ default: m.RecipientPickerField })),
   // Registry-name pickers (objectui#7611, ruling B2 on objectstack#22865): a
@@ -5076,6 +5084,7 @@ const FIELD_TYPES_SKIP_FALLBACK = new Set([
   // Widget-hint-only pickers — resolved solely via `field:<widget>`, so the
   // bare-key fallback is never wanted.
   'object-ref',
+  'shareable-object-ref',
   'filter-condition',
   'recipient-picker',
   'position-ref',
@@ -5226,6 +5235,7 @@ export const FIELD_WIDGET_LABELLING: Record<
   signature: 'group',
   qrcode: 'control',
   'object-ref': 'control',
+  'shareable-object-ref': 'control',
   'filter-condition': 'control',
   'recipient-picker': 'control',
   'position-ref': 'control',

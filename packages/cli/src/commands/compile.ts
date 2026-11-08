@@ -1172,6 +1172,13 @@ export default class Compile extends Command {
       // `devLogins` do; the module exports only `functions` and `meta`, so no
       // boot can read the list out of it.)
       delete finalBundle.demoStaff;
+      // `devPlugins` never reaches the artifact either, for the same reason:
+      // it is the list `os serve --dev` / `os dev` add to the boot, read off
+      // the config it loads (`stackBootPlugins`), and nothing that boots or
+      // installs the artifact loads it. Left in, `os package publish` and
+      // `os deploy` (which read this file) carried a development-only load
+      // list into a target, and a restriction profile had to read it as code.
+      delete finalBundle.devPlugins;
       // [#18431] Docs read out of `src/<pkg>/docs/` attach to the body of the
       //     package that owns them — `packages[i].manifest`, ADR-0130 D4 option
       //     B — and ⛔ never to the top level, which is the maintainer's ruling

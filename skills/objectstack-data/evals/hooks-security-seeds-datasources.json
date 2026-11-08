@@ -100,6 +100,36 @@
         "must_contain": ["beforeInsert", "beforeUpdate", "language: 'js'", "'api.read'", "ctx.api.object("],
         "must_not_contain": ["handler:", "HookContext", "'http.fetch'"]
       }
+    },
+    {
+      "id": 11,
+      "prompt": "Expose the remote `suppliers` table of our `warehouse` datasource as a read-only `ext_supplier` object every member can read.",
+      "expected_output": "A complete `ObjectSchema.create` with `datasource: 'warehouse'`, `external: { remoteName: 'suppliers' }` and an authored `sharingModel: 'public_read'` — a publish with none is refused (`security-owd-unset`), and on 'private' a member reads no row of a binding whose remote rows carry no owner.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["ObjectSchema.create", "remoteName", "sharingModel: 'public_read'"],
+        "must_not_contain": ["columnName:"]
+      }
+    },
+    {
+      "id": 12,
+      "prompt": "When an `account`'s `industry` changes, copy the new value into `account_industry` on every contact of that account.",
+      "expected_output": "An `afterUpdate` hook on `account` with a sandboxed `body: { language: 'js', source, capabilities: ['api.write'] }`: the source compares `ctx.input.industry` with `ctx.previous.industry` and, when it changed, makes one bulk write, `ctx.api.object('contact').update({ account_industry: ctx.input.industry }, { where: { account_id: ctx.previous.id }, multi: true })`. The row is keyed on `ctx.previous.id`: a body's `ctx.input` carries `id` only when the payload does, so on a bulk or by-`where` update the key would be empty and the `where` would match every contact. Not the deprecated inline `handler`, and not a bulk method the hook's `ctx.api` does not have (`updateMany` throws \"not implemented\").",
+      "files": [],
+      "assertions": {
+        "must_contain": ["afterUpdate", "language", "js", "api.write", "multi: true", "ctx.previous.id"],
+        "must_not_contain": ["handler:", "HookContext", "account_id: ctx.input.id"]
+      }
+    },
+    {
+      "id": 13,
+      "prompt": "Run our `account` enrichment hook only for accounts whose `annual_revenue` (an optional currency field) is above 1,000,000.",
+      "expected_output": "The hook's declarative `condition: P`record.annual_revenue != null && record.annual_revenue > 1000000``. `record` is total over the declared fields, so an empty `annual_revenue` reads `null` and CEL has no `>` overload for it: the publish gate refuses the unguarded comparison, and at runtime it would refuse each write on an account with no `annual_revenue`. `has(record.annual_revenue)` is not a guard (a declared field holding null is present).",
+      "files": [],
+      "assertions": {
+        "must_contain": ["condition:", "record.annual_revenue != null", "record.annual_revenue > 1000000"],
+        "must_not_contain": []
+      }
     }
   ]
 }

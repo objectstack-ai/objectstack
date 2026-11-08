@@ -27,7 +27,8 @@
  * The platform's own Layer 0 system read, independent of the caller's audience
  * and posture: X where U equals the caller's user id and `filter` holds, as
  * system context, with the caller's Layer 0 wall for X AND-ed in and no Layer
- * 1, projected to F (and `id`, which explain names), limited to
+ * 1, projected to F (and `id`, which explain names; F may be `id` itself, the
+ * caller's own rows of X, #31129 ruling A), limited to
  * {@link MEMBERSHIP_KEY_MAX_VALUES} + 1 rows. The caller need not read X: a
  * portal contact who cannot see the roster still resolves the key, and X's own
  * row-level security, which may read the very key this read feeds, is not
@@ -492,7 +493,8 @@ async function readDeclaredKey(
   try {
     rows = await host.ql.find(d.object, {
       where: where.length === 1 ? where[0] : { $and: where },
-      fields: ['id', d.valueField],
+      // `valueField: 'id'` (the caller's own roster rows) projects `id` once.
+      fields: d.valueField === 'id' ? ['id'] : ['id', d.valueField],
       limit: MEMBERSHIP_KEY_MAX_VALUES + 1,
       // The wall is the `where` above, the caller's Layer 0 as the read door
       // composes it; the system context carries no organization of its own,

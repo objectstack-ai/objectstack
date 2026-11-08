@@ -2268,6 +2268,12 @@ const ja = {
         done: "同僚が参加済みか、招待済みです。",
         action: "招待",
       },
+      connectAssistant: {
+        title: 'AI アシスタントを接続',
+        todo: 'Claude や Doubao などのアシスタントから、あなた自身としてこのシステムを使えます。',
+        done: 'あなたの AI アシスタントまたは API キーが接続されています。',
+        action: '接続',
+      },
     },
     error: {
       connectionFailed: "サーバーに接続できません",
@@ -3237,6 +3243,12 @@ const ja = {
       cta: "パスワードを設定",
       dismiss: "閉じる",
     },
+    connectAssistant: {
+      title: 'AI アシスタントからこのシステムを使う',
+      body: 'Claude や Doubao などの AI アシスタントから、レコードの参照や変更ができます。アシスタントは常にあなたとして、あなたの権限で動作します。',
+      action: 'AI アシスタントを接続',
+      dismiss: '非表示',
+    },
     pendingDrafts: {
       // objectui#12602 — the drafts row in Home's "My work" section: the
       // count, then the first draft names joined by `nameSeparator`, in
@@ -3801,6 +3813,12 @@ const ja = {
       example2: 'それぞれのオブジェクトにレコードが何件あるか数えて。',
       example3: 'ここで実行できるアクションと、それぞれの内容を教えて。',
       tryFirst: 'まず 1 つ目を試してください。普段使っているオブジェクトが返ってくれば、接続できています。',
+      connected: '接続済み: {{name}}。',
+      connectedKey: 'API キー「{{name}}」で接続済みです。',
+      lastCallHour: '最後の呼び出しは {{time}} からの 1 時間の間です。',
+      lastCallAt: '最後の呼び出しは {{time}} です。',
+      noCallYet: 'まだ呼び出しはありません。上の 1 つ目の依頼を試して接続を確かめてください。',
+      moreConnected: 'あなたとして動作できるほかのものは、このページの下部に一覧があります。',
     },
     disabled: {
       title: 'このデプロイメントでは AI アシスタントの接続がオフです',

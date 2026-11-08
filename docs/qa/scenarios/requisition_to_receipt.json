@@ -12,8 +12,8 @@
       "en": "Build a requisition-to-receipt app: purchase requisitions, an amount-threshold multi-level approval, purchase orders with lines, goods receipts and suppliers."
     },
     "detailed": {
-      "zh": "采购应用,覆盖从采购申请到收货的全过程。员工提交采购申请(类别、用途说明、金额)。申请按金额分级审批:5000 元及以下只需部门经理审批;超过 5000 元、不超过 30000 元的还要财务主管审批;超过 30000 元的再加总经理审批。审批级数由金额自动算出,逐级流转,任一级驳回即结束。申请全部批准后,采购员向供应商下采购单,采购单下有多条明细(物品、数量、单价、金额),明细金额等于数量乘单价,采购单合计自动汇总明细;采购单发给供应商后,申请状态变为已下单。到货后由申请人按明细登记收货,收货数量不能超过订购数量,否则不能保存;全部收齐后采购单和申请都变为已收货。取消已发给供应商的采购单不可撤销,必须先确认。员工只能看到自己的申请及其审批、采购单和收货;部门经理能看到本部门的;采购员能看到全部申请和采购单。部门采购预算只有本部门经理和财务可见,采购员和普通员工看不到;供应商银行账号只有采购员和财务可见。需要一个按部门和类别统计采购支出的报表。尽量用声明式配置(公式字段、汇总字段、校验规则、审批流程)而不是代码钩子,以便应用能以非托管方式安装。",
-      "en": "A procurement app covering the way from a purchase requisition to the goods receipt. An employee files a requisition (category, description, amount). It is approved in levels set by its amount: up to 5,000 the department manager alone; above 5,000 and up to 30,000 the finance controller as well; above 30,000 the general manager too. The number of levels is computed from the amount, the levels run in order, and a rejection at any level ends it. Once every level has approved, the buyer raises a purchase order to a supplier with several lines (item, quantity, unit price, amount); a line's amount is quantity times unit price, and the order total sums its lines. When the order is sent to the supplier the requisition becomes ordered. When the goods arrive the requester records a receipt per line, and a receipt above the ordered quantity cannot be saved; once everything has arrived, the order and the requisition become received. Cancelling an order already sent to the supplier cannot be undone and is confirmed first. An employee sees only their own requisitions with their approvals, orders and receipts, a department manager sees their department's, and the buyer sees every requisition and order. A department's purchasing budget is visible to that department's manager and to Finance only, not to the buyer or an employee; a supplier's bank account to the buyer and Finance only. Add a report of purchasing spend by department and category. Prefer declarative configuration (formula and roll-up fields, validation rules, an approval process) over code hooks, so the app can be installed unmanaged."
+      "zh": "采购应用,覆盖从采购申请到收货的全过程。员工提交采购申请(类别、用途说明、金额)。申请按金额分级审批:5000 元及以下只需部门经理审批;超过 5000 元、不超过 30000 元的还要财务主管审批;超过 30000 元的再加总经理审批。审批级数由金额自动算出,逐级流转,任一级驳回即结束。每一级都是一条独立的审批步骤记录(申请、级别、审批人、审批结果和日期),批准或驳回一级就是更新这条记录。申请全部批准后,采购员向供应商下采购单,采购单下有多条明细(物品、数量、单价、金额),明细金额等于数量乘单价,采购单合计自动汇总明细,明细是采购单的从属记录(主从关系),在采购单表单上直接内联编辑;采购单发给供应商后,申请状态变为已下单。到货后由申请人按明细登记收货,收货数量不能超过订购数量,否则不能保存;全部收齐后采购单和申请都变为已收货。取消已发给供应商的采购单不可撤销,必须先确认。员工只能看到自己的申请及其审批、采购单和收货;部门经理能看到本部门的;采购员能看到全部申请和采购单。部门采购预算只有本部门经理和财务可见,采购员和普通员工看不到;供应商银行账号只有采购员和财务可见。需要一个按部门和类别统计采购支出的报表。尽量用声明式配置(公式字段、汇总字段、校验规则)而不是代码钩子,以便应用能以非托管方式安装。",
+      "en": "A procurement app covering the way from a purchase requisition to the goods receipt. An employee files a requisition (category, description, amount). It is approved in levels set by its amount: up to 5,000 the department manager alone; above 5,000 and up to 30,000 the finance controller as well; above 30,000 the general manager too. The number of levels is computed from the amount, the levels run in order, and a rejection at any level ends it. Each level is its own approval step record (the requisition, the level, the approver, the decision and its date), and approving or rejecting a level updates that record. Once every level has approved, the buyer raises a purchase order to a supplier with several lines (item, quantity, unit price, amount); a line's amount is quantity times unit price, and the order total sums its lines. The lines are details of the order (master-detail), edited inline on the order's form. When the order is sent to the supplier the requisition becomes ordered. When the goods arrive the requester records a receipt per line, and a receipt above the ordered quantity cannot be saved; once everything has arrived, the order and the requisition become received. Cancelling an order already sent to the supplier cannot be undone and is confirmed first. An employee sees only their own requisitions with their approvals, orders and receipts, a department manager sees their department's, and the buyer sees every requisition and order. A department's purchasing budget is visible to that department's manager and to Finance only, not to the buyer or an employee; a supplier's bank account to the buyer and Finance only. Add a report of purchasing spend by department and category. Prefer declarative configuration (formula and roll-up fields, validation rules) over code hooks, so the app can be installed unmanaged."
     }
   },
   "expect": {
@@ -66,8 +66,6 @@
     "records-forms.formula-field",
     "records-forms.validation-rule",
     "records-forms.select-options",
-    "approvals.multi-step-approval",
-    "approvals.dynamic-approver-routing",
     "automation.record-triggered-flow",
     "access-security.row-level-security",
     "access-security.field-permissions",
@@ -850,6 +848,7 @@
       {
         "id": "requester",
         "role": "Requester (employee), Sales — e02",
+        "record": {"object": "employee", "id": "e02"},
         "hidden": {
           "fields": [{"object": "department", "field": "budget"}, {"object": "supplier", "field": "bank_account"}]
         },
@@ -864,6 +863,7 @@
       {
         "id": "dept_manager",
         "role": "Department manager, Sales — e13",
+        "record": {"object": "employee", "id": "e13"},
         "hidden": {"fields": [{"object": "supplier", "field": "bank_account"}]},
         "scope": [
           {"object": "department", "field": "id", "value": "dep_sales"},

@@ -6,8 +6,8 @@
  *
  * A card's prompt describes the business; the Run half then seeds the card's
  * rows and signs each persona in. So the build is told, besides the card's own
- * prompt, exactly what the Run half will rely on — and nothing it will be
- * graded on beyond that:
+ * prompt, exactly what the Run half will rely on and every name its Build half
+ * is checked by:
  *
  *   - the data the app is loaded with (the card's seed rows, verbatim): object
  *     and field machine names, and the values each field must accept;
@@ -21,7 +21,13 @@
  *   - the naming rule: EVERY item the app declares is named
  *     `<namespace>_<short>`, not only its objects ({@link namingRule}). The
  *     scorer reports a bare one as a Build finding, so every authoring prompt
- *     (build, iterate, template iterate) states it.
+ *     (build, iterate, template iterate) states it;
+ *   - the structure the Build half checks by exact name beyond the seed
+ *     ({@link structureLines}): each lookup's target, each single-choice field
+ *     with its minimum option count, each dashboard and each app navigation
+ *     target. Every Build check traces to text the prompt carries, so a
+ *     faithful build never fails for not guessing a name; an iterate prompt
+ *     states its change's own rows the same way ({@link changeContract}).
  *
  * The card handed in here is already namespace-relative (`namespace.ts`): its
  * item names carry the card's prefix (`democrm_`), so the contract states them
@@ -34,7 +40,7 @@
  */
 
 import type { LoadedScenario } from '../loader.js';
-import { scenarioNamespace, type ScenarioCard } from '../schema.js';
+import { scenarioNamespace, type ScenarioCard, type ScenarioExpect } from '../schema.js';
 import { permissionSetName } from './namespace.js';
 import { cycleText, referenceCycles } from './seed.js';
 
@@ -42,6 +48,62 @@ type Card = ScenarioCard;
 type Persona = Card['run']['personas'][number];
 
 const text = (t: { en?: string; zh?: string }): string => t.en ?? t.zh ?? '';
+
+/** The tag whose check holds EVERY single-choice field the build declares to two options or more (`score/scenario-tags.ts`). */
+const SELECT_OPTIONS_TAG = 'records-forms.select-options';
+
+/** The rows of `expect` (or of an iterate's `expectDelta`) the exact-name scorer reads beyond the seed. */
+type StructureRows = Pick<ScenarioExpect, 'selectFields' | 'lookups' | 'dashboards' | 'appNavTargets'>;
+
+const code = (name: string): string => `\`${name}\``;
+
+/**
+ * One line per kind of structure row the exact-name scorer (`scoreGraph`)
+ * checks and the seed does not already state: a lookup's target
+ * (`lookup:<object>.<field>-><to>`), a single-choice field's minimum option
+ * count (`select:<object>.<field>>=<n>opts`), a dashboard (`dashboard:<name>`)
+ * and an app navigation target (`nav:<name>->exists`). On a card carrying
+ * the select-options tag, one more line holds every single-choice field the
+ * build declares (every other one, when rows are listed) to two options, as
+ * that tag's check does.
+ */
+export function structureLines(rows: StructureRows, card: Card): string[] {
+  const out: string[] = [];
+  if (rows.lookups?.length) {
+    out.push(`- Lookups, each referencing the object shown: ${rows.lookups.map((l) => `${code(`${l.object}.${l.field}`)} → ${code(l.to)}`).join(', ')}.`);
+  }
+  if (rows.selectFields?.length) {
+    out.push(
+      `- Single-choice (select) fields, each offering at least the number of options shown: ${rows.selectFields
+        .map((f) => `${code(`${f.object}.${f.field}`)} (${f.minOptions})`)
+        .join(', ')}.`,
+    );
+  }
+  if (card.capabilities.includes(SELECT_OPTIONS_TAG)) {
+    out.push(`- Every ${rows.selectFields?.length ? 'other ' : ''}single-choice field you declare offers at least two options: a field with one option is no choice.`);
+  }
+  if (rows.dashboards?.length) {
+    out.push(
+      `- Dashboards, each a dashboard named exactly: ${rows.dashboards.map(code).join(', ')}. A report the description asks for may be shown on one; it does not stand in for it.`,
+    );
+  }
+  if (rows.appNavTargets?.length) {
+    out.push(`- The app's navigation has an entry for each of: ${rows.appNavTargets.map(code).join(', ')}.`);
+  }
+  return out;
+}
+
+/** What an iterate prompt states of its change: the new objects and the structure rows the change adds, by the names the re-scored Build half checks. */
+export function changeContract(card: Card): string {
+  const delta = card.iterate.expectDelta;
+  const lines: string[] = [];
+  if (delta.objects?.length) {
+    const min = card.expect.minFieldsPerObject;
+    lines.push(`- New objects, named exactly: ${delta.objects.map(code).join(', ')}${min ? `, each with at least ${min} fields` : ''}.`);
+  }
+  lines.push(...structureLines(delta, card));
+  return ['The change is checked for these, by the exact names shown:', ...lines].join('\n');
+}
 
 /** A direct (non-path) row-scope rule names the user handle that persona signs in as, e.g. `u_sam`. */
 export function personaHandles(card: Card): Map<string, string> {
@@ -55,26 +117,14 @@ export function personaHandles(card: Card): Map<string, string> {
 }
 
 /**
- * The scope fields whose seed values are user handles, `object.field`: a
- * field a persona's direct (non-path) `scope` rule names that the card does
- * not declare as a lookup or a select, and that is not `id`. In the crm card
- * that is `account.owner` (`u_sam`, `u_tia`). Every other direct scope field
- * holds a row id or an option value (`asset.custodian` = `e06`, an employee
- * row; `ticket_comment.visibility` = `public`), which the seed loads verbatim.
+ * The seed fields whose values are user handles, `object.field`: the card's
+ * declared `run.userHandleFields`, read and never inferred. In the crm card
+ * that is `account.owner` (`u_sam`, `u_tia`). Every other field holds a row id
+ * or an option value (`asset.custodian` = `e06`, an employee row;
+ * `ticket_comment.visibility` = `public`), which the seed loads verbatim.
  */
 export function userHandleFields(card: Card): Set<string> {
-  const declared = new Set([
-    ...(card.expect.lookups ?? []).map((l) => `${l.object}.${l.field}`),
-    ...(card.expect.selectFields ?? []).map((s) => `${s.object}.${s.field}`),
-  ]);
-  const out = new Set<string>();
-  for (const p of card.run.personas) {
-    for (const sc of p.scope ?? []) {
-      const key = `${sc.object}.${sc.field}`;
-      if (!sc.field.includes('.') && sc.field !== 'id' && !declared.has(key)) out.add(key);
-    }
-  }
-  return out;
+  return new Set((card.run.userHandleFields ?? []).map((h) => `${h.object}.${h.field}`));
 }
 
 /** The handles a seed row names in a {@link userHandleFields} field that no persona signs in as (`u_tia`): the seed loads each as the admin user. */
@@ -130,6 +180,12 @@ export function dataContract(card: Card): string {
   lines.push('```json');
   lines.push(JSON.stringify(card.run.seed, null, 1));
   lines.push('```');
+  const structure = structureLines(card.expect, card);
+  if (structure.length) {
+    lines.push('');
+    lines.push('Structure: besides the objects and fields above, the build is checked for these, by the exact names shown:');
+    lines.push(...structure);
+  }
   lines.push('');
   lines.push(
     'People: declare one permission set per person below, named exactly as shown, granting what that role needs ' +
@@ -210,6 +266,8 @@ export function iteratePrompt(card: Card): string {
     namingRule(card),
     '',
     `Change: ${text(card.iterate.change)}`,
+    '',
+    changeContract(card),
   ].join('\n');
 }
 
@@ -235,14 +293,25 @@ export function templateIteratePrompt(card: Card, server: TemplateServer): strin
     namingRule(card),
     '',
     `Change: ${text(card.iterate.change)}`,
+    '',
+    changeContract(card),
   ].join('\n');
+}
+
+/**
+ * The card's "today", said to the agent. A question or operation that says
+ * "today", "this month" or "overdue" is judged against the card's `asOf`, so
+ * every run-phase prompt states it; a write the platform's clock stamps is
+ * judged against the run date instead (the operation grader's `asOf` rule).
+ */
+function todayOf(card: Card): string {
+  return card.asOf ? ` Today is ${card.asOf}.` : '';
 }
 
 export function questionPrompt(scenario: LoadedScenario, questionId: string): string {
   const q = scenario.card.run.questions.find((x) => x.id === questionId)!;
-  const today = scenario.card.asOf ? ` Today is ${scenario.card.asOf}.` : '';
   return (
-    `${text(q.ask)}${today}\n\nAnswer from the app’s data using the \`app\` tools. State the figures, and end with a line ` +
+    `${text(q.ask)}${todayOf(scenario.card)}\n\nAnswer from the app’s data using the \`app\` tools. State the figures, and end with a line ` +
     '`Source: <object>` naming the object the figures come from.'
   );
 }
@@ -250,7 +319,7 @@ export function questionPrompt(scenario: LoadedScenario, questionId: string): st
 export function operationPrompt(card: Card, operationId: string): string {
   const op = card.run.operations.find((o) => o.id === operationId)!;
   const persona = card.run.personas.find((p) => p.id === op.actingAs);
-  return `${text(op.ask)}\n\nYou act for ${persona?.role ?? op.actingAs}, through the \`app\` tools.`;
+  return `${text(op.ask)}${todayOf(card)}\n\nYou act for ${persona?.role ?? op.actingAs}, through the \`app\` tools.`;
 }
 
 /** `os verify`'s opt-in proofs, chosen from the card's capability tags. */

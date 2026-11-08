@@ -557,6 +557,21 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata-protocol/src/protocol.cached-item-last-modified.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.cached-item-last-modified.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.cached-item-last-modified.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/metadata-protocol/src/protocol.capability-write-door.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -2717,6 +2732,21 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata-protocol/src/sys-metadata-repository.history-snapshot-drained-keys.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/sys-metadata-repository.history-snapshot-drained-keys.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/sys-metadata-repository.history-snapshot-drained-keys.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/metadata-protocol/src/sys-metadata-repository.package-writability.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -2743,6 +2773,21 @@
     },
     {
       "file": "packages/metadata-protocol/src/sys-metadata-repository.recorded-by.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/sys-metadata-repository.restore-and-publish-drained-keys.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/sys-metadata-repository.restore-and-publish-drained-keys.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/sys-metadata-repository.restore-and-publish-drained-keys.test.ts",
       "verb": "update",
       "pinned": 1
     },
@@ -3053,6 +3098,21 @@
     },
     {
       "file": "packages/objectql/src/protocol-registry-shadow.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/objectql/src/protocol-restore-publish-drained-connector-keys.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/objectql/src/protocol-restore-publish-drained-connector-keys.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/objectql/src/protocol-restore-publish-drained-connector-keys.test.ts",
       "verb": "update",
       "pinned": 1
     },

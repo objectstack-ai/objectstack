@@ -61,8 +61,9 @@
  *      version against this build, printed; nothing is installed. A runtime
  *      that refuses it, or does not serve install-local, stops the deploy here
  *      with its sentence and exit 1;
- *   3. the install, with `--confirm-access-upgrade` passed through; the door's
- *      refusals (an access upgrade to confirm, …) stop the deploy with exit 1;
+ *   3. the install, with `--confirm-access-upgrade` and `--confirm-upgrade`
+ *      passed through; the door's refusals (an access upgrade or a schema
+ *      upgrade to confirm, …) stop the deploy with exit 1;
  *   4. the answer — install-local registers the package in the live kernel
  *      before it answers, so the answer IS "live": `hotLoaded` ⇒ 0; a package
  *      the running kernel could not load ⇒ 1, naming the restart it waits for.
@@ -102,6 +103,7 @@ export default class Deploy extends Command {
     '$ os deploy --env env_abc123    # your account reaches several environments',
     '$ os deploy --no-wait           # return once the install is recorded',
     '$ os deploy --confirm-access-upgrade <finding-set>   # self-hosted: confirm the findings the runtime printed',
+    '$ os deploy --confirm-upgrade <finding-set>          # self-hosted: confirm the schema findings the runtime printed',
   ];
 
   static override flags = {
@@ -140,6 +142,16 @@ export default class Deploy extends Command {
         'Self-hosted runtime target: confirm the access findings of this upgrade with the finding-set token the '
         + "runtime's refusal printed (as `os package install --confirm-access-upgrade`)",
     }),
+    // [epic cloud#3652 Q3, #30884] The schema findings' confirmation, passed
+    // through to the install as `--confirm-access-upgrade` is: the embedded
+    // install's refusal prints `os deploy --confirm-upgrade <token>` as its
+    // retry, so this command must take it.
+    'confirm-upgrade': Flags.string({
+      description:
+        'Self-hosted runtime target: confirm the schema findings of this upgrade (a suspected rename, a type change '
+        + "that is not safe) with the finding-set token the runtime's refusal printed (as `os package install "
+        + '--confirm-upgrade`)',
+    }),
   };
 
   async run(): Promise<void> {
@@ -151,12 +163,13 @@ export default class Deploy extends Command {
       // cloud environment was named.
       const runtime = flags.env ? undefined : await activeRuntimeTarget();
       if (runtime) {
-        await this.deployToRuntime(runtime, flags['confirm-access-upgrade']);
+        await this.deployToRuntime(runtime, flags['confirm-access-upgrade'], flags['confirm-upgrade']);
         return;
       }
-      if (flags['confirm-access-upgrade'] !== undefined) {
+      for (const flag of ['confirm-access-upgrade', 'confirm-upgrade'] as const) {
+        if (flags[flag] === undefined) continue;
         printError(
-          '`--confirm-access-upgrade` confirms a self-hosted runtime\'s refusal; the deploy target is ObjectOS Cloud. '
+          `\`--${flag}\` confirms a self-hosted runtime's refusal; the deploy target is ObjectOS Cloud. `
           + 'Drop the flag, or record the runtime with `os environments use-runtime <url> --token <key>`.',
         );
         this.exit(1);
@@ -285,7 +298,11 @@ export default class Deploy extends Command {
    * The self-hosted half (the header's "A self-hosted runtime target"):
    * build → dry run (plan printed) → install → the `hotLoaded` answer.
    */
-  private async deployToRuntime(runtime: RuntimeTarget, confirmAccessUpgrade: string | undefined): Promise<void> {
+  private async deployToRuntime(
+    runtime: RuntimeTarget,
+    confirmAccessUpgrade: string | undefined,
+    confirmUpgrade: string | undefined,
+  ): Promise<void> {
     printStep(`Deploying to the self-hosted runtime ${runtime.url} (os environments use-runtime)`);
 
     printStep('Building...');
@@ -317,7 +334,10 @@ export default class Deploy extends Command {
     }
 
     printStep(`Installing ${plan.manifestId} ${plan.version} into ${runtime.url}...`);
-    const outcome = await install(confirmAccessUpgrade !== undefined ? ['--confirm-access-upgrade', confirmAccessUpgrade] : []);
+    const outcome = await install([
+      ...(confirmAccessUpgrade !== undefined ? ['--confirm-access-upgrade', confirmAccessUpgrade] : []),
+      ...(confirmUpgrade !== undefined ? ['--confirm-upgrade', confirmUpgrade] : []),
+    ]);
     if (outcome?.kind !== 'installed') {
       printError(`${runtime.url} did not answer the install as a managed package install, so this cannot say ${plan.manifestId} is live (see above).`);
       this.exit(1);

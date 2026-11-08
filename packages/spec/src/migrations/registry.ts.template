@@ -1327,8 +1327,10 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'master from it, and a detail row that names no master is read by its owner and by View All on the '
       + 'detail, never through a master, while a row that names one is read through it as before. The builder '
       + 'keeps an explicit `required: false` as written and still forces an omitted one to `true`, and the '
-      + 'stored-row listing stops naming the shape. Writes are unchanged: an empty master reference is still '
-      + 'refused with 422. Its D3 record is the semantic entry `cbp-optional-master-admitted`.',
+      + 'stored-row listing stops naming the shape. A detail row that names no master is written by its '
+      + 'owner and by Modify All on the detail, and refused with 403 for everyone else; only an empty '
+      + 'required master reference is still refused with 422. Its D3 record is the semantic entry '
+      + '`cbp-optional-master-admitted`.',
   },
   {
     id: 'chart-config-aria-retired',
@@ -2375,6 +2377,18 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'catalog, and visibility is the `--visibility` flag. Each key is a retiredKey tombstone with no D2 '
       + 'conversion, because this file is not a stack collection member; the D3 record is the semantic entry '
       + '`marketplace-template-manifest-inert-keys-retired`.',
+  },
+  {
+    id: 'marketplace-template-manifest-platform-decided-keys-retired',
+    order: 121,
+    text:
+      'It retires the file\'s last two keys that configured nothing, `publisher` and `isStarter`: both '
+      + 'are claims only the platform can make — `publisher` is the trust tier that gates listing '
+      + 'privileges, assigned from the publisher\'s credentials, and the starter flag is honoured only on '
+      + 'a first-party seed — so `os package publish` never sent either, and a trust claim does not belong '
+      + 'in an author-editable file. Both are retiredKey tombstones with no D2 conversion, because this file '
+      + 'is not a stack collection member; the D3 record is the semantic entry '
+      + '`marketplace-template-manifest-platform-decided-keys-retired`.',
   },
   {
     id: 'memory-persistence-placeholder-refused',

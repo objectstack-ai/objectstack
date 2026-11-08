@@ -119,6 +119,7 @@ const DISPLAY: Array<{ name: string; label: string }> = [
   { name: 'objectstack-i18n', label: 'i18n' },
   { name: 'objectstack-formula', label: 'Formula' },
   { name: 'objectstack-upgrade', label: 'Upgrade' },
+  { name: 'objectui', label: 'ObjectUI' },
 ];
 
 // ── Frontmatter parser ───────────────────────────────────────────────────────
@@ -152,7 +153,12 @@ function parseFrontmatter(name: string, label: string): Skill {
   let tags: string[] = [];
 
   for (let i = 0; i < lines.length; i++) {
-    if (/^description:\s*>/.test(lines[i])) {
+    // A plain one-line scalar (`description: text…`) is the other shape a
+    // catalog entry uses (objectui's); the folded `>` block is read below.
+    const plain = lines[i].match(/^description:\s*([^>\s].*)$/);
+    if (plain) {
+      description = plain[1].replace(/\s+/g, ' ').trim();
+    } else if (/^description:\s*>/.test(lines[i])) {
       const buf: string[] = [];
       i++;
       while (i < lines.length && /^\s+\S/.test(lines[i])) {
@@ -178,8 +184,9 @@ function parseFrontmatter(name: string, label: string): Skill {
 
   // Split the description into summary / use-when / do-not-use, keeping each
   // clause verbatim (no paraphrasing — the frontmatter is the source).
-  const useIdx = description.search(/\bUse when\b/);
-  const notIdx = description.search(/\bDo not use\b/);
+  // objectui spells the clauses "Use for" / "Do NOT use"; the first match wins.
+  const useIdx = description.search(/\bUse (?:when|for)\b/);
+  const notIdx = description.search(/\bDo not use\b/i);
   const summary = (useIdx >= 0 ? description.slice(0, useIdx) : description).trim();
   const useWhen =
     useIdx >= 0 ? description.slice(useIdx, notIdx >= 0 ? notIdx : undefined).trim() : '';
@@ -274,6 +281,15 @@ function spliceBlock(file: string, block: string, style: CommentStyle): string {
   return content.slice(0, b) + block + content.slice(e + end.length);
 }
 
+/**
+ * The `metadata.internal` predicate `template-consistency.test.ts` applies to a
+ * SKILL.md frontmatter, spelled the same way so the two cannot disagree.
+ */
+function isMarkedInternal(raw: string): boolean {
+  const fm = /^---\n([\s\S]*?)\n---/.exec(raw)?.[1] ?? '';
+  return /^metadata:\s*$/m.test(fm) && /^ +internal:\s*true\s*(#.*)?$/m.test(fm);
+}
+
 // ── Main ─────────────────────────────────────────────────────────────────────
 
 function main() {
@@ -281,10 +297,16 @@ function main() {
 
   assertWatchHintsDeclareTheReadSurface();
 
-  // Catalog ⇄ DISPLAY must be in lockstep.
+  // Catalog ⇄ DISPLAY must be in lockstep. A catalog entry is every child that
+  // carries a SKILL.md and is not `metadata.internal` — the boundary
+  // `template-consistency.test.ts` (create-objectstack) holds the published
+  // tree to — not a name prefix, which left `objectui` out of the index.
   const onDisk = fs
     .readdirSync(SKILLS_DIR)
-    .filter((d) => d.startsWith('objectstack-') && fs.existsSync(path.resolve(SKILLS_DIR, d, ENTRYPOINT_FILE)));
+    .filter((d) => {
+      const entry = path.resolve(SKILLS_DIR, d, ENTRYPOINT_FILE);
+      return fs.existsSync(entry) && !isMarkedInternal(fs.readFileSync(entry, 'utf-8'));
+    });
   const configured = new Set(DISPLAY.map((d) => d.name));
   const missing = onDisk.filter((d) => !configured.has(d));
   const extra = DISPLAY.filter((d) => !onDisk.includes(d.name)).map((d) => d.name);

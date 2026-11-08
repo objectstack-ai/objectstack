@@ -2040,6 +2040,12 @@ const zh = {
         done: '已有同事加入或已发出邀请。',
         action: '邀请',
       },
+      connectAssistant: {
+        title: '连接 AI 助手',
+        todo: '在 Claude、豆包等助手里以你自己的身份使用本系统。',
+        done: '你已连接了 AI 助手或 API 密钥。',
+        action: '连接',
+      },
     },
     error: {
       connectionFailed: '无法连接到服务器',
@@ -3351,6 +3357,12 @@ const zh = {
       cta: '设置密码',
       dismiss: '关闭',
     },
+    connectAssistant: {
+      title: '在 AI 助手里使用本系统',
+      body: '你可以在 Claude、豆包等 AI 助手里查询和修改你的记录。助手始终以你的身份、按你的权限操作。',
+      action: '连接 AI 助手',
+      dismiss: '隐藏',
+    },
     pendingDrafts: {
       // objectui#12602 — the drafts row in Home's "My work" section: the
       // count, then the first draft names joined by `nameSeparator`, in
@@ -4009,6 +4021,12 @@ const zh = {
       example2: '统计这些对象各有多少条记录。',
       example3: '我在这里能运行哪些操作？每个操作是做什么的？',
       tryFirst: '先试第一条：如果助手回答出你平时用的对象，就说明连接成功了。',
+      connected: '已连接：{{name}}。',
+      connectedKey: '已用 API 密钥“{{name}}”连接。',
+      lastCallHour: '最近一次调用在 {{time}} 起的那一小时内。',
+      lastCallAt: '最近一次调用在 {{time}}。',
+      noCallYet: '还没有调用：先在助手里试上面第一条请求，确认连接成功。',
+      moreConnected: '其他能以你的身份操作的助手和密钥，都列在本页底部。',
     },
     disabled: {
       title: '此部署已关闭 AI 助手连接',

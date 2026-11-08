@@ -45,10 +45,11 @@
  * `plugin.record-resource-exposure.test.ts`.
  */
 
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { recordNotFoundError } from '@objectstack/core';
+import { mapDataError } from '@objectstack/types';
 import type { IMetadataService } from '@objectstack/spec/contracts';
 
 import { MCPServerRuntime } from './mcp-server-runtime.js';
@@ -84,6 +85,11 @@ interface Site {
    * change. The `details` pin below covers every other row.
    */
   actionDoor?: true;
+  /**
+   * [#31218] A record data tool: a code-less throw renders the `/data` door's
+   * answer (`dataDoorErrorResult`), not its bare message.
+   */
+  dataDoor?: true;
 }
 
 /** Every tool `wireBridgeTools` registers for {@link benignBridge}, each with the member it calls first. */
@@ -91,17 +97,23 @@ const SITES: readonly Site[] = [
   { tool: 'list_objects', args: {}, member: 'listObjects' },
   { tool: 'describe_object', args: { objectName: 'task' }, member: 'describeObject' },
   { tool: 'validate_expression', args: { objectName: 'task', expression: 'record.title' }, member: 'describeObject' },
-  { tool: 'query_records', args: { objectName: 'task' }, member: 'query' },
+  { tool: 'query_records', args: { objectName: 'task' }, member: 'query', dataDoor: true },
   {
     tool: 'aggregate_records',
     args: { objectName: 'task', aggregations: [{ function: 'count', alias: 'n' }] },
     member: 'aggregate',
+    dataDoor: true,
   },
-  { tool: 'get_record', args: { objectName: 'task', recordId: 't9' }, member: 'get' },
-  { tool: 'create_record', args: { objectName: 'task', data: { title: 'x' } }, member: 'create' },
-  { tool: 'update_record', args: { objectName: 'task', recordId: 't9', data: { title: 'x' } }, member: 'update' },
+  { tool: 'get_record', args: { objectName: 'task', recordId: 't9' }, member: 'get', dataDoor: true },
+  { tool: 'create_record', args: { objectName: 'task', data: { title: 'x' } }, member: 'create', dataDoor: true },
+  {
+    tool: 'update_record',
+    args: { objectName: 'task', recordId: 't9', data: { title: 'x' } },
+    member: 'update',
+    dataDoor: true,
+  },
   // `confirm: true` passes the confirmation gate, so the call reaches `remove`.
-  { tool: 'delete_record', args: { objectName: 'task', recordId: 't9', confirm: true }, member: 'remove' },
+  { tool: 'delete_record', args: { objectName: 'task', recordId: 't9', confirm: true }, member: 'remove', dataDoor: true },
   // [#30891] The selection read is the member a bulk delete calls first; a
   // refusal there refuses the whole call, rendered as the data tools render it.
   { tool: 'delete_records', args: { objectName: 'task', where: {}, confirm: true }, member: 'query' },
@@ -178,10 +190,23 @@ describe('MCP tools over HTTP /mcp: a coded refusal carries its code (#23509)', 
       });
     });
 
-    it(`${site.tool}: a code-less throw from ${String(site.member)} answers its bare message, as before`, async () => {
-      const result = await callTool(site, new Error('engine exploded'));
-      expect(result).toEqual({ content: [{ type: 'text', text: 'engine exploded' }], isError: true });
-    });
+    if (site.dataDoor) {
+      // [#31218] The record data tools answer the `/data` door's classification
+      // of a code-less throw; that door answers this one `500 INTERNAL_ERROR`
+      // and withholds its message. The cases live in the #31218 block below.
+      it(`${site.tool}: a code-less throw from ${String(site.member)} answers the /data door's 500, its message withheld`, async () => {
+        const result = await callTool(site, new Error('engine exploded'));
+        expect(result.isError).toBe(true);
+        expect(JSON.parse(result.content[0].text)).toEqual({
+          error: { code: 'INTERNAL_ERROR', message: 'Internal server error', status: 500 },
+        });
+      });
+    } else {
+      it(`${site.tool}: a code-less throw from ${String(site.member)} answers its bare message, as before`, async () => {
+        const result = await callTool(site, new Error('engine exploded'));
+        expect(result).toEqual({ content: [{ type: 'text', text: 'engine exploded' }], isError: true });
+      });
+    }
 
     if (!site.actionDoor) {
       it(`${site.tool}: a PERMISSION_DENIED answers code, message and status, and WITHHOLDS its details`, async () => {
@@ -201,6 +226,9 @@ describe('MCP tools over HTTP /mcp: a coded refusal carries its code (#23509)', 
 
   // One site is enough below: every catch renders through the one reader.
   const query = SITES.find((s) => s.tool === 'query_records')!;
+  // [#31218] …for the code-less throws, one site that is not a record data
+  // tool: those classify a code-less throw as the `/data` door does.
+  const listActions = SITES.find((s) => s.tool === 'list_actions')!;
 
   // [#23528] Moved to the coded rendering. This row pinned the gate's old
   // `{ statusCode: 404, message }` as its bare message. The gate now throws
@@ -242,7 +270,7 @@ describe('MCP tools over HTTP /mcp: a coded refusal carries its code (#23509)', 
       'a thrown string',
     ]) {
       const text = thrown instanceof Error ? thrown.message : String(thrown);
-      expect(await callTool(query, thrown), text).toEqual({ content: [{ type: 'text', text }], isError: true });
+      expect(await callTool(listActions, thrown), text).toEqual({ content: [{ type: 'text', text }], isError: true });
     }
   });
 
@@ -251,6 +279,213 @@ describe('MCP tools over HTTP /mcp: a coded refusal carries its code (#23509)', 
     expect(JSON.parse((await callTool(query, statusless)).content[0].text)).toEqual({
       error: { code: 'PERMISSION_DENIED', message: 'no status here' },
     });
+  });
+});
+
+/**
+ * [#31218] The record data tools classify a CODE-LESS throw as the
+ * `/api/v1/data` door does: through that door's own `mapDataError`
+ * (`@objectstack/types`), so the two doors give one answer for one throw.
+ *
+ * Each case asserts the literal wire answer AND that it equals the door's
+ * (`mapDataError` on the same throw), so the pin cannot pass by both sides
+ * agreeing on something nobody wrote down, nor by the door moving alone.
+ */
+describe('the record data tools: a code-less throw answers what the /data door answers (#31218)', () => {
+  const DATA_SITES = SITES.filter((s) => s.dataDoor);
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  /** The shape `runtime/src/sandbox/quickjs-runner.ts` throws for a hook body's own `throw`, as measured on the card. */
+  function sandboxAbort(inner: string, extra: Record<string, unknown> = {}): Error {
+    const err = new Error(`hook 'demoleave_leave_request_guard' threw: Error: ${inner}`);
+    err.name = 'SandboxError';
+    return Object.assign(err, { innerMessage: inner }, extra);
+  }
+
+  /** The tool's answer, parsed, after asserting it is a tool error. */
+  async function errorOf(site: Site, thrown: unknown): Promise<{ text: string; error: Record<string, unknown> }> {
+    const result = await callTool(site, thrown);
+    expect(result.isError).toBe(true);
+    expect(result.content).toHaveLength(1);
+    const text = String(result.content[0].text);
+    return { text, error: JSON.parse(text).error };
+  }
+
+  /** The `/data` door's answer to the same throw, in the tool's envelope spelling. */
+  function doorAnswer(thrown: unknown): Record<string, unknown> {
+    const door = mapDataError(thrown, 'task');
+    return {
+      ...(typeof door.body.code === 'string' ? { code: door.body.code } : {}),
+      message: door.body.error,
+      status: door.status,
+    };
+  }
+
+  it('the six record data tools are the rows this block drives', () => {
+    expect(DATA_SITES.map((s) => s.tool).sort()).toEqual(
+      ['aggregate_records', 'create_record', 'delete_record', 'get_record', 'query_records', 'update_record'],
+    );
+  });
+
+  for (const site of DATA_SITES) {
+    it(`${site.tool}: an undeclared sandboxed hook abort answers HOOK_ABORTED with the inner sentence, no wrapper, no hook name`, async () => {
+      const thrown = sandboxAbort('Not enough annual leave remaining');
+      const { text, error } = await errorOf(site, thrown);
+      expect(error).toEqual({ code: 'HOOK_ABORTED', message: 'Not enough annual leave remaining', status: 400 });
+      expect(error).toEqual(doorAnswer(thrown));
+      expect(text).not.toContain('demoleave_leave_request_guard');
+      expect(text).not.toContain('threw');
+    });
+  }
+
+  const update = DATA_SITES.find((s) => s.tool === 'update_record')!;
+
+  it('an abort whose SandboxError instance was lost (the wrapper text alone) answers HOOK_ABORTED too, as the door does', async () => {
+    const thrown = new Error("hook 'demoleave_leave_request_guard' threw: Error: Not enough annual leave remaining");
+    const { text, error } = await errorOf(update, thrown);
+    expect(error).toEqual({ code: 'HOOK_ABORTED', message: 'Not enough annual leave remaining', status: 400 });
+    expect(error).toEqual(doorAnswer(thrown));
+    expect(text).not.toContain('demoleave_leave_request_guard');
+  });
+
+  it('an abort that declared a 4xx status and no code keeps that status, with HOOK_ABORTED', async () => {
+    const thrown = sandboxAbort('Closed.', { status: 422 });
+    const { error } = await errorOf(update, thrown);
+    expect(error).toEqual({ code: 'HOOK_ABORTED', message: 'Closed.', status: 422 });
+    expect(error).toEqual(doorAnswer(thrown));
+  });
+
+  it('a 4xx refusal is not logged as a server fault', async () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    await errorOf(update, sandboxAbort('Not enough annual leave remaining'));
+    expect(log).not.toHaveBeenCalled();
+  });
+
+  it("a code hook's bare throw answers 500 INTERNAL_ERROR, its message withheld from the agent and logged once for the operator", async () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const thrown = new Error('Not enough annual leave remaining (code hook)');
+    const { text, error } = await errorOf(update, thrown);
+    expect(error).toEqual({ code: 'INTERNAL_ERROR', message: 'Internal server error', status: 500 });
+    expect(error).toEqual(doorAnswer(thrown));
+    expect(text).not.toContain('code hook');
+    expect(log).toHaveBeenCalledTimes(1);
+    const line = String(log.mock.calls[0]![0]);
+    expect(line).toMatch(/^\[5xx\] 500 tools\/call update_record task — /);
+    expect(line).toContain('Not enough annual leave remaining (code hook)');
+  });
+
+  it('a sandboxed body that CRASHED is a fault, not an abort: 500 INTERNAL_ERROR, no wrapper', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const thrown = sandboxAbort('TypeError: not a function');
+    const { text, error } = await errorOf(update, thrown);
+    expect(error).toEqual({ code: 'INTERNAL_ERROR', message: 'Internal server error', status: 500 });
+    expect(error).toEqual(doorAnswer(thrown));
+    expect(text).not.toContain('demoleave_leave_request_guard');
+  });
+
+  it("the runtime's `{ statusCode: 503, message }` (no data service) answers 503 with no code and its prose withheld", async () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const thrown = { statusCode: 503, message: 'Data service not available' };
+    const { text, error } = await errorOf(update, thrown);
+    expect(error).toEqual({ message: 'Internal server error', status: 503 });
+    expect(error).toEqual(doorAnswer(thrown));
+    expect(text).not.toContain('Data service not available');
+    expect(log).toHaveBeenCalledTimes(1);
+  });
+
+  it('a throw that declared a 4xx and no code answers that status and its own sentence, with no code invented', async () => {
+    const thrown = { statusCode: 400, message: 'aggregate requires at least one aggregation' };
+    const { error } = await errorOf(update, thrown);
+    expect(error).toEqual({ message: 'aggregate requires at least one aggregation', status: 400 });
+    expect(error).toEqual(doorAnswer(thrown));
+  });
+
+  it('CONTROL: a coded refusal renders exactly as the coded reader renders it, whatever the door would say', async () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    for (const site of DATA_SITES) {
+      const thrown = Object.assign(new Error('Record is locked'), { code: 'RECORD_LOCKED', status: 409 });
+      const { error } = await errorOf(site, thrown);
+      expect(error, site.tool).toEqual({ code: 'RECORD_LOCKED', message: 'Record is locked', status: 409 });
+    }
+    expect(log).not.toHaveBeenCalled();
+  });
+
+  it('CONTROL: the tools that are not record data tools still answer a code-less throw with its bare message', async () => {
+    for (const site of SITES.filter((s) => !s.dataDoor)) {
+      const result = await callTool(site, sandboxAbort('Not enough annual leave remaining'));
+      expect(result, site.tool).toEqual({
+        content: [{ type: 'text', text: "hook 'demoleave_leave_request_guard' threw: Error: Not enough annual leave remaining" }],
+        isError: true,
+      });
+    }
+  });
+});
+
+/**
+ * [#31246] A CODED sandboxed refusal. A QuickJS hook (or action) body that runs
+ * `throw Object.assign(new Error(SENTENCE), { code: 'RECORD_LOCKED', status: 409 })`
+ * leaves the runner as this `SandboxError` (measured on the real
+ * `QuickJSScriptRunner`): `.message` is the `hook '<name>' threw: Error: …`
+ * debug wrapper, `.innerMessage` the sentence the author addressed to the
+ * caller, `code` and `status` as declared.
+ */
+const SANDBOX_SENTENCE = 'A finished invoice cannot be changed.';
+const SANDBOX_WRAPPER = `hook 'demo_invoice_guard' threw: Error: ${SANDBOX_SENTENCE}`;
+function codedSandboxRefusal(): Error {
+  return Object.assign(new Error(SANDBOX_WRAPPER), {
+    name: 'SandboxError',
+    innerMessage: SANDBOX_SENTENCE,
+    code: 'RECORD_LOCKED',
+    status: 409,
+  });
+}
+
+/**
+ * [#31246] Every tool renders a coded sandboxed refusal as the body's own
+ * sentence beside its code and status. `thrownRefusalEnvelope` read `.message`,
+ * so each answered the wrapper, the hook's internal name included, where
+ * `/api/v1/data` answers the inner sentence. It now reads the sentence through
+ * `sandboxBusinessMessage` (`@objectstack/types`), the read that door makes.
+ */
+describe('every tool: a coded sandboxed refusal answers the body\'s sentence, never the wrapper naming the hook (#31246)', () => {
+  for (const site of SITES) {
+    it(`${site.tool}: RECORD_LOCKED, the inner sentence and 409; the hook name is absent`, async () => {
+      const thrown = codedSandboxRefusal();
+      const result = await callTool(site, thrown);
+      expect(result.isError).toBe(true);
+      expect(result.content).toHaveLength(1);
+      expect(JSON.parse(result.content[0].text)).toEqual({
+        error: { code: 'RECORD_LOCKED', message: SANDBOX_SENTENCE, status: 409 },
+      });
+      // The answer the data door gives the same throw.
+      const door = mapDataError(thrown, 'task');
+      expect([door.body.code, door.body.error, door.status]).toEqual(['RECORD_LOCKED', SANDBOX_SENTENCE, 409]);
+      expect(result.content[0].text).not.toContain('demo_invoice_guard');
+      expect(result.content[0].text).not.toContain('threw');
+    });
+  }
+
+  // CONTROL: a READ of the field the sandbox populated, never a strip of the
+  // wrapper's prose. A coded refusal that is not a sandbox's renders byte for
+  // byte as before, even when its own sentence reads like the wrapper.
+  it('CONTROL: a coded non-sandbox refusal renders its own message byte for byte, wrapper-like prose included', async () => {
+    const query = SITES.find((s) => s.tool === 'query_records')!;
+    for (const thrown of [
+      Object.assign(new Error('The period is closed.'), { code: 'RECORD_LOCKED', status: 409 }),
+      Object.assign(new Error(SANDBOX_WRAPPER), { code: 'RECORD_LOCKED', status: 409 }),
+      Object.assign(new Error(SANDBOX_WRAPPER), { name: 'SandboxError', innerMessage: '', code: 'RECORD_LOCKED', status: 409 }),
+    ]) {
+      expect(await callTool(query, thrown), thrown.message).toEqual({
+        content: [{
+          type: 'text',
+          text: JSON.stringify({ error: { code: 'RECORD_LOCKED', message: thrown.message, status: 409 } }, null, 2),
+        }],
+        isError: true,
+      });
+    }
   });
 });
 
@@ -306,11 +541,171 @@ describe('the record resource: a coded refusal adds its code beside the unchange
     });
   });
 
-  it('a code-less throw answers `{ error }` byte-identically', async () => {
-    expect(await readRefused(new Error('engine exploded'))).toBe(JSON.stringify({ error: 'engine exploded' }));
-    expect(await readRefused('a thrown string')).toBe(JSON.stringify({ error: 'a thrown string' }));
-    expect(await readRefused(Object.assign(new Error('empty code'), { code: '' }))).toBe(
-      JSON.stringify({ error: 'empty code' }),
+  it('[#31246] a coded sandboxed refusal: `error` is the inner sentence, beside its code and status', async () => {
+    const text = await readRefused(codedSandboxRefusal());
+    expect(JSON.parse(text)).toEqual({ error: SANDBOX_SENTENCE, code: 'RECORD_LOCKED', status: 409 });
+    expect(text).not.toContain('demo_invoice_guard');
+  });
+
+  it('[#31246] CONTROL: a coded non-sandbox refusal keeps its own sentence, wrapper-like prose included', async () => {
+    expect(await readRefused(Object.assign(new Error(SANDBOX_WRAPPER), { code: 'RECORD_LOCKED', status: 409 }))).toBe(
+      JSON.stringify({ error: SANDBOX_WRAPPER, code: 'RECORD_LOCKED', status: 409 }),
     );
+  });
+
+  it('[#31269] a coded sandboxed CRASH answers what the same crash with no code answers; its code and status are not served', async () => {
+    const crash = (extra: Record<string, unknown> = {}) => Object.assign(
+      new Error("hook 'demo_crash_guard' threw: TypeError: boom"),
+      { name: 'SandboxError', innerMessage: 'TypeError: boom' },
+      extra,
+    );
+    const coded = await readRefused(crash({ code: 'RECORD_LOCKED', status: 409 }));
+    expect(coded).toBe(await readRefused(crash()));
+    expect(coded).not.toContain('RECORD_LOCKED');
+  });
+
+  /**
+   * [#31270] A code-less throw answers what the record data tools answer since
+   * #31218: the `/api/v1/data` door's answer (`mapDataError`, the GET by-id
+   * door), in this resource's `{ error, code, status }` members. It used to
+   * answer `{ error }` with the thrown message, so a sandboxed hook's abort
+   * reached the client as the runner's wrapper naming the hook and a fault's
+   * own text reached it verbatim.
+   */
+  describe('a code-less throw answers the /data door\'s answer (#31270)', () => {
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    /** The `SandboxError` the QuickJS runner raises for a hook body's throw (measured on the real runner). */
+    const sandboxed = (inner: string, extra: Record<string, unknown> = {}) => Object.assign(
+      new Error(`hook 'demo_resource_guard' threw: ${inner}`),
+      { name: 'SandboxError', innerMessage: inner.replace(/^Error: /, '') },
+      extra,
+    );
+
+    /** The door's answer to `thrown`, in this resource's member order. */
+    function doorBody(thrown: unknown): Record<string, unknown> {
+      const door = mapDataError(thrown, 'task');
+      return {
+        error: door.body.error,
+        ...(typeof door.body.code === 'string' ? { code: door.body.code } : {}),
+        status: door.status,
+      };
+    }
+
+    it('an undeclared sandboxed hook abort: HOOK_ABORTED, the inner sentence, 400; no hook name', async () => {
+      const thrown = sandboxed('Error: Not enough leave');
+      const text = await readRefused(thrown);
+      expect(JSON.parse(text)).toEqual({ error: 'Not enough leave', code: 'HOOK_ABORTED', status: 400 });
+      expect(JSON.parse(text)).toEqual(doorBody(thrown));
+      expect(text).not.toContain('demo_resource_guard');
+      expect(text).not.toContain('threw');
+    });
+
+    it('a bare Error: the sanitised 500, its message withheld and logged once for the operator', async () => {
+      const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const thrown = new Error('socket hang up');
+      const text = await readRefused(thrown);
+      expect(text).toBe(JSON.stringify({ error: 'Internal server error', code: 'INTERNAL_ERROR', status: 500 }));
+      expect(JSON.parse(text)).toEqual(doorBody(thrown));
+      expect(log).toHaveBeenCalledTimes(1);
+      const line = String(log.mock.calls[0]![0]);
+      expect(line).toMatch(/^\[5xx\] 500 resources\/read objectstack:\/\/objects\/task\/records\/t1 — /);
+      expect(line).toContain('socket hang up');
+    });
+
+    it('a sandboxed body that CRASHED, with or without a declared code: the sanitised 500, no hook name, no native text', async () => {
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+      for (const thrown of [sandboxed('TypeError: boom'), sandboxed('TypeError: boom', { code: 'RECORD_LOCKED', status: 409 })]) {
+        const text = await readRefused(thrown);
+        expect(text, thrown.message).toBe(JSON.stringify({ error: 'Internal server error', code: 'INTERNAL_ERROR', status: 500 }));
+        expect(text).not.toContain('demo_resource_guard');
+        expect(text).not.toContain('TypeError');
+      }
+    });
+
+    it('a thrown string and an empty `code` are no code: the door\'s answer', async () => {
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+      for (const thrown of ['a thrown string', Object.assign(new Error('empty code'), { code: '' })]) {
+        expect(JSON.parse(await readRefused(thrown)), String(thrown)).toEqual(doorBody(thrown));
+      }
+    });
+
+    it('CONTROL: a coded sandboxed refusal keeps the #31246 answer, and a coded non-sandbox refusal its own; neither is logged', async () => {
+      const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+      expect(JSON.parse(await readRefused(sandboxed('Error: Locked.', { code: 'RECORD_LOCKED', status: 409 })))).toEqual(
+        { error: 'Locked.', code: 'RECORD_LOCKED', status: 409 },
+      );
+      expect(await readRefused(Object.assign(new Error('The period is closed.'), { code: 'RECORD_LOCKED', status: 409 }))).toBe(
+        JSON.stringify({ error: 'The period is closed.', code: 'RECORD_LOCKED', status: 409 }),
+      );
+      expect(log).not.toHaveBeenCalled();
+    });
+  });
+});
+
+/**
+ * [#31269] A sandboxed body that CRASHED while declaring a code (a hook body's
+ * `throw Object.assign(new TypeError('boom'), { code: 'RECORD_LOCKED', status: 409 })`)
+ * is a fault, not a refusal. The doors classify it first (`isSandboxCrash`,
+ * `@objectstack/types`) and answer `500 INTERNAL_ERROR`; MCP's coded path read
+ * the declared code and status and the runner's wrapper, so an agent saw the
+ * hook's name and the native error text at a business status.
+ *
+ * `thrownRefusalEnvelope` now asks that same predicate, so a coded crash is no
+ * coded refusal and each face renders it as it renders the same crash with no
+ * code: the record data tools answer the `/data` door's fault, every other
+ * face its own uncoded rendering (those faces' code-less renderings are
+ * #31270–#31272's, and this card does not touch them).
+ */
+describe('a coded sandboxed CRASH is a fault on every face, never a refusal at its declared status (#31269)', () => {
+  const CRASH_TEXT = "hook 'demo_crash_guard' threw: TypeError: boom";
+
+  /** The `SandboxError` the QuickJS runner raises for the crash above (measured on the real runner). */
+  function crash(extra: Record<string, unknown> = {}): Error {
+    return Object.assign(new Error(CRASH_TEXT), { name: 'SandboxError', innerMessage: 'TypeError: boom' }, extra);
+  }
+  const codedCrash = () => crash({ code: 'RECORD_LOCKED', status: 409 });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  for (const site of SITES.filter((s) => s.dataDoor)) {
+    it(`${site.tool}: 500 INTERNAL_ERROR, the /data door's answer, logged once; no hook name, no native text`, async () => {
+      const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const thrown = codedCrash();
+      const result = await callTool(site, thrown);
+      expect(result.isError).toBe(true);
+      const error = JSON.parse(result.content[0].text).error;
+      expect(error).toEqual({ code: 'INTERNAL_ERROR', message: 'Internal server error', status: 500 });
+      const door = mapDataError(thrown, 'task');
+      expect(error).toEqual({ code: door.body.code, message: door.body.error, status: door.status });
+      expect(result.content[0].text).not.toContain('demo_crash_guard');
+      expect(result.content[0].text).not.toContain('TypeError');
+      expect(log).toHaveBeenCalledTimes(1);
+      expect(String(log.mock.calls[0]![0])).toMatch(new RegExp(`^\\[5xx\\] 500 tools/call ${site.tool} task — `));
+    });
+  }
+
+  for (const site of SITES.filter((s) => !s.dataDoor)) {
+    it(`${site.tool}: answers what it answers for the same crash with no code; its declared code and status are not served`, async () => {
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+      const coded = await callTool(site, codedCrash());
+      expect(coded).toEqual(await callTool(site, crash()));
+      expect(coded.content[0].text).not.toContain('RECORD_LOCKED');
+      expect(coded.content[0].text).not.toContain('409');
+    });
+  }
+
+  // CONTROL: a coded sandboxed REFUSAL keeps the #31246 answer on every face.
+  it('CONTROL: a coded sandboxed refusal keeps its code, inner sentence and status', async () => {
+    const refusal = crash({ innerMessage: 'Locked.', code: 'RECORD_LOCKED', status: 409 });
+    for (const site of SITES) {
+      expect(JSON.parse((await callTool(site, refusal)).content[0].text), site.tool).toEqual({
+        error: { code: 'RECORD_LOCKED', message: 'Locked.', status: 409 },
+      });
+    }
   });
 });

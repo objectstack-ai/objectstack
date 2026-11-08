@@ -1,6 +1,7 @@
 # @objectstack/scenarios
 
-Private, unpublished. The schema (zod) and loader for the open scenario library under
+Published, with a command line: `npx @objectstack/scenarios run` (below, "Running from npm").
+The schema (zod) and loader for the open scenario library under
 [`docs/qa/scenarios/`](../../../docs/qa/scenarios/README.md) — that README is the format's
 reference.
 
@@ -27,10 +28,11 @@ The private overlay's owner migrates its cards to each new card shape (today: `o
 - `src/score/` — the deterministic scorer, entries `@objectstack/scenarios/score` and
   `@objectstack/scenarios/score/full` (below).
 
-Not published. `pnpm --filter @objectstack/scenarios build` (tsup) writes `dist/` as ESM, CJS and
-`.d.ts`, and every `exports` subpath points there, so a consumer that links the framework tree
-and bundles its own entry can load the scorer under plain Node. The suites and `run-scenarios`
-read `src/` directly. Nothing here calls a model or the network.
+`pnpm --filter @objectstack/scenarios build` (tsup) writes `dist/` as ESM, CJS and `.d.ts`, and
+every `exports` subpath points there, so plain Node loads the package with no TypeScript resolver.
+The build then copies the open library into `dist/library/` (`scripts/pack-library.mjs`), which
+the published command line runs. The suites and `run-scenarios` read `src/` directly. The schema,
+loader and scorer call no model and no network; the runner drives a local Claude Code session.
 
 ## Scoring a run against a card — `@objectstack/scenarios/score`
 
@@ -63,9 +65,16 @@ gradeCardAnswer(card, { question: 'account_count', persona: 'sdr', turn }); // a
   card's `write_validation` guardrail names is graded in two halves: the agent half (its write
   was refused with the declared code, or it wrote nothing and its reply declines the write or
   asks for a correction) and the platform half, `platform:` checks (the runner's own write of
-  the declared values, the probe, was refused with that code and stored nothing).
+  the declared values, the probe, was refused with that code and stored nothing); so is every
+  other `refused` create or update, permission oversteps included (`isProbedOperation`). A
+  declared `VALIDATION_FAILED` is met by an app-defined code at a validation-class status
+  (`refusalMeets`), and a declared value equal to the card's `asOf` by the run date, only in a
+  field none of the agent's own write calls set (`agentSet`: the platform's clock stamped it).
 - `scenario-run-grade.ts` — an answer graded on correct / cited / leaks, per persona against
-  that persona's truth; a `withheld` truth is must-not-reveal.
+  that persona's truth; a `withheld` truth is must-not-reveal. A figure computed over rows
+  outside the persona's scope is flagged only when no figure of the persona's own rows
+  (`scopeFigures`) equals it, and a hidden field leaks when a tool answer's keys carry it, not
+  when a call only asked for it.
 
 ### The closed capability-tag table
 
@@ -94,6 +103,34 @@ discrimination test; ⛔ never match by area prefix.
 | `dashboards.report` | carries a report whose dataset binds an object the card names, every report selecting only measures and dimensions its datasets declare |
 | `ai.agent-actions` | carries every action in `run.agentActions` on its object, AI-exposed and confirm-gated where the card says `confirm` (the agent-action checks) |
 
+## Running the cards in a Claude Code cloud session
+
+The runner below also runs in a Claude Code cloud session, under these settings:
+
+- **Repository**: objectstack-ai/objectstack alone. The runner and the cards live here, and a generated app installs
+  the published packages from npm (`create-objectstack@latest` unless `--create-version` says otherwise);
+  objectstack-ai/cloud is not needed.
+- **Login**: the container's `claude` CLI is logged in with the subscription (`claude auth status` reports
+  `oauth_token`). The live driver refuses an API-key login, and refuses to start while `ANTHROPIC_API_KEY` or
+  `ANTHROPIC_AUTH_TOKEN` is set, so unset both.
+- **Permission mode**: not Auto. Auto mode's classifier refuses to launch the headless `claude -p` the runner spawns;
+  use Accept edits and approve the command.
+- **Time**: a background command is capped at 2 hours. Run one `starter` card per command (`--only ID`): its build
+  takes about 20–30 min, then come the Run halves. For more, run two commands in parallel (each boots its app on a free
+  port); do not chain several `starter` cards in one command.
+- **Build first**: `pnpm install`, then `pnpm --filter '@objectstack/scenarios^...' build`. The runner reads its own
+  `src/` but its dependencies' `dist/`, so on a fresh checkout `run-scenarios` stops at `ERR_MODULE_NOT_FOUND` on
+  `@objectstack/spec/dist/…` and the suites at `Failed to resolve entry for package "@objectstack/types"`.
+- **Network**: npm must be reachable (the default): the scaffold runs `npx -y create-objectstack@…`.
+- **Cost**: the session's subscription quota.
+
+```bash
+unset ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN
+claude auth status                                     # oauth_token
+pnpm install && pnpm --filter '@objectstack/scenarios^...' build
+pnpm --filter @objectstack/scenarios run-scenarios --only leave_balances   # one starter card per command
+```
+
 ## Running the cards — `@objectstack/scenarios/runner`
 
 ```bash
@@ -101,26 +138,77 @@ pnpm --filter @objectstack/scenarios run-scenarios                       # every
 pnpm --filter @objectstack/scenarios run-scenarios --only service_desk --modes scratch
 pnpm --filter @objectstack/scenarios run-scenarios --record /tmp/rec.json  # also save every turn
 pnpm --filter @objectstack/scenarios run-scenarios --driver recorded:/tmp/rec.json  # replay, no model
+pnpm --filter @objectstack/scenarios run-scenarios --driver codex           # the Codex CLI on your ChatGPT plan
+pnpm --filter @objectstack/scenarios run-scenarios --driver external:./my-agent.mjs  # any command on the driver contract
 pnpm --filter @objectstack/scenarios run-scenarios --author-timeout 90       # minutes per authoring turn (default 60)
 pnpm --filter @objectstack/scenarios run-scenarios --author-max-turns 400    # turns per authoring turn, every card (default by tier)
 pnpm --filter @objectstack/scenarios run-scenarios --ask-max-turns 20        # turns per question or operation turn (default 12)
+pnpm --filter @objectstack/scenarios run-scenarios --model sonnet            # the model every turn asks for (default: the login's own)
+pnpm --filter @objectstack/scenarios run-scenarios --author-model opus --ask-model haiku  # build and persona turns apart
+pnpm --filter @objectstack/scenarios run-scenarios --packages workspace      # on this checkout's unreleased packages (default: published)
 ```
 
 Per card and mode the runner writes `docs/qa/platform-checklist/runs/<date>-scenario-<card>.json`
 (git-ignored) and prints the scorecard.
+
+### Running from npm
+
+No checkout needed: the package's `objectstack-scenarios` command is the same runner, with the same flags.
+
+```bash
+npx @objectstack/scenarios run --only service_desk --modes scratch   # one card, scratch mode
+npx @objectstack/scenarios run                                       # every card, both modes
+npx @objectstack/scenarios run --cards ./my-cards                    # a directory of your own, loaded as the overlay
+npx @objectstack/scenarios help                                      # the commands; `version` prints the package version
+```
+
+- **Prerequisites**: Node 22 or later, and Claude Code installed and logged in with your own subscription
+  (`claude auth login`). The runner refuses to start when `ANTHROPIC_API_KEY` or `ANTHROPIC_AUTH_TOKEN` is set, or the
+  CLI is logged in with an API key. Each card scaffolds a project with `create-objectstack` (`--create-version` picks
+  its version).
+- **The cards**: the package carries the open library of this repository (`docs/qa/scenarios/*.json` and the
+  capability areas, copied into `dist/library/` at build time) and nothing else. `--cards DIR` runs another directory
+  as the overlay, where a `generic` card is refused.
+- **The records**: one `scenario-runs/<date>-scenario-<card>.json` per card, under the directory you run it from,
+  unless `--out DIR` says otherwise; the scorecard is printed as in a checkout. `--work DIR` keeps the scaffolded
+  projects (default: a temp directory).
+- **The packages**: always the published ones (`--packages published`, the default). `--packages workspace` builds
+  and packs a checkout's packages, so the published CLI refuses it; run it from a checkout.
+- It is not an `objectstack` (`os`) command: scenario scoring stays out of the customer CLI.
 
 | Mode | Steps |
 |:---|:---|
 | `scratch` | `create-objectstack` → the agent builds from the card prompt and the runner's data contract (`prompts.ts`) → `objectstack validate` / `build` / `verify` (proofs chosen from the tags) → score → `objectstack dev --fresh` → seed, one user + permission-set grant + API key per persona → every question as every persona it names and every operation as its persona, over the app's MCP → the iterate change → rebuild, re-score, re-run |
 | `template` | a blank host project (`host<code>`) → boot → install the card's verified build **unmanaged** (`/api/v1/marketplace/install-local`, `installMode: 'unmanaged'`) → the agent applies the iterate change to the installed copy → score → seed → Run. A refused install is a finding in the record |
 
+- **Package source** (`packages.ts`, `--packages`): `published` (the default) scaffolds with `npx -y
+  create-objectstack@<version>` and installs from npm, what a customer gets. `workspace` measures the next release before
+  it ships: it builds what the release builds for the packages it publishes (every non-private `@objectstack/*` and
+  `create-objectstack`, `turbo run build build:dist`), `pnpm pack`s each — the tarball npm would serve, `files[]` only —
+  and scaffolds with the packed `create-objectstack`, whose own install a global pnpmfile points at the tarballs. The
+  tarballs are then kept as `overrides` in the project's `pnpm-workspace.yaml` (a later `pnpm add` stays on them), and the
+  scaffold is refused unless every `@objectstack/*` package came from a tarball and `.claude/skills/` equals the
+  workspace build's catalog (`packages/skills/dist/skills`) file for file. Every record (`env.packages`,
+  `env.packagesLine`) and scorecard states the source: `packages: published 18.3.0`, or `packages: workspace @ <sha>
+  (unreleased)`. ⛔ The gallery exporter exports only a `published` run: a `workspace` record, or one that states no
+  source, is refused.
 - **Driver** (`driver.ts`): the local `claude` CLI on your own login (`claude -p --output-format stream-json`, the
   prompt written to its stdin: a build prompt carries the whole seed, and one argv string over 128 KiB makes `spawn`
   fail with `E2BIG` on Linux). It refuses to start when `ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN` is set or the CLI
   is logged in with an API key (the cost ruling on cloud#3600), and the record states the driver, the login, the
   authoring timeout and the turn caps. Every turn records its process: elapsed time, the turn cap it ran under
   (`--max-turns`), and for a turn that did not finish its exit code or signal, whether the runner's timeout killed it,
-  and the end of its stderr. `RecordedDriver` replays a recording, and refuses the three live-driver limits below.
+  and the end of its stderr. `RecordedDriver` replays a recording, and refuses the live-driver limits and models below;
+  its record keeps the driver of the recording (`replayOf`). For Codex and any other agent tool, see
+  [Other agent tools](#other-agent-tools--codex-and-the-external-driver-contract).
+- **Model** (`driver.ts`): `--model M` passes `claude --model M` on every turn, an alias (`sonnet`) or a name
+  (`claude-sonnet-4-5`); `--author-model` sets the authoring turns (build and iterate) and `--ask-model` the question
+  and operation turns apart, each in place of `--model`. With none, a turn takes the login's default model. Every turn
+  records the model it asked for (`requestedModel`) and the one it was served, read off the stream's init line
+  (`model`); a served name that does not hold the requested one as whole dash-separated parts (`sonnet` is in
+  `claude-sonnet-4-5-20250929`, `opus` is not) is a mismatch (`modelMismatch`). The scorecard's author rows name the
+  served model (`⚠ asked for sonnet` on a mismatch), and its `Run · model` rows count the persona turns per served
+  model (`claude-opus-5-5 ×9 ⚠ 9 not sonnet`).
 - **Turn caps** (`driver.ts`): an authoring turn, build and iterate alike, may take `DEFAULT_AUTHOR_MAX_TURNS` by the
   card's `tier` — `control` 80, `starter` 300, `delivery` 600 — unless `--author-max-turns N` sets one cap for every
   card; a question or operation turn takes 12 unless `--ask-max-turns N` says otherwise. The cap guards a looping turn
@@ -139,7 +227,11 @@ Per card and mode the runner writes `docs/qa/platform-checklist/runs/<date>-scen
   yet left out, then one update per row sets those (`seed.secondPass` in the record). The side that waits is one the
   build left optional; a build that makes every side of a cycle `required` cannot be seeded, which the data contract
   states and the scorecard reports as a Build finding naming the cycle (the seed is still sent, so the record holds
-  the app's own refusals).
+  the app's own refusals). A refused row takes out what it feeds (`seedDependence` in `orchestrate.ts`): with its
+  children through the declared lookups, the runner computes every question's truth again over the rest of the seed
+  by the loader's own rules (`truthsOver`), and only a turn (a question, or a question as one persona) whose expected
+  answer changes is **not measured**; every other turn is asked and graded as usual. An operation is not measured
+  when a row it names is out.
 - **Observation** (`observe.ts`): the write grader is fed what the runner reads itself: the agent's write calls and
   the door's answer (a coded refusal), the object's rows before and after the turn, and the audit trail's actor. A turn
   that wrote nothing because the object refused the read it needed first (a persona that may not read it) grades as
@@ -148,7 +240,12 @@ Per card and mode the runner writes `docs/qa/platform-checklist/runs/<date>-scen
   (`values`, on `target`) as the same persona through the same MCP door (`POST /api/v1/mcp`, its own API key) and
   reads that answer as the **probe**: the app's validation is measured on every run, whether or not the agent sent
   the bad value, and a careful agent that caught it first is not failed for it. A failed probe is the platform's
-  failure, never the agent's.
+  failure, never the agent's. Every other `refused` create or update is probed the same way, so a permission
+  overstep the agent declined still measures the platform's refusal. An answer that carries no code is reported
+  with whose throw it was (`uncodedNote`: the build's own hook or action, named off the sandbox's wrapper, or the
+  door's text). The runner also records the run dates (each clock instant's UTC and local date) and the fields
+  the agent's own write calls set (`agentSetOf`: a create's or update's `data`, a `run_action`'s `params`); a
+  declared `asOf` value is matched against a run date only in a field the agent did not set.
 - **Namespaces** (`namespace.ts`): every card's app is in the namespace `demo` + the card's `code` (`democrm`): scratch
   mode scaffolds the project under that name, and template mode installs a template declaring it into a host named
   `host<code>` (the unmanaged copy keeps its namespace, and the install refuses one the host owns). The card's names are
@@ -157,4 +254,80 @@ Per card and mode the runner writes `docs/qa/platform-checklist/runs/<date>-scen
   non-object item name as a failing Build check (`bare-name:<type>:<name>`), so such a build is never verified.
 - **Persona contract**: the build is asked for one permission set per persona, named `<namespace>_<persona id>`. The runner
   grants it to that persona's user, and makes a seed row whose scope field names a persona's handle (`owner: u_sam`)
-  owned by that persona's user.
+  owned by that persona's user. A field the card declares in `run.userHandleFields` (`userHandleFields` in
+  `prompts.ts` reads the declaration, never infers it) is loaded with the user's id in place of the handle text, and
+  the record's `seed.rewritten` lists each field so rewritten.
+- **Structure contract** (`prompts.ts`): every Build check traces to text the build prompt carries, so a faithful build
+  never fails for not guessing a name. Besides the seed (objects and fields) and the persona sets, the contract states
+  each `expect` row the exact-name scorer checks by name: every lookup's target, every single-choice field with its
+  minimum option count, every dashboard and every app navigation target, and, on a card carrying
+  `records-forms.select-options`, that every other single-choice field offers two options or more. An iterate prompt
+  states its change's rows the same way: the new objects (with the card's field minimum), lookups, option fields,
+  dashboards and nav targets. `test/runner/prompt-trace.test.ts` reads the checks off the scorer itself and holds every
+  card to it.
+
+## Other agent tools — Codex and the external driver contract
+
+The same card can measure another agent tool. Every record (`env.driver`) and every gallery app page (`- Driver:`)
+names the driver and its version; a replay (`--driver recorded:F`) names the driver of the recording it replays
+(`replayOf`), never the recording's path.
+
+### `--driver codex`
+
+`drivers/codex.ts` runs the OpenAI Codex CLI in non-interactive mode, on your own ChatGPT plan. What it reads of the
+CLI was measured on `codex-cli 0.167.0`:
+
+- **Login**: the ChatGPT plan only. It refuses to start while `OPENAI_API_KEY` or `CODEX_API_KEY` is set, or when
+  `codex login status` reports anything but `Logged in using ChatGPT` (an API key, no login, an access token); every
+  turn passes `-c forced_login_method="chatgpt"`, and both variables are removed from its environment.
+- **A turn**: `codex exec --json --ephemeral --skip-git-repo-check -c approval_policy="never" -p PROFILE … -`, the
+  prompt on stdin. An authoring turn runs `-s workspace-write -c sandbox_workspace_write.network_access=true -C
+  <project>`; a question or operation runs `-s read-only` in an empty temp directory.
+- **MCP**: the app is served under the name `app` from a profile layer, `$CODEX_HOME/scenario-runner-<random>.config.toml`
+  (0600, deleted when the turn returns), that holds the persona's key as an `http_headers` `Authorization` header and
+  turns off every MCP server of your own config (`enabled = false`). A server of your own named `app` is refused.
+- **Flags**: `--model`, `--author-model` and `--ask-model` pass `-m`; `--author-timeout` is the runner's own clock.
+  `codex exec` has no cap on its agentic turns, so `--author-max-turns` and `--ask-max-turns` are refused. Its JSONL
+  names no model, so the scorecard shows `model not reported (asked for …)`.
+
+### `--driver external:COMMAND` — the contract
+
+`drivers/external.ts` runs any command that speaks the driver seam as a process contract. `COMMAND` is split on
+whitespace (no shell, no quoting); a word that starts `./` or `../`, and a first word holding a `/`, is resolved against
+the directory you run from. For anything more, write a wrapper script.
+
+- **One process per call.** The call is one JSON object on stdin; the answer is one JSON object on stdout; logs go to
+  stderr (the record keeps its last 2,000 characters). Every input starts with `"contract":
+  "objectstack-scenario-driver/1"`; a command should refuse a contract it does not know.
+- **`info`**, once, before any card runs: `{"contract":…,"kind":"info"}` → `{"name":"my-agent","version":"1.4.2"}`.
+  The record's driver is `external:my-agent`, its version `1.4.2`. A command that cannot answer it is refused.
+- **`author`**: build or iterate the app in `cwd` with shell and file tools; the call runs in `cwd`.
+  `{"contract":…,"kind":"author","step":{"card","mode","phase","step"},"prompt":"…","cwd":"/abs/project","tier":"starter","limits":{…}}`
+- **`ask`**: answer one data question or write operation as a persona, over the app's MCP endpoint; the call runs in
+  the directory of `mcp.configFile`.
+  `{"contract":…,"kind":"ask","step":{"card","mode","phase","step","persona"},"prompt":"…","mcp":{"url":"…","configFile":"/tmp/…/mcp.json"},"limits":{…}}`
+- **The answer** to `author` and `ask`, strict (an unknown key is refused):
+  `{"replyText":"every text the agent said, joined","toolCalls":[{"name":"query_records","input":{…},"output":"…","isError":false}],"model":"…","numTurns":3}`.
+  `model` and `numTurns` are optional; an MCP tool may be named bare or `mcp__<server>__<tool>`; a call that never
+  answered leaves `output` out.
+- **Exit codes**: 0 with an answer of that shape is the turn. Any other end is a failed turn with a named reason,
+  never an empty pass: a non-zero exit or a signal is `no-result(exit N)`, stdout that is not one JSON object of that
+  shape is `invalid-output(…)`. A failed authoring turn leaves its Build half not measured; a failed persona turn is
+  graded as the empty answer it is.
+- **Timeout**: `limits.timeoutMs` — `--author-timeout` for `author` (default 60 min), 5 min for `ask`. The runner kills
+  a call still running then (SIGTERM).
+- **Limits**: `limits` carries `timeoutMs`, and `maxTurns` (`--author-max-turns` / `--ask-max-turns`) and `model`
+  (`--model`, `--author-model`, `--ask-model`) when given. The command may ignore them; the record states them.
+- ⛔ **The key**: the persona's API key is only in `mcp.configFile`, a 0600 file in the shape of Claude Code's
+  `--mcp-config` (`{"mcpServers":{"app":{"type":"http","url":…,"headers":{"Authorization":"Bearer …"}}}}`), deleted
+  when the call returns. It is never on argv, in the environment or on stdin, and so never in a run record, a
+  scorecard or a gallery export. A command must not print it.
+- **Cost**: the runner cannot see an external command's login, so the record's login reads `not verified`; the cost
+  ruling still applies, and the runner removes `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `OPENAI_API_KEY` and
+  `CODEX_API_KEY` from the command's environment.
+
+`test/runner/fixtures/fake-external-driver.mjs` is a complete command in about a hundred lines.
+
+**WorkBuddy** (checked 2026-11-07): Tencent's WorkBuddy is a desktop app; no headless mode with structured output
+and an MCP client was found for it, so it is not wired here. A tool that has both rides `--driver external:` with a
+wrapper, with no change to the runner.

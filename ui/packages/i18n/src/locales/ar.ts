@@ -2505,6 +2505,12 @@ const ar = {
         done: "انضم زملاء أو تمت دعوتهم.",
         action: "دعوة",
       },
+      connectAssistant: {
+        title: 'ربط مساعد ذكاء اصطناعي',
+        todo: 'استخدم هذا النظام من Claude وDoubao والمساعدين المشابهين باسمك أنت.',
+        done: 'تم ربط مساعد ذكاء اصطناعي أو مفتاح API خاص بك.',
+        action: 'ربط',
+      },
     },
     error: {
       connectionFailed: "تعذّر الاتصال بالخادم",
@@ -3489,6 +3495,12 @@ const ar = {
       cta: "تعيين كلمة المرور",
       dismiss: "تجاهل",
     },
+    connectAssistant: {
+      title: 'استخدم هذا النظام من مساعد الذكاء الاصطناعي',
+      body: 'يمكنك عرض سجلاتك وتغييرها من Claude وDoubao ومساعدي الذكاء الاصطناعي المشابهين. يتصرف كل منهم باسمك وبصلاحياتك أنت.',
+      action: 'ربط مساعد ذكاء اصطناعي',
+      dismiss: 'إخفاء',
+    },
     pendingDrafts: {
       // objectui#12602 — the drafts row in Home's "My work" section: the
       // count, then the first draft names joined by `nameSeparator`, in
@@ -4104,6 +4116,12 @@ const ar = {
       example2: 'احسب عدد السجلات في كل كائن منها.',
       example3: 'ما الإجراءات التي يمكنني تشغيلها هنا، وماذا يفعل كل منها؟',
       tryFirst: 'ابدأ بالطلب الأول: إذا أجاب مساعدك بالكائنات التي تعمل عليها، فالاتصال يعمل.',
+      connected: 'متصل: {{name}}.',
+      connectedKey: 'متصل باستخدام مفتاح API "{{name}}".',
+      lastCallHour: 'كان آخر استدعاء خلال الساعة التي تبدأ في {{time}}.',
+      lastCallAt: 'كان آخر استدعاء في {{time}}.',
+      noCallYet: 'لا يوجد استدعاء بعد: جرّب الطلب الأول أعلاه للتحقق من الاتصال.',
+      moreConnected: 'كل ما يمكنه التصرف باسمك مدرج في أسفل هذه الصفحة.',
     },
     disabled: {
       title: 'الاتصال بمساعدي الذكاء الاصطناعي متوقف في هذا النشر',

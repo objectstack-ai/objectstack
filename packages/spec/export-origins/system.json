@@ -574,6 +574,8 @@
     "ResolvedSettingValue": "src/system/settings-manifest.zod.ts#ResolvedSettingValue (type)",
     "ResolvedSettingValueSchema": "src/system/settings-manifest.zod.ts#ResolvedSettingValueSchema (const)",
     "ResolverDoc": "src/system/book.zod.ts#ResolverDoc (interface)",
+    "RestrictionProfile": "src/system/restriction-profile.zod.ts#RestrictionProfile (type)",
+    "RestrictionProfileSchema": "src/system/restriction-profile.zod.ts#RestrictionProfileSchema (const)",
     "ResultDialogLike": "src/system/i18n-resolver.ts#ResultDialogLike (interface)",
     "RetryPolicy": "src/shared/retry-policy.zod.ts#RetryPolicy (type)",
     "RetryPolicyParsed": "src/shared/retry-policy.zod.ts#RetryPolicyParsed (type)",

@@ -2266,6 +2266,12 @@ const de = {
         done: "Kollegen sind beigetreten oder wurden eingeladen.",
         action: "Einladen",
       },
+      connectAssistant: {
+        title: 'KI-Assistenten verbinden',
+        todo: 'Arbeiten Sie in diesem System aus Claude, Doubao und ähnlichen Assistenten, als Sie selbst.',
+        done: 'Ein KI-Assistent oder API-Schlüssel von Ihnen ist verbunden.',
+        action: 'Verbinden',
+      },
     },
     error: {
       connectionFailed: "Verbindung zum Server nicht möglich",
@@ -3235,6 +3241,12 @@ const de = {
       cta: "Passwort festlegen",
       dismiss: "Ausblenden",
     },
+    connectAssistant: {
+      title: 'Arbeiten Sie hier mit Ihrem KI-Assistenten',
+      body: 'Sie können Ihre Datensätze aus Claude, Doubao und ähnlichen KI-Assistenten abrufen und ändern. Jeder handelt in Ihrem Namen, mit Ihren eigenen Berechtigungen.',
+      action: 'KI-Assistenten verbinden',
+      dismiss: 'Ausblenden',
+    },
     pendingDrafts: {
       // objectui#12602 — the drafts row in Home's "My work" section: the
       // count, then the first draft names joined by `nameSeparator`, in
@@ -3799,6 +3811,12 @@ const de = {
       example2: 'Zähle, wie viele Datensätze jedes dieser Objekte hat.',
       example3: 'Welche Aktionen kann ich hier ausführen, und was macht jede davon?',
       tryFirst: 'Beginnen Sie mit der ersten: Antwortet Ihr Assistent mit den Objekten, mit denen Sie arbeiten, funktioniert die Verbindung.',
+      connected: 'Verbunden: {{name}}.',
+      connectedKey: 'Verbunden mit dem API-Schlüssel „{{name}}“.',
+      lastCallHour: 'Der letzte Aufruf war in der Stunde ab {{time}}.',
+      lastCallAt: 'Der letzte Aufruf war am {{time}}.',
+      noCallYet: 'Noch kein Aufruf: Probieren Sie die erste Anfrage oben aus, um die Verbindung zu prüfen.',
+      moreConnected: 'Alles andere, was in Ihrem Namen handeln kann, steht unten auf dieser Seite.',
     },
     disabled: {
       title: 'Verbindungen zu KI-Assistenten sind hier ausgeschaltet',

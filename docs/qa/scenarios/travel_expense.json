@@ -12,8 +12,8 @@
       "en": "Build a travel expense app: trip requests, expense claims with lines, grade-based travel standards and a two-step approval."
     },
     "detailed": {
-      "zh": "差旅报销应用。员工先提交出差申请(目的地、起止日期、事由),批准后出行;回来后填写报销单,报销单下有多条明细(住宿、餐补、机票),每条有数量、单价和金额,报销单合计自动汇总明细金额。差旅标准按职级(g1/g2/g3)和费用类型规定上限;超出标准的明细自动标记为超标,且必须填写超标原因,否则不能保存。报销单走两级审批:先由部门经理审批(经理本人的报销单由财务经理审批),再由财务审批,财务审批通过后由财务付款,付款不可撤销。员工只能看到自己的出差申请和报销单,部门经理能看到本部门的,财务能看到全部报销单但不看出差申请;部门差旅预算只有经理和财务可见,员工银行账号只有本人和财务可见。需要一个按部门和费用类型统计差旅支出的报表。尽量用声明式配置(公式字段、汇总字段、校验规则、审批流程)而不是代码钩子,以便应用能以非托管方式安装。",
-      "en": "A travel expense app. An employee first files a trip request (destination, start and end dates, purpose); once it is approved they travel. Afterwards they file an expense claim with several lines (hotel, meals, airfare), each with a quantity, a unit amount and an amount, and the claim total sums its line amounts. A travel standard caps each expense type per grade (g1/g2/g3); a line above the cap is flagged over-standard automatically and cannot be saved without a reason. A claim goes through a two-step approval: the department manager first (a manager's own claim goes to the finance manager), then Finance; once Finance approves, Finance pays it, and a payment cannot be undone. An employee sees only their own trip requests and claims, a department manager sees their department's, and Finance sees every claim but no trip request; a department's travel budget is visible to managers and Finance only, and an employee's bank account to that employee and Finance only. Add a report of travel spend by department and expense type. Prefer declarative configuration (formula and roll-up fields, validation rules, an approval process) over code hooks, so the app can be installed unmanaged."
+      "zh": "差旅报销应用。员工先提交出差申请(目的地、起止日期、事由),批准后出行;回来后填写报销单,报销单下有多条明细(住宿、餐补、机票),每条有数量、单价和金额,报销单合计自动汇总明细金额。报销明细是报销单的从属记录(主从关系),在报销单表单上直接内联编辑。差旅标准按职级(g1/g2/g3)和费用类型规定上限;超出标准的明细自动标记为超标,且必须填写超标原因,否则不能保存。报销单走两级审批:先由部门经理审批(经理本人的报销单由财务经理审批),再由财务审批;每一步都是一条独立的审批步骤记录(报销单、步骤、审批人、审批结果和日期),批准或驳回一步就是更新这条记录。财务审批通过后由财务付款,付款不可撤销。员工只能看到自己的出差申请和报销单,部门经理能看到本部门的,财务能看到全部报销单但不看出差申请;部门差旅预算只有经理和财务可见,员工银行账号只有本人和财务可见。需要一个按部门和费用类型统计差旅支出的报表。尽量用声明式配置(公式字段、汇总字段、校验规则)而不是代码钩子,以便应用能以非托管方式安装。",
+      "en": "A travel expense app. An employee first files a trip request (destination, start and end dates, purpose); once it is approved they travel. Afterwards they file an expense claim with several lines (hotel, meals, airfare), each with a quantity, a unit amount and an amount, and the claim total sums its line amounts. The lines are details of the claim (master-detail), edited inline on the claim's form. A travel standard caps each expense type per grade (g1/g2/g3); a line above the cap is flagged over-standard automatically and cannot be saved without a reason. A claim goes through a two-step approval: the department manager first (a manager's own claim goes to the finance manager), then Finance; each step is its own approval step record (the claim, the step, the approver, the decision and its date), and approving or rejecting a step updates that record; once Finance approves, Finance pays it, and a payment cannot be undone. An employee sees only their own trip requests and claims, a department manager sees their department's, and Finance sees every claim but no trip request; a department's travel budget is visible to managers and Finance only, and an employee's bank account to that employee and Finance only. Add a report of travel spend by department and expense type. Prefer declarative configuration (formula and roll-up fields, validation rules) over code hooks, so the app can be installed unmanaged."
     }
   },
   "expect": {
@@ -47,7 +47,6 @@
     "records-forms.formula-field",
     "records-forms.validation-rule",
     "records-forms.select-options",
-    "approvals.multi-step-approval",
     "automation.record-triggered-flow",
     "access-security.row-level-security",
     "access-security.field-permissions",
@@ -934,6 +933,7 @@
       {
         "id": "employee",
         "role": "Employee (claimant), Sales, grade g2 — e02",
+        "record": {"object": "employee", "id": "e02"},
         "hidden": {"fields": [{"object": "department", "field": "travel_budget"}]},
         "scope": [
           {"object": "trip_request", "field": "traveler", "value": "e02"},
@@ -945,6 +945,7 @@
       {
         "id": "dept_manager",
         "role": "Department manager, Sales — e01",
+        "record": {"object": "employee", "id": "e01"},
         "hidden": {"fields": [{"object": "employee", "field": "bank_account"}]},
         "scope": [
           {"object": "department", "field": "id", "value": "dep_sales"},

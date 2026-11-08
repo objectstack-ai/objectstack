@@ -2040,6 +2040,12 @@ const zhHant = {
         done: '已有同事加入或已發出邀請。',
         action: '邀請',
       },
+      connectAssistant: {
+        title: '連線 AI 助手',
+        todo: '在 Claude、豆包等助手裡以你自己的身份使用本系統。',
+        done: '你已連線了 AI 助手或 API 金鑰。',
+        action: '連線',
+      },
     },
     error: {
       connectionFailed: '無法連線到伺服器',
@@ -3351,6 +3357,12 @@ const zhHant = {
       cta: '設定密碼',
       dismiss: '關閉',
     },
+    connectAssistant: {
+      title: '在 AI 助手裡使用本系統',
+      body: '你可以在 Claude、豆包等 AI 助手裡查詢和修改你的記錄。助手始終以你的身份、按你的權限操作。',
+      action: '連線 AI 助手',
+      dismiss: '隱藏',
+    },
     pendingDrafts: {
       // objectui#12602 — the drafts row in Home's "My work" section: the
       // count, then the first draft names joined by `nameSeparator`, in
@@ -4009,6 +4021,12 @@ const zhHant = {
       example2: '統計這些物件各有多少條記錄。',
       example3: '我在這裡能執行哪些操作？每個操作是做什麼的？',
       tryFirst: '先試第一條：如果助手回答出你平時用的物件，就說明連線成功了。',
+      connected: '已連線：{{name}}。',
+      connectedKey: '已用 API 金鑰“{{name}}”連線。',
+      lastCallHour: '最近一次呼叫在 {{time}} 起的那一小時內。',
+      lastCallAt: '最近一次呼叫在 {{time}}。',
+      noCallYet: '還沒有呼叫：先在助手裡試上面第一條請求，確認連線成功。',
+      moreConnected: '其他能以你的身份操作的助手和金鑰，都列在本頁底部。',
     },
     disabled: {
       title: '此部署已關閉 AI 助手連線',

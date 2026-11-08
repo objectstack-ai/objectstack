@@ -16,6 +16,7 @@ import {
     applyUserFilterParams,
     parseListStateParams,
     applyListStateParams,
+    parseListPageParam,
     userFilterParamsKey,
     type ListStatePatch,
     type ListUrlFieldGate,
@@ -40,7 +41,7 @@ const isRecord = (v: unknown): v is Record<string, unknown> =>
 /**
  * objectstack#28950 — the params with the reader's whole `uf_*` list state
  * removed: the Filter panel, search, sort and grouping, and every user-filter
- * chip. Through the owning module's own writers, so the family has one
+ * chip, and (objectstack#30850) the page. Through the owning module's own writers, so the family has one
  * definition. Every other param (`filter[...]` drill scope, `recordId`, ...)
  * is kept.
  */
@@ -49,7 +50,7 @@ export function withoutListStateParams(prev: URLSearchParams): URLSearchParams {
     const cleared = chips
         ? applyUserFilterParams(prev, Object.fromEntries(Object.keys(chips).map(field => [field, []])))
         : new URLSearchParams(prev);
-    return applyListStateParams(cleared, { filters: null, search: null, sort: null, grouping: null });
+    return applyListStateParams(cleared, { filters: null, search: null, sort: null, grouping: null, page: null });
 }
 
 /**
@@ -346,9 +347,19 @@ export function useObjectViewListUrlState({
         clearListFilterState(buildListFilterKey(user?.id, objectName, viewId));
         setSearchParams(prev => withoutListStateParams(prev), { replace: true });
     }, [listPrefs.resetView, user?.id, objectName, setSearchParams]);
+    /**
+     * objectstack#30850 — the page the list shows, read from the address on
+     * every render: `ListView` takes it as a controlled `page`, and its every
+     * move comes back through `writeListUrlState({ page })`, replacing the
+     * entry. So Back from a record opened as a full page, a reload and a copied
+     * link land on the page the reader left; the list's own reset to page 1
+     * deletes the param, and "Reset to view" strips it with the rest.
+     */
+    const listPage = parseListPageParam(searchParams);
     return {
         clearSourceListState,
         readPanelFilters,
+        listPage,
         listIdentityKey,
         listSeedRef,
         ownListParamsRef,

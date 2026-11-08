@@ -10,7 +10,7 @@
  */
 
 import { useMemo, useState, useCallback, useEffect, useRef, lazy, Suspense } from 'react';
-import { useParams, useSearchParams, useNavigate, useLocation, useHref } from 'react-router-dom';
+import { useParams, useSearchParams, useNavigate, useLocation, useHref, createSearchParams } from 'react-router-dom';
 import { resolveAffordance, type FilterTokenScope, type SchemaLike } from '@object-ui/core';
 import { useObjectListPreferences } from '../context/ListPreferencesProvider.js';
 const ImportWizard = lazy(() =>
@@ -198,11 +198,28 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
     // One setter for the page's life, calling the latest one.
     const setSearchParamsRef = useRef(setSearchParamsNow);
     setSearchParamsRef.current = setSearchParamsNow;
+    const location = useLocation();
+    // objectstack#30850 — the router hands a functional update the params it
+    // last RENDERED, and its navigation commits in a transition. Two writes
+    // before that commit (a search term, then the list's own page reset that
+    // term causes) would each start from the same params, and the second
+    // would drop the first. So each write starts from the one before it until
+    // the location moves (a new `location.key`, which every navigation makes).
+    const locationKeyRef = useRef(location.key);
+    locationKeyRef.current = location.key;
+    const pendingSearchRef = useRef<{ locationKey: string; params: URLSearchParams } | undefined>(undefined);
     const setSearchParams = useCallback<typeof setSearchParamsNow>(
-        (next, options) => setSearchParamsRef.current(next, options),
+        (next, options) => setSearchParamsRef.current((rendered) => {
+            const pending = pendingSearchRef.current;
+            const base = pending && pending.locationKey === locationKeyRef.current
+                ? new URLSearchParams(pending.params)
+                : rendered;
+            const params = createSearchParams(typeof next === 'function' ? next(base) : next);
+            pendingSearchRef.current = { locationKey: locationKeyRef.current, params };
+            return params;
+        }, options),
         [],
     );
-    const location = useLocation();
     const { showDebug } = useMetadataInspector();
     const { t, language } = useObjectTranslation();
     const { objectLabel, objectPluralLabel, objectDescription: objectDesc, viewLabel, viewEmptyState, actionParamText, fieldLabel, fieldOptionLabel } = useObjectLabel();
@@ -708,6 +725,7 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
         handleResetView,
         clearSourceListState,
         readPanelFilters,
+        listPage,
     } = useObjectViewListUrlState({
         objectName,
         objectDef,
@@ -1065,6 +1083,7 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
         listIdentityKey,
         listSeedRef,
         writeListUrlState,
+        listPage,
         filterScope,
         actions,
         handleRowClick,

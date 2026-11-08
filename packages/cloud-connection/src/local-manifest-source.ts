@@ -93,6 +93,14 @@ export interface InstalledManifestEntry {
      * boot report still raises whatever stands.
      */
     accessUpgradeConfirmation?: { findingSet: string; confirmedBy: string; confirmedAt: string };
+    /**
+     * [epic cloud#3652 Q3, #30884] The installer's confirmation of the schema
+     * findings this upgrade carried — an undeclared suspected rename, a
+     * `needs_confirm` / `destructive` type change. Recorded for the audit: the
+     * finding set confirmed (its digest), by whom, when. It answers only the
+     * install that wrote it; the next upgrade is compared afresh.
+     */
+    schemaUpgradeConfirmation?: { findingSet: string; confirmedBy: string; confirmedAt: string };
 }
 
 /**

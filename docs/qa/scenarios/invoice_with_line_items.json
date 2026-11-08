@@ -8,7 +8,7 @@
   "prompt": {
     "short": {"en": "Build an invoicing app with invoices and their line items."},
     "detailed": {
-      "en": "Model an invoicing app: an invoice with multiple line items (product, quantity, unit price, amount). The invoice total should sum its line amounts, and line items are entered together with the invoice."
+      "en": "Model an invoicing app: an invoice with multiple line items (product, quantity, unit price, amount). The invoice total should sum its line amounts, and line items are entered together with the invoice, inline on its form."
     }
   },
   "expect": {
@@ -46,6 +46,7 @@
         {"id": "l5", "invoice": "i3", "product": "Gadget", "quantity": 3, "unit_price": 25, "amount": 75}
       ]
     },
+    "userHandleFields": [{"object": "invoice", "field": "owner"}],
     "questions": [
       {
         "id": "invoices_not_draft",

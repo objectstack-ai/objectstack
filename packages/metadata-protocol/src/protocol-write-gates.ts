@@ -11,7 +11,7 @@
  * `packagedArtifactOwner`, `storedFlowBindingAgrees`,
  * `packagelessOverlayWriteRefusal`, `namedBaseOverlayWriteRefusal`,
  * `refusePackagedBaseRemoval`, `shipsBundleName`, `baseServesBundleMember`,
- * `pairOfAddedMember`, `findPairAddedMemberRow`, `registryMemberServedAt`,
+ * `pairsOfAddedMember`, `findPairAddedMemberRow`, `registryMemberServedAt`,
  * `recordOptimisticConflictAudit`, `envWritableTypes`,
  * `organizationScopedWriteRefusal`, `requestedOrganization`,
  * `isPackagedBaseRefusal`, `optimisticConflictAuditEntry` moved out of
@@ -37,7 +37,7 @@ import { resolveTenancyPosture } from '@objectstack/types';
 import { envWritableMetadataTypes } from './sys-metadata-repository.js';
 import { managedItemSealedSentence } from './packaged-base-regime.js';
 import type { StoredOverlayRow } from './item-lock.js';
-import { itemDiscriminator, pairOf } from '@objectstack/metadata-core';
+import { itemDiscriminator, pairsOf } from '@objectstack/metadata-core';
 import { installedManifestsOfEngine } from './installed-manifests.js';
 import { PLURAL_TO_SINGULAR } from '@objectstack/spec/shared';
 import { DEFAULT_METADATA_TYPE_REGISTRY } from '@objectstack/spec/kernel';
@@ -646,33 +646,42 @@ export class ProtocolWriteGatesFacet {
     }
 
     /**
-     * [#28802, #28390 ruling A] The pair of `base` when the bundle member
-     * `member` (its discriminator value) of the name `name` is one only the
+     * [#28802, #28390 ruling A] The pairs of `base` when the bundle member
+     * `member` (its discriminator value) of the name `name` is one only a
      * pair can add on `base`'s address: `base` ships the name and not that
      * member. Else `undefined`, and the by-name read serves as before.
+     *
+     * [#29594, ADR-0146 D3 merge question 12] Every pair of `base`
+     * ({@link pairsOf}), the App's pair first: a member the per-package pair
+     * an earlier version created for `base` added is served as it was.
      */
-    static pairOfAddedMember(host: Pick<ProtocolHost, 'engine' | 'shippedArtifactsOf' | 'shippingPackagesOf' | 'shipsBundleName'>, type: string, name: string, base: string, member: string): string | undefined {
+    static pairsOfAddedMember(host: Pick<ProtocolHost, 'engine' | 'shippedArtifactsOf' | 'shippingPackagesOf' | 'shipsBundleName'>, type: string, name: string, base: string, member: string): readonly string[] | undefined {
         const shipping = host.shippingPackagesOf(type);
         if (!host.shipsBundleName(type, name, base, shipping)) return undefined;
         if (shippingPackageIds(host.shippedArtifactsOf(type, name, shipping, member)).has(base)) return undefined;
-        const pair = pairOf(base, installedManifestsOfEngine(host.engine));
-        return pair.ok ? pair.value : undefined;
+        const pairs = pairsOf(base, installedManifestsOfEngine(host.engine));
+        return pairs.length > 0 ? pairs : undefined;
     }
 
     /**
      * [#28802, #28830] The pair's own stored row at the bundle member `member`
      * (`wantedMember` its discriminator value) of the name `name`, when only
-     * the pair can add that member on `base`'s address
-     * ({@link pairOfAddedMember}); else `undefined`. The one read of it the
-     * by-name read and the layered read share.
+     * a pair can add that member on `base`'s address
+     * ({@link pairsOfAddedMember}); else `undefined`. The one read of it the
+     * by-name read and the layered read share. [#29594] The first pair, in
+     * {@link pairsOf} order, that holds the row.
      */
-    static async findPairAddedMemberRow(host: Pick<ProtocolHost, 'findServedOverlayRow' | 'pairOfAddedMember'>, type: string, name: string, base: string, member: string | undefined, wantedMember: string,
+    static async findPairAddedMemberRow(host: Pick<ProtocolHost, 'findServedOverlayRow' | 'pairsOfAddedMember'>, type: string, name: string, base: string, member: string | undefined, wantedMember: string,
             activeRows?: readonly StoredOverlayRow[],): Promise<any> {
-        const pairOfAddition = host.pairOfAddedMember(type, name, base, wantedMember);
-        if (pairOfAddition === undefined) return undefined;
-        return (await host.findServedOverlayRow({
-            type, name, state: 'active', packageId: pairOfAddition, ...memberOption(member),
-        }, activeRows))?.row;
+        const pairsOfAddition = host.pairsOfAddedMember(type, name, base, wantedMember);
+        if (pairsOfAddition === undefined) return undefined;
+        for (const packageId of pairsOfAddition) {
+            const row = (await host.findServedOverlayRow({
+                type, name, state: 'active', packageId, ...memberOption(member),
+            }, activeRows))?.row;
+            if (row !== undefined && row !== null) return row;
+        }
+        return undefined;
     }
 
     /**

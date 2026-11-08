@@ -135,10 +135,10 @@ export const SCAFFOLD_NAMESPACE_MAX_LENGTH = 13;
 /**
  * The `objectstack.manifest.json` keys `@objectstack/spec` 18 retired
  * (ADR-0049): `category` (#30980) and `name`, `specVersion`, `skills`,
- * `scaffold`, `visibility` (#31035). `TemplateManifestSchema` carries a
- * `retiredKey()` tombstone for each, so a manifest still declaring one fails a
- * parse, and `os package publish` refuses `category` and `visibility`
- * outright. The scaffolder strips
+ * `scaffold`, `visibility`, `publisher`, `isStarter` (#31035).
+ * `TemplateManifestSchema` carries a `retiredKey()` tombstone for each, so a
+ * manifest still declaring one fails a parse, and `os package publish`
+ * refuses `category`, `visibility` and `publisher` outright. The scaffolder strips
  * every one of them from the template's manifest, so a template authored
  * before that release can never hand a new project a manifest the schema
  * refuses.
@@ -157,6 +157,8 @@ export const RETIRED_TEMPLATE_MANIFEST_KEYS = [
   'skills',
   'scaffold',
   'visibility',
+  'publisher',
+  'isStarter',
 ] as const;
 
 /**
