@@ -16,6 +16,7 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
+import { ObjectKernel, isServiceNotRegisteredError } from '@objectstack/core';
 import { RestServer } from './rest-server';
 
 const TASK = {
@@ -53,13 +54,14 @@ function makeRes() {
 
 /**
  * Boot the export route over a stub protocol, with `security` resolved from
- * `securityServiceProvider` (the 18th positional ctor arg).
+ * `securityServiceProvider` (the 18th positional ctor arg) — or, when
+ * `provider` is given, from that provider itself.
  *
  * `enable` is left undefined on the object so the OBJECT-level gate
  * (`apiAccessDenialFromEnable`) is fully open — every denial these tests observe
  * is therefore the USER-level axis, never the `apiMethods` whitelist.
  */
-function boot(security: any) {
+function boot(security: any, provider?: () => Promise<unknown>) {
   const findData = vi.fn().mockResolvedValue({ object: 'task', records: ROWS });
   const protocol: any = {
     getMetaItems: vi.fn().mockResolvedValue({ items: [TASK] }),
@@ -84,7 +86,7 @@ function boot(security: any) {
     undefined, // analyticsServiceProvider
     undefined, // settingsServiceProvider
     undefined, // serviceExistsProvider
-    security === undefined ? undefined : async () => security,
+    provider ?? (security === undefined ? undefined : async () => security),
   );
   (rest as any).resolveExecCtx = async () => ({ userId: 'test-user' });
   rest.registerRoutes();
@@ -165,6 +167,34 @@ describe('export route — user-level export axis (#3544)', () => {
     expect(out.getStatus()).toBe(403);
     expect(out.getJson()).toMatchObject({ code: 'EXPORT_NOT_PERMITTED' });
     expect(findData).not.toHaveBeenCalled();
+  });
+
+  it('a wired security provider that REJECTS → 503 SERVICE_UNAVAILABLE, and NOTHING is read', async () => {
+    // A door whose security service cannot be resolved refuses rather than
+    // proceeds: a service that is registered but unresolvable is not "no
+    // security service" (ADR-0106 D6 tier 3; ADR-0049).
+    const { route, findData } = boot(undefined, async () => {
+      throw new Error('the security service failed to construct');
+    });
+    const out = await run(route);
+
+    expect(out.getStatus()).toBe(503);
+    expect(out.getJson()).toMatchObject({ code: 'SERVICE_UNAVAILABLE' });
+    expect(findData).not.toHaveBeenCalled();
+    expect(out.chunks.join('')).toBe('');
+  });
+
+  it('a provider rejecting with the registry\'s "never registered" brand → allowed, as with no security service at all', async () => {
+    // The registry's own rejection for a slot nothing ever registered, from a
+    // real kernel: the one rejection that means "no permission posture here".
+    const kernel = new ObjectKernel({ skipSystemValidation: true, gracefulShutdown: false } as any);
+    const provider = () => kernel.getServiceAsync('security');
+    await expect(provider()).rejects.toSatisfy(isServiceNotRegisteredError);
+    const { route, findData } = boot(undefined, provider);
+    const out = await run(route);
+
+    expect(out.getStatus()).toBe(200);
+    expect(findData).toHaveBeenCalled();
   });
 
   it('the object-level 405 still precedes the user-level 403', async () => {

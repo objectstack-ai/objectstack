@@ -97,12 +97,29 @@ const ENV_BARE = 'env_bare';
 /** [#30192] An environment whose kernel carries no `auth` service either. */
 const ENV_NOAUTH = 'env_noauth';
 
+/**
+ * The environments of the last describe, by how their kernel answers the
+ * `security` slot: a healthy occupant; none at all; a registered factory that
+ * throws; an acquisition that rejects at the security step; and a kernel no
+ * acquisition reaches.
+ */
+const ENV_SEC_OK = 'env_sec_ok';
+const ENV_SEC_NONE = 'env_sec_none';
+const ENV_SEC_FACTORY = 'env_sec_factory';
+const ENV_SEC_ACQ = 'env_sec_acq';
+const ENV_SEC_DOWN = 'env_sec_down';
+
 /** Which hostname the host's resolver maps to which environment. */
 const HOSTS: Record<string, string> = {
     'alpha.example.test': ENV_A,
     'beta.example.test': ENV_B,
     'bare.example.test': ENV_BARE,
     'noauth.example.test': ENV_NOAUTH,
+    'sec-ok.example.test': ENV_SEC_OK,
+    'sec-none.example.test': ENV_SEC_NONE,
+    'sec-factory.example.test': ENV_SEC_FACTORY,
+    'sec-acq.example.test': ENV_SEC_ACQ,
+    'sec-down.example.test': ENV_SEC_DOWN,
 };
 const HOST_OF: Record<string, string> = Object.fromEntries(Object.entries(HOSTS).map(([h, e]) => [e, h]));
 
@@ -947,4 +964,355 @@ describe('[#30218] single kernel: the data engine is the plugin\'s own kernel\'s
             expect(calls).toEqual([{ env: 'host', op: 'registry.isPackageDisabled' }]);
         }, 60_000);
     }
+});
+
+/**
+ * A door whose environment's security service cannot be resolved refuses
+ * rather than proceeds.
+ *
+ * The `security` slot answers one of two different facts, and the doors keep
+ * them apart. NOT REGISTERED is a deployment with no permission posture at all
+ * (ADR-0106 D6 tier 1): every door serves it exactly as before. REGISTERED BUT
+ * UNRESOLVABLE is an unhealthy security service, which D6 tier 3 rules must
+ * never open a door: the request answers the `503 SERVICE_UNAVAILABLE` an
+ * unreadable authorization input answers, and nothing is served — no row, no
+ * template, no schema.
+ *
+ * Four doors ask the server's one security resolver, each driven on both
+ * mounts: the export, the import template's gate, the template's column
+ * projection, and the object-schema mask of `GET /meta/object/:name`. Each
+ * environment answers the slot one way:
+ *
+ *  - `ENV_SEC_OK` — a healthy occupant, the control: export and create are
+ *    denied on `deal`, a `memo` template is projected to its writable columns,
+ *    and `secret` is not a readable field;
+ *  - `ENV_SEC_NONE` — no occupant: every door serves;
+ *  - `ENV_SEC_FACTORY` — the slot is registered as a factory that throws;
+ *  - `ENV_SEC_ACQ` — a healthy occupant whose kernel acquisition rejects at the
+ *    security step, from the first step (or, for the projection leg, from the
+ *    second, so the template's gate is answered and its projection is not);
+ *  - `ENV_SEC_DOWN` — every acquisition rejects, so the request fails before
+ *    any door asks, and serves nothing.
+ *
+ * Every fault is the production seam's own: the registry's rejection of a
+ * factory that threw, or the kernel manager's rejection. The wrapper around
+ * the server's security provider only chooses WHICH acquisition sees it; the
+ * provider it calls is the plugin's.
+ */
+const POSTURE_FIELDS = {
+    id: { type: 'text', label: 'ID' },
+    name: { type: 'text', label: 'Name' },
+    secret: { type: 'text', label: 'Secret' },
+};
+const POSTURE_OBJECTS: Record<string, { name: string; label: string; fields: typeof POSTURE_FIELDS }> = {
+    deal: { name: 'deal', label: 'Deal', fields: POSTURE_FIELDS },
+    memo: { name: 'memo', label: 'Memo', fields: POSTURE_FIELDS },
+};
+
+/** The environment's protocol: two objects, and a row read that records which kernel read it. */
+function postureProtocol(env: string, reached: Reached[]): unknown {
+    return {
+        ...(envProtocol(env) as Record<string, unknown>),
+        getMetaItem: async (request: { type?: string; name?: string }) => {
+            const item = request?.type === 'object' ? POSTURE_OBJECTS[request?.name ?? ''] : undefined;
+            return item ? { type: 'object', name: item.name, item } : undefined;
+        },
+        getMetaItems: async (request: { type?: string }) => ({
+            items: request?.type === 'object' ? Object.values(POSTURE_OBJECTS) : [],
+        }),
+        findData: async ({ object }: { object: string }) => {
+            reached.push({ env, op: 'findData' });
+            return { object, records: [{ id: '1', name: `row_${env}`, secret: `secret_${env}` }] };
+        },
+    };
+}
+
+/** A healthy `security` occupant: export denied, create denied on `deal`, `secret` unreadable. */
+function postureSecurity(env: string, reached: Reached[]): unknown {
+    const rec = (op: string, answer: (...args: any[]) => unknown) => async (...args: any[]) => {
+        reached.push({ env, op });
+        return answer(...args);
+    };
+    return {
+        canExport: rec('security.canExport', () => false),
+        explain: rec('security.explain', (request: { object?: string }) => ({ allowed: request?.object === 'memo' })),
+        getWritableFields: rec('security.getWritableFields', () => ['name']),
+        getReadableFields: rec('security.getReadableFields', () => ['id', 'name']),
+    };
+}
+
+/** The `security` slot registered as a factory that throws. */
+const throwingSecurityFactory = {
+    name: 'test.security.factory-throws',
+    version: '1.0.0',
+    init: async (ctx: PluginContext) => {
+        ctx.registerServiceFactory('security', () => {
+            throw new Error('the security service failed to construct');
+        });
+    },
+};
+
+interface PostureHosted extends Hosted {
+    /** On `ENV_SEC_ACQ`, the security-step acquisitions of a request from `rejectFrom` on reject. */
+    securityStep: { rejectFrom: number; count: number; rejecting: boolean };
+}
+
+async function bootSecurityPosture(): Promise<PostureHosted> {
+    const reached: Reached[] = [];
+    const envKernel = (env: string, security: 'occupant' | 'none' | 'factory-throws') => bootKernel(`test.env.${env}`, {
+        auth: authServiceFor(`u_${env}`),
+        objectql: emptyQl(),
+        protocol: postureProtocol(env, reached),
+        ...(security === 'occupant' ? { security: postureSecurity(env, reached) } : {}),
+    }, security === 'factory-throws' ? [throwingSecurityFactory] : []);
+    const kernelsById: Record<string, ObjectKernel> = {
+        [ENV_SEC_OK]: await envKernel(ENV_SEC_OK, 'occupant'),
+        [ENV_SEC_NONE]: await envKernel(ENV_SEC_NONE, 'none'),
+        [ENV_SEC_FACTORY]: await envKernel(ENV_SEC_FACTORY, 'factory-throws'),
+        [ENV_SEC_ACQ]: await envKernel(ENV_SEC_ACQ, 'occupant'),
+    };
+    const managed = hostKernelManager(kernelsById);
+    const securityStep = { rejectFrom: 1, count: 0, rejecting: false };
+    const km = {
+        ...managed,
+        async getOrCreate(environmentId: string): Promise<ObjectKernel> {
+            if (environmentId === ENV_SEC_DOWN || (environmentId === ENV_SEC_ACQ && securityStep.rejecting)) {
+                managed.acquisitions.push(environmentId);
+                throw new Error(`the kernel of ${environmentId} could not be acquired`);
+            }
+            return managed.getOrCreate(environmentId);
+        },
+    };
+    const resolver = hostKernelResolver();
+    const http = recordingHttp();
+    captured.servers.length = 0;
+    const host = await bootKernel('test.host.security-posture', {
+        'http.server': http,
+        protocol: envProtocol('host'),
+        'kernel-manager': km,
+        'kernel-resolver': resolver,
+        // The host's OWN occupant: an answer from it is recorded as `host`.
+        security: postureSecurity('host', reached),
+    }, [createRestApiPlugin({ api: { api: { enableProjectScoping: true, projectResolution: 'auto' } } } as any)]);
+    expect(captured.servers, 'the plugin must construct exactly one RestServer').toHaveLength(1);
+    const server = captured.servers[0];
+    const provider = server.securityServiceProvider;
+    expect(typeof provider, 'the plugin wires its environment-scoped security provider').toBe('function');
+    // The provider's acquisition runs synchronously inside this call, so the
+    // flag is up for exactly that one acquisition and no other.
+    server.securityServiceProvider = (environmentId?: string) => {
+        securityStep.count += 1;
+        securityStep.rejecting = securityStep.count >= securityStep.rejectFrom;
+        try { return provider(environmentId); } finally { securityStep.rejecting = false; }
+    };
+    return {
+        table: http.table,
+        reached,
+        km: managed,
+        resolver,
+        server,
+        kernels: [host, ...Object.values(kernelsById)],
+        securityStep,
+    };
+}
+
+interface PostureDoor {
+    path: string;
+    params: Record<string, string>;
+    query: Record<string, string>;
+}
+
+const POSTURE_DOORS = {
+    export: { path: '/data/:object/export', params: { object: 'deal' }, query: { format: 'csv' } },
+    templateGate: { path: '/data/:object/export', params: { object: 'deal' }, query: { template: 'true' } },
+    template: { path: '/data/:object/export', params: { object: 'memo' }, query: { template: 'true' } },
+    mask: { path: '/meta/:type/:name', params: { type: 'object', name: 'deal' }, query: {} },
+} satisfies Record<string, PostureDoor>;
+
+async function drivePosture(h: PostureHosted, door: PostureDoor, mount: Mount, env: string, rejectFrom = 1) {
+    h.securityStep.count = 0;
+    h.securityStep.rejectFrom = rejectFrom;
+    h.reached.length = 0;
+    const key = `GET ${mount === 'scoped' ? SCOPED : BASE}${door.path}`;
+    const handler = h.table.get(key);
+    if (!handler) throw new Error(`route not mounted: ${key}`);
+    const concrete = door.path.replace(/:(\w+)/g, (_m, k: string) => door.params[k] ?? `:${k}`);
+    const url = mount === 'scoped' ? `${BASE}/environments/${env}${concrete}` : `${BASE}${concrete}`;
+    const req: any = {
+        method: 'GET',
+        path: url,
+        url,
+        params: { ...door.params, ...(mount === 'scoped' ? { environmentId: env } : {}) },
+        query: { ...door.query },
+        headers: {
+            host: mount === 'scoped' ? 'unbound.example.test' : HOST_OF[env],
+            cookie: 'session=whatever',
+        },
+    };
+    let status = 0; let body: any;
+    const headers: Record<string, string> = {};
+    const written: unknown[] = [];
+    const res: any = {
+        status(c: number) { status = c; return res; },
+        json(b: any) { body = b; return res; },
+        send(b: any) { body = b; return res; },
+        header(n: string, v: string) { headers[n] = v; return res; },
+        setHeader(n: string, v: string) { headers[n] = v; return res; },
+        write(chunk: unknown) { written.push(chunk); return true; },
+        end() {}, type() { return res; },
+    };
+    await handler(req, res);
+    return { status: status || 200, body, headers, written };
+}
+
+/** The served schema's field names, in either served shape of `fields`. */
+function servedFieldNames(body: any): string[] {
+    const item = body?.data?.item ?? body?.item ?? body?.data;
+    const fields = item?.fields;
+    if (Array.isArray(fields)) return fields.map((f: any) => f?.name);
+    return fields && typeof fields === 'object' ? Object.keys(fields) : [];
+}
+
+/**
+ * The refusal: the declared outage, and not one byte of the door's payload.
+ * The pair that is the contract is the STATUS and the machine CODE; the body is
+ * the flat shape every withheld 5xx on this server wears.
+ */
+function expectUnresolvableRefusal(h: PostureHosted, out: Awaited<ReturnType<typeof drivePosture>>): void {
+    expect(out.status, JSON.stringify(out.body)).toBe(503);
+    expect(out.body?.code, JSON.stringify(out.body)).toBe('SERVICE_UNAVAILABLE');
+    expect(out.written).toEqual([]);
+    expect(h.reached.filter((r) => r.op === 'findData')).toEqual([]);
+    expect(servedFieldNames(out.body)).toEqual([]);
+}
+
+const UNRESOLVABLE: Array<{ env: string; how: string }> = [
+    { env: ENV_SEC_FACTORY, how: 'is registered as a factory that throws' },
+    { env: ENV_SEC_ACQ, how: 'cannot be acquired at the security step' },
+];
+
+describe('a door whose environment\'s security service cannot be resolved refuses rather than proceeds', () => {
+    let h: PostureHosted;
+    beforeAll(async () => { h = await bootSecurityPosture(); }, 60_000);
+    afterAll(async () => { for (const k of h?.kernels ?? []) await k.shutdown(); });
+
+    for (const mount of ['scoped', 'hostname'] as const) {
+        it(`control (${mount}): a healthy security service denies the export and the template, projects the template to its writable columns, and masks the schema`, async () => {
+            const exported = await drivePosture(h, POSTURE_DOORS.export, mount, ENV_SEC_OK);
+            expect(exported.status, JSON.stringify(exported.body)).toBe(403);
+            expect(exported.body?.code).toBe('EXPORT_NOT_PERMITTED');
+            expect(h.reached).toEqual([{ env: ENV_SEC_OK, op: 'security.canExport' }]);
+
+            const gated = await drivePosture(h, POSTURE_DOORS.templateGate, mount, ENV_SEC_OK);
+            expect(gated.status, JSON.stringify(gated.body)).toBe(403);
+            expect(gated.body?.error?.code).toBe('PERMISSION_DENIED');
+            expect(gated.written).toEqual([]);
+
+            const template = await drivePosture(h, POSTURE_DOORS.template, mount, ENV_SEC_OK);
+            expect(template.status, JSON.stringify(template.body)).toBe(200);
+            expect(template.headers['X-Export-Template-Projection']).toBe('writable');
+            expect(template.written).toHaveLength(1);
+
+            const schema = await drivePosture(h, POSTURE_DOORS.mask, mount, ENV_SEC_OK);
+            expect(schema.status, JSON.stringify(schema.body)).toBe(200);
+            expect(servedFieldNames(schema.body)).toEqual(['id', 'name']);
+            expect(h.reached.filter((r) => r.env !== ENV_SEC_OK)).toEqual([]);
+        }, 60_000);
+
+        it(`no security service registered (${mount}): every door serves, as a deployment without a permission posture does`, async () => {
+            const exported = await drivePosture(h, POSTURE_DOORS.export, mount, ENV_SEC_NONE);
+            expect(exported.status, JSON.stringify(exported.body)).toBe(200);
+            expect(h.reached).toEqual([{ env: ENV_SEC_NONE, op: 'findData' }]);
+            expect(String(exported.written.join(''))).toContain(`row_${ENV_SEC_NONE}`);
+
+            const template = await drivePosture(h, POSTURE_DOORS.templateGate, mount, ENV_SEC_NONE);
+            expect(template.status, JSON.stringify(template.body)).toBe(200);
+            expect(template.headers['X-Export-Template-Projection']).toBe('none');
+
+            const schema = await drivePosture(h, POSTURE_DOORS.mask, mount, ENV_SEC_NONE);
+            expect(schema.status, JSON.stringify(schema.body)).toBe(200);
+            expect(servedFieldNames(schema.body)).toEqual(['id', 'name', 'secret']);
+            expect(h.reached.filter((r) => r.env === 'host')).toEqual([]);
+        }, 60_000);
+
+        for (const { env, how } of UNRESOLVABLE) {
+            it(`the export (${mount}) refuses when the environment's security service ${how}, and reads no row`, async () => {
+                expectUnresolvableRefusal(h, await drivePosture(h, POSTURE_DOORS.export, mount, env));
+                expect(h.reached).toEqual([]);
+            }, 60_000);
+
+            it(`the import template's gate (${mount}) refuses when the environment's security service ${how}`, async () => {
+                const out = await drivePosture(h, POSTURE_DOORS.templateGate, mount, env);
+                expectUnresolvableRefusal(h, out);
+                expect(out.headers['X-Export-Template-Projection']).toBeUndefined();
+                expect(h.reached).toEqual([]);
+            }, 60_000);
+
+            it(`the object-schema mask (${mount}) refuses when the environment's security service ${how}`, async () => {
+                expectUnresolvableRefusal(h, await drivePosture(h, POSTURE_DOORS.mask, mount, env));
+                expect(h.reached).toEqual([]);
+            }, 60_000);
+        }
+
+        it(`the import template's column projection (${mount}) refuses when its security step cannot be resolved after the gate answered`, async () => {
+            const out = await drivePosture(h, POSTURE_DOORS.template, mount, ENV_SEC_ACQ, 2);
+            expectUnresolvableRefusal(h, out);
+            expect(out.headers['X-Export-Template-Projection']).toBeUndefined();
+            // The gate WAS answered (create is allowed on `memo`); the
+            // projection that follows it was never asked.
+            expect(h.reached).toEqual([{ env: ENV_SEC_ACQ, op: 'security.explain' }]);
+        }, 60_000);
+
+        it(`every acquisition rejecting (${mount}) still fails the request before any door serves`, async () => {
+            for (const door of Object.values(POSTURE_DOORS)) {
+                const out = await drivePosture(h, door, mount, ENV_SEC_DOWN);
+                // Refused by whichever step fails first (the protocol, or the
+                // caller's identity), never answered as a served door.
+                expect(out.status, `${door.path} ${JSON.stringify(out.body)}`).toBeGreaterThanOrEqual(400);
+                expect(out.written).toEqual([]);
+                expect(servedFieldNames(out.body)).toEqual([]);
+                expect(h.reached).toEqual([]);
+            }
+        }, 60_000);
+    }
+
+    it('the resolver still answers `undefined` for an environment whose kernel registers no security service', async () => {
+        for (const req of [hostnameRequest(ENV_SEC_NONE), scopedRequest(ENV_SEC_NONE)]) {
+            await expect(h.server.resolveSecurityService(req.params.environmentId, req)).resolves.toBeUndefined();
+        }
+    }, 60_000);
+});
+
+describe('a single kernel with no security service keeps serving every door, as before', () => {
+    let h: Hosted;
+    beforeAll(async () => {
+        const reached: Reached[] = [];
+        const http = recordingHttp();
+        captured.servers.length = 0;
+        const kernel = await bootKernel('test.single.no-security', {
+            'http.server': http,
+            protocol: postureProtocol('host', reached),
+            auth: authServiceFor('u_host'),
+            objectql: emptyQl(),
+        }, [createRestApiPlugin({ api: { api: { enableProjectScoping: true, projectResolution: 'auto' } } } as any)]);
+        expect(captured.servers).toHaveLength(1);
+        h = {
+            table: http.table,
+            reached,
+            km: hostKernelManager({}),
+            resolver: hostKernelResolver(),
+            server: captured.servers[0],
+            kernels: [kernel],
+        };
+    }, 60_000);
+    afterAll(async () => { for (const k of h?.kernels ?? []) await k.shutdown(); });
+
+    it('the resolver answers `undefined`, and the export serves its rows', async () => {
+        const req = hostnameRequest('host');
+        await expect(h.server.resolveSecurityService(undefined, req)).resolves.toBeUndefined();
+        const out = await drivePosture({ ...h, securityStep: { rejectFrom: 1, count: 0, rejecting: false } },
+            POSTURE_DOORS.export, 'hostname', 'host');
+        expect(out.status, JSON.stringify(out.body)).toBe(200);
+        expect(h.reached).toEqual([{ env: 'host', op: 'findData' }]);
+    }, 60_000);
 });

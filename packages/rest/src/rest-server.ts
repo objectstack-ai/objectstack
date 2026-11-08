@@ -2834,7 +2834,9 @@ export class RestServer {
      * every other permission gate here and `/me/permissions`' documented
      * fail-open. Service PRESENT but unable to answer → fail CLOSED: it resolves
      * permission sets to decide, and a resolution failure must never read as a
-     * grant (ADR-0049).
+     * grant (ADR-0049). A service that is registered but cannot be RESOLVED is
+     * not "no security service": {@link resolveSecurityService} refuses the
+     * request first (`503`), before this gate is asked anything.
      */
     private async enforceExportPermission(
         req: any,
@@ -2891,7 +2893,8 @@ export class RestServer {
      *
      * Fail stance, as {@link enforceExportPermission}'s: no security service,
      * or one without `explain`, → allow (no permission sets exist to deny
-     * with); `explain` throwing → deny, never read as a grant. One direction is
+     * with); `explain` throwing → deny, never read as a grant; a service that
+     * cannot be resolved → the resolver's `503`. One direction is
      * stricter than a write: `explain` denies a caller whose permission sets
      * resolve EMPTY, where the middleware skips its CRUD gate — reachable only
      * on a deployment that configures no baseline set at all, and in the closed
@@ -4435,7 +4438,11 @@ export class RestServer {
      * The returned function REJECTS with {@link ObjectSchemaMaskEvaluationError}
      * on D6 tier 3 — the security service threw. Call sites answer 5xx via
      * {@link sendFieldVisibilityFault}; they must never fall back to the
-     * unmasked body.
+     * unmasked body. This resolution itself rejects with
+     * {@link AuthzStoreUnavailableError} — D6 tier 3 as well — when the caller's
+     * context or the environment's security service cannot be resolved; call
+     * sites rethrow it to the route's `503`. Only a security service that is
+     * NOT REGISTERED reaches tier 1.
      */
     private async resolveObjectMasker(
         environmentId: string | undefined,
@@ -5940,16 +5947,30 @@ export class RestServer {
     /**
      * [#3547] Resolve the environment's `security` service — the ENVIRONMENT's
      * kernel service (its evaluator / FieldMasker are bound to that kernel's
-     * data engine). Mirrors the resolver in registerSecurityExplainEndpoints.
-     * Returns `undefined` when no security service is reachable (no
-     * plugin-security / single-kernel without a provider), so callers degrade
-     * gracefully.
+     * data engine).
      *
-     * [#30192] The provider resolves the environment's kernel itself now
+     * [#30192] The provider resolves the environment's kernel itself
      * (`rest-api-plugin`'s environment-scoped seam), so this asks it for the
      * REQUEST's environment, the shared resolver's answer, and nothing else.
-     * The host's occupant is no longer a fallback: an environment whose kernel
-     * carries no security service, or cannot be acquired, answers `undefined`.
+     * The host's occupant is never a fallback.
+     *
+     * A door whose environment's security service cannot be resolved refuses
+     * rather than proceeds. The two answers are told apart by the registry's
+     * own "never registered" brand, never by message text:
+     *
+     *  - NOT REGISTERED → `undefined`: no provider is wired, the environment's
+     *    kernel registers no `security` service (the provider absorbs the
+     *    branded rejection), or that branded rejection reaches this resolver.
+     *    The deployment has no permission posture at all (no plugin-security,
+     *    or a single kernel without one), and each caller's documented
+     *    degradation for that case stands (ADR-0106 D6 tier 1).
+     *  - REGISTERED BUT UNRESOLVABLE → {@link AuthzStoreUnavailableError}, the
+     *    door's `503 SERVICE_UNAVAILABLE`: every other rejection — a registered
+     *    factory that threw, or the environment's kernel failing to be
+     *    acquired at this step. An unhealthy security service must not open a
+     *    door (ADR-0106 D6 tier 3), and a resolution failure never reads as a
+     *    grant (ADR-0049). The same classification the tenancy read makes
+     *    (`resolveAnonymousFormTenancy`).
      *
      * Typed as a PARTIAL {@link ISecurityService}: an implementation may omit a
      * method it cannot honour, so every call site must keep feature-detecting
@@ -5963,8 +5984,10 @@ export class RestServer {
         try {
             const envId = await this.resolveRequestEnvironmentId(environmentId, req);
             return await this.securityServiceProvider(envId);
+        } catch (err) {
+            if (isServiceNotRegisteredError(err)) return undefined;
+            throw new AuthzStoreUnavailableError('security', err);
         }
-        catch { return undefined; }
     }
 
     /**
