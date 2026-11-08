@@ -1030,7 +1030,7 @@
       "title": "A field's declared accept/maxSize is re-enforced SERVER-SIDE on record write — the control the client widget check explicitly is not — with the declared missing-metadata and dotless-extension holes scored as documented boundaries",
       "since": "v17",
       "status": "active",
-      "revision": 7,
+      "revision": 8,
       "priority": "P1",
       "surface": "api",
       "personas": ["seeded admin (admin@objectos.ai) — the check is a declaration constraint, not an authz gate: it binds every caller identically, so no restricted persona is needed"],
@@ -1039,7 +1039,7 @@
         "requires": [
           "the qamedia_media scratch object with field-level accept/maxSize (see provisioning) — no stock showcase object declares either",
           "the storage service live at the default base — presign/complete is how the probe sys_file rows are minted, and their mime_type/size are the DECLARED values the check reads (packages/services/service-storage/src/storage-routes.ts#registerStorageFamily: its POST /storage/upload/presigned handler persists the pending sys_file row with the declared mimeType and size)",
-          "a system-write channel to CLEAR mime_type and size on one committed sys_file row for the missing-metadata clause — the presign door refuses a body without mimeType/size (400 INVALID_REQUEST, storage-routes.ts), so a metadata-less row cannot be minted through the API; without the system write that one clause is blocked(fixture)"
+          "a system-write channel to CLEAR mime_type and size on one committed sys_file row for the missing-metadata clause — the presign door refuses a body without mimeType/size (400 INVALID_REQUEST, storage-routes.ts), so a metadata-less row cannot be minted through the API. Since #27399 the data door cannot be that channel either: a PATCH of mime_type / size through /api/v1/data/sys_file answers 200 and changes nothing. Name a direct database write: an UPDATE of the sys_file row in the run's own database (for a file DB, node:sqlite against the OS_DATABASE_URL file). Without the system write that one clause is blocked(fixture)"
         ],
         "provisioning": {
           "use": "qa-media-constraints",
@@ -1135,6 +1135,12 @@
           "date": "2026-10-28",
           "change": "steps[1](B), steps[5] and negative[3] corrected. Checklist-accuracy findings of the 18.2.0 wave 2 (QA run #26476, manual api set, at 756220c4; wave anchor #25807, slice B). (1) steps[1](B) said the bytes need not match the declared size; since #24548 upload/complete answers 409 when the backend's bytes differ from the declared size, so B must carry its 2097152 bytes. (2) steps[5] offered PUT, which a record answers 405. (3) negative[3] said an unknown id passes untouched; since #26043 a write with a caller refuses it 400 VALIDATION_FAILED, the same answer as an unreadable file. Re-read at base fd246c22: packages/services/service-storage/src/storage-routes.ts heldBytesRefusal (getInfo size against the declared size), file-reference-lifecycle.ts findReferenceableFile ('refused' for an id the lookup cannot see when a caller is asked). The run's recipe line (media_qa_media, 422 NAMESPACE_PREFIX) is already closed by revision 6 (#26876, qamedia_media). The negative still says the probe measures nothing; only the reason changed",
           "ref": "#25807"
+        },
+        {
+          "revision": 8,
+          "date": "2026-11-08",
+          "change": "fixtures.requires[2] names a direct database write as the system-write channel: since #27399 a PATCH through the data door answers 200 and changes nothing. Checklist-accuracy finding of QA run #31486 (owed:weekly, at 0647dabb). Read at base 4894cfe1",
+          "ref": "#31499"
         }
       ]
     },
@@ -1252,7 +1258,7 @@
       "title": "Chunked upload integrity on v18: complete with a missing chunk is 409 with details.missingChunks and the session stays in_progress, a re-sent chunk counts once, parallel chunks all record, and an org switch mid-upload answers 409 on chunk and complete, and on progress only once the session's expiry stamp is due",
       "since": "v18",
       "status": "active",
-      "revision": 8,
+      "revision": 9,
       "priority": "P2",
       "surface": "api",
       "personas": [
@@ -1264,7 +1270,8 @@
           "a fresh boot of the showcase: `pnpm dev -- --fresh -p PORT --seed-admin` (ephemeral DB; the seeded admin is printed)"
         ],
         "knownGaps": [
-          "CLOSED for the pin half: packages/plugins/organizations/src/storage-upload-organization-change.wall.test.ts now drives the CHUNKED doors after an organization switch over a booted wall (chunk PUT 409, chunked complete 409, progress 200 on a live session and 409 when its expiry stamp is due), so the door-level 409 of acceptance[3] is pinned at http-in-process and the automated.ref names it. The guard is the doors' shared requireStartingOrganization (packages/services/service-storage/src/storage-routes.ts, asking packages/services/service-storage/src/metadata-store.ts#organizationOutOfWriteReach). acceptance[3]'s live leg, steps[3], needs a second organization the admin can make active. A stock boot holds one: POST /api/v1/auth/organization/create answers 403 ORGANIZATION_CREATION_DISABLED on every boot whose posture enforces no wall (packages/plugins/plugin-auth/src/auth-manager.ts#ORGANIZATION_CREATION_DISABLED_CODE; QA runs #24560 / #24558). On 18.0.0, where 18.x step 4 (#24580) has deleted the walled boot refusal that of the published prereleases only 18.0.0-next.5 carries, a walled boot provisioned per RUNNER.md's environment-facts entry 'A walled boot is a fixture of its own' creates it through that same door (RUNNER.md 'A stock `single` boot holds exactly one organization, and no door mints a second; a walled boot mints them through the auth API'). A run that provisions neither records acceptance[3] blocked(fixture) naming those entries, never fail. Such a run scores the guard from the wall pin alone; a run that stages the second organization with a system write, as QA run #24560 did, scores a fixture of its own making and records that its verdict rests on it"
+          "CLOSED for the pin half: packages/plugins/organizations/src/storage-upload-organization-change.wall.test.ts now drives the CHUNKED doors after an organization switch over a booted wall (chunk PUT 409, chunked complete 409, progress 200 on a live session and 409 when its expiry stamp is due), so the door-level 409 of acceptance[3] is pinned at http-in-process and the automated.ref names it. The guard is the doors' shared requireStartingOrganization (packages/services/service-storage/src/storage-routes.ts, asking packages/services/service-storage/src/metadata-store.ts#organizationOutOfWriteReach). acceptance[3]'s live leg, steps[3], needs a second organization the admin can make active. A stock boot holds one: POST /api/v1/auth/organization/create answers 403 ORGANIZATION_CREATION_DISABLED on every boot whose posture enforces no wall (packages/plugins/plugin-auth/src/auth-manager.ts#ORGANIZATION_CREATION_DISABLED_CODE; QA runs #24560 / #24558). On 18.0.0, where 18.x step 4 (#24580) has deleted the walled boot refusal that of the published prereleases only 18.0.0-next.5 carries, a walled boot provisioned per RUNNER.md's environment-facts entry 'A walled boot is a fixture of its own' creates it through that same door (RUNNER.md 'A stock `single` boot holds exactly one organization, and no door mints a second; a walled boot mints them through the auth API'). A run that provisions neither records acceptance[3] blocked(fixture) naming those entries, never fail. Such a run scores the guard from the wall pin alone; a run that stages the second organization with a system write, as QA run #24560 did, scores a fixture of its own making and records that its verdict rests on it",
+          "acceptance[3] needs a second organization, and a single stock boot cannot make one: QA run #31486 (owed:weekly, at 0647dabb) met create organization → 403 ORGANIZATION_CREATION_DISABLED and scored it blocked(fixture). The walled group boot (OS_TENANCY_POSTURE=group) that run's C3a slice provisioned would serve it; access-security.no-active-org-session-semantics (blocked, #9334) needs the same boot"
         ]
       },
       "steps": [
@@ -1355,6 +1362,12 @@
           "date": "2026-10-28",
           "change": "knownGaps[0], acceptance[0] and automated.ref follow the chunked-door wall pin. Checklist-accuracy finding of the 18.2.0 wave 2 (QA run #26468, Tier 1 half A, at 756220c4; wave anchor #25807, slice B): knownGaps[0] said no file drives a chunked door after an organization switch, but packages/plugins/organizations/src/storage-upload-organization-change.wall.test.ts pins the chunk PUT 409, the chunked-complete 409, progress 200 and the progress-with-due-expiry 409 over a booted wall. The file joins the ref, knownGaps[0] is closed for the pin half (its live-leg fixture text is kept), and acceptance[0]'s 'no chunked-door pin' sentence is replaced. Re-read at base fd246c22 (the wall file's chunk-PUT, chunked-complete and progress cases). No clause's assertion changed",
           "ref": "#25807"
+        },
+        {
+          "revision": 9,
+          "date": "2026-11-08",
+          "change": "fixtures.knownGaps gains acceptance[3]'s second-organization fixture gap and the group boot that would serve it. Coverage gap of QA run #31486 (owed:weekly, at 0647dabb). Read at base 4894cfe1",
+          "ref": "#31499"
         }
       ]
     }

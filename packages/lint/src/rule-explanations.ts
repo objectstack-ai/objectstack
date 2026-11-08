@@ -5307,9 +5307,9 @@ const PERMISSION_RETIRED_LIFECYCLE_RESIDUE_EXPLANATION: RuleExplanation = {
     'A warning: the line is harmless, only dead. The fix line is the "Delete the key" sentence of the ' +
       'retirement\'s own prescription, read from the tombstone on `ObjectPermissionSchema` and cut, never ' +
       'retyped, so the parse-time refusal and this finding never word it differently. Deleting the key opens ' +
-      'nothing: a dispatched `restore` or `purge` stays denied fail-closed by the permission evaluator\'s ' +
-      'destructive-operation backstop, and the bit returns with the M2 lifecycle initiative alongside the ' +
-      'operation it gates; `os migrate meta` lists the mechanical edits for existing sources. Judged at every ' +
+      'nothing: the key granted nothing when it was retired, and the recycle bin\'s `restore` and `purge` ' +
+      'operations are granted by their own keys, `allowRestoreOwnDeleted` and `manageRecycleBin` ' +
+      '(ADR-0148); `os migrate meta` lists the mechanical edits for existing sources. Judged at every ' +
       'CLI door and at the runtime publish gate for a `permission` write.',
   ],
 };

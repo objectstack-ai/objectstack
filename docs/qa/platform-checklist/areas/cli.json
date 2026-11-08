@@ -503,7 +503,7 @@
       "title": "The published first-run closes: create-objectstack scaffold → install → validate → build → boot → health, with the skills boundary holding",
       "since": "v15",
       "status": "active",
-      "revision": 7,
+      "revision": 8,
       "priority": "P1",
       "surface": "mixed",
       "personas": ["new user (published-registry consumer)"],
@@ -511,7 +511,7 @@
         "app": "showcase",
         "requires": [
           "npm registry reachability (the whole point is the PUBLISHED path, not the repo checkout)",
-          "PRE-RELEASE VARIANT (proved by run #21845 on the 17.7 candidate) — the published path can only measure what is already released, so to test an unreleased candidate: in the candidate checkout run pnpm install --frozen-lockfile && pnpm build, pack every public workspace package and publish the tarballs ONLY to a localhost registry configured with NO upstream for @objectstack/* and create-objectstack (so nothing under test can resolve from npm), point the scaffold at it (npm_config_registry), and run the repo's own bin — node <checkout>/packages/create-objectstack/bin/create-objectstack.js qa-first-run -t blank --skip-skills — in place of npx create-objectstack@latest. Prove the candidate is what got installed: the scaffold lockfile's integrity hash for each @objectstack/* package equals the local tarball's. Nothing is published anywhere else. The run record names which path it took (published or pre-release)"
+          "PRE-RELEASE VARIANT (proved by run #21845 on the 17.7 candidate) — the published path can only measure what is already released, so to test an unreleased candidate: in the candidate checkout run pnpm install --frozen-lockfile && pnpm build, pack every public workspace package and publish the tarballs ONLY to a localhost registry configured with NO upstream for @objectstack/*, @object-ui/* and create-objectstack (so nothing under test can resolve from npm) and, for verdaccio, max_body_size raised (the @objectstack/spec and @objectstack/console tarballs answer 413 at the default), point the scaffold at it (npm_config_registry), and run the repo's own bin — node <checkout>/packages/create-objectstack/bin/create-objectstack.js qa-first-run -t blank --skip-skills — in place of npx create-objectstack@latest. Prove the candidate is what got installed: the scaffold lockfile's integrity hash for each @objectstack/* package equals the local tarball's. Nothing is published anywhere else. The run record names which path it took (published or pre-release)"
         ],
         "knownGaps": [
           "during an RC window the repo version is unpublished and `latest` points at the previous major, so the protocol-major handshake refuses the artifact — that refusal is the ADR-0087 D1 gate WORKING on a skew the fallback introduced (#4894); record it in evidence, do not fail the item for it",
@@ -524,7 +524,7 @@
         "cd qa-first-run && npm run validate; echo $? — then npm run build; echo $?",
         "boot from the artifact exactly as the workflow does: `npx os start --artifact ./dist/objectstack.json --port 8080 > server.log 2>&1 &`, poll /api/v1/health up to 60s, then `curl -fsS http://localhost:8080/api/v1/ready`",
         "repeat scaffold + validate + build across the template matrix (variants — `blank` only since revision 2: create-objectstack's catalog, packages/create-objectstack/src/template-registry.ts, holds the one bundled template); run validate where the script exists",
-        "skills: from the 18 line on (create-objectstack@next, and this checkout's bin for the pre-release variant) a scaffold WITHOUT --skip-skills installs the catalog from the @objectstack/skills package its own install put in node_modules, synced into .claude/skills/ as real files — compare that set (directories holding a SKILL.md, not symlinks) with the directories holding a SKILL.md under node_modules/@objectstack/skills/dist/skills by name and count — that directory also holds a README.md, so a bare `ls` count reads one higher — as scaffold-e2e.yml's 'Skills: the scaffolder installed exactly the @objectstack/skills catalog' step does, and assert no internal skill (dogfood-verification) is among them. The 17.x line (create-objectstack@latest while 17.7 is latest) depends on no @objectstack/skills package. The GitHub-path boundary probe stays as the guard for the channel the docs keep: in a fresh scaffold run `npx -y skills add <objectstack checkout>/skills --all --copy` and compare the installed set to the curated skills/ catalog; then list repo-root discovery and assert no internal skill (dogfood-verification) surfaces",
+        "skills: from the 18 line on (create-objectstack@next, and this checkout's bin for the pre-release variant) a scaffold WITHOUT --skip-skills installs the catalog from the @objectstack/skills package its own install put in node_modules, synced into .claude/skills/ as real files — compare that set (directories holding a SKILL.md, not symlinks) with the directories holding a SKILL.md under node_modules/@objectstack/skills/dist/skills by name and count — that directory also holds a README.md, so a bare `ls` count reads one higher — as scaffold-e2e.yml's 'Skills: the scaffolder installed exactly the @objectstack/skills catalog' step does, and assert no internal skill (dogfood-verification) is among them. The 17.x line (create-objectstack@latest while 17.7 is latest) depends on no @objectstack/skills package. The GitHub-path boundary probe stays as the guard for the channel the docs keep: in a fresh scaffold run `npx -y skills add <objectstack checkout>/skills --all --copy` and compare the installed set to the curated skills/ catalog; then list repo-root discovery (`npx skills add CHECKOUT --list` works as that listing) and assert no internal skill (dogfood-verification) surfaces",
         "capture server.log for any boot error"
       ],
       "acceptance": [
@@ -584,6 +584,12 @@
           "date": "2026-10-27",
           "change": "steps[0], steps[4] and fixtures.knownGaps follow the wave-2 live leg. Checklist-accuracy findings of the 18.2.0 wave 2 (QA run #26468, release-18.2.0-w2-tier1-a, at 756220c4; wave anchor #25807, slice A): the scaffolder exits 0 after its own install fails, so the exit code is no install evidence; dist/skills holds a README.md beside the skill directories; and on an unreleased subject only the pre-release variant measures the tree. knownGaps[1] names two corroborating unit pins. The run's line that revision 6's history row says 'seven clauses' for five is not edited: history rows are append-only. Re-read at base e4ba846f (create-objectstack index.ts: the install catch prints the warning and the scaffold still reports success). No clause changed",
           "ref": "#25807"
+        },
+        {
+          "revision": 8,
+          "date": "2026-11-08",
+          "change": "fixtures.requires[1]'s pre-release recipe raises verdaccio's max_body_size (@objectstack/spec and @objectstack/console answer 413 otherwise) and adds a no-upstream rule for @object-ui/*; steps[4] names `npx skills add CHECKOUT --list` as the repo-root discovery listing. Checklist-accuracy finding of QA run #31486 (owed:weekly, at 0647dabb). Read at base 4894cfe1",
+          "ref": "#31499"
         }
       ]
     },
@@ -2074,7 +2080,7 @@
       "title": "`os migrate organization-ownership` upgrades a database 17.x or an 18.0 pre-release (18.0.0-next.*) created (18.x): a bare run writes the reviewed plan and changes nothing; `--apply --plan-file PLAN --backup-taken` runs every step — attribution through the moves, the declared webhook and sharing-rule settlements, the column drops and NOT NULL — and certifies the marker at this release's ownership shape generation; the served boot refuses an uncertified database, naming the command, and boots a certified one; `os migrate apply --allow-destructive` still withholds every organization_id drop the ceremony owns, and `os migrate comment-reactions --apply` stays pinned",
       "since": "v18",
       "status": "active",
-      "revision": 8,
+      "revision": 9,
       "priority": "P0",
       "surface": "cli",
       "personas": [
@@ -2099,10 +2105,10 @@
       },
       "steps": [
         "on the v17-shaped copy, in the showcase's directory: first boot the run subject's `os serve` over it once (OS_DATABASE_URL=file:COPY, in the steps[1] environment). It is refused before it listens, and its schema sync still creates the tables this release adds, which the ceremony moves rows into, so the plan must be drawn after it: a plan drawn on a raw v17 database before any v18 boot leaves the apply blocked at its `rewrite` step until one boot has run (QA run #25812; the upgrade order content/docs/releases/v18/18-0.mdx gives, 'Start 18.0.0 against the database once'). Then `os migrate organization-ownership --database-url file:COPY --out /tmp/RUN/plan.json`; checksum the DB before and after the plan run",
-        "`--apply` without --plan-file; then `--apply --plan-file /tmp/RUN/plan.json --backup-taken --out /tmp/RUN/apply.json --json`; then read `SELECT verified_at, blocking, details FROM sys_migration WHERE id = 'adr-0131-organization-ownership'`. Run every ceremony command the way the deployment is served, in one environment with the steps[2] boots: OS_AUTH_SECRET set (a production `os serve`), or `--dev` on each command for a development boot (packages/cli/src/commands/migrate/organization-ownership.ts, the `--dev` flag). With neither, the apply blocks at its `authored-conversion` step (QA run #25812)",
+        "`--apply` without --plan-file; then `--apply --plan-file /tmp/RUN/plan.json --backup-taken --out /tmp/RUN/apply.json --json`; then read `SELECT verified_at, blocking, details FROM sys_migration WHERE id = 'adr-0131-organization-ownership'`. Run every ceremony command the way the deployment is served, in one environment with the steps[2] boots: OS_AUTH_SECRET set (a production `os serve`), or, for a development boot, `--dev` on the commands that declare it: `os migrate organization-ownership` (packages/cli/src/commands/migrate/organization-ownership.ts, the `--dev` flag) and `os serve`. `os migrate apply` and `os migrate comment-reactions` declare no `--dev` flag (steps[3], steps[4]): run them without it. With neither, the apply blocks at its `authored-conversion` step (QA run #25812)",
         "boot the showcase (`os serve`) over the migrated copy, and over a second, unmigrated copy",
-        "on a fresh unmigrated v17-shaped copy, first run steps[4]: on a real 17.x database the drop gate's first refusal is the reactions one, `refused_comment_reactions_unconverted` (packages/cli/src/commands/migrate/apply.ts, the comment-reactions gate sits above the organization-ownership one), until `os migrate comment-reactions --apply` is recorded verified. Then `os migrate apply --allow-destructive --yes --json`; checksum the DB before and after this apply",
-        "`os migrate comment-reactions --apply --yes` twice, on the steps[3] copy before its apply. Without --yes a non-interactive --apply is refused before it converts anything (packages/cli/src/commands/migrate/comment-reactions.ts)",
+        "on a fresh unmigrated v17-shaped copy, first run steps[4]: on a real 17.x database the drop gate's first refusal is the reactions one, `refused_comment_reactions_unconverted` (packages/cli/src/commands/migrate/apply.ts, the comment-reactions gate sits above the organization-ownership one), until `os migrate comment-reactions --apply` is recorded verified. Then `os migrate apply --allow-destructive --yes --json`, with no `--dev` (apply.ts declares no such flag); checksum the DB before and after this apply",
+        "`os migrate comment-reactions --apply --yes` twice, on the steps[3] copy before its apply, with no `--dev` (comment-reactions.ts declares no such flag). Without --yes a non-interactive --apply is refused before it converts anything (packages/cli/src/commands/migrate/comment-reactions.ts)",
         "18.0 pre-release leg, for acceptance[5]: on a COPY of the fixtures.requires[2] database (the cli-18-prerelease-db recipe's restore, the primary and its telemetry sibling, with the reset token re-dated by the recipe's step 3: the dump's one sys_verification row expired an hour after the dump was generated, so without it the reset leg answers 400 INVALID_TOKEN on every later run), read every table's rows through SQLite (node:sqlite, the `-wal` included: no sqlite3 CLI here) and keep per-table counts; boot the run subject's `os serve` over it (OS_DATABASE_URL=file:COPY) and keep the output and exit code; run steps[0] and steps[1] on it (the bare plan, then the reviewed `--apply --plan-file PLAN --backup-taken`); boot `os serve` over it again; read the rows again. Then, on that boot: sign in as each user the pre-release made, with its 18.0 password and once with a wrong one; read the token out of a reset mail the pre-release sent (now a sys_identity_email row) and complete that reset; and PATCH one showcase_task (under --dev its sys_http_delivery row lands in the telemetry sibling, n5.telemetry.db, not in the primary; under a production `os serve` no sibling is composed unless OS_TELEMETRY_DB names one, so the row lands in the primary: packages/cli/src/utils/telemetry-datasource.ts#resolveTelemetryDbPath. Read the file the boot actually composed)"
       ],
       "acceptance": [
@@ -2210,6 +2216,12 @@
           "date": "2026-11-01",
           "change": "Two QA run #28545 (W3-C1R) findings. acceptance[1] named plan-file-required without saying which output carries it: it is the --json refusal's reason, and the text run prints the 'Refused: --apply executes only a plan you reviewed' line through printError (organization-ownership.ts refuse). acceptance[5].verify now points at the cli-18-prerelease-db recipe's new knownGaps[3]: the second boot resumes the dump's two paused showcase_task_follow_up wait runs, so sys_automation_run holds its 9 → 9 count while two pre-existing ids vanish. The paused rows, their elapsed PT1M timers and the null assignees are read from the committed dump; the replacement by run_run_ history rows is #28545's live reading. No clause weakened. Read from source at base 6b9c1ca991. Wave anchor #27377, wave-3 accuracy slice S9 (#28641); finding parked in anchor comment 6554042054",
           "ref": "#28545"
+        },
+        {
+          "revision": 9,
+          "date": "2026-11-08",
+          "change": "steps[1], steps[3] and steps[4]: `os migrate apply` and `os migrate comment-reactions` take no `--dev` flag; only `os migrate organization-ownership` and `os serve` of the ceremony's commands do. Checklist-accuracy finding of QA run #31486 (owed:weekly, at 0647dabb). Read at base 4894cfe1",
+          "ref": "#31499"
         }
       ]
     },

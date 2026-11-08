@@ -106,6 +106,7 @@ import {
   MasterReferenceNotWritableError,
 } from './errors.js';
 import { isPlatformOwnershipFloorPolicy } from './platform-ownership-policies.js';
+import { rlsOperationForVerb } from './lifecycle-verb-rls-operation.js';
 
 /**
  * [ADR-0055] Which leg of the master-detail write check a refusal came from,
@@ -469,7 +470,7 @@ export async function assertControlledByParentWrite(
           ? opCtx.data != null &&
             typeof opCtx.data === 'object' &&
             resolveEngineUpdateDispatch(opCtx.data as EngineUpdateDispatchData, opCtx.options).kind === 'multi'
-          : operation === 'delete' &&
+          : rlsOperationForVerb(operation) === 'delete' &&
             resolveEngineDeleteDispatch(opCtx.options as EngineDeleteDispatchInput | undefined).kind === 'multi';
       if (!predicatePath) return;
       const { masterIds: predicateMasters, nullMasterRows } =
