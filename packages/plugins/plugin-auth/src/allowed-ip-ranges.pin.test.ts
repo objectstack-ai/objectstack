@@ -580,7 +580,7 @@ describe("an API key its own lifecycle refuses is answered that refusal at the o
     expect(res.body.success).toBe(false);
     expect(res.body.data).toBeUndefined();
     // A refusal the caller was told is no fault: the route logs no error line for it.
-    expect(rig.logger.error).not.toHaveBeenCalled();
+    expect(rig.logger.error.mock.calls.map(([line]) => line), JSON.stringify(res)).toEqual([]);
     return res;
   };
 
