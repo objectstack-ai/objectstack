@@ -28,6 +28,11 @@
  *    follows the same rule on `/change-password`: it is given only once the
  *    request's current password is confirmed, and a wrong current password
  *    gets the endpoint's own `INVALID_PASSWORD`.
+ *  - a change's after-effects (the `password_changed_at` stamp, the
+ *    forced-change clear, the history entry) land on the account the change
+ *    acted on, on the bearer lane as on the cookie lane, and on no other
+ *    account: when the password checks before the change judged a different
+ *    account, none of them lands.
  */
 
 import { describe, it, expect, afterAll, afterEach, vi } from 'vitest';
@@ -36,6 +41,7 @@ import { SqlDriver } from '@objectstack/driver-sql';
 import { AuthManager } from './auth-manager.js';
 import { authIdentityObjects } from './manifest.js';
 import { FORCED_ROTATION_REUSE_MESSAGE } from './auth-manager-password-session-policy.js';
+import { globalAfterHook, type AfterHookHost } from './auth-manager-after-hook.js';
 import { memoizeScrypt } from './__tests__/scrypt-memo.testkit';
 import { sqliteEnginePool } from './__tests__/sqlite-engine-pool.testkit';
 // better-auth's first module load is paid here, at module load, not inside the
@@ -253,4 +259,72 @@ describe('with history on, a reuse refusal is given only after the current passw
     }
     expect((await signIn(d, CHOSEN)).status, 'the password is unchanged').toBe(200);
   }, 60_000);
+});
+
+describe('a password change’s after-effects land on the account it changed, and on no other', () => {
+  it('signed in by bearer alone, the stamp and the forced-change clear land on that account', async () => {
+    const d = await deployment(true);
+    const bearer = (await signIn(d, TEMPORARY)).headers.get('set-auth-token') ?? '';
+    expect(bearer, 'sign-in must hand out a bearer').not.toBe('');
+
+    const changed = await post(d.manager, '/change-password', { currentPassword: TEMPORARY, newPassword: CHOSEN }, {
+      authorization: `Bearer ${bearer}`,
+    });
+    expect(changed.status, await changed.clone().text()).toBe(200);
+
+    // The stamp and the clear are one write (`stampPasswordChangedAt`).
+    expect(await mustChange(d)).toBe(false);
+    expect((await signIn(d, CHOSEN)).status).toBe(200);
+  }, 60_000);
+
+  /** The after-hook alone, over a host whose writes are recorded. */
+  const afterHookOf = () => {
+    const host = {
+      stampPasswordChangedAt: vi.fn(async () => {}),
+      recordPasswordHistory: vi.fn(async () => {}),
+      logDurabilityDegradation: vi.fn(),
+    };
+    const run = (ctx: unknown) => globalAfterHook.call(host as unknown as AfterHookHost, ctx);
+    return { host, run };
+  };
+  const changeCtx = (acting: string | undefined, checkedFor: string | undefined, path = '/change-password') => ({
+    path,
+    context: {
+      returned: { status: true },
+      ...(acting ? { session: { user: { id: acting }, session: { userId: acting } } } : {}),
+      ...(checkedFor ? { __osPwChangeUserId: checkedFor, __osPwHistory: { userId: checkedFor, oldHash: 'hash:old' } } : {}),
+    },
+  });
+
+  it('checks run for the account the change acted on: stamp and history land on it', async () => {
+    const { host, run } = afterHookOf();
+    await run(changeCtx('user_acting', 'user_acting'));
+    expect(host.stampPasswordChangedAt).toHaveBeenCalledTimes(1);
+    expect(host.stampPasswordChangedAt).toHaveBeenCalledWith('user_acting');
+    expect(host.recordPasswordHistory).toHaveBeenCalledWith('user_acting', 'hash:old');
+    expect(host.logDurabilityDegradation).not.toHaveBeenCalled();
+  });
+
+  it('checks run for another account: nothing lands on either account, and the operator is told', async () => {
+    const { host, run } = afterHookOf();
+    await run(changeCtx('user_acting', 'user_other'));
+    expect(host.stampPasswordChangedAt).not.toHaveBeenCalled();
+    expect(host.recordPasswordHistory).not.toHaveBeenCalled();
+    expect(host.logDurabilityDegradation).toHaveBeenCalledTimes(1);
+  });
+
+  it('checks that judged no account: nothing lands, and the operator is told', async () => {
+    const { host, run } = afterHookOf();
+    await run(changeCtx('user_acting', undefined));
+    expect(host.stampPasswordChangedAt).not.toHaveBeenCalled();
+    expect(host.recordPasswordHistory).not.toHaveBeenCalled();
+    expect(host.logDurabilityDegradation).toHaveBeenCalledTimes(1);
+  });
+
+  it('a reset carries no session: its after-effects land on the reset token’s account, as before', async () => {
+    const { host, run } = afterHookOf();
+    await run(changeCtx(undefined, 'user_reset', '/reset-password'));
+    expect(host.stampPasswordChangedAt).toHaveBeenCalledWith('user_reset');
+    expect(host.recordPasswordHistory).toHaveBeenCalledWith('user_reset', 'hash:old');
+  });
 });

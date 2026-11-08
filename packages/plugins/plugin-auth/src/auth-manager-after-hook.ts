@@ -311,7 +311,7 @@ export async function globalAfterHook(this: AfterHookHost, ctx: any) {
         // The password changed, but the checks that gate these writes never
         // judged the account it changed on: nothing is stamped, so a forced
         // change stays outstanding and the user is asked again (the safe
-        // direction), and the operator is told once, here.
+        // direction), and the operator is told, here.
         this.logDurabilityDegradation(
           'AuthManager: a password change succeeded, but its password_changed_at stamp, the '
             + 'must_change_password clear and the history entry were NOT written: the password '
