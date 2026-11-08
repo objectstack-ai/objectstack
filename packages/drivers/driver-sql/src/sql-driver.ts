@@ -9261,6 +9261,7 @@ export class SqlDriver implements IDataDriver {
       injectTenantOnInsert: (...a) => driver.injectTenantOnInsert(...a),
       insertOnlyUpsertColumns: (...a) => driver.insertOnlyUpsertColumns(...a),
       get isMysql() { return driver.isMysql; },
+      get isOracle() { return driver.isOracle; },
       get isPostgres() { return driver.isPostgres; },
       get isSqlite() { return driver.isSqlite; },
       keepSuppliedUpdatedAt: (...a) => driver.keepSuppliedUpdatedAt(...a),

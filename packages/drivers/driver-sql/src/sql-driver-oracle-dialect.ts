@@ -53,6 +53,8 @@
 import knex, { type Knex } from 'knex';
 
 import type { SqlDialectName } from './schema-drift.js';
+import { StandardErrorCode } from '@objectstack/spec/api';
+
 import { withheldFilterError } from './sql-driver-top-level.js';
 
 /** The knex client spellings this module serves — `SqlDriver.ORACLE_CLIENTS`' only member. */
@@ -302,6 +304,29 @@ export function assertOracleComparandNotEmptyString(
     `Field "${field}" uses ${op} with ${why}`,
     subtree,
   );
+}
+
+/**
+ * `upsert()` on an Oracle datasource: NOT_IMPLEMENTED / 501, before any
+ * statement is built.
+ *
+ * Oracle has no `INSERT … ON CONFLICT`; its merge is a `MERGE INTO … USING`
+ * statement, which knex does not compile (`.onConflict() is not supported for
+ * oracledb`, measured on knex 3.3.0) and this driver does not yet emit. The
+ * federation write path on Oracle is `create` / `update` / `delete` and their
+ * bulk and filtered forms; a merge is refused by name rather than leaving the
+ * driver as knex's untyped error.
+ */
+export function oracleUpsertUnsupportedError(object: string): Error {
+  const err = new Error(
+    `upsert() on object '${object}' was refused: its datasource is Oracle, which has no INSERT … ON CONFLICT, ` +
+      'and this driver does not emit the MERGE statement Oracle merges with. This is a capability gap in the ' +
+      'backend, not a mistake in the request, which is why it answers NOT_IMPLEMENTED/501. Write with ' +
+      'create() / update() (look the row up by its key first), which an Oracle datasource supports.',
+  ) as Error & { code?: string; status?: number };
+  err.code = StandardErrorCode.enum.NOT_IMPLEMENTED;
+  err.status = 501;
+  return err;
 }
 
 /**

@@ -37,6 +37,7 @@
  * evaluation cycle. `index.ts` re-exports nothing from this module.
  */
 
+import { oracleUpsertUnsupportedError } from './sql-driver-oracle-dialect.js';
 import type { DriverOptions } from '@objectstack/spec/data';
 import { StorageNameMapping } from '@objectstack/spec/system';
 import { OrganizationlessCounterRefusal } from './organizationless-counter-refusal.js';
@@ -81,6 +82,7 @@ export interface SequenceSemanticsHost {
   injectTenantOnInsert: SqlDriver['injectTenantOnInsert'];
   insertOnlyUpsertColumns: SqlDriver['insertOnlyUpsertColumns'];
   readonly isMysql: SqlDriver['isMysql'];
+  readonly isOracle: SqlDriver['isOracle'];
   readonly isPostgres: SqlDriver['isPostgres'];
   readonly isSqlite: SqlDriver['isSqlite'];
   keepSuppliedUpdatedAt: SqlDriver['keepSuppliedUpdatedAt'];
@@ -539,7 +541,8 @@ export class SequenceSemanticsFacet {
   }
 
   /** The body of `SqlDriver#upsert`; the method's docblock there is its contract. */
-  static async upsert(this: Pick<SequenceSemanticsHost, 'applyTenantScope' | 'applyWriteColumnMap' | 'assertConflictTargetBackedWithoutClause' | 'assertConflictTargetHonoured' | 'assertMergeLandedInWrittenOrganization' | 'assertMergeLandedOnSuppliedIdentity' | 'auditMissingTenant' | 'collidingAutoNumberReservations' | 'fillAutoNumberFields' | 'formatInput' | 'formatOutput' | 'getBuilder' | 'injectTenantOnInsert' | 'insertOnlyUpsertColumns' | 'isMysql' | 'knex' | 'mergeLandsInWrittenOrganization' | 'resolveTenantField' | 'resyncSequenceToDataMax' | 'rotationWriteTarget' | 'stampInsertTimestamps' | 'stampUpsertUpdatedAt' | 'upsertTenantGuard'>, object: string, data: Record<string, any>, conflictKeys?: string[], options?: DriverOptions): Promise<Record<string, unknown>> {
+  static async upsert(this: Pick<SequenceSemanticsHost, 'applyTenantScope' | 'applyWriteColumnMap' | 'assertConflictTargetBackedWithoutClause' | 'assertConflictTargetHonoured' | 'assertMergeLandedInWrittenOrganization' | 'assertMergeLandedOnSuppliedIdentity' | 'auditMissingTenant' | 'collidingAutoNumberReservations' | 'fillAutoNumberFields' | 'formatInput' | 'formatOutput' | 'getBuilder' | 'injectTenantOnInsert' | 'insertOnlyUpsertColumns' | 'isMysql' | 'isOracle' | 'knex' | 'mergeLandsInWrittenOrganization' | 'resolveTenantField' | 'resyncSequenceToDataMax' | 'rotationWriteTarget' | 'stampInsertTimestamps' | 'stampUpsertUpdatedAt' | 'upsertTenantGuard'>, object: string, data: Record<string, any>, conflictKeys?: string[], options?: DriverOptions): Promise<Record<string, unknown>> {
+    if (this.isOracle) throw oracleUpsertUnsupportedError(object);
     const { _id, ...rest } = data;
     const toUpsert = { ...rest };
 
