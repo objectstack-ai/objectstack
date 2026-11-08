@@ -1054,7 +1054,10 @@ export const FlowEdgeSchema = lazySchema(() => strictObject(
  *   status: "active",
  *   nodes: [
  *     { id: "start", type: "start", label: "Start", position: {x: 0, y: 0},
- *       config: { objectName: "order", triggerType: "record-after-update" } },
+ *       // Launch only on the transition into "submitted": without a start condition the
+ *       // auto-approve write is itself an update and would launch the flow again.
+ *       config: { objectName: "order", triggerType: "record-after-update",
+ *         condition: "record.status == 'submitted' && previous.status != 'submitted'" } },
  *     { id: "check_amount", type: "decision", label: "Check Amount", position: {x: 0, y: 100} },
  *     { id: "auto_approve", type: "update_record", label: "Auto Approve", position: {x: -100, y: 200},
  *       config: { objectName: "order", filter: { id: { dialect: "cel", source: "record.id" } }, fields: { status: "approved" } } },
