@@ -1,12 +1,12 @@
 ---
-'@objectstack/plugin-auth': patch
-'@objectstack/platform-objects': patch
+'@objectstack/plugin-auth': minor
+'@objectstack/platform-objects': minor
 ---
 
 feat(plugin-auth,platform-objects): per-provider SSO sign-in options for IdP-initiated sign-in and just-in-time accounts, and `invite_only` now refuses an SSO sign-in by someone who was not invited
 
 Clause-②: yes (widening)
-Metadata-protocol: none
+Metadata-protocol: semantic
 
 **Behaviour change for existing deployments.** Under the `invite_only` audience posture, which is the default, an enterprise SSO sign-in (OIDC or SAML, through `@better-auth/sso`) by a person who has no account and no pending invitation is now refused. It redirects to the error page with `error=SELF_REGISTRATION_CLOSED`, and no user is created. Before, such a sign-in created the account. To keep the old behaviour for a provider, turn on its new `allowJit` option: **Setup → SSO Providers → Edit Sign-In Options**, or `POST /api/v1/auth/sso/update-provider` with `{ providerId, allowJit: true }`. Unchanged: a person who already has an account, a person with a pending invitation, the first human of an empty deployment, every sign-in under the `email_domain` or `open` posture, and the social and `oidcProviders` sign-ins.
 
