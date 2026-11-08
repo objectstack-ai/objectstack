@@ -120,6 +120,36 @@
         "must_contain": ["listViews", "or: [", "{current_user_id}"],
         "must_not_contain": ["$or", "logic:", "conditions:", "anyOf"]
       }
+    },
+    {
+      "id": 13,
+      "prompt": "`task` already ships `defineView({ list, form })`. Reps want a board: add a `priority` select (A / B / C) to the object and a kanban grouped by it — the list must stay — and tell them what they will see when they first open the board.",
+      "expected_output": "A new `listViews.priority_kanban` entry (`type: 'kanban'`, the required top-level `columns`, `kanban: { groupByField: 'priority' }`) beside the untouched default `list`, never the list retyped into a board. The hand-over discloses the empty board: every existing task has no `priority` yet, so all of them sit in the trailing `Uncategorized` lane (scroll right on a narrow screen) under one empty lane per option; dragging a card onto a real lane writes the field, or they edit from the list; a runtime-token or CEL `defaultValue` on the new field fills no existing row, and a literal one does only on a SQL datasource, where it becomes the column DEFAULT.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["listViews", "groupByField: 'priority'", "Uncategorized"],
+        "must_not_contain": ["list: { type: 'kanban'", "ready to use"]
+      }
+    },
+    {
+      "id": 14,
+      "prompt": "Add a 'Mark as done' button on `task` records that sets `status` to Done (the option is labelled Done, its value is `done`).",
+      "expected_output": "A `defineAction`, not a view: `name`, `label: 'Mark as done'`, `objectName: 'task'`, `locations: ['record_header']`, `type: 'script'`, `body: { language: 'js', source: \"await ctx.api.object('task').update({ id: ctx.recordId, status: 'done' });\", capabilities: ['api.write'] }`, `refreshAfter: true`. The body CALLS the update with the option value: a body that returns `{ status: 'done' }` or assigns to `ctx.record` writes nothing, an `expression` body cannot write, and without `api.write` the sandbox refuses the call.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["defineAction", "objectName: 'task'", "ctx.api.object('task').update", "ctx.recordId", "api.write", "status: 'done'"],
+        "must_not_contain": ["defineView", "language: 'expression'", "status: 'Done'"]
+      }
+    },
+    {
+      "id": 15,
+      "prompt": "Products need a photo wall: every product as a card with its `main_image` as the cover. Write the `listViews` entry.",
+      "expected_output": "`catalog_gallery: { label: 'Catalogue', type: 'gallery', data, columns: ['name', 'price'], gallery: { coverField: 'main_image' } }` — the kind the request names, added beside the existing views; not a table with an image column, and not the default `list` retyped.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["type: 'gallery'", "coverField: 'main_image'"],
+        "must_not_contain": ["type: 'grid'"]
+      }
     }
   ]
 }

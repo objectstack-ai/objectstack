@@ -663,7 +663,22 @@ export const CEILINGS = new Map([
   // `rules/record-page.md`; one Detailed Rules link and the CRM blueprint row reworded.
   // The file is 14194 bytes less its stamp line -> 3544 tokens; the ceiling follows it
   // down to the measurement, the ratchet's ordinary direction.
-  ['skills/objectstack-ui/SKILL.md', 3544],
+  // 3544 -> 3814 (#31155, the objectstack-ui port of the cloud#3659 ruling-A split): two
+  // teachings the hosted build agent carried privately — an operation on a record is `action`
+  // metadata, never a view, and a write button's body must CALL `ctx.api…update` with
+  // `language: 'js'` and `api.write` (the return value is applied to nothing); and the view
+  // kind the request names is kept, never downgraded to `grid`. PAID DOWN FIRST by genuine
+  // deletion in this file: the intro paragraph restating the frontmatter description, the
+  // "load objectstack-formula" sentence restating the frontmatter, Common Pitfalls 1–2
+  // restating `rules/list-views.md` § Column Features (one pointer line now), the blueprint
+  // row's `slotted` / `full` clause restating Detailed Rules' Record Page line, the
+  // "canonical reference" sentence said twice, the App-navigation row's gloss. `main` base
+  // 14151 bytes (14131 priced) -> 15276 (15256 priced) -> 3814 tokens, pinned AT the
+  // measurement, zero headroom. Authority: the ruling of record that orders this text into
+  // the published skills, objectstack-ai/cloud#3659 letter A (ruling comment 6682024726), via
+  // the standing 2026-10-27 ruling (record 6513306068), quoted verbatim in the PR body.
+  //   ceil(($(wc -c < skills/objectstack-ui/SKILL.md) - 20) / 4) == ceil(15256 / 4)
+  ['skills/objectstack-ui/SKILL.md', 3814],
   // 8333 -> 6193: RE-LOCK at the landed count after the #19715 split (decision
   // batch #213 item 1, maintainer 「1 2 4 同意」): the worked R1, the report
   // template and the v17-canonical shapes block moved VERBATIM into
@@ -893,12 +908,34 @@ export const CEILINGS = new Map([
   // the paragraph restating the allowed-set table above it, and the related-record search
   // prescription that objectstack-data → Search Fields carries whole — so the file nets -4
   // and the ceiling follows it down to the new measurement.
-  ['skills/objectstack-ui/rules/list-views.md', 3129],
+  // 3129 -> 3451 (#31155, the objectstack-ui port of the cloud#3659 ruling-A split): one new
+  // section beside the kanban config — "add a kanban / calendar / gallery / gantt view" is a
+  // NEW `listViews` entry whose key encodes its kind, the default `list` untouched, a kind
+  // changed in place only on an explicit ask; and the board grouped by a field added in the
+  // same change opens with every existing record in the trailing `Uncategorized` lane, with
+  // the three-part hand-over (and the SQL-datasource literal-`defaultValue` exception the
+  // driver's ADD COLUMN DEFAULT makes true). PAID DOWN FIRST by genuine deletion in this
+  // file: the kanban example's `// required on every list view` comment (the sentence above
+  // it), the `userFilters` bullet's "Need named presets? Add a listViews entry" restating the
+  // bullet before it, "the saved-views switcher already covers presets" (same bullet), the
+  // search example's `searchableFields: []` comment restating the table row above it, the
+  // narrowing sentence's "refuses the request" clause restating the ⛔ section below it, the
+  // two Data Source code comments restating the blockquote under them, the `summary`
+  // comment's "footer aggregation" restating the Column Features row. `main` base 12503
+  // bytes -> 13803 -> 3451 tokens, pinned AT the measurement, zero headroom. Authority as the
+  // SKILL.md row above: cloud#3659 letter A (6682024726) via record 6513306068, quoted
+  // verbatim in the PR body.
+  //   ceil($(wc -c < skills/objectstack-ui/rules/list-views.md) / 4) == ceil(13803 / 4)
+  ['skills/objectstack-ui/rules/list-views.md', 3451],
   // 2273 -> 2196 (#27059): LOWERED. The Surface bullet points at `rules/record-page.md`,
   // says create / edit is a modal or the `editMode: 'page'` route, and the Overlay-width
   // bullet moved there whole (the `size` bucket, the deprecated pixel keys); the ceiling
   // follows the file down to the measurement (8784 bytes).
-  ['skills/objectstack-ui/rules/navigation.md', 2196],
+  // 2196 -> 2184 (#31155): LOWERED. The two Chinese fragments in the interface-page signal
+  // list are English (the shipped skill text is English-only), and the bullet's repeated
+  // objectui ADR-0055 citation (the section heading carries it) is gone; the ceiling follows
+  // the file down to the measurement (8734 bytes).
+  ['skills/objectstack-ui/rules/navigation.md', 2184],
   // 5501 -> 5692 (#19715, card item 4): a 5-line table of contents at the top,
   // anchors to the file's existing headings, nothing else changed. +191 tokens,
   // zero headroom to absorb any of it, ceiling +191. Maintainer ruling
@@ -923,7 +960,11 @@ export const CEILINGS = new Map([
   // landed at +39 (1876 -> 1915), so the package nets +592 tokens, every one of them
   // teaching the surface `main` ships today and none of it restating a sibling file.
   //   ceil($(wc -c < skills/objectstack-ui/rules/record-page.md) / 4) == ceil(3981 / 4)
-  ['skills/objectstack-ui/rules/record-page.md', 996],
+  // 996 -> 991 (#31155): LOWERED. The record page's second tab is named as the console
+  // labels it (Activity) in place of the Chinese word, and step 5's "(one page at two
+  // widths)" aside — step 1 already says layout follows the surface's width — is gone; the
+  // ceiling follows the file down to the measurement (3961 bytes).
+  ['skills/objectstack-ui/rules/record-page.md', 991],
 
   // ── 2026-09-22 the #19715 split — decision batch #213 item 1 ─────────────
   // The maintainer ruled the four over-500-line published SKILL.md files split
