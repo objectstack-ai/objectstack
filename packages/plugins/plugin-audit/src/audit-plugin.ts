@@ -332,7 +332,9 @@ export class AuditPlugin implements Plugin {
     // the uninstall verb (`deletePackage` in `@objectstack/metadata-protocol`)
     // resolves it per call and hands it one event per package it uninstalled,
     // so the package itself leaves a `package_uninstall` row
-    // (`package-lifecycle-audit.ts`).
+    // (`package-lifecycle-audit.ts`). [#30964] The install-local door's
+    // unmanaged branch hands the same writer one `package_unmanaged_import`
+    // event per copy it attempted, landed or not.
     const getLedgerEngine = (): IDataEngine | undefined => {
       try {
         return ctx.getService<IDataEngine>('objectql');

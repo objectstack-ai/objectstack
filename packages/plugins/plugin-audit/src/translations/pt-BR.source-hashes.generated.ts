@@ -19,5 +19,6 @@
 
 export const ptBRGeneratedSourceHashes: Readonly<Record<string, string>> = {
   "objects.sys_activity.fields.url.label": "2203b0b9f72534f7",
+  "objects.sys_audit_log.fields.action.options.package_unmanaged_import": "676d7ce8c9d1fda4",
   "objects.sys_comment_reaction.fields.emoji.label": "f281bddefc11042a",
 };

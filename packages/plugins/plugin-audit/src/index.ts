@@ -42,15 +42,19 @@ export type {
   ExportFilterTerm,
 } from './data-export-audit.js';
 // [#31186] The `package_uninstall` row writer the uninstall verb reaches
-// through the `audit` slot.
+// through the `audit` slot; [#30964] the same writer records an unmanaged
+// install's copy as `package_unmanaged_import`.
 export {
   buildPackageLifecycleAuditRow,
   createPackageLifecycleAuditWriter,
   PACKAGE_UNINSTALL_AUDIT_ACTION,
+  PACKAGE_UNMANAGED_IMPORT_AUDIT_ACTION,
 } from './package-lifecycle-audit.js';
 export type {
   PackageLifecycleAuditAction,
   PackageLifecycleAuditEvent,
+  PackageUninstallAuditEvent,
+  PackageUnmanagedImportAuditEvent,
   PackageLifecycleAuditWriter,
   PackageLifecycleAuditWriterOptions,
 } from './package-lifecycle-audit.js';

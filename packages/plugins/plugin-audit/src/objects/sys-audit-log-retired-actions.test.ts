@@ -111,6 +111,12 @@ const ACTIONS_WITH_WRITERS: ReadonlyArray<readonly [action: string, writer: stri
       + 'called by metadata-protocol/src/protocol-package-uninstall.ts (deletePackage, the uninstall verb '
       + 'every door reaches) once per package it uninstalled (#31186)',
   ],
+  [
+    'package_unmanaged_import',
+    'plugin-audit/src/package-lifecycle-audit.ts — createPackageLifecycleAuditWriter on the `audit` slot; '
+      + 'called by cloud-connection/src/marketplace-install-local-plugin.ts (installUnmanaged, the unmanaged '
+      + 'branch both install doors reach) once per copy it attempted (#30964)',
+  ],
 ];
 
 /** Option values declared by the `action` select field. */
