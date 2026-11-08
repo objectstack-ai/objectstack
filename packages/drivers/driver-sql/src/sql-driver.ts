@@ -318,6 +318,7 @@ export interface SqlDriverStaticsHost {
   readonly DIALECT_CONNECT_TIMEOUT: (typeof SqlDriver)['DIALECT_CONNECT_TIMEOUT'];
   readonly MAX_KEYABLE_VARCHAR_CHARS: (typeof SqlDriver)['MAX_KEYABLE_VARCHAR_CHARS'];
   readonly MAX_VARCHAR_CHARS: (typeof SqlDriver)['MAX_VARCHAR_CHARS'];
+  readonly MSSQL_FEDERATION_CLIENTS: (typeof SqlDriver)['MSSQL_FEDERATION_CLIENTS'];
   readonly MYSQL_EMIT_CLIENTS: (typeof SqlDriver)['MYSQL_EMIT_CLIENTS'];
   readonly MYSQL_ROW_BYTE_BUDGET: (typeof SqlDriver)['MYSQL_ROW_BYTE_BUDGET'];
   readonly MYSQL_TEXT_TEMPORAL_TYPES: (typeof SqlDriver)['MYSQL_TEXT_TEMPORAL_TYPES'];
@@ -927,6 +928,22 @@ export class SqlDriver implements IDataDriver {
   ]);
 
   /**
+   * SQL Server spellings — knex's `mssql` client over the `tedious` binding.
+   *
+   * NOT an emission set, and deliberately named apart from the three above:
+   * SQL Server is served for FEDERATION only (an ADR-0015 external datasource
+   * over tables that already exist). The driver reads and, under the ADR's
+   * double opt-in, writes those tables in T-SQL — `dialectName` answers
+   * `'mssql'` and every read-path construct has a SQL Server arm — but it never
+   * builds or alters a table there: {@link assertDialectEmits} refuses the DDL
+   * path for these clients by name, the same boundary the spec draws when it
+   * refuses a `managed` datasource on the `mssql` driver id.
+   */
+  private static readonly MSSQL_FEDERATION_CLIENTS: ReadonlySet<string> = new Set([
+    'mssql',
+  ]);
+
+  /**
    * The ONE declared extension over the emission sets above: knex clients this
    * driver recognises on the pg WIRE and deliberately does not emit DDL for.
    *
@@ -1028,6 +1045,14 @@ export class SqlDriver implements IDataDriver {
   }
 
   /**
+   * Whether the underlying database is Microsoft SQL Server — federation only.
+   * See {@link MSSQL_FEDERATION_CLIENTS}.
+   */
+  protected get isMssql(): boolean {
+    return SqlDriver.MSSQL_FEDERATION_CLIENTS.has(SqlDriver.clientSpelling(this.config));
+  }
+
+  /**
    * [#21227] Whether this dialect's `INSERT … RETURNING *` answers the rows it
    * STORED.
    *
@@ -1039,6 +1064,13 @@ export class SqlDriver implements IDataDriver {
    * True for the SQLite and PostgreSQL families. knex compiles `RETURNING` for
    * both, and the row it answers is the stored one, server-side column defaults
    * included (measured on better-sqlite3 and on live PostgreSQL 16.14).
+   *
+   * True for SQL Server (#31327, federation only). It has no `RETURNING`
+   * either, but knex compiles `returning('*')` on the `mssql` client to
+   * `INSERT … OUTPUT inserted.* VALUES …`, which answers the stored row —
+   * column defaults included — in the same round trip. The doors pass knex's
+   * `includeTriggerModifications`, which routes the OUTPUT through a temp
+   * table: without `INTO`, SQL Server refuses it on a table with a trigger.
    *
    * False for the MySQL family, which has no `RETURNING`. knex's MySQL compiler
    * drops the clause with a `.returning() is not supported by mysql` warning and
@@ -1281,6 +1313,18 @@ export class SqlDriver implements IDataDriver {
    */
   protected nondeterministicPagingWarned = new Set<string>();
 
+  /**
+   * SQL Server (#31327): the federated table's own single-column primary key,
+   * as the LOGICAL field it maps to, per external object — or `null` when the
+   * table has none (a heap, a composite key, a view). Filled lazily by
+   * {@link primeMssqlPagingKey} the first time a page of the object is read;
+   * {@link paginationTieBreaker} answers from it. A federated table on the
+   * other dialects keeps the `null` it always had: this is the dialect whose
+   * `OFFSET … FETCH` is a syntax error without an ORDER BY, so the question
+   * "which column orders a page" has to have an answer here.
+   */
+  protected mssqlPagingKeyByObject = new Map<string, string | null>();
+
   /** Deferred-DDL mode (#3917) — see {@link setDeferredDdl}. */
   protected deferredDdl = false;
 
@@ -1436,6 +1480,16 @@ export class SqlDriver implements IDataDriver {
       ...[...SqlDriver.MYSQL_EMIT_CLIENTS].map(
         (c): [string, { key: string; urlKey: string }] =>
           [c, { key: 'connectTimeout', urlKey: 'uri' }],
+      ),
+      // knex's `mssql` client reads `connectionTimeout` off the connection
+      // settings and hands it to tedious as `connectTimeout` (its own default
+      // is 15s — the pool backstop's value, so without this row the two
+      // would tie and the pool's misleading message would win). The URL slot
+      // is never used: the datasource factory builds SQL Server's connection
+      // as an object, because tedious reads no connection-string grammar.
+      ...[...SqlDriver.MSSQL_FEDERATION_CLIENTS].map(
+        (c): [string, { key: string; urlKey: string }] =>
+          [c, { key: 'connectionTimeout', urlKey: 'connectionString' }],
       ),
     ]);
 
@@ -1735,7 +1789,7 @@ export class SqlDriver implements IDataDriver {
     return CrudFacet.find.call(crudHost.of(this), object, query, options);
   }
 
-  private findRows(
+  private async findRows(
     object: string,
     query: DriverQuery,
     options?: DriverOptions,
@@ -1743,6 +1797,28 @@ export class SqlDriver implements IDataDriver {
   ): Promise<any[]> {
     // [#29520 codemod] The body moved to `sql-driver-crud.ts`, its docblock with it (see `CrudHost`).
     return CrudFacet.findRows.call(crudHost.of(this), object, query, options, singleRowLookup);
+  }
+
+  /**
+   * SQL Server (#31327): learn, once per object, which column a page of a
+   * FEDERATED table can be ordered by — the table's single-column primary key,
+   * read from the remote catalog (`sys.indexes`) and mapped back through the
+   * object's `external.columnMap` to the field that reads it.
+   *
+   * Why the driver reads it rather than being told: an external object's
+   * binding declares no key, and SQL Server refuses `OFFSET n ROWS` without an
+   * `ORDER BY` outright (it is not merely nondeterministic there, as it is on
+   * the other dialects). The card's rule is "use the key when none is given",
+   * and the catalog is where the key is.
+   *
+   * A table with no single-column key (a heap, a composite key, a view)
+   * records `null`: the read then keeps the nondeterministic-paging warning
+   * {@link orderKeysFor} already gives, and the statement is ordered by
+   * `(SELECT NULL)` only so SQL Server will accept the `OFFSET`. A failed
+   * catalog read records nothing, so the next read asks again.
+   */
+  protected async primeMssqlPagingKey(object: string): Promise<void> {
+    return FieldMappingFacet.primeMssqlPagingKey.call(fieldMappingHost.of(this), object);
   }
 
   /**
@@ -5640,7 +5716,9 @@ export class SqlDriver implements IDataDriver {
     const readIsPostgres = () => this.isPostgres;
     const readIsSqlite = () => this.isSqlite;
     const readKnex = () => this.knex;
+    const readIsMssql = () => this.isMssql;
     const host: ThisParameterType<typeof introspectIndexes> = {
+      get isMssql() { return readIsMssql(); },
       get isMysql() { return readIsMysql(); },
       get isPostgres() { return readIsPostgres(); },
       get isSqlite() { return readIsSqlite(); },
@@ -5911,7 +5989,9 @@ export class SqlDriver implements IDataDriver {
     const readIsPostgres = () => this.isPostgres;
     const readIsSqlite = () => this.isSqlite;
     const readKnex = () => this.knex;
+    const readIsMssql = () => this.isMssql;
     const host: ThisParameterType<typeof introspectSchema> = {
+      get isMssql() { return readIsMssql(); },
       get dialectName() { return readDialectName(); },
       introspectColumns: (...a) => this.introspectColumns(...a),
       introspectForeignKeys: (...a) => this.introspectForeignKeys(...a),
@@ -7025,6 +7105,7 @@ export class SqlDriver implements IDataDriver {
     field: string,
     value: unknown,
     negate: boolean,
+    subtree?: unknown,
   ): boolean {
     // [#25521 cut 16] The body moved to `sql-driver-predicate-emitters.ts` (see `PredicateEmitterHost`).
     const readDialectName = () => this.dialectName;
@@ -7033,7 +7114,7 @@ export class SqlDriver implements IDataDriver {
       get dialectName() { return readDialectName(); },
       isJsonColumn: (...a) => this.isJsonColumn(...a),
     };
-    return applyJsonMembership.call(host, builder, method, table, localField, field, value, negate);
+    return applyJsonMembership.call(host, builder, method, table, localField, field, value, negate, subtree);
   }
 
   /**
@@ -7522,6 +7603,12 @@ export class SqlDriver implements IDataDriver {
    * by-id doors address), so that column orders its pages too: unkeyed ties
    * may reshuffle between executions, and a page walk then repeats and loses
    * rows.
+   *
+   * A second is not a guess either (#31327): on SQL Server, when the binding
+   * names no key, the table's own single-column primary key as its catalog
+   * reports it (`primeMssqlPagingKey`, mapped through the binding's
+   * `columnMap`). SQL Server's `OFFSET … FETCH` needs an ORDER BY, so this is
+   * what an unsorted page of a federated table is ordered by.
    *
    * Returns the LOGICAL field name; the call site maps it to a physical column
    * like any other sort key.
@@ -8756,7 +8843,9 @@ export class SqlDriver implements IDataDriver {
     const readIsPostgres = () => this.isPostgres;
     const readIsSqlite = () => this.isSqlite;
     const readKnex = () => this.knex;
+    const readIsMssql = () => this.isMssql;
     const host: ThisParameterType<typeof introspectColumnOrder> = {
+      get isMssql() { return readIsMssql(); },
       get isMysql() { return readIsMysql(); },
       get isPostgres() { return readIsPostgres(); },
       get isSqlite() { return readIsSqlite(); },
@@ -8776,7 +8865,9 @@ export class SqlDriver implements IDataDriver {
     // [#25521 cut 1] The body moved to `sql-driver-introspection.ts` (see `IntrospectionHost`).
     const readIsSqlite = () => this.isSqlite;
     const readKnex = () => this.knex;
+    const readIsMssql = () => this.isMssql;
     const host: ThisParameterType<typeof introspectColumns> = {
+      get isMssql() { return readIsMssql(); },
       introspectColumnOrder: (...a) => this.introspectColumnOrder(...a),
       get isSqlite() { return readIsSqlite(); },
       get knex() { return readKnex(); },
@@ -8809,7 +8900,9 @@ export class SqlDriver implements IDataDriver {
     const readIsPostgres = () => this.isPostgres;
     const readIsSqlite = () => this.isSqlite;
     const readKnex = () => this.knex;
+    const readIsMssql = () => this.isMssql;
     const host: ThisParameterType<typeof introspectForeignKeys> = {
+      get isMssql() { return readIsMssql(); },
       get isMysql() { return readIsMysql(); },
       get isPostgres() { return readIsPostgres(); },
       get isSqlite() { return readIsSqlite(); },
@@ -8847,7 +8940,9 @@ export class SqlDriver implements IDataDriver {
     const readIsPostgres = () => this.isPostgres;
     const readIsSqlite = () => this.isSqlite;
     const readKnex = () => this.knex;
+    const readIsMssql = () => this.isMssql;
     const host: ThisParameterType<typeof introspectPrimaryKeys> = {
+      get isMssql() { return readIsMssql(); },
       get isMysql() { return readIsMysql(); },
       get isPostgres() { return readIsPostgres(); },
       get isSqlite() { return readIsSqlite(); },
@@ -8924,7 +9019,9 @@ export class SqlDriver implements IDataDriver {
     const readIsPostgres = () => this.isPostgres;
     const readIsSqlite = () => this.isSqlite;
     const readKnex = () => this.knex;
+    const readIsMssql = () => this.isMssql;
     const host: ThisParameterType<typeof introspectUniqueConstraints> = {
+      get isMssql() { return readIsMssql(); },
       get isMysql() { return readIsMysql(); },
       get isPostgres() { return readIsPostgres(); },
       get isSqlite() { return readIsSqlite(); },
@@ -8943,6 +9040,7 @@ export class SqlDriver implements IDataDriver {
       DIALECT_CONNECT_TIMEOUT: { get: () => SqlDriver.DIALECT_CONNECT_TIMEOUT },
       MAX_KEYABLE_VARCHAR_CHARS: { get: () => SqlDriver.MAX_KEYABLE_VARCHAR_CHARS },
       MAX_VARCHAR_CHARS: { get: () => SqlDriver.MAX_VARCHAR_CHARS },
+      MSSQL_FEDERATION_CLIENTS: { get: () => SqlDriver.MSSQL_FEDERATION_CLIENTS },
       MYSQL_EMIT_CLIENTS: { get: () => SqlDriver.MYSQL_EMIT_CLIENTS },
       MYSQL_ROW_BYTE_BUDGET: { get: () => SqlDriver.MYSQL_ROW_BYTE_BUDGET },
       MYSQL_TEXT_TEMPORAL_TYPES: { get: () => SqlDriver.MYSQL_TEXT_TEMPORAL_TYPES },
@@ -9010,6 +9108,7 @@ export class SqlDriver implements IDataDriver {
       get getBuilder() { return driver.getBuilder.bind(driver); },
       injectTenantOnInsert: (...a) => driver.injectTenantOnInsert(...a),
       get insertReturnsStoredRows() { return driver.insertReturnsStoredRows; },
+      get isMssql() { return driver.isMssql; },
       keepSuppliedUpdatedAt: (...a) => driver.keepSuppliedUpdatedAt(...a),
       get knex() { return driver.knex; },
       readBackInsertedRows: (...a) => driver.readBackInsertedRows(...a),
@@ -9030,6 +9129,7 @@ export class SqlDriver implements IDataDriver {
       buildDateBucketExpr: (...a) => driver.buildDateBucketExpr(...a),
       get config() { return driver.config; },
       get isMysql() { return driver.isMysql; },
+      get isMssql() { return driver.isMssql; },
       get isOracle() { return driver.isOracle; },
       get isPostgres() { return driver.isPostgres; },
       get isSqlite() { return driver.isSqlite; },
@@ -9078,10 +9178,12 @@ export class SqlDriver implements IDataDriver {
       get getBuilder() { return driver.getBuilder.bind(driver); },
       injectTenantOnInsert: (...a) => driver.injectTenantOnInsert(...a),
       get insertReturnsStoredRows() { return driver.insertReturnsStoredRows; },
+      get isMssql() { return driver.isMssql; },
       get isSqlite() { return driver.isSqlite; },
       get knex() { return driver.knex; },
       mapSortField: (...a) => driver.mapSortField(...a),
       orderKeysFor: (...a) => driver.orderKeysFor(...a),
+      primeMssqlPagingKey: (...a) => driver.primeMssqlPagingKey(...a),
       readBackInsertedRows: (...a) => driver.readBackInsertedRows(...a),
       remoteColumn: (...a) => driver.remoteColumn(...a),
       resolveTenantField: (...a) => driver.resolveTenantField(...a),
@@ -9158,11 +9260,16 @@ export class SqlDriver implements IDataDriver {
       remoteColumn: (...a) => driver.remoteColumn(...a),
     }));
     fieldMappingHost.install((driver) => ({
+      get columnFieldByObject() { return driver.columnFieldByObject; },
       get fieldColumnByObject() { return driver.fieldColumnByObject; },
+      introspectPrimaryKeys: (...a) => driver.introspectPrimaryKeys(...a),
       get logger() { return driver.logger; },
       get managedObjectFields() { return driver.managedObjectFields; },
+      get mssqlPagingKeyByObject() { return driver.mssqlPagingKeyByObject; },
       get nondeterministicPagingWarned() { return driver.nondeterministicPagingWarned; },
       paginationTieBreaker: (...a) => driver.paginationTieBreaker(...a),
+      get physicalSchemaByObject() { return driver.physicalSchemaByObject; },
+      get physicalTableByObject() { return driver.physicalTableByObject; },
     }));
     filterHelpersHost.install((driver) => ({
       applyContainsLike: (...a) => driver.applyContainsLike(...a),
@@ -9188,6 +9295,7 @@ export class SqlDriver implements IDataDriver {
       get datetimeFields() { return driver.datetimeFields; },
       filterColumnExpr: (...a) => driver.filterColumnExpr(...a),
       isJsonColumn: (...a) => driver.isJsonColumn(...a),
+      get isMssql() { return driver.isMssql; },
       get isMysql() { return driver.isMysql; },
       get isOracle() { return driver.isOracle; },
       isNonTextColumn: (...a) => driver.isNonTextColumn(...a),
@@ -9251,6 +9359,7 @@ export class SqlDriver implements IDataDriver {
     }));
     managedDriftHost.install((driver) => ({
       introspectIndexes: (...a) => driver.introspectIndexes(...a),
+      get isMssql() { return driver.isMssql; },
       get isMysql() { return driver.isMysql; },
       get isOracle() { return driver.isOracle; },
       get isPostgres() { return driver.isPostgres; },
@@ -9402,6 +9511,7 @@ export class SqlDriver implements IDataDriver {
       get dateFields() { return driver.dateFields; },
       get datetimeFields() { return driver.datetimeFields; },
       get fileColumnsMoved() { return driver.fileColumnsMoved; },
+      get isMssql() { return driver.isMssql; },
       get isMysql() { return driver.isMysql; },
       get isOracle() { return driver.isOracle; },
       get isSqlite() { return driver.isSqlite; },

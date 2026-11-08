@@ -15,6 +15,12 @@
  * each admission case proves what it was called WITH.
  */
 
+// The server under test reaches `@objectstack/objectql` only through a dynamic
+// import inside a handler (`meta-object-state-routes.ts`), so the first case to
+// call one would pay that module graph's load inside its clocked window. This
+// module-top import pays it during collection instead.
+import '@objectstack/objectql';
+
 import { describe, it, expect, vi } from 'vitest';
 import { HonoHttpServer } from '@objectstack/plugin-hono-server';
 import type { EmailAddress, IEmailService, SendEmailInput } from '@objectstack/spec/contracts';
@@ -411,5 +417,47 @@ describe('POST /api/v1/email/send — identity mail is not sent through this doo
     const input = send.mock.calls[0][0];
     expect('identityMail' in input).toBe(false);
     expect(input.organizationId).toBe(ORG_ADMIN.tenantId);
+  });
+});
+
+describe('POST /api/v1/email/send — a body that is not a JSON object is the route\'s own 400, before the service', () => {
+  // An array is `typeof 'object'`, and a JSON `null` used to be defaulted to
+  // `{}`; either way the message reached `send` and the service answered
+  // VALIDATION_FAILED for a request the route itself should have refused.
+  it.each([
+    ['an array of numbers', [1, 2]],
+    ['an empty array', []],
+    ['an array holding a well-formed message', [MESSAGE]],
+    ['a JSON null', null],
+    ['a JSON string', 'not an object'],
+    ['a JSON number', 42],
+  ])('%s is refused 400 INVALID_REQUEST, and nothing is sent', async (_label, body) => {
+    const { service, send } = emailDouble();
+    const { post } = boot({ service, ctx: ADMIN });
+    const out = await post(body);
+
+    expect(out.status).toBe(400);
+    expect(out.body.code).toBe('INVALID_REQUEST');
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it('CONTROL: an object body still reaches the service, as sent', async () => {
+    const { service, send } = emailDouble();
+    const { post } = boot({ service, ctx: ADMIN });
+    const out = await post(MESSAGE);
+
+    expect(out.status).toBe(200);
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send.mock.calls[0][0]).toMatchObject(MESSAGE);
+  });
+
+  it('CONTROL: an empty object is a message for the service to judge, not a missing body', async () => {
+    const { service, send } = emailDouble();
+    const { post } = boot({ service, ctx: ADMIN });
+    const out = await post({});
+
+    expect(out.status).toBe(200);
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send.mock.calls[0][0]).toEqual({ sentBy: ADMIN.userId });
   });
 });

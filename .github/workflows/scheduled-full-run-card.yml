@@ -95,6 +95,14 @@ on:
     # night files `nightly full run: red on main (UI Coverage)`.
     workflows: ['CI', 'Lint & Type Check', 'UI Coverage']
     types: [completed]
+    # Trigger-level narrowing (#31521): GitHub matches `branches` against the
+    # branch the triggering run ran on, so pull_request and merge_group runs
+    # of the watched workflows no longer start a run here only for the job
+    # `if:` to skip it (about 1,512 a day over 2026-11-01..07, against about
+    # 269 runs on `main`). The trigger cannot filter on event or conclusion,
+    # so `push` runs on `main` still arrive and the job `if:` below stays the
+    # authority; its `head_branch == 'main'` guard is kept, not replaced.
+    branches: [main]
 
 permissions: {}
 

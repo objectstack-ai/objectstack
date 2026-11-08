@@ -8053,7 +8053,7 @@ export function selfTest({ tier = 'full' } = {}) {
   }
   const censusRows = liveMarkerCensus.map((r) => `${r.file}:${r.line} ${r.key}`).sort();
   t(
-    `the live tree carries the ten declarations measured for this census, and no others (${censusRows.join(' · ') || 'none'})`,
+    `the live tree carries the eleven declarations measured for this census, and no others (${censusRows.join(' · ') || 'none'})`,
     censusRows.join(' · ') === [
       // Seventh row, added with the declaration it names: `checklist-status.yml`
       // is paths-filtered (its `pull_request:` trigger is filtered to itself) and
@@ -8063,6 +8063,11 @@ export function selfTest({ tier = 'full' } = {}) {
       // precisely so a seventh declaration reddens WITH the six already read
       // printed beside it, and the author adds their row instead of a number.
       '.github/workflows/checklist-status.yml:57 no-check-families',
+      // Eleventh row, added with the declaration it names: `framework-build-base.yml`
+      // is paths-filtered (its own file and docker/framework-build-base/) and builds
+      // an image, then checks it with a script that needs the built image, so it
+      // discovers no `check:` family.
+      '.github/workflows/framework-build-base.yml:32 no-check-families',
       '.github/workflows/merged-branch-reaper.yml:212 no-check-families',
       '.github/workflows/os-create-smoke.yml:48 no-check-families',
       '.github/workflows/scaffold-e2e.yml:23 no-check-families',
@@ -8093,7 +8098,7 @@ export function selfTest({ tier = 'full' } = {}) {
   const censusCut = liveMarkerCensus.filter((r) => !r.whole).map((r) => `${r.file}:${r.line} ${r.key}`);
   t(
     `every live reason on those markers ENDS on its own marker line (cut: ${censusCut.join(', ') || 'none'})`,
-    censusCut.length === 0 && liveMarkerCensus.length === 10,
+    censusCut.length === 0 && liveMarkerCensus.length === 11,
   );
   t(
     'and every one of them carries a non-empty reason — whole is not the same claim as present, and both are owed',
