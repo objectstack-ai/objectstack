@@ -299,7 +299,7 @@ describe('SCIM group push → mapped permission set', () => {
     const h = await boot();
     await saveMapping(h, { connectionId: CONNECTION, groupExternalId: 'okta-grp-sales', permissionSet: SALES });
     const dave = await provision(h, 'dave');
-    await h.engine.insert('sys_user_permission_set', { user_id: dave.userId, permission_set: ADMIN_FULL_ACCESS }, SYSTEM);
+    await h.engine.insert('sys_user_permission_set', { user_id: dave.userId, permission_set: ADMIN_FULL_ACCESS, organization_id: ORG }, SYSTEM);
     await h.engine.insert('sys_user_permission_set', { user_id: dave.userId, permission_set: SALES, organization_id: ORG }, SYSTEM);
     const handMade = await grantsOf(h, dave.userId);
 
