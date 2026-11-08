@@ -3533,7 +3533,7 @@ export async function selfTest() {
         console.error = (l) => err.push(String(l));
         try {
           const argv = ['--repo', REPO, '--actions-file', file, '--request-id', 'fw-kind-1', ...(dryRun ? ['--dry-run'] : [])];
-          const code = await main(argv, { env: { GITHUB_TOKEN: TOKEN, [SESSION_ENV]: SESSION, ...envExtra }, read: { api: f.api, fetch: f.fetch }, send: { api: 'https://api.github.test', fetch: async (url, init) => { sent.push(`${init?.method ?? 'GET'} ${new URL(url).pathname}`); throw new Error('fixture: nothing may be sent'); } } });
+          const code = await main(argv, { env: { GITHUB_TOKEN: TOKEN, [SESSION_ENV]: SESSION, ...envExtra }, read: { api: f.api, fetch: f.fetch }, send: { api: 'https://api.github.test', pace: paceFor(join(dir, `kind-pace-${paceCase++}.jsonl`)), fetch: async (url, init) => { sent.push(`${init?.method ?? 'GET'} ${new URL(url).pathname}`); throw new Error('fixture: nothing may be sent'); } } });
           return { code, out: out.join('\n'), err: err.join('\n'), seen: f.seen, sent };
         } finally {
           [console.log, console.error] = [log, error];
