@@ -12,8 +12,10 @@ import {
   DRIVER_CONFIG_SCHEMAS,
   DRIVER_ID_ALIASES,
   driverHasLocalDefault,
+  FEDERATION_ONLY_DRIVER_IDS,
   getDriverConfigJsonSchemaById,
   getDriverConfigSchema,
+  isFederationOnlyDriver,
   resolveDatabaseDriverId,
   resolveDriverId,
   RETIRED_DRIVER_ID_GUIDANCE,
@@ -217,12 +219,13 @@ describe('DATABASE_DRIVER_SELECTION_IDS — what a boot flag may offer, derived 
 
   it('is the selectable subset of the ids the platform ships a contract for', () => {
     // Different questions (see the export's docstring), and now different
-    // contents: exactly ONE shipped id is withheld from the flag — `memory`,
+    // contents: exactly TWO shipped ids are withheld from the flag — `memory`,
     // the in-memory (mingo) engine, retired as a boot store and withdrawn on its
-    // row. Stated out loud so a second withheld id is a deliberate, visible
+    // row, and `oracle`, a federation-only dialect that was never a platform
+    // store. Stated out loud so a third withheld id is a deliberate, visible
     // change here rather than something inferred from a diff.
     const withheld = BUILTIN_DRIVER_IDS.filter((id) => !DATABASE_DRIVER_SELECTION_IDS.includes(id));
-    expect(withheld).toEqual(['memory']);
+    expect(withheld).toEqual(['memory', 'oracle']);
     for (const id of DATABASE_DRIVER_SELECTION_IDS) expect(BUILTIN_DRIVER_IDS).toContain(id);
   });
 
@@ -273,7 +276,81 @@ describe('the `memory` row: contract face kept, selection face withdrawn', () =>
       'turso', 'libsql',
     ]);
     expect([...DATABASE_DRIVER_SELECTION_IDS]).toEqual(['sqlite', 'sqlite-wasm', 'postgres', 'mysql', 'mongodb', 'turso']);
-    expect([...BUILTIN_DRIVER_IDS]).toEqual(['memory', 'sqlite', 'sqlite-wasm', 'postgres', 'mysql', 'mongodb', 'turso']);
+    expect([...BUILTIN_DRIVER_IDS]).toEqual([
+      'memory', 'sqlite', 'sqlite-wasm', 'postgres', 'mysql', 'mongodb', 'turso', 'oracle',
+    ]);
+  });
+});
+
+/**
+ * The `oracle` row: a federation-only dialect (ADR-0015 §4.6). Its spellings
+ * resolve a config contract and are never a boot selection, and a datasource
+ * that names it on the default `managed` mode is refused where it is authored.
+ */
+describe('the `oracle` row: federation only', () => {
+  const EXTERNAL = { allowWrites: false };
+  const CONFIG = { host: 'erp-db.internal', serviceName: 'ERPPDB1', username: 'erp_ro' };
+
+  it('is the one federation-only id, and both spellings resolve it on the contract face only', () => {
+    expect([...FEDERATION_ONLY_DRIVER_IDS]).toEqual(['oracle']);
+    expect(Object.isFrozen(FEDERATION_ONLY_DRIVER_IDS)).toBe(true);
+    for (const spelling of ['oracle', 'oracledb', ' OracleDB ']) {
+      expect(resolveDriverId(spelling), spelling).toBe('oracle');
+      expect(isFederationOnlyDriver(spelling), spelling).toBe(true);
+      expect(resolveDatabaseDriverId(spelling), spelling).toBeUndefined();
+    }
+    expect(DATABASE_DRIVER_SELECTION_ALIASES).not.toContain('oracle');
+    expect(driverHasLocalDefault('oracle')).toBe(false);
+    for (const other of ['postgres', 'mysql', 'sqlite', 'mongodb', 'turso', 'com.vendor.snowflake', 42]) {
+      expect(isFederationOnlyDriver(other), String(other)).toBe(false);
+    }
+  });
+
+  it('refuses a managed oracle datasource — the default mode included — naming the scope and the fix', () => {
+    for (const ds of [
+      { name: 'erp', driver: 'oracle', config: CONFIG },
+      { name: 'erp', driver: 'oracledb', schemaMode: 'managed', config: CONFIG },
+    ]) {
+      const parsed = DatasourceSchema.safeParse(ds);
+      expect(parsed.success, ds.driver).toBe(false);
+      const issue = parsed.error!.issues.find((i) => i.path.join('.') === 'schemaMode');
+      expect(issue?.message, ds.driver).toContain("the 'oracle' driver serves federation only");
+      expect(issue?.message, ds.driver).toContain("schemaMode: 'external'");
+    }
+  });
+
+  it('accepts it on an external or validate-only datasource', () => {
+    for (const schemaMode of ['external', 'validate-only'] as const) {
+      const parsed = DatasourceSchema.safeParse({
+        name: 'erp', driver: 'oracle', schemaMode, external: EXTERNAL, config: CONFIG,
+      });
+      expect(parsed.success, schemaMode).toBe(true);
+    }
+  });
+
+  it('judges the config against the oracle contract: a connection target is required, a password is refused', () => {
+    expect(getDriverConfigSchema('oracledb')).toBe(DRIVER_CONFIG_SCHEMAS.oracle);
+    const clean = { known: true, issues: [] };
+    expect(validateDriverConfig('oracle', { connectString: 'erp-db.internal:1521/ERPPDB1' })).toEqual(clean);
+    expect(validateDriverConfig('oracle', CONFIG)).toEqual(clean);
+
+    const noTarget = validateDriverConfig('oracle', { host: 'erp-db.internal' });
+    expect(noTarget).toMatchObject({ known: true, issues: [{ path: ['serviceName'] }] });
+
+    const password = validateDriverConfig('oracle', { ...CONFIG, password: 'hunter2' });
+    expect(password).toMatchObject({ known: true, issues: [{ path: ['password'] }] });
+    // An Oracle connect string is not a URL; the key that would suggest one is
+    // refused with the spelling that works.
+    const url = validateDriverConfig('oracle', { url: 'oracle://erp-db.internal/ERPPDB1' });
+    expect(url.known && url.issues.length).toBeGreaterThan(0);
+    expect(JSON.stringify(url)).toContain('connectString');
+  });
+
+  it('publishes a JSON-Schema projection of the contract', () => {
+    const json = getDriverConfigJsonSchemaById('oracle') as { properties: Record<string, unknown> };
+    expect(Object.keys(json.properties)).toEqual(
+      expect.arrayContaining(['connectString', 'host', 'port', 'serviceName', 'username', 'password']),
+    );
   });
 });
 

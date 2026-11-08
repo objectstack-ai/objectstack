@@ -5,7 +5,12 @@ import { lazySchema } from '../shared/lazy-schema';
 import { strictObject } from '../shared/strict-object';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 import { CODE_DEFINED_CREDENTIAL_ROUTE, urlUserinfoUsername } from './driver/common.zod';
-import { RETIRED_DRIVER_ID_GUIDANCE, resolveDriverId, validateDriverConfig } from './driver/config-registry.zod';
+import {
+  isFederationOnlyDriver,
+  RETIRED_DRIVER_ID_GUIDANCE,
+  resolveDriverId,
+  validateDriverConfig,
+} from './driver/config-registry.zod';
 
 /*
  * ── Unknown-key strictness (#4001 data step, closed out by #4410) ───────────
@@ -595,6 +600,23 @@ const CONNECTOR_ON_MANAGED_REFUSED =
   + "datasource's `external` block may carry only `credentialsRef`.";
 
 /**
+ * A federation-only driver (`DriverVocabularyEntry.federationOnly` — `oracle`)
+ * declared on a `managed` datasource. `managed` is also the DEFAULT mode, so
+ * an author who names the driver and nothing else meets this sentence: the
+ * prescription is the mode, and the reason is that the platform would
+ * otherwise send `CREATE TABLE` / `ALTER TABLE` to a database whose tables
+ * another system owns.
+ */
+function federationOnlyDriverOnManagedRefusal(driverId: string): string {
+  return `the '${driverId}' driver serves federation only: ObjectStack reads the tables an existing `
+    + `${driverId} database already holds (and writes them only where \`external.allowWrites\` and the `
+    + "object's `external.writable` both allow it), and never creates or alters one there, so it cannot "
+    + 'hold a managed datasource. Set `schemaMode: \'external\'` (or `\'validate-only\'` to warn on drift '
+    + "instead of failing) and declare the `external` block. To keep the platform's own tables, "
+    + 'use a driver that can be managed (postgres, mysql or sqlite).';
+}
+
+/**
  * [#29762] `external.rowCap` on a built-in driver. The cap is read only by the
  * engine's floor over a plugin driver; a built-in driver executes the whole
  * query itself and is never floored, so the key would parse and do nothing.
@@ -988,6 +1010,15 @@ export const DatasourceSchema = lazySchema(() => strictObject(
         message: rowCapOnBuiltinDriverRefusal(builtinDriver),
       });
     }
+  }
+
+  // ADR-0015 §4.6 — a federation-only dialect is never a managed store.
+  if (ds.schemaMode === 'managed' && isFederationOnlyDriver(ds.driver)) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['schemaMode'],
+      message: federationOnlyDriverOnManagedRefusal(resolveDriverId(ds.driver)!),
+    });
   }
 
   if (ds.schemaMode !== 'managed' && !ds.external) {

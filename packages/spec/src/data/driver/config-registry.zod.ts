@@ -6,6 +6,7 @@ import type { RetiredValueGuidance } from '../../shared/retired-key';
 import { getMemoryConfigJsonSchema, MemoryConfigSchema } from './memory.zod';
 import { getMongoConfigJsonSchema, MongoConfigSchema } from './mongo.zod';
 import { getMysqlConfigJsonSchema, MysqlConfigSchema } from './mysql.zod';
+import { getOracleConfigJsonSchema, OracleConfigSchema } from './oracle.zod';
 import { getPostgresConfigJsonSchema, PostgresConfigSchema } from './postgres.zod';
 import {
   getSqliteConfigJsonSchema,
@@ -104,8 +105,15 @@ import { getTursoConfigJsonSchema, TursoConfigSchema } from './turso.zod';
  * joined `inmemory` on the contract-only column — so every derived selection
  * face drops them and both hosts refuse them, while a stored
  * `datasource.driver: memory` still parses against {@link MemoryConfigSchema}.
- * `memory` is therefore the one id in {@link BUILTIN_DRIVER_IDS} that is not in
- * {@link DATABASE_DRIVER_SELECTION_IDS}.
+ * `memory` was therefore the first id in {@link BUILTIN_DRIVER_IDS} that is not
+ * in {@link DATABASE_DRIVER_SELECTION_IDS}.
+ *
+ * `oracle` is the second, for a different reason: it was never a platform store
+ * to withdraw. It is a federation-only dialect
+ * ({@link DriverVocabularyEntry.federationOnly}) — a datasource reads an Oracle
+ * system's own tables in place, and the platform emits no DDL there — so its
+ * spellings `oracle` / `oracledb` are contract-only from the row's first day,
+ * and the managed pairing is refused where the datasource is authored.
  *
  * ## `mongo` → `mongodb`, and turso becoming a real builtin (commit e2798fab7)
  *
@@ -209,6 +217,30 @@ export interface DriverVocabularyEntry {
    * set (commit e2798fab7's fork 2).
    */
   readonly hasLocalDefault: boolean;
+  /**
+   * Does this driver serve FEDERATION only — `schemaMode: 'external'` /
+   * `'validate-only'` over a database another system owns — and never a
+   * platform-managed store?
+   *
+   * `true` on a row whose dialect the SQL driver models for reads (and the
+   * double-opt-in write path) but for which it emits no DDL: `oracle`. Two
+   * faces follow from it, both derived here rather than hand-listed at a
+   * consumer:
+   *
+   *  - **authoring** — a datasource declaring the driver with
+   *    `schemaMode: 'managed'` (the default) is refused at parse
+   *    (`datasource.zod.ts`), naming the federation-only scope, rather than
+   *    failing at the first `CREATE TABLE` the sync would send.
+   *  - **selection** — such a row carries its spellings on
+   *    {@link contractOnlyAliases} and none on {@link aliases}, because a boot
+   *    host's `OS_DATABASE_DRIVER` selects the platform's OWN store, which is
+   *    managed by definition. Both hosts therefore refuse it as an unsupported
+   *    selection, enumerating the drivers that can hold the platform.
+   *
+   * Absent (never `false`) on every other row; {@link FEDERATION_ONLY_DRIVER_IDS}
+   * is the projection.
+   */
+  readonly federationOnly?: true;
 }
 
 /**
@@ -240,6 +272,16 @@ const DRIVER_VOCABULARY = [
   { id: 'mysql', aliases: ['mysql', 'mysql2'], contractOnlyAliases: ['mariadb'], hasLocalDefault: false },
   { id: 'mongodb', aliases: ['mongodb'], retiredAliases: { mongo: MONGO_DRIVER_ID_RETIRED }, hasLocalDefault: false },
   { id: 'turso', aliases: ['turso', 'libsql'], hasLocalDefault: false },
+  // Federation only (ADR-0015 §4.6): driver-sql over knex `oracledb`,
+  // node-oracledb in Thin mode. Its spellings sit on the contract face alone —
+  // see `federationOnly` for why no boot host may select it.
+  {
+    id: 'oracle',
+    aliases: [],
+    contractOnlyAliases: ['oracle', 'oracledb'],
+    federationOnly: true,
+    hasLocalDefault: false,
+  },
 ] as const satisfies readonly DriverVocabularyEntry[];
 
 /**
@@ -493,6 +535,26 @@ export function driverHasLocalDefault(driver: unknown): boolean {
   return id ? DRIVER_LOCAL_DEFAULT[id] : true;
 }
 
+/**
+ * The canonical ids of the drivers that serve federation only — the rows that
+ * declare {@link DriverVocabularyEntry.federationOnly}. A datasource naming one
+ * must declare a non-`managed` `schemaMode`; `datasource.zod.ts` refuses the
+ * managed pairing at parse.
+ */
+export const FEDERATION_ONLY_DRIVER_IDS: readonly BuiltinDriverId[] = Object.freeze(
+  VOCABULARY_ROWS.filter((entry) => entry.federationOnly === true).map((entry) => entry.id as BuiltinDriverId),
+);
+
+/**
+ * Does this authored `driver` value resolve to a federation-only builtin?
+ * Follows every alias face, like {@link resolveDriverId}; `false` for a plugin
+ * driver and for anything that is not a string.
+ */
+export function isFederationOnlyDriver(driver: unknown): boolean {
+  const id = resolveDriverId(driver);
+  return id !== undefined && FEDERATION_ONLY_DRIVER_IDS.includes(id);
+}
+
 /** Canonical driver id → the schema its `datasource.config` must satisfy. */
 export const DRIVER_CONFIG_SCHEMAS: Readonly<Record<BuiltinDriverId, z.ZodType>> = {
   memory: MemoryConfigSchema,
@@ -502,6 +564,7 @@ export const DRIVER_CONFIG_SCHEMAS: Readonly<Record<BuiltinDriverId, z.ZodType>>
   mysql: MysqlConfigSchema,
   mongodb: MongoConfigSchema,
   turso: TursoConfigSchema,
+  oracle: OracleConfigSchema,
 };
 
 /**
@@ -523,6 +586,7 @@ const DRIVER_CONFIG_JSON_SCHEMAS: Readonly<Record<BuiltinDriverId, () => Record<
   mysql: getMysqlConfigJsonSchema,
   mongodb: getMongoConfigJsonSchema,
   turso: getTursoConfigJsonSchema,
+  oracle: getOracleConfigJsonSchema,
 };
 
 /**
