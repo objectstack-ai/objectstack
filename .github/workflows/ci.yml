@@ -645,12 +645,33 @@ jobs:
       shards: ${{ steps.plan.outputs.shards }}
       digest: ${{ steps.plan.outputs.digest }}
     steps:
+      # Depth 1, then the step below: the same history the shards fetch, because
+      # the selection diffs against the PR's merge base, the queue's base_sha or
+      # the push's before sha, and every shard re-derives this plan (#22034).
       - name: Checkout repository
         uses: actions/checkout@v7
-        with:
-          # The same history the shards check out: the selection diffs against
-          # the PR's merge base, the queue's base_sha or the push's before sha.
-          fetch-depth: 0
+
+      # The `test` job's step of the same name, verbatim (its comment says why).
+      - name: Fetch this commit's history and the base branch
+        env:
+          PR_BASE_REF: ${{ github.event.pull_request.base.ref }}
+        run: |
+          refspecs=('+refs/heads/main:refs/remotes/origin/main')
+          if [ -n "$PR_BASE_REF" ] && [ "$PR_BASE_REF" != main ]; then
+            refspecs+=("+refs/heads/$PR_BASE_REF:refs/remotes/origin/$PR_BASE_REF")
+          fi
+          head=$(git rev-parse HEAD)
+          for attempt in 1 2 3; do
+            deepen=()
+            if [ "$(git rev-parse --is-shallow-repository)" = true ]; then deepen=(--unshallow); fi
+            if git fetch --no-tags "${deepen[@]}" origin "$head" "${refspecs[@]}"; then break; fi
+            if [ "$attempt" = 3 ]; then
+              echo "::error::Could not fetch $head's history and ${refspecs[*]} after 3 attempts. The package selection reads that history, so this job stops here rather than selecting from a shallow clone."
+              exit 1
+            fi
+            sleep $((attempt * 15))
+          done
+          echo "History: $(git rev-list --count HEAD) commit(s) behind HEAD, shallow=$(git rev-parse --is-shallow-repository), no tags, refs: $(git for-each-ref --format='%(refname)' refs/remotes | tr '\n' ' ')"
 
       # Restore only: the `test` shards save this key.
       - name: Setup workspace
@@ -875,11 +896,59 @@ jobs:
         shard: ${{ fromJSON(needs.test-plan.outputs.shards || '[1, 2, 3, 4, 5, 6, 7, 8]') }}
 
     steps:
+      # Depth 1 (the default), then the step below fetches the history this job
+      # reads. NOT `fetch-depth: 0` (#22034).
       - name: Checkout repository
         uses: actions/checkout@v7
-        with:
-          # Full history so `turbo --affected` can diff against the PR base.
-          fetch-depth: 0
+
+      # ⭐ THIS COMMIT'S HISTORY AND THE BASE BRANCH, NOT EVERY REF (#22034).
+      # `fetch-depth: 0` fetched every head and every tag (`+refs/heads/*` and
+      # `+refs/tags/*`: about 1.5k heads and 17k tags). That ref set, not the
+      # depth of main, was the slow part: 473 s locally against 29-32 s for main
+      # alone, a measured p99 of 553 s on CI, and a 2026-11-03 slowdown that hit
+      # it 5.6-6.5x against about 3x for shallow fetches, cancelling 19 Test UI
+      # shards at their wall before a test ran.
+      #
+      # What this job reads, and why each is here:
+      #   - HEAD's whole ancestry. The PR's merge base, the queue's `base_sha`
+      #     and the push's `before` sha are all in it, and `git merge-base`,
+      #     `git diff` and `turbo ls --affected` need the path from HEAD to
+      #     them. Without it turbo does not fail: measured on turbo 2.11.10 in
+      #     a depth-1 clone with the base fetched, it printed "unable to detect
+      #     git range, assuming all files have changed" and selected all 131
+      #     packages. select-shard-packages.sh now deepens or fails on a shallow
+      #     clone itself; this step is the normal path.
+      #   - refs/remotes/origin/main, with history: the PR selection's
+      #     merge-base, and spec's build (scripts/build-schemas.ts), which
+      #     anchors its authorable-surface checks on `merge-base HEAD
+      #     origin/main` when that answers and falls back to the committed
+      #     anchor when it does not. A PR into another branch fetches that
+      #     branch too.
+      #   - No tags. The one tag spec's build reads it fetches itself at depth 1.
+      # `--unshallow` with HEAD's sha as the want deepens the checked-out
+      # commit, not a branch tip. Three attempts, like the checkout's own fetch,
+      # then a red step: a selection read from a shallow clone is the silent
+      # all-packages answer above, never a fallback this job may take quietly.
+      - name: Fetch this commit's history and the base branch
+        env:
+          PR_BASE_REF: ${{ github.event.pull_request.base.ref }}
+        run: |
+          refspecs=('+refs/heads/main:refs/remotes/origin/main')
+          if [ -n "$PR_BASE_REF" ] && [ "$PR_BASE_REF" != main ]; then
+            refspecs+=("+refs/heads/$PR_BASE_REF:refs/remotes/origin/$PR_BASE_REF")
+          fi
+          head=$(git rev-parse HEAD)
+          for attempt in 1 2 3; do
+            deepen=()
+            if [ "$(git rev-parse --is-shallow-repository)" = true ]; then deepen=(--unshallow); fi
+            if git fetch --no-tags "${deepen[@]}" origin "$head" "${refspecs[@]}"; then break; fi
+            if [ "$attempt" = 3 ]; then
+              echo "::error::Could not fetch $head's history and ${refspecs[*]} after 3 attempts. The package selection reads that history, so this job stops here rather than selecting from a shallow clone."
+              exit 1
+            fi
+            sleep $((attempt * 15))
+          done
+          echo "History: $(git rev-list --count HEAD) commit(s) behind HEAD, shallow=$(git rev-parse --is-shallow-repository), no tags, refs: $(git for-each-ref --format='%(refname)' refs/remotes | tr '\n' ' ')"
 
       - name: Setup workspace
         uses: ./.github/actions/setup-workspace
@@ -3817,12 +3886,38 @@ jobs:
         shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
 
     steps:
+      # Depth 1, then the step below: the select step diffs against the base
+      # commit, which needs HEAD's ancestry and the base branch in the clone,
+      # and nothing else (#22034).
       - name: Checkout repository
         uses: actions/checkout@v7
-        with:
-          # The select step below diffs against the base commit, which needs
-          # the base's history in the clone.
-          fetch-depth: 0
+
+      # The `test` job's step of the same name, verbatim (its comment says why).
+      # Here the readers are the select step below (`git merge-base` against
+      # origin/<base ref>, then select-affected-tests.mjs's `git diff
+      # base...HEAD`) and spec's build. On a shallow clone the select step
+      # would not fail: it would warn and run the full suite.
+      - name: Fetch this commit's history and the base branch
+        env:
+          PR_BASE_REF: ${{ github.event.pull_request.base.ref }}
+        run: |
+          refspecs=('+refs/heads/main:refs/remotes/origin/main')
+          if [ -n "$PR_BASE_REF" ] && [ "$PR_BASE_REF" != main ]; then
+            refspecs+=("+refs/heads/$PR_BASE_REF:refs/remotes/origin/$PR_BASE_REF")
+          fi
+          head=$(git rev-parse HEAD)
+          for attempt in 1 2 3; do
+            deepen=()
+            if [ "$(git rev-parse --is-shallow-repository)" = true ]; then deepen=(--unshallow); fi
+            if git fetch --no-tags "${deepen[@]}" origin "$head" "${refspecs[@]}"; then break; fi
+            if [ "$attempt" = 3 ]; then
+              echo "::error::Could not fetch $head's history and ${refspecs[*]} after 3 attempts. The package selection reads that history, so this job stops here rather than selecting from a shallow clone."
+              exit 1
+            fi
+            sleep $((attempt * 15))
+          done
+          echo "History: $(git rev-list --count HEAD) commit(s) behind HEAD, shallow=$(git rev-parse --is-shallow-repository), no tags, refs: $(git for-each-ref --format='%(refname)' refs/remotes | tr '\n' ' ')"
+
 
       - name: Setup Node.js
         uses: actions/setup-node@v7

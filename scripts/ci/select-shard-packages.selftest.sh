@@ -12,7 +12,7 @@
 # #10057 guard on a merge group is the one that matters most: an empty
 # docs-only group has to select nothing without complaint).
 #
-# Hermetic and offline: a throwaway upstream + clone (+ a shallow clone) under
+# Hermetic and offline: a throwaway upstream + clone (+ shallow clones) under
 # $TMPDIR, a fake `pnpm`/`turbo` pair on PATH that answers from control files
 # and records every call, and a stub `check-cross-package-test-inputs.mjs`
 # inside the fixture that records its argv and appends what it is told to.
@@ -172,6 +172,13 @@ git_q clone -q --depth 1 "file://$UP" "$SHALLOW" 2>/dev/null
 # removed from the script entirely.
 SHALLOW_PUSH="$FIX/shallow-push"
 git_q clone -q --depth 1 "file://$UP" "$SHALLOW_PUSH" 2>/dev/null
+# Two more, for the #22034 guard: one whose deepen cannot reach its remote (the
+# refusal), and one a full-battery event runs in (no deepen at all).
+SHALLOW_OFFLINE="$FIX/shallow-offline"
+git_q clone -q --depth 1 "file://$UP" "$SHALLOW_OFFLINE" 2>/dev/null
+git_q -C "$SHALLOW_OFFLINE" remote set-url origin "file://$FIX/no-such-upstream"
+SHALLOW_SCHEDULE="$FIX/shallow-schedule"
+git_q clone -q --depth 1 "file://$UP" "$SHALLOW_SCHEDULE" 2>/dev/null
 
 ZEROS=0000000000000000000000000000000000000000
 # Well-formed, and in no fixture repository: the "resolvable shape, absent
@@ -262,7 +269,14 @@ expect_line() {
 expect_no_line() {
   if grep -qF -- "$1" "$RT/out.txt"; then bad "does not print: $1"; else ok "does not print: $1"; fi
 }
+# expect_shallow <true|false> <clone>  -- what `--is-shallow-repository` says after the run
+expect_shallow() {
+  local got
+  got=$(git_q -C "$2" rev-parse --is-shallow-repository)
+  if [ "$got" = "$1" ]; then ok "the clone is shallow=$1 after the run"; else bad "the clone is shallow=$1 after the run" "got: $got"; fi
+}
 
+DEEPEN_LINE="This checkout is shallow: fetching HEAD's history (no tags) before choosing a diff base (#22034)."
 W_UNION='::warning::Could not union cross-package scans into the affected set; falling back to the full package list for this shard.'
 affected_call() { echo "affected argv=[ls --affected --output=json] TURBO_SCM_BASE=$1"; }
 full_call='full argv=[ls --output=json] TURBO_SCM_BASE=unset'
@@ -349,13 +363,25 @@ if git_q -C "$SHALLOW_PUSH" cat-file -e "$C0^{commit}" 2>/dev/null; then
 else
   ok 'precondition: the push shallow clone lacks C0 before the fetch case'
 fi
-run_case 'push: a before sha absent from a shallow checkout is fetched BY SHA' "$SHALLOW_PUSH" push '' '' '' "$C0"
+# #22034: the deepen of HEAD now brings the before sha in (it is HEAD's
+# parent here), so the by-sha fetch below it finds the object present. What is
+# pinned is that the run deepened, and that turbo diffed from a base the path
+# from HEAD reaches: a by-sha fetch alone left C1 grafted, and the real turbo
+# then answers "all files changed".
+run_case 'push: a shallow checkout is deepened, then diffed from the before sha (#22034)' "$SHALLOW_PUSH" push '' '' '' "$C0"
 expect_rc 0
 expect_warnings '' ''
+expect_line "$DEEPEN_LINE"
+expect_shallow false "$SHALLOW_PUSH"
 if git_q -C "$SHALLOW_PUSH" cat-file -e "$C0^{commit}" 2>/dev/null; then
   ok 'C0 is present after the run (the fetch happened)'
 else
   bad 'C0 is present after the run (the fetch happened)'
+fi
+if git_q -C "$SHALLOW_PUSH" merge-base "$C0" HEAD > /dev/null 2>&1; then
+  ok 'merge-base(C0, HEAD) answers after the run (HEAD is no longer grafted)'
+else
+  bad 'merge-base(C0, HEAD) answers after the run (HEAD is no longer grafted)'
 fi
 expect_turbo 'affected only, base = before sha' "$(affected_call "$C0")"
 expect_packages '1:a'
@@ -538,9 +564,11 @@ if git_q -C "$SHALLOW" cat-file -e "$C0^{commit}" 2>/dev/null; then
 else
   ok 'precondition: the shallow clone lacks C0 before the fetch case'
 fi
-run_case 'merge_group: a base_sha absent from a shallow checkout is fetched BY SHA' "$SHALLOW" merge_group '' '' "$C0"
+run_case 'merge_group: a shallow checkout is deepened, then diffed from the base_sha (#22034)' "$SHALLOW" merge_group '' '' "$C0"
 expect_rc 0
 expect_warnings '' ''
+expect_line "$DEEPEN_LINE"
+expect_shallow false "$SHALLOW"
 if git_q -C "$SHALLOW" cat-file -e "$C0^{commit}" 2>/dev/null; then
   ok 'C0 is present after the run (the fetch happened)'
 else
@@ -586,14 +614,48 @@ expect_packages '1:a'
 expect_line "Affected-set diff base: $C1  (the merge group's base_sha)"
 expect_no_line "this push's before sha"
 
+# ── a shallow checkout (#22034) ─────────────────────────────────────────────
+# The jobs check out at depth 1 and fetch HEAD's history in their own step; the
+# script's deepen is the guard for a caller without that step. A deepen that
+# cannot reach the remote is a red step that never reaches `turbo`, on every
+# diffing event: on a shallow clone the full-list fallback would be turbo's
+# own silent "all files changed", read as a decision.
+for ev in pull_request merge_group push; do
+  reset_controls
+  case "$ev" in
+    pull_request) run_case "$ev: a shallow checkout whose deepen fails refuses, red, before turbo" "$SHALLOW_OFFLINE" "$ev" main "$C0" '' ;;
+    merge_group) run_case "$ev: a shallow checkout whose deepen fails refuses, red, before turbo" "$SHALLOW_OFFLINE" "$ev" '' '' "$C0" ;;
+    push) run_case "$ev: a shallow checkout whose deepen fails refuses, red, before turbo" "$SHALLOW_OFFLINE" "$ev" '' '' '' "$C0" ;;
+  esac
+  expect_rc 1
+  expect_line "$DEEPEN_LINE"
+  expect_line '::error::This checkout is shallow and HEAD'"'"'s history could not be fetched'
+  expect_warnings '' ''
+  expect_turbo 'never called' ''
+  expect_union 'not invoked' ''
+  if [ -e "$RT/turbo-ls.json" ]; then bad 'no turbo-ls.json is written'; else ok 'no turbo-ls.json is written'; fi
+  expect_shallow true "$SHALLOW_OFFLINE"
+done
+
+# The full battery reads no history, so a shallow checkout is left as it is.
+reset_controls
+run_case 'schedule: a shallow checkout is not deepened -- the FULL list reads no history' "$SHALLOW_SCHEDULE" schedule '' '' '' ''
+expect_rc 0
+expect_warnings '' ''
+expect_no_line "$DEEPEN_LINE"
+expect_shallow true "$SHALLOW_SCHEDULE"
+expect_turbo 'full only' "$full_call"
+expect_packages '3:a,b,c'
+
 # ── Verdict ─────────────────────────────────────────────────────────────────
 # #4690: a battery that ran nothing is a failure, never a pass.
 # The floor RATCHETS: it was 20/80 when this battery covered three events, and
 # it is raised here to what push's own diff base and the two full-battery
 # events actually register (#16467). It is a floor, never a target -- a run
 # below it means cases stopped running, and the remedy is to find which,
-# never to lower the number.
-if [ "$cases" -lt 32 ] || [ "$checks" -lt 158 ]; then
+# never to lower the number. Raised again for the shallow-checkout guard
+# (#22034): 32/158 -> 36/193.
+if [ "$cases" -lt 36 ] || [ "$checks" -lt 193 ]; then
   echo "SELFTEST FAILED: only $cases case(s) / $checks check(s) ran -- the battery is short"
   exit 1
 fi
