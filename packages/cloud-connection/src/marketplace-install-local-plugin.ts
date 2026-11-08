@@ -48,7 +48,10 @@
  *            item already holds a position, permission set or capability name
  *            the package ships (#25366): no restart clears that, so both
  *            branches refuse it (`PLUGIN_REGISTER_FAILED`, 422) and nothing is
- *            registered or written.
+ *            registered or written. So is a register refused because another
+ *            package (or the platform) holds a bare name the package declares
+ *            — a flow, a webhook, a dataset, … (#31296; `bare-name-one-holder.ts`
+ *            in `@objectstack/objectql`): the restart would admit the clash.
  *
  *          `installMode: 'managed' | 'unmanaged'` (ADR-0131 D6; absent means
  *          `managed`, the key parsed against `InstallModeSchema`) chooses
@@ -354,9 +357,10 @@ import {
 } from '@objectstack/metadata-protocol';
 import { resolveThrownHttpError } from '@objectstack/types';
 import { unknownQueryParamRefusalMessage } from '@objectstack/rest';
-// [#25366] The code the registry's security-catalog refusal carries, compared
-// rather than `instanceof`-tested: the engine keeps the class unexported so a
-// consumer holding the other build realm's copy cannot misread it.
+// [#25366] The code the registry's security-catalog refusal carries — and its
+// bare-name sibling's (#31296) — compared rather than `instanceof`-tested: the
+// engine keeps the classes unexported so a consumer holding the other build
+// realm's copy cannot misread them.
 import { NAMESPACE_CONFLICT_CODE } from '@objectstack/objectql';
 
 /** What the auth service's in-process session read answers, as `AuthSessionApi` declares it. */
@@ -393,6 +397,29 @@ function refusesEnvironmentHeldCatalogName(err: unknown): boolean {
     const conflicts = (err as { conflicts?: unknown }).conflicts;
     return Array.isArray(conflicts)
         && conflicts.some((c) => (c as { existingHolder?: { kind?: unknown } } | null)?.existingHolder?.kind === 'environment');
+}
+
+/**
+ * [#31296] Whether a `manifest.register` failure is the registry's bare-name
+ * refusal (`BareNameConflictError`, `registry.ts` in `@objectstack/objectql`;
+ * the rule is `bare-name-one-holder.ts`): the package declares an item of a
+ * covered type — a flow, a webhook, a dataset, an object-less action, … —
+ * under a name another package, or the platform, already holds.
+ *
+ * Recognised by the error's own brand — the code it shares with its siblings
+ * plus its `name` — never by its types or holders: which types the rule covers
+ * and who holds a name are the registry's to decide, so a type the rule gains
+ * later is refused here without a change.
+ *
+ * No restart heals this one either, in the other direction: this ledger entry
+ * is rehydrated at the next boot BEFORE the cold boot seals the holders, so the
+ * boot ADMITS the clash with one warning (`BARE_NAME_COLD_BOOT_MODE`), and
+ * every consumer resolving the name is served one of the two packages' items
+ * by registration order — the condition the rule exists to refuse.
+ */
+function refusesBareNameHeldElsewhere(err: unknown): boolean {
+    const e = err as { code?: unknown; name?: unknown } | null;
+    return e?.code === NAMESPACE_CONFLICT_CODE && e.name === 'BareNameConflictError';
 }
 
 /**
@@ -2977,7 +3004,13 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             // the inline branch does — `422 PLUGIN_REGISTER_FAILED`, the
             // registry's sentence naming each colliding name and its holder —
             // and the installer renames one of the two items and retries.
-            if (refusesEnvironmentHeldCatalogName(err)) {
+            // [#31296] The same for the registry's bare-name refusal (another
+            // package or the platform holds a flow, webhook, dataset, … name
+            // the package declares): a restart would load the entry before the
+            // holders are sealed and admit the clash, so the lenient answer
+            // would install exactly what the rule refuses
+            // ({@link refusesBareNameHeldElsewhere}).
+            if (refusesEnvironmentHeldCatalogName(err) || refusesBareNameHeldElsewhere(err)) {
                 return c.json({
                     success: false,
                     error: { code: 'PLUGIN_REGISTER_FAILED', message: `Package '${manifestId}' cannot be installed: ${registerError}` },
