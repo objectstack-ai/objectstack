@@ -2838,13 +2838,22 @@ importers:
       '@objectstack/observability':
         specifier: workspace:*
         version: link:../../observability
+      '@objectstack/service-cluster':
+        specifier: workspace:*
+        version: link:../service-cluster
       '@objectstack/spec':
         specifier: workspace:*
         version: link:../../spec
     devDependencies:
+      '@objectstack/service-cluster-redis':
+        specifier: workspace:*
+        version: link:../service-cluster-redis
       '@types/node':
         specifier: ^26.6.5
         version: 26.6.5
+      ioredis-mock:
+        specifier: ^8.13.1
+        version: 8.13.1(@types/ioredis-mock@8.2.7(ioredis@6.0.0))(ioredis@6.0.0)
       typescript:
         specifier: ^6.0.3
         version: 6.0.3
