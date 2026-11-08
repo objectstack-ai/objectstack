@@ -15,6 +15,10 @@
  *                                                         # the second pass (#30052): plan (or apply) ObjectRepository and ScopedContext
  *   node scripts/codemod-split-engine.mjs --scoped --verify --base <ref>
  *                                                         # re-prove the second pass on disk against engine.ts at <ref>
+ *   node scripts/codemod-split-engine.mjs --scoped --members <C#a,C#b> [--write]
+ *                                                         # the second pass's members mode (#30020): move named scoped methods onto the split class
+ *   node scripts/codemod-split-engine.mjs --scoped --members --verify --base <ref>
+ *                                                         # re-prove the members mode on disk against engine.ts and its scoped modules at <ref>
  *   node scripts/codemod-split-engine.mjs --hand-docs [--modules <a.ts,b.ts>] [--write]
  *                                                         # the third pass (#30053): plan (or apply) the hand series' private docblocks
  *   node scripts/codemod-split-engine.mjs --hand-docs --verify --base <ref>
@@ -143,6 +147,13 @@
  * a body that reads a private member off another instance (`foreign-private`:
  * the class body may, a module function may not) and one that reads a
  * non-public static (`private-static`: the statics route is `ObjectQL`'s).
+ *
+ * `--scoped --members Class#member,…` is that pass's members mode (#30020): on
+ * the split file, it moves a scoped method a stay rule held then into its
+ * class's written facet, with the identity port on the instance's host (a bare
+ * `this` reads `this.facade`, the instance itself) and R9, a symbol key
+ * (`[SEED_USER_GRANTS]` moves into the facet member `seedUserGrants`). Its
+ * section below states what it grows, what it refuses and the undo proof.
  *
  * ## The third pass: the hand series' private docblocks (#30053)
  *
@@ -2564,7 +2575,6 @@ const scopedStubMarker = () => new RegExp(
  * decide, per method of each scoped class, whether its body moves. Pure.
  */
 function planScoped(tm, text, { classes = SCOPED_CLASSES } = {}) {
-  const { Node } = tm;
   const sf = parse(tm, HOST_PATH, text);
   const scope = moduleScope(tm, sf);
   const targets = [];
