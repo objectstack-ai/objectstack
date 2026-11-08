@@ -207,6 +207,9 @@ const ar = {
     requiredForAction: "مطلوب لتنفيذ «{{action}}».",
     aiSuggested: "اقتراح الذكاء الاصطناعي",
     aiDraftNotice: "ملأ الذكاء الاصطناعي من المحادثة الحقول المميّزة بـ«اقتراح الذكاء الاصطناعي». لا يُحفظ شيء حتى تراجعها وتحفظها.",
+    aiBefore: "السابق: {{value}}",
+    aiBeforeEmpty: "فارغ",
+    aiRevert: "استعادة",
     maxFileSize: "الحجم الأقصى: {{size}}",
     masterDetail: {
       loadingColumns: "جارٍ تحميل الأعمدة…",
