@@ -867,6 +867,7 @@ describe('DelegatedAdminGate — describeDelegableScope', () => {
   it('a tenant admin is unconstrained — flagged, and everything enumerated for one uniform picker', async () => {
     const report = await h.gate.describeDelegableScope(
       await (h.gate as any).deps.resolveSets({ principal: 'tenant_admin' }),
+      h.ctxOf('tenant_admin'),
     );
     expect(report.isTenantAdmin).toBe(true);
     expect([...report.placeableBusinessUnitIds].sort()).toEqual(['bu_east', 'bu_es', 'bu_hq', 'bu_west']);

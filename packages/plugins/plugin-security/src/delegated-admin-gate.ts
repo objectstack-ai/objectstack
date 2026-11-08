@@ -117,8 +117,11 @@ const DEFAULT_DELEGATION_CEILING_MS = 30 * 24 * 60 * 60 * 1000;
  * a context holds no delegated scope: no subtree, no covered or placeable unit,
  * no user it covers, and a write it would authorize is refused naming the
  * missing active organization (`resolveHeldScopes`, {@link NO_ACTIVE_ORGANIZATION}).
- * There is no "every organization" mode, here or in the resolver that loads
- * the caller's sets (`grantAppliesInTenant`, `@objectstack/core`).
+ * Nor is it offered a placeable unit as a tenant-level administrator
+ * (`describeDelegableScope`): the units a report offers are read only for a
+ * context that names its organization. There is no "every organization"
+ * mode, here or in the resolver that loads the caller's sets
+ * (`grantAppliesInTenant`, `@objectstack/core`).
  *
  * Under the `group` posture (ADR-0105 D2) this is the ACTIVE organization, not
  * the caller's whole membership set. That is the narrower of the two, which is
@@ -851,11 +854,12 @@ export class DelegatedAdminGate {
    * resolved in — without it a business unit was named by NAME across
    * organizations, so a picker could offer (and this report could disclose)
    * another organization's unit ids. Omitted, or naming no organization, it
-   * reports no delegated scope, no unit placeable through one and no position
-   * assignable through one ({@link resolveHeldScopes}).
+   * reports no delegated scope, no placeable unit for any caller and no
+   * position assignable through a scope ({@link resolveHeldScopes}).
    *
-   * A tenant-level admin (ADR-0066 superuser wildcard) is unconstrained;
-   * the report says so AND enumerates everything the write path admits, so a
+   * A tenant-level admin (ADR-0066 superuser wildcard) is unconstrained inside
+   * its organization; the report says so AND enumerates everything the write
+   * path admits there — every unit of that organization — so a
    * consumer can render one uniform picker instead of special-casing. Every
    * branch reads one position listing, which never offers a name no writer
    * may assign (an audience anchor or a built-in identity). An organization
@@ -901,8 +905,10 @@ export class DelegatedAdminGate {
         scopes: [],
         // A tenant admin is unconstrained INSIDE their organization, never
         // across organizations: the picker this feeds must not name a unit
-        // the caller could not place anyone in.
-        placeableBusinessUnitIds: await this.organizationBusinessUnitIds(organizationId),
+        // the caller could not place anyone in. A context that names no
+        // organization has no organization to place anyone in, so it is
+        // offered no unit (ADR-0123 D2).
+        placeableBusinessUnitIds: organizationId ? await this.organizationBusinessUnitIds(organizationId) : [],
         assignablePositions: await allPositions(),
       };
     }
@@ -1287,15 +1293,16 @@ export class DelegatedAdminGate {
 
   /**
    * The ids of `organizationId`'s business units (narrowed to `onlyId` when
-   * given) — never another organization's, whatever a driver returns. A call
-   * naming no organization is not filtered; the organization-level callers
-   * never make one (each runs only with an active organization), and no
-   * delegated scope reads here (`resolveHeldScopes`). Not a `single`-posture
-   * surface: since ADR-0131 C1 every `single` session carries the Default
-   * Organization (D11: "`single` is never a reason for a row to be org-less").
-   * Fail-closed: an unreadable table yields none.
+   * given) — never another organization's, whatever a driver returns.
+   * `organizationId` is required: every caller names the caller's active
+   * organization, and a context that names none is offered no unit before it
+   * gets here (ADR-0123 D2) — there is no read of every organization's units.
+   * Not a `single`-posture exception either: since ADR-0131 C1 every `single`
+   * session carries the Default Organization (D11: "`single` is never a
+   * reason for a row to be org-less"). Fail-closed: an unreadable table
+   * yields none.
    */
-  private async organizationBusinessUnitIds(organizationId: string | undefined, onlyId?: string): Promise<string[]> {
+  private async organizationBusinessUnitIds(organizationId: string, onlyId?: string): Promise<string[]> {
     const ql = this.deps.ql;
     if (!ql?.find) return [];
     try {
@@ -1305,7 +1312,7 @@ export class DelegatedAdminGate {
         context: organizationScopedCtx(organizationId),
       });
       return (Array.isArray(rows) ? rows : [])
-        .filter((r: any) => !organizationId || rowOrganizationId(r) === organizationId)
+        .filter((r: any) => rowOrganizationId(r) === organizationId)
         .map((r: any) => String(r?.id ?? ''))
         .filter(Boolean);
     } catch {

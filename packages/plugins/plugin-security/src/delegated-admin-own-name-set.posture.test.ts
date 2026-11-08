@@ -187,7 +187,9 @@ async function boot(
   }
   await engine.insert('sys_business_unit_member',
     { id: 'bum_target', user_id: 'u_target', business_unit_id: 'bu_east_field', organization_id: ORG_A }, sys);
-  return { engine, plugin };
+  // The `security` service the plugin registered: the object `GET /api/v1/security/my-delegable-scope` answers through.
+  const security = (ctx.registerService as any).mock.calls.find(([name]: [string]) => name === 'security')?.[1];
+  return { engine, plugin, security };
 }
 
 async function outcome(run: () => Promise<unknown>): Promise<{ status: number; code?: string; message?: string }> {
@@ -435,6 +437,23 @@ describe('[ADR-0090 D12, ruling of record 6663849489; #30758] canReadObject and 
         expect(layerOf(d, 'object_crud').verdict).toBe('denies');
       });
 
+      it('a context naming no organization holds nothing: the door, canReadObject, getReadFilter and explain answer its delegated read as they answer a caller holding no scope', async () => {
+        const h = await boot(posture);
+        // A context that names no organization holds nothing.
+        const noOrganization: any = { userId: 'u_delegate', positions: [], permissions: ['east_admin'] };
+        expect(await unitsRead(h, noOrganization)).toEqual({ status: 403, code: 'PERMISSION_DENIED' });
+        expect(await h.plugin.canReadObject('sys_business_unit', noOrganization)).toBe(false);
+        // No delegated unit scope reaches the row filter: under `single` there is
+        // none, as for a caller holding no scope; under a wall, Layer 0's deny
+        // sentinel reads nothing (ADR-0123 D2).
+        const filter = await h.plugin.getReadFilter('sys_business_unit', noOrganization);
+        if (posture === 'single') expect(filter).toEqual(await h.plugin.getReadFilter('sys_business_unit', WRITER));
+        else expect(await unitsUnder(h, filter)).toEqual([]);
+        const d: any = await h.plugin.explainAccessForCaller({ object: 'sys_business_unit', operation: 'read' }, noOrganization);
+        expect(d.allowed).toBe(false);
+        expect(layerOf(d, 'object_crud').verdict).toBe('denies');
+      });
+
       it('CONTROL: an organization administrator\'s answers are unchanged — every unit, granted by its own set', async () => {
         const h = await boot(posture);
         expect(await h.plugin.canReadObject('sys_business_unit', ORG_ADMIN)).toBe(true);
@@ -558,6 +577,17 @@ describe('[ADR-0090 D12, ruling of record 6663849489] a delegated business-unit 
         // CONTROL: the gate has not gone dark — inside the scope it admits.
         const inside = await gateInsert(h, NARROW, 'sys_user_position', { user_id: 'u_target', position: 'field_rep', business_unit_id: 'bu_east_field' });
         expect(inside).toEqual({ status: 200 });
+      });
+
+      it("a tenant-level administrator's delegable-scope report offers its own organization's units only, and no unit to a context naming no organization", async () => {
+        const h = await boot(posture);
+        await linkOtherOrganization(h);
+        const naming = delegateCtx('u_org_admin', 'admin_full_access');
+        const report = await h.security.describeDelegableScope(naming);
+        expect([report.isTenantAdmin, [...report.placeableBusinessUnitIds].sort()]).toEqual([true, ['bu_east', 'bu_east_field', 'bu_hq']]);
+        // A context that names no organization holds nothing — a tenant-level administrator's included.
+        const unnamed = await h.security.describeDelegableScope({ userId: 'u_org_admin', positions: [], permissions: ['admin_full_access'] });
+        expect([unnamed.isTenantAdmin, unnamed.scopes, unnamed.placeableBusinessUnitIds]).toEqual([true, [], []]);
       });
 
       it('the write gate refuses every write of a context naming no organization — inside the scope too — naming the missing active organization', async () => {
