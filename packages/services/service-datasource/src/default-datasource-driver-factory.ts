@@ -865,8 +865,16 @@ function buildOracleConnection(spec: DatasourceConnectionSpec): Record<string, u
  * connect string and has no slot for the block, so it would be dropped.
  */
 function assertOracleSslNotDeclared(spec: DatasourceConnectionSpec): void {
-  const ssl = resolveSslOption(spec);
-  if (ssl === undefined || ssl === false) return;
+  // The spec's predicate: the block's defaults (`enabled: false`,
+  // `rejectUnauthorized: true`) ask for nothing; a key that asks for TLS or
+  // shapes it is refused. The `config.ssl` shorthand is not an oracle config
+  // key, so the contract refuses it before this door.
+  const block = spec.ssl as
+    | { enabled?: boolean; rejectUnauthorized?: boolean; ca?: string; cert?: string; key?: string }
+    | undefined;
+  if (!block) return;
+  const asks = block.enabled === true || block.rejectUnauthorized === false || !!block.ca || !!block.cert || !!block.key;
+  if (!asks) return;
   throw new Error(
     `datasource '${spec.name ?? 'default'}': the oracle driver does not read a datasource \`ssl\` block — TLS ` +
       "to Oracle is chosen by the connect string. Write `config.connectString: 'tcps://host:2484/service_name'` " +

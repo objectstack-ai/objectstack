@@ -159,7 +159,12 @@ export class FilterHelpersFacet {
     if (Array.isArray(value)) return value.map((v) => this.coerceFilterValue(table, field, v));
 
     const kind = this.temporalFieldKind(table, field);
-    if (!kind) return value;
+    // [#31328] A `Date` against a NON-temporal column on Oracle: the client
+    // binds a Date as TIMESTAMP WITH TIME ZONE, and Oracle answers that by
+    // converting the COLUMN (`TO_TIMESTAMP_TZ(label)`), which raises on any
+    // text that is not a timestamp. Every other dialect compares the text the
+    // Date serialises to; Oracle is handed that text (the canonical instant).
+    if (!kind) return this.isOracle && value instanceof Date ? canonicalUtcDatetime(value) : value;
     if (kind === 'datetime') return this.storageDatetimeValue(value);
     // `Field.time` (#3994) takes the same treatment for the same reason: the
     // comparand must be the canonical time-of-day text the column stores.

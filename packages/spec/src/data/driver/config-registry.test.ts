@@ -328,6 +328,22 @@ describe('the `oracle` row: federation only', () => {
     }
   });
 
+  it('refuses a datasource `ssl` block that turns TLS on — TLS to Oracle is chosen by the connect string', () => {
+    for (const ssl of [{ enabled: true }, { ca: 'CA-PEM' }, { enabled: true, rejectUnauthorized: false }]) {
+      const parsed = DatasourceSchema.safeParse({
+        name: 'erp', driver: 'oracle', schemaMode: 'external', external: EXTERNAL, config: CONFIG, ssl,
+      });
+      expect(parsed.success, JSON.stringify(ssl)).toBe(false);
+      const issue = parsed.error!.issues.find((i) => i.path.join('.') === 'ssl');
+      expect(issue?.message).toContain('tcps://');
+    }
+    // A block that turns TLS off asks for nothing the driver would drop.
+    const off = DatasourceSchema.safeParse({
+      name: 'erp', driver: 'oracle', schemaMode: 'external', external: EXTERNAL, config: CONFIG, ssl: { enabled: false },
+    });
+    expect(off.success).toBe(true);
+  });
+
   it('judges the config against the oracle contract: a connection target is required, a password is refused', () => {
     expect(getDriverConfigSchema('oracledb')).toBe(DRIVER_CONFIG_SCHEMAS.oracle);
     const clean = { known: true, issues: [] };

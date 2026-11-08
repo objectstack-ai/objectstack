@@ -175,6 +175,13 @@ describe('#31328 temporal comparands bind as instants, never as text', () => {
     expect((bindings[0] as Date).toISOString()).toBe('2026-02-15T00:00:00.000Z');
   });
 
+  it('a Date against a NON-temporal column is bound as the canonical instant text, not a TIMESTAMP', () => {
+    // Bound as TIMESTAMP WITH TIME ZONE, Oracle would convert the TEXT column
+    // to compare it, and raise on every row that is not a timestamp.
+    const { bindings } = probe().compileWhere({ name: { $gte: new Date('2020-01-01T00:00:00.000Z') as any } });
+    expect(bindings[0]).toBe('2020-01-01T00:00:00.000Z');
+  });
+
   it('a value that is not a canonical instant or day is passed through for Oracle to refuse', () => {
     expect(oracleInstantBinding('not a date')).toBe('not a date');
     expect(oracleDayBinding('2026-02')).toBe('2026-02');
@@ -189,6 +196,20 @@ describe('#31328 temporal comparands bind as instants, never as text', () => {
     expect(date).toEqual({ val: at, type: client.driver.DB_TYPE_TIMESTAMP_TZ });
     expect(flag).toBe(1);
     expect(text).toBe('x');
+  });
+});
+
+describe("#31328 $empty on a text column is the null row (Oracle stores '' as NULL)", () => {
+  it('$empty: true compiles IS NULL, with no comparison against an empty string', () => {
+    const { sql, bindings } = probe().compileWhere({ name: { $empty: true } });
+    expect(sql).toBe('select * from "CUST" where "FULL_NAME" is null');
+    expect(bindings).toEqual([]);
+  });
+
+  it('$empty: false compiles IS NOT NULL — `<> \'\'` would be UNKNOWN on every row', () => {
+    const { sql, bindings } = probe().compileWhere({ name: { $empty: false } });
+    expect(sql).toBe('select * from "CUST" where "FULL_NAME" is not null');
+    expect(bindings).toEqual([]);
   });
 });
 

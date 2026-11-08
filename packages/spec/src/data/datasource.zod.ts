@@ -1034,7 +1034,13 @@ export const DatasourceSchema = lazySchema(() => strictObject(
     });
   }
 
-  if (resolveDriverId(ds.driver) === 'oracle' && ds.ssl && ds.ssl.enabled !== false) {
+  // The block's own defaults (`enabled: false`, `rejectUnauthorized: true`)
+  // ask for nothing; any key that would ask for TLS or shape it is refused.
+  if (
+    resolveDriverId(ds.driver) === 'oracle'
+    && ds.ssl
+    && (ds.ssl.enabled === true || ds.ssl.rejectUnauthorized === false || !!ds.ssl.ca || !!ds.ssl.cert || !!ds.ssl.key)
+  ) {
     ctx.addIssue({ code: 'custom', path: ['ssl'], message: ORACLE_SSL_BLOCK_REFUSAL });
   }
 

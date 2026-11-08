@@ -63,7 +63,6 @@ export const OracleConfigSchema = lazySchema(() => strictObject(
       server: 'host',
       service: 'serviceName',
       service_name: 'serviceName',
-      servicename: 'serviceName',
       database: 'serviceName',
       dbname: 'serviceName',
       connect_string: 'connectString',

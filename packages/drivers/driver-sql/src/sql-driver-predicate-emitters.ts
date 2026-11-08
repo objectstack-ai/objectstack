@@ -799,7 +799,12 @@ export function applyEmptyOperator(this: Pick<PredicateEmitterHost, 'declaredVal
   if (!shape) throw undeclaredEmptyOperatorFieldError(field, subtree);
   const expansion = expandEmptyOperator(shape);
   const method = logicalOp === 'or' ? 'orWhere' : 'where';
-  switch (expansion.arm) {
+  // [#31328] Oracle stores `''` as NULL, so a text column's "empty" IS its
+  // null row: `= ''` / `<> ''` compare against NULL and answer UNKNOWN, which
+  // turned `$empty: false` into "no rows". The text arm therefore compiles as
+  // the null-only one there — the same partition, with nothing to compare.
+  const arm = expansion.arm === 'text' && this.dialectName === 'oracle' ? 'null_only' : expansion.arm;
+  switch (arm) {
     case 'null_only':
       builder[
         empty
@@ -826,7 +831,7 @@ export function applyEmptyOperator(this: Pick<PredicateEmitterHost, 'declaredVal
       // The spec's `EmptyOperatorArm` is a closed union of the three rows
       // above; a fourth reaching here is a spec change this driver was not
       // taught, and it must fail loudly rather than answer for it.
-      const unknownArm: never = expansion.arm;
+      const unknownArm: never = arm;
       throw new Error(`[sql-driver] no $empty arm for the declared row ${JSON.stringify(unknownArm)}`);
     }
   }
