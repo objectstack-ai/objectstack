@@ -30,7 +30,8 @@
  *    member's `1.0.0`, not its refused `2.0.0`;
  *  - CONTROLS: a single-package refusal is answered exactly as before (same
  *    code, status and sentence as `registerApp` alone, nothing of it left);
- *    a clean two-member artifact registers both members.
+ *    a clean two-member artifact registers both members, and one with a
+ *    residual records the residual owner's origin (a refused one records none).
  *
  * The artifacts arrive after `start()`, through the `manifest` service, the way
  * the marketplace install door hands them over.
@@ -46,6 +47,8 @@ type ManifestService = { register(artifact: unknown, options?: { source?: 'code'
 const CORE = 'com.probe.suite.core';
 const ADDON = 'com.probe.suite.addon';
 const HOLDER = 'com.probe.holder';
+/** The artifact's own id, which its residual is filed under. */
+const SUITE = 'com.probe.suite';
 const PREFIXES = ['suite_'];
 
 const object = (name: string, extra: Record<string, unknown> = {}) => ({
@@ -93,7 +96,7 @@ const addon = (version = '1.0.0', extra: Record<string, unknown> = {}) => {
 };
 
 const artifact = (members: unknown[], extra: Record<string, unknown> = {}) => ({
-  id: 'com.probe.suite',
+  id: SUITE,
   version: (members[0] as { version: string }).version,
   packages: members.map((manifest) => ({ manifest })),
   ...extra,
@@ -216,6 +219,9 @@ describe('a refused member of a multi-package artifact leaves no member of it re
 
     expect(err).toMatchObject({ code: 'INVALID_METADATA', status: 422 });
     expect(trace(ql)).toEqual(NOTHING);
+    // …and records no origin for the residual's owner: a refused artifact
+    // states nothing about where an id it never registered came from.
+    expect(ql.residualOwnerSource(SUITE)).toBeUndefined();
   });
 });
 
@@ -275,5 +281,14 @@ describe('CONTROLS', () => {
       datasources: ['suite_ds:memory'],
       manifests: [CORE, ADDON],
     });
+  });
+
+  it('a clean artifact with a residual registers it and records the residual owner\'s origin', async () => {
+    const { ql, manifest } = await boot();
+
+    await manifest.register(artifact([core(), addon()], { objects: [object('suite_residual_thing')] }), { source: 'marketplace' });
+
+    expect(ql.registry.getObjectOwner('suite_residual_thing')?.packageId).toBe(SUITE);
+    expect(ql.residualOwnerSource(SUITE)).toBe('marketplace');
   });
 });
