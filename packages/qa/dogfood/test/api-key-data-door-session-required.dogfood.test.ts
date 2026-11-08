@@ -24,6 +24,10 @@
  *  - the owner's SESSION revokes and restores a key from the list (200);
  *  - a key revoked with the forced-reset reason stays administrator-only for
  *    the owner's session (the restore guard, 403);
+ *  - a key revoked because its owner's membership ended is restored by no
+ *    session at all: the declared Restore action, sent exactly as the
+ *    registered schema declares it, is refused to the owner's session and to
+ *    the platform administrator's (the restore guard, 403);
  *  - the mint, and the `last_used_at` stamp the key-admission seam writes,
  *    are system-context writes and still land.
  */
@@ -37,6 +41,7 @@ const SYS = { context: { isSystem: true } };
 describe('sys_api_key on the data door: changing a key requires a signed-in session', () => {
   let stack: VerifyStack;
   let memberToken: string;
+  let adminToken: string;
 
   const MEMBER_EMAIL = 'apikey.datadoor.session@verify.test';
 
@@ -86,7 +91,7 @@ describe('sys_api_key on the data door: changing a key requires a signed-in sess
 
   beforeAll(async () => {
     stack = await bootShowcase({});
-    await stack.signIn();
+    adminToken = await stack.signIn();
     memberToken = await stack.signUp(MEMBER_EMAIL);
   }, 180_000);
 
@@ -190,6 +195,41 @@ describe('sys_api_key on the data door: changing a key requires a signed-in sess
     const row = await readKey(key.id);
     expect(row.revoked).toBe(true);
     expect(row.revoked_reason).toBe('admin_password_reset');
+  });
+
+  it('[restore guard] a key revoked because its owner\'s membership ended: the declared Restore action is refused to the owner\'s session and to the platform administrator\'s (403 PERMISSION_DENIED)', async () => {
+    const key = await mintKey('dd-membership-ended');
+    // The stored state a host writes when it removes the owner from the
+    // organization: `revoked: true` with the reason, in the system context.
+    const ql: any = await stack.kernel.getServiceAsync('objectql');
+    await ql.update('sys_api_key', { id: key.id, revoked: true, revoked_reason: 'organization_membership_ended' }, SYS);
+    expect(await keyAuthenticates(key.raw)).toBe(false);
+
+    // The request `restore_api_key` declares, read off the REGISTERED schema.
+    const restore = ((ql.getSchema('sys_api_key')?.actions ?? []) as any[]).find((a) => a?.name === 'restore_api_key');
+    expect(restore, 'restore_api_key must stay declared').toBeTruthy();
+    expect(String(restore.target).startsWith('/api/v1/')).toBe(true);
+    const restorePath = (id: string) => String(restore.target).slice('/api/v1'.length).replace('{id}', id);
+
+    for (const [who, token] of [['owner', memberToken], ['platform administrator', adminToken]] as const) {
+      const res = await stack.apiAs(token, restore.method, restorePath(key.id), restore.bodyExtra);
+      expect(res.status, `${who}: ${await res.clone().text()}`).toBe(403);
+      const body: any = await res.json();
+      expect(body.code ?? body.error?.code, who).toBe('PERMISSION_DENIED');
+    }
+    const row = await readKey(key.id);
+    expect(row.revoked).toBe(true);
+    expect(row.revoked_reason).toBe('organization_membership_ended');
+    expect(await keyAuthenticates(key.raw)).toBe(false);
+
+    // CONTROL: the administrator's session reaches the member's row, so the
+    // refusal above is the reason's: the same action restores a key the
+    // forced reset revoked.
+    const reset = await mintKey('dd-membership-ended-control');
+    await ql.update('sys_api_key', { id: reset.id, revoked: true, revoked_reason: 'admin_password_reset' }, SYS);
+    const restored = await stack.apiAs(adminToken, restore.method, restorePath(reset.id), restore.bodyExtra);
+    expect(restored.status, await restored.clone().text()).toBe(200);
+    expect(await keyAuthenticates(reset.raw)).toBe(true);
   });
 
   it('[control] the mint and the key-admission `last_used_at` stamp, both system-context writes, still land', async () => {
