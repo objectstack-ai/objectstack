@@ -117,7 +117,7 @@ describe('ObjectQLPlugin registers the three key sources before the lifecycle ma
           }],
         });
       },
-    } as any);
+    });
     await kernel.bootstrap();
 
     expect(calls).toEqual([

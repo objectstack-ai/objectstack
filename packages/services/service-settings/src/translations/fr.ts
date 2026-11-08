@@ -753,15 +753,15 @@ export const fr: PlatformTranslationData = {
         },
         retention_overrides: {
           label: 'Surcharges de rétention',
-          help: 'Surcharges de fenêtre par objet : { "<object>": { "maxAge": "1y", "expireAfter": "30d" } }. Les durées utilisent h/d/w/y. Définies par organisation : une organisation réglementée peut conserver des années, une organisation de développement quelques jours. Une surcharge plus courte que le minimum requis par une fonction de la plateforme (par exemple la fenêtre de détection des doublons de la file de tâches) est ignorée et journalisée comme erreur, et la fenêtre par défaut continue de s’appliquer.',
+          help: 'Surcharges de fenêtre par objet. Les durées utilisent h/d/w/y. Définies par organisation : une organisation réglementée peut conserver des années, une organisation de développement quelques jours. Une surcharge plus courte que le minimum requis par une fonction de la plateforme (par exemple la fenêtre de détection des doublons de la file de tâches) est ignorée et journalisée comme erreur, et la fenêtre par défaut continue de s’appliquer.',
         },
         quotas: {
           label: 'Quotas de lignes',
-          help: 'Nombre maximal de lignes par objet : { "<object>": 1000000 }. Un dépassement déclenche une alerte de gouvernance — les quotas ne suppriment jamais au-delà de la politique déclarée.',
+          help: 'Nombre maximal de lignes par objet. Un dépassement déclenche une alerte de gouvernance — les quotas ne suppriment jamais au-delà de la politique déclarée.',
         },
         quota_defaults: {
           label: 'Quotas par défaut par classe',
-          help: 'Quotas de repli par classe de cycle de vie : { "telemetry": 1000000, "transient": 500000, "event": 100000, "audit": 5000000 }.',
+          help: 'Quotas de repli par classe de cycle de vie (telemetry, transient, event, audit).',
         },
         growth_alert_rows: {
           label: 'Seuil d’alerte de croissance (lignes par passage)',

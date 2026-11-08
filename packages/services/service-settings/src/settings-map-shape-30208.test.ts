@@ -127,6 +127,7 @@ describe('[#30208] the save door judges a lifecycle map', () => {
     const recordClass = await save({ quota_defaults: { record: 10 } });
     const misspelt = await save({ quota_defaults: { telemtry: 10 } });
 
+    // adr0112-ok: D6 — a field-addressed FieldErrorCode in a settings validation answer
     expect((recordClass.body.error.details.fields as Fields)[0]).toMatchObject({ code: 'invalid_option', constraint: { entry: 'record' } });
     expect((misspelt.body.error.details.fields as Fields)[0].message).toBe(
       "Per-class quota defaults: 'telemtry' is not a key this setting admits. Allowed: audit, telemetry, transient, event.",
@@ -161,6 +162,7 @@ describe('[#30208] the save door judges a lifecycle map', () => {
     expect((text.body.error.details.fields as Fields)[0].message).toBe(
       "Row quotas: 'sys_audit_log' must be a whole number greater than 0, such as 1000000, not a string of 3 characters.",
     );
+    // adr0112-ok: D6 — a field-addressed FieldErrorCode in a settings validation answer
     expect((zero.body.error.details.fields as Fields)[0]).toMatchObject({ code: 'invalid_shape', constraint: { kind: 'positive_integer' } });
     expect((fraction.body.error.details.fields as Fields)[0].code).toBe('invalid_shape');
   });
@@ -172,10 +174,12 @@ describe('[#30208] the save door judges a lifecycle map', () => {
     const empty = await save({ retention_overrides: { sys_job_run: {} } });
 
     expect((typo.body.error.details.fields as Fields)[0]).toMatchObject({
+      // adr0112-ok: D6 — a field-addressed FieldErrorCode in a settings validation answer
       code: 'unknown_field',
       constraint: { entry: 'sys_job_run', column: 'max_age' },
       message: "Retention overrides: 'sys_job_run' has a property 'max_age' this setting does not declare. Allowed: maxAge, expireAfter.",
     });
+    // adr0112-ok: D6 — a field-addressed FieldErrorCode in a settings validation answer
     expect((empty.body.error.details.fields as Fields)[0]).toMatchObject({ code: 'invalid_shape', constraint: { entry: 'sys_job_run' } });
   });
 
