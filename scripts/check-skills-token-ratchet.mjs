@@ -501,7 +501,22 @@ export const CEILINGS = new Map([
   // 6426 after the click-through default's three tokens landed on main and
   // the "A Flow is a directed graph of nodes" opener was cut (the node tables
   // and the `nodes` + `edges` FlowSchema line already say it).
-  ['skills/objectstack-automation/SKILL.md', 6426],
+  // 6426 -> 6527 (card #31155, the objectstack-automation port of cloud's private
+  // authoring rules): § Valid-but-silently-wrong gains item 4 — a `select` is
+  // compared and written by its option `value`, never the label the request
+  // speaks, in the start `condition` and every `fields` / `filter` entry (the
+  // condition leg otherwise stages clean and never fires; the `fields` /
+  // `filter` leg fails the run as `invalid_option`). No same-file restatement
+  // was left to pay it; the comment says so honestly. Arithmetic in priced
+  // bytes (stamp line excluded), against `main`'s 25654: 25654 -> 26108 (+454)
+  // -> ceil(26108 / 4) = 6527; headroom was 12 tokens, so the ceiling moves +101,
+  // pinned AT the measurement. Authorised by the ruling of record that orders
+  // this text into the published skills: objectstack-ai/cloud#3659, letter A,
+  // ruling comment 6682024726 (2026-11-06): "How to write valid, working
+  // metadata lives in the public skills … The private corpus's rules of that
+  // kind move there". The raise path is the standing 2026-10-27 ruling (ruling
+  // record 6513306068), quoted verbatim and untranslated in the PR body.
+  ['skills/objectstack-automation/SKILL.md', 6527],
   // 13783 -> 13892 (2026-08-31 app-repo-principles raise, see the block above).
   // The invariant-vs-transition-gate choice, placed in the field-conditional-rule
   // bullet list where the tool is actually picked. Both wrong picks are silent:
@@ -934,7 +949,19 @@ export const CEILINGS = new Map([
   // (whose row is RE-LOCKED above), pinned AT its landed count — no headroom,
   // because a split that arrives with budget is a raise wearing a new path.
   // The package deltas are the pointer lines and the four new file titles only.
-  ['skills/objectstack-automation/references/examples-flows.md', 1436],
+  // 1436 -> 1494 (card #31155, the objectstack-automation port of cloud's private
+  // authoring rules): a wall-clock hour the request names is written as said
+  // with its IANA `timezone` on the start node's `config.schedule`, never
+  // converted to UTC by hand (a bare expression runs in UTC and records no
+  // zone) — the schedule example and the time-relative cadence comment carry
+  // one. Paid down first, one restatement cut: the `requires: ['automation',
+  // 'triggers']` / always-on `job` sentence (SKILL.md § Prerequisite's table
+  // says it), now a pointer. 5685 -> 5976 bytes (+291 net) -> ceil(5976 / 4)
+  // = 1494; headroom was 14 tokens, so the ceiling moves +58, pinned AT the
+  // measurement. Same authority as the SKILL.md row above: cloud#3659 letter A
+  // (ruling comment 6682024726) orders the text in; the raise path is the
+  // standing 2026-10-27 ruling (record 6513306068), quoted in the PR body.
+  ['skills/objectstack-automation/references/examples-flows.md', 1494],
   // NEW FILE (card #27223): one recipe per integration archetype — OpenAPI with
   // a static key, remote MCP with a static header, plain REST, the vendor
   // callback, a hand-written document for a spec-less vendor — plus the two
@@ -1026,7 +1053,30 @@ export const CEILINGS = new Map([
   // bytes, 0 tokens, so the ceiling moves +143, pinned AT the measurement.
   // Same maintainer ruling as the SKILL.md row above (2026-10-27, verbatim and
   // untranslated): 「A:先削重复,余额按实测提高」.
-  ['skills/objectstack-automation/references/state-machines-and-approvals.md', 5730],
+  // 5730 -> 5838 (card #31155, the objectstack-automation port of cloud's private
+  // authoring rules): Approval Best Practices gains item 4 — a flow reacting
+  // to the mirrored `approvalStatusField` runs as the person who acted and
+  // stays `runAs: 'user'`; only the SLA auto-decision and the dead-run release
+  // carry no user, so a flow that must react to those declares
+  // `runAs: 'system'` (the approval service's attributed mirror write on
+  // `main`, which corrects the hosted corpus's blanket "declare system").
+  // Paid down first: the discount-approval example's four-line trigger comment
+  // (a restatement of SKILL.md § Trigger Configuration) is one pointer line;
+  // the three Chinese glosses left the file — the shipped skill text is
+  // English-only (the approver's review on #31223); and the three legacy
+  // "(the old …)" glosses in § Branching, side-effects & rejection, naming
+  // approval-process keys that have no author since ADR-0019, are gone. Two
+  // one-word corrections ride along: the mirrored statuses list `returned`
+  // (send-back writes it), and the dynamic-approval example's condition reads
+  // `record.status`. Base is `main`'s 22908 — #31322 had added 24 bytes to
+  // this file (`record.amount != null && `) under the first pin, which CI
+  // measured on the merge result as 5844 against a 5838 row. 22908 -> 23299
+  // bytes (+391 net) -> ceil(23299 / 4) = 5825; headroom was 3 tokens, so the
+  // ceiling moves +95, pinned AT the measurement. Same authority as the
+  // SKILL.md row above: cloud#3659 letter A (ruling comment 6682024726) orders
+  // the text in; the raise path is the standing 2026-10-27 ruling (record
+  // 6513306068), quoted in the PR body.
+  ['skills/objectstack-automation/references/state-machines-and-approvals.md', 5825],
   // 1779 -> 1769 (#26297): RE-LOCK at the landed count after a net cut — two
   // stale `{ type: 'lookup', reference: 'user' }` fields (an object that does
   // not exist) became `type: 'user'`; -10 tokens, the row follows the
