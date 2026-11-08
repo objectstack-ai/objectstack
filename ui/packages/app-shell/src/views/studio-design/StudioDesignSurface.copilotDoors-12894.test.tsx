@@ -128,6 +128,9 @@ vi.mock('../../preview/DraftChangesPanel', () => ({
 
 import { uiMessagesToChatMessages } from '@object-ui/plugin-chatbot';
 import { I18nProvider } from '@object-ui/i18n';
+// The console's preview and authoring code loads `@objectstack/lint` lazily;
+// warmed here so its first load is paid at import, not inside a test's clock.
+import '@objectstack/lint';
 import { StudioDesignSurface } from './StudioDesignSurface';
 import { subscribeMetadataRefresh } from '../../assistant/assistantBus';
 

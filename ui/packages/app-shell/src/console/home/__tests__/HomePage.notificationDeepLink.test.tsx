@@ -134,6 +134,9 @@ vi.mock('../../../runtime-config', () => ({
 // (`useInboxBell`); this harness serves no inbox feed, so the write is stubbed.
 vi.mock('../../../hooks/useInboxBell', () => ({ useInboxBell: () => ({ markRead: vi.fn() }) }));
 
+// The console's preview and authoring code loads `@objectstack/lint` lazily;
+// warmed here so its first load is paid at import, not inside a test's clock.
+import '@objectstack/lint';
 import { HomePage } from '../HomePage';
 
 /* ── The `_drafts` double (objectui#7307) ─────────────────────────────────────

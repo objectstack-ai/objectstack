@@ -91,6 +91,9 @@ vi.mock('./StudioMetadataArea', () => ({
   ),
 }));
 
+// The console's preview and authoring code loads `@objectstack/lint` lazily;
+// warmed here so its first load is paid at import, not inside a test's clock.
+import '@objectstack/lint';
 import { StudioDesignSurface } from './StudioDesignSurface';
 import { registerMetadataPreview } from '../metadata-admin/preview-registry';
 import { t, tFormat } from '../metadata-admin/i18n';

@@ -58,6 +58,9 @@
 import { describe, it, expect, vi } from 'vitest';
 // `.js` on purpose — NodeNext resolution requires the extension, and this
 // package's TEST_DEBT ceiling has no margin for another TS2835 (#7248).
+// Pays `@objectstack/objectql`'s first load at collection, never inside a clocked case
+// (the source under test imports it lazily; `check:test-source-alias`).
+import '@objectstack/objectql';
 import { RestServer } from './rest-server.js';
 import { refuseRepeatedQueryParams, readSingleQueryValue } from './query-multiplicity.js';
 

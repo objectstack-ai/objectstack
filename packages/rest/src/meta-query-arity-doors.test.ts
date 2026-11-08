@@ -30,6 +30,9 @@ import {
 } from './meta-item-read-gate.js';
 import { unknownQueryParamMessage } from './query-allowlist.js';
 import { repeatedQueryParamMessage } from './query-multiplicity.js';
+// Pays `@objectstack/objectql`'s first load at collection, never inside a clocked case
+// (the source under test imports it lazily; `check:test-source-alias`).
+import '@objectstack/objectql';
 import { RestServer } from './rest-server.js';
 
 const DOORS = Object.keys(META_QUERY_ARITY_DOORS) as MetaQueryArityDoor[];

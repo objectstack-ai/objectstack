@@ -11,6 +11,9 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
+// Pays `@objectstack/metadata`'s first load at collection, never inside a clocked case
+// (the source under test imports it lazily; `check:test-source-alias`).
+import '@objectstack/metadata';
 import { HttpDispatcher } from '../http-dispatcher.js';
 
 const AUTHOR = { userId: 'u_author', isSystem: false, systemPermissions: ['manage_metadata', 'studio.access'] };

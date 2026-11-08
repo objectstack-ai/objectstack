@@ -117,6 +117,9 @@ vi.mock('../../../hooks/useInboxBell', () => ({ useInboxBell: () => ({ markRead:
 // like every other source this page reads.
 vi.mock('../../deployment-notice/DeploymentNotice', () => ({ DeploymentNotice: () => null }));
 
+// The console's preview and authoring code loads `@objectstack/lint` lazily;
+// warmed here so its first load is paid at import, not inside a test's clock.
+import '@objectstack/lint';
 import { HomePage } from '../HomePage';
 
 /** A `GET /api/v1/runtime/config` answer, as the server sends it. */
