@@ -432,6 +432,10 @@ const ko = {
       available: '사용 가능',
       all: '모든 통화 (ISO 4217)',
     },
+    currencyHome: {
+      convertedAt: '{{date}} 환율 {{rate}}(으)로 환산',
+      homeCurrency: '기준 통화(환율 1)',
+    },
     boolean: {
       offBadge: "{{label}} — 꺼짐",
       completed: "완료됨",

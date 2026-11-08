@@ -435,6 +435,10 @@ const fr = {
       available: 'Disponibles',
       all: 'Toutes les devises (ISO 4217)',
     },
+    currencyHome: {
+      convertedAt: 'Converti au taux de {{rate}} du {{date}}',
+      homeCurrency: 'Dans la devise de référence (taux 1)',
+    },
     boolean: {
       offBadge: "{{label}} — Désactivé",
       completed: "Terminé",

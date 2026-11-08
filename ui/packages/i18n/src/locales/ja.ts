@@ -432,6 +432,10 @@ const ja = {
       available: '利用可能',
       all: 'すべての通貨（ISO 4217）',
     },
+    currencyHome: {
+      convertedAt: '{{date}} のレート {{rate}} で換算',
+      homeCurrency: '基準通貨（レート 1）',
+    },
     boolean: {
       offBadge: "{{label}} — オフ",
       completed: "完了",
