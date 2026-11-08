@@ -4793,7 +4793,18 @@ async function dispatchAdmittedBusinessAction(deps: ActionExecutionDeps,
         deps, ql, objectName, resolveActionHandlerKeys(action), actionContext,
     );
     if (!dispatch.dispatched) {
-        throw new Error(`No handler registered for action '${name}' on '${objectName}'`);
+        // No key carried a handler: the routing miss the REST `/actions` door
+        // answers from its own branch (`domains/actions.ts`), thrown as that
+        // answer — its sentence, `404` and the closed code the status derives
+        // (`RESOURCE_NOT_FOUND`) — so `run_action`, which reads every throw
+        // through that door's reader (`actionsDoorAnswerOf`), answers it as
+        // the door does. Thrown uncoded ("No handler registered …"), the
+        // reader answered it as the door's `400 VALIDATION_ERROR` rejection,
+        // telling the agent its input was bad, and the invocation row recorded
+        // a `500`.
+        throw Object.assign(new Error(`Action '${name}' on object '${objectName}' not found`), {
+            code: standardErrorCodeForHttpStatus(404), status: 404,
+        });
     }
     // [#11519] Same doubled post-success-navigation diagnostic as the REST
     // seam — the defect is a property of the authored action + handler pair,
@@ -5052,7 +5063,8 @@ export async function executeRegisteredAction(_deps: ActionExecutionDeps,
  * MCP `list_actions` used to admit a script action on its declaration alone
  * (`target || body`), so a declaration nothing had bound — measured: an
  * `os package install`ed package, before its bodies were bound — was listed
- * and then refused by `run_action` with "No handler registered".
+ * and then refused by `run_action` (then "No handler registered"; now the
+ * coded routing miss REST `/actions` answers, `404`).
  *
  * An engine that cannot enumerate its handlers (no `listRegisteredActions`)
  * answers `false` for everything: the listing then cannot vouch for any script
