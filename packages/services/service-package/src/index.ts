@@ -9,6 +9,7 @@ import type { IDataEngine } from '@objectstack/spec/contracts';
 import {
   ensurePackageTable,
   PACKAGE_TABLE_COLUMNS,
+  PACKAGE_ROW_CREATED_AT_SQL,
   PACKAGE_TABLE_STATEMENTS,
   packageRowStamp,
   probePackageTable,
@@ -91,11 +92,13 @@ export interface PackagePublishResult {
    */
   version?: string;
   /**
-   * [#31530] On success, the `created_at` this write bound
-   * (`YYYY-MM-DD HH:MM:SS` UTC, {@link packageRowStamp}): the row's own when
-   * the write inserted it, which is what `get` then answers for it. When the
-   * `(id, version)` row already existed, the update keeps that row's earlier
-   * `created_at`, and this value is not the row's.
+   * [#31530] On success, the `created_at` the `(id, version)` row holds after
+   * this write, which is what `get` then answers for it: the stamp the write
+   * bound (`YYYY-MM-DD HH:MM:SS` UTC, {@link packageRowStamp}) when it
+   * inserted the row, or the row's earlier `created_at`, which the update
+   * keeps, when the row already existed. Absent when the read before the write
+   * could not say which (it faulted, or the seam answered no result set): the
+   * caller then has no stamp to tie to, and must not guess one.
    */
   createdAt?: string;
 }
@@ -275,6 +278,36 @@ function normalizeRows(result: any): any[] {
  * RESULT SET. Nothing here names a driver, so any host with the same no-op
  * shape is covered without an allowlist to maintain.
  */
+
+/**
+ * [#31530] The `created_at` the `(id, version)` row of `sys_packages` holds,
+ * read before `publish`'s upsert: the text, `null` when no such row is stored,
+ * or `undefined` when this read cannot say (a fault, logged at `warn`, or a
+ * seam that answered no result set). Never throws: the write that follows is
+ * the publish, and its own failure is the one `publish` answers.
+ */
+async function storedRowCreatedAt(
+  engine: IDataEngine,
+  id: string,
+  version: string,
+  logger: Pick<PluginContext['logger'], 'warn'>,
+): Promise<string | null | undefined> {
+  try {
+    const result = await engine.execute!({ sql: PACKAGE_ROW_CREATED_AT_SQL, args: [id, version] });
+    if (!isResultSet(result)) return undefined;
+    const rows = normalizeRows(result);
+    if (rows.length === 0) return null;
+    const value = rows[0]?.created_at;
+    return typeof value === 'string' && value !== '' ? value : undefined;
+  } catch (error) {
+    logger.warn(
+      `Could not read the stored created_at of package '${id}@${version}' before publishing it; `
+        + 'the publish answers no created_at',
+      { cause: (error as Error)?.message ?? String(error) },
+    );
+    return undefined;
+  }
+}
 
 /**
  * Is `result` one of the result-set shapes a raw SELECT can come back as?
@@ -498,6 +531,12 @@ export class PackageServicePlugin implements Plugin {
           // [#31530] The row's stamps, bound by this write, so the answer can
           // name the `created_at` it inserted without reading the row back.
           const stamp = packageRowStamp(new Date());
+          // [#31530] The row's own `created_at` when `(id, version)` is already
+          // stored: the upsert's update arm keeps it, so that is the value to
+          // answer. `null` — no row, so the insert arm runs and binds `stamp`.
+          // `undefined` — this read could not say; the answer then names no
+          // stamp rather than one the row may not hold.
+          const held = await storedRowCreatedAt(objectql, data.manifest.id, data.manifest.version, logger);
 
           // [#21243] The upsert is spelled for the driver's dialect: MySQL has
           // no `ON CONFLICT`, and refused the standard spelling with
@@ -516,7 +555,12 @@ export class PackageServicePlugin implements Plugin {
           });
 
           logger.info(`Published package: ${data.manifest.id}@${data.manifest.version}`);
-          return { success: true, version: data.manifest.version, createdAt: stamp };
+          const createdAt = held === null ? stamp : held;
+          return {
+            success: true,
+            version: data.manifest.version,
+            ...(createdAt !== undefined ? { createdAt } : {}),
+          };
         } catch (error) {
           // [#8131] ① The raw driver text goes to the LOG — the one place it
           // belongs, and where it already went. Nothing about the operator's

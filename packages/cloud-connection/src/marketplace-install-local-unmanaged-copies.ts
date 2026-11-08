@@ -38,8 +38,9 @@
  * the purge. So the record also keeps the base's `instance`: the `version` and
  * `created_at` of the base's row in the package store (`sys_packages`). At
  * install they come from the import's own answer (`baseInstance`, #31530): the
- * package service's `publish` binds the row's `created_at` and answers it, so
- * the door never reads the row back after the copy. The store sets `created_at`
+ * package service's `publish` answers the `created_at` the row holds after its
+ * write (the stamp it bound for a new row, the row's own for one already
+ * stored), so the door never reads the row back after the copy. The store sets `created_at`
  * when it first inserts the row, keeps it when the same base is published
  * again, and an uninstall deletes the row, so a later base under the same id
  * gets a row of its own. The purge reads the row through the `package`
@@ -52,7 +53,8 @@
  *     restart either);
  *   - `created_at` is a `YYYY-MM-DD HH:MM:SS` UTC stamp, so a base uninstalled
  *     and re-created under the same id within the same second shares it;
- *   - a package service whose `publish` states no stamp leaves the import with
+ *   - a package service whose `publish` states no stamp (including one whose
+ *     read of an already-stored row before its write faulted) leaves the import with
  *     no `baseInstance`; the door then writes no record and `copyRecord` says
  *     so (it fails closed, and no door writes that record later: the record's
  *     proof is the door's own act at install, and neither the base row nor

@@ -127,7 +127,9 @@ export interface PackageTableStatements {
  * text carried fractional seconds and a `+00` offset, rows written from now on
  * carry the shorter form. The `latest` order still holds across both forms,
  * since the date and time come first and in the same order. The update arm
- * still keeps the row's `created_at`; it takes the bound `updated_at`.
+ * still keeps the row's `created_at`; it takes the bound `updated_at`. So
+ * `publish` first reads the `(id, version)` row's `created_at`
+ * ({@link PACKAGE_ROW_CREATED_AT_SQL}) and answers that when the row exists.
  * The table DDL, its defaults and the table's shape are untouched.
  */
 export const PACKAGE_TABLE_STATEMENTS: Readonly<Record<PackageTableDialect, PackageTableStatements>> = {
@@ -203,6 +205,17 @@ export const PACKAGE_TABLE_STATEMENTS: Readonly<Record<PackageTableDialect, Pack
 export function packageRowStamp(at: Date): string {
   return at.toISOString().slice(0, 19).replace('T', ' ');
 }
+
+/**
+ * [#31530] The `created_at` an `(id, version)` row already holds, read by
+ * `publish` BEFORE its upsert, in every dialect. The upsert's update arm keeps
+ * an existing row's `created_at`, so when this finds the row, its value — not
+ * the stamp the write binds — is the one the row holds afterwards, and the one
+ * `publish` answers. Reachable: the unmanaged import refuses a target the
+ * registry holds, never one only the store holds (a stored base the boot did
+ * not hydrate, or one a second process on the same store wrote).
+ */
+export const PACKAGE_ROW_CREATED_AT_SQL = 'SELECT created_at FROM sys_packages WHERE id = ? AND version = ?';
 
 /**
  * The table's columns, in the order every dialect's `createTable` declares

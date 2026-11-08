@@ -29,6 +29,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { PackageServicePlugin, type PackageService } from './index.js';
 import {
   ensurePackageTable,
+  PACKAGE_ROW_CREATED_AT_SQL,
   PACKAGE_TABLE_STATEMENTS,
   packageRowStamp,
   resolvePackageTableDialect,
@@ -288,10 +289,41 @@ describe('[#31530] publish answers the row\'s version and created_at, from the w
     // The stored column holds the bound text, in the form the database used to write.
     expect(db.prepare('SELECT created_at, updated_at FROM sys_packages').all()).toEqual([{ created_at: first.createdAt, updated_at: first.createdAt }]);
 
-    // An update of the same (id, version) keeps the row's created_at and takes the new updated_at.
+    // An update of the same (id, version) keeps the row's created_at, takes the new updated_at,
+    // and ANSWERS the created_at the row keeps — never the stamp it bound for the update.
     db.prepare('UPDATE sys_packages SET created_at = ?, updated_at = ?').run('2026-01-01 00:00:00', '2026-01-01 00:00:00');
     const again = await svc.publish({ manifest: { id: 'com.acme.crm-copy', version: '1.0.0', name: 'copy again' } as any, metadata: {} });
-    expect(db.prepare('SELECT created_at, updated_at FROM sys_packages').all()).toEqual([{ created_at: '2026-01-01 00:00:00', updated_at: again.createdAt }]);
+    expect(again).toEqual({ success: true, version: '1.0.0', createdAt: '2026-01-01 00:00:00' });
+    const [kept] = db.prepare('SELECT created_at, updated_at FROM sys_packages').all() as Array<{ created_at: string; updated_at: string }>;
+    expect(kept!.created_at).toBe('2026-01-01 00:00:00');
+    expect(kept!.updated_at).toMatch(STAMP);
+    expect(kept!.updated_at).not.toBe('2026-01-01 00:00:00');
+    expect((await svc.get('com.acme.crm-copy', '1.0.0'))?.created_at).toBe(again.createdAt);
+  });
+
+  it('a read before the write that cannot say whether the row exists leaves the answer without a created_at; the write still lands', async () => {
+    for (const fault of ['throws', 'no result set'] as const) {
+      const db = new DatabaseSync(':memory:');
+      const engine: any = {
+        getDefaultDriverName: () => 'default',
+        getDriverByName: () => ({ dialectName: 'sqlite' }),
+        async execute({ sql, args }: { sql: string; args?: unknown[] }) {
+          if (sql === PACKAGE_ROW_CREATED_AT_SQL) {
+            if (fault === 'throws') throw new Error('SQLITE_BUSY: database is locked');
+            return undefined;
+          }
+          const stmt = db.prepare(sql);
+          return /^\s*select/i.test(sql) ? stmt.all(...((args ?? []) as any[])) : stmt.run(...((args ?? []) as any[]));
+        },
+      };
+      const { ctx, registered } = pluginContext(engine);
+      const plugin = new PackageServicePlugin();
+      await plugin.init(ctx);
+      await plugin.start(ctx);
+      const out = await registered()!.publish({ manifest: { id: 'com.acme.crm-copy', version: '1.0.0', name: 'copy' } as any, metadata: {} });
+      expect(out, fault).toEqual({ success: true, version: '1.0.0' });
+      expect(db.prepare('SELECT id, version FROM sys_packages').all(), fault).toEqual([{ id: 'com.acme.crm-copy', version: '1.0.0' }]);
+    }
   });
 
   it.each(['mysql', 'sqlite'] as const)('%s: the created_at and updated_at bindings are the stamp the answer names', async (dialectName) => {
@@ -306,6 +338,9 @@ describe('[#31530] publish answers the row\'s version and created_at, from the w
     await plugin.init(ctx);
     await plugin.start(ctx);
     const out = await registered()!.publish({ manifest: { id: 'com.acme.crm', version: '2.0.0' } as any, metadata: {} });
+    // The read of the row's created_at runs first, for the same (id, version); no row, so the insert's stamp is answered.
+    const read = calls[calls.length - 2]!;
+    expect(read).toEqual({ sql: PACKAGE_ROW_CREATED_AT_SQL, args: ['com.acme.crm', '2.0.0'] });
     const upsert = calls[calls.length - 1]!;
     expect(upsert.sql).toBe(PACKAGE_TABLE_STATEMENTS[dialectName === 'mysql' ? 'mysql' : 'standard'].upsert);
     expect(upsert.args).toHaveLength(7);
