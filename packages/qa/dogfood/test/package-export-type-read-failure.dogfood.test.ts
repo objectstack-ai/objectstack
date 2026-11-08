@@ -27,10 +27,14 @@
 //      no body;
 //   3. CONTROL: the read restored, both answer 200 with the dashboards again
 //      (the failure was the read's, not the boot's);
-//   4. a type this runtime does not serve is still skipped: `rag_pipeline` is
-//      an exportable collection the showcase's live type vocabulary
-//      (`getMetaTypes`) does not list, and its read failing leaves both doors
-//      200 with the same collections.
+//   4. a type this runtime does not serve is still skipped: `connector` is an
+//      exportable collection, and while the live type vocabulary
+//      (`getMetaTypes`) does not list it its read failing leaves both doors
+//      200 with every other collection. The showcase serves every exportable
+//      type, so the vocabulary's omission is injected beside the read's
+//      failure. (`rag_pipeline` was the natural specimen, exportable and
+//      unlisted, until its `PLURAL_TO_SINGULAR` row was retired: no stack
+//      could declare it, and it is no longer exportable at all.)
 //
 // The fault is injected on the protocol's own overlay read
 // (`readActiveOverlayRows`, which the moved list body reaches through the
@@ -50,8 +54,13 @@ import { bootShowcase } from './showcase-boot.js';
 const SHOWCASE = 'com.example.showcase';
 const INSTALLED = 'com.dogfood.exportread';
 const FAILING = 'dashboard';
-/** An exportable type the showcase's live vocabulary does not list (asserted below, not assumed). */
-const UNSERVED = 'rag_pipeline';
+/**
+ * An exportable type the showcase serves (asserted below, not assumed), made
+ * unserved for one leg by dropping it from the live vocabulary, under either
+ * spelling.
+ */
+const UNSERVED = 'connector';
+const UNSERVED_COLLECTION = 'connectors';
 const ROUTE = '/marketplace/install-local';
 
 /** The install body `os package install` sends for an inline manifest. */
@@ -130,11 +139,19 @@ describe('dogfood: a package export refuses when the read of a type the runtime 
 
       after = await read();
 
+      // A runtime that does not serve the type: its vocabulary does not list
+      // it, and its read throws.
+      const originalTypes = protocol.getMetaTypes;
+      protocol.getMetaTypes = async function (this: unknown) {
+        const listing = await originalTypes.call(protocol);
+        return { ...listing, types: listing.types.filter((t) => t !== UNSERVED && t !== UNSERVED_COLLECTION) };
+      };
       protocol.readActiveOverlayRows = failing(UNSERVED, () => { unservedReadsRefused += 1; });
       try {
         unserved = await read();
       } finally {
         protocol.readActiveOverlayRows = original;
+        protocol.getMetaTypes = originalTypes;
       }
     } finally {
       await stack.stop();
@@ -185,15 +202,24 @@ describe('dogfood: a package export refuses when the read of a type the runtime 
     expect(dashboardNames(entryOf(after.bundle))).toEqual(['exportread_pulse']);
   });
 
-  it('a type this runtime does not serve is still skipped: its failed read leaves both doors 200, the same collections', () => {
-    // The precondition, measured on this boot: the type is exportable and the
-    // live vocabulary does not list it. Registering it makes this case a
-    // served type, whose failed read refuses (the cases above).
+  it('a type this runtime does not serve is still skipped: its failed read leaves both doors 200, every other collection', () => {
+    // The precondition, measured on this boot: the type is served (the real
+    // vocabulary lists it) and the showcase exports its collection, so the
+    // omission during this leg is the injected one and nothing else; the
+    // export read it (the fault was reached). Listed, the same failed read
+    // refuses (the cases above).
     expect(liveTypes).toContain(FAILING);
-    expect(liveTypes).not.toContain(UNSERVED);
+    expect(liveTypes).toContain(UNSERVED);
+    expect(collections(before.one.body?.data)).toContain(UNSERVED_COLLECTION);
     expect(unservedReadsRefused).toBeGreaterThan(0);
     expect(unserved.one.status, JSON.stringify(unserved.one.body)).toBe(200);
-    expect(collections(unserved.one.body?.data)).toEqual(collections(before.one.body?.data));
+    // The showcase's export is answered without the skipped collection, and
+    // with every other one it carried.
+    expect(collections(unserved.one.body?.data)).toEqual(
+      collections(before.one.body?.data).filter((k) => k !== UNSERVED_COLLECTION),
+    );
+    // The installed package declares no connector, so its bundle entry is
+    // answered with exactly the collections it carried before.
     expect(unserved.bundle.status, JSON.stringify(unserved.bundle.body)).toBe(200);
     expect(collections(entryOf(unserved.bundle))).toEqual(collections(entryOf(before.bundle)));
   });
