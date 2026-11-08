@@ -936,9 +936,11 @@ const DEPENDENT_RULES_GUARD_REGISTERED = new WeakSet<object>();
  * validation rule of another enabled package reads a field the package adds
  * through `objectExtensions`: the disable door's verdict
  * ({@link readDisableDependentRules}) and sentence
- * ({@link disableDependentRulesMessage}) under an uninstall lead, as the wire
- * pair `409` `PACKAGE_DISABLE_RESTRICTED_BY_VALIDATION_RULE`. `undefined` when
- * no rule depends. Pure over `registry`.
+ * ({@link disableDependentRulesMessage}, in its uninstall form) under an
+ * uninstall lead, as the wire pair `409`
+ * `PACKAGE_DISABLE_RESTRICTED_BY_VALIDATION_RULE`. `undefined` when no rule
+ * depends. Pure over `registry`. The one refusal both the uninstall verb's
+ * guard and `DELETE /packages/:id` answer.
  */
 export function packageUninstallDependentRulesRefusal(
     registry: unknown,
@@ -949,7 +951,7 @@ export function packageUninstallDependentRulesRefusal(
     return {
         code: PACKAGE_DISABLE_RESTRICTED_BY_VALIDATION_RULE.code,
         status: PACKAGE_DISABLE_RESTRICTED_BY_VALIDATION_RULE.status,
-        message: disableDependentRulesMessage(`Package '${packageId}' cannot be uninstalled`, dependents),
+        message: disableDependentRulesMessage(`Package '${packageId}' cannot be uninstalled`, dependents, { operation: 'uninstall' }),
     };
 }
 
@@ -3854,15 +3856,21 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             // and the environment's state exactly as they were. A package
             // already disabled withholds its fields already: the verdict is
             // empty and the uninstall proceeds as before.
-            const dependents = readDisableDependentRules(registry, id);
-            if (dependents.length > 0) {
+            //
+            // [#31232] Through {@link packageUninstallDependentRulesRefusal},
+            // the ONE refusal the uninstall verb's guard answers too
+            // (`ensureDependentRulesUninstallGuard`), so this door and every
+            // in-process caller of `deletePackage` answer the same code and
+            // the same words. Asked here as well, before the protocol is
+            // resolved, because a host whose protocol has no `deletePackage`,
+            // or that registered no guard, uninstalls through the registry
+            // below; with a guard registered, this answer comes first and the
+            // verb's guard is not reached on this path.
+            const dependentRefusal = packageUninstallDependentRulesRefusal(registry, id);
+            if (dependentRefusal) {
                 return {
                     handled: true,
-                    response: deps.error(
-                        disableDependentRulesMessage(`Package '${id}' cannot be uninstalled`, dependents, { operation: 'uninstall' }),
-                        PACKAGE_DISABLE_RESTRICTED_BY_VALIDATION_RULE.status,
-                        { code: PACKAGE_DISABLE_RESTRICTED_BY_VALIDATION_RULE.code },
-                    ),
+                    response: deps.error(dependentRefusal.message, dependentRefusal.status, { code: dependentRefusal.code }),
                 };
             }
             const protocol = await resolveProtocol(deps, _context);

@@ -1439,6 +1439,7 @@ describe('[#31232] the in-process uninstall verb refuses while an enabled packag
     const expectedMessage = () => runtime.formatPackageDisableDependents(
         `Package '${TIERS}' cannot be uninstalled`,
         runtime.readPackageDisableDependents(booted!.engine.registry, TIERS),
+        { operation: 'uninstall' },
     );
 
     it('the verb answers 409 with the doors\' code and sentence under an uninstall lead, having read and moved nothing', async () => {
@@ -1457,8 +1458,12 @@ describe('[#31232] the in-process uninstall verb refuses while an enabled packag
         expect({ status: refused.status, code: refused.code }).toEqual({ status: 409, code: CODE });
         expect(refused.message).toBe(expectedMessage());
         expect(refused.message).toBe(packageUninstallDependentRulesRefusal(engine.registry, TIERS)?.message);
-        expect(String(refused.message)).toMatch(new RegExp(`^Package '${TIERS.replace(/\./g, '\\.')}' cannot be uninstalled: an active validation rule reads a field it adds through objectExtensions`));
-        expect(String(refused.message)).toContain(`${READER} · ${ACCOUNT} · ${RULE} (reads ${TIER})`);
+        // The uninstall form: what the uninstall would do, and the remedy that keeps the field served.
+        expect(refused.message).toBe(
+            `Package '${TIERS}' cannot be uninstalled: an active validation rule reads a field it adds through objectExtensions, `
+            + `which the uninstall would withdraw — ${READER} · ${ACCOUNT} · ${RULE} (reads ${TIER}). Switch off or change that rule first, `
+            + 'or keep the package installed.',
+        );
 
         // Nothing read, nothing moved: no stored row read or deleted, no
         // registry withdrawal, no cleanup; the package and its field stay
