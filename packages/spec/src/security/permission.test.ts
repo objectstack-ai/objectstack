@@ -1518,6 +1518,31 @@ describe('objectPermissionGrants — the fold, not the bare bit', () => {
     expect(objectPermissionGrants(undefined, 'allowRead')).toBe(false);
     expect(objectPermissionGrants({}, 'allowRead')).toBe(false);
   });
+
+  it('[#30237 Q5 = A] folds the recycle-bin keys: bounded by read; manage implies restoring your own; modifyAll implies both; allowDelete implies neither', () => {
+    // Each grant is bounded by read.
+    expect(objectPermissionGrants({ allowRestoreOwnDeleted: true }, 'allowRestoreOwnDeleted')).toBe(false);
+    expect(objectPermissionGrants({ allowRead: true, allowRestoreOwnDeleted: true }, 'allowRestoreOwnDeleted')).toBe(true);
+    expect(objectPermissionGrants({ manageRecycleBin: true }, 'manageRecycleBin')).toBe(false);
+    expect(objectPermissionGrants({ allowRead: true, manageRecycleBin: true }, 'manageRecycleBin')).toBe(true);
+    expect(objectPermissionGrants({ viewAllRecords: true, manageRecycleBin: true }, 'manageRecycleBin')).toBe(true);
+    // The manager bit implies restoring your own; the reverse does not hold.
+    expect(objectPermissionGrants({ allowRead: true, manageRecycleBin: true }, 'allowRestoreOwnDeleted')).toBe(true);
+    expect(objectPermissionGrants({ allowRead: true, allowRestoreOwnDeleted: true }, 'manageRecycleBin')).toBe(false);
+    // modifyAllRecords implies both; viewAllRecords implies neither.
+    expect(objectPermissionGrants({ modifyAllRecords: true }, 'allowRestoreOwnDeleted')).toBe(true);
+    expect(objectPermissionGrants({ modifyAllRecords: true }, 'manageRecycleBin')).toBe(true);
+    expect(objectPermissionGrants({ viewAllRecords: true }, 'allowRestoreOwnDeleted')).toBe(false);
+    expect(objectPermissionGrants({ viewAllRecords: true }, 'manageRecycleBin')).toBe(false);
+    // allowDelete implies neither.
+    expect(objectPermissionGrants({ allowRead: true, allowDelete: true }, 'allowRestoreOwnDeleted')).toBe(false);
+    expect(objectPermissionGrants({ allowRead: true, allowDelete: true }, 'manageRecycleBin')).toBe(false);
+    // The bin keys widen no CRUD verb.
+    const binOnly = { allowRead: true, allowRestoreOwnDeleted: true, manageRecycleBin: true };
+    for (const verb of ['allowCreate', 'allowEdit', 'allowDelete', 'allowTransfer', 'allowExport'] as const) {
+      expect(objectPermissionGrants(binOnly, verb)).toBe(false);
+    }
+  });
 });
 
 // [#26188] The one list of hierarchy depths and the one finding sentence, read
