@@ -1175,3 +1175,123 @@ describe('the rename parity — one package, one `targetNamespace`, two doors, i
             .toBe(viaDuplicate.packages.get('com.example.acme')?.manifest.namespace);
     });
 });
+
+describe('the sample data, copied when the door asks — the seed receipt (#30808)', () => {
+    /** Two datasets in load order: the lead names its account by the account's natural key. */
+    const seededBody = (extra: Record<string, unknown> = {}) => renamableBody({
+        data: [
+            { object: 'crm_account', externalId: 'title', records: [{ title: 'Acme' }, { title: 'crm_lead' }] },
+            { object: 'crm_lead', externalId: 'title', records: [{ title: 'First', account: 'Acme' }] },
+        ],
+        ...extra,
+    });
+    const seedRows = (table: (name: string) => Row[]) => table('sys_metadata')
+        .filter((r) => r.type === 'seed' && r.state === 'active')
+        .map((r) => ({ name: r.name, package_id: r.package_id, body: typeof r.metadata === 'string' ? JSON.parse(r.metadata) : r.metadata }));
+
+    it('off by default: no `seed` item is planned or written, and the answer lists none', async () => {
+        expect(plan(seededBody()).items.filter((i) => i.type === 'seed')).toEqual([]);
+        const { protocol, table } = makeProtocol();
+        const result = await protocol.importUnmanagedPackage({ manifest: seededBody() });
+        expect(result.copied.filter((c: any) => c.type === 'seed')).toEqual([]);
+        expect(seedRows(table)).toEqual([]);
+    });
+
+    it('asked for: one `seed` item per dataset, after every other item, named `<object>_seed`, the records verbatim', () => {
+        const p = plan(seededBody(), { seedData: true });
+        const seeds = p.items.filter((i) => i.type === 'seed');
+        expect(seeds.map((i) => i.name)).toEqual(['crm_account_seed', 'crm_lead_seed']);
+        expect(p.items.slice(-2)).toEqual(seeds);
+        expect(seeds[0]!.body).toEqual({ object: 'crm_account', externalId: 'title', records: [{ title: 'Acme' }, { title: 'crm_lead' }] });
+    });
+
+    it('under a `targetNamespace`, only `object` follows the rename map: no record value is rewritten, `externalId` stays', () => {
+        const p = plan(seededBody(), { seedData: true, targetNamespace: 'acme' });
+        const seeds = p.items.filter((i) => i.type === 'seed');
+        expect(seeds.map((i) => [i.name, i.body.object])).toEqual([
+            ['acme_account_seed', 'acme_account'],
+            ['acme_lead_seed', 'acme_lead'],
+        ]);
+        // A record value spelled like a source object name is data, never a reference to rename.
+        expect(seeds[0]!.body.records).toEqual([{ title: 'Acme' }, { title: 'crm_lead' }]);
+        expect(seeds[0]!.body.externalId).toBe('title');
+    });
+
+    it('names a second dataset of one object `<object>_seed_2`', () => {
+        const p = plan(seededBody({
+            data: [
+                { object: 'crm_lead', externalId: 'title', locale: 'en', records: [{ title: 'First' }] },
+                { object: 'crm_lead', externalId: 'title', locale: 'zh-CN', records: [{ title: '首个' }] },
+            ],
+        }), { seedData: true });
+        expect(p.items.filter((i) => i.type === 'seed').map((i) => i.name)).toEqual(['crm_lead_seed', 'crm_lead_seed_2']);
+    });
+
+    it('refuses a dataset that names no object or carries no records — INVALID_REQUEST / 400, before anything is written', async () => {
+        const body = seededBody({ data: [{ object: 'crm_lead', records: 'none' }, { records: [] }] });
+        const planned = (() => { try { plan(body, { seedData: true }); } catch (e) { return e; } return undefined; })() as any;
+        expect([resolveThrownHttpError(planned).status, resolveThrownHttpError(planned).code]).toEqual([400, 'INVALID_REQUEST']);
+        expect(planned.message).toContain('`data[0]` (object \'crm_lead\') has no `records` array');
+        expect(planned.message).toContain('`data[1]` names no `object`');
+        // Off, the same body is not this refusal's: `data` stays the door's.
+        expect(() => plan(body)).not.toThrow();
+        const { protocol, writes, packages } = makeProtocol();
+        const err = await refusalOf(() => protocol.importUnmanagedPackage({ manifest: body, seedData: true }));
+        expect(resolveThrownHttpError(err).code).toBe('INVALID_REQUEST');
+        expect(writes).toEqual([]);
+        expect(packages.size).toBe(0);
+    });
+
+    it('refuses the copy whole when `seed` is not runtime-creatable — asked of the registry\'s own flag', () => {
+        const err = (() => {
+            try {
+                plan(seededBody(), { seedData: true, isRuntimeCreatable: (t: string) => t !== 'seed' && registryCreatable(t) });
+            } catch (e) { return e; }
+            return undefined;
+        })() as any;
+        expect(err?.details?.findings).toEqual([expect.objectContaining({ key: 'data' })]);
+    });
+
+    it('the verb writes each seed item into the NEW base, environment-wide, the renamed object in its body', async () => {
+        const { protocol, table } = makeProtocol();
+        const result = await protocol.importUnmanagedPackage({
+            manifest: seededBody(), targetPackageId: 'com.example.acme', targetNamespace: 'acme', seedData: true,
+        });
+        expect(ImportUnmanagedPackageResponseSchema.parse(result)).toEqual(result);
+        expect(result.copied.slice(-2)).toEqual([{ type: 'seed', name: 'acme_account_seed' }, { type: 'seed', name: 'acme_lead_seed' }]);
+        const rows = seedRows(table);
+        expect(rows.map((r) => [r.name, r.package_id, r.body.object])).toEqual([
+            ['acme_account_seed', 'com.example.acme', 'acme_account'],
+            ['acme_lead_seed', 'com.example.acme', 'acme_lead'],
+        ]);
+        expect(rows[0]!.body.records).toEqual([{ title: 'Acme' }, { title: 'crm_lead' }]);
+        expect(table('sys_metadata').filter((r) => r.type === 'seed').every((r) => !('organization_id' in r))).toBe(true);
+    });
+
+    it('a seed item the save door refuses rolls the whole copy back — no base, no item', async () => {
+        const { protocol, table, packages } = makeProtocol();
+        const err = await refusalOf(() => protocol.importUnmanagedPackage({
+            manifest: seededBody({ data: [{ object: 'crm_lead', externalId: 7, records: [] }] }), seedData: true,
+        }));
+        expect(resolveThrownHttpError(err).status).toBeGreaterThanOrEqual(400);
+        expect(err.details?.failedItem).toEqual({ type: 'seed', name: 'crm_lead_seed' });
+        expect(packages.has('com.example.crm-copy')).toBe(false);
+        expect(table('sys_metadata').filter((r) => r.package_id === 'com.example.crm-copy' && r.state === 'active')).toEqual([]);
+    });
+
+    it('a re-run is refused 409 before any write: the `-copy` base exists', async () => {
+        const { protocol, writes } = makeProtocol();
+        await protocol.importUnmanagedPackage({ manifest: seededBody(), seedData: true });
+        const before = writes.length;
+        const err = await refusalOf(() => protocol.importUnmanagedPackage({ manifest: seededBody(), seedData: true }));
+        expect([resolveThrownHttpError(err).status, resolveThrownHttpError(err).code]).toEqual([409, 'RESOURCE_CONFLICT']);
+        expect(writes.length).toBe(before);
+    });
+
+
+    it('`seedData` is the door\'s, never the published request\'s: the declaration still refuses an undeclared key', async () => {
+        const { protocol } = makeProtocol();
+        const err = await refusalOf(() => protocol.importUnmanagedPackage({ manifest: seededBody(), withSampleData: true }));
+        expect(resolveThrownHttpError(err).status).toBe(400);
+    });
+});

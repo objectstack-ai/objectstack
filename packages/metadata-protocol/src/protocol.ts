@@ -11107,10 +11107,11 @@ export class ObjectStackProtocolImplementation implements
      * path is exactly what Q5 rules out.
      *
      * `actor` is stated by the door that calls this verb, never by a body; it
-     * is outside the published request for that reason.
+     * is outside the published request for that reason, and so is `seedData`
+     * (#30808): the door asked for the sample data, copied as `seed` items.
      */
     async importUnmanagedPackage(
-        request: ImportUnmanagedPackageRequest & { actor?: string },
+        request: ImportUnmanagedPackageRequest & { actor?: string; seedData?: boolean },
     ): Promise<ImportUnmanagedPackageResponse> {
         // [#29985 codemod] The body moved to `protocol-package-commits.ts`; it reaches this class through `protocol-host.ts`.
         return ProtocolPackageCommitsFacet.importUnmanagedPackage(protocolHost(this), request);

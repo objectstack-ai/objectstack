@@ -72,6 +72,20 @@ export interface PurgeSeedDataset {
     records: ReadonlyArray<Record<string, unknown>>;
 }
 
+/**
+ * [#30808] One stored `seed` item of an unmanaged copy's seed receipt, as the
+ * dataset it declares: the members `SeedSchema` declares, and no other — the
+ * served envelope (`_packageId`, `_diagnostics`, …) never reaches the loader
+ * or the matcher. `undefined` for a body that names no object or no records.
+ */
+export function seedDatasetOfReceiptItem(body: unknown): PurgeSeedDataset | undefined {
+    if (body === null || typeof body !== 'object' || Array.isArray(body)) return undefined;
+    const dataset = Object.fromEntries(Object.entries(body).filter(([key]) => key in SeedSchema.shape));
+    return typeof dataset.object === 'string' && Array.isArray(dataset.records)
+        ? dataset as unknown as PurgeSeedDataset
+        : undefined;
+}
+
 /** The per-record outcome counts the purge route answers with. */
 export interface SamplePurgeOutcome {
     deleted: number;
