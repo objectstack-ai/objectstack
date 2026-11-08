@@ -47,6 +47,8 @@
     "ai/MCPServerRef",
     "ai/MCPToolBinding",
     "ai/MCPTransport",
+    "ai/McpActionNamespace",
+    "ai/McpListedActionAddress",
     "ai/MessageContent",
     "ai/MessageContentType",
     "ai/MessagePruningEvent",
