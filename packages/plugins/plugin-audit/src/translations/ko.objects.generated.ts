@@ -40,7 +40,8 @@ export const koObjects: NonNullable<TranslationData['objects']> = {
           export: "내보내기",
           platform_admin_standing_change: "플랫폼 관리자 권한 변경",
           action_invocation: "작업 호출",
-          package_uninstall: "패키지 제거"
+          package_uninstall: "패키지 제거",
+          package_unmanaged_import: "Package Unmanaged Import"
         }
       },
       user_id: {

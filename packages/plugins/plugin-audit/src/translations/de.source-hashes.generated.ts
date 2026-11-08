@@ -21,6 +21,7 @@ export const deGeneratedSourceHashes: Readonly<Record<string, string>> = {
   "objects.sys_activity.fields.url.label": "2203b0b9f72534f7",
   "objects.sys_audit_log.fields.action.options.export": "cdfbf4ace38f5a21",
   "objects.sys_audit_log.fields.action.options.import": "05c80d3a61ec3290",
+  "objects.sys_audit_log.fields.action.options.package_unmanaged_import": "676d7ce8c9d1fda4",
   "objects.sys_comment.fields.thread_id.label": "7bf9fcadc2761a11",
   "objects.sys_comment_reaction.fields.emoji.label": "f281bddefc11042a",
 };

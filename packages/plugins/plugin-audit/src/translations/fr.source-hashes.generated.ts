@@ -23,6 +23,7 @@ export const frGeneratedSourceHashes: Readonly<Record<string, string>> = {
   "objects.sys_audit_log.fields.action.label": "a36bba313a7aa9ab",
   "objects.sys_audit_log.fields.action.options.export": "cdfbf4ace38f5a21",
   "objects.sys_audit_log.fields.action.options.import": "05c80d3a61ec3290",
+  "objects.sys_audit_log.fields.action.options.package_unmanaged_import": "676d7ce8c9d1fda4",
   "objects.sys_comment.fields.mentions.label": "4c16427f1faa3679",
   "objects.sys_comment_reaction.fields.emoji.label": "f281bddefc11042a",
 };
