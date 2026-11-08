@@ -1864,10 +1864,6 @@ const fr = {
     },
   },
   console: {
-    organizationMfa: {
-      needsTwoFactor: "Exiger l'authentification multifacteur nécessite l'authentification à deux facteurs, désactivée sur ce déploiement : un enregistrement avec la case cochée est donc refusé. Activez d'abord les deux facteurs : activez « Exiger l'authentification multifacteur » dans Configuration → Authentification (cela s'applique à toutes les organisations), ou définissez OS_AUTH_TWO_FACTOR=true sur le déploiement.",
-      nowRequired: "Tous les membres de cette organisation qui n'ont pas configuré d'application d'authentification doivent maintenant le faire. Chacun perd l'accès aux données à la fin du délai de grâce MFA (7 jours sauf modification dans Configuration → Authentification), compté à partir de sa première utilisation après ce changement. Les membres qui utilisent déjà une application d'authentification ne sont pas concernés.",
-    },
     studio: {
       title: "Studio",
       accessRequired: "Vous avez besoin de l'accès à Studio pour ouvrir Studio. Un administrateur peut vous l'accorder avec un ensemble d'autorisations dans Configuration → Attribution des ensembles d’autorisations.",
