@@ -1649,10 +1649,8 @@ export class HttpDispatcher {
             return null;
         } else {
             // A session principal acts in the organization its resolution
-            // VETTED (`resolveAuthzContext`), the one every other door reads
-            // (`resolveActiveOrganizationId`), ⛔ never the session's stored
-            // claim: a claim the resolution dropped names no organization here.
-            // No resolution of this same user, no vetted organization.
+            // vetted (`resolveAuthzContext`), the one every other door reads
+            // (`resolveActiveOrganizationId`).
             activeOrganizationId = resolved?.userId !== undefined && resolved.userId === userId
                 ? resolved.tenantId
                 : undefined;

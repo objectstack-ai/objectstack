@@ -4055,13 +4055,12 @@ describe('HttpDispatcher', () => {
             expect(memberQL.find).not.toHaveBeenCalled();
         });
 
-        it('judges a session whose stored claim names the platform org when no resolution vetted it', async () => {
+        it('reads the platform org only from a resolution of the same user', async () => {
             const { dispatcher: d, memberQL } = buildDispatcher({
                 memberRows: [],
                 userId: 'staff-1',
                 orgId: PLATFORM_ORG_ID,
             });
-            // No resolution of this user: the claim is not the vetted organization.
             for (const executionContext of [undefined, { userId: 'someone-else', tenantId: PLATFORM_ORG_ID }, { userId: 'staff-1' }]) {
                 memberQL.find.mockClear();
                 const ctx: any = { request: { headers: {} }, environmentId: 'proj-any', executionContext };

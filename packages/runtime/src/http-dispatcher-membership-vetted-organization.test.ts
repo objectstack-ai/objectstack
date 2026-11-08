@@ -1,27 +1,15 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * The environment-membership gate lets a session principal past as platform
- * staff only in the organization the request's resolution VETTED, never on
- * the session's stored `activeOrganizationId`.
+ * The environment-membership gate reads, for a session principal, the
+ * organization the request's resolution vetted (`resolveAuthzContext`, run for
+ * real on each request under an `isolated` posture), the one every other door
+ * reads.
  *
- * A multi-tenant host under an `isolated` posture: a stub resolver places
- * every request in one environment, on a tenant kernel whose
- * `sys_environment_member` holds no row for anyone, so every caller the gate
- * judges is refused (`403 PROJECT_MEMBERSHIP_REQUIRED`) and a caller it lets
- * past makes no membership read. The REAL identity step runs on each request
- * (`resolveRequestScope` → `resolveExecutionContext` → `resolveAuthzContext`),
- * which keeps a session's organization only while a `sys_member` row backs it.
- *
- *  - A session whose stored claim names the platform organization, for a user
- *    with no membership there: the claim is dropped by the resolution, so the
- *    gate judges the user and refuses them.
- *  - CONTROL: the same claim for a user who IS a member of the platform
- *    organization passes without a membership read.
- *  - CONTROL: a claim naming another organization the user is in is judged.
- *
- * With no resolution of the session's user on the request, the gate judges
- * them: pinned at the gate in `http-dispatcher.test.ts`.
+ * A multi-tenant host: a stub resolver places every request in one
+ * environment, on a tenant kernel whose `sys_environment_member` holds no row,
+ * so a caller the gate judges is answered `403 PROJECT_MEMBERSHIP_REQUIRED`
+ * and a caller it passes makes no membership read.
  */
 
 import { describe, it, expect, vi } from 'vitest';
@@ -107,14 +95,14 @@ function membershipRefusal(result: { response?: { status: number; body?: any } }
 }
 
 describe('the environment-membership gate reads the vetted organization of a session', () => {
-    it('a stored platform-organization claim with no membership behind it is judged, and refused', async () => {
+    it('a session is judged in the organization its resolution vetted', async () => {
         const { dispatcher, membershipReads } = tenantHost({ user: OUTSIDER, activeOrganizationId: PLATFORM_ORG, memberOf: [] });
         const result = await dispatcher.dispatch('POST', '/mcp', MCP_CALL, {}, mcp());
         expect(membershipRefusal(result), JSON.stringify(result.response?.body)).toEqual({ userId: OUTSIDER });
         expect(membershipReads()).toEqual([OUTSIDER]);
     });
 
-    it('CONTROL: a member of the platform organization passes without a membership read', async () => {
+    it('CONTROL: a member of the platform organization passes', async () => {
         const { dispatcher, membershipReads } = tenantHost({ user: STAFF, activeOrganizationId: PLATFORM_ORG, memberOf: [PLATFORM_ORG] });
         const result = await dispatcher.dispatch('POST', '/mcp', MCP_CALL, {}, mcp());
         expect(membershipRefusal(result)).toBeUndefined();
