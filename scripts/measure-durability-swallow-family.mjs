@@ -329,6 +329,7 @@ const WRITE_SHAPED_CALLEES = new Map([
   ['persistAuthEventAuditRow', 'gate-vocabulary'],
   ['persistActionInvocationAuditRow', 'gate-vocabulary'],
   ['persistDataExportAuditRow', 'gate-vocabulary'],
+  ['persistPackageLifecycleAuditRow', 'gate-vocabulary'],
   ['deleteMetaItemFromLoader', 'gate-vocabulary'],
   ['persistPackageCommitRow', 'gate-vocabulary'],
   ['persistSeedTenancyReceiptRow', 'gate-vocabulary'],

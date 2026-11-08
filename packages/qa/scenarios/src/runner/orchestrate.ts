@@ -32,7 +32,7 @@
  */
 
 import { applyExpectDelta, truthsOver, type LoadedScenario } from '../loader.js';
-import { isProbedOperation, scenarioNamespace, type CardTitle } from '../schema.js';
+import { isProbedOperation, PERSON_USER_FIELD, scenarioNamespace, type CardTitle } from '../schema.js';
 import {
   gradeCardAnswer,
   gradeCardOperation,
@@ -48,7 +48,7 @@ import { servedAsRequested, type AgentDriver, type StepRef } from './driver.js';
 import { citationLabels, namespaceOfArtifact, namespacedScenario, permissionSetName, templateHostName } from './namespace.js';
 import { agentSetOf, clockDates, observeOperation, observeProbe, probeCall, touchedRowId, type Row } from './observe.js';
 import type { CommandResult } from './project.js';
-import { buildPrompt, iteratePrompt, operationPrompt, personaHandles, questionPrompt, templateIteratePrompt, userHandleFields, verifyArgs } from './prompts.js';
+import { buildPrompt, iteratePrompt, operationPrompt, personaHandles, personaRecords, questionPrompt, rowOwner, templateIteratePrompt, userHandleFields, verifyArgs } from './prompts.js';
 import { lookupKey, requiredLookups, seedPlan, type SeedLookup } from './seed.js';
 import type { ParsedTurn } from './transcript.js';
 
@@ -520,14 +520,21 @@ async function buildHalf(
  * ({@link requiredLookups}), so a cycle is broken on a side the build left
  * optional; without it any side may wait.
  *
- * Row ownership is mapped from the persona handles. A row whose direct scope
- * field names a persona's handle is owned (`owner_id`, the platform's record
- * owner) by that persona's user. A user-handle field (`account.owner`,
- * `userHandleFields`) is itself loaded with a user id — the persona's, or the
- * admin's for a handle no persona holds (`u_tia`), and every handle is the
- * admin's when no persona account is passed (the gallery's screenshot boot) —
- * because a faithful build models it as a user lookup, which refuses the
- * handle text. Any other scope field names a row or an option and is sent
+ * Row ownership follows the persons the card declares ({@link rowOwner}). A
+ * row is owned (`owner_id`, the platform's record owner) by a persona's user
+ * when it IS that persona's `record`, when a declared direct lookup on it holds
+ * that record's id, or when a user-handle field on it holds that persona's
+ * handle; the first persona in `run.personas` order the row names wins. An
+ * option value, a row id scope and a lookup to a row no persona is name
+ * nobody, so those rows keep the inserter (the admin). A persona's own record
+ * is also loaded with that persona's user id in its `user` field
+ * (`PERSON_USER_FIELD`), the binding the build prompt asks the build to model.
+ * A user-handle field (`account.owner`, `userHandleFields`) is itself loaded
+ * with a user id — the persona's, or the admin's for a handle no persona holds
+ * (`u_tia`), and every handle is the admin's when no persona account is passed
+ * (the gallery's screenshot boot, which also leaves every `user` field and
+ * every record-bound owner unset) — because a faithful build models it as a
+ * user lookup, which refuses the handle text. Every other value is sent
  * verbatim.
  *
  * The tally is kept in `seed` as each row is loaded, and `seed` is what is
@@ -546,8 +553,9 @@ export async function seedApp(
 ): Promise<RunHalf['seed']> {
   const { card } = scenario;
   const handles = personaHandles(card);
-  const ownerFields = new Set(card.run.personas.flatMap((p) => (p.scope ?? []).filter((s) => !s.field.includes('.')).map((s) => `${s.object}.${s.field}`)));
+  const records = personaRecords(card);
   const userFields = userHandleFields(card);
+  const accountOf = (persona: string | undefined) => (persona === undefined ? undefined : accounts.find((a) => a.persona === persona));
   const plan = seedPlan(card, required);
   /** `object/id` → the lookup values its second-pass update sets. */
   const later = new Map<string, { object: string; id: string; patch: Record<string, string> }>();
@@ -561,18 +569,18 @@ export async function seedApp(
     for (const row of card.run.seed[object] ?? []) {
       const body: Record<string, unknown> = { ...row };
       for (const [k, v] of Object.entries(row)) {
-        if (typeof v !== 'string' || !ownerFields.has(`${object}.${k}`)) continue;
-        const persona = handles.get(v);
-        const acct = persona ? accounts.find((a) => a.persona === persona) : undefined;
-        if (acct) body.owner_id = acct.userId;
-        if (userFields.has(`${object}.${k}`)) {
-          const userId = acct?.userId ?? app.adminUserId();
-          body[k] = userId;
-          body.owner_id = userId;
-          seed.rewritten = [...new Set([...(seed.rewritten ?? []), `${object}.${k}`])].sort();
-          if (!acct) seed.handlesAsAdmin = [...new Set([...(seed.handlesAsAdmin ?? []), v])].sort();
-        }
+        if (typeof v !== 'string' || !userFields.has(`${object}.${k}`)) continue;
+        const acct = accountOf(handles.get(v));
+        const userId = acct?.userId ?? app.adminUserId();
+        body[k] = userId;
+        body.owner_id = userId;
+        seed.rewritten = [...new Set([...(seed.rewritten ?? []), `${object}.${k}`])].sort();
+        if (!acct) seed.handlesAsAdmin = [...new Set([...(seed.handlesAsAdmin ?? []), v])].sort();
       }
+      const self = accountOf(records.get(`${object}/${row.id}`));
+      if (self) body[PERSON_USER_FIELD] = self.userId;
+      const owner = accountOf(rowOwner(card, object, row));
+      if (owner) body.owner_id = owner.userId;
       const waits = later.get(`${object}/${row.id}`);
       for (const field of Object.keys(waits?.patch ?? {})) delete body[field];
       const r = await app.insertRow(object, body);

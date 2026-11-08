@@ -206,6 +206,7 @@ export default class PackageInstall extends Command {
     '$ OS_RUNTIME_EMAIL=admin@local.test OS_RUNTIME_PASSWORD=… os package install com.acme.crm',
     '$ os package install ./dist/objectstack.json --url https://app.example.com --token osk_…',
     '$ os package install ./dist/objectstack.json --dry-run            # print the upgrade plan, install nothing',
+    '$ os package install ./dist/objectstack.json --confirm-upgrade <finding-set>   # confirm the schema findings the runtime printed',
   ];
 
   static override args = {
@@ -286,6 +287,17 @@ export default class PackageInstall extends Command {
       description:
         "Confirm the access findings of this upgrade with the finding-set token the runtime's refusal printed "
         + '(ACCESS_UPGRADE_CONFIRMATION_REQUIRED). It confirms exactly those findings; a changed set is refused again.',
+    }),
+    // [epic cloud#3652 Q3, #30884] The confirmation of an upgrade's schema
+    // findings — an undeclared suspected rename, a type change that is not
+    // `safe`. A TOKEN, as `--confirm-access-upgrade` is: the finding set's
+    // digest the runtime's refusal printed, so it confirms exactly the
+    // findings shown, and a set that changed since is refused again.
+    'confirm-upgrade': Flags.string({
+      description:
+        "Confirm the schema findings of this upgrade with the finding-set token the runtime's refusal printed "
+        + '(SCHEMA_UPGRADE_CONFIRMATION_REQUIRED): a removed field with an unlinked added one (a suspected rename), '
+        + 'a type change that is not safe. It confirms exactly those findings; a changed set is refused again.',
     }),
     // [epic cloud#3652 Q3, #30884] The install-local body's `dryRun`.
     'dry-run': Flags.boolean({
@@ -411,6 +423,7 @@ export default class PackageInstall extends Command {
       printStep(`Installing ${label} into ${runtime}...`);
       if (flags['confirm-global-uniques']) body.confirmGlobalUniques = true;
       if (flags['confirm-access-upgrade'] !== undefined) body.confirmAccessUpgrade = flags['confirm-access-upgrade'];
+      if (flags['confirm-upgrade'] !== undefined) body.confirmSchemaUpgrade = flags['confirm-upgrade'];
       const installMode = flags['install-mode'] as InstallMode | undefined;
       if (installMode !== undefined) body.installMode = installMode;
       if (flags['dry-run']) body.dryRun = true;
@@ -453,6 +466,27 @@ export default class PackageInstall extends Command {
           console.log('');
           console.log('  Review each finding. To upgrade anyway, confirm exactly these findings:');
           console.log(`    ${retry} --confirm-access-upgrade ${details.findingSet}`);
+          this.exit(1);
+          return;
+        }
+        // [epic cloud#3652 Q3, #30884] The schema upgrade stop: every finding,
+        // then both ways forward — declare the rename in the package, or
+        // confirm exactly these findings.
+        if (res.body?.error?.code === 'SCHEMA_UPGRADE_CONFIRMATION_REQUIRED') {
+          const details = res.body.error.details ?? {};
+          const findings: Array<{ kind?: string; describe?: string }> = Array.isArray(details.findings) ? details.findings : [];
+          // A record of the installed version the runtime could not read is a
+          // finding too (no comparison ran): there is no field to declare.
+          const fieldFindings = findings.some((f) => f.kind === 'suspected_rename' || f.kind === 'type_change');
+          printError(fieldFindings
+            ? 'Upgrade stopped — it would rename or retype stored fields without carrying their values'
+            : 'Upgrade stopped — the runtime cannot compare it with the installed version');
+          console.log('');
+          for (const finding of findings) console.log(`  • ${finding.describe ?? JSON.stringify(finding)}`);
+          console.log('');
+          if (fieldFindings) console.log("  If a field was renamed, declare its old key in the new field's `renamedFrom` and rebuild.");
+          console.log('  To upgrade anyway, accepting each finding as listed, confirm exactly these findings:');
+          console.log(`    ${retry} --confirm-upgrade ${details.findingSet}`);
           this.exit(1);
           return;
         }

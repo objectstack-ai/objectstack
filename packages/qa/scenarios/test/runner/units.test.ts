@@ -47,7 +47,7 @@ import { installedSpecVersion, packagesLine } from '../../src/runner/packages.js
 import { citationLabels, namespaceOfConfig, namespacedScenario, permissionSetName, templateHostName } from '../../src/runner/namespace.js';
 import { authorNotMeasured, changeSize, hiddenValues, installableManifest, probeValues, seedDependence, seedOrder, withoutItems } from '../../src/runner/orchestrate.js';
 import { referenceCycles, requiredLookups, seedPlan, type SeedPlan } from '../../src/runner/seed.js';
-import { buildPrompt, dataContract, iteratePrompt, questionPrompt, templateIteratePrompt, unheldHandles, userHandleFields, verifyArgs, verifyFlags } from '../../src/runner/prompts.js';
+import { buildPrompt, dataContract, iteratePrompt, personaHandles, personaRecords, questionPrompt, rowOwner, templateIteratePrompt, unheldHandles, userHandleFields, verifyArgs, verifyFlags } from '../../src/runner/prompts.js';
 import { parseStreamJson, refusalCodeOf, toolNameOf, type ParsedTurn } from '../../src/runner/transcript.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -408,7 +408,7 @@ describe('prompts, seed order, template manifest and change size', () => {
     const p = buildPrompt(namespacedScenario(crm).card);
     expect(p).toContain('"full_name": "Ana Ruiz"');
     expect(p).toContain('`democrm_sdr` for `sdr` (Sales development representative): must not read the field `democrm_contact.email`');
-    expect(dataContract(crm.card)).toContain('`u_sam` = `sdr`');
+    expect(dataContract(crm.card)).toContain('`u_sam` → the `sdr` user');
     for (const q of crm.card.run.questions) expect(p).not.toContain(q.ask.en!);
     expect(p).not.toContain('VALIDATION_FAILED');
     expect(questionPrompt(crm, 'tech_accounts')).toMatch(/^How many accounts are in tech\?/);
@@ -477,6 +477,50 @@ describe('prompts, seed order, template manifest and change size', () => {
       'travel_expense/employee=employee:e02',
       'travel_expense/dept_manager=employee:e01',
     ]);
+  });
+
+  it('the handle map holds only handles on declared handle fields; a persona named by a row is in the record binding', () => {
+    const { cards } = loadScenarios(dirname(CARD_FILE), { areas: readCapabilityAreas(AREAS_DIR), library: 'open' });
+    const desk = cards.find((c) => c.card.id === 'service_desk')!.card;
+    expect([...personaHandles(namespacedScenario(crm).card)]).toEqual([['u_sam', 'sdr']]);
+    expect([...personaHandles(desk)]).toEqual([]); // `a02`, `grp_tech`, `cus_03`, `public` are rows and an option, never handles
+    expect([...personaRecords(desk)]).toEqual([
+      ['agent/a02', 'support_agent'],
+      ['agent/a04', 'team_lead'],
+      ['customer/cus_03', 'portal_customer'],
+    ]);
+  });
+
+  it('a row is owned by the first persona it names: its own record, a lookup to that record, or its handle; an option or a group names nobody', () => {
+    const { cards } = loadScenarios(dirname(CARD_FILE), { areas: readCapabilityAreas(AREAS_DIR), library: 'open' });
+    const desk = cards.find((c) => c.card.id === 'service_desk')!.card;
+    expect(rowOwner(desk, 'customer', { id: 'cus_03' })).toBe('portal_customer'); // the record itself
+    expect(rowOwner(desk, 'agent', { id: 'a04', group: 'grp_tech' })).toBe('team_lead');
+    expect(rowOwner(desk, 'agent', { id: 'a07', group: 'grp_tech' })).toBeUndefined(); // a group is no person
+    expect(rowOwner(desk, 'ticket', { id: 't', assignee: 'a02', group: 'grp_billing', customer: 'cus_03' })).toBe('support_agent'); // two persons: run.personas order
+    expect(rowOwner(desk, 'ticket', { id: 't', assignee: 'a07', group: 'grp_tech', customer: 'cus_03' })).toBe('portal_customer');
+    expect(rowOwner(desk, 'ticket_comment', { id: 'c', ticket: 't', author: 'a07', visibility: 'public' })).toBeUndefined(); // an option names nobody
+    expect(rowOwner(desk, 'ticket_comment', { id: 'c', ticket: 't', author: 'a02', visibility: 'internal' })).toBe('support_agent');
+    const crmCard = namespacedScenario(crm).card;
+    expect(rowOwner(crmCard, 'democrm_account', { id: 'ac1', owner: 'u_sam' })).toBe('sdr'); // the handle route, kept
+    expect(rowOwner(crmCard, 'democrm_account', { id: 'ac2', owner: 'u_tia' })).toBeUndefined(); // a handle no persona holds
+  });
+
+  it('the build prompt’s Row ownership names the person rows, their `user` field, the order and the platform boundary, and no option value', () => {
+    const { cards } = loadScenarios(dirname(CARD_FILE), { areas: readCapabilityAreas(AREAS_DIR), library: 'open' });
+    const desk = namespacedScenario(cards.find((c) => c.card.id === 'service_desk')!).card;
+    const contract = dataContract(desk);
+    const section = contract.slice(contract.indexOf('Row ownership:'));
+    expect(section).toContain('`demohelpdesk_agent` `a02` is `support_agent`, `demohelpdesk_agent` `a04` is `team_lead`, `demohelpdesk_customer` `cus_03` is `portal_customer`');
+    expect(section).toContain('give `demohelpdesk_agent` and `demohelpdesk_customer` a field named exactly `user` of type `user`');
+    expect(section).toContain('(`demohelpdesk_agent_group.lead`, `demohelpdesk_ticket.customer`, `demohelpdesk_ticket.assignee`, `demohelpdesk_ticket_comment.author`)');
+    expect(section).toContain('first of them in this order: `support_agent`, `team_lead`, `portal_customer`');
+    expect(section).toContain('Platform boundary: the open-source server has no hierarchy resolver');
+    expect(section).not.toContain('`public`');
+    expect(section).not.toContain('`grp_tech`');
+    // A card with no person bound (no record, no handle) has no such section.
+    const { userHandleFields: _h, ...run } = crm.card.run;
+    expect(dataContract({ ...crm.card, run })).not.toContain('Row ownership');
   });
 
   it('a refused seed row takes out its children and what the card names on them, and nothing else', () => {

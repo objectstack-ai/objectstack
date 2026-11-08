@@ -24,7 +24,7 @@
     {
       "id": 2,
       "prompt": "When an opportunity reaches stage `closed_won`, send the account owner an inbox notification with the deal name.",
-      "expected_output": "A `record_change` flow bound on the `start` node `config`: `objectName: 'opportunity'`, `triggerType: 'record-after-update'`, bare-CEL `condition` `previous.stage != 'closed_won' && record.stage == 'closed_won'`; a `notify` node with `recipients: { dialect: 'cel', source: 'record.owner_id' }`, `title: 'Won: {{ record.name }}'`, `channels: ['inbox']`; `requires` lists `automation`, `triggers`, `messaging`, else notify reports success with `skipped: true`.",
+      "expected_output": "A `record_change` flow bound on the `start` node `config`: `objectName: 'opportunity'`, `triggerType: 'record-after-update'`, bare-CEL `condition` `previous.stage != 'closed_won' && record.stage == 'closed_won'`; a `notify` node with `recipients: { dialect: 'cel', source: 'record.owner_id' }`, `title: 'Won: {{ record.name }}'`, `channels: ['inbox']`; `requires` lists `automation`, `triggers`: `messaging` is always-on, listed only under `--preset minimal` (else notify reports success with `skipped: true`).",
       "files": [],
       "assertions": {
         "must_contain": [
@@ -33,7 +33,6 @@
           "previous.",
           "notify",
           "recipients",
-          "messaging",
           "{{"
         ],
         "must_not_contain": [
@@ -246,7 +245,7 @@
     {
       "id": 14,
       "prompt": "When a `crm_case`'s `priority` becomes `urgent`, send its owner an inbox notification; clicking the notification should open that case.",
-      "expected_output": "A `record_change` flow bound on the `start` node `config` (`objectName: 'crm_case'`, `triggerType: 'record-after-update'`, condition `previous.priority != 'urgent' && record.priority == 'urgent'`) and a `notify` node with `recipients: { dialect: 'cel', source: 'record.owner_id' }`, an inline `title`, `channels: ['inbox']`, and no `sourceObject` / `sourceId` / `actionUrl`: a notify that writes none of the three links to the run's trigger record, here the case. An explicit pair or `actionUrl` is only for linking elsewhere and wins when written; half a pair is dropped, never defaulted; a run with no trigger record (a schedule tick) links nowhere. `requires` lists `automation`, `triggers`, `messaging`.",
+      "expected_output": "A `record_change` flow bound on the `start` node `config` (`objectName: 'crm_case'`, `triggerType: 'record-after-update'`, condition `previous.priority != 'urgent' && record.priority == 'urgent'`) and a `notify` node with `recipients: { dialect: 'cel', source: 'record.owner_id' }`, an inline `title`, `channels: ['inbox']`, and no `sourceObject` / `sourceId` / `actionUrl`: a notify that writes none of the three links to the run's trigger record, here the case. An explicit pair or `actionUrl` is only for linking elsewhere and wins when written; half a pair is dropped, never defaulted; a run with no trigger record (a schedule tick) links nowhere. `requires` lists `automation`, `triggers` (`messaging` is always-on).",
       "files": [],
       "assertions": {
         "must_contain": [

@@ -46,6 +46,12 @@ import { canonicalMetaType, captureUninstallDeclared, metadataReadFailureError, 
 export interface PackageUninstallHost {
     readonly deleteMetaItem: ObjectStackProtocolImplementation['deleteMetaItem'];
     readonly engine: ObjectStackProtocolImplementation['engine'];
+    /**
+     * [#31186] The environment the protocol is bound to. The class field is
+     * private, so it cannot be named by an indexed access; it is read for the
+     * package's ledger row and nothing else.
+     */
+    readonly environmentId: string | undefined;
     readonly findEnvironmentRows: ObjectStackProtocolImplementation['findEnvironmentRows'];
     readonly getServicesRegistry: ObjectStackProtocolImplementation['getServicesRegistry'];
     readonly packagelessAddress: ObjectStackProtocolImplementation['packagelessAddress'];
@@ -55,7 +61,7 @@ export interface PackageUninstallHost {
 }
 
 /** The body of `ObjectStackProtocolImplementation#deletePackage`; the method's docblock there is its contract. */
-export async function deletePackage(this: Pick<PackageUninstallHost, 'deleteMetaItem' | 'engine' | 'findEnvironmentRows' | 'getServicesRegistry' | 'packagelessAddress' | 'runUninstallCleanups' | 'shouldDropStorage' | 'uninstallGuards'>, request: DeletePackageRequest): Promise<DeletePackageResponse> {
+export async function deletePackage(this: Pick<PackageUninstallHost, 'deleteMetaItem' | 'engine' | 'environmentId' | 'findEnvironmentRows' | 'getServicesRegistry' | 'packagelessAddress' | 'runUninstallCleanups' | 'shouldDropStorage' | 'uninstallGuards'>, request: DeletePackageRequest): Promise<DeletePackageResponse> {
     // [ADR-0131 D6/D12] An uninstall is environment-wide by construction:
     // every `sys_metadata` row bound to the package, in this environment,
     // whatever organization a legacy row was stored under. The
@@ -352,6 +358,10 @@ export async function deletePackage(this: Pick<PackageUninstallHost, 'deleteMeta
     // time: it is logged, not fatal, because the durable row is already
     // gone and the next boot is clean either way.
     //
+    // [#31186] What the registry holds for this id, read before the withdrawal
+    // below releases it: whether there was a package to uninstall, and its
+    // version, for the package's own ledger row at the end of this verb.
+    const installed = readInstalledPackage((this.engine as any)?.registry, request.packageId);
     // [ADR-0090 D5] What the package declared is captured first: the
     // withdrawal releases its names, and the cleanups below revoke the
     // grants that name them.
@@ -373,6 +383,24 @@ export async function deletePackage(this: Pick<PackageUninstallHost, 'deleteMeta
     // [#21490] Through the registry's one runner, which install-local's
     // uninstall door calls too.
     const cleanups = await this.runUninstallCleanups({ ...request, ...(declared ? { declared } : {}) });
+
+    // [#31186] The package's own ledger row, written once, here, after its
+    // stored row is gone — the one place every uninstall door passes. A
+    // refusal above threw before this line, so it writes none. An id the
+    // registry did not hold and the store bound no metadata to was not a
+    // package, so it writes none either: the `DELETE` door answers that `404`.
+    if (installed.held || deleted.length > 0 || failed.length > 0) {
+        await recordPackageUninstall(this.getServicesRegistry?.()?.get('audit'), {
+            action: 'package_uninstall',
+            packageId: request.packageId,
+            ...(installed.version ? { version: installed.version } : {}),
+            ...(this.environmentId ? { environmentId: this.environmentId } : {}),
+            ...(request.actor ? { actor: request.actor } : {}),
+            ...(request.keepData === true ? { keepData: true } : {}),
+            itemsRemoved: deleted.length,
+            itemsFailed: failed.length,
+        });
+    }
 
     return {
         success: failed.length === 0 && deleted.length > 0,
@@ -401,5 +429,63 @@ async function askUninstallGuards(
         });
         if (!refusal) continue;
         throw Object.assign(new Error(refusal.message), { code: refusal.code, status: refusal.status });
+    }
+}
+
+/**
+ * [#31186] The event the uninstall verb hands the `audit` slot's
+ * `recordPackageLifecycleEvent` — declared here, structurally, so this package
+ * does not depend on `@objectstack/plugin-audit`, which owns the row shape
+ * (`package-lifecycle-audit.ts` there).
+ */
+export interface PackageUninstallAuditEvent {
+    action: 'package_uninstall';
+    packageId: string;
+    version?: string;
+    environmentId?: string;
+    actor?: string;
+    keepData?: boolean;
+    itemsRemoved: number;
+    itemsFailed: number;
+}
+
+/** The `audit` slot member the verb calls. */
+interface PackageLifecycleAuditSurface {
+    recordPackageLifecycleEvent?(event: PackageUninstallAuditEvent): unknown;
+}
+
+/** Whether the registry holds `packageId`, and the version it holds. Never throws. */
+function readInstalledPackage(registry: unknown, packageId: string): { held: boolean; version?: string } {
+    try {
+        const pkg = (registry as { getPackage?(id: string): unknown } | undefined)?.getPackage?.(packageId) as
+            | { manifest?: { version?: unknown } }
+            | undefined;
+        if (pkg === undefined || pkg === null) return { held: false };
+        const version = pkg.manifest?.version;
+        return { held: true, ...(typeof version === 'string' && version !== '' ? { version } : {}) };
+    } catch {
+        // A registry that cannot answer is not asked again: the row is then
+        // written only when stored items were removed, without a version.
+        return { held: false };
+    }
+}
+
+/**
+ * Hand the event to the `audit` slot. A host with no audit plugin has no
+ * ledger at all, so the call is skipped silently. The writer never throws; a
+ * slot that does anyway is a foreign writer, and the uninstall it reports on
+ * has already completed, so its failure is logged, never answered.
+ */
+async function recordPackageUninstall(audit: unknown, event: PackageUninstallAuditEvent): Promise<void> {
+    const record = (audit as PackageLifecycleAuditSurface | undefined)?.recordPackageLifecycleEvent;
+    if (typeof record !== 'function') return;
+    try {
+        await record.call(audit, event);
+    } catch (e) {
+        console.error(
+            `[protocol.deletePackage] '${event.packageId}' was uninstalled, but the audit service refused its `
+            + '`package_uninstall` row, so the compliance ledger does not record who uninstalled it: '
+            + `${(e as Error)?.message ?? String(e)}`,
+        );
     }
 }

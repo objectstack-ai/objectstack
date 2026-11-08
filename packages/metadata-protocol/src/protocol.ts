@@ -10968,10 +10968,12 @@ export class ObjectStackProtocolImplementation implements
         // [#25467 cut 35] The body moved to `protocol-package-uninstall.ts` (see `PackageUninstallHost`).
         const readEngine = () => this.engine;
         const readGetServicesRegistry = () => this.getServicesRegistry;
+        const readEnvironmentId = () => this.environmentId;
         const readUninstallGuards = () => this.uninstallGuards;
         const host: ThisParameterType<typeof deletePackage> = {
             deleteMetaItem: (...a) => this.deleteMetaItem(...a),
             get engine() { return readEngine(); },
+            get environmentId() { return readEnvironmentId(); },
             findEnvironmentRows: (...a) => this.findEnvironmentRows(...a),
             get getServicesRegistry() { return readGetServicesRegistry(); },
             packagelessAddress: (...a) => this.packagelessAddress(...a),

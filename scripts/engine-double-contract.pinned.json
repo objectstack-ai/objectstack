@@ -2777,6 +2777,21 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata-protocol/src/sys-metadata-repository.restore-and-publish-drained-keys.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/sys-metadata-repository.restore-and-publish-drained-keys.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/sys-metadata-repository.restore-and-publish-drained-keys.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/metadata-protocol/src/view-container-runtime-expansion.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -3083,6 +3098,21 @@
     },
     {
       "file": "packages/objectql/src/protocol-registry-shadow.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/objectql/src/protocol-restore-publish-drained-connector-keys.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/objectql/src/protocol-restore-publish-drained-connector-keys.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/objectql/src/protocol-restore-publish-drained-connector-keys.test.ts",
       "verb": "update",
       "pinned": 1
     },
@@ -3764,6 +3794,21 @@
     {
       "file": "packages/plugins/plugin-auth/src/org-create-posture-gate.test.ts",
       "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-auth/src/organization-access-policy-doors.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-auth/src/organization-access-policy-doors.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-auth/src/organization-access-policy-doors.test.ts",
+      "verb": "update",
       "pinned": 1
     },
     {

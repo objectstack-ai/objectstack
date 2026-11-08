@@ -122,9 +122,10 @@
  * author (pm-dispatch SKILL.md, ACCEPT 之后的路径分叉 ③). The maintainer,
  * verbatim: 「应该是开发完了你审核通过才会推送给我审核」. So the draft open
  * summons nobody: a `pr_create` is the create plus the legs the caller spelled,
- * nothing reads the pull's files there, and a dev's `pr_create` carries no
- * `assignees` at all — the seat's own account is never assigned to or
- * requested on a pull. The one follow-up left is `pr_ready`. The platform
+ * nothing reads the pull's files there, and a dev's `pr_create` carries the
+ * claim's `Account:` as its `assignees` (ruling A on #29828, os-dev.md rule 2;
+ * hand-over is the seat's) — the seat's own account is never requested on a
+ * pull as a reviewer. The one follow-up left is `pr_ready`. The platform
  * summons a code owner only when a pull is opened READY or marked ready for
  * review — measured on this repository's own Tier H pulls, the CODEOWNERS
  * request arrived at `ready_for_review` and never at the draft create — and a
@@ -2122,7 +2123,7 @@ export const OPS = Object.freeze({
     optional: Object.freeze(['body', 'assignees', 'labels']),
     // ⛔ No `governedReview` here (header: "The governed-review follow-up"): the draft open summons nobody. A human
     // sees the pull at the seat's hand-off — `pr_request_reviewers` after ACCEPT + a same-head PASS — and a dev's
-    // create carries no `assignees`; the leg stays for the author-is-approver fallback, never for a seat's account.
+    // create carries the claim's `Account:` as `assignees` (ruling A on #29828); never a reviewer request on the seat.
     // `draft: true` is FORCED — a seat cannot open a ready PR through the relay.
     requests: (a, repo) => [
       { verb: 'POST', path: `/repos/${repo}/pulls`, body: { title: a.title, head: a.head, base: a.base, ...('body' in a ? { body: a.body } : {}), draft: true } },

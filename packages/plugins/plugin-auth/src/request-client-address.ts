@@ -29,7 +29,7 @@
  * the audit records no address. ⛔ It never falls back to a header.
  */
 
-import { defineRequestState } from '@better-auth/core/context';
+import { defineRequestState, runWithRequestState } from '@better-auth/core/context';
 
 const requestClientAddressState = defineRequestState<string | undefined>(() => undefined);
 
@@ -50,6 +50,63 @@ export async function readRequestClientAddress(): Promise<string | undefined> {
   try {
     const address = await requestClientAddressState.get();
     return typeof address === 'string' && address.length > 0 ? address : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// The objectstack mount's door, for a session it reads in process
+// ───────────────────────────────────────────────────────────────────────────
+
+/**
+ * ADR-0069 TL;DR 6, D5: the address an objectstack mount under the auth base
+ * path established for its request, carried to the session read that mount
+ * makes IN PROCESS (`auth.api.getSession` — `gateAdmin` and every raw route
+ * that reads the caller's session itself).
+ *
+ * `customSession` judges the organization's IP list again on a session read
+ * that came through a door: the better-auth-served door (`handleRequest`)
+ * hands it the request, and so the address {@link readRequestClientAddress}
+ * holds. An in-process read carries no request, so without this slot it
+ * judged the organization's limits but not its list. The mount middleware in
+ * `auth-plugin.ts` resolves the request's address by the one trust rule
+ * (`AuthManager.resolveClientAddress`, the D5 gate's own reading) and opens
+ * this slot around the route ({@link runAtMountDoor}); better-auth's endpoints
+ * reuse an open request state (`hasRequestState`), so the in-process read sees
+ * it.
+ *
+ * A slot of its own, deliberately not {@link clientAddressStateEntries}':
+ * that one feeds the hooks that stamp an address on a sign-in, a session row
+ * and its audit, and a mount's in-process calls stay as they were for those.
+ * The carried value is an object, so an address the mount could NOT establish
+ * is still a door (`{ address: undefined }`) — refused under a set list, as
+ * at the HTTP door — while no slot at all reads as no door.
+ */
+const mountDoorState = defineRequestState<{ address: string | undefined } | null>(() => null);
+
+/**
+ * Run `fn` — an objectstack mount's route, behind the D5 gate — with its
+ * established `address` carried to the session reads it makes in process. A
+ * fresh request state, scoped to `fn`.
+ */
+export async function runAtMountDoor<T>(address: string | undefined, fn: () => Promise<T>): Promise<T> {
+  const door = { address: address && address.length > 0 ? address : undefined };
+  // `await`, not a bare return: `runWithRequestState` is generic over its
+  // callback, so the composed call is typed `Promise<Promise<T>>`.
+  return await runWithRequestState(new WeakMap<object, unknown>([[mountDoorState.ref, door]]), fn);
+}
+
+/**
+ * The door an objectstack mount opened for the current request
+ * ({@link runAtMountDoor}), or `undefined` when none is open — a programmatic
+ * call, a transport outside the auth mount, no request state. Never throws: a
+ * session read must not fail on its own judgement's input.
+ */
+export async function readMountDoor(): Promise<{ address: string | undefined } | undefined> {
+  try {
+    const door = await mountDoorState.get();
+    return door ? { address: door.address } : undefined;
   } catch {
     return undefined;
   }

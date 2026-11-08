@@ -92,7 +92,7 @@ import { userInfoLocaleClaim } from './oidc-userinfo-locale-claim.js';
 import { refuseGrantForBannedUser } from './oauth-grant-ban-refusal.js';
 import { refuseUserInfoForBannedUser } from './oauth-token-read-ban-refusal.js';
 import { buildTurnstileSignUpPlugin, reportHalfConfiguredTurnstile, resolveTurnstileKeys } from './turnstile-sign-up.js';
-import { readRequestClientAddress } from './request-client-address.js';
+import { readMountDoor, readRequestClientAddress } from './request-client-address.js';
 
 /**
  * The `AuthManager` members the function below reads — every one of them, and
@@ -999,13 +999,18 @@ export async function buildPluginList(this: PluginListHost): Promise<any[]> {
       // revokes the session in place when exceeded (next request → 401).
       // [ADR-0069 TL;DR 6] Against the limits of the organization the session
       // is scoped to, never below the deployment's.
-      // On a request through the HTTP auth door, the organization's IP list
-      // is judged again with the address that door established.
+      // On a read through a door, the organization's IP list is judged again
+      // with the address that door established: the better-auth-served door
+      // (`handleRequest`, the request in `ctx.request`), or an objectstack
+      // mount under the auth base path reading the session in process
+      // (`gateAdmin` and every raw route that reads it itself), whose address
+      // the mount middleware carries (`runAtMountDoor`). A programmatic read
+      // with neither judges the limits only.
       await this.enforceSessionControls(
         (session as any)?.id,
         (session as any)?.createdAt,
         (session as any)?.activeOrganizationId ?? undefined,
-        ctx?.request ? { address: await readRequestClientAddress() } : undefined,
+        ctx?.request ? { address: await readRequestClientAddress() } : await readMountDoor(),
       );
 
       // An impersonation session carries the administrator who started it
