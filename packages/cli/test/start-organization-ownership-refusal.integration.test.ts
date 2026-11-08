@@ -32,7 +32,12 @@
  *   that was refused — not the project's own, which this fixture also holds;
  * - CONTROLs: the project's default database, and a home exported as
  *   `OS_HOME`, are named as before (no `--database-url`), and their bare
- *   commands plan the refused database too.
+ *   commands plan the refused database too;
+ * - ⭐ #31547: the `-d` boot with `--database-driver` and
+ *   `--database-auth-token` sets the driver in front of both commands and the
+ *   token only by reference (`${OS_DATABASE_AUTH_TOKEN:?…}`), never printing
+ *   it; run verbatim with the token exported the plan is of the refused
+ *   database, and with it unset the shell stops before the ceremony runs.
  *
  * ## The fixture
  *
@@ -77,6 +82,10 @@ const ALL_RUNS_TIMEOUT_MS = 6 * RUN_TIMEOUT_MS;
 const MARKER = 'adr-0131-organization-ownership';
 /** An operator's own secret, as they would export it. */
 const OPERATOR_SECRET = 'operator-secret-'.repeat(3);
+/** #31547: the token `--database-auth-token` hands the boot (the SQLite driver reads none). */
+const CONNECTION_TOKEN = 'tok-s3cret-31547';
+/** #31547: what a shell running a printed command says when `OS_DATABASE_AUTH_TOKEN` is unset. */
+const AUTH_TOKEN_UNSET = 'export OS_DATABASE_AUTH_TOKEN as the database auth token this server was started with';
 
 const SCAFFOLD = {
   manifest: { id: 'com.example.start-ownership', namespace: 'startown', version: '1.0.0', type: 'app', name: 'startown' },
@@ -119,6 +128,11 @@ function env(overrides: Record<string, string | undefined> = {}): Record<string,
     BETTER_AUTH_SECRET: undefined,
     OS_INTERNAL_AUTH_SECRET_FILE: undefined,
     OS_INTERNAL_CEREMONY_DATABASE_URL: undefined,
+    OS_INTERNAL_CEREMONY_DATABASE_DRIVER: undefined,
+    OS_INTERNAL_CEREMONY_AUTH_TOKEN_FROM_FLAG: undefined,
+    OS_DATABASE_DRIVER: undefined,
+    OS_DATABASE_AUTH_TOKEN: undefined,
+    TURSO_AUTH_TOKEN: undefined,
     OS_HOME: undefined,
     OS_MODE: undefined,
     NODE_ENV: undefined,
@@ -184,6 +198,8 @@ async function stopGroup(child: ChildProcess): Promise<void> {
 
 /** `os start` on the fixture database, with its home outside the app directory. */
 const start = (): string[] => [process.execPath, CLI, 'start', '-d', 'file:A.db', '-p', KERNEL_ASSIGNED_PORT, '--home', home, '--no-ui'];
+/** #31547: the same `-d` boot with its driver and its token chosen by flag. */
+const startWithConnection = (): string[] => [...start(), '--database-driver', 'sqlite', '--database-auth-token', CONNECTION_TOKEN];
 /** `os start` with no database flag: `extra` picks the home (`--home H`), or none for the project's own. */
 const startOn = (...extra: string[]): string[] => [process.execPath, CLI, 'start', '-p', KERNEL_ASSIGNED_PORT, '--no-ui', ...extra];
 
@@ -312,6 +328,26 @@ beforeAll(async () => {
     await record(planRun, () => run(shell(named.plan, plan), planEnv));
   }
 
+  // #31547: the `-d` boot with a driver and a token chosen by flag, and its plan
+  // run verbatim with the token exported, then with it unset. Before the `-d`
+  // apply below, which upgrades A.db.
+  await record('refusedConnection', () => run(startWithConnection(), env()));
+  const refusedConnection = runs.refusedConnection;
+  if (!(refusedConnection instanceof Error) && refusedConnection !== undefined) {
+    let named: { plan: string; apply: string } | undefined;
+    try {
+      named = namedCommands(refusedConnection.output);
+    } catch {
+      named = undefined;
+    }
+    if (named) {
+      const planCommand = named.plan;
+      await record('planConnection', () =>
+        run(shell(planCommand, 'plan-connection.json'), env({ OS_DATABASE_AUTH_TOKEN: CONNECTION_TOKEN })));
+      await record('planConnectionUnset', () => run(shell(planCommand, 'plan-connection-unset.json'), env()));
+    }
+  }
+
   // The operator's shell: no OS_DATABASE_URL (env() unsets it), as the refusal printed them.
   await record('plan', () => run(shell(commands.plan), env()));
   await record('apply', () => run(shell(commands.apply), env()));
@@ -414,3 +450,33 @@ describe('#31488 — the refusal names the database it refused, and the commands
     expect(plannedDatabase('plan-env-home.json')).toBe(join(envHome, 'data', 'objectstack.db'));
   });
 });
+
+describe('#31547 — a driver and a token chosen by flag reach the ceremony, the token never printed', () => {
+  it('⭐ both commands set the driver and read the token from OS_DATABASE_AUTH_TOKEN; the token is not in the output', () => {
+    const { output, code } = recorded('refusedConnection');
+    expect(code, output.slice(-4000)).toBe(1);
+    const named =
+      `OS_DATABASE_DRIVER=sqlite OS_DATABASE_AUTH_TOKEN="\${OS_DATABASE_AUTH_TOKEN:?${AUTH_TOKEN_UNSET}}" ` +
+      `OS_AUTH_SECRET="$(cat ${join(home, 'auth-secret')})" os migrate organization-ownership --database-url file:A.db`;
+    expect(namedCommands(output)).toEqual({
+      plan: `${named} --out PLAN`,
+      apply: `${named} --apply --plan-file PLAN --backup-taken`,
+    });
+    expect(output).toContain('The database auth token this server was started with (--database-auth-token) is not printed');
+    expect(output).not.toContain(CONNECTION_TOKEN);
+  });
+
+  it('run verbatim with the token exported, the plan is of the refused database', () => {
+    const plan = recorded('planConnection');
+    expect(plan.code, plan.output.slice(-4000)).toBe(0);
+    expect(plannedDatabase('plan-connection.json')).toBe(join(dir, 'A.db'));
+  });
+
+  it('⭐ with the token unset the shell stops before the ceremony runs, saying what to export', () => {
+    const plan = recorded('planConnectionUnset');
+    expect(plan.code, plan.output.slice(-4000)).not.toBe(0);
+    expect(plan.output).toContain(AUTH_TOKEN_UNSET);
+    expect(existsSync(join(dir, 'plan-connection-unset.json'))).toBe(false);
+  });
+});
+

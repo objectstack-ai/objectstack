@@ -2,7 +2,7 @@
 
 /**
  * The CLI's INTERNAL parent-to-child channel for the database `os start`'s
- * ownership refusal must name (#31488).
+ * and `os dev`'s ownership refusal must name (#31488, #31547).
  *
  * `os start` resolves its database on the shared ladder
  * (`resolveProjectDatabaseUrl`, `@objectstack/runtime`) with two inputs no
@@ -20,15 +20,27 @@
  * not listed in `content/docs/deployment/environment-variables.mdx`. The
  * parent OWNS the variable in the child env: set when there is a database to
  * name, deleted otherwise, so an inherited copy never speaks for this run.
+ *
+ * `os dev` writes the same channel from its own resolution (#31547): its `-d`
+ * flag (or `--fresh`'s throwaway file) is just as invisible to the ceremony,
+ * and its refusal names the ceremony with `--dev`, which resolves the same
+ * ladder. Beside the URL, both commands carry what their `--database-driver`
+ * and `--database-auth-token` flags put in the child's environment only
+ * ({@link writeCeremonyConnectionChannel}): the driver by value, the token
+ * only as the fact that the flag supplied it.
  */
 
 import type { ResolvedProjectDatabaseUrl } from '@objectstack/runtime';
 
 export const INTERNAL_CEREMONY_DATABASE_URL_ENV = 'OS_INTERNAL_CEREMONY_DATABASE_URL';
+/** The `--database-driver` value the parent handed the child (#31547). */
+export const INTERNAL_CEREMONY_DATABASE_DRIVER_ENV = 'OS_INTERNAL_CEREMONY_DATABASE_DRIVER';
+/** `1` when `--database-auth-token` supplied the child's token (#31547); never the token itself. */
+export const INTERNAL_CEREMONY_AUTH_TOKEN_FROM_FLAG_ENV = 'OS_INTERNAL_CEREMONY_AUTH_TOKEN_FROM_FLAG';
 
 /**
- * The database the refusal must name: `os start`'s resolved URL when its `-d`
- * flag chose it, or when the file of a `--home` home is the database (the
+ * The database the refusal must name: the parent's resolved URL when its `-d`
+ * flag chose it (`os dev`'s `--fresh` file too), or when the file of a `--home` home is the database (the
  * unified default or a legacy file under that home). `undefined` when the
  * ceremony's own ladder reaches the same database: `$OS_DATABASE_URL`, the
  * project's declared datasource, or the default file of the project's
@@ -54,4 +66,37 @@ export function writeCeremonyDatabaseChannel(env: NodeJS.ProcessEnv, url: string
 export function readCeremonyDatabaseChannel(env: NodeJS.ProcessEnv): string | undefined {
   const url = env[INTERNAL_CEREMONY_DATABASE_URL_ENV];
   return url ? url : undefined;
+}
+
+/**
+ * Write what the ceremony needs, beside the URL, to open the database the
+ * child opens (#31547): the `--database-driver` value, and whether
+ * `--database-auth-token` supplied the token. Each is set exactly when the
+ * parent put the flag's value in the child's environment
+ * (`OS_DATABASE_DRIVER` / `OS_DATABASE_AUTH_TOKEN`), and deleted otherwise: a
+ * driver or token the operator exported is in the shell that runs the
+ * commands already. The token's value is never written here.
+ */
+export function writeCeremonyConnectionChannel(
+  env: NodeJS.ProcessEnv,
+  flags: { databaseDriver: string | undefined; databaseAuthToken: string | undefined },
+): void {
+  if (flags.databaseDriver) env[INTERNAL_CEREMONY_DATABASE_DRIVER_ENV] = flags.databaseDriver;
+  else delete env[INTERNAL_CEREMONY_DATABASE_DRIVER_ENV];
+  if (flags.databaseAuthToken) env[INTERNAL_CEREMONY_AUTH_TOKEN_FROM_FLAG_ENV] = '1';
+  else delete env[INTERNAL_CEREMONY_AUTH_TOKEN_FROM_FLAG_ENV];
+}
+
+/**
+ * Read it in the `serve` child, shaped as the guard's options
+ * (`databaseDriver`, `databaseAuthTokenFromFlag`): only the members the parent set.
+ */
+export function readCeremonyConnectionChannel(
+  env: NodeJS.ProcessEnv,
+): { databaseDriver?: string; databaseAuthTokenFromFlag?: true } {
+  const driver = env[INTERNAL_CEREMONY_DATABASE_DRIVER_ENV];
+  return {
+    ...(driver ? { databaseDriver: driver } : {}),
+    ...(env[INTERNAL_CEREMONY_AUTH_TOKEN_FROM_FLAG_ENV] === '1' ? { databaseAuthTokenFromFlag: true as const } : {}),
+  };
 }
