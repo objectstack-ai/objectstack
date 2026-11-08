@@ -84,6 +84,7 @@ import {
   parseFilterAST,
   type AggregationCase,
   type FilterCondition,
+  type QueryAST,
 } from '@objectstack/spec/data';
 import { SqlDriver } from './sql-driver.js';
 import {
@@ -327,10 +328,10 @@ function declareFederationSweep(cell: Cell, build: () => SqlDriver): void {
 
     // ── PAGINATION_* ───────────────────────────────────────────────────────
     describe('PAGINATION_CASES / PAGINATION_UNORDERED_CASES / PAGINATION_ZERO_LIMIT_CASES', () => {
-      const walk = async (query: Record<string, unknown>, pageSize: number) => {
+      const walk = async (query: Omit<QueryAST, 'object'>, pageSize: number) => {
         const paged: Array<Record<string, unknown>> = [];
         for (let offset = 0; offset < PAGINATION_ROWS.length; offset += pageSize) {
-          paged.push(...(await driver.find(FIXTURES.paged.object, { ...query, limit: pageSize, offset } as any, BYPASS)));
+          paged.push(...(await driver.find(FIXTURES.paged.object, { ...query, limit: pageSize, offset }, BYPASS)));
         }
         return paged;
       };
@@ -341,7 +342,7 @@ function declareFederationSweep(cell: Cell, build: () => SqlDriver): void {
           const seen = paged.map((r) => String(r.id));
           expect(seen).toHaveLength(PAGINATION_ALL_IDS.length);
           expect([...seen].sort()).toEqual([...PAGINATION_ALL_IDS].sort());
-          const whole = await driver.find(FIXTURES.paged.object, { orderBy: [...c.orderBy] } as any, BYPASS);
+          const whole = await driver.find(FIXTURES.paged.object, { orderBy: [...c.orderBy] }, BYPASS);
           expect(seen).toEqual(whole.map((r) => String(r.id)));
         });
       }
@@ -352,7 +353,7 @@ function declareFederationSweep(cell: Cell, build: () => SqlDriver): void {
       }
       for (const c of PAGINATION_ZERO_LIMIT_CASES) {
         it(c.name, async () => {
-          expect(await driver.find(FIXTURES.paged.object, { ...c.query } as any, BYPASS)).toHaveLength(c.expectedRowCount);
+          expect(await driver.find(FIXTURES.paged.object, { ...c.query }, BYPASS)).toHaveLength(c.expectedRowCount);
         });
       }
     });
@@ -384,11 +385,12 @@ function declareFederationSweep(cell: Cell, build: () => SqlDriver): void {
       };
       for (const c of AGGREGATION_CASES) {
         it(c.name, async () => {
-          const rows = await driver.aggregate(FIXTURES.agg.object, {
+          const ast: QueryAST = {
             object: FIXTURES.agg.object,
             aggregations: [{ function: c.function, ...(c.field ? { field: c.field } : {}), alias: 'n' }],
             ...(c.groupBy ? { groupBy: [c.groupByAlias ? { field: c.groupBy, alias: c.groupByAlias } : c.groupBy] } : {}),
-          } as any);
+          };
+          const rows = await driver.aggregate(FIXTURES.agg.object, ast);
           expect(actualFor(c, rows as any[]), c.note).toEqual([...c.expected]);
         });
       }

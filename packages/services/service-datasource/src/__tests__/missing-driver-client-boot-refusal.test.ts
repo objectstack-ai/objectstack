@@ -48,6 +48,9 @@ import { join } from 'node:path';
 // cold load of the driver's whole module graph — clocked windows measure
 // behaviour, never loading.
 import '@objectstack/driver-sql';
+// No case here builds a memory datasource; the shared factory's lazy memory
+// arm is stubbed rather than loaded.
+vi.mock('@objectstack/driver-memory', () => ({}));
 import { DatasourceConnectionService, type ConnectionEngineLike } from '../datasource-connection-service.js';
 import { createDefaultDatasourceDriverFactory } from '../default-datasource-driver-factory.js';
 import {

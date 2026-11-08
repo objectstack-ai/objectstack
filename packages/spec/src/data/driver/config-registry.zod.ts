@@ -313,6 +313,20 @@ export const BUILTIN_DRIVER_IDS = DRIVER_VOCABULARY.map((entry) => entry.id) as 
 export type BuiltinDriverId = (typeof DRIVER_VOCABULARY)[number]['id'];
 
 /**
+ * The ids whose row declares {@link DriverVocabularyEntry.federationOnly} —
+ * derived from the table, so a boot host's exhaustive switch over
+ * {@link DatabaseSelectionDriverId} never has to name one.
+ */
+export type FederationOnlyDriverId = Extract<(typeof DRIVER_VOCABULARY)[number], { federationOnly: true }>['id'];
+
+/**
+ * The ids a boot flag may select ({@link DATABASE_DRIVER_SELECTION_IDS}), at
+ * the type level: never a federation-only one, which no selection alias
+ * resolves to.
+ */
+export type DatabaseSelectionDriverId = Exclude<BuiltinDriverId, FederationOnlyDriverId>;
+
+/**
  * Accepted spellings of each canonical driver id, matched case-insensitively.
  *
  * These are DRIVER SELECTORS, not config keys: `driver: 'pg'` and
@@ -444,9 +458,11 @@ const DATABASE_DRIVER_ALIASES: Readonly<Record<string, BuiltinDriverId>> = Objec
  * because neither host accepted `OS_DATABASE_DRIVER=sqlite3` before commit e2798fab7 and
  * converging the two hosts is not a licence to widen the flag for both.
  */
-export function resolveDatabaseDriverId(driver: unknown): BuiltinDriverId | undefined {
+export function resolveDatabaseDriverId(driver: unknown): DatabaseSelectionDriverId | undefined {
   if (typeof driver !== 'string') return undefined;
-  return lookupDriverId(DATABASE_DRIVER_ALIASES, driver);
+  // No selection alias resolves to a federation-only id (its row offers none),
+  // so the narrower type is a fact of the table, pinned in config-registry.test.ts.
+  return lookupDriverId(DATABASE_DRIVER_ALIASES, driver) as DatabaseSelectionDriverId | undefined;
 }
 
 /**
@@ -508,9 +524,9 @@ export function resolveDatabaseDriverId(driver: unknown): BuiltinDriverId | unde
  * {@link DriverVocabularyEntry.contractOnlyAliases}, so no selection alias
  * resolves to it and this projection drops it on its own.
  */
-export const DATABASE_DRIVER_SELECTION_IDS: readonly BuiltinDriverId[] = Object.freeze(
+export const DATABASE_DRIVER_SELECTION_IDS: readonly DatabaseSelectionDriverId[] = Object.freeze(
   DATABASE_DRIVER_SELECTION_ALIASES.filter(
-    (alias): alias is BuiltinDriverId => resolveDatabaseDriverId(alias) === alias,
+    (alias): alias is DatabaseSelectionDriverId => resolveDatabaseDriverId(alias) === alias,
   ),
 );
 
@@ -541,8 +557,8 @@ export function driverHasLocalDefault(driver: unknown): boolean {
  * must declare a non-`managed` `schemaMode`; `datasource.zod.ts` refuses the
  * managed pairing at parse.
  */
-export const FEDERATION_ONLY_DRIVER_IDS: readonly BuiltinDriverId[] = Object.freeze(
-  VOCABULARY_ROWS.filter((entry) => entry.federationOnly === true).map((entry) => entry.id as BuiltinDriverId),
+export const FEDERATION_ONLY_DRIVER_IDS: readonly FederationOnlyDriverId[] = Object.freeze(
+  VOCABULARY_ROWS.filter((entry) => entry.federationOnly === true).map((entry) => entry.id as FederationOnlyDriverId),
 );
 
 /**
@@ -552,7 +568,7 @@ export const FEDERATION_ONLY_DRIVER_IDS: readonly BuiltinDriverId[] = Object.fre
  */
 export function isFederationOnlyDriver(driver: unknown): boolean {
   const id = resolveDriverId(driver);
-  return id !== undefined && FEDERATION_ONLY_DRIVER_IDS.includes(id);
+  return id !== undefined && (FEDERATION_ONLY_DRIVER_IDS as readonly string[]).includes(id);
 }
 
 /** Canonical driver id → the schema its `datasource.config` must satisfy. */

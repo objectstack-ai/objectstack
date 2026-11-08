@@ -1,6 +1,13 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect, vi } from 'vitest';
+// The factory reaches the SQL driver through a lazy `await import()`; its first
+// load is paid here, at collection, never inside a clocked case
+// (`check:test-source-alias`).
+import '@objectstack/driver-sql';
+// No case here builds a memory datasource; the factory's lazy memory arm is
+// stubbed rather than loaded.
+vi.mock('@objectstack/driver-memory', () => ({}));
 import { HonoHttpServer } from '@objectstack/plugin-hono-server';
 import type { IDatasourceAdminService, IDatasourceDriverFactory } from '../contracts/index.js';
 import type { DatasourceAdminService } from '../datasource-admin-service.js';
