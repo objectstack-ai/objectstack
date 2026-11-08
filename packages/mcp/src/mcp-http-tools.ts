@@ -479,9 +479,8 @@ function errorResult(message: string) {
  * unique arm's `object` / `field`) is not served, as on every other tool
  * ({@link errorResultWithCode} says why).
  *
- * ⚠️ A driver string code (`SQLITE_BUSY`) answers what `/actions` answers,
- * `400 VALIDATION_ERROR` with `declaredCode`, where `/api/v1/data` answers
- * `500 DATABASE_ERROR`. That difference is between the two REST doors.
+ * [#31317] A driver string code (`SQLITE_BUSY`) answers what `/actions`
+ * answers, which is the `/api/v1/data` door's fault: `500 DATABASE_ERROR`.
  */
 function errorResultFromThrown(err: unknown, request: string, objectName?: string) {
   const answer = actionsDoorAnswerOf(err, objectName);
