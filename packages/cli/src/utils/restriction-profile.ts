@@ -283,16 +283,31 @@ export function judgeRestrictionProfile(
 
     // ── actions: a sandboxed JavaScript body, top-level or embedded on an object ──
     if (!profile.allowSandboxedJs) {
-      const actionLists: Array<{ list: unknown; prefix: string }> = [{ list: bag.actions, prefix: `${at}actions` }];
+      // `defineStack` copies each top-level action bound by `objectName` into that
+      // object's `actions` and keeps it at the top level too, so a built stack
+      // carries it twice. It is judged once, at its top-level path; the stack
+      // schema already refuses an action key authored in both positions.
+      const bound = new Set<string>();
+      if (Array.isArray(bag.actions)) {
+        for (const action of bag.actions) {
+          if (isBag(action) && typeof action.objectName === 'string') bound.add(`${action.objectName}:${nameOf(action, '')}`);
+        }
+      }
+      const actionLists: Array<{ list: unknown; prefix: string; owner?: string }> = [
+        { list: bag.actions, prefix: `${at}actions` },
+      ];
       if (Array.isArray(bag.objects)) {
         bag.objects.forEach((object, o) => {
-          if (isBag(object)) actionLists.push({ list: object.actions, prefix: `${at}objects[${o}].actions` });
+          if (isBag(object)) {
+            actionLists.push({ list: object.actions, prefix: `${at}objects[${o}].actions`, owner: nameOf(object, '') });
+          }
         });
       }
-      for (const { list, prefix } of actionLists) {
+      for (const { list, prefix, owner } of actionLists) {
         if (!Array.isArray(list)) continue;
         list.forEach((action, i) => {
           if (bodyLanguage(action) !== 'js') return;
+          if (owner !== undefined && bound.has(`${owner}:${nameOf(action, '')}`)) return;
           rows.push({
             rule: 'allowSandboxedJs',
             where: `action '${nameOf(action, `actions[${i}]`)}'`,

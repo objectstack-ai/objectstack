@@ -72,13 +72,14 @@ describe('judgeRestrictionProfile — one refusal per dimension', () => {
     expect(rowsOf(OPEN)).toEqual([]);
   });
 
-  it('allowCode: false refuses each hook, each function and each plugin — every row naming allowCode', () => {
+  it('allowCode: false refuses each handler-form hook and job, each function and each plugin — every row naming allowCode', () => {
     const rows = rowsOf(profile({ allowCode: false }));
     expect(rows).toEqual([
       { rule: 'allowCode', where: "hook 'rp_audit'", path: 'hooks[0]' },
       { rule: 'allowCode', where: "function 'rp_audit_fn'", path: 'functions.rp_audit_fn' },
       { rule: 'allowCode', where: "function 'rp_calc'", path: 'functions.rp_calc' },
       { rule: 'allowCode', where: "plugin '@acme/rp-plugin'", path: 'plugins[0]' },
+      { rule: 'allowCode', where: "job 'rp_sweep'", path: 'jobs[0]' },
       { rule: 'allowCode', where: "flow 'rp_route' › node 'calc' (script)", path: 'flows[1].nodes[3]' },
       { rule: 'allowCode', where: "flow 'rp_route' › node 'sign' (acme_sign)", path: 'flows[1].nodes[4]' },
     ]);
@@ -298,6 +299,14 @@ describe('judgeRestrictionProfile — allowCode and allowSandboxedJs, judged by 
       { rule: 'allowSandboxedJs', where: "action 'rp_act_js'", path: 'actions[0]' },
       { rule: 'allowSandboxedJs', where: "action 'rp_obj_js'", path: 'objects[0].actions[0]' },
       { rule: 'allowSandboxedJs', where: "job 'rp_job_js'", path: 'jobs[0]' },
+    ]);
+  });
+
+  it('a bound action a built stack carries twice (top level and on its object) is refused once, at its top-level path', () => {
+    const bound = { name: 'rp_bound', label: 'Bound', type: 'script', objectName: 'rp_doc', body: JS };
+    const built = { manifest: STACK.manifest, actions: [bound], objects: [{ name: 'rp_doc', actions: [bound] }] };
+    expect(rowsOf(profile({ allowSandboxedJs: false }), built)).toEqual([
+      { rule: 'allowSandboxedJs', where: "action 'rp_bound'", path: 'actions[0]' },
     ]);
   });
 
