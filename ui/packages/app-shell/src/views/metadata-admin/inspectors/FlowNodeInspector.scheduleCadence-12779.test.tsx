@@ -28,6 +28,10 @@ import * as React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, cleanup, fireEvent } from '@testing-library/react';
 import { resolveFlowTriggerKind } from '@objectstack/spec/automation';
+// The inspector's object picker and CEL authoring load `@objectstack/lint` with
+// function-body `import()`s. Warmed here so its first load is paid at
+// collection, not inside a case's bounded wait.
+import '@objectstack/lint';
 
 vi.mock('../previews/useFlowNodePalette', () => ({
   useActionConfigSchemas: () => ({}),
