@@ -19,6 +19,13 @@
  * phase 1's one-holder rule (the registry sealed), the resolver answers every
  * covered type exactly as `getItem` does, so wiring a reader to it later
  * changes no answer a release gives today.
+ *
+ * Child R2 (#31716) adds the entry over a caller-supplied holder set
+ * (`resolvePackageScopedHolders`) and the engine's function holders
+ * (`ObjectQL#functionHoldersOf`): the `R2` blocks at the end. Their parity
+ * block holds the new entry, over the registry's holders, to exactly
+ * `resolvePackageScopedName`'s answer; their red-line pins were ablated the
+ * same way, readings in the PR body.
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
@@ -26,12 +33,18 @@ import { SchemaRegistry } from './registry.js';
 import { BARE_NAME_REGISTRY_TYPES, type BareNameRegistryType } from './bare-name-one-holder.js';
 import {
   resolvePackageScopedName,
+  resolvePackageScopedHolders,
+  packageScopedHolderSource,
   packageResolutionClosure,
+  ENGINE_FUNCTION_TYPE,
   PACKAGE_SCOPED_TYPES,
   PLATFORM_REQUESTED_BARE_NAMES_BY_TYPE,
+  type PackageScopedHolderSource,
   type PackageScopedResolution,
+  type PackageScopedResolvableType,
   type PackageScopedType,
 } from './package-scoped-resolver.js';
+import { ObjectQL } from './engine.js';
 import { packageDependencyClosure } from '@objectstack/metadata-protocol';
 
 const A = 'com.acme.alpha';
@@ -429,5 +442,233 @@ describe('phase 1 parity — under the one-holder rule the resolver answers as `
     sealedWithHolder(false);
     install(B);
     expect(() => ship('flow', NAME, B)).toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Child R2 (#31716): the rule over a holder set the caller supplies.
+// ---------------------------------------------------------------------------
+
+/** The registry's holders of `(type, name)`, as `(package, item)` pairs. */
+const registryPairs = (type: PackageScopedType, name: string): Array<[string | null, unknown]> => {
+  const pairs: Array<[string | null, unknown]> = registry
+    .packageScopedHoldersOf(type, name)
+    .map((id) => [id, registry.getPackageScopedItem(type, name, id)]);
+  const environment = registry.getEnvironmentScopedItem(type, name);
+  if (environment !== undefined) pairs.push([null, environment]);
+  return pairs;
+};
+
+describe('R2 parity — the holder-set entry over the registry\'s holders answers as `resolvePackageScopedName`', () => {
+  const CALLERS = [undefined, null, '', 'sys_metadata', A, B, C, MID, P, SYS, 'com.acme.not_installed'];
+
+  it('every caller, every arm: own, closure, unique holder, environment, baseline, platform-requested, ambiguous, outside, not-found', () => {
+    install(SYS, [], 'sys');
+    install(EMAIL_BASELINE, [], 'sys');
+    install(A);
+    install(B);
+    install(C);
+    install(MID, [A]);
+    install(P, [MID, B]);
+    ship('flow', 'own_and_closure', P);
+    ship('flow', 'own_and_closure', A);
+    ship('flow', 'closure_only', A);
+    ship('flow', 'two_in_closure', A);
+    ship('flow', 'two_in_closure', B);
+    ship('flow', 'outside_only', C);
+    ship('page', 'kernel_page', SYS, 'kernel');
+    overlay('dataset', 'env_only', undefined, 'env');
+    overlay('page', 'held_and_customized', undefined, 'env-custom');
+    ship('page', 'held_and_customized', C);
+    ship('email_template', 'auth.password_reset', EMAIL_BASELINE, 'builtin');
+    ship('email_template', 'baseline_beside_holder', EMAIL_BASELINE, 'builtin');
+    ship('email_template', 'baseline_beside_holder', A);
+    ship('permission', 'guest_portal', C);
+    const names: Array<[PackageScopedType, string]> = [
+      ['flow', 'own_and_closure'], ['flow', 'closure_only'], ['flow', 'two_in_closure'], ['flow', 'outside_only'],
+      ['page', 'kernel_page'], ['dataset', 'env_only'], ['page', 'held_and_customized'],
+      ['email_template', 'auth.password_reset'], ['email_template', 'baseline_beside_holder'],
+      ['permission', 'guest_portal'], ['flow', 'nothing_here'],
+    ];
+    const seen = new Set<string>();
+    for (const [type, name] of names) {
+      for (const callerPackageId of CALLERS) {
+        const expected = resolvePackageScopedName(registry, { type, name, callerPackageId });
+        const actual = resolvePackageScopedHolders(registry, { type, name, callerPackageId }, packageScopedHolderSource(registryPairs(type, name)));
+        expect(actual, `${type} ${name} for ${String(callerPackageId)}`).toEqual(expected);
+        seen.add(expected.status === 'resolved' ? expected.via : expected.status === 'refused' ? expected.reason : 'not-found');
+      }
+    }
+    // The matrix reaches every arm of the rule, so the equality above is about all of them.
+    expect([...seen].sort()).toEqual([
+      'ambiguous-in-closure', 'ambiguous-in-environment', 'baseline', 'closure', 'environment',
+      'not-found', 'outside-closure', 'own', 'unique-holder',
+    ]);
+  });
+
+  it('a bundled type: the holder-set entry answers the member the source serves', () => {
+    install(A);
+    install(P, [A]);
+    ship('email_template', 'welcome', A);
+    registry.registerItem('email_template', { ...body('email_template', 'welcome', 'alpha-zh'), locale: 'zh-CN' }, 'name' as never, A);
+    for (const member of ['zh-CN', undefined, 'fr-FR']) {
+      const source: PackageScopedHolderSource = {
+        packageHolders: registry.packageScopedHoldersOf('email_template', 'welcome'),
+        packageItem: (id) => registry.getPackageScopedItem('email_template', 'welcome', id, member),
+        environmentItem: () => registry.getEnvironmentScopedItem('email_template', 'welcome', member),
+      };
+      expect(resolvePackageScopedHolders(registry, { type: 'email_template', name: 'welcome', callerPackageId: P }, source))
+        .toEqual(resolvePackageScopedName(registry, { type: 'email_template', name: 'welcome', callerPackageId: P, member }));
+    }
+  });
+});
+
+describe('R2 — the holder source and the types the entry resolves', () => {
+  it('builds a source from `(package, item)` pairs: package holders in order, `null` as the environment', () => {
+    const source = packageScopedHolderSource<string>([[B, 'b'], [null, 'env'], [A, 'a']]);
+    expect(source.packageHolders).toEqual([B, A]);
+    expect(source.packageItem(A)).toBe('a');
+    expect(source.packageItem(C)).toBeUndefined();
+    expect(source.environmentItem()).toBe('env');
+    expect(packageScopedHolderSource([[A, 'a']]).environmentItem()).toBeUndefined();
+  });
+
+  it('refuses a holder set that names one holder twice: nothing picks between its two items', () => {
+    expect(() => packageScopedHolderSource([[A, 1], [A, 2]])).toThrow(TypeError);
+    expect(() => packageScopedHolderSource([[null, 1], [null, 2]])).toThrow(TypeError);
+  });
+
+  it('resolves `function` over a supplied source, and the registry entry refuses it: the registry holds no function', () => {
+    install(A);
+    install(P, [A]);
+    const source = packageScopedHolderSource([[A, 'alpha fn']]);
+    expect(resolvePackageScopedHolders(registry, { type: ENGINE_FUNCTION_TYPE, name: 'score', callerPackageId: P }, source))
+      .toMatchObject({ status: 'resolved', item: 'alpha fn', via: 'closure', holder: { kind: 'package', packageId: A } });
+    expect(() => resolve('function' as PackageScopedType, 'score', P)).toThrow(TypeError);
+  });
+
+  it('positions and objects are not resolved over a supplied source either', () => {
+    const source = packageScopedHolderSource([[A, 'x']]);
+    for (const type of ['position', 'object']) {
+      expect(() => resolvePackageScopedHolders(registry, { type: type as PackageScopedResolvableType, name: 'n' }, source)).toThrow(TypeError);
+    }
+  });
+});
+
+describe('R2 — engine functions resolve in their referrer\'s package (ADR-0150 D4)', () => {
+  let engine: ObjectQL;
+  const fn = (tag: string) => Object.assign(() => tag, { tag });
+  const installOn = (id: string, deps: string[] = [], namespace?: string) => engine.registry.installPackage(manifest(id, deps, namespace), 'code');
+  const resolveFn = (name: string, callerPackageId?: string | null) =>
+    resolvePackageScopedHolders(engine.registry, { type: ENGINE_FUNCTION_TYPE, name, callerPackageId }, engine.functionHoldersOf(name));
+  const tagOf = (r: PackageScopedResolution) =>
+    r.status === 'resolved' ? ((r.item as { handler: { tag?: string } }).handler.tag) : undefined;
+
+  beforeEach(() => {
+    engine = new ObjectQL();
+    engine.registry.logLevel = 'silent';
+  });
+
+  it('keeps every package\'s function of one name, the owner `app:ID` read as the package; the bare map still keeps the last', () => {
+    engine.registerFunction('score', fn('alpha'), `app:${A}`);
+    engine.registerFunction('score', fn('beta'), { packageId: B, effect: 'writes' });
+    expect((engine.resolveFunction('score') as unknown as { tag: string }).tag).toBe('beta');
+    const holders = engine.functionHoldersOf('score');
+    expect(holders.packageHolders).toEqual([A, B]);
+    expect((holders.packageItem(A)?.handler as unknown as { tag: string }).tag).toBe('alpha');
+    expect(holders.packageItem(B)).toMatchObject({ packageId: B, effect: 'writes' });
+    expect(holders.environmentItem()).toBeUndefined();
+    expect(engine.functionHoldersOf('nothing_here').packageHolders).toEqual([]);
+  });
+
+  it('a package re-registering its function replaces its own entry, never adds a holder', () => {
+    engine.registerFunction('score', fn('alpha-1'), `app:${A}`);
+    engine.registerFunction('score', fn('alpha-2'), `app:${A}`);
+    expect(engine.functionHoldersOf('score').packageHolders).toEqual([A]);
+    expect((engine.functionHoldersOf('score').packageItem(A)?.handler as unknown as { tag: string }).tag).toBe('alpha-2');
+  });
+
+  it('own, then the closure: a flow of P resolves its dependency\'s function, each holder its own', () => {
+    installOn(A);
+    installOn(B);
+    installOn(P, [A]);
+    engine.registerFunction('score', fn('alpha'), `app:${A}`);
+    engine.registerFunction('score', fn('beta'), `app:${B}`);
+    expect(resolveFn('score', P)).toMatchObject({ status: 'resolved', via: 'closure', holder: { packageId: A } });
+    expect(tagOf(resolveFn('score', P))).toBe('alpha');
+    expect(tagOf(resolveFn('score', A))).toBe('alpha');
+    expect(tagOf(resolveFn('score', B))).toBe('beta');
+    engine.registerFunction('score', fn('caller'), `app:${P}`);
+    expect(resolveFn('score', P)).toMatchObject({ status: 'resolved', via: 'own' });
+    expect(tagOf(resolveFn('score', P))).toBe('caller');
+  });
+
+  it('red line 1: two holders in the closure refuse — no first- or last-registered pick', () => {
+    installOn(A);
+    installOn(B);
+    installOn(P, [A, B]);
+    engine.registerFunction('score', fn('alpha'), `app:${A}`);
+    engine.registerFunction('score', fn('beta'), `app:${B}`);
+    expect(resolveFn('score', P)).toMatchObject({ status: 'refused', reason: 'ambiguous-in-closure', type: 'function', callerPackageId: P });
+    expect(resolveFn('score')).toMatchObject({ status: 'refused', reason: 'ambiguous-in-environment', callerPackageId: null });
+  });
+
+  it('red line 1: a function held only outside the closure is refused, never served', () => {
+    installOn(C);
+    installOn(P);
+    engine.registerFunction('score', fn('gamma'), `app:${C}`);
+    const r = resolveFn('score', P);
+    expect(r).toMatchObject({ status: 'refused', reason: 'outside-closure', candidates: [{ kind: 'package', packageId: C }] });
+    expect(r.status === 'refused' && r.message).toContain('The function "score"');
+  });
+
+  it('red line 2: every refusal names every holder, and the environment', () => {
+    for (const id of [A, B, C]) installOn(id);
+    installOn(P, [A, B, C]);
+    installOn(MID);
+    for (const id of [A, B, C]) engine.registerFunction('score', fn(id), `app:${id}`);
+    const inClosure = resolveFn('score', P);
+    if (inClosure.status !== 'refused') throw new Error(`expected a refusal, got ${inClosure.status}`);
+    expect(inClosure.candidates).toEqual([A, B, C].map((packageId) => ({ kind: 'package', packageId })));
+    for (const id of [A, B, C]) expect(inClosure.message).toContain(`package "${id}"`);
+    engine.registerFunction('score', fn('host'));
+    const outside = resolveFn('score', MID);
+    if (outside.status !== 'refused') throw new Error(`expected a refusal, got ${outside.status}`);
+    expect(outside.reason).toBe('outside-closure');
+    expect(outside.candidates).toEqual([...[A, B, C].map((packageId) => ({ kind: 'package', packageId })), { kind: 'environment' }]);
+  });
+
+  it('an owner-less registration is the environment\'s own: a caller with no package gets it, a package caller is refused (D3 (a))', () => {
+    installOn(P);
+    engine.registerFunction('score', fn('host'));
+    expect(engine.functionHoldersOf('score').packageHolders).toEqual([]);
+    expect(resolveFn('score')).toMatchObject({ status: 'resolved', via: 'environment', holder: { kind: 'environment' } });
+    expect(resolveFn('score', P)).toMatchObject({ status: 'refused', reason: 'outside-closure', candidates: [{ kind: 'environment' }] });
+  });
+
+  it('a `sys` package\'s function is in every caller\'s closure', () => {
+    installOn(SYS, [], 'sys');
+    installOn(P);
+    engine.registerFunction('now_utc', fn('kernel'), `app:${SYS}`);
+    expect(resolveFn('now_utc', P)).toMatchObject({ status: 'resolved', via: 'closure', holder: { packageId: SYS } });
+  });
+
+  it('unregistering a package removes its holder, even one the bare map had already replaced', () => {
+    installOn(A);
+    installOn(B);
+    engine.registerFunction('score', fn('alpha'), `app:${A}`);
+    engine.registerFunction('score', fn('beta'), `app:${B}`);
+    expect(engine.unregisterFunctionsByPackage(`app:${A}`)).toBe(0); // the bare map holds B's: its count is unchanged
+    expect(engine.functionHoldersOf('score').packageHolders).toEqual([B]);
+    expect(engine.unregisterFunctionsByPackage(`app:${B}`)).toBe(1);
+    expect(engine.functionHoldersOf('score').packageHolders).toEqual([]);
+    expect(resolveFn('score')).toEqual({ status: 'not-found' });
+  });
+
+  it('a holder set is a snapshot: a later registration is not in it', () => {
+    engine.registerFunction('score', fn('alpha'), `app:${A}`);
+    const holders = engine.functionHoldersOf('score');
+    engine.registerFunction('score', fn('beta'), `app:${B}`);
+    expect(holders.packageHolders).toEqual([A]);
   });
 });
