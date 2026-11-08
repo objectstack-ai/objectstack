@@ -12,6 +12,7 @@ import {
   type ControlledByParentMasterShape,
 } from './index';
 import { ObjectSchema } from './object.zod';
+import { defineStack } from '../stack.zod';
 
 /**
  * [#23272 · ADR-0055 §1] The exported exactly-one-master predicate and
@@ -134,6 +135,33 @@ describe('controlledByParentMasterRefusal — the export and ObjectSchema agree 
     const built = ObjectSchema.create(obj as Parameters<typeof ObjectSchema.create>[0]);
     expect(built.fields.order!.required).toBe(true);
     expect(controlledByParentMasterOf(built.fields)).toEqual({ field: 'order', optional: false });
+  });
+
+  // [#30905 ruling A, record 6687830530 · #31470] The three doors, side by
+  // side, on one omitted `required`. The answers differ BY RULING: the builder
+  // sees the omission and forces the required master; the raw parse and
+  // `defineStack` over a plain object literal read the parsed `false`, the
+  // optional master. Refusing the omission at every door was the option the
+  // ruling did not take; `os lint` reports it at `error` instead.
+  it('the three doors on an omitted required: create() → required master; safeParse and defineStack → optional master', () => {
+    const line = { name: 'cbpd3_line', label: 'Line', sharingModel: 'controlled_by_parent' as const, fields: { order: md('cbpd3_header') } };
+
+    const built = ObjectSchema.create(line as Parameters<typeof ObjectSchema.create>[0]);
+    expect(built.fields.order!.required).toBe(true);
+    expect(controlledByParentMasterOf(built.fields)).toEqual({ field: 'order', optional: false });
+
+    const parsed = ObjectSchema.safeParse(line);
+    expect(parsed.success).toBe(true);
+    expect(parsed.data!.fields.order!.required).toBe(false);
+    expect(controlledByParentMasterOf(parsed.data!.fields)).toEqual({ field: 'order', optional: true });
+
+    const stack = defineStack({
+      manifest: { id: 'com.example.cbp-three-doors', namespace: 'cbpd3', version: '0.0.1', type: 'app', name: 'CBP' },
+      objects: [{ name: 'cbpd3_header', label: 'Header', fields: { name: { type: 'text', label: 'Name' } } }, line],
+    } as never) as unknown as { objects: Array<{ name: string; fields: Record<string, { required?: boolean }> }> };
+    const staged = stack.objects.find((o) => o.name === 'cbpd3_line')!;
+    expect(staged.fields.order!.required).toBe(false);
+    expect(controlledByParentMasterOf(staged.fields)).toEqual({ field: 'order', optional: true });
   });
 
   it('answers undefined for any other sharing model, as the parse accepts it', () => {
