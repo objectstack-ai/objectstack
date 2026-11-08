@@ -269,6 +269,13 @@ const ADMITTED = [
   // and is audited) are pinned in `admin-identity-audit-trail.dogfood.test.ts`.
   'POST /api/v1/auth/admin/scim/mint-credential',
   'POST /api/v1/auth/admin/scim/revoke-credential',
+  // The identity-provider group mapping door, beside it: ObjectStack raw
+  // mounts whose FIRST statement is the ADR-0068 gate. The save names a
+  // connection with no credential, so the admin reaches the handler and gets
+  // 400 VALIDATION_FAILED on connectionId; the delete names a mapping that does
+  // not exist and gets 404. Nothing moves.
+  'POST /api/v1/auth/admin/scim/set-group-mapping',
+  'POST /api/v1/auth/admin/scim/delete-group-mapping',
 ] as const;
 
 /**
@@ -762,6 +769,10 @@ describe('#9482: what an ObjectStack platform admin gets from every /admin/ rout
       // credential id that does not exist, so it moves nothing.
       'POST /api/v1/auth/admin/scim/mint-credential': { body: { connectionId: 'standing-probe-scim' } },
       'POST /api/v1/auth/admin/scim/revoke-credential': { body: { credentialId: 'standing-probe-credential' } },
+      'POST /api/v1/auth/admin/scim/set-group-mapping': {
+        body: { connectionId: 'standing-probe-unminted', groupExternalId: 'standing-probe-group', permissionSet: 'standing_probe_set' },
+      },
+      'POST /api/v1/auth/admin/scim/delete-group-mapping': { body: { mappingId: 'standing-probe-mapping' } },
       'POST /api/v1/auth/admin/ban-user': { body: { userId: targetUserId, banReason: 'sweep' } },
       'POST /api/v1/auth/admin/unban-user': { body: { userId: targetUserId } },
       'POST /api/v1/auth/admin/impersonate-user': { body: { userId: targetUserId } },

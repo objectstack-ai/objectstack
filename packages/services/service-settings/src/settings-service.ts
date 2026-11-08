@@ -1528,13 +1528,19 @@ export class SettingsService {
       // A key with no declared table has nothing to enforce — unchanged
       // behaviour (#5131's exhaustive-options semantics, untouched when no
       // domain is declared).
-      const { allowed, judge } = this.optionTableOf(namespace, key, reg.optionTables.get(key) ?? []);
-      if (allowed.length > 0) {
+      // [#31550] …and a source that ANSWERED is the table even when it
+      // answered no options, as the map family judges its keys (#31422): the
+      // `allowed.length` gate is the declared fallback's alone. The boot hold
+      // below covers a list the boot is still filling.
+      const { allowed, sourced, judge } = this.optionTableOf(namespace, key, reg.optionTables.get(key) ?? []);
+      if (sourced || allowed.length > 0) {
         const rejected = judge(value);
         if (rejected && !this.holdsOptionSourceVerdict(namespace, key)) {
           this.reportRejectedEnvOverride(reg, namespace, key, envName, rejected.value, {
             what: 'is not a declared option for',
-            detail: `Allowed values: ${allowed.join(', ')}.`,
+            detail: allowed.length > 0
+              ? `Allowed values: ${allowed.join(', ')}.`
+              : 'Allowed values: none (the running system offers no value right now).',
             fix: 'one of the allowed values',
           });
           return null;
@@ -1703,7 +1709,10 @@ export class SettingsService {
      */
     rejection: { what: string; detail: string; fix: string; shape?: string },
   ): void {
-    const dedupeAt = `${envName}=${String(offending)}`;
+    // [#31550] Keyed by a stable serialisation of a structured value: by
+    // `String(offending)` every map was `[object Object]`, so a second,
+    // different bad map under the same variable was never said.
+    const dedupeAt = `${envName}=${offending !== null && typeof offending === 'object' ? stableStringify(offending) : String(offending)}`;
     if (this.reportedEnvOverrides.has(dedupeAt)) return;
     this.reportedEnvOverrides.add(dedupeAt);
 
@@ -3420,13 +3429,16 @@ export class SettingsService {
       if (!empty && OPTION_BEARING_TYPES.has(type) && !domain) {
         // The table a registered option source serves, else the declared one
         // (see `optionTableOf`).
-        const { allowed, judge } = this.optionTableOf(namespace, key, declaredOptionValues(spec.options));
+        const { allowed, sourced, judge } = this.optionTableOf(namespace, key, declaredOptionValues(spec.options));
         // A manifest with no option table cannot say what is legal. The spec
         // refuses that shape at parse time, but `registerManifest` takes
         // manifests as given (no Zod pass), so skip rather than reject every
         // write to a hand-built manifest — same leniency the unparseable
         // `visible` and invalid `pattern` branches already take.
-        if (allowed.length > 0) {
+        // [#31550] That leniency is the declared table's alone: a registered
+        // source that ANSWERED is the table even when it answered no options,
+        // and then no value is one of them (as the map family, #31422).
+        if (sourced || allowed.length > 0) {
           // Shared with the env path (#5204) — see `firstRejectedOption` for the
           // array/scalar handling and why the result is wrapped.
           const rejected = judge(value);
@@ -3440,7 +3452,9 @@ export class SettingsService {
             errors.push({
               field: key,
               code: 'invalid_option',
-              message: `${label} must be one of: ${allowed.join(', ')}.${got}`,
+              message: allowed.length > 0
+                ? `${label} must be one of: ${allowed.join(', ')}.${got}`
+                : `${label} offers no value to choose from right now.${got}`,
               label,
               // The allowed set as a discrete constraint, so a client composes
               // its own sentence instead of parsing ours (`FieldError.
