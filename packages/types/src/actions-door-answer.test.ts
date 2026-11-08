@@ -33,11 +33,11 @@ describe('[#31271] the /actions door\'s answer to a thrown value', () => {
         });
     });
 
-    it('a driver string code is a rejection too: 400 VALIDATION_ERROR, the code demoted to declaredCode', () => {
+    it('[#31317] a driver string code is the /data door\'s fault: 500 DATABASE_ERROR, the code and text withheld, logged', () => {
         const err = Object.assign(new Error('SQLITE_BUSY: database is locked'), { code: 'SQLITE_BUSY' });
         expect(actionsDoorAnswerOf(err)).toEqual({
-            status: 400, code: 'VALIDATION_ERROR', message: 'SQLITE_BUSY: database is locked',
-            declaredCode: 'SQLITE_BUSY', operatorLines: [],
+            status: 500, code: 'DATABASE_ERROR', message: 'Internal data error',
+            operatorLines: ['driver fault (SQLITE_BUSY): SQLITE_BUSY: database is locked'],
         });
     });
 

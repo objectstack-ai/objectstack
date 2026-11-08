@@ -6,6 +6,7 @@ import { SnakeCaseIdentifierSchema } from '../shared/identifiers.zod';
 import { EvaluatedExpressionInputSchema } from '../shared/expression.zod';
 import { I18nLabelSchema } from '../ui/i18n.zod';
 import { ValueDomainSchema } from '../shared/value-domain.zod';
+import { LIFECYCLE_DURATION_REGEX } from '../data/object.zod';
 
 /**
  * Settings Manifest Protocol
@@ -53,7 +54,8 @@ export const SpecifierType = z.enum([
   'multiselect',
   'slider',
   'color',
-  'json',
+  'json',           // raw config only; a map of rows is a `map` (ADR-0007, amended 2026-11-08)
+  'map',            // keyed rows: a key column plus typed value columns
 
   // Actions
   'action_button',  // calls handler (test connection / rotate / etc.)
@@ -63,12 +65,55 @@ export type SpecifierType = z.input<typeof SpecifierType>;
 const SPECIFIERS_REQUIRING_KEY: ReadonlySet<SpecifierType> = new Set([
   'text', 'textarea', 'password', 'email', 'url', 'phone',
   'number', 'toggle', 'select', 'radio', 'multiselect',
-  'slider', 'color', 'json',
+  'slider', 'color', 'json', 'map',
 ]);
 
 // ---------------------------------------------------------------------------
 // Sub-schemas
 // ---------------------------------------------------------------------------
+
+/**
+ * The value kinds a `map` column may declare (#30208, ADR-0007 as amended
+ * 2026-11-08). Closed, like the specifier set: a new kind is an ADR amendment.
+ *
+ * - `duration` — a duration literal `<n><unit>`, unit `h`, `d`, `w` or `y`
+ *   (`'6h'`, `'14d'`, `'12w'`, `'7y'`): the lifecycle window's own grammar,
+ *   {@link LIFECYCLE_DURATION_REGEX}, which the settings doors judge by too.
+ * - `positive_integer` — a whole number greater than 0.
+ */
+const SpecifierMapColumnKindSchema = z.enum(['duration', 'positive_integer'])
+  .describe(`Map column value kind: 'duration' (a literal matching ${LIFECYCLE_DURATION_REGEX.source}) or 'positive_integer'`);
+
+/**
+ * One value column of a `map` specifier.
+ *
+ * `name` is the property the column's value is stored under when the map has
+ * several value columns (`retention_overrides` stores
+ * `{ "<object>": { "maxAge": "1y", "expireAfter": "30d" } }`), so it keeps the
+ * stored property's own spelling, camelCase included. With one value column the
+ * name is not stored: the entry IS the value (`quotas` stores
+ * `{ "<object>": 1000000 }`).
+ */
+const SpecifierMapColumnSchema = z.object({
+  name: z.string()
+    .regex(/^[A-Za-z][A-Za-z0-9_]*$/, 'A map column name is an identifier (letters, digits, `_`), stored as the property name')
+    .describe('Column identifier: the stored property name when the map has several value columns'),
+  label: I18nLabelSchema.describe('Column header'),
+  description: z.string().optional().describe('Help text for the column'),
+  kind: SpecifierMapColumnKindSchema.describe('Value kind: duration literal or positive integer'),
+});
+
+/**
+ * The key column of a `map` specifier: the header the renderer draws over the
+ * keys. It declares no list of keys. The keys a map admits are served at run
+ * time by the settings service's option source for that map key (objects that
+ * declare a lifecycle, the lifecycle classes): a list written here would be
+ * stale the day an object is added.
+ */
+const SpecifierMapKeyColumnSchema = z.object({
+  label: I18nLabelSchema.describe('Key column header'),
+  description: z.string().optional().describe('Help text for the key column'),
+});
 
 export const SpecifierOptionSchema = lazySchema(() => z.object({
   value: z.union([z.string(), z.number(), z.boolean()]).describe('Stored value'),
@@ -545,6 +590,27 @@ export const SpecifierSchema = lazySchema(() => z.object({
   handler: SpecifierHandlerSchema.optional().describe('Action handler (action_button)'),
 
   /**
+   * `map`: the key column (#30208). A `map` is a set of keyed rows: one key
+   * column, then the value columns in {@link columns}. Stored shape:
+   *
+   * - **one value column** stores `Record<key, value>`: `{ "sys_audit_log": 1000000 }`;
+   * - **several value columns** store `Record<key, { [column.name]: value }>`:
+   *   `{ "sys_job_run": { "maxAge": "1y", "expireAfter": "30d" } }`, each entry
+   *   carrying at least one declared column and no other property.
+   *
+   * The keys a map admits are not declared here. A runtime option source the
+   * settings service registers for the map key serves them (they are what the
+   * running system has: its objects, its lifecycle classes), both doors judge a
+   * key against it, and every manifest read serves them as this specifier's
+   * `options`. Without a source, a declared `options` table is the fallback,
+   * as for a `select`; without either, any key is admitted.
+   */
+  keyColumn: SpecifierMapKeyColumnSchema.optional().describe('Key column (map)'),
+
+  /** `map`: the value columns, in display order. See {@link keyColumn} for the stored shape. */
+  columns: z.array(SpecifierMapColumnSchema).optional().describe('Value columns (map): one stores a scalar per key, several an object'),
+
+  /**
    * `toggle`: the confirm dialog text shown before the value changes to off
    * (omit = no confirm). The name mirrors a handler's `confirmText`; it is
    * asked only on the turn to OFF, the one direction a toggle such as
@@ -609,6 +675,47 @@ export const SpecifierSchema = lazySchema(() => z.object({
         path: ['options'],
         message: `Specifier of type '${spec.type}' requires non-empty 'options'.`,
       });
+    }
+  }
+  // A `map` declares its key column and at least one value column; no other
+  // type carries either, which would be a declaration nothing draws or judges
+  // (Prime Directive #10).
+  if (spec.type === 'map') {
+    if (!spec.keyColumn) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['keyColumn'],
+        message: `Specifier of type 'map' requires a 'keyColumn'.`,
+      });
+    }
+    if (!spec.columns || spec.columns.length === 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['columns'],
+        message: `Specifier of type 'map' requires at least one value column in 'columns'.`,
+      });
+    } else {
+      const seen = new Set<string>();
+      spec.columns.forEach((col, idx) => {
+        if (seen.has(col.name)) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ['columns', idx, 'name'],
+            message: `Duplicate map column '${col.name}'.`,
+          });
+        }
+        seen.add(col.name);
+      });
+    }
+  } else {
+    for (const slot of ['keyColumn', 'columns'] as const) {
+      if (spec[slot] !== undefined) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: [slot],
+          message: `Specifier of type '${spec.type}' must not declare '${slot}' (only a 'map' may).`,
+        });
+      }
     }
   }
   // action_button requires a handler.
