@@ -32,8 +32,8 @@
  *   ① at least `DEFAULT_MIN_GAP_MS` (3 s) between two writes by the same
  *      token. The remainder is SLEPT, and the sleep prints one line saying so —
  *      a pause nobody can see is indistinguishable from a hang;
- *   ② at most `DEFAULT_HOURLY_MAX` (40) writes by that token in the trailing
- *      60 minutes. The 41st is REFUSED — exit `EXIT_WRITE_PACE_REFUSED`, with a
+ *   ② at most `DEFAULT_HOURLY_MAX` (80) writes by that token in the trailing
+ *      60 minutes. The 81st is REFUSED — exit `EXIT_WRITE_PACE_REFUSED`, with a
  *      prescription naming the count, when the window reopens, and what to fold
  *      into fewer writes. ⛔ Never a silent wait: an hour-long sleep inside a
  *      write path is a hang with a good excuse, and the seat that needs to hear
@@ -47,6 +47,23 @@
  * TESTS. The defaults above are the contract; an override that does not parse
  * as a non-negative integer is IGNORED and said out loud, because an override
  * that silently loosens a budget is worse than one that is refused.
+ *
+ * ### Why ② is 80, and what that number does not cover
+ *
+ * The account owner's ruling: 「写入配额临时增加到80」, then 「同意」 to changing
+ * the DEFAULT rather than adding a per-role environment override. The budget
+ * is per token over one shared log, so a seat and every dev it fans out spend
+ * ONE count; raising only the seat's (through the FOR-TESTS override above)
+ * left its devs refused at the old number on the very same token. Changing the
+ * default moves every process on the token together, and the override keeps
+ * its tests-only meaning. ② was always the SECOND guard: the suspensions this
+ * file answers were a RATE shape, and what stops a rate shape is ① the gap,
+ * ③ the stop marker, ④ the lease and ⑤ the batch gap — none of which moved.
+ *
+ * ⚠️ Residual risk: 80 is per token PER CONTAINER (see "How far fleet-wide
+ * reaches" below). N containers on one token are N budgets of 80 that add up
+ * against one identity, and nothing here sees the sum — so keep the number of
+ * concurrent containers per token small.
  *
  * ## Rules ④ and ⑤ — the lease and the batch gap, and the reading behind them
  *
@@ -157,7 +174,8 @@
  * the instant it was decided. So a second process asking while the first is
  * still sleeping sees the reservation and paces behind it. Sleeping under the
  * lock would serialise every seat behind one 3-second pause; deciding without
- * reserving would let two seats agree they are both the 40th.
+ * reserving would let two seats agree they are both the last write the budget
+ * allows.
  *
  * The lock is a `mkdir`, and it FAILS OPEN: a lock that cannot be taken within
  * `LOCK_WAIT_MS`, or one left behind by a process that died, never blocks a
@@ -227,7 +245,7 @@ export const EXIT_WRITE_PACE_REFUSED = 10;
 
 /** The contract. Both are overridable FOR TESTS only; see the header. */
 export const DEFAULT_MIN_GAP_MS = 3_000;
-export const DEFAULT_HOURLY_MAX = 40;
+export const DEFAULT_HOURLY_MAX = 80;
 
 /** The trailing window rule ② is measured over, and the marker rule ③ writes. */
 export const WINDOW_MS = 60 * 60 * 1000;
@@ -559,7 +577,7 @@ const FOLD_ADVICE = [
   '  Read your budget before the next batch:  node scripts/pm/write-pace.mjs --status',
 ].join('\n');
 
-/** Rule ② — the 41st. */
+/** Rule ② — the first write past `DEFAULT_HOURLY_MAX`. */
 export function exhaustedText(d) {
   return [
     `✗ write-pace: REFUSED — ${d.count} write(s) by this token in the trailing hour is the budget (${d.hourlyMax}),`,
@@ -1289,9 +1307,9 @@ export function statusReport({ token } = {}, deps = {}) {
 const SELF_TEST_BATTERIES = Object.freeze({
   'the token key: enough to separate identities, useless as a credential': 6,
   'the write-verb predicate: a read is never paced': 5,
-  'the limits: overrides are for tests, and a malformed one never loosens': 10,
+  'the limits: overrides are for tests, and a malformed one never loosens': 11,
   'rule ①: the remainder is slept, and the pause is said out loud': 7,
-  'rule ②: the 41st is REFUSED, with a prescription': 8,
+  'rule ②: the first write past the hourly budget is REFUSED, with a prescription': 8,
   'rule ③: what writes a stop marker, how long it lasts, what it refuses': 19,
   'the prune: the trailing hour for writes, the expiry for markers': 8,
   'the log, --status and the CLI: what lands on disk, and what must never': 14,
@@ -1427,6 +1445,9 @@ export async function selfTest() {
   // ── the limits ────────────────────────────────────────────────────────────
   battery('the limits: overrides are for tests, and a malformed one never loosens');
   t('the defaults are the contract', [limitsFrom({}).minGapMs, limitsFrom({}).hourlyMax], [DEFAULT_MIN_GAP_MS, DEFAULT_HOURLY_MAX]);
+  // The ONE literal for rule ②, on purpose: every other case follows the constant, so this pin is
+  // what turns red when the ruled value moves without a new ruling (「写入配额临时增加到80」).
+  t('rule ②\'s default is the ruled 80 writes per token-hour', DEFAULT_HOURLY_MAX, 80);
   t('both overrides are honoured', [limitsFrom({ OS_PM_WRITE_MIN_GAP_MS: '5', OS_PM_WRITE_HOURLY_MAX: '2' }).minGapMs, limitsFrom({ OS_PM_WRITE_MIN_GAP_MS: '5', OS_PM_WRITE_HOURLY_MAX: '2' }).hourlyMax], [5, 2]);
   t('⛔ a malformed override falls back to the DEFAULT, never to unlimited', limitsFrom({ OS_PM_WRITE_HOURLY_MAX: '4O' }).hourlyMax, DEFAULT_HOURLY_MAX);
   t('…and says so, so a loosened budget is never silent', limitsFrom({ OS_PM_WRITE_HOURLY_MAX: '4O' }).notes.length, 1);
@@ -1460,7 +1481,7 @@ export async function selfTest() {
     }
 
     // ── rule ② ──────────────────────────────────────────────────────────────
-    battery('rule ②: the 41st is REFUSED, with a prescription');
+    battery('rule ②: the first write past the hourly budget is REFUSED, with a prescription');
     {
       const file = join(dir, 'budget.jsonl');
       const env = { OS_PM_WRITE_MIN_GAP_MS: '0' };
@@ -1469,9 +1490,9 @@ export async function selfTest() {
         await paceWrite({ token: TOKEN, kind: 'label-write POST' }, h.deps);
         h.state.ms += 1000;
       }
-      t('forty writes in the window are allowed', h.state.exits, []);
+      t(`${DEFAULT_HOURLY_MAX} writes in the window are allowed`, h.state.exits, []);
       const refused = await paceWrite({ token: TOKEN, kind: 'label-write POST' }, h.deps);
-      t('the 41st is refused', refused.verdict, 'exhausted');
+      t(`write ${DEFAULT_HOURLY_MAX + 1} is refused`, refused.verdict, 'exhausted');
       t('…with the distinct exit code, ⛔ not the host tool\'s', h.state.exits, [EXIT_WRITE_PACE_REFUSED]);
       t('…and it did NOT sleep instead', h.state.slept.length, 0);
       const said = h.text();
@@ -1838,7 +1859,7 @@ export async function selfTest() {
   }
   console.log(
     `✓ write-pace self-test: ${cases.length} cases pass across ${declared.length} batteries — the per-token key that ` +
-      'never carries the token, the gap remainder, the 41st refusal and its prescription, the stop marker a 429 writes, ' +
+      'never carries the token, the gap remainder, the refusal past the hourly budget and its prescription, the stop marker a 429 writes, ' +
       'the prune that keeps a long retry-after alive, the lease that kept one write in flight across real processes, ' +
       'the batch gap one process announced and two others obeyed, the shell door, and the nine write transports ' +
       'that call both halves.',
