@@ -449,3 +449,40 @@ describe('the ledger CRUD mirror omits encrypted key-material columns', () => {
     expect(created.value_enc).toBe('control-b');
   });
 });
+
+/**
+ * The SSO provider's sign-in toggles (`allow_idp_initiated`, `allow_jit`) widen
+ * who can sign in, so a change to either must leave its audit trail: the
+ * ledger row with both sides, and an activity line naming the field (both are
+ * `trackHistory`). Same in-memory boot as above, on the REAL `SysSsoProvider`
+ * definition; the write is shaped as plugin-auth's adapter makes it (better-auth
+ * stores a boolean as `1` / `0`).
+ */
+describe('a change to an SSO provider sign-in toggle is recorded in the ledger and the activity feed', () => {
+  const def = SysSsoProvider as unknown as ObjectDef;
+
+  it('declares both toggles as tracked, default off', () => {
+    for (const field of ['allow_idp_initiated', 'allow_jit']) {
+      const fd = def.fields[field] as { type?: string; trackHistory?: unknown; defaultValue?: unknown };
+      expect(fd, field).toMatchObject({ type: 'boolean', trackHistory: true, defaultValue: false });
+    }
+  });
+
+  it.each(['allow_idp_initiated', 'allow_jit'])('turning %s on and off writes one update row per change, each with both sides', async (field) => {
+    const { engine, storeFor } = await boot(def);
+    const created = await engine.insert(def.name, { ...seedRow(def, [], 'issuer', 'create'), [field]: 0 }, SYS);
+    const id = String(created.id);
+    await engine.update(def.name, { [field]: 1 }, { where: { id }, ...SYS } as any);
+    await engine.update(def.name, { [field]: 0 }, { where: { id }, ...SYS } as any);
+
+    const updates = ledgerRows(storeFor, def.name).filter((r) => r.action === 'update');
+    expect(updates).toHaveLength(2);
+    expect([parse(updates[0].old_value)[field], parse(updates[0].new_value)[field]].map(Boolean)).toEqual([false, true]);
+    expect([parse(updates[1].old_value)[field], parse(updates[1].new_value)[field]].map(Boolean)).toEqual([true, false]);
+    for (const row of updates) expect(row.record_id).toBe(id);
+
+    const activity = activityRows(storeFor, def.name).filter((r) => r.type === 'updated');
+    expect(activity).toHaveLength(2);
+    for (const row of activity) expect(String(row.summary)).toContain(String((def.fields[field] as { label?: string }).label));
+  });
+});

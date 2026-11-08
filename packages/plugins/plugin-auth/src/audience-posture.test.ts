@@ -363,6 +363,52 @@ describe('admission decision matrix (#11739): posture × creation class', () => 
     }
   });
 
+  // Ruling record 6718355623: an SSO provider (`ssoProvider` present) under
+  // invite_only admits an unknown user only by its allowJit toggle, an
+  // invitation or the bootstrap carve-out.
+  it('invite_only refuses an SSO-provider creation with allowJit off: SELF_REGISTRATION_CLOSED', () => {
+    const verdict = decideAudienceAdmission({ ...base, audience: audience(), creationClass: 'provider', ssoProvider: { allowJit: false } });
+    expect(verdict.admit).toBe(false);
+    if (!verdict.admit) expect(verdict.code).toBe(SELF_REGISTRATION_CLOSED);
+  });
+
+  it('invite_only admits an SSO-provider creation with allowJit on, an invitation, or at bootstrap, never with the grant', () => {
+    const aud = audience();
+    for (const input of [
+      { ssoProvider: { allowJit: true } },
+      { ssoProvider: { allowJit: false }, hasPendingInvitation: true },
+      { ssoProvider: { allowJit: false }, isBootstrap: true },
+    ]) {
+      expect(decideAudienceAdmission({ ...base, audience: aud, creationClass: 'provider', ...input })).toEqual({
+        admit: true,
+        grantPermissionSet: false,
+      });
+    }
+  });
+
+  it('CONTROL: email_domain and open admit an SSO-provider creation with allowJit off, as before', () => {
+    for (const posture of ['email_domain', 'open'] as const) {
+      const verdict = decideAudienceAdmission({
+        ...base,
+        email: 'someone@elsewhere.com',
+        audience: audience({ posture, allowedEmailDomains: posture === 'email_domain' ? ['acme.com'] : [], selfRegistrationPermissionSet: 'portal_user' }),
+        creationClass: 'provider',
+        ssoProvider: { allowJit: false },
+      });
+      expect(verdict).toEqual({ admit: true, grantPermissionSet: false });
+    }
+  });
+
+  it('CONTROL: an off-vocabulary posture admits an SSO-provider creation as before (it is judged only under a valid invite_only)', () => {
+    const verdict = decideAudienceAdmission({
+      ...base,
+      audience: audience({ invalid: { raw: "'inviteOnly'" } }),
+      creationClass: 'provider',
+      ssoProvider: { allowJit: false },
+    });
+    expect(verdict).toEqual({ admit: true, grantPermissionSet: false });
+  });
+
   it('the three refusal codes are DISTINCT and the two new ones are registered in the ADR-0112 ledger', () => {
     expect(SELF_REGISTRATION_CLOSED).not.toBe(EMAIL_DOMAIN_NOT_ALLOWED);
     expect(SELF_REGISTRATION_CLOSED).not.toBe(AUDIENCE_CONFIG_ERROR);
@@ -968,13 +1014,23 @@ describe('end of the chain: better-auth pipeline over the memory engine (#11739)
       nonBootstrapCtx,
     );
     expect(social?.error).toBe(SELF_REGISTRATION_CLOSED);
-    // SSO JIT and SCIM ride their own methods — admitted under invite_only.
-    for (const method of ['sso-oidc', 'sso-saml', 'scim', 'admin']) {
+    // SCIM and admin creation ride their own methods — admitted under invite_only.
+    for (const method of ['scim', 'admin']) {
       const verdict = await (manager as any).validateAudienceAdmission(
         { user: { email: 'x@corp.com' }, source: { action: 'create-user', method } },
         nonBootstrapCtx,
       );
       expect(verdict).toBeUndefined();
+    }
+    // An @better-auth/sso provider is admitted under invite_only only by its own
+    // allowJit toggle (ruling record 6718355623): no provider row here, so it
+    // reads OFF and the posture refuses.
+    for (const method of ['sso-oidc', 'sso-saml']) {
+      const verdict = await (manager as any).validateAudienceAdmission(
+        { user: { email: 'x@corp.com' }, source: { action: 'create-user', method, sso: { providerId: 'acme' } } },
+        nonBootstrapCtx,
+      );
+      expect(verdict?.error).toBe(SELF_REGISTRATION_CLOSED);
     }
     // link-account / sign-in actions are not audience admission.
     const linking = await (manager as any).validateAudienceAdmission(

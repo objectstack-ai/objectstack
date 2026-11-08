@@ -64,7 +64,7 @@ import {
 import { GRANT_SET_NAME_FIELD } from './grant-set-name.js';
 import { withSystemReadContext } from './objectql-adapter.js';
 import { reconcileMembership, type ReconcileOutcome } from './reconcile-membership.js';
-import { readSsoProviderSignInOptions, ssoProviderIdOfSource } from './sso-sign-in-options.js';
+import { isSsoProviderSource, readSsoProviderSignInOptions, ssoProviderIdOfSource } from './sso-sign-in-options.js';
 import { shouldStampOwnerVerifiedAtCreation } from './walled-owner-operator-stamp.js';
 
 /**
@@ -152,14 +152,13 @@ export async function validateAudienceAdmission(
     // An SSO provider's own JIT toggle, read only where it can decide: a
     // provider-class creation through `@better-auth/sso` under `invite_only`
     // (`sso-sign-in-options.ts`; unreadable ⇒ off, so the posture applies).
-    const ssoProviderId = creationClass === 'provider' ? ssoProviderIdOfSource(data?.source) : undefined;
     const ssoProvider =
-      ssoProviderId !== undefined && audience.posture === 'invite_only' && !audience.invalid
+      creationClass === 'provider' && isSsoProviderSource(data?.source) && audience.posture === 'invite_only' && !audience.invalid
         ? {
             allowJit: (
               await readSsoProviderSignInOptions(
                 this.config.dataEngine ? (withSystemReadContext(this.config.dataEngine) as never) : undefined,
-                ssoProviderId,
+                ssoProviderIdOfSource(data?.source),
               )
             ).allowJit,
           }

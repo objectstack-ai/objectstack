@@ -45,7 +45,7 @@
  *   call, any other path) answers false.
  * - **JIT under `invite_only`.** Not a vendor option: the audience gate
  *   (`audience-posture.ts`) reads `allowJit` for a creation whose source is an
- *   SSO provider ({@link ssoProviderIdOfSource}).
+ *   SSO provider ({@link isSsoProviderSource}).
  *
  * Unreadable provider row ⇒ every option reads OFF (fail closed): a sign-in
  * the store cannot vouch for is refused, never widened.
@@ -120,15 +120,24 @@ export async function readSsoProviderSignInOptions(
 }
 
 /**
- * The SSO provider a user creation came through, from the vendor's
- * `validateUserInfo` source (`{ method: 'sso-oidc' | 'sso-saml', sso: {
- * providerId } }`), or `undefined` for every other creation path.
+ * Whether a user creation came through an `@better-auth/sso` provider, from
+ * the vendor's `validateUserInfo` source (`{ method: 'sso-oidc' | 'sso-saml',
+ * sso: { providerId } }`).
  */
-export function ssoProviderIdOfSource(source: unknown): string | undefined {
-  const s = source as { method?: unknown; sso?: { providerId?: unknown } } | undefined;
-  if (s?.method !== 'sso-oidc' && s?.method !== 'sso-saml') return undefined;
-  const providerId = s.sso?.providerId;
-  return typeof providerId === 'string' && providerId ? providerId : undefined;
+export function isSsoProviderSource(source: unknown): boolean {
+  const method = (source as { method?: unknown } | undefined)?.method;
+  return method === 'sso-oidc' || method === 'sso-saml';
+}
+
+/**
+ * The provider id an SSO-provider source names, or `''` when it names none
+ * (the vendor always sends one; a source without it reads no provider row, so
+ * every option reads OFF).
+ */
+export function ssoProviderIdOfSource(source: unknown): string {
+  if (!isSsoProviderSource(source)) return '';
+  const providerId = (source as { sso?: { providerId?: unknown } }).sso?.providerId;
+  return typeof providerId === 'string' ? providerId : '';
 }
 
 // ── OIDC: the column, carried in the blob the vendor reads ──────────────────
