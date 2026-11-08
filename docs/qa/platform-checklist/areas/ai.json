@@ -134,7 +134,7 @@
       "title": "MCP HTTP transport (/mcp) and the public /mcp/skill endpoint gate exactly as documented: 404 when opted out, 501 when unimplemented, 401 anonymous, 403 scopeless-OAuth, full tool list when keyed",
       "since": "v15",
       "status": "active",
-      "revision": 8,
+      "revision": 9,
       "priority": "P1",
       "surface": "api",
       "fixtures": {
@@ -185,9 +185,9 @@
           "evidence": "the 401 response incl. headers"
         },
         {
-          "clause": "a keyed MCP client completes initialize + tools/list, and the tool set over /api/v1/mcp (the HTTP door) is the documented principal-bound surface: list_objects, describe_object, query_records, aggregate_records, get_record, create_record, update_record, delete_record, list_actions, run_action, resume_run, validate_expression. The stdio door on the same build serves 9 of these, without the action family (list_actions, run_action, resume_run): the tool set is a function of the bridge (wireBridgeTools, packages/mcp/src/mcp-http-tools.ts), and the stdio data bridge implements no action methods (createStdioDataBridge, packages/mcp/src/stdio-data-bridge.ts), so a stdio count of 9 is not a shortfall against this clause",
+          "clause": "a keyed MCP client completes initialize + tools/list, and the tool set over /api/v1/mcp (the HTTP door) is the documented principal-bound surface: list_objects, describe_object, query_records, aggregate_records, get_record, create_record, update_record, delete_record, delete_records, list_actions, run_action, resume_run, validate_expression, read_file, create_upload_link: 15 tools. list_remote_tables and import_object are not in it: they register only for a token whose scopes name metadata:write (registerFederationTools, the same file), so a key or a session never lists them. The stdio door on the same build serves 10 of these: every tool but the action family (list_actions, run_action, resume_run) and the file pair (read_file, create_upload_link). The tool set is a function of the bridge (wireBridgeTools, packages/mcp/src/mcp-http-tools.ts), and the stdio data bridge implements no action methods and neither readRecordFile nor createUploadLink (createStdioDataBridge, packages/mcp/src/stdio-data-bridge.ts), so a stdio count of 10 is not a shortfall against this clause",
           "oracle": "network",
-          "verify": "tools/list names against packages/mcp/src/mcp-http-tools.ts registrations (aggregate_records may be absent only when the bridge cannot route it, and resume_run only when the host cannot resume runs — both graceful degradation; record which)",
+          "verify": "tools/list names against packages/mcp/src/mcp-http-tools.ts registrations (aggregate_records may be absent only when the bridge cannot route it, resume_run only when the host cannot resume runs, and read_file / create_upload_link only when the bridge implements no readRecordFile / createUploadLink — all graceful degradation; record which)",
           "evidence": "the session trace + tool-name list"
         },
         {
@@ -225,7 +225,8 @@
           "change": "automated.ref and variants[2] corrected. Checklist-accuracy findings of the 18.2.0 wave 2 (QA run #26468, Tier 1 half A, at 756220c4; wave anchor #25807, slice B). (1) The ref said no named file scores a clause alone, but mcp-skill-method-not-allowed.hono.integration.test.ts asserts acceptance[2] in full (status, Allow: GET, the exact envelope message) over a real Hono socket and the real dispatcher, and a 405 never reaches the faked services; the ref now says it scores that clause. (2) The ref gains packages/cli/test/serve-mcp-capability-collision.e2e.test.ts as corroboration (spawned server, osk_ key, initialize + tools/list, /mcp/skill 200) and says the scopes test's fake bridge has no resumeRun, so it counts 11 tools. (3) variants[2] omitted resume_run, which the same actions:execute scope grants. Re-read at base fd246c22: packages/mcp/src/mcp-http-tools.ts registerActionTools (canResume, 'the same actions:execute scope grants both'), mcp-http-tools.scopes.test.ts ACTION_TOOLS. No clause changed",
           "ref": "#25807"
         },
-        { "revision": 8, "date": "2026-10-31", "change": "acceptance[4] names its transport. Checklist-accuracy finding of QA run #27409 (18.3.0 sweep, wave 3, Tier 1 half A, at c4c515ad; sweep anchor #27377): the HTTP door listed the twelve, while the stdio door on the same build listed 9 with no action family, and the clause did not say which door 'the documented twelve' meant. It now names /api/v1/mcp and says why stdio serves 9. Re-read at base 488b3ed0: packages/mcp/src/mcp-http-tools.ts wireBridgeTools (the action pair registers only when the bridge implements listActions and runAction), packages/mcp/src/stdio-data-bridge.ts createStdioDataBridge (an McpDataBridge, no action methods). The HTTP assertion is unchanged", "ref": "#27409" }
+        { "revision": 8, "date": "2026-10-31", "change": "acceptance[4] names its transport. Checklist-accuracy finding of QA run #27409 (18.3.0 sweep, wave 3, Tier 1 half A, at c4c515ad; sweep anchor #27377): the HTTP door listed the twelve, while the stdio door on the same build listed 9 with no action family, and the clause did not say which door 'the documented twelve' meant. It now names /api/v1/mcp and says why stdio serves 9. Re-read at base 488b3ed0: packages/mcp/src/mcp-http-tools.ts wireBridgeTools (the action pair registers only when the bridge implements listActions and runAction), packages/mcp/src/stdio-data-bridge.ts createStdioDataBridge (an McpDataBridge, no action methods). The HTTP assertion is unchanged", "ref": "#27409" },
+        { "revision": 9, "date": "2026-11-08", "change": "acceptance[4].clause and .verify name the HTTP tool set as 15: delete_records, read_file and create_upload_link joined the 12 it listed, and the stdio door serves 10 (its former 9 plus delete_records). Checklist-accuracy finding of QA run #31486 (owed:weekly, at 0647dabb): tools/list answered 15 on a keyed session. Read at base 4894cfe1", "ref": "#31499" }
       ]
     },
     {
