@@ -4,7 +4,7 @@
 **Deciders**: ObjectStack Protocol Architects
 **Builds on**: [ADR-0005](./0005-metadata-customization-overlay.md) (one Zod source of truth per metadata type)
 **Consumers**: `@objectstack/spec`, `@objectstack/runtime`, `@objectstack/objectql`, `@objectstack/plugins/driver-sql`, `@objectstack/services/service-ai`, `@objectstack/cli`, `../objectui`
-**Amended by**: [ADR-0143](./0143-outbound-connector-auth-is-open-tier.md) (2026-10-27), attribution only — see the note below. D7 (2026-10-29, ruling 6486136301 on #27298) — an API-backed datasource may borrow a declared connector instance's credential through `external.connector`; see the D7 note below. #27688 (2026-10-30), example only — §8's `credentialsRef` is a `sys_secret:` handle, the only form the shipped secret binder resolves; see the note under §8. #27917 (2026-10-30), dialect list only — §4.6 names the `odata` vocabulary the matrix gained with #27745. #28208 (2026-10-31, ruling 6525963988 on #27687) — a datasource defined in code reads its credential at connect from `OS_DATASOURCE_<NAME>_PASSWORD`, behind the host switch `OS_DATASOURCE_ENV_CREDENTIALS`; see the note under §10 and the correction in the D7 note. 2026-11-03 (maintainer ruling in the security channel, D1 = B, D2 = (c2)+(a)) — under a walled tenancy posture every external object states its organization scope, or the boot is refused by name; see the note under §10 and the sentence added to the D7 note. #31328 (2026-11-08), dialect list only — §4.6 names the `oracle` vocabulary, with how `NUMBER(p,s)` and `RAW(16)` are read, and its federation-only scope.
+**Amended by**: [ADR-0143](./0143-outbound-connector-auth-is-open-tier.md) (2026-10-27), attribution only — see the note below. D7 (2026-10-29, ruling 6486136301 on #27298) — an API-backed datasource may borrow a declared connector instance's credential through `external.connector`; see the D7 note below. #27688 (2026-10-30), example only — §8's `credentialsRef` is a `sys_secret:` handle, the only form the shipped secret binder resolves; see the note under §8. #27917 (2026-10-30), dialect list only — §4.6 names the `odata` vocabulary the matrix gained with #27745. #28208 (2026-10-31, ruling 6525963988 on #27687) — a datasource defined in code reads its credential at connect from `OS_DATASOURCE_<NAME>_PASSWORD`, behind the host switch `OS_DATASOURCE_ENV_CREDENTIALS`; see the note under §10 and the correction in the D7 note. 2026-11-03 (maintainer ruling in the security channel, D1 = B, D2 = (c2)+(a)) — under a walled tenancy posture every external object states its organization scope, or the boot is refused by name; see the note under §10 and the sentence added to the D7 note. #31328 (2026-11-08) — §4.6 names the `oracle` vocabulary, with how `NUMBER(p,s)` and `RAW(16)` are read, and its federation-only scope; §5.1 gains the federation-only arm of the DDL gate.
 
 > **Amendment note D7 (2026-10-29, ruling 6486136301, letter A) — a second credential channel.**
 > §10 says credentials reach a datasource only through `credentialsRef`. That stays true for a
@@ -466,6 +466,18 @@ if (datasource.schemaMode !== 'managed') {
 and `packages/drivers/driver-sql/src/sql-driver.ts` (current `createTable` / `alterTable` call sites) gain a
 guard at the top. The `applyMigrations` implementation (forthcoming
 in `service-migration` per ADR-0008) also calls this guard.
+
+**Federation-only dialects** (#31328) — a second arm, after the
+`schemaMode` check. A driver row §4.6 marks federation-only (`oracle`) has no
+schema-emission path at all, so a DDL operation that passes the check above
+(the driver runs `managed`) is still refused on that knex client, with
+`UnsupportedDialectEmissionError`, reason `'federation-only'` (code
+`SQL_DIALECT_EMISSION_UNSUPPORTED`, HTTP 501). Authoring already refuses a
+`managed` datasource on such a driver (§4.6); this arm is the driver-layer
+floor for a `SqlDriver` that reaches DDL without passing that check (one
+constructed directly, say), and it names the supported clients and the `schemaMode: 'external'`
+fix. A non-managed oracle datasource meets the first arm, as every other
+driver does.
 
 ### 5.2 Gate 2 — Boot validation (runtime layer)
 
