@@ -2061,6 +2061,9 @@ importers:
       '@objectstack/formula':
         specifier: workspace:*
         version: link:../../formula
+      '@objectstack/objectql':
+        specifier: workspace:*
+        version: link:../../objectql
       '@objectstack/platform-objects':
         specifier: workspace:*
         version: link:../../platform-objects
@@ -2071,9 +2074,6 @@ importers:
         specifier: ^10.1.4
         version: 10.2.1
     devDependencies:
-      '@objectstack/objectql':
-        specifier: workspace:*
-        version: link:../../objectql
       '@objectstack/service-queue':
         specifier: workspace:*
         version: link:../../services/service-queue
@@ -2270,6 +2270,9 @@ importers:
       '@objectstack/core':
         specifier: workspace:*
         version: link:../../core
+      '@objectstack/objectql':
+        specifier: workspace:*
+        version: link:../../objectql
       '@objectstack/platform-objects':
         specifier: workspace:*
         version: link:../../platform-objects
@@ -2289,9 +2292,6 @@ importers:
       '@objectstack/metadata-core':
         specifier: workspace:*
         version: link:../../metadata-core
-      '@objectstack/objectql':
-        specifier: workspace:*
-        version: link:../../objectql
       '@types/node':
         specifier: ^26.6.5
         version: 26.6.5
@@ -2801,6 +2801,9 @@ importers:
       '@objectstack/metadata-protocol':
         specifier: workspace:*
         version: link:../../metadata-protocol
+      '@objectstack/objectql':
+        specifier: workspace:*
+        version: link:../../objectql
       '@objectstack/platform-objects':
         specifier: workspace:*
         version: link:../../platform-objects
@@ -2817,9 +2820,6 @@ importers:
       '@objectstack/driver-sql':
         specifier: workspace:*
         version: link:../../drivers/driver-sql
-      '@objectstack/objectql':
-        specifier: workspace:*
-        version: link:../../objectql
       '@objectstack/plugin-audit':
         specifier: workspace:*
         version: link:../../plugins/plugin-audit
