@@ -93,6 +93,7 @@ import { postureEnforcesWall, type TenancyPosture } from '@objectstack/spec/secu
 import { MCP_OAUTH_SCOPES } from '@objectstack/spec/ai';
 import type { RegisteredErrorCode, StandardErrorCode } from '@objectstack/spec/api';
 import { createObjectQLAdapterFactory, withSystemReadContext } from './objectql-adapter.js';
+import { isPresentedInvitationPending } from './presented-invitation.js';
 import { type ExternalDirectoryDoorDeps } from './external-directory-door.js';
 import { roleChangeGrantDepsFor, type RoleChangeGrantDeps } from './role-change-granted-set.js';
 import { isExternalMembershipRole } from './external-membership.js';
@@ -2738,7 +2739,10 @@ export class AuthManager {
    * `data.user` here is `internalAdapter.createUser`'s own input, not the raw
    * request body, so it never carries an undeclared key. That is a plain read
    * of an already-parsed value, not a re-derived I/O probe, so it does not
-   * reopen what #11767 closed.
+   * reopen what #11767 closed. The invitation a sign-up presents is the second
+   * such read, for the same reason (`presented-invitation.ts`): the id is a
+   * `ctx.body` field, and the row it names is read on the same ctx-independent
+   * data path as the other probes ({@link hasPresentedPendingInvitation}).
    */
   private validateAudienceAdmission(
     data: {
@@ -2749,12 +2753,13 @@ export class AuthManager {
   ): Promise<{ error: string; errorDescription?: string } | undefined> {
     // [#25224 cut 8] The body moved to `auth-manager-membership-admission.ts` (see `MembershipAdmissionHost`).
     const readConfig = () => this.config;
-    const host: Pick<MembershipAdmissionHost, 'audienceLogError' | 'config' | 'enterpriseOAuthProviderIds' | 'getAudience' | 'hasPendingInvitationFor' | 'isBootstrapCreation' | 'isOperatorProvisioning' | 'selfRegistrationSetResolvable' | 'stageOwnerVerifiedStamp' | 'stageSelfRegistrationGrant'> = {
+    const host: Pick<MembershipAdmissionHost, 'audienceLogError' | 'config' | 'enterpriseOAuthProviderIds' | 'getAudience' | 'hasPendingInvitationFor' | 'hasPresentedPendingInvitation' | 'isBootstrapCreation' | 'isOperatorProvisioning' | 'selfRegistrationSetResolvable' | 'stageOwnerVerifiedStamp' | 'stageSelfRegistrationGrant'> = {
       audienceLogError: (...a) => this.audienceLogError(...a),
       get config() { return readConfig(); },
       enterpriseOAuthProviderIds: (...a) => this.enterpriseOAuthProviderIds(...a),
       getAudience: (...a) => this.getAudience(...a),
       hasPendingInvitationFor: (...a) => this.hasPendingInvitationFor(...a),
+      hasPresentedPendingInvitation: (...a) => this.hasPresentedPendingInvitation(...a),
       isBootstrapCreation: (...a) => this.isBootstrapCreation(...a),
       isOperatorProvisioning: (...a) => this.isOperatorProvisioning(...a),
       selfRegistrationSetResolvable: (...a) => this.selfRegistrationSetResolvable(...a),
@@ -2909,6 +2914,16 @@ export class AuthManager {
     } catch {
       return false;
     }
+  }
+
+  /**
+   * The invitation a sign-up PRESENTS admits it: the `sys_invitation` row the
+   * presented id names is pending, unexpired and addressed to `email`. The
+   * rule, and why every other answer is `false` (fail closed, like
+   * {@link hasPendingInvitationFor}), live in `presented-invitation.ts`.
+   */
+  private hasPresentedPendingInvitation(invitationId: string | undefined, email: string): Promise<boolean> {
+    return isPresentedInvitationPending(this.config.dataEngine, invitationId, email);
   }
 
   /**

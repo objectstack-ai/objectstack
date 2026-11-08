@@ -132,11 +132,13 @@ async function bootEngine(): Promise<ObjectQL> {
   return bound;
 }
 
-async function seedPendingInvitation(engine: ObjectQL, email: string): Promise<void> {
+/** Seed a pending invitation and answer its id, which the sign-up presents. */
+async function seedPendingInvitation(engine: ObjectQL, email: string): Promise<string> {
+  const id = `inv_${Math.random().toString(36).slice(2, 10)}`;
   await engine.insert(
     'sys_invitation',
     {
-      id: `inv_${Math.random().toString(36).slice(2, 10)}`,
+      id,
       email,
       status: 'pending',
       organization_id: 'org_25060',
@@ -146,6 +148,7 @@ async function seedPendingInvitation(engine: ObjectQL, email: string): Promise<v
     },
     SYSTEM,
   );
+  return id;
 }
 
 const EMAIL_DOMAIN = {
@@ -187,12 +190,17 @@ function makeManager(engine: ObjectQL, email: { service: unknown } | undefined, 
   return manager;
 }
 
-function signUp(manager: AuthManager, email: string, headers: Record<string, string> = {}): Promise<Response> {
+function signUp(
+  manager: AuthManager,
+  email: string,
+  headers: Record<string, string> = {},
+  invitationId?: string,
+): Promise<Response> {
   return manager.handleRequest(
     new Request(`${AUTH}/sign-up/email`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', origin: BASE, ...headers },
-      body: JSON.stringify({ email, password: PASSWORD, name: 'Someone' }),
+      body: JSON.stringify({ email, password: PASSWORD, name: 'Someone', invitationId }),
     }),
   );
 }
@@ -363,11 +371,11 @@ describe('[#25060] ② no live transport keeps the refusal', () => {
 describe('[#25060] ③ invite_only is unchanged', () => {
   it('an invited holder of an existing address is refused with the shield on and a live transport, and nothing is mailed', async () => {
     const engine = await bootEngine();
-    await seedPendingInvitation(engine, EXISTING);
+    const invitationId = await seedPendingInvitation(engine, EXISTING);
     const email = recordingEmail(true);
     const manager = makeManager(engine, email, { emailAndPassword: { requireEmailVerification: true } });
 
-    await expectRefused(await signUp(manager, EXISTING));
+    await expectRefused(await signUp(manager, EXISTING, {}, invitationId));
     expect(email.sent).toEqual([]);
   });
 

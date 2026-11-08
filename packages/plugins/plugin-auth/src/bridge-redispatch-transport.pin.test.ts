@@ -115,8 +115,8 @@ async function stage(deployment: { trustProxy?: boolean }): Promise<Stage> {
     [ADMIN_EMAIL, 'Platform Admin'],
     [MEMBER_EMAIL, 'Plain Member'],
   ]) {
-    await inviteForAudienceGate(manager, email);
-    const res = await direct('/sign-up/email', { email, password: PASSWORD, name });
+    const invitationId = await inviteForAudienceGate(manager, email);
+    const res = await direct('/sign-up/email', { email, password: PASSWORD, name, invitationId });
     expect(res.status, `sign-up ${email}: ${await res.clone().text()}`).toBe(200);
   }
   const users = (engine.tables.get('sys_user') ?? []) as any[];

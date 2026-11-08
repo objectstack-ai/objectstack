@@ -589,7 +589,7 @@
       "title": "Sampled endpoints return the standard error envelope with ledgered codes — no invented codes, no retired keys, statuses match the map",
       "since": "v16",
       "status": "active",
-      "revision": 8,
+      "revision": 9,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -601,7 +601,7 @@
         "app": "showcase",
         "requires": [
           "showcase_invoice.name is required:true — the cheapest deterministic VALIDATION_FAILED",
-          "a member persona lacking showcase_announcement create (member_default: create false) — the deterministic 403. Stock showcase SEEDS two loginable non-admin personas for exactly this: Mei Phone (phone.demo@example.com) and Ada Auditor (auditor.demo@example.com), both with DEMO_PERSONA_PASSWORD = 'showcase123' (examples/app-showcase/src/security/demo-personas.ts, provisioned by seed-approval-demo.ts on every dev boot). Driven as Mei, POST /api/v1/data/showcase_announcement answers 403 PERMISSION_DENIED — a ledgered code — so the 403 family is reachable with no provisioning at all. A THIRD identity is not a self-sign-up on stock: POST /api/v1/auth/sign-up/email answers 403 SELF_REGISTRATION_CLOSED, because the showcase declares no audience posture and the default is invite_only (packages/plugins/plugin-auth/src/audience-posture.ts). Mint it as the admin with POST /api/v1/auth/admin/create-user, or invite the address first: a pending invitation admits that address's own sign-up"
+          "a member persona lacking showcase_announcement create (member_default: create false) — the deterministic 403. Stock showcase SEEDS two loginable non-admin personas for exactly this: Mei Phone (phone.demo@example.com) and Ada Auditor (auditor.demo@example.com), both with DEMO_PERSONA_PASSWORD = 'showcase123' (examples/app-showcase/src/security/demo-personas.ts, provisioned by seed-approval-demo.ts on every dev boot). Driven as Mei, POST /api/v1/data/showcase_announcement answers 403 PERMISSION_DENIED — a ledgered code — so the 403 family is reachable with no provisioning at all. A THIRD identity is not a self-sign-up on stock: POST /api/v1/auth/sign-up/email answers 403 SELF_REGISTRATION_CLOSED, because the showcase declares no audience posture and the default is invite_only (packages/plugins/plugin-auth/src/audience-posture.ts). Mint it as the admin with POST /api/v1/auth/admin/create-user, or invite the address first: a sign-up presenting the id invite-member answered, as invitationId, is admitted, and the address alone is refused"
         ]
       },
       "steps": [
@@ -717,7 +717,8 @@
           "change": "acceptance[3].clause stops calling OBJECT_NOT_FOUND and RECORD_NOT_FOUND extension codes. Checklist-accuracy finding of the 18.2.0 wave 2 (QA run #26476, release-18.2.0-w2-manual-api, at 756220c4; wave anchor #25807, slice A): both are StandardErrorCode members (packages/spec/src/api/errors.zod.ts), while VALIDATION_FAILED is not. Neither is a floor code, so both still answer by family; the clause now sorts the codes into floor codes and the rest. Re-read at base e4ba846f. The assertion (status agrees with code) is unchanged",
           "ref": "#25807"
         },
-        { "revision": 8, "date": "2026-10-31", "change": "fixtures.requires[1] corrected from QA run #27392 (18.3.0 sweep, wave 3, at c4c515ad; sweep anchor #27377): it said sign-up/email works on a stock dev boot, but it answers 403 SELF_REGISTRATION_CLOSED under the invite_only default. The line now names the two doors that do mint a third identity. Re-read at base 488b3ed0: packages/plugins/plugin-auth/src/audience-posture.ts (an undeclared posture is invite_only; a pending invitation admits), packages/plugins/plugin-auth/src/admin-user-endpoints.ts (POST /admin/create-user). No clause changed", "ref": "#27392" }
+        { "revision": 8, "date": "2026-10-31", "change": "fixtures.requires[1] corrected from QA run #27392 (18.3.0 sweep, wave 3, at c4c515ad; sweep anchor #27377): it said sign-up/email works on a stock dev boot, but it answers 403 SELF_REGISTRATION_CLOSED under the invite_only default. The line now names the two doors that do mint a third identity. Re-read at base 488b3ed0: packages/plugins/plugin-auth/src/audience-posture.ts (an undeclared posture is invite_only; a pending invitation admits), packages/plugins/plugin-auth/src/admin-user-endpoints.ts (POST /admin/create-user). No clause changed", "ref": "#27392" },
+        { "revision": 9, "date": "2026-11-08", "change": "The invite step presents the invitation: under invite_only a self-serve sign-up is admitted only by the invitation it presents, so the sign-up sends the id invite-member answered as invitationId beside the email, and the address alone answers 403 SELF_REGISTRATION_CLOSED. Prose only; no clause changed" }
       ]
     },
     {
