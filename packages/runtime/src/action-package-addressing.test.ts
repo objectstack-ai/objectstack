@@ -21,7 +21,7 @@
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
-import { ObjectQL } from '@objectstack/objectql';
+import { ObjectQL, assertEngineFindOnePredicate } from '@objectstack/objectql';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { executeRegisteredAction, resolveRouteActionDeclaration, type ActionExecutionDeps } from './action-execution.js';
 
@@ -56,7 +56,9 @@ beforeEach(() => {
     engine.registry.logLevel = 'silent';
     const rowStore: any = {
         registry: engine.registry,
-        find: async () => [], findOne: async () => null, count: async () => 0, aggregate: async () => [],
+        find: async () => [],
+        findOne: async (object: string, query: any) => { assertEngineFindOnePredicate(object, query); return null; },
+        count: async () => 0, aggregate: async () => [],
     };
     const protocol = new ObjectStackProtocolImplementation(rowStore);
     deps = {
