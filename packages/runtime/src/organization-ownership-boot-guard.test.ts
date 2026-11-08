@@ -22,6 +22,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { spawnSync } from 'node:child_process';
 import { DatabaseSync } from 'node:sqlite';
 import { assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import { ORGANIZATION_OWNERSHIP_SHAPE_GENERATION } from '@objectstack/spec/system';
@@ -39,6 +40,9 @@ import {
   ORGANIZATION_OWNERSHIP_BOOT_GUARD_PLUGIN_NAME,
   ORGANIZATION_OWNERSHIP_BOOT_REFUSAL_CODE,
 } from './organization-ownership-boot-guard.js';
+
+/** What a shell running a printed command says when `OS_DATABASE_AUTH_TOKEN` is unset (#31547). */
+const AUTH_TOKEN_UNSET = 'export OS_DATABASE_AUTH_TOKEN as the database auth token this server was started with';
 
 let db: DatabaseSync;
 
@@ -232,6 +236,81 @@ describe('the v18 boot refusal (ADR-0131 D10 item 5; the birth marker, ruling �
     const message = organizationOwnershipRefusalMessage([], 'absent', { authSecretFile: '/srv/os/home/auth-secret' });
     expect(message).not.toContain('--database-url');
     expect(message).not.toContain('OS_DATABASE_URL');
+  });
+
+  it('⭐ #31547: a driver from --database-driver is set in front of both commands, in every refusal, beside the secret and the database', async () => {
+    v17Shape();
+    const opts = { authSecretFile: '/srv/os/home/auth-secret', databaseUrl: 'file:A.db', databaseDriver: 'turso' };
+    const named =
+      'OS_DATABASE_DRIVER=turso OS_AUTH_SECRET="$(cat /srv/os/home/auth-secret)" os migrate organization-ownership ' +
+      '--database-url file:A.db';
+    const absent = await refusalOf(() => assertOrganizationOwnershipMigrated(engine({ stats: FOUND }), undefined, opts));
+    expect(absent.message).toContain(
+      `Run '${named} --out PLAN' to write and review its plan, take a backup, then run ` +
+        `'${named} --apply --plan-file PLAN --backup-taken', and start again.`,
+    );
+    for (const state of ['outdated', 'unreadable', 'unverified'] as const) {
+      expect(organizationOwnershipRefusalMessage(['sys_job'], state, opts), state)
+        .toContain(`'${named} --apply --plan-file PLAN --backup-taken'`);
+    }
+    // A development boot (`os dev -d … --database-driver …`) keeps `--dev` after the command name.
+    expect(organizationOwnershipRefusalMessage([], 'absent', { dev: true, databaseUrl: 'file:A.db', databaseDriver: 'sqlite' }))
+      .toContain("'OS_DATABASE_DRIVER=sqlite os migrate organization-ownership --dev --database-url file:A.db --out PLAN'");
+  });
+
+  it('⭐ #31547: a token from --database-auth-token is never printed — both commands read it from OS_DATABASE_AUTH_TOKEN, and say why', () => {
+    const message = organizationOwnershipRefusalMessage([], 'absent', {
+      dev: true,
+      databaseUrl: 'libsql://os-dev.turso.io',
+      databaseDriver: 'turso',
+      databaseAuthTokenFromFlag: true,
+    });
+    const named =
+      `OS_DATABASE_DRIVER=turso OS_DATABASE_AUTH_TOKEN="\${OS_DATABASE_AUTH_TOKEN:?${AUTH_TOKEN_UNSET}}" ` +
+      'os migrate organization-ownership --dev --database-url libsql://os-dev.turso.io';
+    expect(message).toContain(`'${named} --out PLAN'`);
+    expect(message).toContain(`'${named} --apply --plan-file PLAN --backup-taken'`);
+    expect(message).toContain('The database auth token this server was started with (--database-auth-token) is not printed');
+    // The token alone, with no driver and a database the ceremony finds by default.
+    expect(organizationOwnershipRefusalMessage([], 'absent', { databaseAuthTokenFromFlag: true }))
+      .toContain(`'OS_DATABASE_AUTH_TOKEN="\${OS_DATABASE_AUTH_TOKEN:?${AUTH_TOKEN_UNSET}}" os migrate organization-ownership --out PLAN'`);
+  });
+
+  it('⭐ #31547: the printed command runs as written — the driver and the token reach the ceremony, and an unset token stops the shell', () => {
+    const message = organizationOwnershipRefusalMessage([], 'absent', {
+      dev: true,
+      databaseUrl: 'file:A.db',
+      databaseDriver: 'turso',
+      databaseAuthTokenFromFlag: true,
+    });
+    const plan = /Run '(.+? --out PLAN)'/.exec(message)?.[1];
+    expect(plan, message).toBeDefined();
+    // `os` stands in for the CLI: it prints what the ceremony would read.
+    const script = `os() { printf '%s|%s|%s' "$OS_DATABASE_DRIVER" "$OS_DATABASE_AUTH_TOKEN" "$*"; }; ${plan!}`;
+    const shellEnv = { PATH: process.env.PATH ?? '/usr/bin:/bin' };
+    const ran = spawnSync('sh', ['-c', script], { env: { ...shellEnv, OS_DATABASE_AUTH_TOKEN: 'tok-31547' }, encoding: 'utf8' });
+    expect(ran.status, ran.stderr).toBe(0);
+    expect(ran.stdout).toBe('turso|tok-31547|migrate organization-ownership --dev --database-url file:A.db --out PLAN');
+    const unset = spawnSync('sh', ['-c', script], { env: shellEnv, encoding: 'utf8' });
+    expect(unset.status).not.toBe(0);
+    expect(unset.stdout).toBe('');
+    expect(unset.stderr).toContain(AUTH_TOKEN_UNSET);
+  });
+
+  it('CONTROL #31547: with no driver and no token flag the commands are as #31488 printed them', () => {
+    for (const opts of [
+      { authSecretFile: '/srv/os/home/auth-secret', databaseUrl: 'file:/srv/os/home/data/objectstack.db' },
+      { dev: true, databaseUrl: 'file:A.db' },
+      { authSecretFile: '/srv/os/home/auth-secret' },
+      {},
+    ]) {
+      const message = organizationOwnershipRefusalMessage([], 'absent', opts);
+      expect(message, JSON.stringify(opts)).not.toContain('OS_DATABASE_DRIVER');
+      expect(message, JSON.stringify(opts)).not.toContain('OS_DATABASE_AUTH_TOKEN');
+      expect(message, JSON.stringify(opts)).not.toContain('--database-auth-token');
+    }
+    expect(organizationOwnershipRefusalMessage([], 'absent', { dev: true, databaseUrl: 'file:A.db' }))
+      .toContain("Run 'os migrate organization-ownership --dev --database-url file:A.db --out PLAN'");
   });
 
   it('⭐ R1: a store created from empty gets its birth marker, exactly once, and boots — again and again', async () => {

@@ -105,8 +105,10 @@ describe('os dev — the in-place upgrade of a v17-shape development database', 
     expect(result.lines[0]).toBe('Refused (sys_mystery): sys_mystery carries organization_id …');
     expect(result.lines.at(-1)).toContain('nothing was changed');
     expect(result.lines.at(-1)).toContain(BACKUP());
-    // The ceremony is open (18.x step 6): the way on is running it by hand.
-    expect(result.lines.at(-1)).toContain('os migrate organization-ownership --dev');
+    // The ceremony is open (18.x step 6): the way on is running it by hand, by
+    // the commands the guard's refusal printed (#31547: they name the database).
+    expect(result.lines.at(-1)).toContain("the two commands the boot guard's refusal above names");
+    expect(result.lines.at(-1)).not.toContain('os migrate organization-ownership --dev');
     expect(result.lines.at(-1)).not.toContain('17.x');
   });
 
@@ -140,12 +142,16 @@ describe('os dev — the in-place upgrade of a v17-shape development database', 
     expect(result.lines.at(-1)).toContain(`--apply --plan-file ${join(BACKUP(), 'plan.json')} --backup-taken`);
   });
 
-  it('a database that is not a local SQLite file is not upgraded in place: the ceremony is named instead', () => {
+  it('⭐ #31547: a database that is not a local SQLite file is not upgraded in place: the refusal\'s commands are pointed at, never respelled bare', () => {
     const result = upgradeDevelopmentDatabase(input(fakeRun({}), { sqliteFile: null, databaseUrl: 'postgres://db/app' }));
     expect(result.ok).toBe(false);
     expect(calls).toEqual([]);
     expect(existsSync(join(dir, 'backups'))).toBe(false);
-    expect(result.lines[0]).toContain('os migrate organization-ownership --dev');
+    // The guard's refusal names this database (`--database-url`), its driver and
+    // token; a bare `os migrate organization-ownership --dev` would plan the
+    // project's default database instead.
+    expect(result.lines[0]).toContain("the two commands the boot guard's refusal above names");
+    expect(result.lines[0]).not.toContain('os migrate organization-ownership --dev');
     expect(result.lines[0]).not.toContain('17.x');
   });
 
