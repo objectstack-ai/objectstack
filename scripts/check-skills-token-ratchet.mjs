@@ -1144,7 +1144,20 @@ export const CEILINGS = new Map([
   // the remainder, +35 measured, raises the row, pinned at the measurement.
   // Same maintainer ruling, verbatim and untranslated:
   // 「A:先削重复,余额按实测提高」 (ruling record 6513306068 on #27847).
-  ['skills/objectstack-platform/references/operations.md', 3375],
+  // 3375 -> 3394: the `use-runtime` paragraph's install refusal also names the
+  // installation-wide uniques stop: rerun with `--confirm-global-uniques` when
+  // those `unique` constraints are meant platform-wide, else set them
+  // `unique: 'organization'`. Paid first by deleting restatement in the same
+  // file (-67 bytes): the Logs bullet's `{ level: 'info', format: 'json' }`
+  // example (home: references/plugin-development.md § ObjectKernel
+  // Configuration) and the Metrics bullet's "(per-plugin startup durations)"
+  // (home: the same file's § Health Monitoring, `Map<name, startup ms>`).
+  // 13500 -> 13574 bytes (+74 net: -67 cut, +141 added) -> ceil(13574 / 4) =
+  // 3394; headroom was 0, so the remainder, +19 measured, raises the row,
+  // pinned at the measurement. Same maintainer ruling, verbatim and
+  // untranslated: 「A:先削重复,余额按实测提高」 (ruling record 6513306068 on
+  // #27847).
+  ['skills/objectstack-platform/references/operations.md', 3394],
   ['skills/objectstack-platform/references/plugin-development.md', 3137],
   ['skills/objectstack-upgrade/references/examples-upgrade.md', 1197],
 
