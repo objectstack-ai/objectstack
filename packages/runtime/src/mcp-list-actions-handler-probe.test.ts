@@ -22,6 +22,10 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
+// Pay the first transform of `@objectstack/metadata`, which the dispatcher's
+// source reaches through a dynamic `import()`, at MODULE LOAD, never inside a
+// clocked `it` (`scripts/check-test-source-alias.mjs`).
+import '@objectstack/metadata';
 
 import { HttpDispatcher } from './http-dispatcher.js';
 

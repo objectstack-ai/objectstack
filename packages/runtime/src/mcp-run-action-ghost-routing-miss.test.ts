@@ -22,6 +22,10 @@
 
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { actionsDoorAnswerOf } from '@objectstack/types';
+// Pay the first transform of `@objectstack/metadata`, which the dispatcher's
+// source reaches through a dynamic `import()`, at MODULE LOAD, never inside a
+// clocked `it` (`scripts/check-test-source-alias.mjs`).
+import '@objectstack/metadata';
 
 import { HttpDispatcher } from './http-dispatcher.js';
 
@@ -41,7 +45,6 @@ function makeKernel(handler?: (ctx: any) => unknown) {
         getSchema: (name: string) => (name === OBJECT ? object : undefined),
         registry: { getObject: (name: string) => (name === OBJECT ? object : undefined), getItem: () => undefined },
         find: vi.fn(async () => [{ id: 'r1' }]),
-        findOne: vi.fn(async () => ({ id: 'r1' })),
         insert: vi.fn(), update: vi.fn(), delete: vi.fn(),
         executeAction: vi.fn(async (obj: string, key: string, ctx: any) => {
             const h = handlers.get(`${obj}:${key}`);
