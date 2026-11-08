@@ -741,6 +741,73 @@ describe('DelegatedAdminGate — self-delegation anchor containment (cloud#830 f
   });
 });
 
+// ── [ADR-0105 D6] The walk's root is one organization's, on a driver that scopes NOTHING ─
+//
+// Red line 2: every BU mechanism operates within one organization. The
+// harness `ql` ignores `context`, so the root read hands back a unit of any
+// organization and the row-level predicate is the only thing standing — the
+// same predicate the walk applies to every descendant. The posture rig
+// (`delegated-admin-own-name-set.posture.test.ts`) pins the rule through the
+// doors on a real engine; this half also pins an organization-less unit, which
+// a real table cannot hold (its tenant column is NOT NULL, ADR-0131 D1).
+describe("[ADR-0105 D6] DelegatedAdminGate — a delegated business-unit walk never starts at a unit outside the caller's organization", () => {
+  /** A unit of another organization with a unit below it, and an organization-less unit. */
+  function withUnitsOutsideTheOrganization(d: ReturnType<typeof makeAnchoredDelegationHarness>) {
+    d.tables.sys_business_unit.push(
+      { id: 'bu_x', name: 'x_desk', parent_business_unit_id: null, organization_id: 'org_other' },
+      { id: 'bu_x_field', name: 'x_field', parent_business_unit_id: 'bu_x', organization_id: 'org_other' },
+      { id: 'bu_none', name: 'none', parent_business_unit_id: null, organization_id: null },
+    );
+    return d;
+  }
+  const OUTSIDE = ['bu_x', 'bu_x_field', 'bu_none'];
+  /** The refusal of `u_boss`'s delegation anchored at `unit`: its envelope, and its message with the anchor spelled out. */
+  const answerAt = async (d: ReturnType<typeof makeAnchoredDelegationHarness>, unit: string) => {
+    const err = await refusalOf(() => d.delegate('u_boss', d.base({ business_unit_id: unit })));
+    return [err.code, err.status, String(err.message).split(`'${unit}'`).join("'ANCHOR'")];
+  };
+
+  it("an unanchored holding's range holds no root outside the caller's organization: a member unit there is refused as any unit outside the range", async () => {
+    const d = withUnitsOutsideTheOrganization(makeAnchoredDelegationHarness());
+    d.tables.sys_user_position.find((r: any) => r.id === 'ha').business_unit_id = null;
+    d.tables.sys_business_unit_member.push(
+      { id: 'm_boss_x', user_id: 'u_boss', business_unit_id: 'bu_x', organization_id: 'org_other' },
+      { id: 'm_boss_none', user_id: 'u_boss', business_unit_id: 'bu_none', organization_id: DELEGATION_ORG },
+    );
+    const outside = await answerAt(d, 'bu_hq');
+    expect(outside.slice(0, 2), String(outside[2])).toEqual(['PERMISSION_DENIED', 403]);
+    for (const unit of OUTSIDE) expect(await answerAt(d, unit), unit).toEqual(outside);
+    // CONTROL: the member unit of the caller's organization still roots the range.
+    await expect(d.delegate('u_boss', d.base({ business_unit_id: 'bu_es' }))).resolves.toBeUndefined();
+  });
+
+  it("a holding anchored at a unit outside the caller's organization roots no range: no anchor is admitted through it", async () => {
+    // The answer of a holding whose anchor names no unit at all: no range.
+    const noRange = withUnitsOutsideTheOrganization(makeAnchoredDelegationHarness());
+    noRange.tables.sys_user_position.find((r: any) => r.id === 'ha').business_unit_id = 'bu_no_such_unit';
+    const refused = await answerAt(noRange, 'bu_es');
+    expect(refused.slice(0, 2), String(refused[2])).toEqual(['PERMISSION_DENIED', 403]);
+    for (const anchor of ['bu_x', 'bu_none']) {
+      const d = withUnitsOutsideTheOrganization(makeAnchoredDelegationHarness());
+      d.tables.sys_user_position.find((r: any) => r.id === 'ha').business_unit_id = anchor;
+      for (const unit of [...OUTSIDE, 'bu_es']) expect(await answerAt(d, unit), `${anchor} · ${unit}`).toEqual(refused);
+      // CONTROL: unanchored, the delegation is admitted, as before.
+      await expect(d.delegate('u_boss', d.base({}))).resolves.toBeUndefined();
+    }
+  });
+
+  it("CONTROL: a holding anchored at a unit of the caller's organization keeps its subtree, and a unit of another organization under it stays outside", async () => {
+    const d = withUnitsOutsideTheOrganization(makeAnchoredDelegationHarness());
+    d.tables.sys_business_unit.push({ id: 'bu_x_linked', name: 'x_linked', parent_business_unit_id: 'bu_east', organization_id: 'org_other' });
+    for (const unit of ['bu_east', 'bu_es']) {
+      await expect(d.delegate('u_boss', d.base({ business_unit_id: unit })), unit).resolves.toBeUndefined();
+    }
+    const outside = await answerAt(d, 'bu_hq');
+    expect(outside.slice(0, 2), String(outside[2])).toEqual(['PERMISSION_DENIED', 403]);
+    for (const unit of ['bu_x_linked', ...OUTSIDE]) expect(await answerAt(d, unit), unit).toEqual(outside);
+  });
+});
+
 // ── [ADR-0090 D12 / ADR-0105 D8] describeDelegableScope — the READ half ──────
 //
 // A picker narrows with this; the gate still decides. So the property that
