@@ -61,8 +61,9 @@ import { esES } from './es-ES.js';
 import { zhHant } from './zh-Hant.js';
 import { ar } from './ar.js';
 import { fr } from './fr.js';
+import { ptBR } from './pt-BR.js';
 
-const LOCALES = { en, 'zh-CN': zhCN, 'ja-JP': jaJP, 'es-ES': esES, 'zh-Hant': zhHant, ar, fr } as const;
+const LOCALES = { en, 'zh-CN': zhCN, 'ja-JP': jaJP, 'es-ES': esES, 'zh-Hant': zhHant, ar, fr, 'pt-BR': ptBR } as const;
 
 /** Every statically declared nav item of an app, depth-first, with its label. */
 function navItems(app: { navigation?: unknown[] }): Array<{ id: string; label?: string }> {

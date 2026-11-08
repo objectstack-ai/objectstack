@@ -8,12 +8,14 @@ import { esESMetadataForms } from '../apps/translations/es-ES.metadata-forms.gen
 import { zhHantMetadataForms } from '../apps/translations/zh-Hant.metadata-forms.generated.js';
 import { arMetadataForms } from '../apps/translations/ar.metadata-forms.generated.js';
 import { frMetadataForms } from '../apps/translations/fr.metadata-forms.generated.js';
+import { ptBRMetadataForms } from '../apps/translations/pt-BR.metadata-forms.generated.js';
 import { zhCNGeneratedSourceHashes } from '../apps/translations/zh-CN.source-hashes.generated.js';
 import { jaJPGeneratedSourceHashes } from '../apps/translations/ja-JP.source-hashes.generated.js';
 import { esESGeneratedSourceHashes } from '../apps/translations/es-ES.source-hashes.generated.js';
 import { zhHantGeneratedSourceHashes } from '../apps/translations/zh-Hant.source-hashes.generated.js';
 import { arGeneratedSourceHashes } from '../apps/translations/ar.source-hashes.generated.js';
 import { frGeneratedSourceHashes } from '../apps/translations/fr.source-hashes.generated.js';
+import { ptBRGeneratedSourceHashes } from '../apps/translations/pt-BR.source-hashes.generated.js';
 import { withSourceFallback } from '../apps/translations/source-hash.js';
 
 /** The source bundle the translated locales are judged against — `en` is a copy of it. */
@@ -52,4 +54,5 @@ export const MetadataFormsTranslations: TranslationBundle = {
   'zh-Hant': withSourceFallback({ metadataForms: zhHantMetadataForms }, enSource, undefined, zhHantGeneratedSourceHashes),
   ar: withSourceFallback({ metadataForms: arMetadataForms }, enSource, undefined, arGeneratedSourceHashes),
   fr: withSourceFallback({ metadataForms: frMetadataForms }, enSource, undefined, frGeneratedSourceHashes),
+  'pt-BR': withSourceFallback({ metadataForms: ptBRMetadataForms }, enSource, undefined, ptBRGeneratedSourceHashes),
 };

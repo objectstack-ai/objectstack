@@ -56,6 +56,7 @@ import { esESMetadataForms } from './es-ES.metadata-forms.generated.js';
 import { zhHantMetadataForms } from './zh-Hant.metadata-forms.generated.js';
 import { arMetadataForms } from './ar.metadata-forms.generated.js';
 import { frMetadataForms } from './fr.metadata-forms.generated.js';
+import { ptBRMetadataForms } from './pt-BR.metadata-forms.generated.js';
 
 const LOCALES = [
   { name: 'en', forms: enMetadataForms as Record<string, any> },
@@ -65,6 +66,7 @@ const LOCALES = [
   { name: 'zh-Hant', forms: zhHantMetadataForms as Record<string, any> },
   { name: 'ar', forms: arMetadataForms as Record<string, any> },
   { name: 'fr', forms: frMetadataForms as Record<string, any> },
+  { name: 'pt-BR', forms: ptBRMetadataForms as Record<string, any> },
 ];
 
 /** Every `*.form.ts` the spec package exports, by its export name. */

@@ -33,6 +33,7 @@ describe('System Overview: the null-user bucket reads "System"', () => {
       'zh-Hant': '系統',
       ar: 'النظام',
       fr: 'Système',
+      'pt-BR': 'Sistema',
     });
   });
 
