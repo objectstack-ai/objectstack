@@ -86,6 +86,23 @@ export type UninstallGuard = (args: {
 }) => UninstallGuardRefusal | undefined | Promise<UninstallGuardRefusal | undefined>;
 
 /**
+ * [#31186, #31283] What an uninstall door states about the package it
+ * uninstalled, for the package's own `package_uninstall` ledger row
+ * ({@link ObjectStackProtocolImplementation.recordPackageUninstall}): the
+ * package's id, the version it removed, the operator, whether its object
+ * tables were kept, and how many of its stored `sys_metadata` items were
+ * removed and failed to be. The environment is the protocol's own.
+ */
+export interface PackageUninstallRecord {
+    packageId: string;
+    version?: string;
+    actor?: string;
+    keepData?: boolean;
+    itemsRemoved: number;
+    itemsFailed: number;
+}
+
+/**
  * [ADR-0090 D5, ADR-0131 D4] The security-catalog names an uninstalled package
  * held. A grant names its set, and the package's sets are served from the
  * registry, not stored, so after the withdrawal nothing else knows them.

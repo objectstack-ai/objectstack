@@ -741,6 +741,73 @@ describe('DelegatedAdminGate — self-delegation anchor containment (cloud#830 f
   });
 });
 
+// ── [ADR-0105 D6] The walk's root is one organization's, on a driver that scopes NOTHING ─
+//
+// Red line 2: every BU mechanism operates within one organization. The
+// harness `ql` ignores `context`, so the root read hands back a unit of any
+// organization and the row-level predicate is the only thing standing — the
+// same predicate the walk applies to every descendant. The posture rig
+// (`delegated-admin-own-name-set.posture.test.ts`) pins the rule through the
+// doors on a real engine; this half also pins an organization-less unit, which
+// a real table cannot hold (its tenant column is NOT NULL, ADR-0131 D1).
+describe("[ADR-0105 D6] DelegatedAdminGate — a delegated business-unit walk never starts at a unit outside the caller's organization", () => {
+  /** A unit of another organization with a unit below it, and an organization-less unit. */
+  function withUnitsOutsideTheOrganization(d: ReturnType<typeof makeAnchoredDelegationHarness>) {
+    d.tables.sys_business_unit.push(
+      { id: 'bu_x', name: 'x_desk', parent_business_unit_id: null, organization_id: 'org_other' },
+      { id: 'bu_x_field', name: 'x_field', parent_business_unit_id: 'bu_x', organization_id: 'org_other' },
+      { id: 'bu_none', name: 'none', parent_business_unit_id: null, organization_id: null },
+    );
+    return d;
+  }
+  const OUTSIDE = ['bu_x', 'bu_x_field', 'bu_none'];
+  /** The refusal of `u_boss`'s delegation anchored at `unit`: its envelope, and its message with the anchor spelled out. */
+  const answerAt = async (d: ReturnType<typeof makeAnchoredDelegationHarness>, unit: string) => {
+    const err = await refusalOf(() => d.delegate('u_boss', d.base({ business_unit_id: unit })));
+    return [err.code, err.status, String(err.message).split(`'${unit}'`).join("'ANCHOR'")];
+  };
+
+  it("an unanchored holding's range holds no root outside the caller's organization: a member unit there is refused as any unit outside the range", async () => {
+    const d = withUnitsOutsideTheOrganization(makeAnchoredDelegationHarness());
+    d.tables.sys_user_position.find((r: any) => r.id === 'ha').business_unit_id = null;
+    d.tables.sys_business_unit_member.push(
+      { id: 'm_boss_x', user_id: 'u_boss', business_unit_id: 'bu_x', organization_id: 'org_other' },
+      { id: 'm_boss_none', user_id: 'u_boss', business_unit_id: 'bu_none', organization_id: DELEGATION_ORG },
+    );
+    const outside = await answerAt(d, 'bu_hq');
+    expect(outside.slice(0, 2), String(outside[2])).toEqual(['PERMISSION_DENIED', 403]);
+    for (const unit of OUTSIDE) expect(await answerAt(d, unit), unit).toEqual(outside);
+    // CONTROL: the member unit of the caller's organization still roots the range.
+    await expect(d.delegate('u_boss', d.base({ business_unit_id: 'bu_es' }))).resolves.toBeUndefined();
+  });
+
+  it("a holding anchored at a unit outside the caller's organization roots no range: no anchor is admitted through it", async () => {
+    // The answer of a holding whose anchor names no unit at all: no range.
+    const noRange = withUnitsOutsideTheOrganization(makeAnchoredDelegationHarness());
+    noRange.tables.sys_user_position.find((r: any) => r.id === 'ha').business_unit_id = 'bu_no_such_unit';
+    const refused = await answerAt(noRange, 'bu_es');
+    expect(refused.slice(0, 2), String(refused[2])).toEqual(['PERMISSION_DENIED', 403]);
+    for (const anchor of ['bu_x', 'bu_none']) {
+      const d = withUnitsOutsideTheOrganization(makeAnchoredDelegationHarness());
+      d.tables.sys_user_position.find((r: any) => r.id === 'ha').business_unit_id = anchor;
+      for (const unit of [...OUTSIDE, 'bu_es']) expect(await answerAt(d, unit), `${anchor} · ${unit}`).toEqual(refused);
+      // CONTROL: unanchored, the delegation is admitted, as before.
+      await expect(d.delegate('u_boss', d.base({}))).resolves.toBeUndefined();
+    }
+  });
+
+  it("CONTROL: a holding anchored at a unit of the caller's organization keeps its subtree, and a unit of another organization under it stays outside", async () => {
+    const d = withUnitsOutsideTheOrganization(makeAnchoredDelegationHarness());
+    d.tables.sys_business_unit.push({ id: 'bu_x_linked', name: 'x_linked', parent_business_unit_id: 'bu_east', organization_id: 'org_other' });
+    for (const unit of ['bu_east', 'bu_es']) {
+      await expect(d.delegate('u_boss', d.base({ business_unit_id: unit })), unit).resolves.toBeUndefined();
+    }
+    const outside = await answerAt(d, 'bu_hq');
+    expect(outside.slice(0, 2), String(outside[2])).toEqual(['PERMISSION_DENIED', 403]);
+    for (const unit of ['bu_x_linked', ...OUTSIDE]) expect(await answerAt(d, unit), unit).toEqual(outside);
+  });
+});
+
 // ── [ADR-0090 D12 / ADR-0105 D8] describeDelegableScope — the READ half ──────
 //
 // A picker narrows with this; the gate still decides. So the property that
@@ -1818,15 +1885,16 @@ describe('[#26189] DelegatedAdminGate — a scope violation answers DELEGATION_S
       expectOpaqueDenial(await refusalOf(() => grant({ user_id: 'u_east_1', permission_set: 'sub_admin' })), 'sys_user_permission_set');
     });
 
-    it('a stored grant whose set the catalog does not hold, a grant naming no target user, or one whose target has no business unit', async () => {
+    it('a stored grant whose set the catalog does not hold, or a grant naming no target user', async () => {
       // An INSERT naming an unknown set is judged by the allowlist (a scope
-      // violation, above); the catalog miss is the PRE-IMAGE's reason.
+      // violation, above); the catalog miss is the PRE-IMAGE's reason. A target
+      // user with no business unit is outside the subtree: the describe at the
+      // foot of this file.
       h.tables.sys_user_permission_set = [{ id: 'g_retired', user_id: 'u_east_1', permission_set: 'sales_user_retired' }];
       expectOpaqueDenial(await refusalOf(() => h.gate.assert({
         object: 'sys_user_permission_set', operation: 'delete', options: { where: { id: 'g_retired' } }, context: h.ctxOf('delegate'),
       })), 'sys_user_permission_set');
       expectOpaqueDenial(await refusalOf(() => grant({ permission_set: 'sales_user' })), 'sys_user_permission_set');
-      expectOpaqueDenial(await refusalOf(() => grant({ user_id: 'u_delegate', permission_set: 'sales_user' })), 'sys_user_permission_set');
     });
 
     it('a self-service delegation of duty (ADR-0091 D3)', async () => {
@@ -1834,5 +1902,124 @@ describe('[#26189] DelegatedAdminGate — a scope violation answers DELEGATION_S
         user_id: 'u_east_1', position: 'sales_rep', business_unit_id: 'bu_es', delegated_from: 'u_delegate', reason: 'cover',
       })), 'sys_user_position');
     });
+  });
+});
+
+// ── [ADR-0090 D12; ruling on #26059, Q3] A target user is inside the delegated
+//    subtree only through a business unit of the subtree, so a direct grant to a
+//    target outside it is refused with ONE reason, whether or not the user
+//    exists or holds a business-unit membership: the same class, code, status,
+//    sentence and details, on the thrown value and on the REST door's
+//    classification (`mapDataError`). A target user the write NAMES is first
+//    asked of the caller's own read door, as the engine's reference check asks
+//    it: one the caller cannot read is answered as one that does not exist, so
+//    it is outside the subtree too. One target id, its stored states, and every
+//    write shape that judges a target user.
+
+describe('[ADR-0090 D12] a delegated refusal names one reason for a target user outside the subtree, whether or not the user exists or holds a business-unit membership', () => {
+  const TARGET = 'u_target';
+  const STATES = [
+    'an id naming no user',
+    'a user with no business-unit membership',
+    'a user whose business unit is outside the subtree',
+  ] as const;
+  /** A state only a write that NAMES the target meets: the caller's read door is asked about it. */
+  const UNREADABLE_INSIDE = 'a user with a business unit inside the subtree whom the caller cannot read';
+  const READABLE_INSIDE = 'a user with a business unit inside the subtree whom the caller reads';
+  type TargetState = (typeof STATES)[number] | typeof UNREADABLE_INSIDE | typeof READABLE_INSIDE;
+
+  /**
+   * A fresh harness with `TARGET` in `state`, over the engine the gate meets in
+   * a real composition: `sys_user` registered and the grant's `user_id` a
+   * lookup to it (the conditions under which the engine's reference check asks
+   * the caller's read door), and a caller read of `sys_user` that returns no
+   * row for a user the caller cannot read. A system read returns every row.
+   */
+  function harnessWith(state: TargetState): ReturnType<typeof makeHarness> {
+    const harness = makeHarness();
+    const unreadable = new Set<string>();
+    const { find, findOne } = harness.ql;
+    const served = (object: string, opts: any, row: any) =>
+      !(object === 'sys_user' && !opts?.context?.isSystem && unreadable.has(row?.id));
+    harness.ql.find = async (object: string, opts: any) =>
+      (await find.call(harness.ql, object, opts)).filter((row: any) => served(object, opts, row));
+    harness.ql.findOne = async (object: string, opts: any) => {
+      const row = await findOne.call(harness.ql, object, opts);
+      return row && served(object, opts, row) ? row : null;
+    };
+    const SCHEMAS: Record<string, unknown> = {
+      sys_user: { name: 'sys_user', fields: {} },
+      sys_user_permission_set: { name: 'sys_user_permission_set', fields: { user_id: { type: 'lookup', reference: 'sys_user' } } },
+    };
+    harness.ql.getSchema = (name: string) => SCHEMAS[name];
+    if (state === 'an id naming no user') return harness;
+    harness.tables.sys_user.push({ id: TARGET });
+    if (state === 'a user whose business unit is outside the subtree') {
+      harness.tables.sys_business_unit_member.push({ id: 'm_target', business_unit_id: 'bu_west', user_id: TARGET });
+    }
+    if (state === UNREADABLE_INSIDE || state === READABLE_INSIDE) {
+      harness.tables.sys_business_unit_member.push({ id: 'm_target', business_unit_id: 'bu_es', user_id: TARGET });
+    }
+    if (state === UNREADABLE_INSIDE) unreadable.add(TARGET);
+    return harness;
+  }
+
+  /**
+   * Every write shape that judges a target user, as `[operation, write, names]`:
+   * a new grant and a stored grant pointed at the target NAME it; a stored
+   * grant of the target removed holds it as stored. Each write is the gate's
+   * own `assert`, never an engine double.
+   */
+  const WRITES: ReadonlyArray<readonly [string, (harness: ReturnType<typeof makeHarness>) => Promise<void>, boolean]> = [
+    ['insert', (harness) => harness.gate.assert({
+      object: 'sys_user_permission_set', operation: 'insert',
+      data: { user_id: TARGET, permission_set: 'sales_user' }, context: harness.ctxOf('delegate'),
+    }), true],
+    ['update', (harness) => {
+      harness.tables.sys_user_permission_set = [{ id: 'g_east', user_id: 'u_east_1', permission_set: 'sales_user' }];
+      return harness.gate.assert({
+        object: 'sys_user_permission_set', operation: 'update',
+        data: { id: 'g_east', user_id: TARGET }, context: harness.ctxOf('delegate'),
+      });
+    }, true],
+    ['delete', (harness) => {
+      harness.tables.sys_user_permission_set = [{ id: 'g_target', user_id: TARGET, permission_set: 'sales_user' }];
+      return harness.gate.assert({
+        object: 'sys_user_permission_set', operation: 'delete',
+        options: { where: { id: 'g_target' } }, context: harness.ctxOf('delegate'),
+      });
+    }, false],
+  ];
+
+  /** Everything a caller is told by a refusal: the thrown value and the REST door's envelope. */
+  const answerOf = (err: any) => ({
+    class: err?.constructor?.name,
+    name: err?.name,
+    code: err?.code,
+    status: err?.status,
+    statusCode: err?.statusCode,
+    message: err?.message,
+    details: err?.details,
+    wire: mapDataError(err, 'sys_user_permission_set'),
+  });
+
+  for (const [shape, write, names] of WRITES) {
+    const states: TargetState[] = names ? [...STATES, UNREADABLE_INSIDE] : [...STATES];
+    it(`${shape}: the ${states.length} target states answer the same scope-violation refusal`, async () => {
+      const answers: Array<ReturnType<typeof answerOf>> = [];
+      for (const state of states) answers.push(answerOf(await refusalOf(() => write(harnessWith(state)))));
+      for (const [i, answer] of answers.entries()) expect(answer, states[i]).toEqual(answers[0]);
+      // The one answer is the caller's own scope: the target outside the subtree.
+      const err = await refusalOf(() => write(harnessWith('an id naming no user')));
+      expectScopeViolation(err, 'sys_user_permission_set',
+        /^\[Security\] Outside your delegated scope: delegated '\w+' on sys_user_permission_set rejected — target user 'u_target' is outside the delegated subtree \(scope from 'sub_admin'\)\.$/);
+      expect(err.details).toEqual({ operation: shape, object: 'sys_user_permission_set', permissionSet: 'sales_user' });
+    });
+  }
+
+  it('CONTROL: the same target with a business unit inside the subtree, read by the caller, is admitted on every write shape', async () => {
+    for (const [shape, write] of WRITES) {
+      await expect(write(harnessWith(READABLE_INSIDE)), shape).resolves.toBeUndefined();
+    }
   });
 });

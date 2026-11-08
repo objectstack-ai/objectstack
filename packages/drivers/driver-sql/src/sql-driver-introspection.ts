@@ -90,6 +90,7 @@ import type {
   UniqueConstraintMember,
 } from './sql-driver.js';
 import { postgresTableNameCollisionError, singleColumnUniqueColumns } from './sql-driver.js';
+import { introspectOracleSchema } from './sql-driver-oracle-introspection.js';
 import {
   applyIndexKeyParts,
   isHashShadowCarrier,
@@ -114,6 +115,7 @@ export interface IntrospectionHost {
   introspectPrimaryKeys: SqlDriver['introspectPrimaryKeys'];
   introspectUniqueConstraints: SqlDriver['introspectUniqueConstraints'];
   readonly isMysql: SqlDriver['isMysql'];
+  readonly isOracle: SqlDriver['isOracle'];
   readonly isPostgres: SqlDriver['isPostgres'];
   readonly isSqlite: SqlDriver['isSqlite'];
   readonly knex: SqlDriver['knex'];
@@ -725,7 +727,10 @@ export async function introspectUniqueConstraints(
 }
 
 /** The body of `SqlDriver#introspectSchema`; the method's signature there is its contract. */
-export async function introspectSchema(this: Pick<IntrospectionHost, 'dialectName' | 'introspectColumns' | 'introspectForeignKeys' | 'introspectPrimaryKeys' | 'introspectUniqueConstraints' | 'isMysql' | 'isPostgres' | 'isSqlite' | 'knex'>): Promise<IntrospectedSchema> {
+export async function introspectSchema(this: Pick<IntrospectionHost, 'dialectName' | 'introspectColumns' | 'introspectForeignKeys' | 'introspectPrimaryKeys' | 'introspectUniqueConstraints' | 'isMysql' | 'isOracle' | 'isPostgres' | 'isSqlite' | 'knex'>): Promise<IntrospectedSchema> {
+  // Oracle reads its own catalog views, four statements for the whole schema
+  // (ADR-0015 §4.6) — see `sql-driver-oracle-introspection.ts`.
+  if (this.isOracle) return introspectOracleSchema(this.knex, this.dialectName);
   const tables: Record<string, IntrospectedTable> = {};
   // Stamped BEFORE the reads, not after: a consumer asking "has the remote
   // changed since this snapshot?" must not be told the snapshot covers a
