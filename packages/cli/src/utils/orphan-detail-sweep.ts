@@ -1,11 +1,13 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { isControlledByParentMasterField } from '@objectstack/spec/data';
+import { controlledByParentMasterOf, isControlledByParentMasterField } from '@objectstack/spec/data';
 import type { DanglingReference, DanglingReferenceReport, ObjectQL } from '@objectstack/objectql';
 
 /**
- * [#24964] The plan behind `os db orphans`: the detail rows whose REQUIRED
- * master-detail master does not exist, and what deleting each one removes.
+ * [#24964] The plan behind `os db orphans`: the detail rows whose master —
+ * a REQUIRED master-detail, or the OPTIONAL master of a controlled-by-parent
+ * object (#30976) — names a record that does not exist, and what deleting each
+ * one removes.
  *
  * ## Where the rows come from
  *
@@ -22,10 +24,20 @@ import type { DanglingReference, DanglingReferenceReport, ObjectQL } from '@obje
  *
  * - **Which rows are orphans** is the audit's `dangling` bucket — the engine's
  *   own existence probe, the one the write-path guard uses — kept to the
- *   findings on a REQUIRED `master_detail` field. "Required master-detail" is
- *   `isControlledByParentMasterField` from `@objectstack/spec/data`: a
- *   `master_detail` declared `required: true`, and nothing else. That is the
- *   one place the spec spells it.
+ *   findings on a MASTER field ({@link masterFieldsOf}), each judged where the
+ *   spec spells it, from `@objectstack/spec/data`:
+ *   - every REQUIRED `master_detail` (`isControlledByParentMasterField`: a
+ *     `master_detail` declared `required: true`, and nothing else);
+ *   - on a `controlled_by_parent` object, its OPTIONAL master
+ *     (`controlledByParentMasterOf` answering `optional: true`: the one
+ *     `master_detail`, declared `required: false`, with no required one beside
+ *     it — ADR-0055 §1 as amended by ruling A of #30905). A row that names no
+ *     master is valid there, and the audit never reports it: an empty value is
+ *     not a reference. A row that names a master that does not exist derives
+ *     its access from that master (the security runtime's master arm), so, as
+ *     for a required master, no user door reads it, and the master's own delete
+ *     would have removed it or been refused while it stood (a `master_detail`
+ *     cascades or restricts; `set_null` is refused on it at parse).
  * - **What a delete removes** is `ObjectQL.inspectCascadeDelete`: the cascade
  *   set the engine's own by-id delete collects, read through the same walk. A
  *   list of "which relations cascade" kept in this file would be free to
@@ -37,8 +49,9 @@ import type { DanglingReference, DanglingReferenceReport, ObjectQL } from '@obje
  *   registered, has no driver, or whose read failed) are counted and never
  *   listed as orphans. The audit counts them; it does not itemise them.
  * - A dangling reference on any other field (a plain `lookup`, a `master_detail`
- *   that is not required) is NAMED in `otherDangling` and never deleted: its row
- *   does not depend on that master for its existence.
+ *   that is not required and is not a controlled-by-parent object's optional
+ *   master) is NAMED in `otherDangling` and never deleted: its row does not
+ *   depend on that master for its existence.
  * - An orphan whose cascade could not be read is WITHHELD, with the reason,
  *   and never deleted. "The probe failed" is not "there are no deeper details".
  * - A bounded scan says what it did not read (`truncatedObjects`,
@@ -52,7 +65,7 @@ import type { DanglingReference, DanglingReferenceReport, ObjectQL } from '@obje
 /** The slice of the engine the plan reads. Typed off the engine itself, so it cannot drift from it. */
 export type OrphanDetailEngine = Pick<ObjectQL, 'getConfigs' | 'inspectDanglingReferences' | 'inspectCascadeDelete'>;
 
-/** One required master-detail field on an orphan row, naming a master that does not exist. */
+/** One master field on an orphan row (see {@link masterFieldsOf}), naming a master that does not exist. */
 export interface OrphanDetailField {
   field: string;
   /** The master object the field declares. */
@@ -67,7 +80,7 @@ export interface RecordRef {
   id: string;
 }
 
-/** A detail row whose required master is missing, and what deleting it removes. */
+/** A detail row whose master is missing, and what deleting it removes. */
 export interface OrphanDetailRow {
   object: string;
   recordId: string;
@@ -85,7 +98,7 @@ export interface WithheldOrphanDetailRow {
 }
 
 export interface OrphanDetailPlan {
-  /** Objects declaring a required master-detail field — the ones the audit read. */
+  /** Objects declaring a master field ({@link masterFieldsOf}) — the ones the audit read. */
   objects: string[];
   /** Objects with such a field whose table this database does not have: nothing is stored there. */
   notRead: string[];
@@ -95,7 +108,7 @@ export interface OrphanDetailPlan {
   orphans: OrphanDetailRow[];
   /** Orphans the plan will not delete, each with its reason. */
   withheld: WithheldOrphanDetailRow[];
-  /** Dangling references on the scanned objects that are not a required master-detail. Never deleted. */
+  /** Dangling references on the scanned objects that are not on a master field. Never deleted. */
   otherDangling: DanglingReference[];
   /** Reference values on the scanned objects whose target could not be probed. Not orphans. */
   undetermined: number;
@@ -121,21 +134,39 @@ export function recordKey(object: string, id: string): string {
   return JSON.stringify([object, id]);
 }
 
-/** The objects that declare at least one required master-detail field, in registration order. */
-export function objectsWithRequiredMaster(configs: Record<string, unknown>): string[] {
-  const out: string[] = [];
-  for (const [name, obj] of Object.entries(configs)) {
-    const fields = (obj as { fields?: unknown } | null | undefined)?.fields;
-    if (!fields || typeof fields !== 'object') continue;
-    if (Object.values(fields as Record<string, unknown>).some((f) => isControlledByParentMasterField(f))) out.push(name);
+/**
+ * The fields of one object whose dangling value makes its row an orphan: every
+ * REQUIRED `master_detail` (`isControlledByParentMasterField`), and, on a
+ * `controlled_by_parent` object, its OPTIONAL master
+ * (`controlledByParentMasterOf` answering `optional: true`). The optional
+ * master is the spec's judgement on the field map, not restated here; the
+ * sharing model is the caller's question (`controlledByParentMasterOf` reads any
+ * map), and only a controlled-by-parent object derives its rows' access from
+ * that field. A lone `master_detail` declared `required: false` on any other
+ * object is an ordinary reference: its dangling value is named, never deleted.
+ */
+export function masterFieldsOf(obj: unknown): string[] {
+  const def = obj as { fields?: unknown; sharingModel?: unknown } | null | undefined;
+  const fields = def?.fields;
+  if (!fields || typeof fields !== 'object' || Array.isArray(fields)) return [];
+  const out = Object.entries(fields as Record<string, unknown>)
+    .filter(([, f]) => isControlledByParentMasterField(f))
+    .map(([key]) => key);
+  if (def?.sharingModel === 'controlled_by_parent') {
+    const master = controlledByParentMasterOf(fields);
+    if (master?.optional === true) out.push(master.field);
   }
   return out;
 }
 
-/** Is `finding` on a required master-detail field of its object? */
-function isRequiredMasterFinding(configs: Record<string, unknown>, finding: DanglingReference): boolean {
-  const fields = (configs[finding.objectName] as { fields?: Record<string, unknown> } | undefined)?.fields;
-  return isControlledByParentMasterField(fields?.[finding.field]);
+/** The objects that declare at least one master field ({@link masterFieldsOf}), in registration order. */
+export function objectsWithMaster(configs: Record<string, unknown>): string[] {
+  return Object.entries(configs).filter(([, obj]) => masterFieldsOf(obj).length > 0).map(([name]) => name);
+}
+
+/** Is `finding` on a master field ({@link masterFieldsOf}) of its object? */
+function isMasterFinding(configs: Record<string, unknown>, finding: DanglingReference): boolean {
+  return masterFieldsOf(configs[finding.objectName]).includes(finding.field);
 }
 
 /**
@@ -149,7 +180,7 @@ export function orphanFindings(
   const byRow = new Map<string, Omit<OrphanDetailRow, 'cascade'>>();
   const other: DanglingReference[] = [];
   for (const finding of report.dangling) {
-    if (!isRequiredMasterFinding(configs, finding)) {
+    if (!isMasterFinding(configs, finding)) {
       other.push(finding);
       continue;
     }
@@ -172,7 +203,7 @@ export async function planOrphanDetailSweep(input: {
   absent?: (object: string) => boolean;
 }): Promise<OrphanDetailPlan> {
   const configs = input.engine.getConfigs() as Record<string, unknown>;
-  const declaring = objectsWithRequiredMaster(configs);
+  const declaring = objectsWithMaster(configs);
   const notRead = declaring.filter((name) => input.absent?.(name) === true);
   const objects = declaring.filter((name) => !notRead.includes(name));
 
@@ -234,7 +265,7 @@ export async function planOrphanDetailSweep(input: {
   if (other.length > 0) {
     notes.push(
       `${other.length} other stored reference(s) on the scanned objects name a record that does not exist, on a `
-      + 'field that is not a required master-detail. They are listed so you can see them; this command never '
+      + 'field that is not a master. They are listed so you can see them; this command never '
       + 'deletes their rows, because those rows do not depend on that record to exist.',
     );
   }

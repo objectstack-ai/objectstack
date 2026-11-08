@@ -89,6 +89,7 @@ export function useObjectViewListRenderer({
     listIdentityKey,
     listSeedRef,
     writeListUrlState,
+    listPage,
     filterScope,
     actions,
     handleRowClick,
@@ -124,6 +125,8 @@ export function useObjectViewListRenderer({
     listIdentityKey: ReturnType<typeof useObjectViewListUrlState>['listIdentityKey'];
     listSeedRef: ReturnType<typeof useObjectViewListUrlState>['listSeedRef'];
     writeListUrlState: ReturnType<typeof useObjectViewListUrlState>['writeListUrlState'];
+    /** objectstack#30850 — the page the address carries, for `ListView`'s controlled `page`. */
+    listPage: ReturnType<typeof useObjectViewListUrlState>['listPage'];
     filterScope: FilterTokenScope;
     actions: ReturnType<typeof useObjectActions>;
     handleRowClick: ReturnType<typeof useObjectViewRecordNavigation>['handleRowClick'];
@@ -978,6 +981,10 @@ export function useObjectViewListRenderer({
                 }}
                 onRowsChange={handleListRowsChange}
                 onTotalChange={handleListTotalChange}
+                // objectstack#30850 — the page lives in the address (`uf__page`,
+                // replace): the list reads it and reports every move back.
+                page={listPage}
+                onPageChange={(next: number) => writeListUrlState({ page: next })}
                 onSortChange={(sort: any) => {
                     // objectui#12418 — this user's sort, not the view's.
                     persistListSort(sort);
@@ -1042,7 +1049,7 @@ export function useObjectViewListRenderer({
                 dataSource={ds}
             />
         );
-    }, [inSetup, activeView, activeViewDeclaresColumns, activeViewIsSaved, objectDef, objectName, refreshKey, createRecord, urlFilters, initialUfSelections, handleUserFilterSelectionsChange, writeListUrlState, user?.id, pageOffersCreate, listAddRecordOpensCreate, listIdentityKey, listPrefs.ready, listPrefs.preference, listPrefs.patchView, handleListTotalChange, managedUsers, managedUserMarker, recordOpen, openAsPage, handleListRowsChange, phoneTitle, handleListPersonalizationChange, workspaceTimeZone, viewPanelFilters]);
+    }, [inSetup, activeView, activeViewDeclaresColumns, activeViewIsSaved, objectDef, objectName, refreshKey, createRecord, urlFilters, initialUfSelections, handleUserFilterSelectionsChange, writeListUrlState, listPage, user?.id, pageOffersCreate, listAddRecordOpensCreate, listIdentityKey, listPrefs.ready, listPrefs.preference, listPrefs.patchView, handleListTotalChange, managedUsers, managedUserMarker, recordOpen, openAsPage, handleListRowsChange, phoneTitle, handleListPersonalizationChange, workspaceTimeZone, viewPanelFilters]);
 
     return { renderListView };
 }

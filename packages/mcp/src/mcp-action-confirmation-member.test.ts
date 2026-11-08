@@ -35,7 +35,7 @@
  * The gate's own predicate is pinned in
  * `packages/runtime/src/action-confirmation-gate.test.ts`, and the two halves
  * are driven together, against a real engine, in
- * `examples/app-todo/test/mcp-actions.e2e.ts`.
+ * `examples/app-todo/test/mcp-actions.test.ts`.
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';

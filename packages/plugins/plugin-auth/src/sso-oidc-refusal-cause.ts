@@ -44,14 +44,44 @@
  *   nothing else: no token content, no claim value, no subject or email, and
  *   nothing that depends on whether an account exists. The refusal happens
  *   before any user lookup, so the answer is the same for every account.
- * - SAML: the vendor discards the SAML cause inside the package (a bare
- *   `catch` around `parseLoginResponse`), so it is not readable here; that half
- *   waits on the vendor.
+ * - SAML causes: the vendor discards the SAML cause inside the package (a
+ *   bare `catch` around `parseLoginResponse`), so it is not readable here; that
+ *   half waits on the vendor. Where a SAML refusal LANDS is this module's,
+ *   below.
  *
  * The values are lowercase `error_description` tokens in the vendor's own
  * dialect for that slot (`token_not_verified`, `id_token_subject_missing`), not
  * ADR-0112 `error.code` members: a redirect query is not one of that
  * vocabulary's doors.
+ *
+ * ## SAML: where a refusal lands
+ *
+ * The same scope wraps the SAML ACS (`POST /sso/saml2/sp/acs/:providerId`),
+ * for a different gap. `@better-auth/sso` (1.7.12, `processSAMLResponse`)
+ * sends nearly every SAML refusal to the flow's error URL: the sign-in's
+ * `errorCallbackURL`, else the platform error page (`onAPIError.errorURL`),
+ * as the OIDC callback does. Two do not:
+ *
+ *  - an account refusal answered by better-auth's `handleOAuthUserInfo`
+ *    (`account_not_linked`, `signup_disabled`, `unable_to_link_account`,
+ *    `unable_to_create_user`, `email_not_verified`,
+ *    `unable_to_create_session`) is redirected to the SUCCESS `callbackURL`
+ *    with only `?error=`, so the user lands on the signed-in page, not
+ *    signed in;
+ *  - a refusal thrown before the vendor reads the relay state (a response
+ *    over `maxResponseSize`) lands on the provider's fallback, the app origin
+ *    for a provider the Register SAML Provider bridge stored.
+ *
+ * The vendor computes the error URL from the relay state and offers no hook
+ * on it, so {@link readSamlAcsLanding} reads the same relay-state row through
+ * the vendor's own `internalAdapter` BEFORE the vendor consumes it, and
+ * applies the vendor's own redirect safety rule to it. When the vendor's answer
+ * is then a redirect carrying `error=` that is not the success URL, it is
+ * re-based onto that error URL with its `error` and `error_description` as
+ * the vendor wrote them, built the way the vendor builds every other SAML
+ * refusal. A refusal already on the error URL comes out byte-identical; a
+ * success, an IdP-initiated response (no relay state), and a relay state the
+ * vendor itself cannot read are left as the vendor answered them.
  */
 
 import { AsyncLocalStorage } from 'node:async_hooks';
@@ -294,4 +324,189 @@ export async function runSsoOidcCallbackScope(
   const headers = new Headers(response.headers);
   headers.set('location', withDescription(location, classified.cause));
   return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
+}
+
+// ── SAML: where a refusal lands ─────────────────────────────────────────────
+
+const SAML_ACS_PATH_PREFIX = '/sso/saml2/sp/acs/';
+
+/**
+ * The provider id of a SAML ACS request (`/sso/saml2/sp/acs/:providerId`, the
+ * endpoint path as `betterAuthEndpointPath` answers it), or `undefined` for
+ * any other path.
+ */
+export function ssoSamlAcsProviderId(endpointPath: string | undefined): string | undefined {
+  if (!endpointPath?.startsWith(SAML_ACS_PATH_PREFIX)) return undefined;
+  const providerId = endpointPath.slice(SAML_ACS_PATH_PREFIX.length);
+  if (!providerId || providerId.includes('/')) return undefined;
+  try {
+    return decodeURIComponent(providerId);
+  } catch {
+    return providerId;
+  }
+}
+
+/** One SSO callback request that runs inside the refusal scope. */
+export type SsoCallbackRequest =
+  | { protocol: 'oidc'; providerId: string }
+  | { protocol: 'saml'; providerId: string; request: Request };
+
+/**
+ * The SSO callback a request is, if any: the OIDC callback, or a `POST` to the
+ * SAML ACS (the IdP's assertion; a `GET` there carries no assertion).
+ */
+export function ssoCallbackOf(endpointPath: string | undefined, request: Request): SsoCallbackRequest | undefined {
+  const oidc = ssoOidcCallbackProviderId(endpointPath);
+  if (oidc !== undefined) return { protocol: 'oidc', providerId: oidc };
+  const saml = ssoSamlAcsProviderId(endpointPath);
+  if (saml !== undefined && request.method === 'POST') return { protocol: 'saml', providerId: saml, request };
+  return undefined;
+}
+
+/** The members of better-auth's endpoint context the SAML landing reads. */
+export interface SamlLandingContext {
+  baseURL: string;
+  options: { onAPIError?: { errorURL?: string } };
+  isTrustedOrigin: (url: string, settings?: { allowRelativePaths: boolean }) => boolean;
+  internalAdapter: { findVerificationValue: (identifier: string) => Promise<{ value: string } | null | undefined> };
+}
+
+/** Where one SAML sign-in lands: its success URL, and the error URL for every refusal. */
+export interface SamlAcsLanding {
+  success: string;
+  error: string;
+}
+
+/** The `RelayState` an ACS `POST` carries, form-encoded or JSON (the two media types the vendor admits). */
+async function relayStateOf(request: Request): Promise<string | undefined> {
+  const text = await request.clone().text();
+  const type = request.headers.get('content-type') ?? '';
+  let relayState: unknown;
+  if (type.includes('application/json')) {
+    try {
+      relayState = (JSON.parse(text) as { RelayState?: unknown } | null)?.RelayState;
+    } catch {
+      return undefined;
+    }
+  } else {
+    relayState = new URLSearchParams(text).get('RelayState');
+  }
+  return typeof relayState === 'string' && relayState ? relayState : undefined;
+}
+
+/**
+ * The vendor's redirect safety rule for a SAML redirect target
+ * (`@better-auth/sso` `getSafeRedirectCandidate`): a same-origin path that does
+ * not start `//` or `/\`, or an absolute URL on the app origin or a trusted
+ * origin; never the ACS itself.
+ */
+function safeSamlTarget(
+  url: string,
+  acsPathname: string,
+  appOrigin: string,
+  isTrustedOrigin: SamlLandingContext['isTrustedOrigin'],
+): string | undefined {
+  if (url.startsWith('/')) {
+    if (/^\/(?:\/|\\|%2f|%5c)/i.test(url)) return undefined;
+    try {
+      const absolute = new URL(url, appOrigin);
+      return absolute.origin !== appOrigin || absolute.pathname === acsPathname ? undefined : url;
+    } catch {
+      return undefined;
+    }
+  }
+  let absolute: URL;
+  try {
+    absolute = new URL(url);
+  } catch {
+    return undefined;
+  }
+  if (absolute.origin !== appOrigin && !isTrustedOrigin(url, { allowRelativePaths: false })) return undefined;
+  if (absolute.origin === appOrigin && absolute.pathname === acsPathname) return undefined;
+  return url;
+}
+
+/**
+ * Where this ACS request's refusals land, read BEFORE the vendor runs: the
+ * relay-state row the vendor wrote at `/sign-in/sso` (`auth-state:<RelayState>`,
+ * read through the vendor's own `internalAdapter`, which the vendor deletes
+ * once it has read it), with the same default and the same safety rule the
+ * vendor applies to it. `undefined` when there is no relay state, the row is
+ * gone or unreadable, or the error URL is not a safe target: the vendor then
+ * has no error URL either, and its answer stands.
+ */
+export async function readSamlAcsLanding(
+  context: SamlLandingContext,
+  providerId: string,
+  request: Request,
+): Promise<SamlAcsLanding | undefined> {
+  const relayState = await relayStateOf(request);
+  if (!relayState) return undefined;
+  const row = await context.internalAdapter.findVerificationValue(`auth-state:${relayState}`);
+  if (!row?.value) return undefined;
+  let state: { callbackURL?: unknown; errorURL?: unknown };
+  try {
+    state = JSON.parse(row.value);
+  } catch {
+    return undefined;
+  }
+  if (typeof state?.callbackURL !== 'string') return undefined;
+  const errorURL =
+    typeof state.errorURL === 'string' && state.errorURL
+      ? state.errorURL
+      : context.options.onAPIError?.errorURL || `${context.baseURL}/error`;
+  const appOrigin = new URL(context.baseURL).origin;
+  const acsPathname = new URL(`${context.baseURL}${SAML_ACS_PATH_PREFIX}${providerId}`).pathname;
+  const error = safeSamlTarget(errorURL, acsPathname, appOrigin, context.isTrustedOrigin);
+  return error ? { success: state.callbackURL, error } : undefined;
+}
+
+/**
+ * The vendor's refusal `location`, re-based onto `target` with its `error` and
+ * `error_description` kept as written, built as the vendor builds every other
+ * SAML refusal (`buildSAMLRedirectUrl`: query values set on the target, a
+ * relative target kept relative).
+ */
+function rebaseSamlRefusal(location: string, target: string): string {
+  const from = new URL(location, 'http://better-auth.local');
+  const url = new URL(target, 'http://better-auth.local');
+  for (const key of ['error', 'error_description']) {
+    const value = from.searchParams.get(key);
+    if (value !== null) url.searchParams.set(key, value);
+  }
+  return target.startsWith('/') && !target.startsWith('//') ? `${url.pathname}${url.search}${url.hash}` : url.toString();
+}
+
+/**
+ * Put one SAML ACS answer on its landing: a redirect that carries `error=` and
+ * is not the success URL is re-based onto the error URL. Every other answer is
+ * returned untouched.
+ */
+export function landSamlRefusal(response: Response, landing: SamlAcsLanding): Response {
+  const location = response.headers.get('location');
+  if (!location || location === landing.success) return response;
+  if (!new URL(location, 'http://better-auth.local').searchParams.has('error')) return response;
+  const landed = rebaseSamlRefusal(location, landing.error);
+  if (landed === location) return response;
+  const headers = new Headers(response.headers);
+  headers.set('location', landed);
+  return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
+}
+
+/**
+ * Run one SSO callback request inside the refusal scope: the OIDC callback
+ * through {@link runSsoOidcCallbackScope}, the SAML ACS with its landing read
+ * before the vendor runs and applied to its answer.
+ */
+export async function runSsoCallbackScope(
+  callback: SsoCallbackRequest,
+  host: SsoRefusalHostLogger | undefined,
+  readSamlLanding: (saml: Extract<SsoCallbackRequest, { protocol: 'saml' }>) => Promise<SamlAcsLanding | undefined>,
+  run: () => Promise<Response>,
+): Promise<Response> {
+  if (callback.protocol === 'oidc') return runSsoOidcCallbackScope(callback.providerId, host, run);
+  // A landing that cannot be read leaves the vendor's answer as it is.
+  const landing = await readSamlLanding(callback).catch(() => undefined);
+  const response = await run();
+  return landing ? landSamlRefusal(response, landing) : response;
 }

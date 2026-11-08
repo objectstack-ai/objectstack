@@ -53,7 +53,8 @@ import { ensureDefaultOrganizationExists } from './default-organization-invarian
 import { recoverInternalFieldsForSystemRead } from './internal-field-readback.js';
 import { runAttributedToUser } from './auth-actor-attribution.js';
 import { withSystemContext } from './objectql-adapter.js';
-import type { AuthEventAuditSurface } from './auth-session-audit.js';
+import { signInClientFingerprint, type AuthEventAuditSurface } from './auth-session-audit.js';
+import { ipRefusalAuditBoundFor, isSignInEndpoint, recordDeploymentListRefusal } from './ip-allow-list-refusal-audit.js';
 import { createTenancyService, type TenancyService } from './tenancy-service.js';
 import {
   isMembershipPolicy,
@@ -932,6 +933,33 @@ export class AuthPlugin implements Plugin {
     // `AuthPluginOptions.registerOrganizationRecordPage`.
     const registerOrganizationRecordPage = this.options.registerOrganizationRecordPage !== false;
 
+    const accessControlNavItems = [
+      ...(this.authManager.isSsoWired()
+        ? [
+            {
+              id: 'nav_sso_providers',
+              type: 'object',
+              label: 'SSO Providers',
+              objectName: 'sys_sso_provider',
+              icon: 'log-in',
+              requiredPermissions: ['manage_platform_settings'],
+            },
+          ]
+        : []),
+      ...(this.authManager.isScimWired()
+        ? [
+            {
+              id: 'nav_scim_credentials',
+              type: 'object',
+              label: 'SCIM Credentials',
+              objectName: 'sys_scim_connection_credential',
+              icon: 'key-round',
+              requiredPermissions: ['manage_platform_settings'],
+            },
+          ]
+        : []),
+    ];
+
     ctx.getService<{ register(m: any): void }>('manifest').register({
       // The header, `objects` and `objectExtensions`, from the ONE builder
       // `IdentityObjectsPlugin` registers on its own in a reduced kernel, so the
@@ -975,13 +1003,25 @@ export class AuthPlugin implements Plugin {
       dashboards: [SystemOverviewDashboard],
       // ADR-0021 — datasets backing the System Overview dashboard's widgets.
       datasets: SystemOverviewDatasets,
-      // ADR-0135 D6 / cloud#551 — surface "SSO Providers" (sys_sso_provider) in the
-      // Setup app's Access Control group, but ONLY when the external-IdP RP is
-      // wired (self-host `OS_SSO_ENABLED`, or the cloud per-env `planAllowsSso`
-      // arriving via `plugins.sso`). Without the gate the entry would render an
-      // empty list + a "Register" button whose endpoint 404s when SSO is off.
-      // Owning-plugin-contributes pattern (ADR-0029 K2), mirroring plugin-security.
-      ...(this.authManager.isSsoWired()
+      // Setup > Access Control entries for the identity surfaces this plugin
+      // owns (owning-plugin-contributes, ADR-0029 K2, mirroring
+      // plugin-security). Each is contributed only while its capability is
+      // wired, so no entry opens a list whose actions can only fail:
+      // - ADR-0135 D6 / cloud#551 — "SSO Providers" (sys_sso_provider), only
+      //   when the external-IdP RP is wired (self-host `OS_SSO_ENABLED`, or the
+      //   cloud per-env `planAllowsSso` arriving via `plugins.sso`). Without
+      //   the gate the entry would render an empty list + a "Register" button
+      //   whose endpoint 404s when SSO is off.
+      // - [#31123] "SCIM Credentials" (sys_scim_connection_credential, where
+      //   the Mint / Revoke Credential actions live), only when SCIM is wired:
+      //   `isScimWired()` is the same answer the `/admin/scim/mint-credential`
+      //   door reads before refusing 503, so the entry and the door cannot
+      //   disagree. Same gate as SSO Providers; the doors keep their own.
+      // Both labels are translated in `@objectstack/platform-objects`
+      // (`apps.setup.navigation`), pinned there by
+      // `setup-nav-dead-key-tombstone.test.ts`'s conditional list, because no
+      // boot of `check:app-nav-i18n` merges a gated-off entry.
+      ...(accessControlNavItems.length > 0
         ? {
             navigationContributions: [
               {
@@ -989,16 +1029,7 @@ export class AuthPlugin implements Plugin {
                 group: 'group_access_control',
                 // After Roles/Permission-Sets (100) and Sharing (200), near API Keys (300).
                 priority: 250,
-                items: [
-                  {
-                    id: 'nav_sso_providers',
-                    type: 'object',
-                    label: 'SSO Providers',
-                    objectName: 'sys_sso_provider',
-                    icon: 'log-in',
-                    requiredPermissions: ['manage_platform_settings'],
-                  },
-                ],
+                items: accessControlNavItems,
               },
             ],
           }
@@ -3414,6 +3445,42 @@ export class AuthPlugin implements Plugin {
   }
 
   /**
+   * [#30924] ADR-0069 D5 — the `login_failed` row of a sign-in the
+   * deployment's allow-list refused (`ip-allow-list-refusal-audit.ts`): a
+   * `/sign-in/*` endpoint only, counted by the per-address bound, and written
+   * detached from the refusal, so the answer, and the time it takes, do not
+   * depend on whether the identifier names an account. No `audit` service ⇒
+   * nothing is counted or read.
+   */
+  private auditAllowListRefusal(
+    ctx: PluginContext,
+    mgr: AuthManager,
+    c: any,
+    endpoint: string,
+    ip: string | undefined,
+  ): void {
+    if (!isSignInEndpoint(endpoint)) return;
+    let sink: AuthEventAuditSurface | undefined;
+    try {
+      sink = ctx.getService<AuthEventAuditSurface>('audit');
+    } catch {
+      return;
+    }
+    if (!sink || typeof sink.recordAuthEvent !== 'function') return;
+    const attempts = ipRefusalAuditBoundFor(sink).admit(ip, (line) => ctx.logger.warn(line));
+    if (attempts === undefined) return;
+    const request: Request = c.req.raw;
+    void recordDeploymentListRefusal(sink, {
+      request,
+      endpoint,
+      attempts,
+      fingerprint: signInClientFingerprint({ headers: request.headers }, ip),
+      resolveAccount: (email) => mgr.resolveRefusedSignInAccountId(email),
+      debug: (line, meta) => ctx.logger.debug(line, meta),
+    });
+  }
+
+  /**
    * Register authentication routes with HTTP server
    *
    * Uses better-auth's universal handler for all authentication requests.
@@ -3499,6 +3566,7 @@ export class AuthPlugin implements Plugin {
       const ip = mgr.resolveClientAddress({ headers, ...transportOf(c) });
       if (!mgr.isClientIpAllowed(ip)) {
         this.explainAllowListRefusal(ctx, mgr, ip, headers);
+        this.auditAllowListRefusal(ctx, mgr, c, path.startsWith(basePath) ? path.slice(basePath.length) : path, ip);
         return c.json(
           { success: false, error: { code: 'IP_NOT_ALLOWED', message: 'Sign-in is not allowed from your network.' } },
           403,

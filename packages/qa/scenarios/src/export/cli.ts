@@ -23,7 +23,9 @@
  *
  * It writes only under `--out`; it pushes nothing anywhere. ⛔ It exports only
  * a card whose `origin` is `generic` and whose `tier` is `starter` or
- * `delivery` (`generic.ts`) — and offers no flag to do otherwise.
+ * `delivery` (`generic.ts`), and only a run on published packages — never a
+ * `run-scenarios --packages workspace` record (`record.ts`) — and offers no
+ * flag to do otherwise.
  */
 
 import { existsSync, readFileSync } from 'node:fs';

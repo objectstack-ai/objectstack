@@ -26,6 +26,7 @@ import { canonicalizeMetaRequestType } from './protocol-meta-type-schema.js';
 import { simpleHash } from './protocol-version-tokens.js';
 import { metadataItemNotFoundError } from './protocol-client-failures.js';
 import type { ProtocolHost } from './protocol-host.js';
+import { servedRowChangedAtOf } from './served-row-changed-at.js';
 
 export class ProtocolSearchAndCacheFacet {
     /** The body of `ObjectStackProtocolImplementation#getMetaItemCached`; the method's docblock there is its contract. */
@@ -55,6 +56,15 @@ export class ProtocolSearchAndCacheFacet {
             // [#28001] …and the objects a delete of one of its records can
             // cascade into, on the same terms.
             const cascadeDeleteObjects = (result as { cascadeDeleteObjects?: string[] } | undefined)?.cascadeDeleteObjects;
+            // [#31196] When the stored row this item is served from last
+            // changed: a save or a publish moves it, a read never does. An
+            // item no stored row serves (a code-shipped or file-loaded
+            // definition) has no known change time, so it answers none and
+            // the REST door sends no `Last-Modified`. ⛔ Never the time of
+            // the read: two reads of one unchanged item answered two values
+            // under one ETag. Freshness is the ETag's alone (`no-cache`
+            // below); nothing here answers a 304 from this time.
+            const lastModified = servedRowChangedAtOf(result);
 
             if (!item) {
                 // [#5532] Structured: 404 + the catalog's `RESOURCE_NOT_FOUND`.
@@ -144,7 +154,7 @@ export class ProtocolSearchAndCacheFacet {
                 ...(disabledActions !== undefined ? { disabledActions } : {}),
                 ...(cascadeDeleteObjects !== undefined ? { cascadeDeleteObjects } : {}),
                 etag,
-                lastModified: new Date().toISOString(),
+                ...(lastModified !== undefined ? { lastModified } : {}),
                 cacheControl: {
                     // Metadata is invalidated by publish, so freshness must be
                     // gated by the ETag validator — not a TTL. `no-cache` lets

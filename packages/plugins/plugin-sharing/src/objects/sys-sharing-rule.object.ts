@@ -71,7 +71,7 @@ export const SysSharingRule = ObjectSchema.create({
       columns: ['object_name', 'label', 'recipient_type', 'access_level', 'active'],
       // [#24701] Ordered by the target object, not grouped on it: a group header
       // draws `object_name` as its stored API name, while the Object cell draws
-      // the object's icon and label (its `object-ref` widget). No column stores
+      // the object's icon and label (its object-picker widget). No column stores
       // the label, so no grouping key could carry it. The sort keeps one
       // object's rules together (`sys-sharing-rule.by-object.test.ts`).
       sort: [{ field: 'object_name', order: 'asc' }, { field: 'label', order: 'asc' }],
@@ -132,10 +132,12 @@ export const SysSharingRule = ObjectSchema.create({
       label: 'Object',
       required: true,
       maxLength: 100,
-      // Rendered as an object picker (choose a registered object by name)
-      // instead of a free-text machine-name input. Falls back to a text input
-      // when the `field:object-ref` widget is unavailable.
-      widget: 'object-ref',
+      // Rendered as the sharing-rule object picker: only the objects a rule
+      // can take effect on (`GET /api/v1/sharing/shareable-objects`, the save
+      // doors' own verdict), business objects first. It is the `object-ref`
+      // picker when that door does not answer the list, and a text input when
+      // the `field:shareable-object-ref` widget is unavailable.
+      widget: 'shareable-object-ref',
       description: 'The object whose records this rule shares.',
       group: 'Target',
     }),

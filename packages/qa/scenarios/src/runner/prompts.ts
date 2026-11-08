@@ -117,26 +117,14 @@ export function personaHandles(card: Card): Map<string, string> {
 }
 
 /**
- * The scope fields whose seed values are user handles, `object.field`: a
- * field a persona's direct (non-path) `scope` rule names that the card does
- * not declare as a lookup or a select, and that is not `id`. In the crm card
- * that is `account.owner` (`u_sam`, `u_tia`). Every other direct scope field
- * holds a row id or an option value (`asset.custodian` = `e06`, an employee
- * row; `ticket_comment.visibility` = `public`), which the seed loads verbatim.
+ * The seed fields whose values are user handles, `object.field`: the card's
+ * declared `run.userHandleFields`, read and never inferred. In the crm card
+ * that is `account.owner` (`u_sam`, `u_tia`). Every other field holds a row id
+ * or an option value (`asset.custodian` = `e06`, an employee row;
+ * `ticket_comment.visibility` = `public`), which the seed loads verbatim.
  */
 export function userHandleFields(card: Card): Set<string> {
-  const declared = new Set([
-    ...(card.expect.lookups ?? []).map((l) => `${l.object}.${l.field}`),
-    ...(card.expect.selectFields ?? []).map((s) => `${s.object}.${s.field}`),
-  ]);
-  const out = new Set<string>();
-  for (const p of card.run.personas) {
-    for (const sc of p.scope ?? []) {
-      const key = `${sc.object}.${sc.field}`;
-      if (!sc.field.includes('.') && sc.field !== 'id' && !declared.has(key)) out.add(key);
-    }
-  }
-  return out;
+  return new Set((card.run.userHandleFields ?? []).map((h) => `${h.object}.${h.field}`));
 }
 
 /** The handles a seed row names in a {@link userHandleFields} field that no persona signs in as (`u_tia`): the seed loads each as the admin user. */
@@ -310,11 +298,20 @@ export function templateIteratePrompt(card: Card, server: TemplateServer): strin
   ].join('\n');
 }
 
+/**
+ * The card's "today", said to the agent. A question or operation that says
+ * "today", "this month" or "overdue" is judged against the card's `asOf`, so
+ * every run-phase prompt states it; a write the platform's clock stamps is
+ * judged against the run date instead (the operation grader's `asOf` rule).
+ */
+function todayOf(card: Card): string {
+  return card.asOf ? ` Today is ${card.asOf}.` : '';
+}
+
 export function questionPrompt(scenario: LoadedScenario, questionId: string): string {
   const q = scenario.card.run.questions.find((x) => x.id === questionId)!;
-  const today = scenario.card.asOf ? ` Today is ${scenario.card.asOf}.` : '';
   return (
-    `${text(q.ask)}${today}\n\nAnswer from the app’s data using the \`app\` tools. State the figures, and end with a line ` +
+    `${text(q.ask)}${todayOf(scenario.card)}\n\nAnswer from the app’s data using the \`app\` tools. State the figures, and end with a line ` +
     '`Source: <object>` naming the object the figures come from.'
   );
 }
@@ -322,7 +319,7 @@ export function questionPrompt(scenario: LoadedScenario, questionId: string): st
 export function operationPrompt(card: Card, operationId: string): string {
   const op = card.run.operations.find((o) => o.id === operationId)!;
   const persona = card.run.personas.find((p) => p.id === op.actingAs);
-  return `${text(op.ask)}\n\nYou act for ${persona?.role ?? op.actingAs}, through the \`app\` tools.`;
+  return `${text(op.ask)}${todayOf(card)}\n\nYou act for ${persona?.role ?? op.actingAs}, through the \`app\` tools.`;
 }
 
 /** `os verify`'s opt-in proofs, chosen from the card's capability tags. */

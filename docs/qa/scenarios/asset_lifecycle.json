@@ -767,6 +767,7 @@
       {
         "id": "employee",
         "role": "Employee (asset holder), Sales - e06",
+        "record": {"object": "employee", "id": "e06"},
         "hidden": {
           "objects": ["depreciation_entry"],
           "fields": [
@@ -787,6 +788,7 @@
       {
         "id": "dept_manager",
         "role": "Department manager, Sales - e05",
+        "record": {"object": "employee", "id": "e05"},
         "hidden": {"fields": [{"object": "employee", "field": "home_address"}]},
         "scope": [
           {"object": "department", "field": "id", "value": "dep_sales"},
