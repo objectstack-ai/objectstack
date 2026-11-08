@@ -6,13 +6,14 @@
  *
  * The preview is the reviewer's read of a permission set, so it carried two
  * columns and one sanity check ("Purge (hard delete) granted without Delete")
- * for keys whose `restore` / `purge` ObjectQL operations have never existed —
- * a dispatched restore/purge is denied unconditionally by the evaluator's
+ * for keys whose `restore` / `purge` ObjectQL operations did not exist then —
+ * a dispatched restore/purge was denied unconditionally by the evaluator's
  * fail-closed destructive-operation backstop. `@objectstack/spec` retired both
  * as `retiredKey()` tombstones (objectstack#12497; maintainer ruling
  * 2026-08-26 accepting objectstack#1883 recommendation B, ADR-0049
- * enforce-or-remove); they return with the M2 lifecycle initiative, whose
- * restart is recorded on objectstack#1883.
+ * enforce-or-remove); they do not return — the operations now exist with the
+ * recycle bin (ADR-0148), granted by the new keys `allowRestoreOwnDeleted` /
+ * `manageRecycleBin`.
  *
  * The lint is the half worth stating: a warning over a key that can no longer
  * be granted cannot fire for a real reason, but it CAN fire for a stored
