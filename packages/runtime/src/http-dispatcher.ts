@@ -1673,6 +1673,7 @@ export class HttpDispatcher {
         // and single-tenant setups run without auth.
         let userId: string | undefined;
         let activeOrganizationId: string | undefined;
+        let sessionUnread = false;
         try {
             // [#4127 batch 4] This read was `authService?.api?.getSession?.(…)`
             // with NO `getApi()` fallback — the only one of the three `.api`
@@ -1698,6 +1699,23 @@ export class HttpDispatcher {
             userId = sessionData?.user?.id ?? sessionData?.session?.userId;
             activeOrganizationId = sessionData?.session?.activeOrganizationId;
         } catch {
+            sessionUnread = true;
+        }
+
+        // The gate judges the principal this request RESOLVED
+        // (`resolveRequestScope`), whichever credential admitted it. A
+        // principal an API key or an OAuth access token admitted (with or
+        // without a cookie beside it) is the one judged, in the organization
+        // its resolution vetted. A session principal is judged by the session
+        // read above, as before.
+        const resolved = context.executionContext;
+        const bearerAdmitted = context.admission?.credential === 'api_key'
+            || resolved?.principalKind === 'agent'
+            || resolved?.oauthScopes !== undefined;
+        if (bearerAdmitted && resolved?.userId) {
+            userId = resolved.userId;
+            activeOrganizationId = resolved.tenantId;
+        } else if (sessionUnread) {
             // Auth resolution failed — do not block the request on RBAC.
             return null;
         }
