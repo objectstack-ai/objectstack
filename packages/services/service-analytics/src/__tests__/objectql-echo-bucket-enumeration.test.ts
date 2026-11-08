@@ -284,17 +284,15 @@ const DRIVER_ROWS = {
   ],
   // [#31327] SQL Server is federation-only and advertises no native date
   // granularity, so every bucket is the engine's in-memory one over `find`. The
-  // real driver-sql face on the `mssql` client, never connected: `find` is
-  // answered by code path (no server in this suite), every other member is the
-  // driver's own — including the `supports` that sends the engine in-memory.
+  // real driver-sql face on the `mssql` client, never connected (no server in
+  // this suite): its doors are spied like every unseeded face's, every other
+  // member is the driver's own — including the `supports` that sends the
+  // engine in-memory.
   mssql: [
     {
-      face: 'driver-sql, mssql, never connected, find by code path',
-      build: () => {
-        const driver = new SqlDriver({ client: 'mssql', connection: { server: '127.0.0.1', database: 'unconnected' }, pool: { min: 0 } } as any) as unknown as EnumeratedDriver;
-        Object.defineProperty(driver, 'find', { value: async () => [] });
-        return driver;
-      },
+      face: 'driver-sql, mssql, never connected',
+      build: () =>
+        new SqlDriver({ client: 'mssql', connection: { server: '127.0.0.1', database: 'unconnected' }, pool: { min: 0 } } as any) as unknown as EnumeratedDriver,
       release: releaseKnex,
     },
   ],

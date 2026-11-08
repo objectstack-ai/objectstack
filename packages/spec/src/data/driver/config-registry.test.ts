@@ -1,6 +1,6 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, expectTypeOf } from 'vitest';
 import { z } from 'zod';
 
 import { DatasourceSchema, DriverType } from '../datasource.zod';
@@ -20,6 +20,8 @@ import {
   resolveDriverId,
   RETIRED_DRIVER_ID_GUIDANCE,
   validateDriverConfig,
+  type DatabaseDriverSelectionId,
+  type FederationOnlyDriverId,
 } from './config-registry.zod';
 
 describe('driver config registry', () => {
@@ -531,6 +533,13 @@ describe('SQL driver `autoMigrate` carries a form title', () => {
  * contract (kept, so an external datasource's `config` is judged).
  */
 describe('the `mssql` row: a federation-only driver', () => {
+  it('derives the federation-only id TYPE from the row, and keeps it off the selection type', () => {
+    expectTypeOf<FederationOnlyDriverId>().toEqualTypeOf<'mssql'>();
+    expectTypeOf<(typeof DATABASE_DRIVER_SELECTION_IDS)[number]>().toEqualTypeOf<DatabaseDriverSelectionId>();
+    expectTypeOf<'mssql'>().not.toMatchTypeOf<DatabaseDriverSelectionId>();
+    expect([...DATABASE_DRIVER_SELECTION_IDS]).not.toContain('mssql');
+  });
+
   const external = { allowWrites: false };
   const target = { host: 'erp.internal', database: 'ERP', username: 'ro_reader' };
 

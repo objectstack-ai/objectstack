@@ -416,10 +416,10 @@ export function resolveDriverId(driver: unknown): BuiltinDriverId | undefined {
 }
 
 /** Selection-face lookup, built once so {@link resolveDatabaseDriverId} is a hash hit. */
-const DATABASE_DRIVER_ALIASES: Readonly<Record<string, BuiltinDriverId>> = Object.freeze(
+const DATABASE_DRIVER_ALIASES: Readonly<Record<string, DatabaseDriverSelectionId>> = Object.freeze(
   Object.fromEntries(
     VOCABULARY_ROWS.flatMap((entry) => entry.aliases.map((alias) => [alias, entry.id] as const)),
-  ) as Record<string, BuiltinDriverId>,
+  ) as Record<string, DatabaseDriverSelectionId>,
 );
 
 /**
@@ -432,9 +432,11 @@ const DATABASE_DRIVER_ALIASES: Readonly<Record<string, BuiltinDriverId>> = Objec
  * because neither host accepted `OS_DATABASE_DRIVER=sqlite3` before commit e2798fab7 and
  * converging the two hosts is not a licence to widen the flag for both.
  */
-export function resolveDatabaseDriverId(driver: unknown): BuiltinDriverId | undefined {
+export function resolveDatabaseDriverId(driver: unknown): DatabaseDriverSelectionId | undefined {
   if (typeof driver !== 'string') return undefined;
-  return lookupDriverId(DATABASE_DRIVER_ALIASES, driver);
+  // A federation-only row carries no selection alias (#31327), so this face
+  // never answers one; the return type says the same.
+  return lookupDriverId(DATABASE_DRIVER_ALIASES, driver) as DatabaseDriverSelectionId | undefined;
 }
 
 /**
@@ -496,11 +498,27 @@ export function resolveDatabaseDriverId(driver: unknown): BuiltinDriverId | unde
  * {@link DriverVocabularyEntry.contractOnlyAliases}, so no selection alias
  * resolves to it and this projection drops it on its own.
  */
-export const DATABASE_DRIVER_SELECTION_IDS: readonly BuiltinDriverId[] = Object.freeze(
+export const DATABASE_DRIVER_SELECTION_IDS: readonly DatabaseDriverSelectionId[] = Object.freeze(
   DATABASE_DRIVER_SELECTION_ALIASES.filter(
-    (alias): alias is BuiltinDriverId => resolveDatabaseDriverId(alias) === alias,
+    (alias): alias is DatabaseDriverSelectionId => resolveDatabaseDriverId(alias) === alias,
   ),
 );
+
+/**
+ * The canonical ids whose row declares {@link DriverVocabularyEntry.federationOnly}
+ * — derived from the table's literal rows, so a row gaining the column is the
+ * whole change. #31327.
+ */
+export type FederationOnlyDriverId = Extract<(typeof DRIVER_VOCABULARY)[number], { federationOnly: true }>['id'];
+
+/**
+ * The type of a {@link DATABASE_DRIVER_SELECTION_IDS} member: every builtin a
+ * federation-only row does not withhold. A federation-only row carries no
+ * selection alias, so the projection already drops it at run time; this keeps
+ * the TYPE as narrow as the value, so a boot host's exhaustive dispatch over the
+ * selection face is not asked for an arm no selection can reach (#31327).
+ */
+export type DatabaseDriverSelectionId = Exclude<BuiltinDriverId, FederationOnlyDriverId>;
 
 /** Canonical id → whether it can be selected with no database URL at all. */
 const DRIVER_LOCAL_DEFAULT: Readonly<Record<BuiltinDriverId, boolean>> = Object.freeze(

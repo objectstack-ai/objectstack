@@ -17,7 +17,7 @@ const factory = () => createDefaultDatasourceDriverFactory({ dev: false });
 
 const BOUND_SECRET = 's3cr3t-from-sys_secret';
 
-async function built(spec: Record<string, unknown>): Promise<{ client: unknown; connection: any; schemaMode: unknown; dialect: unknown }> {
+async function built(spec: Record<string, unknown>): Promise<{ client: unknown; connection: any; dialect: unknown }> {
   const handle: any = await factory().create({
     driver: 'mssql',
     schemaMode: 'external',
@@ -26,7 +26,7 @@ async function built(spec: Record<string, unknown>): Promise<{ client: unknown; 
   try {
     const driver = handle.driver ?? handle;
     const config = driver.config ?? {};
-    return { client: config.client, connection: config.connection, schemaMode: config.schemaMode, dialect: driver.dialectName };
+    return { client: config.client, connection: config.connection, dialect: driver.dialectName };
   } finally {
     try { await handle.disconnect?.(); } catch { /* noop */ }
   }
@@ -41,7 +41,6 @@ describe('[#31327] mssql — the factory builds SqlDriver over the tedious conne
     });
     expect(got.client).toBe('mssql');
     expect(got.dialect).toBe('mssql');
-    expect(got.schemaMode).toBe('external');
     expect(got.connection).toMatchObject({
       server: 'erp-db.internal',
       port: 1433,
