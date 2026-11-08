@@ -2576,7 +2576,7 @@ export class ObjectQL implements IObjectQLEngine {
     patch: Record<string, unknown>,
     context: ExecutionContext | undefined,
     recordId: unknown,
-    serving: HomeAmountServing = this.homeAmountServing(context),
+    serving?: HomeAmountServing,
   ): Promise<void> {
     // [#29986 codemod] The body moved to `engine-references-and-master-detail.ts`, its docblock with it (see `ReferencesAndMasterDetailHost`).
     return ReferencesAndMasterDetailFacet.projectHomeAmountsOntoPatch.call(referencesAndMasterDetailHost.of(this), object, plan, prior, patch, context, recordId, serving);
