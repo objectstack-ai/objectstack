@@ -3814,6 +3814,8 @@ export class ObjectStackProtocolImplementation implements
         const host: ThisParameterType<typeof findServedOverlayRow> = {
             get engine() { return readEngine(); },
             findEnvironmentRow: (...a) => this.findEnvironmentRow(...a),
+            findEnvironmentRows: (...a) => this.findEnvironmentRows(...a),
+            shippedArtifactsOf: (...a) => this.shippedArtifactsOf(...a),
         };
         return findServedOverlayRow.call(host, args, activeRows);
     }
