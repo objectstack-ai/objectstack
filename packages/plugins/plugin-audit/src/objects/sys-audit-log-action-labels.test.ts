@@ -31,6 +31,8 @@ describe('sys_audit_log.action option labels', () => {
       'platform_admin_standing_change',
       // #27908: a new value, added writer-first; no existing value moved.
       'action_invocation',
+      // #31186: a new value, added writer-first; no existing value moved.
+      'package_uninstall',
     ]);
   });
 

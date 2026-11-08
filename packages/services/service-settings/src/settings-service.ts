@@ -767,6 +767,51 @@ function firstFormatMiss(type: string, value: unknown): FormatMiss | null {
   };
 }
 
+/** A `json` value that is not a JSON object or array — see {@link jsonShapeMiss}. */
+interface JsonShapeMiss {
+  /** The value's shape — its kind and, for a string, its length — never its content. */
+  shape: string;
+}
+
+/**
+ * The shape verdict for a value of a `json` specifier (#31241): a
+ * {@link JsonShapeMiss} when the value is neither a plain JSON object nor an
+ * array, else `null`.
+ *
+ * ADR-0007's specifier table declares `json` | code editor | **object**: the
+ * value a `json` key persists is the structure itself. Its readers index it as
+ * one — `LifecycleService.loadGovernance` reads `lifecycle.quotas` as
+ * `Record<object, number>` — so a JSON *text* stored in its place is not a
+ * spelling of the same value. It is a different value, and every reader of the
+ * key reads it as "nothing configured", silently. The console's `json` field
+ * used to send exactly that: the textarea's text, a string.
+ *
+ * ONE judgment for both doors, as {@link firstFormatMiss} is: the save door
+ * ({@link SettingsService.validatePatch}) refuses a miss with one
+ * `invalid_type` `FieldError` for the key and stores nothing; the env door
+ * ({@link SettingsService.effectiveEnvOverride}) rejects an `OS_*` override
+ * whose text does not parse to an object or array, so it is not in force and
+ * the key resolves from the next layer of the cascade.
+ *
+ * `null` / `undefined` pass: that is a clear, which falls back to the default.
+ * Every other kind misses, a blank string included — a `json` key has no
+ * "empty text" value to store.
+ */
+function jsonShapeMiss(type: string, value: unknown): JsonShapeMiss | null {
+  if (type !== 'json') return null;
+  if (value === null || typeof value === 'undefined') return null;
+  if (Array.isArray(value)) return null;
+  if (typeof value === 'object') {
+    const proto = Object.getPrototypeOf(value);
+    if (proto === Object.prototype || proto === null) return null;
+    return { shape: 'a non-plain object' };
+  }
+  if (typeof value === 'string') {
+    return { shape: `a string of ${value.length} character${value.length === 1 ? '' : 's'}` };
+  }
+  return { shape: `a ${typeof value}` };
+}
+
 /** The declared `type` of one specifier key, or `''` when the manifest declares no such key. */
 function declaredTypeOf(manifest: SettingsManifest, key: string): string {
   const spec = (manifest.specifiers ?? []).find((s) => s.key === key);
@@ -1498,6 +1543,23 @@ export class SettingsService {
         detail: `Allowed values: ${formatMiss.expected}.`,
         fix: formatMiss.expected,
         shape: formatMiss.shape,
+      });
+      return null;
+    }
+
+    // A `json` key persists a JSON object or array (ADR-0007; #31241). The
+    // override's text was parsed against the key's object default
+    // (`coerceEnvValue`); text that did not parse, or parsed to a scalar, is
+    // not that value, and every reader would index it as nothing configured.
+    // Same helper as the save path ({@link jsonShapeMiss}); the line carries the
+    // value's shape, never its content.
+    const shapeMiss = jsonShapeMiss(declaredTypeOf(reg.manifest, key), value);
+    if (shapeMiss) {
+      this.reportRejectedEnvOverride(reg, namespace, key, envName, value, {
+        what: "is not a JSON object or array, which its type 'json' declares for",
+        detail: 'Allowed values: JSON text that parses to an object or an array.',
+        fix: 'JSON text of an object or an array',
+        shape: shapeMiss.shape,
       });
       return null;
     }
@@ -3428,6 +3490,24 @@ export class SettingsService {
           });
           continue;
         }
+      }
+
+      // A `json` key persists a JSON object or array (ADR-0007; #31241), so a
+      // string — the JSON *text* the console's field used to send — or any
+      // other scalar is refused here rather than stored for every reader to
+      // index as nothing. Not gated on `empty`: a blank string is still a
+      // string where a structure is declared; only `null` (a clear) passes,
+      // inside the helper. The message names what to send and never the value.
+      const shapeMiss = jsonShapeMiss(type, value);
+      if (shapeMiss) {
+        errors.push({
+          field: key,
+          code: 'invalid_type',
+          message: `${label} must be a JSON object or array, not ${shapeMiss.shape}. Send the parsed value, not its JSON text.`,
+          label,
+          constraint: { type: 'json' },
+        });
+        continue;
       }
     }
 

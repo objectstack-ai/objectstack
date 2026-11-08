@@ -1864,10 +1864,6 @@ const fr = {
     },
   },
   console: {
-    organizationMfa: {
-      needsTwoFactor: "Exiger l'authentification multifacteur nécessite l'authentification à deux facteurs, désactivée sur ce déploiement : un enregistrement avec la case cochée est donc refusé. Activez d'abord les deux facteurs : activez « Exiger l'authentification multifacteur » dans Configuration → Authentification (cela s'applique à toutes les organisations), ou définissez OS_AUTH_TWO_FACTOR=true sur le déploiement.",
-      nowRequired: "Tous les membres de cette organisation qui n'ont pas configuré d'application d'authentification doivent maintenant le faire. Chacun perd l'accès aux données à la fin du délai de grâce MFA (7 jours sauf modification dans Configuration → Authentification), compté à partir de sa première utilisation après ce changement. Les membres qui utilisent déjà une application d'authentification ne sont pas concernés.",
-    },
     studio: {
       title: "Studio",
       accessRequired: "Vous avez besoin de l'accès à Studio pour ouvrir Studio. Un administrateur peut vous l'accorder avec un ensemble d'autorisations dans Configuration → Attribution des ensembles d’autorisations.",
@@ -2274,6 +2270,7 @@ const fr = {
       unsupportedSpecifierType: "Type de paramètre non pris en charge : {{type}}",
       invalidPhone: "Saisissez un numéro de téléphone composé uniquement de chiffres, d’espaces et de + ( ) - .",
       invalidColor: "Saisissez une couleur hexadécimale, par exemple #1a2b3c",
+      jsonStoredAsText: "Cette valeur est enregistrée sous forme de texte, et non comme objet JSON. Enregistrez pour la stocker comme objet ; la page l'a marquée comme modification non enregistrée.",
       clientAddressDirect: "Votre adresse, telle que le serveur la juge : {{address}}. Une liste qui ne la contient pas ne peut pas être enregistrée d’ici. Ce serveur ne fait pas confiance aux en-têtes de proxy : derrière un proxy, c’est donc l’adresse du proxy.",
       clientAddressViaProxy: "Votre adresse, telle que le serveur la juge : {{address}}, lue dans les en-têtes transférés par le proxy auquel ce serveur fait confiance. Une liste qui ne la contient pas ne peut pas être enregistrée d’ici.",
       clientAddressUnknown: "Le serveur ne peut pas établir votre adresse : une liste non vide ne peut donc pas être enregistrée d’ici.",

@@ -5,7 +5,7 @@
 **Builds on**: [ADR-0003](./0003-package-as-first-class-citizen.md) (package as first-class citizen), [ADR-0005](./0005-metadata-customization-overlay.md) (artifact vs runtime overlay precedence), [ADR-0008](./0008-metadata-repository-and-change-log.md) (metadata repository, `MetaRef` identity), [ADR-0010](./0010-metadata-protection-model.md) (package provenance / `_packageId` stamping)
 **Consumers**: `@objectstack/objectql` (`SchemaRegistry.registerItem`, `ObjectQL.registerApp`, install path), `@objectstack/console` / `objectui` (routing + metadata resolution), package authors, CLI/CI install path, the app marketplace registry.
 **Surfaced by**: ADR-0046 review (doc naming) → generalised to all bare-named metadata → re-examined through the app-marketplace install lens.
-**Addenda**: [2026-08-08 — publish-time / marketplace namespace exclusivity](#addendum-2026-08-08-publish-time--marketplace-namespace-exclusivity) (**Accepted** 2026-08-08 — maintainer ruling on #1825, [acceptance comment 5226411687](https://github.com/objectstack-ai/objectstack/issues/1825#issuecomment-5226411687), landed by PR #6671; additive to §3.2, supersedes nothing); [2026-11-06 — bare names resolved without a package hold one package](#addendum-2026-11-06-bare-names-resolved-without-a-package-hold-one-package--34-narrowed) (**Accepted**, ruling C on #30798, phase 1; narrows §3.4 for picklists, mappings, datasets, APIs, object-less actions and engine functions, supersedes nothing).
+**Addenda**: [2026-08-08 — publish-time / marketplace namespace exclusivity](#addendum-2026-08-08-publish-time--marketplace-namespace-exclusivity) (**Accepted** 2026-08-08 — maintainer ruling on #1825, [acceptance comment 5226411687](https://github.com/objectstack-ai/objectstack/issues/1825#issuecomment-5226411687), landed by PR #6671; additive to §3.2, supersedes nothing); [2026-11-06 — bare names resolved without a package hold one package](#addendum-2026-11-06-bare-names-resolved-without-a-package-hold-one-package--34-narrowed) (**Accepted**, ruling C on #30798, phase 1; narrows §3.4 for picklists, mappings, datasets, APIs, object-less actions, engine functions, flows, webhooks, connectors and email templates, supersedes nothing).
 
 ---
 
@@ -267,22 +267,28 @@ package — stays covered by the `naming/namespace-prefix` lint in `os lint`.
 > [Addendum (2026-10-08)](#addendum-2026-10-08-the-security-catalog-holds-one-name-per-deployment--34-narrowed).
 
 > **Narrowed (2026-11-06) — picklists, mappings, datasets, APIs, object-less
-> actions and engine functions are out of §3.4.** Their consumers resolve the
-> name with no package — a field's `picklist`, an import's `mappingName`, a
-> dashboard's `datasetName`, the endpoint matcher's one API per name,
-> `/actions/global/NAME`, a flow `script` node's function — so with two holders
-> every caller is served one of them, chosen by registration order, measured on a
-> booted two-package deployment (#30803). Once the cold boot has sealed the
-> registry, a package whose picklist, mapping, dataset, API or object-less action
-> bears a name another installed package holds is refused at managed install and
-> at package registration (a built-in's name, at managed install), and a package
-> whose handlers bring a function another package holds is refused at the hook
-> binder's bind, each naming both holders and the rename. ⛔ The environment
-> catalog is never a holder: an environment item under a package's name is the
-> ADR-0005 overlay. The other types the measurement found resolving without a
-> package context — `email_template`, `webhook`, `connector`, `flow`, `agent` and
-> `skill` — are to follow, each family in its own change. Every other type,
-> an action bound to an object among them, keeps §3.4 as written. See
+> actions, engine functions, flows, webhooks, connectors and email templates are
+> out of §3.4.** Their consumers resolve the name with no package — a field's
+> `picklist`, an import's `mappingName`, a dashboard's `datasetName`, the
+> endpoint matcher's one API per name, `/actions/global/NAME`, a flow `script`
+> node's function, the automation engine's one armed flow per name, the
+> dispatcher's one declared webhook per name, the connector picker's one
+> connector per name, a send's `template` — so with two holders every caller is
+> served one of them, chosen by registration order, measured on a booted
+> two-package deployment (#30803). Once the cold boot has sealed the registry, a
+> package whose picklist, mapping, dataset, API, object-less action, flow,
+> webhook, connector or email template bears a name another installed package
+> holds is refused at managed install and at package registration (a built-in's
+> name, at managed install), and a package whose handlers bring a function
+> another package holds is refused at the hook binder's bind, each naming both
+> holders and the rename. ⛔ The environment catalog is never a holder: an
+> environment item under a package's name is the ADR-0005 overlay. ⛔ Nor is the
+> email service's built-in template bundle: an app's same-named template
+> overrides it by contract (ADR-0131 D6), so that package holds no template name
+> and is refused none. The remaining types the measurement found resolving
+> without a package context — `agent` and `skill` — are to follow in the series'
+> last change. Every other type, an action bound to an object among them, keeps
+> §3.4 as written. See
 > [Addendum (2026-11-06)](#addendum-2026-11-06-bare-names-resolved-without-a-package-hold-one-package--34-narrowed).
 
 ### 3.5 Namespace rename-on-install is deferred (non-goal)
@@ -950,8 +956,8 @@ first phase.
 
 > **Status of this addendum: Accepted** — it records phase 1 of a maintainer
 > ruling. It **narrows §3.4 for more metadata types, one family per change (P1.2,
-> P1.7), and supersedes no other text**: §§1–6, the 2026-08-08 addendum and the
-> 2026-10-08 addendum stand verbatim.
+> P1.7, P1.8), and supersedes no other text**: §§1–6, the 2026-08-08 addendum and
+> the 2026-10-08 addendum stand verbatim.
 >
 > **Ruling this addendum records** — #30798, answered by the maintainer
 > 「同意 c」 (ruling record 6676670839, 2026-11-06). The ruled option's text,
@@ -1059,18 +1065,17 @@ the doors never refuse.
 
 ### P1.5 To follow
 
-The same measurement found these types resolving without a package context too:
-`email_template`, `webhook` (the second package's webhook is never subscribed),
-`connector`, `flow`, `agent` and `skill`. Each family joins P1.2's list in its own
-change under #30803 — `flow`, `webhook`, `connector` and `email_template`; then
-`agent` and `skill` — with its own pins, narrowing §3.4 the same way (the
-maintainer kept all of them in #30803 on 2026-11-06). `tool` and `rag_pipeline`
-share a reader with `agent` and were not measured. The request family that was
-listed here is P1.7.
+The same measurement found `agent` and `skill` resolving without a package
+context too. They join P1.2's list in the series' last change under #30803, with
+their own pins, narrowing §3.4 the same way (the maintainer kept all of them in
+#30803 on 2026-11-06). `tool` and `rag_pipeline` share a reader with `agent` and
+were not measured. The request family that was listed here is P1.7; the flow
+family — `flow`, `webhook`, `connector` and `email_template` — is P1.8.
 
 ### P1.6 Where it is implemented
 
-`@objectstack/objectql`: the rule, the holders and the switch in
+`@objectstack/objectql`: the rule, the holders, the overridable baseline
+(`OVERRIDABLE_BASELINE_PACKAGES`, P1.8) and the switch in
 `bare-name-one-holder.ts`; the package door in `SchemaRegistry.installPackage` and
 the item seam in `SchemaRegistry.registerItem`; the function door in
 `bindHooksToEngine`, through `SchemaRegistry.claimBareNameFunctions`; the seal in
@@ -1115,3 +1120,61 @@ ambiguous: the binder resolves it among its own package's functions only.
 **The cold boot** reads the bind claims with the registry's holders, under P1.3's
 switch: two packages of one boot binding one function name are named in the same
 warning line, as packages, never as their handler owners.
+
+### P1.8 The flow family: `flow`, `webhook`, `connector`, `email_template`
+
+Measured with P1.1's two packages, in both orders (#30803, PR 3):
+
+- **`flow`** — the automation engine keys its flow map by the bare name and
+  arms ONE flow per name: the lexicographically-first package's
+  (`resolveFlowPrecedence`), whichever registered first, with a warning naming
+  both — the one type of the nine that warns; `/meta/flow/NAME` serves the
+  FIRST-registered package's declaration, so in one order the body the designer
+  opens and the body that runs come from two packages. A third package installed
+  after the boot under that name installs (`200`) and is shadowed.
+- **`webhook`** — the dispatcher's declared-webhook reader keeps the
+  FIRST-registered package's declaration per name and never subscribes the
+  other, silently; `/meta/webhook/NAME` serves the same one.
+- **`connector`** — `/meta/connector/NAME` (the by-name door the designer's
+  connector picker reads) serves the FIRST-registered package's descriptor,
+  silently. Two provider-bound instances under one name at boot are already
+  refused by the automation service (ADR-0097's duplicate, fatal at boot); after
+  the boot the second is logged at `error` and skipped, its install answering
+  `200`.
+- **`email_template`** — a send's `template: NAME` resolves the
+  FIRST-registered package's bundle, silently; `/meta/email_template/NAME` serves
+  the same one.
+
+**What is refused.** All four join P1.2's list: the same two doors, the same
+holders, the same envelope and rename. A provider-bound connector instance and a
+catalog descriptor hold the name alike — it is the connector's identity in the
+engine's registry and the picker both. An email template's NAME holds its
+bundle: the registry keys the type by `(name, locale)` (`pkg:name@locale`), the
+holder reading strips the member, two members of one package's bundle are one
+holder, and another package's member of that name — another locale included — is
+one conflict, on the name.
+
+**The overridable baseline.** The platform's built-in auth templates are
+code-declared under the email service's own package
+(`EmailServicePlugin.init`, `@objectstack/plugin-email`), and the template loader
+serves any OTHER package's `(name, locale)` member over them by contract
+(ADR-0131 D6/D10: an app declaring `auth.password_reset` overrides the
+platform's copy). So that package is an overridable baseline for
+`email_template` (`OVERRIDABLE_BASELINE_PACKAGES`): it neither holds a template
+name nor is refused one, at the package door, the item seam and the cold boot
+alike. The first other package to take a built-in name holds it; a second is
+refused naming the first, never the baseline. No other type has a baseline today.
+
+**Not judged.** A paired `.custom` package's declared override of a base
+package's flow (ADR-0146 D9 item 1) is a stored row bound to its pair, hydrated
+into the bare slot — the environment catalog, never a package holder, so the
+override path stays open. The automation service's own duplicate refusal of two
+provider-bound instances in ONE boot (ADR-0097) runs before the seal and stands;
+the doors here judge the install that follows a boot. The kernel `metadata`
+service's `(type, name)` overwrite is not a consumer of these four on a
+composed runtime (the webhook reader falls back to it only with no registry),
+and is not judged.
+
+**The cold boot** reads the four with the registry's other holders, under
+P1.3's switch: the flow precedence warning keeps naming both packages and arming
+one, as before; the bare-name warning names every clash once with its rename.
