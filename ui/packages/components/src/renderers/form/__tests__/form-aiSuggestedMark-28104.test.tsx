@@ -31,6 +31,9 @@ import { ComponentRegistry } from '@object-ui/core';
 // Module scope, not `beforeAll` — the cold transform must not be billed to
 // `hookTimeout`. See object-ui/no-dynamic-import-in-test-hook (objectui#3010).
 import '../../../renderers';
+// The layout renderers reach `@object-ui/react-runtime` through a dynamic import;
+// pay that load during collection, not inside a clocked case (check:test-source-alias).
+import '@object-ui/react-runtime';
 import { SuggestedFieldsContext } from '../suggested-fields-context';
 
 beforeEach(() => {
