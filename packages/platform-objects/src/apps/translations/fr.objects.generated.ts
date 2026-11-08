@@ -2660,14 +2660,15 @@ export const frObjects: NonNullable<TranslationData['objects']> = {
       },
       source_kind: {
         label: "Type de source",
-        help: "Ce qui envoie le groupe : une connexion SCIM.",
+        help: "Ce qui envoie le groupe : une connexion SCIM, ou un fournisseur SSO à la connexion.",
         options: {
-          scim: "Connexion SCIM"
+          scim: "Connexion SCIM",
+          sso: "Fournisseur SSO"
         }
       },
       source_id: {
         label: "ID de source",
-        help: "L’ID de la connexion SCIM par laquelle le groupe arrive, p. ex. \"okta-prod\"."
+        help: "L’ID de la connexion SCIM ou du fournisseur SSO par lequel le groupe arrive, p. ex. \"okta-prod\"."
       },
       group_external_id: {
         label: "ID externe du groupe",
@@ -2683,7 +2684,7 @@ export const frObjects: NonNullable<TranslationData['objects']> = {
       },
       organization_id: {
         label: "Organisation",
-        help: "L’organisation dans laquelle l’attribution est faite : celle qui possède la connexion SCIM."
+        help: "L’organisation dans laquelle l’attribution est faite : celle qui possède la connexion SCIM ou le fournisseur SSO."
       },
       created_at: {
         label: "Créé le"

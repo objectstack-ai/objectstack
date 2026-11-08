@@ -6,11 +6,12 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
  * sys_idp_group_mapping — which permission set an identity provider's group
  * grants (ADR-0134 D4's group seam, filled for permission sets only).
  *
- * One row says: a member of THIS group, pushed by THIS source, holds THIS
- * permission set in THIS organization. The source is a SCIM connection today
+ * One row says: a member of THIS group, sent by THIS source, holds THIS
+ * permission set in THIS organization. The source is a SCIM connection
  * (`source_kind: 'scim'`, `source_id` = the connection id the bearer verifies
- * as); the kind column is there so an SSO provider's group claim can name its
- * provider the same way later, without a second mapping model.
+ * as) or an SSO provider whose sign-in carries the user's groups as a claim
+ * (`source_kind: 'sso'`, `source_id` = the provider id): one mapping model for
+ * both, never a second one.
  *
  * Who writes it: the platform administrator, through plugin-auth's
  * `/admin/scim/set-group-mapping` and `/admin/scim/delete-group-mapping`
@@ -23,8 +24,10 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
  * administrator standing.
  *
  * Who reads it: the SCIM `projection` (`scim-group-projection.ts`) when a
- * group's membership changes. A group is matched by its `externalId` when the
- * row names one, else by its `displayName`; the row names exactly one.
+ * group's membership changes, and the SSO sign-in (`sso-group-projection.ts`)
+ * on every sign-in through the provider. A group is matched by its
+ * `externalId` (for SSO: a claim value equal to it) when the row names one,
+ * else by its `displayName`; the row names exactly one.
  *
  * @namespace sys
  */
@@ -68,16 +71,19 @@ export const SysIdpGroupMapping = ObjectSchema.create({
       label: 'Source Kind',
       required: true,
       defaultValue: 'scim',
-      description: 'What pushes the group: a SCIM connection.',
+      description: 'What sends the group: a SCIM connection, or an SSO provider at sign-in.',
       group: 'Source',
-      options: [{ value: 'scim', label: 'SCIM Connection' }],
+      options: [
+        { value: 'scim', label: 'SCIM Connection' },
+        { value: 'sso', label: 'SSO Provider' },
+      ],
     }),
 
     source_id: Field.text({
       label: 'Source ID',
       required: true,
       maxLength: 255,
-      description: 'The SCIM connection ID the group arrives through, e.g. "okta-prod".',
+      description: 'The SCIM connection ID or the SSO provider ID the group arrives through, e.g. "okta-prod".',
       group: 'Source',
     }),
 
@@ -109,7 +115,7 @@ export const SysIdpGroupMapping = ObjectSchema.create({
       label: 'Organization',
       required: false,
       maxLength: 255,
-      description: 'The organization the grant is made in: the organization that owns the SCIM connection.',
+      description: 'The organization the grant is made in: the organization that owns the SCIM connection or the SSO provider.',
       group: 'Grant',
     }),
 
