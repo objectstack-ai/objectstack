@@ -248,7 +248,9 @@
 
 import process from 'node:process';
 import { spawnSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { isEntrypoint } from '../invoked-as.mjs';
@@ -1828,6 +1830,61 @@ function fakeRelay(board, outcome = 'success', sent = []) {
   };
 }
 
+/**
+ * The REAL transport shape: fleet-write's own `sendFleetWrite` — its dispatch POST, its run poll, its body
+ * read-back with whatever judge this file hands it — over a fake `fetch` that answers from THE SAME fake board
+ * (the dispatch applies the stroke as the executor would, through `fakeRelay`). Only the network, the clock, the
+ * sleeps and the throttle file are fake, so a read-back that cannot settle under the real send cannot settle
+ * here either. Every send is raced against a wall-clock ceiling: an unsettled promise answers `never-settled`
+ * instead of draining the event loop.
+ */
+const REAL_TRANSPORT_CEILING_MS = 15_000;
+function realTransport(board, sent = []) {
+  const apply = fakeRelay(board, 'success', []);
+  const at = board.serverNow ?? Date.UTC(2026, 10, 8, 15, 0, 0);
+  const dir = mkdtempSync(join(tmpdir(), 'label-write-real-transport-'));
+  let requestId = null;
+  const headers = new Headers({ 'x-ratelimit-remaining': '4999' });
+  const answer = (status, json) => ({ status, headers, json: async () => json });
+  const RUN = () => ({ id: 42, display_title: `fleet-write ${requestId}`, name: 'Fleet Write', html_url: 'https://github.test/run/42', status: 'completed', conclusion: 'success' });
+  const fetchImpl = async (url, init = {}) => {
+    const u = new URL(url);
+    const method = init.method ?? 'GET';
+    if (method === 'POST' && u.pathname.endsWith('/dispatches')) {
+      const payload = JSON.parse(init.body).client_payload;
+      requestId = payload.request_id;
+      await apply(payload);
+      return answer(204, null);
+    }
+    if (method !== 'GET') return answer(405, { message: 'self-test: the real transport writes nothing but the dispatch' });
+    if (u.pathname.endsWith('/actions/runs')) return answer(200, { total_count: 1, workflow_runs: [RUN()] });
+    if (/\/actions\/runs\/42$/u.test(u.pathname)) return answer(200, RUN());
+    if (/\/issues\/\d+\/comments$/u.test(u.pathname)) return answer(200, Number(u.searchParams.get('page') ?? '1') > 1 ? [] : board.comments);
+    return answer(404, { message: 'Not Found' });
+  };
+  const send = async (payload, opts = {}) => {
+    sent.push(payload);
+    let timer;
+    const ceiling = new Promise((resolve) => {
+      timer = setTimeout(() => resolve({ state: 'never-settled', ok: false, requestId: payload.request_id, run: null, status: 204, verdict: 'ok', detail: `sendFleetWrite did not settle within ${REAL_TRANSPORT_CEILING_MS} ms` }), REAL_TRANSPORT_CEILING_MS);
+    });
+    const real = sendFleetWrite(payload, {
+      ...opts,
+      fetch: fetchImpl,
+      now: () => at,
+      sleep: async () => {},
+      ceilings: { startMs: 90_000, ceilingMs: 300_000, pollMs: 5_000, notes: [] },
+      pace: { file: join(dir, 'pace.jsonl'), env: { OS_PM_WRITE_MIN_GAP_MS: '0' }, log: () => {}, exit: (code) => { throw new Error(`self-test: the throttle refused with exit ${code}`); } },
+    });
+    try {
+      return await Promise.race([real, ceiling]);
+    } finally {
+      clearTimeout(timer);
+    }
+  };
+  return { send, sent, cleanup: () => rmSync(dir, { recursive: true, force: true }) };
+}
+
 async function driveOffline(argv, boardInit = {}, extra = {}) {
   const fake = fakeBoard(boardInit);
   const parsed = parseOptions(argv);
@@ -1871,7 +1928,7 @@ const silentCard = (serverNowHoursAfterKnock, extra = {}) => ({
 const RELEASE_ARGV = ['--repo', 'objectstack-ai/objectstack', '--issue', '7', '--release', '--recheck-comment', '200', '--comment-file', RELEASE_FILE, '--resume-from', `${RELEASE_BRANCH}@abcdef1234`];
 
 async function driveRelease(argv, boardInit, extra = {}) {
-  const fake = fakeBoard(boardInit);
+  const fake = extra.board ?? fakeBoard(boardInit);
   const parsed = parseOptions(argv);
   if (!parsed.ok) return { parsed, exit: EXIT_USAGE, fake, out: [], sent: [], text: '' };
   const out = [];
@@ -1910,6 +1967,7 @@ export async function relayMissProbe({ route, send }) {
 // that stops registering cases is the bug; a pinned TOTAL would hide it the
 // moment a sibling battery grows (#13489, the shape post-stamped.mjs carries).
 const FOLD_BATTERY = "the fold: a claim (comment + labels + assignee) and a verdict (comment + pr_ready + automerge_enable) as ONE relay stroke, the comment judged on post-stamped's path, every part read back on its own line, a part that fails read-back exit 4 and never repaired, RELAY-ONLY";
+const REAL_TRANSPORT_BATTERY = "the real transport: a comment-bearing stroke (a fold, a release) through fleet-write's own sendFleetWrite — fake fetch, real dispatch, real read-back — settles, exit 0, every ④ line printed";
 const KIND_BATTERY = 'the kind rule: no pm state added to a pull request, no `pm:awaiting-merge` added to an issue, a removal never refused, an unreadable kind refused — on both write paths, before the transport';
 const SELF_TEST_BATTERIES = Object.freeze({
   'the re-exec guard: the name this tool sets, and the patrol name that must not silence it': 11,
@@ -1926,8 +1984,9 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the relay transport: ONE dispatch carrying the whole stroke, the same read-back, and an accepted dispatch with no run UNCONFIRMED under auto too — never a direct write': 14,
   'the release: a silent claim reclaimed in ONE relay stroke — Release: comment → pm:queue on → pm:dispatched off → unassign — on the knock\'s SERVER-clock age, RELAY-ONLY, never a direct write': 32,
   [FOLD_BATTERY]: 24,
+  [REAL_TRANSPORT_BATTERY]: 4,
 });
-const SELF_TEST_BATTERY_FLOOR = 14;
+const SELF_TEST_BATTERY_FLOOR = 15;
 const UNATTRIBUTED_BATTERY = '(unattributed)';
 
 const batteryCases = new Map();
@@ -2404,6 +2463,42 @@ export async function selfTest() {
     const duties = readFileSync(new URL('.claude/skills/pm-dispatch/references/execution-duties.md', REPO_ROOT), 'utf8');
     const landing = readFileSync(new URL('.claude/skills/pm-dispatch/references/landing-operations.md', REPO_ROOT), 'utf8');
     t('↔ the procedure text sends a claim and a landing through the fold, so a seat reads ONE stroke where it used to read two', [duties.includes('--comment-file'), landing.includes('--land')], [true, true]);
+  }
+
+  // ── the real transport ───────────────────────────────────────────────────
+  battery(REAL_TRANSPORT_BATTERY);
+  {
+    const SESSION = 'session_01ABCDEFGHJKMNPQRSTVWXYZ';
+    const route = { requested: 'auto', transport: 'dispatch', reason: 'self-test: dispatch', error: null, session: SESSION };
+    const SIG = `domain:skills#2 · os-justin · ${SESSION}`;
+    const CLAIM_FILE = '/tmp/self-test/claim.md';
+    const CLAIM = `${SIG}\nClaim: PM loop round 1 · {{NOW}}\nSession: \`${SESSION}\`\nBranch: \`claude/issue-7-fold\`\nSeat: \`domain:skills#2\`\nClause-②: no\n`;
+    const at = Date.UTC(2026, 10, 8, 15, 0, 0);
+    const claimArgv = ['--repo', 'objectstack-ai/objectstack', '--issue', '7', '--add', 'pm:dispatched', '--remove', 'pm:queue', '--assign', 'dev', '--comment-file', CLAIM_FILE];
+    const board = fakeBoard({ labels: ['pm:queue', 'domain:skills'], assignees: [], serverNow: at });
+    const wire = realTransport(board.board);
+    const out = [];
+    let fold;
+    try {
+      const parsed = parseOptions(claimArgv);
+      fold = await runLabelWrite(parsed.options, { call: board.call, log: (l) => out.push(l), route, send: wire.send, readText: () => CLAIM, now: () => new Date(at) });
+    } finally {
+      wire.cleanup();
+    }
+    const text = out.join('\n');
+    t('⭐ a FOLD through the real sendFleetWrite SETTLES: its read-back of the comment completes, ONE dispatch, exit 0', [fold.relay?.state, fold.exit, wire.sent.length], ['success', EXIT_OK, 1], text.slice(-600));
+    t('…and label-write\'s own ④ lines print after it, the comment found by its stored bytes', ['④ labels ✓', '④ assignees ✓', '④ comment ✓', '④ MATCHES'].map((l) => text.includes(l)), [true, true, true, true]);
+
+    const releaseBoard = fakeBoard(silentCard(13));
+    const releaseWire = realTransport(releaseBoard.board);
+    let rel;
+    try {
+      rel = await driveRelease(RELEASE_ARGV, silentCard(13), { send: releaseWire.send, board: releaseBoard });
+    } finally {
+      releaseWire.cleanup();
+    }
+    t('⭐ a RELEASE through the real sendFleetWrite SETTLES too: ONE dispatch, exit 0', [rel.res?.relay?.state, rel.exit, releaseWire.sent.length], ['success', EXIT_OK, 1], rel.text.slice(-600));
+    t('…and its ④ comment line prints', rel.text.includes('④ comment ✓') || rel.text.includes('comment ✓'), true, rel.text.slice(-600));
   }
 
   // ── the floor, BEFORE the verdict ────────────────────────────────────────
