@@ -48,6 +48,12 @@ interface ServedOverlayRowCandidate {
  */
 interface StoredRowPlace {
     readonly type: string;
+    /**
+     * [#31399] The row's own `name` column: the name the by-name read finds
+     * the row under. The merge slots a stored body by it when the body states
+     * no name of its own ({@link mergePackageAwareOverlay}).
+     */
+    readonly name?: string;
 }
 
 /**
@@ -357,8 +363,20 @@ export function mergePackageAwareOverlay(
         }
     }
     for (const { data, packageId, stored, standIn } of records) {
-        const body = data as any;
-        const bodyName = listSlotNameOf(canonicalType, body);
+        // [#31399] A stored body that states no name of its own (a `seed`:
+        // `SeedSchema` declares none, the name lives on the row) is slotted by
+        // its row's `name` column, the name the by-name read finds it under,
+        // and served carrying that name, as every listed item carries its own.
+        // Before, the merge skipped it, so `GET /meta/seed` listed no stored
+        // seed while `GET /meta/seed/:name` served each one. A body that states
+        // a name keeps it; the stored body is never written.
+        const ownName = listSlotNameOf(canonicalType, data);
+        const rowName = ownName === undefined && stored?.name !== undefined && stored.name !== ''
+            && data !== null && typeof data === 'object' && !Array.isArray(data)
+            ? stored.name
+            : undefined;
+        const body = (rowName !== undefined ? { ...(data as object), name: rowName } : data) as any;
+        const bodyName = ownName ?? rowName;
         if (bodyName === undefined) continue;
         // The base row this record shadows at its own slot (for view-identity
         // healing): a same-package row, else a package-less one, else any

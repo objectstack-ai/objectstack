@@ -235,23 +235,25 @@ export async function readFlattenedMetaItems(host: Pick<ProtocolHost, 'artifactL
             // spelling), so the merge picks a package's slot by the
             // served-row resolution the by-name read takes
             // ({@link servedOverlayRowCandidates}), not by row order.
-            const placed = mergeable.map(({ data, packageId: recPkg, type: recType }) => ({
-                data, packageId: recPkg, stored: { type: recType },
+            // [#31399] …and its row's `name`, which slots a body that states
+            // none ({@link mergePackageAwareOverlay}).
+            const placed = mergeable.map(({ name, data, packageId: recPkg, type: recType }) => ({
+                data, packageId: recPkg, stored: { type: recType, name },
             }));
             // [#21817] The package-less rows, placed the same way, as
             // stand-ins: the same parse and the same stored-row rule.
             const standIns = host.storedOverlayEntries(request, standInRows)
                 .filter((entry) => !host.declinesStoredRow(request.type, (entry.data as { name?: unknown } | null)?.name, storedEntryRow(entry)))
-                .map(({ data, type: recType }) => ({
-                    data, packageId: undefined, stored: { type: recType }, standIn: true,
+                .map(({ name, data, type: recType }) => ({
+                    data, packageId: undefined, stored: { type: recType, name }, standIn: true,
                 }));
             // [#28409] The pair's rows, placed the same way and bound to
             // the pair, as stand-ins: the merge serves one only where it
             // declares the override of the slot's package.
             const overrideStandIns = host.storedOverlayEntries(request, overrideRows)
                 .filter((entry) => !host.declinesStoredRow(request.type, (entry.data as { name?: unknown } | null)?.name, storedEntryRow(entry)))
-                .map(({ data, packageId: recPkg, type: recType }) => ({
-                    data, packageId: recPkg, stored: { type: recType }, standIn: true,
+                .map(({ name, data, packageId: recPkg, type: recType }) => ({
+                    data, packageId: recPkg, stored: { type: recType, name }, standIn: true,
                 }));
             items = mergePackageAwareOverlay(request.type, items, [...placed, ...standIns, ...overrideStandIns], (data, prev) => {
                 if (isView && data && typeof data === 'object') {
@@ -554,7 +556,11 @@ export async function readFlattenedMetaItems(host: Pick<ProtocolHost, 'artifactL
                     // by-name read's preview arm serves, in any row order.
                     // [ADR-0131 D6/D7] Every row read here is the
                     // environment's (filtered at the read).
-                    const stored = { type: String(record.type ?? request.type) };
+                    // [#31399] …with its row's `name` (see the active arm).
+                    const stored = {
+                        type: String(record.type ?? request.type),
+                        ...(typeof record.name === 'string' ? { name: record.name } : {}),
+                    };
                     return { data, packageId: recPkg, stored };
                 };
                 const drafts = [
