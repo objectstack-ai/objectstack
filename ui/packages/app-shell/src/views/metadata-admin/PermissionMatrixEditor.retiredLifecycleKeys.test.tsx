@@ -4,8 +4,8 @@
  * Pins that the Access matrix never AUTHORS the retired lifecycle bits
  * `allowRestore` / `allowPurge` (objectui#6595).
  *
- * Both keys gated `restore` / `purge` ObjectQL operations that have never
- * existed — a dispatched restore/purge is denied unconditionally by the
+ * Both keys claimed to gate `restore` / `purge` ObjectQL operations that did
+ * not exist then — a dispatched restore/purge was denied unconditionally by the
  * evaluator's fail-closed destructive-operation backstop — so every tick of
  * the `Re` / `Pu` checkboxes was a grant no runtime has ever read.
  * `@objectstack/spec` retired both as `retiredKey()` tombstones

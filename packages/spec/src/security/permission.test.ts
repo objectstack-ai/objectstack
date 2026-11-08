@@ -464,7 +464,7 @@ describe('an object permission that edits or deletes a record also reads it', ()
 describe('allowRestore / allowPurge are RETIRED (ADR-0049)', () => {
   // Removed by the 2026-08-26 maintainer ruling accepting #1883's
   // recommendation B: the `restore`/`purge` ObjectQL operations the bits
-  // claimed to gate have never existed (no destructive lifecycle verb in the
+  // claimed to gate did not exist then (no destructive lifecycle verb in the
   // engine's dispatch vocabulary — the #8106 pin), so granting them delivered
   // nothing. The tombstone keeps the removal audible instead of silently
   // stripping an authored value. The keys do not return: `restore`/`purge`
