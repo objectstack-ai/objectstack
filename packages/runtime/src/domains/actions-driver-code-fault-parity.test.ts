@@ -17,6 +17,8 @@
  */
 
 import { describe, it, expect, vi, afterEach } from 'vitest';
+// The dispatcher's reach loads this lazily; pay its first load during collection.
+import '@objectstack/metadata';
 import { mapDataError } from '@objectstack/types';
 
 import { HttpDispatcher } from '../http-dispatcher.js';
