@@ -289,11 +289,11 @@ write them right the first time:
    ```
 
 4. **A `select` is compared and written by its option `value`, never its label.**
-   The request speaks the label ("Lost", "Closed Won"); the row stores the
-   `value` (`lost`). `condition: "record.status == 'Lost'"` or
-   `fields: { status: 'Lost' }` parses, matches no row, and the flow stages
-   clean and never fires — read the field's `options` first and map the words
-   to `value` in the start `condition` AND every `fields` / `filter` entry.
+   The request speaks the label ("Lost"); the row stores the `value` (`lost`).
+   `condition: "record.status == 'Lost'"` parses, matches no row: the flow
+   stages clean and never fires; `fields: { status: 'Lost' }` / a `filter`
+   fails the run (`invalid_option`). Read the field's `options`; write the
+   `value` in the `condition` AND every `fields` / `filter` entry.
 
 ---
 

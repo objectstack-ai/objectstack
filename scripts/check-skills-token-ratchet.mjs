@@ -505,10 +505,11 @@ export const CEILINGS = new Map([
   // authoring rules): § Valid-but-silently-wrong gains item 4 — a `select` is
   // compared and written by its option `value`, never the label the request
   // speaks, in the start `condition` and every `fields` / `filter` entry (the
-  // flow otherwise stages clean and never fires). No same-file restatement was
-  // left to pay it; the comment says so honestly. Arithmetic in priced bytes
-  // (stamp line excluded), against `main`'s 25654: 25654 -> 26107 (+453) ->
-  // ceil(26107 / 4) = 6527; headroom was 12 tokens, so the ceiling moves +101,
+  // condition leg otherwise stages clean and never fires; the `fields` /
+  // `filter` leg fails the run as `invalid_option`). No same-file restatement
+  // was left to pay it; the comment says so honestly. Arithmetic in priced
+  // bytes (stamp line excluded), against `main`'s 25654: 25654 -> 26108 (+454)
+  // -> ceil(26108 / 4) = 6527; headroom was 12 tokens, so the ceiling moves +101,
   // pinned AT the measurement. Authorised by the ruling of record that orders
   // this text into the published skills: objectstack-ai/cloud#3659, letter A,
   // ruling comment 6682024726 (2026-11-06): "How to write valid, working
@@ -1060,15 +1061,22 @@ export const CEILINGS = new Map([
   // `runAs: 'system'` (the approval service's attributed mirror write on
   // `main`, which corrects the hosted corpus's blanket "declare system").
   // Paid down first: the discount-approval example's four-line trigger comment
-  // (a restatement of SKILL.md § Trigger Configuration) is one pointer line,
-  // and the three Chinese glosses left the file — the shipped skill text is
-  // English-only (the approver's review on #31223). 22883 -> 23349 bytes
-  // (+466 net) -> ceil(23349 / 4) = 5838; headroom was 9 tokens, so the
-  // ceiling moves +108, pinned AT the measurement. Same authority as the
+  // (a restatement of SKILL.md § Trigger Configuration) is one pointer line;
+  // the three Chinese glosses left the file — the shipped skill text is
+  // English-only (the approver's review on #31223); and the three legacy
+  // "(the old …)" glosses in § Branching, side-effects & rejection, naming
+  // approval-process keys that have no author since ADR-0019, are gone. Two
+  // one-word corrections ride along: the mirrored statuses list `returned`
+  // (send-back writes it), and the dynamic-approval example's condition reads
+  // `record.status`. Base is `main`'s 22908 — #31322 had added 24 bytes to
+  // this file (`record.amount != null && `) under the first pin, which CI
+  // measured on the merge result as 5844 against a 5838 row. 22908 -> 23299
+  // bytes (+391 net) -> ceil(23299 / 4) = 5825; headroom was 3 tokens, so the
+  // ceiling moves +95, pinned AT the measurement. Same authority as the
   // SKILL.md row above: cloud#3659 letter A (ruling comment 6682024726) orders
   // the text in; the raise path is the standing 2026-10-27 ruling (record
   // 6513306068), quoted in the PR body.
-  ['skills/objectstack-automation/references/state-machines-and-approvals.md', 5838],
+  ['skills/objectstack-automation/references/state-machines-and-approvals.md', 5825],
   // 1779 -> 1769 (#26297): RE-LOCK at the landed count after a net cut — two
   // stale `{ type: 'lookup', reference: 'user' }` fields (an object that does
   // not exist) became `type: 'user'`; -10 tokens, the row follows the
