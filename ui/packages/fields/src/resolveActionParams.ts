@@ -47,7 +47,7 @@
  * rejects it, the server's `.strict()` parse rejects it, and this resolver
  * names it via {@link RESOLVED_ONLY_PARAM_KEYS} rather than reading it.
  */
-import { EXPANDABLE_FIELD_TYPES, actionCopySource, toPredicateRecord } from '@object-ui/core';
+import { EXPANDABLE_FIELD_TYPES, actionCopySource, isActionCopyEnvelope, toPredicateRecord } from '@object-ui/core';
 import type { ActionParamDef, ActionParamOption } from '@object-ui/core';
 // The form's widget fold. Imported from the barrel this module is re-exported
 // by — a cycle in the SOURCE graph only, and a call-time one: nothing at this
@@ -186,9 +186,10 @@ export interface RawActionParam {
   placeholder?: string;
   /**
    * The hint under the input. A `template` slot since objectstack#27948: the
-   * bare string, or the parsed `{ dialect: 'template', source }` envelope a
-   * served param carries; read through `actionCopySource`, so the resolved
-   * param's `helpText` is always the text.
+   * bare string, the parsed `{ dialect: 'template', source }` envelope a
+   * served param carries, or (objectstack#28266) an inline per-locale map,
+   * resolved for {@link ResolveActionParamsContext.locale} like `label` — so
+   * the resolved param's `helpText` is always the text.
    */
   helpText?: unknown;
   defaultValue?: unknown;
@@ -645,6 +646,17 @@ export function resolveActionParam(
   const authoredLabel = resolveInlineI18nLabel(param.label, ctx.locale);
   /** Inline options, with each authored label narrowed to the resolved side. */
   const authoredOptions = resolveOptionLabels(param.options, ctx.locale);
+  /**
+   * The authored hint, narrowed to the resolved side the same way: the bare
+   * string or the `template` envelope's `source`, else an inline per-locale map
+   * (objectstack#28266 — the form an inline action, which no bundle reaches,
+   * writes its hint in) resolved for the active language. An envelope with no
+   * `source` gives `undefined`, never a map limb's guess, so a field-backed
+   * param still falls back to the field's help line.
+   */
+  const authoredHelpText = isActionCopyEnvelope(param.helpText)
+    ? actionCopySource(param.helpText)
+    : resolveInlineI18nLabel(param.helpText as I18nLabel | undefined, ctx.locale);
 
   // Inline param — no field reference, just normalise.
   if (!param.field) {
@@ -655,7 +667,7 @@ export function resolveActionParam(
       required: param.required ?? false,
       options: authoredOptions,
       placeholder: param.placeholder,
-      helpText: actionCopySource(param.helpText),
+      helpText: authoredHelpText,
       defaultValue: rowDefault ?? param.defaultValue,
       visible: normaliseVisible(param.visible),
       // This output is built key by key, so an authored key that is not
@@ -718,7 +730,7 @@ export function resolveActionParam(
       required: param.required ?? false,
       options: authoredOptions,
       placeholder: param.placeholder,
-      helpText: actionCopySource(param.helpText),
+      helpText: authoredHelpText,
       defaultValue: rowDefault ?? param.defaultValue,
       visible: normaliseVisible(param.visible),
       carryOver: param.carryOver,
@@ -886,7 +898,7 @@ export function resolveActionParam(
     // form shares (`fieldHelpText`, objectui#12213): the spec's
     // `inlineHelpText`, then `description`, an empty string reading as absent.
     // A served `help` key is not read.
-    helpText: actionCopySource(param.helpText) ?? fieldHelpText(field),
+    helpText: authoredHelpText ?? fieldHelpText(field),
     defaultValue: rowDefault ?? param.defaultValue ?? field.defaultValue,
     visible: normaliseVisible(param.visible),
     // A declaration of the PARAM, never inherited from the field.

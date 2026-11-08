@@ -10,15 +10,15 @@
  *    `confirmText` and `successMessage`, each a bare string, the parsed
  *    envelope, or an inline locale map whose every value is such a sentence —
  *    and, since #27948 (ruling A, step 2), `description`, each
- *    `outcomeMessages` entry (both with the locale map) and each
- *    `params[].helpText` (without it);
+ *    `outcomeMessages` entry and each `params[].helpText` (all three with the
+ *    locale map; `helpText` took it in #28266);
  *  - a page action row — `action:button` / `action:icon` `properties`, and
  *    each `properties.actions[]` member of an `action:group` / `action:menu` —
  *    all three keys;
  *  - a page component's inline `properties.action` (`InlineActionSchema`, the
  *    pick of `ActionSchema` an `element:button` carries): `confirmText`,
- *    `successMessage`, `description` (each with the locale map) and each
- *    `params[].helpText`.
+ *    `successMessage`, `description` and each `params[].helpText`, each with
+ *    the locale map.
  *
  * The same two steps the bulk `confirmText` pass takes, through the same
  * judge: `closedScopeTemplateRefusal` names a `${…}` or single-brace token
@@ -176,12 +176,12 @@ function judgeAction(
   localeMap: boolean,
 ): void {
   for (const key of keys) {
-    // A param's `helpText` was a plain string, never a locale map (#27948).
-    const takesMap = localeMap && key !== 'helpText';
     const slot = SLOT_NAME[key];
     const roots = rootsOf(key, action);
     for (const { path, value } of valuesOf(action, key)) {
-      for (const { at, text } of sentencesOf(value, takesMap)) {
+      // A param's `helpText` takes the locale map too (#28266): each entry is
+      // judged at `.<locale>`, like a `description` entry.
+      for (const { at, text } of sentencesOf(value, localeMap)) {
         const located = `${where} ${path}${at}`;
         const refuse = (message: string, quoted: string): void => {
           issues.push({ where: located, message, source: quoted, severity: 'error' });

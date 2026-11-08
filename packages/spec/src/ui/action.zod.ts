@@ -175,13 +175,23 @@ const actionParamOptionUndeclaredAnywhere = (key: 'icon' | 'disabled'): string =
  *
  * [#27948, ruling A, step 2] The param dialog's `description` and each
  * `outcomeMessages` entry joined the family with their locale map; a param's
- * `helpText` joined it without one (it was a plain string, so a map was never
- * its shape — {@link actionParamHelpText}).
+ * `helpText` joined it without one, and took the map one step later (#28266 —
+ * {@link actionParamHelpText}).
  */
 const actionCopy = (key: 'confirmText' | 'successMessage' | 'description' | 'outcomeMessages') => actionCopyTemplateSlot(templateExpressionInput(ExpressionSchema, actionCopyRefusals(key, { localeMap: true })), key, { localeMap: true });
 
-/** [#27948] A param's `helpText`: the copy family's slot, with no locale map (it was a plain string). */
-const actionParamHelpText = () => actionCopyTemplateSlot(templateExpressionInput(ExpressionSchema, actionCopyRefusals('helpText')), 'helpText');
+/**
+ * [#27948, #28266] A param's `helpText`: the copy family's slot, with the
+ * inline locale map its siblings keep. It joined the family without one (it
+ * was a plain string), which left the hint the one sentence of an INLINE
+ * action — a page button's `properties.action`, which no translation bundle
+ * reaches — that could not be written per locale while the dialog's title,
+ * line, option labels and toast could. A registered action's param is still
+ * translated through the bundle (`_actions.<action>.params.<param>.helpText`,
+ * `system/translation.zod.ts`); the map is the inline form beside it, read by
+ * the same `pickLocalized` order as `label`.
+ */
+const actionParamHelpText = () => actionCopyTemplateSlot(templateExpressionInput(ExpressionSchema, actionCopyRefusals('helpText', { localeMap: true })), 'helpText', { localeMap: true });
 
 /**
  * Action Parameter Schema
@@ -421,7 +431,8 @@ export const ActionParamSchema = lazySchema(() => strictObject(
   placeholder: z.string().optional().meta({ title: 'Placeholder' }),
   /**
    * Help/description override — the hint under this input in the param
-   * dialog. A `template` slot over `confirmText`'s roots (#27948).
+   * dialog. A `template` slot over `confirmText`'s roots (#27948) that also
+   * takes an inline locale map (`{ en, "zh-CN" }`, #28266).
    */
   helpText: actionParamHelpText().optional().meta({ title: 'Help Text' }).describe(`Hint shown under this input in the action's param dialog — ${ACTION_PARAM_HELP_TEXT_TEMPLATE_DESCRIBE}`),
   /**
