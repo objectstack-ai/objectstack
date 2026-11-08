@@ -421,4 +421,3 @@ describe('handleInstall() — step 2c′ over an unreadable record asks, never i
         expect(new LocalManifestSource(dir).read('app.test.crm').failure).toBeDefined();
     });
 });
-});
