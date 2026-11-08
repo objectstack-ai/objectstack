@@ -21,8 +21,9 @@ import { fr } from './translations/fr.js';
 import { ptBR } from './translations/pt-BR.js';
 import { ru } from './translations/ru.js';
 import { de } from './translations/de.js';
+import { ko } from './translations/ko.js';
 
-const LOCALES = { en, 'zh-CN': zhCN, 'ja-JP': jaJP, 'es-ES': esES, 'zh-Hant': zhHant, ar, fr, 'pt-BR': ptBR, ru, de } as const;
+const LOCALES = { en, 'zh-CN': zhCN, 'ja-JP': jaJP, 'es-ES': esES, 'zh-Hant': zhHant, ar, fr, 'pt-BR': ptBR, ru, de, ko } as const;
 
 type NavItem = { id?: string; label?: string };
 

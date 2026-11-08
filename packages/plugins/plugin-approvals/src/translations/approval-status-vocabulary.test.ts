@@ -41,7 +41,7 @@ import { describe, it, expect } from 'vitest';
 import { APPROVAL_STATUSES, APPROVAL_STATUS_LABELS } from '@objectstack/spec/contracts';
 import { translateObject, resolveViewLabel } from '@objectstack/spec/system';
 import type { TranslationData } from '@objectstack/spec/system';
-import { zhCN, jaJP, esES, zhHant, ar, fr, ptBR, ru, de } from '@objectstack/platform-objects/apps';
+import { zhCN, jaJP, esES, zhHant, ar, fr, ptBR, ru, de, ko } from '@objectstack/platform-objects/apps';
 
 import { ApprovalsTranslations } from './index.js';
 import { SysApprovalRequest } from '../sys-approval-request.object.js';
@@ -146,6 +146,7 @@ describe('approval status vocabulary (#7232)', () => {
       ['pt-BR', ptBR],
       ['ru', ru],
       ['de', de],
+      ['ko', ko],
     ] as const) {
       const navLabel = navApprovalsLabel(nav);
       expect(navLabel, `platform-objects lost the ${locale} nav_account_approvals label`).toBeTruthy();
