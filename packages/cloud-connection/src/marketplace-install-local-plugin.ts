@@ -314,13 +314,18 @@ import {
     // the one the dry run and `os diff` read — which step 2c′'s verdict reads.
     comparePackageVersions,
     type PackageUpgradeSide,
-    type PackageUpgradePlan,
-    type UpgradeDriftCategory,
+    // [epic cloud#3652 Q3, #30884] The ONE schema upgrade verdict and its
+    // token — the rule a host's install door applies too, so both doors refuse
+    // the same pair of versions with the same findings and the same token.
+    schemaUpgradeVerdict,
+    installedRecordUnavailableVerdict,
+    SCHEMA_UPGRADE_CONFIRMATION_REQUIRED,
+    SCHEMA_UPGRADE_CONFIRMATION_STATUS,
+    type SchemaUpgradeVerdict,
 } from '@objectstack/metadata-core';
 import { resolveCloudUrl } from './cloud-url.js';
 import { resolveMarketplacePublicBaseUrl } from './marketplace-public-url.js';
 import { join } from 'node:path';
-import { createHash } from 'node:crypto';
 
 import {
     LocalManifestSource,
@@ -333,7 +338,10 @@ import { ConnectionCredentialStore } from './connection-credential-store.js';
 import { readJsonRequestBody } from './request-json-body.js';
 import { MARKETPLACE_INSTALLED_UI_BUNDLE } from './marketplace-ui.js';
 import { countSeedRows, matchSeedRows, purgeSeedRows, seedDatasetOfReceiptItem, type PurgeSeedDataset } from './marketplace-install-local-purge.js';
-import { INSTALL_LOCAL_DOOR_SERVICE, routeContextOf, type InstallLocalDoor } from './install-local-door-service.js';
+import {
+    INSTALL_LOCAL_DOOR_SERVICE, grantRefusalEvent, recordUnmanagedImportEvent, refusalCodeOf, routeContextOf,
+    type InstallLocalDoor, type InstallLocalDoorGrant, type UnmanagedImportAuditEvent, type UnmanagedImportAuditSurface,
+} from './install-local-door-service.js';
 import {
     UnmanagedCopyRecord,
     readUnmanagedCopyInstance,
@@ -398,33 +406,6 @@ import { NAMESPACE_CONFLICT_CODE } from '@objectstack/objectql';
 type SessionRead = Awaited<ReturnType<NonNullable<AuthSessionApi['getSession']>>>;
 
 const ROUTE_BASE = '/api/v1/marketplace/install-local';
-
-/**
- * [#30964] The event this door hands the `audit` slot's
- * `recordPackageLifecycleEvent` for each unmanaged copy it attempted —
- * declared here, structurally, so this package does not depend on
- * `@objectstack/plugin-audit`, which owns the row shape
- * (`PackageUnmanagedImportAuditEvent` there).
- */
-interface UnmanagedImportAuditEvent {
-    action: 'package_unmanaged_import';
-    packageId: string;
-    version?: string;
-    environmentId?: string;
-    actor?: string;
-    targetPackageId?: string;
-    namespace?: string;
-    sourceNamespace?: string;
-    copiedCount?: number;
-    outcome: 'success' | 'failure';
-    errorCode?: string;
-    status?: number;
-}
-
-/** The `audit` slot member this door calls. */
-interface UnmanagedImportAuditSurface {
-    recordPackageLifecycleEvent?(event: UnmanagedImportAuditEvent): unknown;
-}
 
 /**
  * The closed query-parameter set of `GET …/:manifestId/sample-data` (AGENTS.md,
@@ -640,185 +621,26 @@ const ACCESS_UPGRADE_CONFIRMATION_STATUS = 409;
 const ACCESS_UPGRADE_CHECK_SERVICE = 'security.accessUpgradeCheck';
 
 /**
- * [epic cloud#3652 Q3 「默认拒绝，需显式映射（推荐）」, #30884] The refusal of a
- * managed upgrade whose package upgrade plan carries a change the additive
- * schema sync would make silently: a stored field removed while one is added
- * with no `renamedFrom` linking them (if it is a rename, the new field starts
- * empty and the data stays in the old column), or a type change the drift
- * categories call `needs_confirm` or `destructive`. 409, before any write,
- * until the same request carries the finding set's token
- * (`confirmSchemaUpgrade`). Its own code, beside
- * {@link ACCESS_UPGRADE_CONFIRMATION_REQUIRED}: its findings and its token are
- * its own, so neither confirmation answers the other's question.
- */
-const SCHEMA_UPGRADE_CONFIRMATION_REQUIRED = 'SCHEMA_UPGRADE_CONFIRMATION_REQUIRED';
-const SCHEMA_UPGRADE_CONFIRMATION_STATUS = 409;
-
-/** The token's topic: a finding set token reads as what it confirms. */
-const SCHEMA_UPGRADE_TOPIC = 'schema-upgrade';
-
-/**
- * The drift categories a type change must be confirmed under (ruling record
- * 6709061297, (ii)). A `safe` change — the installed field had no stored
- * column — loses nothing and is reported by the dry run, never refused.
- */
-const SCHEMA_UPGRADE_CONFIRMED_CATEGORIES: ReadonlySet<UpgradeDriftCategory> = new Set(['needs_confirm', 'destructive']);
-
-/**
- * One finding of the schema upgrade verdict, as the 409 (and the 501) name it
- * in `details.findings`: what the comparison found, one readable sentence,
- * and — when this runtime's `manifest` service answers `planUpgrade` — the
- * rows holding a value in the installed column (`null`: the reading failed).
- */
-type SchemaUpgradeFinding =
-    | {
-        kind: 'suspected_rename';
-        object: string;
-        /** The removed (installed) key. */
-        field: string;
-        type?: string;
-        candidates: Array<{ field: string; type?: string }>;
-        describe: string;
-        rows?: number | null;
-    }
-    | {
-        kind: 'type_change';
-        object: string;
-        /** The key in the incoming version. */
-        field: string;
-        from: string;
-        to: string;
-        category: UpgradeDriftCategory;
-        /** Set when the change rides on a declared rename: the installed key. */
-        renamedFrom?: string;
-        describe: string;
-        rows?: number | null;
-    }
-    | {
-        /** The ledger file exists and would not parse: no installed side to compare. */
-        kind: 'installed_record_unreadable';
-        /** The ledger file's basename. */
-        file: string;
-        /** The thrower's own words. */
-        cause: string;
-        describe: string;
-    }
-    | {
-        /**
-         * No installed body to compare: the ledger entry parses but carries no
-         * package body, or the registry serves the package while the ledger
-         * holds no record of it (an orphaned install) and its row carries none.
-         */
-        kind: 'installed_record_missing';
-        describe: string;
-    };
-
-/**
- * [epic cloud#3652 Q3, #30884] The verdict step 2c′ gives, read from the
- * pure comparison alone (ruling record 6709061297, C3): which declared renames
- * which findings need the installer's confirmation, and the token of that
- * finding set. Nothing here reads the
- * environment: whether an upgrade is refused is decided by the two package
- * bodies, never by a reading that could fail.
- *
- * - A declared rename (`renamedFrom`) is no finding: the column is carried
- *   (#30885, {@link planInstallDeclaredRenames}), or the install is refused
- *   before this verdict is asked (step 2c″).
- * - A suspected rename always needs confirming.
- * - A type change needs confirming when its category is `needs_confirm` or
- *   `destructive` — on a declared rename too: a declared rename never stands
- *   in for a type-change confirmation (scope note 6685166393).
- * - Removed fields, removed objects, `safe` type changes and seed changes are
- *   reported by the dry run and refused by nothing.
- *
- * The token ({@link schemaUpgradeFindingSet}) is a digest of the package id
- * and the findings' identities (never of their sentences or readings),
- * order-free, so the same two versions always yield the same token and any
- * change to the finding set yields another.
- */
-function schemaUpgradeVerdict(manifestId: string, plan: PackageUpgradePlan): {
-    findings: SchemaUpgradeFinding[];
-    findingSet: string;
-} {
-    const findings: SchemaUpgradeFinding[] = [];
-    for (const s of plan.suspectedRenames) {
-        const candidates = s.candidates.map((c) => ({ field: c.field, ...(c.type !== undefined ? { type: c.type } : {}) }));
-        const added = candidates.map((c) => `${s.object}.${c.field}${c.type ? ` (${c.type})` : ''}`).join(', ');
-        findings.push({
-            kind: 'suspected_rename',
-            object: s.object,
-            field: s.field,
-            ...(s.type !== undefined ? { type: s.type } : {}),
-            candidates,
-            describe: `${s.object}.${s.field}${s.type ? ` (${s.type})` : ''} is removed while ${added} `
-                + `${candidates.length === 1 ? 'is' : 'are'} added, and no \`renamedFrom\` links them: if this is a rename, `
-                + 'the new field starts empty and the data stays in the old column, which nothing reads any more.',
-        });
-    }
-    for (const t of plan.typeChanges) {
-        if (!SCHEMA_UPGRADE_CONFIRMED_CATEGORIES.has(t.category)) continue;
-        const what = t.category === 'destructive'
-            ? 'the new type stores no column, so the values the existing column holds are no longer read'
-            : 'the existing column keeps its type under the new declaration, and nothing converts the values it holds';
-        findings.push({
-            kind: 'type_change',
-            object: t.object,
-            field: t.field,
-            from: t.from,
-            to: t.to,
-            category: t.category,
-            ...(t.renamedFrom !== undefined ? { renamedFrom: t.renamedFrom } : {}),
-            describe: `${t.object}.${t.field}${t.renamedFrom !== undefined ? ` (renamed from ${t.renamedFrom})` : ''} `
-                + `changes type ${t.from} → ${t.to} (${t.category}): ${what}.`,
-        });
-    }
-    return { findings, findingSet: schemaUpgradeFindingSet(manifestId, findings) };
-}
-
-/**
- * The finding set's token: `schema-upgrade:` and 32 hex of a SHA-256 over the
- * package id and the findings' identities, string-sorted — never their
- * sentences or row counts. The package id is in the digest, so a token issued
- * for one package never confirms the same findings on another.
- */
-function schemaUpgradeFindingSet(manifestId: string, findings: readonly SchemaUpgradeFinding[]): string {
-    const identities = findings
-        .map((f) => JSON.stringify(
-            f.kind === 'suspected_rename'
-                ? [f.kind, f.object, f.field, f.type ?? null, f.candidates.map((c) => [c.field, c.type ?? null]).sort()]
-                : f.kind === 'type_change'
-                    ? [f.kind, f.object, f.field, f.from, f.to, f.category, f.renamedFrom ?? null]
-                    : f.kind === 'installed_record_unreadable'
-                        ? [f.kind, f.file]
-                        : [f.kind],
-        ))
-        .sort();
-    const digest = createHash('sha256').update(JSON.stringify([manifestId, identities])).digest('hex').slice(0, 32);
-    return `${SCHEMA_UPGRADE_TOPIC}:${digest}`;
-}
-
-/**
- * [epic cloud#3652 Q3, #30884] The verdict when there is no installed side to
- * compare: the ledger file would not parse, its entry carries no package body,
- * or neither the ledger nor the registry (an orphaned install's row) holds
- * one. The upgrade's renames and type changes against the installed version
- * cannot be known, and a comparison that did not run is never taken for "no
- * finding" (2a, 2b and 2c answer the same way): the one finding names what is
- * missing, and its token admits the re-install — the re-install that rewrites
- * the record — confirmed and recorded, one round trip, never silently.
+ * [epic cloud#3652 Q3, #30884] The verdict when the ledger holds no installed
+ * side to compare: the ledger file would not parse, its entry carries no
+ * package body, or neither the ledger nor the registry (an orphaned install's
+ * row) holds one. The platform's rule ({@link installedRecordUnavailableVerdict},
+ * `@objectstack/metadata-core`) makes it one confirmable finding, never "no
+ * finding" (2a, 2b and 2c answer the same way); this door writes the finding's
+ * sentence, naming the ledger file it could not read.
  *
  * A rename the incoming version declares is judged before this verdict
  * (step 2c″), on the physical table: with no installed record it is taken as
  * pending, so a transport that cannot carry it refuses, and an extension's
  * rename is refused, since whose earlier key it names cannot be told.
  */
-function installedRecordUnavailableVerdict(
+function ledgerRecordUnavailableVerdict(
     manifestId: string,
     failure: { file: string; cause: unknown } | undefined,
-): { findings: SchemaUpgradeFinding[]; findingSet: string } {
+): SchemaUpgradeVerdict {
     const consequence = 'so this upgrade cannot be checked for fields it renames or retypes: confirming installs it '
         + 'unchecked, and the install rewrites the record.';
-    const finding: SchemaUpgradeFinding = failure
+    return installedRecordUnavailableVerdict(manifestId, failure
         ? {
             kind: 'installed_record_unreadable',
             file: failure.file,
@@ -830,11 +652,7 @@ function installedRecordUnavailableVerdict(
             kind: 'installed_record_missing',
             describe: `This runtime holds no package body of the installed "${manifestId}" (neither its install record `
                 + `nor the registry carries one), ${consequence}`,
-        };
-    return {
-        findings: [finding],
-        findingSet: schemaUpgradeFindingSet(manifestId, [finding]),
-    };
+        });
 }
 
 /** One side of the comparison, a multi-package artifact folded as `planUpgrade` folds it. */
@@ -1663,7 +1481,8 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         // the cloud-connection door hands it the copy an unmanaged grant asks
         // for. The same handler `POST ${ROUTE_BASE}` mounts at kernel:ready.
         const door: InstallLocalDoor = {
-            install: async (request: Request): Promise<Response> => this.handleInstall(routeContextOf(request), ctx),
+            install: async (request: Request, options?: { grant?: InstallLocalDoorGrant }): Promise<Response> =>
+                this.installForGrant(routeContextOf(request), ctx, options?.grant),
         };
         ctx.registerService?.(INSTALL_LOCAL_DOOR_SERVICE, door);
     };
@@ -2202,6 +2021,44 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             return { inserted: s.inserted, updated: s.updated, skipped: s.skipped, errors: s.errorList };
         };
     };
+
+    /**
+     * [#31481, cloud#3624 ruling A「两边审计」] The in-process door's install.
+     * Without a `grant` it is {@link handleInstall}, exactly. With one (the
+     * cloud-connection door's copy of an unmanaged grant), a refusal the
+     * unmanaged copy did not already audit hands the `audit` slot one
+     * `package_unmanaged_import` failure event with the answer's code and
+     * status: a refusal before the import runs (the install capability, the
+     * body, the manifest fetch, the walled catalog, the handshake, the mode,
+     * and every other step) would otherwise leave the control plane's grant
+     * row with no outcome in the environment. A throw is audited the same
+     * way, with the status it resolves to, and then rethrown. The import's
+     * own success and failure events ({@link installUnmanaged}) are not
+     * written twice.
+     */
+    private installForGrant = async (c: any, ctx: PluginContext, grant: InstallLocalDoorGrant | undefined): Promise<Response> => {
+        if (!grant) return this.handleInstall(c, ctx);
+        const call = { audited: false };
+        this.grantCalls.set(c, call);
+        let answer: Response;
+        try {
+            answer = await this.handleInstall(c, ctx);
+        } catch (err) {
+            if (!call.audited) {
+                const resolved = resolveThrownHttpError(err, 500);
+                await this.recordUnmanagedImport(c, ctx, grantRefusalEvent(grant, resolved.code, resolved.status));
+            }
+            throw err;
+        }
+        if (!answer.ok && !call.audited) {
+            const errorCode = (await refusalCodeOf(answer)) ?? 'PLUGIN_INSTALL_FAILED';
+            await this.recordUnmanagedImport(c, ctx, grantRefusalEvent(grant, errorCode, answer.status));
+        }
+        return answer;
+    };
+
+    /** [#31481] The grant-path calls in flight, by route context: whether the call's audit event was handed. */
+    private readonly grantCalls = new WeakMap<object, { audited: boolean }>();
 
     private handleInstall = async (c: any, ctx: PluginContext): Promise<Response> => {
         // [#8976] The sharpest of the four: this door accepts an INLINE manifest
@@ -4329,7 +4186,7 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         // other, never "no finding".
         const installed = this.installedPackageSide(ctx, manifestId, previous);
         const verdict = installed === undefined
-            ? installedRecordUnavailableVerdict(manifestId, previous.failure)
+            ? ledgerRecordUnavailableVerdict(manifestId, previous.failure)
             : schemaUpgradeVerdict(manifestId, comparePackageVersions(packageUpgradeSideOf(installed), packageUpgradeSideOf(converted)));
         const { findingSet } = verdict;
         if (verdict.findings.length === 0) return {};
@@ -4967,7 +4824,7 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             }
             const details = isPlainObject(err?.details) ? err.details : undefined;
             // [#30964] The environment's half of "both sides audited": the copy failed.
-            await this.recordUnmanagedImport(ctx, {
+            await this.recordUnmanagedImport(c, ctx, {
                 action: 'package_unmanaged_import',
                 packageId: manifestId,
                 ...(version ? { version } : {}),
@@ -4989,7 +4846,7 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
 
         // [#30964] The environment's half of "both sides audited": the copy
         // landed — the new base, its namespace, what was copied.
-        await this.recordUnmanagedImport(ctx, {
+        await this.recordUnmanagedImport(c, ctx, {
             action: 'package_unmanaged_import',
             packageId: manifestId,
             ...((result.sourceVersion ?? version) ? { version: result.sourceVersion ?? version } : {}),
@@ -6039,21 +5896,15 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
      * hands an event, never a row. A host with no audit plugin has no ledger,
      * so the call is skipped; a slot that throws anyway is logged, never
      * answered: the copy's answer is the copy's, whatever the ledger does.
+     * [#31481] On a grant-path call (`c`, {@link installForGrant}) the call is
+     * marked audited, so its refusal is not handed a second event.
      */
-    private recordUnmanagedImport = async (ctx: PluginContext, event: UnmanagedImportAuditEvent): Promise<void> => {
+    private recordUnmanagedImport = async (c: any, ctx: PluginContext, event: UnmanagedImportAuditEvent): Promise<void> => {
+        const call = this.grantCalls.get(c);
+        if (call) call.audited = true;
         let audit: UnmanagedImportAuditSurface | undefined;
         try { audit = ctx.getService<UnmanagedImportAuditSurface>('audit'); } catch { return; /* no audit plugin */ }
-        const record = audit?.recordPackageLifecycleEvent;
-        if (typeof record !== 'function') return;
-        try {
-            await record.call(audit, event);
-        } catch (err: any) {
-            ctx.logger?.error?.(
-                `[MarketplaceInstallLocal] the unmanaged install of ${event.packageId} (${event.outcome}) was answered, but the `
-                + 'audit service refused its `package_unmanaged_import` row, so the compliance ledger does not record it: '
-                + `${err?.message ?? err}`,
-            );
-        }
+        await recordUnmanagedImportEvent(audit, ctx.logger, 'MarketplaceInstallLocal', event);
     };
 
     /**

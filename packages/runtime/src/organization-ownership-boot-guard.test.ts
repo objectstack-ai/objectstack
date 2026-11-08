@@ -25,6 +25,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { DatabaseSync } from 'node:sqlite';
 import { assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import { ORGANIZATION_OWNERSHIP_SHAPE_GENERATION } from '@objectstack/spec/system';
+// AppPlugin reaches `@objectstack/metadata` through a dynamic import: pay its load at collection.
+import '@objectstack/metadata';
 import { AppPlugin } from './app-plugin.js';
 import {
   assertOrganizationOwnershipMigrated,
@@ -32,6 +34,7 @@ import {
   OrganizationOwnershipBirthMarkerPlugin,
   OrganizationOwnershipBootGuardPlugin,
   organizationOwnershipRefusalMessage,
+  ORGANIZATION_OWNERSHIP_CREDENTIAL_URL_UNSET as CREDENTIAL_URL_UNSET,
   recordOrganizationOwnershipBirth,
   ORGANIZATION_OWNERSHIP_BOOT_GUARD_PLUGIN_NAME,
   ORGANIZATION_OWNERSHIP_BOOT_REFUSAL_CODE,
@@ -183,6 +186,52 @@ describe('the v18 boot refusal (ADR-0131 D10 item 5; the birth marker, ruling �
     const dev = organizationOwnershipRefusalMessage([], 'absent', { dev: true, authSecretFile: '/srv/os/home/auth-secret' });
     expect(dev).toContain("'os migrate organization-ownership --dev --out PLAN'");
     expect(dev).not.toContain('OS_AUTH_SECRET');
+  });
+
+  it('⭐ #31488: a boot whose database the ceremony would not find by default names it in both commands, in every refusal', async () => {
+    v17Shape();
+    const opts = { authSecretFile: '/srv/os/home/auth-secret', databaseUrl: 'file:/srv/os/home/data/objectstack.db' };
+    const named =
+      'OS_AUTH_SECRET="$(cat /srv/os/home/auth-secret)" os migrate organization-ownership ' +
+      '--database-url file:/srv/os/home/data/objectstack.db';
+    const absent = await refusalOf(() => assertOrganizationOwnershipMigrated(engine({ stats: FOUND }), undefined, opts));
+    expect(absent.message).toContain(
+      `Run '${named} --out PLAN' to write and review its plan, take a backup, then run ` +
+        `'${named} --apply --plan-file PLAN --backup-taken', and start again.`,
+    );
+    for (const state of ['outdated', 'unreadable', 'unverified'] as const) {
+      expect(organizationOwnershipRefusalMessage(['sys_job'], state, opts), state)
+        .toContain(`'${named} --apply --plan-file PLAN --backup-taken'`);
+    }
+    // A path a shell would split or expand is one double-quoted word.
+    expect(organizationOwnershipRefusalMessage([], 'absent', { databaseUrl: 'file:/data/o p/$x.db' }))
+      .toContain('os migrate organization-ownership --database-url "file:/data/o p/\\$x.db" --out PLAN');
+    // A development boot keeps `--dev`, and names the database after it.
+    expect(organizationOwnershipRefusalMessage([], 'absent', { dev: true, databaseUrl: 'file:A.db' }))
+      .toContain("'os migrate organization-ownership --dev --database-url file:A.db --out PLAN'");
+  });
+
+  it('⭐ #31488: a database URL that carries a credential is never printed — the commands read it from OS_DATABASE_URL, loudly', () => {
+    for (const url of [
+      'postgres://app:s3cret-pw@db.internal:5432/os',
+      'libsql://os-prod.turso.io?authToken=tok-s3cret',
+    ]) {
+      const message = organizationOwnershipRefusalMessage([], 'absent', { databaseUrl: url });
+      expect(message, url).not.toContain('s3cret');
+      expect(message, url).toContain(
+        `'os migrate organization-ownership --database-url "\${OS_DATABASE_URL:?${CREDENTIAL_URL_UNSET}}" --out PLAN'`,
+      );
+      expect(message, url).toContain('carries a credential, so it is not printed');
+    }
+    // A URL with no credential (a user name alone included) is printed as it is.
+    expect(organizationOwnershipRefusalMessage([], 'absent', { databaseUrl: 'postgres://app@db.internal/os' }))
+      .toContain("'os migrate organization-ownership --database-url postgres://app@db.internal/os --out PLAN'");
+  });
+
+  it('a boot the ceremony finds by default is told the commands as before: no --database-url', () => {
+    const message = organizationOwnershipRefusalMessage([], 'absent', { authSecretFile: '/srv/os/home/auth-secret' });
+    expect(message).not.toContain('--database-url');
+    expect(message).not.toContain('OS_DATABASE_URL');
   });
 
   it('⭐ R1: a store created from empty gets its birth marker, exactly once, and boots — again and again', async () => {

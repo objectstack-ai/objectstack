@@ -1942,17 +1942,20 @@ export class SettingsService {
    * the judgment of a written value: a registered source's answer when it has
    * one, else `declared`, judged by {@link firstRejectedOption}. Both doors ask
    * here, the save (`validatePatch`) and the `OS_*` override
-   * (`effectiveEnvOverride`), so a source moves both at once.
+   * (`effectiveEnvOverride`), so a source moves both at once. `sourced` says
+   * which table it is: `true` when a registered source answered (even with no
+   * options), `false` for the declared fallback.
    */
   private optionTableOf(
     namespace: string,
     key: string,
     declared: string[],
-  ): { allowed: string[]; judge: (value: unknown) => { value: unknown } | null } {
+  ): { allowed: string[]; sourced: boolean; judge: (value: unknown) => { value: unknown } | null } {
     const answer = this.optionSourceAnswer(namespace, key);
-    if (!answer) return { allowed: declared, judge: (value) => firstRejectedOption(declared, value) };
+    if (!answer) return { allowed: declared, sourced: false, judge: (value) => firstRejectedOption(declared, value) };
     return {
       allowed: answer.options.map((opt) => opt.value),
+      sourced: true,
       judge: (value) => {
         // Element-wise and in string form, as `firstRejectedOption` judges.
         const picked = Array.isArray(value) ? value : [value];
@@ -1970,7 +1973,13 @@ export class SettingsService {
    * ONE judgement for both doors ({@link firstMapShapeMiss}); the key column's
    * domain is the key's option table as {@link optionTableOf} serves it, a
    * registered source's answer else the declared `options`, so a source moves
-   * both doors at once. An empty table admits every key.
+   * both doors at once.
+   *
+   * [#31422] A source that answered is the domain even when it answered no
+   * keys: the running system has nothing a key could name (a host with no
+   * lifecycle-declared object), so every key is refused. Only the declared
+   * fallback with no keys (no source registered, or one that could not answer)
+   * admits every key, as a key with no declared `options` always has.
    */
   private mapShapeVerdict(
     reg: RegisteredManifest,
@@ -1980,8 +1989,8 @@ export class SettingsService {
   ): { shape: DeclaredMapShape; miss: MapShapeMiss; allowedKeys: string[] } | null {
     const map = reg.maps.get(key);
     if (!map) return null;
-    const { allowed, judge } = this.optionTableOf(namespace, key, map.declaredKeys);
-    const admitsKey = allowed.length > 0 ? (entry: string) => judge(entry) === null : undefined;
+    const { allowed, sourced, judge } = this.optionTableOf(namespace, key, map.declaredKeys);
+    const admitsKey = sourced || allowed.length > 0 ? (entry: string) => judge(entry) === null : undefined;
     const miss = firstMapShapeMiss(map.shape, value, admitsKey);
     return miss ? { shape: map.shape, miss, allowedKeys: allowed } : null;
   }
