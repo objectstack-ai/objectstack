@@ -763,8 +763,9 @@ export function createUploadSessionReapGuard(
         // A cold sweep runs long after the live session, so the S3 adapter's
         // in-process `uploadId → key` map (populated by `setUploadKey` during
         // upload) is empty — re-seed it from the row so the abort can resolve
-        // the S3 key. `setUploadKey` is S3-specific and not forwarded by the
-        // swappable proxy, so reach the inner adapter; a no-op for `local`.
+        // the S3 key. `setUploadKey` is S3-specific and off the IStorageService
+        // contract; the inner adapter is reached directly (the swappable proxy
+        // forwards it too); a no-op for `local`.
         const inner: any = typeof (storage as any).getInner === 'function' ? (storage as any).getInner() : storage;
         if (typeof row.key === 'string' && row.key && typeof inner?.setUploadKey === 'function') {
           inner.setUploadKey(backendId, row.key);
