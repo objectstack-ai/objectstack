@@ -1049,7 +1049,10 @@ export interface AuthManagerOptions extends Partial<AuthConfig> {
    *   identity-proofing front door.
    *
    * Either way the account's `login_failed` row records the reason
-   * `ACCOUNT_LOCKED`, and the lock holds against the correct password.
+   * `ACCOUNT_LOCKED`, and the lock holds against the correct password. A
+   * sign-in reached outside better-auth's endpoint pipeline (no request state
+   * open) cannot be answered uniformly; it is refused `403 ACCOUNT_LOCKED`
+   * and logged as a degradation.
    */
   lockoutRefusal?: 'uniform' | 'explicit';
 
@@ -6121,7 +6124,10 @@ export class AuthManager {
    * password: with the answer a wrong password gets (`401
    * INVALID_EMAIL_OR_PASSWORD`, made by better-auth's own credential check,
    * `sign-in-lockout-refusal.ts`), or with `403 ACCOUNT_LOCKED` when the
-   * deployment opted in (`lockoutRefusal: 'explicit'`). Given the endpoint
+   * deployment opted in (`lockoutRefusal: 'explicit'`). A call with no
+   * request state open (outside better-auth's endpoint pipeline, which opens
+   * one for every call) cannot hand the verdict to that check, so it is
+   * refused here with `403 ACCOUNT_LOCKED` and reported. Given the endpoint
    * context `ctx`, a locked refusal writes the account's `login_failed` row
    * with the reason `ACCOUNT_LOCKED` (`auth-session-audit.ts`).
    *

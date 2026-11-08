@@ -4027,15 +4027,18 @@ describe('AuthManager', () => {
       expect(engine.update).not.toHaveBeenCalled();
     });
 
-    it('admitSignInAttempt refuses a locked account with the wrong-password answer when it cannot hand the verdict on', async () => {
+    it('admitSignInAttempt refuses a locked account by itself, explicitly and reported, when it cannot hand the verdict on', async () => {
       // No request state open: the credential check could not see the verdict,
-      // so the gate refuses by itself — with the answer a wrong password gets.
+      // so the gate refuses by itself — the lock never yields to the password.
       const engine = makeEngine(LOCKED_ROW());
-      const m = mgr(engine, { lockoutThreshold: 3 });
+      const logger = { warn: vi.fn(), info: vi.fn(), error: vi.fn(), debug: vi.fn() };
+      const m = mgr(engine, { lockoutThreshold: 3, logger });
       await expect((m as any).admitSignInAttempt('a@b.com')).rejects.toMatchObject({
-        statusCode: 401,
-        body: { code: 'INVALID_EMAIL_OR_PASSWORD' },
+        statusCode: 403,
+        body: { code: 'ACCOUNT_LOCKED' },
       });
+      expect(logger.warn).toHaveBeenCalledTimes(1);
+      expect(logger.warn.mock.calls[0]?.[1]).toMatchObject({ object: 'sys_user', threshold: 3 });
     });
 
     it('admitSignInAttempt hands a locked verdict on, and the settlement neither counts nor clears it', async () => {

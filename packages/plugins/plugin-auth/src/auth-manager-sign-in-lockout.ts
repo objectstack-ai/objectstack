@@ -259,28 +259,33 @@ export async function admitSignInAttempt(
       }),
     );
   }
-  if (this.config.lockoutRefusal === 'explicit') {
-    const { APIError } = await import('better-auth/api');
-    throw new APIError('FORBIDDEN', {
-      message:
-        'This account is temporarily locked after too many failed sign-in ' +
-        'attempts. Try again later or ask an administrator to unlock it.',
-      code: 'ACCOUNT_LOCKED',
-    });
-  }
+  const explicit = this.config.lockoutRefusal === 'explicit';
   // The endpoint's own credential check refuses it, with the answer a wrong
   // password gets (`sign-in-lockout-refusal.ts`).
-  if (carried) return;
-  // No request state to carry the verdict to that check: refuse here, with the
-  // wrong-password answer, after the one password hash that answer costs.
-  if (typeof ctx?.context?.password?.hash === 'function') {
-    await ctx.context.password.hash(typeof ctx?.body?.password === 'string' ? ctx.body.password : '');
+  if (carried && !explicit) return;
+  if (!carried && !explicit) {
+    // better-auth opens a request state for every endpoint call, so a call
+    // with none ran outside its pipeline: the verdict cannot reach the
+    // credential check, and the lock must not yield to a correct password. It
+    // is refused here with the explicit answer, and that is said, because the
+    // uniform answer this deployment chose is not the one it gets.
+    this.logDurabilityDegradation(
+      'AuthManager: a sign-in for a locked account ran with no request state, so the lock '
+        + 'refused it with 403 ACCOUNT_LOCKED instead of the wrong-password answer '
+        + '`lockoutRefusal: \'uniform\'` gives (ADR-0069 D2). That answer tells the caller the '
+        + 'account exists. Remedy: reach /sign-in/email through the better-auth handler or an '
+        + '`auth.api` call, both of which open a request state.',
+      new Error('no request state is open'),
+      { object: 'sys_user', threshold },
+    );
   }
-  const [{ APIError }, { BASE_ERROR_CODES }] = await Promise.all([
-    import('better-auth/api'),
-    import('@better-auth/core/error'),
-  ]);
-  throw APIError.from('UNAUTHORIZED', BASE_ERROR_CODES.INVALID_EMAIL_OR_PASSWORD);
+  const { APIError } = await import('better-auth/api');
+  throw new APIError('FORBIDDEN', {
+    message:
+      'This account is temporarily locked after too many failed sign-in ' +
+      'attempts. Try again later or ask an administrator to unlock it.',
+    code: 'ACCOUNT_LOCKED',
+  });
 }
 
 /** How a `/sign-in/email` ended, as the after-hook judged it. */
