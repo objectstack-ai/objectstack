@@ -797,6 +797,26 @@ describe('the record resource: a coded refusal adds its code beside the unchange
         JSON.stringify({ error: 'Internal server error', code: 'SERVICE_UNAVAILABLE', status: 503 }),
       );
     });
+
+    it('[#31407] an unregistered code with a declared 4xx: the closed code and its declaredCode, the sentence kept, unlogged', async () => {
+      const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const thrown = leaveExhausted();
+      const text = await readRefused(thrown);
+      expect(text).toBe(JSON.stringify({
+        error: 'No leave days left this year.', code: 'RESOURCE_CONFLICT', status: 409, declaredCode: 'LEAVE_EXHAUSTED',
+      }));
+      expect(JSON.parse(text)).toEqual(doorBody(thrown));
+      expect(log).not.toHaveBeenCalled();
+    });
+
+    it('[#31407] a status-less code the door refuses carries the door\'s userMessage after its code', async () => {
+      const thrown = Object.assign(new Error('Field read denied: salary'), {
+        code: 'PERMISSION_DENIED', userMessage: 'Ask an administrator for access to salaries.',
+      });
+      expect(await readRefused(thrown)).toBe(JSON.stringify({
+        error: 'Field read denied: salary', code: 'PERMISSION_DENIED', userMessage: 'Ask an administrator for access to salaries.',
+      }));
+    });
   });
 });
 
@@ -1155,6 +1175,11 @@ function ledgerClosing(extra: Record<string, unknown> = {}): Error {
   return Object.assign(new Error('The ledger is closing.'), { code: 'SERVICE_UNAVAILABLE', status: 503 }, extra);
 }
 
+/** [#31407] An app's own, unregistered code with a declared 4xx, with its own sentence. */
+function leaveExhausted(extra: Record<string, unknown> = {}): Error {
+  return Object.assign(new Error('No leave days left this year.'), { code: 'LEAVE_EXHAUSTED', status: 409 }, extra);
+}
+
 /** [#31373] An app's own, unregistered code with a declared 5xx, with its own sentence. */
 function vendorDown(extra: Record<string, unknown> = {}): Error {
   return Object.assign(new Error('The vendor is down.'), { code: 'VENDOR_DOWN', status: 503 }, extra);
@@ -1373,6 +1398,72 @@ describe('the record data tools: a driver\'s own string code is the /data door\'
       expect(error, site.tool).toEqual({ code: 'SERVICE_UNAVAILABLE', message: 'Internal server error', status: 503 });
       expect('declaredCode' in error, site.tool).toBe(false);
       expect('userMessage' in error, site.tool).toBe(false);
+    }
+  });
+
+  /**
+   * [#31407] A coded refusal (the door answers below 500) keeps the coded
+   * envelope on these faces, but two things the door serves for it were lost:
+   * an app's own unregistered code is demoted there to the status's closed
+   * code with the producer's spelling in `declaredCode`, and a producer's
+   * `userMessage` rides the answer. Both are read off the door's answer, in
+   * `run_action`'s order. A refusal is not a fault, so nothing is logged.
+   */
+  for (const site of FACES) {
+    it(`${site.tool}: an unregistered code with a declared 4xx answers the closed code and its declaredCode, its sentence and status kept, unlogged (#31407)`, async () => {
+      const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const warnLog = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const thrown = leaveExhausted();
+      const { error } = await errorOf(site, thrown);
+      expect(error).toEqual({
+        code: 'RESOURCE_CONFLICT', message: 'No leave days left this year.', status: 409, declaredCode: 'LEAVE_EXHAUSTED',
+      });
+      expect(Object.keys(error)).toEqual(['code', 'message', 'status', 'declaredCode']);
+      expect(error).toEqual(doorWire(thrown));
+      expect(errorLog).not.toHaveBeenCalled();
+      expect(warnLog).not.toHaveBeenCalled();
+    });
+  }
+
+  it('an unregistered declared-4xx code with a userMessage serves both members on every face (#31407)', async () => {
+    const thrown = leaveExhausted({ userMessage: 'Ask your manager for unpaid leave.' });
+    for (const site of FACES) {
+      const { error } = await errorOf(site, thrown);
+      expect(error, site.tool).toEqual({
+        code: 'RESOURCE_CONFLICT',
+        message: 'No leave days left this year.',
+        status: 409,
+        declaredCode: 'LEAVE_EXHAUSTED',
+        userMessage: 'Ask your manager for unpaid leave.',
+      });
+      expect(error, site.tool).toEqual(doorWire(thrown));
+    }
+  });
+
+  // The status-less refusal keeps its envelope (#23509, #31273 pin it with no
+  // `status`); only the door's `userMessage` joins it.
+  it('a status-less code the door refuses carries the door\'s userMessage on every face (#31407)', async () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const thrown = Object.assign(new Error('Field read denied: salary'), {
+      code: 'PERMISSION_DENIED', userMessage: 'Ask an administrator for access to salaries.',
+    });
+    expect(mapDataError(thrown, 'task').body.userMessage).toBe('Ask an administrator for access to salaries.');
+    for (const site of FACES) {
+      const { error } = await errorOf(site, thrown);
+      expect(error, site.tool).toEqual({
+        code: 'PERMISSION_DENIED', message: 'Field read denied: salary', userMessage: 'Ask an administrator for access to salaries.',
+      });
+      expect(Object.keys(error), site.tool).toEqual(['code', 'message', 'userMessage']);
+    }
+    expect(log).not.toHaveBeenCalled();
+  });
+
+  it('CONTROL: a registered declared-4xx code and a coded sandboxed refusal carry no declaredCode or userMessage (#31407)', async () => {
+    for (const site of FACES) {
+      for (const thrown of [Object.assign(new Error('Locked.'), { code: 'RECORD_LOCKED', status: 409 }), codedSandboxRefusal()]) {
+        const { error } = await errorOf(site, thrown);
+        expect(Object.keys(error), site.tool).toEqual(['code', 'message', 'status']);
+      }
     }
   });
 });

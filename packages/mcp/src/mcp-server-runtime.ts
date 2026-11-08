@@ -1585,10 +1585,14 @@ export class MCPServerRuntime {
             const envelope = dataDoorRefusalEnvelope(err, objectName);
             let body: { error: string; code?: string; status?: number; declaredCode?: string; userMessage?: string };
             if (envelope) {
+              // [#31407] …with the door's `declaredCode` / `userMessage` beside
+              // a coded refusal, as the record data tools serve them.
               body = {
                 error: envelope.message,
                 code: envelope.code,
                 ...(envelope.status !== undefined ? { status: envelope.status } : {}),
+                ...(envelope.declaredCode !== undefined ? { declaredCode: envelope.declaredCode } : {}),
+                ...(envelope.userMessage !== undefined ? { userMessage: envelope.userMessage } : {}),
               };
             } else {
               const door = dataDoorAnswerOf(err, objectName);
