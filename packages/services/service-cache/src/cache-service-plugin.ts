@@ -226,7 +226,7 @@ function describeDriver(cluster: unknown): string | undefined {
  * import { CacheServicePlugin } from '@objectstack/service-cache';
  *
  * const kernel = new ObjectKernel();
- * kernel.use(new CacheServicePlugin({ adapter: 'memory', memory: { maxSize: 1000 } }));
+ * kernel.use(new CacheServicePlugin({ memory: { maxSize: 1000 } }));
  * await kernel.bootstrap();
  *
  * const cache = kernel.getService('cache');

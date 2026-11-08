@@ -1,17 +1,11 @@
 # @objectstack/service-cache
 
-The shipped provider for the kernel's **`cache`** service slot — an in-memory
-`ICacheService` implementation with metrics instrumentation.
+The shipped provider for the kernel's **`cache`** service slot — an `ICacheService`
+implementation with metrics instrumentation, in memory by default and on Redis when a
+multi-node deployment shares one.
 
 Slot criticality: `core` (`ServiceRequirementDef` in `@objectstack/spec/system`): the
 kernel warns and degrades if the slot is empty, it does not fail to start.
-
-> ⚠️ **The Redis adapter is a skeleton, not a shipped capability.**
-> `RedisCacheAdapter` throws `RedisCacheAdapter not yet implemented` from every method,
-> and `new CacheServicePlugin({ adapter: 'redis' })` throws during `init` rather than
-> falling back. The only working adapter today is `MemoryCacheAdapter`. For a shared
-> cache, register your own `ICacheService` implementation under the slot (see
-> [Custom implementations](#custom-implementations)).
 
 ## Installation
 
@@ -35,16 +29,46 @@ await cache.set('user:123', { name: 'Alice' }, 60);   // ttl in SECONDS, positio
 const user = await cache.get<{ name: string }>('user:123');
 ```
 
+## Which adapter
+
+Leave `adapter` unset and the deployment's topology decides, at `init`:
+
+| Deployment | Cache |
+|:---|:---|
+| Single node — no multi-node declaration | `MemoryCacheAdapter`. Nothing else is read; the boot is the one it always was. |
+| Multi-node declared (`OS_EXPECT_MULTI_NODE=true` or `OS_CLUSTER_REPLICAS` > 1) over the `redis` cluster driver | `RedisCacheAdapter`, on a connection duplicated from the driver's — the same Redis, the same key prefix, every node one cache. |
+| Multi-node declared over that driver, but no shared cache is possible (`adapter: 'memory'`, or a driver build that offers no connection) | **Boot is refused** with an error that names the fix. |
+| Multi-node declared over any other driver, or with no cluster service | `MemoryCacheAdapter`, plus one `warn` line saying cache-backed limits multiply by the replica count. |
+
+Why it matters: a counter kept in the cache — better-auth's sign-in rate limits through
+`rateLimit.customStorage`, the inbound API budget, the OTP send budget — is one counter
+per cache. On a per-process cache, N replicas each count alone and admit N times the
+declared limit.
+
+The Redis connection comes from `@objectstack/service-cluster-redis`, which `os serve`
+mounts for `OS_CLUSTER_DRIVER=redis` + `OS_REDIS_URL`. The cache plugin declares the
+cluster plugin as an optional dependency, so it reads the driver after it started,
+whatever order the two were registered in.
+
 ## Plugin options
 
-`CacheServicePluginOptions` has exactly four fields, all optional.
+`CacheServicePluginOptions` — every field optional.
 
 | Option | Type | Default | Purpose |
 |:---|:---|:---|:---|
-| `adapter` | `'memory' \| 'redis'` | `'memory'` | `'redis'` throws at `init` — see the warning above. |
+| `adapter` | `'memory' \| 'redis'` | unset (topology decides) | `'redis'` forces Redis: over `redis.client`, else the redis cluster driver's connection, else boot is refused. `'memory'` forces memory, except in a declared multi-node redis deployment, where it is refused. |
 | `memory` | `MemoryCacheAdapterOptions` | `{}` | Forwarded to `MemoryCacheAdapter`. |
-| `redisUrl` | `string` | none | Read by nothing today; kept for the unimplemented Redis path. |
+| `redis` | `CacheServicePluginRedisOptions` | `{}` | Read whenever the adapter is Redis. |
+| `redisUrl` | `string` | none | **Deprecated, never read.** The plugin builds no client from a URL; the Redis is the cluster driver's, or `redis.client`. |
 | `metrics` | `MetricsRegistry` | resolved from the kernel | Explicit metrics backend; wins over the service-registry lookup. |
+
+`CacheServicePluginRedisOptions`:
+
+| Option | Type | Default | Purpose |
+|:---|:---|:---|:---|
+| `client` | `RedisCacheClient` (an ioredis client) | the cluster driver's connection | A client you own. Wins over the driver's connection; the plugin never closes it. |
+| `keyPrefix` | `string` | the driver's (`'os:'`) | Entries live at `<keyPrefix>cache:<key>`. |
+| `defaultTtl` | `number` | `0` (no expiry) | Default TTL in seconds. |
 
 `MemoryCacheAdapterOptions`:
 
@@ -99,12 +123,32 @@ const s = await cache.stats();
 ```
 
 `MemoryCacheAdapter` returns `hits`, `misses` and `keyCount`; it does not report
-`memoryUsage` (the contract declares it optional).
+`memoryUsage` (the contract declares it optional). `RedisCacheAdapter` returns the same
+three, in two scopes: `hits` / `misses` count this process's lookups, `keyCount` counts
+the shared `<keyPrefix>cache:` namespace on the server.
+
+### What the Redis adapter does differently
+
+- **Values are JSON.** They cross a process boundary, so a value is stored as
+  `JSON.stringify(value)`: objects, arrays, strings, numbers, booleans and `null`
+  round-trip, a `Date` comes back as its ISO string, and a value JSON cannot represent
+  (`undefined`, a function, a `bigint`) is refused with a `TypeError`.
+- **A Redis failure is thrown, never answered as a miss.** An outage read as "not found"
+  would silently reset every counter kept in the cache. Each consumer decides what a
+  failure means: the inbound limiter lets the request through; better-auth's sign-in
+  limiter fails the request.
+- **`clear()` touches only `<keyPrefix>cache:`** — never the cluster driver's own
+  `kv:` / `ctr:` / lock keys under the same prefix.
+- **Counters stay read-modify-write.** `ICacheService` has no atomic increment, so two
+  nodes counting one key in the same instant can both be admitted at a limit's
+  boundary — the bounded imprecision ADR-0069 D2 accepts in exchange for one shared
+  count.
 
 ## Metrics
 
-`MemoryCacheAdapter` emits the `cache_lookups_total` and `cache_writes_total` counters
-(`SEMCONV` in `@objectstack/observability`). The registry is resolved in this order:
+Both adapters emit the `cache_lookups_total` and `cache_writes_total` counters
+(`SEMCONV` in `@objectstack/observability`), labelled `adapter="memory"` or
+`adapter="redis"`. The registry is resolved in this order:
 
 1. `options.metrics` (explicit constructor wiring)
 2. `ctx.getService('observability:metrics')` — registered by `ObservabilityServicePlugin`
@@ -119,8 +163,9 @@ the fact itself, not a proxy for reduced capability (ADR-0076 D12).
 
 ## Custom implementations
 
-The slot is multi-provider. To back the cache with Redis, Memcached or anything else,
-register an object satisfying `ICacheService` under `'cache'` from your own plugin:
+The slot is multi-provider. To back the cache with Memcached or anything else this
+package does not ship, register an object satisfying `ICacheService` under `'cache'`
+from your own plugin:
 
 ```typescript
 import type { CacheStats, ICacheService } from '@objectstack/spec/contracts';
@@ -146,7 +191,8 @@ import {
 } from '@objectstack/service-cache';
 ```
 
-Types: `CacheServicePluginOptions`, `MemoryCacheAdapterOptions`, `RedisCacheAdapterOptions`.
+Types: `CacheServicePluginOptions`, `CacheServicePluginRedisOptions`,
+`MemoryCacheAdapterOptions`, `RedisCacheAdapterOptions`, `RedisCacheClient`.
 
 ## License
 
