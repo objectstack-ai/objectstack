@@ -442,7 +442,7 @@ describe('SCIM group push → mapped permission set', () => {
     const saved = await saveMapping(h, { connectionId: CONNECTION, groupExternalId: 'okta-grp-sales', permissionSet: SALES });
 
     expect(saved.status, JSON.stringify(saved.body)).toBe(200);
-    expect((saved.body as { data: { organizationId: string } }).data.organizationId).toBe(ORG_B);
+    expect((saved.body as unknown as { data: { organizationId: string } }).data.organizationId).toBe(ORG_B);
     const rows = (await h.engine.find('sys_idp_group_mapping', {}, SYSTEM)) as Array<Record<string, unknown>>;
     expect(rows.map((r) => r.organization_id)).toEqual([ORG_B]);
   });
