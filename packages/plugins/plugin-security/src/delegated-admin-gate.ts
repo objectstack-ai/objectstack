@@ -1768,11 +1768,8 @@ export class DelegatedAdminGate {
    * Fail closed on both axes: a name that resolves to no row of the caller's
    * own organization approves nothing, exactly as a misconfigured scope does.
    * `organizationId` is required: a context that names no organization holds
-   * no scope ({@link resolveHeldScopes}) and never reaches this read, so the
-   * by-name read always carries an organization and the candidates are always
-   * reduced to that organization's own row — the organization-less arm of
-   * {@link resolveOwnOrganizationRow}, a seeding pass's, never answers a
-   * delegation boundary.
+   * no scope ({@link resolveHeldScopes}) and never reaches this read, so every
+   * by-name read here carries the caller's organization.
    */
   private async resolveSubtree(
     businessUnitName: string,
