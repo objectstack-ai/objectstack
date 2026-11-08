@@ -5,7 +5,7 @@
 **Builds on**: [ADR-0003](./0003-package-as-first-class-citizen.md) (package as first-class citizen), [ADR-0005](./0005-metadata-customization-overlay.md) (artifact vs runtime overlay precedence), [ADR-0008](./0008-metadata-repository-and-change-log.md) (metadata repository, `MetaRef` identity), [ADR-0010](./0010-metadata-protection-model.md) (package provenance / `_packageId` stamping)
 **Consumers**: `@objectstack/objectql` (`SchemaRegistry.registerItem`, `ObjectQL.registerApp`, install path), `@objectstack/console` / `objectui` (routing + metadata resolution), package authors, CLI/CI install path, the app marketplace registry.
 **Surfaced by**: ADR-0046 review (doc naming) → generalised to all bare-named metadata → re-examined through the app-marketplace install lens.
-**Addenda**: [2026-08-08 — publish-time / marketplace namespace exclusivity](#addendum-2026-08-08-publish-time--marketplace-namespace-exclusivity) (**Accepted** 2026-08-08 — maintainer ruling on #1825, [acceptance comment 5226411687](https://github.com/objectstack-ai/objectstack/issues/1825#issuecomment-5226411687), landed by PR #6671; additive to §3.2, supersedes nothing); [2026-11-06 — bare names resolved without a package hold one package](#addendum-2026-11-06-bare-names-resolved-without-a-package-hold-one-package--34-narrowed) (**Accepted**, ruling C on #30798, phase 1; narrows §3.4 for picklists, mappings, datasets, APIs, object-less actions, engine functions, flows, webhooks, connectors, email templates, agents and skills — phase 1 complete — supersedes nothing).
+**Addenda**: [2026-08-08 — publish-time / marketplace namespace exclusivity](#addendum-2026-08-08-publish-time--marketplace-namespace-exclusivity) (**Accepted** 2026-08-08 — maintainer ruling on #1825, [acceptance comment 5226411687](https://github.com/objectstack-ai/objectstack/issues/1825#issuecomment-5226411687), landed by PR #6671; additive to §3.2, supersedes nothing); [2026-11-06 — bare names resolved without a package hold one package](#addendum-2026-11-06-bare-names-resolved-without-a-package-hold-one-package--34-narrowed) (**Accepted**, ruling C on #30798, phase 1; narrows §3.4 for picklists, mappings, datasets, APIs, object-less actions, engine functions, flows, webhooks, connectors, email templates, agents and skills — phase 1 complete — and, by its dated note P1.10 (2026-11-08), tools; supersedes nothing).
 
 ---
 
@@ -268,17 +268,17 @@ package — stays covered by the `naming/namespace-prefix` lint in `os lint`.
 
 > **Narrowed (2026-11-06) — picklists, mappings, datasets, APIs, object-less
 > actions, engine functions, flows, webhooks, connectors, email templates, agents
-> and skills are out of §3.4.** Their consumers resolve the name with no package — a field's
+> and skills are out of §3.4, and tools since 2026-11-08 (P1.10).** Their consumers resolve the name with no package — a field's
 > `picklist`, an import's `mappingName`, a dashboard's `datasetName`, the
 > endpoint matcher's one API per name, `/actions/global/NAME`, a flow `script`
 > node's function, the automation engine's one armed flow per name, the
 > dispatcher's one declared webhook per name, the connector picker's one
 > connector per name, a send's `template`, `/meta/agent/NAME`, an MCP client's
-> skill prompt — so with two holders every caller is
+> skill prompt, `/meta/tool/NAME` and a skill's `tools` — so with two holders every caller is
 > served one of them, chosen by registration order, measured on a booted
 > two-package deployment (#30803). Once the cold boot has sealed the registry, a
 > package whose picklist, mapping, dataset, API, object-less action, flow,
-> webhook, connector, email template, agent or skill bears a name another
+> webhook, connector, email template, agent, skill or tool bears a name another
 > installed package holds is refused at managed install and at package registration (a built-in's
 > name, at managed install), and a package whose handlers bring a function
 > another package holds is refused at the hook binder's bind, each naming both
@@ -286,8 +286,8 @@ package — stays covered by the `naming/namespace-prefix` lint in `os lint`.
 > environment item under a package's name is the ADR-0005 overlay. ⛔ Nor is the
 > email service's built-in template bundle: an app's same-named template
 > overrides it by contract (ADR-0131 D6), so that package holds no template name
-> and is refused none. Every other type keeps §3.4 as written, among them a
-> `tool` and an action bound to an object. See
+> and is refused none. Every other type keeps §3.4 as written, among them an
+> action bound to an object. See
 > [Addendum (2026-11-06)](#addendum-2026-11-06-bare-names-resolved-without-a-package-hold-one-package--34-narrowed).
 
 ### 3.5 Namespace rename-on-install is deferred (non-goal)
@@ -1069,7 +1069,8 @@ first, as the maintainer ordered on 2026-11-06 (all of them kept in #30803): the
 data family (P1.1), the request family (P1.7), the flow family (P1.8) and, last,
 the AI family — `agent` and `skill` (P1.9). P1.9's change closes phase 1. `tool`
 and `rag_pipeline` were never in the ruling's list; P1.9 records what was
-measured of them.
+measured of them. `tool` joined afterwards, on its own card and measurement
+(P1.10, 2026-11-08); `rag_pipeline` stays out.
 
 ### P1.6 Where it is implemented
 
@@ -1203,12 +1204,13 @@ holders, the same envelope and rename. Neither is bundled, and neither has an
 overridable baseline or a built-in name. An agent and a skill are two types: one
 package's agent and another's skill under one name never meet.
 
-**Not in the list.** A `tool` is not covered — the ruling's types do not name it.
-Measured beside them: `/meta/tool/NAME` serves the first-registered package's
-tool as well; the readers that resolve a tool by name are the cloud's. A
+**Not in the list.** A `tool` is not covered by this change — the ruling's types
+do not name it. Measured beside them: `/meta/tool/NAME` serves the
+first-registered package's tool as well. (It joined the list later, on its own
+card and measurement: P1.10.) A
 `rag_pipeline` cannot be declared through `defineStack` (the stack schema
-refuses `ragPipelines`) and registered nothing in the measurement. Both are left
-as §3.4 has them.
+refuses `ragPipelines`) and registered nothing in the measurement. `rag_pipeline` is left
+as §3.4 has it.
 
 **The cold boot** reads the two with the registry's other holders, under P1.3's
 switch (`'warn'`). This is the series' closing change: phase 1's list is
@@ -1216,9 +1218,9 @@ complete, and phase 2 (#30804, #30805) and phase 3 (#30806) follow.
 
 ### P1.10 (2026-11-08) `tool` joins the list, after the AI family
 
-A dated note under this addendum; it narrows §3.4 for one more type and amends
-no earlier text, so read P1.2's list, P1.5's series and P1.9's "Not in the list"
-with it. The maintainer accepted a separate card for `tool` out of P1.9's
+A dated note under this addendum; it narrows §3.4 for one more type. The
+header's Addenda entry, §3.4's 2026-11-06 note, P1.5 and P1.9's "Not in the
+list" name it beside the earlier types. The maintainer accepted a separate card for `tool` out of P1.9's
 measurement (「以上都同意」, 2026-11-08, #31414): measure the readers that resolve a
 tool by name, and if any carries no package, `tool` joins P1.2's list the way
 the AI family did.

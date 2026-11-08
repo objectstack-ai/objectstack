@@ -4,7 +4,7 @@
 
 feat(objectql)!: a tool holds one name per package — once the cold boot has sealed the registry, a package declaring a tool under a name another installed package holds is refused at install and registration, naming both holders and the rename; a boot that already holds such a clash warns.
 
-Clause-②: yes (narrowing) — the engine's package door (`SchemaRegistry.installPackage`) and item seam (`SchemaRegistry.registerItem`) refuse, after the cold boot, a package registration they accepted before: one whose tool bears a name another installed package holds. Nothing is widened.
+Clause-②: no (narrowing) — the engine's package door (`SchemaRegistry.installPackage`) and item seam (`SchemaRegistry.registerItem`) refuse, after the cold boot, a package registration they accepted before: one whose tool bears a name another installed package holds. Nothing is widened.
 Metadata-protocol: narrowed
 Skills-docs: none — `skills/**` does not teach that two packages may share a tool name, and the naming rule itself is phase 2's (#30805); the prescription ships in the refusal and warning text and in ADR-0048's 2026-11-06 addendum (P1.10).
 
