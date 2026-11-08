@@ -18,6 +18,8 @@
 
 import { describe, it, expect } from 'vitest';
 import {
+  DatasourceSchema,
+  FEDERATION_ONLY_DRIVER_IDS,
   getDriverConfigJsonSchemaById,
   validateDriverConfig,
   type BuiltinDriverId,
@@ -54,7 +56,40 @@ describe('DRIVER_CATALOG', () => {
     // the assertion is the one that has to move with the rename — stored rows
     // carrying `mongo` are converged by the ADR-0087 conversion
     // `datasource-driver-mongo-to-mongodb`.
-    expect(DRIVER_CATALOG.map((d) => d.id)).toEqual(['memory', 'sqlite', 'postgres', 'mysql', 'mongodb']);
+    expect(DRIVER_CATALOG.map((d) => d.id)).toEqual([
+      'memory', 'sqlite', 'postgres', 'mysql', 'mongodb', 'oracle', 'mssql',
+    ]);
+  });
+
+  /**
+   * The federation-only drivers (ADR-0015 §4.6) are offered, each marked so
+   * the form leaves the managed schema mode out. The mark is the spec's
+   * `FEDERATION_ONLY_DRIVER_IDS` projected, so the set is compared to that
+   * export, not to a list written here.
+   */
+  it('marks exactly the spec\'s federation-only drivers, and no other entry', () => {
+    expect([...FEDERATION_ONLY_DRIVER_IDS].sort()).toEqual(['mssql', 'oracle']);
+    const marked = DRIVER_CATALOG.filter((d) => d.federationOnly === true).map((d) => d.id);
+    expect(marked.sort()).toEqual([...FEDERATION_ONLY_DRIVER_IDS].sort());
+    for (const entry of DRIVER_CATALOG) {
+      if (marked.includes(entry.id)) continue;
+      expect(Object.prototype.hasOwnProperty.call(entry, 'federationOnly'), entry.id).toBe(false);
+    }
+  });
+
+  it('a federation-only entry is the mode the spec refuses as managed and accepts as external', () => {
+    const configs: Record<string, Record<string, unknown>> = {
+      oracle: { connectString: 'db.example.com:1521/ORCLPDB1' },
+      mssql: { host: 'sql.example.com', database: 'erp' },
+    };
+    for (const id of FEDERATION_ONLY_DRIVER_IDS) {
+      const base = { name: 'legacy', driver: id, config: configs[id] };
+      expect(DatasourceSchema.safeParse({ ...base, schemaMode: 'managed' }).success, `${id} managed`).toBe(false);
+      for (const schemaMode of ['external', 'validate-only']) {
+        const parsed = DatasourceSchema.safeParse({ ...base, schemaMode, external: {} });
+        expect(parsed.success, `${id} ${schemaMode}: ${JSON.stringify(parsed.error?.issues)}`).toBe(true);
+      }
+    }
   });
 
   /**
@@ -97,7 +132,7 @@ const entryOf = (catalog: typeof DRIVER_CATALOG, id: string) => {
 const filenameTitle = (tag: string | undefined) => propsOf(entryOf(driverCatalogFor(tag), 'sqlite')).filename.title;
 
 /** The labels that are product names, served as written in every language. */
-const PRODUCT_NAME_LABELS = new Set(['sqlite', 'postgres', 'mysql', 'mongodb']);
+const PRODUCT_NAME_LABELS = new Set(['sqlite', 'postgres', 'mysql', 'mongodb', 'oracle', 'mssql']);
 
 /**
  * The catalog's words in the requester's language. The New datasource dialog
@@ -123,6 +158,26 @@ describe('driverCatalogFor', () => {
     expect(propsOf(entryOf(zh, 'mysql')).host.title).toBe('主机');
     expect(propsOf(entryOf(zh, 'mongodb')).port.title).toBe('端口');
     expect(entryOf(zh, 'memory').label).toBe('内存');
+  });
+
+  it('serves Simplified Chinese words for the federation-only drivers, and keeps their mark', () => {
+    const zh = driverCatalogFor('zh-CN');
+
+    const oracle = entryOf(zh, 'oracle');
+    expect(oracle.label).toBe('Oracle Database');
+    expect(oracle.federationOnly).toBe(true);
+    expect(propsOf(oracle).connectString.title).toBe('连接字符串');
+    expect(propsOf(oracle).serviceName).toMatchObject({ title: '服务名', description: '数据库服务名' });
+    expect(propsOf(oracle).host).toMatchObject({ title: '主机', description: '监听器主机地址' });
+
+    const mssql = entryOf(zh, 'mssql');
+    expect(mssql.label).toBe('SQL Server');
+    expect(mssql.federationOnly).toBe(true);
+    expect(propsOf(mssql).instanceName.title).toBe('实例名');
+    expect(propsOf(mssql).ssl.title).toBe('加密（TLS）');
+    expect(propsOf(mssql).host).toMatchObject({ title: '主机', description: '主机地址' });
+
+    expect(Object.prototype.hasOwnProperty.call(entryOf(zh, 'postgres'), 'federationOnly')).toBe(false);
   });
 
   it('serves a word of its own in every language on the platform table', () => {
@@ -164,7 +219,8 @@ describe('driverCatalogFor', () => {
   it('keeps everything but the words: ids, icons, types and defaults are the English entry\'s', () => {
     for (const tag of PLATFORM_LOCALE_TAGS) {
       const served = driverCatalogFor(tag);
-      expect(served.map((d) => [d.id, d.icon]), tag).toEqual(DRIVER_CATALOG.map((d) => [d.id, d.icon]));
+      expect(served.map((d) => [d.id, d.icon, d.federationOnly]), tag)
+        .toEqual(DRIVER_CATALOG.map((d) => [d.id, d.icon, d.federationOnly]));
       for (const entry of served) {
         const english = propsOf(entryOf(DRIVER_CATALOG, entry.id));
         const translated = propsOf(entry);
