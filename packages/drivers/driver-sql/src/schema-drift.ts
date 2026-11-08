@@ -130,7 +130,7 @@ export function organizationKeyPartSql(column: string): string {
   return `COALESCE(${column}, '${GLOBAL_TENANT}')`;
 }
 
-export type SqlDialectName = 'sqlite' | 'postgres' | 'mysql' | 'unknown';
+export type SqlDialectName = 'sqlite' | 'postgres' | 'mysql' | 'oracle' | 'unknown';
 
 export type DriftCategory = 'safe' | 'needs_confirm' | 'destructive';
 

@@ -432,8 +432,9 @@ Oracle's `INTEGER` — included; a bare `NUMBER` is `decimal`. `RAW(16)` is
 `datetime`. A pre-23ai flag column (`NUMBER(1)` / `CHAR(1)`) is judged as the
 integer or text it is, never coerced to `boolean`. The `oracle` driver id serves
 federation only: a datasource naming it with `schemaMode: 'managed'` is refused
-at authoring, because Gate 1 below would refuse every statement a managed sync
-sends.
+at authoring, because the SQL driver models Oracle for reads and the
+double-opt-in write path only and emits no Oracle DDL, so a managed sync would
+have nothing to send.
 
 ---
 

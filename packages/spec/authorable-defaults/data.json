@@ -79,6 +79,7 @@
     "data/ObjectExtension:priority = 200",
     "data/ObjectExternalBinding:writable = false",
     "data/ObjectFieldGroup:collapse = \"none\"",
+    "data/OracleConfig:port = 1521",
     "data/PoolConfig:connectionTimeoutMillis = 5000",
     "data/PoolConfig:idleTimeoutMillis = 30000",
     "data/PoolConfig:max = 10",

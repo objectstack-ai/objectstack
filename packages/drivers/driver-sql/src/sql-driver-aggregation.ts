@@ -28,6 +28,7 @@
  * evaluation cycle. `index.ts` re-exports nothing from this module.
  */
 
+import { coreSqlDialectOf } from './sql-driver-oracle-dialect.js';
 import { emptyGroupValueFor } from '@objectstack/spec/data';
 import type { DriverOptions } from '@objectstack/spec/data';
 import type { DriverQuery } from '@objectstack/spec/contracts';
@@ -222,7 +223,7 @@ export class AggregationFacet {
         // face applies too. Still one `??` binding: the cast and the wrap are
         // SQL text around it, so the column stays a knex identifier binding.
         const aggregandClass = fieldExpr === '*' ? undefined : this.aggregandColumnClassOf(table, fieldExpr);
-        const argExpr = aggregandOperandSql(funcName, aggregandClass, this.dialectName, '??');
+        const argExpr = aggregandOperandSql(funcName, aggregandClass, coreSqlDialectOf(this.dialectName), '??');
         const rawFunc = lowering.distinct
           ? `${lowering.sql}(distinct ${argExpr})`
           : `${lowering.sql}(${argExpr})`;

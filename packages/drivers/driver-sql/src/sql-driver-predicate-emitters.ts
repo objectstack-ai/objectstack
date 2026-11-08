@@ -61,6 +61,7 @@
  * does not move.
  */
 
+import { coreSqlDialectOf } from './sql-driver-oracle-dialect.js';
 import { jsonMembershipPredicate } from '@objectstack/core';
 import { expandEmptyOperator, likePatternToGlobPattern } from '@objectstack/spec/data';
 import type { SqlDialectName } from './schema-drift.js';
@@ -331,8 +332,16 @@ function mysqlAsciiLowerBinary(expr: string): string {
  *   provisionable in the container that wrote this, so the mysql cell is a
  *   declared skip in the live matrix rather than a claimed pass, and the
  *   reasoning is written out on that helper instead.
+ * - **Oracle → `LIKE`, the Postgres arm's construct.** `LIKE` is byte-wise
+ *   there under `NLS_COMP = BINARY`, which every Oracle session this driver
+ *   opens pins (`ORACLE_SESSION_SETUP_SQL`) so a database or user default of
+ *   `LINGUISTIC` cannot fold case behind the operator. The fold is the same
+ *   `translate()` over the 26 ASCII letters — Oracle's `TRANSLATE` has the
+ *   same signature — and the escape character is bound like everywhere else.
+ *   Measured on Oracle 23ai: `name LIKE '%Caf%' ESCAPE '\'` answers the
+ *   mixed-case row only; the folded form answers both spellings and not `CAFÉ`.
  * - **`'unknown'` → the pre-#6518 `LIKE`/`LOWER()` shape.** `dialectName` is
- *   `'unknown'` for a knex client this driver does not model (mssql, oracle),
+ *   `'unknown'` for a knex client this driver does not model (mssql),
  *   where `GLOB` is a syntax error and `CAST(… AS BINARY)` means something
  *   else. Emitting the old shape is not an endorsement of it — it is the only
  *   answer that still RUNS, and it is the residue the conformance ledger names.
@@ -381,7 +390,7 @@ export function textMatchPredicate(
   // spelling everywhere (#5567).
   const bindings = [field, pattern, LIKE_ESCAPE_CHARACTER];
 
-  if (dialect === 'postgres') {
+  if (dialect === 'postgres' || dialect === 'oracle') {
     const asciiLower = (expr: string) =>
       fold ? `translate(${expr}, '${ASCII_UPPER_LETTERS}', '${ASCII_LOWER_LETTERS}')` : expr;
     return { sql: `${asciiLower('??')} ${keyword} ${asciiLower('?')} ESCAPE ?`, bindings };
@@ -560,6 +569,9 @@ function sqliteLikePatternMatch(field: string, pattern: string, fold: boolean): 
  *   {@link mysqlAsciiLowerBinary} on both sides. Not executed here for the same
  *   reason its sibling records: no MySQL server is provisionable in this
  *   container, so the cell is a declared skip rather than a claimed pass.
+ * - **Oracle → the Postgres arm**, for the reasons {@link textMatchPredicate}
+ *   gives: `LIKE` is byte-wise under the pinned `NLS_COMP = BINARY`, and
+ *   `TRANSLATE` folds the 26 ASCII letters only.
  * - **`'unknown'` → plain `LIKE` / `LOWER()`**, the only shape that still RUNS
  *   on a client this driver does not model. Same residue the conformance ledger
  *   names for the `$contains` family.
@@ -579,7 +591,7 @@ export function likePatternPredicate(
 
   const bindings = [field, pattern, LIKE_ESCAPE_CHARACTER];
 
-  if (dialect === 'postgres') {
+  if (dialect === 'postgres' || dialect === 'oracle') {
     const asciiLower = (expr: string) =>
       fold ? `translate(${expr}, '${ASCII_UPPER_LETTERS}', '${ASCII_LOWER_LETTERS}')` : expr;
     return { sql: `${asciiLower('??')} LIKE ${asciiLower('?')} ESCAPE ?`, bindings };
@@ -622,6 +634,27 @@ export function undeclaredEmptyOperatorFieldError(field: string, subtree?: unkno
       'diagnostic is in the server log.',
     `Operator "$empty" on field "${field}" targets a field whose declaration this driver does not ` +
       `hold (no declared type). ${why}`,
+    subtree,
+  );
+}
+
+/**
+ * `$contains` / `$notContains` on a JSON (multi-value) column of an Oracle
+ * table. The membership reading — "is the comparand an element of the stored
+ * array" — has no Oracle construct here, and the substring emitter the other
+ * dialects fall back to would test the serialized JSON text instead, matching
+ * `'red'` inside `["redwood"]`. Refused, with the operators that do run.
+ */
+export function jsonMembershipUnsupportedOnOracleError(field: string, subtree?: unknown): Error {
+  const why =
+    'a multi-value (JSON) field of an Oracle table, and element membership in a stored JSON array is not ' +
+    'modelled for Oracle. A substring test over the JSON text would match partial elements, so the ' +
+    'filter is refused rather than over-matched; "$null" / "$empty" and the scalar operators on other ' +
+    'fields still run.';
+  return withheldFilterError(
+    `Operator "$contains" / "$notContains" in this filter targets ${why} The field is withheld from the ` +
+      'message; the full diagnostic is in the server log.',
+    `Operator "$contains" / "$notContains" on field "${field}" targets ${why}`,
     subtree,
   );
 }
@@ -802,12 +835,16 @@ export function applyEmptyOperator(this: Pick<PredicateEmitterHost, 'declaredVal
 /** The body of `SqlDriver#applyJsonMembership`; the method's docblock there is its contract. */
 export function applyJsonMembership(this: Pick<PredicateEmitterHost, 'applyNullSafeNegative' | 'dialectName' | 'isJsonColumn'>, builder: any, method: string, table: string | null | undefined, localField: string, field: string, value: unknown, negate: boolean): boolean {
   if (!this.isJsonColumn(table, localField)) return false;
+  // Oracle: no membership construct is modelled, and the substring fallback
+  // below would answer a different question (a needle inside the JSON TEXT),
+  // so the operator is refused there rather than over-matched.
+  if (this.dialectName === 'oracle') throw jsonMembershipUnsupportedOnOracleError(localField);
   // [#20987] The construct lives in `@objectstack/core`, placeholder-agnostic;
   // this driver's plumbing is knex's: `??` binds the column as an identifier
   // and `?` a value, each pushed in the order the placeholders appear.
   const bindings: unknown[] = [];
   const sql = jsonMembershipPredicate(
-    this.dialectName,
+    coreSqlDialectOf(this.dialectName),
     {
       column: () => { bindings.push(field); return '??'; },
       value: (v) => { bindings.push(v); return '?'; },
