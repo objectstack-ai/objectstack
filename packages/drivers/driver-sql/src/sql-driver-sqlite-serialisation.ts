@@ -55,6 +55,8 @@ export interface SqliteSerialisationHost {
   readonly mediaFields: SqlDriver['mediaFields'];
   readonly numericFields: SqlDriver['numericFields'];
   readonly numericValueFields: SqlDriver['numericValueFields'];
+  readonly oracleRawUuidFieldsByObject: SqlDriver['oracleRawUuidFieldsByObject'];
+  oracleUuidBinding: SqlDriver['oracleUuidBinding'];
   storageDatetimeValue: SqlDriver['storageDatetimeValue'];
   readonly timeFields: SqlDriver['timeFields'];
   toDateOnly: SqlDriver['toDateOnly'];
@@ -65,7 +67,7 @@ export interface SqliteSerialisationHost {
 /** The bodies of the "SQLite serialisation" section of `SqlDriver`: a stateless facet, called by the class's stubs. */
 export class SqliteSerialisationFacet {
   /** The body of `SqlDriver#formatInput`; the method's docblock there is its contract. */
-  static formatInput(this: Pick<SqliteSerialisationHost, 'dateFields' | 'datetimeFields' | 'fileColumnsMoved' | 'isOracle' | 'isSqlite' | 'jsonFields' | 'mediaFields' | 'storageDatetimeValue' | 'timeFields' | 'toDateOnly' | 'undeclaredAuditTimestampFields'>, object: string, data: any): any {
+  static formatInput(this: Pick<SqliteSerialisationHost, 'dateFields' | 'datetimeFields' | 'fileColumnsMoved' | 'isOracle' | 'isSqlite' | 'jsonFields' | 'mediaFields' | 'oracleRawUuidFieldsByObject' | 'oracleUuidBinding' | 'storageDatetimeValue' | 'timeFields' | 'toDateOnly' | 'undeclaredAuditTimestampFields'>, object: string, data: any): any {
     let copy: any = data;
     let copied = false;
 
@@ -254,6 +256,23 @@ export class SqliteSerialisationFacet {
           if (v === undefined || v === null || typeof v === 'string') continue;
           if (!copied) { copy = { ...copy }; copied = true; }
           copy[field] = JSON.stringify(v);
+        }
+      }
+    }
+
+    // [#31390] Oracle: a field over a `RAW(16)` uuid column (as the catalog
+    // reports it — `SqlDriver#primeOracleRawUuidColumns`) is written as
+    // `HEXTORAW(?)` over the uuid's hex digits, and a value that is not uuid
+    // text is refused before the statement is built. No other dialect, and no
+    // other Oracle column, reaches this arm.
+    if (this.isOracle && copy && typeof copy === 'object') {
+      const rawUuidFields = this.oracleRawUuidFieldsByObject.get(object);
+      if (rawUuidFields && rawUuidFields.size > 0) {
+        for (const field of rawUuidFields) {
+          const v = copy[field];
+          if (v === undefined || v === null) continue;
+          if (!copied) { copy = { ...copy }; copied = true; }
+          copy[field] = this.oracleUuidBinding(object, field, v, 'write');
         }
       }
     }

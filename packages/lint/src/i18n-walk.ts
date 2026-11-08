@@ -1816,7 +1816,9 @@ function dedupeByPath(entries: ExpectedEntry[]): ExpectedEntry[] {
  *   datasets.<name>.label
  *   datasets.<name>.description
  *   datasets.<name>.dimensions.<dimension>.label
+ *   datasets.<name>.dimensions.<dimension>.description
  *   datasets.<name>.measures.<measure>.label
+ *   datasets.<name>.measures.<measure>.description
  *
  * **Why a dataset is a display surface at all.** It reads like a back-office
  * definition, but a measure label is drawn ON THE DASHBOARD — under every
@@ -1830,7 +1832,7 @@ function dedupeByPath(entries: ExpectedEntry[]): ExpectedEntry[] {
  * ask for the same string once per presentation and leave a dataset no
  * dashboard references unaddressable.
  *
- * **`pushOptional`, not `pushDerived`, for every key here.** These four are
+ * **`pushOptional`, not `pushDerived`, for every key here.** These six are
  * `I18nLabelSchema` at the authoring site, so a value may already be an inline
  * `{ en, 'zh-CN' }` map (#5728) — not source text to scaffold from, and
  * `inlineText` narrows it away. And no renderer fallback is measured for a
@@ -1840,10 +1842,10 @@ function dedupeByPath(entries: ExpectedEntry[]): ExpectedEntry[] {
  * authors it. It is the same posture the resolver takes — `translateDataset`
  * writes only where the bundle answered.
  *
- * The face stops at `label` below the dataset: `DatasetDimensionSchema` and
- * `DatasetMeasureSchema` declare no `description` and say so in their own
- * authoring guidance, so a `dimensions.<d>.description` key would parse clean
- * and translate nothing.
+ * A member's `description` is its business definition (ADR-0149 D1), display
+ * text the resolver overlays like `label`. A member's `synonyms` emit nothing:
+ * they are matched in every language at once and are never translated, so the
+ * translation group declares no key for them.
  */
 function walkDatasets(config: any, out: ExpectedEntry[]): void {
   const datasets: any[] = Array.isArray(config?.datasets) ? config.datasets : [];
@@ -1860,6 +1862,7 @@ function walkDatasets(config: any, out: ExpectedEntry[]): void {
         const memberName = member.name;
         if (typeof memberName !== 'string' || memberName.length === 0) continue;
         pushOptional(out, ['datasets', name, group, memberName, 'label'], member.label, 'dataset');
+        pushOptional(out, ['datasets', name, group, memberName, 'description'], member.description, 'dataset');
       }
     }
   }
