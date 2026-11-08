@@ -240,6 +240,7 @@ export interface SchemaSyncHost {
   readonly numericFields: SqlDriver['numericFields'];
   readonly numericValueFields: SqlDriver['numericValueFields'];
   readonly objectByPhysicalTable: SqlDriver['objectByPhysicalTable'];
+  readonly oracleRawUuidFieldsByObject: SqlDriver['oracleRawUuidFieldsByObject'];
   readonly physicalSchemaByObject: SqlDriver['physicalSchemaByObject'];
   readonly physicalTableByObject: SqlDriver['physicalTableByObject'];
   planDeclaredRenames: SqlDriver['planDeclaredRenames'];
@@ -1856,7 +1857,7 @@ export function rotationColumnList(obj: { fields?: Record<string, any> }): strin
 }
 
 /** The body of `SqlDriver#registerExternalObject`; the method's docblock there is its contract. */
-export function registerExternalObject(this: Pick<SchemaSyncHost, 'autoNumberFields' | 'booleanFields' | 'columnFieldByObject' | 'computeAndRecordTenantField' | 'dateFields' | 'datetimeFields' | 'fieldColumnByObject' | 'fractionalNumericFields' | 'isJsonField' | 'isSqlite' | 'jsonFields' | 'logger' | 'mediaFields' | 'numericFields' | 'numericValueFields' | 'objectByPhysicalTable' | 'physicalSchemaByObject' | 'physicalTableByObject' | 'tenantFieldByTable' | 'timeFields' | 'valueShapeFields'>, schema: {
+export function registerExternalObject(this: Pick<SchemaSyncHost, 'autoNumberFields' | 'booleanFields' | 'columnFieldByObject' | 'computeAndRecordTenantField' | 'dateFields' | 'datetimeFields' | 'fieldColumnByObject' | 'fractionalNumericFields' | 'isJsonField' | 'isSqlite' | 'jsonFields' | 'logger' | 'mediaFields' | 'numericFields' | 'numericValueFields' | 'objectByPhysicalTable' | 'oracleRawUuidFieldsByObject' | 'physicalSchemaByObject' | 'physicalTableByObject' | 'tenantFieldByTable' | 'timeFields' | 'valueShapeFields'>, schema: {
   name: string;
   fields?: Record<string, any>;
   tenancy?: any;
@@ -1866,6 +1867,9 @@ export function registerExternalObject(this: Pick<SchemaSyncHost, 'autoNumberFie
   const remoteName = schema.external?.remoteName || schema.name;
   const remoteSchema = schema.external?.remoteSchema;
   this.physicalTableByObject[key] = remoteName;
+  // [#31390] A re-registration may point the object at another remote table, so
+  // its RAW(16) uuid columns are read from the catalog again on its next door.
+  this.oracleRawUuidFieldsByObject.delete(key);
   this.objectByPhysicalTable[remoteName] = key;
   if (remoteSchema) {
     if (this.isSqlite) {
