@@ -254,7 +254,8 @@ export function HomeAmountHint({
       {t('fields.currencyHome.convertedAt', {
         // The rate as stored, every digit: a rounded rate would not reproduce the home amount.
         rate: formatDisplayNumber(Number(rate), { locale, maximumFractionDigits: 12 }),
-        date: formatDate(date as string),
+        // With its year always: a rate is looked up by the whole date.
+        date: formatDate(date as string, undefined, { alwaysShowYear: true }),
       })}
     </span>
   );
