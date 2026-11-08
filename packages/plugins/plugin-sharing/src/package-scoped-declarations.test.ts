@@ -86,9 +86,13 @@ function makeEngine(tables: Record<string, Row[]> = {}) {
     async find(object: string, options?: any) {
       const where = options?.where ?? options?.filter ?? {};
       const rows = (tables[object] ?? []).filter((row) =>
-        Object.entries(where).every(([k, v]) =>
-          v && typeof v === 'object' && '$in' in (v as object) ? (v as any).$in.includes(row[k]) : row[k] === v,
-        ),
+        Object.entries(where).every(([k, v]) => {
+          if (k.startsWith('$')) throw new Error(`test double: combinator '${k}' is not implemented`);
+          if (v === null || typeof v !== 'object') return row[k] === v;
+          const ops = Object.keys(v as object);
+          if (ops.length !== 1 || ops[0] !== '$in') throw new Error(`test double: operator ${ops.join(',')} on '${k}' is not implemented`);
+          return (v as { $in: unknown[] }).$in.includes(row[k]);
+        }),
       );
       return typeof options?.limit === 'number' ? rows.slice(0, options.limit) : rows;
     },
