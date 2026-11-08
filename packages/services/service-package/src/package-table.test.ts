@@ -30,6 +30,7 @@ import { PackageServicePlugin, type PackageService } from './index.js';
 import {
   ensurePackageTable,
   PACKAGE_TABLE_STATEMENTS,
+  packageRowStamp,
   resolvePackageTableDialect,
 } from './package-table.js';
 
@@ -212,7 +213,7 @@ describe('[#21243] publish writes with the driver dialect\'s upsert', () => {
 
     const out = await registered()!.publish({ manifest: { id: 'com.acme.crm', version: '1.0.0' } as any, metadata: {} });
 
-    expect(out).toEqual({ success: true });
+    expect(out).toEqual({ success: true, version: expect.any(String), createdAt: expect.stringMatching(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/) });
     expect(seen[seen.length - 1]).toBe(PACKAGE_TABLE_STATEMENTS[set].upsert);
   });
 });
@@ -252,5 +253,68 @@ describe('[#21243] CONTROL — the standard set on a real SQLite database', () =
     expect(pk).toEqual([{ name: 'id' }, { name: 'version' }]);
     const index = db.prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_packages_latest'").all();
     expect(index).toHaveLength(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 6. [#31530] publish answers the row stamp it bound — what a later read answers
+// ---------------------------------------------------------------------------
+
+describe('[#31530] publish answers the row\'s version and created_at, from the write itself', () => {
+  const STAMP = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/;
+
+  it('SQLite: a new row\'s answer is what `get` then reads, by latest and by version; a re-publish keeps the row\'s created_at', async () => {
+    const db = new DatabaseSync(':memory:');
+    const engine: any = {
+      getDefaultDriverName: () => 'default',
+      getDriverByName: () => ({ dialectName: 'sqlite' }),
+      async execute({ sql, args }: { sql: string; args?: unknown[] }) {
+        const stmt = db.prepare(sql);
+        return /^\s*select/i.test(sql) ? stmt.all(...((args ?? []) as any[])) : stmt.run(...((args ?? []) as any[]));
+      },
+    };
+    const { ctx, registered } = pluginContext(engine);
+    const plugin = new PackageServicePlugin();
+    await plugin.init(ctx);
+    await plugin.start(ctx);
+    const svc = registered()!;
+
+    const first = await svc.publish({ manifest: { id: 'com.acme.crm-copy', version: '1.0.0', name: 'copy' } as any, metadata: {} });
+    expect(first).toEqual({ success: true, version: '1.0.0', createdAt: expect.stringMatching(STAMP) });
+    const latest = await svc.get('com.acme.crm-copy');
+    expect({ version: latest?.version, createdAt: latest?.created_at }).toEqual({ version: first.version, createdAt: first.createdAt });
+    const byVersion = await svc.get('com.acme.crm-copy', '1.0.0');
+    expect(byVersion?.created_at).toBe(first.createdAt);
+    // The stored column holds the bound text, in the form the database used to write.
+    expect(db.prepare('SELECT created_at, updated_at FROM sys_packages').all()).toEqual([{ created_at: first.createdAt, updated_at: first.createdAt }]);
+
+    // An update of the same (id, version) keeps the row's created_at and takes the new updated_at.
+    db.prepare('UPDATE sys_packages SET created_at = ?, updated_at = ?').run('2026-01-01 00:00:00', '2026-01-01 00:00:00');
+    const again = await svc.publish({ manifest: { id: 'com.acme.crm-copy', version: '1.0.0', name: 'copy again' } as any, metadata: {} });
+    expect(db.prepare('SELECT created_at, updated_at FROM sys_packages').all()).toEqual([{ created_at: '2026-01-01 00:00:00', updated_at: again.createdAt }]);
+  });
+
+  it.each(['mysql', 'sqlite'] as const)('%s: the created_at and updated_at bindings are the stamp the answer names', async (dialectName) => {
+    const calls: Array<{ sql: string; args?: unknown[] }> = [];
+    const engine: any = {
+      getDefaultDriverName: () => 'default',
+      getDriverByName: () => ({ dialectName }),
+      async execute(q: { sql: string; args?: unknown[] }) { calls.push(q); return [[], []]; },
+    };
+    const { ctx, registered } = pluginContext(engine);
+    const plugin = new PackageServicePlugin();
+    await plugin.init(ctx);
+    await plugin.start(ctx);
+    const out = await registered()!.publish({ manifest: { id: 'com.acme.crm', version: '2.0.0' } as any, metadata: {} });
+    const upsert = calls[calls.length - 1]!;
+    expect(upsert.sql).toBe(PACKAGE_TABLE_STATEMENTS[dialectName === 'mysql' ? 'mysql' : 'standard'].upsert);
+    expect(upsert.args).toHaveLength(7);
+    expect(upsert.args!.slice(1, 2)).toEqual(['2.0.0']);
+    expect(upsert.args!.slice(5)).toEqual([out.createdAt, out.createdAt]);
+    expect(out).toEqual({ success: true, version: '2.0.0', createdAt: expect.stringMatching(STAMP) });
+  });
+
+  it('packageRowStamp is UTC `YYYY-MM-DD HH:MM:SS`', () => {
+    expect(packageRowStamp(new Date('2026-11-08T14:40:07.912Z'))).toBe('2026-11-08 14:40:07');
   });
 });

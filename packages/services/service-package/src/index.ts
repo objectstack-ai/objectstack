@@ -10,6 +10,7 @@ import {
   ensurePackageTable,
   PACKAGE_TABLE_COLUMNS,
   PACKAGE_TABLE_STATEMENTS,
+  packageRowStamp,
   probePackageTable,
   resolvePackageTableDialect,
 } from './package-table.js';
@@ -85,6 +86,18 @@ export interface PackagePublishResult {
   success: boolean;
   /** Present only when the write broke. Absent on success. */
   driverFault?: PackagePublishDriverFault;
+  /**
+   * [#31530] On success, the row's `version`, as written.
+   */
+  version?: string;
+  /**
+   * [#31530] On success, the `created_at` this write bound
+   * (`YYYY-MM-DD HH:MM:SS` UTC, {@link packageRowStamp}): the row's own when
+   * the write inserted it, which is what `get` then answers for it. When the
+   * `(id, version)` row already existed, the update keeps that row's earlier
+   * `created_at`, and this value is not the row's.
+   */
+  createdAt?: string;
 }
 
 /**
@@ -482,6 +495,9 @@ export class PackageServicePlugin implements Plugin {
           const hash = createHash('sha256')
             .update(JSON.stringify({ manifest: data.manifest, metadata: data.metadata }))
             .digest('hex');
+          // [#31530] The row's stamps, bound by this write, so the answer can
+          // name the `created_at` it inserted without reading the row back.
+          const stamp = packageRowStamp(new Date());
 
           // [#21243] The upsert is spelled for the driver's dialect: MySQL has
           // no `ON CONFLICT`, and refused the standard spelling with
@@ -494,11 +510,13 @@ export class PackageServicePlugin implements Plugin {
               JSON.stringify(data.manifest),
               JSON.stringify(data.metadata),
               hash,
+              stamp,
+              stamp,
             ],
           });
 
           logger.info(`Published package: ${data.manifest.id}@${data.manifest.version}`);
-          return { success: true };
+          return { success: true, version: data.manifest.version, createdAt: stamp };
         } catch (error) {
           // [#8131] ① The raw driver text goes to the LOG — the one place it
           // belongs, and where it already went. Nothing about the operator's

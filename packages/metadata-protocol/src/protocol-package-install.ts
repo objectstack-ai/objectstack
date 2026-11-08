@@ -51,7 +51,7 @@ import { assertDeclaredDependencies, assertProtocolCompat } from '@objectstack/m
 // [#24086] The install door's own manifest declaration — `ManifestSchema` with
 // `scope` narrowed to `project` — judged whole at the top of `installPackage`.
 import { PackageInstallManifestSchema } from '@objectstack/spec/api';
-import type { InstallPackageRequest, InstallPackageResponse } from '@objectstack/spec/api';
+import type { ImportUnmanagedPackageResponse, InstallPackageRequest, InstallPackageResponse } from '@objectstack/spec/api';
 import { ManifestSchema, deriveNamespaceFromPackageId, manifestIdRefusal } from '@objectstack/spec/kernel';
 // [ADR-0146 D3] The pair-shaped-id predicate, asked before the namespace default.
 import { customizationPairManifestRefusal } from './protocol-customization-package.js';
@@ -96,15 +96,62 @@ export function runtimeNavigationContributionsRefusal(manifest: unknown): string
 }
 
 /**
+ * [#31530] The `sys_packages` row a package write stored, as the write itself
+ * answered it: the row's `version` and `created_at`, so a caller that ties
+ * something to the row instance never reads the row back.
+ */
+export interface StoredPackageRow {
+    version: string;
+    createdAt: string;
+}
+
+/**
+ * [#31530] The door-only member an in-process caller of
+ * {@link installPackage} may put beside the published request. A JSON body
+ * cannot carry a function, so no HTTP door reaches it.
+ */
+export interface InstallPackageStoredRowHook {
+    /**
+     * Called once the base row is written, with the row as the package
+     * service's `publish` answered it. Not called when the service names no
+     * stamp, or when there is no `package` service.
+     */
+    onStoredRow?(row: StoredPackageRow): void;
+}
+
+/**
+ * [#31530] What `importUnmanagedPackage` answers: the published
+ * `ImportUnmanagedPackageResponse`, and, door-only beside it, the new base's
+ * stored row as its own write answered it (`baseInstance`). Outside the
+ * published answer, as the request's `actor` and `seedData` are outside the
+ * published request: the install-local door ties its copy record to it.
+ * Absent when the base row's write named no stamp (no `package` service, or a
+ * service that does not state one).
+ */
+export type ImportUnmanagedPackageAnswer = ImportUnmanagedPackageResponse & { baseInstance?: StoredPackageRow };
+
+/** [#31530] The row `publish` answered, when it named both its `version` and its `createdAt`. */
+function storedRowOf(out: unknown): StoredPackageRow | undefined {
+    if (typeof out !== 'object' || out === null) return undefined;
+    const { version, createdAt } = out as { version?: unknown; createdAt?: unknown };
+    return typeof version === 'string' && version !== '' && typeof createdAt === 'string' && createdAt !== ''
+        ? { version, createdAt }
+        : undefined;
+}
+
+/**
  * [#21243] Write `manifest` to `sys_packages`, and say whether it failed.
  *
  * `undefined` means the write landed. Otherwise `cause` is what the failure
  * WAS — the thrown value, or the returned `{ success: false, … }` outcome —
  * wrapped so that a thrown `undefined` still reads as a failure.
+ *
+ * [#31530] A landed write that named its row hands it to `onStoredRow`.
  */
 async function persistPackageManifest(
     svc: PackagePersistService,
     manifest: unknown,
+    onStoredRow?: (row: StoredPackageRow) => void,
 ): Promise<{ cause: unknown } | undefined> {
     let out: unknown;
     try {
@@ -115,6 +162,8 @@ async function persistPackageManifest(
     if (typeof out === 'object' && out !== null && (out as { success?: unknown }).success === false) {
         return { cause: out };
     }
+    const stored = storedRowOf(out);
+    if (stored && onStoredRow) onStoredRow(stored);
     return undefined;
 }
 
@@ -429,7 +478,11 @@ export async function installPackage(
     // failure into a `console.warn` and an answer of success.
     const pkgSvc = this.packagePersistService();
     if (pkgSvc) {
-        const failure = await persistPackageManifest(pkgSvc, manifest);
+        // [#31530] The in-process caller's door-only hook, outside the published request.
+        const onStoredRow = (request as InstallPackageRequest & InstallPackageStoredRowHook).onStoredRow;
+        const failure = await persistPackageManifest(
+            pkgSvc, manifest, typeof onStoredRow === 'function' ? (row) => onStoredRow(row) : undefined,
+        );
         if (failure) {
             undoInstall();
             throw packagePersistFailureError(failure.cause, manifest.id, 'install');

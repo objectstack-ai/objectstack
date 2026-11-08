@@ -62,7 +62,13 @@ export interface PackageTableStatements {
   readonly latestIndexProbe?: string;
   /** The `idx_packages_latest` DDL. */
   readonly createLatestIndex: string;
-  /** Insert-or-update of one `(id, version)` row; bindings: id, version, manifest, metadata, hash. */
+  /**
+   * Insert-or-update of one `(id, version)` row; bindings: id, version,
+   * manifest, metadata, hash, created_at, updated_at. [#31530] Both stamps are
+   * bound ({@link packageRowStamp}), so the writer knows the `created_at` it
+   * inserted. An update keeps the row's `created_at` and takes the bound
+   * `updated_at`.
+   */
   readonly upsert: string;
 }
 
@@ -87,9 +93,10 @@ export interface PackageTableStatements {
  *
  * The key — `PRIMARY KEY (id, version)`, several versions of one package side
  * by side — the column names, and what each column holds. The timestamps are
- * the `YYYY-MM-DD HH:MM:SS` UTC text SQLite's `CURRENT_TIMESTAMP` writes
- * (`UTC_TIMESTAMP()`, not the session-zone `NOW()`), so `get(id, 'latest')`'s
- * `ORDER BY created_at` compares one format. `id` and `version` use
+ * the `YYYY-MM-DD HH:MM:SS` UTC text SQLite's `CURRENT_TIMESTAMP` writes, so
+ * `get(id, 'latest')`'s `ORDER BY created_at` compares one format. [#31530]
+ * Every dialect's publish now binds that text itself ({@link packageRowStamp})
+ * rather than asking the database for it. `id` and `version` use
  * `utf8mb4_bin` because the key compares bytes on SQLite and PostgreSQL, and
  * MySQL's default collation would fold `1.0.0-Beta` and `1.0.0-beta` into one
  * row. The two timestamp columns carry no default because MySQL refuses the
@@ -99,11 +106,29 @@ export interface PackageTableStatements {
  * `VALUES(col)` spelling still runs on 8.0.46, with deprecation warning 1287
  * naming the alias form as its replacement.
  *
- * ## Why the standard set is byte-for-byte what shipped
+ * ## Why the standard set's DDL is byte-for-byte what shipped
  *
  * SQLite and PostgreSQL ran it correctly, and every existing `sys_packages`
  * table on both was created by it. One changed character would make a fresh
  * table differ from an adopted one on the dialects that never had the defect.
+ * That holds for `createTable` and `createLatestIndex`, which are unchanged.
+ *
+ * ## [#31530] What changed in the upsert, and why
+ *
+ * The `upsert` of both dialects binds `created_at` and `updated_at` (the 6th
+ * and 7th bindings) where it used to write `CURRENT_TIMESTAMP` /
+ * `UTC_TIMESTAMP()`. So `publish` can answer the `created_at` it inserted
+ * from the write itself: the unmanaged import ties its copy record to the base
+ * row's `version` and `created_at`, and before this it had to read the row back
+ * through `get`, which answers `null` on a passing driver fault, leaving the
+ * copy unrecorded. The value bound is the text the database wrote before,
+ * `YYYY-MM-DD HH:MM:SS` UTC ({@link packageRowStamp}), so a column keeps one
+ * format on SQLite and MySQL. On PostgreSQL, whose `CURRENT_TIMESTAMP` cast to
+ * text carried fractional seconds and a `+00` offset, rows written from now on
+ * carry the shorter form. The `latest` order still holds across both forms,
+ * since the date and time come first and in the same order. The update arm
+ * still keeps the row's `created_at`; it takes the bound `updated_at`.
+ * The table DDL, its defaults and the table's shape are untouched.
  */
 export const PACKAGE_TABLE_STATEMENTS: Readonly<Record<PackageTableDialect, PackageTableStatements>> = {
   standard: {
@@ -125,12 +150,12 @@ export const PACKAGE_TABLE_STATEMENTS: Readonly<Record<PackageTableDialect, Pack
         `,
     upsert: `
               INSERT INTO sys_packages (id, version, manifest, metadata, hash, created_at, updated_at)
-              VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+              VALUES (?, ?, ?, ?, ?, ?, ?)
               ON CONFLICT(id, version) DO UPDATE SET
                 manifest = excluded.manifest,
                 metadata = excluded.metadata,
                 hash = excluded.hash,
-                updated_at = CURRENT_TIMESTAMP
+                updated_at = excluded.updated_at
             `,
   },
   mysql: {
@@ -159,15 +184,25 @@ export const PACKAGE_TABLE_STATEMENTS: Readonly<Record<PackageTableDialect, Pack
         `,
     upsert: `
               INSERT INTO sys_packages (id, version, manifest, metadata, hash, created_at, updated_at)
-              VALUES (?, ?, ?, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP()) AS incoming
+              VALUES (?, ?, ?, ?, ?, ?, ?) AS incoming
               ON DUPLICATE KEY UPDATE
                 manifest = incoming.manifest,
                 metadata = incoming.metadata,
                 hash = incoming.hash,
-                updated_at = UTC_TIMESTAMP()
+                updated_at = incoming.updated_at
             `,
   },
 };
+
+/**
+ * [#31530] The `created_at` / `updated_at` text a publish binds: `at` in UTC,
+ * `YYYY-MM-DD HH:MM:SS`, the form SQLite's `CURRENT_TIMESTAMP` and MySQL's
+ * `UTC_TIMESTAMP()` wrote before the stamp was bound, so a column keeps one
+ * format and the `latest` read's `ORDER BY created_at` compares like with like.
+ */
+export function packageRowStamp(at: Date): string {
+  return at.toISOString().slice(0, 19).replace('T', ' ');
+}
 
 /**
  * The table's columns, in the order every dialect's `createTable` declares
