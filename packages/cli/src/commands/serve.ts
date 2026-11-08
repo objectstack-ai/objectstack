@@ -83,7 +83,7 @@ import { missingProviderMessage } from '../utils/capability-preflight.js';
 // app-declared package wins there (per commit 5a90c56d1).
 import { resolveDeploymentAppName } from '@objectstack/plugin-email';
 import { createHash } from 'node:crypto';
-import { resolveObjectStackHome } from '@objectstack/runtime';
+import { resolveObjectStackHome, type InstalledPluginRefusal } from '@objectstack/runtime';
 import { LOG_LEVELS, resolveLogLevel, readLogLevelEnv } from '../utils/log-level.js';
 // The ONE port contract — range, reader and refusal prose — shared with the two
 // commands that spawn this one (#12673). `serve`'s own door below calls it
@@ -4787,9 +4787,11 @@ export default class Serve extends Command {
       // environment's trusted keys, the unpacked tree, the `runtime` tier) and
       // registered here, after the config's own `plugins`, while the kernel
       // still takes plugins. Only `runtime: 'node'` is dispatched; a refused
-      // plugin is printed by name and the boot goes on without it. No
-      // installations file, no read. See `../utils/installed-plugins-boot.ts`.
+      // plugin is printed by name, and the boot goes on without it unless it
+      // may provide the crypto provider: see the function. No installations
+      // file, no read. See `../utils/installed-plugins-boot.ts`.
       const installedPluginsBoot = await registerInstalledPlugins({ kernel, track: trackPlugin });
+      refuseRefusedInstalledCryptoProviderPlugins(installedPluginsBoot?.refused ?? []);
 
       // Register REST API and Dispatcher plugins (consume http.server + protocol services)
       //
@@ -6480,6 +6482,69 @@ export function refuseUnloadedCryptoProviderPlugins(unloaded: readonly UnloadedS
     + `and nothing rules out that ${refused.length === 1 ? 'it provides' : 'one of them provides'} the crypto provider `
     + `('${CRYPTO_PROVIDER_SERVICE}'). It seals every secret field, datasource credential and encrypted setting, `
     + 'so this boot does not choose another one. Make the entry load, or remove it from the stack\'s plugins.',
+  );
+}
+
+/**
+ * Refuse a boot in which a plugin `os plugin install` installed was refused at
+ * boot and nothing rules out that it provides the crypto provider
+ * ({@link CRYPTO_PROVIDER_SERVICE}): the rule
+ * {@link refuseUnloadedCryptoProviderPlugins} keeps for the stack's `plugins`.
+ *
+ * A refusal is ruled out when the plugin's verified artifact declares a tier
+ * this host does not run in process (`runtime_undeclared`,
+ * `runtime_not_dispatched`), or when the plugin was imported and what it
+ * declares in `providesServices` (ADR-0116) could be read and does not name
+ * the provider. Every other refusal, the loader's own failure included, says
+ * nothing it provides, and is refused. A disabled plugin is not a refusal.
+ *
+ * The refusal names each plugin with its refusal code and the step that lets
+ * the next boot go on: `os plugin disable <id>` for most codes. A code that
+ * `os plugin disable` cannot clear names its own step instead: a record whose
+ * directory is not its install directory is checked before the disabled set,
+ * so it is installed again; an uninstall the boot could not finish is finished
+ * by a later boot; an unreadable disable-state file, or installations file,
+ * is repaired; a loader that failed outright is fixed.
+ */
+export function refuseRefusedInstalledCryptoProviderPlugins(refused: readonly InstalledPluginRefusal[]): void {
+  const stopping = refused.filter(({ error, declaredServices }) => {
+    if (error === 'runtime_undeclared' || error === 'runtime_not_dispatched') return false;
+    return declaredServices === undefined || declaredServices.includes(CRYPTO_PROVIDER_SERVICE);
+  });
+  if (stopping.length === 0) return;
+  const unnamed = ({ id }: InstalledPluginRefusal): boolean => id === '*' || id === '?';
+  const label = (r: InstalledPluginRefusal): string =>
+    unnamed(r) ? `the installed plugins could not be read (${r.error})` : `installed plugin ${r.id}@${r.version} was refused (${r.error})`;
+  /** The step for a code `os plugin disable` cannot clear; `null` when it can. */
+  const ownStep = ({ id, error }: InstalledPluginRefusal): string | null => {
+    switch (error) {
+      case 'install_dir_unexpected':
+        return `Install ${id} again (os plugin install): its record names a directory that is not its install directory.`;
+      case 'uninstall_failed':
+      case 'record_changed':
+        return `${id} is being uninstalled: fix what stopped it, and a later boot finishes the uninstall.`;
+      case 'disabled_state_unreadable':
+        return "Repair this environment's disable-state file: until it reads, no installed plugin can be disabled.";
+      case 'records_unreadable':
+        return "Repair this project's installations file.";
+      case 'loader_failed':
+        return 'Fix what failed the installed-plugin loader.';
+      default:
+        return null;
+    }
+  };
+  const disables = [...new Set(stopping.filter((r) => !unnamed(r) && ownStep(r) === null).map(({ id }) => `os plugin disable ${id}`))];
+  const steps = [
+    ...(disables.length > 0
+      ? [`Fix what refused ${disables.length === 1 ? 'it' : 'them'}, or boot without ${disables.length === 1 ? 'it' : 'them'}: ${disables.join(', ')}.`]
+      : []),
+    ...new Set(stopping.map(ownStep).filter((step): step is string => step !== null)),
+  ];
+  throw new HostCryptoProviderRefusal(
+    `Refusing to boot: ${stopping.map(label).join('; ')}, and nothing rules out that `
+    + `${stopping.length === 1 ? 'it provides' : 'one of them provides'} the crypto provider ('${CRYPTO_PROVIDER_SERVICE}'). `
+    + 'It seals every secret field, datasource credential and encrypted setting, so this boot does not choose another one. '
+    + steps.join(' '),
   );
 }
 

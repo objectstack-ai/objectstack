@@ -34,6 +34,15 @@ vi.mock('./format.js', () => ({ isExitSignal: () => false }));
 
 import { registerInstalledPlugins } from './installed-plugins-boot.js';
 
+// Paid at collection, not inside a clocked case: what the code under test
+// reaches through dynamic `import()`s (`check:test-source-alias`).
+import '@objectstack/service-datasource';
+import '@objectstack/driver-turso';
+import '@objectstack/driver-sql';
+import '@objectstack/platform-objects/plugin';
+import '@objectstack/plugin-security';
+import '@objectstack/rest';
+
 let dir: string;
 
 beforeEach(() => {
@@ -119,6 +128,29 @@ describe('the serve wiring of installed plugins', () => {
     const out = await boot(k);
     expect(out?.refused).toEqual([expect.objectContaining({ id: 'com.acme.dup', error: 'plugin_name_taken' })]);
     expect(k.used).toEqual([]);
+  });
+
+  it('a plugin refused here carries what the loader read it declares; one the loader could not read carries none', async () => {
+    const kms = { name: 'kms', init() {} };
+    const dup = { name: 'host-plugin', init() {} };
+    const unread = { name: 'unread', init() {} };
+    stub.load = async () => ({
+      loaded: [
+        { record: record('com.acme.kms'), plugin: kms, declaredServices: ['crypto-provider'] },
+        { record: record('com.acme.dup'), plugin: dup, declaredServices: [] },
+        { record: record('com.acme.unread'), plugin: unread },
+      ],
+      refused: [],
+      disabled: [],
+      removed: [],
+    });
+    const k = kernel({ taken: ['host-plugin'], use: async () => { throw new Error('no'); } });
+    const out = await boot(k);
+    expect(out?.refused).toEqual([
+      { id: 'com.acme.kms', version: '1.0.0', error: 'kernel_refused', message: 'no', declaredServices: ['crypto-provider'] },
+      expect.objectContaining({ id: 'com.acme.dup', error: 'plugin_name_taken', declaredServices: [] }),
+      { id: 'com.acme.unread', version: '1.0.0', error: 'kernel_refused', message: 'no' },
+    ]);
   });
 
   it('reads nothing when this project has no installations file', async () => {
