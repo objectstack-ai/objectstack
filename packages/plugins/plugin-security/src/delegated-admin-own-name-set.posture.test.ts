@@ -768,3 +768,147 @@ describe("[ADR-0105 D6; ADR-0091 D3] a delegated business-unit walk never starts
     });
   }
 });
+
+/**
+ * [ADR-0090 D12; ruling on #26059, Q3] A delegated answer about a user the
+ * caller cannot read does not depend on that user's existence or memberships.
+ * One subject id in four states — no user; a user holding no business-unit
+ * membership; a user whose unit is outside the delegate's scope; a user whose
+ * unit is inside it whom the delegate cannot read — asked of every delegated
+ * door that judges a target user: the write gate's four direct-grant shapes
+ * (an insert, an update pointing a stored grant at the subject, an update of
+ * the subject's stored grant leaving its `user_id` as stored, a removal of
+ * it), `security/explain` for the subject, and the subject's effective access.
+ * Every state answers exactly what the id naming no user answers; the CONTROL,
+ * a user inside the scope whom the delegate reads, is served at every door.
+ *
+ * A user the delegate cannot read is one its context may not read: `sys_user`'s
+ * row scope (`id == current_user.id || id in current_user.org_user_ids`), the
+ * same in every posture. The write shapes are asked of the gate itself, as
+ * `gateInsert` above asks it: the delegate holds no read of
+ * `sys_user_permission_set`, so for a stored grant the write door would answer
+ * the read door's refusal instead (`readDoorAnswerForGateRefusal`).
+ *
+ * Revocation does not leave the organization: a tenant-level administrator and
+ * the organization administrator still remove the stored grant of the subject
+ * the delegate cannot read, through the write door itself.
+ */
+describe("[ADR-0090 D12] a delegated answer about a user the caller cannot read does not depend on that user's existence or memberships — three postures", () => {
+  const SUBJECT = 'u_subject';
+  const STATES = [
+    'an id naming no user',
+    'a user with no business-unit membership',
+    'a user whose business unit is outside the scope',
+    'a user with a business unit inside the scope whom the delegate cannot read',
+  ] as const;
+  const UNREADABLE_INSIDE = STATES[3];
+  const CONTROL = 'a user with a business unit inside the scope whom the delegate reads';
+  type State = (typeof STATES)[number] | typeof CONTROL;
+
+  /** The delegate's context: the subject is among the users it may read exactly when the subject is a user it reads. */
+  const delegateFor = (state: State) => ({
+    ...NARROW,
+    org_user_ids: state === 'an id naming no user' || state === UNREADABLE_INSIDE ? ORG_USER_IDS : [...ORG_USER_IDS, SUBJECT],
+  });
+
+  /** A fresh rig with the subject in `state`, its stored grant `g_subject`, and `g_target`, a grant of a user inside the scope. */
+  async function bootWith(posture: Posture, state: State) {
+    const h = await boot(posture);
+    const sys = { context: { isSystem: true, tenantId: ORG_A } } as any;
+    if (state !== 'an id naming no user') {
+      await h.engine.insert('sys_user', { id: SUBJECT, email: `${SUBJECT}@example.test`, name: SUBJECT }, sys);
+      await h.engine.insert('sys_member', { id: `m_${SUBJECT}`, user_id: SUBJECT, organization_id: ORG_A, role: 'member' }, sys);
+    }
+    const unit = state === 'a user whose business unit is outside the scope' ? 'bu_hq'
+      : state === UNREADABLE_INSIDE || state === CONTROL ? 'bu_east_field'
+        : null;
+    if (unit) {
+      await h.engine.insert('sys_business_unit_member',
+        { id: 'bum_subject', user_id: SUBJECT, business_unit_id: unit, organization_id: ORG_A }, sys);
+    }
+    await h.engine.insert('sys_user_permission_set', [
+      { id: 'g_subject', user_id: SUBJECT, permission_set: 'field_user', organization_id: ORG_A },
+      { id: 'g_target', user_id: 'u_target', permission_set: 'field_user', organization_id: ORG_A },
+    ], sys);
+    return h;
+  }
+
+  /** Everything a caller is told: the envelope both HTTP doors answer with, the class, the message and the details. */
+  async function answerOf(run: () => Promise<unknown>) {
+    try {
+      await run();
+      return { status: 200 };
+    } catch (e: any) {
+      const r = resolveThrownHttpError(e);
+      return { status: r.status, code: r.code, class: e?.constructor?.name, message: e?.message, details: e?.details };
+    }
+  }
+
+  /** Every delegated door's answer about the subject, asked by the delegate. */
+  async function answersFor(posture: Posture, state: State) {
+    const h = await bootWith(posture, state);
+    const caller = delegateFor(state);
+    const gate = (h.plugin as any).delegatedAdminGate;
+    const write = (operation: string, data: Record<string, unknown> | undefined, id?: string) =>
+      answerOf(() => gate.assert({
+        object: 'sys_user_permission_set', operation, data, ...(id ? { options: { where: { id } } } : {}), context: caller,
+      }));
+    return {
+      insert: await write('insert', { user_id: SUBJECT, permission_set: 'field_user' }),
+      'update pointing a stored grant at the subject': await write('update', { id: 'g_target', user_id: SUBJECT }),
+      "update of the subject's stored grant, its user_id left as stored": await write('update', { id: 'g_subject', reason: 'renewed' }),
+      "removal of the subject's stored grant": await write('delete', undefined, 'g_subject'),
+      'security/explain for the subject': await answerOf(() =>
+        h.plugin.explainAccessForCaller({ object: 'sys_business_unit', operation: 'read', userId: SUBJECT }, caller)),
+      "the subject's effective access": await answerOf(() => h.plugin.describeEffectiveAccess(SUBJECT, caller)),
+    };
+  }
+
+  for (const posture of POSTURES) {
+    describe(`posture '${posture}'`, () => {
+      it('ground truth: the delegate reads the subject exactly in the states where it is a user the delegate may read', async () => {
+        for (const state of [...STATES, CONTROL]) {
+          const h = await bootWith(posture, state);
+          const rows = await h.engine.find('sys_user', { where: { id: SUBJECT }, fields: ['id'], context: delegateFor(state) } as any);
+          const reads = (Array.isArray(rows) ? rows : []).some((r: any) => r.id === SUBJECT);
+          expect(reads, state).toBe(state !== 'an id naming no user' && state !== UNREADABLE_INSIDE);
+        }
+      });
+
+      it(`the ${STATES.length} states get, at every door, the answer the id naming no user gets`, async () => {
+        const answers = [];
+        for (const state of STATES) answers.push(await answersFor(posture, state));
+        for (const [i, answer] of answers.entries()) expect(answer, STATES[i]).toEqual(answers[0]);
+        // The one answer: the write gate's scope violation, and each explain door's refusal of a user the caller may not describe.
+        const [none] = answers;
+        for (const [door, answer] of Object.entries(none)) {
+          const expected = door.startsWith('security/explain') || door.startsWith("the subject's effective")
+            ? [403, 'PERMISSION_DENIED', 'PermissionDeniedError']
+            : [403, 'DELEGATION_SCOPE_VIOLATION', 'DelegationScopeViolationError'];
+          expect([answer.status, (answer as any).code, (answer as any).class], door).toEqual(expected);
+        }
+        expect((none['security/explain for the subject'] as any).details)
+          .toEqual({ object: 'sys_business_unit', operation: 'read', targetUserId: SUBJECT });
+        expect((none["the subject's effective access"] as any).details).toBeUndefined();
+      });
+
+      it('CONTROL: the same subject with a business unit inside the scope, read by the delegate, is served at every door', async () => {
+        const answers = await answersFor(posture, CONTROL);
+        for (const [door, answer] of Object.entries(answers)) expect(answer, door).toEqual({ status: 200 });
+      });
+
+      it("CONTROL: a tenant-level administrator and the organization administrator still remove the stored grant of the subject the delegate cannot read, through the write door", async () => {
+        for (const [who, context] of [
+          ['tenant-level administrator', delegateCtx('u_org_admin', 'admin_full_access')],
+          ['organization administrator', delegateCtx('u_org_admin', 'organization_admin')],
+        ] as const) {
+          const h = await bootWith(posture, UNREADABLE_INSIDE);
+          const removed = await answerOf(() => h.engine.delete('sys_user_permission_set', { where: { id: 'g_subject' }, context } as any));
+          expect(removed, who).toEqual({ status: 200 });
+          const left = await h.engine.find('sys_user_permission_set', { where: { id: 'g_subject' }, context: SYS });
+          expect(Array.isArray(left) ? left : [], who).toEqual([]);
+        }
+      });
+    });
+  }
+});
