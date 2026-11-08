@@ -32,6 +32,13 @@ export default defineConfig({
       // a FILE replacement would also swallow the published `/testing` subpath
       // and resolve it to `…/service-cluster/src/index.ts/testing` — `ENOTDIR`
       // at run time, from a config that reads as correct.
+      // The topology tests boot a real `ObjectKernel`: plugin order under
+      // `optionalDependencies` is the kernel's own decision. Same reason, same
+      // anchoring (core publishes `/logger` and other subpaths).
+      {
+        find: /^@objectstack\/core$/,
+        replacement: path.resolve(__dirname, '../../core/src/index.ts'),
+      },
       {
         find: /^@objectstack\/service-cluster$/,
         replacement: path.resolve(__dirname, '../service-cluster/src/index.ts'),

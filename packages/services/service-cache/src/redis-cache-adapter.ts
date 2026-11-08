@@ -65,9 +65,16 @@ export interface RedisCacheAdapterOptions {
 /** SCAN page size for `clear()` / `stats()`. A hint to Redis, not a limit. */
 const SCAN_COUNT = 500;
 
-/** Escape Redis glob metacharacters so a prefix is matched literally by `SCAN MATCH`. */
-function escapeGlob(literal: string): string {
-  return literal.replace(/[*?[\]\\]/g, (c) => `\\${c}`);
+/**
+ * A `SCAN MATCH` pattern that selects AT LEAST every key under `namespace`:
+ * each glob metacharacter in it becomes `?` (any one character, the literal
+ * included). The caller keeps only the keys that really start with
+ * `namespace`, so the pattern never has to be escaped — backslash escapes in
+ * `MATCH` are honoured by Redis but not by every Redis-speaking server or
+ * double, and a pattern one of them misreads would silently skip keys.
+ */
+function widenedMatch(namespace: string): string {
+  return `${namespace.replace(/[*?[\]\\]/g, '?')}*`;
 }
 
 /**
@@ -129,7 +136,7 @@ export class RedisCacheAdapter implements ICacheService {
     }
     this.client = options.client;
     this.namespace = `${options.keyPrefix ?? 'os:'}cache:`;
-    this.matchAll = `${escapeGlob(this.namespace)}*`;
+    this.matchAll = widenedMatch(this.namespace);
     this.defaultTtl = options.defaultTtl ?? 0;
     this.metrics = options.metrics ?? new NoopMetricsRegistry();
     this.ownsClient = options.ownsClient === true;
@@ -250,7 +257,7 @@ export class RedisCacheAdapter implements ICacheService {
     let cursor = '0';
     do {
       const [next, keys] = await this.client.scan(cursor, 'MATCH', this.matchAll, 'COUNT', SCAN_COUNT);
-      await visit(keys);
+      await visit(keys.filter((k) => k.startsWith(this.namespace)));
       cursor = String(next);
     } while (cursor !== '0');
   }
