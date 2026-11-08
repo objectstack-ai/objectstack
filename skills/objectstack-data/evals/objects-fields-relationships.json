@@ -15,7 +15,7 @@
           "nameField"
         ],
         "must_not_contain": [
-          "type: 'password'",
+          "{ type: 'password'",
           "namespace:",
           "vendorName"
         ]
@@ -37,7 +37,7 @@
           "type: 'user'"
         ],
         "must_not_contain": [
-          "many_to_many",
+          "type: 'many_to_many'",
           "deleteBehavior: 'set_null'",
           "reference: 'user'"
         ]

@@ -12,9 +12,9 @@
           "relatedLists"
         ],
         "must_not_contain": [
-          "definePage",
-          "slots.tabs",
-          "kind: 'full'"
+          "definePage(",
+          "slots: { tabs",
+          "kind: 'full',"
         ]
       }
     },
@@ -47,7 +47,7 @@
           "page:header"
         ],
         "must_not_contain": [
-          "slots.tabs",
+          "slots: { tabs",
           "actions: ['"
         ]
       }

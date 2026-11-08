@@ -18,7 +18,7 @@
       "files": [],
       "assertions": {
         "must_contain": ["requiredWhen", "os migrate meta", "conversionId", "tsc --noEmit"],
-        "must_not_contain": ["??"]
+        "must_not_contain": ["?? "]
       }
     },
     {

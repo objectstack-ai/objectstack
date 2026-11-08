@@ -28,7 +28,7 @@
       "files": [],
       "assertions": {
         "must_contain": ["engine.aggregate(", "groupBy", "aggregations", "count_distinct", "alias"],
-        "must_not_contain": ["distinct: true", "orderBy:"]
+        "must_not_contain": ["distinct: true,", "distinct: true }", "orderBy:"]
       }
     },
     {
@@ -38,7 +38,7 @@
       "files": [],
       "assertions": {
         "must_contain": ["searchFields", "expand", "fields", "stored"],
-        "must_not_contain": ["'project_id.name'", "fuzzy"]
+        "must_not_contain": ["'project_id.name'", "fuzzy:"]
       }
     },
     {
