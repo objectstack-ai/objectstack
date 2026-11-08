@@ -946,6 +946,13 @@ export const buildOidcProviderPluginSchema = buildOauthProviderPluginSchema;
 // unless it is actually handed to `sso({ schema })` — the one trigger #10074
 // named that would justify that rewiring is sso needing `additionalFields`,
 // which has no adapter-layer equivalent.
+//
+// That trigger has now fired, for `additionalFields` ONLY: the per-provider
+// sign-in toggles `allowIdpInitiated` / `allowJit` (`sso-sign-in-options.ts`)
+// are handed to `sso({ schema: { ssoProvider: { additionalFields } } })`. No
+// `modelName` and no `fields` map go with them, so the adapter rule above still
+// owns every column name (`allow_idp_initiated`, `allow_jit`), declared on the
+// `sys_sso_provider` platform object.
 
 // ---------------------------------------------------------------------------
 // SCIM plugin – scim* tables (@better-auth/scim)

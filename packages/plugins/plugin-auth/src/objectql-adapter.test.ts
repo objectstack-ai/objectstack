@@ -348,7 +348,10 @@ describe('createObjectQLAdapterFactory – adapter-layer plugin bridging (@bette
       model: 'ssoProvider',
       where: [{ field: 'providerId', value: 'okta', operator: 'eq', connector: 'AND' }],
     });
-    expect(row).toMatchObject({ providerId: 'okta', oidcConfig: '{"clientId":"x"}' });
+    // The blob also carries `allowIdpInitiated`, written from the provider's
+    // `allow_idp_initiated` column on every read (`sso-sign-in-options.ts`);
+    // this row has none, so it reads off.
+    expect(row).toMatchObject({ providerId: 'okta', oidcConfig: '{"clientId":"x","allowIdpInitiated":false}' });
     expect(row).not.toHaveProperty('oidc_config');
   });
 });
