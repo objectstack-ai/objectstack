@@ -16,6 +16,14 @@ import '@objectstack/runtime';
 import '@objectstack/objectql';
 import '@objectstack/plugin-auth';
 import '@objectstack/plugin-security';
+import '@objectstack/metadata-protocol';
+import '@objectstack/platform-objects/plugin';
+import '@objectstack/platform-objects/system';
+import '@objectstack/spec/automation';
+import '@objectstack/rest';
+import '@objectstack/service-datasource';
+import '@objectstack/driver-sql';
+import '@objectstack/driver-turso';
 
 /**
  * `os migrate plan` / `apply` and the organization-ownership ceremony compose
