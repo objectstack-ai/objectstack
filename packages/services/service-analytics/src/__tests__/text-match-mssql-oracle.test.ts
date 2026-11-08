@@ -62,7 +62,6 @@
  */
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import type { Knex } from 'knex';
 import type { Cube, FilterCondition } from '@objectstack/spec/data';
 import { FILTER_TEXT_CASES, FILTER_TEXT_ROWS, lowerFilterCondition } from '@objectstack/spec/data';
 import type { AnalyticsQuery } from '@objectstack/spec/contracts';
@@ -77,7 +76,7 @@ import type { DatasetScopedStrategyContext } from '../strategies/types.js';
 /** A driver that answers the WHERE clause its own filter compiler builds. */
 class CompilerProbe extends SqlDriver {
   compileWhere(where: FilterCondition): { sql: string; bindings: unknown[] } {
-    const builder: Knex.QueryBuilder = this.getKnex()('t');
+    const builder = this.getKnex()('t');
     this.applyFilters(builder, where);
     const native = builder.toSQL().toNative();
     return { sql: native.sql, bindings: [...native.bindings] };
@@ -313,7 +312,7 @@ for (const cell of LIVE) {
   describe.skipIf(!url)(`[#31394] live ${cell.id}: the driver face and the native-SQL face answer the shared rows`, { timeout: 120_000 }, () => {
     const table = `os_31394_text_${process.pid}`;
     let driver: SqlDriver;
-    let knex: Knex;
+    let knex: ReturnType<SqlDriver['getKnex']>;
     const liveCube = { ...CUBE, sql: table } as unknown as Cube;
 
     beforeAll(async () => {
