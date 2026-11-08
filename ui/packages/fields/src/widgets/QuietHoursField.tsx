@@ -80,7 +80,7 @@ function draftDenotes(draft: QuietHoursDraft, value: unknown): boolean {
  * A stored value that is not that shape is shown as stored with a note, and is
  * replaced only when the person chooses to set a new range.
  */
-export function QuietHoursField({ value, onChange, field: _field, readonly, error, ...props }: FieldWidgetComponentProps<any>) {
+export function QuietHoursField({ value, onChange, field: _field, readonly, error, ...props }: FieldWidgetComponentProps<unknown>) {
   const { t } = useFieldTranslation();
   const groupId = useId();
   const subId = (part: 'tz' | 'start' | 'end') => `${groupId}-${part}`;

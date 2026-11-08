@@ -20,11 +20,12 @@
  * and its rule for anything else: an unreadable stored value shows as-is with
  * a note and is never silently rewritten.
  */
-import { describe, it, expect, vi, afterEach, beforeAll } from 'vitest';
+import { describe, it, expect, vi, afterEach, beforeAll, type Mock } from 'vitest';
 import React from 'react';
 import { render, screen, fireEvent, cleanup, within } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import { ComponentRegistry } from '@object-ui/core';
+import type { FieldMetadata } from '@object-ui/types';
 // Module scope: pulls in the form renderer's registration side effect.
 import '@object-ui/components';
 import { QuietHoursField } from '../QuietHoursField';
@@ -36,13 +37,15 @@ import { registerAllFields } from '../../index';
 // form's `React.lazy` resolves at once.
 import '../QuietHoursField.js';
 
-const FIELD = { name: 'quiet_hours', type: 'json', widget: 'quiet-hours', label: 'Quiet Hours' } as any;
+const FIELD = { name: 'quiet_hours', type: 'json', label: 'Quiet Hours' } as FieldMetadata;
+/** The field as the server half (#31426) declares it: the hint the form resolves `field:quiet-hours` from. */
+const HINTED_FIELD = { ...FIELD, widget: 'quiet-hours' };
 
 function mount({
   value,
-  onChange = vi.fn(),
+  onChange = vi.fn<(val: unknown) => void>(),
   readonly = false,
-}: { value: unknown; onChange?: ReturnType<typeof vi.fn>; readonly?: boolean }) {
+}: { value: unknown; onChange?: Mock<(val: unknown) => void>; readonly?: boolean }) {
   const view = render(<QuietHoursField value={value} onChange={onChange} readonly={readonly} field={FIELD} />);
   return { onChange, ...view };
 }
@@ -249,7 +252,7 @@ describe('the record form draws a field declaring widget: quiet-hours with this 
           showSubmit: false,
           showCancel: false,
           defaultValues: { quiet_hours: { tz: 'Europe/Berlin', start: '22:00', end: '07:00' } },
-          fields: [{ name: 'quiet_hours', label: 'Quiet Hours', type: 'object', field: FIELD }],
+          fields: [{ name: 'quiet_hours', label: 'Quiet Hours', type: 'object', field: HINTED_FIELD }],
         }}
       />,
     );
@@ -261,7 +264,6 @@ describe('the record form draws a field declaring widget: quiet-hours with this 
 
   it('the same field without the hint stays the JSON box', async () => {
     const Form = ComponentRegistry.get('form')!;
-    const { widget: _widget, ...bare } = FIELD;
     render(
       <Form
         schema={{
@@ -270,7 +272,7 @@ describe('the record form draws a field declaring widget: quiet-hours with this 
           showSubmit: false,
           showCancel: false,
           defaultValues: { quiet_hours: { start: '22:00', end: '07:00' } },
-          fields: [{ name: 'quiet_hours', label: 'Quiet Hours', type: 'object', field: bare }],
+          fields: [{ name: 'quiet_hours', label: 'Quiet Hours', type: 'object', field: FIELD }],
         }}
       />,
     );
