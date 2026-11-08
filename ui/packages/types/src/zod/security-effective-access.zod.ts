@@ -41,8 +41,10 @@ const SECURITY_EFFECTIVE_ACCESS_NEITHER_CHANNEL =
   'REFUSED — `security:effective-access` reads NEITHER content channel: its registration hands '
   + 'the node to `UserEffectiveAccess`, which reads only `className`, and `SchemaRenderer` strips '
   + 'both channels out of the props bag it spreads. An authored value would render NOTHING — no '
-  + 'render-time error or warning and no element. What it renders instead: the effective permission '
-  + 'sets of the person of the bound `sys_user` record, each with where it comes from.';
+  + 'render-time error or warning and no element; only the parser tier\'s `not-a-container` warning '
+  + '(objectui#9910) noticed it, because the registration declares no `children` input. What it '
+  + 'renders instead: the effective permission sets of the person of the bound `sys_user` record, '
+  + 'each with where it comes from.';
 
 /**
  * `security:effective-access` — a person's effective permission sets and their
