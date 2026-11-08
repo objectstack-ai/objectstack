@@ -535,11 +535,13 @@ describe('[ADR-0090 D12, ruling of record 6663849489] a delegated business-unit 
         expect(await gateAnswers(h, NO_ORGANIZATION)).toEqual({ covered: [], placeable: [], coversMember: false, coversOtherMember: false });
       });
 
-      it('the read door returns no unit to a context naming no organization', async () => {
+      it('the read door returns no unit to a context naming no organization: it refuses the read, as for a caller holding no scope', async () => {
         const h = await boot(posture);
         await linkOtherOrganization(h);
-        // A context that names no organization holds nothing: its scope admits no read.
-        expect(await unitsRead(h, NO_ORGANIZATION)).toEqual([]);
+        // A context that names no organization holds nothing: its scope admits
+        // no read, so the read is refused as it is for a caller holding no
+        // scope at all (the CONTROL of the describe above).
+        expect(await unitsRead(h, NO_ORGANIZATION)).toEqual({ status: 403, code: 'PERMISSION_DENIED' });
         // CONTROL: the context naming its organization reads its scope, as before.
         expect(await unitsRead(h, NARROW)).toEqual(IN_SCOPE);
       });

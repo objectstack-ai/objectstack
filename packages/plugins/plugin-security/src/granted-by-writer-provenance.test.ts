@@ -155,6 +155,11 @@ async function boot(opts: { security: boolean } = { security: true }): Promise<R
     { id: 'bu_east', name: 'east', parent_business_unit_id: 'bu_hq' },
   ], SYS);
   await engine.insert('sys_business_unit_member', [{ id: 'bum_target', user_id: TARGET, business_unit_id: 'bu_east' }], SYS);
+  // The target is a member of the organization the delegate's session names, so
+  // a grant written in it names a holder the organization holds.
+  await engine.insert('sys_member', [
+    { id: 'mem_target_default', user_id: TARGET, organization_id: 'org_default', role: 'member', created_at: new Date().toISOString() },
+  ], SYS);
   await engine.insert('sys_permission_set', [
     { id: 'ps_plain', name: 'qa_plain', label: 'Plain', active: true },
     { id: 'ps_oa', name: 'organization_admin', label: 'Organization admin', active: true },
