@@ -297,9 +297,11 @@ import type * as M201 from './data/recycle-bin.zod.js';
 import type * as M202 from './marketplace/taxonomy.zod.js';
 // The restriction profile a target environment publishes -- new module, next free index.
 import type * as M203 from './system/restriction-profile.zod.js';
+// [ADR-0149 D2] The dataset AI tools' inputs, outputs and provenance -- new module, next free index.
+import type * as M204 from './ai/dataset-tools.zod.js';
 
 // ---------------------------------------------------------------------------
-// 843 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
+// 853 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
 //
 // That number is machine-checked, not hand-kept. The runtime companion at the
 // bottom of this file recomputes the pin count from the source and asserts that
@@ -375,6 +377,18 @@ export type Iso_ai_conversation__MessagePruningEventSchema = Assert<Eq< z.input<
 export type Iso_ai_conversation__MessageRoleSchema = Assert<Eq< z.input< typeof M1.MessageRoleSchema >, z.infer< typeof M1.MessageRoleSchema > >>;
 export type Iso_ai_conversation__TextContentSchema = Assert<Eq< z.input< typeof M1.TextContentSchema >, z.infer< typeof M1.TextContentSchema > >>;
 export type Iso_ai_conversation__TokenBudgetStrategySchema = Assert<Eq< z.input< typeof M1.TokenBudgetStrategySchema >, z.infer< typeof M1.TokenBudgetStrategySchema > >>;
+
+// ai/dataset-tools.zod.ts -- [ADR-0149 D2] plain objects, strict inputs, enums and literals, no default and no transform
+export type Iso_ai_datasetTools__DatasetCatalogDimensionSchema = Assert<Eq< z.input< typeof M204.DatasetCatalogDimensionSchema >, z.infer< typeof M204.DatasetCatalogDimensionSchema > >>;
+export type Iso_ai_datasetTools__DatasetCatalogEntrySchema = Assert<Eq< z.input< typeof M204.DatasetCatalogEntrySchema >, z.infer< typeof M204.DatasetCatalogEntrySchema > >>;
+export type Iso_ai_datasetTools__DatasetCatalogMeasureSchema = Assert<Eq< z.input< typeof M204.DatasetCatalogMeasureSchema >, z.infer< typeof M204.DatasetCatalogMeasureSchema > >>;
+export type Iso_ai_datasetTools__DatasetProvenanceSchema = Assert<Eq< z.input< typeof M204.DatasetProvenanceSchema >, z.infer< typeof M204.DatasetProvenanceSchema > >>;
+export type Iso_ai_datasetTools__DatasetTermMatchSchema = Assert<Eq< z.input< typeof M204.DatasetTermMatchSchema >, z.infer< typeof M204.DatasetTermMatchSchema > >>;
+export type Iso_ai_datasetTools__DatasetTermMatchedOn = Assert<Eq< z.input< typeof M204.DatasetTermMatchedOn >, z.infer< typeof M204.DatasetTermMatchedOn > >>;
+export type Iso_ai_datasetTools__ListDatasetsInputSchema = Assert<Eq< z.input< typeof M204.ListDatasetsInputSchema >, z.infer< typeof M204.ListDatasetsInputSchema > >>;
+export type Iso_ai_datasetTools__ListDatasetsOutputSchema = Assert<Eq< z.input< typeof M204.ListDatasetsOutputSchema >, z.infer< typeof M204.ListDatasetsOutputSchema > >>;
+export type Iso_ai_datasetTools__QueryDatasetInputSchema = Assert<Eq< z.input< typeof M204.QueryDatasetInputSchema >, z.infer< typeof M204.QueryDatasetInputSchema > >>;
+export type Iso_ai_datasetTools__QueryDatasetOutputSchema = Assert<Eq< z.input< typeof M204.QueryDatasetOutputSchema >, z.infer< typeof M204.QueryDatasetOutputSchema > >>;
 
 // ai/embedding.zod.ts
 export type Iso_ai_embedding__EmbeddingModelSchema = Assert<Eq< z.input< typeof M2.EmbeddingModelSchema >, z.infer< typeof M2.EmbeddingModelSchema > >>;
@@ -1807,7 +1821,7 @@ describe('ADR-0122 type-alias convention', () => {
   // this title and the section header above the pin list — are now asserted
   // against the recomputed count below, so neither can go stale without a red
   // test naming it.
-  it('still declares all 843 isomorphic pins', () => {
+  it('still declares all 853 isomorphic pins', () => {
     // The truth of each pin is proved by tsc, not here — an `Assert<Eq<...>>`
     // that stops holding is a compile error with the alias named. What tsc
     // cannot notice is a pin that was DELETED: removing the assertion removes
@@ -2849,7 +2863,15 @@ describe('ADR-0122 type-alias convention', () => {
     // (`RestrictionProfileNodeType`): an enum of the built-in node type ids
     // plus the spec-declared approval pair, no default and no transform
     // (Iso_system_restrictionProfile__RestrictionProfileNodeType). +1 added.
-    expect(pins).toHaveLength(843);
+    // 843 -> 853 is ADR-0149 D2's dataset AI tools (`ai/dataset-tools.zod.ts`):
+    // the two tool inputs (strict objects over an array of strings, and a
+    // string beside `DatasetSelectionSchema` by reference, itself pinned), the
+    // catalogue entry, its dimension, measure and term-match rows, the
+    // matched-on enum, the provenance block and the two outputs, the query
+    // output extending the dataset answer's `data` members — plain objects,
+    // enums and literals, no default and no transform (Iso_ai_datasetTools__*).
+    // +10 added.
+    expect(pins).toHaveLength(853);
 
     // The count is stated in PROSE twice as well — this case's title and the
     // section header above the pin list — and until commit c6b05c76a nothing read either
