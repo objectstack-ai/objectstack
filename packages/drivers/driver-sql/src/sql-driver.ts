@@ -294,7 +294,7 @@ import { SqliteSerialisationFacet } from './sql-driver-sqlite-serialisation.js';
 // [cloud#3652 D3] Declared renames: the methods of the same names below hand the bodies what they read (`DeclaredRenameHost`).
 import { DeclaredRenameFacet } from './sql-driver-declared-rename.js';
 import type { DeclaredRenameCarry, DeclaredRenamePlan } from './declared-rename.js';
-import { withOracleFederationClient } from './sql-driver-oracle-dialect.js';
+import { withOracleFederationClient, type OracleUuidBindingRole } from './sql-driver-oracle-dialect.js';
 // [#29520 codemod] The facets' hosts, one per driver, which the static block at the end of the class builds.
 import {
   aggregationHost, bulkOperationsHost, classHeadHost, columnCreationHost, crudHost, databaseHelpersHost,
@@ -1326,6 +1326,16 @@ export class SqlDriver implements IDataDriver {
   protected mssqlPagingKeyByObject = new Map<string, string | null>();
 
   /**
+   * Oracle (#31390): per external object, the LOGICAL fields whose remote
+   * column is a `RAW(16)` uuid, read from the catalog by
+   * {@link primeOracleRawUuidColumns} the first time the object is read or
+   * written. A field here binds as `HEXTORAW(?)` ({@link oracleUuidBinding});
+   * an object with no entry binds every value as before. Empty on every other
+   * dialect.
+   */
+  protected oracleRawUuidFieldsByObject = new Map<string, ReadonlySet<string>>();
+
+  /**
    * SQL Server (#31395): the REMOTE columns of a federated table that the
    * remote catalog reports as `uniqueidentifier`, per object. Filled lazily by
    * {@link primeMssqlGuidColumns} the first time a read compiles a text
@@ -1829,6 +1839,50 @@ export class SqlDriver implements IDataDriver {
    */
   protected async primeMssqlPagingKey(object: string): Promise<void> {
     return FieldMappingFacet.primeMssqlPagingKey.call(fieldMappingHost.of(this), object);
+  }
+
+  /**
+   * Oracle (#31390): learn, once per object, which of a FEDERATED table's
+   * columns are `RAW(16)` uuids — read from the remote catalog
+   * (`oracleRawUuidColumns`) and mapped back through the object's
+   * `external.columnMap` to the fields that read them.
+   *
+   * Why the driver reads it rather than being told: nothing an author writes
+   * names the physical type. A `lookup` (or `text`) field is the exact pairing
+   * for a `VARCHAR2` uuid column and a `RAW(16)` one alike, and only the second
+   * needs its comparands and written values bound through `HEXTORAW`. The value
+   * is never the evidence: a uuid-shaped string in a text column stays text.
+   *
+   * Recorded once per object, so a read costs the catalog one statement for
+   * the object's lifetime in this driver (re-registering the object forgets
+   * it). A failed catalog read records nothing: the statement is then bound as
+   * before, and the next read asks again. A no-op on every other dialect, and
+   * for an object that was never registered as external.
+   */
+  protected async primeOracleRawUuidColumns(object: string): Promise<void> {
+    return FieldMappingFacet.primeOracleRawUuidColumns.call(fieldMappingHost.of(this), object);
+  }
+
+  /** The catalog read behind {@link primeOracleRawUuidColumns}: the remote table's `RAW(16)` column names. */
+  protected readOracleRawUuidColumns(remoteTable: string, remoteSchema: string | undefined): Promise<string[]> {
+    return FieldMappingFacet.readOracleRawUuidColumns.call(fieldMappingHost.of(this), remoteTable, remoteSchema);
+  }
+
+  /**
+   * Oracle (#31390): `value` as bound against `field` of `object` — through
+   * `HEXTORAW(?)` when the catalog reported the field's column as a `RAW(16)`
+   * uuid ({@link primeOracleRawUuidColumns}), refused when it is not uuid text
+   * (`INVALID_FILTER` for a comparand, `VALIDATION_ERROR` for a written value).
+   * Returned untouched for any other column, a null, and on every other
+   * dialect.
+   */
+  protected oracleUuidBinding(
+    object: string | null | undefined,
+    field: string,
+    value: unknown,
+    role: OracleUuidBindingRole,
+  ): unknown {
+    return FilterHelpersFacet.oracleUuidBinding.call(filterHelpersHost.of(this), object, field, value, role);
   }
 
   /**
@@ -4363,6 +4417,7 @@ export class SqlDriver implements IDataDriver {
     const readNumericFields = () => this.numericFields;
     const readNumericValueFields = () => this.numericValueFields;
     const readObjectByPhysicalTable = () => this.objectByPhysicalTable;
+    const readOracleRawUuidFieldsByObject = () => this.oracleRawUuidFieldsByObject;
     const readPhysicalSchemaByObject = () => this.physicalSchemaByObject;
     const readPhysicalTableByObject = () => this.physicalTableByObject;
     const readTenantFieldByTable = () => this.tenantFieldByTable;
@@ -4385,6 +4440,7 @@ export class SqlDriver implements IDataDriver {
       get numericFields() { return readNumericFields(); },
       get numericValueFields() { return readNumericValueFields(); },
       get objectByPhysicalTable() { return readObjectByPhysicalTable(); },
+      get oracleRawUuidFieldsByObject() { return readOracleRawUuidFieldsByObject(); },
       get physicalSchemaByObject() { return readPhysicalSchemaByObject(); },
       get physicalTableByObject() { return readPhysicalTableByObject(); },
       get tenantFieldByTable() { return readTenantFieldByTable(); },
@@ -9125,11 +9181,13 @@ export class SqlDriver implements IDataDriver {
       get fractionalNumericFields() { return driver.fractionalNumericFields; },
       get getBuilder() { return driver.getBuilder.bind(driver); },
       get isMssql() { return driver.isMssql; },
+      get isOracle() { return driver.isOracle; },
       get knex() { return driver.knex; },
       mapAggregateFunc: (...a) => driver.mapAggregateFunc(...a),
       get numericFields() { return driver.numericFields; },
       presentReadColumns: (...a) => driver.presentReadColumns(...a),
       primeMssqlGuidColumns: (...a) => driver.primeMssqlGuidColumns(...a),
+      primeOracleRawUuidColumns: (...a) => driver.primeOracleRawUuidColumns(...a),
       readPresentationKind: (...a) => driver.readPresentationKind(...a),
       remoteColumn: (...a) => driver.remoteColumn(...a),
     }));
@@ -9148,9 +9206,12 @@ export class SqlDriver implements IDataDriver {
       injectTenantOnInsert: (...a) => driver.injectTenantOnInsert(...a),
       get insertReturnsStoredRows() { return driver.insertReturnsStoredRows; },
       get isMssql() { return driver.isMssql; },
+      get isOracle() { return driver.isOracle; },
       keepSuppliedUpdatedAt: (...a) => driver.keepSuppliedUpdatedAt(...a),
       get knex() { return driver.knex; },
+      oracleUuidBinding: (...a) => driver.oracleUuidBinding(...a),
       primeMssqlGuidColumns: (...a) => driver.primeMssqlGuidColumns(...a),
+      primeOracleRawUuidColumns: (...a) => driver.primeOracleRawUuidColumns(...a),
       readBackInsertedRows: (...a) => driver.readBackInsertedRows(...a),
       resyncSequenceToDataMax: (...a) => driver.resyncSequenceToDataMax(...a),
       remoteColumn: (...a) => driver.remoteColumn(...a),
@@ -9219,12 +9280,15 @@ export class SqlDriver implements IDataDriver {
       injectTenantOnInsert: (...a) => driver.injectTenantOnInsert(...a),
       get insertReturnsStoredRows() { return driver.insertReturnsStoredRows; },
       get isMssql() { return driver.isMssql; },
+      get isOracle() { return driver.isOracle; },
       get isSqlite() { return driver.isSqlite; },
       get knex() { return driver.knex; },
       mapSortField: (...a) => driver.mapSortField(...a),
+      oracleUuidBinding: (...a) => driver.oracleUuidBinding(...a),
       orderKeysFor: (...a) => driver.orderKeysFor(...a),
       primeMssqlGuidColumns: (...a) => driver.primeMssqlGuidColumns(...a),
       primeMssqlPagingKey: (...a) => driver.primeMssqlPagingKey(...a),
+      primeOracleRawUuidColumns: (...a) => driver.primeOracleRawUuidColumns(...a),
       readBackInsertedRows: (...a) => driver.readBackInsertedRows(...a),
       remoteColumn: (...a) => driver.remoteColumn(...a),
       resolveTenantField: (...a) => driver.resolveTenantField(...a),
@@ -9297,8 +9361,10 @@ export class SqlDriver implements IDataDriver {
       distinctBackendFault: (...a) => driver.distinctBackendFault(...a),
       get getBuilder() { return driver.getBuilder.bind(driver); },
       get isMssql() { return driver.isMssql; },
+      get isOracle() { return driver.isOracle; },
       presentReadValue: (...a) => driver.presentReadValue(...a),
       primeMssqlGuidColumns: (...a) => driver.primeMssqlGuidColumns(...a),
+      primeOracleRawUuidColumns: (...a) => driver.primeOracleRawUuidColumns(...a),
       readPresentationKind: (...a) => driver.readPresentationKind(...a),
       remoteColumn: (...a) => driver.remoteColumn(...a),
     }));
@@ -9307,14 +9373,18 @@ export class SqlDriver implements IDataDriver {
       get fieldColumnByObject() { return driver.fieldColumnByObject; },
       introspectColumns: (...a) => driver.introspectColumns(...a),
       introspectPrimaryKeys: (...a) => driver.introspectPrimaryKeys(...a),
+      get isOracle() { return driver.isOracle; },
+      get knex() { return driver.knex; },
       get logger() { return driver.logger; },
       get managedObjectFields() { return driver.managedObjectFields; },
       get mssqlGuidColumnsByObject() { return driver.mssqlGuidColumnsByObject; },
       get mssqlPagingKeyByObject() { return driver.mssqlPagingKeyByObject; },
       get nondeterministicPagingWarned() { return driver.nondeterministicPagingWarned; },
+      get oracleRawUuidFieldsByObject() { return driver.oracleRawUuidFieldsByObject; },
       paginationTieBreaker: (...a) => driver.paginationTieBreaker(...a),
       get physicalSchemaByObject() { return driver.physicalSchemaByObject; },
       get physicalTableByObject() { return driver.physicalTableByObject; },
+      readOracleRawUuidColumns: (...a) => driver.readOracleRawUuidColumns(...a),
     }));
     filterHelpersHost.install((driver) => ({
       applyContainsLike: (...a) => driver.applyContainsLike(...a),
@@ -9347,6 +9417,7 @@ export class SqlDriver implements IDataDriver {
       get isSqlite() { return driver.isSqlite; },
       jsonColumnFieldClass: (...a) => driver.jsonColumnFieldClass(...a),
       get jsonFields() { return driver.jsonFields; },
+      get knex() { return driver.knex; },
       logWithheldFilterDiagnostic: (...a) => driver.logWithheldFilterDiagnostic(...a),
       get logger() { return driver.logger; },
       get managedObjectFields() { return driver.managedObjectFields; },
@@ -9357,6 +9428,8 @@ export class SqlDriver implements IDataDriver {
       needsLegacyTimeRepair: (...a) => driver.needsLegacyTimeRepair(...a),
       get numericFields() { return driver.numericFields; },
       get objectByPhysicalTable() { return driver.objectByPhysicalTable; },
+      get oracleRawUuidFieldsByObject() { return driver.oracleRawUuidFieldsByObject; },
+      oracleUuidBinding: (...a) => driver.oracleUuidBinding(...a),
       presentReadValue: (...a) => driver.presentReadValue(...a),
       get readableIdsDriverName() { return driver.readableIdsDriverName; },
       get readableIdsRefusalLog() { return driver.readableIdsRefusalLog; },
@@ -9422,11 +9495,13 @@ export class SqlDriver implements IDataDriver {
       get getBuilder() { return driver.getBuilder.bind(driver); },
       get isMssql() { return driver.isMssql; },
       get isMysql() { return driver.isMysql; },
+      get isOracle() { return driver.isOracle; },
       get isPostgres() { return driver.isPostgres; },
       get isSqlite() { return driver.isSqlite; },
       get knex() { return driver.knex; },
       mapSortField: (...a) => driver.mapSortField(...a),
       primeMssqlGuidColumns: (...a) => driver.primeMssqlGuidColumns(...a),
+      primeOracleRawUuidColumns: (...a) => driver.primeOracleRawUuidColumns(...a),
     }));
     rotationHost.install((driver) => ({
       assertSchemaMutable: (...a) => driver.assertSchemaMutable(...a),
@@ -9531,8 +9606,10 @@ export class SqlDriver implements IDataDriver {
       maxAutonumberCounter: (...a) => driver.maxAutonumberCounter(...a),
       mergeLandsInWrittenOrganization: (...a) => driver.mergeLandsInWrittenOrganization(...a),
       observedUpdatedAtColumn: (...a) => driver.observedUpdatedAtColumn(...a),
+      oracleUuidBinding: (...a) => driver.oracleUuidBinding(...a),
       get organizationObjectRegistered() { return driver.organizationObjectRegistered; },
       get physicalTableByObject() { return driver.physicalTableByObject; },
+      primeOracleRawUuidColumns: (...a) => driver.primeOracleRawUuidColumns(...a),
       remoteColumn: (...a) => driver.remoteColumn(...a),
       resolveSequenceTenantId: (...a) => driver.resolveSequenceTenantId(...a),
       resolveTenantField: (...a) => driver.resolveTenantField(...a),
@@ -9567,6 +9644,8 @@ export class SqlDriver implements IDataDriver {
       get mediaFields() { return driver.mediaFields; },
       get numericFields() { return driver.numericFields; },
       get numericValueFields() { return driver.numericValueFields; },
+      get oracleRawUuidFieldsByObject() { return driver.oracleRawUuidFieldsByObject; },
+      oracleUuidBinding: (...a) => driver.oracleUuidBinding(...a),
       storageDatetimeValue: (...a) => driver.storageDatetimeValue(...a),
       get timeFields() { return driver.timeFields; },
       toDateOnly: (...a) => driver.toDateOnly(...a),
@@ -9590,9 +9669,11 @@ export class SqlDriver implements IDataDriver {
       formatOutput: (...a) => driver.formatOutput(...a),
       get getBuilder() { return driver.getBuilder.bind(driver); },
       get isMssql() { return driver.isMssql; },
+      get isOracle() { return driver.isOracle; },
       get knex() { return driver.knex; },
       mapSortField: (...a) => driver.mapSortField(...a),
       primeMssqlGuidColumns: (...a) => driver.primeMssqlGuidColumns(...a),
+      primeOracleRawUuidColumns: (...a) => driver.primeOracleRawUuidColumns(...a),
     }));
   }
 }

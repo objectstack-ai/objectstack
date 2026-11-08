@@ -256,3 +256,62 @@ describe('Details — a refusal code the console has no sentence for (objectui#1
     expect(screen.queryByText(fill(en.marketplace.detail.installedV, { version: '3.2.0' }))).toBeNull();
   });
 });
+
+/**
+ * objectstack#31566 (PR objectstack#31650) adds the marker's second arm,
+ * `{ code, message }`: the engine refused the package's register at boot, and
+ * `message` is its own sentence. The header reads it through Installed Apps'
+ * one reader (`MarketplaceNotLoadedReason`): the code's sentence, then the
+ * engine's, as text. A marker with no sentence, or an empty one, reads with the
+ * code alone. The protocol arm is pinned unchanged by the cases above.
+ */
+const ENGINE_MESSAGE =
+  'Package "com.example.crm" declares the default page "crm_home", which is not a record page: '
+  + 'a default page must be a record page of its object.';
+const REGISTER_REFUSED = { ...REFUSED, notLoaded: { code: 'INVALID_METADATA', message: ENGINE_MESSAGE } };
+
+describe.each([
+  ['en', EN, en as Pack],
+  ['zh', ZH, zh as unknown as Pack],
+])('Details — a register-refused local install shows the engine\'s reason (objectstack#31566) [%s]', (_lang, config, pack) => {
+  const sentence = fill(pack.marketplace.notLoaded.otherReason, { code: 'INVALID_METADATA' });
+
+  describe.each([
+    ['the catalog view (marketplace on)', true],
+    ['the offline local view (marketplace off, objectui#11627)', false],
+  ])('%s', (_view, marketplace) => {
+    it('the header carries the not-loaded badge, the code\'s sentence and the engine\'s sentence', async () => {
+      await boot(marketplace, REGISTER_REFUSED);
+      renderPage(config);
+
+      expect(await screen.findByText(pack.marketplace.notLoaded.badge)).toBeInTheDocument();
+      expect(screen.getByText(sentence)).toBeInTheDocument();
+      expect(screen.getByText(ENGINE_MESSAGE)).toBeInTheDocument();
+      expect(screen.queryByText(fill(pack.marketplace.detail.installedV, { version: '3.2.0' }))).toBeNull();
+    });
+  });
+});
+
+describe('Details — the engine\'s sentence is server text (objectstack#31566)', () => {
+  it('a sentence shaped like markup is drawn as its literal text, never as elements', async () => {
+    const markup = 'Object <b>crm_lead</b> is owned by package "com.example.base".';
+    await boot(true, { ...REFUSED, notLoaded: { code: 'OBJECT_OWNERSHIP_CONFLICT', message: markup } });
+    renderPage(EN);
+
+    expect(await screen.findByText(markup)).toBeInTheDocument();
+    expect(document.body.querySelector('b')).toBeNull();
+  });
+
+  it.each([
+    ['no `message` member', { code: 'INVALID_METADATA' }],
+    ['an empty `message`', { code: 'INVALID_METADATA', message: '' }],
+    ['a blank `message`', { code: 'INVALID_METADATA', message: '   ' }],
+  ])('a marker with %s reads with the code alone', async (_case, notLoaded) => {
+    await boot(true, { ...REFUSED, notLoaded });
+    renderPage(EN);
+
+    expect(await screen.findByText(en.marketplace.notLoaded.badge)).toBeInTheDocument();
+    expect(screen.getByText(fill(en.marketplace.notLoaded.otherReason, { code: 'INVALID_METADATA' }))).toBeInTheDocument();
+    expect(screen.queryByTestId('marketplace-not-loaded-engine-message')).toBeNull();
+  });
+});

@@ -39,6 +39,12 @@ import {
  * do not clash with the Cube layer's `DimensionSchema` / `MetricSchema` in
  * `data/analytics.zod.ts` while the two layers coexist (Phase 1). The Cube
  * layer is absorbed/retired in a later phase (D-A).
+ *
+ * Business vocabulary (ADR-0149 D1): every dimension and measure may carry
+ * `synonyms` — the words people use for it in a question, matched and never
+ * rendered — and a `description`, one or two sentences of business definition
+ * in plain language, never a prompt. Within one dataset a word answers to one
+ * member: a synonym may not equal another member's name, label or synonym.
  */
 
 /**
@@ -97,6 +103,106 @@ const DATASET_POLARITY_NOT_A_FLAG =
   'a measure declares which direction is good news with `polarity`, not a boolean: '
   + "`polarity: 'higher'` (a rise is good), `polarity: 'lower'` (a fall is good: turnaround days, overdue "
   + "counts, cost) or `polarity: 'neutral'` (neither, the delta is drawn without a good or bad colour).";
+
+/**
+ * [ADR-0149 D1] The business vocabulary a dimension or a measure answers to.
+ *
+ * Two optional keys on both member shapes: `synonyms` (the words a person uses
+ * for the member in a question) and `description` (one or two sentences of
+ * business definition in plain language — never a prompt or an instruction to
+ * a model; M1, ruled A). Their reader is the dataset AI tools' catalogue and
+ * term matcher (ADR-0149 D2/D3, `@objectstack/service-analytics`), which
+ * `liveness/dataset.json` records as `planned` until it lands.
+ *
+ * A synonym is MATCHED, never rendered: it is not display copy, so it is not
+ * locale-keyed and has no translation-bundle key (a locale map would invite a
+ * reader to match only the active locale's list, the one thing a synonym list
+ * must not do). A member `description` IS display text, an `I18nLabel` like
+ * `label`, translated at `datasets.<name>.{dimensions,measures}.<member>.description`.
+ */
+const DATASET_SYNONYM_MAX_LENGTH = 60;
+const DATASET_MEMBER_SYNONYMS_MAX = 20;
+const DATASET_MEMBER_DESCRIPTION_MAX_LENGTH = 500;
+
+/**
+ * [ADR-0149 D1/D3] The ONE normalization a vocabulary term is compared under —
+ * the dataset's uniqueness validation below and the dataset tools' term matcher
+ * call this same function, so whether two words are "the same word" has one
+ * answer everywhere.
+ *
+ * NFKC (full-width and compatibility forms fold to their plain spelling), then
+ * Unicode lower case, then `_` and `-` fold to a space, then every run of
+ * whitespace collapses to one space and the ends are trimmed — so
+ * `total_amount`, `Total Amount` and `ＴＯＴＡＬ－ＡＭＯＵＮＴ` are one term. Equality
+ * after this is a match; a substring, a stem or a neighbour is not.
+ */
+export function normalizeDatasetTerm(term: string): string {
+  return term.normalize('NFKC').toLowerCase().replace(/[_-]/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+const DATASET_SYNONYM_NOT_TRIMMED =
+  'a synonym is one word or phrase as a person types it in a question: not empty, no leading or '
+  + 'trailing whitespace, no line break (ADR-0149 D1). The schema refuses rather than trims it, so what '
+  + 'is stored is what was written.';
+
+/**
+ * [ADR-0149 D1] A member's `synonyms`: each a trimmed, non-empty word or phrase
+ * of at most 60 characters, at most 20 per member. Mixed languages in one list
+ * are the normal case (`['收入', '销售额', 'revenue']`). Uniqueness — within the
+ * member and against the dataset's other members — is judged by
+ * {@link DatasetSchema}'s refinement, which has every member in hand.
+ */
+export const DatasetMemberSynonymsSchema = lazySchema(() => z.array(
+  z.string()
+    .max(DATASET_SYNONYM_MAX_LENGTH, {
+      error: () => `a synonym is at most ${DATASET_SYNONYM_MAX_LENGTH} characters — one word or short phrase `
+        + 'a person would use in a question. A longer explanation is the member\'s `description`.',
+    })
+    .regex(/^\S(?:.*\S)?$/u, { error: () => DATASET_SYNONYM_NOT_TRIMMED }),
+).max(DATASET_MEMBER_SYNONYMS_MAX, {
+  error: () => `a member takes at most ${DATASET_MEMBER_SYNONYMS_MAX} synonyms — keep the words people `
+    + 'actually use for it in a question.',
+}).describe(
+  'Words a person uses for this member in a question (e.g. ["收入", "销售额", "revenue"]), matched after '
+  + 'normalization and never rendered. Each trimmed, non-empty, at most 60 characters; at most 20. Within one '
+  + 'dataset a synonym may not equal another member\'s name, label or synonym.',
+));
+
+/**
+ * [ADR-0149 D1, M1 ruled A] A member's `description`: a business definition in
+ * plain language, never a prompt. `I18nLabelSchema` by reference — a string or
+ * an inline locale map — bounded to 500 characters per locale by
+ * {@link DatasetSchema}'s refinement.
+ */
+const DATASET_MEMBER_DESCRIPTION_EXAMPLE = {
+  dimension: '商机当前所处的销售阶段，从初步接洽到赢单或丢单',
+  measure: '已赢单金额合计，按成交日期归月；不含报价中与已丢单',
+} as const;
+const datasetMemberDescription = (kind: 'dimension' | 'measure') => I18nLabelSchema.optional()
+  .describe(
+    `Business definition of this ${kind} in plain language — one or two sentences on what it is and when to `
+    + `use it (e.g. "${DATASET_MEMBER_DESCRIPTION_EXAMPLE[kind]}"). Never a prompt or an instruction to an AI. `
+    + 'At most 500 characters per locale.',
+  )
+  .meta({ title: 'Description' });
+
+/**
+ * [ADR-0149 D1] The spellings an author who has written Cube, Looker or Power BI
+ * reaches for, pointed at the one key each means. Shared by both member shapes.
+ */
+const DATASET_MEMBER_VOCABULARY_ALIASES = {
+  synonym: 'synonyms',
+  alias: 'synonyms',
+  aliases: 'synonyms',
+  alternateNames: 'synonyms',
+  terms: 'synonyms',
+  keywords: 'synonyms',
+  aiDescription: 'description',
+  aiContext: 'description',
+  hint: 'description',
+  help: 'description',
+  tooltip: 'description',
+} as const;
 
 /**
  * A dataset dimension's and measure's `field` is a COLUMN REFERENCE, never a
@@ -174,13 +280,13 @@ export const DatasetDimensionSchema = lazySchema(() => strictObject({
     // Identity/display.
     title: 'label',
     displayName: 'label',
+    // [ADR-0149 D1] Business vocabulary.
+    ...DATASET_MEMBER_VOCABULARY_ALIASES,
   },
   guidance: {
     sql: DATASET_NO_SQL,
     expression: DATASET_NO_SQL,
     formula: DATASET_NO_SQL,
-    description:
-      'a dimension has no `description` — its author-facing text is `label`. `description` is declared on the DATASET itself; put the explanation there.',
   },
 }, {
   /** Referenced by presentations (report rows/columns, widget dimensions). */
@@ -214,6 +320,10 @@ export const DatasetDimensionSchema = lazySchema(() => strictObject({
       + 'Display copy only: grouping is unchanged. When absent, consumers fall back to their own default label for that bucket.',
     )
     .meta({ title: 'Null Label' }),
+  /** [ADR-0149 D1] See {@link DatasetMemberSynonymsSchema}. */
+  synonyms: DatasetMemberSynonymsSchema.optional().meta({ title: 'Synonyms' }),
+  /** [ADR-0149 D1, M1 ruled A] A business definition, never a prompt. */
+  description: datasetMemberDescription('dimension'),
 }));
 
 /**
@@ -384,6 +494,8 @@ export const DatasetMeasureSchema = lazySchema(() => strictObject({
     direction: 'polarity',
     goodDirection: 'polarity',
     trendDirection: 'polarity',
+    // [ADR-0149 D1] Business vocabulary.
+    ...DATASET_MEMBER_VOCABULARY_ALIASES,
   },
   guidance: {
     sql: DATASET_NO_SQL,
@@ -391,8 +503,6 @@ export const DatasetMeasureSchema = lazySchema(() => strictObject({
     formula: DATASET_NO_SQL,
     higherIsBetter: DATASET_POLARITY_NOT_A_FLAG,
     lowerIsBetter: DATASET_POLARITY_NOT_A_FLAG,
-    description:
-      'a measure has no `description` — its author-facing text is `label`. `description` is declared on the DATASET itself; put the explanation there.',
   },
 }, {
   name: SnakeCaseIdentifierSchema.describe('Measure name — e.g. "revenue"; defined once').meta({ title: 'Name' }),
@@ -535,6 +645,10 @@ export const DatasetMeasureSchema = lazySchema(() => strictObject({
     'Time between two datetime columns of each record ({ from, to, unit }), reduced by `aggregate` '
     + '(avg / min / max / sum). Records with either instant null are excluded. Replaces `field`.',
   ).meta({ title: 'Duration' }),
+  /** [ADR-0149 D1] See {@link DatasetMemberSynonymsSchema}. */
+  synonyms: DatasetMemberSynonymsSchema.optional().meta({ title: 'Synonyms' }),
+  /** [ADR-0149 D1, M1 ruled A] A business definition, never a prompt. */
+  description: datasetMemberDescription('measure'),
 }).superRefine((measure, ctx) => {
   // [#25778] A duration measure's source is its column pair, and its value is
   // a number of `unit`s: so no `field` beside it (two sources), no `derived`
@@ -615,6 +729,144 @@ export const DatasetMeasureSchema = lazySchema(() => strictObject({
     });
   }
 }));
+
+/** A member as {@link checkDatasetVocabulary} reads it — the keys it judges, nothing else. */
+interface VocabularyMember {
+  name: string;
+  label?: unknown;
+  description?: unknown;
+  synonyms?: readonly string[];
+}
+
+/** One word a member answers to, and what it is on that member. */
+interface VocabularyTarget {
+  /** Ordinal of the owning member across `dimensions` then `measures`. */
+  owner: number;
+  on: 'name' | 'label' | 'synonym';
+  written: string;
+  /** The inline locale map key, when the word is one locale of a `label` map. */
+  locale?: string;
+}
+
+/** The strings an `I18nLabel` holds: the string itself, or each locale of an inline map. */
+function i18nLabelTexts(value: unknown): Array<{ text: string; locale?: string }> {
+  if (typeof value === 'string') return [{ text: value }];
+  if (value && typeof value === 'object') {
+    return Object.entries(value as Record<string, unknown>)
+      .filter((entry): entry is [string, string] => typeof entry[1] === 'string')
+      .map(([locale, text]) => ({ text, locale }));
+  }
+  return [];
+}
+
+/**
+ * [ADR-0149 D1] The dataset-level vocabulary rules, judged where every member
+ * is in hand:
+ *
+ * - a member `description` is at most 500 characters per locale;
+ * - one member's synonyms are distinct after {@link normalizeDatasetTerm};
+ * - a synonym may not equal ANOTHER member's name, label (any locale of an
+ *   inline map) or synonym after normalization — two members answering to one
+ *   word make the selection rule undecidable before any model is involved.
+ *
+ * A synonym equal to its OWN member's name or label is accepted as written
+ * (redundant, harmless): the schema accepts or refuses, it never rewrites. The
+ * rule is per dataset — the same word may answer to different members in two
+ * datasets, and the selection rule turns that into a clarifying question.
+ * Dimensions and measures are one population: a measure's synonym may not be a
+ * dimension's name either.
+ */
+function checkDatasetVocabulary(
+  groups: ReadonlyArray<readonly ['dimensions' | 'measures', readonly VocabularyMember[]]>,
+  ctx: z.RefinementCtx,
+): void {
+  const members: Array<{ group: 'dimensions' | 'measures'; index: number; member: VocabularyMember }> = [];
+  for (const [group, list] of groups) list.forEach((member, index) => members.push({ group, index, member }));
+  const kindOf = (group: 'dimensions' | 'measures') => (group === 'measures' ? 'measure' : 'dimension');
+
+  const byWord = new Map<string, VocabularyTarget[]>();
+  const index = (written: string, target: Omit<VocabularyTarget, 'written'>) => {
+    const word = normalizeDatasetTerm(written);
+    if (word.length === 0) return;
+    const list = byWord.get(word) ?? [];
+    list.push({ ...target, written });
+    byWord.set(word, list);
+  };
+  /** Positions `[ordinal, synonymIndex]` that repeat an earlier synonym of the same member. */
+  const repeated = new Set<string>();
+
+  members.forEach(({ group, index: at, member }, owner) => {
+    const kind = kindOf(group);
+    index(member.name, { owner, on: 'name' });
+    for (const { text, locale } of i18nLabelTexts(member.label)) index(text, { owner, on: 'label', locale });
+
+    for (const { text, locale } of i18nLabelTexts(member.description)) {
+      if (text.length <= DATASET_MEMBER_DESCRIPTION_MAX_LENGTH) continue;
+      ctx.addIssue({
+        code: 'custom',
+        path: locale === undefined ? [group, at, 'description'] : [group, at, 'description', locale],
+        message:
+          `the description of ${kind} "${member.name}"${locale === undefined ? '' : ` (${locale})`} is ${text.length} `
+          + `characters; a member description is one or two sentences of business definition, at most `
+          + `${DATASET_MEMBER_DESCRIPTION_MAX_LENGTH} per locale (ADR-0149 D1). Shorten it — what the dataset as a `
+          + 'whole covers belongs in the dataset\'s own `description`.',
+      });
+    }
+
+    const seen = new Map<string, number>();
+    (member.synonyms ?? []).forEach((synonym, position) => {
+      const word = normalizeDatasetTerm(synonym);
+      const first = seen.get(word);
+      if (first !== undefined) {
+        repeated.add(`${owner}:${position}`);
+        ctx.addIssue({
+          code: 'custom',
+          path: [group, at, 'synonyms', position],
+          message:
+            `synonym "${synonym}" of ${kind} "${member.name}" repeats synonyms[${first}] `
+            + `"${member.synonyms![first]}" once case, width, spacing, \`_\` and \`-\` are folded `
+            + '(ADR-0149 D1). List each word once.',
+        });
+        return;
+      }
+      seen.set(word, position);
+      index(synonym, { owner, on: 'synonym' });
+    });
+  });
+
+  const describeTarget = (target: VocabularyTarget): string => {
+    if (target.on === 'name') return 'the name';
+    if (target.on === 'label') return target.locale === undefined ? 'the label' : `the ${target.locale} label`;
+    return 'a synonym';
+  };
+
+  members.forEach(({ group, index: at, member }, owner) => {
+    (member.synonyms ?? []).forEach((synonym, position) => {
+      if (repeated.has(`${owner}:${position}`)) return;
+      // One report per OTHER member, naming the first thing it answers to by
+      // this word (name, then label, then synonym). A synonym-to-synonym
+      // collision is reported once, on the later of the two members.
+      const reported = new Set<number>();
+      for (const target of byWord.get(normalizeDatasetTerm(synonym)) ?? []) {
+        if (target.owner === owner || reported.has(target.owner)) continue;
+        if (target.on === 'synonym' && target.owner > owner) continue;
+        reported.add(target.owner);
+        const other = members[target.owner];
+        const spelled = target.written === synonym ? '' : ` ("${target.written}")`;
+        ctx.addIssue({
+          code: 'custom',
+          path: [group, at, 'synonyms', position],
+          message:
+            `synonym "${synonym}" of ${kindOf(group)} "${member.name}" is also ${describeTarget(target)}${spelled} of `
+            + `${kindOf(other.group)} "${other.member.name}" in this dataset, once case, width, spacing, \`_\` and \`-\` `
+            + 'are folded. Within one dataset a word answers to one member, or no rule can tell which of the two a '
+            + 'question means (ADR-0149 D1). Remove it from one of them; the same word may answer to different '
+            + 'members in different datasets.',
+        });
+      }
+    });
+  });
+}
 
 /**
  * Dataset — the single analytical source of truth (ADR-0021 D1).
@@ -701,6 +953,8 @@ export const DatasetSchema = lazySchema(() => strictObject({
     }
     dimNames.add(d.name);
   }
+  // [ADR-0149 D1] Member vocabulary: description length, synonym uniqueness.
+  checkDatasetVocabulary([['dimensions', ds.dimensions], ['measures', ds.measures]], ctx);
   // Derived measures may only reference OTHER measures declared in this dataset.
   for (const m of ds.measures) {
     // [#25778] A duration measure's aggregate and column pair are judged on the
@@ -765,6 +1019,8 @@ export type DatasetMeasure = z.input<typeof DatasetMeasureSchema>;
 export type DatasetMeasureDuration = z.input<typeof DatasetMeasureDurationSchema>;
 export type DatasetDurationUnit = z.input<typeof DatasetDurationUnit>;
 export type DatasetMeasurePolarity = z.input<typeof DatasetMeasurePolarity>;
+/** [ADR-0149 D1] A dataset member's `synonyms`: the words a question is matched against. */
+export type DatasetMemberSynonyms = z.input<typeof DatasetMemberSynonymsSchema>;
 export type DerivedMeasureOpValue = z.input<typeof DerivedMeasureOp>;
 export type Dataset = z.input<typeof DatasetSchema>;
 

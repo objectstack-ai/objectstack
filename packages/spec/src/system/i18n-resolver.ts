@@ -2417,6 +2417,8 @@ export interface DatasetMemberLike {
   name?: string;
   /** `I18nLabelSchema` — a plain string OR an inline locale map (#5728). */
   label?: unknown;
+  /** `I18nLabelSchema` — the member's business definition (ADR-0149 D1). */
+  description?: unknown;
   [key: string]: unknown;
 }
 
@@ -2444,27 +2446,35 @@ function lookupDatasetAttr(
   return undefined;
 }
 
-function lookupDatasetMemberLabel(
+/**
+ * `datasets.<name>.{dimensions,measures}.<member>.{label,description}` — the
+ * member's `label`, and since ADR-0149 D1 its `description` (a business
+ * definition, display text like the label; its `synonyms` are match input and
+ * have no key).
+ */
+function lookupDatasetMemberAttr(
   bundle: TranslationBundle | undefined,
   datasetName: string,
   group: 'dimensions' | 'measures',
   memberName: string,
+  attr: 'label' | 'description',
   opts?: ResolveOptions,
 ): string | undefined {
   if (!bundle) return undefined;
   for (const code of localeChain(opts)) {
     const candidate =
-      pickData(bundle, code)?.datasets?.[datasetName]?.[group]?.[memberName]?.label;
+      pickData(bundle, code)?.datasets?.[datasetName]?.[group]?.[memberName]?.[attr];
     if (typeof candidate === 'string' && candidate.length > 0) return candidate;
   }
   return undefined;
 }
 
 /**
- * Overlay the bundle's labels onto a dataset's `dimensions[]` / `measures[]`,
- * returning the SAME array reference when nothing matched. Each member is
- * judged against the packaged base's member of the same `name`
- * ({@link packagedPart}) — {@link translateDataset}'s rule, one level down.
+ * Overlay the bundle's labels and descriptions onto a dataset's
+ * `dimensions[]` / `measures[]`, returning the SAME array reference when
+ * nothing matched. Each string of each member is judged against the packaged
+ * base's member of the same `name` ({@link packagedPart}) —
+ * {@link translateDataset}'s rule, one level down.
  */
 function translateDatasetMembers(
   members: unknown,
@@ -2483,13 +2493,21 @@ function translateDatasetMembers(
     }
     const memberName = member.name;
     const packagedMember = packagedPart(base, group, (candidate) => candidate.name === memberName);
-    const label = lookupDatasetMemberLabel(
+    const label = lookupDatasetMemberAttr(
       catalogFor(catalogs, valueOverridesPackagedBase(packagedMember, 'label', member.label)),
-      datasetName, group, memberName, opts,
+      datasetName, group, memberName, 'label', opts,
     );
-    if (label === undefined) return raw;
+    const description = lookupDatasetMemberAttr(
+      catalogFor(catalogs, valueOverridesPackagedBase(packagedMember, 'description', member.description)),
+      datasetName, group, memberName, 'description', opts,
+    );
+    if (label === undefined && description === undefined) return raw;
     changed = true;
-    return { ...member, label };
+    return {
+      ...member,
+      ...(label !== undefined ? { label } : {}),
+      ...(description !== undefined ? { description } : {}),
+    };
   });
   return changed ? next : members;
 }
@@ -2497,8 +2515,10 @@ function translateDatasetMembers(
 /**
  * Apply the active locale to a dataset metadata document — translates the
  * dataset's `label` / `description` and each dimension's and measure's `label`
- * against `datasets.<name>.{dimensions,measures}.<member>.label`. The input
- * document is not mutated.
+ * and `description` against
+ * `datasets.<name>.{dimensions,measures}.<member>.{label,description}`. The
+ * input document is not mutated. A member's `synonyms` are never translated:
+ * they are match input in every language at once (ADR-0149 D1).
  *
  * ## Why a dataset needs this at all
  *
@@ -2516,7 +2536,7 @@ function translateDatasetMembers(
  *
  * ## Writes only where the bundle answered
  *
- * `Dataset.label` / `.description` and the member labels are `I18nLabelSchema`,
+ * `Dataset.label` / `.description` and the member labels and descriptions are `I18nLabelSchema`,
  * so an author may already have written an inline `{ en, 'zh-CN' }` map (#5728).
  * Overwriting one with a resolved string would flatten a four-language label
  * down to one, so — exactly as `translatePage` does — a key the bundle does not
@@ -2530,8 +2550,8 @@ function translateDatasetMembers(
  * {@link labelCatalogs}' order, judged against
  * {@link TranslateDocumentOptions.packagedBase} by
  * {@link valueOverridesPackagedBase}: `label` and `description` against the
- * base's, each dimension's and measure's `label` against the base's member of
- * the same `name`. A string the override changed reads only the pair's
+ * base's, each dimension's and measure's `label` and `description` against the
+ * base's member of the same `name`. A string the override changed reads only the pair's
  * translations and otherwise keeps its own text; a string it left alone takes
  * the pair's translation, then the base's. An inline locale map is never
  * "changed" (the comparison reads strings only), so the catalog keeps the

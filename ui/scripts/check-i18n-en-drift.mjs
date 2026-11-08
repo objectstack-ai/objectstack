@@ -839,7 +839,7 @@ if (invokedDirectly) {
             '  answer it confidently. Name a commit that exists in this clone, or pass none and\n' +
             '  let the merge base with the target branch be found.\n'
           : base.shallow
-            ? '  This clone is SHALLOW. In CI, give the checkout `fetch-depth: 0`; locally,\n' +
+            ? '  This clone is SHALLOW. In CI, fetch HEAD\'s history and the base branch after the checkout; locally,\n' +
               '  run `git fetch --no-tags origin main` (or `git fetch --unshallow`).\n'
             : '  Fetch the base branch (`git fetch --no-tags origin main`) and re-run.\n') +
         '  This is a failure, not a skip: a diff gate with no diff would pass while\n' +

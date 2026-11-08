@@ -26,6 +26,8 @@ import {
   trackedFiles,
 } from '../select-affected-tests.mjs';
 import { shardTotal } from '../../../scripts/ci-shard-matrix.mjs';
+import { parse as parseYaml } from 'yaml';
+
 import { jobBlock, rootCi, triggerBlock, UI_JOBS, uiRun, withoutComments } from './helpers/root-ci';
 
 /**
@@ -725,5 +727,55 @@ describe("the root ci.yml's Test UI job wires the selector fail-open (objectui#1
     const run = job.slice(job.indexOf(header));
     expect(run).toContain(`${uiRun('test')} --shard=\${{ matrix.shard }}/${shards}`);
     expect(run).toContain(`pnpm --dir ui exec vitest run --shard=\${{ matrix.shard }}/${shards} --reporter=default --reporter=github-actions "\${filters[@]}"`);
+  });
+});
+
+// objectstack#22034: the four root ci.yml jobs that read git history check out
+// at depth 1 and fetch only HEAD's ancestry and the base branch, in one step
+// that is the same in all four. `fetch-depth: 0` fetched every head and every
+// tag; a checkout that grows it back passes every other gate and silently
+// undoes the measurement the fetch step's budget was sized from.
+describe("the root ci.yml's history readers check out at depth 1, then fetch (objectstack#22034)", () => {
+  type Step = { name?: string; uses?: string; with?: Record<string, unknown>; 'timeout-minutes'?: number; run?: string; env?: Record<string, string> };
+  const jobs = (parseYaml(rootCi()) as { jobs: Record<string, { 'timeout-minutes'?: number; steps: Step[] }> }).jobs;
+  const FETCH = "Fetch this commit's history and the base branch";
+  // Each job's first step that reads history: the fetch must come before it.
+  const FIRST_READER: Record<string, string> = {
+    'test-plan': "Plan this run's Test Core shards",
+    test: "Compute this shard's package set",
+    [UI_JOBS.test]: 'Select the tests this change affects',
+    [UI_JOBS.typeCheck]: 'check:lockfile-integrity — compare this pull request\'s lockfile with its merge base',
+  };
+
+  for (const [job, reader] of Object.entries(FIRST_READER)) {
+    it(`${job}: depth-1 checkout, the fetch step next, then the first reader`, () => {
+      const steps = jobs[job]?.steps ?? [];
+      expect(steps.length, `ci.yml has no job ${job}`).toBeGreaterThan(0);
+      const checkout = steps.findIndex((s) => s.uses?.startsWith('actions/checkout@'));
+      expect(checkout, `${job} has no actions/checkout step`).toBeGreaterThan(-1);
+      expect(steps[checkout].with?.['fetch-depth'], `${job}'s checkout sets fetch-depth`).toBeUndefined();
+      expect(steps[checkout + 1]?.name, `${job}: the step after the checkout is not the fetch`).toBe(FETCH);
+      const first = steps.findIndex((s) => s.name === reader);
+      expect(first, `${job} has no step named ${reader}`).toBeGreaterThan(checkout + 1);
+      // Each job sizes its own budget inside its wall (the `test` job's FETCH
+      // BUDGET comment): never under the healthy floor, never the whole wall.
+      const budget = steps[checkout + 1]['timeout-minutes'];
+      const wall = jobs[job]['timeout-minutes'];
+      expect(typeof budget, `${job}'s fetch step has no timeout-minutes`).toBe('number');
+      expect(budget).toBeGreaterThanOrEqual(8);
+      expect(typeof wall, `${job} has no job wall`).toBe('number');
+      expect(budget!).toBeLessThan(wall!);
+    });
+  }
+
+  it('the fetch step is one step, the same in all four jobs but for its budget', () => {
+    const copies = Object.keys(FIRST_READER).map((job) => {
+      const copy: Step = { ...jobs[job].steps.find((s) => s.name === FETCH) };
+      delete copy['timeout-minutes'];
+      return copy;
+    });
+    expect(copies[0]).toHaveProperty('run');
+    for (const copy of copies) expect(copy).toEqual(copies[0]);
+    expect(copies[0]?.run).toContain('git fetch --no-tags "${deepen[@]}" origin "$head" "${refspecs[@]}"');
   });
 });
