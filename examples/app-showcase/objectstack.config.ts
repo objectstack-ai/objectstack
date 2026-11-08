@@ -103,8 +103,9 @@ export default defineStack({
   //                   and their read gates, served through the data API.
   // Not listed: `messaging` (the `notify` node's inbox delivery) and `job` (the
   // timing backend the schedule trigger delegates to) are always-on core
-  // capabilities that every boot mounts, listed or not. Only a
-  // `--preset minimal` boot drops them; there, list both.
+  // capabilities that every boot mounts, listed or not. A `--preset minimal`
+  // boot drops `messaging`, and drops `job` only when `email`, `approvals`
+  // or `auth` is absent; there, list what it drops.
   requires: ['ui', 'automation', 'approvals', 'triggers', 'marketplace', 'webhooks', 'realtime', 'mailbox'],
 
   // Concrete connectors for the `connector_action` node. The baseline engine

@@ -3000,7 +3000,7 @@ export default class Serve extends Command {
       //    route without also loading the MCP plugin would 501 every request
       //    (#2698: the default must yield a connectable MCP endpoint). Explicit
       //    `requires: ['mcp']` still mounts the plugin, but with the env var off
-      //    the route answers 404: `isMcpServerEnabled()` alone decides it.
+      //    the route is not served: `isMcpServerEnabled()` alone decides it.
       //  - Pinyin search recall (#2486): locale-gated platform capability. When
       //    `OS_SEARCH_PINYIN_ENABLED` is unset, the default derives from the
       //    stack's configured locales (any `zh-*` → on), and the resolved
