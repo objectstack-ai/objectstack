@@ -124,7 +124,7 @@ import { NativeSQLStrategy } from '../strategies/native-sql-strategy.js';
 import { ObjectQLStrategy } from '../strategies/objectql-strategy.js';
 import { compileScopedFilterToSql } from '../read-scope-sql.js';
 import type { DatasetScopedStrategyContext } from '../strategies/types.js';
-import { escapeGlobPattern, globPattern, normalizeSqlDialect } from '../text-match-sql.js';
+import { normalizeSqlDialect } from '../text-match-sql.js';
 
 /** The four operators #4706 Q2 = A rules case-SENSITIVE. */
 const CASE_EXACT_OPS = new Set(['$contains', '$notContains', '$startsWith', '$endsWith']);
@@ -225,10 +225,11 @@ async function locateWasm(): Promise<((file: string) => string) | undefined> {
 }
 
 describe('[#15684] the per-dialect construct table', () => {
-  it('normalises exactly the three dialects it has arms for; everything else is `unknown`', () => {
-    for (const d of ['sqlite', 'postgres', 'mysql']) expect(normalizeSqlDialect(d), d).toBe(d);
+  it('normalises exactly the dialects it names; everything else is `unknown`', () => {
+    // [#31394] `mssql` joined the named set when the table moved to core.
+    for (const d of ['sqlite', 'postgres', 'mysql', 'mssql']) expect(normalizeSqlDialect(d), d).toBe(d);
     // "Cannot answer, do not block": an unmodelled name must not pick an arm.
-    for (const d of ['mssql', 'oracle', 'unknown', 'SQLite', '']) {
+    for (const d of ['oracle', 'unknown', 'SQLite', '']) {
       expect(normalizeSqlDialect(d), d).toBe('unknown');
     }
     expect(normalizeSqlDialect(undefined)).toBe('unknown');
@@ -236,20 +237,21 @@ describe('[#15684] the per-dialect construct table', () => {
   });
 
   it('escapes the GLOB metacharacters, and ONLY those — the LIKE class is a different one', () => {
-    // Character for character `driver-sql`'s `escapeGlobComparand`. `]` gets no
-    // escape on purpose: every `[` becomes a class that closes itself.
-    expect(escapeGlobPattern('a*b')).toBe('a[*]b');
-    expect(escapeGlobPattern('a?b')).toBe('a[?]b');
-    expect(escapeGlobPattern('a[b')).toBe('a[[]b');
-    expect(escapeGlobPattern('a]b')).toBe('a]b');
+    // [#31394] The escape is core's now (`dialectTextMatchSql`, the table
+    // `driver-sql` emits through), so it is read where it lands: the pattern
+    // the SQLite arm binds. Only `starts` still takes GLOB (#20025). `]` gets
+    // no escape on purpose: every `[` becomes a class that closes itself.
+    const bound = (value: string): unknown[] =>
+      compileScopedFilterToSql({ name: { $startsWith: value } } as FilterCondition, 't', { dialect: 'sqlite' }).params;
+    expect(bound('a*b')).toEqual(['a[*]b*']);
+    expect(bound('a?b')).toEqual(['a[?]b*']);
+    expect(bound('a[b')).toEqual(['a[[]b*']);
+    expect(bound('a]b')).toEqual(['a]b*']);
     // `%`, `_` and `\` are ORDINARY to GLOB — escaping them here would search
     // for a backslash that is not in the data.
-    expect(escapeGlobPattern('100%')).toBe('100%');
-    expect(escapeGlobPattern('a_b')).toBe('a_b');
-    expect(escapeGlobPattern('a\\b')).toBe('a\\b');
-    expect(globPattern('contains', 'a*b')).toBe('*a[*]b*');
-    expect(globPattern('starts', 'a*b')).toBe('a[*]b*');
-    expect(globPattern('ends', 'a*b')).toBe('*a[*]b');
+    expect(bound('100%')).toEqual(['100%*']);
+    expect(bound('a_b')).toEqual(['a_b*']);
+    expect(bound('a\\b')).toEqual(['a\\b*']);
   });
 });
 

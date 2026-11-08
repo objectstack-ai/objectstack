@@ -13,7 +13,7 @@
 export { MCPServerPlugin } from './plugin.js';
 export type { MCPServerPluginOptions } from './plugin.js';
 export { MCPServerRuntime } from './mcp-server-runtime.js';
-export type { MCPServerRuntimeConfig } from './mcp-server-runtime.js';
+export type { MCPServerRuntimeConfig, McpHttpCaller } from './mcp-server-runtime.js';
 // [#26464] The host-injected authoring bridge behind `metadata:write`: the
 // shapes a host passes to `handleHttpRequest` (`authoring`) and the door
 // constant its access check branches on.
@@ -25,6 +25,19 @@ export type {
   McpAuthoringToolRegistry,
   McpAuthoringInjection,
 } from './types.js';
+// [#31605] The host-installed tool-call interceptor
+// (`MCPServerRuntime.setToolInterceptor`): what it is told about each call,
+// and the verdicts it may return.
+export type {
+  McpToolInterceptor,
+  McpToolCallContext,
+  McpToolCallPrincipal,
+  McpToolCallRefusal,
+  McpToolCallResult,
+  McpToolTransport,
+  McpPrincipalKind,
+} from './types.js';
+export type { McpCallerExecutionContext } from './tool-call-interceptor.js';
 export {
   registerObjectTools,
   registerActionTools,

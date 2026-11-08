@@ -170,7 +170,7 @@ describe('[#8131] a real INSERT INTO sys_packages failure', () => {
   it('a healthy publish is unaffected (anti-vacuity for the whole section)', async () => {
     const { svc, errorLogs } = await boot();
     const result = await svc.publish({ manifest: MANIFEST, metadata: METADATA });
-    expect(result).toEqual({ success: true });
+    expect(result).toEqual({ success: true, version: expect.any(String), createdAt: expect.stringMatching(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/) });
     expect(errorLogs).toEqual([]);
   });
 });

@@ -274,8 +274,13 @@ describe('auth route ledger hygiene', () => {
       // `${basePath}/admin/scim/revoke-credential` templates, ahead of the
       // catch-all), and the `live.has(route)` loop below holds them to the
       // same proof — stable `@better-auth/scim` serves no credential endpoint.
+      // The identity-provider group mapping door (delete and set), on the
+      // same terms: two `rawApp.post` templates `auth-plugin.ts` mounts beside
+      // the credential door; the vendor serves no mapping endpoint.
+      'POST /api/v1/auth/admin/scim/delete-group-mapping',
       'POST /api/v1/auth/admin/scim/mint-credential',
       'POST /api/v1/auth/admin/scim/revoke-credential',
+      'POST /api/v1/auth/admin/scim/set-group-mapping',
       // [#16678] The thirteenth, added on this pin's own terms exactly as the
       // set-initial-password row below was: `auth-plugin.ts` mounts it itself
       // (a `rawApp.post` on the `${basePath}/admin/set-user-manager`

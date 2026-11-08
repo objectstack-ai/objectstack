@@ -137,11 +137,12 @@ export const MANAGED_EXTENSION_FIELDS: Readonly<Record<string, ReadonlySet<strin
     // column here (see the editable map).
     'revoked',
     // Why a key was revoked, where the reason decides who may restore it
-    // (`admin_password_reset`: a platform administrator only). Deliberately
-    // NOT in the editable map: an owner who could clear it could restore the
-    // key the reset closed. Its one stamp is the forced reset
-    // (`forced-reset-revocation.ts`) and its one keeper is
-    // `api-key-restore-guard.ts`, both system-side.
+    // (`admin_password_reset` and `administrator_suspended`: a platform
+    // administrator only). Deliberately NOT in the editable map: an owner who
+    // could clear it could restore the key the reset or the administrator
+    // closed. Its stamps are the forced reset (`forced-reset-revocation.ts`)
+    // and the restore guard's own write on a platform administrator's revoke
+    // of a key they do not own; its one keeper is `api-key-restore-guard.ts`.
     'revoked_reason',
     'key',
   ]),
