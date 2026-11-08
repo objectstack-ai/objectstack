@@ -222,7 +222,9 @@ describe('#15972 the service write door funnels into the same single refusal', (
 
   function gateHarness() {
     const tables: Record<string, any[]> = {
-      sys_business_unit: [{ id: 'bu_east', name: 'east', parent_business_unit_id: null }],
+      // The organization the delegate's context names: a delegated scope
+      // covers units of the active organization only (ADR-0123 D2).
+      sys_business_unit: [{ id: 'bu_east', name: 'east', parent_business_unit_id: null, organization_id: 'org_1' }],
       sys_position: [{ id: 'pos_platform_admin', name: 'platform_admin' }],
       sys_permission_set: [{ id: 'ps_sales', name: 'sales_user' }],
       // ⛔ Deliberately EMPTY: the seeded `platform_admin` position binds no
@@ -265,7 +267,7 @@ describe('#15972 the service write door funnels into the same single refusal', (
       object: 'sys_user_position',
       operation: 'insert',
       data: { user_id: 'u_victim', position: 'platform_admin', business_unit_id: 'bu_east' },
-      context: { userId: 'u_delegate' },
+      context: { userId: 'u_delegate', organizationId: 'org_1' },
     })).resolves.toBeUndefined();
   });
 
