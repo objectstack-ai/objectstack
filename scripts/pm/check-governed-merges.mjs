@@ -470,11 +470,12 @@
  *
  *   H by PATH — the release, publish and deploy files in
  *      `WORKFLOW_TIER_H_FILES`, each with its reason, any edit at all.
- *   H by DIFF (C2) — an added or changed `permissions:`; a `secrets.*` or
- *      `github.token` line added, changed or moved; `pull_request_target`;
- *      a `uses:` (or image) not already used at the base; a deleted job, a
- *      changed literal check-run name or a lost `needs:`; a new
- *      `continue-on-error`; an `if:` new or changed on an existing job or step.
+ *   H by DIFF (C2) — an added or changed `permissions:`; a `secrets` or
+ *      `github.token` line (any case, dot or index) added, changed or moved;
+ *      `pull_request_target`; a `uses:` (or image) not already used at the
+ *      base; a deleted job, a changed literal check-run name or a changed
+ *      `needs:`; a new `continue-on-error`; an `if:` the base does not hold for
+ *      the same owner with the same text, unless its job is new on the head.
  *   S otherwise — a contract-review PASS on the current head, every check
  *      green, and the owning seat lands it (the Tier S landing above).
  *
@@ -483,10 +484,17 @@
  * added `|| true`, `set +e`, `exit 0` or `OS_SKIP_`/`OS_DISABLE_`/`OS_ALLOW_`;
  * a gate invocation or a `uses:` dropped; a changed trigger set or workflow
  * name; a new job with a computed or colliding name; a new, deleted or
- * non-YAML file. ⛔ Fail closed: a copy the line reader cannot parse (anchors,
- * tags, tabs, flow spanning lines…), an unreadable commit, a missing base or
- * no reading at all is H — so `--test`, which has paths only, always says H,
- * and `--pr` reads the diff only on a checkout holding both commits.
+ * non-YAML file. ⛔ Fail closed: a copy the line reader refuses (anchors,
+ * tags, tabs, flow mappings, flow spanning lines, double-quoted escapes, a
+ * line led by an indicator, a valued node with children…), an unreadable
+ * commit, a missing base or no reading at all is H — so `--test`, which has
+ * paths only, always says H, and `--pr` reads the diff only on a checkout
+ * holding both commits.
+ *
+ * Known limit, S by the ruling: the TEXT of a `run:` or `shell:` edit is not
+ * judged beyond a dropped gate token or an added risky pattern, so
+ * `echo "pnpm check:x"`, `|| :` or `shell: bash {0}` read S. The contract
+ * review of record is the control there.
  *
  * `readWorkflowDiff` is the one reader; the queue guard calls it per queued
  * commit and `--branch` / `--pr` per PR. The reader is dependency-free on
@@ -1075,7 +1083,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '⭐ the argv is CLOSED: a flag the mode does not read, or a second repository beside a bare --pr, is refused': 22,
   'the per-row repository scope (ruled B2, 2026-10-13)': 20,
   'the nested `ui/` workspace rows, on the register (#25712)': 16,
-  '⭐ the workflows split: Tier H by path or by C2 trigger, else Tier S (ruling record 6722205630)': 45,
+  '⭐ the workflows split: Tier H by path or by C2 trigger, else Tier S (ruling record 6722205630)': 61,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -1621,8 +1629,8 @@ export const WORKFLOW_TIER_H_FILES = Object.freeze([
 
 /** The patterns an ADDED line may not carry without Tier H (biased cases: each can turn a check off or skip a gate). */
 const WORKFLOW_RISKY_LINE = /\|\|\s*true\b|\bset\s+\+e\b|\bexit\s+0\b|\bOS_(?:SKIP|DISABLE|ALLOW)_[A-Z0-9_]+/;
-/** A secret or the job's own token, wherever it is spelled. */
-const WORKFLOW_CREDENTIAL = /\bsecrets\b|\bgithub\.token\b/;
+/** `secrets` or the job's own token, in any case and by dot or index, as the expression evaluator reads them. */
+const WORKFLOW_CREDENTIAL = /\bsecrets\b|\bgithub\s*(?:\.\s*token\b|\[\s*['"]token['"]\s*\])/i;
 /** The gate invocations a run block carries, each as a token; one dropped from a file is Tier H (biased: a removed check). */
 const WORKFLOW_INVOCATIONS = Object.freeze([
   [/check:[A-Za-z0-9:._-]+/g, (m) => m[0]],
@@ -1667,6 +1675,8 @@ function stripYamlComment(line) {
 function unreadableValue(value) {
   const v = value.trim();
   if (/^[&*!]/.test(v)) return 'an anchor, alias or tag';
+  // A flow mapping hides its keys (`- { name: Gate, if: false }`) from this reader, so any one but `{}` is refused.
+  if (v !== '{}' && /[{}]/.test(v.replace(/\$\{\{.*?\}\}/g, '').replace(/"(?:[^"\\]|\\.)*"|'[^']*'/g, ''))) return 'a flow mapping';
   if (v.startsWith('{') || v.startsWith('[')) {
     let depth = 0;
     for (const c of v.replace(/"(?:[^"\\]|\\.)*"|'[^']*'/g, '')) {
@@ -1681,14 +1691,16 @@ function unreadableValue(value) {
 /**
  * A line-model reader of ONE workflow file — the subset of YAML the
  * repository's workflows are written in: block mappings, block sequences,
- * one-line flow collections, quoted and plain scalars (a plain scalar may
+ * one-line flow sequences, quoted and plain scalars (a plain scalar may
  * continue on deeper lines), and `|` / `>` block scalars. Pure, no dependency:
  * the queue guard's job imports this file before any install.
  *
  * ⛔ Fail closed: a tab in the indentation, a document marker or directive, an
- * anchor, alias, tag or merge key, a flow collection spanning lines, a quote
- * that never closes, or a line that is neither a key, an item nor a
- * continuation answers `{ ok: false, line, reason }` — and an unread file is
+ * anchor, alias, tag or merge key, a flow mapping other than `{}`, a flow
+ * collection spanning lines, a quote that never closes, a double-quoted
+ * escape that spells a character, a line led by a YAML indicator, a child
+ * under a node with a scalar value, or a line that is neither a key, an item
+ * nor a continuation answers `{ ok: false, line, reason }` — and an unread file is
  * Tier H. Returns `{ ok: true, root }`: nodes `{ indent, key, value, item,
  * children, block, line }`.
  */
@@ -1705,8 +1717,12 @@ export function readWorkflowTree(text) {
       if (node.item && top.indent === node.indent && !top.item && top.key !== null && top.value === '' && top.blockStyle === undefined) break;
       stack.pop();
     }
-    stack[stack.length - 1].children.push(node);
+    const parent = stack[stack.length - 1];
+    // A node with a scalar value and children is not YAML: refuse it rather than guess which one GitHub reads.
+    if (parent !== root && parent.value !== '') return false;
+    parent.children.push(node);
     stack.push(node);
+    return true;
   };
   let block = null;
   let last = null;
@@ -1729,11 +1745,13 @@ export function readWorkflowTree(text) {
     if (lead === '' && (/^(?:---|\.\.\.)(?:\s|$)/.test(trimmed) || trimmed.startsWith('%'))) return fail(n, 'a document marker or directive');
     let rest = stripYamlComment(trimmed);
     if (rest === null) return fail(n, 'a quote that never closes on its line');
+    // `"i\x66"` is the key `if`: an escape that spells a character is refused, never compared raw.
+    if ((rest.match(/"(?:[^"\\]|\\.)*"/g) ?? []).some((q) => /\\[xuUNLP_]/.test(q))) return fail(n, 'a double-quoted escape (`\\x`, `\\u`, `\\U`, …)');
     let indent = lead.length;
     let item = null;
     while (rest === '-' || rest.startsWith('- ')) {
       item = { indent, key: null, value: '', item: true, children: [], block: [], line: n };
-      attach(item);
+      if (!attach(item)) return fail(n, 'a child under a node that already has a scalar value');
       if (rest === '-') {
         rest = '';
         break;
@@ -1759,7 +1777,7 @@ export function readWorkflowTree(text) {
         node.blockStyle = value;
         block = { node, indent };
       }
-      attach(node);
+      if (!attach(node)) return fail(n, 'a child under a node that already has a scalar value');
       last = node;
       continue;
     }
@@ -1770,6 +1788,8 @@ export function readWorkflowTree(text) {
       last = item;
       continue;
     }
+    // A continuation never starts with an indicator: `? permissions` / `: write-all` is an explicit key, not text.
+    if (/^[?:\-,[\]{}#&*!|>'"%@`]/.test(rest)) return fail(n, `a line led by the YAML indicator \`${rest[0]}\``);
     if (last !== null && indent > last.indent && last.blockStyle === undefined && last.children.length === 0) {
       last.value = `${last.value} ${rest}`.trim();
       continue;
@@ -1952,8 +1972,8 @@ export function workflowDiffReasons(a, b, inventory) {
       // between two COMPUTED names — a matrix job's shard count — changes no required context.
       const computed = (name) => name.includes('${{');
       if (now.name !== job.name && !(computed(now.name) && computed(job.name))) say(`a job's check-run name changed: \`${id}\` \`${job.name}\` → \`${now.name}\``);
-      const dropped = job.needs.filter((x) => !now.needs.includes(x));
-      if (dropped.length > 0) say(`a job's \`needs:\` lost ${dropped.map((x) => `\`${x}\``).join(', ')}: \`${id}\``);
+      // Either direction: a job whose dependency is skipped is skipped, and a skipped required check reads green.
+      if ([...new Set(job.needs)].sort().join() !== [...new Set(now.needs)].sort().join()) say(`a job's \`needs:\` changed: \`${id}\` [${job.needs.join(', ')}] → [${now.needs.join(', ')}]`);
     }
   }
   for (const [id, job] of b.jobs) {
@@ -1963,16 +1983,14 @@ export function workflowDiffReasons(a, b, inventory) {
   }
   if (a.name !== b.name) say('the workflow `name:` changed');
   if (a.events.join() !== b.events.join()) say(`the trigger set changed: [${a.events.join(', ')}] → [${b.events.join(', ')}]`);
-  // C2 — a new `continue-on-error`, or an `if:` on a job or step that already existed.
+  // C2 — a new `continue-on-error`, or an `if:` the base does not hold for the same owner with the same text.
+  // An owner is a name the author picks, so only a job NEW on the head may bring its own `if:`: a renamed step
+  // given `if: false` beside a dummy under the old name is in an existing job, and is H.
   for (const fact of addedIn(a.coes, b.coes)) say(`a new \`continue-on-error\` at ${ownerWords(JSON.parse(fact)[0])}`);
-  const baseIfs = a.ifs.map((f) => JSON.stringify(f));
-  const lostOwner = (owner) => {
-    const job = owner.split('/')[0];
-    return [...a.owners.keys()].some((o) => o.startsWith(`${job}/`) && !b.owners.has(o));
-  };
-  for (const fact of addedIn(baseIfs, b.ifs.map((f) => JSON.stringify(f)))) {
+  for (const fact of addedIn(a.ifs.map((f) => JSON.stringify(f)), b.ifs.map((f) => JSON.stringify(f)))) {
     const [owner] = JSON.parse(fact);
-    if (a.owners.has(owner) || lostOwner(owner)) say(`an \`if:\` added or changed on a job or step that already ran: ${ownerWords(owner)}`);
+    const jobId = owner === 'workflow' ? null : owner.split('/')[0].slice('job:'.length);
+    if (jobId === null || a.jobs.has(jobId)) say(`an \`if:\` added or changed in a job that already ran: ${ownerWords(owner)}`);
   }
   // Biased to H — each listed in the report.
   for (const owner of new Set([...a.credentialOwners, ...b.credentialOwners, ...a.writeOwners, ...b.writeOwners])) {
@@ -5207,6 +5225,33 @@ async function selfTest() {
     assert('C2-an-if-that-disables-a-step-is-H', isH(tierOf(edit("        if: github.event_name != 'schedule'", '        if: false')), /`if:` added or changed/));
     assert('C2-an-if-that-disables-a-job-is-H', isH(tierOf(edit('    timeout-minutes: 20', '    timeout-minutes: 20\n    if: false')), /`if:` added or changed .*`job:build`/));
 
+    // The contract review's holes (FAIL at d51132be): each is H now, pinned with the shape that slipped past.
+    const GATE_STEP = "      - name: Gate\n        if: github.event_name != 'schedule'\n";
+    const renamedDummy = tierOf(edit(GATE_STEP, "      - name: Gate2\n        if: false\n").replace('      - name: Build with the cache token', '      - name: Gate\n        run: echo ok\n      - name: Build with the cache token'));
+    assert('⛔ M1-a-renamed-gate-step-given-if-false-beside-a-dummy-under-the-old-name-is-H', isH(renamedDummy, /`if:` added or changed in a job that already ran: `job:build\/step:Gate2`/), show(renamedDummy));
+    const idDummy = tierOf(edit(GATE_STEP, "      - id: gate2\n        name: Gate\n        if: false\n"));
+    assert('⛔ M1-a-gate-step-re-keyed-by-an-id-and-given-if-false-is-H', isH(idDummy, /`if:` added or changed in a job that already ran/), show(idDummy));
+    const newStepIf = tierOf(edit('      - run: pnpm vitest run', "      - run: pnpm vitest run\n      - name: Extra\n        if: github.ref == 'refs/heads/main'\n        run: echo extra"));
+    assert('⛔ M1-a-new-step-with-its-own-if-inside-an-existing-job-is-H', isH(newStepIf, /in a job that already ran: `job:shards\/step:Extra`/), show(newStepIf));
+    const flowStep = tierOf(edit(GATE_STEP, '      - { name: Gate, if: false }\n'));
+    assert('⛔ M2a-a-flow-mapped-step-is-refused-and-H', isH(flowStep, /does not parse .*a flow mapping/), show(flowStep));
+    assert('M2a-an-empty-flow-mapping-and-an-expression-still-parse', workflowFacts(edit('  merge_group:', '  merge_group: {}')).ok === true && workflowFacts(edit('    runs-on: ubuntu-latest\n    timeout', "    runs-on: ${{ inputs.os || 'ubuntu-latest' }}\n    timeout")).ok === true);
+    const escaped = tierOf(edit("        if: github.event_name != 'schedule'", '        "i\\x66": false'));
+    assert('⛔ M2b-a-double-quoted-escape-spelling-a-key-is-refused-and-H', isH(escaped, /does not parse .*double-quoted escape/), show(escaped));
+    const escapedValue = tierOf(edit('          TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}', '          TURBO_TOKEN: "${{ secre\\x74s.TURBO_TOKEN }}"'));
+    assert('⛔ M2b-an-escape-inside-a-value-is-refused-too', isH(escapedValue, /does not parse .*double-quoted escape/), show(escapedValue));
+    for (const spelling of ['${{ Secrets.NPM_TOKEN }}', '${{ SECRETS.NPM_TOKEN }}', "${{ github['token'] }}", '${{ GitHub.Token }}', '${{ github . token }}']) {
+      const r = tierOf(edit('      - run: pnpm vitest run', `      - run: pnpm vitest run\n        env:\n          T: ${spelling}`));
+      assert(`⛔ M2c-a-credential-spelled-${spelling}-is-H`, isH(r, /token reference added, changed or moved/), show(r));
+    }
+    const explicitKey = tierOf(edit('    timeout-minutes: 20\n', '    timeout-minutes: 20\n    ? permissions\n    : write-all\n'));
+    assert('⛔ M2d-an-explicit-key-line-is-refused-and-H', isH(explicitKey, /does not parse .*YAML indicator/), show(explicitKey));
+    const valuedParent = tierOf(edit('    name: Build Core\n', '    name: Build Core\n      if: false\n'));
+    assert('⛔ M2d-a-child-under-a-node-with-a-scalar-value-is-refused-and-H', isH(valuedParent, /does not parse/), show(valuedParent));
+    assert('M2d-a-plain-scalar-continuation-still-reads', workflowFacts(edit('    name: Build Core\n', '    name: Build\n      Core\n')).ok === true);
+    const addedNeeds = tierOf(edit('    needs: [build]', '    needs: [build, opt-in]'));
+    assert('⛔ S1-a-needs-added-on-an-existing-job-is-H', isH(addedNeeds, /`needs:` changed: `shards` \[build\] → \[build, opt-in\]/), show(addedNeeds));
+
     // The near-misses: each is Tier S.
     const BUILD_RUN = '        run: pnpm turbo run build --filter=@objectstack/spec';
     const reordered = edit(
@@ -5226,7 +5271,7 @@ async function selfTest() {
     assert('biased-an-added-or-true-is-H', isH(tierOf(edit('          pnpm check:generated', '          pnpm check:generated || true')), /can skip a check/));
     assert('biased-a-dropped-gate-invocation-is-H', isH(tierOf(edit('          node scripts/check-required-contexts.mjs\n', '')), /gate invocation dropped/));
     assert('biased-a-changed-step-that-holds-a-secret-is-H', isH(tierOf(edit('--filter=@objectstack/spec', '--filter=@objectstack/core')), /already holds a secret or a write token/));
-    assert('biased-a-needs-that-lost-a-job-is-H', isH(tierOf(edit('    needs: [build]\n', '')), /`needs:` lost `build`/));
+    assert('biased-a-needs-that-lost-a-job-is-H', isH(tierOf(edit('    needs: [build]\n', '')), /`needs:` changed: `shards` \[build\] → \[\]/));
     assert('biased-a-changed-trigger-set-is-H', isH(tierOf(edit('  merge_group:\n', '')), /trigger set changed/));
     assert('biased-a-new-job-taking-a-name-already-in-use-is-H', isH(tierOf(`${BASE_WF}  again:\n    name: Build Core\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo hi\n`), /already in use/));
 

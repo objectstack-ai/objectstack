@@ -200,7 +200,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - ④ 轮报单列 awaiting a human merge 并现读请审人;⛔ 未请审不在 chat 报「等你批」,先补请。
 - skills 车道自有 PR:纯代码面如 `scripts/pm/` 由本席按达档自审(清单不减)后落地。
 - 受管面两层:Tier S = `.claude/**`+下行 S 面,余皆 Tier H 等人批;S 经达档 PASS 后 ready → 入队。
-- 本仓 `.github/workflows/**` 按 diff 定档:发布路径、C2 触发或读不出 ⇒ H,余 S(`readWorkflowDiff`)。
+- 本仓 `.github/workflows/**` 由 `readWorkflowDiff` 定档:发布路径、C2 触发、拒读或未读 ⇒ H,余 S。
 - 入队资格:每 check 绿或预期 skip,⛔ 非必查子集;名单 check-expected-skips.mjs 只判 objectstack。
 - 非必查红是真缺陷或坏门,归 PM 入队前处置;第三种按设计而红,三条全立才可带红入队:
 - 源码自述 pushed 分支上按设计而红、不跑 `merge_group`、PR 评论记明门与因,缺一即否。
