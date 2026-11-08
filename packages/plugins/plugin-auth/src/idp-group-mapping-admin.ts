@@ -46,7 +46,7 @@ import type { IDataEngine } from '@objectstack/spec/contracts';
 import { withSystemContext } from './objectql-adapter.js';
 import type { PlatformAdminActor } from './platform-admin-gate.js';
 import { readJsonRequestBody } from './request-json-body.js';
-import { SCIM_CREDENTIAL_OBJECT } from './scim-connection-service.js';
+import { SCIM_CREDENTIAL_OBJECT, scimCredentialIsLive } from './scim-connection-service.js';
 import {
   IDP_GROUP_MAPPING_OBJECT,
   SCIM_MAPPING_SOURCE_KIND,
@@ -124,21 +124,29 @@ function readText(body: Record<string, unknown>, key: string, max: number, refus
   return trimmed === '' ? undefined : trimmed;
 }
 
-/** The connection's credential rows: its owning organization and its provisioning domains. */
+/**
+ * The connection's credential rows: its owning organization, read from its LIVE
+ * credentials only (what the bearer verifier accepts: `scimCredentialIsLive`),
+ * and its provisioning domains, read from every row. A revoked credential stays
+ * stored (revoke switches `active` off), so counting it would let a credential
+ * revoked in one organization make the connection ambiguous forever once a new
+ * one is minted in another; the domains still include it, so a delete re-projects
+ * every domain the connection ever provisioned.
+ */
 async function readConnection(
   engine: IDataEngine,
   connectionId: string,
 ): Promise<{ found: false } | { found: true; organizations: string[]; domains: string[] }> {
   const rows = await engine.find(
     SCIM_CREDENTIAL_OBJECT,
-    { where: { connection_id: connectionId }, fields: ['organization_id', 'provisioning_domain_id'] },
+    { where: { connection_id: connectionId }, fields: ['organization_id', 'provisioning_domain_id', 'active', 'expires_at'] },
     { context: SYSTEM_CTX } as never,
   );
   const list = Array.isArray(rows) ? (rows as Record<string, unknown>[]) : [];
   if (list.length === 0) return { found: false };
   return {
     found: true,
-    organizations: [...new Set(list.map((r) => text(r.organization_id)))],
+    organizations: [...new Set(list.filter((r) => scimCredentialIsLive(r)).map((r) => text(r.organization_id)))],
     domains: [...new Set(list.map((r) => text(r.provisioning_domain_id) || connectionId))],
   };
 }
@@ -233,6 +241,9 @@ export async function runSetIdpGroupMapping(
   const connection = await readConnection(engine, connectionId);
   if (!connection.found) {
     return refuseFields([{ field: 'connectionId', code: 'reference_not_found', message: `No SCIM connection '${connectionId}' exists: mint its credential first.` }]);
+  }
+  if (connection.organizations.length === 0) {
+    return refuseFields([{ field: 'connectionId', code: 'rule_violation', message: `SCIM connection '${connectionId}' has no live credential (every one is revoked or expired), so no organization owns it. Mint a credential for it first.` }]);
   }
   if (connection.organizations.includes('')) {
     return refuseFields([{ field: 'connectionId', code: 'rule_violation', message: `SCIM connection '${connectionId}' has a credential owned by no organization, so a grant it makes would belong to no organization. Mint the connection's credential in an organization first.` }]);
