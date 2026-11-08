@@ -38,7 +38,8 @@ export type SqlDialect =
   | 'snowflake'
   | 'bigquery'
   | 'mongo'
-  | 'odata';
+  | 'odata'
+  | 'mssql';
 
 /**
  * Result of a compatibility check:
@@ -127,6 +128,27 @@ const DIALECT_ALIASES: Partial<Record<SqlDialect, Record<string, CanonicalSqlTyp
     'edm.date': 'date', 'edm.timeofday': 'time', 'edm.datetimeoffset': 'datetime',
     'edm.binary': 'binary', 'edm.stream': 'binary', collection: 'array',
     'edm.datetime': 'datetime', 'edm.time': 'time',
+  },
+  // Microsoft SQL Server, as `INFORMATION_SCHEMA.COLUMNS.DATA_TYPE` spells it
+  // (the parameter strip turns `nvarchar(max)` into `nvarchar`). Two entries
+  // OVERRIDE the base map rather than restate it: `timestamp` on SQL Server is
+  // the `rowversion` synonym, an 8-byte binary counter and never a date-time,
+  // and `bit` is the dialect's only boolean. `xml` is text, which is what the
+  // tedious client reads it as. Not mapped, so a draft flags them for review:
+  // `sql_variant` (a value of any type), `hierarchyid` and the
+  // `geography` / `geometry` spatial types (CLR types the client reads as bytes).
+  mssql: {
+    nvarchar: 'text', nchar: 'text', ntext: 'text', varchar: 'text', char: 'text', text: 'text',
+    xml: 'text', sysname: 'text',
+    bit: 'boolean',
+    tinyint: 'integer', smallint: 'integer', int: 'integer', bigint: 'bigint',
+    decimal: 'decimal', numeric: 'decimal', money: 'decimal', smallmoney: 'decimal',
+    float: 'float', real: 'float',
+    date: 'date', time: 'time',
+    datetime: 'datetime', datetime2: 'datetime', smalldatetime: 'datetime', datetimeoffset: 'datetime',
+    uniqueidentifier: 'uuid',
+    varbinary: 'binary', binary: 'binary', image: 'binary',
+    timestamp: 'binary', rowversion: 'binary',
   },
 };
 

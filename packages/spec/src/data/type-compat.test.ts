@@ -324,3 +324,52 @@ describe('canonicalizeSqlType — Object.prototype fall-through', () => {
     expect(canonicalizeSqlType('objectid', 'mongo')).toBe('text');
   });
 });
+
+describe('the mssql dialect (SQL Server federation)', () => {
+  // Every name the card lists, as INFORMATION_SCHEMA.COLUMNS.DATA_TYPE spells it.
+  const EXPECTED: Record<string, string> = {
+    nvarchar: 'text', nchar: 'text', ntext: 'text', xml: 'text',
+    bit: 'boolean',
+    tinyint: 'integer', smallint: 'integer', int: 'integer', bigint: 'bigint',
+    decimal: 'decimal', numeric: 'decimal', money: 'decimal',
+    float: 'float', real: 'float',
+    date: 'date', time: 'time',
+    datetime: 'datetime', datetime2: 'datetime', smalldatetime: 'datetime', datetimeoffset: 'datetime',
+    uniqueidentifier: 'uuid', varbinary: 'binary',
+  };
+
+  it('maps every SQL Server type the federation reads onto its canonical type', () => {
+    for (const [raw, canonical] of Object.entries(EXPECTED)) {
+      expect(canonicalizeSqlType(raw, 'mssql'), raw).toBe(canonical);
+    }
+  });
+
+  it('strips the `(max)` length the way it strips a number', () => {
+    expect(canonicalizeSqlType('nvarchar(max)', 'mssql')).toBe('text');
+    expect(canonicalizeSqlType('varbinary(max)', 'mssql')).toBe('binary');
+    expect(canonicalizeSqlType('datetime2(7)', 'mssql')).toBe('datetime');
+  });
+
+  it('reads `timestamp` as the rowversion binary it is on SQL Server, never as a date-time', () => {
+    expect(canonicalizeSqlType('timestamp', 'mssql')).toBe('binary');
+    expect(canonicalizeSqlType('rowversion', 'mssql')).toBe('binary');
+    expect(isCompatible('timestamp', 'datetime', 'mssql')).toBe(false);
+    // CONTROL: the shared base map still reads it as a date-time elsewhere.
+    expect(canonicalizeSqlType('timestamp', 'postgres')).toBe('datetime');
+  });
+
+  it('suggests the field types a drafted SQL Server object gets', () => {
+    expect(suggestFieldTypeForSqlType('bit', 'mssql')).toBe('boolean');
+    expect(suggestFieldTypeForSqlType('datetimeoffset', 'mssql')).toBe('datetime');
+    expect(suggestFieldTypeForSqlType('uniqueidentifier', 'mssql')).toBe('text');
+    expect(suggestFieldTypeForSqlType('money', 'mssql')).toBe('number');
+    expect(isCompatible('uniqueidentifier', 'lookup', 'mssql')).toBe(true);
+    expect(isCompatible('int', 'lookup', 'mssql')).toBe(true);
+  });
+
+  it('leaves the types with no field type unknown, so a draft flags them', () => {
+    for (const raw of ['sql_variant', 'hierarchyid', 'geography', 'geometry']) {
+      expect(canonicalizeSqlType(raw, 'mssql'), raw).toBe('unknown');
+    }
+  });
+});

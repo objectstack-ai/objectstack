@@ -15,6 +15,7 @@ export * from './common.zod';
 export * from './config-registry.zod';
 export * from './memory.zod';
 export * from './mongo.zod';
+export * from './mssql.zod';
 export * from './mysql.zod';
 export * from './postgres.zod';
 export * from './sqlite.zod';

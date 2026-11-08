@@ -5,7 +5,12 @@ import { lazySchema } from '../shared/lazy-schema';
 import { strictObject } from '../shared/strict-object';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 import { CODE_DEFINED_CREDENTIAL_ROUTE, urlUserinfoUsername } from './driver/common.zod';
-import { RETIRED_DRIVER_ID_GUIDANCE, resolveDriverId, validateDriverConfig } from './driver/config-registry.zod';
+import {
+  driverIsFederationOnly,
+  RETIRED_DRIVER_ID_GUIDANCE,
+  resolveDriverId,
+  validateDriverConfig,
+} from './driver/config-registry.zod';
 
 /*
  * ── Unknown-key strictness (#4001 data step, closed out by #4410) ───────────
@@ -608,6 +613,23 @@ function rowCapOnBuiltinDriverRefusal(driverId: string): string {
 }
 
 /**
+ * Refusal for a `managed` datasource whose driver is served for federation
+ * only (`DriverVocabularyEntry.federationOnly` — SQL Server today).
+ *
+ * `managed` is the default, so the common way to meet this is a datasource that
+ * names the driver and says nothing about its mode. The message therefore names
+ * the scope, the one-line fix and what the datasource can still do, in that order.
+ */
+function managedOnFederationOnlyDriverRefusal(driverId: string): string {
+  return `The '${driverId}' driver is served for federation only: ObjectStack reads (and, with `
+    + '`external.allowWrites`, writes) tables that already exist in that database, but never builds '
+    + "or alters its own schema there, so it cannot be a `managed` datasource (the default when "
+    + "`schemaMode` is omitted). Set `schemaMode: 'external'` (or `'validate-only'` to warn on "
+    + 'drift instead of failing) and add an `external` block; to keep platform-owned tables, use a '
+    + 'postgres, mysql or sqlite datasource for them.';
+}
+
+/**
  * Replay a driver-config parse onto the datasource's own issue list (#4410).
  *
  * A no-op for a driver the platform ships no contract for — `known: false` is
@@ -988,6 +1010,15 @@ export const DatasourceSchema = lazySchema(() => strictObject(
         message: rowCapOnBuiltinDriverRefusal(builtinDriver),
       });
     }
+  }
+
+  // A federation-only driver never carries a platform-owned schema.
+  if (ds.schemaMode === 'managed' && driverIsFederationOnly(ds.driver)) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['schemaMode'],
+      message: managedOnFederationOnlyDriverRefusal(resolveDriverId(ds.driver) ?? String(ds.driver)),
+    });
   }
 
   if (ds.schemaMode !== 'managed' && !ds.external) {

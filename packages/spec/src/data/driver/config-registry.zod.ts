@@ -5,6 +5,7 @@ import type { z } from 'zod';
 import type { RetiredValueGuidance } from '../../shared/retired-key';
 import { getMemoryConfigJsonSchema, MemoryConfigSchema } from './memory.zod';
 import { getMongoConfigJsonSchema, MongoConfigSchema } from './mongo.zod';
+import { getMssqlConfigJsonSchema, MssqlConfigSchema } from './mssql.zod';
 import { getMysqlConfigJsonSchema, MysqlConfigSchema } from './mysql.zod';
 import { getPostgresConfigJsonSchema, PostgresConfigSchema } from './postgres.zod';
 import {
@@ -209,6 +210,26 @@ export interface DriverVocabularyEntry {
    * set (commit e2798fab7's fork 2).
    */
   readonly hasLocalDefault: boolean;
+  /**
+   * Is this driver served for FEDERATION only — an ADR-0015 external
+   * datasource (`schemaMode: 'external'` / `'validate-only'`) over tables that
+   * already exist — and never as a store whose schema the platform builds?
+   *
+   * `true` on a row whose dialect the SQL driver reads and writes but never
+   * emits DDL for. Three faces follow from it, each enforced where it lives:
+   *
+   *  - **authoring** — `DatasourceSchema` refuses `schemaMode: 'managed'`
+   *    (the default) on such a driver, naming the federation-only scope
+   *    ({@link FEDERATION_ONLY_DRIVER_IDS});
+   *  - **selection** — the row offers no {@link aliases}, so no boot host
+   *    accepts it as the platform database; its spellings live on
+   *    {@link contractOnlyAliases}, which keeps the config contract;
+   *  - **driver** — the SQL driver refuses the DDL path for the dialect by
+   *    name, so a hand-built managed driver meets the same boundary.
+   *
+   * Absent means `false`.
+   */
+  readonly federationOnly?: true;
 }
 
 /**
@@ -230,7 +251,7 @@ const MONGO_DRIVER_ID_RETIRED =
  * THE table. Everything else in this module is a projection of it.
  *
  * Row order is the order {@link BUILTIN_DRIVER_IDS} publishes, which is the
- * order the tuple used before commit e2798fab7, plus `turso` appended.
+ * order the tuple used before commit e2798fab7, plus `turso` appended, then `mssql`.
  */
 const DRIVER_VOCABULARY = [
   { id: 'memory', aliases: [], contractOnlyAliases: ['memory', 'mingo', 'in-memory', 'inmemory'], hasLocalDefault: true },
@@ -240,6 +261,15 @@ const DRIVER_VOCABULARY = [
   { id: 'mysql', aliases: ['mysql', 'mysql2'], contractOnlyAliases: ['mariadb'], hasLocalDefault: false },
   { id: 'mongodb', aliases: ['mongodb'], retiredAliases: { mongo: MONGO_DRIVER_ID_RETIRED }, hasLocalDefault: false },
   { id: 'turso', aliases: ['turso', 'libsql'], hasLocalDefault: false },
+  // Microsoft SQL Server, federation only (`driver-sql` over knex `mssql`).
+  // No selection alias: it is never the platform database.
+  {
+    id: 'mssql',
+    aliases: [],
+    contractOnlyAliases: ['mssql', 'sqlserver', 'tedious'],
+    hasLocalDefault: false,
+    federationOnly: true,
+  },
 ] as const satisfies readonly DriverVocabularyEntry[];
 
 /**
@@ -493,6 +523,30 @@ export function driverHasLocalDefault(driver: unknown): boolean {
   return id ? DRIVER_LOCAL_DEFAULT[id] : true;
 }
 
+/**
+ * The canonical ids served for FEDERATION only
+ * ({@link DriverVocabularyEntry.federationOnly}), in table row order.
+ *
+ * `DatasourceSchema` reads it to refuse a `managed` datasource on one of these
+ * drivers; read it through {@link driverIsFederationOnly} when the id came from
+ * authored metadata.
+ */
+export const FEDERATION_ONLY_DRIVER_IDS: readonly BuiltinDriverId[] = Object.freeze(
+  DRIVER_VOCABULARY.filter((entry) => (entry as DriverVocabularyEntry).federationOnly === true).map(
+    (entry) => entry.id,
+  ),
+);
+
+/**
+ * Does an authored `datasource.driver` resolve to a federation-only builtin?
+ * Follows every alias face ({@link resolveDriverId}); a plugin driver answers
+ * `false` — its storage model is not ours to judge.
+ */
+export function driverIsFederationOnly(driver: unknown): boolean {
+  const id = resolveDriverId(driver);
+  return id !== undefined && FEDERATION_ONLY_DRIVER_IDS.includes(id);
+}
+
 /** Canonical driver id → the schema its `datasource.config` must satisfy. */
 export const DRIVER_CONFIG_SCHEMAS: Readonly<Record<BuiltinDriverId, z.ZodType>> = {
   memory: MemoryConfigSchema,
@@ -502,6 +556,7 @@ export const DRIVER_CONFIG_SCHEMAS: Readonly<Record<BuiltinDriverId, z.ZodType>>
   mysql: MysqlConfigSchema,
   mongodb: MongoConfigSchema,
   turso: TursoConfigSchema,
+  mssql: MssqlConfigSchema,
 };
 
 /**
@@ -523,6 +578,7 @@ const DRIVER_CONFIG_JSON_SCHEMAS: Readonly<Record<BuiltinDriverId, () => Record<
   mysql: getMysqlConfigJsonSchema,
   mongodb: getMongoConfigJsonSchema,
   turso: getTursoConfigJsonSchema,
+  mssql: getMssqlConfigJsonSchema,
 };
 
 /**
