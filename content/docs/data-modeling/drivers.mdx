@@ -80,6 +80,7 @@ libSQL data stayed untouched. Pass the token with `--database-auth-token`
 | **MongoDB** | `@objectstack/driver-mongodb` | `MongoDBDriver` | `mongodb` (single-tenant only — see [below](#multi-tenancy-not-supported)) |
 | **Turso / libSQL** | `@objectstack/driver-turso` (optional install — see the callout above) | `TursoDriver` | `turso` \| `libsql` |
 | **Memory** | `@objectstack/driver-memory` | `InMemoryDriver` | none — not a boot store (see [Memory Driver](#memory-driver)) |
+| **Oracle Database** | `@objectstack/driver-sql` (peer: `oracledb`, Thin mode) | `SqlDriver` | none — federation only, an external datasource (see [External datasources](/docs/data-modeling/external-datasources#7-oracle-database)) |
 
 > All SQL flavours (PostgreSQL / MySQL / SQLite) are served by a single
 > `@objectstack/driver-sql` package — there is no separate
@@ -102,6 +103,7 @@ driver ships that contract as a zod schema, exported from `@objectstack/spec/dat
 | `sqlite-wasm` \| `wasm-sqlite` | `SqliteWasmConfigSchema` | `filename`, `persist` |
 | `mongodb` | `MongoConfigSchema` | `url`, `host`, `port`, `database`, `username`, `password`, `authSource`, `options` |
 | `memory` \| `in-memory` \| `mingo` | `MemoryConfigSchema` | `initialData`, `strictMode`, `persistence` |
+| `oracle` \| `oracledb` | `OracleConfigSchema` | `connectString`, `host`, `port`, `serviceName`, `username` (federation only; TLS by a `tcps://` connect string) |
 
 `mongo` was a second spelling of `mongodb` until 18. It is retired: an authored
 `driver: 'mongo'` is refused with the prescription naming `mongodb`, and
@@ -125,7 +127,7 @@ Two things live **outside** `config`, because they are not driver-specific:
 
 - **Pool sizing** — the `pool` block on the datasource (`min`, `max`,
   `idleTimeoutMillis`, `connectionTimeoutMillis`), honoured by the pooled
-  drivers: `postgres` and `mysql` pass all four to Knex, and `mongodb` maps
+  drivers: `postgres`, `mysql` and `oracle` pass all four to Knex, and `mongodb` maps
   `min` / `max` — and only those two — onto the client's `minPoolSize` /
   `maxPoolSize`. Everywhere else the block is an **authoring error**, rejected by
   the Setup wizard when you save and by the boot when a declared datasource
@@ -133,7 +135,7 @@ Two things live **outside** `config`, because they are not driver-specific:
 
   | Driver | Verdict on `pool` |
   | --- | --- |
-  | `postgres`, `mysql` | all four keys honoured |
+  | `postgres`, `mysql`, `oracle` | all four keys honoured |
   | `mongodb` | `min` / `max` honoured; `idleTimeoutMillis` and `connectionTimeoutMillis` **rejected by name** |
   | `sqlite`, `sqlite-wasm` | whole block **rejected** |
   | `memory` | whole block **rejected** |
