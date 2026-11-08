@@ -538,6 +538,163 @@ describe('#21602: two packages declaring the same job name — each job keeps it
     });
 });
 
+describe('ADR-0150 E7: a job\'s package coordinate keeps the key the job catalogue holds for it, across a restart', () => {
+    const OTHER = 'com.example.other';
+    const markedJob = (name: string, marker: string) => ({
+        name,
+        schedule: INTERVAL,
+        body: { ...WRITE_BODY, source: `await ctx.api.object('${TICK}').insert({ name: '${marker}' });` },
+    });
+
+    /**
+     * One `sys_job` catalogue that outlives a process, read the way
+     * `DbJobAdapter.readArming` reads it — `schedule` writes the row active,
+     * `cancel` clears `active`, and a process that stops leaves every row as it
+     * was — and one job service per process (a restart is a new kernel, so
+     * nothing of the previous process's in-memory record survives).
+     */
+    function catalogue(opts: { readFails?: boolean } = {}) {
+        const rows = new Map<string, { active: boolean }>();
+        const engine = recordingEngine();
+        const boot = () => {
+            const scheduled = new Map<string, (c: any) => Promise<unknown>>();
+            const cleanups = new Map<string, (args: { packageId: string }) => Promise<unknown>>();
+            const svc = {
+                schedule: async (name: string, _schedule: unknown, run: (c: any) => Promise<unknown>) => {
+                    scheduled.set(name, run);
+                    rows.set(name, { active: true });
+                },
+                cancel: async (name: string) => {
+                    scheduled.delete(name);
+                    const row = rows.get(name);
+                    if (row) row.active = false;
+                },
+                trigger: async () => undefined,
+                readArming: async (name: string) => {
+                    if (opts.readFails) throw new Error('sys_job unreadable');
+                    const row = rows.get(name);
+                    return row ? { active: row.active, schedule: null, lastAliveAt: null } : null;
+                },
+            };
+            const logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+            const ctx = {
+                logger,
+                getService: (name: string) => {
+                    if (name === 'job') return svc;
+                    if (name === 'protocol') return { registerUninstallCleanup: (n: string, f: any) => cleanups.set(n, f) };
+                    throw new Error(`no ${name}`);
+                },
+            } as unknown as PluginContext;
+            return {
+                logger,
+                keys: () => [...scheduled.keys()].sort(),
+                schedule: (packageId: string, marker: string) =>
+                    scheduleAppArtifactJobs(ctx, { ...pkg([markedJob('shared_tick', marker)]), id: packageId }, { appId: packageId, ql: engine.ql as any, source: 'Test' }),
+                uninstall: (packageId: string) => cleanups.get(PACKAGE_JOBS_UNINSTALL_CLEANUP)!({ packageId }),
+                /** Fire whatever this process holds under `key` once; the marker its body wrote. */
+                fire: async (key: string) => {
+                    const before = engine.writes.length;
+                    await scheduled.get(key)!({ jobId: key });
+                    return engine.writes.slice(before).map((w) => (w.data as { name: string }).name);
+                },
+            };
+        };
+        return { rows, boot };
+    }
+
+    it('a job stored under its bare key before the upgrade is scheduled under it again, and fires', async () => {
+        const store = catalogue();
+        // The catalogue as an earlier release left it: the job's row under its authored name.
+        store.rows.set('shared_tick', { active: true });
+
+        const after = store.boot();
+        const out = await after.schedule(APP_ID, 'mine');
+
+        expect(out.bodies).toEqual(['shared_tick']);
+        expect(after.keys()).toEqual(['shared_tick']);
+        expect(await after.fire('shared_tick')).toEqual(['mine']);
+    });
+
+    it('a restart in the install order schedules every job under the key it had (control)', async () => {
+        const store = catalogue();
+        const first = store.boot();
+        await first.schedule(APP_ID, 'mine');
+        await first.schedule(OTHER, 'theirs');
+
+        const second = store.boot();
+        await second.schedule(APP_ID, 'mine');
+        await second.schedule(OTHER, 'theirs');
+
+        expect(second.keys()).toEqual([`${OTHER}:shared_tick`, 'shared_tick']);
+        expect(await second.fire('shared_tick')).toEqual(['mine']);
+        expect(await second.fire(`${OTHER}:shared_tick`)).toEqual(['theirs']);
+    });
+
+    it('a restart that schedules the second package FIRST still hands it its own scoped key — never the first package\'s bare one', async () => {
+        const store = catalogue();
+        const first = store.boot();
+        await first.schedule(APP_ID, 'mine');
+        await first.schedule(OTHER, 'theirs');
+
+        const second = store.boot();
+        await second.schedule(OTHER, 'theirs');
+        await second.schedule(APP_ID, 'mine');
+
+        expect(second.keys()).toEqual([`${OTHER}:shared_tick`, 'shared_tick']);
+        // Each catalogue row keeps running its OWN package's body.
+        expect(await second.fire('shared_tick')).toEqual(['mine']);
+        expect(await second.fire(`${OTHER}:shared_tick`)).toEqual(['theirs']);
+        // Said once, naming the key and where it came from.
+        const said = second.logger.info.mock.calls.filter((c) => String(c[0]).includes('keeps its package-scoped identity'));
+        expect(said).toHaveLength(1);
+        expect(said[0][1]).toEqual({ appId: OTHER, job: 'shared_tick', scheduledAs: `${OTHER}:shared_tick` });
+    });
+
+    it('a scoped holder whose bare holder was uninstalled keeps its scoped key across a restart, as it does in-process', async () => {
+        const store = catalogue();
+        const first = store.boot();
+        await first.schedule(APP_ID, 'mine');
+        await first.schedule(OTHER, 'theirs');
+        await first.uninstall(APP_ID);
+        expect(first.keys()).toEqual([`${OTHER}:shared_tick`]);
+
+        const second = store.boot();
+        await second.schedule(OTHER, 'theirs');
+
+        expect(second.keys()).toEqual([`${OTHER}:shared_tick`]);
+        expect(await second.fire(`${OTHER}:shared_tick`)).toEqual(['theirs']);
+    });
+
+    it('a scoped key the catalogue holds CANCELLED keeps nothing: the package, alone after a restart, takes its authored name', async () => {
+        const store = catalogue();
+        const first = store.boot();
+        await first.schedule(APP_ID, 'mine');
+        await first.schedule(OTHER, 'theirs');
+        await first.uninstall(OTHER);
+        await first.uninstall(APP_ID);
+
+        const second = store.boot();
+        await second.schedule(OTHER, 'theirs');
+
+        expect(second.keys()).toEqual(['shared_tick']);
+        expect(second.logger.info.mock.calls.some((c) => String(c[0]).includes('keeps its package-scoped identity'))).toBe(false);
+    });
+
+    it('a catalogue read that fails schedules the job anyway, by this run\'s order, and says so at warn', async () => {
+        const store = catalogue({ readFails: true });
+        const boot = store.boot();
+
+        const out = await boot.schedule(OTHER, 'theirs');
+
+        expect(out.bodies).toEqual(['shared_tick']);
+        expect(out.failed).toEqual([]);
+        expect(boot.keys()).toEqual(['shared_tick']);
+        const warned = boot.logger.warn.mock.calls.filter((c) => String(c[0]).includes('could not read the job catalogue'));
+        expect(warned).toHaveLength(1);
+        expect(warned[0][1]).toMatchObject({ appId: OTHER, job: 'shared_tick' });
+    });
+});
+
 describe('#21489: the sandbox job origin', () => {
     it("a job body with no timeoutMs gets the runner's JOB default — not the hook's, not the action's", async () => {
         const runner = new QuickJSScriptRunner({ jobTimeoutMs: 30, hookTimeoutMs: 5_000, actionTimeoutMs: 5_000 });
