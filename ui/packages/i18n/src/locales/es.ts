@@ -440,6 +440,10 @@ const es = {
       available: 'Disponibles',
       all: 'Todas las monedas (ISO 4217)',
     },
+    currencyHome: {
+      convertedAt: 'Convertido al tipo {{rate}} del {{date}}',
+      homeCurrency: 'En la moneda base (tipo 1)',
+    },
     boolean: {
       offBadge: "{{label}} — Desactivado",
       completed: "Completado",

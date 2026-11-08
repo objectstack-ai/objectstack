@@ -445,6 +445,10 @@ const zh = {
       available: '可用',
       all: '全部币种（ISO 4217）',
     },
+    currencyHome: {
+      convertedAt: '按汇率 {{rate}}（{{date}}）折算',
+      homeCurrency: '本位币（汇率 1）',
+    },
     boolean: {
       offBadge: '{{label}} — 已关闭',
       completed: '已完成',
