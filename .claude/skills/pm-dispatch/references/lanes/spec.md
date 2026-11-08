@@ -8,8 +8,14 @@
 - 含 schema 形状、`contracts/**`、退役行为半边、strictness 台账。
 - 含 describe/JSDoc、墓碑散文、错误 guidance、alias 表;其重生成的 references 产物归源 PR。
 - 含 `packages/spec/scripts/**`、`packages/spec/docs/**`。
-- 同含围着 spec 契约转的工具链:门禁、生成器、lint 规则、报错散文、references 管线。
-- 一般开发工具面留 devx;`packages/spec` 恒归本席,不论谁需要它。
+- 同含围着 spec 契约转的工具链:门禁、生成器、lint 规则、报错散文。
+- 一般开发工具面留 devx;`packages/spec` 文件归本席,唯下列搭车改动可随产品 PR。
+- 元数据协议改动归本席,走 spec 子卡:首触即立,产品卡带 `Blocked-by:` 该子卡。
+- 元数据协议 = 可编写元数据的形状:对象、字段、flow、视图、权限、设置清单等。
+- 接受集的放宽或收窄、属性的新增或退役,同属元数据协议改动。
+- 可搭产品 PR 的 spec 改动:错误码台账行、平台名注册表、`contracts/`、JSDoc/describe、测试。
+- 兜底:产品车道 PR 被自动挂上 `protocol:*` 标签即停,协议 hunk 移入 spec 子卡。
+- PR 自报的 `Metadata-protocol:` 行单独不作判据。
 
 ## 席内分派参考
 
@@ -21,7 +27,6 @@
 - 收窄不触发条款②,但按 `yes` 申报恒不是错误;⛔ 个案裁决不改本行。
 - 机器面改围契约的仪器,与辅助面不交,⛔ 不碰 `packages/spec/src/**/*.zod.ts` 与 strictness 台账。
 - 机器面卡只按北极星「Instruments serve the fleet」的那一问评级。
-- 改元数据格式或接受面的照旧归本席;`/meta` 路由本体在 `packages/rest` 归 `domain:server`。
 - 拿不准 FLAG 回分诊,⛔ 不自设判据;档位随面走,表在 SKILL.md 模型分档,⛔ 不另抄。
 
 ## 常设承诺
@@ -36,7 +41,3 @@
 - 待命巡逻每次做整车道全交集读:delta 有尾隙,扫描后至波次边界入队的卡谁都看不见。
 - 契约面卡的 fixture triage 必须跑消费包测试:A 包的改动可让 B 包的 fixture 反着断言。
 - spec 内任何 sweep 都看不见它 ⇒ 派发令点名消费包测试清单,报告要有各消费包真实读数。
-
-## 席内判断
-
-- 候选卡评论必读,见 SKILL.md 候选与批次;裁决与撤销住在评论里,即使正文已是决策形状。

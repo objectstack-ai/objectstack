@@ -64,10 +64,12 @@ export interface CrudHost {
   getBuilder: SqlDriver['getBuilder'];
   injectTenantOnInsert: SqlDriver['injectTenantOnInsert'];
   readonly insertReturnsStoredRows: SqlDriver['insertReturnsStoredRows'];
+  readonly isMssql: SqlDriver['isMssql'];
   readonly isSqlite: SqlDriver['isSqlite'];
   readonly knex: SqlDriver['knex'];
   mapSortField: SqlDriver['mapSortField'];
   orderKeysFor: SqlDriver['orderKeysFor'];
+  primeMssqlPagingKey: SqlDriver['primeMssqlPagingKey'];
   readBackInsertedRows: SqlDriver['readBackInsertedRows'];
   remoteColumn: SqlDriver['remoteColumn'];
   resolveTenantField: SqlDriver['resolveTenantField'];
@@ -114,7 +116,10 @@ export class CrudFacet {
    * cited that as agreement, which it was not; objectstack#4419.) The
    * obligation the contract states is on `find`, and this keeps it there.
    */
-  static async findRows(this: Pick<CrudHost, 'applyFilters' | 'applyTenantScope' | 'backendStatementFault' | 'formatOutput' | 'getBuilder' | 'mapSortField' | 'orderKeysFor' | 'remoteColumn' | 'unresolvableFilterColumnRefusal'>, object: string, query: DriverQuery, options?: DriverOptions, singleRowLookup = false): Promise<any[]> {
+  static async findRows(this: Pick<CrudHost, 'applyFilters' | 'applyTenantScope' | 'backendStatementFault' | 'formatOutput' | 'getBuilder' | 'isMssql' | 'mapSortField' | 'orderKeysFor' | 'primeMssqlPagingKey' | 'remoteColumn' | 'unresolvableFilterColumnRefusal'>, object: string, query: DriverQuery, options?: DriverOptions, singleRowLookup = false): Promise<any[]> {
+    // [#31327] On SQL Server a federated object's paging key is read from the
+    // remote catalog before the ORDER BY is decided (`primeMssqlPagingKey`).
+    if (this.isMssql) await this.primeMssqlPagingKey(object);
     // The whole ORDER BY, decided once: the caller's keys plus whatever this
     // driver has to add to make a paged read deterministic. Derived out here
     // rather than inside `buildBase` so the recovery ladder below can ask
@@ -140,8 +145,25 @@ export class CrudFacet {
           b.orderBy(this.remoteColumn(object, key.field, this.mapSortField(key.field)), key.direction);
         }
       }
+      // [#31327] SQL Server rejects `OFFSET n ROWS` without an ORDER BY (a
+      // syntax error, not a reshuffle). When nothing above ordered the read —
+      // a keyless federated table, or the #3821 rung that dropped the sort —
+      // `(SELECT NULL)` is the order that changes nothing but the statement's
+      // validity; the nondeterministic-paging warning has already been given.
+      if (this.isMssql && query.offset && !(withOrderBy && orderKeys.length > 0)) {
+        b.orderByRaw('(SELECT NULL)');
+      }
 
       // PAGINATION
+      if (this.isMssql && query.limit === 0) {
+        // [#31327] `FETCH NEXT 0 ROWS` is an error on SQL Server ("must be
+        // greater than zero"), where every other dialect answers `LIMIT 0`
+        // with no rows. Without the offset knex compiles `SELECT TOP (0)`,
+        // which is the same empty answer — and an offset into no rows is no
+        // rows.
+        b.limit(0);
+        return b;
+      }
       if (query.offset !== undefined) b.offset(query.offset);
       if (query.limit !== undefined) b.limit(query.limit);
 
@@ -249,7 +271,7 @@ export class CrudFacet {
   }
 
   /** The body of `SqlDriver#create`; the method's docblock there is its contract. */
-  static async create(this: Pick<CrudHost, 'applyWriteColumnMap' | 'auditMissingTenant' | 'collidingAutoNumberReservations' | 'decorateHashShadowDuplicate' | 'fillAutoNumberFields' | 'formatInput' | 'formatOutput' | 'getBuilder' | 'injectTenantOnInsert' | 'insertReturnsStoredRows' | 'readBackInsertedRows' | 'resyncSequenceToDataMax' | 'rotationWriteTarget' | 'stampInsertTimestamps'>, object: string, data: Record<string, any>, options?: DriverOptions): Promise<Record<string, unknown>> {
+  static async create(this: Pick<CrudHost, 'applyWriteColumnMap' | 'auditMissingTenant' | 'collidingAutoNumberReservations' | 'decorateHashShadowDuplicate' | 'fillAutoNumberFields' | 'formatInput' | 'formatOutput' | 'getBuilder' | 'injectTenantOnInsert' | 'insertReturnsStoredRows' | 'isMssql' | 'readBackInsertedRows' | 'resyncSequenceToDataMax' | 'rotationWriteTarget' | 'stampInsertTimestamps'>, object: string, data: Record<string, any>, options?: DriverOptions): Promise<Record<string, unknown>> {
     const { _id, ...rest } = data;
     const toInsert = { ...rest };
 
@@ -289,7 +311,13 @@ export class CrudFacet {
 
       try {
         if (this.insertReturnsStoredRows) {
-          const result = await builder.insert(formatted).returning('*');
+          // [#31327] On SQL Server `OUTPUT inserted.*` without `INTO` is refused
+          // on a table with an enabled trigger (error 334) — routine on an ERP
+          // table. knex's `includeTriggerModifications` routes the OUTPUT through
+          // a temp table, which SQL Server accepts on every table.
+          const result = await (this.isMssql
+            ? builder.insert(formatted).returning('*', { includeTriggerModifications: true })
+            : builder.insert(formatted).returning('*'));
           return this.formatOutput(object, result[0]);
         }
         await builder.insert(formatted);
