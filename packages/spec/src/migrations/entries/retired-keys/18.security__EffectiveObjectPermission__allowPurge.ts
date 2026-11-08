@@ -3,7 +3,8 @@
 // #12497 — the RESPONSE-side face of `security/ObjectPermission:allowPurge`
 // (see that entry for the full rationale: ADR-0049 enforce-or-remove,
 // maintainer ruling 2026-08-26 accepting #1883's recommendation B; the key
-// returns with the M2 lifecycle initiative). `EffectiveObjectPermissionSchema`
+// stays retired — the recycle bin's grants are new keys, ADR-0148 D5).
+// `EffectiveObjectPermissionSchema`
 // extends the same closed base shape (`.extend({ apiOperations }).strip()`,
 // both faces behind the #12840 residue stage since 2026-08-28) — the clone
 // shares the authoring shape's per-property schema instances, so the

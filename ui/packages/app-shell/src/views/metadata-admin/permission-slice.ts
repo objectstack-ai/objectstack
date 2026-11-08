@@ -31,19 +31,20 @@ export interface ObjectPerm {
   allowExport?: boolean;
   allowTransfer?: boolean;
   // `allowRestore` / `allowPurge` were REMOVED here (objectui#6595). Both gated
-  // `restore` / `purge` ObjectQL operations that have never existed — a
-  // dispatched restore/purge is denied unconditionally by the evaluator's
+  // `restore` / `purge` ObjectQL operations that did not exist then — a
+  // dispatched restore/purge was denied unconditionally by the evaluator's
   // fail-closed destructive-operation backstop — so the matrix authored two
-  // checkboxes no runtime has ever read. `@objectstack/spec` retired both keys
+  // checkboxes no runtime ever read. `@objectstack/spec` retired both keys
   // as `retiredKey()` tombstones (objectstack#12497; maintainer ruling
   // 2026-08-26 accepting objectstack#1883 recommendation B, ADR-0049
   // enforce-or-remove).
   //
-  // THE RETURN PATH: both keys come back with the M2 lifecycle initiative,
-  // whose restart is recorded upstream on objectstack#1883. Restoring them
-  // means restoring three things together — these fields, the columns in
-  // `PermissionMatrixEditor`, the rows in `previews/PermissionPreview` — and
-  // only alongside the operations that make them enforceable.
+  // NO RETURN PATH: the keys stay retired. The operations now exist with the
+  // recycle bin (ADR-0148), and their grants are the NEW keys
+  // `allowRestoreOwnDeleted` (restore the entries you deleted) and
+  // `manageRecycleBin` (restore any entry, purge, empty) — ADR-0148 D5. Any
+  // matrix support for the bin belongs to those two keys, never to these
+  // spellings.
   //
   // A value written by an older editor is not modelled here and not authorable.
   // It is carried through save untouched, as any key this editor does not model

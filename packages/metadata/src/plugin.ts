@@ -1207,9 +1207,12 @@ export class MetadataPlugin implements Plugin {
      * releases); an artifact authored at the current (or a newer) surface
      * converts nothing and answers to the strict parse, tombstones included.
      * The version key is what keeps this a conversion
-     * rather than an amnesty — the retired keys return with the M2 lifecycle
-     * batch (#1883), and artifacts authored against that surface must never
-     * have them stripped by history.
+     * rather than an amnesty — an artifact authored against the current surface
+     * that still writes a retired key is an authoring error its tombstone must
+     * report, never residue for history to strip. (`allowRestore` /
+     * `allowPurge`, the keys this door was built for, stay retired: the recycle
+     * bin's grants are the new keys `allowRestoreOwnDeleted` /
+     * `manageRecycleBin`, ADR-0148 D5.)
      *
      * Notices surface the way the stored-row pass's do — operator-visible and
      * deduped — as one summary line per conversion per artifact rather than
