@@ -37,7 +37,7 @@ const ORG = 'org_acme';
 
 const OWNER = 'owner@acme.example';
 const INVITEE = 'invitee@acme.example';
-const STRANGER = 'stranger@acme.example';
+const OTHER = 'other@acme.example';
 
 const scrypt = memoizeScrypt();
 afterAll(scrypt.restore);
@@ -203,7 +203,7 @@ describe('under invite_only, a self-serve sign-up is admitted only by the invita
       ['an id no invitation carries', INVITEE, { invitationId: 'Zz9Yy8Xx7Ww6Vv5Uu4Tt3Ss2Rr1Qq0Pp' }],
       ['an expired invitation', 'expired@acme.example', { invitationId: expiredId }],
       ['an invitation that is no longer pending', 'canceled@acme.example', { invitationId: canceledId }],
-      ["another address's invitation", STRANGER, { invitationId: pendingId }],
+      ["another address's invitation", OTHER, { invitationId: pendingId }],
       ['an invitation id that is not a string', INVITEE, { invitationId: [pendingId] }],
       ['an empty invitation id', INVITEE, { invitationId: '' }],
     ];
@@ -233,12 +233,12 @@ describe('under invite_only, a self-serve sign-up is admitted only by the invita
     expect(res.status, await res.clone().text()).toBe(200);
   });
 
-  it('the invitee still signs up with the link after a stranger tried the address alone, and accepts', async () => {
+  it('an address-only attempt does not spend the invitation: the invitee still signs up with the link, and accepts', async () => {
     const d = await deployment();
     const invitationId = await d.invite(INVITEE);
 
-    const stranger = await signUp(d.manager, INVITEE);
-    expect(await verdict(stranger)).toMatchObject({ status: 403, code: SELF_REGISTRATION_CLOSED });
+    const addressOnly = await signUp(d.manager, INVITEE);
+    expect(await verdict(addressOnly)).toMatchObject({ status: 403, code: SELF_REGISTRATION_CLOSED });
     expect(await rows(d.engine, 'sys_user', { email: INVITEE })).toEqual([]);
 
     const invitee = await signUp(d.manager, INVITEE, { invitationId });
@@ -293,7 +293,7 @@ describe('under invite_only, a self-serve sign-up is admitted only by the invita
   it('an invitation id is 32 characters of [a-zA-Z0-9], and two invitations never share one', async () => {
     const d = await deployment();
     const first = await d.invite(INVITEE);
-    const second = await d.invite(STRANGER);
+    const second = await d.invite(OTHER);
     for (const id of [first, second]) expect(id).toMatch(/^[a-zA-Z0-9]{32}$/);
     expect(first).not.toBe(second);
   });
@@ -317,7 +317,7 @@ describe('under invite_only, the other creation doors', () => {
     const d = await deployment();
     await d.invite(INVITEE);
     expect(await gate(d.manager, { email: INVITEE }, { method: 'magic-link' })).toBeUndefined();
-    expect((await gate(d.manager, { email: STRANGER }, { method: 'magic-link' }))?.error).toBe(SELF_REGISTRATION_CLOSED);
+    expect((await gate(d.manager, { email: OTHER }, { method: 'magic-link' }))?.error).toBe(SELF_REGISTRATION_CLOSED);
   });
 
   it('an OAuth creation is admitted by its invitation only when the identity provider verified the address', async () => {
@@ -352,7 +352,7 @@ describe('open and email_domain match an invitation by address, as before', () =
       await d.invite(INVITEE);
       const manager = makeManager(d.engine, { audience });
       expect(await gate(manager, INVITEE)).toBeUndefined();
-      expect((await gate(manager, STRANGER))?.error).not.toBeUndefined();
+      expect((await gate(manager, OTHER))?.error).not.toBeUndefined();
     });
   }
 });

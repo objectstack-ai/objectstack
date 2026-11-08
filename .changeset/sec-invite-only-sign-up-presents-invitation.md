@@ -21,6 +21,10 @@ A sign-up under `invite_only` presents the invitation it is admitted by: the inv
 
 **Upgrading.** A client that signs an invitee up sends `invitationId` beside the `email`, `password` and `name` it already sends. The one-line fix: send the id the invitation link carries as `invitationId`.
 
+**Who moves.** Nothing in this repository: the Console, the SDK, the CLI, the `@objectstack/verify` harness and the test fixtures all present the id; a client outside it that signs invitees up under `invite_only`, such as a custom front-end or a script, sends the accept link's last path segment as `invitationId`.
+
+**Operators.** Deploy the Console bundle together with the server; on a deployment with no mail transport, hand the invitee the link with the invitation's **Copy Invite Link** action; give an out-of-band recovery invitation row an `id` of your own, which the sign-up sends; and review accounts created before the upgrade that are unverified and hold or accepted an invitation.
+
 - **Unchanged:** the first account of a new deployment, and the operator's own provisioning (admin create, SCIM, the boot command's seed), need no invitation. The `open` and `email_domain` postures match an invitation by address as before. A magic-link or email-OTP creation, whose own flow answers from the mailbox, matches by address; an SSO provider's creation is unchanged.
 - **Social OAuth under `invite_only`:** a creation through a social provider is admitted by an invitation only when the provider verified the address; otherwise it is refused with the same code as an uninvited sign-up.
 - **No mail transport:** hand the invitee the link with the invitation's **Copy Invite Link** action; it carries the id.
