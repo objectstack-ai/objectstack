@@ -144,11 +144,11 @@ const post = (manager: AuthManager, path: string, cookie?: string, body?: unknow
     }),
   );
 
-const signUp = (manager: AuthManager, email: string) => {
+const signUp = async (manager: AuthManager, email: string) => {
   // [#11739] default posture invite_only: fixture users beyond the first
   // enter through the invitation carve-out (see audience-gate-test-support).
-  inviteForAudienceGate(manager, email);
-  return post(manager, 'sign-up/email', undefined, { email, password: PASSWORD, name: 'AdminRevoke' });
+  const invitationId = await inviteForAudienceGate(manager, email);
+  return post(manager, 'sign-up/email', undefined, { email, password: PASSWORD, name: 'AdminRevoke', invitationId });
 };
 
 const signIn = (manager: AuthManager, email: string) =>

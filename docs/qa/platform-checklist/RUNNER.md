@@ -504,14 +504,18 @@ contradicts it, and correct it here when it does.
   `invite_only` default (`packages/plugins/plugin-auth/src/audience-posture.ts`:
   `resolveAudience` — undeclared ⇒ `invite_only`; the migration entry
   `audience-posture-default-invite-only` records the flip), and
-  `POST /api/v1/auth/sign-up/email` for an address holding no pending invitation answers
-  **`403 SELF_REGISTRATION_CLOSED`** (`decideAudienceAdmission` in the same file; the code
+  `POST /api/v1/auth/sign-up/email` that presents no pending invitation — an address alone
+  included — answers **`403 SELF_REGISTRATION_CLOSED`** (`decideAudienceAdmission` in the same file; the code
   is in the ADR-0112 ledger, `error-code-ledger.zod.ts`). QA run #21056 met it on every
   member persona it needed. Two doors mint one instead:
-  1. **Invite, then sign up.** As admin, `POST /api/v1/auth/organization/invite-member`
-     with `{"email": "EMAIL", "role": "member"}`; a pending, unexpired `sys_invitation`
-     row for that address is what admits the following `sign-up/email`
-     (`packages/plugins/plugin-auth/src/auth-manager.ts`, `hasPendingInvitationFor`).
+  1. **Invite, then sign up presenting the invitation.** As admin,
+     `POST /api/v1/auth/organization/invite-member` with `{"email": "EMAIL", "role": "member"}`,
+     and keep the `id` it answers: the following `sign-up/email` sends it as `invitationId`
+     beside the email (`{"email": "EMAIL", "password": "…", "name": "…", "invitationId": "ID"}`).
+     Under `invite_only` a sign-up is admitted only by the invitation it presents, pending,
+     unexpired and addressed to that email
+     (`packages/plugins/plugin-auth/src/presented-invitation.ts`); the address alone answers
+     the same 403.
      ⚠️ **The sign-up does not apply the invitation's role.** It binds the new user to the
      Default Organization as `member` whatever role was invited, and leaves the invitation
      `pending` (`reconcileMembership` in
