@@ -1080,7 +1080,21 @@ export const CEILINGS = new Map([
   // measured, raises the row, pinned at the measurement. Same maintainer
   // ruling, verbatim and untranslated: 「A:先削重复,余额按实测提高」 (ruling
   // record 6513306068 on #27847).
-  ['skills/objectstack-platform/references/operations.md', 3340],
+  // 3340 -> 3375: the `os deploy` exit-1 paragraph is scoped to the cloud and
+  // a `use-runtime` target's own paragraph follows: no cloud login, and its
+  // exit 1 (a failed build; a dry run refused, unserved or ignored; an install
+  // refusal with `--confirm-access-upgrade` / `--confirm-upgrade`; installed
+  // but not loaded). Paid first by deleting restatement in the same file
+  // (-262 bytes): the `os deploy` row's use-runtime tail (home: the new
+  // paragraph, which carries each of its facts) and the Common ops pitfalls
+  // row on a declared permission set that grants nobody anything (home:
+  // objectstack-data rules/security.md § Assigning a permission set to a
+  // user). 13360 -> 13500 bytes (+140 net: -262 cut, +402 added)
+  // -> ceil(13500 / 4) = 3375; headroom was 0, so
+  // the remainder, +35 measured, raises the row, pinned at the measurement.
+  // Same maintainer ruling, verbatim and untranslated:
+  // 「A:先削重复,余额按实测提高」 (ruling record 6513306068 on #27847).
+  ['skills/objectstack-platform/references/operations.md', 3375],
   ['skills/objectstack-platform/references/plugin-development.md', 3137],
   ['skills/objectstack-upgrade/references/examples-upgrade.md', 1197],
 
