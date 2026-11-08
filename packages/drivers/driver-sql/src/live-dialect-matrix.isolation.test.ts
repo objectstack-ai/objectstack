@@ -148,7 +148,7 @@ describe('live-dialect matrix — the cell is the only route to a live server (#
    * hole the scan exists to close, and this file has since become a live suite
    * itself, which would have made the exclusion actively wrong.
    */
-  const ENV_READ = new RegExp('process' + '\\.env\\.OS_TEST_(POSTGRES|MYSQL)_URL');
+  const ENV_READ = new RegExp('process' + '\\.env\\.OS_TEST_(POSTGRES|MYSQL|ORACLE)_URL');
 
   it('no test file in this package reads OS_TEST_*_URL directly', () => {
     const offenders = TEST_FILE_KEYS

@@ -75,6 +75,14 @@ the publish door rejects it before that:
 | `public_read_write` | everyone reads and writes |
 | `controlled_by_parent` | inherited from the master record (`master_detail` children); a row with no (optional) master is its owner's |
 
+Choose the posture from the request, not by habit: a business object a team
+shares is `public_read_write` (`private` would hide every colleague's records
+from everyone else); `private` fits personal or sensitive data only its owner
+should see (HR reviews, pay, personal notes); `public_read` fits reference data
+everyone reads and the owner maintains (price lists, policies, notices). This
+axis is distinct from `ownership`, which decides whether `owner_id` exists at
+all (Relationship Patterns below).
+
 **Important optional properties:**
 
 | Property | Default | Description |
@@ -175,7 +183,7 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
 
 export const Invoice = ObjectSchema.create({
   name: 'invoice',
-  sharingModel: 'private',
+  sharingModel: 'public_read_write',
   fields: {
     status: Field.select({
       options: [
@@ -275,11 +283,25 @@ lowercase option values — incorrect/correct examples: [rules/naming.md](./rule
 ### Field Type Selection
 
 The full table, per-type config and traps: [rules/field-types.md](./rules/field-types.md).
-From here, three to get right: credentials are `secret` (reversible, **encrypted-at-rest**
-via the registered `ICryptoProvider`, masked on read, fail-closed, ADR-0100) — never
-`password`, which on a generic object is **plaintext at rest**; `user` is a person picker
-(a lookup specialized to `sys_user`, stored identically to `lookup`); `formula` takes CEL in
-`expression` (`F\`...\`` from `@objectstack/spec`; see **objectstack-formula**).
+From here, three to get right: credentials are `secret` (**encrypted-at-rest**, ADR-0100) —
+never `password`, which on a generic object is **plaintext at rest**; `user` is the person
+picker; `formula` takes CEL in `expression` (`F\`...\`` from `@objectstack/spec`; see
+**objectstack-formula**).
+
+- A yes/no flag (`is_*`, `has_*`, "done?", "active?") is `{ type: 'boolean', defaultValue: false }`
+  and never `required`: a checkbox always holds one of its two values, so
+  `required` can only read as "must be true", and a form that reads it that way
+  refuses the unchecked state — the one state a new record starts in. "Must be
+  accepted" (terms, a confirmation) is a `validations[]` rule, not `required`.
+  The default also lands seeded or imported rows that omit the column on a real
+  `false` instead of a null that only looks unchecked.
+- A person on the record (assignee, approver, reviewer) is `type: 'user'` with
+  no `reference`, and optional unless the request says otherwise — the platform
+  already stamps the owner and `created_by`.
+- A dynamic default (`defaultValue: 'current_user'`, `'NOW()'`, a CEL envelope)
+  resolves when the record is SAVED with the field empty. Describe it as
+  save-time; whether a create form pre-displays it is a client capability you
+  cannot promise.
 
 ### Relationship Patterns
 
@@ -290,6 +312,9 @@ via the registered `ICryptoProvider`, masked on read, fail-closed, ADR-0100) —
 | Many-to-Many (simple) | multi-value `lookup` (`multiple: true`) — an **array column** of ids |
 | Many-to-Many (with attributes) | Junction object with two `lookup` fields |
 | Hierarchical | `tree` field (self-reference) |
+| Record status / lifecycle | a `select` on the business object (plus a `state_machine` validation) — never a separate status / stage / step table |
+| Approval, review, routing, audit trail | not objects: an approval is a flow node (**objectstack-automation**) and its trail is platform history; model only the people it references (approver, reviewer), as `user` fields beside the owner |
+| Record owner | the platform's `owner_id` (`ownership: 'user'`, the default) — never a hand-added "owner" / "person in charge" lookup, a second owner that owner-scoped visibility and "My records" views never read; `ownership: 'none'` only for a shared catalog or a pure junction table |
 
 > **`multiple: true` lookup ≠ junction object.** A multi-value lookup
 > (`{ type: 'lookup', reference: 'x', multiple: true }`) is stored and read as an
@@ -309,10 +334,14 @@ via the registered `ICryptoProvider`, masked on read, fail-closed, ADR-0100) —
 The **complete** set of types (`ValidationRuleSchema` discriminators): `script`,
 `state_machine`, `format`, `cross_field`, `json_schema`, `conditional`.
 
-> **There is NO `unique` validation type** (removed from the spec).
-> Enforce uniqueness — including composite — with a **unique index**, and state
-> its scope (ADR-0120):
-> `indexes: [{ fields: ['department', 'email'], unique: 'organization' }]`.
+A `state_machine` rule also declares `initialStates` whenever the status has a
+real starting point — without it a record can be created already `approved` /
+`paid` and walk past the process. List only the genuine entry states (usually
+one: `draft` / `pending` / `new`), never a terminal one; keys and values are
+option `value`s, never labels.
+
+> **There is NO `unique` validation type** — uniqueness is a unique **index**
+> with its scope (ADR-0120; [rules/validation.md § Uniqueness](./rules/validation.md#uniqueness--use-unique-indexes)).
 
 See [rules/validation.md](./rules/validation.md) for all types and examples.
 

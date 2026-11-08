@@ -2862,7 +2862,7 @@ const zh = {
         signIn: '以开发管理员登录',
       },
       errors: {
-        invalidCredentials: '邮箱或密码错误，请重试。',
+        invalidCredentials: '邮箱或密码错误。多次失败后，登录将暂停一段时间。忘记密码？重置密码后即可立即登录。',
         emailNotVerified: '请先验证您的邮箱后再登录。',
         oauthCallbackFailed: '单点登录未能完成——登录链接已过期或已被使用，请重新发起登录。',
         twoFactorInvalidCode: '验证码无效，请检查身份验证器应用后重试。',

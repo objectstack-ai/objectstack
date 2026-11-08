@@ -55,6 +55,8 @@ import {
   presentAuditTimestampOutput, reduceFilterKey, reduceFilterNode, refusalSubtree, retiredFilterOperatorError,
   unsupportedFilterError, unsupportedFilterOperatorError, withheldFilterDiagnosticOf,
 } from './sql-driver-top-level.js';
+import { assertOracleComparandNotEmptyString, oracleDayBinding, oracleInstantBinding } from './sql-driver-oracle-dialect.js';
+import { jsonMembershipUnsupportedOnOracleError } from './sql-driver-predicate-emitters.js';
 import type { ReadPresentationKind } from './sql-driver-top-level.js';
 import type { SqlDriver } from './sql-driver.js';
 
@@ -91,6 +93,7 @@ export interface FilterHelpersHost {
   isJsonColumn: SqlDriver['isJsonColumn'];
   readonly isMysql: SqlDriver['isMysql'];
   isNonTextColumn: SqlDriver['isNonTextColumn'];
+  readonly isOracle: SqlDriver['isOracle'];
   readonly isSqlite: SqlDriver['isSqlite'];
   jsonColumnFieldClass: SqlDriver['jsonColumnFieldClass'];
   readonly jsonFields: SqlDriver['jsonFields'];
@@ -151,22 +154,32 @@ export class FilterHelpersFacet {
   }
 
   /** The body of `SqlDriver#coerceFilterValue`; the method's docblock there is its contract. */
-  static coerceFilterValue(this: Pick<FilterHelpersHost, 'coerceFilterValue' | 'storageDatetimeValue' | 'temporalFieldKind' | 'toDateOnly'>, table: string | null, field: string, value: any): any {
+  static coerceFilterValue(this: Pick<FilterHelpersHost, 'coerceFilterValue' | 'isOracle' | 'storageDatetimeValue' | 'temporalFieldKind' | 'toDateOnly'>, table: string | null, field: string, value: any): any {
     if (value == null || !table) return value;
     if (Array.isArray(value)) return value.map((v) => this.coerceFilterValue(table, field, v));
 
     const kind = this.temporalFieldKind(table, field);
-    if (!kind) return value;
+    // [#31328] A `Date` against a NON-temporal column on Oracle: the client
+    // binds a Date as TIMESTAMP WITH TIME ZONE, and Oracle answers that by
+    // converting the COLUMN (`TO_TIMESTAMP_TZ(label)`), which raises on any
+    // text that is not a timestamp. Every other dialect compares the text the
+    // Date serialises to; Oracle is handed that text (the canonical instant).
+    if (!kind) return this.isOracle && value instanceof Date ? canonicalUtcDatetime(value) : value;
     if (kind === 'datetime') return this.storageDatetimeValue(value);
     // `Field.time` (#3994) takes the same treatment for the same reason: the
     // comparand must be the canonical time-of-day text the column stores.
     if (kind === 'time') return canonicalTimeOfDay(value);
-    return this.toDateOnly(value);
+    const day = this.toDateOnly(value);
+    // Oracle has no date-only type and parses no text into a `DATE` without an
+    // NLS format: the calendar day is bound as the instant its UTC midnight
+    // names (see `oracleDayBinding`).
+    return this.isOracle ? oracleDayBinding(day) : day;
   }
 
   /** The body of `SqlDriver#storageDatetimeValue`; the method's docblock there is its contract. */
-  static storageDatetimeValue(this: Pick<FilterHelpersHost, 'isMysql'>, value: unknown): unknown {
+  static storageDatetimeValue(this: Pick<FilterHelpersHost, 'isMysql' | 'isOracle'>, value: unknown): unknown {
     const canonical = canonicalUtcDatetime(value);
+    if (this.isOracle) return oracleInstantBinding(canonical);
     return this.isMysql ? mysqlDatetimeLiteral(canonical) : canonical;
   }
 
@@ -225,12 +238,16 @@ export class FilterHelpersFacet {
   }
 
   /** The body of `SqlDriver#readPresentationKind`; the method's docblock there is its contract. */
-  static readPresentationKind(this: Pick<FilterHelpersHost, 'booleanFields' | 'isMysql' | 'isSqlite' | 'numericFields' | 'temporalFieldKind'>, table: string | null | undefined, field: string): ReadPresentationKind | null {
+  static readPresentationKind(this: Pick<FilterHelpersHost, 'booleanFields' | 'isMysql' | 'isOracle' | 'isSqlite' | 'numericFields' | 'temporalFieldKind'>, table: string | null | undefined, field: string): ReadPresentationKind | null {
     if (!table) return null;
     const temporal = this.temporalFieldKind(table, field);
     if (temporal) return temporal;
     if ((AUDIT_TIMESTAMP_COLUMNS as readonly string[]).includes(field)) return 'audit_timestamp';
-    if ((this.isSqlite || this.isMysql) && this.booleanFields[table]?.includes(field)) {
+    // Oracle before 23ai has no BOOLEAN: a declared boolean over a `NUMBER(1)`
+    // / `CHAR(1)` flag column reads `1` / `0` and is presented here, like the
+    // integer flags of SQLite and MySQL. (A `CHAR(1)` `'Y'`/`'N'` column is not
+    // a boolean column — the type matrix says so at import, never this line.)
+    if ((this.isSqlite || this.isMysql || this.isOracle) && this.booleanFields[table]?.includes(field)) {
       return 'boolean';
     }
     // [#16318] Every dialect, for the reason `formatOutput`'s own numeric pass
@@ -501,7 +518,7 @@ export class FilterHelpersFacet {
   }
 
   /** The body of `SqlDriver#compileFilters`; the method's docblock there is its contract. */
-  static compileFilters(this: Pick<FilterHelpersHost, 'applyFilterCondition' | 'applyNormalizedComparison' | 'assertOperatorAppliesToColumn' | 'coerceFilterValue' | 'coercionKey' | 'filterColumnExpr' | 'remoteColumn'>, builder: Knex.QueryBuilder, filters: any, options?: DriverOptions) {
+  static compileFilters(this: Pick<FilterHelpersHost, 'applyFilterCondition' | 'applyNormalizedComparison' | 'assertOperatorAppliesToColumn' | 'coerceFilterValue' | 'coercionKey' | 'filterColumnExpr' | 'isOracle' | 'remoteColumn'>, builder: Knex.QueryBuilder, filters: any, options?: DriverOptions) {
     if (!filters) return;
 
     // [#5158] `where` is a `FilterCondition` OBJECT. It always was — the spec
@@ -574,6 +591,7 @@ export class FilterHelpersFacet {
         // This loop IS the bare `{ field: value }` spelling, one of the four
         // the issue measured as silently answering zero rows on an array column.
         this.assertOperatorAppliesToColumn(table, key, column, '=', true, refusalSubtree(value, filters));
+        if (this.isOracle) assertOracleComparandNotEmptyString('=', key, value, refusalSubtree(value, filters));
         const coerced = this.coerceFilterValue(table, key, value);
         const expr = this.filterColumnExpr(table, key, column);
         if (expr && this.applyNormalizedComparison(builder, 'and', expr, '=', coerced)) continue;
@@ -603,7 +621,7 @@ export class FilterHelpersFacet {
   }
 
   /** The body of `SqlDriver#applyFilterCondition`; the method's docblock there is its contract. */
-  static applyFilterCondition(this: Pick<FilterHelpersHost, 'applyContainsLike' | 'applyCrossFieldComparison' | 'applyEmptyOperator' | 'applyFalseConstant' | 'applyFilterCondition' | 'applyJsonMembership' | 'applyLike' | 'applyLikePattern' | 'applyNormalizedComparison' | 'applyNowAnchorComparison' | 'applyNullSafeNegative' | 'applyTextOperatorOverNonTextColumn' | 'assertOperatorAppliesToColumn' | 'coerceFilterValue' | 'coercionKey' | 'filterColumnExpr' | 'isNonTextColumn' | 'mapSortField' | 'readableIdsSubquery' | 'remoteColumn' | 'withWithheldFilterLog'>,
+  static applyFilterCondition(this: Pick<FilterHelpersHost, 'applyContainsLike' | 'applyCrossFieldComparison' | 'applyEmptyOperator' | 'applyFalseConstant' | 'applyFilterCondition' | 'applyJsonMembership' | 'applyLike' | 'applyLikePattern' | 'applyNormalizedComparison' | 'applyNowAnchorComparison' | 'applyNullSafeNegative' | 'applyTextOperatorOverNonTextColumn' | 'assertOperatorAppliesToColumn' | 'coerceFilterValue' | 'coercionKey' | 'filterColumnExpr' | 'isJsonColumn' | 'isNonTextColumn' | 'isOracle' | 'mapSortField' | 'readableIdsSubquery' | 'remoteColumn' | 'withWithheldFilterLog'>,
     builder: Knex.QueryBuilder,
     condition: any,
     logicalOp: 'and' | 'or' = 'and',
@@ -821,6 +839,15 @@ export class FilterHelpersFacet {
           // deleted: a caller that passes no seam compiles the comparison it
           // wrote, `<=` / BETWEEN against midnight.
           const op = rawOp;
+          if (this.isOracle) {
+            assertOracleComparandNotEmptyString(op, localField, opValue, refusalSubtree(value, condition));
+            // JSON-array membership has no Oracle construct; refused here, where
+            // the refusing subtree is known, rather than in the emitter below
+            // (which keeps the same refusal as its backstop).
+            if ((op === '$contains' || op === '$notContains') && this.isJsonColumn(table, localField)) {
+              throw jsonMembershipUnsupportedOnOracleError(localField, refusalSubtree(value, condition));
+            }
+          }
           const coerced = this.coerceFilterValue(table, localField, opValue);
           if (columnExpr && this.applyNormalizedComparison(builder, logicalOp, columnExpr, op, coerced)) continue;
           switch (op) {
@@ -1010,6 +1037,7 @@ export class FilterHelpersFacet {
         this.assertOperatorAppliesToColumn(
           table, localField, field, '=', true, refusalSubtree(value, condition),
         );
+        if (this.isOracle) assertOracleComparandNotEmptyString('=', localField, value, refusalSubtree(value, condition));
         const coerced = this.coerceFilterValue(table, localField, value);
         const columnExpr = this.filterColumnExpr(table, localField, field);
         if (columnExpr && this.applyNormalizedComparison(builder, logicalOp, columnExpr, '=', coerced)) continue;

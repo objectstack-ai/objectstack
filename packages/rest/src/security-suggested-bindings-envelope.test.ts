@@ -48,9 +48,13 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
+import { AuthzStoreUnavailableError, ObjectKernel, isServiceNotRegisteredError } from '@objectstack/core';
 // `.js` on purpose — NodeNext resolution requires the extension, and this
 // package's TEST_DEBT ceiling has no margin for another TS2835 (#7248).
 import { RestServer } from './rest-server.js';
+// Pays `@objectstack/objectql`'s first load at collection, never inside a clocked case
+// (the route modules import it lazily).
+import '@objectstack/objectql';
 
 const LIST = '/api/v1/security/suggested-bindings';
 const CONFIRM = '/api/v1/security/suggested-bindings/:id/confirm';
@@ -100,8 +104,13 @@ type Answer = { status: number; body: any };
  *                 `listAudienceBindingSuggestions` is ALSO the 501 arm (the
  *                 route's own duck-type check), which is how the two POST
  *                 routes reach 501 while still being driven normally.
+ * @param wiring   overrides for the two reads every arm begins with: the
+ *                 security provider itself, and the caller's context.
  */
-function boot(service?: any) {
+function boot(
+    service?: any,
+    wiring: { provider?: () => Promise<unknown>; execCtx?: () => Promise<unknown> } = {},
+) {
     const rest = new RestServer(
         mockServer() as any,
         { getDiscovery: vi.fn().mockResolvedValue({ version: 'v0', routes: {} }) } as any,
@@ -109,8 +118,9 @@ function boot(service?: any) {
     );
     // `isSystem` clears the auth gates that run BEFORE the arms under test, so
     // every request below reaches the envelope it is named after.
-    (rest as any).resolveExecCtx = async () => ({ isSystem: true, userId: 'u1' });
-    if (service !== undefined) (rest as any).securityServiceProvider = async () => service;
+    (rest as any).resolveExecCtx = wiring.execCtx ?? (async () => ({ isSystem: true, userId: 'u1' }));
+    if (wiring.provider) (rest as any).securityServiceProvider = wiring.provider;
+    else if (service !== undefined) (rest as any).securityServiceProvider = async () => service;
     rest.registerRoutes();
 
     const route = (method: string, path: string) => {
@@ -418,5 +428,32 @@ describe('[#27149] reopen hands the caller context and the id to the service —
         expect(service.reopenAudienceBindingSuggestion.mock.calls[0][1]).toBe('s1');
         expect(service.confirmAudienceBindingSuggestion).not.toHaveBeenCalled();
         expect(service.dismissAudienceBindingSuggestion).not.toHaveBeenCalled();
+    });
+});
+
+describe('an authorization input that cannot be read answers the suggested-binding family\'s 503, never its 500 or 501', () => {
+    it('a security service that cannot be resolved → 503 SERVICE_UNAVAILABLE on every route', async () => {
+        const doors = boot(undefined, {
+            provider: async () => { throw new Error('the security service failed to construct'); },
+        });
+        for (const answer of [await doors.list(), await doors.confirm(), await doors.dismiss(), await doors.reopen()]) {
+            expectNestedEnvelope(answer, 503, 'SERVICE_UNAVAILABLE');
+        }
+    });
+
+    it('a caller context whose authorization store cannot be read → 503 SERVICE_UNAVAILABLE', async () => {
+        const service = healthyService();
+        const doors = boot(service, {
+            execCtx: async () => { throw new AuthzStoreUnavailableError('sys_user_permission_set', new Error('store down')); },
+        });
+        expectNestedEnvelope(await doors.list(), 503, 'SERVICE_UNAVAILABLE');
+        expect(service.listAudienceBindingSuggestions).not.toHaveBeenCalled();
+    });
+
+    it('the registry\'s "never registered" rejection keeps the 501 — no security service on this deployment', async () => {
+        const kernel = new ObjectKernel({ skipSystemValidation: true, gracefulShutdown: false } as any);
+        const provider = () => kernel.getServiceAsync('security');
+        await expect(provider()).rejects.toSatisfy(isServiceNotRegisteredError);
+        expectNestedEnvelope(await boot(undefined, { provider }).list(), 501, 'NOT_IMPLEMENTED');
     });
 });

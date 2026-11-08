@@ -294,6 +294,7 @@ import { SqliteSerialisationFacet } from './sql-driver-sqlite-serialisation.js';
 // [cloud#3652 D3] Declared renames: the methods of the same names below hand the bodies what they read (`DeclaredRenameHost`).
 import { DeclaredRenameFacet } from './sql-driver-declared-rename.js';
 import type { DeclaredRenameCarry, DeclaredRenamePlan } from './declared-rename.js';
+import { withOracleFederationClient } from './sql-driver-oracle-dialect.js';
 // [#29520 codemod] The facets' hosts, one per driver, which the static block at the end of the class builds.
 import {
   aggregationHost, bulkOperationsHost, classHeadHost, columnCreationHost, crudHost, databaseHelpersHost,
@@ -320,6 +321,7 @@ export interface SqlDriverStaticsHost {
   readonly MYSQL_EMIT_CLIENTS: (typeof SqlDriver)['MYSQL_EMIT_CLIENTS'];
   readonly MYSQL_ROW_BYTE_BUDGET: (typeof SqlDriver)['MYSQL_ROW_BYTE_BUDGET'];
   readonly MYSQL_TEXT_TEMPORAL_TYPES: (typeof SqlDriver)['MYSQL_TEXT_TEMPORAL_TYPES'];
+  readonly ORACLE_CLIENTS: (typeof SqlDriver)['ORACLE_CLIENTS'];
   readonly PG_OID_DATE: (typeof SqlDriver)['PG_OID_DATE'];
   readonly PG_OID_DATE_ARRAY: (typeof SqlDriver)['PG_OID_DATE_ARRAY'];
   readonly PG_OID_TEXT_ARRAY: (typeof SqlDriver)['PG_OID_TEXT_ARRAY'];
@@ -908,6 +910,23 @@ export class SqlDriver implements IDataDriver {
   ]);
 
   /**
+   * Oracle Database (ADR-0015 §4.6): knex's `oracledb` client, node-oracledb
+   * in Thin mode. A FEDERATION-ONLY family — {@link isOracle} gives it a read
+   * identity (paging, identifier case, text matching, value presentation,
+   * introspection and the double-opt-in write path), and it is deliberately
+   * NOT an emission set: {@link assertDialectEmits} refuses every DDL
+   * operation on it by name, because the platform never builds a table in a
+   * database another system owns. `@objectstack/spec`'s driver table says the
+   * same thing at authoring (`federationOnly`).
+   *
+   * knex's bare `oracle` client is not here: it is the abstract base of
+   * `oracledb` and needs the retired `oracle` npm binding.
+   */
+  private static readonly ORACLE_CLIENTS: ReadonlySet<string> = new Set([
+    'oracledb',
+  ]);
+
+  /**
    * The ONE declared extension over the emission sets above: knex clients this
    * driver recognises on the pg WIRE and deliberately does not emit DDL for.
    *
@@ -998,6 +1017,14 @@ export class SqlDriver implements IDataDriver {
    */
   protected get isMysql(): boolean {
     return SqlDriver.MYSQL_EMIT_CLIENTS.has(SqlDriver.clientSpelling(this.config));
+  }
+
+  /**
+   * Whether the underlying database is Oracle — read identity only. See
+   * {@link ORACLE_CLIENTS}: Oracle is a federation dialect, never a DDL target.
+   */
+  protected get isOracle(): boolean {
+    return SqlDriver.ORACLE_CLIENTS.has(SqlDriver.clientSpelling(this.config));
   }
 
   /**
@@ -1152,11 +1179,13 @@ export class SqlDriver implements IDataDriver {
     // [#25521 cut 20] The body moved to `sql-driver-date-bucket.ts` (see `DateBucketHost`).
     const readDateGranularityCapabilities = () => this.dateGranularityCapabilities;
     const readIsMysql = () => this.isMysql;
+    const readIsOracle = () => this.isOracle;
     const readIsPostgres = () => this.isPostgres;
     const readIsSqlite = () => this.isSqlite;
     const host: ThisParameterType<typeof buildDateBucketExpr> = {
       get dateGranularityCapabilities() { return readDateGranularityCapabilities(); },
       get isMysql() { return readIsMysql(); },
+      get isOracle() { return readIsOracle(); },
       get isPostgres() { return readIsPostgres(); },
       get isSqlite() { return readIsSqlite(); },
       sqliteTemporalArg: (...a) => this.sqliteTemporalArg(...a),
@@ -1302,7 +1331,12 @@ export class SqlDriver implements IDataDriver {
     // (#6743 — the ruling's "same report as today, byte for byte"). Only the
     // Knex instance below is redirected.
     this.config = knexConfig;
-    this.knex = knex(SqlDriver.withConnectBound(this.knexConfigFor(knexConfig, sqliteAbsentFile)));
+    // `withOracleFederationClient` is the LAST step on purpose: every table
+    // above it keys on the configured `client` spelling, and it replaces that
+    // spelling with the Oracle client class (a no-op for every other client).
+    this.knex = knex(withOracleFederationClient(
+      SqlDriver.withConnectBound(this.knexConfigFor(knexConfig, sqliteAbsentFile)),
+    ) as Knex.Config);
     this.installQueryTiming();
   }
 
@@ -5873,6 +5907,7 @@ export class SqlDriver implements IDataDriver {
     // [#25521 cut 4] The body moved to `sql-driver-introspection.ts` (see `IntrospectionHost`).
     const readDialectName = () => this.dialectName;
     const readIsMysql = () => this.isMysql;
+    const readIsOracle = () => this.isOracle;
     const readIsPostgres = () => this.isPostgres;
     const readIsSqlite = () => this.isSqlite;
     const readKnex = () => this.knex;
@@ -5883,6 +5918,7 @@ export class SqlDriver implements IDataDriver {
       introspectPrimaryKeys: (...a) => this.introspectPrimaryKeys(...a),
       introspectUniqueConstraints: (...a) => this.introspectUniqueConstraints(...a),
       get isMysql() { return readIsMysql(); },
+      get isOracle() { return readIsOracle(); },
       get isPostgres() { return readIsPostgres(); },
       get isSqlite() { return readIsSqlite(); },
       get knex() { return readKnex(); },
@@ -8915,6 +8951,7 @@ export class SqlDriver implements IDataDriver {
       PG_OID_TEXT_ARRAY: { get: () => SqlDriver.PG_OID_TEXT_ARRAY },
       POSTGRES_EMIT_CLIENTS: { get: () => SqlDriver.POSTGRES_EMIT_CLIENTS },
       POSTGRES_WIRE_CLIENTS: { get: () => SqlDriver.POSTGRES_WIRE_CLIENTS },
+      ORACLE_CLIENTS: { get: () => SqlDriver.ORACLE_CLIENTS },
       POSTGRES_WIRE_ONLY_CLIENTS: { get: () => SqlDriver.POSTGRES_WIRE_ONLY_CLIENTS },
       SQLITE_AUTO_VACUUM_INCREMENTAL: { get: () => SqlDriver.SQLITE_AUTO_VACUUM_INCREMENTAL },
       SQLITE_EMIT_CLIENTS: { get: () => SqlDriver.SQLITE_EMIT_CLIENTS },
@@ -8993,6 +9030,7 @@ export class SqlDriver implements IDataDriver {
       buildDateBucketExpr: (...a) => driver.buildDateBucketExpr(...a),
       get config() { return driver.config; },
       get isMysql() { return driver.isMysql; },
+      get isOracle() { return driver.isOracle; },
       get isPostgres() { return driver.isPostgres; },
       get isSqlite() { return driver.isSqlite; },
       get knex() { return driver.knex; },
@@ -9151,6 +9189,7 @@ export class SqlDriver implements IDataDriver {
       filterColumnExpr: (...a) => driver.filterColumnExpr(...a),
       isJsonColumn: (...a) => driver.isJsonColumn(...a),
       get isMysql() { return driver.isMysql; },
+      get isOracle() { return driver.isOracle; },
       isNonTextColumn: (...a) => driver.isNonTextColumn(...a),
       get isSqlite() { return driver.isSqlite; },
       jsonColumnFieldClass: (...a) => driver.jsonColumnFieldClass(...a),
@@ -9213,6 +9252,7 @@ export class SqlDriver implements IDataDriver {
     managedDriftHost.install((driver) => ({
       introspectIndexes: (...a) => driver.introspectIndexes(...a),
       get isMysql() { return driver.isMysql; },
+      get isOracle() { return driver.isOracle; },
       get isPostgres() { return driver.isPostgres; },
       get isSqlite() { return driver.isSqlite; },
       get knex() { return driver.knex; },
@@ -9325,6 +9365,7 @@ export class SqlDriver implements IDataDriver {
       injectTenantOnInsert: (...a) => driver.injectTenantOnInsert(...a),
       insertOnlyUpsertColumns: (...a) => driver.insertOnlyUpsertColumns(...a),
       get isMysql() { return driver.isMysql; },
+      get isOracle() { return driver.isOracle; },
       get isPostgres() { return driver.isPostgres; },
       get isSqlite() { return driver.isSqlite; },
       keepSuppliedUpdatedAt: (...a) => driver.keepSuppliedUpdatedAt(...a),
@@ -9362,6 +9403,7 @@ export class SqlDriver implements IDataDriver {
       get datetimeFields() { return driver.datetimeFields; },
       get fileColumnsMoved() { return driver.fileColumnsMoved; },
       get isMysql() { return driver.isMysql; },
+      get isOracle() { return driver.isOracle; },
       get isSqlite() { return driver.isSqlite; },
       get jsonFields() { return driver.jsonFields; },
       get mediaFields() { return driver.mediaFields; },

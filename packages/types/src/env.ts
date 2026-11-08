@@ -404,6 +404,37 @@ export function resolveScheduledWorkPolicy(): ScheduledWorkPolicy {
 }
 
 /**
+ * [#19834] A per-kernel scheduled-work policy a HOST hands a binder: a value,
+ * or a resolver called at each read. What the automation engine, both schedule
+ * triggers and their plugins, and (#31382) `AppPlugin` and the package-jobs
+ * binder in `@objectstack/runtime` accept.
+ *
+ * Lives here, beside {@link ScheduledWorkPolicy}, so every binder spells it
+ * once; `@objectstack/trigger-schedule` re-exports it under the same name.
+ *
+ * ⚠️ A hand-built value owes the resolver's invariant:
+ * `requiresActingOrganization === enabled && runOwnership === 'declared'`.
+ */
+export type ScheduledWorkPolicySource = ScheduledWorkPolicy | (() => ScheduledWorkPolicy);
+
+/**
+ * [#17396] The scheduled-work policy, read once per bind.
+ *
+ * [#19834] The per-kernel `source` when a host gave one; else the zero-argument
+ * deployment resolver {@link resolveScheduledWorkPolicy}, exactly as before.
+ *
+ * ⛔ Not memoised at module scope on purpose. {@link resolveScheduledWorkPolicy}
+ * reads `process.env` live, and a host that rebinds after changing the
+ * environment (the CLI's `--fresh` harness, a test that flips the switch
+ * between kernels in one process) must get the value that is current at the
+ * bind, not the one the first import happened to see.
+ */
+export function readScheduledWorkPolicy(source?: ScheduledWorkPolicySource): ScheduledWorkPolicy {
+  if (source === undefined) return resolveScheduledWorkPolicy();
+  return typeof source === 'function' ? source() : source;
+}
+
+/**
  * The one sentence a surface prints when package-authored scheduled work is
  * OFF — so the bind refusal, the engine's binding audit, the CLI startup
  * summary and the flow status door cannot drift about WHY a flow is not armed.
@@ -414,8 +445,9 @@ export function resolveScheduledWorkPolicy(): ScheduledWorkPolicy {
  * reads {@link scheduledWorkDisabledReason} rather than this constant — which
  * answers this sentence, unchanged, whenever the policy carries no reason of
  * its own. A zero-argument reader of the switch itself — the declarative
- * `defineJob` gate in `@objectstack/runtime` — only ever sees the deployment's
- * answer, so it quotes this constant directly.
+ * `defineJob` gate in `@objectstack/runtime` when its host handed no policy —
+ * only ever sees the deployment's answer, so it quotes this constant directly;
+ * handed one (#31382), it reads {@link scheduledWorkDisabledReason} too.
  *
  * ⚠️ [#18235] Studio's own door carries it now: `GET /automation/_status`
  * answers `FlowRuntimeState` rows (`@objectstack/spec`

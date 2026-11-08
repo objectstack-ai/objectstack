@@ -20,7 +20,7 @@
 | `os compile` | Compile to portable JSON artifact (for runtime hydration) |
 | `os serve` | Serve a compiled stack in production mode |
 | `os start` | Quick-start a server: auto-compiles `objectstack.config.ts` when no artifact is present, and falls back to an empty kernel with the Console + marketplace when there is no config at all. It does **not** validate env or apply migrations — run `os validate` / `os migrate apply` yourself |
-| `os generate <kind>` | Scaffold an object / view / flow / skill from a template |
+| `os generate <kind>` | Scaffold `object` `view` `action` `flow` `dashboard` `app` `skill` `picklist` `permission` `dataset` |
 
 ## Verify your work
 
@@ -61,8 +61,8 @@ Port resolution is the same for `os dev` and `os start` (both spawn `os serve`):
 
 | Mode | If the resolved port is busy |
 |:-----|:-----------------------------|
-| **Dev** (`os dev`, or `NODE_ENV=development`) | Auto-hops to the next free port (up to +100) so several example apps run side-by-side. The startup banner shows the *actual* bound port. |
-| **Production** (`os start`) | **Fails loudly and exits 1.** It never silently drifts. |
+| **Dev** (`os dev`, or `NODE_ENV=development`) | Auto-hops to the next free port (up to +100). The startup banner shows the *actual* bound port. |
+| **Production** (`os start`) | **Fails loudly and exits 1.** |
 
 **Production guidance:**
 
@@ -99,7 +99,7 @@ Port resolution is the same for `os dev` and `os start` (both spawn `os serve`):
 
 **`os deploy` exit 1, cloud:** a refusal before any write publishes nothing: log in (`os cloud login`), pick an environment (`--env`; none: create one in the ObjectOS Cloud console), or fix the local build or `manifest.version`. `could not build …: <reason>`: the environment's build failed, it keeps serving the previous one; fix and deploy again. `Timed out after …`: the install is recorded and a failing build reads as pending for minutes; deploy again with a longer `--wait-timeout`, or see the build in the ObjectOS Cloud console.
 
-**A `use-runtime` target** (no `--env`) asks for no cloud login: build, dry-run plan, install, live on `hotLoaded`. Exit 1: a failed build; a dry run refused, unserved (no install-local) or ignored (an older runtime installed: upgrade it); an install refusal (rerun with the `--confirm-access-upgrade` / `--confirm-upgrade <token>` it printed); installed but not loaded (live after a restart).
+**A `use-runtime` target** (no `--env`) asks for no cloud login: build, dry-run plan, install, live on `hotLoaded`. Exit 1: a failed build; a dry run refused, unserved (no install-local) or ignored (an older runtime installed: upgrade it); an install refusal (rerun with the `--confirm-access-upgrade` / `--confirm-upgrade <token>` it printed, or `--confirm-global-uniques` if its installation-wide `unique` constraints are meant platform-wide, else set them `unique: 'organization'`); installed but not loaded (live after a restart).
 
 > **Cloud connection & marketplace (`@objectstack/cloud-connection`, ADR-0008/0009):**
 > the open runtime-side cloud client; its `MarketplaceInstallLocalPlugin` serves the
@@ -161,10 +161,9 @@ the other imports: [Using Plugins](./plugin-development.md#using-plugins).
 - **Health endpoints:** the HTTP dispatcher exposes `GET /health` and
   `GET /ready` under the API prefix.
 - **Logs:** plugins log via `ctx.logger`. Logger config is a **kernel
-  construction** option, not a `defineStack` key:
-  `new ObjectKernel({ logger: { level: 'info', format: 'json' } })`.
+  construction** option (`new ObjectKernel({ logger })`), not a `defineStack` key.
 - **Metrics:** use the kernel's built-ins — `kernel.getPluginMetrics()`
-  (per-plugin startup durations) and `await kernel.checkAllPluginsHealth()`.
+  and `await kernel.checkAllPluginsHealth()`.
   There is no `metrics` service and no `@objectstack/plugin-prometheus`.
 
 ## Common ops pitfalls

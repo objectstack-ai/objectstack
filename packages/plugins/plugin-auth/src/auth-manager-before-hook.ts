@@ -83,7 +83,7 @@ import { refuseVisitorResendWithoutLiveTransport } from './visitor-verification-
  * `config` is read-only here: the host hands it out through a getter.
  */
 export interface BeforeHookHost {
-  assertAccountNotLocked: AuthManager['assertAccountNotLocked'];
+  admitSignInAttempt: AuthManager['admitSignInAttempt'];
   assertActorNotHeld: AuthManager['assertActorNotHeld'];
   assertAdminRevokeUserSessionIdentifiesRecord: AuthManager['assertAdminRevokeUserSessionIdentifiesRecord'];
   assertOrganizationDeletable: AuthManager['assertOrganizationDeletable'];
@@ -672,13 +672,17 @@ export async function globalBeforeHook(
   });
 
   // ── ADR-0069 D2: account lockout (gate) ─────────────────────
-  // Reject a sign-in for a locked identity BEFORE better-auth checks
-  // the password — a lock must hold even against the correct password.
-  // The refusal is a refused sign-in, so it writes its `login_failed`
-  // row (`auth-session-audit.ts`, account events) before it throws.
+  // BEFORE better-auth checks the password: the attempt is stamped as a
+  // failure (settled by the after-hook once the check answers), and a
+  // locked identity is refused — a lock must hold even against the
+  // correct password. The refusal is the one a wrong password gets, made
+  // by better-auth's own credential check (`sign-in-lockout-refusal.ts`),
+  // unless the deployment opted into `403 ACCOUNT_LOCKED`. It is a
+  // refused sign-in, so it writes its `login_failed` row
+  // (`auth-session-audit.ts`, account events).
   if (ctx?.path === SIGN_IN_EMAIL_PATH) {
     const email = typeof ctx?.body?.email === 'string' ? ctx.body.email : '';
-    if (email) await this.assertAccountNotLocked(email, ctx);
+    if (email) await this.admitSignInAttempt(email, ctx);
     return;
   }
 
