@@ -28,7 +28,8 @@ describe('lint — every package-authored name carries the package namespace (ru
     // set by a floor and by the types the decision's audit named.
     expect(Object.keys(NAME_JUDGED_ELSEWHERE).sort()).toEqual(['docs', 'objects', 'views']);
     for (const reason of Object.values(NAME_JUDGED_ELSEWHERE)) expect(reason.length).toBeGreaterThan(20);
-    expect(JUDGED.length).toBeGreaterThanOrEqual(28);
+    // 27, not 28: #31380 retired `ragPipelines` from `PLURAL_TO_SINGULAR`.
+    expect(JUDGED.length).toBeGreaterThanOrEqual(27);
     expect(JUDGED).toEqual(expect.arrayContaining([
       'apps', 'pages', 'dashboards', 'reports', 'datasets', 'actions', 'flows', 'jobs',
       'positions', 'permissions', 'capabilities', 'sharingRules', 'queues', 'assignmentRules',
