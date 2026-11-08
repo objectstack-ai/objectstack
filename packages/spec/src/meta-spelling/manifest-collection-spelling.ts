@@ -92,13 +92,16 @@ export const PLURAL_TO_SINGULAR: Record<string, string> = {
   skills: 'skill',
   // `ragPipelines: 'rag_pipeline'` was removed (ADR-0049 enforce-or-remove): no
   // stack could declare the collection — `ObjectStackDefinitionSchema` never
-  // carried the key, so `defineStack` refused it — and nothing produced or read
-  // a `rag_pipeline` item. Like the `themes` row above, its absence moves
-  // `/meta/rag_pipeline` out of the generated `META_URL_TO_SINGULAR`, so the
-  // type gets `unrecognisedMetaTypeRefusal`'s verdict instead of the no-schema
-  // store-anything branch, and `GET /meta/types` stops advertising it as
-  // creatable. The D3 semantic entry `meta-type-rag-pipeline-retired` carries
-  // it to upgraders.
+  // carried the key, so `defineStack` refused it — and no producer or reader of
+  // a `rag_pipeline` item was found in objectstack (with its ui workspace),
+  // hotcrm or gallery (the cloud repository was not measured). Like the `themes`
+  // row above, its absence moves `/meta/rag_pipeline` out of the generated
+  // `META_URL_TO_SINGULAR`, so a write to the type gets
+  // `unrecognisedMetaTypeRefusal`'s verdict instead of the no-schema
+  // store-anything branch (unless the deployment's `sys_metadata` already holds
+  // the namespace: the write door exempts a namespace that predates the write),
+  // and `GET /meta/types` stops advertising it as creatable. The D3 semantic
+  // entry `meta-type-rag-pipeline-retired` carries it to upgraders.
   hooks: 'hook',
   mappings: 'mapping',
   picklists: 'picklist',
