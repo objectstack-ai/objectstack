@@ -6,6 +6,7 @@ feat(cli)!: `os migrate plan` / `apply` refuse a config whose AI plugin only `os
 
 Clause-②: no (narrowing)
 Metadata-protocol: none
+Skills-docs: none — no file under `skills/**` teaches that `os serve` auto-injects the AI plugin or that `os migrate` composes it: `skills/objectstack-platform` names `AIServicePlugin` as cloud / EE only and mounted by the cloud host, which is the explicit mount the refusal asks for; `content/docs/` does not describe the migrate composition's AI handling either.
 
 <!-- adr-0087: not-required (no-migration-prescription) No key of any schema or export is added, removed, renamed or re-shaped. What moves is the migrate commands' answer to a config that relies on serve's AI auto-inject: they refuse it before planning, and the remedy is one line in the config, not a rewrite of anything at rest. -->
 
