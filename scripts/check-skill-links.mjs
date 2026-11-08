@@ -20,15 +20,14 @@
  * ## The expected catch
  *
  * "Moved verbatim" refactors. A section moves from SKILL.md into a references/
- * or rules/ file (or back), the inbound links keep the old `../SKILL.md#slug`,
+ * or rules/ file (or back), the inbound links keep the old SKILL.md fragment,
  * and every other skill gate stays green, because none of them reads links. The
- * 2026-11-02 review found three such links by hand, all of this one shape:
- * `objectstack-data/references/data-hooks.md` -> `../SKILL.md#lifecycle-hooks`,
- * `objectstack-platform/rules/plugin-lifecycle.md` ->
- * `../SKILL.md#complete-plugin-example`, and
- * `objectstack-platform/rules/service-registry.md` ->
- * `../SKILL.md#well-known-plugin-names--services`. The self-test reproduces that
- * shape and must red on it.
+ * 2026-11-02 review found three such links by hand, all of this one shape: the
+ * objectstack-data data-hooks reference linking its SKILL.md at fragment
+ * lifecycle-hooks, and the objectstack-platform plugin-lifecycle and
+ * service-registry rules linking theirs at complete-plugin-example and
+ * well-known-plugin-names--services. The self-test reproduces that shape and
+ * must red on it.
  *
  * ## The slug rule is the whole gate
  *
