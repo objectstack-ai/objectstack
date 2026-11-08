@@ -458,3 +458,49 @@ describe('a completed password reset clears the sign-in lockout (ADR-0069 D2)', 
     expect((await signIn(a, FIRST)).status).toBe(401);
   }, 60_000);
 });
+
+describe('ADR-0069 D2: an account whose failed_login_count is NULL is counted and cleared through ObjectQL + SqlDriver', () => {
+  const THRESHOLD = 3;
+  const WRONG = 'Wr0ng!Guess-Zebra-7731';
+  const signIn = (a: Account, password: string) => post(a.manager, '/sign-in/email', { email: EMAIL, password });
+
+  /** The account's id and lockout columns, read off the table. */
+  async function lockoutRow(engine: ObjectQL): Promise<{ id: string; failed_login_count?: unknown; locked_until?: unknown }> {
+    const [row] = (await engine.find(
+      'sys_user',
+      { where: { email: EMAIL }, fields: ['id', 'failed_login_count', 'locked_until'], limit: 1 },
+      SYS,
+    )) as Array<{ id: string; failed_login_count?: unknown; locked_until?: unknown }>;
+    return row;
+  }
+
+  /** A signed-in account whose counter column is then written NULL, read back NULL. */
+  async function nullCounterAccount(): Promise<Account> {
+    const a = await signedInAccount({ lockoutThreshold: THRESHOLD });
+    const { id } = await lockoutRow(a.engine);
+    await a.engine.update('sys_user', { id, failed_login_count: null, locked_until: null }, SYS);
+    // Non-vacuity: the column really is NULL, so the compare-and-set compares against NULL.
+    expect((await lockoutRow(a.engine)).failed_login_count).toBeNull();
+    return a;
+  }
+
+  it('the correct password signs in, and the counter is cleared to 0', async () => {
+    const a = await nullCounterAccount();
+    const res = await signIn(a, FIRST);
+    expect(res.status, await res.clone().text()).toBe(200);
+    const row = await lockoutRow(a.engine);
+    expect(Number(row.failed_login_count)).toBe(0);
+    expect(row.locked_until ?? null).toBeNull();
+  }, 60_000);
+
+  it('a wrong password counts to 1, and the correct one still signs in after it', async () => {
+    const a = await nullCounterAccount();
+    expect((await signIn(a, WRONG)).status).toBe(401);
+    const row = await lockoutRow(a.engine);
+    expect(Number(row.failed_login_count)).toBe(1);
+    expect(row.locked_until ?? null).toBeNull();
+    const res = await signIn(a, FIRST);
+    expect(res.status, await res.clone().text()).toBe(200);
+    expect(Number((await lockoutRow(a.engine)).failed_login_count)).toBe(0);
+  }, 60_000);
+});

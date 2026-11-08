@@ -489,3 +489,33 @@ describe('ADR-0069 D2: attempts that arrive together reach the credential check 
     expect(await outcome(await signIn(manager, EMAIL, PASSWORD))).toEqual(LOCKED);
   });
 });
+
+describe('ADR-0069 D2: an account whose failed_login_count is NULL or absent is counted and cleared like one at 0', () => {
+  const blank: Array<[string, (row: any) => void]> = [
+    ['NULL', (row) => { row.failed_login_count = null; }],
+    ['absent', (row) => { delete row.failed_login_count; }],
+  ];
+  for (const [label, clearCounter] of blank) {
+    it(`${label}: the correct password signs in, and the counter is cleared to 0`, async () => {
+      const { engine, manager } = deployment();
+      await signUp(manager);
+      clearCounter(accountRow(engine));
+      const res = await signIn(manager, EMAIL, PASSWORD);
+      expect(res.status, await res.clone().text()).toBe(200);
+      expect(accountRow(engine).failed_login_count).toBe(0);
+      expect(isLocked(accountRow(engine))).toBe(false);
+    });
+
+    it(`${label}: a wrong password counts to 1, and the correct one still signs in after it`, async () => {
+      const { engine, manager } = deployment();
+      await signUp(manager);
+      clearCounter(accountRow(engine));
+      expect(await outcome(await signIn(manager, EMAIL, WRONG_PASSWORD))).toEqual(REFUSED);
+      expect(accountRow(engine).failed_login_count).toBe(1);
+      expect(isLocked(accountRow(engine))).toBe(false);
+      const res = await signIn(manager, EMAIL, PASSWORD);
+      expect(res.status, await res.clone().text()).toBe(200);
+      expect(accountRow(engine).failed_login_count).toBe(0);
+    });
+  }
+});
