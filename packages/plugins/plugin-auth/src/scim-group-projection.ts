@@ -221,12 +221,13 @@ export async function reconcileProjectedGrants(
 
   for (const [k, { set, org }] of desired) {
     if (heldKeys.has(k)) continue;
-    await writer.insert(GRANT_OBJECT, {
-      user_id: state.userId,
-      permission_set: set,
-      organization_id: org,
-      reason,
-    });
+    // The grant's organization rides on the row AND as the write's tenant, so the
+    // engine owns it in that organization exactly as a session write would.
+    await writer.insert(
+      GRANT_OBJECT,
+      { user_id: state.userId, permission_set: set, organization_id: org, reason },
+      { context: { isSystem: true, tenantId: org } },
+    );
   }
   for (const row of held) {
     if (text(row.reason) !== reason) continue;
