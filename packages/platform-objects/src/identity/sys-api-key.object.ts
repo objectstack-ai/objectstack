@@ -152,7 +152,7 @@ export const SysApiKey = ObjectSchema.create({
       // Offered on a live key only, Restore on a revoked one, in the form of
       // `sys_oauth_application`'s Disable / Enable pair: a null `revoked`
       // reads as live. Display only, no door reads `visible`; who may restore
-      // a key a forced password reset revoked is the server's
+      // a key revoked with a `revoked_reason` is the server's
       // (`api-key-restore-guard.ts` in plugin-auth). Pinned in
       // `action-state-visibility.test.ts`.
       visible: 'has(record.revoked) && record.revoked != true',
@@ -387,16 +387,28 @@ export const SysApiKey = ObjectSchema.create({
     }),
 
     // Why the key was revoked, recorded only where the reason changes WHO may
-    // restore it. An administrator's forced password reset revokes the user's
-    // keys by default because the reset may answer a compromise, so the owner
-    // must not be the one to reopen such a key: only a platform administrator
-    // restores it, and the owner creates a new key instead.
+    // restore it. Two values, each the same word the platform writes on
+    // `sys_session.revoke_reason` for the same event:
     //
-    // One writer stamps it (plugin-auth `forced-reset-revocation.ts`, beside
-    // `revoked: true`), and one hook keeps it in step with `revoked`
-    // (plugin-auth `api-key-restore-guard.ts`): it refuses the owner's restore
-    // of a key carrying this reason, clears the reason on every restore it
-    // admits, and leaves it alone when a revoked key is revoked again.
+    //  - `admin_password_reset`: an administrator's forced password reset
+    //    revokes the user's keys by default because the reset may answer a
+    //    compromise, so the owner must not be the one to reopen such a key:
+    //    only a platform administrator restores it, and the owner creates a new
+    //    key instead. Its one writer is plugin-auth `forced-reset-revocation.ts`,
+    //    beside `revoked: true`.
+    //  - `organization_membership_ended`: the key was revoked because its
+    //    owner's membership in the organization ended. Nobody restores such a
+    //    key from a user context, a platform administrator included: re-arming
+    //    it would hand a non-member's credential back its access. A member mints
+    //    a new key instead. The platform does not stamp it itself: a host that
+    //    revokes a departed member's keys (a control plane removing someone from
+    //    the organization) writes it in the system context, beside
+    //    `revoked: true`.
+    //
+    // One hook keeps it in step with `revoked` (plugin-auth
+    // `api-key-restore-guard.ts`): it refuses the user-context restores each
+    // reason rules out, clears the reason on every restore it admits, and
+    // leaves it alone when a revoked key is revoked again.
     // `readonly` for ADR-0092 D4's form-rendering reason: it is not on the D2
     // whitelist, so no data-API write may set or clear it.
     revoked_reason: Field.select({
@@ -405,9 +417,10 @@ export const SysApiKey = ObjectSchema.create({
       readonly: true,
       options: [
         { label: 'Administrator password reset', value: 'admin_password_reset' },
+        { label: 'Organization membership ended', value: 'organization_membership_ended' },
       ],
       description:
-        'Set when an administrator\'s forced password reset revoked this key. Only a platform administrator can restore such a key; its owner creates a new one. Cleared when the key is restored. Empty for a key revoked from the API Keys list.',
+        'Why the key was revoked, where that decides who can restore it. Administrator password reset: only a platform administrator can restore the key. Organization membership ended: the owner left the organization, and no one can restore the key; a member creates a new one. Cleared when the key is restored. Empty for a key revoked from the API Keys list.',
       group: 'Lifecycle',
     }),
 
