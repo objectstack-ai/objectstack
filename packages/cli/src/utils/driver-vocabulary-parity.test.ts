@@ -207,7 +207,7 @@ describe('driver vocabulary parity: `os start` and `os migrate` answer alike (#6
   // are what keeps that from being a silent drop in coverage.
   it('the spec table withdrew exactly these spellings: contract face yes, selection face no', () => {
     const withdrawn = Object.keys(DRIVER_ID_ALIASES)
-      .filter((alias) => !DATABASE_DRIVER_SELECTION_IDS.includes(DRIVER_ID_ALIASES[alias]!))
+      .filter((alias) => !(DATABASE_DRIVER_SELECTION_IDS as readonly string[]).includes(DRIVER_ID_ALIASES[alias]!))
       .sort();
     expect(withdrawn).toEqual([...WITHDRAWN_MEMORY_SPELLINGS, 'inmemory'].sort());
     for (const spelling of withdrawn) {
