@@ -19,17 +19,18 @@ import { isDict, stripKeys } from '../shared.js';
  * (protocol 18, #12497 — ADR-0049 enforce-or-remove, maintainer ruling
  * 2026-08-26 accepting #1883's recommendation B).
  *
- * The `restore` / `purge` ObjectQL operations the bits claimed to gate have
- * never existed: no destructive lifecycle verb is in the engine's dispatch
- * vocabulary (pinned by objectql's
- * `engine-middleware-operation-vocabulary.test.ts`, #8106). Authoring the bits
- * therefore granted nothing — an advertised switch with nothing behind it, on
- * the most destructive operations (undelete, GDPR hard-delete). A pure
- * lossless delete: a dispatched `restore`/`purge` was denied before (deny
- * unless a bit nothing could ever exercise was granted) and stays denied after
- * (the evaluator's `DESTRUCTIVE_OPERATIONS` fail-closed backstop — the
- * pre-mapping rows retired in the same batch, #12497). The keys RETURN with
- * the M2 lifecycle initiative (feature + RBAC in one batch); #1883 stays open.
+ * The `restore` / `purge` ObjectQL operations the bits claimed to gate did
+ * not exist when they were retired: no destructive lifecycle verb was then in
+ * the engine's dispatch vocabulary (#8106). Authoring the bits therefore
+ * granted nothing — an advertised switch with nothing behind it, on the most
+ * destructive operations (undelete, GDPR hard-delete). A pure lossless delete:
+ * a dispatched `restore`/`purge` was denied before (deny unless a bit nothing
+ * could ever exercise was granted) and stayed denied after (the evaluator's
+ * `DESTRUCTIVE_OPERATIONS` fail-closed backstop — the pre-mapping rows retired
+ * in the same batch, #12497). The keys do NOT return: the operations now exist
+ * with the recycle bin (ADR-0148), and their grants are NEW spellings,
+ * `allowRestoreOwnDeleted` and `manageRecycleBin` (ADR-0148 D5), never these
+ * tombstoned ones.
  *
  * `allowTransfer` — the third lifecycle bit — is ENFORCED (#3004) and stays.
  *
@@ -52,10 +53,9 @@ const permissionAllowRestorePurgeRemoved: MetadataConversion = {
   surface: 'permission.objects.<object>.allowRestore / permission.objects.<object>.allowPurge',
   summary:
     "object-permission keys 'allowRestore' and 'allowPurge' removed (ADR-0049 — the "
-    + '`restore`/`purge` operations they claimed to gate have never existed, so granting the '
-    + 'bits delivered nothing; dispatched destructive lifecycle verbs stay denied fail-closed. '
-    + 'The keys return with the M2 lifecycle initiative, which builds undelete and purge together '
-    + 'with the permission bits that gate them)',
+    + '`restore`/`purge` operations they claimed to gate did not exist then, so granting the '
+    + 'bits delivered nothing. The keys do not return: the operations now exist with the recycle '
+    + 'bin (ADR-0148), and their grants are spelled `allowRestoreOwnDeleted` and `manageRecycleBin`)',
   apply(stack, emit) {
     return mapCollection(stack, 'permissions', (ps, path) => {
       const objects = (ps as { objects?: unknown }).objects;
