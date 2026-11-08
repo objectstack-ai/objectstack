@@ -385,7 +385,11 @@ describe('handleInstall() — step 2c′ over an unreadable record asks, never i
         expect(entry?.schemaUpgradeConfirmation).toMatchObject({ findingSet: details.findingSet });
     });
 
-    it('a declared rename over an unreadable record still answers 501, with or without the token, and writes nothing', async () => {
+    it('a declared rename over an unreadable record, on a driver that renames no column, is refused 422 `transport` with or without the token, and writes nothing', async () => {
+        // [#30885] With no readable record, whether the installed version still
+        // holds the old key cannot be told, so the rename is taken as pending:
+        // this engine's driver carries none, and the door refuses it by name
+        // before the unreadable record's 409 — no token answers it.
         writeCorruptEntryFor('app.test.crm');
         const { rawApp, ctx } = await boot();
         const install = rawApp.routes.get('POST /api/v1/marketplace/install-local')!;
@@ -399,23 +403,22 @@ describe('handleInstall() — step 2c′ over an unreadable record asks, never i
 
         const bare = await install(makeInstallC({ manifest: renamed }));
 
-        expect(bare.status).toBe(501);
-        expect(bare.payload.error.code).toBe('NOT_IMPLEMENTED');
-        expect(bare.payload.error.details.declaredRenames).toEqual([{ object: 'crm_x', from: 'name', to: 'name2', toType: 'text' }]);
-        expect(bare.payload.error.details.findings).toEqual([expect.objectContaining({
-            kind: 'installed_record_unreadable', file: 'app.test.crm.json',
+        expect(bare.status).toBe(422);
+        expect(bare.payload.error.code).toBe('VALIDATION_ERROR');
+        expect(bare.payload.error.details.refusals).toEqual([expect.objectContaining({
+            object: 'crm_x', field: 'name2', from: ['name'], reason: 'transport',
         })]);
 
-        // The token the unreadable record's 409 would print — the same finding
-        // set the plain upgrade above is asked to confirm — admits no rename.
+        // The token the unreadable record's 409 would print admits no rename.
         const plain = await install(makeInstallC({ manifest: { ...GOOD_MANIFEST, version: '1.0.1' } }));
         expect(plain.status).toBe(409);
         const token = plain.payload.error.details.findingSet;
         const withToken = await install(makeInstallC({ manifest: renamed, confirmSchemaUpgrade: token }));
 
-        expect(withToken.status).toBe(501);
-        expect(withToken.payload.error.details.declaredRenames).toEqual([{ object: 'crm_x', from: 'name', to: 'name2', toType: 'text' }]);
+        expect(withToken.status).toBe(422);
+        expect(withToken.payload.error.details.refusals[0].reason).toBe('transport');
         expect(register).not.toHaveBeenCalled();
         expect(new LocalManifestSource(dir).read('app.test.crm').failure).toBeDefined();
     });
+});
 });

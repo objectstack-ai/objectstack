@@ -72,6 +72,17 @@ const TYPE_DRIFT_OPS: ReadonlySet<DriftOp['type']> = new Set([
 /** The object shape these bodies read: its fields, and its declared indexes for keyedness. */
 type DeclaringObject = { fields?: Record<string, any>; indexes?: any[] };
 
+/**
+ * A carry is reported on `info`, and on `warn` where the injected sink has no
+ * `info` (the driver's default sink has none): a renamed column is never a
+ * silent change. The receiver-safe spelling `reconcileAndWarnDrift` uses — a
+ * class-based logger's methods reach for `this`.
+ */
+function logInfoOrWarn(logger: DeclaredRenameHost['logger'], msg: string, meta?: unknown): void {
+  if (logger.info) logger.info(msg, meta);
+  else logger.warn(msg, meta);
+}
+
 /** The bodies of the "Declared renames" section of `SqlDriver`: a stateless facet, called by the class's stubs. */
 export class DeclaredRenameFacet {
   /** The body of `SqlDriver#declaredRenameLimit`; the method's docblock there is its contract. */
@@ -193,7 +204,8 @@ export class DeclaredRenameFacet {
     // `planDeclaredRenames` answers a `transport` refusal for any other dialect.
     await executeDeclaredRenames(this.knex, this.dialectName as 'sqlite' | 'postgres' | 'mysql', tableName, plan.carries);
     for (const c of plan.carries) {
-      this.logger.info?.(
+      logInfoOrWarn(
+        this.logger,
         `[sql-driver] carried the declared rename ${tableName}.${c.from} → ${tableName}.${c.to} (renamedFrom): `
         + `the column and every value in it now serve '${c.to}'`,
         { table: tableName, from: c.from, to: c.to },
@@ -217,7 +229,8 @@ export class DeclaredRenameFacet {
     }
     for (const [table, list] of byTable) {
       await executeDeclaredRenames(this.knex, this.dialectName as 'sqlite' | 'postgres' | 'mysql', table, list);
-      this.logger.info?.(
+      logInfoOrWarn(
+        this.logger,
         `[sql-driver] reversed ${list.length} declared rename(s) on ${table}: ${list.map((c) => `${c.from} → ${c.to}`).join(', ')}`,
         { table },
       );
@@ -255,7 +268,8 @@ export class DeclaredRenameFacet {
           if (name === e.name || expectedNames.has(name) || !physical.has(name) || retired.includes(name)) continue;
           await this.dropIndexIfExists(tableName, name);
           retired.push(name);
-          this.logger.info?.(
+          logInfoOrWarn(
+            this.logger,
             `[sql-driver] dropped the index '${name}' on ${tableName}: it was named for the old key '${old}', and the `
             + `rename carried it to '${column}', where '${e.name}' now holds the same key`,
             { table: tableName, index: name, replacedBy: e.name },

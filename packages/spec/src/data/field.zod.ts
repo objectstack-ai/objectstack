@@ -2604,8 +2604,8 @@ export const FieldSchema = lazySchema(() => {
    * depends on the installed version, so the upgrade plan judges it.
    *
    * Read only at package upgrade (the upgrade plan and the rename execution);
-   * no record read, write or query reads it. Declared ahead of those readers
-   * — `planned` in `liveness/field.json`.
+   * no record read, write or query reads it. `live` in `liveness/field.json`
+   * since #30885: the schema sync carries the column, or refuses by name.
    */
   renamedFrom: z.array(
     z.string().regex(/^[a-z_][a-z0-9_]*$/, {
@@ -2616,7 +2616,8 @@ export const FieldSchema = lazySchema(() => {
     + 'On a package upgrade from a version that has one of these keys and not this one, the platform carries that column\'s data to this field instead of adding an empty column. '
     + 'A field renamed twice lists both earlier keys. Each entry once; never this field\'s own key; never a key another field of the same object still declares (that name is still in use); never an old key another field of the same object also claims. '
     + 'Read only at package upgrade: no record read, write or query reads it, and the type of the old column is judged by the upgrade plan, not here. '
-    + 'Declared ahead of the upgrade step that carries the data: until that step ships, no upgrade carries a column on this declaration.',
+    + 'A declaration the carry cannot honour (both columns present, two old columns, a platform column, a destructive type change) is refused by name before any change. '
+    + 'Keep an entry while any installed version may still carry the old key: an upgrade from such a version carries the column only while the entry is declared.',
   ),
 
   // ADR-0010 — runtime protection envelope (internal — set by the loader).

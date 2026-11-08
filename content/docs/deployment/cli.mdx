@@ -3560,9 +3560,9 @@ old column), or a type change that keeps or drops a stored column
 its record of the installed version, since nothing could be compared. Nothing is
 installed. The command prints each finding and the exact retry, carrying the
 finding set's token. If a field was renamed, declare its old key in the new
-field's `renamedFrom` and rebuild instead; a declared rename is refused with
-`501 NOT_IMPLEMENTED` until the runtime can carry the column's values to the new
-key. As with `--confirm-access-upgrade`, the token stops matching once the
+field's `renamedFrom` and rebuild instead: the upgrade then carries the old
+column's values to the new key, and the answer lists each carried rename; a
+rename the runtime cannot carry is refused by name before anything changes. As with `--confirm-access-upgrade`, the token stops matching once the
 findings change, and the confirmation is recorded in the install's ledger entry.
 A type change on a field that had no stored column, a removed field and a seed
 data change are never refused; `--dry-run` lists them. `os deploy` passes

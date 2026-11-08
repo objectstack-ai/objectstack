@@ -241,10 +241,11 @@ schema, and the **database column wins at write time**:
 
 | Change | Existing DB on restart |
 |--------|------------------------|
-| add object / field / index | ✅ applied automatically (additive) |
-| `storage: { notNull: true }` removed (relax `NOT NULL`) | ⚠️ **never auto-applied** — the drift is `category: 'needs_confirm'` (`relax_not_null`), so `os migrate apply` confirms it. Relaxing `required` alone changes no column |
+| add object / field / index | ✅ applied automatically |
+| `storage: { notNull: true }` removed (relax `NOT NULL`) | ⚠️ **never auto-applied** — the drift is `category: 'needs_confirm'` (`relax_not_null`), so `os migrate apply` confirms it |
 | `unique` re-scoped global → per-tenant | dev auto-heals; otherwise `os migrate apply` (`replace_unique_index`) |
-| type / length change, drop field, rename | `os migrate apply` (`--allow-destructive` for drops / tightenings) |
+| type / length change, drop field | `os migrate apply` (`--allow-destructive` for drops / tightenings) |
+| rename a field | `renamedFrom: ['old_key']` on the new key: the sync carries the column's values |
 | declared index removed, or its columns changed | `os migrate apply` (`--allow-destructive` when it drops, or rebuilds as `UNIQUE`) |
 
 **`required` is not the `NOT NULL` dial (ADR-0113).** `required` is the
@@ -253,8 +254,7 @@ implies nothing about the column. The physical constraint is a separate explicit
 opt-in, `storage: { notNull: true }`, and it is what drift detection compares
 against. So tightening `required` on a deployed object is safe (existing null
 rows stay readable), while declaring `storage.notNull` over null rows is a
-destructive migration. The two cannot be combined with `requiredWhen` — a
-conditional contract cannot be an unconditional column constraint.
+destructive migration. The two cannot be combined with `requiredWhen`.
 
 Tell-tale: `/meta` reports a field optional (no `required`, no `storage.notNull`)
 but writes that omit it fail with a **raw driver error** rather than a clean
