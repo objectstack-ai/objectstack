@@ -221,6 +221,11 @@ interface EnvironmentKernel {
     getService?<T = unknown>(name: string): T;
 }
 
+/** [#30964] The slice of the `kernel-manager` service the unmanaged-grant copy reads: the environment's own kernel. */
+interface EnvironmentKernelManager {
+    getOrCreate?(environmentId: string): Promise<EnvironmentKernel | undefined>;
+}
+
 /** What the auth service's in-process session read answers, as `AuthSessionApi` declares it. */
 type SessionRead = Awaited<ReturnType<NonNullable<AuthSessionApi['getSession']>>>;
 
@@ -1092,7 +1097,8 @@ export class CloudConnectionPlugin implements Plugin {
                     if (this.cfg.singleEnvironment) {
                         door = ctx.getService<InstallLocalDoor>(INSTALL_LOCAL_DOOR_SERVICE);
                     } else {
-                        const kernel: EnvironmentKernel | undefined = await ctx.getService<any>('kernel-manager')?.getOrCreate?.(environmentId);
+                        const kernels = ctx.getService<EnvironmentKernelManager>('kernel-manager');
+                        const kernel = await kernels?.getOrCreate?.(environmentId);
                         try { door = await kernel?.getServiceAsync?.<InstallLocalDoor>(INSTALL_LOCAL_DOOR_SERVICE); } catch { /* not registered */ }
                         if (!door) { try { door = kernel?.getService?.<InstallLocalDoor>(INSTALL_LOCAL_DOOR_SERVICE); } catch { /* not registered */ } }
                     }
