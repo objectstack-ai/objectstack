@@ -1,6 +1,6 @@
 ---
 '@objectstack/plugin-auth': patch
-'@objectstack/spec': patch
+'@objectstack/spec': minor
 '@objectstack/client': patch
 '@objectstack/cli': patch
 '@objectstack/verify': patch
@@ -11,9 +11,9 @@
 fix(plugin-auth)!: under invite_only, a self-serve sign-up is admitted only by the invitation it presents
 
 Clause-②: yes (narrowing) — under the `invite_only` audience posture an email-and-password sign-up for an invited address is admitted only when it presents that invitation's id as `invitationId`, and the address alone is refused `SELF_REGISTRATION_CLOSED`; a social OAuth creation is admitted by an invitation only when its identity provider verified the address. The sign-up request widens: `RegisterRequestSchema` and `RegisterRequest` gain `invitationId`, `SignUpData`, `RegisterForm` and the auth context's `signUp` gain it, and `os register` gains `--invitation`.
-Metadata-protocol: none
+Metadata-protocol: added — RegisterRequest gains the optional invitationId key (packages/spec/authorable-surface/api.json)
 
-<!-- adr-0087: not-required (no-migration-prescription) No metadata an author writes changes and no stored row is rewritten: the sign-up request gains an optional body field, and a sign-up under invite_only that does not present its invitation is refused with the posture's existing code and message. -->
+<!-- adr-0087: not-required (no-migration-prescription) No key is removed, renamed or re-shaped and no stored row is rewritten: RegisterRequest gains an optional key, and a sign-up under invite_only that does not present its invitation is refused with the posture's existing code and message. -->
 
 **BREAKING** accept-set narrowing at the email-and-password sign-up door (`@objectstack/plugin-auth`), under the `invite_only` audience posture, the default.
 
