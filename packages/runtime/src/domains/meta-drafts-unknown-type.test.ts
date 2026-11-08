@@ -60,3 +60,47 @@ describe('[#29180] dispatcher GET /meta/_drafts — a type filter that names no 
         },
     );
 });
+
+/**
+ * [#31490] The dispatcher twin reads its package through `metaItemPackageBinding`
+ * (`?package=`, the spelling its `/meta/:type` list branch reads) and refuses
+ * a name outside its closed query set, as `RestServer`'s route does
+ * (`packages/rest/src/meta-drafts-unknown-filter.test.ts`).
+ */
+describe('[#31490] dispatcher GET /meta/_drafts — `?package=` scopes the list, and an unknown name is refused', () => {
+    it('`?package=ID` reaches listDrafts as the package', async () => {
+        const { dispatcher, protocol } = boot();
+        const answer = await get(dispatcher, '/meta/_drafts', { package: 'com.acme', type: 'view' });
+        expect(answer.status).toBe(200);
+        expect(protocol.listDrafts).toHaveBeenCalledWith({ packageId: 'com.acme', type: 'view' });
+    });
+
+    it('`?package=all` and no query each list every package', async () => {
+        for (const query of [{ package: 'all' }, {}]) {
+            const { dispatcher, protocol } = boot();
+            expect((await get(dispatcher, '/meta/_drafts', query)).status).toBe(200);
+            expect(protocol.listDrafts).toHaveBeenCalledWith({ packageId: undefined, type: undefined });
+        }
+    });
+
+    it.each([
+        ['the retired spelling `packageId`', { packageId: 'com.acme' }, 'packageId'],
+        ['a misspelt filter `typ`', { typ: 'view' }, 'typ'],
+        ['an unknown name beside a known one', { package: 'com.acme', nosuch: '1' }, 'nosuch'],
+    ])('%s is refused 400 VALIDATION_ERROR naming it, and listDrafts is never called', async (_label, query, named) => {
+        const { dispatcher, protocol } = boot();
+        const answer = await get(dispatcher, '/meta/_drafts', query);
+        expect(answer.status).toBe(400);
+        expect(answer.body?.error?.code).toBe('VALIDATION_ERROR');
+        expect(answer.body?.error?.message).toContain(named);
+        expect(protocol.listDrafts).not.toHaveBeenCalled();
+    });
+
+    it('an unknown name answers the status and code the list branch answers for it', async () => {
+        const { dispatcher } = boot();
+        const drafts = await get(dispatcher, '/meta/_drafts', { nosuch: '1' });
+        const list = await get(dispatcher, '/meta/view', { nosuch: '1' });
+        expect(drafts.status).toBe(list.status);
+        expect(drafts.body?.error?.code).toBe(list.body?.error?.code);
+    });
+});
