@@ -251,6 +251,14 @@ interface DriverEntry {
   label: string;
   description?: string;
   configSchema?: { properties?: Record<string, JsonProp>; required?: string[] };
+  /**
+   * The catalog marks a driver that serves federation only (ADR-0015 §4.6,
+   * `GET /datasources/drivers`, absent on every other entry): the spec refuses
+   * a `managed` datasource naming it, so the Schema mode select offers it only
+   * the federation modes ({@link schemaModesFor}). Read from the catalog, never
+   * from a driver list kept here.
+   */
+  federationOnly?: boolean;
 }
 
 interface EditorForm {
@@ -301,6 +309,17 @@ const PRIMARY_DATASOURCE = 'default';
 
 /** The `schemaMode` values that make a datasource a federation source. */
 const FEDERATION_SCHEMA_MODES: ReadonlySet<SchemaMode> = new Set<SchemaMode>(['external', 'validate-only']);
+
+/**
+ * The Schema mode options the select offers for `driver` (objectstack#31389).
+ * A driver the catalog marks `federationOnly` is offered the federation modes
+ * alone, since the spec refuses a managed datasource naming it; every other
+ * driver, and a driver the catalog does not list, is offered all three.
+ */
+function schemaModesFor(driver: DriverEntry | undefined): ReadonlyArray<(typeof SCHEMA_MODES)[number]> {
+  if (driver?.federationOnly !== true) return SCHEMA_MODES;
+  return SCHEMA_MODES.filter((m) => FEDERATION_SCHEMA_MODES.has(m.value));
+}
 
 /**
  * Does this row offer "Sync objects"? (objectui#13318)
@@ -588,7 +607,15 @@ export function DatasourceResourcePage(_props: { type?: string }): React.ReactEl
   };
 
   const onDriverChange = (id: string) => {
-    setForm((f) => (f ? { ...f, driver: id, config: defaultConfig(drivers.find((d) => d.id === id)), secret: '' } : f));
+    const next = drivers.find((d) => d.id === id);
+    setForm((f) => {
+      if (!f) return f;
+      // A mode the new driver is not offered (managed, on a federation-only
+      // driver) moves to the mode a new datasource starts on.
+      const offered = schemaModesFor(next).some((m) => m.value === f.schemaMode);
+      const schemaMode = offered ? f.schemaMode : NEW_DATASOURCE_SCHEMA_MODE;
+      return { ...f, driver: id, schemaMode, config: defaultConfig(next), secret: '' };
+    });
     setTestMsg(null);
   };
 
@@ -950,9 +977,12 @@ export function DatasourceResourcePage(_props: { type?: string }): React.ReactEl
                 <Select value={form.schemaMode} onValueChange={(v) => setForm((f) => (f ? { ...f, schemaMode: v } : f))}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    {SCHEMA_MODES.map((m) => <SelectItem key={m.value} value={m.value}>{t(m.labelKey, locale)}</SelectItem>)}
+                    {schemaModesFor(selectedDriver).map((m) => <SelectItem key={m.value} value={m.value}>{t(m.labelKey, locale)}</SelectItem>)}
                   </SelectContent>
                 </Select>
+                {selectedDriver?.federationOnly === true && (
+                  <p className="text-[11px] text-muted-foreground" data-testid="datasource-schema-mode-federation-only">{t('engine.datasource.schemaModeFederationOnly', locale)}</p>
+                )}
                 {selectedModeHint && (
                   <p className="text-[11px] text-muted-foreground" data-testid="datasource-schema-mode-hint">{t(selectedModeHint, locale)}</p>
                 )}

@@ -2031,6 +2031,7 @@ const STUDIO_EN: Record<string, string> = {
   'engine.datasource.schemaModeExternalHint': 'Choose this to read a database that already holds your data. ObjectStack reads its tables as they are and never creates or changes them. After saving, Sync objects brings its tables in as objects, whose records are read-only.',
   'engine.datasource.schemaModeManagedHint': 'ObjectStack creates and changes this database’s tables to fit the objects stored in it. Use it only for an empty database set aside for ObjectStack: in an existing database, storing an object adds columns to the table of the same name. A managed datasource has no Sync objects.',
   'engine.datasource.schemaModeValidateOnlyHint': 'Reads an existing database the way External does, and never changes its tables. If you are unsure, choose External.',
+  'engine.datasource.schemaModeFederationOnly': 'Managed is not offered: this driver only connects to a database another system owns, and ObjectStack never creates or changes its tables.',
   'engine.datasource.noSyncManaged': 'No Sync objects: this datasource is managed, so ObjectStack creates its tables and there are none to bring in. To read an existing database’s tables, create a datasource for it with the schema mode External.',
   'engine.datasource.testConnection': 'Test connection',
   'engine.datasource.connectionFailed': 'Connection failed',
