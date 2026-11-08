@@ -351,4 +351,21 @@ describe('[#23944] the revoked refusal agrees with the declared restore action',
     expect(resetMessage).toContain('POST /api/v1/keys');
     expect(plainMessage).toMatch(/Its owner or a platform administrator can restore it/);
   });
+
+  it('a key revoked because its owner\'s membership ended names no restorer, only the new-key road', async () => {
+    // `revoked_reason: organization_membership_ended` is written by the host
+    // that removed the owner, and plugin-auth's restore door refuses every
+    // user-context restore on that reason, a platform administrator's
+    // included. The text follows the door: it offers no restore anyone could
+    // make. Code, status and every carried field stay those of any revoked key.
+    const ended = await resolveApiKeyAdmission(
+      makeQl({ revoked: true, revoked_reason: 'organization_membership_ended' }), headers(), NOW, undefined, undefined, policy(),
+    );
+
+    expect(ended.outcome === 'lifecycle' && ended.refusal).toMatchObject({ code: 'API_KEY_REVOKED', keyId: KEY_ID, userId: OWNER });
+    const endedMessage = ended.outcome === 'lifecycle' ? ended.refusal.message : '';
+    expect(endedMessage).toMatch(/membership in the organization ended, and it cannot be restored/);
+    expect(endedMessage).not.toMatch(/can restore it/);
+    expect(endedMessage).toContain('POST /api/v1/keys');
+  });
 });

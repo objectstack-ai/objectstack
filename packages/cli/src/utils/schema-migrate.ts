@@ -1392,6 +1392,10 @@ export async function bootSchemaStack(
   // Registered here, after the data stack, for the same reason `extraPlugins`
   // is: the presence tests it performs read what `createStandaloneStack`
   // produced, and the DDL deferral above must already be armed.
+  // [#31411] A composition that refuses (`composeServedPlatform`'s AI
+  // auto-inject refusal, a provider that does not export its plugin) throws
+  // before the stack starts: give stdout back first, or the reservation above
+  // outlives the command and swallows the next writer's document.
   const composition = opts.composeHostStack === true
     ? await buildSchemaMigrationPlugins({
         basePlugins: stack.plugins,
@@ -1409,6 +1413,9 @@ export async function bootSchemaStack(
         ...(opts.composeServedPlatform === true
           ? { servedPlatform: { artifactRequires: stack.requires } }
           : {}),
+      }).catch((error: unknown) => {
+        releaseStdout();
+        throw error;
       })
     : {
         plugins: [], hostConfigPath: null, hostConfigLoaded: false, hostConfigError: null,
