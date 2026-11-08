@@ -13,6 +13,10 @@
  * The epic's red lines are the `red line` cases. Each refusal pin was ablated
  * once (the engine's gate put back to "no refusal", the pin read red,
  * restored); the readings are in the PR body, not kept as test files.
+ *
+ * Red line 2's refusal of a name two packages hold is held back for the
+ * maintainer's ruling on a deployment sealed with such a clash (#31677; see
+ * `FLOW_NAME_REFUSALS_ACTED_ON` in the engine), so its pins land with it.
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
@@ -195,25 +199,6 @@ describe('red line 1 — resolution never loosens: a package caller is never ser
         const result = await engine.execute('welcome');
         expect(result.success).toBe(true);
         expect(ran).toEqual(['welcome']);
-    });
-});
-
-describe('red line 2 — ambiguity is reported, never guessed', () => {
-    it('a name two packages hold is refused at registration, naming both, and nothing is armed', async () => {
-        install(A);
-        install(Q);
-        registry.registerItem('flow', { ...leaf('notify'), _packageId: A }, 'name' as never, A);
-        registry.registerItem('flow', { ...leaf('notify'), _packageId: Q }, 'name' as never, Q);
-        expect(() => engine.registerFlow('notify', leaf('notify'))).toThrow(
-            /held by 2 packages in this environment[\s\S]*com\.acme\.alpha[\s\S]*com\.acme\.stranger/,
-        );
-        expect(await engine.getFlow('notify')).toBeNull();
-    });
-
-    it('control: a name one package holds arms as before', async () => {
-        install(A);
-        ship(A, leaf('notify'));
-        expect(await engine.getFlow('notify')).not.toBeNull();
     });
 });
 

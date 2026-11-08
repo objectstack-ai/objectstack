@@ -57,7 +57,7 @@ export class FlowActivationProjection {
 
     /** Record that `(packageId, name)` is switched on (its row is active, or gone). */
     delete(name: string, packageId?: string): void {
-        const packages = this.rows.get(name);
+        const packages: Set<string> | undefined = this.rows.get(name);
         if (!packages) return;
         packages.delete(packageId ?? '');
         if (packages.size === 0) this.rows.delete(name);
