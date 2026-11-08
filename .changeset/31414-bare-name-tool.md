@@ -1,0 +1,22 @@
+---
+'@objectstack/objectql': minor
+---
+
+feat(objectql)!: a tool holds one name per package — once the cold boot has sealed the registry, a package declaring a tool under a name another installed package holds is refused at install and registration, naming both holders and the rename; a boot that already holds such a clash warns.
+
+Clause-②: yes (narrowing) — the engine's package door (`SchemaRegistry.installPackage`) and item seam (`SchemaRegistry.registerItem`) refuse, after the cold boot, a package registration they accepted before: one whose tool bears a name another installed package holds. Nothing is widened.
+Metadata-protocol: narrowed
+Skills-docs: none — `skills/**` does not teach that two packages may share a tool name, and the naming rule itself is phase 2's (#30805); the prescription ships in the refusal and warning text and in ADR-0048's 2026-11-06 addendum (P1.10).
+
+<!-- adr-0087: not-required (no-migration-prescription) the refusal removes no key, export or field and changes the shape of no stored body; what an author does about a refused name is pick a different one, which no conversion can choose for them -->
+
+**BREAKING** accept-set narrowing at the package registration door, for tools: managed install (`install-local`, a post-start `manifest.register`, a hot reload) and package registration (`ObjectQL.registerApp` and every package-bound `registerItem`). `tool` joins the bare-name one-holder list after the AI family of maintainer ruling C on #30798, phase 1 (#30803), by the maintainer's acceptance of a separate card for it. ADR-0048 §3.4 narrowed (addendum 2026-11-06, P1.10).
+
+- **Why.** Every reader of a tool names it with no package. Measured on a booted showcase with two packages sharing one tool name, in both registration orders: `/meta/tool/NAME` served the first-registered package's tool, silently, and a third package installed after the boot under that name installed (`200`) and was shadowed. The protocol a tool is called through carries a bare name and nothing else: a skill's `tools` list admits only a bare snake_case name, an AI tool definition and a tool call carry a name and no package, and an MCP server registers one tool per name (a second registration of a name throws).
+- **Before.** Two installed packages could each ship a tool under one name, at boot or by a later install; every caller was served one of them, chosen by registration order.
+- **Now.** After the cold boot (the engine plugin seals the registry at `kernel:bootstrapped`), a package registration declaring a tool under a name another installed package holds is refused ahead of every mutation, so it leaves no record behind. The envelope is the first family's: `code: 'NAMESPACE_CONFLICT'`, `status: 422`, `install-local` answering `422 PLUGIN_REGISTER_FAILED`, every conflicting name in one refusal, both holders named, the rename (the incoming package's namespace prefixed) carried, `conflicts[]` structured.
+- **The cold boot.** A deployment whose installed packages already share a tool name still boots: the one warning line names every such name, both holders and the rename, and changes nothing about which holder each caller is served (`BARE_NAME_COLD_BOOT_MODE` stays `'warn'`).
+- **Who moves.** An author whose package declares a tool under a name another package installed beside it already ships, at the next install or upgrade into a running deployment. **The one-line fix: rename the tool in one of the two packages — the refusal names the namespace-prefixed name — or uninstall one of them.** A skill, an agent's guardrail or an MCP client that named the old name must name the new one; nothing rewrites stored references.
+- **Unchanged.** The same package registering its own tool name again. An environment tool under a package's name (never judged, never a holder: the ADR-0005 overlay). One package's tool and another package's skill or agent under one name (different types). A `rag_pipeline`, and every other type the rule does not list (ADR-0048 §3.4 as written). `OS_METADATA_COLLISION=warn` does not downgrade the refusal.
+
+**Measured producers.** On objectstack `69244406`, no example app and no platform package declares a tool (`app-showcase`'s coverage file defers tools, ADR-0063), so no shipped name has two holders. HotCRM is not checked out in this container and is NOT MEASURED here. Deployed and marketplace packages NOT MEASURED.

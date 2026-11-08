@@ -1213,3 +1213,37 @@ as §3.4 has them.
 **The cold boot** reads the two with the registry's other holders, under P1.3's
 switch (`'warn'`). This is the series' closing change: phase 1's list is
 complete, and phase 2 (#30804, #30805) and phase 3 (#30806) follow.
+
+### P1.10 (2026-11-08) `tool` joins the list, after the AI family
+
+A dated note under this addendum; it narrows §3.4 for one more type and amends
+no earlier text, so read P1.2's list, P1.5's series and P1.9's "Not in the list"
+with it. The maintainer accepted a separate card for `tool` out of P1.9's
+measurement (「以上都同意」, 2026-11-08, #31414): measure the readers that resolve a
+tool by name, and if any carries no package, `tool` joins P1.2's list the way
+the AI family did.
+
+**Measured** on objectstack `69244406`, beside P1.9's booted measurement:
+
+- `/meta/tool/NAME` serves the FIRST-registered package's tool, silently, in
+  either registration order (P1.9), and a third package installed after the boot
+  under that name installs (`200`) and is shadowed.
+- Every reference to a tool carries its bare name and nothing else. A skill's
+  `tools` list admits only a snake_case name (the spec's `SkillSchema`, bound by
+  the cloud agent runtime); an AI tool definition and a tool call carry a name
+  and no package (`AIToolDefinition`, `ToolCallPart` in the AI service
+  contract); the MCP bridge registers each tool under its name and calls it by
+  that name, and an MCP server holds one tool per name (a second registration of
+  a name throws). An agent's guardrail matches a tool by its name.
+- The cloud agent runtime's own by-name read was put to the cloud seat as a read
+  request; this repository's readers already settle the question, since one
+  reader without package context is enough.
+
+**What is refused.** `tool` joins P1.2's list, last: the same two doors, the
+same holders, the same envelope and rename. It is not bundled, and it has no
+overridable baseline and no built-in name. An agent, a skill and a tool are
+three types: one package's item of one and another package's item of another
+under one name never meet.
+
+**The cold boot** reads it with the registry's other holders, under P1.3's
+switch (`'warn'`). `rag_pipeline` stays as P1.9 left it.
