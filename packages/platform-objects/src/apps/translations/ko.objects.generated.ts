@@ -2660,14 +2660,15 @@ export const koObjects: NonNullable<TranslationData['objects']> = {
       },
       source_kind: {
         label: "출처 유형",
-        help: "그룹을 푸시하는 주체: SCIM 연결.",
+        help: "그룹을 보내는 주체: SCIM 연결, 또는 로그인 시의 SSO 공급자.",
         options: {
-          scim: "SCIM 연결"
+          scim: "SCIM 연결",
+          sso: "SSO 공급자"
         }
       },
       source_id: {
         label: "출처 ID",
-        help: "그룹이 들어오는 SCIM 연결 ID(예: \"okta-prod\")."
+        help: "그룹이 들어오는 SCIM 연결 ID 또는 SSO 공급자 ID(예: \"okta-prod\")."
       },
       group_external_id: {
         label: "그룹 외부 ID",
@@ -2683,7 +2684,7 @@ export const koObjects: NonNullable<TranslationData['objects']> = {
       },
       organization_id: {
         label: "조직",
-        help: "권한이 부여되는 조직, 즉 SCIM 연결을 소유한 조직입니다."
+        help: "권한이 부여되는 조직, 즉 SCIM 연결 또는 SSO 공급자를 소유한 조직입니다."
       },
       created_at: {
         label: "생성 시각"
