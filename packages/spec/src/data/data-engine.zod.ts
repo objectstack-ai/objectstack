@@ -1410,7 +1410,21 @@ export type EngineQueryOptionsParsed = z.infer<typeof EngineQueryOptionsSchema>;
 export type EngineUpdateOptions = z.input<typeof EngineUpdateOptionsSchema>;
 export type DroppedFieldsEvent = z.input<typeof DroppedFieldsEventSchema>;
 export type ValidationAdvisoryEvent = z.input<typeof ValidationAdvisoryEventSchema>;
-export type EngineDeleteOptions = z.input<typeof EngineDeleteOptionsSchema>;
+export type EngineDeleteOptions = z.input<typeof EngineDeleteOptionsSchema> & {
+  /**
+   * [ADR-0148 D1, #30237] Told the id of the recycle-bin entry this delete
+   * wrote, once the delete has removed the row: the entry a caller offers to
+   * undo (the data door answers it as `DeleteDataResponse.recycleBinEntryId`).
+   * Not called when the delete wrote no entry: a platform object, a delete by
+   * predicate or with `multi: true`, `permanent: true`, a composition with no
+   * bin, or a store that answered no entry id.
+   *
+   * A function, so it is declared on the type only and never on
+   * {@link EngineDeleteOptionsSchema}: a callback has no JSON Schema, and the
+   * schema stays the published, serialisable half of the options.
+   */
+  onRecycleBinEntry?: (entryId: string) => void;
+};
 export type EngineAggregateOptions = z.input<typeof EngineAggregateOptionsSchema>;
 /**
  * Post-parse shape of {@link EngineAggregateOptions} — defaults applied (ADR-0122).

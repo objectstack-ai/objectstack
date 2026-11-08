@@ -244,6 +244,9 @@ const CASES: Array<{ path: string; removes: string[] }> = [
         removes: [
             `DELETE ${DATA}/:id`, `GET ${DATA}`, `GET ${DATA}/:id`,
             `PATCH ${DATA}/:id`, `POST ${DATA}`, `POST ${DATA}/query`,
+            // [#30237] The recycle-bin doors register inside the same switch.
+            `DELETE ${DATA}/recycle-bin`, `DELETE ${DATA}/recycle-bin/:entryId`,
+            `GET ${DATA}/recycle-bin`, `POST ${DATA}/recycle-bin/:entryId/restore`,
         ],
     },
     {

@@ -46,6 +46,8 @@ const EMITTERS: readonly Emitter[] = [
   { label: 'ai.pendingActions.list', call: (c, limit) => c.ai.pendingActions.list({ limit }) },
   { label: 'data.listImportJobs', call: (c, limit) => c.data.listImportJobs({ limit }) },
   { label: 'data.export', call: (c, limit) => c.data.export('task', { limit }) },
+  // [#30237] The recycle-bin listing: sent as written, for the door to refuse.
+  { label: 'recycleBin.list', call: (c, limit) => c.recycleBin.list('task', { limit }) },
   { label: 'environment().meta.getHistory', call: (c, limit) => c.environment(ENV).meta.getHistory('object', 'task', { limit }) },
   { label: 'environment().data.listImportJobs', call: (c, limit) => c.environment(ENV).data.listImportJobs({ limit }) },
   { label: 'environment().automation.listRuns', call: (c, limit) => c.environment(ENV).automation.listRuns('my_flow', { limit }) },

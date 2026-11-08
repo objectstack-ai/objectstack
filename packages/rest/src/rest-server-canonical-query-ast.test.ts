@@ -241,6 +241,9 @@ const REGISTRAR_QUERY_SLOT_FLOORS: Readonly<Record<RestServerRegistrarFile, numb
     // [#30675] The record-currency code backfill door: no slot (the walk's
     // queries are `@objectstack/objectql`'s, built inside the function it calls).
     'meta-record-currency-backfill-route.ts': 0,
+    // [#30237] The recycle-bin doors: no slot (the listing's read is built
+    // inside `@objectstack/objectql`'s `listRecycleBin`).
+    'recycle-bin-routes.ts': 0,
 };
 
 const CENSUS: CensusEntry[] = [
@@ -453,6 +456,7 @@ describe('[#16638] §1 CONTROLS on the census instrument itself', () => {
         // [#27627] The sum unchanged by the app metadata bundle (no slot).
         // [#28470] The sum 5 → 6: the record page's stream reads (`readStream`).
         // [#30675] The sum unchanged by the record-currency code backfill (no slot).
+        // [#30237] The sum unchanged by the recycle-bin doors (no slot).
         expect(Object.keys(REGISTRAR_QUERY_SLOT_FLOORS).sort()).toEqual([...REST_SERVER_REGISTRAR_FILES].sort());
         expect(CENSUS.filter(({ file }) => REGISTRAR_SOURCES.has(file)).map(({ file }) => file))
             .toEqual([...REST_SERVER_REGISTRAR_FILES]);

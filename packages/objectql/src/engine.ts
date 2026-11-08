@@ -87,6 +87,7 @@ import { openRecycleBinCapture, type RecycleBinCapture } from './recycle-bin/cap
 import { emptyRecycleBin, purgeRecycleBinEntry, readPermanentDelete, type RecycleBinRemovalOptions } from './recycle-bin/purge.js';
 import type { RecycleBinRetentionSettings } from './recycle-bin/retention.js';
 import { restoreRecycleBinEntry, type RecycleBinRestoreOptions, type RecycleBinRestoreResult } from './recycle-bin/restore.js';
+import { listRecycleBin, type RecycleBinListOptions, type RecycleBinListResult } from './recycle-bin/list.js';
 // [#25522 cut 6] The predicate-write hook dispatch bodies; the methods of the
 // same names below hand each body the members it reads (`HookDispatchHost`).
 import {
@@ -8350,6 +8351,34 @@ export class ObjectQL implements IObjectQLEngine {
   }
 
   /**
+   * [#30237, ADR-0148 D5] One page of the recycle-bin entries of `object` that
+   * the caller's organization holds, newest first, each with its snapshot.
+   * An empty page when the composition registers no bin or the tenant wall
+   * denies the caller; a platform object is refused `400`.
+   *
+   * Listing is the recycle-bin manager's: a caller whose effective permissions
+   * do not grant `manageRecycleBin` on `object` is refused `403
+   * PERMISSION_DENIED`, and so is every caller when no effective-permission
+   * resolver answers. The snapshot is served unmasked; field-level security is
+   * the caller's to apply. The body lives in `recycle-bin/list.ts`, its
+   * docblock with it.
+   */
+  listRecycleBin(object: string, options?: RecycleBinListOptions): Promise<RecycleBinListResult> {
+    const readRegistry = () => this._registry;
+    const readLogger = () => this.logger;
+    const readResolver = () => this._effectiveObjectPermissionsResolver;
+    const host: ThisParameterType<typeof listRecycleBin> = {
+      get _registry() { return readRegistry(); },
+      get logger() { return readLogger(); },
+      get effectiveObjectPermissionsResolver() { return readResolver(); },
+      getDriver: (...a) => this.getDriver(...a),
+      buildDriverOptions: (...a) => this.buildDriverOptions(...a),
+      engineLayer0Verdict: (...a) => this.engineLayer0Verdict(...a),
+    };
+    return listRecycleBin.call(host, object, options);
+  }
+
+  /**
    * [#27004] How many records of one object a single dependents probe asks
    * about: the predicate arm's `$in` delete batch, so neither statement
    * outgrows a driver's bind-parameter limit.
@@ -9029,17 +9058,27 @@ export class ObjectQL implements IObjectQLEngine {
               // the capture's compensation otherwise. A caller's `multi: true`
               // opens none, even here: the lifecycle sweep reaps by id with it.
               // Nor does a permanent delete, which is the point of it.
+              //
+              // [#30237] The entry's id is told to the caller
+              // (`options.onRecycleBinEntry`) only once the unit has landed:
+              // after the transaction commits, never from inside it.
+              let binEntryId: string | undefined;
               const runByIdDelete = async (writeContext?: ExecutionContext) => {
                 const bin = this.openRecycleBinCapture(object, hookContext.input.id as string | number, writeContext, options?.multi === true || permanent);
                 await this.cascadeDeleteRelations(object, [hookContext.input.id as string | number], writeContext, 0, bin?.onCollected)
                   .catch((e: unknown) => { throw cascadeStoppedRefusal(e, object); });
                 const entry = await bin?.write();
                 try {
-                  return await driver.delete(
+                  const removed = await driver.delete(
                     object,
                     hookContext.input.id as string,
                     this.buildDriverOptions(object, writeContext, hookContext.input.options as any),
                   );
+                  // Told only for a row the driver says it removed: `false`
+                  // (not found) and a count of 0 (kept) name no deletion an
+                  // undo could reverse.
+                  if (removed !== false && removed !== 0) binEntryId = entry?.id;
+                  return removed;
                 } catch (e) {
                   await entry?.compensate();
                   throw e;
@@ -9064,6 +9103,9 @@ export class ObjectQL implements IObjectQLEngine {
               } else {
                   if (plan === 'split') this.warnCascadeNotAtomic(object);
                   result = await runByIdDelete(opCtx.context);
+              }
+              if (binEntryId !== undefined && typeof options?.onRecycleBinEntry === 'function') {
+                  options.onRecycleBinEntry(binEntryId);
               }
               // [#27581] The handles the removed row held, off its pre-image.
               deletedSecrets = deletedSecretSlots(deleteSchema, [priorRecord]);

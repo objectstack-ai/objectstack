@@ -334,6 +334,10 @@ const ENGINE_UPDATE_OPTION_KEYS: ReadonlySet<string> = new Set([
 ]);
 const ENGINE_DELETE_OPTION_KEYS: ReadonlySet<string> = new Set([
   'context', 'where', 'multi', 'permanent',
+  // #30237: the by-id delete tells this callback the recycle-bin entry it
+  // wrote, so the delete answer can name the entry to undo. Type-only (a
+  // function has no JSON Schema), like `onFieldsDropped` on update.
+  'onRecycleBinEntry',
   ...ENGINE_DRIVER_PASSTHROUGH_KEYS,
 ]);
 // `search` / `searchFields` are READ by `count` and `aggregate` through the

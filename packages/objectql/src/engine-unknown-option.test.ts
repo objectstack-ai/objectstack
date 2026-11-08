@@ -271,7 +271,10 @@ describe('unknown engine option keys are rejected (#4371 option 2)', () => {
         // the fifth: the engine only carries them to the hooks, on
         // `ctx.input.options`.
         expectSetMatches('update', EngineUpdateOptionsSchema as any, ['onFieldsDropped', 'onValidationAdvisory', 'onMentionsWithheld', 'onNotice', 'strictReadonlyWrites', ...PASSTHROUGH]);
-        expectSetMatches('delete', EngineDeleteOptionsSchema as any, PASSTHROUGH);
+        // `onRecycleBinEntry` (#30237) is delete's one type-only extra: a
+        // callback told the recycle-bin entry a by-id delete wrote, outside
+        // the schema because a function has no JSON Schema.
+        expectSetMatches('delete', EngineDeleteOptionsSchema as any, ['onRecycleBinEntry', ...PASSTHROUGH]);
         expectSetMatches('count', EngineCountOptionsSchema as any, []);
         expectSetMatches('aggregate', EngineAggregateOptionsSchema as any, []);
     });
