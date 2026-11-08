@@ -69,6 +69,7 @@ import type { ErrorCode } from '@objectstack/spec/api';
 import { standardErrorCodeForHttpStatus } from '@objectstack/spec/api';
 import { classifiedRefusalAnswer, nestedRefusalEnvelope, sandboxFaultAnswer } from './error-response.js';
 import { logError } from './log.js';
+import { unknownQueryParamRefusalMessage } from './query-allowlist.js';
 import { refuseRepeatedQueryParams } from './query-multiplicity.js';
 import type { RestServer } from './rest-server.js';
 
@@ -111,6 +112,12 @@ const EMPTY_KEY_REMEDIES: ReadonlyArray<readonly ['object' | 'userId', string]> 
     ['object', 'Give the name of the object whose access to explain.'],
     ['userId', 'Omit userId to explain your own access, or give the id of the user to explain.'],
 ];
+
+/**
+ * [ADR-0090 D6/D12] `GET {basePath}/security/users/:id/effective-access` reads
+ * no query parameter: its closed set is empty (AGENTS.md, route rule 5).
+ */
+export const EFFECTIVE_ACCESS_QUERY_PARAMS: readonly string[] = [];
 
 /**
  * Register the access-explanation endpoints —
@@ -444,6 +451,77 @@ export function registerSecurityExplainEndpoints(this: SecurityExplainRouteHost,
         handler: delegableHandler,
         metadata: {
             summary: "The caller's delegable scope: business units they may place into and positions they may assign (ADR-0090 D12 / ADR-0105 D8)",
+            tags: ['security'],
+        },
+    });
+
+    /**
+     * [ADR-0090 D6/D12] One user's effective permission sets, each with
+     * where it comes from.
+     *
+     *   GET {basePath}/security/users/:id/effective-access
+     *
+     * Relays the security service's `describeEffectiveAccess`, the spec
+     * member whose docblock is the contract: the door decides no access of
+     * its own. Who may read whom is explain's caller gate, asked in the
+     * SERVICE; an id no user has is refused there exactly as one the caller
+     * may not manage, so this door answers both with the one `403` below and
+     * says nothing about which ids exist.
+     *
+     * The route reads no query parameter, and declares that closed set on the
+     * day it lands (AGENTS.md, route rule 5): a request carrying one is
+     * refused `400 VALIDATION_ERROR` naming it, never ignored. A security
+     * service without the member answers `501`, never an empty list.
+     */
+    const effectiveAccessHandler = async (req: any, res: any) => {
+        try {
+            const environmentId = isScoped ? req.params?.environmentId : undefined;
+            const context = await this.resolveExecCtx(environmentId, req);
+            if (this.enforceAuth(req, res, context)) return;
+            if (!context?.userId) {
+                return respondError(
+                    res, 401, 'UNAUTHORIZED',
+                    'The effective-access endpoint requires an authenticated caller.',
+                );
+            }
+            const unknownQuery = unknownQueryParamRefusalMessage(req.query, EFFECTIVE_ACCESS_QUERY_PARAMS);
+            if (unknownQuery !== undefined) return respondError(res, 400, 'VALIDATION_ERROR', unknownQuery);
+
+            const svc = await resolveService(environmentId, req);
+            if (!svc || typeof svc.describeEffectiveAccess !== 'function') {
+                return respondError(
+                    res, 501, 'NOT_IMPLEMENTED',
+                    'Effective access is not available on this deployment (no security service with describeEffectiveAccess).',
+                );
+            }
+
+            res.json(await svc.describeEffectiveAccess(String(req.params?.id ?? ''), context));
+        } catch (error: any) {
+            const msg = String(error?.message ?? error ?? '');
+            if (error?.code === 'PERMISSION_DENIED' || error?.name === 'PermissionDeniedError') {
+                return respondError(res, 403, 'PERMISSION_DENIED', msg.slice(0, 1000));
+            }
+            // A refusal the service classified (an ADR-0112 `code` with a 4xx
+            // `status`, the permission store's own `503`): the caller's
+            // answer, classified as the explain arm above classifies it.
+            const refusal = classifiedRefusalAnswer(error);
+            if (refusal) {
+                const code = typeof refusal.body.code === 'string'
+                    ? refusal.body.code as ErrorCode
+                    : standardErrorCodeForHttpStatus(refusal.status);
+                return respondError(res, refusal.status, code, String(refusal.body.error ?? ''));
+            }
+            logError('[REST] Effective access error:', error);
+            respondError(res, 500, 'INTERNAL_ERROR', msg.slice(0, 500));
+        }
+    };
+
+    this.routeManager.register({
+        method: 'GET',
+        path: `${basePath}/security/users/:id/effective-access`,
+        handler: effectiveAccessHandler,
+        metadata: {
+            summary: "A user's effective permission sets, each with its origin: default binding, position, direct grant or derived standing (ADR-0090 D6/D12)",
             tags: ['security'],
         },
     });

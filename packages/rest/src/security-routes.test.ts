@@ -461,3 +461,95 @@ describe('[#8326] POST/GET /security/explain with recordIds (batch form)', () =>
     ]);
   });
 });
+
+describe('GET /security/users/:id/effective-access (ADR-0090 D6/D12)', () => {
+  const PATH = '/api/v1/security/users/:id/effective-access';
+  const ANSWER = {
+    userId: 'u_target',
+    organizationId: 'org_a',
+    positions: ['org_member', 'everyone'],
+    permissionSets: [{ name: 'member_default', origins: [{ kind: 'default' }] }],
+  };
+
+  function door(securityProvider?: any, opts: { callerCtx?: any } = { callerCtx: CALLER }) {
+    const server = mockServer();
+    const rest = new RestServer(
+      server as any, mockProtocol() as any, { api: { requireAuth: false } } as any,
+      undefined, undefined, undefined, undefined, undefined, undefined, undefined,
+      undefined, undefined, undefined, undefined, undefined, undefined, undefined,
+      securityProvider,
+    );
+    vi.spyOn(rest as any, 'resolveExecCtx').mockResolvedValue(opts.callerCtx);
+    rest.registerRoutes();
+    const route = rest.getRoutes().find((r) => r.method === 'GET' && r.path === PATH);
+    return {
+      route,
+      async call(id: string, query: Record<string, unknown> = {}) {
+        const res = mockRes();
+        await route!.handler({ method: 'GET', params: { id }, headers: {}, query } as any, res);
+        return res;
+      },
+    };
+  }
+
+  /** A refusal shaped as plugin-security's `PermissionDeniedError` (matched by code/name, not imported). */
+  const denied = () => Object.assign(new Error(
+    "[Security] Access denied: reading another user's effective access requires the 'manage_users' capability.",
+  ), { name: 'PermissionDeniedError', code: 'PERMISSION_DENIED', status: 403, statusCode: 403 });
+
+  it('is registered under the security tag', () => {
+    const { route } = door(async () => ({ describeEffectiveAccess: vi.fn() }));
+    expect(route).toBeTruthy();
+    expect(route!.metadata?.tags).toContain('security');
+  });
+
+  it('relays the service\'s answer, bare, for the path id and the caller', async () => {
+    const describeEffectiveAccess = vi.fn().mockResolvedValue(ANSWER);
+    const res = await door(async () => ({ describeEffectiveAccess })).call('u_target');
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toEqual(ANSWER);
+    expect(describeEffectiveAccess).toHaveBeenCalledWith('u_target', CALLER);
+  });
+
+  it('an anonymous caller is 401ed before the service runs', async () => {
+    const describeEffectiveAccess = vi.fn();
+    const res = await door(async () => ({ describeEffectiveAccess }), { callerCtx: undefined }).call('u_target');
+    expect(res.statusCode).toBe(401);
+    expect(describeEffectiveAccess).not.toHaveBeenCalled();
+  });
+
+  it('a refusal is 403 PERMISSION_DENIED, and the body is byte-identical whichever id was asked — known or not', async () => {
+    const describeEffectiveAccess = vi.fn().mockImplementation(async () => { throw denied(); });
+    const d = door(async () => ({ describeEffectiveAccess }));
+    const forbidden = await d.call('u_target');
+    const unknown = await d.call('u_nobody');
+    expect(forbidden.statusCode).toBe(403);
+    expect(forbidden.body.error.code).toBe('PERMISSION_DENIED');
+    expect(unknown.statusCode).toBe(403);
+    expect(JSON.stringify(unknown.body)).toBe(JSON.stringify(forbidden.body));
+    expect(JSON.stringify(forbidden.body)).not.toContain('u_target');
+  });
+
+  it('a query parameter is refused 400 VALIDATION_ERROR naming it, and the service is never called', async () => {
+    const describeEffectiveAccess = vi.fn();
+    const res = await door(async () => ({ describeEffectiveAccess })).call('u_target', { organizationId: 'org_b' });
+    expect(res.statusCode).toBe(400);
+    expect(res.body.error.code).toBe('VALIDATION_ERROR');
+    expect(res.body.error.message).toContain('"organizationId"');
+    expect(describeEffectiveAccess).not.toHaveBeenCalled();
+  });
+
+  it('a security service without the member, or none at all, answers 501 — never an empty list', async () => {
+    for (const provider of [async () => ({ explain: vi.fn() }), undefined]) {
+      const res = await door(provider).call('u_target');
+      expect(res.statusCode).toBe(501);
+      expect(res.body.error.code).toBe('NOT_IMPLEMENTED');
+    }
+  });
+
+  it('an unclassified fault is 500 in the nested envelope', async () => {
+    const res = await door(async () => ({ describeEffectiveAccess: vi.fn().mockRejectedValue(new Error('store exploded')) })).call('u_target');
+    expect(res.statusCode).toBe(500);
+    expect(res.body.error.code).toBe('INTERNAL_ERROR');
+  });
+});

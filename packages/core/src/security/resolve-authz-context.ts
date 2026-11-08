@@ -890,8 +890,9 @@ export interface UserAuthzGrants {
    * audience anchor, whose bindings are the default ones), and `derived` where
    * the configured platform administrators (§6b-config) or the `ai_access` flag
    * (§7) confer the name. Every name in `permissions` the resolution derived has
-   * at least one origin, each origin listed once, in the order the resolution
-   * reached it; a `seedPermissions` name the caller supplied has none.
+   * at least one origin, each listed once, in the order the envelope lists its
+   * channels — `direct`, then `position` (in held-position order), `default`,
+   * `derived`; a `seedPermissions` name the caller supplied has none.
    */
   permissionOrigins?: Record<string, EffectivePermissionSetOrigin[]>;
 }
@@ -1873,8 +1874,8 @@ export async function resolveUserAuthzGrants(
   const grantsCache = openUserGrantsCache(ql, userId, cacheOpts);
   if (grantsCache?.hit) return grantsCache.hit;
 
-  // [ADR-0090 D6] The origin record, when asked for: each origin once per name,
-  // in the order the derivation below reaches it.
+  // [ADR-0090 D6] The origin record, when asked for: each origin once per name.
+  // Ordered by channel when the envelope is returned (see `permissionOrigins`).
   const origins = opts.withPermissionOrigins ? new Map<string, EffectivePermissionSetOrigin[]>() : undefined;
   const recordOrigin = (name: string, origin: EffectivePermissionSetOrigin): void => {
     if (!origins) return;
@@ -2344,10 +2345,12 @@ export async function resolveUserAuthzGrants(
   // [ADR-0090 D6] Only names the envelope holds keep an origin: a bound name
   // the catalog holds no set for, or a switched-off set, confers nothing.
   if (origins) {
+    const channelRank: Record<EffectivePermissionSetOrigin['kind'], number> = { direct: 0, position: 1, default: 2, derived: 3 };
     const permissionOrigins: Record<string, EffectivePermissionSetOrigin[]> = {};
     for (const name of grants.permissions) {
       const list = origins.get(name);
-      if (list) permissionOrigins[name] = list;
+      // A stable sort: positions keep the held-position order they were reached in.
+      if (list) permissionOrigins[name] = [...list].sort((a, b) => channelRank[a.kind] - channelRank[b.kind]);
     }
     grants.permissionOrigins = permissionOrigins;
   }
