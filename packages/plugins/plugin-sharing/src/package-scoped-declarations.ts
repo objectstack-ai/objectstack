@@ -199,10 +199,10 @@ export function reportRefusedDeclaration(
   reported: Set<string>,
   refusal: PackageScopedRefusal,
 ): void {
-  const key = `${refusal.type}::${refusal.name}`;
+  const key = `${refusal.type}::${refusal.name}::${refusal.callerPackageId ?? ''}`;
   if (reported.has(key)) return;
   reported.add(key);
-  const message = `[package-scoped] ${refusal.message} It is not in force until one holder remains.`;
+  const message = `[package-scoped] ${refusal.message} Nothing is served for that name until it resolves.`;
   const meta = {
     type: refusal.type,
     name: refusal.name,

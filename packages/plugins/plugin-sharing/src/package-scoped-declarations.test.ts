@@ -16,9 +16,12 @@
  * declares answers exactly what it answered before. Red line 2 (ambiguity is
  * reported, never guessed) is the `two holders` block: a name two packages
  * declare is refused, naming both, by every reader — where `main` answered
- * the first package registered (and `queuesOf` the last). Each refusal pin was
- * ablated once (the first-registered pick put back, the pin read red,
- * restored); the readings are in the PR body.
+ * the first package registered (and `queuesOf` the last). The last block is
+ * the one reference this plugin reads that a package writes: a declared
+ * rule's queue recipient, resolved from the rule's package (D3), so a holder
+ * outside its declared closure, or only the environment (D3 (a)), is refused.
+ * Each refusal pin was ablated once (the loosened answer put back, the pin
+ * read red, restored); the readings are in the PR body.
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
@@ -35,11 +38,18 @@ const BETA = 'com.acme.beta';
 
 type Row = Record<string, any>;
 
-const manifest = (id: string) =>
-  ({ id, name: id, version: '1.0.0', type: 'app', namespace: id.split('.').pop() }) as never;
+const manifest = (id: string, deps: string[] = []) =>
+  ({
+    id,
+    name: id,
+    version: '1.0.0',
+    type: 'app',
+    namespace: id.split('.').pop(),
+    ...(deps.length > 0 ? { dependencies: Object.fromEntries(deps.map((d) => [d, '^1.0.0'])) } : {}),
+  }) as never;
 
 let registry: SchemaRegistry;
-const install = (id: string) => registry.installPackage(manifest(id), 'code');
+const install = (id: string, deps: string[] = []) => registry.installPackage(manifest(id, deps), 'code');
 const declare = (type: string, packageId: string, item: Row) =>
   registry.registerItem(type, { ...item, _packageId: packageId }, 'name', packageId);
 
@@ -251,5 +261,84 @@ describe('a listing that cannot be asked (package, name) gets no pick either', (
     expect(refused.status).toBe('refused');
     if (refused.status === 'refused') expect(refused.refusal.candidates.map((c) => (c.kind === 'package' ? c.packageId : c.kind))).toEqual([ALPHA, BETA]);
     expect(resolveDeclaredName(undefined, 'queue', 'billing', listed)).toEqual({ status: 'resolved', item: listed[2] });
+  });
+});
+
+describe('a declared rule’s queue recipient resolves from the rule’s package (ADR-0150 D3)', () => {
+  /** ALPHA's declared rule `share_support`, granting to queue `support`, and its org_a projection. */
+  const declaredQueueRule = () => {
+    declare('sharing_rule', ALPHA, {
+      ...sharingRule('share_support', 'unused'),
+      sharedWith: { type: 'queue', value: 'support' },
+    });
+    return {
+      id: 'share_support',
+      name: 'share_support',
+      label: 'share_support',
+      object_name: 'account',
+      organization_id: 'org_a',
+      criteria: { region: 'emea' },
+      recipient_type: 'queue' as const,
+      recipient_id: 'support',
+      access_level: 'read' as const,
+      active: true,
+      managed_by: 'package' as const,
+    };
+  };
+
+  /** The rule service over the real registry and queue service, with one standing grant to `userId`. */
+  const serviceWithGrant = (userId: string) => {
+    const engine = makeEngine({
+      ...TABLES(),
+      sys_record_share: [{ id: 'rs_1', source: 'rule', source_id: 'share_support', organization_id: 'org_a', recipient_id: userId }],
+    });
+    const queues = new OwnershipQueueService({ engine: () => engine as any });
+    const source = createDeclaredSharingRuleSource({ engine: { registry } });
+    return new SharingRuleService({
+      engine: engine as any,
+      sharing: {} as any,
+      declaredRules: source,
+      ownershipQueues: () => queues,
+      logger: { warn: () => {}, error: () => {} },
+    });
+  };
+
+  it('refuses a queue held only by a package outside the rule package’s declared closure, naming it', async () => {
+    const rule = declaredQueueRule();
+    declare('queue', BETA, queue('support', 'beta_agent'));
+    const refused = await serviceWithGrant('u_beta').revokeRuleGrantsForRetiredRecipients(rule).catch((e: unknown) => e);
+    expect(refused).toBeInstanceOf(PackageScopedNameRefusedError);
+    expect((refused as PackageScopedNameRefusedError).refusal).toMatchObject({
+      reason: 'outside-closure',
+      callerPackageId: ALPHA,
+      candidates: [{ kind: 'package', packageId: BETA }],
+    });
+  });
+
+  it('refuses a queue only an environment-authored registry item holds (D3 (a))', async () => {
+    const rule = declaredQueueRule();
+    registry.registerItem('queue', queue('support', 'beta_agent'), 'name');
+    const refused = await serviceWithGrant('u_beta').revokeRuleGrantsForRetiredRecipients(rule).catch((e: unknown) => e);
+    expect(refused).toBeInstanceOf(PackageScopedNameRefusedError);
+    expect((refused as PackageScopedNameRefusedError).refusal).toMatchObject({
+      reason: 'outside-closure',
+      candidates: [{ kind: 'environment' }],
+    });
+  });
+
+  it('serves the queue of a package the rule’s package declares a dependency on', async () => {
+    registry = new SchemaRegistry();
+    install(BETA);
+    install(ALPHA, [BETA]);
+    const rule = declaredQueueRule();
+    declare('queue', BETA, queue('support', 'beta_agent'));
+    // The standing grant to the queue's one member is still desired: nothing revoked.
+    expect(await serviceWithGrant('u_beta').revokeRuleGrantsForRetiredRecipients(rule)).toBe(0);
+  });
+
+  it('serves the rule package’s own queue', async () => {
+    const rule = declaredQueueRule();
+    declare('queue', ALPHA, queue('support', 'alpha_agent'));
+    expect(await serviceWithGrant('u_alpha').revokeRuleGrantsForRetiredRecipients(rule)).toBe(0);
   });
 });

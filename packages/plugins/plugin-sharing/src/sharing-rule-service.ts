@@ -52,7 +52,12 @@ import { TeamGraphService, teamHasMember } from './team-graph.js';
 import { PositionGraphService } from './position-graph.js';
 import { BusinessUnitGraphService } from './business-unit-graph.js';
 import type { DeclaredSharingRule, DeclaredSharingRuleSource } from './declared-sharing-rules.js';
-import { PackageScopedNameRefusedError } from './package-scoped-declarations.js';
+import { resolvePackageScopedName } from '@objectstack/objectql';
+import {
+  PackageScopedNameRefusedError,
+  isPackageScopedRegistry,
+  reportRefusedDeclaration,
+} from './package-scoped-declarations.js';
 import { listShareableObjects, type ShareableObject, type ShareableObjectsEngine } from './shareable-objects.js';
 
 /**
@@ -553,6 +558,8 @@ export class SharingRuleService implements ISharingRuleService {
   private unknownScopesSweepWarned = false;
   /** [ADR-0131 D6 regime C] The declaration-over-row conflicts already reported, `name::scope`. */
   private readonly declarationOverRowReported = new Set<string>();
+  /** [ADR-0150, child E4] Declared rules' queue recipients already reported as refused from their package. */
+  private readonly queueRecipientRefusalsReported = new Set<string>();
   /** [ADR-0131 D1/D8] Stored rules refused for carrying no organization, reported once each. */
   private readonly organizationlessRuleReported = new Set<string>();
 
@@ -1802,9 +1809,9 @@ export class SharingRuleService implements ISharingRuleService {
     // grants stay, as they do for a team or position recipient (#29503).
     if (rule.recipient_type === 'queue') {
       const queues = this.ownershipQueues?.();
-      return queues
-        ? queues.isMember(userId, rule.recipient_id, rule.organization_id ?? null, { onFailedRead: 'refuse' })
-        : false;
+      if (!queues) return false;
+      await this.assertQueueRecipientReachable(rule);
+      return queues.isMember(userId, rule.recipient_id, rule.organization_id ?? null, { onFailedRead: 'refuse' });
     }
     return (await this.expandRecipient(rule, pass)).includes(userId);
   }
@@ -2249,9 +2256,44 @@ export class SharingRuleService implements ISharingRuleService {
       // grants and warns (#29362), as for a team or position recipient.
       const queues = this.ownershipQueues?.();
       if (!queues) return [];
+      await this.assertQueueRecipientReachable(rule);
       return queues.expandMembers(rule.recipient_id, rule.organization_id ?? null, { onFailedRead: 'refuse' });
     }
     return [];
+  }
+
+  /**
+   * [ADR-0150 D3, child E4] A DECLARED rule's queue recipient is a reference
+   * written inside the rule's package P, so it resolves from P through the
+   * shared resolver: P's own queue, else the unique holder in P's declared
+   * dependency closure (plus `sys`), else a refusal naming every holder —
+   * never a holder outside the closure, and never an environment-authored
+   * registry item (D3 (a)). A name no registry item holds passes on: the
+   * queue service then answers an organization's own `sys_queue` row, as
+   * before.
+   *
+   * A refusal throws, like the queue service's own refusals under
+   * `onFailedRead: 'refuse'`: each recompute's caller keeps the rule's grants
+   * and says so, rather than revoking them on an answer nobody could pick.
+   * The queue service still resolves the name environment-wide after this
+   * (its contract carries no caller package), so a name two packages hold is
+   * refused there even when P's closure reaches only one of them — refused,
+   * never guessed.
+   */
+  private async assertQueueRecipientReachable(rule: SharingRuleRow): Promise<void> {
+    if (!isDeclaredSharingRule(rule)) return;
+    const registry = (this.engine as { registry?: unknown }).registry;
+    if (!isPackageScopedRegistry(registry)) return;
+    const declared = await this.declaredRuleNamed(rule.name);
+    if (!declared?.packageId) return;
+    const resolution = resolvePackageScopedName(registry, {
+      type: 'queue',
+      name: rule.recipient_id,
+      callerPackageId: declared.packageId,
+    });
+    if (resolution.status !== 'refused') return;
+    reportRefusedDeclaration(this.logger, this.queueRecipientRefusalsReported, resolution);
+    throw new PackageScopedNameRefusedError(resolution);
   }
 
   /**
