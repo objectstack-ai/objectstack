@@ -98,6 +98,8 @@
     "DatasetMeasureDurationSchema": "ui/DatasetMeasureDuration",
     "DatasetMeasurePolarity": "ui/DatasetMeasurePolarity",
     "DatasetMeasureSchema": "ui/DatasetMeasure",
+    "DatasetMemberSynonyms": "ui/DatasetMemberSynonyms",
+    "DatasetMemberSynonymsSchema": "ui/DatasetMemberSynonyms",
     "DatasetSchema": "ui/Dataset",
     "DerivedMeasureOp": "ui/DerivedMeasureOp",
     "DocNavItem": "ui/DocNavItem",

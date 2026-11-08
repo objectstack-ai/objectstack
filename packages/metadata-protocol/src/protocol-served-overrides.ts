@@ -13,9 +13,11 @@
  *
  * ## One predicate, not a second spelling
  *
- * A row is listed exactly when {@link isServedOverrideRowOf} holds for it and
- * X — the predicate the effective read asks before it serves a `.custom` row
- * at X's address (`servedOverlayRowCandidates`, N-10). ⛔ Never a body-only
+ * A row is listed exactly when it holds one of the pair's candidates for X in
+ * the served reads' order — `isServedOverrideRowOf`, the predicate the
+ * effective read asks before it serves a `.custom` row at X's address
+ * (`servedOverlayRowCandidates`, N-10), or [#31656] the moved edit's
+ * {@link isMovedOverrideRowOf} (below). ⛔ Never a body-only
  * test such as `overrides.package === X`: a declaration from a package that is
  * not X's pair, or a pair row with no declaration, is not served as X's item,
  * so it is not an override of X either. The agreement is pinned in
@@ -40,6 +42,27 @@
  *
  * ## What it reports, and what it never computes
  *
+ * ## [#31656] A moved edit is listed where it is served now, and only there
+ *
+ * A row is admitted through the served reads' own candidates, in their order
+ * ({@link servedOverlayRowCandidates}, {@link holdsServedOverlayCandidate}):
+ * the pair's declared override of X first, then the pair's override of the
+ * item from before a later version of X's App moved it to X
+ * ({@link isMovedOverrideRowOf}, `suite-moved-overlay.ts`). So after a suite
+ * split (or its rollback) the tenant's edit is listed under the package that
+ * ships the item now, the one whose address serves it. ⛔ It is no longer
+ * listed under the former owner whose name the declaration still carries: a
+ * pair row that a package shipping the item now holds as a moved edit is that
+ * package's. Same App is read only through the predicates (`appOf` over the
+ * installed manifests), never here. Which packages ship the item is the
+ * registry's answer the served by-name read takes too (`shippedArtifactsOf`).
+ *
+ * The list stays the pair's rows. A row bound to a package of the App itself
+ * (a Regime O save from before the ADR-0146 D11 close) is served at the new
+ * owner through `isMovedBaseRowOf`'s candidate, last, but it is not a
+ * pair row, so it is listed under no package, as such a row bound to the
+ * package that still ships the item is not listed today.
+ *
  * Each entry is the row's own facts: its type (folded to the canonical
  * singular), its name, its bundle member when the type's identity is a pair,
  * the `basedOn` its declaration records and the row's history `version`.
@@ -55,7 +78,9 @@ import { pairsOf } from '@objectstack/metadata-core';
 import { PLURAL_TO_SINGULAR } from '@objectstack/spec/shared';
 import { storedRowDocument } from './item-lock.js';
 import type { ObjectStackProtocolImplementation } from './protocol.js';
-import { isServedOverrideRowOf } from './served-override.js';
+import { holdsServedOverlayCandidate, servedOverlayRowCandidates } from './protocol-overlay-merge.js';
+import { shippingPackageIds } from './protocol-environment-rows.js';
+import { isMovedOverrideRowOf } from './suite-moved-overlay.js';
 import { installedManifestsOfEngine } from './installed-manifests.js';
 
 /** The class members {@link listServedOverrides} reads, typed as the class declares them. */
@@ -63,6 +88,7 @@ export interface ServedOverridesHost {
     readonly engine: ObjectStackProtocolImplementation['engine'];
     readonly findEnvironmentRows: ObjectStackProtocolImplementation['findEnvironmentRows'];
     readonly declinesStoredRow: ObjectStackProtocolImplementation['declinesStoredRow'];
+    readonly shippedArtifactsOf: ObjectStackProtocolImplementation['shippedArtifactsOf'];
     readonly rethrowUnlessMetadataStoreUnprovisioned: ObjectStackProtocolImplementation['rethrowUnlessMetadataStoreUnprovisioned'];
 }
 
@@ -81,8 +107,10 @@ export interface ServedOverrideEntry {
 }
 
 /**
- * The served overrides of `request.packageId`'s items: the ACTIVE rows of its
- * pair that {@link isServedOverrideRowOf} admits and no read declines, ordered
+ * The served overrides of `request.packageId`'s items: per item, the ACTIVE
+ * row of its pair that the served reads' candidates pick (the declared
+ * override, else [#31656] the moved edit, module header) and no read
+ * declines, ordered
  * by type, name and member. A base with no pair package, or a package id that
  * has no pair (a `.custom` id, an invalid id), answers `[]`; this read never
  * creates the pair.
@@ -93,7 +121,7 @@ export interface ServedOverrideEntry {
  *         An unprovisioned table answers `[]`.
  */
 export async function listServedOverrides(
-    this: Pick<ServedOverridesHost, 'engine' | 'findEnvironmentRows' | 'declinesStoredRow' | 'rethrowUnlessMetadataStoreUnprovisioned'>,
+    this: Pick<ServedOverridesHost, 'engine' | 'findEnvironmentRows' | 'declinesStoredRow' | 'shippedArtifactsOf' | 'rethrowUnlessMetadataStoreUnprovisioned'>,
     request: { packageId: string },
 ): Promise<ServedOverrideEntry[]> {
     const base = request.packageId;
@@ -114,31 +142,61 @@ export async function listServedOverrides(
         // overridden".
         this.rethrowUnlessMetadataStoreUnprovisioned(error, 'sys_metadata');
     }
-    const entries = new Map<string, ServedOverrideEntry>();
+    // [#31656] The pair's rows of one item (type folded, name, member) are
+    // judged together: the served reads pick one of them by candidate order.
+    const items = new Map<string, { type: string; name: string; member: string | undefined; rows: any[] }>();
     for (const row of rows ?? []) {
         if (typeof row?.name !== 'string' || row.name === '') continue;
-        if (!isServedOverrideRowOf(row, base, installed)) continue;
         const type = PLURAL_TO_SINGULAR[row.type] ?? row.type;
-        if (this.declinesStoredRow(type, row.name, row)) continue;
+        if (typeof type !== 'string' || type === '') continue;
         const member = typeof row.bundle_member === 'string' && row.bundle_member !== '' ? row.bundle_member : undefined;
-        // `isServedOverrideRowOf` parsed this body already; a body it admitted parses.
-        const declaration = (storedRowDocument(row) as { overrides?: { basedOn?: unknown } }).overrides;
-        const version = typeof row.version === 'number' && Number.isInteger(row.version) && row.version >= 0
-            ? row.version
+        const key = `${type}\u0000${row.name}\u0000${member ?? ''}`;
+        const item = items.get(key) ?? { type, name: row.name as string, member, rows: [] as any[] };
+        item.rows.push(row);
+        items.set(key, item);
+    }
+    const entries: ServedOverrideEntry[] = [];
+    for (const { type, name, member, rows: itemRows } of items.values()) {
+        // The code packages that ship the item, read once per item and only
+        // when a moved edit is in question (the by-name read's own reading).
+        let shippers: ReadonlySet<string> | undefined;
+        const shippersOf = (): ReadonlySet<string> =>
+            (shippers ??= shippingPackageIds(this.shippedArtifactsOf(type, name, undefined, member)));
+        const ships = (packageId: string): boolean => shippersOf().has(packageId);
+        let served: any;
+        for (const candidate of servedOverlayRowCandidates({ packageId: base, servedOverride: true, installed, ships })) {
+            // Only the pair's candidates: the base's own row, the
+            // package-less row and a row bound to a former owner are not
+            // the pair's, and this list reads the pair's rows alone.
+            if (candidate.overrideOf === undefined || candidate.moved === 'base') continue;
+            served = itemRows.find((row) => (row.type === type ? 'canonical' : 'other') === candidate.spelling
+                && row.package_id === candidate.packageId
+                && holdsServedOverlayCandidate(candidate, row, installed, ships));
+            if (served === undefined) continue;
+            // A declared override the base no longer ships, which a package
+            // shipping the item now holds as its moved edit, is that
+            // package's: listed there, never also here.
+            if (candidate.moved === undefined && !ships(base)
+                && [...shippersOf()].some((now) => now !== base && isMovedOverrideRowOf(served, now, installed, ships))) {
+                served = undefined;
+            }
+            break;
+        }
+        if (served === undefined) continue;
+        if (this.declinesStoredRow(type, name, served)) continue;
+        // The candidate's predicate parsed this body already; a body it admitted parses.
+        const declaration = (storedRowDocument(served) as { overrides?: { basedOn?: unknown } }).overrides;
+        const version = typeof served.version === 'number' && Number.isInteger(served.version) && served.version >= 0
+            ? served.version
             : undefined;
-        const entry: ServedOverrideEntry = {
+        entries.push({
             type,
-            name: row.name,
+            name,
             ...(member !== undefined ? { member } : {}),
             ...(typeof declaration?.basedOn === 'string' ? { basedOn: declaration.basedOn } : {}),
             ...(version !== undefined ? { version } : {}),
-        };
-        // A row stored under the type's other spelling (pre-#4432 residue)
-        // and one under the canonical spelling are one item: listed once,
-        // the canonical row's facts kept.
-        const key = `${type}\u0000${row.name}\u0000${member ?? ''}`;
-        if (!entries.has(key) || row.type === type) entries.set(key, entry);
+        });
     }
-    return [...entries.values()].sort((a, b) =>
+    return entries.sort((a, b) =>
         a.type.localeCompare(b.type) || a.name.localeCompare(b.name) || (a.member ?? '').localeCompare(b.member ?? ''));
 }

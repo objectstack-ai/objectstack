@@ -284,10 +284,10 @@ See `ui/AGENTS.md` for the app-id / localStorage / auth gotchas.
     auto-merge, ⛔ never flip it out of draft to make any of those possible — judged on the PR's **file list**, not
     its description; a **mixed diff is not a proportion question**, one path hit is enough; to land the rest, split off
     the governed files. **The landing is tiered by the register; one Tier H path makes the whole PR Tier H.** **Tier H**
-    (人合: every register row except `.claude/**`): those four lift only for an
+    (人合: every register row except `.claude/**` and Tier S workflow edits): those four lift only for an
     authorized APPROVED review by an account in `GOVERNED_APPROVERS`, on ANY commit and not dismissed; that word is
     spent once per PR — the OWNING seat then lands it, later pushes included; the click stays the maintainer's.
-    **Tier S** (席内达档复核落地: all of
+    **Tier S** (席内达档复核落地: objectstack workflow edits `readWorkflowDiff` reads as Tier S, and all of
     `.claude/**`): those four lift once the PR thread or its card carries a `## Contract review` record for the PR's
     current head with `Served-tier: CONTRACT_REVIEW_TIER` and a PASS verdict and every check is green — the owning
     seat then lands it through the queue; the post-merge audit is the compensating control. A PR whose only governed
@@ -501,19 +501,19 @@ Even inside your own worktree, operate defensively:
    the owning seat, or the maintainer's merge or enqueue. Read the PR's file list (`get_files`), **its author and
    its size** before you arm anything.
 
-   **Green means the gate-carrying jobs' `conclusion` is `success`** — not "no failure
-   yet"; `in_progress` is not a pass, and arming a red PR hides it
-   ([why](docs/agents/multi-agent-discipline.md#arming-a-red-pr-hides-it)). Always read *two* things:
-   the queue branch **and** `origin/main`. And **the queue enforces only the required
-   set** — eleven contexts block: `Lint & Repo Gates` (all `check:*` gates), `TypeScript Type Check`,
-   `Test Core`, `Build Core`, `Governed Surface Queue Guard`, `Lint UI`, `Type Check UI`, `Test UI`,
-   `Build & E2E UI`, `Live E2E UI` and `Dogfood Regression Gate`; a check outside those eleven is advisory
-   ([why that matters](docs/agents/multi-agent-discipline.md#advisory-checks-ride-through)). A required context is
-   matched by check-run name, so a rename detaches its gate silently — treat those eleven names as contract.
-   **Two speeds** — PR runs carry the fast set, queue runs add the dogfood shards; `main`'s scheduled and push runs
-   carry the full battery ([detail](docs/agents/multi-agent-discipline.md#two-speeds-which-runs-carry-which-battery)).
-   **Main-red:** a full-battery red is its lane's first work — triage files it under
-   the main-red convention, the lane's next PR fixes it, and ⛔ no lane PR arms the queue meanwhile.
+   **Green means the gate-carrying jobs' `conclusion` is `success`** — not "no failure yet"; `in_progress` is not a
+   pass, and arming a red PR hides it ([why](docs/agents/multi-agent-discipline.md#arming-a-red-pr-hides-it)). Always
+   read *two* things: the queue branch **and** `origin/main`. And **the queue enforces only the required set** —
+   eleven contexts block: `Lint & Repo Gates` (all `check:*` gates), `TypeScript Type Check`, `Test Core`, `Build Core`,
+   `Governed Surface Queue Guard`, `Lint UI`, `Type Check UI`, `Test UI`, `Build & E2E UI`, `Live E2E UI` and
+   `Dogfood Regression Gate`; a check outside those eleven is advisory ([why that
+   matters](docs/agents/multi-agent-discipline.md#advisory-checks-ride-through)). A required context is matched by
+   check-run name, so a rename detaches its gate silently — treat those eleven names as contract. **Two speeds** —
+   PR runs carry the fast set, queue runs add the dogfood shards; `main`'s scheduled runs carry the full battery, and a
+   push run carries it by running the main-only jobs and borrowing the rest from the green queue runs of its commits
+   ([detail](docs/agents/multi-agent-discipline.md#two-speeds-which-runs-carry-which-battery)). **Main-red:** a
+   full-battery red is its lane's first work — triage files it under the main-red convention, the lane's next PR fixes
+   it, and ⛔ no lane PR arms the queue meanwhile.
 
    **Re-arm awareness** ([measured](docs/agents/multi-agent-discipline.md#re-arm-awareness)): a red queue build
    ejects your entry and drops auto-merge, and collateral eviction is silent — neither on `main` nor in the
