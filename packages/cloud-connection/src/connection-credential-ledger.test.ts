@@ -17,6 +17,10 @@
  *    replica on another crypto key, an engine with no crypto provider and a
  *    runtime with no data engine each refuse by naming the remedy, and none is
  *    read as "not bound"; a single node's file is moved into the empty row once;
+ *  - the plugin takes the shared row only for declared replicas over a remote
+ *    cluster driver, moves the file before its first door, reports a missing
+ *    data engine at `error`, and refuses a bind it cannot seal to the caller
+ *    rather than answering it as connected;
  *  - two OS processes, each with its own working directory and credential
  *    file, over one SQLite database file and one crypto key: a bind on A is
  *    the bearer B presents to the control plane — through B's doors at once,
@@ -53,6 +57,7 @@ import {
 } from './connection-credential-ledger.js';
 import { CloudConnectionPlugin } from './cloud-connection-plugin.js';
 import { SysCloudBindingCredential } from './sys-cloud-binding-credential.object.js';
+import { bindCatalogFromTables } from './__tests__/security-catalog.testkit.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const PKG = resolve(HERE, '..');
@@ -233,6 +238,62 @@ describe('[#31554] the plugin chooses the shared row only for declared replicas 
         expect([...logs.info, ...logs.warn, ...logs.error].join('\n')).not.toContain(TOKEN);
         await fire('kernel:shutdown');
         await plugin.destroy();
+    });
+
+    it('a bind the shared row cannot seal (no crypto provider) is refused to the caller, never answered as connected', async () => {
+        vi.stubEnv('OS_CLUSTER_REPLICAS', '2');
+        dir = mkdtempSync(join(tmpdir(), 'ccl-plugin-'));
+        const credPath = join(dir, 'cc.json');
+        const { ql, raw } = await database({ key: null });
+        const grants: Record<string, any[]> = {
+            sys_user_permission_set: [{ id: 'ups_1', user_id: 'admin', permission_set_id: 'ps_1', permission_set: 'platform_admin', organization_id: 'o1' }],
+            sys_permission_set: [{ id: 'ps_1', name: 'platform_admin', system_permissions: ['setup.access', 'manage_platform_settings'] }],
+        };
+        const engine = bindCatalogFromTables({
+            find: (o: string, q: unknown) => (o === CLOUD_BINDING_CREDENTIAL_OBJECT ? ql.find(o, q as never) : Promise.resolve(grants[o] ?? [])),
+            insert: (o: string, d: unknown, x: unknown) => ql.insert(o, d as never, x as never),
+            update: (o: string, d: unknown, x: unknown) => ql.update(o, d as never, x as never),
+            delete: (o: string, x: unknown) => ql.delete(o, x as never),
+            resolveSecretField: (o: string, id: string, f: string) => ql.resolveSecretField(o, id, f),
+        }, grants);
+        const routes = new Map<string, (c: any) => Promise<any>>();
+        const { ctx, logs, fire } = pluginContext({
+            objectql: engine,
+            manifest: { register: vi.fn() },
+            cluster: { driver: 'redis', nodeId: 'n1' },
+            auth: { api: { getSession: async () => ({ user: { id: 'admin' }, session: { activeOrganizationId: 'o1' } }) } },
+            protocol: { getDiscovery: async () => ({ version: 'release-31554' }) },
+            'http-server': { getRawApp: () => ({ get: (p: string, h: any) => routes.set(`GET ${p}`, h), post: (p: string, h: any) => routes.set(`POST ${p}`, h) }) },
+        });
+        vi.stubGlobal('fetch', vi.fn(async (url: unknown) => {
+            const u = String(url);
+            if (u.includes('/auth/device/token')) return new Response(JSON.stringify({ access_token: 'op-token' }), { status: 200 });
+            if (u.includes('/cloud-connection/bind')) {
+                return new Response(JSON.stringify({ success: true, data: { bound: true, runtime_id: 'rt_31554', runtime_token: TOKEN, connection: {} } }), { status: 200 });
+            }
+            throw new Error(`unexpected fetch ${u}`);
+        }));
+        try {
+            const plugin = new CloudConnectionPlugin({ singleEnvironment: true, environmentId: 'env_31554', controlPlaneUrl: 'http://cloud.test', credentialPath: credPath });
+            await plugin.init(ctx as never);
+            await plugin.start(ctx as never);
+            await fire('kernel:ready');
+
+            const json = (payload: any, status?: number) => ({ payload, status: status ?? 200 });
+            const url = 'http://localhost:3000/x';
+            const res = await routes.get('POST /api/v1/cloud-connection/bind/poll')!({ req: { url, raw: new Request(url), json: async () => ({ device_code: 'dc' }) }, json });
+            expect(res.status).toBe(503);
+            expect(res.payload).toMatchObject({ success: false, error: { code: 'ENVIRONMENT_BIND_FAILED' } });
+            expect(res.payload.error.message).toMatch(/crypto provider/i);
+            expect(JSON.stringify(res.payload)).not.toContain(TOKEN);
+            expect(await raw(CLOUD_BINDING_CREDENTIAL_OBJECT)).toHaveLength(0);
+            expect(existsSync(credPath)).toBe(false);
+            expect([...logs.info, ...logs.warn, ...logs.error].join('\n')).not.toContain(TOKEN);
+            await fire('kernel:shutdown');
+            await plugin.destroy();
+        } finally {
+            vi.unstubAllGlobals();
+        }
     });
 
     it('with no manifest service to register the object, reports the split at error with its consequence and fix, and keeps the file', async () => {

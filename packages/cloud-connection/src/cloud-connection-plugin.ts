@@ -508,8 +508,9 @@ export class CloudConnectionPlugin implements Plugin {
     /**
      * Re-read the shared row (a no-op on a single node). Never throws: a read
      * that fails leaves the last copy in place and is reported once per
-     * distinct failure, at `warn` — the replica serves the binding it last
-     * read, and the Setup page shows what that is.
+     * distinct failure, at `error` — persisted and runtime state now disagree
+     * (a bind or an unbind made on a peer is not seen here) while this replica
+     * keeps looking healthy, so the line names that and the fix.
      */
     private async refreshShared(ctx: PluginContext): Promise<void> {
         if (!this.ledger.shared) return;
@@ -520,9 +521,13 @@ export class CloudConnectionPlugin implements Plugin {
             const message = err instanceof Error ? err.message : String(err);
             if (message === this.lastSharedReadFailure) return;
             this.lastSharedReadFailure = message;
-            ctx.logger?.warn?.(
-                `[CloudConnectionPlugin] the shared cloud binding credential could not be read; this replica keeps the binding it `
-                    + `last read until a read succeeds: ${message}`,
+            const report = ctx.logger?.error ?? ctx.logger?.warn;
+            report?.call(
+                ctx.logger,
+                '[CloudConnectionPlugin] the shared cloud binding credential could not be read, so this replica keeps acting on '
+                    + 'the binding it last read: a bind or a disconnect made on another replica is not seen here until a read '
+                    + 'succeeds. Restore the database connection, and give every replica the same secret key (OS_SECRET_KEY '
+                    + `with the local crypto provider): ${message}`,
             );
         }
     }
@@ -543,9 +548,14 @@ export class CloudConnectionPlugin implements Plugin {
                 );
             }
         } catch (err) {
-            ctx.logger?.warn?.(
+            // Durability: the binding this node held is not where the replicas
+            // read it, and nothing else will say so.
+            const report = ctx.logger?.error ?? ctx.logger?.warn;
+            report?.call(
+                ctx.logger,
                 `[CloudConnectionPlugin] the cloud binding credential in ${this.store.path} could not be moved into the shared `
-                    + `database; bind again from any replica: ${err instanceof Error ? err.message : String(err)}`,
+                    + 'database, so no replica presents it to the cloud. Connect again from any replica (Setup, Cloud '
+                    + `Connection): ${err instanceof Error ? err.message : String(err)}`,
             );
         }
         await this.refreshShared(ctx);
@@ -1115,6 +1125,14 @@ export class CloudConnectionPlugin implements Plugin {
                             });
                         } catch (err: any) {
                             ctx.logger?.error?.('[CloudConnectionPlugin] failed to persist runtime credential', err instanceof Error ? err : new Error(String(err)));
+                            // [#31554] On shared replicas the store's refusal names
+                            // its remedy (a crypto provider, the data engine) and
+                            // never carries the bearer: hand it to the caller, so
+                            // the panel does not read "connected" over a binding
+                            // no replica holds. A single node answers as before.
+                            if (this.ledger.shared) {
+                                return c.json({ success: false, error: { code: 'ENVIRONMENT_BIND_FAILED', message: String(err?.message ?? err) } }, 503);
+                            }
                         }
                         delete bindJson.data.runtime_token;
                     }

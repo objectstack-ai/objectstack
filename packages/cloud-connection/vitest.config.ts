@@ -126,6 +126,15 @@ export default defineConfig({
         find: /^@objectstack\/service-settings$/,
         replacement: path.resolve(__dirname, '../services/service-settings/src/index.ts'),
       },
+      // [#31554] The plugin picks its credential store with the cluster
+      // service's own multi-replica predicate (`declaresMultiNode`,
+      // `isInProcessClusterDriver`), so the suites judge THIS checkout's
+      // predicate, not a `service-cluster/dist` that may be behind it.
+      // Anchored: `@objectstack/service-cluster` exports `./testing`.
+      {
+        find: /^@objectstack\/service-cluster$/,
+        replacement: path.resolve(__dirname, '../services/service-cluster/src/index.ts'),
+      },
     ],
   },
   // Discovery is untouched — but this file is NOT "the alias and nothing else".
