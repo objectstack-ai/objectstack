@@ -2660,14 +2660,15 @@ export const arObjects: NonNullable<TranslationData['objects']> = {
       },
       source_kind: {
         label: "نوع المصدر",
-        help: "ما يرسل المجموعة: اتصال SCIM.",
+        help: "ما يرسل المجموعة: اتصال SCIM، أو مزوّد SSO عند تسجيل الدخول.",
         options: {
-          scim: "اتصال SCIM"
+          scim: "اتصال SCIM",
+          sso: "مزوّد SSO"
         }
       },
       source_id: {
         label: "معرّف المصدر",
-        help: "معرّف اتصال SCIM الذي تصل عبره المجموعة، مثل \"okta-prod\"."
+        help: "معرّف اتصال SCIM أو معرّف مزوّد SSO الذي تصل عبره المجموعة، مثل \"okta-prod\"."
       },
       group_external_id: {
         label: "المعرّف الخارجي للمجموعة",
@@ -2683,7 +2684,7 @@ export const arObjects: NonNullable<TranslationData['objects']> = {
       },
       organization_id: {
         label: "المؤسسة",
-        help: "المؤسسة التي يتم المنح فيها: المؤسسة المالكة لاتصال SCIM."
+        help: "المؤسسة التي يتم المنح فيها: المؤسسة المالكة لاتصال SCIM أو لمزوّد SSO."
       },
       created_at: {
         label: "تاريخ الإنشاء"

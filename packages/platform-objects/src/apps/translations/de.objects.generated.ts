@@ -2660,14 +2660,15 @@ export const deObjects: NonNullable<TranslationData['objects']> = {
       },
       source_kind: {
         label: "Quellart",
-        help: "Was die Gruppe überträgt: eine SCIM-Verbindung.",
+        help: "Was die Gruppe überträgt: eine SCIM-Verbindung oder ein SSO-Anbieter bei der Anmeldung.",
         options: {
-          scim: "SCIM-Verbindung"
+          scim: "SCIM-Verbindung",
+          sso: "SSO-Anbieter"
         }
       },
       source_id: {
         label: "Quell-ID",
-        help: "Die ID der SCIM-Verbindung, über die die Gruppe eintrifft, z. B. \"okta-prod\"."
+        help: "Die ID der SCIM-Verbindung oder des SSO-Anbieters, über die die Gruppe eintrifft, z. B. \"okta-prod\"."
       },
       group_external_id: {
         label: "Externe Gruppen-ID",
@@ -2683,7 +2684,7 @@ export const deObjects: NonNullable<TranslationData['objects']> = {
       },
       organization_id: {
         label: "Organisation",
-        help: "Die Organisation, in der die Berechtigung erteilt wird: die Organisation, der die SCIM-Verbindung gehört."
+        help: "Die Organisation, in der die Berechtigung erteilt wird: die Organisation, der die SCIM-Verbindung oder der SSO-Anbieter gehört."
       },
       created_at: {
         label: "Erstellt am"
