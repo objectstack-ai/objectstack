@@ -49,7 +49,14 @@
  *     condition above stays open there (such a base does not survive a
  *     restart either);
  *   - `created_at` is the store's `CURRENT_TIMESTAMP`, so a base uninstalled
- *     and re-created under the same id within the same second shares it.
+ *     and re-created under the same id within the same second shares it;
+ *   - the store's `get` catches an ordinary driver error (a lock timeout, a
+ *     dropped connection), logs it and answers `null`; only its
+ *     seam-unreadable refusal is thrown. So a passing store error reads as
+ *     "no row": at purge the copy answers 404 (the purge refuses, nothing is
+ *     deleted), and at install no record is written and `copyRecord` says so;
+ *     no door writes that record later (re-recording is #31425). Both fail
+ *     closed. Only the seam refusal reaches the purge as a 503.
  */
 
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';

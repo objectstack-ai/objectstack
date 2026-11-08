@@ -5606,7 +5606,10 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
      * or is a later base under the copy's id (the package store's row is gone
      * or carries another `created_at`); `notSeeded` for a copy made without
      * the sample data; `failure` when the record (`recordFile` set), the
-     * package store, or the receipt could not be read.
+     * package store, or the receipt could not be read. The package store's
+     * `get` answers `null` for an ordinary driver error (it logs it and throws
+     * only its seam-unreadable refusal), so a passing store error is a 404
+     * here, not a 503: the purge fails closed and deletes nothing.
      */
     private unmanagedCopyPurgeDatasets = async (
         ctx: PluginContext,
@@ -5643,7 +5646,10 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
      * store's row of `baseId` ({@link readUnmanagedCopyInstance}). No
      * `instance` on a runtime with no `package` service (the record's reach is
      * then by id alone — the residual its module docblock states); a
-     * `failure`, and so no record, when the store holds no readable row.
+     * `failure`, and so no record, when the store holds no readable row —
+     * which is also what a passing store error reads as, since the store
+     * answers `null` for it. That copy stays unrecorded (`copyRecord` says
+     * so); no door records it later (#31425).
      */
     private unmanagedCopyInstance = async (
         ctx: PluginContext,

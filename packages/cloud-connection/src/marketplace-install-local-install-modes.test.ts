@@ -657,7 +657,10 @@ describe('install-local — an unmanaged copy\'s sample data, asked for with `se
      * so a second mount is a restart over the same database. `packageRows`
      * stands in for the `package` service's `sys_packages` rows (`get`), the
      * import minting each new base's `created_at`; `packageStore: false`
-     * mounts a runtime with no `package` service.
+     * mounts a runtime with no `package` service. `storeFault(kind)` makes the
+     * next `get` meet a fault the way `service-package`'s does: an ordinary
+     * driver error (a lock timeout, a dropped connection) is caught, logged and
+     * answered `null`; only the seam-unreadable refusal escapes, as a 503.
      */
     function world(opts: { packageStore?: boolean } = {}) {
         const tables: Record<string, Row[]> = {};
@@ -665,11 +668,26 @@ describe('install-local — an unmanaged copy\'s sample data, asked for with `se
         const packages = new Map<string, { manifest: Record<string, unknown> }>();
         const packageRows = new Map<string, { version: string; created_at: string }>();
         let stamp = 0;
+        let fault: 'ordinary' | 'seam' | undefined;
+        const seamRefusal = Object.assign(
+            new Error('The package store cannot answer: its query seam ran no SELECT.'), { code: 'SERVICE_UNAVAILABLE', status: 503 },
+        );
         const packageGet = vi.fn(async (id: string, version = 'latest') => {
-            const row = packageRows.get(id);
-            if (!row || (version !== 'latest' && row.version !== version)) return null;
-            return { id, ...row };
+            try {
+                if (fault !== undefined) {
+                    const kind = fault;
+                    fault = undefined;
+                    throw kind === 'seam' ? seamRefusal : new Error('SQLITE_BUSY: database is locked');
+                }
+                const row = packageRows.get(id);
+                if (!row || (version !== 'latest' && row.version !== version)) return null;
+                return { id, ...row };
+            } catch (err) {
+                if (err === seamRefusal) throw err;
+                return null;
+            }
         });
+        const storeFault = (kind: 'ordinary' | 'seam') => { fault = kind; };
         const writes: string[] = [];
         let nextId = 0;
         const known = (object: string) => {
@@ -813,7 +831,7 @@ describe('install-local — an unmanaged copy\'s sample data, asked for with `se
                 logger,
             };
         }
-        return { tables, writes, seedRows, packages, packageRows, packageGet, importUnmanagedPackage, getMetaItem, cleanups, boot };
+        return { tables, writes, seedRows, packages, packageRows, packageGet, storeFault, importUnmanagedPackage, getMetaItem, cleanups, boot };
     }
 
     it('off by default: the import is not asked for the sample data, no row lands, and the answer says it was skipped', async () => {
@@ -1020,16 +1038,23 @@ describe('install-local — an unmanaged copy\'s sample data, asked for with `se
         expect(w.packageGet).toHaveBeenLastCalledWith('com.example.crm-copy', '1.0.0');
     });
 
-    it('a base whose package-store row is gone is not reached (404); a package store that does not answer is a 503 naming no file', async () => {
+    it('at purge: a gone row, or an ordinary store error the store answers null, fails closed (404); only the seam refusal is a 503', async () => {
         const w = world();
         const h = await w.boot();
         await h.install({ manifest: seededCrm(), installMode: 'unmanaged', seedSampleData: true });
         const before = w.writes.length;
-        w.packageGet.mockRejectedValueOnce(new Error('sys_packages is unreachable'));
+        // An ordinary driver error: the store logs it and answers null, so the
+        // door cannot tell it from a gone row — 404, nothing deleted.
+        w.storeFault('ordinary');
+        const passing = await h.purge('com.example.crm-copy');
+        expect(passing.status, JSON.stringify(passing.payload)).toBe(404);
+        expect(passing.payload.error.code).toBe('RESOURCE_NOT_FOUND');
+        // The seam-unreadable refusal is the one fault that escapes the store: 503, no file named, no store text.
+        w.storeFault('seam');
         const unread = await h.purge('com.example.crm-copy');
         expect(unread.status, JSON.stringify(unread.payload)).toBe(503);
         expect(unread.payload.error.message).not.toContain('Repair');
-        expect(unread.payload.error.message).not.toContain('sys_packages is unreachable');
+        expect(unread.payload.error.message).not.toContain('query seam');
         const row = w.packageRows.get('com.example.crm-copy')!;
         w.packageRows.delete('com.example.crm-copy');
         expect((await h.purge('com.example.crm-copy')).status).toBe(404);
@@ -1066,16 +1091,19 @@ describe('install-local — an unmanaged copy\'s sample data, asked for with `se
             expect((await h.purge('com.example.crm-copy')).status).toBe(404);
             rmSync(join(dir, 'unmanaged-copies'), { force: true });
         }
-        // The package store holds no row of the new base: no record is written.
-        {
+        // The package store meets a fault at install — an ordinary error it
+        // answers null, or the seam refusal it throws: no record is written,
+        // and the copy stays unrecorded (re-recording is #31425).
+        for (const kind of ['ordinary', 'seam'] as const) {
             const w = world();
             const h = await w.boot();
-            w.packageGet.mockResolvedValueOnce(null);
+            w.storeFault(kind);
             const res = await h.install({ manifest: seededCrm(), installMode: 'unmanaged', seedSampleData: true });
-            expect(res.status, JSON.stringify(res.payload)).toBe(200);
+            expect(res.status, `${kind}: ${JSON.stringify(res.payload)}`).toBe(200);
             expect(res.payload.data.copyRecord).toEqual({
                 written: false, message: expect.stringContaining('the package store did not answer with the new base\'s row'),
             });
+            expect(res.payload.data.copyRecord.message).not.toContain('SQLITE_BUSY');
             expect(existsSync(COPY_RECORD())).toBe(false);
             expect((await h.purge('com.example.crm-copy')).status).toBe(404);
         }
