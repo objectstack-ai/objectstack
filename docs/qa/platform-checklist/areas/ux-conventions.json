@@ -179,7 +179,7 @@
       "title": "Every disabled control explains itself — the reason shows on hover and on keyboard focus, and is exposed as an accessible description",
       "since": "v17.7",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -199,11 +199,11 @@
       },
       "variants": [
         "declared action disabled by its `disabled` predicate — Archive on a not-done task, in its record header placement (its only declared location)",
-        "Studio Publish on a read-only package",
+        "Studio Publish on a read-only package — run it before records-forms.form-view-gallery creates the com.example.showcase.custom pair, or on a boot without one: once the pair exists, Studio Publish on the showcase leaves its read-only posture (#28562)",
         "Studio controls on a read-only package — field inspector inputs, validation editor selects, and the default inspector of the All metadata item page (/_console/studio/~all/metadata/TYPE/NAME, #29897). Not the automation Enabled switch: it is the deployment's ledger switch and stays enabled on a read-only package (FlowLedgerSwitch.tsx draws it disabled only on a walled boot)",
         "import wizard — the step's continue/import button while a required field is unmapped",
         "a form submit button, where the surface disables it instead of validating on submit (QA run #29890 found no stock instance: record it not offered unless the run finds one)",
-        "toolbar or bulk buttons rendered disabled for the member persona (QA run #29890 found no stock instance: record it not offered unless the run finds one)"
+        "toolbar or bulk buttons rendered disabled for the member persona — the stock instance is the task list's 'Reassign…' with no row selected (QA run #31486 (owed:weekly, at 0647dabb); QA run #29890 had found none)"
       ],
       "steps": [
         "sign in as admin; on each variant locate every control rendered disabled (the disabled attribute, aria-disabled=true, or data-disabled)",
@@ -273,6 +273,12 @@
           "date": "2026-11-04",
           "change": "fixtures.knownGaps[0] and [1] and variants[0], [2], [4] and [5] corrected from QA run #29890 (W5-FAIL, at 589049b0): Archive declares its own disabledReason and only the record_header placement; the automation Enabled switch is the ledger switch and stays enabled on a read-only package; variants[2] names the All metadata item page's default inspector (#29897, fixed); variants[4] and [5] had no stock instance. Read at base f68b47ca",
           "ref": "#29906"
+        },
+        {
+          "revision": 6,
+          "date": "2026-11-08",
+          "change": "variants[1] runs before the customization pair exists (once it does, Studio Publish on the showcase leaves its read-only posture, #28562), and variants[5] names its stock instance, the task list's 'Reassign…' with no row selected. Checklist-accuracy findings of QA run #31486 (owed:weekly, at 0647dabb). Read at base 4894cfe1",
+          "ref": "#31499"
         }
       ]
     },

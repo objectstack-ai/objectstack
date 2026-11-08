@@ -2870,7 +2870,7 @@
       "title": "Customize a read-only base's flow in Studio: the pair's item under the base's name, declaring the override, is armed in place of the base in one reload, keeps the base's ledger switch, lets a waiting run finish on the base, and Restore re-arms the base — New similar stays a separate copy under a new name",
       "since": "v18",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -2887,18 +2887,19 @@
         ],
         "knownGaps": [
           "AUTOMATION LIVES UNDER ui/ — `cd ui && pnpm exec vitest run --maxWorkers=1 packages/app-shell/src/views/studio-design/FILE`; the jsdom pins mock the server",
-          "the engine's arming and the waiting run are pinned at the engine layer only (packages/services/service-automation/src/flow-sync-one-precedence.test.ts drives the boot pull, the kernel:ready sync and the metadata:reloaded re-sync against a fake store); no pin drives the HTTP doors this item reads"
+          "the engine's arming and the waiting run are pinned at the engine layer only (packages/services/service-automation/src/flow-sync-one-precedence.test.ts drives the boot pull, the kernel:ready sync and the metadata:reloaded re-sync against a fake store); no pin drives the HTTP doors this item reads",
+          "acceptance[2] cannot be told apart by a label-only override edit: QA run #31486 (owed:weekly, at 0647dabb) saw the run suspended on the base complete, but a node label does not show in the step log, so the clause scored partial. Prescribe a topology-changing override edit (a node added or removed, so the two definitions' step logs differ), or score the clause from its engine pin (knownGaps[1]) and record which"
         ]
       },
       "steps": [
-        "start a run on the BASE first: PATCH a showcase_project budget above 100000; GET /api/v1/automation/showcase_budget_approval/runs and record the paused run's id",
+        "start a run on the BASE first: PATCH a showcase_project budget above 100000; GET /api/v1/automation/showcase_budget_approval/runs (the list is at data.runs, as on every runs read below) and record the paused run's id",
         "open /_console/studio/com.example.showcase/automations and select showcase_budget_approval: the canvas is read-only and Customize (studio-customize) is offered; press it — nothing is sent",
         "edit the flow (e.g. a node's label) and let the autosave run: capture POST /api/v1/packages/com.example.showcase/ensure-customization and PUT /api/v1/meta/flow/showcase_budget_approval?mode=draft&package=com.example.showcase.custom; confirm no POST /api/v1/automation/showcase_budget_approval/toggle and no sys_metadata_activation write",
-        "publish the pair; then GET /api/v1/automation/_status (one row for the name) and GET /api/v1/meta/flow/showcase_budget_approval (no package); read the header: the override badge (studio-override-chip) and the ledger switch (auto-ledger-switch) — no definition switch",
+        "publish the pair; then GET /api/v1/automation/_status (one row for the name) and GET /api/v1/meta/flow/showcase_budget_approval (no package); read the header: the override badge is folded into the item's More menu (open auto-item-more; studio-override-chip sits in studio-item-header-folded-chips) beside the ledger switch (auto-ledger-switch) — no definition switch",
         "as the approver, approve the step-1 run's pending request; GET /api/v1/automation/showcase_budget_approval/runs/RUN_ID",
         "PATCH the project budget again (a new value above 100000): the new run's step log",
         "ledger: switch the flow off with auto-ledger-switch, PATCH the budget again (no run starts), switch it back on",
-        "Restore package original (studio-restore-original), read the confirmation and confirm: capture the two DELETEs at the pair; PATCH the budget once more and read the new run",
+        "Restore package original from the override chip's popover (studio-override-restore, as in studio-authoring.package-customize-restore-display steps[6]), read the confirmation (studio-restore-original-dialog) and confirm (studio-restore-original-confirm): capture the two DELETEs at the pair; PATCH the budget once more and read the new run",
         "New similar on the same flow (auto-new-similar-*): give a new name and label; read where the copy opens and its status",
         "Customize and publish the flow again (as steps 2–4), and while that override is live press New similar on it with another new name and label; read the answer, the copy's draft in the pair, and GET /api/v1/meta/flow/showcase_budget_approval; then Restore package original as in step 8"
       ],
@@ -2987,6 +2988,12 @@
           "date": "2026-11-03",
           "change": "added step 10 and acceptance[6]: New similar while the override is live. The steps cloned only after the restore, so they could not see the copy keeping the override's overrides block under its new name, which the save gate refused 403 NOT_OVERRIDABLE (#29650, QA-source #29648). automated names the clone-door pin",
           "ref": "#29650"
+        },
+        {
+          "revision": 4,
+          "date": "2026-11-08",
+          "change": "steps[0], steps[3] and steps[7] corrected: the runs list is at data.runs, the override chip is folded into auto-item-more as studio-item-header-folded-chips, and Restore is the chip popover's studio-override-restore. fixtures.knownGaps gains acceptance[2]'s discrimination gap. Checklist-accuracy finding and coverage gap of QA run #31486 (owed:weekly, at 0647dabb). Read at base 4894cfe1",
+          "ref": "#31499"
         }
       ]
     }
