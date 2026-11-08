@@ -384,7 +384,7 @@ Where a source leans one way, the lean is quoted here, not adopted. This record 
    calendar day in the organization's `localization.timezone`, UTC when the setting is unset or unknown to the host,
    never the writer's request zone, so a REST write, an import and a flow pick the same rate for the same stored
    instant — ruling [`6539345871`](https://github.com/objectstack-ai/objectstack/issues/8345#issuecomment-6539345871) on #8345, letter B
-   (`packages/objectql/src/home-amount-projection.ts#documentDateOf`; the zone rides the same settings bridge as the
+   (`packages/formula/src/home-amount-arithmetic.ts#documentDateOf`; the zone rides the same settings bridge as the
    home currency, item 4). Not chosen: A, the UTC day now and the organization's zone as a later card, a semantic
    change over stored rows once released. A foreign-currency amount with a blank document date is refused
    `VALIDATION_FAILED` with `required` on the date field (item 9). Review: contract review
@@ -399,7 +399,9 @@ Where a source leans one way, the lean is quoted here, not adopted. This record 
    exact scaled-decimal arithmetic over `BigInt` with no float step, rounded **once, half away from zero** (accounting
    `HALF_UP`; `1.005` stores `1.01`, `-0.125` stores `-0.13`) to the home currency's fraction digits, and stored as the
    rounded decimal's own spelling, the bare number ADR-0104 D1 requires
-   (`packages/objectql/src/home-amount-projection.ts#divideToPlaces`, `#divideRoundHalfAwayFromZero`, `#toScaledDecimal`).
+   (`packages/formula/src/home-amount-arithmetic.ts#divideToPlaces`, `#divideRoundHalfAwayFromZero`, `#toScaledDecimal`;
+   moved there unchanged from `packages/objectql/src/home-amount-projection.ts`, which imports them back, on 2026-11-08
+   in #31609, so the form's live home-amount preview reads the engine's one copy).
    The rate is stored in `homeAmount.rateField` **unrounded**, as the rate row holds it, so the
    stored home amount reproduces from the stored amount and rate
    (`packages/objectql/src/home-amount-projection.ts#projectHomeAmounts`); a `scale` declared on that field reaches

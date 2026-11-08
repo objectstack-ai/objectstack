@@ -64,6 +64,7 @@ import { PluginDisclosure } from './PluginDisclosure.js';
 import { MarketplaceAccessDenied } from './MarketplaceAccessDenied.js';
 import { MarketplaceResolving } from './MarketplaceResolving.js';
 import { MarketplaceDisabled } from './MarketplaceDisabled.js';
+import { MarketplaceNotLoadedReason } from './MarketplaceRowActions.js';
 import { localizePackage } from './usePackageL10n.js';
 import { isNewerVersion } from './versionPrecedence.js';
 import {
@@ -86,7 +87,6 @@ import {
   type MarketplaceDetailResponse,
   type CloudEnvironment,
   type LocalInstallEntry,
-  type LocalInstallNotLoaded,
   type LocalInstallMode,
   type LocalInstallStrippedLock,
   type CloudInstallationInfo,
@@ -1035,16 +1035,12 @@ function MarketplacePackagePageBody() {
       {t('marketplace.detail.installedV', { version: localInstall.version })}
     </Badge>
   ));
-  // The reason in plain words. A code the console has no sentence for is still
-  // read as not loaded, naming the code — Installed Apps' reading of the marker.
-  const notLoadedReason = (marker: LocalInstallNotLoaded): string =>
-    marker.code === 'OS_PROTOCOL_INCOMPATIBLE'
-      ? t('marketplace.notLoaded.protocolIncompatible', { requiredRange: marker.requiredRange })
-      : t('marketplace.notLoaded.otherReason', { code: marker.code });
+  // The reason in plain words, through Installed Apps' one reader of the
+  // marker: the protocol range, or the code with the engine's sentence.
   const localNotLoadedReason = localInstall?.notLoaded && (
     <p className="text-xs text-destructive mt-2 flex items-start gap-1.5">
       <AlertCircle className="h-3.5 w-3.5 mt-px shrink-0" aria-hidden="true" />
-      <span>{notLoadedReason(localInstall.notLoaded)}</span>
+      <MarketplaceNotLoadedReason marker={localInstall.notLoaded} />
     </p>
   );
   const localMenu = localInstall && (
