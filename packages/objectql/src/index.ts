@@ -638,6 +638,16 @@ export type { RecycleBinRemovalOptions } from './recycle-bin/purge.js';
 // hook's api, and the runtime's sandbox to every body's.
 export { refuseAppAuthoredPermanentDelete } from './recycle-bin/app-authored-delete.js';
 export { lifecycleSettingsManifest } from './lifecycle/lifecycle-settings.js';
+// [#30208] The key columns of the three lifecycle map settings, served from the
+// running system; `ObjectQLPlugin` registers them with the settings service.
+export {
+  lifecycleObjectKeySource,
+  lifecycleClassKeySource,
+  type LifecycleKeySource,
+  type LifecycleKeyAnswer,
+  type LifecycleKeyOption,
+  type LifecycleKeyRegistryLike,
+} from './lifecycle/lifecycle-key-options.js';
 
 // [#4551] Read-only referential-integrity audit — the reporting half of the
 // `isSystem` exemption #4441 deliberately left in the write-path guard.
