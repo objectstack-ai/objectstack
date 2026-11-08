@@ -9,8 +9,7 @@
  * FIELD verbatim in GROUP BY, in the aggregand and in `SELECT DISTINCT`, so
  * the remote table was asked for a column it does not have. Measured before
  * the fix on SQLite (this file's fixture) as the driver's unattributed-column
- * refusal, and on Oracle 23ai as ORA-00904 for every mapped object — Oracle's
- * imported columns are upper-case, so every Oracle object is a mapped one.
+ * refusal.
  *
  * The rule pinned here: identifiers are the REMOTE column; output keys,
  * presentation and the per-field registries stay the FIELD.

@@ -25,8 +25,11 @@
  *   string through the console's one date-display path, a number through its
  *   one number-display path, a boolean as Yes / No (the detail view's
  *   read-only word), and an array or object as short text — never raw JSON.
- *   That includes a lookup: its value is the stored id, and the target's name
- *   is not served to an anonymous visitor, so the id is what shows.
+ * - A lookup or master-detail value is the stored id of ANOTHER record, and
+ *   neither that id nor the target's name is anything the visitor should read:
+ *   a filled one shows a neutral, localized "Linked record" and an empty one
+ *   the empty face. Which field is one is read from the type the projection
+ *   serves, never guessed from the value's shape; nothing reads the target.
  *
  * System fields are shown, not hidden: the record detail view's notion of a
  * framework-managed column (`isSystemManagedField`, `@object-ui/types`) only
@@ -112,6 +115,21 @@ const NO_FETCH_CELL_RENDERERS: ReadonlySet<React.FC<CellRendererProps>> = new Se
   CurrencyCellRenderer,
 ]);
 
+/**
+ * The field types whose value is the stored id of another record, as the
+ * projection serves `type`. The value never reaches the page as text.
+ */
+const RECORD_REFERENCE_TYPES: ReadonlySet<string> = new Set(['lookup', 'master_detail']);
+
+function isRecordReference(field: SharedFieldDisplay | undefined): boolean {
+  return !!field?.type && RECORD_REFERENCE_TYPES.has(field.type);
+}
+
+/** A value with nothing in it: no id was stored, so there is no link to name. */
+function isEmptyValue(value: unknown): boolean {
+  return value === null || value === undefined || value === '' || (Array.isArray(value) && value.length === 0);
+}
+
 /** The detail view's renderer for `field`'s type, when it is one this page may use. */
 function noFetchRendererOf(field: SharedFieldDisplay | undefined): React.FC<CellRendererProps> | undefined {
   if (!field?.type) return undefined;
@@ -146,7 +164,15 @@ export function SharedRecordFields({ record, fields }: SharedRecordFieldsProps) 
         <div key={key} className="grid grid-cols-1 gap-1 py-2 sm:grid-cols-[minmax(8rem,1fr)_2fr] sm:gap-4">
           <dt className="text-xs font-medium text-muted-foreground">{field?.label || humanizeLabel(key)}</dt>
           <dd className="min-w-0 whitespace-pre-wrap break-words text-sm text-foreground">
-            {Renderer ? (
+            {isRecordReference(field) ? (
+              isEmptyValue(record[key]) ? (
+                EMPTY
+              ) : (
+                <span className="text-muted-foreground">
+                  {t('sharedRecord.linkedRecord', { defaultValue: 'Linked record' })}
+                </span>
+              )
+            ) : Renderer ? (
               <Renderer
                 value={record[key]}
                 field={{ name: key, ...field } as unknown as FieldMetadata}

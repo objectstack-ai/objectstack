@@ -9,8 +9,7 @@
  * (`readBackInsertedRows`). The by-id doors were not: they wrote
  * `WHERE "id" = ?` whatever the map said, so on a federated object whose key
  * column is `CUST_NO` they asked for a column the remote table does not have.
- * Measured before the fix on Oracle 23ai (ORA-00904 `"id"` on every update and
- * delete — every Oracle object is mapped) and on SQLite (this file).
+ * Measured before the fix on SQLite (this file).
  *
  * The second fixture is the silent half: a remote table that ALSO has a
  * column literally named `id`, which is not the mapped key. The unmapped

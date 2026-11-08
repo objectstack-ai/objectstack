@@ -3864,6 +3864,7 @@ const es = {
     noMessages: 'Esta conversación aún no tiene mensajes.',
     sharedObject: '{{object}} compartido',
     redactedFields: 'El propietario ocultó algunos campos: {{fields}}',
+    linkedRecord: 'Registro vinculado',
   },
   publicForm: {
     submit: "Enviar",

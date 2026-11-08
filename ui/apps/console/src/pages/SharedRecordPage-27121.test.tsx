@@ -4,9 +4,10 @@
  * objectstack#27121 — the shared-record page reads the resolve answer's
  * `fields` projection (objectstack#26991): each row carries the field's
  * authored label, a picklist value its authored option label, a currency
- * value its currency through `resolveFieldCurrency`, and a lookup its stored
- * id. A key with no `fields` entry, and an answer from a server that predates
- * the projection, keep the humanized label and the JSON-shape value.
+ * value its currency through `resolveFieldCurrency`, and a filled lookup a
+ * neutral "Linked record" in place of its stored id (objectstack#31326). A key
+ * with no `fields` entry, and an answer from a server that predates the
+ * projection, keep the humanized label and the JSON-shape value.
  *
  * The stub answers `/share-links/:token/resolve` the way both producers do:
  * enveloped, with the redacted fields already stripped from `record` and
@@ -20,7 +21,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { formatCurrency } from '@object-ui/fields';
-import { resolveFieldCurrency } from '@object-ui/i18n';
+import { I18nProvider, resolveFieldCurrency } from '@object-ui/i18n';
+import { builtInLocales } from '@object-ui/i18n/locales';
 import { SchemaRendererProvider } from '@object-ui/react';
 import SharedRecordPage from './SharedRecordPage';
 
@@ -72,7 +74,11 @@ const json = (status: number, body: unknown) =>
   new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
 
 /** Stub the resolve route; answer `fields` only when given. Returns every requested path. */
-function shareServer(record: Record<string, unknown>, fields?: Record<string, unknown>): string[] {
+function shareServer(
+  record: Record<string, unknown>,
+  fields?: Record<string, unknown>,
+  objectName = 'account',
+): string[] {
   const requested: string[] = [];
   vi.stubGlobal(
     'fetch',
@@ -88,7 +94,7 @@ function shareServer(record: Record<string, unknown>, fields?: Record<string, un
             link: {
               id: 'sl_1',
               token: TOKEN,
-              object_name: 'account',
+              object_name: objectName,
               record_id: String(record.id),
               permission: 'view',
               audience: 'anyone',
@@ -104,7 +110,7 @@ function shareServer(record: Record<string, unknown>, fields?: Record<string, un
   return requested;
 }
 
-function renderLink(dataSource?: Record<string, unknown>) {
+function renderLink(dataSource?: Record<string, unknown>, language?: 'zh') {
   const routed = (
     <MemoryRouter initialEntries={[`/s/${TOKEN}`]}>
       <Routes>
@@ -112,8 +118,19 @@ function renderLink(dataSource?: Record<string, unknown>) {
       </Routes>
     </MemoryRouter>
   );
+  const withData = dataSource ? (
+    <SchemaRendererProvider dataSource={dataSource as never}>{routed}</SchemaRendererProvider>
+  ) : (
+    routed
+  );
   return render(
-    dataSource ? <SchemaRendererProvider dataSource={dataSource as never}>{routed}</SchemaRendererProvider> : routed,
+    language ? (
+      <I18nProvider config={{ defaultLanguage: language, detectBrowserLanguage: false }} persistLanguage={false}>
+        {withData}
+      </I18nProvider>
+    ) : (
+      withData
+    ),
   );
 }
 
@@ -180,12 +197,12 @@ describe('SharedRecordPage — rows read the resolve answer’s fields projectio
     expect(cellOf('Open Pipeline').textContent).not.toMatch(/CN¥|¥|CNY/);
   });
 
-  it('a lookup shows its stored id under its authored label, and nothing but resolve is fetched', async () => {
+  it('a lookup shows a neutral placeholder under its authored label, and nothing but resolve is fetched', async () => {
     const requested = shareServer(ACCOUNT, FIELDS);
     renderLink();
 
     await screen.findByText('Shared account');
-    expect(cellOf('Parent Account').textContent).toBe('acc_parent_9');
+    expect(cellOf('Parent Account').textContent).toBe('Linked record');
     // One request, to resolve: no lookup-name read, no /meta, no /data.
     expect(requested).toEqual([RESOLVE_PATH]);
   });
@@ -205,7 +222,10 @@ describe('SharedRecordPage — rows read the resolve answer’s fields projectio
     await screen.findByText('Shared account');
     // Let any effect a renderer scheduled settle before reading the spies.
     await new Promise((resolve) => setTimeout(resolve, 50));
-    expect(cellOf('Parent Account').textContent).toBe('acc_parent_9');
+    expect(cellOf('Parent Account').textContent).toBe('Linked record');
+    // Neither the stored id nor the target's name reaches the page.
+    expect(document.body.innerHTML).not.toContain('acc_parent_9');
+    expect(document.body.textContent).not.toContain('Globex');
     expect(dataSource.find).not.toHaveBeenCalled();
     expect(dataSource.findOne).not.toHaveBeenCalled();
     expect(dataSource.getObjectSchema).not.toHaveBeenCalled();
@@ -234,5 +254,93 @@ describe('SharedRecordPage — rows read the resolve answer’s fields projectio
     expect(screen.queryByText('Account Name', { selector: 'dt' })).toBeNull();
     expect(container.querySelectorAll('dt')).toHaveLength(Object.keys(ACCOUNT).length);
     expect(requested).toEqual([RESOLVE_PATH]);
+  });
+});
+
+/**
+ * objectstack#31326 — a lookup or master-detail value is the stored id of
+ * another record. The page shows a neutral, localized "Linked record" for a
+ * filled one and the empty face for an empty one; the id never reaches the
+ * DOM. Which field is one is read from the `type` the projection serves.
+ */
+describe('SharedRecordPage — a lookup shows a neutral placeholder, never its stored id (objectstack#31326)', () => {
+  /** An `opportunity` as resolve hands it over: one filled and one empty lookup, a master-detail, a multi lookup. */
+  const OPPORTUNITY = {
+    id: 'opp_7',
+    name: 'Renewal 2027',
+    account_id: 'acc_9f3e1c',
+    partner_id: null,
+    plan_id: 'plan_mdx_42',
+    contact_ids: ['con_a11', 'con_b22'],
+    created_by: 'usr_creator_5',
+  };
+  const OPPORTUNITY_FIELDS = {
+    id: { label: 'Record ID', type: 'text' },
+    name: { label: 'Opportunity Name', type: 'text' },
+    account_id: { label: 'Account', type: 'lookup', reference: 'account', displayField: 'name' },
+    partner_id: { label: 'Partner', type: 'lookup', reference: 'account', displayField: 'name' },
+    plan_id: { label: 'Plan', type: 'master_detail', reference: 'plan', displayField: 'title' },
+    contact_ids: { label: 'Contacts', type: 'lookup', reference: 'contact', multiple: true },
+    created_by: { label: 'Created By', type: 'lookup', reference: 'sys_user' },
+  };
+  const STORED_IDS = ['acc_9f3e1c', 'plan_mdx_42', 'con_a11', 'con_b22', 'usr_creator_5'];
+
+  it('a filled lookup shows the placeholder, and its id appears nowhere in the DOM', async () => {
+    const requested = shareServer(OPPORTUNITY, OPPORTUNITY_FIELDS, 'opportunity');
+    renderLink();
+
+    await screen.findByText('Shared opportunity');
+    expect(cellOf('Account').textContent).toBe('Linked record');
+    expect(cellOf('Created By').textContent).toBe('Linked record');
+    expect(document.body.innerHTML).not.toContain('acc_9f3e1c');
+    expect(document.body.innerHTML).not.toContain('usr_creator_5');
+    expect(requested).toEqual([RESOLVE_PATH]);
+  });
+
+  it('a filled master-detail shows the placeholder, and its id appears nowhere in the DOM', async () => {
+    shareServer(OPPORTUNITY, OPPORTUNITY_FIELDS, 'opportunity');
+    renderLink();
+
+    await screen.findByText('Shared opportunity');
+    expect(cellOf('Plan').textContent).toBe('Linked record');
+    expect(document.body.innerHTML).not.toContain('plan_mdx_42');
+  });
+
+  it('a multiple lookup shows the placeholder, and none of its ids', async () => {
+    shareServer(OPPORTUNITY, OPPORTUNITY_FIELDS, 'opportunity');
+    renderLink();
+
+    await screen.findByText('Shared opportunity');
+    expect(cellOf('Contacts').textContent).toBe('Linked record');
+    for (const id of STORED_IDS) expect(document.body.innerHTML).not.toContain(id);
+  });
+
+  it('an empty lookup renders empty, as before', async () => {
+    shareServer(OPPORTUNITY, OPPORTUNITY_FIELDS, 'opportunity');
+    renderLink();
+
+    await screen.findByText('Shared opportunity');
+    expect(cellOf('Partner').textContent).toBe('—');
+  });
+
+  it('the placeholder speaks the session language', async () => {
+    const zh = builtInLocales['zh-Hans'].sharedRecord.linkedRecord;
+    // Guard: a real zh row, not an English copy.
+    expect(zh).not.toBe(builtInLocales.en.sharedRecord.linkedRecord);
+    shareServer(OPPORTUNITY, OPPORTUNITY_FIELDS, 'opportunity');
+    renderLink(undefined, 'zh');
+
+    await screen.findByText(builtInLocales['zh-Hans'].sharedRecord.sharedObject.replace('{{object}}', 'opportunity'));
+    expect(cellOf('Account').textContent).toBe(zh);
+    expect(document.body.innerHTML).not.toContain('acc_9f3e1c');
+  });
+
+  it('a text field renders its value as before (control)', async () => {
+    shareServer(OPPORTUNITY, OPPORTUNITY_FIELDS, 'opportunity');
+    renderLink();
+
+    await screen.findByText('Shared opportunity');
+    expect(cellOf('Opportunity Name').textContent).toBe('Renewal 2027');
+    expect(cellOf('Record ID').textContent).toBe('opp_7');
   });
 });
