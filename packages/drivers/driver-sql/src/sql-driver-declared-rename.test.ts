@@ -232,7 +232,7 @@ function declareDeclaredRenameSuite(cell: DialectCell): void {
       expect(after.map((r) => r.b)).toEqual(['alpha', 'beta', 'gamma']);
       expect(after).toHaveLength(3);
       // The driver's own read path serves the new key.
-      expect((await v2.findOne(table, { where: { id: 'r1' } } as any))?.b).toBe('beta');
+      expect((await v2.findOne(table, { where: { id: 'r1' } }))?.b).toBe('beta');
       expect(lines.some((l) => l.includes(`carried the declared rename ${table}.a → ${table}.b`))).toBe(true);
       await fresh(v2, table);
     });
@@ -335,7 +335,7 @@ function declareDeclaredRenameSuite(cell: DialectCell): void {
       expect(cols).not.toContain('b');
       expect((await rows(driver, table)).map((r) => r.a)).toEqual(['alpha', 'beta', 'gamma']);
       // …and v1 still reads them through the driver.
-      expect((await driver.findOne(table, { where: { id: 'r2' } } as any))?.a).toBe('gamma');
+      expect((await driver.findOne(table, { where: { id: 'r2' } }))?.a).toBe('gamma');
       await fresh(driver, table);
     });
 
