@@ -953,21 +953,27 @@ export class ObjectQLPlugin implements Plugin {
           for (const manifest of ordered) for (const name of collectManifestPicklistNames(manifest)) declared.add(name);
           // [ADR-0150 D3, child E6] A registered list is reached the way the
           // served field will reach it: from the package that writes the
-          // reference, through the package-scoped resolver. A reference it
-          // refuses — the environment's own list included (D3 (a)) — is
-          // refused here, loudly, naming every candidate.
-          const judge = <R extends { picklist: string; packageId: string | undefined }>(ref: R): R & { refusal?: string } | undefined => {
+          // reference, through the package-scoped resolver, against the
+          // artifact's own manifests (their declared dependencies). A
+          // reference it refuses — the environment's own list included
+          // (D3 (a)) — is refused here, loudly, naming every candidate. An
+          // extension's target is a contribution, judged caller-less (epic
+          // seat ruling X on #31678; `SchemaRegistry.picklistContributions`).
+          const judge = <R extends { picklist: string; packageId: string | undefined }>(
+            ref: R,
+            caller: string | null | undefined,
+          ): R & { refusal?: string } | undefined => {
             if (declared.has(ref.picklist)) return undefined;
-            const verdict = ql.registry.picklistReferenceVerdict(ref.picklist, ref.packageId, ordered);
+            const verdict = ql.registry.picklistReferenceVerdict(ref.picklist, caller, ordered);
             if (verdict.status === 'resolved') return undefined;
             return verdict.status === 'refused' ? { ...ref, refusal: verdict.message } : ref;
           };
           const unresolved = ordered
             .flatMap((manifest) => collectManifestPicklistReferences(manifest, artifactPackageId(manifest)))
-            .flatMap((ref) => judge(ref) ?? []);
+            .flatMap((ref) => judge(ref, ref.packageId) ?? []);
           const orphans = ordered
             .flatMap((manifest) => collectManifestPicklistExtensions(manifest, artifactPackageId(manifest)))
-            .flatMap((ext) => judge(ext) ?? []);
+            .flatMap((ext) => judge(ext, null) ?? []);
           const refusal = describeUnresolvedPicklistReferences(unresolved, orphans);
           if (refusal) throw refusal;
         }
@@ -1216,21 +1222,14 @@ export class ObjectQLPlugin implements Plugin {
         // validator refuses its values. That is the declared narrowing — a
         // refused REFERENCE, never a refused boot — so it is named here, once
         // per reference, in the resolver's own words, and the boot goes on.
-        const environmentHeld = this.ql?.registry.findEnvironmentHeldPicklistReferences();
-        for (const ref of environmentHeld?.fields ?? []) {
+        for (const ref of this.ql?.registry.findEnvironmentHeldPicklistReferences() ?? []) {
             ctx.logger.warn(
                 `[ObjectQLPlugin] Field '${ref.object}.${ref.field}' of package '${ref.packageId}' is served with no `
                 + `options and refuses every value: ${ref.refusal}`,
                 { object: ref.object, field: ref.field, packageId: ref.packageId, picklist: ref.picklist },
             );
         }
-        for (const ext of environmentHeld?.extensions ?? []) {
-            ctx.logger.warn(
-                `[ObjectQLPlugin] A \`picklistExtensions\` entry of package '${ext.packageId}' adds its options to `
-                + `nothing: ${ext.refusal}`,
-                { packageId: ext.packageId, picklist: ext.picklist },
-            );
-        }
+
         this.picklistVocabularySealed = true;
         // [#24400] A top-level action bound by `objectName` to an object no
         // package registers fails the boot, naming the action, its package and

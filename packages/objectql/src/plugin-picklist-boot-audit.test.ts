@@ -82,7 +82,10 @@ describe('the picklist boot audit', () => {
   it('boots when the list arrives from a package registered LATER in the same boot', async () => {
     const { kernel, use } = kernelWith(
       new ObjectQLPlugin(),
-      registering('app', [{ id: 'com.test.boot.app', name: 'app', objects: [ACCOUNT] }]),
+      // The app declares its dependency on the package whose list its field
+      // names: a field's `picklist` resolves from its package's declared
+      // closure (ADR-0150 D3).
+      registering('app', [{ id: 'com.test.boot.app', name: 'app', dependencies: { 'com.test.boot.lists': '^1.0.0' }, objects: [ACCOUNT] }]),
       registering('lists', [{ id: 'com.test.boot.lists', name: 'lists', picklists: [INDUSTRY] }]),
     );
     await use();
@@ -118,7 +121,8 @@ describe('the picklist boot audit', () => {
     await use();
     await kernel.bootstrap();
     const manifest = kernel.getService<ManifestService>('manifest');
-    await manifest.register({ id: 'com.test.late', name: 'late', objects: [ACCOUNT] });
+    // Naming a registered list of another package takes the dependency (ADR-0150 D3).
+    await manifest.register({ id: 'com.test.late', name: 'late', dependencies: { 'com.test.boot.lists': '^1.0.0' }, objects: [ACCOUNT] });
     await manifest.register({
       id: 'com.test.late2', name: 'late2',
       picklists: [{ name: 'tier', label: 'Tier', options: [{ label: 'Gold', value: 'gold' }] }],

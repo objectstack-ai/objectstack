@@ -133,7 +133,6 @@ import {
   resolvePicklistFieldsOnto,
   type PicklistContribution,
   type PicklistOptionLike,
-  type PicklistReference,
   type UnresolvedPicklistExtension,
   type UnresolvedPicklistReference,
 } from './picklist-resolution.js';
@@ -9629,7 +9628,7 @@ export class SchemaRegistry {
       if (option && typeof option === 'object' && option.value !== undefined) merged.set(String(option.value), option);
     }
     const candidate: PicklistContribution = { packageId, kind: 'extension', options: [...merged.values()] };
-    const others = this.picklistContributions(target, packageId).filter(
+    const others = this.picklistContributions(target).filter(
       (c) => !(c.kind === 'extension' && (c.packageId ?? '') === packageKey),
     );
     // The candidate's own list first: a value repeated INSIDE this one entry
@@ -9734,33 +9733,38 @@ export class SchemaRegistry {
   }
 
   /**
-   * Every `picklistExtensions` entry whose target list reaches no list from
-   * the extending package — the second half of the load-time audit. Held
-   * extensions are legal while the boot fills; once it is sealed, one still
-   * held adds its options to nothing. The environment-only arm is left out,
-   * as above.
+   * Every `picklistExtensions` entry whose target names no list — the second
+   * half of the load-time audit. Held extensions are legal while the boot
+   * fills; once it is sealed, one still held adds its options to nothing.
+   * The target is judged caller-less ({@link picklistContributions} says
+   * why), so a refusal here is only ever an ambiguity, every holder named.
    */
   findOrphanPicklistExtensions(): UnresolvedPicklistExtension[] {
-    return this.auditPicklistExtensions().unresolved;
+    const orphans: UnresolvedPicklistExtension[] = [];
+    for (const [target, byPackage] of this.picklistExtensionContributions) {
+      const verdict = this.picklistReferenceVerdict(target, null);
+      if (verdict.status === 'resolved') continue;
+      for (const entry of byPackage.values()) {
+        orphans.push(verdict.status === 'refused'
+          ? { picklist: target, packageId: entry.packageId, refusal: verdict.message }
+          : { picklist: target, packageId: entry.packageId });
+      }
+    }
+    return orphans;
   }
 
   /**
-   * [ADR-0150 D3 (a), child E6] The packaged references — fields and
-   * `picklistExtensions` — whose name only an environment-authored list holds.
-   * The resolver refuses them (`outside-closure`, the environment its one
-   * candidate): the field is served with no options and the record validator
-   * refuses its values. The boot names each one (a warning carrying the
-   * refusal's sentence) and the D10 upgrade report lists them; it does not
-   * refuse the boot.
+   * [ADR-0150 D3 (a), child E6] The packaged fields whose picklist only an
+   * environment-authored list holds. The resolver refuses them
+   * (`outside-closure`, the environment its one candidate): the field is
+   * served with no options and the record validator refuses its values. The
+   * boot names each one (a warning carrying the refusal's sentence) and the
+   * D10 upgrade report lists them; it does not refuse the boot (epic seat
+   * ruling on the E6 card: the declared narrowing is a refused reference, not
+   * a refused boot).
    */
-  findEnvironmentHeldPicklistReferences(): {
-    fields: UnresolvedPicklistReference[];
-    extensions: UnresolvedPicklistExtension[];
-  } {
-    return {
-      fields: this.auditPicklistReferences().environmentHeld,
-      extensions: this.auditPicklistExtensions().environmentHeld,
-    };
+  findEnvironmentHeldPicklistReferences(): UnresolvedPicklistReference[] {
+    return this.auditPicklistReferences().environmentHeld;
   }
 
   /** The field half of the audit, split by the resolver's verdict (above). */
@@ -9779,26 +9783,6 @@ export class SchemaRegistry {
           const entry = judged.refusal ? { ...ref, refusal: judged.refusal.message } : ref;
           (judged.environmentOnly ? environmentHeld : unresolved).push(entry);
         }
-      }
-    }
-    return { unresolved, environmentHeld };
-  }
-
-  /** The extension half of the audit, split the same way. */
-  private auditPicklistExtensions(): {
-    unresolved: UnresolvedPicklistExtension[];
-    environmentHeld: UnresolvedPicklistExtension[];
-  } {
-    const unresolved: UnresolvedPicklistExtension[] = [];
-    const environmentHeld: UnresolvedPicklistExtension[] = [];
-    for (const [target, byPackage] of this.picklistExtensionContributions) {
-      for (const entry of byPackage.values()) {
-        const judged = this.judgePicklistReference(target, entry.packageId);
-        if (judged === 'resolved') continue;
-        const orphan: UnresolvedPicklistExtension = judged.refusal
-          ? { picklist: target, packageId: entry.packageId, refusal: judged.refusal.message }
-          : { picklist: target, packageId: entry.packageId };
-        (judged.environmentOnly ? environmentHeld : unresolved).push(orphan);
       }
     }
     return { unresolved, environmentHeld };
@@ -9825,9 +9809,16 @@ export class SchemaRegistry {
 
   /**
    * The list `name` reaches from `callerPackageId` (its options, when that is
-   * one), followed by every extension of the SAME list: an extension's own
-   * package resolves its `extend` target by the same rule, and adds to the
-   * list it reaches, never to another one.
+   * one), followed by every extension of the SAME list.
+   *
+   * [ADR-0150 D3, child E6; epic seat ruling X on the E6 card, #31678] A
+   * `picklistExtensions` entry's `extend` is a CONTRIBUTION to another
+   * package's item, not a reference its package reads: it resolves
+   * caller-less through R — the environment's own list, else the unique
+   * package holder, else a refusal naming every holder — the treatment D3
+   * gives an environment overlay. So an extension adds to the list its target
+   * names environment-wide, and to a field's list only when that is the same
+   * list. Loosens nothing (no first match is picked) and guesses nothing.
    */
   private picklistContributions(name: string, callerPackageId?: string | null): PicklistContribution[] {
     const contributions: PicklistContribution[] = [];
@@ -9841,17 +9832,12 @@ export class SchemaRegistry {
         options: Array.isArray(item?.options) ? item.options : [],
       });
     }
+    const extended = base ? this.picklistReferenceVerdict(name, null) : undefined;
+    if (base && !(extended?.status === 'resolved' && sameHolder(extended.holder, base.holder))) return contributions;
     for (const entry of this.picklistExtensionContributions.get(name)?.values() ?? []) {
-      if (base && !this.extensionReaches(name, entry.packageId, base.holder)) continue;
       contributions.push({ packageId: entry.packageId, kind: 'extension', options: [...entry.options.values()] });
     }
     return contributions;
-  }
-
-  /** Does an extension from `packageId` reach the list `holder` holds (its own resolution of `name`)? */
-  private extensionReaches(name: string, packageId: string | undefined, holder: PackageScopedHolder): boolean {
-    const reached = this.picklistReferenceVerdict(name, packageId);
-    return reached.status === 'resolved' && sameHolder(reached.holder, holder);
   }
 
   /**

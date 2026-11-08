@@ -100,10 +100,16 @@ const CORE = {
   objects: [account],
 };
 
-/** A second package: adds a value to the list and binds a second object to it. */
+/**
+ * A second package: adds a value to the list and binds a second object to it.
+ * It declares its dependency on CORE: a field's `picklist` resolves from its
+ * package's declared closure (ADR-0150 D3), so binding a field to another
+ * package's list takes the dependency.
+ */
 const HEALTH = {
   id: 'com.test.picklist.health',
   name: 'health',
+  dependencies: { 'com.test.picklist.core': '^1.0.0' },
   picklistExtensions: [HEALTHCARE_EXTENSION],
   objects: [lead],
 };
@@ -169,7 +175,10 @@ describe('picklist — the served shape', () => {
 describe('picklist — load order', () => {
   it('an object registered BEFORE its list still resolves once the list arrives', async () => {
     const engine = await bootEngine();
-    engine.registry.registerObject(account as any, 'com.test.early');
+    // The object is the list's own package's (a field's `picklist` resolves
+    // from its package's declared closure, ADR-0150 D3); only the ORDER is
+    // under test.
+    engine.registry.registerObject(account as any, 'com.test.core');
     // Read before the list exists: nothing to serve yet …
     expect((engine.registry.getObject('pk_account')!.fields.industry as any).options).toBeUndefined();
     // … then the list and an extension land, in the "wrong" order.
