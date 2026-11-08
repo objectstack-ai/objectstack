@@ -43,6 +43,7 @@
 import type { FormField } from '@object-ui/types';
 import { evalFieldPredicate, isBlankPredicateText, type FieldRulePredicate } from '@object-ui/core';
 import { mapFieldTypeToFormType, buildValidationRules, fieldHelpText } from '@object-ui/fields';
+import { withHomeAmountSource } from '@object-ui/i18n';
 import { isCreateFormMode, isRequiredInForm } from './schemaDefaults';
 import { findCustomFieldMember } from './customFieldsMerge';
 import { isInlineFieldDef } from './submitTarget';
@@ -342,7 +343,9 @@ export function fromObjectSchema(fieldName: string, ctx: SectionFieldsContext): 
     // (`fieldHelpText` from `@object-ui/fields`, objectui#12213).
     description: fieldHelpText(field),
     validation: buildValidationRules(field),
-    field,
+    // A home field (ADR-0144 D5) carries the amount, rate and document date
+    // that produced it, so its widget can draw the read face and say so.
+    field: withHomeAmountSource(field, ctx.objectSchema?.fields, fieldName),
     options: field.options,
     multiple: field.multiple,
     // Field-level conditional rules (ADR-0036) — the form renderer resolves

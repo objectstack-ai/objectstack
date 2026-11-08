@@ -4251,14 +4251,16 @@ export class AuthPlugin implements Plugin {
       });
 
       // [ADR-0134 D4, filled for permission sets] The identity-provider group
-      // mapping door: which ordinary permission set a SCIM connection's group
-      // grants. The same gate as the credential door above, then the save
+      // mapping door: which ordinary permission set a SCIM connection's group,
+      // or an SSO provider's sign-in group claim (ruling record 6718355623,
+      // item 3: the same mapping, no second model), grants. The same gate as the credential door above, then the save
       // refuses any set outside the organization boundary (judged by the
       // `security` service), so an IdP group never confers administrator
       // standing. See `idp-group-mapping-admin.ts`.
       const groupMappingDeps = (actor: PlatformAdminActor): import('./idp-group-mapping-admin.js').IdpGroupMappingAdminDeps => ({
         getDataEngine: () => this.authManager!.getDataEngine(),
         isScimEnabled: () => this.authManager!.isScimWired(),
+        isSsoEnabled: () => this.authManager!.isSsoWired(),
         boundary: () => this.authManager!.organizationBoundaryJudge(),
         reconcile: (domain) => this.authManager!.reconcileScimProjectionDomain(domain),
         attributed: (fn) => runAttributedToUser(actor, fn),

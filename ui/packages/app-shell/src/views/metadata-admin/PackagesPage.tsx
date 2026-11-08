@@ -589,7 +589,7 @@ export function PackageDetailSheet({
     }
     let cancelled = false;
     apiJson<{ drafts?: Array<{ type: string; name: string }> }>(
-      `/api/v1/meta/_drafts?packageId=${encodeURIComponent(pid)}`,
+      `/api/v1/meta/_drafts?package=${encodeURIComponent(pid)}`,
     )
       .then((r) => {
         if (!cancelled) setDrafts(r?.drafts ?? []);
@@ -781,7 +781,7 @@ export function PackageDetailSheet({
         emitMetadataRefresh();
         try {
           const fresh = await apiJson<{ drafts?: Array<{ type: string; name: string }> }>(
-            `/api/v1/meta/_drafts?packageId=${encodeURIComponent(id)}`,
+            `/api/v1/meta/_drafts?package=${encodeURIComponent(id)}`,
           );
           setDrafts(fresh?.drafts ?? []);
         } catch {
@@ -835,7 +835,7 @@ export function PackageDetailSheet({
         ).then(async (r) => {
           try {
             const fresh = await apiJson<{ drafts?: Array<{ type: string; name: string }> }>(
-              `/api/v1/meta/_drafts?packageId=${encodeURIComponent(id)}`,
+              `/api/v1/meta/_drafts?package=${encodeURIComponent(id)}`,
             );
             setDrafts(fresh?.drafts ?? []);
           } catch {

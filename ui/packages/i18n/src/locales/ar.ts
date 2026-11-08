@@ -450,6 +450,10 @@ const ar = {
       available: 'المتاحة',
       all: 'كل العملات (ISO 4217)',
     },
+    currencyHome: {
+      convertedAt: 'محوّل بسعر {{rate}} بتاريخ {{date}}',
+      homeCurrency: 'بالعملة الأساسية (السعر 1)',
+    },
     boolean: {
       offBadge: "{{label}} — إيقاف",
       completed: "مكتمل",

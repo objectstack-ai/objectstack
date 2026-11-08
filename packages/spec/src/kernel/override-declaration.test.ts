@@ -79,10 +79,11 @@ describe('OverrideDeclarationSchema — the shape', () => {
     expect(pattern.test(`com.acme.crm${CUSTOMIZATION_PACKAGE_SUFFIX}`)).toBe(false);
   });
 
-  it('describes basedOn as recorded and never judged (ADR-0146 D2)', () => {
+  it('describes basedOn as recorded and never a gate, read only as advice by an upgrade plan (ADR-0146 D2, as amended)', () => {
     const described = OverrideDeclarationSchema.shape.basedOn.description ?? '';
-    expect(described).toMatch(/Recorded, never judged/);
-    expect(OverrideDeclarationFields.overrides.description ?? '').toMatch(/recorded and never judged/);
+    expect(described).toMatch(/Recorded, never a gate/);
+    expect(described).toMatch(/upgrade plan/);
+    expect(OverrideDeclarationFields.overrides.description ?? '').toMatch(/recorded and never gates; a base's upgrade plan reads it only as advice/);
   });
 
   it('is NOT part of the ADR-0010 envelope the registration and clone paths strip', () => {

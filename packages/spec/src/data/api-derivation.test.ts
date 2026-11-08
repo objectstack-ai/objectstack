@@ -95,14 +95,20 @@ describe('api-derivation — one table resolves the effective operations from si
       expect(isApiOperationAllowed(resolveEffectiveApiMethods({ apiMethods: ['get'], trackHistory: false }), 'history')).toBe(false);
     });
 
-    it('restore/purge never derive (trash flag retired)', () => {
+    it('[#30237] restore/purge = delete: the recycle bin follows the delete primitive', () => {
       const eff = resolveEffectiveApiMethods({ apiMethods: ['get', 'list', 'create', 'update', 'delete'] });
-      expect(isApiOperationAllowed(eff, 'restore')).toBe(false);
-      expect(isApiOperationAllowed(eff, 'purge')).toBe(false);
-      // even fully-unrestricted objects do not expose restore/purge
+      expect(isApiOperationAllowed(eff, 'restore')).toBe(true);
+      expect(isApiOperationAllowed(eff, 'purge')).toBe(true);
       const open = resolveEffectiveApiMethods({});
-      expect(isApiOperationAllowed(open, 'restore')).toBe(false);
-      expect(isApiOperationAllowed(open, 'purge')).toBe(false);
+      expect(isApiOperationAllowed(open, 'restore')).toBe(true);
+      expect(isApiOperationAllowed(open, 'purge')).toBe(true);
+      // an object whose API withholds `delete` withholds its bin's doors too
+      const noDelete = resolveEffectiveApiMethods({ apiMethods: ['get', 'list', 'create', 'update'] });
+      expect(isApiOperationAllowed(noDelete, 'restore')).toBe(false);
+      expect(isApiOperationAllowed(noDelete, 'purge')).toBe(false);
+      const closed = resolveEffectiveApiMethods({ apiMethods: [] });
+      expect(isApiOperationAllowed(closed, 'restore')).toBe(false);
+      expect(isApiOperationAllowed(closed, 'purge')).toBe(false);
     });
   });
 
@@ -264,7 +270,7 @@ describe('api-derivation — one table resolves the effective operations from si
       expect(arr.indexOf('list')).toBeLessThan(arr.indexOf('create'));
     });
 
-    it('unrestricted exposes all primitives + derivable legacy (minus restore/purge)', () => {
+    it('unrestricted exposes all primitives + every derived operation', () => {
       const arr = effectiveOperationsArray(resolveEffectiveApiMethods({ searchable: true, trackHistory: true }));
       for (const p of API_PRIMITIVES) expect(arr).toContain(p);
       expect(arr).toContain('upsert');
@@ -273,8 +279,8 @@ describe('api-derivation — one table resolves the effective operations from si
       expect(arr).toContain('history');
       expect(arr).toContain('import');
       expect(arr).toContain('export');
-      expect(arr).not.toContain('restore');
-      expect(arr).not.toContain('purge');
+      expect(arr).toContain('restore');
+      expect(arr).toContain('purge');
     });
   });
 

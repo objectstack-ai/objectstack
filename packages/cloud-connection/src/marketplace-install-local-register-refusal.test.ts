@@ -44,7 +44,13 @@
  *     no restart;
  *   - CONTROL, a register failure that declares no status (the runtime's own
  *     fault): the lenient answer it had — `200`, `hotLoaded: false`, ledgered —
- *     and the restart heals it: the next boot loads the package.
+ *     and the restart heals it: the next boot loads the package;
+ *   - (#31566) a ledger entry an earlier build wrote for a register the engine
+ *     refuses: at boot nothing of it loads, and the listing marks it
+ *     `notLoaded: { code, message }` from the refusal; a healthy entry and a
+ *     protocol-incompatible one are listed as before; DELETE and a compatible
+ *     reinstall act on it; a register fault and a failure after the register
+ *     are not marked.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -52,6 +58,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { BaseResponseSchema, ApiErrorSchema, envelopeViolations } from '@objectstack/spec/api';
+import { PROTOCOL_MAJOR } from '@objectstack/spec/kernel';
 // The plugin reaches `@objectstack/runtime` through a lazy `import()`; its first
 // load is paid here, at module top, never inside a clocked `it`.
 import '@objectstack/runtime';
@@ -73,6 +80,8 @@ const HOLDER_ID = 'com.acme.dispatch';
 const INCOMING_ID = 'com.acme.routing';
 /** The register failure the CONTROL's engine throws: an `Error` declaring no status. */
 const REGISTER_FAULT = 'driver connection reset while registering';
+/** A failure AFTER a successful register (#31566 CONTROL): the side effects' replay throws it. */
+const SIDE_EFFECT_FAULT = 'translation store unavailable while replaying side effects';
 
 const obj = (name: string, fields: Bag = { title: { name: 'title', type: 'text', label: 'Title' } }) => ({ name, label: name, fields });
 const recordPage = (name: string, object: string) => ({ name, label: name, type: 'record', object, isDefault: true, regions: [] });
@@ -176,7 +185,7 @@ function serveVersions(versions: Record<string, Bag>) {
  * restart. `failRegisterOf` makes the engine's register throw an undeclared
  * fault for that one package id.
  */
-async function bootPlugin(failRegisterOf?: string) {
+async function bootPlugin(failRegisterOf?: string, opts: { failSideEffectsOf?: string } = {}) {
     const kernel = new ObjectKernel({ logger: { level: 'silent' }, gracefulShutdown: false } as never);
     kernels.push(kernel);
     await kernel.use(new ObjectQLPlugin());
@@ -218,23 +227,28 @@ async function bootPlugin(failRegisterOf?: string) {
     const plugin = new MarketplaceInstallLocalPlugin({ controlPlaneUrl: CLOUD_URL, storageDir: dir });
     const p = plugin as unknown as Record<string, unknown>;
     p.bindArtifactHandlers = async () => undefined;
-    p.applySideEffects = async () => ({ translationsLoaded: 0, seeded: { mode: 'none' } });
+    p.applySideEffects = async (_ctx: unknown, body: any) => {
+        // A failure AFTER a successful register, for the one package id named.
+        if (opts.failSideEffectsOf !== undefined && body?.id === opts.failSideEffectsOf) throw new Error(SIDE_EFFECT_FAULT);
+        return { translationsLoaded: 0, seeded: { mode: 'none' } };
+    };
 
     await plugin.start(ctx as never);
     await hooks.get('kernel:ready')?.();
 
-    const install = async (body: Bag) => {
+    const call = async (route: string, body?: Bag, params: Record<string, string> = {}) => {
         const json = vi.fn((payload: any, status?: number) => ({ payload, status: status ?? 200 }));
-        return routes.get(`POST ${ROUTE}`)!({
+        return routes.get(route)!({
             req: {
                 url: `http://localhost:3000${ROUTE}`,
                 raw: new Request(`http://localhost:3000${ROUTE}`),
                 json: async () => body,
-                param: () => undefined,
+                param: (k: string) => params[k],
             },
             json,
         });
     };
+    const install = (body: Bag) => call(`POST ${ROUTE}`, body);
     /** The cloud-fetched branch: a `packageId` + `versionId` body, the manifest downloaded from the control plane. */
     const installFromCloud = (versionId: string) => install({ packageId: 'pkg_acme_routing', versionId });
     /** The holder, through the same door's inline branch. */
@@ -242,7 +256,14 @@ async function bootPlugin(failRegisterOf?: string) {
         const res = await install({ manifest: holderVersion() });
         expect(res.status, JSON.stringify(res.payload)).toBe(200);
     };
-    return { ql, install, installFromCloud, installHolder };
+    /** `GET` the installed list: its items by manifest id. */
+    const list = async () => {
+        const res = await call(`GET ${ROUTE}`);
+        expect(res.status, JSON.stringify(res.payload)).toBe(200);
+        return new Map<string, Bag>((res.payload.data.items as Bag[]).map((i) => [i.manifestId, i]));
+    };
+    const uninstall = (manifestId: string) => call(`DELETE ${ROUTE}/:manifestId`, undefined, { manifestId });
+    return { ql, logger, install, installFromCloud, installHolder, list, uninstall };
 }
 
 
@@ -393,5 +414,148 @@ describe('install-local cloud branch refuses a register the engine refuses, befo
         const restarted = await bootPlugin();
         expect(restarted.ql.registry.getPackage(INCOMING_ID)?.manifest?.version).toBe('1.0.0');
         expect(restarted.ql.registry.getObjectOwner('routing_stop')?.packageId).toBe(INCOMING_ID);
+    });
+});
+
+/**
+ * #31566 — a ledger entry an earlier build wrote for a register the engine
+ * refuses (before #31478 the cloud branch ledgered it) is refused again at
+ * every boot, loads nothing, and is kept. The listing marks it `notLoaded` with
+ * the refusal's own code and sentence, read from what the rehydrate recorded,
+ * the way #21822 marks a protocol-range refusal.
+ */
+describe('a ledgered entry whose register the engine refuses at boot is listed notLoaded (#31566)', () => {
+    /** Written to the ledger directly, as the earlier build's lenient cloud branch did. */
+    const LEGACY_AT = '2026-01-01T00:00:00.000Z';
+    const writeLegacy = (manifest: Bag, manifestId: string = manifest.id) => new LocalManifestSource(dir).write({
+        packageId: `pkg_${manifestId}`,
+        versionId: manifest.version,
+        manifestId,
+        version: manifest.version,
+        manifest,
+        installedAt: LEGACY_AT,
+        installedBy: 'admin',
+        withSampleData: false,
+    });
+    /** The Error the rehydrate logged for `manifestId` (its `rehydrate failed` line). */
+    const loggedRefusal = (logger: { error: { mock: { calls: unknown[][] } } }, manifestId: string) => {
+        const lines = logger.error.mock.calls.filter((c) => String(c[0]) === `[MarketplaceInstallLocal] rehydrate failed for ${manifestId}`);
+        expect(lines, manifestId).toHaveLength(1);
+        return lines[0]![1] as Error;
+    };
+    /** A healthy package beside the refused one. */
+    const HEALTHY = packageVersion('com.acme.healthy', '1.0.0', { objects: [obj('healthy_item')] });
+    /** Installed for the previous protocol major: #21822's refusal, beside this card's. */
+    const OLD_PROTOCOL = packageVersion('com.acme.oldproto', '1.0.0', {
+        engines: { protocol: `^${PROTOCOL_MAJOR - 1}` }, objects: [obj('oldproto_item')],
+    });
+
+    const REFUSED = [
+        {
+            title: 'a default page that is not a record page (a body refusal)',
+            manifest: VERSIONS['v1-misplaced-default']!, manifestId: INCOMING_ID, packages: [INCOMING_ID],
+            code: 'INVALID_METADATA', says: 'Page "routing_home" of package "com.acme.routing": `isDefault: true` is refused',
+        },
+        {
+            title: 'a multi-package artifact whose second member is refused (rolled back whole)',
+            manifest: collidingArtifact(), manifestId: 'com.acme.crm-suite', packages: ['com.acme.crm', 'com.acme.crm.billing'],
+            code: 'DUPLICATE_ARTIFACT_OBJECT_NAME', says: 'Object name conflict inside one release artifact: object "crm_account"',
+        },
+    ] as const;
+
+    for (const r of REFUSED) {
+        it(`${r.title}: listed with notLoaded { code, message } from the refusal, nothing of it loaded`, async () => {
+            writeLegacy(r.manifest, r.manifestId);
+            const { ql, logger, list } = await bootPlugin();
+
+            // The boot refused it and loaded none of it; the entry is kept.
+            const refusal = loggedRefusal(logger, r.manifestId);
+            for (const id of r.packages) expect(ql.registry.getPackage(id), id).toBeUndefined();
+            expect(ledger()).toEqual([`${r.manifestId}@1.0.0`]);
+
+            const item = (await list()).get(r.manifestId);
+            expect(item).toEqual({
+                packageId: `pkg_${r.manifestId}`,
+                versionId: '1.0.0',
+                manifestId: r.manifestId,
+                version: '1.0.0',
+                installedAt: LEGACY_AT,
+                notLoaded: { code: r.code, message: refusal.message },
+                installedBy: 'admin',
+            });
+            // The engine's own sentence, the one the boot logged — and CLOSED:
+            // exactly the two members, nothing else of the error.
+            expect(item!.notLoaded.message).toContain(r.says);
+            expect(Object.keys(item!.notLoaded).sort()).toEqual(['code', 'message']);
+        });
+    }
+
+    it('CONTROL — a healthy entry beside it is listed exactly as with no refused entry; a protocol-incompatible one keeps its { code, requiredRange }', async () => {
+        writeLegacy(HEALTHY);
+        const alone = (await bootPlugin()).list;
+        const healthyAlone = JSON.stringify((await alone()).get(HEALTHY.id));
+
+        writeLegacy(VERSIONS['v1-misplaced-default']!);
+        writeLegacy(OLD_PROTOCOL);
+        const { ql, list } = await bootPlugin();
+        const items = await list();
+
+        expect(ql.registry.getPackage(HEALTHY.id)?.manifest?.version).toBe('1.0.0');
+        expect(JSON.stringify(items.get(HEALTHY.id))).toBe(healthyAlone);
+        expect(items.get(HEALTHY.id)).not.toHaveProperty('notLoaded');
+        expect(JSON.stringify(items.get(OLD_PROTOCOL.id)!.notLoaded))
+            .toBe(JSON.stringify({ code: 'OS_PROTOCOL_INCOMPATIBLE', requiredRange: `^${PROTOCOL_MAJOR - 1}` }));
+        expect(items.get(INCOMING_ID)!.notLoaded.code).toBe('INVALID_METADATA');
+    });
+
+    it('DELETE still removes the refused entry, and the listing no longer serves it', async () => {
+        writeLegacy(VERSIONS['v1-misplaced-default']!);
+        writeLegacy(HEALTHY);
+        const { list, uninstall } = await bootPlugin();
+        expect((await list()).get(INCOMING_ID)).toHaveProperty('notLoaded');
+
+        const res = await uninstall(INCOMING_ID);
+
+        expect(res.status, JSON.stringify(res.payload)).toBe(200);
+        expect(ledger()).toEqual([`${HEALTHY.id}@1.0.0`]);
+        expect([...(await list()).keys()]).toEqual([HEALTHY.id]);
+    });
+
+    it('a compatible version installed over the refused entry is loaded and listed with no marker', async () => {
+        writeLegacy(VERSIONS['v1-misplaced-default']!);
+        serveVersions(VERSIONS);
+        const { ql, list, installFromCloud } = await bootPlugin();
+        expect((await list()).get(INCOMING_ID)).toHaveProperty('notLoaded');
+
+        const res = await installFromCloud('v1-free');
+
+        expect(res.status, JSON.stringify(res.payload)).toBe(200);
+        expect(res.payload.data.hotLoaded).toBe(true);
+        expect(ql.registry.getPackage(INCOMING_ID)?.manifest?.version).toBe('1.0.0');
+        const item = (await list()).get(INCOMING_ID)!;
+        expect(item).not.toHaveProperty('notLoaded');
+        expect(item.withSampleData).toBe(false);
+    });
+
+    it('CONTROL — a register fault declaring no status is no refusal: not marked, and the next boot loads it', async () => {
+        writeLegacy(HEALTHY);
+        const faulted = await bootPlugin(HEALTHY.id);
+        expect(loggedRefusal(faulted.logger, HEALTHY.id).message).toBe(REGISTER_FAULT);
+        expect(faulted.ql.registry.getPackage(HEALTHY.id)).toBeUndefined();
+        expect((await faulted.list()).get(HEALTHY.id)).not.toHaveProperty('notLoaded');
+
+        const restarted = await bootPlugin();
+        expect(restarted.ql.registry.getPackage(HEALTHY.id)?.manifest?.version).toBe('1.0.0');
+    });
+
+    it('CONTROL — a failure after a successful register leaves the package loaded: not marked', async () => {
+        writeLegacy(HEALTHY);
+        const { ql, logger, list } = await bootPlugin(undefined, { failSideEffectsOf: HEALTHY.id });
+
+        expect(loggedRefusal(logger, HEALTHY.id).message).toBe(SIDE_EFFECT_FAULT);
+        expect(ql.registry.getPackage(HEALTHY.id)?.manifest?.version).toBe('1.0.0');
+        const item = (await list()).get(HEALTHY.id)!;
+        expect(item).not.toHaveProperty('notLoaded');
+        expect(item.withSampleData).toBe(false);
     });
 });

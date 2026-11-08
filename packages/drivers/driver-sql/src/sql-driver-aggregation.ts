@@ -62,10 +62,12 @@ export interface AggregationHost {
   foldEmptyAggregateAnswers: SqlDriver['foldEmptyAggregateAnswers'];
   readonly fractionalNumericFields: SqlDriver['fractionalNumericFields'];
   getBuilder: SqlDriver['getBuilder'];
+  readonly isMssql: SqlDriver['isMssql'];
   readonly knex: SqlDriver['knex'];
   mapAggregateFunc: SqlDriver['mapAggregateFunc'];
   readonly numericFields: SqlDriver['numericFields'];
   presentReadColumns: SqlDriver['presentReadColumns'];
+  primeMssqlGuidColumns: SqlDriver['primeMssqlGuidColumns'];
   readPresentationKind: SqlDriver['readPresentationKind'];
   remoteColumn: SqlDriver['remoteColumn'];
 }
@@ -73,7 +75,9 @@ export interface AggregationHost {
 /** The bodies of the "Aggregation" section of `SqlDriver`: a stateless facet, called by the class's stubs. */
 export class AggregationFacet {
   /** The body of `SqlDriver#aggregate`; the method's docblock there is its contract. */
-  static async aggregate(this: Pick<AggregationHost, 'aggregandColumnClassOf' | 'aggregateBackendFault' | 'aliasIdentifierSql' | 'applyFilters' | 'applyTenantScope' | 'buildDateBucketExpr' | 'coercionKey' | 'config' | 'dateGranularityCapabilities' | 'dialectName' | 'foldEmptyAggregateAnswers' | 'getBuilder' | 'knex' | 'mapAggregateFunc' | 'presentReadColumns' | 'readPresentationKind' | 'remoteColumn'>, object: string, query: DriverQuery, options?: DriverOptions): Promise<Record<string, unknown>[]> {
+  static async aggregate(this: Pick<AggregationHost, 'aggregandColumnClassOf' | 'aggregateBackendFault' | 'aliasIdentifierSql' | 'applyFilters' | 'applyTenantScope' | 'buildDateBucketExpr' | 'coercionKey' | 'config' | 'dateGranularityCapabilities' | 'dialectName' | 'foldEmptyAggregateAnswers' | 'getBuilder' | 'isMssql' | 'knex' | 'mapAggregateFunc' | 'presentReadColumns' | 'primeMssqlGuidColumns' | 'readPresentationKind' | 'remoteColumn'>, object: string, query: DriverQuery, options?: DriverOptions): Promise<Record<string, unknown>[]> {
+    // [#31395] SQL Server: which columns are GUIDs, before a text operator compiles.
+    if (this.isMssql) await this.primeMssqlGuidColumns(object, query.where);
     const builder = this.getBuilder(object, options);
     // The column a FIELD names in this statement: its `external.columnMap`
     // remote column on a federated object, the field itself otherwise. Every

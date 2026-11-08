@@ -129,6 +129,72 @@ function mssqlLikePattern(pattern: string): string {
 }
 
 /**
+ * [#31395] The text a SQL Server `uniqueidentifier` column is matched as: its
+ * canonical lower-case form, `LOWER(CONVERT(nvarchar(36), col))`.
+ *
+ * SQL Server renders a GUID as UPPER-case text (`CONVERT`, `CAST` and an
+ * implicit conversion alike), while this driver reads one back lower-case
+ * (`lowerCaseGuids`, set on the connection since #31327). A substring or pattern
+ * match over the column's own text therefore compared a different spelling from
+ * the one every read answers: a lower-case fragment copied from a read matched
+ * nothing. Matching over the lower-case form makes the match agree with the
+ * read, so the case-exact operators stay case-exact against the value a caller
+ * can see, and the folding ones fold as before.
+ *
+ * `nvarchar(36)` is exact: a GUID's text form is always 36 ASCII characters, so
+ * `LOWER` moves only the hex letters, and the `mssqlCaseExactSql` wrap around
+ * it changes no character. Applied ONLY to a column the remote catalog reports
+ * as `uniqueidentifier` (`primeMssqlGuidColumns`), never chosen from the
+ * comparand's shape: an `nvarchar` column holding GUID-shaped text keeps its
+ * own, case-exact text.
+ */
+function mssqlGuidText(expr: string): string {
+  return `LOWER(CONVERT(nvarchar(36), ${expr}))`;
+}
+
+/**
+ * [#31395] The `$contains` family and `$icontains` over a SQL Server
+ * `uniqueidentifier` column: the core table's mssql arm (`dialectTextMatchSql`,
+ * so the same escape, case-exact wrap, `TRANSLATE` fold and bound `ESCAPE`)
+ * with the column read as {@link mssqlGuidText}. Reached only from
+ * {@link applyLike}, and only for a column the remote catalog reported as
+ * `uniqueidentifier`.
+ */
+function mssqlGuidTextMatch(field: string, value: unknown, shape: TextMatchShape, negate: boolean, fold: boolean): { sql: string; bindings: unknown[] } {
+  const bindings: unknown[] = [];
+  const sql = dialectTextMatchSql(
+    { dialect: 'mssql', shape, value, negate, fold },
+    {
+      column: () => {
+        bindings.push(field);
+        return mssqlGuidText('??');
+      },
+      value: (v) => {
+        bindings.push(v);
+        return '?';
+      },
+    },
+  );
+  if (sql !== null) return { sql, bindings };
+  // Unreachable: the core table answers every mssql request; `null` is only the
+  // `'unknown'` residue, which the plain mssql emitter would hand back too.
+  return textMatchPredicate('mssql', field, value, shape, negate, fold);
+}
+
+/**
+ * [#31395] `$like` / `$ilike` over a SQL Server `uniqueidentifier` column:
+ * {@link likePatternPredicate}'s mssql construct with the column read as
+ * {@link mssqlGuidText}. Reached only from {@link applyLikePattern}.
+ */
+function mssqlGuidLikePattern(field: string, pattern: string, fold: boolean): { sql: string; bindings: unknown[] } {
+  const caseExact = fold ? mssqlAsciiLowerSql : mssqlCaseExactSql;
+  return {
+    sql: `${caseExact(mssqlGuidText('??'))} LIKE ${caseExact('?')} ESCAPE ?`,
+    bindings: [field, mssqlLikePattern(pattern), LIKE_ESCAPE_CHARACTER],
+  };
+}
+
+/**
  * [#6518] The `$contains` family and `$icontains` as `{sql, bindings}` for
  * knex's `whereRaw`, with `??` the column and `?` each value.
  *
@@ -698,15 +764,19 @@ export function applyNullSafeNegative(builder: any, method: string, field: strin
 }
 
 /** The body of `SqlDriver#applyLike`; the method's docblock there is its contract. */
-export function applyLike(this: Pick<PredicateEmitterHost, 'dialectName'>, builder: any, method: string, field: string, value: unknown, shape: TextMatchShape, negate = false, fold = false): void {
+export function applyLike(this: Pick<PredicateEmitterHost, 'dialectName'>, builder: any, method: string, field: string, value: unknown, shape: TextMatchShape, negate = false, fold = false, guidColumn = false): void {
   const rawMethod = method.startsWith('or') ? 'orWhereRaw' : 'whereRaw';
-  const { sql, bindings } = textMatchPredicate(this.dialectName, field, value, shape, negate, fold);
+  const { sql, bindings } = guidColumn && this.dialectName === 'mssql'
+    ? mssqlGuidTextMatch(field, value, shape, negate, fold)
+    : textMatchPredicate(this.dialectName, field, value, shape, negate, fold);
   builder[rawMethod](sql, bindings);
 }
 
 /** The body of `SqlDriver#applyLikePattern`; the method's docblock there is its contract. */
-export function applyLikePattern(this: Pick<PredicateEmitterHost, 'dialectName'>, builder: any, method: string, field: string, pattern: string, fold: boolean): void {
+export function applyLikePattern(this: Pick<PredicateEmitterHost, 'dialectName'>, builder: any, method: string, field: string, pattern: string, fold: boolean, guidColumn = false): void {
   const rawMethod = method.startsWith('or') ? 'orWhereRaw' : 'whereRaw';
-  const { sql, bindings } = likePatternPredicate(this.dialectName, field, pattern, fold);
+  const { sql, bindings } = guidColumn && this.dialectName === 'mssql'
+    ? mssqlGuidLikePattern(field, pattern, fold)
+    : likePatternPredicate(this.dialectName, field, pattern, fold);
   builder[rawMethod](sql, bindings);
 }

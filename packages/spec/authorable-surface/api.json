@@ -490,6 +490,7 @@
     "api/DeleteDataRequest:object",
     "api/DeleteDataResponse:id",
     "api/DeleteDataResponse:object",
+    "api/DeleteDataResponse:recycleBinEntryId",
     "api/DeleteDataResponse:success",
     "api/DeleteFlowRequest:name",
     "api/DeleteFlowResponse:data",

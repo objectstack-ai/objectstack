@@ -46,14 +46,18 @@ export interface WindowFunctionsHost {
   buildWindowFunction: SqlDriver['buildWindowFunction'];
   formatOutput: SqlDriver['formatOutput'];
   getBuilder: SqlDriver['getBuilder'];
+  readonly isMssql: SqlDriver['isMssql'];
   readonly knex: SqlDriver['knex'];
   mapSortField: SqlDriver['mapSortField'];
+  primeMssqlGuidColumns: SqlDriver['primeMssqlGuidColumns'];
 }
 
 /** The bodies of the "Window Functions" section of `SqlDriver`: a stateless facet, called by the class's stubs. */
 export class WindowFunctionsFacet {
   /** The body of `SqlDriver#findWithWindowFunctions`; the method's docblock there is its contract. */
-  static async findWithWindowFunctions(this: Pick<WindowFunctionsHost, 'aliasIdentifierSql' | 'applyFilters' | 'applyTenantScope' | 'buildWindowFunction' | 'formatOutput' | 'getBuilder' | 'knex' | 'mapSortField'>, object: string, query: SqlWindowFunctionQuery, options?: DriverOptions): Promise<any[]> {
+  static async findWithWindowFunctions(this: Pick<WindowFunctionsHost, 'aliasIdentifierSql' | 'applyFilters' | 'applyTenantScope' | 'buildWindowFunction' | 'formatOutput' | 'getBuilder' | 'isMssql' | 'knex' | 'mapSortField' | 'primeMssqlGuidColumns'>, object: string, query: SqlWindowFunctionQuery, options?: DriverOptions): Promise<any[]> {
+    // [#31395] SQL Server: which columns are GUIDs, before a text operator compiles.
+    if (this.isMssql) await this.primeMssqlGuidColumns(object, query.where);
     const builder = this.getBuilder(object, options);
     // ROWS, so this is the read-side wall itself — not a consistency tidy-up
     // (#6792). This door returned every tenant's rows to a caller that passed

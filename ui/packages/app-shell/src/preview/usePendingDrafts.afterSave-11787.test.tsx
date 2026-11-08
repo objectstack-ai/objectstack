@@ -48,7 +48,7 @@ function heldFetch() {
   return { held, reads };
 }
 
-const CRM = '/api/v1/meta/_drafts?packageId=app.crm';
+const CRM = '/api/v1/meta/_drafts?package=app.crm';
 const draft = (name: string) => ({ type: 'object', name, packageId: 'app.crm' });
 
 /** The Studio header's shape: the count, whether it is behind a save, and the save's refresh. */
