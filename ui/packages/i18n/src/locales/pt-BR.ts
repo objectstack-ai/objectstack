@@ -3988,6 +3988,22 @@ const pt = {
       managedTruncated: 'Só os mais recentes são mostrados; esta pessoa autorizou mais.',
     },
   },
+  effectiveAccess: {
+    title: 'Conjuntos de permissões efetivos',
+    body: 'Cada conjunto de permissões em vigor para esta pessoa na sua organização atual, e de onde cada um vem. As atribuições diretas também aparecem abaixo, onde podem ser removidas.',
+    refused: 'Você não tem permissão para ver o acesso efetivo desta pessoa.',
+    unserved: 'Este servidor não informa o acesso efetivo.',
+    loadFailed: 'Não foi possível carregar o acesso efetivo: {{message}}',
+    empty: 'Nenhum conjunto de permissões está em vigor para esta pessoa nesta organização.',
+    originsLabel: 'Vem de',
+    origin: {
+      direct: 'Atribuição direta',
+      position: 'Cargo: {{position}}',
+      default: 'Vínculo padrão',
+      derivedPlatformAdmin: 'Administrador de plataforma configurado',
+      derivedAiAccess: 'Acesso à IA ativado',
+    },
+  },
   excelImport: {
     noImportableFields: "Esse objeto não tem campos importáveis.",
     schemaReadFailed: "Não foi possível ler o esquema do objeto.",

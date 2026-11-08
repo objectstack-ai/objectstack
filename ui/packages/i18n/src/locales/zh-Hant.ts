@@ -4126,6 +4126,22 @@ const zhHant = {
       managedTruncated: '僅顯示最新的部分，此人授權的助手還有更多。',
     },
   },
+  effectiveAccess: {
+    title: '實際生效的權限集',
+    body: '此人在你目前組織中實際生效的每個權限集，以及各自的來源。直接指派的權限集也列在下方，可以在那裡移除。',
+    refused: '你無權檢視此人實際生效的權限。',
+    unserved: '此伺服器不提供實際生效權限的查詢。',
+    loadFailed: '無法載入實際生效的權限：{{message}}',
+    empty: '此人在此組織中沒有生效的權限集。',
+    originsLabel: '來源',
+    origin: {
+      direct: '直接指派',
+      position: '職位：{{position}}',
+      default: '預設繫結',
+      derivedPlatformAdmin: '設定的平台管理員',
+      derivedAiAccess: '已開啟 AI 存取',
+    },
+  },
   excelImport: {
     noImportableFields: '該物件沒有可匯入的欄位。',
     schemaReadFailed: '無法讀取物件結構。',

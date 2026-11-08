@@ -3918,6 +3918,22 @@ const ja = {
       managedTruncated: '新しいものだけを表示しています。この人が認可したアシスタントはほかにもあります。',
     },
   },
+  effectiveAccess: {
+    title: '有効な権限セット',
+    body: '現在の組織でこの人に有効なすべての権限セットと、それぞれの付与元です。直接付与は下にも一覧表示され、そこで削除できます。',
+    refused: 'この人の有効なアクセス権を表示する権限がありません。',
+    unserved: 'このサーバーは有効なアクセス権を返しません。',
+    loadFailed: '有効なアクセス権を読み込めませんでした: {{message}}',
+    empty: 'この組織でこの人に有効な権限セットはありません。',
+    originsLabel: '付与元',
+    origin: {
+      direct: '直接付与',
+      position: 'ポジション: {{position}}',
+      default: '既定のバインド',
+      derivedPlatformAdmin: '設定されたプラットフォーム管理者',
+      derivedAiAccess: 'AI アクセスが有効',
+    },
+  },
   excelImport: {
     noImportableFields: "そのオブジェクトにはインポート可能なフィールドがありません。",
     schemaReadFailed: "オブジェクトのスキーマを読み取れませんでした。",
