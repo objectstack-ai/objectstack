@@ -61,9 +61,11 @@ import { maskComments } from '../../../../scripts/js-comment-mask.mjs';
 
 import {
   createHostCryptoProvider,
+  cryptoProviderPlugins,
   HostCryptoProviderRefusal,
   refuseTwoCryptoProviderPlugins,
   refuseUnloadedCryptoProviderPlugins,
+  refuseSetAsideCryptoProviderPlugins,
 } from './serve.js';
 
 // [#10126] Pay the first load of what `serve.ts` reaches through dynamic
@@ -485,6 +487,26 @@ describe('a plugins entry that did not load refuses the boot unless it is ruled 
     expect(refusalOf([])).toBeUndefined();
   });
 
+  it('a devPlugins entry is named by the list it was written in', () => {
+    const refusal = refusalOf([
+      { list: 'devPlugins', index: 0, entry: '@acme/dev-kms', error: new Error('a') },
+      { index: 1, entry: '@acme/kms', error: new Error('b') },
+    ]);
+    expect(refusal!.message).toContain("devPlugins[0] ('@acme/dev-kms') did not load (a)");
+    expect(refusal!.message).toContain("plugins[1] ('@acme/kms') did not load (b)");
+  });
+
+  it('reads a declaration as cryptoProviderPlugins does: an entry it counts as the provider is refused, one it does not is ruled out', () => {
+    const declaring = providerPlugin('com.example.kms-crypto', kmsProvider().provider);
+    const other = { name: 'com.example.widgets', providesServices: ['widgets'], init: async () => {} };
+    const none = { name: 'com.example.plain', init: async () => {} };
+    for (const candidate of [declaring, other, none]) {
+      const counted = cryptoProviderPlugins([candidate]).length > 0;
+      const refused = refusalOf([{ index: 0, entry: candidate, error: new Error('x') }]) !== undefined;
+      expect(refused, (candidate as { name: string }).name).toBe(counted);
+    }
+  });
+
   it('every refused entry is named, and the ruled-out ones are not', () => {
     const refusal = refusalOf([
       { index: 0, entry: '@acme/one', error: new Error('a') },
@@ -494,6 +516,51 @@ describe('a plugins entry that did not load refuses the boot unless it is ruled 
     expect(refusal!.message).toContain("plugins[0] ('@acme/one')");
     expect(refusal!.message).toContain("plugins[2] ('@acme/two')");
     expect(refusal!.message).not.toContain('com.example.widgets');
+  });
+});
+
+describe('a plugins entry the standalone boot sets aside refuses the boot unless it is ruled out as the crypto provider', () => {
+  const refusalOf = async (authored: unknown, importSpecifier: (specifier: string) => Promise<unknown>): Promise<Error | undefined> => {
+    try { await refuseSetAsideCryptoProviderPlugins(authored, importSpecifier); }
+    catch (err) { return err as Error; }
+    return undefined;
+  };
+  const notInstalled = async (specifier: string): Promise<unknown> => {
+    throw new Error(`Failed to import plugin '${specifier}': not found`);
+  };
+
+  it('a specifier that does not import declares nothing, and is refused, named by its specifier', async () => {
+    const refusal = await refusalOf(['@acme/kms-crypto'], notInstalled);
+    expect(refusal).toBeInstanceOf(HostCryptoProviderRefusal);
+    expect(refusal!.message).toContain("plugins[0] ('@acme/kms-crypto') did not load");
+    expect(refusal!.message).toContain(`'${CRYPTO_PROVIDER_SERVICE}'`);
+  });
+
+  it('a specifier that imports a plugin declaring the provider is refused, named by its specifier', async () => {
+    const plugin = providerPlugin('com.example.aws-kms-crypto', kmsProvider().provider);
+    const refusal = await refusalOf(['@acme/aws-kms-crypto'], async () => ({ default: plugin }));
+    expect(refusal).toBeInstanceOf(HostCryptoProviderRefusal);
+    expect(refusal!.message).toContain("plugins[0] ('@acme/aws-kms-crypto') provides the crypto provider");
+    expectNoKeyMaterial(refusal!.message);
+  });
+
+  it('an object entry declaring the provider is read as it is, never booted, and refused by its name', async () => {
+    let initialized = false;
+    const entry = { name: 'com.example.vault-crypto', providesServices: [CRYPTO_PROVIDER_SERVICE], init: async () => { initialized = true; } };
+    const refusal = await refusalOf([entry], notInstalled);
+    expect(refusal!.message).toContain("plugins[0] ('com.example.vault-crypto') provides the crypto provider");
+    expect(initialized).toBe(false);
+  });
+
+  it('CONTROL: entries that declare other services, or none, and a missing list, are ruled out', async () => {
+    expect(await refusalOf([
+      { name: 'com.example.widgets', providesServices: ['widgets'] },
+      { name: 'com.example.bundle', objects: [] },
+      '@acme/widgets',
+      null,
+    ], async () => ({ default: { name: 'com.example.plain', providesServices: ['plain'] } }))).toBeUndefined();
+    expect(await refusalOf(undefined, notInstalled)).toBeUndefined();
+    expect(await refusalOf([], notInstalled)).toBeUndefined();
   });
 });
 
@@ -617,12 +684,21 @@ describe('the wiring inside run()', () => {
   });
 
   it('refuses an unloaded entry that may provide the crypto provider right after the plugins loop, before the host provider is built', () => {
-    const record = SERVE.indexOf('unloadedStackPlugins.push({ index, entry: plugin, materialized, error: e });');
+    const record = SERVE.indexOf('unloadedStackPlugins.push(');
     const check = SERVE.indexOf('refuseUnloadedCryptoProviderPlugins(unloadedStackPlugins);');
     const host = SERVE.indexOf('hostCrypto = createHostCryptoProvider(() => localCryptoProvider.resolve());');
     expect(record).toBeGreaterThan(0);
     expect(check).toBeGreaterThan(record);
     expect(host).toBeGreaterThan(check);
+  });
+
+  it('refuses a set-aside entry that may provide the crypto provider before the standalone stack replaces the authored plugins', () => {
+    const branch = SERVE.indexOf('if (useArtifactFallback || shouldBootWithLibrary(config)) {');
+    const check = SERVE.indexOf('await refuseSetAsideCryptoProviderPlugins(');
+    const replaced = SERVE.indexOf('config = mergeBootConfig(originalConfig as any, bootResult as any) as any;');
+    expect(branch).toBeGreaterThan(0);
+    expect(check).toBeGreaterThan(branch);
+    expect(replaced).toBeGreaterThan(check);
   });
 
   it('checks the declared providers before the boot', () => {

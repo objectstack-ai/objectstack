@@ -63,6 +63,7 @@ export interface BulkOperationsHost {
   readonly knex: SqlDriver['knex'];
   readBackInsertedRows: SqlDriver['readBackInsertedRows'];
   resyncSequenceToDataMax: SqlDriver['resyncSequenceToDataMax'];
+  remoteColumn: SqlDriver['remoteColumn'];
   rotationShardsOf: SqlDriver['rotationShardsOf'];
   rotationWriteTarget: SqlDriver['rotationWriteTarget'];
   stampInsertTimestamps: SqlDriver['stampInsertTimestamps'];
@@ -260,10 +261,12 @@ export class BulkOperationsFacet {
   }
 
   /** The body of `SqlDriver#bulkDelete`; the method's docblock there is its contract. */
-  static async bulkDelete(this: Pick<BulkOperationsHost, 'applyTenantScope' | 'auditMissingTenant' | 'getBuilder' | 'rotationShardsOf'>, object: string, ids: Array<string | number>, options?: DriverOptions): Promise<void> {
+  static async bulkDelete(this: Pick<BulkOperationsHost, 'applyTenantScope' | 'auditMissingTenant' | 'getBuilder' | 'remoteColumn' | 'rotationShardsOf'>, object: string, ids: Array<string | number>, options?: DriverOptions): Promise<void> {
     this.auditMissingTenant(object, 'bulkDelete', options);
     for (const target of this.rotationShardsOf(object) ?? [object]) {
-      const builder = this.getBuilder(target, options).whereIn('id', ids);
+      // The primary key's column: the `external.columnMap` remote column on a
+      // federated object, `id` otherwise (a rotation shard is never federated).
+      const builder = this.getBuilder(target, options).whereIn(this.remoteColumn(object, 'id', 'id'), ids);
       this.applyTenantScope(builder, object, options);
       await builder.delete();
     }

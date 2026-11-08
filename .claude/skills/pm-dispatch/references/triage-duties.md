@@ -5,11 +5,11 @@
 - ⛔ 分诊 fresh session 开局不做泛关键词 ToolSearch;可验判据:空转轮 ~4 万 token 以内。
 - 两级盘点:小时轮以 `since` 窗口读增量,锚 = 座位贴上一份收班简报的时间戳。
 - 查重缓存住席内:新会话全量拉,其后 `since` 增量;⛔ 不建分支、不共享、不依赖备份。
-- 每日一 fire 跑两仓全量对账并归集日频职责;选层按 fire 时刻 ⛔ 不用计数器,简报写明层。
+- 每日一 fire 跑两仓全量对账(`objectstack-ai/objectstack`、`objectstack-ai/cloud`)并归集日频职责;
+- 选层按 fire 时刻 ⛔ 不用计数器,简报写明层;cloud 卡首触归 `repo:cloud` 席自巡,见多仓协调。
 - 每条枚举比对返回数与 `totalCount`,不等 ⇒ 报 `sweep INCOMPLETE` 点名缺口,⛔ 永不报干净。
 - 轮次记录按车道计欠审逾一轮的 head 数并点名车道(`check-owed-reviews.mjs`),只报 ⛔ 不接审。
 - 轮次记录分写「决策卡 N」与「待您审合 PR M」,不合计;后者 = open `pm:awaiting-merge` PR。
-- 分诊旧记录过期:delta 复审归车道或复审席,照 contract-review.md;⛔ 分诊不再审。
 - 析取 ①全裸(无 `pm:*`/`needs-user-decision`/`domain:*`);② `pm:queue` 无 `domain:*`(仅多车道仓);
 - ③ `domain:*` 无 pm-state;④ `pm:queue`+`domain:*` 无 `priority:*`;②③④ 只取 `updated_at` 早于 ~2min。
 - 排除 `tracking`、`status:parked`、全部 `pm:seat` 贴、`qa-run` 记录。
@@ -21,8 +21,7 @@
 - 每轮读上份轮次记录 fire 以来全部 main push、schedule 与队列结论,⛔ 不只读最新一跑。
 - 窗内无锚红当轮立锚卡、照首触定级,转绿照立并点名承修卡;逾 90 分钟无记录记明断档。
 - main-red 锚卡由席位先立先派,首触事后补作记录级:可改域,⛔ 不改动作,在飞照补。
-- 锚卡关闭同轮:读正文行首 `Waits-on: main-red #n` 的 open PR,一 PR 一敲其席 `Notify: main-green`。
-- 例:锚 #N 关 ⇒ 带 `Waits-on: main-red #N` 的 PR #a、#b 各一敲;计数进轮次记录;缺分诊归总监。
+- 锚卡关闭同轮照 project-forms.md 敲门,一 PR 一敲;敲门数进轮次记录。
 - 主干全量红与确定性队列红首触定 p0(锚卡、根因卡、full-run 卡);flake 锚卡判确定性才升。
 - 车道席自分诊:本车道卡挡自有在飞(认领卡/PR/落地/拆分链)且证据清楚,方可首触定 p1/p2。
 - 证据 = 卡上引具名失败 check/run、复现读数或 pin 测试;记录照分诊格式贴卡,请分诊复审。
@@ -38,6 +37,7 @@
 - `tooling` 入 `pm:queue` 仅凭三门之一:首行带 `Unblocks: #N`(open 产品卡)或点名所护的已发布面;
 - 或实测拖慢车队开发:正确源上假红/假绿、反复重跑、同因丢复核轮;卡须具名实例。
 - `pm:queue` 也收恢复不变量的 finding、test-only pin,与实现未被裁错的说明书脱节(修文档)。
+- 入 `pm:queue` 前读最新转换评论(dispatch-runbook 状态提取):hold/冻结/裁决即改挂 `pm:retriage`。
 - `needs-user-decision` = 设计卡、feature/契约形状提案、需要 appetite 的多周程序;只挂 issue。
 - 先例已定新键/值/导出名非契约形状提案;分诊审计 ⛔ 不自加门,唯语义/形状真分歧呈人。
 - 碰迁移形状或删已发布能力也进决策箱;说明书脱节不进:有裁定出处才是 (b),否则改文档。

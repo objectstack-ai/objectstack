@@ -9,6 +9,7 @@ import {
   isCloudManaged,
   resolveRequestExecutionContext,
   isAuthzStoreUnavailableError,
+  isApiKeyLifecycleRefusalError,
   AUTHZ_STORE_UNAVAILABLE_CODE,
   AUTHZ_STORE_UNAVAILABLE_MESSAGE,
   AUTHZ_STORE_UNAVAILABLE_STATUS,
@@ -4099,6 +4100,12 @@ export class AuthPlugin implements Plugin {
             { success: false, error: { code: AUTHZ_STORE_UNAVAILABLE_CODE, message: AUTHZ_STORE_UNAVAILABLE_MESSAGE } },
             AUTHZ_STORE_UNAVAILABLE_STATUS,
           );
+        }
+        // An API key its own lifecycle refuses (revoked, expired, inactive) is
+        // the caller's refusal, never a fault: relayed as the error declares it,
+        // its status, code and located message, as the settings door relays it.
+        if (isApiKeyLifecycleRefusalError(error)) {
+          return c.json({ success: false, error: { code: error.code, message: error.message } }, error.status);
         }
         const err = error instanceof Error ? error : new Error(String(error));
         ctx.logger.error('[AuthPlugin] client-address failed', err);

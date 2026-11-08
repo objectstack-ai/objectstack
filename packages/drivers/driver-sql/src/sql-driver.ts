@@ -1176,6 +1176,7 @@ export class SqlDriver implements IDataDriver {
     field: string,
     granularity: 'day' | 'week' | 'month' | 'quarter' | 'year',
     table?: string | null,
+    column?: string,
   ): { sql: string; bindings: any[] } | null {
     // [#25521 cut 20] The body moved to `sql-driver-date-bucket.ts` (see `DateBucketHost`).
     const readDateGranularityCapabilities = () => this.dateGranularityCapabilities;
@@ -1190,7 +1191,7 @@ export class SqlDriver implements IDataDriver {
       sqliteTemporalArg: (...a) => this.sqliteTemporalArg(...a),
       temporalFieldKind: (...a) => this.temporalFieldKind(...a),
     };
-    return buildDateBucketExpr.call(host, field, granularity, table);
+    return buildDateBucketExpr.call(host, field, granularity, table, column);
   }
 
   /**
@@ -8977,6 +8978,7 @@ export class SqlDriver implements IDataDriver {
       get numericFields() { return driver.numericFields; },
       presentReadColumns: (...a) => driver.presentReadColumns(...a),
       readPresentationKind: (...a) => driver.readPresentationKind(...a),
+      remoteColumn: (...a) => driver.remoteColumn(...a),
     }));
     bulkOperationsHost.install((driver) => ({
       applyFilters: (...a) => driver.applyFilters(...a),
@@ -8997,6 +8999,7 @@ export class SqlDriver implements IDataDriver {
       get knex() { return driver.knex; },
       readBackInsertedRows: (...a) => driver.readBackInsertedRows(...a),
       resyncSequenceToDataMax: (...a) => driver.resyncSequenceToDataMax(...a),
+      remoteColumn: (...a) => driver.remoteColumn(...a),
       rotationShardsOf: (...a) => driver.rotationShardsOf(...a),
       rotationWriteTarget: (...a) => driver.rotationWriteTarget(...a),
       stampInsertTimestamps: (...a) => driver.stampInsertTimestamps(...a),
@@ -9124,6 +9127,7 @@ export class SqlDriver implements IDataDriver {
       get getBuilder() { return driver.getBuilder.bind(driver); },
       presentReadValue: (...a) => driver.presentReadValue(...a),
       readPresentationKind: (...a) => driver.readPresentationKind(...a),
+      remoteColumn: (...a) => driver.remoteColumn(...a),
     }));
     fieldMappingHost.install((driver) => ({
       get fieldColumnByObject() { return driver.fieldColumnByObject; },

@@ -233,3 +233,117 @@ describe('SettingsView — Allowed IP ranges shows the address the server judges
     expect(addressReads()).toHaveLength(1);
   });
 });
+
+/**
+ * objectstack#31260 — the organization's Allowed IP ranges (Setup → Access
+ * policy, the `access_policy` namespace) shows the same note, read from the
+ * route an organization administrator may call, `GET /api/v1/auth/client-address`
+ * (gated to `setup.write` in the caller's current organization, the list's own
+ * write permission). Its save check judges the same address the same way, so the
+ * three sentences hold for it unchanged. A refused or failed read leaves the page
+ * as it was: no note and no toast.
+ */
+describe('SettingsView — Access policy shows the address the server judges (objectstack#31260)', () => {
+  const ORG_ADDRESS_URL = '/api/v1/auth/client-address';
+
+  const ACCESS_POLICY = {
+    manifest: {
+      namespace: 'access_policy',
+      version: 1,
+      label: 'Access policy',
+      scope: 'tenant',
+      specifiers: [
+        { type: 'textarea', key: 'allowed_ip_ranges', label: 'Allowed IP ranges', description: 'CIDR ranges.' },
+        { type: 'number', key: 'session_idle_timeout_minutes', label: 'Idle timeout (minutes)' },
+      ],
+    },
+    values: {
+      allowed_ip_ranges: { value: null, source: 'default', locked: false },
+      session_idle_timeout_minutes: { value: null, source: 'default', locked: false },
+    },
+  };
+
+  /** The organization route's reads; the platform route's URL does not end with it. */
+  const orgReads = () => fetchMock.mock.calls.filter(([url]) => String(url).endsWith(ORG_ADDRESS_URL));
+
+  /** Serve the namespace page, and answer the organization route with `address`. */
+  function serveOrg(page: unknown, address: () => Promise<Response>) {
+    fetchMock.mockImplementation(async (url: string) => {
+      if (String(url).endsWith(ORG_ADDRESS_URL)) return address();
+      if (String(url).endsWith(CLIENT_ADDRESS_URL)) return refused(403, 'PERMISSION_DENIED');
+      return ok(page);
+    });
+  }
+
+  it('draws the address under the list with the proxy sentence when trustProxy is off, from the organization route', async () => {
+    serveOrg(ACCESS_POLICY, async () => ok({ clientAddress: '203.0.113.7', trustProxy: false }));
+    renderAt('access_policy');
+
+    const note = await screen.findByTestId('settings-field-note');
+    expect(note.textContent).toBe(sentence('clientAddressDirect', '203.0.113.7'));
+    expect(rowOf('allowed_ip_ranges')!.contains(note)).toBe(true);
+    expect(rowOf('session_idle_timeout_minutes')!.querySelector('[data-testid="settings-field-note"]')).toBeNull();
+    const box = rowOf('allowed_ip_ranges')!.querySelector('textarea')!;
+    expect(box.getAttribute('aria-describedby')).toBe(note.id);
+
+    // One read, at the organization route, with the session cookie; the
+    // platform-admin route is never asked from this page.
+    expect(orgReads()).toHaveLength(1);
+    expect(orgReads()[0][1]).toMatchObject({ credentials: 'include' });
+    expect(addressReads()).toHaveLength(0);
+  });
+
+  it('says the address came through the trusted proxy when trustProxy is on', async () => {
+    serveOrg(ACCESS_POLICY, async () => ok({ clientAddress: '198.51.100.20', trustProxy: true }));
+    renderAt('access_policy');
+
+    const note = await screen.findByTestId('settings-field-note');
+    expect(note.textContent).toBe(sentence('clientAddressViaProxy', '198.51.100.20'));
+  });
+
+  it('says no address could be established when the server answers null', async () => {
+    serveOrg(ACCESS_POLICY, async () => ok({ clientAddress: null, trustProxy: false }));
+    renderAt('access_policy');
+
+    const note = await screen.findByTestId('settings-field-note');
+    expect(note.textContent).toBe(sentence('clientAddressUnknown'));
+  });
+
+  it.each([
+    ['a caller without setup.write (403)', async () => refused(403, 'PERMISSION_DENIED')],
+    ['no session (401)', async () => refused(401, 'UNAUTHENTICATED')],
+    [
+      'a server without the route (404)',
+      async () =>
+        ({
+          ok: false,
+          status: 404,
+          statusText: 'Not Found',
+          json: async () => ({ success: false, error: { code: 'NOT_FOUND', message: 'Not found.' } }),
+        }) as unknown as Response,
+    ],
+    ['a body that is not the declared shape', async () => ok({ trustProxy: false })],
+    ['a network failure', async () => Promise.reject(new TypeError('Failed to fetch'))],
+  ])('leaves the page as it was on %s: no note, no toast', async (_what, answer) => {
+    serveOrg(ACCESS_POLICY, answer);
+    renderAt('access_policy');
+
+    await screen.findByText('Allowed IP ranges');
+    await waitFor(() => expect(orgReads()).toHaveLength(1));
+    // Let the rejected read settle before asserting its absence.
+    await new Promise((r) => setTimeout(r, 0));
+    expect(screen.queryByTestId('settings-field-note')).toBeNull();
+    expect(screen.queryByText(/Failed to load settings/)).toBeNull();
+    expect(toastError).not.toHaveBeenCalled();
+    expect(rowOf('allowed_ip_ranges')!.querySelector('textarea')!.hasAttribute('aria-describedby')).toBe(false);
+  });
+
+  it('the Authentication page still reads the platform route, never the organization one', async () => {
+    serve(AUTH, async () => ok({ clientAddress: '203.0.113.7', trustProxy: false }));
+    renderAt('auth');
+
+    await screen.findByTestId('settings-field-note');
+    expect(addressReads()).toHaveLength(1);
+    expect(orgReads()).toHaveLength(0);
+  });
+});

@@ -3997,6 +3997,7 @@ const zh = {
     noMessages: '此对话暂无消息。',
     sharedObject: '分享的 {{object}}',
     redactedFields: '部分字段已被所有者隐藏：{{fields}}',
+    linkedRecord: '已关联记录',
   },
   publicForm: {
     submit: '提交',

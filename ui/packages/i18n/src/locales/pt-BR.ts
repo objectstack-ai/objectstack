@@ -3859,6 +3859,7 @@ const pt = {
     noMessages: 'Esta conversa ainda não tem mensagens.',
     sharedObject: '{{object}} compartilhado',
     redactedFields: 'Alguns campos foram ocultados pelo proprietário: {{fields}}',
+    linkedRecord: 'Registro vinculado',
   },
   publicForm: {
     submit: "Enviar",
