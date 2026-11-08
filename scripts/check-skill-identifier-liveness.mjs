@@ -235,6 +235,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'extractor': 26,
   'LEG 1 end to end, incl. the positive control': 7,
   'LEG 2: symbols, sections, and the two structural safety rules': 23,
+  'LEG 2: string arrays, object keys, set algebra and row scope': 15,
   'both legs in ONE walk': 1,
   '#8435: whose remedy is the expanding one': 3,
   'the ledgers move in opposite directions, and the source says so': 2,
@@ -246,7 +247,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 10;
+const SELF_TEST_BATTERY_FLOOR = 11;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -314,9 +315,19 @@ const NEGATIVE_HEADERS = new Set([
  *   why      what makes this section exhaustive, for the reviewer of the next
  *            edit that reddens it.
  *
+ * Three optional fields, each read by the same engine path:
+ *
+ *   intersect  `{symbol, source}` — keep only members this symbol also names
+ *              (a token table covers the tokens that HAVE a provider row).
+ *   minus      `{symbol, source}` — drop the members this symbol names, and
+ *              RED when the scope documents one of them (`[leg2-retired-row]`):
+ *              a retired member listed as live is this binding's phantom.
+ *   row        the exact first cell of the one table row that is exhaustive,
+ *              when its section's other rows are not.
+ *
  * ⛔ A row is an ASSERTION THAT A SECTION IS EXHAUSTIVE. Adding one that is not
- * manufactures a false red for every legitimate future subset. The nine here
- * were each verified complete (or measured incomplete and ledgered) at landing;
+ * manufactures a false red for every legitimate future subset. Each row here
+ * was verified complete (or measured incomplete and ledgered) at landing;
  * `--suggest` lists candidates, it does not bless them.
  */
 const BINDINGS = [
@@ -383,6 +394,33 @@ const BINDINGS = [
     symbol: 'NavItemVariant',
     source: 'packages/spec/src/ui/app.zod.ts',
     why: 'The nav-item catalog, and the one binding that landed with a MEASURED gap rather than complete — see the gap ledger. Registered anyway: an unregistered gap is invisible, and the ledger is what makes it shrink.',
+  },
+  {
+    id: 'requires-capability-tokens',
+    file: 'skills/objectstack-platform/SKILL.md',
+    heading: '### `requires:` — which service plugins boot',
+    symbol: 'PLATFORM_CAPABILITY_TOKENS',
+    source: 'packages/spec/src/kernel/platform-capabilities.ts',
+    intersect: { symbol: 'CAPABILITY_PROVIDERS', source: 'packages/core/src/capability-providers.ts' },
+    why: 'The token table is how an author learns what `requires:` turns on; every token with a provider row must be in it. Tokens with no provider (tier-gated, enterprise) are named in the same section as the ones that do not resolve through the map.',
+  },
+  {
+    id: 'generate-kinds',
+    file: 'skills/objectstack-platform/references/operations.md',
+    heading: '## Build & runtime',
+    row: '`os generate <kind>`',
+    symbol: 'GENERATORS',
+    source: 'packages/cli/src/commands/generate.ts',
+    minus: { symbol: 'RETIRED_GENERATORS', source: 'packages/cli/src/commands/generate.ts' },
+    why: 'The CLI row is the one place the catalog lists what `os generate` scaffolds. A kind missing here is never scaffolded; a retired kind listed here is a command that refuses.',
+  },
+  {
+    id: 'filter-operators',
+    file: 'skills/objectstack-query/rules/filters.md',
+    heading: '## Operator Reference',
+    symbol: 'FILTER_OPERATORS',
+    source: 'packages/spec/src/data/filter.zod.ts',
+    why: 'The operator reference table is the filter vocabulary an author writes from; an operator the spec accepts and the table omits is never used.',
   },
 ];
 
@@ -582,6 +620,174 @@ export function undocumentedMembers(members, pool) {
   return members.filter((v) => !pool.has(v));
 }
 
+// ── LEG 2: the two shapes `extractSymbols` does not read ────────────────────
+//
+// Three tables a person asserted exhaustive are keyed by declarations that are
+// neither a `z.enum` nor a literal union: a frozen string ARRAY
+// (`PLATFORM_CAPABILITY_TOKENS`, `FILTER_OPERATORS`) and an object literal whose
+// KEYS are the vocabulary (`CAPABILITY_PROVIDERS`, `GENERATORS`). They are read
+// by NAME through `membersOf`, never added to `extractSymbols`: that function
+// also feeds `--suggest`, and every object literal in the spec offered as a
+// candidate enum would bury the feeder's real leads.
+//
+// The reader walks characters, not regexes, because these declarations carry
+// what a regex reads wrong: a type annotation with braces of its own
+// (`Record<string, { … }>`) before the `=`, nested objects, and string values
+// holding `//` (a URL in a retired generator's help text) that a comment
+// stripper would cut mid-string. Anything at depth 1 that is not a plain
+// member — a spread, a computed key, a bare identifier element — makes the
+// read REFUSE (null), which the engine reports as a stale binding: a member set
+// the reader cannot see whole is not a member set.
+
+/** Index just past the string/template/comment opening at `i`, or `i` when none opens there. */
+function skipNonCode(t, i) {
+  const c = t[i];
+  if (c === '/' && t[i + 1] === '/') { const e = t.indexOf('\n', i); return e < 0 ? t.length : e; }
+  if (c === '/' && t[i + 1] === '*') { const e = t.indexOf('*/', i + 2); return e < 0 ? t.length : e + 2; }
+  if (c === "'" || c === '"') {
+    let j = i + 1;
+    while (j < t.length && t[j] !== c) j += t[j] === '\\' ? 2 : 1;
+    return j + 1;
+  }
+  if (c === '`') {
+    let j = i + 1;
+    while (j < t.length && t[j] !== '`') {
+      if (t[j] === '\\') { j += 2; continue; }
+      if (t[j] === '$' && t[j + 1] === '{') {
+        let depth = 1;
+        j += 2;
+        while (j < t.length && depth > 0) {
+          const k = skipNonCode(t, j);
+          if (k !== j) { j = k; continue; }
+          if (t[j] === '{') depth += 1;
+          else if (t[j] === '}') depth -= 1;
+          j += 1;
+        }
+        continue;
+      }
+      j += 1;
+    }
+    return j + 1;
+  }
+  return i;
+}
+
+/**
+ * The members of `const NAME = [ 'a', … ]` (optionally `Object.freeze(…)`,
+ * `as const`, a type annotation) or the KEYS of `const NAME = { a: …, 'b-c': … }`.
+ *
+ * @returns {string[] | null} null when NAME is not declared in one of those shapes
+ */
+export function literalMembersOf(text, name) {
+  const decl = new RegExp(`(?:^|[^\\w$])const\\s+${name.replace(/\$/g, '\\$')}(?![\\w$])`, 'g');
+  for (const m of text.matchAll(decl)) {
+    let i = m.index + m[0].length;
+    let depth = 0;
+    while (i < text.length) {
+      const k = skipNonCode(text, i);
+      if (k !== i) { i = k; continue; }
+      const c = text[i];
+      if ('<{[('.includes(c)) depth += 1;
+      else if ('>}])'.includes(c) && text[i - 1] !== '=') depth -= 1;
+      else if (c === '=' && depth === 0 && text[i + 1] !== '>' && text[i + 1] !== '=') break;
+      else if (c === ';' && depth === 0) { i = text.length; break; }
+      i += 1;
+    }
+    if (i >= text.length) continue;
+    const rhs = /^=\s*(?:Object\.freeze\(\s*)?([[{])/.exec(text.slice(i));
+    if (!rhs) continue;
+    const open = i + rhs[0].length - 1;
+    const isArray = rhs[1] === '[';
+    const members = [];
+    let j = open + 1;
+    let level = 1;
+    let expectEntry = true;
+    while (j < text.length && level > 0) {
+      const k = skipNonCode(text, j);
+      if (k !== j) {
+        const quote = text[j];
+        if (level === 1 && expectEntry && (quote === "'" || quote === '"')) {
+          const value = text.slice(j + 1, k - 1);
+          const after = /^\s*(:?)/.exec(text.slice(k))[1];
+          if (isArray === (after === '')) members.push(value); else return null;
+          expectEntry = false;
+        }
+        j = k;
+        continue;
+      }
+      const c = text[j];
+      if (/\s/.test(c)) { j += 1; continue; }
+      if ('{[('.includes(c)) { if (level === 1 && expectEntry) return null; level += 1; j += 1; continue; }
+      if ('}])'.includes(c)) { level -= 1; j += 1; continue; }
+      if (level === 1 && c === ',') { expectEntry = true; j += 1; continue; }
+      if (level === 1 && expectEntry) {
+        const id = /^[A-Za-z_$][\w$]*/.exec(text.slice(j));
+        if (isArray || !id || !/^\s*:/.test(text.slice(j + id[0].length))) return null;
+        members.push(id[0]);
+        expectEntry = false;
+        j += id[0].length;
+        continue;
+      }
+      j += 1;
+    }
+    return members.length ? [...new Set(members)] : null;
+  }
+  return null;
+}
+
+/** A symbol's members in any shape this gate reads. @returns {string[] | null} */
+export function membersOf(text, name) {
+  return extractSymbols(text).get(name) ?? literalMembersOf(text, name);
+}
+
+/**
+ * The lines a binding judges: its section, narrowed to the table row(s) whose
+ * first cell is exactly `row` when the binding names one. A row binding exists
+ * because one table row can be exhaustive while its neighbours are not — the
+ * CLI table's `os generate <kind>` row lists every kind, the rest of that
+ * section names other commands, and a section pool would credit a kind
+ * backticked in an unrelated row.
+ *
+ * @returns {{lines: string[]} | {error: 'absent' | 'ambiguous' | 'no-row', count: number}}
+ */
+export function scopeOf(text, binding) {
+  const section = sectionOf(text, binding.heading);
+  if (section.error || binding.row === undefined) return section;
+  const lines = section.lines.filter((l) => TABLE_ROW.test(l) && (splitRow(l)[0] || '') === binding.row);
+  return lines.length ? { lines } : { error: 'no-row', count: 0 };
+}
+
+/**
+ * The member set a binding asserts, after its set algebra: `symbol`, kept to
+ * what `intersect` also names, less what `minus` names. The retired half is
+ * returned too, because a section that documents a member `minus` took away is
+ * the phantom of this binding: a live-looking row for a thing that is gone.
+ *
+ * @returns {{members: string[], retired: string[]} | {stale: string}}
+ */
+export function bindingMembers(binding, sources) {
+  const read = (ref) => {
+    const src = sources.get(ref.source);
+    return src === undefined ? null : membersOf(src, ref.symbol);
+  };
+  const base = read(binding);
+  if (!base) return { stale: binding.symbol };
+  let members = base;
+  if (binding.intersect) {
+    const other = read(binding.intersect);
+    if (!other) return { stale: binding.intersect.symbol };
+    members = members.filter((m) => other.includes(m));
+  }
+  let retired = [];
+  if (binding.minus) {
+    const gone = read(binding.minus);
+    if (!gone) return { stale: binding.minus.symbol };
+    members = members.filter((m) => !gone.includes(m));
+    retired = gone;
+  }
+  return { members, retired };
+}
+
 // ── Ledger ──────────────────────────────────────────────────────────────────
 
 const EMPTY_LEDGER = { leg1Exemptions: [], leg2Gaps: {} };
@@ -623,9 +829,11 @@ export function staleExemptionMessage(entries) {
     + 'An exemption nobody needs is budget a later edit can spend silently.';
 }
 
-export function unknownSymbolMessage(binding) {
-  return `[stale-binding] ${binding.id} binds ${binding.file} to \`${binding.symbol}\`, `
-    + `declared at ${binding.source} — and the symbol is NOT THERE. This is the binding's `
+export function unknownSymbolMessage(binding, symbol = binding.symbol) {
+  const ref = [binding, binding.intersect, binding.minus].find((r) => r && r.symbol === symbol) || binding;
+  return `[stale-binding] ${binding.id} binds ${binding.file} to \`${symbol}\`, `
+    + `declared at ${ref.source} — and the symbol is NOT THERE, or not in a shape this gate reads `
+    + 'whole (a z.enum, a literal union, a string array, or an object literal\'s keys). This is the binding\'s '
     + 'positive control: without this failure, deleting the schema would turn the row green, '
     + 'which is the exact inversion of what it is for. Re-point `source`/`symbol`, or delete the row.';
 }
@@ -636,6 +844,11 @@ export function anchorMessage(binding, err) {
       + `${err.count} times in ${binding.file}, so it cannot scope a section. Taking the first `
       + 'silently measures a different table than the one the row\'s author read. Make the anchor unique.';
   }
+  if (err.error === 'no-row') {
+    return `[stale-binding] ${binding.id}: no table row under ${JSON.stringify(binding.heading)} in `
+      + `${binding.file} opens with the cell ${JSON.stringify(binding.row)}. A reworded row unbinds the `
+      + 'assertion, so it fails here rather than quietly checking nothing. Re-point `row`, or delete the binding.';
+  }
   return `[stale-binding] ${binding.id}: the heading ${JSON.stringify(binding.heading)} is not in `
     + `${binding.file}. A renamed heading unbinds the assertion, so it fails here rather than `
     + 'quietly checking nothing. Re-point `heading`, or delete the row.';
@@ -643,7 +856,7 @@ export function anchorMessage(binding, err) {
 
 export function missingRowMessage(binding, missing, allowed) {
   const grew = allowed !== undefined;
-  return `[leg2-missing-row] ${binding.file} — ${binding.heading} is registered exhaustive over `
+  return `[leg2-missing-row] ${binding.file} — ${binding.heading}${binding.row ? ` (row ${binding.row})` : ''} is registered exhaustive over `
     + `\`${binding.symbol}\` (${binding.source}) and does not document `
     + `${missing.map((m) => `\`${m}\``).join(', ')}`
     + (grew ? ` — the recorded gap ${allowed.length} grew to ${missing.length}.` : '.')
@@ -655,6 +868,14 @@ export function missingRowMessage(binding, missing, allowed) {
     + `so an entry weakens a ratchet: ${RATCHET_AUTHORITY_MARKER}, not a co-equal second option. `
     + 'The gated thing is that ACT, not the flag — `--update` takes whichever direction the tree '
     + 'moved, and only policy tells a ratchet-down from a weakening apart.';
+}
+
+export function retiredRowMessage(binding, shown) {
+  return `[leg2-retired-row] ${binding.file} — ${binding.heading}${binding.row ? ` (row ${binding.row})` : ''} `
+    + `documents ${shown.map((m) => `\`${m}\``).join(', ')}, which \`${binding.minus.symbol}\` `
+    + `(${binding.minus.source}) declares RETIRED. A retired member listed as live is an instruction an AI `
+    + 'author follows straight into a refusal. REMEDY: delete it from the row — the retirement prints its '
+    + 'own prescription when someone still reaches for it. There is no ledger for this one.';
 }
 
 export function shrunkGapMessage(binding, missing, allowed) {
@@ -713,15 +934,17 @@ export function run({ corpus, index, bindings, sources, ledger }) {
   const gaps = {};
   const improved = [];
   for (const b of bindings) {
-    const src = sources.get(b.source);
-    if (src === undefined) { errors.push(unknownSymbolMessage(b)); continue; }
-    const members = extractSymbols(src).get(b.symbol);
-    if (!members) { errors.push(unknownSymbolMessage(b)); continue; }
+    const resolved = bindingMembers(b, sources);
+    if (resolved.stale) { errors.push(unknownSymbolMessage(b, resolved.stale)); continue; }
+    const { members, retired } = resolved;
     const text = byFile.get(b.file);
     if (text === undefined) { errors.push(anchorMessage(b, { error: 'absent' })); continue; }
-    const section = sectionOf(text, b.heading);
+    const section = scopeOf(text, b);
     if (section.error) { errors.push(anchorMessage(b, section)); continue; }
-    const missing = undocumentedMembers(members, documentedPool(section.lines));
+    const pool = documentedPool(section.lines);
+    const shown = retired.filter((m) => pool.has(m));
+    if (shown.length) errors.push(retiredRowMessage(b, shown));
+    const missing = undocumentedMembers(members, pool);
     const allowed = ledger.leg2Gaps[b.id];
     if (missing.length) gaps[b.id] = missing;
     if (allowed === undefined) {
@@ -812,10 +1035,10 @@ function readIndexFiles() {
 
 function readSources(bindings) {
   const sources = new Map();
-  for (const b of bindings) {
-    if (sources.has(b.source)) continue;
-    const abs = join(REPO_ROOT, b.source);
-    if (existsSync(abs)) sources.set(b.source, readFileSync(abs, 'utf8'));
+  for (const ref of bindings.flatMap((b) => [b, b.intersect, b.minus]).filter(Boolean)) {
+    if (sources.has(ref.source)) continue;
+    const abs = join(REPO_ROOT, ref.source);
+    if (existsSync(abs)) sources.set(ref.source, readFileSync(abs, 'utf8'));
   }
   return sources;
 }
@@ -1126,6 +1349,60 @@ function selfTest() {
     sources: sources2, ledger: noLedger,
   });
   expect('duplicate binding ids are refused', r2dupe.errors.some((e) => e.includes('duplicate binding id')));
+
+  // ── LEG 2: arrays, object keys, set algebra, row scope ───────────────────
+  battery('LEG 2: string arrays, object keys, set algebra and row scope');
+  const literalText = [
+    "export const OPS = ['$eq', // '$notAMember'",
+    "  '$ne', '$empty'] as const;",
+    "export const TOKENS: readonly string[] = Object.freeze(['ai', 'cache', 'mailbox']);",
+    'const PROVIDERS: Readonly<Record<string, { pkg: string }>> = {',
+    "  cache: { pkg: 'a', nested: { deep: 1 } },",
+    "  // ghost: { pkg: 'commented out' },",
+    "  'mailbox': { pkg: 'b', help: ['https://objectstack.ai/docs', `t ${'{'} x`] },",
+    '};',
+    'const KINDS: Record<string, { run: () => void }> = { object: { run: () => {} }, agent: {}, flow: {} };',
+    "const GONE: Record<string, string> = { agent: 'retired' };",
+    "const SPREAD = [...OPS, '$x'];",
+    'const COMPUTED = { [KEY]: 1 };',
+  ].join('\n');
+  eq('a const string array is read, comments masked', literalMembersOf(literalText, 'OPS'), ['$eq', '$ne', '$empty']);
+  eq('Object.freeze and a type annotation do not hide an array', literalMembersOf(literalText, 'TOKENS'), ['ai', 'cache', 'mailbox']);
+  eq('an object literal yields its top-level KEYS, past a braced type annotation, nested values and a URL string',
+    literalMembersOf(literalText, 'PROVIDERS'), ['cache', 'mailbox']);
+  eq('a function-typed annotation (`=>`) does not end the type early', literalMembersOf(literalText, 'KINDS'), ['object', 'agent', 'flow']);
+  eq('a spread element REFUSES the read rather than guessing', literalMembersOf(literalText, 'SPREAD'), null);
+  eq('a computed key REFUSES the read', literalMembersOf(literalText, 'COMPUTED'), null);
+  eq('an undeclared name reads as absent', literalMembersOf(literalText, 'NOPE'), null);
+  const algebra = new Map([['lit.ts', literalText]]);
+  eq('intersect keeps only members the second symbol names',
+    bindingMembers({ symbol: 'TOKENS', source: 'lit.ts', intersect: { symbol: 'PROVIDERS', source: 'lit.ts' } }, algebra).members,
+    ['cache', 'mailbox']);
+  const minus = bindingMembers({ symbol: 'KINDS', source: 'lit.ts', minus: { symbol: 'GONE', source: 'lit.ts' } }, algebra);
+  eq('minus drops the retired members and returns them', [minus.members, minus.retired], [['object', 'flow'], ['agent']]);
+  eq('a vanished intersect symbol is stale, naming that symbol',
+    bindingMembers({ symbol: 'TOKENS', source: 'lit.ts', intersect: { symbol: 'Gone', source: 'lit.ts' } }, algebra).stale, 'Gone');
+
+  const cli = [
+    '## Build & runtime', '| Command | What |', '|:--|:--|',
+    '| `os build` | builds an `app` |', '| `os generate <kind>` | Scaffold `object` `flow` |',
+  ].join('\n');
+  const rowBinding = {
+    id: 'kinds', file: 'skills/s/ops.md', heading: '## Build & runtime', row: '`os generate <kind>`',
+    symbol: 'KINDS', source: 'lit.ts', minus: { symbol: 'GONE', source: 'lit.ts' }, why: 'synthetic row-scoped binding with a retired set',
+  };
+  const idxCli = new Set(['os']);
+  const rRow = (text) => run({ corpus: [{ file: 'skills/s/ops.md', text }], index: idxCli, bindings: [rowBinding], sources: algebra, ledger: noLedger });
+  eq('a row-scoped binding over a complete row is green', rRow(cli).errors, []);
+  const rowMiss = rRow(cli.replace(' `flow` |', ' |'));
+  expect('the ROW is the scope: a member backticked in a neighbouring row does not count',
+    rRow(cli.replace(' `flow` |', ' |').replace('`app`', '`flow`')).errors.length === 1 && rowMiss.errors[0].includes('`flow`'));
+  expect('the missing-row finding names the row', rowMiss.errors[0].includes('(row `os generate <kind>`)'));
+  const rowRetired = rRow(cli.replace('`flow` |', '`flow` `agent` |'));
+  expect('a retired member listed in the scope is a [leg2-retired-row] red',
+    rowRetired.errors.length === 1 && rowRetired.errors[0].startsWith('[leg2-retired-row]') && rowRetired.errors[0].includes('`agent`'));
+  expect('a reworded row is a stale binding, never an empty scope read green',
+    rRow(cli.replace('`os generate <kind>`', '`os g <kind>`')).errors.some((e) => e.startsWith('[stale-binding]') && e.includes('no table row')));
 
   // ── both legs in ONE walk ────────────────────────────────────────────────
   battery('both legs in ONE walk');

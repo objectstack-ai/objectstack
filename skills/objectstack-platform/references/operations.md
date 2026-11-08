@@ -20,7 +20,7 @@
 | `os compile` | Compile to portable JSON artifact (for runtime hydration) |
 | `os serve` | Serve a compiled stack in production mode |
 | `os start` | Quick-start a server: auto-compiles `objectstack.config.ts` when no artifact is present, and falls back to an empty kernel with the Console + marketplace when there is no config at all. It does **not** validate env or apply migrations — run `os validate` / `os migrate apply` yourself |
-| `os generate <kind>` | Scaffold an object / view / flow / skill from a template |
+| `os generate <kind>` | Scaffold `object` `view` `action` `flow` `dashboard` `app` `skill` `picklist` `permission` `dataset` |
 
 ## Verify your work
 
@@ -61,8 +61,8 @@ Port resolution is the same for `os dev` and `os start` (both spawn `os serve`):
 
 | Mode | If the resolved port is busy |
 |:-----|:-----------------------------|
-| **Dev** (`os dev`, or `NODE_ENV=development`) | Auto-hops to the next free port (up to +100) so several example apps run side-by-side. The startup banner shows the *actual* bound port. |
-| **Production** (`os start`) | **Fails loudly and exits 1.** It never silently drifts. |
+| **Dev** (`os dev`, or `NODE_ENV=development`) | Auto-hops to the next free port (up to +100). The startup banner shows the *actual* bound port. |
+| **Production** (`os start`) | **Fails loudly and exits 1.** |
 
 **Production guidance:**
 
