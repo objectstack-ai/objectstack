@@ -1011,10 +1011,10 @@ export const CEILINGS = new Map([
   // narrowing sentence's "refuses the request" clause restating the ⛔ section below it, the
   // two Data Source code comments restating the blockquote under them, the `summary`
   // comment's "footer aggregation" restating the Column Features row. `main` base 12503
-  // bytes -> 13803 -> 3451 tokens, pinned AT the measurement, zero headroom. Authority as the
+  // bytes -> 13802 -> 3451 tokens, pinned AT the measurement, zero headroom. Authority as the
   // SKILL.md row above: cloud#3659 letter A (6682024726) via record 6513306068, quoted
   // verbatim in the PR body.
-  //   ceil($(wc -c < skills/objectstack-ui/rules/list-views.md) / 4) == ceil(13803 / 4)
+  //   ceil($(wc -c < skills/objectstack-ui/rules/list-views.md) / 4) == ceil(13802 / 4)
   ['skills/objectstack-ui/rules/list-views.md', 3451],
   // 2273 -> 2196 (#27059): LOWERED. The Surface bullet points at `rules/record-page.md`,
   // says create / edit is a modal or the `editMode: 'page'` route, and the Overlay-width

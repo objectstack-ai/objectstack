@@ -280,9 +280,9 @@ top-level `groupBy`**; the top-level `columns` stays required.
 
 "Add a kanban (calendar / gallery / gantt) view" means a NEW `listViews` entry
 that coexists with the views the object has — its key encodes the kind or
-purpose (`status_kanban`, `timeline_gantt`; loaded as `OBJECT.status_kanban`,
-the name a nav item's `viewName` points at), the default `list` and every other
-view untouched. Never satisfy an add by retyping `list` (or an existing named
+purpose (`status_kanban`, `timeline_gantt`: the key a nav item's `viewName`
+names, registered as `OBJECT.status_kanban`), the default `list` and every
+other view untouched. Never satisfy an add by retyping `list` (or an existing named
 view) to `type: 'kanban'`: nothing refuses it, the view is converted in place
 and the original is gone. Change a view's kind in place only when the request
 says to convert or replace THAT view.
