@@ -61,6 +61,7 @@ export interface BulkOperationsHost {
   readonly isMssql: SqlDriver['isMssql'];
   keepSuppliedUpdatedAt: SqlDriver['keepSuppliedUpdatedAt'];
   readonly knex: SqlDriver['knex'];
+  primeMssqlGuidColumns: SqlDriver['primeMssqlGuidColumns'];
   readBackInsertedRows: SqlDriver['readBackInsertedRows'];
   resyncSequenceToDataMax: SqlDriver['resyncSequenceToDataMax'];
   remoteColumn: SqlDriver['remoteColumn'];
@@ -273,7 +274,9 @@ export class BulkOperationsFacet {
   }
 
   /** The body of `SqlDriver#updateMany`; the method's docblock there is its contract. */
-  static async updateMany(this: Pick<BulkOperationsHost, 'applyFilters' | 'applyTenantScope' | 'applyWriteColumnMap' | 'auditMissingTenant' | 'formatInput' | 'getBuilder' | 'keepSuppliedUpdatedAt' | 'rotationShardsOf' | 'stampsUpdatedAt' | 'updateWithPresumedTimestamp' | 'updatedAtStamp' | 'updatedAtStampIsPresumed'>, object: string, query: DriverQuery, data: any, options?: DriverOptions): Promise<number> {
+  static async updateMany(this: Pick<BulkOperationsHost, 'applyFilters' | 'applyTenantScope' | 'applyWriteColumnMap' | 'auditMissingTenant' | 'formatInput' | 'getBuilder' | 'isMssql' | 'keepSuppliedUpdatedAt' | 'primeMssqlGuidColumns' | 'rotationShardsOf' | 'stampsUpdatedAt' | 'updateWithPresumedTimestamp' | 'updatedAtStamp' | 'updatedAtStampIsPresumed'>, object: string, query: DriverQuery, data: any, options?: DriverOptions): Promise<number> {
+    // [#31395] SQL Server: which columns are GUIDs, before a text operator compiles.
+    if (this.isMssql) await this.primeMssqlGuidColumns(object, query.where);
     this.auditMissingTenant(object, 'updateMany', options);
 
     // `data ?? {}` keeps the nullish tolerance this door already had on the
@@ -315,7 +318,9 @@ export class BulkOperationsFacet {
   }
 
   /** The body of `SqlDriver#deleteMany`; the method's docblock there is its contract. */
-  static async deleteMany(this: Pick<BulkOperationsHost, 'applyFilters' | 'applyTenantScope' | 'auditMissingTenant' | 'getBuilder' | 'rotationShardsOf'>, object: string, query: DriverQuery, options?: DriverOptions): Promise<number> {
+  static async deleteMany(this: Pick<BulkOperationsHost, 'applyFilters' | 'applyTenantScope' | 'auditMissingTenant' | 'getBuilder' | 'isMssql' | 'primeMssqlGuidColumns' | 'rotationShardsOf'>, object: string, query: DriverQuery, options?: DriverOptions): Promise<number> {
+    // [#31395] SQL Server: which columns are GUIDs, before a text operator compiles.
+    if (this.isMssql) await this.primeMssqlGuidColumns(object, query.where);
     this.auditMissingTenant(object, 'deleteMany', options);
     let total = 0;
     for (const target of this.rotationShardsOf(object) ?? [object]) {
@@ -358,7 +363,9 @@ export class BulkOperationsFacet {
   }
 
   /** The body of `SqlDriver#count`; the method's docblock there is its contract. */
-  static async count(this: Pick<BulkOperationsHost, 'applyFilters' | 'applyTenantScope' | 'backendStatementFault' | 'getBuilder' | 'unresolvableFilterColumnRefusal'>, object: string, query?: DriverQuery, options?: DriverOptions): Promise<number> {
+  static async count(this: Pick<BulkOperationsHost, 'applyFilters' | 'applyTenantScope' | 'backendStatementFault' | 'getBuilder' | 'isMssql' | 'primeMssqlGuidColumns' | 'unresolvableFilterColumnRefusal'>, object: string, query?: DriverQuery, options?: DriverOptions): Promise<number> {
+    // [#31395] SQL Server: which columns are GUIDs, before a text operator compiles.
+    if (this.isMssql) await this.primeMssqlGuidColumns(object, query?.where);
     const builder = this.getBuilder(object, options);
     this.applyTenantScope(builder, object, options);
 
