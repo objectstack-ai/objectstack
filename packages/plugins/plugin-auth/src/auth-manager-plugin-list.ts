@@ -788,7 +788,14 @@ export async function buildPluginList(this: PluginListHost): Promise<any[]> {
         getEngine: () => this.getDataEngine(),
         boundary: async () => (await this.config.organizationBoundary?.().catch(() => undefined)) ?? undefined,
         warn: (message) => this.config.logger?.warn?.(message),
-        error: (message) => this.config.logger?.error?.(message),
+        // The host logger carries `error` though the config type names only
+        // `info`/`warn` (as `logAfterResponseSendFailure` reads it); with none,
+        // the console's error stream, never a lower level.
+        error: (message) => {
+          const sink = this.config.logger as { error?: (msg: string) => void } | undefined;
+          if (typeof sink?.error === 'function') sink.error(message);
+          else console.error(message);
+        },
       }),
       provisionUserOnEveryLogin: true,
     });
