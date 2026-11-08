@@ -225,8 +225,9 @@ async function makeEngine(options: { withBin?: boolean } = {}) {
 }
 
 /**
- * plugin-security's posture until it maps `restore` to its grants: the
- * destructive verb, unmapped, is refused for every caller but the system.
+ * A security layer that refuses `restore` for every caller but the system
+ * (plugin-security answers it from `allowRestoreOwnDeleted` since #30237
+ * PR 4; this stands in for a caller that holds no such grant).
  */
 function refuseNonSystemRestore(engine: ObjectQL) {
   engine.registerMiddleware(async (opCtx: any, next: () => Promise<void>) => {
@@ -365,6 +366,103 @@ describe('restore(entryId)', () => {
     await expect(engine.restore(entryId, SYSTEM)).resolves.toMatchObject({ recordId: 'acc1' });
     expect(driver.rowsOf('account')).toHaveLength(1);
     expect(entriesOf(driver)).toHaveLength(0);
+  });
+});
+
+/** A second member of org_1, who did not delete Acme. */
+const ORG1_OTHER = { context: { userId: 'u_dave', tenantId: 'org_1' } } as const;
+
+describe("restoring another caller's entry (#30237 PR 4, Q5 = A)", () => {
+  it("refuses another member's entry, 403, when no permission resolver answers: it fails closed", async () => {
+    const { engine, driver, dispatches } = await makeEngine();
+    const entryId = await deleteAcme(engine, driver);
+    dispatches.length = 0;
+
+    await expect(engine.restore(entryId, ORG1_OTHER)).rejects.toMatchObject({
+      code: 'PERMISSION_DENIED', status: 403, httpStatus: 403, object: 'account', entryId,
+    });
+    expect(driver.rowsOf('account')).toHaveLength(0);
+    expect(entriesOf(driver)).toHaveLength(1);
+  });
+
+  it("restores another member's entry for a caller holding `manageRecycleBin` on the object", async () => {
+    const { engine, driver } = await makeEngine();
+    const entryId = await deleteAcme(engine, driver);
+    engine.registerEffectiveObjectPermissionsResolver(async () => ({ account: { allowRead: true, manageRecycleBin: true } }));
+
+    await expect(engine.restore(entryId, ORG1_OTHER)).resolves.toMatchObject({ recordId: 'acc1' });
+    expect(driver.rowsOf('account')).toHaveLength(1);
+    expect(entriesOf(driver)).toHaveLength(0);
+  });
+
+  it('restores it for `modifyAllRecords`, which implies the manager bit', async () => {
+    const { engine, driver } = await makeEngine();
+    const entryId = await deleteAcme(engine, driver);
+    engine.registerEffectiveObjectPermissionsResolver(async () => ({ account: { allowRead: true, modifyAllRecords: true } }));
+    await expect(engine.restore(entryId, ORG1_OTHER)).resolves.toMatchObject({ recordId: 'acc1' });
+  });
+
+  it.each([
+    ['allowRestoreOwnDeleted only', { allowRead: true, allowRestoreOwnDeleted: true }],
+    ['allowDelete only', { allowRead: true, allowDelete: true }],
+    ['manageRecycleBin without read', { allowRead: false, manageRecycleBin: true }],
+  ])("refuses another member's entry for %s, 403", async (_label, permission) => {
+    const { engine, driver } = await makeEngine();
+    const entryId = await deleteAcme(engine, driver);
+    engine.registerEffectiveObjectPermissionsResolver(async () => ({ account: permission }));
+
+    await expect(engine.restore(entryId, ORG1_OTHER)).rejects.toMatchObject({ code: 'PERMISSION_DENIED', status: 403 });
+    expect(entriesOf(driver)).toHaveLength(1);
+  });
+
+  it("refuses when the manager bit is held on another object only", async () => {
+    const { engine, driver } = await makeEngine();
+    const entryId = await deleteAcme(engine, driver);
+    engine.registerEffectiveObjectPermissionsResolver(async () => ({ contact: { allowRead: true, manageRecycleBin: true } }));
+    await expect(engine.restore(entryId, ORG1_OTHER)).rejects.toMatchObject({ code: 'PERMISSION_DENIED', status: 403 });
+  });
+
+  it('refuses, 403, when the resolver throws: it fails closed', async () => {
+    const { engine, driver } = await makeEngine();
+    const entryId = await deleteAcme(engine, driver);
+    engine.registerEffectiveObjectPermissionsResolver(async () => { throw new Error('grants store down'); });
+
+    await expect(engine.restore(entryId, ORG1_OTHER)).rejects.toMatchObject({ code: 'PERMISSION_DENIED', status: 403 });
+    expect(entriesOf(driver)).toHaveLength(1);
+  });
+
+  it('restores the deleter\'s own entry with no resolver and no grant asked', async () => {
+    const { engine, driver } = await makeEngine();
+    const entryId = await deleteAcme(engine, driver);
+    const resolver = vi.fn(async () => ({}));
+    engine.registerEffectiveObjectPermissionsResolver(resolver);
+
+    await expect(engine.restore(entryId, ORG1_USER)).resolves.toMatchObject({ recordId: 'acc1' });
+    expect(resolver).not.toHaveBeenCalled();
+  });
+
+  it('answers null for a caller the tenant wall denies (no active organization), and leaves the entry', async () => {
+    const { engine, driver, dispatches } = await makeEngine();
+    const entryId = await deleteAcme(engine, driver);
+    dispatches.length = 0;
+
+    await expect(engine.restore(entryId, { context: { userId: 'u_alice' } })).resolves.toBeNull();
+    expect(dispatches).toEqual([]);
+    expect(entriesOf(driver)).toHaveLength(1);
+    expect(driver.rowsOf('account')).toHaveLength(0);
+  });
+
+  it('answers null when the security layer recorded a deny verdict on the dispatch', async () => {
+    const { engine, driver } = await makeEngine();
+    const entryId = await deleteAcme(engine, driver);
+    engine.registerMiddleware(async (opCtx: any, next: () => Promise<void>) => {
+      if (opCtx.operation === 'restore') opCtx.tenantLayer0Verdict = { kind: 'deny' };
+      await next();
+    });
+
+    await expect(engine.restore(entryId, ORG1_USER)).resolves.toBeNull();
+    expect(entriesOf(driver)).toHaveLength(1);
+    expect(driver.rowsOf('account')).toHaveLength(0);
   });
 });
 

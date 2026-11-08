@@ -1111,10 +1111,11 @@ describe('SecurityPlugin', () => {
       // The bits retired with their mapping rows — `allowPurge` on a legacy
       // stored set (`as any`: the spec type now spells it `never`) grants
       // nothing, and the dispatch is refused fail-closed by the object-level
-      // gate. The row-level machinery must never even be consulted: no
-      // pre-image read, no sharing probe. (The pre-image coverage claim for
-      // by-id destructive writes lives on with `delete` above, and returns for
-      // purge with the M2 batch.)
+      // gate: `purge` asks `manageRecycleBin` since #30237 PR 4, which this
+      // set does not hold. The row-level machinery must never even be
+      // consulted: no pre-image read, no sharing probe. (The pre-image
+      // coverage claim for by-id destructive writes lives on with `delete`
+      // above.)
       const purgerSet: PermissionSet = {
         name: 'purger', label: 'Purger',
         objects: { '*': { allowRead: true, allowPurge: true } },
@@ -1139,36 +1140,34 @@ describe('SecurityPlugin', () => {
       expect(harness.findOne).toHaveBeenCalledTimes(0);
     });
 
-    it("[#30237] DENIES the engine's object-level `restore` dispatch fail-closed, whatever the caller holds, until the verb is mapped", async () => {
-      // `ObjectQL.restore(entryId)` dispatches `restore` on the business object
-      // with no AST and no id (`recycle-bin/restore.ts`). Until the recycle-bin
-      // grants are read (`allowRestoreOwnDeleted` / `manageRecycleBin`,
-      // ADR-0148 D5), the DESTRUCTIVE_OPERATIONS backstop refuses it for every
-      // caller that is not the system: holding every CRUD bit, the
-      // super-user bypass and both new keys grants nothing yet, and no row is
-      // read.
-      const everythingSet: PermissionSet = {
-        name: 'everything', label: 'Everything',
-        objects: {
-          '*': {
-            allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true,
-            viewAllRecords: true, modifyAllRecords: true,
-            allowRestoreOwnDeleted: true, manageRecycleBin: true,
-          },
-        },
-      } as any;
-      const plugin = new SecurityPlugin({ fallbackPermissionSet: 'everything' });
-      const harness = makeMiddlewareCtx({
-        permissionSets: [everythingSet],
-        objectFields: ownerFields,
-        findOneImpl: () => ({ id: 'r1', created_by: 'u1', name: 'x' }),
+    for (const [op, grantKey] of [['restore', 'allowRestoreOwnDeleted'], ['purge', 'manageRecycleBin']] as const) {
+      it(`[#30237 PR 4] answers the engine's object-level \`${op}\` dispatch from \`${grantKey}\`, and reads no row`, async () => {
+        // `ObjectQL.restore(entryId)` / `purge(entryId)` / `empty(object)`
+        // dispatch on the business object with no AST and no id
+        // (`recycle-bin/restore.ts`, `purge.ts`). The object gate answers it
+        // from the recycle-bin key (ADR-0148 D5, Q5 = A): bounded by read,
+        // implied by modifyAllRecords, NOT by allowDelete. No row is read.
+        const run = async (entry: Record<string, unknown>) => {
+          const ps: PermissionSet = { name: 'ps', label: 'PS', objects: { '*': entry } } as any;
+          const plugin = new SecurityPlugin({ fallbackPermissionSet: 'ps' });
+          const harness = makeMiddlewareCtx({
+            permissionSets: [ps],
+            objectFields: ownerFields,
+            findOneImpl: () => ({ id: 'r1', created_by: 'u1', name: 'x' }),
+          });
+          await plugin.init(harness.ctx);
+          await plugin.start(harness.ctx);
+          const opCtx: any = { object: 'task', operation: op, options: { context: memberCtx }, context: memberCtx };
+          const outcome = await harness.run(opCtx).then(() => 'allowed', (e: any) => e?.name);
+          expect(harness.findOne).toHaveBeenCalledTimes(0);
+          return outcome;
+        };
+        expect(await run({ allowRead: true, [grantKey]: true })).toBe('allowed');
+        expect(await run({ modifyAllRecords: true })).toBe('allowed');
+        expect(await run({ [grantKey]: true })).toBe('PermissionDeniedError');
+        expect(await run({ allowRead: true, allowEdit: true, allowDelete: true, viewAllRecords: true })).toBe('PermissionDeniedError');
       });
-      await plugin.init(harness.ctx);
-      await plugin.start(harness.ctx);
-      const opCtx: any = { object: 'task', operation: 'restore', options: { context: memberCtx }, context: memberCtx };
-      await expect(harness.run(opCtx)).rejects.toMatchObject({ name: 'PermissionDeniedError' });
-      expect(harness.findOne).toHaveBeenCalledTimes(0);
-    });
+    }
 
     it('SKIPS the write-class re-read when no RLS policy applies (e.g. modifyAllRecords / admin) — the read question only', async () => {
       const adminSet: PermissionSet = {
@@ -2772,8 +2771,8 @@ describe('PermissionEvaluator', () => {
     const evaluator = new PermissionEvaluator();
     // Full CRUD does NOT imply the destructive lifecycle class: `transfer` is
     // gated by its own bit (`allowTransfer`) and must be denied when the bit
-    // is absent — never default-allow (ADR-0049). `restore`/`purge` are denied
-    // unconditionally since #12497 (bits tombstoned, mapping rows retired).
+    // is absent — never default-allow (ADR-0049). `restore`/`purge` ask the
+    // recycle-bin keys (#30237 PR 4), which allowDelete does not imply.
     const ps = makePermSet('member', {
       contact: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true },
     });
@@ -2798,25 +2797,25 @@ describe('PermissionEvaluator', () => {
     // ADR-0049 — the ops never existed; the keys return with M2, #1883). A
     // 17-era STORED permission-set row can still carry the bits (`as any` —
     // the spec type now spells them `never`, and a fresh parse rejects them),
-    // and it must grant nothing: denial is unconditional via the
-    // DESTRUCTIVE_OPERATIONS backstop, before any bit or bypass is consulted.
+    // and it must grant nothing: since #30237 PR 4 the verbs ask
+    // `allowRestoreOwnDeleted` / `manageRecycleBin`, which the legacy row
+    // does not carry, even beside read.
     const evaluator = new PermissionEvaluator();
     const legacy = makePermSet('legacy', {
-      contact: { allowRestore: true, allowPurge: true },
+      contact: { allowRead: true, allowRestore: true, allowPurge: true },
     } as any);
     expect(evaluator.checkObjectPermission('restore', 'contact', [legacy])).toBe(false);
     expect(evaluator.checkObjectPermission('purge', 'contact', [legacy])).toBe(false);
   });
 
-  it('modifyAllRecords super-user bypass covers transfer; restore/purge stay fail-closed (#1883/#12497)', () => {
+  it('modifyAllRecords super-user bypass covers transfer, restore and purge (#1883, #30237 Q5 = A)', () => {
     const evaluator = new PermissionEvaluator();
     const admin = makePermSet('admin', { contact: { modifyAllRecords: true } });
     expect(evaluator.checkObjectPermission('transfer', 'contact', [admin])).toBe(true);
-    // Unmapped destructive ops are denied before the bypass is consulted —
-    // "Modify All Data" re-covers restore/purge only when the M2 batch re-adds
-    // their mapping rows (Salesforce semantics, #1883 disposition).
-    expect(evaluator.checkObjectPermission('restore', 'contact', [admin])).toBe(false);
-    expect(evaluator.checkObjectPermission('purge', 'contact', [admin])).toBe(false);
+    // "Modify All Data" re-covers restore/purge now that their mapping rows
+    // are back (restore → allowRestoreOwnDeleted, purge → manageRecycleBin).
+    expect(evaluator.checkObjectPermission('restore', 'contact', [admin])).toBe(true);
+    expect(evaluator.checkObjectPermission('purge', 'contact', [admin])).toBe(true);
   });
 
   it('should allow via viewAllRecords', () => {
@@ -3061,12 +3060,9 @@ describe('crudBucketForOperation (ADR-0066 ⑤)', () => {
   it('folds delete into `delete`', () => {
     expect(crudBucketForOperation('delete')).toBe('delete');
   });
-  it('restore/purge resolve null since #12497 — out of the map with their retired bits', () => {
-    // Their dispatch is denied at the object gate before any per-operation map
-    // is consulted; the M2 batch re-adds the rows (restore→update,
-    // purge→delete) together with the bits.
-    expect(crudBucketForOperation('restore')).toBeNull();
-    expect(crudBucketForOperation('purge')).toBeNull();
+  it('folds restore into `update` and purge into `delete` (#30237 PR 4, back in the map with the recycle-bin keys)', () => {
+    expect(crudBucketForOperation('restore')).toBe('update');
+    expect(crudBucketForOperation('purge')).toBe('delete');
   });
   it('returns null for an operation with no CRUD mapping', () => {
     expect(crudBucketForOperation('customReadSideOp')).toBeNull();

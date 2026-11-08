@@ -149,8 +149,9 @@ async function makeEngine(options: { withBin?: boolean; deleteMany?: boolean } =
 }
 
 /**
- * plugin-security's posture until it maps `purge` to `manageRecycleBin`: the
- * destructive verb, unmapped, is refused for every caller but the system.
+ * A security layer that refuses `purge` for every caller but the system
+ * (plugin-security answers it from `manageRecycleBin` since #30237 PR 4; this
+ * stands in for a caller that holds no such grant).
  */
 function refuseNonSystemPurge(engine: ObjectQL) {
   engine.registerMiddleware(async (opCtx: any, next: () => Promise<void>) => {
@@ -411,6 +412,85 @@ describe('empty(object)', () => {
     const { engine, dispatches } = await makeEngine();
     await expect(engine.empty(object, SYSTEM)).rejects.toMatchObject({ code: 'VALIDATION_ERROR', status: 400, param });
     expect(dispatches).toEqual([]);
+  });
+});
+
+/** A security layer that records `verdict` as its Layer-0 tenant verdict on every `purge` dispatch. */
+function recordVerdictOnPurge(engine: ObjectQL, verdict: unknown) {
+  engine.registerMiddleware(async (opCtx: any, next: () => Promise<void>) => {
+    if (opCtx.operation === 'purge') opCtx.tenantLayer0Verdict = verdict;
+    await next();
+  });
+}
+
+/** A caller the `isolated` wall denies: signed in, with no active organization. */
+const NO_ORG_USER = { context: { userId: 'u_alice' } } as const;
+
+describe('the tenant wall on purge and empty (#30237 PR 2 should-fix 1)', () => {
+  it('purge answers false for a caller the wall denies, before reading or dispatching anything', async () => {
+    const { engine, driver, dispatches } = await makeEngine();
+    const seeded = await seedEntries(engine, driver);
+    dispatches.length = 0;
+
+    await expect(engine.purge(seeded.of('l1').id as string, NO_ORG_USER)).resolves.toBe(false);
+    await expect(engine.purge(seeded.of('l3').id as string, NO_ORG_USER)).resolves.toBe(false);
+    expect(entriesOf(driver)).toHaveLength(5);
+    expect(dispatches).toEqual([]);
+  });
+
+  it('empty answers 0 for a caller the wall denies, and removes no organization\'s entries', async () => {
+    const { engine, driver, dispatches } = await makeEngine();
+    await seedEntries(engine, driver);
+    dispatches.length = 0;
+
+    await expect(engine.empty('loner', NO_ORG_USER)).resolves.toBe(0);
+    expect(entriesOf(driver)).toHaveLength(5);
+    expect(dispatches).toEqual([]);
+  });
+
+  it('purge answers false, and removes nothing, when the security layer recorded a deny verdict on the dispatch', async () => {
+    const { engine, driver } = await makeEngine();
+    recordVerdictOnPurge(engine, { kind: 'deny' });
+    const seeded = await seedEntries(engine, driver);
+
+    await expect(engine.purge(seeded.of('l1').id as string, ORG1_USER)).resolves.toBe(false);
+    expect(entriesOf(driver)).toHaveLength(5);
+  });
+
+  it('empty answers 0, and removes nothing, when the security layer recorded a deny verdict on the dispatch', async () => {
+    const { engine, driver } = await makeEngine();
+    recordVerdictOnPurge(engine, { kind: 'deny' });
+    await seedEntries(engine, driver);
+
+    await expect(engine.empty('loner', ORG1_USER)).resolves.toBe(0);
+    expect(entriesOf(driver)).toHaveLength(5);
+  });
+
+  it("purge's removal is scoped by the recorded verdict: an organization it does not name keeps its entry", async () => {
+    const { engine, driver } = await makeEngine();
+    recordVerdictOnPurge(engine, { kind: 'organization', organizationId: 'org_2' });
+    const seeded = await seedEntries(engine, driver);
+
+    // The entry is org 1's; the verdict recorded on the dispatch names org 2 only.
+    await expect(engine.purge(seeded.of('l1').id as string, ORG1_USER)).resolves.toBe(false);
+    expect(entriesOf(driver)).toHaveLength(5);
+  });
+
+  it("empty's removal is scoped by the recorded verdict, not by the caller's own organization", async () => {
+    const { engine, driver } = await makeEngine();
+    recordVerdictOnPurge(engine, { kind: 'organization', organizationId: 'org_2' });
+    await seedEntries(engine, driver);
+
+    await expect(engine.empty('loner', ORG1_USER)).resolves.toBe(2);
+    // Org 2's loners went, as the recorded verdict names org 2; org 1's stay.
+    expect(entriesOf(driver).map((e) => e.record_id).sort()).toEqual(['acc1', 'l1', 'l2']);
+  });
+
+  it('the system is exempt from the wall', async () => {
+    const { engine, driver } = await makeEngine();
+    recordVerdictOnPurge(engine, { kind: 'deny' });
+    await seedEntries(engine, driver);
+    await expect(engine.empty('loner', SYSTEM)).resolves.toBe(4);
   });
 });
 
