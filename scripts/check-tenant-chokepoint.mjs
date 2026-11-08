@@ -268,6 +268,8 @@ const DECLARED_WATCH_HINTS = [
   'packages/drivers/driver-sql/src/sql-driver-introspection.ts',
   'packages/drivers/driver-sql/src/sql-driver-lifecycle.ts',
   'packages/drivers/driver-sql/src/sql-driver-managed-drift.ts',
+  'packages/drivers/driver-sql/src/sql-driver-oracle-dialect.ts',
+  'packages/drivers/driver-sql/src/sql-driver-oracle-introspection.ts',
   'packages/drivers/driver-sql/src/sql-driver-predicate-emitters.ts',
   'packages/drivers/driver-sql/src/sql-driver-presumed-timestamp.ts',
   'packages/drivers/driver-sql/src/sql-driver-query-plan.ts',

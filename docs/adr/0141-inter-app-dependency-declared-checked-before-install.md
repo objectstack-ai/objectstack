@@ -96,6 +96,14 @@ added; one gate learns a second source of co-owners:
 
 The first consumer is a HotCRM module shipping on its own, revenue first.
 
+> **Addendum (2026-11-08, [#26986](https://github.com/objectstack-ai/objectstack/issues/26986) — ruling of record
+> [`6717108024`](https://github.com/objectstack-ai/objectstack/issues/26986#issuecomment-6717108024), Q0 = A) — this
+> first consumer is shelved.** HotCRM ships as one suite artifact whose modules a customer turns off in settings
+> (#25805 ruling D, #28117 ruling A); revenue shipped as its own artifact is not a target. The sentence above is left as
+> written, and the note under [D7](#d7--the-first-consumer-a-hotcrm-module-shipping-on-its-own-revenue-first) says what
+> stands. No decision of this record is reversed, and the open section stays open, decided with the first consumer —
+> whoever that becomes.
+
 ---
 
 ## Context
@@ -459,6 +467,40 @@ it. Renaming a module's objects to dodge the gate stays refused (ADR-0129; lette
   on: a standalone module's permission sets are the module author's work, not a platform blocker.
 
 ### D7 — The first consumer: a HotCRM module shipping on its own, revenue first
+
+> **Addendum (2026-11-08, [#26986](https://github.com/objectstack-ai/objectstack/issues/26986) — ruling of record
+> [`6717108024`](https://github.com/objectstack-ai/objectstack/issues/26986#issuecomment-6717108024), Q0 = A) — the
+> consumer this section names is shelved; what the record declares stands.** The maintainer, verbatim and untranslated:
+> 「所以hotcrm 以套件的形式发布就没有后续的问题了对吧，」 (2026-11-08T04:06:30Z), then 「A」 (04:12:06Z). Letter A: the
+> module-absent shape — revenue as its own artifact, hotcrm#2271, since closed `not_planned` — is not a target. The
+> shape that ships is the one [#25805](https://github.com/objectstack-ai/objectstack/issues/25805) ruling D chose
+> ([`6500011525`](https://github.com/objectstack-ai/objectstack/issues/25805#issuecomment-6500011525),
+> 「大包 + 设置里启用模块」): one artifact, its modules turned off in settings, with "disabled" carrying the one meaning
+> [#28117](https://github.com/objectstack-ai/objectstack/issues/28117) ruling A
+> ([`6545646924`](https://github.com/objectstack-ai/objectstack/issues/28117#issuecomment-6545646924)) binds — hidden,
+> refused on the data plane and the by-name reads, data kept, and an app's own in-process access to the module's objects
+> still served. With the module disabled, measurement
+> [`6716259819`](https://github.com/objectstack-ai/objectstack/issues/26986#issuecomment-6716259819) (`main` `604a2b3b`)
+> finds that #26986's gaps F3–F6 no longer reproduce, and that F2 leaves only an editable lookup whose picker is empty,
+> as hotcrm#2404 documents. Four readings follow; nothing else in this record changes:
+>
+> - **No decision is reversed.** D1–D6 and D8 stand as declared, with their earlier notes. D2's pre-install check
+>   (`packages/metadata-core/src/protocol-handshake.ts#assertDeclaredDependencies`) and D5's dependency and sibling
+>   co-owner sources (`packages/objectql/src/registry.ts#installPackage`) are on `main` and stay as built, for a future
+>   cross-artifact consumer: an app in another artifact that depends on an installed app.
+> - **That consumer reopens two deferrals**: #26986's Q1–Q5, the per-gap options, deferred and not rejected (the option
+>   table stays in that card's body and in `6716259819`); and #25805, closed `not_planned`, whose trigger is an app
+>   built and installed on its own that depends on another app's objects across repositories.
+> - **The one-artifact suite still reads D1.** Each HotCRM module is `type: 'module'` and declares the app package in
+>   `manifest.dependencies` (hotcrm `main` `6961ab1`); at install, D2's second arm judges that entry for presence only,
+>   and the disable door reads it as the module's tie to its app
+>   ([ADR-0070](./0070-package-first-authoring.md)'s 2026-10-31 amendment).
+> - **The sentences that plan the shelved consumer stay as written**, read as worked examples of D2 and D5, not as a
+>   plan of record: the TL;DR's closing sentence; Context §2's sentence on hotcrm#2270 and hotcrm#2271; the lead of D4's
+>   open section; D5's "The depended-on app's companions must declare it" bullet; this section, its three HotCRM
+>   preconditions and its closing paragraph; the Consequences lines on "a HotCRM module" and on the companions
+>   precondition; Open items 1, 6 and 7; Execution plan item 5. D4's three questions stay open, decided with the first
+>   consumer — whoever that becomes.
 
 The scenario this record is accepted against is HotCRM's module split as its `docs/architecture/module-split-plan.md`
 records it — the 2026-09-14 shape: the sales app plus service, revenue and marketing modules (**not re-verified**). The

@@ -479,9 +479,8 @@ function errorResult(message: string) {
  * unique arm's `object` / `field`) is not served, as on every other tool
  * ({@link errorResultWithCode} says why).
  *
- * ⚠️ A driver string code (`SQLITE_BUSY`) answers what `/actions` answers,
- * `400 VALIDATION_ERROR` with `declaredCode`, where `/api/v1/data` answers
- * `500 DATABASE_ERROR`. That difference is between the two REST doors.
+ * [#31317] A driver string code (`SQLITE_BUSY`) answers what `/actions`
+ * answers, which is the `/api/v1/data` door's fault: `500 DATABASE_ERROR`.
  */
 function errorResultFromThrown(err: unknown, request: string, objectName?: string) {
   const answer = actionsDoorAnswerOf(err, objectName);
@@ -549,6 +548,10 @@ interface DataDoorAnswer {
   code?: string;
   message: string;
   status: number;
+  /** [#31373] The producer's unregistered spelling the door demoted, when it serves one. */
+  declaredCode?: string;
+  /** [#31373] The producer's marked end-user sentence the door rides onto its answer, when it serves one. */
+  userMessage?: string;
 }
 
 /**
@@ -564,6 +567,15 @@ interface DataDoorAnswer {
  * other context keys the door adds are not read, as `details` is not
  * ({@link errorResultWithCode}).
  *
+ * [#31373] `declaredCode` and `userMessage` are read as the door serves them,
+ * each omitted when it serves none: an unregistered code the door demoted to
+ * its closed code (`{ code: 'VENDOR_DOWN', status: 503 }` answers
+ * `SERVICE_UNAVAILABLE` with `declaredCode: 'VENDOR_DOWN'`), and a producer's
+ * marked end-user sentence, which the door rides onto any answer, a fault's
+ * included. ⛔ Read off the door's body, never a second demotion rule. The
+ * record data faces render them in `run_action`'s order ({@link
+ * errorResultFromThrown}); the metadata tools do not ({@link metaDoorErrorResult}).
+ *
  * [#31270] Exported for the record resource (`MCPServerRuntime.bridgeResources`),
  * which answers a code-less throw with the same read; not on the package entry.
  */
@@ -571,7 +583,14 @@ export function dataDoorAnswerOf(err: unknown, objectName?: string): DataDoorAns
   const door = mapDataError(err, objectName);
   const code = typeof door.body.code === 'string' && door.body.code !== '' ? door.body.code : undefined;
   const message = typeof door.body.error === 'string' && door.body.error !== '' ? door.body.error : messageOf(err);
-  return { ...(code !== undefined ? { code } : {}), message, status: door.status };
+  const { declaredCode, userMessage } = door.body;
+  return {
+    ...(code !== undefined ? { code } : {}),
+    message,
+    status: door.status,
+    ...(typeof declaredCode === 'string' && declaredCode !== '' ? { declaredCode } : {}),
+    ...(typeof userMessage === 'string' && userMessage !== '' ? { userMessage } : {}),
+  };
 }
 
 /**
@@ -597,28 +616,76 @@ export function dataDoorAnswerOf(err: unknown, objectName?: string): DataDoorAns
  *   the throw marks itself `refusal: true` (`declaredRefusalMessage`,
  *   `@objectstack/types`). It used to reach the agent with its own sentence.
  *   An unregistered code is demoted there to the status's closed code, with
- *   the producer's spelling in a `declaredCode` member that no MCP face
- *   serves; the face answers the closed code.
+ *   the producer's spelling in `declaredCode`; the face answers both (#31373,
+ *   {@link dataDoorAnswerOf}).
  *
  * ⛔ One reader, never a copy of the withhold rule: the door's answer is
  * `mapDataError`'s, through {@link dataDoorAnswerOf}, and the fault line is
  * the doors' own `isServerFault`. The question is asked only of a throw whose
  * status is a 5xx or undeclared (`serverFaultProvenance`, `@objectstack/types`,
  * answers `'declared'` or `'undeclared'`): a producer that DECLARED a refusal
- * status (below 500) keeps its coded answer byte for byte, as #31246 pins it,
- * and so does a code the door refuses (`PERMISSION_DENIED` with no status
- * answers 403 there).
+ * status (below 500) keeps its coded answer, as #31246 pins it, and so does
+ * a code the door refuses (`PERMISSION_DENIED` with no status answers 403
+ * there).
+ *
+ * [#31407] …with what the door serves beside that refusal
+ * ({@link refusalAsTheDoorServesIt}): an app's own unregistered code is the
+ * door's closed code with `declaredCode`, and a producer's `userMessage`
+ * rides it. A registered code with no `userMessage`, a coded sandboxed
+ * refusal and the engine's unique violation are unchanged byte for byte.
  *
  * Read by the six record data tools ({@link dataDoorErrorResult}),
  * `delete_records`' selection read and the record resource
  * (`MCPServerRuntime.bridgeResources`). ⛔ Not by `run_action` / `resume_run`
  * or the metadata tools, whose doors are not `/data`.
  */
-export function dataDoorRefusalEnvelope(err: unknown, objectName: string): ThrownRefusalEnvelope | undefined {
+export function dataDoorRefusalEnvelope(err: unknown, objectName: string): DataDoorRefusalEnvelope | undefined {
   const envelope = thrownRefusalEnvelope(err);
   if (envelope === undefined) return undefined;
-  if (serverFaultProvenance(resolveThrownHttpError(err)) === undefined) return envelope;
-  return isServerFault(dataDoorAnswerOf(err, objectName).status) ? undefined : envelope;
+  const door = dataDoorAnswerOf(err, objectName);
+  if (serverFaultProvenance(resolveThrownHttpError(err)) !== undefined && isServerFault(door.status)) return undefined;
+  return refusalAsTheDoorServesIt(envelope, door);
+}
+
+/** [#31407] A coded refusal on a `/data` face, with the members the door serves beside it. */
+export interface DataDoorRefusalEnvelope extends ThrownRefusalEnvelope {
+  declaredCode?: string;
+  userMessage?: string;
+}
+
+/**
+ * [#31407] A coded refusal on a `/data` face, read against the door's answer
+ * to the same throw ({@link dataDoorAnswerOf}, `mapDataError`):
+ *
+ * - when the door DEMOTED the code (it serves `declaredCode`: an app's own
+ *   unregistered code, `{ code: 'LEAVE_EXHAUSTED', status: 409 }`), the face
+ *   answers the door's refusal: the closed code
+ *   (`RESOURCE_CONFLICT`), its sentence, its status and `declaredCode`. It
+ *   used to answer `code: 'LEAVE_EXHAUSTED'`, outside the registered
+ *   vocabulary, with no `declaredCode`;
+ * - otherwise the coded envelope stands, and the door's `userMessage` joins
+ *   it when the door serves one (`PERMISSION_DENIED` + `userMessage` answers
+ *   403 with it there). It used to be dropped.
+ *
+ * ⛔ No second demotion rule: whether a code is demoted is the door's
+ * `declaredCode`, never a vocabulary check here. Members render in
+ * `run_action`'s order ({@link errorResultFromThrown}), each omitted when the
+ * door serves none. Only a refusal reaches here ({@link
+ * dataDoorRefusalEnvelope}); a declared 4xx the door answers as a fault (the
+ * sandbox's own fault) serves no `declaredCode` there, so it keeps the
+ * envelope, as #31246 pins it.
+ */
+function refusalAsTheDoorServesIt(envelope: ThrownRefusalEnvelope, door: DataDoorAnswer): DataDoorRefusalEnvelope {
+  if (door.declaredCode !== undefined && door.code !== undefined) {
+    return {
+      code: door.code,
+      message: door.message,
+      status: door.status,
+      declaredCode: door.declaredCode,
+      ...(door.userMessage !== undefined ? { userMessage: door.userMessage } : {}),
+    };
+  }
+  return door.userMessage !== undefined ? { ...envelope, userMessage: door.userMessage } : envelope;
 }
 
 /**
@@ -644,6 +711,11 @@ export function dataDoorRefusalEnvelope(err: unknown, objectName: string): Throw
  *   `{ statusCode: 503, message }` when no data service is registered): the
  *   status, and no code, since the door invents none. A declared 5xx's prose is
  *   withheld there too.
+ *
+ * [#31373] The door's `declaredCode` and `userMessage` ride after `status`
+ * when it serves them, as `run_action` renders `/actions`' ({@link
+ * errorResultFromThrown}): `{ error: { code, message, status, declaredCode?,
+ * userMessage? } }`.
  *
  * ⛔ The coded path is read FIRST and is unchanged: a thrown `code` keeps
  * {@link thrownRefusalEnvelope}'s rendering byte for byte, its unique-violation
@@ -714,7 +786,9 @@ function metaDoorErrorResult(err: unknown, tool: MetaDoorTool, objectName?: stri
     ...(door.code !== undefined ? { code: door.code } : {}),
     request: { method: 'tools/call', path: objectName !== undefined ? `${tool} ${objectName}` : tool },
   });
-  return codedErrorResult(door);
+  // [#31373] The `/data` door's `declaredCode` / `userMessage` are the record
+  // data faces' members; this answer is unchanged by them.
+  return codedErrorResult({ ...(door.code !== undefined ? { code: door.code } : {}), message: door.message, status: door.status });
 }
 
 /**
@@ -2423,11 +2497,13 @@ export function registerObjectTools(
             }
             return textResult(outcome);
           } catch (err) {
-            // [#31273, #31341] A coded throw from the selection read that the
-            // door answers as a fault (a driver's own code, a declared 5xx)
-            // answers the door's fault, as the record data tools answer it.
-            // Every other throw keeps this catch's rendering (#31218 says why).
-            if (thrownRefusalEnvelope(err) !== undefined && dataDoorRefusalEnvelope(err, objectName) === undefined) {
+            // [#31273, #31341, #31407] A coded throw from the selection read
+            // answers as the record data tools answer it: the door's fault
+            // when the door answers one (a driver's own code, a declared 5xx),
+            // else the coded refusal with what the door serves beside it
+            // (`declaredCode`, `userMessage`). A code-less throw keeps this
+            // catch's rendering (#31218 says why).
+            if (thrownRefusalEnvelope(err) !== undefined) {
               return dataDoorErrorResult(err, DELETE_RECORDS_TOOL, objectName);
             }
             return errorResultWithCode(err);

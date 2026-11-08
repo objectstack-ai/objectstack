@@ -1053,7 +1053,11 @@ export const FlowEdgeSchema = lazySchema(() => strictObject(
  *   type: "record_change",
  *   status: "active",
  *   nodes: [
- *     { id: "start", type: "start", label: "Start", position: {x: 0, y: 0} },
+ *     { id: "start", type: "start", label: "Start", position: {x: 0, y: 0},
+ *       // Launch only on the transition into "submitted": without a start condition the
+ *       // auto-approve write is itself an update and would launch the flow again.
+ *       config: { objectName: "order", triggerType: "record-after-update",
+ *         condition: "record.status == 'submitted' && previous.status != 'submitted'" } },
  *     { id: "check_amount", type: "decision", label: "Check Amount", position: {x: 0, y: 100} },
  *     { id: "auto_approve", type: "update_record", label: "Auto Approve", position: {x: -100, y: 200},
  *       config: { objectName: "order", filter: { id: { dialect: "cel", source: "record.id" } }, fields: { status: "approved" } } },
@@ -1068,8 +1072,12 @@ export const FlowEdgeSchema = lazySchema(() => strictObject(
  *     // Conditions are bare CEL (ADR-0032). Reference fields directly —
  *     // `record.amount`, `previous.status`, `<var>.field` — and DO NOT wrap them
  *     // in `{…}` template braces: `{amount}` parses as a CEL map literal and fails.
- *     { id: "e2", source: "check_amount", target: "auto_approve", condition: "record.amount < 500" },
- *     { id: "e3", source: "check_amount", target: "submit_for_approval", condition: "record.amount >= 500" }
+ *     // On a record-triggered flow an optional field reads `null` when unset, and
+ *     // `<` on null aborts the condition: test `!= null` first — `has()` does not.
+ *     // e3 is the default edge: it takes every order e2 does not, so an order
+ *     // with no amount goes to review instead of being auto-approved.
+ *     { id: "e2", source: "check_amount", target: "auto_approve", condition: "record.amount != null && record.amount < 500" },
+ *     { id: "e3", source: "check_amount", target: "submit_for_approval", isDefault: true }
  *   ]
  * }
  */
