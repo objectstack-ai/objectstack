@@ -24,6 +24,17 @@
  *   the replay erases. Counted for every such dataset the installed version
  *   also declares, changed or not: an unchanged `upsert` dataset overwrites
  *   the same edits.
+ * - **Overrides of the base, as advice** (ADR-0146 D2, as amended by decision
+ *   D2 on cloud#3652). Each item of a base's paired `<base>.custom` package
+ *   that the reads serve over a base item — the protocol's served-override
+ *   list ({@link PlanPackageUpgradeOptions.listOverrides}), never a second
+ *   predicate — is read against the two versions of the base: an override
+ *   whose base item the upgrade changes is listed as hiding that change, and
+ *   an override whose `basedOn` is not the installed base version is listed
+ *   as stale. Both are an advisory class: the install door's schema refusal
+ *   never reads them, no finding-set token covers them, and nothing is
+ *   refused, merged or rebased on them; the upgrade proceeds as it would
+ *   without them.
  *
  * Read-only: every read is a `count` or a `find` with the system context, across
  * every organization (a package upgrade replaces the package for all of them).
@@ -41,19 +52,25 @@ import {
   blankAsNullColumns,
   blankStorageForm,
   resolveStackCollection,
+  stackPackageBodies,
   temporalComparandKind,
   temporalStorageForm,
   type BlankAsNullReach,
   type TemporalComparandKind,
 } from '@objectstack/core';
 import {
+  canonicalize,
   comparePackageVersions,
+  itemDiscriminator,
   seedModeOverwritesMatchedRows,
   upgradePlanSeedDatasets,
   type PackageUpgradePlan,
   type PackageUpgradeSide,
 } from '@objectstack/metadata-core';
 import { FILE_REFERENCE_TYPES, isMaskedOnReadFieldType, isVirtualSearchField } from '@objectstack/spec/data';
+import { ASSEMBLED_VIEW_ITEMS_KEY, expandViewContainer, isAggregatedViewContainer } from '@objectstack/spec';
+import { pluralToSingular } from '@objectstack/spec/shared';
+import { METADATA_ARRAY_KEYS, resolveMetadataItemName } from './engine-top-level.js';
 
 /** Why a column is read: what the upgrade does to it. */
 export type UpgradeColumnReason = 'removed' | 'renamed' | 'suspected_rename' | 'type_change';
@@ -91,10 +108,61 @@ export interface UpgradeSeedOverwrite {
   editedKeys: string[];
 }
 
+/** What the upgrade does to the base item an override is served over. */
+export type UpgradeOverriddenItemChange = 'changed' | 'removed' | 'added';
+
+/**
+ * One served override of a base item, listed as advice (ADR-0146 D2, as
+ * amended). Never a refusal and never covered by a confirmation token.
+ */
+export interface UpgradeOverrideFinding {
+  /** The base package whose item the override is served over. */
+  package: string;
+  /** The overriding item's metadata type, canonical singular (`view`, `dashboard`). */
+  type: string;
+  /** The item's name: the base's name it is served under. */
+  name: string;
+  /** The bundle member, for a type whose identity is a pair (`email_template`); absent otherwise. */
+  member?: string;
+  /** `overrides.basedOn` exactly as the override records it; absent when it records none. */
+  basedOn?: string;
+  /** The installed base's `version`; `null` when the installed body declares none. */
+  installedVersion: string | null;
+  /** The incoming base's `version`; `null` when the incoming body declares none. */
+  incomingVersion: string | null;
+  /** What the upgrade does to the base's item (a hiding finding only). */
+  change?: UpgradeOverriddenItemChange;
+  /** The next step, in Studio. */
+  next: string;
+}
+
+/** The advisory class of the plan: overrides of the upgraded base. */
+export interface UpgradeOverrideAdvisories {
+  /** Overrides whose base item differs between the installed and the incoming version. */
+  hidesChange: UpgradeOverrideFinding[];
+  /** Overrides whose `basedOn` is not the installed base version: stale before this upgrade. */
+  stale: UpgradeOverrideFinding[];
+}
+
 export interface PackageUpgradeEnvironment {
   columns: UpgradeColumnRows[];
   removedObjects: UpgradeObjectRows[];
   seeds: UpgradeSeedOverwrite[];
+  /**
+   * The advisory class: overrides that hide a change of this upgrade, and
+   * overrides already stale. `null` when the overrides were not read — no
+   * override reader was given, or the reading failed — never an empty answer
+   * for a reading that did not happen.
+   */
+  overrides: UpgradeOverrideAdvisories | null;
+}
+
+/** One served override, as the protocol's served-override list answers it. */
+export interface UpgradeServedOverride {
+  type: string;
+  name: string;
+  member?: string;
+  basedOn?: string;
 }
 
 /** The comparison and the environment's readings of it, as `planUpgrade` answers. */
@@ -114,6 +182,13 @@ export interface PlanPackageUpgradeOptions {
   getObject?: (name: string) => unknown;
   /** Told once per failed reading. */
   warn?: (message: string, meta?: Record<string, unknown>) => void;
+  /**
+   * The served overrides of one base package's items: the protocol's
+   * `listServedOverrides` (`@objectstack/metadata-protocol`), the one reading
+   * of "which item of the pair is served over this base item". Absent ⇒ the
+   * overrides are not read and the advisory class is `null`.
+   */
+  listOverrides?: (basePackageId: string) => Promise<readonly UpgradeServedOverride[]>;
 }
 
 /** How many edited rows an answer names by key. */
@@ -150,6 +225,7 @@ export async function planPackageUpgrade(
     columns: await readTouchedColumns(engine, plan, options),
     removedObjects: [],
     seeds: await readSeedOverwrites(engine, plan, installedSide, incomingSide, options),
+    overrides: await readOverrideAdvisories(installed, incoming, options),
   };
   for (const object of plan.objects.removed) {
     environment.removedObjects.push({ object, rows: await reading(options, { object }, () => engine.count(object, {}, SYSTEM_READ)) });
@@ -387,4 +463,163 @@ async function readSeedOverwrites(
     entry.editedRows = edited;
   }
   return out;
+}
+
+// ── overrides of the base, as advice ───────────────────────────────────
+
+/**
+ * The package bodies an artifact delivers, each with its own id: the bodies
+ * of its `packages` list, or the artifact itself when it carries none (the
+ * one-package shape). A body without an id is not a base anything overrides.
+ */
+function packageBodiesById(artifact: unknown): Map<string, Bag> {
+  const bodies = stackPackageBodies(artifact);
+  const out = new Map<string, Bag>();
+  for (const body of bodies.length > 0 ? bodies : isBag(artifact) ? [artifact] : []) {
+    if (typeof body.id === 'string' && body.id !== '' && !out.has(body.id)) out.set(body.id, body);
+  }
+  return out;
+}
+
+function versionOf(body: Bag | undefined): string | null {
+  return typeof body?.version === 'string' && body.version !== '' ? body.version : null;
+}
+
+/** An item's identity as the served-override list names it: type, name and bundle member. */
+function itemKey(type: string, name: string, member: string | undefined): string {
+  return `${type}\u0000${name}\u0000${member ?? ''}`;
+}
+
+/**
+ * The document an item is compared by: its body without the loader's stamps
+ * (`_packageId`, `_packageVersion`, `_provenance`, the expansion's
+ * `_diagnostics`), which name the version the item came with and would make
+ * every item of an upgrade differ.
+ */
+function itemText(item: Bag): string {
+  const body: Bag = {};
+  for (const [key, value] of Object.entries(item)) if (!key.startsWith('_')) body[key] = value;
+  try {
+    return canonicalize(body);
+  } catch {
+    return JSON.stringify(body) ?? 'undefined';
+  }
+}
+
+/**
+ * Every item one package body ships, by the identity the registry keys it
+ * by: the collections and the name the engine's own registration reads
+ * (`METADATA_ARRAY_KEYS`, `resolveMetadataItemName`), an aggregated view
+ * container both under its object and as the view items it expands to, and
+ * the assembled `viewItems` channel.
+ */
+function packageItemTexts(body: Bag): Map<string, string> {
+  const out = new Map<string, string>();
+  const put = (type: string, name: string, item: Bag) => {
+    const key = itemKey(type, name, itemDiscriminator(type, item));
+    if (!out.has(key)) out.set(key, itemText(item));
+  };
+  for (const key of METADATA_ARRAY_KEYS) {
+    if (key === 'picklistExtensions') continue;
+    const items = body[key];
+    if (!Array.isArray(items)) continue;
+    const type = pluralToSingular(key);
+    for (const item of items) {
+      if (!isBag(item)) continue;
+      const name = resolveMetadataItemName(key, item);
+      if (typeof name !== 'string' || name === '') continue;
+      put(type, name, item);
+      if (key === 'views' && isAggregatedViewContainer(item)) {
+        for (const view of expandViewContainer(name, item)) {
+          if (isBag(view) && typeof view.name === 'string' && view.name !== '') put('view', view.name, view);
+        }
+      }
+    }
+  }
+  const assembled = body[ASSEMBLED_VIEW_ITEMS_KEY];
+  for (const item of Array.isArray(assembled) ? assembled : []) {
+    if (!isBag(item)) continue;
+    const name = resolveMetadataItemName('views', item);
+    if (typeof name === 'string' && name !== '') put('view', name, item);
+  }
+  return out;
+}
+
+function nextStepHiding(override: UpgradeServedOverride, change: UpgradeOverriddenItemChange, incomingVersion: string | null): string {
+  const item = `the ${override.type} '${override.name}'`;
+  const target = incomingVersion ?? 'the new version';
+  if (change === 'removed') {
+    return `Open ${item} in Studio: the new version of the base no longer ships it, and the override keeps serving the name. `
+      + 'Keep it as your own, or restore the package original (which deletes the override). The upgrade installs either way.';
+  }
+  return `Open ${item} in Studio and compare the override with the base's document in ${target}: re-base it (take the new `
+    + `document and record basedOn ${target}), or restore the package original to serve the base's document. The upgrade `
+    + 'installs either way; until then the override keeps hiding this change.';
+}
+
+function nextStepStale(override: UpgradeServedOverride, installedVersion: string): string {
+  return `Open the ${override.type} '${override.name}' in Studio: it was taken from ${override.basedOn}, not from the installed `
+    + `${installedVersion}. Compare it with the base's document and re-base it, or restore the package original.`;
+}
+
+/**
+ * The advisory class: for each base package the installed artifact delivers,
+ * its served overrides read against the installed and the incoming body.
+ * `null` when no reader was given, or a reading failed (told once).
+ */
+async function readOverrideAdvisories(
+  installed: unknown,
+  incoming: unknown,
+  options: PlanPackageUpgradeOptions,
+): Promise<UpgradeOverrideAdvisories | null> {
+  if (typeof options.listOverrides !== 'function') return null;
+  const advisories: UpgradeOverrideAdvisories = { hidesChange: [], stale: [] };
+  const before = packageBodiesById(installed);
+  if (before.size === 0) return advisories;
+  const after = packageBodiesById(incoming);
+  for (const [packageId, installedBody] of before) {
+    let overrides: readonly UpgradeServedOverride[];
+    try {
+      overrides = await options.listOverrides(packageId);
+    } catch (error) {
+      options.warn?.('[planUpgrade] the overrides of an upgraded base could not be read; they are answered null, never none', {
+        package: packageId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return null;
+    }
+    if (overrides.length === 0) continue;
+    const incomingBody = after.get(packageId);
+    const installedVersion = versionOf(installedBody);
+    const incomingVersion = versionOf(incomingBody);
+    const installedItems = packageItemTexts(installedBody);
+    const incomingItems = incomingBody ? packageItemTexts(incomingBody) : new Map<string, string>();
+    for (const override of overrides) {
+      const finding = (): UpgradeOverrideFinding => ({
+        package: packageId,
+        type: override.type,
+        name: override.name,
+        ...(override.member !== undefined ? { member: override.member } : {}),
+        ...(override.basedOn !== undefined ? { basedOn: override.basedOn } : {}),
+        installedVersion,
+        incomingVersion,
+        next: '',
+      });
+      const key = itemKey(override.type, override.name, override.member);
+      const was = installedItems.get(key);
+      const will = incomingItems.get(key);
+      const change: UpgradeOverriddenItemChange | undefined = was === undefined
+        ? (will === undefined ? undefined : 'added')
+        : will === undefined ? 'removed' : was !== will ? 'changed' : undefined;
+      if (change !== undefined) {
+        advisories.hidesChange.push({ ...finding(), change, next: nextStepHiding(override, change, incomingVersion) });
+      }
+      // `basedOn` names the base version the override was taken from; one
+      // that is not the installed version is stale before this upgrade runs.
+      if (override.basedOn !== undefined && installedVersion !== null && override.basedOn !== installedVersion) {
+        advisories.stale.push({ ...finding(), next: nextStepStale(override, installedVersion) });
+      }
+    }
+  }
+  return advisories;
 }

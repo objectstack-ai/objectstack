@@ -76,7 +76,7 @@ import { SecurityCatalogNameConflictError, findEnvironmentHeldSecurityCatalogNam
 // (`bare-name-one-holder.ts`, "The cold boot").
 import { sealBareNameHoldersAtColdBoot } from './registry.js';
 import { BARE_NAME_COLD_BOOT_MODE } from './bare-name-one-holder.js';
-import { planPackageUpgrade } from './package-upgrade-environment.js';
+import { planPackageUpgrade, type UpgradeServedOverride } from './package-upgrade-environment.js';
 // [ADR-0029 D3] The registry's own refusal of a second owner — read, never
 // re-derived, when a residual object's name is already owned.
 import { ObjectOwnershipConflictError, collectManifestBoundActions, collectManifestObjectNames, describeBoundActionCollision, describeUnboundActionTargets, FIND_BOUND_ACTION_COLLISIONS, type BoundActionCollision } from './registry.js';
@@ -1042,12 +1042,22 @@ export class ObjectQLPlugin implements Plugin {
       // environment knows: rows in each column the upgrade touches and rows a
       // customer edited that the seed replay overwrites. Read-only; the install
       // door's dry run and a host's install door call it. See
-      // {@link planPackageUpgrade}.
-      planUpgrade: (installed: unknown, incoming: unknown) =>
-        planPackageUpgrade(ql, installed, incoming, {
+      // {@link planPackageUpgrade}. [ADR-0146 D2, as amended] Its advisory
+      // class reads the base's served overrides through the protocol's one
+      // list, resolved when the plan is asked (the protocol may register
+      // after this service); a runtime without it answers that class `null`.
+      planUpgrade: (installed: unknown, incoming: unknown) => {
+        let protocol: { listServedOverrides?: (request: { packageId: string }) => Promise<UpgradeServedOverride[]> } | undefined;
+        try { protocol = ctx.getService('protocol') as typeof protocol; } catch { /* no protocol service */ }
+        const listServedOverrides = protocol?.listServedOverrides;
+        return planPackageUpgrade(ql, installed, incoming, {
           getObject: (name) => ql.registry.getObject(name),
           warn: (message, meta) => ctx.logger.warn(message, meta),
-        }),
+          ...(typeof listServedOverrides === 'function'
+            ? { listOverrides: (packageId: string) => listServedOverrides.call(protocol, { packageId }) }
+            : {}),
+        });
+      },
     });
 
     ctx.logger.info('ObjectQL engine registered', {
