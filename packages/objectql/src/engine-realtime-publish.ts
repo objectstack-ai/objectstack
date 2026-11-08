@@ -410,7 +410,7 @@ function eventMatchedCount(value: unknown): number | undefined {
  */
 export async function publishDataEvent(
   this: Pick<RealtimePublishHost, 'realtimeService' | 'logger' | '_registry'>,
-  action: 'created' | 'updated' | 'deleted',
+  action: 'created' | 'updated' | 'deleted' | 'restored',
   object: string,
   input: {
     recordId: unknown;

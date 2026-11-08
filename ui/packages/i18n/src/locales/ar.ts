@@ -4093,6 +4093,7 @@ const ar = {
     sharedObject: '{{object}} مشترك',
     redactedFields: 'أخفى المالك بعض الحقول: {{fields}}',
     linkedRecord: 'سجل مرتبط',
+    linkedUser: 'مستخدم مرتبط',
   },
   publicForm: {
     submit: "إرسال",

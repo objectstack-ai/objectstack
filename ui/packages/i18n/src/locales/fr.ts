@@ -3861,6 +3861,7 @@ const fr = {
     sharedObject: '{{object}} partagé',
     redactedFields: 'Certains champs sont masqués par le propriétaire : {{fields}}',
     linkedRecord: 'Enregistrement lié',
+    linkedUser: 'Utilisateur lié',
   },
   publicForm: {
     submit: "Envoyer",
