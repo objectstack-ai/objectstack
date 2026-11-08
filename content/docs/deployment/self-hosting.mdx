@@ -477,6 +477,24 @@ decrypt each other's secrets. All replicas must share the same
 `OS_SECRET_KEY`, `OS_AUTH_SECRET`, and database. See
 [Cluster](/docs/kernel/cluster).
 
+**`/ready` reports the cluster driver's health once replicas are declared.**
+When the deployment declares itself multi-node — `OS_EXPECT_MULTI_NODE=true` or
+`OS_CLUSTER_REPLICAS` greater than 1; `OS_CLUSTER_DRIVER` alone is not a
+declaration — and runs the redis cluster driver, `/api/v1/ready` adds a
+`cluster` entry to its 200 body. While Redis answers it reads
+`{ driver: "redis", reachable: true }` and `status` stays `"ready"`. While it
+does not, the probe still answers **200**, with `status: "degraded"` and
+`cluster: { driver: "redis", reachable: false, reason }`, where `reason` is one
+of `timeout`, `ping-failed`, `unexpected-reply` or `no-probe`; the store's
+address never appears in the body. It is not a 503 on purpose: every replica
+loses a shared Redis at the same moment, so draining on it would take every
+replica out of the load balancer while the database can still serve. Wire your
+alerting to `status: "degraded"` (or `cluster.reachable: false`) rather than to
+the status code. The check is one `PING` bounded at 500 ms and cached ~1s, like
+the data-driver check, and recovery needs no restart. A single-node deployment
+sees no change: its body and status code are exactly what they were, and its
+Redis, if any, is never probed.
+
 **Scheduled jobs' leader election has a window, not a deadline.** `cron` /
 `interval` / `once` schedules dedupe across replicas by holding a lock for
 the duration of each fire — the mutual-exclusion window is the handler's
