@@ -501,7 +501,22 @@ export const CEILINGS = new Map([
   // 6426 after the click-through default's three tokens landed on main and
   // the "A Flow is a directed graph of nodes" opener was cut (the node tables
   // and the `nodes` + `edges` FlowSchema line already say it).
-  ['skills/objectstack-automation/SKILL.md', 6426],
+  // 6426 -> 6527 (card #31155, the objectstack-automation port of cloud's private
+  // authoring rules): § Valid-but-silently-wrong gains item 4 — a `select` is
+  // compared and written by its option `value`, never the label the request
+  // speaks, in the start `condition` and every `fields` / `filter` entry (the
+  // condition leg otherwise stages clean and never fires; the `fields` /
+  // `filter` leg fails the run as `invalid_option`). No same-file restatement
+  // was left to pay it; the comment says so honestly. Arithmetic in priced
+  // bytes (stamp line excluded), against `main`'s 25654: 25654 -> 26108 (+454)
+  // -> ceil(26108 / 4) = 6527; headroom was 12 tokens, so the ceiling moves +101,
+  // pinned AT the measurement. Authorised by the ruling of record that orders
+  // this text into the published skills: objectstack-ai/cloud#3659, letter A,
+  // ruling comment 6682024726 (2026-11-06): "How to write valid, working
+  // metadata lives in the public skills … The private corpus's rules of that
+  // kind move there". The raise path is the standing 2026-10-27 ruling (ruling
+  // record 6513306068), quoted verbatim and untranslated in the PR body.
+  ['skills/objectstack-automation/SKILL.md', 6527],
   // 13783 -> 13892 (2026-08-31 app-repo-principles raise, see the block above).
   // The invariant-vs-transition-gate choice, placed in the field-conditional-rule
   // bullet list where the tool is actually picked. Both wrong picks are silent:
@@ -524,7 +539,33 @@ export const CEILINGS = new Map([
   // 6123 -> 6078: re-locked at the landed count. The rule index's `rules/lifecycle.md`
   // entry names the save notice (+16); the `lifecycle` property row dropped the
   // bounding-policy clause that entry and `rules/lifecycle.md` already carry (-25).
-  ['skills/objectstack-data/SKILL.md', 6078],
+  // 6078 -> 6665 (#31155, card 1 of the cloud#3659 ruling-A split): the
+  // metadata-authoring judgment the hosted build agent carried privately, now
+  // the one published source — the `sharingModel` posture chosen from the
+  // request; a yes/no flag is `defaultValue: false` and never `required`; a
+  // person on the record is `type: 'user'`, optional unless asked; a dynamic
+  // default resolves on save; three Relationship Patterns rows (status is a
+  // `select`, never a table; approvals and audit trails are not objects; the
+  // owner is the platform `owner_id`, `ownership: 'none'` only for catalogs and
+  // junctions); a `state_machine` declares `initialStates`. Paid down first,
+  // two restatements in this file: the `unique`-validation blockquote restated
+  // `rules/validation.md` § Uniqueness and is a one-line pointer now; the
+  // `secret` / `user` parentheticals restated `rules/field-types.md` rows 42-43
+  // and 96 and are gone; the contract-review round then cut the `initialStates`
+  // mechanic sentence (a restatement of `validation.zod.ts`'s describe) and
+  // aligned the conditional-rules `invoice` example with the posture paragraph;
+  // the approver's round then put the two example phrases into English (the
+  // shipped skill text is English-only; eval prompts are exempt).
+  // Arithmetic in priced bytes (stamp line excluded), against `main`'s 24308:
+  // 24308 -> 26658 (+2350 net) -> ceil(26658 / 4) = 6665; headroom was 1
+  // token, so the ceiling moves +587, pinned AT the measurement. Authorised by
+  // the ruling of record that orders this text into the published skills:
+  // objectstack-ai/cloud#3659, letter A, maintainer 「A」 (ruling comment
+  // 6682024726, 2026-11-06): "How to write valid, working metadata lives in the
+  // public skills … The private corpus's rules of that kind move there". The
+  // raise path is the standing 2026-10-27 ruling, verbatim and untranslated:
+  // 「A:先削重复,余额按实测提高」 (ruling record 6513306068).
+  ['skills/objectstack-data/SKILL.md', 6665],
   ['skills/objectstack-formula/SKILL.md', 5997], //     -53 (was 6055), then -5 A2′ (was 6002)
   ['skills/objectstack-i18n/SKILL.md', 6333], //        -11 (was 6349), then -5 A2′ (was 6338)
   // 12705 -> 12984 (2026-08-31 app-repo-principles raise, see the block above).
@@ -735,7 +776,30 @@ export const CEILINGS = new Map([
   // +201 tokens on a landed 3672, 4 absorbed by headroom, ceiling +197. No
   // repeated passage to cut first (measured: no sentence repeats). Maintainer ruling 2026-10-27 on the decision card 「skills 修复卡的教学和 eval 都撞 token 天
   // 花板,怎么付?」, tap A, verbatim and untranslated: 「A:先削重复,余额按实测提高」.
-  ['skills/objectstack-data/rules/relationships.md', 3873],
+  // 3873 -> 4127 (#31155, card 1 of the cloud#3659 ruling-A split): the
+  // Roll-up Summaries `filter` paragraph is REWRITTEN, not appended to — pick
+  // the function from the words, every qualifier goes in `filter` (dropped, a
+  // plausible wrong total), one child feeds several totals, a rate is a
+  // formula over a working summary; and the recompute runs only on a child
+  // write, so a summary declared after its rows exist is backfilled by
+  // `os migrate summary-nulls --apply`, never by editing a child. Five example
+  // objects take the posture the new SKILL.md paragraph teaches
+  // (`public_read_write` on account / contact / invoice / the junction,
+  // `public_read` on the category table). Paid down first: the `engagement`
+  // signup/click example and the "aggregate only a subset" lead-in (both
+  // restated by the kept `procurement_receipt` example), the `filter` code
+  // comment's second line (the paragraph says it), and the child-field half of
+  // the `filter` sentence (an enforce-or-remove row for the spec lane,
+  // #31224 D, not prose). The approver's round then put the roll-up passage's
+  // example phrases into English (the shipped skill text is English-only).
+  // Arithmetic in bytes against `main`'s re-locked 15489:
+  // 15489 -> 16505 (+1016 net) -> ceil(16505 / 4) = 4127; headroom was 0, so
+  // the ceiling moves +254, pinned AT the measurement. Authorised by the ruling
+  // of record that orders this text into the published skills:
+  // objectstack-ai/cloud#3659, letter A, maintainer 「A」 (ruling comment
+  // 6682024726); raise path the 2026-10-27 ruling 「A:先削重复,余额按实测提高」
+  // (ruling record 6513306068).
+  ['skills/objectstack-data/rules/relationships.md', 4127],
   // NEW FILE (#14296 item 1 = A, condition (b)): the entry's Security & Access
   // Control block moved here whole. Pinned at its landed count — no headroom,
   // because a split that arrives with budget is a raise wearing a new path.
@@ -806,7 +870,17 @@ export const CEILINGS = new Map([
   // 3109 -> 2756: RE-LOCK at the landed count (#19715, card item 4). A 5-line
   // table of contents (+155 tokens) landed inside the row's 508 tokens of
   // headroom, so no raise; pinned AT the measurement — zero headroom.
-  ['skills/objectstack-data/rules/validation.md', 2756],
+  // 2756 -> 2761 (#31155): the canonical `state_machine` example gains
+  // `initialStates: ['draft']` so the example no longer undercuts the rule
+  // SKILL.md § Validation Patterns teaches (ordered by the contract review on
+  // PR #31223). Paid down first: the "(removed from the spec)" aside in the
+  // no-`unique` list item, restated by § Uniqueness below it (-24 bytes).
+  // Arithmetic in bytes: 10992 -> 11044 (+52 net) -> ceil(11044 / 4) = 2761;
+  // headroom was 8 tokens, so the ceiling moves +5, pinned AT the
+  // measurement. Same authority as the three rows above: cloud#3659 letter A
+  // (ruling comment 6682024726); raise path 「A:先削重复,余额按实测提高」
+  // (ruling record 6513306068).
+  ['skills/objectstack-data/rules/validation.md', 2761],
 
   // objectstack-platform
   ['skills/objectstack-platform/references/plugin-hooks.md', 2628],
@@ -934,7 +1008,19 @@ export const CEILINGS = new Map([
   // (whose row is RE-LOCKED above), pinned AT its landed count — no headroom,
   // because a split that arrives with budget is a raise wearing a new path.
   // The package deltas are the pointer lines and the four new file titles only.
-  ['skills/objectstack-automation/references/examples-flows.md', 1436],
+  // 1436 -> 1494 (card #31155, the objectstack-automation port of cloud's private
+  // authoring rules): a wall-clock hour the request names is written as said
+  // with its IANA `timezone` on the start node's `config.schedule`, never
+  // converted to UTC by hand (a bare expression runs in UTC and records no
+  // zone) — the schedule example and the time-relative cadence comment carry
+  // one. Paid down first, one restatement cut: the `requires: ['automation',
+  // 'triggers']` / always-on `job` sentence (SKILL.md § Prerequisite's table
+  // says it), now a pointer. 5685 -> 5976 bytes (+291 net) -> ceil(5976 / 4)
+  // = 1494; headroom was 14 tokens, so the ceiling moves +58, pinned AT the
+  // measurement. Same authority as the SKILL.md row above: cloud#3659 letter A
+  // (ruling comment 6682024726) orders the text in; the raise path is the
+  // standing 2026-10-27 ruling (record 6513306068), quoted in the PR body.
+  ['skills/objectstack-automation/references/examples-flows.md', 1494],
   // NEW FILE (card #27223): one recipe per integration archetype — OpenAPI with
   // a static key, remote MCP with a static header, plain REST, the vendor
   // callback, a hand-written document for a spec-less vendor — plus the two
@@ -1026,7 +1112,30 @@ export const CEILINGS = new Map([
   // bytes, 0 tokens, so the ceiling moves +143, pinned AT the measurement.
   // Same maintainer ruling as the SKILL.md row above (2026-10-27, verbatim and
   // untranslated): 「A:先削重复,余额按实测提高」.
-  ['skills/objectstack-automation/references/state-machines-and-approvals.md', 5730],
+  // 5730 -> 5838 (card #31155, the objectstack-automation port of cloud's private
+  // authoring rules): Approval Best Practices gains item 4 — a flow reacting
+  // to the mirrored `approvalStatusField` runs as the person who acted and
+  // stays `runAs: 'user'`; only the SLA auto-decision and the dead-run release
+  // carry no user, so a flow that must react to those declares
+  // `runAs: 'system'` (the approval service's attributed mirror write on
+  // `main`, which corrects the hosted corpus's blanket "declare system").
+  // Paid down first: the discount-approval example's four-line trigger comment
+  // (a restatement of SKILL.md § Trigger Configuration) is one pointer line;
+  // the three Chinese glosses left the file — the shipped skill text is
+  // English-only (the approver's review on #31223); and the three legacy
+  // "(the old …)" glosses in § Branching, side-effects & rejection, naming
+  // approval-process keys that have no author since ADR-0019, are gone. Two
+  // one-word corrections ride along: the mirrored statuses list `returned`
+  // (send-back writes it), and the dynamic-approval example's condition reads
+  // `record.status`. Base is `main`'s 22908 — #31322 had added 24 bytes to
+  // this file (`record.amount != null && `) under the first pin, which CI
+  // measured on the merge result as 5844 against a 5838 row. 22908 -> 23299
+  // bytes (+391 net) -> ceil(23299 / 4) = 5825; headroom was 3 tokens, so the
+  // ceiling moves +95, pinned AT the measurement. Same authority as the
+  // SKILL.md row above: cloud#3659 letter A (ruling comment 6682024726) orders
+  // the text in; the raise path is the standing 2026-10-27 ruling (record
+  // 6513306068), quoted in the PR body.
+  ['skills/objectstack-automation/references/state-machines-and-approvals.md', 5825],
   // 1779 -> 1769 (#26297): RE-LOCK at the landed count after a net cut — two
   // stale `{ type: 'lookup', reference: 'user' }` fields (an object that does
   // not exist) became `type: 'user'`; -10 tokens, the row follows the
@@ -1049,7 +1158,20 @@ export const CEILINGS = new Map([
   // tokens at headroom 0, ceiling +267. No repeated passage to cut first
   // (measured: no sentence repeats). Maintainer ruling 2026-10-27 on the decision card 「skills 修复卡的教学和 eval 都撞 token 天
   // 花板,怎么付?」, tap A, verbatim and untranslated: 「A:先削重复,余额按实测提高」.
-  ['skills/objectstack-data/references/seeds.md', 1566],
+  // 1566 -> 1747 (#31155, card 1 of the cloud#3659 ruling-A split): one
+  // paragraph under Seed best practices — a seed row passes the same field
+  // validation as a user's insert, so a masked or placeholder value never
+  // lands and the table loads short; `os validate` / `os build` refuse it
+  // first, at the record's field; invent a well-formed fictional value,
+  // never downgrade the field type. No repeated passage to cut first
+  // (measured: the file said nothing about seed values). Arithmetic in bytes:
+  // 6240 -> 6985 (+745) -> ceil(6985 / 4) = 1747; headroom was 6 tokens, so
+  // the ceiling moves +181, pinned AT the measurement. Authorised by the ruling
+  // of record that orders this text into the published skills:
+  // objectstack-ai/cloud#3659, letter A, maintainer 「A」 (ruling comment
+  // 6682024726); raise path the 2026-10-27 ruling 「A:先削重复,余额按实测提高」
+  // (ruling record 6513306068).
+  ['skills/objectstack-data/references/seeds.md', 1747],
   ['skills/objectstack-platform/references/bootstrap.md', 1351],
   // 3108 -> 3287: `os deploy`, the managed-package dev loop — when to deploy
   // rather than publish a release, its entry points, how it picks the
@@ -1080,7 +1202,21 @@ export const CEILINGS = new Map([
   // measured, raises the row, pinned at the measurement. Same maintainer
   // ruling, verbatim and untranslated: 「A:先削重复,余额按实测提高」 (ruling
   // record 6513306068 on #27847).
-  ['skills/objectstack-platform/references/operations.md', 3340],
+  // 3340 -> 3375: the `os deploy` exit-1 paragraph is scoped to the cloud and
+  // a `use-runtime` target's own paragraph follows: no cloud login, and its
+  // exit 1 (a failed build; a dry run refused, unserved or ignored; an install
+  // refusal with `--confirm-access-upgrade` / `--confirm-upgrade`; installed
+  // but not loaded). Paid first by deleting restatement in the same file
+  // (-262 bytes): the `os deploy` row's use-runtime tail (home: the new
+  // paragraph, which carries each of its facts) and the Common ops pitfalls
+  // row on a declared permission set that grants nobody anything (home:
+  // objectstack-data rules/security.md § Assigning a permission set to a
+  // user). 13360 -> 13500 bytes (+140 net: -262 cut, +402 added)
+  // -> ceil(13500 / 4) = 3375; headroom was 0, so
+  // the remainder, +35 measured, raises the row, pinned at the measurement.
+  // Same maintainer ruling, verbatim and untranslated:
+  // 「A:先削重复,余额按实测提高」 (ruling record 6513306068 on #27847).
+  ['skills/objectstack-platform/references/operations.md', 3375],
   ['skills/objectstack-platform/references/plugin-development.md', 3137],
   ['skills/objectstack-upgrade/references/examples-upgrade.md', 1197],
 

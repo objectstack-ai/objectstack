@@ -1,6 +1,6 @@
 # ADR-0007: Settings — Manifest + K/V Store + Resolver (Apple-style)
 
-**Status**: Accepted — backend implemented; UI pending (objectui) (proposed 2026-05-20 · calibrated 2026-06-12) · **Amended (2026-11-05, #30385)** — D6: a clear (`null`) of an env-pinned key is not refused; it clears the stored value beneath the override and changes nothing in force.
+**Status**: Accepted — backend implemented; UI pending (objectui) (proposed 2026-05-20 · calibrated 2026-06-12) · **Amended (2026-11-05, #30385)** — D6: a clear (`null`) of an env-pinned key is not refused; it clears the stored value beneath the override and changes nothing in force. · **Amended (2026-11-08, #30208)** — §Specifier set gains `map` (keyed rows with typed value columns); `json` stays for raw config and is no longer the home for maps.
 **Deciders**: ObjectStack Protocol Architects
 **Builds on**: [ADR-0005](./0005-metadata-customization-overlay.md) (Metadata Customization Overlay), [ADR-0006 v4](./0006-project-environment-split.v4.md) (Project/Environment Split — this record was originally built on v3, superseded by v4)
 **Consumers**: `@objectstack/spec`, `@objectstack/platform-objects`, new `@objectstack/service-settings`, `@objectstack/plugin-auth` (Setup app), `objectui` (Settings renderer)
@@ -106,6 +106,8 @@ ObjectStack's protocol-first DNA matches Apple's: a small set of declarative spe
 
 A small, **closed** set of specifier types. Borrowed from Apple's PreferenceSpecifiers and trimmed to what enterprise settings actually need. New types require an ADR amendment.
 
+*Amended 2026-11-08 (#30208, ruling record 6715997428): `map` added. A setting whose value is a map of rows (an object → a window, an object → a row count) declares that shape as a `map`, so the console draws a table and both doors (the save and the `OS_*` override) judge each key against the running system's domain and each cell against its column's kind, as they judge `options` and `pattern`. Its stored value is the object a `json` key held, unchanged. `json` stays in the set for genuinely raw config; it is no longer the home for maps.*
+
 | Specifier | Renders as | Persists | Notes |
 |---|---|---|---|
 | `group` | section header + divider | — | `visible` expression supported for conditional sections |
@@ -120,7 +122,8 @@ A small, **closed** set of specifier types. Borrowed from Apple's PreferenceSpec
 | `multiselect` | checkbox list / tag picker | array | |
 | `slider` | range slider | number | `min`, `max`, `step` |
 | `color` | colour picker | hex string | |
-| `json` | code editor | object | for advanced/raw config |
+| `json` | code editor | object | for advanced/raw config — not for maps (see `map`) |
+| `map` | keyed rows: a key column + typed value columns | object: `Record<key, value>` with one value column, `Record<key, {column: value}>` with several | `keyColumn`, `columns: [{name, label, kind}]`, `kind` ∈ `duration` \| `positive_integer`; the keys a map admits are served by a runtime option source, never listed in the manifest |
 | `title-value` | read-only label | — | display computed/derived values |
 | `child-pane` | nav row → sub-page | — | references another manifest namespace |
 | `action-button` | button | — | triggers `handler` (HTTP / built-in) |

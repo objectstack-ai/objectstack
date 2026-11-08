@@ -209,6 +209,7 @@
     "system/ResolvedGroup",
     "system/ResolvedSettingValue",
     "system/RestrictionProfile",
+    "system/RestrictionProfileNodeType",
     "system/RetryPolicy",
     "system/RouteHandlerMetadata",
     "system/RowLevelIsolationStrategy",

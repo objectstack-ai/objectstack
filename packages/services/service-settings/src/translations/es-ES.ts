@@ -593,18 +593,18 @@ export const esES: PlatformTranslationData = {
         },
         retention_overrides: {
           label: 'Sustituciones de retención',
-          help: 'Sustituciones de la ventana por objeto: { "<object>": { "maxAge": "1y", "expireAfter": "30d" } }. Las duraciones usan h/d/w/y. '
+          help: 'Sustituciones de la ventana por objeto. Las duraciones usan h/d/w/y. '
             + 'Se define por organización, de modo que una organización regulada puede conservar años y una de desarrollo, días. '
             + 'Una sustitución más corta que el mínimo que necesita una función de la plataforma (por ejemplo, la ventana de detección de duplicados de la cola de trabajos) '
             + 'se ignora y se registra como error, y se sigue aplicando la ventana predeterminada.',
         },
         quotas: {
           label: 'Cuotas de filas',
-          help: 'Número máximo de filas por objeto: { "<object>": 1000000 }. Superarlo genera una alerta de gobernanza: las cuotas nunca eliminan más allá de la política declarada.',
+          help: 'Número máximo de filas por objeto. Superarlo genera una alerta de gobernanza: las cuotas nunca eliminan más allá de la política declarada.',
         },
         quota_defaults: {
           label: 'Cuotas predeterminadas por clase',
-          help: 'Cuotas de respaldo por clase de ciclo de vida: { "telemetry": 1000000, "transient": 500000, "event": 100000, "audit": 5000000 }.',
+          help: 'Cuotas de respaldo por clase de ciclo de vida (telemetry, transient, event, audit).',
         },
         growth_alert_rows: {
           label: 'Umbral de alerta de crecimiento (filas por barrido)',

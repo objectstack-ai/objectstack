@@ -28,21 +28,19 @@
  *     arm, the one `/data` answers.
  *  5. An unexpected fault (a non-`Error` name, no sandbox mark, no code, no
  *     fields, not a validation failure) is the sanitised `500`.
- *  6. Everything else is a rejection: {@link resolveThrownHttpError} at a `400`
+ *  6. [#31317] A status-less throw whose `.code` is not a closed ADR-0112 code
+ *     (a driver's `SQLITE_BUSY`, `ECONNREFUSED`) answers the `/data` door's
+ *     fault when that door reads it as one ({@link mapDataError}).
+ *  7. Everything else is a rejection: {@link resolveThrownHttpError} at a `400`
  *     fallback, so an undeclared sandboxed abort is `HOOK_ABORTED` and a bare
  *     `Error` is `VALIDATION_ERROR` with its own sentence.
  *
- * Arms 3 and 6 answer the way the runtime dispatcher answers a thrown value
+ * Arms 3 and 7 answer the way the runtime dispatcher answers a thrown value
  * (`HttpDispatcher.errorFromThrown`): the resolver's closed `code`, the
  * engine's unique-constraint class at its wire spelling with the REST arm's
  * context ({@link structuredCodeAnswer}), the demoted spelling as
  * `declaredCode` ({@link demotedDeclaredCode}), a declared `userMessage`, and a
  * leaky 5xx sentence withheld ({@link looksLikeInternalErrorLeak}).
- *
- * ⚠️ `/actions` and `/data` differ on a driver's string code: `/data` answers
- * `SQLITE_BUSY` as `500 DATABASE_ERROR`, this door as `400 VALIDATION_ERROR`
- * with `declaredCode`. This function answers what `/actions` answers; it does
- * not decide which door is right.
  *
  * ⛔ The one side effect is the door's own, moved here unchanged: when the
  * client sentence differs from `.message`, `.message` is rewritten to it
@@ -51,9 +49,10 @@
  */
 
 import { standardErrorCodeForHttpStatus } from '@objectstack/spec/api';
-import { driverNotNullRefusalAnswer, isEngineDuplicateRecordEnvelope, structuredCodeAnswer } from './data-error-classification.js';
+import { driverNotNullRefusalAnswer, isEngineDuplicateRecordEnvelope, mapDataError, structuredCodeAnswer } from './data-error-classification.js';
 import { INTERNAL_ERROR_MESSAGE, looksLikeInternalErrorLeak } from './error-leak.js';
 import { isNativeErrorName } from './native-error-name.js';
+import { isServerFault } from './server-fault-log.js';
 import { sandboxBusinessMessage } from './sandbox-business-message.js';
 import { demotedDeclaredCode, resolveThrownHttpError } from './thrown-http-error.js';
 import { validationFailureDetails } from './validation-failure.js';
@@ -310,7 +309,51 @@ export function actionsDoorAnswerOf(err: unknown, objectName?: string): ActionsD
     return faultAnswer(operatorLines);
   }
 
-  // Arm 6: a rejection.
+  // Arm 6: a driver's own string code.
+  //
+  // [#31317] Arm 5 reads a string `code` as "a structured domain failure",
+  // and so did the rejection below: a driver error carrying its errno
+  // (`SQLITE_BUSY`, `ECONNREFUSED`, `57P01`) answered `400 VALIDATION_ERROR`
+  // with the errno in `declaredCode`, a client refusal naming the backend,
+  // where `/data` answers the same throw `500 DATABASE_ERROR`. Since #31271
+  // the MCP `run_action` / `resume_run` tools answered it so too.
+  //
+  // Which throws: `demotedDeclaredCode` at the rejection's `400` reading,
+  // the read that put the errno on this door's wire. It is present exactly
+  // when the throw spelled a code that is not a closed ADR-0112 code, and
+  // arm 3 above has already taken every throw that declared a status. A
+  // closed code (`RECORD_LOCKED`, `PERMISSION_DENIED`) is not demoted, so
+  // it stays the rejection it was: the author's refusal, in the vocabulary.
+  //
+  // What answers: the `/data` door's own classifier, `mapDataError`, never
+  // a copy of its reading. A driver errno and an app's own spelling both
+  // arrive on `.code` as a plain string, and nothing here looks at the
+  // string (the #12509 ruling: the discriminator is the status channel). So
+  // an unregistered code with no status moves exactly when `/data` answers
+  // it as a server fault, and a sandboxed body's coded refusal, which
+  // `/data` answers `400`, keeps the rejection below. The cost is the
+  // ruling's own, stated there: a producer that spells an unregistered code
+  // and declares no status loses the code on a fault; it keeps it by
+  // declaring the status it means.
+  //
+  // The answer is that door's status, code and sentence (`Internal data
+  // error`, `Internal server error`), with nothing the throw carried: no
+  // `declaredCode` (withheld on an undeclared 5xx, `demotedDeclaredCode`'s
+  // own rule), no `details`. The full text reaches the operator.
+  if (demotedDeclaredCode(resolveThrownHttpError(err, 400)) !== undefined) {
+    const door = mapDataError(err, objectName);
+    if (isServerFault(door.status)) {
+      operatorLines.push(`driver fault (${String(code)}): ${full}`);
+      return {
+        status: door.status,
+        code: typeof door.body.code === 'string' ? door.body.code : standardErrorCodeForHttpStatus(door.status),
+        message: typeof door.body.error === 'string' ? door.body.error : INTERNAL_ERROR_MESSAGE,
+        operatorLines,
+      };
+    }
+  }
+
+  // Arm 7: a rejection.
   //
   // [#3962] A deliberate REJECTION is a 400. The 200-with-inner-envelope
   // wire this used to emit was never a designed contract — no ADR or doc
@@ -328,7 +371,7 @@ function faultAnswer(operatorLines: string[]): ActionsDoorAnswer {
   return { status: 500, code: standardErrorCodeForHttpStatus(500), message: INTERNAL_ERROR_MESSAGE, operatorLines };
 }
 
-/** Arms 3 and 6: the dispatcher's answer to a thrown value at `fallbackStatus`. */
+/** Arms 3 and 7: the dispatcher's answer to a thrown value at `fallbackStatus`. */
 function thrownAnswer(err: unknown, fallbackStatus: number, operatorLines: string[]): ActionsDoorAnswer {
   const thrown = resolveThrownHttpError(err, fallbackStatus);
   // The engine's unique-constraint class crosses HTTP as the REST arm's wire

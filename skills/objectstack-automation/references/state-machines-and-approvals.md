@@ -76,10 +76,7 @@ is one diagram a reviewer (or AI) can read end-to-end.
   label: 'Opportunity Discount Approval',
   type: 'record_change',
   nodes: [
-    // Record-change flows bind via the START NODE's config — there is no
-    // separate top-level `trigger`. `triggerType` is one of
-    // `record-(before|after)-(create|update|delete)`; `condition` (bare CEL)
-    // gates whether the flow launches.
+    // The trigger is the START node's config (SKILL.md § Trigger Configuration).
     {
       id: 'start',
       type: 'start',
@@ -142,7 +139,7 @@ is one diagram a reviewer (or AI) can read end-to-end.
 
 ### Send-back for revision (ADR-0044)
 
-Approval centers also model **send back for revision** (退回修改) — distinct from
+Approval centers also model **send back for revision** — distinct from
 `reject` (terminate) and from a comment thread (which keeps the request pending).
 Send-back is a **flow movement**: the request finalizes as `returned`, the run
 walks a **`revise`** out-edge to an **`approval_revise`** node (the *revise
@@ -290,7 +287,7 @@ slate — guard genuinely-optional inputs explicitly, e.g.
 // ② The previous approval node's decision outputs pick this node's approvers:
 { type: 'expression', value: cel`vars.lead_review.next_reviewers` }
 
-// ③ Dynamic co-sign (会签): expression yields department ids; resolveAs expands
+// ③ Dynamic co-sign: expression yields department ids; resolveAs expands
 //    each into its members, and with behavior: 'per_group' EACH department is
 //    its own sign-off group:
 {
@@ -315,7 +312,7 @@ export const DynamicApprovalFlow = defineFlow({
   nodes: [
     {
       id: 'start', type: 'start', label: 'On Submit',
-      config: { objectName: 'expense', triggerType: 'record-after-update', condition: "status == 'submitted'" },
+      config: { objectName: 'expense', triggerType: 'record-after-update', condition: "record.status == 'submitted'" },
     },
     {
       // Node A declares what a decision may hand to the flow; the lead
@@ -363,10 +360,10 @@ Object-hook `ctx` is a different vocabulary — see **objectstack-data**
 | Field | Purpose |
 |:------|:--------|
 | `approvers` | Who may act (≥ 1 — see Approver Types above). Each approver may carry an optional **`group`** label (e.g. `{ type: 'position', value: 'crm_auditor', group: 'finance' }`) — with `behavior: 'per_group'`, approvers sharing a label form one group; unlabelled approvers each form their own |
-| `behavior` | `first_response` (first approver decides), `unanimous` (all must approve), `quorum` (`minApprovals` of N — M-of-N collective sign-off), or `per_group` (EACH approver `group` must reach `minApprovals` — one-from-each-group sign-off, 会签). In every mode a single rejection finalizes the node as `rejected`. Default `first_response` |
+| `behavior` | `first_response` (first approver decides), `unanimous` (all must approve), `quorum` (`minApprovals` of N — M-of-N collective sign-off), or `per_group` (EACH approver `group` must reach `minApprovals` — one-from-each-group sign-off). In every mode a single rejection finalizes the node as `rejected`. Default `first_response` |
 | `minApprovals` | Approvals required — total for `quorum`, per group for `per_group`. Omitted ⇒ ALL resolvable approvers under `quorum`, `1` per group; clamped at runtime so a misconfiguration can never deadlock |
 | `lockRecord` | Lock the triggering record from edits while pending. Default `true` |
-| `approvalStatusField` | Business-object field to mirror `pending`/`approved`/`rejected`/`recalled` onto (should be readonly) |
+| `approvalStatusField` | Business-object field to mirror `pending`/`approved`/`rejected`/`returned`/`recalled` onto (should be readonly) |
 | `onEmptyApprovers` | What an EMPTY resolved slate does: `admin_rescue` (default — request opens, only a privileged admin can act via Reassign; never waves through, never kills the run), `fail` (node fails — treat an empty slate as a config bug), `auto_approve` (skip the request, continue down `approve` with `output.autoApproved = true` — opt-in because it silently waves the record through), `fallback` (request opens on the sibling `fallbackApprovers` instead — same shape as `approvers`, required by this policy and refused under any other; a fallback that itself resolves to nobody degrades to `admin_rescue`). Declare it explicitly on any node with an `expression` approver (linted) |
 | `excludeSubmitter` | `true` drops the run's submitter (`submitter_id`) from the resolved slate, whatever approver type produced them — segregation of duties; a slate it empties takes the `onEmptyApprovers` route, never a silent pass. `onEmptyApprovers: 'auto_approve'` is **refused** beside it (it would approve exactly the request this exists to stop): use `admin_rescue`, `fail` or `fallback`. Default `false` |
 | `decisionOutputs` | Decision outputs a decision may carry: bare keys (free text) **or typed declarations** `{ key, label?, type: 'text'\|'user'\|'department'\|'position'\|'team', multiple?, required? }`, enforced at the decision — see *Recording a decision* |
@@ -378,14 +375,13 @@ Object-hook `ctx` is a different vocabulary — see **objectstack-data**
 These are wired on the **graph**, not in node config:
 
 - **Conditional step** — put a `decision` node before the Approval node, or a
-  `condition` on the edge entering it (the old per-step `entryCriteria`).
+  `condition` on the edge entering it.
 - **On approve / on reject** — wire downstream nodes (`update_record`,
   `http`, a `notify` node, …) to the `approve` / `reject` out-edge.
 - **Roll back on reject** — route the `reject` edge as a **back-edge** to an
-  earlier node so the submitter can revise (the old `back_to_previous`).
+  earlier node so the submitter can revise.
 - **Send back for revision (ADR-0044)** — see *Send-back for revision* above.
-- **Hard reject** — route the `reject` edge to an `end` node (the old
-  `reject_process`).
+- **Hard reject** — route the `reject` edge to an `end` node.
 
 ### Approval Best Practices
 
@@ -397,3 +393,12 @@ These are wired on the **graph**, not in node config:
    `reject` edges. Opening already tells each resolved approver
    (`approval.requested`); ⛔ no `notify` node for the opening: it tells
    them twice.
+4. **A flow reacting to the mirrored status runs as the person who acted.**
+   The `approvalStatusField` write is elevated but attributed — submit carries
+   the submitter, approve / reject / recall / send-back the person who decided —
+   so a `record_change` flow on that field ("when the invoice is approved, do
+   X") stays `runAs: 'user'` and runs with the decider's own grants. Only the
+   two machine-driven transitions carry no user — an SLA `escalation`
+   auto-decision and the release of a record whose run died — and a
+   `runAs: 'user'` flow fired by one has its data steps refused: a flow that
+   must react to those too declares `runAs: 'system'`.

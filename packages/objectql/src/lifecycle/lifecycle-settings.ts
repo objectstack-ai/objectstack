@@ -10,6 +10,12 @@ import type { SettingsManifest } from '@objectstack/spec/system';
  * global > tenant > default), which is exactly ADR-0057 §3.2's "regulated
  * tenants set years; dev sets days — the same knob at different settings":
  * `retention_overrides` is tenant-scoped, so one deployment can carry both.
+ *
+ * The three maps are `map` specifiers (#30208, ADR-0007 as amended 2026-11-08):
+ * a key column, then typed value columns. Their stored shapes are the ones the
+ * sweep has always read (`Record<object, { maxAge?, expireAfter? }>`,
+ * `Record<object, number>`, `Record<class, number>`), unchanged. The keys each
+ * admits are served at run time (`lifecycle-key-options.ts`), never listed here.
  */
 export const lifecycleSettingsManifest = {
   namespace: 'lifecycle',
@@ -36,34 +42,44 @@ export const lifecycleSettingsManifest = {
         'Master switch for the periodic sweep. Off = declared retention/ttl/rotation policies stop being enforced (data grows unbounded again).',
     },
     {
-      type: 'json',
+      type: 'map',
       key: 'retention_overrides',
       label: 'Retention overrides',
       required: false,
       scope: 'tenant',
       default: {},
+      keyColumn: { label: 'Object' },
+      columns: [
+        { name: 'maxAge', label: 'Keep rows for', kind: 'duration' },
+        { name: 'expireAfter', label: 'Expire rows after', kind: 'duration' },
+      ],
       description:
-        'Per-object window overrides: { "<object>": { "maxAge": "1y", "expireAfter": "30d" } }. ' +
-        'Durations use h/d/w/y. Set per organization, so a regulated organization can keep years while a development one keeps days. ' +
+        'Per-object windows that replace the declared ones. Durations use h, d, w or y, for example 30d or 7y. ' +
+        'Set per organization, so a regulated organization can keep years while a development one keeps days. ' +
         'An override shorter than the minimum a platform feature needs (for example the job queue\'s duplicate-detection window) ' +
         'is ignored and logged as an error, and the default window keeps applying.',
     },
     {
-      type: 'json',
+      type: 'map',
       key: 'quotas',
       label: 'Row quotas',
       required: false,
       default: {},
+      keyColumn: { label: 'Object' },
+      columns: [{ name: 'max_rows', label: 'Max rows', kind: 'positive_integer' }],
       description:
-        'Per-object max row counts: { "<object>": 1000000 }. A breach raises a governance alert — quotas never delete beyond the declared policy.',
+        'Per-object maximum row counts. A breach raises a governance alert — quotas never delete beyond the declared policy.',
     },
     {
-      type: 'json',
+      type: 'map',
       key: 'quota_defaults',
       label: 'Per-class quota defaults',
       required: false,
       default: {},
-      description: 'Fallback quotas by lifecycle class: { "telemetry": 1000000, "transient": 500000, "event": 100000, "audit": 5000000 }.',
+      keyColumn: { label: 'Lifecycle class' },
+      columns: [{ name: 'max_rows', label: 'Max rows', kind: 'positive_integer' }],
+      description:
+        'Fallback row quotas by lifecycle class (telemetry, transient, event, audit), for objects with no quota of their own.',
     },
     {
       type: 'number',
