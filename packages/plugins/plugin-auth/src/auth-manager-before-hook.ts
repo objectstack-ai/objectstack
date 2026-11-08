@@ -69,6 +69,7 @@ import {
   LAST_LOCAL_CREDENTIAL_CODE,
   LAST_LOCAL_CREDENTIAL_MESSAGE,
 } from './last-local-credential.js';
+import { refuseRequestNamingDifferentAccounts } from './one-account-per-request.js';
 import { ORGANIZATION_DELETE_PATH } from './organization-delete.js';
 import { carriesPrincipalSession } from './principal-session-mint.js';
 import { SSO_PROVIDER_DELETE_PATH } from './sign-in-method-floor.js';
@@ -149,6 +150,17 @@ export async function globalBeforeHook(
   // of every endpoint on both lanes and in-process — see
   // `principal-session-mint.ts` (3b).
   if (carriesPrincipalSession(ctx)) await setShouldSkipSessionRefresh(true);
+
+  // ── An auth request is judged and executed as one account ────────
+  // AHEAD OF EVERY GATE BELOW, and of the endpoint: a request whose
+  // session cookie and bearer token name two different signed-in
+  // accounts is refused here (401 CREDENTIALS_NAME_DIFFERENT_ACCOUNTS),
+  // so every gate that follows, every after-effect and the endpoint
+  // itself see one account or none. One credential, one account, or a
+  // credential that names nobody passes untouched. The two steps above
+  // read nothing, so they keep their place. `one-account-per-request.ts`
+  // states the rule and how each credential is read.
+  await refuseRequestNamingDifferentAccounts(ctx);
 
   // ── #2780: per-number OTP send guard (admission control) ─────
   // MUST run BEFORE the phone-number endpoints: better-auth's

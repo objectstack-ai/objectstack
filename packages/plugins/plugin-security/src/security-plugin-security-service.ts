@@ -55,7 +55,7 @@
  *
  * Nothing re-exports this module, so the published surface does not move.
  */
-import type { PluginContext } from '@objectstack/core';
+import { securityCatalogReaderOf, type PluginContext } from '@objectstack/core';
 import type {
   AuthoredRowWriteOperation,
   DelegationNarrowing,
@@ -71,6 +71,7 @@ import {
   intersectDelegatedScope,
   d10NarrowingStatement,
 } from './explain-engine.js';
+import { organizationBoundaryFailure } from './delegated-admin-gate.js';
 import type { OwnershipFloorAlternate } from './platform-ownership-policies.js';
 import {
   listAudienceBindingSuggestions,
@@ -418,6 +419,13 @@ export function registerSecurityService(
               : alternates.map((a) => `${a.object}.${a.operation} (${a.name})`).join(', ')),
         );
       },
+      // [ADR-0090 D12] The organization boundary, judged by the gate's own
+      // predicate against this engine's security catalog: `null` when the set
+      // is inside, else the reason. plugin-auth's identity-provider group
+      // mapping door calls it at save, so an IdP group never grants a set an
+      // organization administrator could not assign.
+      organizationBoundaryFailure: (setName: string): Promise<string | null> =>
+        organizationBoundaryFailure(securityCatalogReaderOf(ql), setName),
     });
     ctx.registerService('security', registeredSecurityService);
     // The member list is READ OFF the registered object, never typed by hand:
