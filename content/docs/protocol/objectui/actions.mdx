@@ -516,6 +516,8 @@ params:
 
 `ActionParam` fields: `name`, `field`, `objectOverride`, `label`, `type`, `required` (default `false`), `options`, `placeholder`, `helpText`, `defaultValue`, `defaultFromRow`, `visible` (CEL predicate — the dialog omits the param when false), `requiresFeature` (capability gate, lowered into `visible` — see [Capability gates](#capability-gates-requiresfeature)).
 
+A param's `helpText` is the hint under its input. Write it as a sentence, translated at `objects.<object>._actions.<action>.params.<param>.helpText` (`globalActions.<action>.params.<param>.helpText` for an action with no `objectName`), or as an inline locale map (`helpText: { en: 'Why the account is paused', 'zh-CN': '暂停该账户的原因' }`), the same two forms `label` takes. A page button's inline `action` has no translation key, so the locale map is the way to translate its hint. Either form may hold `{{ record.* }}` holes.
+
 ### Naming the submit button: `submitText`
 
 An action with `params` collects them in a dialog whose submit button says **Confirm**. `submitText` gives that button the action's own verb, so a send-email action can say **Send** and a log-call action **Log Call**. The dialog's other copy stays where it was: the title is the action's `label`, and the line under it is `description`.

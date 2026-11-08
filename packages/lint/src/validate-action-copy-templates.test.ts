@@ -303,6 +303,33 @@ describe('validateStackExpressions — description, params[].helpText and outcom
     expect(issues[0]!.message).toContain('is blank');
   });
 
+  // #28266: a param's `helpText` takes the inline locale map its siblings keep,
+  // so each entry is a sentence the doors judge at `.<locale>` — on a
+  // registered action and on a page button's inline action alike.
+  it('passes a helpText locale map and judges each entry at `.<locale>`', () => {
+    const map = { en: 'Why pause {{ record.name }}?', 'zh-CN': '为什么暂停 {{ record.name }}？' };
+    expect(newSlotIssues({ objects, actions: [invite(withParam(map))] })).toEqual([]);
+
+    const registered = newSlotIssues({
+      objects,
+      actions: [invite(withParam({ en: 'Why pause {{ record.name }}?', 'zh-CN': '为什么暂停 ${record.name}？', 'ja-JP': ' ' }))],
+    });
+    expect(registered.map((i) => [i.where, i.severity])).toEqual([
+      ["stack · action 'invite' params[0].helpText.zh-CN", 'error'],
+      ["stack · action 'invite' params[0].helpText.ja-JP", 'error'],
+    ]);
+    expect(registered[0]!.message).toContain("An action param's `helpText`");
+    expect(registered[1]!.message).toContain('is blank');
+
+    const page = pageWith([{
+      type: 'element:button',
+      properties: { action: { type: 'script', target: 'run', params: [{ name: 'reason', type: 'text', helpText: { en: 'Why', 'zh-CN': '{{ result.email }}' } }] } },
+    }]);
+    const pageIssues = runStackExpressionPasses({ objects, pages: [page] }, { runtimeWriteType: 'page' })
+      .filter((i) => /helpText/.test(i.where));
+    expect(pageIssues.map((i) => i.where)).toEqual([expect.stringContaining('· action params[0].helpText.zh-CN')]);
+  });
+
   it('judges an inline `properties.action` param helpText; an object\'s own action on an object write', () => {
     const page = pageWith([{
       type: 'element:button',
