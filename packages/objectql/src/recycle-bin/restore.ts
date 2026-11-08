@@ -13,10 +13,22 @@
  * to, with no `ast` and no id, as `purge(entryId)` is (`purge.ts`). The verb is
  * outside the hook namespace (`ENGINE_OPERATION_VERBS.restore = false`), so
  * `beforeRestore` / `afterRestore` stay plain names a plugin may dispatch.
- * Until `@objectstack/plugin-security` maps the verb to its grants
- * (`allowRestoreOwnDeleted` / `manageRecycleBin`, ADR-0148 D5), its fail-closed
- * backstop for the destructive verbs (`DESTRUCTIVE_OPERATIONS`) refuses every
- * caller that is not the system.
+ *
+ * ## Who may restore (ADR-0148 D5, #30237)
+ *
+ * Two halves. `@objectstack/plugin-security` maps the verb to
+ * `allowRestoreOwnDeleted` at the object gate: a caller whose object
+ * permission folds to it (`objectPermissionGrants`, ruling Q5 = A: read bounds
+ * it, `manageRecycleBin` and `modifyAllRecords` imply it) passes the chain.
+ * The engine then asks whose entry it is ({@link assertCallerMayRestoreEntry}):
+ * the caller restores an entry it deleted (`deleted_by` is its `userId`), and
+ * any other entry only when it holds `manageRecycleBin` on the object, asked
+ * of the registered effective-permission resolver. With no resolver, or one
+ * that fails, the answer is no: fail closed. The system restores any entry.
+ *
+ * The tenant wall is the removal side's (`purge.ts`,
+ * {@link recycleBinWallDenies}): a caller the wall denies sees no entry, and
+ * the restore answers `null`.
  *
  * ## The entry is the unit (ADR-0148 D2)
  *
@@ -56,6 +68,7 @@
  */
 
 import {
+  RECYCLE_BIN_GRANT_KEYS,
   RECYCLE_BIN_OBJECT,
   RecycleBinSnapshotSchema,
   type RecycleBinClearedReference,
@@ -64,19 +77,28 @@ import {
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import type { Logger } from '@objectstack/core';
 import { isUniqueViolationError, keysetWalk, redactBoundStatement, uniqueViolationColumn } from '@objectstack/types';
+import { objectPermissionGrants, type EffectiveObjectPermission, type TenantLayer0Verdict } from '@objectstack/spec/security';
 import type { OperationContext } from '../engine-top-level.js';
 import { declaredMultiValued } from '../engine-top-level.js';
 import { SummaryRecomputeError, type SummaryRecomputeFailure } from '../summary-errors.js';
 import { resolveTenantFieldName } from '../tenancy/system-write-organization.js';
-import { recycleBinCallRefusal } from './purge.js';
+import { recycleBinCallRefusal, recycleBinWallDenies } from './purge.js';
 
 /** What {@link restoreRecycleBinEntry} reads off the engine. */
 export interface RecycleBinRestoreHost {
   readonly _registry: { getObject(name: string): unknown };
   readonly logger: Pick<Logger, 'warn' | 'error'>;
+  /**
+   * The registered effective object-permission resolver
+   * (`ObjectQL.registerEffectiveObjectPermissionsResolver`), the map
+   * `/me/permissions` serves; `undefined` when none is registered.
+   */
+  readonly effectiveObjectPermissionsResolver: ((context: unknown) => Promise<unknown>) | undefined;
   getDriver(object: string): any;
   buildDriverOptions(object: string, execCtx?: ExecutionContext): any;
   executeWithMiddleware(ctx: OperationContext, executor: () => Promise<any>): Promise<any>;
+  /** The Layer 0 verdict over the engine's own facts (`engine-driver-options.ts`). */
+  engineLayer0Verdict(execCtx: ExecutionContext | undefined, activeOrganization: string | undefined): TenantLayer0Verdict;
   transaction<T>(callback: (trxCtx: any) => Promise<T>, baseContext?: any): Promise<T>;
   update(object: string, data: any, options?: any): Promise<unknown>;
   recomputeSummaries(childObject: string, records: any, previous: any, execCtx?: ExecutionContext): Promise<SummaryRecomputeFailure[]>;
@@ -264,6 +286,73 @@ export function relinkedValue(field: FieldDef | undefined, current: unknown, val
 }
 
 /**
+ * The refusal of a restore of an entry the caller did not delete, to a caller
+ * that does not manage the object's recycle bin (ADR-0148 D5): `403
+ * PERMISSION_DENIED`, the code the security layer's object gate answers.
+ */
+function notOwnEntryRefusal(entryId: string, object: string, unanswered: boolean): Error {
+  const err: any = new Error(
+    'You can restore only the records you deleted. Restoring a record someone else deleted needs the recycle-bin manager permission on this object.',
+  );
+  err.code = 'PERMISSION_DENIED';
+  err.status = 403;
+  err.httpStatus = 403;
+  err.developerMessage =
+    `Recycle-bin entry '${entryId}' of '${object}' was not deleted by this caller, and restoring another ` +
+    `caller's entry needs '${RECYCLE_BIN_GRANT_KEYS.manage}' on '${object}' (ADR-0148 D5). ` +
+    (unanswered
+      ? 'No effective-permission resolver answered for this caller, so the restore failed closed.'
+      : `The caller's effective permission on '${object}' does not grant it.`);
+  err.object = object;
+  err.entryId = entryId;
+  return err;
+}
+
+/**
+ * [#30237, ADR-0148 D5] Whose entry a restore may write back. The security
+ * layer's object gate has already admitted the caller for `restore`
+ * (`allowRestoreOwnDeleted`, or a grant that implies it); this asks the half
+ * the gate cannot, since the dispatch carries no entry:
+ *
+ *   - the system restores any entry;
+ *   - a caller restores an entry whose `deleted_by` is its own `userId`
+ *     (`attributedUserId` is attribution only and authorizes nothing);
+ *   - any other entry needs `manageRecycleBin` on the entry's object, folded
+ *     by the spec's `objectPermissionGrants` over the caller's effective
+ *     permission, as the registered resolver answers it (the map
+ *     `/me/permissions` serves). No resolver registered, a resolver that
+ *     throws, or a map with no entry for the object: refused. Fail closed.
+ */
+export async function assertCallerMayRestoreEntry(
+  this: Pick<RecycleBinRestoreHost, 'effectiveObjectPermissionsResolver' | 'logger'>,
+  entry: { id: string; object: string; deletedBy: unknown },
+  context: ExecutionContext | undefined,
+): Promise<void> {
+  if (context?.isSystem === true) return;
+  const caller = context?.userId;
+  if (typeof caller === 'string' && caller !== '' && entry.deletedBy === caller) return;
+  const resolver = this.effectiveObjectPermissionsResolver;
+  if (!resolver) throw notOwnEntryRefusal(entry.id, entry.object, true);
+  let permissions: unknown;
+  try {
+    permissions = await resolver(context);
+  } catch (error) {
+    this.logger.warn('[recycle-bin] the effective-permission resolution failed, so the restore of another caller\'s entry is refused (failed closed)', {
+      object: entry.object, entryId: entry.id, error,
+    });
+    throw notOwnEntryRefusal(entry.id, entry.object, true);
+  }
+  const permission =
+    permissions !== null && typeof permissions === 'object' && Object.prototype.hasOwnProperty.call(permissions, entry.object)
+      ? (permissions as Record<string, unknown>)[entry.object]
+      : undefined;
+  const manages =
+    permission !== null && typeof permission === 'object' &&
+    objectPermissionGrants(permission as EffectiveObjectPermission, RECYCLE_BIN_GRANT_KEYS.manage);
+  if (!manages) throw notOwnEntryRefusal(entry.id, entry.object, false);
+}
+
+/**
  * The body of `ObjectQL.restore`: write one recycle-bin entry back. Answers
  * what came back, or `null` when no entry with that id is visible to the
  * caller's organization, or the composition registers no bin.
@@ -283,10 +372,11 @@ export async function restoreRecycleBinEntry(
   }
   if (!this._registry.getObject(RECYCLE_BIN_OBJECT)) return null;
   const context = options?.context;
+  if (recycleBinWallDenies.call(this, context)) return null;
   const binDriver = this.getDriver(RECYCLE_BIN_OBJECT);
   const found = ((await binDriver.find(
     RECYCLE_BIN_OBJECT,
-    { object: RECYCLE_BIN_OBJECT, where: { id: entryId }, fields: ['id', 'object_name', 'record_id', 'snapshot'], limit: 1 },
+    { object: RECYCLE_BIN_OBJECT, where: { id: entryId }, fields: ['id', 'object_name', 'record_id', 'snapshot', 'deleted_by'], limit: 1 },
     this.buildDriverOptions(RECYCLE_BIN_OBJECT, context),
   )) ?? []) as Array<Record<string, unknown>>;
   const entry = found[0];
@@ -295,6 +385,8 @@ export async function restoreRecycleBinEntry(
   const snapshot = readSnapshot(id, entry.snapshot);
   const opCtx: OperationContext = { object: entry.object_name, operation: 'restore', options: { context }, context };
   return await this.executeWithMiddleware(opCtx, async () => {
+    if (recycleBinWallDenies.call(this, opCtx.context, opCtx.tenantLayer0Verdict)) return null;
+    await assertCallerMayRestoreEntry.call(this, { id, object: entry.object_name as string, deletedBy: entry.deleted_by }, opCtx.context);
     await judgeRestore.call(this, id, snapshot.rows, opCtx.context);
     const relinked = await writeBack.call(this, id, snapshot.rows, snapshot.clearedReferences, opCtx.context);
 

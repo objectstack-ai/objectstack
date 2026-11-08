@@ -1206,10 +1206,10 @@ function nullMasterReferenceOf(
  * served member computes for an update is the answer step 2.8 gives each of
  * these writes, and the engine asks it for each.
  *
- * `restore` and `purge` are refused at the object gate for every principal
- * until their grants return, so the object-level CRUD layer decides their
- * record verdict first. They are listed because step 2.8 lists them, so the
- * report stays the door's on the day they can be granted.
+ * `restore` and `purge` are listed because step 2.8 lists them. [#30237] Their
+ * object gate reads the recycle bin's grants (`allowRestoreOwnDeleted`,
+ * `manageRecycleBin`); the by-id `purge` (the permanent delete) is the one of
+ * them that addresses a row.
  */
 const MASTER_CHECKED_BY_ID_WRITES: ReadonlySet<string> = new Set(['update', 'delete', 'transfer', 'restore', 'purge']);
 
@@ -3366,8 +3366,8 @@ async function explainRecordOnPass(
   // ({@link rlsOperationForVerb}), never the verb as asked: keyed on the raw
   // verb, a transfer of a row the caller cannot read was reported visible
   // beside the transfer door's 404. `restore` and `purge` map the same way
-  // and are refused at the object gate first, so the question never reaches
-  // them while their grants are retired.
+  // ([#30237] the by-id `purge`, the permanent delete, is a delete of the
+  // addressed row).
   //
   // [#22761] The WHOLE record story answers it, not the record verdict
   // alone. The question is asked before the row story is written.

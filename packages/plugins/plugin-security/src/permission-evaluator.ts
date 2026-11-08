@@ -8,6 +8,7 @@ import type {
   FieldPermissionParsed,
 } from '@objectstack/spec/security';
 import { objectPermissionGrants } from '@objectstack/spec/security';
+import { RECYCLE_BIN_GRANT_KEYS } from '@objectstack/spec/data';
 import {
   fieldPermissionVote,
   holdsSuperuserBypass,
@@ -58,14 +59,17 @@ export interface ConditionedFieldEntry {
  * deny unless a resolved permission set grants it. (`allowTransfer` is also
  * ENFORCED today through the ordinary insert/update `owner_id` door, #3004.)
  *
- * The former `restore`/`purge` rows RETIRED with their bits (#12497, ADR-0049
- * — maintainer ruling 2026-08-26 accepting #1883's recommendation B):
- * `allowRestore`/`allowPurge` are `retiredKey()` tombstones in the spec, so a
- * mapping onto them was a claim about a surface that rejects authoring. A
- * dispatched `restore`/`purge` is now denied unconditionally by the
- * DESTRUCTIVE_OPERATIONS backstop below — there is still no window where the
- * ops could ship ungated. The rows return with the M2 lifecycle initiative
- * (feature + RBAC in one batch), together with the bits they read.
+ * [#30237, ADR-0148 D5] `restore` and `purge` are the recycle bin's verbs, and
+ * they read the bin's two grants (`RECYCLE_BIN_GRANT_KEYS`), NEW spellings on
+ * purpose: the retired `allowRestore` / `allowPurge` (#12497, ADR-0049) stay
+ * tombstoned. `restore` reads `allowRestoreOwnDeleted`; `purge` (the
+ * permanent delete, `purge(entryId)`, `empty(object)`, Q3 = A) reads
+ * `manageRecycleBin`. The fold is the spec's `objectPermissionGrants` (ruling
+ * Q5 = A: `allowRead` bounds both, `modifyAllRecords` implies both,
+ * `manageRecycleBin` implies `allowRestoreOwnDeleted`, `allowDelete` implies
+ * neither). The object gate is the verb's first half only: the engine's
+ * restore then lets a caller that does not manage the bin restore just the
+ * entries it deleted (`recycle-bin/restore.ts`, `@objectstack/objectql`).
  */
 const OPERATION_TO_PERMISSION: Record<string, ObjectPermissionVerbTarget> = {
   find: 'allowRead',
@@ -76,19 +80,19 @@ const OPERATION_TO_PERMISSION: Record<string, ObjectPermissionVerbTarget> = {
   update: 'allowEdit',
   delete: 'allowDelete',
   transfer: 'allowTransfer',
+  restore: RECYCLE_BIN_GRANT_KEYS.restoreOwnDeleted,
+  purge: RECYCLE_BIN_GRANT_KEYS.manage,
 };
 
 /**
  * Destructive operation class — operations that must FAIL CLOSED when they are
  * not mapped to a concrete permission key. See ADR-0049: an unrecognised
  * destructive operation must be DENIED rather than silently allowed by the
- * default-allow fallthrough. Since #12497 this set is the ACTIVE gate for
- * `restore`/`purge` (their mapping rows retired with their tombstoned bits —
- * denial is unconditional, not even `modifyAllRecords` reaches them until the
- * M2 ops ship with re-added rows) and the backstop for `transfer` (mapped
- * above; this keeps it fail-closed if the mapping is ever removed).
- * Non-destructive unknown operations retain default-allow so custom read-side
- * operations are not broken.
+ * default-allow fallthrough. Every member is mapped above today (`transfer`
+ * since #1883, `restore` / `purge` since #30237), so the set is the BACKSTOP
+ * that keeps each fail-closed if its mapping is ever removed, never the gate
+ * that decides it. Non-destructive unknown operations retain default-allow so
+ * custom read-side operations are not broken.
  */
 const DESTRUCTIVE_OPERATIONS = new Set<string>(['transfer', 'restore', 'purge']);
 
@@ -97,12 +101,11 @@ const DESTRUCTIVE_OPERATIONS = new Set<string>(['transfer', 'restore', 'purge'])
  * edit/delete plus the MAPPED members of the destructive lifecycle class,
  * DERIVED from the two constants above so a future destructive op added to the
  * map+set is covered automatically (hand-listing it inline is how bypass gaps
- * happen — #1883). Unmapped destructive ops (`restore`/`purge` since #12497)
- * contribute nothing here — they are denied before the bypass is consulted.
- * NOTE this means "Modify All Data" grants (incl. the wildcard on
- * organization_admin / admin_full_access defaults) cover `transfer` (and will
- * cover restore/purge again when the M2 batch re-adds their rows — Salesforce
- * semantics, confirmed in the #1883 disposition; revisit per-op when M2 lands).
+ * happen — #1883). NOTE this means "Modify All Data" grants (incl. the
+ * wildcard on organization_admin / admin_full_access defaults) cover
+ * `transfer`, and since #30237 the recycle bin's `restore` / `purge`
+ * (Salesforce semantics, confirmed in the #1883 disposition and ruled for the
+ * bin as Q5 = A).
  *
  * [#18785] ⛔ This set no longer DECIDES anything — the bypass is folded by the
  * spec's `objectPermissionGrants`, the one definition of the rule. What it
@@ -159,18 +162,20 @@ export function superuserBypassBitForOperation(operation: string): SuperuserBypa
  * destructive op added there). `transfer` folds into `update`. Returns `null`
  * for an operation with no CRUD mapping (e.g. a custom read-side op) — such an
  * op is never matched by a per-operation map, but the flat `string[]` form
- * still gates it via its `all` bucket. (`restore`/`purge` fell out of the map
- * with #12497 — they resolve `null` here, and their dispatch is denied at the
- * object gate before any per-operation map is consulted; the M2 batch re-adds
- * the rows, restore→update / purge→delete, with the bits.)
+ * still gates it via its `all` bucket. The recycle bin's verbs fold as their
+ * row-level security does (`lifecycle-verb-rls-operation.ts`): `restore`
+ * rewrites a row back into existence, so `update`; `purge` destroys it, so
+ * `delete`.
  */
 export function crudBucketForOperation(operation: string): CrudBucket | null {
   switch (OPERATION_TO_PERMISSION[operation]) {
     case 'allowRead': return 'read';
     case 'allowCreate': return 'create';
     case 'allowEdit':
-    case 'allowTransfer': return 'update';
-    case 'allowDelete': return 'delete';
+    case 'allowTransfer':
+    case 'allowRestoreOwnDeleted': return 'update';
+    case 'allowDelete':
+    case 'manageRecycleBin': return 'delete';
     default: return null;
   }
 }

@@ -326,8 +326,17 @@ function isPrivatePosture(schema: ObjectAccessPostureLike | null | undefined): b
   return typeof access === 'object' && access !== null && (access as { default?: unknown }).default === 'private';
 }
 
-/** The `allow*` bits {@link objectPermissionGrants} reads, i.e. every bit a `can()` verb resolves to. */
-const GRANT_BITS = ['allowRead', 'allowCreate', 'allowEdit', 'allowDelete', 'allowTransfer', 'allowExport'] as const;
+/**
+ * The grant bits {@link objectPermissionGrants} folds: every bit a `can()` verb
+ * resolves to, and [#30237] the recycle bin's two grants (ADR-0148 D5), which
+ * the server reads for `restore` / `purge`. A super-user wildcard therefore
+ * carries both onto every object the map holds (Q5 = A: `modifyAllRecords`
+ * implies both), so the map the Console reads answers what the server grants.
+ */
+const GRANT_BITS = [
+  'allowRead', 'allowCreate', 'allowEdit', 'allowDelete', 'allowTransfer', 'allowExport',
+  'allowRestoreOwnDeleted', 'manageRecycleBin',
+] as const;
 type GrantBit = (typeof GRANT_BITS)[number];
 const GRANT_BIT_SET: ReadonlySet<string> = new Set(GRANT_BITS);
 

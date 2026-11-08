@@ -8270,8 +8270,8 @@ export class ObjectQL implements IObjectQLEngine {
    * bin (`PlatformObjectsPlugin`).
    *
    * Authorized as the `purge` operation on the object the entry's rows belong
-   * to, the recycle-bin manager's verb: until `@objectstack/plugin-security`
-   * maps it to its grant, every caller that is not the system is refused. The
+   * to, the recycle-bin manager's verb (`@objectstack/plugin-security` maps it
+   * to `manageRecycleBin`). A caller the tenant wall denies sees no entry. The
    * body lives in `recycle-bin/purge.ts`, its docblock with it.
    */
   purge(entryId: string | number, options?: RecycleBinRemovalOptions): Promise<boolean> {
@@ -8281,6 +8281,7 @@ export class ObjectQL implements IObjectQLEngine {
       getDriver: (...a) => this.getDriver(...a),
       buildDriverOptions: (...a) => this.buildDriverOptions(...a),
       executeWithMiddleware: (...a) => this.executeWithMiddleware(...a),
+      engineLayer0Verdict: (...a) => this.engineLayer0Verdict(...a),
     };
     return purgeRecycleBinEntry.call(host, entryId, options);
   }
@@ -8301,6 +8302,7 @@ export class ObjectQL implements IObjectQLEngine {
       getDriver: (...a) => this.getDriver(...a),
       buildDriverOptions: (...a) => this.buildDriverOptions(...a),
       executeWithMiddleware: (...a) => this.executeWithMiddleware(...a),
+      engineLayer0Verdict: (...a) => this.engineLayer0Verdict(...a),
     };
     return emptyRecycleBin.call(host, object, options);
   }
@@ -8321,19 +8323,24 @@ export class ObjectQL implements IObjectQLEngine {
    * nothing.
    *
    * Authorized as the `restore` operation on the object of the entry's master
-   * row: until `@objectstack/plugin-security` maps it to its grants, every
-   * caller that is not the system is refused. The body lives in
-   * `recycle-bin/restore.ts`, its docblock with it.
+   * row (`@objectstack/plugin-security` maps it to `allowRestoreOwnDeleted`);
+   * a caller then restores only an entry it deleted unless it holds
+   * `manageRecycleBin` on the object, asked of the registered
+   * effective-permission resolver and refused when none answers. The body
+   * lives in `recycle-bin/restore.ts`, its docblock with it.
    */
   restore(entryId: string | number, options?: RecycleBinRestoreOptions): Promise<RecycleBinRestoreResult | null> {
     const readRegistry = () => this._registry;
     const readLogger = () => this.logger;
+    const readResolver = () => this._effectiveObjectPermissionsResolver;
     const host: ThisParameterType<typeof restoreRecycleBinEntry> = {
       get _registry() { return readRegistry(); },
       get logger() { return readLogger(); },
+      get effectiveObjectPermissionsResolver() { return readResolver(); },
       getDriver: (...a) => this.getDriver(...a),
       buildDriverOptions: (...a) => this.buildDriverOptions(...a),
       executeWithMiddleware: (...a) => this.executeWithMiddleware(...a),
+      engineLayer0Verdict: (...a) => this.engineLayer0Verdict(...a),
       transaction: (...a) => this.transaction(...a),
       update: (...a) => this.update(...a),
       recomputeSummaries: (...a) => this.recomputeSummaries(...a),

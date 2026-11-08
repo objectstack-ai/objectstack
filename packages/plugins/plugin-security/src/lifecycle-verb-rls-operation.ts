@@ -15,34 +15,28 @@
  *
  * Every other verb is returned unchanged.
  *
- * ⛔ Not the RLS compiler's own map. `RLSCompiler.mapOperationToRLS` sends every
- * verb outside its list to `select`, so a lifecycle verb handed to
- * `computeLayeredRlsFilter` raw is composed as a READ: no update-class policy
- * and no ownership floor reaches it. That default serves the compiler's other
- * callers and is left alone; the mapping is applied here, BEFORE the
- * composition is asked, and every composition for a lifecycle verb reads it:
+ * Every site that judges a write by its class reads this mapping, never an
+ * inline copy of it [#30237]: the RLS compiler's own operation map
+ * (`RLSCompiler.mapOperationToRLS`, whose default would otherwise send a
+ * lifecycle verb to `select` and compose it as a READ), the layered RLS
+ * composition (`computeLayeredRlsFilter`), the by-id write pre-image gate
+ * (`security-plugin.ts`, step 2.7, whose floor decision
+ * `resolvePreImageFloorDrop` and floor hand-over `masterGateCoversOperation`
+ * key on the mapped verb), the addressed-write readers
+ * (`security-plugin-addressed-writes.ts`), the controlled-by-parent write
+ * gate's predicate test, and `security/explain` (`explain-engine.ts`), the
+ * object-level `rls` layer and the record-level row story alike — and
+ * [#22571] its read-absent rewrite (#21771 ruling A), whose guard asks this
+ * mapping which operation the explained verb's door is, so a `transfer` of a
+ * row the caller cannot read gets the missing-record shape the transfer
+ * door's 404 is.
  *
- *  - the by-id write pre-image gate (`security-plugin.ts`, step 2.7) — the
- *    door's composition, whose floor decision (`resolvePreImageFloorDrop`) and
- *    floor hand-over (`masterGateCoversOperation`) key on the mapped verb;
- *  - `security/explain` (`explain-engine.ts`), the object-level `rls` layer and
- *    the record-level row story alike, so a `transfer` is explained against the
- *    update-class policies the door judges it by;
- *  - [#22571] `security/explain`'s read-absent rewrite (#21771 ruling A), whose
- *    guard asks this mapping which operation the explained verb's door is, so a
- *    `transfer` of a row the caller cannot read gets the missing-record shape
- *    the transfer door's 404 is.
- *
- * The middleware's AST step (step 3) passes its verb RAW, by design: the
- * engine's middleware vocabulary carries no lifecycle verb, an invariant
- * pinned in `packages/objectql/src/engine-middleware-operation-vocabulary.test.ts`.
- * If that invariant ever breaks, this is the mapping that site adopts.
- *
- * `restore` and `purge` are refused at the object gate for every principal
- * until their grants return (`permission-evaluator.ts`,
- * `DESTRUCTIVE_OPERATIONS`), so the object-level CRUD layer decides their
- * verdict first; the mapping is what their row-level security is composed for
- * on the day they can be granted.
+ * `restore` and `purge` dispatch on the engine since the recycle bin
+ * (ADR-0148): the permanent delete as `purge` by id, `purge(entryId)` /
+ * `empty(object)` as `purge` and `restore(entryId)` as `restore` with no id
+ * and no AST. The object gate reads their grants (`permission-evaluator.ts`,
+ * `allowRestoreOwnDeleted` / `manageRecycleBin`), and a by-id `purge` meets
+ * the row-level security this mapping composes for `delete`.
  */
 export const LIFECYCLE_VERB_RLS_OPERATION: Readonly<Record<string, 'update' | 'delete'>> = Object.freeze({
   transfer: 'update',

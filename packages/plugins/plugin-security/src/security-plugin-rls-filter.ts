@@ -87,6 +87,7 @@ import { RESERVED_RLS_MEMBERSHIP_KEYS } from '@objectstack/spec/contracts';
 import { isConfiguredPlatformAdminEmail, resolvePlatformAdminEmails } from '@objectstack/core';
 import { RLS_DENY_FILTER, policyDeclaresClause } from './rls-compiler.js';
 import { isPlatformOwnershipFloorPolicy } from './platform-ownership-policies.js';
+import { rlsOperationForVerb } from './lifecycle-verb-rls-operation.js';
 import { noteResolverStagedKeys, policiesReadCurrentUserKey, stageDeclaredMembershipKeys } from './object-membership-keys.js';
 import { stageKernelQueues } from './kernel-queue-membership.js';
 import {
@@ -169,7 +170,9 @@ export async function computeLayeredRlsFilter(
   // The two are computed independently and never share a compiler, a merge
   // step, or a bypass bit (closes W1 by construction, W2 structurally).
   const meta = await this.getObjectSecurityMeta(object);
-  const isWrite = operation === 'insert' || operation === 'update' || operation === 'delete';
+  // [#30237] A lifecycle verb is the write class it is judged as.
+  const rlsOperation = rlsOperationForVerb(operation);
+  const isWrite = rlsOperation === 'insert' || rlsOperation === 'update' || rlsOperation === 'delete';
   // Posture permits a platform admin to cross the tenant wall (ADR-0066 ①):
   // private / platform-global / better-auth-managed objects. Public tenant
   // business objects do NOT permit it, so a platform admin stays org-scoped.
@@ -368,7 +371,7 @@ export async function computeLayeredRlsFilter(
     // reached on exactly the same inputs as before.
     if (
       !collected.some((p) => policyDeclaresClause(p, 'using')) &&
-      (operation === 'update' || operation === 'delete') &&
+      (rlsOperation === 'update' || rlsOperation === 'delete') &&
       !(
         posturePermits &&
         this.permissionEvaluator.hasSuperuserReadBypass(object, permissionSets, { isPrivate: meta.isPrivate })

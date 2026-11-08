@@ -393,10 +393,16 @@ export function registerAuthzMiddleware(
     //
     // [#27175] A row write probe is no write: it changes no grant, and it
     // must leave no shared state behind, so it advances nothing.
+    //
+    // [#30237] The verbs are the engine's write set (`WRITE_EPOCH_OPERATIONS`,
+    // `@objectstack/objectql` `write-epoch.ts`, a devDependency here, so it is
+    // spelled out): the recycle bin's `purge` removes rows or entries and its
+    // `restore` writes rows back.
     if (
       !this.epoch.seamOwnedByEngine &&
       !isRowWriteProbe(opCtx) &&
-      (opCtx.operation === 'insert' || opCtx.operation === 'update' || opCtx.operation === 'delete')
+      (opCtx.operation === 'insert' || opCtx.operation === 'update' || opCtx.operation === 'delete' ||
+        opCtx.operation === 'purge' || opCtx.operation === 'restore')
     ) {
       this.epoch.bump('write');
     }
@@ -1054,13 +1060,12 @@ export function registerAuthzMiddleware(
     // `checkDelete` for the delete class, so an `edit` share widens update and
     // still leaves delete denied without this file knowing why.
     if (
-      // update/delete today; the lifecycle verbs stay listed so the M2 ops
-      // inherit the pre-image check the moment they dispatch — the CRUD bit
-      // alone must never be the only row-level defense. `transfer` clears
-      // the object gate via its mapped bit (#1883/#3004); `restore`/`purge`
-      // are denied AT the object gate since #12497 (bits tombstoned, rows
-      // retired, DESTRUCTIVE_OPERATIONS fail-closed), so this branch is
-      // dormant defense-in-depth for them until the M2 batch re-adds both.
+      // update/delete, and the lifecycle verbs, so the CRUD bit alone is
+      // never the only row-level defense. `transfer` clears the object gate
+      // via its mapped bit (#1883/#3004); [#30237] the recycle bin's
+      // permanent delete is a by-id `purge` and meets this check as a delete,
+      // while `purge(entryId)` / `empty(object)` / `restore(entryId)` carry no
+      // id and pass by (`extractSingleId` answers none).
       ['update', 'delete', 'transfer', 'restore', 'purge'].includes(opCtx.operation) &&
       permissionSets.length > 0 &&
       !!opCtx.context?.userId &&
@@ -2322,32 +2327,16 @@ export function registerAuthzMiddleware(
     // the public getReadFilter service via computeRlsFilter, so the engine
     // find-path and the analytics raw-SQL path enforce identical scoping.
     //
-    // [#7809] `opCtx.operation` is passed RAW here — no `purge -> delete`,
-    // `transfer|restore -> update` normalisation like the 2.7 gate above
-    // does at `rlsOperation` (through `rlsOperationForVerb`, the one
-    // declaration of that mapping). That asymmetry is deliberate and safe, but ONLY
-    // because of an invariant that lives in another package: the engine's
-    // middleware dispatch vocabulary (`OperationContext['operation']`) has
-    // seven members and none of them is a destructive lifecycle verb, and
-    // middleware is reachable only through the private
-    // `executeWithMiddleware(ctx: OperationContext, …)`. So no `purge` /
-    // `transfer` / `restore` can arrive here to be mis-derived.
-    //
-    // Measured, not assumed — a real engine driven through every public
-    // method dispatches exactly `find/findOne/count/aggregate` (with ast),
-    // `insert/update/delete` by-id (no ast) and bulk `update`/`delete` (with
-    // ast). The 2.7 gate normalises anyway because it is pre-wired for the
-    // M2 ops (#1883); this path is not, and does not need to be while the
-    // invariant holds.
-    //
-    // ⚠️ The invariant is PINNED, in the package that owns it:
+    // [#7809] `opCtx.operation` is passed RAW here, and that is safe on two
+    // counts. The step runs only for an operation that carries an `ast`, and
+    // the engine dispatches the recycle bin's lifecycle verbs (`purge`,
+    // `restore`) with none — an invariant pinned in the package that owns it,
     // `packages/objectql/src/engine-middleware-operation-vocabulary.test.ts`.
-    // If a recycle bin (#3146) ever makes one of those verbs dispatchable,
-    // that pin goes red first — and THIS site and the D10 delegator half
-    // below are what must normalise before it can go green again, by
-    // reading `rlsOperationForVerb` (`lifecycle-verb-rls-operation.ts`), the
-    // mapping the 2.7 gate and `security/explain` already read — never a
-    // second inline copy of it.
+    // And [#30237] the composition maps a lifecycle verb to its write class
+    // itself: `computeLayeredRlsFilter` and the RLS compiler's operation map
+    // both read `rlsOperationForVerb` (`lifecycle-verb-rls-operation.ts`), so
+    // a verb that ever arrives here is composed as the write it is, never as
+    // a read.
     if (opCtx.ast) {
       const extra: Record<string, unknown>[] = [];
       // [#15813] The layered split rather than `computeRlsFilter`, composed
