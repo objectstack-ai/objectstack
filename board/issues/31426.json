@@ -2,8 +2,8 @@
   "number": 31426,
   "kind": "issue",
   "title": "notification preference: quiet_hours declares the quiet-hours widget hint (server half of #31421)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "domain:server",
     "enhancement",
-    "pm:dispatched",
     "priority:p3"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-08T07:24:48Z",
-  "updated_at": "2026-11-08T14:01:52Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-08T14:26:32Z",
+  "closed_at": "2026-11-08T14:24:11Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 5,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/31426",
   "body": "domain:ui#3 · zhuangjianguo · session_01QsR2jVEjiYrK7onirxUGyo\n\nFiling gate: **④ coordination child**, the server half of #31421 (carries its widget hint; #31421 keeps the ui control). #31421's filer named it: \"If the ui needs the field to declare a widget hint, as the topic and channel fields do since #31004, that is a small server half. Name it here and the server lane cuts it.\"\nBusiness reason: an administrator sets 免打扰 (quiet hours) on a notification preference with a time-zone picker and two times instead of hand-writing `{ \"tz\": …, \"start\": …, \"end\": … }`. Without this hint the ui control from #31421 is never chosen and Setup keeps the JSON box.\nReader: a `domain:server` seat, a one-line change; the ui half (#31421, `domain:ui#3`) builds in parallel and lands independently.\nDedupe (open AND closed): `quiet_hours widget`, `quiet-hours` → #31421 and #30208 only; none is this hint.\n\n## 维护者速读\n\n「免打扰」字段要换成时间段控件，前端已在 #31421 里做。前端只认字段上的 widget 提示（和同一对象的 topic、channel 字段一样），所以服务端要给 `quiet_hours` 加一行 `widget: 'quiet-hours'`。存储格式不变。\n\n## What to do\n\n- `packages/services/service-messaging/src/objects/notification-preference.object.ts`, `quiet_hours: Field.json({ … })` (~L202 on `origin/main` `216b18a6c`): add `widget: 'quiet-hours'`, with the same kind of `[#30208 row 6]` comment the `topic` (~L142–149, `widget: 'notification-topic'`) and `channel` (~L174–178) fields carry.\n- Measured by #31421's dev at step 1 (report `/mnt/project-files/issue-31421/step1.md` in the fleet project): the record form resolves form widget → `field.widget` → type, so a `json` field with no hint goes to the JSON editor. `FieldSchema.widget` is a free string, and an unregistered name degrades to the JSON editor, so this can land before or after the ui half.\n- Storage shape unchanged: `{ tz?, start: 'HH:MM', end: 'HH:MM' }`.\n\n## Acceptance\n\n- A pin that `quiet_hours` declares `widget: 'quiet-hours'`, beside whatever pins the topic and channel hints today.\n\nRefs #31421, #30208"

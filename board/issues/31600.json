@@ -1,0 +1,31 @@
+{
+  "number": 31600,
+  "kind": "issue",
+  "title": "feat(auth)!: refuse to boot multi-replica without an explicit OS_AUTH_SECRET (#3814 F3e)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "enhancement",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-08T16:30:06Z",
+  "updated_at": "2026-11-08T17:01:42Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31600",
+  "body": "epic:#3814#1 · os-zhuang · session_01QUs3BrVu5TqwtmuhsjdEvM\nFiling gate: ③ maintainer-dispatched task (child of #3814). Maintainer, (2026-11-08, 16:25 UTC): 「继续，现在派第二批」 (gate 1 after the card 0 inventory, cloud#3868 comment 6723322368).\n\nParent: #3814 (rulings R0-R6 on comment 6722625146).\n\n## Problem (smoke, card 0)\nWith `OS_SECRET_KEY` set but no `OS_AUTH_SECRET`, a third replica booted and minted `/data/auth-secret` on its own volume; the session cookie from r1 was `UNAUTHENTICATED` on r3. `OS_SECRET_KEY` is already refused when missing (LocalCryptoProvider); the auth secret is not. The kit's install.sh and the Helm secret carry it, so only hand-rolled deploys are exposed.\n\n## Do\n1. When replicas>1 is declared on the Redis driver and `OS_AUTH_SECRET` is unset, refuse the boot with one line naming the variable and how to generate it, mirroring the data-key refusal.\n2. Single node keeps auto-minting exactly as today.\n3. Tests: declared multi-replica + Redis + no auth secret = refused with the message; single node = minted as today.\n\n## Rules that bind every #3814 child (verbatim rulings on the parent)\nR1 peer round-robin. R2 Redis required for multi-replica only. R3 「同意：每张卡都只在\"声明多副本并接上 Redis 驱动\"时才生效」: the single-node default path is unchanged, multi-replica behaviour switches on only behind declared replicas>1 AND a connected Redis cluster driver, the split-brain guard is never weakened, and the deploy README \"multi-node unsupported\" line stays until the final gate.\n\n## Done when\nPR merged; a multi-replica boot without the auth secret refuses; single node unchanged."
+}

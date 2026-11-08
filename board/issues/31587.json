@@ -1,0 +1,35 @@
+{
+  "number": 31587,
+  "kind": "issue",
+  "title": "spec: dataset vocabulary keys (synonyms, member description) and dataset tool I/O schemas (ADR-0149 D1/D2)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "domain:spec",
+    "enhancement",
+    "pm:blocking",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-08T16:12:11Z",
+  "updated_at": "2026-11-08T19:24:39Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31587",
+  "body": "domain:spec#4 · marchtian · session_017ihL2eAG5J8aqAyPZif4BJ\n\nFiling gate: ② a child card of an Accepted ADR. [ADR-0149](https://github.com/objectstack-ai/objectstack/blob/main/docs/adr/0149-ai-answers-business-questions-through-the-dataset-semantic-layer.md) D7 card 1, with card 4 folded in: the seat takes up the record's offer (\"may merge into card 1 if the seat prefers one spec PR\"), so the vocabulary keys and the tool I/O schemas ship as one spec contract. Parent: #31503, landed by PR #31535.\nReader: the `domain:spec` lane. Seat suggests p1, because this is a protocol addition and cards 2 and 3 wait on it.\nDedupe (open AND closed): \"dataset synonyms description measure dimension\" and \"dataset-tools.zod\" found nothing besides #31503.\nRulings: 田騏 2026-11-08 on cloud#3825 待裁 2 「同意放 objectstack」 and on the forks 「同意」 (M1 A, M2 A, M3 A), recorded verbatim in the ADR's Status and Decided by.\n\n## 维护者速读\n\n- **问题：** ADR-0149 已定：数据集的指标和维度要加 `synonyms`（同义词）和 `description`（人话写的业务定义）。两个数据集工具的输入输出也要在 spec 里定形。\n- **影响面：** spec 新增可写键和一份工具 I/O schema，属于协议新增。卡 2（service-analytics 工具）和卡 3（MCP 注册）都等这张卡。\n- **需要您做的：** 无，由 spec 车道实现，按惯例评审。\n\n## Task (quote the D-sections; the ADR is the contract)\n\n- [ ] **D1:** `synonyms: string[]` and member `description: I18nLabel` on `DatasetMeasureSchema` / `DatasetDimensionSchema`, plus the aliases D1 lists.\n  - Uniqueness is validated at dataset level.\n  - Add translation-group keys, and keep the `ui/` mirrors in step.\n  - Add liveness rows, and regenerate the schema and docs.\n- [ ] **M1 A:** `description` is a business definition in plain words, not a prompt; no AI-steering text enters spec. Retire the two `description` guidance entries and `DATASET_MEMBER_NO_DESCRIPTION`.\n- [ ] **D2, from card 4:** `ai/dataset-tools.zod.ts` holds the inputs and outputs of `list_datasets` / `query_dataset`, including `provenance`, projected to JSON Schema.\n- [ ] **D6 (enforce-or-remove):** each new key names its reader in this card's PR. The reader is the card 2 executor, so state the reader and the follow-up explicitly.\n\nDeclare `Clause-②: yes (widening)` and `Metadata-protocol: added` on the PR. A spec change needs a Fable review."
+}

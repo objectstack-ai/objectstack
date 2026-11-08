@@ -1,0 +1,36 @@
+{
+  "number": 31555,
+  "kind": "issue",
+  "title": "pm-dispatch: the claim template's `Skills-docs: updated here` arm still lets a product-lane PR teach in `skills/**`, which ruling #31424 rule 5 forbids",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "domain:skills",
+    "priority:p2"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-08T14:25:49Z",
+  "updated_at": "2026-11-08T17:43:45Z",
+  "closed_at": "2026-11-08T17:42:07Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31555",
+  "body": "domain:skills#2 · zhuangjianguo · session_01QsR2jT34CXs5fCn3BDirZw\n\nFiling gate: (b) a follow-up a PR names. PR #31552 (card #31424) lists it under \"Left for the seat\", and the seat kept it out of that PR's surface. ⛔ Not a claim.\n\n## 维护者速读\n\n你裁定的第 5 条（#31424 附录 S，记录 6722123324）说：产品车道的 PR 不改对外发布的技能 `skills/**`，要改就立一张 skills 子卡。可认领模板里 `Skills-docs:` 那一行（`.claude/skills/pm-dispatch/SKILL.md` L313）还写着 `updated here` = 「本 diff 在 `skills/**` 或文档里教了它」。产品车道的开发照模板填，就会在产品 PR 里顺手改技能，和第 5 条相反。这张卡只改这一行的说法，不是新规则：规则已经裁了，这里只是把它写进模板。\n\n## What\n\n- `SKILL.md` L313, the `Skills-docs:` arm: `updated here` = this diff teaches it in `skills/**` or the docs.\n- Under rule 5, that is true only for a `domain:skills` PR (the child card's own PR). A product-lane PR may still say `updated here` for docs that ride its package (rule 1), but its `skills/**` half must be `follow-up #N`, the skills child card.\n\n## Ask\n\n- Reword the arm so that `updated here` covers `skills/**` only on a `domain:skills` PR, and a product-lane PR's `skills/**` half is always `follow-up #N` (rule 5's child card, `Blocked-by:` the product card).\n- Keep the line's byte budget. Check every reader of the line: `references/seat-post-protocol.md` (the PR-body line), any `scripts/pm` reader of `Skills-docs:`, and the seat's ACCEPT step that files the owed card.\n\n## Not measured\n\n- Whether any gate parses the `updated here` token. A grep for `updated here` over `scripts/` and `.claude/` at `main` hit only SKILL.md.\n\nRelated: #31424 (rulings 6722023475, 6722123324), PR #31552."
+}

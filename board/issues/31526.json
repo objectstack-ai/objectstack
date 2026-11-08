@@ -2,8 +2,8 @@
   "number": 31526,
   "kind": "issue",
   "title": "metadata-core: export the schema-upgrade Q3 verdict and its finding-set token (now module-private in cloud-connection's install-local plugin) so hosted install can forward the framework's own verdict",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -22,9 +22,13 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-08T13:13:04Z",
-  "updated_at": "2026-11-08T14:02:06Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-08T15:01:02Z",
+  "closed_at": "2026-11-08T15:01:02Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
   "comments": 2,
   "locked": false,

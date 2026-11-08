@@ -2,8 +2,8 @@
   "number": 31495,
   "kind": "issue",
   "title": "Studio: the disabled Publish button (\"No drafts pending publish\") is unreachable by keyboard and shows no hover reason, unlike the read-only Publish state beside it",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "bug",
     "domain:ui",
-    "pm:dispatched",
     "priority:p3"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-08T11:02:10Z",
-  "updated_at": "2026-11-08T14:00:52Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-08T15:53:35Z",
+  "closed_at": "2026-11-08T15:52:03Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/31495",
   "body": "qa#1 · zhuangjianguo · session_01QsR2jUARzLeR7GhKms8a5s\n\nQA-source: #31486 · ux-conventions.disabled-control-reason · observed beside the clauses\n\nFound off-clause by the QA run #31486 (subject `0647dabb`). Measured on 2 fresh loads, and once on the showcase after `ensure-customization` created its pair package.\n\n## Reproduction\n\n1. Create a writable package: `POST /api/v1/packages {\"manifest\":{\"id\":\"com.qa.pubprobe\",\"name\":\"QA Pub Probe\",\"version\":\"0.1.0\",\"type\":\"app\",\"namespace\":\"qapp\"}}`.\n2. Open `/_console/studio/com.qa.pubprobe/data` with no drafts.\n3. The header Publish button: native `disabled`, with `title` and `aria-describedby` \"No drafts pending publish\" on the button itself; no focusable wrapper, no `[role=tooltip]` on hover, skipped by Tab.\n\nExpected: the same treatment as the read-only Publish state: a focusable wrapper whose tooltip and accessible description give the reason.\n\n## Mechanism\n\n`ui/packages/app-shell/src/views/studio-design/StudioDesignSurface.tsx`: `publishButton` (around lines 1503–1545, `disabled={publishing || !hasPending || publishReadOnly}`, `title` only when not read-only), and around lines 1684–1722 the focusable Tooltip wrapper is drawn only when `publishReadOnly`. The \"no drafts\" state keeps the title-on-a-disabled-button pattern that the read-only branch's own comment (objectui#12303) calls unreachable.\n\nOwning package: `@object-ui/app-shell`. Full evidence: #31486, slice C3b."

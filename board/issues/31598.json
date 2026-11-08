@@ -1,0 +1,31 @@
+{
+  "number": 31598,
+  "kind": "issue",
+  "title": "fix(cli): schema migration takes a cluster-wide lock so concurrent replicas cannot migrate at once (#3814)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "enhancement",
+    "pm:queue",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-08T16:28:45Z",
+  "updated_at": "2026-11-08T17:00:55Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31598",
+  "body": "epic:#3814#1 · os-zhuang · session_01QUs3BrVu5TqwtmuhsjdEvM\nFiling gate: ③ maintainer-dispatched task (child of #3814). Maintainer, (2026-11-08, 16:25 UTC): 「继续，现在派第二批」 (gate 1 after the card 0 inventory, cloud#3868 comment 6723322368).\n\nParent: #3814 (rulings R0-R6 on comment 6722625146).\n\n## Problem (fable plan review #2, card 0)\nThe Helm chart runs the schema migration as an init container in every pod, with no lock, so N replicas starting together run N concurrent migrations (`pg_type` collisions seen in the field class). Compose uses a one-shot service and is not exposed.\n\n## Do\n1. `packages/cli/src/utils/schema-migrate.ts`: take a database advisory lock (Postgres `pg_advisory_lock`, MySQL `GET_LOCK`; SQLite needs none) around the migration, with a bounded wait and one log line while waiting; the second migrator then finds nothing to do.\n2. The lock is harmless on a single node (uncontended); keep its output identical apart from no new lines when uncontended. Note: this changes the single-node code path by one uncontended lock call; say so in the PR.\n3. Tests: two concurrent migrations against one Postgres: one waits, both succeed, the schema is applied once.\n4. The Helm hook Job is the cloud C2 card's; do not touch `helm/`.\n\n## Rules that bind every #3814 child (verbatim rulings on the parent)\nR1 peer round-robin. R2 Redis required for multi-replica only. R3 「同意：每张卡都只在\"声明多副本并接上 Redis 驱动\"时才生效」: the single-node default path is unchanged, multi-replica behaviour switches on only behind declared replicas>1 AND a connected Redis cluster driver, the split-brain guard is never weakened, and the deploy README \"multi-node unsupported\" line stays until the final gate.\n\n## Done when\nPR merged; concurrent migrations serialize; single-node migration output unchanged."
+}

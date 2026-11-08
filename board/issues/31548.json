@@ -2,8 +2,8 @@
   "number": 31548,
   "kind": "issue",
   "title": "pm-dispatch enqueue: merge main first when the last green PR run is 15+ merges behind, and no re-enqueue on an unchanged head after a deterministic red",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -11,17 +11,25 @@
     "type": "Bot"
   },
   "labels": [
-    "domain:skills"
+    "domain:skills",
+    "priority:p1",
+    "tooling"
   ],
-  "assignees": [],
+  "assignees": [
+    "zhuangjianguo"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-08T14:07:37Z",
-  "updated_at": "2026-11-08T14:07:37Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-08T16:12:10Z",
+  "closed_at": "2026-11-08T16:08:46Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/31548",
   "body": "domain:devx#2 · zhuangjianguo · session_01QsR2jTo666XXx9e1Gm21C6\n\nFiling gate: ③ a task the maintainer directed. This is the enqueue-procedure half of #31518. The maintainer's words on that card, verbatim: 「同意，立卡」 · 「高优先」 (2026-11-08T12:30Z). #31518 itself routes this half here: \"Any change to the enqueue procedure (`.claude/skills/pm-dispatch/**`, the `fleet-write` relay) is `domain:skills`' and governed; the devx seat files it there with the readings.\" ⛔ Not a claim. No grade: triage sets it.\n\n**Business reason.** Every PR author waits in the merge queue. In 2026-11-01..07, stale-base entries were 21 of 68 queue roots and caused 122 of 157 cascade rebuilds: each one is a PR that was green on its own run, entered the queue far behind `main`, went red there and ejected the entries behind it (5.8 cascades per root). A further 28 cascades (18% of the window) came from 5 PRs re-enqueued with an unchanged head after a deterministic red. Multi-build PRs waited p50 48 min and p90 130 min against 18 min for one build (#31518 \"Business reason\").\n\n**Reader who acts.** The `domain:skills` seat, on `.claude/skills/pm-dispatch/references/landing-operations.md` (the enqueue rules) and, if a rule should be enforced and not only written, the relay's `automerge_enable` / enqueue op under `scripts/pm/fleet-write/`. Governed (Tier S / relay); no CI or workflow change.\n\n## Measured (#31518 step 1, comment 6722460022, roots table with 68 rows)\n\n- K = `git rev-list --count --first-parent PRBASE..origin/main`, where PRBASE is the diff base of the PR's last green run (Test Core's `Affected-set diff base` line). Every (a) root with a measured K had K ≥ 7 (median 25).\n- Refresh threshold, as measured over the window:\n\n  | refresh when K is at least | (a) roots caught | (a) cascades caught | other rows also refreshed |\n  |---|---|---|---|\n  | 10 | 19 of 21 | 116 of 122 | 21 of 47 |\n  | 15 | 16 of 21 | 108 of 122 | 12 of 47 |\n  | 20 | 13 of 21 | 82 of 122 | 10 of 47 |\n\n- Re-enqueued with an unchanged head: 12 roots. 5 were deterministic reds that went red again (#30716, #30866, #30902 twice, #31233), costing 28 cascades. The other 7 were flakes, and retrying those was correct. AGENTS.md §7 already says \"a stale red clears only with a new commit (`git merge origin/main`), never by re-running\"; the rule exists and was not followed at enqueue.\n- A PR run that starts after a landing has not necessarily seen it: #30902's last PR run was created at 15:08Z, after #30969 landed at 14:55:57Z, and still tested a 14:13Z base. So the rule keys on the run's diff base, not on its start time.\n\n## Wanted\n\n1. Before arming auto-merge or enqueuing, the seat reads K for the PR's last green run; at K ≥ 15 it merges `origin/main` and waits for a green re-run first. The devx reading recommends 15: one extra PR CI round on about a quarter of entries, against 108 of 122 cascades. #31536 (merged) is the locale-label special case of this rule and is subsumed by it or kept beside it; the skills seat decides.\n2. A PR the queue ejected is not re-enqueued until its head changes or the ejection is read as a flake (same tree green on re-run, or a queue-flake anchor names the test).\n3. ⛔ No gate skipped or made report-only, no required context dropped, no merge-queue setting changed (#31518 Wanted 3).\n\n## Acceptance\n\n- The rule text is in the landing procedure; if the relay enforces it, its self-test pins K 14 (passes) / K 15 (refused without a merge) and unchanged-head-after-red (refused).\n- #31518's 7-day re-reading counts it: stale-base roots per week.\n\n## Dedupe\n\nSearched 2026-11-08T14:1xZ, open and closed issues: \"enqueue refresh behind\" 172 hits, \"re-enqueue unchanged head\" 145, \"stale base enqueue\" 1110 (seat posts, unrelated cards, #31518 itself). Pull requests: #31536 (locale-label special case, merged) is the only one that adds an enqueue refresh rule. **New.**"

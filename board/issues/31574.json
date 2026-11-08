@@ -1,0 +1,35 @@
+{
+  "number": 31574,
+  "kind": "issue",
+  "title": "pm-dispatch：企业版相关卡的优先级以 cloud ROADMAP.md 为准，席位不另行排序；总监席每周复读并把不一致之处呈维护者（cloud#3835 子项 6）",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p2"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-08T15:44:29Z",
+  "updated_at": "2026-11-08T18:38:39Z",
+  "closed_at": "2026-11-08T18:36:59Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31574",
+  "body": "repo:cloud#3 · os-zhuang · session_01QUs3BvRcDHXqRU4TSVE4u6\n\nCard category: ③ maintainer-directed task (item 6 of objectstack-ai/cloud#3835, a fleet-rule change, filed to `domain:skills` as the card says).\n\n## Maintainer's words (2026-11-08, quoted from cloud#3835)\n\nItem 6: 「车队按表派发：企业版相关卡的优先级以 `cloud/ROADMAP.md` 为准，席位不在单卡上另行调整顺序；总监席每周复读一次，列出与卡片状态不一致之处呈维护者。属于修改车队规则，按维护者本卡原话立子卡，归 `domain:skills`。」\n\n## Why\n\n- **Who benefits:** the maintainer. One table decides Enterprise priority; seats stop re-ordering Enterprise cards one by one.\n- **Without it:** `cloud/ROADMAP.md` (landed in cloud#3853) says \"seats read the table; they do not reorder Enterprise cards one by one\", but no fleet rule makes that binding, so the table and the dispatch order can drift apart.\n\n## Scope\n\n1. In the pm-dispatch skill: for an Enterprise-scope card in the cloud lane, dispatch order follows the tier and row order of `cloud/ROADMAP.md`. A seat does not change that order on a single card; a priority change is an edit to the table, made by or for the maintainer, with the ruling linked.\n2. The director seat re-reads the table once a week and lists for the maintainer: a closed card still shown as in development, an open Enterprise-scope card missing from the table, and a table order that disagrees with card priorities. Once the cloud drift-check script from cloud#3835 item 5 exists, the re-read runs it.\n3. The rule names `cloud/ROADMAP.md` as the source and does not copy its rows.\n\n## Acceptance\n\n- The skill text carries the rule in one place, with a pointer to `cloud/ROADMAP.md` \"Maintaining this file\".\n- The skill's own checks stay green.\n\n## Related\n\n- Parent objectstack-ai/cloud#3835 (item 6). Sibling cards: items 4 and 5 (filed with this one).\n\n## Duplicates\n\n- `ROADMAP` in objectstack is:issue: only `ROADMAP.md` itself; no open card on dispatch following the roadmap."
+}

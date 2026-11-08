@@ -1,0 +1,32 @@
+{
+  "number": 31593,
+  "kind": "issue",
+  "title": "A tenant's edit of a packaged view stops applying when its item moves to another package of the same suite (composed upgrade, rollback)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-08T16:18:48Z",
+  "updated_at": "2026-11-08T19:57:13Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31593",
+  "body": "repo:cloud#3 · os-zhuang · session_01QUs3BvRcDHXqRU4TSVE4u6\n\nCard category: finding from the seat contract review of objectstack-ai/cloud PR objectstack-ai/cloud#3831 (objectstack-ai/cloud#3677 C4, review https://github.com/objectstack-ai/cloud/issues/3677#issuecomment-6723891204).\n\n\n\n## What happens\n\nADR-0126 Regime O lets a tenant edit a packaged view. The edit is stored as a tenant `sys_metadata` row keyed by `(type, name, package_id)`, and `package_id` is the package that shipped the item **at the time of the edit**.\n\nWhen a suite is split into packages (HotCRM 6.x flat → 6.2.0 composed, ADR-0130 D4, objectstack-ai/cloud#3636), the same item moves to another package of the same suite. The kernel then looks for an overlay under the new owner and does not find the row, so it serves the packaged view **without the tenant's edit**. Nothing is deleted and nothing errors. The edit is invisible until the item goes back to the package it was saved under.\n\nMeasured on a real tenant kernel (one sqlite file, real publish/install/artifact routes, `ArtifactKernelFactory`), both directions:\n\n| Step | Overlay row in tenant DB | Served `x3677e_case.open` |\n|---|---|---|\n| Flat 6.1.0, tenant edits the view | `['view','x3677e_case.open','app.objectstack.hotcrm','active']` | edited, owner `app.objectstack.hotcrm` |\n| Upgrade to composed 6.2.0 (view now owned by `app.objectstack.hotcrm.service`) | same row, kept | **not edited**, owner `…hotcrm.service` |\n| Rollback to 6.1.0 | same row | edited again |\n| Reverse: tenant edits under 6.2.0 | `['view','x3677e_case.open','app.objectstack.hotcrm.service','active']` | edited |\n| Rollback to 6.1.0 | that row, kept | **not edited**, owner `app.objectstack.hotcrm` |\n| Re-upgrade to 6.2.0 | that row | edited again |\n\nSources: `apps/cloud/test/composed-version-upgrade.test.ts` cases 1, 4 and 6 at cloud PR objectstack-ai/cloud#3831 head `bde2c56` (forward direction, pinned as measured), and the review probe `/mnt/project-files/issue-3677/review-probe-e2e.test.ts` (reverse direction; output in `review-probe-output.txt`).\n\nObjects are not affected: a managed package's object takes no tenant overlay (`saveMetaItem` answers `ITEM_LOCKED`, case 1).\n\n## Why it matters\n\nEvery HotCRM tenant who customized a packaged view under 6.x loses that customization, visibly, the moment the composed 6.2.0 is installed, and support cannot tell them where it went (the row is still there). A rollback then hides any edit made under 6.2.0. This needs to be fixed before HotCRM's composed version reaches real tenants.\n\n## Fix options (the card picks one)\n\n1. **Framework rule (recommended):** an overlay row follows its item across packages of the same suite. For example, look up the overlay by `(type, name)` among the packages of the installed suite when the row's `package_id` is no longer the item's owner but is a package of the same composition (the app id or one of its module ids). Then both directions work with no data migration, and rollback needs nothing.\n2. **One-time rebind at upgrade:** rewrite `sys_metadata.package_id` to the new owner when the version changes. This needs a reverse rebind on rollback, and the control plane does not write the tenant DB today, so it would need a tenant-side hook. More moving parts than option 1.\n\n## Acceptance\n\n- `composed-version-upgrade.test.ts` case 4 flips: under 6.2.0 the served label is `Open cases (ours)`.\n- The reverse direction (edit under 6.2.0, roll back) serves the edit under 6.1.0.\n- An overlay bound to an unrelated package (not part of the suite) still does not apply to another package's item.\n\nRefs objectstack-ai/cloud#3677, objectstack-ai/cloud#3636 (plan §4 risk a), cloud PR objectstack-ai/cloud#3831."
+}

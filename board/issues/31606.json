@@ -1,0 +1,34 @@
+{
+  "number": 31606,
+  "kind": "issue",
+  "title": "auth: disabling an OAuth client refuses its already-issued tokens on the next call, and an API key can be suspended and resumed (cloud#3820 O5)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:cloud",
+    "enhancement",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-08T16:32:17Z",
+  "updated_at": "2026-11-08T18:40:06Z",
+  "closed_at": "2026-11-08T18:36:58Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31606",
+  "body": "repo:cloud#3 · os-zhuang · session_01QUs3BvRcDHXqRU4TSVE4u6\n\nFiling gate: ③ maintainer-dispatched task, child of objectstack-ai/cloud#3820 (EE AI employee console, p1). Maintainer, 2026-11-08 16:27 UTC, in the cloud#3820 PM thread: 「objectstack 可以先开工吗？」. The PM thread read this as \"start the open-source tasks that depend on nothing\", and O1, O2 and O5 are those tasks.\n\nParent: objectstack-ai/cloud#3820, card 2 (one-click disable). Consumer in cloud: C4.\n\n## 维护者速读\n\n管理员要能「立刻停掉」某个外部 AI。今天停用 OAuth 客户端以后，已经发出去的访问令牌是否马上失效还没核实；API 密钥只能永久吊销，不能暂停后恢复。这张卡先实测，失效不及时就修，再给密钥加可恢复的暂停。\n\n## Problem (read in code at objectstack 3c380253, not run)\n\n- `verifyMcpAccessToken` (`packages/plugins/plugin-auth/src/auth-manager-mcp-access-token.ts` around line 212) checks the JWT claims, then checks per request that the consent still stands (`mcpConsentAdmits`). Revoking consent therefore cuts the next call.\n- It does not read the client's `disabled` flag (`sys_oauth_application.disabled`, toggled by `POST /auth/admin/oauth2/toggle-disabled`, `auth-plugin.ts` around line 3782). Unverified: whether a token issued before the disable keeps working until it expires.\n- `sys_api_key.revoked` is terminal (with `revoked_reason`). There is no reversible suspend.\n\n## Do\n\n1. **Measure first.** Register a client, consent, take a token, call `/mcp`, disable the client, call again with the same token. Record the answer and the token lifetime; do the same for a refresh. Put the reading in the PR.\n2. **If the old token still works,** refuse a token whose client is disabled at the same per-request check. Fail closed on a store error, as the consent check does. Answer with the existing refusal.\n3. **API keys:** add a reversible suspend, distinct from revoke, refused where revoked keys are refused, recorded by the existing data audit. If O1's ADR has landed by then and changes key semantics, follow it.\n\n## Tests\n\n- A token issued before the client was disabled is refused on the next call. Re-enabling the client lets a new consent and token work.\n- A suspended key is refused; a resumed key works; a revoked key stays refused.\n\n## Done when\n\nDisabling a client, or suspending a key, refuses the very next call from a credential already issued.\n\n## Reader\n\nFiled and dispatched by a cloud seat; reviewed and landed by that seat. The cloud#3820 PM thread answers premise questions.\n\nDedup: `oauth client disabled token` returned #30918, #30894, #25118 and three QA runs, all closed. #30918 added the per-person list of authorized assistants and `sys_oauth_consent.last_used_at`; none covers a disabled client's live tokens or key suspension.\n\n## Duplicates\n\nSearched objectstack open issues for \"service account\" AI, MCP interceptor, OAuth client disable token, API key suspend (2026-11-08): no open card covers this.\n"
+}

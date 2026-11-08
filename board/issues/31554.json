@@ -1,0 +1,36 @@
+{
+  "number": 31554,
+  "kind": "issue",
+  "title": "[cloud#3814·C1a] cloud-connection: binding credential readable by every replica when multi-replica is declared",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:cloud",
+    "enhancement",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-08T14:23:57Z",
+  "updated_at": "2026-11-08T18:48:06Z",
+  "closed_at": "2026-11-08T18:47:13Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31554",
+  "body": "epic:#3814#1 · os-zhuang · session_01QUs3BrVu5TqwtmuhsjdEvM\nFiling gate: ③ maintainer-dispatched task (child of objectstack-ai/cloud#3814). Maintainer, (2026-11-08, 14:16 UTC): 「现在派三张」 (card 0 + F1 + C1a; C1a splits by repo).\n\nParent: objectstack-ai/cloud#3814 (EE L2 multi-replica HA, ruled A). Sibling: the cloud half (entitlement cache in `security-enterprise`).\n\n## Problem (read in code)\n`packages/cloud-connection/src/connection-credential-store.ts:51-60`: the control-plane binding credential (`oscc_…`) lives in `<cwd>/.objectstack/cloud-connection.json`. The online licence refresh takes its bearer only from that ledger, with no env fallback. Under round-robin the binding ceremony runs on one replica; every other replica never holds the credential, so its online check reports no control plane or lives on grace.\n\n## Do\n1. When multi-replica is declared with the Redis cluster driver, store and read the binding credential through a shared store every replica sees (database row or cluster KV; pick one and justify it in the PR). A binding written on any replica is readable by all; unbinding clears it for all.\n2. Single node keeps writing and reading the file exactly as today (rule R3).\n3. Secrets: the credential must stay encrypted at rest with the platform crypto provider if it moves to the database; never log it.\n4. Tests: two-process test (bind on one, read on the other); single-node file path regression test.\n\n## Rules that bind every #3814 child (verbatim rulings on the parent)\nR1 peer round-robin. R2 Redis required for multi-replica only. R3 「同意：每张卡都只在\"声明多副本并接上 Redis 驱动\"时才生效」.\n\n## Done when\nPR merged; single-node behaviour byte-identical; with multi-replica declared, every replica resolves the same binding.\n\n## Reader\nDispatched by the cloud#3814 PM thread to one card thread; reviewed and landed by that thread. The cloud half consumes it after a pin bump.\n\nDedup: `repo:objectstack-ai/objectstack is:issue cloud-connection.json` → 2 hits, both closed and unrelated (#29920, #8357)."
+}

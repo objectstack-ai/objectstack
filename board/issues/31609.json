@@ -1,0 +1,33 @@
+{
+  "number": 31609,
+  "kind": "issue",
+  "title": "formula: export the home-amount conversion arithmetic (scaled-decimal divide, rounding, document date) so the ui preview reuses the engine rule (blocks #27196 PR 2)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "enhancement",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-08T16:38:26Z",
+  "updated_at": "2026-11-08T18:14:57Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31609",
+  "body": "domain:ui#3 · zhuangjianguo · session_01QsR2jVEjiYrK7onirxUGyo\n\nFiling gate: **④ coordination child**. This is the server half of #27196 Task 2, the live home-amount preview. #27196 keeps the ui preview; this card moves the rule it must reuse.\nBusiness reason: the preview shows \"≈ ¥71,994.24 at 0.1389 on 2026-11-01\" on the invoice form before save (the #27196 two-minute check). Finance reads that number against the stored one, so it must be the engine's arithmetic exactly, not a second copy. A second copy is the drift a JPY (0 digits) or KWD (3 digits) case would hide.\nReader: a `domain:server` seat, as a move with no behaviour change. #27196 PR 2 (`domain:ui#3`) is `Blocked-by` this card. #27196 PR 1 (read-only display + Studio editor) builds now and does not wait.\nDedupe (open AND closed): `divideToPlaces`, `toScaledDecimal`, `documentDateOf`, `home-amount-projection formula`. These return #27196, #8345, #27191 and #30103 only, and none of them moves the rule.\n\n## 维护者速读\n\n- **改了什么:** 把引擎里换算本位币金额的几个纯函数(定点小数解析、除以汇率并按 CLDR 位数四舍五入、格式化、取单据日期)从 `objectql` 的内部文件移到一个前端也能导入的已发布包,`objectql` 改为导入回来,行为一字不变。\n- **为什么改:** #27196 要在表单上实时预览「≈ 本位币金额」,数字必须和保存时引擎算出的完全一致。这些函数现在只在 `packages/objectql/src/home-amount-projection.ts` 里,而且没有从 `@objectstack/objectql` 导出;前端也不依赖 `objectql`,又不允许复制一份。\n- **风险与回滚:** 纯搬移,现有的换算测试原样通过即为证据;回滚就是 revert。\n- **需要你做的:** 无。\n\n## What to do\n\n1. Move these four functions out of `packages/objectql/src/home-amount-projection.ts` on `origin/main` `6b83ec2de`, together with their private helpers and the `ScaledDecimal` type:\n   - `toScaledDecimal` (~L156);\n   - `divideToPlaces` (~L201), with `divideRoundHalfAwayFromZero` (~L187);\n   - `formatScaledDecimal` (~L209);\n   - `documentDateOf` (~L241), with `calendarDayIn` (~L251).\n2. Put them in a published package that both `objectql` and the ui already depend on. #27196's step-1 report (6724108734) proposes `@objectstack/formula`; the server seat picks the home. ⛔ Not `packages/spec`, because Prime Directive 2 keeps business logic out of spec.\n3. Have `objectql` import them back. Export them from the new home's index, since the ui imports them by name.\n4. `CURRENCY_FRACTION_DIGITS` stays where it is (spec).\n\n## Acceptance\n\n- The existing projection tests stay green unchanged: `home-amount-projection.test.ts`, `engine-home-amount-projection.test.ts` and `home-amount-write-paths.test.ts`.\n- One new test in the new home pins the four exports on the engine's own samples: JPY 0 digits, USD 2 digits, KWD 3 digits, half away from zero on a tie, a `datetime` taken as the calendar day in a non-UTC timezone, and UTC when the timezone is unset.\n- `Clause-②: yes (widening)` on the receiving package (new exports, nothing removed). `Metadata-protocol: none`.\n\nRefs #27196, #8345, ADR-0144 D5"
+}

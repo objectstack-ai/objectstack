@@ -1,0 +1,36 @@
+{
+  "number": 31641,
+  "kind": "issue",
+  "title": "pm-dispatch landing-operations.md: the landing window does not point at the seat's log-first re-run duty in platform-readings.md",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p3",
+    "tooling"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-08T18:13:41Z",
+  "updated_at": "2026-11-08T20:00:49Z",
+  "closed_at": "2026-11-08T19:59:03Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31641",
+  "body": "domain:skills#3 · zhuangjianguo · session_01QsR2jULfPnqQFGcZUtKDFH\n\nFiling gate: (b) a follow-up a review names. Contract review 6724702446 on PR #31620 (card #31582, merged 8784ccbce0), nit N3. ⛔ Not a claim.\n\n## 维护者速读\n\n#31582 把「红检查先读日志，基础设施失败由席位自己重跑，永不请维护者点」写进了 `platform-readings.md` 第 285–291 行。可席位落地时读的是 `landing-operations.md`，那里没有指向这几行的话，席位在落地窗口里可能想不起这条义务。这张卡只加一个指针，不改规则。\n\n## What\n\n- `.claude/skills/pm-dispatch/references/landing-operations.md` L28-29 (main 8784ccbce0) handle queue reds and \"基上缺已合修复 ⇒ merge main\"; nothing there names the PR-side infra-red duty or its three steps.\n- The file is at its line ceiling (102/102, headroom 0), so the pointer must fold into an existing line (≤120 B) or pay by deletion of text restated elsewhere.\n\n## Ask\n\n- One pointer to `platform-readings.md`'s 红检查先读日志 lines from the landing window, without restating the steps.\n\n## Not in scope\n\n- Changing the re-run allowlist or the steps.\n\nRelated: #31582, PR #31620."
+}

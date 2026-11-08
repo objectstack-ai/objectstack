@@ -1,0 +1,36 @@
+{
+  "number": 31553,
+  "kind": "issue",
+  "title": "[cloud#3814·F1] service-cache: shared Redis cache adapter so cache-backed rate limits hold across replicas",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "enhancement",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-08T14:23:20Z",
+  "updated_at": "2026-11-08T18:37:53Z",
+  "closed_at": "2026-11-08T18:36:58Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31553",
+  "body": "epic:#3814#1 · os-zhuang · session_01QUs3BrVu5TqwtmuhsjdEvM\nFiling gate: ③ maintainer-dispatched task (child of objectstack-ai/cloud#3814). Maintainer, (2026-11-08, 14:16 UTC): 「现在派三张」 (card 0 + F1 + C1a).\n\nParent: objectstack-ai/cloud#3814 (EE L2 multi-replica HA, ruled A). This half is open mechanism (ADR-0010 D4: cluster mechanisms stay in the open framework).\n\n## Problem (read in code at c65599fa)\n`packages/services/service-cache/src/redis-cache-adapter.ts` is a skeleton: every method throws `RedisCacheAdapter not yet implemented`, and `cache-service-plugin.ts` throws for `adapter: 'redis'`. Everything that relies on a shared `cache` service is therefore per process: the better-auth rate-limit counters (`plugins/plugin-auth/src/rate-limit-storage.ts`, `rateLimit.customStorage`) and the inbound limiter (`runtime/src/security/inbound-rate-limit.ts`, `SharedTokenBucketLimiter`). With N replicas the effective limit is declared × N and an attacker can rotate replicas (ADR-0069 D2 names exactly this hole).\n\n## Do\n1. Implement a shared cache adapter backed by Redis, reusing the cluster driver's connection settings (`service-cluster-redis`) rather than a second client config; TTL, get/set/delete, and the counter shape the two limiters use.\n2. Select it only when multi-replica is declared and the cluster driver is Redis (rule R3 below); `adapter: 'memory'` stays the default and its branch is not touched.\n3. When multi-replica is declared and no shared cache is registered, refuse boot loudly (same posture as the split-brain guard), never a silent per-process fallback.\n4. ⛔ Red line: wire the counters through `rateLimit.customStorage`; never enable better-auth `secondaryStorage`, which moves the session of record into the cache and silently breaks `sys_session` revocation (see `plugin-auth/src/secondary-storage.ts` header).\n5. Tests: adapter contract tests against Redis (pattern of `service-cluster-redis` contract tests); a two-process test showing one shared limit.\n\n## Rules that bind every #3814 child (verbatim rulings on the parent)\nR1 peer round-robin. R2 Redis required for multi-replica only. R3 「同意：每张卡都只在\"声明多副本并接上 Redis 驱动\"时才生效」: single-node default path unchanged.\n\n## Done when\nPR merged; single-node boot logs and behaviour unchanged; a declared multi-replica boot with Redis enforces one global login limit.\n\n## Reader\nDispatched by the cloud#3814 PM thread to one card thread; reviewed and landed by that thread.\n\nDedup: `repo:objectstack-ai/objectstack is:issue RedisCacheAdapter` → 2 hits, both closed docs cards (#24740, #9532); `redis cache adapter` → 20 hits, none open on implementing the adapter (#25329 closed: warning text)."
+}

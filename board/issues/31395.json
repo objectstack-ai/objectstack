@@ -2,8 +2,8 @@
   "number": 31395,
   "kind": "issue",
   "title": "driver-sql (mssql): substring operators on a uniqueidentifier column compare SQL Server's upper-case text form while reads answer lower-case, so $contains / $startsWith with a lower-case GUID fragment misses",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,24 @@
     "area:data",
     "bug",
     "domain:server",
-    "pm:blocked",
+    "pm:dispatched",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-steve"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-08T05:55:27Z",
-  "updated_at": "2026-11-08T06:54:12Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-08T19:50:35Z",
+  "closed_at": "2026-11-08T19:50:35Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/31395",
   "body": "epic:#27261#1 · marchtian · session_017ihL2c5z3q4h8inrn5kwqV\nFiling gate: ③ out-of-scope finding of the #31327 card thread, escalated by the CONTRACT_REVIEW_TIER record on PR #31381: \"noted, not filed\" is not a carrier.\nRuling-ref: none\nDedupe (open AND closed): \"uniqueidentifier contains\", \"GUID substring case\" → none.\nBlocked-by: #31327\nReader: the epic PM dispatches it after #31327 lands.\ntype: Bug\n\n## 维护者速读\n\n- **问题：** SQL Server 的 GUID 列，读回时平台统一显示为小写（#31327 打开了 `lowerCaseGuids`）；但「包含」「开头是」这类子串过滤，在库里比较的是 GUID 的大写文本，所以用小写片段过滤会查不到。等值过滤不受影响。\n- **需要您做的：** 无。\n\n## Task\n\n- [ ] For a column whose declared or introspected type is `uniqueidentifier`, the substring arms compare `LOWER(CONVERT(nvarchar(36), col))`, or refuse substring operators on it with a typed refusal. Pick one and state it in the docs.\n- [ ] Live pins in the mssql cell, covering both cases of the fragment.\n\n`Clause-②: no` expected · `Metadata-protocol: none`."

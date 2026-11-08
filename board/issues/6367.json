@@ -1,7 +1,7 @@
 {
   "number": 6367,
   "kind": "issue",
-  "title": "[PM seat] domain:server · seat 1 — ⏳ vacant",
+  "title": "[PM seat] domain:server · seat 1 — 🟢 os-steve · 由 os-steve 账户的项目负责",
   "state": "open",
   "state_reason": "reopened",
   "draft": null,
@@ -14,16 +14,18 @@
     "domain:server",
     "pm:seat"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-steve"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-08-07T15:16:20Z",
-  "updated_at": "2026-11-08T04:11:24Z",
+  "updated_at": "2026-11-08T15:55:02Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 365,
+  "comments": 366,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/6367",
-  "body": "domain:server#1 · sunhaolin · session_017xRBcTJTE7kSbcMoJQ4Txf\n\n⚠️ **Seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/server.md` (⛔ not copied here). This is **`domain:server` seat 1**. Seat 2 is #20966, seat 3 is #26761, seat 4 is #27737, seat 5 is #28677 and seat 6 is #29908. #6021 and #6024 are archives of this post, ⛔ do not sit there.\n\n<sub>Refreshed at clock-out 2026-11-08T04:09Z; the clock-out brief is the newest comment.</sub>\n\n## Current PM\n\n⏳ vacant. Previous PM: `sunhaolin` · `session_017xRBcTJTE7kSbcMoJQ4Txf`, clocked out on the maintainer's order in that session (「你直接下班」). `check-handover` exit 0.\n\n## Handover ledger\n\n- **In flight:** none. #30906 (PR #31082) and #31021 (PR #31083) merged and closed; #30803 PR 3 (#31093) was handed to seat 5 by triage (6713641758), landed, and seat 5 holds PR 4.\n- **Follow-ups this seat filed or routed:** #31090 (docs, the skills seed-mode table, the `seed.zod.ts` `mode` text); #30907 carry-over comment (ADR-0055 §3, spec jsdoc); objectstack-ai/cloud#3657 item 2 (hosted re-seed wiring, not measured from this repo).\n- **Pointer:** canonical ledger = labels + assignee + `Claim:` comments carrying `Seat: domain:server#1` + `head:claude/` PRs.\n\n## Hot-file serial queue\n\n- **This seat holds:** none.\n\n## Notes\n\n- **Mailbox:** #31077 closed. **Patrol:** deleted. Successor: `/pm-dispatch server seat 1`, read this post first, open a new mailbox.\n- **Publication:** objectstack. A merge to `main` publishes nothing. The release is the Version Packages PR, a human act.\n\n<!-- signed: domain:server#1 · sunhaolin · session_017xRBcTJTE7kSbcMoJQ4Txf -->\n"
+  "body": "domain:server#1 · os-steve · session_01ADHkmPF1skfu2kx89BEXZi\n\n⚠️ **Seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/server.md` (⛔ not copied here). This is **`domain:server` seat 1**. Seat 2 is #20966, seat 3 is #26761, seat 4 is #27737, seat 5 is #28677 and seat 6 is #29908. #6021 and #6024 are archives of this post, ⛔ do not sit there.\n\n<sub>Refreshed at seating 2026-11-08T15:52Z; the seating mark is the newest comment.</sub>\n\n## Current PM\n\n🟢 `os-steve` · `session_01ADHkmPF1skfu2kx89BEXZi` · seated 2026-11-08T15:52Z · 由 os-steve 账户的项目负责 (Claude Code project \"objectstack server\"). Posture and ledger live in the project.\n\n## Handover ledger\n\n- **Inherited:** clock-out brief 6717079918 (`sunhaolin`): in flight none, stay-behind none.\n- **Pointer:** canonical ledger = labels + assignee + `Claim:` comments carrying `Seat: domain:server#1` + `head:claude/` PRs.\n\n## Hot-file serial queue\n\n- **This seat holds:** none.\n\n## Notes\n\n- **Mailbox:** PR #31578 (subscribed). **Patrol:** `trig_01FH8EWwxvSdbp31pwN3B2DT` · `52 * * * *`.\n- **Publication:** objectstack. A merge to `main` publishes nothing. The release is the Version Packages PR, a human act.\n\n<!-- signed: domain:server#1 · os-steve · session_01ADHkmPF1skfu2kx89BEXZi -->\n"
 }

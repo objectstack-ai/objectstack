@@ -1,0 +1,37 @@
+{
+  "number": 31568,
+  "kind": "pull_request",
+  "title": "fix(service-automation): a screen-flow resume refuses a non-string value for a text-like field before the pause is consumed",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "documentation",
+    "domain:server",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-08T15:26:55Z",
+  "updated_at": "2026-11-08T18:11:50Z",
+  "closed_at": "2026-11-08T18:11:47Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-08T18:11:47Z",
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/31568",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-project-manager\"} -->\n_Requested by **Leehom** · [project thread](https://claude.ai/code/project/chan_01TenzsRopZj4jMbvjX8uz1X?thread=cmsg_01TenzsRopZj4jMbvjX8uz1X9QaksZP89FVq2pH6CVzsEb)_\n\nFixes #31491\n\nClause-②: no (narrowing)\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么：屏幕流程恢复时，`text`、`textarea`、`email`、`url`、`phone` 五种字段收到非字符串值（对象、数字、布尔、数组）一律在消费暂停之前拒绝 400 `INVALID_SCREEN_INPUT`，运行保持暂停，改正后再提交即可完成。\n- 为什么改：按裁定 A+（卡片评论 6721960676）。修改前，对象值在暂停已被消费后才在写记录时失败，运行变成 failed，改正后的恢复只得到 `RUN_NOT_FOUND`；数字则被当成文本存下。\n- 风险与回滚：这是收紧（narrowing），只判断类型，不判断邮箱、网址、电话的格式；缺失值的行为不变。无头调用（MCP `run_action`）给这类字段传非字符串时，屏幕改为保持交互，与数字字段现有做法一致。回滚即还原本 PR。\n- 先看：`packages/services/service-automation/src/screen-input-contract.ts` 中的 `isString` 和 `SCREEN_FIELD_VALUE_DOMAINS` 新增的五项。\n- 两分钟验证：`cd packages/services/service-automation && npx vitest run src/screen-input-contract.test.ts src/builtin/screen-string-field-resume.test.ts`，预期 40 个全绿。\n- 需要你做的：无，席位做契约审查后落地。\n\n## What changes\n\n- `screen-input-contract.ts`: `text`, `textarea`, `email`, `url` and `phone` join `SCREEN_FIELD_VALUE_DOMAINS` on one predicate, `isString` (a JSON string). A present value of another JSON type is an `invalid_type` issue, `Screen field \"answer\" must be a string`, and `refuseInvalidScreenInput` answers it `400 INVALID_SCREEN_INPUT` before `claimAdvance`, so the suspension is not consumed (the #13937 order: consume before traverse, nothing consumed on a refusal).\n- Only the shape is judged. The format of an email, URL or phone number, and any other downstream refusal of a string, are unchanged and keep the operator restore as their exit.\n- An absent value, `null`, the empty string and a hidden field behave as today. A missing required field still yields only the `required` issue.\n- The docblocks name ruling A+ next to the existing A′ and #30178 groups, and the `judgeHeadlessScreen` comment says an issue may be a wrong-shape value as well as a missing required one.\n- Changesets: `@objectstack/service-automation` patch, titled with `!` and carrying the `**BREAKING**` banner, with `Clause-②: no (narrowing)` and an ADR-0087 `not-required (no-migration-prescription)` disposition (nothing at rest changes). It also names the two console paths that now stop at Submit with the run still paused: a text-kind field whose `options[].value` is a number or a boolean, and a text-kind field whose served `defaultValue` resolves to a non-string. A second `@objectstack/spec` patch docs changeset covers the contract text below.\n- Contract text (prose only, as #30178 did; no accept set, schema shape or export in spec moves): the `ScreenFieldSpec.type` docblock (`packages/spec/src/contracts/automation-service.ts`), the `ScreenFieldConfigSchema.type` docblock and describe string (`builtin-node-config.zod.ts`, with `content/docs/references/automation/builtin-node-config.mdx` regenerated), `content/docs/automation/flows.mdx` (the shape section and the list of refused conditions), and the opening of the `validateScreenInputs` docblock now name the five string kinds beside the numeric kinds and `file`.\n\n## Tests\n\n- `screen-input-contract.test.ts`: for each of the five kinds, an object, `42`, `0`, `true` and an array are refused `invalid_type` with the message above; any string is admitted; absent, `null`, `''` and a hidden field are left alone. A headless pin: `judgeHeadlessScreen` with `42` is not satisfied (the field is listed as supplied and missing), and the string `'42'` is satisfied.\n- New `builtin/screen-string-field-resume.test.ts` (engine, start → screen → create_record → end): for each kind, an object resume and a number resume are refused `INVALID_SCREEN_INPUT`, nothing is inserted, and `hasSuspendedRun` stays true. A string resume then completes, is inserted, and the suspension is gone. A missing value gets the `is required` refusal and the run stays paused.\n- `screen-headless-provenance-durable-resume.test.ts` and `screen-headless-caller-signal.test.ts`: their review screen field is now untyped. Those fixtures bind an ARRAY to the field, which a `text` field would now refuse for its shape, a second reason to pause that is not the provenance verdict they measure. A comment in each says so.\n\n## Verification\n\n<details><summary>Reproduction before the change (fresh showcase boot)</summary>\n\n```\nresume with an object for a text field   -> 400 FLOW_FAILED, run failed, corrected resume 404 RUN_NOT_FOUND\nresume with 42 for a text field          -> completed, '42' stored\nresume with the value missing            -> 400, run still paused\n```\n</details>\n\n<details><summary>Pins and ablations</summary>\n\n```\nnpx vitest run src/screen-input-contract.test.ts src/builtin/screen-string-field-resume.test.ts   Tests 40 passed (40)\n\nablation 1: isString admits any non-null value\n Tests  16 failed | 24 passed (40)\nablation 2: delete the phone member of SCREEN_FIELD_VALUE_DOMAINS\n × refuses a present non-string on a `phone` field\n × leaves an absent value and a hidden `phone` field alone\n × `phone`: an object and a number are refused, the pause survives, and a corrected resume completes\n Tests  3 failed | 37 passed (40)\n```\nBoth were run through `scripts/ablation-replace.mjs` on the committed tree and restored to the HEAD blob.\n</details>\n\n<details><summary>Suite, typecheck and gates</summary>\n\n`pnpm install --frozen-lockfile`, the turbo build, the full service-automation suite (`Test Files 265 passed`, `Tests 3454 passed`) and `pnpm run typecheck` all exit 0. After the contract-text round, on head 4d1aeaf3f: the spec schemas and reference docs were regenerated (`gen:schema`, `gen:docs`), the spec and service-automation builds and the full suite pass again (3454), and `node scripts/pm/dispatch-gates.mjs --commands` derives 114 families; all 114 run with each exit code captured before any pipe, all exit 0, and `--ran` reconciles: `114 derived famil(ies) accounted for — 114 run, 0 NOT-MEASURED (a DERIVED zero)`. The first round, before the prose, derived 66, all exit 0. The ADR-0087 registration gate went red on the first run because the changeset lacked a disposition; the marker was added in its own commit and the gate, plus every changeset-reading gate, was rerun to exit 0.\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01FEkQ5kheduG7p1MXMoHHr4)_\n\n<!-- signed: domain:server#3 · os-project-manager · session_01FEkQ5kheduG7p1MXMoHHr4 -->\n"
+}

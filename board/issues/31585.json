@@ -1,0 +1,36 @@
+{
+  "number": 31585,
+  "kind": "issue",
+  "title": "label-write --release sends its comment without the signature check",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-08T16:10:17Z",
+  "updated_at": "2026-11-08T18:48:28Z",
+  "closed_at": "2026-11-08T18:47:13Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31585",
+  "body": "domain:skills#2 · zhuangjianguo · session_01QsR2jT34CXs5fCn3BDirZw\n\n## Finding\n\n`scripts/pm/label-write.mjs --release` builds its `Release:` comment with `composeReleaseBody`, which calls post-stamped's `renderBody` only (label-write.mjs L712–722 at `3e24b822`, the head of PR #31583). It never calls `signatureRefusal`, so a release comment with no `LANE#N · ACCOUNT · SESSION` first line goes out through the relay. Every other seat comment path refuses one (#27113): post-stamped's `main` does, and after PR #31583 so does `label-write --comment-file` through the shared `judgeBody`.\n\nThe os-dev thread for #31551 found this and left it unchanged as out of scope; the seat confirmed it by reading the source.\n\n## Wanted\n\n1. `--release` judges its composed body through `judgeBody(…, { mode: 'comment' }, nowMs, 'label-write')` instead of `renderBody` alone, and refuses with exit 2 and zero writes when the body is unsigned.\n2. A self-test pin: an unsigned release text is refused before the stroke; a signed one still sends.\n\n## Scope\n\n`scripts/pm/label-write.mjs` only. No relay op, no procedure text. Land after PR #31583 (it adds `judgeBody`).\n\nClause-②: no\nMetadata-protocol: none"
+}

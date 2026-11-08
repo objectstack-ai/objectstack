@@ -1,0 +1,31 @@
+{
+  "number": 31608,
+  "kind": "issue",
+  "title": "fix(driver-sql): MySQL autonumber issues duplicate numbers when the first rows of an object are written concurrently",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-08T16:32:52Z",
+  "updated_at": "2026-11-08T17:04:26Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31608",
+  "body": "epic:#3814#1 · os-zhuang · session_01QUs3BrVu5TqwtmuhsjdEvM\nFiling gate: ③ maintainer-dispatched task (child of #3814). Maintainer, (2026-11-08, 16:25 UTC): 「继续，现在派第二批」 (gate 1 after the card 0 inventory, cloud#3868 comment 6723322368).\n\nSingle-node defect S3, found by card 0 of #3814 (cloud#3868 comment 6723322368, V1b). Maintainer ruling D2 (2026-11-08, 16:25 UTC): 「现在修，按普通 bug 卡」. This is a single-node bug fix, so it is NOT bound by #3814's R3.\n\n## Problem (measured, MySQL 8.0)\nOn a new object, concurrent creates produced duplicate autonumbers every run: two processes gave 11-18 duplicates plus up to 21 `ER_LOCK_DEADLOCK` create errors, and a single process at concurrency 16 also gave 8/8/0 duplicates. A warm sequence passes. There is no unique index on the autonumber column. The likely cause (not proven) is that a deadlock rolls back past the savepoint during the cold seed. Postgres 16 passes the same probe (`SELECT … FOR UPDATE`). The probe scripts are in project files `issue-3868/`.\n\n## Do\n1. Root-cause the cold-seed path in driver-sql for MySQL and make it atomic (for example, seed the sequence row with an insert-ignore before the locking read, and retry the whole issue on deadlock).\n2. Consider the unique index the autonumber contract implies; if adding it is a schema change for existing installs, say so in the PR and keep it to new objects unless the migration is safe.\n3. Tests: the concurrent cold-seed probe on MySQL gives 1..N with no duplicates; Postgres unchanged.\n\n## Done when\nPR merged; concurrent first writes on MySQL never duplicate an autonumber."
+}

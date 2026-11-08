@@ -1,0 +1,34 @@
+{
+  "number": 31613,
+  "kind": "pull_request",
+  "title": "docs(pm-dispatch): patrol held hand-off PRs for the four-piece terminal and read the governed verdict whole",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-08T16:51:11Z",
+  "updated_at": "2026-11-08T17:41:30Z",
+  "closed_at": "2026-11-08T17:41:28Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-08T17:41:28Z",
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/31613",
+  "body": "domain:skills#2 · zhuangjianguo · session_01QsR2jT34CXs5fCn3BDirZw\n\n<!-- claude-projects-attribution: {\"github_login\":\"zhuangjianguo\"} -->\n_Requested by **Steedos** · [project thread](https://claude.ai/code/project/chan_018ETKaNwMZCNRYD7D8Q9Ubb?thread=cmsg_018ETKaNwMZCNRYD7D8Q9UbbRrUorU6VVbzenykhN9Sz4x)_\n\nFixes #31580\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么:pm-dispatch 执行席职责加一条每轮巡检(核本席所持终局四件套 PR 的四件)并点名读数器;落地步骤加一句「`check-governed-merges` 判定读全文,四件套照 SKILL.md」。\n- 为什么改:规则本来就有,但席位截断读了判定、巡检也从不回看自己挂着的 PR,四个 Tier H PR 因此几小时不在您的待审列表里。\n- 风险与回滚:只改两份席位文档,行数零净增;回滚即 revert 本 PR。\n- 先看:`execution-duties.md` 第 21–22 行(新巡检与读数器);`landing-operations.md` 第 57 行(读全文条)。\n- 两分钟验证:`pnpm check:pm-skill-ratchet`,预期 exit 0、两文件仍在上限 188 与 102。\n- 需要你做的:无,席位落地(Tier S,待契约复审档记录)。\n\n## What changes\n\n- `.claude/skills/pm-dispatch/references/execution-duties.md` L21–22, beside the soft cap on held Tier H PRs (L20): every round, check the four-piece terminal on the current head of each PR the seat holds (seat record, `pm:awaiting-merge`, review request, final 维护者速读) and complete a missing piece in the same round; the reader is a local `node scripts/pm/check-half-states.mjs` (H43/H48, which read governed Tier H PRs only; an over-3000-line PR with no governed path the seat reads itself).\n- `.claude/skills/pm-dispatch/references/landing-operations.md` L57: the `check-governed-merges.mjs --pr N` step now says to read the verdict whole, never through `tail`/`head`, and to take the four pieces from SKILL.md (the verdict lists them only on the unlifted over-3000-line branch, `renderSizeLines`).\n\nHome: `execution-duties.md` holds the executing seat's own duties and already counts the PRs this line patrols (L20 soft cap). `seat-lifecycle.md`'s standby list says each item lives in its main section and is not copied there, so a new duty does not belong in that pointer list.\n\nLine payment (both files stay at their ceilings, 188 and 102; every line is 120 bytes or less, nothing re-wrapped):\n\n- Deleted `execution-duties.md` old L180 (an edited `.changeset/*.md` takes no `skip-changeset`; confirmation is the dispatch seat's record). Survivors: `.claude/agents/os-dev.md:300–301`, `landing-operations.md:14–16`.\n- Deleted `execution-duties.md` old L185 (`mcp_calls` naming a write tool means the report is refused). Survivors: `.claude/agents/os-dev.md:374`, `execution-duties.md:134–136`.\n- Dropped from `landing-operations.md` L57 the two tier clauses. Survivors: `.claude/skills/pm-dispatch/SKILL.md:203` (two governed tiers), `SKILL.md:187` (over 3000 lines takes the Tier H terminal).\n\n## Tests\n\nNo code changed. Reader measured on `main` 6b83ec2d:\n\n- `node scripts/pm/check-half-states.mjs` (live sweep, about 6.5 min): finished with exit 0, 143 cards and 35 open PRs swept, H43 judged 3 governed open PRs and H48 judged 1, with no H43 or H48 finding today (the four PRs on the card were already fixed).\n- The H48 sentence for a Tier H PR with a seat ACCEPT and no label, from the exported `h48GovernedVerdictWithoutBrief` on a fixture: `open and GOVERNED on Tier H (1 changed file(s) on the register: skills/**×1), carrying a seat's **ACCEPT** verdict (newest one 2026-11-08T09:01:00Z), and no pm:awaiting-merge label. … Remedy: add pm:awaiting-merge.` The same PR with the label returns null.\n\n## Acceptance notes\n\n- H43 and H48 read governed PRs only. A PR on the terminal only because it is over 3000 changed lines with no governed path is not covered by either row; for that one the seat reads its own PR's labels and `requested_reviewers`.\n- The live sweep reads the whole board. It needs no workflow (ruling #208 on #19491 stands), but it is a several-minute read, not a one-PR read.\n\n## Verification\n\n<details><summary>Derived gates on 0466fc5e (17 derived + 1 roster), re-run on f62ee425 after the review rework</summary>\n\nAll exit 0: check-closing-keyword-parity (plain and --self-test), check-comment-mask-corpus, check-harness-current --self-test, lint check:doc-formula-expressions, check:agent-test-spelling, check:cross-package-test-inputs, check:doc-authoring, check:driver-memory-census, check:gitlink-declared, check:nul-bytes, check:pm-governed-merges, check:pm-skill-id-lint, check:pm-skill-ratchet, check:refd-timer-probe, check:skill-frame-sync, check:watch-hint-literal, check:pm-settings-deny-roster. `dispatch-gates --ran`: 17 derived families accounted for, 17 run, 0 NOT-MEASURED. Rework head f62ee425 (contract review 6724388379 F1+F2): the same 18 commands all exit 0, `--ran` 17/17, 0 NOT-MEASURED; edited lines 118 B and 116 B, files still 188 and 102.\n\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01QsR2jRATdrUHTttGiQshZA)_\n"
+}

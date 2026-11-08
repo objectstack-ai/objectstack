@@ -1,0 +1,36 @@
+{
+  "number": 31582,
+  "kind": "issue",
+  "title": "fleet-write relay re-runs failed jobs only for ci.yml, so a seat cannot clear an infra-red check in another workflow",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-08T16:05:58Z",
+  "updated_at": "2026-11-08T18:13:15Z",
+  "closed_at": "2026-11-08T18:11:48Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31582",
+  "body": "security#1 · sunhaolin · session_017xRBcT1w3zpekijraHJE4f\n\n## Why this card exists\n\nThe maintainer, in this seat's session (`session_017xRBcT1w3zpekijraHJE4f`), on 2026-11-08, about a seat PR stuck on a red non-required check, verbatim:\n\n> 31469 这种你应该自己处理\n\nand, on this card's scope:\n\n> skills应该立卡更新，以后这种问题都应该自己处理\n\n## What was measured (2026-11-08)\n\n- On PR #31469, `Check Documentation Links` (workflow `.github/workflows/check-links.yml`) was red on two heads in a row for an infrastructure reason only. The job log says: \"lychee setup failed twice (binary download, curl exit 22). No links were checked — see #8238. Re-run the job.\"\n- `node scripts/pm/rerun-failed.mjs --run 42470905626` refused before dispatch: \"fence `workflow`: … the relay re-runs only a run whose path is one of .github/workflows/ci.yml — a closed list, matched whole\" (`RERUN_FAILED_WORKFLOWS` in `scripts/pm/fleet-write/ops.mjs`).\n- The queue-entry rule requires every check to be green or an expected skip, not only the required subset. So the seat could not land the PR, and the only remedies were a human re-run or an unrelated new push.\n\n## Rule wanted\n\nA seat can re-run, once, the failed jobs of any workflow run whose log proves it measured nothing (an infrastructure setup failure). It does so through the same relay op with the same once-only and head-check fences, so a flaky infra check never needs a human click.\n\n## Skills rule wanted (pm-dispatch)\n\nThe landing references (`references/landing-operations.md`, with `references/platform-readings.md` for the readings) say that a check which is red for an infrastructure reason, and whose own log says it measured nothing, is the seat's to clear. The seat never asks the maintainer to click a re-run. The order is:\n1. Re-run its failed jobs once through the relay.\n2. If that is refused, or the PR is behind or conflicted, bring `origin/main` in with the relay's `pr_update_branch` (or have the PR's dev merge `origin/main` and resolve). That is a real merge commit, so CI re-runs; it is never an empty commit.\n3. Only a second red that measured something is real, and is then handled as a failure.\nThe seat states which step it took in its landing note.\n\n## Suggested route (the skills lane decides)\n\n- Add `.github/workflows/check-links.yml` to `RERUN_FAILED_WORKFLOWS`, or replace the closed list with a reviewed allowlist of read-only check workflows.\n- Keep every existing fence: once per run, the run's head equals the PR head, and no re-run of a run that measured something and failed.\n\n## Acceptance\n\n`rerun-failed.mjs --run <check-links run id>` dispatches and re-runs the failed job once. A second attempt on the same run is refused.\n"
+}

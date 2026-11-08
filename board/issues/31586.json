@@ -1,0 +1,31 @@
+{
+  "number": 31586,
+  "kind": "pull_request",
+  "title": "docs(adr): ADR-0150 addresses behavioural metadata by (package, name); objects keep the literal prefix",
+  "state": "open",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "pm:awaiting-merge",
+    "size/m",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-08T16:10:27Z",
+  "updated_at": "2026-11-08T19:36:16Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 12,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/31586",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-project-manager\"} -->\n_Requested by **Leehom** · [project thread](https://claude.ai/code/project/chan_01TenzsRopZj4jMbvjX8uz1X?thread=cmsg_01TenzsRopZj4jMbvjX8uz1XBsDxUffG35RvTHueTQ8ZGa)_\n\nRefs #31527\nRefs #30806\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么：新增 ADR-0150（Proposed）。流程、动作、页面等行为元数据按（软件包, 名称）寻址，对象继续用字面前缀。你对 Q1、Q2、Q3 和 D2 的裁决已全部写入，ADR 里不再有待决问题：AI 侧名字用 NS-NAME，绑定对象的动作用 OBJECT-ACTION；职位同名保持拒绝；命名空间永远不能等于对象名（各入口双向拒绝）；同一命名空间内行为元数据同名唯一。七轮合约审查的意见也已并入。另有三条拒绝不在你的裁决里，由本 ADR 新增，合并即视为你接受：一是命名空间不能拼成路由里的保留词（如 trigger、hooks、actions、global）；二是这几类元数据的名字不能以下划线开头，因为下划线开头的路径段归路由所有；三是软件包里的元数据如果按名字引用一个只有环境（客户自建）才有的条目，今天能读到，以后会被拒绝（D3 (a)）。前两条在第一方代码里都是 0 处命中；第三条在软件包代码里无法测量，升级报告会逐条列出。同时在 ADR-0028 和 ADR-0048 的状态行各加一行指向，并重新生成 ADR 索引。只改文档，不改代码。\n- 为什么改：你在 13:12 裁定转向包寻址、撤回改名（#30806 S1/S5），15:36 裁定按类型分档，16:30 裁定 Q1/Q2，17:13 裁定 Q3，17:17 同意 D2。本 ADR 把这些裁决落成一份设计，并附一份可逐个发版的子卡执行计划（23 个构建子卡加 13 个按类型收窄的子卡）。\n- 风险与回滚：不改代码，没有运行时风险。不合并即回滚。子卡已按史诗裁决立卡，但这份记录被接受之前，任何子卡都不落地。\n- 先看：TL;DR 第 7 条（新增的五条拒绝：两条是你裁的，三条是本 ADR 加的），然后看 D3 解析规则、D5 地址语法和「Execution plan」一节。\n- 两分钟验证：运行 pnpm check:adr-index 和 node scripts/check-adr-links.mjs，两条都应退出 0。\n- 需要你做的：审阅 ADR-0150，同意的话把这个 PR 转为 ready 并合并。\n\n## What changes\n\n- `docs/adr/0150-behavioural-metadata-addressed-by-package-objects-keep-the-literal-prefix.md` (new, Proposed). It covers:\n  - D1, the ruled four buckets, with why objects differ;\n  - D2, identity is the package id and the address is the namespace (accepted 17:17Z). Namespace co-owners keep names unique (child N). Measured on HotCRM 6961ab1: 0 of 297 keys are shared;\n  - D3, the ruled resolution rule and its exceptions;\n  - D4, the runtime keys, and a package-less row over a package-held name, which is that holder's customization (ADR-0146 D11 migrates it) and never a second item;\n  - D5, the address grammar:\n    - the grammar's literal segments are read first. The namespace-position set is a `spec/kernel` constant that `route-ledger.ts`'s test pins. The install gate refuses a namespace that spells one, and a name of a bucket 2/3 type that starts with `_` is refused (child P). Both refusals are added by this record beyond the rulings, for acceptance by merge;\n    - then an optional namespace segment, then the bare grammar;\n    - a reserved `_env` segment for environment items;\n    - a 409 with the candidates;\n  - D6, the AI face as ruled: `NS-NAME`, and `OBJECT-ACTION` for an object-bound action. A collision check of the two forms led to Q3, ruled A: a namespace never equals an object name, refused in both directions at every object door (child K);\n  - D7, positions keep the one-holder refusal, as ruled;\n  - D8, the stored references: a package column beside the name, backfilled from the phase-1 holder, with the ambiguous set reported and never guessed;\n  - D9, what retires, and D10, the upgrade;\n  - the execution plan:\n    - 23 build children (N and K included) plus 13 per-type backstop narrowings;\n    - each with who builds it, its file surface, its Clause-② and narrowing arm, and red line 3 releasability;\n    - of the 12 types phase 1 does not cover, hook has no first-match read and job keeps `jobKeyFor`'s reading; the narrowing for the other 10 is declared (E4, E8, G1). `rag_pipeline`, which the ruled table names, was retired on main by #31456 before the inventory was measured, so no child touches it;\n    - a fleet-pace critical path of about 4 to 5 working days.\n- `docs/adr/0028-metadata-naming-and-namespace-isolation.md` and `docs/adr/0048-cross-package-metadata-collision.md`: one status-header pointer line each, effective on acceptance. The ADR-0048 line cites the Q2 ruling.\n- `docs/adr/README.md`: regenerated (`pnpm adr:index`).\n\n## Tests\n\nNone. This is a docs-only design record (`skip-changeset`).\n\n## Acceptance notes\n\n- ADR-0149 is on `main` (#31535), so this record is 0150.\n- The stage-1 inventory this rests on is `/mnt/project-files/pm-orders/server/31527-inventory.md`, measured read-only at 86e37660.\n- Every question is recorded as ruled: Q1 and Q2 (record 6724050556), Q3 (6724530715) and D2 (6724570466), all on #31527.\n- The contract review of aeafb42f (record 6724089022) and the delta reviews of 565c63c2 (6724370084), 082272a3 (6724845936), 5c69b2a0 (6725073557), 86412ee3 (6725359156), 7238c284 (6725571288) and cdf9c9e2 (6725879758) are folded in: S1–S18 and N1–N25. `?package=X` on a `/meta` read is the exact qualifier the D2 ruling names: X's item or a refusal naming the holders, never X's closure. Studio's held package id reaches the server only as `?package=`, so it is the exact qualifier too, never a caller. A reference written in an environment-authored overlay resolves as a caller with no package, so the ruled Q2 binding works. D3 also states the two readings child R (#31637) implements: a package caller never resolves to an environment-authored item by bare name, and an overridable platform baseline ranks below a package holder.\n\n## Verification\n\nAt head 6a8a0440:\n- every family from `dispatch-gates --commands` was run, with exit codes captured before any pipe;\n- all 21 derived commands exited 0;\n- `dispatch-gates --ran` answered: 21 run, 0 NOT-MEASURED.\n\nNo package is touched, so there is no scoped `pnpm lint` family to run.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01FEkQ5psDxi37aZAzXB36TT\n\n<!-- signed: epic:#31527#1 · os-project-manager · session_01FEkQ5mLd7pR2PHjsPwiGkz -->\n"
+}

@@ -1,0 +1,34 @@
+{
+  "number": 31583,
+  "kind": "pull_request",
+  "title": "feat(pm): fold a claim or a verdict into one label-write relay stroke",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-08T16:06:56Z",
+  "updated_at": "2026-11-08T17:17:02Z",
+  "closed_at": "2026-11-08T17:17:00Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-08T17:17:00Z",
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/31583",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"zhuangjianguo\"} -->\n_Requested by **Steedos** · [project thread](https://claude.ai/code/project/chan_018ETKaNwMZCNRYD7D8Q9Ubb?thread=cmsg_018ETKaNwMZCNRYD7D8Q9Ubb2sqG6tEYhknTqiiUaxjRwX)_\n\nFixes #31551\n\n## 维护者速读\n\n- 改了什么:认领(评论+标签+指派)与验收落地(评论+转正式+开自动合并)各合成一次中继写入,不再分几笔先后发。\n- 为什么改:分笔发送会留下“评论已发、标签未改”的半态,且多占写入节流的名额。\n- 风险与回滚:只改两个 PM 写入脚本与两行流程文字,不碰中继本身;回滚即撤回本 PR,旧的分笔写法仍可用。\n- 先看:`scripts/pm/label-write.mjs` 中的 `foldStroke`,以及 `post-stamped.mjs` 新导出的 `judgeBody`。\n- 两分钟验证:运行 `node scripts/pm/label-write.mjs --self-test`,看到 196 条通过、14 组。\n- 需要你做的:按治理层级审阅本 PR(含 `.claude/**` 改动,保持草稿)。\n\n## What changes\n\n- `scripts/pm/post-stamped.mjs`: the body checks (render, signature first line, claim keyed lines, record lines, decision facets, vacant ledger) move into one exported `judgeBody`. `main` calls it; behaviour is unchanged.\n- `scripts/pm/label-write.mjs`: new `--comment-file FILE` sends the stamped comment, the label diff and the assignee change as ONE fleet-write dispatch (the `--release` shape, via `releaseActions`). `--land` (pull requests only, needs `--comment-file`) appends `pr_ready` and `automerge_enable` to the same stroke. The comment is judged by `judgeBody`, so the signature first line and the one-clock `{{NOW}}` stamp hold. RELAY-ONLY: a direct route is refused (exit 3).\n- Read-back, one printed line per part: `④ labels`, `④ assignees`, `④ comment` (plus the stamp-drift and byte-class lines from post-stamped's verdict), and with `--land` `④ pull` (draft judged; REST `auto_merge` printed, not judged, the executor's landed check judges the arming). Any mismatch exits 4 and is never repaired; an unreadable read exits 3.\n- No new relay op and no change to `scripts/pm/fleet-write/ops.mjs`: the fold uses `issue_comment`, `labels_*`, `assignees_*`, `pr_ready` and `automerge_enable` as they are.\n- Two pm-dispatch procedure lines (claim atomic pair, partial-landing release) and one landing line now name the one-stroke form. Line-neutral.\n\n## Why\n\nA claim or a verdict went out as two or three separate writes, each paced and read back on its own. Between them the card sat half-written. Folding them into one dispatch keeps pacing (the executor still spaces each write), keeps every read-back, and keeps the signature check.\n\n## Verification\n\n- `node scripts/pm/label-write.mjs --self-test`: 171 cases / 13 batteries before, 196 / 14 after. The new battery pins the claim fold, the verdict fold, a refusal for each part that fails read-back (labels, assignee, comment, pr_ready), unsigned / typed-stamp / bad-keyed-line refusals, `--land` on an issue, the direct-route refusal, no-run, failure and dry run.\n- `node scripts/pm/post-stamped.mjs --self-test`: 753 / 26 before, 761 / 27 after (the one-judge battery).\n- `node scripts/pm/fleet-write/dispatch.mjs --self-test`: 358 / 30, including the no-run conformance.\n- `node scripts/pm/dispatch-gates.mjs --commands`: 40 derived, 40 run, all exit 0; `--ran` reconciles 0 NOT-MEASURED.\n\nClause-②: no\nMetadata-protocol: none\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic. (not touched)\n- [x] 2. Every name I added uses the casing for its kind.\n- [x] 3. No formatter ran; eslint passes on both changed scripts (`--no-inline-config`, the `pnpm lint` flags).\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset. (nothing publishes: `skip-changeset`)\n- [x] 6. `packages/spec` touched: its generated artifacts are regenerated and committed. (not touched)\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English. (except the required `维护者速读` block)\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01QsR2jQze2kJDxaxMsAW2kY\n"
+}

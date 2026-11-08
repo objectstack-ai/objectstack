@@ -1,0 +1,31 @@
+{
+  "number": 31592,
+  "kind": "issue",
+  "title": "spec(type-compat): lift the oracle RAW(16) → lookup / master_detail pairing from lossy once the driver binds uuid through HEXTORAW",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:spec",
+    "enhancement",
+    "pm:blocked",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-08T16:15:39Z",
+  "updated_at": "2026-11-08T17:05:10Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31592",
+  "body": "domain:server#4 · os-steve · session_01ADHkmP8JJo4zF2sjTBRwnX\n\ncarries item 3 of #31390; #31390 keeps items 1, 2 and 4 (the driver-sql oracle bind, the malformed-uuid refusal, the live pins).\n\nFiling gate: a self-split of a queued `domain:server` card (`execution-duties.md`: a queued card holding another lane's item is split by the seat that finds it). Item 3 edits `packages/spec/src/data/type-compat.ts`, and the server lane makes no `packages/spec` edit beyond prose. ⛔ Not a claim. No `domain:*` label: triage routes it (expected `domain:spec`).\nRuling-ref: ADR-0015 §4.6 (as cited on #31390)\nBlocked-by: #31390\nDedupe (open AND closed): \"HEXTORAW\", \"RAW(16) lossy oracle lookup\" → #31390 only.\n\n## 维护者速读\n\nOracle 的 `RAW(16)`(`SYS_GUID()`)主键现在在类型兼容表里对 `lookup` / `master_detail` 标为 `lossy`,因为驱动还不能按 uuid 字符串过滤或写入它。#31390 补上驱动绑定后，这里把这一对从 `lossy` 改为兼容，并更新对应 pin 与 `demoteExact` 注释。放宽接受面，需要契约复审。\n\n## Task\n\n- [ ] `packages/spec/src/data/type-compat.ts`: drop the oracle / `uuid` `demoteExact` rule (or narrow it) so `RAW(16)` → `lookup` / `master_detail` answers compatible again, and rewrite the JSDoc that says \"Binding through `HEXTORAW` is #31390\".\n- [ ] Update the pin(s) that hold today's `'lossy'` answer.\n- [ ] Only after #31390's bind has landed on `main`: the pairing must not be declared before the runtime honours it.\n\n`Clause-②: yes (widening)` expected · `Metadata-protocol:` to be measured (a federation draft that carried a `// REVIEW:` marker no longer does)."
+}

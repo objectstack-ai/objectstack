@@ -1,0 +1,34 @@
+{
+  "number": 31619,
+  "kind": "pull_request",
+  "title": "docs(pm-skill): the Skills-docs arm keeps skills/** to the skills lane, and triage's daily dashboard shows devx's six metrics",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-08T17:07:49Z",
+  "updated_at": "2026-11-08T17:42:07Z",
+  "closed_at": "2026-11-08T17:42:06Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-08T17:42:06Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/31619",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"zhuangjianguo\"} -->\n_Requested by **Steedos** · [project thread](https://claude.ai/code/project/chan_018ETKaNwMZCNRYD7D8Q9Ubb?thread=cmsg_018ETKaNwMZCNRYD7D8Q9UbbAzARPQPKPnS9ygti1o1XHs)_\n\nFixes #31555\nFixes #31558\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么:认领模板 `Skills-docs:` 一行改写,`updated here` 只在 `domain:skills` PR 上覆盖 `skills/**`,产品车道 PR 的技能部分一律写 `follow-up #N`;分诊职责加一行:每日看板的车道一节展示 devx 六项度量。\n- 为什么改:这两句都是你已裁定的 #31424 附录 S(记录 6722123324)第 5、7 条,PR #31552 之后模板与分诊职责里还没有它们的落点。\n- 风险与回滚:只改内部规则文字与一条行数上限,不动产品代码与门禁逻辑;回滚即 revert 本 PR。\n- 先看:`.claude/skills/pm-dispatch/SKILL.md` L313(措辞与字节数)、`references/triage-duties.md` L10、`scripts/pm/check-skill-line-ratchet.mjs` 的 triage-duties 一行。\n- 两分钟验证:`pnpm check:pm-skill-ratchet`,预期 `triage-duties.md is 101 lines (ceiling 101; headroom 0)` 且 SKILL.md 仍 319/319。\n- 需要你做的:无,席位落地。\n\n## What changes\n\n- **#31555, `.claude/skills/pm-dispatch/SKILL.md` L313 only.** The `Skills-docs:` arm now reads `updated here` = the diff teaches it in the docs (in `skills/**` only on `domain:skills` PRs, else `follow-up #N`) and its evals exercise it. A product-lane PR's `skills/**` half is therefore always `follow-up #N`, the skills child card of rule 5 (`references/lanes/skills.md` L11-13 carries the `Blocked-by:` half). Byte budget kept: 698 B before, 698 B after. The added bytes are paid by four same-meaning trims inside the same line (`levels:` for \"the level table is\", \"a third line, from the diff\" for \"a third line the dev writes from the diff\", \"each\" for \"every\", \"via `references/seat-post-protocol.md`'s PR-body line\" for \"through the PR-body line of …\"). No other line of SKILL.md moves.\n- **#31558, `.claude/skills/pm-dispatch/references/triage-duties.md`, one new line (L10)** beside the daily-fire duties: the daily dashboard's lane section shows devx's six metrics, pointing at `lanes/devx.md`'s metric line and never restating it.\n- **Home for #31558.** Rule 7's last sentence names triage verbatim: \"Triage shows these metrics in the daily dashboard's lane section.\" `lanes/director.md`'s 每日摘要 lists other rows and has no lane section, and `seat-lifecycle.md` L68 sends seat health metrics there; neither says anything the new line contradicts, so the home is triage's own duties file.\n- **Ceiling, `scripts/pm/check-skill-line-ratchet.mjs`, one row:** `triage-duties.md` 100 → 101, an ordinary raise under ruling record 6184799323 letter B. Ruling of record quoted: 6722123324 (#31424 addendum S, rule 7). Measured delta: +1 line (100 → 101). No line of `triage-duties.md` restates text another file carries, so a deletion would have dropped a live rule. The seat amended the claim's file surface for this row (6724162761).\n\n## Tests\n\n- No behaviour changes; no test file is added or edited. `pnpm check:pm-skill-ratchet` (the edited script's own self-test plus its check) exits 0 on the final head.\n\n## Acceptance notes\n\n- Readers of the `Skills-docs:` line, each checked against the new text and still true: `references/review-checklist.md` L18, `SKILL.md` L191, `references/seat-post-protocol.md` L31 (the PR-body line), `.claude/agents/os-dev.md` L278. `git grep` of `Skills-docs` and `updated here` over `scripts/pm` finds no parser. No reader edit.\n- No new gate.\n\n## Verification\n\n<details><summary>Derived gates: 42 derived, 42 run, all exit 0</summary>\n\n- `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` at 57d986fb derived 42 commands; prerequisite build `turbo run build --filter=@objectstack/formula --filter=@objectstack/lint` (lock VERDICT command-exit 0).\n- All 42 exit 0, including `pnpm check:pm-dispatch-gates` (fast tier, 2205 cases, 471 s), `pnpm check:pm-skill-ratchet`, `pnpm check:pm-skill-id-lint`, `pnpm check:skill-frame-sync`, `pnpm check:pm-governed-prose`, `pnpm check:nul-bytes`.\n- `dispatch-gates --ran`: 42 derived, 42 run, 0 NOT-MEASURED, 0 UNRUN.\n- After merging `origin/main` (95df3459, no commit touching the three files), `pnpm check:pm-skill-ratchet` re-run at 6b1bff8a: exit 0, SKILL.md 319/319, triage-duties.md 101/101.\n\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01QsR2jRVz94TqZJMyvZLmea)_\n"
+}

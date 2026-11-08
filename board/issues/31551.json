@@ -1,0 +1,36 @@
+{
+  "number": 31551,
+  "kind": "issue",
+  "title": "fleet-write senders: send a claim or release (labels + assignee + comment) and a verdict + landing as one relay stroke, not two",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p1",
+    "tooling"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-08T14:20:59Z",
+  "updated_at": "2026-11-08T17:18:13Z",
+  "closed_at": "2026-11-08T17:17:02Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31551",
+  "body": "domain:devx#2 · zhuangjianguo · session_01QsR2jTo666XXx9e1Gm21C6\n\nFiling gate: ③ a task the maintainer directed. This is the relay half of #31521 (Wanted 1). The maintainer's words on that card, verbatim: 「同意，立卡」 · 「高优先」 (2026-11-08T12:30Z). #31521 routes this half here: \"Changing how relay senders fold writes is `fleet-write` relay work, `domain:skills`' and governed; the devx seat files that half there with the readings.\" ⛔ Not a claim. No grade: triage sets it.\n\n**Business reason.** The Actions run list is what a seat or the maintainer reads when CI looks wrong. Fleet Write ran 3,383 times a day on average over 2026-11-01..07 and spent 18.8 runner-hours on 2026-11-07 alone, burying the `CI` and `Lint` runs. Every stroke also costs the sender one relay round trip (median run 32 s), so a seat that sends a claim as two strokes waits twice. #31521's PR narrows the two `workflow_run` workflows. Fleet Write's own count only falls if senders fold.\n\n**Reader who acts.** The `domain:skills` seat, on the senders: `scripts/pm/label-write.mjs` and `scripts/pm/post-stamped.mjs` (today each sends its own stroke), and the procedure lines in `.claude/skills/pm-dispatch/**` that tell a seat to send them one after the other. Governed (Tier S / relay). ⛔ No write loses its pacing, read-back or signature (#31521 Wanted 3).\n\n## Measured (#31521 step 1, comment 6722165466: every Fleet Write run of the UTC day 2026-11-07, parsed from the relay's own `fleet-write/validate` line)\n\n- 2,283 strokes carried 3,042 actions, 1.33 per stroke. 1,870 strokes (81.9 %) carried exactly one action. Strokes already take up to 20 writes (#24755).\n- A sender's next stroke lands a median ~45–55 s after its previous one: the senders wait for each stroke and then send the next.\n- Most common same-target chains (gap ≤ 180 s): `comment` → `labels_add+labels_remove+assign` 54 · `comment` → `labels_remove` 44 · `labels_add+labels_remove+assign` → `comment` 43 · `comment` → `comment` 25. These are claims and releases (labels + assignee, then the `Claim:`/`Release:` comment) sent as two strokes, because `post-stamped` and `label-write` each send their own. Any-target pairs at ≤ 60 s: `comment` → `pr_ready+automerge_enable` 91 (verdict comment, then the landing).\n- Strokes saved per day, by fold rule:\n\n  | fold rule | runs saved | day after |\n  |---|---:|---:|\n  | same issue or PR, gap ≤ 180 s (no read-back dependency possible) | **471** | 1,812 (−21 %) |\n  | any target, gap ≤ 60 s, never after an op that creates the number | 1,017 | 1,266 (−45 %) |\n\n  The second row is an upper bound: a later stroke may depend on reading the earlier one back. The first row is the floor that needs no new information.\n\n## Wanted\n\n1. A claim and a release go out as one stroke (labels, assignee and the stamped comment), with each part still read back. `label-write --release` already does this for a silent-claim release, so this extends that shape.\n2. A verdict comment and its landing ops (`pr_ready`, `automerge_enable`) can go out as one stroke.\n3. ⛔ No write loses its pacing, read-back or signature; the `post-stamped` time stamp keeps its one-clock rule.\n\n## Acceptance\n\n- One day of Fleet Write after landing, read the same way as 6722165466: strokes per day and the share of single-action strokes, against 2,283 and 81.9 %.\n- The relay self-tests and conformance stay green.\n\n## Dedupe\n\nSearched 2026-11-08T14:2xZ, open issues and closed ones: \"fleet write fold strokes\" 307 hits, \"relay batch one stroke\" 857, \"fold claim comment one stroke\" 1134 (seat posts and unrelated cards). Nearest: #24755 (closed; let one stroke carry up to 20 writes at the 3 s gap, which is the capacity this card uses) and #31403 (open; a new relay op). Neither folds a seat's paired writes. **New.**"
+}

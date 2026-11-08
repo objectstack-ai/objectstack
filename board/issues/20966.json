@@ -1,7 +1,7 @@
 {
   "number": 20966,
   "kind": "issue",
-  "title": "[PM seat] domain:server · seat 2 — 🟢 marchtian · 由 marchtian 账户的项目负责",
+  "title": "[PM seat] domain:server · seat 2 — 🟢 os-steve · 由 os-steve 账户的项目负责",
   "state": "open",
   "state_reason": null,
   "draft": null,
@@ -15,17 +15,17 @@
     "pm:seat"
   ],
   "assignees": [
-    "marchtian"
+    "os-steve"
   ],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-30T23:12:24Z",
-  "updated_at": "2026-11-08T06:11:56Z",
+  "updated_at": "2026-11-08T16:02:21Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 94,
+  "comments": 95,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/20966",
-  "body": "domain:server#2 · marchtian · session_017ihL2fBJ6xsLWJsnNJGMMx\n\n⚠️ **Project-seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/server.md` (⛔ not copied here). This is **`domain:server` seat 2**. Seat 1 is #6367, seat 3 is #26761, seat 4 is #27737, seat 5 is #28677 and seat 6 is #29908. #21118 and #22648 are archives of this post, ⛔ do not sit there.\n\n## Current PM\n\n⏳ **vacant** since 2026-11-08T06:11Z. Previous PM: `marchtian` · `session_017ihL2fBJ6xsLWJsnNJGMMx` (project \"Objectstack devx\", engine/metadata face), seated 2026-11-07T10:51Z, clocked out on the maintainer's order 「当前任务处理完，合并后就下班」 (2026-11-07T23:57Z). `check-handover` exit 0. Clock-out brief: 6718032182. Successor: `/pm-dispatch 接手`, then read this post.\n\n## Handover ledger\n\n- **In flight from this seat:** none.\n- Stay-behind: none.\n- **Released at clock-out to `pm:queue`:** #30237 (PRs 4–5 remain), #30020 (S1 next, now unblocked), #30512 (`pt-BR`, `ru`, `de`, `ko`, then the final PR), each with `Resume-from: none`; #30208 with `Resume-from: claude/project-thread-4ntp5s@32b54d4d` (row 5 phase 1 = PR #31386, ACCEPTed, Tier H, waits on the maintainer's merge; the next holder owes its landing comment).\n- **With the maintainer:** PR #31386 (merge).\n- **Landed this term:** #31117, #31116, #31151, #31120, #31182, #31134, #31205, #31243, #31312, #31233, #31279, #31321, #31220.\n- **Filed by this seat, owned elsewhere:** #31391 (`domain:ui`, `pm:blocked` until #31386 merges).\n- **Pointer:** canonical ledger = labels + assignee + `Claim:` comments carrying `Seat: domain:server#2` + `head:claude/` PRs.\n\n## Hot-file serial queue\n\n- **This seat holds:** nothing. #30020 S1 and #30237 PRs 4–5 both edit `packages/objectql/src/engine.ts`; ⛔ re-derive the overlap from live claims and PR file lists before dispatching either.\n\n## Notes\n\n- **Mailbox:** PR #31109 closed at clock-out (a successor opens its own with `mailbox-open.mjs`). **Patrol:** none (`trig_011uu1joWxvUARfxQBMf3ANc` deleted).\n- **Write path:** the relay (`post-stamped.mjs`, `label-write.mjs`, `issue-create.mjs`, `fleet-write/dispatch.mjs`) as `objectstack-fleet[bot]`. ⛔ No GitHub MCP writes.\n- **Publication:** a merge to `main` publishes nothing; the release is the Version Packages PR, a human act.\n\n<!-- signed: domain:server#2 · marchtian · session_017ihL2fBJ6xsLWJsnNJGMMx -->\n"
+  "body": "domain:server#2 · os-steve · session_01ADHkmQKZzp4DLtqiCkZZRM\n\n⚠️ **Project-seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/server.md` (⛔ not copied here). This is **`domain:server` seat 2**. Seat 1 is #6367, seat 3 is #26761, seat 4 is #27737, seat 5 is #28677 and seat 6 is #29908. #21118 and #22648 are archives of this post, ⛔ do not sit there.\n\n## Current PM\n\n🟢 `os-steve` · `session_01ADHkmQKZzp4DLtqiCkZZRM` (project \"objectstack server\"), seated 2026-11-08T15:52Z on the maintainer's order 「开 server 车道 seat 1 seat 2 seat 4」. Posture, ledger and round reports live in the project. Previous PM: `marchtian` · `session_017ihL2fBJ6xsLWJsnNJGMMx`, clock-out brief 6718032182 (the prior revision of this body is the archive).\n\n## Handover ledger\n\n- **In flight from this seat:** #31564 (claim 6723710504, branch `claude/project-thread-1gwtt5`), refreshed 2026-11-08T16:01Z.\n- **Inherited from the brief:** #30237, #30020, #30512 released to `pm:queue`; #30237 and #30512 have since been claimed by another seat; #30020 is still in the queue. #30208 sits `pm:blocked` on PR #31386 (Tier H, the maintainer's merge); its landing comment is owed by whoever holds #30208 when it lands.\n- **Pointer:** canonical ledger = labels + assignee + `Claim:` comments carrying `Seat: domain:server#2` + `head:claude/` PRs.\n\n## Hot-file serial queue\n\n- **This seat holds:** `packages/cloud-connection/src/marketplace-install-local-plugin.ts` → #31564, then #31566 (agreed with seat 4: #31566 dispatches only after #31564 lands). #30020 S1 and #30237 both edit `packages/objectql/src/engine.ts`; ⛔ re-derive the overlap from live claims and PR file lists before dispatching #30020.\n\n## Notes\n\n- **Mailbox:** PR #31577. **Patrol:** `trig_012BkLucKKcGKShfjGjsKKFM` · hourly (:52).\n- **Write path:** the relay (`post-stamped.mjs`, `label-write.mjs`, `issue-create.mjs`, `fleet-write/dispatch.mjs`) as `objectstack-fleet[bot]`. ⛔ No GitHub MCP writes.\n- **Publication:** a merge to `main` publishes nothing; the release is the Version Packages PR, a human act.\n\n<!-- signed: domain:server#2 · os-steve · session_01ADHkmQKZzp4DLtqiCkZZRM -->\n\n"
 }

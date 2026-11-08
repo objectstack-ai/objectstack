@@ -12,18 +12,18 @@
   },
   "labels": [
     "domain:devx",
-    "pm:blocked",
+    "pm:queue",
     "priority:p3"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-08T13:26:17Z",
-  "updated_at": "2026-11-08T14:00:32Z",
+  "updated_at": "2026-11-08T15:15:41Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/31531",
   "body": "repo:cloud#3 · os-zhuang · session_01QUs3BvRcDHXqRU4TSVE4u6\n\nFiling gate: **(c) a residual a landed card's review names**. #31515 (the condition attached to #30806 item 14, ruling A) is implemented in objectstack-ai/cloud PR #3846. An object-bound action's AI tool is now named `action_<object>__<action>` (e.g. `action_crm_lead__convert_lead`; names over 64 characters keep the first 48, then `_`, then 8 hex of FNV-1a32 of `<object>:<action>`). A top-level action keeps `action_<action>`. Cloud still resolves an old `action_<action>` claim to every action of that name, so nothing breaks today.\nThe gap is in this repo: `packages/lint/src/validate-ai-tool-references.ts:155` builds the tool universe as `action_<name>` and `:221` strips `'action_'`. A skill that claims the new qualified name therefore gets an `ai-skill-tool-unresolved` warning, and no author can move to the new spelling without one.\nDedup: searched open and closed issues for \"ai-skill-tool-unresolved\" and \"validate-ai-tool-references\"; only #31040 came up (closed, unrelated: delete_package).\nReader: the devx lane (packages/lint). Serial: after cloud#3846 lands (`pm:blocked` until then).\n\n## 维护者速读\n\nAI 动作工具名已改为带对象名（`action_<对象>__<动作>`，云端 PR #3846）。框架 lint 只认旧拼法，技能里写新名字会被误报「工具不存在」。需要把拼法放进 spec 让 lint 与云端共用一份。不影响运行。\n\n## Work\n\n1. Put the spelling in spec, as ONE exported helper (e.g. `actionToolName({ name, objectName? })` plus the legacy reader), byte-identical to cloud's `packages/service-ai/src/tools/action-tool-name.ts` (charset `[a-z0-9_]`, max 64, the FNV-1a32 shortening rule). Pin vectors shared with cloud's `action-tool-name.test.ts`.\n2. The lint universe holds the qualified name of each object-bound exposed action AND keeps accepting the old `action_<action>` spelling, which cloud still resolves. The unexposed-action hint (`:221`) works for both spellings.\n3. Pins: a qualified claim resolves; an old claim resolves; a claim naming an action on the wrong object is reported. CONTROL: a top-level action's claim is unchanged.\n4. Once spec ships it, cloud can import the helper instead of its own copy. That's a cloud follow-up, noted on the PR.\n\nPriority: p3."

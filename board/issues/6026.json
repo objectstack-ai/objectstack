@@ -1,7 +1,7 @@
 {
   "number": 6026,
   "kind": "issue",
-  "title": "[PM seat] repo:cloud#1 — ⏳ vacant · os-bob 已收班",
+  "title": "[PM seat] repo:cloud#1 — 🟢 os-warren · 由 os-warren 账户的项目负责",
   "state": "open",
   "state_reason": null,
   "draft": null,
@@ -14,17 +14,17 @@
     "pm:seat"
   ],
   "assignees": [
-    "baozhoutao"
+    "os-warren"
   ],
   "milestone": null,
   "type": null,
   "created_at": "2026-08-06T15:03:36Z",
-  "updated_at": "2026-11-08T11:12:19Z",
+  "updated_at": "2026-11-08T16:48:14Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 137,
+  "comments": 138,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/6026",
-  "body": "repo:cloud#1 · os-bob · session_012dn2AdARJtc4RgABPH7PHk\n\n**本贴是 `repo:cloud`(整仓)座位 1 的权威登记。** 座位贴协议:索引 = `label:pm:seat`;只有在任座位 PM 编辑正文;接管/移交 = 改正文 + 审计评论;动手前重拉正文、时间戳先到先得、写后回读。\n\n## 当前 PM\n\n**⏳ vacant** — `os-bob` · `session_012dn2AdARJtc4RgABPH7PHk` stood down 2026-11-08T11:10Z on the account owner's word 「你可以下班了」.\n\n**Read first: the stand-down brief `6720645533` (a comment on this post).** It lists what landed, the four ACCEPTed PRs waiting for a queue or a human (cloud #3808, #3751, #3813; objectstack #31479), the cards released to the lane (each carries `Release:` + `Resume-from:`), the maintainer items, and the lane queue left. The brief is a release marker, not an inherited ruling.\n\n- Form was an on-demand seat: no patrol routine, no mailbox; nothing to tear down.\n- Sibling seats online at stand-down: `repo:cloud` seat 2 (#24145) and seat 3 (#30278), both `os-zhuang`; `Notify: seat-offline` sent to their mailboxes and to triage.\n- The previous body (the 2026-11-07 17:48Z checkpoint) is superseded by the brief; read the edit history for it.\n"
+  "body": "repo:cloud#1 · os-warren · session_01JQwxbYK6SZCmyzbGnrvmkk\n\n**This post is the registration of `repo:cloud` seat 1** (`Seat: repo:cloud#1`) — the `objectstack-ai/cloud` whole-repo lane. Seat-post protocol: index = `label:pm:seat`; only the sitting PM edits this body; takeover or handover = body edit + audit comment; re-fetch before editing, first stamp wins, read back after writing. The lane's platform facts, standing bans and permanent notes that earlier bodies of this post carried are in its edit history; the rules themselves live in the pm-dispatch skill (`references/cross-repo-coordination.md`, `references/true-green.md` 〈cloud〉) and cloud's `AGENTS.md`.\n\n## 当前 PM\n\n**🟢 `os-warren`** · session `session_01JQwxbYK6SZCmyzbGnrvmkk` · seat `repo:cloud#1` · seated 2026-11-08T16:47Z on the maintainer's words in the `objectstack cloud` Claude project: 「开一个 cloud 车道」. Project seat (a project thread; card threads open through the project coordinator). Posture, ledger and round reports live in the project; this post is the stub other accounts read.\n\n- **Seating basis:** `os-bob`'s stand-down brief `6720645533` was the newest event, so the seat was taken at once; opening marker `6724222897`.\n- **Patrol:** `trig_0118Jm4dLBbP98vLUZZiZRmT` · `46 * * * *` (hourly, self-bound to the seat session).\n- **Mailbox:** objectstack-ai/objectstack#31612 (subscribed by the seat session).\n- **Siblings:** seat 2 (`os-zhuang`, #24145, mailbox #31364) and seat 3 (`os-zhuang`, #30278, mailbox #31366) are live and not taken over. The seats share the queue; the split is agreed by mailbox (`Notify: split`), and claim timestamps arbitrate.\n\n## 继承台账\n\nNone carried as obligations: brief `6720645533` is the record of the previous shift, and everything it held went to the lane with `Release:` + `Resume-from:`.\n\n## 热文件串行队\n\nNone declared by this seat.\n\n## 说明\n\n- Scope: the `objectstack-ai/cloud` whole-repo queue plus objectstack cards carrying `domain:cloud` + `repo:cloud`; ⛔ no `domain:*` is produced here.\n- 由 os-warren 账户的项目负责.\n"
 }

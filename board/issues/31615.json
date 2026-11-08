@@ -1,0 +1,33 @@
+{
+  "number": 31615,
+  "kind": "pull_request",
+  "title": "docs(adr): ADR-0151 an AI service account is a registered principal of its own, with its own keys and its own name on every row",
+  "state": "open",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "pm:awaiting-merge",
+    "size/m",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-08T16:56:31Z",
+  "updated_at": "2026-11-08T17:01:28Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/31615",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-zhuang\"} -->\n_Requested by **Sam** · [project thread](https://claude.ai/code/project/chan_01GsBogozeZG5sdpAARrN7HP?thread=cmsg_01GsBogozeZG5sdpAARrN7HPVAuE8pR4mjNZGhhDFx4Kap)_\n\n## 维护者速读\n\n今天通过 MCP 用 API 密钥接入的 AI 就是密钥主人本人：系统列不出它、数不清它，也不能单独收窄权限或停用。本 PR 新增 ADR-0151（草案）定义「AI 服务账号」：\n\n- **是什么**：一行 `sys_user`，`principal_kind = 'agent'`，有一位负责人；只属于一个组织，只是普通成员；由组织管理员登记。\n- **永不登录**：在身份驱动层一处拒绝为它创建会话和登录凭据，覆盖所有登录方式和模拟登录。\n- **权限**：只来自显式授予的权限集，受 ADR-0090 D10 规则 2 的 agent 上限约束，在求值时生效；不继承负责人的权限。\n- **凭据**：由已登录的管理员或负责人为它签发 API 密钥。个人自己的密钥仍然是本人（2026-09-16 的裁定不变）。\n- **归属**：账号本身就是写入主体，审计行的 `user_id` 就是它。\n- **停用**：暂停就是现有的 ban 状态，下一次调用即被拒；恢复后原密钥照常可用。\n- **计数**（cloud ADR-0116 D7）：一个登记账号算一个 agent 身份，按行计，不按密钥或调用计。开源侧不含任何许可逻辑。\n\n**与卡片不同的一处，请留意**：卡片第 3 项建议用 `performedBy` 记录账号。本 ADR 改为让账号本身做主体（`user_id`），`performedBy` 仍只记 OAuth 客户端。原因见 D5：否则审计行会写成「agent 代表它自己」，同一个键也会混用两种 id。\n\n合并方式：`docs/adr/**` 是受治理路径（Tier H），本 PR 保持草稿，由维护者合并，合并即采纳。合并后可以按本 ADR 立 O3（账号本身）和 O4（归属）。\n\nCloses objectstack-ai/objectstack#31603\n\n## What changes\n\n- **New**: `docs/adr/0151-ai-service-account-a-headless-agent-is-a-registered-principal-of-its-own.md`, status **Proposed**. It decides:\n  - **D1**, the account: a `sys_user` row with `principal_kind = 'agent'`, born with its kind and never changed; an accountable owner (`accountable_user_id`); exactly one organization as a `member`; a placeholder address; an organization administrator or a platform administrator registers it.\n  - **D2**, no sign-in: session creation and sign-in credentials are refused in better-auth's own hooks, for every caller.\n  - **D3**, authority: the account is the authorization subject, with its own grants only (no member baseline, no `everyone` anchor), under rule 2's ceiling enforced at evaluation. Rule 1 does not apply, rule 3's confirmation is never self-given, and rule 5 needs nothing new.\n  - **D4**, credentials: dedicated API keys minted for it by a signed-in person. `POST /keys` is unchanged, and a person's key stays the person's.\n  - **D5**, attribution: `user_id` is the account, and `performedBy` stays OAuth-only (reasoned refusal of the card's item 3).\n  - **D6**, lifecycle: register, grant, mint, revoke, suspend (the ban state), resume (administrators only), change owner, the owner leaving suspends it, retire, and last use derived from the keys.\n  - **D7**, the boundary for cloud ADR-0116 D7: one row per agent, no licence logic here, and how cloud#3886's question 3 stands.\n  - Options considered, non-goals, and what O2, O3, O4, O6 and cloud build on.\n- **ADR-0090**: a status-line amendment, plus a note under D10's 2026-09-16 API-key note that its reopening condition is met without reopening it.\n- **ADR-0093**: a status-line amendment. D7's deferred service-account row is resolved: the marker is `principal_kind`, and the reconciler never binds an account.\n- **`docs/adr/README.md`**: regenerated (`node scripts/adr-index.mjs`).\n\n## Why\n\ncloud ADR-0116 D7 (adopted 2026-11-08) counts each agent that connects over MCP with an API key as one AI user. Its own Consequences says the rule is contract-counted only, because the runtime has no agent identity, and that the mechanism waits on this record. cloud#3820 needs the same identity for its inventory, kill switch and trace. This is the mechanism half (Prime Directive #13): the identity in open code, with the commercial half left in cloud.\n\n## Verification\n\nReadings are of code, on `objectstack-ai/objectstack` at `158cc2aa`. Nothing was run against a server. Gates, run on the head `e93a2ada`:\n\n- `node scripts/check-adr-symbol-anchors.mjs`: ✅ 3297 anchors across 152 records resolve. A negative probe (one bogus `user-ban.ts#…` symbol appended to ADR-0151) turned it red on that line, so the gate does judge the new record; the probe was removed before commit.\n- `node scripts/check-adr-anchors.mjs`: OK.\n- `node scripts/check-adr-links.mjs`: ✅ 1064 relative links resolve.\n- `node scripts/adr-index.mjs --report`: OK, the index is current.\n\nClause-②: no\nMetadata-protocol: none\n\n## Acceptance notes\n\n- **Number**: 0151, because 0150 is held by open PR #31586.\n- **Claim**: the card carried no `Claim:`, so this thread posted one (comment 6724190959) naming this branch.\n- **Departures from the card**:\n  - Item 3, `performedBy` naming the account, is refused with reasons in D5.\n  - Item 2's optional OAuth `client_credentials` is left as a named follow-up in D4.\n- **Facts O3 must re-measure before building**: the resolver's `everyone` anchor skips only externals today (D3), and several readers treat `principalKind === 'agent'` as OAuth-shaped (listed under \"What builds on this\").\n- **Owed outside this repo**: cloud ADR-0116 gains a one-line pointer to ADR-0151, as a cloud-lane edit.\n- **Label**: `skip-changeset`. The diff is `docs/adr/**` only and publishes nothing.\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic. (No code.)\n- [x] 2. Every name I added uses the casing for its kind (`principal_kind`, `accountable_user_id`, snake_case machine names).\n- [x] 3. No formatter ran; no lintable source changed.\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. Publishes nothing; `skip-changeset`.\n- [x] 6. `packages/spec` not touched.\n- [x] 7. No hand edits to generated or release-owned docs.\n- [ ] 8. Title, body and comments are in English, except the 维护者速读 above, which is Chinese for the maintainer by this project's convention.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01QUs3BrfVH2WkyVdVACF8U8)_\n"
+}

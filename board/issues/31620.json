@@ -1,0 +1,34 @@
+{
+  "number": 31620,
+  "kind": "pull_request",
+  "title": "fix(fleet-write): re-run once the failed jobs of a read-only check workflow, check-links.yml first",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-08T17:18:32Z",
+  "updated_at": "2026-11-08T18:11:49Z",
+  "closed_at": "2026-11-08T18:11:47Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-08T18:11:47Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/31620",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"zhuangjianguo\"} -->\n_Requested by **Steedos** · [project thread](https://claude.ai/code/project/chan_018ETKaNwMZCNRYD7D8Q9Ubb?thread=cmsg_018ETKaNwMZCNRYD7D8Q9Ubb1TRaih3bEfi4rktaCKDryh)_\n\nFixes #31582\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么：席位经中继重跑失败 job 的名单，从只有 `ci.yml` 改为审过的只读检查白名单，首个新成员是 `check-links.yml`（Check Documentation Links）；pm-dispatch 读数表写明先读日志、按三步清基础设施红。\n- 为什么改：日志自称\"一个链接都没查\"的基础设施红，过去只能等人手点重跑，挡住入队；维护者要求这类问题席位自己处理。\n- 风险与回滚：只读检查重跑一次只多花 runner 时间，五道围栏（只一次、head 等于 PR 当前 head、pull_request 事件、attempt 1、已完成且失败）一道未动；回滚即 revert 本 PR。\n- 先看：`scripts/pm/fleet-write/ops.mjs`（名单与只读定义）、`scripts/pm/fleet-write/validate.mjs`（名单与只读自测）、`platform-readings.md` 第 285–291 行。\n- 两分钟验证：`node scripts/pm/fleet-write/validate.mjs --self-test`，应见 364 cases pass；`node scripts/pm/rerun-failed.mjs --self-test`，应见 32 cases pass。\n- 需要你做的：无，席位落地。\n\n## What changes\n\n- `scripts/pm/fleet-write/ops.mjs`: `RERUN_FAILED_WORKFLOWS` is a reviewed allowlist, `['.github/workflows/ci.yml', '.github/workflows/check-links.yml']`. The docblock states the read-only definition every entry after `ci.yml` meets (no `secrets.*` but `GITHUB_TOKEN`, no `environment:`, a `permissions:` block covering every job, no write scope) and the reading that admitted each entry. The header's workflow and head fence text no longer says the list is `ci.yml` alone. Every fence (workflow, event, once, failed, head, alone, grant) is unchanged.\n- `scripts/pm/fleet-write/validate.mjs` self-test: the list is pinned exactly; the existing \"file on disk that runs on `pull_request`\" case is kept; a new case reads each entry after `ci.yml` from its own file and requires zero read-only breaches; a control case shows the definition fails on `ci.yml`, `validate-deps.yml` and `release.yml`; a run of each listed workflow passes all five fences. The battery floor goes 33 to 36.\n- `scripts/pm/rerun-failed.mjs` self-test: a run of each listed workflow passes the seat-side fences and is dispatched once, with `check-links.yml` listed and `lint.yml` not (floor 11 to 12). The wiring case now refuses any workflow-path array literal in this file, not only the old one-entry spelling. The header and usage say \"a listed workflow\" instead of `ci.yml`.\n- `.claude/skills/pm-dispatch/references/platform-readings.md`: the re-run lines now state the seat's duty to read the log first. A red whose own log says it measured nothing is the seat's to clear and never the maintainer's click. The order is (1) one relay re-run, (2) when it is refused, the base lacks a landed fix, or the PR is conflicted, `pr_update_branch` or the dev merges main, (3) only a second red that measured something is real. The landing note names the step taken. The file stays at 458 lines (ceiling 458) with every line at or under 120 bytes.\n\n## Tests\n\n<details><summary>Self-tests, green at the final head</summary>\n\n```text\n✓ fleet-write/validate self-test: 364 cases pass across 18 batteries\n✓ rerun-failed self-test: 32 cases pass across 5 batteries\n```\n</details>\n\n<details><summary>Red with a deliberately wrong entry, through ablation-replace (restore proved: blob equals HEAD, git diff HEAD empty)</summary>\n\n```text\n+ validate-deps.yml (pull_request, issues write):\n  validate exit 1: 2 of 364 failed (the exact list; every entry after ci.yml READ-ONLY)\n  rerun-failed exit 0 (it pins membership of check-links.yml and absence of lint.yml, not the whole list)\n+ release.yml (no pull_request trigger, NPM_TOKEN, environment):\n  validate exit 1: 4 of 364 failed (exact list; file runs on pull_request; READ-ONLY; the all-fences control that uses release.yml as its unlisted path)\n+ lint.yml (turbo cache secrets, a write scope):\n  validate exit 1: 3 of 364 failed (exact list; READ-ONLY; the workflow fence's lint.yml refusal)\n  rerun-failed exit 1: 2 of 32 failed (each listed workflow accepted, lint.yml not listed; the seat-side lint.yml refusal)\n```\n</details>\n\n## Acceptance notes\n\n- Entries measured against the read-only definition (every `pull_request` workflow on `158cc2aa`, read by the self-test's own predicate). These meet it: `check-links.yml` (added), plus `governed-surface-guard.yml`, `pr-body-guards.yml`, `os-create-smoke.yml`, `scaffold-e2e.yml`, `pack-smoke-optin.yml`, `upgrade-harness-optin.yml` and `spec-liveness-check.yml` (not added). The two guards judge live PR state (reviews, body), so a re-run re-judges governance; it does not recover a check that measured nothing. The four smokes and the liveness check have no measured infra-red incident behind them, and the order adds an entry only with a reading. A later PR adds one with its reading. Every other `pull_request` workflow breaches the definition (a write scope, or a secret other than `GITHUB_TOKEN`).\n- `ci.yml` stays the first entry by the ruling that made the op; it reads the turbo remote-cache secrets, so the read-only definition is checked on the entries after it.\n- Step (2) reads \"behind\" as \"the base lacks a landed fix\". That keeps it consistent with `platform-readings.md` L88, which says being behind alone is no queue veto and never a reason to send `pr_update_branch`.\n- The acceptance live check (`rerun-failed.mjs --run RUN_ID` on a check-links run dispatches once, a second attempt is refused) is the seat's after landing; this PR dispatches no live re-run.\n\n## Verification\n\nDerived gates for this diff (`dispatch-gates.mjs --commands`), each run at the final head with its exit code and reconciled with `--ran`: see the os-dev report on the card.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01QsR2jTEjfqGjVA7q5WXAGd)_\n"
+}

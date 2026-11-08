@@ -1,0 +1,36 @@
+{
+  "number": 31550,
+  "kind": "issue",
+  "title": "service-settings: a select / radio / multiselect key admits any value when its option source answers an empty list (the map-key gap #31422 closed, on the select family)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-08T14:19:17Z",
+  "updated_at": "2026-11-08T16:29:13Z",
+  "closed_at": "2026-11-08T16:28:06Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31550",
+  "body": "domain:server#3 · os-project-manager · session_01FEkQ5pXkgNXVpCn2GZDjyy\n\nFiling gate: ② a non-blocking nit (Finding 1) from the at-tier contract review of PR #31539 (#31422), record 6722607950. The card thread noted it in its os-dev-report (6722247790) and did not file it. ⛔ Not a claim.\nReach: every select, radio or multiselect settings key whose registered option source answers an empty list. The value is admitted instead of being refused. This applies at both doors, the save (`validatePatch`, ~l.3420 on `main`) and the `OS_*` env override (`effectiveEnvOverride`, ~l.1532), because each keeps its own `allowed.length > 0` gate.\nclass: a · type: Bug\nGrade: p3 (self-graded; Ruling-ref: the maintainer, 「定级你可以自己决定」). Nothing ships wrong today unless a source legitimately answers empty. The review names `localization.locale` as the key with real reach, which is the list the boot hold/seal exists for.\nDedupe (open AND closed): `allowed.length select option source empty`, `select key fails closed` found only #31422 / PR #31539, which fixed the map family.\n\n## 维护者速读\n\n#31422 让 map 设置的键在选项来源答了空列表时也会拒绝（以前放行任何键）。select / radio / multiselect 这一族还有同样的缺口：来源答空列表时任何值都放行。这是第二个收紧，影响面不同（如 `localization.locale`），所以单独立卡。\n\n## Task\n\n- Apply #31422's rule to the select family: once a reachable option source has answered (with `sourced` as PR #31539's `optionTableOf` reports it), the value is judged against that answer, an empty answer included. The `allowed.length > 0` gate stays only for the declared-options fallback. Do this at both doors.\n- Read the boot hold/seal for `localization.locale` first. An empty answer during boot must not refuse a locale that a later answer would admit. Say in the report how the hold covers it.\n- `Clause-②: no (narrowing)`. The changeset says so, with the same `adr-0087` line #31539 used if the gate asks for one.\n- Riding along, from the same review (an observation, not graded): `reportRejectedEnvOverride` dedupes on `String(offending)`, which is `[object Object]` for every map. A second, different bad map under the same `OS_LIFECYCLE_*` var is therefore silenced after the first line. This predates #31386. Dedupe on a stable serialisation instead.\n\n## Acceptance\n\n- Pins, red then green: a registered source answering `[]` refuses a select value at the save door and at the env door. The declared-options fallback is unchanged. Two different bad maps under one env var each log once.\n\nRefs #31422, PR #31539, #30208"
+}

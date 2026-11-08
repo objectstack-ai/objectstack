@@ -1,0 +1,31 @@
+{
+  "number": 31604,
+  "kind": "issue",
+  "title": "fix(cloud-connection): keep the binding credential under OS_HOME so a container recreate does not unbind the node",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "pm:queue",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-08T16:31:32Z",
+  "updated_at": "2026-11-08T17:05:31Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31604",
+  "body": "epic:#3814#1 · os-zhuang · session_01QUs3BrVu5TqwtmuhsjdEvM\nFiling gate: ③ maintainer-dispatched task (child of #3814). Maintainer, (2026-11-08, 16:25 UTC): 「继续，现在派第二批」 (gate 1 after the card 0 inventory, cloud#3868 comment 6723322368).\n\nSingle-node defect S1 (open half), found by card 0 of #3814 (cloud#3868 comment 6723322368, V2). Maintainer ruling D2 (2026-11-08, 16:25 UTC): 「现在修，按普通 bug 卡」. This is a single-node bug fix, so it is NOT bound by #3814's R3.\n\n## Problem (measured on the shipped EE image)\n`cloud-connection.json` resolves to `<WORKDIR>/.objectstack/` in the container layer, not `OS_HOME=/data`. It survives `docker restart` but is lost on recreate (compose recreate, `upgrade.sh`'s image switch). After a recreate the exchange answers \"not bound\", so an online-licensed single node drops to Community at once until someone re-binds.\n\n## Do\n1. Resolve the binding credential file under `OS_HOME` (keep an explicit override variable if one exists).\n2. Migrate in place: on boot, if the old cwd-relative file exists and the new one does not, move it, with mode 0600 kept and one log line.\n3. Do not touch the multi-replica shared store (objectstack#31554 / PR #31584); coordinate with it if both edit the same resolver.\n4. Tests: a fresh path under OS_HOME; an old file migrated once; both present = new wins, old left alone; mode 0600.\n\n## Done when\nPR merged; a container recreate keeps the binding on the same `/data` volume.\n\nCloud half (entitlement cache default path) is a sibling cloud card."
+}

@@ -1,0 +1,36 @@
+{
+  "number": 31560,
+  "kind": "issue",
+  "title": "pm-dispatch lanes/spec.md: the closed list of spec edits a product PR may carry names only the error-code ledger, so a liveness-citation row fix (now required on every PR by #31559) reads as forbidden",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "domain:skills",
+    "priority:p2"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-08T15:00:21Z",
+  "updated_at": "2026-11-08T18:57:23Z",
+  "closed_at": "2026-11-08T18:56:07Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31560",
+  "body": "domain:skills#2 · zhuangjianguo · session_01QsR2jT34CXs5fCn3BDirZw\n\nFiling gate: (b) a follow-up a PR names. The director's contract review of devx PR #31559 (record 6723037686) flagged it for this lane. ⛔ Not a claim.\n\n## 维护者速读\n\n你裁的 #31424 第 2 条（记录 6722023475）列了哪些 `packages/spec` 改动可以随产品 PR 一起改：错误码台账行、平台名注册表、`contracts/`、JSDoc/describe、测试。PR #31552 把这份清单照原样写成了封闭清单（「唯下列搭车改动可随产品 PR」）。devx 的 PR #31559 会让 `check:liveness` 在每个 PR 上必跑。一个产品 PR 把代码从被引用的证据文件里挪走时，CI 会红，必须同时修 `packages/spec/liveness/**` 里那一行引用。这种修改和错误码台账行同类，也不是元数据协议改动，但不在清单里，照字面就成了不许随产品 PR 改。\n\n## Ask\n\n- Decide whether a liveness citation row fix (`packages/spec/liveness/**`) joins rule 2's rider list.\n  - The director reads the ruling's sense as covering it (\"a ledger row of the same kind and not a metadata-protocol change\").\n  - But the list is the maintainer's own words. Rule 6 (record 6722123324) says a change to a lane boundary is a decision card first.\n- If yes, `lanes/spec.md` L12 (the rider list after #31552) becomes, for example, 「台账行(错误码、liveness 引用)」 at equal line count within the 120-byte cap.\n\n## Serial\n\n- After PR #31552 lands; it is in the merge queue now.\n- #31559 makes the gap bite on every PR once it lands.\n\nRelated: #31424, PR #31552, PR #31559."
+}

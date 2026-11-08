@@ -1,0 +1,32 @@
+{
+  "number": 31648,
+  "kind": "pull_request",
+  "title": "docs(adr): ADR-0011 identity addendum dates its twelve-object count and names the thirteenth",
+  "state": "open",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-08T19:05:32Z",
+  "updated_at": "2026-11-08T19:16:57Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/31648",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi9UeA8FPbGfY1jB92HZk5Sy9)_\n\nFixes #31621\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- **改了什么**：ADR-0011 身份动作附录里「十二个身份对象」那一句，改成写明这是 2026-10-30 评估时的数，并点名 2026-11-07 修订收进的第 13 个对象 `sys_scim_connection_credential`。\n- **为什么改**：这句话读起来像现在的清点，但树上带动作的身份对象已经是 13 个，停在了修订之前（契约复审 6724527824 的 ④ nit）。\n- **风险与回滚**：只改 ADR 一句文字，不动代码，不做任何新评估。回滚即 revert 本 PR。\n- **先看**：`docs/adr/0011-actions-as-ai-tools.md` 第 317–321 行（附录第一段的第二句）。\n- **两分钟验证**：`grep -n \"thirteenth\" docs/adr/0011-actions-as-ai-tools.md`，应见一行，紧接 `sys_scim_connection_credential`。\n- **需要你做的**：批准本 PR（受管面 Tier H，保持 draft），批准后由席位落地。\n\n## What changes\n\nOne sentence in ADR-0011's 2026-10-30 identity addendum. It said the named actions \"on the twelve identity objects in `packages/platform-objects/src/identity/`\" were assessed once, as one set. That is a count of the 2026-10-30 assessment, but it read as the current census: the 2026-11-07 amendment (in the same addendum) brought `sys_scim_connection_credential`'s two actions into the buckets, so thirteen objects carry named actions today.\n\nThe sentence keeps the twelve, dates it to the 2026-10-30 assessment (\"the twelve identity objects that carried them ... at the 2026-10-30 assessment\"), and adds that the 2026-11-07 amendment brought in a thirteenth, `sys_scim_connection_credential`. Both the history (\"assessed once, as one set\") and the present count stay true. No other paragraph of the ADR changes. No action is assessed: `sys_user.list_platform_admins` and `sys_sso_provider.edit_sso_sign_in_options` are left to the maintainer ruling the card names.\n\n## Why\n\nContract review 6724527824 on PR #31616, finding ④ (nit, outside that diff). Card #31621.\n\n## Verification\n\nPremise measured on `origin/main` `99364ea7`: every `*.object.ts` under `packages/platform-objects/src/identity/` was read for an `actions: [` array (and for any other `actions` spelling: none). 13 objects carry one: `sys_account`, `sys_api_key`, `sys_invitation`, `sys_member`, `sys_oauth_application`, `sys_organization`, `sys_scim_connection_credential`, `sys_session`, `sys_sso_provider`, `sys_team_member`, `sys_team`, `sys_two_factor`, `sys_user`. The H/C/E lists name exactly these 13 object prefixes; the 12 without `sys_scim_connection_credential` are the 2026-10-30 set.\n\n<details><summary>Gates (dispatch-gates --commands at 20a1c07d: 21 derived, 21 run, all exit 0)</summary>\n\n```text\nnode scripts/check-adr-links.mjs :: exit 0\nnode scripts/check-adr-links.mjs --self-test :: exit 0\nnode scripts/check-closing-keyword-parity.mjs :: exit 0\nnode scripts/check-closing-keyword-parity.mjs --self-test :: exit 0\nnode scripts/check-comment-mask-corpus.mjs :: exit 0\nnode scripts/ci/plan-test-core-shards.mjs --self-test :: exit 0\npnpm --filter @objectstack/lint run check:doc-formula-expressions :: exit 0\npnpm check:adr-anchors :: exit 0\npnpm check:adr-index :: exit 0\npnpm check:adr-symbol-anchors :: exit 0\npnpm check:ci-filter-parity :: exit 0\npnpm check:closed-ceremony-text :: exit 0\npnpm check:cross-package-test-inputs :: exit 0\npnpm check:doc-authoring :: exit 0\npnpm check:driver-memory-census :: exit 0\npnpm check:gitlink-declared :: exit 0\npnpm check:nul-bytes :: exit 0\npnpm check:pm-governed-merges :: exit 0\npnpm check:pm-prior-rulings :: exit 0\npnpm check:refd-timer-probe :: exit 0\npnpm check:watch-hint-literal :: exit 0\n```\n\n`check:doc-formula-expressions` first exited 3 (prerequisite not met: `@objectstack/formula` / `@objectstack/lint` dist absent, nothing measured); after `turbo run build --filter=@objectstack/formula --filter=@objectstack/lint` it ran and exited 0. Reconciliation: `dispatch-gates --ran`: 21 derived, 21 run, 0 NOT-MEASURED, 0 UNRUN. No package is touched, so no `pnpm lint`, test or typecheck is owed.\n\n</details>\n\n## Acceptance notes\n\n- Open PR #31616 edits the same file (the census and \"Not assessed\" paragraphs, not this sentence). Whichever lands second merges `origin/main`; the seat decides the order.\n- Governed surface (`docs/adr/**`, Tier H): this PR stays draft until a `GOVERNED_APPROVERS` approval.\n- No changeset: `docs/adr/**` publishes nothing (`skip-changeset`).\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic. (not touched)\n- [x] 2. Every name I added uses the casing for its kind. (no names)\n- [x] 3. No formatter ran; `pnpm lint` passes. (no lintable file touched)\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset. (publishes nothing)\n- [x] 6. `packages/spec` touched: its generated artifacts are regenerated and committed. (not touched)\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English.\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01ADHkmRbRXBo8uDXg21xy8x)_\n"
+}

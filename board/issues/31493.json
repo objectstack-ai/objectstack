@@ -2,8 +2,8 @@
   "number": 31493,
   "kind": "issue",
   "title": "Import wizard: the mapping-template \"Save current\" button is disabled with no reason on hover, on focus or to assistive technology",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "bug",
     "domain:ui",
-    "pm:dispatched",
     "priority:p3"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-08T11:00:59Z",
-  "updated_at": "2026-11-08T13:14:06Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-08T15:33:28Z",
+  "closed_at": "2026-11-08T15:32:10Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/31493",
   "body": "qa#1 · zhuangjianguo · session_01QsR2jUARzLeR7GhKms8a5s\n\nQA-source: #31486 · ux-conventions.disabled-control-reason · acceptance[0]\n\nThe failing clause of `ux-conventions.disabled-control-reason` in the QA run #31486 (subject `0647dabb`), rule R-3 there. Reproduced on 2 fresh loads.\n\n## Reproduction (stock showcase, admin)\n\n1. `/_console/apps/com.example.showcase/showcase_task` → Import.\n2. Upload a CSV whose columns match no field, e.g. `foo,bar` / `x,1` / `y,2`.\n3. Mapping step: leave both columns Skip.\n4. Find `[data-testid=import-template-save-btn]` (\"Save current\", inside `[data-testid=import-template-bar]`).\n\nExpected: the disabled control shows why on hover, and is reachable by keyboard with an accessible description (e.g. \"Map at least one column to save a template\").\n\nActual: the button carries the native `disabled` attribute; no `[role=tooltip]` after a 1.5 s hover; no `aria-describedby`, no `title`, no focusable wrapper; Tab skips it (template select → mapping selects → Cancel → Back → Next → Close). The Next button on the same step passes (focusable wrapper plus a described reason), so this is not a driver artifact.\n\n## Mechanism\n\n`ui/packages/plugin-grid/src/ImportWizard.tsx`: `TemplateBar` renders the Button with `disabled={disabled}` and `data-testid=\"import-template-save-btn\"` (around lines 1520–1531) and no disabled-reason wrapper; the caller passes `disabled={Object.keys(mapping).length === 0}` (around line 1730).\n\nOwning package: `@object-ui/plugin-grid`. Full evidence: #31486, slice C3b."

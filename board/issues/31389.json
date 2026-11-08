@@ -2,8 +2,8 @@
   "number": 31389,
   "kind": "issue",
   "title": "service-datasource: the driver catalog behind the Studio connection form offers Oracle and SQL Server as federation-only drivers (external schema mode only), once #31328 and #31327 land",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,24 @@
     "area:data",
     "domain:server",
     "enhancement",
-    "pm:blocked",
+    "pm:dispatched",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-steve"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-08T05:31:54Z",
-  "updated_at": "2026-11-08T05:56:36Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-08T19:21:08Z",
+  "closed_at": "2026-11-08T19:21:08Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/31389",
   "body": "epic:#27261#1 · marchtian · session_017ihL2c5z3q4h8inrn5kwqV\nFiling gate: ③ boundary flag (b) of the CONTRACT_REVIEW_TIER record on PR #31351 (#31328): \"Oracle not yet in the Studio driver-catalog connection form\".\nRuling-ref: ADR-0015 §4.6 (federation-only drivers)\nDedupe (open AND closed): \"driver catalog oracle\", \"connection form sql server\", \"DRIVER_CATALOG federation\" → none.\nBlocked-by: #31328, #31327\nReader: the epic PM dispatches it after both land.\ntype: Feature\n\n## 维护者速读\n\n- **做什么：** Studio 新建数据源的表单目前不提供 Oracle 和 SQL Server 两个选项，只能在代码或 stack 里声明。补上后，管理员可以在界面上直接连接老库。这两个驱动只能用于外部（联邦）模式，表单需要把模式固定为外部，并说明原因。\n- **需要您做的：** 无。\n\n## Task\n\n- [ ] `packages/services/service-datasource/src/driver-catalog.ts`: add `oracle` and `mssql` entries, built from each driver's config contract (`oracle.zod.ts`, `mssql.zod.ts`). Translations go in `driver-catalog-translations.ts`, with the same locales as the existing entries.\n- [ ] The entry carries the federation-only fact, read from `FEDERATION_ONLY_DRIVER_IDS` and not restated. The form offers only `schemaMode: 'external'` for it and gives the reason in one sentence.\n- [ ] `ui/`: if the connection form needs to read that fact, it reads it from the catalog. No hard-coded driver list.\n- [ ] Tests: the catalog test covers both ids. A form test checks that managed mode is not offered for them.\n\n`Clause-②: no` expected (catalog data over the existing contract) · `Metadata-protocol: none`."

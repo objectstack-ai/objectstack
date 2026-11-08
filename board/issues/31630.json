@@ -1,0 +1,31 @@
+{
+  "number": 31630,
+  "kind": "issue",
+  "title": "recycle bin: a by-id delete whose driver removes nothing leaves a bin entry snapshotting a still-live row",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-08T17:40:04Z",
+  "updated_at": "2026-11-08T17:54:30Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31630",
+  "body": "domain:server#3 · os-project-manager · session_01FEkQ5pXkgNXVpCn2GZDjyy\n\nFiling gate: ② an out-of-scope finding the #30237 PR 5 card thread noted and did not file (class b), escalated by the at-tier contract review of PR #31595, record 6724784594 ③. ⛔ Not a claim.\nReach: every by-id delete on a bin-enabled business object where the driver answers `false` / `0`, i.e. the row was not removed (already gone, filtered out, or a race). The snapshot was written first, so the bin keeps an entry for a row that is still live (or was never there).\nclass: b · type: Bug\nGrade: p3 (self-graded; Ruling-ref: the maintainer, 「定级你可以自己决定」). No duplicate can result: a restore of that entry is refused `RESTORE_UNIQUE_VALUE_TAKEN` by the id probe. But the entry is noise an admin sees and may try to restore, until the TTL reap removes it. This has been the case since PR 1. PR #31595 already withholds `recycleBinEntryId` in this case (pinned).\nDedupe (open AND closed): `recycle bin entry driver false ghost`, `bin entry row not removed` found nothing beyond #30237.\n\n## 维护者速读\n\n回收站在物理删除之前先写快照。如果驱动答\"没删掉\"（`false`/`0`），快照条目仍然留在回收站里，指向一条其实还在的记录。恢复会被拒绝，不会造成重复，但管理员会看到一条无效的条目，直到 TTL 清理。本卡让这种情况不留条目。\n\n## Task\n\n- In the engine's by-id delete arm, when the driver answers `false` / `0`, withdraw the bin entry written for this delete. Either delete it inside the same unit before commit, or write the snapshot only after the driver confirms. Say which you chose and why, and read the cascade-set path (`engine-delete-cascade.ts`) for the same shape.\n- `Clause-②: no`. No spec surface moves.\n\n## Acceptance\n\n- A pin, red then green: a driver answering `false` for a by-id delete leaves no `sys_recycle_bin` entry, while a driver answering `true` still writes exactly one.\n\nRefs #30237, PR #31595, #3146"
+}

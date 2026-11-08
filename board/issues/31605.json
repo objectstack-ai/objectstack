@@ -1,0 +1,34 @@
+{
+  "number": 31605,
+  "kind": "issue",
+  "title": "mcp: a host can observe and refuse every MCP tool call through one neutral interceptor (cloud#3820 O2)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:cloud",
+    "enhancement",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-08T16:31:52Z",
+  "updated_at": "2026-11-08T18:38:43Z",
+  "closed_at": "2026-11-08T18:38:43Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31605",
+  "body": "repo:cloud#3 · os-zhuang · session_01QUs3BvRcDHXqRU4TSVE4u6\n\nFiling gate: ③ maintainer-dispatched task, child of objectstack-ai/cloud#3820 (EE AI employee console, p1). Maintainer, 2026-11-08 16:27 UTC, in the cloud#3820 PM thread: 「objectstack 可以先开工吗？」. The PM thread read this as \"start the open-source tasks that depend on nothing\", and O1, O2 and O5 are those tasks.\n\nParent: objectstack-ai/cloud#3820, card 0 (external AI under governance). Consumers in cloud after a pin: C1 (audit row per MCP call), C2 (AI seat check on the MCP door), C4 (kill switch).\n\n## 维护者速读\n\n外部 AI 通过 MCP 调用数据工具时，直接走数据协议，任何宿主都看不见、也拦不住这次调用。所以企业版的 AI 审计表里没有外部 AI 的记录。这张卡在 MCP 门上加一个中立的拦截口：默认什么都不装，行为不变；企业版装上后可以记审计、按席位或停用状态拒绝。开源侧不含任何许可逻辑和审计表。\n\n## Problem (read in code at objectstack 3c380253, not run)\n\n- HTTP `/mcp` tools reach data through `callData` (`packages/runtime/src/domains/mcp.ts` around line 930 for create, update and remove; query, get and aggregate the same way), never through the AI `ToolRegistry`.\n- The `ToolRegistry` has a neutral `setInterceptor` seam. Cloud's EE governance uses it to audit and veto in-product AI tool calls. MCP has no equivalent, so on a licensed EE an external AI's calls never reach `sys_ai_audit_log`.\n- Per-request HTTP servers register tools through `wireBridgeTools` (object, action and file tools) and `registerAuthoringTools`. The long-lived stdio server registers through `bridgeDataTools` and `bridgeTools` (`packages/mcp/src/mcp-server-runtime.ts` around lines 1254, 1413 and 1454).\n- `bridgeTools` calls `toolRegistry.execute(call)` with no context. Under EE governance every such call is denied as `denied_no_actor`, so the stdio bridge of AI tools is unusable there.\n\n## Do\n\n1. Add a host-installable interceptor on the `mcp` service, for example `setToolInterceptor(fn)`. When none is set, behaviour is byte-identical to today.\n2. Route every tool call on every path through it: the HTTP object, action and file tools, the authoring family, and the stdio `bridgeDataTools` and `bridgeTools`.\n3. Pass a server-constructed context: door (`mcp`), transport (http or stdio), tool name, arguments, and the principal (`userId`, `principalKind`, `onBehalfOf`, `performedBy.clientId`, `organizationId`, `environmentId`). Nothing from client headers. O4 will add the service-account key to `performedBy`.\n4. Contract: the interceptor calls `next()` (allow; it sees the result and may replace it) or returns a refusal without calling `next()` (deny), answered with the existing coded-refusal envelope. Leave room for a later \"hold\" outcome (cloud#3820 O6, route to `plugin-approvals`) but do not build it.\n5. Give `bridgeTools` the stdio principal as its execution context, so a governed host sees an actor.\n6. No licence logic and no audit table in open code, the same rule as `ToolRegistry.setInterceptor`.\n\n## Tests\n\n- Unset: the existing MCP suites stay green unchanged.\n- Allow, deny and replace on each registration path (HTTP data, actions, files, authoring; stdio data and bridged tools).\n- The principal fields cannot be changed by any request header.\n\n## Done when\n\nMerged, with the single-node, no-interceptor behaviour unchanged. Cloud consumes it after a pin.\n\n## Reader\n\nFiled and dispatched by a cloud seat; reviewed and landed by that seat. The cloud#3820 PM thread answers premise questions.\n\nDedup: `repo:objectstack-ai/objectstack is:issue interceptor mcp` and `mcp tool call audit` returned no card about an MCP tool-call seam (#27908, closed, recorded the action door only).\n\n## Duplicates\n\nSearched objectstack open issues for \"service account\" AI, MCP interceptor, OAuth client disable token, API key suspend (2026-11-08): no open card covers this.\n"
+}
