@@ -50,7 +50,7 @@ import { StandardErrorCode, type ErrorCode } from '@objectstack/spec/api';
 // [#23701] The one key every door that translates the engine's unique-violation
 // envelope asks (the registered code AND the class name, never message text),
 // and the one classification whose arm states the wire code for it.
-import { earnedAnswerOf, isEngineDuplicateRecordEnvelope, isSandboxCrash, isServerFault, logServerFault, mapDataError, resolveQueryReadLimits, sandboxBusinessMessage, staleSummaryAnswerLines, structuredCodeAnswer, type SummaryRecomputeRefusal } from '@objectstack/types';
+import { earnedAnswerOf, isEngineDuplicateRecordEnvelope, isSandboxCrash, isServerFault, logServerFault, mapDataError, resolveQueryReadLimits, resolveThrownHttpError, sandboxBusinessMessage, serverFaultProvenance, staleSummaryAnswerLines, structuredCodeAnswer, type SummaryRecomputeRefusal } from '@objectstack/types';
 import {
   MCP_OAUTH_SCOPE_DATA_READ,
   MCP_OAUTH_SCOPE_DATA_WRITE,
@@ -548,6 +548,37 @@ export function dataDoorAnswerOf(err: unknown, objectName?: string): DataDoorAns
 }
 
 /**
+ * [#31273] {@link thrownRefusalEnvelope} for a face the `/api/v1/data` door
+ * serves: the coded refusal, unless the door answers the throw as a server
+ * fault whose status the producer never declared. That throw is a driver's own
+ * errno on `.code` (`SQLITE_BUSY`, `ECONNRESET`, `40P01`), not a refusal, and
+ * the face answers the door's fault instead: `500 DATABASE_ERROR` `Internal
+ * data error` for `SQLITE_BUSY`, the errno and driver text withheld and logged.
+ * It used to reach the agent as `{ code: 'SQLITE_BUSY', message: <driver
+ * text> }` with no status.
+ *
+ * Both halves are the door's own reads, never a copy: {@link dataDoorAnswerOf}
+ * (`mapDataError`) says "server fault", and `serverFaultProvenance`
+ * (`@objectstack/types`) says "undeclared". The second is the 2026-08-27
+ * ruling on #12509 that withholds a demoted errno at every door: the
+ * discriminator is the status channel, never the code's spelling, so a
+ * producer that spells a code and declares no status loses it on a 5xx, here
+ * as at the door. A code the door refuses (`PERMISSION_DENIED` with no status
+ * answers 403 there) and a code with a declared status keep the coded answer.
+ *
+ * Read by the six record data tools ({@link dataDoorErrorResult}),
+ * `delete_records`' selection read and the record resource
+ * (`MCPServerRuntime.bridgeResources`). ⛔ Not by `run_action` / `resume_run`
+ * or the metadata tools, whose doors are not `/data`.
+ */
+export function dataDoorRefusalEnvelope(err: unknown, objectName: string): ThrownRefusalEnvelope | undefined {
+  const envelope = thrownRefusalEnvelope(err);
+  if (envelope === undefined) return undefined;
+  if (serverFaultProvenance(resolveThrownHttpError(err)) !== 'undeclared') return envelope;
+  return isServerFault(dataDoorAnswerOf(err, objectName).status) ? undefined : envelope;
+}
+
+/**
  * [#31218] The record data tools' tool error: a CODED throw renders exactly as
  * {@link errorResultWithCode} renders it, and a throw with NO code renders the
  * answer the `/api/v1/data` door gives the same throw ({@link dataDoorAnswerOf}),
@@ -573,15 +604,16 @@ export function dataDoorAnswerOf(err: unknown, objectName?: string): DataDoorAns
  *
  * ⛔ The coded path is read FIRST and is unchanged: a thrown `code` keeps
  * {@link thrownRefusalEnvelope}'s rendering byte for byte, its unique-violation
- * spelling included.
+ * spelling included. [#31273] One exception, a driver's own code: see
+ * {@link dataDoorRefusalEnvelope}.
  *
  * Only these six tools. `delete_records` groups its rows through the same door
  * ({@link rowRefusalOf}); its outer catch also renders this file's own
  * code-less sentences, which the door's message heuristics would misread, so
  * it keeps {@link errorResultWithCode}.
  */
-function dataDoorErrorResult(err: unknown, tool: DataDoorTool, objectName: string) {
-  const envelope = thrownRefusalEnvelope(err);
+function dataDoorErrorResult(err: unknown, tool: DataDoorTool | typeof DELETE_RECORDS_TOOL, objectName: string) {
+  const envelope = dataDoorRefusalEnvelope(err, objectName);
   if (envelope) return codedErrorResult({ ...envelope });
   const door = dataDoorAnswerOf(err, objectName);
   if (isServerFault(door.status)) {
@@ -2340,6 +2372,12 @@ export function registerObjectTools(
             }
             return textResult(outcome);
           } catch (err) {
+            // [#31273] A driver's own code from the selection read answers the
+            // door's fault, as the record data tools answer it. Every other
+            // throw keeps this catch's rendering (#31218 says why).
+            if (thrownRefusalEnvelope(err) !== undefined && dataDoorRefusalEnvelope(err, objectName) === undefined) {
+              return dataDoorErrorResult(err, DELETE_RECORDS_TOOL, objectName);
+            }
             return errorResultWithCode(err);
           }
         },
