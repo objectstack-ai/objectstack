@@ -415,6 +415,15 @@ export interface DatasourceAdminServiceConfig {
    */
   convergePool?: (name: string) => Promise<void> | void;
   /**
+   * The names a `cluster.resync` must converge — see
+   * {@link DatasourceAdminService.resyncDatasourceMutationPubSub}: every
+   * datasource the SHARED store holds (the read `convergePool` performs, never
+   * the per-replica metadata registry) and every pool this replica built.
+   * Optional: without it a resync converges only the pools the connection
+   * service reports.
+   */
+  listConvergeNames?: () => Promise<readonly string[]>;
+  /**
    * Last connect verdict per datasource, from `DatasourceConnectionService`
    * (framework#3827). Absent (a host without the connection service) means the
    * list reports `unvalidated` throughout — the pre-#3827 behavior, and honest:
@@ -671,9 +680,10 @@ export class DatasourceAdminService implements IDatasourceAdminService {
    * driver's local `cluster.resync` event; a no-op until a transport is
    * attached, or when the host wired no `convergePool`.
    *
-   * Converges every name a lost signal could have carried — each stored
-   * record (created or edited during the outage) and each pool this replica
-   * holds (deleted during it) — through the same per-name convergence a
+   * Converges every name a lost signal could have carried — each record in
+   * the SHARED store (created or edited during the outage) and each pool this
+   * replica holds (deleted during it), from the host's `listConvergeNames` —
+   * through the same per-name convergence a
    * received signal runs, so it re-reads the shared record and builds,
    * rebuilds or evicts exactly as a delivered hint would have. Resolves once
    * every convergence settled; one name failing is logged and does not stop
@@ -683,8 +693,8 @@ export class DatasourceAdminService implements IDatasourceAdminService {
     const converge = this.config.convergePool;
     if (!this.clusterPubSub || !converge) return;
     const names = new Set<string>();
-    for (const record of await this.config.listDatasourceRecords()) {
-      if (typeof record?.name === 'string' && record.name.length > 0) names.add(record.name);
+    for (const name of (await this.config.listConvergeNames?.()) ?? []) {
+      if (typeof name === 'string' && name.length > 0) names.add(name);
     }
     for (const state of this.config.connectionStates?.() ?? []) {
       if (typeof state?.name === 'string' && state.name.length > 0) names.add(state.name);

@@ -34,7 +34,7 @@ import { join } from 'node:path';
 
 import type { Redis } from 'ioredis';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
-import { ObjectKernel } from '@objectstack/core';
+import { LiteKernel } from '@objectstack/core';
 import type { IClusterService, IJobService } from '@objectstack/spec/contracts';
 import {
     ClusterServicePlugin,
@@ -145,9 +145,9 @@ describe.skipIf(!REDIS_SERVER)(
 
             const driverLines: Record<string, string[]> = { A: [], B: [] };
             let runs = 0;
-            const kernels: ObjectKernel[] = [];
+            const kernels: LiteKernel[] = [];
             const boot = async (nodeId: 'A' | 'B') => {
-                const kernel = new ObjectKernel({ logger: { level: 'warn', format: 'text' } });
+                const kernel = new LiteKernel({ logger: { level: 'warn', format: 'text' } });
                 kernel.use(new ClusterServicePlugin({
                     config: {
                         driver: 'redis',
@@ -262,6 +262,11 @@ describe('a black-holed Redis fails a cache call within the command bound', () =
             expect(offered).toBeDefined();
             // Exactly how `CacheServicePlugin` derives the shared cache's connection.
             const derived = offered!.client.duplicate();
+            // The handshake times out too, and ioredis reports that as a
+            // connection `error`; the cache's own derived connection is the
+            // cache plugin's to listen on. Here only the command's bound is
+            // under test.
+            derived.on('error', () => {});
             try {
                 const started = Date.now();
                 await expect(derived.get('os:cache:probe')).rejects.toThrow(/timed out/i);
