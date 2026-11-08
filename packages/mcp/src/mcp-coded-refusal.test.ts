@@ -681,13 +681,47 @@ describe('the record resource: a coded refusal adds its code beside the unchange
       expect(line).toContain('SQLITE_BUSY: database is locked');
     });
 
-    it('CONTROL: a declared 5xx code and a code the door refuses with no status keep their coded answers, unlogged', async () => {
+    it('CONTROL: a code the door refuses with no status keeps its coded answer, unlogged', async () => {
       const log = vi.spyOn(console, 'error').mockImplementation(() => {});
-      expect(JSON.parse(await readRefused(Object.assign(new Error('The ledger is closing.'), { code: 'SERVICE_UNAVAILABLE', status: 503 }))))
-        .toEqual({ error: 'The ledger is closing.', code: 'SERVICE_UNAVAILABLE', status: 503 });
       expect(JSON.parse(await readRefused(Object.assign(new Error('Field read denied: salary'), { code: 'PERMISSION_DENIED' }))))
         .toEqual({ error: 'Field read denied: salary', code: 'PERMISSION_DENIED' });
       expect(log).not.toHaveBeenCalled();
+    });
+  });
+
+  /**
+   * [#31341] A coded throw that DECLARES a 5xx answers the door's answer here
+   * too, through the same predicate the record data tools ask (their block,
+   * below, says why). This row was #31273's CONTROL, which pinned the
+   * producer's sentence served.
+   */
+  describe('a declared 5xx answers the /data door\'s answer, its sentence withheld unless it is a refusal (#31341)', () => {
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    it('SERVICE_UNAVAILABLE / 503: code and status kept, the sentence withheld and logged once', async () => {
+      const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const thrown = ledgerClosing();
+      const text = await readRefused(thrown);
+      expect(text).toBe(JSON.stringify({ error: 'Internal server error', code: 'SERVICE_UNAVAILABLE', status: 503 }));
+      const door = mapDataError(thrown, 'task');
+      expect(JSON.parse(text)).toEqual({ error: door.body.error, code: door.body.code, status: door.status });
+      const lines = [...error.mock.calls, ...warn.mock.calls].map((call) => String(call[0]));
+      expect(lines).toHaveLength(1);
+      expect(lines[0]).toMatch(/^\[5xx\] 503 resources\/read objectstack:\/\/objects\/task\/records\/t1 — /);
+      expect(lines[0]).toContain('The ledger is closing.');
+    });
+
+    it('a declared 503 that marks itself `refusal: true` keeps its sentence, as the door serves it', async () => {
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+      vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const thrown = ledgerClosing({ refusal: true });
+      const text = await readRefused(thrown);
+      expect(text).toBe(JSON.stringify({ error: 'The ledger is closing.', code: 'SERVICE_UNAVAILABLE', status: 503 }));
+      const door = mapDataError(thrown, 'task');
+      expect(JSON.parse(text)).toEqual({ error: door.body.error, code: door.body.code, status: door.status });
     });
   });
 });
@@ -884,6 +918,11 @@ describe('the metadata tools and list_actions: a fault answers what the /meta do
  * 2026-08-27 on #12509: the discriminator is the status channel, never the
  * code's spelling). Then the face answers the door's fault.
  *
+ * [#31341] A coded throw that DECLARES a 5xx is a server fault at the door
+ * too, so the faces now answer it the same way: the door's code and status,
+ * its sentence withheld unless the throw marks itself `refusal: true`. Its
+ * rows close this block; they replaced #31273's CONTROL for a declared 5xx.
+ *
  * Only the record data tools, `delete_records`' selection read and the record
  * resource (its rows are below). `run_action` / `resume_run` and the metadata
  * tools answer a driver code through their own doors' readers (#31271,
@@ -891,6 +930,11 @@ describe('the metadata tools and list_actions: a fault answers what the /meta do
  */
 function sqliteBusy(): Error {
   return Object.assign(new Error('SQLITE_BUSY: database is locked'), { code: 'SQLITE_BUSY' });
+}
+
+/** [#31341] A producer's coded throw that declares a 5xx, with its own sentence. */
+function ledgerClosing(extra: Record<string, unknown> = {}): Error {
+  return Object.assign(new Error('The ledger is closing.'), { code: 'SERVICE_UNAVAILABLE', status: 503 }, extra);
 }
 
 describe('the record data tools: a driver\'s own string code is the /data door\'s server fault, not a coded refusal (#31273)', () => {
@@ -979,13 +1023,53 @@ describe('the record data tools: a driver\'s own string code is the /data door\'
     expect(log).not.toHaveBeenCalled();
   });
 
-  // A 5xx the producer DECLARED is not a driver's: its code is authored. The
-  // door withholds a declared 5xx's prose too; that is not this card's face.
-  it('CONTROL: a code with a declared 5xx keeps its coded answer', async () => {
-    const thrown = Object.assign(new Error('The ledger is closing.'), { code: 'SERVICE_UNAVAILABLE', status: 503 });
+  /**
+   * [#31341] A 5xx the producer DECLARED is a server fault at the door too:
+   * `mapDataError` keeps its code and status and withholds its sentence
+   * (`Internal server error`) unless the throw marks itself `refusal: true`
+   * (`declaredRefusalMessage`, `@objectstack/types`). These faces read the
+   * coded path first, so they served the producer's sentence verbatim. This
+   * row was #31273's CONTROL, which pinned that sentence served; it moved.
+   */
+  for (const site of FACES) {
+    it(`${site.tool}: a declared 5xx keeps its code and status, its sentence withheld and logged once (#31341)`, async () => {
+      const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const warnLog = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const thrown = ledgerClosing();
+      const { text, error } = await errorOf(site, thrown);
+      expect(error).toEqual({ code: 'SERVICE_UNAVAILABLE', message: 'Internal server error', status: 503 });
+      expect(error).toEqual(doorAnswer(thrown));
+      expect(text).not.toContain('The ledger is closing.');
+      const lines = [...errorLog.mock.calls, ...warnLog.mock.calls].map((call) => String(call[0]));
+      expect(lines).toHaveLength(1);
+      expect(lines[0]).toMatch(new RegExp(`^\\[5xx\\] 503 tools/call ${site.tool} task — `));
+      expect(lines[0]).toContain('The ledger is closing.');
+    });
+  }
+
+  it('a declared 5xx that marks itself `refusal: true` keeps its sentence on every face, as the door serves it (#31341)', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const thrown = ledgerClosing({ refusal: true });
     for (const site of FACES) {
-      expect((await errorOf(site, thrown)).error, site.tool)
-        .toEqual({ code: 'SERVICE_UNAVAILABLE', message: 'The ledger is closing.', status: 503 });
+      const { error } = await errorOf(site, thrown);
+      expect(error, site.tool).toEqual({ code: 'SERVICE_UNAVAILABLE', message: 'The ledger is closing.', status: 503 });
+      expect(error, site.tool).toEqual(doorAnswer(thrown));
     }
+  });
+
+  // [#31341] The door demotes an unregistered code with a declared 5xx to the
+  // status's closed code and names the producer's spelling in `declaredCode`,
+  // a member these faces do not serve (as the metadata tools do not, #31272).
+  // So the face answers the closed code. A producer keeps its own code on the
+  // wire by registering it or by throwing a 4xx refusal.
+  it('an unregistered code with a declared 5xx answers the door\'s closed code, its sentence withheld (#31341)', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const thrown = Object.assign(new Error('The vendor is down.'), { code: 'VENDOR_DOWN', status: 503 });
+    const { text, error } = await errorOf(update, thrown);
+    expect(error).toEqual({ code: 'SERVICE_UNAVAILABLE', message: 'Internal server error', status: 503 });
+    expect(error).toEqual(doorAnswer(thrown));
+    expect(text).not.toContain('The vendor is down.');
   });
 });
