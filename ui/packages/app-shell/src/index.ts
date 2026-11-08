@@ -306,6 +306,7 @@ export {
   InvitationGoneNotice,
   InvitationLinkHint,
   invitationArrivalCopy,
+  invitationIdOf,
   useInvitationArrival,
   useInvitationPreview,
   type InvitationArrival,

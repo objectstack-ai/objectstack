@@ -1030,21 +1030,19 @@ const ITEM_TRANSLATION_KEY_GUIDANCE: Record<string, string> = {
  * exist for.
  */
 /**
- * The measured exclusion on `datasets.<name>.dimensions.<d>` and
- * `.measures.<m>`.
+ * [ADR-0149 D1] Why `datasets.<name>.dimensions.<d>` and `.measures.<m>` carry
+ * no `synonyms` key, though the authoring members declare one.
  *
- * Not inherited by symmetry from the dataset's own `description`: the authoring
- * schema states it directly. `DatasetDimensionSchema` and `DatasetMeasureSchema`
- * each carry a `guidance` entry for `description` reading "its author-facing
- * text is `label`. `description` is declared on the DATASET itself" — so a key
- * here would parse clean and translate nothing, the ADR-0078 shape this file
- * keeps paying to remove.
+ * A synonym is MATCH INPUT, not display copy: the dataset tools compare a
+ * question's words against every synonym a member lists, in every language at
+ * once. A per-locale bundle key would invite a reader to match only the active
+ * locale's list — the one thing a synonym list must not do — so the words of
+ * every language go in the one authored `synonyms` array.
  */
-const DATASET_MEMBER_NO_DESCRIPTION =
-  'a dataset dimension/measure has no `description` — its author-facing text is `label`, and '
-  + '`DatasetDimensionSchema` / `DatasetMeasureSchema` say so at the authoring site too. '
-  + '`description` is declared on the DATASET itself: translate it at '
-  + "'datasets.<dataset_name>.description'.";
+const DATASET_MEMBER_SYNONYMS_NOT_TRANSLATED =
+  '`synonyms` are not translated: they are the words a question is matched against, in every '
+  + 'language at once, so a dimension or measure lists the words of every language in its one '
+  + 'authored `synonyms` array (ADR-0149 D1). Display copy is translated here: `label` and `description`.';
 
 /**
  * The tombstone prescription for `dashboards.<name>.widgets.<id>.subCaption`
@@ -1283,8 +1281,8 @@ const appTranslationDataShape = () => ({
    * Convention (auto-resolved by `translateDataset`):
    *   datasets.<name>.label
    *   datasets.<name>.description
-   *   datasets.<name>.dimensions.<dimension_name>.label
-   *   datasets.<name>.measures.<measure_name>.label
+   *   datasets.<name>.dimensions.<dimension_name>.label / .description
+   *   datasets.<name>.measures.<measure_name>.label / .description
    *
    * **The hole this closes (#14253).** A dataset reads like a back-office
    * definition, but a measure label is drawn ON THE DASHBOARD — under every
@@ -1304,14 +1302,13 @@ const appTranslationDataShape = () => ({
    * definition, one key.
    *
    * **The key face is measured against `DatasetSchema`.** A dimension and a
-   * measure each declare exactly one piece of display copy — `label` — and
-   * `dataset.zod.ts` says so twice, in the `guidance` it already gives an
-   * author who writes `description` on either: *"its author-facing text is
-   * `label`. `description` is declared on the DATASET itself"*. So
-   * `description` is declared here on the dataset and NOWHERE below it; a
-   * `dimensions.<d>.description` key would parse clean and translate nothing.
+   * measure each declare two pieces of display copy — `label` and, since
+   * ADR-0149 D1, `description` (a business definition in plain language) —
+   * and both are translated here. Their `synonyms` are not: a synonym is match
+   * input, not display copy, and the members' `guidance` says so to an author
+   * who reaches for a `synonyms` key.
    *
-   * ⚠️ These four are `I18nLabelSchema` at the authoring site, so a dataset's
+   * ⚠️ These six are `I18nLabelSchema` at the authoring site, so a dataset's
    * copy may already be an inline `{ en, 'zh-CN' }` map (#5728).
    * `translateDataset` writes ONLY where the bundle actually has an entry, so
    * an inline map the bundle does not cover is left intact rather than
@@ -1341,17 +1338,21 @@ const appTranslationDataShape = () => ({
       surface: 'this dataset dimension translation',
       history: TRANSLATION_HISTORY,
       aliases: { name: 'label', title: 'label', displayName: 'label', text: 'label' },
-      guidance: { description: DATASET_MEMBER_NO_DESCRIPTION },
+      guidance: { synonyms: DATASET_MEMBER_SYNONYMS_NOT_TRANSLATED },
     }, {
       label: z.string().optional().describe('Translated dimension label (drawn on chart axes and group headers)'),
+      description: z.string().optional()
+        .describe("Translated dimension description — overlays the dimension's own business definition (ADR-0149 D1)"),
     })).optional().describe('Dimension translations keyed by dimension name (`DatasetDimensionSchema.name`)'),
     measures: z.record(z.string(), strictObject({
       surface: 'this dataset measure translation',
       history: TRANSLATION_HISTORY,
       aliases: { name: 'label', title: 'label', displayName: 'label', text: 'label' },
-      guidance: { description: DATASET_MEMBER_NO_DESCRIPTION },
+      guidance: { synonyms: DATASET_MEMBER_SYNONYMS_NOT_TRANSLATED },
     }, {
       label: z.string().optional().describe('Translated measure label (drawn under every metric tile and on chart axes)'),
+      description: z.string().optional()
+        .describe("Translated measure description — overlays the measure's own business definition (ADR-0149 D1)"),
     })).optional().describe('Measure translations keyed by measure name (`DatasetMeasureSchema.name`)'),
   })).optional().describe('Analytics dataset translations keyed by dataset name'),
 

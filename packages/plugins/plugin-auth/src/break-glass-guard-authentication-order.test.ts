@@ -109,8 +109,8 @@ async function seedDeployment() {
   ]) {
     // [#11739] default posture invite_only: users beyond the first enter
     // through the invitation carve-out (see audience-gate-test-support).
-    inviteForAudienceGate(engine, email);
-    const res = await post(manager, '/sign-up/email', { email, password: PASSWORD, name });
+    const invitationId = await inviteForAudienceGate(engine, email);
+    const res = await post(manager, '/sign-up/email', { email, password: PASSWORD, name, invitationId });
     expect(res.status, `sign-up ${email}: ${await res.clone().text()}`).toBe(200);
   }
 

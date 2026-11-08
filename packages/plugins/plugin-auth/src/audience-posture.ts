@@ -56,12 +56,21 @@
  * `invite_only` means BY INVITATION — not "no new users". better-auth's
  * organization invitation flow requires the invitee to hold an account before
  * `accept-invitation`, and for a brand-new invitee that account comes from the
- * self-serve sign-up route. So a self-serve creation whose email holds a
- * PENDING, unexpired `sys_invitation` row is admitted under every posture
- * (under `email_domain` an explicit invitation also trumps the domain list —
- * an operator inviting an external contractor must not dead-end them).
- * Without this carve-out the posture would be "admin-create only" and the
- * invitation surface would be dead for new users — the invite dead-end class.
+ * self-serve sign-up route. So a self-serve creation holding a PENDING,
+ * unexpired `sys_invitation` row is admitted under every posture (under
+ * `email_domain` an explicit invitation also trumps the domain list — an
+ * operator inviting an external contractor must not dead-end them). Without
+ * this carve-out the posture would be "admin-create only" and the invitation
+ * surface would be dead for new users — the invite dead-end class.
+ *
+ * What "holding" means is {@link invitationProofFor}'s answer. Under
+ * `invite_only` a self-serve sign-up is admitted only by the invitation it
+ * presents: an email-and-password sign-up presents the invitation's id (the
+ * one its accept link carries, `presented-invitation.ts`), and an address
+ * alone is refused like any uninvited sign-up. A creation whose own flow
+ * proved the mailbox (magic link, email OTP), or whose identity provider
+ * verified the address, is matched by address. `open` and `email_domain`
+ * match every creation by address.
  *
  * ## Pinned domain-matching rules (`email_domain`)
  *
@@ -461,7 +470,10 @@ export interface AudienceAdmissionInput {
   creationClass: AudienceCreationClass;
   /** The would-be user's email, as the creation path carries it. */
   email: string | undefined;
-  /** A pending, unexpired `sys_invitation` row exists for this email. */
+  /**
+   * The creation holds a pending, unexpired `sys_invitation` row, by the proof
+   * {@link invitationProofFor} asks of it.
+   */
   hasPendingInvitation: boolean;
   /**
    * No user exists yet — the first-run owner wizard / seeded admin creating
@@ -476,6 +488,41 @@ export interface AudienceAdmissionInput {
    * creation, an `oidcProviders` entry included.
    */
   ssoProvider?: { allowJit: boolean };
+}
+
+/**
+ * What a creation must show for the invitation carve-out to answer for it:
+ *
+ * - `presented` — the request presents the invitation itself, its id, and
+ *   that row is pending, unexpired and addressed to the creation's email
+ *   (`isPresentedInvitationPending`);
+ * - `address` — a pending, unexpired invitation is addressed to the
+ *   creation's email (`AuthManager#hasPendingInvitationFor`);
+ * - `none` — no invitation admits it.
+ */
+export type InvitationProof = 'presented' | 'address' | 'none';
+
+/**
+ * Which {@link InvitationProof} the carve-out asks of a creation. Under a
+ * valid `invite_only` posture a self-serve email-and-password sign-up must
+ * present the invitation, and a self-serve OAuth creation is matched by
+ * address only when the identity provider verified it (`emailVerified`
+ * `true`). Magic link and email OTP create an account only after the mailbox
+ * answered, so they keep the address match, as does every other method (a
+ * phone or anonymous creation carries no invited address to match), the
+ * `provider` class, and every creation under `open` and `email_domain`.
+ */
+export function invitationProofFor(input: {
+  audience: ResolvedAudience;
+  creationClass: AudienceCreationClass;
+  method: unknown;
+  emailVerified: unknown;
+}): InvitationProof {
+  const { audience, creationClass, method, emailVerified } = input;
+  if (audience.invalid || audience.posture !== 'invite_only' || creationClass !== 'self-serve') return 'address';
+  if (method === 'email-password') return 'presented';
+  if (method === 'oauth') return emailVerified === true ? 'address' : 'none';
+  return 'address';
 }
 
 /** The refusal message for an unknown user arriving through an SSO provider under `invite_only`. */

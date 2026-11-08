@@ -51,12 +51,12 @@ export async function bootMintFixture(
   } as any);
 
   const email = 'mint.23772@example.com';
-  await inviteForAudienceGate(manager, email);
+  const invitationId = await inviteForAudienceGate(manager, email);
   const res = await manager.handleRequest(
     new Request(`${origin}${MINT_BASE}/sign-up/email`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', origin },
-      body: JSON.stringify({ email, password: PASSWORD, name: 'Mint Human' }),
+      body: JSON.stringify({ email, password: PASSWORD, name: 'Mint Human', invitationId }),
     }),
   );
   if (res.status !== 200) throw new Error(`fixture sign-up answered ${res.status}: ${await res.text()}`);

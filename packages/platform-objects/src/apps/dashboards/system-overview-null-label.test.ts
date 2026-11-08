@@ -36,6 +36,7 @@ describe('System Overview: the null-user bucket reads "System"', () => {
       'pt-BR': 'Sistema',
       ru: 'Система',
       de: 'System',
+      ko: '시스템',
     });
   });
 
