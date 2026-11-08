@@ -146,7 +146,7 @@ const STUDIO_EN: Record<string, string> = {
   'perm.cel.type.unknown': 'Unknown',
   'perm.cel.type.unknownHint':
     'the engine cannot prove a single type. Wrap operands in double() / int() / string() to pin it — only proven-Number formulas are offered as dataset measures.',
-  'perm.cel.saveBlocked': 'Fix the CEL syntax errors before saving.',
+  'perm.cel.saveBlocked': 'Fix the expression errors before saving.',
   // The editor's inspector-blocked Save title (objectui#6900, ruling 5831744213):
   // that channel carries more than CEL faults, so its copy names no one kind.
   'perm.inspector.saveBlocked': 'Fix the issues shown in the inspector before saving.',

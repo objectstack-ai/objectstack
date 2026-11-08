@@ -104,7 +104,7 @@ import { runRegisterSsoProviderFromForm, runRegisterSamlProviderFromForm, runReq
 import { runResendVerificationEmail } from './send-verification-email.js';
 import { runSysSessionRevoke, sysSessionRevokeDepsFor } from './sys-session-revoke.js';
 import { oneAccountReadFaultAtMount, oneAccountRefusalAtMount } from './one-account-per-request.js';
-import { resolveHandoffSignInEntry, runOneTimeTokenHandoff } from './one-time-token-handoff.js';
+import { answerOneTimeTokenHandoff } from './one-time-token-handoff.js';
 import { readJsonRequestBody } from './request-json-body.js';
 import {
   seedCreatedOrganizationCurrency,
@@ -4741,45 +4741,33 @@ export class AuthPlugin implements Plugin {
     // navigation is refused (ruling A). A page navigation without such a session
     // goes to this deployment's sign-in page and comes back, so the app opens this
     // route and never names the Console's. The reasons for every answer live in
-    // `one-time-token-handoff.ts`. Ledgered in auth-route-ledger.ts.
+    // `one-time-token-handoff.ts`, whose `answerOneTimeTokenHandoff` is this
+    // route's whole body and the package export a host that forwards the auth
+    // routes to a manager it did not mount calls. Ledgered in auth-route-ledger.ts.
     let reportedNoHandoffSignInPage = false;
     rawApp.get(`${basePath}/one-time-token/handoff`, async (c: any) => {
       try {
-        const manager = this.authManager!;
-        const answer = await runOneTimeTokenHandoff(
+        const answer = await answerOneTimeTokenHandoff(
+          this.authManager!,
           {
-            registeredSchemes: manager.getRegisteredAppSchemes(),
-            sessionCreatedAt: async (headers) => {
-              const api: any = await manager.getApi();
-              const live = await api.getSession({ headers });
-              const createdAt = live?.session?.createdAt;
-              return createdAt ? new Date(createdAt) : null;
-            },
-            generate: async (headers) => {
-              const api: any = await manager.getApi();
-              return api.generateOneTimeToken({ headers });
-            },
-            signInEntry: (headers) =>
-              resolveHandoffSignInEntry({
-                signInPageUrl: manager.getConsoleUrl('/login'),
-                authBaseUrl: manager.getAuthIssuer(),
-                authMountPath: basePath,
-                requestUrl: c.req.url,
-                requestHost: headers.get('host'),
-                server: rawApp,
-                serverEnv: c.env,
-                onUnserved: (path, reason) => {
-                  if (reportedNoHandoffSignInPage) return;
-                  reportedNoHandoffSignInPage = true;
-                  ctx.logger.warn(
-                    `[AuthPlugin] one-time-token/handoff: this server does not serve a sign-in page at ${path} (${reason}), ` +
-                      'so a signed-out browser that opens the mobile sign-in hand-off sees a JSON 401 instead of a sign-in form. ' +
-                      'Mount the Console, or set uiBasePath to where it is mounted. Reported once.',
-                  );
-                },
-              }),
+            url: c.req.url,
+            headers: c.req.raw.headers,
+            queries: (c.req.queries() ?? {}) as Record<string, string[]>,
           },
-          { queries: (c.req.queries() ?? {}) as Record<string, string[]>, headers: c.req.raw.headers },
+          {
+            authMountPath: basePath,
+            server: rawApp,
+            serverEnv: c.env,
+            onUnserved: (path, reason) => {
+              if (reportedNoHandoffSignInPage) return;
+              reportedNoHandoffSignInPage = true;
+              ctx.logger.warn(
+                `[AuthPlugin] one-time-token/handoff: this server does not serve a sign-in page at ${path} (${reason}), ` +
+                  'so a signed-out browser that opens the mobile sign-in hand-off sees a JSON 401 instead of a sign-in form. ' +
+                  'Mount the Console, or set uiBasePath to where it is mounted. Reported once.',
+              );
+            },
+          },
         );
         if (answer.status === 302) {
           return new Response(null, { status: 302, headers: answer.headers });

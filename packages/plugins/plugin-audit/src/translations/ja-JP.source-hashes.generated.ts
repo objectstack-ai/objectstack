@@ -20,6 +20,7 @@
 export const jaJPGeneratedSourceHashes: Readonly<Record<string, string>> = {
   "objects.sys_activity.fields.type.help": "5d8df777db464241",
   "objects.sys_activity.fields.url.label": "2203b0b9f72534f7",
+  "objects.sys_audit_log.fields.action.options.package_unmanaged_import": "676d7ce8c9d1fda4",
   "objects.sys_comment_reaction.description": "d0fe7e44049573c2",
   "objects.sys_comment_reaction.fields.comment_id.help": "054975bf4ebc079c",
   "objects.sys_comment_reaction.fields.comment_id.label": "98e6afea98d2698b",

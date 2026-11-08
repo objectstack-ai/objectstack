@@ -2167,6 +2167,16 @@ export type ProvenanceWaiver = z.input<typeof ProvenanceWaiverSchema>;
 export const PROVENANCE_WAIVERS: readonly ProvenanceWaiver[] = [
   {
     package: '@objectstack/metadata-core',
+    code: 'SCHEMA_UPGRADE_CONFIRMATION_REQUIRED',
+    registeredUnder: '@objectstack/cloud-connection',
+    reason: 'Shared verdict one package over (#31526): metadata-core\'s `package-upgrade-verdict.ts` ' +
+      'defines the constant beside `schemaUpgradeVerdict` so every install door applies one rule and ' +
+      'mints one token, but metadata-core has no HTTP door. The refusal ships on the wire from ' +
+      'install-local\'s own Hono route (`marketplace-install-local-plugin.ts`), the cloud-connection ' +
+      'row\'s emitter, which imports the constant; a host\'s install door forwards the same verdict.',
+  },
+  {
+    package: '@objectstack/metadata-core',
     code: 'UPDATE_ID_MISMATCH',
     registeredUnder: '@objectstack/objectql',
     reason: 'Shared constructor one package over: metadata-core\'s ' +

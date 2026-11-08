@@ -279,6 +279,17 @@ const en = {
     // Under an empty field that a visible update action's static `patch` would
     // make required (objectstack#28382). `{{action}}` is the action's label.
     requiredForAction: 'Required to run “{{action}}”.',
+    // objectstack#28104 — the marker under a create-form field an AI chat
+    // draft filled (the record-write card's "Open the full form"), shown until
+    // the person edits the field, and the page notice above such a form.
+    aiSuggested: 'AI suggestion',
+    aiDraftNotice: 'AI filled in the fields marked “AI suggestion” from the chat. Nothing is saved until you check them and save.',
+    // objectstack#28106 — on an edit form opened on an AI chat update's
+    // proposed values: the stored value each change replaces, the word for
+    // an empty one, and the per-field revert.
+    aiBefore: 'Was: {{value}}',
+    aiBeforeEmpty: 'empty',
+    aiRevert: 'Revert',
     // The size-limit hint the flat `ObjectForm` appends to a `file` or `image`
     // field's description when the field declares `maxSize` (objectui#12156).
     // `{{size}}` is the formatted limit ("10.0 MB"); only the words translate.
@@ -481,6 +492,18 @@ const en = {
       notConfigured: '{{value}} (not configured)',
       notInList: '{{value}} (not in the list)',
       useTyped: 'Use "{{value}}"',
+    },
+    quietHours: {
+      timeZone: 'Time zone',
+      start: 'Start',
+      end: 'End',
+      range: '{{start}} to {{end}} ({{zone}})',
+      pastMidnight: 'Runs past midnight and ends the next day.',
+      sameTimes: 'Start and end are the same, so nothing is held.',
+      incomplete: 'Enter both a start and an end time.',
+      unreadable: 'This value is not a time range this control can show. It is kept as stored.',
+      replace: 'Set a time range',
+      zoneNotInList: '{{zone}} (not in the list)',
     },
     recipient: {
       selectTypeFirst: 'Select a recipient type first.',
@@ -830,6 +853,7 @@ const en = {
       noSavedTemplates: 'No saved templates',
       noneOption: '— None —',
       saveCurrent: 'Save current',
+      saveCurrentNeedsMapping: 'Map at least one column to save a template.',
       templateName: 'Template name',
       save: 'Save',
       deleteTemplate: 'Delete template',
@@ -1023,6 +1047,10 @@ const en = {
     eventTitlePlaceholder: 'What\'s this event about?',
     creating: 'Creating…',
     titleRequired: 'Title is required',
+    // A drag-to-reschedule the server refused because the record is gone for
+    // this session: deleted, or no longer visible to it. `{{object}}` is the
+    // object's label; with none to show, `form.recordNotFoundOrHidden` is used.
+    rescheduleNotFound: 'This {{object}} record no longer exists, or you no longer have access to it.',
     a11y: {
       region: 'Calendar',
       grid: 'Calendar grid',
@@ -2367,6 +2395,23 @@ const en = {
       deprecatedBadge: 'Deprecated',
       deprecatedBadgeReplacedBy: 'Deprecated → {{replacedBy}}',
       unsupportedSpecifierType: 'Unsupported specifier type: {{type}}',
+      // The `map` control (objectstack#31391): keyed rows over the keys the server
+      // serves. `mapAddRow` is the picker that adds a row by its key, `{{key}}` in
+      // `mapRemoveRow` the row's key as shown; `mapKeyNotOffered` marks a stored key
+      // the server no longer offers, with `mapKeyNotOfferedHint` as its title;
+      // `mapUnitLabel` names a duration cell's unit select, `{{column}}` its header,
+      // and `mapUnitHours`..`mapUnitYears` are the h, d, w and y units it offers.
+      mapAddRow: 'Add a row',
+      mapRemoveRow: 'Remove {{key}}',
+      mapKeyNotOffered: 'Not offered',
+      mapKeyNotOfferedHint: 'This key is not one the setting admits now. Saving refuses it until the row is removed or given another key.',
+      mapNoRows: 'No rows',
+      mapSearchKey: 'Search…',
+      mapUnitLabel: '{{column}} unit',
+      mapUnitHours: 'hours',
+      mapUnitDays: 'days',
+      mapUnitWeeks: 'weeks',
+      mapUnitYears: 'years',
       // A settings value that misses its type's declared format blocks Save
       // (objectui#13287). `email` and `url` reuse `validation.email` and
       // `validation.url`; these two name what a phone number and a colour take.
@@ -4359,6 +4404,7 @@ const en = {
       organizationExists: 'Organization already exists',
       slugTaken: 'That URL slug is already taken',
       notAllowedToCreate: 'You are not allowed to create a new organization',
+      organizationLimitReached: 'You have reached the limit on organizations you can create. Organizations you were invited to do not count toward it.',
       notTheRecipient: 'You are not the recipient of the invitation',
       invitationNotFound: 'This invitation no longer exists or has expired',
       unknown: 'Something went wrong. Please try again.',

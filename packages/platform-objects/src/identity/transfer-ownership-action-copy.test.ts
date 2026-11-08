@@ -25,6 +25,8 @@ import { zhHantObjects } from '../apps/translations/zh-Hant.objects.generated.js
 import { arObjects } from '../apps/translations/ar.objects.generated.js';
 import { frObjects } from '../apps/translations/fr.objects.generated.js';
 import { ptBRObjects } from '../apps/translations/pt-BR.objects.generated.js';
+import { ruObjects } from '../apps/translations/ru.objects.generated.js';
+import { deObjects } from '../apps/translations/de.objects.generated.js';
 import { SysMember } from './sys-member.object.js';
 
 // [#27948] An action's `description`, each param's `helpText` and each
@@ -87,6 +89,8 @@ const LOCALES = [
   ['ar', arObjects],
   ['fr', frObjects],
   ['pt-BR', ptBRObjects],
+  ['ru', ruObjects],
+  ['de', deObjects],
 ] as const;
 
 describe('sys_member.transfer_ownership — declared copy', () => {

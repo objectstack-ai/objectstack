@@ -22,6 +22,9 @@ import {
   apiKeyLifecyclePolicySourceOf,
   isApiKeyLifecycleRefusalError,
   type RequestAuthService,
+  // [#30237] A write's class (purge → delete, restore/transfer → update): the
+  // one mapping plugin-security's write gates read too.
+  rlsOperationForVerb,
 } from '@objectstack/core';
 import type { EngineMiddleware, OperationContext } from '@objectstack/objectql';
 import type {
@@ -1506,12 +1509,23 @@ export function buildSharingMiddleware(
     // WRITES — gate on the per-VERB check. [ADR-0111 D3] update and delete no
     // longer share a gate: `canEdit` accepts an edit-level share, `canDelete`
     // does not (a share widens which rows a principal reaches, never which
-    // verbs). The middleware picks the gate by `op`.
-    if (op === 'update' || op === 'delete') {
-      const verb: 'update' | 'delete' = op;
+    // verbs). The middleware picks the gate by the write CLASS of `op`
+    // (`rlsOperationForVerb`, #30237): a `purge` is judged as the `delete` it
+    // is, so the permanent delete of a row by id asks `canDelete`, and a bulk
+    // permanent delete is scoped to the rows the caller may delete.
+    const writeClass = rlsOperationForVerb(op);
+    if (writeClass === 'update' || writeClass === 'delete') {
+      const verb: 'update' | 'delete' = writeClass;
       const data: any = ctx.data;
       const options: any = ctx.options;
       const id = inferTargetId(data, options);
+      // [#30237] The recycle bin's own doors — `restore(entryId)`,
+      // `purge(entryId)`, `empty(object)` — dispatch their verb with no id and
+      // no AST: they address no live row, so there is no row to gate and no
+      // query to scope here (the engine checks the entry's owner and the
+      // tenant wall itself). Only a verb that is not update/delete itself
+      // arrives this way; an ordinary update/delete keeps its path below.
+      if (id == null && !ctx.ast && op !== 'update' && op !== 'delete') return next();
       if (id != null) {
         // [#27175] The by-id gate is ONE service method,
         // `SharingService.admitsByIdWrite`, and this middleware refuses exactly

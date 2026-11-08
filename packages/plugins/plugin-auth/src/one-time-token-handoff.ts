@@ -147,6 +147,20 @@
  *
  * `redirect_uri`, `code_challenge`, `code_challenge_method`, each at most
  * once; any other name answers the shared recognition rule's located 400.
+ *
+ * ## One implementation, two mounts
+ *
+ * {@link answerOneTimeTokenHandoff} is the route's whole body, and the only
+ * part of this module the package root publishes. AuthPlugin's own mount calls
+ * it for its manager. A host that serves no AuthPlugin routes and forwards
+ * `/api/v1/auth/*` to a kernel's `AuthManager` instead (a per-environment
+ * kernel with no HTTP server of its own) calls it for the manager it forwards
+ * to. Because the token is minted inside it, inside the challenge scope, such a
+ * host cannot mint the way the second paragraph above says fails closed. The
+ * seams it is built from ({@link runOneTimeTokenHandoff},
+ * {@link withHandoffChallenge}, {@link resolveHandoffSignInEntry} and
+ * {@link oneTimeTokenStoreHasher}) stay unpublished, so no host composes a
+ * second hand-off from them.
  */
 
 import { AsyncLocalStorage } from 'node:async_hooks';
@@ -590,4 +604,74 @@ export async function runOneTimeTokenHandoff(deps: HandoffDeps, request: Handoff
   const { token } = await withHandoffChallenge(challenge.value, () => deps.generate(request.headers));
   target.searchParams.set('token', token);
   return { status: 302, headers: { ...NO_STORE, Location: target.toString() } };
+}
+
+/**
+ * What {@link answerOneTimeTokenHandoff} reads off the auth manager it answers
+ * for. `AuthManager` satisfies it; the members are named here so a host's
+ * manager is not asked for anything the hand-off does not read.
+ */
+export interface OneTimeTokenHandoffManager {
+  /** The registered app schemes ({@link registeredAppSchemesOf}). */
+  getRegisteredAppSchemes(): string[];
+  /** better-auth's server API: `getSession` for the session's age, `generateOneTimeToken` to mint. */
+  getApi(): Promise<unknown>;
+  /** The Console URL of a page; the hand-off asks for `/login`. */
+  getConsoleUrl(path: string): string;
+  /** The canonical origin, any base path, and the auth mount. */
+  getAuthIssuer(): string;
+}
+
+/** The server the hand-off is answered on, which also answers whether it serves a sign-in page. */
+export interface OneTimeTokenHandoffServing {
+  /** The path this server mounts the auth routes at, e.g. `/api/v1/auth`. */
+  authMountPath: string;
+  /** The composed server, asked in-process whether it serves the sign-in page. */
+  server: { fetch(request: Request, env?: unknown): Response | Promise<Response> };
+  /** The transport's bindings `server.fetch` runs under. */
+  serverEnv?: unknown;
+  /** Told why this server serves no sign-in page; the caller says so once. */
+  onUnserved(path: string, reason: string): void;
+}
+
+/**
+ * `GET /api/v1/auth/one-time-token/handoff` for `manager`, answered on
+ * `serving.server`: the one implementation AuthPlugin's mount and a host that
+ * forwards the auth routes to a manager it did not mount both call (see "One
+ * implementation, two mounts" above). The caller turns the answer into its
+ * transport's response: a `302` carries `headers` and no body; every other
+ * status carries `body` as JSON with `headers`.
+ */
+export function answerOneTimeTokenHandoff(
+  manager: OneTimeTokenHandoffManager,
+  request: { url: string; headers: Headers; queries: Record<string, readonly string[]> },
+  serving: OneTimeTokenHandoffServing,
+): Promise<HandoffAnswer> {
+  return runOneTimeTokenHandoff(
+    {
+      registeredSchemes: manager.getRegisteredAppSchemes(),
+      sessionCreatedAt: async (headers) => {
+        const api: any = await manager.getApi();
+        const live = await api.getSession({ headers });
+        const createdAt = live?.session?.createdAt;
+        return createdAt ? new Date(createdAt) : null;
+      },
+      generate: async (headers) => {
+        const api: any = await manager.getApi();
+        return api.generateOneTimeToken({ headers });
+      },
+      signInEntry: (headers) =>
+        resolveHandoffSignInEntry({
+          signInPageUrl: manager.getConsoleUrl('/login'),
+          authBaseUrl: manager.getAuthIssuer(),
+          authMountPath: serving.authMountPath,
+          requestUrl: request.url,
+          requestHost: headers.get('host'),
+          server: serving.server,
+          serverEnv: serving.serverEnv,
+          onUnserved: serving.onUnserved,
+        }),
+    },
+    { queries: request.queries, headers: request.headers },
+  );
 }

@@ -200,9 +200,11 @@ export function ConsoleLayout({
   // `context.surface` (cloud#1610's shape): the object of a list, the object
   // and record id of a record page, the dashboard, report or page. Read off the
   // URL each render, so the next send after a navigation carries the new page.
+  // objectstack#28106 — the query string too: a record open in a list's
+  // detail drawer (`?recordId=`) is the record in view.
   const dockSurface = useMemo(
-    () => consoleChatSurface(location.pathname, hostRoutePaths),
-    [location.pathname, hostRoutePaths],
+    () => consoleChatSurface(location.pathname, hostRoutePaths, location.search),
+    [location.pathname, location.search, hostRoutePaths],
   );
   // The chip's label for an object surface: the object's own translated
   // label, the one its page shows: the served label as given, the bundle only

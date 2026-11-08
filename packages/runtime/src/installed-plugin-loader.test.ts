@@ -44,6 +44,10 @@ import {
 } from './plugin-installation-store.js';
 import { packageStateFileName } from './package-state-store.js';
 import { publicKeyFingerprint, type TrustedKeyResolution } from './plugin-trusted-keys.js';
+// Paid at collection, not inside a clocked case: what the code under test
+// reaches through dynamic `import()`s (`check:test-source-alias`).
+import '@objectstack/objectql';
+import '@objectstack/metadata';
 
 /**
  * A file-system call the test makes throw, by its operation and path; every
@@ -201,9 +205,10 @@ function install(o: InstallOptions = {}): PluginInstallationRecord & { artifactB
 }
 
 /** Load, with the module import counted, so a refusal can be shown to import nothing. */
-async function load(resolveKeys = activeKeys().resolveKeys) {
+async function load(resolveKeys = activeKeys().resolveKeys, extra: { leaveUninstallsPending?: boolean } = {}) {
   const imported: string[] = [];
   const result = await loadInstalledPlugins({
+    ...extra,
     environmentId: ENV,
     resolveKeys,
     wrapBundle: (bundle) => ({ name: 'wrapped', init() {}, bundle }),
@@ -462,6 +467,44 @@ describe('what the import answers', () => {
   });
 });
 
+describe('what an imported plugin declares rides on its answer', () => {
+  it.each([
+    ['refused after its import', 'export default { name: "x", init() {}, providesServices: ["crypto-provider", 7], signature: "ed25519:other:AAAA" };\n', ['crypto-provider']],
+    ['refused after its import, declaring none', 'export default Object.freeze({ name: "x", init() {} });\n', []],
+  ])('%s: declaredServices is what providesServices names', async (_label, entry, declared) => {
+    install({ entry });
+    const out = await load();
+    expect(out.refused).toHaveLength(1);
+    expect(out.refused[0].declaredServices).toEqual(declared);
+  });
+
+  it.each([
+    ['a number', 'export default 42;\n'],
+    ['a class, whose instances would declare', 'export default class Kms { providesServices = ["crypto-provider"]; init() {} }\n'],
+  ])('a refusal of an import that is not an object (%s) carries nothing read', async (_label, entry) => {
+    install({ entry });
+    const out = await load();
+    expect(out.refused).toEqual([expect.objectContaining({ error: 'not_a_plugin' })]);
+    expect('declaredServices' in out.refused[0]).toBe(false);
+  });
+
+  it('a declaration that throws when read is absent, not empty', async () => {
+    install({ entry: 'export default { name: "x", init() {}, signature: "ed25519:other:AAAA", get providesServices() { throw new Error("no"); } };\n' });
+    const out = await load();
+    expect(out.refused).toEqual([expect.objectContaining({ error: 'signature_conflict' })]);
+    expect('declaredServices' in out.refused[0]).toBe(false);
+  });
+
+  it('a plugin refused before its import carries none; a loaded plugin carries its declaration', async () => {
+    install({ id: 'com.acme.sandboxed', manifest: { runtime: 'sandbox' } });
+    install({ id: 'com.acme.fine', entry: 'export default { name: "fine", init() {}, providesServices: ["widgets"] };\n' });
+    const out = await load();
+    expect(out.refused).toEqual([expect.objectContaining({ id: 'com.acme.sandboxed', error: 'runtime_not_dispatched' })]);
+    expect('declaredServices' in out.refused[0]).toBe(false);
+    expect(out.loaded.map((l) => [l.record.id, l.declaredServices])).toEqual([['com.acme.fine', ['widgets']]]);
+  });
+});
+
 describe('disable and uninstall', () => {
   it('skips a disabled install before reading anything of it', async () => {
     const r = install();
@@ -489,6 +532,22 @@ describe('disable and uninstall', () => {
     // The drop forgets the disable, so a later install starts enabled.
     const again = install();
     expect((await load()).loaded.map((l) => l.record.id)).toEqual([again.id]);
+  });
+
+  it('a reader that leaves uninstalls pending removes nothing and loads nothing of one; the next boot finishes it', async () => {
+    const r = install();
+    const fine = install({ id: 'com.acme.fine' });
+    markPluginUninstall(ENV, r.id);
+    const read = await load(undefined, { leaveUninstallsPending: true });
+    expect(read.removed).toEqual([]);
+    expect(read.refused).toEqual([]);
+    expect(read.loaded.map((l) => l.record.id)).toEqual([fine.id]);
+    expect(existsSync(join(r.dir, INSTALLED_ARTIFACT_FILE))).toBe(true);
+    expect(loadPluginInstallations(ENV)).toEqual(expect.arrayContaining([expect.objectContaining({ id: r.id, status: 'uninstall-pending' })]));
+    // CONTROL: the boot's own read finishes it.
+    const booted = await load();
+    expect(booted.removed).toEqual([expect.objectContaining({ kept: false })]);
+    expect(existsSync(r.dir)).toBe(false);
   });
 
   it('keeps a directory another project in this environment still records', async () => {

@@ -25,7 +25,14 @@
  *   that secret is already in the shell that runs them;
  * - the two commands, run through a shell exactly as printed (`os` is the
  *   built entry), write the plan, complete the apply, and the next `os start`
- *   serves the database.
+ *   serves the database;
+ * - ⭐ #31488: a boot whose database came from `-d` or from a `--home` home
+ *   names that database in both commands (`--database-url`), so run verbatim
+ *   in the same directory with `OS_DATABASE_URL` unset they plan the database
+ *   that was refused — not the project's own, which this fixture also holds;
+ * - CONTROLs: the project's default database, and a home exported as
+ *   `OS_HOME`, are named as before (no `--database-url`), and their bare
+ *   commands plan the refused database too.
  *
  * ## The fixture
  *
@@ -44,7 +51,7 @@
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { spawn, type ChildProcess } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -92,6 +99,9 @@ let home: string;
 let db: string;
 let staged = false;
 const runs: Record<string, Run | Error> = {};
+/** #31488: the homes of the `--home` scenario and the exported-`OS_HOME` control. */
+let flagHome: string;
+let envHome: string;
 
 /** The environment every run gets: a production boot, no operator secret, no console. */
 function env(overrides: Record<string, string | undefined> = {}): Record<string, string | undefined> {
@@ -108,6 +118,8 @@ function env(overrides: Record<string, string | undefined> = {}): Record<string,
     AUTH_SECRET: undefined,
     BETTER_AUTH_SECRET: undefined,
     OS_INTERNAL_AUTH_SECRET_FILE: undefined,
+    OS_INTERNAL_CEREMONY_DATABASE_URL: undefined,
+    OS_HOME: undefined,
     OS_MODE: undefined,
     NODE_ENV: undefined,
     ...overrides,
@@ -172,14 +184,37 @@ async function stopGroup(child: ChildProcess): Promise<void> {
 
 /** `os start` on the fixture database, with its home outside the app directory. */
 const start = (): string[] => [process.execPath, CLI, 'start', '-d', 'file:A.db', '-p', KERNEL_ASSIGNED_PORT, '--home', home, '--no-ui'];
+/** `os start` with no database flag: `extra` picks the home (`--home H`), or none for the project's own. */
+const startOn = (...extra: string[]): string[] => [process.execPath, CLI, 'start', '-p', KERNEL_ASSIGNED_PORT, '--no-ui', ...extra];
 
 /**
  * A printed command, run through a shell exactly as printed: `os` is the built
  * entry, `PLAN` the plan file this run writes.
  */
-const shell = (command: string): string[] => [
-  'bash', '-c', `os() { "${process.execPath}" "${CLI}" "$@"; }; ${command.replaceAll('PLAN', 'plan.json')}`,
+const shell = (command: string, plan = 'plan.json'): string[] => [
+  'bash', '-c', `os() { "${process.execPath}" "${CLI}" "$@"; }; ${command.replaceAll('PLAN', plan)}`,
 ];
+
+/**
+ * The database file a written plan names (`database`), read from the plan file
+ * and resolved against the directory the plan ran in (the label keeps a
+ * relative `-d file:A.db` relative).
+ */
+function plannedDatabase(plan: string): string {
+  const label = String((JSON.parse(readFileSync(join(dir, plan), 'utf8')) as { database?: unknown }).database);
+  return resolve(dir, label.replace(/^file:/, ''));
+}
+
+/** Copy the staged 17.x database to `file`, closed and whole (`VACUUM INTO`). */
+function copyStaged(file: string): void {
+  mkdirSync(resolve(file, '..'), { recursive: true });
+  const handle = new Database(db);
+  try {
+    handle.prepare('VACUUM INTO ?').run(file);
+  } finally {
+    handle.close();
+  }
+}
 
 async function record(name: string, step: () => Promise<Run>): Promise<void> {
   try {
@@ -223,6 +258,8 @@ beforeAll(async () => {
   requireBuiltCli(RUN_JS_RESOLVES_FROM_DIST);
   dir = mkdtempSync(join(tmpdir(), 'os-start-ownership-'));
   home = mkdtempSync(join(tmpdir(), 'os-start-ownership-home-'));
+  flagHome = mkdtempSync(join(tmpdir(), 'os-start-ownership-flag-home-'));
+  envHome = mkdtempSync(join(tmpdir(), 'os-start-ownership-env-home-'));
   writeDefineStackConfig(dir, SCAFFOLD);
   db = join(dir, 'A.db');
 
@@ -244,14 +281,46 @@ beforeAll(async () => {
   } catch {
     return;
   }
-  await record('plan', () => run(shell(commands.plan), env({ OS_DATABASE_URL: 'file:A.db' })));
-  await record('apply', () => run(shell(commands.apply), env({ OS_DATABASE_URL: 'file:A.db' })));
+  // #31488: the same 17.x shape at three more places — a `--home` home, a home
+  // exported as `OS_HOME`, and the project's own default — copied BEFORE the
+  // operator's commands run, so a command that names no database finds the
+  // project's file and plans that one instead of the refused database.
+  copyStaged(join(flagHome, 'data', 'objectstack.db'));
+  copyStaged(join(envHome, 'data', 'objectstack.db'));
+  copyStaged(join(dir, '.objectstack', 'data', 'objectstack.db'));
+
+  // The three refusals and their plans run FIRST: a plan only reads, and the
+  // `-d` scenario's apply below must not reach the copies before the controls
+  // are judged (on a tree where the apply lands on the project's database,
+  // the default control would otherwise boot instead of refusing).
+  await record('refusedFlagHome', () => run(startOn('--home', flagHome), env()));
+  await record('refusedDefault', () => run(startOn(), env()));
+  await record('refusedEnvHome', () => run(startOn(), env({ OS_HOME: envHome })));
+  for (const [refusal, planRun, plan, planEnv] of [
+    ['refusedFlagHome', 'planFlagHome', 'plan-flag-home.json', env()],
+    ['refusedDefault', 'planDefault', 'plan-default.json', env()],
+    ['refusedEnvHome', 'planEnvHome', 'plan-env-home.json', env({ OS_HOME: envHome })],
+  ] as const) {
+    const refusedRun = runs[refusal];
+    if (refusedRun instanceof Error || refusedRun === undefined) continue;
+    let named: { plan: string; apply: string };
+    try {
+      named = namedCommands(refusedRun.output);
+    } catch {
+      continue;
+    }
+    await record(planRun, () => run(shell(named.plan, plan), planEnv));
+  }
+
+  // The operator's shell: no OS_DATABASE_URL (env() unsets it), as the refusal printed them.
+  await record('plan', () => run(shell(commands.plan), env()));
+  await record('apply', () => run(shell(commands.apply), env()));
   await record('startedAfter', () => run(start(), env(), READY));
-}, ALL_RUNS_TIMEOUT_MS);
+}, ALL_RUNS_TIMEOUT_MS * 2);
 
 afterAll(async () => {
   for (const child of groups) await stopGroup(child);
-  for (const path of [dir, home]) {
+  for (const path of [dir, home, flagHome, envHome]) {
     try { rmSync(path, { recursive: true, force: true }); } catch { /* ignore */ }
   }
 });
@@ -266,7 +335,8 @@ describe('`os start` names an ownership ceremony that runs with the secret it se
     const { output, code } = recorded('refused');
     expect(code, output.slice(-4000)).toBe(1);
     const secretFile = join(home, 'auth-secret');
-    const exported = `OS_AUTH_SECRET="$(cat ${secretFile})" os migrate organization-ownership`;
+    // #31488: `-d file:A.db` is named, so the commands plan the database this boot refused.
+    const exported = `OS_AUTH_SECRET="$(cat ${secretFile})" os migrate organization-ownership --database-url file:A.db`;
     expect(namedCommands(output)).toEqual({
       plan: `${exported} --out PLAN`,
       apply: `${exported} --apply --plan-file PLAN --backup-taken`,
@@ -280,8 +350,8 @@ describe('`os start` names an ownership ceremony that runs with the secret it se
     const { output, code } = recorded('refusedWithOperatorSecret');
     expect(code, output.slice(-4000)).toBe(1);
     expect(namedCommands(output)).toEqual({
-      plan: 'os migrate organization-ownership --out PLAN',
-      apply: 'os migrate organization-ownership --apply --plan-file PLAN --backup-taken',
+      plan: 'os migrate organization-ownership --database-url file:A.db --out PLAN',
+      apply: 'os migrate organization-ownership --database-url file:A.db --apply --plan-file PLAN --backup-taken',
     });
     expect(output).not.toContain('OS_AUTH_SECRET="$(cat');
   });
@@ -290,6 +360,8 @@ describe('`os start` names an ownership ceremony that runs with the secret it se
     const plan = recorded('plan');
     expect(plan.code, plan.output.slice(-4000)).toBe(0);
     expect(existsSync(join(dir, 'plan.json'))).toBe(true);
+    // ⭐ #31488: with OS_DATABASE_URL unset, the plan is of the refused database, not the project's own.
+    expect(plannedDatabase('plan.json')).toBe(join(dir, 'A.db'));
     const apply = recorded('apply');
     expect(apply.code, apply.output.slice(-6000)).toBe(0);
     expect(apply.output).toContain('The ceremony is complete');
@@ -300,5 +372,45 @@ describe('`os start` names an ownership ceremony that runs with the secret it se
 
   it('…and the next `os start` serves the upgraded database', () => {
     expect(recorded('startedAfter').output).toMatch(READY);
+  });
+});
+
+describe('#31488 — the refusal names the database it refused, and the commands plan it', () => {
+  const flagHomeFile = (): string => join(flagHome, 'data', 'objectstack.db');
+
+  it('⭐ `--home H`: both commands name H\'s database, and run verbatim they plan it', () => {
+    const { output, code } = recorded('refusedFlagHome');
+    expect(code, output.slice(-4000)).toBe(1);
+    const named = `OS_AUTH_SECRET="$(cat ${join(flagHome, 'auth-secret')})" os migrate organization-ownership ` +
+      `--database-url file:${flagHomeFile()}`;
+    expect(namedCommands(output)).toEqual({
+      plan: `${named} --out PLAN`,
+      apply: `${named} --apply --plan-file PLAN --backup-taken`,
+    });
+    const plan = recorded('planFlagHome');
+    expect(plan.code, plan.output.slice(-4000)).toBe(0);
+    expect(plannedDatabase('plan-flag-home.json')).toBe(flagHomeFile());
+  });
+
+  it('CONTROL: the project\'s own database is named as before, and its bare commands plan it', () => {
+    const { output, code } = recorded('refusedDefault');
+    expect(code, output.slice(-4000)).toBe(1);
+    const exported = `OS_AUTH_SECRET="$(cat ${join(dir, '.objectstack', 'auth-secret')})" os migrate organization-ownership`;
+    expect(namedCommands(output)).toEqual({
+      plan: `${exported} --out PLAN`,
+      apply: `${exported} --apply --plan-file PLAN --backup-taken`,
+    });
+    const plan = recorded('planDefault');
+    expect(plan.code, plan.output.slice(-4000)).toBe(0);
+    expect(plannedDatabase('plan-default.json')).toBe(join(dir, '.objectstack', 'data', 'objectstack.db'));
+  });
+
+  it('CONTROL: a home exported as OS_HOME is named as before, and with it exported the commands plan its database', () => {
+    const { output, code } = recorded('refusedEnvHome');
+    expect(code, output.slice(-4000)).toBe(1);
+    expect(namedCommands(output).plan).not.toContain('--database-url');
+    const plan = recorded('planEnvHome');
+    expect(plan.code, plan.output.slice(-4000)).toBe(0);
+    expect(plannedDatabase('plan-env-home.json')).toBe(join(envHome, 'data', 'objectstack.db'));
   });
 });

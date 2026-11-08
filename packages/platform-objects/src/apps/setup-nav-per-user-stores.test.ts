@@ -114,9 +114,11 @@ describe('(2) the User page lists each per-user store, keyed to its record (#238
       ar: 'التفضيلات',
       fr: 'Préférences',
       'pt-BR': 'Preferências',
+      ru: 'Предпочтения',
+      de: 'Präferenzen',
     });
     expect((tabOf('sys_account')?.label as Rec)?.en).toBe('Linked Accounts');
-    expect(Object.keys((tabOf('sys_account')?.label as Rec) ?? {}).sort()).toEqual(['ar', 'en', 'es-ES', 'fr', 'ja-JP', 'pt-BR', 'zh-CN', 'zh-Hant']);
+    expect(Object.keys((tabOf('sys_account')?.label as Rec) ?? {}).sort()).toEqual(['ar', 'de', 'en', 'es-ES', 'fr', 'ja-JP', 'pt-BR', 'ru', 'zh-CN', 'zh-Hant']);
   });
 });
 

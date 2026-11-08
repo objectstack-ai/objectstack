@@ -98,6 +98,27 @@ import {
   parseIndexDdl,
   type PhysicalIndex,
 } from './schema-drift.js';
+import {
+  listMssqlTables,
+  mssqlColumnOrder,
+  mssqlColumns,
+  mssqlForeignKeys,
+  mssqlIndexes,
+  mssqlPrimaryKey,
+  mssqlSingleColumnUniques,
+  splitMssqlQualifiedName,
+  type MssqlTableName,
+} from './sql-driver-mssql-introspection.js';
+
+/**
+ * The SQL Server table a reader was handed (#31327): an explicit `schema`
+ * wins; otherwise a `schema.table` key (the shape the mssql arm of
+ * `introspectSchema` lists) is split at its first dot, and a bare name reads
+ * in the session's default schema.
+ */
+function mssqlTableName(tableName: string, schema?: string): MssqlTableName {
+  return schema !== undefined ? { schema, table: tableName } : splitMssqlQualifiedName(tableName);
+}
 
 /**
  * The `SqlDriver` members the functions below read — every one of them, and
@@ -114,6 +135,7 @@ export interface IntrospectionHost {
   introspectForeignKeys: SqlDriver['introspectForeignKeys'];
   introspectPrimaryKeys: SqlDriver['introspectPrimaryKeys'];
   introspectUniqueConstraints: SqlDriver['introspectUniqueConstraints'];
+  readonly isMssql: SqlDriver['isMssql'];
   readonly isMysql: SqlDriver['isMysql'];
   readonly isOracle: SqlDriver['isOracle'];
   readonly isPostgres: SqlDriver['isPostgres'];
@@ -123,7 +145,8 @@ export interface IntrospectionHost {
 }
 
 /** The body of `SqlDriver#introspectColumnOrder`; the method's docblock there is its contract. */
-export async function introspectColumnOrder(this: Pick<IntrospectionHost, 'isMysql' | 'isPostgres' | 'isSqlite' | 'knex'>, tableName: string, schema?: string): Promise<string[]> {
+export async function introspectColumnOrder(this: Pick<IntrospectionHost, 'isMssql' | 'isMysql' | 'isPostgres' | 'isSqlite' | 'knex'>, tableName: string, schema?: string): Promise<string[]> {
+  if (this.isMssql) return mssqlColumnOrder(this.knex, mssqlTableName(tableName, schema));
   if (this.isPostgres) {
     const result = await this.knex.raw(
       `SELECT column_name
@@ -159,7 +182,11 @@ export async function introspectColumnOrder(this: Pick<IntrospectionHost, 'isMys
 }
 
 /** The body of `SqlDriver#introspectColumns`; the method's docblock there is its contract. */
-export async function introspectColumns(this: Pick<IntrospectionHost, 'introspectColumnOrder' | 'isSqlite' | 'knex'>, tableName: string, schema?: string): Promise<IntrospectedColumn[]> {
+export async function introspectColumns(this: Pick<IntrospectionHost, 'introspectColumnOrder' | 'isMssql' | 'isSqlite' | 'knex'>, tableName: string, schema?: string): Promise<IntrospectedColumn[]> {
+  // SQL Server (#31327): knex's `columnInfo()` on this client hard-codes `dbo`
+  // for an unnamed schema and reports a `(max)` column's length as `-1`; the
+  // mssql arm reads the same view with the session's default schema instead.
+  if (this.isMssql) return mssqlColumns(this.knex, mssqlTableName(tableName, schema));
   let catalog = this.knex(tableName);
   if (schema !== undefined) catalog = catalog.withSchema(schema);
   const columnInfo = (await catalog.columnInfo()) as Record<string, any>;
@@ -216,7 +243,7 @@ export async function introspectColumns(this: Pick<IntrospectionHost, 'introspec
 
 /** The body of `SqlDriver#introspectForeignKeys`; the method's docblock there is its contract. */
 export async function introspectForeignKeys(
-  this: Pick<IntrospectionHost, 'isMysql' | 'isPostgres' | 'isSqlite' | 'knex'>,
+  this: Pick<IntrospectionHost, 'isMssql' | 'isMysql' | 'isPostgres' | 'isSqlite' | 'knex'>,
   tableName: string,
   opts: {
     /**
@@ -230,6 +257,10 @@ export async function introspectForeignKeys(
   const foreignKeys: IntrospectedForeignKey[] = [];
 
   try {
+    if (this.isMssql) {
+      foreignKeys.push(...(await mssqlForeignKeys(this.knex, mssqlTableName(tableName))));
+      return foreignKeys;
+    }
     if (this.isPostgres) {
       // Read from `pg_constraint`, not `information_schema` (#11324). The
       // three-view join this replaced was wrong in two independent ways, both
@@ -456,7 +487,7 @@ export async function introspectForeignKeys(
 
 /** The body of `SqlDriver#introspectPrimaryKeys`; the method's docblock there is its contract. */
 export async function introspectPrimaryKeys(
-  this: Pick<IntrospectionHost, 'isMysql' | 'isPostgres' | 'isSqlite' | 'knex'>,
+  this: Pick<IntrospectionHost, 'isMssql' | 'isMysql' | 'isPostgres' | 'isSqlite' | 'knex'>,
   tableName: string,
   opts: {
     /**
@@ -470,6 +501,10 @@ export async function introspectPrimaryKeys(
   const primaryKeys: string[] = [];
 
   try {
+    if (this.isMssql) {
+      primaryKeys.push(...(await mssqlPrimaryKey(this.knex, mssqlTableName(tableName))));
+      return primaryKeys;
+    }
     if (this.isPostgres) {
       // `i.indkey` is an `int2vector` holding the key's attnums IN KEY ORDER,
       // but `a.attnum = ANY(i.indkey)` is a MEMBERSHIP test: it reads the
@@ -582,7 +617,7 @@ export async function introspectPrimaryKeys(
 
 /** The body of `SqlDriver#introspectUniqueConstraints`; the method's docblock there is its contract. */
 export async function introspectUniqueConstraints(
-  this: Pick<IntrospectionHost, 'isMysql' | 'isPostgres' | 'isSqlite' | 'knex'>,
+  this: Pick<IntrospectionHost, 'isMssql' | 'isMysql' | 'isPostgres' | 'isSqlite' | 'knex'>,
   tableName: string,
   opts: {
     /**
@@ -596,6 +631,9 @@ export async function introspectUniqueConstraints(
   const members: UniqueConstraintMember[] = [];
 
   try {
+    if (this.isMssql) {
+      return await mssqlSingleColumnUniques(this.knex, mssqlTableName(tableName));
+    }
     if (this.isPostgres) {
       // ⚠️ This query was INVALID until #11161: it selected `c.column_name`
       // while the only aliases in scope were `tc` and `ccu`, so every
@@ -727,7 +765,7 @@ export async function introspectUniqueConstraints(
 }
 
 /** The body of `SqlDriver#introspectSchema`; the method's signature there is its contract. */
-export async function introspectSchema(this: Pick<IntrospectionHost, 'dialectName' | 'introspectColumns' | 'introspectForeignKeys' | 'introspectPrimaryKeys' | 'introspectUniqueConstraints' | 'isMysql' | 'isOracle' | 'isPostgres' | 'isSqlite' | 'knex'>): Promise<IntrospectedSchema> {
+export async function introspectSchema(this: Pick<IntrospectionHost, 'dialectName' | 'introspectColumns' | 'introspectForeignKeys' | 'introspectPrimaryKeys' | 'introspectUniqueConstraints' | 'isMssql' | 'isMysql' | 'isOracle' | 'isPostgres' | 'isSqlite' | 'knex'>): Promise<IntrospectedSchema> {
   // Oracle reads its own catalog views, four statements for the whole schema
   // (ADR-0015 §4.6) — see `sql-driver-oracle-introspection.ts`.
   if (this.isOracle) return introspectOracleSchema(this.knex, this.dialectName);
@@ -781,6 +819,14 @@ export async function introspectSchema(this: Pick<IntrospectionHost, 'dialectNam
 
     tableNames = rows.map((row) => row.table_name);
     for (const row of rows) schemaByTable.set(row.table_name, row.table_schema);
+  } else if (this.isMssql) {
+    // SQL Server (#31327): every user base table in EVERY schema, keyed
+    // `schema.table` (`dbo.Orders`). A SQL Server database is routinely many
+    // schemas, and two of them holding the same name is ordinary there, so the
+    // bare-name key the other arms use would collide; the qualified key is the
+    // shape `ExternalDatasourceService` already splits into `remoteSchema` /
+    // `remoteName`. Every per-table read below splits it back the same way.
+    tableNames = (await listMssqlTables(this.knex)).map((t) => `${t.schema}.${t.table}`);
   } else if (this.isMysql) {
     const result = await this.knex.raw(`
         SELECT table_name
@@ -837,7 +883,7 @@ export async function introspectSchema(this: Pick<IntrospectionHost, 'dialectNam
 
 /** The body of `SqlDriver#introspectIndexes`; the method's docblock there is its contract. */
 export async function introspectIndexes(
-  this: Pick<IntrospectionHost, 'isMysql' | 'isPostgres' | 'isSqlite' | 'knex' | 'resolveHashShadowKeys'>,
+  this: Pick<IntrospectionHost, 'isMssql' | 'isMysql' | 'isPostgres' | 'isSqlite' | 'knex' | 'resolveHashShadowKeys'>,
   tableName: string,
   opts: {
     /**
@@ -855,6 +901,7 @@ export async function introspectIndexes(
     return e;
   };
   try {
+    if (this.isMssql) return await mssqlIndexes(this.knex, mssqlTableName(tableName));
     if (this.isSqlite) {
       const safe = tableName.replace(/[^a-zA-Z0-9_]/g, '');
       // `sqlite_master.sql` is the only place an expression key or a WHERE

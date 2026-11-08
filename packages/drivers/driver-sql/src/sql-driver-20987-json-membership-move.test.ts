@@ -22,7 +22,7 @@
  * `1.5`), a comparand that is a JS number, a comparand JSON must escape, and a
  * string `Number()` would accept but the JSON grammar refuses (`'0x10'`).
  *
- * `'unknown'` is a knex client this driver does not model (here `mssql`): it
+ * `'unknown'` is a knex client this driver does not model (knex's base client): it
  * keeps the `LIKE` from before commit e04a0aff2, unchanged by the move. The scalar column beside
  * the JSON one is the control: `$contains` stays the substring test there.
  */
@@ -31,6 +31,7 @@ import { describe, it, expect, afterAll } from 'vitest';
 import type { Knex } from 'knex';
 import type { FilterCondition } from '@objectstack/spec/data';
 import { SqlDriver, type SqlDriverConfig } from './sql-driver.js';
+import { UNMODELLED_CLIENT_CONFIG } from './unmodelled-knex-client.testkit.js';
 
 const TABLE = 't';
 
@@ -160,7 +161,7 @@ for (const cell of CELLS) {
 }
 
 describe("[#20987] the 'unknown' dialect keeps the pre-#17590 LIKE on a JSON column, unchanged by the move", () => {
-  const probe = probeFor({ client: 'mssql', connection: {} } as SqlDriverConfig);
+  const probe = probeFor(UNMODELLED_CLIENT_CONFIG);
 
   it('the probe compiles for a client the driver does not model', () => {
     expect(probe.dialectName).toBe('unknown');
@@ -168,14 +169,14 @@ describe("[#20987] the 'unknown' dialect keeps the pre-#17590 LIKE on a JSON col
 
   it('$contains binds the escaped substring pattern', () => {
     expect(probe.compile({ tags: { $contains: 'u1' } } as FilterCondition)).toEqual({
-      sql: 'select * from [t] where [tags] LIKE ? ESCAPE ?',
+      sql: 'select * from "t" where "tags" LIKE ? ESCAPE ?',
       bindings: ['%u1%', '\\'],
     });
   });
 
   it('$notContains binds the NULL-safe NOT LIKE', () => {
     expect(probe.compile({ tags: { $notContains: '1.50' } } as FilterCondition)).toEqual({
-      sql: 'select * from [t] where ([tags] is null or [tags] NOT LIKE ? ESCAPE ?)',
+      sql: 'select * from "t" where ("tags" is null or "tags" NOT LIKE ? ESCAPE ?)',
       bindings: ['%1.50%', '\\'],
     });
   });

@@ -1160,9 +1160,10 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
       },
       revoked_reason: {
         label: "Motivo da revogação",
-        help: "Definido quando a redefinição forçada de senha por um administrador revogou esta chave. Somente um administrador da plataforma pode restaurar essa chave; o proprietário cria uma nova. Limpo quando a chave é restaurada. Vazio para uma chave revogada na lista de Chaves de API.",
+        help: "Por que a chave foi revogada, quando isso decide quem pode restaurá-la. Redefinição de senha pelo administrador: somente um administrador da plataforma pode restaurar a chave. Fim da associação à organização: o proprietário saiu da organização e ninguém pode restaurar a chave; um membro cria uma nova. Limpo quando a chave é restaurada. Vazio para uma chave revogada na lista de Chaves de API.",
         options: {
-          admin_password_reset: "Redefinição de senha pelo administrador"
+          admin_password_reset: "Redefinição de senha pelo administrador",
+          organization_membership_ended: "Fim da associação à organização"
         }
       },
       key: {
@@ -2047,6 +2048,14 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
         label: "Configuração SAML",
         help: "JSON: entryPoint, cert, identifierFormat, mapping (gerenciado pelo better-auth)"
       },
+      allow_idp_initiated: {
+        label: "Permitir login iniciado pelo IdP",
+        help: "Aceita um login que começa no provedor de identidade (uma resposta SAML não solicitada ou um callback OIDC sem state) em vez de neste sistema. Desativado por padrão: uma resposta SAML iniciada pelo IdP não está vinculada a nenhuma solicitação feita por este sistema. Altere em “Editar opções de login”."
+      },
+      allow_jit: {
+        label: "Permitir provisionamento just-in-time",
+        help: "Na política de público somente por convite, cria uma conta para quem faz login por este provedor sem conta nem convite. Desativado por padrão: essa pessoa é recusada. As demais políticas provisionam como antes. Altere em “Editar opções de login”."
+      },
       user_id: {
         label: "Registrado por",
         help: "Usuário que registrou este provedor"
@@ -2167,6 +2176,10 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
         label: "Excluir provedor de SSO",
         description: "Excluir este provedor de SSO? Os usuários do domínio dele não poderão mais entrar por meio dele.",
         successMessage: "Provedor de SSO excluído"
+      },
+      edit_sso_sign_in_options: {
+        label: "Editar opções de login",
+        successMessage: "Opções de login salvas"
       }
     }
   },

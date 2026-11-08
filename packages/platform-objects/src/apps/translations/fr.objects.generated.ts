@@ -1160,9 +1160,10 @@ export const frObjects: NonNullable<TranslationData['objects']> = {
       },
       revoked_reason: {
         label: "Motif de la révocation",
-        help: "Renseigné lorsque la réinitialisation forcée du mot de passe par un administrateur a révoqué cette clé. Seul un administrateur de la plateforme peut restaurer une telle clé ; son propriétaire en crée une nouvelle. Effacé lorsque la clé est restaurée. Vide pour une clé révoquée depuis la liste Clés API.",
+        help: "Motif de la révocation de la clé, lorsqu'il détermine qui peut la restaurer. Réinitialisation du mot de passe par un administrateur : seul un administrateur de la plateforme peut restaurer la clé. Fin de l'appartenance à l'organisation : le propriétaire a quitté l'organisation et personne ne peut restaurer la clé ; un membre en crée une nouvelle. Effacé lorsque la clé est restaurée. Vide pour une clé révoquée depuis la liste Clés API.",
         options: {
-          admin_password_reset: "Réinitialisation du mot de passe par un administrateur"
+          admin_password_reset: "Réinitialisation du mot de passe par un administrateur",
+          organization_membership_ended: "Fin de l'appartenance à l'organisation"
         }
       },
       key: {
@@ -2047,6 +2048,14 @@ export const frObjects: NonNullable<TranslationData['objects']> = {
         label: "Configuration SAML",
         help: "JSON : entryPoint, cert, identifierFormat, mappage (géré par better-auth)"
       },
+      allow_idp_initiated: {
+        label: "Autoriser la connexion initiée par l’IdP",
+        help: "Accepter une connexion qui commence chez le fournisseur d’identité (une réponse SAML non sollicitée, ou un rappel OIDC sans state) plutôt que dans ce système. Désactivé par défaut : une réponse SAML initiée par l’IdP n’est liée à aucune requête émise par ce système. Modifiez-le avec « Modifier les options de connexion »."
+      },
+      allow_jit: {
+        label: "Autoriser le provisionnement juste-à-temps",
+        help: "Avec la politique d’audience sur invitation uniquement, créer un compte pour une personne qui se connecte via ce fournisseur sans compte ni invitation. Désactivé par défaut : cette personne est refusée. Les autres politiques provisionnent comme avant. Modifiez-le avec « Modifier les options de connexion »."
+      },
       user_id: {
         label: "Enregistré par",
         help: "Utilisateur qui a enregistré ce fournisseur"
@@ -2167,6 +2176,10 @@ export const frObjects: NonNullable<TranslationData['objects']> = {
         label: "Supprimer le fournisseur SSO",
         description: "Supprimer ce fournisseur SSO ? Les utilisateurs de son domaine ne pourront plus se connecter par son intermédiaire.",
         successMessage: "Fournisseur SSO supprimé"
+      },
+      edit_sso_sign_in_options: {
+        label: "Modifier les options de connexion",
+        successMessage: "Options de connexion enregistrées"
       }
     }
   },

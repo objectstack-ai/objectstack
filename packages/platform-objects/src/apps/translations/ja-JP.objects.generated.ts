@@ -1160,9 +1160,10 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       revoked_reason: {
         label: "失効理由",
-        help: "管理者によるパスワードの強制リセットでこのキーが失効したときに記録されます。このようなキーを復元できるのはプラットフォーム管理者のみで、所有者は新しいキーを作成します。キーを復元するとクリアされます。API キー一覧から失効させたキーでは空です。",
+        help: "キーが失効した理由で、誰が復元できるかを左右する場合に記録されます。管理者によるパスワードの強制リセット：キーを復元できるのはプラットフォーム管理者のみです。組織メンバーシップの終了：所有者が組織を離れたため、誰もキーを復元できません。組織のメンバーが新しいキーを作成します。キーを復元するとクリアされます。API キー一覧から失効させたキーでは空です。",
         options: {
-          admin_password_reset: "管理者によるパスワードの強制リセット"
+          admin_password_reset: "管理者によるパスワードの強制リセット",
+          organization_membership_ended: "組織メンバーシップの終了"
         }
       },
       key: {
@@ -2047,6 +2048,14 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         label: "SAML 設定",
         help: "JSON: entryPoint、cert、identifierFormat、マッピング（better-auth が管理）"
       },
+      allow_idp_initiated: {
+        label: "IdP 起点のサインインを許可",
+        help: "本システムではなく ID プロバイダーから始まるサインイン（要求していない SAML レスポンス、または state のない OIDC コールバック）を受け入れます。既定ではオフです。IdP 起点の SAML レスポンスは、本システムが送ったどの要求にも結び付いていません。「サインインオプションを編集」で変更します。"
+      },
+      allow_jit: {
+        label: "ジャストインタイムのプロビジョニングを許可",
+        help: "招待制のオーディエンス方針のもとで、アカウントも招待もないままこのプロバイダー経由でサインインした人のアカウントを作成します。既定ではオフで、そのような人は拒否されます。ほかの方針では従来どおりプロビジョニングされます。「サインインオプションを編集」で変更します。"
+      },
       user_id: {
         label: "登録者",
         help: "このプロバイダーを登録したユーザー"
@@ -2167,6 +2176,10 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         label: "SSO プロバイダーを削除",
         description: "この SSO プロバイダーを削除しますか？そのドメインのユーザーは、これを通じてサインインできなくなります。",
         successMessage: "SSO プロバイダーを削除しました"
+      },
+      edit_sso_sign_in_options: {
+        label: "サインインオプションを編集",
+        successMessage: "サインインオプションを保存しました"
       }
     }
   },

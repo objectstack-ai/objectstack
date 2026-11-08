@@ -56,6 +56,8 @@ import type {
 import { assertDatasourcePoolSupported } from './datasource-pool-support.js';
 import { resolveDatasourceSchemaMode } from './datasource-schema-mode.js';
 import { buildTursoDriverConfig, resolveTursoUrl } from './turso-driver-config.js';
+import { buildMssqlConnection } from './mssql-driver-config.js';
+import { resolveSslOption } from './datasource-ssl-option.js';
 import { MissingDriverPackageError } from './missing-driver-package-error.js';
 import type { SqliteAbsentFileMode } from '@objectstack/driver-sql';
 
@@ -341,42 +343,6 @@ function pgConnectionExtras(cfg: Record<string, unknown>): Record<string, unknow
     ...(cfg.applicationName ? { application_name: cfg.applicationName } : {}),
     ...(cfg.statementTimeout != null ? { statement_timeout: cfg.statementTimeout } : {}),
   };
-}
-
-/**
- * The `ssl` value to hand a SQL client, from the datasource's TLS block or the
- * per-driver on/off shorthand.
- *
- * `datasource.ssl` is declared, strict, documented — and until #4410 stopped at
- * the record: nothing put it on the connection spec, so a TLS block with a CA
- * certificate in it configured precisely nothing, which is the failure its own
- * schema comment warns about ("a TLS setting that never took effect looked
- * identical to one that did"). The block wins when present because it is the
- * more specific statement; `config.ssl` remains the boolean shorthand.
- *
- * ⚠️ The `true` this can return is a `pg` spelling, not a universal one — see
- * {@link mysqlSslOption}, which re-expands it for `mysql2`. Do not "simplify"
- * that call away.
- */
-function resolveSslOption(spec: DatasourceConnectionSpec): unknown {
-  const block = spec.ssl as
-    | { enabled?: boolean; rejectUnauthorized?: boolean; ca?: string; cert?: string; key?: string }
-    | undefined;
-  if (block) {
-    if (block.enabled === false) return false;
-    const options = {
-      ...(block.rejectUnauthorized !== undefined ? { rejectUnauthorized: block.rejectUnauthorized } : {}),
-      ...(block.ca ? { ca: block.ca } : {}),
-      ...(block.cert ? { cert: block.cert } : {}),
-      ...(block.key ? { key: block.key } : {}),
-    };
-    // `ssl: {}` would read as "TLS with default options" to `pg`, which is what
-    // `enabled: true` with nothing else means anyway — but an empty object is
-    // an odd thing to hand a client, so collapse it to the boolean.
-    return Object.keys(options).length > 0 ? options : true;
-  }
-  const shorthand = (spec.config ?? {}).ssl;
-  return shorthand == null ? undefined : shorthand;
 }
 
 /**
@@ -841,6 +807,18 @@ function buildMysqlConnection(spec: DatasourceConnectionSpec): unknown {
   };
 }
 
+/** `SELECT @@VERSION` — SQL Server's server-version probe, swallowed like the others. */
+async function mssqlServerVersion(driver: any): Promise<string | undefined> {
+  if (typeof driver?.execute !== 'function') return undefined;
+  try {
+    const rows: any = await driver.execute('SELECT @@VERSION AS v');
+    const first = Array.isArray(rows) ? rows[0] : rows;
+    return typeof first?.v === 'string' ? first.v : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * Build the node-oracledb connection for an `oracle` datasource (ADR-0015
  * §4.6): `connectString` verbatim, else the Easy Connect string
@@ -1273,6 +1251,24 @@ export function createDefaultDatasourceDriverFactory(
           ...(schemaMode ? { schemaMode: schemaMode as any } : {}),
         } as any);
         return toHandle(driver);
+      }
+
+      if (kind === 'mssql') {
+        // [#31327] SQL Server — FEDERATION ONLY. `DatasourceSchema` refuses a
+        // `managed` datasource on this driver at parse, so `schemaMode` here is
+        // `external` or `validate-only`; the driver refuses managed DDL on its
+        // own as well. Same lazy import and optional-peer posture as `mysql`:
+        // `tedious` is an optional peer of driver-sql, like `mysql2` and `pg`.
+        // There is no `autoMigrate` to forward — the config contract refuses
+        // the key, since the platform emits no DDL here.
+        const { SqlDriver } = await import('@objectstack/driver-sql');
+        const driver = new SqlDriver({
+          client: 'mssql',
+          connection: buildMssqlConnection(spec, resolveSslOption(spec)) as any,
+          pool: buildSqlPool(spec),
+          ...(schemaMode ? { schemaMode: schemaMode as any } : {}),
+        } as any);
+        return toHandle(driver, () => mssqlServerVersion(driver));
       }
 
       if (kind === 'mongodb') {

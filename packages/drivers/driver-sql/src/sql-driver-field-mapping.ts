@@ -43,11 +43,16 @@ import type { SqlDriver } from './sql-driver.js';
  * assigns.
  */
 export interface FieldMappingHost {
+  readonly columnFieldByObject: SqlDriver['columnFieldByObject'];
   readonly fieldColumnByObject: SqlDriver['fieldColumnByObject'];
+  introspectPrimaryKeys: SqlDriver['introspectPrimaryKeys'];
   readonly logger: SqlDriver['logger'];
   readonly managedObjectFields: SqlDriver['managedObjectFields'];
+  readonly mssqlPagingKeyByObject: SqlDriver['mssqlPagingKeyByObject'];
   readonly nondeterministicPagingWarned: SqlDriver['nondeterministicPagingWarned'];
   paginationTieBreaker: SqlDriver['paginationTieBreaker'];
+  readonly physicalSchemaByObject: SqlDriver['physicalSchemaByObject'];
+  readonly physicalTableByObject: SqlDriver['physicalTableByObject'];
 }
 
 /** The bodies of the "Field mapping" section of `SqlDriver`: a stateless facet, called by the class's stubs. */
@@ -60,7 +65,7 @@ export class FieldMappingFacet {
   }
 
   /** The body of `SqlDriver#paginationTieBreaker`; the method's docblock there is its contract. */
-  static paginationTieBreaker(this: Pick<FieldMappingHost, 'managedObjectFields' | 'fieldColumnByObject'>, object: string): string | null {
+  static paginationTieBreaker(this: Pick<FieldMappingHost, 'fieldColumnByObject' | 'managedObjectFields' | 'mssqlPagingKeyByObject'>, object: string): string | null {
     const tableName = StorageNameMapping.resolveTableName({ name: object } as any);
     const managed =
       this.managedObjectFields.has(tableName) || this.managedObjectFields.has(object);
@@ -68,8 +73,32 @@ export class FieldMappingFacet {
     // A federated object whose binding NAMES its key column — `external.columnMap`
     // mapping a remote column to `id` — is not a guess: the binding declares
     // which remote column identifies a row, the column the by-id doors already
-    // address. Without it, nothing is known and nothing is imposed.
-    return this.fieldColumnByObject[object]?.id ? 'id' : null;
+    // address.
+    if (this.fieldColumnByObject[object]?.id) return 'id';
+    // [#31327] Otherwise, a federated SQL Server table's own single-column key,
+    // read from its catalog by `primeMssqlPagingKey` — not a guess either: an
+    // entry exists only when the remote catalog named the key. Without one of
+    // the three, nothing is known and nothing is imposed.
+    return this.mssqlPagingKeyByObject.get(object) ?? null;
+  }
+
+  /** The body of `SqlDriver#primeMssqlPagingKey`; the method's docblock there is its contract. */
+  static async primeMssqlPagingKey(this: Pick<FieldMappingHost, 'columnFieldByObject' | 'introspectPrimaryKeys' | 'mssqlPagingKeyByObject' | 'physicalSchemaByObject' | 'physicalTableByObject'>, object: string): Promise<void> {
+    if (this.mssqlPagingKeyByObject.has(object)) return;
+    const remoteTable = this.physicalTableByObject[object];
+    if (remoteTable === undefined) return;
+    const remoteSchema = this.physicalSchemaByObject[object];
+    let keyColumns: string[];
+    try {
+      keyColumns = await this.introspectPrimaryKeys(
+        remoteSchema ? `${remoteSchema}.${remoteTable}` : remoteTable,
+      );
+    } catch {
+      return;
+    }
+    const keyColumn = keyColumns.length === 1 ? keyColumns[0]! : null;
+    const field = keyColumn === null ? null : (this.columnFieldByObject[object]?.[keyColumn] ?? keyColumn);
+    this.mssqlPagingKeyByObject.set(object, field);
   }
 
   /** The body of `SqlDriver#orderKeysFor`; the method's docblock there is its contract. */

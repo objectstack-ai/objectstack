@@ -37,7 +37,6 @@ export const META_URL_TO_SINGULAR: Readonly<Record<string, string>> = Object.fre
   "agents": "agent",
   "tools": "tool",
   "skills": "skill",
-  "ragPipelines": "rag_pipeline",
   "hooks": "hook",
   "mappings": "mapping",
   "picklists": "picklist",

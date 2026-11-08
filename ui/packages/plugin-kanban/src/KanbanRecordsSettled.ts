@@ -33,6 +33,11 @@ import { createContext, useContext } from 'react';
  * ⇒ The only thing hiding the false announcement today is the lazy skeleton
  * happening to be slower than the fetch, and nothing makes it slower.
  *
+ * The lane COUNTS are the same kind of claim and wait on the same signal
+ * (objectstack#30431): before the records settle every header held `0`, which
+ * a board opened right after publish showed under a list footer that already
+ * read 「12 条记录」. See `LaneCountPending` in `KanbanImpl`.
+ *
  * ## Why a tri-state settle and not a `loading` boolean
  *
  * `ObjectKanban` already holds a `loading` boolean — and wiring THAT into the

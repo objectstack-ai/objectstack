@@ -61,22 +61,90 @@ import {
 } from './audit-writers.js';
 import type { AuthEventAuditLogger } from './auth-event-audit.js';
 
-/** The `sys_audit_log.action` value this writer emits. */
+/** The `sys_audit_log.action` value this writer emits for an uninstall. */
 export const PACKAGE_UNINSTALL_AUDIT_ACTION = 'package_uninstall' as const;
+
+/**
+ * [#30964, cloud#3624 ruling A「两边审计」] The `sys_audit_log.action` value
+ * this writer emits for an UNMANAGED install: one row per copy the
+ * environment attempted, whether it landed or not.
+ *
+ * ## Who calls it
+ *
+ * The install-local door's unmanaged branch (`installUnmanaged` in
+ * `@objectstack/cloud-connection`), once per `importUnmanagedPackage` it ran:
+ * the `POST /api/v1/marketplace/install-local` door, and the copy the
+ * `POST /api/v1/cloud-connection/install` door hands it on a control plane's
+ * unmanaged grant. Only the environment knows whether the copy succeeded, so
+ * the control plane's own row (its decision) and this one (the result) are
+ * the two halves of the ruling's "both sides audited".
+ *
+ * ## The row
+ *
+ *  - `action: 'package_unmanaged_import'`;
+ *  - `actor` / `user_id` as for an uninstall: the installer the door admitted;
+ *  - no `object_name` / `record_id` and `tenant_id` NULL: the copy is a new
+ *    environment base (ADR-0131 D6), so the row is a deployment-level row, as
+ *    `package_uninstall`'s is;
+ *  - `metadata`: `package_id` and `version` (the source package and the
+ *    version it was copied from), `environment_id` (null when the door knows
+ *    none), `target_package_id` and `namespace` (the new base and its
+ *    namespace; null when the copy failed before naming them),
+ *    `source_namespace` (the namespace a rename came from, or null),
+ *    `copied_count`, and `outcome` (`success` or `failure`); a failure adds
+ *    the answer's `error_code` and HTTP `status`, never its message (a refusal
+ *    message can quote package content).
+ */
+export const PACKAGE_UNMANAGED_IMPORT_AUDIT_ACTION = 'package_unmanaged_import' as const;
 
 /**
  * Every package lifecycle action this writer records. Closed literal union, for
  * the reason `auth-event-audit.ts` gives: the ledger's `action` field is
  * `readonly`, so nothing validates a stored value.
  */
-export type PackageLifecycleAuditAction = typeof PACKAGE_UNINSTALL_AUDIT_ACTION;
+export type PackageLifecycleAuditAction =
+  | typeof PACKAGE_UNINSTALL_AUDIT_ACTION
+  | typeof PACKAGE_UNMANAGED_IMPORT_AUDIT_ACTION;
+
+/** One package lifecycle event, in the vocabulary of what HAPPENED. The caller builds it; this writer turns it into a row. */
+export type PackageLifecycleAuditEvent = PackageUninstallAuditEvent | PackageUnmanagedImportAuditEvent;
+
+/**
+ * [#30964] One unmanaged copy the environment attempted
+ * ({@link PACKAGE_UNMANAGED_IMPORT_AUDIT_ACTION}).
+ */
+export interface PackageUnmanagedImportAuditEvent {
+  action: typeof PACKAGE_UNMANAGED_IMPORT_AUDIT_ACTION;
+  /** The source package's id (its manifest id). */
+  packageId: string;
+  /** The source version copied; absent when the door read none. */
+  version?: string;
+  /** The environment the copy ran in; absent when the door knows none. */
+  environmentId?: string;
+  /** The installer the door admitted: a user id, or a `svc:` principal. */
+  actor?: string;
+  /** The new base's id; absent when the copy failed before naming it. */
+  targetPackageId?: string;
+  /** The new base's namespace; absent when the copy failed before naming it. */
+  namespace?: string;
+  /** The namespace a rename came from (#30794); absent when the copy kept it. */
+  sourceNamespace?: string;
+  /** Items the copy wrote. */
+  copiedCount?: number;
+  /** Whether the copy landed. */
+  outcome: 'success' | 'failure';
+  /** A failed copy's machine code, as the door answered it. */
+  errorCode?: string;
+  /** A failed copy's HTTP status, as the door answered it. */
+  status?: number;
+}
 
 /**
  * One package uninstall, in the vocabulary of what HAPPENED. The verb builds
  * it; this writer turns it into a row.
  */
-export interface PackageLifecycleAuditEvent {
-  action: PackageLifecycleAuditAction;
+export interface PackageUninstallAuditEvent {
+  action: typeof PACKAGE_UNINSTALL_AUDIT_ACTION;
   /** The package's id (its manifest id). */
   packageId: string;
   /** The version the verb found installed; absent when it found none. */
@@ -97,8 +165,8 @@ export interface PackageLifecycleAuditEvent {
 export interface PackageLifecycleAuditWriter {
   /**
    * Record one package lifecycle event in `sys_audit_log`. Never throws — an
-   * audit write must never change the answer an uninstall gets — and reports
-   * a lost row loudly, once per cause.
+   * audit write must never change the answer an uninstall or an install
+   * gets — and reports a lost row loudly, once per cause.
    */
   recordPackageLifecycleEvent(event: PackageLifecycleAuditEvent): Promise<void>;
 }
@@ -140,6 +208,39 @@ export function buildPackageLifecycleAuditRow(
 ): Record<string, unknown> {
   const actor = nonEmpty(event.actor);
   const userId = actor && !actor.startsWith(SERVICE_PRINCIPAL_PREFIX) ? actor : undefined;
+  if (event.action === PACKAGE_UNMANAGED_IMPORT_AUDIT_ACTION) {
+    const failed = event.outcome !== 'success';
+    const importMetadata: Record<string, unknown> = {
+      package_id: event.packageId,
+      version: nonEmpty(event.version) ?? null,
+      environment_id: nonEmpty(event.environmentId) ?? null,
+      target_package_id: nonEmpty(event.targetPackageId) ?? null,
+      namespace: nonEmpty(event.namespace) ?? null,
+      source_namespace: nonEmpty(event.sourceNamespace) ?? null,
+      copied_count: count(event.copiedCount),
+      outcome: failed ? 'failure' : 'success',
+      ...(failed
+        ? {
+            error_code: nonEmpty(event.errorCode) ?? null,
+            status: typeof event.status === 'number' && Number.isInteger(event.status) ? event.status : null,
+          }
+        : {}),
+    };
+    const importRow: Record<string, unknown> = {
+      action: PACKAGE_UNMANAGED_IMPORT_AUDIT_ACTION,
+      user_id: userId ?? null,
+      // The copy is a new environment base, not a record.
+      object_name: null,
+      record_id: null,
+      old_value: null,
+      new_value: null,
+      // [ADR-0131 D6] An environment base is environment-wide: a deployment-level row.
+      tenant_id: null,
+      metadata: safeStringify(importMetadata),
+    };
+    if (objectHasField('sys_audit_log', 'actor')) importRow.actor = actor ?? null;
+    return importRow;
+  }
   const itemsFailed = count(event.itemsFailed);
   const metadata: Record<string, unknown> = {
     package_id: event.packageId,
@@ -201,7 +302,7 @@ export function createPackageLifecycleAuditWriter(
         `Package lifecycle audit write FAILED (${auditFailureCauseSummary(err, detail)}) — the compliance trail ` +
         `is now INCOMPLETE. The ${event.action} of '${event.packageId}' itself completed and was answered exactly ` +
         'as it would have been without the ledger, so nothing downstream looks broken; only the `sys_audit_log` ' +
-        'row recording WHO uninstalled the package, and when, never landed, and nothing retries it. Every later ' +
+        'row recording WHO did it to the package, and when, never landed, and nothing retries it. Every later ' +
         'package lifecycle event failing THIS WAY loses its row the same way (this CAUSE is reported ONCE — raise ' +
         'the log level to `debug` to see the rest; a DIFFERENT cause gets its own `error` line). ' +
         (isMissingTableError(err, 'sys_audit_log')
@@ -236,7 +337,13 @@ export function createPackageLifecycleAuditWriter(
 
   return {
     async recordPackageLifecycleEvent(event: PackageLifecycleAuditEvent): Promise<void> {
-      if (!event || event.action !== PACKAGE_UNINSTALL_AUDIT_ACTION || !nonEmpty(event.packageId)) return;
+      if (
+        !event
+        || (event.action !== PACKAGE_UNINSTALL_AUDIT_ACTION && event.action !== PACKAGE_UNMANAGED_IMPORT_AUDIT_ACTION)
+        || !nonEmpty(event.packageId)
+      ) {
+        return;
+      }
       const engine = getEngine();
       if (!engine) return;
       if (probe === undefined || probedEngine !== engine) {

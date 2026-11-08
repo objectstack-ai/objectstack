@@ -77,3 +77,27 @@ describe('consoleChatSurface — the page in view as cloud#1610 `context.surface
     for (const path of Object.keys(APP_ROUTE_SURFACES)) expect(declared.has(path), path).toBe(true);
   });
 });
+
+describe('consoleChatSurface — a record open in a list drawer is the record in view (objectstack#28106)', () => {
+  const RECORD = { artifact: { type: 'object', name: 'account' }, selection: { kind: 'record', id: 'rec_1' } };
+
+  it('on every list route, `?recordId=` names the object and that record', () => {
+    expect(consoleChatSurface('/apps/crm/account', [], '?recordId=rec_1')).toEqual(RECORD);
+    expect(consoleChatSurface('/apps/crm/account/data', [], '?recordId=rec_1&tab=details')).toEqual(RECORD);
+    // Over a saved view the open record is the finer selection.
+    expect(consoleChatSurface('/apps/crm/account/view/my_open', [], '?recordId=rec_1')).toEqual(RECORD);
+    expect(consoleChatSurface('/apps/crm/account', [], '?recordId=a%2Fb%20c')?.selection).toEqual({ kind: 'record', id: 'a/b c' });
+  });
+
+  it('CONTROL: no drawer, an empty param, or a route that is not a list reads as before', () => {
+    expect(consoleChatSurface('/apps/crm/account', [], '')).toEqual({ artifact: { type: 'object', name: 'account' } });
+    expect(consoleChatSurface('/apps/crm/account', [], '?recordId=')).toEqual({ artifact: { type: 'object', name: 'account' } });
+    expect(consoleChatSurface('/apps/crm/account/view/my_open', [], '?tab=x')?.selection).toEqual({ kind: 'view', id: 'my_open' });
+    // The New page and a record page keep their own reading.
+    expect(consoleChatSurface('/apps/crm/account/new', [], '?recordId=rec_1')).toEqual({ artifact: { type: 'object', name: 'account' } });
+    expect(consoleChatSurface('/apps/crm/account/record/rec_2', [], '?recordId=rec_1')?.selection).toEqual({ kind: 'record', id: 'rec_2' });
+    // A page with no artifact gains none from the param.
+    expect(consoleChatSurface('/apps/crm/search', [], '?recordId=rec_1')).toBeUndefined();
+    expect(consoleChatSurface('/apps/crm/billing', ['billing'], '?recordId=rec_1')).toBeUndefined();
+  });
+});

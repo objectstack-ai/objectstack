@@ -42,6 +42,7 @@ import {
 import { pickLocalized, useObjectTranslation } from '@object-ui/i18n';
 import { AlertTriangle, ChevronRight, Info, RotateCcw } from 'lucide-react';
 import { EnvLockBadge } from './EnvLockBadge';
+import { SettingsMapField, type MapRefusalAt } from './SettingsMapField';
 import {
   resolveLabel,
   type Specifier,
@@ -115,6 +116,12 @@ export interface SettingsFieldProps {
    * sitting under a red error reads as if the field has two states at once.
    */
   error?: string;
+  /**
+   * Where the last refusal points inside a `map` value (objectstack#31391):
+   * the save door's `constraint.entry` and `constraint.column`. The row and
+   * cell named are marked; `error` stays the sentence. Read by `map` only.
+   */
+  errorAt?: MapRefusalAt;
   /**
    * A fact the PAGE knows about this row that the manifest cannot carry
    * (objectstack#30313: the address the server judges beside Allowed IP
@@ -586,6 +593,7 @@ export function SettingsField(props: SettingsFieldProps) {
     saving,
     labels,
     error,
+    errorAt,
     note,
     writeScope,
     onClearSaved,
@@ -805,6 +813,24 @@ export function SettingsField(props: SettingsFieldProps) {
     const literal = typeof opt.label === 'string' ? opt.label : opt.label?.defaultValue ?? String(opt.value);
     if (!spec.key || !labels) return literal;
     return labels.optionLabel(spec.key, String(opt.value), literal);
+  };
+
+  // A `map` header's shown text: the setting's `keyColumn` slot for the key
+  // column, its `columns.<name>` slot for a value column (objectstack#31453).
+  const renderMapHeader = (
+    column: string | undefined,
+    leaf: 'label' | 'help',
+    literal: string | undefined,
+  ): string | undefined => {
+    if (!spec.key || !labels) return literal;
+    if (column === undefined) {
+      return leaf === 'label'
+        ? labels.mapKeyColumnLabel(spec.key, literal ?? '')
+        : labels.mapKeyColumnHelp(spec.key, literal);
+    }
+    return leaf === 'label'
+      ? labels.mapColumnLabel(spec.key, column, literal ?? '')
+      : labels.mapColumnHelp(spec.key, column, literal);
   };
 
   // The default a `Modified` row names. A secret's default is never shown,
@@ -1061,6 +1087,22 @@ export function SettingsField(props: SettingsFieldProps) {
           disabled={disabled}
           onChange={(e) => onChange(e.target.value)}
         />,
+      );
+    case 'map':
+      // objectstack#31391 — keyed rows over the served `options`, one cell per
+      // declared column. A group named by the row's label, so no `htmlFor`.
+      return wrapper(
+        <SettingsMapField
+          spec={spec}
+          value={value}
+          onChange={onChange}
+          disabled={disabled}
+          labelId={labelId}
+          optionLabel={renderOptionLabel}
+          headerText={renderMapHeader}
+          errorAt={error ? errorAt : undefined}
+        />,
+        undefined,
       );
     default:
       return wrapper(

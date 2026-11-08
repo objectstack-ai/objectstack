@@ -1160,9 +1160,10 @@ export const zhHantObjects: NonNullable<TranslationData['objects']> = {
       },
       revoked_reason: {
         label: "撤銷原因",
-        help: "管理員強制重設密碼時撤銷了該金鑰，則記錄此原因。此類金鑰只能由平台管理員恢復，其擁有者應建立新的金鑰。金鑰恢復後清除。從 API 金鑰清單撤銷的金鑰此項為空。",
+        help: "金鑰被撤銷的原因，僅在它決定誰能恢復金鑰時記錄。管理員強制重設密碼：只有平台管理員能恢復該金鑰。組織成員資格已結束：擁有者已離開組織，任何人都不能恢復該金鑰，由組織成員建立新的金鑰。金鑰恢復後清除。從 API 金鑰清單撤銷的金鑰此項為空。",
         options: {
-          admin_password_reset: "管理員強制重設密碼"
+          admin_password_reset: "管理員強制重設密碼",
+          organization_membership_ended: "組織成員資格已結束"
         }
       },
       key: {
@@ -2047,6 +2048,14 @@ export const zhHantObjects: NonNullable<TranslationData['objects']> = {
         label: "SAML 設定",
         help: "JSON：entryPoint、cert、identifierFormat、對應（由 better-auth 管理）"
       },
+      allow_idp_initiated: {
+        label: "允許 IdP 發起的登入",
+        help: "接受從身分提供方發起的登入（未經請求的 SAML 回應，或不帶 state 的 OIDC 回呼），而非從本系統發起的登入。預設關閉：IdP 發起的 SAML 回應不對應本系統發出的任何請求。請透過「編輯登入選項」修改。"
+      },
+      allow_jit: {
+        label: "允許即時開通帳號",
+        help: "在僅限邀請的受眾策略下，為透過此提供方登入、但既無帳號也無邀請的人建立帳號。預設關閉：此類人員會被拒絕。其他策略照舊開通帳號。請透過「編輯登入選項」修改。"
+      },
       user_id: {
         label: "註冊者",
         help: "註冊該提供方的使用者"
@@ -2167,6 +2176,10 @@ export const zhHantObjects: NonNullable<TranslationData['objects']> = {
         label: "刪除 SSO 提供方",
         description: "刪除該 SSO 提供方嗎？其網域下的使用者將無法再透過它登入。",
         successMessage: "SSO 提供方已刪除"
+      },
+      edit_sso_sign_in_options: {
+        label: "編輯登入選項",
+        successMessage: "登入選項已儲存"
       }
     }
   },

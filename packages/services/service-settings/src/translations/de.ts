@@ -745,14 +745,20 @@ export const de: PlatformTranslationData = {
         retention_overrides: {
           label: 'Aufbewahrungs-Überschreibungen',
           help: 'Fensterüberschreibungen pro Objekt. Dauern verwenden h/d/w/y. Pro Organisation gesetzt, sodass eine regulierte Organisation Jahre aufbewahren kann, eine Entwicklungsorganisation nur Tage. Eine Überschreibung, die kürzer ist als das Minimum, das eine Plattformfunktion braucht (etwa das Duplikaterkennungsfenster der Job-Warteschlange), wird ignoriert und als Fehler protokolliert; das Standardfenster gilt weiter.',
+          keyColumn: { label: 'Objekt' },
+          columns: { maxAge: { label: 'Zeilen aufbewahren für' }, expireAfter: { label: 'Zeilen ablaufen lassen nach' } },
         },
         quotas: {
           label: 'Zeilenkontingente',
           help: 'Maximale Zeilenanzahl pro Objekt. Eine Überschreitung löst eine Governance-Warnung aus — Kontingente löschen nie über die deklarierte Richtlinie hinaus.',
+          keyColumn: { label: 'Objekt' },
+          columns: { max_rows: { label: 'Max. Zeilen' } },
         },
         quota_defaults: {
           label: 'Standardkontingente pro Klasse',
           help: 'Ersatzkontingente nach Lebenszyklusklasse (telemetry, transient, event, audit).',
+          keyColumn: { label: 'Lebenszyklusklasse' },
+          columns: { max_rows: { label: 'Max. Zeilen' } },
         },
         growth_alert_rows: {
           label: 'Wachstums-Warnschwelle (Zeilen pro Durchlauf)',

@@ -13,6 +13,8 @@ export { zhHant } from './zh-Hant.js';
 export { ar } from './ar.js';
 export { fr } from './fr.js';
 export { ptBR } from './pt-BR.js';
+export { ru } from './ru.js';
+export { de } from './de.js';
 
 /**
  * The staleness mechanism (#8765 Option B, extended to the generated bundles by

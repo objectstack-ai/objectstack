@@ -594,14 +594,20 @@ export const jaJP: PlatformTranslationData = {
           help: 'オブジェクトごとの保持ウィンドウの上書き。期間は h/d/w/y で指定します。'
             + '組織ごとに設定するため、規制対象の組織は数年、開発用の組織は数日だけ保持できます。'
             + 'プラットフォーム機能が必要とする最小期間（例：ジョブキューの重複検出ウィンドウ）より短い上書きは無視されてエラーとして記録され、既定のウィンドウが引き続き適用されます。',
+          keyColumn: { label: 'オブジェクト' },
+          columns: { maxAge: { label: '行の保持期間' }, expireAfter: { label: '行の失効までの期間' } },
         },
         quotas: {
           label: '行数クォータ',
           help: 'オブジェクトごとの最大行数。超過するとガバナンスアラートが発生します。クォータが宣言済みのポリシーを超えて削除することはありません。',
+          keyColumn: { label: 'オブジェクト' },
+          columns: { max_rows: { label: '最大行数' } },
         },
         quota_defaults: {
           label: 'クラス別の既定クォータ',
           help: 'ライフサイクルクラスごとのフォールバッククォータ（telemetry、transient、event、audit）。',
+          keyColumn: { label: 'ライフサイクルクラス' },
+          columns: { max_rows: { label: '最大行数' } },
         },
         growth_alert_rows: {
           label: '増加アラートのしきい値（クリーンアップ 1 回あたりの行数）',

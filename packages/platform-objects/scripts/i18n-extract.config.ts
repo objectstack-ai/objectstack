@@ -8,7 +8,7 @@
  * pointed at this file via `bundle-require`:
  *
  *   os i18n extract packages/platform-objects/scripts/i18n-extract.config.ts \
- *     --locales=zh-CN,ja-JP,es-ES,zh-Hant,ar,fr,pt-BR \
+ *     --locales=zh-CN,ja-JP,es-ES,zh-Hant,ar,fr,pt-BR,ru,de \
  *     --fill=default \
  *     --source-hashes \
  *     --out=packages/platform-objects/src/apps/translations
@@ -225,6 +225,8 @@ import { zhHantObjects } from '../src/apps/translations/zh-Hant.objects.generate
 import { arObjects } from '../src/apps/translations/ar.objects.generated.js';
 import { frObjects } from '../src/apps/translations/fr.objects.generated.js';
 import { ptBRObjects } from '../src/apps/translations/pt-BR.objects.generated.js';
+import { ruObjects } from '../src/apps/translations/ru.objects.generated.js';
+import { deObjects } from '../src/apps/translations/de.objects.generated.js';
 import { enMetadataForms } from '../src/apps/translations/en.metadata-forms.generated.js';
 import { zhCNMetadataForms } from '../src/apps/translations/zh-CN.metadata-forms.generated.js';
 import { jaJPMetadataForms } from '../src/apps/translations/ja-JP.metadata-forms.generated.js';
@@ -233,6 +235,8 @@ import { zhHantMetadataForms } from '../src/apps/translations/zh-Hant.metadata-f
 import { arMetadataForms } from '../src/apps/translations/ar.metadata-forms.generated.js';
 import { frMetadataForms } from '../src/apps/translations/fr.metadata-forms.generated.js';
 import { ptBRMetadataForms } from '../src/apps/translations/pt-BR.metadata-forms.generated.js';
+import { ruMetadataForms } from '../src/apps/translations/ru.metadata-forms.generated.js';
+import { deMetadataForms } from '../src/apps/translations/de.metadata-forms.generated.js';
 
 // ── Existing hand-authored app/dashboard/page translations ────────────────
 // The per-locale assemblers, NOT the `SetupAppTranslations` wrapper. Each one
@@ -259,6 +263,8 @@ import { zhHant } from '../src/apps/translations/zh-Hant.js';
 import { ar } from '../src/apps/translations/ar.js';
 import { fr } from '../src/apps/translations/fr.js';
 import { ptBR } from '../src/apps/translations/pt-BR.js';
+import { ru } from '../src/apps/translations/ru.js';
+import { de } from '../src/apps/translations/de.js';
 
 /**
  * The annotation is load-bearing, not decoration (#10868). `defineStack`
@@ -363,6 +369,8 @@ const config: ObjectStackDefinition = defineStack({
     { 'ar': { ...ar, objects: arObjects, metadataForms: arMetadataForms } },
     { 'fr': { ...fr, objects: frObjects, metadataForms: frMetadataForms } },
     { 'pt-BR': { ...ptBR, objects: ptBRObjects, metadataForms: ptBRMetadataForms } },
+    { ru: { ...ru, objects: ruObjects, metadataForms: ruMetadataForms } },
+    { de: { ...de, objects: deObjects, metadataForms: deMetadataForms } },
   ],
 });
 

@@ -1159,8 +1159,9 @@ export class LifecycleService {
    * (`retention_overrides`, `quotas`, `quota_defaults`) as the map this service
    * indexes, or `undefined` for "nothing configured".
    *
-   * These keys are `json` specifiers, which persist an object (ADR-0007). Until
-   * #31241 the console's `json` field sent the textarea's TEXT and the settings
+   * These keys are `map` specifiers (#30208; `json` specifiers before it),
+   * which persist an object (ADR-0007). Until #31241, when they were still
+   * `json`, the console's `json` field sent the textarea's TEXT and the settings
    * save door stored it, so a deployment that saved this page holds a JSON
    * string where the map belongs; indexing that string reads every override and
    * quota as absent, with nothing logged. The save door refuses a string now,

@@ -157,13 +157,13 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 | 标签 | 包家族 |
 |:--|:--|
 | `domain:server` | 服务端:引擎 + 服务插件 + CLI/运行时;`objectql core formula metadata* platform-objects drivers/* services/* connectors/* triggers/* plugin-* embedder-openai knowledge-* cli runtime verify types rest mcp observability client* cloud-connection create-objectstack adapters/*`;详见 `references/lanes/server.md` |
-| `domain:devx` | `sdui-parser`、`packages/qa`、`content/docs`、`apps/docs`、`docs/qa`、`.githooks`、`.github/workflows/**`(接线、CI 性能)、`docker/README.md`、`examples/**` 仅测试基建面;`packages/lint`、`scripts`(门禁类)按锚定规则归 spec,门禁按 SUBJECT:governed 面归 skills,代码/文档质量归本域 |
+| `domain:devx` | `sdui-parser`、`packages/qa`、`apps/docs`、`docs/qa`、`.githooks`、`.github/workflows/**`、`docker/README.md`、`content/docs` 横切与 `examples/**` 测试基建(见 `lanes/devx.md`);`packages/lint`、`scripts`(门禁类)按锚定规则归 spec,门禁按 SUBJECT:受管面归 skills,代码/文档质量归本域 |
 | `domain:skills` | 规则文本:`AGENTS.md`+`CLAUDE.md`+`.claude/**`(含本文件)+`skills/**`+`docs/adr/**`+`docs/NORTH-STAR.md`;非门禁的 `scripts/pm/**`(PM 循环工具);governed 面的治理执行文件:`.github/CODEOWNERS` + SUBJECT 是 governed 面本身的门禁/审计(现为 `scripts/pm/check-governed-merges.mjs`) |
 | `domain:spec` | `packages/spec` 整包:schema 形状、`contracts/**`、退役行为半边、strictness 台账;describe/JSDoc/墓碑散文/错误 guidance 与 alias 表;`packages/spec/scripts/**`、`packages/spec/docs/**` 及按锚定规则的例外归本域的工具链(域边界枚举与席内分派见 `references/lanes/spec.md`) |
 | `domain:ui` | `ui/**` 全部代码:`@object-ui/*` 库与 `ui/apps/*`、`ui/packages/types` 与 schema 语料、`ui/scripts` 与门禁工具、文档随所记录的面走;`packages/console`(dist 由 `pnpm console:build` 生成 ⛔ 不手改);协议恒归 `domain:spec`,受管面归 `domain:skills`;详见 `references/lanes/ui.md` |
 | `domain:cloud` | 涉 cloud 即整卡归 cloud PM(`repo:cloud` 席,同挂 `repo:cloud`):读或改 cloud 代码、生产方、事实或带 cloud 半边;本仓车道 ⛔ 不认领;cloud PM 跟到关卡,余下纯本仓活由它写明 cloud 事实后另立卡;判据见 `references/cross-repo-coordination.md` |
-| `security` · `review`(车道,无 `domain:*` 标签) | 安全发现(无文件面;修复落在归属包);席位 `security#N`、接收、台账、派修与复核见 `references/lanes/security.md`;永不公开的规则只住 `references/security-findings.md`。复核席 `review#N` 见 `references/lanes/review.md` |
-| (无固定归属,按落点分诊) | `packages/apps/*`、`examples/*`(归它演练的子系统)、`docs/audits/**` |
+| `security` · `review`(车道,无 `domain:*` 标签) | 本仓安全公告(无文件面;修复落在归属包;私有仓卡归该仓车道,cloud 即上行);席位 `security#N` 与职责见 `references/lanes/security.md`;永不公开的规则只住 `references/security-findings.md`。复核席 `review#N` 见 `references/lanes/review.md` |
+| (无固定归属,按落点分诊) | `packages/apps/*`、`examples/*`(归它演练的子系统,测试基建见 devx 行)、`docs/audits/**` |
 
 - 表未覆盖的包首次分诊时归类并走 PR 更新本表;新增或退役 `domain:*` 必须同批改本表。
 - 退役 `domain:*` 只退流通,对象保留;`domain:engine`/`domain:services`/`domain:cli` 读作 `domain:server`。
@@ -172,7 +172,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - 跨域例外路径:拆不动的跨域单 PR 由分诊席指定一个车道 PM 认领,认领评论申报文件面。
 - 派发前在飞检查:读 `pm:dispatched` 卡认领评论申报的文件面,本地求交、不另发查询。
 - 跨域例外路径的范围加上该单文件面触及各域的在飞单;相交 ⇒ 排该 PR 之后串行或让行。
-- 越界只四通道:跨域例外路径、认领席跟到底的越界面、接手无主阻塞项、main-red 锚卡。
+- 越界只五通道:跨域例外路径、跟到底的越界面、无主阻塞项、main-red 锚卡、spec.md 搭车。
 - 合并队列是共享串行资源:车道买到的是并行编写,不是并行落地。
 - 谁发现 flake 谁修或立单,⛔ 不绕行。
 

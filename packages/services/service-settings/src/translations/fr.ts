@@ -754,14 +754,20 @@ export const fr: PlatformTranslationData = {
         retention_overrides: {
           label: 'Surcharges de rétention',
           help: 'Surcharges de fenêtre par objet. Les durées utilisent h/d/w/y. Définies par organisation : une organisation réglementée peut conserver des années, une organisation de développement quelques jours. Une surcharge plus courte que le minimum requis par une fonction de la plateforme (par exemple la fenêtre de détection des doublons de la file de tâches) est ignorée et journalisée comme erreur, et la fenêtre par défaut continue de s’appliquer.',
+          keyColumn: { label: 'Objet' },
+          columns: { maxAge: { label: 'Conserver les lignes pendant' }, expireAfter: { label: 'Faire expirer les lignes après' } },
         },
         quotas: {
           label: 'Quotas de lignes',
           help: 'Nombre maximal de lignes par objet. Un dépassement déclenche une alerte de gouvernance — les quotas ne suppriment jamais au-delà de la politique déclarée.',
+          keyColumn: { label: 'Objet' },
+          columns: { max_rows: { label: 'Lignes max.' } },
         },
         quota_defaults: {
           label: 'Quotas par défaut par classe',
           help: 'Quotas de repli par classe de cycle de vie (telemetry, transient, event, audit).',
+          keyColumn: { label: 'Classe de cycle de vie' },
+          columns: { max_rows: { label: 'Lignes max.' } },
         },
         growth_alert_rows: {
           label: 'Seuil d’alerte de croissance (lignes par passage)',

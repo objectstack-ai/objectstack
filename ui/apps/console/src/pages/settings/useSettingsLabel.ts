@@ -11,6 +11,8 @@
  *   settings.<namespace>.groups.<groupKey>.title / .description
  *   settings.<namespace>.keys.<key>.label / .help / .placeholder / .confirmOffText
  *   settings.<namespace>.keys.<key>.options.<value>
+ *   settings.<namespace>.keys.<key>.keyColumn.label / .help
+ *   settings.<namespace>.keys.<key>.columns.<column>.label / .help
  *   settings.<namespace>.actions.<actionId>.label / .confirmText / .successMessage
  *   settings.<namespace>.banners.<bannerId>.title / .text
  *
@@ -19,6 +21,10 @@
  * by `resolveSettingsBannerTitle` / `resolveSettingsBannerText` in the spec's
  * `i18n-resolver.ts`). That slot is the ONE spelling: no other leaf or branch
  * name for a banner is read here (objectui#12671).
+ *
+ * `keyColumn` and `columns.<column>` are a `map` setting's table headers,
+ * spelled as the specifier spells them: the key column, and each value column
+ * by its `name`; `help` translates the column's `description` (objectstack#31453).
  *
  * All lookups fall back to the literal authored in the manifest, so an
  * unconfigured locale gracefully degrades to English (or whatever the
@@ -48,6 +54,14 @@ export interface SettingsLabelHelpers {
   /** A `toggle`'s question before it goes off, keyed by the setting key; falls back to its `confirmOffText`. */
   fieldConfirmOff: (key: string, fallback: string) => string;
   optionLabel: (key: string, optionValue: string, fallback: string) => string;
+  /** A `map` setting's key column header; falls back to its `keyColumn.label`. */
+  mapKeyColumnLabel: (key: string, fallback: string) => string;
+  /** A `map` setting's key column help; falls back to its `keyColumn.description`. */
+  mapKeyColumnHelp: (key: string, fallback: string | undefined) => string | undefined;
+  /** A `map` setting's value column header, by column `name`; falls back to the column's `label`. */
+  mapColumnLabel: (key: string, column: string, fallback: string) => string;
+  /** A `map` setting's value column help, by column `name`; falls back to the column's `description`. */
+  mapColumnHelp: (key: string, column: string, fallback: string | undefined) => string | undefined;
   actionLabel: (actionId: string, fallback: string) => string;
   actionConfirm: (actionId: string, fallback: string | undefined) => string | undefined;
   actionSuccess: (actionId: string, fallback: string | undefined) => string | undefined;
@@ -157,6 +171,13 @@ export function useSettingsLabel(namespace: string): SettingsLabelHelpers {
         resolve(`keys.${key}.confirmOffText`, fallback) ?? fallback,
       optionLabel: (key, optionValue, fallback) =>
         resolve(`keys.${key}.options.${optionValue}`, fallback) ?? fallback,
+      mapKeyColumnLabel: (key, fallback) =>
+        resolve(`keys.${key}.keyColumn.label`, fallback) ?? fallback,
+      mapKeyColumnHelp: (key, fallback) => resolve(`keys.${key}.keyColumn.help`, fallback),
+      mapColumnLabel: (key, column, fallback) =>
+        resolve(`keys.${key}.columns.${column}.label`, fallback) ?? fallback,
+      mapColumnHelp: (key, column, fallback) =>
+        resolve(`keys.${key}.columns.${column}.help`, fallback),
       actionLabel: (actionId, fallback) =>
         resolve(`actions.${actionId}.label`, fallback) ?? fallback,
       actionConfirm: (actionId, fallback) =>

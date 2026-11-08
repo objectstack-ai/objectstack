@@ -14,6 +14,11 @@ import '@testing-library/jest-dom/vitest';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
+// The CEL authoring and catalog code loads these lazily; warmed here so the
+// first load is paid at import, not inside a test's clock.
+import '@objectstack/formula';
+import '@objectstack/lint';
+import '@objectstack/spec/identity';
 
 interface FieldEntry {
   readable?: boolean;
@@ -185,7 +190,7 @@ describe('a field row offers a row condition on its edit vote (objectstack#25866
 
     fireEvent.change(screen.getByLabelText(WHEN_LABEL), { target: { value: 'status ==' } });
     const held = await screen.findByTestId('perm-autosave-held', {}, { timeout: 3000 });
-    expect(held).toHaveTextContent('Fix the CEL syntax errors before saving.');
+    expect(held).toHaveTextContent('Fix the expression errors before saving.');
     // Longer than the autosave's pause: the held edit does not land.
     await new Promise((r) => setTimeout(r, 2000));
     expect(saved).toHaveLength(1);

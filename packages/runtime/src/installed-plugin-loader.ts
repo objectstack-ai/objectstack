@@ -147,6 +147,30 @@ export interface InstalledPluginRefusal {
   version: string;
   error: InstalledPluginRefusalCode;
   message: string;
+  /**
+   * What the plugin declares in `providesServices` (ADR-0116), for a plugin
+   * refused after its entry module was imported, when that could be read: `[]`
+   * when it declares none. Absent when it was refused before its import, when
+   * what it exports is not an object, or when the declaration could not be
+   * read. `os serve` judges a refusal by it.
+   */
+  declaredServices?: string[];
+}
+
+/**
+ * What an imported plugin declares in `providesServices` (ADR-0116): its string
+ * entries, or `[]` when it declares none. `undefined` (nothing read) when what
+ * it exports is not an object, or when reading the declaration throws — the
+ * test `os serve`'s own reading of a stack plugin's declaration makes.
+ */
+function readDeclaredServices(plugin: unknown): string[] | undefined {
+  if (!plugin || typeof plugin !== 'object') return undefined;
+  try {
+    const provides = (plugin as { providesServices?: unknown }).providesServices;
+    return Array.isArray(provides) ? provides.filter((s): s is string => typeof s === 'string') : [];
+  } catch {
+    return undefined;
+  }
 }
 
 /** An installed plugin every check passed: what loading it would import. */
@@ -509,6 +533,12 @@ export async function verifyInstalledPlugins(input: VerifyInstalledPluginsInput)
 export interface LoadedInstalledPlugin {
   record: PluginInstallationRecord;
   plugin: unknown;
+  /**
+   * What the plugin declares in `providesServices` (ADR-0116), read as it was
+   * imported: `[]` when it declares none, absent when it could not be read.
+   * The host carries it onto a refusal it raises for this plugin.
+   */
+  declaredServices?: string[];
 }
 
 export interface InstalledPluginsLoad {
@@ -531,6 +561,13 @@ export interface LoadInstalledPluginsInput extends VerifyInstalledPluginsInput {
    * from the install directory.
    */
   resolveHostPackagesFrom?: string;
+  /**
+   * A caller that only reads the installed set (a one-shot command) leaves a
+   * pending uninstall as it is: that plugin is neither removed nor loaded, as
+   * the next boot that finishes its uninstall would not load it either.
+   * Unset, a pending uninstall is finished here, as `os serve`'s boot does.
+   */
+  leaveUninstallsPending?: boolean;
 }
 
 /**
@@ -666,7 +703,7 @@ export async function loadInstalledPlugins(input: LoadInstalledPluginsInput): Pr
   const verdict = await verifyInstalledPlugins(input);
   const out: InstalledPluginsLoad = { loaded: [], refused: [...verdict.refused], disabled: verdict.disabled, removed: [] };
 
-  for (const record of verdict.uninstallPending) {
+  for (const record of input.leaveUninstallsPending ? [] : verdict.uninstallPending) {
     let finished: { kept: boolean } | null;
     try {
       finished = finishUninstall(input.environmentId, record);
@@ -720,11 +757,12 @@ export async function loadInstalledPlugins(input: LoadInstalledPluginsInput): Pr
     } catch (error) {
       refusal = { id: record.id, version: record.version, error: 'not_a_plugin', message: `reading what ${item.entry} exports threw: ${thrownMessage(error)}` };
     }
+    const declaredServices = readDeclaredServices(plugin);
     if (refusal) {
-      out.refused.push(refusal);
+      out.refused.push(declaredServices === undefined ? refusal : { ...refusal, declaredServices });
       continue;
     }
-    out.loaded.push({ record, plugin });
+    out.loaded.push(declaredServices === undefined ? { record, plugin } : { record, plugin, declaredServices });
   }
   return out;
 }

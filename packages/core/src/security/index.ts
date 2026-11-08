@@ -349,6 +349,11 @@ export {
   type EffectiveFieldPermissionsInputSet,
 } from './effective-object-permissions.js';
 
+// [#30237] The lifecycle-verb → row-level-security operation mapping
+// (transfer/restore → update, purge → delete), read by plugin-security and
+// plugin-sharing alike.
+export { LIFECYCLE_VERB_RLS_OPERATION, rlsOperationForVerb } from './lifecycle-verb-rls-operation.js';
+
 // Commit f586f1a89 (maintainer ruling 2026-08-08, Option A) — the SINGLE ExecutionContext
 // assembly shared by every transport entry point, with the anonymous face as
 // two NAMED entries (fail-closed default / explicit guest) instead of drift.

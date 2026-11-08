@@ -897,7 +897,7 @@
       "title": "Email templates resolve from the registry (no sys_email_template row since ADR-0131 D6/D10), resolve (name, locale) with en-US fallback, render {{path}} holes, gate on required variables and active:false, survive admin edits across redeploys — and the raw POST /api/v1/email/send door authenticates, requires manage_platform_settings, bounds sentBy, from, headers, organizationId and identityMail, refuses anonymous, and 400s malformed input",
       "since": "v15",
       "status": "active",
-      "revision": 16,
+      "revision": 17,
       "priority": "P2",
       "surface": "mixed",
       "fixtures": {
@@ -910,7 +910,7 @@
         ],
         "knownGaps": [
           "no stock example exercises an email template end-to-end; needs a small fixture flow with a notify/email step",
-          "refinement of the gap above: the TEMPLATE fixture exists (showcase_task_done_email) and the send path is pinned by packages/qa/dogfood/test/email-template-materialization.dogfood.test.ts, but no shipped FLOW invokes sendTemplate. The workable door, measured by QA run #23922 and corrected by QA run #28656 at 6e11a929: a SCRATCH flow authored through POST /api/v1/automation (a runtime flow registers on stock showcase) of type 'api', whose start node's config is { triggerType: 'api', hookId, secret } — an api flow needs a non-blank config.secret or a config.secretRef, and without one its registration is refused (service-automation flow-registration-checks.ts validateApiTriggerSecret; 400 when #28656 met it) — and whose notify node names channels ['email'], template 'showcase_task_done_email' and templateData (CEL value envelopes for title / project) and carries NO inline title or message: template and inline title/message are mutually exclusive (NotifyConfigSchema, packages/spec/src/automation/io-node-config.zod.ts; 400). Fire it as the admin with POST /api/v1/automation/NAME/trigger. Not type 'autolaunched': #28656's autolaunched flow was refused at that door, 403 (the door refuses an elevated, runAs: 'system', self-triggered type with PERMISSION_DENIED, packages/runtime/src/flow-start-admission.ts) — the email channel calls sendTemplate per recipient, and each delivery lands in sys_email (admin GET /api/v1/data/sys_email) with the rendered subject and body"
+          "refinement of the gap above: the TEMPLATE fixture exists (showcase_task_done_email) and the send path is pinned by packages/qa/dogfood/test/email-template-materialization.dogfood.test.ts, but no shipped FLOW invokes sendTemplate. The workable door, measured by QA run #23922 and corrected by QA run #28656 at 6e11a929: a SCRATCH flow authored through POST /api/v1/automation (a runtime flow registers on stock showcase) of type 'api', whose start node's config is { triggerType: 'api', hookId, secret } — an api flow needs a non-blank config.secret or a config.secretRef, and without one its registration is refused (service-automation flow-registration-checks.ts validateApiTriggerSecret; 400 when #28656 met it) — and whose notify node names channels ['email'], template 'showcase_task_done_email' and templateData (CEL value envelopes for title / project) and carries NO inline title or message: template and inline title/message are mutually exclusive (NotifyConfigSchema, packages/spec/src/automation/io-node-config.zod.ts; 400). Fire it as the admin with POST /api/v1/automation/NAME/trigger. Not type 'autolaunched': #28656's autolaunched flow was refused at that door, 403 (the door refuses an elevated, runAs: 'system', self-triggered type with PERMISSION_DENIED, packages/runtime/src/flow-start-admission.ts) — the email channel calls sendTemplate per recipient, and each delivery lands in sys_email (admin GET /api/v1/data/sys_email) with the rendered subject and body. On the dev `log` transport the email channel is suppressed (skipped as transport_not_configured, CHANNEL_UNAVAILABLE_REASONS in packages/services/service-messaging/src/channel.ts), so arm the SMTP sink first, as identity-auth.email-verification-loop fixtures.requires[2] does: plugin-email's fake-smtp.testkit.ts under tsx, then PUT /api/settings/mail {provider: 'smtp', smtp_host: '127.0.0.1', smtp_port: PORT, smtp_secure: false, from_email, from_name}"
         ]
       },
       "variants": [
@@ -1102,6 +1102,12 @@
           "date": "2026-11-05",
           "change": "acceptance[3].clause and .verify name the fold ladder as resolveLocaleAmong's five steps: PR #30601 put a platform locale table step (platformLocaleTagOf) between case-insensitive and base language, so zh reaches zh-CN at that step and zh-TW / zh-HK / zh-MO reach a zh-Hant tag when the bundle holds one, else zh-CN by variant expansion. The showcase bundle holds no zh-Hant tag, so no verdict this item scores changes. Read on main b77c160a",
           "ref": "#30617"
+        },
+        {
+          "revision": 17,
+          "date": "2026-11-08",
+          "change": "fixtures.knownGaps[1]: on the dev log transport the email channel is suppressed (transport_not_configured), so the scratch flow's delivery needs the same SMTP-sink recipe as identity-auth.email-verification-loop. Checklist-accuracy finding of QA run #31486 (owed:weekly, at 0647dabb). Read at base 4894cfe1",
+          "ref": "#31499"
         }
       ]
     },

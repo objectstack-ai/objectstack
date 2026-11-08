@@ -18,7 +18,9 @@
  * same details — as one the caller may not manage, for every caller,
  * `manage_users` included, so the answer says nothing about which ids exist.
  * That is the departure the contract names: explain answers an admitted caller
- * `404` there, and this read must not.
+ * `404` there, and this read must not. A caller only a delegated scope could
+ * admit is refused the same for a user it cannot read, whom the scope does not
+ * cover: the gate's answer, not a second rule here.
  *
  * ## One reading of the origins
  *

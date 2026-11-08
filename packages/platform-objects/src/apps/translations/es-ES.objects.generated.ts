@@ -1160,9 +1160,10 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       revoked_reason: {
         label: "Motivo de la revocación",
-        help: "Se registra cuando el restablecimiento forzado de la contraseña por parte de un administrador revocó esta clave. Solo un administrador de la plataforma puede restaurar una clave así; su propietario crea una nueva. Se borra cuando la clave se restaura. Vacío para una clave revocada desde la lista de claves de API.",
+        help: "Por qué se revocó la clave, cuando eso decide quién puede restaurarla. Restablecimiento forzado de la contraseña por un administrador: solo un administrador de la plataforma puede restaurar la clave. Fin de la pertenencia a la organización: el propietario dejó la organización y nadie puede restaurar la clave; un miembro crea una nueva. Se borra cuando la clave se restaura. Vacío para una clave revocada desde la lista de claves de API.",
         options: {
-          admin_password_reset: "Restablecimiento forzado de la contraseña por un administrador"
+          admin_password_reset: "Restablecimiento forzado de la contraseña por un administrador",
+          organization_membership_ended: "Fin de la pertenencia a la organización"
         }
       },
       key: {
@@ -2047,6 +2048,14 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         label: "Configuración SAML",
         help: "JSON: entryPoint, cert, identifierFormat, mapeo (gestionado por better-auth)"
       },
+      allow_idp_initiated: {
+        label: "Permitir inicio de sesión iniciado por el IdP",
+        help: "Acepta un inicio de sesión que empieza en el proveedor de identidad (una respuesta SAML no solicitada o una devolución de llamada OIDC sin state) en lugar de en este sistema. Desactivado de forma predeterminada: una respuesta SAML iniciada por el IdP no está vinculada a ninguna solicitud hecha por este sistema. Cámbielo con «Editar opciones de inicio de sesión»."
+      },
+      allow_jit: {
+        label: "Permitir aprovisionamiento just-in-time",
+        help: "Con la política de audiencia solo por invitación, crea una cuenta para quien inicia sesión a través de este proveedor sin cuenta ni invitación. Desactivado de forma predeterminada: esa persona es rechazada. Las demás políticas aprovisionan como antes. Cámbielo con «Editar opciones de inicio de sesión»."
+      },
       user_id: {
         label: "Registrado por",
         help: "Usuario que registró este proveedor"
@@ -2167,6 +2176,10 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         label: "Eliminar proveedor SSO",
         description: "¿Eliminar este proveedor SSO? Los usuarios de su dominio ya no podrán iniciar sesión a través de él.",
         successMessage: "Proveedor SSO eliminado"
+      },
+      edit_sso_sign_in_options: {
+        label: "Editar opciones de inicio de sesión",
+        successMessage: "Opciones de inicio de sesión guardadas"
       }
     }
   },
