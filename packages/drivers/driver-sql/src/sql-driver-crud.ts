@@ -69,6 +69,7 @@ export interface CrudHost {
   readonly knex: SqlDriver['knex'];
   mapSortField: SqlDriver['mapSortField'];
   orderKeysFor: SqlDriver['orderKeysFor'];
+  primeMssqlPagingKey: SqlDriver['primeMssqlPagingKey'];
   readBackInsertedRows: SqlDriver['readBackInsertedRows'];
   remoteColumn: SqlDriver['remoteColumn'];
   resolveTenantField: SqlDriver['resolveTenantField'];
@@ -115,7 +116,10 @@ export class CrudFacet {
    * cited that as agreement, which it was not; objectstack#4419.) The
    * obligation the contract states is on `find`, and this keeps it there.
    */
-  static async findRows(this: Pick<CrudHost, 'applyFilters' | 'applyTenantScope' | 'backendStatementFault' | 'formatOutput' | 'getBuilder' | 'isMssql' | 'mapSortField' | 'orderKeysFor' | 'remoteColumn' | 'unresolvableFilterColumnRefusal'>, object: string, query: DriverQuery, options?: DriverOptions, singleRowLookup = false): Promise<any[]> {
+  static async findRows(this: Pick<CrudHost, 'applyFilters' | 'applyTenantScope' | 'backendStatementFault' | 'formatOutput' | 'getBuilder' | 'isMssql' | 'mapSortField' | 'orderKeysFor' | 'primeMssqlPagingKey' | 'remoteColumn' | 'unresolvableFilterColumnRefusal'>, object: string, query: DriverQuery, options?: DriverOptions, singleRowLookup = false): Promise<any[]> {
+    // [#31327] On SQL Server a federated object's paging key is read from the
+    // remote catalog before the ORDER BY is decided (`primeMssqlPagingKey`).
+    if (this.isMssql) await this.primeMssqlPagingKey(object);
     // The whole ORDER BY, decided once: the caller's keys plus whatever this
     // driver has to add to make a paged read deterministic. Derived out here
     // rather than inside `buildBase` so the recovery ladder below can ask

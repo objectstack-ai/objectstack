@@ -30,6 +30,7 @@
     "driver-common",
     "driver-memory",
     "driver-mongo",
+    "driver-mssql",
     "driver-mysql",
     "driver-postgres",
     "driver-sqlite",

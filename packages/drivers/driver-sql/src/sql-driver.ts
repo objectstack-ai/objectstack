@@ -1757,9 +1757,6 @@ export class SqlDriver implements IDataDriver {
     options?: DriverOptions,
     singleRowLookup = false,
   ): Promise<any[]> {
-    // [#31327] On SQL Server a federated object's paging key is read from the
-    // remote catalog before the ORDER BY is decided — see {@link primeMssqlPagingKey}.
-    if (this.isMssql) await this.primeMssqlPagingKey(object);
     // [#29520 codemod] The body moved to `sql-driver-crud.ts`, its docblock with it (see `CrudHost`).
     return CrudFacet.findRows.call(crudHost.of(this), object, query, options, singleRowLookup);
   }
@@ -9068,6 +9065,7 @@ export class SqlDriver implements IDataDriver {
       get knex() { return driver.knex; },
       mapSortField: (...a) => driver.mapSortField(...a),
       orderKeysFor: (...a) => driver.orderKeysFor(...a),
+      primeMssqlPagingKey: (...a) => driver.primeMssqlPagingKey(...a),
       readBackInsertedRows: (...a) => driver.readBackInsertedRows(...a),
       remoteColumn: (...a) => driver.remoteColumn(...a),
       resolveTenantField: (...a) => driver.resolveTenantField(...a),

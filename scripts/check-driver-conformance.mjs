@@ -745,6 +745,19 @@ const DIALECT_MATRIX_SYMBOLS = ['DIALECT_CELLS', 'LIVE_DIALECT_CELLS'];
  */
 const DIALECT_CELL_SYMBOLS = ['dialectCell', 'PG_CELL', 'MYSQL_CELL', 'declareDialectCell', 'declareUnprovisionedCell'];
 
+/**
+ * Naming one of these means the suite is about a FEDERATION-ONLY dialect
+ * (#31327): a backend the driver reads and writes as an `external` datasource
+ * but never manages — no DDL, no boot host (ADR-0015 §4.6). Such a suite runs
+ * the shared case-sets against a schema it builds itself, so it measures the
+ * dialect honestly, but it is OUTSIDE ADR-0053 D-A3's managed matrix: it never
+ * covers a managed cell, never discharges a DEBT entry, and is never scored on
+ * the dialect axis. It is reported on its own line, so a federation suite
+ * cannot make a managed cell read green, and a managed gap cannot hide behind
+ * one. A further federation-only dialect appends its cell symbol here.
+ */
+const FEDERATION_CELL_SYMBOLS = ['MSSQL_FEDERATION_CELL'];
+
 /** The export that identifies a package's dialect-matrix testkit, found on disk. */
 const DIALECT_TESTKIT_EXPORT = 'DIALECT_CELLS';
 
@@ -1368,6 +1381,19 @@ function dialectStance(src, specifier) {
   return 'undeclared';
 }
 
+/**
+ * Is this suite about a federation-only dialect? Same import-plus-reference
+ * rule as {@link dialectStance}: a mention in a comment, or an import never
+ * used, is not a declaration.
+ *
+ * @param {string} src file text (raw; stripped here)
+ * @param {string} specifier the testkit's module specifier for this package
+ */
+function isFederationSuite(src, specifier) {
+  const clean = stripComments(src);
+  return FEDERATION_CELL_SYMBOLS.some((s) => drivenFrom(clean, s, specifier));
+}
+
 // ── The run ─────────────────────────────────────────────────────────────────
 
 function audit() {
@@ -1408,10 +1434,23 @@ function audit() {
   const ledgerHit = new Set();
   /** driver -> (covering file -> the markers it covers), for the dialect axis. */
   const coveringByDriver = new Map();
+  /** driver -> (federation suite -> the markers it runs), reported, never scored. */
+  const federationByDriver = new Map();
   for (const driver of drivers) {
     const dir = join(DRIVERS_DIR, driver);
+    const kit = discoverDialectTestkit(dir);
     for (const c of CASE_SETS) {
-      const covering = coveringFiles(dir, c.marker);
+      const covering = [];
+      for (const f of coveringFiles(dir, c.marker)) {
+        if (kit && /\.test\.tsx?$/.test(f) && isFederationSuite(readFileSync(f, 'utf8'), kit.specifier)) {
+          if (!federationByDriver.has(driver)) federationByDriver.set(driver, new Map());
+          const perFile = federationByDriver.get(driver);
+          if (!perFile.has(f)) perFile.set(f, []);
+          perFile.get(f).push(c.marker);
+          continue;
+        }
+        covering.push(f);
+      }
       const where = covering[0] ?? null;
       for (const f of covering) {
         if (!coveringByDriver.has(driver)) coveringByDriver.set(driver, new Map());
@@ -1451,6 +1490,8 @@ function audit() {
   // DIALECTED — the third axis. Runs last because it scores the covering files
   // the CONSUMED pass just collected.
   const dialect = dialectAudit(drivers, coveringByDriver, errors);
+  dialect.federation = [...federationByDriver].flatMap(([driver, perFile]) =>
+    [...perFile].map(([file, markers]) => ({ driver, file: file.slice(ROOT.length + 1), markers })));
 
   return { drivers, rows, errors, dialect };
 }
@@ -1620,6 +1661,15 @@ function report() {
         `  ${glyph.padEnd(10)}  ${s.file.split('/').pop().padEnd(w)}  ${s.markers.map((m) => m.replace(/_CASES$/, '')).join(', ')}`,
       );
     }
+    const federation = (dialect.federation ?? []).filter((s) => s.driver === driver);
+    for (const s of federation.sort((a, b) => a.file.localeCompare(b.file))) {
+      console.log(
+        `  ${'federation'.padEnd(10)}  ${s.file.split('/').pop().padEnd(w)}  ${s.markers.map((m) => m.replace(/_CASES$/, '')).join(', ')}`,
+      );
+    }
+    if (federation.length) {
+      console.log('              federation-only dialect: outside the managed matrix, covers no managed cell');
+    }
     console.log('');
   }
   for (const rel of dialect.notExecutable) {
@@ -1663,7 +1713,8 @@ function report() {
       + `${dialect.kits.size} dialect-capable driver(s): `
       + `${dialect.scored.filter((s) => s.stance === 'matrix').length} run the matrix, `
       + `${dialect.scored.filter((s) => s.stance === 'cell').length} declare named cell(s), `
-      + `${dialect.scored.filter((s) => s.stance === 'ledger').length} in the DIALECT ledger. `
+      + `${dialect.scored.filter((s) => s.stance === 'ledger').length} in the DIALECT ledger; `
+      + `${(dialect.federation ?? []).length} federation-only suite(s) reported, not scored. `
       + `${matrixCells.size} of ${scoredCells.size} dialect-scored cell(s) have a matrix-routed `
       + `suite. ${singleBackendCells} covered cell(s) belong to ${dialect.singleBackend.length} `
       + 'single-backend driver(s), which have no dialect axis.\n',
@@ -2211,6 +2262,14 @@ function selfTest() {
     dialectStance("const d = new SqlDriver({ client: 'better-sqlite3' });\n", KIT_SPEC) === 'undeclared');
   expect('an imported but unused stance is not a stance (the `consumes` rule, applied here)',
     dialectStance("import { DIALECT_CELLS } from './kit.testkit.js';\nconst x = 1;\n", KIT_SPEC) === 'undeclared');
+  // #31327 — a federation-only suite is recognised by the same rule, and
+  // naming its cell is not a managed stance.
+  expect('naming a federation cell marks a federation suite',
+    isFederationSuite("import { MSSQL_FEDERATION_CELL } from './kit.testkit.js';\nif (MSSQL_FEDERATION_CELL.available) {}\n", KIT_SPEC));
+  expect('a federation cell mentioned only in a comment marks nothing',
+    !isFederationSuite("// MSSQL_FEDERATION_CELL\nimport { x } from './kit.testkit.js';\nx();\n", KIT_SPEC));
+  expect('a federation cell is not a managed stance',
+    dialectStance("import { MSSQL_FEDERATION_CELL } from './kit.testkit.js';\nif (MSSQL_FEDERATION_CELL.available) {}\n", KIT_SPEC) === 'undeclared');
 
   {
     // THE non-vacuity assertion for the stripper. This fixture is the real shape
