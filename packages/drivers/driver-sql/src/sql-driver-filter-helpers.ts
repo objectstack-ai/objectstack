@@ -89,6 +89,7 @@ export interface FilterHelpersHost {
   readonly datetimeFields: SqlDriver['datetimeFields'];
   filterColumnExpr: SqlDriver['filterColumnExpr'];
   isJsonColumn: SqlDriver['isJsonColumn'];
+  readonly isMssql: SqlDriver['isMssql'];
   readonly isMysql: SqlDriver['isMysql'];
   isNonTextColumn: SqlDriver['isNonTextColumn'];
   readonly isSqlite: SqlDriver['isSqlite'];
@@ -151,12 +152,22 @@ export class FilterHelpersFacet {
   }
 
   /** The body of `SqlDriver#coerceFilterValue`; the method's docblock there is its contract. */
-  static coerceFilterValue(this: Pick<FilterHelpersHost, 'coerceFilterValue' | 'storageDatetimeValue' | 'temporalFieldKind' | 'toDateOnly'>, table: string | null, field: string, value: any): any {
+  static coerceFilterValue(this: Pick<FilterHelpersHost, 'coerceFilterValue' | 'isMssql' | 'storageDatetimeValue' | 'temporalFieldKind' | 'toDateOnly'>, table: string | null, field: string, value: any): any {
     if (value == null || !table) return value;
     if (Array.isArray(value)) return value.map((v) => this.coerceFilterValue(table, field, v));
 
     const kind = this.temporalFieldKind(table, field);
-    if (!kind) return value;
+    if (!kind) {
+      // [#31327] SQL Server: tedious binds a JS `Date` as a `datetime`
+      // parameter, and `datetime` outranks `nvarchar` in SQL Server's type
+      // precedence — so `text_col >= @date` converts the COLUMN and fails
+      // ("Conversion failed when converting date and/or time from character
+      // string") on any row that is not a date. Bound as its canonical UTC
+      // text instead, the comparison is the text comparison the other
+      // dialects make.
+      if (this.isMssql && value instanceof Date) return this.storageDatetimeValue(value);
+      return value;
+    }
     if (kind === 'datetime') return this.storageDatetimeValue(value);
     // `Field.time` (#3994) takes the same treatment for the same reason: the
     // comparand must be the canonical time-of-day text the column stores.
@@ -882,7 +893,7 @@ export class FilterHelpersFacet {
             // through to the substring emitter for every scalar string column,
             // which is the other half of the sentence the spec now states.
             case '$contains':
-              if (!this.applyJsonMembership(builder, method, table, localField, field, opValue, false)) {
+              if (!this.applyJsonMembership(builder, method, table, localField, field, opValue, false, value)) {
                 this.applyContainsLike(builder, method, field, opValue);
               }
               break;
@@ -903,7 +914,7 @@ export class FilterHelpersFacet {
               // the substring emitter would make the pair non-complementary on
               // every JSON column — `['redwood']` would answer neither
               // `$contains: 'red'` nor `$notContains: 'red'`.
-              if (!this.applyJsonMembership(builder, method, table, localField, field, opValue, true)) {
+              if (!this.applyJsonMembership(builder, method, table, localField, field, opValue, true, value)) {
                 // [#5298] NULL-safe: `NOT LIKE` is UNKNOWN for a NULL column, and
                 // "does not contain" is true of a value that is not there.
                 this.applyNullSafeNegative(builder, method, field, (qb) =>

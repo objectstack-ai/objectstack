@@ -151,6 +151,15 @@ export class CrudFacet {
       }
 
       // PAGINATION
+      if (this.isMssql && query.limit === 0) {
+        // [#31327] `FETCH NEXT 0 ROWS` is an error on SQL Server ("must be
+        // greater than zero"), where every other dialect answers `LIMIT 0`
+        // with no rows. Without the offset knex compiles `SELECT TOP (0)`,
+        // which is the same empty answer — and an offset into no rows is no
+        // rows.
+        b.limit(0);
+        return b;
+      }
       if (query.offset !== undefined) b.offset(query.offset);
       if (query.limit !== undefined) b.limit(query.limit);
 

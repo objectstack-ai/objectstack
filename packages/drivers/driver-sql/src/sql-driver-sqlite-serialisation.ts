@@ -46,6 +46,7 @@ export interface SqliteSerialisationHost {
   readonly dateFields: SqlDriver['dateFields'];
   readonly datetimeFields: SqlDriver['datetimeFields'];
   readonly fileColumnsMoved: SqlDriver['fileColumnsMoved'];
+  readonly isMssql: SqlDriver['isMssql'];
   readonly isMysql: SqlDriver['isMysql'];
   readonly isSqlite: SqlDriver['isSqlite'];
   readonly jsonFields: SqlDriver['jsonFields'];
@@ -271,7 +272,7 @@ export class SqliteSerialisationFacet {
   }
 
   /** The body of `SqlDriver#formatOutput`; the method's docblock there is its contract. */
-  static formatOutput(this: Pick<SqliteSerialisationHost, 'booleanFields' | 'columnFieldByObject' | 'dateFields' | 'datetimeFields' | 'isMysql' | 'isSqlite' | 'jsonFields' | 'mediaFields' | 'numericFields' | 'numericValueFields' | 'timeFields' | 'toDateOnly' | 'toTimeOnly'>, object: string, data: any): any {
+  static formatOutput(this: Pick<SqliteSerialisationHost, 'booleanFields' | 'columnFieldByObject' | 'dateFields' | 'datetimeFields' | 'isMssql' | 'isMysql' | 'isSqlite' | 'jsonFields' | 'mediaFields' | 'numericFields' | 'numericValueFields' | 'timeFields' | 'toDateOnly' | 'toTimeOnly'>, object: string, data: any): any {
     if (!data) return data;
 
     // External columnMap (ADR-0015): rename physical remote-column keys to local
@@ -289,7 +290,12 @@ export class SqliteSerialisationFacet {
       }
     }
 
-    if (this.isSqlite) {
+    // [#31327] SQL Server too: a federated JSON field lives in an `nvarchar`
+    // column (SQL Server has no JSON type), so the client hands back the stored
+    // TEXT exactly as SQLite does, and the same inverse applies. The catch below
+    // is then also what keeps a remote column holding plain, non-JSON text
+    // readable as that text.
+    if (this.isSqlite || this.isMssql) {
       // The exact inverse of `formatInput`'s `JSON.stringify` (commit 4045b954d). Postgres
       // and MySQL need no arm here because their clients already parse a native
       // `json`/`jsonb` column; SQLite hands back the stored TEXT, so the driver

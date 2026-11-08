@@ -931,10 +931,12 @@ export function applyEmptyOperator(this: Pick<PredicateEmitterHost, 'declaredVal
 }
 
 /** The body of `SqlDriver#applyJsonMembership`; the method's docblock there is its contract. */
-export function applyJsonMembership(this: Pick<PredicateEmitterHost, 'applyNullSafeNegative' | 'dialectName' | 'isJsonColumn'>, builder: any, method: string, table: string | null | undefined, localField: string, field: string, value: unknown, negate: boolean): boolean {
+export function applyJsonMembership(this: Pick<PredicateEmitterHost, 'applyNullSafeNegative' | 'dialectName' | 'isJsonColumn'>, builder: any, method: string, table: string | null | undefined, localField: string, field: string, value: unknown, negate: boolean, subtree?: unknown): boolean {
   if (!this.isJsonColumn(table, localField)) return false;
   const dialect = this.dialectName;
-  if (dialect === 'mssql') throw jsonMembershipUnsupportedDialectError(field);
+  // [#31327] `subtree` carries the filter-subtree provenance, so the refusal's
+  // detail is shown only to an author-marked filter (#20039).
+  if (dialect === 'mssql') throw jsonMembershipUnsupportedDialectError(field, subtree);
   // [#20987] The construct lives in `@objectstack/core`, placeholder-agnostic;
   // this driver's plumbing is knex's: `??` binds the column as an identifier
   // and `?` a value, each pushed in the order the placeholders appear.

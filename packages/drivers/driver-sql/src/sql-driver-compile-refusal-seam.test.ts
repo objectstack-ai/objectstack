@@ -266,10 +266,23 @@ const DOORS: readonly Door[] = [
     where: () => ({ [JSON_COL]: { $empty: false } }),
     secrets: [JSON_COL],
     klass: 'whose empty list is tested with a JSON function that differs per SQL dialect',
-    // A knex client this driver does not model (mssql, oracle) reads as the
+    // A knex client this driver does not model (oracledb, for one) reads as the
     // `'unknown'` dialect, where the multi-value row has no construct.
     setup: (driver) => {
       Object.defineProperty(driver, 'dialectName', { get: () => 'unknown', configurable: true });
+    },
+  },
+  // ── #31327: JSON-array membership on SQL Server, refused rather than guessed ──
+  {
+    builder: 'jsonMembershipUnsupportedDialectError',
+    where: () => ({ [JSON_COL]: { $contains: SECRET } }),
+    secrets: [JSON_COL],
+    klass: 'targets a multi-value (JSON-array) field',
+    // The federation-only `mssql` dialect has no element-membership construct
+    // here; a substring LIKE over the serialized list would answer a
+    // different question, so the seam refuses it.
+    setup: (driver) => {
+      Object.defineProperty(driver, 'dialectName', { get: () => 'mssql', configurable: true });
     },
   },
 ];

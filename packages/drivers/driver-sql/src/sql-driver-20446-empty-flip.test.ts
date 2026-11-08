@@ -16,7 +16,7 @@
  *   it — the corrected premise of ruling 5881556735 on #20446.
  * - N2, the narrowing the changeset declares, in its two `driver-sql` shapes:
  *   the built-in `id` (no object declares it), and a multi-value column over a
- *   knex client this driver does not model (mssql here — its client builds
+ *   knex client this driver does not model (knex's base client here — it builds
  *   without a server, so the statement is compiled, not run). Each is REFUSED,
  *   loudly, with the `$null` prescription, where the old `$null` lowering
  *   compiled `IS NULL`.
@@ -32,6 +32,7 @@ import { join } from 'node:path';
 import type { Knex } from 'knex';
 import { parseFilterAST, type FilterCondition } from '@objectstack/spec/data';
 import { SqlDriver } from './sql-driver.js';
+import { UNMODELLED_CLIENT_CONFIG } from './unmodelled-knex-client.testkit.js';
 
 const TABLE = 'os20446_task';
 
@@ -163,9 +164,9 @@ describe('[#20446] SqlDriver — a multi-value column over a knex client this dr
   }
 
   it('N2: the lowered rule is REFUSED with the $null prescription on the multi-value column only', async () => {
-    // mssql is not a platform datasource driver; its knex client builds without
-    // a server, and this driver reads it as the `'unknown'` dialect.
-    const d = new CompilerProbeDriver({ client: 'mssql', connection: {} } as never);
+    // knex's base client builds without a server, and this driver reads it as
+    // the `'unknown'` dialect (`mssql` served until #31327 modelled it).
+    const d = new CompilerProbeDriver(UNMODELLED_CLIENT_CONFIG);
     expect(d.dialectName).toBe('unknown');
     d.registerObjectMetadata([{ name: TABLE, fields: FIELDS } as never]);
     for (const op of ['is_empty', 'is_not_empty']) {

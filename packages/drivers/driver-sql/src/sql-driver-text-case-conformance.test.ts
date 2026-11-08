@@ -79,6 +79,7 @@ import {
   declareUnprovisionedCell,
   type DialectCell,
 } from './live-dialect-matrix.testkit.js';
+import { UNMODELLED_CLIENT_CONFIG } from './unmodelled-knex-client.testkit.js';
 
 /**
  * [#20822 · ADR-0053 D-D1 items 5 and 9, as amended] The `$not` operand a seam
@@ -359,11 +360,11 @@ describe('[#6518] the per-dialect construct, compiled', () => {
     // of it — it is the only answer that still RUNS, and it is named as residue
     // in the driver-conformance ledger rather than left to be discovered.
     //
-    // `mssql` is the stand-in because knex resolves its driver (`tedious`) from
-    // this workspace without a server; it is not a supported dialect and this
-    // case makes no claim that it is. Any client outside `isSqlite` /
-    // `isPostgres` / `isMysql` takes the same arm.
-    const d = probe({ client: 'mssql', connection: {} });
+    // The stand-in is knex's base client (`UNMODELLED_CLIENT_CONFIG`): it builds
+    // without a server and carries no spelling the driver models. (It was
+    // `mssql` until #31327 modelled SQL Server.) Any client outside the
+    // modelled families takes the same arm.
+    const d = probe(UNMODELLED_CLIENT_CONFIG);
     expect(d.compileWhere({ name: { $contains: 'acme' } })).toMatch(/LIKE/);
     expect(d.compileWhere({ name: { $icontains: 'acme' } })).toMatch(/LOWER\(/);
   });

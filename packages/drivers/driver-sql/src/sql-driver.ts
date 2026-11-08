@@ -7004,6 +7004,7 @@ export class SqlDriver implements IDataDriver {
     field: string,
     value: unknown,
     negate: boolean,
+    subtree?: unknown,
   ): boolean {
     // [#25521 cut 16] The body moved to `sql-driver-predicate-emitters.ts` (see `PredicateEmitterHost`).
     const readDialectName = () => this.dialectName;
@@ -7012,7 +7013,7 @@ export class SqlDriver implements IDataDriver {
       get dialectName() { return readDialectName(); },
       isJsonColumn: (...a) => this.isJsonColumn(...a),
     };
-    return applyJsonMembership.call(host, builder, method, table, localField, field, value, negate);
+    return applyJsonMembership.call(host, builder, method, table, localField, field, value, negate, subtree);
   }
 
   /**
@@ -9155,6 +9156,7 @@ export class SqlDriver implements IDataDriver {
       get datetimeFields() { return driver.datetimeFields; },
       filterColumnExpr: (...a) => driver.filterColumnExpr(...a),
       isJsonColumn: (...a) => driver.isJsonColumn(...a),
+      get isMssql() { return driver.isMssql; },
       get isMysql() { return driver.isMysql; },
       isNonTextColumn: (...a) => driver.isNonTextColumn(...a),
       get isSqlite() { return driver.isSqlite; },
@@ -9365,6 +9367,7 @@ export class SqlDriver implements IDataDriver {
       get dateFields() { return driver.dateFields; },
       get datetimeFields() { return driver.datetimeFields; },
       get fileColumnsMoved() { return driver.fileColumnsMoved; },
+      get isMssql() { return driver.isMssql; },
       get isMysql() { return driver.isMysql; },
       get isSqlite() { return driver.isSqlite; },
       get jsonFields() { return driver.jsonFields; },
