@@ -26,8 +26,16 @@
  * gate's host (cut 8, `protocol-authoring-gate.ts`), whose closure calls it.
  *
  * The body reads no module-level declaration of `protocol.ts`; it imports the
- * class type and the shared walk (`resolvePackageClosure`, below). Nothing
- * re-exports this module, so the published surface does not move.
+ * class type and the shared walk (`resolvePackageClosure`, below).
+ *
+ * ## One declared dependency closure for every reader (#31575, ADR-0150 D3)
+ *
+ * {@link packageDependencyClosure} is the one answer to "what may package P
+ * reach by declaration": the save door's write scope (the method above, which
+ * now only adds its silent `catch`) and objectql's package-scoped name
+ * resolver (`resolvePackageScopedName`) both ask it, so the closure a write is
+ * judged against and the closure a bare name resolves in can never disagree.
+ * It is the one export of this module the package root re-exports.
  */
 
 import { resolvePackageClosure } from '@objectstack/lint/runtime';
@@ -105,15 +113,45 @@ export function resolveWritePackageScope(
     packageId: string | null | undefined,
 ): { packageId: string; dependencies: string[] } | undefined {
     try {
-        const registry = this.engine.registry as MemberRegistry | undefined;
-        const getPackage = registry?.getPackage;
-        if (typeof getPackage !== 'function') return undefined;
-        const closure = resolvePackageClosure(packageId, (id) => getPackage.call(registry, id));
-        return closure === undefined ? undefined : widenPairClosureToAppMembers(closure, registry);
+        return packageDependencyClosure(packageId, this.engine.registry as MemberRegistry | undefined);
     } catch {
         // Context gathering must never fail a write (the same contract
         // `listCollection` above holds). An unreadable registry means an
         // unnarrowed gate, not a refused publish.
         return undefined;
     }
+}
+
+/**
+ * [#31575, ADR-0150 D3, ADR-0141] Package `packageId`'s DECLARED dependency
+ * closure, read from `registry`: the package itself and every package its
+ * manifest's `dependencies` name, transitively (`resolvePackageClosure`, the
+ * walk Studio's object pickers share), with an App's pair widened by the App's
+ * members ({@link widenPairClosureToAppMembers}). The one implementation: the
+ * save door's write scope ({@link resolveWritePackageScope}) is this call
+ * inside a silent `catch`, and objectql's package-scoped name resolver asks it
+ * for the closure a bare name resolves in.
+ *
+ * Answers `undefined` exactly where the walk does — no package id, the
+ * `sys_metadata` sentinel, a package `registry` cannot produce — and for a
+ * registry with no `getPackage` (a metadata-only test double). Each reader
+ * decides what `undefined` means for it: the save door narrows nothing, the
+ * resolver reaches nothing beyond the caller's own items and `sys`.
+ *
+ * Not a widening of anything: it adds no package the walk and the pair
+ * widening did not already add. ⛔ It does NOT add the `sys` kernel namespace
+ * ADR-0150 D3 puts in a resolution closure: the save door's scope stays as it
+ * was, so the resolver adds `sys` itself.
+ *
+ * A `getPackage` that throws propagates; the caller decides what an unreadable
+ * registry means.
+ */
+export function packageDependencyClosure(
+    packageId: string | null | undefined,
+    registry: MemberRegistry | undefined,
+): { packageId: string; dependencies: string[] } | undefined {
+    const getPackage = registry?.getPackage;
+    if (typeof getPackage !== 'function') return undefined;
+    const closure = resolvePackageClosure(packageId, (id) => getPackage.call(registry, id));
+    return closure === undefined ? undefined : widenPairClosureToAppMembers(closure, registry);
 }
