@@ -3995,6 +3995,22 @@ const es = {
       managedTruncated: 'Solo se muestran los más recientes; esta persona ha autorizado más.',
     },
   },
+  effectiveAccess: {
+    title: 'Conjuntos de permisos efectivos',
+    body: 'Cada conjunto de permisos vigente para esta persona en tu organización actual, y de dónde viene cada uno. Las asignaciones directas también aparecen abajo, donde se pueden quitar.',
+    refused: 'No tienes permiso para ver el acceso efectivo de esta persona.',
+    unserved: 'Este servidor no informa del acceso efectivo.',
+    loadFailed: 'No se pudo cargar el acceso efectivo: {{message}}',
+    empty: 'Esta persona no tiene ningún conjunto de permisos vigente en esta organización.',
+    originsLabel: 'Procede de',
+    origin: {
+      direct: 'Asignación directa',
+      position: 'Puesto: {{position}}',
+      default: 'Vinculación predeterminada',
+      derivedPlatformAdmin: 'Administrador de plataforma configurado',
+      derivedAiAccess: 'Acceso a IA activado',
+    },
+  },
   excelImport: {
     noImportableFields: "Ese objeto no tiene campos importables.",
     schemaReadFailed: "No se pudo leer el esquema del objeto.",
