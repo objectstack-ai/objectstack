@@ -2047,6 +2047,14 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         label: "SAML 配置",
         help: "JSON：entryPoint、cert、identifierFormat、映射（由 better-auth 管理）"
       },
+      allow_idp_initiated: {
+        label: "允许 IdP 发起的登录",
+        help: "接受从身份提供方发起的登录（未经请求的 SAML 响应，或不带 state 的 OIDC 回调），而不是从本系统发起的登录。默认关闭：IdP 发起的 SAML 响应不对应本系统发出的任何请求。请通过“编辑登录选项”修改。"
+      },
+      allow_jit: {
+        label: "允许即时开通账号",
+        help: "在仅限邀请的受众策略下，为通过此提供方登录、但既无账号也无邀请的人创建账号。默认关闭：此类人员会被拒绝。其他策略照旧开通账号。请通过“编辑登录选项”修改。"
+      },
       user_id: {
         label: "注册人",
         help: "注册该提供方的用户"
@@ -2167,6 +2175,10 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         label: "删除 SSO 提供方",
         description: "删除该 SSO 提供方吗？其域名下的用户将无法再通过它登录。",
         successMessage: "SSO 提供方已删除"
+      },
+      edit_sso_sign_in_options: {
+        label: "编辑登录选项",
+        successMessage: "登录选项已保存"
       }
     }
   },

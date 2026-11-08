@@ -2047,6 +2047,14 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         label: "SAML 設定",
         help: "JSON: entryPoint、cert、identifierFormat、マッピング（better-auth が管理）"
       },
+      allow_idp_initiated: {
+        label: "IdP 起点のサインインを許可",
+        help: "本システムではなく ID プロバイダーから始まるサインイン（要求していない SAML レスポンス、または state のない OIDC コールバック）を受け入れます。既定ではオフです。IdP 起点の SAML レスポンスは、本システムが送ったどの要求にも結び付いていません。「サインインオプションを編集」で変更します。"
+      },
+      allow_jit: {
+        label: "ジャストインタイムのプロビジョニングを許可",
+        help: "招待制のオーディエンス方針のもとで、アカウントも招待もないままこのプロバイダー経由でサインインした人のアカウントを作成します。既定ではオフで、そのような人は拒否されます。ほかの方針では従来どおりプロビジョニングされます。「サインインオプションを編集」で変更します。"
+      },
       user_id: {
         label: "登録者",
         help: "このプロバイダーを登録したユーザー"
@@ -2167,6 +2175,10 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         label: "SSO プロバイダーを削除",
         description: "この SSO プロバイダーを削除しますか？そのドメインのユーザーは、これを通じてサインインできなくなります。",
         successMessage: "SSO プロバイダーを削除しました"
+      },
+      edit_sso_sign_in_options: {
+        label: "サインインオプションを編集",
+        successMessage: "サインインオプションを保存しました"
       }
     }
   },

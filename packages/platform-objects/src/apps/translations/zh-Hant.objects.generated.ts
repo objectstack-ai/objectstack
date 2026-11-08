@@ -2047,6 +2047,14 @@ export const zhHantObjects: NonNullable<TranslationData['objects']> = {
         label: "SAML 設定",
         help: "JSON：entryPoint、cert、identifierFormat、對應（由 better-auth 管理）"
       },
+      allow_idp_initiated: {
+        label: "允許 IdP 發起的登入",
+        help: "接受從身分提供方發起的登入（未經請求的 SAML 回應，或不帶 state 的 OIDC 回呼），而非從本系統發起的登入。預設關閉：IdP 發起的 SAML 回應不對應本系統發出的任何請求。請透過「編輯登入選項」修改。"
+      },
+      allow_jit: {
+        label: "允許即時開通帳號",
+        help: "在僅限邀請的受眾策略下，為透過此提供方登入、但既無帳號也無邀請的人建立帳號。預設關閉：此類人員會被拒絕。其他策略照舊開通帳號。請透過「編輯登入選項」修改。"
+      },
       user_id: {
         label: "註冊者",
         help: "註冊該提供方的使用者"
@@ -2167,6 +2175,10 @@ export const zhHantObjects: NonNullable<TranslationData['objects']> = {
         label: "刪除 SSO 提供方",
         description: "刪除該 SSO 提供方嗎？其網域下的使用者將無法再透過它登入。",
         successMessage: "SSO 提供方已刪除"
+      },
+      edit_sso_sign_in_options: {
+        label: "編輯登入選項",
+        successMessage: "登入選項已儲存"
       }
     }
   },

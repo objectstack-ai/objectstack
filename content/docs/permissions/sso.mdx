@@ -368,6 +368,64 @@ configure on the IdP side:
 
 ---
 
+## Per-provider sign-in options
+
+Each registered SSO provider, OIDC or SAML, carries two switches. Both are
+**off** by default.
+
+| Option | Column on `sys_sso_provider` | When on |
+|---|---|---|
+| `allowIdpInitiated` | `allow_idp_initiated` | The provider may start a sign-in from the IdP's own portal, with no request from this platform. |
+| `allowJit` | `allow_jit` | Under the `invite_only` audience posture, the provider may create an account for a person who has none and holds no invitation. |
+
+**Changing them.** Use **Setup → SSO Providers → Edit Sign-In Options** on a
+provider row. It posts to `POST /api/v1/auth/sso/update-provider` with
+`{ providerId, allowIdpInitiated, allowJit }`, and `POST /api/v1/auth/sso/register`
+takes the same two members. The people who can change a provider today are the
+only ones who can change these options. A value that is not a boolean is refused
+**400 `VALIDATION_ERROR`**, and nothing is written. Both fields keep a history,
+so every change writes a row to the audit ledger (`sys_audit_log`) and a
+field-level line to the record's activity feed, naming the old and the new value.
+
+### IdP-initiated sign-in
+
+With the option off, a sign-in the IdP starts on its own is refused, and nobody
+is signed in:
+
+- **SAML.** A Response with no `InResponseTo` redirects to the error page with
+  `error=unsolicited_response`.
+- **OIDC.** A callback that carries a `code` and no `state` redirects with
+  `error=state_not_found`.
+
+With it on, `@better-auth/sso` accepts that sign-in, and the platform adds no
+mechanism of its own. A SAML Response with no `InResponseTo` is validated like
+any other and signs the user in. An OIDC callback with no `state` restarts the
+flow at the IdP's authorization endpoint with a fresh `state`, and the sign-in
+completes from there. A sign-in this platform starts is unchanged either way.
+
+The option belongs to one provider: turning it on for one SAML provider does not
+accept unsolicited Responses for another. For OIDC, the column is the only
+place it is set. An `allowIdpInitiated` member written into the stored OIDC
+configuration is not read, and it is removed on the next write.
+
+### Accounts for people who were not invited
+
+Under the `invite_only` audience posture (the default, see
+[Who may sign up](/docs/deployment/self-hosting#who-may-sign-up--and-what-each-posture-tells-a-stranger)),
+an SSO sign-in by a person who has no account and no pending invitation is
+refused. It redirects to the error page with `error=SELF_REGISTRATION_CLOSED`,
+and no user is created. These sign-ins are unchanged:
+
+- a person who already has an account;
+- a person with a pending invitation;
+- the first human of a deployment that has none yet;
+- every sign-in under the `email_domain` or `open` posture.
+
+To let a provider create accounts for everyone its IdP authenticates, as it did
+before this rule, turn on `allowJit` for that provider.
+
+---
+
 ## Verify configuration
 
 Restart the server (`pnpm dev`), then:

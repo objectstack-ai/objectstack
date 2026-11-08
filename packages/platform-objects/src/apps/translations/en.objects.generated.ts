@@ -2047,6 +2047,14 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         label: "SAML Config",
         help: "JSON: entryPoint, cert, identifierFormat, mapping (managed by better-auth)"
       },
+      allow_idp_initiated: {
+        label: "Allow IdP-Initiated Sign-In",
+        help: "Accept a sign-in that starts at the identity provider (an unsolicited SAML response, or an OIDC callback with no state) instead of at this system. Off by default: an IdP-initiated SAML response is not bound to any request this system made. Change it with “Edit Sign-In Options”."
+      },
+      allow_jit: {
+        label: "Allow Just-in-Time Provisioning",
+        help: "Under the invite-only audience posture, create an account for a person who signs in through this provider without an account or an invitation. Off by default: such a person is refused. Other postures provision as before. Change it with “Edit Sign-In Options”."
+      },
       user_id: {
         label: "Registered By",
         help: "User who registered this provider"
@@ -2167,6 +2175,10 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         label: "Delete SSO Provider",
         description: "Delete this SSO provider? Users from its domain will no longer be able to sign in through it.",
         successMessage: "SSO provider deleted"
+      },
+      edit_sso_sign_in_options: {
+        label: "Edit Sign-In Options",
+        successMessage: "Sign-in options saved"
       }
     }
   },

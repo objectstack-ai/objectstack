@@ -2047,6 +2047,14 @@ export const arObjects: NonNullable<TranslationData['objects']> = {
         label: "تهيئة SAML",
         help: "JSON: entryPoint، cert، identifierFormat، mapping (يديرها better-auth)"
       },
+      allow_idp_initiated: {
+        label: "السماح بتسجيل الدخول الذي يبدأ من مزوّد الهوية",
+        help: "قبول تسجيل دخول يبدأ من مزوّد الهوية (استجابة SAML غير مطلوبة، أو استدعاء OIDC دون state) بدلًا من هذا النظام. معطّل افتراضيًا: استجابة SAML التي يبدأها مزوّد الهوية غير مرتبطة بأي طلب أرسله هذا النظام. غيّره من خلال «تعديل خيارات تسجيل الدخول»."
+      },
+      allow_jit: {
+        label: "السماح بالتزويد الفوري للحسابات",
+        help: "في وضع الجمهور المقتصر على الدعوات، إنشاء حساب لشخص يسجّل الدخول عبر هذا المزوّد دون حساب أو دعوة. معطّل افتراضيًا: يُرفض هذا الشخص. الأوضاع الأخرى تنشئ الحسابات كما كانت. غيّره من خلال «تعديل خيارات تسجيل الدخول»."
+      },
       user_id: {
         label: "سجّله",
         help: "المستخدم الذي سجّل هذا المزوّد"
@@ -2167,6 +2175,10 @@ export const arObjects: NonNullable<TranslationData['objects']> = {
         label: "حذف مزوّد SSO",
         description: "هل تريد حذف مزوّد SSO هذا؟ لن يتمكن مستخدمو نطاقه من تسجيل الدخول من خلاله بعد ذلك.",
         successMessage: "تم حذف مزوّد SSO"
+      },
+      edit_sso_sign_in_options: {
+        label: "تعديل خيارات تسجيل الدخول",
+        successMessage: "تم حفظ خيارات تسجيل الدخول"
       }
     }
   },
