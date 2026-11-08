@@ -5203,10 +5203,11 @@ async function selfTest() {
     assert('C2-an-if-that-disables-a-job-is-H', isH(tierOf(edit('    timeout-minutes: 20', '    timeout-minutes: 20\n    if: false')), /`if:` added or changed .*`job:build`/));
 
     // The near-misses: each is Tier S.
+    const BUILD_RUN = '        run: pnpm turbo run build --filter=@objectstack/spec';
     const reordered = edit(
       "      - name: Gate\n        if: github.event_name != 'schedule'\n        run: |\n          # the gate\n          pnpm check:generated\n          node scripts/check-required-contexts.mjs\n",
       '',
-    ).replace("        run: pnpm turbo run build --filter=@objectstack/spec\n", "        run: pnpm turbo run build --filter=@objectstack/spec\n      - name: Gate\n        if: github.event_name != 'schedule'\n        run: |\n          # the gate\n          pnpm check:generated\n          node scripts/check-required-contexts.mjs\n");
+    ).replace(`${BUILD_RUN}\n`, `${BUILD_RUN}\n` + "      - name: Gate\n        if: github.event_name != 'schedule'\n        run: |\n          # the gate\n          pnpm check:generated\n          node scripts/check-required-contexts.mjs\n");
     assert('near-miss-a-moved-if-that-disables-nothing-is-S', reordered !== BASE_WF && isS(tierOf(reordered)), show(tierOf(reordered)));
     assert('near-miss-a-uses-bump-of-an-action-already-in-use-is-S', isS(tierOf(edit('actions/cache@v4', 'actions/cache@v5'))), show(tierOf(edit('actions/cache@v4', 'actions/cache@v5'))));
     assert('near-miss-a-timeout-edit-is-S', isS(tierOf(edit('timeout-minutes: 20', 'timeout-minutes: 30'))));
