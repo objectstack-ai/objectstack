@@ -123,6 +123,8 @@ const result = ResolvedSettingValueSchema.parse(data);
 | **pattern** | `string` | optional | Regex pattern (text only) |
 | **rows** | `integer` | optional |  |
 | **handler** | `{ kind: 'http'; method?: Enum<'GET' \| 'POST' \| 'PUT' \| 'DELETE' \| 'PATCH'>; url: string; body?: Record<string, any>; … } \| { kind: 'action'; name: string; params?: Record<string, any>; confirmText?: string \| Record<string, string> } \| { kind: 'navigate'; url: string; target?: Enum<'_self' \| '_blank'> }` | optional | Action handler (action_button) |
+| **keyColumn** | `{ label: string \| Record<string, string>; description?: string }` | optional | Key column (map) |
+| **columns** | `{ name: string; label: string \| Record<string, string>; description?: string; kind: Enum<'duration' \| 'positive_integer'> }[]` | optional | Value columns (map): one stores a scalar per key, several an object |
 | **confirmOffText** | `string \| Record<string, string>` | optional | Confirm dialog text shown before a toggle's value changes to off (omit = no confirm) |
 | **childNamespace** | `string` | optional | Sub-namespace (child_pane) |
 | **bannerText** | `string` | optional | Markdown body (info_banner) |
@@ -179,7 +181,7 @@ const result = ResolvedSettingValueSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **type** | `Enum<'group' \| 'child_pane' \| 'info_banner' \| 'title_value' \| 'text' \| 'textarea' \| 'password' \| 'email' \| 'url' \| 'phone' \| 'number' \| 'toggle' \| 'select' \| 'radio' \| … +5 more>` | ✅ | Specifier variant |
+| **type** | `Enum<'group' \| 'child_pane' \| 'info_banner' \| 'title_value' \| 'text' \| 'textarea' \| 'password' \| 'email' \| 'url' \| 'phone' \| 'number' \| 'toggle' \| 'select' \| 'radio' \| … +6 more>` | ✅ | Specifier variant |
 | **id** | `string` | optional | Stable identifier (snake_case) |
 | **key** | `string` | optional | Storage key (snake_case) |
 | **label** | `string \| Record<string, string>` | ✅ | Display label |
@@ -206,6 +208,8 @@ const result = ResolvedSettingValueSchema.parse(data);
 | **pattern** | `string` | optional | Regex pattern (text only) |
 | **rows** | `integer` | optional |  |
 | **handler** | `{ kind: 'http'; method?: Enum<'GET' \| 'POST' \| 'PUT' \| 'DELETE' \| 'PATCH'>; url: string; body?: Record<string, any>; … } \| { kind: 'action'; name: string; params?: Record<string, any>; confirmText?: string \| Record<string, string> } \| { kind: 'navigate'; url: string; target?: Enum<'_self' \| '_blank'> }` | optional | Action handler (action_button) |
+| **keyColumn** | `{ label: string \| Record<string, string>; description?: string }` | optional | Key column (map) |
+| **columns** | `{ name: string; label: string \| Record<string, string>; description?: string; kind: Enum<'duration' \| 'positive_integer'> }[]` | optional | Value columns (map): one stores a scalar per key, several an object |
 | **confirmOffText** | `string \| Record<string, string>` | optional | Confirm dialog text shown before a toggle's value changes to off (omit = no confirm) |
 | **childNamespace** | `string` | optional | Sub-namespace (child_pane) |
 | **bannerText** | `string` | optional | Markdown body (info_banner) |
@@ -231,6 +235,7 @@ const result = ResolvedSettingValueSchema.parse(data);
 * `slider`
 * `color`
 * `json`
+* `map`
 * `action_button`
 
 ### Nested Shape: `Specifier.options[number]`
@@ -268,6 +273,22 @@ const result = ResolvedSettingValueSchema.parse(data);
 | **kind** | `'navigate'` | ✅ |  |
 | **url** | `string` | ✅ | Target URL or in-app route |
 | **target** | `Enum<'_self' \| '_blank'>` | optional (default: `"_self"`) |  |
+
+### Nested Shape: `Specifier.keyColumn`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **label** | `string \| Record<string, string>` | ✅ | Key column header |
+| **description** | `string` | optional | Help text for the key column |
+
+### Nested Shape: `Specifier.columns[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | ✅ | Column identifier: the stored property name when the map has several value columns |
+| **label** | `string \| Record<string, string>` | ✅ | Column header |
+| **description** | `string` | optional | Help text for the column |
+| **kind** | `Enum<'duration' \| 'positive_integer'>` | ✅ | Value kind: duration literal or positive integer |
 
 
 ---
@@ -367,6 +388,7 @@ This schema accepts one of the following structures:
 * `slider`
 * `color`
 * `json`
+* `map`
 * `action_button`
 
 

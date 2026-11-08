@@ -382,14 +382,14 @@ export const PLATFORM_ALWAYS_ON_CAPABILITIES: readonly string[] = Object.freeze(
   // this slate (its only hard requirement is the ObjectQL engine, which is not
   // a capability token), so it joins the TAIL like any other reader.
   //
-  // ⚠️ SCOPE, measured on `serve`'s capability resolver at c17ff70f3f: a slate
-  // entry is force-appended to every app's `requires`, and the CLI then mounts
-  // it only if `Serve.CAPABILITY_PROVIDERS` keys the token. That registry keys
-  // `marketplace`, not this token, so under `objectstack serve` this entry is
-  // inert until the runtime half of the same ruling lands (#17676 items 2/3/5,
-  // the engine lane). The declaration is deliberately first: it is the single
-  // list both runtimes read, and the thing the runtime half is written
-  // against.
+  // Mounting: a slate entry joins every boot's served tokens
+  // (`resolveServedCapabilities`, `@objectstack/core`) unless the preset is
+  // `minimal`, and the CLI mounts it through `CAPABILITY_PROVIDERS`
+  // (`@objectstack/core`, `capability-providers.ts`). That registry keys this
+  // token at `@objectstack/service-package`'s `PackageServicePlugin`, the
+  // provider `PLATFORM_CAPABILITY_PROVIDERS` declares and the same one
+  // `marketplace` resolves to, so a stock `objectstack serve` boot mounts it;
+  // an app that also declares `marketplace` gets one instance, not two.
   'package-registry',
 ]);
 

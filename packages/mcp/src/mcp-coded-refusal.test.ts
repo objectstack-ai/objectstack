@@ -816,9 +816,8 @@ describe('a coded sandboxed CRASH is a fault on every face, never a refusal at i
  * with no status, and a sandboxed crash (coded or not) with the wrapper and
  * the native error text.
  *
- * ⚠️ `SQLITE_BUSY` answers what `/actions` answers, `400 VALIDATION_ERROR` with
- * `declaredCode`; `/api/v1/data` answers the same throw `500 DATABASE_ERROR`.
- * That REST-side difference is not this card's.
+ * [#31317] `SQLITE_BUSY` answers what `/actions` answers, which is now what
+ * `/api/v1/data` answers: `500 DATABASE_ERROR`, the errno and text withheld.
  */
 describe('run_action / resume_run: a throw answers what the /actions door answers (#31271)', () => {
   const ACTION_SITES = SITES.filter((s) => s.actionDoor);
@@ -839,10 +838,10 @@ describe('run_action / resume_run: a throw answers what the /actions door answer
       logs: 0,
     },
     {
-      name: 'a driver string code: 400 VALIDATION_ERROR, SQLITE_BUSY demoted to declaredCode',
+      name: 'a driver string code: the /data door\'s 500 DATABASE_ERROR, SQLITE_BUSY withheld (#31317)',
       thrown: () => Object.assign(new Error('SQLITE_BUSY: database is locked'), { code: 'SQLITE_BUSY' }),
-      answer: { code: 'VALIDATION_ERROR', message: 'SQLITE_BUSY: database is locked', status: 400, declaredCode: 'SQLITE_BUSY' },
-      logs: 0,
+      answer: { code: 'DATABASE_ERROR', message: 'Internal data error', status: 500 },
+      logs: 1,
     },
     {
       name: 'a sandboxed CRASH with no code: 500 INTERNAL_ERROR, the generic sentence',
