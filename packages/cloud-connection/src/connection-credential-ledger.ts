@@ -48,28 +48,31 @@
  */
 
 import { ConnectionCredentialStore, type StoredConnectionCredential } from './connection-credential-store.js';
-import { declaresMultiNode } from '@objectstack/service-cluster';
+import { declaresMultiReplicaOnRedis, MULTI_REPLICA_CLUSTER_DRIVER } from '@objectstack/service-cluster';
 
 /**
  * The one cluster driver whose replicas share the binding credential. The
  * multi-replica cards take effect only over Redis (cloud#3814 R2/R3); the
- * entitlement half gates on the same driver.
+ * entitlement half gates on the same driver. The cluster package's
+ * {@link MULTI_REPLICA_CLUSTER_DRIVER}, the one every multi-replica card reads.
  */
-export const CLOUD_BINDING_SHARED_CLUSTER_DRIVER = 'redis';
+export const CLOUD_BINDING_SHARED_CLUSTER_DRIVER = MULTI_REPLICA_CLUSTER_DRIVER;
 
 /**
  * Does this deployment keep the binding credential in the shared row? Exactly
  * when replicas are declared (`declaresMultiNode`, the predicate the
  * entitlement half reads, so the two licence halves cannot drift) AND the
- * cluster driver is {@link CLOUD_BINDING_SHARED_CLUSTER_DRIVER}. The plugin
- * asks it with the cluster service's driver; the pre-boot read asks it with
- * `OS_CLUSTER_DRIVER`.
+ * cluster driver is {@link CLOUD_BINDING_SHARED_CLUSTER_DRIVER} — the cluster
+ * package's `declaresMultiReplicaOnRedis`, the one condition every
+ * multi-replica card keys on, so this card and the package-change refusals
+ * cannot disagree. The plugin asks it with the cluster service's driver; the
+ * pre-boot read asks it with `OS_CLUSTER_DRIVER`.
  */
 export function sharesCloudBindingCredential(
     env: Readonly<Record<string, string | undefined>>,
     clusterDriver: string | undefined,
 ): boolean {
-    return declaresMultiNode(env) && clusterDriver?.trim() === CLOUD_BINDING_SHARED_CLUSTER_DRIVER;
+    return declaresMultiReplicaOnRedis(env, clusterDriver);
 }
 
 /** The object a shared binding credential lives in (`sys-cloud-binding-credential.object.ts`). */
