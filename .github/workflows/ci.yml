@@ -189,7 +189,9 @@ jobs:
   queue-verdict:
     name: Queue verdict
     # Push only, and before anything else: every borrowing job needs it.
-    if: github.event_name == 'push'
+    # The two pr-event terms come first so check-expected-skips reads the
+    # skip on a PR and in the queue as expected; the push term decides.
+    if: github.event_name != 'pull_request' && github.event_name != 'merge_group' && github.event_name == 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     # `actions: read` is the merge_group run listings and the head run's jobs;
@@ -231,7 +233,8 @@ jobs:
     # re-reads the head commit's queue run. Do not rename it.
     name: Borrowed queue verdict
     needs: queue-verdict
-    if: ${{ success() && needs.queue-verdict.outputs.covered == 'true' }}
+    # The pr-event terms are for check-expected-skips, as on queue-verdict.
+    if: ${{ success() && github.event_name != 'pull_request' && github.event_name != 'merge_group' && needs.queue-verdict.outputs.covered == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:

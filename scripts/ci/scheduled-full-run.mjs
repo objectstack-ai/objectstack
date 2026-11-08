@@ -1553,8 +1553,12 @@ export function borrowedRecordOf(jobs) {
 // runs only on a covered push; every read of `covered` compares with the
 // literal 'true', so an empty output (a probe that died) means the full
 // battery; and no main-only job reads it at all.
-export const QUEUE_VERDICT_IF = "github.event_name == 'push'";
-export const BORROWED_VERDICT_IF = `\${{ success() && needs.${QUEUE_VERDICT_JOB}.outputs.covered == 'true' }}`;
+// Each opens with the two pr-event terms check-expected-skips derives a
+// PR / queue skip from (it reads no push term and no needs output); the
+// last term is the one that decides, so the behaviour is the push term's.
+const PR_EVENT_TERMS = "github.event_name != 'pull_request' && github.event_name != 'merge_group'";
+export const QUEUE_VERDICT_IF = `${PR_EVENT_TERMS} && github.event_name == 'push'`;
+export const BORROWED_VERDICT_IF = `\${{ success() && ${PR_EVENT_TERMS} && needs.${QUEUE_VERDICT_JOB}.outputs.covered == 'true' }}`;
 export const MAIN_ONLY_JOBS = Object.freeze(['temporal-conformance', 'dogfood-verify', 'ui-published-artifacts']);
 export function borrowedVerdictWiring(ciYamlText) {
   const findings = [];
