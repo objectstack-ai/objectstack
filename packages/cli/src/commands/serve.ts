@@ -2871,7 +2871,7 @@ export default class Serve extends Command {
         // replaces it): an entry that may provide the crypto provider refuses
         // the boot first. See the function.
         await refuseSetAsideCryptoProviderPlugins(
-          (config as { plugins?: unknown }).plugins,
+          stackBootPlugins(config, false),
           async (specifier) => await Serve.importConfigPlugin(specifier, servedAppRootOrCwd()),
         );
         // The boot stack returns only `{plugins, api}` — preserve the
@@ -6493,7 +6493,6 @@ export async function refuseSetAsideCryptoProviderPlugins(
   importSpecifier: (specifier: string) => Promise<unknown>,
 ): Promise<void> {
   if (!Array.isArray(authored)) return;
-  const { materializeStackPlugin } = await import('@objectstack/core');
   const unloaded: UnloadedStackPlugin[] = [];
   const declaring: string[] = [];
   for (const [index, entry] of authored.entries()) {
