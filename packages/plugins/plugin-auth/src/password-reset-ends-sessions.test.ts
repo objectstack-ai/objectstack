@@ -375,3 +375,86 @@ describe('the retired revokeSessionsOnPasswordReset is refused at any value, nev
     ).not.toThrow();
   });
 });
+
+describe('a completed password reset clears the sign-in lockout (ADR-0069 D2)', () => {
+  const THRESHOLD = 3;
+  const WRONG = 'Wr0ng!Guess-Zebra-7731';
+
+  /** The account's lockout columns, read off the table. */
+  async function lockoutRow(engine: ObjectQL): Promise<{ failed_login_count?: unknown; locked_until?: unknown }> {
+    const [row] = (await engine.find(
+      'sys_user',
+      { where: { email: EMAIL }, fields: ['failed_login_count', 'locked_until'], limit: 1 },
+      SYS,
+    )) as Array<{ failed_login_count?: unknown; locked_until?: unknown }>;
+    return row;
+  }
+
+  const signIn = (a: Account, password: string) => post(a.manager, '/sign-in/email', { email: EMAIL, password });
+
+  /** A signed-in account, then locked by wrong passwords through the real engine. */
+  async function lockedAccount(config: Record<string, unknown> = {}): Promise<Account> {
+    const a = await signedInAccount({ lockoutThreshold: THRESHOLD, ...config });
+    for (let i = 0; i < THRESHOLD; i++) expect((await signIn(a, WRONG)).status).toBe(401);
+    const row = await lockoutRow(a.engine);
+    expect(Number(row.failed_login_count)).toBe(THRESHOLD);
+    expect(new Date(row.locked_until as string).getTime()).toBeGreaterThan(Date.now());
+    // Non-vacuity: the lock holds against the correct password.
+    expect((await signIn(a, FIRST)).status).toBe(401);
+    return a;
+  }
+
+  it('the emailed link: the counter and the lock are cleared, and the new password signs in at once', async () => {
+    const a = await lockedAccount();
+    const token = await requestResetToken(a);
+
+    const reset = await post(a.manager, '/reset-password', { token, newPassword: SECOND });
+    expect(reset.status, await reset.clone().text()).toBe(200);
+
+    const row = await lockoutRow(a.engine);
+    expect(Number(row.failed_login_count ?? 0)).toBe(0);
+    expect(row.locked_until ?? null).toBeNull();
+    const fresh = await signIn(a, SECOND);
+    expect(fresh.status, await fresh.clone().text()).toBe(200);
+  }, 60_000);
+
+  it('the phone OTP reset clears it too', async () => {
+    const PHONE = '+15550143';
+    const a = await lockedAccount({ plugins: { phoneNumber: true } });
+    const texts: Array<{ to: string; templateParams?: { code?: string } }> = [];
+    a.manager.setSmsService({
+      async send(input: { to: string; templateParams?: { code?: string } }) {
+        texts.push(input);
+        return { id: `sms${texts.length}`, status: 'sent' };
+      },
+      isConfigured: () => true,
+    } as never);
+    const [user] = (await a.engine.find('sys_user', { where: { email: EMAIL }, limit: 1 }, SYS)) as Array<{ id: string }>;
+    await a.engine.update('sys_user', { id: user.id, phone_number: PHONE, phone_number_verified: true }, SYS);
+
+    const requested = await post(a.manager, '/phone-number/request-password-reset', { phoneNumber: PHONE });
+    expect(requested.status, await requested.clone().text()).toBe(200);
+    await vi.waitFor(() => expect(texts.map((t) => t.to)).toEqual([PHONE]));
+    const otp = String(texts[0].templateParams?.code ?? '');
+    const reset = await post(a.manager, '/phone-number/reset-password', { phoneNumber: PHONE, otp, newPassword: SECOND });
+    expect(reset.status, await reset.clone().text()).toBe(200);
+
+    const row = await lockoutRow(a.engine);
+    expect(Number(row.failed_login_count ?? 0)).toBe(0);
+    expect(row.locked_until ?? null).toBeNull();
+    expect((await signIn(a, SECOND)).status).toBe(200);
+  }, 60_000);
+
+  it('a reset that does not complete leaves the lock where it stands', async () => {
+    const a = await lockedAccount();
+    await requestResetToken(a);
+    const before = await lockoutRow(a.engine);
+
+    const refused = await post(a.manager, '/reset-password', { token: 'not-the-issued-token', newPassword: SECOND });
+    expect(refused.status).toBe(400);
+
+    const row = await lockoutRow(a.engine);
+    expect(new Date(row.locked_until as string).getTime()).toBe(new Date(before.locked_until as string).getTime());
+    expect((await signIn(a, FIRST)).status).toBe(401);
+  }, 60_000);
+});

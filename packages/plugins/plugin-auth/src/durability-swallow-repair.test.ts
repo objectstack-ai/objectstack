@@ -212,7 +212,7 @@ describe('#12981 batch 5 — plugin-auth durability swallows report instead of v
       expect(warnText(logger)).toContain('passwordHistoryCount');
     });
 
-    it('recordSignInOutcome: a lost lockout counter names the brute-force limit that is off', async () => {
+    it('admitSignInAttempt: a lost lockout counter names the brute-force limit that is off', async () => {
       const logger = createLogger();
       const engine = createEngine({
         refuseUpdateOn: ['sys_user'],
@@ -220,8 +220,9 @@ describe('#12981 batch 5 — plugin-auth durability swallows report instead of v
       });
       const manager = createManager(engine, logger, { lockoutThreshold: 3 });
 
-      await (manager as never as { recordSignInOutcome(e: string, s: boolean): Promise<void> })
-        .recordSignInOutcome('a@b.com', false);
+      // Fails OPEN: the attempt is admitted, and the lost count is reported.
+      await expect((manager as never as { admitSignInAttempt(e: string): Promise<void> })
+        .admitSignInAttempt('a@b.com')).resolves.toBeUndefined();
 
       expect(logger.warn).toHaveBeenCalledTimes(1);
       expect(warnText(logger)).toContain('lockoutThreshold');
@@ -361,8 +362,8 @@ describe('#12981 batch 5 — plugin-auth durability swallows report instead of v
 
       await (manager as never as { stampLastLogin(u: string, ip?: string): Promise<void> })
         .stampLastLogin('u1', '203.0.113.7');
-      await (manager as never as { recordSignInOutcome(e: string, s: boolean): Promise<void> })
-        .recordSignInOutcome('a@b.com', false);
+      await (manager as never as { admitSignInAttempt(e: string): Promise<void> })
+        .admitSignInAttempt('a@b.com');
       await (manager as never as { stampPasswordChangedAt(u: string): Promise<void> })
         .stampPasswordChangedAt('u1');
 

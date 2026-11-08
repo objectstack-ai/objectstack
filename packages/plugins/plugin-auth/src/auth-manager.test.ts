@@ -36,6 +36,7 @@ vi.mock('better-auth/plugins/haveibeenpwned', () => ({
 }));
 
 import { betterAuth } from 'better-auth';
+import { runWithRequestState } from '@better-auth/core/context';
 import { bindTestSecurityCatalog } from './__tests__/security-catalog.testkit';
 import { ADMIN_FULL_ACCESS, ADMIN_FULL_ACCESS_CAPABILITIES } from '@objectstack/spec';
 import { AuthzStoreUnavailableError, resetCloudManagedForTesting } from '@objectstack/core';
@@ -4012,51 +4013,112 @@ describe('AuthManager', () => {
       return m;
     };
 
-    it('assertAccountNotLocked is a no-op when lockout is disabled (threshold 0)', async () => {
-      const engine = makeEngine({ id: 'u1', email: 'a@b.com', locked_until: new Date(Date.now() + 60_000).toISOString() });
+    // The gate runs inside better-auth's request state in production (every
+    // endpoint call opens one); these cases open it the same way, so the
+    // verdict it records is readable by the settlement that follows.
+    const inRequest = <T>(fn: () => Promise<T>): Promise<T> => runWithRequestState(new WeakMap(), fn);
+    const LOCKED_ROW = () => ({ id: 'u1', email: 'a@b.com', failed_login_count: 3, locked_until: new Date(Date.now() + 60_000).toISOString() });
+
+    it('admitSignInAttempt is a no-op when lockout is disabled (threshold 0)', async () => {
+      const engine = makeEngine(LOCKED_ROW());
       const m = mgr(engine, { lockoutThreshold: 0 });
-      await expect((m as any).assertAccountNotLocked('a@b.com')).resolves.toBeUndefined();
+      await expect(inRequest(() => (m as any).admitSignInAttempt('a@b.com'))).resolves.toBeUndefined();
       expect(engine.findOne).not.toHaveBeenCalled();
+      expect(engine.update).not.toHaveBeenCalled();
     });
 
-    it('assertAccountNotLocked throws ACCOUNT_LOCKED while locked_until is in the future', async () => {
-      const engine = makeEngine({ id: 'u1', email: 'a@b.com', locked_until: new Date(Date.now() + 60_000).toISOString() });
+    it('admitSignInAttempt refuses a locked account with the wrong-password answer when it cannot hand the verdict on', async () => {
+      // No request state open: the credential check could not see the verdict,
+      // so the gate refuses by itself — with the answer a wrong password gets.
+      const engine = makeEngine(LOCKED_ROW());
       const m = mgr(engine, { lockoutThreshold: 3 });
-      await expect((m as any).assertAccountNotLocked('a@b.com')).rejects.toMatchObject({
+      await expect((m as any).admitSignInAttempt('a@b.com')).rejects.toMatchObject({
+        statusCode: 401,
+        body: { code: 'INVALID_EMAIL_OR_PASSWORD' },
+      });
+    });
+
+    it('admitSignInAttempt hands a locked verdict on, and the settlement neither counts nor clears it', async () => {
+      const engine = makeEngine(LOCKED_ROW());
+      const m = mgr(engine, { lockoutThreshold: 3 });
+      const settled = await inRequest(async () => {
+        await (m as any).admitSignInAttempt('a@b.com');
+        engine.update.mockClear();
+        return (m as any).settleSignInAttempt('a@b.com', 'refused');
+      });
+      expect(settled).toEqual({ refusedByLock: true, userId: 'u1' });
+      expect(engine.update).not.toHaveBeenCalled();
+    });
+
+    it('admitSignInAttempt throws 403 ACCOUNT_LOCKED for a locked account when the deployment opted in', async () => {
+      const engine = makeEngine(LOCKED_ROW());
+      const m = mgr(engine, { lockoutThreshold: 3, lockoutRefusal: 'explicit' });
+      await expect(inRequest(() => (m as any).admitSignInAttempt('a@b.com'))).rejects.toMatchObject({
+        statusCode: 403,
         body: { code: 'ACCOUNT_LOCKED' },
       });
     });
 
-    it('assertAccountNotLocked allows sign-in once the lock has expired', async () => {
-      const engine = makeEngine({ id: 'u1', email: 'a@b.com', locked_until: new Date(Date.now() - 60_000).toISOString() });
+    it('admitSignInAttempt counts a locked attempt without moving its lock', async () => {
+      const row = LOCKED_ROW();
+      const engine = makeEngine(row);
       const m = mgr(engine, { lockoutThreshold: 3 });
-      await expect((m as any).assertAccountNotLocked('a@b.com')).resolves.toBeUndefined();
+      await inRequest(() => (m as any).admitSignInAttempt('a@b.com'));
+      const [object, patch, options] = engine.update.mock.calls[0];
+      expect(object).toBe('sys_user');
+      expect(patch).toEqual({ failed_login_count: 4 });
+      expect(options).toMatchObject({ where: { id: 'u1', failed_login_count: 3 }, multi: true });
     });
 
-    it('recordSignInOutcome increments below threshold without locking', async () => {
+    it('admitSignInAttempt admits once the lock has expired', async () => {
+      const engine = makeEngine({ id: 'u1', email: 'a@b.com', failed_login_count: 3, locked_until: new Date(Date.now() - 60_000).toISOString() });
+      const m = mgr(engine, { lockoutThreshold: 3 });
+      await expect(inRequest(() => (m as any).admitSignInAttempt('a@b.com'))).resolves.toBeUndefined();
+    });
+
+    it('admitSignInAttempt stamps the attempt below the threshold in one compare-and-set write, without locking', async () => {
       const engine = makeEngine({ id: 'u1', email: 'a@b.com', failed_login_count: 0, locked_until: null });
       const m = mgr(engine, { lockoutThreshold: 3 });
-      await (m as any).recordSignInOutcome('a@b.com', false);
-      const patch = engine.update.mock.calls[0][1];
-      expect(patch.failed_login_count).toBe(1);
-      expect(patch.locked_until).toBeUndefined();
+      await inRequest(() => (m as any).admitSignInAttempt('a@b.com'));
+      const [, patch, options] = engine.update.mock.calls[0];
+      expect(patch).toEqual({ failed_login_count: 1 });
+      expect(options).toMatchObject({ where: { id: 'u1', failed_login_count: 0 }, multi: true });
     });
 
-    it('recordSignInOutcome stamps locked_until (a Date) once the threshold is reached', async () => {
+    it('admitSignInAttempt stamps locked_until (a Date) in the write whose count reaches the threshold', async () => {
       const engine = makeEngine({ id: 'u1', email: 'a@b.com', failed_login_count: 2, locked_until: null });
       const m = mgr(engine, { lockoutThreshold: 3, lockoutDurationMinutes: 15 });
-      await (m as any).recordSignInOutcome('a@b.com', false);
+      const settled = await inRequest(async () => {
+        await (m as any).admitSignInAttempt('a@b.com');
+        return (m as any).settleSignInAttempt('a@b.com', 'refused');
+      });
       const patch = engine.update.mock.calls[0][1];
       expect(patch.failed_login_count).toBe(3);
       expect(patch.locked_until instanceof Date).toBe(true);
       // ~15 minutes out (datetime stored as a Date, never epoch-ms — see ADR-0074).
       expect((patch.locked_until as Date).getTime()).toBeGreaterThan(Date.now() + 14 * 60_000);
+      // The refusal that stamped it is the one the account_locked row records.
+      expect(settled).toMatchObject({ refusedByLock: false, userId: 'u1', lockStamped: { userId: 'u1', threshold: 3, lockedUntil: patch.locked_until } });
     });
 
-    it('recordSignInOutcome resets counter + lock on success when there is state to clear', async () => {
+    it('admitSignInAttempt reads again when another attempt moved the counter first', async () => {
+      const row = { id: 'u1', email: 'a@b.com', failed_login_count: 0, locked_until: null as unknown };
+      const engine = makeEngine(row);
+      // The first write lands on a stale read: another attempt took count 1.
+      engine.update
+        .mockImplementationOnce(async () => { row.failed_login_count = 1; return 0; })
+        .mockImplementation(async () => 1);
+      const m = mgr(engine, { lockoutThreshold: 3 });
+      await inRequest(() => (m as any).admitSignInAttempt('a@b.com'));
+      expect(engine.update).toHaveBeenCalledTimes(2);
+      expect(engine.update.mock.calls[1][1]).toEqual({ failed_login_count: 2 });
+      expect(engine.update.mock.calls[1][2]).toMatchObject({ where: { id: 'u1', failed_login_count: 1 } });
+    });
+
+    it('settleSignInAttempt resets counter + lock on success when there is state to clear', async () => {
       const engine = makeEngine({ id: 'u1', email: 'a@b.com', failed_login_count: 2, locked_until: null });
       const m = mgr(engine, { lockoutThreshold: 3 });
-      await (m as any).recordSignInOutcome('a@b.com', true);
+      await (m as any).settleSignInAttempt('a@b.com', 'succeeded');
       expect(engine.update).toHaveBeenCalledWith(
         'sys_user',
         { id: 'u1', failed_login_count: 0, locked_until: null },
@@ -4064,18 +4126,33 @@ describe('AuthManager', () => {
       );
     });
 
-    it('recordSignInOutcome skips the write on success when nothing needs clearing', async () => {
+    it('settleSignInAttempt skips the write on success when nothing needs clearing', async () => {
       const engine = makeEngine({ id: 'u1', email: 'a@b.com', failed_login_count: 0, locked_until: null });
       const m = mgr(engine, { lockoutThreshold: 3 });
-      await (m as any).recordSignInOutcome('a@b.com', true);
+      await (m as any).settleSignInAttempt('a@b.com', 'succeeded');
       expect(engine.update).not.toHaveBeenCalled();
     });
 
-    it('recordSignInOutcome is a no-op when lockout is disabled', async () => {
+    it('settleSignInAttempt is a no-op when lockout is disabled', async () => {
       const engine = makeEngine({ id: 'u1', email: 'a@b.com', failed_login_count: 5 });
       const m = mgr(engine, { lockoutThreshold: 0 });
-      await (m as any).recordSignInOutcome('a@b.com', false);
+      await (m as any).settleSignInAttempt('a@b.com', 'succeeded');
+      await (m as any).settleSignInAttempt('a@b.com', 'refused');
       expect(engine.update).not.toHaveBeenCalled();
+    });
+
+    it('clearSignInLockout clears the counter and the lock, and skips the write when there is nothing to clear', async () => {
+      const engine = makeEngine({ id: 'u1', email: 'a@b.com', failed_login_count: 4, locked_until: new Date(Date.now() + 60_000).toISOString() });
+      const m = mgr(engine, { lockoutThreshold: 3 });
+      await (m as any).clearSignInLockout('u1');
+      expect(engine.update).toHaveBeenCalledWith(
+        'sys_user',
+        { id: 'u1', failed_login_count: 0, locked_until: null },
+        expect.anything(),
+      );
+      const clean = makeEngine({ id: 'u1', email: 'a@b.com', failed_login_count: 0, locked_until: null });
+      await (mgr(clean, { lockoutThreshold: 3 }) as any).clearSignInLockout('u1');
+      expect(clean.update).not.toHaveBeenCalled();
     });
 
     it('unlockUser clears failed_login_count and locked_until', async () => {
