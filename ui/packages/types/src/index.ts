@@ -885,6 +885,7 @@ import type { ObjectQLComponentSchema, ListViewSchema } from './objectql.js';
 import type { AppComponentSchema, AppSchemaRendererNodeSchema } from './app.js';
 import type { CloudWorkspaceTimezoneNoticeSchema } from './cloud.js';
 import type { McpAuthorizedAssistantsSchema } from './mcp-authorized-assistants.js';
+import type { SecurityEffectiveAccessSchema } from './security-effective-access.js';
 import type {
   HeroBlockSchema,
   StatBlockSchema,
@@ -1026,6 +1027,11 @@ export type {
 } from './mcp-authorized-assistants.js';
 
 export type {
+  // The `security:effective-access` node's TS twin, landed with its zod arm.
+  SecurityEffectiveAccessSchema,
+} from './security-effective-access.js';
+
+export type {
   // The product-page blocks' TS twins, landed with their zod arms and their
   // `@object-ui/app-shell` registrations (objectui#12197).
   ProductBlockExpressionHole,
@@ -1156,6 +1162,8 @@ export type AnySchema =
   | CloudWorkspaceTimezoneNoticeSchema
   // Landed with its zod arm and its `@object-ui/app-shell` registration.
   | McpAuthorizedAssistantsSchema
+  // Landed with its zod arm and its `@object-ui/app-shell` registration.
+  | SecurityEffectiveAccessSchema
   // objectui#12342 — landed with its zod arm.
   | RecordApprovalDecisionBlockSchema
   // objectui#12363 — landed with their zod arms.

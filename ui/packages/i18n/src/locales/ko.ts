@@ -3917,6 +3917,22 @@ const ko = {
       managedTruncated: '최신 항목만 표시합니다. 이 사람이 승인한 어시스턴트가 더 있습니다.',
     },
   },
+  effectiveAccess: {
+    title: '유효한 권한 세트',
+    body: '현재 조직에서 이 사람에게 적용되는 모든 권한 세트와 각각의 출처입니다. 직접 부여는 아래에도 나열되며 거기서 제거할 수 있습니다.',
+    refused: '이 사람의 유효한 액세스를 볼 권한이 없습니다.',
+    unserved: '이 서버는 유효한 액세스를 제공하지 않습니다.',
+    loadFailed: '유효한 액세스를 불러오지 못했습니다: {{message}}',
+    empty: '이 조직에서 이 사람에게 적용되는 권한 세트가 없습니다.',
+    originsLabel: '출처',
+    origin: {
+      direct: '직접 부여',
+      position: '직책: {{position}}',
+      default: '기본 바인딩',
+      derivedPlatformAdmin: '구성된 플랫폼 관리자',
+      derivedAiAccess: 'AI 액세스 켜짐',
+    },
+  },
   excelImport: {
     noImportableFields: "해당 오브젝트에는 가져올 수 있는 필드가 없습니다.",
     schemaReadFailed: "오브젝트 스키마를 읽을 수 없습니다.",

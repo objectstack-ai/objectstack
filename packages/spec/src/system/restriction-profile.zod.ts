@@ -66,6 +66,18 @@ export const RestrictionProfileSchema = lazySchema(() => strictObject(
      * named handler `functions`, and code plugins.
      *
      * `false` refuses every one of them; `true` allows them.
+     *
+     * ## Reader rule
+     *
+     * Besides `hooks`, a reader takes what is code from the spec's one
+     * classification of a package body's keys, `UNMANAGED_INSTALL_KEY_DISPOSITIONS`
+     * (`@objectstack/spec/kernel`, disposition `code`), and a key that carries
+     * nothing refuses nothing. `devPlugins` is not judged by `allowCode`: it
+     * is loaded only by a local development boot, and `os build` leaves it out
+     * of the artifact a target installs, so it never reaches a target;
+     * `UNMANAGED_INSTALL_KEY_DISPOSITIONS` still classifies it as `code` for an
+     * unmanaged install. A `script` flow node is also subject to this rule (see
+     * `allowedFlowNodeTypes`).
      */
     allowCode: z
       .boolean()
@@ -91,6 +103,26 @@ export const RestrictionProfileSchema = lazySchema(() => strictObject(
      * forbidden; a type the registry does not name is refused here.
      *
      * An empty array allows no built-in node type.
+     *
+     * ## Reader rules
+     *
+     * A reader judges every node of every flow, at every region depth, by
+     * these rules, and names exactly one dimension per refused node:
+     *
+     * - `start` / `end` are structural and always allowed, listed or not: the
+     *   engine runs them without an executor, so a profile never has to list
+     *   them for a flow to run at all.
+     * - The ADR-0031 containers `parallel` and `try_catch` are structural too
+     *   and always allowed: engine built-ins that are not `FlowNodeAction` ids,
+     *   so no profile could list them. A container only holds regions, and
+     *   every node inside them is still judged. (`loop`, the third container,
+     *   is a `FlowNodeAction` id and is judged by this list.)
+     * - A `script` node calls a registered function, so it is also subject to
+     *   `allowCode`: under `allowCode: false` it is refused by `allowCode`
+     *   alone, and under `allowCode: true` by this list.
+     * - A node type outside the profile's vocabulary cannot be named by this
+     *   list, so `allowCode` governs it: refused under `allowCode: false`,
+     *   allowed under `allowCode: true`.
      */
     allowedFlowNodeTypes: z
       .array(FlowNodeAction)
