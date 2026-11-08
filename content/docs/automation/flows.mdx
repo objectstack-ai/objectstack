@@ -2470,7 +2470,7 @@ placeholder such as `{today}` among them, which the query engine resolves.
 
 | Where | Dialect | Write it like | Bindings |
 |:---|:---|:---|:---|
-| Start-node `condition` | **CEL** (bare, no braces) | `record.amount > 500` | `record.*`, `previous.*`, bare field names, `vars.*`, `current_user` |
+| Start-node `condition` | **CEL** (bare, no braces) | `record.amount != null && record.amount > 500` | `record.*`, `previous.*`, bare field names, `vars.*`, `current_user` |
 | Edge `condition` | **CEL** (bare, no braces) | `record.status == 'open'` | same as above |
 | Decision-node `conditions[].expression` | **CEL** (bare, no braces) | `order_amount > 10000` | flow variables by name, `vars.*` and `current_user` |
 | Field values and assignment values, as a **literal** | none — written as it is | `'open'`, `42`, `true`, `['a', 'b']` | — (a `{…}` template token is refused here since [#19939](https://github.com/objectstack-ai/objectstack/issues/19939), `{$User.*}` and the date macros `{NOW()}` / `{TODAY() ± N}` included: a date is `isoDate(today())` / `isoDatetime(now())` in an envelope) |
