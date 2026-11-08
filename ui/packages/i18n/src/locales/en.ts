@@ -853,6 +853,7 @@ const en = {
       noSavedTemplates: 'No saved templates',
       noneOption: '— None —',
       saveCurrent: 'Save current',
+      saveCurrentNeedsMapping: 'Map at least one column to save a template.',
       templateName: 'Template name',
       save: 'Save',
       deleteTemplate: 'Delete template',

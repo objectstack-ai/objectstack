@@ -724,6 +724,7 @@ const es = {
       noSavedTemplates: "Sin plantillas guardadas",
       noneOption: "— Ninguno —",
       saveCurrent: "Guardar actual",
+      saveCurrentNeedsMapping: "Asigne al menos una columna para guardar una plantilla.",
       templateName: "Nombre de la plantilla",
       save: "Guardar",
       deleteTemplate: "Eliminar plantilla",

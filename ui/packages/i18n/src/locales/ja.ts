@@ -703,6 +703,7 @@ const ja = {
       noSavedTemplates: "保存されたテンプレートはありません",
       noneOption: "— なし —",
       saveCurrent: "現在を保存",
+      saveCurrentNeedsMapping: "テンプレートを保存するには、列を 1 つ以上マッピングしてください。",
       templateName: "テンプレート名",
       save: "保存",
       deleteTemplate: "テンプレートを削除",
