@@ -141,8 +141,9 @@ export async function getNextSequenceValue(this: Pick<AutonumberHost, 'attemptWi
   // others' gap lock for its insert intention. InnoDB answers
   // `ER_LOCK_DEADLOCK` and rolls back the victim's WHOLE transaction, not to
   // the savepoint (`ROLLBACK TO SAVEPOINT` then answers
-  // `ER_SP_DOES_NOT_EXIST`). knex cannot tell, so the recovery statements ran
-  // on in autocommit: the `FOR UPDATE` lock ended with its own statement, and
+  // `ER_SP_DOES_NOT_EXIST`, which knex's MySQL client swallows). The recovery
+  // statements ran on regardless, in autocommit: the `FOR UPDATE` lock ended
+  // with its own statement, and
   // every victim read the winner's counter and wrote the same `last_value + 1`
   // — a lost update, issued as duplicate numbers.
   //
@@ -163,65 +164,53 @@ export async function getNextSequenceValue(this: Pick<AutonumberHost, 'attemptWi
   //    burst). `ON DUPLICATE KEY UPDATE` takes the EXCLUSIVE lock at once, so
   //    the losers queue behind the seeder: 0 deadlocks. It also leaves every
   //    other error loud, where `IGNORE` downgrades them to warnings.
-  const issue = (): Promise<number> => {
-    // The statement's own error, kept before knex's `ROLLBACK TO SAVEPOINT`
-    // can replace it: after a whole-transaction rollback that statement
-    // fails too (`ER_SP_DOES_NOT_EXIST`) and knex rejects with ITS error.
-    let fatal: unknown;
-    const keep = (error: unknown): never => {
-      if (fatal === undefined && rollsBackWholeTransaction(error)) fatal = error;
-      throw error;
-    };
-    return runner
-      .transaction(async (trx) => {
-        const present = await trx(SEQUENCES_TABLE).where(key).first().catch(keep);
-        if (!present) {
-          const seedMax = await this.scanMaxNumericTail(
-            trx,
-            tableName,
-            field,
-            prefix,
-            tenantField,
-            resolvedTenantId === GLOBAL_TENANT ? null : resolvedTenantId,
-            suffix,
-          ).catch(keep);
-          const seed = trx(SEQUENCES_TABLE).insert({ ...insertRow, last_value: seedMax }).onConflict();
-          await (this.isMysql ? seed.merge({ object: trx.ref('object') }) : seed.ignore()).catch(keep);
-        }
-
-        // Lock the row (no-op on SQLite, real lock on Postgres/MySQL).
-        //
-        // Under a savepoint, so a lock-level failure on Postgres — deadlock
-        // (40P01), lock/statement timeout (55P03/57014) — does not turn into a
-        // `25P02` from the fallback SELECT and mask the real error. A failure
-        // that rolled back the whole transaction has no fallback: nothing the
-        // SELECT below reads would be locked any more.
-        let existing: any;
-        const locked = await this.attemptWithoutPoisoning(trx, (scoped) =>
-          scoped(SEQUENCES_TABLE).where(key).forUpdate().first().catch(keep),
+  const issue = (): Promise<number> =>
+    runner.transaction(async (trx) => {
+      const present = await trx(SEQUENCES_TABLE).where(key).first();
+      if (!present) {
+        const seedMax = await this.scanMaxNumericTail(
+          trx,
+          tableName,
+          field,
+          prefix,
+          tenantField,
+          resolvedTenantId === GLOBAL_TENANT ? null : resolvedTenantId,
+          suffix,
         );
-        if (fatal !== undefined) throw fatal;
-        if (locked.ok) {
-          existing = locked.value;
-        } else {
-          // Fall back to a plain SELECT then rely on transaction isolation.
-          existing = await trx(SEQUENCES_TABLE).where(key).first().catch(keep);
-        }
-        if (!existing) {
-          throw new Error(
-            `Cannot issue autonumber "${object}.${field}": its counter row in ${SEQUENCES_TABLE} ` +
-              `was seeded but is gone (deleted while this number was being issued).`,
-          );
-        }
+        const seed = trx(SEQUENCES_TABLE).insert({ ...insertRow, last_value: seedMax }).onConflict();
+        await (this.isMysql ? seed.merge({ object: trx.ref('object') }) : seed.ignore());
+      }
 
-        const next = Number(existing.last_value) + 1;
-        await trx(SEQUENCES_TABLE).where(key).update({ last_value: next, updated_at: this.knex.fn.now() }).catch(keep);
-        return next;
-      })
-      .catch((error: unknown) => {
-        throw fatal ?? error;
-      });
-  };
+      // Lock the row (no-op on SQLite, real lock on Postgres/MySQL).
+      //
+      // Under a savepoint, so a lock-level failure on Postgres — deadlock
+      // (40P01), lock/statement timeout (55P03/57014) — does not turn into a
+      // `25P02` from the fallback SELECT and mask the real error. A failure
+      // that rolled back the whole transaction has no fallback: nothing the
+      // SELECT below reads would be locked any more, and its UPDATE would
+      // autocommit outside any transaction.
+      let existing: any;
+      const locked = await this.attemptWithoutPoisoning(trx, (scoped) =>
+        scoped(SEQUENCES_TABLE).where(key).forUpdate().first(),
+      );
+      if (locked.ok) {
+        existing = locked.value;
+      } else {
+        if (rollsBackWholeTransaction(locked.error)) throw locked.error;
+        // Fall back to a plain SELECT then rely on transaction isolation.
+        existing = await trx(SEQUENCES_TABLE).where(key).first();
+      }
+      if (!existing) {
+        throw new Error(
+          `Cannot issue autonumber "${object}.${field}": its counter row in ${SEQUENCES_TABLE} ` +
+            `was seeded but is gone (deleted while this number was being issued).`,
+        );
+      }
+
+      const next = Number(existing.last_value) + 1;
+      await trx(SEQUENCES_TABLE).where(key).update({ last_value: next, updated_at: this.knex.fn.now() });
+      return next;
+    });
 
   // ⛔ Never retried inside a caller's transaction: the deadlock already rolled
   // that transaction back, and the caller's earlier writes with it, so
@@ -255,7 +244,8 @@ async function issueOwningTransaction(issue: () => Promise<number>): Promise<num
  *
  * MySQL's `ER_LOCK_DEADLOCK` (errno 1213) does (measured on 8.0: a later
  * `ROLLBACK TO SAVEPOINT` answers `ER_SP_DOES_NOT_EXIST`, and later statements
- * autocommit). Postgres's deadlock (`40P01`) and lock timeouts abort only the
+ * autocommit). knex's MySQL client swallows that savepoint error and rejects
+ * with the deadlock itself, so the deadlock is what reaches this check. Postgres's deadlock (`40P01`) and lock timeouts abort only the
  * current savepoint, which `attemptWithoutPoisoning` already recovers, so they
  * are not this class and keep their existing handling.
  */

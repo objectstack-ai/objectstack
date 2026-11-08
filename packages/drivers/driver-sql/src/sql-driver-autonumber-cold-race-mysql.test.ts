@@ -141,15 +141,15 @@ declareDialectCell(MYSQL_CELL, 'autonumber cold concurrent race (#31608)', (cell
           // Closes the cycle; InnoDB rolls the caller back. (`.then` sends it:
           // a knex builder is lazy until something awaits it.)
           const closing = other(LOCKS).where('k', 'held-by-caller').forUpdate().first().then(() => 'granted', (e: any) => e?.code);
-          // The driver's own error reaches the caller — not knex's
-          // `ER_SP_DOES_NOT_EXIST` from rolling back to a savepoint the
-          // deadlock already destroyed. Unfixed, the issue went on in
-          // autocommit instead and the create SUCCEEDED outside the caller's
-          // rolled-back transaction.
-          await expect(issuing).rejects.toMatchObject({ code: 'ER_LOCK_DEADLOCK' });
           // The other side was not the victim: it got the lock once the
-          // caller's transaction was gone.
+          // caller's transaction was gone. Ending it frees the counter row, so
+          // nothing stops an issue that went on regardless from completing.
           expect(await closing).toBe('granted');
+          await other.rollback();
+          // The server's own error reaches the caller. Unfixed, the issue went
+          // on in autocommit instead and the create SUCCEEDED, outside the
+          // caller's rolled-back transaction.
+          await expect(issuing).rejects.toMatchObject({ code: 'ER_LOCK_DEADLOCK' });
         } finally {
           await other.rollback().catch(() => {});
           await caller?.rollback().catch(() => {});
