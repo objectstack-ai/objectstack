@@ -474,12 +474,21 @@ browser login (you connect as yourself, no admin-minted credentials):
 
 ```bash
 # the dev server you just booted in step 5
-claude mcp add --transport http support-desk http://localhost:3000/api/v1/mcp
+npx os mcp connect --url http://localhost:3000
 
-# or a deployed instance
-claude mcp add --transport http support-desk https://your-deployment.example.com/api/v1/mcp
+# or a deployed instance: your ObjectOS Cloud environment, or a self-hosted server
+npx os mcp connect
+npx os mcp connect --url https://your-deployment.example.com
 
 # first tool use opens a browser login — you're connected as yourself
+```
+
+[`os mcp connect`](/docs/deployment/cli#os-mcp-connect) runs the `claude mcp add`
+line for you and stores no token. Without the CLI, type the line yourself:
+
+```bash
+claude mcp add --transport http support-desk http://localhost:3000/api/v1/mcp
+claude mcp add --transport http support-desk https://your-deployment.example.com/api/v1/mcp
 ```
 
 Or install the [official plugin](https://github.com/objectstack-ai/claude-plugin) —
