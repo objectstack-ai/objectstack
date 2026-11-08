@@ -2,16 +2,28 @@
 
 /**
  * [#25224 cut 2] The sign-in lockout path of `AuthManager` (ADR-0069 D2) —
- * the locked-account gate before the credential check, the failure counter
- * and lock stamp after it, the `login_failed` row of a refused attempt, the
- * account a sign-in identifier resolves to, the second factor's lockout
+ * the lock gate that stamps each attempt before its credential is checked,
+ * the settlement of that stamp once the check has answered, the clear a
+ * completed password reset makes, the `login_failed` row of a refused attempt,
+ * the account a sign-in identifier resolves to, the second factor's lockout
  * projection — and the last-login stamp the same after-hook writes (D7),
  * moved out of `auth-manager.ts` whole.
  *
- * A MOVE, not a redesign. Each function below is the body of the
- * `AuthManager` method of the same name as it stood, re-indented one level
- * and otherwise unedited: the same reads and writes, the same refusal with
- * the same code, the same audit rows, failing open exactly where they did.
+ * Each function below is the body of the `AuthManager` method of the same
+ * name. The lockout's three answers [#28381]:
+ *
+ *  - a locked account is refused with the answer a wrong password gets, unless
+ *    the deployment opted into the explicit `403 ACCOUNT_LOCKED`
+ *    (`lockoutRefusal: 'explicit'`); how the refusal is made, and why it is
+ *    made by the endpoint's own credential check, is `sign-in-lockout-refusal.ts`;
+ *  - every attempt is stamped as a failure BEFORE its credential is checked,
+ *    in one compare-and-set write ({@link admitSignInAttempt}), and the stamp
+ *    is settled after: cleared by a success, handed back by a refusal that
+ *    came after the credential passed, kept by any other refusal
+ *    ({@link settleSignInAttempt}) — so attempts that arrive together cannot
+ *    all be checked before the lock lands;
+ *  - a completed password reset clears the counter and the lock
+ *    ({@link clearSignInLockout}).
  *
  * ## How the moved bodies reach the class
  *
@@ -49,6 +61,12 @@ import {
 } from './auth-session-audit.js';
 import { canonicalClientAddress } from './client-address-canonical.js';
 import { readRequestClientAddress } from './request-client-address.js';
+import {
+  readSignInAttempt,
+  recordSignInAttempt,
+  type SignInAttempt,
+  type SignInLockStamp,
+} from './sign-in-lockout-refusal.js';
 
 /**
  * The `AuthManager` members the functions below read — every one of them, and
@@ -66,33 +84,163 @@ export interface SignInLockoutHost {
   resolveSignInAccountId: AuthManager['resolveSignInAccountId'];
 }
 
-/** The body of `AuthManager#assertAccountNotLocked`; the method's docblock there is its contract. */
-export async function assertAccountNotLocked(this: Pick<SignInLockoutHost, 'config' | 'findSignInAccount' | 'getDataEngine'>, email: string, ctx?: unknown): Promise<void> {
-  const threshold = Number(this.config.lockoutThreshold) || 0;
-  if (threshold <= 0) return;
-  const engine = this.getDataEngine();
-  if (!engine) return;
-  let locked = false;
-  let lockedUserId: string | undefined;
-  try {
-    const u = await this.findSignInAccount(engine, email, ['locked_until']);
-    const lu = u?.locked_until as string | number | Date | null | undefined;
-    locked = !!(lu && new Date(lu).getTime() > Date.now());
-    if (locked && u) lockedUserId = u.id;
-  } catch {
-    return; // fail-open
-  }
-  if (locked) {
-    if (ctx !== undefined && lockedUserId) {
-      await emitAuthSessionAuditEvent(
-        this.config.getAuditSink?.(),
-        signInFailureEventFor(lockedUserId, {
-          path: SIGN_IN_EMAIL_PATH,
-          reason: 'ACCOUNT_LOCKED',
-          fingerprint: signInClientFingerprint(ctx, await readRequestClientAddress()),
-        }),
-      );
+/** The context every lockout read and write runs under: the system's, attributed to nobody. */
+const LOCKOUT_SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] };
+
+/**
+ * How many compare-and-set rounds an admitted attempt tries before it is
+ * refused as contended. Each lost round means another attempt on the same
+ * account landed its own reservation first, so a round is lost at most once
+ * per concurrent attempt; past this many, the account is under a burst and the
+ * attempt is refused as a locked one is (`admitSignInAttempt`).
+ */
+const RESERVATION_ROUNDS = 32;
+
+/** Whether a stored `locked_until` is still in the future at `now` (epoch ms). */
+function lockHolds(lockedUntil: unknown, now: number): boolean {
+  if (lockedUntil === null || lockedUntil === undefined || lockedUntil === '') return false;
+  const at = new Date(lockedUntil as string | number | Date).getTime();
+  return Number.isFinite(at) && at > now;
+}
+
+/** Whether a stored datetime names the same instant as `at` (drivers return a `Date` or ISO text). */
+function sameInstant(stored: unknown, at: Date): boolean {
+  if (stored === null || stored === undefined || stored === '') return false;
+  return new Date(stored as string | number | Date).getTime() === at.getTime();
+}
+
+/** Whether a predicate write landed: an engine that reports no count is read as landed. */
+function writeLanded(result: unknown): boolean {
+  return typeof result === 'number' ? result > 0 : true;
+}
+
+/**
+ * Stamp one sign-in attempt as a failure before its credential is checked: the
+ * counter moves by one in a compare-and-set write on the value just read, and a
+ * write that lands on a stale read lands nothing, so the attempt reads again.
+ * Two attempts can therefore never reserve the same count, and the attempt
+ * whose reservation reaches the threshold stamps the lock in that same write —
+ * every attempt after it reads the lock and is refused, however many arrived
+ * together.
+ *
+ * An account whose lock holds is counted too (its lock is never moved), in one
+ * round: the write is what an admitted attempt pays, so the two cost the same,
+ * and losing that round to a concurrent attempt changes nothing about the
+ * refusal. Resolves to `undefined` when the identifier names no account.
+ * Throws what the engine throws.
+ */
+async function reserveSignInAttempt(
+  engine: IDataEngine,
+  findAccount: SignInLockoutHost['findSignInAccount'],
+  email: string,
+  threshold: number,
+  durationMinutes: number,
+): Promise<SignInAttempt | undefined> {
+  const identifier = email.toLowerCase();
+  let last: { id: string; priorCount: unknown; priorLockedUntil: unknown } | undefined;
+  for (let round = 0; round < RESERVATION_ROUNDS; round++) {
+    const row = await findAccount(engine, email, ['failed_login_count', 'locked_until']);
+    if (!row) return undefined;
+    const now = Date.now();
+    const priorCount = row.failed_login_count ?? null;
+    const priorLockedUntil = row.locked_until ?? null;
+    last = { id: row.id, priorCount, priorLockedUntil };
+    const locked = lockHolds(priorLockedUntil, now);
+    const reservedCount = (Number(priorCount) || 0) + 1;
+    const patch: Record<string, unknown> = { failed_login_count: reservedCount };
+    let lockStamped: SignInLockStamp | undefined;
+    if (!locked && reservedCount >= threshold) {
+      const lockedUntil = new Date(now + durationMinutes * 60_000);
+      patch.locked_until = lockedUntil;
+      lockStamped = { userId: row.id, lockedUntil, threshold };
     }
+    // `multi: true` because the by-id path binds only the primary key and
+    // would drop the rest of the predicate (the shape `db-queue-adapter.ts`
+    // gives for its own compare-and-set writes).
+    const landed = writeLanded(await engine.update('sys_user', patch, {
+      where: { id: row.id, failed_login_count: priorCount },
+      multi: true,
+      context: LOCKOUT_SYSTEM_CTX,
+    } as any));
+    if (locked) {
+      return { identifier, userId: row.id, verdict: 'locked', priorCount, reservedCount: landed ? reservedCount : Number(priorCount) || 0, priorLockedUntil };
+    }
+    if (landed) {
+      return {
+        identifier,
+        userId: row.id,
+        verdict: 'admitted',
+        priorCount,
+        reservedCount,
+        priorLockedUntil,
+        ...(lockStamped ? { lockStamped } : {}),
+      };
+    }
+  }
+  // Every round lost to another attempt on this account: refused as a locked
+  // account is, and uncounted.
+  return last
+    ? { identifier, userId: last.id, verdict: 'locked', priorCount: last.priorCount, reservedCount: Number(last.priorCount) || 0, priorLockedUntil: last.priorLockedUntil }
+    : undefined;
+}
+
+/** The body of `AuthManager#admitSignInAttempt`; the method's docblock there is its contract. */
+export async function admitSignInAttempt(
+  this: Pick<SignInLockoutHost, 'config' | 'findSignInAccount' | 'getDataEngine' | 'logDurabilityDegradation'>,
+  email: string,
+  ctx?: any,
+): Promise<void> {
+  const threshold = Number(this.config.lockoutThreshold) || 0;
+  const engine = threshold > 0 ? this.getDataEngine() : undefined;
+  if (!engine) {
+    // Whatever an earlier call in this request recorded, this attempt has no verdict.
+    await recordSignInAttempt(undefined);
+    return;
+  }
+  let attempt: SignInAttempt | undefined;
+  try {
+    attempt = await reserveSignInAttempt(
+      engine,
+      this.findSignInAccount,
+      email,
+      threshold,
+      Number(this.config.lockoutDurationMinutes) || 15,
+    );
+  } catch (e) {
+    // Fail OPEN: an infra hiccup must never block every login. [#12981] But
+    // lockout accounting that silently stops accounting is brute-force
+    // protection that is OFF.
+    this.logDurabilityDegradation(
+      'AuthManager: the sign-in lockout counter was NOT written — the auth response is '
+        + 'unaffected, so nothing looks broken. This attempt was not counted, which means '
+        + 'consecutive failures do not accumulate and the account is never locked: '
+        + '`lockoutThreshold` (ADR-0069 D2) is configured and, for this identity, not enforced. '
+        + 'A brute-force run against this account meets no limit while this persists, and the '
+        + 'only notice is this line. Remedy: make the sys_user read and update land — check the '
+        + 'write permission on `failed_login_count` / `locked_until` and driver connectivity.',
+      e,
+      { object: 'sys_user', threshold },
+    );
+    await recordSignInAttempt(undefined);
+    return;
+  }
+  const carried = await recordSignInAttempt(attempt);
+  if (attempt?.verdict !== 'locked') return;
+
+  // The refusal is a refused sign-in of the account it names, so — given the
+  // endpoint context — it writes that account's `login_failed` row, with the
+  // lock as its reason, whichever answer the caller is given.
+  if (ctx !== undefined) {
+    await emitAuthSessionAuditEvent(
+      this.config.getAuditSink?.(),
+      signInFailureEventFor(attempt.userId, {
+        path: SIGN_IN_EMAIL_PATH,
+        reason: 'ACCOUNT_LOCKED',
+        fingerprint: signInClientFingerprint(ctx, await readRequestClientAddress()),
+      }),
+    );
+  }
+  if (this.config.lockoutRefusal === 'explicit') {
     const { APIError } = await import('better-auth/api');
     throw new APIError('FORBIDDEN', {
       message:
@@ -101,57 +249,175 @@ export async function assertAccountNotLocked(this: Pick<SignInLockoutHost, 'conf
       code: 'ACCOUNT_LOCKED',
     });
   }
+  // The endpoint's own credential check refuses it, with the answer a wrong
+  // password gets (`sign-in-lockout-refusal.ts`).
+  if (carried) return;
+  // No request state to carry the verdict to that check: refuse here, with the
+  // wrong-password answer, after the one password hash that answer costs.
+  if (typeof ctx?.context?.password?.hash === 'function') {
+    await ctx.context.password.hash(typeof ctx?.body?.password === 'string' ? ctx.body.password : '');
+  }
+  const [{ APIError }, { BASE_ERROR_CODES }] = await Promise.all([
+    import('better-auth/api'),
+    import('@better-auth/core/error'),
+  ]);
+  throw APIError.from('UNAUTHORIZED', BASE_ERROR_CODES.INVALID_EMAIL_OR_PASSWORD);
 }
 
-/** The body of `AuthManager#recordSignInOutcome`; the method's docblock there is its contract. */
-export async function recordSignInOutcome(
+/** How a `/sign-in/email` ended, as the after-hook judged it. */
+export type SignInOutcome =
+  /** A session was issued. */
+  | 'succeeded'
+  /** The password passed and a policy then refused the sign-in (`refusedAfterTheCredential`). */
+  | 'refused-after-credential'
+  /** Any other refusal: a wrong password above all. */
+  | 'refused';
+
+/** What settling one attempt hands the account events. */
+export interface SignInSettlement {
+  /**
+   * The gate refused this attempt because the account's lock held. Its
+   * `login_failed` row is already written ({@link admitSignInAttempt}).
+   */
+  readonly refusedByLock: boolean;
+  /** The account the gate resolved for this attempt, when it resolved one. */
+  readonly userId?: string;
+  /** The lock this attempt stamped, when it was refused and stamped one. */
+  readonly lockStamped?: SignInLockStamp;
+}
+
+/** The body of `AuthManager#settleSignInAttempt`; the method's docblock there is its contract. */
+export async function settleSignInAttempt(
   this: Pick<SignInLockoutHost, 'config' | 'findSignInAccount' | 'getDataEngine' | 'logDurabilityDegradation'>,
   email: string,
-  success: boolean,
-): Promise<{ userId: string; lockedUntil: Date; threshold: number } | undefined> {
+  outcome: SignInOutcome,
+): Promise<SignInSettlement> {
+  const recorded = await readSignInAttempt();
+  // A verdict recorded for another identifier belongs to another call.
+  const attempt = recorded && recorded.identifier === email.toLowerCase() ? recorded : undefined;
+  if (attempt?.verdict === 'locked') return { refusedByLock: true, userId: attempt.userId };
+  const settled: SignInSettlement = { refusedByLock: false, ...(attempt ? { userId: attempt.userId } : {}) };
   const threshold = Number(this.config.lockoutThreshold) || 0;
-  if (threshold <= 0) return undefined;
+  if (threshold <= 0) return settled;
   const engine = this.getDataEngine();
-  if (!engine) return undefined;
-  try {
-    const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] };
-    const u = await this.findSignInAccount(engine, email, ['failed_login_count', 'locked_until']);
-    if (!u) return undefined;
-    if (success) {
-      if ((Number(u.failed_login_count) || 0) !== 0 || u.locked_until) {
+  if (!engine) return settled;
+
+  if (outcome === 'refused') {
+    // The failure was counted, and any lock stamped, when the attempt was admitted.
+    return attempt?.lockStamped ? { ...settled, lockStamped: attempt.lockStamped } : settled;
+  }
+
+  if (outcome === 'succeeded') {
+    try {
+      const u = await this.findSignInAccount(engine, email, ['failed_login_count', 'locked_until']);
+      if (u && ((Number(u.failed_login_count) || 0) !== 0 || u.locked_until)) {
         await engine.update(
           'sys_user',
           { id: u.id, failed_login_count: 0, locked_until: null },
-          { context: SYSTEM_CTX } as any,
+          { context: LOCKOUT_SYSTEM_CTX } as any,
         );
       }
-      return undefined;
+    } catch (e) {
+      this.logDurabilityDegradation(
+        'AuthManager: a successful sign-in did NOT clear the sign-in lockout counter — the user '
+          + 'holds a valid session, so nothing looks wrong. `failed_login_count` keeps the failures '
+          + 'before this sign-in, so fewer further failures than `lockoutThreshold` (ADR-0069 D2) '
+          + 'now lock the account. Remedy: make the sys_user read and update land; the next '
+          + 'successful sign-in clears it.',
+        e,
+        { object: 'sys_user', threshold, outcome },
+      );
     }
-    const next = (Number(u.failed_login_count) || 0) + 1;
-    const patch: Record<string, unknown> = { id: u.id, failed_login_count: next };
-    let lockedUntil: Date | undefined;
-    if (next >= threshold) {
-      const mins = Number(this.config.lockoutDurationMinutes) || 15;
-      lockedUntil = new Date(Date.now() + mins * 60_000);
-      patch.locked_until = lockedUntil;
+    return settled;
+  }
+
+  // The password passed and a policy refused the sign-in: this attempt neither
+  // counts nor clears, so the reservation it was admitted with is handed back.
+  if (attempt) await releaseReservation.call(this, engine, attempt, threshold);
+  return settled;
+}
+
+/**
+ * Hand back one admitted attempt's reservation: the counter down by one, and
+ * the lock that reservation stamped lifted while the count stays below the
+ * threshold. A compare-and-set on the counter, for the reason
+ * {@link reserveSignInAttempt} gives; a counter already at zero (a success or
+ * an administrator's unlock came first) is left alone. Never throws.
+ */
+async function releaseReservation(
+  this: Pick<SignInLockoutHost, 'logDurabilityDegradation'>,
+  engine: IDataEngine,
+  attempt: SignInAttempt,
+  threshold: number,
+): Promise<void> {
+  try {
+    for (let round = 0; round < RESERVATION_ROUNDS; round++) {
+      const row = await engine.findOne('sys_user', {
+        where: { id: attempt.userId },
+        fields: ['id', 'failed_login_count', 'locked_until'],
+        context: LOCKOUT_SYSTEM_CTX,
+      } as any);
+      if (!row) return;
+      const current = Number(row.failed_login_count) || 0;
+      if (current <= 0) return;
+      const patch: Record<string, unknown> = { failed_login_count: current - 1 };
+      if (
+        attempt.lockStamped
+        && current - 1 < threshold
+        && sameInstant(row.locked_until, attempt.lockStamped.lockedUntil)
+      ) {
+        patch.locked_until = attempt.priorLockedUntil ?? null;
+      }
+      const landed = writeLanded(await engine.update('sys_user', patch, {
+        where: { id: attempt.userId, failed_login_count: row.failed_login_count ?? null },
+        multi: true,
+        context: LOCKOUT_SYSTEM_CTX,
+      } as any));
+      if (landed) return;
     }
-    await engine.update('sys_user', patch, { context: SYSTEM_CTX } as any);
-    return lockedUntil ? { userId: u.id, lockedUntil, threshold } : undefined;
   } catch (e) {
-    // Never break the auth response. [#12981] But lockout accounting that
-    // silently stops accounting is brute-force protection that is OFF.
     this.logDurabilityDegradation(
-      'AuthManager: the sign-in lockout counter was NOT written — the auth response is '
-        + 'unaffected, so nothing looks broken. This attempt was not counted, which means '
-        + 'consecutive failures do not accumulate and the account is never locked: '
-        + '`lockoutThreshold` (ADR-0069 D2) is configured and, for this identity, not enforced. '
-        + 'A brute-force run against this account meets no limit while this persists, and the '
-        + 'only notice is this line. Remedy: make the sys_user update land — check the write '
-        + 'permission on `failed_login_count` / `locked_until` and driver connectivity.',
+      'AuthManager: a sign-in whose password passed and that a policy then refused did NOT hand '
+        + 'back its lockout reservation — the refusal was answered normally, so nothing looks '
+        + 'broken. `failed_login_count` keeps one failure this attempt did not earn, so the account '
+        + 'locks one wrong password sooner than `lockoutThreshold` (ADR-0069 D2) says. Remedy: make '
+        + 'the sys_user read and update land; a successful sign-in clears the counter.',
       e,
-      { object: 'sys_user', threshold, success },
+      { object: 'sys_user', threshold },
     );
-    return undefined;
+  }
+}
+
+/** The body of `AuthManager#clearSignInLockout`; the method's docblock there is its contract. */
+export async function clearSignInLockout(
+  this: Pick<SignInLockoutHost, 'getDataEngine' | 'logDurabilityDegradation'>,
+  userId: string,
+): Promise<void> {
+  const engine = this.getDataEngine();
+  if (!engine || !userId) return;
+  try {
+    const row = await engine.findOne('sys_user', {
+      where: { id: userId },
+      fields: ['id', 'failed_login_count', 'locked_until'],
+      context: LOCKOUT_SYSTEM_CTX,
+    } as any);
+    if (!row || ((Number(row.failed_login_count) || 0) === 0 && !row.locked_until)) return;
+    await engine.update(
+      'sys_user',
+      { id: userId, failed_login_count: 0, locked_until: null },
+      { context: LOCKOUT_SYSTEM_CTX } as any,
+    );
+  } catch (e) {
+    // The new password is already written and the reset answers success.
+    this.logDurabilityDegradation(
+      'AuthManager: a completed password reset did NOT clear the sign-in lockout — the reset '
+        + 'answered success and the new password is set, so nothing looks wrong. '
+        + '`failed_login_count` / `locked_until` are untouched, so an account locked before the '
+        + 'reset stays locked and refuses the new password until the lock runs out (ADR-0069 D2). '
+        + 'Remedy: make the sys_user read and update land, or clear it with the Unlock action.',
+      e,
+      { object: 'sys_user', userId },
+    );
   }
 }
 
@@ -160,11 +426,12 @@ export async function auditRefusedSignIn(
   this: Pick<SignInLockoutHost, 'config' | 'resolveSignInAccountId'>,
   ctx: any,
   email: string,
-  lockStamped: { userId: string; lockedUntil: Date; threshold: number } | undefined,
+  settlement: SignInSettlement,
 ): Promise<void> {
   const sink = this.config.getAuditSink?.();
   if (!sink) return;
-  const userId = lockStamped?.userId ?? (await this.resolveSignInAccountId(email));
+  const lockStamped = settlement.lockStamped;
+  const userId = lockStamped?.userId ?? settlement.userId ?? (await this.resolveSignInAccountId(email));
   if (!userId) return;
   const fingerprint = signInClientFingerprint(ctx, await readRequestClientAddress());
   await emitAuthSessionAuditEvent(

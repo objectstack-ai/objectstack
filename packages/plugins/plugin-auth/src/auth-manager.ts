@@ -140,14 +140,17 @@ import {
 // [#25224 cut 2] The sign-in lockout path; the methods of the same names
 // below hand each body the members it reads (`SignInLockoutHost`).
 import {
-  assertAccountNotLocked,
+  admitSignInAttempt,
   auditRefusedSignIn,
+  clearSignInLockout,
   findSignInAccount,
-  recordSignInOutcome,
   resolveSignInAccountId,
   resolveTwoFactorAccountLockout,
+  settleSignInAttempt,
   stampLastLogin,
   type SignInLockoutHost,
+  type SignInOutcome,
+  type SignInSettlement,
 } from './auth-manager-sign-in-lockout.js';
 // [#25224 cut 3] The password, auth-gate and session policy; the methods of
 // the same names below hand each body the members it reads
@@ -1032,6 +1035,23 @@ export interface AuthManagerOptions extends Partial<AuthConfig> {
 
   /** Minutes an account stays locked once the threshold is crossed. Default 15. */
   lockoutDurationMinutes?: number;
+
+  /**
+   * ADR-0069 D2 — how a password sign-in for a LOCKED account is refused.
+   *
+   * - `'uniform'` (default): exactly as a wrong password is — `401
+   *   INVALID_EMAIL_OR_PASSWORD`, the same body, and the same work before the
+   *   answer. Only an existing account can be locked, so any other answer tells
+   *   the caller the account exists.
+   * - `'explicit'`: `403 ACCOUNT_LOCKED`, which tells the person why they cannot
+   *   sign in — and tells anyone who submits that address that the account
+   *   exists. For deployments that accept that, e.g. behind their own
+   *   identity-proofing front door.
+   *
+   * Either way the account's `login_failed` row records the reason
+   * `ACCOUNT_LOCKED`, and the lock holds against the correct password.
+   */
+  lockoutRefusal?: 'uniform' | 'explicit';
 
   /**
    * ADR-0069 D1 — password complexity. When `passwordRequireComplexity` is on,
@@ -1932,7 +1952,7 @@ export class AuthManager {
     const readConfig = () => this.config;
     const readIdpLocale = () => this.idpLocale;
     const host: AuthInstanceHost = {
-      assertAccountNotLocked: (...a) => this.assertAccountNotLocked(...a),
+      admitSignInAttempt: (...a) => this.admitSignInAttempt(...a),
       assertActorNotHeld: (...a) => this.assertActorNotHeld(...a),
       assertAdminRevokeUserSessionIdentifiesRecord: (...a) => this.assertAdminRevokeUserSessionIdentifiesRecord(...a),
       assertOrganizationDeletable: (...a) => this.assertOrganizationDeletable(...a),
@@ -1944,6 +1964,7 @@ export class AuthManager {
       assertSsoProviderDeletable: (...a) => this.assertSsoProviderDeletable(...a),
       auditRefusedSignIn: (...a) => this.auditRefusedSignIn(...a),
       buildPluginList: (...a) => this.buildPluginList(...a),
+      clearSignInLockout: (...a) => this.clearSignInLockout(...a),
       composeDatabaseHooks: (...a) => this.composeDatabaseHooks(...a),
       get config() { return readConfig(); },
       configuredBasePath: (...a) => this.configuredBasePath(...a),
@@ -1968,7 +1989,6 @@ export class AuthManager {
       isSsoWired: (...a) => this.isSsoWired(...a),
       linkingContext: (...a) => this.linkingContext(...a),
       recordPasswordHistory: (...a) => this.recordPasswordHistory(...a),
-      recordSignInOutcome: (...a) => this.recordSignInOutcome(...a),
       resolveActor: (...a) => this.resolveActor(...a),
       resolveAuthSecret: (...a) => this.resolveAuthSecret(...a),
       resolvePasswordChangeUserId: (...a) => this.resolvePasswordChangeUserId(...a),
@@ -1976,6 +1996,7 @@ export class AuthManager {
       roleChangeGrantDeps: (...a) => this.roleChangeGrantDeps(...a),
       sendChangeEmailNotice: (...a) => this.sendChangeEmailNotice(...a),
       sendExistingAccountSignUpNotice: (...a) => this.sendExistingAccountSignUpNotice(...a),
+      settleSignInAttempt: (...a) => this.settleSignInAttempt(...a),
       signUpForcedOff: (...a) => this.signUpForcedOff(...a),
       ssoDiscoveryTrustedOrigins: (...a) => this.ssoDiscoveryTrustedOrigins(...a),
       stampLastLogin: (...a) => this.stampLastLogin(...a),
@@ -6083,54 +6104,32 @@ export class AuthManager {
   }
 
   /**
-   * ADR-0069 D2 — throw `ACCOUNT_LOCKED` when the identity is currently locked
-   * out (brute-force protection). No-op when lockout is disabled
-   * (`lockoutThreshold <= 0`) or no data engine is wired. Fails OPEN on a
-   * lookup error: an infra hiccup must never block every login.
+   * ADR-0069 D2 — the lock gate of one `/sign-in/email` attempt, run BEFORE
+   * better-auth checks the password. No-op when lockout is disabled
+   * (`lockoutThreshold <= 0`), no data engine is wired, or the identifier
+   * names no account. Fails OPEN on a read or write error (an infra hiccup
+   * must never block every login), and reports the attempt it could not count.
    *
-   * The lock it enforces is the one held by the account the credential check
-   * resolves the identifier to ({@link findSignInAccount}), so it holds for
+   * It stamps the attempt as a failure first — `failed_login_count` up by one
+   * in a compare-and-set write, and `locked_until = now +
+   * lockoutDurationMinutes` in that same write when the count reaches the
+   * threshold — so attempts that arrive together are each counted against the
+   * one lock and cannot all reach the credential check before it lands. The
+   * stamp is settled once the check answers ({@link settleSignInAttempt}).
+   *
+   * While the account's lock holds, the attempt is refused whatever the
+   * password: with the answer a wrong password gets (`401
+   * INVALID_EMAIL_OR_PASSWORD`, made by better-auth's own credential check,
+   * `sign-in-lockout-refusal.ts`), or with `403 ACCOUNT_LOCKED` when the
+   * deployment opted in (`lockoutRefusal: 'explicit'`). Given the endpoint
+   * context `ctx`, a locked refusal writes the account's `login_failed` row
+   * with the reason `ACCOUNT_LOCKED` (`auth-session-audit.ts`).
+   *
+   * The lock and the counter are those of the account the credential check
+   * resolves the identifier to ({@link findSignInAccount}), so they hold for
    * every spelling of the address that signs in to that account.
-   *
-   * The refusal is a refused sign-in of the account it names, so — given the
-   * endpoint context `ctx` — it writes that account's `login_failed` row with
-   * the refusal's own code before throwing (`auth-session-audit.ts`).
    */
-  private assertAccountNotLocked(email: string, ctx?: unknown): Promise<void> {
-    // [#25224 cut 2] The body moved to `auth-manager-sign-in-lockout.ts` (see `SignInLockoutHost`).
-    const readConfig = () => this.config;
-    const host: Pick<SignInLockoutHost, 'config' | 'findSignInAccount' | 'getDataEngine'> = {
-      get config() { return readConfig(); },
-      findSignInAccount: (...a) => this.findSignInAccount(...a),
-      getDataEngine: (...a) => this.getDataEngine(...a),
-    };
-    return assertAccountNotLocked.call(host, email, ctx);
-  }
-
-  /**
-   * ADR-0069 D2 — record a sign-in outcome for lockout accounting. On failure
-   * increments `failed_login_count` and, once it reaches `lockoutThreshold`,
-   * stamps `locked_until = now + lockoutDurationMinutes`. On success resets
-   * both (only writing when there is something to clear, to avoid a no-op
-   * history row on every login). No-op when lockout is disabled. Never throws —
-   * a counter write must not turn a valid login into an error.
-   *
-   * The counter it moves is the one held by the account the credential check
-   * resolves the identifier to ({@link findSignInAccount}) — the account the
-   * gate above enforces — so every refused attempt on that account counts
-   * toward one lock, and every success on it clears that lock, whatever
-   * spelling of the address the attempt carried.
-   *
-   * Resolves to the lock it stamped — the account, the expiry and the
-   * threshold — when THIS call wrote `locked_until` and the write landed, and
-   * to `undefined` otherwise. That is the lockout transition the
-   * `account_locked` row records, so a lock that was never written is never
-   * reported as one.
-   */
-  private recordSignInOutcome(
-    email: string,
-    success: boolean,
-  ): Promise<{ userId: string; lockedUntil: Date; threshold: number } | undefined> {
+  private admitSignInAttempt(email: string, ctx?: unknown): Promise<void> {
     // [#25224 cut 2] The body moved to `auth-manager-sign-in-lockout.ts` (see `SignInLockoutHost`).
     const readConfig = () => this.config;
     const host: Pick<SignInLockoutHost, 'config' | 'findSignInAccount' | 'getDataEngine' | 'logDurabilityDegradation'> = {
@@ -6139,16 +6138,71 @@ export class AuthManager {
       getDataEngine: (...a) => this.getDataEngine(...a),
       logDurabilityDegradation: (...a) => this.logDurabilityDegradation(...a),
     };
-    return recordSignInOutcome.call(host, email, success);
+    return admitSignInAttempt.call(host, email, ctx);
+  }
+
+  /**
+   * ADR-0069 D2 — settle the stamp {@link admitSignInAttempt} made for this
+   * request's `/sign-in/email`, once the credential check has answered:
+   *
+   * - `'succeeded'` clears `failed_login_count` and `locked_until` (writing
+   *   only when there is something to clear, to avoid a no-op history row on
+   *   every login);
+   * - `'refused-after-credential'` — the password passed and a policy refused
+   *   the sign-in — hands the attempt's stamp back: it neither counts nor
+   *   clears;
+   * - `'refused'` keeps the stamp: the failure is already counted, and any
+   *   lock already stamped.
+   *
+   * A locked refusal is neither counted again nor cleared. No-op when lockout
+   * is disabled. Never throws — a counter write must not turn a valid login
+   * into an error.
+   *
+   * Resolves to what the account events need: whether the gate refused the
+   * attempt as locked (its `login_failed` row is then already written), the
+   * account the gate resolved, and — on a refusal — the lock this attempt
+   * stamped, when its stamp wrote `locked_until`. That is the lockout
+   * transition the `account_locked` row records, so a lock that was never
+   * written is never reported as one.
+   */
+  private settleSignInAttempt(email: string, outcome: SignInOutcome): Promise<SignInSettlement> {
+    // [#25224 cut 2] The body moved to `auth-manager-sign-in-lockout.ts` (see `SignInLockoutHost`).
+    const readConfig = () => this.config;
+    const host: Pick<SignInLockoutHost, 'config' | 'findSignInAccount' | 'getDataEngine' | 'logDurabilityDegradation'> = {
+      get config() { return readConfig(); },
+      findSignInAccount: (...a) => this.findSignInAccount(...a),
+      getDataEngine: (...a) => this.getDataEngine(...a),
+      logDurabilityDegradation: (...a) => this.logDurabilityDegradation(...a),
+    };
+    return settleSignInAttempt.call(host, email, outcome);
+  }
+
+  /**
+   * ADR-0069 D2 — a completed password reset clears the account's sign-in
+   * lockout: `failed_login_count` and `locked_until`, so the new password
+   * signs in at once. Wired to better-auth's `onPasswordReset`, which every
+   * reset door runs after the new password is written (the emailed link and
+   * the phone OTP reset). The second factor's own lock is NOT cleared: a reset
+   * proves the mailbox or the phone, not the second factor (the admin
+   * {@link unlockUser} clears both). Never throws — the reset has already
+   * succeeded.
+   */
+  private clearSignInLockout(userId: string): Promise<void> {
+    // [#25224 cut 2] The body moved to `auth-manager-sign-in-lockout.ts` (see `SignInLockoutHost`).
+    const host: Pick<SignInLockoutHost, 'getDataEngine' | 'logDurabilityDegradation'> = {
+      getDataEngine: (...a) => this.getDataEngine(...a),
+      logDurabilityDegradation: (...a) => this.logDurabilityDegradation(...a),
+    };
+    return clearSignInLockout.call(host, userId);
   }
 
   /**
    * Write the account events for a refused `/sign-in/email`: one
    * `login_failed` row for the account the sign-in named, carrying the
    * refusal's machine code, and — when this attempt stamped the ADR-0069 D2
-   * lockout (`lockStamped`, from {@link recordSignInOutcome}) — one
-   * `account_locked` row. Independent of the lockout configuration: a refused
-   * sign-in is recorded whether or not a threshold is set.
+   * lockout (`settlement.lockStamped`, from {@link settleSignInAttempt}) —
+   * one `account_locked` row. Independent of the lockout configuration: a
+   * refused sign-in is recorded whether or not a threshold is set.
    *
    * ⛔ The submitted identifier is used only to FIND the account and is never
    * recorded; an identifier that resolves to no account writes nothing
@@ -6158,7 +6212,7 @@ export class AuthManager {
   private auditRefusedSignIn(
     ctx: any,
     email: string,
-    lockStamped: { userId: string; lockedUntil: Date; threshold: number } | undefined,
+    settlement: SignInSettlement,
   ): Promise<void> {
     // [#25224 cut 2] The body moved to `auth-manager-sign-in-lockout.ts` (see `SignInLockoutHost`).
     const readConfig = () => this.config;
@@ -6166,7 +6220,7 @@ export class AuthManager {
       get config() { return readConfig(); },
       resolveSignInAccountId: (...a) => this.resolveSignInAccountId(...a),
     };
-    return auditRefusedSignIn.call(host, ctx, email, lockStamped);
+    return auditRefusedSignIn.call(host, ctx, email, settlement);
   }
 
   /**
@@ -6203,8 +6257,8 @@ export class AuthManager {
 
   /**
    * ADR-0069 D2 — the ONE answer to "which account does this password sign-in
-   * name", read by the lock gate ({@link assertAccountNotLocked}), the counter
-   * ({@link recordSignInOutcome}) and the account events
+   * name", read by the lock gate ({@link admitSignInAttempt}), the counter
+   * ({@link settleSignInAttempt}) and the account events
    * ({@link resolveSignInAccountId}): the `sys_user` row with `fields`
    * (plus `id`), or `undefined` when the identifier names no account.
    *
