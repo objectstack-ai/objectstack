@@ -49,18 +49,18 @@
 
 ## Epic 子树车道
 
-- 大开发与跨层功能点(spec/运行时/前端)整体委托一个专职 PM 会话:`/pm-dispatch epic:#<n>`。
-- 委托信号成对落地:父单打 `pm:epic` + 正文写会话 ID 与声明的文件领地。
-- epic 立卡挂父单、打 `pm:epic`,⛔ 永不 `pm:queue`;`label:pm:epic` 即父子保留全集,域座位不取。
-- 队列 = 子树 open 未认领 sub-issue,每轮重读不缓存;其它 PM 候选获取跳过整棵子树。
-- 域座位批次选择读一次 `label:pm:epic` 索引,避开领地相交;epic PM 不兼任 `domain:*` 座位。
-- 认领纪律全套照做:先写标签、再 `Claim:`、再全线程重读;认领后 `pm:epic` 留在卡上。
-- 离开子树(交车道或转 spec 座位)同一笔标签写摘 `pm:epic` 加 `pm:queue`。
-- `pm:epic` + `pm:queue` 同卡 = 半状态(保留兼移交);后者即已移交,取回走全套认领协议含重读。
-- 单车道仓(无 `domain:*`)开卡即认领合法;多车道仓域标签前置照旧,子树标记即保留。
-- 新立 spec/公共契约 sub-issue 照旧转 spec 座位队列,epic 侧写 `Blocked-by:`;衍生按三分留席。
-- 每次分流留一行审计评论;父单维护 checklist 汇总评论,决策仍锚在具体 sub-issue。
-- 收尾四步、僵尸回收与领地防撞细则见 `references/seat-post-protocol.md`。
+- 专题 = 父单 + 里程碑表 + 负责车道(立卡车道):它拆卡并保持表现值;⛔ 无默认专题席。
+- 表四列 `Milestone | Child | Blocked-by | Lane`,一里程碑一组行,子卡格 `#<n>` 加一句话。
+- 父单挂 `tracking` + `area:*`,无 pm 状态标签与 `pm:epic`,永不派发;决策锚在子卡。
+- 子卡一律 `sub_issue_add` 挂父单、住车道队列,默认无 `pm:epic`;先后只写子卡 `Blocked-by:`。
+- 滚动拆卡:只当前与下一个里程碑是卡,余为表行;高风险专题拆前贴小结,维护者裁 go/no-go。
+- 专题次序 = 路线图表(云:`cloud/ROADMAP.md`;本仓列每日看板,直至有表);⛔ 无每账号上限。
+- 暂停:父单 `pm:on-hold` + `Restart-when:`(原话+理由);同笔当前与下个里程碑未起工子卡同挂。
+- 在飞子卡逐卡呈维护者:默认契约复审 PASS 者落地,余停手转 `pm:on-hold`。
+- 后续里程碑子卡先把目标、要裁与链接并入表,再关 not_planned。
+- 父单留检查点评论(发运/冻结件现状/风险);重启新读它后按表重拆,仍成立的旧卡可重开。
+- 总览单列暂停专题(天数、`Restart-when`);逾 30 天问一次,不续则父单连余卡关 not_planned。
+- 须一手到底的链:写成一卡有序步骤,或具名集中例外打 `pm:epic`(细则 `seat-post-protocol.md`)。
 
 ## 轮次报告与节奏
 

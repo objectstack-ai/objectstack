@@ -31,6 +31,8 @@ const OWNED_OBJECTS = new Set([
   'sys_scim_connection_binding', 'sys_scim_connection_credential', 'sys_scim_group',
   'sys_scim_group_member', 'sys_scim_identity_tombstone', 'sys_scim_projection_grant',
   'sys_scim_subject', 'sys_scim_user',
+  // identity — IdP group → permission set mapping (#30959; SCIM now, SSO group claims later)
+  'sys_idp_group_mapping',
   // audit / messaging-adjacent (still owned here)
   'sys_notification', 'sys_attachment', 'sys_email', 'sys_email_template',
   // (sys_saved_report / sys_report_schedule retired with the saved-report stack, #20102)

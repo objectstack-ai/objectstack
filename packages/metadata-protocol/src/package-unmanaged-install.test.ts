@@ -32,7 +32,7 @@
  */
 // Pays the lint root's first load at collection, never inside a clocked case.
 import './lint-root-preload.testkit.js';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { assertEngineDeleteDispatch, assertEngineFindOnePredicate, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 import { ImportUnmanagedPackageResponseSchema } from '@objectstack/spec/api';
 import { DEFAULT_METADATA_TYPE_REGISTRY, getMetadataTypeSchema, listMetadataTypeSchemaTypes } from '@objectstack/spec/kernel';
@@ -1362,5 +1362,36 @@ describe('the sample data, copied when the door asks — the seed receipt (#3080
         const { protocol } = makeProtocol();
         const err = await refusalOf(() => protocol.importUnmanagedPackage({ manifest: seededBody(), withSampleData: true }));
         expect(resolveThrownHttpError(err).status).toBe(400);
+    });
+});
+
+describe('[#31530] the base row, as its own write answered it (`baseInstance`, door-only)', () => {
+    /** The protocol over the stub engine, with a `package` service whose `publish` answers `answer`. */
+    function withPackageService(answer: (manifest: any) => unknown) {
+        const harness = makeEngine();
+        const published: any[] = [];
+        const packageService = {
+            publish: vi.fn(async ({ manifest }: { manifest: any }) => { published.push(manifest); return answer(manifest); }),
+        };
+        const protocol = new ObjectStackProtocolImplementation(harness.engine, () => new Map([['package', packageService]])) as any;
+        return { ...harness, protocol, published, packageService };
+    }
+
+    it('answers the base row the package service\'s write answered, beside the published answer', async () => {
+        const { protocol, published } = withPackageService((manifest) => ({ success: true, version: manifest.version, createdAt: '2026-11-08 14:40:07' }));
+        const result = await protocol.importUnmanagedPackage({ manifest: crmBody() });
+        expect(published.map((m) => m.id)).toEqual(['com.example.crm-copy']);
+        expect(result.baseInstance).toEqual({ version: published[0].version, createdAt: '2026-11-08 14:40:07' });
+        // Door-only: outside the published answer, whose declaration still reads every other key.
+        const { baseInstance: _door, ...answer } = result;
+        expect(ImportUnmanagedPackageResponseSchema.parse(answer)).toEqual(answer);
+        expect(ImportUnmanagedPackageResponseSchema.parse(result)).not.toHaveProperty('baseInstance');
+    });
+
+    it('answers none when the write named no stamp, or when there is no package service', async () => {
+        const silent = withPackageService(() => ({ success: true }));
+        expect(await silent.protocol.importUnmanagedPackage({ manifest: crmBody() })).not.toHaveProperty('baseInstance');
+        const { protocol } = makeProtocol();
+        expect(await protocol.importUnmanagedPackage({ manifest: crmBody() })).not.toHaveProperty('baseInstance');
     });
 });
