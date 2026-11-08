@@ -123,6 +123,42 @@ export interface ExplainAccessHost {
  */
 type RlsFilterOptions = NonNullable<Parameters<SecurityPlugin['computeLayeredRlsFilter']>[4]>;
 
+/**
+ * [ADR-0090 D6/D12] Whether `callerContext` may describe ANOTHER user's access:
+ * the one caller gate of the explain family, asked by `explain` and by
+ * `describeEffectiveAccess` (`security-plugin-effective-access.ts`) alike, so
+ * the two cannot disagree about who may read whom.
+ *
+ * A system caller may. Otherwise the caller holds `manage_users`, or — [ADR-0090
+ * D12, amended 2026-10-17] — is the organization administrator of an
+ * organization `userId` is a member of (the members whose assignments it
+ * creates and removes), or [D12] holds a delegated `adminScope` covering
+ * `userId`. Each check fails closed on any error, and each reads the
+ * organization the caller's sets were resolved in, never another. It answers
+ * `false` for an id no user has, as for one the caller may not manage: what
+ * each caller does about a user that does not exist is decided after it.
+ */
+export async function mayDescribeAnotherUser(
+  this: Pick<ExplainAccessHost, 'delegatedAdminGate' | 'permissionEvaluator' | 'resolvePermissionSetsForContext'>,
+  userId: string,
+  callerContext?: any,
+): Promise<boolean> {
+  if (callerContext?.isSystem === true) return true;
+  const callerSets = await this.resolvePermissionSetsForContext(callerContext).catch(() => []);
+  const held = this.permissionEvaluator.getSystemPermissions(callerSets);
+  if (held.has('manage_users')) return true;
+  const organizationLevel = this.delegatedAdminGate
+    ? await this.delegatedAdminGate
+        .organizationAdminCoversUser(callerSets, userId, callerContext)
+        .catch(() => false)
+    : false;
+  return organizationLevel || (this.delegatedAdminGate
+    ? await this.delegatedAdminGate
+        .scopesCoverUser(callerSets, userId, callerContext)
+        .catch(() => false)
+    : false);
+}
+
 /** The body of `SecurityPlugin#explainAccessForCaller`; the method's docblock there is its contract. */
 export async function explainAccessForCaller(
   this: Pick<ExplainAccessHost, 'baselinePermissionSets' | 'checkControlledByParentWrite' | 'collectRLSPolicies' | 'computeLayeredRlsFilter' | 'computeReadPartialMaskRules' | 'computeRlsFilter' | 'delegatedAdminGate' | 'foldFieldRequiredPermissions' | 'getObjectSecurityMeta' | 'permissionEvaluator' | 'ql' | 'readRowById' | 'resolveKernelService' | 'resolvePermissionSetsForContext' | 'resolvePreImageFloorDrop' | 'resolveSharingReadFilter' | 'resolveSharingWriteVerdict' | 'resolveWriteScopeForSharing' | 'tenancyPosture'>,
@@ -150,36 +186,13 @@ export async function explainAccessForCaller(
   // through the other-user arm: an empty id names nobody, so it is refused
   // there like an unknown one, never folded into explaining the caller.
   if (request.userId !== undefined && request.userId !== callerContext?.userId) {
-    const callerIsSystem = callerContext?.isSystem === true;
-    if (!callerIsSystem) {
-      const callerSets = await this.resolvePermissionSetsForContext(callerContext).catch(() => []);
-      const held = this.permissionEvaluator.getSystemPermissions(callerSets);
-      if (!held.has('manage_users')) {
-        // [ADR-0090 D12, amended 2026-10-17] An organization administrator
-        // may explain a member of the organization it administers — the
-        // members whose assignments it creates and removes. Then [D12]
-        // delegated administrators may explain principals inside their
-        // delegation boundary. Both fail closed on any error, and both read
-        // the organization the caller's sets were resolved in, never another.
-        const organizationLevel = this.delegatedAdminGate
-          ? await this.delegatedAdminGate
-              .organizationAdminCoversUser(callerSets, request.userId, callerContext)
-              .catch(() => false)
-          : false;
-        const delegated = organizationLevel || (this.delegatedAdminGate
-          ? await this.delegatedAdminGate
-              .scopesCoverUser(callerSets, request.userId, callerContext)
-              .catch(() => false)
-          : false);
-        if (!delegated) {
-          throw new PermissionDeniedError(
-            `[Security] Access denied: explaining another user's access requires the 'manage_users' ` +
-              `capability, organization administration of an organization that user is a member of, ` +
-              `or a delegated adminScope covering that user (ADR-0090 D6/D12).`,
-            { object, operation, targetUserId: request.userId },
-          );
-        }
-      }
+    if (!(await mayDescribeAnotherUser.call(this, request.userId, callerContext))) {
+      throw new PermissionDeniedError(
+        `[Security] Access denied: explaining another user's access requires the 'manage_users' ` +
+          `capability, organization administration of an organization that user is a member of, ` +
+          `or a delegated adminScope covering that user (ADR-0090 D6/D12).`,
+        { object, operation, targetUserId: request.userId },
+      );
     }
     // [#26641] ...and only a user who exists is explained. The resolver
     // synthesises the baseline anchor and sets for ANY id, so an id no

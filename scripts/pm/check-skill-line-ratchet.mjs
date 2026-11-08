@@ -1680,6 +1680,17 @@ export const CEILINGS = new Map([
   // added row and no other row moves; set at the landed line count (headroom
   // 0, same convention as every lane charter above).
   ['.claude/skills/pm-dispatch/references/lanes/review.md', 21],
+  // QA seat charter (`qa#N`): the Routine seat that owns checklist-test §6's
+  // two standing routines (the weekly four-record regression, the post-release
+  // npm smoke), each round's close-out, record close and supersede, and the
+  // weekly `retest-owed.mjs` read that feeds the next regression; it dispatches
+  // no dev and changes no product code. Ruling of record: the maintainer's
+  // letter A on the card that ordered this file, 「同意 新设 qa#1」, recorded
+  // verbatim in triage's ruling comment 6715420603, whose workload names
+  // `references/lanes/qa.md`. A NEW file, so this is an added row and no other
+  // row moves; set at the landed line count (headroom 0, same convention as
+  // every lane charter above).
+  ['.claude/skills/pm-dispatch/references/lanes/qa.md', 29],
   // 399 → 405 (#11126): maintainer-ruled (2026-08-23, option B, quoted in that
   // PR) — the +6-line cross-repo dispatch-gates caveat, sized so the queued
   // #11137 (395→399 on main) and this PR's +6 compose to exactly 405.
@@ -1763,7 +1774,14 @@ export const CEILINGS = new Map([
   // hardening re-runs the item itself).
   // 277 → 276 (#29111): the Guardrails security definition and fix dispatch
   // became a pointer at pm-dispatch security-findings.md (lowering is legitimate).
-  ['.claude/skills/checklist-test/SKILL.md', 276],
+  // 276 → 279: ruling comment 6715420603 (maintainer letter A, 「同意 新设 qa#1」)
+  // orders the card's three text fixes, two of which land here: §6 names the
+  // `qa#1` seat as the routines' one owner (a rewrite in place, 0 lines), and §5
+  // gains the close line (close-out complete ⇒ the QA seat closes the record
+  // `completed`; residuals stay on their cards, retests owed through
+  // `retest-owed.mjs`). Measured delta +3 (two text lines and their paragraph
+  // break), ceiling moved by +3; landed count, headroom 0.
+  ['.claude/skills/checklist-test/SKILL.md', 279],
   ['.claude/skills/checklist-author/SKILL.md', 62],
   // 157 → 140 (#25753): lines that named objectui as a sibling repo retired; landed count.
   ['.claude/skills/dogfood-verification/SKILL.md', 140],
@@ -2481,6 +2499,7 @@ export const MAX_TABLE_ROW_BYTES = new Map([
   ['.claude/skills/pm-dispatch/references/lanes/director.md', 0],
   ['.claude/skills/pm-dispatch/references/lanes/triage.md', 0],
   ['.claude/skills/pm-dispatch/references/lanes/review.md', 0],
+  ['.claude/skills/pm-dispatch/references/lanes/qa.md', 0],
   ['.claude/agents/os-dev.md', 0],
   ['.claude/skills/checklist-test/SKILL.md', 221],
   ['.claude/skills/checklist-author/SKILL.md', 0],

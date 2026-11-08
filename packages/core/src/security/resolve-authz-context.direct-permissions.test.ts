@@ -56,7 +56,12 @@ const GRANTS = [
   { permission_set: 'elsewhere', organization_id: ORG_B },
 ];
 
-async function resolve(tenantId: string | undefined, ledger: unknown[] = []) {
+async function resolve(tenantId: string | undefined, ledger: unknown[] = [], extra: { withPermissionOrigins?: boolean } = {}) {
+  const { out } = await resolveRecorded(tenantId, ledger, extra);
+  return out;
+}
+
+async function resolveRecorded(tenantId: string | undefined, ledger: unknown[] = [], extra: { withPermissionOrigins?: boolean } = {}) {
   const ql = bindStaticSecurityCatalog(makeRecordingQl({
     sys_user: [{ id: 'u1', email: 'u1@example.com' }],
     sys_member: [{ user_id: 'u1', organization_id: ORG_A, role: 'member' }, { user_id: 'u1', organization_id: ORG_B, role: 'member' }],
@@ -67,7 +72,8 @@ async function resolve(tenantId: string | undefined, ledger: unknown[] = []) {
     sys_permission_set: [],
     sys_metadata_activation: ledger,
   }), definitions);
-  return resolveUserAuthzGrants(ql, 'u1', tenantId ? { tenantId } : {});
+  const out = await resolveUserAuthzGrants(ql, 'u1', { ...(tenantId ? { tenantId } : {}), ...extra });
+  return { out, calls: (ql as any).calls as Array<{ object: string }> };
 }
 
 describe('[#25799] directPermissions is the resolver\'s own direct channel', () => {
@@ -95,5 +101,30 @@ describe('[#25799] directPermissions is the resolver\'s own direct channel', () 
     const out = await resolve(ORG_A, [{ metadata_type: 'permission', name: 'tools', package_id: null, active: false }]);
     expect(out.permissions).not.toContain('tools');
     expect(out.directPermissions).toEqual(['both_channels']);
+  });
+});
+
+describe('[ADR-0090 D6] withPermissionOrigins records each name\'s channels, and changes nothing else', () => {
+  it('a set reached through a grant row and the `everyone` anchor carries both, in channel order; each other name its one', async () => {
+    const out = await resolve(ORG_A, [], { withPermissionOrigins: true });
+    expect(out.permissionOrigins).toEqual({
+      tools: [{ kind: 'direct' }],
+      both_channels: [{ kind: 'direct' }, { kind: 'default' }],
+      definition_only: [{ kind: 'default' }],
+    });
+  });
+
+  it('a switched-off set keeps no origin, since the envelope does not hold it', async () => {
+    const out = await resolve(ORG_A, [{ metadata_type: 'permission', name: 'tools', package_id: null, active: false }], { withPermissionOrigins: true });
+    expect(out.permissionOrigins).not.toHaveProperty('tools');
+  });
+
+  it('the envelope and the reads are byte-identical to a resolution that did not ask', async () => {
+    const plain = await resolveRecorded(ORG_A);
+    const asked = await resolveRecorded(ORG_A, [], { withPermissionOrigins: true });
+    expect(plain.out).not.toHaveProperty('permissionOrigins');
+    const { permissionOrigins: _origins, ...rest } = asked.out;
+    expect(rest).toEqual(plain.out);
+    expect(asked.calls.map((c) => c.object)).toEqual(plain.calls.map((c) => c.object));
   });
 });

@@ -64,6 +64,7 @@ import {
   HostCryptoProviderRefusal,
   refuseTwoCryptoProviderPlugins,
   refuseUnloadedCryptoProviderPlugins,
+  refuseSetAsideCryptoProviderPlugins,
 } from './serve.js';
 
 // [#10126] Pay the first load of what `serve.ts` reaches through dynamic
@@ -497,6 +498,51 @@ describe('a plugins entry that did not load refuses the boot unless it is ruled 
   });
 });
 
+describe('a plugins entry the standalone boot sets aside refuses the boot unless it is ruled out as the crypto provider', () => {
+  const refusalOf = async (authored: unknown, importSpecifier: (specifier: string) => Promise<unknown>): Promise<Error | undefined> => {
+    try { await refuseSetAsideCryptoProviderPlugins(authored, importSpecifier); }
+    catch (err) { return err as Error; }
+    return undefined;
+  };
+  const notInstalled = async (specifier: string): Promise<unknown> => {
+    throw new Error(`Failed to import plugin '${specifier}': not found`);
+  };
+
+  it('a specifier that does not import declares nothing, and is refused, named by its specifier', async () => {
+    const refusal = await refusalOf(['@acme/kms-crypto'], notInstalled);
+    expect(refusal).toBeInstanceOf(HostCryptoProviderRefusal);
+    expect(refusal!.message).toContain("plugins[0] ('@acme/kms-crypto') did not load");
+    expect(refusal!.message).toContain(`'${CRYPTO_PROVIDER_SERVICE}'`);
+  });
+
+  it('a specifier that imports a plugin declaring the provider is refused, named by its specifier', async () => {
+    const plugin = providerPlugin('com.example.aws-kms-crypto', kmsProvider().provider);
+    const refusal = await refusalOf(['@acme/aws-kms-crypto'], async () => ({ default: plugin }));
+    expect(refusal).toBeInstanceOf(HostCryptoProviderRefusal);
+    expect(refusal!.message).toContain("plugins[0] ('@acme/aws-kms-crypto') provides the crypto provider");
+    expectNoKeyMaterial(refusal!.message);
+  });
+
+  it('an object entry declaring the provider is read as it is, never booted, and refused by its name', async () => {
+    let initialized = false;
+    const entry = { name: 'com.example.vault-crypto', providesServices: [CRYPTO_PROVIDER_SERVICE], init: async () => { initialized = true; } };
+    const refusal = await refusalOf([entry], notInstalled);
+    expect(refusal!.message).toContain("plugins[0] ('com.example.vault-crypto') provides the crypto provider");
+    expect(initialized).toBe(false);
+  });
+
+  it('CONTROL: entries that declare other services, or none, and a missing list, are ruled out', async () => {
+    expect(await refusalOf([
+      { name: 'com.example.widgets', providesServices: ['widgets'] },
+      { name: 'com.example.bundle', objects: [] },
+      '@acme/widgets',
+      null,
+    ], async () => ({ default: { name: 'com.example.plain', providesServices: ['plain'] } }))).toBeUndefined();
+    expect(await refusalOf(undefined, notInstalled)).toBeUndefined();
+    expect(await refusalOf([], notInstalled)).toBeUndefined();
+  });
+});
+
 describe('the deferred path: nothing is sealed by a provider the boot did not choose', () => {
   it('a credential bound before the post-start wiring is sealed by the registered provider', async () => {
     const kms = kmsProvider();
@@ -623,6 +669,15 @@ describe('the wiring inside run()', () => {
     expect(record).toBeGreaterThan(0);
     expect(check).toBeGreaterThan(record);
     expect(host).toBeGreaterThan(check);
+  });
+
+  it('refuses a set-aside entry that may provide the crypto provider before the standalone stack replaces the authored plugins', () => {
+    const branch = SERVE.indexOf('if (useArtifactFallback || shouldBootWithLibrary(config)) {');
+    const check = SERVE.indexOf('await refuseSetAsideCryptoProviderPlugins(');
+    const replaced = SERVE.indexOf('config = mergeBootConfig(originalConfig as any, bootResult as any) as any;');
+    expect(branch).toBeGreaterThan(0);
+    expect(check).toBeGreaterThan(branch);
+    expect(replaced).toBeGreaterThan(check);
   });
 
   it('checks the declared providers before the boot', () => {
