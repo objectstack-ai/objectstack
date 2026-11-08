@@ -59,6 +59,8 @@ const DEPLOYMENT_LEVEL = [
   // [#31186] A package uninstall is environment-wide: its row names no record and no organization
   // (`package-lifecycle-audit.ts`), so it is served to the platform administrator alone.
   { action: 'package_uninstall', object_name: null, record_id: null },
+  // [#30964] An unmanaged copy is a new environment base: likewise no record, no organization.
+  { action: 'package_unmanaged_import', object_name: null, record_id: null },
 ];
 
 const noteObject = {

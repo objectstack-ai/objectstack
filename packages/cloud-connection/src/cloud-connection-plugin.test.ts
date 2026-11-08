@@ -210,8 +210,8 @@ describe('multi-tenant mode (env-registry + per-env kernel auth)', () => {
 
     it('install forwards `install_mode` as the control plane spells it, from either spelling of the body', async () => {
         for (const body of [{ package_id: 'pkg_1', install_mode: 'unmanaged' }, { package_id: 'pkg_1', installMode: 'unmanaged' }]) {
-            const { res, sent } = await installWith(body);
-            expect(res.payload.success, JSON.stringify(body)).toBe(true);
+            // What is SENT is pinned here; what the answer does with an unmanaged grant is pinned below.
+            const { sent } = await installWith(body);
             expect(sent).toEqual({
                 recordId: 'pkg_1',
                 params: { environment_id: ENV, seed_sample_data: false, install_mode: 'unmanaged', installer_user_id: 'user-1' },
@@ -380,5 +380,131 @@ describe('CloudConnectionPlugin — the routes and the binding read the control-
         const { binding, called } = await readBoth(option);
         expect(binding).toBe(expected);
         expect(called).toEqual([`${expected}/api/v1/cloud/environments/${ENV}/packages`]);
+    });
+});
+
+// ── [#30964, cloud#3624 ruling A] an UNMANAGED grant: the copy is made in the environment, by its install-local door ──
+//
+// Cross-repo, NOT MEASURED: the grant's shape. The control-plane double below
+// answers what the cloud half is assumed to (cloud PR #3683 is not readable
+// from this repository): on an unmanaged grant it skips its own install and
+// echoes `install_mode: 'unmanaged'` with the granted `version_id`.
+
+describe('[#30964] an unmanaged grant hands the copy to the environment\'s install-local door', () => {
+    const ENV = 'env-123';
+    const COOKIE = 'os.session=abc';
+
+    function cWithCookie(body: any) {
+        const url = 'https://t1.example.com/api/v1/cloud-connection/install';
+        const json = vi.fn((payload: any, status?: number) => ({ payload, status: status ?? 200 }));
+        return { req: { url, raw: new Request(url, { method: 'POST', headers: { cookie: COOKIE } }), json: async () => body }, json };
+    }
+
+    async function grant(opts: {
+        body?: Record<string, unknown>;
+        answer?: { status?: number; json: unknown };
+        door?: { install: (r: Request) => Promise<Response> } | null;
+        singleEnvironment?: boolean;
+    } = {}) {
+        const rawApp = makeRawApp();
+        const seen: { request?: Request; body?: any } = {};
+        const door = opts.door === null ? undefined : opts.door ?? {
+            install: vi.fn(async (request: Request) => {
+                seen.request = request;
+                seen.body = await request.json();
+                return new Response(JSON.stringify({ success: true, data: { installMode: 'unmanaged', targetPackageId: 'com.acme.crm-copy' } }), { status: 200 });
+            }),
+        };
+        const envKernel = {
+            getServiceAsync: async (name: string) => {
+                if (name === 'auth') return sessionAuth('user-1');
+                if (name === 'marketplace-install-local' && door) return door;
+                throw new Error(`no ${name}`);
+            },
+        };
+        const services: Record<string, any> = opts.singleEnvironment
+            ? { auth: sessionAuth('user-1'), ...(door ? { 'marketplace-install-local': door } : {}) }
+            : { 'env-registry': { resolveByHostname: async () => ({ environmentId: ENV }) }, 'kernel-manager': { getOrCreate: async () => envKernel } };
+        const { ctx, fireKernelReady } = makeCtx({ rawApp, services });
+        const answer = opts.answer ?? { json: { success: true, data: { install_mode: 'unmanaged', version_id: 'ver_9', version: '2.0.0' } } };
+        const fetchSpy = vi.fn(async () => new Response(JSON.stringify(answer.json), { status: answer.status ?? 200 }));
+        vi.stubGlobal('fetch', fetchSpy);
+        await new CloudConnectionPlugin({
+            controlPlaneUrl: 'http://cloud.test', controlPlaneApiKey: 'svc-key',
+            ...(opts.singleEnvironment ? { singleEnvironment: true, environmentId: ENV } : {}),
+        }).start(ctx as any);
+        await fireKernelReady();
+        const res = await rawApp.routes.get('POST /api/v1/cloud-connection/install')!(
+            cWithCookie(opts.body ?? { package_id: 'pkg_1', install_mode: 'unmanaged' }),
+        );
+        return { res, door, seen, fetchSpy, logger: ctx.logger };
+    }
+
+    it('copies the granted version through the door, as the caller (their own headers), and answers the door\'s answer', async () => {
+        const { res, seen, fetchSpy } = await grant();
+        expect(fetchSpy).toHaveBeenCalledTimes(1);
+        expect(res.status, JSON.stringify(res.payload)).toBe(200);
+        expect(res.payload).toEqual({ success: true, data: { installMode: 'unmanaged', targetPackageId: 'com.acme.crm-copy' } });
+        expect(seen.request!.method).toBe('POST');
+        expect(new URL(seen.request!.url).pathname).toBe('/api/v1/marketplace/install-local');
+        expect(seen.request!.headers.get('cookie')).toBe(COOKIE);
+        expect(seen.request!.headers.get('authorization')).toBeNull();
+        // No sample data unless asked (framework parity), and never a manifest from the grant.
+        expect(seen.body).toEqual({ packageId: 'pkg_1', versionId: 'ver_9', installMode: 'unmanaged' });
+    });
+
+    it('asked for the sample data, the door is asked for it too (the #30808 copy, owned by the installer)', async () => {
+        const { seen } = await grant({ body: { package_id: 'pkg_1', install_mode: 'unmanaged', seed_sample_data: true } });
+        expect(seen.body).toEqual({ packageId: 'pkg_1', versionId: 'ver_9', installMode: 'unmanaged', seedSampleData: true });
+    });
+
+    it('a door refusal is the answer, status and all', async () => {
+        const door = { install: vi.fn(async () => new Response(JSON.stringify({ success: false, error: { code: 'FORBIDDEN', message: 'nope' } }), { status: 403 })) };
+        const { res } = await grant({ door });
+        expect(res.status).toBe(403);
+        expect(res.payload.error.code).toBe('FORBIDDEN');
+    });
+
+    it('single-environment: the door is the host kernel\'s', async () => {
+        const { res, seen } = await grant({ singleEnvironment: true });
+        expect(res.status, JSON.stringify(res.payload)).toBe(200);
+        expect(seen.body).toMatchObject({ packageId: 'pkg_1', versionId: 'ver_9', installMode: 'unmanaged' });
+    });
+
+    it('fails closed on a grant it cannot read: no echoed mode, or no version id — 502, nothing copied', async () => {
+        for (const data of [
+            { version_id: 'ver_9' },
+            { install_mode: 'managed', version_id: 'ver_9' },
+            { install_mode: 'unmanaged' },
+            { install_mode: 'unmanaged', version_id: '  ' },
+            // A manifest in the answer is never a substitute for the granted version.
+            { install_mode: 'unmanaged', manifest: { id: 'com.acme.crm', version: '2.0.0' } },
+        ]) {
+            const { res, door } = await grant({ answer: { json: { success: true, data } } });
+            expect(res.status, JSON.stringify(data)).toBe(502);
+            expect(res.payload.error.code).toBe('PLUGIN_INSTALL_FAILED');
+            expect(res.payload.error.message).toContain('Nothing was copied');
+            expect((door as any).install).not.toHaveBeenCalled();
+        }
+    });
+
+    it('a control-plane refusal is relayed as it was, and nothing is copied', async () => {
+        const { res, door } = await grant({ answer: { status: 403, json: { success: false, error: { code: 'FORBIDDEN', message: 'not entitled' } } } });
+        expect(res.status).toBe(403);
+        expect(res.payload).toEqual({ success: false, error: { code: 'FORBIDDEN', message: 'not entitled' } });
+        expect((door as any).install).not.toHaveBeenCalled();
+    });
+
+    it('a managed install is never handed to the door', async () => {
+        const { res, door } = await grant({ body: { package_id: 'pkg_1' }, answer: { json: { success: true, data: { installed: true } } } });
+        expect(res.payload).toEqual({ success: true, data: { installed: true } });
+        expect((door as any).install).not.toHaveBeenCalled();
+    });
+
+    it('an environment with no install-local door answers 503 and copies nothing', async () => {
+        const { res } = await grant({ door: null });
+        expect(res.status).toBe(503);
+        expect(res.payload.error.code).toBe('SERVICE_UNAVAILABLE');
+        expect(res.payload.error.message).toContain('Nothing was copied');
     });
 });

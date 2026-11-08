@@ -781,6 +781,8 @@ describe('install-local — an unmanaged copy\'s sample data, asked for with `se
             return { sourcePackageId: source.id, targetPackageId, namespace: source.namespace, copiedCount: copied.length, copied, strippedLocks: [] };
         });
         const cleanups = new Map<string, (args: { packageId: string }) => Promise<{ success: boolean; removed: number; error?: string }>>();
+        // [#30964] The `audit` slot's package lifecycle writer, as the door reaches it.
+        const auditEvents: any[] = [];
         const getMetaItem = vi.fn(async ({ type, name, packageId }: { type: string; name: string; packageId?: string }) => {
             const row: any = (tables.sys_metadata ?? []).find((r) => r.type === type && r.name === name && (!packageId || r.package_id === packageId));
             if (!row) throw Object.assign(new Error(`${type} '${name}' not found`), { code: 'NOT_FOUND', status: 404 });
@@ -806,6 +808,7 @@ describe('install-local — an unmanaged copy\'s sample data, asked for with `se
                     registerUninstallCleanup: (name: string, cleanup: any) => { cleanups.set(name, cleanup); },
                 },
                 ...(opts.packageStore === false ? {} : { package: { get: packageGet } }),
+                audit: { recordPackageLifecycleEvent: async (event: unknown) => { auditEvents.push(event); } },
             };
             const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
             const ctx = {
@@ -820,6 +823,7 @@ describe('install-local — an unmanaged copy\'s sample data, asked for with `se
                 logger,
             };
             const plugin = new MarketplaceInstallLocalPlugin({ controlPlaneUrl: 'off', storageDir: dir });
+            await plugin.init(ctx as any);
             await plugin.start(ctx as any);
             await hooks.get('kernel:ready')?.();
             register.mockClear();
@@ -829,9 +833,11 @@ describe('install-local — an unmanaged copy\'s sample data, asked for with `se
                 purge: (manifestId: string) => routes.get(`POST ${ROUTE}/:manifestId/purge-sample-data`)!(purgeC(manifestId)),
                 register,
                 logger,
+                /** [#30964] The in-process door init() registered. */
+                door: services['marketplace-install-local'] as { install(r: Request): Promise<Response> } | undefined,
             };
         }
-        return { tables, writes, seedRows, packages, packageRows, packageGet, storeFault, importUnmanagedPackage, getMetaItem, cleanups, boot };
+        return { tables, writes, seedRows, packages, packageRows, packageGet, storeFault, auditEvents, importUnmanagedPackage, getMetaItem, cleanups, boot };
     }
 
     it('off by default: the import is not asked for the sample data, no row lands, and the answer says it was skipped', async () => {
@@ -1139,4 +1145,76 @@ describe('install-local — an unmanaged copy\'s sample data, asked for with `se
         expect(await cleanup!({ packageId: 'com.example.crm-copy' })).toEqual({ success: true, removed: 0 });
         expect((await h.purge('com.example.crm-copy')).status).toBe(404);
     });
+
+    // ── [#30964, cloud#3624 ruling A「两边审计」] the environment's audit row of each copy, and the in-process door ──
+
+    it('a copy that lands hands the audit slot one package_unmanaged_import event: the new base, its namespace, the count, success', async () => {
+        const w = world();
+        const h = await w.boot();
+        const res = await h.install({ manifest: seededCrm(), installMode: 'unmanaged' });
+        expect(res.status, JSON.stringify(res.payload)).toBe(200);
+        expect(w.auditEvents).toEqual([{
+            action: 'package_unmanaged_import',
+            packageId: 'com.example.crm',
+            version: res.payload.data.version,
+            actor: INSTALLER,
+            targetPackageId: 'com.example.crm-copy',
+            namespace: res.payload.data.namespace,
+            copiedCount: res.payload.data.copiedCount,
+            outcome: 'success',
+        }]);
+    });
+
+    it('a copy the import refuses hands it one failure event, with the answer\'s code and status and no message', async () => {
+        const w = world();
+        const h = await w.boot();
+        await h.install({ manifest: seededCrm(), installMode: 'unmanaged' });
+        w.auditEvents.length = 0;
+        const res = await h.install({ manifest: seededCrm(), installMode: 'unmanaged' });
+        expect(res.status).toBe(409);
+        expect(w.auditEvents).toEqual([{
+            action: 'package_unmanaged_import',
+            packageId: 'com.example.crm',
+            version: expect.any(String),
+            actor: INSTALLER,
+            targetPackageId: 'com.example.crm-copy',
+            outcome: 'failure',
+            errorCode: 'RESOURCE_CONFLICT',
+            status: 409,
+        }]);
+    });
+
+    it('an audit slot that throws changes no answer', async () => {
+        const w = world();
+        const h = await w.boot();
+        const before = h.logger.error.mock.calls.length;
+        w.auditEvents.push = () => { throw new Error('ledger offline'); };
+        const res = await h.install({ manifest: seededCrm(), installMode: 'unmanaged' });
+        expect(res.status, JSON.stringify(res.payload)).toBe(200);
+        expect(h.logger.error.mock.calls.length).toBe(before + 1);
+        expect(String(h.logger.error.mock.calls[h.logger.error.mock.calls.length - 1]?.[0])).toContain('package_unmanaged_import');
+    });
+
+    it('the in-process door (`marketplace-install-local`) is the same install door: same gates, same copy, same answer', async () => {
+        const w = world();
+        const h = await w.boot();
+        expect(typeof h.door?.install).toBe('function');
+        const request = new Request(`http://localhost${ROUTE}`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ manifest: seededCrm(), installMode: 'unmanaged', seedSampleData: true }),
+        });
+        const answer = await h.door!.install(request);
+        const payload: any = await answer.json();
+        expect(answer.status, JSON.stringify(payload)).toBe(200);
+        expect(payload.data).toMatchObject({ installMode: 'unmanaged', targetPackageId: 'com.example.crm-copy' });
+        expect(payload.data.seeded).toMatchObject({ mode: 'inline', inserted: 3 });
+        expect(w.auditEvents).toHaveLength(1);
+        // A malformed JSON body is refused as the route refuses it, never read as no body.
+        const bad = await h.door!.install(new Request(`http://localhost${ROUTE}`, {
+            method: 'POST', headers: { 'content-type': 'application/json' }, body: '{ nope',
+        }));
+        expect(bad.status).toBe(400);
+    });
 });
+

@@ -155,6 +155,7 @@ import { CLOUD_CONNECTION_CAPABILITY, CLOUD_CONNECTION_UI_BUNDLE } from './cloud
 import { readJsonRequestBody } from './request-json-body.js';
 // [#30964] The install mode's one declaration, read by reference: never a copy of its two spellings.
 import { InstallModeSchema, type InstallMode } from '@objectstack/spec/kernel';
+import { INSTALL_LOCAL_DOOR_SERVICE, type InstallLocalDoor } from './install-local-door-service.js';
 
 const CLOUD_CONNECTION_PREFIX = '/api/v1/cloud-connection';
 
@@ -1035,13 +1036,97 @@ export class CloudConnectionPlugin implements Plugin {
                             },
                         }),
                     });
-                    const json = await resp.json().catch(() => ({ success: false, error: 'install failed (no body)' }));
-                    return c.json(json, resp.status as any);
+                    const json: any = await resp.json().catch(() => ({ success: false, error: 'install failed (no body)' }));
+                    // [#30964] A control-plane refusal, and every managed answer, is relayed as it was.
+                    if (installMode !== 'unmanaged' || !resp.ok || json?.success === false) return c.json(json, resp.status as any);
+                    return await copyOnUnmanagedGrant(c, { environmentId, packageId, seedSampleData, grant: json });
                 } catch (err: any) {
                     ctx.logger?.error?.('[CloudConnectionPlugin] install failed', err instanceof Error ? err : new Error(String(err)));
                     return c.json({ success: false, error: { code: 'PLUGIN_INSTALL_FAILED', message: String(err?.message ?? err) } }, 502);
                 }
             });
+
+            /**
+             * [#30964, cloud#3624 ruling A] The copy an UNMANAGED grant asks for,
+             * made in the environment by its own install-local door
+             * ({@link INSTALL_LOCAL_DOOR_SERVICE}): `installMode: 'unmanaged'`,
+             * the granted version, the caller's own headers (so the door admits
+             * and gates the same person, and the copy and any sample rows are
+             * the installer's), and `seedSampleData` only when the caller asked
+             * for it. The answer is that door's own answer.
+             *
+             * Cross-repo, NOT MEASURED: the grant's shape. The control plane is
+             * assumed to skip its own install on an unmanaged grant and answer
+             * `data.install_mode: 'unmanaged'` with the granted `data.version_id`;
+             * the door then fetches that version's manifest itself, as its
+             * cloud branch always has. Fail closed: an answer that does not echo
+             * the mode, or names no version, copies nothing (502). A
+             * `data.manifest` in the answer is never read.
+             */
+            const copyOnUnmanagedGrant = async (
+                c: any,
+                args: { environmentId: string; packageId: string; seedSampleData: boolean; grant: any },
+            ): Promise<Response> => {
+                const { environmentId, packageId, seedSampleData, grant } = args;
+                const data = grant?.data;
+                const versionId = typeof data?.version_id === 'string' ? data.version_id.trim() : '';
+                const unread = data?.install_mode !== 'unmanaged'
+                    ? 'its answer does not echo `install_mode: \'unmanaged\'`'
+                    : versionId === '' ? 'its answer names no `version_id`' : undefined;
+                if (unread !== undefined) {
+                    ctx.logger?.warn?.(
+                        `[CloudConnectionPlugin] the unmanaged install of ${packageId} in ${environmentId} was not copied: `
+                        + `the control plane's grant could not be read (${unread})`,
+                    );
+                    return c.json({
+                        success: false,
+                        error: {
+                            code: 'PLUGIN_INSTALL_FAILED',
+                            message: `The control plane answered the unmanaged install of '${packageId}', but ${unread}, so this `
+                                + 'environment cannot tell which version it granted. Nothing was copied.',
+                        },
+                    }, 502);
+                }
+                let door: InstallLocalDoor | undefined;
+                try {
+                    if (this.cfg.singleEnvironment) {
+                        door = ctx.getService<InstallLocalDoor>(INSTALL_LOCAL_DOOR_SERVICE);
+                    } else {
+                        const kernel: EnvironmentKernel | undefined = await ctx.getService<any>('kernel-manager')?.getOrCreate?.(environmentId);
+                        try { door = await kernel?.getServiceAsync?.<InstallLocalDoor>(INSTALL_LOCAL_DOOR_SERVICE); } catch { /* not registered */ }
+                        if (!door) { try { door = kernel?.getService?.<InstallLocalDoor>(INSTALL_LOCAL_DOOR_SERVICE); } catch { /* not registered */ } }
+                    }
+                } catch { /* no door */ }
+                if (!door || typeof door.install !== 'function') {
+                    return c.json({
+                        success: false,
+                        error: {
+                            code: 'SERVICE_UNAVAILABLE',
+                            message: `The control plane granted an unmanaged install of '${packageId}', but this environment has no `
+                                + 'install-local door to make the copy with (MarketplaceInstallLocalPlugin is not mounted). Nothing was copied.',
+                        },
+                    }, 503);
+                }
+                const headers = new Headers(c.req.raw?.headers);
+                headers.set('content-type', 'application/json');
+                headers.delete('content-length');
+                const request = new Request(new URL('/api/v1/marketplace/install-local', c.req.url).toString(), {
+                    method: 'POST',
+                    headers,
+                    body: JSON.stringify({
+                        packageId,
+                        versionId,
+                        installMode: 'unmanaged',
+                        ...(seedSampleData ? { seedSampleData: true } : {}),
+                    }),
+                });
+                const answer = await door.install(request);
+                const body = await answer.json().catch(() => ({
+                    success: false,
+                    error: { code: 'PLUGIN_INSTALL_FAILED', message: `The unmanaged copy of '${packageId}' answered no body.` },
+                }));
+                return c.json(body, answer.status as any);
+            };
 
             // GET /installation?package_id=… — same-origin installed-state
             // probe. Always returns 200 with `{ installed: boolean, … }`;
