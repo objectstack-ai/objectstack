@@ -63,6 +63,13 @@ interface StoredRowPlace {
  * served exit judges such a body's `_diagnostics` without that `name`
  * ({@link withoutServedRowName}), since the document's schema does not
  * declare it: the verdict is the one the by-name read gives the same row.
+ *
+ * ⚠️ The one exception to {@link listSlotNameOf}'s "the body is not given a
+ * `name`, so what a GET answers PUTs back through the strict schema": a body
+ * the list served its row's name (a `seed`; or any stored body that states no
+ * name, such as a legacy row saved before its schema declared one) carries a
+ * `name` the strict schema refuses, so a listed item PUT back verbatim is
+ * refused. The by-name read serves the body as stored, without it.
  */
 export const SERVED_ROW_NAME: unique symbol = Symbol('metadata-protocol.servedRowName');
 
@@ -396,7 +403,10 @@ export function mergePackageAwareOverlay(
             ? stored.name
             : undefined;
         const body = (rowName !== undefined ? { ...(data as object), name: rowName, [SERVED_ROW_NAME]: true } : data) as any;
-        const bodyName = ownName ?? rowName;
+        // A body whose own `name` is null still states one: it is listed under
+        // it (with `_diagnostics` flagging it), as before; only an absent name
+        // falls to the row's.
+        const bodyName = ownName !== undefined ? ownName : rowName;
         if (bodyName === undefined) continue;
         // The base row this record shadows at its own slot (for view-identity
         // healing): a same-package row, else a package-less one, else any

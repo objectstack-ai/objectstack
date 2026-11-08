@@ -21,7 +21,8 @@
  *     Each listed seed's `_diagnostics` is the by-name read's: the served
  *     `name` is judged off, as the row stores the body.
  *  4. Control: a stored body that states a name keeps it, whatever the row
- *     says (a seed body spelling the retired `name` keeps its diagnostic),
+ *     says (a seed body spelling the retired `name` keeps its diagnostic; a
+ *     body whose `name` is null is still listed, flagged, not dropped),
  *     and the stored body itself is not written by the list.
  */
 // Pays the lint root's first load at collection, never inside a clocked case.
@@ -195,6 +196,17 @@ describe('[#31399] §4 CONTROL — a body that states a name keeps it; the store
         };
         const res: any = await harness([row]).getMetaItems({ type: 'dashboard' });
         expect((res.items as any[]).map((i) => i.name)).toEqual(['body_spelling']);
+    });
+
+    it('a stored body whose `name` is null is still listed, once, with its diagnostic', async () => {
+        const row: StoredRow = {
+            id: 'r_dash_null', type: 'dashboard', name: 'row_spelling', package_id: PKG, state: 'active',
+            metadata: JSON.stringify({ name: null, label: 'Nameless' }),
+        };
+        const res: any = await harness([row]).getMetaItems({ type: 'dashboard' });
+        expect(res.items).toHaveLength(1);
+        expect(res.items[0].name).toBeNull();
+        expect(res.items[0]._diagnostics.valid).toBe(false);
     });
 
     it('a stored seed body that spells a `name` itself is listed under it and keeps its diagnostic, as the by-name read', async () => {
