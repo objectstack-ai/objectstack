@@ -55,9 +55,11 @@ import {
   type MetadataContextValue,
 } from '@object-ui/react';
 import './UserEffectiveAccess';
+import type { SecurityEffectiveAccessSchema } from '@object-ui/types';
 import { describeOrigin, type EffectiveAccessAnswer } from './effectiveAccess';
 
-const NODE = { type: 'security:effective-access', properties: {} };
+/** The node a page authors, typed on its `@object-ui/types` twin. */
+const NODE: SecurityEffectiveAccessSchema = { type: 'security:effective-access', properties: {} };
 
 /** The permission-set catalog the labels come from (`/meta/permission`). */
 const CATALOG = [
