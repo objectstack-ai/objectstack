@@ -58,6 +58,7 @@ export interface BulkOperationsHost {
   getBuilder: SqlDriver['getBuilder'];
   injectTenantOnInsert: SqlDriver['injectTenantOnInsert'];
   readonly insertReturnsStoredRows: SqlDriver['insertReturnsStoredRows'];
+  readonly isMssql: SqlDriver['isMssql'];
   keepSuppliedUpdatedAt: SqlDriver['keepSuppliedUpdatedAt'];
   readonly knex: SqlDriver['knex'];
   readBackInsertedRows: SqlDriver['readBackInsertedRows'];
@@ -76,7 +77,7 @@ export interface BulkOperationsHost {
 /** The bodies of the "Bulk & Batch Operations" section of `SqlDriver`: a stateless facet, called by the class's stubs. */
 export class BulkOperationsFacet {
   /** The body of `SqlDriver#bulkCreate`; the method's docblock there is its contract. */
-  static async bulkCreate(this: Pick<BulkOperationsHost, 'applyWriteColumnMap' | 'auditMissingTenant' | 'autoNumberCounterKey' | 'collidingAutoNumberReservations' | 'fillAutoNumberFields' | 'formatInput' | 'formatOutput' | 'getBuilder' | 'injectTenantOnInsert' | 'insertReturnsStoredRows' | 'readBackInsertedRows' | 'resyncSequenceToDataMax' | 'rotationWriteTarget' | 'stampInsertTimestamps'>, object: string, data: any[], options?: DriverOptions): Promise<Record<string, unknown>[]> {
+  static async bulkCreate(this: Pick<BulkOperationsHost, 'applyWriteColumnMap' | 'auditMissingTenant' | 'autoNumberCounterKey' | 'collidingAutoNumberReservations' | 'fillAutoNumberFields' | 'formatInput' | 'formatOutput' | 'getBuilder' | 'injectTenantOnInsert' | 'insertReturnsStoredRows' | 'isMssql' | 'readBackInsertedRows' | 'resyncSequenceToDataMax' | 'rotationWriteTarget' | 'stampInsertTimestamps'>, object: string, data: any[], options?: DriverOptions): Promise<Record<string, unknown>[]> {
     // Same client-side id assignment as create() (id/_id normalization,
     // nanoid fallback when neither is supplied) — a row missing an id must
     // not be silently inserted with a NULL primary key just because the
@@ -176,7 +177,10 @@ export class BulkOperationsFacet {
 
       try {
         if (this.insertReturnsStoredRows) {
-          const result = await builder.insert(formattedRows).returning('*');
+          // [#31327] Through a temp table on SQL Server — see `create`.
+          const result = await (this.isMssql
+            ? builder.insert(formattedRows).returning('*', { includeTriggerModifications: true })
+            : builder.insert(formattedRows).returning('*'));
           // Read-back parity with create(): JSON columns come back as their stored
           // strings from `returning('*')` — decode them so batch callers see the
           // same shapes single-insert callers do.

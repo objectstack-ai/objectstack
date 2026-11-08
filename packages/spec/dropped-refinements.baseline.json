@@ -1002,6 +1002,14 @@
         "username"
       ]
     },
+    "data/MssqlConfig": {
+      "sites": [
+        "database",
+        "host",
+        "instanceName",
+        "username"
+      ]
+    },
     "data/MysqlConfig": {
       "sites": [
         "",

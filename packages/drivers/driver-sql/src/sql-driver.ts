@@ -1038,7 +1038,9 @@ export class SqlDriver implements IDataDriver {
    * True for SQL Server (#31327, federation only). It has no `RETURNING`
    * either, but knex compiles `returning('*')` on the `mssql` client to
    * `INSERT … OUTPUT inserted.* VALUES …`, which answers the stored row —
-   * IDENTITY values and column defaults included — in the same round trip.
+   * column defaults included — in the same round trip. The doors pass knex's
+   * `includeTriggerModifications`, which routes the OUTPUT through a temp
+   * table: without `INTO`, SQL Server refuses it on a table with a trigger.
    *
    * False for the MySQL family, which has no `RETURNING`. knex's MySQL compiler
    * drops the clause with a `.returning() is not supported by mysql` warning and
@@ -8993,6 +8995,7 @@ export class SqlDriver implements IDataDriver {
       get getBuilder() { return driver.getBuilder.bind(driver); },
       injectTenantOnInsert: (...a) => driver.injectTenantOnInsert(...a),
       get insertReturnsStoredRows() { return driver.insertReturnsStoredRows; },
+      get isMssql() { return driver.isMssql; },
       keepSuppliedUpdatedAt: (...a) => driver.keepSuppliedUpdatedAt(...a),
       get knex() { return driver.knex; },
       readBackInsertedRows: (...a) => driver.readBackInsertedRows(...a),

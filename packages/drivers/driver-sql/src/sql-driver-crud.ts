@@ -267,7 +267,7 @@ export class CrudFacet {
   }
 
   /** The body of `SqlDriver#create`; the method's docblock there is its contract. */
-  static async create(this: Pick<CrudHost, 'applyWriteColumnMap' | 'auditMissingTenant' | 'collidingAutoNumberReservations' | 'decorateHashShadowDuplicate' | 'fillAutoNumberFields' | 'formatInput' | 'formatOutput' | 'getBuilder' | 'injectTenantOnInsert' | 'insertReturnsStoredRows' | 'readBackInsertedRows' | 'resyncSequenceToDataMax' | 'rotationWriteTarget' | 'stampInsertTimestamps'>, object: string, data: Record<string, any>, options?: DriverOptions): Promise<Record<string, unknown>> {
+  static async create(this: Pick<CrudHost, 'applyWriteColumnMap' | 'auditMissingTenant' | 'collidingAutoNumberReservations' | 'decorateHashShadowDuplicate' | 'fillAutoNumberFields' | 'formatInput' | 'formatOutput' | 'getBuilder' | 'injectTenantOnInsert' | 'insertReturnsStoredRows' | 'isMssql' | 'readBackInsertedRows' | 'resyncSequenceToDataMax' | 'rotationWriteTarget' | 'stampInsertTimestamps'>, object: string, data: Record<string, any>, options?: DriverOptions): Promise<Record<string, unknown>> {
     const { _id, ...rest } = data;
     const toInsert = { ...rest };
 
@@ -307,7 +307,13 @@ export class CrudFacet {
 
       try {
         if (this.insertReturnsStoredRows) {
-          const result = await builder.insert(formatted).returning('*');
+          // [#31327] On SQL Server `OUTPUT inserted.*` without `INTO` is refused
+          // on a table with an enabled trigger (error 334) — routine on an ERP
+          // table. knex's `includeTriggerModifications` routes the OUTPUT through
+          // a temp table, which SQL Server accepts on every table.
+          const result = await (this.isMssql
+            ? builder.insert(formatted).returning('*', { includeTriggerModifications: true })
+            : builder.insert(formatted).returning('*'));
           return this.formatOutput(object, result[0]);
         }
         await builder.insert(formatted);

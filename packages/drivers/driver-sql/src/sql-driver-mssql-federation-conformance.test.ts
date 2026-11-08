@@ -466,6 +466,38 @@ function declareFederationSweep(): void {
       });
     });
 
+    // ── The write path on SQL Server's own terms ─────────────────────────────
+    describe('writes: OUTPUT inserted.* on an ERP-shaped table', () => {
+      const T = 'fed_write_path';
+      beforeAll(async () => {
+        await federate(T, { title: { type: 'text' }, qty: { type: 'integer' }, touched: { type: 'text' } });
+        // An enabled trigger — routine on an ERP table — makes SQL Server
+        // refuse `OUTPUT inserted.*` without `INTO` (error 334).
+        await knex.raw(
+          `CREATE TRIGGER [${schema}].[tr_${T}] ON [${schema}].[${T}] AFTER INSERT AS ` +
+            `UPDATE t SET [touched] = N'by-trigger' FROM [${schema}].[${T}] t JOIN inserted i ON i.[id] = t.[id]`,
+        );
+        await knex.raw(`ALTER TABLE [${schema}].[${T}] ADD CONSTRAINT [df_${T}_qty] DEFAULT 7 FOR [qty]`);
+      });
+      it('create answers the stored row, a server-side default included, through a trigger', async () => {
+        const row = await driver.create(T, { id: 'w1', title: 'first' }, BYPASS);
+        expect(row).toMatchObject({ id: 'w1', title: 'first', qty: 7 });
+      });
+      it('bulkCreate answers every stored row', async () => {
+        const rows = await driver.bulkCreate(T, [{ id: 'w2', title: 'b' }, { id: 'w3', title: 'c', qty: 1 }], BYPASS);
+        expect(rows.map((r: any) => [r.id, r.qty])).toEqual([['w2', 7], ['w3', 1]]);
+      });
+      it('update and delete land, and the trigger ran', async () => {
+        await driver.update(T, 'w2', { title: 'bb' }, BYPASS);
+        await driver.delete(T, 'w3', BYPASS);
+        const rows = await driver.find(T, { orderBy: [{ field: 'id', order: 'asc' }] }, BYPASS);
+        expect(rows.map((r: any) => [r.id, r.title, r.touched])).toEqual([
+          ['w1', 'first', 'by-trigger'],
+          ['w2', 'bb', 'by-trigger'],
+        ]);
+      });
+    });
+
     // ── CROSS_FIELD (#5222): refused on a federated object, on every dialect ──
     //
     // Cross-field push-down validates both column names against the object's

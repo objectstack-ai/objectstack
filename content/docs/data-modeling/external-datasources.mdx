@@ -464,6 +464,79 @@ remote table/columns: the analytics layer routes such queries through the driver
 physical-table resolution (honoring `remoteName` / `remoteSchema`) rather than the
 object name, so they never hit the wrong table.
 
+## 7. SQL Server (federation only)
+
+Microsoft SQL Server is a **federation-only** driver: point an `external` (or
+`validate-only`) datasource at it and its tables become objects, read live — and,
+with the double opt-in above, written live. The usual reason is an older
+line-of-business system (an ERP, a MES, a HIS) whose database is federated in place
+rather than migrated. It is served by `@objectstack/driver-sql` over knex's `mssql`
+client, so install its optional peer `tedious` next to it.
+
+{/* os:check */}
+```typescript
+import { defineDatasource } from '@objectstack/spec/data';
+
+export const Erp = defineDatasource({
+  name: 'erp',
+  label: 'Legacy ERP (SQL Server)',
+  driver: 'mssql',                     // aliases: 'sqlserver', 'tedious'
+  schemaMode: 'external',              // required — see below
+  config: {
+    host: 'erp-db.internal',
+    port: 1433,                        // ignored when instanceName is set
+    database: 'ERP',
+    username: 'objectstack_ro',
+    // instanceName: 'SQLEXPRESS',     // a named instance, via SQL Server Browser
+    ssl: true,                         // tedious `encrypt`; required by Azure SQL
+  },
+  external: {
+    credentialsRef: 'sys_secret:7c1e…', // the password — never written inline
+    validation: { onMismatch: 'fail', checkOnBoot: true },
+  },
+  active: true,
+});
+```
+
+What is different from the other SQL drivers:
+
+- **Federation only.** The platform never builds its own schema on SQL Server, so a
+  `managed` datasource on this driver is refused when the stack is parsed, with a
+  message naming the scope, and no boot host offers it as the platform database. If
+  you need ObjectStack's own tables on SQL Server, that is a separate feature request.
+- **Discrete fields, no URL.** `tedious` reads no connection-string grammar, so the
+  config takes `host` / `port` / `database` / `username` / `instanceName` and
+  refuses a `url` / `connectionString`. The password is refused inline: bind it
+  through the connection form or `external.credentialsRef`.
+- **TLS.** `config.ssl` is tedious's `encrypt`. For an on-premises server with a
+  self-signed certificate, set the datasource-level `ssl: { rejectUnauthorized: false }`
+  (tedious's `trustServerCertificate`); a CA goes in the same block.
+- **Schemas.** A SQL Server database is usually several schemas. The Studio Tables
+  tab, `list_remote_tables` and `import_object` list every user table as
+  `schema.table` (`dbo.Orders`, `Sales.Customers`) with its primary key and foreign
+  keys, and an imported object gets `external.remoteSchema` / `remoteName` from it.
+  A bound object without `remoteSchema` resolves in the login's default schema.
+- **Types.** `nvarchar` / `nchar` / `ntext` / `xml` read as text (`nvarchar(max)`
+  included), `bit` as boolean, `datetime2` / `datetimeoffset` / `smalldatetime` as
+  datetime, `uniqueidentifier` as uuid, `money` / `decimal` as decimal. SQL Server's
+  `timestamp` is `rowversion` — a binary row counter, not a date.
+- **Text matching** follows the platform's contract, not the database's collation:
+  `$contains` / `$startsWith` / `$endsWith` / `$like` are case-exact even on SQL
+  Server's case-insensitive default collations, and `$icontains` folds A–Z only.
+  This uses `TRANSLATE`, so the floor is **SQL Server 2017**.
+- **Paging.** `OFFSET … FETCH` needs an `ORDER BY` on SQL Server. An unsorted page
+  is ordered by the table's own single-column primary key, read from the catalog;
+  a table without one (a heap, a composite key) pages without a stable order, and
+  the driver logs that once per object.
+- **Writes** use `INSERT … OUTPUT inserted.*` (routed through a temp table, so a
+  table with triggers accepts it too), and a created record comes back with the
+  values SQL Server filled in. The remote table needs a column the object reads as
+  `id`, and the platform supplies its value: an `IDENTITY` key cannot be inserted
+  into, so keep a table keyed that way read-only.
+- **Not on SQL Server:** `$contains` / `$empty` on a multi-value (JSON-array) field is
+  refused rather than approximated, and date buckets in reports are computed by the
+  engine rather than pushed down.
+
 ## Multi-tenant hosts
 
 A self-hosted single-environment runtime connects external datasources out of the

@@ -842,6 +842,67 @@ function buildMysqlConnection(spec: DatasourceConnectionSpec): unknown {
 }
 
 /**
+ * [#31327] The `tedious` connection object for an `mssql` datasource, from the
+ * discrete fields `MssqlConfigSchema` declares (there is no URL form: tedious
+ * reads no connection-string grammar, and the contract refuses one).
+ *
+ * - `username` → `user`, the knex `mssql` client's key (it hands tedious
+ *   `authentication.options.userName`).
+ * - The password comes ONLY from the bound secret (`external.credentialsRef`
+ *   or the connection form's secret input) — the contract refuses it inline.
+ * - TLS: the datasource-level `ssl` block / `config.ssl` toggle, as
+ *   {@link resolveSslOption} reads it for every SQL driver. `false` →
+ *   `encrypt: false`; anything truthy → `encrypt: true`, with
+ *   `rejectUnauthorized: false` spelled the way tedious spells it
+ *   (`trustServerCertificate: true`) and a CA / client certificate carried in
+ *   `cryptoCredentialsDetails`. Undeclared leaves tedious's own default
+ *   (encrypt on), which is what Azure SQL requires.
+ * - `instanceName` is tedious's named-instance key; with it set the SQL Server
+ *   Browser service resolves the port.
+ */
+function buildMssqlConnection(spec: DatasourceConnectionSpec): Record<string, unknown> {
+  const cfg = (spec.config ?? {}) as Record<string, unknown>;
+  const ssl = resolveSslOption(spec);
+  const options: Record<string, unknown> = {};
+  if (cfg.instanceName) options.instanceName = cfg.instanceName;
+  if (ssl === false) {
+    options.encrypt = false;
+  } else if (ssl !== undefined) {
+    options.encrypt = true;
+    if (ssl && typeof ssl === 'object') {
+      const block = ssl as { rejectUnauthorized?: boolean; ca?: string; cert?: string; key?: string };
+      if (block.rejectUnauthorized === false) options.trustServerCertificate = true;
+      const credentials = {
+        ...(block.ca ? { ca: block.ca } : {}),
+        ...(block.cert ? { cert: block.cert } : {}),
+        ...(block.key ? { key: block.key } : {}),
+      };
+      if (Object.keys(credentials).length > 0) options.cryptoCredentialsDetails = credentials;
+    }
+  }
+  return {
+    server: cfg.host,
+    ...(typeof cfg.port === 'number' ? { port: cfg.port } : {}),
+    database: cfg.database,
+    ...(cfg.username ? { user: cfg.username } : {}),
+    ...(spec.secret ? { password: spec.secret } : {}),
+    ...(Object.keys(options).length > 0 ? { options } : {}),
+  };
+}
+
+/** `SELECT @@VERSION` — SQL Server's server-version probe, swallowed like the others. */
+async function mssqlServerVersion(driver: any): Promise<string | undefined> {
+  if (typeof driver?.execute !== 'function') return undefined;
+  try {
+    const rows: any = await driver.execute('SELECT @@VERSION AS v');
+    const first = Array.isArray(rows) ? rows[0] : rows;
+    return typeof first?.v === 'string' ? first.v : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * Host-composition keys the CLI/standalone stack stamps into a `default`
  * datasource's `config` for the SQL builders (#3826). They are not memory-driver
  * config, so they are stripped before the rest of `config` is handed through.
@@ -1211,6 +1272,24 @@ export function createDefaultDatasourceDriverFactory(
           ...(autoMigrate ? { autoMigrate } : {}),
         } as any);
         return toHandle(driver);
+      }
+
+      if (kind === 'mssql') {
+        // [#31327] SQL Server — FEDERATION ONLY. `DatasourceSchema` refuses a
+        // `managed` datasource on this driver at parse, so `schemaMode` here is
+        // `external` or `validate-only`; the driver refuses managed DDL on its
+        // own as well. Same lazy import and optional-peer posture as `mysql`:
+        // `tedious` is an optional peer of driver-sql, like `mysql2` and `pg`.
+        // There is no `autoMigrate` to forward — the config contract refuses
+        // the key, since the platform emits no DDL here.
+        const { SqlDriver } = await import('@objectstack/driver-sql');
+        const driver = new SqlDriver({
+          client: 'mssql',
+          connection: buildMssqlConnection(spec) as any,
+          pool: buildSqlPool(spec),
+          ...(schemaMode ? { schemaMode: schemaMode as any } : {}),
+        } as any);
+        return toHandle(driver, () => mssqlServerVersion(driver));
       }
 
       if (kind === 'mongodb') {

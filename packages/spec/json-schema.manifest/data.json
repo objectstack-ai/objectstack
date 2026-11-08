@@ -100,6 +100,7 @@
     "data/Mapping",
     "data/Metric",
     "data/MongoConfig",
+    "data/MssqlConfig",
     "data/MysqlConfig",
     "data/NoSQLDataTypeMapping",
     "data/NoSQLDatabaseType",

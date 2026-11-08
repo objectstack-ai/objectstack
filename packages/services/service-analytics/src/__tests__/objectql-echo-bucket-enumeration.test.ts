@@ -282,6 +282,22 @@ const DRIVER_ROWS = {
         'it advertises no granularity, and inherits the SQLite expression, which libSQL runs and which answers the face\'s keys and rows',
     },
   ],
+  // [#31327] SQL Server is federation-only and advertises no native date
+  // granularity, so every bucket is the engine's in-memory one over `find`. The
+  // real driver-sql face on the `mssql` client, never connected: `find` is
+  // answered by code path (no server in this suite), every other member is the
+  // driver's own — including the `supports` that sends the engine in-memory.
+  mssql: [
+    {
+      face: 'driver-sql, mssql, never connected, find by code path',
+      build: () => {
+        const driver = new SqlDriver({ client: 'mssql', connection: { server: '127.0.0.1', database: 'unconnected' }, pool: { min: 0 } } as any) as unknown as EnumeratedDriver;
+        Object.defineProperty(driver, 'find', { value: async () => [] });
+        return driver;
+      },
+      release: releaseKnex,
+    },
+  ],
 } satisfies Record<BuiltinDriverId, readonly DriverFace[]>;
 
 /** The error `p` rejects with; a resolution fails the case. */

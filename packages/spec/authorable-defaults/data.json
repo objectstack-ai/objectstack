@@ -59,6 +59,7 @@
     "data/Mapping:sourceFormat = \"csv\"",
     "data/MongoConfig:host = \"localhost\"",
     "data/MongoConfig:port = 27017",
+    "data/MssqlConfig:port = 1433",
     "data/MysqlConfig:host = \"localhost\"",
     "data/MysqlConfig:port = 3306",
     "data/NoSQLIndex:background = false",
