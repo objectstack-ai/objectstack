@@ -237,6 +237,8 @@ describe('inline-edit type coverage — every type has exactly one decision (#42
         // `object-ref` — and their fillable arm's two keys above
         // (objectstack#31062).
         'permission-ref', 'position-ref',
+        // objectstack#31421: the quiet-hours window, a widget hint over `json`.
+        'quiet-hours',
         'recipient-picker', 'record', 'repeater', 'richtext', 'secret',
         // objectstack#31217: the sharing-rule object picker, an `object-ref` arm.
         'shareable-object-ref',

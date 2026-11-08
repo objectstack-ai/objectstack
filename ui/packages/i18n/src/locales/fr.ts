@@ -340,6 +340,18 @@ const fr = {
       notInList: "{{value}} (absent de la liste)",
       useTyped: "Utiliser « {{value}} »",
     },
+    quietHours: {
+      timeZone: "Fuseau horaire",
+      start: "Début",
+      end: "Fin",
+      range: "De {{start}} à {{end}} ({{zone}})",
+      pastMidnight: "Passe minuit et se termine le lendemain.",
+      sameTimes: "Le début et la fin sont identiques : rien n’est retenu.",
+      incomplete: "Saisissez une heure de début et une heure de fin.",
+      unreadable: "Cette valeur n’est pas une plage horaire que ce contrôle peut afficher. Elle est conservée telle qu’enregistrée.",
+      replace: "Définir une plage horaire",
+      zoneNotInList: "{{zone}} (absent de la liste)",
+    },
     recipient: {
       selectTypeFirst: "Sélectionnez d'abord un type de destinataire.",
       loading: "Chargement…",

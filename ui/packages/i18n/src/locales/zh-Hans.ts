@@ -347,6 +347,18 @@ const zh = {
       notInList: '{{value}}（不在列表中）',
       useTyped: '使用“{{value}}”',
     },
+    quietHours: {
+      timeZone: '时区',
+      start: '开始',
+      end: '结束',
+      range: '{{start}} 至 {{end}}（{{zone}}）',
+      pastMidnight: '跨过午夜，次日结束。',
+      sameTimes: '开始与结束时间相同，不会暂缓任何通知。',
+      incomplete: '请同时填写开始时间和结束时间。',
+      unreadable: '此值不是本控件能显示的时间段，将按原样保留。',
+      replace: '设置时间段',
+      zoneNotInList: '{{zone}}（不在列表中）',
+    },
     recipient: {
       selectTypeFirst: '请先选择接收方类型。',
       loading: '加载中…',

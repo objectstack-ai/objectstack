@@ -337,6 +337,18 @@ const ko = {
       notInList: "{{value}} (목록에 없음)",
       useTyped: '"{{value}}" 사용',
     },
+    quietHours: {
+      timeZone: "시간대",
+      start: "시작",
+      end: "종료",
+      range: "{{start}}~{{end}} ({{zone}})",
+      pastMidnight: "자정을 넘겨 다음 날 끝납니다.",
+      sameTimes: "시작과 종료가 같아서 아무것도 보류되지 않습니다.",
+      incomplete: "시작 시간과 종료 시간을 모두 입력하세요.",
+      unreadable: "이 값은 이 컨트롤이 표시할 수 있는 시간 범위가 아닙니다. 저장된 그대로 유지됩니다.",
+      replace: "시간 범위 설정",
+      zoneNotInList: "{{zone}} (목록에 없음)",
+    },
     recipient: {
       selectTypeFirst: "먼저 수신자 유형을 선택하세요.",
       loading: "로딩 중…",

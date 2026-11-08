@@ -340,6 +340,18 @@ const pt = {
       notInList: "{{value}} (fora da lista)",
       useTyped: 'Usar "{{value}}"',
     },
+    quietHours: {
+      timeZone: "Fuso horário",
+      start: "Início",
+      end: "Fim",
+      range: "Das {{start}} às {{end}} ({{zone}})",
+      pastMidnight: "Passa da meia-noite e termina no dia seguinte.",
+      sameTimes: "O início e o fim são iguais, então nada é retido.",
+      incomplete: "Informe um horário de início e um de fim.",
+      unreadable: "Este valor não é um intervalo de horário que este controle consiga mostrar. Ele é mantido como está salvo.",
+      replace: "Definir um intervalo de horário",
+      zoneNotInList: "{{zone}} (fora da lista)",
+    },
     recipient: {
       selectTypeFirst: "Selecione primeiro um tipo de destinatário.",
       loading: "Carregando…",

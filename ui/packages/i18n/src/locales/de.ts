@@ -337,6 +337,18 @@ const de = {
       notInList: "{{value}} (nicht in der Liste)",
       useTyped: "„{{value}}“ verwenden",
     },
+    quietHours: {
+      timeZone: "Zeitzone",
+      start: "Beginn",
+      end: "Ende",
+      range: "{{start}} bis {{end}} ({{zone}})",
+      pastMidnight: "Läuft über Mitternacht und endet am nächsten Tag.",
+      sameTimes: "Beginn und Ende sind gleich, daher wird nichts zurückgehalten.",
+      incomplete: "Geben Sie eine Beginn- und eine Endzeit ein.",
+      unreadable: "Dieser Wert ist kein Zeitraum, den dieses Steuerelement anzeigen kann. Er bleibt so gespeichert, wie er ist.",
+      replace: "Zeitraum festlegen",
+      zoneNotInList: "{{zone}} (nicht in der Liste)",
+    },
     recipient: {
       selectTypeFirst: "Wählen Sie zuerst einen Empfängertyp.",
       loading: "Wird geladen…",

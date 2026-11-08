@@ -482,6 +482,18 @@ const en = {
       notInList: '{{value}} (not in the list)',
       useTyped: 'Use "{{value}}"',
     },
+    quietHours: {
+      timeZone: 'Time zone',
+      start: 'Start',
+      end: 'End',
+      range: '{{start}} to {{end}} ({{zone}})',
+      pastMidnight: 'Runs past midnight and ends the next day.',
+      sameTimes: 'Start and end are the same, so nothing is held.',
+      incomplete: 'Enter both a start and an end time.',
+      unreadable: 'This value is not a time range this control can show. It is kept as stored.',
+      replace: 'Set a time range',
+      zoneNotInList: '{{zone}} (not in the list)',
+    },
     recipient: {
       selectTypeFirst: 'Select a recipient type first.',
       loading: 'Loading…',

@@ -347,6 +347,18 @@ const zhHant = {
       notInList: '{{value}}（不在列表中）',
       useTyped: '使用“{{value}}”',
     },
+    quietHours: {
+      timeZone: '時區',
+      start: '開始',
+      end: '結束',
+      range: '{{start}} 至 {{end}}（{{zone}}）',
+      pastMidnight: '跨過午夜，次日結束。',
+      sameTimes: '開始與結束時間相同，不會暫緩任何通知。',
+      incomplete: '請同時填寫開始時間和結束時間。',
+      unreadable: '此值不是本控制項能顯示的時間段，將按原樣保留。',
+      replace: '設定時間段',
+      zoneNotInList: '{{zone}}（不在列表中）',
+    },
     recipient: {
       selectTypeFirst: '請先選擇接收方型別。',
       loading: '載入中…',

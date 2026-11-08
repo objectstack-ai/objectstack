@@ -337,6 +337,18 @@ const ja = {
       notInList: "{{value}}（一覧にありません）",
       useTyped: "「{{value}}」を使用",
     },
+    quietHours: {
+      timeZone: "タイムゾーン",
+      start: "開始",
+      end: "終了",
+      range: "{{start}}〜{{end}}（{{zone}}）",
+      pastMidnight: "午前0時をまたぎ、翌日に終了します。",
+      sameTimes: "開始と終了が同じため、何も保留されません。",
+      incomplete: "開始時刻と終了時刻の両方を入力してください。",
+      unreadable: "この値は、このコントロールで表示できる時間帯ではありません。保存されたまま保持されます。",
+      replace: "時間帯を設定",
+      zoneNotInList: "{{zone}}（一覧にありません）",
+    },
     recipient: {
       selectTypeFirst: "先に受信者タイプを選択してください。",
       loading: "読み込み中…",
