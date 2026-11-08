@@ -1575,6 +1575,7 @@
     "api/RegisterDeviceResponse:success",
     "api/RegisterRequest:email",
     "api/RegisterRequest:image",
+    "api/RegisterRequest:invitationId",
     "api/RegisterRequest:name",
     "api/RegisterRequest:password",
     "api/RejectAiPendingActionResponse:id",
