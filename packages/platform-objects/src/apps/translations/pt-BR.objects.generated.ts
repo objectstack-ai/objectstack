@@ -2649,6 +2649,54 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
       }
     }
   },
+  sys_idp_group_mapping: {
+    label: "Mapeamento de grupo do IdP",
+    pluralLabel: "Mapeamentos de grupo do IdP",
+    description: "Mapeia um grupo do provedor de identidade para o conjunto de permissões concedido aos seus membros",
+    fields: {
+      id: {
+        label: "ID"
+      },
+      source_kind: {
+        label: "Tipo de origem",
+        help: "O que envia o grupo: uma conexão SCIM.",
+        options: {
+          scim: "Conexão SCIM"
+        }
+      },
+      source_id: {
+        label: "ID de origem",
+        help: "O ID da conexão SCIM pela qual o grupo chega, por exemplo \"okta-prod\"."
+      },
+      group_external_id: {
+        label: "ID externo do grupo",
+        help: "O externalId do grupo como o provedor de identidade o envia. Defina este ou o nome de exibição, não ambos."
+      },
+      group_display_name: {
+        label: "Nome de exibição do grupo",
+        help: "O displayName do grupo, com correspondência exata. Usado quando o mapeamento não indica um ID externo."
+      },
+      permission_set: {
+        label: "Conjunto de permissões",
+        help: "O conjunto de permissões concedido a um membro do grupo. Conjuntos de administrador são recusados."
+      },
+      organization_id: {
+        label: "Organização",
+        help: "A organização em que a concessão é feita: a organização proprietária da conexão SCIM."
+      },
+      created_at: {
+        label: "Criado em"
+      },
+      updated_at: {
+        label: "Atualizado em"
+      }
+    },
+    _views: {
+      all: {
+        label: "Todos"
+      }
+    }
+  },
   sys_notification: {
     label: "Evento de notificação",
     pluralLabel: "Eventos de notificação",

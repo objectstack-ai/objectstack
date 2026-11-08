@@ -129,6 +129,7 @@ export const frGeneratedSourceHashes: Readonly<Record<string, string>> = {
   "objects.sys_exchange_rate.fields.id.label": "00b0385c9c152888",
   "objects.sys_exchange_rate.fields.source.label": "8fe786e8e29c8cec",
   "objects.sys_exchange_rate.fields.source.options.import": "05c80d3a61ec3290",
+  "objects.sys_idp_group_mapping.fields.id.label": "00b0385c9c152888",
   "objects.sys_invitation.label": "9bbd01ba5ed1a107",
   "objects.sys_invitation.pluralLabel": "4ebb9fd13de7a546",
   "objects.sys_job.fields.active.label": "eee107cf4e466779",
