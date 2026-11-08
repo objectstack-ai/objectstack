@@ -13,6 +13,7 @@ import {
   TranslationBundleSchema,
   PlatformTranslationDataSchema,
   PlatformTranslationBundleSchema,
+  ServedTranslationDataSchema,
   defineTranslationBundle,
   LocaleSchema,
   FieldTranslationSchema,
@@ -1844,6 +1845,58 @@ describe('translation unknown-key strictness', () => {
       const result = PlatformTranslationDataSchema.safeParse({ settings: withConfirm });
       expect(result.success, JSON.stringify(result.error?.issues)).toBe(true);
       expect(result.data?.settings?.auth?.keys?.email_password_enabled?.confirmOffText).toBe('Sure?');
+    });
+
+    describe("a map setting's column headers (#31453)", () => {
+      // Spelled as the `map` specifier spells them: `keyColumn` is the key
+      // column, `columns` the value columns keyed by column `name`; each
+      // carries the column's `label` and its `description` as `help`.
+      const keys = (entry: Record<string, unknown>) => ({ lifecycle: { keys: { retention_overrides: entry } } });
+      const issuesOf = (entry: Record<string, unknown>) =>
+        PlatformTranslationDataSchema.safeParse({ settings: keys(entry) }).error?.issues ?? [];
+
+      it('carries the key column and each value column beside the setting label', () => {
+        const entry = {
+          label: '保留期覆盖',
+          keyColumn: { label: '对象', help: '要覆盖的对象' },
+          columns: { maxAge: { label: '保留时长' }, expireAfter: { label: '过期时间', help: '行过期前的时长' } },
+        };
+        const result = PlatformTranslationDataSchema.safeParse({ settings: keys(entry) });
+        expect(result.success, JSON.stringify(result.error?.issues)).toBe(true);
+        const parsed = result.data?.settings?.lifecycle?.keys?.retention_overrides;
+        expect(parsed?.keyColumn).toEqual({ label: '对象', help: '要覆盖的对象' });
+        expect(parsed?.columns?.expireAfter).toEqual({ label: '过期时间', help: '行过期前的时长' });
+        // The served document and the platform bundle read the same shape.
+        expect(ServedTranslationDataSchema.safeParse({ settings: keys(entry) }).success).toBe(true);
+        expect(PlatformTranslationBundleSchema.safeParse({ 'zh-CN': { settings: keys(entry) } }).success).toBe(true);
+      });
+
+      it.each([
+        ['headers', 'columns'],
+        ['columnLabels', 'columns'],
+        ['keyHeader', 'keyColumn'],
+        ['key_column', 'keyColumn'],
+      ])('refuses `%s` on the setting entry, naming `%s`', (wrong, right) => {
+        const issue = issuesOf({ [wrong]: {} }).find((i) => i.code === 'unrecognized_keys');
+        expect(issue?.message).toContain(`\`${wrong}\` → \`${right}\``);
+      });
+
+      it('is strict on a column, as the setting entry is: an undeclared leaf is refused', () => {
+        const inColumn = issuesOf({ columns: { maxAge: { label: 'Keep', description: 'x' } } })
+          .find((i) => i.code === 'unrecognized_keys');
+        expect(inColumn?.message).toContain('`description` → `help`');
+        expect(inColumn?.path).toEqual(['settings', 'lifecycle', 'keys', 'retention_overrides', 'columns', 'maxAge']);
+        const inKey = issuesOf({ keyColumn: { title: 'Object' } }).find((i) => i.code === 'unrecognized_keys');
+        expect(inKey?.message).toContain('`title` → `label`');
+        expect(inKey?.path).toEqual(['settings', 'lifecycle', 'keys', 'retention_overrides', 'keyColumn']);
+      });
+
+      it('refuses a bare string where a column entry is an object', () => {
+        // A column header is two strings, not one: a plain string would leave
+        // no place for its `help`, so the shape refuses it rather than coerce.
+        expect(issuesOf({ keyColumn: 'Object' })).not.toEqual([]);
+        expect(issuesOf({ columns: { maxAge: 'Keep rows for' } })).not.toEqual([]);
+      });
     });
   });
 

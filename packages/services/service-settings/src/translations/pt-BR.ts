@@ -738,14 +738,20 @@ export const ptBR: PlatformTranslationData = {
         retention_overrides: {
           label: 'Substituições de retenção',
           help: 'Substituições de janela por objeto. As durações usam h/d/w/y. Definidas por organização, para que uma organização regulada guarde anos e uma de desenvolvimento guarde dias. Uma substituição mais curta que o mínimo exigido por um recurso da plataforma (por exemplo, a janela de detecção de duplicatas da fila de tarefas) é ignorada e registrada como erro, e a janela padrão continua valendo.',
+          keyColumn: { label: 'Objeto' },
+          columns: { maxAge: { label: 'Manter linhas por' }, expireAfter: { label: 'Expirar linhas após' } },
         },
         quotas: {
           label: 'Cotas de linhas',
           help: 'Quantidade máxima de linhas por objeto. Ultrapassar gera um alerta de governança — as cotas nunca excluem além da política declarada.',
+          keyColumn: { label: 'Objeto' },
+          columns: { max_rows: { label: 'Máx. de linhas' } },
         },
         quota_defaults: {
           label: 'Cotas padrão por classe',
           help: 'Cotas de reserva por classe de ciclo de vida (telemetry, transient, event, audit).',
+          keyColumn: { label: 'Classe de ciclo de vida' },
+          columns: { max_rows: { label: 'Máx. de linhas' } },
         },
         growth_alert_rows: {
           label: 'Limite de alerta de crescimento (linhas por varredura)',

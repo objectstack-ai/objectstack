@@ -597,14 +597,20 @@ export const esES: PlatformTranslationData = {
             + 'Se define por organización, de modo que una organización regulada puede conservar años y una de desarrollo, días. '
             + 'Una sustitución más corta que el mínimo que necesita una función de la plataforma (por ejemplo, la ventana de detección de duplicados de la cola de trabajos) '
             + 'se ignora y se registra como error, y se sigue aplicando la ventana predeterminada.',
+          keyColumn: { label: 'Objeto' },
+          columns: { maxAge: { label: 'Conservar filas durante' }, expireAfter: { label: 'Caducar filas tras' } },
         },
         quotas: {
           label: 'Cuotas de filas',
           help: 'Número máximo de filas por objeto. Superarlo genera una alerta de gobernanza: las cuotas nunca eliminan más allá de la política declarada.',
+          keyColumn: { label: 'Objeto' },
+          columns: { max_rows: { label: 'Máx. de filas' } },
         },
         quota_defaults: {
           label: 'Cuotas predeterminadas por clase',
           help: 'Cuotas de respaldo por clase de ciclo de vida (telemetry, transient, event, audit).',
+          keyColumn: { label: 'Clase de ciclo de vida' },
+          columns: { max_rows: { label: 'Máx. de filas' } },
         },
         growth_alert_rows: {
           label: 'Umbral de alerta de crecimiento (filas por barrido)',

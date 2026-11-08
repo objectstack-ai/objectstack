@@ -490,11 +490,20 @@ export const zhHant: PlatformTranslationData = {
         retention_overrides: {
           label: '保留期覆寫',
           help: '依物件覆寫保留期。時長使用 h/d/w/y。依組織設定，因此受監管的組織可保留數年，開發用組織只保留數天。短於某項平台功能所需最短期限（例如工作佇列的重複偵測期限）的覆寫值會被忽略並記錄為錯誤，繼續套用預設期限。',
+          keyColumn: { label: '物件' },
+          columns: { maxAge: { label: '列保留期限' }, expireAfter: { label: '列到期時間' } },
         },
-        quotas: { label: '列數配額', help: '依物件的最大列數。超出時會發出治理警示——配額絕不會刪除超出已宣告原則的資料。' },
+        quotas: {
+          label: '列數配額',
+          help: '依物件的最大列數。超出時會發出治理警示——配額絕不會刪除超出已宣告原則的資料。',
+          keyColumn: { label: '物件' },
+          columns: { max_rows: { label: '最大列數' } },
+        },
         quota_defaults: {
           label: '依類別的預設配額',
           help: '依生命週期類別的備援配額（telemetry、transient、event、audit）。',
+          keyColumn: { label: '生命週期類別' },
+          columns: { max_rows: { label: '最大列數' } },
         },
         growth_alert_rows: { label: '成長警示門檻（每次清理的列數）', help: '宣告了生命週期的資料表在兩次清理之間增加超過這麼多列時發出警示。0 表示停用成長警示。' },
       },
