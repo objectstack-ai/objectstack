@@ -2394,6 +2394,9 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
                             path,
                             prefix,
                             metadataService,
+                            // The environment-membership check `dispatch()`
+                            // runs after this same resolution.
+                            membership: () => dispatcher.environmentMembershipRefusal(protocolContext),
                             policy: {
                                 headers: req.headers ?? {},
                                 ...(req.remoteAddress ? { remoteAddress: req.remoteAddress } : {}),

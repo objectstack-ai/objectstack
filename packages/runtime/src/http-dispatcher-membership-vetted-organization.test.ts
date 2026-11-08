@@ -3,8 +3,8 @@
 /**
  * The environment-membership gate reads, for a session principal, the
  * organization the request's resolution vetted (`resolveAuthzContext`, run for
- * real on each request under an `isolated` posture), the one every other door
- * reads.
+ * real on each request under an `isolated` posture, and once with no tenancy
+ * posture), the one every other door reads.
  *
  * A multi-tenant host: a stub resolver places every request in one
  * environment, on a tenant kernel whose `sys_environment_member` holds no row,
@@ -38,7 +38,7 @@ function kernelWith(services: Record<string, unknown>): any {
  * The tenant host. The cookie session reads as `user`, claiming
  * `activeOrganizationId`; `memberOf` are that user's `sys_member` rows.
  */
-function tenantHost(opts: { user: string; activeOrganizationId: string; memberOf: string[] }) {
+function tenantHost(opts: { user: string; activeOrganizationId: string; memberOf: string[]; posture?: string | null }) {
     const find = vi.fn(async (object: string, query: { where?: Record<string, unknown> }) => {
         const where = query?.where ?? {};
         if (object === 'sys_member' && where.user_id === opts.user) {
@@ -66,7 +66,8 @@ function tenantHost(opts: { user: string; activeOrganizationId: string; memberOf
             }),
         }),
     };
-    const tenant = kernelWith({ objectql, auth, tenancy: { posture: 'isolated' } });
+    const posture = opts.posture === undefined ? 'isolated' : opts.posture;
+    const tenant = kernelWith({ objectql, auth, ...(posture === null ? {} : { tenancy: { posture } }) });
     const resolver: KernelResolver = {
         resolveKernel: async (c: HttpProtocolContext) => {
             c.environmentId = ENV;
@@ -114,5 +115,12 @@ describe('the environment-membership gate reads the vetted organization of a ses
         const result = await dispatcher.dispatch('POST', '/mcp', MCP_CALL, {}, mcp());
         expect(membershipRefusal(result)).toEqual({ userId: OUTSIDER });
         expect(membershipReads()).toEqual([OUTSIDER]);
+    });
+
+    it('CONTROL: on a host whose posture keeps every claim, the resolution keeps the platform organization', async () => {
+        const { dispatcher, membershipReads } = tenantHost({ user: STAFF, activeOrganizationId: PLATFORM_ORG, memberOf: [], posture: null });
+        const result = await dispatcher.dispatch('POST', '/mcp', MCP_CALL, {}, mcp());
+        expect(membershipRefusal(result)).toBeUndefined();
+        expect(membershipReads()).toEqual([]);
     });
 });
