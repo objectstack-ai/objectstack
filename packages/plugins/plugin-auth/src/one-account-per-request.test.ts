@@ -389,8 +389,8 @@ describe('the identity mount refuses the request ahead of its raw routes', () =>
       { getRawApp: () => app, getPort: () => 0 },
       ctx,
     );
-    return (path, credentials, body) =>
-      app.request(`${AUTH}${path}`, {
+    return async (path, credentials, body) =>
+      await app.request(`${AUTH}${path}`, {
         method: 'POST',
         headers: { 'content-type': 'application/json', origin: BASE, ...headersOf(credentials) },
         body: JSON.stringify(body),
