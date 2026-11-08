@@ -351,6 +351,68 @@ export const MYSQL_CELL = dialectCell('mysql');
 /** The Postgres cell. `.url` is the provisioned URL (or `undefined`) for `skipIf`. */
 export const PG_CELL = dialectCell('pg');
 
+// ── The FEDERATION cell: SQL Server (#31327) ─────────────────────────────────
+//
+// Not a member of {@link DIALECT_CELLS}, and deliberately so. Every consumer of
+// that list builds its fixture with `initObjects` — a MANAGED table — and the
+// `mssql` client is federation-only: the driver refuses to emit managed DDL on
+// it. Adding it there would turn every managed matrix red for a reason that is
+// the contract, not a defect. The SQL Server cell runs the shared case-sets the
+// way a federated datasource meets them instead: over tables created by raw
+// DDL and bound with `registerExternalObject`
+// (`sql-driver-mssql-federation-conformance.test.ts`).
+//
+// Opt-in, like the other live cells: `OS_TEST_MSSQL_URL`, spelled
+// `mssql://user:password@host:port/database?encrypt=false&trustServerCertificate=true`.
+// Unset, the cell is a named SKIP; under `OS_EXPECT_MSSQL_FEDERATION=1` (a
+// runner that provisioned the server) it is a named failure instead. No CI job
+// provisions it today, so a green CI run says nothing about SQL Server — the
+// coverage reporter prints that line.
+
+const MSSQL_URL = process.env.OS_TEST_MSSQL_URL;
+
+/** `1` when the runner provisioned SQL Server and a missing URL is a runner defect. */
+export const EXPECT_MSSQL_FEDERATION = process.env.OS_EXPECT_MSSQL_FEDERATION === '1';
+
+/**
+ * `mssql://user:password@host:port/database?encrypt=…&trustServerCertificate=…`
+ * → the knex `mssql` (tedious) connection object. tedious reads no URL, which
+ * is also why the spec's `mssql` config refuses one; this parser exists for
+ * the test env var only.
+ */
+export function mssqlConnectionFromUrl(url: string): Record<string, unknown> {
+  const u = new URL(url);
+  const flag = (name: string, fallback: boolean): boolean => {
+    const v = u.searchParams.get(name);
+    return v === null ? fallback : v === 'true' || v === '1';
+  };
+  return {
+    server: u.hostname,
+    port: u.port ? Number(u.port) : 1433,
+    user: decodeURIComponent(u.username),
+    password: decodeURIComponent(u.password),
+    database: decodeURIComponent(u.pathname.replace(/^\//, '')) || 'master',
+    options: {
+      encrypt: flag('encrypt', false),
+      trustServerCertificate: flag('trustServerCertificate', true),
+    },
+  };
+}
+
+/** The SQL Server federation cell — see the block above for why it stands apart. */
+export const MSSQL_FEDERATION_CELL = {
+  id: 'mssql' as const,
+  label: 'live sql server (federation)',
+  env: 'OS_TEST_MSSQL_URL',
+  url: MSSQL_URL,
+  available: !!MSSQL_URL,
+  config: (): SqlDriverConfig => ({
+    client: 'mssql',
+    connection: mssqlConnectionFromUrl(MSSQL_URL!) as any,
+    schemaMode: 'external',
+  }),
+};
+
 /**
  * Declare a cell nobody provisioned: REPORTED, never omitted.
  *

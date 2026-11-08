@@ -91,7 +91,7 @@
  */
 
 import type { Reporter, TestModule } from 'vitest/node';
-import { DIALECT_CELLS, EXPECT_LIVE_DIALECTS } from './live-dialect-matrix.testkit.js';
+import { DIALECT_CELLS, EXPECT_LIVE_DIALECTS, MSSQL_FEDERATION_CELL } from './live-dialect-matrix.testkit.js';
 
 /** Everything this reporter needs to know about the run, in one pass. */
 interface SkipCensus {
@@ -156,7 +156,25 @@ function wrap(text: string, indent = '  ', width = 92): string[] {
   return out;
 }
 
+/**
+ * [#31327] The SQL Server federation cell, one line, every run. It is outside
+ * {@link DIALECT_CELLS} (federation-only — see the testkit), so the block above
+ * never names it; without this line a run that never touched SQL Server would
+ * read exactly like one that did.
+ */
+function federationLine(): string {
+  const cell = MSSQL_FEDERATION_CELL;
+  return cell.available
+    ? `  driver-sql federation cell: ${cell.label} RAN.`
+    : `  driver-sql federation cell: ${cell.label} NOT RUN -- set ${cell.env} to run it ` +
+        '(no CI job provisions SQL Server; a green run says nothing about it).';
+}
+
 function report(testModules: ReadonlyArray<TestModule>): string {
+  return `${reportDialects(testModules)}\n${federationLine()}\n`;
+}
+
+function reportDialects(testModules: ReadonlyArray<TestModule>): string {
   const live = DIALECT_CELLS.filter((cell) => cell.live);
   const missing = live.filter((cell) => !cell.available);
   const ran = DIALECT_CELLS.filter((cell) => cell.available);
