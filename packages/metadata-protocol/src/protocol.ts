@@ -1461,8 +1461,7 @@ export class ObjectStackProtocolImplementation implements
      * holds a copy of it.
      */
     async runUninstallGuards(request: Pick<DeletePackageRequest, 'packageId' | 'actor'>): Promise<void> {
-        const readUninstallGuards = () => this.uninstallGuards;
-        return runUninstallGuards.call({ get uninstallGuards() { return readUninstallGuards(); } }, request);
+        return runUninstallGuards(protocolHost(this), request);
     }
 
     /**
@@ -1480,12 +1479,7 @@ export class ObjectStackProtocolImplementation implements
      * uninstall completed and never after a refusal.
      */
     async recordPackageUninstall(record: PackageUninstallRecord): Promise<void> {
-        const readGetServicesRegistry = () => this.getServicesRegistry;
-        const readEnvironmentId = () => this.environmentId;
-        return recordPackageUninstall.call({
-            get environmentId() { return readEnvironmentId(); },
-            get getServicesRegistry() { return readGetServicesRegistry(); },
-        }, record);
+        return recordPackageUninstall(protocolHost(this), record);
     }
 
     /**

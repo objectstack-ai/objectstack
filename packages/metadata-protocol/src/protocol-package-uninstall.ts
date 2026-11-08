@@ -101,7 +101,7 @@ export async function deletePackage(this: Pick<PackageUninstallHost, 'deleteMeta
     // guard's own throw propagates as is — an uninstall a guard could not
     // judge does not proceed. With no guard registered nothing is asked, and
     // the verb behaves exactly as it did before guards existed.
-    await runUninstallGuards.call(this, request);
+    await runUninstallGuards(this, request);
 
     const where: Record<string, unknown> = { package_id: request.packageId };
     // [#8136] This read is the uninstall's FIRST database touch, and until
@@ -392,7 +392,7 @@ export async function deletePackage(this: Pick<PackageUninstallHost, 'deleteMeta
     // registry did not hold and the store bound no metadata to was not a
     // package, so it writes none either: the `DELETE` door answers that `404`.
     if (installed.held || deleted.length > 0 || failed.length > 0) {
-        await recordPackageUninstall.call(this, {
+        await recordPackageUninstall(this, {
             packageId: request.packageId,
             ...(installed.version ? { version: installed.version } : {}),
             ...(request.actor ? { actor: request.actor } : {}),
@@ -414,22 +414,22 @@ export async function deletePackage(this: Pick<PackageUninstallHost, 'deleteMeta
 
 /** The body of `ObjectStackProtocolImplementation#runUninstallGuards`; the method's docblock there is its contract. */
 export async function runUninstallGuards(
-    this: Pick<PackageUninstallHost, 'uninstallGuards'>,
+    host: Pick<PackageUninstallHost, 'uninstallGuards'>,
     request: Pick<DeletePackageRequest, 'packageId' | 'actor'>,
 ): Promise<void> {
-    await askUninstallGuards(this.uninstallGuards, request);
+    await askUninstallGuards(host.uninstallGuards, request);
 }
 
 /** The body of `ObjectStackProtocolImplementation#recordPackageUninstall`; the method's docblock there is its contract. */
 export async function recordPackageUninstall(
-    this: Pick<PackageUninstallHost, 'environmentId' | 'getServicesRegistry'>,
+    host: Pick<PackageUninstallHost, 'environmentId' | 'getServicesRegistry'>,
     record: PackageUninstallRecord,
 ): Promise<void> {
-    await writePackageUninstallEvent(this.getServicesRegistry?.()?.get('audit'), {
+    await writePackageUninstallEvent(host.getServicesRegistry?.()?.get('audit'), {
         action: 'package_uninstall',
         packageId: record.packageId,
         ...(record.version ? { version: record.version } : {}),
-        ...(this.environmentId ? { environmentId: this.environmentId } : {}),
+        ...(host.environmentId ? { environmentId: host.environmentId } : {}),
         ...(record.actor ? { actor: record.actor } : {}),
         ...(record.keepData === true ? { keepData: true } : {}),
         itemsRemoved: record.itemsRemoved,
