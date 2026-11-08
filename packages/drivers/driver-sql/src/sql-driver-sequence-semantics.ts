@@ -91,8 +91,10 @@ export interface SequenceSemanticsHost {
   maxAutonumberCounter: SqlDriver['maxAutonumberCounter'];
   mergeLandsInWrittenOrganization: SqlDriver['mergeLandsInWrittenOrganization'];
   observedUpdatedAtColumn: SqlDriver['observedUpdatedAtColumn'];
+  oracleUuidBinding: SqlDriver['oracleUuidBinding'];
   readonly organizationObjectRegistered: SqlDriver['organizationObjectRegistered'];
   readonly physicalTableByObject: SqlDriver['physicalTableByObject'];
+  primeOracleRawUuidColumns: SqlDriver['primeOracleRawUuidColumns'];
   remoteColumn: SqlDriver['remoteColumn'];
   resolveSequenceTenantId: SqlDriver['resolveSequenceTenantId'];
   resolveTenantField: SqlDriver['resolveTenantField'];
@@ -277,7 +279,10 @@ export class SequenceSemanticsFacet {
   }
 
   /** The body of `SqlDriver#update`; the method's docblock there is its contract. */
-  static async update(this: Pick<SequenceSemanticsHost, 'applyTenantScope' | 'applyWriteColumnMap' | 'auditMissingTenant' | 'formatInput' | 'formatOutput' | 'getBuilder' | 'keepSuppliedUpdatedAt' | 'remoteColumn' | 'rotatedUpdateById' | 'rotationShardsOf' | 'stampsUpdatedAt' | 'updateWithPresumedTimestamp' | 'updatedAtStamp' | 'updatedAtStampIsPresumed'>, object: string, id: string | number, data: Record<string, any>, options?: DriverOptions): Promise<Record<string, unknown> | null> {
+  static async update(this: Pick<SequenceSemanticsHost, 'applyTenantScope' | 'applyWriteColumnMap' | 'auditMissingTenant' | 'formatInput' | 'formatOutput' | 'getBuilder' | 'isOracle' | 'keepSuppliedUpdatedAt' | 'oracleUuidBinding' | 'primeOracleRawUuidColumns' | 'remoteColumn' | 'rotatedUpdateById' | 'rotationShardsOf' | 'stampsUpdatedAt' | 'updateWithPresumedTimestamp' | 'updatedAtStamp' | 'updatedAtStampIsPresumed'>, object: string, id: string | number, data: Record<string, any>, options?: DriverOptions): Promise<Record<string, unknown> | null> {
+    // [#31390] On Oracle a federated object's RAW(16) uuid columns are read from
+    // the remote catalog before a comparand or a written value is bound.
+    if (this.isOracle) await this.primeOracleRawUuidColumns(object);
     this.auditMissingTenant(object, 'update', options);
     const rotationShards = this.rotationShardsOf(object);
     if (rotationShards) return this.rotatedUpdateById(object, rotationShards, id, data, options);
@@ -286,11 +291,13 @@ export class SequenceSemanticsFacet {
     // federated object (the mapping the payload above just went through), `id`
     // otherwise.
     const idColumn = this.remoteColumn(object, 'id', 'id');
+    // [#31390] On Oracle a RAW(16) uuid key binds as `HEXTORAW(?)`; the id itself otherwise.
+    const idComparand = this.oracleUuidBinding(object, 'id', id, 'comparand');
 
     // One definition of the statement, so the speculative attempt, the fenced
     // retry and the plain path cannot drift in WHERE or tenant scope.
     const issue = (payload: Record<string, any>, issueOptions?: DriverOptions): Promise<number> => {
-      const builder = this.getBuilder(object, issueOptions).where(idColumn, id);
+      const builder = this.getBuilder(object, issueOptions).where(idColumn, idComparand as any);
       this.applyTenantScope(builder, object, issueOptions);
       return builder.update(payload) as unknown as Promise<number>;
     };
@@ -314,7 +321,7 @@ export class SequenceSemanticsFacet {
       await issue(formatted, options);
     }
 
-    const readback = this.getBuilder(object, options).where(idColumn, id);
+    const readback = this.getBuilder(object, options).where(idColumn, idComparand as any);
     this.applyTenantScope(readback, object, options);
     const updated = await readback.first();
     return this.formatOutput(object, updated) || null;
@@ -935,7 +942,10 @@ export class SequenceSemanticsFacet {
   }
 
   /** The body of `SqlDriver#delete`; the method's docblock there is its contract. */
-  static async delete(this: Pick<SequenceSemanticsHost, 'applyTenantScope' | 'auditMissingTenant' | 'getBuilder' | 'remoteColumn' | 'rotationShardsOf'>, object: string, id: string | number, options?: DriverOptions): Promise<boolean> {
+  static async delete(this: Pick<SequenceSemanticsHost, 'applyTenantScope' | 'auditMissingTenant' | 'getBuilder' | 'isOracle' | 'oracleUuidBinding' | 'primeOracleRawUuidColumns' | 'remoteColumn' | 'rotationShardsOf'>, object: string, id: string | number, options?: DriverOptions): Promise<boolean> {
+    // [#31390] On Oracle a federated object's RAW(16) uuid columns are read from
+    // the remote catalog before a comparand or a written value is bound.
+    if (this.isOracle) await this.primeOracleRawUuidColumns(object);
     this.auditMissingTenant(object, 'delete', options);
     const rotationShards = this.rotationShardsOf(object);
     if (rotationShards) {
@@ -950,7 +960,11 @@ export class SequenceSemanticsFacet {
     }
     // The primary key's column — the `external.columnMap` remote column on a
     // federated object (as `update` above), `id` otherwise.
-    const builder = this.getBuilder(object, options).where(this.remoteColumn(object, 'id', 'id'), id);
+    // [#31390] On Oracle a RAW(16) uuid key binds as `HEXTORAW(?)`.
+    const builder = this.getBuilder(object, options).where(
+      this.remoteColumn(object, 'id', 'id'),
+      this.oracleUuidBinding(object, 'id', id, 'comparand') as any,
+    );
     this.applyTenantScope(builder, object, options);
     const count = await builder.delete();
     return count > 0;

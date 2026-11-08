@@ -17,6 +17,7 @@ import FileTimingsReporter, {
   fileRecord,
   judgeRun,
   medianDurations,
+  selectRuns,
   summarize,
   readRunReports,
   runDurations,
@@ -223,6 +224,24 @@ describe('the selector', () => {
     expect(judgeRun({ jobs: jobs(['success']), artifacts: artifacts(2), shards: 2 }).eligible).toBe(false);
     expect(judgeRun({ jobs: jobs(['success', 'success']), artifacts: artifacts(1), shards: 2 }).eligible).toBe(false);
     expect(judgeRun({ jobs: jobs(['success', 'success']), artifacts: [{ name: artifactName(1) }, { name: artifactName(2), expired: true }], shards: 2 }).eligible).toBe(false);
+  });
+
+  it('lists schedule runs only, and takes no push run even when one is listed (objectstack#31519)', async () => {
+    const routes: string[] = [];
+    const fetchImpl = (async (url: string) => {
+      const route = url.replace('https://api.test', '');
+      routes.push(route);
+      const body = route.includes('/actions/workflows/ci.yml/runs')
+        ? { workflow_runs: [{ id: 2, event: 'push', head_sha: 'b'.repeat(40), created_at: 'x' }, { id: 1, event: 'schedule', head_sha: 'a'.repeat(40), created_at: 'y' }] }
+        : route.includes('/jobs')
+          ? { jobs: jobs(['success', 'success']) }
+          : { artifacts: artifacts(2) };
+      return { ok: true, status: 200, json: async () => body };
+    }) as unknown as typeof fetch;
+    const chosen = await selectRuns({ shards: 2, limit: 6, repository: 'o/r', token: '', apiUrl: 'https://api.test', fetchImpl });
+    expect(routes[0]).toBe('/repos/o/r/actions/workflows/ci.yml/runs?branch=main&event=schedule&status=completed&per_page=50');
+    expect(chosen.map((r) => r.id)).toEqual([1]);
+    expect(routes.some((r) => r.startsWith('/repos/o/r/actions/runs/2/'))).toBe(false);
   });
 });
 

@@ -8,20 +8,21 @@
 
 ## Two spellings: `Field.*` factory or object literal
 
-The tables below give the **object-literal** spelling. Real apps overwhelmingly
-use the equivalent **`Field.*` factory** (`@objectstack/spec`) — same schema, plus
+The tables below give the **object-literal** spelling. Real apps mostly
+use the equivalent **`Field.*` factory** — same schema, plus
 per-helper JSDoc and inference (`Field.lookup`'s const generic is what lets
 `defineSeed()` type its reference values). A helper exists for every type below
 except a few authored as literals (`tags`, `progress`, `repeater`, `vector`).
 
+<!-- os:check -->
 ```typescript
-import { Field } from '@objectstack/spec';
+import { Field } from '@objectstack/spec/data';
 
-fields: {
+const fields = {
   name:       Field.text({ required: true, maxLength: 255 }),
   stage:      Field.select(['new', 'won'], { required: true }),  // options 1st
   account_id: Field.lookup('account', { required: true }),       // reference 1st
-}
+};
 ```
 
 > **Config columns list only real `FieldSchema` keys.** Per-type display knobs

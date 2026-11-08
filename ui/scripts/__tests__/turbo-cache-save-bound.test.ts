@@ -243,10 +243,14 @@ describe('root ci.yml — ui-deps builds the seven packages once for the ui jobs
   };
 
   it('runs whenever any ui job runs', () => {
-    // The union of the four conditions is Type Check UI's (and Build & E2E
-    // UI's): Test UI and Lint UI run on a subset of it.
+    // The union of the four conditions is Type Check UI's: Test UI and Lint UI
+    // run on a subset of it, and so does Build & E2E UI, which is that union
+    // narrowed by the covered conjunct (it skips on a push that borrowed the
+    // queue's verdict, objectstack#31519). ui-deps keeps the union.
     expect(deps().if).toBe(job(UI_JOBS.typeCheck).if);
-    expect(job(UI_JOBS.buildE2e).if).toBe(job(UI_JOBS.typeCheck).if);
+    expect(job(UI_JOBS.buildE2e).if).toBe(
+      String(job(UI_JOBS.typeCheck).if).replace(/ \}\}$/, " && needs.queue-verdict.outputs.covered != 'true' }}"),
+    );
   });
 
   it('hands over the pruned turbo cache, only when the prune found the build', () => {

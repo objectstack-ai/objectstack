@@ -76,9 +76,9 @@
     },
     "datasets": {
       "status": "live",
-      "verifiedAt": "2026-09-02",
-      "evidence": "packages/spec/src/system/i18n-resolver.ts#lookupDatasetAttr (`datasets.<name>.label` / `.description`); packages/spec/src/system/i18n-resolver.ts#lookupDatasetMemberLabel (`datasets.<name>.dimensions.<d>.label` and `.measures.<m>.label`); packages/spec/src/system/i18n-resolver.ts#translateDataset (registered in METADATA_DOCUMENT_TRANSLATORS, which is what TRANSLATABLE_METADATA_TYPES is derived from, so packages/rest/src/rest-server.ts#translateMetaItem localizes a served dataset with nothing else to remember, #3786)",
-      "note": "Seeded 2026-09-02 (#14253) LIVE, with its reader in the same change — not declared first and wired later. A dataset reads like a back-office definition, but a measure label is drawn ON THE DASHBOARD, under every metric tile and on every chart axis; before this `dataset` was neither in TRANSLATABLE_METADATA_TYPES nor addressed by any group, so a translated dashboard rendered Chinese tile titles with `Untouched > 14 days` directly beneath them. Top-level rather than nested under `dashboards` because a dataset is the ONE definition every presentation binds to by reference (ADR-0021 D1): the same measure is drawn by N widgets across M dashboards, and a dataset no dashboard references would otherwise be unaddressable. WALK BOUNDARY as for the other RECORD groups here (the header names the one group that is not a record): the drill sees this record's VALUE shape one level; the per-key conventions below it (dimensions.<d>.label, measures.<m>.label) are governed by the resolvers cited above. Key face measured against DatasetSchema: a dimension and a measure each declare `label` and nothing else display-shaped, which `dataset.zod.ts` states at the authoring site too ('its author-facing text is `label`. `description` is declared on the DATASET itself'), so `description` lives on the dataset and nowhere below it.",
+      "verifiedAt": "2026-11-08",
+      "evidence": "packages/spec/src/system/i18n-resolver.ts#lookupDatasetAttr (`datasets.<name>.label` / `.description`); packages/spec/src/system/i18n-resolver.ts#lookupDatasetMemberAttr (`datasets.<name>.dimensions.<d>.label` / `.description` and `.measures.<m>.label` / `.description`); packages/spec/src/system/i18n-resolver.ts#translateDataset (registered in METADATA_DOCUMENT_TRANSLATORS, which is what TRANSLATABLE_METADATA_TYPES is derived from, so packages/rest/src/rest-server.ts#translateMetaItem localizes a served dataset with nothing else to remember, #3786)",
+      "note": "Seeded 2026-09-02 (#14253) LIVE, with its reader in the same change — not declared first and wired later. A dataset reads like a back-office definition, but a measure label is drawn ON THE DASHBOARD, under every metric tile and on every chart axis; before this `dataset` was neither in TRANSLATABLE_METADATA_TYPES nor addressed by any group, so a translated dashboard rendered Chinese tile titles with `Untouched > 14 days` directly beneath them. Top-level rather than nested under `dashboards` because a dataset is the ONE definition every presentation binds to by reference (ADR-0021 D1): the same measure is drawn by N widgets across M dashboards, and a dataset no dashboard references would otherwise be unaddressable. WALK BOUNDARY as for the other RECORD groups here (the header names the one group that is not a record): the drill sees this record's VALUE shape one level; the per-key conventions below it (dimensions.<d>.label / .description, measures.<m>.label / .description) are governed by the resolvers cited above. Key face measured against DatasetSchema: until 2026-11-08 a dimension and a measure each declared `label` and nothing else display-shaped, so `description` lived on the dataset alone; ADR-0149 D1 (M1 ruled A) gave each member a `description` — a business definition, display text like the label — and its translation key landed with its overlay in `translateDatasetMembers` in the same change. A member's `synonyms` are match input, not display copy, and have no key (the member translation shapes' `guidance.synonyms` says so).",
       "children": {
         "label": {
           "status": "live",
@@ -88,21 +88,21 @@
         },
         "description": {
           "status": "live",
-          "verifiedAt": "2026-09-02",
+          "verifiedAt": "2026-11-08",
           "evidence": "packages/spec/src/system/i18n-resolver.ts#lookupDatasetAttr (`datasets.<name>.description`); packages/spec/src/system/i18n-resolver.ts#translateDataset",
-          "note": "the dataset's explanatory line. It is the ONLY description on this surface: `DatasetDimensionSchema` / `DatasetMeasureSchema` declare none and say so in their own authoring guidance, which is why the translation face has none below this level either."
+          "note": "the dataset's explanatory line — what the dataset as a whole covers. Each dimension and measure carries its own `description` since ADR-0149 D1, translated one level down (see `dimensions` / `measures`)."
         },
         "dimensions": {
           "status": "live",
-          "verifiedAt": "2026-09-02",
-          "evidence": "packages/spec/src/system/i18n-resolver.ts#lookupDatasetMemberLabel (`datasets.<name>.dimensions.<d>.label`); packages/spec/src/system/i18n-resolver.ts#translateDatasetMembers (overlays each dimension, keyed by `DatasetDimensionSchema.name`)",
-          "note": "one key beneath this record — `label`, the string drawn on chart axes and group headers. Keyed by the dimension's declared `name`, which is also how every presentation binds to it (ADR-0021)."
+          "verifiedAt": "2026-11-08",
+          "evidence": "packages/spec/src/system/i18n-resolver.ts#lookupDatasetMemberAttr (`datasets.<name>.dimensions.<d>.label` / `.description`); packages/spec/src/system/i18n-resolver.ts#translateDatasetMembers (overlays each dimension, keyed by `DatasetDimensionSchema.name`)",
+          "note": "two keys beneath this record — `label`, the string drawn on chart axes and group headers, and `description`, the dimension's business definition (ADR-0149 D1, added 2026-11-08 with its overlay). Keyed by the dimension's declared `name`, which is also how every presentation binds to it (ADR-0021)."
         },
         "measures": {
           "status": "live",
-          "verifiedAt": "2026-09-02",
-          "evidence": "packages/spec/src/system/i18n-resolver.ts#lookupDatasetMemberLabel (`datasets.<name>.measures.<m>.label`); packages/spec/src/system/i18n-resolver.ts#translateDatasetMembers (overlays each measure, keyed by `DatasetMeasureSchema.name`)",
-          "note": "one key beneath this record — `label`, the string drawn under every metric tile and on chart axes. This is the key #14253 was filed on: a translated dashboard rendered Chinese tile titles with `Untouched > 14 days` directly beneath them."
+          "verifiedAt": "2026-11-08",
+          "evidence": "packages/spec/src/system/i18n-resolver.ts#lookupDatasetMemberAttr (`datasets.<name>.measures.<m>.label` / `.description`); packages/spec/src/system/i18n-resolver.ts#translateDatasetMembers (overlays each measure, keyed by `DatasetMeasureSchema.name`)",
+          "note": "two keys beneath this record — `label`, the string drawn under every metric tile and on chart axes, and `description`, the measure's business definition (ADR-0149 D1, added 2026-11-08 with its overlay). This is the key #14253 was filed on: a translated dashboard rendered Chinese tile titles with `Untouched > 14 days` directly beneath them."
         }
       }
     },
