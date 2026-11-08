@@ -49,7 +49,7 @@ import { whereContainsMembershipSql } from '../contains-membership-sql.js';
 // [#25778] The per-row operand of a dataset duration measure, per dialect.
 import { durationMeasureIn, durationMeasureKey, durationOperandSql, hasDurationSql } from '../duration-measure-sql.js';
 import { scopedMeasureFilter } from '../scoped-measure-key.js';
-import { isJsonStoredShape } from '../contains-membership-sql.js';
+import { hasJsonMembershipSql, isJsonStoredShape } from '../contains-membership-sql.js';
 import { expandEmptyOperator } from '@objectstack/spec/data';
 import { resolveAnalyticsDateRangeString } from '@objectstack/core';
 import { dateRangeWindowBounds } from '../dataset-executor.js';
@@ -219,6 +219,9 @@ const OFFSET_ONLY_LIMIT_SQL: Readonly<Record<AnalyticsSqlDialect, string | null>
   mysql: 'LIMIT 18446744073709551615',
   postgres: null,
   unknown: 'LIMIT 9223372036854775807',
+  // [#31394] Named for the text-match arms only; the window keeps the spelling
+  // it had while SQL Server still read as `unknown`.
+  mssql: 'LIMIT 9223372036854775807',
 };
 
 /**
@@ -277,6 +280,8 @@ const NULLS_LAST_SQL: Readonly<Record<AnalyticsSqlDialect, string | null>> = {
   postgres: 'NULLS LAST',
   mysql: null,
   unknown: null,
+  // [#31394] As `unknown`, which SQL Server read as until it was named.
+  mssql: null,
 };
 
 /**
@@ -978,7 +983,7 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
     type Target = { object: string; field: string } | undefined;
     const needsJson = (target: Target, op: string): boolean => {
       if (!target || (op !== '$contains' && op !== '$notContains' && op !== '$empty')) return false;
-      if (sqlDialectFor(ctx, target.object) !== 'unknown') return false;
+      if (hasJsonMembershipSql(sqlDialectFor(ctx, target.object))) return false;
       const shape = declaredValueShapeResolver(ctx, target.object)?.(target.field);
       if (op === '$empty') return shape !== undefined && expandEmptyOperator(shape).arm === 'multi_value';
       return isJsonStoredShape(shape);
