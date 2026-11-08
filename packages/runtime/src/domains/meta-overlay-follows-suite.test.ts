@@ -35,6 +35,7 @@ import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { appOf, installedManifestsOf } from '@objectstack/metadata-core';
+import type { DataEngineInsertOptions, EngineQueryOptions } from '@objectstack/spec/data';
 import { SysMetadata, SysMetadataHistoryObject, SysMetadataAuditObject } from '@objectstack/platform-objects/metadata';
 // The protocol's doors reach `import('@objectstack/metadata')`; pay that load
 // during collection, never inside a clocked case (check:test-source-alias).
@@ -127,14 +128,14 @@ async function boot(file: string, version: Version, { partner = false } = {}) {
     const served = async (owner: string) => ({
         bare: await label(), owner: await label(owner), list: await listed(), layered: await layered(),
     });
-    const rows = async () => ((await engine.find('sys_metadata', {
-        where: { type: 'view', name: VIEW }, context: { isSystem: true },
-    } as any)) as any[]).map((r) => [r.package_id ?? null, r.state]);
+    const systemRead: EngineQueryOptions = { where: { type: 'view', name: VIEW }, context: { isSystem: true } };
+    const rows = async () => (await engine.find('sys_metadata', systemRead)).map((r) => [r.package_id ?? null, r.state]);
+    const systemWrite: DataEngineInsertOptions = { context: { isSystem: true } };
     /** A row laid down through the engine, as an earlier release or a pre-gate write stored it. */
     const layRow = async (type: string, name: string, packageId: string, body: Record<string, unknown>) => engine.insert('sys_metadata', {
         type, name, namespace: 'default', package_id: packageId, scope: 'platform', strategy: 'merge', state: 'active', version: 1,
         metadata: JSON.stringify(body),
-    }, { context: { isSystem: true } } as any);
+    }, systemWrite);
     return { engine, protocol, label, served, rows, layRow, installed: installedManifestsOf(engine.registry as any) };
 }
 type Session = Awaited<ReturnType<typeof boot>>;
