@@ -195,9 +195,14 @@ const shell = (command: string, plan = 'plan.json'): string[] => [
   'bash', '-c', `os() { "${process.execPath}" "${CLI}" "$@"; }; ${command.replaceAll('PLAN', plan)}`,
 ];
 
-/** The database a written plan names (`database`), read from the plan file. */
+/**
+ * The database file a written plan names (`database`), read from the plan file
+ * and resolved against the directory the plan ran in (the label keeps a
+ * relative `-d file:A.db` relative).
+ */
 function plannedDatabase(plan: string): string {
-  return String((JSON.parse(readFileSync(join(dir, plan), 'utf8')) as { database?: unknown }).database);
+  const label = String((JSON.parse(readFileSync(join(dir, plan), 'utf8')) as { database?: unknown }).database);
+  return resolve(dir, label.replace(/^file:/, ''));
 }
 
 /** Copy the staged 17.x database to `file`, closed and whole (`VACUUM INTO`). */
@@ -356,7 +361,7 @@ describe('`os start` names an ownership ceremony that runs with the secret it se
     expect(plan.code, plan.output.slice(-4000)).toBe(0);
     expect(existsSync(join(dir, 'plan.json'))).toBe(true);
     // ⭐ #31488: with OS_DATABASE_URL unset, the plan is of the refused database, not the project's own.
-    expect(plannedDatabase('plan.json')).toContain(join(dir, 'A.db'));
+    expect(plannedDatabase('plan.json')).toBe(join(dir, 'A.db'));
     const apply = recorded('apply');
     expect(apply.code, apply.output.slice(-6000)).toBe(0);
     expect(apply.output).toContain('The ceremony is complete');
@@ -384,7 +389,7 @@ describe('#31488 — the refusal names the database it refused, and the commands
     });
     const plan = recorded('planFlagHome');
     expect(plan.code, plan.output.slice(-4000)).toBe(0);
-    expect(plannedDatabase('plan-flag-home.json')).toContain(flagHomeFile());
+    expect(plannedDatabase('plan-flag-home.json')).toBe(flagHomeFile());
   });
 
   it('CONTROL: the project\'s own database is named as before, and its bare commands plan it', () => {
@@ -397,7 +402,7 @@ describe('#31488 — the refusal names the database it refused, and the commands
     });
     const plan = recorded('planDefault');
     expect(plan.code, plan.output.slice(-4000)).toBe(0);
-    expect(plannedDatabase('plan-default.json')).toContain(join(dir, '.objectstack', 'data', 'objectstack.db'));
+    expect(plannedDatabase('plan-default.json')).toBe(join(dir, '.objectstack', 'data', 'objectstack.db'));
   });
 
   it('CONTROL: a home exported as OS_HOME is named as before, and with it exported the commands plan its database', () => {
@@ -406,6 +411,6 @@ describe('#31488 — the refusal names the database it refused, and the commands
     expect(namedCommands(output).plan).not.toContain('--database-url');
     const plan = recorded('planEnvHome');
     expect(plan.code, plan.output.slice(-4000)).toBe(0);
-    expect(plannedDatabase('plan-env-home.json')).toContain(join(envHome, 'data', 'objectstack.db'));
+    expect(plannedDatabase('plan-env-home.json')).toBe(join(envHome, 'data', 'objectstack.db'));
   });
 });
