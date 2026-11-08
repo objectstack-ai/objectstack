@@ -68,7 +68,7 @@ interface FieldRefusal {
 }
 
 export interface IdpGroupMappingAdminResult {
-  status: 200 | 400 | 404 | 503;
+  status: 200 | 400 | 404 | 409 | 503;
   body:
     | { success: true; data: Record<string, unknown> }
     | { success: false; error: { code: string; message: string; fields?: FieldRefusal[] } };
@@ -278,9 +278,21 @@ export async function runSetIdpGroupMapping(
     { where: { source_kind: SCIM_MAPPING_SOURCE_KIND, source_id: connectionId, permission_set: permissionSet } },
     { context: SYSTEM_CTX } as never,
   );
-  const existing = (Array.isArray(sameRows) ? (sameRows as Record<string, unknown>[]) : []).find(
+  const sameKey = (Array.isArray(sameRows) ? (sameRows as Record<string, unknown>[]) : []).filter(
     (r) => text(r.group_external_id) === (groupExternalId ?? '') && text(r.group_display_name) === (groupExternalId ? '' : groupDisplayName ?? ''),
   );
+  // A same-key row saved while another organization owned the connection is
+  // not this mapping: its row and its grants stay in that organization. Never
+  // answer an organization the row does not carry, and never write a twin.
+  const elsewhere = sameKey.find((r) => text(r.organization_id) !== organizationId);
+  if (elsewhere) {
+    return fail(
+      409,
+      'RESOURCE_CONFLICT',
+      `IdP group mapping '${text(elsewhere.id)}' already maps this group to '${permissionSet}' for SCIM connection '${connectionId}' in organization '${text(elsewhere.organization_id)}', but the connection now belongs to organization '${organizationId}'. Delete mapping '${text(elsewhere.id)}' first (POST /admin/scim/delete-group-mapping), then save again.`,
+    );
+  }
+  const existing = sameKey.find((r) => text(r.organization_id) === organizationId);
   let mappingId: string;
   if (existing) {
     mappingId = text(existing.id);
