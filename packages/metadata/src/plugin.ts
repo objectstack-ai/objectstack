@@ -1209,7 +1209,8 @@ export class MetadataPlugin implements Plugin {
      * The version key is what keeps this a conversion
      * rather than an amnesty — an artifact authored against the current surface
      * that still writes a retired key is an authoring error its tombstone must
-     * report, never residue for history to strip. (`allowRestore` /
+     * report (only the #12840 `false` residue is tolerated, at the schema), never
+     * a strip this door performs. (`allowRestore` /
      * `allowPurge`, the keys this door was built for, stay retired: the recycle
      * bin's grants are the new keys `allowRestoreOwnDeleted` /
      * `manageRecycleBin`, ADR-0148 D5.)

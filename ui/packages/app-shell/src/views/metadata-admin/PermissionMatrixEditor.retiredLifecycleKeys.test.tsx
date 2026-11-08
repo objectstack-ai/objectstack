@@ -10,8 +10,9 @@
  * the `Re` / `Pu` checkboxes was a grant no runtime has ever read.
  * `@objectstack/spec` retired both as `retiredKey()` tombstones
  * (objectstack#12497; maintainer ruling 2026-08-26 accepting objectstack#1883
- * recommendation B, ADR-0049 enforce-or-remove). They return with the M2
- * lifecycle initiative, whose restart is recorded on objectstack#1883.
+ * recommendation B, ADR-0049 enforce-or-remove). They do not return: the
+ * operations now exist with the recycle bin (ADR-0148), granted by the new
+ * keys `allowRestoreOwnDeleted` / `manageRecycleBin`.
  *
  * Two directions are pinned, because a missing column is only half of it:
  *  - the COLUMN SET, not merely the absence of two keys. A set assertion is

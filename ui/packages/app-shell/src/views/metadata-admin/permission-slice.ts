@@ -30,8 +30,8 @@ export interface ObjectPerm {
   /** Bulk export of the object's records — an opt-in grant no bulk button sets. */
   allowExport?: boolean;
   allowTransfer?: boolean;
-  // `allowRestore` / `allowPurge` were REMOVED here (objectui#6595). Both gated
-  // `restore` / `purge` ObjectQL operations that did not exist then — a
+  // `allowRestore` / `allowPurge` were REMOVED here (objectui#6595). Both claimed
+  // to gate `restore` / `purge` ObjectQL operations that did not exist then — a
   // dispatched restore/purge was denied unconditionally by the evaluator's
   // fail-closed destructive-operation backstop — so the matrix authored two
   // checkboxes no runtime ever read. `@objectstack/spec` retired both keys
@@ -50,9 +50,10 @@ export interface ObjectPerm {
   // It is carried through save untouched, as any key this editor does not model
   // is (`PermissionSetDraft`'s index signature below states that rule for the
   // record; `updateObjectPerm`'s spread applies it per row). Stripping it is
-  // NOT this change: the installed spec still accepts both keys, so a strip
-  // today would delete stored data the schema still honours. That belongs with
-  // the `@objectstack/spec` bump that lands the retirement.
+  // NOT this editor's job: the spec tolerates only the retired `false` residue
+  // (objectstack#12840) and refuses every other value with the tombstone's
+  // prescription, and sources are rewritten by `os migrate meta` (conversion
+  // `permission-allow-restore-purge-removed`).
   viewAllRecords?: boolean;
   modifyAllRecords?: boolean;
   /**

@@ -21,7 +21,7 @@
  * Direction one pins the fix: the 17.1-authored artifact converts forward and
  * registers. Direction two pins the boundary that keeps the conversion
  * *versioned* — the retired window opens on version evidence, never as a
- * blanket amnesty (the keys return with M2, #1883) — as re-shaped by the
+ * blanket amnesty (the keys stay retired, ADR-0148 D5) — as re-shaped by the
  * #12845 ruling (maintainer 2026-08-28): at the CURRENT spec version a
  * NON-default retired-key value still refuses with the tombstone, while the
  * emitted default parses as inert residue stripped silently at the SCHEMA
