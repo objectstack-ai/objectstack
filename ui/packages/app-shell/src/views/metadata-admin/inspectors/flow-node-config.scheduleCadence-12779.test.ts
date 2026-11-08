@@ -171,8 +171,41 @@ describe('a typed cron stores a descriptor that resolves to it (objectui#12779)'
     expect(scheduleWithExpression({ cron: '0 4 * * *' }, '')).toBeUndefined();
     expect(scheduleWithExpression({ expression: '0 4 * * *' }, undefined)).toBeUndefined();
     expect(scheduleWithExpression({ type: 'interval', intervalMs: 60000 }, undefined)).toBeUndefined();
-    expect(scheduleWithExpression({ type: 'cron', expression: '0 7 * * *', timezone: 'UTC' }, '')).toEqual({
+  });
+});
+
+describe('clearing never leaves a typed schedule block with no cadence (objectstack#31383)', () => {
+  // A typed block is judged by the published `ScheduleSchema`, which refuses a
+  // `type: 'cron'` with no `expression`; the engine binds nothing from it.
+  const typedCleared: Array<[string, Record<string, unknown>, unknown]> = [
+    ["a typed cron's expression", { type: 'cron', expression: '0 7 * * *' }, ''],
+    ["a typed cron's expression beside a timezone", { type: 'cron', expression: '0 7 * * *', timezone: 'UTC' }, ''],
+    ['a typed cron cleared to undefined', { type: 'cron', expression: '0 7 * * *', timezone: 'Asia/Shanghai' }, undefined],
+    ["a typed { cron }'s value", { type: 'cron', cron: '0 5 * * *', timezone: 'UTC' }, ''],
+    ['a typed cron that already carried no cadence', { type: 'cron', timezone: 'UTC' }, ''],
+    ['an interval type that carried only an expression', { type: 'interval', expression: '0 7 * * *' }, ''],
+    ['an unknown type beside an expression', { type: 'weekly', expression: '0 8 * * *', timezone: 'UTC' }, ''],
+  ];
+  for (const [name, schedule, value] of typedCleared) {
+    it(`clearing ${name} removes the whole schedule`, () => {
+      expect(normalizeScheduleCadence(scheduleWithExpression(schedule, value))).toBeNull();
+      expect(scheduleWithExpression(schedule, value)).toBeUndefined();
+    });
+  }
+
+  it('CONTROL: clearing an untyped { expression } still removes the whole schedule', () => {
+    expect(scheduleWithExpression({ expression: '0 4 * * *' }, '')).toBeUndefined();
+  });
+
+  it('CONTROL: a cron typed over a typed block keeps its type and the other keys', () => {
+    expect(scheduleWithExpression({ type: 'cron', expression: '0 7 * * *', timezone: 'UTC' }, '0 9 * * *')).toEqual({
       type: 'cron',
+      expression: '0 9 * * *',
+      timezone: 'UTC',
+    });
+    expect(scheduleWithExpression({ type: 'cron', timezone: 'UTC' }, '0 9 * * *')).toEqual({
+      type: 'cron',
+      expression: '0 9 * * *',
       timezone: 'UTC',
     });
   });

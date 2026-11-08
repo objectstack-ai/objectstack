@@ -238,6 +238,30 @@ describe('a typed cron stores a descriptor the engine resolves to it (objectui#1
   });
 });
 
+describe('clearing the Cron schedule box drops a typed block it would leave with no cadence (objectstack#31383)', () => {
+  const typed: Array<[string, Record<string, unknown>]> = [
+    ['a typed cron', { type: 'cron', expression: '0 7 * * *' }],
+    ['a typed cron with a timezone', { type: 'cron', expression: '0 7 * * *', timezone: 'Asia/Shanghai' }],
+  ];
+  for (const [name, schedule] of typed) {
+    it(`clearing ${name} stores no schedule`, () => {
+      const { latest, patches } = mount(scheduleFlow({ schedule, objectName: 'todo_task' }));
+      fireEvent.change(controlOf('Cron schedule'), { target: { value: '' } });
+      expect(patches.length).toBeGreaterThan(0);
+      const config = startConfig(latest());
+      expect('schedule' in config).toBe(false);
+      expect(config.objectName).toBe('todo_task');
+      expect(controlOf('Cron schedule').value).toBe('');
+    });
+  }
+
+  it('CONTROL: clearing an untyped { expression } stores no schedule, as before', () => {
+    const { latest } = mount(scheduleFlow({ schedule: { expression: '0 6 * * *' }, objectName: 'todo_task' }));
+    fireEvent.change(controlOf('Cron schedule'), { target: { value: '' } });
+    expect('schedule' in startConfig(latest())).toBe(false);
+  });
+});
+
 describe('CONTROLS: the forms the field already read behave as before (objectui#12779)', () => {
   it('a typed cron with a timezone reads and writes with its type and timezone kept', () => {
     const { latest } = mount(scheduleFlow({ schedule: { type: 'cron', expression: '0 7 * * *', timezone: 'Asia/Shanghai' } }));

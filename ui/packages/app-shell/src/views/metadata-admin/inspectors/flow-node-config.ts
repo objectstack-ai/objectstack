@@ -526,7 +526,8 @@ const FLOW_NODE_CONFIG: Record<string, FlowConfigField[]> = {
     // it is (`readOnlyScheduleCadence`): the designer edits cron cadences only.
     // A commit rewrites the whole block through `scheduleWithExpression`, which
     // keeps a bare string a string and an object's `type` / `timezone`, so the
-    // stored cadence resolves to the cron the field shows.
+    // stored cadence resolves to the cron the field shows; clearing it never
+    // leaves a typed block with no cadence (objectstack#31383).
     //
     // objectui#12672 — gated on the flow's RESOLVED kind as well as on the
     // select: a `type: 'schedule'` flow, or a start node carrying
@@ -1705,7 +1706,13 @@ const NON_CRON_CADENCE_KEYS = ['intervalMs', 'every', 'at'] as const;
  *   only met on a descriptor the engine binds nothing from, since a live
  *   interval or once cadence offers no cron edit at all.
  * - Clearing removes `expression` and `cron`, or the whole schedule when it is
- *   a string, an interval or once cadence, or an object left empty.
+ *   a string, an interval or once cadence, an object left empty, or a typed
+ *   block left with no cadence (objectstack#31383). A typed block is judged
+ *   by the published `ScheduleSchema`, which refuses `{ type: 'cron' }` with no
+ *   `expression` (a `timezone` beside it does not make it a cadence); the
+ *   engine binds nothing from it either. So a cleared `{ type: 'cron',
+ *   expression, timezone }` leaves no schedule, as an untyped `{ expression }`
+ *   always did.
  */
 export function scheduleWithExpression(schedule: unknown, value: unknown): unknown {
   const expression = typeof value === 'string' ? value : '';
@@ -1717,6 +1724,7 @@ export function scheduleWithExpression(schedule: unknown, value: unknown): unkno
     const cadence = normalizeScheduleCadence(schedule);
     if (cadence && cadence.type !== 'cron') return undefined;
     delete next.expression;
+    if (next.type !== undefined && normalizeScheduleCadence(next) === null) return undefined;
   } else {
     if (typeof next.type === 'string' && next.type !== 'cron') delete next.type;
     for (const key of NON_CRON_CADENCE_KEYS) delete next[key];
