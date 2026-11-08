@@ -504,12 +504,12 @@ Even inside your own worktree, operate defensively:
    **Green means the gate-carrying jobs' `conclusion` is `success`** — not "no failure yet"; `in_progress` is not a
    pass, and arming a red PR hides it ([why](docs/agents/multi-agent-discipline.md#arming-a-red-pr-hides-it)). Always
    read *two* things: the queue branch **and** `origin/main`. And **the queue enforces only the required set** —
-   eleven contexts block: `Lint & Repo Gates` (all `check:*` gates), `TypeScript Type Check`, `Test Core`, `Build
-   Core`, `Governed Surface Queue Guard`, `Lint UI`, `Type Check UI`, `Test UI`, `Build & E2E UI`, `Live E2E UI` and
-   `Dogfood Regression Gate`; a check outside those eleven is advisory ([why that
+   eleven contexts block: `Lint & Repo Gates` (all `check:*` gates), `TypeScript Type Check`, `Test Core`, `Build Core`,
+   `Governed Surface Queue Guard`, `Lint UI`, `Type Check UI`, `Test UI`, `Build & E2E UI`, `Live E2E UI` and `Dogfood
+   Regression Gate`; a check outside those eleven is advisory ([why that
    matters](docs/agents/multi-agent-discipline.md#advisory-checks-ride-through)). A required context is matched by
-   check-run name, so a rename detaches its gate silently — treat those eleven names as contract. **Two speeds** — PR
-   runs carry the fast set, queue runs add the dogfood shards; `main`'s scheduled runs carry the full battery, and a
+   check-run name, so a rename detaches its gate silently — treat those eleven names as contract. **Two speeds** —
+   PR runs carry the fast set, queue runs add the dogfood shards; `main`'s scheduled runs carry the full battery, and a
    push run carries it by running the main-only jobs and borrowing the rest from the green queue runs of its commits
    ([detail](docs/agents/multi-agent-discipline.md#two-speeds-which-runs-carry-which-battery)). **Main-red:** a
    full-battery red is its lane's first work — triage files it under the main-red convention, the lane's next PR fixes
