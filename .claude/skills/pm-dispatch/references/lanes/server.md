@@ -3,7 +3,7 @@
 见 seat-lifecycle.md;本文是本车道岗位说明,现值状态恒在座位贴,⛔ 不迁入本文。
 
 - 三节按文件面分读:认领的 `File surface:` 落在哪节就读哪节,⛔ 不读整篇。
-- 红线:触 `packages/spec` 的卡一律归 spec 席;改元数据格式或接受面的卡亦然,不论碰没碰 spec。
+- 红线:元数据协议改动与可搭车的 `packages/spec` 改动,判据见 `spec.md`,⛔ 不另抄。
 
 ## 引擎面(原 `domain:engine`)
 
@@ -15,7 +15,7 @@
 - `packages/metadata*`(加载、注册、持久化、缓存、目录)、`packages/platform-objects`。
 - `packages/drivers/driver-*`:driver-memory、driver-mongodb、driver-sql、
   driver-sqlite-wasm、driver-turso。
-- `content/docs/**` 与 `packages/lint` ⇒ `domain:devx`;`packages/lint` 的唯一例外见 SKILL.md 锚定规则。
+- 本车道包的 `content/docs` 页随本席,判据见 `devx.md`;`packages/lint` 归属见 SKILL.md 的 devx 行。
 
 ### 常设承诺
 
