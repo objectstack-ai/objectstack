@@ -77,6 +77,16 @@
         "types": "./dist/picklist-references.d.cts",
         "default": "./dist/picklist-references.cjs"
       }
+    },
+    "./history-snapshot": {
+      "import": {
+        "types": "./dist/utils/history-snapshot-body.d.ts",
+        "default": "./dist/utils/history-snapshot-body.js"
+      },
+      "require": {
+        "types": "./dist/utils/history-snapshot-body.d.cts",
+        "default": "./dist/utils/history-snapshot-body.cjs"
+      }
     }
   },
   "files": [

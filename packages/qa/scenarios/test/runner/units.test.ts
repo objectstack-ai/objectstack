@@ -435,7 +435,7 @@ describe('prompts, seed order, template manifest and change size', () => {
     }
   });
 
-  it('a user-handle field is a scope field the card declares as neither lookup nor select; the contract says it is loaded with a user id', () => {
+  it('a user-handle field is one the card declares in `run.userHandleFields`; the contract says it is loaded with a user id', () => {
     const card = namespacedScenario(crm).card;
     expect([...userHandleFields(card)]).toEqual(['democrm_account.owner']);
     expect(unheldHandles(card)).toEqual(['u_tia']);
@@ -449,9 +449,40 @@ describe('prompts, seed order, template manifest and change size', () => {
     expect([...userHandleFields(desk.card)]).toEqual([]);
   });
 
+  it('reads the handle declaration, never infers it: a card that declares none has none, whatever its scope rules', () => {
+    const { userHandleFields: _declared, ...run } = crm.card.run;
+    expect([...userHandleFields({ ...crm.card, run })]).toEqual([]);
+    expect(unheldHandles({ ...crm.card, run })).toEqual([]);
+  });
+
+  it('across the nine cards the seed rewrites exactly the three handle fields it rewrote when they were inferred', () => {
+    const { cards, refusals } = loadScenarios(dirname(CARD_FILE), { areas: readCapabilityAreas(AREAS_DIR), library: 'open' });
+    expect(refusals.map(formatRefusal)).toEqual([]);
+    expect(cards).toHaveLength(9);
+    expect(cards.flatMap((c) => [...userHandleFields(c.card)]).sort()).toEqual(['account.owner', 'invoice.owner', 'task.assignee']);
+    // Every scoped persona names its person: a seed row (`record`), or a handle on a declared handle field.
+    const byRecord = cards.flatMap((c) => c.card.run.personas.filter((p) => p.record).map((p) => `${c.card.id}/${p.id}=${p.record!.object}:${p.record!.id}`));
+    expect(byRecord).toEqual([
+      'asset_lifecycle/employee=employee:e06',
+      'asset_lifecycle/dept_manager=employee:e05',
+      'leave_balances/employee=employee:e07',
+      'leave_balances/dept_manager=employee:e05',
+      'order_to_cash/sales_rep=employee:e03',
+      'order_to_cash/sales_manager=employee:e01',
+      'requisition_to_receipt/requester=employee:e02',
+      'requisition_to_receipt/dept_manager=employee:e13',
+      'service_desk/support_agent=agent:a02',
+      'service_desk/team_lead=agent:a04',
+      'service_desk/portal_customer=customer:cus_03',
+      'travel_expense/employee=employee:e02',
+      'travel_expense/dept_manager=employee:e01',
+    ]);
+  });
+
   it('a refused seed row takes out its children and what the card names on them, and nothing else', () => {
-    const card = namespacedScenario(crm).card;
-    const dep = seedDependence(card, [{ object: 'democrm_account', id: 'ac1' }]);
+    const scenario = namespacedScenario(crm);
+    const { card } = scenario;
+    const dep = seedDependence(scenario, [{ object: 'democrm_account', id: 'ac1' }]);
     expect([...dep.out.keys()].sort()).toEqual(['democrm_account/ac1', 'democrm_contact/ct1', 'democrm_contact/ct2']);
     const op = (id: string) => dep.operation(card.run.operations.find((o) => o.id === id)!);
     expect(op('partner_edits_account')).toBe('seed: needs democrm_account ac1, which the app refused'); // its target
@@ -459,10 +490,40 @@ describe('prompts, seed order, template manifest and change size', () => {
     expect(op('move_eli')).toBe('seed: needs democrm_account ac1, which the app refused'); // the account it writes
     expect(op('add_contact')).toBeUndefined();
     expect(op('contact_bad_email')).toBeUndefined();
-    const q = (id: string) => dep.question(card.run.questions.find((x) => x.id === id)!);
-    expect(q('tech_accounts')).toBe('seed: needs democrm_account ac1, which the app refused');
-    expect(q('unattached_contacts')).toBe('seed: needs democrm_contact ct1, a child of democrm_account ac1, which the app refused');
-    expect(seedDependence(card, []).out.size).toBe(0);
+    const q = (id: string, persona: string | null = null) => dep.question(card.run.questions.find((x) => x.id === id)!, persona);
+    expect(q('tech_accounts')).toBe('seed: its expected answer changes without democrm_account ac1, which the app refused'); // 2 tech accounts → 1
+    expect(q('contacts_per_account', 'sdr')).toBe('seed: its expected answer changes without democrm_account ac1, which the app refused');
+    expect(q('unattached_contacts')).toBeUndefined(); // ct4, the one unattached contact, is still held
+    expect(q('account_count', 'partner_user')).toBeUndefined(); // withheld either way
+    expect(q('acme_revenue')).toBeUndefined(); // unanswerable either way
+    expect(seedDependence(scenario, []).out.size).toBe(0);
+    expect(seedDependence(scenario, []).question(card.run.questions[0]!, null)).toBeUndefined();
+  });
+
+  it('decides dependence per turn: refusing ct4 leaves `contacts_per_account` as `sdr` measured, whose scope never reads it', () => {
+    const scenario = namespacedScenario(crm);
+    const dep = seedDependence(scenario, [{ object: 'democrm_contact', id: 'ct4' }]);
+    const turns = scenario.card.run.questions.flatMap((x) => (x.personas ?? [null]).map((p) => [x, p] as const));
+    const out = turns.filter(([x, p]) => dep.question(x, p) !== undefined).map(([x, p]) => `${x.id}/${p ?? '-'}`);
+    // ct4 is the one unattached contact: the unattached count (1 → 0) and the per-industry null group lose it; nothing else moves.
+    expect(out).toEqual(['unattached_contacts/-', 'contacts_by_industry/-']);
+    expect(dep.question(scenario.card.run.questions.find((x) => x.id === 'contacts_per_account')!, 'sdr')).toBeUndefined();
+    expect(dep.question(scenario.card.run.questions.find((x) => x.id === 'unattached_contacts')!, null)).toBe(
+      'seed: its expected answer changes without democrm_contact ct4, which the app refused',
+    );
+  });
+
+  it('a turn whose truth the rest of the seed no longer determines is not measured, and says so', () => {
+    const scenario = namespacedScenario(crm);
+    // An average over no rows is undefined: give the card one, then take every account away.
+    const card = structuredClone(scenario.card);
+    card.run.questions[0] = { ...card.run.questions[0]!, truth: { kind: 'avg', field: 'score' } };
+    for (const r of card.run.seed.democrm_account!) r.score = 3;
+    const withAvg: LoadedScenario = { ...scenario, card, truths: { ...scenario.truths, [card.run.questions[0]!.id]: { kind: 'scalar', value: 3 } } };
+    const dep = seedDependence(withAvg, ['ac1', 'ac2', 'ac3'].map((id) => ({ object: 'democrm_account', id })));
+    expect(dep.question(card.run.questions[0]!, null)).toBe(
+      'seed: its expected answer is not defined without democrm_account ac1, democrm_account ac2, democrm_account ac3, which the app refused',
+    );
   });
 
   it('chooses verify proofs from the tags, and seeds a lookup target before its referrer', () => {

@@ -30,6 +30,7 @@
  */
 
 import type { RunToolCall, RunTranscript } from '../score/index.js';
+import { contentText } from './drivers/process.js';
 
 /** A tool call as the runner keeps it: the graders' shape plus the error flag. */
 export interface RunnerToolCall extends RunToolCall {
@@ -101,17 +102,6 @@ function isBag(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v);
 }
 
-/** A tool result's content as the text the model was given. */
-function resultText(content: unknown): unknown {
-  if (typeof content === 'string') return content;
-  if (Array.isArray(content)) {
-    const texts = content.filter(isBag).filter((c) => c.type === 'text' && typeof c.text === 'string').map((c) => c.text as string);
-    if (texts.length === content.length) return texts.join('\n');
-    return content;
-  }
-  return content;
-}
-
 /** Parse a stream-json transcript (the whole stdout, or its lines). */
 export function parseStreamJson(stream: string | readonly string[]): ParsedTurn {
   const lines = typeof stream === 'string' ? stream.split('\n') : stream;
@@ -154,7 +144,7 @@ export function parseStreamJson(stream: string | readonly string[]): ParsedTurn 
         } else if (ev.type === 'user' && block.type === 'tool_result' && typeof block.tool_use_id === 'string') {
           const call = byId.get(block.tool_use_id);
           if (!call) continue;
-          call.output = resultText(block.content);
+          call.output = contentText(block.content);
           if (block.is_error === true) call.isError = true;
         }
       }

@@ -740,6 +740,9 @@ function reportUnrecognizedRulesOnce(fieldName: string, unrecognized: string[]):
  */
 const DATA_SOURCE_ONLY_WIDGET_TYPES = new Set([
   'object-ref', 'filter-condition', 'recipient-picker',
+  // The sharing-rule object picker is `object-ref` when its door does not
+  // answer, and that list is read through `dataSource.getObjects`.
+  'shareable-object-ref',
   // objectui#7611: the registry-name pickers read their catalog through
   // `dataSource.listMetadataItems`.
   'position-ref', 'permission-ref',

@@ -6,7 +6,8 @@
  * driver (better-sqlite3, the `sys_oauth_consent` table created by schema
  * sync, so the `last_used_at` column is the one the platform object declares),
  * tokens minted by the real jwt plugin and verified by the real
- * `verifyMcpAccessToken`, consents written by better-auth's own adapter.
+ * `verifyMcpAccessToken` and recorded by `recordMcpAccessTokenUse` (#31211),
+ * consents written by better-auth's own adapter.
  *
  * What is pinned:
  *
@@ -201,6 +202,17 @@ async function rig() {
 
 const iso = (ms: number) => new Date(ms).toISOString();
 
+/**
+ * [#31211] One MCP call the door ADMITTED, as `resolve-execution-context.ts`
+ * makes it: verify the token, then hand the very object the verifier answered
+ * back to `recordMcpAccessTokenUse`. Verifying alone records nothing.
+ */
+async function admittedCall(manager: AuthManager, token: string) {
+  const principal = await manager.verifyMcpAccessToken(token);
+  if (principal) manager.recordMcpAccessTokenUse(principal);
+  return principal;
+}
+
 describe('[#30918] the last-use stamp is coarse: one write per consent per hour', () => {
   it('many verified calls in one hour write once, with the hour\'s start; the next hour writes once more; the read answers it', async () => {
     const r = await rig();
@@ -209,7 +221,7 @@ describe('[#30918] the last-use stamp is coarse: one write per consent per hour'
 
     const token = await r.mint();
     for (let i = 0; i < 25; i++) {
-      expect(await r.manager.verifyMcpAccessToken(token)).toMatchObject({ userId: USER, clientId: CLIENT });
+      expect(await admittedCall(r.manager, token)).toMatchObject({ userId: USER, clientId: CLIENT });
     }
     await vi.waitFor(async () => expect(await r.stampOf(id)).toBe(iso(HOUR_10)));
     await drain();
@@ -219,7 +231,7 @@ describe('[#30918] the last-use stamp is coarse: one write per consent per hour'
     // Later in the same hour: still the same stamp, no I/O at all.
     vi.setSystemTime(HOUR_10 + 59 * MINUTE);
     const late = await r.mint();
-    for (let i = 0; i < 5; i++) await r.manager.verifyMcpAccessToken(late);
+    for (let i = 0; i < 5; i++) await admittedCall(r.manager, late);
     await drain();
     expect(r.writes()).toBe(1);
     expect(r.reads()).toBe(1);
@@ -228,7 +240,7 @@ describe('[#30918] the last-use stamp is coarse: one write per consent per hour'
     // The next hour: one more write, with that hour's start.
     vi.setSystemTime(HOUR_11 + 2 * MINUTE);
     const next = await r.mint();
-    for (let i = 0; i < 3; i++) await r.manager.verifyMcpAccessToken(next);
+    for (let i = 0; i < 3; i++) await admittedCall(r.manager, next);
     await vi.waitFor(async () => expect(await r.stampOf(id)).toBe(iso(HOUR_11)));
     await drain();
     expect(r.writes()).toBe(2);
@@ -247,14 +259,14 @@ describe('[#30918] the last-use stamp is coarse: one write per consent per hour'
     const r = await rig();
     const id = await r.consent();
     const token = await r.mint();
-    await r.manager.verifyMcpAccessToken(token);
+    await admittedCall(r.manager, token);
     await vi.waitFor(async () => expect(await r.stampOf(id)).toBe(iso(HOUR_10)));
     await drain();
     const [writes, reads] = [r.writes(), r.reads()];
 
     const second = r.makeManager();
     await second.getApi();
-    for (let i = 0; i < 10; i++) expect(await second.verifyMcpAccessToken(token)).toMatchObject({ userId: USER });
+    for (let i = 0; i < 10; i++) expect(await admittedCall(second, token)).toMatchObject({ userId: USER });
     await drain();
     expect(r.writes(), 'the stored hour is current, so the second process writes nothing').toBe(writes);
     expect(r.reads(), 'and it reads once for the hour, not once per call').toBe(reads + 1);
@@ -267,19 +279,78 @@ describe('[#30918] the last-use stamp is coarse: one write per consent per hour'
     const inNone = await r.consent();
     const otherClient = await r.consent({ clientId: OTHER_CLIENT, referenceId: ORG_A });
 
-    await r.manager.verifyMcpAccessToken(await r.mint({ [OAUTH_ORGANIZATION_CLAIM]: ORG_A }));
+    await admittedCall(r.manager, await r.mint({ [OAUTH_ORGANIZATION_CLAIM]: ORG_A }));
     await vi.waitFor(async () => expect(await r.stampOf(inA)).toBe(iso(HOUR_10)));
     await drain();
     expect(await r.stampOf(inB)).toBeNull();
     expect(await r.stampOf(inNone)).toBeNull();
     expect(await r.stampOf(otherClient)).toBeNull();
 
-    await r.manager.verifyMcpAccessToken(await r.mint());
+    await admittedCall(r.manager, await r.mint());
     await vi.waitFor(async () => expect(await r.stampOf(inNone)).toBe(iso(HOUR_10)));
     await drain();
     expect(await r.stampOf(inB)).toBeNull();
     expect(await r.stampOf(otherClient)).toBeNull();
   }, 60_000);
+});
+
+describe('[#31211] verifying is not admitting: only the verifier\'s own object, handed back once, is recorded', () => {
+  it('a token that verifies but is never recorded (the door refused the call) stamps nothing', async () => {
+    const r = await rig();
+    const id = await r.consent();
+    const token = await r.mint();
+    for (let i = 0; i < 3; i++) {
+      expect(await r.manager.verifyMcpAccessToken(token)).toMatchObject({ userId: USER, clientId: CLIENT });
+    }
+    await drain();
+    expect(r.reads(), 'verification alone reads no stamp').toBe(0);
+    expect(r.writes(), 'and writes none').toBe(0);
+    expect(await r.stampOf(id)).toBeNull();
+
+    // Control: the same token, admitted, stamps the hour.
+    await admittedCall(r.manager, token);
+    await vi.waitFor(async () => expect(await r.stampOf(id)).toBe(iso(HOUR_10)));
+    expect(r.writes()).toBe(1);
+  }, 60_000);
+
+  it('a hand-built principal, or a copy of a verified one, records nothing', async () => {
+    const r = await rig();
+    const id = await r.consent();
+    const verified = await r.manager.verifyMcpAccessToken(await r.mint());
+    expect(verified).toMatchObject({ userId: USER, clientId: CLIENT });
+    r.manager.recordMcpAccessTokenUse({ userId: USER, scopes: ['data:read'], clientId: CLIENT });
+    r.manager.recordMcpAccessTokenUse({ ...verified! });
+    await drain();
+    expect(r.reads()).toBe(0);
+    expect(r.writes()).toBe(0);
+    expect(await r.stampOf(id)).toBeNull();
+
+    // Control: the verifier's own object stamps.
+    r.manager.recordMcpAccessTokenUse(verified!);
+    await vi.waitFor(async () => expect(await r.stampOf(id)).toBe(iso(HOUR_10)));
+  }, 60_000);
+
+  it('one verified object is recorded once: handed back again in a later hour, it stamps nothing more', async () => {
+    const r = await rig();
+    const id = await r.consent();
+    const verified = await r.manager.verifyMcpAccessToken(await r.mint());
+    r.manager.recordMcpAccessTokenUse(verified!);
+    await vi.waitFor(async () => expect(await r.stampOf(id)).toBe(iso(HOUR_10)));
+    await drain();
+    expect(r.writes()).toBe(1);
+
+    vi.setSystemTime(HOUR_11 + 2 * MINUTE);
+    r.manager.recordMcpAccessTokenUse(verified!);
+    await drain();
+    expect(r.writes(), 'the same object again is not a second admitted call').toBe(1);
+    expect(await r.stampOf(id)).toBe(iso(HOUR_10));
+  }, 60_000);
+
+  it('a principal no verifier answered never throws: the record is bookkeeping, never the call\'s failure', () => {
+    const manager = new AuthManager({ secret: SECRET, baseUrl: BASE } as never);
+    expect(() => manager.recordMcpAccessTokenUse({ userId: USER, scopes: [] })).not.toThrow();
+    expect(() => manager.recordMcpAccessTokenUse(null as never)).not.toThrow();
+  });
 });
 
 describe('[#30918] nothing a client sends reaches the stamp', () => {
@@ -304,17 +375,17 @@ describe('[#30918] nothing a client sends reaches the stamp', () => {
     const expired = await r.mint({ exp: now - 60 });
     const noAzp = await r.mint({ azp: undefined, client_id: CLIENT });
 
-    expect(await r.manager.verifyMcpAccessToken(wrongAudience)).toBeNull();
-    expect(await r.manager.verifyMcpAccessToken(foreignKey)).toBeNull();
-    expect(await r.manager.verifyMcpAccessToken(expired)).toBeNull();
-    expect(await r.manager.verifyMcpAccessToken('not.a.token')).toBeNull();
+    expect(await admittedCall(r.manager, wrongAudience)).toBeNull();
+    expect(await admittedCall(r.manager, foreignKey)).toBeNull();
+    expect(await admittedCall(r.manager, expired)).toBeNull();
+    expect(await admittedCall(r.manager, 'not.a.token')).toBeNull();
     // #30879 keys the verifier's consent read by `azp`, so a token without one
     // is refused before the stamp could see it.
-    expect(await r.manager.verifyMcpAccessToken(noAzp), 'a client_id-only token is refused').toBeNull();
+    expect(await admittedCall(r.manager, noAzp), 'a client_id-only token is refused').toBeNull();
 
     // Positive control on the same process: a verified token for another
     // client stamps, so the stamp path is live while the five above did not.
-    await r.manager.verifyMcpAccessToken(await r.mint({ azp: OTHER_CLIENT }));
+    await admittedCall(r.manager, await r.mint({ azp: OTHER_CLIENT }));
     await vi.waitFor(async () => expect(await r.stampOf(control)).toBe(iso(HOUR_10)));
     await drain();
     expect(await r.stampOf(id)).toBeNull();
@@ -369,7 +440,7 @@ describe('[#30918] nothing a client sends reaches the stamp', () => {
     expect(await r.stampOf(id)).toBeNull();
 
     // The one writer: a verified call, with the server's hour.
-    await r.manager.verifyMcpAccessToken(await r.mint({ sub: userId }));
+    await admittedCall(r.manager, await r.mint({ sub: userId }));
     await vi.waitFor(async () => expect(await r.stampOf(id)).toBe(iso(HOUR_10)));
   }, 60_000);
 });
@@ -392,7 +463,7 @@ describe('[#30918] a failing store', () => {
       vi.setSystemTime(at);
       const token = await r.mint();
       for (let i = 0; i < 4; i++) {
-        expect(await r.manager.verifyMcpAccessToken(token), 'the verdict never waits on, or fails with, the stamp').toMatchObject({
+        expect(await admittedCall(r.manager, token), 'the verdict never waits on, or fails with, the stamp').toMatchObject({
           userId: USER,
           clientId: CLIENT,
         });
@@ -427,7 +498,7 @@ describe('[#30918] a failing store', () => {
     // Every call after the consent was granted (10:17), so the verifier admits each.
     for (const at of [HOUR_10 + 20 * MINUTE, HOUR_11 + 5 * MINUTE, HOUR_11 + 65 * MINUTE]) {
       vi.setSystemTime(at);
-      await r.manager.verifyMcpAccessToken(await r.mint());
+      await admittedCall(r.manager, await r.mint());
       await drain();
     }
     expect(attempts, 'one attempt in each of the three hours').toBe(3);
@@ -464,7 +535,7 @@ describe('[#30918] a failing store', () => {
       }
     }) as never);
 
-    await r.manager.verifyMcpAccessToken(await r.mint());
+    await admittedCall(r.manager, await r.mint());
     await drain();
     expect(updateErrors, 'the write did land on a row that was gone').toEqual(['RECORD_NOT_FOUND']);
     const reportsOf = () => r.logger.error.mock.calls.filter(([message]) => String(message).includes('last-use time'));
@@ -478,7 +549,7 @@ describe('[#30918] a failing store', () => {
       return realUpdate(object, ...rest);
     }) as never);
     vi.setSystemTime(HOUR_11 + 5 * MINUTE);
-    await r.manager.verifyMcpAccessToken(await r.mint());
+    await admittedCall(r.manager, await r.mint());
     await drain();
     expect(reportsOf().map(([, meta]) => meta)).toEqual([{ error: 'no such column: last_used_at' }]);
   }, 60_000);
@@ -489,7 +560,7 @@ describe('[#30918 × #30879] the stamp lands only on the consent that admitted t
     const r = await rig();
     const first = await r.consent();
     const oldToken = await r.mint();
-    expect(await r.manager.verifyMcpAccessToken(oldToken)).toMatchObject({ userId: USER, clientId: CLIENT });
+    expect(await admittedCall(r.manager, oldToken)).toMatchObject({ userId: USER, clientId: CLIENT });
     await vi.waitFor(async () => expect(await r.stampOf(first)).toBe(iso(HOUR_10)));
     await drain();
     const writes = r.writes();
@@ -498,7 +569,7 @@ describe('[#30918 × #30879] the stamp lands only on the consent that admitted t
     // this hour or the next.
     await r.withdraw(first);
     vi.setSystemTime(HOUR_11 + 3 * MINUTE);
-    expect(await r.manager.verifyMcpAccessToken(oldToken), 'a revoked consent refuses its token').toBeNull();
+    expect(await admittedCall(r.manager, oldToken), 'a revoked consent refuses its token').toBeNull();
     await drain();
     expect(r.writes(), 'a revoked consent stamps nothing').toBe(writes);
 
@@ -506,13 +577,13 @@ describe('[#30918 × #30879] the stamp lands only on the consent that admitted t
     // the new consent stays unstamped until a token of ITS grant is used.
     vi.setSystemTime(HOUR_11 + 4 * MINUTE);
     const again = await r.consent();
-    expect(await r.manager.verifyMcpAccessToken(oldToken), 'a token older than the consent is refused').toBeNull();
+    expect(await admittedCall(r.manager, oldToken), 'a token older than the consent is refused').toBeNull();
     await drain();
     expect(await r.stampOf(again)).toBeNull();
     expect(r.writes()).toBe(writes);
 
     vi.setSystemTime(HOUR_11 + 5 * MINUTE);
-    expect(await r.manager.verifyMcpAccessToken(await r.mint())).toMatchObject({ userId: USER });
+    expect(await admittedCall(r.manager, await r.mint())).toMatchObject({ userId: USER });
     await vi.waitFor(async () => expect(await r.stampOf(again)).toBe(iso(HOUR_11)));
   }, 60_000);
 
@@ -537,7 +608,7 @@ describe('[#30918 × #30879] the stamp lands only on the consent that admitted t
       return realFind(object, ...rest);
     }) as never);
 
-    expect(await r.manager.verifyMcpAccessToken(oldToken), 'the verdict admits the token under its consent').toMatchObject({
+    expect(await admittedCall(r.manager, oldToken), 'the verdict admits the token under its consent').toMatchObject({
       userId: USER,
     });
     await drain();

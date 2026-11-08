@@ -18,10 +18,16 @@
  *     there, as `data` and `devLogins` do), and what it exports is what a boot
  *     can read.
  *
+ * `devPlugins` is left out the same way: it is the list a development boot
+ * (`os dev`, `os serve --dev`) adds off the config it loads, never read off the
+ * artifact, and leaving it in carried a development-only load list through
+ * `os package publish` / `os deploy` into a target. The same build measures
+ * both keys.
+ *
  * The control is the same build carrying the stack's other keys through: the
  * declared position the demo account names is in the artifact, and the
- * `functions` entry runs, so a green here is "this one key was left out", not
- * "the build wrote nothing".
+ * `functions` entry runs, so a green here is "these two keys were left out",
+ * not "the build wrote nothing".
  *
  * Runs the CLI from source (`bin/run-dev.js` under `node`), as the other build
  * suites do, so `compile.ts` is measured without a rebuild.
@@ -42,6 +48,7 @@ const CLI = resolve(HERE, '../bin/run-dev.js');
 const RUNTIME_MODULE = /^objectstack-runtime\.[a-f0-9]+\.mjs$/;
 
 const STAFF_EMAIL = 'counsel1@legal.example';
+const DEV_PLUGIN = '@acme/legal-dev-only-plugin';
 
 const CONFIG = `import { defineStack } from '@objectstack/spec';
 
@@ -60,6 +67,7 @@ export default defineStack({
   functions: { legal_score: legalScore },
   positions: [{ name: 'legal_counsel', label: 'Legal Counsel' }],
   demoStaff: [{ name: 'Legal Counsel 1', email: '${STAFF_EMAIL}', position: 'legal_counsel' }],
+  devPlugins: ['${DEV_PLUGIN}'],
 });
 `;
 
@@ -91,15 +99,22 @@ function build(cwd: string): Promise<{ code: number; stdout: string; stderr: str
   });
 }
 
-describe('`os build` leaves the demo accounts out of the artifact (#25777)', () => {
-  it('writes no `demoStaff` into objectstack.json, and a deployment that loads the artifact reads none', async () => {
-    const run = await build(dir);
+/** The one build both cases read: `os build --json` in the fixture directory. */
+let built: Promise<{ artifactPath: string; text: string; artifact: Record<string, unknown> }> | undefined;
+function buildOnce() {
+  built ??= build(dir).then((run) => {
     expect(run.code, `os build --json failed:\n${run.stdout}\n${run.stderr}`).toBe(0);
-
     const payload = JSON.parse(run.stdout) as { output?: string };
     const artifactPath = String(payload.output);
     const text = readFileSync(artifactPath, 'utf8');
-    const artifact = JSON.parse(text) as Record<string, unknown>;
+    return { artifactPath, text, artifact: JSON.parse(text) as Record<string, unknown> };
+  });
+  return built;
+}
+
+describe('`os build` leaves the demo accounts out of the artifact (#25777)', () => {
+  it('writes no `demoStaff` into objectstack.json, and a deployment that loads the artifact reads none', async () => {
+    const { artifactPath, text, artifact } = await buildOnce();
 
     expect(Object.keys(artifact)).not.toContain('demoStaff');
     expect(text).not.toContain(STAFF_EMAIL);
@@ -119,5 +134,21 @@ describe('`os build` leaves the demo accounts out of the artifact (#25777)', () 
     // module carries, both survived the same build.
     expect((artifact.positions as Array<{ name: string }>).map((p) => p.name)).toEqual(['legal_counsel']);
     expect(await (functions as Record<string, (input: unknown) => unknown>).legal_score({})).toBe(7);
+  }, 180_000);
+});
+
+describe('`os build` leaves the dev-only plugins out of the artifact', () => {
+  it('writes no `devPlugins` into objectstack.json, and a deployment that loads the artifact reads none', async () => {
+    const { artifactPath, text, artifact } = await buildOnce();
+
+    expect(Object.keys(artifact)).not.toContain('devPlugins');
+    expect(text).not.toContain(DEV_PLUGIN);
+
+    const loaded = (await loadArtifactBundle(artifactPath)) as Record<string, unknown> | null;
+    expect(loaded, 'the runtime loader could not load the artifact').toBeTruthy();
+    expect(Object.keys(loaded!)).not.toContain('devPlugins');
+
+    // Control: the stack's other keys survived the same build.
+    expect((artifact.objects as Array<{ name: string }>).map((o) => o.name)).toEqual(['legal_matter']);
   }, 180_000);
 });

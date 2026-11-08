@@ -163,6 +163,7 @@ export const KNOWN_SCHEMA_TYPES: readonly string[] = [
   'field:recipient-picker',
   'field:richtext',
   'field:select',
+  'field:shareable-object-ref',
   'field:signature',
   'field:slider',
   'field:summary',

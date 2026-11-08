@@ -5,8 +5,8 @@
  *
  * The cost ruling on cloud#3600 (「目前阶段尽量不要用云端的token，api的更贵」)
  * fixes what may sit behind it: a LOCAL Claude Code session on the developer's
- * own login, never an API-billed model and never a cloud agent. So there are
- * exactly two drivers, and neither calls a model API itself:
+ * own login, never an API-billed model and never a cloud agent. No driver
+ * calls a model API itself:
  *
  *   - {@link ClaudeCodeDriver} spawns the `claude` CLI in headless mode
  *     (`claude -p --output-format stream-json`, the prompt on stdin). It REFUSES
@@ -14,6 +14,11 @@
  *     `ANTHROPIC_AUTH_TOKEN` in the environment, or a CLI whose `auth status`
  *     reports an API-key login — and strips both variables from every child it
  *     spawns.
+ *   - `CodexDriver` (`drivers/codex.ts`, `--driver codex`) does the same with
+ *     the OpenAI Codex CLI (`codex exec --json`) on a ChatGPT plan login.
+ *   - `ExternalDriver` (`drivers/external.ts`, `--driver external:COMMAND`)
+ *     runs any command that speaks this seam as a stdin/stdout JSON process
+ *     contract (the package README states it).
  *   - {@link RecordedDriver} replays turns recorded earlier, so the runner's
  *     own tests (and a re-grade of an old run) need no model and no network.
  *
@@ -21,13 +26,14 @@
  * a recording the replay driver reads back.
  */
 
-import { spawn, spawnSync } from 'node:child_process';
+import { spawnSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 
 import { SCENARIO_TIERS, type ScenarioTier } from '../schema.js';
-import { parseStreamJson, type ParsedTurn, type TurnProcess } from './transcript.js';
+import { noResult, runTurnProcess } from './drivers/process.js';
+import { parseStreamJson, type ParsedTurn } from './transcript.js';
 
 /** Which run step a turn belongs to; the replay key is built from it. */
 export interface StepRef {
@@ -64,12 +70,14 @@ export interface AuthorResult {
 }
 
 export interface DriverInfo {
-  /** `claude-code-cli` or `recorded`. */
+  /** `claude-code-cli`, `codex-cli`, `external:NAME` (the name the command gives itself) or `recorded`. */
   driver: string;
-  /** The CLI version, or the recording's path. */
+  /** The CLI's (or the external command's) version, or the recording's path. */
   version?: string;
-  /** How the CLI is logged in (`claude auth status`), e.g. `oauth_token`; never a secret. */
+  /** How the CLI is logged in (`claude auth status`, `codex login status`), e.g. `oauth_token`; never a secret. */
   authMethod?: string;
+  /** A replay's: the driver and version that made the recording it replays — the agent whose turns these are. */
+  replayOf?: { driver: string; version?: string };
   /** Always `false`: no driver here bills an API key; the record states it. */
   apiBilled: false;
   /** The live driver's wall-clock budget per authoring turn (build and iterate), ms. */
@@ -97,10 +105,11 @@ export const API_BILLING_ENV = ['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN'] as 
 
 // The cost ruling recorded on objectstack-ai/cloud#3600; the message below carries its substance, not its id.
 export class ApiBillingRefusedError extends Error {
-  constructor(reason: string) {
+  /** `cli` names the agent tool and its login command; default Claude Code's. */
+  constructor(reason: string, cli: { tool: string; login: string } = { tool: 'Claude Code', login: 'claude auth login' }) {
     super(
-      `the scenario runner drives a local Claude Code login only, never an API-billed model: ${reason}. ` +
-        'Unset it and run `claude auth login` with your subscription.',
+      `the scenario runner drives a local ${cli.tool} login only, never an API-billed model: ${reason}. ` +
+        `Unset it and run \`${cli.login}\` with your subscription.`,
     );
     this.name = 'ApiBillingRefusedError';
   }
@@ -189,82 +198,6 @@ export function servedAsRequested(requested: string, served: string): boolean {
   }
   return false;
 }
-
-interface CliRun {
-  stdout: string;
-  process: TurnProcess;
-}
-
-const STDERR_TAIL = 2000;
-
-/**
- * One CLI process, the prompt written to its stdin. The prompt never travels
- * on argv: a build prompt carries the card's whole seed, and on Linux one
- * argument longer than 128 KiB (`MAX_ARG_STRLEN`) makes `spawn` throw `E2BIG`
- * before the CLI starts — the two largest cards' build prompts are past it.
- *
- * Never rejects: a process that could not start, was killed by the timeout or
- * exited without a result is answered with what was seen of it, so the turn
- * it belongs to is recorded rather than lost.
- */
-function runCli(bin: string, args: string[], cwd: string, input: string, timeoutMs: number): Promise<CliRun> {
-  return new Promise((resolvePromise) => {
-    const started = Date.now();
-    let stdout = '';
-    let stderr = '';
-    let timedOut = false;
-    let error: string | undefined;
-    let settled = false;
-    let timer: NodeJS.Timeout | undefined;
-    const settle = (exit: number | null, signal: NodeJS.Signals | null) => {
-      if (settled) return;
-      settled = true;
-      if (timer) clearTimeout(timer);
-      const tail = stderr.trim().slice(-STDERR_TAIL);
-      resolvePromise({
-        stdout,
-        process: {
-          elapsedMs: Date.now() - started,
-          exit,
-          ...(signal ? { signal } : {}),
-          timedOut,
-          timeoutMs,
-          ...(tail ? { stderrTail: tail } : {}),
-          ...(error ? { error } : {}),
-        },
-      });
-    };
-    let child: ReturnType<typeof spawn>;
-    try {
-      child = spawn(bin, args, { cwd, env: subscriptionOnlyEnv(), stdio: ['pipe', 'pipe', 'pipe'] });
-    } catch (e) {
-      error = e instanceof Error ? e.message : String(e); // `spawn E2BIG` and its kin throw here
-      settle(null, null);
-      return;
-    }
-    child.stdout!.on('data', (d: Buffer) => (stdout += d.toString()));
-    child.stderr!.on('data', (d: Buffer) => (stderr += d.toString()));
-    child.on('error', (e) => {
-      error ??= e.message; // `spawn ENOENT`: no `close` may follow
-      if (child.pid === undefined) settle(null, null);
-    });
-    child.stdin!.on('error', (e) => (error ??= e.message)); // EPIPE: the CLI exited before reading its prompt
-    child.stdin!.end(input);
-    timer = setTimeout(() => {
-      timedOut = true;
-      child.kill('SIGTERM');
-    }, timeoutMs);
-    child.on('close', (exit, signal) => settle(exit, signal));
-  });
-}
-
-/**
- * `no-result(exit 143)`, `no-result(signal SIGTERM)`, `no-result(spawn E2BIG)`:
- * a turn that printed no result line, by how its process ended — or, when no
- * process ever ran, why.
- */
-const noResult = (p: TurnProcess): string =>
-  `no-result(${p.exit !== null ? `exit ${p.exit}` : p.signal ? `signal ${p.signal}` : (p.error ?? 'no exit code, no signal')})`;
 
 /** Every file under `dir` (skipping dependency and build trees) → content, for the author recording. */
 export function snapshotSources(dir: string): Record<string, string> {
@@ -369,7 +302,7 @@ export class ClaudeCodeDriver implements AgentDriver {
         '--permission-mode', 'acceptEdits',
         '--allowedTools', 'Bash', 'Read', 'Edit', 'Write', 'Glob', 'Grep', 'Skill',
       ];
-      const run = await runCli(this.bin, args, task.cwd, task.prompt, this.authorTimeoutMs);
+      const run = await runTurnProcess(this.bin, args, { cwd: task.cwd, input: task.prompt, timeoutMs: this.authorTimeoutMs, env: subscriptionOnlyEnv() });
       const turn = parseStreamJson(run.stdout);
       turn.meta.process = { ...run.process, maxTurns, ...(model ? { requestedModel: model } : {}) };
       if (turn.meta.resultSubtype === undefined) turn.meta.resultSubtype = noResult(run.process);
@@ -393,7 +326,7 @@ export class ClaudeCodeDriver implements AgentDriver {
       const maxTurns = this.askMaxTurns;
       const model = this.askModel;
       const args = ['-p', ...this.base(maxTurns, model), '--mcp-config', cfg, '--strict-mcp-config', '--allowedTools', 'mcp__app'];
-      const run = await runCli(this.bin, args, dir, task.prompt, this.opts.askTimeoutMs ?? 5 * 60_000);
+      const run = await runTurnProcess(this.bin, args, { cwd: dir, input: task.prompt, timeoutMs: this.opts.askTimeoutMs ?? 5 * 60_000, env: subscriptionOnlyEnv() });
       const turn = parseStreamJson(run.stdout);
       turn.meta.process = { ...run.process, maxTurns, ...(model ? { requestedModel: model } : {}) };
       if (turn.meta.resultSubtype === undefined) turn.meta.resultSubtype = noResult(run.process);
@@ -433,7 +366,16 @@ export class RecordedDriver implements AgentDriver {
   }
 
   info(): DriverInfo {
-    return { driver: 'recorded', version: this.source, ...(this.recording.driver.authMethod ? { authMethod: `replay of ${this.recording.driver.driver} (${this.recording.driver.authMethod})` } : {}), apiBilled: false };
+    const made = this.recording.driver;
+    // A recording of a replay names the agent of the run it replayed, not the replay.
+    const replayOf = made.replayOf ?? { driver: made.driver, ...(made.version !== undefined ? { version: made.version } : {}) };
+    return {
+      driver: 'recorded',
+      version: this.source,
+      replayOf,
+      ...(made.authMethod ? { authMethod: `replay of ${made.driver} (${made.authMethod})` } : {}),
+      apiBilled: false,
+    };
   }
 
   async author(task: AuthorTask): Promise<AuthorResult> {

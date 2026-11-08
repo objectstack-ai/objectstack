@@ -265,7 +265,7 @@ F`coalesce(record.cost, 0) > 0
 import { P } from '@objectstack/spec';
 
 P`record.status == 'qualified'`;
-P`record.amount > 10000 && record.region in ['us', 'eu']`;
+P`record.amount != null && record.amount > 10000 && record.region in ['us', 'eu']`;
 P`!isBlank(record.po_number)`;
 ```
 

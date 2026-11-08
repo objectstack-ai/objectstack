@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { Auth, BetterAuthOptions } from 'better-auth';
-import { decodeJwt, type JSONWebKeySet } from 'jose';
+import type { JSONWebKeySet } from 'jose';
 import type { SCIMIdentityState, SCIMTransactionContext } from '@better-auth/scim';
 // better-auth value imports (betterAuth + plugins) are deferred via dynamic
 // import() in getOrCreateAuth() / buildPluginList() so that disabled plugins
@@ -225,7 +225,7 @@ import {
   type McpAccessTokenHost,
 } from './auth-manager-mcp-access-token.js';
 // [#30918] The coarse last-use stamp a verified MCP call writes on its consent.
-import { McpClientLastUseStamper, mcpClientLastUseStoreFor } from './mcp-client-last-use.js';
+import { McpClientLastUseStamper, mcpClientLastUseStoreFor, issuedAtOf } from './mcp-client-last-use.js';
 import { runAfterResponse } from './run-after-response.js';
 // [objectstack-ai/cloud#3606, ruling A] `/oauth2/revoke` for an MCP access
 // token: the answer `handleRequest` gives after the provider's, through
@@ -4632,13 +4632,12 @@ export class AuthManager {
    * organization (`vetOrganizationClaim`, `@objectstack/core`), as the
    * `IAuthService` contract states.
    *
-   * [#30918] A token that verifies also schedules, AFTER the verdict and off
-   * the request's path, the coarse last-use stamp on the consent it was minted
-   * under (`mcp-client-last-use.ts`): at most one write per consent per hour
-   * in each process, from this verified token and the server's clock, and
-   * only on the consent that admitted it (the consent read above, by the same
-   * rule). The stamp reads and writes nothing the verdict depends on, and its
-   * failure is never this method's failure.
+   * [#30918 · #31211] Verifying is not admitting: this method records NO use.
+   * The door that resolves the principal can still refuse the call (a banned
+   * subject, an authorization store it could not read), and a refused call is
+   * not a use. It remembers the principal object it returns, and the door
+   * hands that object back to {@link recordMcpAccessTokenUse} once it has
+   * admitted the call.
    */
   verifyMcpAccessToken(
     token: string,
@@ -4652,16 +4651,46 @@ export class AuthManager {
       rereadKeyringForUnknownKey: (...a) => this.rereadKeyringForUnknownKey(...a),
       getAuthContext: (...a) => this.getAuthContext(...a),
     };
-    // [#30918] A token that verified is a verified MCP call: its consent's
-    // coarse last-use stamp is settled after the response, never awaited here,
-    // and from the verified token only (`mcp-client-last-use.ts`). The
-    // verifier has just admitted the token by its consent (#30879,
-    // `mcpConsentAdmits`), so a revoked consent refuses the call and stamps
-    // nothing; the stamp picks its consent by the same rule.
+    // [#31211] Remember the object this verifier answered, with the `iat` of
+    // the token it verified, so only that object can later be recorded as
+    // used. The token has just verified, so its payload is the one the
+    // signature covers: its `iat` is what the verifier admitted the consent
+    // against (#30879, `mcpConsentAdmits`).
     return verifyMcpAccessToken.call(host, token).then((principal) => {
-      if (principal) this.scheduleMcpClientLastUse(principal, token);
+      if (principal) this.verifiedMcpPrincipals.set(principal, { issuedAt: issuedAtOf(token) });
       return principal;
     });
+  }
+
+  /**
+   * [#31211] The principal objects {@link verifyMcpAccessToken} answered and
+   * nobody has recorded yet, each with its token's `iat`. Weak, so a principal
+   * whose call was refused (never recorded) is dropped with the request.
+   */
+  private readonly verifiedMcpPrincipals = new WeakMap<object, { issuedAt?: number }>();
+
+  /**
+   * [#31211] `IAuthService.recordMcpAccessTokenUse`: the MCP door admitted a
+   * call made with a token {@link verifyMcpAccessToken} verified, so the
+   * consent that token was minted under gets its coarse last-use stamp
+   * (`mcp-client-last-use.ts`, #30918), after the response and never awaited
+   * here: at most one write per consent per hour in each process, from the
+   * verified token and the server's clock, and only on the consent that
+   * admitted it.
+   *
+   * Only an object this manager's verifier returned is recorded, and only
+   * once; a hand-built principal, a copy, or the same object again records
+   * nothing. Never throws: the stamp's failure is never the call's failure.
+   */
+  recordMcpAccessTokenUse(principal: { userId: string; scopes: string[]; clientId?: string; organizationId?: string }): void {
+    try {
+      const verified = principal !== null && typeof principal === 'object' ? this.verifiedMcpPrincipals.get(principal) : undefined;
+      if (!verified) return;
+      this.verifiedMcpPrincipals.delete(principal);
+      this.scheduleMcpClientLastUse(principal, verified.issuedAt);
+    } catch {
+      // Bookkeeping only: an admitted call is never refused for it.
+    }
   }
 
   /** [#30918] The per-manager stamper, built on first use. */
@@ -4679,18 +4708,9 @@ export class AuthManager {
    */
   private scheduleMcpClientLastUse(
     principal: { userId: string; clientId?: string; organizationId?: string },
-    token: string,
+    issuedAt: number | undefined,
   ): void {
     if (!principal.clientId) return;
-    // The token has just verified, so its payload is the one the signature
-    // covers: its `iat` is what the verifier admitted the consent against.
-    let issuedAt: number | undefined;
-    try {
-      const iat = decodeJwt(token).iat;
-      issuedAt = typeof iat === 'number' ? iat : undefined;
-    } catch {
-      issuedAt = undefined;
-    }
     const stamper = (this.mcpClientLastUse ??= new McpClientLastUseStamper(
       mcpClientLastUseStoreFor(() => this.getDataEngine()),
       {
@@ -6163,6 +6183,22 @@ export class AuthManager {
       logDurabilityDegradation: (...a) => this.logDurabilityDegradation(...a),
     };
     return resolveSignInAccountId.call(host, email);
+  }
+
+  /**
+   * [#30924] The id of the account a sign-in refused by the ADR-0069 D5 IP
+   * allow-list names, for its `login_failed` row only
+   * (`ip-allow-list-refusal-audit.ts`), or `undefined` — the password
+   * sign-in's own account question ({@link findSignInAccount}). The gate
+   * refuses before better-auth resolves any account, so this is the only way
+   * that row can name one. It decides nothing: the refusal is already
+   * answered. Throws what the engine throws; the caller writes the row with no
+   * subject then.
+   */
+  public async resolveRefusedSignInAccountId(email: string): Promise<string | undefined> {
+    const engine = this.getDataEngine();
+    if (!engine) return undefined;
+    return (await this.findSignInAccount(engine, email, []))?.id;
   }
 
   /**

@@ -2,7 +2,7 @@
 
 /**
  * [#30918] When an authorized AI assistant was last used: a coarse stamp the
- * server writes on a verified MCP call, and nothing else ever writes.
+ * server writes on an ADMITTED MCP call, and nothing else ever writes.
  *
  * ## Where it lives
  *
@@ -18,10 +18,19 @@
  *
  * ## Who writes it, and when
  *
- * Only {@link McpClientLastUseStamper.record}, and only with the principal
- * `AuthManager.verifyMcpAccessToken` has just verified: the token's subject,
- * its `azp` client, its `organization_id` claim and its `iat`, every one read
- * from a signature this server checked. The time is the server's clock. No
+ * Only {@link McpClientLastUseStamper.record}, and only with a principal
+ * `AuthManager.verifyMcpAccessToken` verified: the token's subject, its `azp`
+ * client, its `organization_id` claim and its `iat`, every one read from a
+ * signature this server checked.
+ *
+ * And only once the MCP door has ADMITTED the call (#31211): verifying is not
+ * admitting, since the door refuses a banned subject after the verifier
+ * answers, and a refused call is not a use. So the verifier records nothing;
+ * the door hands the verified principal back through
+ * `IAuthService.recordMcpAccessTokenUse` after its last refusal
+ * (`@objectstack/runtime` `resolve-execution-context.ts`), and
+ * `AuthManager.recordMcpAccessTokenUse` stamps only a principal object its own
+ * verifier returned, once. The time is the server's clock. No
  * request field, header or body reaches the stamp, and the consent doors
  * better-auth serves (`/oauth2/consent`, `/oauth2/update-consent`) do not
  * carry the column. A token with no `azp` names no client, so it stamps
@@ -82,6 +91,8 @@
  * `RECORD_NOT_FOUND` as done.
  */
 
+import { decodeJwt } from 'jose';
+
 /** The stamp's granularity: one clock hour. */
 export const MCP_CLIENT_LAST_USE_GRANULARITY_MS = 60 * 60 * 1000;
 
@@ -141,6 +152,20 @@ export function consentForToken(
     : consents.find((row) => !row.referenceId);
   if (!consent || typeof issuedAt !== 'number' || !Number.isFinite(issuedAt) || !consent.createdAt) return undefined;
   return Math.floor(consent.createdAt.getTime() / 1000) <= issuedAt ? consent : undefined;
+}
+
+/**
+ * The `iat` of a token the verifier has just verified, in seconds; absent
+ * when it carries none (or does not decode). Read only after verification, so
+ * the payload is the one the signature covers.
+ */
+export function issuedAtOf(verifiedToken: string): number | undefined {
+  try {
+    const iat = decodeJwt(verifiedToken).iat;
+    return typeof iat === 'number' ? iat : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /** The start of the clock hour `nowMs` falls in. */
