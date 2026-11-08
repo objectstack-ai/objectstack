@@ -798,15 +798,14 @@ describe('an SSO sign-in grants the permission set its IdP group is mapped to', 
 
   it('the break-glass guard still refuses through the sign-in: the last administrator\'s grant is not removed, and the sign-in still lands', async () => {
     const rp = await makeGroupRp();
-    // Mia already exists and is the only administrator, through a grant carrying this provider's marker.
-    await rp.engine.delete('sys_user', { where: { id: 'usr_admin' } }, SYSTEM as never);
-    await rp.engine.insert('sys_user', { id: 'usr_mia', email: EMAIL, name: 'Mia Chen', email_verified: true }, SYSTEM);
+    // Mia is the only administrator, through a grant carrying this provider's marker
+    // (a row the projection would remove: no mapping names it).
+    const { userId } = await signInWithClaims(rp, { groups: [] });
     await rp.engine.insert('sys_user_permission_set', {
-      user_id: 'usr_mia', permission_set: ADMIN_FULL_ACCESS, organization_id: DEFAULT_ORG, reason: SSO_MARKER,
+      user_id: userId, permission_set: ADMIN_FULL_ACCESS, organization_id: DEFAULT_ORG, reason: SSO_MARKER,
     }, SYSTEM);
 
-    const { userId } = await signInWithClaims(rp, { groups: [] });
-    expect(userId).toBe('usr_mia');
+    await signInWithClaims(rp, { groups: [] });
     expect(await grantsOf(rp, userId)).toEqual([{ permission_set: ADMIN_FULL_ACCESS, organization_id: DEFAULT_ORG, reason: SSO_MARKER }]);
     expect(rp.error).toHaveBeenCalledTimes(1);
     expect(String(rp.error.mock.calls[0][0])).toMatch(/applying the provider's IdP group mappings .* FAILED/);
