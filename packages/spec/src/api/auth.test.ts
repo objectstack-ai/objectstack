@@ -270,6 +270,19 @@ describe('RegisterRequestSchema', () => {
     expect(req.image).toBe('https://example.com/img.png');
   });
 
+  it('accepts the invitation id a sign-up presents, and keeps it optional', () => {
+    const req = RegisterRequestSchema.parse({
+      email: 'invitee@example.com',
+      password: 'pass',
+      name: 'Invitee',
+      invitationId: 'aB3dE5fG7hJ9kL1mN3pQ5rS7tU9vW1xY',
+    });
+    expect(req.invitationId).toBe('aB3dE5fG7hJ9kL1mN3pQ5rS7tU9vW1xY');
+    expect(
+      RegisterRequestSchema.safeParse({ email: 'invitee@example.com', password: 'pass', name: 'Invitee', invitationId: 42 }).success,
+    ).toBe(false);
+  });
+
   it('should reject missing required fields', () => {
     expect(() => RegisterRequestSchema.parse({ email: 'a@b.com' })).toThrow();
     expect(() =>

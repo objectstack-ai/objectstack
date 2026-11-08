@@ -230,7 +230,7 @@ async function signUpMember(who: { email: string; password: string }, n: number)
   const res = await req('/auth/sign-up/email', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email: who.email, password: who.password, name: `pin member ${n}` }),
+    body: JSON.stringify({ email: who.email, password: who.password, name: `pin member ${n}`, invitationId: `inv_pin_30848_${n}` }),
   });
   if (!res.ok) throw new Error(`pin signUp failed: ${res.status} ${await res.text()}`);
   return (await res.json() as any).token;

@@ -83,6 +83,14 @@ export interface RegisterFormProps {
    * verification — an auto-signed-in registration calls `onSuccess` instead.
    */
   verificationCallbackURL?: string;
+  /**
+   * The invitation this registration presents — the id the page's
+   * `/accept-invitation/ID` redirect carries. Forwarded to `signUp`, which
+   * sends it as the sign-up body's `invitationId`: under the server's
+   * `invite_only` audience posture a sign-up is admitted only by the
+   * invitation it presents. Omitted, nothing is sent.
+   */
+  invitationId?: string;
   /** Callback on registration error */
   onError?: (error: Error) => void;
   /** Link to login page */
@@ -156,6 +164,7 @@ export function RegisterForm({
   onSuccess,
   onVerificationRequired,
   verificationCallbackURL,
+  invitationId,
   onError,
   loginUrl = '/login',
   title = 'Create an account',
@@ -230,6 +239,7 @@ export function RegisterForm({
         password,
         verificationCallbackURL,
         captchaRequired ? captchaToken ?? undefined : undefined,
+        invitationId || undefined,
       );
       if (result?.requiresVerification) {
         onVerificationRequired?.(trimmedEmail);
