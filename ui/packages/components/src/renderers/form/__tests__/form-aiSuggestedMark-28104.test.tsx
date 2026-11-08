@@ -249,6 +249,33 @@ describe('form — AI-proposed changes on an edit form (objectstack#28106)', () 
     expect(onSubmit.mock.calls[0][0]).toMatchObject({ phone: '13800000000', name: '张伟' });
   });
 
+  it('a field a rule locks on the stored record (`readonlyWhen`) is left alone; an unlocked one beside it applies', () => {
+    const Form = ComponentRegistry.get('form')!;
+    const stored = { status: 'closed', type: 'quality', phone: '13900001111' };
+    render(
+      <SuggestedFieldChangesContext.Provider value={new Map([['type', 'ai type'], ['phone', '13800000000']])}>
+        <Form
+          schema={{
+            type: 'form',
+            showSubmit: false,
+            showCancel: false,
+            defaultValues: stored,
+            previousValues: stored,
+            fields: [
+              { name: 'status', label: 'Status', type: 'input' },
+              { name: 'type', label: 'Type', type: 'input', readonlyWhen: "previous.status != 'draft'" },
+              { name: 'phone', label: 'Phone', type: 'input' },
+            ],
+          }}
+        />
+      </SuggestedFieldChangesContext.Provider>,
+    );
+    expect(screen.getByLabelText(/^Type$/)).toHaveValue('quality');
+    expect(markOf('Type')).toBeNull();
+    expect(screen.getByLabelText('Phone')).toHaveValue('13800000000');
+    expect(revertButtons()).toHaveLength(1);
+  });
+
   it('CONTROL: with no provider the form opens on the stored record, unmarked and clean', async () => {
     const { onDirtyChange } = renderEdit(undefined);
     expect(screen.getByLabelText('Phone')).toHaveValue('13900001111');

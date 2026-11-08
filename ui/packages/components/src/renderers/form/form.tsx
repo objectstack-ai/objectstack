@@ -1706,10 +1706,20 @@ ComponentRegistry.register('form',
     // value of; each is marked while it still holds that value.
     const suggestedFields = React.useContext(SuggestedFieldsContext);
     // objectstack#28106 — on an edit form, the changes the host says AI
-    // proposed (field name → value): applied once over the record the form
-    // opens on, as unsaved edits, then marked while the field still holds one.
+    // proposed (field name → value): each applied once over the record the
+    // form opens on, as an unsaved edit, then marked while the field still
+    // holds it. `suggestedChangeAttemptsRef` names every proposal already
+    // tried, PER FIELD: a wizard reuses this one form across its steps and
+    // draws one step's fields at a time, so a later step's proposal is tried
+    // when that step draws it, and a proposal tried once is never tried again.
+    // `appliedChangeBefore` holds, per applied field, the stored value it
+    // replaced: the before line and the revert read it, not `defaultValues`,
+    // which a wizard refills with the steps' answers at every boundary.
     const suggestedChanges = React.useContext(SuggestedFieldChangesContext);
-    const suggestedChangesAppliedRef = React.useRef(false);
+    const suggestedChangeAttemptsRef = React.useRef<Set<string>>(new Set());
+    const [appliedChangeBefore, setAppliedChangeBefore] = React.useState<ReadonlyMap<string, unknown>>(
+      () => new Map(),
+    );
     // Prefix for the label ids the GROUP-labelled fields need (objectui#3961).
     // Owned here, not derived from `<FormItem>`'s own `useId()`: that id lives in
     // a context published INSIDE `FormItem`, and this renderer builds the label
@@ -2491,14 +2501,16 @@ ComponentRegistry.register('form',
      * config (not hidden, read-only or disabled), so the person sees every
      * change and can undo it. A proposal for any other field is left out.
      */
-    const changeableFieldNames = React.useMemo(() => {
-      const names = new Set<string>();
+    const { drawnFieldNames, changeableFieldNames } = React.useMemo(() => {
+      const drawn = new Set<string>();
+      const changeable = new Set<string>();
       for (const f of fields as FormFieldConfig[]) {
         if (!f?.name || f.type === 'section-divider') continue;
+        drawn.add(f.name);
         if (f.hidden || (f as any).readonly === true || f.disabled === true) continue;
-        names.add(f.name);
+        changeable.add(f.name);
       }
-      return names;
+      return { drawnFieldNames: drawn, changeableFieldNames: changeable };
     }, [fields]);
 
     /** Field name → the tab that owns it (first claim wins). */
@@ -2843,6 +2855,33 @@ ComponentRegistry.register('form',
     // the explicit call belongs beside the `onDirtyChangeProp?.(...)` one
     // below, not back in a subscription's teardown ordering.
     const resetInFlightRef = React.useRef(false);
+    /**
+     * objectstack#28106 — try each AI-proposed change this form draws and has
+     * not tried yet, against `baseline` (the record the form holds). Tried
+     * ONCE per field, on the first pass where the form draws it and holds a
+     * record: applied when the person could edit it (not read-only, disabled
+     * or hidden by its config, not locked by a `readonlyWhen` rule on this
+     * record) and it differs from the stored value, skipped for good otherwise. So a later
+     * reset (a wizard step boundary, a re-read after the person reverted)
+     * keeps what the person decided. Returns how many it applied.
+     */
+    const applySuggestedChanges = (baseline: Record<string, unknown>): number => {
+      if (!suggestedChanges || Object.keys(baseline ?? {}).length === 0) return 0;
+      const applied: Array<[string, unknown]> = [];
+      for (const [name, value] of suggestedChanges) {
+        if (suggestedChangeAttemptsRef.current.has(name) || !drawnFieldNames.has(name)) continue;
+        suggestedChangeAttemptsRef.current.add(name);
+        // A field a rule locks on this record (`readonlyWhen`, the same verdict
+        // the save strips by: `readonlyFieldNames`) is skipped like a static
+        // read-only one.
+        if (!changeableFieldNames.has(name) || readonlyFieldNames.has(name)) continue;
+        if (valuesEqualForDirty(baseline[name], value)) continue;
+        form.setValue(name, value, { shouldValidate: false, shouldDirty: true });
+        applied.push([name, baseline[name]]);
+      }
+      if (applied.length > 0) setAppliedChangeBefore((prev) => new Map([...prev, ...applied]));
+      return applied.length;
+    };
     // LAYOUT effect, deliberately — not a passive one. A passive effect runs a
     // commit LATER than the render that produced the new values, so there is a
     // window in which the new inputs are already mounted and interactive but the
@@ -2911,21 +2950,11 @@ ComponentRegistry.register('form',
       }
       // Fresh values, so last attempt's rejected-field markers no longer apply.
       setRejectedFieldNames([]);
-      // objectstack#28106 — the AI-proposed changes, applied ONCE, on the first
-      // reset that brings the record the edit form opens on, and AFTER the
-      // reset window: they are changes to that record, so the dirty check, the
-      // value channels and the save payload see them exactly as the person's
-      // own edits. Never re-applied: a later reset (a re-read after the person
-      // reverted every one) keeps what the person decided.
-      let appliedChanges = 0;
-      if (suggestedChanges && !suggestedChangesAppliedRef.current && Object.keys(incoming).length > 0) {
-        suggestedChangesAppliedRef.current = true;
-        for (const [name, value] of suggestedChanges) {
-          if (!changeableFieldNames.has(name) || valuesEqualForDirty(incoming[name], value)) continue;
-          form.setValue(name, value, { shouldValidate: false, shouldDirty: true });
-          appliedChanges += 1;
-        }
-      }
+      // objectstack#28106 — the AI-proposed changes this form now draws,
+      // applied AFTER the reset window: they are changes to the record, so the
+      // dirty check, the value channels and the save payload see them exactly
+      // as the person's own edits (`applySuggestedChanges`).
+      const appliedChanges = applySuggestedChanges(incoming);
       // A reset that carried nothing is by definition pristine — clear any stale
       // dirty signal (e.g. an edit-mode record that just finished loading). One
       // that carried input, or applied an AI-proposed change, is genuinely dirty
@@ -2934,6 +2963,15 @@ ComponentRegistry.register('form',
       onDirtyChangeProp?.(carried.length > 0 || appliedChanges > 0);
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [defaultValues]);
+
+    // objectstack#28106 — the drawn fields can change with no `defaultValues`
+    // reset (a wizard step whose answers match what it opened with): a
+    // proposal for a field drawn only now is tried here, against the record
+    // the form holds. The dirty watcher reports the change it makes.
+    React.useLayoutEffect(() => {
+      applySuggestedChanges(baselineRef.current);
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [drawnFieldNames, suggestedChanges]);
 
     // Watch for form changes - only track changes when onAction is available.
     // LAYOUT effect to stay in the same phase as the `defaultValues` reset
@@ -3791,7 +3829,7 @@ ComponentRegistry.register('form',
       // edit or the revert takes the mark, the before line and the revert away.
       const suggestedChangeShown = (value: unknown): boolean =>
         !!suggestedChanges?.has(name) &&
-        !valuesEqualForDirty(defaultValues?.[name], suggestedChanges.get(name)) &&
+        appliedChangeBefore.has(name) &&
         valuesEqualForDirty(suggestedChanges.get(name), value);
       // Same i18n key the option widgets fall back to (`fields.options.
       // selectFirst`, objectui#3231): one sentence, two callers — this one
@@ -4220,7 +4258,7 @@ ComponentRegistry.register('form',
                 // that proposed change replaces (before → after).
                 suggestedChangeShown(formField.value)
                   ? t('form.aiBefore', {
-                      value: formatSuggestionBefore(defaultValues?.[name], effectiveOptions, t),
+                      value: formatSuggestionBefore(appliedChangeBefore.get(name), effectiveOptions, t),
                     })
                   : undefined,
               )}
@@ -4233,7 +4271,7 @@ ComponentRegistry.register('form',
                   data-ai-revert="true"
                   disabled={isSubmitting}
                   onClick={() =>
-                    form.setValue(name, defaultValues?.[name] ?? null, { shouldValidate: true, shouldDirty: true })
+                    form.setValue(name, appliedChangeBefore.get(name) ?? null, { shouldValidate: true, shouldDirty: true })
                   }
                 >
                   {t('form.aiRevert')}
