@@ -537,7 +537,23 @@ describe('the `mssql` row: a federation-only driver', () => {
     expectTypeOf<FederationOnlyDriverId>().toEqualTypeOf<'mssql'>();
     expectTypeOf<(typeof DATABASE_DRIVER_SELECTION_IDS)[number]>().toEqualTypeOf<DatabaseDriverSelectionId>();
     expectTypeOf<'mssql'>().not.toMatchTypeOf<DatabaseDriverSelectionId>();
+    expectTypeOf(FEDERATION_ONLY_DRIVER_IDS).toEqualTypeOf<readonly FederationOnlyDriverId[]>();
     expect([...DATABASE_DRIVER_SELECTION_IDS]).not.toContain('mssql');
+  });
+
+  it('withholds every federation-only id from the selection face, by the column', () => {
+    // Table-wide: whatever spelling of a federation-only row any face knows,
+    // the selection resolver answers nothing and the selection aliases omit it.
+    const federationOnly = new Set<string>(FEDERATION_ONLY_DRIVER_IDS);
+    const spellings = Object.entries(DRIVER_ID_ALIASES)
+      .filter(([, id]) => federationOnly.has(id))
+      .map(([spelling]) => spelling);
+    expect(spellings.length).toBeGreaterThan(0);
+    for (const spelling of spellings) {
+      expect(resolveDatabaseDriverId(spelling), spelling).toBeUndefined();
+      expect(DATABASE_DRIVER_SELECTION_ALIASES, spelling).not.toContain(spelling);
+    }
+    for (const id of DATABASE_DRIVER_SELECTION_IDS) expect(federationOnly.has(id), id).toBe(false);
   });
 
   const external = { allowWrites: false };

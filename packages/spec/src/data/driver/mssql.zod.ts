@@ -127,8 +127,10 @@ export const MssqlConfigSchema = lazySchema(() => strictObject(
   /**
    * TLS on/off — `tedious`'s `encrypt`. Azure SQL requires it; an on-premises
    * server usually accepts both. Certificate verification lives in the
-   * datasource-level `ssl` block (`rejectUnauthorized: false` is how a server
-   * with a self-signed certificate is trusted).
+   * datasource-level `ssl` block: `ssl: { enabled: true, rejectUnauthorized: false }`
+   * is how a server with a self-signed certificate is trusted. The block's
+   * `enabled` defaults to `false`, and a block that leaves it out turns
+   * encryption off, so it is spelled out.
    */
   ssl: DriverSslToggleSchema.optional().meta({ title: 'Encrypt (TLS)' }),
 })

@@ -4,7 +4,7 @@
 **Deciders**: ObjectStack Protocol Architects
 **Builds on**: [ADR-0005](./0005-metadata-customization-overlay.md) (one Zod source of truth per metadata type)
 **Consumers**: `@objectstack/spec`, `@objectstack/runtime`, `@objectstack/objectql`, `@objectstack/plugins/driver-sql`, `@objectstack/services/service-ai`, `@objectstack/cli`, `../objectui`
-**Amended by**: [ADR-0143](./0143-outbound-connector-auth-is-open-tier.md) (2026-10-27), attribution only — see the note below. D7 (2026-10-29, ruling 6486136301 on #27298) — an API-backed datasource may borrow a declared connector instance's credential through `external.connector`; see the D7 note below. #27688 (2026-10-30), example only — §8's `credentialsRef` is a `sys_secret:` handle, the only form the shipped secret binder resolves; see the note under §8. #27917 (2026-10-30), dialect list only — §4.6 names the `odata` vocabulary the matrix gained with #27745. #28208 (2026-10-31, ruling 6525963988 on #27687) — a datasource defined in code reads its credential at connect from `OS_DATASOURCE_<NAME>_PASSWORD`, behind the host switch `OS_DATASOURCE_ENV_CREDENTIALS`; see the note under §10 and the correction in the D7 note. 2026-11-03 (maintainer ruling in the security channel, D1 = B, D2 = (c2)+(a)) — under a walled tenancy posture every external object states its organization scope, or the boot is refused by name; see the note under §10 and the sentence added to the D7 note. #31327 (2026-11-08), dialect list only — §4.6 names the `mssql` vocabulary the matrix gained with SQL Server federation.
+**Amended by**: [ADR-0143](./0143-outbound-connector-auth-is-open-tier.md) (2026-10-27), attribution only — see the note below. D7 (2026-10-29, ruling 6486136301 on #27298) — an API-backed datasource may borrow a declared connector instance's credential through `external.connector`; see the D7 note below. #27688 (2026-10-30), example only — §8's `credentialsRef` is a `sys_secret:` handle, the only form the shipped secret binder resolves; see the note under §8. #27917 (2026-10-30), dialect list only — §4.6 names the `odata` vocabulary the matrix gained with #27745. #28208 (2026-10-31, ruling 6525963988 on #27687) — a datasource defined in code reads its credential at connect from `OS_DATASOURCE_<NAME>_PASSWORD`, behind the host switch `OS_DATASOURCE_ENV_CREDENTIALS`; see the note under §10 and the correction in the D7 note. 2026-11-03 (maintainer ruling in the security channel, D1 = B, D2 = (c2)+(a)) — under a walled tenancy posture every external object states its organization scope, or the boot is refused by name; see the note under §10 and the sentence added to the D7 note. #31327 (2026-11-08) — a federation-only driver (SQL Server, `mssql`): a builtin driver the platform serves for federation and never as a store whose schema it builds. §4.6 names the `mssql` vocabulary and its one dialect-only lossy pairing; §5.1 gains the federation-only arm of Gate 1 (DDL refused in every mode, and a `managed` datasource refused at parse).
 
 > **Amendment note D7 (2026-10-29, ruling 6486136301, letter A) — a second credential channel.**
 > §10 says credentials reach a datasource only through `credentialsRef`. That stays true for a
@@ -424,7 +424,10 @@ OData service's `$metadata` declares, except `Edm.Duration` and the
 flags them for review. `mssql` is SQL Server, a federation-only dialect of the SQL
 driver: `DIALECT_ALIASES.mssql` reads `INFORMATION_SCHEMA` type names, and maps
 `timestamp` to binary, because on SQL Server it is the `rowversion` counter and
-not a date-time.
+not a date-time. It is also the one dialect that adds a pairing of its own: a
+text column backs a `json`, `tags` or `multiselect` field as `'lossy'` on
+`mssql` only, because SQL Server keeps JSON in `nvarchar(max)` and the SQL
+driver stores those fields there as JSON text (#31327).
 
 ---
 
@@ -454,6 +457,21 @@ if (datasource.schemaMode !== 'managed') {
 and `packages/drivers/driver-sql/src/sql-driver.ts` (current `createTable` / `alterTable` call sites) gain a
 guard at the top. The `applyMigrations` implementation (forthcoming
 in `service-migration` per ADR-0008) also calls this guard.
+
+**Federation-only drivers** *(Amended 2026-11-08, #31327)*. A driver whose
+vocabulary row declares `federationOnly` (SQL Server, `mssql`, today) never has
+a `managed` datasource to guard, and the gate does not rely on the mode check
+alone for it:
+
+- **at parse** — `DatasourceSchema` refuses `schemaMode: 'managed'` (the
+  default) on such a driver, naming the federation-only scope, so a stack that
+  declares one never boots; no boot host offers the driver as the platform
+  database either;
+- **in the driver** — DDL is refused in every mode. The mode check above runs
+  first and refuses an `external` / `validate-only` datasource as it does on
+  any driver; a driver configured `managed` anyway (built by hand, with no
+  datasource in front of it) then meets the dialect refusal by name
+  (`SQL_DIALECT_EMISSION_UNSUPPORTED`, `assertDialectEmits`).
 
 ### 5.2 Gate 2 — Boot validation (runtime layer)
 

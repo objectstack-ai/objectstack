@@ -329,6 +329,23 @@ export function suggestFieldTypeForSqlType(rawType: string, dialect?: SqlDialect
 }
 
 /**
+ * Pairings one dialect adds on top of {@link CANONICAL_TO_FIELD}, always as
+ * `'lossy'` — never exact, never suggested.
+ *
+ * SQL Server (before its 2025 `json` type) keeps JSON in `nvarchar(max)`, and
+ * the SQL driver writes a `json` field and a multi-value field (`tags`,
+ * `multiselect`) there as JSON text and parses it back on read. So on `mssql`
+ * a text column can back those fields: lossy, because the column does not
+ * enforce JSON, and because JSON-array membership (`$contains`) and `$empty`
+ * on a multi-value field are refused on this dialect rather than approximated.
+ * Without the row, validation reported every such field as a type mismatch on
+ * the very column shape the driver relies on (#31327).
+ */
+const DIALECT_LOSSY_PAIRINGS: Partial<Record<SqlDialect, Partial<Record<CanonicalSqlType, readonly FieldType[]>>>> = {
+  mssql: { text: ['json', 'tags', 'multiselect'] },
+};
+
+/**
  * Whether a remote SQL column type can back the given ObjectStack field type.
  *
  * @returns `true` (exact), `'lossy'` (usable with possible loss), or `false`.
@@ -342,6 +359,7 @@ export function isCompatible(
   const entry = CANONICAL_TO_FIELD[canonical];
   if (entry.exact.includes(fieldType)) return true;
   if (entry.lossy.includes(fieldType)) return 'lossy';
+  if (dialect && DIALECT_LOSSY_PAIRINGS[dialect]?.[canonical]?.includes(fieldType)) return 'lossy';
   // Unknown remote types are permissive-but-lossy against text/json only,
   // already encoded in CANONICAL_TO_FIELD.unknown.
   return false;

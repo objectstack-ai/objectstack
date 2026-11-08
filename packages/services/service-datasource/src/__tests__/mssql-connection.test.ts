@@ -8,13 +8,17 @@
  * hands to `SqlDriver` as the knex `mssql` client's `connection`. Each case is
  * one key of `MssqlConfigSchema` (or the resolved datasource-level `ssl`
  * value, or the bound secret) arriving under the name the knex `mssql` client
- * hands tedious. The module imports no driver package, so this file loads
- * none (`check:test-source-alias`, `check:driver-memory-census`).
+ * hands tedious. The last two cases run the datasource-level `ssl` block
+ * through the spec parse and `resolveSslOption` (the factory's own resolution) first. Neither
+ * module imports a driver package at load, so this file loads none
+ * (`check:test-source-alias`, `check:driver-memory-census`).
  */
 
 import { describe, expect, it } from 'vitest';
+import { DatasourceSchema } from '@objectstack/spec/data';
 import type { DatasourceConnectionSpec } from '../contracts/index.js';
 import { buildMssqlConnection } from '../mssql-driver-config.js';
+import { resolveSslOption } from '../datasource-ssl-option.js';
 
 const BOUND_SECRET = 's3cr3t-from-sys_secret';
 
@@ -58,5 +62,20 @@ describe('[#31327] mssql — the tedious connection built from the datasource', 
       trustServerCertificate: true,
       cryptoCredentialsDetails: { ca: 'PEM' },
     });
+  });
+
+  it('the documented self-signed shape: enabled true keeps encrypt on and trusts the certificate', () => {
+    // The datasource-level block as the SQL Server docs and the MssqlConfigSchema
+    // `ssl` docblock write it, parsed by the spec, resolved by the factory.
+    const ssl = DatasourceSchema.shape.ssl.parse({ enabled: true, rejectUnauthorized: false });
+    const got = buildMssqlConnection(spec({ config: { host: 'h', database: 'ERP' }, ssl }), resolveSslOption(spec({ ssl })));
+    expect(got.options).toEqual({ encrypt: true, trustServerCertificate: true });
+  });
+
+  it('a block without enabled parses as TLS off — which is why the docs spell enabled: true', () => {
+    const ssl = DatasourceSchema.shape.ssl.parse({ rejectUnauthorized: false });
+    expect(ssl).toMatchObject({ enabled: false });
+    const got = buildMssqlConnection(spec({ config: { host: 'h', database: 'ERP' }, ssl }), resolveSslOption(spec({ ssl })));
+    expect(got.options).toEqual({ encrypt: false });
   });
 });

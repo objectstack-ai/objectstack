@@ -221,8 +221,9 @@ export interface DriverVocabularyEntry {
    *  - **authoring** — `DatasourceSchema` refuses `schemaMode: 'managed'`
    *    (the default) on such a driver, naming the federation-only scope
    *    ({@link FEDERATION_ONLY_DRIVER_IDS});
-   *  - **selection** — the row offers no {@link aliases}, so no boot host
-   *    accepts it as the platform database; its spellings live on
+   *  - **selection** — the selection tables are built without such a row,
+   *    so no boot host accepts it as the platform database even if it listed
+   *    {@link aliases}; by convention its spellings live on
    *    {@link contractOnlyAliases}, which keeps the config contract;
    *  - **driver** — the SQL driver refuses the DDL path for the dialect by
    *    name, so a hand-built managed driver meets the same boundary.
@@ -343,6 +344,16 @@ export const RETIRED_DRIVER_ID_GUIDANCE: Readonly<Record<string, string>> = Obje
 );
 
 /**
+ * The rows a boot host may select: every row but a federation-only one. The
+ * withdrawal is enforced here, by the column, so a federation-only row that
+ * someday lists a selection alias still never reaches the selection face
+ * (#31327).
+ */
+const SELECTION_ROWS: readonly DriverVocabularyEntry[] = VOCABULARY_ROWS.filter(
+  (entry) => entry.federationOnly !== true,
+);
+
+/**
  * The spellings a BOOT HOST accepts as a driver selection — every selection
  * alias of every builtin, sorted for a stable refusal message.
  *
@@ -350,7 +361,7 @@ export const RETIRED_DRIVER_ID_GUIDANCE: Readonly<Record<string, string>> = Obje
  * values an operator is shown cannot drift from the values that actually work.
  */
 export const DATABASE_DRIVER_SELECTION_ALIASES: readonly string[] = Object.freeze(
-  VOCABULARY_ROWS.flatMap((entry) => [...entry.aliases]),
+  SELECTION_ROWS.flatMap((entry) => [...entry.aliases]),
 );
 
 /**
@@ -418,7 +429,7 @@ export function resolveDriverId(driver: unknown): BuiltinDriverId | undefined {
 /** Selection-face lookup, built once so {@link resolveDatabaseDriverId} is a hash hit. */
 const DATABASE_DRIVER_ALIASES: Readonly<Record<string, DatabaseDriverSelectionId>> = Object.freeze(
   Object.fromEntries(
-    VOCABULARY_ROWS.flatMap((entry) => entry.aliases.map((alias) => [alias, entry.id] as const)),
+    SELECTION_ROWS.flatMap((entry) => entry.aliases.map((alias) => [alias, entry.id] as const)),
   ) as Record<string, DatabaseDriverSelectionId>,
 );
 
@@ -434,8 +445,8 @@ const DATABASE_DRIVER_ALIASES: Readonly<Record<string, DatabaseDriverSelectionId
  */
 export function resolveDatabaseDriverId(driver: unknown): DatabaseDriverSelectionId | undefined {
   if (typeof driver !== 'string') return undefined;
-  // A federation-only row carries no selection alias (#31327), so this face
-  // never answers one; the return type says the same.
+  // The table is built from SELECTION_ROWS, so this face never answers a
+  // federation-only id (#31327); the return type says the same.
   return lookupDriverId(DATABASE_DRIVER_ALIASES, driver) as DatabaseDriverSelectionId | undefined;
 }
 
@@ -512,11 +523,13 @@ export const DATABASE_DRIVER_SELECTION_IDS: readonly DatabaseDriverSelectionId[]
 export type FederationOnlyDriverId = Extract<(typeof DRIVER_VOCABULARY)[number], { federationOnly: true }>['id'];
 
 /**
- * The type of a {@link DATABASE_DRIVER_SELECTION_IDS} member: every builtin a
- * federation-only row does not withhold. A federation-only row carries no
- * selection alias, so the projection already drops it at run time; this keeps
- * the TYPE as narrow as the value, so a boot host's exhaustive dispatch over the
- * selection face is not asked for an arm no selection can reach (#31327).
+ * The type of a {@link DATABASE_DRIVER_SELECTION_IDS} member: every builtin
+ * except a federation-only one. The selection tables are built without the
+ * federation-only rows, so no selection resolves to one at run time; the type
+ * drops them too, so a boot host's exhaustive dispatch over the selection face
+ * is not asked for an arm no selection can reach (#31327). It is not exactly as
+ * narrow as the value: a builtin with no selection alias of its own (`memory`
+ * today) still stays in the type.
  */
 export type DatabaseDriverSelectionId = Exclude<BuiltinDriverId, FederationOnlyDriverId>;
 
@@ -549,9 +562,9 @@ export function driverHasLocalDefault(driver: unknown): boolean {
  * drivers; read it through {@link driverIsFederationOnly} when the id came from
  * authored metadata.
  */
-export const FEDERATION_ONLY_DRIVER_IDS: readonly BuiltinDriverId[] = Object.freeze(
+export const FEDERATION_ONLY_DRIVER_IDS: readonly FederationOnlyDriverId[] = Object.freeze(
   DRIVER_VOCABULARY.filter((entry) => (entry as DriverVocabularyEntry).federationOnly === true).map(
-    (entry) => entry.id,
+    (entry) => entry.id as FederationOnlyDriverId,
   ),
 );
 
@@ -562,7 +575,7 @@ export const FEDERATION_ONLY_DRIVER_IDS: readonly BuiltinDriverId[] = Object.fre
  */
 export function driverIsFederationOnly(driver: unknown): boolean {
   const id = resolveDriverId(driver);
-  return id !== undefined && FEDERATION_ONLY_DRIVER_IDS.includes(id);
+  return id !== undefined && (FEDERATION_ONLY_DRIVER_IDS as readonly BuiltinDriverId[]).includes(id);
 }
 
 /** Canonical driver id → the schema its `datasource.config` must satisfy. */

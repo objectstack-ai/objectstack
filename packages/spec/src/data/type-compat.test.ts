@@ -367,6 +367,19 @@ describe('the mssql dialect (SQL Server federation)', () => {
     expect(isCompatible('int', 'lookup', 'mssql')).toBe(true);
   });
 
+  it('lets an nvarchar column back a json or multi-value field, lossy, on mssql only', () => {
+    for (const fieldType of ['json', 'tags', 'multiselect'] as const) {
+      expect(isCompatible('nvarchar(max)', fieldType, 'mssql'), fieldType).toBe('lossy');
+      expect(isCompatible('nvarchar', fieldType, 'mssql'), fieldType).toBe('lossy');
+      // CONTROL: the pairing is the dialect's, not the base map's.
+      expect(isCompatible('varchar', fieldType, 'postgres'), fieldType).toBe(false);
+      expect(isCompatible('nvarchar(max)', fieldType), fieldType).toBe(false);
+    }
+    // Never suggested: an nvarchar column still drafts as text.
+    expect(suggestFieldTypeForSqlType('nvarchar(max)', 'mssql')).toBe('text');
+    expect(isCompatible('int', 'json', 'mssql')).toBe(false);
+  });
+
   it('leaves the types with no field type unknown, so a draft flags them', () => {
     for (const raw of ['sql_variant', 'hierarchyid', 'geography', 'geometry']) {
       expect(canonicalizeSqlType(raw, 'mssql'), raw).toBe('unknown');

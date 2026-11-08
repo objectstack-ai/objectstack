@@ -57,6 +57,7 @@ import { assertDatasourcePoolSupported } from './datasource-pool-support.js';
 import { resolveDatasourceSchemaMode } from './datasource-schema-mode.js';
 import { buildTursoDriverConfig, resolveTursoUrl } from './turso-driver-config.js';
 import { buildMssqlConnection } from './mssql-driver-config.js';
+import { resolveSslOption } from './datasource-ssl-option.js';
 import { MissingDriverPackageError } from './missing-driver-package-error.js';
 import type { SqliteAbsentFileMode } from '@objectstack/driver-sql';
 
@@ -342,42 +343,6 @@ function pgConnectionExtras(cfg: Record<string, unknown>): Record<string, unknow
     ...(cfg.applicationName ? { application_name: cfg.applicationName } : {}),
     ...(cfg.statementTimeout != null ? { statement_timeout: cfg.statementTimeout } : {}),
   };
-}
-
-/**
- * The `ssl` value to hand a SQL client, from the datasource's TLS block or the
- * per-driver on/off shorthand.
- *
- * `datasource.ssl` is declared, strict, documented — and until #4410 stopped at
- * the record: nothing put it on the connection spec, so a TLS block with a CA
- * certificate in it configured precisely nothing, which is the failure its own
- * schema comment warns about ("a TLS setting that never took effect looked
- * identical to one that did"). The block wins when present because it is the
- * more specific statement; `config.ssl` remains the boolean shorthand.
- *
- * ⚠️ The `true` this can return is a `pg` spelling, not a universal one — see
- * {@link mysqlSslOption}, which re-expands it for `mysql2`. Do not "simplify"
- * that call away.
- */
-function resolveSslOption(spec: DatasourceConnectionSpec): unknown {
-  const block = spec.ssl as
-    | { enabled?: boolean; rejectUnauthorized?: boolean; ca?: string; cert?: string; key?: string }
-    | undefined;
-  if (block) {
-    if (block.enabled === false) return false;
-    const options = {
-      ...(block.rejectUnauthorized !== undefined ? { rejectUnauthorized: block.rejectUnauthorized } : {}),
-      ...(block.ca ? { ca: block.ca } : {}),
-      ...(block.cert ? { cert: block.cert } : {}),
-      ...(block.key ? { key: block.key } : {}),
-    };
-    // `ssl: {}` would read as "TLS with default options" to `pg`, which is what
-    // `enabled: true` with nothing else means anyway — but an empty object is
-    // an odd thing to hand a client, so collapse it to the boolean.
-    return Object.keys(options).length > 0 ? options : true;
-  }
-  const shorthand = (spec.config ?? {}).ssl;
-  return shorthand == null ? undefined : shorthand;
 }
 
 /**

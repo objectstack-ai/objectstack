@@ -525,8 +525,11 @@ What is different from the other SQL drivers:
   refuses a `url` / `connectionString`. The password is refused inline: bind it
   through the connection form or `external.credentialsRef`.
 - **TLS.** `config.ssl` is tedious's `encrypt`. For an on-premises server with a
-  self-signed certificate, set the datasource-level `ssl: { rejectUnauthorized: false }`
-  (tedious's `trustServerCertificate`); a CA goes in the same block.
+  self-signed certificate, set the datasource-level
+  `ssl: { enabled: true, rejectUnauthorized: false }` (tedious's `encrypt` plus
+  `trustServerCertificate`); a CA goes in the same block. Write `enabled: true`:
+  the block's `enabled` defaults to `false`, and a block without it turns
+  encryption off.
 - **Schemas.** A SQL Server database is usually several schemas. The Studio Tables
   tab, `list_remote_tables` and `import_object` list every user table as
   `schema.table` (`dbo.Orders`, `Sales.Customers`) with its primary key and foreign
@@ -535,12 +538,16 @@ What is different from the other SQL drivers:
 - **Types.** `nvarchar` / `nchar` / `ntext` / `xml` read as text (`nvarchar(max)`
   included), `bit` as boolean, `datetime2` / `datetimeoffset` / `smalldatetime` as
   datetime, `uniqueidentifier` as uuid, `money` / `decimal` as decimal. SQL Server's
-  `timestamp` is `rowversion` — a binary row counter, not a date.
+  `timestamp` is `rowversion` — a binary row counter, not a date. A `json`,
+  `tags` or `multiselect` field over an `nvarchar(max)` column is accepted as a
+  lossy match (the driver keeps it as JSON text); JSON-array membership
+  (`$contains`) and `$empty` on a multi-value field are refused on SQL Server.
 - **GUIDs.** A `uniqueidentifier` reads back in the lower-case form
   (`3f2504e0-4f89-…`), so a GUID written as a string reads back as that string, and
   an equality or `$in` filter matches it in either case. Substring operators
   (`$contains`, `$startsWith`) compare against SQL Server's own upper-case text form
-  of the GUID; filter a GUID by equality.
+  of the GUID; filter a GUID by equality
+  ([#31395](https://github.com/objectstack-ai/objectstack/issues/31395) tracks it).
 - **Text matching** follows the platform's contract, not the database's collation:
   `$contains` / `$startsWith` / `$endsWith` / `$like` are case-exact even on SQL
   Server's case-insensitive default collations, and `$icontains` folds A–Z only.
