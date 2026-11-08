@@ -108,6 +108,11 @@ A bare name, read by a caller that belongs to package P, resolves to:
 
 A caller with no package (an environment item, a context-free door, an MCP client) resolves against the whole environment: the environment item of that name first (ADR-0005 overlay precedence keeps the environment's own item ahead), else the unique package holder, else the refusal with candidates (`409` at a door, D5).
 
+**Two consequences of the rule, as R (#31637) implements it.**
+
+- **A package caller never resolves to an environment-authored item by bare name.** A package cannot declare a dependency on the environment, so an environment item is in no package's closure. A name that only an environment item holds is refused for a package caller (`outside-closure`), and the refusal names the environment as the holder.
+- **An overridable platform baseline ranks below a package holder.** These are the items of phase 1's `OVERRIDABLE_BASELINE_PACKAGES`; today that is the email service's built-in templates (ADR-0131 D6/D10). They rank below a package holder in step 2 and in the context-free environment step. A baseline item answers only when no package holds the name, as the template loader serves it today.
+
 **Exceptions (ruled).**
 
 - **Names the platform requests by spelling** (`PLATFORM_REQUESTED_BARE_NAMES`; today only the permission set `guest_portal`, which the public form doors request): the platform declares no dependency, so they resolve environment-wide and keep ONE holder. Phase 1's refusal stays for them.
