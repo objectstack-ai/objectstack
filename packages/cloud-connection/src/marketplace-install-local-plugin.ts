@@ -316,7 +316,10 @@ import { ConnectionCredentialStore } from './connection-credential-store.js';
 import { readJsonRequestBody } from './request-json-body.js';
 import { MARKETPLACE_INSTALLED_UI_BUNDLE } from './marketplace-ui.js';
 import { countSeedRows, matchSeedRows, purgeSeedRows, seedDatasetOfReceiptItem, type PurgeSeedDataset } from './marketplace-install-local-purge.js';
-import { INSTALL_LOCAL_DOOR_SERVICE, routeContextOf, type InstallLocalDoor } from './install-local-door-service.js';
+import {
+    INSTALL_LOCAL_DOOR_SERVICE, grantRefusalEvent, recordUnmanagedImportEvent, refusalCodeOf, routeContextOf,
+    type InstallLocalDoor, type InstallLocalDoorGrant, type UnmanagedImportAuditEvent, type UnmanagedImportAuditSurface,
+} from './install-local-door-service.js';
 import {
     UnmanagedCopyRecord,
     readUnmanagedCopyInstance,
@@ -374,33 +377,6 @@ import { NAMESPACE_CONFLICT_CODE } from '@objectstack/objectql';
 type SessionRead = Awaited<ReturnType<NonNullable<AuthSessionApi['getSession']>>>;
 
 const ROUTE_BASE = '/api/v1/marketplace/install-local';
-
-/**
- * [#30964] The event this door hands the `audit` slot's
- * `recordPackageLifecycleEvent` for each unmanaged copy it attempted —
- * declared here, structurally, so this package does not depend on
- * `@objectstack/plugin-audit`, which owns the row shape
- * (`PackageUnmanagedImportAuditEvent` there).
- */
-interface UnmanagedImportAuditEvent {
-    action: 'package_unmanaged_import';
-    packageId: string;
-    version?: string;
-    environmentId?: string;
-    actor?: string;
-    targetPackageId?: string;
-    namespace?: string;
-    sourceNamespace?: string;
-    copiedCount?: number;
-    outcome: 'success' | 'failure';
-    errorCode?: string;
-    status?: number;
-}
-
-/** The `audit` slot member this door calls. */
-interface UnmanagedImportAuditSurface {
-    recordPackageLifecycleEvent?(event: UnmanagedImportAuditEvent): unknown;
-}
 
 /**
  * The closed query-parameter set of `GET …/:manifestId/sample-data` (AGENTS.md,
@@ -1657,7 +1633,8 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         // the cloud-connection door hands it the copy an unmanaged grant asks
         // for. The same handler `POST ${ROUTE_BASE}` mounts at kernel:ready.
         const door: InstallLocalDoor = {
-            install: async (request: Request): Promise<Response> => this.handleInstall(routeContextOf(request), ctx),
+            install: async (request: Request, options?: { grant?: InstallLocalDoorGrant }): Promise<Response> =>
+                this.installForGrant(routeContextOf(request), ctx, options?.grant),
         };
         ctx.registerService?.(INSTALL_LOCAL_DOOR_SERVICE, door);
     };
@@ -2196,6 +2173,44 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             return { inserted: s.inserted, updated: s.updated, skipped: s.skipped, errors: s.errorList };
         };
     };
+
+    /**
+     * [#31481, cloud#3624 ruling A「两边审计」] The in-process door's install.
+     * Without a `grant` it is {@link handleInstall}, exactly. With one (the
+     * cloud-connection door's copy of an unmanaged grant), a refusal the
+     * unmanaged copy did not already audit hands the `audit` slot one
+     * `package_unmanaged_import` failure event with the answer's code and
+     * status: a refusal before the import runs (the install capability, the
+     * body, the manifest fetch, the walled catalog, the handshake, the mode,
+     * and every other step) would otherwise leave the control plane's grant
+     * row with no outcome in the environment. A throw is audited the same
+     * way, with the status it resolves to, and then rethrown. The import's
+     * own success and failure events ({@link installUnmanaged}) are not
+     * written twice.
+     */
+    private installForGrant = async (c: any, ctx: PluginContext, grant: InstallLocalDoorGrant | undefined): Promise<Response> => {
+        if (!grant) return this.handleInstall(c, ctx);
+        const call = { audited: false };
+        this.grantCalls.set(c, call);
+        let answer: Response;
+        try {
+            answer = await this.handleInstall(c, ctx);
+        } catch (err) {
+            if (!call.audited) {
+                const resolved = resolveThrownHttpError(err, 500);
+                await this.recordUnmanagedImport(c, ctx, grantRefusalEvent(grant, resolved.code, resolved.status));
+            }
+            throw err;
+        }
+        if (!answer.ok && !call.audited) {
+            const code = await refusalCodeOf(answer, 'PLUGIN_INSTALL_FAILED');
+            await this.recordUnmanagedImport(c, ctx, grantRefusalEvent(grant, code, answer.status));
+        }
+        return answer;
+    };
+
+    /** [#31481] The grant-path calls in flight, by route context: whether the call's audit event was handed. */
+    private readonly grantCalls = new WeakMap<object, { audited: boolean }>();
 
     private handleInstall = async (c: any, ctx: PluginContext): Promise<Response> => {
         // [#8976] The sharpest of the four: this door accepts an INLINE manifest
@@ -4844,7 +4859,7 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             }
             const details = isPlainObject(err?.details) ? err.details : undefined;
             // [#30964] The environment's half of "both sides audited": the copy failed.
-            await this.recordUnmanagedImport(ctx, {
+            await this.recordUnmanagedImport(c, ctx, {
                 action: 'package_unmanaged_import',
                 packageId: manifestId,
                 ...(version ? { version } : {}),
@@ -4866,7 +4881,7 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
 
         // [#30964] The environment's half of "both sides audited": the copy
         // landed — the new base, its namespace, what was copied.
-        await this.recordUnmanagedImport(ctx, {
+        await this.recordUnmanagedImport(c, ctx, {
             action: 'package_unmanaged_import',
             packageId: manifestId,
             ...((result.sourceVersion ?? version) ? { version: result.sourceVersion ?? version } : {}),
@@ -5807,21 +5822,15 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
      * hands an event, never a row. A host with no audit plugin has no ledger,
      * so the call is skipped; a slot that throws anyway is logged, never
      * answered: the copy's answer is the copy's, whatever the ledger does.
+     * [#31481] On a grant-path call (`c`, {@link installForGrant}) the call is
+     * marked audited, so its refusal is not handed a second event.
      */
-    private recordUnmanagedImport = async (ctx: PluginContext, event: UnmanagedImportAuditEvent): Promise<void> => {
+    private recordUnmanagedImport = async (c: any, ctx: PluginContext, event: UnmanagedImportAuditEvent): Promise<void> => {
+        const call = this.grantCalls.get(c);
+        if (call) call.audited = true;
         let audit: UnmanagedImportAuditSurface | undefined;
         try { audit = ctx.getService<UnmanagedImportAuditSurface>('audit'); } catch { return; /* no audit plugin */ }
-        const record = audit?.recordPackageLifecycleEvent;
-        if (typeof record !== 'function') return;
-        try {
-            await record.call(audit, event);
-        } catch (err: any) {
-            ctx.logger?.error?.(
-                `[MarketplaceInstallLocal] the unmanaged install of ${event.packageId} (${event.outcome}) was answered, but the `
-                + 'audit service refused its `package_unmanaged_import` row, so the compliance ledger does not record it: '
-                + `${err?.message ?? err}`,
-            );
-        }
+        await recordUnmanagedImportEvent(audit, ctx.logger, 'MarketplaceInstallLocal', event);
     };
 
     /**
