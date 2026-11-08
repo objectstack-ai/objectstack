@@ -5,6 +5,7 @@
 '@objectstack/core': patch
 '@objectstack/objectql': patch
 '@objectstack/verify': patch
+'@objectstack/lint': patch
 ---
 
 feat(security): the recycle bin's two grants are read: `restore` asks `allowRestoreOwnDeleted` and `purge` asks `manageRecycleBin`, and a member restores only the entries they deleted
@@ -20,6 +21,7 @@ Until now every `restore` and `purge` dispatch was refused for every caller but 
 - **How the keys fold**: each is bounded by read; `modifyAllRecords` implies both; `manageRecycleBin` implies `allowRestoreOwnDeleted`; `allowDelete` implies neither. `objectPermissionGrants` (`@objectstack/spec/security`) answers both keys this way, and `/me/permissions` reports them.
 - **The tenant wall on the bin**: a caller the organization wall denies (for example, signed in with no active organization on a multi-organization deployment) now sees no entry: `restore` answers `null`, `purge` answers `false` and `empty` answers `0`. Before, such a caller's `purge` and `empty` were not scoped to any organization. The removal is scoped by the verdict the security layer recorded on the dispatch when it recorded one.
 - **Record sharing on the permanent delete**: the sharing write gate judges `purge` as the delete it is, so the permanent delete of a record by id is refused (`403 FORBIDDEN`) unless the caller may delete that record (ownership, write depth or Modify All Data; an edit share is not enough), and a bulk permanent delete is scoped to the records the caller may delete. `security/explain` reports a purge against the same delete gate.
+- **The retired `allowRestore` / `allowPurge` keys stay refused**, but their prescription (and that of the bare `restore` / `purge` keys) no longer says the operations do not exist: it says to delete the key and names the grants that gate the operations now, `allowRestoreOwnDeleted` and `manageRecycleBin`. The residue lint's rule explanation says the same.
 - `@objectstack/verify`: a write observer now also sees `purge` and `restore`.
 
 Grant `allowRestoreOwnDeleted` (with read) to the people who should take back what they deleted, and `manageRecycleBin` to the people who administer the bin. Nothing changes for a caller who holds neither.

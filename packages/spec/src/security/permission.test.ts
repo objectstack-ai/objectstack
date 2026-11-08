@@ -487,7 +487,11 @@ describe('allowRestore / allowPurge are RETIRED (ADR-0049)', () => {
       expect(messages).toContain('ObjectQL operation it claimed');
       expect(messages).toContain('removed in @objectstack/spec 17');
       expect(messages).toContain('Delete the key');
-      expect(messages).toContain('M2');
+      // [#30237, consent 6720657486] The operation exists now: the prescription
+      // names the new spelling of its grant, never a return of this key.
+      expect(messages).toContain('ADR-0148');
+      expect(messages).toContain('`manageRecycleBin`');
+      expect(messages).not.toContain('M2');
     }
   });
 
@@ -519,7 +523,10 @@ describe('allowRestore / allowPurge are RETIRED (ADR-0049)', () => {
       const r = ObjectPermissionSchema.safeParse({ [key]: true } as never);
       expect(r.success).toBe(false);
       const messages = r.error!.issues.map((i) => i.message).join('\n');
-      expect(messages).toContain('ObjectQL operation it claimed');
+      expect(messages).toContain(`was the alias of \`objects.<object>.${key === 'restore' ? 'allowRestore' : 'allowPurge'}\``);
+      expect(messages).toContain('Delete the key');
+      // [#30237, consent 6720657486] …and names the grant that gates the verb now.
+      expect(messages).toContain('`manageRecycleBin`');
       expect(messages).not.toContain(`\`${key}\` → \``);
     }
   });

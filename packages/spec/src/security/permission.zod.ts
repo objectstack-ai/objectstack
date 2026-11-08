@@ -528,18 +528,14 @@ const ObjectPermissionBaseSchema = lazySchema(() => strictObject(
       //    prescription directly.
       restore:
         '`restore` was the alias of `objects.<object>.allowRestore`, which was removed in ' +
-        '@objectstack/spec 17 (ADR-0049) — the `restore` ObjectQL operation it claimed ' +
-        'to gate has never shipped (roadmap M2), so granting the bit delivered nothing. Delete ' +
-        'the key — a dispatched `restore` stays denied fail-closed by the permission ' +
-        'evaluator\'s destructive-operation backstop, and the bit returns with the M2 ' +
-        'lifecycle initiative alongside the operation it gates.',
+        '@objectstack/spec 17 (ADR-0049). Delete the key. The `restore` operation now exists ' +
+        'with the recycle bin (ADR-0148), and its grants are spelled `allowRestoreOwnDeleted` ' +
+        '(restore the entries you deleted) and `manageRecycleBin` (restore any entry).',
       purge:
         '`purge` was the alias of `objects.<object>.allowPurge`, which was removed in ' +
-        '@objectstack/spec 17 (ADR-0049) — the `purge` ObjectQL operation it claimed ' +
-        'to gate has never shipped (roadmap M2), so granting the bit delivered nothing. Delete ' +
-        'the key — a dispatched `purge` stays denied fail-closed by the permission ' +
-        'evaluator\'s destructive-operation backstop, and the bit returns with the M2 ' +
-        'lifecycle initiative alongside the operation it gates.',
+        '@objectstack/spec 17 (ADR-0049). Delete the key. The `purge` operation now exists ' +
+        'with the recycle bin (ADR-0148), and its grant is spelled `manageRecycleBin` (purge an ' +
+        'entry, empty an object\'s entries, and the permanent delete).',
     },
     history:
       'Until this shape was closed, these were dropped silently — the permission set still parsed, so the ' +
@@ -619,9 +615,12 @@ const ObjectPermissionBaseSchema = lazySchema(() => strictObject(
 
   /**
    * REMOVED — `allowRestore` / `allowPurge` claimed to gate `restore` /
-   * `purge` ObjectQL operations that have never existed (no destructive
-   * lifecycle verb is in the engine's dispatch vocabulary — pinned by
-   * objectql's `engine-middleware-operation-vocabulary.test.ts`, #8106).
+   * `purge` ObjectQL operations that did not exist when they were retired (no
+   * destructive lifecycle verb was then in the engine's dispatch vocabulary,
+   * #8106). The operations now exist with the recycle bin (ADR-0148), and their
+   * grants are NEW spellings, `allowRestoreOwnDeleted` and `manageRecycleBin`
+   * (below, #30235 / #30237); these two keys stay tombstones and their
+   * prescriptions name the new spellings (consent 6720657486).
    *
    * ADR-0049 enforce-or-remove, maintainer ruling 2026-08-26 accepting
    * #1883's recommendation B (#12497): an AI author who declared
@@ -630,11 +629,9 @@ const ObjectPermissionBaseSchema = lazySchema(() => strictObject(
    * prescription) instead of a silent strip. The former evaluator pre-mapping
    * (`OPERATION_TO_PERMISSION` restore/purge rows) retired in the same batch —
    * with the bits unwritable, a mapping onto them was a claim about a surface
-   * that rejects authoring — and a dispatched `restore`/`purge` stays denied
-   * fail-closed via the evaluator's `DESTRUCTIVE_OPERATIONS` backstop, so
-   * there is still no ungated window. THE KEYS RETURN with the M2 lifecycle
-   * initiative (feature + RBAC in one batch, maintainer 2026-08-03); #1883
-   * stays open as the anchor.
+   * that rejects authoring. The rows came back with the recycle bin, mapped
+   * onto the new spellings (`restore` → `allowRestoreOwnDeleted`, `purge` →
+   * `manageRecycleBin`, #30237), so these keys did not return.
    *
    * [#12840] Both keys carried `.default(false)` before the retirement, so
    * every artifact the published 17.x toolchain built has them materialized
@@ -653,21 +650,20 @@ const ObjectPermissionBaseSchema = lazySchema(() => strictObject(
    * tombstone exists to refuse. The matrix is pinned in `permission.test.ts`.
    */
   allowRestore: retiredKey(
-    '`objects.<object>.allowRestore` was removed in @objectstack/spec 17 (ADR-0049) — ' +
-    'the `restore` ObjectQL operation it claimed to gate has never shipped (roadmap M2), so ' +
-    'granting the bit delivered nothing. Delete the key — a dispatched `restore` stays denied ' +
-    'fail-closed by the permission evaluator\'s destructive-operation backstop, and the bit ' +
-    'returns with the M2 lifecycle initiative alongside the operation it gates. ' +
+    '`objects.<object>.allowRestore` was removed in @objectstack/spec 17 (ADR-0049): the ' +
+    '`restore` ObjectQL operation it claimed to gate did not exist then, so granting the bit ' +
+    'delivered nothing. Delete the key. The operation now exists with the recycle bin ' +
+    '(ADR-0148), and its grants are spelled `allowRestoreOwnDeleted` (restore the entries you ' +
+    'deleted) and `manageRecycleBin` (restore any entry). ' +
     'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
   ),
   allowPurge: retiredKey(
-    '`objects.<object>.allowPurge` was removed in @objectstack/spec 17 (ADR-0049) — ' +
-    'the `purge` ObjectQL operation it claimed to gate has never shipped (roadmap M2), so ' +
-    'granting the bit delivered nothing (a compliance/GDPR erase the author believed was ' +
-    'permission-locked was not — the operation itself does not exist). Delete the key — a ' +
-    'dispatched `purge` stays denied fail-closed by the permission evaluator\'s ' +
-    'destructive-operation backstop, and the bit returns with the M2 lifecycle initiative' +
-    ' alongside the operation it gates. ' +
+    '`objects.<object>.allowPurge` was removed in @objectstack/spec 17 (ADR-0049): the ' +
+    '`purge` ObjectQL operation it claimed to gate did not exist then, so granting the bit ' +
+    'delivered nothing (a compliance/GDPR erase the author believed was permission-locked ' +
+    'was not). Delete the key. The operation now exists with the recycle bin (ADR-0148), and ' +
+    'its grant is spelled `manageRecycleBin` (purge an entry, empty an object\'s entries, and ' +
+    'the permanent delete). ' +
     'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
   ),
 
