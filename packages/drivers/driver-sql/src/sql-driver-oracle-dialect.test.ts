@@ -462,7 +462,7 @@ describe('#31390 a comparand that is not uuid text is INVALID_FILTER, never sent
 
   it('through the find door: refused, and no statement reaches the database', async () => {
     const p = await primed();
-    await expect(p.find('ord', { where: { account: 'not-a-uuid' } } as any)).rejects.toMatchObject({
+    await expect(p.find('ord', { where: { account: 'not-a-uuid' } })).rejects.toMatchObject({
       code: 'INVALID_FILTER',
       status: 400,
     });
@@ -530,26 +530,26 @@ describe('#31390 a written RAW(16) uuid value binds as HEXTORAW(?)', () => {
 describe('#31390 which columns: read from the catalog, once per object', () => {
   it('the doors read the catalog once per object, not once per statement', async () => {
     const p = new OracleUuidProbe(CATALOG);
-    await p.find('ord', { where: { account: UUID } } as any);
-    await p.count('ord', { where: { account: UUID } } as any);
-    await p.find('acct', { where: { id: UUID } } as any);
-    await p.find('ord', { where: { account: UUID_2 } } as any);
+    await p.find('ord', { where: { account: UUID } });
+    await p.count('ord', { where: { account: UUID } });
+    await p.find('acct', { where: { id: UUID } });
+    await p.find('ord', { where: { account: UUID_2 } });
     expect(p.catalogReads).toEqual(['ORD', 'ACCT']);
     expect(p.sent.every((s) => s.sql.includes('HEXTORAW('))).toBe(true);
   });
 
   it('a failed catalog read records nothing: the statement binds text as before, and the next door asks again', async () => {
     const p = new OracleUuidProbe({});
-    await p.find('ord', { where: { account: UUID } } as any);
+    await p.find('ord', { where: { account: UUID } });
     expect(p.sent[0]).toMatchObject({ sql: 'select * from "ORD" where "ACCT_REF" = :1', bindings: [UUID] });
-    await p.find('ord', { where: { account: UUID } } as any);
+    await p.find('ord', { where: { account: UUID } });
     expect(p.catalogReads).toEqual(['ORD', 'ORD']);
   });
 
   it('an empty catalog answer (no RAW(16) column) binds text, and is not asked again', async () => {
     const p = new OracleUuidProbe({ ORD: [] });
-    await p.find('ord', { where: { account: UUID } } as any);
-    await p.find('ord', { where: { account: 'not-a-uuid' } } as any);
+    await p.find('ord', { where: { account: UUID } });
+    await p.find('ord', { where: { account: 'not-a-uuid' } });
     expect(p.sent.map((s) => s.bindings)).toEqual([[UUID], ['not-a-uuid']]);
     expect(p.catalogReads).toEqual(['ORD']);
   });
