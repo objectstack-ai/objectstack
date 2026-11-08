@@ -51,6 +51,11 @@
  * `protocol.code-only-types.test.ts` uses. A gate INSIDE `saveMetaItem` cannot
  * be measured against a harness that mocks `saveMetaItem`.
  */
+// `@objectstack/lint` is reached through the save door's author-time gate, a
+// dynamic `import()` (`metadata-diagnostics.ts`). Paid here, at collection, so no
+// case's `testTimeout` window pays that first load
+// (`scripts/check-test-source-alias.mjs`, "The source reach").
+import '@objectstack/lint';
 import { describe, expect, it } from 'vitest';
 // [#5619] The producer's OWN write-verb dispatch decisions, so the fake engine
 // below cannot accept a call ObjectQL itself refuses.
