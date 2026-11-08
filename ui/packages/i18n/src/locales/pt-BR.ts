@@ -193,6 +193,8 @@ const pt = {
     deniedDescription: "Você não tem permissão para editar este campo.",
     serverDefaultHint: "Definido automaticamente ao salvar.",
     requiredForAction: "Obrigatório para executar «{{action}}».",
+    aiSuggested: "Sugestão da IA",
+    aiDraftNotice: "A IA preencheu a partir do chat os campos marcados como «Sugestão da IA». Nada é salvo até você revisar e salvar.",
     maxFileSize: "Tamanho máximo: {{size}}",
     masterDetail: {
       loadingColumns: "Carregando colunas…",

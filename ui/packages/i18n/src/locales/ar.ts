@@ -205,6 +205,8 @@ const ar = {
     deniedDescription: "ليس لديك إذن لتعديل هذا الحقل.",
     serverDefaultHint: "يُعيَّن تلقائيًا عند الحفظ.",
     requiredForAction: "مطلوب لتنفيذ «{{action}}».",
+    aiSuggested: "اقتراح الذكاء الاصطناعي",
+    aiDraftNotice: "ملأ الذكاء الاصطناعي من المحادثة الحقول المميّزة بـ«اقتراح الذكاء الاصطناعي». لا يُحفظ شيء حتى تراجعها وتحفظها.",
     maxFileSize: "الحجم الأقصى: {{size}}",
     masterDetail: {
       loadingColumns: "جارٍ تحميل الأعمدة…",
