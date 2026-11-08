@@ -1593,6 +1593,36 @@ export class HttpDispatcher {
         // `domains/automation-hooks.test.ts`.
         if (matchInboundHookRoute(path, method)) return null;
 
+        return this.judgeEnvironmentMembership(context);
+    }
+
+    /**
+     * The environment-membership check for a request a host serves OUTSIDE
+     * `dispatch()`: the declarative-endpoint step on the dispatcher plugin's
+     * fallback seam, which resolves the request through
+     * {@link resolveRequestScope} and so owes it the same check `dispatch()`
+     * runs after that resolution. A `403 PROJECT_MEMBERSHIP_REQUIRED` answer
+     * for a caller who is not a member of the resolved environment, else
+     * `null`; off when the host turned the check off.
+     *
+     * None of `dispatch()`'s path carve-outs apply: they name built-in routes
+     * (`/auth`, share links, the approval action page, the inbound hook), and
+     * a declared endpoint is none of them, whatever its path spells.
+     */
+    async environmentMembershipRefusal(
+        context: HttpProtocolContext,
+    ): Promise<{ status: number; body: any } | null> {
+        if (!this.enforceMembership) return null;
+        return this.judgeEnvironmentMembership(context);
+    }
+
+    /**
+     * The membership judgment both checks share: the caller this request
+     * resolved, against `sys_environment_member` for `context.environmentId`.
+     */
+    private async judgeEnvironmentMembership(
+        context: HttpProtocolContext,
+    ): Promise<{ status: number; body: any } | null> {
         const environmentId = context.environmentId;
         if (!environmentId) return null; // Unscoped legacy routes fall through.
 
@@ -1638,7 +1668,8 @@ export class HttpDispatcher {
         // without a cookie beside it) is the one judged, in the organization
         // its resolution vetted; which credential that was is the one reading
         // the api-action forward takes too (`admittingCredentialKind`). A
-        // session principal is judged by the session read above, as before.
+        // session principal is the user the session read above names, in the
+        // organization its resolution vetted (below).
         const resolved = context.executionContext;
         const admittedBy = admittingCredentialKind(context);
         if ((admittedBy === 'api_key' || admittedBy === 'oauth') && resolved?.userId) {
