@@ -424,7 +424,9 @@
  *   H  人合 — every register row except objectstack's `.claude/**` (today: `docs/adr/**`,
  *      `docs/NORTH-STAR.md`, `skills/**`, `AGENTS.md`, `CLAUDE.md`, and since
  *      the B2 ruling of 2026-10-13 the `workflows` row, `.github/workflows/**`,
- *      scoped to objectstack, objectui and cloud): the maintainer's hand, or
+ *      scoped to objectstack, objectui and cloud — in objectstack split by
+ *      content since ruling record 6722205630, "The workflows row's split"
+ *      below): the maintainer's hand, or
  *      an authorized APPROVED review by `GOVERNED_APPROVERS` and then the
  *      owning seat lands it. The tier ruling left this landing as it was; the
  *      list itself grew by one row on 2026-10-13. The `.claude/**` row of every
@@ -460,6 +462,35 @@
  * tier function, and `check-governed-prose.mjs` keeps pinning the SET of globs
  * the instruction prose names — the tier is an attribute the prose states in
  * words, which that gate deliberately does not parse.
+ *
+ * ## The workflows row's split (#31538, ruling record 6722205630, letter C)
+ *
+ * In objectstack the `workflows` row's tier is read off the DIFF, not the
+ * path (`split` on the row; objectui and cloud stay Tier H by path):
+ *
+ *   H by PATH — the release, publish and deploy files in
+ *      `WORKFLOW_TIER_H_FILES`, each with its reason, any edit at all.
+ *   H by DIFF (C2) — an added or changed `permissions:`; a `secrets.*` or
+ *      `github.token` line added, changed or moved; `pull_request_target`;
+ *      a `uses:` (or image) not already used at the base; a deleted job, a
+ *      changed literal check-run name or a lost `needs:`; a new
+ *      `continue-on-error`; an `if:` new or changed on an existing job or step.
+ *   S otherwise — a contract-review PASS on the current head, every check
+ *      green, and the owning seat lands it (the Tier S landing above).
+ *
+ * ⛔ Biased to H, because this surface can switch the other gates off: a
+ * changed job, step or workflow that holds a secret or a write token; an
+ * added `|| true`, `set +e`, `exit 0` or `OS_SKIP_`/`OS_DISABLE_`/`OS_ALLOW_`;
+ * a gate invocation or a `uses:` dropped; a changed trigger set or workflow
+ * name; a new job with a computed or colliding name; a new, deleted or
+ * non-YAML file. ⛔ Fail closed: a copy the line reader cannot parse (anchors,
+ * tags, tabs, flow spanning lines…), an unreadable commit, a missing base or
+ * no reading at all is H — so `--test`, which has paths only, always says H,
+ * and `--pr` reads the diff only on a checkout holding both commits.
+ *
+ * `readWorkflowDiff` is the one reader; the queue guard calls it per queued
+ * commit and `--branch` / `--pr` per PR. The reader is dependency-free on
+ * purpose: the guard's `pull_request` leg runs before any install.
  *
  * ### The generator co-edit fence (#11084) — a NARROWING, not a widening
  *
