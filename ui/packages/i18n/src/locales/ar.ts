@@ -861,6 +861,7 @@ const ar = {
     eventTitlePlaceholder: "ما موضوع هذا الحدث؟",
     creating: "جارٍ الإنشاء…",
     titleRequired: "العنوان مطلوب",
+    rescheduleNotFound: "سجل {{object}} هذا لم يعد موجودًا، أو لم يعد لديك إذن للوصول إليه.",
     a11y: {
       region: "التقويم",
       grid: "شبكة التقويم",

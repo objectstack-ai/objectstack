@@ -797,6 +797,7 @@ const zhHant = {
     eventTitlePlaceholder: '這個事件是關於什麼的？',
     creating: '建立中…',
     titleRequired: '請填寫標題',
+    rescheduleNotFound: '這條{{object}}記錄已不存在，或者您已無權訪問它。',
     a11y: {
       region: '日曆',
       grid: '日曆網格',

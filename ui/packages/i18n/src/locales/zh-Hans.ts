@@ -797,6 +797,7 @@ const zh = {
     eventTitlePlaceholder: '这个事件是关于什么的？',
     creating: '创建中…',
     titleRequired: '请填写标题',
+    rescheduleNotFound: '这条{{object}}记录已不存在，或者您已无权访问它。',
     a11y: {
       region: '日历',
       grid: '日历网格',

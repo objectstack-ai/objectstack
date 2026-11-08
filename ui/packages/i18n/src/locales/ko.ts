@@ -775,6 +775,7 @@ const ko = {
     eventTitlePlaceholder: "이 일정은 어떤 내용인가요?",
     creating: "생성 중…",
     titleRequired: "제목을 입력하세요",
+    rescheduleNotFound: "이 {{object}} 레코드가 더 이상 존재하지 않거나 접근 권한이 없습니다.",
     a11y: {
       region: "캘린더",
       grid: "캘린더 그리드",

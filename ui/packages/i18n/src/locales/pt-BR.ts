@@ -795,6 +795,7 @@ const pt = {
     eventTitlePlaceholder: "Sobre o que é este evento?",
     creating: "Criando…",
     titleRequired: "O título é obrigatório",
+    rescheduleNotFound: "Este registro de {{object}} não existe mais ou você não tem mais acesso a ele.",
     a11y: {
       region: "Calendário",
       grid: "Grade do calendário",
