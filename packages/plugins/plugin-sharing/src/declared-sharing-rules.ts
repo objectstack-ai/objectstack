@@ -66,11 +66,7 @@ import {
   type DeclaredNameAnswer,
 } from './package-scoped-declarations.js';
 
-type Logger = {
-  info?: (m: string, meta?: any) => void;
-  warn?: (m: string, meta?: any) => void;
-  error?: (m: string, meta?: any) => void;
-};
+type Logger = { info?: (m: string, meta?: any) => void; warn?: (m: string, meta?: any) => void };
 
 /** Map the spec `sharedWith.type` onto a runtime recipient_type, or null. */
 function mapRecipientType(t: unknown): SharingRuleRecipientType | null {

@@ -189,13 +189,15 @@ export class PackageScopedNameRefusedError extends Error {
 }
 
 /**
- * The refusal a reader reports when it leaves a name unserved: once per type
- * and name per process (the caller keeps the set), at `error` — the
- * declaration that would grant, route or staff is not in force while nothing
- * else looks wrong (AGENTS.md, degradation log levels).
+ * The refusal a reader reports when it leaves a name unserved: once per type,
+ * name and caller per process (the caller keeps the set), at `warn` — a
+ * functional degradation in AGENTS.md's terms, the level this plugin's other
+ * "declared rule not served" reports take: the rule grants nobody, the queue
+ * staffs nobody, and the next person to use it finds out; nothing claims to be
+ * persisted that is not.
  */
 export function reportRefusedDeclaration(
-  logger: { error?: (m: string, meta?: any) => void; warn?: (m: string, meta?: any) => void } | undefined,
+  logger: { warn?: (m: string, meta?: any) => void } | undefined,
   reported: Set<string>,
   refusal: PackageScopedRefusal,
 ): void {
@@ -209,6 +211,5 @@ export function reportRefusedDeclaration(
     reason: refusal.reason,
     candidates: refusal.candidates.map((c) => (c.kind === 'package' ? c.packageId : 'environment')),
   };
-  if (logger?.error) logger.error(message, meta);
-  else logger?.warn?.(message, meta);
+  logger?.warn?.(message, meta);
 }

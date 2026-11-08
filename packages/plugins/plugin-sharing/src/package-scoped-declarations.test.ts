@@ -26,7 +26,6 @@
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import { SchemaRegistry } from '@objectstack/objectql';
-import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 import { createDeclaredSharingRuleSource } from './declared-sharing-rules.js';
 import { SharingRuleService, bindDeclaredRuleNameGuard } from './sharing-rule-service.js';
 import { OwnershipQueueService } from './ownership-queue-service.js';
@@ -86,22 +85,12 @@ function makeEngine(tables: Record<string, Row[]> = {}) {
     getSchema: () => undefined,
     async find(object: string, options?: any) {
       const where = options?.where ?? options?.filter ?? {};
-      return (tables[object] ?? []).filter((row) =>
+      const rows = (tables[object] ?? []).filter((row) =>
         Object.entries(where).every(([k, v]) =>
           v && typeof v === 'object' && '$in' in (v as object) ? (v as any).$in.includes(row[k]) : row[k] === v,
         ),
       );
-    },
-    async insert(_object: string, data: any) {
-      return data;
-    },
-    async update(_object: string, data: any, options?: any) {
-      assertEngineUpdateDispatch(data, options);
-      return {};
-    },
-    async delete(_object: string, options?: any) {
-      assertEngineDeleteDispatch(options);
-      return {};
+      return typeof options?.limit === 'number' ? rows.slice(0, options.limit) : rows;
     },
     registerHook(event: string, handler: (ctx: any) => any, o?: { object?: string; packageId?: string }) {
       hooks.push({ event, object: String(o?.object), handler, packageId: o?.packageId });
@@ -122,9 +111,10 @@ const TABLES = (): Record<string, Row[]> => ({
   ],
 });
 
+/** The warnings a reader logs, kept. */
 const logs = () => {
-  const errors: Array<{ msg: string; meta?: any }> = [];
-  return { errors, logger: { warn: () => {}, error: (msg: string, meta?: any) => errors.push({ msg, meta }) } };
+  const warnings: Array<{ msg: string; meta?: any }> = [];
+  return { warnings, logger: { warn: (msg: string, meta?: any) => warnings.push({ msg, meta }) } };
 };
 
 beforeEach(() => {
@@ -184,12 +174,12 @@ describe('two holders: a name two packages declare is refused, naming both (red 
   });
 
   it('serves neither sharing rule, and reports the name once, naming both packages', async () => {
-    const { errors, logger } = logs();
+    const { warnings, logger } = logs();
     const source = createDeclaredSharingRuleSource({ engine: { registry }, logger });
     expect(await source.list()).toEqual([]);
     expect(await source.list()).toEqual([]);
-    expect(errors).toHaveLength(1);
-    expect(errors[0].meta).toMatchObject({ type: 'sharing_rule', name: 'emea_share', candidates: [ALPHA, BETA] });
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0].meta).toMatchObject({ type: 'sharing_rule', name: 'emea_share', candidates: [ALPHA, BETA] });
   });
 
   it('refuses the sharing rule by name with 409 RESOURCE_CONFLICT naming both packages', async () => {
@@ -213,7 +203,7 @@ describe('two holders: a name two packages declare is refused, naming both (red 
   });
 
   it('resolves the queue nowhere — neither package’s members — and refuses it under onFailedRead refuse', async () => {
-    const { errors, logger } = logs();
+    const { warnings, logger } = logs();
     const queues = new OwnershipQueueService({ engine: () => makeEngine(TABLES()) as any, logger });
     expect(await queues.resolveQueue('triage', 'org_a')).toBeNull();
     expect(await queues.expandMembers('triage', 'org_a')).toEqual([]);
@@ -221,8 +211,8 @@ describe('two holders: a name two packages declare is refused, naming both (red 
     const refused = await queues.expandMembers('triage', 'org_a', { onFailedRead: 'refuse' }).catch((e: unknown) => e);
     expect(refused).toBeInstanceOf(PackageScopedNameRefusedError);
     expect(refused).toMatchObject({ code: 'RESOURCE_CONFLICT', status: 409 });
-    expect(errors).toHaveLength(1);
-    expect(errors[0].meta).toMatchObject({ type: 'queue', name: 'triage', candidates: [ALPHA, BETA] });
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0].meta).toMatchObject({ type: 'queue', name: 'triage', candidates: [ALPHA, BETA] });
   });
 
   it('serves neither queue to a user’s queues (main served the LAST one listed there)', async () => {
