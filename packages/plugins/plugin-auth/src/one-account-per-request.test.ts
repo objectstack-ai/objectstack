@@ -207,12 +207,14 @@ describe('an auth request whose credentials name two different accounts is refus
     const resolve = (credentials: Credentials) =>
       resolveRequestExecutionContext({
         headers: new Headers(headersOf(credentials)),
-        ql: d.engine,
+        // The session leg is the question here, not the grants: with no
+        // engine the resolver stops at the principal it admitted.
+        ql: undefined,
         authService: d.manager as unknown as RequestAuthService,
         tenancy: undefined,
         anonymous: 'fail-closed',
         authGate: 'resolved',
-        credentials: 'api-key-and-session',
+        credentials: 'session-only',
         sessionApi: 'optional',
         session: 'request',
         localization: 'withhold',
