@@ -129,6 +129,6 @@ query placeholder such as `{today}` is refused there (`expression-invalid`).
 For "days remaining" in a message, use `daysBetween(today(), record.end_date)`.
 
 `timeRelative` ships in `@objectstack/trigger-schedule` — needs
-`requires: ['automation', 'triggers']` **plus `'job'`** (the sweep cadence
-runs on the job service). Full descriptor schema:
+`requires: ['automation', 'triggers']` (the sweep cadence
+runs on the always-on `job` service). Full descriptor schema:
 `node_modules/@objectstack/spec/src/automation/time-relative-trigger.zod.ts`.

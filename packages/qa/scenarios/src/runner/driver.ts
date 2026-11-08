@@ -4,9 +4,14 @@
  * The agent driver: the one seam between the runner and the model.
  *
  * The cost ruling on cloud#3600 (「目前阶段尽量不要用云端的token，api的更贵」)
- * fixes what may sit behind it: a LOCAL Claude Code session on the developer's
- * own login, never an API-billed model and never a cloud agent. No driver
- * calls a model API itself:
+ * fixes what may sit behind it: a Claude Code session on a subscription
+ * login, never an API-billed model. Ruling D2 of the scenario-library epic
+ * (2026-11-06, the gallery write path) names the two callers that qualify: a
+ * LOCAL session on the developer's own login, and a scheduled Claude Code
+ * task in the project's cloud environment on the maintainer's subscription
+ * login (the gallery refresh, `export/refresh.ts`). An API-billed model is
+ * still never allowed, wherever the session runs. No driver calls a model
+ * API itself:
  *
  *   - {@link ClaudeCodeDriver} spawns the `claude` CLI in headless mode
  *     (`claude -p --output-format stream-json`, the prompt on stdin). It REFUSES

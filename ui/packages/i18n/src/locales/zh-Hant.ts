@@ -1990,6 +1990,7 @@ const zhHant = {
       unsupportedSpecifierType: '不支援的設定項型別:{{type}}',
       invalidPhone: '請輸入僅由數字、空格和 + ( ) - . 組成的電話號碼',
       invalidColor: '請輸入十六進位制顏色，例如 #1a2b3c',
+      jsonStoredAsText: '該值以文本形式儲存，而不是 JSON 物件。儲存後將改存為物件；頁面已將其標記為未儲存的更改。',
       clientAddressDirect: '伺服器判定的你的地址：{{address}}。不包含該地址的列表無法在此儲存。此伺服器不信任代理轉發頭，若部署在代理之後，這裡顯示的是代理的地址。',
       clientAddressViaProxy: '伺服器判定的你的地址：{{address}}，取自此伺服器所信任代理的轉發頭。不包含該地址的列表無法在此儲存。',
       clientAddressUnknown: '伺服器無法確定你的地址，因此無法在此儲存非空的列表。',

@@ -475,8 +475,9 @@ function errorResultFromThrown(err: unknown) {
 }
 
 /**
- * [#23509] The metadata tools', `list_actions`' and `delete_records`' tool
- * error, and the coded half of the record data tools' ({@link dataDoorErrorResult}):
+ * [#23509] `delete_records`' tool error, the coded half of the record data
+ * tools' ({@link dataDoorErrorResult}), and the refusal half of the metadata
+ * tools' and `list_actions`' ({@link metaDoorErrorResult}, #31272):
  * a thrown coded refusal renders its `code` and `status` beside the message, in
  * {@link errorResultFromThrown}'s shape. A throw with no code renders here as
  * `errorResult(messageOf(err))`, byte-identical to what these catches answered
@@ -539,7 +540,7 @@ interface DataDoorAnswer {
  * [#31270] Exported for the record resource (`MCPServerRuntime.bridgeResources`),
  * which answers a code-less throw with the same read; not on the package entry.
  */
-export function dataDoorAnswerOf(err: unknown, objectName: string): DataDoorAnswer {
+export function dataDoorAnswerOf(err: unknown, objectName?: string): DataDoorAnswer {
   const door = mapDataError(err, objectName);
   const code = typeof door.body.code === 'string' && door.body.code !== '' ? door.body.code : undefined;
   const message = typeof door.body.error === 'string' && door.body.error !== '' ? door.body.error : messageOf(err);
@@ -623,6 +624,52 @@ function dataDoorErrorResult(err: unknown, tool: DataDoorTool | typeof DELETE_RE
       request: { method: 'tools/call', path: `${tool} ${objectName}` },
     });
   }
+  return codedErrorResult(door);
+}
+
+/**
+ * The tools whose throw the `/meta` read doors would answer: the object-schema
+ * reads and `list_actions`. {@link metaDoorErrorResult} renders their catches.
+ */
+type MetaDoorTool = 'list_objects' | 'describe_object' | 'validate_expression' | 'list_actions';
+
+/**
+ * [#31272] The metadata tools' and `list_actions`' tool error: a throw the
+ * `/meta` door answers as a server fault renders that door's answer, logged
+ * once for the operator; every other throw renders through
+ * {@link errorResultWithCode}, byte for byte as before.
+ *
+ * Those catches rendered every throw through {@link errorResultWithCode}, so a
+ * bridge member that FAULTED handed the agent its raw text (`socket hang up`)
+ * or, for a driver's own string code, `{ code: SQLITE_BUSY, message: <driver
+ * text> }` as if a rule had refused. The `/meta` read doors answer the same
+ * throws `500 INTERNAL_ERROR 'Internal server error'` and `500 DATABASE_ERROR
+ * 'Internal data error'`: they call `handleRouteError` (`@objectstack/rest`)
+ * with no object, which answers a fault with `mapDataError`'s classification
+ * (`@objectstack/types`). ⛔ So this asks that reader, through
+ * {@link dataDoorAnswerOf} with no object, and decides with the doors' own
+ * `isServerFault`; it holds no copy of either. The thrown text reaches the
+ * operator through `logServerFault`, never the agent.
+ *
+ * A declared 5xx is a fault there too: the object-schema reads' own
+ * `FIELD_VISIBILITY_UNRESOLVED` / 503 keeps its code and status and has its
+ * prose withheld, as the `/meta` object read answers it
+ * (`sendFieldVisibilityFault`).
+ *
+ * ⛔ A refusal (the door answers 4xx) is not reclassified: its code, sentence
+ * and status render as {@link errorResultWithCode} renders them, and a
+ * code-less 4xx keeps its bare message. This is {@link rowRefusalOf}'s line,
+ * drawn with the same reader.
+ */
+function metaDoorErrorResult(err: unknown, tool: MetaDoorTool, objectName?: string) {
+  const door = dataDoorAnswerOf(err);
+  if (!isServerFault(door.status)) return errorResultWithCode(err);
+  logServerFault({
+    status: door.status,
+    error: err,
+    ...(door.code !== undefined ? { code: door.code } : {}),
+    request: { method: 'tools/call', path: objectName !== undefined ? `${tool} ${objectName}` : tool },
+  });
   return codedErrorResult(door);
 }
 
@@ -1685,7 +1732,7 @@ export function registerObjectTools(
             status: 503,
           });
         } catch (err) {
-          return errorResultWithCode(err);
+          return metaDoorErrorResult(err, 'list_objects');
         }
       },
     );
@@ -1709,7 +1756,7 @@ export function registerObjectTools(
           if (!def) return errorResult(`Object "${objectName}" not found`);
           return textResult(def);
         } catch (err) {
-          return errorResultWithCode(err);
+          return metaDoorErrorResult(err, 'describe_object', objectName);
         }
       },
     );
@@ -1868,7 +1915,7 @@ export function registerObjectTools(
             },
           });
         } catch (err) {
-          return errorResultWithCode(err);
+          return metaDoorErrorResult(err, 'validate_expression', objectName);
         }
       },
     );
@@ -2400,7 +2447,7 @@ export function registerActionTools(
         const visible = allowSystem ? actions : actions.filter(isListableAction);
         return textResult({ actions: visible, totalCount: visible.length });
       } catch (err) {
-        return errorResultWithCode(err);
+        return metaDoorErrorResult(err, 'list_actions');
       }
     },
   );
