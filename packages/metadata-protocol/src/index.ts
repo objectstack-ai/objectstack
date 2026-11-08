@@ -258,6 +258,11 @@ export type { PackagelessOverlayCensus, PackagelessOverlayMigration } from './pr
 // read by the automation boot pull, which judges a flow override on the
 // column (`isServedOverrideRowOf`), ⛔ never on the body's `_packageId`.
 export { bindStoredRow, storedRowBindingOf } from './stored-row-binding.js';
+
+// [#31575, ADR-0150 D3] A package's declared dependency closure: the ONE
+// function the save door's write scope (`resolveWritePackageScope`) and
+// objectql's package-scoped name resolver both ask, so the two never disagree.
+export { packageDependencyClosure } from './protocol-write-package-scope.js';
 export { shadowedStoredRowsOf } from './stored-flow-slot.js';
 
 // [ADR-0131 D6] The `unmanaged` install mode's walled-posture refusal — the
