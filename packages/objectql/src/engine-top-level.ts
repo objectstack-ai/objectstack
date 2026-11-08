@@ -4629,6 +4629,17 @@ export function collectionItemOwnerStampRefusal(
  * @param ownerId The package the door registers it under.
  * @param scope   Which of the app shapes this door registers.
  */
+/**
+ * Does `registerApp` register this package body itself as an app (step 4:
+ * a body with a `name` and a `navigation` and no `apps[]`, the legacy
+ * one-app package)? The one spelling of that condition: the registration
+ * step, its owner-stamp refusal and the upgrade plan's override advice
+ * (`package-upgrade-environment.ts`) all ask it.
+ */
+export function registersManifestAsApp(manifest: any): boolean {
+  return Boolean(manifest?.name && manifest?.navigation && !manifest?.apps?.length);
+}
+
 export function packageBodyObjectAndAppOwnerStampRefusal(
   body: any,
   ownerId: string | undefined,
