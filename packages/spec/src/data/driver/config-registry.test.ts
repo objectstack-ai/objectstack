@@ -226,7 +226,7 @@ describe('DATABASE_DRIVER_SELECTION_IDS — what a boot flag may offer, derived 
     // row, and `mssql`, which is served for federation only and was never a
     // boot store. Stated out loud so a third withheld id is a deliberate,
     // visible change here rather than something inferred from a diff.
-    const withheld = BUILTIN_DRIVER_IDS.filter((id) => !DATABASE_DRIVER_SELECTION_IDS.includes(id));
+    const withheld = BUILTIN_DRIVER_IDS.filter((id) => !(DATABASE_DRIVER_SELECTION_IDS as readonly string[]).includes(id));
     expect(withheld).toEqual(['memory', 'mssql']);
     for (const id of DATABASE_DRIVER_SELECTION_IDS) expect(BUILTIN_DRIVER_IDS).toContain(id);
   });

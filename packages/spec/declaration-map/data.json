@@ -185,6 +185,8 @@
     "MetricSchema": "data/Metric",
     "MongoConfig": "data/MongoConfig",
     "MongoConfigSchema": "data/MongoConfig",
+    "MssqlConfig": "data/MssqlConfig",
+    "MssqlConfigSchema": "data/MssqlConfig",
     "MysqlConfig": "data/MysqlConfig",
     "MysqlConfigSchema": "data/MysqlConfig",
     "NoSQLDataTypeMapping": "data/NoSQLDataTypeMapping",

@@ -4,48 +4,31 @@
  * [#31327] The `mssql` arm of the datasource driver factory: what reaches the
  * `tedious` connection from a federated SQL Server datasource.
  *
- * Read off the built driver's own knex config, with no server: knex's `mssql`
- * client builds offline. Each case is one key of `MssqlConfigSchema` (or the
- * datasource-level `ssl` block / bound secret) arriving under the name the
- * knex `mssql` client hands tedious.
+ * Read off `buildMssqlConnection`, the leaf module the factory's `mssql` arm
+ * hands to `SqlDriver` as the knex `mssql` client's `connection`. Each case is
+ * one key of `MssqlConfigSchema` (or the resolved datasource-level `ssl`
+ * value, or the bound secret) arriving under the name the knex `mssql` client
+ * hands tedious. The module imports no driver package, so this file loads
+ * none (`check:test-source-alias`, `check:driver-memory-census`).
  */
 
 import { describe, expect, it } from 'vitest';
-import { createDefaultDatasourceDriverFactory } from '../default-datasource-driver-factory.js';
-// Paid at collection, not inside a clocked case: the factory reaches both
-// drivers through dynamic imports (check:test-source-alias).
-import '@objectstack/driver-sql';
-import '@objectstack/driver-memory';
-
-const factory = () => createDefaultDatasourceDriverFactory({ dev: false });
+import type { DatasourceConnectionSpec } from '../contracts/index.js';
+import { buildMssqlConnection } from '../mssql-driver-config.js';
 
 const BOUND_SECRET = 's3cr3t-from-sys_secret';
 
-async function built(spec: Record<string, unknown>): Promise<{ client: unknown; connection: any; dialect: unknown }> {
-  const handle: any = await factory().create({
-    driver: 'mssql',
-    schemaMode: 'external',
-    ...spec,
-  } as any);
-  try {
-    const driver = handle.driver ?? handle;
-    const config = driver.config ?? {};
-    return { client: config.client, connection: config.connection, dialect: driver.dialectName };
-  } finally {
-    try { await handle.disconnect?.(); } catch { /* noop */ }
-  }
-}
+const spec = (over: Record<string, unknown>): DatasourceConnectionSpec =>
+  ({ name: 'erp', driver: 'mssql', schemaMode: 'external', ...over }) as unknown as DatasourceConnectionSpec;
 
-describe('[#31327] mssql — the factory builds SqlDriver over the tedious connection', () => {
-  it('maps the discrete fields onto the knex mssql connection, the bound secret as password', async () => {
-    const got = await built({
-      name: 'erp',
-      config: { host: 'erp-db.internal', port: 1433, database: 'ERP', username: 'objectstack_ro' },
-      secret: BOUND_SECRET,
-    });
-    expect(got.client).toBe('mssql');
-    expect(got.dialect).toBe('mssql');
-    expect(got.connection).toMatchObject({
+describe('[#31327] mssql — the tedious connection built from the datasource', () => {
+  it('maps the discrete fields onto the knex mssql connection, the bound secret as password', () => {
+    expect(
+      buildMssqlConnection(
+        spec({ config: { host: 'erp-db.internal', port: 1433, database: 'ERP', username: 'objectstack_ro' }, secret: BOUND_SECRET }),
+        undefined,
+      ),
+    ).toEqual({
       server: 'erp-db.internal',
       port: 1433,
       database: 'ERP',
@@ -54,24 +37,23 @@ describe('[#31327] mssql — the factory builds SqlDriver over the tedious conne
     });
   });
 
-  it('leaves tedious its own TLS default when nothing about TLS is declared', async () => {
-    const got = await built({ name: 'erp', config: { host: 'h', database: 'ERP' } });
-    expect(got.connection.options).toBeUndefined();
-    expect(got.connection.password).toBeUndefined();
+  it('leaves tedious its own TLS default when nothing about TLS is declared', () => {
+    const got = buildMssqlConnection(spec({ config: { host: 'h', database: 'ERP' } }), undefined);
+    expect(got.options).toBeUndefined();
+    expect(got.password).toBeUndefined();
   });
 
-  it('config.ssl: false turns encrypt off; a named instance reaches tedious as instanceName', async () => {
-    const got = await built({ name: 'erp', config: { host: 'h', database: 'ERP', ssl: false, instanceName: 'SQLEXPRESS' } });
-    expect(got.connection.options).toEqual({ encrypt: false, instanceName: 'SQLEXPRESS' });
+  it('ssl false turns encrypt off; a named instance reaches tedious as instanceName', () => {
+    const got = buildMssqlConnection(spec({ config: { host: 'h', database: 'ERP', instanceName: 'SQLEXPRESS' } }), false);
+    expect(got.options).toEqual({ encrypt: false, instanceName: 'SQLEXPRESS' });
   });
 
-  it('the ssl block: rejectUnauthorized false is trustServerCertificate, a CA rides in cryptoCredentialsDetails', async () => {
-    const got = await built({
-      name: 'erp',
-      config: { host: 'h', database: 'ERP' },
-      ssl: { enabled: true, rejectUnauthorized: false, ca: 'PEM' },
+  it('the ssl block: rejectUnauthorized false is trustServerCertificate, a CA rides in cryptoCredentialsDetails', () => {
+    const got = buildMssqlConnection(spec({ config: { host: 'h', database: 'ERP' } }), {
+      rejectUnauthorized: false,
+      ca: 'PEM',
     });
-    expect(got.connection.options).toEqual({
+    expect(got.options).toEqual({
       encrypt: true,
       trustServerCertificate: true,
       cryptoCredentialsDetails: { ca: 'PEM' },
