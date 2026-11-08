@@ -658,8 +658,8 @@ export interface DataDoorRefusalEnvelope extends ThrownRefusalEnvelope {
  * to the same throw ({@link dataDoorAnswerOf}, `mapDataError`):
  *
  * - when the door DEMOTED the code (it serves `declaredCode`: an app's own
- *   unregistered code, `{ code: 'LEAVE_EXHAUSTED', status: 409 }`) and still
- *   refuses (below 500), the face answers the door's refusal: the closed code
+ *   unregistered code, `{ code: 'LEAVE_EXHAUSTED', status: 409 }`), the face
+ *   answers the door's refusal: the closed code
  *   (`RESOURCE_CONFLICT`), its sentence, its status and `declaredCode`. It
  *   used to answer `code: 'LEAVE_EXHAUSTED'`, outside the registered
  *   vocabulary, with no `declaredCode`;
@@ -670,12 +670,13 @@ export interface DataDoorRefusalEnvelope extends ThrownRefusalEnvelope {
  * ⛔ No second demotion rule: whether a code is demoted is the door's
  * `declaredCode`, never a vocabulary check here. Members render in
  * `run_action`'s order ({@link errorResultFromThrown}), each omitted when the
- * door serves none. A demoted code the door answers as a fault (a declared
- * 4xx it reads as the sandbox's own fault) keeps the envelope: the 4xx line
- * #31341 drew is not moved here.
+ * door serves none. Only a refusal reaches here ({@link
+ * dataDoorRefusalEnvelope}); a declared 4xx the door answers as a fault (the
+ * sandbox's own fault) serves no `declaredCode` there, so it keeps the
+ * envelope, as #31246 pins it.
  */
 function refusalAsTheDoorServesIt(envelope: ThrownRefusalEnvelope, door: DataDoorAnswer): DataDoorRefusalEnvelope {
-  if (door.declaredCode !== undefined && door.code !== undefined && !isServerFault(door.status)) {
+  if (door.declaredCode !== undefined && door.code !== undefined) {
     return {
       code: door.code,
       message: door.message,
