@@ -403,14 +403,25 @@ describe('[#30964] an unmanaged grant hands the copy to the environment\'s insta
     async function grant(opts: {
         body?: Record<string, unknown>;
         answer?: { status?: number; json: unknown };
-        door?: { install: (r: Request) => Promise<Response> } | null;
+        door?: { install: (r: Request, options?: { grant?: unknown }) => Promise<Response> } | null;
         singleEnvironment?: boolean;
+        /** [#31481] The audit slot throws. */
+        auditThrows?: boolean;
     } = {}) {
         const rawApp = makeRawApp();
-        const seen: { request?: Request; body?: any } = {};
+        const seen: { request?: Request; body?: any; options?: any } = {};
+        // [#31481] The environment's `audit` slot, recording what it is handed.
+        const auditEvents: any[] = [];
+        const audit = {
+            recordPackageLifecycleEvent: async (event: unknown) => {
+                if (opts.auditThrows) throw new Error('ledger offline');
+                auditEvents.push(event);
+            },
+        };
         const door = opts.door === null ? undefined : opts.door ?? {
-            install: vi.fn(async (request: Request) => {
+            install: vi.fn(async (request: Request, options?: { grant?: unknown }) => {
                 seen.request = request;
+                seen.options = options;
                 seen.body = await request.json();
                 return new Response(JSON.stringify({ success: true, data: { installMode: 'unmanaged', targetPackageId: 'com.acme.crm-copy' } }), { status: 200 });
             }),
@@ -419,11 +430,12 @@ describe('[#30964] an unmanaged grant hands the copy to the environment\'s insta
             getServiceAsync: async (name: string) => {
                 if (name === 'auth') return sessionAuth('user-1');
                 if (name === 'marketplace-install-local' && door) return door;
+                if (name === 'audit') return audit;
                 throw new Error(`no ${name}`);
             },
         };
         const services: Record<string, any> = opts.singleEnvironment
-            ? { auth: sessionAuth('user-1'), ...(door ? { 'marketplace-install-local': door } : {}) }
+            ? { auth: sessionAuth('user-1'), audit, ...(door ? { 'marketplace-install-local': door } : {}) }
             : { 'env-registry': { resolveByHostname: async () => ({ environmentId: ENV }) }, 'kernel-manager': { getOrCreate: async () => envKernel } };
         const { ctx, fireKernelReady } = makeCtx({ rawApp, services });
         const answer = opts.answer ?? { json: { success: true, data: { install_mode: 'unmanaged', version_id: 'ver_9', version: '2.0.0' } } };
@@ -437,7 +449,7 @@ describe('[#30964] an unmanaged grant hands the copy to the environment\'s insta
         const res = await rawApp.routes.get('POST /api/v1/cloud-connection/install')!(
             cWithCookie(opts.body ?? { package_id: 'pkg_1', install_mode: 'unmanaged' }),
         );
-        return { res, door, seen, fetchSpy, logger: ctx.logger };
+        return { res, door, seen, fetchSpy, auditEvents, logger: ctx.logger };
     }
 
     it('copies the granted version through the door, as the caller (their own headers), and answers the door\'s answer', async () => {
@@ -531,5 +543,67 @@ describe('[#30964] an unmanaged grant hands the copy to the environment\'s insta
         expect(res.status).toBe(503);
         expect(res.payload.error.code).toBe('SERVICE_UNAVAILABLE');
         expect(res.payload.error.message).toContain('Nothing was copied');
+    });
+
+    // ── [#31481, ruling A「两边审计」] a refusal after the grant leaves the environment's audit row ──
+
+    /** The failure event this door hands for a grant it refuses itself. */
+    const refusedGrant = (errorCode: string, status: number) => ({
+        action: 'package_unmanaged_import',
+        packageId: 'pkg_1',
+        version: '2.0.0',
+        environmentId: ENV,
+        actor: 'user-1',
+        outcome: 'failure',
+        errorCode,
+        status,
+    });
+
+    it('[#31481] the door is handed the grant beside the request: package, version, environment and installer', async () => {
+        const { res, seen, auditEvents } = await grant();
+        expect(res.status, JSON.stringify(res.payload)).toBe(200);
+        expect(seen.options).toEqual({ grant: { packageId: 'pkg_1', version: '2.0.0', environmentId: ENV, actor: 'user-1' } });
+        // The copy's own events are the door's; this door writes none for a copy it handed over.
+        expect(auditEvents).toEqual([]);
+    });
+
+    it('[#31481] a grant it cannot read hands the environment\'s audit slot one failure event (502), in either deployment', async () => {
+        for (const singleEnvironment of [false, true]) {
+            const { res, auditEvents } = await grant({
+                singleEnvironment,
+                answer: { json: { success: true, data: { install_mode: 'unmanaged', version: '2.0.0' } } },
+            });
+            expect(res.status).toBe(502);
+            expect(auditEvents).toEqual([refusedGrant('PLUGIN_INSTALL_FAILED', 502)]);
+        }
+    });
+
+    it('[#31481] no install-local door hands the environment\'s audit slot one failure event (503)', async () => {
+        const { res, auditEvents } = await grant({ door: null });
+        expect(res.status).toBe(503);
+        expect(auditEvents).toEqual([refusedGrant('SERVICE_UNAVAILABLE', 503)]);
+    });
+
+    it('[#31481] a door refusal is the door\'s to audit: this door hands no second event', async () => {
+        const door = { install: vi.fn(async () => new Response(JSON.stringify({ success: false, error: { code: 'FORBIDDEN', message: 'nope' } }), { status: 403 })) };
+        const { res, auditEvents } = await grant({ door });
+        expect(res.status).toBe(403);
+        expect(auditEvents).toEqual([]);
+    });
+
+    it('[#31481] no grant, no event: a control-plane refusal and a managed install hand none', async () => {
+        const refused = await grant({ answer: { status: 403, json: { success: false, error: { code: 'FORBIDDEN', message: 'not entitled' } } } });
+        expect(refused.auditEvents).toEqual([]);
+        const managed = await grant({ body: { package_id: 'pkg_1' }, answer: { json: { success: true, data: { installed: true } } } });
+        expect(managed.auditEvents).toEqual([]);
+    });
+
+    it('[#31481] an audit slot that throws changes no answer, and is logged at error', async () => {
+        const { res, logger } = await grant({ door: null, auditThrows: true });
+        expect(res.status).toBe(503);
+        expect(res.payload.error.code).toBe('SERVICE_UNAVAILABLE');
+        const errors = (logger.error as any).mock.calls.map((call: unknown[]) => String(call[0])).join('\n');
+        expect(errors).toContain('package_unmanaged_import');
+        expect(errors).toContain('ledger offline');
     });
 });
