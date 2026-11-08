@@ -4003,7 +4003,10 @@ describe('AuthManager', () => {
         const matches = Object.entries(w).every(([k, v]) => (user as any)[k] === v);
         return matches ? user : null;
       }),
-      update: vi.fn(async (_obj: string, _patch: any, _options?: any): Promise<unknown> => ({ ...(user ?? {}) })),
+      update: vi.fn(async (_obj: string, patch: any, options?: any): Promise<unknown> => {
+        assertEngineUpdateDispatch(patch, options);
+        return { ...(user ?? {}) };
+      }),
       count: vi.fn(),
     });
     const mgr = (engine: any, extra: any = {}) => {
