@@ -37,8 +37,8 @@
  * - `both_columns` — the old column and the new one both exist: a half-done
  *   state no rule can resolve without choosing which values to keep;
  * - `several_old_columns` — two old keys in one list both still have columns;
- * - `destructive_type` — the declaring field stores no column (a formula, a
- *   summary) while the old column stands, or the old column, read under the
+ * - `destructive_type` — the declaring field has no column (a formula) while
+ *   the old column stands, or the old column, read under the
  *   new declaration, is a change the drift categories call `destructive` (the
  *   driver's own {@link diffManagedTable}, judged by the caller that can read
  *   the column);
@@ -142,22 +142,6 @@ export function planDeclaredRenames(args: {
     // A builtin key is never a field the sync materialises (the builtin
     // collision warning says so): not a rename target.
     if (BUILTIN_COLUMNS.has(field)) continue;
-    // A virtual field (a formula, a summary) has no column to carry values
-    // into. With an old column still on the table, passing over it would leave
-    // that column orphaned in silence, so it is refused by name — the same
-    // refusal the install door gives a renamed field turned to a type that
-    // stores no column.
-    if (!fieldHasColumn((def ?? {}) as Record<string, any>)) {
-      const stranded = entries.filter((old) => !isPlatformOwnedColumn(old, tenantField) && !live.has(old) && physicalColumns.has(old));
-      if (stranded.length > 0) {
-        refuse(field, stranded, 'destructive_type',
-          `'${field}' is a field that stores no column, so the values the column ${quote(stranded)} holds would have `
-          + 'nowhere to go. Nothing was changed. Keep a stored type for the renamed field, or carry the values by hand '
-          + 'and drop the old column.');
-      }
-      continue;
-    }
-
     const usable: string[] = [];
     let refused = false;
     for (const old of entries) {
@@ -192,6 +176,19 @@ export function planDeclaredRenames(args: {
 
     const present = usable.filter((old) => physicalColumns.has(old));
     if (present.length === 0) continue;
+    // A field with no column (a formula) has nowhere to carry values into.
+    // Passing over it would leave the old column orphaned in silence, so it is
+    // refused by name — the refusal the install door gives a renamed field
+    // turned to a type that stores no column. It runs after the per-entry
+    // refusals above, so a platform-owned, live or twice-claimed key keeps its
+    // own name on a virtual target too.
+    if (!fieldHasColumn((def ?? {}) as Record<string, any>)) {
+      refuse(field, present, 'destructive_type',
+        `'${field}' is a field that stores no column, so the values the column ${quote(present)} holds would have `
+        + 'nowhere to go. Nothing was changed. Keep a stored type for the renamed field, or carry the values by hand '
+        + 'and drop the old column.');
+      continue;
+    }
     if (physicalColumns.has(field)) {
       refuse(field, present, 'both_columns',
         `the table has a column for ${quote(present)} and one for '${field}' too — a half-done rename, and carrying `

@@ -82,6 +82,13 @@ describe('planDeclaredRenames — the rule, read from the new metadata and the p
     expect(plan({ b: { type: 'formula', expression: '1', renamedFrom: ['a'] } }, [])).toEqual({ carries: [], refusals: [] });
   });
 
+  it('a virtual target keeps the per-entry refusals by their own name: platform column, live key, claimed twice', () => {
+    const f = (from: string) => ({ type: 'formula', expression: '1', renamedFrom: [from] });
+    expect(reasons(plan({ b: f('created_at') }, ['created_at']))).toEqual(['platform_column']);
+    expect(reasons(plan({ a: { type: 'text' }, b: f('a') }, ['a']))).toEqual(['live_key']);
+    expect(reasons(plan({ c: { type: 'text', renamedFrom: ['a'] }, b: f('a') }, ['a']))).toEqual(['claimed_twice']);
+  });
+
   it('refuses `platform_column`: the record id, an audit column, the tenant column', () => {
     for (const old of ['id', 'created_at', 'updated_at', 'org_id']) {
       const p = plan({ b: { type: 'text', renamedFrom: [old] } }, [old], { tenantField: 'org_id' });
