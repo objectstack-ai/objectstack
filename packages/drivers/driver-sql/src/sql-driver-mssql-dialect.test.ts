@@ -142,7 +142,7 @@ describe('[#31327] aggregands — bit is not a SUM/AVG/MIN/MAX operand on SQL Se
   });
 
   it('an integer AVG is not integer division', () => {
-    expect(mssqlAggregandOperandSql('avg', 'integer', '??')).toBe('cast(?? as float)');
+    expect(mssqlAggregandOperandSql('avg', 'integral', '??')).toBe('cast(?? as float)');
   });
 });
 
