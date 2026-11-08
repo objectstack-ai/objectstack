@@ -1075,7 +1075,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '⭐ the argv is CLOSED: a flag the mode does not read, or a second repository beside a bare --pr, is refused': 22,
   'the per-row repository scope (ruled B2, 2026-10-13)': 20,
   'the nested `ui/` workspace rows, on the register (#25712)': 16,
-  '⭐ the workflows split: Tier H by path or by C2 trigger, else Tier S (ruling record 6722205630)': 43,
+  '⭐ the workflows split: Tier H by path or by C2 trigger, else Tier S (ruling record 6722205630)': 45,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -5193,6 +5193,11 @@ async function selfTest() {
 
     // Tier H by DIFF: one pin per C2 trigger.
     assert('C2-permissions-added-is-H', isH(tierOf(edit('    timeout-minutes: 20', '    timeout-minutes: 20\n    permissions:\n      contents: write')), /`permissions:` block/), show(tierOf(edit('    timeout-minutes: 20', '    timeout-minutes: 20\n    permissions:\n      contents: write'))));
+    const READ_PERMS = edit('jobs:\n', 'permissions:\n  contents: read\njobs:\n');
+    const widened = tierOf(READ_PERMS.replace('contents: read', 'contents: write'), { base: READ_PERMS });
+    assert('C2-a-changed-permissions-key-is-H', isH(widened, /`permissions:` block/), show(widened));
+    const tokened = tierOf(edit('      - run: pnpm vitest run', '      - run: pnpm vitest run\n        env:\n          GH_TOKEN: ${{ github.token }}'));
+    assert('C2-a-github-token-reference-added-is-H', isH(tokened, /secrets\.\*|github\.token/), show(tokened));
     assert('C2-a-secrets-reference-added-is-H', isH(tierOf(edit('      - run: pnpm vitest run', '      - run: pnpm vitest run\n        env:\n          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}')), /secrets\.\*/));
     assert('C2-pull_request_target-is-H', isH(tierOf(edit('  merge_group:', '  merge_group:\n  pull_request_target:')), /pull_request_target/));
     assert('C2-a-uses-no-workflow-on-the-base-uses-is-H', isH(tierOf(edit('      - uses: actions/checkout@v7', '      - uses: actions/checkout@v7\n      - uses: someone/new-action@v1')), /not used anywhere on the base tree: `someone\/new-action`/));
