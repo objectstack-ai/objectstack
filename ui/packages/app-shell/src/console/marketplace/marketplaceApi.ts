@@ -783,18 +783,36 @@ export async function purgeSampleData(installationId: string): Promise<SampleDat
 
 /**
  * The marker the install-local listing puts on an entry this runtime's startup
- * rehydrate refused to load (objectstack#21822, served since `@objectstack/*`
- * 17.7.0). CLOSED on the server: exactly these two members.
+ * rehydrate refused to load. CLOSED on the server (`NotLoadedMarker` in
+ * `@objectstack/cloud-connection`): exactly one of these two arms, each with
+ * exactly these members.
  *
- * `code` is the refusal's error code. The one the server sends today is
- * `OS_PROTOCOL_INCOMPATIBLE`, and `requiredRange` is then the protocol range the
- * package declares (the same `requiredRange` the install door's 422 carries in
- * `error.details`). It is typed `string` rather than that literal because the
- * console names a code it has no sentence for instead of hiding the row.
+ * - {@link LocalInstallNotLoadedProtocol}: the package targets a protocol range
+ *   this runtime does not support (objectstack#21822, served since
+ *   `@objectstack/*` 17.7.0).
+ * - {@link LocalInstallNotLoadedRefused}: the engine refused the package's
+ *   register (objectstack#31566): `code` is the refusal's ADR-0112 code and
+ *   `message` the engine's own sentence, the one the boot logs.
+ *
+ * Read the reason through `notLoadedReason` (`MarketplaceRowActions.tsx`),
+ * the one reader both Installed Apps and the package page draw.
  */
-export interface LocalInstallNotLoaded {
-  code: string;
+export type LocalInstallNotLoaded = LocalInstallNotLoadedProtocol | LocalInstallNotLoadedRefused;
+
+/** The protocol arm: `requiredRange` is the range the package declares (the same `requiredRange` the install door's 422 carries in `error.details`). */
+export interface LocalInstallNotLoadedProtocol {
+  code: 'OS_PROTOCOL_INCOMPATIBLE';
   requiredRange: string;
+}
+
+/**
+ * The register-refusal arm. `code` is typed `string` because the engine's
+ * refusal codes are open to this console: it names a code it has no sentence
+ * for instead of hiding the row. `message` is server text, drawn as text.
+ */
+export interface LocalInstallNotLoadedRefused {
+  code: string;
+  message: string;
 }
 
 /**

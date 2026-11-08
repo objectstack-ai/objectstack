@@ -1,6 +1,6 @@
 # Data Lifecycle & Retention
 
-Guide for declaring how long an object's data lives and how its space is
+Declaring how long an object's data lives and how its space is
 reclaimed (ADR-0057). Distinct from
 **lifecycle hooks** (`beforeInsert` / `afterUpdate` …), which run logic on
 writes: this page covers the rows' retention, rotation and archival.
@@ -28,6 +28,7 @@ expired rows under a system context, and reclaims driver space.
 
 ## Syntax
 
+<!-- os:check -->
 ```typescript
 import { ObjectSchema, Field } from '@objectstack/spec/data';
 

@@ -47,11 +47,13 @@ export interface QueryPlanHost {
   getBuilder: SqlDriver['getBuilder'];
   readonly isMssql: SqlDriver['isMssql'];
   readonly isMysql: SqlDriver['isMysql'];
+  readonly isOracle: SqlDriver['isOracle'];
   readonly isPostgres: SqlDriver['isPostgres'];
   readonly isSqlite: SqlDriver['isSqlite'];
   readonly knex: SqlDriver['knex'];
   mapSortField: SqlDriver['mapSortField'];
   primeMssqlGuidColumns: SqlDriver['primeMssqlGuidColumns'];
+  primeOracleRawUuidColumns: SqlDriver['primeOracleRawUuidColumns'];
 }
 
 /** The bodies of the "Query Plan Analysis" section of `SqlDriver`: a stateless facet, called by the class's stubs. */
@@ -62,9 +64,12 @@ export class QueryPlanFacet {
   }
 
   /** The body of `SqlDriver#analyzeQuery`; the method's docblock there is its contract. */
-  static async analyzeQuery(this: Pick<QueryPlanHost, 'applyFilters' | 'applyTenantScope' | 'config' | 'getBuilder' | 'isMssql' | 'isMysql' | 'isPostgres' | 'isSqlite' | 'knex' | 'mapSortField' | 'primeMssqlGuidColumns'>, object: string, query: DriverQuery, options?: DriverOptions): Promise<any> {
+  static async analyzeQuery(this: Pick<QueryPlanHost, 'applyFilters' | 'applyTenantScope' | 'config' | 'getBuilder' | 'isMssql' | 'isMysql' | 'isOracle' | 'isPostgres' | 'isSqlite' | 'knex' | 'mapSortField' | 'primeMssqlGuidColumns' | 'primeOracleRawUuidColumns'>, object: string, query: DriverQuery, options?: DriverOptions): Promise<any> {
     // [#31395] SQL Server: which columns are GUIDs, before a text operator compiles.
     if (this.isMssql) await this.primeMssqlGuidColumns(object, query.where);
+    // [#31390] On Oracle a federated object's RAW(16) uuid columns are read from
+    // the remote catalog before a comparand or a written value is bound.
+    if (this.isOracle) await this.primeOracleRawUuidColumns(object);
     const builder = this.getBuilder(object, options);
     // A PLAN, not rows — so this is a smaller fix than the one above, and it is
     // made on its own merits rather than riding in on that one (#6792). It is
