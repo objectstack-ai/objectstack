@@ -527,9 +527,16 @@ export const Erp = defineDatasource({
 Oracle connect string is not a URL.
 
 **TLS** is chosen by the connect string: `connectString: 'tcps://erp-db.internal:2484/ERPPDB1'`.
-The server is verified against the host's trusted certificate authorities. Thin mode
-has no slot for a datasource `ssl` block or for `ca`, `cert`, `key` or
-`rejectUnauthorized` keys, so each is refused rather than silently dropped.
+The server is verified against the host's trusted certificate authorities. If the
+database's certificate comes from a private certificate authority, put that CA in a
+PEM wallet (a directory holding `ewallet.pem`) on the host and name the directory in
+the connect string, which reaches the driver unchanged:
+`'tcps://erp-db.internal:2484/ERPPDB1?wallet_location=/etc/oracle/wallet'`, or
+`(SECURITY=(MY_WALLET_DIRECTORY=/etc/oracle/wallet))` inside a descriptor. This route
+follows node-oracledb's Thin-mode connect-string handling and has not been tested
+against a live TLS listener here. A datasource `ssl` block and `ca`, `cert`, `key` or
+`rejectUnauthorized` config keys are refused rather than silently dropped, because
+the driver reads TLS only from the connect string.
 
 **Binding tables.** Oracle stores an unquoted identifier in UPPER case, so an
 imported table's columns are `CUST_NO`, `FULL_NAME`, and so on. The Tables tab and

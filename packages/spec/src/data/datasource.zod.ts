@@ -630,14 +630,18 @@ function federationOnlyDriverOnManagedRefusal(driverId: string): string {
 /**
  * ADR-0015 §4.6 — a datasource-level `ssl` block on an `oracle` datasource.
  * Thin-mode node-oracledb takes TLS from the connect string (`tcps://…`) and
- * verifies the server against the host's trusted certificate authorities; it
- * has no slot for the block's `ca` / `cert` / `key` / `rejectUnauthorized`,
- * so a declared block would parse and do nothing.
+ * verifies the server against the host's trusted certificate authorities, or
+ * against a PEM wallet the connect string names (`?wallet_location=DIR`, or
+ * `(SECURITY=(MY_WALLET_DIRECTORY=DIR))` in a descriptor). The factory never
+ * hands the block's `ca` / `cert` / `key` / `rejectUnauthorized` to the
+ * driver, so a declared block would parse and do nothing.
  */
 const ORACLE_SSL_BLOCK_REFUSAL =
   "the 'oracle' driver does not read a datasource `ssl` block: TLS to Oracle is chosen by the connect "
   + "string, so write `config.connectString: 'tcps://host:2484/service_name'`, and the server is verified "
-  + "against the host's trusted certificate authorities. Remove the `ssl` block (`ssl: { enabled: false }` "
+  + "against the host's trusted certificate authorities. For a private certificate authority, add "
+  + '`?wallet_location=/path/to/wallet` (a directory holding `ewallet.pem`) to that connect string. '
+  + 'Remove the `ssl` block (`ssl: { enabled: false }` '
   + 'is accepted and means plain TCP, which is also what a `host`/`port`/`serviceName` config opens).';
 
 /**

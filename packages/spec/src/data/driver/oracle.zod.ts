@@ -21,8 +21,10 @@
  *  - `autoMigrate` — a managed-schema self-heal, and Oracle is never managed.
  *  - `ssl` (and `ca` / `cert` / `key` / `rejectUnauthorized`) — Thin mode
  *    negotiates TLS from the connect string itself
- *    (`tcps://host:2484/service`), not from a key beside it; the datasource
- *    `ssl` block is refused on an oracle datasource for the same reason.
+ *    (`tcps://host:2484/service`), and reads a private CA from the PEM wallet
+ *    the connect string names (`?wallet_location=DIR`), not from a key beside
+ *    it; the datasource `ssl` block is refused on an oracle datasource for the
+ *    same reason.
  *  - `sid` — a SID names an instance, not a service; Thin mode reaches a
  *    SID-only listener through a full descriptor in `connectString`.
  */
@@ -42,15 +44,22 @@ import {
 
 /**
  * Every TLS spelling an author might reach for in an oracle `config`. Thin-mode
- * node-oracledb takes TLS from the connect string and verifies the server
- * against the host's trusted certificate authorities; there is no toggle and no
- * certificate slot beside it — not in `config`, and not in the datasource
- * `ssl` block either (refused there too).
+ * node-oracledb takes TLS, and the certificates it trusts, from the connect
+ * string: `tcps://` turns TLS on and the server is verified against the host's
+ * trusted certificate authorities, and a private CA is reached through a PEM
+ * wallet the connect string names — Easy Connect `?wallet_location=DIR`, or a
+ * descriptor's `(SECURITY=(MY_WALLET_DIRECTORY=DIR))`, where `DIR` holds
+ * `ewallet.pem`. The connect string reaches the driver verbatim, so those
+ * spellings are the slot; a key beside it — in `config`, or the datasource
+ * `ssl` block (refused there too) — would be dropped. The wallet route is read
+ * from node-oracledb's Thin-mode source, not exercised against a live listener.
  */
 const ORACLE_TLS_BY_CONNECT_STRING =
   'TLS to Oracle is chosen by the connect string, not by a key beside it: write '
-  + "`connectString: 'tcps://host:2484/service_name'`. The server is verified against the host's trusted "
-  + 'certificate authorities; there is no certificate or verification key to set here.';
+  + "`connectString: 'tcps://host:2484/service_name'`, and the server is verified against the host's trusted "
+  + 'certificate authorities. For a private certificate authority, name a PEM wallet directory (holding '
+  + "`ewallet.pem`) in the connect string: `'tcps://host:2484/service_name?wallet_location=/path/to/wallet'`, "
+  + 'or `(SECURITY=(MY_WALLET_DIRECTORY=/path/to/wallet))` in a descriptor.';
 
 /** The listener port an Oracle Database answers on unless configured otherwise. */
 export const ORACLE_DEFAULT_PORT = 1521;

@@ -878,7 +878,8 @@ function assertOracleSslNotDeclared(spec: DatasourceConnectionSpec): void {
   throw new Error(
     `datasource '${spec.name ?? 'default'}': the oracle driver does not read a datasource \`ssl\` block — TLS ` +
       "to Oracle is chosen by the connect string. Write `config.connectString: 'tcps://host:2484/service_name'` " +
-      'and remove the `ssl` block; the server is verified against the host\'s trusted certificate authorities.',
+      'and remove the `ssl` block; the server is verified against the host\'s trusted certificate authorities, ' +
+      'or, for a private certificate authority, against the PEM wallet `?wallet_location=/path/to/wallet` names.',
   );
 }
 
