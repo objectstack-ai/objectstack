@@ -15,6 +15,12 @@
  * each admission case proves what it was called WITH.
  */
 
+// The server under test reaches `@objectstack/objectql` only through a dynamic
+// import inside a handler (`meta-object-state-routes.ts`), so the first case to
+// call one would pay that module graph's load inside its clocked window. This
+// module-top import pays it during collection instead.
+import '@objectstack/objectql';
+
 import { describe, it, expect, vi } from 'vitest';
 import { HonoHttpServer } from '@objectstack/plugin-hono-server';
 import type { EmailAddress, IEmailService, SendEmailInput } from '@objectstack/spec/contracts';
