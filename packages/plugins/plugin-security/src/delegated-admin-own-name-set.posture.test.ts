@@ -869,7 +869,7 @@ describe("[ADR-0090 D12] a delegated answer about a user the caller cannot read 
       it('ground truth: the delegate reads the subject exactly in the states where it is a user the delegate may read', async () => {
         for (const state of [...STATES, CONTROL] as State[]) {
           const h = await bootWith(posture, state);
-          const rows = await h.engine.find('sys_user', { where: { id: SUBJECT }, fields: ['id'], context: delegateFor(state) } as any);
+          const rows = await h.engine.find('sys_user', { where: { id: SUBJECT }, fields: ['id'], context: delegateFor(state) });
           const reads = (Array.isArray(rows) ? rows : []).some((r: any) => r.id === SUBJECT);
           expect(reads, state).toBe(state !== 'an id naming no user' && state !== UNREADABLE_INSIDE);
         }
@@ -903,7 +903,7 @@ describe("[ADR-0090 D12] a delegated answer about a user the caller cannot read 
           ['organization administrator', delegateCtx('u_org_admin', 'organization_admin')],
         ] as const) {
           const h = await bootWith(posture, UNREADABLE_INSIDE);
-          const removed = await answerOf(() => h.engine.delete('sys_user_permission_set', { where: { id: 'g_subject' }, context } as any));
+          const removed = await answerOf(() => h.engine.delete('sys_user_permission_set', { where: { id: 'g_subject' }, context }));
           expect(removed, who).toEqual({ status: 200 });
           const left = await h.engine.find('sys_user_permission_set', { where: { id: 'g_subject' }, context: SYS });
           expect(Array.isArray(left) ? left : [], who).toEqual([]);
