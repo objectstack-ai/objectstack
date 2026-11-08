@@ -232,3 +232,143 @@ describe('agent_prompt — advertised only where an agent can answer it', () => 
     }
   });
 });
+
+/**
+ * [#31514] `agent_prompt` reads an agent through the protocol, the read
+ * `GET /api/v1/meta/agent/NAME` serves, and its advertisement reads the
+ * protocol's listing, `GET /api/v1/meta/agent`'s. An agent a package ships
+ * lives in the registry the protocol reads; the kernel `metadata` service holds
+ * no copy of it, so the metadata double below holds none (`get` answers
+ * `undefined`, `list` answers `[]`), and the protocol double serves it. The
+ * real-kernel twin of these pins is
+ * `packages/qa/dogfood/test/mcp-stdio-package-object-discovery.test.ts`.
+ */
+describe('agent_prompt — one reader with GET /meta/agent/NAME (the protocol)', () => {
+  const PACKAGE_AGENT = {
+    name: 'pkg_helper',
+    label: 'Package Helper',
+    instructions: 'You help with what the package ships.',
+    active: true,
+  };
+
+  /** A protocol double: the merged listing and the by-name read, over `agents` and `skills`. */
+  function protocol({ agents = [PACKAGE_AGENT], skills = [SKILL], byName }: {
+    agents?: unknown[];
+    skills?: unknown[];
+    byName?: (request: { type: string; name: string }) => Promise<unknown>;
+  } = {}) {
+    const itemsOf = (type: string) => (type === 'agent' ? agents : type === 'skill' ? skills : []);
+    return {
+      getMetaItems: vi.fn(async ({ type }: { type: string }) => ({ type, items: itemsOf(type) })),
+      getMetaItem: vi.fn(byName ?? (async ({ type, name }: { type: string; name: string }) => ({
+        type,
+        name,
+        item: (itemsOf(type) as Array<{ name: string }>).find((i) => i.name === name),
+      }))),
+    };
+  }
+
+  async function connectWith(service: ReturnType<typeof metadataService>, read: ReturnType<typeof protocol>) {
+    const log = logger();
+    const runtime = new MCPServerRuntime({ name: 'objectstack-test', version: '9.9.9', logger: log as never });
+    await runtime.bridgePrompts(service as never, read as never);
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    const client = new Client({ name: 'test-client', version: '0.0.0' });
+    await Promise.all([runtime.server.connect(serverTransport), client.connect(clientTransport)]);
+    return {
+      client,
+      log,
+      close: async () => {
+        await client.close();
+        await runtime.stop().catch(() => {});
+      },
+    };
+  }
+
+  /** Every call the metadata double took for the `agent` type. */
+  const agentCallsOn = (service: ReturnType<typeof metadataService>) =>
+    [service.get, service.list, service.listDiagnosed]
+      .flatMap((fn) => (fn as ReturnType<typeof vi.fn>).mock.calls)
+      .filter((args) => args[0] === 'agent');
+
+  it('a boot whose only agent a package ships lists agent_prompt, and the argument names that agent', async () => {
+    const service = metadataService({ agents: [] });
+    const session = await connectWith(service, protocol());
+    try {
+      const listed = await session.client.listPrompts();
+      expect(listed.prompts.map((p) => p.name)).toContain('agent_prompt');
+      expect(agentNameDescription(listed.prompts)).toContain('"pkg_helper"');
+    } finally {
+      await session.close();
+    }
+  });
+
+  it('serves the package agent with the instructions the protocol\'s by-name read answers, and never asks the metadata service for it', async () => {
+    const service = metadataService({ agents: [] });
+    const read = protocol();
+    const session = await connectWith(service, read);
+    try {
+      const served = await session.client.getPrompt({ name: 'agent_prompt', arguments: { agentName: 'pkg_helper' } });
+      const answered = (await read.getMetaItem({ type: 'agent', name: 'pkg_helper' })) as { item: { instructions: string } };
+      expect(served.messages).toEqual([
+        { role: 'assistant', content: { type: 'text', text: answered.item.instructions } },
+      ]);
+      expect(read.getMetaItem).toHaveBeenCalledWith({ type: 'agent', name: 'pkg_helper' });
+      expect(agentCallsOn(service).filter((args) => args[1] === 'pkg_helper')).toEqual([]);
+    } finally {
+      await session.close();
+    }
+  });
+
+  it('CONTROL: an environment agent is served as before', async () => {
+    const service = metadataService({ agents: [AGENT] });
+    const session = await connectWith(service, protocol({ agents: [AGENT, PACKAGE_AGENT] }));
+    try {
+      const listed = await session.client.listPrompts();
+      expect(agentNameDescription(listed.prompts)).toContain('"support_triage"');
+      const served = await session.client.getPrompt({
+        name: 'agent_prompt',
+        arguments: { agentName: 'support_triage', objectName: 'case' },
+      });
+      expect(served.messages).toEqual([
+        { role: 'assistant', content: { type: 'text', text: 'You triage support cases.\n\n--- Current Context ---\nCurrent object: case' } },
+      ]);
+    } finally {
+      await session.close();
+    }
+  });
+
+  it('a name the protocol does not serve keeps today\'s miss answer', async () => {
+    const session = await connectWith(metadataService({ agents: [] }), protocol());
+    try {
+      const miss = await session.client.getPrompt({ name: 'agent_prompt', arguments: { agentName: 'nope' } });
+      expect(miss.messages).toEqual([
+        { role: 'user', content: { type: 'text', text: 'Error: Agent "nope" not found' } },
+      ]);
+    } finally {
+      await session.close();
+    }
+  });
+
+  it('a by-name read refused SERVICE_UNAVAILABLE (503) answers the #6055 outage text and serves no instructions', async () => {
+    const outage = Object.assign(new Error('The metadata store could not be read.'), { code: 'SERVICE_UNAVAILABLE', status: 503 });
+    const session = await connectWith(
+      metadataService({ agents: [] }),
+      protocol({ byName: async () => { throw outage; } }),
+    );
+    try {
+      const answer = await session.client.getPrompt({ name: 'agent_prompt', arguments: { agentName: 'pkg_helper' } });
+      expect(answer.messages).toHaveLength(1);
+      expect(answer.messages[0].role).toBe('user');
+      const text = (answer.messages[0].content as { text: string }).text;
+      expect(text.startsWith('Error: SERVICE_UNAVAILABLE — ')).toBe(true);
+      expect(text).not.toContain(PACKAGE_AGENT.instructions);
+      expect(session.log.warn).toHaveBeenCalledWith(
+        expect.stringContaining('agent prompt refused'),
+        expect.objectContaining({ agentName: 'pkg_helper' }),
+      );
+    } finally {
+      await session.close();
+    }
+  });
+});
