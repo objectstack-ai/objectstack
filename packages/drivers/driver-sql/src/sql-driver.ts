@@ -5828,6 +5828,7 @@ export class SqlDriver implements IDataDriver {
     // [#25521 cut 4] The body moved to `sql-driver-introspection.ts` (see `IntrospectionHost`).
     const readDialectName = () => this.dialectName;
     const readIsMysql = () => this.isMysql;
+    const readIsOracle = () => this.isOracle;
     const readIsPostgres = () => this.isPostgres;
     const readIsSqlite = () => this.isSqlite;
     const readKnex = () => this.knex;
@@ -5838,6 +5839,7 @@ export class SqlDriver implements IDataDriver {
       introspectPrimaryKeys: (...a) => this.introspectPrimaryKeys(...a),
       introspectUniqueConstraints: (...a) => this.introspectUniqueConstraints(...a),
       get isMysql() { return readIsMysql(); },
+      get isOracle() { return readIsOracle(); },
       get isPostgres() { return readIsPostgres(); },
       get isSqlite() { return readIsSqlite(); },
       get knex() { return readKnex(); },
