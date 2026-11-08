@@ -297,7 +297,7 @@
     {
       "id": 17,
       "prompt": "`customer.status` 的选项是 `{ value: 'active', label: '活跃' }` 和 `{ value: 'lost', label: '已流失' }`。当客户状态变成「已流失」时，自动创建一条 `followup_task`：标题是「流失回访: 」加客户名，`customer` 指回这个客户，负责人是该客户的负责人。",
-      "expected_output": "A `record_change` flow bound on the `start` node `config` (`objectName: 'customer'`, `triggerType: 'record-after-update'`) whose bare-CEL condition compares the option VALUE the field stores — `previous.status != 'lost' && record.status == 'lost'` — never the label the request speaks; one `create_record` on `followup_task` whose `fields` are CEL value envelopes: `subject: { dialect: 'cel', source: \"'流失回访: ' + record.name\" }`, `customer: { dialect: 'cel', source: 'record.id' }`, `owner_id: { dialect: 'cel', source: 'record.owner_id' }` — never a `{record.name}` token, which is refused at save; `edges` start → create → end.",
+      "expected_output": "A `record_change` flow bound on the `start` node `config` (`objectName: 'customer'`, `triggerType: 'record-after-update'`) whose bare-CEL condition compares the option VALUE the field stores — `previous.status != 'lost' && record.status == 'lost'` — never the label the request speaks; one `create_record` on `followup_task` whose `fields` are CEL value envelopes: `subject: { dialect: 'cel', source: \"'流失回访: ' + record.name\" }`, `customer: { dialect: 'cel', source: 'record.id' }`, `owner_id: { dialect: 'cel', source: 'record.owner_id' }` — never a single-brace token over the record, which is refused at save; `edges` start → create → end.",
       "files": [],
       "assertions": {
         "must_contain": [
@@ -316,19 +316,19 @@
     },
     {
       "id": 18,
-      "prompt": "Every weekday at 9 in the morning, Shanghai time, send the `crm_sales` queue's members an inbox digest of `opportunity` records whose `close_date` falls this week.",
-      "expected_output": "A `type: 'schedule'` flow, `runAs: 'system'` (a schedule run has no trigger user), the cadence on the START node's `config.schedule` written as the request said it, with its IANA zone: `{ type: 'cron', expression: '0 9 * * 1-5', timezone: 'Asia/Shanghai' }` — never the hour converted to UTC by hand (`'0 1 * * 1-5'` bare runs in UTC and records no zone, so the next reader takes 01:00 as the intended hour); a `get_record` over `opportunity` with a `close_date` window and a `notify` to the queue's members.",
+      "prompt": "Every morning at 9, Shanghai time, send the `crm_sales` queue's members an inbox digest of `opportunity` records whose `close_date` falls this week.",
+      "expected_output": "A `type: 'schedule'` flow, `runAs: 'system'` (a schedule run has no trigger user), the cadence on the START node's `config.schedule` written as the request said it, with its IANA zone: `{ type: 'cron', expression: '0 9 * * *', timezone: 'Asia/Shanghai' }` — never the hour converted to UTC by hand: a bare expression runs in UTC and records no zone, so the next reader takes the converted hour as the intended one; a `get_record` over `opportunity` with a `close_date` window and a `notify` to the queue's members.",
       "files": [],
       "assertions": {
         "must_contain": [
           "type: 'schedule'",
           "timezone: 'Asia/Shanghai'",
-          "0 9 * * 1-5",
+          "0 9 * * *",
           "runAs: 'system'",
           "notify"
         ],
         "must_not_contain": [
-          "0 1 * * 1-5",
+          "0 1 * * *",
           "UTC+8"
         ]
       }
