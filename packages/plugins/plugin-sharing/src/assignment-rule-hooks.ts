@@ -37,8 +37,10 @@ import { resolveInjectedColumnProvenance } from '@objectstack/spec/data';
 import {
   ASSIGNMENT_RULE_OBJECT,
   assignmentExpressionRefusals,
+  describePackageScopedHolder,
   organizationMemberStanding,
 } from '@objectstack/objectql';
+import { resolveDeclaredName, type DeclaredNameAnswer } from './package-scoped-declarations.js';
 
 const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] } as const;
 
@@ -97,19 +99,33 @@ function present(v: unknown): string | null {
   return s.trim() === '' ? null : s;
 }
 
+/** Every declared assignment rule, switched on or off, as the registry lists it. */
+function declaredRuleItems(engine: MinimalEngine): unknown[] {
+  try {
+    const items = engine.registry?.listItems?.(ASSIGNMENT_RULE_TYPE) ?? [];
+    return Array.isArray(items) ? items : [];
+  } catch {
+    return [];
+  }
+}
+
 /** Every declared assignment rule's name, switched on or off. */
 function declaredRuleNames(engine: MinimalEngine): Set<string> {
   const names = new Set<string>();
-  let items: unknown[] = [];
-  try {
-    items = engine.registry?.listItems?.(ASSIGNMENT_RULE_TYPE) ?? [];
-  } catch {
-    return names;
-  }
-  for (const item of Array.isArray(items) ? items : []) {
+  for (const item of declaredRuleItems(engine)) {
     if (isRecord(item) && typeof item.name === 'string') names.add(item.name);
   }
   return names;
+}
+
+/**
+ * [ADR-0150 D3/D4, child E4] The declared assignment rule a bare `name`
+ * addresses, through the shared resolver (`package-scoped-declarations.ts`):
+ * one holder's, `not-found`, or a refusal naming every package that declares
+ * it. Either of the first and last means the name is taken.
+ */
+function declaredRuleAnswer(engine: MinimalEngine, name: string): DeclaredNameAnswer<unknown> {
+  return resolveDeclaredName(engine.registry, ASSIGNMENT_RULE_TYPE, name, declaredRuleItems(engine));
 }
 
 /** The column an `AssignmentRuleSchema` issue path names, for the one-entry row. */
@@ -151,14 +167,27 @@ export async function assignmentRuleRowIssues(
       code: 'invalid_format',
       message: `An assignment rule name is a machine name — lowercase letters, digits and underscores, starting with a letter (got ${JSON.stringify(name)}).`,
     });
-  } else if (name !== null && declaredRuleNames(engine).has(name)) {
-    issues.push({
-      field: 'name',
-      code: 'invalid_value',
-      message:
-        `'${name}' is the name of an assignment rule an installed app provides, and one name means one rule. ` +
-        'Choose another name for your own rule.',
-    });
+  } else if (name !== null) {
+    const declared = declaredRuleAnswer(engine, name);
+    if (declared.status === 'resolved') {
+      issues.push({
+        field: 'name',
+        code: 'invalid_value',
+        message:
+          `'${name}' is the name of an assignment rule an installed app provides, and one name means one rule. ` +
+          'Choose another name for your own rule.',
+      });
+    } else if (declared.status === 'refused') {
+      // Two apps declare it: still taken, and every holder is named.
+      issues.push({
+        field: 'name',
+        code: 'invalid_value',
+        message:
+          `'${name}' is the name of an assignment rule ${declared.refusal.candidates.length} installed apps provide ` +
+          `(${declared.refusal.candidates.map(describePackageScopedHolder).join('; ')}), and one name means one rule. ` +
+          'Choose another name for your own rule.',
+      });
+    }
   }
 
   const object = present(row.object_name);

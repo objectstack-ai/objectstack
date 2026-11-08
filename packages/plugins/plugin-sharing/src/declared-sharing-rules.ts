@@ -23,6 +23,12 @@
  *  2. The kernel `metadata` service (`list('sharing_rule')`), only when the
  *     registry holds no rule at all — the registry-less host.
  *
+ * A sharing rule is addressed by `(package, name)` (ADR-0150 D1 bucket 2), so
+ * two packages may each declare a rule of one name. A name is served once,
+ * resolved through `package-scoped-declarations.ts` (objectql's shared
+ * resolver): one holder's rule, or none — the name refused, naming every
+ * holder, and reported once. It is never served as the first holder.
+ *
  * `sharing_rule` needs no registered metadata kind for either read: the
  * registry keys items by the type string `METADATA_ARRAY_KEYS` maps
  * `sharingRules` to, and the metadata service binds the type through its
@@ -53,8 +59,18 @@ import { compileCelToFilter } from '@objectstack/formula';
 import type { CelFilterFailReason } from '@objectstack/formula';
 import { isMatchAllCriteria } from './rule-criteria.js';
 import { FIELD_NAME_GRAMMAR } from './sharing-rule-service.js';
+import {
+  reportRefusedDeclaration,
+  resolveDeclaredName,
+  servedDeclarations,
+  type DeclaredNameAnswer,
+} from './package-scoped-declarations.js';
 
-type Logger = { info?: (m: string, meta?: any) => void; warn?: (m: string, meta?: any) => void };
+type Logger = {
+  info?: (m: string, meta?: any) => void;
+  warn?: (m: string, meta?: any) => void;
+  error?: (m: string, meta?: any) => void;
+};
 
 /** Map the spec `sharedWith.type` onto a runtime recipient_type, or null. */
 function mapRecipientType(t: unknown): SharingRuleRecipientType | null {
@@ -236,11 +252,26 @@ export function translateDeclaredSharingRule(
 /** Where enforcement reads declared rules. Read on every call: the registry is the authority, never a snapshot of it. */
 export interface DeclaredSharingRuleSource {
   list(): Promise<DeclaredSharingRule[]>;
+  /**
+   * [ADR-0150 D3, child E4] The declared rule a bare `name` addresses: the one
+   * holder's, `not-found`, or the resolver's refusal naming every package that
+   * holds it. A name two packages hold is never answered as either one. A
+   * rule whose declaration the runtime cannot serve (the skips above) is
+   * `not-found`, as `list()` leaves it out.
+   */
+  lookup?(name: string): Promise<DeclaredNameAnswer<DeclaredSharingRule>>;
 }
 
 /** The registry, as this read uses it — ObjectQL's `SchemaRegistry` (`engine.registry`) satisfies it. */
 interface DeclaredRuleRegistry {
   listItems(type: string): readonly unknown[] | undefined;
+}
+
+/** Where the declarations were read, and so what can resolve a name among them. */
+interface DeclaredRuleRead {
+  defs: unknown[];
+  /** The registry the defs came from — `undefined` for the metadata-service fallback. */
+  registry: unknown;
 }
 
 /** The kernel `metadata` service, as this read uses it. */
@@ -312,25 +343,40 @@ export function createDeclaredSharingRuleSource(opts: DeclaredSharingRuleSourceO
     opts.logger?.warn?.(SKIP_WARN[skip.kind], meta);
   };
 
+  const refusedReported = new Set<string>();
+  const read = async (): Promise<DeclaredRuleRead> => {
+    const fromRegistry = readRegistry();
+    if (fromRegistry.length > 0) return { defs: fromRegistry, registry: opts.engine?.registry };
+    return { defs: await readMetadata(), registry: undefined };
+  };
+
   return {
     async list(): Promise<DeclaredSharingRule[]> {
-      let defs = readRegistry();
-      if (defs.length === 0) defs = await readMetadata();
+      const { defs, registry } = await read();
       const out: DeclaredSharingRule[] = [];
-      const names = new Set<string>();
-      for (const def of defs) {
+      // [ADR-0150 D3/D4, child E4] One rule per NAME, resolved: two packages
+      // may each declare a rule of one name (the registry keys them apart), and
+      // such a name is refused, naming both, never served as the first one
+      // registered — its grants carry the bare name, so serving both, or one
+      // of them, would grant on a guess.
+      for (const def of servedDeclarations(registry, 'sharing_rule', defs, (refusal) =>
+        reportRefusedDeclaration(opts.logger, refusedReported, refusal),
+      )) {
         const translated = translate(def);
         if (translated.skip) {
           warnOnce(def, translated.skip);
           continue;
         }
-        // One rule per name: the registry already refuses a second package
-        // registering a held name, so a duplicate here is the same item twice.
-        if (names.has(translated.rule.name)) continue;
-        names.add(translated.rule.name);
         out.push(translated.rule);
       }
       return out;
+    },
+    async lookup(name: string): Promise<DeclaredNameAnswer<DeclaredSharingRule>> {
+      const { defs, registry } = await read();
+      const answer = resolveDeclaredName(registry, 'sharing_rule', name, defs);
+      if (answer.status !== 'resolved') return answer;
+      const translated = translate(answer.item);
+      return translated.rule ? { status: 'resolved', item: translated.rule } : { status: 'not-found' };
     },
   };
 }

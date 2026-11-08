@@ -52,6 +52,7 @@ import { TeamGraphService, teamHasMember } from './team-graph.js';
 import { PositionGraphService } from './position-graph.js';
 import { BusinessUnitGraphService } from './business-unit-graph.js';
 import type { DeclaredSharingRule, DeclaredSharingRuleSource } from './declared-sharing-rules.js';
+import { PackageScopedNameRefusedError } from './package-scoped-declarations.js';
 import { listShareableObjects, type ShareableObject, type ShareableObjectsEngine } from './shareable-objects.js';
 
 /**
@@ -1128,6 +1129,14 @@ export class SharingRuleService implements ISharingRuleService {
    */
   async declaredRuleNamed(name: string): Promise<DeclaredSharingRule | null> {
     if (!this.declaredSource || !name) return null;
+    // [ADR-0150 D3/D4, child E4] Through the resolver: a name two packages
+    // declare is refused (409, every holder named) — never answered as the
+    // first one listed, and never as free (no row may take it either).
+    if (this.declaredSource.lookup) {
+      const answer = await this.declaredSource.lookup(name);
+      if (answer.status === 'refused') throw new PackageScopedNameRefusedError(answer.refusal);
+      return answer.status === 'resolved' ? answer.item : null;
+    }
     return (await this.declaredSource.list()).find((r) => r.name === name) ?? null;
   }
 
@@ -1175,7 +1184,10 @@ export class SharingRuleService implements ISharingRuleService {
     if (!idOrName) return null;
     const row = await this.findRuleRow(idOrName, context);
     if (row) return row;
-    // [ADR-0131 D2] A declared rule: its id is its name.
+    // [ADR-0131 D2] A declared rule: its id is its name. [ADR-0150, child E4]
+    // A name two packages declare refuses here, naming both, rather than
+    // reading as no rule at all.
+    await this.declaredRuleNamed(idOrName);
     return (await this.declaredRules(context, { name: idOrName }))[0] ?? null;
   }
 
@@ -1189,6 +1201,7 @@ export class SharingRuleService implements ISharingRuleService {
     if (!idOrName) return [];
     const row = await this.findRuleRow(idOrName, context);
     if (row) return [row];
+    await this.declaredRuleNamed(idOrName); // [ADR-0150, child E4] refuses a name two packages declare
     return this.declaredRules(context, { name: idOrName });
   }
 
