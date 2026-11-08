@@ -92,8 +92,15 @@ export const DatasetTermMatchSchema = lazySchema(() => z.object({
   ),
 }));
 
-/** A dimension as the catalogue lists it. */
-export const DatasetCatalogDimensionSchema = lazySchema(() => z.object({
+/**
+ * A dimension as the catalogue lists it.
+ *
+ * The three catalogue schemas carry `Tool` in their names because
+ * `@object-ui/app-shell` already declares its own `DatasetCatalogEntry`, the
+ * Studio designer's picker list, which is a different shape (`ui`'s
+ * `check:spec-symbols` refuses a spec export under that name).
+ */
+export const DatasetToolCatalogDimensionSchema = lazySchema(() => z.object({
   name: z.string().describe('Dimension name — what `selection.dimensions` takes'),
   label: z.string().describe(
     'Display label at the caller\'s locale — the text the query answer\'s `fields[].label` carries for this '
@@ -113,7 +120,7 @@ export const DatasetCatalogDimensionSchema = lazySchema(() => z.object({
 }));
 
 /** A measure as the catalogue lists it. */
-export const DatasetCatalogMeasureSchema = lazySchema(() => z.object({
+export const DatasetToolCatalogMeasureSchema = lazySchema(() => z.object({
   name: z.string().describe('Measure name — what `selection.measures` takes'),
   label: z.string().describe(
     'Display label at the caller\'s locale — the text the query answer\'s `fields[].label` carries for this '
@@ -137,7 +144,7 @@ export const DatasetCatalogMeasureSchema = lazySchema(() => z.object({
 }));
 
 /** One dataset the caller may query, with the members the caller may read. */
-export const DatasetCatalogEntrySchema = lazySchema(() => z.object({
+export const DatasetToolCatalogEntrySchema = lazySchema(() => z.object({
   name: z.string().describe('Dataset name — what `query_dataset` takes as `datasetName`'),
   label: z.string().describe('Dataset label at the caller\'s locale'),
   description: z.string().optional().describe(
@@ -149,8 +156,8 @@ export const DatasetCatalogEntrySchema = lazySchema(() => z.object({
     + 'narrowing is stated, so an answer can say a measure exists that this caller may not see (ADR-0090 D10). '
     + 'Absent when every member the dataset publishes is listed',
   ),
-  dimensions: z.array(DatasetCatalogDimensionSchema).describe('The dimensions this caller may group by'),
-  measures: z.array(DatasetCatalogMeasureSchema).describe('The measures this caller may read'),
+  dimensions: z.array(DatasetToolCatalogDimensionSchema).describe('The dimensions this caller may group by'),
+  measures: z.array(DatasetToolCatalogMeasureSchema).describe('The measures this caller may read'),
   matches: z.array(DatasetTermMatchSchema).optional().describe(
     'Each of the caller\'s `terms` that matched a member of this dataset, computed by the platform under the '
     + 'same normalization the dataset\'s own validation uses. Absent when no `terms` were sent',
@@ -159,7 +166,7 @@ export const DatasetCatalogEntrySchema = lazySchema(() => z.object({
 
 /** `list_datasets` output. */
 export const ListDatasetsOutputSchema = lazySchema(() => z.object({
-  datasets: z.array(DatasetCatalogEntrySchema).describe(
+  datasets: z.array(DatasetToolCatalogEntrySchema).describe(
     'The datasets this caller may query. A dataset the caller may not query is absent, the same answer as one '
     + 'that does not exist',
   ),
@@ -324,9 +331,9 @@ export function getDatasetToolJsonSchemas(): Readonly<
 export type ListDatasetsInput = z.input<typeof ListDatasetsInputSchema>;
 export type DatasetTermMatchedOn = z.input<typeof DatasetTermMatchedOn>;
 export type DatasetTermMatch = z.input<typeof DatasetTermMatchSchema>;
-export type DatasetCatalogDimension = z.input<typeof DatasetCatalogDimensionSchema>;
-export type DatasetCatalogMeasure = z.input<typeof DatasetCatalogMeasureSchema>;
-export type DatasetCatalogEntry = z.input<typeof DatasetCatalogEntrySchema>;
+export type DatasetToolCatalogDimension = z.input<typeof DatasetToolCatalogDimensionSchema>;
+export type DatasetToolCatalogMeasure = z.input<typeof DatasetToolCatalogMeasureSchema>;
+export type DatasetToolCatalogEntry = z.input<typeof DatasetToolCatalogEntrySchema>;
 export type ListDatasetsOutput = z.input<typeof ListDatasetsOutputSchema>;
 export type QueryDatasetInput = z.input<typeof QueryDatasetInputSchema>;
 export type DatasetProvenance = z.input<typeof DatasetProvenanceSchema>;

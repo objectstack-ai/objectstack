@@ -41,92 +41,12 @@ executor: AI guidance text does not enter the spec (ADR-0149 M1, ruled A).
 ## TypeScript Usage
 
 ```typescript
-import { DatasetCatalogDimensionSchema, DatasetCatalogEntrySchema, DatasetCatalogMeasureSchema, DatasetProvenanceSchema, DatasetTermMatchSchema, DatasetTermMatchedOn, ListDatasetsInputSchema, ListDatasetsOutputSchema, QueryDatasetInputSchema, QueryDatasetOutputSchema } from '@objectstack/spec/ai';
-import type { DatasetCatalogDimension, DatasetCatalogEntry, DatasetCatalogMeasure, DatasetProvenance, DatasetTermMatch, DatasetTermMatchedOn, ListDatasetsInput, ListDatasetsOutput, QueryDatasetInput, QueryDatasetOutput } from '@objectstack/spec/ai';
+import { DatasetProvenanceSchema, DatasetTermMatchSchema, DatasetTermMatchedOn, DatasetToolCatalogDimensionSchema, DatasetToolCatalogEntrySchema, DatasetToolCatalogMeasureSchema, ListDatasetsInputSchema, ListDatasetsOutputSchema, QueryDatasetInputSchema, QueryDatasetOutputSchema } from '@objectstack/spec/ai';
+import type { DatasetProvenance, DatasetTermMatch, DatasetTermMatchedOn, DatasetToolCatalogDimension, DatasetToolCatalogEntry, DatasetToolCatalogMeasure, ListDatasetsInput, ListDatasetsOutput, QueryDatasetInput, QueryDatasetOutput } from '@objectstack/spec/ai';
 
 // Validate data
-const result = DatasetCatalogDimensionSchema.parse(data);
+const result = DatasetProvenanceSchema.parse(data);
 ```
-
----
-
-## DatasetCatalogDimension
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **name** | `string` | ✅ | Dimension name — what `selection.dimensions` takes |
-| **label** | `string` | ✅ | Display label at the caller's locale — the text the query answer's `fields[].label` carries for this dimension |
-| **description** | `string` | optional | The dimension's business definition at the caller's locale; absent when the dataset declares none |
-| **type** | `Enum<'string' \| 'number' \| 'boolean' \| 'time' \| 'geo'>` | ✅ | Column type in the `DimensionType` vocabulary — the word the query answer's `fields[].type` carries for this dimension (a date dimension is `time`) |
-| **synonyms** | `string[]` | optional | The words a person uses for this dimension in a question, as the dataset declares them; matched, never rendered |
-
-
----
-
-## DatasetCatalogEntry
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **name** | `string` | ✅ | Dataset name — what `query_dataset` takes as `datasetName` |
-| **label** | `string` | ✅ | Dataset label at the caller's locale |
-| **description** | `string` | optional | Dataset description at the caller's locale; absent when the dataset declares none |
-| **object** | `string` | ✅ | The dataset's base object, by machine name |
-| **membersWithheld** | `true` | optional | Present, and `true`, when a member was left out because this caller cannot read a field it reads: the narrowing is stated, so an answer can say a measure exists that this caller may not see (ADR-0090 D10). Absent when every member the dataset publishes is listed |
-| **dimensions** | `{ name: string; label: string; description?: string; type: Enum<'string' \| 'number' \| 'boolean' \| 'time' \| 'geo'>; … }[]` | ✅ | The dimensions this caller may group by |
-| **measures** | `{ name: string; label: string; description?: string; aggregate?: Enum<'count' \| 'sum' \| 'avg' \| 'min' \| 'max' \| 'count_distinct'>; … }[]` | ✅ | The measures this caller may read |
-| **matches** | `{ term: string; member: string; matchedOn: Enum<'name' \| 'label' \| 'synonym'> }[]` | optional | Each of the caller's `terms` that matched a member of this dataset, computed by the platform under the same normalization the dataset's own validation uses. Absent when no `terms` were sent |
-
-### Nested Shape: `DatasetCatalogEntry.dimensions[number]`
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **name** | `string` | ✅ | Dimension name — what `selection.dimensions` takes |
-| **label** | `string` | ✅ | Display label at the caller's locale — the text the query answer's `fields[].label` carries for this dimension |
-| **description** | `string` | optional | The dimension's business definition at the caller's locale; absent when the dataset declares none |
-| **type** | `Enum<'string' \| 'number' \| 'boolean' \| 'time' \| 'geo'>` | ✅ | Column type in the `DimensionType` vocabulary — the word the query answer's `fields[].type` carries for this dimension (a date dimension is `time`) |
-| **synonyms** | `string[]` | optional | The words a person uses for this dimension in a question, as the dataset declares them; matched, never rendered |
-
-### Nested Shape: `DatasetCatalogEntry.measures[number]`
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **name** | `string` | ✅ | Measure name — what `selection.measures` takes |
-| **label** | `string` | ✅ | Display label at the caller's locale — the text the query answer's `fields[].label` carries for this measure |
-| **description** | `string` | optional | The measure's business definition at the caller's locale: what the number includes and when to use it. Absent when the dataset declares none |
-| **aggregate** | `Enum<'count' \| 'sum' \| 'avg' \| 'min' \| 'max' \| 'count_distinct'>` | optional | The measure's aggregate; absent on a derived measure, which has no single aggregate |
-| **format** | `string` | optional | Display format hint, as the measure declares it (e.g. "$0,0", "0.0%") |
-| **polarity** | `Enum<'higher' \| 'lower' \| 'neutral'>` | optional | Which direction of change is good news, as the measure declares it; absent means a rise is good |
-| **synonyms** | `string[]` | optional | The words a person uses for this measure in a question, as the dataset declares them; matched, never rendered |
-
-### Nested Shape: `DatasetCatalogEntry.matches[number]`
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **term** | `string` | ✅ | The caller's term, as sent in `terms` |
-| **member** | `string` | ✅ | The member the term matched, as `measures.<name>` or `dimensions.<name>` |
-| **matchedOn** | `Enum<'name' \| 'label' \| 'synonym'>` | ✅ | Which of the member's words the term equals after normalization: its `name`, its `label` (any locale) or one of its `synonyms` |
-
-
----
-
-## DatasetCatalogMeasure
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **name** | `string` | ✅ | Measure name — what `selection.measures` takes |
-| **label** | `string` | ✅ | Display label at the caller's locale — the text the query answer's `fields[].label` carries for this measure |
-| **description** | `string` | optional | The measure's business definition at the caller's locale: what the number includes and when to use it. Absent when the dataset declares none |
-| **aggregate** | `Enum<'count' \| 'sum' \| 'avg' \| 'min' \| 'max' \| 'count_distinct'>` | optional | The measure's aggregate; absent on a derived measure, which has no single aggregate |
-| **format** | `string` | optional | Display format hint, as the measure declares it (e.g. "$0,0", "0.0%") |
-| **polarity** | `Enum<'higher' \| 'lower' \| 'neutral'>` | optional | Which direction of change is good news, as the measure declares it; absent means a rise is good |
-| **synonyms** | `string[]` | optional | The words a person uses for this measure in a question, as the dataset declares them; matched, never rendered |
-
 
 ---
 
@@ -187,6 +107,86 @@ const result = DatasetCatalogDimensionSchema.parse(data);
 * `name`
 * `label`
 * `synonym`
+
+
+---
+
+## DatasetToolCatalogDimension
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | ✅ | Dimension name — what `selection.dimensions` takes |
+| **label** | `string` | ✅ | Display label at the caller's locale — the text the query answer's `fields[].label` carries for this dimension |
+| **description** | `string` | optional | The dimension's business definition at the caller's locale; absent when the dataset declares none |
+| **type** | `Enum<'string' \| 'number' \| 'boolean' \| 'time' \| 'geo'>` | ✅ | Column type in the `DimensionType` vocabulary — the word the query answer's `fields[].type` carries for this dimension (a date dimension is `time`) |
+| **synonyms** | `string[]` | optional | The words a person uses for this dimension in a question, as the dataset declares them; matched, never rendered |
+
+
+---
+
+## DatasetToolCatalogEntry
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | ✅ | Dataset name — what `query_dataset` takes as `datasetName` |
+| **label** | `string` | ✅ | Dataset label at the caller's locale |
+| **description** | `string` | optional | Dataset description at the caller's locale; absent when the dataset declares none |
+| **object** | `string` | ✅ | The dataset's base object, by machine name |
+| **membersWithheld** | `true` | optional | Present, and `true`, when a member was left out because this caller cannot read a field it reads: the narrowing is stated, so an answer can say a measure exists that this caller may not see (ADR-0090 D10). Absent when every member the dataset publishes is listed |
+| **dimensions** | `{ name: string; label: string; description?: string; type: Enum<'string' \| 'number' \| 'boolean' \| 'time' \| 'geo'>; … }[]` | ✅ | The dimensions this caller may group by |
+| **measures** | `{ name: string; label: string; description?: string; aggregate?: Enum<'count' \| 'sum' \| 'avg' \| 'min' \| 'max' \| 'count_distinct'>; … }[]` | ✅ | The measures this caller may read |
+| **matches** | `{ term: string; member: string; matchedOn: Enum<'name' \| 'label' \| 'synonym'> }[]` | optional | Each of the caller's `terms` that matched a member of this dataset, computed by the platform under the same normalization the dataset's own validation uses. Absent when no `terms` were sent |
+
+### Nested Shape: `DatasetToolCatalogEntry.dimensions[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | ✅ | Dimension name — what `selection.dimensions` takes |
+| **label** | `string` | ✅ | Display label at the caller's locale — the text the query answer's `fields[].label` carries for this dimension |
+| **description** | `string` | optional | The dimension's business definition at the caller's locale; absent when the dataset declares none |
+| **type** | `Enum<'string' \| 'number' \| 'boolean' \| 'time' \| 'geo'>` | ✅ | Column type in the `DimensionType` vocabulary — the word the query answer's `fields[].type` carries for this dimension (a date dimension is `time`) |
+| **synonyms** | `string[]` | optional | The words a person uses for this dimension in a question, as the dataset declares them; matched, never rendered |
+
+### Nested Shape: `DatasetToolCatalogEntry.measures[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | ✅ | Measure name — what `selection.measures` takes |
+| **label** | `string` | ✅ | Display label at the caller's locale — the text the query answer's `fields[].label` carries for this measure |
+| **description** | `string` | optional | The measure's business definition at the caller's locale: what the number includes and when to use it. Absent when the dataset declares none |
+| **aggregate** | `Enum<'count' \| 'sum' \| 'avg' \| 'min' \| 'max' \| 'count_distinct'>` | optional | The measure's aggregate; absent on a derived measure, which has no single aggregate |
+| **format** | `string` | optional | Display format hint, as the measure declares it (e.g. "$0,0", "0.0%") |
+| **polarity** | `Enum<'higher' \| 'lower' \| 'neutral'>` | optional | Which direction of change is good news, as the measure declares it; absent means a rise is good |
+| **synonyms** | `string[]` | optional | The words a person uses for this measure in a question, as the dataset declares them; matched, never rendered |
+
+### Nested Shape: `DatasetToolCatalogEntry.matches[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **term** | `string` | ✅ | The caller's term, as sent in `terms` |
+| **member** | `string` | ✅ | The member the term matched, as `measures.<name>` or `dimensions.<name>` |
+| **matchedOn** | `Enum<'name' \| 'label' \| 'synonym'>` | ✅ | Which of the member's words the term equals after normalization: its `name`, its `label` (any locale) or one of its `synonyms` |
+
+
+---
+
+## DatasetToolCatalogMeasure
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | ✅ | Measure name — what `selection.measures` takes |
+| **label** | `string` | ✅ | Display label at the caller's locale — the text the query answer's `fields[].label` carries for this measure |
+| **description** | `string` | optional | The measure's business definition at the caller's locale: what the number includes and when to use it. Absent when the dataset declares none |
+| **aggregate** | `Enum<'count' \| 'sum' \| 'avg' \| 'min' \| 'max' \| 'count_distinct'>` | optional | The measure's aggregate; absent on a derived measure, which has no single aggregate |
+| **format** | `string` | optional | Display format hint, as the measure declares it (e.g. "$0,0", "0.0%") |
+| **polarity** | `Enum<'higher' \| 'lower' \| 'neutral'>` | optional | Which direction of change is good news, as the measure declares it; absent means a rise is good |
+| **synonyms** | `string[]` | optional | The words a person uses for this measure in a question, as the dataset declares them; matched, never rendered |
 
 
 ---

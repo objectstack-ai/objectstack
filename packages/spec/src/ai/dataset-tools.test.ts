@@ -15,7 +15,7 @@
 import { describe, expect, it } from 'vitest';
 import { AnalyticsResultResponseSchema, DatasetSelectionSchema } from '../api/analytics.zod';
 import {
-  DatasetCatalogEntrySchema,
+  DatasetToolCatalogEntrySchema,
   DatasetProvenanceSchema,
   DatasetTermMatchSchema,
   LIST_DATASETS_TOOL_NAME,
@@ -135,12 +135,12 @@ describe('list_datasets output', () => {
 
   it('a derived measure carries no aggregate', () => {
     const derived = { ...entry, measures: [{ name: 'win_rate', label: '赢率', format: '0.0%' }] };
-    expect(DatasetCatalogEntrySchema.safeParse(derived).success).toBe(true);
+    expect(DatasetToolCatalogEntrySchema.safeParse(derived).success).toBe(true);
   });
 
   it('`membersWithheld` and `partial` are present only as `true`', () => {
-    expect(DatasetCatalogEntrySchema.safeParse({ ...entry, membersWithheld: true }).success).toBe(true);
-    expect(DatasetCatalogEntrySchema.safeParse({ ...entry, membersWithheld: false }).success).toBe(false);
+    expect(DatasetToolCatalogEntrySchema.safeParse({ ...entry, membersWithheld: true }).success).toBe(true);
+    expect(DatasetToolCatalogEntrySchema.safeParse({ ...entry, membersWithheld: false }).success).toBe(false);
     expect(ListDatasetsOutputSchema.safeParse({ datasets: [], partial: false }).success).toBe(false);
   });
 

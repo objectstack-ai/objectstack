@@ -379,12 +379,12 @@ export type Iso_ai_conversation__TextContentSchema = Assert<Eq< z.input< typeof 
 export type Iso_ai_conversation__TokenBudgetStrategySchema = Assert<Eq< z.input< typeof M1.TokenBudgetStrategySchema >, z.infer< typeof M1.TokenBudgetStrategySchema > >>;
 
 // ai/dataset-tools.zod.ts -- [ADR-0149 D2] plain objects, enums and literals, no default and no transform
-export type Iso_ai_datasetTools__DatasetCatalogDimensionSchema = Assert<Eq< z.input< typeof M204.DatasetCatalogDimensionSchema >, z.infer< typeof M204.DatasetCatalogDimensionSchema > >>;
-export type Iso_ai_datasetTools__DatasetCatalogEntrySchema = Assert<Eq< z.input< typeof M204.DatasetCatalogEntrySchema >, z.infer< typeof M204.DatasetCatalogEntrySchema > >>;
-export type Iso_ai_datasetTools__DatasetCatalogMeasureSchema = Assert<Eq< z.input< typeof M204.DatasetCatalogMeasureSchema >, z.infer< typeof M204.DatasetCatalogMeasureSchema > >>;
 export type Iso_ai_datasetTools__DatasetProvenanceSchema = Assert<Eq< z.input< typeof M204.DatasetProvenanceSchema >, z.infer< typeof M204.DatasetProvenanceSchema > >>;
 export type Iso_ai_datasetTools__DatasetTermMatchSchema = Assert<Eq< z.input< typeof M204.DatasetTermMatchSchema >, z.infer< typeof M204.DatasetTermMatchSchema > >>;
 export type Iso_ai_datasetTools__DatasetTermMatchedOn = Assert<Eq< z.input< typeof M204.DatasetTermMatchedOn >, z.infer< typeof M204.DatasetTermMatchedOn > >>;
+export type Iso_ai_datasetTools__DatasetToolCatalogDimensionSchema = Assert<Eq< z.input< typeof M204.DatasetToolCatalogDimensionSchema >, z.infer< typeof M204.DatasetToolCatalogDimensionSchema > >>;
+export type Iso_ai_datasetTools__DatasetToolCatalogEntrySchema = Assert<Eq< z.input< typeof M204.DatasetToolCatalogEntrySchema >, z.infer< typeof M204.DatasetToolCatalogEntrySchema > >>;
+export type Iso_ai_datasetTools__DatasetToolCatalogMeasureSchema = Assert<Eq< z.input< typeof M204.DatasetToolCatalogMeasureSchema >, z.infer< typeof M204.DatasetToolCatalogMeasureSchema > >>;
 export type Iso_ai_datasetTools__ListDatasetsOutputSchema = Assert<Eq< z.input< typeof M204.ListDatasetsOutputSchema >, z.infer< typeof M204.ListDatasetsOutputSchema > >>;
 export type Iso_ai_datasetTools__QueryDatasetOutputSchema = Assert<Eq< z.input< typeof M204.QueryDatasetOutputSchema >, z.infer< typeof M204.QueryDatasetOutputSchema > >>;
 
