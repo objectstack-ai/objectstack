@@ -2238,3 +2238,112 @@ describe('[ADR-0090 D12] a delegate can neither capture nor evict a direct grant
     }
   });
 });
+
+// ── [ADR-0090 D12] … and on the set axis. An update that re-names a stored
+//    direct grant's set takes that set away from its holder, so the set it
+//    takes away is judged exactly as the removal of that grant judges it — the
+//    allowlist, the catalog and strict containment, with the same reasons,
+//    sentences and details — and named only when the caller reads it (ruling
+//    of record 6649064874). A grant the delegate could not remove it cannot
+//    re-name either; the set it re-names the grant TO is judged as before.
+
+/**
+ * A delegate over `east` allowlisting `sales_user`, `support_user` and
+ * `west_admin` — the last carrying an adminScope over `west`, which the
+ * delegate's own scope does not strictly contain — and three stored grants of
+ * `u_east_1`, a holder inside the subtree the caller reads: `g_fin` of
+ * `finance_admin` (outside the allowlist), `g_west` of `west_admin`, and
+ * `g_retired` of a name the catalog does not hold. `masked` serves the
+ * caller's read of a grant without its `permission_set`.
+ */
+function renameHarness({ masked = false } = {}) {
+  const harness = makeHarness();
+  harness.tables.sys_permission_set.push(
+    { id: 'ps_support', name: 'support_user' },
+    { id: 'ps_west', name: 'west_admin', admin_scope: JSON.stringify({ ...EAST_SCOPE, businessUnit: 'west' }) },
+  );
+  harness.tables.sys_user_permission_set = [
+    { id: 'g_fin', user_id: 'u_east_1', permission_set: 'finance_admin' },
+    { id: 'g_west', user_id: 'u_east_1', permission_set: 'west_admin' },
+    { id: 'g_retired', user_id: 'u_east_1', permission_set: 'sales_user_retired' },
+    { id: 'g_sales', user_id: 'u_east_1', permission_set: 'sales_user' },
+  ];
+  const scope = { ...EAST_SCOPE, assignablePermissionSets: ['sales_user', 'support_user', 'west_admin'] };
+  const gate = new DelegatedAdminGate({
+    ql: harness.ql,
+    resolveSets: async (context: any) => context?.principal === 'tenant_admin'
+      ? harness.SETS.tenant_admin
+      : [{ name: 'east_admin', objects: {}, adminScope: scope }] as any[],
+  });
+  if (masked) {
+    const { findOne } = harness.ql;
+    harness.ql.findOne = async (object: string, opts: any) => {
+      const row = await findOne.call(harness.ql, object, opts);
+      if (object !== 'sys_user_permission_set' || opts?.context?.isSystem || !row) return row;
+      const { permission_set: _hidden, ...rest } = row;
+      return rest;
+    };
+  }
+  const as = (principal: string) => harness.ctxOf(principal);
+  const rename = (id: string, permission_set: string, context = as('delegate')) => gate.assert({
+    object: 'sys_user_permission_set', operation: 'update', data: { id, permission_set }, context,
+  });
+  const remove = (id: string, context = as('delegate')) => gate.assert({
+    object: 'sys_user_permission_set', operation: 'delete', options: { where: { id } }, context,
+  });
+  return { ...harness, gate, as, rename, remove };
+}
+
+/** A refusal's answer with its operation word spelled out of it: what a re-name and a removal must share. */
+const operationFree = (answer: ReturnType<typeof answerOf>) =>
+  JSON.parse(JSON.stringify(answer).replace(/'(update|delete)'/g, "'OP'").replace(/"(update|delete)"/g, '"OP"'));
+
+describe('[ADR-0090 D12] a delegate can neither capture nor evict a direct grant beyond its scope: an update that re-names a stored grant is judged on the set it takes away as the removal of that grant is', () => {
+  it('re-naming a grant FROM a set outside the allowlist TO an allowlisted one is refused, with the answer the removal of that grant gets', async () => {
+    const r = renameHarness();
+    const renamed = await refusalOf(() => r.rename('g_fin', 'sales_user'));
+    expectScopeViolation(renamed, 'sys_user_permission_set',
+      /^\[Security\] Outside your delegated scope: delegated 'update' on sys_user_permission_set rejected — permission set 'finance_admin' is not in the scope's allowlist \(scope from 'east_admin'\)\.$/);
+    expect(renamed.details).toEqual({ operation: 'update', object: 'sys_user_permission_set', permissionSet: 'finance_admin' });
+    expect(operationFree(answerOf(renamed))).toEqual(operationFree(answerOf(await refusalOf(() => r.remove('g_fin')))));
+  });
+
+  it('the removal\'s other refusals hold for a re-name too: a set the delegate\'s scope does not strictly contain, and a name the catalog does not hold', async () => {
+    const r = renameHarness();
+    for (const id of ['g_west', 'g_retired']) {
+      const renamed = await refusalOf(() => r.rename(id, 'sales_user'));
+      expectOpaqueDenial(renamed, 'sys_user_permission_set');
+      expect(operationFree(answerOf(renamed)), id).toEqual(operationFree(answerOf(await refusalOf(() => r.remove(id)))));
+    }
+    expect((await refusalOf(() => r.rename('g_west', 'sales_user'))).message).toMatch(/granting set 'west_admin' would hand out an adminScope not strictly contained by yours/);
+    expect((await refusalOf(() => r.rename('g_retired', 'sales_user'))).message).toMatch(/permission set 'sales_user_retired' is not in the security catalog/);
+  });
+
+  it('a caller that cannot read the stored set is told the same refusal without its name, as the removal is', async () => {
+    const r = renameHarness({ masked: true });
+    const renamed = await refusalOf(() => r.rename('g_fin', 'sales_user'));
+    expectScopeViolation(renamed, 'sys_user_permission_set', /the grant's permission set is not in the scope's allowlist/);
+    expect(renamed.message).not.toMatch(/finance_admin/);
+    expect(renamed.details).toEqual({ operation: 'update', object: 'sys_user_permission_set' });
+    expect(operationFree(answerOf(renamed))).toEqual(operationFree(answerOf(await refusalOf(() => r.remove('g_fin')))));
+  });
+
+  it('re-naming a grant TO a set outside the allowlist is refused, as before', async () => {
+    const r = renameHarness();
+    const err = await refusalOf(() => r.rename('g_sales', 'finance_admin'));
+    expectScopeViolation(err, 'sys_user_permission_set', /permission set 'finance_admin' is not in the scope's allowlist/);
+    expect(err.details).toEqual({ operation: 'update', object: 'sys_user_permission_set', permissionSet: 'finance_admin' });
+  });
+
+  it('CONTROL: re-naming a grant between two allowlisted sets is admitted', async () => {
+    const r = renameHarness();
+    await expect(r.rename('g_sales', 'support_user')).resolves.toBeUndefined();
+  });
+
+  it('CONTROL: a tenant-level administrator re-names any of these grants freely', async () => {
+    const r = renameHarness();
+    for (const [id, to] of [['g_fin', 'sales_user'], ['g_west', 'sales_user'], ['g_retired', 'sales_user'], ['g_sales', 'finance_admin']] as const) {
+      await expect(r.rename(id, to, r.as('tenant_admin')), `${id} → ${to}`).resolves.toBeUndefined();
+    }
+  });
+});
