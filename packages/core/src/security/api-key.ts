@@ -313,9 +313,11 @@ function lifecycleRefusalOf(
       // (`sys_api_key`'s own row action): the key works at once, no re-issue.
       // Who may clear it depends on why it was set, read off the row's
       // `revoked_reason`: a key an administrator's forced password reset
-      // revoked (`admin_password_reset`) is restored by a platform
-      // administrator only (plugin-auth `api-key-restore-guard.ts` refuses its
-      // owner); a key revoked because its owner's membership in the
+      // revoked (`admin_password_reset`), and a key a platform administrator
+      // revoked although it is not theirs (`administrator_suspended`), is
+      // restored by a platform administrator only (plugin-auth
+      // `api-key-restore-guard.ts` refuses its owner); a key revoked because
+      // its owner's membership in the
       // organization ended (`organization_membership_ended`, written by the
       // host that removed them) by no one, the same guard refusing every
       // user-context restore of it; any other revoked key by its owner or a
@@ -326,6 +328,10 @@ function lifecycleRefusalOf(
         ? `${label} was revoked by an administrator's forced password reset. Only a platform administrator can `
           + 'restore it (the Restore API Key action on the API Keys list); otherwise create a new key '
           + '(POST /api/v1/keys, or the API Keys page) and replace this one wherever it is configured.'
+        : row.revoked_reason === 'administrator_suspended'
+          ? `${label} was suspended by a platform administrator. Only a platform administrator can restore it `
+            + '(the Restore API Key action on the API Keys list); otherwise create a new key (POST /api/v1/keys, or '
+            + 'the API Keys page) and replace this one wherever it is configured.'
         : row.revoked_reason === 'organization_membership_ended'
           ? `${label} was revoked because its owner's membership in the organization ended, and it cannot be `
             + 'restored. A member of the organization creates a new key (POST /api/v1/keys, or the API Keys page) '

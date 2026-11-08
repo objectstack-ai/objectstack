@@ -1160,10 +1160,11 @@ export const deObjects: NonNullable<TranslationData['objects']> = {
       },
       revoked_reason: {
         label: "Widerrufsgrund",
-        help: "Warum der Schlüssel widerrufen wurde, sofern das entscheidet, wer ihn wiederherstellen kann. Passwortzurücksetzung durch Administrator: Nur ein Plattformadministrator kann den Schlüssel wiederherstellen. Mitgliedschaft in der Organisation beendet: Der Eigentümer hat die Organisation verlassen, und niemand kann den Schlüssel wiederherstellen; ein Mitglied legt einen neuen an. Wird beim Wiederherstellen des Schlüssels gelöscht. Leer bei einem Schlüssel, der in der Liste der API-Schlüssel widerrufen wurde.",
+        help: "Warum der Schlüssel widerrufen wurde, sofern das entscheidet, wer ihn wiederherstellen kann. Passwortzurücksetzung durch Administrator: Nur ein Plattformadministrator kann den Schlüssel wiederherstellen. Mitgliedschaft in der Organisation beendet: Der Eigentümer hat die Organisation verlassen, und niemand kann den Schlüssel wiederherstellen; ein Mitglied legt einen neuen an. Von einem Administrator gesperrt: Ein Plattformadministrator hat einen Schlüssel widerrufen, der ihm nicht gehört, und nur ein Plattformadministrator kann ihn wiederherstellen. Wird beim Wiederherstellen des Schlüssels gelöscht. Leer bei einem Schlüssel, den sein Eigentümer in der Liste der API-Schlüssel widerrufen hat.",
         options: {
           admin_password_reset: "Passwortzurücksetzung durch Administrator",
-          organization_membership_ended: "Mitgliedschaft in der Organisation beendet"
+          organization_membership_ended: "Mitgliedschaft in der Organisation beendet",
+          administrator_suspended: "Von einem Administrator gesperrt"
         }
       },
       key: {
