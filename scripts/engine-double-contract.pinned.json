@@ -5282,6 +5282,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/services/service-automation/src/builtin/notify-email-field.shared-redis.integration.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
       "file": "packages/services/service-automation/src/builtin/notify-organization-stamp.integration.test.ts",
       "verb": "findOne",
       "pinned": 1
