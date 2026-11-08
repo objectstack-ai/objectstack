@@ -427,6 +427,17 @@ type UninstallCleanupRunner = {
     runUninstallCleanups?(
         request: Pick<DeletePackageRequest, 'packageId' | 'actor'> & { declared?: UninstallDeclared },
     ): Promise<UninstallCleanupOutcome[]>;
+    /**
+     * [#31283] The verb's pre-uninstall guards, asked through the protocol's
+     * one runner of them — the runner `deletePackage` asks at its first step.
+     */
+    runUninstallGuards?: ObjectStackProtocolImplementation['runUninstallGuards'];
+    /**
+     * [#31283] The verb's `package_uninstall` ledger row (#31186), written
+     * through the protocol's one writer of it — the writer `deletePackage`
+     * calls at its last step.
+     */
+    recordPackageUninstall?: ObjectStackProtocolImplementation['recordPackageUninstall'];
 };
 
 /** The outcome name this door reports when the runner itself could not run. */
@@ -3343,6 +3354,20 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             const walled = this.refuseWalledCatalogPackage(c, ctx, 'Uninstalling', manifestId, admission);
             if (walled) return walled;
         }
+        // [#31283] THE UNINSTALL VERB'S PRE-UNINSTALL GUARDS, ASKED BEFORE
+        // ANYTHING MOVES. This door cannot delegate to `deletePackage` (it
+        // answers `success: false` for a package with no stored rows, and
+        // drops the tables of the objects it removes), so it asks the verb's
+        // guards through the protocol's one runner of them
+        // (`runUninstallGuards`) — the runtime's dependent-rule refusal (#31232:
+        // an active validation rule of another enabled package reads a field
+        // this package adds through `objectExtensions`) among them — and holds
+        // no copy of any verdict. A refusal is the request's, spelled as the
+        // guard spelled it (`code`, `status`, `message`), with nothing moved.
+        {
+            const refused = await this.askUninstallGuards(c, ctx, manifestId, admission.userId);
+            if (refused) return refused;
+        }
         // [#28511, ADR-0146 D3] THE REGISTRY'S UNINSTALL REFUSAL, ASKED BEFORE
         // THE LEDGER WRITE. The withdrawal below asks the registry to
         // uninstall the package, and the registry refuses a base whose paired
@@ -3383,6 +3408,8 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                 }
             }
         }
+        // [#31283] The version this uninstall removes, for the package's ledger row.
+        const removedVersion = this.ledger.read(manifestId).entry?.version;
         try {
             this.ledger.remove(manifestId);
         } catch (err: any) {
@@ -3444,6 +3471,13 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         // re-sync would only read it back.
         const resync = withdrawal ? undefined : await this.announceUninstall(ctx, manifestId);
         if (resync) cleanups.push(resync);
+        // [#31283] The package's own `package_uninstall` ledger row (#31186),
+        // written once the uninstall is durable — the ledger entry is gone —
+        // through the protocol's one writer of it (`recordPackageUninstall`),
+        // never on a refusal above. `itemsRemoved` / `itemsFailed` count the
+        // stored `sys_metadata` items an uninstall removes: an install-local
+        // package is registered from its ledger entry and has none.
+        await this.recordUninstall(ctx, manifestId, removedVersion, admission.userId);
         const withdrawals = (withdrawal ? 1 : 0) + (copies ? 1 : 0) + (resync ? 1 : 0);
         ctx.logger?.info?.(
             `[MarketplaceInstallLocal] uninstalled ${manifestId} (cached manifest removed; `
@@ -3694,6 +3728,65 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             removed,
             error: 'the metadata service kept copies of the package\'s objects — the object reads serve them until the next restart',
         };
+    };
+
+    /**
+     * [#31283] Ask the uninstall verb's pre-uninstall guards about `manifestId`
+     * through the protocol's one runner of them (`runUninstallGuards`), and
+     * answer the first refusal as this request's: `{ success: false, error:
+     * { code, message } }` under the guard's `status`. `undefined` when no
+     * guard refuses.
+     *
+     * No `protocol` service, or a protocol from a build without the runner,
+     * holds no guard this door can ask, and the door behaves as before — the
+     * capability question {@link runUninstallCleanups} asks of its runner. A
+     * throw that is not a coded client refusal is the guard's failure to
+     * judge: it propagates, as it does out of `deletePackage`, and the
+     * uninstall does not proceed.
+     */
+    private askUninstallGuards = async (
+        c: any,
+        ctx: PluginContext,
+        manifestId: string,
+        actor: string,
+    ): Promise<Response | undefined> => {
+        let protocol: UninstallCleanupRunner | undefined;
+        try { protocol = ctx.getService<UninstallCleanupRunner>('protocol'); } catch { /* no protocol service */ }
+        if (typeof protocol?.runUninstallGuards !== 'function') return undefined;
+        try {
+            await protocol.runUninstallGuards({ packageId: manifestId, ...(actor ? { actor } : {}) });
+            return undefined;
+        } catch (err: any) {
+            const status = err?.status;
+            if (typeof err?.code === 'string' && typeof status === 'number' && status >= 400 && status < 500) {
+                return c.json({ success: false, error: { code: err.code, message: String(err.message) } }, status);
+            }
+            throw err;
+        }
+    };
+
+    /**
+     * [#31283] Write the package's `package_uninstall` ledger row through the
+     * protocol's one writer of it (`recordPackageUninstall`). No `protocol`
+     * service, or a protocol from a build without the writer, has no row to
+     * write; the writer itself never throws.
+     */
+    private recordUninstall = async (
+        ctx: PluginContext,
+        manifestId: string,
+        version: string | undefined,
+        actor: string,
+    ): Promise<void> => {
+        let protocol: UninstallCleanupRunner | undefined;
+        try { protocol = ctx.getService<UninstallCleanupRunner>('protocol'); } catch { /* no protocol service */ }
+        if (typeof protocol?.recordPackageUninstall !== 'function') return;
+        await protocol.recordPackageUninstall({
+            packageId: manifestId,
+            ...(version ? { version } : {}),
+            ...(actor ? { actor } : {}),
+            itemsRemoved: 0,
+            itemsFailed: 0,
+        });
     };
 
     /**

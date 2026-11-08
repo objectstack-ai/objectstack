@@ -132,3 +132,56 @@ describe('#31232: deletePackage asks every registered pre-uninstall guard before
         expect(res).toMatchObject({ success: false, deletedCount: 0, failedCount: 0 });
     });
 });
+
+/**
+ * #31283 — the two public entry points an uninstall door that cannot delegate
+ * to `deletePackage` (install-local's) calls: `runUninstallGuards`, the runner
+ * the verb itself asks at its first step, and `recordPackageUninstall`, the
+ * writer of the `package_uninstall` row the verb calls at its last. The door's
+ * half is pinned in `@objectstack/cloud-connection`
+ * (`marketplace-install-local-uninstall-guards-audit.test.ts`).
+ */
+describe('#31283: the guard runner and the audit writer, reachable without deletePackage', () => {
+    it('runUninstallGuards throws the first refusal as the verb does, hands the guard the actor, and reads or moves nothing', async () => {
+        const rig = makeProtocol();
+        const guard = vi.fn(() => ({ code: CODE, status: 409, message: 'a rule reads its field' }));
+        rig.protocol.registerUninstallGuard('qa.refuses', guard);
+
+        await expect(rig.protocol.runUninstallGuards({ packageId: PACKAGE_ID, actor: 'usr_1' }))
+            .rejects.toMatchObject({ code: CODE, status: 409, message: 'a rule reads its field' });
+
+        expect(guard.mock.calls).toEqual([[{ packageId: PACKAGE_ID, actor: 'usr_1' }]]);
+        expect(touched(rig)).toEqual(NOTHING);
+    });
+
+    it('control: runUninstallGuards resolves when no guard refuses, and on a bare protocol', async () => {
+        const rig = makeProtocol();
+        await expect(rig.protocol.runUninstallGuards({ packageId: PACKAGE_ID })).resolves.toBeUndefined();
+        rig.protocol.registerUninstallGuard('qa.passes', () => undefined);
+        await expect(rig.protocol.runUninstallGuards({ packageId: PACKAGE_ID })).resolves.toBeUndefined();
+        expect(touched(rig)).toEqual(NOTHING);
+    });
+
+    it('recordPackageUninstall hands the audit slot one package_uninstall event, with the protocol\'s environment', async () => {
+        const events: unknown[] = [];
+        const services = new Map<string, unknown>([['audit', { recordPackageLifecycleEvent: async (e: unknown) => { events.push(e); } }]]);
+        const protocol = new ObjectStackProtocolImplementation({ registry: {} } as never, () => services as never, 'env_31283');
+
+        await protocol.recordPackageUninstall({ packageId: PACKAGE_ID, version: '1.2.0', actor: 'usr_1', itemsRemoved: 0, itemsFailed: 0 });
+
+        expect(events).toEqual([{
+            action: 'package_uninstall',
+            packageId: PACKAGE_ID,
+            version: '1.2.0',
+            environmentId: 'env_31283',
+            actor: 'usr_1',
+            itemsRemoved: 0,
+            itemsFailed: 0,
+        }]);
+    });
+
+    it('control: recordPackageUninstall writes nothing and does not throw with no audit slot', async () => {
+        const protocol = new ObjectStackProtocolImplementation({ registry: {} } as never, () => new Map() as never);
+        await expect(protocol.recordPackageUninstall({ packageId: PACKAGE_ID, itemsRemoved: 0, itemsFailed: 0 })).resolves.toBeUndefined();
+    });
+});

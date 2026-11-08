@@ -33,7 +33,7 @@
 
 import { PLURAL_TO_SINGULAR } from '@objectstack/spec/shared';
 import { declaredUserMessage } from '@objectstack/types';
-import type { DeletePackageRequest, DeletePackageResponse, ObjectStackProtocolImplementation } from './protocol.js';
+import type { DeletePackageRequest, DeletePackageResponse, ObjectStackProtocolImplementation, PackageUninstallRecord } from './protocol.js';
 import { canonicalMetaType, captureUninstallDeclared, metadataReadFailureError, packagePersistFailureError, remainingRowsPhrase } from './protocol.js';
 
 /**
@@ -101,7 +101,7 @@ export async function deletePackage(this: Pick<PackageUninstallHost, 'deleteMeta
     // guard's own throw propagates as is — an uninstall a guard could not
     // judge does not proceed. With no guard registered nothing is asked, and
     // the verb behaves exactly as it did before guards existed.
-    await askUninstallGuards(this.uninstallGuards, request);
+    await runUninstallGuards.call(this, request);
 
     const where: Record<string, unknown> = { package_id: request.packageId };
     // [#8136] This read is the uninstall's FIRST database touch, and until
@@ -385,16 +385,16 @@ export async function deletePackage(this: Pick<PackageUninstallHost, 'deleteMeta
     const cleanups = await this.runUninstallCleanups({ ...request, ...(declared ? { declared } : {}) });
 
     // [#31186] The package's own ledger row, written once, here, after its
-    // stored row is gone — the one place every uninstall door passes. A
+    // stored row is gone — through the one writer of that row
+    // ({@link recordPackageUninstall}), which an uninstall door that cannot
+    // delegate to this verb calls too (install-local's, #31283). A
     // refusal above threw before this line, so it writes none. An id the
     // registry did not hold and the store bound no metadata to was not a
     // package, so it writes none either: the `DELETE` door answers that `404`.
     if (installed.held || deleted.length > 0 || failed.length > 0) {
-        await recordPackageUninstall(this.getServicesRegistry?.()?.get('audit'), {
-            action: 'package_uninstall',
+        await recordPackageUninstall.call(this, {
             packageId: request.packageId,
             ...(installed.version ? { version: installed.version } : {}),
-            ...(this.environmentId ? { environmentId: this.environmentId } : {}),
             ...(request.actor ? { actor: request.actor } : {}),
             ...(request.keepData === true ? { keepData: true } : {}),
             itemsRemoved: deleted.length,
@@ -412,6 +412,31 @@ export async function deletePackage(this: Pick<PackageUninstallHost, 'deleteMeta
     };
 }
 
+/** The body of `ObjectStackProtocolImplementation#runUninstallGuards`; the method's docblock there is its contract. */
+export async function runUninstallGuards(
+    this: Pick<PackageUninstallHost, 'uninstallGuards'>,
+    request: Pick<DeletePackageRequest, 'packageId' | 'actor'>,
+): Promise<void> {
+    await askUninstallGuards(this.uninstallGuards, request);
+}
+
+/** The body of `ObjectStackProtocolImplementation#recordPackageUninstall`; the method's docblock there is its contract. */
+export async function recordPackageUninstall(
+    this: Pick<PackageUninstallHost, 'environmentId' | 'getServicesRegistry'>,
+    record: PackageUninstallRecord,
+): Promise<void> {
+    await writePackageUninstallEvent(this.getServicesRegistry?.()?.get('audit'), {
+        action: 'package_uninstall',
+        packageId: record.packageId,
+        ...(record.version ? { version: record.version } : {}),
+        ...(this.environmentId ? { environmentId: this.environmentId } : {}),
+        ...(record.actor ? { actor: record.actor } : {}),
+        ...(record.keepData === true ? { keepData: true } : {}),
+        itemsRemoved: record.itemsRemoved,
+        itemsFailed: record.itemsFailed,
+    });
+}
+
 /**
  * [#31232] Ask every registered pre-uninstall guard, in registration order,
  * and throw the first refusal one answers: an `Error` carrying the guard's
@@ -420,7 +445,7 @@ export async function deletePackage(this: Pick<PackageUninstallHost, 'deleteMeta
  */
 async function askUninstallGuards(
     guards: PackageUninstallHost['uninstallGuards'],
-    request: DeletePackageRequest,
+    request: Pick<DeletePackageRequest, 'packageId' | 'actor'>,
 ): Promise<void> {
     for (const guard of guards.values()) {
         const refusal = await guard({
@@ -476,7 +501,7 @@ function readInstalledPackage(registry: unknown, packageId: string): { held: boo
  * slot that does anyway is a foreign writer, and the uninstall it reports on
  * has already completed, so its failure is logged, never answered.
  */
-async function recordPackageUninstall(audit: unknown, event: PackageUninstallAuditEvent): Promise<void> {
+async function writePackageUninstallEvent(audit: unknown, event: PackageUninstallAuditEvent): Promise<void> {
     const record = (audit as PackageLifecycleAuditSurface | undefined)?.recordPackageLifecycleEvent;
     if (typeof record !== 'function') return;
     try {

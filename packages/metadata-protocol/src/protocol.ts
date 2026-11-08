@@ -383,7 +383,7 @@ import { findEnvironmentRow, findEnvironmentRows, findServedOverlayRow, packagel
 // [#25467 cut 35] The stored rows of a collection, folded over the registered ones.
 import { foldStoredCollection } from './protocol-stored-collection-fold.js';
 // [#25467 cut 35] The environment-wide package uninstall verb.
-import { deletePackage } from './protocol-package-uninstall.js';
+import { deletePackage, recordPackageUninstall, runUninstallGuards } from './protocol-package-uninstall.js';
 // ADR-0146 D3 — the ensure door of a base's paired `.custom` package, and the
 // pair-shaped-id predicate the duplicate asks before it reads a row.
 import { ensureCustomizationPackage } from './protocol-customization-package.js';
@@ -522,6 +522,7 @@ export type { MetadataWriteFace } from './protocol-write-face.js';
 import type {
     DeletePackageRequest,
     DeletePackageResponse,
+    PackageUninstallRecord,
     PublishMaterializeResult,
     PublishMaterializer,
     UninstallCleanup,
@@ -533,6 +534,7 @@ export { captureUninstallDeclared } from './protocol-package-lifecycle-types.js'
 export type {
     DeletePackageRequest,
     DeletePackageResponse,
+    PackageUninstallRecord,
     PublishMaterializeResult,
     PublishMaterializer,
     UninstallCleanup,
@@ -1439,6 +1441,51 @@ export class ObjectStackProtocolImplementation implements
      */
     registerUninstallGuard(name: string, guard: UninstallGuard): void {
         return ProtocolClassHeadFacet.registerUninstallGuard(protocolHost(this), name, guard);
+    }
+
+    /**
+     * [#31283] Ask every registered pre-uninstall guard
+     * ({@link registerUninstallGuard}) about one package, in registration
+     * order, and throw the first refusal one answers — an `Error` carrying the
+     * guard's `message`, with its `code` and `status` — exactly as
+     * {@link deletePackage} asks them at its first step: THE one runner of the
+     * guard registry, which the verb calls too. A guard's own throw propagates
+     * as is. Resolves when no guard refuses (and at once when none is
+     * registered). Reads only: nothing is read from the store or moved.
+     *
+     * For a door that uninstalls a package the protocol never stored and so
+     * cannot delegate to {@link deletePackage} — install-local's
+     * `DELETE /api/v1/marketplace/install-local/:manifestId`, the reason
+     * {@link runUninstallCleanups} exists — asked before that door's first
+     * write, so every uninstall door answers the guards' verdict, and no door
+     * holds a copy of it.
+     */
+    async runUninstallGuards(request: Pick<DeletePackageRequest, 'packageId' | 'actor'>): Promise<void> {
+        const readUninstallGuards = () => this.uninstallGuards;
+        return runUninstallGuards.call({ get uninstallGuards() { return readUninstallGuards(); } }, request);
+    }
+
+    /**
+     * [#31283] Write the package's own `package_uninstall` ledger row
+     * (#31186): hand the `audit` slot's `recordPackageLifecycleEvent` one
+     * event naming the package, the version removed, this protocol's
+     * environment and the operator — THE one writer of that row, which
+     * {@link deletePackage} calls as its last step. A host with no audit
+     * plugin has no ledger, so nothing is written; an audit slot that throws
+     * is logged, never thrown, since the uninstall it reports on has already
+     * completed.
+     *
+     * For a door that uninstalls a package without {@link deletePackage}
+     * (install-local's own uninstall door), called once, after that door's
+     * uninstall completed and never after a refusal.
+     */
+    async recordPackageUninstall(record: PackageUninstallRecord): Promise<void> {
+        const readGetServicesRegistry = () => this.getServicesRegistry;
+        const readEnvironmentId = () => this.environmentId;
+        return recordPackageUninstall.call({
+            get environmentId() { return readEnvironmentId(); },
+            get getServicesRegistry() { return readGetServicesRegistry(); },
+        }, record);
     }
 
     /**
