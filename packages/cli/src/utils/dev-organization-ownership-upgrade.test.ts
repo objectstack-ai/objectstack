@@ -14,6 +14,9 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+// The telemetry sibling's resolution reaches both through dynamic imports: pay their load at collection.
+import '@objectstack/runtime';
+import '@objectstack/service-datasource';
 import {
   isOrganizationOwnershipRequiredMessage,
   ORGANIZATION_OWNERSHIP_REQUIRED_MESSAGE,
