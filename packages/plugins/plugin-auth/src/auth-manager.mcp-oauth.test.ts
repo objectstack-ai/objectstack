@@ -47,10 +47,15 @@ const savedEnv: Record<string, string | undefined> = {};
  * adapter dialect: `findMany` / `findOne` over the provider's camelCase field
  * names with `eq` clauses, the only shape the consent read sends. `reads`
  * counts every call, so a leg can pin how many reads one verification costs.
+ *
+ * [objectstack-ai/cloud#3820, card 2] The grant read starts at the client row:
+ * a disabled client, or one whose row is gone, admits nothing. So the default
+ * store holds the one client every token below names, enabled, and a leg that
+ * is about the client passes its own rows.
  */
 function consentStore(
   consents: Array<{ clientId: string; userId: string; referenceId?: string | null; createdAt: Date }>,
-  clients: Array<{ clientId: string; skipConsent?: boolean }> = [],
+  clients: Array<{ clientId: string; skipConsent?: boolean; disabled?: boolean }> = [{ clientId: 'client-abc' }],
 ) {
   const tables: Record<string, Array<Record<string, unknown>>> = { oauthConsent: consents, oauthClient: clients };
   const reads: string[] = [];
@@ -573,14 +578,28 @@ describe('verifyMcpAccessToken reads the consent the token was minted under (rul
       .sign(privateKey);
   }
 
-  it('admits a token whose consent stands — at the cost of exactly ONE read', async () => {
+  it('admits a token whose consent stands — at the cost of exactly TWO reads, the client and then the consent', async () => {
     const store = consentStore([{ clientId: 'client-abc', userId: 'user-1', referenceId: null, createdAt: HOUR_AGO }]);
     expect(await managerOver(store).verifyMcpAccessToken(await signToken())).toEqual({
       userId: 'user-1',
       scopes: ['data:read'],
       clientId: 'client-abc',
     });
-    expect(store.reads).toEqual(['findMany oauthConsent']);
+    // [objectstack-ai/cloud#3820, card 2] The client row is read first, so a
+    // disabled client's token is refused before its consent is looked at.
+    expect(store.reads).toEqual(['findOne oauthClient', 'findMany oauthConsent']);
+  });
+
+  it('[objectstack-ai/cloud#3820, card 2] refuses the token of a disabled client, or of a client whose row is gone, though its consent stands', async () => {
+    const consent = [{ clientId: 'client-abc', userId: 'user-1', referenceId: null, createdAt: HOUR_AGO }];
+    const disabled = consentStore(consent, [{ clientId: 'client-abc', disabled: true }]);
+    expect(await managerOver(disabled).verifyMcpAccessToken(await signToken())).toBeNull();
+    // Refused on the client row alone: the consent is never read.
+    expect(disabled.reads).toEqual(['findOne oauthClient']);
+    expect(await managerOver(consentStore(consent, [])).verifyMcpAccessToken(await signToken())).toBeNull();
+    // The control: the same consent under the same client, enabled, admits.
+    const enabled = consentStore(consent, [{ clientId: 'client-abc', disabled: false }]);
+    expect(await managerOver(enabled).verifyMcpAccessToken(await signToken())).not.toBeNull();
   });
 
   it('refuses a token whose consent is gone (revoked, or withdrawn in the Console)', async () => {
@@ -630,7 +649,8 @@ describe('verifyMcpAccessToken reads the consent the token was minted under (rul
   it('a server-only `skip_consent` client has no consent row and is admitted without one (ruling A, step 5)', async () => {
     const skip = consentStore([], [{ clientId: 'client-abc', skipConsent: true }]);
     expect(await managerOver(skip).verifyMcpAccessToken(await signToken())).not.toBeNull();
-    expect(skip.reads).toEqual(['findMany oauthConsent', 'findOne oauthClient']);
+    // One client read answers both questions: enabled, and consent-less.
+    expect(skip.reads).toEqual(['findOne oauthClient', 'findMany oauthConsent']);
     // The control: the same client without the flag is refused.
     const consenting = consentStore([], [{ clientId: 'client-abc', skipConsent: false }]);
     expect(await managerOver(consenting).verifyMcpAccessToken(await signToken())).toBeNull();

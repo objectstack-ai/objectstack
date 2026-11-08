@@ -201,7 +201,7 @@ message names the key's prefix, the date, and the remedy:
 |:---|:---|
 | `API_KEY_EXPIRED` | Past its `expires_at` (or past the grace of a key created with none). |
 | `API_KEY_INACTIVE` | No recorded use for longer than the inactivity window. The key is **not** revoked. |
-| `API_KEY_REVOKED` | Revoked by its owner or an administrator. |
+| `API_KEY_REVOKED` | Revoked by its owner or an administrator. A key a platform administrator revoked for someone else is suspended: only a platform administrator can restore it. |
 
 The remedy is the same for all three: **create a new key and replace the old
 one wherever it is configured** — keys do not renew. To rotate without a gap,
@@ -447,6 +447,14 @@ drive this MCP server. Same word, different layer.
   `401`, and anyone else who is signed in is refused `403`. The SDK
   spells them `oauth.authorizedClients.list()` / `withdraw(id)` and
   `listForUser(userId)` / `withdrawForUser(userId, id)`.
+- **A platform administrator can pause an assistant for everyone.** Disabling
+  its client (the Disable action on the OAuth applications list, or
+  `POST /api/v1/auth/admin/oauth2/toggle-disabled` with
+  `{ "client_id": "…", "disabled": true }`) refuses every access token the
+  client already holds on its next call (`401`), and the client gets no new
+  ones: a refresh is refused `invalid_client`. Disabling is a pause, not an
+  end: the grants and refresh tokens stay, so enabling the client again
+  serves them again. To end a grant, withdraw it.
 - **Action bodies run as trusted app code** once invoked (the `ai.exposed`
   gate and `requiredPermissions` are checked at *invoke* time). Treat writing
   an action as a code-review-worthy act — that's the real security boundary.
