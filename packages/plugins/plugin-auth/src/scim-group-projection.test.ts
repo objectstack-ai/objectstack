@@ -447,6 +447,32 @@ describe('SCIM group push → mapped permission set', () => {
     expect(rows.map((r) => r.organization_id)).toEqual([ORG_B]);
   });
 
+  it('(S5) a re-save after the connection moved organization is refused, never answered with an organization the row does not carry', async () => {
+    const h = await boot();
+    const first = await saveMapping(h, { connectionId: CONNECTION, groupExternalId: 'okta-grp-sales', permissionSet: SALES });
+    expect(first.status, JSON.stringify(first.body)).toBe(200);
+    const mappingId = mappingIdOf(first);
+
+    // CONTROL: a re-save in the same organization is idempotent.
+    const again = await saveMapping(h, { connectionId: CONNECTION, groupExternalId: 'okta-grp-sales', permissionSet: SALES });
+    expect(again.status).toBe(200);
+    expect((again.body as unknown as { data: { mappingId: string; created: boolean; organizationId: string } }).data)
+      .toMatchObject({ mappingId, created: false, organizationId: ORG });
+
+    const ORG_B = 'org_scim_30959_b';
+    await revokeScimConnectionCredential(h.engine as never, h.credentialId);
+    await mintScimConnectionCredential(h.engine as never, SECRET, { connectionId: CONNECTION, organizationId: ORG_B });
+
+    const refused = await saveMapping(h, { connectionId: CONNECTION, groupExternalId: 'okta-grp-sales', permissionSet: SALES });
+    expect(refused.status, JSON.stringify(refused.body)).toBe(409);
+    const error = (refused.body as { error: { code: string; message: string } }).error;
+    expect(error.code).toBe('RESOURCE_CONFLICT');
+    expect(error.message).toContain(mappingId);
+    expect(error.message).toContain(ORG);
+    const rows = (await h.engine.find('sys_idp_group_mapping', {}, SYSTEM)) as Array<Record<string, unknown>>;
+    expect(rows.map((r) => [r.id, r.organization_id])).toEqual([[mappingId, ORG]]);
+  });
+
   it('(S4) a connection whose every credential is revoked is refused at save', async () => {
     const h = await boot();
     await revokeScimConnectionCredential(h.engine as never, h.credentialId);
