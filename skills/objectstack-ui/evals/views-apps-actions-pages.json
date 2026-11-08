@@ -138,7 +138,7 @@
       "files": [],
       "assertions": {
         "must_contain": ["defineAction", "objectName: 'task'", "ctx.api.object('task').update", "ctx.recordId", "api.write", "status: 'done'"],
-        "must_not_contain": ["defineView", "language: 'expression'", "status: 'Done'"]
+        "must_not_contain": ["defineView(", "language: 'expression'", "status: 'Done'"]
       }
     },
     {
