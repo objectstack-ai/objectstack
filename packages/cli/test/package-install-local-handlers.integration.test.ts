@@ -14,7 +14,8 @@
  * declarations, and bound none of its handlers:
  *
  *   - REST `POST /api/v1/actions/<obj>/complete_task`  → 404 RESOURCE_NOT_FOUND
- *   - MCP  `run_action complete_task`                  → "No handler registered …"
+ *   - MCP  `run_action complete_task`                  → "No handler registered …" (since
+ *     #31330 the same coded 404 the REST door answers)
  *   - MCP  `list_actions`                              → still lists complete_task
  *   - a `beforeInsert` body hook                       → never ran (status null)
  *
@@ -388,15 +389,16 @@ describe('#21321: an install-local package runs its script actions and body hook
       it('list_actions does not advertise a declared action run_action cannot run', () => {
         const p = phases[name]!;
         expect(p.ghostRun.isError, 'precondition: ghost_task has no handler anywhere').toBe(true);
-        // [#31271] `run_action` answers a throw through the `/actions` door's
-        // reader (`actionsDoorAnswerOf`), so the bridge's uncoded "No handler
-        // registered" throw arrives as that door's 400 rejection envelope, its
-        // sentence intact. (`POST /api/v1/actions` answers the same ghost action
-        // from its own routing-miss branch, a 404, before any throw.)
-        expect(p.ghostRun.payload?.error, JSON.stringify(p.ghostRun.payload)).toMatchObject({
-          code: 'VALIDATION_ERROR',
-          status: 400,
-          message: expect.stringMatching(/No handler registered/),
+        // `run_action` answers a throw through the `/actions` door's reader
+        // (`actionsDoorAnswerOf`), and the bridge throws a ghost action as the
+        // coded routing miss `POST /api/v1/actions` answers from its own
+        // routing-miss branch: 404, `RESOURCE_NOT_FOUND`, the same sentence.
+        // It used to throw it uncoded ("No handler registered …"), which the
+        // reader answered as the door's `400 VALIDATION_ERROR` rejection.
+        expect(p.ghostRun.payload?.error, JSON.stringify(p.ghostRun.payload)).toEqual({
+          code: 'RESOURCE_NOT_FOUND',
+          status: 404,
+          message: `Action 'ghost_task' on object '${OBJECT}' not found`,
         });
         expect(p.listed, 'advertised an action the run door refuses').not.toContain('ghost_task');
       });

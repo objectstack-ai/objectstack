@@ -28,6 +28,10 @@ import * as React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, cleanup, fireEvent } from '@testing-library/react';
 import { resolveFlowTriggerKind } from '@objectstack/spec/automation';
+// The inspector's object picker and CEL authoring load `@objectstack/lint` with
+// function-body `import()`s. Warmed here so its first load is paid at
+// collection, not inside a case's bounded wait.
+import '@objectstack/lint';
 
 vi.mock('../previews/useFlowNodePalette', () => ({
   useActionConfigSchemas: () => ({}),
@@ -235,6 +239,30 @@ describe('a typed cron stores a descriptor the engine resolves to it (objectui#1
     const { latest } = mount(scheduleFlow({ schedule: { cron: '0 4 * * *' } }));
     fireEvent.change(controlOf('Cron schedule'), { target: { value: '0 9 * * *' } });
     expect(startConfig(latest()).schedule).toEqual({ expression: '0 9 * * *' });
+  });
+});
+
+describe('clearing the Cron schedule box drops a typed block it would leave with no cadence (objectstack#31383)', () => {
+  const typed: Array<[string, Record<string, unknown>]> = [
+    ['a typed cron', { type: 'cron', expression: '0 7 * * *' }],
+    ['a typed cron with a timezone', { type: 'cron', expression: '0 7 * * *', timezone: 'Asia/Shanghai' }],
+  ];
+  for (const [name, schedule] of typed) {
+    it(`clearing ${name} stores no schedule`, () => {
+      const { latest, patches } = mount(scheduleFlow({ schedule, objectName: 'todo_task' }));
+      fireEvent.change(controlOf('Cron schedule'), { target: { value: '' } });
+      expect(patches.length).toBeGreaterThan(0);
+      const config = startConfig(latest());
+      expect('schedule' in config).toBe(false);
+      expect(config.objectName).toBe('todo_task');
+      expect(controlOf('Cron schedule').value).toBe('');
+    });
+  }
+
+  it('CONTROL: clearing an untyped { expression } stores no schedule, as before', () => {
+    const { latest } = mount(scheduleFlow({ schedule: { expression: '0 6 * * *' }, objectName: 'todo_task' }));
+    fireEvent.change(controlOf('Cron schedule'), { target: { value: '' } });
+    expect('schedule' in startConfig(latest())).toBe(false);
   });
 });
 

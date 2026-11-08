@@ -13,6 +13,13 @@ import type {
   SettingsUnsubscribe,
 } from '@objectstack/spec/system';
 import {
+  type DeclaredMapShape,
+  type MapShapeMiss,
+  declaredMapShape,
+  firstMapShapeMiss,
+  mapMissSentence,
+} from './map-shape.js';
+import {
   type CryptoAdapter,
   NoopCryptoAdapter,
   providesConfidentiality,
@@ -812,6 +819,44 @@ function jsonShapeMiss(type: string, value: unknown): JsonShapeMiss | null {
   return { shape: `a ${typeof value}` };
 }
 
+/** The `FieldError` code each kind of map miss is answered with (#30208; ADR-0114 catalog). */
+const MAP_MISS_CODES: Record<MapShapeMiss['kind'], FieldError['code']> = {
+  not_a_map: 'invalid_type',
+  key: 'invalid_option',
+  unknown_column: 'unknown_field',
+  not_an_entry: 'invalid_shape',
+  cell: 'invalid_shape',
+};
+
+/**
+ * The map miss as discrete values (`FieldError.constraint`, ADR-0114), so a
+ * client can mark the entry and the column without parsing the sentence.
+ */
+function mapMissConstraint(miss: MapShapeMiss, allowedKeys: string[]): Record<string, unknown> {
+  switch (miss.kind) {
+    case 'not_a_map':
+      return { type: 'map' };
+    case 'key':
+      return { type: 'map', entry: miss.entry, ...(allowedKeys.length > 0 ? { allowed: allowedKeys.join(', ') } : {}) };
+    case 'unknown_column':
+      return { type: 'map', entry: miss.entry, column: miss.column };
+    case 'not_an_entry':
+      return { type: 'map', entry: miss.entry };
+    case 'cell':
+      return { type: 'map', entry: miss.entry, column: miss.column.name, kind: miss.column.kind };
+  }
+}
+
+/** A rejected override's map value, described for the log line without its content. */
+function describedMapValue(value: unknown): string {
+  if (typeof value === 'string') return `a string of ${value.length} character${value.length === 1 ? '' : 's'}`;
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    const n = Object.keys(value).length;
+    return `an object of ${n} entr${n === 1 ? 'y' : 'ies'}`;
+  }
+  return Array.isArray(value) ? 'an array' : `a ${typeof value}`;
+}
+
 /** The declared `type` of one specifier key, or `''` when the manifest declares no such key. */
 function declaredTypeOf(manifest: SettingsManifest, key: string): string {
   const spec = (manifest.specifiers ?? []).find((s) => s.key === key);
@@ -875,6 +920,14 @@ interface RegisteredManifest {
    * impossible pattern", which would reject everything.
    */
   patterns: Map<string, DeclaredPattern>;
+  /**
+   * Every `map` specifier's declared shape (#30208), keyed by specifier key:
+   * its value columns, and the declared key table (`options`, string form)
+   * that stands for the key column's domain when no option source answers.
+   * An ABSENT key is not a map, or a map whose manifest declares no usable
+   * column: nothing to judge, never "reject everything".
+   */
+  maps: Map<string, { shape: DeclaredMapShape; declaredKeys: string[] }>;
 }
 
 /**
@@ -1297,6 +1350,7 @@ export class SettingsService {
     const bounds = new Map<string, DeclaredBounds>();
     const valueDomains = new Map<string, SpecifierValueDomain>();
     const patterns = new Map<string, DeclaredPattern>();
+    const maps = new Map<string, { shape: DeclaredMapShape; declaredKeys: string[] }>();
     const defaultScope = manifest.scope ?? 'tenant';
     for (const spec of manifest.specifiers) {
       if (!spec.key || LAYOUT_ONLY_TYPES.has(spec.type)) continue;
@@ -1323,6 +1377,16 @@ export class SettingsService {
       // behaviour at both call sites, never "reject everything".
       const pattern = declaredPattern(spec.pattern);
       if (pattern) patterns.set(spec.key, pattern);
+      // A `map`'s columns and declared key table (#30208), judged at both
+      // doors by `mapShapeVerdict`. Not an option table: its `options` name the
+      // KEYS a map admits, never the value, so the option family must not see it.
+      const mapShape = declaredMapShape(spec);
+      if (mapShape) {
+        maps.set(spec.key, {
+          shape: mapShape,
+          declaredKeys: declaredOptionValues((spec as { options?: unknown }).options),
+        });
+      }
       if (OPTION_BEARING_TYPES.has(spec.type)) {
         // A manifest with no option table cannot say what is legal. The spec
         // refuses that shape at parse time, but `registerManifest` takes
@@ -1345,6 +1409,7 @@ export class SettingsService {
       bounds,
       valueDomains,
       patterns,
+      maps,
     });
     this.auditEnvOverrides(manifest.namespace);
   }
@@ -1385,6 +1450,9 @@ export class SettingsService {
       ...reg.patterns.keys(),
       ...[...reg.scopes.keys()].filter((key) =>
         DECLARED_VALUE_FORMATS.has(declaredTypeOf(reg.manifest, key))),
+      // A `map` (#30208): its key column's domain is a source when one is
+      // registered, judged when read for the reason sourced option keys are.
+      ...[...reg.maps.keys()].filter((key) => !this.optionSources.get(namespace)?.has(key)),
     ]);
     for (const key of enforceable) {
       this.effectiveEnvOverride(reg, namespace, key);
@@ -1454,7 +1522,9 @@ export class SettingsService {
     // is on file: the same comparison in two places is how the env half came to
     // disagree with the save half in the first place.
     const domain = reg.valueDomains.get(key);
-    if (!domain) {
+    // A `map`'s key table names its KEYS (#30208): it is judged entry by entry
+    // in the map family below, never against the whole value here.
+    if (!domain && !reg.maps.has(key)) {
       // A key with no declared table has nothing to enforce — unchanged
       // behaviour (#5131's exhaustive-options semantics, untouched when no
       // domain is declared).
@@ -1543,6 +1613,23 @@ export class SettingsService {
         detail: `Allowed values: ${formatMiss.expected}.`,
         fix: formatMiss.expected,
         shape: formatMiss.shape,
+      });
+      return null;
+    }
+
+    // A `map` (#30208): keyed rows of declared columns, the key admitted by the
+    // key column's domain. Same judgement as the save door
+    // ({@link mapShapeVerdict}). The line names the entry and the form
+    // expected, never the value. A key-domain miss while the option sources'
+    // verdicts are held is taken in force and judged again at the seal, as a
+    // sourced option is.
+    const mapVerdict = this.mapShapeVerdict(reg, namespace, key, value);
+    if (mapVerdict && !(mapVerdict.miss.kind === 'key' && this.holdsOptionSourceVerdict(namespace, key))) {
+      this.reportRejectedEnvOverride(reg, namespace, key, envName, value, {
+        what: "is not the map of keyed rows its type 'map' declares for",
+        detail: mapMissSentence(envName, mapVerdict.shape, mapVerdict.miss, mapVerdict.allowedKeys),
+        fix: 'JSON text of an object of keyed rows the setting admits',
+        shape: describedMapValue(value),
       });
       return null;
     }
@@ -1873,6 +1960,30 @@ export class SettingsService {
         return at === -1 ? null : { value: picked[at] };
       },
     };
+  }
+
+  /**
+   * The map verdict for one key (#30208): the first way `value` is not the map
+   * its `map` specifier declares, with what the sentence needs, or `null` when
+   * it is the declared map, the key is not a map, or the value is a clear.
+   *
+   * ONE judgement for both doors ({@link firstMapShapeMiss}); the key column's
+   * domain is the key's option table as {@link optionTableOf} serves it, a
+   * registered source's answer else the declared `options`, so a source moves
+   * both doors at once. An empty table admits every key.
+   */
+  private mapShapeVerdict(
+    reg: RegisteredManifest,
+    namespace: string,
+    key: string,
+    value: unknown,
+  ): { shape: DeclaredMapShape; miss: MapShapeMiss; allowedKeys: string[] } | null {
+    const map = reg.maps.get(key);
+    if (!map) return null;
+    const { allowed, judge } = this.optionTableOf(namespace, key, map.declaredKeys);
+    const admitsKey = allowed.length > 0 ? (entry: string) => judge(entry) === null : undefined;
+    const miss = firstMapShapeMiss(map.shape, value, admitsKey);
+    return miss ? { shape: map.shape, miss, allowedKeys: allowed } : null;
   }
 
   /**
@@ -3490,6 +3601,28 @@ export class SettingsService {
           });
           continue;
         }
+      }
+
+      // A `map` (#30208): an object of keyed rows, each key admitted by the key
+      // column's domain and each cell of its column's kind. Same judgement as
+      // the env door ({@link mapShapeVerdict}). Not gated on `empty`: a blank
+      // string is not a map; a clear (`null`) passes inside the helper. The
+      // code names what failed: `invalid_type` for a value that is not a map at
+      // all, `invalid_option` for a key the domain does not admit,
+      // `unknown_field` for a property no column declares, `invalid_shape` for
+      // an entry or a cell that is not its column's form. The sentence names
+      // the entry and the form expected.
+      const mapVerdict = this.mapShapeVerdict(reg, namespace, key, value);
+      if (mapVerdict) {
+        const { shape, miss, allowedKeys } = mapVerdict;
+        errors.push({
+          field: key,
+          code: MAP_MISS_CODES[miss.kind],
+          message: mapMissSentence(label, shape, miss, allowedKeys),
+          label,
+          constraint: mapMissConstraint(miss, allowedKeys),
+        });
+        continue;
       }
 
       // A `json` key persists a JSON object or array (ADR-0007; #31241), so a
