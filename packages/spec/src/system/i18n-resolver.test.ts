@@ -5813,6 +5813,51 @@ describe('translateDataset', () => {
     }) as any).measures[0].label).toBe('停滞超过 14 天');
   });
 
+  it('overlays a member `description` (ADR-0149 D1) and never touches `synonyms`', () => {
+    const described = DatasetSchema.parse({
+      name: 'duty_pulse',
+      label: 'Duty pulse',
+      object: 'duly_duty',
+      dimensions: [
+        { name: 'owner', field: 'owner_id', label: 'Owner', description: 'Who holds the duty' },
+        { name: 'status', field: 'status', label: 'Status', description: 'Where the duty stands' },
+      ],
+      measures: [
+        {
+          name: 'untouched_14d', aggregate: 'count', label: 'Untouched > 14 days',
+          description: 'Open duties not updated for 14 days', synonyms: ['stale', '停滞'],
+        },
+      ],
+    }) as any;
+    const withDescriptions: TranslationBundle = {
+      'zh-CN': {
+        datasets: {
+          duty_pulse: {
+            // A description-only entry: the label stays as authored.
+            dimensions: { owner: { description: '任务的负责人' } },
+            measures: { untouched_14d: { label: '停滞超过 14 天', description: '超过 14 天未更新的未完成任务' } },
+          },
+        },
+      },
+    };
+    const out = translateMetadataDocument('dataset', described, withDescriptions, { locale: 'zh-CN' }) as any;
+    expect(out.dimensions[0]).toMatchObject({ label: 'Owner', description: '任务的负责人' });
+    // No bundle entry: the member is returned as authored.
+    expect(out.dimensions[1]).toBe(described.dimensions[1]);
+    expect(out.measures[0]).toMatchObject({
+      label: '停滞超过 14 天',
+      description: '超过 14 天未更新的未完成任务',
+      synonyms: ['stale', '停滞'],
+    });
+
+    // A label-only entry leaves the authored description in place.
+    const labelOnly = translateMetadataDocument('dataset', described, bundle, { locale: 'zh-CN' }) as any;
+    expect(labelOnly.measures[0]).toMatchObject({
+      label: '停滞超过 14 天',
+      description: 'Open duties not updated for 14 days',
+    });
+  });
+
   it('returns the document unchanged with no bundle and with no name', () => {
     const doc = dataset();
     expect(translateMetadataDocument('dataset', doc, undefined, { locale: 'zh-CN' })).toBe(doc);
@@ -5843,16 +5888,25 @@ describe('TranslationDataSchema — datasets', () => {
       .toThrow(/metrics[\s\S]*measures/);
   });
 
-  it('refuses `description` on a dimension or a measure, with the reason', () => {
+  it('accepts `description` on a dimension and a measure (ADR-0149 D1)', () => {
+    for (const group of ['dimensions', 'measures'] as const) {
+      const data = TranslationDataSchema.parse({
+        datasets: { duty_pulse: { [group]: { m: { label: '指标', description: '说明' } } } },
+      });
+      expect(data.datasets?.duty_pulse[group]?.m).toEqual({ label: '指标', description: '说明' });
+    }
+  });
+
+  it('refuses `synonyms` on a dimension or a measure, with the reason', () => {
     for (const group of ['dimensions', 'measures']) {
       let msg = '';
       try {
         TranslationDataSchema.parse({
-          datasets: { duty_pulse: { [group]: { m: { description: '说明' } } } },
+          datasets: { duty_pulse: { [group]: { m: { synonyms: ['营收'] } } } },
         });
       } catch (e) { msg = String(e); }
-      expect(msg).toMatch(/its author-facing text is `label`/);
-      expect(msg).toMatch(/datasets\.<dataset_name>\.description/);
+      expect(msg).toMatch(/`synonyms` are not translated/);
+      expect(msg).toMatch(/in every language at once/);
     }
   });
 
@@ -5864,10 +5918,10 @@ describe('TranslationDataSchema — datasets', () => {
   });
 
   it('closes at BOTH doors — bundle entry and registered item', () => {
-    const payload = { datasets: { d: { measures: { m: { description: 'x' } } } } };
-    expect(() => TranslationDataSchema.parse(payload)).toThrow(/its author-facing text is `label`/);
+    const payload = { datasets: { d: { measures: { m: { synonyms: ['x'] } } } } };
+    expect(() => TranslationDataSchema.parse(payload)).toThrow(/`synonyms` are not translated/);
     expect(() => TranslationItemSchema.parse({ locale: 'zh-CN', ...payload }))
-      .toThrow(/its author-facing text is `label`/);
+      .toThrow(/`synonyms` are not translated/);
   });
 });
 

@@ -1170,13 +1170,17 @@ describe('the gate is wired to run', () => {
     expect(step, 'the check runs before dependencies are installed').toBeGreaterThan(install);
   });
 
-  it('gives that job a full-history checkout, or the merge base does not exist', () => {
-    // actions/checkout defaults to depth 1. Without this the gate cannot resolve
-    // a base — and by design that is a red build, not a silent pass, so losing
-    // this line breaks CI loudly. The pin is here so the reason survives.
+  it("fetches HEAD's history and the base branch before it runs, or the merge base does not exist", () => {
+    // actions/checkout defaults to depth 1, and the job keeps that default: the
+    // fetch step after it brings HEAD's ancestry and origin/<base> (objectstack#22034).
+    // Without it the gate cannot resolve a base — and by design that is a red
+    // build, not a silent pass, so losing the step breaks CI loudly. The pin is
+    // here so the reason survives.
+    const fetch = job.indexOf("- name: Fetch this commit's history and the base branch");
     const step = job.indexOf(`run: ${uiRun('check:i18n-drift')}`);
     expect(step, '`type-check-ui` does not run `pnpm --dir ui run check:i18n-drift`').toBeGreaterThan(-1);
-    expect(job.slice(0, step)).toContain('fetch-depth: 0');
+    expect(fetch, '`type-check-ui` has no step fetching HEAD\'s history and the base branch').toBeGreaterThan(-1);
+    expect(fetch, 'the history is fetched after the check runs').toBeLessThan(step);
   });
 
   it('is not hidden from the locale packs by ci.yml path filters', () => {

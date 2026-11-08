@@ -335,6 +335,12 @@
  * record IS one (#18060). Every governed path outside Tier S is Tier H, the
  * rules layer, and keeps the predicate above byte-for-byte.
  *
+ * ⚖️ The `workflows` row is the one row whose tier is read off the DIFF
+ * (ruling record 6722205630 on #31538, letter C): `attachWorkflowReadings`
+ * hands each queued commit's workflow reading — against its first parent on
+ * `merge_group`, the merge base on `pull_request` — to the register's
+ * `applyWorkflowSplit`, and a commit it could not read stays Tier H.
+ *
  * ⭐ THE TWO CARRIERS ARE ONE DELIVERY, and the location is the governed text's
  * to decide rather than this file's — quoted, untranslated, because it IS the
  * criterion: 「复核记录 = 一条评论落 PR 或卡」
@@ -572,7 +578,9 @@ import {
   GOVERNED_TIER_S,
   HUMAN_MERGE_LINE_THRESHOLD,
   SELF_REPO_ID,
+  WORKFLOWS_PREFIX,
   applyGeneratedExceptions,
+  applyWorkflowSplit,
   assertGovernedRepo,
   generatedExceptionFor,
   governedPathsIn,
@@ -580,10 +588,13 @@ import {
   governedTierFor,
   groupHitsByException,
   landsByHumanMerge,
+  mergeWorkflowReadings,
   pullNumberFromSubject,
   pullSizeFrom,
   recomputeProvenanceFor,
+  readWorkflowDiff,
   renderLiftApprovals,
+  renderWorkflowSplitLines,
   repoIdForSlug,
   testVerdict,
 } from './check-governed-merges.mjs';
@@ -635,6 +646,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the CODEOWNERS mirror: every Tier H register row routes to every GOVERNED_APPROVERS account, nothing else is routed, and the file says so': 12,
   '⭐ the 2026-10-26 ENQUEUE leg: an authorized enqueuer is the human review': 28,
   '⭐ the cheap early-warning leg: commits and trees, toolchain on demand': 20,
+  '⭐ the workflows split at the queue (ruling record 6722205630)': 30,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -646,7 +658,8 @@ const SELF_TEST_BATTERIES = Object.freeze({
 // Raised 26 → 27 with the CODEOWNERS mirror battery: one battery, one row.
 // Raised 27 → 28 with the ENQUEUE leg battery (maintainer ruling 2026-10-26): one battery, one row.
 // Raised 28 → 29 with the cheap early-warning leg battery: one battery, one row.
-const SELF_TEST_BATTERY_FLOOR = 29;
+// Raised 29 → 30 with the workflows split battery (ruling record 6722205630): one battery, one row.
+const SELF_TEST_BATTERY_FLOOR = 30;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -1140,18 +1153,31 @@ export function decomposeGovernedWork(rows, repo) {
       unattributed.push({ sha: row.sha ?? null, subject: row.subject ?? '', paths });
       continue;
     }
-    const seen = byPull.get(row.pr) ?? { pr: row.pr, paths: new Set(), shas: [] };
+    const seen = byPull.get(row.pr) ?? { pr: row.pr, paths: new Set(), shas: [], workflowReadings: [] };
     for (const p of paths) seen.paths.add(p);
     if (row.sha) seen.shas.push(row.sha);
+    // The `workflows` split (ruling record 6722205630): every commit of this PR that touches a workflow
+    // path hands its reading in; one it did not read is UNMEASURED, so the entry stays Tier H.
+    if (paths.some((p) => p.startsWith(WORKFLOWS_PREFIX))) {
+      seen.workflowReadings.push(row.workflowDiff ?? { measured: false, reason: `the workflow diff of ${String(row.sha ?? 'a commit').slice(0, 12)} was not read`, files: [] });
+    }
     byPull.set(row.pr, seen);
   }
   const governed = [...byPull.values()]
     .map((entry) => {
       const paths = [...entry.paths];
+      const workflowDiff = mergeWorkflowReadings(entry.workflowReadings);
       // The landing TIER travels with the entry (#18020), derived from the
       // SAME governed path list the verdict is judged on — never from the raw
-      // diff, which carries files the register does not govern at all.
-      return { pr: entry.pr, shas: entry.shas, paths, surfaces: governedPathsIn(paths, repo), tier: governedTierFor(paths, repo) };
+      // diff, which carries files the register does not govern at all — and,
+      // for the `workflows` row, from the reading of its diff (the split).
+      return {
+        pr: entry.pr,
+        shas: entry.shas,
+        paths,
+        surfaces: applyWorkflowSplit(governedPathsIn(paths, repo), repo, workflowDiff),
+        tier: governedTierFor(paths, repo, GOVERNED_SURFACES, workflowDiff),
+      };
     })
     .sort((a, b) => a.pr - b.pr);
   return { governed, unattributed };
@@ -1518,6 +1544,7 @@ export function renderGuardVerdict(verdict) {
   for (const entry of verdict.entries) {
     lines.push('', `  #${entry.pr} — governed:`);
     lines.push(...surfaceLines(entry));
+    lines.push(...renderWorkflowSplitLines(entry.surfaces).split('\n').filter((l) => l !== '').map((l) => `  ${l}`));
     // The pre-#19133 `pull_request` byte-identity constraint (2026-08-27) is
     // superseded by that ruling's own requirement: the early warning names the
     // tier and what it waits for.
@@ -2440,6 +2467,32 @@ export function enumerateRows(root, baseSha, headSha, fallbackPull = null, { eve
 }
 
 /**
+ * Every row that touches a `workflows` path gets the reading the split needs
+ * (`readWorkflowDiff`, imported — ⛔ never a second classifier here). The
+ * `pull_request` row is read over its own range, merge-base to head; a
+ * `merge_group` row over its commit and that commit's first parent. "Already
+ * in use" is the merge-base's tree on both legs — the queue's own base — so an
+ * earlier pull request in the same group cannot vouch for a later one's new
+ * action. A reading that fails is UNMEASURED, and that entry stays Tier H.
+ * `runGit(args)` returns stdout and throws, as `enumerateRows`'s seam does.
+ */
+export function attachWorkflowReadings(rows, { event = EVENT_MERGE_GROUP, mergeBase, runGit }) {
+  const cache = new Map();
+  return (Array.isArray(rows) ? rows : []).map((row) => {
+    if (!(row?.paths ?? []).some((p) => p.startsWith(WORKFLOWS_PREFIX))) return row;
+    let base = mergeBase;
+    if (event !== EVENT_PULL_REQUEST) {
+      try {
+        base = runGit(['rev-parse', '--verify', `${row.sha}^1`]).trim();
+      } catch (error) {
+        return { ...row, workflowDiff: { measured: false, reason: `the first parent of ${String(row.sha).slice(0, 12)} could not be read (${String(error?.message ?? error).split('\n')[0]})`, files: [] } };
+      }
+    }
+    return { ...row, workflowDiff: readWorkflowDiff({ paths: row.paths, base, head: row.sha, inventoryBase: mergeBase, git: runGit, cache }) };
+  });
+}
+
+/**
  * How many commits the read range held — the header line's count. A
  * `pull_request` net row carries its range's count; a `merge_group` reading
  * is one row per commit, so the row count IS the commit count there.
@@ -2850,6 +2903,7 @@ async function main() {
     const beforeLift = rows;
     rows = await liftGeneratedExceptions(repoRoot, mergeBase, rows, notes, recomputeProvenanceFor, repo);
     lifted = liftedPathsBetween(beforeLift, rows);
+    rows = attachWorkflowReadings(rows, { event: context.event, mergeBase, runGit: (args) => git(repoRoot, args) });
   } catch (error) {
     console.error(`⛔ ${CHECK_CONTEXT_NAME}: could not read the diff (${String(error?.message ?? error).split('\n')[0]}).`);
     return EXIT_CANNOT_RUN;
@@ -3050,7 +3104,7 @@ export async function selfTest() {
   battery('the per-row repository scope (ruling B2, 2026-10-13)');
   const WF = '.github/workflows/lint.yml';
   const wfWork = decomposeGovernedWork([row(23043, [WF])], REPO);
-  assert('a-workflow-path-in-this-queue-decomposes-to-ONE-governed-entry-Tier-H', wfWork.governed.length === 1 && wfWork.governed[0].tier === TIER_H && wfWork.governed[0].surfaces.map((s) => s.id).join() === 'workflows' && wfWork.governed[0].paths.join() === WF, JSON.stringify(wfWork));
+  assert('a-workflow-path-in-this-queue-with-NO-reading-decomposes-to-ONE-governed-entry-Tier-H', wfWork.governed.length === 1 && wfWork.governed[0].tier === TIER_H && wfWork.governed[0].surfaces.map((s) => s.id).join() === 'workflows' && wfWork.governed[0].paths.join() === WF, JSON.stringify(wfWork));
   assert('the-same-path-is-governed-in-objectui-and-cloud', ['objectui', 'cloud'].every((r) => decomposeGovernedWork([row(1, [WF])], r).governed.length === 1 && governedTierFor([WF], r) === TIER_H));
   assert('and-NOT-in-objectos-or-hotcrm-the-scope-is-the-rows-not-the-guards', ['objectos', 'hotcrm'].every((r) => decomposeGovernedWork([row(1, [WF])], r).governed.length === 0 && governedPathsIn([WF], r).length === 0));
   assert('a-github-tree-sibling-outside-workflows-is-clear', decomposeGovernedWork([row(2, ['.github/ISSUE_TEMPLATE/bug.md', '.github/CODEOWNERS', '.github/workflowsx/y.yml'])], REPO).governed.length === 0);
@@ -4716,13 +4770,14 @@ export async function selfTest() {
     pr = 70,
     runGit = null,
     baseRef = null,
+    workflowDiff = null,
   } = {}) => {
     tierApiCalls = 0;
     tierThreadsRead = [];
     return runGuard({
       repo: REPO,
       event,
-      rows: [row(pr, files, 'c'.repeat(40), `x (#${pr})`)],
+      rows: [{ ...row(pr, files, 'c'.repeat(40), `x (#${pr})`), ...(workflowDiff ? { workflowDiff } : {}) }],
       fetchReviews: async () => { tierApiCalls += 1; return reviews; },
       fetchPull: async () => { tierApiCalls += 1; if (headThrows) throw new Error('head unreadable'); return pull(head, { body: prBody, headRef: branch }); },
       fetchComments: async (n) => {
@@ -5393,6 +5448,105 @@ export async function selfTest() {
     const priorRegister = codeownersMirrorVerdict({ text: onDisk.split('\n').filter((l) => !l.startsWith('/ui/')).join('\n'), register: withoutUi });
     assert('the-register-seam-still-reads-a-register-handed-in-the-one-without-the-ui-rows-passes-the-file-without-their-lines', priorRegister.ok && priorRegister.tierHPatterns.every((p) => !p.startsWith('/ui/')), priorRegister.problems.join(' | '));
     assert('the-ui-rows-govern-objectstack-alone-so-a-sibling-copy-needs-no-ui-line', codeownersMirrorVerdict({ text: full(), repo: 'objectui' }).tierHPatterns.every((p) => !p.startsWith('/ui/')));
+  }
+
+  // ── ⭐ the workflows split at the queue (ruling record 6722205630) ────────
+  //
+  // The register's `workflows` row reads its tier off the diff in this
+  // repository (ruling C on #31538): Tier H by path for a release, publish or
+  // deploy file, Tier H by a C2 trigger, else Tier S. This guard is the only
+  // place the queue reads it, so both directions are pinned here: a measured
+  // Tier S reading moves the entry onto the record leg, and every reading the
+  // guard could not make — no reading, a first parent it could not resolve, a
+  // second commit of the same pull request it did not read — stays Tier H.
+  battery('⭐ the workflows split at the queue (ruling record 6722205630)');
+  {
+    const WF_PATH = '.github/workflows/ci.yml';
+    const reading = (tier, path = WF_PATH) => ({ measured: true, reason: null, base: 'b'.repeat(40), head: 'c'.repeat(40), files: [{ path, tier, reasons: tier === TIER_S ? [] : ['an added `permissions:` key'] }] });
+    const S_READ = reading(TIER_S);
+    const H_READ = reading(TIER_H);
+    const withRead = (pr, files, workflowDiff, sha) => ({ ...row(pr, files, sha), workflowDiff });
+
+    const sWork = decomposeGovernedWork([withRead(31538, [WF_PATH], S_READ)], REPO);
+    assert('⭐ a-measured-Tier-S-reading-makes-the-workflows-entry-Tier-S', sWork.governed.length === 1 && sWork.governed[0].tier === TIER_S && sWork.governed[0].surfaces[0].splitVerdict?.tier === TIER_S, JSON.stringify(sWork.governed));
+    assert('a-Tier-H-reading-keeps-it-Tier-H', decomposeGovernedWork([withRead(31538, [WF_PATH], H_READ)], REPO).governed[0].tier === TIER_H);
+    assert('⛔ a-row-with-no-reading-is-Tier-H-and-says-it-was-not-read', (() => { const e = decomposeGovernedWork([row(31538, [WF_PATH])], REPO).governed[0]; return e.tier === TIER_H && e.surfaces[0].splitVerdict?.measured === false && /was not read/.test(e.surfaces[0].splitVerdict.reason); })());
+    assert('⛔ an-unmeasured-reading-is-Tier-H', decomposeGovernedWork([withRead(31538, [WF_PATH], { measured: false, reason: 'git failed', files: [] })], REPO).governed[0].tier === TIER_H);
+    assert('⛔ two-commits-of-one-PR-one-read-S-one-unread-is-Tier-H', decomposeGovernedWork([withRead(9, [WF_PATH], S_READ, '1'.repeat(40)), row(9, [WF_PATH], '2'.repeat(40))], REPO).governed[0].tier === TIER_H);
+    assert('two-commits-of-one-PR-both-read-S-is-Tier-S', decomposeGovernedWork([withRead(9, [WF_PATH], S_READ, '1'.repeat(40)), withRead(9, [WF_PATH], S_READ, '2'.repeat(40))], REPO).governed[0].tier === TIER_S);
+    assert('⛔ a-path-the-reading-did-not-classify-is-Tier-H', decomposeGovernedWork([withRead(9, [WF_PATH, '.github/workflows/lint.yml'], S_READ)], REPO).governed[0].tier === TIER_H);
+    assert('⛔ a-Tier-S-workflow-reading-beside-a-Tier-H-path-is-Tier-H-ALL-not-ANY', decomposeGovernedWork([withRead(9, [WF_PATH, 'AGENTS.md'], S_READ)], REPO).governed[0].tier === TIER_H);
+    assert('a-Tier-S-workflow-reading-beside-a-Tier-S-path-is-Tier-S', decomposeGovernedWork([withRead(9, [WF_PATH, '.claude/agents/os-dev.md'], S_READ)], REPO).governed[0].tier === TIER_S);
+    assert('⛔ objectui-and-cloud-stay-Tier-H-on-the-same-reading-the-split-names-objectstack-alone', ['objectui', 'cloud'].every((r) => decomposeGovernedWork([withRead(9, [WF_PATH], S_READ)], r).governed[0].tier === TIER_H && governedTierFor([WF_PATH], r, GOVERNED_SURFACES, S_READ) === TIER_H));
+    assert('⛔ the-ui-workflows-row-is-not-split', decomposeGovernedWork([withRead(9, ['ui/.github/workflows/ci.yml'], reading(TIER_S, 'ui/.github/workflows/ci.yml'))], REPO).governed[0].tier === TIER_H);
+    assert('a-reading-on-a-row-with-no-workflow-path-changes-nothing', JSON.stringify(decomposeGovernedWork([withRead(9, ['AGENTS.md'], S_READ)], REPO)) === JSON.stringify(decomposeGovernedWork([row(9, ['AGENTS.md'])], REPO)));
+
+    // The queue's verdict on it: Tier S takes the record leg, and its words say why.
+    const sRefused = run('merge_group', [withRead(31538, [WF_PATH], S_READ)], new Map(), absentRecord(31538));
+    const sText = renderGuardVerdict(sRefused);
+    assert('⛔ a-Tier-S-workflow-entry-with-no-record-is-REFUSED-at-the-queue', sRefused.exitCode !== EXIT_CLEAR && sRefused.conclusion === 'refused', JSON.stringify(sRefused.conclusion));
+    assert('and-its-words-name-the-tier-and-the-split', /landing tier: S/.test(sText) && /Tier S by content/.test(sText) && sText.includes('ruling record 6722205630'), sText);
+    const hText = renderGuardVerdict(run('merge_group', [withRead(31538, [WF_PATH], H_READ)], new Map([[31538, authorizedApprovalVerdict([], HEAD)]])));
+    assert('a-Tier-H-reading-names-its-trigger-under-the-entry', /landing tier: H/.test(hText) && /Tier H by content/.test(hText) && hText.includes('an added `permissions:` key'), hText);
+    const nText = renderGuardVerdict(run('merge_group', [row(31538, [WF_PATH])], new Map([[31538, authorizedApprovalVerdict([], HEAD)]])));
+    assert('an-unread-row-says-NOT-MEASURED-and-fail-closed', /content NOT MEASURED/.test(nText) && /fail closed/.test(nText), nText);
+    const plainText = renderGuardVerdict(run('merge_group', [row(5, ['AGENTS.md'])], new Map([[5, authorizedApprovalVerdict([], HEAD)]])));
+    assert('a-verdict-with-no-workflow-path-carries-no-split-line', !plainText.includes('split ('), plainText);
+
+    // The record leg end to end, through the real recognisers.
+    const sPass = await tierRun({ files: [WF_PATH], workflowDiff: S_READ, comments: [recordComment()] });
+    assert('⭐ a-Tier-S-workflow-PR-with-a-valid-record-on-the-current-head-CLEARS-with-zero-approvals', sPass.exitCode === EXIT_CLEAR && sPass.entries[0].tier === TIER_S && sPass.entries[0].record?.state === 'stands', JSON.stringify(sPass.entries[0]));
+    const sNoRecord = await tierRun({ files: [WF_PATH], workflowDiff: S_READ });
+    assert('⛔ and-without-the-record-it-is-refused', sNoRecord.exitCode !== EXIT_CLEAR, String(sNoRecord.exitCode));
+    const hWithRecord = await tierRun({ files: [WF_PATH], workflowDiff: H_READ, comments: [recordComment()] });
+    assert('⛔ a-Tier-H-workflow-PR-with-only-a-record-is-refused-the-record-is-not-the-human-review', hWithRecord.exitCode === EXIT_REFUSED_UNAPPROVED, String(hWithRecord.exitCode));
+    const unreadWithRecord = await tierRun({ files: [WF_PATH], comments: [recordComment()] });
+    assert('⛔ an-unread-workflow-PR-with-only-a-record-is-refused', unreadWithRecord.exitCode === EXIT_REFUSED_UNAPPROVED, String(unreadWithRecord.exitCode));
+
+    // The reader the live run calls, against a fake git: which commits it reads.
+    const WF_BASE = ['name: CI', 'on:', '  pull_request:', 'jobs:', '  build:', '    name: Build Core', '    runs-on: ubuntu-latest', '    timeout-minutes: 20', '    steps:', '      - uses: actions/checkout@v4', '      - run: pnpm build', ''].join('\n');
+    const WF_TIMEOUT = WF_BASE.replace('timeout-minutes: 20', 'timeout-minutes: 30');
+    const WF_PERMS = WF_BASE.replace('jobs:\n', 'permissions:\n  contents: write\njobs:\n');
+    const M = 'd'.repeat(40);
+    const P = 'e'.repeat(40);
+    const S_SHA = '5'.repeat(40);
+    const H_SHA = '6'.repeat(40);
+    const trees = new Map([[M, { [WF_PATH]: WF_BASE }], [P, { [WF_PATH]: WF_BASE }], [S_SHA, { [WF_PATH]: WF_TIMEOUT }], [H_SHA, { [WF_PATH]: WF_PERMS }]]);
+    const fakeGit = (calls, { parentThrows = false } = {}) => (argv) => {
+      calls.push(argv.join(' '));
+      if (argv[0] === 'rev-parse') {
+        if (parentThrows) throw new Error('fatal: bad revision');
+        return `${P}\n`;
+      }
+      if (argv[0] === 'ls-tree') {
+        const tree = trees.get(argv[3]);
+        if (!tree) throw new Error(`fatal: not a tree object: ${argv[3]}`);
+        const dirs = argv.slice(5).map((d) => (d.endsWith('/') ? d : `${d}/`));
+        return Object.keys(tree).filter((p) => dirs.some((d) => p.startsWith(d))).join('\n');
+      }
+      if (argv[0] === 'show') {
+        const at = argv[1].indexOf(':');
+        const text = trees.get(argv[1].slice(0, at))?.[argv[1].slice(at + 1)];
+        if (text === undefined) throw new Error(`fatal: path does not exist: ${argv[1]}`);
+        return text;
+      }
+      throw new Error(`unexpected git ${argv.join(' ')}`);
+    };
+    const prCalls = [];
+    const [prRow] = attachWorkflowReadings([row(7, [WF_PATH], S_SHA)], { event: EVENT_PULL_REQUEST, mergeBase: M, runGit: fakeGit(prCalls) });
+    assert('the-pull_request-leg-reads-the-net-row-against-the-merge-base', prRow.workflowDiff?.measured === true && prRow.workflowDiff.base === M && prRow.workflowDiff.head === S_SHA && !prCalls.some((c) => c.startsWith('rev-parse')), JSON.stringify(prRow.workflowDiff));
+    assert('⭐ a-timeout-edit-read-end-to-end-is-Tier-S', decomposeGovernedWork([prRow], REPO).governed[0].tier === TIER_S, JSON.stringify(prRow.workflowDiff?.files));
+    const mgCalls = [];
+    const mgRows = attachWorkflowReadings([row(7, [WF_PATH], S_SHA), row(8, [WF_PATH], H_SHA), row(9, ['AGENTS.md'], '7'.repeat(40))], { event: EVENT_MERGE_GROUP, mergeBase: M, runGit: fakeGit(mgCalls) });
+    assert('the-merge_group-leg-reads-each-commit-against-its-FIRST-PARENT', mgRows[0].workflowDiff?.base === P && mgCalls.includes(`rev-parse --verify ${S_SHA}^1`) && mgCalls.includes(`rev-parse --verify ${H_SHA}^1`), mgCalls.join(' | '));
+    assert('⛔ an-added-permissions-key-read-end-to-end-is-Tier-H', decomposeGovernedWork([mgRows[1]], REPO).governed[0].tier === TIER_H && mgRows[1].workflowDiff.files[0].reasons.length > 0);
+    assert('the-inventory-of-the-merge-base-is-read-ONCE-per-run', mgCalls.filter((c) => c === `ls-tree -r --name-only ${M} -- .github/workflows .github/actions`).length === 1, mgCalls.join(' | '));
+    assert('a-row-with-no-workflow-path-is-passed-through-untouched', mgRows[2].workflowDiff === undefined && !mgCalls.some((c) => c.includes('7'.repeat(40))));
+    const [unparented] = attachWorkflowReadings([row(7, [WF_PATH], S_SHA)], { event: EVENT_MERGE_GROUP, mergeBase: M, runGit: fakeGit([], { parentThrows: true }) });
+    assert('⛔ a-first-parent-git-cannot-resolve-is-UNMEASURED-and-Tier-H', unparented.workflowDiff?.measured === false && /first parent/.test(unparented.workflowDiff.reason) && decomposeGovernedWork([unparented], REPO).governed[0].tier === TIER_H, JSON.stringify(unparented.workflowDiff));
+    const [lostBase] = attachWorkflowReadings([row(7, [WF_PATH], S_SHA)], { event: EVENT_PULL_REQUEST, mergeBase: 'a'.repeat(40), runGit: fakeGit([]) });
+    assert('⛔ a-base-git-cannot-read-is-UNMEASURED-and-Tier-H', lostBase.workflowDiff?.measured === false && decomposeGovernedWork([lostBase], REPO).governed[0].tier === TIER_H, JSON.stringify(lostBase.workflowDiff));
+    assert('no-rows-attach-nothing', attachWorkflowReadings(undefined, { event: EVENT_MERGE_GROUP, mergeBase: M, runGit: fakeGit([]) }).length === 0);
   }
 
   // ── The floor: every declared battery RAN, and ran its cases (#13489) ────

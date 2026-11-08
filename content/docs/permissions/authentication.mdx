@@ -1203,6 +1203,10 @@ the identity provider to it, then revoke the old one; both authenticate until
 you do. Each mint and each revoke writes one `sys_audit_log` row naming the
 administrator and the connection, never the credential.
 
+A connection's groups grant permission sets through the same group mappings an
+SSO provider's sign-in uses; see
+[Grant permission sets from IdP groups](/docs/permissions/sso#grant-permission-sets-from-idp-groups).
+
 ---
 
 ## Client Integration

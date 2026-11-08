@@ -16,13 +16,14 @@
 ## Visibility, Disable & Feedback
 
 - `visible` — a bare CEL predicate over the current record (prefer the `P\`...\`` template; `record.<field>` resolves identically on every surface, never `${…}`- or `{…}`-wrapped — see `objectstack-formula`); when false the action is **hidden**.
-- `disabled` — `boolean` **or** a CEL predicate; when true the action **shows but greys out**. Use this (not `visible`) when the action should stay discoverable but locked in the current state.
+- `disabled` — `boolean` **or** a CEL predicate; when true the action **shows but greys out**.
 - `disabledReason` — an I18nLabel (a sentence or an inline locale map) a greyed action shows as its hover title and accessible description. Display-only: never a predicate and never a gate (the hook or permission still refuses). Omit it to keep the console's default "Not available for this record"; a blank one is refused, and `disabledMessage` / `disabledTooltip` / `disabledHint` / `disabledText` are refused naming this key. The reason goes here, not in `description`.
 - `pressed` — a CEL predicate over the same scope as `visible` that marks the action as already done by this reader: while TRUE the record header draws it pressed (`aria-pressed`). Display-only, never a gate; a boolean literal is refused (a constant is a style, not a reader's state), and `active` / `activeWhen` / `pressedWhen` are refused naming this key. A per-reader fact (the reader's vote) is a block the object declares under `attachedOnRead`, filled per caller by a service or `afterFind` hook, read as `has(record.viewer) && record.viewer.vote == 'helpful'`.
 - `confirmText` — set for any destructive or irreversible operation; the confirm dialog of a param-less action. A registered action is refused it beside a non-empty `params` (put the question on `description`); a view's `bulkActionDefs` entry pairs the two by its own contract.
 - `submitText` — the verb on the param dialog's submit button ("Send", "Log Call") in place of "Confirm": an I18nLabel, refused blank and refused without a non-empty `params` (no dialog opens); `submitLabel` / `confirmLabel` are refused naming this key.
-- `successMessage` / `errorMessage` — toast copy on success / failure. Set `successMessage` for non-obvious outcomes; without it the UI shows a generic "Action completed" toast.
-- Copy holes are `{{ }}`: `confirmText`, `description` (`'Choose the new owner of {{ record.name }}.'`) and a param's `helpText` (`'Why {{ record.name }} is paused'`) read `record`; `successMessage` and each `outcomeMessages` entry (`resent: 'Invitation resent to {{ result.email }}'`) read `result` (the handler's answer) and `record`; `errorMessage` takes none. A `bulkActionDefs` entry's `confirmText` reads `{{ count }}` and its params by bare name (`{{ tier }}`). In all of them `${record.name}`, `{name}`, logic in a hole and a blank sentence fail `os validate`.
+- `successMessage` / `errorMessage` — toast copy on success / failure; without `successMessage` the UI shows a generic "Action completed" toast.
+- Copy holes are `{{ }}`: `confirmText`, `description` (`'Choose the new owner of {{ record.name }}.'`) and a param's `helpText` read `record`; `successMessage` and each `outcomeMessages` entry (`resent: 'Invitation resent to {{ result.email }}'`) read `result` (the handler's answer) and `record`; `errorMessage` takes none. A `bulkActionDefs` entry's `confirmText` reads `{{ count }}` and its params by bare name (`{{ tier }}`). In all of them `${record.name}`, `{name}`, logic in a hole and a blank sentence fail `os validate`.
+- A param's `helpText`, like `description`, is a sentence or an inline locale map (`{ en: 'Why {{ record.name }} is paused', 'zh-CN': '暂停原因' }`), holes in either; the map is how a page button's inline `action` (no bundle reaches it) writes its hint per locale.
 - `undoable: true` — an **Undo** in the success toast (and `Ctrl+Z`). Snapshot: runtime on `operation: 'update'`, console on `type: 'api'`; else refused.
 
 <!-- os:check -->
@@ -62,7 +63,7 @@ export const ConvertLeadAction = defineAction({
   objectName: 'lead',
   icon: 'arrow-right-circle',
   type: 'flow',
-  target: 'crm_lead_conversion',            // name of the flow
+  target: 'crm_lead_conversion',
   locations: ['record_header', 'list_item'],
   visible: P`record.status == "qualified" && record.is_converted == false`,
   confirmText: 'Are you sure you want to convert this lead?',
@@ -72,7 +73,7 @@ export const ConvertLeadAction = defineAction({
 });
 ```
 
-**Script-typed action** (params, then a server body):
+**Script-typed action**:
 
 <!-- os:check -->
 ```typescript
@@ -142,7 +143,7 @@ export const PrintA3Action = defineAction({
 
 ### `opensInNewTab` + `newTabUrl` — async / computed redirect (SSO)
 
-A redirect URL **computed after a fetch** (SSO-like handlers): `opensInNewTab:
+A redirect URL **computed after a fetch**: `opensInNewTab:
 true` pre-opens the tab synchronously on click (no popup blocker), then navigates
 it to the handler's `redirectUrl`. `newTabUrl` skips the round-trip — a backend
 path starting with `/` (`{recordId}` placeholder; an external URL is refused, use
@@ -155,7 +156,7 @@ export const OpenInvoicePdfAction = defineAction({
   label: 'Open PDF',
   objectName: 'invoice',
   type: 'script',
-  target: 'crm_open_invoice_pdf', // registered handler
+  target: 'crm_open_invoice_pdf',
   opensInNewTab: true,
   newTabUrl: '/api/v1/invoice/{recordId}/pdf',
   locations: ['record_header'],

@@ -138,6 +138,15 @@ A check outside those eleven is advisory and rides through, and an advisory red
    Temporal Conformance and `UI Published Artifacts` stay full-battery only. The `Dogfood Regression
    Gate` context is in the required set again (ruling record 6669982756), so a dogfood red ejects the entry.
 
+**A push run borrows what the queue ran** (#31519). Every commit the queue lands was tested there on the same
+sha. A push run's `Queue verdict` job walks the pushed commits and reads each one's newest `merge_group` run. When
+every commit has one that is green and built on its first parent, the push runs only the main-only jobs, `Type Check
+UI`, `Lint UI` and the builds, keeps its Turbo seeds through seed-only Test Core and dogfood legs, and records the
+queue runs in its `Borrowed queue verdict` job. `Test UI` is borrowed only when the head's queue run ran the whole
+suite. A missing, red, running or differently based queue run, or any read failure, runs the whole battery. The
+release gate re-reads the head's queue run when a borrowed push decides, and the 4-hourly schedule is unchanged.
+Rules and pins: `scripts/ci/scheduled-full-run.mjs` HALF 4.
+
 ## Re-arm awareness
 
 ← [`AGENTS.md` › Multi-agent working discipline](../../AGENTS.md#multi-agent-working-discipline)

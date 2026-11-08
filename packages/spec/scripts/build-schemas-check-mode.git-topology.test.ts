@@ -832,6 +832,8 @@ describe('build-schemas.ts — a shallow checkout re-anchors the deletion gate, 
       expect(status).toBe(1);
       expect(output).toContain('No baseline to anchor the deletion checks on');
       expect(output).toContain('authorable-surface.base.json');
+      // Both CI remedies: ci.yml's history fetch step, and lint.yml's full checkout.
+      expect(output).toContain("Fetch this commit's history and the base branch");
       expect(output).toContain('fetch-depth: 0');
       expect(output).not.toContain('anchors on the origin/main TIP');
       expect(output).not.toContain('deleted without proof');

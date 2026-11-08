@@ -6,6 +6,8 @@
 - [External / Custom Validation → Lifecycle Hooks](#external--custom-validation--lifecycle-hooks) · [Validation Properties](#validation-properties)
 - [Incorrect vs Correct](#incorrect-vs-correct)
 
+Unmarked blocks are fragments; `check:skill-examples` skips them.
+
 ## Available Rule Types
 
 The **complete** set of `type` discriminators accepted by `ValidationRuleSchema`:
@@ -85,7 +87,7 @@ condition: P`record.start_date != null && record.end_date != null && record.end_
 
 ## Uniqueness — Use Unique Indexes
 
-There is **no `unique` validation type**. Uniqueness — including composite
+Uniqueness — including composite
 uniqueness — is declared as a unique **index** on the object:
 
 ```typescript
@@ -149,8 +151,7 @@ validations: [
 
 ## Cross-Field Validation
 
-Same inverted semantics as `script` — the predicate is the **failure**
-condition. `fields` lists the fields involved (used for error targeting).
+`fields` lists the fields involved (used for error targeting).
 
 ```typescript
 validations: [
@@ -321,6 +322,7 @@ priority: 1000   // User validations (run last)
 
 ```typescript
 {
+  name: 'no_draft_publish',
   type: 'script',
   condition: P`record.status == 'draft'`,
   message: 'Cannot publish draft records',
