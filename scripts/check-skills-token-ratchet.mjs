@@ -501,7 +501,21 @@ export const CEILINGS = new Map([
   // 6426 after the click-through default's three tokens landed on main and
   // the "A Flow is a directed graph of nodes" opener was cut (the node tables
   // and the `nodes` + `edges` FlowSchema line already say it).
-  ['skills/objectstack-automation/SKILL.md', 6426],
+  // 6426 -> 6527 (card #31155, the objectstack-automation port of cloud's private
+  // authoring rules): § Valid-but-silently-wrong gains item 4 — a `select` is
+  // compared and written by its option `value`, never the label the request
+  // speaks, in the start `condition` and every `fields` / `filter` entry (the
+  // flow otherwise stages clean and never fires). No same-file restatement was
+  // left to pay it; the comment says so honestly. Arithmetic in priced bytes
+  // (stamp line excluded), against `main`'s 25654: 25654 -> 26107 (+453) ->
+  // ceil(26107 / 4) = 6527; headroom was 12 tokens, so the ceiling moves +101,
+  // pinned AT the measurement. Authorised by the ruling of record that orders
+  // this text into the published skills: objectstack-ai/cloud#3659, letter A,
+  // ruling comment 6682024726 (2026-11-06): "How to write valid, working
+  // metadata lives in the public skills … The private corpus's rules of that
+  // kind move there". The raise path is the standing 2026-10-27 ruling (ruling
+  // record 6513306068), quoted verbatim and untranslated in the PR body.
+  ['skills/objectstack-automation/SKILL.md', 6527],
   // 13783 -> 13892 (2026-08-31 app-repo-principles raise, see the block above).
   // The invariant-vs-transition-gate choice, placed in the field-conditional-rule
   // bullet list where the tool is actually picked. Both wrong picks are silent:
