@@ -9,7 +9,7 @@
   - The direction, decision card tapped **A 「转向包寻址」** at 13:12:35Z (seat record [`6721941146`](https://github.com/objectstack-ai/objectstack/issues/30806#issuecomment-6721941146) on #30806), after his message 「你不能只考虑现状，还要考虑长远的合理性；我说的流程不是url挂到对象下，而是挂到软件包下」.
   - The scope, 13:13:39Z: 「流程等行为元数据按软件包寻址，立决策卡，现在就所有的元数据类型然后和我沟通。」
   - The per-type table, decision card tapped **A 「按修正后分档写入」** at 15:36:01Z (seat record [`6723462584`](https://github.com/objectstack-ai/objectstack/issues/31527#issuecomment-6723462584) on #31527). [D1](#d1--four-buckets-as-ruled) restates it; where the two differ in words, the ruling binds.
-- **Left open by the per-type ruling, put to the maintainer by this record, and since ruled**: the bucket-3 flat spelling on the AI face (Q1, D6) and how two packages' same-named positions are handled (Q2, D7). Decision card tapped **option 0 「A+A，含对象动作补充」** at 16:30:25Z (seat record [`6724050556`](https://github.com/objectstack-ai/objectstack/issues/31527#issuecomment-6724050556) on #31527): Q1 = A with the object-action refinement, Q2 = A. D6 and D7 record both as decided. One question the refined spelling raises is still open ([Open questions](#open-questions-needs-decision), Q3).
+- **Left open by the per-type ruling, put to the maintainer by this record, and since ruled**: the bucket-3 flat spelling on the AI face (Q1, D6) and how two packages' same-named positions are handled (Q2, D7). Decision card tapped **option 0 「A+A，含对象动作补充」** at 16:30:25Z (seat record [`6724050556`](https://github.com/objectstack-ai/objectstack/issues/31527#issuecomment-6724050556) on #31527): Q1 = A with the object-action refinement, Q2 = A. D6 and D7 record both as decided. The one question the refined spelling raised, Q3, was ruled A 「安装时拒绝」 at 17:13:30Z (seat record [`6724530715`](https://github.com/objectstack-ai/objectstack/issues/31527#issuecomment-6724530715) on #31527); see [Open questions](#open-questions-needs-decision).
 - **Division of labour** (ruling A 「留核心，其余交车道」, record [`6723571682`](https://github.com/objectstack-ai/objectstack/issues/31527#issuecomment-6723571682)) and the red lines every child carries (the #31527 body) shape the [Execution plan](#execution-plan-after-acceptance).
 - **Builds on**: [ADR-0005](./0005-metadata-customization-overlay.md) (overlays), [ADR-0019](./0019-app-as-consumer-unit.md) (the namespace-named app), [ADR-0048](./0048-cross-package-metadata-collision.md) §3.1–§3.3 (package id is identity; prefer-local resolution), [ADR-0126](./0126-packaged-metadata-customization-model.md) §4 (the activation ledger; no re-encoded literal in a column), [ADR-0129](./0129-object-name-is-the-canonical-id.md) (the object name is the table name), [ADR-0130](./0130-release-artifact-as-co-ownership-boundary.md) and [ADR-0141](./0141-inter-app-dependency-declared-checked-before-install.md) (namespace co-ownership; the declared dependency closure), [ADR-0146](./0146-studio-designs-setup-administers-one-editor-per-item-paired-customize-package.md) (the paired `.custom` package).
 - **Inputs**: the #30806 plan ([`6719833098`](https://github.com/objectstack-ai/objectstack/issues/30806#issuecomment-6719833098)), the seat records `6721537981` and `6721596287`, and the #31527 stage-1 inventory, measured read-only on `main` at `86e37660`. Measurements below cite it.
@@ -24,11 +24,11 @@
 4. **Addresses carry the namespace when they must.** A by-name URL takes an optional namespace segment (`/automation/crm/send_email`). A bare one keeps resolving while the name is unique in the environment, and answers `409` with the candidates when it is not. The AI face spells a flat name derived from the address (ruled): `NS-NAME`, and `OBJECT-ACTION` for an action bound to an object.
 5. **Stored references gain a package column beside the name**, backfilled from the one holder phase 1 guarantees today. The sealed ambiguity set is reported, ⛔ never rewired on a guess.
 6. **Positions stay one environment-wide slot per name** (ruled), and a second package holder is refused, as today (ruled). An administrator binds another package's set through an overlay; there is no merge engine.
-7. **What this record adds beyond the rulings: three refusals, plus one more if Q3 is ruled.** Each is a narrowing:
+7. **What this record adds beyond the rulings: three refusals.** A fourth, Q3's, is ruled. Each is a narrowing:
    - **Child N**: a `(type, name)` held twice inside one namespace (D2). ⛔ It is pending the maintainer's word on D2.
    - **The address grammar's namespace-position literals** (read from `route-ledger.ts`: `trigger`, `hooks`, `connectors`, `actions`, `global`, …) are refused as a namespace at install (D5).
    - **A bucket 2/3 item name that starts with `_`** is refused, because `_`-led segments are the router's (D5).
-   - **Q3's guard**, if it is ruled: a namespace may not equal an object name, at every door either one enters by.
+   - **Q3's refusal (ruled, child K)**: a namespace never equals an object name, in both directions, at every object door.
 
    Measured first-party, none of them refuses anything.
 
@@ -152,7 +152,7 @@ Hooks bind by event and object and already carry `packageId`. Only `isArtifactSh
   3. **Otherwise the bare grammar applies.**
 - **A package item whose bare name equals an installed namespace** is still reachable by its qualified address.
 - **An environment item has no namespace, so it gets the reserved segment `_env`**: `/automation/_env/:name`, `/actions/_env/:object/:action`, and so on. A `_`-led segment can never be a namespace, and no item name either (step 1). So an environment flow named like an installed namespace, including one installed after the flow was saved, keeps every sub-resource door (`runs`, `trigger`, `toggle`, `clone`) through `_env`, and nothing is refused.
-- **An object name can equal a namespace.** The namespace grammar admits `_`, so the object `crm_lead` of namespace `crm` and a package namespaced `crm_lead` can both be installed. Then `/actions/crm_lead/convert_lead/REC1` reads as qualified (namespace `crm_lead`, object `convert_lead`) under step 2. This is the same ambiguity as D6's face check, and it is guarded by Q3.
+- **An object name can equal a namespace.** The namespace grammar admits `_`, so the object `crm_lead` of namespace `crm` and a package namespaced `crm_lead` can both be installed. Then `/actions/crm_lead/convert_lead/REC1` reads as qualified (namespace `crm_lead`, object `convert_lead`) under step 2. This is the same ambiguity as D6's face check, and Q3's ruled refusal (child K) closes it.
 - This is documented precedence, not a guess.
 - **A bare address** resolves while the name has one holder in the environment, and answers **`409`** with the candidate qualified addresses otherwise, in the D3 refusal vocabulary. The status already exists in the ledger (`RESOURCE_CONFLICT`); ⛔ no new code is minted.
 - **MCP.** `run_action` gains an optional `namespace` input beside `objectName`. `list_actions` rows carry `namespace`. Skill prompts and agents are named by the D6 face.
@@ -189,7 +189,13 @@ The four-axis reading the maintainer ruled on, kept as the record of why:
 
 - **One list, several types.** A carrier that lists several types' faces together can collide across them. For example, the cloud lists its action tools as `action_` plus the face beside tool faces, and a tool of a namespace `action_crm` named `x` spells `action_crm-x`, the same as the cloud tool for `crm`'s object-less action `x`.
 
-These are recorded as Q3 rather than decided here, because each guard narrows or re-spells what the maintainer ruled.
+**Ruled** (Q3 = A 「安装时拒绝」, 17:13:30Z, record [`6724530715`](https://github.com/objectstack-ai/objectstack/issues/31527#issuecomment-6724530715) on #31527):
+
+- **A namespace never equals an object name.** This is refused in both directions, at every object door (`defineStack`, `os validate`, install, Studio publish), naming both spellings (child K). So no package ships an object whose short name is `custom`, because the ADR-0146 pair's namespace is `NS_custom`.
+- **A face is cut only past 64 characters**, as Q1 ruled.
+- **The face list refuses a duplicate face** at registration, naming both items (G2, and C for the cloud's list). This covers the 64-character boundary, an `action_*` namespace against the cloud's `action_` prefix, and a hash collision.
+
+With these, `L-R` names one item per environment, and the server's catalog reads it back.
 
 ### D7 — Positions are environment-scoped (ruled: Q2 = A, the one-holder refusal stays)
 
@@ -283,6 +289,7 @@ Each child PR proves it is releasable with four readings:
 | D | this ADR | epic seat | `docs/adr/` | no | no |
 | R | **resolver and closure**: one `(package, name)` resolver (D3) with the ADR-0141 closure (the save door's `resolveWritePackageScope` is the nearest existing one), the refusal in `bare-name-one-holder.ts`'s vocabulary, and the per-package overlay slot (D4). The resolver adds `sys` to the closure itself (D3). Not wired to any reader yet | epic seat | objectql (`registry.ts`, a new resolver module), metadata-protocol (closure) | no | no |
 | N | **namespace co-owner uniqueness** for the bucket 2/3 types phase 1 does not cover (sharing rule, queue, assignment rule, hook, job, app, page, dashboard, report, book, cube, tool, rag_pipeline): a `(type, name)` held twice inside one namespace is refused at install and `os validate` (D2), on the ADR-0130 D3 object check. Lands before G1, so a qualified address always names one item. ⛔ Pending the maintainer's word on D2 | server | objectql `registry.ts` (`installPackage`), cli validate | no | **yes** (measured first-party: 0 of 297) |
+| K | **a namespace never equals an object name** (Q3 = A, ruled): refused in both directions (a new namespace equal to an existing object name; a new object name equal to an existing namespace), naming both spellings, at every object door: `defineStack`, `os validate`, install and Studio publish. The one predicate lives in `kernel/namespace-prefix.ts`, the single source both object doors already read. It also refuses an object whose short name is `custom` (the ADR-0146 pair namespace is `NS_custom`). Lands before G1, G2 and C | server | spec `kernel/namespace-prefix.ts`, `stack.zod.ts`; cli validate; objectql `registry.ts` (`installPackage`); metadata-protocol (`publishPackage`) | no | **yes**: a namespace equal to an object name, and an object short-named `custom` (measured first-party: 0) |
 | P | **spec**: `namespace` on MCP `run_action` / `list_actions` shapes; the address grammar helpers (D5); the face derivation (D6, ruled: `NS-NAME`, `OBJECT-ACTION`); retire phase 2's bare-name lint finding and the skills and templates text (D9) | `domain:spec` | spec (`ai/`, `api/`), cli `lint.ts`, `skills/`, create-objectstack templates; the refusal of a `_`-led bucket 2/3 item name (D5) | yes | **yes**: a `_`-led item name (measured first-party: 0) |
 | E1 | flow index and activation consult on `(package, name)` | server | service-automation (`engine.ts`, `flow-definitions.ts`) | no | no |
 | E2 | action engine key `(package, objectName, name)`; `ActionNavItem` resolved by D3 | server | objectql (`engine` action registry, `action-governance.ts`), runtime `action-execution.ts` | no | no |
@@ -293,10 +300,10 @@ Each child PR proves it is releasable with four readings:
 | E7 | jobs: `jobKeyFor` on the package coordinate, keeping the bare key readable | server | runtime `app-artifact-handlers.ts`, service-job | no | no: the first holder keeps the bare key and a second keeps its `APPID:jobName`, as `jobKeyFor` gives them today |
 | E8 | presentation and AI items: app, page, dashboard, report, book, cube, tool, skill, agent, rag_pipeline; `agent_prompt` on the protocol read (#31514) | server | objectql, metadata-protocol, mcp | no | **yes**, for a bare name of an uncovered type that two packages hold today (measured first-party: 0) |
 | G1 | REST doors: the optional namespace segment, the `_env` segment and the `409` with candidates (D5) on `/automation`, `/automation/hooks`, `/actions`, `/meta`, connectors; the install gate refuses a namespace that spells a grammar literal (D5) | server | runtime `domains/*.ts`, `route-ledger.ts`; objectql `registry.ts` (`installPackage`, a refused-literal set read from `route-ledger.ts`) | yes (additive) | **yes**: a namespace spelling a literal (first-party: none); and a today-ambiguous bare name of an uncovered type answers `409` (measured first-party: 0). A bare address with one holder still resolves |
-| G2 | MCP: `run_action` / `list_actions` `namespace`; skill, agent and action face names (D6, ruled) | server | mcp | yes (additive) | no |
+| G2 | MCP: `run_action` / `list_actions` `namespace`; skill, agent and action face names (D6, ruled), and the face list's duplicate refusal (Q3) | server | mcp | yes (additive) | no: a duplicate face cannot exist until two packages can share a bare name, which the B children open |
 | G3 | client SDK: optional namespace on `automation.*`, `actions.invoke`, `meta.getItem` | server | client | yes (additive) | no |
 | U | Studio and Console pass the held package id through `MetadataService` reads and editors (D5) | ui lane | `ui/packages/app-shell` (`services/MetadataService.ts`, `views/studio-design/*`) | no | no |
-| C | the action tool name on the AI face (#31515), from the D6 derivation (ruled) | cloud lane | cloud `service-ai` | carrier: cloud | — |
+| C | the action tool name on the AI face (#31515), from the D6 derivation (ruled), with the same duplicate refusal over the cloud's list (Q3) | cloud lane | cloud `service-ai` | carrier: cloud | — |
 | S1 | activation ledger unique `(metadata_type, package_id, name)`, backfilled (R4) | server | platform-objects, core `metadata-activation-store.ts` | no | no |
 | S2 | security and sharing columns: R1, R3, R5, R6, R13 | server | plugin-security, plugin-sharing | no | no |
 | S3 | automation columns: R7, R8, R9, R10, R11, R14, R20 | server | service-automation, plugin-approvals, service-job, plugin-email | no | no |
@@ -304,7 +311,7 @@ Each child PR proves it is releasable with four readings:
 | B1…B13 | **backstop narrowing, one child per type**, last: the one-holder refusal narrows from environment to namespace (D2), after that type's E, G and S children land | server, after each type's E/G/S | objectql `bare-name-one-holder.ts`, `security-catalog-namespace.ts` (permission sets) | no | **yes** for co-owners of one namespace (measured first-party: 0); a widening for everyone else |
 | A | ADR status lines (ADR-0048 addendum, ADR-0129 cross-reference) | epic seat | `docs/adr/` | no | no |
 
-**Count:** D, R, N, P, A, U and C (7), 8 E, 3 G and 4 S make 22 build children, N included. That is the top of the evaluation thread's estimate of 18–22.
+**Count:** D, R, N, K, P, A, U and C (8), 8 E, 3 G and 4 S make 23 build children, N and K included. That is one above the evaluation thread's estimate of 18–22, because of K, which carries the Q3 ruling.
 
 The B children are one per covered type, 13 in all (phase 1's 12 types plus permission sets), and small. Several types of one family can ride one PR where their E, G and S children have all landed. The trailing B children are new, and come from red line 3.
 
@@ -312,40 +319,25 @@ The B children are one per covered type, 13 in all (phase 1's 12 types plus perm
 
 | Step | Working days |
 |:--|:--|
-| this ADR, plus the maintainer's Tier H approval (Q1/Q2 ruled 16:30Z; D2/N and Q3 with him) | 0.5 + his approval |
-| R | 0.5–1 |
+| this ADR, plus the maintainer's Tier H approval (Q1/Q2 ruled 16:30Z, Q3 17:13Z; D2/N with him) | 0.5 + his approval |
+| R, K | 0.5–1 |
 | E, G, P, U, C in parallel | 1–2 |
 | S | 1 |
 | B, per type | 0.5 |
 | **Total** | **about 4–5** |
 
-The real bottlenecks are not calendar weeks. They are the maintainer's ADR approval and his word on D2/N and Q3, merge-queue and CI throughput, and the cloud lane for C.
+The real bottlenecks are not calendar weeks. They are the maintainer's ADR approval and his word on D2/N, merge-queue and CI throughput, and the cloud lane for C.
 
 ## Open questions (needs decision)
 
 - **Q1 — the bucket-3 face spelling** (`status: decided`). Ruled `NS-NAME`, with `OBJECT-ACTION` for an object-bound action (D6). Decision card option 0 「A+A，含对象动作补充」 at 16:30:25Z, record [`6724050556`](https://github.com/objectstack-ai/objectstack/issues/31527#issuecomment-6724050556). This unblocks P, G2 and C.
 - **Q2 — two packages' same-named position** (`status: decided`). Ruled: keep the one-holder refusal; an administrator binds another package's set through an ADR-0005 overlay; no merge engine (D7). Same card and record.
-- **Q3 — the face collisions the refined spelling leaves** (`status: needs_decision`), from D6's check. There are three cases:
-  - (i) a namespace that equals an object name, which collides on the AI face and also makes D5's router read an object's action URL as qualified;
-  - (ii) an uncut 64-character face shaped like a cut one;
-  - (iii) one carrier list holding several types' faces.
-
-  Options:
-  - **A (recommended).** A namespace that equals an object name is refused, in both directions, at every door either one enters by: `defineStack`, `os validate`, install (ADR-0048 §3.2's gate) and Studio's publish (`MetadataManager.publishPackage`, the second enforcement point `namespace-prefix.ts` names). The refusal names both. A face is cut from 64 characters on, so an uncut face is at most 63. Where one list holds several types' faces, the list builder refuses a duplicate face at registration, naming both items. That last check is the backstop for any residual case, including a hash collision.
-  - **B.** A separator of its own for the object-bound form, `OBJECT--ACTION`, which reads back by grammar alone. It re-spells the ruled example, and D5's router still needs A's install check.
-
-  Axes:
-  - *business need*: measured on HotCRM `6961ab1`, 0 namespaces equal an object name (its modules all declare `crm`); the shape is still ordinary, because the paired `.custom` package's namespace is `NS_custom`;
-  - *long-term*: A keeps the ruled spelling and makes `L-R` name one thing per environment; B is grammar-reversible but adds a second separator to remember;
-  - *hard for AI to get wrong*: A is loud at install, while left unguarded the collision is a silent wrong tool;
-  - *startup scope*: A is one more comparison in an existing gate (a narrowing) plus a duplicate check where the face list is built; B needs no gate for the face, but not for the URL.
-
-  Under A, it blocks nothing: the faces stay as ruled, and A's checks ride G1 (the same gate) and G2/C (the face list). Under B, P's derivation and C wait.
+- **Q3 — the face collisions the refined spelling leaves** (`status: decided`). Ruled A 「安装时拒绝」, decision card at 17:13:30Z, record [`6724530715`](https://github.com/objectstack-ai/objectstack/issues/31527#issuecomment-6724530715) on #31527. A namespace never equals an object name, refused in both directions at every object door, naming both spellings. The riders: a face is cut only past 64 characters, and the face list refuses duplicates (D6). It is carried by child K, a declared narrowing (first-party 0), and it blocks nothing: the faces stay as Q1 ruled. The option not taken was a separate `OBJECT--ACTION` separator: it re-spells the ruled example, and D5's router would still need the refusal.
 
 ## Consequences
 
 - **Good.** Two packages can ship `send_email` side by side, and every caller reaches the one it means. No author, no AI and no stored row carries the namespace inside a behavioural name. The literal prefix is left only where a name leaves the platform (objects). Live environments migrate by adding columns, not by rewriting names.
-- **Cost.** Every runtime index and by-name door of 20 behavioural types gains a coordinate, which is the plan above. The router gains a documented precedence (the grammar's literals, then a namespace, then the bare grammar) and the reserved `_env` segment. Three refusals are added: a namespace spelling a grammar literal (install), a `_`-led bucket 2/3 item name (authoring and the save door), and, pending the maintainer's word on D2, a name held twice across a namespace's co-owners (N). Q3 may add a fourth. On an uncovered type, a bare name that two packages already hold turns from a silent first match into a `409`.
+- **Cost.** Every runtime index and by-name door of 20 behavioural types gains a coordinate, which is the plan above. The router gains a documented precedence (the grammar's literals, then a namespace, then the bare grammar) and the reserved `_env` segment. Three refusals are added: a namespace spelling a grammar literal (install), a `_`-led bucket 2/3 item name (authoring and the save door), and, pending the maintainer's word on D2, a name held twice across a namespace's co-owners (N). Q3's ruled refusal is the fourth (K). On an uncovered type, a bare name that two packages already hold turns from a silent first match into a `409`.
 - **Risk.** A reader that is missed keeps resolving first-registered. Each slice therefore retires its type's phase-1 refusal only once its readers are measured on a booted two-package deployment, as phase 1 measured them.
 
 ## Alternatives considered
