@@ -6,7 +6,7 @@
 
 fix(cloud-connection): every replica reads the cloud binding credential when several are declared over a shared cluster driver
 
-Clause-②: yes (widening)
+Clause-②: no
 Metadata-protocol: none
 
 A self-hosted server kept its cloud binding credential only in `<cwd>/.objectstack/cloud-connection.json`. With several replicas behind a load balancer, the bind ran on one replica and the others held no credential: their online licence checks reported no control plane, and their control-plane calls went without a bearer.
