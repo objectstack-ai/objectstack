@@ -4231,24 +4231,24 @@ export class AuthPlugin implements Plugin {
         attributed: (fn) => runAttributedToUser(actor, fn),
         logger: { warn: (m) => ctx.logger.warn(m), error: (m) => ctx.logger.error(m) },
       });
-      for (const [path, runner] of [
-        ['/admin/scim/set-group-mapping', 'runSetIdpGroupMapping'],
-        ['/admin/scim/delete-group-mapping', 'runDeleteIdpGroupMapping'],
-      ] as const) {
-        rawApp.post(`${basePath}${path}`, async (c: any) => {
-          try {
-            const actor = await gateAdmin(c);
-            if (actor instanceof Response) return actor;
-            const door = await import('./idp-group-mapping-admin.js');
-            const { status, body } = await door[runner](groupMappingDeps(actor), actor, c.req.raw);
-            return c.json(body, status as any);
-          } catch (error) {
-            const err = error instanceof Error ? error : new Error(String(error));
-            ctx.logger.error(`[AuthPlugin] ${path.slice(1)} failed`, err);
-            return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: err.message } }, 500);
-          }
-        });
-      }
+      const groupMappingHandler = (
+        label: string,
+        runner: 'runSetIdpGroupMapping' | 'runDeleteIdpGroupMapping',
+      ) => async (c: any) => {
+        try {
+          const actor = await gateAdmin(c);
+          if (actor instanceof Response) return actor;
+          const door = await import('./idp-group-mapping-admin.js');
+          const { status, body } = await door[runner](groupMappingDeps(actor), actor, c.req.raw);
+          return c.json(body, status as any);
+        } catch (error) {
+          const err = error instanceof Error ? error : new Error(String(error));
+          ctx.logger.error(`[AuthPlugin] ${label} failed`, err);
+          return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: err.message } }, 500);
+        }
+      };
+      rawApp.post(`${basePath}/admin/scim/set-group-mapping`, groupMappingHandler('admin/scim/set-group-mapping', 'runSetIdpGroupMapping'));
+      rawApp.post(`${basePath}/admin/scim/delete-group-mapping`, groupMappingHandler('admin/scim/delete-group-mapping', 'runDeleteIdpGroupMapping'));
     }
 
     // ────────────────────────────────────────────────────────────────────

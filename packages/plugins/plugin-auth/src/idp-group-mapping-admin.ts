@@ -268,7 +268,8 @@ export async function runSetIdpGroupMapping(
   if (existing) {
     mappingId = text(existing.id);
   } else {
-    const inserted = (await deps.attributed(() => withSystemContext(engine).insert(IDP_GROUP_MAPPING_OBJECT, row))) as Record<string, unknown>;
+    const writer: IDataEngine = withSystemContext(engine);
+    const inserted = (await deps.attributed(() => writer.insert(IDP_GROUP_MAPPING_OBJECT, row))) as Record<string, unknown>;
     mappingId = text(inserted?.id);
     await writeMappingAudit(deps, engine, { action: 'create', actor, mappingId, event: 'idp_group_mapping_saved', connectionId, permissionSet });
   }
@@ -306,7 +307,8 @@ export async function runDeleteIdpGroupMapping(
   if (!row) return fail(404, 'RESOURCE_NOT_FOUND', `No IdP group mapping '${mappingId}' exists`);
   const connectionId = text(row.source_id);
   const permissionSet = text(row.permission_set);
-  await deps.attributed(() => withSystemContext(engine).delete(IDP_GROUP_MAPPING_OBJECT, { where: { id: mappingId } }));
+  const writer: IDataEngine = withSystemContext(engine);
+  await deps.attributed(() => writer.delete(IDP_GROUP_MAPPING_OBJECT, { where: { id: mappingId } }));
   await writeMappingAudit(deps, engine, { action: 'delete', actor, mappingId, event: 'idp_group_mapping_deleted', connectionId, permissionSet });
   const connection = deps.isScimEnabled() ? await readConnection(engine, connectionId) : ({ found: false } as const);
   const applied = connection.found ? await deps.attributed(() => reproject(deps, connectionId, connection.domains)) : { reprojected: false, reconciledUsers: 0 };

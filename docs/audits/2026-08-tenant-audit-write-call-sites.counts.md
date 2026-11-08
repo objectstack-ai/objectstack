@@ -33,19 +33,19 @@ silent, and `node scripts/tenant-audit-census.mjs --write` is the resolution.
 
 | Measure | Value |
 |---|---:|
-| Write call sites | 270 |
-| Object name statically decidable | 192 |
-| Object name chosen at run time | 78 |
-| Against a tenancy-enabled object | 186 |
+| Write call sites | 275 |
+| Object name statically decidable | 195 |
+| Object name chosen at run time | 80 |
+| Against a tenancy-enabled object | 189 |
 | Against an object declaring tenancy off | 6 |
-| Threading a tenant context | 206 |
-| Provably carrying none | 8 |
-| …and decidably tenancy-enabled | 2 |
-| Options argument unreadable | 56 |
-| …and decidably tenancy-enabled | 30 |
-| Threading a decidably elevated context | 150 |
+| Threading a tenant context | 207 |
+| Provably carrying none | 10 |
+| …and decidably tenancy-enabled | 3 |
+| Options argument unreadable | 58 |
+| …and decidably tenancy-enabled | 31 |
+| Threading a decidably elevated context | 151 |
 | Threading a decidably non-elevated context | 0 |
-| Threading a context of undecidable elevation | 112 |
+| Threading a context of undecidable elevation | 114 |
 
 ## Subtractions the census could NOT defend — enforced
 
@@ -90,14 +90,14 @@ holds still. They are required to be HERE and to say WHEN they were true;
 their values are not compared. The reasoning, and the measurement behind it,
 are in `scripts/check-tenant-audit-census.mjs`.
 
-Measured on 2026-11-07 at `9dd4abeaa`.
+Measured on 2026-11-08 at `b6fd47ba6`.
 
 | corpus scale (not enforced) | count |
 | :--- | ---: |
-| tracked non-test sources scanned | 1057 |
-| engine-shaped types recognised | 113 |
-| declared objects in the registry | 131 |
-| same-named calls subtracted as non-engine | 239 |
+| tracked non-test sources scanned | 1061 |
+| engine-shaped types recognised | 114 |
+| declared objects in the registry | 132 |
+| same-named calls subtracted as non-engine | 243 |
 
 ## Every site
 
@@ -155,6 +155,9 @@ Measured on 2026-11-07 at `9dd4abeaa`.
 | `packages/plugins/plugin-auth/src/ensure-default-organization.ts` | `update` | `sys_member` | enabled | elevated | 1 |
 | `packages/plugins/plugin-auth/src/forced-reset-revocation.ts` | `update` | `SystemObjectName.API_KEY` | undecidable | elevated | 1 |
 | `packages/plugins/plugin-auth/src/forced-reset-revocation.ts` | `update` | `SystemObjectName.SESSION` | undecidable | elevated | 1 |
+| `packages/plugins/plugin-auth/src/idp-group-mapping-admin.ts` | `delete` | `IDP_GROUP_MAPPING_OBJECT` | undecidable | PROVABLY NONE | 1 |
+| `packages/plugins/plugin-auth/src/idp-group-mapping-admin.ts` | `insert` | `IDP_GROUP_MAPPING_OBJECT` | undecidable | options unreadable | 1 |
+| `packages/plugins/plugin-auth/src/idp-group-mapping-admin.ts` | `insert` | `sys_audit_log` | enabled | elevated | 1 |
 | `packages/plugins/plugin-auth/src/idp-locale-claim.ts` | `update` | `sys_user` | enabled | elevated | 1 |
 | `packages/plugins/plugin-auth/src/mcp-client-last-use.ts` | `update` | `sys_oauth_consent` | enabled | elevated | 1 |
 | `packages/plugins/plugin-auth/src/member-role-canonical.ts` | `update` | `MEMBER_OBJECT` | undecidable | elevated | 1 |
@@ -173,6 +176,8 @@ Measured on 2026-11-07 at `9dd4abeaa`.
 | `packages/plugins/plugin-auth/src/scim-connection-admin.ts` | `insert` | `sys_audit_log` | enabled | elevated | 1 |
 | `packages/plugins/plugin-auth/src/scim-connection-service.ts` | `insert` | `sys_scim_connection_credential` | enabled | PROVABLY NONE | 1 |
 | `packages/plugins/plugin-auth/src/scim-connection-service.ts` | `update` | `sys_scim_connection_credential` | enabled | elevated | 1 |
+| `packages/plugins/plugin-auth/src/scim-group-projection.ts` | `delete` | `sys_user_permission_set` | enabled | PROVABLY NONE | 1 |
+| `packages/plugins/plugin-auth/src/scim-group-projection.ts` | `insert` | `sys_user_permission_set` | enabled | options unreadable | 1 |
 | `packages/plugins/plugin-auth/src/session-tombstone.ts` | `update` | `objectName` | undecidable | options unreadable | 1 |
 | `packages/plugins/plugin-auth/src/sso-client-secret.ts` | `update` | `sys_sso_provider` | disabled | elevated | 1 |
 | `packages/plugins/plugin-auth/src/sys-session-revoke.ts` | `update` | `SystemObjectName.SESSION` | undecidable | elevated | 1 |
