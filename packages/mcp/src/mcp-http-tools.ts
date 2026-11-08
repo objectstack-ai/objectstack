@@ -473,8 +473,9 @@ function errorResult(message: string) {
  * body name and no native text, and an unregistered code is demoted to
  * `declaredCode` beside the closed `code`, as the door serves it. The lines
  * the door prints for the operator (the full wrapper, the fault line) are
- * printed here under `request`. `details` is unchanged: a thrown `details`
- * rides as before, and the context the door adds (`fields`, `issues`, the
+ * printed here under `request`. A thrown `details` rides on a refusal (a
+ * status below 500) as before, and never on a fault, whose answer is the
+ * door's sanitised one; the context the door adds (`fields`, `issues`, the
  * unique arm's `object` / `field`) is not served, as on every other tool
  * ({@link errorResultWithCode} says why).
  *
@@ -493,7 +494,10 @@ function errorResultFromThrown(err: unknown, request: string, objectName?: strin
     ...(answer.userMessage !== undefined ? { userMessage: answer.userMessage } : {}),
   };
   if (answer.code === StandardErrorCode.enum.PERMISSION_DENIED) return codedErrorResult(envelope);
-  const details = (err as { details?: unknown } | null | undefined)?.details;
+  // A fault (5xx) carries nothing but the door's sanitised answer: a thrown
+  // `details` rides only on a refusal, as `/actions` serves no producer
+  // context on a fault.
+  const details = answer.status < 500 ? (err as { details?: unknown } | null | undefined)?.details : undefined;
   return codedErrorResult({ ...envelope, ...(details !== undefined ? { details } : {}) });
 }
 

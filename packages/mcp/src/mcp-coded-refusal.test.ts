@@ -740,6 +740,36 @@ describe('run_action / resume_run: a throw answers what the /actions door answer
       });
     }
 
+    it(`${site.tool}: an app's own unregistered code crosses as the status-derived closed code, its spelling in declaredCode`, async () => {
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+      const thrown = () => Object.assign(new Error('No leave days left this year.'), { code: 'LEAVE_EXHAUSTED', status: 409 });
+      const { error } = JSON.parse((await callTool(site, thrown())).content[0].text);
+      expect(error).toEqual({
+        code: 'RESOURCE_CONFLICT', message: 'No leave days left this year.', status: 409, declaredCode: 'LEAVE_EXHAUSTED',
+      });
+      const door = actionsDoorAnswerOf(thrown());
+      expect([door.code, door.declaredCode, door.status]).toEqual([error.code, error.declaredCode, error.status]);
+    });
+
+    it(`${site.tool}: a fault carries no thrown details; a refusal still does`, async () => {
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+      const details = { host: 'db-primary.internal', pool: 'writer' };
+      for (const fault of [
+        Object.assign(new Error('pool exhausted'), { status: 503, details }),
+        Object.assign(new Error(CRASH_WRAPPER), { name: 'SandboxError', innerMessage: 'TypeError: boom', details }),
+      ]) {
+        const result = await callTool(site, fault);
+        const { error } = JSON.parse(result.content[0].text);
+        expect(error.status).toBeGreaterThanOrEqual(500);
+        expect(error).not.toHaveProperty('details');
+        expect(result.content[0].text).not.toContain('db-primary.internal');
+      }
+      const refusal = Object.assign(new Error('Confirm first.'), { code: 'ACTION_CONFIRMATION_REQUIRED', status: 428, details });
+      expect(JSON.parse((await callTool(site, refusal)).content[0].text).error).toEqual({
+        code: 'ACTION_CONFIRMATION_REQUIRED', message: 'Confirm first.', status: 428, details,
+      });
+    });
+
     it(`${site.tool}: CONTROL: a coded sandboxed refusal keeps the #31246 answer (code, inner sentence, status)`, async () => {
       vi.spyOn(console, 'error').mockImplementation(() => {});
       const result = await callTool(site, codedSandboxRefusal());
