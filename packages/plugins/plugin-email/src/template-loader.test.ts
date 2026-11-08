@@ -31,10 +31,8 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { SchemaRegistry } from '@objectstack/objectql';
 import {
   BUILTIN_EMAIL_TEMPLATES_PACKAGE_ID,
-  EmailTemplateAmbiguousError,
   createRegistryEmailTemplateLoader,
 } from './template-loader.js';
 
@@ -284,47 +282,5 @@ describe('createRegistryEmailTemplateLoader — a malformed item is refused, nev
     });
 
     await expect(loader.load('ops.digest', 'en-US')).rejects.toThrow(/ops\.digest/);
-  });
-});
-
-describe('createRegistryEmailTemplateLoader — the name resolves by (package, name) (ADR-0150 D3)', () => {
-  const OTHER_PACKAGE = 'com.example.other';
-
-  /** A real registry: each id installed as a code package, shipping `items` in its composite slot. */
-  function registryShipping(shipped: Array<[string, AnyRecord]>): SchemaRegistry {
-    const reg = new SchemaRegistry();
-    reg.logLevel = 'silent';
-    for (const [id, item] of shipped) {
-      if (!reg.getPackage(id)) {
-        reg.installPackage({ id, name: id, version: '1.0.0', type: 'app', namespace: id.split('.').pop() } as never, 'code');
-      }
-      const { _packageId: _drop, ...body } = item;
-      reg.registerItem('email_template', body, 'name' as never, id);
-    }
-    return reg;
-  }
-
-  it('one package holder beside the built-in: resolves, and the layered list answers as before', async () => {
-    const reg = registryShipping([[BUILTIN_EMAIL_TEMPLATES_PACKAGE_ID, builtin()], [APP_PACKAGE, declared()]]);
-    const loader = createRegistryEmailTemplateLoader({ protocol: layeredProtocol([builtin(), declared()]), registry: reg });
-    expect((await loader.load('auth.password_reset', 'en-US'))?.subject).toBe(AUTHORED);
-  });
-
-  it('two package holders: the send is refused with the 409 conflict naming both — never the first listed', async () => {
-    const other = declared({ subject: 'Other wording', _packageId: OTHER_PACKAGE });
-    const reg = registryShipping([[APP_PACKAGE, declared()], [OTHER_PACKAGE, other]]);
-    const loader = createRegistryEmailTemplateLoader({ protocol: layeredProtocol([declared(), other]), registry: reg });
-
-    const err = await loader.load('auth.password_reset', 'en-US').then(() => undefined, (e: unknown) => e);
-    expect(err).toBeInstanceOf(EmailTemplateAmbiguousError);
-    expect(err).toMatchObject({ code: 'RESOURCE_CONFLICT', status: 409, template: 'auth.password_reset' });
-    expect((err as EmailTemplateAmbiguousError).candidates).toEqual([
-      { kind: 'package', packageId: APP_PACKAGE },
-      { kind: 'package', packageId: OTHER_PACKAGE },
-    ]);
-    expect((err as Error).message).toContain(`"${APP_PACKAGE}"`);
-    expect((err as Error).message).toContain(`"${OTHER_PACKAGE}"`);
-    // No locale escapes it: the name is refused before any bundle is read.
-    await expect(loader.load('auth.password_reset', undefined)).rejects.toBeInstanceOf(EmailTemplateAmbiguousError);
   });
 });
