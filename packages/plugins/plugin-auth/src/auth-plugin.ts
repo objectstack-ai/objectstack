@@ -103,7 +103,7 @@ import { runSetInitialPassword } from './set-initial-password.js';
 import { runRegisterSsoProviderFromForm, runRegisterSamlProviderFromForm, runRequestDomainVerification, runVerifyDomain, type AuthRequestHandler } from './register-sso-provider.js';
 import { runResendVerificationEmail } from './send-verification-email.js';
 import { runSysSessionRevoke, sysSessionRevokeDepsFor } from './sys-session-revoke.js';
-import { oneAccountRefusalAtMount } from './one-account-per-request.js';
+import { oneAccountReadFaultAtMount, oneAccountRefusalAtMount } from './one-account-per-request.js';
 import { resolveHandoffSignInEntry, runOneTimeTokenHandoff } from './one-time-token-handoff.js';
 import { readJsonRequestBody } from './request-json-body.js';
 import {
@@ -3673,21 +3673,23 @@ export class AuthPlugin implements Plugin {
     // (`one-account-per-request.ts`); asked here, a raw mount answers it with
     // its code instead of meeting it as a throw from its session read. A
     // request that carries one credential, or two that name one account, is
-    // handed on with nothing read.
+    // handed on with nothing read. Fail-closed, as the before-hook is: a
+    // request carrying both credentials whose judgment could not be reached
+    // (no auth context to read with, or any other fault on the way) is
+    // answered `503 SERVICE_UNAVAILABLE` and goes no further.
     if (typeof rawApp.use === 'function') {
       rawApp.use(`${basePath}/*`, async (c: any, next: () => Promise<void>) => {
         const mgr = this.authManager;
         const headers: Headers | undefined = c.req.raw?.headers;
-        if (!mgr || typeof mgr.getAuthContext !== 'function' || !headers?.get('authorization') || !headers.get('cookie')) {
+        if (!mgr || typeof mgr.getAuthContext !== 'function' || !headers?.get?.('authorization') || !headers?.get?.('cookie')) {
           return next();
         }
         let refusal: Awaited<ReturnType<typeof oneAccountRefusalAtMount>>;
         try {
           refusal = await oneAccountRefusalAtMount(headers, await mgr.getAuthContext());
         } catch {
-          // No auth context to read with: the routes below meet the same
-          // judgment in the before-hook their session reads pass through.
-          return next();
+          const fault = oneAccountReadFaultAtMount();
+          return c.json(fault.body, fault.status);
         }
         if (refusal) return c.json(refusal.body, refusal.status);
         return next();

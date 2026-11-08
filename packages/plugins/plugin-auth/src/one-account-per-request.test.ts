@@ -18,9 +18,10 @@
  *    reads it), and nothing is written for either account;
  *  - the same account on both credentials still works, two sessions of one
  *    user included; the cookie alone and the bearer alone still work;
- *  - a credential that names no signed-in account does not trip the rule;
+ *  - a credential that names no signed-in account does not trip the rule, and
+ *    an API key is not a session credential for it;
  *  - the identity mount refuses the request ahead of its raw routes, with the
- *    same code;
+ *    same code, and answers 503 when its judgment cannot be reached;
  *  - a session read that cannot answer refuses, as an outage (503).
  */
 
@@ -28,7 +29,7 @@ import { describe, it, expect, afterAll, afterEach, vi } from 'vitest';
 import { Hono } from 'hono';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
-import { resolveRequestExecutionContext, type PluginContext, type RequestAuthService } from '@objectstack/core';
+import { API_KEY_PREFIX, resolveRequestExecutionContext, type PluginContext, type RequestAuthService } from '@objectstack/core';
 import { AuthManager } from './auth-manager.js';
 import { AuthPlugin } from './auth-plugin.js';
 import { authIdentityObjects } from './manifest.js';
@@ -37,6 +38,7 @@ import {
   CREDENTIALS_NAME_DIFFERENT_ACCOUNTS_CODE,
   CREDENTIALS_NAME_DIFFERENT_ACCOUNTS_MESSAGE,
   ONE_ACCOUNT_READ_FAULT_CODE,
+  ONE_ACCOUNT_READ_FAULT_MESSAGE,
   OneAccountReadFault,
   presentedSessionTokens,
   refuseRequestNamingDifferentAccounts,
@@ -358,6 +360,26 @@ describe('a request that names one account, or carries one credential, goes on a
     expect(await sessionUser(await send(d.manager, 'GET', '/get-session', { cookie: d.a.cookie }))).toBe(d.a.id);
   });
 
+  it('an API key beside a session cookie is not a session credential for this rule, and is not refused by it', async () => {
+    const d = await deployment();
+    const key = `${API_KEY_PREFIX}one_account_rule_${'k'.repeat(24)}`;
+
+    // On the wire: an API key beside a valid cookie is never this rule's refusal.
+    const res = await verdict(await send(d.manager, 'GET', '/get-session', { cookie: d.a.cookie, bearer: key }));
+    expect(res.code).not.toBe(CREDENTIALS_NAME_DIFFERENT_ACCOUNTS_CODE);
+
+    // The judgment: the key is never read as a session, even from a store that
+    // would answer its value as another account's session.
+    const findSession = vi.fn(async (token: string) => ({
+      session: { userId: token === 'tokA' ? 'u_a' : 'u_key_owner', expiresAt: new Date(Date.now() + 60_000) },
+      user: { id: token === 'tokA' ? 'u_a' : 'u_key_owner' },
+    }));
+    const headers = new Headers({ cookie: 'better-auth.session_token=tokA.sig', authorization: `Bearer ${key}` });
+    const context = { authCookies: { sessionToken: { name: 'better-auth.session_token' } }, internalAdapter: { findSession } };
+    expect(await requestNamesDifferentAccounts(headers, context)).toBe(false);
+    expect(findSession).not.toHaveBeenCalled();
+  });
+
   it('a cookie that names no signed-in account beside a valid bearer does not trip the rule', async () => {
     const d = await deployment();
     const signedOut = await send(d.manager, 'POST', '/sign-out', { cookie: d.a.cookie }, {});
@@ -411,6 +433,26 @@ describe('the identity mount refuses the request ahead of its raw routes', () =>
     const read = await fire('/update-user', { cookie: adminCookie, bearer: d.b.bearer }, { name: 'Renamed At Mount' });
     expect(await verdict(read)).toEqual(REFUSED);
     expect((await userRow(d, d.b.id)).name).toBe('Holder B');
+  });
+
+  it('a request carrying both credentials whose judgment cannot be reached is answered 503, and goes no further', async () => {
+    const d = await deployment();
+    const fire = await mounted(d);
+    vi.spyOn(d.manager, 'getAuthContext').mockRejectedValue(new Error('auth context unavailable'));
+
+    const res = await fire('/update-user', { cookie: d.a.cookie, bearer: d.b.bearer }, { name: 'Renamed At Mount' });
+    expect(await verdict(res)).toEqual({
+      status: 503,
+      code: ONE_ACCOUNT_READ_FAULT_CODE,
+      message: ONE_ACCOUNT_READ_FAULT_MESSAGE,
+    });
+    expect((await userRow(d, d.a.id)).name).toBe('Holder A');
+    expect((await userRow(d, d.b.id)).name).toBe('Holder B');
+
+    // The control: one credential is handed on without the judgment being asked.
+    const one = await fire('/update-user', { bearer: d.b.bearer }, { name: 'Holder B Renamed' });
+    expect(one.status, await one.clone().text()).toBe(200);
+    expect((await userRow(d, d.b.id)).name).toBe('Holder B Renamed');
   });
 });
 

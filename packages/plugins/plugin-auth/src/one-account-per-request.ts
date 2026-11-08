@@ -20,7 +20,13 @@
  *    session);
  *  - a credential that names no signed-in account: no session carries its
  *    token, the session has expired, or its user is gone. Such a request goes
- *    on exactly as it would have without this rule.
+ *    on exactly as it would have without this rule;
+ *  - an API key. An API key is not a session credential for this rule: a
+ *    `Bearer` value carrying the API-key prefix (`API_KEY_PREFIX`, the one
+ *    `extractApiKey` recognises) is never read as a session, and `x-api-key` /
+ *    `Authorization: ApiKey` are not read here at all. Each door keeps its
+ *    existing one-principal rule for keys (the key admission answers for the
+ *    key's owner, and a cookie beside the key never answers for it).
  *
  * ## How a credential is read here
  *
@@ -59,6 +65,7 @@
  *    its caller in process and would otherwise meet the refusal as a throw.
  */
 
+import { API_KEY_PREFIX } from '@objectstack/core';
 import type { RegisteredErrorCode, StandardErrorCode } from '@objectstack/spec/api';
 
 /** The refusal's wire code (ledgered under `@objectstack/plugin-auth`). */
@@ -85,9 +92,9 @@ export const ONE_ACCOUNT_READ_FAULT_MESSAGE =
 /** The session cookie's default name, in every prefix spelling better-auth emits. */
 const DEFAULT_SESSION_COOKIE = /^(?:__Secure-|__Host-)?better-auth\.session_token$/;
 
-/** A header bag: a Web `Headers`, or anything with its `get`. */
+/** A header bag: a Web `Headers`, or anything with its `get` (read as optional, as the sibling readers do). */
 export interface HeaderSource {
-  get(name: string): string | null | undefined;
+  get?(name: string): string | null | undefined;
 }
 
 /** What better-auth's own session read answers (`internalAdapter.findSession`). */
@@ -151,8 +158,9 @@ function sessionCookieValue(cookieHeader: string, cookieName: string | undefined
 
 /**
  * The session tokens a request presents — the cookie's and the bearer's —
- * each without its signature. A credential that is absent, or not a
- * `Bearer` authorization, is left out.
+ * each without its signature. A credential that is absent, not a `Bearer`
+ * authorization, or an API key (a `Bearer` value carrying `API_KEY_PREFIX`)
+ * is left out: an API key is not a session credential for this rule.
  */
 export function presentedSessionTokens(
   header: (name: string) => string,
@@ -160,7 +168,8 @@ export function presentedSessionTokens(
 ): { cookie?: string; bearer?: string } {
   const out: { cookie?: string; bearer?: string } = {};
   const bearer = /^Bearer\s+(.+)$/i.exec(header('authorization').trim());
-  const bearerToken = bearer?.[1] ? tokenOf(bearer[1]) : undefined;
+  const bearerValue = bearer?.[1]?.trim();
+  const bearerToken = bearerValue && !bearerValue.startsWith(API_KEY_PREFIX) ? tokenOf(bearerValue) : undefined;
   if (bearerToken) out.bearer = bearerToken;
   const cookie = sessionCookieValue(header('cookie'), cookieName);
   const cookieToken = cookie ? tokenOf(cookie) : undefined;
@@ -207,12 +216,13 @@ export async function requestNamesDifferentAccounts(
   fallbackHeaders?: HeaderSource,
 ): Promise<boolean> {
   const header = (name: string): string =>
-    String(headers?.get(name) ?? fallbackHeaders?.get(name) ?? '');
+    String(headers?.get?.(name) ?? fallbackHeaders?.get?.(name) ?? '');
   const { cookie, bearer } = presentedSessionTokens(header, context?.authCookies?.sessionToken?.name);
   if (!cookie || !bearer || cookie === bearer || !context) return false;
   // The bearer first: on most requests that carry one beside a cookie it is
   // the cookie's own session, and a bearer that is no session token at all
-  // (an API key, an OAuth access token) settles it in one read.
+  // (an OAuth access token, say) settles it in one read. An API key never
+  // reaches here: `presentedSessionTokens` leaves it out.
   const bearerAccount = await accountOf(bearer, context);
   if (!bearerAccount) return false;
   const cookieAccount = await accountOf(cookie, context);
@@ -247,6 +257,24 @@ export async function refuseRequestNamingDifferentAccounts(ctx: any): Promise<vo
   });
 }
 
+/** The identity mount's answer: the ADR-0112 envelope and its status. */
+export interface OneAccountMountAnswer {
+  status: 401 | 503;
+  body: { success: false; error: { code: string; message: string } };
+}
+
+/**
+ * The identity mount's fail-closed answer when the judgment could not be
+ * reached at all (a session read that threw, or no auth context to read with):
+ * `503 SERVICE_UNAVAILABLE`, as the before-hook answers a read that throws.
+ */
+export function oneAccountReadFaultAtMount(): OneAccountMountAnswer {
+  return {
+    status: 503,
+    body: { success: false, error: { code: ONE_ACCOUNT_READ_FAULT_CODE, message: ONE_ACCOUNT_READ_FAULT_MESSAGE } },
+  };
+}
+
 /**
  * The identity mount's answer for the same judgment: the ADR-0112 envelope a
  * raw mount refuses with, or `null` when the request goes on. Same codes,
@@ -255,15 +283,12 @@ export async function refuseRequestNamingDifferentAccounts(ctx: any): Promise<vo
 export async function oneAccountRefusalAtMount(
   headers: HeaderSource,
   context: SessionReadContext | undefined,
-): Promise<{ status: 401 | 503; body: { success: false; error: { code: string; message: string } } } | null> {
+): Promise<OneAccountMountAnswer | null> {
   try {
     if (!(await requestNamesDifferentAccounts(headers, context))) return null;
   } catch (error) {
     if (!(error instanceof OneAccountReadFault)) throw error;
-    return {
-      status: 503,
-      body: { success: false, error: { code: ONE_ACCOUNT_READ_FAULT_CODE, message: ONE_ACCOUNT_READ_FAULT_MESSAGE } },
-    };
+    return oneAccountReadFaultAtMount();
   }
   return {
     status: CREDENTIALS_NAME_DIFFERENT_ACCOUNTS_STATUS,

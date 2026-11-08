@@ -8,7 +8,7 @@ fix(plugin-auth): an auth request is judged and executed as one account
 Clause-②: yes
 Metadata-protocol: none
 
-A request whose session cookie and bearer token name two different signed-in accounts is refused before anything runs, with `401 CREDENTIALS_NAME_DIFFERENT_ACCOUNTS`, and nothing is read or written for either account. It applies to every better-auth endpoint (over HTTP and to the in-process session read every data door makes) and to the raw ObjectStack routes on the identity mount. One credential alone, two credentials that name the same account (two sessions of one user included), and a credential that names no signed-in account are unaffected. A session read that cannot answer refuses too, as an outage (`503 SERVICE_UNAVAILABLE`).
+A request whose session cookie and bearer token name two different signed-in accounts is refused before anything runs, with `401 CREDENTIALS_NAME_DIFFERENT_ACCOUNTS`, and nothing is read or written for either account. It applies to every better-auth endpoint (over HTTP and to the in-process session read every data door makes) and to the raw ObjectStack routes on the identity mount. One credential alone, two credentials that name the same account (two sessions of one user included), and a credential that names no signed-in account are unaffected. An API key is not a session credential for this rule; each door keeps its existing one-principal rule for keys. A session read that cannot answer refuses too, as an outage (`503 SERVICE_UNAVAILABLE`), and so does the identity mount when the judgment cannot be reached at all.
 
 `CREDENTIALS_NAME_DIFFERENT_ACCOUNTS` is registered in the `@objectstack/spec` error-code ledger under `@objectstack/plugin-auth`.
 
