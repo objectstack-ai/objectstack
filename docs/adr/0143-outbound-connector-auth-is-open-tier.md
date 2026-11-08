@@ -48,6 +48,21 @@ cloud-repository record with a `## Provenance` pointer back to this number. That
 filed by the PR that lands this file**; the cloud repository is outside its reach. Until it exists,
 the maintainer's ruling quoted above is the commercial decision of record.
 
+> **Amended (2026-11-08, #28262) — the commercial half is cloud ADR-0115.** The cloud-repository record
+> the paragraph above calls owed exists: `cloud ADR-0115`,
+> [`docs/adr/0115-outbound-connector-auth-open-tier-commercial-boundary.md`](https://github.com/objectstack-ai/cloud/blob/main/docs/adr/0115-outbound-connector-auth-open-tier-commercial-boundary.md)
+> in `objectstack-ai/cloud`. The maintainer merged it on 2026-10-30 through objectstack-ai/cloud#3354, as
+> cloud commit `d4c97b39`. Its header names it the commercial half of this record, and its
+> `## Provenance` points back here and to #26768 item 3. Its own status line reads Proposed (2026-10-28).
+>
+> - **What it decides.** Open tier, with no paid gate set by cloud: the in-environment connector
+>   credential object, outbound OAuth with its refresh and connection record, the app-credential exchange
+>   and request signing. Commercial, as "may be charged, no delivery promised": vault / KMS backends,
+>   BYOK, key rotation, credential access-audit export and premium hand-built connectors.
+> - **The record of decision.** The sentence above that begins "Until it exists" records the state before
+>   that merge. The commercial decision of record is now cloud ADR-0115, and the warning below applies to
+>   it. Nothing this file decides changes.
+
 ⚠️ Where a cloud record and this document disagree about the *commercial* boundary, the cloud record
 decides. What this document decides, and cloud does not, is where the **code** lives and what its
 contract is.
@@ -551,3 +566,7 @@ Each slice is its own card and lands after this record is accepted.
 | providers: MCP authorization flow, OpenAPI `securitySchemes`, REST; the `RequestSigner` seam and first signers | `domain:server` | #26702 item 6, #26710 items 3–4 |
 | Console Connect / Reconnect and connection status | `domain:ui` | #26702 item 7 |
 | the cloud-repository record ([Provenance](#provenance--read-this-before-citing-this-file)) | the commercial repository | #26702 item 1, #26768 item 3 |
+
+> **Amended (2026-11-08, #28262).** The last row's record exists: cloud ADR-0115, merged on 2026-10-30
+> through objectstack-ai/cloud#3354 as cloud commit `d4c97b39`. That slice is done; see the 2026-11-08
+> note under [Provenance](#provenance--read-this-before-citing-this-file).
