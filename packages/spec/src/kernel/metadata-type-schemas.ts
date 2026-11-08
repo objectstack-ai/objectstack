@@ -229,11 +229,11 @@ const BUILTIN_METADATA_TYPE_SCHEMAS: Partial<Record<MetadataType, z.ZodType>> = 
  * while the stack door strictly refused the same body. They were bound then,
  * the same SHAPE-check-only way. (Commit 35ad101bc later retired the `themes` carrier
  * and `ThemeSchema` whole under ADR-0049, and `theme` left the URL-spelling
- * contract with it — see the entry-shaped comment below.) `rag_pipeline` is
- * deliberately NOT bound: it has
- * no stack collection to take a schema from — that drift is recorded as #6242
- * row 2 (`scripts/check-stack-collection-maps.mjs`), not solved by inventing a
- * schema here.
+ * contract with it — see the entry-shaped comment below.) `rag_pipeline` was
+ * never bound: it had no stack collection to take a schema from (the drift
+ * recorded as #6242 row 2), and that was resolved by retiring its
+ * `PLURAL_TO_SINGULAR` row under ADR-0049, not by inventing a schema here — so
+ * it, too, has left the URL-spelling contract.
  *
  * This map is separate from `BUILTIN_METADATA_TYPE_SCHEMAS` above because that
  * one is keyed by `MetadataType`, and these entries are deliberately NOT that.

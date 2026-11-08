@@ -694,12 +694,13 @@ export class ProtocolDiscoveryAndBasesFacet {
             //
             // What this keeps, and it is the whole point: the legitimate
             // plugin kinds with no static registry entry — `webhook`,
-            // `connector`, `analytics_cube`, `rag_pipeline` — are IN the static
-            // spelling contract (limb 1 of the URL map), so the predicate
-            // accepts them and they stay advertised as creatable. (`theme` and
-            // `sharing_rule` were two more: `theme` left the contract with its
-            // carrier, and ADR-0131 D6 gave `sharing_rule` a code-only registry
-            // entry, so it takes the registry arm above.)
+            // `connector`, `analytics_cube` — are IN the static spelling
+            // contract (limb 1 of the URL map), so the predicate accepts them
+            // and they stay advertised as creatable. (`theme`, `rag_pipeline`
+            // and `sharing_rule` were three more: `theme` left the contract with
+            // its carrier, `rag_pipeline` with its retired listing row — no
+            // stack could declare it — and ADR-0131 D6 gave `sharing_rule` a
+            // code-only registry entry, so it takes the registry arm above.)
             // `PUT /meta/theme/dark` is the operation the plugin path exists to
             // serve and this change must not touch it.
             //

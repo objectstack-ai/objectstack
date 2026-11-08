@@ -29,6 +29,7 @@ import { zhHantObjects } from './zh-Hant.objects.generated.js';
 import { arObjects } from './ar.objects.generated.js';
 import { frObjects } from './fr.objects.generated.js';
 import { ptBRObjects } from './pt-BR.objects.generated.js';
+import { ruObjects } from './ru.objects.generated.js';
 
 const LOCALES = [
   ['zh-CN', zhCNObjects],
@@ -38,6 +39,7 @@ const LOCALES = [
   ['ar', arObjects],
   ['fr', frObjects],
   ['pt-BR', ptBRObjects],
+  ['ru', ruObjects],
 ] as const;
 
 /**

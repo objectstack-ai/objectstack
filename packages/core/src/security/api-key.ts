@@ -315,17 +315,24 @@ function lifecycleRefusalOf(
       // `revoked_reason`: a key an administrator's forced password reset
       // revoked (`admin_password_reset`) is restored by a platform
       // administrator only (plugin-auth `api-key-restore-guard.ts` refuses its
-      // owner); any other revoked key by its owner or a platform administrator.
-      // The text names exactly those restorers and never claims the key is
-      // gone for good. Rotation stays the other road, for a key that should
-      // not come back.
+      // owner); a key revoked because its owner's membership in the
+      // organization ended (`organization_membership_ended`, written by the
+      // host that removed them) by no one, the same guard refusing every
+      // user-context restore of it; any other revoked key by its owner or a
+      // platform administrator. The text names exactly those restorers, and
+      // says the key cannot come back only where no restorer exists. Rotation
+      // stays the other road, for a key that should not come back.
       message: row.revoked_reason === 'admin_password_reset'
         ? `${label} was revoked by an administrator's forced password reset. Only a platform administrator can `
           + 'restore it (the Restore API Key action on the API Keys list); otherwise create a new key '
           + '(POST /api/v1/keys, or the API Keys page) and replace this one wherever it is configured.'
-        : `${label} was revoked. Its owner or a platform administrator can restore it (the Restore API Key action `
-          + 'on the API Keys list); otherwise create a new key (POST /api/v1/keys, or the API Keys page) and replace '
-          + 'this one wherever it is configured.',
+        : row.revoked_reason === 'organization_membership_ended'
+          ? `${label} was revoked because its owner's membership in the organization ended, and it cannot be `
+            + 'restored. A member of the organization creates a new key (POST /api/v1/keys, or the API Keys page) '
+            + 'and replaces this one wherever it is configured.'
+          : `${label} was revoked. Its owner or a platform administrator can restore it (the Restore API Key action `
+            + 'on the API Keys list); otherwise create a new key (POST /api/v1/keys, or the API Keys page) and replace '
+            + 'this one wherever it is configured.',
       ...ids,
     };
   }

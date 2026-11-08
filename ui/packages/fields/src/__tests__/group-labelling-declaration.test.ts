@@ -71,6 +71,8 @@ const GROUP_LABELLED = [
   'slider',
   'signature',
   'grid',
+  // A time-zone picker and two time inputs under one label (objectstack#31421).
+  'quiet-hours',
 ] as const;
 
 /**

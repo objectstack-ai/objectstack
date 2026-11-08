@@ -205,7 +205,9 @@ export const fr: TranslationData = {
     },
     connect_agent: {
       label: 'Connecter un assistant IA',
-      subtitle: 'Donnez à tout client IA compatible MCP un accès encadré à ce système : chaque appel s’exécute avec les autorisations et la sécurité au niveau des lignes de l’appelant.',
+      subtitle:
+        'Travaillez dans ce système depuis Claude, Doubao et d’autres assistants IA. '
+        + 'Chacun agit en votre nom : il ne voit et ne modifie que ce que vos propres autorisations permettent.',
     },
 
     // Platform record pages (#15743) -- see `en.ts` for the key set.

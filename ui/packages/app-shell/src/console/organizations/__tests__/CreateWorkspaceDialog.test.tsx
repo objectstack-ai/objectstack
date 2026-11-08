@@ -379,3 +379,36 @@ describe('prefills a first organization from the e-mail (objectstack-ai/cloud#35
     expect(screen.getByTestId('workspace-name-input')).toHaveValue('Acme');
   });
 });
+
+// objectstack#28124: past the per-user creation cap (`OS_ORG_LIMIT`) the server
+// refuses with 403 YOU_HAVE_REACHED_THE_MAXIMUM_NUMBER_OF_ORGANIZATIONS, and the
+// dialog showed better-auth's English sentence in every locale. Rendered through
+// the real packs, zh and en.
+describe('the organization-limit refusal is shown in the session language (objectstack#28124)', () => {
+  const SERVER_SENTENCE = 'You have reached the maximum number of organizations';
+  const limitRefusal = () =>
+    Object.assign(new Error(SERVER_SENTENCE), {
+      code: 'YOU_HAVE_REACHED_THE_MAXIMUM_NUMBER_OF_ORGANIZATIONS',
+      status: 403,
+    });
+
+  for (const lang of ['zh-Hans', 'en'] as const) {
+    it(`${lang}: the dialog shows the pack sentence, not the server's English, and does not retry`, async () => {
+      packLang = lang;
+      createOrganization.mockRejectedValue(limitRefusal());
+      render(<CreateWorkspaceDialog open onOpenChange={() => {}} />);
+      await settleAuthConfig();
+
+      fillAndSubmit();
+
+      const shown = await screen.findByTestId('workspace-create-error');
+      const expected = (builtInLocales[lang] as { organization: { errors: Record<string, string> } }).organization
+        .errors.organizationLimitReached;
+      expect(typeof expected).toBe('string');
+      expect(shown).toHaveTextContent(expected);
+      expect(shown).not.toHaveTextContent(SERVER_SENTENCE);
+      expect(createOrganization).toHaveBeenCalledTimes(1);
+      expect(provisionMock).not.toHaveBeenCalled();
+    });
+  }
+});

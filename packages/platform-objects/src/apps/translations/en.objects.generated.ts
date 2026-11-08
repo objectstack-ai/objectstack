@@ -1160,9 +1160,10 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       revoked_reason: {
         label: "Revoke Reason",
-        help: "Set when an administrator's forced password reset revoked this key. Only a platform administrator can restore such a key; its owner creates a new one. Cleared when the key is restored. Empty for a key revoked from the API Keys list.",
+        help: "Why the key was revoked, where that decides who can restore it. Administrator password reset: only a platform administrator can restore the key. Organization membership ended: the owner left the organization, and no one can restore the key; a member creates a new one. Cleared when the key is restored. Empty for a key revoked from the API Keys list.",
         options: {
-          admin_password_reset: "Administrator password reset"
+          admin_password_reset: "Administrator password reset",
+          organization_membership_ended: "Organization membership ended"
         }
       },
       key: {

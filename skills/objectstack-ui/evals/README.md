@@ -19,7 +19,9 @@ view / page / dashboard / report metadata.
   base object's `allowExport` permission).
 - `views-apps-actions-pages.json` — `defineView` containers, `App.create`
   navigation, `defineAction` surfaces, record / interface pages, package
-  docs, wizard forms.
+  docs, wizard forms, a view added beside the list (and the empty board over
+  a field added with it), a write button whose body writes, the view kind
+  the request names.
 
 ## Format
 

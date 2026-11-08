@@ -112,6 +112,20 @@ const FIELD_DEFAULTS: Record<string, string> = {
   'fields.preferenceOption.notConfigured': '{{value}} (not configured)',
   'fields.preferenceOption.notInList': '{{value}} (not in the list)',
   'fields.preferenceOption.useTyped': 'Use "{{value}}"',
+  // `quiet-hours`: the window's three part labels, its readonly line, the
+  // two notes about what the window holds, the refusal of a half-entered
+  // window, the unreadable-value note and its replace button, and the mark on
+  // a stored zone the list does not hold. Same values as the `en` pack.
+  'fields.quietHours.timeZone': 'Time zone',
+  'fields.quietHours.start': 'Start',
+  'fields.quietHours.end': 'End',
+  'fields.quietHours.range': '{{start}} to {{end}} ({{zone}})',
+  'fields.quietHours.pastMidnight': 'Runs past midnight and ends the next day.',
+  'fields.quietHours.sameTimes': 'Start and end are the same, so nothing is held.',
+  'fields.quietHours.incomplete': 'Enter both a start and an end time.',
+  'fields.quietHours.unreadable': 'This value is not a time range this control can show. It is kept as stored.',
+  'fields.quietHours.replace': 'Set a time range',
+  'fields.quietHours.zoneNotInList': '{{zone}} (not in the list)',
   'fields.recipient.selectTypeFirst': 'Select a recipient type first.',
   'fields.recipient.loading': 'Loading…',
   'fields.recipient.search': 'Search…',

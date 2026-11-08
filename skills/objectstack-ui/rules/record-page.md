@@ -10,9 +10,9 @@ option declares `kind: 'open' | 'won' | 'lost'`; `false` suppresses it),
 order of the related lists, `editMode` (`'modal'` | `'page'`) how Edit opens.
 Layout follows the width of the surface the page occupies, never a key (the
 object's `detail` block and `relatedLayout` are removed, ADR-0085): two columns
-from 760 px (details | 动态 and the related panels), three-column sections from
-1120 px, one column below; a tab row under the header (Overview, 动态, one tab
-per panel with its count) enlarges a panel at `?related=object.field`.
+from 760 px (details | Activity and the related panels), three-column sections
+from 1120 px, one column below; a tab row under the header (Overview, Activity,
+one tab per panel with its count) enlarges a panel at `?related=object.field`.
 
 **2 · Relationship flags shape the related column.** On the CHILD object's
 reference field: `relatedList: 'primary'` draws the child as a full-width body
@@ -38,7 +38,7 @@ the default — a filtered split (Open vs Closed), a chart tab, a bespoke strip 
 when steps 1–3 cannot express the page.
 
 **5 · The drawer, unless the object declares `page`.** A clicked row opens the
-record in the drawer, which expands to the full page (one page at two widths);
+record in the drawer, which expands to the full page;
 `navigation: { mode: 'page' }` on the object's list view is for an object whose
 record should open as the full page (`new_window`, `none` are the other members).
 `modal` / `split` / `popover` were removed in @objectstack/spec 18.3.0 (ADR-0087

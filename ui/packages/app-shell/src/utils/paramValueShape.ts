@@ -182,6 +182,7 @@ export const PARAM_VALUE_SHAPES: Readonly<Record<string, ParamValueShapeSpec>> =
   'permission-ref': { base: 'string', cardinality: 'scalar', widgetHintOnly: true, note: 'Permission-set name string. Widget-hint only — not a declarable param type.' },
   'notification-topic': { base: 'string', cardinality: 'scalar', widgetHintOnly: true, note: 'Notification topic string. Widget-hint only — not a declarable param type.' },
   'notification-channel': { base: 'string', cardinality: 'scalar', widgetHintOnly: true, note: 'Notification channel string. Widget-hint only — not a declarable param type.' },
+  'quiet-hours': { base: 'object', cardinality: 'scalar', widgetHintOnly: true, note: 'Quiet-hours window { tz?, start, end } object (null when empty). Widget-hint only — not a declarable param type.' },
 });
 
 /** Concrete `base[]` tag for a base shape. */

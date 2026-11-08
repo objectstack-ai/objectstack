@@ -1160,9 +1160,10 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
       },
       revoked_reason: {
         label: "Motivo da revogação",
-        help: "Definido quando a redefinição forçada de senha por um administrador revogou esta chave. Somente um administrador da plataforma pode restaurar essa chave; o proprietário cria uma nova. Limpo quando a chave é restaurada. Vazio para uma chave revogada na lista de Chaves de API.",
+        help: "Por que a chave foi revogada, quando isso decide quem pode restaurá-la. Redefinição de senha pelo administrador: somente um administrador da plataforma pode restaurar a chave. Fim da associação à organização: o proprietário saiu da organização e ninguém pode restaurar a chave; um membro cria uma nova. Limpo quando a chave é restaurada. Vazio para uma chave revogada na lista de Chaves de API.",
         options: {
-          admin_password_reset: "Redefinição de senha pelo administrador"
+          admin_password_reset: "Redefinição de senha pelo administrador",
+          organization_membership_ended: "Fim da associação à organização"
         }
       },
       key: {

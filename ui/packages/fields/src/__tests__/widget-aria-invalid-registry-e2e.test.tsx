@@ -141,6 +141,7 @@ import {
   NotificationTopicField,
   NotificationChannelField,
 } from '../widgets/RegistryRefField';
+import { QuietHoursField } from '../widgets/QuietHoursField';
 
 /** Same widget map as the #3291 sweep, so the parity check covers the registry. */
 const WIDGETS: Record<string, ComponentType<any>> = {
@@ -197,6 +198,7 @@ const WIDGETS: Record<string, ComponentType<any>> = {
   'permission-ref': PermissionRefField,
   'notification-topic': NotificationTopicField,
   'notification-channel': NotificationChannelField,
+  'quiet-hours': QuietHoursField,
 };
 
 /**
