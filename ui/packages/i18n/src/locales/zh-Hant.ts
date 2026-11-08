@@ -2862,7 +2862,7 @@ const zhHant = {
         signIn: '以開發管理員登入',
       },
       errors: {
-        invalidCredentials: '郵箱或密碼錯誤，請重試。',
+        invalidCredentials: '郵箱或密碼錯誤。多次失敗後，登入將暫停一段時間。忘記密碼？重置密碼後即可立即登入。',
         emailNotVerified: '請先驗證您的郵箱後再登入。',
         oauthCallbackFailed: '單點登入未能完成——登入連結已過期或已被使用，請重新發起登入。',
         twoFactorInvalidCode: '驗證碼無效，請檢查身份驗證器應用後重試。',

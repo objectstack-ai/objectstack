@@ -3407,7 +3407,7 @@ const en = {
         signIn: 'Sign in as dev admin',
       },
       errors: {
-        invalidCredentials: 'Invalid email or password. Please try again.',
+        invalidCredentials: 'Invalid email or password. After several failed attempts, sign-in is paused for a while. Forgot your password? Reset it to sign in right away.',
         emailNotVerified: 'Please verify your email address before signing in.',
         oauthCallbackFailed: 'Single sign-on could not be completed — the sign-in link expired or was already used. Please try again.',
         // objectstack#29105 — refusals of the two-factor sign-in step, by the
