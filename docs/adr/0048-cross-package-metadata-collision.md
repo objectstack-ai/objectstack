@@ -1235,9 +1235,12 @@ the AI family did.
   contract); the MCP bridge registers each tool under its name and calls it by
   that name, and an MCP server holds one tool per name (a second registration of
   a name throws). An agent's guardrail matches a tool by its name.
-- The cloud agent runtime's own by-name read was put to the cloud seat as a read
-  request; this repository's readers already settle the question, since one
-  reader without package context is enough.
+- The cloud agent runtime (read by the cloud seat at objectstack-ai/cloud
+  `ba6f0fa`, #31414) resolves a tool by bare name too, for chat (a skill's
+  `tools`) and MCP alike, against an in-process tool registry keyed by the name
+  that plugins fill in code; the metadata `tool` item is a mirror for Studio and
+  reaches no handler there. So no reader on either side carries a package, and
+  one such reader is enough.
 
 **What is refused.** `tool` joins P1.2's list, last: the same two doors, the
 same holders, the same envelope and rename. It is not bundled, and it has no
