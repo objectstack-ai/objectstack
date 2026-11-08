@@ -133,7 +133,7 @@ const STUDIO_ZH: Record<string, string> = {
   'perm.cel.type.unknown': '未知',
   'perm.cel.type.unknownHint':
     '引擎无法证明唯一类型。用 double() / int() / string() 包裹操作数以固定类型——只有可证明为数字的公式才能作为数据集度量。',
-  'perm.cel.saveBlocked': '请先修复 CEL 语法错误再保存。',
+  'perm.cel.saveBlocked': '请先修复表达式错误再保存。',
   // objectui#6900 — 见英文表同名条目。
   'perm.inspector.saveBlocked': '请先修复检查器中列出的问题再保存。',
   'perm.cel.test.title': '测试策略',
