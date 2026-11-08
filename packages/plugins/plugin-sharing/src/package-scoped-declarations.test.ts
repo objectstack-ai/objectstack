@@ -51,7 +51,7 @@ const manifest = (id: string, deps: string[] = []) =>
 let registry: SchemaRegistry;
 const install = (id: string, deps: string[] = []) => registry.installPackage(manifest(id, deps), 'code');
 const declare = (type: string, packageId: string, item: Row) =>
-  registry.registerItem(type, { ...item, _packageId: packageId }, 'name', packageId);
+  registry.registerItem<Row>(type, { ...item, _packageId: packageId }, 'name', packageId);
 
 /** A sharing rule `name`, granting `position` read on `account`. */
 const sharingRule = (name: string, position: string): Row => ({
