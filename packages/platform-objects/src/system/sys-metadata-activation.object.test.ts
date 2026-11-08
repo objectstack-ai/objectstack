@@ -102,12 +102,25 @@ describe('sys_metadata_activation — the ADR-0126 §4 activation ledger', () =>
     });
   });
 
-  describe('row identity — one row per (metadata_type, name)', () => {
+  describe('row identity — one row per (metadata_type, package_id, name) (ADR-0150 D4, D8 row R4)', () => {
     const uniqueIndexes = (SysMetadataActivation.indexes ?? []).filter((i: any) => i.unique);
 
-    it('declares exactly one unique index, on (metadata_type, name)', () => {
+    it('declares exactly one unique index, on (metadata_type, package_id, name)', () => {
+      // The package is part of the identity: two packages may each hold a row
+      // for an item of the same name, one package may not hold two. Asserted
+      // by EQUALITY and in key order, so neither the old two-part key nor a
+      // re-encoded `package:name` spelling in `name` passes.
       expect(uniqueIndexes).toHaveLength(1);
-      expect((uniqueIndexes[0] as any).fields).toEqual(['metadata_type', 'name']);
+      expect((uniqueIndexes[0] as any).fields).toEqual(['metadata_type', 'package_id', 'name']);
+    });
+
+    it('keeps the package as its own nullable column, never re-encoded into the name (ADR-0126 §4)', () => {
+      const f = SysMetadataActivation.fields as Record<string, any>;
+      // Nullable: an environment-authored item has no package, and its row
+      // says so by carrying none (the store refuses '').
+      expect(f.package_id.required).not.toBe(true);
+      expect(f.name.required).toBe(true);
+      expect(f.metadata_type.required).toBe(true);
     });
 
     it("states the scope as 'global' — NOT bare `true`, and NOT 'organization'", () => {
