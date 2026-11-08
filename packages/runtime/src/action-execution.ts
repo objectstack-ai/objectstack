@@ -83,6 +83,7 @@ import { serveStoredMetadataRead, serveStoredMetadataReadsThrough } from './stor
 import { actorUserFromExecutionContext, resolveActorDisplayName } from './security/actor-user.js';
 import { actionInvocationBranch, actionInvocationFailure, actionInvocationTarget, recordActionInvocation, withActionSurface } from './action-invocation-audit.js';
 import type { HttpProtocolContext } from './http-dispatcher.js';
+import { admittingCredentialKind, type AdmittingCredentialKind } from './security/admitting-credential.js';
 import {
     GLOBAL_ACTION_OBJECT_KEY,
     actionHandlerObjectKeys,
@@ -1619,9 +1620,10 @@ function isIdentityRouteTarget(path: string): boolean {
  * envelope carries its `oauthScopes`; such a token is honoured on the MCP
  * endpoint alone), else what the door's admission recorded — `api_key` or
  * `session`. `undefined` when the door recorded nothing (an anonymous caller,
- * whom the door's own floor answers first).
+ * whom the door's own floor answers first). The one reading is
+ * {@link admittingCredentialKind}, which the environment-membership gate takes too.
  */
-export type ApiForwardCredentialKind = 'session' | 'api_key' | 'oauth';
+export type ApiForwardCredentialKind = AdmittingCredentialKind;
 
 /** Which kind of door an api action's `target` is served by, for the forward. */
 export type ApiForwardTargetDoor = 'identity' | 'mcp' | 'platform';
@@ -1710,8 +1712,7 @@ export function apiForwardAgentOf(requestContext: HttpProtocolContext | undefine
 
 /** The kind of credential that admitted this request's caller (see {@link ApiForwardCredentialKind}). */
 export function apiForwardCredentialKind(requestContext: HttpProtocolContext | undefined): ApiForwardCredentialKind | undefined {
-    if (Array.isArray(requestContext?.executionContext?.oauthScopes)) return 'oauth';
-    return requestContext?.admission?.credential;
+    return admittingCredentialKind(requestContext);
 }
 
 /**
