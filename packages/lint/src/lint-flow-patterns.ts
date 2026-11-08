@@ -239,6 +239,11 @@ export const FLOW_MULTIPLE_DEFAULT_EDGES = 'flow-multiple-default-edges';
 /** #4414 — `config.condition` on a node whose executor never reads it. */
 export const FLOW_INERT_NODE_CONDITION = 'flow-inert-node-condition';
 /**
+ * A top-level node no edge path from the start node reaches: it never runs.
+ * See {@link scanUnreachableNodes}.
+ */
+export const FLOW_NODE_UNREACHABLE = 'flow-node-unreachable';
+/**
  * #15429 — a `decision` `config.mode` the spec refuses: a value outside
  * `'exclusive' | 'inclusive'`, or a legal `mode` beside a non-empty
  * `conditions` list (ruling A on #20168). `error`: `registerFlow` refuses the
@@ -1862,6 +1867,87 @@ function scanTryCatchWithoutCatch(
  * never throws. A finding marked `severity: 'error'` fails the build, and since
  * #5383 it can be raised by a node inside a `loop` body too.
  */
+/**
+ * {@link FLOW_NODE_UNREACHABLE}: a top-level node no edge path from the start
+ * node reaches, one `error` finding per node.
+ *
+ * The engine runs a flow from its first `start` node and follows out-edges from
+ * there (`service-automation`'s `executeNode` → `traverseNext`); nothing else
+ * schedules a top-level node. So a node no path reaches (an edge forgotten while
+ * wiring, a node left behind when its in-edges were deleted) registers,
+ * publishes, reports itself configured and never runs: inert on every run,
+ * which is this module's bar for `error`.
+ *
+ * Why lint and not the flow parse: the save door parses `FlowSchema` on every
+ * save, a draft included, and the Studio designer produces this shape mid-edit
+ * (removing a node that has more or fewer than one in-edge and out-edge drops
+ * its edges without bridging them, which leaves its successors unwired). A
+ * parse refusal would refuse that draft. As a finding here it fails `os lint` /
+ * `os build`, and on the runtime authoring gate (`runtimeTypes: ['flow']`) a
+ * live save and a publish, while a draft is kept with it in `_diagnostics`.
+ *
+ * Scope, declared rather than discovered:
+ *
+ *  - The top-level graph only (see the call site).
+ *  - A flow with no `start` node is not judged: nothing is reached from
+ *    nothing, and the engine refuses to run it (`FLOW_NO_START_NODE`).
+ *  - Every edge counts, whatever its `type` or `condition`: a `fault` edge or a
+ *    conditional edge is a path the engine can take.
+ *  - A flow with an edge whose endpoint names no top-level node is not judged:
+ *    the flow parse refuses that edge, and the node it was meant to reach would
+ *    be reported a second time, for the same fault, under a cure (add an edge)
+ *    that is not the one to apply.
+ *  - A `boundary_event` is exempt, and so is a node reached only through one: it
+ *    is attached to its host by `boundaryConfig.attachedToNodeId`, not entered by
+ *    an edge, and its own contract owns its refusal.
+ */
+function scanUnreachableNodes(
+  flowName: string,
+  nodes: AnyRec[],
+  edges: AnyRec[],
+  findings: FlowLintFinding[],
+): void {
+  const start = nodes.find((n) => n.type === 'start');
+  if (!start || typeof start.id !== 'string') return;
+  const ids = new Set(nodes.map((n) => n.id).filter((id): id is string => typeof id === 'string'));
+  const outgoing = new Map<string, string[]>();
+  for (const e of edges) {
+    if (typeof e.source !== 'string' || typeof e.target !== 'string') return;
+    if (!ids.has(e.source) || !ids.has(e.target)) return;
+    const targets = outgoing.get(e.source) ?? [];
+    targets.push(e.target);
+    outgoing.set(e.source, targets);
+  }
+  const reached = new Set<string>();
+  const visit = (from: readonly string[]): void => {
+    const queue = [...from];
+    while (queue.length > 0) {
+      const id = queue.shift()!;
+      if (reached.has(id)) continue;
+      reached.add(id);
+      queue.push(...(outgoing.get(id) ?? []));
+    }
+  };
+  visit([start.id]);
+  visit(nodes.filter((n) => n.type === 'boundary_event' && typeof n.id === 'string').map((n) => n.id as string));
+  for (const node of nodes) {
+    if (typeof node.id !== 'string' || reached.has(node.id)) continue;
+    findings.push({
+      where: `flow '${flowName}' · node '${node.id}' (${String(node.type)})`,
+      message:
+        `no edge path leads to this node from the start node '${start.id}', so it never runs: a run starts ` +
+        `at the start node and follows edges, and the flow still registers and reports itself as configured.`,
+      // A second `start` node is unreached by construction (a run starts at the
+      // first one), and an edge into it is not the cure: remove the extra start.
+      hint: node.type === 'start'
+        ? `A run starts at the first start node only: delete this extra start node, and wire what follows it from a node that runs.`
+        : `Add an edge into it from a node that runs, or delete the node.`,
+      rule: FLOW_NODE_UNREACHABLE,
+      severity: 'error',
+    });
+  }
+}
+
 export function lintFlowPatterns(stack: AnyRec): FlowLintFinding[] {
   const findings: FlowLintFinding[] = [];
   for (const flow of recordsOf(stack.flows)) {
@@ -1966,6 +2052,12 @@ export function lintFlowPatterns(stack: AnyRec): FlowLintFinding[] {
         });
       }
     }
+
+    // (a5) A top-level node no edge path from the start node reaches never runs.
+    //      Flow-level for the reason the trigger rules are: a run enters the
+    //      top-level graph at its start node, and a region body is already
+    //      single-entry (ADR-0031), so nothing one level down can be unreached.
+    scanUnreachableNodes(flowName, nodes, edges, findings);
 
     // (b)–(e) #5383 — every graph in the flow, not just the top-level one: its
     //     own `nodes`/`edges` plus each nested ADR-0031 region, each scanned
