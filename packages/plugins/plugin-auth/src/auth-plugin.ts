@@ -103,6 +103,7 @@ import { runSetInitialPassword } from './set-initial-password.js';
 import { runRegisterSsoProviderFromForm, runRegisterSamlProviderFromForm, runRequestDomainVerification, runVerifyDomain, type AuthRequestHandler } from './register-sso-provider.js';
 import { runResendVerificationEmail } from './send-verification-email.js';
 import { runSysSessionRevoke, sysSessionRevokeDepsFor } from './sys-session-revoke.js';
+import { oneAccountRefusalAtMount } from './one-account-per-request.js';
 import { resolveHandoffSignInEntry, runOneTimeTokenHandoff } from './one-time-token-handoff.js';
 import { readJsonRequestBody } from './request-json-body.js';
 import {
@@ -3660,6 +3661,36 @@ export class AuthPlugin implements Plugin {
         if (!mgr || typeof mgr.resolveClientAddress !== 'function') return next();
         const address = mgr.resolveClientAddress({ headers: (c.req.header() ?? {}) as Record<string, string>, ...transportOf(c) });
         return runAtMountDoor(address, () => next());
+      });
+    }
+
+    // ── An auth request is judged and executed as one account ─────────────
+    // A request whose session cookie and bearer token name two different
+    // signed-in accounts is refused HERE, ahead of every route below — the
+    // raw ObjectStack mounts, which read their caller in process, and the
+    // vendor catch-all alike — with `401 CREDENTIALS_NAME_DIFFERENT_ACCOUNTS`
+    // in the ADR-0112 envelope. The judgment is the before-hook's own
+    // (`one-account-per-request.ts`); asked here, a raw mount answers it with
+    // its code instead of meeting it as a throw from its session read. A
+    // request that carries one credential, or two that name one account, is
+    // handed on with nothing read.
+    if (typeof rawApp.use === 'function') {
+      rawApp.use(`${basePath}/*`, async (c: any, next: () => Promise<void>) => {
+        const mgr = this.authManager;
+        const headers: Headers | undefined = c.req.raw?.headers;
+        if (!mgr || typeof mgr.getAuthContext !== 'function' || !headers?.get('authorization') || !headers.get('cookie')) {
+          return next();
+        }
+        let refusal: Awaited<ReturnType<typeof oneAccountRefusalAtMount>>;
+        try {
+          refusal = await oneAccountRefusalAtMount(headers, await mgr.getAuthContext());
+        } catch {
+          // No auth context to read with: the routes below meet the same
+          // judgment in the before-hook their session reads pass through.
+          return next();
+        }
+        if (refusal) return c.json(refusal.body, refusal.status);
+        return next();
       });
     }
 

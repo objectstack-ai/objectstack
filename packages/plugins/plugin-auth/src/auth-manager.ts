@@ -1991,6 +1991,7 @@ export class AuthManager {
       isPlatformAdminUserId: (...a) => this.isPlatformAdminUserId(...a),
       isSsoWired: (...a) => this.isSsoWired(...a),
       linkingContext: (...a) => this.linkingContext(...a),
+      logDurabilityDegradation: (...a) => this.logDurabilityDegradation(...a),
       recordPasswordHistory: (...a) => this.recordPasswordHistory(...a),
       resolveActor: (...a) => this.resolveActor(...a),
       resolveAuthSecret: (...a) => this.resolveAuthSecret(...a),
@@ -5519,8 +5520,12 @@ export class AuthManager {
    * `admin-revoke-user-session-match-guard.ts`.
    */
   private assertAdminRevokeUserSessionIdentifiesRecord(ctx: any): Promise<void> {
-    // [#25224 cut 1] The body moved to `auth-manager-actor-guards.ts`; it reads no member of this class.
-    return assertAdminRevokeUserSessionIdentifiesRecord(ctx);
+    // [#25224 cut 1] The body moved to `auth-manager-actor-guards.ts` (see `ActorGuardHost`).
+    // It asks `resolveActor` for a caller signed in by bearer alone.
+    const host: Pick<ActorGuardHost, 'resolveActor'> = {
+      resolveActor: (...a) => this.resolveActor(...a),
+    };
+    return assertAdminRevokeUserSessionIdentifiesRecord.call(host, ctx);
   }
 
   /**
