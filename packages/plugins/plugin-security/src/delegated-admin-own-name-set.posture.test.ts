@@ -1065,8 +1065,7 @@ describe('[ADR-0090 D12] a delegate can neither capture nor evict a direct grant
 
           it('moving a grant FROM the subject TO a holder inside the scope is refused with the one answer, at the gate and through the write door, and the grant stays', async () => {
             expect(await atGate(h, 'from', delegateFor(state))).toEqual(OUTSIDE_ANSWER);
-            const door = await throughWriteDoor(h, 'from', delegateFor(state));
-            expect([door.status, (door as any).code, (door as any).message]).toEqual([403, OUTSIDE_ANSWER.code, OUTSIDE_ANSWER.message]);
+            expect(await throughWriteDoor(h, 'from', delegateFor(state))).toEqual(OUTSIDE_ANSWER);
             await expectUnmoved(h);
           });
 
