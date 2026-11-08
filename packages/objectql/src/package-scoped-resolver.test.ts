@@ -567,7 +567,7 @@ describe('R2 — the holder source and the types the entry resolves', () => {
 
 describe('R2 — engine functions resolve in their referrer\'s package (ADR-0150 D4)', () => {
   let engine: ObjectQL;
-  const fn = (tag: string) => Object.assign(() => tag, { tag });
+  const fn = (tag: string) => Object.assign((): void => undefined, { tag });
   const installOn = (id: string, deps: string[] = [], namespace?: string) => engine.registry.installPackage(manifest(id, deps, namespace), 'code');
   const resolveFn = (name: string, callerPackageId?: string | null) => resolvePackageScopedFunction(engine, { name, callerPackageId });
   const tagOf = (r: PackageScopedResolution) =>
