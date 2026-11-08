@@ -217,6 +217,15 @@ export interface SignUpData {
    * `features.turnstileSiteKey`. Omitted, no header is sent.
    */
   captchaToken?: string;
+  /**
+   * The id of the invitation this sign-up presents — the last segment of the
+   * `/accept-invitation/ID` link the invitee arrived from. Sent in the
+   * `/sign-up/email` body as `invitationId`. Under the server's `invite_only`
+   * audience posture a sign-up is admitted only by the invitation it
+   * presents; an address alone is refused `SELF_REGISTRATION_CLOSED`.
+   * Omitted, no field is sent.
+   */
+  invitationId?: string;
 }
 
 /** Auth client configuration */

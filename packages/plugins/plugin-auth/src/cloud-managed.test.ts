@@ -153,8 +153,8 @@ async function produceStagedRows() {
     idp: 'idp.25083@example.com',
   } as const;
   for (const email of Object.values(emails)) {
-    await inviteForAudienceGate(manager, email);
-    const res = await direct('/sign-up/email', { email, password: PASSWORD, name: email });
+    const invitationId = await inviteForAudienceGate(manager, email);
+    const res = await direct('/sign-up/email', { email, password: PASSWORD, name: email, invitationId });
     expect(res.status, `sign-up ${email}: ${await res.clone().text()}`).toBe(200);
   }
 
@@ -347,20 +347,20 @@ describe('[#25083] local sign-up on a cloud-managed environment', () => {
     setManaged(true);
     const engine = createMemoryEngine();
     const manager = makeManager(engine);
-    const signUp = (email: string) =>
+    const signUp = (email: string, invitationId?: string) =>
       manager.handleRequest(
         new Request(`${ORIGIN}${BASE}/sign-up/email`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email, password: PASSWORD, name: email }),
+          body: JSON.stringify({ email, password: PASSWORD, name: email, invitationId }),
         }),
       );
 
     const owner = await signUp('owner.25083@example.com');
     expect(owner.status, await owner.clone().text()).toBe(200);
 
-    await inviteForAudienceGate(manager, 'invitee.25083@example.com');
-    const invitee = await verdict(await signUp('invitee.25083@example.com'));
+    const invitationId = await inviteForAudienceGate(manager, 'invitee.25083@example.com');
+    const invitee = await verdict(await signUp('invitee.25083@example.com', invitationId));
     expect(invitee.status, invitee.text).toBe(400);
     expect(invitee.code, invitee.text).toBe('EMAIL_PASSWORD_SIGN_UP_DISABLED');
     expect(((engine.tables.get('sys_user') ?? []) as any[]).map((u) => u.email)).toEqual([

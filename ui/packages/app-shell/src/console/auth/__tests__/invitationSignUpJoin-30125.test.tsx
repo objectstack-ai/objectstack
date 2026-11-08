@@ -157,3 +157,14 @@ describe('DefaultRegisterPage — a sign-up from an invitation link joins it (#3
     expect(client.acceptInvitation).not.toHaveBeenCalled();
   });
 });
+
+describe('DefaultRegisterPage — the sign-up presents the invitation its link names', () => {
+  it('sends the redirect\'s invitation id with the sign-up', async () => {
+    const client = createMockClient();
+    renderRegister(client);
+    await signUpOnTheForm();
+
+    await waitFor(() => expect(client.signUp).toHaveBeenCalledTimes(1));
+    expect(client.signUp).toHaveBeenCalledWith(expect.objectContaining({ email: USER.email, invitationId: INVITATION_ID }));
+  });
+});
