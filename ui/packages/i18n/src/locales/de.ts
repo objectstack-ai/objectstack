@@ -3787,6 +3787,7 @@ const de = {
     noMessages: 'Diese Unterhaltung enthält noch keine Nachrichten.',
     sharedObject: 'Geteilt: {{object}}',
     redactedFields: 'Einige Felder hat der Eigentümer ausgeblendet: {{fields}}',
+    linkedRecord: 'Verknüpfter Datensatz',
   },
   publicForm: {
     submit: "Absenden",

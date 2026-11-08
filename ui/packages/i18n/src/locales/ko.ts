@@ -3786,6 +3786,7 @@ const ko = {
     noMessages: '이 대화에는 아직 메시지가 없습니다.',
     sharedObject: '공유된 {{object}}',
     redactedFields: '일부 필드는 소유자가 숨겼습니다: {{fields}}',
+    linkedRecord: '연결된 레코드',
   },
   publicForm: {
     submit: "제출",

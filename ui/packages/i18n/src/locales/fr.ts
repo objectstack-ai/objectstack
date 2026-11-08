@@ -3860,6 +3860,7 @@ const fr = {
     noMessages: 'Cette conversation ne contient encore aucun message.',
     sharedObject: '{{object}} partagé',
     redactedFields: 'Certains champs sont masqués par le propriétaire : {{fields}}',
+    linkedRecord: 'Enregistrement lié',
   },
   publicForm: {
     submit: "Envoyer",
