@@ -193,6 +193,9 @@ const de = {
     requiredForAction: "Erforderlich, um „{{action}}“ auszuführen.",
     aiSuggested: "KI-Vorschlag",
     aiDraftNotice: "Die KI hat die mit „KI-Vorschlag“ markierten Felder aus dem Chat ausgefüllt. Gespeichert wird erst, wenn Sie sie prüfen und speichern.",
+    aiBefore: "Vorher: {{value}}",
+    aiBeforeEmpty: "leer",
+    aiRevert: "Zurücksetzen",
     maxFileSize: "Maximale Größe: {{size}}",
     masterDetail: {
       loadingColumns: "Spalten werden geladen…",

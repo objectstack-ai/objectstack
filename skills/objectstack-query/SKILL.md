@@ -57,7 +57,11 @@ The RLS / system-read escape hatch. A hook, job or endpoint that reads without
 one runs as whatever identity the caller carried — org-scoping hooks then return
 **fewer rows**, indistinguishable from "there is no data".
 
+<!-- os:check -->
 ```typescript
+import type { IDataEngine } from '@objectstack/spec/contracts';
+declare const engine: IDataEngine;
+declare const name: string;
 const SYS = { isSystem: true } as const;
 const [row] = await engine.find('project', { where: { name }, limit: 1, context: SYS });
 ```
@@ -91,6 +95,8 @@ procedure and the full tombstone register are **objectstack-upgrade**.
 - **[Pagination](./rules/pagination.md)** — offset vs keyset, best practices, performance
 
 ## Filter Operators
+
+The bare `{ where: … }` blocks here are option fragments, so `check:skill-examples` skips them.
 
 ### Implicit Equality (Shorthand)
 
@@ -209,14 +215,16 @@ rules → Field References / Now-Anchored Comparands](./rules/filters.md)**.
 
 Sort with `orderBy` — an array of sort nodes:
 
+<!-- os:check -->
 ```typescript
-{
+import type { QueryInput } from '@objectstack/spec/data';
+const query: QueryInput = {
   object: 'account',
   orderBy: [
     { field: 'priority', order: 'desc' },
     { field: 'name', order: 'asc' },      // Secondary sort
   ]
-}
+};
 ```
 
 **Rules:**
@@ -226,9 +234,11 @@ Sort with `orderBy` — an array of sort nodes:
 
 ## Pagination
 
+<!-- os:check -->
 ```typescript
+import type { QueryInput } from '@objectstack/spec/data';
 // Offset paging — page 3
-{ object: 'account', limit: 20, offset: 40 }
+const page3: QueryInput = { object: 'account', limit: 20, offset: 40 };
 ```
 
 **When to use:** UI pages, small datasets, "jump to page N". It degrades on
@@ -245,7 +255,10 @@ The functions (`count`, `sum`, `avg`, `min`, `max`, `count_distinct`), date
 bucketing, `having`, and the per-measure `filter` are
 **[aggregation rules](./rules/aggregation.md)**. The call shape:
 
+<!-- os:check -->
 ```typescript
+import type { IDataEngine } from '@objectstack/spec/contracts';
+declare const engine: IDataEngine;
 // Total revenue per region
 const rows = await engine.aggregate('deal', {
   groupBy: ['region'],
@@ -269,7 +282,10 @@ rows; read each measure under its `alias`, and reference that same name from
 Load related records through lookup / master_detail fields. **Keep the foreign
 key in `fields`** — the relation is carried by that column:
 
+<!-- os:check -->
 ```typescript
+import type { IDataEngine } from '@objectstack/spec/contracts';
+declare const engine: IDataEngine;
 const tasks = await engine.find('task', {
   fields: ['title', 'status', 'assignee', 'project'],   // the FK columns stay
   expand: {
@@ -300,7 +316,10 @@ const tasks = await engine.find('task', {
 
 The canonical form is a **bare string** with a sibling `searchFields`:
 
+<!-- os:check -->
 ```typescript
+import type { IDataEngine } from '@objectstack/spec/contracts';
+declare const engine: IDataEngine;
 const rows = await engine.find('article', {
   search: 'machine learning',
   searchFields: ['title', 'content'],
@@ -359,7 +378,11 @@ related record's column, `where: { relation: { column: value } }`; to *display* 
 
 ### Pagination Pattern for APIs
 
+<!-- os:check -->
 ```typescript
+import type { IDataEngine } from '@objectstack/spec/contracts';
+declare const engine: IDataEngine;
+declare const pageNumber: number;
 const page = await engine.find('account', {
   where: { status: 'active' },
   fields: ['id', 'name', 'email'],
@@ -375,7 +398,10 @@ Every KPI on a dashboard shares **one** aggregate call — unconditional measure
 plain, conditional ones carrying their own `filter`. `where` scopes the whole
 call, so reach for it only when every measure wants the same scope:
 
+<!-- os:check -->
 ```typescript
+import type { IDataEngine } from '@objectstack/spec/contracts';
+declare const engine: IDataEngine;
 const [kpis] = await engine.aggregate('deal', {
   aggregations: [
     { function: 'count', alias: 'total_deals' },

@@ -1,6 +1,6 @@
 # Filter Rules
 
-Comprehensive guide for building ObjectStack query filters.
+Every block below is a `where` fragment, so `check:skill-examples` skips it.
 
 ## Operator Reference
 

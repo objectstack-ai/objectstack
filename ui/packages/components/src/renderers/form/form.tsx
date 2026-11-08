@@ -47,7 +47,7 @@ import { createSafeTranslation } from '@object-ui/i18n';
 import type { RendererHostProps } from '../../lib/renderer-host-props';
 import { currencyCodeFieldNames, useUsedCurrencyCodes, withUsedCurrencyCodes } from './usedCurrencyCodes';
 import { usePatchingUpdateActions } from './actionRequirements';
-import { SuggestedFieldsContext } from './suggested-fields-context';
+import { SuggestedFieldChangesContext, SuggestedFieldsContext } from './suggested-fields-context';
 
 /**
  * A submit refusal as the banner and the toast draw it: one string as itself,
@@ -520,6 +520,14 @@ const useSafeFormTranslation = createSafeTranslation(
     // chat draft suggested (see `SuggestedFieldsContext`). Byte-identical to
     // the `en` pack.
     'form.aiSuggested': 'AI suggestion',
+    // objectstack#28106 — beside that mark on an EDIT form: the stored value
+    // the AI-proposed change replaces, and the per-field revert. Byte-identical
+    // to the `en` pack.
+    'form.aiBefore': 'Was: {{value}}',
+    'form.aiBeforeEmpty': 'empty',
+    'form.aiRevert': 'Revert',
+    'common.yes': 'Yes',
+    'common.no': 'No',
   },
   'common.selectOption',
 );
@@ -1205,6 +1213,33 @@ const HORIZONTAL_FIELD_ITEM_CLASS =
   'sm:grid sm:grid-cols-[minmax(0,10rem)_minmax(0,1fr)] sm:items-baseline sm:gap-x-4 sm:gap-y-2 sm:space-y-0 sm:[&>:not(label)]:col-start-2';
 
 /**
+ * objectstack#28106 — the stored value an AI-proposed change replaces, as the
+ * one line "Was: …" under the field reads it. An option field reads its option
+ * label, a lookup read back expanded its record's name, a list its items
+ * joined; an empty value says so rather than drawing nothing.
+ */
+function formatSuggestionBefore(
+  value: unknown,
+  options: readonly SelectOption[] | undefined,
+  t: (key: string, params?: Record<string, unknown>) => string,
+): string {
+  const one = (v: unknown): string => {
+    if (typeof v === 'boolean') return t(v ? 'common.yes' : 'common.no');
+    const option = options?.find((o) => valuesEqualForDirty(o?.value, v));
+    if (option) return String(option.label ?? option.value);
+    if (v && typeof v === 'object') {
+      const r = v as Record<string, unknown>;
+      const named = r.name ?? r.label ?? r.title ?? r.display_name ?? r.id ?? r._id;
+      if (named !== undefined && named !== null && typeof named !== 'object') return String(named);
+      try { return JSON.stringify(v); } catch { return String(v); }
+    }
+    return String(v);
+  };
+  if (isEmptyish(value)) return t('form.aiBeforeEmpty');
+  return Array.isArray(value) ? value.map(one).join(', ') : one(value);
+}
+
+/**
  * The help line under one field: its authored `description`, and the
  * "set automatically when saved" hint when the caller passes one
  * (objectui#12108).
@@ -1228,6 +1263,7 @@ function renderFieldDescription(
   serverDefaultHint: string | undefined,
   actionRequirementHints: readonly string[] = [],
   suggestedHint?: string,
+  suggestedBefore?: string,
 ): React.ReactNode {
   if (!description && !serverDefaultHint && actionRequirementHints.length === 0 && !suggestedHint) return null;
   return (
@@ -1242,6 +1278,13 @@ function renderFieldDescription(
           data-ai-suggested="true"
         >
           {suggestedHint}
+        </span>
+      )}
+      {/* objectstack#28106 — on an edit form, the stored value the suggestion
+          replaces: the control shows the after, this line the before. */}
+      {suggestedHint && suggestedBefore && (
+        <span className="mb-0.5 mr-1.5 inline-block text-xs" data-ai-before="true">
+          {suggestedBefore}
         </span>
       )}
       {description}
@@ -1662,6 +1705,21 @@ ComponentRegistry.register('form',
     // objectstack#28104 — the fields the host says AI suggested the opening
     // value of; each is marked while it still holds that value.
     const suggestedFields = React.useContext(SuggestedFieldsContext);
+    // objectstack#28106 — on an edit form, the changes the host says AI
+    // proposed (field name → value): each applied once over the record the
+    // form opens on, as an unsaved edit, then marked while the field still
+    // holds it. `suggestedChangeAttemptsRef` names every proposal already
+    // tried, PER FIELD: a wizard reuses this one form across its steps and
+    // draws one step's fields at a time, so a later step's proposal is tried
+    // when that step draws it, and a proposal tried once is never tried again.
+    // `appliedChangeBefore` holds, per applied field, the stored value it
+    // replaced: the before line and the revert read it, not `defaultValues`,
+    // which a wizard refills with the steps' answers at every boundary.
+    const suggestedChanges = React.useContext(SuggestedFieldChangesContext);
+    const suggestedChangeAttemptsRef = React.useRef<Set<string>>(new Set());
+    const [appliedChangeBefore, setAppliedChangeBefore] = React.useState<ReadonlyMap<string, unknown>>(
+      () => new Map(),
+    );
     // Prefix for the label ids the GROUP-labelled fields need (objectui#3961).
     // Owned here, not derived from `<FormItem>`'s own `useId()`: that id lives in
     // a context published INSIDE `FormItem`, and this renderer builds the label
@@ -2437,6 +2495,24 @@ ComponentRegistry.register('form',
       return m;
     }, [fields]);
 
+    /**
+     * objectstack#28106 — the fields an AI-proposed change may be applied to:
+     * drawn by this form, and open to the person's own edit by their static
+     * config (not hidden, read-only or disabled), so the person sees every
+     * change and can undo it. A proposal for any other field is left out.
+     */
+    const { drawnFieldNames, changeableFieldNames } = React.useMemo(() => {
+      const drawn = new Set<string>();
+      const changeable = new Set<string>();
+      for (const f of fields as FormFieldConfig[]) {
+        if (!f?.name || f.type === 'section-divider') continue;
+        drawn.add(f.name);
+        if (f.hidden || (f as any).readonly === true || f.disabled === true) continue;
+        changeable.add(f.name);
+      }
+      return { drawnFieldNames: drawn, changeableFieldNames: changeable };
+    }, [fields]);
+
     /** Field name → the tab that owns it (first claim wins). */
     const tabKeyByFieldName = React.useMemo(() => {
       const m = new Map<string, string>();
@@ -2779,6 +2855,33 @@ ComponentRegistry.register('form',
     // the explicit call belongs beside the `onDirtyChangeProp?.(...)` one
     // below, not back in a subscription's teardown ordering.
     const resetInFlightRef = React.useRef(false);
+    /**
+     * objectstack#28106 — try each AI-proposed change this form draws and has
+     * not tried yet, against `baseline` (the record the form holds). Tried
+     * ONCE per field, on the first pass where the form draws it and holds a
+     * record: applied when the person could edit it (not read-only, disabled
+     * or hidden by its config, not locked by a `readonlyWhen` rule on this
+     * record) and it differs from the stored value, skipped for good otherwise. So a later
+     * reset (a wizard step boundary, a re-read after the person reverted)
+     * keeps what the person decided. Returns how many it applied.
+     */
+    const applySuggestedChanges = (baseline: Record<string, unknown>): number => {
+      if (!suggestedChanges || Object.keys(baseline ?? {}).length === 0) return 0;
+      const applied: Array<[string, unknown]> = [];
+      for (const [name, value] of suggestedChanges) {
+        if (suggestedChangeAttemptsRef.current.has(name) || !drawnFieldNames.has(name)) continue;
+        suggestedChangeAttemptsRef.current.add(name);
+        // A field a rule locks on this record (`readonlyWhen`, the same verdict
+        // the save strips by: `readonlyFieldNames`) is skipped like a static
+        // read-only one.
+        if (!changeableFieldNames.has(name) || readonlyFieldNames.has(name)) continue;
+        if (valuesEqualForDirty(baseline[name], value)) continue;
+        form.setValue(name, value, { shouldValidate: false, shouldDirty: true });
+        applied.push([name, baseline[name]]);
+      }
+      if (applied.length > 0) setAppliedChangeBefore((prev) => new Map([...prev, ...applied]));
+      return applied.length;
+    };
     // LAYOUT effect, deliberately — not a passive one. A passive effect runs a
     // commit LATER than the render that produced the new values, so there is a
     // window in which the new inputs are already mounted and interactive but the
@@ -2847,13 +2950,28 @@ ComponentRegistry.register('form',
       }
       // Fresh values, so last attempt's rejected-field markers no longer apply.
       setRejectedFieldNames([]);
+      // objectstack#28106 — the AI-proposed changes this form now draws,
+      // applied AFTER the reset window: they are changes to the record, so the
+      // dirty check, the value channels and the save payload see them exactly
+      // as the person's own edits (`applySuggestedChanges`).
+      const appliedChanges = applySuggestedChanges(incoming);
       // A reset that carried nothing is by definition pristine — clear any stale
       // dirty signal (e.g. an edit-mode record that just finished loading). One
-      // that carried input is genuinely dirty against the caller's defaults, and
-      // the host's discard guard has to keep hearing so.
-      onDirtyChangeProp?.(carried.length > 0);
+      // that carried input, or applied an AI-proposed change, is genuinely dirty
+      // against the caller's defaults, and the host's discard guard has to keep
+      // hearing so.
+      onDirtyChangeProp?.(carried.length > 0 || appliedChanges > 0);
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [defaultValues]);
+
+    // objectstack#28106 — the drawn fields can change with no `defaultValues`
+    // reset (a wizard step whose answers match what it opened with): a
+    // proposal for a field drawn only now is tried here, against the record
+    // the form holds. The dirty watcher reports the change it makes.
+    React.useLayoutEffect(() => {
+      applySuggestedChanges(baselineRef.current);
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [drawnFieldNames, suggestedChanges]);
 
     // Watch for form changes - only track changes when onAction is available.
     // LAYOUT effect to stay in the same phase as the `defaultValues` reset
@@ -3705,6 +3823,14 @@ ComponentRegistry.register('form',
       const optionGroupGated = cascade?.gated ?? false;
       const dependsOnFields = cascade?.dependsOnFields ?? [];
       const effectiveOptions = cascade ? cascade.options : rawOptions;
+      // objectstack#28106 — whether this field shows an AI-proposed change:
+      // the host proposed one that differs from the stored value, and the
+      // control still holds it. Read off the live value, so the person's own
+      // edit or the revert takes the mark, the before line and the revert away.
+      const suggestedChangeShown = (value: unknown): boolean =>
+        !!suggestedChanges?.has(name) &&
+        appliedChangeBefore.has(name) &&
+        valuesEqualForDirty(suggestedChanges.get(name), value);
       // Same i18n key the option widgets fall back to (`fields.options.
       // selectFirst`, objectui#3231): one sentence, two callers — this one
       // interpolates the controlling fields' LABELS, a standalone widget its
@@ -4123,10 +4249,33 @@ ComponentRegistry.register('form',
                 // the same empty-ish comparison the dirty check uses, so a
                 // widget normalizing on mount does not read as an edit. The
                 // person's first change takes the mark away.
-                suggestedFields?.has(name) &&
-                  valuesEqualForDirty(defaultValues?.[name], formField.value)
+                (suggestedFields?.has(name) &&
+                  valuesEqualForDirty(defaultValues?.[name], formField.value)) ||
+                  suggestedChangeShown(formField.value)
                   ? t('form.aiSuggested')
                   : undefined,
+                // objectstack#28106 — and on an edit form, the stored value
+                // that proposed change replaces (before → after).
+                suggestedChangeShown(formField.value)
+                  ? t('form.aiBefore', {
+                      value: formatSuggestionBefore(appliedChangeBefore.get(name), effectiveOptions, t),
+                    })
+                  : undefined,
+              )}
+              {/* objectstack#28106 — the per-field revert: the stored value back,
+                  as an edit, which takes the mark and this button away. */}
+              {suggestedChangeShown(formField.value) && (
+                <button
+                  type="button"
+                  className="self-start text-xs font-medium text-primary underline-offset-2 hover:underline disabled:opacity-50"
+                  data-ai-revert="true"
+                  disabled={isSubmitting}
+                  onClick={() =>
+                    form.setValue(name, appliedChangeBefore.get(name) ?? null, { shouldValidate: true, shouldDirty: true })
+                  }
+                >
+                  {t('form.aiRevert')}
+                </button>
               )}
               <FormMessage />
             </FormItem>

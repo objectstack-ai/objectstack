@@ -28,6 +28,10 @@
  *     (objectstack#28104, `utils/recordFormAiDraft.ts`): those values seed the
  *     form under any query-string prefill, each such field is marked
  *     「AI 建议」 until edited, and nothing is saved until the person saves.
+ *   - Edit mode opens on an AI chat UPDATE's proposed values carried the same
+ *     way (objectstack#28106): the form applies each over the stored record as
+ *     an unsaved change, before → after, marked 「AI 建议」 with a per-field
+ *     revert, and nothing is saved until the person saves.
  *
  * @module views/RecordFormPage
  */
@@ -35,7 +39,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useNavigate, useSearchParams, useLocation, Link } from 'react-router-dom';
 import { ObjectForm } from '@object-ui/plugin-form';
-import { Button, Empty, EmptyTitle, EmptyDescription, SuggestedFieldsContext } from '@object-ui/components';
+import {
+  Button,
+  Empty,
+  EmptyTitle,
+  EmptyDescription,
+  SuggestedFieldChangesContext,
+  SuggestedFieldsContext,
+} from '@object-ui/components';
 import { ArrowLeft, Building2, Database, Sparkles } from 'lucide-react';
 import { toast } from 'sonner';
 import { useObjectTranslation, useObjectLabel, recordSaveMessage } from '@object-ui/i18n';
@@ -54,7 +65,7 @@ import { SkeletonDetail } from '../skeletons/index.js';
 import { ManagedByBadge } from '../components/ManagedByBadge.js';
 import { resolveFormViewChrome, selectRecordFormView } from '../utils/recordFormNavigation.js';
 import { servedObjectLabel, servedObjectPluralLabel } from '../hooks/servedObjectLabel.js';
-import { readRecordFormAiDraft } from '../utils/recordFormAiDraft.js';
+import { readRecordFormAiChanges, readRecordFormAiDraft } from '../utils/recordFormAiDraft.js';
 import { useAuth } from '@object-ui/auth';
 
 export interface RecordFormPageProps {
@@ -134,6 +145,16 @@ export function RecordFormPage({ mode }: RecordFormPageProps) {
     const names = Object.keys(aiDraftValues).filter((name) => !prefillValues || !(name in prefillValues));
     return names.length > 0 ? new Set(names) : undefined;
   }, [aiDraftValues, prefillValues]);
+  /**
+   * objectstack#28106 — an AI chat UPDATE's proposed values, carried in the
+   * same router state and bound to the record they were proposed for. The
+   * form applies them over the stored record as unsaved changes; a create
+   * reads none.
+   */
+  const aiProposedChanges = useMemo(
+    () => (mode === 'edit' ? readRecordFormAiChanges(location.state, recordId) : undefined),
+    [mode, location.state, recordId],
+  );
 
   const objectDef = useMemo(
     () => objects.find((o: any) => o.name === objectName),
@@ -455,8 +476,10 @@ export function RecordFormPage({ mode }: RecordFormPageProps) {
           <div className="mx-auto max-w-4xl">
             {/* objectstack#28104 — the form opened on an AI chat draft: say so
                 once, above it, and that nothing is saved until the person
-                saves. Each field it filled carries its own mark below. */}
-            {aiSuggestedFields && (
+                saves. Each field it filled carries its own mark below. The
+                same for an edit opened on an update's proposed values
+                (objectstack#28106). */}
+            {(aiSuggestedFields || aiProposedChanges) && (
               <p
                 className="mb-4 flex items-start gap-2 rounded-md border border-primary/20 bg-primary/5 px-3 py-2 text-sm text-muted-foreground"
                 data-testid="record-form-ai-draft-notice"
@@ -466,30 +489,32 @@ export function RecordFormPage({ mode }: RecordFormPageProps) {
                 <span>{t('form.aiDraftNotice')}</span>
               </p>
             )}
-            <SuggestedFieldsContext.Provider value={aiSuggestedFields}>
-              <ObjectForm
-                key={`${mode}:${objectName}:${recordId ?? 'new'}`}
-                schema={{
-                  type: 'object-form',
-                  formType: pageFormType,
-                  ...formLayoutProps,
-                  objectName: objectDef.name,
-                  mode,
-                  recordId: mode === 'edit' ? recordId : undefined,
-                  title: pageTitle,
-                  fields,
-                  // Master-detail by config: if the object's form view declares
-                  // inline child collections, ObjectForm renders them as an atomic
-                  // master-detail form on this page — no bespoke page needed.
-                  subforms: (objectDef as any).form?.subforms
-                    ?? (objectDef as any).formViews?.default?.subforms,
-                  onSuccess: handleSuccess,
-                  onCancel: handleCancel,
-                  ...formChrome,
-                }}
-                dataSource={dataSource ?? undefined}
-              />
-            </SuggestedFieldsContext.Provider>
+            <SuggestedFieldChangesContext.Provider value={aiProposedChanges}>
+              <SuggestedFieldsContext.Provider value={aiSuggestedFields}>
+                <ObjectForm
+                  key={`${mode}:${objectName}:${recordId ?? 'new'}`}
+                  schema={{
+                    type: 'object-form',
+                    formType: pageFormType,
+                    ...formLayoutProps,
+                    objectName: objectDef.name,
+                    mode,
+                    recordId: mode === 'edit' ? recordId : undefined,
+                    title: pageTitle,
+                    fields,
+                    // Master-detail by config: if the object's form view declares
+                    // inline child collections, ObjectForm renders them as an atomic
+                    // master-detail form on this page — no bespoke page needed.
+                    subforms: (objectDef as any).form?.subforms
+                      ?? (objectDef as any).formViews?.default?.subforms,
+                    onSuccess: handleSuccess,
+                    onCancel: handleCancel,
+                    ...formChrome,
+                  }}
+                  dataSource={dataSource ?? undefined}
+                />
+              </SuggestedFieldsContext.Provider>
+            </SuggestedFieldChangesContext.Provider>
           </div>
         </div>
       </div>
