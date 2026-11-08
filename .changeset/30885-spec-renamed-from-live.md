@@ -2,9 +2,9 @@
 '@objectstack/spec': minor
 ---
 
-docs(spec): `renamedFrom` is live — a declared rename carries the old column's values on upgrade
+docs(spec): the liveness ledger grades `renamedFrom` live — a declared rename carries the old column's values on upgrade
 
 Clause-②: no
 Metadata-protocol: semantic
 
-The field's `renamedFrom` description no longer says the carry is pending: the schema sync renames the old column to the declaring field, or refuses by name before any change. Keep an entry while any installed version may still carry the old key. `liveness/field.json` grades the key `live`, citing the driver's carry and the install door.
+`liveness/field.json` (shipped in the package) flips the field's `renamedFrom` row from `planned` to `live`, citing its executor: the SQL driver's schema sync carries the old column to the declaring field, or refuses by name before any change, and the install-local door carries it before the new version registers. No schema changes.
