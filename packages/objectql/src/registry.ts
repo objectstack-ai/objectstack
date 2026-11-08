@@ -8214,8 +8214,17 @@ export class SchemaRegistry {
    * §3.3; `withRowBinding` drops a body's own stamp for a package-less row) —
    * read as follows:
    *
-   *  - none, `''` or the `sys_metadata` sentinel → `null`: the environment's
-   *    own item (ADR-0150 D1 bucket 4), customizing no package;
+   *  - none, `''` or the `sys_metadata` sentinel (a package-less row), when no
+   *    package holds the name in a composite slot → `null`: the environment's
+   *    own item (ADR-0150 D1 bucket 4);
+   *  - a package-less row when exactly one package holds the name → that
+   *    package: "a package-less row that bears a package-held name is a
+   *    customization, never a second item" (ADR-0150 D3), the ADR-0005
+   *    overlay of the one holder, read at call time, so a package installed
+   *    after the row was saved makes it that package's overlay;
+   *  - a package-less row when two or more packages hold the name →
+   *    `undefined`: a customization of a name it cannot say whose, so it binds
+   *    to no package and is no environment item either (never a guess);
    *  - a package that holds the name in its composite slot → that package
    *    (an ADR-0005 overlay of its item);
    *  - a paired `<base>.custom` package holding no composite slot of the name,
@@ -8223,13 +8232,16 @@ export class SchemaRegistry {
    *    customizes its base's item);
    *  - any other package → that package: its own stored item of the name.
    *
-   * `undefined` when there is no bare-slot entry. `holders` is the composite
-   * holder set, passed in when the caller already has it.
+   * `holders` is the composite holder set, passed in when the caller already
+   * has it.
    */
-  private overlaySlotBinding(item: unknown, name: string, collection: Map<string, any>, holders?: ReadonlySet<string>): string | null {
+  private overlaySlotBinding(item: unknown, name: string, collection: Map<string, any>, holders?: ReadonlySet<string>): string | null | undefined {
     const stamped = (item as { _packageId?: unknown } | null | undefined)?._packageId;
-    if (typeof stamped !== 'string' || stamped === '' || stamped === 'sys_metadata') return null;
     const composite = holders ?? new Set(this.compositeHoldersOf(collection, name));
+    if (typeof stamped !== 'string' || stamped === '' || stamped === 'sys_metadata') {
+      if (composite.size === 0) return null;
+      return composite.size === 1 ? [...composite][0] : undefined;
+    }
     if (composite.has(stamped)) return stamped;
     const base = customizationBasePackageId(stamped);
     if (base !== null && composite.has(base)) return base;
@@ -8257,8 +8269,9 @@ export class SchemaRegistry {
    * order: each composite `<packageId>:<name>` slot, then the package a
    * bare-slot entry is its own stored item of ({@link overlaySlotBinding}) when
    * that package holds no composite slot. An overlay of a package's item adds
-   * no holder (it is that package's item), and the environment's own item is
-   * no package holder ({@link getEnvironmentScopedItem}).
+   * no holder (it is that package's item), a package-less row over a held name
+   * adds none (ADR-0150 D3: a customization, never a second item), and the
+   * environment's own item is no package holder ({@link getEnvironmentScopedItem}).
    *
    * Every package, overridable baselines included: the resolver ranks them
    * (`package-scoped-resolver.ts`). An object is not addressed by package
@@ -8272,7 +8285,7 @@ export class SchemaRegistry {
     const compositeSet = new Set(composite);
     for (const { item } of this.bareSlotEntriesOf(type, collection, name)) {
       const bound = this.overlaySlotBinding(item, name, collection, compositeSet);
-      if (bound !== null) holders.add(bound);
+      if (typeof bound === 'string') holders.add(bound);
     }
     return [...holders];
   }
@@ -8307,8 +8320,9 @@ export class SchemaRegistry {
    * [ADR-0150 D1 bucket 4, D3] The environment's own item of `(type, name)`:
    * the bare-slot entry when it binds to no package ({@link overlaySlotBinding}
    * answers `null`) — an item authored in this environment, in the implicit
-   * environment package. `undefined` when the bare slot is empty or holds a
-   * package's overlay.
+   * environment package, under a name no package holds. `undefined` when the
+   * bare slot is empty, holds a package's overlay, or holds a package-less
+   * row over a name packages hold (a customization, never a second item).
    *
    * @param member - As on {@link getItem}.
    */

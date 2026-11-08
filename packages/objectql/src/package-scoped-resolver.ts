@@ -26,13 +26,20 @@
  *  2. else **the unique holder in P's declared dependency closure** — P's
  *     `manifest.dependencies`, transitively (ADR-0141; the save door's own
  *     closure, `packageDependencyClosure` in `@objectstack/metadata-protocol`),
- *     plus every package of the reserved kernel namespace `sys` (D2);
+ *     plus every package of the reserved kernel namespace `sys` (D2), which
+ *     this resolver adds itself: the save door's closure does not;
  *  3. else a **refusal that names every candidate**.
  *
  * A caller with no package (an environment item, a context-free door, an MCP
  * client) resolves against the whole environment: the environment's own item
  * first (ADR-0005 overlay precedence), else the unique package holder, else the
  * refusal naming every candidate (the doors map it to `409`, D5).
+ *
+ * **A package-less row that bears a package-held name is a customization,
+ * never a second item** (ADR-0150 D3): it is the overlay of the one holder,
+ * and the environment's own item is one whose name no package holds
+ * (`SchemaRegistry.getEnvironmentScopedItem`). So it never makes a name
+ * ambiguous, and it is never served beside the item it customizes.
  *
  * **Zero holders is not-found, never a refusal.** A refusal says "this name
  * means more than one thing here, or nothing you may reach"; not-found says the

@@ -160,13 +160,23 @@ describe('ADR-0150 D3 — a caller that belongs to a package', () => {
 });
 
 describe('ADR-0150 D3 — a caller with no package', () => {
-  it("answers the environment's own item first", () => {
+  it("answers the environment's own item: a package-less row under a name no package holds", () => {
     install(A);
-    ship('page', 'home', A);
+    ship('page', 'about', A);
     overlay('page', 'home', undefined, 'env');
     const r = resolve('page', 'home');
     expect(r).toMatchObject({ status: 'resolved', via: 'environment', holder: { kind: 'environment' } });
     expect(label(r)).toBe('env page');
+  });
+
+  it("a package-less row under the one holder's name is that holder's overlay, never a second item", () => {
+    install(A);
+    ship('page', 'home', A);
+    overlay('page', 'home', undefined, 'env-custom');
+    const r = resolve('page', 'home');
+    expect(r).toMatchObject({ status: 'resolved', via: 'unique-holder', holder: { kind: 'package', packageId: A } });
+    expect(label(r)).toBe('env-custom page');
+    expect(r.status === 'resolved' && r.item).toBe(registry.getItem('page', 'home'));
   });
 
   it('answers the unique package holder', () => {
@@ -189,7 +199,7 @@ describe('ADR-0150 D3 — a caller with no package', () => {
 });
 
 describe('red line 1 — the resolver never loosens', () => {
-  it('two holders in the closure refuse: no first-registered pick, even with an environment item beside them', () => {
+  it('two holders in the closure refuse: no first-registered pick, even with a package-less row beside them', () => {
     install(A);
     install(B);
     install(P, [A, B]);
@@ -322,13 +332,29 @@ describe('ADR-0150 D4 — the per-package overlay slot', () => {
     expect(label(resolve('page', 'home', P))).toBe('beta page');
   });
 
-  it("a package-less row is the environment's own item, and overlays no package", () => {
+  it("a package-less row is the environment's own item only while no package holds the name", () => {
     install(A);
-    ship('page', 'home', A);
     overlay('page', 'home', undefined, 'env');
     expect(registry.getEnvironmentScopedItem<{ label: string }>('page', 'home')?.label).toBe('env page');
-    expect(registry.getPackageScopedItem<{ label: string }>('page', 'home', A)?.label).toBe('alpha page');
+    expect(registry.packageScopedHoldersOf('page', 'home')).toEqual([]);
+    // A package that takes the name later makes the row its overlay (ADR-0150 D3).
+    ship('page', 'home', A);
+    expect(registry.getEnvironmentScopedItem('page', 'home')).toBeUndefined();
+    expect(registry.getPackageScopedItem<{ label: string }>('page', 'home', A)?.label).toBe('env page');
     expect(registry.packageScopedHoldersOf('page', 'home')).toEqual([A]);
+  });
+
+  it('a package-less row over a name two packages hold binds to neither, and is no environment item', () => {
+    install(A);
+    install(B);
+    ship('page', 'home', A);
+    ship('page', 'home', B);
+    overlay('page', 'home', undefined, 'env');
+    expect(registry.getEnvironmentScopedItem('page', 'home')).toBeUndefined();
+    expect(registry.getPackageScopedItem<{ label: string }>('page', 'home', A)?.label).toBe('alpha page');
+    expect(registry.getPackageScopedItem<{ label: string }>('page', 'home', B)?.label).toBe('beta page');
+    expect(registry.packageScopedHoldersOf('page', 'home')).toEqual([A, B]);
+    expect(resolve('page', 'home')).toMatchObject({ status: 'refused', reason: 'ambiguous-in-environment' });
   });
 
   it("a paired `.custom` package's row binds to its base's item (ADR-0146 D9)", () => {
@@ -363,21 +389,23 @@ describe('ADR-0150 D4 — the per-package overlay slot', () => {
 describe('phase 1 parity — under the one-holder rule the resolver answers as `getItem` does (red line 3)', () => {
   const NAME = 'shared_name';
 
-  /** A sealed registry where A holds every covered name; P depends on A; Q declares nothing. */
-  const sealedWithHolder = (withOverlay: boolean) => {
+  /** A sealed registry where A holds every covered name and P depends on A. */
+  const sealedWithHolder = (withOverlay: boolean, binding?: string) => {
     install(A);
     install(P, [A]);
     install('com.acme.unrelated');
     for (const type of BARE_NAME_REGISTRY_TYPES) {
       ship(type, NAME, A);
-      if (withOverlay) overlay(type, NAME, A, 'alpha-custom');
+      if (withOverlay) overlay(type, NAME, binding, 'alpha-custom');
     }
     registry.sealBareNameHolders();
   };
 
-  for (const withOverlay of [false, true]) {
-    it(`every covered type, one package holder${withOverlay ? ' and its overlay' : ''}: the same item for no caller, the holder and a dependent`, () => {
-      sealedWithHolder(withOverlay);
+  for (const overlayBinding of [null, A, undefined] as const) {
+    const withOverlay = overlayBinding !== null;
+    const what = overlayBinding === null ? '' : overlayBinding === A ? ' and its bound overlay' : ' and a package-less row over its name';
+    it(`every covered type, one package holder${what}: the same item for no caller, the holder and a dependent`, () => {
+      sealedWithHolder(withOverlay, overlayBinding ?? undefined);
       for (const type of BARE_NAME_REGISTRY_TYPES as readonly BareNameRegistryType[]) {
         for (const caller of [undefined, A, P]) {
           const r = resolve(type, NAME, caller);
