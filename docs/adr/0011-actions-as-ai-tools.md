@@ -369,17 +369,18 @@ three buckets, and the declarations were written in the same change as this adde
 `sys_oauth_application.enable_oauth_application` · `sys_user.update_my_profile` ·
 `sys_user.resend_verification_email` · `sys_sso_provider.request_domain_verification`.
 
-That is 61 assessed actions and 37 `ai` blocks (H 24 / C 18 / E 19); the tree holds one more identity
-action, unassessed (below). The 2026-10-30 assessment covered 58
+That is 61 assessed actions and 37 `ai` blocks (H 24 / C 18 / E 19); the tree holds two more identity
+actions, unassessed (below). The 2026-10-30 assessment covered 58
 actions in 38 blocks: the card's bucket headers read H 19 and E 22, its name lists, which the ruling
 adopted, held 20 and 21, and the names are the record. `sys_invitation.copy_invitation_link`, added
 after that assessment, and the two `enable_two_factor` moves came with the 2026-10-31 amendment; the two
 `sys_scim_connection_credential` actions came with the 2026-11-07 amendment.
 
 **Not assessed.** `sys_approval_request`'s 9 actions (`plugin-approvals`) are outside this assessment:
-they are unassessed and human-only, with no `ai` block, until a maintainer ruling assesses them. So is
-`sys_user.list_platform_admins` (PR #29427, 2026-11-02), the one identity action that postdates the
-assessment and is in no bucket above: no `ai` block, human-only, until a ruling assesses it.
+they are unassessed and human-only, with no `ai` block, until a maintainer ruling assesses them. So are
+`sys_user.list_platform_admins` (PR #29427, 2026-11-02) and `sys_sso_provider.edit_sso_sign_in_options`
+(PR #31448, 2026-11-08), the two identity actions that postdate the assessment and are in no bucket
+above: no `ai` block, human-only, until a ruling assesses them.
 
 **No automatic check.** The maintainer struck the pin test the assessment proposed:
 「自动检查 有必要吗？每一个元数据应用都有类似的问题，后续都要检查吗」. This table lives only here; a reviewer
