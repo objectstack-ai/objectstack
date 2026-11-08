@@ -3799,6 +3799,7 @@ const zhHant = {
       organizationExists: '該組織已存在。',
       slugTaken: '該標識已被佔用。',
       notAllowedToCreate: '您無權建立新組織。',
+      organizationLimitReached: '您建立的組織數量已達上限。被邀請加入的組織不計入此上限。',
       notTheRecipient: '您不是該邀請的收件人。',
       invitationNotFound: '該邀請已失效或已過期。',
       unknown: '出了點問題，請重試。',

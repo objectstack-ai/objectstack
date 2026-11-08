@@ -3660,6 +3660,7 @@ const es = {
       organizationExists: 'Esa organización ya existe.',
       slugTaken: 'Ese slug ya está en uso.',
       notAllowedToCreate: 'No tiene permiso para crear una organización nueva.',
+      organizationLimitReached: 'Ha alcanzado el número máximo de organizaciones que puede crear. Las organizaciones a las que se le ha invitado no cuentan para este límite.',
       notTheRecipient: 'No es el destinatario de esta invitación.',
       invitationNotFound: 'Esta invitación ya no existe o ha caducado.',
       unknown: 'Algo salió mal. Inténtelo de nuevo.',
