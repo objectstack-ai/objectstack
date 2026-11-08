@@ -37,8 +37,8 @@
 - `tooling` 入 `pm:queue` 仅凭三门之一:首行带 `Unblocks: #N`(open 产品卡)或点名所护的已发布面;
 - 或实测拖慢车队开发:正确源上假红/假绿、反复重跑、同因丢复核轮;卡须具名实例。
 - `pm:queue` 也收恢复不变量的 finding、test-only pin,与实现未被裁错的说明书脱节(修文档)。
-- 入 `pm:queue` 前读最新转换评论(dispatch-runbook 状态提取):hold/冻结/裁决 ⇒ 同笔挂 `pm:on-hold`+
-- 引其原文的 `Restart-when:`(state-machine);写不出可执行判据才挂 `pm:retriage` 问所属车道。
+- 入 `pm:queue` 前读最新转换评论(dispatch-runbook 状态提取):hold/冻结/裁决 ⇒ 分诊自补半状态。
+- 自补 = 同笔 `pm:on-hold`+引原文 `Restart-when:`;写不出可执行判据才挂 `pm:retriage` 问所属车道。
 - `needs-user-decision` = 设计卡、feature/契约形状提案、需要 appetite 的多周程序;只挂 issue。
 - 先例已定新键/值/导出名非契约形状提案;分诊审计 ⛔ 不自加门,唯语义/形状真分歧呈人。
 - 碰迁移形状或删已发布能力也进决策箱;说明书脱节不进:有裁定出处才是 (b),否则改文档。
