@@ -294,7 +294,12 @@ import { SqliteSerialisationFacet } from './sql-driver-sqlite-serialisation.js';
 // [cloud#3652 D3] Declared renames: the methods of the same names below hand the bodies what they read (`DeclaredRenameHost`).
 import { DeclaredRenameFacet } from './sql-driver-declared-rename.js';
 import type { DeclaredRenameCarry, DeclaredRenamePlan } from './declared-rename.js';
-import { withOracleFederationClient } from './sql-driver-oracle-dialect.js';
+import {
+  oracleRawUuidColumns,
+  oracleUuidRawBinding,
+  withOracleFederationClient,
+  type OracleUuidBindingRole,
+} from './sql-driver-oracle-dialect.js';
 // [#29520 codemod] The facets' hosts, one per driver, which the static block at the end of the class builds.
 import {
   aggregationHost, bulkOperationsHost, classHeadHost, columnCreationHost, crudHost, databaseHelpersHost,
@@ -1325,6 +1330,16 @@ export class SqlDriver implements IDataDriver {
    */
   protected mssqlPagingKeyByObject = new Map<string, string | null>();
 
+  /**
+   * Oracle (#31390): per external object, the LOGICAL fields whose remote
+   * column is a `RAW(16)` uuid, read from the catalog by
+   * {@link primeOracleRawUuidColumns} the first time the object is read or
+   * written. A field here binds as `HEXTORAW(?)` ({@link oracleUuidBinding});
+   * an object with no entry binds every value as before. Empty on every other
+   * dialect.
+   */
+  protected oracleRawUuidFieldsByObject = new Map<string, ReadonlySet<string>>();
+
   /** Deferred-DDL mode (#3917) — see {@link setDeferredDdl}. */
   protected deferredDdl = false;
 
@@ -1786,7 +1801,8 @@ export class SqlDriver implements IDataDriver {
   // `sql-driver-doors-declared-types.test.ts`.
   find(object: string, query: DriverQuery, options?: DriverOptions): Promise<Record<string, unknown>[]> {
     // [#29520 codemod] The body moved to `sql-driver-crud.ts` (see `CrudHost`).
-    return CrudFacet.find.call(crudHost.of(this), object, query, options);
+    // [#31390] Oracle learns the object's RAW(16) uuid columns first; any other dialect runs as before.
+    return this.withOracleRawUuidColumns(object, () => CrudFacet.find.call(crudHost.of(this), object, query, options));
   }
 
   private async findRows(
@@ -1822,6 +1838,72 @@ export class SqlDriver implements IDataDriver {
   }
 
   /**
+   * Oracle (#31390): learn, once per object, which of a FEDERATED table's
+   * columns are `RAW(16)` uuids — read from the remote catalog
+   * (`oracleRawUuidColumns`) and mapped back through the object's
+   * `external.columnMap` to the fields that read them.
+   *
+   * Why the driver reads it rather than being told: nothing an author writes
+   * names the physical type. A `lookup` (or `text`) field is the exact pairing
+   * for a `VARCHAR2` uuid column and a `RAW(16)` one alike, and only the second
+   * needs its comparands and written values bound through `HEXTORAW`. The value
+   * is never the evidence: a uuid-shaped string in a text column stays text.
+   *
+   * Recorded once per object, so a read costs the catalog one statement for
+   * the object's lifetime in this driver (re-registering the object forgets
+   * it). A failed catalog read records nothing: the statement is then bound as
+   * before, and the next read asks again. A no-op on every other dialect, and
+   * for an object that was never registered as external.
+   */
+  protected async primeOracleRawUuidColumns(object: string): Promise<void> {
+    if (!this.isOracle || this.oracleRawUuidFieldsByObject.has(object)) return;
+    const remoteTable = this.physicalTableByObject[object];
+    if (remoteTable === undefined) return;
+    let columns: string[];
+    try {
+      columns = await this.readOracleRawUuidColumns(remoteTable, this.physicalSchemaByObject[object]);
+    } catch {
+      return;
+    }
+    const colToField = this.columnFieldByObject[object];
+    this.oracleRawUuidFieldsByObject.set(object, new Set(columns.map((column) => colToField?.[column] ?? column)));
+  }
+
+  /** The catalog read behind {@link primeOracleRawUuidColumns}: the remote table's `RAW(16)` column names. */
+  protected readOracleRawUuidColumns(remoteTable: string, remoteSchema: string | undefined): Promise<string[]> {
+    return oracleRawUuidColumns(this.knex, remoteTable, remoteSchema);
+  }
+
+  /**
+   * Oracle (#31390): `value` as bound against `field` of `object` — through
+   * `HEXTORAW(?)` when the catalog reported the field's column as a `RAW(16)`
+   * uuid ({@link primeOracleRawUuidColumns}), refused when it is not uuid text
+   * (`INVALID_FILTER` for a comparand, `VALIDATION_ERROR` for a written value).
+   * Returned untouched for any other column, a null, and on every other
+   * dialect.
+   */
+  protected oracleUuidBinding(
+    object: string | null | undefined,
+    field: string,
+    value: unknown,
+    role: OracleUuidBindingRole,
+  ): unknown {
+    if (!this.isOracle || !object || value === null || value === undefined) return value;
+    if (this.oracleRawUuidFieldsByObject.get(object)?.has(field) !== true) return value;
+    return oracleUuidRawBinding(this.knex, field, value, role);
+  }
+
+  /**
+   * Run a door that compiles comparands or written values for `object` after
+   * {@link primeOracleRawUuidColumns}. On every other dialect `run` is called
+   * at once, synchronously, exactly as the door did before.
+   */
+  private withOracleRawUuidColumns<T>(object: string, run: () => Promise<T>): Promise<T> {
+    if (!this.isOracle) return run();
+    return this.primeOracleRawUuidColumns(object).then(run);
+  }
+
+  /**
    * `IDataDriver.findOne` — find a single record BY QUERY.
    *
    * This also accepted a bare id (`findOne('task', 't1')`) through an
@@ -1846,7 +1928,8 @@ export class SqlDriver implements IDataDriver {
    */
   findOne(object: string, query: DriverQuery, options?: DriverOptions): Promise<Record<string, unknown> | null> {
     // [#29520 codemod] The body moved to `sql-driver-crud.ts` (see `CrudHost`).
-    return CrudFacet.findOne.call(crudHost.of(this), object, query, options);
+    // [#31390] Oracle learns the object's RAW(16) uuid columns first; any other dialect runs as before.
+    return this.withOracleRawUuidColumns(object, () => CrudFacet.findOne.call(crudHost.of(this), object, query, options));
   }
 
   // `findStream` was removed with the contract method in 17.0.0 (#4484). This driver's
@@ -1869,7 +1952,8 @@ export class SqlDriver implements IDataDriver {
    */
   create(object: string, data: Record<string, any>, options?: DriverOptions): Promise<Record<string, unknown>> {
     // [#29520 codemod] The body moved to `sql-driver-crud.ts` (see `CrudHost`).
-    return CrudFacet.create.call(crudHost.of(this), object, data, options);
+    // [#31390] Oracle learns the object's RAW(16) uuid columns first; any other dialect runs as before.
+    return this.withOracleRawUuidColumns(object, () => CrudFacet.create.call(crudHost.of(this), object, data, options));
   }
 
   private readBackInsertedRows(
@@ -2741,7 +2825,8 @@ export class SqlDriver implements IDataDriver {
    */
   update(object: string, id: string | number, data: Record<string, any>, options?: DriverOptions): Promise<Record<string, unknown> | null> {
     // [#29520 codemod] The body moved to `sql-driver-sequence-semantics.ts` (see `SequenceSemanticsHost`).
-    return SequenceSemanticsFacet.update.call(sequenceSemanticsHost.of(this), object, id, data, options);
+    // [#31390] Oracle learns the object's RAW(16) uuid columns first; any other dialect runs as before.
+    return this.withOracleRawUuidColumns(object, () => SequenceSemanticsFacet.update.call(sequenceSemanticsHost.of(this), object, id, data, options));
   }
 
   /**
@@ -3111,7 +3196,8 @@ export class SqlDriver implements IDataDriver {
 
   delete(object: string, id: string | number, options?: DriverOptions): Promise<boolean> {
     // [#29520 codemod] The body moved to `sql-driver-sequence-semantics.ts` (see `SequenceSemanticsHost`).
-    return SequenceSemanticsFacet.delete.call(sequenceSemanticsHost.of(this), object, id, options);
+    // [#31390] Oracle learns the object's RAW(16) uuid columns first; any other dialect runs as before.
+    return this.withOracleRawUuidColumns(object, () => SequenceSemanticsFacet.delete.call(sequenceSemanticsHost.of(this), object, id, options));
   }
 
   // ===================================
@@ -3127,7 +3213,8 @@ export class SqlDriver implements IDataDriver {
    */
   bulkCreate(object: string, data: any[], options?: DriverOptions): Promise<Record<string, unknown>[]> {
     // [#29520 codemod] The body moved to `sql-driver-bulk-operations.ts` (see `BulkOperationsHost`).
-    return BulkOperationsFacet.bulkCreate.call(bulkOperationsHost.of(this), object, data, options);
+    // [#31390] Oracle learns the object's RAW(16) uuid columns first; any other dialect runs as before.
+    return this.withOracleRawUuidColumns(object, () => BulkOperationsFacet.bulkCreate.call(bulkOperationsHost.of(this), object, data, options));
   }
 
   /**
@@ -3198,7 +3285,8 @@ export class SqlDriver implements IDataDriver {
 
   bulkDelete(object: string, ids: Array<string | number>, options?: DriverOptions): Promise<void> {
     // [#29520 codemod] The body moved to `sql-driver-bulk-operations.ts` (see `BulkOperationsHost`).
-    return BulkOperationsFacet.bulkDelete.call(bulkOperationsHost.of(this), object, ids, options);
+    // [#31390] Oracle learns the object's RAW(16) uuid columns first; any other dialect runs as before.
+    return this.withOracleRawUuidColumns(object, () => BulkOperationsFacet.bulkDelete.call(bulkOperationsHost.of(this), object, ids, options));
   }
 
   /**
@@ -3253,12 +3341,14 @@ export class SqlDriver implements IDataDriver {
    */
   updateMany(object: string, query: DriverQuery, data: any, options?: DriverOptions): Promise<number> {
     // [#29520 codemod] The body moved to `sql-driver-bulk-operations.ts` (see `BulkOperationsHost`).
-    return BulkOperationsFacet.updateMany.call(bulkOperationsHost.of(this), object, query, data, options);
+    // [#31390] Oracle learns the object's RAW(16) uuid columns first; any other dialect runs as before.
+    return this.withOracleRawUuidColumns(object, () => BulkOperationsFacet.updateMany.call(bulkOperationsHost.of(this), object, query, data, options));
   }
 
   deleteMany(object: string, query: DriverQuery, options?: DriverOptions): Promise<number> {
     // [#29520 codemod] The body moved to `sql-driver-bulk-operations.ts` (see `BulkOperationsHost`).
-    return BulkOperationsFacet.deleteMany.call(bulkOperationsHost.of(this), object, query, options);
+    // [#31390] Oracle learns the object's RAW(16) uuid columns first; any other dialect runs as before.
+    return this.withOracleRawUuidColumns(object, () => BulkOperationsFacet.deleteMany.call(bulkOperationsHost.of(this), object, query, options));
   }
 
   /** By-id update for a rotation-managed object: the row lives in exactly one
@@ -3374,7 +3464,8 @@ export class SqlDriver implements IDataDriver {
 
   count(object: string, query?: DriverQuery, options?: DriverOptions): Promise<number> {
     // [#29520 codemod] The body moved to `sql-driver-bulk-operations.ts` (see `BulkOperationsHost`).
-    return BulkOperationsFacet.count.call(bulkOperationsHost.of(this), object, query, options);
+    // [#31390] Oracle learns the object's RAW(16) uuid columns first; any other dialect runs as before.
+    return this.withOracleRawUuidColumns(object, () => BulkOperationsFacet.count.call(bulkOperationsHost.of(this), object, query, options));
   }
 
   // ===================================
@@ -3592,7 +3683,8 @@ export class SqlDriver implements IDataDriver {
    */
   aggregate(object: string, query: DriverQuery, options?: DriverOptions): Promise<Record<string, unknown>[]> {
     // [#29520 codemod] The body moved to `sql-driver-aggregation.ts` (see `AggregationHost`).
-    return AggregationFacet.aggregate.call(aggregationHost.of(this), object, query, options);
+    // [#31390] Oracle learns the object's RAW(16) uuid columns first; any other dialect runs as before.
+    return this.withOracleRawUuidColumns(object, () => AggregationFacet.aggregate.call(aggregationHost.of(this), object, query, options));
   }
 
   /**
@@ -3821,7 +3913,8 @@ export class SqlDriver implements IDataDriver {
    */
   distinct(object: string, field: string, filters?: FilterCondition, options?: DriverOptions): Promise<any[]> {
     // [#29520 codemod] The body moved to `sql-driver-distinct.ts` (see `DistinctHost`).
-    return DistinctFacet.distinct.call(distinctHost.of(this), object, field, filters, options);
+    // [#31390] Oracle learns the object's RAW(16) uuid columns first; any other dialect runs as before.
+    return this.withOracleRawUuidColumns(object, () => DistinctFacet.distinct.call(distinctHost.of(this), object, field, filters, options));
   }
 
   /**
@@ -3981,7 +4074,8 @@ export class SqlDriver implements IDataDriver {
    */
   findWithWindowFunctions(object: string, query: SqlWindowFunctionQuery, options?: DriverOptions): Promise<any[]> {
     // [#29520 codemod] The body moved to `sql-driver-window-functions.ts` (see `WindowFunctionsHost`).
-    return WindowFunctionsFacet.findWithWindowFunctions.call(windowFunctionsHost.of(this), object, query, options);
+    // [#31390] Oracle learns the object's RAW(16) uuid columns first; any other dialect runs as before.
+    return this.withOracleRawUuidColumns(object, () => WindowFunctionsFacet.findWithWindowFunctions.call(windowFunctionsHost.of(this), object, query, options));
   }
 
   // ===================================
@@ -4001,7 +4095,8 @@ export class SqlDriver implements IDataDriver {
    */
   explain(object: string, query: DriverQuery, options?: DriverOptions): Promise<unknown> {
     // [#29520 codemod] The body moved to `sql-driver-query-plan.ts` (see `QueryPlanHost`).
-    return QueryPlanFacet.explain.call(queryPlanHost.of(this), object, query, options);
+    // [#31390] Oracle learns the object's RAW(16) uuid columns first; any other dialect runs as before.
+    return this.withOracleRawUuidColumns(object, () => QueryPlanFacet.explain.call(queryPlanHost.of(this), object, query, options));
   }
 
   /**
@@ -4012,7 +4107,8 @@ export class SqlDriver implements IDataDriver {
    */
   analyzeQuery(object: string, query: DriverQuery, options?: DriverOptions): Promise<any> {
     // [#29520 codemod] The body moved to `sql-driver-query-plan.ts` (see `QueryPlanHost`).
-    return QueryPlanFacet.analyzeQuery.call(queryPlanHost.of(this), object, query, options);
+    // [#31390] Oracle learns the object's RAW(16) uuid columns first; any other dialect runs as before.
+    return this.withOracleRawUuidColumns(object, () => QueryPlanFacet.analyzeQuery.call(queryPlanHost.of(this), object, query, options));
   }
 
   // ===================================
@@ -4314,6 +4410,8 @@ export class SqlDriver implements IDataDriver {
     external?: { remoteName?: string; remoteSchema?: string; columnMap?: Record<string, string> };
   }): void {
     // [#25521 cut 17] The body moved to `sql-driver-schema-sync.ts` (see `SchemaSyncHost`).
+    // [#31390] A re-registration may name another remote table: its RAW(16) columns are read again.
+    this.oracleRawUuidFieldsByObject.delete(schema.name);
     const readAutoNumberFields = () => this.autoNumberFields;
     const readBooleanFields = () => this.booleanFields;
     const readColumnFieldByObject = () => this.columnFieldByObject;
@@ -9111,6 +9209,7 @@ export class SqlDriver implements IDataDriver {
       get isMssql() { return driver.isMssql; },
       keepSuppliedUpdatedAt: (...a) => driver.keepSuppliedUpdatedAt(...a),
       get knex() { return driver.knex; },
+      oracleUuidBinding: (...a) => driver.oracleUuidBinding(...a),
       readBackInsertedRows: (...a) => driver.readBackInsertedRows(...a),
       resyncSequenceToDataMax: (...a) => driver.resyncSequenceToDataMax(...a),
       remoteColumn: (...a) => driver.remoteColumn(...a),
@@ -9182,6 +9281,7 @@ export class SqlDriver implements IDataDriver {
       get isSqlite() { return driver.isSqlite; },
       get knex() { return driver.knex; },
       mapSortField: (...a) => driver.mapSortField(...a),
+      oracleUuidBinding: (...a) => driver.oracleUuidBinding(...a),
       orderKeysFor: (...a) => driver.orderKeysFor(...a),
       primeMssqlPagingKey: (...a) => driver.primeMssqlPagingKey(...a),
       readBackInsertedRows: (...a) => driver.readBackInsertedRows(...a),
@@ -9311,6 +9411,8 @@ export class SqlDriver implements IDataDriver {
       needsLegacyTimeRepair: (...a) => driver.needsLegacyTimeRepair(...a),
       get numericFields() { return driver.numericFields; },
       get objectByPhysicalTable() { return driver.objectByPhysicalTable; },
+      get oracleRawUuidFieldsByObject() { return driver.oracleRawUuidFieldsByObject; },
+      oracleUuidBinding: (...a) => driver.oracleUuidBinding(...a),
       presentReadValue: (...a) => driver.presentReadValue(...a),
       get readableIdsDriverName() { return driver.readableIdsDriverName; },
       get readableIdsRefusalLog() { return driver.readableIdsRefusalLog; },
@@ -9483,6 +9585,7 @@ export class SqlDriver implements IDataDriver {
       maxAutonumberCounter: (...a) => driver.maxAutonumberCounter(...a),
       mergeLandsInWrittenOrganization: (...a) => driver.mergeLandsInWrittenOrganization(...a),
       observedUpdatedAtColumn: (...a) => driver.observedUpdatedAtColumn(...a),
+      oracleUuidBinding: (...a) => driver.oracleUuidBinding(...a),
       get organizationObjectRegistered() { return driver.organizationObjectRegistered; },
       get physicalTableByObject() { return driver.physicalTableByObject; },
       remoteColumn: (...a) => driver.remoteColumn(...a),
@@ -9519,6 +9622,8 @@ export class SqlDriver implements IDataDriver {
       get mediaFields() { return driver.mediaFields; },
       get numericFields() { return driver.numericFields; },
       get numericValueFields() { return driver.numericValueFields; },
+      get oracleRawUuidFieldsByObject() { return driver.oracleRawUuidFieldsByObject; },
+      oracleUuidBinding: (...a) => driver.oracleUuidBinding(...a),
       storageDatetimeValue: (...a) => driver.storageDatetimeValue(...a),
       get timeFields() { return driver.timeFields; },
       toDateOnly: (...a) => driver.toDateOnly(...a),

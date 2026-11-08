@@ -107,6 +107,8 @@ export interface FilterHelpersHost {
   needsLegacyTimeRepair: SqlDriver['needsLegacyTimeRepair'];
   readonly numericFields: SqlDriver['numericFields'];
   readonly objectByPhysicalTable: SqlDriver['objectByPhysicalTable'];
+  readonly oracleRawUuidFieldsByObject: SqlDriver['oracleRawUuidFieldsByObject'];
+  oracleUuidBinding: SqlDriver['oracleUuidBinding'];
   presentReadValue: SqlDriver['presentReadValue'];
   readonly readableIdsDriverName: SqlDriver['readableIdsDriverName'];
   readonly readableIdsRefusalLog: SqlDriver['readableIdsRefusalLog'];
@@ -155,9 +157,16 @@ export class FilterHelpersFacet {
   }
 
   /** The body of `SqlDriver#coerceFilterValue`; the method's docblock there is its contract. */
-  static coerceFilterValue(this: Pick<FilterHelpersHost, 'coerceFilterValue' | 'isMssql' | 'isOracle' | 'storageDatetimeValue' | 'temporalFieldKind' | 'toDateOnly'>, table: string | null, field: string, value: any): any {
+  static coerceFilterValue(this: Pick<FilterHelpersHost, 'coerceFilterValue' | 'isMssql' | 'isOracle' | 'oracleRawUuidFieldsByObject' | 'oracleUuidBinding' | 'storageDatetimeValue' | 'temporalFieldKind' | 'toDateOnly'>, table: string | null, field: string, value: any): any {
     if (value == null || !table) return value;
     if (Array.isArray(value)) return value.map((v) => this.coerceFilterValue(table, field, v));
+
+    // [#31390] Oracle: a comparand against a `RAW(16)` uuid column (as the
+    // catalog reports it — `SqlDriver#primeOracleRawUuidColumns`) binds as
+    // `HEXTORAW(?)`; a value that is not uuid text is INVALID_FILTER, unsent.
+    if (this.isOracle && this.oracleRawUuidFieldsByObject.get(table)?.has(field) === true) {
+      return this.oracleUuidBinding(table, field, value, 'comparand');
+    }
 
     const kind = this.temporalFieldKind(table, field);
     if (!kind) {

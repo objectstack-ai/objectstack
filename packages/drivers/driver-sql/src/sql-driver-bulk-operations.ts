@@ -61,6 +61,7 @@ export interface BulkOperationsHost {
   readonly isMssql: SqlDriver['isMssql'];
   keepSuppliedUpdatedAt: SqlDriver['keepSuppliedUpdatedAt'];
   readonly knex: SqlDriver['knex'];
+  oracleUuidBinding: SqlDriver['oracleUuidBinding'];
   readBackInsertedRows: SqlDriver['readBackInsertedRows'];
   resyncSequenceToDataMax: SqlDriver['resyncSequenceToDataMax'];
   remoteColumn: SqlDriver['remoteColumn'];
@@ -261,12 +262,14 @@ export class BulkOperationsFacet {
   }
 
   /** The body of `SqlDriver#bulkDelete`; the method's docblock there is its contract. */
-  static async bulkDelete(this: Pick<BulkOperationsHost, 'applyTenantScope' | 'auditMissingTenant' | 'getBuilder' | 'remoteColumn' | 'rotationShardsOf'>, object: string, ids: Array<string | number>, options?: DriverOptions): Promise<void> {
+  static async bulkDelete(this: Pick<BulkOperationsHost, 'applyTenantScope' | 'auditMissingTenant' | 'getBuilder' | 'oracleUuidBinding' | 'remoteColumn' | 'rotationShardsOf'>, object: string, ids: Array<string | number>, options?: DriverOptions): Promise<void> {
     this.auditMissingTenant(object, 'bulkDelete', options);
     for (const target of this.rotationShardsOf(object) ?? [object]) {
       // The primary key's column: the `external.columnMap` remote column on a
       // federated object, `id` otherwise (a rotation shard is never federated).
-      const builder = this.getBuilder(target, options).whereIn(this.remoteColumn(object, 'id', 'id'), ids);
+      // [#31390] On Oracle a RAW(16) uuid key binds each id as `HEXTORAW(?)`.
+      const keys = ids.map((id) => this.oracleUuidBinding(object, 'id', id, 'comparand'));
+      const builder = this.getBuilder(target, options).whereIn(this.remoteColumn(object, 'id', 'id'), keys as any[]);
       this.applyTenantScope(builder, object, options);
       await builder.delete();
     }

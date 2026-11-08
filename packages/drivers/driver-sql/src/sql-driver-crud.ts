@@ -68,6 +68,7 @@ export interface CrudHost {
   readonly isSqlite: SqlDriver['isSqlite'];
   readonly knex: SqlDriver['knex'];
   mapSortField: SqlDriver['mapSortField'];
+  oracleUuidBinding: SqlDriver['oracleUuidBinding'];
   orderKeysFor: SqlDriver['orderKeysFor'];
   primeMssqlPagingKey: SqlDriver['primeMssqlPagingKey'];
   readBackInsertedRows: SqlDriver['readBackInsertedRows'];
@@ -415,7 +416,7 @@ export class CrudFacet {
    * Refused with {@link insertedRowsNotReadBackError}, never answered with the
    * payload: see that function for why.
    */
-  static async readBackInsertedRows(this: Pick<CrudHost, 'applyTenantScope' | 'formatOutput' | 'getBuilder' | 'remoteColumn' | 'resolveTenantField'>, object: string, writeTable: string, written: Record<string, any>[], options?: DriverOptions): Promise<Record<string, unknown>[]> {
+  static async readBackInsertedRows(this: Pick<CrudHost, 'applyTenantScope' | 'formatOutput' | 'getBuilder' | 'oracleUuidBinding' | 'remoteColumn' | 'resolveTenantField'>, object: string, writeTable: string, written: Record<string, any>[], options?: DriverOptions): Promise<Record<string, unknown>[]> {
     if (written.length === 0) return [];
     const idColumn = this.remoteColumn(object, 'id', 'id');
     const tenantField = this.resolveTenantField(object);
@@ -437,15 +438,17 @@ export class CrudFacet {
       : { ...options };
     const builder = this.getBuilder(writeTable, options);
     this.applyTenantScope(builder, object, scopeOptions);
-    const stored: Record<string, any>[] = await builder.whereIn(
-      idColumn,
-      written.map((row) => row.id),
-    );
+    // [#31390] On Oracle a RAW(16) uuid key binds each id as `HEXTORAW(?)`, and
+    // reads back as lowercase uuid text whatever case it was written in.
+    const keys = written.map((row) => this.oracleUuidBinding(object, 'id', row.id, 'comparand'));
+    const writtenKey = (row: Record<string, any>, i: number): string =>
+      keys[i] === row.id ? String(row.id) : String(row.id).toLowerCase();
+    const stored: Record<string, any>[] = await builder.whereIn(idColumn, keys as any[]);
     const byId = new Map<string, Record<string, any>>();
     for (const row of stored) byId.set(String(row[idColumn]), row);
-    const missing = written.filter((row) => !byId.has(String(row.id))).map((row) => row.id);
+    const missing = written.filter((row, i) => !byId.has(writtenKey(row, i))).map((row) => row.id);
     if (missing.length > 0) throw insertedRowsNotReadBackError(object, missing, written.length);
-    return written.map((row) => this.formatOutput(object, byId.get(String(row.id))));
+    return written.map((row, i) => this.formatOutput(object, byId.get(writtenKey(row, i))));
   }
 
   /** The body of `SqlDriver#ensureSequencesTable`; the method's docblock there is its contract. */
