@@ -21,7 +21,7 @@
  * the gate meet: the gate admits exactly what the resolver grants.
  */
 
-import { describe, it, expect, afterEach, vi } from 'vitest';
+import { describe, it, expect, afterEach, beforeAll, afterAll, vi } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { resolveThrownHttpError } from '@objectstack/types';
@@ -907,6 +907,345 @@ describe("[ADR-0090 D12] a delegated answer about a user the caller cannot read 
           expect(removed, who).toEqual({ status: 200 });
           const left = await h.engine.find('sys_user_permission_set', { where: { id: 'g_subject' }, context: SYS });
           expect(Array.isArray(left) ? left : [], who).toEqual([]);
+        }
+      });
+    });
+  }
+});
+
+/**
+ * [ADR-0090 D12; ruling on #26059, Q3] A delegate can neither capture nor
+ * evict a direct grant beyond its subtree. An update that points a stored
+ * grant at another user touches two holders — the user it takes the grant
+ * from and the user it gives the grant to — and each is judged as the gate
+ * judges every target user (the describe above): through the delegate's own
+ * read, inside the scope only through one of the scope's units.
+ *
+ * The delegate here administers direct grants: its set carries CRUD on
+ * `sys_user_permission_set` beside its scope, so its update reaches the gate
+ * through the write door itself and its own read returns the grants it edits.
+ * Two grants of one set: `g_subject`, the subject's (the subject in the four
+ * states above), and `g_target`, held by `u_target`, a user inside the scope
+ * whom the delegate reads. Moving `g_subject` to `u_peer`, another such user,
+ * takes a grant FROM the subject; moving `g_target` to the subject gives one
+ * TO it. A holder outside
+ * the scope, at either end, gets the one scope-violation answer, the same
+ * whichever end it is, and the grant stays where it is; the CONTROL moves at
+ * either end. A delegate that cannot read the stored grant is told the same
+ * refusal without the holder's name (ruling of record 6649064874).
+ *
+ * The other administrators are untouched: a tenant-level administrator still
+ * moves the grant; an organization administrator, whose right creates and
+ * removes a grant and never edits one in place, gets the answer it always got.
+ */
+describe('[ADR-0090 D12] a delegate can neither capture nor evict a direct grant beyond its subtree: an update that points a stored grant at another user is judged on both holders — three postures', () => {
+  const SUBJECT = 'u_subject';
+  /** A second user inside the scope whom the delegate reads, holding no grant: where the FROM end moves the subject's grant. */
+  const PEER = 'u_peer';
+  /** The two ends of the move, as the update's payload: FROM the subject, and TO it. */
+  const ENDS = {
+    from: { id: 'g_subject', user_id: PEER },
+    to: { id: 'g_target', user_id: SUBJECT },
+  } as const;
+  type End = keyof typeof ENDS;
+  const STATES = [
+    'an id naming no user',
+    'a user with no business-unit membership',
+    'a user whose business unit is outside the scope',
+    'a user with a business unit inside the scope whom the delegate cannot read',
+  ] as const;
+  const UNREADABLE_INSIDE = STATES[3];
+  const CONTROL = 'a user with a business unit inside the scope whom the delegate reads';
+  type State = (typeof STATES)[number] | typeof CONTROL;
+
+  const GRANT_ADMIN = 'east_grant_admin';
+  const GRANT_CRUD = { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true };
+  /** A delegate over `east` that administers direct grants of the set the rig's grants hold. */
+  const GRANT_ADMIN_SET = {
+    name: GRANT_ADMIN, label: 'East grant delegate',
+    objects: { sys_user_permission_set: GRANT_CRUD }, adminScope: eastScope(['field_user']),
+  };
+
+  /** The delegate's context, `set` its one permission set: the subject is among the users it may read exactly when the subject is a user it reads. */
+  const delegateFor = (state: State, set = GRANT_ADMIN) => ({
+    ...delegateCtx('u_delegate', set),
+    org_user_ids: state === 'an id naming no user' || state === UNREADABLE_INSIDE
+      ? [...ORG_USER_IDS, PEER]
+      : [...ORG_USER_IDS, PEER, SUBJECT],
+  });
+
+  /**
+   * A fresh rig with the subject in `state`, the peer, and the stored grant
+   * each of `ends` moves: `g_subject`, the subject's, for `from`; `g_target`,
+   * `u_target`'s, for `to`. A move through the write door boots its own end
+   * alone: moved onto the subject, `g_target` would duplicate `g_subject`.
+   */
+  async function bootWith(posture: Posture, state: State, ends: readonly End[] = ['from', 'to']) {
+    const h = await boot(posture, { permissions: [GRANT_ADMIN_SET] });
+    const sys = { context: { isSystem: true, tenantId: ORG_A } } as any;
+    await h.engine.insert('sys_user', { id: PEER, email: `${PEER}@example.test`, name: PEER }, sys);
+    await h.engine.insert('sys_member', { id: `m_${PEER}`, user_id: PEER, organization_id: ORG_A, role: 'member' }, sys);
+    await h.engine.insert('sys_business_unit_member',
+      { id: 'bum_peer', user_id: PEER, business_unit_id: 'bu_east_field', organization_id: ORG_A }, sys);
+    if (state !== 'an id naming no user') {
+      await h.engine.insert('sys_user', { id: SUBJECT, email: `${SUBJECT}@example.test`, name: SUBJECT }, sys);
+      await h.engine.insert('sys_member', { id: `m_${SUBJECT}`, user_id: SUBJECT, organization_id: ORG_A, role: 'member' }, sys);
+    }
+    const unit = state === 'a user whose business unit is outside the scope' ? 'bu_hq'
+      : state === UNREADABLE_INSIDE || state === CONTROL ? 'bu_east_field'
+        : null;
+    if (unit) {
+      await h.engine.insert('sys_business_unit_member',
+        { id: 'bum_subject', user_id: SUBJECT, business_unit_id: unit, organization_id: ORG_A }, sys);
+    }
+    await h.engine.insert('sys_user_permission_set', [
+      ...(ends.includes('from') ? [{ id: 'g_subject', user_id: SUBJECT, permission_set: 'field_user', organization_id: ORG_A }] : []),
+      ...(ends.includes('to') ? [{ id: 'g_target', user_id: 'u_target', permission_set: 'field_user', organization_id: ORG_A }] : []),
+    ], sys);
+    return h;
+  }
+
+  /** Everything a caller is told: the envelope both HTTP doors answer with, the class, the message and the details. */
+  async function answerOf(run: () => Promise<unknown>) {
+    try {
+      await run();
+      return { status: 200 };
+    } catch (e: any) {
+      const r = resolveThrownHttpError(e);
+      return { status: r.status, code: r.code, class: e?.constructor?.name, message: e?.message, details: e?.details };
+    }
+  }
+
+  /** The gate's answer to `end`, asked by `context`. */
+  const atGate = (h: Awaited<ReturnType<typeof bootWith>>, end: End, context: any) =>
+    answerOf(() => (h.plugin as any).delegatedAdminGate.assert({
+      object: 'sys_user_permission_set', operation: 'update', data: { ...ENDS[end] }, context,
+    }));
+  /** The write door's answer to `end`, asked by `context`. */
+  const throughWriteDoor = (h: Awaited<ReturnType<typeof bootWith>>, end: End, context: any) =>
+    answerOf(() => h.engine.update('sys_user_permission_set', { ...ENDS[end] } as any, { context } as any));
+  /** Who holds `id` now, as stored. */
+  async function holderOf(h: Awaited<ReturnType<typeof bootWith>>, id: string): Promise<unknown> {
+    const rows = await h.engine.find('sys_user_permission_set', { where: { id }, context: SYS });
+    return (Array.isArray(rows) ? rows : []).map((r: any) => r.user_id)[0];
+  }
+
+  /** The one answer a holder outside the scope gets at the gate, at either end of the move: one sentence, one class, one set of details. */
+  const OUTSIDE_ANSWER = {
+    status: 403,
+    code: 'DELEGATION_SCOPE_VIOLATION',
+    class: 'DelegationScopeViolationError',
+    message: "[Security] Outside your delegated scope: delegated 'update' on sys_user_permission_set rejected — target user 'u_subject' is outside the delegated subtree (scope from 'east_grant_admin').",
+    details: { operation: 'update', object: 'sys_user_permission_set', permissionSet: 'field_user' },
+  };
+  type Rig = Awaited<ReturnType<typeof bootWith>>;
+  /** Both grants are where the rig booted them: nothing a refused pin sent moved either. */
+  async function expectUnmoved(h: Rig) {
+    expect(await holderOf(h, 'g_subject')).toBe(SUBJECT);
+    expect(await holderOf(h, 'g_target')).toBe('u_target');
+  }
+
+  for (const posture of POSTURES) {
+    describe(`posture '${posture}'`, () => {
+      // Every pin under a state is a refusal and moves nothing (each re-reads
+      // both grants to show it), so the subject in each state boots ONE rig that
+      // serves them all — a boot is what a pin here costs. The CONTROLs that
+      // move a grant, below, boot their own.
+      for (const state of STATES) {
+        describe(`the subject is ${state}`, () => {
+          let h: Rig;
+          beforeAll(async () => {
+            h = await bootWith(posture, state);
+            // Kept past the file's per-test teardown (`engines`); destroyed by this describe's afterAll.
+            engines.splice(engines.indexOf(h.engine), 1);
+          });
+          afterAll(async () => {
+            try { await h?.engine.destroy(); } catch { /* noop */ }
+          });
+
+          it('moving a grant FROM the subject TO a holder inside the scope is refused with the one answer, at the gate and through the write door, and the grant stays', async () => {
+            expect(await atGate(h, 'from', delegateFor(state))).toEqual(OUTSIDE_ANSWER);
+            expect(await throughWriteDoor(h, 'from', delegateFor(state))).toEqual(OUTSIDE_ANSWER);
+            await expectUnmoved(h);
+          });
+
+          it('moving a grant TO the subject is refused with the one answer, as before', async () => {
+            expect(await atGate(h, 'to', delegateFor(state))).toEqual(OUTSIDE_ANSWER);
+            await expectUnmoved(h);
+          });
+
+          it('the refusal is the same whichever end the subject is at: status, code, class, message and details', async () => {
+            expect(await atGate(h, 'from', delegateFor(state))).toEqual(await atGate(h, 'to', delegateFor(state)));
+            await expectUnmoved(h);
+          });
+
+          it("a delegate that cannot read the stored grant is told the same refusal without the stored holder's name", async () => {
+            // `east_admin` holds no read of `sys_user_permission_set`: the stored
+            // grant's values are ones it may not be told (ruling of record 6649064874).
+            const { message: fromMessage, ...from } = await atGate(h, 'from', delegateFor(state, 'east_admin')) as any;
+            const { message: toMessage, ...to } = await atGate(h, 'to', delegateFor(state, 'east_admin')) as any;
+            expect(from).toEqual(to);
+            expect([from.status, from.code]).toEqual([403, 'DELEGATION_SCOPE_VIOLATION']);
+            expect(fromMessage).toBe(
+              "[Security] Outside your delegated scope: delegated 'update' on sys_user_permission_set rejected — the grant's target user is outside the delegated subtree (scope from 'east_admin').",
+            );
+            expect(toMessage).toMatch(/target user 'u_subject' is outside the delegated subtree/);
+            await expectUnmoved(h);
+          });
+
+          it('CONTROL: an organization administrator gets the answer it always got at either end, an edit in place being no part of its right', async () => {
+            const organization = delegateCtx('u_org_admin', 'organization_admin');
+            for (const end of Object.keys(ENDS) as End[]) {
+              const answer = await throughWriteDoor(h, end, organization);
+              expect([answer.status, (answer as any).code], end).toEqual([403, 'PERMISSION_DENIED']);
+              expect((answer as any).message, end).toMatch(/'update' is not part of the right — an assignment row is created and removed, never edited in place/);
+            }
+            await expectUnmoved(h);
+          });
+        });
+      }
+
+      for (const end of Object.keys(ENDS) as End[]) {
+        const which = end === 'from' ? 'FROM' : 'TO';
+        it(`CONTROL: moving a grant ${which} a holder inside the scope whom the delegate reads is admitted at the gate and through the write door, and the grant moves`, async () => {
+          const h = await bootWith(posture, CONTROL, [end]);
+          expect(await atGate(h, end, delegateFor(CONTROL))).toEqual({ status: 200 });
+          expect(await throughWriteDoor(h, end, delegateFor(CONTROL))).toEqual({ status: 200 });
+          expect(await holderOf(h, ENDS[end].id)).toBe(ENDS[end].user_id);
+        });
+
+        it(`CONTROL: a tenant-level administrator still moves the grant ${which} a holder outside the scope, through the write door`, async () => {
+          const tenant = delegateCtx('u_org_admin', 'admin_full_access');
+          for (const state of ['a user whose business unit is outside the scope', UNREADABLE_INSIDE] as const) {
+            const h = await bootWith(posture, state, [end]);
+            expect(await throughWriteDoor(h, end, tenant), state).toEqual({ status: 200 });
+            expect(await holderOf(h, ENDS[end].id), state).toBe(ENDS[end].user_id);
+          }
+        });
+      }
+    });
+  }
+});
+
+/**
+ * [ADR-0090 D12] … and on the set axis. An update that re-names a stored
+ * direct grant's set takes that set away from its holder, so the set it takes
+ * away is judged exactly as the removal of that grant judges it, with the same
+ * reasons, sentences and details, and named only when the delegate reads it
+ * (ruling of record 6649064874); the set it re-names the grant TO is judged as
+ * before. A grant the delegate could not remove it cannot re-name either.
+ *
+ * The delegate administers direct grants (CRUD on `sys_user_permission_set`
+ * beside a scope over `east` allowlisting `field_user` and `field_rep`), so its
+ * update reaches the gate through the write door and its own read returns the
+ * grants it edits. Each pin boots the grants it moves, all held by `u_target`,
+ * a user inside the scope whom the delegate reads: `g_audit` of `field_audit`,
+ * which the scope does not allowlist, and `g_user` of `field_user`.
+ */
+describe('[ADR-0090 D12] a delegate can neither capture nor evict a direct grant beyond its scope: an update that re-names a stored grant is judged on the set it takes away as the removal of that grant is — three postures', () => {
+  const RENAMER = 'east_grant_renamer';
+  const GRANT_CRUD = { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true };
+  const RENAMER_SET = {
+    name: RENAMER, label: 'East grant delegate (re-names)',
+    objects: { sys_user_permission_set: GRANT_CRUD }, adminScope: eastScope(['field_user', 'field_rep']),
+  };
+  const GRANTS = {
+    g_audit: { id: 'g_audit', user_id: 'u_target', permission_set: 'field_audit', organization_id: ORG_A },
+    g_user: { id: 'g_user', user_id: 'u_target', permission_set: 'field_user', organization_id: ORG_A },
+  } as const;
+  type GrantId = keyof typeof GRANTS;
+
+  /** A fresh rig holding the stored grants `ids`. */
+  async function bootWith(posture: Posture, ids: readonly GrantId[]) {
+    const h = await boot(posture, { permissions: [RENAMER_SET] });
+    await h.engine.insert('sys_user_permission_set', ids.map((id) => ({ ...GRANTS[id] })),
+      { context: { isSystem: true, tenantId: ORG_A } } as any);
+    return h;
+  }
+
+  /** Everything a caller is told: the envelope both HTTP doors answer with, the class, the message and the details. */
+  async function answerOf(run: () => Promise<unknown>) {
+    try {
+      await run();
+      return { status: 200 };
+    } catch (e: any) {
+      const r = resolveThrownHttpError(e);
+      return { status: r.status, code: r.code, class: e?.constructor?.name, message: e?.message, details: e?.details };
+    }
+  }
+  /** An answer with its operation word spelled out of it: what a re-name and a removal must share. */
+  const operationFree = (answer: unknown) =>
+    JSON.parse(JSON.stringify(answer).replace(/'(update|delete)'/g, "'OP'").replace(/"(update|delete)"/g, '"OP"'));
+
+  type Rig = Awaited<ReturnType<typeof bootWith>>;
+  const gateOf = (h: Rig) => (h.plugin as any).delegatedAdminGate;
+  const renameAtGate = (h: Rig, id: GrantId, to: string, context: any) =>
+    answerOf(() => gateOf(h).assert({ object: 'sys_user_permission_set', operation: 'update', data: { id, permission_set: to }, context }));
+  const removeAtGate = (h: Rig, id: GrantId, context: any) =>
+    answerOf(() => gateOf(h).assert({ object: 'sys_user_permission_set', operation: 'delete', options: { where: { id } }, context }));
+  const renameThroughWriteDoor = (h: Rig, id: GrantId, to: string, context: any) =>
+    answerOf(() => h.engine.update('sys_user_permission_set', { id, permission_set: to } as any, { context } as any));
+  const removeThroughWriteDoor = (h: Rig, id: GrantId, context: any) =>
+    answerOf(() => h.engine.delete('sys_user_permission_set', { where: { id }, context } as any));
+  /** The set grant `id` holds now, as stored. */
+  async function setOf(h: Rig, id: GrantId): Promise<unknown> {
+    const rows = await h.engine.find('sys_user_permission_set', { where: { id }, context: SYS });
+    return (Array.isArray(rows) ? rows : []).map((r: any) => r.permission_set)[0];
+  }
+
+  const RENAMER_CTX = delegateCtx('u_delegate', RENAMER);
+
+  for (const posture of POSTURES) {
+    describe(`posture '${posture}'`, () => {
+      it('re-naming a grant FROM a set outside the allowlist TO an allowlisted one is refused with the answer the removal of that grant gets, at the gate and through the write door, and the grant keeps its set', async () => {
+        const h = await bootWith(posture, ['g_audit']);
+        const gate = await renameAtGate(h, 'g_audit', 'field_user', RENAMER_CTX);
+        expect([gate.status, (gate as any).code, (gate as any).class]).toEqual([403, 'DELEGATION_SCOPE_VIOLATION', 'DelegationScopeViolationError']);
+        expect((gate as any).message).toBe(
+          "[Security] Outside your delegated scope: delegated 'update' on sys_user_permission_set rejected — permission set 'field_audit' is not in the scope's allowlist (scope from 'east_grant_renamer').",
+        );
+        expect((gate as any).details).toEqual({ operation: 'update', object: 'sys_user_permission_set', permissionSet: 'field_audit' });
+        expect(operationFree(gate)).toEqual(operationFree(await removeAtGate(h, 'g_audit', RENAMER_CTX)));
+
+        const door = await renameThroughWriteDoor(h, 'g_audit', 'field_user', RENAMER_CTX);
+        expect(operationFree(door)).toEqual(operationFree(await removeThroughWriteDoor(h, 'g_audit', RENAMER_CTX)));
+        expect([door.status, (door as any).code, (door as any).message]).toEqual([403, 'DELEGATION_SCOPE_VIOLATION', (gate as any).message]);
+        expect(await setOf(h, 'g_audit')).toBe('field_audit');
+      });
+
+      it('a delegate that cannot read the stored grant is told the same refusal without the set it takes away, as the removal is', async () => {
+        // `east_admin` holds no read of `sys_user_permission_set`, and allowlists `field_user` alone.
+        const h = await bootWith(posture, ['g_audit']);
+        const renamed = await renameAtGate(h, 'g_audit', 'field_user', NARROW);
+        expect([renamed.status, (renamed as any).code]).toEqual([403, 'DELEGATION_SCOPE_VIOLATION']);
+        expect((renamed as any).message).toBe(
+          "[Security] Outside your delegated scope: delegated 'update' on sys_user_permission_set rejected — the grant's permission set is not in the scope's allowlist (scope from 'east_admin').",
+        );
+        expect((renamed as any).details).toEqual({ operation: 'update', object: 'sys_user_permission_set' });
+        expect(operationFree(renamed)).toEqual(operationFree(await removeAtGate(h, 'g_audit', NARROW)));
+      });
+
+      it('re-naming a grant TO a set outside the allowlist is refused, as before, and the grant keeps its set', async () => {
+        const h = await bootWith(posture, ['g_user']);
+        const door = await renameThroughWriteDoor(h, 'g_user', 'field_audit', RENAMER_CTX);
+        expect([door.status, (door as any).code]).toEqual([403, 'DELEGATION_SCOPE_VIOLATION']);
+        expect((door as any).message).toMatch(/permission set 'field_audit' is not in the scope's allowlist/);
+        expect(await setOf(h, 'g_user')).toBe('field_user');
+      });
+
+      it('CONTROL: re-naming a grant between two allowlisted sets is admitted at the gate and through the write door, and the grant is re-named', async () => {
+        const h = await bootWith(posture, ['g_user']);
+        expect(await renameAtGate(h, 'g_user', 'field_rep', RENAMER_CTX)).toEqual({ status: 200 });
+        expect(await renameThroughWriteDoor(h, 'g_user', 'field_rep', RENAMER_CTX)).toEqual({ status: 200 });
+        expect(await setOf(h, 'g_user')).toBe('field_rep');
+      });
+
+      it('CONTROL: a tenant-level administrator re-names a grant freely, FROM a set outside the allowlist and TO one, through the write door', async () => {
+        const tenant = delegateCtx('u_org_admin', 'admin_full_access');
+        for (const [id, to] of [['g_audit', 'field_user'], ['g_user', 'field_audit']] as const) {
+          const h = await bootWith(posture, [id]);
+          expect(await renameThroughWriteDoor(h, id, to, tenant), `${id} → ${to}`).toEqual({ status: 200 });
+          expect(await setOf(h, id), `${id} → ${to}`).toBe(to);
         }
       });
     });
