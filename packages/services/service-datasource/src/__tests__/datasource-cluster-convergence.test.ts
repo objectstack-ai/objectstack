@@ -40,6 +40,11 @@ import {
   assertEngineUpdateDispatch,
 } from '@objectstack/metadata-core';
 import type { IDataDriver, IPubSub } from '@objectstack/spec/contracts';
+// The plugin under test loads both drivers lazily, inside a function body;
+// pay that first load here, during collection, not inside a clocked case
+// (`pnpm check:test-source-alias`, "The source reach").
+import '@objectstack/driver-sql';
+import '@objectstack/driver-memory';
 import { DatasourceAdminServicePlugin } from '../datasource-admin-plugin.js';
 import {
   DatasourceAdminService,
