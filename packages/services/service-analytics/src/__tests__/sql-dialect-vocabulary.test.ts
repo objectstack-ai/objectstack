@@ -166,13 +166,17 @@ const dialectWarnings = (logger: TestLogger): string[] =>
   logger.warn.mock.calls.map((c) => String(c[0])).filter((m) => m.includes('sqlDialect hook answered'));
 
 describe('[#16206] the declared vocabulary', () => {
-  it('is the three canonical names, and the type and the runtime set are ONE source', () => {
-    expect([...ACCEPTED_SQL_DIALECTS]).toEqual(['sqlite', 'postgres', 'mysql']);
+  it('is canonical names only, and the type and the runtime set are ONE source', () => {
+    // [#31394] `mssql` joined — the driver's own canonical name for SQL Server
+    // (#31327), which the plugin's bridge must hand on for the text-match arms.
+    // `oracle` is canonical too and deliberately stays out (measured consistent
+    // on the residue; see `text-match-mssql-oracle.test.ts`).
+    expect([...ACCEPTED_SQL_DIALECTS]).toEqual(['sqlite', 'postgres', 'mysql', 'mssql']);
     // Every declared name is accepted at runtime…
     for (const d of ACCEPTED_SQL_DIALECTS) expect(normalizeSqlDialect(d), d).toBe(d);
     // …and the type is the same list, checked by the compiler rather than by eye.
     const declared: readonly AcceptedSqlDialect[] = ACCEPTED_SQL_DIALECTS;
-    expect(declared.length).toBe(3);
+    expect(declared.length).toBe(4);
     // ⛔ `'unknown'` is the residue arm, never something a host may answer.
     expect((ACCEPTED_SQL_DIALECTS as readonly string[]).includes('unknown')).toBe(false);
     expect(normalizeSqlDialect('unknown')).toBe('unknown');
@@ -189,7 +193,7 @@ describe('[#16206] the declared vocabulary', () => {
 
   it('separates a non-answer from a wrong answer — the identity the defect rested on', () => {
     // A wrong answer: something was said, and it is outside the accept set.
-    for (const wrong of ['sqlite3', 'better-sqlite3', 'SQLite', 'mssql', ' sqlite']) {
+    for (const wrong of ['sqlite3', 'better-sqlite3', 'SQLite', 'oracle', ' sqlite']) {
       expect(isUnrecognisedSqlDialectAnswer(wrong), wrong).toBe(true);
     }
     // ⛔ A non-answer is NOT a wrong answer. The hook is optional.
