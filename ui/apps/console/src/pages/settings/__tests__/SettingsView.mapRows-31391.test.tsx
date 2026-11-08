@@ -45,6 +45,12 @@ vi.mock('sonner', () => ({
 }));
 
 import { SettingsView } from '../SettingsView';
+import {
+  createI18n,
+  I18nProvider,
+  transformSpecTranslations,
+  type SpecTranslationData,
+} from '@object-ui/i18n';
 
 /** The keys the object option source serves on this deployment. */
 const OBJECT_OPTIONS = [
@@ -366,5 +372,74 @@ describe('SettingsView — a locked map (objectstack#31391)', () => {
     fireEvent.click(remove);
     expect(entryKeys('quotas')).toEqual(['sys_audit_log']);
     expect(screen.queryByTestId('settings-unsaved-count')).toBeNull();
+  });
+});
+
+/**
+ * The headers translate through the setting's own slots (objectstack#31453):
+ * `settings.lifecycle.keys.<key>.keyColumn` for the key column and
+ * `keys.<key>.columns.<name>` for each value column, `label` the header and
+ * `help` its hover text. The served document below is the zh-CN shape the
+ * shipped platform bundle carries, minus one column, which keeps its literal.
+ */
+describe('SettingsView — a map\'s headers translate through keyColumn / columns (objectstack#31453)', () => {
+  const ZH: SpecTranslationData = {
+    settings: {
+      lifecycle: {
+        keys: {
+          retention_overrides: {
+            label: '保留期覆盖',
+            keyColumn: { label: '对象', help: '要覆盖保留期的对象' },
+            // `expireAfter` is left out on purpose: it keeps its literal.
+            columns: { maxAge: { label: '行保留时长', help: '行保留多久' } },
+          },
+          quotas: { label: '行数配额', keyColumn: { label: '对象' }, columns: { max_rows: { label: '最大行数' } } },
+        },
+      },
+    },
+  };
+
+  function renderInZh() {
+    const instance = createI18n({
+      defaultLanguage: 'zh-CN',
+      detectBrowserLanguage: false,
+      resources: { 'zh-CN': transformSpecTranslations(ZH) },
+    });
+    return render(
+      <I18nProvider instance={instance}>
+        <MemoryRouter initialEntries={['/settings/lifecycle']}>
+          <Routes>
+            <Route path="/settings/:namespace" element={<SettingsView />} />
+          </Routes>
+        </MemoryRouter>
+      </I18nProvider>,
+    );
+  }
+
+  it('heads the key column and a translated value column in zh-CN; an untranslated column keeps its literal', async () => {
+    getSettingsNamespace.mockResolvedValue(
+      lifecyclePayload({ retention_overrides: { sys_job_run: { maxAge: '1y', expireAfter: '30d' } } }),
+    );
+    renderInZh();
+    await screen.findByText('保留期覆盖');
+
+    const headers = within(rowFor('retention_overrides')).getAllByRole('columnheader');
+    expect(headers.slice(0, 3).map((h) => h.textContent)).toEqual(['对象', '行保留时长', 'Expire rows after']);
+    // `help` is the header's hover text; a column without one has none.
+    expect(headers.slice(0, 3).map((h) => h.getAttribute('title'))).toEqual(['要覆盖保留期的对象', '行保留多久', null]);
+    // The translated header is still what names the row's cells and key picker.
+    expect(cell('retention_overrides', 'sys_job_run', '行保留时长').value).toBe('1');
+    expect(cell('retention_overrides', 'sys_job_run', 'Expire rows after').value).toBe('30');
+    expect(within(entryRow('retention_overrides', 'sys_job_run')!).getByRole('combobox', { name: '对象' })).toBeTruthy();
+  });
+
+  it('a one-column map reads its own key, not a sibling map\'s', async () => {
+    getSettingsNamespace.mockResolvedValue(lifecyclePayload({ quotas: { sys_audit_log: 1000000 } }));
+    renderInZh();
+    await screen.findByText('行数配额');
+
+    const headers = within(rowFor('quotas')).getAllByRole('columnheader').map((h) => h.textContent);
+    expect(headers.slice(0, 2)).toEqual(['对象', '最大行数']);
+    expect(cell('quotas', 'sys_audit_log', '最大行数').value).toBe('1000000');
   });
 });
