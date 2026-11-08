@@ -27,8 +27,14 @@
  * context that handler reads.
  *
  * Multi-tenant, the service is read from the environment's own kernel (the
- * one `kernel-manager` hands out), where its plugin runs; single-environment,
- * from the host's.
+ * one `kernel-manager` hands out); single-environment, from the host's.
+ *
+ * Cross-repo, NOT MEASURED: that a hosted environment's kernel mounts the
+ * install-local plugin at all. Nothing in this repo shows it, and this repo's
+ * own hosted Console reads a cloud base as having no install-local door (the
+ * 30963 changeset, `MarketplacePage`). Where the door is not mounted, an
+ * unmanaged grant copies nothing and answers 503 `SERVICE_UNAVAILABLE`, saying
+ * the plugin is not mounted. Follow-up: #31482.
  */
 
 /** The service name the install-local plugin registers its in-process door under. */

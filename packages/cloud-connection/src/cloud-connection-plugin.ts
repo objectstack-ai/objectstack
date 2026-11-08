@@ -971,7 +971,7 @@ export class CloudConnectionPlugin implements Plugin {
                 return c.json({ success: true, data: { environmentId: environmentId ?? null, revoked, cleared } });
             });
 
-            // POST /install { package_id, seed_sample_data? } — in-environment
+            // POST /install { package_id, seed_sample_data?, install_mode? } — in-environment
             // marketplace install. Authorizes the caller against the
             // environment's own session (SSO-as-owner only ever admits org
             // owners/admins), then performs the install against the cloud
@@ -1013,6 +1013,8 @@ export class CloudConnectionPlugin implements Plugin {
                 // Call the cloud install endpoint in service mode. We do NOT send
                 // an active org → package-install treats this as platform/CI and
                 // installs unrestricted (we already authorized the env admin above).
+                // The installer travels only as the `installer_user_id` body param
+                // below, always sent: the id of the session admitted above.
                 try {
                     const resp = await fetch(`${cloudUrl}/api/v1/actions/sys_package/install_package`, {
                         method: 'POST',
@@ -1075,20 +1077,29 @@ export class CloudConnectionPlugin implements Plugin {
                 const { environmentId, packageId, seedSampleData, grant } = args;
                 const data = grant?.data;
                 const versionId = typeof data?.version_id === 'string' ? data.version_id.trim() : '';
+                // An answer with no `install_mode` at all may come from a control
+                // plane that does not read the param, and so may already have
+                // installed the package MANAGED; the refusal says so, so the
+                // installer checks Installed before retrying.
+                const unechoed = data?.install_mode === undefined || data?.install_mode === null;
                 const unread = data?.install_mode !== 'unmanaged'
                     ? 'its answer does not echo `install_mode: \'unmanaged\'`'
                     : versionId === '' ? 'its answer names no `version_id`' : undefined;
                 if (unread !== undefined) {
+                    const managedNote = unechoed
+                        ? ' The control plane did not echo install_mode; a control plane that does not read it may have '
+                            + 'installed the package managed. Check Installed before retrying.'
+                        : '';
                     ctx.logger?.warn?.(
                         `[CloudConnectionPlugin] the unmanaged install of ${packageId} in ${environmentId} was not copied: `
-                        + `the control plane's grant could not be read (${unread})`,
+                        + `the control plane's grant could not be read (${unread}).${managedNote}`,
                     );
                     return c.json({
                         success: false,
                         error: {
                             code: 'PLUGIN_INSTALL_FAILED',
                             message: `The control plane answered the unmanaged install of '${packageId}', but ${unread}, so this `
-                                + 'environment cannot tell which version it granted. Nothing was copied.',
+                                + `environment cannot tell which version it granted. Nothing was copied.${managedNote}`,
                         },
                     }, 502);
                 }

@@ -662,7 +662,7 @@ describe('install-local — an unmanaged copy\'s sample data, asked for with `se
      * driver error (a lock timeout, a dropped connection) is caught, logged and
      * answered `null`; only the seam-unreadable refusal escapes, as a 503.
      */
-    function world(opts: { packageStore?: boolean } = {}) {
+    function world(opts: { packageStore?: boolean; grantless?: boolean } = {}) {
         const tables: Record<string, Row[]> = {};
         const objects = new Map<string, any>();
         const packages = new Map<string, { manifest: Record<string, unknown> }>();
@@ -789,6 +789,16 @@ describe('install-local — an unmanaged copy\'s sample data, asked for with `se
             return { type, name, item: { ...row.metadata, _packageId: row.package_id }, lock: 'none', editable: true };
         });
 
+        // [#30964] `grantless`: the same signed-in person holding no permission
+        // set, so no install capability (`manage_metadata`). The wrapped engine is kept (the
+        // security catalog is bound to it); only its grant read answers empty.
+        function grantsOf<T extends { find: (object: string, options?: unknown) => Promise<unknown> }>(objectql: T): T {
+            if (!opts.grantless) return objectql;
+            const find = objectql.find;
+            objectql.find = async (object: string, options?: unknown) => (object === 'sys_user_permission_set' ? [] : find(object, options));
+            return objectql;
+        }
+
         async function boot() {
             const routes = new Map<string, Handler>();
             const rawApp = {
@@ -801,7 +811,7 @@ describe('install-local — an unmanaged copy\'s sample data, asked for with `se
             const services: Record<string, any> = {
                 manifest: { register },
                 auth: installerAuthService(INSTALLER),
-                objectql: withInstallerGrants(engine, INSTALLER),
+                objectql: grantsOf(withInstallerGrants(engine, INSTALLER)),
                 metadata: { getObject: async (name: string) => objects.get(name) },
                 protocol: {
                     importUnmanagedPackage, getMetaItem,
@@ -1215,6 +1225,23 @@ describe('install-local — an unmanaged copy\'s sample data, asked for with `se
             method: 'POST', headers: { 'content-type': 'application/json' }, body: '{ nope',
         }));
         expect(bad.status).toBe(400);
+    });
+
+    it('the in-process door refuses a caller without the install capability as the route does: 403, no import, no audit event', async () => {
+        const w = world({ grantless: true });
+        const h = await w.boot();
+        const answer = await h.door!.install(new Request(`http://localhost${ROUTE}`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ manifest: seededCrm(), installMode: 'unmanaged', seedSampleData: true }),
+        }));
+        const payload: any = await answer.json();
+        expect(answer.status, JSON.stringify(payload)).toBe(403);
+        expect(payload.error.code).toBe('FORBIDDEN');
+        expect(payload.error.message).toContain('requires the `manage_metadata` capability');
+        expect(w.importUnmanagedPackage).not.toHaveBeenCalled();
+        expect(w.auditEvents).toEqual([]);
+        // The installer's own copy through the same door is the case above.
     });
 });
 

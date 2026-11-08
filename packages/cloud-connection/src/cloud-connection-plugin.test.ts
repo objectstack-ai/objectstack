@@ -488,6 +488,31 @@ describe('[#30964] an unmanaged grant hands the copy to the environment\'s insta
         }
     });
 
+    it('no echoed install_mode at all says the package may already be installed managed; an echoed mismatch or a missing version does not', async () => {
+        const MANAGED_NOTE = 'The control plane did not echo install_mode; a control plane that does not read it may have '
+            + 'installed the package managed. Check Installed before retrying.';
+        for (const data of [{ version_id: 'ver_9' }, { install_mode: null, version_id: 'ver_9' }, {}]) {
+            const { res, logger } = await grant({ answer: { json: { success: true, data } } });
+            expect(res.status, JSON.stringify(data)).toBe(502);
+            expect(res.payload.error.message).toContain('Nothing was copied.');
+            expect(res.payload.error.message).toContain(MANAGED_NOTE);
+            const warned = (logger.warn as any).mock.calls.map((call: unknown[]) => String(call[0])).join('\n');
+            expect(warned).toContain(MANAGED_NOTE);
+        }
+        for (const data of [
+            { install_mode: 'managed', version_id: 'ver_9' },
+            { install_mode: 'unmanaged' },
+            { install_mode: 'unmanaged', version_id: '  ' },
+        ]) {
+            const { res, logger } = await grant({ answer: { json: { success: true, data } } });
+            expect(res.status, JSON.stringify(data)).toBe(502);
+            expect(res.payload.error.message).not.toContain('may have installed the package managed');
+            const warned = (logger.warn as any).mock.calls.map((call: unknown[]) => String(call[0])).join('\n');
+            expect(warned).toContain('was not copied');
+            expect(warned).not.toContain('may have installed the package managed');
+        }
+    });
+
     it('a control-plane refusal is relayed as it was, and nothing is copied', async () => {
         const { res, door } = await grant({ answer: { status: 403, json: { success: false, error: { code: 'FORBIDDEN', message: 'not entitled' } } } });
         expect(res.status).toBe(403);
