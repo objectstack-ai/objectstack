@@ -364,6 +364,25 @@ export default class Start extends Command {
       }
     }
 
+    // ── A declared multi-replica deployment shares ONE sign-in secret ──────
+    // Minting one below is right for a single node and wrong for replicas:
+    // each mints its own into its own home, and a session signed on one is
+    // refused on the others. Asked only when the operator set none, and before
+    // anything is generated, so the refusal writes no secret. The declaration
+    // and the driver are the pair `planCacheAdapter` (`@objectstack/service-cache`)
+    // switches on: `declaresMultiNode`, read from the module that owns it, and
+    // the driver the `serve` child composes its cluster service from.
+    if (operatorAuthSecret === undefined || operatorAuthSecret.trim().length === 0) {
+      const { declaresMultiNode } = await import('@objectstack/service-cluster');
+      if (refusesMintedAuthSecret({
+        multiNode: declaresMultiNode(process.env),
+        clusterDriver: process.env.OS_CLUSTER_DRIVER,
+      })) {
+        process.stderr.write(`${MULTI_REPLICA_AUTH_SECRET_REFUSAL}\n`);
+        process.exit(1);
+      }
+    }
+
     const persistedAuthSecret = operatorAuthSecret === undefined ? readOrCreateAuthSecret(homeDir) : undefined;
     const authSecret = persistedAuthSecret ? persistedAuthSecret.secret : operatorAuthSecret;
 
@@ -673,6 +692,38 @@ export async function resolveStartDatabase(opts: {
     artifactPath: opts.artifactPath,
   });
 }
+
+/**
+ * The cluster driver whose replicas share state, so whose deployment must
+ * share one sign-in secret too: the driver `planCacheAdapter`
+ * (`@objectstack/service-cache`) shares one cache over.
+ */
+const SHARED_CLUSTER_DRIVER = 'redis';
+
+/**
+ * Whether `os start` refuses to mint its own sign-in secret: the deployment
+ * declares several replicas (`declaresMultiNode` from
+ * `@objectstack/service-cluster`, the split-brain guard's reading) over the
+ * redis cluster driver. Both are required (cloud ADR-0010 path A): a single
+ * node keeps minting into `<home>/auth-secret`, and a declaration over any
+ * other driver keeps today's boot. The caller asks only when the operator set
+ * no secret. `clusterDriver` is `OS_CLUSTER_DRIVER` as written, trimmed the way
+ * the `serve` child trims it before composing the cluster service.
+ */
+export function refusesMintedAuthSecret(facts: { multiNode: boolean; clusterDriver: string | undefined }): boolean {
+  return facts.multiNode && facts.clusterDriver?.trim() === SHARED_CLUSTER_DRIVER;
+}
+
+/**
+ * The refusal, one line in the data key's shape (`LocalCryptoProvider`): what
+ * is missing, what minting one would break, and how to generate the value.
+ * It names the variable and never a value.
+ */
+export const MULTI_REPLICA_AUTH_SECRET_REFUSAL =
+  '[auth] Refusing to start: several replicas are declared (OS_EXPECT_MULTI_NODE / OS_CLUSTER_REPLICAS>1) ' +
+  'over the redis cluster driver, but OS_AUTH_SECRET is not set — each replica would mint its own sign-in ' +
+  'secret, and a session signed on one would be refused on the others. Fix: generate one and set the same ' +
+  'value on every replica, e.g. OS_AUTH_SECRET=$(openssl rand -hex 32)';
 
 /**
  * Read the persisted AUTH_SECRET from `<home>/auth-secret`, or generate

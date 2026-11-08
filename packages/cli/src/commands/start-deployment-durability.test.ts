@@ -10,14 +10,17 @@ import { describe, expect, it } from 'vitest';
 import {
   DURABILITY_CHECK_ENV,
   INTERNAL_DEPLOYMENT_FINDINGS_ENV,
+  MULTI_REPLICA_AUTH_SECRET_REFUSAL,
   formatDurabilityBootBlock,
   formatDurabilityRefusal,
   isDefaultedDatabase,
   missingDurableVariables,
   readDurabilityCheckSignal,
+  refusesMintedAuthSecret,
   sqliteFileOf,
   writeDeploymentFindingsChannel,
 } from './start.js';
+import { declaresMultiNode } from '@objectstack/service-cluster';
 
 describe('the image switch', () => {
   it.each([
@@ -135,5 +138,37 @@ describe('the channel to the server process', () => {
     env[INTERNAL_DEPLOYMENT_FINDINGS_ENV] = 'inherited';
     writeDeploymentFindingsChannel(env, undefined);
     expect(INTERNAL_DEPLOYMENT_FINDINGS_ENV in env).toBe(false);
+  });
+});
+
+describe('a declared multi-replica start on the redis cluster driver mints no sign-in secret of its own', () => {
+  // The facts as the call site reads them: the declaration through the
+  // split-brain guard's own reader, the driver as `OS_CLUSTER_DRIVER` spells it.
+  const facts = (env: Record<string, string | undefined>) => ({
+    multiNode: declaresMultiNode(env),
+    clusterDriver: env.OS_CLUSTER_DRIVER,
+  });
+
+  it('refuses when several replicas are declared over the redis driver, by either declaration', () => {
+    expect(refusesMintedAuthSecret(facts({ OS_CLUSTER_REPLICAS: '3', OS_CLUSTER_DRIVER: 'redis' }))).toBe(true);
+    expect(refusesMintedAuthSecret(facts({ OS_EXPECT_MULTI_NODE: 'true', OS_CLUSTER_DRIVER: ' redis ' }))).toBe(true);
+  });
+
+  it('CONTROL: a single node keeps minting, on the redis driver too', () => {
+    expect(refusesMintedAuthSecret(facts({}))).toBe(false);
+    expect(refusesMintedAuthSecret(facts({ OS_CLUSTER_DRIVER: 'redis' }))).toBe(false);
+    expect(refusesMintedAuthSecret(facts({ OS_CLUSTER_REPLICAS: '1', OS_CLUSTER_DRIVER: 'redis' }))).toBe(false);
+  });
+
+  it('CONTROL: replicas declared over the memory driver, or none named, keep the boot they had', () => {
+    expect(refusesMintedAuthSecret(facts({ OS_CLUSTER_REPLICAS: '3', OS_CLUSTER_DRIVER: 'memory' }))).toBe(false);
+    expect(refusesMintedAuthSecret(facts({ OS_CLUSTER_REPLICAS: '3' }))).toBe(false);
+  });
+
+  it('the refusal is one line naming OS_AUTH_SECRET and how to generate it, and carries no value', () => {
+    expect(MULTI_REPLICA_AUTH_SECRET_REFUSAL).not.toContain('\n');
+    expect(MULTI_REPLICA_AUTH_SECRET_REFUSAL).toMatch(/^\[auth\] Refusing to start: several replicas are declared/);
+    expect(MULTI_REPLICA_AUTH_SECRET_REFUSAL).toContain('but OS_AUTH_SECRET is not set');
+    expect(MULTI_REPLICA_AUTH_SECRET_REFUSAL).toContain('set the same value on every replica, e.g. OS_AUTH_SECRET=$(openssl rand -hex 32)');
   });
 });

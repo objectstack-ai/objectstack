@@ -106,6 +106,10 @@ function baseEnv(home: string, over: Record<string, string | undefined> = {}): R
     AUTH_SECRET: undefined,
     BETTER_AUTH_SECRET: undefined,
     OS_CLUSTER_DRIVER: undefined,
+    OS_EXPECT_MULTI_NODE: undefined,
+    OS_CLUSTER_REPLICAS: undefined,
+    OS_ALLOW_MEMORY_CLUSTER_MULTINODE: undefined,
+    OS_REDIS_URL: undefined,
     OS_MODE: undefined,
     OS_PORT: undefined,
     PORT: undefined,
@@ -289,6 +293,54 @@ describe('#30120 — with the image switch on, a start missing its settings refu
     const { run, out } = refuse({ [SWITCH]: 'yes please' });
     expect(run.status, out).toBe(1);
     expect(out).toContain('is not a switch value');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 1b — several replicas declared over the redis cluster driver: no secret of its own
+// ---------------------------------------------------------------------------
+
+describe('#31600 — a declared multi-replica start on the redis cluster driver mints no sign-in secret of its own', () => {
+  // The data key is set on every leg, so the only thing each leg varies is the
+  // sign-in secret and the topology. No leg needs a Redis: the door is asked in
+  // `os start` itself, before the `serve` child composes any cluster driver.
+  const start = (over: Record<string, string | undefined>) => {
+    const home = tmp('os-31600-home-');
+    const cwd = tmp('os-31600-cwd-');
+    const run = spawnSync(process.execPath, [CLI, 'start', '--port', KERNEL_ASSIGNED_PORT], {
+      cwd,
+      env: childEnv({ ...baseEnv(home, { OS_SECRET_KEY: secret(), ...over }), NODE_ENV: undefined }),
+      encoding: 'utf8',
+      timeout: 120_000,
+    });
+    const minted = [...filesUnder(home), ...filesUnder(cwd)].filter((f) => /(^|\/)auth-secret$/.test(f));
+    return { run, minted, out: `${run.stdout}\n${run.stderr}` };
+  };
+  const REFUSAL = /^\[auth\] Refusing to start: several replicas are declared \(OS_EXPECT_MULTI_NODE \/ OS_CLUSTER_REPLICAS>1\) over the redis cluster driver, but OS_AUTH_SECRET is not set/m;
+
+  it('OS_AUTH_SECRET unset: exit 1 on the one line, before any secret is written', () => {
+    const { run, minted, out } = start({ OS_CLUSTER_REPLICAS: '3', OS_CLUSTER_DRIVER: 'redis' });
+    expect(run.status, out).toBe(1);
+    expect(run.stderr).toMatch(REFUSAL);
+    expect(run.stderr).toContain('e.g. OS_AUTH_SECRET=$(openssl rand -hex 32)');
+    expect(out).not.toMatch(READY);
+    expect(minted, out).toEqual([]);
+  });
+
+  it('OS_AUTH_SECRET set: this door passes, and nothing is minted', () => {
+    const { minted, out } = start({ OS_EXPECT_MULTI_NODE: 'true', OS_CLUSTER_DRIVER: 'redis', OS_AUTH_SECRET: secret() });
+    expect(out).not.toMatch(REFUSAL);
+    // The banner is printed after the door: the start went on to its child.
+    expect(out).toMatch(/Database/);
+    expect(minted, out).toEqual([]);
+  });
+
+  it('CONTROL: replicas declared over the memory driver mint a secret exactly as before', () => {
+    // The child then meets the split-brain guard, today's refusal for this
+    // topology; the secret is minted in `os start` before that, as it always was.
+    const { minted, out } = start({ OS_CLUSTER_REPLICAS: '3', OS_CLUSTER_DRIVER: 'memory' });
+    expect(out).not.toMatch(REFUSAL);
+    expect(minted, out).toEqual([join('.objectstack', 'auth-secret')]);
   });
 });
 

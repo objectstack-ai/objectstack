@@ -90,6 +90,7 @@
     "@objectstack/service-analytics": "workspace:*",
     "@objectstack/service-automation": "workspace:*",
     "@objectstack/service-cache": "workspace:*",
+    "@objectstack/service-cluster": "workspace:*",
     "@objectstack/service-datasource": "workspace:*",
     "@objectstack/service-job": "workspace:*",
     "@objectstack/service-mailbox": "workspace:*",
