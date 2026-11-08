@@ -7,30 +7,33 @@ import { jaJP } from './ja-JP.js';
 import { esES } from './es-ES.js';
 import { zhHant } from './zh-Hant.js';
 import { ar } from './ar.js';
+import { fr } from './fr.js';
 import { zhCNSourceHashes } from './zh-CN.source-hashes.js';
 import { jaJPSourceHashes } from './ja-JP.source-hashes.js';
 import { esESSourceHashes } from './es-ES.source-hashes.js';
 import { zhHantSourceHashes } from './zh-Hant.source-hashes.js';
 import { arSourceHashes } from './ar.source-hashes.js';
+import { frSourceHashes } from './fr.source-hashes.js';
 import { zhCNGeneratedSourceHashes } from './zh-CN.source-hashes.generated.js';
 import { jaJPGeneratedSourceHashes } from './ja-JP.source-hashes.generated.js';
 import { esESGeneratedSourceHashes } from './es-ES.source-hashes.generated.js';
 import { zhHantGeneratedSourceHashes } from './zh-Hant.source-hashes.generated.js';
 import { arGeneratedSourceHashes } from './ar.source-hashes.generated.js';
+import { frGeneratedSourceHashes } from './fr.source-hashes.generated.js';
 import { withSourceFallback } from './source-hash.js';
 
 /**
  * Setup App — Internationalization (i18n)
  *
  * Mirrors the CRM example's `per_locale` convention: each language lives
- * in its own file (`en.ts`, `zh-CN.ts`, `ja-JP.ts`, `es-ES.ts`, `zh-Hant.ts`, `ar.ts`) and is
+ * in its own file (`en.ts`, `zh-CN.ts`, `ja-JP.ts`, `es-ES.ts`, `zh-Hant.ts`, `ar.ts`, `fr.ts`) and is
  * assembled into a single `TranslationBundle` here.
  *
  * Loaded into the kernel's i18n service by `plugin-auth` during
  * `kernel:ready` (auth is the natural registration point for the Setup
  * App — see `auth-plugin.ts`).
  *
- * Supported locales: en, zh-CN, ja-JP, es-ES, zh-Hant, ar.
+ * Supported locales: en, zh-CN, ja-JP, es-ES, zh-Hant, ar, fr.
  *
  * ## This assembly is where staleness is resolved (#8765)
  *
@@ -77,4 +80,5 @@ export const SetupAppTranslations: TranslationBundle = {
   'es-ES': withSourceFallback(esES, en, esESSourceHashes, esESGeneratedSourceHashes),
   'zh-Hant': withSourceFallback(zhHant, en, zhHantSourceHashes, zhHantGeneratedSourceHashes),
   ar: withSourceFallback(ar, en, arSourceHashes, arGeneratedSourceHashes),
+  fr: withSourceFallback(fr, en, frSourceHashes, frGeneratedSourceHashes),
 };

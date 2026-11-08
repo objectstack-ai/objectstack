@@ -68,7 +68,9 @@
  *   a string nor a finite number. Nothing the grant resolver reads matches such
  *   a value to a user, so it confers nothing;
  * - a composition that registers no `sys_member` object: there is no membership
- *   to be a member through.
+ *   to be a member through;
+ * - a holder the write names that the caller cannot read: the engine's
+ *   reference check answers it (see *A holder the caller cannot read*).
  *
  * ## Where it runs, and why hooks
  *
@@ -110,10 +112,39 @@
  * field code is a member of the closed ADR-0114 catalog. A user that exists
  * nowhere and a user that belongs only to another organization receive the
  * same answer.
+ *
+ * ## A holder the caller cannot read
+ *
+ * A refused grant holder the caller cannot read is answered as a holder that
+ * does not exist — the platform's rule for every user a non-system write
+ * names (#29029) — and by the engine itself, never by a second spelling here.
+ *
+ * So a holder the write NAMES — every insert's, and an update's that names a
+ * different user than the row stores — is first asked of the caller's own read
+ * door, exactly as the engine's reference check asks it of a `user_id` value
+ * (`masterDetailHeadersCallerReads`, `@objectstack/objectql`): `sys_user` WHERE
+ * `id` equals the value as written, projected to `id`, under the caller's own
+ * context — the hook's `ctx.api`, which the engine builds over it — where a
+ * read that fails returns no row. A holder that door does not return is not
+ * judged here: its membership is not read, and the write goes on to the
+ * engine's reference check, which refuses it with the engine's own
+ * `reference_not_found` entry, in the engine's message context. One answer,
+ * whatever that holder is. A holder the caller CAN read is judged on
+ * membership as above, and a non-member keeps the membership sentence: it
+ * names a user the caller may see, and the remedy it reads.
+ *
+ * The hook steps aside only where that check is certain to ask: the live
+ * object's `user_id` is a non-`readonly` `lookup` / `user` reference to
+ * `sys_user`, and `sys_user` is registered — the conditions under which
+ * `assertReferencesResolve` (objectql) asks the caller's read door about the
+ * value and refuses one it does not return. Anywhere else, and wherever there
+ * is no caller api to ask, membership is judged here as before. An update that
+ * leaves the holder as stored names no holder (the reference check forgives a
+ * value the row already stores), so its holder is judged on membership.
  */
 
 import type { FieldErrorCode } from '@objectstack/spec/api';
-import { classifyFilterToken, isPlainRecord, isTenancyDisabled } from '@objectstack/spec/data';
+import { classifyFilterToken, isPlainRecord, isTenancyDisabled, referenceTargetOf } from '@objectstack/spec/data';
 import { validationFailure } from '@objectstack/types';
 import { isFederatedObject } from './federated-phantom-anchors.js';
 import { SysUserPosition } from './objects/sys-user-position.object.js';
@@ -123,6 +154,8 @@ import { SysUserPermissionSet } from './objects/sys-user-permission-set.object.j
 export const MEMBERSHIP_OBJECT = 'sys_member';
 /** The holder column, on every judged grant object. */
 export const HOLDER_FIELD = 'user_id';
+/** The object a holder is a row of: the target of {@link HOLDER_FIELD}. */
+export const HOLDER_OBJECT = 'sys_user';
 /** The organization column, on every judged grant object and on {@link MEMBERSHIP_OBJECT}. */
 export const ORGANIZATION_FIELD = 'organization_id';
 
@@ -272,6 +305,80 @@ async function holdsMembership(
 
 /** Per-write memo of membership verdicts, keyed by the dispatch scope every hook of one write shares. */
 const memoByWrite = new WeakMap<object, Map<string, boolean>>();
+/** Per-write memo of the caller's read-door answers for a holder, keyed the same way. */
+const readsByWrite = new WeakMap<object, Map<string, boolean>>();
+
+/** The memo of `store` for the write `ctx` belongs to, or `undefined` when the dispatch names no scope. */
+function memoOf(store: WeakMap<object, Map<string, boolean>>, ctx: any): Map<string, boolean> | undefined {
+  const scope = ctx?.dispatch?.scope;
+  if (!scope || typeof scope !== 'object') return undefined;
+  let memo = store.get(scope);
+  if (!memo) {
+    memo = new Map();
+    store.set(scope, memo);
+  }
+  return memo;
+}
+
+/**
+ * Does the engine's reference check ask the caller's read door about this
+ * object's holder, and refuse one it does not return? Only for a non-`readonly`
+ * `lookup` / `user` reference to {@link HOLDER_OBJECT} on the LIVE schema, with
+ * that object registered (see *A holder the caller cannot read*). Anything
+ * else — a schema this engine cannot hand over included — answers no.
+ */
+function referenceCheckAsksCaller(engine: MembershipEngine, object: string): boolean {
+  if (typeof engine.getSchema !== 'function') return false;
+  const def = (engine.getSchema(object) as { fields?: Record<string, any> } | undefined)?.fields?.[HOLDER_FIELD];
+  if (!def || def.readonly === true) return false;
+  if (def.type !== 'lookup' && def.type !== 'user') return false;
+  let target: string | undefined;
+  try {
+    target = referenceTargetOf(def);
+  } catch {
+    return false;
+  }
+  return target === HOLDER_OBJECT && Boolean(engine.getSchema(HOLDER_OBJECT));
+}
+
+/**
+ * Does the caller's own read door return `holder`? The read the engine's
+ * reference check asks first (see *A holder the caller cannot read*), through
+ * the hook's `ctx.api`. A read that fails returns no row, as on the engine's
+ * side. `undefined` when the dispatch carries no caller api to ask.
+ */
+async function callerReadsHolder(ctx: any, holder: unknown, userId: string): Promise<boolean | undefined> {
+  const api = ctx?.api;
+  if (!api || typeof api.object !== 'function') return undefined;
+  try {
+    const rows = await api.object(HOLDER_OBJECT).find({ where: { id: holder }, fields: ['id'] });
+    return Array.isArray(rows) && rows.some((r: any) => r?.id != null && String(r.id) === userId);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Is `holder` — a value this write NAMES — one the caller cannot read? Then
+ * the engine's reference check answers it, and this hook judges nothing for
+ * it (see *A holder the caller cannot read*).
+ */
+async function holderLeftToReferenceCheck(
+  engine: MembershipEngine,
+  ctx: any,
+  holder: unknown,
+  userId: string,
+): Promise<boolean> {
+  if (!referenceCheckAsksCaller(engine, ctx.object)) return false;
+  const memo = memoOf(readsByWrite, ctx);
+  let reads = memo?.get(userId);
+  if (reads === undefined) {
+    reads = await callerReadsHolder(ctx, holder, userId);
+    if (reads === undefined) return false;
+    memo?.set(userId, reads);
+  }
+  return !reads;
+}
 
 /**
  * Refuse when `userId` is not a member of `organizationId`. A composition with
@@ -287,15 +394,7 @@ async function assertHolderIsMember(
   if (typeof engine.find !== 'function') return;
 
   const key = `${userId}\u0000${organizationId}`;
-  const scope = ctx?.dispatch?.scope;
-  let memo: Map<string, boolean> | undefined;
-  if (scope && typeof scope === 'object') {
-    memo = memoByWrite.get(scope);
-    if (!memo) {
-      memo = new Map();
-      memoByWrite.set(scope, memo);
-    }
-  }
+  const memo = memoOf(memoByWrite, ctx);
   let member = memo?.get(key);
   if (member === undefined) {
     member = await holdsMembership(engine, userId, organizationId, ctx?.transaction);
@@ -320,6 +419,7 @@ async function onInsert(engine: MembershipEngine, ctx: any): Promise<void> {
     ctx?.session?.organizationId,
   );
   if (organizationId === undefined) return;
+  if (await holderLeftToReferenceCheck(engine, ctx, row[HOLDER_FIELD], userId)) return;
   await assertHolderIsMember(engine, ctx, userId, organizationId);
 }
 
@@ -349,6 +449,9 @@ async function onUpdate(engine: MembershipEngine, ctx: any): Promise<void> {
   const userId = idOf(nextHolder);
   if (userId === undefined) return;
   if (nextOrganization === undefined || nextOrganization === null || nextOrganization === '') return;
+  // Only a holder the payload NAMES anew: the reference check forgives one the row already stores.
+  const namesHolder = movesHolder && !sameValue(nextHolder, previous[HOLDER_FIELD]);
+  if (namesHolder && (await holderLeftToReferenceCheck(engine, ctx, nextHolder, userId))) return;
   await assertHolderIsMember(engine, ctx, userId, String(nextOrganization));
 }
 

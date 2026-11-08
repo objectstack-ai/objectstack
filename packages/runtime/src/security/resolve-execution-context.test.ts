@@ -962,3 +962,105 @@ describe('a banned user\'s OAuth credentials resolve to no principal while the b
     expect(served.userId).toBe('u_ban');
   });
 });
+
+describe('[#31211] a verified MCP token is recorded as used only once this door admits the call', () => {
+  const VERIFIED = () => ({ userId: 'u_rec', scopes: ['data:read'], clientId: 'agent-client-1' });
+
+  /**
+   * A table double: `sys_user` holds `user`, every other object is empty, and
+   * `faultOn` names the one object whose read throws (a store fault).
+   */
+  function recQl(user: Record<string, unknown> | undefined, faultOn?: string) {
+    const tables: Record<string, any[]> = { sys_user: user ? [user] : [] };
+    return {
+      async find(object: string, opts: any) {
+        if (object === faultOn) throw new Error('connection reset by peer');
+        return bounded((tables[object] ?? []).filter((row) =>
+          Object.entries(opts?.where ?? {}).every(([k, v]) => {
+            if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`);
+            if (v !== null && typeof v === 'object') throw new Error(`fake driver: unsupported operator on '${k}'`);
+            return row[k] === v;
+          }),
+        ), opts);
+      },
+    };
+  }
+  /** An auth service whose verifier answers `verified` (the same object every time) and whose recorder is a spy. */
+  function recAuth(verified: any) {
+    const recorded: unknown[] = [];
+    const auth = {
+      verifyMcpAccessToken: async () => verified,
+      recordMcpAccessTokenUse: (principal: unknown) => {
+        recorded.push(principal);
+      },
+    };
+    return { auth, recorded };
+  }
+  const mcpOpts = (ql: any, auth: any) => ({
+    acceptOAuthAccessToken: true,
+    getService: async (name: string) => (name === 'auth' ? auth : undefined),
+    getQl: async () => ql,
+    request: { headers: { authorization: 'Bearer a.b.c' } },
+  });
+
+  it('admitted: recorded exactly once, with the very object the verifier answered', async () => {
+    const verified = VERIFIED();
+    const { auth, recorded } = recAuth(verified);
+    const ctx = await resolveExecutionContext(mcpOpts(recQl({ id: 'u_rec' }), auth));
+    expect(ctx.principalKind).toBe('agent');
+    expect(ctx.userId).toBe('u_rec');
+    expect(recorded).toHaveLength(1);
+    expect(recorded[0], 'the verifier\'s own object, not a copy').toBe(verified);
+  });
+
+  it('a banned subject\'s verified token is refused and recorded as nothing', async () => {
+    const { auth, recorded } = recAuth(VERIFIED());
+    const ctx = await resolveExecutionContext(mcpOpts(recQl({ id: 'u_rec', banned: true, ban_expires: null }), auth));
+    expect(ctx.principalKind).toBe('guest');
+    expect(ctx.userId).toBeUndefined();
+    expect(recorded).toEqual([]);
+  });
+
+  it('a call refused after the ban read (the grant read cannot be answered: 503) is recorded as nothing', async () => {
+    const { auth, recorded } = recAuth(VERIFIED());
+    const err: any = await resolveExecutionContext(mcpOpts(recQl({ id: 'u_rec' }, 'sys_user_position'), auth)).then(
+      () => undefined,
+      (e) => e,
+    );
+    expect(err, 'the resolver resolved despite the store fault').toBeDefined();
+    expect(isAuthzStoreUnavailableError(err)).toBe(true);
+    expect(err.code).toBe('SERVICE_UNAVAILABLE');
+    expect(err.status).toBe(503);
+    expect(recorded).toEqual([]);
+  });
+
+  it('a token that does not verify is recorded as nothing', async () => {
+    const { auth, recorded } = recAuth(null);
+    const ctx = await resolveExecutionContext(mcpOpts(recQl({ id: 'u_rec' }), auth));
+    expect(ctx.principalKind).toBe('guest');
+    expect(recorded).toEqual([]);
+  });
+
+  it('a forward credential is the continuation of a call already recorded: it records nothing', async () => {
+    const { auth, recorded } = recAuth(VERIFIED());
+    const binding: ForwardCredentialBinding = {
+      method: 'PATCH',
+      path: '/api/v1/data/crm_lead/r1',
+      run: { objectName: 'crm_lead', actionName: 'probe', recordId: 'r1' },
+      agent: { userId: 'u_rec', clientId: 'agent-client-1', scopes: ['actions:execute', 'data:write'] },
+    };
+    const served = await withForwardCredential(binding, (handle) => resolveExecutionContext({
+      getService: async (name: string) => (name === 'auth' ? auth : undefined),
+      getQl: async () => recQl({ id: 'u_rec' }),
+      request: { method: 'PATCH', path: '/api/v1/data/crm_lead/r1', headers: { [FORWARD_CREDENTIAL_HEADER]: handle } },
+    }));
+    expect(served.principalKind).toBe('agent');
+    expect(recorded).toEqual([]);
+  });
+
+  it('an auth service without the member still admits the call (the member is optional)', async () => {
+    const ctx = await resolveExecutionContext(mcpOpts(recQl({ id: 'u_rec' }), { verifyMcpAccessToken: async () => VERIFIED() }));
+    expect(ctx.principalKind).toBe('agent');
+    expect(ctx.userId).toBe('u_rec');
+  });
+});

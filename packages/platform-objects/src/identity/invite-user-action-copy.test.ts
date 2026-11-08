@@ -31,6 +31,7 @@ import { jaJPObjects } from '../apps/translations/ja-JP.objects.generated.js';
 import { esESObjects } from '../apps/translations/es-ES.objects.generated.js';
 import { zhHantObjects } from '../apps/translations/zh-Hant.objects.generated.js';
 import { arObjects } from '../apps/translations/ar.objects.generated.js';
+import { frObjects } from '../apps/translations/fr.objects.generated.js';
 import { SysInvitation } from './sys-invitation.object.js';
 import { SysMember } from './sys-member.object.js';
 import { SysOrganization } from './sys-organization.object.js';
@@ -80,6 +81,7 @@ const TRANSLATED = [
   ['es-ES', esESObjects],
   ['zh-Hant', zhHantObjects],
   ['ar', arObjects],
+  ['fr', frObjects],
 ] as const;
 
 // [#24814] `successMessage` is a `template` slot: the parsed

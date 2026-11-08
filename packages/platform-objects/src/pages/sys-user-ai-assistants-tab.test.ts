@@ -99,6 +99,7 @@ describe('sys_user_detail — the AI Assistants tab', () => {
       'es-ES': 'Asistentes de IA',
       'zh-Hant': 'AI 助理',
       ar: 'مساعدو الذكاء الاصطناعي',
+      fr: 'Assistants IA',
     });
     for (const sibling of items) {
       expect(Object.keys(sibling.label as Rec).sort(), String((sibling.label as Rec).en)).toEqual(

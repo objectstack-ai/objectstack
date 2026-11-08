@@ -1881,10 +1881,6 @@ const zh = {
     },
   },
   console: {
-    organizationMfa: {
-      needsTwoFactor: '“强制多因素认证”需要双重验证，而本部署未开启双重验证，因此勾选后保存会被拒绝。请先开启双重验证：在“设置 → 认证”中打开“要求多因素认证”（对所有组织生效），或在部署上设置 OS_AUTH_TWO_FACTOR=true。',
-      nowRequired: '本组织所有尚未绑定身份验证器的成员现在都必须绑定。每位成员从此次变更后第一次使用起开始计算 MFA 宽限期（默认 7 天，可在“设置 → 认证”中修改），宽限期结束后将无法访问数据，直到完成绑定。已使用身份验证器的成员不受影响。',
-    },
     studio: {
       title: 'Studio',
       accessRequired: '你需要 Studio 访问权限才能打开 Studio。管理员可以在“设置 → 权限集分配”中通过权限集授予。',
@@ -1990,6 +1986,7 @@ const zh = {
       unsupportedSpecifierType: '不支持的设置项类型:{{type}}',
       invalidPhone: '请输入仅由数字、空格和 + ( ) - . 组成的电话号码',
       invalidColor: '请输入十六进制颜色，例如 #1a2b3c',
+      jsonStoredAsText: '该值以文本形式保存，而不是 JSON 对象。保存后将改存为对象；页面已将其标记为未保存的更改。',
       clientAddressDirect: '服务器判定的你的地址：{{address}}。不包含该地址的列表无法在此保存。此服务器不信任代理转发头，若部署在代理之后，这里显示的是代理的地址。',
       clientAddressViaProxy: '服务器判定的你的地址：{{address}}，取自此服务器所信任代理的转发头。不包含该地址的列表无法在此保存。',
       clientAddressUnknown: '服务器无法确定你的地址，因此无法在此保存非空的列表。',

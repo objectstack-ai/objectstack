@@ -261,6 +261,11 @@ OS_ALLOWED_ORIGINS=["a","b","c"]   # default is array/object → JSON.parse
 ```
 
 If the raw value cannot be parsed for the expected type, the raw string is used.
+The exception is a `json` specifier, which persists a JSON object or array
+(ADR-0007): an override whose text does not parse to one is not in force, one
+`error` line names the variable, and the key resolves from the next layer of the
+cascade. The save door refuses the same values for a `json` key with an
+`invalid_type` field error, so a client sends the parsed value, never its text.
 
 **What is stored beneath a pin is listed by the namespace read.** An override in
 force answers `source: 'env'`, `locked: true`, and `get()` / `getMany()` build

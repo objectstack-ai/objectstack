@@ -235,6 +235,12 @@ describe('auth route ledger hygiene', () => {
       'GET /api/v1/auth/admin/client-address',
       'GET /api/v1/auth/authorized-clients',
       'GET /api/v1/auth/bootstrap-status',
+      // On this pin's own terms: `auth-plugin.ts` mounts it itself (a
+      // `rawApp.get` on the `${basePath}/client-address` template, ahead of
+      // the catch-all), the organization administrator's twin of the
+      // platform-admin read above, and the `live.has(route)` loop below holds
+      // it to the same proof — better-auth serves no address read.
+      'GET /api/v1/auth/client-address',
       'GET /api/v1/auth/config',
       // On this pin's own terms: `auth-plugin.ts` mounts it itself (a
       // `rawApp.get` on the `${basePath}/one-time-token/handoff`
