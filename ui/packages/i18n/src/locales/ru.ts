@@ -200,6 +200,9 @@ const ru = {
     requiredForAction: "Обязательно для выполнения «{{action}}».",
     aiSuggested: "Предложение ИИ",
     aiDraftNotice: "ИИ заполнил по чату поля с пометкой «Предложение ИИ». Ничего не сохраняется, пока вы их не проверите и не сохраните.",
+    aiBefore: "Было: {{value}}",
+    aiBeforeEmpty: "пусто",
+    aiRevert: "Вернуть",
     maxFileSize: "Максимальный размер: {{size}}",
     masterDetail: {
       loadingColumns: "Загрузка столбцов…",
