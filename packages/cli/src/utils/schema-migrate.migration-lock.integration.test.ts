@@ -38,10 +38,33 @@ import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { basename, dirname, join } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { SqlDriver } from '@objectstack/driver-sql';
-import { CLI, childEnv } from '../../test/helpers/serve-process.js';
 import { SCHEMA_MIGRATION_PG_LOCK_KEY } from './schema-migrate.js';
+
+const HERE = dirname(fileURLToPath(import.meta.url));
+/** The source entry, as `test/helpers/serve-process.ts` spawns it; `src/` cannot import that helper. */
+const CLI = resolve(HERE, '../../bin/run-dev.js');
+
+/** Env that would point the child's boot somewhere other than this file's database. */
+const OVERRIDING_ENV = ['OS_DATABASE_URL', 'DATABASE_URL', 'TURSO_DATABASE_URL', 'OS_DATABASE_DRIVER', 'OS_HOME'] as const;
+
+/**
+ * This process's environment for a child, minus the families
+ * `test/helpers/serve-process.ts` `childEnv()` strips (its header says why).
+ */
+function childEnv(): Record<string, string | undefined> {
+  const env: Record<string, string | undefined> = {};
+  for (const [key, value] of Object.entries(process.env)) {
+    if (key === 'TEST' || key === 'VITEST' || key.startsWith('VITEST_') || key === 'NODE_PATH') continue;
+    if ((OVERRIDING_ENV as readonly string[]).includes(key)) continue;
+    env[key] = value;
+  }
+  // The fixed key `serve-process.ts` hands its children, so no boot mints and
+  // persists a crypto key into this runner's home directory.
+  return { ...env, OS_SECRET_KEY: '0e2e'.repeat(16), NO_COLOR: '1' };
+}
 
 const PG_URL = process.env.OS_TEST_POSTGRES_URL;
 const EXPECT_LIVE_DIALECTS = process.env.OS_EXPECT_LIVE_DIALECT_MATRIX === '1';
@@ -118,7 +141,7 @@ function migrate(cwd: string): Promise<Run> {
     execFile(
       process.execPath,
       [CLI, 'migrate', 'apply', '--yes', '--json', '--database-url', liveUrl()],
-      { cwd, maxBuffer: 64 * 1024 * 1024, env: childEnv({ NO_COLOR: '1' }) },
+      { cwd, maxBuffer: 64 * 1024 * 1024, env: childEnv() },
       (err, stdout, stderr) => {
         resolvePromise({
           code: err ? (typeof (err as { code?: unknown }).code === 'number' ? (err as unknown as { code: number }).code : 1) : 0,

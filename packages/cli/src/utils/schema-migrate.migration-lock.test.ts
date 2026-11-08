@@ -192,7 +192,7 @@ describe('MySQL', () => {
     ]);
   });
 
-  it.each([[0, 'timed out'], [null, 'errored']])('⛔ GET_LOCK answering %s (%s) REFUSES and closes the session', async (answer) => {
+  it.each([[0, 'timed out'], [null, 'errored']])('⛔ GET_LOCK answering %s (%s) REFUSES and closes the session', async (answer, _why) => {
     let tries = 0;
     const f = fakeDriver('mysql', () => ({ locked: tries++ === 0 ? 0 : answer }));
     const failure = await acquireSchemaMigrationLock(f.driver, { database: DB, warn: vi.fn() }).then(
