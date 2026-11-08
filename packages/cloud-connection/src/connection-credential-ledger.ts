@@ -6,11 +6,13 @@
  *
  * Two homes, chosen once per boot by `CloudConnectionPlugin.init()`:
  *
- *   - **A single node** keeps the credential in its local file,
- *     `<cwd>/.objectstack/cloud-connection.json`, through
+ *   - **A single node** keeps the credential in its local file, which
+ *     follows `OS_HOME`: `<OS_HOME>/cloud-connection.json`, or
+ *     `<cwd>/.objectstack/cloud-connection.json` when `OS_HOME` is unset
+ *     (`resolveConnectionCredentialPath`), through
  *     {@link ConnectionCredentialStore}, exactly as before this module existed:
  *     {@link fileCredentialLedger} is a pass-through, so the path, the bytes
- *     and the 0600 mode do not move.
+ *     and the 0600 mode are the store's own.
  *   - **Several replicas** — declared (`OS_CLUSTER_REPLICAS` > 1 or
  *     `OS_EXPECT_MULTI_NODE=true`) AND served by the Redis cluster driver — keep
  *     it in the one `sys_cloud_binding_credential` row of the database every
