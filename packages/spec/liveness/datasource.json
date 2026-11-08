@@ -62,31 +62,31 @@
         "enabled": {
           "status": "live",
           "verifiedAt": "2026-08-28",
-          "evidence": "packages/services/service-datasource/src/default-datasource-driver-factory.ts#resolveSslOption (`if (block.enabled === false) return false` — the short-circuit, ahead of the option assembly)",
+          "evidence": "packages/services/service-datasource/src/datasource-ssl-option.ts#resolveSslOption (`if (block.enabled === false) return false` — the short-circuit, ahead of the option assembly)",
           "note": "`enabled: false` short-circuits to `ssl: false`; otherwise the block is assembled into client TLS options. 2026-08-28: RE-ANCHORED (commit 9ee2dcfbd) and REPOINTED — see the block note."
         },
         "rejectUnauthorized": {
           "status": "live",
           "verifiedAt": "2026-08-28",
-          "evidence": "packages/services/service-datasource/src/default-datasource-driver-factory.ts#resolveSslOption (`block.rejectUnauthorized !== undefined ? { rejectUnauthorized: block.rejectUnauthorized } : {}` — present-or-absent, so `false` is carried rather than defaulted away); packages/services/service-datasource/src/default-datasource-driver-factory.ts#mysqlSslOption (re-reads the resolved option into the spelling mysql2 accepts, commit d70428ae7)",
+          "evidence": "packages/services/service-datasource/src/datasource-ssl-option.ts#resolveSslOption (`block.rejectUnauthorized !== undefined ? { rejectUnauthorized: block.rejectUnauthorized } : {}` — present-or-absent, so `false` is carried rather than defaulted away); packages/services/service-datasource/src/default-datasource-driver-factory.ts#mysqlSslOption (re-reads the resolved option into the spelling mysql2 accepts, commit d70428ae7)",
           "note": "2026-08-28: RE-ANCHORED (commit 9ee2dcfbd) and REPOINTED — see the block note."
         },
         "ca": {
           "status": "live",
           "verifiedAt": "2026-08-28",
-          "evidence": "packages/services/service-datasource/src/default-datasource-driver-factory.ts#resolveSslOption (`block.ca ? { ca: block.ca } : {}`)",
+          "evidence": "packages/services/service-datasource/src/datasource-ssl-option.ts#resolveSslOption (`block.ca ? { ca: block.ca } : {}`)",
           "note": "2026-08-28: RE-ANCHORED (commit 9ee2dcfbd) and REPOINTED — see the block note."
         },
         "cert": {
           "status": "live",
           "verifiedAt": "2026-08-28",
-          "evidence": "packages/services/service-datasource/src/default-datasource-driver-factory.ts#resolveSslOption (`block.cert ? { cert: block.cert } : {}`)",
+          "evidence": "packages/services/service-datasource/src/datasource-ssl-option.ts#resolveSslOption (`block.cert ? { cert: block.cert } : {}`)",
           "note": "2026-08-28: RE-ANCHORED (commit 9ee2dcfbd) and REPOINTED — see the block note."
         },
         "key": {
           "status": "live",
           "verifiedAt": "2026-08-28",
-          "evidence": "packages/services/service-datasource/src/default-datasource-driver-factory.ts#resolveSslOption (`block.key ? { key: block.key } : {}`)",
+          "evidence": "packages/services/service-datasource/src/datasource-ssl-option.ts#resolveSslOption (`block.key ? { key: block.key } : {}`)",
           "note": "2026-08-28: RE-ANCHORED (commit 9ee2dcfbd) and REPOINTED — see the block note."
         }
       },

@@ -30,6 +30,10 @@
  * `turso` is absent for the same reason since commit e2798fab7 gave it a contract: it is a
  * full builtin now, but it additionally needs an optional package installed next
  * to the server, which is not a thing a dropdown can arrange.
+ * `mssql` (#31327) is absent for that reason too — its `tedious` binding is an
+ * optional peer of driver-sql. It is also federation-only (`schemaMode:
+ * 'external'` or `'validate-only'`), so it is declared in code with its
+ * `external` block; its Tables tab and table import work once it is.
  *
  * ## The words are served in the requester's language
  *
