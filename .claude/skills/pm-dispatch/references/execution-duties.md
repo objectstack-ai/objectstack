@@ -19,7 +19,7 @@
 - `batch` 等待不填槽,四态见 SKILL.md 该行;同批独立按文件面不相交判,⛔ 不按包或 check 名。
 - 软顶:本席已验收等人批的 Tier H PR 逾 5 ⇒ 停派 Tier H,S/非受管照常,轮报列积压;两周复测。
 - 每轮按现 head 核本席终局四件套 PR:席位记录/`pm:awaiting-merge`/请审/终版速读,缺件同轮补。
-- 四件读数器:本地 `node scripts/pm/check-half-states.mjs`,H43 行报未请审、H48 行报缺标或缺速读。
+- 四件读数器:本地 `node scripts/pm/check-half-states.mjs` H43/H48 只读受管 H;超行无受管 PR 自读。
 - single-writer 路径 = `SINGLE_CLAIM_PATHS` 所枚举;共享其它路径是普通并发,后落地方解冲突。
 - 第 N 单派发前读 `scripts/pm/os-verify-lock.sh --status`:到达深度 ≥ `LOCK_DEPTH_HOLD`(= 2)即等。
 - 到达深度 = `queue N:` 行数 + 1(待派 dev 的运行算作到达);`state:` holder 与 `parked` 行不计。
