@@ -268,7 +268,7 @@ describe('agent_prompt — one reader with GET /meta/agent/NAME (the protocol)',
     };
   }
 
-  async function connectWith(service: ReturnType<typeof metadataService>, read: ReturnType<typeof protocol>) {
+  async function connectWith(service: ReturnType<typeof metadataService>, read: unknown) {
     const log = logger();
     const runtime = new MCPServerRuntime({ name: 'objectstack-test', version: '9.9.9', logger: log as never });
     await runtime.bridgePrompts(service as never, read as never);
@@ -366,6 +366,63 @@ describe('agent_prompt — one reader with GET /meta/agent/NAME (the protocol)',
       expect(session.log.warn).toHaveBeenCalledWith(
         expect.stringContaining('agent prompt refused'),
         expect.objectContaining({ agentName: 'pkg_helper' }),
+      );
+    } finally {
+      await session.close();
+    }
+  });
+  it('a host whose read has the listing but no by-name read reads the metadata service for both the roster and the get', async () => {
+    // One decision per host. The listing alone would let the roster advertise a
+    // package agent that the get, still on the metadata service, answers "not
+    // found": the #28940 defect again, on a host `bridgePrompts`' parameter type
+    // accepts.
+    const service = metadataService({ agents: [AGENT] });
+    const listingOnly = { getMetaItems: vi.fn(protocol().getMetaItems) };
+    const session = await connectWith(service, listingOnly);
+    try {
+      const listed = await session.client.listPrompts();
+      const description = agentNameDescription(listed.prompts) ?? '';
+      expect(description).toContain('"support_triage"');
+      expect(description).not.toContain('pkg_helper');
+      expect(listingOnly.getMetaItems).not.toHaveBeenCalledWith({ type: 'agent' });
+      const served = await session.client.getPrompt({ name: 'agent_prompt', arguments: { agentName: 'support_triage' } });
+      expect(served.messages).toEqual([
+        { role: 'assistant', content: { type: 'text', text: 'You triage support cases.' } },
+      ]);
+    } finally {
+      await session.close();
+    }
+  });
+
+  it('a by-name read that throws anything but SERVICE_UNAVAILABLE travels as a protocol error and serves no instructions', async () => {
+    const session = await connectWith(
+      metadataService({ agents: [] }),
+      protocol({ byName: async () => { throw Object.assign(new Error('registry exploded'), { code: 'INTERNAL' }); } }),
+    );
+    try {
+      const got = session.client.getPrompt({ name: 'agent_prompt', arguments: { agentName: 'pkg_helper' } });
+      await expect(got).rejects.toThrow(/registry exploded/);
+      await expect(got).rejects.not.toThrow(PACKAGE_AGENT.instructions);
+      expect(session.log.warn).not.toHaveBeenCalledWith(expect.stringContaining('agent prompt refused'), expect.anything());
+    } finally {
+      await session.close();
+    }
+  });
+
+  it('a degraded roster verdict with the protocol present and no agent named keeps the prompt listed, naming no agent', async () => {
+    const session = await connectWith(
+      metadataService({
+        agentList: async () => ({ items: [], degraded: true, errors: ['loader sys_metadata: connection refused'] }),
+      }),
+      protocol({ agents: [] }),
+    );
+    try {
+      const listed = await session.client.listPrompts();
+      expect(listed.prompts.map((p) => p.name)).toContain('agent_prompt');
+      expect(agentNameDescription(listed.prompts) ?? '').not.toContain('e.g.');
+      expect(session.log.warn).toHaveBeenCalledWith(
+        expect.stringContaining('agent_prompt'),
+        expect.objectContaining({ errors: ['loader sys_metadata: connection refused'] }),
       );
     } finally {
       await session.close();

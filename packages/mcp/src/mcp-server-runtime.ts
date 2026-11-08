@@ -709,10 +709,12 @@ export interface AgentPromptResult {
 /**
  * [#31514] Read one agent by name through the protocol's by-name read, the read
  * `GET /api/v1/meta/agent/NAME` serves, where this host has one; the metadata
- * service otherwise, as before. ONE reader per host, never both: the defect
- * this closes is that the two disagree (an agent a package ships lives in the
- * registry the protocol reads, and the metadata service holds no copy of it),
- * so a lookup that tried one and then the other would keep both answers alive.
+ * service otherwise, as before. Which of the two is {@link agentReadOf}'s
+ * decision, the one the roster takes too. ONE reader per host, never both:
+ * the defect this closes is that the two disagree (an agent a package ships
+ * lives in the registry the protocol reads, and the metadata service holds no
+ * copy of it), so a lookup that tried one and then the other would keep both
+ * answers alive.
  *
  * The protocol answers `{ type, name, item }`, with `item` absent on a miss,
  * and throws `SERVICE_UNAVAILABLE` (503) when the metadata service behind it
@@ -725,12 +727,13 @@ async function readAgentByName(
   protocol: McpMergedMetadataRead | undefined,
   name: string,
 ): Promise<DiagnosedRead> {
-  if (!protocol || typeof protocol.getMetaItem !== 'function') {
+  const read = agentReadOf(protocol);
+  if (!read?.getMetaItem) {
     return diagnosedGet(metadataService, 'agent', name);
   }
   let envelope: unknown;
   try {
-    envelope = await protocol.getMetaItem({ type: 'agent', name });
+    envelope = await read.getMetaItem({ type: 'agent', name });
   } catch (err) {
     if ((err as { code?: unknown } | null)?.code === METADATA_UNAVAILABLE_CODE) {
       return { data: undefined, degraded: true, errors: [err instanceof Error ? err.message : String(err)] };
@@ -738,6 +741,23 @@ async function readAgentByName(
     throw err;
   }
   return { data: (envelope as { item?: unknown } | null | undefined)?.item, degraded: false, errors: [] };
+}
+
+/**
+ * [#31514] The ONE decision, per host, of which layer `agent_prompt` reads:
+ * the protocol when the host's read carries both the merged listing and the
+ * by-name read, the metadata service (`undefined` here) otherwise. The roster
+ * ({@link readAgentRoster}) and the get ({@link readAgentByName}) both take
+ * this answer, so they cannot split: a read with the listing but no by-name
+ * read would otherwise advertise a package agent that the get, left on the
+ * metadata service, answers "not found", the #28940 defect again.
+ */
+function agentReadOf(mergedRead: McpMergedMetadataRead | undefined): McpMergedMetadataRead | undefined {
+  return mergedRead
+    && typeof mergedRead.getMetaItems === 'function'
+    && typeof mergedRead.getMetaItem === 'function'
+    ? mergedRead
+    : undefined;
 }
 
 /** An `Error: …` answer on the prompt surface — this file's existing shape. */
@@ -771,8 +791,9 @@ function promptError(text: string): AgentPromptResult {
  * A read that answered a body is served as it always was.
  *
  * [#31514] The agent is read through `protocol`, the read
- * `GET /api/v1/meta/agent/NAME` serves, where the host has one
- * ({@link readAgentByName}); the three states above are unchanged.
+ * `GET /api/v1/meta/agent/NAME` serves, where the host has both its reads
+ * ({@link agentReadOf}, {@link readAgentByName}); the three states above are
+ * unchanged.
  */
 export async function buildAgentPromptResult(
   metadataService: IMetadataService,
@@ -849,7 +870,8 @@ type AgentRoster =
  * The roster is read from the same layer {@link buildAgentPromptResult}
  * resolves a name from, so the names the argument teaches are names a
  * `prompts/get` can answer. [#31514] That layer is the protocol where the host
- * has one: its merged listing, `GET /api/v1/meta/agent`'s read
+ * has both its reads ({@link agentReadOf}, the decision the get takes too):
+ * its merged listing, `GET /api/v1/meta/agent`'s read
  * ({@link mergedDiagnosedList}), which holds the agents a package ships. The
  * metadata service holds no copy of those, so a roster read from it alone told
  * a boot whose only agent a package ships that it held none, and the prompt
@@ -864,7 +886,7 @@ async function readAgentRoster(
 ): Promise<AgentRoster> {
   let read: DiagnosedListRead;
   try {
-    read = await mergedDiagnosedList(metadataService, mergedRead, 'agent');
+    read = await mergedDiagnosedList(metadataService, agentReadOf(mergedRead), 'agent');
   } catch (err) {
     return { state: 'unknown', errors: [err instanceof Error ? err.message : String(err)] };
   }
@@ -1763,8 +1785,11 @@ export class MCPServerRuntime {
     // once the transport attaches. A roster read that cannot say (degraded, or
     // it threw) keeps the prompt, which then answers the honest #6055 outage
     // text at get time.
-    // [#31514] Through the protocol where the host has one, as the get below.
-    const roster = await readAgentRoster(metadataService, mergedRead);
+    // [#31514] Through the protocol where the host has both its reads, the
+    // metadata service otherwise: one decision ({@link agentReadOf}) that the
+    // get below takes too.
+    const agentRead = agentReadOf(mergedRead);
+    const roster = await readAgentRoster(metadataService, agentRead);
     if (roster.state === 'none') {
       logger?.info(
         '[MCP] agent_prompt not advertised — this boot registers no agent, so nothing could answer it. '
@@ -1800,8 +1825,8 @@ export class MCPServerRuntime {
         async (args) =>
           // [#6055] Outage vs. miss lives in the builder — see
           // {@link buildAgentPromptResult}. [#31514] The agent is read through
-          // the protocol's by-name read where `mergedRead` carries it.
-          buildAgentPromptResult(metadataService, args, logger, mergedRead),
+          // the protocol's by-name read where `agentRead` is the protocol.
+          buildAgentPromptResult(metadataService, args, logger, agentRead),
       );
 
       logger?.info('[MCP] Agent prompts bridged');
