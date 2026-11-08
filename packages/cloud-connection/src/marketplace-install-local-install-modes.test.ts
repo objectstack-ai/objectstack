@@ -37,6 +37,7 @@ import { MarketplaceInstallLocalPlugin } from './marketplace-install-local-plugi
 import { declareInstallerPlatformOwner, installerAuthService, withInstallerGrants } from './install-local-principal.fixtures.js';
 import { LocalManifestSource } from './local-manifest-source.js';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
+import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 
 const ROUTE = '/api/v1/marketplace/install-local';
 const INSTALLER = 'usr_installer';
@@ -705,6 +706,7 @@ describe('install-local — an unmanaged copy\'s sample data, asked for with `se
                 return Array.isArray(record) ? record.map(one) : one(record);
             },
             async update(object: string, data: Record<string, unknown>, options: any) {
+                assertEngineUpdateDispatch(data, options);
                 let n = 0;
                 for (const row of known(object)) {
                     if (!matches(row, options?.where ?? {})) continue;
@@ -714,6 +716,7 @@ describe('install-local — an unmanaged copy\'s sample data, asked for with `se
                 return n;
             },
             async delete(object: string, options?: any): Promise<boolean> {
+                assertEngineDeleteDispatch(options);
                 const id = String(options?.where?.id ?? '');
                 const table = known(object);
                 const at = table.findIndex((r) => r.id === id);

@@ -17,6 +17,16 @@
       "pinned": 1
     },
     {
+      "file": "packages/cloud-connection/src/marketplace-install-local-install-modes.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/cloud-connection/src/marketplace-install-local-install-modes.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/cloud-connection/src/marketplace-install-local-sample-data-not-loaded.test.ts",
       "verb": "delete",
       "pinned": 1
