@@ -2636,6 +2636,54 @@ export const arObjects: NonNullable<TranslationData['objects']> = {
       }
     }
   },
+  sys_idp_group_mapping: {
+    label: "ربط مجموعة IdP",
+    pluralLabel: "روابط مجموعات IdP",
+    description: "يربط مجموعة من مزوّد الهوية بمجموعة الأذونات الممنوحة لأعضائها",
+    fields: {
+      id: {
+        label: "ID"
+      },
+      source_kind: {
+        label: "نوع المصدر",
+        help: "ما يرسل المجموعة: اتصال SCIM.",
+        options: {
+          scim: "اتصال SCIM"
+        }
+      },
+      source_id: {
+        label: "معرّف المصدر",
+        help: "معرّف اتصال SCIM الذي تصل عبره المجموعة، مثل \"okta-prod\"."
+      },
+      group_external_id: {
+        label: "المعرّف الخارجي للمجموعة",
+        help: "قيمة externalId للمجموعة كما يرسلها مزوّد الهوية. اضبط هذا الحقل أو اسم العرض، وليس كليهما."
+      },
+      group_display_name: {
+        label: "اسم عرض المجموعة",
+        help: "قيمة displayName للمجموعة، بمطابقة تامة. يُستخدم عندما لا يحدد الربط معرّفًا خارجيًا."
+      },
+      permission_set: {
+        label: "مجموعة الأذونات",
+        help: "مجموعة الأذونات الممنوحة لعضو المجموعة. تُرفض مجموعات المسؤول."
+      },
+      organization_id: {
+        label: "المؤسسة",
+        help: "المؤسسة التي يتم المنح فيها: المؤسسة المالكة لاتصال SCIM."
+      },
+      created_at: {
+        label: "تاريخ الإنشاء"
+      },
+      updated_at: {
+        label: "تاريخ التحديث"
+      }
+    },
+    _views: {
+      all: {
+        label: "الكل"
+      }
+    }
+  },
   sys_notification: {
     label: "حدث الإشعار",
     pluralLabel: "أحداث الإشعارات",

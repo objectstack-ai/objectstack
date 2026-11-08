@@ -2636,6 +2636,54 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       }
     }
   },
+  sys_idp_group_mapping: {
+    label: "IdP グループマッピング",
+    pluralLabel: "IdP グループマッピング",
+    description: "ID プロバイダーのグループを、そのメンバーに付与する権限セットに対応付けます",
+    fields: {
+      id: {
+        label: "ID"
+      },
+      source_kind: {
+        label: "ソース種別",
+        help: "グループを送信するもの：SCIM 接続。",
+        options: {
+          scim: "SCIM 接続"
+        }
+      },
+      source_id: {
+        label: "ソース ID",
+        help: "グループが届く SCIM 接続の ID（例：\"okta-prod\"）。"
+      },
+      group_external_id: {
+        label: "グループ外部 ID",
+        help: "ID プロバイダーが送信するグループの externalId。表示名とどちらか一方を設定し、両方は設定しません。"
+      },
+      group_display_name: {
+        label: "グループ表示名",
+        help: "グループの displayName（完全一致）。マッピングに外部 ID がない場合に使用します。"
+      },
+      permission_set: {
+        label: "権限セット",
+        help: "グループのメンバーに付与される権限セット。管理者セットは拒否されます。"
+      },
+      organization_id: {
+        label: "組織",
+        help: "付与が行われる組織：SCIM 接続を所有する組織。"
+      },
+      created_at: {
+        label: "作成日時"
+      },
+      updated_at: {
+        label: "更新日時"
+      }
+    },
+    _views: {
+      all: {
+        label: "すべて"
+      }
+    }
+  },
   sys_notification: {
     label: "通知",
     pluralLabel: "通知",

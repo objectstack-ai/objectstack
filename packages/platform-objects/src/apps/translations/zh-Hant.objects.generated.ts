@@ -2636,6 +2636,54 @@ export const zhHantObjects: NonNullable<TranslationData['objects']> = {
       }
     }
   },
+  sys_idp_group_mapping: {
+    label: "IdP 群組對應",
+    pluralLabel: "IdP 群組對應",
+    description: "將身分識別提供者的群組對應到其成員獲授予的權限集",
+    fields: {
+      id: {
+        label: "ID"
+      },
+      source_kind: {
+        label: "來源類型",
+        help: "推送該群組的來源：SCIM 連線。",
+        options: {
+          scim: "SCIM 連線"
+        }
+      },
+      source_id: {
+        label: "來源 ID",
+        help: "該群組經由的 SCIM 連線 ID，例如 \"okta-prod\"。"
+      },
+      group_external_id: {
+        label: "群組外部 ID",
+        help: "身分識別提供者傳送的群組 externalId。與顯示名稱擇一設定，不可同時設定。"
+      },
+      group_display_name: {
+        label: "群組顯示名稱",
+        help: "群組的 displayName，精確比對。對應未指定外部 ID 時使用。"
+      },
+      permission_set: {
+        label: "權限集",
+        help: "授予該群組成員的權限集。管理員權限集會被拒絕。"
+      },
+      organization_id: {
+        label: "組織",
+        help: "授權所在的組織：擁有該 SCIM 連線的組織。"
+      },
+      created_at: {
+        label: "建立時間"
+      },
+      updated_at: {
+        label: "更新時間"
+      }
+    },
+    _views: {
+      all: {
+        label: "全部"
+      }
+    }
+  },
   sys_notification: {
     label: "通知",
     pluralLabel: "通知",

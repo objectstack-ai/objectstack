@@ -25,6 +25,7 @@ export const arGeneratedSourceHashes: Readonly<Record<string, string>> = {
   "metadataForms.permission.fields.tabPermissions.helpText": "8942e2aebe59897c",
   "metadataForms.position.fields.name.helpText": "3594bba7cc2a3c8a",
   "objects.sys_email.fields.message_id.label": "14cd089a4062f4b1",
+  "objects.sys_idp_group_mapping.fields.id.label": "00b0385c9c152888",
   "objects.sys_job.fields.schedule_type.options.cron": "fd48d0e2cd59cab2",
   "objects.sys_oauth_application.fields.jwks.label": "b2cf79f9d66c0dbc",
   "objects.sys_oauth_application.fields.jwks_uri.label": "2a4339df734ab269",

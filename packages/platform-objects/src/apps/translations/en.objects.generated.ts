@@ -2636,6 +2636,54 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       }
     }
   },
+  sys_idp_group_mapping: {
+    label: "IdP Group Mapping",
+    pluralLabel: "IdP Group Mappings",
+    description: "Maps an identity provider group to the permission set its members are granted",
+    fields: {
+      id: {
+        label: "ID"
+      },
+      source_kind: {
+        label: "Source Kind",
+        help: "What pushes the group: a SCIM connection.",
+        options: {
+          scim: "SCIM Connection"
+        }
+      },
+      source_id: {
+        label: "Source ID",
+        help: "The SCIM connection ID the group arrives through, e.g. \"okta-prod\"."
+      },
+      group_external_id: {
+        label: "Group External ID",
+        help: "The group's externalId as the identity provider sends it. Set this or the display name, not both."
+      },
+      group_display_name: {
+        label: "Group Display Name",
+        help: "The group's displayName, matched exactly. Used when the mapping names no external ID."
+      },
+      permission_set: {
+        label: "Permission Set",
+        help: "The permission set a member of the group is granted. Administrator sets are refused."
+      },
+      organization_id: {
+        label: "Organization",
+        help: "The organization the grant is made in: the organization that owns the SCIM connection."
+      },
+      created_at: {
+        label: "Created At"
+      },
+      updated_at: {
+        label: "Updated At"
+      }
+    },
+    _views: {
+      all: {
+        label: "All"
+      }
+    }
+  },
   sys_notification: {
     label: "Notification Event",
     pluralLabel: "Notification Events",

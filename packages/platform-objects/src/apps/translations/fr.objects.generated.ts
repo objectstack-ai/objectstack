@@ -2636,6 +2636,54 @@ export const frObjects: NonNullable<TranslationData['objects']> = {
       }
     }
   },
+  sys_idp_group_mapping: {
+    label: "Correspondance de groupe IdP",
+    pluralLabel: "Correspondances de groupe IdP",
+    description: "Associe un groupe du fournisseur d’identité à l’ensemble d’autorisations accordé à ses membres",
+    fields: {
+      id: {
+        label: "ID"
+      },
+      source_kind: {
+        label: "Type de source",
+        help: "Ce qui envoie le groupe : une connexion SCIM.",
+        options: {
+          scim: "Connexion SCIM"
+        }
+      },
+      source_id: {
+        label: "ID de source",
+        help: "L’ID de la connexion SCIM par laquelle le groupe arrive, p. ex. \"okta-prod\"."
+      },
+      group_external_id: {
+        label: "ID externe du groupe",
+        help: "L’externalId du groupe tel que l’envoie le fournisseur d’identité. Renseignez-le ou le nom d’affichage, pas les deux."
+      },
+      group_display_name: {
+        label: "Nom d’affichage du groupe",
+        help: "Le displayName du groupe, en correspondance exacte. Utilisé quand la correspondance ne nomme aucun ID externe."
+      },
+      permission_set: {
+        label: "Ensemble d’autorisations",
+        help: "L’ensemble d’autorisations accordé à un membre du groupe. Les ensembles administrateur sont refusés."
+      },
+      organization_id: {
+        label: "Organisation",
+        help: "L’organisation dans laquelle l’attribution est faite : celle qui possède la connexion SCIM."
+      },
+      created_at: {
+        label: "Créé le"
+      },
+      updated_at: {
+        label: "Mis à jour le"
+      }
+    },
+    _views: {
+      all: {
+        label: "Tous"
+      }
+    }
+  },
   sys_notification: {
     label: "Événement de notification",
     pluralLabel: "Événements de notification",

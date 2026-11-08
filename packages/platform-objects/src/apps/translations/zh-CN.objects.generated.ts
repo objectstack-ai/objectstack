@@ -2636,6 +2636,54 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       }
     }
   },
+  sys_idp_group_mapping: {
+    label: "IdP 组映射",
+    pluralLabel: "IdP 组映射",
+    description: "将身份提供商的组映射到其成员被授予的权限集",
+    fields: {
+      id: {
+        label: "ID"
+      },
+      source_kind: {
+        label: "来源类型",
+        help: "推送该组的来源：SCIM 连接。",
+        options: {
+          scim: "SCIM 连接"
+        }
+      },
+      source_id: {
+        label: "来源 ID",
+        help: "该组经由的 SCIM 连接 ID，例如 \"okta-prod\"。"
+      },
+      group_external_id: {
+        label: "组外部 ID",
+        help: "身份提供商发送的组 externalId。与显示名称二选一，不可同时设置。"
+      },
+      group_display_name: {
+        label: "组显示名称",
+        help: "组的 displayName，精确匹配。映射未指定外部 ID 时使用。"
+      },
+      permission_set: {
+        label: "权限集",
+        help: "授予该组成员的权限集。管理员权限集会被拒绝。"
+      },
+      organization_id: {
+        label: "组织",
+        help: "授权所在的组织：拥有该 SCIM 连接的组织。"
+      },
+      created_at: {
+        label: "创建时间"
+      },
+      updated_at: {
+        label: "更新时间"
+      }
+    },
+    _views: {
+      all: {
+        label: "全部"
+      }
+    }
+  },
   sys_notification: {
     label: "通知",
     pluralLabel: "通知",
