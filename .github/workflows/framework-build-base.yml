@@ -1,0 +1,313 @@
+name: Framework Build Base Image
+
+# Builds and pushes ghcr.io/objectstack-ai/framework-build-base:<sha> from
+# docker/framework-build-base/Dockerfile: ONE framework commit on `main`, its
+# workspace dependencies installed, every package built, and the Console built
+# into packages/console/dist. It is a builder stage for downstream images that
+# link the framework by path and pin it by commit, so they can start FROM it
+# instead of installing and building the whole framework on every cold cache.
+# It is NOT the runtime image; that one is docker-publish.yml.
+#
+# On demand only, never per commit:
+#   - workflow_dispatch, from main, with `sha` = a full commit on main;
+#   - repository_dispatch, event type `framework-build-base`, with
+#     client_payload {"sha": "<40 hex>"}: the hook a downstream pin move can call;
+#   - pull_request touching this file or docker/framework-build-base/: the dry
+#     run of a change to the image definition. It builds the PR's base commit
+#     with the PR's Dockerfile and pushes nothing; its job has no packages grant.
+#
+# A tag is written once. A request for a commit whose tag already exists reports
+# the existing digest and builds nothing (dispatch with `rebuild: true` to
+# replace it), so a downstream can ask on every pin move at no cost.
+#
+# The image definition always comes from THIS run's checkout of main; only the
+# build context is the requested commit. So a commit that predates this file can
+# be packaged, and a commit cannot bring its own Dockerfile into a published image.
+#
+# Visibility: GitHub creates a new container package private on its first push,
+# and no API changes that. The maintainer sets it Public once, in the package's
+# settings (Danger Zone, Change visibility; it cannot be made private again).
+# Until then the anonymous-pull step below is red and names that fix.
+
+# dispatch-gates: no-check-families -- the steps are an image build, a registry read and an in-image check script (docker/framework-build-base/check-image.sh, which needs the built image), not named local checks
+
+on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: 'Full 40-hex framework commit on main to package (e.g. a downstream .objectstack-sha)'
+        required: true
+        type: string
+      rebuild:
+        description: 'Rebuild and re-push even when the tag already exists (the digest changes)'
+        required: false
+        type: boolean
+        default: false
+  repository_dispatch:
+    types: [framework-build-base]
+  pull_request:
+    paths:
+      - '.github/workflows/framework-build-base.yml'
+      - 'docker/framework-build-base/**'
+
+permissions:
+  contents: read
+
+# One build per commit at a time; a second request for the same commit waits,
+# then finds the tag and builds nothing. A PR's dry run is superseded by its
+# next push.
+concurrency:
+  group: framework-build-base-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.event.client_payload.sha || inputs.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  IMAGE: ghcr.io/objectstack-ai/framework-build-base
+
+jobs:
+  verify:
+    name: Build framework build base (dry run, no push)
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    # The same build as `publish` below; see its budget note.
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    steps:
+      - name: Free runner disk
+        run: |
+          set -euxo pipefail
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          sudo docker image prune -af || true
+          df -h /
+
+      - name: Check out the image definition (this pull request)
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: builder
+          persist-credentials: false
+          sparse-checkout: docker/framework-build-base
+
+      - name: Check out the framework commit (the pull request's base)
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: objectstack
+          persist-credentials: false
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Note the build start
+        id: clock
+        run: echo "start=$(date +%s)" >> "$GITHUB_OUTPUT"
+
+      - name: Build (load into the runner, never push)
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: objectstack
+          file: builder/docker/framework-build-base/Dockerfile
+          platforms: linux/amd64
+          push: false
+          load: true
+          provenance: false
+          sbom: false
+          build-args: |
+            FRAMEWORK_SHA=${{ github.event.pull_request.base.sha }}
+          tags: framework-build-base:dry-run
+
+      - name: Look inside the image
+        env:
+          SHA: ${{ github.event.pull_request.base.sha }}
+          START: ${{ steps.clock.outputs.start }}
+        run: |
+          set -euo pipefail
+          BUILD_S=$(( $(date +%s) - START ))
+          READINGS="$(bash builder/docker/framework-build-base/check-image.sh framework-build-base:dry-run "$SHA")"
+          echo "$READINGS"
+          {
+            echo "### Framework build base, dry run (nothing pushed)"
+            echo
+            echo "- framework commit (PR base): \`$SHA\`"
+            echo "- build wall: ${BUILD_S} s"
+            echo "$READINGS" | sed 's/^/- /'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  publish:
+    name: Build & push ghcr.io/objectstack-ai/framework-build-base
+    # Trusted runs only: a dispatch from main, or a repository_dispatch (which
+    # always runs main's copy of this file). This `if` is the policy, not a
+    # security boundary: anyone who can push a branch can also edit it there.
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    # One cold reading on record, the `verify` job of run 42464408854: job wall
+    # 18m45s, of which the build 15m25s (install 33 s, 82 framework tasks
+    # 1m58s, 74 Console tasks 10m47s, load into the runner 94 s). This job
+    # skips the load and adds a push and an anonymous pull of about 0.8 GB.
+    # 60 minutes is about 3x, room for a slow npm or a slow registry.
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Resolve the framework commit
+        id: sha
+        env:
+          REQUESTED: ${{ github.event_name == 'repository_dispatch' && github.event.client_payload.sha || inputs.sha }}
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          SHA="$(printf '%s' "$REQUESTED" | tr -d '[:space:]')"
+          if ! printf '%s' "$SHA" | grep -Eq '^[0-9a-f]{40}$'; then
+            echo "::error::the requested commit is not a full 40-hex lowercase sha"
+            exit 1
+          fi
+          # Only commits on main are packaged: main must be ahead of the commit,
+          # or be it. Anything else (a branch head, a fork's pull ref) is refused.
+          if ! STATUS="$(gh api "repos/$REPO/compare/$SHA...main" --jq .status)"; then
+            echo "::error::cannot compare $SHA with main (is it a commit of $REPO?)"
+            exit 1
+          fi
+          case "$STATUS" in
+            ahead|identical) ;;
+            *) echo "::error::$SHA is not on main (compare status: $STATUS); only commits on main are packaged"; exit 1 ;;
+          esac
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Log in to ghcr.io
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Is this commit already packaged
+        id: existing
+        env:
+          REF: ${{ env.IMAGE }}:${{ steps.sha.outputs.sha }}
+          REBUILD: ${{ inputs.rebuild && 'true' || 'false' }}
+        run: |
+          set -euo pipefail
+          DIGEST="$(docker buildx imagetools inspect "$REF" --format '{{json .Manifest}}' 2>/dev/null | jq -r '.digest // empty' || true)"
+          if [ -n "$DIGEST" ] && [ "$REBUILD" != true ]; then
+            echo "$REF already exists at $DIGEST; nothing to build (dispatch with rebuild: true to replace it)."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "digest=$DIGEST" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Free runner disk
+        if: steps.existing.outputs.skip != 'true'
+        run: |
+          set -euxo pipefail
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          sudo docker image prune -af || true
+          df -h /
+
+      - name: Check out the image definition (this run's main)
+        if: steps.existing.outputs.skip != 'true'
+        uses: actions/checkout@v7
+        with:
+          path: builder
+          persist-credentials: false
+          sparse-checkout: docker/framework-build-base
+
+      - name: Check out the framework commit (the build context)
+        if: steps.existing.outputs.skip != 'true'
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ steps.sha.outputs.sha }}
+          path: objectstack
+          persist-credentials: false
+
+      - name: Note the build start
+        if: steps.existing.outputs.skip != 'true'
+        id: clock
+        env:
+          SHA: ${{ steps.sha.outputs.sha }}
+        run: |
+          set -euo pipefail
+          [ "$(git -C objectstack rev-parse HEAD)" = "$SHA" ] || { echo "::error::the context checkout is not $SHA"; exit 1; }
+          echo "start=$(date +%s)" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push
+        if: steps.existing.outputs.skip != 'true'
+        id: build
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: objectstack
+          file: builder/docker/framework-build-base/Dockerfile
+          platforms: linux/amd64
+          push: true
+          provenance: false
+          sbom: false
+          build-args: |
+            FRAMEWORK_SHA=${{ steps.sha.outputs.sha }}
+          tags: ${{ env.IMAGE }}:${{ steps.sha.outputs.sha }}
+
+      - name: Note the build wall
+        if: steps.existing.outputs.skip != 'true'
+        id: wall
+        env:
+          START: ${{ steps.clock.outputs.start }}
+        run: echo "seconds=$(( $(date +%s) - START ))" >> "$GITHUB_OUTPUT"
+
+      # The image is for anyone to pull, so it is read back the way a stranger
+      # would: logged out. A fresh build is pulled whole and looked inside; an
+      # existing tag only has its manifest read, anonymously.
+      - name: Pull the image anonymously
+        id: pull
+        env:
+          SHA: ${{ steps.sha.outputs.sha }}
+          DIGEST: ${{ steps.build.outputs.digest || steps.existing.outputs.digest }}
+          FRESH: ${{ steps.existing.outputs.skip != 'true' }}
+        run: |
+          set -euo pipefail
+          docker logout ghcr.io
+          REF="$IMAGE@$DIGEST"
+          PRIVATE="::error::$IMAGE cannot be read anonymously. A new container package is private: the maintainer sets it Public once, in the package's settings (Danger Zone, Change visibility)."
+          if [ "$FRESH" = true ]; then
+            docker pull "$REF" || { echo "$PRIVATE"; exit 1; }
+            bash builder/docker/framework-build-base/check-image.sh "$REF" "$SHA" | tee "$RUNNER_TEMP/readings.txt"
+          else
+            TOKEN="$(curl -fsS "https://ghcr.io/token?scope=repository:objectstack-ai/framework-build-base:pull&service=ghcr.io" | jq -r .token)" \
+              && curl -fsS -o /dev/null -H "Authorization: Bearer $TOKEN" \
+                   -H 'Accept: application/vnd.oci.image.manifest.v1+json' \
+                   -H 'Accept: application/vnd.docker.distribution.manifest.v2+json' \
+                   "https://ghcr.io/v2/objectstack-ai/framework-build-base/manifests/$DIGEST" \
+              || { echo "$PRIVATE"; exit 1; }
+            echo "manifest readable anonymously" > "$RUNNER_TEMP/readings.txt"
+          fi
+
+      - name: Summary
+        if: always() && steps.sha.outputs.sha != ''
+        env:
+          SHA: ${{ steps.sha.outputs.sha }}
+          DIGEST: ${{ steps.build.outputs.digest || steps.existing.outputs.digest }}
+          SKIPPED: ${{ steps.existing.outputs.skip }}
+          WALL: ${{ steps.wall.outputs.seconds }}
+          PULL: ${{ steps.pull.outcome }}
+        run: |
+          {
+            echo "### $IMAGE"
+            echo
+            echo "- framework commit: \`$SHA\`"
+            echo "- tag: \`$IMAGE:$SHA\`"
+            echo "- digest: \`${DIGEST:-none}\`"
+            if [ "$SKIPPED" = true ]; then
+              echo "- build: skipped, the tag already existed"
+            else
+              echo "- build wall: ${WALL:-not reached} s"
+            fi
+            echo "- anonymous read: ${PULL:-not reached}"
+            if [ -f "$RUNNER_TEMP/readings.txt" ]; then sed 's/^/- /' "$RUNNER_TEMP/readings.txt"; fi
+            if [ -n "$DIGEST" ]; then
+              echo
+              echo "Pin it by digest: \`FROM $IMAGE:$SHA@$DIGEST\`"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
