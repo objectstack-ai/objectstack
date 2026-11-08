@@ -1,6 +1,7 @@
 ---
 '@objectstack/spec': patch
 '@objectstack/plugin-security': patch
+'@objectstack/plugin-sharing': patch
 '@objectstack/core': patch
 '@objectstack/objectql': patch
 '@objectstack/verify': patch
@@ -10,6 +11,7 @@ feat(security): the recycle bin's two grants are read: `restore` asks `allowRest
 
 Clause-②: yes (widening)
 Metadata-protocol: none
+Skills-docs: follow-up #30847
 
 Until now every `restore` and `purge` dispatch was refused for every caller but the system, whatever the caller's permission sets granted. The two recycle-bin keys on an object permission are now read (ADR-0148 D5):
 
@@ -17,6 +19,7 @@ Until now every `restore` and `purge` dispatch was refused for every caller but 
 - **`manageRecycleBin`** answers `purge`: purging one entry, emptying an object's entries, and the permanent delete (`delete(…, { permanent: true })`). It also restores any entry, not only your own.
 - **How the keys fold**: each is bounded by read; `modifyAllRecords` implies both; `manageRecycleBin` implies `allowRestoreOwnDeleted`; `allowDelete` implies neither. `objectPermissionGrants` (`@objectstack/spec/security`) answers both keys this way, and `/me/permissions` reports them.
 - **The tenant wall on the bin**: a caller the organization wall denies (for example, signed in with no active organization on a multi-organization deployment) now sees no entry: `restore` answers `null`, `purge` answers `false` and `empty` answers `0`. Before, such a caller's `purge` and `empty` were not scoped to any organization. The removal is scoped by the verdict the security layer recorded on the dispatch when it recorded one.
+- **Record sharing on the permanent delete**: the sharing write gate judges `purge` as the delete it is, so the permanent delete of a record by id is refused (`403 FORBIDDEN`) unless the caller may delete that record (ownership, write depth or Modify All Data; an edit share is not enough), and a bulk permanent delete is scoped to the records the caller may delete. `security/explain` reports a purge against the same delete gate.
 - `@objectstack/verify`: a write observer now also sees `purge` and `restore`.
 
 Grant `allowRestoreOwnDeleted` (with read) to the people who should take back what they deleted, and `manageRecycleBin` to the people who administer the bin. Nothing changes for a caller who holds neither.

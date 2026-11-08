@@ -1976,7 +1976,7 @@ async function applyRecordAttribution(
   // members — never deleted, so a delete explanation reports nothing — and a
   // `transfer` of an unowned record by the principal is a CLAIM when the
   // sharing model positively admits them, which needs no transfer grant.
-  if (recordExists && engineOp !== 'delete' && hasOwnerField && (ownerRaw == null || ownerRaw === '') && context?.userId != null) {
+  if (recordExists && rlsOperationForVerb(engineOp) !== 'delete' && hasOwnerField && (ownerRaw == null || ownerRaw === '') && context?.userId != null) {
     const row = record as Record<string, unknown>;
     const sittingIn = typeof row.queue === 'string' && row.queue !== '' ? row.queue : null;
     if (sittingIn && deps.queueMember) {
@@ -2014,7 +2014,10 @@ async function applyRecordAttribution(
   // Write ops: the by-construction verdict is the sharing service's own gate.
   // [ADR-0111 D3] delete has its own narrower gate (an edit share does not
   // confer delete), so a `delete` explanation consults canDelete, not canEdit.
-  const writeGate = engineOp === 'delete' ? deps.canDeleteRecord : deps.canEditRecord;
+  // [#30237] The gate is picked by the write CLASS, as the sharing middleware
+  // picks it (`rlsOperationForVerb`): a `purge` is explained against canDelete.
+  const writeClass = rlsOperationForVerb(engineOp);
+  const writeGate = writeClass === 'delete' ? deps.canDeleteRecord : deps.canEditRecord;
   // A rejected gate is not an absent one: "no gate wired" hands the verdict to
   // ownership and read shares, while the by-id write it explains fails.
   const canEditOrFault = !isRead && writeGate && recordExists
@@ -2029,11 +2032,13 @@ async function applyRecordAttribution(
   // pre-image gate (the `rls` layer below). Asked on that condition alone, so
   // a row the gate admits, abstains on or faulted on is explained as before;
   // every answer but `admit`, and a rejection, keeps the refusal, as at the door.
-  // A transfer's door is the by-id update of `owner_id`, so it is deferred as
-  // an update; restore and purge have no by-id door (the object gate refuses
-  // both), so nothing defers them.
+  // The verb deferred is the write CLASS (`rlsOperationForVerb`), as at the
+  // middleware: a transfer's door is the by-id update of `owner_id`, so it is
+  // deferred as an update, and the permanent delete's by-id `purge` [#30237]
+  // as the delete it is. A `restore` addresses no live row (its record is in
+  // the recycle bin, so `recordExists` is false and nothing reaches here).
   const authoredDeferralVerb: AuthoredRowWriteOperation | undefined =
-    engineOp === 'update' || engineOp === 'transfer' ? 'update' : engineOp === 'delete' ? 'delete' : undefined;
+    writeClass === 'update' || writeClass === 'delete' ? writeClass : undefined;
   const authoredRowWriteAdmits = canEdit === false && authoredDeferralVerb && deps.probeAuthoredRowWrite
     ? (await deps.probeAuthoredRowWrite(object, recordId, authoredDeferralVerb, context).catch(() => 'abstain')) === 'admit'
     : false;
@@ -2136,7 +2141,7 @@ async function applyRecordAttribution(
             'the find fails on the same call — so the record is reported NOT visible (fail closed), never admitted.'
           : undefined)
     : (writeGateFault
-        ? `The sharing service's per-record ${engineOp === 'delete' ? 'delete' : 'update'} gate could not be ` +
+        ? `The sharing service's per-record ${writeClass === 'delete' ? 'delete' : 'update'} gate could not be ` +
           'evaluated: it threw, and the by-id write fails on the same call — so the record is reported NOT ' +
           'writable (fail closed), never admitted.'
         : masterFault
