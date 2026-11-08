@@ -1402,7 +1402,7 @@ function selfTest() {
   expect('a retired member listed in the scope is a [leg2-retired-row] red',
     rowRetired.errors.length === 1 && rowRetired.errors[0].startsWith('[leg2-retired-row]') && rowRetired.errors[0].includes('`agent`'));
   expect('a reworded row is a stale binding, never an empty scope read green',
-    rRow(cli.replace('`os generate <kind>`', '`os g <kind>`')).errors.some((e) => e.startsWith('[stale-binding]') && e.includes('no table row')));
+    rRow(cli.replace('`os generate <kind>`', '`os generate KIND`')).errors.some((e) => e.startsWith('[stale-binding]') && e.includes('no table row')));
 
   // ── both legs in ONE walk ────────────────────────────────────────────────
   battery('both legs in ONE walk');
