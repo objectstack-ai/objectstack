@@ -120,9 +120,9 @@ export const RestrictionProfileSchema = lazySchema(() => strictObject(
      * - A `script` node calls a registered function, so it is also subject to
      *   `allowCode`: under `allowCode: false` it is refused by `allowCode`
      *   alone, and under `allowCode: true` by this list.
-     * - A node type outside this vocabulary exists because a code plugin
-     *   registered it, so this list cannot name it and `allowCode` governs it:
-     *   refused under `allowCode: false`, allowed under `allowCode: true`.
+     * - A node type outside the profile's vocabulary cannot be named by this
+     *   list, so `allowCode` governs it: refused under `allowCode: false`,
+     *   allowed under `allowCode: true`.
      */
     allowedFlowNodeTypes: z
       .array(FlowNodeAction)
