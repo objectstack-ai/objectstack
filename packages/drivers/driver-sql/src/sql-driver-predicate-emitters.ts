@@ -234,6 +234,35 @@ function mssqlGuidText(expr: string): string {
   return `LOWER(CONVERT(nvarchar(36), ${expr}))`;
 }
 
+/**
+ * [#31395] The `$contains` family and `$icontains` over a SQL Server
+ * `uniqueidentifier` column: {@link textMatchPredicate}'s mssql construct —
+ * the same {@link escapeMssqlLikeComparand} escape, the same case-exact wrap and
+ * `TRANSLATE` fold, the same bound `ESCAPE` — with the column read as
+ * {@link mssqlGuidText}. Reached only from {@link applyLike}, and only for a
+ * column the remote catalog reported as `uniqueidentifier`.
+ */
+function mssqlGuidTextMatch(field: string, value: unknown, shape: TextMatchShape, negate: boolean, fold: boolean): { sql: string; bindings: unknown[] } {
+  const caseExact = fold ? mssqlAsciiLower : mssqlCaseExact;
+  return {
+    sql: `${caseExact(mssqlGuidText('??'))} ${negate ? 'NOT LIKE' : 'LIKE'} ${caseExact('?')} ESCAPE ?`,
+    bindings: [field, wrapTextMatchShape(escapeMssqlLikeComparand(value), shape, '%'), LIKE_ESCAPE_CHARACTER],
+  };
+}
+
+/**
+ * [#31395] `$like` / `$ilike` over a SQL Server `uniqueidentifier` column:
+ * {@link likePatternPredicate}'s mssql construct with the column read as
+ * {@link mssqlGuidText}. Reached only from {@link applyLikePattern}.
+ */
+function mssqlGuidLikePattern(field: string, pattern: string, fold: boolean): { sql: string; bindings: unknown[] } {
+  const caseExact = fold ? mssqlAsciiLower : mssqlCaseExact;
+  return {
+    sql: `${caseExact(mssqlGuidText('??'))} LIKE ${caseExact('?')} ESCAPE ?`,
+    bindings: [field, mssqlLikePattern(pattern), LIKE_ESCAPE_CHARACTER],
+  };
+}
+
 /** Wrap an already-escaped comparand in the wildcards `shape` calls for. */
 function wrapTextMatchShape(escaped: string, shape: TextMatchShape, wildcard: string): string {
   if (shape === 'starts') return `${escaped}${wildcard}`;
@@ -435,8 +464,7 @@ function mysqlAsciiLowerBinary(expr: string): string {
  *   cannot fold the match), with {@link escapeMssqlLikeComparand}'s wider
  *   character class — `[` is a metacharacter there — and
  *   {@link mssqlAsciiLower}'s `TRANSLATE` for the fold. Executed on SQL Server
- *   2022 by the live mssql cell. A `uniqueidentifier` column is matched as its
- *   lower-case text, {@link mssqlGuidText}, the form a read answers (#31395).
+ *   2022 by the live mssql cell.
  * - **Oracle → `LIKE`, the Postgres arm's construct.** `LIKE` is byte-wise
  *   there under `NLS_COMP = BINARY`, which every Oracle session this driver
  *   opens pins (`ORACLE_SESSION_SETUP_SQL`) so a database or user default of
@@ -468,8 +496,6 @@ export function textMatchPredicate(
   shape: TextMatchShape,
   negate: boolean,
   fold: boolean,
-  // [#31395] The column is a SQL Server `uniqueidentifier`; read by the mssql arm only.
-  guidColumn = false,
 ): { sql: string; bindings: unknown[] } {
   if (dialect === 'sqlite') {
     // [#19999, #20024] `glob()` cuts its pattern AND the stored value at their
@@ -492,9 +518,8 @@ export function textMatchPredicate(
   if (dialect === 'mssql') {
     // `[` is a fourth metacharacter here, so the comparand takes its own escape.
     const caseExact = fold ? mssqlAsciiLower : mssqlCaseExact;
-    const column = guidColumn ? mssqlGuidText('??') : '??';
     return {
-      sql: `${caseExact(column)} ${negate ? 'NOT LIKE' : 'LIKE'} ${caseExact('?')} ESCAPE ?`,
+      sql: `${caseExact('??')} ${negate ? 'NOT LIKE' : 'LIKE'} ${caseExact('?')} ESCAPE ?`,
       bindings: [field, wrapTextMatchShape(escapeMssqlLikeComparand(value), shape, '%'), LIKE_ESCAPE_CHARACTER],
     };
   }
@@ -689,8 +714,7 @@ function sqliteLikePatternMatch(field: string, pattern: string, fold: boolean): 
  * - **SQL Server → `LIKE` over {@link mssqlCaseExact}**, the pattern carried
  *   through {@link mssqlLikePattern} so an unescaped `[` stays the literal it is
  *   in the shared pattern language; `$ilike` folds through
- *   {@link mssqlAsciiLower}. A `uniqueidentifier` column is matched as
- *   {@link mssqlGuidText}, the lower-case form a read answers (#31395).
+ *   {@link mssqlAsciiLower}.
  * - **Oracle → the Postgres arm**, for the reasons {@link textMatchPredicate}
  *   gives: `LIKE` is byte-wise under the pinned `NLS_COMP = BINARY`, and
  *   `TRANSLATE` folds the 26 ASCII letters only.
@@ -703,8 +727,6 @@ export function likePatternPredicate(
   field: string,
   pattern: string,
   fold: boolean,
-  // [#31395] The column is a SQL Server `uniqueidentifier`; read by the mssql arm only.
-  guidColumn = false,
 ): { sql: string; bindings: unknown[] } {
   if (dialect === 'sqlite') {
     // [#20024] `glob()` reads the stored value only up to its first U+0000;
@@ -715,9 +737,8 @@ export function likePatternPredicate(
 
   if (dialect === 'mssql') {
     const caseExact = fold ? mssqlAsciiLower : mssqlCaseExact;
-    const column = guidColumn ? mssqlGuidText('??') : '??';
     return {
-      sql: `${caseExact(column)} LIKE ${caseExact('?')} ESCAPE ?`,
+      sql: `${caseExact('??')} LIKE ${caseExact('?')} ESCAPE ?`,
       bindings: [field, mssqlLikePattern(pattern), LIKE_ESCAPE_CHARACTER],
     };
   }
@@ -1048,13 +1069,17 @@ export function applyNullSafeNegative(builder: any, method: string, field: strin
 /** The body of `SqlDriver#applyLike`; the method's docblock there is its contract. */
 export function applyLike(this: Pick<PredicateEmitterHost, 'dialectName'>, builder: any, method: string, field: string, value: unknown, shape: TextMatchShape, negate = false, fold = false, guidColumn = false): void {
   const rawMethod = method.startsWith('or') ? 'orWhereRaw' : 'whereRaw';
-  const { sql, bindings } = textMatchPredicate(this.dialectName, field, value, shape, negate, fold, guidColumn);
+  const { sql, bindings } = guidColumn && this.dialectName === 'mssql'
+    ? mssqlGuidTextMatch(field, value, shape, negate, fold)
+    : textMatchPredicate(this.dialectName, field, value, shape, negate, fold);
   builder[rawMethod](sql, bindings);
 }
 
 /** The body of `SqlDriver#applyLikePattern`; the method's docblock there is its contract. */
 export function applyLikePattern(this: Pick<PredicateEmitterHost, 'dialectName'>, builder: any, method: string, field: string, pattern: string, fold: boolean, guidColumn = false): void {
   const rawMethod = method.startsWith('or') ? 'orWhereRaw' : 'whereRaw';
-  const { sql, bindings } = likePatternPredicate(this.dialectName, field, pattern, fold, guidColumn);
+  const { sql, bindings } = guidColumn && this.dialectName === 'mssql'
+    ? mssqlGuidLikePattern(field, pattern, fold)
+    : likePatternPredicate(this.dialectName, field, pattern, fold);
   builder[rawMethod](sql, bindings);
 }

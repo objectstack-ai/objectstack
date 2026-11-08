@@ -647,10 +647,16 @@ What is different from the other SQL drivers:
   (`$contains`) and `$empty` on a multi-value field are refused on SQL Server.
 - **GUIDs.** A `uniqueidentifier` reads back in the lower-case form
   (`3f2504e0-4f89-…`), so a GUID written as a string reads back as that string, and
-  an equality or `$in` filter matches it in either case. Substring operators
-  (`$contains`, `$startsWith`) compare against SQL Server's own upper-case text form
-  of the GUID; filter a GUID by equality
-  ([#31395](https://github.com/objectstack-ai/objectstack/issues/31395) tracks it).
+  an equality or `$in` filter matches it in either case. The text operators
+  (`$contains`, `$startsWith`, `$endsWith`, `$notContains`, `$like` and their
+  case-insensitive siblings) match a `uniqueidentifier` column as that same
+  lower-case text, `LOWER(CONVERT(nvarchar(36), col))`, so a fragment copied from a
+  read finds its row. The case-exact operators follow that read form, so
+  `$startsWith: '3f2504e0'` matches and `$startsWith: '3F2504E0'` does not;
+  `$icontains` and `$ilike` match either case. The driver learns which columns
+  are GUIDs from the remote catalog
+  (`INFORMATION_SCHEMA.COLUMNS`) the first time a read uses a text operator on the
+  object, never from the shape of the value you filter by.
 - **Text matching** follows the platform's contract, not the database's collation:
   `$contains` / `$startsWith` / `$endsWith` / `$like` are case-exact even on SQL
   Server's case-insensitive default collations, and `$icontains` folds A–Z only.
