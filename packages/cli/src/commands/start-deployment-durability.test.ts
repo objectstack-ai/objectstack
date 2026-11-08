@@ -7,6 +7,11 @@
  */
 
 import { describe, expect, it } from 'vitest';
+// Paid during collection, never inside a case's clock: `start.ts` loads these
+// lazily, and `check:test-source-alias` reads every one it can reach.
+import '@objectstack/cloud-connection';
+import '@objectstack/runtime';
+import '@objectstack/service-settings';
 import {
   DURABILITY_CHECK_ENV,
   INTERNAL_DEPLOYMENT_FINDINGS_ENV,
