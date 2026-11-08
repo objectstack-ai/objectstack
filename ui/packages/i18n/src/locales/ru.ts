@@ -822,6 +822,7 @@ const ru = {
     eventTitlePlaceholder: "О чём это событие?",
     creating: "Создание…",
     titleRequired: "Укажите название",
+    rescheduleNotFound: "Эта запись ({{object}}) больше не существует, или у вас больше нет к ней доступа.",
     a11y: {
       region: "Календарь",
       grid: "Сетка календаря",

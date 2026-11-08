@@ -1047,6 +1047,10 @@ const en = {
     eventTitlePlaceholder: 'What\'s this event about?',
     creating: 'Creating…',
     titleRequired: 'Title is required',
+    // A drag-to-reschedule the server refused because the record is gone for
+    // this session: deleted, or no longer visible to it. `{{object}}` is the
+    // object's label; with none to show, `form.recordNotFoundOrHidden` is used.
+    rescheduleNotFound: 'This {{object}} record no longer exists, or you no longer have access to it.',
     a11y: {
       region: 'Calendar',
       grid: 'Calendar grid',

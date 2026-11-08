@@ -799,6 +799,7 @@ const fr = {
     eventTitlePlaceholder: "De quoi s'agit-il ?",
     creating: "Création…",
     titleRequired: "Le titre est obligatoire",
+    rescheduleNotFound: "Cet enregistrement ({{object}}) n'existe plus, ou vous n'y avez plus accès.",
     a11y: {
       region: "Calendrier",
       grid: "Grille du calendrier",

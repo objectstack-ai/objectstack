@@ -779,6 +779,7 @@ const ja = {
     eventTitlePlaceholder: "この予定の内容は？",
     creating: "作成中…",
     titleRequired: "タイトルは必須です",
+    rescheduleNotFound: "この{{object}}レコードは存在しないか、アクセス権がなくなりました。",
     a11y: {
       region: "カレンダー",
       grid: "カレンダーグリッド",

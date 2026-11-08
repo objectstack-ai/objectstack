@@ -804,6 +804,7 @@ const es = {
     eventTitlePlaceholder: "¿De qué trata este evento?",
     creating: "Creando…",
     titleRequired: "El título es obligatorio",
+    rescheduleNotFound: "Este registro de {{object}} ya no existe o ya no tienes acceso a él.",
     a11y: {
       region: "Calendario",
       grid: "Cuadrícula del calendario",
