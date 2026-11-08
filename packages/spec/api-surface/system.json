@@ -599,6 +599,8 @@
     "ResolvedSettingValueSchema (const)",
     "ResolverDoc (interface)",
     "RestrictionProfile (type)",
+    "RestrictionProfileNodeType (const)",
+    "RestrictionProfileNodeType (type)",
     "RestrictionProfileSchema (const)",
     "ResultDialogLike (interface)",
     "RetryPolicy (type)",

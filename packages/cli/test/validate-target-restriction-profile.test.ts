@@ -11,6 +11,9 @@
  *    and an all-open profile refuses nothing;
  *  - each dimension refuses through the command, one `errors` row per item,
  *    each naming its `rule`;
+ *  - a Team-shaped profile (`allowCode: false`, `allowSandboxedJs: true`, the
+ *    approval pair listed) passes a stack with an approval flow and a
+ *    sandboxed hook, and `allowSandboxedJs: false` refuses that hook;
  *  - version drift is a warning on the payload, never a refusal, and not
  *    gated by `--strict`;
  *  - an invalid profile and a URL target are refused before the stack is read.
@@ -22,7 +25,7 @@ import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { FLOW_BUILTIN_NODE_TYPES } from '@objectstack/spec/automation';
+import { RestrictionProfileNodeType } from '@objectstack/spec/system';
 // Clocked windows measure behaviour, never loading: the command reaches both
 // of these through a dynamic import, so their first load is paid here, during
 // collection (`pnpm check:test-source-alias`).
@@ -103,15 +106,45 @@ const STACK = `{
   ],
 }`;
 
+/**
+ * A Team-shaped stack: an approval flow (the approval node is a plugin node
+ * type the spec declares a contract for, not a `FlowNodeAction` id) and an
+ * object lifecycle hook whose body is sandboxed JavaScript.
+ */
+const TEAM_STACK = `{
+  manifest: { id: 'com.example.rptt', namespace: 'rptt', version: '1.0.0', name: 'Rptt', type: 'app', engines: { protocol: '^18' } },
+  requires: ['automation', 'triggers'],
+  objects: [{ name: 'rptt_doc', label: 'Doc', sharingModel: 'private', fields: { title: { type: 'text', label: 'Title' } } }],
+  hooks: [{ name: 'rptt_stamp', object: 'rptt_doc', events: ['beforeInsert'], body: { language: 'js', source: 'return;' } }],
+  flows: [
+    {
+      name: 'rptt_signoff', label: 'Sign-off', type: 'record_change', status: 'active',
+      nodes: [
+        { id: 'start', type: 'start', label: 'Start', config: { objectName: 'rptt_doc', triggerType: 'record-after-create' } },
+        { id: 'ask', type: 'approval', label: 'Ask', config: { approvers: [{ type: 'manager' }], behavior: 'first_response' } },
+        { id: 'approved', type: 'end', label: 'Approved' },
+        { id: 'rejected', type: 'end', label: 'Rejected' },
+      ],
+      edges: [
+        { id: 'e1', source: 'start', target: 'ask' },
+        { id: 'e2', source: 'ask', target: 'approved', label: 'approve' },
+        { id: 'e3', source: 'ask', target: 'rejected', label: 'reject' },
+      ],
+    },
+  ],
+}`;
+
 const OPEN = {
   allowCode: true,
+  allowSandboxedJs: true,
   allowScheduledAutomation: true,
-  allowedFlowNodeTypes: [...FLOW_BUILTIN_NODE_TYPES],
+  allowedFlowNodeTypes: [...RestrictionProfileNodeType.options],
   versions: { spec: SPEC_VERSION, skills: '18.4.0' },
 };
 
 let root = '';
 let config = '';
+let teamConfig = '';
 const profileFile = (name: string, value: unknown): string => {
   const file = join(root, `${name}.json`);
   writeFileSync(file, typeof value === 'string' ? value : JSON.stringify(value));
@@ -122,6 +155,9 @@ beforeAll(() => {
   root = mkdtempSync(join(tmpdir(), 'os-validate-target-'));
   config = join(root, 'objectstack.config.ts');
   writeFileSync(config, defineStackSourceFromLiteral(STACK));
+  mkdirSync(join(root, 'team'), { recursive: true });
+  teamConfig = join(root, 'team', 'objectstack.config.ts');
+  writeFileSync(teamConfig, defineStackSourceFromLiteral(TEAM_STACK));
   linkSpec(root);
   // The project installs the skills catalog at a known version, so the drift
   // reading below does not depend on what else the resolver can reach.
@@ -204,6 +240,39 @@ describe('os validate --target <restriction profile file>', () => {
     expect(drift).toEqual([
       { name: '@objectstack/spec', local: SPEC_VERSION, target: '0.0.1' },
       { name: '@objectstack/skills', local: '18.4.0', target: '0.0.1' },
+    ]);
+  }, 60_000);
+
+  /** What a hosted Team kernel runs: no in-process code or schedules, sandboxed bodies and the approval pair. */
+  const TEAM = {
+    ...OPEN,
+    allowCode: false,
+    allowScheduledAutomation: false,
+    allowedFlowNodeTypes: ['approval', 'approval_revise', 'update_record'],
+  };
+
+  it('CONTROL: the Team-shaped stack validates without --target', async () => {
+    const r = await run([teamConfig, '--json']);
+    expect(r.code, r.stdout).toBe(0);
+    expect(json(r).valid).toBe(true);
+  }, 60_000);
+
+  it('a Team-shaped profile passes an approval flow and a sandboxed hook under allowCode: false', async () => {
+    const r = await run([teamConfig, '--json', '--target', profileFile('team', TEAM)]);
+    expect(r.code, r.stdout).toBe(0);
+    expect(json(r).valid).toBe(true);
+  }, 60_000);
+
+  it('allowSandboxedJs: false refuses the sandboxed hook; a profile omitting approval refuses that node by allowedFlowNodeTypes', async () => {
+    const r = await run([teamConfig, '--json', '--target', profileFile('team-strict', {
+      ...TEAM,
+      allowSandboxedJs: false,
+      allowedFlowNodeTypes: ['update_record'],
+    })]);
+    expect(r.code, r.stdout).toBe(1);
+    expect(errorRows(r)).toEqual([
+      { rule: 'allowSandboxedJs', where: "hook 'rptt_stamp'", path: 'hooks[0]' },
+      { rule: 'allowedFlowNodeTypes', where: "flow 'rptt_signoff' › node 'ask' (approval)", path: 'flows[0].nodes[1]' },
     ]);
   }, 60_000);
 
