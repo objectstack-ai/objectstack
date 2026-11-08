@@ -11,11 +11,12 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { ConnectionCredentialStore } from './connection-credential-store.js';
 import { CloudConnectionPlugin } from './cloud-connection-plugin.js';
+import { CLOUD_BINDING_CREDENTIAL_SERVICE, type CloudBindingCredentialReader } from './connection-credential-ledger.js';
 import { bindCatalogFromTables } from './__tests__/security-catalog.testkit.js';
 
 let dir: string;
@@ -320,5 +321,78 @@ describe('CloudConnectionPlugin credential behavior', () => {
             pages: [expect.objectContaining({ name: 'cloud_connection_settings' })],
             navigationContributions: [expect.objectContaining({ app: 'setup' })],
         }));
+    });
+});
+
+/**
+ * [#31554] The single node is untouched by the shared binding credential. A
+ * node that declares no replicas — or declares them over the in-process
+ * driver, or with no cluster service at all — keeps the credential in its
+ * file: the same path, the same bytes, mode 0600, nothing registered with the
+ * manifest service for it, and the credential reader answering from the file.
+ * The bytes below are the ones `ConnectionCredentialStore.write` produced
+ * before the shared ledger existed, for the same bind.
+ */
+describe('[#31554] a single node keeps the binding credential in its file', () => {
+    afterEach(() => { vi.unstubAllEnvs(); });
+
+    const topologies: Array<[string, Record<string, string>, Record<string, any>]> = [
+        ['no replicas declared, a remote cluster driver composed', { OS_CLUSTER_REPLICAS: '', OS_EXPECT_MULTI_NODE: '' }, { cluster: { driver: 'redis', nodeId: 'n1' } }],
+        ['replicas declared over the in-process driver', { OS_CLUSTER_REPLICAS: '3', OS_EXPECT_MULTI_NODE: '' }, { cluster: { driver: 'memory', nodeId: 'n1' } }],
+        ['replicas declared with no cluster service composed', { OS_CLUSTER_REPLICAS: '', OS_EXPECT_MULTI_NODE: 'true' }, {}],
+    ];
+
+    it.each(topologies)('%s: bind/poll writes the same file, bytes and mode, and registers nothing', async (_label, env, services) => {
+        for (const [k, v] of Object.entries(env)) vi.stubEnv(k, v);
+        const credPath = join(dir, 'cc.json');
+        const rawApp = makeRawApp();
+        const register = vi.fn();
+        const registered = new Map<string, unknown>();
+        const { ctx, fire } = makeCtx(rawApp, { auth: sessionAuth('admin'), manifest: { register }, ...services });
+        (ctx as any).registerService = (name: string, svc: unknown) => registered.set(name, svc);
+        vi.stubGlobal('fetch', vi.fn(async (url: any) => {
+            const u = String(url);
+            if (u.includes('/auth/device/token')) return new Response(JSON.stringify({ access_token: 'op-token' }), { status: 200 });
+            if (u.includes('/cloud-connection/bind')) {
+                return new Response(JSON.stringify({ success: true, data: {
+                    bound: true, runtime_id: 'rt-1', runtime_token: 'oscc_minted',
+                    connection: { organization_id: 'org_x', account_email: 'ops@example.test', bound_at: '2026-11-08T00:00:00.000Z' },
+                } }), { status: 200 });
+            }
+            throw new Error(`unexpected fetch ${u}`);
+        }));
+        const plugin = new CloudConnectionPlugin({
+            singleEnvironment: true, environmentId: 'env_1', controlPlaneUrl: 'http://cloud.test', credentialPath: credPath,
+        });
+        await plugin.init(ctx as any);
+        await plugin.start(ctx as any);
+        await fire();
+
+        const res = await rawApp.routes.get('POST /api/v1/cloud-connection/bind/poll')!(makeC('http://localhost:3000/x', { device_code: 'dc' }));
+        expect(res.payload.success).toBe(true);
+        expect(readFileSync(credPath, 'utf8')).toBe(JSON.stringify({
+            runtimeToken: 'oscc_minted',
+            runtimeId: 'rt-1',
+            environmentId: 'env_1',
+            controlPlaneUrl: 'http://cloud.test',
+            organizationId: 'org_x',
+            accountEmail: 'ops@example.test',
+            boundAt: '2026-11-08T00:00:00.000Z',
+        }, null, 2));
+        expect(statSync(credPath).mode & 0o777).toBe(0o600);
+        // Nothing registered for a shared store: the only manifest the plugin hands over is its Setup page bundle.
+        expect(register.mock.calls.some(([m]) => JSON.stringify(m ?? {}).includes('sys_cloud_binding_credential'))).toBe(false);
+        expect(register.mock.calls.map(([m]) => m?.id)).toEqual(['com.objectstack.cloud-connection.ui']);
+        // The reader answers from the file.
+        const reader = registered.get(CLOUD_BINDING_CREDENTIAL_SERVICE) as CloudBindingCredentialReader;
+        expect(reader.shared).toBe(false);
+        expect(await reader.load()).toEqual(new ConnectionCredentialStore(credPath).read());
+        expect(reader.read()?.runtimeToken).toBe('oscc_minted');
+
+        // Unbind keeps the identity residual in the same file, as before.
+        vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ success: true }), { status: 200 })));
+        await rawApp.routes.get('POST /api/v1/cloud-connection/unbind')!(makeC('http://localhost:3000/x'));
+        expect(readFileSync(credPath, 'utf8')).toBe(JSON.stringify({ runtimeToken: '', runtimeId: 'rt-1' }, null, 2));
+        expect(existsSync(credPath)).toBe(true);
     });
 });

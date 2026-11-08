@@ -884,6 +884,9 @@ importers:
       '@objectstack/runtime':
         specifier: workspace:*
         version: link:../runtime
+      '@objectstack/service-cluster':
+        specifier: workspace:*
+        version: link:../services/service-cluster
       '@objectstack/spec':
         specifier: workspace:*
         version: link:../spec
@@ -891,12 +894,21 @@ importers:
         specifier: workspace:*
         version: link:../types
     devDependencies:
+      '@objectstack/driver-sql':
+        specifier: workspace:*
+        version: link:../drivers/driver-sql
       '@objectstack/lint':
         specifier: workspace:*
         version: link:../lint
+      '@objectstack/platform-objects':
+        specifier: workspace:*
+        version: link:../platform-objects
       '@objectstack/plugin-security':
         specifier: workspace:*
         version: link:../plugins/plugin-security
+      '@objectstack/service-settings':
+        specifier: workspace:*
+        version: link:../services/service-settings
       '@types/node':
         specifier: ^26.6.5
         version: 26.6.5

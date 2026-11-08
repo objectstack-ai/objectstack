@@ -85,5 +85,23 @@ export type { RuntimeTelemetryPosture, ClientErrorReportingConfig } from './tele
 // persists the oscc_ bearer here; forwards present it to the control plane).
 export { ConnectionCredentialStore, DEFAULT_CONNECTION_CREDENTIAL_PATH } from './connection-credential-store.js';
 export type { StoredConnectionCredential } from './connection-credential-store.js';
+// [#31554] Where the binding credential lives for this boot: the file above on a
+// single node, the shared encrypted database row when several replicas are
+// declared over a remote cluster driver. A reader outside the plugin asks
+// CLOUD_BINDING_CREDENTIAL_SERVICE, never the file.
+export {
+    CLOUD_BINDING_CREDENTIAL_OBJECT,
+    CLOUD_BINDING_CREDENTIAL_SERVICE,
+    SHARED_CREDENTIAL_REFRESH_MS,
+    SharedConnectionCredentialLedger,
+    SharedCredentialUnavailableError,
+    fileCredentialLedger,
+} from './connection-credential-ledger.js';
+export type {
+    BindingCredentialEngine,
+    CloudBindingCredentialReader,
+    ConnectionCredentialLedger,
+} from './connection-credential-ledger.js';
+export { SysCloudBindingCredential } from './sys-cloud-binding-credential.object.js';
 export { CloudConnectionSettingsPage, CLOUD_CONNECTION_UI_BUNDLE } from './cloud-connection-ui.js';
 export { MARKETPLACE_BROWSE_UI_BUNDLE, MARKETPLACE_INSTALLED_UI_BUNDLE } from './marketplace-ui.js';
