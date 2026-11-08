@@ -188,6 +188,8 @@ export const McpActionNamespaceSchema = lazySchema(() => z
   })
   .describe('Manifest namespace of the package that holds the action; absent for an environment-authored action'));
 
+export type McpActionNamespace = z.infer<typeof McpActionNamespaceSchema>;
+
 /**
  * The address a `list_actions` row carries (ADR-0150 D5): the action name,
  * the object it is bound to, and the namespace of its holder. The three
