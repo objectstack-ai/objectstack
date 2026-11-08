@@ -2378,6 +2378,9 @@ const en = {
       // `validation.url`; these two name what a phone number and a colour take.
       invalidPhone: 'Enter a phone number using only digits, spaces and + ( ) - .',
       invalidColor: 'Enter a hex color, such as #1a2b3c',
+      // A `json` setting stored as text by the console before objectstack#31241:
+      // the page puts that text in the draft so one Save stores it as an object.
+      jsonStoredAsText: 'This value is stored as text, not as a JSON object. Save to store it as an object; the page has marked it as an unsaved change.',
       // The address the server judges beside Allowed IP ranges (objectstack#30313),
       // one whole sentence per state of `GET /api/v1/auth/admin/client-address`:
       // `trustProxy` off, on, and no address the server can establish.
