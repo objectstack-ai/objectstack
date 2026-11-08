@@ -719,6 +719,7 @@ const pt = {
       noSavedTemplates: "Sem modelos salvos",
       noneOption: "— Nenhum —",
       saveCurrent: "Salvar atual",
+      saveCurrentNeedsMapping: "Mapeie pelo menos uma coluna para salvar um modelo.",
       templateName: "Nome do modelo",
       save: "Salvar",
       deleteTemplate: "Excluir modelo",
