@@ -89,6 +89,9 @@ import { inviteForAudienceGate } from './audience-gate-test-support';
 import { bindTestSecurityCatalog } from './__tests__/security-catalog.testkit';
 import { ADMIN_FULL_ACCESS_CAPABILITIES } from '@objectstack/spec';
 import { relaxTenantColumns } from './pre-18-tenant-column.testkit.js';
+import { withSystemReadContext } from './objectql-adapter.js';
+import { readSsoProviderSignInOptions } from './sso-sign-in-options.js';
+import { SysSsoProvider } from '@objectstack/platform-objects/identity';
 
 const BASE = 'http://localhost:3000';
 const AUTH = `${BASE}/api/v1/auth`;
@@ -457,4 +460,161 @@ describe('[#10009] the two doors onto SSO registration now answer the same org o
     expect(direct.status, await direct.clone().text()).toBe(403);
     expect(directBody?.code ?? directBody?.error?.code).toBe('SSO_REGISTER_FORBIDDEN');
   });
+});
+
+// ---------------------------------------------------------------------------
+// The provider's sign-in toggles are written through the vendor's own
+// /sso/update-provider (`sso-sign-in-options.ts`), on a real SQL store.
+// ---------------------------------------------------------------------------
+
+describe('the per-provider sign-in toggles are written by the provider writer, default off', () => {
+  async function providerOwnedBy(manager: AuthManager, userId: string): Promise<void> {
+    const auth: any = await manager.getAuthInstance();
+    const ctx = await auth.$context;
+    await ctx.adapter.create({
+      model: 'ssoProvider',
+      data: {
+        providerId: 'acme-okta',
+        issuer: 'https://idp.acme.example',
+        domain: 'acme.example',
+        userId,
+        oidcConfig: JSON.stringify({ issuer: 'https://idp.acme.example', clientId: 'cid', pkce: true }),
+      },
+    });
+  }
+
+  const postUpdate = (send: (r: Request) => Promise<Response>, cookie: string, body: Record<string, unknown>) =>
+    send(
+      new Request(`${AUTH}/sso/update-provider`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', origin: BASE, cookie },
+        body: JSON.stringify({ providerId: 'acme-okta', ...body }),
+      }),
+    );
+
+  it('a new provider stores both OFF; update-provider turns each on and off; the store reads what was written', async () => {
+    const engine = await bootEngine();
+    const manager = makeManager(engine);
+    const send = (r: Request) => manager.handleRequest(r);
+    const email = 'platformadmin@example.com';
+    const cookie = await signUp(send, email, engine);
+    const userId = await userIdOf(engine, email);
+    await grantPlatformAdmin(engine, userId);
+    await providerOwnedBy(manager, userId);
+
+    const reader = withSystemReadContext(engine as never) as never;
+    expect(await readSsoProviderSignInOptions(reader, 'acme-okta')).toEqual({ allowIdpInitiated: false, allowJit: false });
+
+    const on = await postUpdate(send, cookie, { allowIdpInitiated: true, allowJit: true });
+    expect(on.status, await on.clone().text()).toBe(200);
+    expect(await readSsoProviderSignInOptions(reader, 'acme-okta')).toEqual({ allowIdpInitiated: true, allowJit: true });
+
+    const off = await postUpdate(send, cookie, { allowJit: false });
+    expect(off.status, await off.clone().text()).toBe(200);
+    expect(await readSsoProviderSignInOptions(reader, 'acme-okta')).toEqual({ allowIdpInitiated: true, allowJit: false });
+  });
+
+  it('a value that is not a boolean is refused 400, and nothing is written', async () => {
+    const engine = await bootEngine();
+    const manager = makeManager(engine);
+    const send = (r: Request) => manager.handleRequest(r);
+    const email = 'platformadmin@example.com';
+    const cookie = await signUp(send, email, engine);
+    const userId = await userIdOf(engine, email);
+    await grantPlatformAdmin(engine, userId);
+    await providerOwnedBy(manager, userId);
+
+    const res = await postUpdate(send, cookie, { allowJit: 'yes' });
+    const body = (await res.clone().json()) as Record<string, any>;
+    expect(res.status, await res.clone().text()).toBe(400);
+    expect(body?.code).toBe('VALIDATION_ERROR');
+    expect(await readSsoProviderSignInOptions(withSystemReadContext(engine as never) as never, 'acme-okta')).toEqual({
+      allowIdpInitiated: false,
+      allowJit: false,
+    });
+  });
+
+  it('a member who does not write the provider cannot flip it (the vendor provider-access check)', async () => {
+    const engine = await bootEngine();
+    const manager = makeManager(engine);
+    const send = (r: Request) => manager.handleRequest(r);
+    const adminCookie = await signUp(send, 'platformadmin@example.com', engine);
+    const adminId = await userIdOf(engine, 'platformadmin@example.com');
+    await grantPlatformAdmin(engine, adminId);
+    await providerOwnedBy(manager, adminId);
+    expect(adminCookie).toBeTruthy();
+
+    const memberCookie = await signUp(send, 'member@example.com', engine);
+    const res = await postUpdate(send, memberCookie, { allowJit: true });
+    // The vendor's own refusal (403, no `code` member on @better-auth/sso 1.7.12).
+    expect(res.status, await res.clone().text()).toBe(403);
+    expect(await readSsoProviderSignInOptions(withSystemReadContext(engine as never) as never, 'acme-okta')).toEqual({
+      allowIdpInitiated: false,
+      allowJit: false,
+    });
+  });
+
+  // Setup's "Edit Sign-In Options" pre-fills each toggle from the provider row
+  // (`defaultFromRow`) and posts it to update-provider, whose body types both
+  // as booleans. The row reaches the console through the data API's engine
+  // read; what is stored is better-auth's 1 / 0, or NULL on a row that
+  // predates the columns. The console seeds a field-backed param with the
+  // row's value, else the field's own default (objectui `resolveActionParams`:
+  // `rowDefault ?? param.defaultValue ?? field.defaultValue`), and the dialog
+  // submits that seed untouched. Each stored carrier must come out a boolean
+  // the vendor accepts.
+  for (const [stored, presented] of [
+    [1, true],
+    [0, false],
+    [null, null],
+  ] as const) {
+    it(`a stored ${String(stored)} pre-fills the Edit Sign-In Options action as a boolean, and the update it sends succeeds`, async () => {
+      const engine = await bootEngine();
+      const manager = makeManager(engine);
+      const send = (r: Request) => manager.handleRequest(r);
+      const email = 'platformadmin@example.com';
+      const cookie = await signUp(send, email, engine);
+      const userId = await userIdOf(engine, email);
+      await grantPlatformAdmin(engine, userId);
+      await providerOwnedBy(manager, userId);
+
+      const driver = engine.getDriverForObject('sys_sso_provider') as unknown as { getKnex(): any };
+      await driver
+        .getKnex()('sys_sso_provider')
+        .where({ provider_id: 'acme-okta' })
+        .update({ allow_idp_initiated: stored, allow_jit: stored });
+      const raw = await driver.getKnex()('sys_sso_provider').where({ provider_id: 'acme-okta' }).first();
+      expect([raw.allow_idp_initiated, raw.allow_jit]).toEqual([stored, stored]);
+
+      // The engine read the data API serves the console from.
+      const [row] = (await engine.find('sys_sso_provider', { where: { provider_id: 'acme-okta' }, limit: 1 }, SYSTEM as never)) as Record<
+        string,
+        unknown
+      >[];
+      expect([row.allow_idp_initiated, row.allow_jit]).toEqual([presented, presented]);
+
+      // The body the action sends: each param seeded from the row, else the field default.
+      const action = (SysSsoProvider as any).actions.find((a: any) => a.name === 'edit_sso_sign_in_options');
+      const body: Record<string, unknown> = {};
+      for (const param of action.params) {
+        const fieldDefault = (SysSsoProvider as any).fields[param.field]?.defaultValue;
+        body[param.name] = row[param.field] ?? fieldDefault;
+      }
+      expect(body).toEqual({ providerId: 'acme-okta', allowIdpInitiated: presented ?? false, allowJit: presented ?? false });
+
+      const res = await send(
+        new Request(`${AUTH}/sso/update-provider`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', origin: BASE, cookie },
+          body: JSON.stringify(body),
+        }),
+      );
+      expect(res.status, await res.clone().text()).toBe(200);
+      const expected = presented ?? false;
+      expect(await readSsoProviderSignInOptions(withSystemReadContext(engine as never) as never, 'acme-okta')).toEqual({
+        allowIdpInitiated: expected,
+        allowJit: expected,
+      });
+    });
+  }
 });
