@@ -4003,7 +4003,7 @@ describe('AuthManager', () => {
         const matches = Object.entries(w).every(([k, v]) => (user as any)[k] === v);
         return matches ? user : null;
       }),
-      update: vi.fn(async () => ({ ...(user ?? {}) })),
+      update: vi.fn(async (_obj: string, _patch: any, _options?: any): Promise<unknown> => ({ ...(user ?? {}) })),
       count: vi.fn(),
     });
     const mgr = (engine: any, extra: any = {}) => {
@@ -4016,7 +4016,7 @@ describe('AuthManager', () => {
     // The gate runs inside better-auth's request state in production (every
     // endpoint call opens one); these cases open it the same way, so the
     // verdict it records is readable by the settlement that follows.
-    const inRequest = <T>(fn: () => Promise<T>): Promise<T> => runWithRequestState(new WeakMap(), fn);
+    const inRequest = <T>(fn: () => T) => runWithRequestState(new WeakMap(), fn);
     const LOCKED_ROW = () => ({ id: 'u1', email: 'a@b.com', failed_login_count: 3, locked_until: new Date(Date.now() + 60_000).toISOString() });
 
     it('admitSignInAttempt is a no-op when lockout is disabled (threshold 0)', async () => {
