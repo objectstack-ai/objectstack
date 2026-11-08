@@ -3861,6 +3861,7 @@ const fr = {
     sharedObject: '{{object}} partagé',
     redactedFields: 'Certains champs sont masqués par le propriétaire : {{fields}}',
     linkedRecord: 'Enregistrement lié',
+    linkedUser: 'Utilisateur lié',
   },
   publicForm: {
     submit: "Envoyer",
@@ -3988,6 +3989,22 @@ const fr = {
       managedBody: 'Les assistants IA que cette personne a autorisés. Chacun agit avec ses autorisations, et Révoquer met fin à son accès immédiatement.',
       managedEmpty: 'Cette personne n’a encore autorisé aucun assistant IA.',
       managedTruncated: 'Seuls les plus récents sont affichés ; cette personne en a autorisé d’autres.',
+    },
+  },
+  effectiveAccess: {
+    title: 'Ensembles d’autorisations effectifs',
+    body: 'Chaque ensemble d’autorisations en vigueur pour cette personne dans votre organisation actuelle, et sa provenance. Les attributions directes sont aussi listées ci-dessous, où elles peuvent être retirées.',
+    refused: 'Vous n’êtes pas autorisé à voir l’accès effectif de cette personne.',
+    unserved: 'Ce serveur n’indique pas l’accès effectif.',
+    loadFailed: 'Impossible de charger l’accès effectif : {{message}}',
+    empty: 'Aucun ensemble d’autorisations n’est en vigueur pour cette personne dans cette organisation.',
+    originsLabel: 'Provient de',
+    origin: {
+      direct: 'Attribution directe',
+      position: 'Poste : {{position}}',
+      default: 'Liaison par défaut',
+      derivedPlatformAdmin: 'Administrateur de plateforme configuré',
+      derivedAiAccess: 'Accès IA activé',
     },
   },
   excelImport: {

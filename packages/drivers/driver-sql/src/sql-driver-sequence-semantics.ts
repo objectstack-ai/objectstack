@@ -435,7 +435,7 @@ export class SequenceSemanticsFacet {
    * row must be looked for. Reading the unsharded name would report every
    * rotated write as a cross-row merge.
    */
-  static async assertMergeLandedOnSuppliedIdentity(this: Pick<SequenceSemanticsHost, 'applyTenantScope' | 'getBuilder' | 'physicalTableByObject'>, object: string, writeTable: string, id: string | number, rivals: PhysicalIndex[], writtenTenant: unknown, options?: DriverOptions): Promise<void> {
+  static async assertMergeLandedOnSuppliedIdentity(this: Pick<SequenceSemanticsHost, 'applyTenantScope' | 'getBuilder' | 'physicalTableByObject' | 'remoteColumn'>, object: string, writeTable: string, id: string | number, rivals: PhysicalIndex[], writtenTenant: unknown, options?: DriverOptions): Promise<void> {
     const builder = this.getBuilder(writeTable, options);
     // Scoped to the tenant this row was written under (see the docblock): the
     // caller's org on an ordinary call, the explicitly named one on an admin
@@ -450,7 +450,10 @@ export class SequenceSemanticsFacet {
       tenantIds: undefined,
     };
     this.applyTenantScope(builder, object, scopeOptions);
-    const landed = await builder.where('id', id).first('id');
+    // The key's column: its `external.columnMap` remote column on a federated
+    // object, `id` otherwise.
+    const idColumn = this.remoteColumn(object, 'id', 'id');
+    const landed = await builder.where(idColumn, id).first(idColumn);
     if (landed) return;
     const tableName = this.physicalTableByObject[writeTable] ?? writeTable;
     throw refuseCrossRowIdentityMerge(object, tableName, id, rivals);
@@ -511,17 +514,20 @@ export class SequenceSemanticsFacet {
    * ⛔ Nothing read here reaches the caller: the refusal names no organization
    * and no value of the row it landed on.
    */
-  static async assertMergeLandedInWrittenOrganization(this: Pick<SequenceSemanticsHost, 'applyTenantScope' | 'getBuilder' | 'physicalTableByObject'>, object: string, writeTable: string, mergeKeys: string[], matchOn: Record<string, unknown>, sent: Record<string, unknown>, guard: { column: string; value: unknown }, identity: { id: string | number; rivals: PhysicalIndex[] } | null, options?: DriverOptions): Promise<void> {
+  static async assertMergeLandedInWrittenOrganization(this: Pick<SequenceSemanticsHost, 'applyTenantScope' | 'getBuilder' | 'physicalTableByObject' | 'remoteColumn'>, object: string, writeTable: string, mergeKeys: string[], matchOn: Record<string, unknown>, sent: Record<string, unknown>, guard: { column: string; value: unknown }, identity: { id: string | number; rivals: PhysicalIndex[] } | null, options?: DriverOptions): Promise<void> {
     // The tenant scope of a ONE-row probe: the written tenant, with
     // `tenantIds` dropped for #8807's reason (the group-union posture widens a
     // READ to a membership set; this asks about one organization).
     const scopeOptions: DriverOptions = { ...options, tenantId: String(guard.value), tenantIds: undefined };
 
+    // Every probe selects the key's column — the `external.columnMap` remote
+    // column on a federated object, `id` otherwise.
+    const idColumn = this.remoteColumn(object, 'id', 'id');
     const landedProbe = this.getBuilder(writeTable, options);
     this.applyTenantScope(landedProbe, object, scopeOptions);
     landedProbe.where(guard.column, guard.value as any);
     for (const [column, value] of Object.entries(matchOn)) landedProbe.where(column, value as any);
-    if (await landedProbe.first('id')) return;
+    if (await landedProbe.first(idColumn)) return;
 
     if (identity) {
       for (const rival of identity.rivals) {
@@ -531,7 +537,7 @@ export class SequenceSemanticsFacet {
         this.applyTenantScope(rivalProbe, object, scopeOptions);
         rivalProbe.where(guard.column, guard.value as any);
         for (const column of rival.columns) rivalProbe.where(column, sent[column] as any);
-        if (await rivalProbe.first('id')) {
+        if (await rivalProbe.first(idColumn)) {
           const tableName = this.physicalTableByObject[writeTable] ?? writeTable;
           throw refuseCrossRowIdentityMerge(object, tableName, identity.id, identity.rivals);
         }
@@ -541,7 +547,7 @@ export class SequenceSemanticsFacet {
   }
 
   /** The body of `SqlDriver#upsert`; the method's docblock there is its contract. */
-  static async upsert(this: Pick<SequenceSemanticsHost, 'applyTenantScope' | 'applyWriteColumnMap' | 'assertConflictTargetBackedWithoutClause' | 'assertConflictTargetHonoured' | 'assertMergeLandedInWrittenOrganization' | 'assertMergeLandedOnSuppliedIdentity' | 'auditMissingTenant' | 'collidingAutoNumberReservations' | 'fillAutoNumberFields' | 'formatInput' | 'formatOutput' | 'getBuilder' | 'injectTenantOnInsert' | 'insertOnlyUpsertColumns' | 'isMysql' | 'isOracle' | 'knex' | 'mergeLandsInWrittenOrganization' | 'resolveTenantField' | 'resyncSequenceToDataMax' | 'rotationWriteTarget' | 'stampInsertTimestamps' | 'stampUpsertUpdatedAt' | 'upsertTenantGuard'>, object: string, data: Record<string, any>, conflictKeys?: string[], options?: DriverOptions): Promise<Record<string, unknown>> {
+  static async upsert(this: Pick<SequenceSemanticsHost, 'applyTenantScope' | 'applyWriteColumnMap' | 'assertConflictTargetBackedWithoutClause' | 'assertConflictTargetHonoured' | 'assertMergeLandedInWrittenOrganization' | 'assertMergeLandedOnSuppliedIdentity' | 'auditMissingTenant' | 'collidingAutoNumberReservations' | 'fillAutoNumberFields' | 'formatInput' | 'formatOutput' | 'getBuilder' | 'injectTenantOnInsert' | 'insertOnlyUpsertColumns' | 'isMysql' | 'isOracle' | 'knex' | 'mergeLandsInWrittenOrganization' | 'resolveTenantField' | 'resyncSequenceToDataMax' | 'remoteColumn' | 'rotationWriteTarget' | 'stampInsertTimestamps' | 'stampUpsertUpdatedAt' | 'upsertTenantGuard'>, object: string, data: Record<string, any>, conflictKeys?: string[], options?: DriverOptions): Promise<Record<string, unknown>> {
     if (this.isOracle) throw oracleUpsertUnsupportedError(object);
     const { _id, ...rest } = data;
     const toUpsert = { ...rest };
@@ -556,6 +562,15 @@ export class SequenceSemanticsFacet {
     this.injectTenantOnInsert(object, toUpsert, options);
 
     const mergeKeys = conflictKeys && conflictKeys.length > 0 ? conflictKeys : ['id'];
+    // The conflict target as the statement names it: each key's
+    // `external.columnMap` remote column on a federated object, the field
+    // itself otherwise. The payload (`formatted` / `sent` below) is already in
+    // column form after `applyWriteColumnMap`, the physical indexes the MySQL
+    // pre-flight reads are columns, and so is the read-back. `mergeKeys` stays
+    // the FIELDS, for the refusals the caller reads. On an object without a
+    // map the two are the same list.
+    const conflictColumns = mergeKeys.map((k) => this.remoteColumn(object, k, k));
+    const idColumn = this.remoteColumn(object, 'id', 'id');
 
     // [#21185] The organization fence (ADR-0131 D8: the tenant predicate
     // reaches every driver door, and the merge leg of an upsert was the one it
@@ -592,7 +607,7 @@ export class SequenceSemanticsFacet {
     //    externally meaningful sequence, handed out for a rejected call.
     const callerNamed = !!(conflictKeys && conflictKeys.length > 0);
     const preflight = this.isMysql
-      ? await this.assertConflictTargetHonoured(object, mergeKeys, callerNamed)
+      ? await this.assertConflictTargetHonoured(object, conflictColumns, callerNamed)
       : { verifyIdentity: false };
 
     // [#8807] The primary-key-targeted merge on a table that carries a rival
@@ -725,11 +740,11 @@ export class SequenceSemanticsFacet {
       // exclude. ⛔ Not `ignore()` either: knex lowers it on MySQL to
       // `insert ignore`, which swallows unrelated errors and drops the conflict
       // target. See {@link withUpsertConflictClause}.
-      const noopMergeColumns = Object.keys(formatted).filter((c) => mergeKeys.includes(c));
+      const noopMergeColumns = Object.keys(formatted).filter((c) => conflictColumns.includes(c));
       const columnsToMerge = mergeColumns.length > 0 ? mergeColumns : noopMergeColumns;
       // …and that plain INSERT still refuses a conflict target nothing backs,
       // as every dialect does when there is something to merge.
-      if (columnsToMerge.length === 0) await this.assertConflictTargetBackedWithoutClause(object, writeTable, mergeKeys);
+      if (columnsToMerge.length === 0) await this.assertConflictTargetBackedWithoutClause(object, writeTable, conflictColumns);
 
       // [#21185] The fence for THIS attempt: the tenant column, and the value
       // the row is written under in storage form (what the statement sends).
@@ -753,7 +768,7 @@ export class SequenceSemanticsFacet {
         // this one is deliberately not scoped.
         const builder = this.getBuilder(writeTable, writeOptions);
         const insertion = builder.insert(formatted);
-        const { statement, merges } = withUpsertConflictClause(insertion, mergeKeys, columnsToMerge);
+        const { statement, merges } = withUpsertConflictClause(insertion, conflictColumns, columnsToMerge);
         // [#21185] SQLite and PostgreSQL: the fence is a predicate INSIDE the
         // merge statement — `… DO UPDATE SET … WHERE` the stored tenant column
         // equals the written one — so a conflict on a row of another
@@ -773,9 +788,9 @@ export class SequenceSemanticsFacet {
         if (mysqlFence) {
           // [#21185] One read, under the written tenant exactly; #8807's
           // identity verdict rides on it when a rival key made one owed.
-          const matchOn: Record<string, unknown> = mergeKeys.every((k) => formatted[k] !== undefined && formatted[k] !== null)
-            ? Object.fromEntries(mergeKeys.map((k) => [k, formatted[k]]))
-            : { id: toUpsert.id };
+          const matchOn: Record<string, unknown> = conflictColumns.every((c) => formatted[c] !== undefined && formatted[c] !== null)
+            ? Object.fromEntries(conflictColumns.map((c) => [c, formatted[c]]))
+            : { [idColumn]: toUpsert.id };
           await this.assertMergeLandedInWrittenOrganization(
             object,
             writeTable,
@@ -892,10 +907,10 @@ export class SequenceSemanticsFacet {
     // (NULL never conflicts), so the statement inserted and the row carries
     // `toUpsert.id`. On the default `['id']` target the two readings are the
     // same query. The tenant scope is applied to either, as before.
-    const matchedOn = mergeKeys.every((k) => sent[k] !== undefined && sent[k] !== null);
+    const matchedOn = conflictColumns.every((c) => sent[c] !== undefined && sent[c] !== null);
     const readback = this.getBuilder(object, options);
-    if (matchedOn) for (const k of mergeKeys) readback.where(k, sent[k]);
-    else readback.where('id', toUpsert.id);
+    if (matchedOn) for (const c of conflictColumns) readback.where(c, sent[c]);
+    else readback.where(idColumn, toUpsert.id);
     if (tenantGuard) {
       // [#21185] A fenced call reads back under the WRITTEN organization
       // EXACTLY: the chokepoint scope for that tenant (`tenantIds` dropped, as

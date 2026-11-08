@@ -49,7 +49,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { recordNotFoundError } from '@objectstack/core';
-import { mapDataError } from '@objectstack/types';
+import { actionsDoorAnswerOf, mapDataError } from '@objectstack/types';
 import type { IMetadataService } from '@objectstack/spec/contracts';
 
 import { MCPServerRuntime } from './mcp-server-runtime.js';
@@ -212,6 +212,18 @@ describe('MCP tools over HTTP /mcp: a coded refusal carries its code (#23509)', 
         expect(result.isError).toBe(true);
         expect(JSON.parse(result.content[0].text)).toEqual({
           error: { code: 'INTERNAL_ERROR', message: 'Internal server error', status: 500 },
+        });
+      });
+    } else if (site.actionDoor) {
+      // [#31271] `run_action` / `resume_run` answer a code-less throw as the
+      // `/api/v1/actions` door does (`actionsDoorAnswerOf`): a plain `Error`
+      // is that door's rejection, `400 VALIDATION_ERROR` with its own
+      // sentence. The cases live in the #31271 block below.
+      it(`${site.tool}: a code-less throw from ${String(site.member)} answers the /actions door's 400 rejection`, async () => {
+        const result = await callTool(site, new Error('engine exploded'));
+        expect(result.isError).toBe(true);
+        expect(JSON.parse(result.content[0].text)).toEqual({
+          error: { code: 'VALIDATION_ERROR', message: 'engine exploded', status: 400 },
         });
       });
     } else {
@@ -428,8 +440,8 @@ describe('the record data tools: a code-less throw answers what the /data door a
     expect(log).not.toHaveBeenCalled();
   });
 
-  it('CONTROL: the tools that are not record data tools still answer a code-less throw with its bare message', async () => {
-    for (const site of SITES.filter((s) => !s.dataDoor)) {
+  it('CONTROL: the tools that are neither record data tools nor action tools still answer a code-less throw with its bare message', async () => {
+    for (const site of SITES.filter((s) => !s.dataDoor && !s.actionDoor)) {
       const result = await callTool(site, sandboxAbort('Not enough annual leave remaining'));
       expect(result, site.tool).toEqual({
         content: [{ type: 'text', text: "hook 'demoleave_leave_request_guard' threw: Error: Not enough annual leave remaining" }],
@@ -681,13 +693,47 @@ describe('the record resource: a coded refusal adds its code beside the unchange
       expect(line).toContain('SQLITE_BUSY: database is locked');
     });
 
-    it('CONTROL: a declared 5xx code and a code the door refuses with no status keep their coded answers, unlogged', async () => {
+    it('CONTROL: a code the door refuses with no status keeps its coded answer, unlogged', async () => {
       const log = vi.spyOn(console, 'error').mockImplementation(() => {});
-      expect(JSON.parse(await readRefused(Object.assign(new Error('The ledger is closing.'), { code: 'SERVICE_UNAVAILABLE', status: 503 }))))
-        .toEqual({ error: 'The ledger is closing.', code: 'SERVICE_UNAVAILABLE', status: 503 });
       expect(JSON.parse(await readRefused(Object.assign(new Error('Field read denied: salary'), { code: 'PERMISSION_DENIED' }))))
         .toEqual({ error: 'Field read denied: salary', code: 'PERMISSION_DENIED' });
       expect(log).not.toHaveBeenCalled();
+    });
+  });
+
+  /**
+   * [#31341] A coded throw that DECLARES a 5xx answers the door's answer here
+   * too, through the same predicate the record data tools ask (their block,
+   * below, says why). This row was #31273's CONTROL, which pinned the
+   * producer's sentence served.
+   */
+  describe('a declared 5xx answers the /data door\'s answer, its sentence withheld unless it is a refusal (#31341)', () => {
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    it('SERVICE_UNAVAILABLE / 503: code and status kept, the sentence withheld and logged once', async () => {
+      const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const thrown = ledgerClosing();
+      const text = await readRefused(thrown);
+      expect(text).toBe(JSON.stringify({ error: 'Internal server error', code: 'SERVICE_UNAVAILABLE', status: 503 }));
+      const door = mapDataError(thrown, 'task');
+      expect(JSON.parse(text)).toEqual({ error: door.body.error, code: door.body.code, status: door.status });
+      const lines = [...error.mock.calls, ...warn.mock.calls].map((call) => String(call[0]));
+      expect(lines).toHaveLength(1);
+      expect(lines[0]).toMatch(/^\[5xx\] 503 resources\/read objectstack:\/\/objects\/task\/records\/t1 — /);
+      expect(lines[0]).toContain('The ledger is closing.');
+    });
+
+    it('a declared 503 that marks itself `refusal: true` keeps its sentence, as the door serves it', async () => {
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+      vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const thrown = ledgerClosing({ refusal: true });
+      const text = await readRefused(thrown);
+      expect(text).toBe(JSON.stringify({ error: 'The ledger is closing.', code: 'SERVICE_UNAVAILABLE', status: 503 }));
+      const door = mapDataError(thrown, 'task');
+      expect(JSON.parse(text)).toEqual({ error: door.body.error, code: door.body.code, status: door.status });
     });
   });
 });
@@ -755,6 +801,136 @@ describe('a coded sandboxed CRASH is a fault on every face, never a refusal at i
       });
     }
   });
+});
+
+/**
+ * [#31271] `run_action` / `resume_run` answer a throw as the `/api/v1/actions`
+ * door answers it: through that door's own reader, `actionsDoorAnswerOf`
+ * (`@objectstack/types`), never a copy. Each row asserts the literal answer
+ * AND its equality with the reader's on a fresh copy of the same throw, so the
+ * pin cannot pass by the two agreeing on something nobody wrote down.
+ *
+ * These tools used to answer a code-less sandboxed body abort with the
+ * runner's `KIND 'NAME' threw: …` wrapper naming the body, a bare `Error` with
+ * its bare text and no code, a driver string code as `{ code: SQLITE_BUSY }`
+ * with no status, and a sandboxed crash (coded or not) with the wrapper and
+ * the native error text.
+ *
+ * ⚠️ `SQLITE_BUSY` answers what `/actions` answers, `400 VALIDATION_ERROR` with
+ * `declaredCode`; `/api/v1/data` answers the same throw `500 DATABASE_ERROR`.
+ * That REST-side difference is not this card's.
+ */
+describe('run_action / resume_run: a throw answers what the /actions door answers (#31271)', () => {
+  const ACTION_SITES = SITES.filter((s) => s.actionDoor);
+  const BODY_WRAPPER = "action 'demo_leave_body' threw: Error: Not enough annual leave remaining";
+  const CRASH_WRAPPER = "action 'demo_leave_body' threw: TypeError: boom";
+
+  const CASES: ReadonlyArray<{ name: string; thrown: () => unknown; answer: Record<string, unknown>; logs: number }> = [
+    {
+      name: 'a code-less sandboxed body abort: 400 HOOK_ABORTED with the inner sentence',
+      thrown: () => Object.assign(new Error(BODY_WRAPPER), { name: 'SandboxError', innerMessage: 'Not enough annual leave remaining' }),
+      answer: { code: 'HOOK_ABORTED', message: 'Not enough annual leave remaining', status: 400 },
+      logs: 1,
+    },
+    {
+      name: 'a bare Error: the door\'s 400 rejection, VALIDATION_ERROR with its own sentence',
+      thrown: () => new Error('socket hang up'),
+      answer: { code: 'VALIDATION_ERROR', message: 'socket hang up', status: 400 },
+      logs: 0,
+    },
+    {
+      name: 'a driver string code: 400 VALIDATION_ERROR, SQLITE_BUSY demoted to declaredCode',
+      thrown: () => Object.assign(new Error('SQLITE_BUSY: database is locked'), { code: 'SQLITE_BUSY' }),
+      answer: { code: 'VALIDATION_ERROR', message: 'SQLITE_BUSY: database is locked', status: 400, declaredCode: 'SQLITE_BUSY' },
+      logs: 0,
+    },
+    {
+      name: 'a sandboxed CRASH with no code: 500 INTERNAL_ERROR, the generic sentence',
+      thrown: () => Object.assign(new Error(CRASH_WRAPPER), { name: 'SandboxError', innerMessage: 'TypeError: boom' }),
+      answer: { code: 'INTERNAL_ERROR', message: 'Internal server error', status: 500 },
+      logs: 1,
+    },
+    {
+      name: 'a sandboxed CRASH that declared a code and status: the same fault; neither is served',
+      thrown: () => Object.assign(new Error(CRASH_WRAPPER), {
+        name: 'SandboxError', innerMessage: 'TypeError: boom', code: 'RECORD_LOCKED', status: 409,
+      }),
+      answer: { code: 'INTERNAL_ERROR', message: 'Internal server error', status: 500 },
+      logs: 1,
+    },
+  ];
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('the two action tools are the rows this block drives', () => {
+    expect(ACTION_SITES.map((s) => s.tool).sort()).toEqual(['resume_run', 'run_action']);
+  });
+
+  for (const site of ACTION_SITES) {
+    for (const c of CASES) {
+      it(`${site.tool}: ${c.name}`, async () => {
+        const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+        const result = await callTool(site, c.thrown());
+        expect(result.isError).toBe(true);
+        expect(result.content).toHaveLength(1);
+        const text = String(result.content[0].text);
+        const { error } = JSON.parse(text);
+        expect(error).toEqual(c.answer);
+        // The door's reader, on a fresh copy of the same throw.
+        const door = actionsDoorAnswerOf(c.thrown());
+        expect(error).toEqual({
+          code: door.code,
+          message: door.message,
+          status: door.status,
+          ...(door.declaredCode !== undefined ? { declaredCode: door.declaredCode } : {}),
+        });
+        expect(text).not.toContain('demo_leave_body');
+        expect(text).not.toContain('TypeError');
+        // The wrapper and the fault line reach the operator, as the door prints them.
+        expect(log).toHaveBeenCalledTimes(c.logs);
+      });
+    }
+
+    it(`${site.tool}: an app's own unregistered code crosses as the status-derived closed code, its spelling in declaredCode`, async () => {
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+      const thrown = () => Object.assign(new Error('No leave days left this year.'), { code: 'LEAVE_EXHAUSTED', status: 409 });
+      const { error } = JSON.parse((await callTool(site, thrown())).content[0].text);
+      expect(error).toEqual({
+        code: 'RESOURCE_CONFLICT', message: 'No leave days left this year.', status: 409, declaredCode: 'LEAVE_EXHAUSTED',
+      });
+      const door = actionsDoorAnswerOf(thrown());
+      expect([door.code, door.declaredCode, door.status]).toEqual([error.code, error.declaredCode, error.status]);
+    });
+
+    it(`${site.tool}: a fault carries no thrown details; a refusal still does`, async () => {
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+      const details = { host: 'db-primary.internal', pool: 'writer' };
+      for (const fault of [
+        Object.assign(new Error('pool exhausted'), { status: 503, details }),
+        Object.assign(new Error(CRASH_WRAPPER), { name: 'SandboxError', innerMessage: 'TypeError: boom', details }),
+      ]) {
+        const result = await callTool(site, fault);
+        const { error } = JSON.parse(result.content[0].text);
+        expect(error.status).toBeGreaterThanOrEqual(500);
+        expect(error).not.toHaveProperty('details');
+        expect(result.content[0].text).not.toContain('db-primary.internal');
+      }
+      const refusal = Object.assign(new Error('Confirm first.'), { code: 'ACTION_CONFIRMATION_REQUIRED', status: 428, details });
+      expect(JSON.parse((await callTool(site, refusal)).content[0].text).error).toEqual({
+        code: 'ACTION_CONFIRMATION_REQUIRED', message: 'Confirm first.', status: 428, details,
+      });
+    });
+
+    it(`${site.tool}: CONTROL: a coded sandboxed refusal keeps the #31246 answer (code, inner sentence, status)`, async () => {
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+      const result = await callTool(site, codedSandboxRefusal());
+      expect(JSON.parse(result.content[0].text)).toEqual({
+        error: { code: 'RECORD_LOCKED', message: SANDBOX_SENTENCE, status: 409 },
+      });
+    });
+  }
 });
 
 /**
@@ -884,6 +1060,11 @@ describe('the metadata tools and list_actions: a fault answers what the /meta do
  * 2026-08-27 on #12509: the discriminator is the status channel, never the
  * code's spelling). Then the face answers the door's fault.
  *
+ * [#31341] A coded throw that DECLARES a 5xx is a server fault at the door
+ * too, so the faces now answer it the same way: the door's code and status,
+ * its sentence withheld unless the throw marks itself `refusal: true`. Its
+ * rows close this block; they replaced #31273's CONTROL for a declared 5xx.
+ *
  * Only the record data tools, `delete_records`' selection read and the record
  * resource (its rows are below). `run_action` / `resume_run` and the metadata
  * tools answer a driver code through their own doors' readers (#31271,
@@ -891,6 +1072,11 @@ describe('the metadata tools and list_actions: a fault answers what the /meta do
  */
 function sqliteBusy(): Error {
   return Object.assign(new Error('SQLITE_BUSY: database is locked'), { code: 'SQLITE_BUSY' });
+}
+
+/** [#31341] A producer's coded throw that declares a 5xx, with its own sentence. */
+function ledgerClosing(extra: Record<string, unknown> = {}): Error {
+  return Object.assign(new Error('The ledger is closing.'), { code: 'SERVICE_UNAVAILABLE', status: 503 }, extra);
 }
 
 describe('the record data tools: a driver\'s own string code is the /data door\'s server fault, not a coded refusal (#31273)', () => {
@@ -979,13 +1165,53 @@ describe('the record data tools: a driver\'s own string code is the /data door\'
     expect(log).not.toHaveBeenCalled();
   });
 
-  // A 5xx the producer DECLARED is not a driver's: its code is authored. The
-  // door withholds a declared 5xx's prose too; that is not this card's face.
-  it('CONTROL: a code with a declared 5xx keeps its coded answer', async () => {
-    const thrown = Object.assign(new Error('The ledger is closing.'), { code: 'SERVICE_UNAVAILABLE', status: 503 });
+  /**
+   * [#31341] A 5xx the producer DECLARED is a server fault at the door too:
+   * `mapDataError` keeps its code and status and withholds its sentence
+   * (`Internal server error`) unless the throw marks itself `refusal: true`
+   * (`declaredRefusalMessage`, `@objectstack/types`). These faces read the
+   * coded path first, so they served the producer's sentence verbatim. This
+   * row was #31273's CONTROL, which pinned that sentence served; it moved.
+   */
+  for (const site of FACES) {
+    it(`${site.tool}: a declared 5xx keeps its code and status, its sentence withheld and logged once (#31341)`, async () => {
+      const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const warnLog = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const thrown = ledgerClosing();
+      const { text, error } = await errorOf(site, thrown);
+      expect(error).toEqual({ code: 'SERVICE_UNAVAILABLE', message: 'Internal server error', status: 503 });
+      expect(error).toEqual(doorAnswer(thrown));
+      expect(text).not.toContain('The ledger is closing.');
+      const lines = [...errorLog.mock.calls, ...warnLog.mock.calls].map((call) => String(call[0]));
+      expect(lines).toHaveLength(1);
+      expect(lines[0]).toMatch(new RegExp(`^\\[5xx\\] 503 tools/call ${site.tool} task — `));
+      expect(lines[0]).toContain('The ledger is closing.');
+    });
+  }
+
+  it('a declared 5xx that marks itself `refusal: true` keeps its sentence on every face, as the door serves it (#31341)', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const thrown = ledgerClosing({ refusal: true });
     for (const site of FACES) {
-      expect((await errorOf(site, thrown)).error, site.tool)
-        .toEqual({ code: 'SERVICE_UNAVAILABLE', message: 'The ledger is closing.', status: 503 });
+      const { error } = await errorOf(site, thrown);
+      expect(error, site.tool).toEqual({ code: 'SERVICE_UNAVAILABLE', message: 'The ledger is closing.', status: 503 });
+      expect(error, site.tool).toEqual(doorAnswer(thrown));
     }
+  });
+
+  // [#31341] The door demotes an unregistered code with a declared 5xx to the
+  // status's closed code and names the producer's spelling in `declaredCode`,
+  // a member these faces do not serve (as the metadata tools do not, #31272).
+  // So the face answers the closed code. A producer keeps its own code on the
+  // wire by registering it or by throwing a 4xx refusal.
+  it('an unregistered code with a declared 5xx answers the door\'s closed code, its sentence withheld (#31341)', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const thrown = Object.assign(new Error('The vendor is down.'), { code: 'VENDOR_DOWN', status: 503 });
+    const { text, error } = await errorOf(update, thrown);
+    expect(error).toEqual({ code: 'SERVICE_UNAVAILABLE', message: 'Internal server error', status: 503 });
+    expect(error).toEqual(doorAnswer(thrown));
+    expect(text).not.toContain('The vendor is down.');
   });
 });

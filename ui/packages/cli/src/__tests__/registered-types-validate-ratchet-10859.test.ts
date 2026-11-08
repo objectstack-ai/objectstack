@@ -688,6 +688,16 @@ describe('registered NAMESPACED component types refused at `type` — a ratchet 
     expect(refusedAtType('mcp:authorized-assistants')).toBe(false);
   });
 
+  it('counts `security:effective-access` armed — it registered WITH its arm', () => {
+    // One registry key (`skipFallback: true`, so no bare `effective-access`
+    // and no `app-shell:` spelling), armed in `@object-ui/types/zod` in the same
+    // change, so the pin above did not move.
+    expect(NAMESPACED_KEYS).toContain('security:effective-access');
+    expect(NAMESPACED_KEYS).not.toContain('app-shell:security:effective-access');
+    expect(BARE_KEYS).not.toContain('effective-access');
+    expect(refusedAtType('security:effective-access')).toBe(false);
+  });
+
   it('counts `record:approval_decision` armed — it registered WITH its arm (objectui#12342)', () => {
     // One registry key (`skipFallback: true`, so no bare `approval_decision`),
     // armed in `@object-ui/types/zod` in the same change, so the pin above did not move.

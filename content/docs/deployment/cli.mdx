@@ -3242,6 +3242,7 @@ is its production, so a deploy is always a deliberate act.
 | `-s, --server <url>` | `OS_CLOUD_URL` | Control-plane URL. Default `https://cloud.objectos.ai`, or the URL recorded by `os cloud login` |
 | `-t, --token <key>` | `OS_CLOUD_API_KEY` | Bearer token; `$OS_TOKEN` and `~/.objectstack/cloud.json` are the fallbacks |
 | `--confirm-access-upgrade <token>` | — | Self-hosted target only: confirm the upgrade's access findings with the finding-set token the runtime's refusal printed (as [`os package install`](#os-package-install)). Refused when the target is ObjectOS Cloud |
+| `--confirm-upgrade <token>` | — | Self-hosted target only: confirm the upgrade's schema findings (a suspected rename, a type change that is not safe) with the finding-set token the runtime's refusal printed (as [`os package install`](#os-package-install)). Refused when the target is ObjectOS Cloud |
 
 `os package publish` stays the command for a **release**: it publishes the
 version the manifest declares, with `--install` optional.
@@ -3262,12 +3263,17 @@ answers are the ones printed.
    build is printed; nothing is installed. A runtime that refuses it, or does not
    serve install-local, stops the deploy with exit `1`. A runtime that predates the
    dry run ignores it and installs: the command says so and exits `1`.
-3. **Install** — with `--confirm-access-upgrade` passed through. The endpoint's
-   refusals (an access upgrade to confirm, a package the running kernel cannot
-   register, …) stop the deploy with exit `1`.
+3. **Install** — with `--confirm-access-upgrade` and `--confirm-upgrade` passed
+   through. The endpoint's refusals (an access upgrade to confirm, a schema
+   upgrade to confirm, a package the running kernel cannot register, …) stop the
+   deploy with exit `1`. An upgrade refusal prints its retry as
+   `os deploy --confirm-access-upgrade <token>` for access findings or
+   `os deploy --confirm-upgrade <token>` for schema findings.
 4. **Live** — install-local registers the package in the running kernel before it
    answers, so the answer is the verdict: `hotLoaded` prints `Live: … now serves …`
-   and exits `0`.
+   and exits `0`. A package the runtime recorded but its running kernel could not
+   load is not live: the command prints that it loads when the runtime restarts
+   and exits `1`.
 
 The `d` key in [`os dev`](#os-dev) runs the same `os deploy`, so it deploys to the
 runtime too and asks for no cloud login.

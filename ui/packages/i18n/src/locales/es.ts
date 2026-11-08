@@ -3865,6 +3865,7 @@ const es = {
     sharedObject: '{{object}} compartido',
     redactedFields: 'El propietario ocultó algunos campos: {{fields}}',
     linkedRecord: 'Registro vinculado',
+    linkedUser: 'Usuario vinculado',
   },
   publicForm: {
     submit: "Enviar",
@@ -3992,6 +3993,22 @@ const es = {
       managedBody: 'Los asistentes de IA que esta persona ha autorizado. Cada uno actúa con sus permisos, y Revocar pone fin a su acceso de inmediato.',
       managedEmpty: 'Esta persona todavía no ha autorizado ningún asistente de IA.',
       managedTruncated: 'Solo se muestran los más recientes; esta persona ha autorizado más.',
+    },
+  },
+  effectiveAccess: {
+    title: 'Conjuntos de permisos efectivos',
+    body: 'Cada conjunto de permisos vigente para esta persona en tu organización actual, y de dónde viene cada uno. Las asignaciones directas también aparecen abajo, donde se pueden quitar.',
+    refused: 'No tienes permiso para ver el acceso efectivo de esta persona.',
+    unserved: 'Este servidor no informa del acceso efectivo.',
+    loadFailed: 'No se pudo cargar el acceso efectivo: {{message}}',
+    empty: 'Esta persona no tiene ningún conjunto de permisos vigente en esta organización.',
+    originsLabel: 'Procede de',
+    origin: {
+      direct: 'Asignación directa',
+      position: 'Puesto: {{position}}',
+      default: 'Vinculación predeterminada',
+      derivedPlatformAdmin: 'Administrador de plataforma configurado',
+      derivedAiAccess: 'Acceso a IA activado',
     },
   },
   excelImport: {

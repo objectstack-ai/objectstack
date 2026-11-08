@@ -87,7 +87,7 @@ is one diagram a reviewer (or AI) can read end-to-end.
       config: {
         objectName: 'opportunity',
         triggerType: 'record-after-update',
-        condition: cel`record.amount > 100000`,
+        condition: cel`record.amount != null && record.amount > 100000`,
       },
     },
     {
