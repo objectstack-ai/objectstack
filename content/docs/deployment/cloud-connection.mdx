@@ -200,9 +200,11 @@ every replica reads:
 - **It can be read before the server starts.** The multi-node licence check
   runs before startup, so a host reads the row once at that point with
   `readCloudBindingCredentialBeforeBoot` from `@objectstack/cloud-connection`.
-  The read opens one connection and closes it again before startup
-  continues, gives up after 3 seconds by default, and never writes. If it
-  fails, the replica starts as an unconnected one would.
+  The read opens one connection, starts closing it again before startup
+  continues, and never writes. The open, the read and the close share one
+  time limit, 3 seconds by default: if the database has not answered by then
+  the read gives up, and a close that is slow to finish is not waited for.
+  If the read fails, the replica starts as an unconnected one would.
 
 **Scaling out a server that is already connected.** The first start with
 several replicas declared moves the credential from

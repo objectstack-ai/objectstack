@@ -21,17 +21,24 @@
  *     Anything else answers `not-shared` without calling `openDriver`: a single
  *     node, the in-process driver and any other driver open nothing.
  *   - **One connection, opened by the host, closed here**: `openDriver` returns
- *     a connected driver over the configured datasource; it is disconnected
- *     before this returns, on every path, and also when the open lands after the
- *     time bound. No pool survives the call.
+ *     a connected driver over the configured datasource, and its disconnect is
+ *     initiated on every path: also when the open lands after the time bound,
+ *     the moment it lands. When the read answers inside the bound, the call
+ *     waits for the disconnect with what is left of the bound; on the timeout
+ *     path the disconnect is initiated and not awaited. No pool is kept: this
+ *     one connection is all the call opens.
  *   - **Read only**: no schema sync and no write. A database that has never held
  *     the row (a first boot) reads as unavailable, not as an error to raise.
  *   - **The engine's own decrypt**: a bare ObjectQL engine over that one driver,
  *     with only the credential object registered, reads the row through the
  *     same `SharedConnectionCredentialLedger.load()` the plugin uses, so the
  *     secret is dereferenced by `resolveSecretField` and nothing else.
- *   - **Bounded and soft**: open, read and close share one time bound
- *     ({@link PREBOOT_CREDENTIAL_TIMEOUT_MS} by default). Any failure answers
+ *   - **Bounded and soft**: open, read and close share ONE deadline, taken
+ *     when the call starts ({@link PREBOOT_CREDENTIAL_TIMEOUT_MS} by default).
+ *     The open and the read race it; the close gets only the budget left, and
+ *     at least 50 ms (`PREBOOT_CLOSE_FLOOR_MS`) when the read answers at the very
+ *     end of it. So the call returns within the bound, or within that floor
+ *     after it, and never waits on a disconnect that hangs. Any failure answers
  *     `unavailable` with a reason and never throws, so the replica boots exactly
  *     as an unbound one does today.
  *
@@ -53,6 +60,14 @@ import { SysCloudBindingCredential } from './sys-cloud-binding-credential.object
 /** The default bound on the pre-boot open, read and close together. */
 export const PREBOOT_CREDENTIAL_TIMEOUT_MS = 3_000;
 
+/**
+ * The least time a close is waited for when the read answered so near the
+ * deadline that less than this is left: a healthy disconnect takes a few ms,
+ * and this lets it finish rather than be left initiated. It is the only time
+ * the call may run past `timeoutMs`.
+ */
+const PREBOOT_CLOSE_FLOOR_MS = 50;
+
 export interface CloudBindingCredentialBeforeBootOptions {
     /**
      * Open ONE connected driver over the datasource the replicas share. Called
@@ -66,7 +81,12 @@ export interface CloudBindingCredentialBeforeBootOptions {
     env?: Readonly<Record<string, string | undefined>>;
     /** The cluster driver id, when the host configures it somewhere other than `OS_CLUSTER_DRIVER`. */
     clusterDriver?: string;
-    /** The bound on open, read and close together, in ms. Default {@link PREBOOT_CREDENTIAL_TIMEOUT_MS}. */
+    /**
+     * The one deadline for open, read and close together, in ms from the call.
+     * Default {@link PREBOOT_CREDENTIAL_TIMEOUT_MS}. A close that starts with
+     * less than 50 ms left is waited for 50 ms; on the timeout path the
+     * disconnect is initiated and not awaited.
+     */
     timeoutMs?: number;
 }
 
@@ -94,6 +114,8 @@ export async function readCloudBindingCredentialBeforeBoot(
     if (!sharesCloudBindingCredential(env, clusterDriver)) return { status: 'not-shared' };
 
     const timeoutMs = options.timeoutMs ?? PREBOOT_CREDENTIAL_TIMEOUT_MS;
+    // ONE deadline for open, read and close: the close below gets what is left.
+    const deadline = Date.now() + timeoutMs;
     let opened: IDataDriver | undefined;
     let closing: Promise<void> | undefined;
     let abandoned = false;
@@ -121,7 +143,7 @@ export async function readCloudBindingCredentialBeforeBoot(
 
     let timer: ReturnType<typeof setTimeout> | undefined;
     const timedOut = new Promise<'timeout'>((resolve) => {
-        timer = setTimeout(() => resolve('timeout'), timeoutMs);
+        timer = setTimeout(() => resolve('timeout'), Math.max(deadline - Date.now(), 0));
     });
     try {
         const outcome = await Promise.race([
@@ -131,7 +153,8 @@ export async function readCloudBindingCredentialBeforeBoot(
         if (outcome === 'timeout') {
             abandoned = true;
             // Closing the connection is what ends a read still in flight; an
-            // open still pending closes itself when it lands (above).
+            // open still pending closes itself when it lands (above). The
+            // disconnect is initiated, not awaited: the bound is spent.
             attempt.catch(() => { /* reported below as the timeout */ });
             void close();
             return {
@@ -143,14 +166,18 @@ export async function readCloudBindingCredentialBeforeBoot(
         return { status: 'read', credential: outcome.credential };
     } finally {
         if (timer) clearTimeout(timer);
-        if (!abandoned) await boundedClose(close(), timeoutMs);
+        if (!abandoned) await boundedClose(close(), Math.max(deadline - Date.now(), PREBOOT_CLOSE_FLOOR_MS));
     }
 }
 
-/** Wait for the close, but never longer than the bound: a hung disconnect must not hold the boot. */
-async function boundedClose(closing: Promise<void>, timeoutMs: number): Promise<void> {
+/**
+ * Wait for the close, but only for `budgetMs`, what is left of the call's one
+ * deadline: a hung disconnect must not hold the boot. Past the budget the
+ * disconnect stays initiated and is not awaited.
+ */
+async function boundedClose(closing: Promise<void>, budgetMs: number): Promise<void> {
     let timer: ReturnType<typeof setTimeout> | undefined;
-    await Promise.race([closing, new Promise<void>((resolve) => { timer = setTimeout(resolve, timeoutMs); })]);
+    await Promise.race([closing, new Promise<void>((resolve) => { timer = setTimeout(resolve, budgetMs); })]);
     if (timer) clearTimeout(timer);
 }
 

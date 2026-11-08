@@ -10,8 +10,11 @@
  *    sync, and the connection is disconnected before the call returns;
  *  - every failure is soft and closes what it opened: a database that never
  *    held the row, another key, an open that throws, an open that lands after
- *    the bound (closed when it lands), a read that hangs (closed at the bound);
- *    none throws, and no reason carries the credential;
+ *    the bound (closed when it lands), a read that hangs (disconnect initiated
+ *    at the bound); none throws, and no reason carries the credential;
+ *  - open, read and close keep ONE deadline: an open that never answers, and a
+ *    close that never answers after a slow open, each return within the bound
+ *    (plus the 50 ms close floor), never a second full bound for the close;
  *  - only replicas declared over Redis open anything: no declaration, the
  *    in-process driver, no driver, or any other driver answers `not-shared`
  *    without calling `openDriver`.
@@ -182,6 +185,81 @@ describe('[#31554] every pre-boot failure is soft, bounded and closes what it op
         });
         expect(result).toEqual({ status: 'unavailable', reason: expect.stringContaining('within 30 ms') });
         await vi.waitFor(() => expect(disconnect).toHaveBeenCalledTimes(1));
+    });
+});
+
+describe('[#31554] open, read and close keep ONE deadline: a hung open or a hung close never doubles it', () => {
+    // The bound is one budget from the call, not one for the read and a second
+    // for the close. Generous margins on both sides: a loaded runner gets
+    // 500 ms of scheduling slack, and the old shape (a fresh full bound for the
+    // close) lands at the open's 1000 ms plus the read plus the whole bound
+    // again, at least 3000 ms against the 2500 ms asserted.
+    const BOUND = 2_000;
+    const OPEN_DELAY = 1_000;
+    const SLACK = 500;
+    // The hung-open and hung-read cases answer at the bound itself, so a short
+    // one keeps them quick.
+    const SHORT_BOUND = 300;
+
+    it('an open that never answers returns at the bound', async () => {
+        const openDriver = vi.fn(() => new Promise<never>(() => {}));
+        const started = Date.now();
+        const result = await readCloudBindingCredentialBeforeBoot({
+            env: SHARED_ENV, openDriver, cryptoProvider: new LocalCryptoProvider({ key: randomBytes(32) }), timeoutMs: SHORT_BOUND,
+        });
+        expect(result).toEqual({ status: 'unavailable', reason: expect.stringContaining(`within ${SHORT_BOUND} ms`) });
+        expect(Date.now() - started).toBeLessThan(SHORT_BOUND + SLACK);
+    });
+
+    it('a slow open, a read that answers, then a close that never answers: the close gets only what is left', async () => {
+        const key = randomBytes(32);
+        const filename = await replicaDatabase(key, FULL);
+        let closeReal: (() => Promise<void>) | undefined;
+        const disconnect = vi.fn(() => new Promise<void>(() => {}));
+        const openDriver = vi.fn(async () => {
+            // Spend most of the budget opening.
+            await new Promise((r) => setTimeout(r, OPEN_DELAY));
+            const driver = new SqlDriver({ client: 'better-sqlite3', connection: { filename }, useNullAsDefault: true });
+            await driver.connect();
+            closeReal = driver.disconnect.bind(driver);
+            driver.disconnect = disconnect;
+            return driver as never;
+        });
+        const started = Date.now();
+        const result = await readCloudBindingCredentialBeforeBoot({
+            env: SHARED_ENV, openDriver, cryptoProvider: new LocalCryptoProvider({ key }), timeoutMs: BOUND,
+        });
+        const elapsed = Date.now() - started;
+        try {
+            expect(result).toEqual({ status: 'read', credential: FULL });
+            expect(disconnect).toHaveBeenCalledTimes(1);
+            // Within the one bound (plus the 50 ms close floor and scheduling),
+            // not the open's delay plus a second full bound for the close.
+            expect(elapsed).toBeLessThan(BOUND + SLACK);
+        } finally {
+            await closeReal?.();
+        }
+    });
+
+    it('a read that never answers, then a close that never answers: returns at the bound, disconnect initiated', async () => {
+        const hanging = new SqlDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true });
+        await hanging.connect();
+        hanging.find = () => new Promise<never>(() => {});
+        const closeReal = hanging.disconnect.bind(hanging);
+        const disconnect = vi.fn(() => new Promise<void>(() => {}));
+        hanging.disconnect = disconnect;
+        const started = Date.now();
+        try {
+            const result = await readCloudBindingCredentialBeforeBoot({
+                env: SHARED_ENV, openDriver: async () => hanging as never,
+                cryptoProvider: new LocalCryptoProvider({ key: randomBytes(32) }), timeoutMs: SHORT_BOUND,
+            });
+            expect(result).toEqual({ status: 'unavailable', reason: expect.stringContaining(`within ${SHORT_BOUND} ms`) });
+            expect(Date.now() - started).toBeLessThan(SHORT_BOUND + SLACK);
+            await vi.waitFor(() => expect(disconnect).toHaveBeenCalledTimes(1));
+        } finally {
+            await closeReal();
+        }
     });
 });
 
