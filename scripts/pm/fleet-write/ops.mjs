@@ -707,9 +707,9 @@
  * (`advisoryListPadded`), so every sealed listing is exactly
  * `ADVISORY_READ_MAX_SEALED_CHARS` characters in `ADVISORY_READ_MAX_PARTS`
  * parts, and the public ciphertext's length and part count say nothing of the
- * count. The cap that binds first is that one: 29,939 bytes of JSON, about 240
- * advisories at about 125 bytes each (the self-test measures it with fake
- * items), far under `ADVISORY_LIST_PAGE_CAP` pages of 100 for each of three
+ * count. The cap that binds first is that one: 29,939 bytes of JSON, measured
+ * with fake items at 206 advisories of `critical` severity (144 bytes each) up
+ * to 215 with no severity (138 bytes each; the self-test pins the edge), far under `ADVISORY_LIST_PAGE_CAP` pages of 100 for each of three
  * states. A listing over it is FAILED with nothing emitted, ⛔ never a cut list.
  *
  * Sealed and emitted exactly as `advisory_read`'s answer: `sealAdvisoryRead` to

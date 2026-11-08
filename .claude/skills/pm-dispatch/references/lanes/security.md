@@ -14,10 +14,10 @@
 ## 接收与台账
 
 - 接收 ①:发现者 `Notify: security · GHSA-ID`(私有仓 `OWNER/REPO#N`)门铃,私卡已由其经中继建好。
-- 接收 ②:无门铃的 `triage` 公告(外报或中继实测):经 `advisory_read` 读,座位贴记 `received`。
+- 接收 ②:列表比出的无台账编号(外报、无门铃或席空时建):记 `received`,经 `advisory_read` 读。
 - 判定:发现 ⇒ 中继 `advisory_state` 置 `draft` 走派修;非发现 ⇒ 置 `closed`,台账记非发现。
 - 中继拒或本席空缺照第 3、9 节。
-- 云席列不了本仓公告,中继也拒裸集合:编号只来自维护者、门铃或中继实测。
+- 巡查:每轮中继 `advisory_list` 列 `triage`/`draft`/`closed` 比台账;缺行照接收 ②,状态不符即改。
 - 读出的公告明文只印本席进程 stdout(`--reveal`),⛔ 不进文件、日志或后台任务输出。
 - 台账住座位贴,一份一行:不透明编号 · 会话 · 状态;⛔ 无细节;修复的认领只记台账。
 - 状态词表:`received` → `fixing` → `merged` → `closed`;挑中发布再 `awaiting publish` → `published`。
