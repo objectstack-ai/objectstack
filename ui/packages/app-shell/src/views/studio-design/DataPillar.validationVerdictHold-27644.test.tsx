@@ -20,6 +20,9 @@ import * as React from 'react';
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { render, screen, fireEvent, cleanup, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
+// The CEL authoring code loads `@objectstack/lint` lazily; warmed here so its
+// first load is paid at import, not inside a test's clock.
+import '@objectstack/lint';
 
 const REFUSED = 'record.amount > 100';
 const ACCEPTED = 'record.amount != null && record.amount > 100';
