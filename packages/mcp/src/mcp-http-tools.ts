@@ -549,6 +549,10 @@ interface DataDoorAnswer {
   code?: string;
   message: string;
   status: number;
+  /** [#31373] The producer's unregistered spelling the door demoted, when it serves one. */
+  declaredCode?: string;
+  /** [#31373] The producer's marked end-user sentence the door rides onto its answer, when it serves one. */
+  userMessage?: string;
 }
 
 /**
@@ -564,6 +568,15 @@ interface DataDoorAnswer {
  * other context keys the door adds are not read, as `details` is not
  * ({@link errorResultWithCode}).
  *
+ * [#31373] `declaredCode` and `userMessage` are read as the door serves them,
+ * each omitted when it serves none: an unregistered code the door demoted to
+ * its closed code (`{ code: 'VENDOR_DOWN', status: 503 }` answers
+ * `SERVICE_UNAVAILABLE` with `declaredCode: 'VENDOR_DOWN'`), and a producer's
+ * marked end-user sentence, which the door rides onto any answer, a fault's
+ * included. ⛔ Read off the door's body, never a second demotion rule. The
+ * record data faces render them in `run_action`'s order ({@link
+ * errorResultFromThrown}); the metadata tools do not ({@link metaDoorErrorResult}).
+ *
  * [#31270] Exported for the record resource (`MCPServerRuntime.bridgeResources`),
  * which answers a code-less throw with the same read; not on the package entry.
  */
@@ -571,7 +584,14 @@ export function dataDoorAnswerOf(err: unknown, objectName?: string): DataDoorAns
   const door = mapDataError(err, objectName);
   const code = typeof door.body.code === 'string' && door.body.code !== '' ? door.body.code : undefined;
   const message = typeof door.body.error === 'string' && door.body.error !== '' ? door.body.error : messageOf(err);
-  return { ...(code !== undefined ? { code } : {}), message, status: door.status };
+  const { declaredCode, userMessage } = door.body;
+  return {
+    ...(code !== undefined ? { code } : {}),
+    message,
+    status: door.status,
+    ...(typeof declaredCode === 'string' && declaredCode !== '' ? { declaredCode } : {}),
+    ...(typeof userMessage === 'string' && userMessage !== '' ? { userMessage } : {}),
+  };
 }
 
 /**
@@ -597,8 +617,8 @@ export function dataDoorAnswerOf(err: unknown, objectName?: string): DataDoorAns
  *   the throw marks itself `refusal: true` (`declaredRefusalMessage`,
  *   `@objectstack/types`). It used to reach the agent with its own sentence.
  *   An unregistered code is demoted there to the status's closed code, with
- *   the producer's spelling in a `declaredCode` member that no MCP face
- *   serves; the face answers the closed code.
+ *   the producer's spelling in `declaredCode`; the face answers both (#31373,
+ *   {@link dataDoorAnswerOf}).
  *
  * ⛔ One reader, never a copy of the withhold rule: the door's answer is
  * `mapDataError`'s, through {@link dataDoorAnswerOf}, and the fault line is
@@ -644,6 +664,11 @@ export function dataDoorRefusalEnvelope(err: unknown, objectName: string): Throw
  *   `{ statusCode: 503, message }` when no data service is registered): the
  *   status, and no code, since the door invents none. A declared 5xx's prose is
  *   withheld there too.
+ *
+ * [#31373] The door's `declaredCode` and `userMessage` ride after `status`
+ * when it serves them, as `run_action` renders `/actions`' ({@link
+ * errorResultFromThrown}): `{ error: { code, message, status, declaredCode?,
+ * userMessage? } }`.
  *
  * ⛔ The coded path is read FIRST and is unchanged: a thrown `code` keeps
  * {@link thrownRefusalEnvelope}'s rendering byte for byte, its unique-violation
@@ -714,7 +739,9 @@ function metaDoorErrorResult(err: unknown, tool: MetaDoorTool, objectName?: stri
     ...(door.code !== undefined ? { code: door.code } : {}),
     request: { method: 'tools/call', path: objectName !== undefined ? `${tool} ${objectName}` : tool },
   });
-  return codedErrorResult(door);
+  // [#31373] The `/data` door's `declaredCode` / `userMessage` are the record
+  // data faces' members; this answer is unchanged by them.
+  return codedErrorResult({ ...(door.code !== undefined ? { code: door.code } : {}), message: door.message, status: door.status });
 }
 
 /**
