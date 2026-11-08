@@ -145,6 +145,8 @@ and the lock banner reads.
 
 ### Schema
 
+A type excerpt, so `check:skill-examples` skips it:
+
 ```ts
 protection?: {
   /** Lock level — controls what Studio can do to this item. */

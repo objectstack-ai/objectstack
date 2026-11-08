@@ -185,6 +185,12 @@ export type { FieldRole, ExprInput, ExprSchemaHint, ExprFaultOutcome, ExprValida
 // source field's own `currencyConfig`. The producer behind `returnType: 'currency'`.
 export { inferFormulaReturn } from './formula-return';
 export type { FormulaReturnDeclaration, FormulaSourceField } from './formula-return';
+// ADR-0144 D5 — the home-amount conversion arithmetic: the engine's write-time
+// home projection (`@objectstack/objectql`) and the form's live "≈ home amount"
+// preview read this one copy, so the number a form shows before save is the
+// number the engine stores.
+export { toScaledDecimal, divideToPlaces, formatScaledDecimal, documentDateOf } from './home-amount-arithmetic';
+export type { ScaledDecimal } from './home-amount-arithmetic';
 // The closed set of refusal codes `validateExpression` and
 // `collectCelRootIdentifiers` carry beside their English message, with the
 // typed params each message interpolates — so a localized author surface keys

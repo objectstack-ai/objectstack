@@ -20,7 +20,7 @@
 # ALL THREE PARTS LIVE IN ONE SCRIPT: ui/scripts/test-file-timings.mjs
 # ---------------------------------------------------------------------
 #   the writer   (the reporter ci.yml's `test-ui` job passes),
-#   `select`     the newest completed `push` / `schedule` runs of ci.yml on
+#   `select`     the newest completed `schedule` runs of ci.yml on
 #                `main` whose sixteen `Test UI (N/16)` shards ALL concluded
 #                `success` and whose sixteen `test-file-timings-N` artifacts
 #                are all still there (a red or cancelled shard may have
@@ -139,7 +139,7 @@ jobs:
               echo
               echo "\`test-file-timings.mjs select\` found no eligible run, so"
               echo "\`ui/scripts/test-shard-timings.json\` is untouched. Expected until a full-battery run"
-              echo "(a \`push\` that starts Test UI, or the 4-hourly \`schedule\`) has uploaded all"
+              echo "(the 4-hourly \`schedule\`, objectstack#31519) has uploaded all"
               echo "$UI_TEST_SHARDS \`test-file-timings-N\` reports after the reporter landed."
               echo
               echo "⛔ A NOT MEASURED that persists past a day of scheduled runs is a defect, not a"

@@ -55,13 +55,17 @@ const config = (overrides: Record<string, unknown> = {}) => ({
 });
 
 describe('the extractor scaffolds a key for every string a dataset draws', () => {
-  it('emits label, description and one `label` per dimension and measure', () => {
+  it('emits label, description and one `label` and `description` per dimension and measure', () => {
     expect(datasetKeys(config()).sort()).toEqual([
       'datasets.task_metrics.description',
+      'datasets.task_metrics.dimensions.due_date.description',
       'datasets.task_metrics.dimensions.due_date.label',
+      'datasets.task_metrics.dimensions.status.description',
       'datasets.task_metrics.dimensions.status.label',
       'datasets.task_metrics.label',
+      'datasets.task_metrics.measures.est_hours.description',
       'datasets.task_metrics.measures.est_hours.label',
+      'datasets.task_metrics.measures.task_count.description',
       'datasets.task_metrics.measures.task_count.label',
     ]);
   });
@@ -81,7 +85,7 @@ describe('the extractor scaffolds a key for every string a dataset draws', () =>
     const entries = datasetEntries(
       config({ measures: [{ name: 'task_count', aggregate: 'count' }] }),
     );
-    const measure = entries.find((e) => e.path.includes('task_count'));
+    const measure = entries.find((e) => e.path.join('.') === 'datasets.task_metrics.measures.task_count.label');
     expect(measure).toBeDefined();
     expect(measure?.sourceValue).toBeUndefined();
     expect(measure?.inline).toBeUndefined();
@@ -98,16 +102,19 @@ describe('the extractor scaffolds a key for every string a dataset draws', () =>
     expect(label?.inline).toBeUndefined();
   });
 
-  it('emits no `description` below the dataset', () => {
-    // `DatasetDimensionSchema` / `DatasetMeasureSchema` declare none and say so
-    // in their own authoring guidance — a `dimensions.<d>.description` key
-    // would parse clean and translate nothing.
-    const keys = datasetKeys(
-      config({ dimensions: [{ name: 'status', label: 'Status', description: 'ignored' }] }),
+  it('seeds a member `description` (ADR-0149 D1) and emits nothing for `synonyms`', () => {
+    // A member's business definition is display text the resolver overlays like
+    // `label`. Its `synonyms` are matched in every language at once and are
+    // never translated, so the translation group has no key for them.
+    const entries = datasetEntries(
+      config({
+        dimensions: [{ name: 'status', label: 'Status', description: 'Where the task stands', synonyms: ['state'] }],
+      }),
     );
-    expect(keys.some((k) => k.startsWith('datasets.task_metrics.dimensions.') && k.endsWith('.description')))
-      .toBe(false);
-    expect(keys).toContain('datasets.task_metrics.description');
+    const description = entries.find((e) => e.path.join('.') === 'datasets.task_metrics.dimensions.status.description');
+    expect(description?.inline).toBe('Where the task stands');
+    expect(description?.source).toBe('dataset');
+    expect(entries.some((e) => e.path.includes('synonyms'))).toBe(false);
   });
 
   it('skips a dataset or member with no `name` — the key it would be addressed by', () => {
@@ -137,12 +144,17 @@ describe('the emitted key is the key the schema declares', () => {
     ).not.toThrow();
   });
 
-  it('a member `description` is still rejected — the slot did not go open', () => {
+  it('a member `description` is accepted at the extracted path; `synonyms` are still rejected', () => {
     expect(() =>
       TranslationDataSchema.parse({
-        datasets: { task_metrics: { measures: { task_count: { label: '任务数', description: 'x' } } } },
+        datasets: { task_metrics: { measures: { task_count: { label: '任务数', description: '任务总数' } } } },
       }),
-    ).toThrow();
+    ).not.toThrow();
+    expect(() =>
+      TranslationDataSchema.parse({
+        datasets: { task_metrics: { measures: { task_count: { label: '任务数', synonyms: ['x'] } } } },
+      }),
+    ).toThrow(/`synonyms` are not translated/);
   });
 });
 

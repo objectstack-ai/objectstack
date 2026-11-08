@@ -35,6 +35,7 @@ import { StorageNameMapping } from '@objectstack/spec/system';
 import { SQL_AGGREGATE_FUNCTIONS, TEXT_OPERATORS, refuseAggregateFunction } from './sql-driver-top-level.js';
 import type { SqlAggregateLowering } from './sql-driver-top-level.js';
 import type { SqlDriver } from './sql-driver.js';
+import { oracleRawUuidColumns } from './sql-driver-oracle-dialect.js';
 
 /**
  * The `SqlDriver` members the bodies of {@link FieldMappingFacet} read — every one of
@@ -48,18 +49,46 @@ export interface FieldMappingHost {
   readonly fieldColumnByObject: SqlDriver['fieldColumnByObject'];
   introspectColumns: SqlDriver['introspectColumns'];
   introspectPrimaryKeys: SqlDriver['introspectPrimaryKeys'];
+  readonly isOracle: SqlDriver['isOracle'];
+  readonly knex: SqlDriver['knex'];
   readonly logger: SqlDriver['logger'];
   readonly managedObjectFields: SqlDriver['managedObjectFields'];
   readonly mssqlGuidColumnsByObject: SqlDriver['mssqlGuidColumnsByObject'];
   readonly mssqlPagingKeyByObject: SqlDriver['mssqlPagingKeyByObject'];
   readonly nondeterministicPagingWarned: SqlDriver['nondeterministicPagingWarned'];
+  readonly oracleRawUuidFieldsByObject: SqlDriver['oracleRawUuidFieldsByObject'];
   paginationTieBreaker: SqlDriver['paginationTieBreaker'];
   readonly physicalSchemaByObject: SqlDriver['physicalSchemaByObject'];
   readonly physicalTableByObject: SqlDriver['physicalTableByObject'];
+  readOracleRawUuidColumns: SqlDriver['readOracleRawUuidColumns'];
 }
 
 /** The bodies of the "Field mapping" section of `SqlDriver`: a stateless facet, called by the class's stubs. */
 export class FieldMappingFacet {
+  /** The body of `SqlDriver#primeOracleRawUuidColumns`; the method's docblock there is its contract. */
+  static async primeOracleRawUuidColumns(this: Pick<FieldMappingHost, 'columnFieldByObject' | 'isOracle' | 'oracleRawUuidFieldsByObject' | 'physicalSchemaByObject' | 'physicalTableByObject' | 'readOracleRawUuidColumns'>, object: string): Promise<void> {
+    if (!this.isOracle || this.oracleRawUuidFieldsByObject.has(object)) return;
+    // Only a federated object names a remote table; a platform-created table
+    // never holds a RAW(16) uuid column, so there is nothing to read.
+    const remoteTable = this.physicalTableByObject[object];
+    if (remoteTable === undefined) return;
+    let columns: string[];
+    try {
+      columns = await this.readOracleRawUuidColumns(remoteTable, this.physicalSchemaByObject[object]);
+    } catch {
+      // A catalog that cannot be read leaves nothing recorded: every value
+      // keeps today's text bind, and the next door asks again.
+      return;
+    }
+    const colToField = this.columnFieldByObject[object];
+    this.oracleRawUuidFieldsByObject.set(object, new Set(columns.map((column) => colToField?.[column] ?? column)));
+  }
+
+  /** The body of `SqlDriver#readOracleRawUuidColumns`; the method's docblock there is its contract. */
+  static readOracleRawUuidColumns(this: Pick<FieldMappingHost, 'knex'>, remoteTable: string, remoteSchema: string | undefined): Promise<string[]> {
+    return oracleRawUuidColumns(this.knex, remoteTable, remoteSchema);
+  }
+
   /** The body of `SqlDriver#mapSortField`; the method's docblock there is its contract. */
   static mapSortField(field: string): string {
     if (field === 'createdAt') return 'created_at';
