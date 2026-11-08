@@ -48,7 +48,8 @@
  * the slug collision that is the create dialog's other outcome; the
  * multi-org-disabled refusal `CreateWorkspaceDialog` already comments about; and
  * the expired link `AcceptInvitationPage` already has a hand-written fallback
- * for), and one objectstack registered code (ADR-0112) on the create path:
+ * for; the per-user creation cap, which a hosted deployment sets low enough
+ * that an ordinary user reaches it), and one objectstack registered code (ADR-0112) on the create path:
  * `ORGANIZATION_CREATION_DISABLED`, the server's refusal for the same
  * deployment posture `CreateWorkspaceDialog`'s own guard reads from
  * `/auth/config` (objectui#12977). The rest are teams, dynamic roles and org
@@ -110,6 +111,18 @@ export const ORG_ERROR_MESSAGE_KEYS: Record<string, OrgErrorEntry> = {
   YOU_ARE_NOT_ALLOWED_TO_CREATE_A_NEW_ORGANIZATION: {
     key: 'organization.errors.notAllowedToCreate',
     defaultValue: 'You are not allowed to create a new organization',
+  },
+  // The per-user creation cap (`OS_ORG_LIMIT`, better-auth's
+  // `organizationLimit`): only organizations the caller OWNS count, never ones
+  // they were invited into, and the sentence says so because that is the part
+  // a refused user cannot guess. It names no number on purpose: the refusal
+  // body is better-auth's bare `{ code, message }` and `/auth/config` does not
+  // publish the cap, so the console has no number to show, and a number baked
+  // into every pack would be wrong on every deployment that sets another one.
+  YOU_HAVE_REACHED_THE_MAXIMUM_NUMBER_OF_ORGANIZATIONS: {
+    key: 'organization.errors.organizationLimitReached',
+    defaultValue:
+      'You have reached the limit on organizations you can create. Organizations you were invited to do not count toward it.',
   },
   // objectstack's registered code (ADR-0112) for a deployment whose tenancy
   // posture refuses organization creation for every caller — a deployment

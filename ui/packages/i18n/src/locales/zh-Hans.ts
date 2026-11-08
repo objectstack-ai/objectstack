@@ -3774,6 +3774,7 @@ const zh = {
       organizationExists: '该组织已存在。',
       slugTaken: '该标识已被占用。',
       notAllowedToCreate: '您无权创建新组织。',
+      organizationLimitReached: '您创建的组织数量已达上限。被邀请加入的组织不计入此上限。',
       notTheRecipient: '您不是该邀请的收件人。',
       invitationNotFound: '该邀请已失效或已过期。',
       unknown: '出了点问题，请重试。',

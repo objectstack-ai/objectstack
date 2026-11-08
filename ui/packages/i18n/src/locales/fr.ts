@@ -3631,6 +3631,7 @@ const fr = {
       organizationExists: 'Cette organisation existe déjà.',
       slugTaken: 'Ce slug est déjà utilisé.',
       notAllowedToCreate: "Vous n'êtes pas autorisé à créer une nouvelle organisation.",
+      organizationLimitReached: "Vous avez atteint le nombre maximal d'organisations que vous pouvez créer. Les organisations auxquelles vous avez été invité ne sont pas comptées.",
       notTheRecipient: "Vous n'êtes pas le destinataire de cette invitation.",
       invitationNotFound: "Cette invitation n'existe plus ou a expiré.",
       unknown: 'Une erreur est survenue. Veuillez réessayer.',
