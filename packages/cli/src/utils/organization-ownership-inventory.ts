@@ -784,6 +784,14 @@ export const ORGANIZATION_OWNERSHIP_INVENTORY: readonly InventoryEntry[] = [
       `${CENSUS_MAIN}: systemFields.tenant: false; ${D7}: a declarative connector's stored credential is environment-level, ` +
       'read by the reference its instances name, never by organization',
   },
+  {
+    object: 'sys_cloud_binding_credential',
+    census: PMAIN,
+    fate: 'column-drop',
+    citation:
+      `${CENSUS_MAIN}: systemFields.tenant: false; ${D7}: the deployment's one cloud binding credential, read by its ` +
+      'fixed slot under the system context, never by organization',
+  },
   // #30959 (ruling record 6718345088, fork 1 (a)) — an identity-provider group
   // mapping is saved by the platform administrator for one SCIM connection and
   // always carries the organization that owns the connection's credential (the
