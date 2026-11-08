@@ -237,16 +237,13 @@ import { count, rejectCredentialAggregation } from './engine-count-aggregate.js'
 import { rejectCredentialEvaluation } from './credential-evaluation-guard.js';
 import { assertRecordCurrencyCodes, touchesRecordCurrency } from './validation/record-currency-code.js';
 import {
-  EXCHANGE_RATE_OBJECT,
   homeAmountsTouched,
-  memoizeHomeAmountServing,
   planHomeAmounts,
   projectHomeAmounts,
   settleBulkHomeAmounts,
   type HomeAmountPlanEntry,
   type HomeAmountReads,
   type HomeAmountServing,
-  type HomeLocalization,
   type HomeLocalizationResolver,
 } from './home-amount-projection.js';
 import { SchemaRegistry, type ArtifactInstallScope } from './registry.js';
@@ -2545,59 +2542,9 @@ export class ObjectQL implements IObjectQLEngine {
     return ReferencesAndMasterDetailFacet.homeAmountReadsFor.call(referencesAndMasterDetailHost.of(this), context);
   }
 
-  /**
-   * [ADR-0144 D5, Open item 2] What one write's home projection reads, memoized
-   * for that write: each organization's home currency once, and each
-   * (organization, currency, document date) rate once, however many rows ask.
-   *
-   * The rate is the `sys_exchange_rate` row of that currency with the latest
-   * `effective_date` on or before the document date, in the organization the
-   * row lands in. Read `sudo()`-shaped (`{ ...context, isSystem: true }`): a
-   * rank-and-file writer cannot read the rate table (parameter 2 makes it an
-   * administrator's object), yet every write of theirs is converted through
-   * it; the caller's transaction rides along, and `tenantId` is the row's own
-   * organization, so one organization's rate never converts another's
-   * amount. An install without the rate object registered has no rate for any
-   * currency.
-   */
   private homeAmountServing(context: ExecutionContext | undefined): HomeAmountServing {
-    // One settings read per organization per write answers both the home
-    // currency and the timezone.
-    const localizations = new Map<string, Promise<HomeLocalization | undefined>>();
-    const localizationOf = (organizationId: string | undefined) => {
-      const key = organizationId ?? '';
-      let hit = localizations.get(key);
-      if (!hit) {
-        hit = Promise.resolve(this.homeLocalizationResolver?.(organizationId));
-        localizations.set(key, hit);
-      }
-      return hit;
-    };
-    return memoizeHomeAmountServing({
-      homeCurrency: async (organizationId) => (await localizationOf(organizationId))?.currency,
-      timezone: async (organizationId) => (await localizationOf(organizationId))?.timezone,
-      rateOn: async (organizationId, currency, onOrBefore) => {
-        if (!this._registry.getObject(EXCHANGE_RATE_OBJECT)) return undefined;
-        const rows = await this.find(EXCHANGE_RATE_OBJECT, {
-          where: { currency, effective_date: { $lte: onOrBefore } },
-          orderBy: [{ field: 'effective_date', order: 'desc' }],
-          limit: 1,
-          fields: ['rate', 'effective_date'],
-          context: {
-            ...(context ?? {}),
-            isSystem: true,
-            ...(organizationId !== undefined ? { tenantId: organizationId } : {}),
-          } as ExecutionContext,
-        });
-        const row = rows[0] as { rate?: unknown; effective_date?: unknown } | undefined;
-        if (!row) return undefined;
-        const effective = row.effective_date;
-        return {
-          rate: row.rate,
-          effectiveDate: effective instanceof Date ? effective.toISOString().slice(0, 10) : (typeof effective === 'string' ? effective : undefined),
-        };
-      },
-    });
+    // [#29986 codemod] The body moved to `engine-references-and-master-detail.ts`, its docblock with it (see `ReferencesAndMasterDetailHost`).
+    return ReferencesAndMasterDetailFacet.homeAmountServing.call(referencesAndMasterDetailHost.of(this), context);
   }
 
   private static homeAmountOrganizationOf(
