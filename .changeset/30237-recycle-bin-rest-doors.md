@@ -20,6 +20,6 @@ The recycle bin (ADR-0148) is now reachable over HTTP, one object at a time, und
 
 An entry addressed under an object it does not belong to answers `404`. Each door refuses an unknown or repeated query parameter `400`. An object whose API exposure withholds `delete` withholds the four doors too (`405`): the API derivation now derives `restore` and `purge` from `delete`.
 
-`DELETE /api/v1/data/:object/:id` answers `recycleBinEntryId` (optional on `DeleteDataResponseSchema`) when the delete wrote a recycle-bin entry, so a client can offer an undo. The engine's by-id `delete` tells an `onRecycleBinEntry` callback (a type-only member of `EngineDeleteOptions`) the entry it wrote.
+`DELETE /api/v1/data/:object/:id` answers `recycleBinEntryId` (optional on `DeleteDataResponseSchema`) when the delete wrote a recycle-bin entry, so a client can offer an undo. The engine's by-id `delete` tells an `onRecycleBinEntry` callback (`RecycleBinDeleteObservability`, exported by `@objectstack/objectql` beside `EngineDeleteOptions`, as update's `WriteObservabilityOptions` are) the entry it wrote, once the driver reports the row removed.
 
 The engine gains `ObjectQL.listRecycleBin(object, { context, limit, offset })`, refused unless the caller manages the object's bin (fail closed when no permission resolver answers), and `restore` / `purge` take an optional `object` that an entry must belong to. `@objectstack/client` gains `client.recycleBin.list / restore / purge / empty`, and `DeleteDataResult` gains `recycleBinEntryId`.
