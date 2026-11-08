@@ -31,6 +31,7 @@ from `node_modules` — there is no local copy in the skill bundle.
 - `node_modules/@objectstack/spec/src/data/driver/memory.zod.ts` — Memory Driver Configuration Schema
 - `node_modules/@objectstack/spec/src/data/driver/mongo.zod.ts` — MongoDB Standard Driver Protocol
 - `node_modules/@objectstack/spec/src/data/driver/mysql.zod.ts` — MySQL / MariaDB driver configuration — the `config` slot of a `datasource`
+- `node_modules/@objectstack/spec/src/data/driver/oracle.zod.ts` — Oracle Database driver configuration — the `config` slot of a `datasource`
 - `node_modules/@objectstack/spec/src/data/driver/postgres.zod.ts` — PostgreSQL driver configuration — the `config` slot of a `datasource` whose
 - `node_modules/@objectstack/spec/src/data/driver/sqlite.zod.ts` — SQLite driver configuration — the `config` slot of a `datasource` whose
 - `node_modules/@objectstack/spec/src/data/driver/turso.zod.ts` — Turso / libSQL Driver Protocol.

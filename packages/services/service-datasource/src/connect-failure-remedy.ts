@@ -180,8 +180,8 @@ export const UNBUILT_WORKSPACE_REMEDY =
 /**
  * The database clients `@objectstack/driver-sql` loads through knex and that a
  * project installs itself — the client each SQL arm of the shared factory names
- * (`client: 'pg'` / `'mysql2'` / `'better-sqlite3'`; knex requires the package
- * of the same name). A module-not-found naming one of these, as a bare
+ * (`client: 'pg'` / `'mysql2'` / `'better-sqlite3'` / `'oracledb'`; knex
+ * requires the package of the same name). A module-not-found naming one of these, as a bare
  * specifier, is a missing install and not an unbuilt workspace.
  *
  * Closed on purpose: a name on this list is promised the install remedy, so it
@@ -189,7 +189,7 @@ export const UNBUILT_WORKSPACE_REMEDY =
  * each one's real failure through the real factory arm, so a renamed client
  * shows up there rather than as a silent return to the build advice.
  */
-export const OPTIONAL_DRIVER_CLIENT_PACKAGES: readonly string[] = ['pg', 'mysql2', 'better-sqlite3'];
+export const OPTIONAL_DRIVER_CLIENT_PACKAGES: readonly string[] = ['pg', 'mysql2', 'better-sqlite3', 'oracledb'];
 
 /**
  * The remedy when the database client the driver loads is not installed.
