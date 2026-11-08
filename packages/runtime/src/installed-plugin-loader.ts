@@ -561,6 +561,13 @@ export interface LoadInstalledPluginsInput extends VerifyInstalledPluginsInput {
    * from the install directory.
    */
   resolveHostPackagesFrom?: string;
+  /**
+   * A caller that only reads the installed set (a one-shot command) leaves a
+   * pending uninstall as it is: that plugin is neither removed nor loaded, as
+   * the next boot that finishes its uninstall would not load it either.
+   * Unset, a pending uninstall is finished here, as `os serve`'s boot does.
+   */
+  leaveUninstallsPending?: boolean;
 }
 
 /**
@@ -696,7 +703,7 @@ export async function loadInstalledPlugins(input: LoadInstalledPluginsInput): Pr
   const verdict = await verifyInstalledPlugins(input);
   const out: InstalledPluginsLoad = { loaded: [], refused: [...verdict.refused], disabled: verdict.disabled, removed: [] };
 
-  for (const record of verdict.uninstallPending) {
+  for (const record of input.leaveUninstallsPending ? [] : verdict.uninstallPending) {
     let finished: { kept: boolean } | null;
     try {
       finished = finishUninstall(input.environmentId, record);

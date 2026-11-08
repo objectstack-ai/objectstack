@@ -33,6 +33,12 @@ const EAST_SCOPE = {
   assignablePermissionSets: ['sales_user'],
 };
 
+/**
+ * [ADR-0123 D2] The organization the fixture tree belongs to and the delegate's
+ * context names: a delegated scope covers units of the active organization only.
+ */
+const ORG = 'org_1';
+
 const SETS: Record<string, any[]> = {
   tenant_admin: [{ name: 'admin_full', objects: { '*': { allowRead: true, modifyAllRecords: true } } }],
   delegate: [{ name: 'east_admin', objects: {}, adminScope: EAST_SCOPE }],
@@ -55,9 +61,9 @@ const CATALOG = {
 function makeQl(tables: Record<string, any[]> = {}) {
   const all: Record<string, any[]> = {
     sys_business_unit: [
-      { id: 'bu_hq', name: 'hq', parent_business_unit_id: null },
-      { id: 'bu_east', name: 'east', parent_business_unit_id: 'bu_hq' },
-      { id: 'bu_west', name: 'west', parent_business_unit_id: 'bu_hq' },
+      { id: 'bu_hq', name: 'hq', parent_business_unit_id: null, organization_id: ORG },
+      { id: 'bu_east', name: 'east', parent_business_unit_id: 'bu_hq', organization_id: ORG },
+      { id: 'bu_west', name: 'west', parent_business_unit_id: 'bu_hq', organization_id: ORG },
     ],
     // Rows say something else on purpose: `rep` is bound to the set NOT on
     // the allowlist, and `mixed` to nothing at all.
@@ -102,7 +108,7 @@ const assign = (gate: DelegatedAdminGate, position: string) =>
     object: 'sys_user_position',
     operation: 'insert',
     data: { user_id: 'u_east_1', position, business_unit_id: 'bu_east' },
-    context: { principal: 'delegate', userId: 'u_delegate' },
+    context: { principal: 'delegate', userId: 'u_delegate', organizationId: ORG },
   });
 
 async function refusal(p: Promise<unknown>): Promise<any> {
@@ -148,7 +154,7 @@ describe('DelegatedAdminGate — a position distributes what its definition decl
 describe('DelegatedAdminGate — describeDelegableScope lists the catalog positions', () => {
   it('a delegate is offered exactly the positions whose declared sets are all allowlisted (anchors excluded)', async () => {
     const gate = gateOver(bindTestSecurityCatalog(makeQl(), CATALOG));
-    const report = await gate.describeDelegableScope(SETS.delegate, { userId: 'u_delegate' });
+    const report = await gate.describeDelegableScope(SETS.delegate, { userId: 'u_delegate', organizationId: ORG });
     expect(report.assignablePositions.sort()).toEqual(['registry_only', 'rep']);
   });
 
