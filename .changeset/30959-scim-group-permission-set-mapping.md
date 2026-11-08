@@ -3,6 +3,7 @@
 '@objectstack/plugin-security': patch
 '@objectstack/platform-objects': patch
 '@objectstack/spec': patch
+'@objectstack/cli': patch
 ---
 
 feat(plugin-auth): a SCIM group push grants the ordinary permission set its group mapping names
@@ -17,3 +18,5 @@ When a group's membership changes, `@better-auth/scim`'s projection grants each 
 A mapping can never make anyone an administrator. The save refuses, with `400 VALIDATION_FAILED` on `permissionSet`, every set outside the organization boundary: `admin_full_access`, the organization-administrator sets, the agent ceiling sets, a set with a superuser wildcard or an `adminScope`, and a set with a capability not scoped to the organization. The judgement is plugin-security's own delegated-administration predicate, now served as the optional `ISecurityService.organizationBoundaryFailure(setName)` member. Without a security service the save is refused `503` and nothing is granted.
 
 The break-glass guard's refusal no longer tells operators that "the SCIM group mapping is too broad": a group mapping never moves administrator standing, so the sentence now says to grant another account standing first.
+
+The v18 organization-ownership ceremony (`os migrate organization-ownership`) inventories `sys_idp_group_mapping` with the attribution fate, like the other organization-owned rows written with their organization: a database that holds the new table plans and applies as before.
