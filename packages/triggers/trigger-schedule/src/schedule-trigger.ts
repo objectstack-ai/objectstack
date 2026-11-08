@@ -9,9 +9,10 @@ import {
     describeMissingScheduleOrganization,
 } from '@objectstack/spec/automation';
 import {
-    resolveScheduledWorkPolicy,
+    readScheduledWorkPolicy,
     scheduledWorkDisabledReason,
     type ScheduledWorkPolicy,
+    type ScheduledWorkPolicySource,
 } from '@objectstack/types';
 import { dueTimesInSilence } from './missed-due-times.js';
 
@@ -320,27 +321,12 @@ export function resolveBindingOrganization(binding: FlowTriggerBinding): string 
 }
 
 /**
- * [#19834] A per-kernel scheduled-work policy: a value, or a resolver called at
- * each bind. What both schedule triggers and their plugins accept.
+ * [#19834] A per-kernel scheduled-work policy, and its one read. Both live in
+ * `@objectstack/types` beside `ScheduledWorkPolicy` (#31382: the package-jobs
+ * binder in `@objectstack/runtime` takes the same source), re-exported here
+ * under the names this package always exported.
  */
-export type ScheduledWorkPolicySource = ScheduledWorkPolicy | (() => ScheduledWorkPolicy);
-
-/**
- * [#17396] The scheduled-work policy, read once per bind.
- *
- * [#19834] The per-kernel `source` when a host gave one; else the zero-argument
- * deployment resolver, exactly as before.
- *
- * ⛔ Not memoised at module scope on purpose. {@link resolveScheduledWorkPolicy}
- * reads `process.env` live, and a host that rebinds its flows after changing
- * the environment (the CLI's `--fresh` harness, a test that flips the switch
- * between kernels in one process) must get the value that is current at the
- * bind, not the one the first import happened to see.
- */
-export function readScheduledWorkPolicy(source?: ScheduledWorkPolicySource): ScheduledWorkPolicy {
-    if (source === undefined) return resolveScheduledWorkPolicy();
-    return typeof source === 'function' ? source() : source;
-}
+export { readScheduledWorkPolicy, type ScheduledWorkPolicySource };
 
 /**
  * [#19834] Construction options shared by {@link ScheduleTrigger}, the

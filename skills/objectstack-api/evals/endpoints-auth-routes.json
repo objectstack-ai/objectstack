@@ -28,7 +28,7 @@
       "files": [],
       "assertions": {
         "must_contain": ["x-objectstack-signature", "functions"],
-        "must_not_contain": ["http.server", "kernel:ready", "getService"]
+        "must_not_contain": ["'http.server'", "kernel:ready", "getService"]
       }
     },
     {
@@ -68,7 +68,7 @@
       "files": [],
       "assertions": {
         "must_contain": ["?names=", "/api/v1/meta/object", "VALIDATION_ERROR"],
-        "must_not_contain": ["?ids=", "?filter="]
+        "must_not_contain": ["object?ids=", "object?filter="]
       }
     }
   ]

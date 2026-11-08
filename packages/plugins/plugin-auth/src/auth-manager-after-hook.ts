@@ -68,9 +68,9 @@ export interface AfterHookHost {
   externalDirectoryDoorDeps: AuthManager['externalDirectoryDoorDeps'];
   isEmailDeliveryLive: AuthManager['isEmailDeliveryLive'];
   recordPasswordHistory: AuthManager['recordPasswordHistory'];
-  recordSignInOutcome: AuthManager['recordSignInOutcome'];
   roleChangeGrantDeps: AuthManager['roleChangeGrantDeps'];
   sendChangeEmailNotice: AuthManager['sendChangeEmailNotice'];
+  settleSignInAttempt: AuthManager['settleSignInAttempt'];
   stampLastLogin: AuthManager['stampLastLogin'];
   stampPasswordChangedAt: AuthManager['stampPasswordChangedAt'];
 }
@@ -191,10 +191,12 @@ export async function globalAfterHook(this: AfterHookHost, ctx: any) {
   // ── ADR-0069 D2: account lockout (counter) ──────────────────
   // better-auth catches an INVALID_EMAIL_OR_PASSWORD APIError and runs
   // the after-hook with it on `ctx.context.returned`; a success leaves
-  // the session payload there. Count failures, reset on success.
-  // A refusal `refusedAfterTheCredential` names is neither: the password
-  // passed and a policy then refused the sign-in, so the counter is left
-  // as it stands. Its `login_failed` row is still written below.
+  // the session payload there. The gate stamped this attempt as a
+  // failure before the check; settle that stamp now: a success clears
+  // the counter, a failure keeps it. A refusal `refusedAfterTheCredential`
+  // names is neither: the password passed and a policy then refused the
+  // sign-in, so the stamp is handed back and the counter is left as it
+  // stood. Its `login_failed` row is still written below.
   if (ctx?.path === SIGN_IN_EMAIL_PATH) {
     const email = typeof ctx?.body?.email === 'string' ? ctx.body.email : '';
     if (email) {
@@ -205,13 +207,20 @@ export async function globalAfterHook(this: AfterHookHost, ctx: any) {
       } catch {
         succeeded = !(ctx?.context?.returned instanceof Error);
       }
-      const lockStamped = !succeeded && await refusedAfterTheCredential(ctx?.context?.returned)
-        ? undefined
-        : await this.recordSignInOutcome(email, succeeded);
+      const settlement = await this.settleSignInAttempt(
+        email,
+        succeeded
+          ? 'succeeded'
+          : await refusedAfterTheCredential(ctx?.context?.returned)
+            ? 'refused-after-credential'
+            : 'refused',
+      );
       // A refused sign-in writes `login_failed`, and the one that
       // stamped the lockout also writes `account_locked`. A successful
-      // one is recorded as `login` by the session hook, unchanged.
-      if (!succeeded) await this.auditRefusedSignIn(ctx, email, lockStamped);
+      // one is recorded as `login` by the session hook, unchanged. A
+      // sign-in refused because the account is locked had its row
+      // written by the gate, with the lock as its reason.
+      if (!succeeded && !settlement.refusedByLock) await this.auditRefusedSignIn(ctx, email, settlement);
       if (succeeded) {
         const uid = ctx?.context?.returned?.user?.id;
         // [ADR-0069 TL;DR 6] The cap of the organization the new session
@@ -227,7 +236,7 @@ export async function globalAfterHook(this: AfterHookHost, ctx: any) {
           );
         }
         // ADR-0069 D7 — login audit: stamp last_login_at/ip on success.
-        // Independent of lockout config (recordSignInOutcome no-ops when
+        // Independent of lockout config (settleSignInAttempt no-ops when
         // lockout is off). The IP is the address `handleRequest`
         // established for this request by the client-address trust rule,
         // the same address the D5 allow-list judged; none when it was

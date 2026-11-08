@@ -92,6 +92,9 @@ export const DIALECT_EMISSION_UNSUPPORTED_STATUS = 501;
  * plan, an installer) reads `client` and `supportedClients` instead of parsing
  * the sentence back out of `message`.
  */
+/** Why a knex client is outside schema emission — see {@link UnsupportedDialectEmissionError.reason}. */
+export type DialectEmissionRefusalReason = 'postgres-wire' | 'federation-only';
+
 export class UnsupportedDialectEmissionError extends Error {
   readonly code = DIALECT_EMISSION_UNSUPPORTED_CODE;
   readonly status = DIALECT_EMISSION_UNSUPPORTED_STATUS;
@@ -103,8 +106,14 @@ export class UnsupportedDialectEmissionError extends Error {
     readonly operation: string,
     /** Every client spelling this driver DOES emit DDL for, sorted. */
     readonly supportedClients: readonly string[],
+    /**
+     * Why the client is outside emission: a Postgres-WIRE database this driver
+     * does not emit for (#11991, the default), or a federation-only dialect
+     * (Oracle, ADR-0015 §4.6), which the platform reads and never builds in.
+     */
+    readonly reason: DialectEmissionRefusalReason = 'postgres-wire',
   ) {
-    super(renderDialectEmissionRefusal(client, operation, supportedClients));
+    super(renderDialectEmissionRefusal(client, operation, supportedClients, reason));
     this.name = 'UnsupportedDialectEmissionError';
   }
 }
@@ -123,7 +132,19 @@ export function renderDialectEmissionRefusal(
   client: string,
   operation: string,
   supportedClients: readonly string[],
+  reason: DialectEmissionRefusalReason = 'postgres-wire',
 ): string {
+  if (reason === 'federation-only') {
+    return (
+      `DDL operation '${operation}' was refused: knex client '${client}' is a federation-only dialect ` +
+      `(ADR-0015 §4.6) — ObjectStack reads the tables another system owns there and never creates or ` +
+      `alters one, so no table was created or altered. ` +
+      `Supported clients for schema emission: ${supportedClients.join(', ')}. ` +
+      `Declare the datasource \`schemaMode: 'external'\` (or 'validate-only') and bind each object to an ` +
+      `existing table with \`external.remoteName\`; reads, and writes where both write opt-ins are on, ` +
+      `are unaffected by this refusal.`
+    );
+  }
   return (
     `DDL operation '${operation}' was refused: knex client '${client}' speaks the PostgreSQL wire ` +
     `protocol, but ObjectStack does not emit schema DDL for it, so no table was created or altered. ` +
