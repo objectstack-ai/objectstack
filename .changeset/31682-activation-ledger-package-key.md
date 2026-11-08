@@ -2,6 +2,7 @@
 '@objectstack/core': patch
 '@objectstack/platform-objects': patch
 '@objectstack/objectql': patch
+'@objectstack/driver-sql': patch
 ---
 
 feat(core): the activation ledger is keyed by `(metadata_type, package_id, name)`, and rows that name no package take their one holder
@@ -15,4 +16,4 @@ At every boot, once the package holders are sealed, a ledger row that names no p
 
 Nothing reads the package yet: every flow, action and catalog switch still applies by type and name exactly as before, and the activation doors answer as before.
 
-On an existing SQL database the boot's schema sync creates the new index beside the old one. The old `(metadata_type, name)` index is reported as orphaned by `os migrate plan` and is dropped by `os migrate apply --allow-destructive`; until then it keeps refusing a second package's row of the same name, which nothing writes yet.
+On an existing SQL database the boot's schema sync creates the new index beside the old one, and `os migrate plan` reports the old `(metadata_type, name)` index as superseded: one `replace_unique_index`, category safe, applied by `os migrate apply` with no `--allow-destructive`. The SQL driver now reads any generated plain UNIQUE whose columns are an in-order proper subsequence of a declared global UNIQUE on the same table this way, because widening a unique key only admits rows the old key refused and drops none; a UNIQUE on other columns still reads as an orphan, as before. Until the replace is applied the old index keeps refusing a second package's row of the same name, which nothing writes yet.
