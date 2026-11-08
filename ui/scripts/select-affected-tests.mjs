@@ -48,13 +48,24 @@
  *       - it, or a module it reaches through RELATIVE imports, reads the disk
  *         or spawns a process (`fs`, `child_process`, `import.meta.glob`):
  *         its input is the tree, and the tree is not a package;
- *       - it reaches, through relative imports, a file outside its own
- *         package directory: that edge is in no `package.json`;
- *       - it imports a workspace package by name that is not its own and not
- *         in its own package's dependency closure: the root vitest alias map
- *         resolves every `@object-ui/*` name to source whether or not the
- *         package declares it, so the edge is real at test time and absent
- *         from the graph.
+ *       - it reaches, through relative imports, a file outside every
+ *         workspace package (`scripts/`, the tree root): no package change
+ *         reaches that file.
+ *
+ *  2a. ATTRIBUTED TEST FILES. A test whose relative closure reads nothing off
+ *     disk and stays inside workspace packages, but reaches past its own
+ *     package -- a relative import into another package's directory, or a
+ *     workspace package imported by name that its own package does not depend
+ *     on (the root vitest alias map resolves every `@object-ui/*` name to
+ *     source whether or not the package declares it) -- has edges no
+ *     `package.json` states. Its INPUT PACKAGES are its own, every package its
+ *     relative closure has a file in, and every workspace package that closure
+ *     imports by name. It is selected, file by file, whenever one of them is
+ *     affected; an affected package already folds in its dependents, so a
+ *     change to a package one of those reads is selected too. Declaring the
+ *     edge instead would make the test's whole package a dependent of the
+ *     target, and three of those edges on this tree would be cycles
+ *     (objectstack#31520).
  *
  *  3. FULL RUN instead, when the change reaches something every test runs
  *     through:
@@ -597,7 +608,7 @@ export function readHeavyProject(configText) {
  * @param {{ root?: string, changed: string[], outside?: string[], tracked?: string[] }} input
  *   `changed` relative to `root`; `outside` the changed files outside the tree,
  *   relative to the workspace root (`changedOutsideTree`)
- * @returns {{ mode: 'full', reasons: string[] } | { mode: 'affected', changedPackages: string[], affectedPackages: string[], heavyEdge: string[], alwaysOn: Array<{ file: string, why: string }>, filters: string[], testFileCount: number, selectedTestFileCount: number }}
+ * @returns {{ mode: 'full', reasons: string[] } | { mode: 'affected', changedPackages: string[], affectedPackages: string[], heavyEdge: string[], alwaysOn: Array<{ file: string, why: string }>, attributed: Array<{ file: string, via: string[] }>, filters: string[], testFileCount: number, selectedTestFileCount: number }}
  */
 export function selectAffectedTests({ root = REPO_ROOT, changed, outside = [], tracked = trackedFiles(root) }) {
   const packages = listWorkspacePackages(root);
@@ -704,7 +715,10 @@ export function selectAffectedTests({ root = REPO_ROOT, changed, outside = [], t
     return owner && !affected.has(owner.name);
   });
   const summaries = closureSummaries(root, placed, names, dirOf);
+  const nameOfDir = new Map(packages.map((p) => [p.dir, p.name]));
   const alwaysOn = [];
+  /** @type {Array<{ file: string, via: string[] }>} */
+  const attributed = [];
   for (const file of testFiles) {
     const owner = owningPackage(file, packages);
     if (!owner) {
@@ -717,23 +731,30 @@ export function selectAffectedTests({ root = REPO_ROOT, changed, outside = [], t
       alwaysOn.push({ file, why: 'reads the disk or spawns a process' });
       continue;
     }
-    const outside = [...closure.dirs].find((d) => d !== owner.dir);
-    if (outside !== undefined) {
-      alwaysOn.push({ file, why: `reaches ${outside === '' ? 'the repository root' : outside} outside ${owner.dir}` });
+    if (closure.dirs.has('')) {
+      alwaysOn.push({ file, why: `reaches the repository root outside ${owner.dir}` });
       continue;
     }
+    // Item 2a: every edge past the owner's declared closure is an input
+    // package; one of them affected selects the file.
     const allowed = dependencyClosure.get(owner.name) ?? new Set();
-    const undeclared = [...closure.packageNames].find((n) => n !== owner.name && !allowed.has(n));
-    if (undeclared) {
-      alwaysOn.push({ file, why: `imports ${undeclared}, which ${owner.name} does not depend on` });
-    }
+    const inputs = new Set([...closure.dirs].map((d) => nameOfDir.get(d)));
+    for (const n of closure.packageNames) if (!allowed.has(n)) inputs.add(n);
+    inputs.delete(owner.name);
+    const via = [...inputs].filter((n) => affected.has(n)).sort();
+    if (via.length > 0) attributed.push({ file, via });
   }
 
   const dirFilters = packages
     .filter((p) => affected.has(p.name) && testFiles.some((f) => f.startsWith(`${p.dir}/`)))
     .map((p) => `${p.dir}/`);
   const heavyFilters = heavyEdge.length > 0 ? [...heavy.tests.filter((t) => tracked.includes(t)), ...heavyConfigDirs] : [];
-  const filters = dedupeFilters([...dirFilters, ...heavyFilters, ...alwaysOn.map((a) => a.file)]);
+  const filters = dedupeFilters([
+    ...dirFilters,
+    ...heavyFilters,
+    ...alwaysOn.map((a) => a.file),
+    ...attributed.map((a) => a.file),
+  ]);
   const selected = testFiles.filter((f) => filters.some((flt) => f.toLowerCase().includes(flt.toLowerCase())));
 
   return {
@@ -742,6 +763,7 @@ export function selectAffectedTests({ root = REPO_ROOT, changed, outside = [], t
     affectedPackages: [...affected].sort(),
     heavyEdge,
     alwaysOn,
+    attributed,
     filters,
     testFileCount: testFiles.length,
     selectedTestFileCount: selected.length,
@@ -797,6 +819,8 @@ function main(argv) {
   }
   console.log(`always-on test files (the package graph cannot place them): ${verdict.alwaysOn.length}`);
   if (explain) for (const a of verdict.alwaysOn) console.log(`  - ${a.file}: ${a.why}`);
+  console.log(`attributed test files (an affected package they reach or import past their own): ${verdict.attributed.length}`);
+  if (explain) for (const a of verdict.attributed) console.log(`  - ${a.file}: through ${a.via.join(', ')}`);
   console.log(
     `selected ${verdict.selectedTestFileCount} of ${verdict.testFileCount} tracked test files through ${verdict.filters.length} filter(s)`,
   );
