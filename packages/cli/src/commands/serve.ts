@@ -10,6 +10,7 @@ import { loadConfig, bundleConfigModule } from '../utils/config.js';
 import { mergeBootConfig } from '../utils/merge-boot-config.js';
 import { provisionTelemetryDatasource, standaloneTelemetryPrimary } from '../utils/telemetry-datasource.js';
 import { isHostConfig, shouldBootWithLibrary } from '../utils/plugin-detection.js';
+import { mountsAiServicePlugin, resolveAiServiceLoad, resolveOptionalPluginLoad } from '../utils/ai-service-auto-inject.js';
 import { registerInstalledPlugins } from '../utils/installed-plugins-boot.js';
 import { readInternalArtifactPath, readInternalConfigOutputPath } from '../utils/internal-artifact-channel.js';
 import { readAuthSecretFileChannel } from '../utils/internal-auth-secret-channel.js';
@@ -1650,10 +1651,8 @@ export default class Serve extends Command {
     required: boolean;
     declared: boolean;
   }): 'required' | 'auto' | 'off' {
-    if (!opts.tierAllowed) return 'off';
-    if (opts.required) return 'required';
-    if (opts.declared) return 'auto';
-    return 'off';
+    // [#31411] The rule's one home, shared with `os migrate`.
+    return resolveOptionalPluginLoad(opts);
   }
 
   /**
@@ -4970,10 +4969,7 @@ export default class Serve extends Command {
       // 4. Auto-register AIServicePlugin if not already loaded by config plugins.
       // Registered AFTER Dispatcher so that the ai:routes hook listener is
       // already in place when AIServicePlugin.start() fires the hook.
-      const hasAIPlugin = plugins.some(
-        (p: any) => p.name === 'com.objectstack.service-ai'
-            || p.constructor?.name === 'AIServicePlugin'
-      );
+      const hasAIPlugin = mountsAiServicePlugin(plugins);
       // `importFromHost` (module scope, hoisted over this whole file — it is no
       // longer "declared above" anything, which is the point) resolves optional
       // plugin packages from the HOST APP's context — the app being served
@@ -4996,16 +4992,14 @@ export default class Serve extends Command {
       // now go through the one owner in `@objectstack/types/node`, so "declared"
       // cannot mean two different things in one file (Prime Directive #12).
       const hostDeclaresDependency = (pkg: string): boolean => isDeclaredByHost(pkg, hostRoot);
-      // `wantsAiService` is the AUTO (opt-in) signal: the host app listed the base
-      // AI service — or the Studio that builds on it — in its OWN package.json. This
-      // is a package.json READ (a deliberate authoring act), not a speculative
-      // import: gating on a *declared* dep, not mere resolvability, is reliable in a
+      // The AUTO (opt-in) signal is the host app listing the base AI service — or
+      // the Studio that builds on it — in its OWN package.json. This is a
+      // package.json READ (a deliberate authoring act), not a speculative import:
+      // gating on a *declared* dep, not mere resolvability, is reliable in a
       // workspace/monorepo where a package stays hoist-resolvable when undeclared.
       // Studio implies the base service (it attaches via the `ai:ready` hook the base
       // fires; the base is a transitive dep of Studio, so it stays resolvable).
-      const wantsAiService =
-        hostDeclaresDependency('@objectstack/service-ai')
-        || hostDeclaresDependency('@objectstack/service-ai-studio');
+      // `resolveAiServiceLoad` below reads it.
 
       // Load an optional, separately-published service plugin by INTENT (#1597).
       // `required` (from an explicit `requires: [...]` capability) makes a missing
@@ -5069,12 +5063,12 @@ export default class Serve extends Command {
       // `tiers` omit `ai` never loads it, whatever the intent — so a CE app that
       // omits AI gets no AI service, no agents, and no `services.ai` in discovery
       // (the console hides its AI surface), while every other capability is unaffected.
-      const aiRequired =
-        declaredRequires.has('ai') || declaredRequires.has('ai-studio');
-      const aiDecision = Serve.resolveOptionalPluginLoad({
-        tierAllowed: tierEnabled('ai'),
-        required: aiRequired,
-        declared: wantsAiService,
+      // [#31411] The rule's one reading, shared with `os migrate`, which refuses a
+      // config whose AI plugin only this auto-inject would mount.
+      const aiDecision = resolveAiServiceLoad({
+        declaredRequires,
+        aiTierEnabled: tierEnabled('ai'),
+        hostDeclaresDependency,
       });
       if (!hasAIPlugin && aiDecision !== 'off') {
         // AIServicePlugin auto-detects its LLM provider from environment
