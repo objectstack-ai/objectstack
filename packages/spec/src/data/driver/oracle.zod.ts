@@ -19,8 +19,10 @@
  *
  * Deliberately absent, each because the factory would drop it:
  *  - `autoMigrate` — a managed-schema self-heal, and Oracle is never managed.
- *  - `ssl` — Thin mode negotiates TLS from the connect string itself
- *    (`tcps://host:2484/service`), not from a boolean beside it.
+ *  - `ssl` (and `ca` / `cert` / `key` / `rejectUnauthorized`) — Thin mode
+ *    negotiates TLS from the connect string itself
+ *    (`tcps://host:2484/service`), not from a key beside it; the datasource
+ *    `ssl` block is refused on an oracle datasource for the same reason.
  *  - `sid` — a SID names an instance, not a service; Thin mode reaches a
  *    SID-only listener through a full descriptor in `connectString`.
  */
@@ -36,8 +38,19 @@ import {
   READ_ONLY_BELONGS_ON_DATASOURCE,
   refusedInlineCredentialKey,
   SCHEMA_MODE_BELONGS_ON_DATASOURCE,
-  SSL_DETAIL_BELONGS_ON_DATASOURCE,
 } from './common.zod';
+
+/**
+ * Every TLS spelling an author might reach for in an oracle `config`. Thin-mode
+ * node-oracledb takes TLS from the connect string and verifies the server
+ * against the host's trusted certificate authorities; there is no toggle and no
+ * certificate slot beside it — not in `config`, and not in the datasource
+ * `ssl` block either (refused there too).
+ */
+const ORACLE_TLS_BY_CONNECT_STRING =
+  'TLS to Oracle is chosen by the connect string, not by a key beside it: write '
+  + "`connectString: 'tcps://host:2484/service_name'`. The server is verified against the host's trusted "
+  + 'certificate authorities; there is no certificate or verification key to set here.';
 
 /** The listener port an Oracle Database answers on unless configured otherwise. */
 export const ORACLE_DEFAULT_PORT = 1521;
@@ -75,14 +88,11 @@ export const OracleConfigSchema = lazySchema(() => strictObject(
         'A SID names an instance, not a service, and the Thin-mode client this driver uses connects '
         + 'to a service. Use the database service name as `serviceName`, or write a full descriptor '
         + 'with `(CONNECT_DATA=(SID=…))` as `connectString`.',
-      ssl:
-        'TLS to Oracle is chosen by the connect string, not by a toggle beside it: write '
-        + '`connectString: \'tcps://host:2484/service_name\'`. Certificate detail stays in the '
-        + "datasource's own `ssl` block.",
-      ca: SSL_DETAIL_BELONGS_ON_DATASOURCE,
-      cert: SSL_DETAIL_BELONGS_ON_DATASOURCE,
-      key: SSL_DETAIL_BELONGS_ON_DATASOURCE,
-      rejectUnauthorized: SSL_DETAIL_BELONGS_ON_DATASOURCE,
+      ssl: ORACLE_TLS_BY_CONNECT_STRING,
+      ca: ORACLE_TLS_BY_CONNECT_STRING,
+      cert: ORACLE_TLS_BY_CONNECT_STRING,
+      key: ORACLE_TLS_BY_CONNECT_STRING,
+      rejectUnauthorized: ORACLE_TLS_BY_CONNECT_STRING,
       autoMigrate:
         '`autoMigrate` heals a schema the platform manages, and an Oracle datasource is federation-only: '
         + 'its tables belong to the Oracle system and are never altered from here. Remove the key.',

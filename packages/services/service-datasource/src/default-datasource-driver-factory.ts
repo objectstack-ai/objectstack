@@ -842,6 +842,63 @@ function buildMysqlConnection(spec: DatasourceConnectionSpec): unknown {
 }
 
 /**
+ * Build the node-oracledb connection for an `oracle` datasource (ADR-0015
+ * §4.6): `connectString` verbatim, else the Easy Connect string
+ * `host:port/serviceName` composed from the discrete keys. The password is the
+ * bound secret only — `OracleConfigSchema` refuses one inline.
+ */
+function buildOracleConnection(spec: DatasourceConnectionSpec): Record<string, unknown> {
+  const cfg = (spec.config ?? {}) as Record<string, unknown>;
+  const connectString = typeof cfg.connectString === 'string' && cfg.connectString
+    ? cfg.connectString
+    : `${cfg.host}:${typeof cfg.port === 'number' ? cfg.port : 1521}/${cfg.serviceName}`;
+  return {
+    connectString,
+    ...(typeof cfg.username === 'string' ? { user: cfg.username } : {}),
+    ...(spec.secret ? { password: spec.secret } : {}),
+  };
+}
+
+/**
+ * The last door's copy of the spec's oracle `ssl`-block refusal, for a stored
+ * row written before the refusal existed: node-oracledb Thin reads TLS from the
+ * connect string and has no slot for the block, so it would be dropped.
+ */
+function assertOracleSslNotDeclared(spec: DatasourceConnectionSpec): void {
+  const ssl = resolveSslOption(spec);
+  if (ssl === undefined || ssl === false) return;
+  throw new Error(
+    `datasource '${spec.name ?? 'default'}': the oracle driver does not read a datasource \`ssl\` block — TLS ` +
+      "to Oracle is chosen by the connect string. Write `config.connectString: 'tcps://host:2484/service_name'` " +
+      'and remove the `ssl` block; the server is verified against the host\'s trusted certificate authorities.',
+  );
+}
+
+/** The optional package knex's `oracledb` client loads, and the command that installs it. */
+export const ORACLE_DRIVER_PACKAGE = 'oracledb';
+
+/** @see {@link ORACLE_DRIVER_PACKAGE} */
+export const ORACLE_DRIVER_INSTALL_COMMAND = `npm install ${ORACLE_DRIVER_PACKAGE}`;
+
+/** Whether `err` is knex failing to load the `oracledb` package. */
+function isMissingOracledbPackage(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err);
+  return /Cannot find (module|package) ['"]oracledb['"]/.test(message) || /npm install oracledb/.test(message);
+}
+
+/** What the `oracle` arm says when the optional `oracledb` package is absent. */
+export function missingOracledbMessage(args: { datasource?: string; cause?: unknown }): string {
+  const cause = args.cause instanceof Error ? args.cause.message.split('\n')[0] : undefined;
+  return (
+    `datasource '${args.datasource ?? 'default'}' uses the oracle driver, but the optional package ` +
+    `'${ORACLE_DRIVER_PACKAGE}' is not installed, so no connection was opened. Install it with ` +
+    `\`${ORACLE_DRIVER_INSTALL_COMMAND}\` in the server's project (it runs in Thin mode: pure JavaScript, ` +
+    `no Oracle Client libraries) and restart.` +
+    (cause ? ` (${cause})` : '')
+  );
+}
+
+/**
  * Host-composition keys the CLI/standalone stack stamps into a `default`
  * datasource's `config` for the SQL builders (#3826). They are not memory-driver
  * config, so they are stripped before the rest of `config` is handed through.
@@ -1210,6 +1267,38 @@ export function createDefaultDatasourceDriverFactory(
           ...(schemaMode ? { schemaMode: schemaMode as any } : {}),
           ...(autoMigrate ? { autoMigrate } : {}),
         } as any);
+        return toHandle(driver);
+      }
+
+      if (kind === 'oracle') {
+        // ADR-0015 §4.6 — federation only: the spec refuses a managed oracle
+        // datasource at authoring, and `SqlDriver` refuses every DDL operation
+        // on it by name; this arm only connects. knex `oracledb`, node-oracledb
+        // in Thin mode (pure JavaScript). `oracledb` is an OPTIONAL peer of
+        // `@objectstack/driver-sql`, and knex loads it at construction — so its
+        // absence surfaces HERE, as the install remedy rather than knex's own
+        // `Knex: run $ npm install oracledb --save`.
+        assertOracleSslNotDeclared(spec);
+        const { SqlDriver } = await import('@objectstack/driver-sql');
+        let driver: any;
+        try {
+          driver = new SqlDriver({
+            client: 'oracledb',
+            connection: buildOracleConnection(spec) as any,
+            pool: buildSqlPool(spec),
+            ...(schemaMode ? { schemaMode: schemaMode as any } : {}),
+          } as any);
+        } catch (err: any) {
+          if (isMissingOracledbPackage(err)) {
+            throw new MissingDriverPackageError({
+              driverType: 'oracle',
+              packageName: ORACLE_DRIVER_PACKAGE,
+              installCommand: ORACLE_DRIVER_INSTALL_COMMAND,
+              message: missingOracledbMessage({ datasource: spec.name, cause: err }),
+            });
+          }
+          throw err;
+        }
         return toHandle(driver);
       }
 

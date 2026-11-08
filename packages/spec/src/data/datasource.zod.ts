@@ -617,6 +617,19 @@ function federationOnlyDriverOnManagedRefusal(driverId: string): string {
 }
 
 /**
+ * ADR-0015 §4.6 — a datasource-level `ssl` block on an `oracle` datasource.
+ * Thin-mode node-oracledb takes TLS from the connect string (`tcps://…`) and
+ * verifies the server against the host's trusted certificate authorities; it
+ * has no slot for the block's `ca` / `cert` / `key` / `rejectUnauthorized`,
+ * so a declared block would parse and do nothing.
+ */
+const ORACLE_SSL_BLOCK_REFUSAL =
+  "the 'oracle' driver does not read a datasource `ssl` block: TLS to Oracle is chosen by the connect "
+  + "string, so write `config.connectString: 'tcps://host:2484/service_name'`, and the server is verified "
+  + "against the host's trusted certificate authorities. Remove the `ssl` block (`ssl: { enabled: false }` "
+  + 'is accepted and means plain TCP, which is also what a `host`/`port`/`serviceName` config opens).';
+
+/**
  * [#29762] `external.rowCap` on a built-in driver. The cap is read only by the
  * engine's floor over a plugin driver; a built-in driver executes the whole
  * query itself and is never floored, so the key would parse and do nothing.
@@ -1019,6 +1032,10 @@ export const DatasourceSchema = lazySchema(() => strictObject(
       path: ['schemaMode'],
       message: federationOnlyDriverOnManagedRefusal(resolveDriverId(ds.driver)!),
     });
+  }
+
+  if (resolveDriverId(ds.driver) === 'oracle' && ds.ssl && ds.ssl.enabled !== false) {
+    ctx.addIssue({ code: 'custom', path: ['ssl'], message: ORACLE_SSL_BLOCK_REFUSAL });
   }
 
   if (ds.schemaMode !== 'managed' && !ds.external) {
