@@ -27,9 +27,17 @@
  * the first test below asserts that precondition off the app's own flow rather
  * than trusting it, because adding a `fields` list to that step is precisely
  * the edit that would silently empty the day count again.
+ *
+ * ONE KERNEL PER FILE, CLEAN ROWS PER CASE. Booting a kernel inside each
+ * async case put the boot under vitest's 5 s per-test default, and on a loaded
+ * Test Core shard the first one was cut off at 5016 ms. So the kernel boots
+ * once in `beforeAll`, under its own measured budget (below), and `beforeEach`
+ * gives every case the table a fresh boot would: no `todo_task` rows (deleted
+ * through the driver, so no hook observes the reset). Each case still passes
+ * alone and in shuffled order.
  */
 
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, beforeAll, beforeEach, afterAll } from 'vitest';
 import { ObjectKernel } from '@objectstack/core';
 import { ObjectQLPlugin } from '@objectstack/objectql';
 import { SqliteWasmDriver } from '@objectstack/driver-sqlite-wasm';
@@ -37,13 +45,6 @@ import { SqliteWasmDriver } from '@objectstack/driver-sqlite-wasm';
 import { OverdueEscalationFlow } from '../src/flows/index.js';
 import { Task } from '../src/objects/task.object.js';
 import { installDefaultOrganization } from './default-organization.testkit.js';
-
-const openDrivers: Array<{ disconnect?: () => Promise<void> }> = [];
-afterEach(async () => {
-  while (openDrivers.length) {
-    try { await openDrivers.pop()?.disconnect?.(); } catch { /* noop */ }
-  }
-});
 
 /**
  * A node of the app's real flow, by id — searched at EVERY depth.
@@ -95,7 +96,7 @@ function daysAgoIso(n: number): string {
 }
 
 /** A real kernel with the app's real `todo_task` over in-process sqlite-wasm. */
-async function bootTodoData(): Promise<any> {
+async function bootTodoData(): Promise<{ data: any; driver: any }> {
   const kernel = new ObjectKernel({ logger: { level: 'silent' } } as any);
   await kernel.use(new ObjectQLPlugin());
   await kernel.bootstrap();
@@ -104,15 +105,37 @@ async function bootTodoData(): Promise<any> {
   const driver: any = new SqliteWasmDriver({ filename: ':memory:' });
   await driver.connect();
   objectql.registerDriver(driver, true);
-  openDrivers.push(driver);
   objectql.registry.registerObject(Task, 'todo', 'todo');
   await objectql.syncSchemas();
   // A real `single` install's Default Organization: the system writes below
   // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
   await installDefaultOrganization(objectql);
 
-  return kernel.getService('data');
+  return { data: kernel.getService('data'), driver };
 }
+
+/**
+ * The boot budget is measured, not vitest's 10 s hook default. Locally one boot
+ * (kernel, sqlite-wasm connect, schema sync, Default Organization) took
+ * 150–250 ms cold and ~45 ms warm, and the case that paid it took 192–279 ms
+ * idle and 466–693 ms with 8 CPU-bound processes beside the suite on 4 cores.
+ * On a Test Core shard that case was cut off at 5016 ms (job 128575054246) and
+ * the next one, booting its own kernel, took 3822 ms: the shard's slowdown has
+ * reached ~20x the idle reading. 30 s is 6x the 5 s the shard already exceeded.
+ */
+const BOOT_BUDGET_MS = 30_000;
+
+let data: any;
+let driver: any;
+beforeAll(async () => { ({ data, driver } = await bootTodoData()); }, BOOT_BUDGET_MS);
+afterAll(async () => { await driver?.disconnect?.(); });
+
+/** The table a fresh boot leaves: no task rows. */
+beforeEach(async () => {
+  for (const row of await driver.find('todo_task', { where: {} })) {
+    await driver.delete('todo_task', row.id);
+  }
+});
 
 const SYSTEM = { context: { isSystem: true } };
 
@@ -127,7 +150,6 @@ describe('#18584 — the overdue escalation projection carries a day count', () 
   });
 
   it('every `{{ currentTask.… }}` hole in the escalation body names a key the row carries', async () => {
-    const data = await bootTodoData();
     const due = daysAgoIso(5);
     await data.insert('todo_task', {
       subject: 'Renew the domain',
@@ -163,7 +185,6 @@ describe('#18584 — the overdue escalation projection carries a day count', () 
   });
 
   it('0 when the task is not overdue, and 0 when `due_date` is empty', async () => {
-    const data = await bootTodoData();
     await data.insert('todo_task', {
       subject: 'Future task', status: 'not_started', priority: 'normal',
       due_date: daysAgoIso(-3), owner: 'usr_test_owner',
