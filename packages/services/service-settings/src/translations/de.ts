@@ -744,15 +744,15 @@ export const de: PlatformTranslationData = {
         },
         retention_overrides: {
           label: 'Aufbewahrungs-Überschreibungen',
-          help: 'Fensterüberschreibungen pro Objekt: { "<object>": { "maxAge": "1y", "expireAfter": "30d" } }. Dauern verwenden h/d/w/y. Pro Organisation gesetzt, sodass eine regulierte Organisation Jahre aufbewahren kann, eine Entwicklungsorganisation nur Tage. Eine Überschreibung, die kürzer ist als das Minimum, das eine Plattformfunktion braucht (etwa das Duplikaterkennungsfenster der Job-Warteschlange), wird ignoriert und als Fehler protokolliert; das Standardfenster gilt weiter.',
+          help: 'Fensterüberschreibungen pro Objekt. Dauern verwenden h/d/w/y. Pro Organisation gesetzt, sodass eine regulierte Organisation Jahre aufbewahren kann, eine Entwicklungsorganisation nur Tage. Eine Überschreibung, die kürzer ist als das Minimum, das eine Plattformfunktion braucht (etwa das Duplikaterkennungsfenster der Job-Warteschlange), wird ignoriert und als Fehler protokolliert; das Standardfenster gilt weiter.',
         },
         quotas: {
           label: 'Zeilenkontingente',
-          help: 'Maximale Zeilenanzahl pro Objekt: { "<object>": 1000000 }. Eine Überschreitung löst eine Governance-Warnung aus — Kontingente löschen nie über die deklarierte Richtlinie hinaus.',
+          help: 'Maximale Zeilenanzahl pro Objekt. Eine Überschreitung löst eine Governance-Warnung aus — Kontingente löschen nie über die deklarierte Richtlinie hinaus.',
         },
         quota_defaults: {
           label: 'Standardkontingente pro Klasse',
-          help: 'Ersatzkontingente nach Lebenszyklusklasse: { "telemetry": 1000000, "transient": 500000, "event": 100000, "audit": 5000000 }.',
+          help: 'Ersatzkontingente nach Lebenszyklusklasse (telemetry, transient, event, audit).',
         },
         growth_alert_rows: {
           label: 'Wachstums-Warnschwelle (Zeilen pro Durchlauf)',

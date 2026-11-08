@@ -267,6 +267,18 @@ The exception is a `json` specifier, which persists a JSON object or array
 cascade. The save door refuses the same values for a `json` key with an
 `invalid_type` field error, so a client sends the parsed value, never its text.
 
+A `map` specifier (keyed rows, such as `lifecycle.quotas`) is judged further,
+at both doors alike: its JSON text must parse to an object whose every key the
+setting admits (the running system serves the admissible keys, for example the
+objects that declare a lifecycle) and whose every value is of its column's kind,
+such as a duration like `7y` or a whole number above 0. An override that is not
+is not in force, with one `error` line naming the entry and the form expected:
+
+```bash
+OS_LIFECYCLE_QUOTAS='{"sys_audit_log": 1000000}'
+OS_LIFECYCLE_RETENTION_OVERRIDES='{"sys_job_run": {"maxAge": "90d"}}'
+```
+
 **What is stored beneath a pin is listed by the namespace read.** An override in
 force answers `source: 'env'`, `locked: true`, and `get()` / `getMany()` build
 that answer from the env alone, without reading the store. `getNamespace()` — the
