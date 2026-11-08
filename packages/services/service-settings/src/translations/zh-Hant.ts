@@ -491,7 +491,7 @@ export const zhHant: PlatformTranslationData = {
           label: '保留期覆寫',
           help: '依物件覆寫保留期。時長使用 h/d/w/y。依組織設定，因此受監管的組織可保留數年，開發用組織只保留數天。短於某項平台功能所需最短期限（例如工作佇列的重複偵測期限）的覆寫值會被忽略並記錄為錯誤，繼續套用預設期限。',
           keyColumn: { label: '物件' },
-          columns: { maxAge: { label: '列保留期限' }, expireAfter: { label: '列到期時間' } },
+          columns: { maxAge: { label: '列保留期限' }, expireAfter: { label: '列到期期限' } },
         },
         quotas: {
           label: '列數配額',

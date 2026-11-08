@@ -2238,6 +2238,29 @@ const appTranslationDataShape = () => ({
 });
 
 /**
+ * One column header of a settings `map` specifier: the key column
+ * (`keys.<key>.keyColumn`) or one value column (`keys.<key>.columns.<name>`).
+ * Its leaves are the two strings `SpecifierMapColumnSchema` and
+ * `SpecifierMapKeyColumnSchema` declare: `label`, and `description` translated
+ * as `help`, the spelling the setting's own entry uses for its `description`.
+ */
+const settingsMapColumnTranslation = (surface: string) => strictObject({
+  surface,
+  history: TRANSLATION_HISTORY,
+  aliases: { title: 'label', header: 'label', heading: 'label', helpText: 'help', hint: 'help', description: 'help' },
+  // A specifier column pasted in whole carries these two. Neither is copy:
+  // the column's `name` is the record key this entry sits under, and its
+  // `kind` is declared by the specifier, so neither is renamed to a leaf here.
+  guidance: {
+    name: "a column's `name` is not translated: it is the key this entry sits under (`columns.<name>`), so write the entry there and drop `name`",
+    kind: "a column's `kind` is not translated: the `map` specifier declares it, so drop it from the translation",
+  },
+}, {
+  label: z.string().optional().describe('Translated column header'),
+  help: z.string().optional().describe('Translated column help text'),
+});
+
+/**
  * The one group that is PLATFORM-ONLY, as a shape rather than a schema.
  *
  * `settings` is keyed by `SettingsManifest.namespace`, and a manifest is
@@ -2266,22 +2289,6 @@ const appTranslationDataShape = () => ({
  * A function, not a `const`, for the same reason
  * {@link appTranslationDataShape} is one.
  */
-/**
- * One column header of a settings `map` specifier: the key column
- * (`keys.<key>.keyColumn`) or one value column (`keys.<key>.columns.<name>`).
- * Its leaves are the two strings `SpecifierMapColumnSchema` and
- * `SpecifierMapKeyColumnSchema` declare: `label`, and `description` translated
- * as `help`, the spelling the setting's own entry uses for its `description`.
- */
-const settingsMapColumnTranslation = (surface: string) => strictObject({
-  surface,
-  history: TRANSLATION_HISTORY,
-  aliases: { title: 'label', name: 'label', header: 'label', heading: 'label', helpText: 'help', hint: 'help', description: 'help' },
-}, {
-  label: z.string().optional().describe('Translated column header'),
-  help: z.string().optional().describe('Translated column help text'),
-});
-
 const platformSettingsShape = () => ({
   /**
    * Settings manifest translations keyed by settings namespace
@@ -2340,7 +2347,7 @@ const platformSettingsShape = () => ({
       history: TRANSLATION_HISTORY,
       aliases: {
         title: 'label', name: 'label', helpText: 'help', hint: 'help', description: 'help', choices: 'options', values: 'options',
-        keyHeader: 'keyColumn', key_column: 'keyColumn', headers: 'columns', columnLabels: 'columns',
+        keyHeader: 'keyColumn', headers: 'columns', columnLabels: 'columns',
       },
     }, {
       label: z.string().optional().describe('Translated setting label'),

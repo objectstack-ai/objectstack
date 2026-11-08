@@ -613,7 +613,7 @@ export const zhCN: PlatformTranslationData = {
             + '按组织设置，因此受监管的组织可以保留数年，开发用的组织只保留数天。'
             + '短于某项平台功能所需最短窗口（例如作业队列的重复检测窗口）的覆盖会被忽略并记为错误，继续沿用默认窗口。',
           keyColumn: { label: '对象' },
-          columns: { maxAge: { label: '行保留时长' }, expireAfter: { label: '行过期时间' } },
+          columns: { maxAge: { label: '行保留时长' }, expireAfter: { label: '行过期时长' } },
         },
         quotas: {
           label: '行数配额',

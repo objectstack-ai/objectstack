@@ -1859,13 +1859,13 @@ describe('translation unknown-key strictness', () => {
         const entry = {
           label: '保留期覆盖',
           keyColumn: { label: '对象', help: '要覆盖的对象' },
-          columns: { maxAge: { label: '保留时长' }, expireAfter: { label: '过期时间', help: '行过期前的时长' } },
+          columns: { maxAge: { label: '保留时长' }, expireAfter: { label: '过期时长', help: '行过期前的时长' } },
         };
         const result = PlatformTranslationDataSchema.safeParse({ settings: keys(entry) });
         expect(result.success, JSON.stringify(result.error?.issues)).toBe(true);
         const parsed = result.data?.settings?.lifecycle?.keys?.retention_overrides;
         expect(parsed?.keyColumn).toEqual({ label: '对象', help: '要覆盖的对象' });
-        expect(parsed?.columns?.expireAfter).toEqual({ label: '过期时间', help: '行过期前的时长' });
+        expect(parsed?.columns?.expireAfter).toEqual({ label: '过期时长', help: '行过期前的时长' });
         // The served document and the platform bundle read the same shape.
         expect(ServedTranslationDataSchema.safeParse({ settings: keys(entry) }).success).toBe(true);
         expect(PlatformTranslationBundleSchema.safeParse({ 'zh-CN': { settings: keys(entry) } }).success).toBe(true);
@@ -1875,7 +1875,6 @@ describe('translation unknown-key strictness', () => {
         ['headers', 'columns'],
         ['columnLabels', 'columns'],
         ['keyHeader', 'keyColumn'],
-        ['key_column', 'keyColumn'],
       ])('refuses `%s` on the setting entry, naming `%s`', (wrong, right) => {
         const issue = issuesOf({ [wrong]: {} }).find((i) => i.code === 'unrecognized_keys');
         expect(issue?.message).toContain(`\`${wrong}\` → \`${right}\``);
@@ -1894,8 +1893,21 @@ describe('translation unknown-key strictness', () => {
       it('refuses a bare string where a column entry is an object', () => {
         // A column header is two strings, not one: a plain string would leave
         // no place for its `help`, so the shape refuses it rather than coerce.
-        expect(issuesOf({ keyColumn: 'Object' })).not.toEqual([]);
-        expect(issuesOf({ columns: { maxAge: 'Keep rows for' } })).not.toEqual([]);
+        const at = ['settings', 'lifecycle', 'keys', 'retention_overrides'];
+        expect(issuesOf({ keyColumn: 'Object' }).map((i) => [i.code, i.path]))
+          .toEqual([['invalid_type', [...at, 'keyColumn']]]);
+        expect(issuesOf({ columns: { maxAge: 'Keep rows for' } }).map((i) => [i.code, i.path]))
+          .toEqual([['invalid_type', [...at, 'columns', 'maxAge']]]);
+      });
+
+      it("refuses a specifier column pasted in whole, saying where its `name` goes instead of renaming it", () => {
+        // `name` is the record key, never the header: a rename to `label`
+        // would tell the author to overwrite the header with the identifier.
+        const issue = issuesOf({ columns: { maxAge: { name: 'maxAge', label: '保留时长', kind: 'duration' } } })
+          .find((i) => i.code === 'unrecognized_keys');
+        expect(issue?.message).toContain('`columns.<name>`');
+        expect(issue?.message).toContain('the `map` specifier declares it');
+        expect(issue?.message).not.toContain('`name` → `label`');
       });
     });
   });

@@ -595,7 +595,7 @@ export const jaJP: PlatformTranslationData = {
             + '組織ごとに設定するため、規制対象の組織は数年、開発用の組織は数日だけ保持できます。'
             + 'プラットフォーム機能が必要とする最小期間（例：ジョブキューの重複検出ウィンドウ）より短い上書きは無視されてエラーとして記録され、既定のウィンドウが引き続き適用されます。',
           keyColumn: { label: 'オブジェクト' },
-          columns: { maxAge: { label: '行の保持期間' }, expireAfter: { label: '行の有効期限' } },
+          columns: { maxAge: { label: '行の保持期間' }, expireAfter: { label: '行の失効までの期間' } },
         },
         quotas: {
           label: '行数クォータ',
