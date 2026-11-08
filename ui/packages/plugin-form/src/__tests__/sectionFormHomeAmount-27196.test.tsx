@@ -20,6 +20,7 @@ import { render, waitFor, cleanup } from '@testing-library/react';
 import { afterEach } from 'vitest';
 import React from 'react';
 import { LocalizationProvider } from '@object-ui/i18n';
+import { SchemaRendererProvider } from '@object-ui/react';
 import { registerAllFields } from '@object-ui/fields';
 import { ModalForm } from '../ModalForm';
 import { DrawerForm } from '../DrawerForm';
@@ -76,5 +77,27 @@ describe('authored sections: the home field (ADR-0144 D5)', () => {
     const other = row('other_home');
     expect((other.querySelector('input') as HTMLInputElement).disabled).toBe(true);
     expect(other.querySelector('[data-testid="home-amount-hint"]')).toBeNull();
+  });
+});
+
+describe('the live preview under the amount, through the form (ADR-0144 D5)', () => {
+  it('an edited record-mode amount shows what the save stores, read through the host adapter', async () => {
+    const finds: string[] = [];
+    const ds = {
+      getObjectSchema: async () => OBJ, findOne: async () => ROW, create: async () => ROW, update: async () => ROW,
+      find: async (resource: string) => { finds.push(resource); return { data: [{ rate: 0.1389, effective_date: '2026-10-01' }] }; },
+    };
+    render(
+      <SchemaRendererProvider dataSource={ds as any}>
+        <LocalizationProvider value={{ locale: 'en-US', currency: 'CNY' }}>
+          <ObjectForm schema={{ type: 'object-form', objectName: 'fx_invoice', mode: 'edit', recordId: 'r1' } as any} dataSource={ds as any} />
+        </LocalizationProvider>
+      </SchemaRendererProvider>,
+    );
+    await waitFor(() => {
+      const line = document.querySelector('[data-field="amount"] [data-testid="home-amount-preview"]');
+      expect(line?.textContent?.replace(/ /g, ' ')).toBe('≈ CN¥71,994.24 at 0.1389 on Nov 1, 2026');
+    }, { timeout: 5000 });
+    expect(finds).toEqual(['sys_exchange_rate']);
   });
 });
