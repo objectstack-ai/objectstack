@@ -64,6 +64,11 @@ function isFiniteNumber(value: unknown): boolean {
   return typeof value === 'number' && Number.isFinite(value);
 }
 
+/** A JSON string: the one value the string screen-field kinds admit (ruling A+, #31491). */
+function isString(value: unknown): boolean {
+  return typeof value === 'string';
+}
+
 /**
  * The closed set of screen-field `type` members that are VALUE domains, each
  * with the predicate a present value must meet and the sentence a value that
@@ -83,6 +88,17 @@ const SCREEN_FIELD_VALUE_DOMAINS: ReadonlyMap<string, { admits: (value: unknown)
     // by the spec's one arbiter, the predicate the record write's claim path
     // reads too, so an id this door admits is one a later write can claim.
     ['file', { admits: isFileIdToken, expected: 'the id of an uploaded file' }],
+    // [#31491, ruling A+ 2026-11-08] The five string kinds, on one predicate:
+    // a present value that is not a JSON string (an object, a number, a
+    // boolean, an array) is refused here, before the suspension is consumed,
+    // instead of reaching the record write after it. ⛔ Shape only: an email,
+    // URL or phone number is not judged for its format, and a number is
+    // never read as the string it would print.
+    ['text', { admits: isString, expected: 'a string' }],
+    ['textarea', { admits: isString, expected: 'a string' }],
+    ['email', { admits: isString, expected: 'a string' }],
+    ['url', { admits: isString, expected: 'a string' }],
+    ['phone', { admits: isString, expected: 'a string' }],
   ]);
 
 /**
@@ -123,8 +139,9 @@ export function screenDeclaresInputContract(screen: ScreenSpec | undefined): boo
  * Enforced, and nothing beyond it:
  *  - `required` presence for every field the caller was actually asked for;
  *  - the VALUE SHAPE of a numeric field — `type: 'number'` (#17306),
- *    `'currency'` or `'percent'` (#30178) — and of a `type: 'file'` field
- *    (#25801);
+ *    `'currency'` or `'percent'` (#30178) — of a `type: 'file'` field
+ *    (#25801), and of a string field — `'text'`, `'textarea'`, `'email'`,
+ *    `'url'` or `'phone'` (#31491);
  *  - the declared numeric bound pair `min` / `max` (#17306);
  *  - no value at all under a `type: 'record_link'` field;
  *  - undeclared keys.
@@ -139,11 +156,13 @@ export function screenDeclaresInputContract(screen: ScreenSpec | undefined): boo
  * degradation is loud rather than silent. Its KEY stays accepted either way —
  * the author declared it, so it is never "undeclared".
  *
- * Value SHAPE (`type`) is out of scope here with ONE closed exception, and the
- * exception is the maintainer's (ruling A′, 2026-09-13): a screen field's
- * `type` is an open widget hint, so no member of it constrains a value —
- * EXCEPT the numeric kinds, whose meaning is not a rendering preference but a
- * value domain the bound pair beside it already assumes. Ruling A′ named
+ * Value SHAPE (`type`) is out of scope here except for one closed set, and
+ * every member of it is a maintainer's ruling (`SCREEN_FIELD_VALUE_DOMAINS`):
+ * a screen field's `type` is an open widget hint, so no member of it
+ * constrains a value — EXCEPT the numeric kinds, `'file'` and the five string
+ * kinds, whose meaning is not a rendering preference but a value domain. The
+ * numeric kinds came first (ruling A′, 2026-09-13): their domain is the one
+ * the bound pair beside them already assumes. Ruling A′ named
  * `'number'`; `'currency'` and `'percent'` joined it under the same rule by a
  * later ruling (#30178), so the three numeric kinds the object protocol groups
  * (`MEASURE_FIELD_TYPES`) answer one question one way. A present value for a
@@ -184,6 +203,21 @@ export function screenDeclaresInputContract(screen: ScreenSpec | undefined): boo
  * file reference is. Whether the CALLER may read that file is the claiming
  * write's question, asked there under the write's own caller (#25692) — not
  * this door's, which holds no storage service.
+ *
+ * The five string kinds are the third group (ruling A+, maintainer
+ * 2026-11-08, #31491): `'text'`, `'textarea'`, `'email'`, `'url'` and
+ * `'phone'`, on one predicate, a JSON string. Their meaning is a value domain
+ * the record write downstream already holds them to: a text column refuses an
+ * object, and coerces a number into the string it prints. Before this, both
+ * passed the door, so the suspension was consumed first — and #13937's
+ * shape-4 order consumes it before any downstream node runs — so an object
+ * failed the run at the write with no pause left to resume, and a number was
+ * stored as text the caller never sent. A present value that is not a string
+ * is now refused with the same `invalid_type`, ⛔ never coerced, while the
+ * pause is still live. Shape only: the format of an email, URL or phone number
+ * stays the record write's question. A string the write refuses for another
+ * reason (a length, an option, uniqueness) still ends the run; its exit is the
+ * shape-4 operator restore, not this door.
  *
  * No other widget hint is read as a value domain — `rating`, `slider` and
  * `progress` included, which the console has no numeric input for: the set is
@@ -226,8 +260,8 @@ export function validateScreenInputs(
   }
 
   // Value shape for a value-domain `type` — the numeric kinds (`'number'`,
-  // #17306 ruling A′; `'currency'` / `'percent'`, #30178) and `'file'`
-  // (#25801). Its own pass, BEFORE the bound: a value that is not a
+  // #17306 ruling A′; `'currency'` / `'percent'`, #30178), `'file'`
+  // (#25801) and the string kinds (ruling A+, #31491). Its own pass, BEFORE the bound: a value that is not a
   // number cannot be compared against one, so the shape is the first thing
   // true or false about it. A caller that posts `"25"` under a `max` of 20 gets
   // one issue naming the shape, not a silent pass and not a bound verdict
@@ -549,7 +583,10 @@ export function judgeHeadlessScreen(
   if (supplied.length === 0) return NOTHING_SUPPLIED;
 
   // Condition 2/3 — `unknown_field` cannot fire: every bag key is a declared
-  // field by construction, so every issue returned here is a missing `required`.
+  // field by construction, so every issue returned here is a missing `required`
+  // or a supplied value of the wrong shape for a value-domain kind (a numeric,
+  // `file` or, since #31491, string field) — one the resume door would refuse
+  // too, so the screen stays interactive rather than continuing on it.
   const issues = validateScreenInputs(declared, bag, () => true);
   return { satisfied: issues.length === 0, supplied, missing: issues.map((i) => i.field) };
 }
