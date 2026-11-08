@@ -54,6 +54,7 @@ import {
   type CatalogReferenceReportEngine,
 } from './catalog-reference-report.js';
 import { relaxTenantColumns } from './pre-18-tenant-column.testkit.js';
+import { createPackageScopedSecurityCatalogReader } from './security-catalog-package-scope.js';
 
 const SYS = { isSystem: true } as const;
 const POSTURE_ENV = 'OS_TENANCY_POSTURE';
@@ -98,6 +99,8 @@ interface Booted {
   /** Kernel lifecycle hooks the plugin registered, by event — collected, fired only by a test. */
   hooks: Map<string, Array<() => Promise<unknown>>>;
   catalog: SecurityCatalogReader;
+  /** [ADR-0150 D3/D4] The catalog the plugin binds: permission sets by (package, name). */
+  scopedCatalog: SecurityCatalogReader;
   /** The metadata service's declarations, by type — remove one and the catalog stops resolving it. */
   declared: { position: Map<string, Record<string, unknown>>; permission: Map<string, Record<string, unknown>> };
   report(): Promise<CatalogReferenceReport>;
@@ -191,6 +194,7 @@ async function boot(opts: { posture?: 'single' | 'isolated' } = {}): Promise<Boo
     logger,
     hooks,
     catalog,
+    scopedCatalog: createPackageScopedSecurityCatalogReader((engine as any).registry, metadata),
     declared,
     report: () => collectCatalogReferences(engine as any, { catalog }),
     async bootstrapped() {
@@ -510,6 +514,22 @@ describe('[ADR-0131 D4] a position definition naming a permission set the catalo
     await reportCatalogReferences(b.engine as any, { catalog: b.catalog, logger });
     expect(logger.error).not.toHaveBeenCalled();
     expect(logger.info).toHaveBeenCalledTimes(1);
+  });
+
+  it('[ADR-0150 D3/D7] lists a set the position\'s package cannot reach, with the refusal naming every candidate', async () => {
+    const b = await boot();
+    installSet(b);
+    bindPositions(b);
+    // The set is held, so the by-name read resolves it …
+    expect((await b.report()).positions).toEqual([]);
+    // … but only by a package outside the binding position's declared closure.
+    const report = await collectCatalogReferences(b.engine as any, { catalog: b.scopedCatalog });
+    const line = report.positions.find((p) => p.position === BINDING_POSITION);
+    expect(line).toMatchObject({ position: BINDING_POSITION, packageId: PKG });
+    expect(line?.permissionSets).toContain(PKG_SET.name);
+    expect(line?.refusals).toEqual([
+      expect.objectContaining({ permissionSet: PKG_SET.name, reason: 'outside-closure', candidates: [expect.stringContaining(SET_PKG)] }),
+    ]);
   });
 
   it('an unreadable position list stops the report: no finding, and the stop is said', async () => {
