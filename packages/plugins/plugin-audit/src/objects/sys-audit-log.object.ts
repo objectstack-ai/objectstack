@@ -402,6 +402,18 @@ export const SysAuditLog = ObjectSchema.create({
     // unfiltered `recent` and `all_events` views above, as for
     // `platform_admin_standing_change`.
     //
+    // [#30964, cloud#3624 ruling A] `package_unmanaged_import` joins the enum
+    // WRITER-FIRST. Its writer is the same `package-lifecycle-audit.ts`, called
+    // by the install-local door's unmanaged branch (`installUnmanaged` in
+    // `@objectstack/cloud-connection`) once per copy it attempted, from both
+    // doors that reach it (`POST /marketplace/install-local` and the copy an
+    // unmanaged grant on `POST /cloud-connection/install` hands it): one row
+    // with the copy's result — the new base, its namespace, the items copied,
+    // `success` or `failure` — which only the environment knows. Like
+    // `package_uninstall`, it names no record and no organization (a
+    // deployment-level row), and its shipped surfaces are the unfiltered
+    // `recent` and `all_events` views above.
+    //
     // Each option carries a label (#27855): the list, the detail and the System
     // Overview "Audit Events by Action" chart (whose dimension resolves through
     // these options) read it, where the bare-array shorthand made the label the
@@ -423,6 +435,7 @@ export const SysAuditLog = ObjectSchema.create({
           { label: 'Platform Admin Standing Change', value: 'platform_admin_standing_change' },
           { label: 'Action Invocation', value: 'action_invocation' },
           { label: 'Package Uninstall', value: 'package_uninstall' },
+          { label: 'Package Unmanaged Import', value: 'package_unmanaged_import' },
         ],
         label: 'Action',
         required: true,
