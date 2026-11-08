@@ -24,7 +24,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 
 const PACKAGE_ID = 'app.a';
-const DRAFTS = `/api/v1/meta/_drafts?packageId=${PACKAGE_ID}`;
+const DRAFTS = `/api/v1/meta/_drafts?package=${PACKAGE_ID}`;
 
 vi.mock('sonner', () => ({
   toast: {
@@ -65,6 +65,9 @@ vi.mock('../../preview/DraftChangesPanel', () => ({
     ) : null,
 }));
 
+// The console's preview and authoring code loads `@objectstack/lint` lazily;
+// warmed here so its first load is paid at import, not inside a test's clock.
+import '@objectstack/lint';
 import { StudioDesignSurface } from './StudioDesignSurface';
 import { t } from '../metadata-admin/i18n';
 

@@ -87,7 +87,7 @@ async function serve(input: RequestInfo | URL, init?: RequestInit): Promise<Resp
     if (seg[0] === '_drafts') {
       body = {
         drafts: [...server.drafts.values()]
-          .filter((d) => (!q.get('type') || d.type === q.get('type')) && (!q.get('packageId') || d.packageId === q.get('packageId')))
+          .filter((d) => (!q.get('type') || d.type === q.get('type')) && (!q.get('package') || d.packageId === q.get('package')))
           .map((d) => ({ type: d.type, name: d.name, packageId: d.packageId, organizationId: null })),
       };
     } else if (seg.length === 1) {
@@ -132,6 +132,9 @@ vi.mock('@object-ui/react', async (importOriginal) => {
   return { ...mod, useAdapter: () => dataSource };
 });
 
+// The console's preview and authoring code loads `@objectstack/lint` lazily;
+// warmed here so its first load is paid at import, not inside a test's clock.
+import '@objectstack/lint';
 import { AutomationsPillar, DataPillar, InterfacesPillar } from './StudioDesignSurface';
 import { registerMetadataPreview } from '../metadata-admin/preview-registry';
 import { DashboardPreview } from '../metadata-admin/previews/DashboardPreview';

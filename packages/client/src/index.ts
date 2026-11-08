@@ -2317,11 +2317,14 @@ export class ObjectStackClient {
     /**
      * ADR-0033: pending drafts — metadata authored (e.g. by an AI) but not
      * yet published, which the active-only item lists hide.
+     *
+     * `opts.packageId` goes on the wire as `?package=`, the spelling every
+     * `/meta` read takes; the door refuses the retired `?packageId=`.
      */
     listDrafts: async (opts?: { packageId?: string; type?: string }): Promise<ListDraftsResponse> => {
         const route = this.getRoute('metadata');
         const params = new URLSearchParams();
-        if (opts?.packageId) params.set('packageId', opts.packageId);
+        if (opts?.packageId) params.set('package', opts.packageId);
         if (opts?.type) params.set('type', opts.type);
         const qs = params.toString();
         const res = await this.fetch(`${this.baseUrl}${route}/_drafts${qs ? `?${qs}` : ''}`);

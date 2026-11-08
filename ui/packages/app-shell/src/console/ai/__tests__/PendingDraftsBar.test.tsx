@@ -71,7 +71,7 @@ describe('PendingDraftsBar (objectui#5694)', () => {
     const { container, rerender } = render(<PendingDraftsBar packageId="app.k9qk" idle />);
     await waitFor(() =>
       expect(fetch).toHaveBeenCalledWith(
-        '/api/v1/meta/_drafts?packageId=app.k9qk',
+        '/api/v1/meta/_drafts?package=app.k9qk',
         expect.objectContaining({ credentials: 'include' }),
       ),
     );

@@ -111,6 +111,9 @@ vi.mock('../metadata-admin/AccessExplainPanel', () => ({ AccessExplainPanel: () 
 vi.mock('./StudioAiCopilot', () => ({ StudioChatDock: () => null }));
 vi.mock('../../preview/DraftChangesPanel', () => ({ DraftChangesPanel: () => null }));
 
+// The console's preview and authoring code loads `@objectstack/lint` lazily;
+// warmed here so its first load is paid at import, not inside a test's clock.
+import '@objectstack/lint';
 import { StudioDesignSurface, StudioNavItemInspector } from './StudioDesignSurface';
 import { DraftTargetLabels, useNavTargetLabel } from '../../hooks/useNavTargetLabel';
 
@@ -157,7 +160,7 @@ beforeEach(() => {
   });
   fetchPackagesMock.mockReset();
   fetchPackagesMock.mockResolvedValue([{ id: PKG, name: 'Acme', writable: true, namespace: 'acme' }]);
-  // The surface's pending-drafts feed (`GET /api/v1/meta/_drafts?packageId=…`).
+  // The surface's pending-drafts feed (`GET /api/v1/meta/_drafts?package=…`).
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL) => {
