@@ -31,7 +31,7 @@
  * The values below are obvious dummies.
  */
 
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { createServer, type IncomingMessage, type Server } from 'node:http';
 import { randomBytes } from 'node:crypto';
@@ -46,9 +46,12 @@ import { LocalCryptoProvider } from '@objectstack/service-settings';
 import { ConnectionCredentialStore, type StoredConnectionCredential } from './connection-credential-store.js';
 import {
     CLOUD_BINDING_CREDENTIAL_OBJECT,
+    CLOUD_BINDING_CREDENTIAL_SERVICE,
     SharedConnectionCredentialLedger,
     SharedCredentialUnavailableError,
+    type CloudBindingCredentialReader,
 } from './connection-credential-ledger.js';
+import { CloudConnectionPlugin } from './cloud-connection-plugin.js';
 import { SysCloudBindingCredential } from './sys-cloud-binding-credential.object.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -177,6 +180,71 @@ describe('[#31554] the shared ledger keeps the credential in one sealed row', ()
         file.write({ ...FULL, runtimeToken: ROTATED });
         expect(await ledger.adoptFrom(file)).toBe(false);
         expect((await ledger.load())?.runtimeToken).toBe(TOKEN);
+    });
+});
+
+/** A plugin context with the services given, recording registrations, hooks and log lines. */
+function pluginContext(services: Record<string, unknown>) {
+    const registered = new Map<string, unknown>(Object.entries(services));
+    const hooks = new Map<string, Array<() => Promise<void>>>();
+    const logs = { info: [] as string[], warn: [] as string[], error: [] as string[] };
+    const ctx = {
+        hook: (e: string, h: () => Promise<void>) => { hooks.set(e, [...(hooks.get(e) ?? []), h]); },
+        getService: (name: string) => {
+            if (!registered.has(name)) throw new Error(`no ${name}`);
+            return registered.get(name);
+        },
+        registerService: (name: string, svc: unknown) => { registered.set(name, svc); },
+        logger: {
+            info: (m: string) => { logs.info.push(m); },
+            warn: (m: string) => { logs.warn.push(m); },
+            error: (m: string) => { logs.error.push(m); },
+        },
+    };
+    const fire = async (event: string) => { for (const h of hooks.get(event) ?? []) await h(); };
+    return { ctx, registered, logs, fire };
+}
+
+describe('[#31554] the plugin chooses the shared row only for declared replicas over a remote driver', () => {
+    afterEach(() => { vi.unstubAllEnvs(); });
+
+    it("registers the object, says so once, and moves a single node's file into the row before the first door", async () => {
+        vi.stubEnv('OS_CLUSTER_REPLICAS', '3');
+        dir = mkdtempSync(join(tmpdir(), 'ccl-plugin-'));
+        const credPath = join(dir, 'cc.json');
+        new ConnectionCredentialStore(credPath).write(FULL); // bound while it was one node
+        const { ql } = await database();
+        const register = vi.fn();
+        const { ctx, registered, logs, fire } = pluginContext({ manifest: { register }, cluster: { driver: 'redis', nodeId: 'n1' }, objectql: ql });
+        const plugin = new CloudConnectionPlugin({ singleEnvironment: true, controlPlaneUrl: 'http://cloud.test', credentialPath: credPath });
+        await plugin.init(ctx as never);
+        expect(register).toHaveBeenCalledWith(expect.objectContaining({ namespace: 'sys', objects: [SysCloudBindingCredential] }));
+        expect(logs.info.filter((m) => m.includes('sys_cloud_binding_credential'))).toHaveLength(1);
+        const reader = registered.get(CLOUD_BINDING_CREDENTIAL_SERVICE) as CloudBindingCredentialReader;
+        expect(reader.shared).toBe(true);
+        expect(reader.read()).toBeNull(); // nothing read before kernel:ready
+
+        await plugin.start(ctx as never);
+        await fire('kernel:ready');
+        expect(reader.read()).toEqual(FULL);
+        expect((registered.get('cloud-binding') as { credential(): string }).credential()).toBe(TOKEN);
+        expect(await new SharedConnectionCredentialLedger(() => ql as never).load()).toEqual(FULL);
+        expect(logs.info.some((m) => m.includes(`moved the cloud binding credential from ${credPath}`))).toBe(true);
+        expect([...logs.info, ...logs.warn, ...logs.error].join('\n')).not.toContain(TOKEN);
+        await fire('kernel:shutdown');
+        await plugin.destroy();
+    });
+
+    it('with no manifest service to register the object, reports the split at error with its consequence and fix, and keeps the file', async () => {
+        vi.stubEnv('OS_EXPECT_MULTI_NODE', 'true');
+        dir = mkdtempSync(join(tmpdir(), 'ccl-plugin-'));
+        const { ctx, registered, logs } = pluginContext({ cluster: { driver: 'redis', nodeId: 'n1' } });
+        const plugin = new CloudConnectionPlugin({ singleEnvironment: true, controlPlaneUrl: 'http://cloud.test', credentialPath: join(dir, 'cc.json') });
+        await plugin.init(ctx as never);
+        expect((registered.get(CLOUD_BINDING_CREDENTIAL_SERVICE) as CloudBindingCredentialReader).shared).toBe(false);
+        expect(logs.error).toHaveLength(1);
+        expect(logs.error[0]).toContain('a bind made on one replica is not seen by the others');
+        expect(logs.error[0]).toContain('Compose the data engine');
     });
 });
 
