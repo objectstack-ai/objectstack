@@ -312,6 +312,7 @@ import { ConnectionCredentialStore } from './connection-credential-store.js';
 import { readJsonRequestBody } from './request-json-body.js';
 import { MARKETPLACE_INSTALLED_UI_BUNDLE } from './marketplace-ui.js';
 import { countSeedRows, matchSeedRows, purgeSeedRows, seedDatasetOfReceiptItem, type PurgeSeedDataset } from './marketplace-install-local-purge.js';
+import { UnmanagedCopyRecord } from './marketplace-install-local-unmanaged-copies.js';
 import {
     isStampableOwner,
     stampSeedOwner,
@@ -324,6 +325,7 @@ import type {
 } from '@objectstack/spec/contracts';
 import type {
     DeletePackageRequest,
+    UninstallCleanup,
     UninstallCleanupOutcome,
     UninstallDeclared,
     ObjectStackProtocolImplementation,
@@ -884,6 +886,9 @@ type UnmanagedCopySeedNameStore = Pick<IObjectQLEngine, 'find'>;
  * which the import writes each dataset as.
  */
 const UNMANAGED_COPY_SEED_TYPE = 'seed';
+
+/** [#30808] The uninstall cleanup that removes the door's record of a copy ({@link UnmanagedCopyRecord}). */
+const UNMANAGED_COPY_RECORD_UNINSTALL_CLEANUP = 'install-local:unmanaged-copy-record';
 
 /**
  * [ADR-0146 D2 / D3, #30106] The three verbs a pair install composes, typed
@@ -1550,10 +1555,18 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
      */
     private readonly refusedAtRehydrate = new Map<string, { installedAt: string; marker: NotLoadedMarker }>();
 
+    /**
+     * [#30808] The unmanaged copies this door made, beside the ledger
+     * ({@link UnmanagedCopyRecord}): the only bases its purge reaches without
+     * a ledger entry.
+     */
+    private readonly unmanagedCopies: UnmanagedCopyRecord;
+
     constructor(config: MarketplaceInstallLocalPluginConfig = {}) {
         this.cloudUrl = resolveCloudUrl(config.controlPlaneUrl);
         this.ledger = new LocalManifestSource(config.storageDir);
         this.storageDir = this.ledger.dir;
+        this.unmanagedCopies = new UnmanagedCopyRecord(this.storageDir);
         this.credentials = new ConnectionCredentialStore();
     }
 
@@ -1579,6 +1592,9 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
 
             // 1. Rehydrate previously installed packages so they survive restart.
             await this.rehydrate(ctx);
+
+            // [#30808] An uninstalled copy leaves the door's record of it.
+            this.registerUnmanagedCopyCleanup(ctx);
 
             // 2. Mount HTTP endpoints.
             // [#4251] Read canonical-first with a REAL per-name fallback:
@@ -4684,6 +4700,25 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             + `${userId ? ` by ${userId}` : ''}. Nothing is registered under '${manifestId}'; the copy follows no upgrade.`,
         );
         if (withheldMaps.length > 0) ctx.logger?.warn?.(withheldMapsLogLine(manifestId, 'unmanaged', withheldMaps));
+        // [#30808] The door's record of this copy, in the same act — before
+        // any row is loaded, so a load that fails partway is still purgeable.
+        // A record that cannot be written leaves the copy unreachable by the
+        // purge (its 404), never reachable by mistake; the operator is told.
+        try {
+            this.unmanagedCopies.write({
+                baseId: result.targetPackageId,
+                sourcePackageId: result.sourcePackageId,
+                ...(result.sourceVersion !== undefined ? { sourceVersion: result.sourceVersion } : {}),
+                seeded: seedSampleData,
+                copiedAt: new Date().toISOString(),
+                ...(userId ? { copiedBy: userId } : {}),
+            });
+        } catch (err: any) {
+            ctx.logger?.warn?.(
+                `[MarketplaceInstallLocal] the record of the unmanaged copy '${result.targetPackageId}' could not be written `
+                + `under ${this.unmanagedCopies.dir}: ${err?.message ?? err}. Its sample data cannot be purged through this door.`,
+            );
+        }
         const declaresSeeds = unmanagedInstallValueCarries(packageBody.data);
         // [#30808] Asked for: the rows, from the receipt the verb just wrote.
         const seeded = seedSampleData
@@ -5427,11 +5462,22 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             return c.json({ success: false, error: { code: 'INVALID_REQUEST', message: 'manifestId path param required.' } }, 400);
         }
         // [#30808] An unmanaged copy writes no install-ledger entry: its base
-        // holds the seed receipt instead, and the purge deletes by it.
+        // holds the seed receipt instead, and the purge deletes by it — for a
+        // base this door copied ({@link UnmanagedCopyRecord}) and no other.
         if (!this.ledger.has(manifestId)) {
             const copy = await this.unmanagedCopyPurgeDatasets(ctx, manifestId);
             if (copy === null) {
                 return c.json({ success: false, error: { code: 'RESOURCE_NOT_FOUND', message: `No marketplace install for ${manifestId}.` } }, 404);
+            }
+            if ('notSeeded' in copy) {
+                return c.json({
+                    success: false,
+                    error: {
+                        code: 'NOTHING_TO_PURGE',
+                        message: `No sample data was copied into '${manifestId}': it was installed unmanaged without `
+                            + '`seedSampleData`. Nothing was deleted.',
+                    },
+                }, 400);
             }
             if ('failure' in copy) {
                 ctx.logger?.warn?.(`[MarketplaceInstallLocal] purge of the unmanaged copy ${manifestId} refused: ${copy.failure}`);
@@ -5445,7 +5491,8 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                     },
                 }, 503);
             }
-            return this.purgeSeedDatasets(c, ctx, manifestId, copy.datasets, null);
+            return this.purgeSeedDatasets(c, ctx, manifestId, copy.datasets, null,
+                `The sample data receipt of '${manifestId}' holds no seed item any more, so no row can be matched. Nothing was deleted.`);
         }
         // #5426 — same shape as reseed: `has()` said the file is there, so a
         // missing entry here is an unreadable one, and the operator gets the
@@ -5463,18 +5510,44 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
     };
 
     /**
+     * [#30808] Remove the door's record of a copy when its base is uninstalled
+     * (the protocol's uninstall cleanups, which `deletePackage` runs), so a
+     * later base under the same id is never taken for the copy. A protocol
+     * without the cleanup registry leaves the records as they are; the purge
+     * still answers 404 for a record whose base is gone.
+     */
+    private registerUnmanagedCopyCleanup = (ctx: PluginContext): void => {
+        let protocol: { registerUninstallCleanup?: (name: string, cleanup: UninstallCleanup) => void } | undefined;
+        try { protocol = ctx.getService<typeof protocol>('protocol'); } catch { return; /* no protocol service */ }
+        if (!protocol || typeof protocol.registerUninstallCleanup !== 'function') return;
+        protocol.registerUninstallCleanup(UNMANAGED_COPY_RECORD_UNINSTALL_CLEANUP, async ({ packageId }) => {
+            try {
+                return { success: true, removed: this.unmanagedCopies.remove(packageId) ? 1 : 0 };
+            } catch (err: any) {
+                return { success: false, removed: 0, error: String(err?.message ?? err) };
+            }
+        });
+    };
+
+    /**
      * [#30808] The datasets a purge of an UNMANAGED COPY deletes by: its
      * base's seed receipt ({@link readUnmanagedCopySeedReceipt}). `null` when
-     * `packageId` is no installed writable base — the purge's 404, as for no
-     * install at all; `failure` when the receipt could not be read.
+     * `packageId` is no copy this door made ({@link UnmanagedCopyRecord}) or
+     * is no longer an installed writable base — the purge's 404, as for no
+     * install at all; `notSeeded` for a copy made without the sample data;
+     * `failure` when the record or the receipt could not be read.
      */
     private unmanagedCopyPurgeDatasets = async (
         ctx: PluginContext,
         packageId: string,
-    ): Promise<{ datasets: PurgeSeedDataset[] } | { failure: string } | null> => {
+    ): Promise<{ datasets: PurgeSeedDataset[] } | { notSeeded: true } | { failure: string } | null> => {
+        const record = this.unmanagedCopies.read(packageId);
+        if (record.failure !== undefined) return { failure: record.failure };
+        if (record.entry === null) return null;
         let ql: NamespaceHoldingEngine | undefined;
         try { ql = ctx.getService<NamespaceHoldingEngine>('objectql'); } catch { return null; /* no data engine — no base */ }
         if (!ql?.registry?.getPackage?.(packageId) || !isWritablePackage(ql, packageId)) return null;
+        if (!record.entry.seeded) return { notSeeded: true };
         const listed = await this.unmanagedCopySeedNames(ctx, packageId);
         if (listed.failure !== undefined) return { failure: listed.failure };
         const receipt = await this.readUnmanagedCopySeedReceipt(ctx, packageId, listed.names);
@@ -5493,12 +5566,13 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         manifestId: string,
         datasets: PurgeSeedDataset[],
         entry: InstalledEntry | null,
+        nothingToPurge = 'This package declares no seed datasets.',
     ): Promise<Response> => {
 
         if (datasets.length === 0) {
             return c.json({
                 success: false,
-                error: { code: 'NOTHING_TO_PURGE', message: 'This package declares no seed datasets.' },
+                error: { code: 'NOTHING_TO_PURGE', message: nothingToPurge },
             }, 400);
         }
 

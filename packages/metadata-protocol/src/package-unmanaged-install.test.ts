@@ -96,12 +96,16 @@ function makeEngine(opts: { artifacts?: Array<{ type: string; name: string; pack
             assertEngineFindOnePredicate(t, q);
             return table(t).find((r) => matches(r, q.where)) ?? null;
         },
-        async insert(t: string, data: Row) {
-            writes.push({ op: 'insert', table: t });
-            nextId += 1;
-            const row = { id: `r_${nextId}`, ...data };
-            table(t).push(row);
-            return { ...row };
+        // One record, or the batch the seed loader inserts a dataset in.
+        async insert(t: string, data: Row | Row[]): Promise<Row | Row[]> {
+            const one = (record: Row) => {
+                writes.push({ op: 'insert', table: t });
+                nextId += 1;
+                const row = { id: `r_${nextId}`, ...record };
+                table(t).push(row);
+                return { ...row };
+            };
+            return Array.isArray(data) ? data.map(one) : one(data);
         },
         async update(t: string, data: Row, q?: Record<string, unknown>) {
             assertEngineUpdateDispatch(data, q);
@@ -1217,6 +1221,16 @@ describe('the sample data, copied when the door asks — the seed receipt (#3080
         expect(seeds[0]!.body.externalId).toBe('title');
     });
 
+    it('a dataset that carries `files` keeps its bytes in the receipt, verbatim — the managed loader is handed them as written', async () => {
+        const files = { 'fixtures/hello.txt': { contentType: 'text/plain', size: 2, sha256: '8f434346648f6b96df89dda901c5176b10a6d83961dd3c1ac88b59b2dc327aa4', data: 'aGk=' } };
+        const { protocol, table } = makeProtocol();
+        await protocol.importUnmanagedPackage({
+            manifest: seededBody({ data: [{ object: 'crm_account', externalId: 'title', records: [{ title: 'Acme' }], files }] }),
+            seedData: true,
+        });
+        expect(seedRows(table).map((r) => [r.name, r.body.files])).toEqual([['crm_account_seed', files]]);
+    });
+
     it('names a second dataset of one object `<object>_seed_2`', () => {
         const p = plan(seededBody({
             data: [
@@ -1289,7 +1303,22 @@ describe('the sample data, copied when the door asks — the seed receipt (#3080
     });
 
 
-    it('a copied seed item is an environment seed item like any other: re-saved, or drafted and published, it loads no row twice', async () => {
+    it('a copied seed item is an environment seed item like any other: a plain save loads nothing, even with every row gone', async () => {
+        const { protocol, table, writes } = makeProtocol();
+        await protocol.importUnmanagedPackage({ manifest: seededBody(), seedData: true });
+        // The state after a purge: the install's one organization, and no row of the dataset.
+        table('sys_organization').push({ id: 'org_1', name: 'Acme Corp' });
+        const stored = seedRows(table).find((r) => r.name === 'crm_account_seed')!.body;
+        const inserts = () => writes.filter((w) => w.op === 'insert' && w.table === 'crm_account').length;
+
+        // A plain save writes metadata only: a seed is applied when it is PUBLISHED. Every
+        // record is missing here, so a save that loaded would insert both.
+        await protocol.saveMetaItem({ type: 'seed', name: 'crm_account_seed', item: stored, mode: 'publish', packageId: 'com.example.crm-copy' });
+        expect(inserts()).toBe(0);
+        expect(table('crm_account')).toEqual([]);
+    });
+
+    it('drafted and published while its rows are there, a copied seed item loads no row twice', async () => {
         const { protocol, table, writes } = makeProtocol();
         await protocol.importUnmanagedPackage({ manifest: seededBody(), seedData: true });
         // The install's one organization, and the rows the install door loaded
@@ -1302,11 +1331,7 @@ describe('the sample data, copied when the door asks — the seed receipt (#3080
         const stored = seedRows(table).find((r) => r.name === 'crm_account_seed')!.body;
         const inserts = () => writes.filter((w) => w.op === 'insert' && w.table === 'crm_account').length;
 
-        // A plain save of the item writes metadata only: a seed is applied when it is PUBLISHED.
-        await protocol.saveMetaItem({ type: 'seed', name: 'crm_account_seed', item: stored, mode: 'publish', packageId: 'com.example.crm-copy' });
-        expect(inserts()).toBe(0);
-
-        // Drafted and published, it is applied — create-only (`ignore`, the spec default): every record already has its row.
+        // Applied create-only (`ignore`, the spec default): every record already has its row.
         await protocol.saveMetaItem({ type: 'seed', name: 'crm_account_seed', item: stored, mode: 'draft', packageId: 'com.example.crm-copy' });
         const published = await protocol.publishPackageDrafts({ packageId: 'com.example.crm-copy' });
         expect(published.seedApplied).toMatchObject({
@@ -1315,6 +1340,22 @@ describe('the sample data, copied when the door asks — the seed receipt (#3080
         });
         expect(inserts()).toBe(0);
         expect(table('crm_account').map((r) => r.title)).toEqual(['Acme', 'crm_lead']);
+    });
+
+    it('drafted and published after a purge, a copied seed item loads its rows again under the publish rule: no installer, no owner stamped', async () => {
+        const { protocol, table } = makeProtocol();
+        await protocol.importUnmanagedPackage({ manifest: seededBody(), seedData: true });
+        table('sys_organization').push({ id: 'org_1', name: 'Acme Corp' });
+        const stored = seedRows(table).find((r) => r.name === 'crm_account_seed')!.body;
+
+        await protocol.saveMetaItem({ type: 'seed', name: 'crm_account_seed', item: stored, mode: 'draft', packageId: 'com.example.crm-copy' });
+        const published = await protocol.publishPackageDrafts({ packageId: 'com.example.crm-copy' });
+        expect(published.seedApplied).toMatchObject({ success: true, inserted: 2 });
+        // A publish names no person to the loader, so the rows carry the
+        // organization the loader derives and no owner: the installer rule
+        // (`owner_id` / `created_by`) is the install door's, not the publish's.
+        expect(table('crm_account').map((r) => [r.title, r.organization_id, r.owner_id, r.created_by]))
+            .toEqual([['Acme', 'org_1', undefined, undefined], ['crm_lead', 'org_1', undefined, undefined]]);
     });
 
     it('`seedData` is the door\'s, never the published request\'s: the declaration still refuses an undeclared key', async () => {
