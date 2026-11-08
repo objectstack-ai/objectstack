@@ -1869,27 +1869,31 @@ describe('[ADR-0090 D12] a delegated refusal names one reason for a target user 
     return harness;
   }
 
-  /** Every write shape that names a target user: a new grant, a grant pointed at it, a stored grant of it removed. */
-  const WRITES: Record<string, (harness: ReturnType<typeof makeHarness>) => Promise<void>> = {
-    insert: (harness) => harness.gate.assert({
+  /**
+   * Every write shape that names a target user, as `[operation, write]`: a new
+   * grant, a stored grant pointed at the target, a stored grant of the target
+   * removed. Each write is the gate's own `assert`, never an engine double.
+   */
+  const WRITES: ReadonlyArray<readonly [string, (harness: ReturnType<typeof makeHarness>) => Promise<void>]> = [
+    ['insert', (harness) => harness.gate.assert({
       object: 'sys_user_permission_set', operation: 'insert',
       data: { user_id: TARGET, permission_set: 'sales_user' }, context: harness.ctxOf('delegate'),
-    }),
-    update: (harness) => {
+    })],
+    ['update', (harness) => {
       harness.tables.sys_user_permission_set = [{ id: 'g_east', user_id: 'u_east_1', permission_set: 'sales_user' }];
       return harness.gate.assert({
         object: 'sys_user_permission_set', operation: 'update',
         data: { id: 'g_east', user_id: TARGET }, context: harness.ctxOf('delegate'),
       });
-    },
-    delete: (harness) => {
+    }],
+    ['delete', (harness) => {
       harness.tables.sys_user_permission_set = [{ id: 'g_target', user_id: TARGET, permission_set: 'sales_user' }];
       return harness.gate.assert({
         object: 'sys_user_permission_set', operation: 'delete',
         options: { where: { id: 'g_target' } }, context: harness.ctxOf('delegate'),
       });
-    },
-  };
+    }],
+  ];
 
   /** Everything a caller is told by a refusal: the thrown value and the REST door's envelope. */
   const answerOf = (err: any) => ({
@@ -1903,7 +1907,7 @@ describe('[ADR-0090 D12] a delegated refusal names one reason for a target user 
     wire: mapDataError(err, 'sys_user_permission_set'),
   });
 
-  for (const [shape, write] of Object.entries(WRITES)) {
+  for (const [shape, write] of WRITES) {
     it(`${shape}: the three target states answer the same scope-violation refusal`, async () => {
       const answers: Array<ReturnType<typeof answerOf>> = [];
       for (const state of STATES) answers.push(answerOf(await refusalOf(() => write(harnessWith(state)))));
@@ -1917,7 +1921,7 @@ describe('[ADR-0090 D12] a delegated refusal names one reason for a target user 
   }
 
   it('CONTROL: the same target with a business unit inside the subtree is admitted, on every write shape', async () => {
-    for (const [shape, write] of Object.entries(WRITES)) {
+    for (const [shape, write] of WRITES) {
       await expect(write(harnessWith('a user whose business unit is inside the subtree')), shape).resolves.toBeUndefined();
     }
   });
