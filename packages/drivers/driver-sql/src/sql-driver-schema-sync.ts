@@ -169,6 +169,7 @@ import { isJsonColumnType, mediaColumnMoveDialect, mediaColumnMovePlan, type Med
 import { StandardErrorCode } from '@objectstack/spec/api';
 import { recoverUnencodedJsonText } from './unencoded-json-text.js';
 import { renderExistingTableAdoptionRefusal } from './existing-table-refusal.js';
+import { renderDeclaredRenameRefusal } from './declared-rename.js';
 import { aggregandColumnClass } from '@objectstack/core';
 import { FILE_REFERENCE_TYPES, isRuntimeDefaultToken, NUMERIC_VALUE_TYPES, parseAutonumberFormat, resolveAutonumberFormat, type AutonumberToken } from '@objectstack/spec/data';
 import { formatAttribute, undeliveredStorageAttributes, type UndeliveredAttribute } from './builtin-column-collision.js';
@@ -241,6 +242,7 @@ export interface SchemaSyncHost {
   readonly objectByPhysicalTable: SqlDriver['objectByPhysicalTable'];
   readonly physicalSchemaByObject: SqlDriver['physicalSchemaByObject'];
   readonly physicalTableByObject: SqlDriver['physicalTableByObject'];
+  planDeclaredRenames: SqlDriver['planDeclaredRenames'];
   previewDatetimeConvergence: SqlDriver['previewDatetimeConvergence'];
   previewTimeConvergence: SqlDriver['previewTimeConvergence'];
   probeNullSafeUniqueDuplicates: SqlDriver['probeNullSafeUniqueDuplicates'];
@@ -1950,7 +1952,7 @@ export function registerExternalObject(this: Pick<SchemaSyncHost, 'autoNumberFie
 }
 
 /** The body of `SqlDriver#previewDeferredSchemaWork`; the method's docblock there is its contract. */
-export async function previewDeferredSchemaWork(this: Pick<SchemaSyncHost, 'deferredSchemaObjects' | 'knex' | 'previewDatetimeConvergence' | 'previewTimeConvergence' | 'rotationShardKey' | 'supportsRotation'>): Promise<PendingSchemaWork[]> {
+export async function previewDeferredSchemaWork(this: Pick<SchemaSyncHost, 'deferredSchemaObjects' | 'knex' | 'planDeclaredRenames' | 'previewDatetimeConvergence' | 'previewTimeConvergence' | 'rotationShardKey' | 'supportsRotation'>): Promise<PendingSchemaWork[]> {
   const out: PendingSchemaWork[] = [];
   for (const [tableName, obj] of this.deferredSchemaObjects) {
     const declared = Object.entries<any>(obj.fields ?? {})
@@ -2000,6 +2002,34 @@ export async function previewDeferredSchemaWork(this: Pick<SchemaSyncHost, 'defe
         ? { table: tableName, kind: 'refuse_table', columns: ['_id'], rows: count, refusal: renderExistingTableAdoptionRefusal(tableName, '_id', count) }
         : { table: tableName, kind: 'rebuild_table', columns: declared, rows: 0 });
       continue;
+    }
+    // [cloud#3652 D3] A declared rename is planned as `initObjects` performs it
+    // (`carryDeclaredRenames`, before the additive diff): the carried column
+    // is no `add_columns` entry, and a refused declaration refuses the whole
+    // table, as the sync does — with the refusal's own text.
+    const renames = await this.planDeclaredRenames(tableName, obj);
+    if (renames.refusals.length > 0) {
+      const [{ rows }] = await this.knex(tableName).count({ rows: '*' });
+      out.push({
+        table: tableName,
+        kind: 'refuse_table',
+        columns: renames.refusals.map((r) => r.field),
+        rows: Number(rows),
+        refusal: renderDeclaredRenameRefusal(tableName, renames.refusals),
+      });
+      continue;
+    }
+    if (renames.carries.length > 0) {
+      out.push({
+        table: tableName,
+        kind: 'rename_columns',
+        columns: renames.carries.map((c) => c.to),
+        renames: renames.carries.map(({ from, to }) => ({ from, to })),
+      });
+      for (const c of renames.carries) {
+        existing.delete(c.from);
+        existing.add(c.to);
+      }
     }
     const missing = declared.filter((c) => !existing.has(c));
     if (missing.length > 0) {

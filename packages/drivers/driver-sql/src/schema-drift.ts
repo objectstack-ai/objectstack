@@ -356,6 +356,12 @@ export interface PendingSchemaWork {
    * read one text.
    */
   refusal?: string;
+  /**
+   * [cloud#3652 D3] Set on a `rename_columns` entry only: each column the sync
+   * carries to a field declaring `renamedFrom`, old key to new, in the order
+   * {@link columns} lists the new keys.
+   */
+  renames?: Array<{ from: string; to: string }>;
 }
 
 /**
@@ -377,6 +383,13 @@ export interface PendingSchemaWork {
  * does when it holds rows — nothing. It is no work at all, so it is neither
  * additive nor in place ({@link isRefusedSchemaWork}); the entry carries the
  * refusal's text, and `os migrate apply` leaves that table exactly as it is.
+ *
+ * [cloud#3652 D3] `rename_columns` is a declared rename the sync carries
+ * (`declared-rename.ts`): an existing column renamed to the field that
+ * declares `renamedFrom`, its values kept — in place, since it changes a column
+ * that holds rows. A declared rename the sync refuses is planned as
+ * `refuse_table`, with the refusal's text: the sync leaves that table exactly
+ * as it is.
  */
 export type PendingSchemaWorkKind =
   | 'create_table'
@@ -386,6 +399,7 @@ export type PendingSchemaWorkKind =
   | 'widen_datetime_columns'
   | 'widen_time_columns'
   | 'rebuild_table'
+  | 'rename_columns'
   | 'refuse_table';
 
 /** [#30636] True for the kind that is a refusal — work the sync will NOT do. */

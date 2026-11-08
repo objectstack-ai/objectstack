@@ -23,6 +23,16 @@ export { recoverUnencodedJsonText } from './unencoded-json-text.js';
 // face compiles SQL text with its own compiler, and must regroup by the same
 // rule the knex path does.
 export { FLAT_GROUP_MAX_MEMBERS, joinBalancedGroup } from './sql-driver-balanced-group.js';
+// [cloud#3652 D3] The declared-rename refusal the sync throws before any DDL,
+// and its renderer, so a host reporting a refused sync (the install door, `os
+// migrate apply`) reads the structured refusals rather than parsing the text.
+export { DeclaredRenameRefusal, renderDeclaredRenameRefusal } from './declared-rename.js';
+export type {
+  DeclaredRenameCarry,
+  DeclaredRenamePlan,
+  DeclaredRenameRefusalEntry,
+  DeclaredRenameRefusalReason,
+} from './declared-rename.js';
 // [#11991] The #11756 emission-scope refusal. Exported because a host that
 // renders its own diagnostics (Studio, `os migrate plan`, an installer) needs
 // the structured `client` / `supportedClients` and the stable `code` — the

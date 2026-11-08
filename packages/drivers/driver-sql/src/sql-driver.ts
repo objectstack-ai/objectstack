@@ -291,10 +291,13 @@ import { ColumnCreationFacet } from './sql-driver-column-creation.js';
 import { DatabaseHelpersFacet } from './sql-driver-database-helpers.js';
 // [#29520 codemod] SQLite serialisation: the methods of the same names below hand the bodies what they read (`SqliteSerialisationHost`).
 import { SqliteSerialisationFacet } from './sql-driver-sqlite-serialisation.js';
+// [cloud#3652 D3] Declared renames: the methods of the same names below hand the bodies what they read (`DeclaredRenameHost`).
+import { DeclaredRenameFacet } from './sql-driver-declared-rename.js';
+import type { DeclaredRenameCarry, DeclaredRenamePlan } from './declared-rename.js';
 // [#29520 codemod] The facets' hosts, one per driver, which the static block at the end of the class builds.
 import {
   aggregationHost, bulkOperationsHost, classHeadHost, columnCreationHost, crudHost, databaseHelpersHost,
-  deferredDdlHost, distinctHost, fieldMappingHost, filterHelpersHost, internalHelpersHost, lifecycleHost,
+  declaredRenameHost, deferredDdlHost, distinctHost, fieldMappingHost, filterHelpersHost, internalHelpersHost, lifecycleHost,
   managedDriftHost, queryPlanHost, rotationHost, schemaIntrospectionHost, schemaSyncSectionHost,
   sequenceSemanticsHost, sqliteSerialisationHost, transactionsSectionHost, windowFunctionBuilderHost,
   windowFunctionsHost,
@@ -4874,6 +4877,81 @@ export class SqlDriver implements IDataDriver {
   }
 
   /**
+   * [cloud#3652 D3 「写进清单 renamedFrom」] Why this driver renames no column on
+   * this datasource, or `null` when it can. A declared rename on a datasource
+   * that answers a limit is refused by name before any write
+   * ({@link planDeclaredRenames} answers each declaring field as a `transport`
+   * refusal), never synced as a new empty column. The SQL driver renames on
+   * SQLite (3.25+), PostgreSQL and MySQL (8.0+); a subclass whose transport
+   * runs its own DDL overrides this.
+   */
+  declaredRenameLimit(): string | null {
+    return DeclaredRenameFacet.declaredRenameLimit.call(declaredRenameHost.of(this));
+  }
+
+  /**
+   * [cloud#3652 D3] The declared renames of one table, read and judged, and
+   * nothing written: each field whose `renamedFrom` names a key the table
+   * still has a column for, and the object (`liveKeys`, the merged field map's
+   * keys by default) no longer declares, is planned as a carry of that column;
+   * every declaration the carry cannot honour is a refusal naming the field,
+   * the old key and the reason (`declared-rename.ts` lists them). The install
+   * door asks this before any write; {@link carryDeclaredRenames} asks it
+   * again, on the table as it is then.
+   */
+  planDeclaredRenames(
+    tableName: string,
+    object: { fields?: Record<string, any>; indexes?: any[] },
+    opts: { liveKeys?: Iterable<string> } = {},
+  ): Promise<DeclaredRenamePlan> {
+    return DeclaredRenameFacet.planDeclaredRenames.call(declaredRenameHost.of(this), tableName, object, opts);
+  }
+
+  /**
+   * [cloud#3652 D3] Carry one table's declared renames: rename each planned
+   * column, values and all, in one transaction (one `ALTER TABLE` on MySQL),
+   * and log each carry at `info`. Throws `DeclaredRenameRefusal` before any DDL
+   * when {@link planDeclaredRenames} refuses a declaration. Idempotent: once
+   * carried, the table has the new column and not the old, and nothing is
+   * planned. Schema sync calls it for every existing table before adding
+   * columns, so the boot on a new artifact and the install door carry alike.
+   */
+  carryDeclaredRenames(
+    tableName: string,
+    object: { fields?: Record<string, any>; indexes?: any[] },
+    opts: { liveKeys?: Iterable<string> } = {},
+  ): Promise<DeclaredRenameCarry[]> {
+    return DeclaredRenameFacet.carryDeclaredRenames.call(declaredRenameHost.of(this), tableName, object, opts);
+  }
+
+  /**
+   * [cloud#3652 D3] Undo carries {@link carryDeclaredRenames} made: each column
+   * renamed back to its old key, per table in one transaction. The install door
+   * calls it when the version that declared the renames is not installed after
+   * all, so the version still serving finds its columns where it left them.
+   */
+  reverseDeclaredRenames(carries: ReadonlyArray<DeclaredRenameCarry>): Promise<void> {
+    return DeclaredRenameFacet.reverseDeclaredRenames.call(declaredRenameHost.of(this), carries);
+  }
+
+  /**
+   * [cloud#3652 D3] Drop each index named for an old key that a carried rename
+   * moved onto a declaring field, once the index the declaration names now
+   * exists over the same key. The index sync creates indexes by name, so after
+   * a carry the renamed column is keyed twice: under the old name, which no
+   * declaration names any more, and under the new one. Returns the names
+   * dropped. Reads only the declaring fields' `renamedFrom`, so it is stateless
+   * and idempotent, whichever path carried the column.
+   */
+  retireIndexesNamedForOldKeys(
+    tableName: string,
+    object: { fields?: Record<string, any>; indexes?: any[] },
+    tenantField: string | null,
+  ): Promise<string[]> {
+    return DeclaredRenameFacet.retireIndexesNamedForOldKeys.call(declaredRenameHost.of(this), tableName, object, tenantField);
+  }
+
+  /**
    * What the deferred sync *would* do, without doing it.
    *
    * Read-only: `hasTable` + `columnInfo` decide between create and alter (the
@@ -4910,6 +4988,7 @@ export class SqlDriver implements IDataDriver {
     const host: ThisParameterType<typeof previewDeferredSchemaWork> = {
       get deferredSchemaObjects() { return readDeferredSchemaObjects(); },
       get knex() { return readKnex(); },
+      planDeclaredRenames: (...a) => this.planDeclaredRenames(...a),
       previewDatetimeConvergence: (...a) => this.previewDatetimeConvergence(...a),
       previewTimeConvergence: (...a) => this.previewTimeConvergence(...a),
       rotationShardKey: (...a) => this.rotationShardKey(...a),
@@ -8998,6 +9077,21 @@ export class SqlDriver implements IDataDriver {
       get tenantKeyCertifiedResolver() { return driver.tenantKeyCertifiedResolver; },
       set tenantKeyCertifiedResolver(v) { driver.tenantKeyCertifiedResolver = v; },
     }));
+    declaredRenameHost.install((driver) => ({
+      assertSchemaMutable: (...a) => driver.assertSchemaMutable(...a),
+      declaredRenameLimit: (...a) => driver.declaredRenameLimit(...a),
+      get dialectName() { return driver.dialectName; },
+      dropIndexIfExists: (...a) => driver.dropIndexIfExists(...a),
+      get fileColumnsMoved() { return driver.fileColumnsMoved; },
+      introspectColumns: (...a) => driver.introspectColumns(...a),
+      introspectIndexes: (...a) => driver.introspectIndexes(...a),
+      get isMysql() { return driver.isMysql; },
+      get knex() { return driver.knex; },
+      get logger() { return driver.logger; },
+      planDeclaredRenames: (...a) => driver.planDeclaredRenames(...a),
+      resolveTenantField: (...a) => driver.resolveTenantField(...a),
+      varcharColumnChars: (...a) => driver.varcharColumnChars(...a),
+    }));
     deferredDdlHost.install((driver) => ({
       get deferredDdl() { return driver.deferredDdl; },
       set deferredDdl(v) { driver.deferredDdl = v; },
@@ -9138,6 +9232,7 @@ export class SqlDriver implements IDataDriver {
       backfillCanonicalJsonEncoding: (...a) => driver.backfillCanonicalJsonEncoding(...a),
       backfillCanonicalTimes: (...a) => driver.backfillCanonicalTimes(...a),
       get booleanFields() { return driver.booleanFields; },
+      carryDeclaredRenames: (...a) => driver.carryDeclaredRenames(...a),
       computeAndRecordTenantField: (...a) => driver.computeAndRecordTenantField(...a),
       computeTenantField: (...a) => driver.computeTenantField(...a),
       createAuditTimestampColumn: (...a) => driver.createAuditTimestampColumn(...a),
@@ -9176,6 +9271,7 @@ export class SqlDriver implements IDataDriver {
       resolveFileColumnsMoved: (...a) => driver.resolveFileColumnsMoved(...a),
       resolveTenantField: (...a) => driver.resolveTenantField(...a),
       rethrowWithRowSizeExplanation: (...a) => driver.rethrowWithRowSizeExplanation(...a),
+      retireIndexesNamedForOldKeys: (...a) => driver.retireIndexesNamedForOldKeys(...a),
       get rotationStateByTable() { return driver.rotationStateByTable; },
       runWideningAlters: (...a) => driver.runWideningAlters(...a),
       get supportsRotation() { return driver.supportsRotation; },
