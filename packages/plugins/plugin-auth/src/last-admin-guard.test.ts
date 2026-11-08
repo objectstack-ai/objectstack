@@ -1161,8 +1161,11 @@ describe('[#5978] path 1 — downgrading the last administrator\'s sys_member ro
     await expect(setRole('mem_usr_owner', 'member')).rejects.toThrow(/sys_member/);
     await expect(setRole('mem_usr_owner', 'member')).rejects.toThrow(/ADR-0135 D5\.2/);
     await expect(setRole('mem_usr_owner', 'member')).rejects.toThrow(new RegExp(ADMIN_FULL_ACCESS));
-    // An IdP drove most of these, so the message points at the group mapping.
-    await expect(setRole('mem_usr_owner', 'member')).rejects.toThrow(/SCIM group mapping/);
+    // The closing advice names the writers that move standing, and says an
+    // identity provider group mapping is not one of them (it grants ordinary
+    // permission sets only).
+    await expect(setRole('mem_usr_owner', 'member')).rejects.toThrow(/grant another account administrator standing first/);
+    await expect(setRole('mem_usr_owner', 'member')).rejects.toThrow(/never moves administrator standing/);
   });
 
   it('a downgrade to ANOTHER administrative grade is allowed — the grade is not lost', async () => {
@@ -1819,7 +1822,7 @@ describe('[#6084, ADR-0131 D3] path 4 — switching admin_full_access off in the
     // …and the closing advice names the doors that actually write this table,
     // NOT the SCIM sentence: nothing in an IdP writes the ledger.
     expect(message).toMatch(/disable action/);
-    expect(message).not.toMatch(/SCIM group mapping/);
+    expect(message).not.toMatch(/identity provider group mapping/);
   });
 
   it('the payload is simulated, not pattern-matched: switching the row ON proceeds, OFF is refused', async () => {

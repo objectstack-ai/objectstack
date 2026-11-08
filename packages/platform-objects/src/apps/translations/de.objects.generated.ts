@@ -2649,6 +2649,54 @@ export const deObjects: NonNullable<TranslationData['objects']> = {
       }
     }
   },
+  sys_idp_group_mapping: {
+    label: "IdP-Gruppenzuordnung",
+    pluralLabel: "IdP-Gruppenzuordnungen",
+    description: "Ordnet eine Gruppe des Identitätsanbieters dem Berechtigungssatz zu, den ihre Mitglieder erhalten",
+    fields: {
+      id: {
+        label: "ID"
+      },
+      source_kind: {
+        label: "Quellart",
+        help: "Was die Gruppe überträgt: eine SCIM-Verbindung.",
+        options: {
+          scim: "SCIM-Verbindung"
+        }
+      },
+      source_id: {
+        label: "Quell-ID",
+        help: "Die ID der SCIM-Verbindung, über die die Gruppe eintrifft, z. B. \"okta-prod\"."
+      },
+      group_external_id: {
+        label: "Externe Gruppen-ID",
+        help: "Die externalId der Gruppe, wie der Identitätsanbieter sie sendet. Legen Sie diese oder den Anzeigenamen fest, nicht beides."
+      },
+      group_display_name: {
+        label: "Gruppen-Anzeigename",
+        help: "Der displayName der Gruppe, exakt abgeglichen. Wird verwendet, wenn die Zuordnung keine externe ID nennt."
+      },
+      permission_set: {
+        label: "Berechtigungssatz",
+        help: "Der Berechtigungssatz, den ein Mitglied der Gruppe erhält. Administratorsätze werden abgelehnt."
+      },
+      organization_id: {
+        label: "Organisation",
+        help: "Die Organisation, in der die Berechtigung erteilt wird: die Organisation, der die SCIM-Verbindung gehört."
+      },
+      created_at: {
+        label: "Erstellt am"
+      },
+      updated_at: {
+        label: "Aktualisiert am"
+      }
+    },
+    _views: {
+      all: {
+        label: "Alle"
+      }
+    }
+  },
   sys_notification: {
     label: "Benachrichtigungsereignis",
     pluralLabel: "Benachrichtigungsereignisse",

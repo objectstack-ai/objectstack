@@ -36,6 +36,7 @@ import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFin
 import type { IEmailService, SendEmailResult, SendTemplateInput } from '@objectstack/spec/contracts';
 import { AuthManager } from './auth-manager';
 import { inviteForAudienceGate } from './audience-gate-test-support';
+import { CREDENTIALS_NAME_DIFFERENT_ACCOUNTS_CODE } from './one-account-per-request';
 
 // ───────────────────────────────────────────────────────────────────────────
 // Harness
@@ -606,27 +607,24 @@ describe('#8019 — a change-email request notifies the current address whatever
     });
   }
 
-  it('signed in as two accounts at once: the notice goes to the current address of the account the request changes', async () => {
+  it('signed in as two accounts at once: the request is refused, nothing is mailed and no address moves', async () => {
+    // An auth request is judged and executed as one account
+    // (`one-account-per-request.ts`): a cookie and a bearer naming two
+    // different accounts never reach the endpoint, so no confirmation and no
+    // notice is owed to anyone.
     const engine = createMemoryEngine();
     const email = createRecordingEmailService();
     const manager = makeManager(engine, email.service);
     const cookie = cookieFrom(await signUp(manager, 'cookie-holder@example.com'));
     const bearer = bearerFrom(await signUp(manager, 'token-holder@example.com'));
-    const tokenHolderId = userRows(engine).find((r) => r.email === 'token-holder@example.com')!.id;
     email.sent.length = 0;
 
     const response = await changeEmailAs(manager, { cookie, bearer }, 'requested@example.com');
-    expect(response.status, await response.clone().text()).toBe(200);
+    expect(response.status).toBe(401);
+    expect(await errorBody(response)).toMatchObject({ code: CREDENTIALS_NAME_DIFFERENT_ACCOUNTS_CODE });
 
-    // The account the request changes is the one its confirmation is for.
-    const confirmations = email.sent.filter((s) => s.template === 'auth.verify_email');
-    expect(confirmations).toHaveLength(1);
-    expect(confirmations[0].to).toMatchObject({ address: 'requested@example.com' });
-    expect((confirmations[0].data as { user?: { id?: string } }).user?.id).toBe(tokenHolderId);
-
-    // …and the notice goes to that account's current address, and to no other.
-    expect(notices(email.sent).map((s) => s.to)).toEqual([expect.objectContaining({ address: 'token-holder@example.com' })]);
-    expect((notices(email.sent)[0].data as { user?: { id?: string } }).user?.id).toBe(tokenHolderId);
+    expect(email.sent).toEqual([]);
+    expect(userRows(engine).map((r) => r.email).sort()).toEqual(['cookie-holder@example.com', 'token-holder@example.com']);
   });
 });
 
