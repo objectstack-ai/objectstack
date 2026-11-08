@@ -2236,7 +2236,29 @@ export const PER_CHUNK_GZIP_CEILINGS = Object.freeze({
   // gzipped bytes, headroom 49 -> 2,990. The eager closure read 2,204,342 ->
   // 2,201,440 (-2,902), with no chunk added and none but this one moving by
   // more than 40 bytes.
-  'i18n-locale-en': 60_000,
+  //
+  // ⚠️ RAISED by objectstack#28124 (2026-11-08), from 60,000 by 1,000 bytes,
+  // with its baseline below moved by the same amount. WHAT THE BYTES ARE —
+  // one container, one instrument: `CI=true pnpm exec vite build` in
+  // `apps/console`, reading `apps/console/dist/eager-closure.json`, twice on
+  // the same tree (`main` at `eb92a48d` merged into that card's branch): with
+  // the card's one new key, `organization.errors.organizationLimitReached`,
+  // this chunk reads 60,036 gzipped bytes; with that one `en` line deleted it
+  // reads 59,981. So `main` was 19 bytes under the line and the key costs 55.
+  // The eager closure read 2,237,031 -> 2,237,137 (+106), well inside the
+  // aggregate ceiling.
+  //
+  // WHAT THEY BUY: the 55 bytes are the create-workspace dialog's explanation
+  // of the per-user organization limit (better-auth's
+  // `YOU_HAVE_REACHED_THE_MAXIMUM_NUMBER_OF_ORGANIZATIONS`), which showed the
+  // English server sentence in every locale. The other 945 are SHARED headroom
+  // for the next few error strings of that size (about seventeen at 55 bytes),
+  // ⛔ not a budget for a new group: a whole group belongs in a lazy namespace,
+  // as `marketplace` went (objectstack#30588), and the `organization.*` group
+  // is the next candidate. ⛔ Not moved: MAX_EAGER_CLOSURE_GZIP_BYTES, BASELINE,
+  // REGRESSION_THIS_GATE_MUST_CATCH_BYTES and the other per-chunk rows. No
+  // exemption was added and no import was made lazy.
+  'i18n-locale-en': 61_000,
   // Raised by the maintainer ruling of 2026-09-08, ⛔ not by a measurement here:
   // `main` had been red on this line since `f76f43628`. The bytes that put it
   // there were UNATTRIBUTED when this moved and have since been measured to
@@ -2480,7 +2502,12 @@ export const PER_CHUNK_BASELINE = Object.freeze({
   // BASELINE above, so the two are directly comparable, and the same instrument
   // and container as the control build it is subtracted from. It supersedes
   // objectui#8816's `ba20b0bc0` reading of the retired `i18n-locales` key.
-  'i18n-locale-en': 40_415,
+  //
+  // Moved with its ceiling by objectstack#28124 (2026-11-08), from 40,415 by
+  // the same +1,000 bytes (the entry on that key of PER_CHUNK_GZIP_CEILINGS),
+  // which keeps the ceiling-minus-baseline gap this key carried. ⚠️ So this is
+  // no longer one build's reading.
+  'i18n-locale-en': 41_415,
   // `3f775eeb8`, its OWN console build — ⛔ not the one above it and not
   // BASELINE's. Moved with the ceiling in the same commit, per the maintainer
   // ruling of 2026-09-08 and the rule stated under "Raising one".

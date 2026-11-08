@@ -36,7 +36,13 @@
  *     the ledger exactly as before the call, and the environment's item still
  *     the environment's;
  *   - CONTROL, the same flows shipping a name nobody holds: `200`,
- *     `hotLoaded: true`, the new version registered and ledgered.
+ *     `hotLoaded: true`, the new version registered and ledgered;
+ *   - #31392, the cloud-fetched branch with the other two holders: a name
+ *     another installed package holds (a fresh install and an upgrade) and a
+ *     built-in name (`everyone`) answer the same `422` naming that holder,
+ *     nothing registered or ledgered, and a name nobody holds beside the
+ *     holding package still installs. Measured before the fix: `200`,
+ *     `hotLoaded: false`, ledgered.
  *
  * A capability is code-only (`allowRuntimeCreate: false`), so no environment
  * save produces one; its case pins that the door judges the refusal, not the
@@ -48,6 +54,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { BaseResponseSchema, ApiErrorSchema, envelopeViolations } from '@objectstack/spec/api';
+import { EVERYONE_POSITION } from '@objectstack/spec/identity';
 // The plugin reaches `@objectstack/runtime` through a lazy `import()`; its first
 // load is paid here, at module top, never inside a clocked `it`.
 import '@objectstack/runtime';
@@ -283,4 +290,110 @@ describe('install-local refuses a package whose catalog name an environment-auth
             });
         }
     }
+});
+
+/** [#31392] The package already holding the catalog name, installed first through the same door's inline branch. */
+const HOLDER_ID = 'com.acme.dispatch-roles';
+
+/** The registry's sentence for a held catalog name: the name, the incoming package, and `holder` as its holder. */
+function expectHeldElsewhereRefusal(res: any, name: string, holder: string) {
+    expect(res.status, JSON.stringify(res.payload)).toBe(422);
+    expect(BaseResponseSchema.safeParse(res.payload).success).toBe(true);
+    expect(envelopeViolations(res.payload)).toEqual([]);
+    expect(ApiErrorSchema.safeParse(res.payload.error).success).toBe(true);
+    expect(res.payload.success).toBe(false);
+    expect(res.payload.error.code).toBe('PLUGIN_REGISTER_FAILED');
+    expect(res.payload.error.message).toContain(`package "${APP_ID}"`);
+    expect(res.payload.error.message).toContain(`"${name}" is already held by ${holder}`);
+}
+
+describe('install-local cloud branch refuses a package whose catalog name another package or a built-in holds, before any write (#31392)', () => {
+    const k = CASES[0];
+    const cloud = BRANCHES[1];
+    const versions = {
+        'v1': packageVersion(k, '1.0.0', [k.shipped]),
+        'v2-collides': packageVersion(k, '2.0.0', [k.shipped, k.cloned]),
+        'v2-free': packageVersion(k, '2.0.0', [k.shipped, k.free]),
+        'v1-built-in': {
+            id: APP_ID,
+            name: 'acme_field_service',
+            type: 'app',
+            version: '1.0.0',
+            positions: [{ name: EVERYONE_POSITION, label: 'Everyone at Acme' }],
+        },
+    };
+    const holder: Bag = {
+        id: HOLDER_ID,
+        name: 'acme_dispatch_roles',
+        type: 'app',
+        version: '1.0.0',
+        [k.collection]: [{ ...item(k, k.cloned), label: 'held by the roles package' }],
+    };
+
+    async function bootWithHolder() {
+        cloud.serve(versions);
+        const booted = await bootPlugin(cloud.controlPlaneUrl);
+        const held = await booted.install({ manifest: holder });
+        expect(held.status, JSON.stringify(held.payload)).toBe(200);
+        return booted;
+    }
+    const ledgerOf = (id: string) => new LocalManifestSource(dir).read(id).entry;
+    function expectHolderItemKept(ql: ObjectQL) {
+        expect(ql.registry.getItem<Bag>(k.type, k.cloned)?.label).toBe('held by the roles package');
+        expect(ql.registry.getPackage(HOLDER_ID)?.manifest?.version).toBe('1.0.0');
+    }
+
+    it('a fresh install of a name another package holds is refused: 422 naming the holder, nothing registered or ledgered', async () => {
+        const { ql, install } = await bootWithHolder();
+        const holderEntry = ledgerOf(HOLDER_ID);
+
+        const res = await install(cloud.body(versions, 'v2-collides'));
+
+        expectHeldElsewhereRefusal(res, k.cloned, `package "${HOLDER_ID}"`);
+        expect(res.payload.data).toBeUndefined();
+        expect(ql.registry.getPackage(APP_ID)).toBeUndefined();
+        expect(ledgerOf(APP_ID)).toBeNull();
+        expect(ledgerOf(HOLDER_ID)).toEqual(holderEntry);
+        expectHolderItemKept(ql);
+    });
+
+    it('an upgrade to a name another package holds is refused: 422, the installed version still registered and ledgered', async () => {
+        const { ql, install } = await bootWithHolder();
+        const first = await install(cloud.body(versions, 'v1'));
+        expect(first.status, JSON.stringify(first.payload)).toBe(200);
+        expect(first.payload.data.hotLoaded).toBe(true);
+        const entry = ledgerOf(APP_ID);
+
+        const res = await install(cloud.body(versions, 'v2-collides'));
+
+        expectHeldElsewhereRefusal(res, k.cloned, `package "${HOLDER_ID}"`);
+        expect(ql.registry.getPackage(APP_ID)?.manifest?.version).toBe('1.0.0');
+        expect(ledgerOf(APP_ID)).toEqual(entry);
+        expectHolderItemKept(ql);
+    });
+
+    it('a fresh install of a built-in name is refused: 422 naming the platform, nothing registered or ledgered', async () => {
+        cloud.serve(versions);
+        const { ql, install } = await bootPlugin(cloud.controlPlaneUrl);
+
+        const res = await install(cloud.body(versions, 'v1-built-in'));
+
+        expectHeldElsewhereRefusal(res, EVERYONE_POSITION, 'the platform');
+        expect(ql.registry.getPackage(APP_ID)).toBeUndefined();
+        expect(ledgerOf(APP_ID)).toBeNull();
+    });
+
+    it('CONTROL — beside the holder, an upgrade shipping a name nobody holds installs: 200, hot-loaded, ledgered', async () => {
+        const { ql, install } = await bootWithHolder();
+        expect((await install(cloud.body(versions, 'v1'))).status).toBe(200);
+
+        const res = await install(cloud.body(versions, 'v2-free'));
+
+        expect(res.status, JSON.stringify(res.payload)).toBe(200);
+        expect(res.payload.data.hotLoaded).toBe(true);
+        expect(res.payload.data.hotLoadError).toBeUndefined();
+        expect(ql.registry.getPackage(APP_ID)?.manifest?.version).toBe('2.0.0');
+        expect(ledgerOf(APP_ID)?.version).toBe('2.0.0');
+        expectHolderItemKept(ql);
+    });
 });

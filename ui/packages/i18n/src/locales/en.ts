@@ -4393,6 +4393,7 @@ const en = {
       organizationExists: 'Organization already exists',
       slugTaken: 'That URL slug is already taken',
       notAllowedToCreate: 'You are not allowed to create a new organization',
+      organizationLimitReached: 'You have reached the limit on organizations you can create. Organizations you were invited to do not count toward it.',
       notTheRecipient: 'You are not the recipient of the invitation',
       invitationNotFound: 'This invitation no longer exists or has expired',
       unknown: 'Something went wrong. Please try again.',
