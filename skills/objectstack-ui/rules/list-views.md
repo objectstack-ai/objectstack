@@ -39,10 +39,7 @@ export const CaseViews = defineView({
 Every view connects to data via one of two providers:
 
 ```typescript
-// Auto-connect to an ObjectStack object
 data: { provider: 'object', object: 'support_case' }
-
-// Static inline data
 data: { provider: 'value', items: [...] }
 ```
 
@@ -64,7 +61,7 @@ columns: [
   { field: 'assigned_to', label: 'Owner' },
   {
     field: 'due_date',
-    summary: 'min',       // footer aggregation — plain enum value, not an object
+    summary: 'min',       // plain enum value, not an object
     sortable: true,
   },
 ]
@@ -146,20 +143,18 @@ Rules:
   `element: 'dropdown'` (value chips) is allowed — `tabs` is page-only**
   (ADR-0047 amendment): the saved-view switcher already owns the tab bar, so
   `ObjectUserFiltersSchema` **rejects** `tabs` at parse (not dropped) and the
-  `validate` list-view-mode lint reports it.
-  Need named presets on an object? Add a `listViews` entry instead. The full
+  `validate` list-view-mode lint reports it. The full
   `dropdown | tabs | toggle` range applies only to **page lists** /
   `interfaceConfig.userFilters` (the block above).
 - **Omit `userFilters` when unsure — omission means a clean toolbar.** Nothing
-  is auto-derived, and the saved-views switcher already covers presets.
+  is auto-derived.
 - `userFilters: { element: 'dropdown' }` (no `fields`) is valid shorthand:
   the renderer fills the field list from the object's select/boolean fields.
 
 ### Toolbar Search (`searchableFields`, ADR-0061)
 
 The toolbar's search box scans a set the **object** owns. A list view's
-`searchableFields` **narrows** that set for this one list — never widens it;
-the runtime **refuses the request** rather than dropping the extra name.
+`searchableFields` **narrows** that set for this one list — never widens it.
 
 <!-- os:check -->
 ```typescript
@@ -221,7 +216,7 @@ export const AuditViews = defineView({
   list: {
     label: 'Audit Log', type: 'grid', data,
     columns: ['case_number', 'status'],
-    userActions: { search: false },   // ← no search box; `searchableFields: []` would NOT do this
+    userActions: { search: false },   // ← no search box
   },
 });
 ```
@@ -265,7 +260,7 @@ top-level `groupBy`**; the top-level `columns` stays required.
 {
   type: 'kanban',
   data: { provider: 'object', object: 'project_task' },
-  columns: ['title', 'assignee', 'priority'],       // required on every list view
+  columns: ['title', 'assignee', 'priority'],
   kanban: {
     groupByField: 'status',                // a select field — one lane per option
     lanes: ['todo', 'in_progress', 'review'],   // option VALUES to draw, in this order
@@ -280,6 +275,32 @@ top-level `groupBy`**; the top-level `columns` stays required.
 > value is unlisted lands in `Uncategorized`, so filter the view to keep records
 > off the board. Omit it to draw every option in its own order; a value that is
 > not one of the field's inline options, or listed twice, fails `os validate`.
+
+### Adding a board, calendar, gallery or gantt beside the list
+
+"Add a kanban (calendar / gallery / gantt) view" means a NEW `listViews` entry
+that coexists with the views the object has — its key encodes the kind or
+purpose (`status_kanban`, `timeline_gantt`: the key a nav item's `viewName`
+names, registered as `OBJECT.status_kanban`), the default `list` and every
+other view untouched. Never satisfy an add by retyping `list` (or an existing named
+view) to `type: 'kanban'`: nothing refuses it, the view is converted in place
+and the original is gone. Change a view's kind in place only when the request
+says to convert or replace THAT view.
+
+**A board over a field added in the same change opens empty.** Adding a field
+writes nothing into existing rows, so when `kanban.groupByField` is a `select`
+created in this change every pre-existing record lands in the trailing
+`Uncategorized` lane: one empty lane per option, the populated lane last —
+past the right edge of a narrow screen — under a non-zero record count. That
+is the renderer's correct fallback, not lost data, and the hand-over says so
+instead of "the board is ready": (a) the existing records are all in the last
+`Uncategorized` lane, scroll right; (b) dragging a card out of it onto a real
+lane writes the field, or edit them from the list; (c) a runtime-token
+(`current_user`) or CEL `defaultValue` is applied on INSERT and changes no
+existing row, but on a SQL datasource a LITERAL `defaultValue` becomes the
+added column's DEFAULT, so there the existing rows read it and land in its
+lane. The same is owed when an existing list is converted into a board over a
+just-added field.
 
 ---
 
