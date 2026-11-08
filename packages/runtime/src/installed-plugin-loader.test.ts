@@ -205,9 +205,10 @@ function install(o: InstallOptions = {}): PluginInstallationRecord & { artifactB
 }
 
 /** Load, with the module import counted, so a refusal can be shown to import nothing. */
-async function load(resolveKeys = activeKeys().resolveKeys) {
+async function load(resolveKeys = activeKeys().resolveKeys, extra: { leaveUninstallsPending?: boolean } = {}) {
   const imported: string[] = [];
   const result = await loadInstalledPlugins({
+    ...extra,
     environmentId: ENV,
     resolveKeys,
     wrapBundle: (bundle) => ({ name: 'wrapped', init() {}, bundle }),
@@ -531,6 +532,22 @@ describe('disable and uninstall', () => {
     // The drop forgets the disable, so a later install starts enabled.
     const again = install();
     expect((await load()).loaded.map((l) => l.record.id)).toEqual([again.id]);
+  });
+
+  it('a reader that leaves uninstalls pending removes nothing and loads nothing of one; the next boot finishes it', async () => {
+    const r = install();
+    const fine = install({ id: 'com.acme.fine' });
+    markPluginUninstall(ENV, r.id);
+    const read = await load(undefined, { leaveUninstallsPending: true });
+    expect(read.removed).toEqual([]);
+    expect(read.refused).toEqual([]);
+    expect(read.loaded.map((l) => l.record.id)).toEqual([fine.id]);
+    expect(existsSync(join(r.dir, INSTALLED_ARTIFACT_FILE))).toBe(true);
+    expect(loadPluginInstallations(ENV)).toEqual(expect.arrayContaining([expect.objectContaining({ id: r.id, status: 'uninstall-pending' })]));
+    // CONTROL: the boot's own read finishes it.
+    const booted = await load();
+    expect(booted.removed).toEqual([expect.objectContaining({ kept: false })]);
+    expect(existsSync(r.dir)).toBe(false);
   });
 
   it('keeps a directory another project in this environment still records', async () => {

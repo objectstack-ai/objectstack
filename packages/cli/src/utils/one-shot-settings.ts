@@ -3,6 +3,7 @@
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import type { ICryptoProvider } from '@objectstack/spec/contracts';
+import type { InstalledPluginRefusal } from '@objectstack/runtime';
 import type { HostCryptoProvider } from '../commands/serve.js';
 import { resolveStartHome } from './start-home.js';
 
@@ -64,6 +65,14 @@ import { resolveStartHome } from './start-home.js';
  *
  * Only `plugins` is read, never `devPlugins`: the list `os serve` boots
  * without `--dev`, and `os start`.
+ *
+ * The plugins `os plugin install` installed for this project and environment
+ * are read beside it, through the loader `os serve`'s boot reads them with
+ * (`loadHostInstalledPlugins`), and judged by its rule: one that loads and
+ * declares the provider is the declaring plugin above; a refused one that may
+ * provide it refuses the run (`refuseRefusedInstalledCryptoProviderPlugins`).
+ * ⛔ The run registers and removes none of them: a pending uninstall is left
+ * for the next boot.
  *
  * ⛔ Nothing else in `src/` names `SettingsServicePlugin` or
  * `LocalCryptoProvider`, except `commands/serve.ts`, the long-lived host:
@@ -233,17 +242,34 @@ export async function oneShotSettingsPlugins(crypto?: OneShotCrypto): Promise<un
 }
 
 /**
- * The one plugin of the host config that declares the crypto provider, or
- * `null` when none does. Two are refused, both named. Read by `serve`'s rules
- * for the same list (module header); ⛔ never guessed: an unreadable config or
- * entry is refused, not read as "none".
+ * The one plugin that declares the crypto provider — of the host config's
+ * `plugins`, or of the plugins `os plugin install` installed — or `null` when
+ * none does. Two are refused, both named. Read by `serve`'s rules for the same
+ * lists (module header); ⛔ never guessed: an unreadable config or entry, or a
+ * refused installed plugin that may provide it, is refused, not read as "none".
  */
 async function readDeclaredCryptoProvider(cwd: string): Promise<{ name: string; plugin: object } | null> {
+  const {
+    cryptoProviderPlugins,
+    refuseTwoCryptoProviderPlugins,
+    refuseRefusedInstalledCryptoProviderPlugins,
+  } = await import('../commands/serve.js');
+  const composed = await readHostConfigPlugins(cwd);
+  composed.push(...await readInstalledPlugins(composed, refuseRefusedInstalledCryptoProviderPlugins));
+  refuseTwoCryptoProviderPlugins(composed);
+  return cryptoProviderPlugins(composed)[0] ?? null;
+}
+
+/**
+ * The host config's `plugins`, each materialized by `serve`'s rules and never
+ * booted; none when there is no host config. ⛔ An unreadable config or entry
+ * is refused, not read as "none".
+ */
+async function readHostConfigPlugins(cwd: string): Promise<unknown[]> {
   const { findHostConfig } = await import('./schema-migration-plugins.js');
   const configPath = findHostConfig(cwd);
-  if (!configPath) return null;
-  const { default: Serve, cryptoProviderPlugins, refuseTwoCryptoProviderPlugins, HostCryptoProviderRefusal } =
-    await import('../commands/serve.js');
+  if (!configPath) return [];
+  const { default: Serve, HostCryptoProviderRefusal } = await import('../commands/serve.js');
   const refuse = (what: string, error: unknown): never => {
     throw new HostCryptoProviderRefusal(
       `Refusing to seal or open a secret: ${what} could not be read (${error instanceof Error ? error.message : String(error)}), `
@@ -276,8 +302,60 @@ async function readDeclaredCryptoProvider(cwd: string): Promise<{ name: string; 
       return refuse(`${configName} plugins[${index}]${typeof entry === 'string' ? ` ('${entry}')` : ''}`, error);
     }
   }
-  refuseTwoCryptoProviderPlugins(composed);
-  return cryptoProviderPlugins(composed)[0] ?? null;
+  return composed;
+}
+
+/**
+ * The plugins `os plugin install` installed for this project and environment,
+ * read the way `os serve`'s boot reads them (`loadHostInstalledPlugins`) and
+ * judged by its rule: a refused one that may provide the crypto provider
+ * refuses this run ({@link refuseRefused}, `serve`'s
+ * `refuseRefusedInstalledCryptoProviderPlugins`), and each one that loads is
+ * answered, so the provider it declares is the one this run seals with. ⛔
+ * Nothing is registered or removed here: a pending uninstall is left for the
+ * next boot. One whose name an entry of the host config already takes is
+ * refused as `os serve` refuses it (`plugin_name_taken`), and so is one whose
+ * name cannot be read (`kernel_refused`).
+ */
+async function readInstalledPlugins(
+  configPlugins: readonly unknown[],
+  refuseRefused: (refused: readonly InstalledPluginRefusal[]) => void,
+): Promise<unknown[]> {
+  const { loadHostInstalledPlugins } = await import('./installed-plugins-boot.js');
+  const installed = await loadHostInstalledPlugins({ leaveUninstallsPending: true });
+  if (installed === null) return [];
+  const taken = new Set<string>();
+  for (const plugin of configPlugins) {
+    try {
+      const name = (plugin as { name?: unknown } | null)?.name;
+      if (typeof name === 'string') taken.add(name);
+    } catch {
+      // a name that cannot be read takes none
+    }
+  }
+  const refused: InstalledPluginRefusal[] = [...installed.refused];
+  const loaded: unknown[] = [];
+  for (const { record, plugin, declaredServices } of installed.loaded) {
+    const refusal = (error: InstalledPluginRefusal['error'], message: string): void => {
+      refused.push(declaredServices === undefined
+        ? { id: record.id, version: record.version, error, message }
+        : { id: record.id, version: record.version, error, message, declaredServices });
+    };
+    let name: string;
+    try {
+      name = String((plugin as { name?: unknown }).name ?? record.id);
+    } catch {
+      refusal('kernel_refused', 'its plugin name cannot be read');
+      continue;
+    }
+    if (taken.has(name)) {
+      refusal('plugin_name_taken', `its plugin name '${name}' is a plugin of the host config, and an installed plugin does not replace one.`);
+      continue;
+    }
+    loaded.push(plugin);
+  }
+  refuseRefused(refused);
+  return loaded;
 }
 
 /**
