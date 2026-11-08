@@ -35,7 +35,7 @@
  */
 import React from 'react';
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import { ValueDataSource } from '@object-ui/core';
 import { ActionProvider, SchemaRendererProvider } from '@object-ui/react';
@@ -164,5 +164,95 @@ describe('a kanban under a list view draws every record of the view in its colum
     // The third non-stage column is not a card line.
     expect(within(card).queryByText('Probability')).not.toBeInTheDocument();
     expect(within(card).queryByText('Close Date')).not.toBeInTheDocument();
+  });
+});
+
+/**
+ * objectstack#30431 — under a list view the footer and the lanes answer from
+ * different queries: the list asks its own window and count, the board asks one
+ * query per lane. Walked on cloud's two-plane stack with the card's 客服工单
+ * package (12 tickets, 2 / 4 / 2 / 3 / 1), a board opened right after publish
+ * read footer 「12 条记录」 over lanes 0 / 0 / 0 / 0 while its lane queries were
+ * in flight. Here the lane queries are held open and the list's are not, which
+ * is that ordering.
+ */
+describe('the board under a list view claims no lane count before its lanes answer (objectstack#30431)', () => {
+  const TICKET = 'helpdesk_ticket';
+  const STATUSES = [
+    ['new', '待处理', 2],
+    ['in_progress', '处理中', 4],
+    ['waiting_customer', '等待客户', 2],
+    ['resolved', '已解决', 3],
+    ['closed', '已关闭', 1],
+  ] as const;
+  const TICKETS: Row[] = STATUSES.flatMap(([status, , count]) =>
+    Array.from({ length: count }, (_, i) => ({ id: `${status}-${i}`, subject: `${status} ticket ${i}`, status })),
+  );
+  const TICKET_DEF = {
+    name: TICKET,
+    label: '工单',
+    fields: {
+      subject: { type: 'text', label: '标题' },
+      status: { type: 'select', label: '状态', options: STATUSES.map(([value, label]) => ({ value, label })) },
+    },
+  };
+  const BOARD_VIEW = {
+    type: 'list-view',
+    objectName: TICKET,
+    viewType: 'kanban',
+    columns: [{ field: 'subject' }, { field: 'status' }],
+    kanban: { groupByField: 'status', titleField: 'subject' },
+  };
+
+  /** A lane query is the one that filters on the lane field; the list's never does. */
+  const isLaneQuery = (params: any) => JSON.stringify(params?.$filter ?? null).includes('"status"');
+
+  function heldLanes() {
+    const store = new ValueDataSource<Row>({ items: TICKETS });
+    let release!: () => void;
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    const ds = {
+      find: vi.fn(async (object: string, params: any) => {
+        if (isLaneQuery(params)) await gate;
+        return store.find(object, params);
+      }),
+      findOne: vi.fn(),
+      create: vi.fn(),
+      update: vi.fn(),
+      delete: vi.fn(),
+      getObjectSchema: vi.fn(async () => TICKET_DEF),
+    } as any;
+    return { ds, release: () => act(async () => release()) };
+  }
+
+  /** The count badge beside a lane title. */
+  const laneBadge = (title: string) => within(lane(title)).getByRole('heading').parentElement!.querySelector('span')!;
+
+  it('the footer may read 12 while the lanes wait, but no lane reads 0 until it has answered', async () => {
+    const { ds, release } = heldLanes();
+    mountBoard(ds, BOARD_VIEW);
+
+    // RIG SELF-CHECK — the state the card reported: the list's count is on
+    // screen and every lane query has left without an answer.
+    await waitFor(() => expect(screen.getByTestId('record-count-bar')).toHaveTextContent('12 records'));
+    await waitFor(() => expect(ds.find.mock.calls.filter((call: any[]) => isLaneQuery(call[1]))).toHaveLength(STATUSES.length + 1));
+    expect(cards()).toHaveLength(0);
+
+    for (const [, title] of STATUSES) {
+      // RED before the fix: '0' on every lane, under a footer reading 12.
+      expect(laneBadge(title).textContent?.trim()).toBe('');
+      expect(lane(title)).toHaveAttribute('aria-busy', 'true');
+    }
+
+    await release();
+
+    await waitFor(() => expect(cards()).toHaveLength(12));
+    for (const [, title, count] of STATUSES) {
+      expect(laneBadge(title).textContent?.trim()).toBe(String(count));
+      expect(lane(title)).not.toHaveAttribute('aria-busy');
+    }
+    expect(screen.getByTestId('record-count-bar')).toHaveTextContent('12 records');
   });
 });
