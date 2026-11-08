@@ -134,8 +134,8 @@ async function stage() {
     // users beyond the first enter through the invitation carve-out — the
     // house lane (see audience-gate-test-support; `open` would force email
     // verification on and stop sign-up from minting the bearers below).
-    await inviteForAudienceGate(manager, email);
-    const res = await direct('/sign-up/email', { email, password: PASSWORD, name });
+    const invitationId = await inviteForAudienceGate(manager, email);
+    const res = await direct('/sign-up/email', { email, password: PASSWORD, name, invitationId });
     expect(res.status, `sign-up ${email}: ${await res.clone().text()}`).toBe(200);
   }
 

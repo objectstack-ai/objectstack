@@ -1443,17 +1443,22 @@ async function bootClaimed(
    * real admission verdict, not a bypass). Same choice, same reasons, as
    * plugin-auth's own `audience-gate-test-support.ts`.
    *
+   * Under `invite_only` a sign-up is admitted only by the invitation it
+   * presents, so the helper answers the row's id and `signUp` sends it as
+   * `invitationId`, the way a real invitee's accept link carries it.
+   *
    * Best-effort: a stack whose engine or `sys_invitation` object is not
    * reachable simply signs up without the row and lets the gate answer.
    */
-  const inviteForAudienceGate = async (email: string): Promise<void> => {
+  const inviteForAudienceGate = async (email: string): Promise<string> => {
+    const id = `inv_verify_${Math.random().toString(36).slice(2, 10)}`;
     try {
       const engine = await kernel.getServiceAsync<any>('objectql');
-      if (!engine || typeof engine.insert !== 'function') return;
+      if (!engine || typeof engine.insert !== 'function') return id;
       await engine.insert(
         'sys_invitation',
         {
-          id: `inv_verify_${Math.random().toString(36).slice(2, 10)}`,
+          id,
           // [#11770] Normalized, as the invitation route stores it — the
           // audience probe reads `sys_invitation` by address, and better-auth
           // lowercases both the stored address and the registrant's.
@@ -1481,12 +1486,12 @@ async function bootClaimed(
       // still reports success", to a person. Here the answer is NO, on two
       // independent grounds:
       //
-      //   1. NOTHING CLAIMS TO HAVE PERSISTED. This helper answers a `Promise`
-      //      of `void`: no return value, no counter, no report out of which
-      //      any caller could read a landed row. Its ONLY caller is `signUp`
-      //      immediately below, whose very next statement POSTs
-      //      `/auth/sign-up/email` -- the operation this row is a
-      //      precondition for.
+      //   1. NOTHING CLAIMS TO HAVE PERSISTED. This helper answers the id it
+      //      MINTED, before any write and whether or not the write lands: no
+      //      counter, no report out of which any caller could read a landed
+      //      row. Its ONLY caller is `signUp` immediately below, whose very
+      //      next statement POSTs `/auth/sign-up/email` presenting that id --
+      //      the operation this row is a precondition for.
       //   2. THE LOSS IS ANSWERED ONE LINE LATER, LOUDLY. Under the default
       //      `invite_only` posture a missing invitation makes that POST
       //      refuse, and `signUp` throws `verify signUp failed:` carrying the
@@ -1521,6 +1526,7 @@ async function bootClaimed(
       // deployed plane here that could go on looking healthy while something
       // it claims is persisted did not land.
     }
+    return id;
   };
 
   const signUp = async (
@@ -1528,11 +1534,11 @@ async function bootClaimed(
     password = 'Member-Pass-123',
     name?: string,
   ): Promise<string> => {
-    await inviteForAudienceGate(email);
+    const invitationId = await inviteForAudienceGate(email);
     const res = await api('/auth/sign-up/email', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password, name: name ?? email.split('@')[0] }),
+      body: JSON.stringify({ email, password, name: name ?? email.split('@')[0], invitationId }),
     });
     if (!res.ok) {
       throw new Error(`verify signUp failed: ${res.status} ${await res.text()}`);

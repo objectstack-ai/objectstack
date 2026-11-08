@@ -395,12 +395,12 @@ describe('[#30918] nothing a client sends reaches the stamp', () => {
     const r = await rig();
     const email = 'nora@last-use.example.com';
     const password = 'S3cure!Passw0rd-last-use';
-    await inviteForAudienceGate(r.manager, email);
+    const invitationId = await inviteForAudienceGate(r.manager, email);
     const signUp = await r.manager.handleRequest(
       new Request(`${BASE}${AUTH_BASE}/sign-up/email`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ email, password, name: 'Nora' }),
+        body: JSON.stringify({ email, password, name: 'Nora', invitationId }),
       }),
     );
     expect(signUp.status, await signUp.clone().text()).toBe(200);
