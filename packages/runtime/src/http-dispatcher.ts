@@ -1647,6 +1647,15 @@ export class HttpDispatcher {
         } else if (sessionUnread) {
             // Auth resolution failed — do not block the request on RBAC.
             return null;
+        } else {
+            // A session principal acts in the organization its resolution
+            // VETTED (`resolveAuthzContext`), the one every other door reads
+            // (`resolveActiveOrganizationId`), ⛔ never the session's stored
+            // claim: a claim the resolution dropped names no organization here.
+            // No resolution of this same user, no vetted organization.
+            activeOrganizationId = resolved?.userId !== undefined && resolved.userId === userId
+                ? resolved.tenantId
+                : undefined;
         }
 
         if (!userId) return null; // Anonymous requests — upstream auth will decide.
