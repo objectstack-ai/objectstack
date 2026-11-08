@@ -1,0 +1,16 @@
+---
+'@objectstack/spec': minor
+'@objectstack/driver-sql': minor
+'@objectstack/service-datasource': minor
+---
+
+feat(spec,driver-sql,service-datasource): Oracle Database as a federation dialect: read live, write behind both opt-ins, never managed
+
+Clause-②: yes (widening)
+Metadata-protocol: added
+
+- **`@objectstack/spec`**: a datasource may name `driver: 'oracle'` (alias `oracledb`), with `OracleConfigSchema` as its `config` contract: `connectString`, or `host` / `port` (default 1521) / `serviceName`, and `username`. `password` (the credential is the bound secret), `url`, and the TLS keys are refused by name with the spelling that works. The row is federation-only (`FEDERATION_ONLY_DRIVER_IDS`, `isFederationOnlyDriver`) with no local default. It is never a boot selection, and a `managed` oracle datasource, including the default mode, is refused at `defineStack` with the scope and the fix named. A datasource `ssl` block that asks for TLS is refused on oracle too, because Thin mode takes TLS from a `tcps://` connect string and would drop the block. The type-compatibility matrix gains `'oracle'` (`DIALECT_ALIASES.oracle`, `NUMBER(p,s)` / `RAW(16)` parameterised), and ADR-0015 §4.6 lists it.
+- **`@objectstack/driver-sql`**: `client: 'oracledb'` speaks Oracle over node-oracledb in Thin mode, with no Oracle Client libraries. `oracledb` is an optional peer. Minimum Oracle 12c Release 1. Paging uses `OFFSET … ROWS FETCH NEXT … ROWS ONLY`. Identifiers are quoted as the catalog folds them (UPPER). `LIKE` gets a bound `ESCAPE`, and the `$icontains` fold is ASCII-only. A NUMBER(1) flag reads as a boolean. Datetime and date comparands and writes bind as instants on a UTC session, and DATE / TIMESTAMP reads are repaired from Thin's local-clock decode. RAW(16) reads as a UUID string. `$empty` on a text column is its NULL row. Catalog introspection covers the current schema: ALL_TABLES, ALL_TAB_COLUMNS, and PK/unique/FK from ALL_CONSTRAINTS. Refusals: every DDL operation (`UnsupportedDialectEmissionError`, reason `federation-only`); a `''` equality or range comparand (`INVALID_FILTER`, because Oracle stores `''` as NULL and would answer IS NULL); JSON-array membership (`INVALID_FILTER`); and upsert (`NOT_IMPLEMENTED`, 501, because no MERGE is emitted).
+- **`@objectstack/service-datasource`**: the shared driver factory builds the oracle arm. It composes `host:port/serviceName` or passes `connectString` verbatim, and the password is the bound secret. A missing `oracledb` package is answered with that package's install.
+
+Held to the shared conformance case-sets over a live Oracle 23ai (`OS_TEST_ORACLE_URL`, declared skip without it, `OS_EXPECT_LIVE_ORACLE=1` to require it). The Oracle section of the external-datasources guide states the minimum version, the config shape, and each refusal.

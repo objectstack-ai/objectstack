@@ -225,6 +225,8 @@
     "ObjectRequiredPermissionsSchema": "data/ObjectRequiredPermissions",
     "ObjectSchema": "data/Object",
     "ObjectSchemaBase": "data/Object",
+    "OracleConfig": "data/OracleConfig",
+    "OracleConfigSchema": "data/OracleConfig",
     "PerOperationRequiredPermissions": "data/PerOperationRequiredPermissions",
     "PerOperationRequiredPermissionsSchema": "data/PerOperationRequiredPermissions",
     "PersistenceType": "data/PersistenceType",

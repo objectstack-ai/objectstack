@@ -464,6 +464,100 @@ remote table/columns: the analytics layer routes such queries through the driver
 physical-table resolution (honoring `remoteName` / `remoteSchema`) rather than the
 object name, so they never hit the wrong table.
 
+## 7. Oracle Database
+
+Oracle is a **federation-only** dialect. ObjectStack reads an existing Oracle schema
+live and writes to it when both write gates are on, but it never owns one. A
+`managed` Oracle datasource, including one that leaves `schemaMode` at its default,
+is refused when the stack is defined. Every DDL operation is refused by the driver
+too.
+
+{/* os:check */}
+```typescript
+import { defineDatasource } from '@objectstack/spec/data';
+
+export const Erp = defineDatasource({
+  name: 'erp',
+  label: 'ERP (Oracle)',
+  driver: 'oracle',                 // alias: 'oracledb'
+  schemaMode: 'external',           // required: 'external' or 'validate-only'
+  config: { host: 'erp-db.internal', port: 1521, serviceName: 'ERPPDB1', username: 'erp_ro' },
+  external: {
+    allowWrites: false,
+    credentialsRef: 'sys_secret:4b1e…', // the password is the bound secret, never inline
+  },
+});
+```
+
+**Requirements**
+
+- **Oracle Database 12c Release 1 or later.** Pages are read with
+  `OFFSET … ROWS FETCH NEXT … ROWS ONLY`, which 12c introduced. Verified live on
+  Oracle Database 23ai Free.
+- **The `oracledb` package.** It is an optional install of `@objectstack/driver-sql`
+  (`npm install oracledb`). It runs in **Thin mode**, which is pure JavaScript and
+  needs no Oracle Client libraries. Without the package, the datasource's connect
+  fails with an error that names that install.
+
+**The `config` block**
+
+| Key | Meaning |
+| --- | --- |
+| `connectString` | An Easy Connect string (`host:port/service_name`), a `tcps://…` string, or a TNS descriptor. Wins over the keys below when set. |
+| `host` / `port` / `serviceName` | Composed into `host:port/serviceName` when there is no `connectString`. `port` defaults to 1521. |
+| `username` | The database user. Its schema is the one the Tables tab lists. |
+
+`password` and `url` are refused by name. The password is the bound secret, and an
+Oracle connect string is not a URL.
+
+**TLS** is chosen by the connect string: `connectString: 'tcps://erp-db.internal:2484/ERPPDB1'`.
+The server is verified against the host's trusted certificate authorities. Thin mode
+has no slot for a datasource `ssl` block or for `ca`, `cert`, `key` or
+`rejectUnauthorized` keys, so each is refused rather than silently dropped.
+
+**Binding tables.** Oracle stores an unquoted identifier in UPPER case, so an
+imported table's columns are `CUST_NO`, `FULL_NAME`, and so on. The Tables tab and
+`import_object` map each one to a lower-case field through `external.columnMap`. The
+driver quotes the catalog spelling back in every statement. The Tables tab lists the
+tables of the connecting user's current schema. Reach another owner's table with an
+object whose `remoteName` is `OWNER.TABLE`.
+
+**How values read and compare**
+
+| Remote column | Field | Notes |
+| --- | --- | --- |
+| `BOOLEAN` (23ai) | `boolean` | Exact. |
+| `NUMBER(1)` flag | `boolean` | Judged lossy by the type matrix: it is an integer column. It reads as `true` / `false`, and a write sends `1` / `0`. |
+| `CHAR(1)` flag (`'Y'` / `'N'`) | `text` | Judged incompatible with a `boolean` field, so bind it as text. A boolean binding would read every non-NULL letter as `true`. |
+| `DATE` | `datetime` | An Oracle `DATE` carries a time of day. A `date` field over it is judged lossy: the time is dropped. |
+| `TIMESTAMP WITH TIME ZONE` | `datetime` | Compared and returned as UTC instants. |
+| `CLOB` | `textarea` | |
+| `RAW(16)` | `text` | Read as a lower-case UUID string. |
+
+The driver pins every session to UTC. Thin mode decodes `DATE` and `TIMESTAMP`
+values with the server process's local clock, and the driver repairs that on read.
+The repair is exact except during the hour a daylight-saving spring-forward skips in
+the process's own time zone. Run the server with `TZ=UTC` and there is no such hour.
+
+**What Oracle answers differently**
+
+- **`''` is NULL in Oracle.** A filter that compares against an empty string
+  (`= ''`, `$ne: ''`, `$in: ['']`, a range bound of `''`) is refused with
+  `INVALID_FILTER`, because Oracle would answer it as a comparison with NULL rather
+  than as written. Use `$null` / `$empty` instead. `$empty` on a text column matches
+  exactly the NULL rows there.
+- **Upsert is refused** with `NOT_IMPLEMENTED` (HTTP 501). The driver emits no
+  `MERGE`. Use create and update.
+- **JSON-array membership** (`$contains` on a multi-value field) is refused. There is
+  no Oracle construct modelled for it.
+- **Filtering or writing a `RAW(16)` column by its UUID string is not supported.**
+  The driver presents the value as a string on read, but it does not convert the
+  string back to `RAW` for a comparison or a write.
+- A `NUMBER` beyond 2^53 is read as a JavaScript number and loses precision.
+- **Paged reads are stable when the object's `columnMap` maps a column to `id`.**
+  That column breaks ties after the caller's own sort. Without a mapped key, a paged
+  read has no unique order, and the server logs a warning once per object.
+
 ## Multi-tenant hosts
 
 A self-hosted single-environment runtime connects external datasources out of the

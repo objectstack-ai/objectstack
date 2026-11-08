@@ -1,0 +1,67 @@
+---
+title: Driver Oracle schema — Data Protocol reference
+navTitle: Driver Oracle
+description: "Oracle Database driver configuration — the config slot of a datasource whose driver resolves to oracle (oracledb)."
+---
+
+{/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
+
+Oracle Database driver configuration — the `config` slot of a `datasource`
+whose `driver` resolves to `oracle` (`oracledb`).
+
+Oracle is a FEDERATION-ONLY driver (ADR-0015 §4.6): the datasource must
+declare `schemaMode: 'external'` (or `'validate-only'`), and a managed one is
+refused at authoring. The platform reads the tables an Oracle system already
+owns; it never creates or alters one there.
+
+Every key here is read by `createDefaultDatasourceDriverFactory`
+(→ `SqlDriver`, knex `oracledb`, node-oracledb in Thin mode — pure
+JavaScript, no Oracle Client libraries on the host). The connection is
+opened from an Oracle connect string: either `connectString` verbatim, or
+the Easy Connect string `host:port/serviceName` the factory composes from
+the discrete keys. Oracle has no `scheme://` URL of its own, so there is no
+`url` key to accept here.
+
+Deliberately absent, each because the factory would drop it:
+ - `autoMigrate` — a managed-schema self-heal, and Oracle is never managed.
+ - `ssl` (and `ca` / `cert` / `key` / `rejectUnauthorized`) — Thin mode
+   negotiates TLS from the connect string itself
+   (`tcps://host:2484/service`), not from a key beside it; the datasource
+   `ssl` block is refused on an oracle datasource for the same reason.
+ - `sid` — a SID names an instance, not a service; Thin mode reaches a
+   SID-only listener through a full descriptor in `connectString`.
+
+<Callout type="info">
+**Source:** `packages/spec/src/data/driver/oracle.zod.ts`
+</Callout>
+
+## TypeScript Usage
+
+```typescript
+import { OracleConfigSchema } from '@objectstack/spec/data';
+import type { OracleConfig } from '@objectstack/spec/data';
+
+// Validate data
+const result = OracleConfigSchema.parse(data);
+```
+
+---
+
+## OracleConfig
+
+Oracle Database connection configuration (federation only)
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **connectString** | `string` | optional | Oracle connect string — Easy Connect or a full descriptor (supersedes host/port/serviceName) |
+| **host** | `string` | optional | Listener host address |
+| **port** | `integer` | optional (default: `1521`) | Listener port |
+| **serviceName** | `string` | optional | Database service name |
+| **username** | `string` | optional | Authentication user (also the default schema) |
+| **password** | `never` | optional | Set through the connection form's secret field or `external.credentialsRef` — encrypted into `sys_secret`, never stored in `config`. A datasource defined in code (`defineDatasource`) leaves the credential out of the declaration: it is read at connect time from the runtime environment variable derived from the datasource name (`OS_DATASOURCE_WAREHOUSE_PASSWORD` for a datasource named `warehouse`), which `os serve` / `os start` honour by default (`OS_DATASOURCE_ENV_CREDENTIALS=on`). |
+
+
+---
+
