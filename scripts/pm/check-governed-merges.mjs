@@ -2086,8 +2086,9 @@ export function readWorkflowDiff({ paths, base, head, inventoryBase = base, git,
     const show = (rev, path) => git(['show', `${rev}:${path}`]);
     let inventory = cache?.get(inventoryBase) ?? null;
     if (inventory === null) {
-      // Workflows only: `.github/actions/**` is no register row, so an action used there alone vouches for nothing.
-      const files = listAt(inventoryBase, WORKFLOWS_PREFIX).filter((p) => /\.ya?ml$/.test(p));
+      // Workflows only: `.github/actions/**` is no register row, so an action used there alone vouches for
+      // nothing. The listing argv is unchanged (the queue guard pins it read once per run); the filter drops them.
+      const files = listAt(inventoryBase, '.github/workflows', '.github/actions').filter((p) => p.startsWith(WORKFLOWS_PREFIX) && /\.ya?ml$/.test(p));
       inventory = workflowInventory(files.map((p) => ({ path: p, text: show(inventoryBase, p) })));
       cache?.set(inventoryBase, inventory);
     }
