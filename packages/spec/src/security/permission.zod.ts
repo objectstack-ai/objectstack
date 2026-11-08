@@ -124,10 +124,17 @@ const OBJECT_PERMISSION_KEY_ALIASES: Readonly<Record<string, string>> = {
 };
 
 /**
- * The object-permission bit a permission VERB resolves to. Only the `allow*`
- * capability bits are reachable from a verb: the super-user axes
- * (`viewAllRecords` / `modifyAllRecords`) are grants a verb never names, and
- * the depth axes (`readScope` / `writeScope`) are not booleans at all.
+ * The object-permission bit a grant question names: the bits
+ * {@link objectPermissionGrants} folds. The super-user axes
+ * (`viewAllRecords` / `modifyAllRecords`) are grants a question never names,
+ * and the depth axes (`readScope` / `writeScope`) are not booleans at all.
+ *
+ * Every `allow*` capability bit a permission VERB resolves to
+ * ({@link OBJECT_PERMISSION_VERBS}) is one, and so are the two recycle-bin
+ * grants (`allowRestoreOwnDeleted`, `manageRecycleBin`, ADR-0148 D5), which the
+ * permission evaluator reads for the engine's `restore` / `purge` operations.
+ * No verb resolves to those two: `restore` and `purge` stay outside the verb
+ * vocabulary (they carry the #12497 retirement guidance).
  */
 export type ObjectPermissionVerbTarget =
   | 'allowRead'
@@ -135,7 +142,9 @@ export type ObjectPermissionVerbTarget =
   | 'allowEdit'
   | 'allowDelete'
   | 'allowExport'
-  | 'allowTransfer';
+  | 'allowTransfer'
+  | 'allowRestoreOwnDeleted'
+  | 'manageRecycleBin';
 
 /**
  * A `can`-prefixed spelling of a bare verb already in
@@ -258,6 +267,11 @@ export function resolveObjectPermissionVerb(verb: string): ObjectPermissionVerbT
  *   Applied to the MERGED entry (`/me/permissions`, and the evaluator, which
  *   merges the caller's resolved entries before it asks), the read half may
  *   come from a different set than the grant, exactly as export's does.
+ * - **The recycle-bin grants fold the way ruling Q5 = A (ADR-0148 D5) states
+ *   them.** `allowRead` bounds both: a grant on an object the caller cannot
+ *   read grants nothing. `modifyAllRecords` implies both. `manageRecycleBin`
+ *   implies `allowRestoreOwnDeleted`. `allowDelete` does NOT imply either: a
+ *   person who may delete may not thereby restore or purge.
  * - **An ABSENT entry is `false`, never an error.** An object no permission set
  *   mentions is an object with no grant; an effective map is allowed to omit it
  *   exactly as it is allowed to carry an all-`false` entry, and the two must
@@ -277,6 +291,9 @@ export function objectPermissionGrants(
     case 'allowDelete': return read && (permission.allowDelete === true || modifyAll);
     case 'allowTransfer': return permission.allowTransfer === true || modifyAll;
     case 'allowExport': return permission.allowExport === true && read;
+    case 'manageRecycleBin': return read && (permission.manageRecycleBin === true || modifyAll);
+    case 'allowRestoreOwnDeleted':
+      return read && (permission.allowRestoreOwnDeleted === true || permission.manageRecycleBin === true || modifyAll);
   }
 }
 
@@ -665,14 +682,17 @@ const ObjectPermissionBaseSchema = lazySchema(() => strictObject(
    * materialize the key into every parsed entry, and a runtime built before
    * these keys existed refuses a key it does not know.
    *
-   * PLANNED: declared ahead of the reader by the ADR's rollout. The permission
-   * evaluator maps the engine's `restore` / `purge` operations onto them when
-   * the engine slice lands; until then a dispatched `restore` / `purge` stays
-   * denied fail-closed by the destructive-operation backstop, whatever these
-   * say.
+   * READ by the permission evaluator, which maps the engine's `restore`
+   * operation onto `allowRestoreOwnDeleted` and its `purge` operation (the
+   * permanent delete, `purge(entryId)`, `empty(object)`) onto
+   * `manageRecycleBin`, and by the engine's restore, which lets a caller
+   * without `manageRecycleBin` restore only the entries it deleted. Folded per
+   * ruling Q5 = A ({@link objectPermissionGrants}): `allowRead` bounds both,
+   * `modifyAllRecords` implies both, `manageRecycleBin` implies
+   * `allowRestoreOwnDeleted`, and `allowDelete` implies neither.
    */
-  allowRestoreOwnDeleted: z.boolean().optional().describe('[PLANNED] Recycle bin: restore the entries of this object the caller deleted. Not read yet: until the engine\'s restore ships, a dispatched restore stays denied.'),
-  manageRecycleBin: z.boolean().optional().describe('[PLANNED] Recycle bin administration on this object: list every entry, restore any, and purge (emptying the bin purges every entry the caller manages). Not read yet: until the engine\'s restore ships, a dispatched restore or purge stays denied.'),
+  allowRestoreOwnDeleted: z.boolean().optional().describe('Recycle bin: restore the entries of this object the caller deleted. Bounded by read; implied by manageRecycleBin and modifyAllRecords, not by allowDelete.'),
+  manageRecycleBin: z.boolean().optional().describe('Recycle bin administration on this object: restore any entry, not only your own, and purge (the permanent delete, purging one entry, emptying the object\'s entries). Bounded by read; implied by modifyAllRecords.'),
 
   /** 
    * View All Records: Super-user read access. 
