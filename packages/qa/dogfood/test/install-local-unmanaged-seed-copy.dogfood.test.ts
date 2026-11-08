@@ -21,12 +21,15 @@
 //   4. a restart on the same database inserts no row (the receipt is not a
 //      boot-time load);
 //   5. the purge deletes exactly the 28 copied rows and keeps a row the
-//      person wrote; a second restart inserts none of them back.
+//      person wrote; a second restart inserts none of them back;
+//   6. the door's record of the copy is tied to the base's row in the
+//      package store (`version` and `created_at`), and a restart keeps that
+//      row's `created_at`, so the purge in boot 2 still reaches the copy.
 //
 // Boots fixture stacks of its own (a database file across restarts), so it
 // stays out of `SHARED_SHOWCASE`.
 
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -83,6 +86,7 @@ describe('dogfood: an unmanaged copy with its sample data (#30808)', () => {
   let dbDir: string;
 
   let install: Answer;
+  let record: any;
   let afterInstall: Record<string, number>;
   let owners = new Set<string>();
   let creators = new Set<string>();
@@ -111,6 +115,7 @@ describe('dogfood: an unmanaged copy with its sample data (#30808)', () => {
 
     install = await json(await stack.apiAs(token, 'POST', ROUTE, installBody()));
     afterInstall = await countRows(ql);
+    record = JSON.parse(readFileSync(join(storageDir, 'unmanaged-copies', `${BASE_ID}.json`), 'utf8'));
     for (const object of Object.keys(SEEDED)) {
       for (const row of rowsOf(await ql.find(object, { context: SYS }))) {
         owners.add(String(row.owner_id));
@@ -159,6 +164,12 @@ describe('dogfood: an unmanaged copy with its sample data (#30808)', () => {
     expect(afterInstall).toEqual(SEEDED);
     const seeds = (install.body?.data?.copied ?? []).filter((i: any) => i.type === 'seed').map((i: any) => i.name).sort();
     expect(seeds, JSON.stringify(install.body?.data?.copied)).toEqual(Object.keys(SEEDED).map((o) => `${o}_seed`).sort());
+  });
+
+  it('the door\'s record of the copy is tied to the base\'s package-store row, and the answer carries no `copyRecord`', () => {
+    expect(install.body?.data).not.toHaveProperty('copyRecord');
+    expect(record).toMatchObject({ baseId: BASE_ID, seeded: true, instance: { version: expect.any(String), createdAt: expect.any(String) } });
+    expect(record.instance.createdAt).not.toBe('');
   });
 
   it('every copied row is owned by the person who installed it', () => {
