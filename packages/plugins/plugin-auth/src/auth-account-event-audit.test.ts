@@ -225,9 +225,10 @@ describe('reaching the lockout threshold records one account_locked event', () =
     for (let i = 0; i < 3; i++) await signIn(manager, EMAIL, WRONG_PASSWORD);
     events.length = 0;
 
-    // Refused by the lock even with the right password.
+    // Refused by the lock even with the right password — with the answer a
+    // wrong password gets; the ledger row still names the lock.
     const res = await signIn(manager, EMAIL, PASSWORD);
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(401);
 
     expect(accountEvents(events)).toEqual([
       {

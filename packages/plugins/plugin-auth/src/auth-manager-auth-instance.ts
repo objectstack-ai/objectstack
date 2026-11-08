@@ -56,6 +56,7 @@ import { tryGetCurrentAuthEndpointContext } from '@better-auth/core/context';
 import { audiencePermitsSelfRegistration } from '@objectstack/spec/system';
 import { readEnvWithDeprecation } from '@objectstack/types';
 import { readAccountInvitation, settleImportResetDelivery } from './account-invitation-marker.js';
+import { withLockoutRefusal } from './sign-in-lockout-refusal.js';
 import { resolveEmailVerificationRequirement } from './audience-posture.js';
 import { globalAfterHook, type AfterHookHost } from './auth-manager-after-hook.js';
 import { globalBeforeHook, type BeforeHookHost } from './auth-manager-before-hook.js';
@@ -121,7 +122,7 @@ function sendAfterResponseOnSignUpAndVisitorResend<D>(
  * through getters.
  */
 export interface AuthInstanceHost {
-  assertAccountNotLocked: AuthManager['assertAccountNotLocked'];
+  admitSignInAttempt: AuthManager['admitSignInAttempt'];
   assertActorNotHeld: AuthManager['assertActorNotHeld'];
   assertAdminRevokeUserSessionIdentifiesRecord: AuthManager['assertAdminRevokeUserSessionIdentifiesRecord'];
   assertOrganizationDeletable: AuthManager['assertOrganizationDeletable'];
@@ -133,6 +134,7 @@ export interface AuthInstanceHost {
   assertSsoProviderDeletable: AuthManager['assertSsoProviderDeletable'];
   auditRefusedSignIn: AuthManager['auditRefusedSignIn'];
   buildPluginList: AuthManager['buildPluginList'];
+  clearSignInLockout: AuthManager['clearSignInLockout'];
   composeDatabaseHooks: AuthManager['composeDatabaseHooks'];
   readonly config: AuthManager['config'];
   configuredBasePath: AuthManager['configuredBasePath'];
@@ -157,7 +159,6 @@ export interface AuthInstanceHost {
   isSsoWired: AuthManager['isSsoWired'];
   linkingContext: AuthManager['linkingContext'];
   recordPasswordHistory: AuthManager['recordPasswordHistory'];
-  recordSignInOutcome: AuthManager['recordSignInOutcome'];
   resolveActor: AuthManager['resolveActor'];
   resolveAuthSecret: AuthManager['resolveAuthSecret'];
   resolvePasswordChangeUserId: AuthManager['resolvePasswordChangeUserId'];
@@ -165,6 +166,7 @@ export interface AuthInstanceHost {
   roleChangeGrantDeps: AuthManager['roleChangeGrantDeps'];
   sendChangeEmailNotice: AuthManager['sendChangeEmailNotice'];
   sendExistingAccountSignUpNotice: AuthManager['sendExistingAccountSignUpNotice'];
+  settleSignInAttempt: AuthManager['settleSignInAttempt'];
   signUpForcedOff: AuthManager['signUpForcedOff'];
   ssoDiscoveryTrustedOrigins: AuthManager['ssoDiscoveryTrustedOrigins'];
   stampLastLogin: AuthManager['stampLastLogin'];
@@ -181,7 +183,10 @@ export async function createAuthInstance(this: AuthInstanceHost): Promise<Auth<a
   const { betterAuth } = await import('better-auth');
   const { createAuthMiddleware, setShouldSkipSessionRefresh } = await import('better-auth/api');
   const plugins = await this.buildPluginList();
-  const passwordHasher = await this.resolvePasswordHasher();
+  // ADR-0069 D2: the verifier refuses a locked account by better-auth's own
+  // wrong-password path; the WebContainer hasher, when there is one, is the
+  // pair it wraps (`sign-in-lockout-refusal.ts`).
+  const passwordHasher = await withLockoutRefusal(await this.resolvePasswordHasher());
   const betterAuthConfig: BetterAuthOptions = {
     // Base configuration
     secret: this.resolveAuthSecret(),
@@ -405,7 +410,7 @@ export async function createAuthInstance(this: AuthInstanceHost): Promise<Auth<a
         : (disableSignUpFromEnv ?? this.config.emailAndPassword?.disableSignUp);
       return {
         enabled: this.config.emailAndPassword?.enabled ?? true,
-        ...(passwordHasher ? { password: passwordHasher } : {}),
+        password: passwordHasher,
         ...(effectiveDisableSignUp != null
           ? { disableSignUp: effectiveDisableSignUp } : {}),
         // [#11739] Invariant: a posture that permits self-registration
@@ -439,6 +444,12 @@ export async function createAuthInstance(this: AuthInstanceHost): Promise<Auth<a
         // manager refuses it at entry at any value.
         // `password-reset-ends-sessions.ts` holds the rule and the wiring.
         revokeSessionsOnPasswordReset: true,
+        // ADR-0069 D2: a completed reset clears the sign-in lockout, so the
+        // new password signs in at once. better-auth runs this on every reset
+        // door after the new password is written (`clearSignInLockout`).
+        onPasswordReset: async ({ user }: { user: { id?: unknown } }) => {
+          if (typeof user?.id === 'string' && user.id) await this.clearSignInLockout(user.id);
+        },
       // #14319 — better-auth calls this as `sendResetPassword(data, ctx.request)`.
       // [#23598] better-auth CATCHES what this callback throws
       // (`runInBackgroundOrAwait`) and still answers `{ status: true }`, so a
@@ -779,7 +790,7 @@ export async function createAuthInstance(this: AuthInstanceHost): Promise<Auth<a
       before: createAuthMiddleware((ctx: any) => {
         const readConfig = () => this.config;
         const host: BeforeHookHost = {
-          assertAccountNotLocked: (...a) => this.assertAccountNotLocked(...a),
+          admitSignInAttempt: (...a) => this.admitSignInAttempt(...a),
           assertActorNotHeld: (...a) => this.assertActorNotHeld(...a),
           assertAdminRevokeUserSessionIdentifiesRecord: (...a) => this.assertAdminRevokeUserSessionIdentifiesRecord(...a),
           assertOrganizationDeletable: (...a) => this.assertOrganizationDeletable(...a),
@@ -813,9 +824,9 @@ export async function createAuthInstance(this: AuthInstanceHost): Promise<Auth<a
           externalDirectoryDoorDeps: (...a) => this.externalDirectoryDoorDeps(...a),
           isEmailDeliveryLive: (...a) => this.isEmailDeliveryLive(...a),
           recordPasswordHistory: (...a) => this.recordPasswordHistory(...a),
-          recordSignInOutcome: (...a) => this.recordSignInOutcome(...a),
           roleChangeGrantDeps: (...a) => this.roleChangeGrantDeps(...a),
           sendChangeEmailNotice: (...a) => this.sendChangeEmailNotice(...a),
+          settleSignInAttempt: (...a) => this.settleSignInAttempt(...a),
           stampLastLogin: (...a) => this.stampLastLogin(...a),
           stampPasswordChangedAt: (...a) => this.stampPasswordChangedAt(...a),
         };

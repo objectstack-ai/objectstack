@@ -5,7 +5,13 @@ import { lazySchema } from '../shared/lazy-schema';
 import { strictObject } from '../shared/strict-object';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 import { CODE_DEFINED_CREDENTIAL_ROUTE, urlUserinfoUsername } from './driver/common.zod';
-import { RETIRED_DRIVER_ID_GUIDANCE, resolveDriverId, validateDriverConfig } from './driver/config-registry.zod';
+import {
+  DATABASE_DRIVER_SELECTION_IDS,
+  isFederationOnlyDriver,
+  RETIRED_DRIVER_ID_GUIDANCE,
+  resolveDriverId,
+  validateDriverConfig,
+} from './driver/config-registry.zod';
 
 /*
  * ── Unknown-key strictness (#4001 data step, closed out by #4410) ───────────
@@ -595,6 +601,50 @@ const CONNECTOR_ON_MANAGED_REFUSED =
   + "datasource's `external` block may carry only `credentialsRef`.";
 
 /**
+ * A federation-only driver (`DriverVocabularyEntry.federationOnly` — `oracle`)
+ * declared on a `managed` datasource. `managed` is also the DEFAULT mode, so
+ * an author who names the driver and nothing else meets this sentence: the
+ * prescription is the mode, and the reason is that the platform would
+ * otherwise send `CREATE TABLE` / `ALTER TABLE` to a database whose tables
+ * another system owns.
+ */
+/**
+ * The drivers that can hold a managed datasource, as a prose list. Derived from
+ * the boot-selection face of the driver table, never hand-listed, so a driver
+ * that joins or leaves that face is named here the day it does.
+ */
+function managedDriverList(): string {
+  const ids = [...DATABASE_DRIVER_SELECTION_IDS];
+  return ids.length > 1 ? `${ids.slice(0, -1).join(', ')} or ${ids[ids.length - 1]}` : ids.join('');
+}
+
+function federationOnlyDriverOnManagedRefusal(driverId: string): string {
+  return `the '${driverId}' driver serves federation only: ObjectStack reads the tables an existing `
+    + `${driverId} database already holds (and writes them only where \`external.allowWrites\` and the `
+    + "object's `external.writable` both allow it), and never creates or alters one there, so it cannot "
+    + 'hold a managed datasource. Set `schemaMode: \'external\'` (or `\'validate-only\'` to warn on drift '
+    + "instead of failing) and declare the `external` block. To keep the platform's own tables, "
+    + `use a driver that can be managed (${managedDriverList()}).`;
+}
+
+/**
+ * ADR-0015 §4.6 — a datasource-level `ssl` block on an `oracle` datasource.
+ * Thin-mode node-oracledb takes TLS from the connect string (`tcps://…`) and
+ * verifies the server against the host's trusted certificate authorities, or
+ * against a PEM wallet the connect string names (`?wallet_location=DIR`, or
+ * `(SECURITY=(MY_WALLET_DIRECTORY=DIR))` in a descriptor). The factory never
+ * hands the block's `ca` / `cert` / `key` / `rejectUnauthorized` to the
+ * driver, so a declared block would parse and do nothing.
+ */
+const ORACLE_SSL_BLOCK_REFUSAL =
+  "the 'oracle' driver does not read a datasource `ssl` block: TLS to Oracle is chosen by the connect "
+  + "string, so write `config.connectString: 'tcps://host:2484/service_name'`, and the server is verified "
+  + "against the host's trusted certificate authorities. For a private certificate authority, add "
+  + '`?wallet_location=/path/to/wallet` (a directory holding `ewallet.pem`) to that connect string. '
+  + 'Remove the `ssl` block (`ssl: { enabled: false }` '
+  + 'is accepted and means plain TCP, which is also what a `host`/`port`/`serviceName` config opens).';
+
+/**
  * [#29762] `external.rowCap` on a built-in driver. The cap is read only by the
  * engine's floor over a plugin driver; a built-in driver executes the whole
  * query itself and is never floored, so the key would parse and do nothing.
@@ -988,6 +1038,25 @@ export const DatasourceSchema = lazySchema(() => strictObject(
         message: rowCapOnBuiltinDriverRefusal(builtinDriver),
       });
     }
+  }
+
+  // ADR-0015 §4.6 — a federation-only dialect is never a managed store.
+  if (ds.schemaMode === 'managed' && isFederationOnlyDriver(ds.driver)) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['schemaMode'],
+      message: federationOnlyDriverOnManagedRefusal(resolveDriverId(ds.driver)!),
+    });
+  }
+
+  // The block's own defaults (`enabled: false`, `rejectUnauthorized: true`)
+  // ask for nothing; any key that would ask for TLS or shape it is refused.
+  if (
+    resolveDriverId(ds.driver) === 'oracle'
+    && ds.ssl
+    && (ds.ssl.enabled === true || ds.ssl.rejectUnauthorized === false || !!ds.ssl.ca || !!ds.ssl.cert || !!ds.ssl.key)
+  ) {
+    ctx.addIssue({ code: 'custom', path: ['ssl'], message: ORACLE_SSL_BLOCK_REFUSAL });
   }
 
   if (ds.schemaMode !== 'managed' && !ds.external) {
