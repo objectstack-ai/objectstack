@@ -1,6 +1,6 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 
 import { MCPServerRuntime } from './mcp-server-runtime.js';
 import type { McpDataBridge, McpActionBridge } from './mcp-http-tools.js';
@@ -231,16 +231,27 @@ describe('MCP action tools (list_actions / run_action)', () => {
     expect(json.result.content[0].text).toMatch(/requires capability/i);
   });
 
+  // [#31272] A fault answers what the `/meta` door answers: its text is
+  // withheld from the agent and logged for the operator.
   it('surfaces list_actions bridge errors as tool errors', async () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
     const failing = {
       ...bridge,
       async listActions() {
         throw new Error('metadata unavailable');
       },
     };
-    const { status, json } = await call(runtime, toolsCall(7, 'list_actions', {}), failing);
-    expect(status).toBe(200);
-    expect(json.result.isError).toBe(true);
-    expect(json.result.content[0].text).toContain('metadata unavailable');
+    try {
+      const { status, json } = await call(runtime, toolsCall(7, 'list_actions', {}), failing);
+      expect(status).toBe(200);
+      expect(json.result.isError).toBe(true);
+      expect(JSON.parse(json.result.content[0].text)).toEqual({
+        error: { code: 'INTERNAL_ERROR', message: 'Internal server error', status: 500 },
+      });
+      expect(log).toHaveBeenCalledTimes(1);
+      expect(String(log.mock.calls[0]![0])).toContain('metadata unavailable');
+    } finally {
+      log.mockRestore();
+    }
   });
 });
