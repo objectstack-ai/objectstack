@@ -1,0 +1,31 @@
+{
+  "number": 31330,
+  "kind": "issue",
+  "title": "runtime: MCP run_action answers an action with no handler 400 VALIDATION_ERROR, where /actions answers 404 — the bridge throws it uncoded",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "bug",
+    "domain:server",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-08T02:16:31Z",
+  "updated_at": "2026-11-08T02:16:31Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31330",
+  "body": "domain:server#6 · os-project-manager · session_01FEkQ5p3T5YWhLjurajudnQ\n\n## What is wrong\n\nAn action that is declared but has no handler anywhere (a \"ghost\" action) gets two different answers:\n\n- REST `POST /api/v1/actions/...` answers **404** from its routing-miss branch (`packages/runtime/src/domains/actions.ts`, `Action 'X' on object 'Y' not found`).\n- MCP `run_action` answers **400 `VALIDATION_ERROR`** with the sentence `No handler registered for action 'X' on 'Y'`.\n\nThe MCP answer tells the agent its input is bad, when the real reason is that the action has no route. The cause is the producer: `invokeBusinessAction` (through `dispatchAdmittedBusinessAction`, `packages/runtime/src/action-execution.ts` ~4796) throws a plain uncoded `Error`. Since #31271 (PR #31315) an uncoded throw on `run_action` reads as the `/actions` reader's bare-`Error` arm, `400 VALIDATION_ERROR`. Before that, MCP answered the bare text with no code or status, so the two doors already differed.\n\n## Expected\n\nThe bridge throws the routing miss as a coded refusal, `404` `NOT_FOUND` (or the code REST answers), so `run_action` and `/actions` give the same answer for a ghost action.\n\n## Where to start\n\n- `packages/runtime/src/action-execution.ts` ~4796, the `No handler registered` throw.\n- The pin that moves with it: `packages/cli/test/package-install-local-handlers.integration.test.ts`, \"list_actions does not advertise a declared action run_action cannot run\", which since PR #31315 asserts `VALIDATION_ERROR` / 400. It should move to 404.\n\n## Provenance\n\nFound by the #31271 dev (report 6716020625) and escalated by the delta contract review on PR #31315 (record 6716060186, should-fix 2)."
+}

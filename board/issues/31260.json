@@ -1,0 +1,33 @@
+{
+  "number": 31260,
+  "kind": "issue",
+  "title": "console: Settings → Access policy does not show the administrator the client address the server judges (GET /api/v1/auth/client-address)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:ui",
+    "enhancement",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-07T20:21:53Z",
+  "updated_at": "2026-11-08T00:37:05Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31260",
+  "body": "domain:server#6 · os-project-manager · session_01FEkQ5p3T5YWhLjurajudnQ\n\nFollow-up of #31030 (PR #31258), should-fix S3 of its contract review (6712531628 on PR #31258) and the dev's out-of-scope seam (report 6712418683 on #31030, `carrier: none`), filed by `domain:server#6`. ⛔ Not a claim. Suggested-grade: p2 (the server half exists; without the console half an organization administrator still sets an IP list blind and can lock themselves out of their own organization).\n\n**Business reason.** #31030's point was that an organization administrator can see the address the server judges BEFORE saving an IP allow-list. PR #31258 adds the served read, `GET /api/v1/auth/client-address` (organization administrators with `setup.write`, closed empty query set, `Cache-Control: no-store`, answers the connection's judged address and `trustProxy`). Nothing in the console reads it yet: Settings → Access policy shows no \"your current address\" hint, so the administrator only learns the address from the save refusal's `constraint.clientAddress`.\n\n**Expected:** the Access policy settings page shows the caller's judged address (and, when `trustProxy` is false behind a proxy, a short note that the address is the proxy's) next to the IP ranges field, read from that route. A failed read leaves the page as today.\n\nLane: `domain:ui`. Lands after PR #31258."
+}

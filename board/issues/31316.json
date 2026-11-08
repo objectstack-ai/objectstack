@@ -1,0 +1,35 @@
+{
+  "number": 31316,
+  "kind": "pull_request",
+  "title": "refactor(types)!: delete the two field-types orphans nothing reads",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-08T01:14:50Z",
+  "updated_at": "2026-11-08T02:05:15Z",
+  "closed_at": "2026-11-08T02:05:14Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-08T02:05:14Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/31316",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-project-manager\"} -->\n_Requested by **Leehom** · [project thread](https://claude.ai/code/project/chan_01TenzsRopZj4jMbvjX8uz1X?thread=cmsg_01TenzsRopZj4jMbvjX8uz1XUdLNsYDSwYM1UrcfZv5vcX)_\n\nPart of #25921\n\nClause-②: no (narrowing)\nMetadata-protocol: none\nSkills-docs: none — neither name appears under `skills/**` or `content/docs/**`\n\n## 维护者速读\n\n- 改了什么:`@object-ui/types` 删掉 `field-types.ts` 里两个早已标 `@deprecated` 的孤儿类型 `VisibilityCondition` 与 `GeolocationFieldMetadata`,根入口的 \"Field Types\" 列表同步去掉;这是 #25921 的第 13 批。\n- 为什么改:两者在 objectui#12242 之后就没有任何读者(前者给已退役的 `visible_on` 键定型,后者已被移出 `FieldMetadata` 联合,`geolocation` 不是规格字段类型);两个仓库里 0 引用,含散文。\n- 风险与回滚:只删类型,构建出的 JavaScript 不变;外部 npm 宿主若 import 了它们会编译失败(未实测,changeset 写了 BREAKING 与替代写法)。`!` patch。回滚即 revert 本 PR。\n- 先看:`ui/packages/types/src/field-types.ts`(两处退役注释与联合注释)、`ui/packages/types/src/index.ts`(列表)、`.changeset/25921-types-field-types-orphans.md`。\n- 两分钟验证:`node scripts/check-adr-0087-registration.mjs --base origin/main`,预期两名都 `verified ... (export, ui/packages/types/src/field-types.ts)`、退出 0。\n- 需要你做的:无,席位落地。\n\n## What changes\n\nBatch 13 as named in the seat's amendment 6714801527 on claim 6714769871 (census option A, `/mnt/project-files/pm-orders/ui/25921-b13-census.md`, `origin/main` `7c523aa1`, hotcrm `6961ab1`).\n\n- **`ui/packages/types/src/field-types.ts`**: `VisibilityCondition` and `GeolocationFieldMetadata` are deleted, each replaced by a short retirement comment that names the live replacement (`BaseFieldMetadata.visibleWhen`; the spec's `location` type, `LocationFieldMetadata`). The `FieldMetadata` union's comment no longer names the retired interface.\n- **`ui/packages/types/src/index.ts`**: both names leave the \"Field Types\" export-type list, with a one-line note pointing at `field-types.ts`.\n- **`__tests__/field-metadata-family-retired-12242.test.ts`**: one JSDoc prose bullet reworded so it does not name the retired interface as current. No assertion read either name.\n- **Changeset** `.changeset/25921-types-field-types-orphans.md`: `!` patch, BREAKING, FROM/TO for each name, `runtime-export-retired` ×2 (FROM spans 1:1), both declaration lines.\n\nEvery other name of the module stays: each has an outside reader, or is a member of `FieldMetadata` (os_out 56) and so is reached by a kept export's signature.\n\n## Tests\n\n- Census per name (`git grep -lw` on `origin/main`, CHANGELOGs excluded): `VisibilityCondition` hits only `field-types.ts` and `index.ts`; `GeolocationFieldMetadata` hits those plus one JSDoc line in the 12242 pin. hotcrm 0 for both. Positive controls in the same module: `FieldMetadata` 56 outside files, `BaseFieldMetadata` 11. No zod twin, not a subpath, README 0, pending changesets 0, predicate-2 surface (`*.zod.ts`, spec contracts, object definitions) 0.\n- No test was added or removed, and there is no ablation: this deletes two TypeScript-only declarations and changes no tested behaviour.\n\n## Acceptance notes\n\n- Left on the card (seat amendment 6714801527): option B (`FieldValidationFunction`, plus the unbarrelled `FieldConstraints` that reads it) has three prose readers in `ui/scripts/__tests__/one-authority-per-exported-name-6273.test.ts`, outside this batch's surface; option C (`UploadedFileMetadata`) is named by the latest fields release note as the host-stored value shape. The seven `Spec*` aliases still wait on the predicate-2 ruling.\n- `dist/index.js` keeps the `index.ts` retirement note as a comment line (the bundler keeps comments); no export of either name is in `dist/`.\n\n## Verification\n\nAll on head `0da1e7d5` (base `7c523aa1`). Exit codes captured before any pipe.\n\n<details><summary>Package: build, type-check, 388/388 files, 10470/10470 tests</summary>\n\n- Under the verification lock: clean `dist` + tsbuildinfo, `pnpm --filter @object-ui/types build`, `pnpm --filter @object-ui/types run type-check`, `pnpm exec vitest run packages/types/` (from `ui/`): `Test Files 388 passed (388)`, `Tests 10470 passed (10470)`, VERDICT command-exit 0.\n- Built `dist/`: no export of either name; `LocationFieldMetadata` control present in 2 files. The one `dist/index.js` hit is the `index.ts` retirement comment line.\n- Reverse probe against the built `.d.ts` (a throwaway file in `@object-ui/fields`, removed): `TS2305 ... no exported member 'VisibilityCondition'` and `TS2724 ... no exported member named 'GeolocationFieldMetadata'. Did you mean 'LocationFieldMetadata'?`; no error on the `LocationFieldMetadata` control.\n</details>\n\n<details><summary>Derived gates: 36 derived, 36 run, all exit 0</summary>\n\n- `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` on `0da1e7d5`: 36 families, each run with stdin closed; every one exit 0, including `check-adr-0087-registration --base origin/main` (\"verified: @object-ui/types#VisibilityCondition (export, ui/packages/types/src/field-types.ts), @object-ui/types#GeolocationFieldMetadata (export, ...)\"), `check-empty-changeset`, `check-changeset-no-major`, `check:type-check-debt`, `check:published-files` and `pnpm --dir ui exec vitest run scripts/` (170 passed, 2 skipped files; 4996 tests).\n- `--ran` reconciliation: \"36 derived famil(ies) accounted for — 36 run, 0 NOT-MEASURED (a DERIVED zero — all 36 recorded an exit code and none of them is 3)\".\n- Beyond the derivation: `node scripts/check-platform-checklist.mjs --changed-from origin/main` exit 0 (no anchored file in the change set); `pnpm --dir ui check:new-line-citations` exit 0, 0 new citations.\n</details>\n\n<details><summary>Full dogfood battery: 435 passed, 3 skipped files; 3610 passed, 41 skipped tests</summary>\n\n- Under the verification lock: `pnpm --filter '@objectstack/dogfood^...' build && pnpm --filter @objectstack/dogfood test`, VERDICT command-exit 0; `Test Files 435 passed | 3 skipped (438)`, `Tests 3610 passed | 41 skipped (3651)`; no failure.\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01FEkQ5mTGTu2zw57z7wQ6cn)_\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01FEkQ5mTGTu2zw57z7wQ6cn\n"
+}

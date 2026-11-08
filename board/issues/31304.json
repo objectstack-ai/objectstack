@@ -1,0 +1,34 @@
+{
+  "number": 31304,
+  "kind": "pull_request",
+  "title": "docs(releases): say the Console UI builds from this repo's ui/, and add objectui to the 17.x skills remove roster",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-08T00:20:09Z",
+  "updated_at": "2026-11-08T01:26:58Z",
+  "closed_at": "2026-11-08T01:26:56Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-08T01:26:56Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/31304",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-project-manager\"} -->\n_Requested by **Leehom** · [project thread](https://claude.ai/code/project/chan_01TenzsRopZj4jMbvjX8uz1X?thread=cmsg_01TenzsRopZj4jMbvjX8uz1XLFhFvLJPa3PqrCb5j7uuBC)_\n\ndomain:devx#3 · os-project-manager · session_01FEkQ5pqSJEepcpxnxx9aZy\n\nFixes #31158\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么:两处文档文字。发布说明总览页(`content/docs/releases/index.mdx`)改说 Console UI 由本仓 `ui/` 构建,「细粒度变更日志」一节不再指向已归档的 objectui CHANGELOG,改指各 `@object-ui/*` 包自带的 `CHANGELOG.md`;升级指南(`content/docs/upgrading.mdx`)17.x 的 `npx skills remove` 名单补上 `objectui`。\n- 为什么改:18.2.0 起 Console 在本仓 `ui/` 构建,`@object-ui/*` 与 `@objectstack/*` 同一固定版本组;objectui 仓已归档,它的 CHANGELOG 不再更新。升级技能(`skills/objectstack-upgrade/SKILL.md`)的名单已含 `objectui`,文档页与之不一致。\n- 风险与回滚:只改文档文字,不发布(skip-changeset);带日期的各版本发布页(v12/v13/v14 仍链到 objectui CHANGELOG)按裁决保持原样。回滚即 revert。\n- 先看:`content/docs/releases/index.mdx` 第 6–11 行与第 41–45 行两个 hunk。\n- 两分钟验证:`git grep -n 'objectstack-upgrade objectui -y' -- content/docs/upgrading.mdx skills/objectstack-upgrade/SKILL.md`,预期两个文件各命中一行(两份 `skills remove` 名单一致)。\n- 需要你做的:无,席位落地。\n\n## What changes\n\n`content/docs/releases/index.mdx` (the releases overview, not a dated release page):\n\n- The opening paragraph says the Console UI is built from this repository's `ui/` workspace, whose `@object-ui/*` packages version in the same lockstep group, and is frozen into `@objectstack/console` at release time. It no longer says \"built from the objectui repository\".\n- \"Where the fine-grained changelogs live\", the Console UI bullet: every `@object-ui/*` package under `ui/` ships its own changeset-generated `CHANGELOG.md` in the same release, as does `@objectstack/console`. Console changes from before 18.2.0 (built from the separate objectui repository) are summarized on the release pages for their versions. The link to the archived objectui `CHANGELOG.md` is dropped.\n\n`content/docs/upgrading.mdx`, the \"From 17.x to 18\" skills step:\n\n- The `npx skills remove` roster gains `objectui`, so it is again the same list as `skills/objectstack-upgrade/SKILL.md`.\n- The sentence under the block says why `objectui` is there: a 17.x project installed it from the objectui repository, so the sync skips it like the `objectstack-*` skills.\n\n## Why\n\n- Since 18.2.0 the Console is built in this workspace from `ui/apps/console` (`packages/console/CHANGELOG.md`, 18.2.0 entry), and `.changeset/config.json` puts the `@object-ui/*` packages in the `@objectstack/*` fixed group. The objectui repository is archived, and its CHANGELOG gets no entries. `ui/CHANGELOG.md` in this repo is marked frozen history too, so the overview points at the per-package changelogs instead.\n- PR #31152 added `objectui` to the upgrade skill's roster. The docs page kept the old list, and no gate holds the two equal.\n\n## Tests\n\nNone owed: docs text only, no behaviour changed, so no test and no ablation.\n\n## Acceptance notes\n\n- **Dated release pages untouched.** v12 (L204), v13 (L188) and v14 (L298) still link the objectui CHANGELOG. They describe their own time; the order rules them out of scope.\n- **Readers of these lines.** `git grep` for `objectui/blob/main/CHANGELOG` and `built from the [objectui]` outside `node_modules` hits only `content/docs/releases/index.mdx` and the three dated pages; no script, census or link checker reads those lines. `scripts/role-word-baseline.json` counts `content/docs/releases/index.mdx`; the new text adds no counted word (`pnpm check:role-word` below).\n- `ui/.github/**` untouched.\n\n## Verification\n\nGate union derived by `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` (51 families for this diff), run on head `1ea1840d`, each exit code captured before any pipe:\n\n- **51 run, exit 0 each.** `--ran`: \"51 derived famil(ies) accounted for — 51 run, 0 NOT-MEASURED (a DERIVED zero — all 51 recorded an exit code and none of them is 3)\".\n- First pass: five families answered a missing build prerequisite, not a finding (`check:doc-formula-expressions` and `check:doc-security-posture` exit 3, `check:skill-examples` exit 3, `check:docs-transcript-drift` exit 3, `check:docs` exit 1 \"json-schema is missing\"). After `pnpm --filter '@objectstack/lint...' --filter '@objectstack/client-react...' --filter '@objectstack/spec' build` under the verify lock (VERDICT command-exit 0), all five re-ran exit 0.\n- `pnpm check:role-word` exit 0 (reads `content/docs/releases/index.mdx` against its baseline); `node scripts/check-nul-bytes.mjs` exit 0.\n- `node scripts/pm/dispatch-gates.mjs --tier`: no path-derived model mandate for this surface.\n- `pnpm lint`: the diff touches no package, so there is no scoped package lint.\n- CI families are read from this PR's check-runs, not re-run here.\n\n`skip-changeset`: content under `content/docs/` ships in no package.\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic. (not touched)\n- [x] 2. Every name I added uses the casing for its kind. (none added)\n- [x] 3. No formatter ran; `pnpm lint` passes. (no package touched; docs only)\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset. (publishes nothing: `skip-changeset`)\n- [x] 6. `packages/spec` touched: its generated artifacts are regenerated and committed. (not touched)\n- [ ] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`. Deliberate: this is the dedicated docs-only PR AGENTS.md's Documentation Guardrails name for a factual error on a releases page; only the maintained overview `index.mdx` moves, no dated page.\n- [x] 8. Title, body and comments are in English.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01FEkQ5pqSJEepcpxnxx9aZy\n"
+}

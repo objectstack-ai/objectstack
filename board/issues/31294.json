@@ -1,0 +1,35 @@
+{
+  "number": 31294,
+  "kind": "issue",
+  "title": "Queue-flake anchor: test/loop-body-iteration.test.ts",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "github-actions[bot]",
+    "id": 41898282,
+    "type": "Bot"
+  },
+  "labels": [
+    "pm:dispatched",
+    "queue-flake-anchor"
+  ],
+  "assignees": [
+    "marchtian"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-07T23:17:26Z",
+  "updated_at": "2026-11-08T02:00:28Z",
+  "closed_at": "2026-11-08T02:00:28Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31294",
+  "body": "`test/loop-body-iteration.test.ts` has ejected **9 pull requests** from the merge\nqueue within a rolling 24 hours — **4 independent hits** once\nGitHub's speculative stacking is accounted for. This issue is the single place for\nthat conversation; it is refreshed by the merge-queue-triage workflow on every\nfurther ejection.\n\n| PR | stack | queue build |\n|---|---|---|\n| #31220 | S1 · root | [42429362317](https://github.com/objectstack-ai/objectstack/actions/runs/42429362317) |\n| #31233 | S2 · root | [42430894350](https://github.com/objectstack-ai/objectstack/actions/runs/42430894350) · [42427285234](https://github.com/objectstack-ai/objectstack/actions/runs/42427285234) |\n| #31243 | S1 · inherited | [42430423477](https://github.com/objectstack-ai/objectstack/actions/runs/42430423477) |\n| #31244 | S1 · inherited | [42430861831](https://github.com/objectstack-ai/objectstack/actions/runs/42430861831) |\n| #31247 | S3 · inherited | [42425767147](https://github.com/objectstack-ai/objectstack/actions/runs/42425767147) |\n| #31249 | independent | [42410962891](https://github.com/objectstack-ai/objectstack/actions/runs/42410962891) |\n| #31256 | S2 · inherited | [42428161519](https://github.com/objectstack-ai/objectstack/actions/runs/42428161519) |\n| #31258 | S3 · root | [42425740739](https://github.com/objectstack-ai/objectstack/actions/runs/42425740739) · [42422774934](https://github.com/objectstack-ai/objectstack/actions/runs/42422774934) |\n| #31293 | S1 · inherited | [42430379056](https://github.com/objectstack-ai/objectstack/actions/runs/42430379056) |\n\n⚠️ **Queue depth is not evidence.** The `stack` column is read out of the queue\nbranch names: GitHub builds each queued PR on top of the previous entry, so a\nbuild whose BASE chain reaches another victim's queue HEAD (directly, or through\ngreen groups queued between them) contains that victim's tree by construction.\nA single deterministic break therefore ejects every PR\nbehind it, and the raw victim count climbs with QUEUE DEPTH until the owner\nlands a fix. Start with the roots above; an `inherited` row is a bystander until shown otherwise.\n\n**This issue is a NAME, not a diagnosis.** The workflow that files it reads the\nfailing test file path out of the job logs and counts PRs; it does not\nknow whether this is a flake, a load/timing cliff, a semantic conflict between\nqueued PRs, or a real regression, and it does not act on any of those. No test is\nskipped, quarantined or re-queued by it, and no PR is labelled by it — weakening\na gate stays a human act.\n\nWhat to do with it: read one victim PR's triage comment for the failure REASON\nline beside the FAIL line (a timeout and an assertion are the same FAIL line and\nopposite diagnoses), decide the cause, and close this issue with the fix or with\nthe reason it is not one.\n\nA later queue build that went green on the same `main` is a control only if its\naffected-only selection ran the failing package; a green group that never selected\nit carried the same tree without testing it.\n\nLast refreshed by queue build [42430861831](https://github.com/objectstack-ai/objectstack/actions/runs/42430861831) (PR #31244).\n\n---\n_Filed by the merge-queue-triage workflow (#4859, aggregation #10128)._\n\n<!-- queue-signature-anchor:test/loop-body-iteration.test.ts -->"
+}

@@ -22,11 +22,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-06T18:43:43Z",
-  "updated_at": "2026-11-07T20:09:32Z",
+  "updated_at": "2026-11-07T23:30:28Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 7,
+  "comments": 8,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/31030",
   "body": "repo:cloud#3 · hotlong · session_01Q4EjjRhUZjdy8VXs6Kkur2\n\nFiling gate: **(c) should-fix carried from a contract review** of objectstack#31013 (objectstack#30922; review 6692495550, items S6 and S7).\n\n## 维护者速读\n\n按组织的访问策略上线后有两处收尾：\n- 组织管理员保存 IP 白名单前，看不到平台判定的自己的地址，只能从保存被拒的提示里得知。读这个地址的接口目前只给平台管理员开。\n- 控制台里围绕旧字段 `require_mfa` 的提示已经不会再出现（字段改成只读了），这些代码该删掉，或者改成提示新的设置。\n\n## Expected\n\n1. **S7:** `GET /admin/client-address`, or a sibling read, gated by `setup.write` in the organization, so an org admin sees the judged address before saving `access_policy` IP ranges.\n2. **S6:** `ui/packages/app-shell/src/console/organizationMfaNotices.ts` (with `AppContent.tsx:969` and its i18n strings) is removed, or re-pointed at `access_policy.mfa_required`.\n\n## Acceptance\n\n- An org admin reads their judged address; a plain member is refused.\n- No dead notice code remains.\n\nSerial: after objectstack#31013 lands.\n\nSuggested-grade: p2."

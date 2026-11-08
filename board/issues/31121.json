@@ -2,8 +2,8 @@
   "number": 31121,
   "kind": "issue",
   "title": "Scenario gallery: a daily scheduled Claude Code task reruns the gallery after each stable release and opens a PR on objectstack-ai/gallery (ruling D2)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,18 +13,23 @@
   "labels": [
     "area:devpath",
     "domain:devx",
-    "pm:queue",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-project-manager"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-07T13:05:19Z",
-  "updated_at": "2026-11-07T13:57:29Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-08T01:58:25Z",
+  "closed_at": "2026-11-08T01:55:29Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/31121",
   "body": "domain:devx#2 · marchtian · session_017ihL2ebbZkr2QAEG1x7UC8\n\nFiling gate: ② follow-up of #30349 (scenario library T8), carrying out the maintainer's write-path ruling **D2** of 2026-11-06 14:53Z. ⛔ Not a claim. Triage sets the grade and the lane.\n\n**Business reason.** The gallery README promises the whole gallery is rebuilt after every ObjectStack release. The exporter (PR #30930, `c571165dae`) writes the gallery layout to a local directory, but nothing ever runs it. The maintainer ruled that the trigger is a scheduled Claude Code task in this project's cloud environment, not a person. The task runs the scenarios and the export, then opens a PR on objectstack-ai/gallery, which the maintainer merges with one click. After three clean runs he may switch it to pushing `main` directly (D1). The full analysis, including §8–9, is in the project files at `issue-30349/decision-analysis.md`.\n\n## What the ruling settled (not open here)\n\n- **Who runs it:** a scheduled cloud Claude Code task, which uses the maintainer's subscription login. It is not API-billed, and it was measured in this project's cloud container:\n  - `claude` 2.1.318 is installed;\n  - `auth status` reports `oauth_token` / `firstParty`;\n  - neither `ANTHROPIC_API_KEY` nor `ANTHROPIC_AUTH_TOKEN` is set;\n  - a nested `claude -p` works;\n  - Chromium is preinstalled.\n- **Where it writes:** a branch `export/<version>` on objectstack-ai/gallery plus a PR. Gallery commits carry the maintainer's GitHub identity, not the fleet bot's.\n- **How often:** daily. It skips silently when the gallery's `index.json` `framework.version` already equals npm's latest stable `@objectstack/cli`, the same shape as the #30832 snapshot pre-check.\n\n## Where (`origin/main`)\n\n- `packages/qa/scenarios/src/runner/driver.ts`: the header says \"a LOCAL Claude Code session …, never a cloud agent\". That is the dev's reading of the cost ruling, and D2 supersedes it. `ClaudeCodeDriver`'s API-key refusal stays exactly as it is.\n- `packages/qa/scenarios/src/runner/cli.ts`: there is no `--model` flag, so a run cannot pick a cheaper alias to save subscription quota.\n- `packages/qa/scenarios/src/export/` (`export-gallery`): exports only from a local `--runs` directory, and refuses every card until #30932 lands (`NO_GENERIC_MARKER`).\n- No entry point does the whole chain (version check → run → export → commit) in one deterministic step.\n\n## Wanted\n\n1. **One deterministic entry point** in `packages/qa/scenarios`, for example `gallery-refresh --gallery DIR [--cards …] [--model ALIAS] [--debut]`. It must:\n   - read npm's latest stable `@objectstack/cli` and the gallery checkout's `index.json` `framework.version`;\n   - when they are equal, exit 0 with a one-line `skip: <reason>` (a quiet skip);\n   - otherwise run the scenarios against that released version, export with screenshots into the gallery checkout, and commit on the branch `export/<version>`;\n   - print the branch and a PR body.\n   It never pushes and never opens the PR; the scheduled task does that. Every refusal exits non-zero and says why.\n2. **`--model`** on the runner, passed through to `claude -p --model`.\n3. **The `driver.ts` header** names ruling D2. A local session or a scheduled cloud task on the maintainer's subscription login is allowed. An API-billed model is still never allowed.\n4. **Debut:** `--debut` exports one card (the gallery's first app) so the whole chain is proved once. After that, every `starter` and `delivery` card is exported, never `control` (the `tier` rule, comment 6687463653).\n5. **A runbook** in the package README: the exact prompt the scheduled task carries (clone the gallery, run `gallery-refresh`, push the branch, open the PR, and on failure file or refresh one deduplicated card). The seat creates the scheduled task from that text once this lands.\n\n## Depends on\n\n- **#30932:** the `origin: generic` marker and the `{zh, en}` title. Until it lands, the exporter refuses every card and the debut exports nothing.\n- **The maintainer** adds objectstack-ai/gallery to this project's environment resources, so the cloud task can clone and push it.\n\n**Level:** QA tooling. `Clause-②: no`, `Metadata-protocol: none`. Nothing here touches the published packages.\n\nDedupe (open and closed): \"scheduled gallery routine\", \"gallery index.json framework.version\" and \"never a cloud agent\" turned up only #30349 itself. **New.**\n\nRelated: #30349, PR #30930, #30932, #30832, #30970.\n\nReader: the `domain:devx` lane seat, from `pm:queue`, after #30932 lands."

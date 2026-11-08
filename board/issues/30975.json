@@ -12,19 +12,21 @@
   },
   "labels": [
     "domain:server",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p3",
     "tech-debt"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-project-manager"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-06T14:59:50Z",
-  "updated_at": "2026-11-07T16:18:22Z",
+  "updated_at": "2026-11-08T02:11:30Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 2,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30975",
   "body": "domain:devx#1 · os-elon-musk · session_016WV4cxm997Tr9c3JFQTKGj\n\n## What\n\n`scripts/facade-delegation-registry.json` holds four exception rows for `packages/objectql/src/engine.ts` that cite #30147. The maintainer ruling on #30147 (comment 6687801899, option A, 2026-11-06T14:55Z) hands them to this card, so #30147 can close with its protocol.ts work. The 3b PR of #30147 re-points the four rows' `card` to this issue; their reasons stay as written until this card retires each row.\n\n| Class | Member | Current reason (abridged) |\n| --- | --- | --- |\n| `ObjectQL` | `homeAmountServing` | codemod limit: field-call (calls a field as a function) |\n| `ObjectQL` | `projectHomeAmountsOntoPatch` | codemod limit: a parameter default computes (calls `this.homeAmountServing`) |\n| `ScopedContext` | `derive` | codemod limit: foreign-private, writes `appAuthored` on another instance |\n| `ScopedContext` | `[APP_AUTHORED_HOOK_API]` | codemod limit: symbol-keyed method; also writes `appAuthored` on another instance |\n\n## Serial behind #30747\n\n⛔ Do not start while #30747 is open: that draft (security hardening) edits `engine.ts`, and so does #30940. Start from a `main` that carries #30747's merge (or its close), and re-check open pulls touching `packages/objectql/src/engine*.ts` first.\n\n## Measurement (from #30147 phase 3c, main 616311c126, 2026-11-06)\n\nLine numbers below are main `1b3e22f02` and will move.\n\n- `ObjectQL` has 61 instance fields; exactly one is called as a function: `homeLocalizationResolver` (declared ~line 2621). It is called once, in `homeAmountServing` (~2661, `this.homeLocalizationResolver?.(organizationId)`), never read as a value, and written by `setHomeLocalizationResolver` through the host setter (~10393-10394).\n- `projectHomeAmountsOntoPatch`'s body is already moved (to `engine-references-and-master-detail.ts`, #29986); only its stub's parameter default `serving: HomeAmountServing = this.homeAmountServing(context)` (~2722) still computes on the class.\n- `ScopedContext.derive` (~10720) and `[APP_AUTHORED_HOOK_API]` (~10757) write the private `appAuthored` on another `ScopedContext` instance, which a module function cannot reach.\n\n## Proposed plan (from the #30147 report, for the owner to confirm)\n\n1. `projectHomeAmountsOntoPatch`: move the default into the facet (the stub passes `serving` through, undefined when the caller passes none, and the facet computes `host.homeAmountServing(context)`). A private signature; no public `.d.ts` change.\n2. `homeAmountServing`: a receiver-form hand move that reads `homeLocalizationResolver` off the instance (the only called-only field, so no general field-forwarding rule is needed), with an undo proof like the codemod's.\n3. `derive` and `[APP_AUTHORED_HOOK_API]`: likely accepted exceptions with written reasons (the foreign-private write is the point of both); that needs a maintainer ruling like #30147's (a recorded exception to ruling 6624345766 item 3), or a design that moves the write.\n\n## Acceptance\n\n- Each row is retired (its member moved and the row deleted) or carries a maintainer-ruled accepted-exception reason.\n- `node scripts/check-facade-delegation-only.mjs` exit 0; `pnpm --filter @objectstack/objectql typecheck` exit 0; objectql vitest base and head; the public `.d.ts` surface of `@objectstack/objectql` unchanged.\n\nFiled unclaimed for triage."

@@ -16,17 +16,15 @@
     "pm:awaiting-maintainer",
     "priority:p1"
   ],
-  "assignees": [
-    "marchtian"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-07T15:33:36Z",
-  "updated_at": "2026-11-07T16:52:17Z",
+  "updated_at": "2026-11-07T23:57:49Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 4,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/31168",
   "body": "domain:server#3 · marchtian · session_017ihL2dFb2QdZEHEJ83cR2B\n\nFiling gate: a follow-up carved out by a maintainer ruling. #30965 was ruled D + A + V1 (ruling 6709033929, 田騏 2026-11-07 15:29Z): that card lands OIDC now; SAML moves here, upstream first. This card inherits that ruling and does not go back to the decision box, except for the one return named below. Consumer: objectstack-ai/cloud#3666 (Enterprise SSO with Okta / Entra ID, SAML is Entra's default).\n\n## 维护者速读\n\nSAML 登录被拒时（断言过期、签发方不对、签名坏了、证书换了），平台仍只说一句「Invalid SAML response」。原因在 `@better-auth/sso` 内部就被丢掉了，我们不改包读不到。按裁定，先给 better-auth 提一个约 30 行的上游 PR，让它把 samlify 的错误原因带出来，合并后升级依赖，再在 plugin-auth 里映射成和 OIDC 同一份清单的原因 token。\n\n## Measured (card thread report 6708108101, analysis 6708199006)\n\n- `@better-auth/sso` 1.7.12 `processSAMLResponse` wraps `sp.parseLoginResponse` in a `catch` with no binding, logs the constant `SAML response validation failed`, and throws a constant `APIError('Invalid SAML response')`. The ACS endpoint turns that into `error=saml_error`. samlify's causes (`FAILED_TO_VERIFY_SIGNATURE`, `ERR_UNMATCH_ISSUER`, `ERR_SUBJECT_UNCONFIRMED` for NotBefore/NotOnOrAfter, `ERR_EXPIRED_SESSION`) never leave the package.\n- Still the same in 1.7.18 (npm latest) and 1.8.0-beta.6, per the Fable analysis thread's download of each `dist/index.mjs`.\n- Already distinct today, so out of scope: audience / recipient (`invalid_saml_response` + message), replay (`replay_detected`), InResponseTo.\n- `pnpm patch` in this repo does not reach cloud's npm install of `@objectstack/plugin-auth` (ruled out as option C).\n\n## Plan (ruling execution, section 7 of 6708199006)\n\n1. The seat drafts the better-auth upstream PR: inside that `catch`, keep the samlify error and map its code onto the `APIError`'s `code`, so the ACS endpoint's existing lower-casing puts it in `error=` (or a hook, whichever upstream prefers), plus a test. Draft text goes to this card.\n2. **Maintainer action:** submitting it needs 田騏's account or an authorization, because the upstream repository is outside this project's write scope.\n3. After upstream merges and releases: bump the `@better-auth/sso` pin, then map the cause onto the token list #30965 exports, with the same docs page and the same structured `warn` line (`providerId`, `protocol: 'saml'`, `cause`). Tokens: `assertion_expired`, `assertion_not_yet_valid`, `assertion_issuer_mismatch`, `assertion_signing_key_unknown`, `assertion_signature_invalid`. ⛔ No assertion XML, NameID, email, or account signal.\n4. **The one return to the box:** if the upstream PR has not moved two weeks after submission, option B (plugin-auth re-parses with samlify only to label an already-refused response) goes back to the decision box once, with its preconditions stated.\n\n## Acceptance\n\n- Each SAML refusal class yields its own token and log line on the real plugin, with a CONTROL valid assertion and a no-leak pin. The SAML cases among cloud#3666's `it.todo` cases can go live.\n\nBlocked-by: #30965\n\nSerial: #30965 creates the exported token list and docs page this card extends; #30967 and #30966 touch the same SSO mount.\n\nDedupe (open and closed): `Invalid SAML response` → #30965 (the parent), #6015 (triage seat post); `processSAMLResponse` → none. None is this card.\n\nSuggested-grade: p2 · Enterprise priority (maintainer); the parent's p1 rested on a protocol addition, which V1 removed.\n\nMaintainer-action: run the upstream checks in `notes.md` and submit `upstream-pr.md` + `upstream.patch` to better-auth/better-auth from an account with access (or authorize a named account to do it) — done when an upstream PR URL is on this card\n"

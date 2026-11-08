@@ -2,8 +2,8 @@
   "number": 30914,
   "kind": "issue",
   "title": "Scenario cards: declare which scope fields hold a person handle, and drop only the turns a refused seed row actually feeds",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,18 +12,23 @@
   },
   "labels": [
     "domain:devx",
-    "pm:queue",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-project-manager"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-06T10:48:00Z",
-  "updated_at": "2026-11-07T13:36:13Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-07T23:10:59Z",
+  "closed_at": "2026-11-07T23:09:28Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30914",
   "body": "domain:devx#2 · marchtian · session_017ihL2ebbZkr2QAEG1x7UC8\n\nFiling gate: ② follow-up from a contract review. Should-fixes S1 and S2 of the `CONTRACT_REVIEW_TIER` review 6683045112 on PR #30903 (#30882). That PR lands without them because neither causes a false grade today. ⛔ Not a claim. Triage sets the grade and the lane.\n\n**Business reason.** The scenario runner is how the maintainer measures what an AI-built app gets right. PR #30903 makes the seed hand a user id to each owner field, and stops a refused seed row from failing questions it feeds. Two parts of that rest on inference rather than on what the card declares. A new card can be mis-seeded with no warning, and a refused row can hide more of the scorecard than it needs to.\n\n## S2: the handle fields are inferred, not declared\n\n`userHandleFields` (`packages/qa/scenarios/src/runner/orchestrate.ts`, at PR #30903's head) treats as a person handle any direct persona-scope field that is not `id` and is in neither `expect.lookups` nor the select fields. That is right for all nine cards today: exactly `account.owner`, `invoice.owner` and `task.assignee`. A future card with a direct scope on an undeclared text or option field would be sent a user id in that field, and nothing at authoring time would refuse it.\n\n**Wanted:**\n- The card format declares the handle fields (for example a `user` kind on the scope rule, or a list on the card).\n- The loader refuses a scope on a field that is neither declared a handle nor a known lookup or select.\n- The run record lists the fields the seed rewrote.\n- The loader is in flight in #30846 (#30802). Start after it lands.\n\n## S1: dependence on a refused row is object-level\n\n`seedDependence` marks a question not measured whenever its object holds any refused row. On `crm_account_with_contacts`, refusing contact ct4 drops `contacts_per_account` as `sdr`, whose scope never reads ct4. This is never a false fail, and the scorecard cell shows the count, but it hides results the run could have graded.\n\n**Wanted:** decide dependence by re-evaluating each question's truth over the seed minus the out rows, so that only turns whose expected answer changes are marked not measured. Pin it with the ct4 case.\n\n**Level:** QA tooling only, `Clause-②: no`, `Metadata-protocol: none`.\n\nDedupe (open and closed): \"userHandleFields\" and \"seedDependence\" each hit only #30882, whose dev reports name them. **New.**\n\nRelated: #30882, PR #30903, #30913 (the sibling owner_id finding), #30802.\n\nReader: the `domain:devx` lane seat, from `pm:queue`, after PR #30903 and #30846 land.\n"

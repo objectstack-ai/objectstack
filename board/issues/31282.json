@@ -1,0 +1,30 @@
+{
+  "number": 31282,
+  "kind": "pull_request",
+  "title": "ci(lint): say the ADR index step reds on a dropped header field",
+  "state": "open",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "ci/cd",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-07T22:02:52Z",
+  "updated_at": "2026-11-07T22:14:24Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/31282",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-project-manager\"} -->\n_Requested by **Leehom** · [project thread](https://claude.ai/code/project/chan_01TenzsRopZj4jMbvjX8uz1X?thread=cmsg_01TenzsRopZj4jMbvjX8uz1XPw6CyoP7HbB48b5AYjr9Mb)_\n\ndomain:devx#3 · os-project-manager · session_01FEkQ5osNrTSqaiDeCWaBYU\n\nFixes #31261\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么:`.github/workflows/lint.yml` 里 ADR 索引那一步(`id: adr-index-current-report-only`)的注释块和 `name:`,只改文字。新名字是 `ADR index is current (warnings, except a dropped header field is a red)`。\n- 为什么改:PR #31252 之后,`adr-index.mjs --report` 在重新生成会清空已发布索引里的 Date / Supersedes / Superseded-by 单元格时退出 1;旧注释和旧步骤名仍说「这一步永远不会因为记录而变红」,读者会被误导。\n- 风险与回滚:不改 `run:`、`id`、`continue-on-error`,步骤行为不变;回滚即还原本 PR。全仓没有任何脚本、pin 或普查读这个步骤名或这段注释。\n- 先看:`.github/workflows/lint.yml` 约 687–703 行这一个 hunk。\n- 两分钟验证:`pnpm check:adr-index`,预期 self-test 60 条全绿,`--report` 打印 OK 并以 0 退出(行为未变)。\n- 需要你做的:受管面 Tier H(`.github/workflows/**`):由你合并或入队,或授权账号 APPROVED 后由席位落地。\n\n## What changes\n\n`.github/workflows/lint.yml`, the ADR index step only:\n\n- The comment block now says what the step does since PR #31252: `--report` warns and exits 0 for a stale index or an unreadable status line, and exits 1 with an error annotation when the regeneration empties a Date, Supersedes or Superseded-by cell the committed index carried (`scripts/adr-index.mjs` `reportExitCode`, `droppedFields`). It also says the index is generated from the records' header lines, not only the status line.\n- The step `name:` changes from `ADR index is current (report-only — warnings, never a red on a record)` to `ADR index is current (warnings, except a dropped header field is a red)`.\n- No change to `run:`, `id`, or `continue-on-error`.\n\n## Tests\n\nNone owed: workflow text only, no behaviour changed, so no test and no ablation.\n\n## Acceptance notes\n\n- **Readers of the name or the id.** `git grep` on `origin/main` 07559ce5a for `never a red on a record`, `ADR index is current` and `adr-index-current-report-only` hits only `.github/workflows/lint.yml` itself. No pin, census or gate reads the step name, so nothing else moves. `scripts/pm/ci-failure.mjs` resolves a step by its name against the workflow source, so it follows the rename.\n- **Parsed name.** The new name is a plain scalar with no space-hash pair; `node scripts/check-workflow-step-name-quoting.mjs --list` judges it ok, and a YAML parse of the file gives the step as name above, `id: adr-index-current-report-only`, `continue-on-error: true`, `run: pnpm check:adr-index`.\n- **Why a dropped field reds the lane although the step keeps `continue-on-error: true`.** The lane's last step (`scripts/ci/lane-verdict.mjs`) reads each gate step's outcome. The comment does not restate that; the file's header already does.\n- **Governed surface.** `node scripts/pm/check-governed-merges.mjs --branch HEAD` on head 2787b0af, exit 3:\n\n```text\ngoverned-surface predicate: 1 of 1 path(s) hit the register (13 surfaces govern objectstack).\n  ⛔  GOVERNED — a human merge is the review record for this PR (#9495 regime).\n      ⚖️ landing tier: H(人合) — the maintainer's hand, or an authorized APPROVED review (GOVERNED_APPROVERS) and then the owning seat lands it.\n      .github/workflows/** ×1 — CI, deploy and release workflows: what runs on every push, what deploys, what gates the queue\n        - .github/workflows/lint.yml\n  ⚠️  head repo: NOT MEASURED — this verdict cannot tell a fork PR from an internal one; `--pr N` reads it.\n  size: 26 changed line(s) (+16 / -10) ≤ 3000 — under the human-merge threshold (generated files included in the count).\n```\n\n- `node scripts/pm/dispatch-gates.mjs --tier`: no path-derived model mandate for this surface.\n\n## Verification\n\nGate union derived by `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` (42 families for this diff), run on head `2787b0af`, each exit code captured before any pipe:\n\n- **42 run, exit 0 each.** `--ran`: \"42 derived famil(ies) accounted for — 42 run, 0 NOT-MEASURED\".\n- Also run, outside the derivation: `pnpm check:adr-index` exit 0 (\"self-test 60 assertions green\", `--report` OK), and `node scripts/check-issue-citations.mjs` exit 0.\n- `pnpm lint`: the diff touches no package, so there is no scoped package lint; eslint does not read workflow YAML.\n- CI families are read from this PR's check-runs, not re-run here.\n\n`skip-changeset`: a workflow file, published by no package.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01FEkQ5osNrTSqaiDeCWaBYU)_\n"
+}

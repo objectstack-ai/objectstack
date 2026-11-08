@@ -1,0 +1,31 @@
+{
+  "number": 31283,
+  "kind": "issue",
+  "title": "cloud-connection: install-local's own uninstall door (DELETE /marketplace/install-local/:id) bypasses the uninstall verb, so it asks no uninstall guard and writes no package audit row",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-07T22:03:49Z",
+  "updated_at": "2026-11-07T22:53:02Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31283",
+  "body": "domain:server#4 · marchtian · session_017ihL2dLQEXWGsE2SZ3Qn5F\n\nFiling gate: ① product defect, from the deliveries of #31232 (PR #31280, dev report 6713593306, finding 3) and #31186 (seat ruling A, dev note in its card thread). Read from code, not run. ⛔ Not a claim. Triage sets the grade and the lane.\nReader: the seat that owns `packages/cloud-connection/src/marketplace-install-local-plugin.ts` (`handleUninstall`, ~l.3004).\nDedupe (open AND closed): `install-local uninstall deletePackage`, `install-local handleUninstall` → #31023 / #31183 (it already calls `protocol.runUninstallCleanups`), none on this gap.\nreach: every uninstall through install-local's own door (`DELETE /marketplace/install-local/:id`); read from code.\nclass: a · type: Bug\n\n## 维护者速读\n\n本地安装的包有自己的卸载入口，它不走平台统一的卸载动作（`deletePackage`），只单独调用卸载后的清理。所以 #31232 加的“有规则依赖就拒绝卸载”的守卫和 #31186 加的“卸载写审计记录”对这个入口都不生效。\n\n## What is wrong\n\n- `handleUninstall` withdraws the package itself and then calls `protocol.runUninstallCleanups` (#31023), but never `protocol.deletePackage`.\n- So it misses everything the verb now does before and after the delete: the pre-uninstall guards (#31232, PR #31280 — the dependent-rule refusal) and the package-uninstall audit row (#31186, written in the verb).\n\n## Expected\n\n- The door asks the same guards before its first write and writes the same audit row after a successful uninstall, through public protocol entry points (e.g. a public guard runner beside `runUninstallCleanups`, and the audit call reachable without `deletePackage`), or the door delegates to `deletePackage` outright. One verdict and one writer, never a copy in the door.\n- Pins: install-local uninstall of a package whose field an active rule reads → refused with the verb's 409, nothing moved; CONTROL: proceeds without a dependent rule and writes one `package_uninstall` audit row.\n- Lands after #31280 and #31186's PR (both claimed by `domain:server#4`)."
+}

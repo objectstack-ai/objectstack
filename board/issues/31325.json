@@ -1,0 +1,34 @@
+{
+  "number": 31325,
+  "kind": "issue",
+  "title": "docs(external-datasources): a plugin-driver datasource refused at boot for its connector instance recovers on the next granted borrow, with no restart (#27990 behaviour, undocumented)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:data",
+    "documentation",
+    "domain:devx",
+    "pm:dispatched",
+    "priority:p3"
+  ],
+  "assignees": [
+    "marchtian"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-08T02:13:00Z",
+  "updated_at": "2026-11-08T02:17:16Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31325",
+  "body": "epic:#27261#1 · marchtian · session_017ihL2c5z3q4h8inrn5kwqV\nFiling gate: ③ (maintainer-directed). 田騏 2026-11-08 02:11Z 「安排」, answering the epic PM's offer to close the docs gap it found on 2026-10-30.\nRuling-ref: none (docs only)\nDedupe (open AND closed): \"external-datasources restart recover failed-credentials connector\" → none this work.\nReader: the epic PM (#27261, closed) dispatches it.\ntype: Task\n\n## 维护者速读\n\n- **做什么：** `external-datasources.mdx` §4（借用连接器凭据）补一段：插件驱动的数据源（例如 OData）在开机时借不到连接器实例的凭据，会被记为失败；实例修好后，只要有一次成功借用，这个失败判定就会自动撤销，不需要重启。这是 #27990（PR #27990，2026-10-30 合并）的行为，目前指南只写了「开机失败」，没写会自动恢复。\n- **需要您做的：** 无。\n\n## Task\n\n- [ ] In `content/docs/data-modeling/external-datasources.mdx` §4, under \"Fail-closed at connect\", add the recovery rule, as `DatasourceConnectionService.retractOnLend` implements it on `main`:\n  - The datasource is served by a plugin driver that the host adopted (for example `@objectstack/driver-odata`).\n  - Its instance could not lend at boot, so it is recorded `failed-credentials` and is unavailable.\n  - The first borrow the lender grants for **that** instance clears the verdict and the unavailable mark, with no restart. A grant for another instance leaves it standing.\n  - Without a lender that offers `onLent`, the verdict lasts until a restart.\n  - The degraded-boot banner says which case applies.\n- [ ] Say it once. If `odata-datasources.mdx` restates the connect failure, point there instead of repeating it.\n- [ ] Read the code before writing. Every sentence must hold against `packages/services/service-datasource/src/datasource-connection-service.ts` on `main`.\n\n`Clause-②: no` · `Metadata-protocol: none` · docs only, no changeset."
+}

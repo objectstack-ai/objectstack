@@ -1,0 +1,34 @@
+{
+  "number": 31327,
+  "kind": "issue",
+  "title": "driver-sql: SQL Server as a federation dialect — an external datasource over Microsoft SQL Server reads (and, double opt-in, writes) live, with type-compat and the predicate emitters modelling mssql",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:data",
+    "domain:server",
+    "enhancement",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "marchtian"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-08T02:13:25Z",
+  "updated_at": "2026-11-08T02:19:10Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31327",
+  "body": "epic:#27261#1 · marchtian · session_017ihL2c5z3q4h8inrn5kwqV\nFiling gate: ③ (maintainer-directed). On 2026-11-08 at 02:11Z 田騏 said 「安排」, approving the epic PM's offer of 2026-10-30. The legacy-modernization scenario (federate an old ERP/MES/HIS database in place) has no driver for the two databases those systems most often run on.\nRuling-ref: ADR-0015 (external datasource federation; non-goals: cross-datasource joins, distributed transactions, reverse DDL)\nDedupe (open AND closed): \"SQL Server mssql driver tedious federation dialect\" → none this work. driver-sql already lists `tedious` as an optional peer, and its predicate emitters name mssql `'unknown'`.\nReader: the epic PM (#27261, closed) dispatches it.\ntype: Feature\n\n## 维护者速读\n\n- **做什么：** 让 `schemaMode: 'external'` 的数据源可以指向 SQL Server。老系统的表直接变成本体对象，查询下推成 T-SQL 在老库执行；默认只读，写入需要两处都打开。\n- **范围：** 只做联邦（external）。不支持把平台自己的库建在 SQL Server 上（managed 模式），声明时会被拒收，并说明原因。以后有需要再立卡。\n- **工作量：** 约 M–L。改动集中在 driver-sql 的方言建模、spec 的驱动词表和类型矩阵（要走契约复核）、`$metadata` 式导入（读表结构）和一个可选的真库测试。\n- **需要您做的：** 无。\n\n## Task\n\n- [ ] **Driver id.** `DRIVER_VOCABULARY` (`packages/spec/src/data/driver/config-registry.zod.ts`) gains `mssql`, aliases `sqlserver` and `tedious`, served by `driver-sql` over knex's `mssql` client. `hasLocalDefault: false`. Declaring it on a `managed` datasource is refused at `defineStack`, with a message that names the federation-only scope.\n- [ ] **Dialect modelling in driver-sql.** `dialectName` gains `'mssql'`, so nothing falls through to `'unknown'`:\n  - paging: `OFFSET … ROWS FETCH NEXT … ROWS ONLY`, which needs an `ORDER BY`, so use the key when none is given;\n  - identifier quoting with `[]`;\n  - the case-exact and case-folded `LIKE` (#6518's contract; `COLLATE Latin1_General_BIN2` or the equivalent), with escaping;\n  - `bit` as boolean;\n  - `datetime2` / `datetimeoffset`;\n  - `nvarchar(max)`;\n  - `uniqueidentifier` as uuid;\n  - no `RETURNING`: use `OUTPUT inserted.*` for the double-opt-in write path.\n- [ ] **Type-compat.** `SqlDialect` gains `'mssql'`, and `DIALECT_ALIASES.mssql` maps SQL Server's types to canonical ones (`nvarchar`, `nchar`, `ntext`, `bit`, `tinyint`, `smallint`, `int`, `bigint`, `decimal`, `numeric`, `money`, `float`, `real`, `date`, `time`, `datetime`, `datetime2`, `smalldatetime`, `datetimeoffset`, `uniqueidentifier`, `varbinary`, `xml`). ADR-0015 §4.6's dialect list gains it. This is a published spec widening, so a CONTRACT_REVIEW_TIER review is owed.\n- [ ] **Introspection.** The Studio Tables tab and `list_remote_tables` / `import_object` list and draft SQL Server tables, including schema-qualified names (`dbo.Orders`), primary keys and foreign keys.\n- [ ] **Tests.** Compile-level pins (`toSQL()`) for every emitter arm. The 11 shared conformance case-sets run on the driver. Add a live cell in `live-dialect-matrix` (opt-in `MSSQL_URL`; `mcr.microsoft.com/mssql/server` in CI if the live job can host it, otherwise a declared skip, never a claimed pass).\n- [ ] **Docs.** `external-datasources.mdx` names SQL Server, with its config shape and the federation-only scope.\n\n`Clause-②: yes (widening)` expected · `Metadata-protocol: added` (a new accepted driver id). Serial with the Oracle card filed beside this one: both touch `config-registry.zod.ts`, `type-compat.ts` and ADR-0015 §4.6, and whichever lands second merges."
+}

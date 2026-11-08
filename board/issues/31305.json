@@ -1,0 +1,32 @@
+{
+  "number": 31305,
+  "kind": "issue",
+  "title": "[Decision] QA loop has no working owner: 16 `qa-run` records sit open with close-out done, the weekly regression ruled in 6501246005 has never run, and 96 QA-extracted fixes are unretested. Add a `qa` seat, or give the duty to an existing lane?",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:skills",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-08T00:23:35Z",
+  "updated_at": "2026-11-08T01:52:33Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31305",
+  "body": "triage#1 · os-zhuang · session_01AavokzJ5DndAwitDXvKy4U\n\nFiling gate: ② a decision only the maintainer can make (a new seat or a lane-charter change). The maintainer asked in triage's session, 2026-11-08: 「排查一下 所有的 qa-run 卡片，为什么还开着，包括很久以前的还有价值吗」 and 「skills 需要更新吗？包括是否建议设计一个 qa 席位，定期处理 qa 相关的事项」. ⛔ Not a claim.\n\n## 维护者速读\n\n- **一句话问题：** QA 这条线没有真正在岗的负责人，所以跑完的记录没人关、该定期跑的回归没人跑、修好的缺陷没人回测。\n- **现读事实**（2026-11-08 读）：\n  - 开着的 `qa-run` 记录有 16 张，全部是 11-02 到 11-03 的 18.3.0 发版测试波次（w4/w5 和 ADR-0146 专项）。\n  - 其中 15 张收口评论早已写好：每条 FAIL 都有处置，从它们抽出、挂靠的 97 张卡里 **96 张已关闭**，只剩 #27482（p2）还开着。按 checklist-test §5 和先例（#27441、#28656 收口后当场关闭，遗留项留在自己的卡上），这 15 张早该关闭。没关是因为执行收口的 devx#1 已下线，关卡这一步没人接。\n  - #29560 已被 #29648（同 7 项重跑）覆盖，`Superseded-by:` 一直没写，也没关。\n  - 你在 6501246005 裁定的两条例行（每周回归 4 张记录、发版后 npm 冒烟）：每周回归 `owed:weekly` **一次都没跑过**。最近一次 P0 记录是 11-02，此后 5 天没有任何 `qa-run`。\n  - 96 张修复卡已落地，按 §5 触发 2 该回测，但没人做；欠测清单脚本 `retest-owed.mjs` 也没人跑。\n- **记录还有价值吗？** 有，但价值不靠\"开着\"。逐项最新判定是汇总脚本（`qa-rollup.mjs`、`retest-owed.mjs`）的数据源，它们读的是 `state=all`，关闭不丢任何东西。开着反而有害：§5 把\"开着的 qa-run 数\"定义为收口债的健康指标，现在这个数是假的，16 里有 15 张没有欠债。\n- **技能文本要不要改？** 要，三处自相矛盾或缺主语，见下面「Text owed」。\n\n## 选项\n\n- **A（推荐）：设 `qa#1` 角色席**，与 triage、security、director 同类，自带例行任务（routine）。\n  - 职责：§6 的两条例行（每周回归、发版后冒烟）；每轮收口、关卡、supersede；每周跑一次 `retest-owed.mjs`，把欠测项纳入下一轮回归。\n  - ⛔ 不派开发、不改产品代码，抽出的缺陷卡照常进分诊。\n  - 技能文本仍归 `domain:skills`。\n  - 代价：多一个常驻会话，加每周一轮浏览器回归的算力（单轮时长未测）。\n- **B：不设新席，写死给现有车道。** 把例行、收口、关卡明确写给 `domain:skills` 席（现行岗位说明本来就写\"QA 管理循环执行归本席\"）。代价最小，但这条职责现在就写在 skills 席，事实上没人执行；skills 席的主业是技能文本，例行很容易再次落空。\n- **C：维持人工触发。** 只修文本：收口即关卡，例行仍由你点名才跑。最省，但回测债会继续累积，「平台测试清单反复变红」的风险靠你记着点名。\n\n## Four facets\n\n<!-- os-decision-facets -->\n- ① Long-term soundness: A gives one named owner per duty (QA cadence vs QA text). B leaves two jobs on one seat, the same arrangement under which the duty was never done. C keeps the cadence in the maintainer's head.\n- ② Business pull: now. 96 shipped fixes have no live re-judge, and 18.3.x landings since 11-02 are untested by any checklist run. The next release candidate starts from an unknown baseline.\n- ③ AI-error resistance: a routine-driven seat makes \"no run this week\" visible (a missed fire is a missing record), and the close-out step stops depending on whichever runner session happens to be alive. Under B/C a skipped week is silent, as it is today.\n- ④ Startup-stage scope: A adds one seat and one routine but no gate, label or protocol key. B and C add nothing. A weekly 4-record regression is the ruling already given in 6501246005, not new scope.\n\nConfidence gap: the wall time and cost of one weekly regression (four records) are unmeasured; the 11-02 `priority:P0` run of 23 items is the nearest reading.\n\nPrior rulings read: 6501246005 (two routines, checklist-test §6); `lanes/skills.md` 「QA 管理循环执行归本席」 and 「QA 波次由维护者手动触发,⛔ 不自启」; checklist-test §5 close-out and the Supersede protocol.\n\n## Text owed (any option)\n\n1. `lanes/skills.md` says the skills seat owns the QA loop, while checklist-test §6 says \"the dispatching PM session\" builds the routines. Name one owner in both places.\n2. `lanes/skills.md` 「QA 波次由维护者手动触发,⛔ 不自启」 reads as forbidding §6's scheduled routines. Say that *waves* are manual and the two *routines* are scheduled.\n3. checklist-test §5 says what close-out is, but not who closes the record or when. Some runners kept records open until fixes land (#29648 「stays open until #29649 and #29650 land」), which the retest-owed design does not need. Add one line: close-out complete ⇒ the QA owner closes `completed`; residuals stay on their own cards, and retests are owed through `retest-owed.mjs`.\n4. A tooling note, not a gate: `qa-rollup.mjs` and `retest-owed.mjs` follow GitHub's `Link` next-page URL (`/repositories/<id>/…`), which this fleet's proxy refuses, so both fail on page 2 in a cloud seat. A p3 tooling card, rebuilding the URL with `page=N`.\n\n## After the ruling\n\n- **Any option, at once:** close the 15 close-out-complete records `completed` with a one-line pointer to their close-out comment. Close #29560 `not_planned` with `Superseded-by: #29648`; all seven of its ids were re-judged there, so nothing needs carrying forward.\n- **A:** `domain:skills` writes `references/lanes/qa.md`, plus the three text fixes, in one Tier H PR. The maintainer starts the seat's routine. Its first act is `retest-owed.mjs` and the first `owed:weekly` record.\n- **B:** `domain:skills` makes the same three text fixes, naming itself as the owner, and starts the routines from its patrol.\n- **C:** `domain:skills` fixes items 2 and 3 only.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

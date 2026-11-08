@@ -22,11 +22,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-07T16:31:21Z",
-  "updated_at": "2026-11-07T20:07:24Z",
+  "updated_at": "2026-11-07T22:17:43Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 2,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/31186",
   "body": "domain:server#4 · marchtian · session_017ihL2dLQEXWGsE2SZ3Qn5F\n\nFiling gate: ① product defect (audit gap on a package lifecycle write), split from #31023 Expected line 1 during its delivery (PR #31183, dev report 6709857870, open question 1). ⛔ Not a claim. Triage sets the grade and the lane.\nReader: the `domain:server` seat that owns `packages/services/service-package` and the package doors in `packages/runtime/src/domains/packages.ts`.\nDedupe (open AND closed): `sys_packages audit uninstall` → 15 hits, the only match is #31023 (the source card); `\"package lifecycle\" audit` → 243 hits, none about an audit row for the package row itself.\nreach: `DELETE /api/v1/packages/:id` and every in-process `deletePackage` caller; read from the code on `main` 21c1f748, not run.\nclass: c · type: Bug\n\n## 维护者速读\n\n在 Studio 里卸载一个应用后，审计日志能看到它的每条元数据是谁删的（#31023 / PR #31183 补上了），但「这个包本身被卸载了」这件事没有任何审计记录：包表的那一行是用原始 SQL 删掉的，不走钩子，所以连写审计的机会都没有。安装、启用、停用同样只在元数据层留痕。\n\n## What is wrong\n\n- `packages/services/service-package/src/index.ts` ~631 deletes the package row with `DELETE FROM sys_packages WHERE id = ?` through `engine.execute`. That path fires no hooks, so no `sys_audit_log` row is written for it, with or without an actor. `PackageService.delete(id)` takes no actor either.\n- #31023 asked that \"both the metadata deletes and the `sys_packages` delete are attributed in `sys_audit_log`\". PR #31183 delivers the metadata half (each removed metadata row names the person, via `resolvePackageWriteActor`). The `sys_packages` half cannot be met by passing an actor, because there is no audited write to attribute.\n\n## Expected\n\n- A package-lifecycle audit row (at least uninstall; the design decides whether install / enable / disable join it) naming the actor, the package id and version, and the environment, written for every caller of the uninstall verb, not only the HTTP door.\n\n## Design question (for triage / the decision box if needed)\n\n- One audit writer on the package service (signature gains an actor) vs. a lifecycle event the audit plugin subscribes to. The audit log's object model decides which; this card does not pick.\n\nConsumer: objectstack-ai/cloud#3656 (its uninstall tool passes an actor and calls the in-process verb)."

@@ -1,0 +1,33 @@
+{
+  "number": 31264,
+  "kind": "issue",
+  "title": "cli: os build carries devPlugins into the artifact, so a restriction profile must treat dev-only plugins as code",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:spec",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-07T20:44:00Z",
+  "updated_at": "2026-11-08T00:06:08Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31264",
+  "body": "domain:spec#1 · os-project-manager · session_01FEkQ5mw7HFYn9o4LEGMQdK\n\nFiling gate: ② split from #31239 item 2 by the spec seat — the carve-out the card asked for is unsafe until the artifact stops carrying the key. Measured by the #31239 card thread on `origin/main` `bdefd49f` with a freshly built CLI (handback to the seat, not yet on GitHub). ⛔ Not a claim.\nReader: `domain:server` (cli) — `packages/cli/src/commands/compile.ts` (the artifact write), then `packages/cli/src/utils/restriction-profile.ts` (the `os validate --target` reader).\nDedupe (open AND closed): `devPlugins artifact`, `devPlugins compile`, `demoStaff artifact` → only #31239 / #31156 (the restriction-profile cards).\nreach: every stack that declares `devPlugins` and runs `os compile` / `os build` / `os package publish` / `os deploy`; measured, not run on a target.\nclass: c · type: Bug\nGrade: p2 — self-graded by the spec seat (Ruling-ref: the maintainer, 「定级你可以自己决定」): no target is known to load the key; the cost today is a stack with dev-only plugins refused under `allowCode: false`.\n\n## 维护者速读\n\n只在本地 `--dev` 下加载的 `devPlugins`，会被 `os compile` 原样写进产物并随 `os package publish` 进入 `sys_package_version.manifest_json`。所以限制配置现在只能把它当代码拒掉。应当让构建像去掉 `demoStaff` 一样去掉它，之后再让限制读取器放行。\n\n## What is wrong (measured)\n\n- A stack with `devPlugins: ['@acme/dev-only-plugin']`: `os compile` exits 0 and `dist/objectstack.json` carries `\"devPlugins\": [...]`; `compile.ts` deletes only `demoStaff` at the artifact write.\n- `os package publish` (and `os deploy`, which runs it) snapshots that file into `sys_package_version.manifest_json`, so the key reaches the control plane.\n- No objectstack boot found that loads it there: `devPlugins` load only via `stackBootPlugins` under `--dev`; an artifact-fallback boot starts from `config = {}`; no package under runtime / core / objectql / metadata-protocol names `devPlugins`. Whether the cloud runtime reads it is not measurable from this repo.\n- So the restriction reader (#31237) reads `devPlugins` as code under `allowCode: false` (the `UNMANAGED_INSTALL_KEY_DISPOSITIONS` classification), and #31239 keeps that behaviour.\n\n## Owed\n\n1. The artifact write drops `devPlugins` exactly as it drops `demoStaff` (and say so in the compile docs if they list what is dropped). Confirm nothing in the cloud control plane reads the key first (cross-repo check), or name it if something does.\n2. Then the restriction reader stops reading `devPlugins` as code, and the `RestrictionProfileSchema` docblock (spec, `allowCode` rule) states the carve-out. ⛔ `UNMANAGED_INSTALL_KEY_DISPOSITIONS` stays as is unless the measurement says otherwise.\n3. Pins move with both.\n\nRelated: #31239 (item 2 moved here), #31156, PR #31237, PR #31191."
+}

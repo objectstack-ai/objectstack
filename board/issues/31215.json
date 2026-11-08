@@ -14,8 +14,8 @@
     "area:access",
     "domain:server",
     "enhancement",
-    "pm:blocked",
     "pm:blocking",
+    "pm:queue",
     "priority:p1"
   ],
   "assignees": [
@@ -24,11 +24,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-07T18:04:16Z",
-  "updated_at": "2026-11-07T19:18:59Z",
+  "updated_at": "2026-11-08T02:02:51Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 4,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/31215",
   "body": "domain:server#3 · marchtian · session_017ihL2dFb2QdZEHEJ83cR2B\n\nFiling gate: ② missing capability, split from #30209 row 1 during its delivery (PR #31207, dev report 6710717748, \"Rows 1 and 2\" in the PR body). ⛔ Not a claim. Triage sets the grade and the lane.\nReader: the `domain:server` seat that owns `packages/plugins/plugin-security` (services/identity face).\nDedupe (open AND closed): `\"effective access\"` → 20 hits, `effective-access` → 165, `\"permission set\" origin user page` → 518; the only open match is #30209 (the source card). #25799 (closed) fixed position attribution inside `security/explain`; it adds no per-user read.\nreach: `POST /api/v1/security/explain` and `resolveUserAuthzGrants` (`@objectstack/core`), read from the code on `main`, not run.\ntype: Enhancement\n\n## 维护者速读\n\n管理员打开某个用户的「权限集」页签，看到的是 0 条记录，但这个人其实通过默认权限集和岗位拿到了不少权限。页面只能列出直接分配的那几行，因为服务器没有一个「这个人实际有哪些权限集、各自从哪来」的读接口。本卡补这个接口；页面上的展示是另一张 ui 卡。\n\n## What is missing\n\n- `POST /api/v1/security/explain` answers one object and one operation. `principal.permissionSets` lists the resolved set names without their origin; only the per-layer `contributors[].via` (`baseline`, `everyone`, `position:NAME`) says how a set arrived, and only per object.\n- `resolveUserAuthzGrants` carries `permissions` and `directPermissions`, but not which position or default binding brought each other set.\n- So no caller can list \"the effective permission sets of user X, each with its origin\" without asking `explain` object by object.\n\n## Suggested shape (the dev's reading; the seat that takes it decides)\n\n- A per-user read, for example `GET /api/v1/security/users/:id/effective-access`, on plugin-security's `IHttpServer`, built on the resolver plus the catalog's position bindings. Each set carries its origin: default binding, position (with the position's name), or direct.\n- Admission like the other administrator reads of this surface; the answer for someone the caller cannot administer is the same refusal whether or not the user exists.\n- Served by plugin-security on `IHttpServer`: no spec arm. Served by `@objectstack/rest` over a spec service contract: that contract member is a spec change and takes the spec path.\n\n## Acceptance\n\n- For a user with a default-binding set, a position set and a direct set, the read lists all three with the right origin; a CONTROL user with only a direct set lists one.\n- A set reached two ways is listed once with both origins.\n- Refusals: anonymous 401, non-admin 403, unknown user indistinguishable from a forbidden one.\n\nConsumer: the ui card for the user page's effective-access widget (filed alongside this one).\nSuggested-grade: p3 · from a Setup walkthrough (#30209, 「以上都同意，立卡」 2026-11-05).\n\nBlocked-by: #31238\n"

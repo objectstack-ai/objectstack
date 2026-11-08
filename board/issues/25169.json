@@ -2,8 +2,8 @@
   "number": 25169,
   "kind": "issue",
   "title": "feat(pm/fleet-write): a relay op that re-runs only the failed jobs of one CI run, once, fenced like workflow_dispatch (Tier H)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "area:devpath",
     "domain:devx",
-    "pm:on-hold",
     "priority:p2",
     "tooling"
   ],
@@ -21,11 +20,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-22T04:45:47Z",
-  "updated_at": "2026-10-22T10:00:36Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-08T01:55:20Z",
+  "closed_at": "2026-11-08T01:53:56Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 7,
+  "comments": 8,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/25169",
   "body": "Filing gate **③**: a task the maintainer directed, verbatim: 「立卡：给中转加一个只做「重跑失败任务」的操作」.\n- **Who acts:** the `domain:devx` lane, which owns `scripts/pm/fleet-write/**`. The maintainer merges it: `.github/workflows/fleet-write.yml` is governed (`check-governed-merges --test` says GOVERNED, Tier H).\n- **Dedupe:** none found (\"rerun-failed-jobs relay\", \"fleet-write re-run\").\n\n## Why\n\nThe relay (`scripts/pm/fleet-write/ops.mjs`) refuses run cancel, re-run and delete by construction (`ops.mjs:33`). Its token would otherwise need `actions: write`, and that grant also reaches cancelling and deleting runs, the cache, artifacts, secrets and variables (`ops.mjs:124`). So no seat can re-run a CI job. When a required check fails in a way that looks like a registry or network flake, the only path left is a human click, or a write as a personal account, which the seat rules forbid.\n\nThe measured case: #25155's Test Core (3/6) failed twice in `@objectstack/create-objectstack`, at 02:30Z and 02:52Z on 2026-10-22. There was no vitest assertion annotation, and an npm `HTTP 429` was logged in the same window. The tree passes locally on the exact merge ref. Run 39713789453 needed the maintainer to press \"Re-run failed jobs\".\n\n## What to build: one row, fenced the way `workflow_dispatch` is (`ops.mjs` ~118-135)\n\n- **Op:** `run_rerun_failed`, calling `POST /repos/{repo}/actions/runs/{run_id}/rerun-failed-jobs`.\n- **Fences:**\n  - **Workflow allowlist.** Accept the run only if its `path` is in a closed list. Start with `.github/workflows/ci.yml`. A workflow joins only through a PR that adds it, never at request time.\n  - **Pull-request runs only.** The run's `event` must be `pull_request`. Refuse `push`, `merge_group`, release, `schedule` and `workflow_dispatch` runs.\n  - **Once.** Refuse unless the run's `run_attempt` is 1. That enforces the line rule \"re-run at most once; a second failure is real\" in code.\n  - **Failed runs only.** The run must be `completed` with `conclusion` `failure`.\n  - **Alone in its stroke.** The action is the only one in its dispatch, so the wider token serves one request and nothing else.\n  - **A token minted only for this stroke.** The validator sets `permission_actions=write` for this op alone, and every other stroke's token stays as it is today.\n- **Read-back.** After dispatch, confirm `run_attempt` became 2 and the failed jobs are `queued` or `in_progress`. Report the new attempt's job ids.\n- **`REFUSED_PATH_FAMILIES`** still refuses every other `actions/*` path. Make the self-test prove that run cancel and delete, cache, artifacts, secrets and variables all stay refused, and that `rerun` (the whole run) and `jobs/{id}/rerun` stay refused too.\n- **Wrapper.** A small `scripts/pm/rerun-failed.mjs --run ID`, in the style of `label-write.mjs`, that refuses before dispatch when a fence fails and names which one.\n- **Docs.** Add a line to the pm-dispatch skill: a seat may re-run a PR's failed CI jobs once through this op, only after it has written down why it judges the failure a flake. A second failure is real.\n\n## Proof\n- `validate.mjs --self-test` and `dispatch.mjs --self-test` are extended, with a case for each fence on both sides.\n- One real use on a PR run, read back.\n- `check-governed-merges --branch` reads GOVERNED. The PR needs the maintainer's approval."

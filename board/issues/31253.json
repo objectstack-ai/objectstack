@@ -11,17 +11,20 @@
     "type": "Bot"
   },
   "labels": [
-    "finding"
+    "domain:skills",
+    "pm:queue",
+    "priority:p2",
+    "tooling"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-07T19:59:21Z",
-  "updated_at": "2026-11-07T19:59:21Z",
+  "updated_at": "2026-11-07T20:56:14Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/31253",
   "body": "domain:skills#3 · huangyiirene · session_01J8VVAj7CvjkGXvgXzd6RZ7\n\nThis card carries the half of #31148 that PR #31250 leaves open. #31148 / PR #31250 enforce the rule at `scripts/pm/label-write.mjs`. This card covers the other doors and the case gap.\n\n## What is wrong\n\nThe rule: the six pm state labels (`pm:queue`, `pm:dispatched`, `pm:blocked`, `pm:on-hold`, `pm:awaiting-maintainer`, `needs-user-decision`) never go on a pull request, and `pm:awaiting-merge` only goes on a pull request. It is in `.claude/skills/pm-dispatch/SKILL.md` ≈L102/L107/L194. After PR #31250, label-write refuses both. But on `main`:\n\n1. `scripts/pm/fleet-write/dispatch.mjs` adds labels without going through label-write. It does this in a raw `labels_add`, and in `pr_create` / `issue_create` with a `labels` list. `RETIRED_LANE_REWRITE_OPS` (≈L920) already applies one label rule (retired lane aliases) to exactly these three ops, so this is the place for the PR-vs-issue rule too. The incident in #31148 (cloud PR #3680) was written by `objectstack-fleet[bot]`, the account behind both doors, so the record does not show which door it went through.\n2. The match is case-sensitive, in both `refuseTwoStates` and the new #31250 refusal. GitHub label names match case-insensitively, so adding `Needs-User-Decision` applies the existing `needs-user-decision` label and gets past both checks.\n\n## Expected\n\n- dispatch.mjs refuses, before any write and with the rule quoted: a state label in `labels_add` on a pull request (or in `pr_create`'s labels), and `pm:awaiting-merge` in `labels_add` on an issue (or in `issue_create`'s labels). Reuse label-write's predicate rather than restating it.\n- Both doors compare pm labels case-insensitively (`refuseTwoStates` included).\n- Removals are never refused. One self-test case per door and direction.\n\n## Evidence\n\nContract review on PR #31250, S1 and N1."

@@ -2,8 +2,8 @@
   "number": 31158,
   "kind": "issue",
   "title": "docs(releases): the overview still says the Console UI is \"built from the objectui repository\" and points at the archived objectui CHANGELOG, after the ui merge",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,18 +13,23 @@
   "labels": [
     "documentation",
     "domain:devx",
-    "pm:queue",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-project-manager"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-07T15:03:20Z",
-  "updated_at": "2026-11-07T15:59:48Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-08T01:28:37Z",
+  "closed_at": "2026-11-08T01:26:57Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/31158",
   "body": "domain:skills#3 · huangyiirene · session_01J8VVAj7CvjkGXvgXzd6RZ7\n\nFound during the contract review of PR #31152 (card #31114), outside that claim. ⛔ Not a claim. Triage sets the grade and the lane.\n\n## What is wrong (re-read on `main` today)\n\n- `content/docs/releases/index.mdx:7-8` says, in the present tense, that the Console UI is \"built from the [objectui](https://github.com/objectstack-ai/objectui) repository\". Since the ui merge (#25677, cutover #25854) the Console is built from this repository's `ui/` workspace, and objectstack-ai/objectui is archived as a migration notice.\n- `content/docs/releases/index.mdx:40` routes readers to the objectui CHANGELOG at `objectstack-ai/objectui/blob/main/CHANGELOG.md` for Console UI changes. That file no longer receives entries.\n\nThis is the overview page, which is maintained going forward, not a per-release note. The per-release notes v12 (L204), v13 (L188) and v14 (L298) link the same archived CHANGELOG. Those describe their own time and are probably right to leave; triage decides.\n\n## Fix\n\nRewrite the two sentences on the overview to say where Console UI changes are recorded now (the `ui/` workspace changesets, in the same release train), and drop the archived link. Per the os-dev contract (#18908), a releases page correction is a dedicated docs-only PR.\n\n## Dedupe (REST search, open and closed)\n\n- `\"objectui repository\" releases` → 70; none touches `content/docs/releases/index.mdx`.\n- `objectui CHANGELOG archived release notes` → 40; none."

@@ -2,9 +2,9 @@
   "number": 31227,
   "kind": "pull_request",
   "title": "fix(runtime)!: refuse a package uninstall while an active validation rule reads a field it adds",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
-  "draft": true,
+  "draft": false,
   "author": {
     "login": "objectstack-fleet[bot]",
     "id": 332303061,
@@ -12,7 +12,6 @@
   },
   "labels": [
     "documentation",
-    "pm:awaiting-merge",
     "size/m",
     "tests",
     "tooling"
@@ -23,10 +22,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-07T18:36:53Z",
-  "updated_at": "2026-11-07T19:33:11Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-11-08T01:03:35Z",
+  "closed_at": "2026-11-08T01:03:32Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-11-08T01:03:32Z",
   "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/31227",

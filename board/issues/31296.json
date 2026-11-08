@@ -1,0 +1,31 @@
+{
+  "number": 31296,
+  "kind": "issue",
+  "title": "cloud-connection: install-local's cloud branch accepts a package whose flow, webhook or other bare name another package holds",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-07T23:48:57Z",
+  "updated_at": "2026-11-08T00:01:50Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31296",
+  "body": "domain:server#5 · os-project-manager · session_01FEkQ5o8PE7ZtVjcor51wBZ\n\nFiling gate: ② routed from the contract review of PR #31093 (record 6714650391, should-fix 1: outside that PR's claimed surface). Read from code, not run. ⛔ Not a claim.\nReader: the seat that owns `packages/cloud-connection/src/marketplace-install-local-plugin.ts` (the cloud branch of `POST /marketplace/install-local`, `refusesEnvironmentHeldCatalogName`).\nDedupe (open AND closed): `install-local BareNameConflictError`, `refusesEnvironmentHeldCatalogName bare-name`, `install-local cloud branch hotLoaded false conflict` → none.\nreach: every install-local of a control-plane package (cloud branch, `inlineManifest` false) that declares a name another installed package already holds for a bare-name type (#30803 series: dataset, mapping, the request family, flow, webhook, connector, email template); read from code.\nclass: a · type: Bug\nGrade: p2 — self-graded by the server seat (Ruling-ref: the maintainer, 「定级你可以自己决定」): the same grade as the #30803 series whose refusal this door loses.\n\n## 维护者速读\n\n本地安装的云端分支在注册失败时，只把「环境已持有的目录名」当拒绝。#30803 系列的「同名只能一个包持有」冲突(`BareNameConflictError`，持有者是另一个包或内置)被当作可以晚点再加载：写入安装记录、回答成功(`hotLoaded: false`)，下次启动在封印之前恢复这个包，冷启动只告警一次就接受了冲突。应当和内联分支一样直接拒绝(422)，什么都不写。\n\n## What is wrong (read from code)\n\n- The inline branch of `POST /marketplace/install-local` refuses a bare-name clash with 422 `PLUGIN_REGISTER_FAILED` before any write (pinned by the #30803 dogfood files).\n- The cloud branch (control-plane download) catches the registry's refusal and asks `refusesEnvironmentHeldCatalogName`, which recognises only `existingHolder.kind === 'environment'`. A bare-name refusal carries `package` or `built-in`, so the door takes #22695's lenient path: the ledger entry is written and the answer is success with `hotLoaded: false`.\n- On the next boot the package is rehydrated before the seal, so the cold boot admits the clash with one warning (ruling B on #30803) and the consumers resolve the name as before the series.\n- Predates PR #31093: PR 1's mechanism (#30836), every covered type since `2a6a28db`.\n\n## Expected\n\n- The cloud branch refuses a bare-name clash the way the inline branch does: 422, both holders and the rename named, nothing written to the ledger. One predicate on that branch (recognise the registry's bare-name refusal), never a copy of the holder rule.\n- Pins: cloud-branch install of a package declaring a held flow name → 422, ledger unchanged, nothing hot-loaded; CONTROL: an environment-held catalog name keeps its current answer; CONTROL: a fresh name installs.\n\nRelated: #30803, PR #30836, PR #31006, PR #31093, #22695.\n"
+}

@@ -1,0 +1,31 @@
+{
+  "number": 31299,
+  "kind": "issue",
+  "title": "Platform skill and nearby code still misstate the minimal preset, the seed mode default and two capability comments",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "domain:skills",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-08T00:05:20Z",
+  "updated_at": "2026-11-08T01:08:29Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31299",
+  "body": "domain:skills#3 · huangyiirene · session_01J8VVAj7CvjkGXvgXzd6RZ7\n\nFiling gate: other sites from the contract review of PR #31297 (comment 6714732815, card #31184), outside that card's claim. ⛔ Not a claim. Triage sets the grade and the lane.\n\n## What is wrong (read on `main` `7c523aa1`)\n\n1. **Skill, platform § Seed Data:** names `upsert` as the seed `mode` default. `SeedMode` defaults to `ignore` (`packages/spec/src/data/seed.zod.ts` ≈L207). The fix should be byte-neutral. The section is pinned as exhaustive over `SeedMode` by `check-skill-identifier-liveness`, so keep every mode named.\n2. **Skill, platform § `requires:`:** \"`--preset minimal` drops exactly those\" is not exact for `job` and `queue`. `NEEDS_JOB_AND_QUEUE` (`packages/core/src/capability-composition.ts`) puts them back under minimal when `email`, `approvals` or `auth` is present.\n3. **Skill eval, `skills/objectstack-automation/evals/integrations-declared.json` case 1:** its `must_not_contain` `connector-esign` appears in its own `expected_output`, and its `must_contain` `type: 'api'` does not (the #31278 pattern).\n4. **Spec comment (card #31184 item 5):** the `'package-registry'` jsdoc in `packages/spec/src/kernel/platform-capabilities.ts` (≈L385-L392) says the registry \"keys `marketplace`, not this token\". `packages/core/src/capability-providers.ts` (≈L174) keys `'package-registry'`.\n5. **CLI comment:** `packages/cli/src/commands/serve.ts` ≈L2994-L2995 says an explicit `requires: ['mcp']` \"works regardless of the env var\". The MCP route (`runtime/domains/mcp.ts` ≈L112-L114) answers 404 whenever `isMcpServerEnabled()` is false, listed or not. Either the comment or the behaviour is wrong. PR #31297 teaches neither.\n6. **Example app:** `examples/app-showcase` config and flow comments still list `job` / `messaging` in `requires` as needed. That is harmless at runtime, but it teaches the old opt-in reading that #31184 removed from the skills.\n\n## Suggested shape\n\nItems 1-3 are one `domain:skills` card (`'@objectstack/skills': patch`; the platform SKILL.md row is priced by the token ratchet). Item 4 is the spec lane, item 5 the CLI lane (or a behaviour ruling first), and item 6 the examples owner. Triage may split them.\n\nRelated: #31184, PR #31297, PR #31181, #31278."
+}

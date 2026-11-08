@@ -1,0 +1,30 @@
+{
+  "number": 31301,
+  "kind": "issue",
+  "title": "security lane: the security#1 seat owns only the public repository's security advisories; a private repository's security issue belongs to that repository's lane",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:skills",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-08T00:08:07Z",
+  "updated_at": "2026-11-08T01:09:09Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31301",
+  "body": "security#1 · os-bob · session_012dn2AdqWnb3ndnEacKvJvF\n\nRuled: the maintainer, in the security#1 seat's session `session_012dn2AdqWnb3ndnEacKvJvF` on 2026-11-08, verbatim:\n- 「我理解的是这里的任务 https://github.com/objectstack-ai/objectstack/security/advisories 才归安全席位」\n- 「是的，立卡改规则，cloud#3727 交给 cloud 车道」\n\n## What the rule says today, and why it reads otherwise\n\n- `.claude/skills/pm-dispatch/references/security-findings.md` §3 makes a private repository's private card a `security`-labelled issue in that repository, and its last bullet says the `security#1` seat dispatches that fix \"as usual, xhigh\". §9 assigns every security finding, from receipt to publication, to `security#1`.\n- `.claude/skills/pm-dispatch/references/lanes/security.md` 〈座位〉 and 〈派修与复核〉 read the same way.\n- `.claude/skills/pm-dispatch/SKILL.md`, domain table, `domain:cloud` row: \"涉 cloud 即整卡归 cloud PM\". Both rows claim a cloud security issue, and no text says which one wins.\n- So the seat took three objectstack-ai/cloud `security` issues this week (one dispatched and landed, one in flight, one queued). The ruling says those belong to the cloud lane.\n\n## The change (rule level)\n\n1. `security#1` owns repository security advisories on the public repository `objectstack-ai/objectstack` (the Security → Advisories page): receipt, ledger, the fix order, the contract review, closing, the publish-or-not list.\n2. A finding in a private repository is that repository's `security`-labelled issue, created as §3 already says, and it belongs to that repository's lane (for `objectstack-ai/cloud`, the cloud lane), which triages, dispatches, reviews and lands it under its own rules. The never-public rules of §2 and §6 still apply to it unchanged.\n3. Where the finder cannot create the private card (the relay refuses), the hand-over in §9 goes to the private repository's lane seat, not to `security#1`.\n4. Rewrite §3's last bullets, §9, `lanes/security.md` 〈座位〉〈接收与台账〉〈派修与复核〉, and the `security · review` row of the SKILL.md domain table to match, in one place each (§8: one written copy).\n\n## Acceptance\n\n- No text left that sends a private repository's security issue to `security#1`.\n- The SKILL.md domain table names exactly one owner for a cloud security issue.\n- In-flight work at the time of the ruling is not moved mid-flight: objectstack-ai/cloud PR #3726 (for cloud#3720) finishes under the seat that dispatched it; cloud#3727 was handed to the cloud lane on the ruling.\n- Governed surface (`.claude/**`): lands on the maintainer's approval."
+}

@@ -1,7 +1,7 @@
 {
   "number": 18917,
   "kind": "issue",
-  "title": "[PM seat] domain:spec · seat 4 — ⏳ vacant",
+  "title": "[PM seat] domain:spec · seat 4 — 🟢 marchtian",
   "state": "open",
   "state_reason": null,
   "draft": null,
@@ -13,16 +13,18 @@
   "labels": [
     "pm:seat"
   ],
-  "assignees": [],
+  "assignees": [
+    "marchtian"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-18T05:48:48Z",
-  "updated_at": "2026-11-07T17:21:19Z",
+  "updated_at": "2026-11-08T02:10:38Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 77,
+  "comments": 78,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/18917",
-  "body": "domain:spec#4 · marchtian · session_017ihL2eHDXrsKgGAUHq956U\n\n⚠️ **Seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/spec.md` (⛔ not copied here). This is **`domain:spec` seat 4**. Seat 1 is #6017, seat 2 is #18549, seat 3 is #18883 and seat 5 is #19357 (⛔ this post is none of them).\n\n## Current PM\n\n⏳ **vacant** since 2026-11-07T17:19Z. Previous PM: `marchtian` · `session_017ihL2eHDXrsKgGAUHq956U` (project \"Objectstack devx server spec\"), seated 2026-11-07T13:01:00Z, opening mark 6707273013, clocked out on the maintainer's order 「devx spec 当前任务处理完，合并后就下班」. Clock-out brief: the comment posted with this revision. Successor: `/pm-dispatch 接手`, then read this post.\n\n## Handover ledger\n\n- **In flight from this seat:** none. Landed: #31099 → PR #31135, #31094 → PR #31126, #31129 → PR #31174, #31035 → PR #31178.\n- **Queue snapshot at clock-out:** `domain:spec` + `pm:queue` open: none; `needs-user-decision`: none. `pm:dispatched` held by `domain:spec#1` (`os-project-manager`): #31156, #31169, #31180.\n- **Filed by this seat, owned elsewhere:** #31139 (`domain:server`), #31140 (`domain:devx`), #31176 (`domain:skills`, unblocked into `pm:queue` at clock-out), #31180 (held by spec#1).\n- **Owed, unfiled:** the hotcrm follow-up named by ruling 6708417668 on #31035 (move `publisher` / `isStarter` off hotcrm's manifest into `scripts/lib/marketplace-listing.mjs`). The relay refuses a sender with read-only on `objectstack-ai/hotcrm` (run 42393093271); the card text is with the maintainer for someone with hotcrm write access.\n- **Pointer:** canonical ledger = labels + assignee + `Claim:` comments carrying `Seat: domain:spec#4` + `head:claude/` PRs.\n- **Split:** `domain:spec#1` (`os-project-manager`, mailbox #31165) is seated and reads the lane.\n\n## Hot-file serial queue\n\n- **This seat holds:** nothing.\n\n## Notes\n\n- **Mailbox:** PR #31118 closed at clock-out (a successor reopens by seat). **Patrol:** none (`trig_01JwEKRSkChmo5DHWnsME1xh` deleted).\n- **Write path:** the relay (`post-stamped.mjs`, `label-write.mjs`, `fleet-write/dispatch.mjs`) as `objectstack-fleet[bot]`. ⛔ No GitHub MCP writes.\n- **Publication:** objectstack. A merge to `main` publishes nothing; the release is the Version Packages PR, a human act.\n- **Tier H:** a governed PR is never readied, queued or armed before an APPROVED review from a `GOVERNED_APPROVERS` account.\n\n<!-- signed: domain:spec#4 · marchtian · session_017ihL2eHDXrsKgGAUHq956U -->\n"
+  "body": "domain:spec#4 · marchtian · session_017ihL2eAG5J8aqAyPZif4BJ\n\n⚠️ **Seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/spec.md` (⛔ not copied here). This is **`domain:spec` seat 4**. Seat 1 is #6017, seat 2 is #18549, seat 3 is #18883 and seat 5 is #19357 (⛔ this post is none of them).\n\n## Current PM\n\n🟢 `marchtian` · `session_017ihL2eAG5J8aqAyPZif4BJ` (project \"Objectstack devx server spec\", thread \"Run spec seat shift\"), seated 2026-11-08T02:09Z on the maintainer's summons 「开 spec seat」. Posture and ledger live in the project; the opening mark is the comment posted with this revision.\n\n## Handover ledger\n\n- **Pointer:** canonical ledger = labels + assignee + `Claim:` comments carrying `Seat: domain:spec#4` + `head:claude/` PRs. Previous term's clock-out brief: 6710590073.\n- **Split:** `domain:spec#1` (`os-project-manager`, mailbox #31165) is seated. Seats 2, 3 and 5 are vacant.\n\n## Hot-file serial queue\n\n- **This seat holds:** nothing.\n\n## Notes\n\n- **Mailbox:** PR #31323. **Patrol:** `trig_0173nFjbcgKGy48XZ1gkjoYp` · `48 * * * *` (hourly, bound to the seated session).\n- **Batch ceiling:** 3 (the maintainer's per-seat order in the project).\n- **Write path:** the relay (`post-stamped.mjs`, `label-write.mjs`, `fleet-write/dispatch.mjs`) as `objectstack-fleet[bot]`. ⛔ No GitHub MCP writes.\n- **Publication:** objectstack. A merge to `main` publishes nothing; the release is the Version Packages PR, a human act.\n- **Tier H:** a governed PR is never readied, queued or armed before an APPROVED review from a `GOVERNED_APPROVERS` account.\n\n<!-- signed: domain:spec#4 · marchtian · session_017ihL2eAG5J8aqAyPZif4BJ -->\n"
 }

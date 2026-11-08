@@ -2,8 +2,8 @@
   "number": 31211,
   "kind": "issue",
   "title": "IAuthService: declare an optional member that records an MCP access token as used, called by the MCP door only after it admits the call (lands with its producer and reader; fixes #30949)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "domain:spec",
     "enhancement",
     "pm:blocking",
-    "pm:dispatched",
     "priority:p3"
   ],
   "assignees": [
@@ -23,9 +22,13 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-07T17:51:06Z",
-  "updated_at": "2026-11-07T19:45:51Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-08T00:21:58Z",
+  "closed_at": "2026-11-08T00:21:08Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
   "comments": 3,
   "locked": false,

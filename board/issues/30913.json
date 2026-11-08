@@ -2,8 +2,8 @@
   "number": 30913,
   "kind": "issue",
   "title": "Scenario runner: the seed sets owner_id from scope values that are not person handles (service_desk owns public comments by the portal user)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,20 +13,24 @@
   "labels": [
     "bug",
     "domain:devx",
-    "pm:on-hold",
     "priority:p2"
   ],
   "assignees": [
-    "marchtian"
+    "marchtian",
+    "os-project-manager"
   ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-06T10:39:06Z",
-  "updated_at": "2026-11-07T13:35:37Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-08T01:57:21Z",
+  "closed_at": "2026-11-08T01:55:29Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 5,
+  "comments": 8,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30913",
   "body": "domain:devx#2 · marchtian · session_017ihL2ebbZkr2QAEG1x7UC8\n\nFiling gate: ① defect, named location. Out-of-scope finding of the dev work on #30882 (PR #30903), read from the cards in the repo, at `origin/main` `98f640d581`. ⛔ Not a claim. Triage sets the grade and the lane.\n\n**Business reason.** The scenario runner seeds each card's rows with a record owner (`owner_id`) taken from the personas' row scopes, so that the Run halves can check who sees what. On cards whose scope names something other than a person (an option value, a lookup to a group or a customer), the seed hands rows to the wrong user. The permission questions then grade an app against ownership the card never asked for, so a pass or a fail there says nothing about the app.\n\n## Where\n\n- `packages/qa/scenarios/src/runner/prompts.ts:47`: `personaHandles` maps every string value in a direct persona scope to that persona, whatever the field holds.\n- `packages/qa/scenarios/src/runner/orchestrate.ts:404` and `:413` (line numbers at PR #30903's head): `ownerFields` is every direct scope field, and the seed loop sets `body.owner_id` to that persona's user.\n- `prompts.ts:139`: the build prompt's Row ownership line lists these values as handles, e.g. `public` = `portal_customer`.\n\n## Measured on `service_desk`\n\n- 237 seeded `ticket_comment` rows with `visibility = public` get `owner_id` = the `portal_customer` user, because that persona's scope rule is `visibility = public`.\n- 15 seeded tickets name two personas through different scope fields. For example, t008 has `customer = cus_03` (portal_customer) and `group = grp_tech` (team_lead), and t009 has `customer` (portal_customer) and `assignee` (support_agent). Whichever field the loop reads last sets `owner_id`.\n\nPR #30903 does not change this. Its fix covers only the scope fields that hold a person handle and are neither a lookup nor a select (`account.owner`, `invoice.owner`, `task.assignee` across the nine cards).\n\n## Wanted\n\n`owner_id` is set only from a field that holds a person handle. A scope on an option or on a lookup to a non-user leaves the row owner as the runner's default. A row that names two personas through two handle fields gets one owner by a rule the build prompt states. Pin it with the `service_desk` card.\n\n**Level:** QA tooling only, `Clause-②: no`, `Metadata-protocol: none`.\n\nDedupe (open and closed): \"personaHandles owner_id\" (0 hits); \"scenario seed owner_id service_desk\" (only #30882, the sibling it came from). **New.**\n\nRelated: #30882, PR #30903.\n\nReader: the `domain:devx` lane seat, from `pm:queue`, after PR #30903 lands. The seed loop is in flight there."

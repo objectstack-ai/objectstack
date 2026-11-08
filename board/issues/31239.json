@@ -13,18 +13,20 @@
   "labels": [
     "bug",
     "domain:spec",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p1"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-project-manager"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-07T19:19:49Z",
-  "updated_at": "2026-11-07T19:56:13Z",
+  "updated_at": "2026-11-07T21:40:59Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/31239",
   "body": "domain:server#4 · marchtian · session_017ihL2dLQEXWGsE2SZ3Qn5F\n\nFiling gate: ② contract gap in `RestrictionProfileSchema` (`packages/spec/src/system/restriction-profile.zod.ts`), found by its first reader, `os validate --target` (#31156 item 2, PR #31237, dev report 6711857510, open questions 1 and 3, out-of-scope finding 1). ⛔ Not a claim. Triage sets the grade and the lane; item 1 is a vocabulary choice and may need a ruling.\nReader: the spec seat (`packages/spec/src/system/restriction-profile.zod.ts`, `packages/spec/src/automation/flow.zod.ts`, `packages/spec/src/kernel/unmanaged-install.ts`).\nDedupe (open AND closed): `restriction profile`, `RestrictionProfile`, `allowedFlowNodeTypes` → only #31155 / #31156 (the parent cards).\nreach: every environment that publishes a profile with `allowCode: false`, and every author who runs `os validate --target` against one; read from the code, not run.\nclass: c · type: Bug\n\n## 维护者速读\n\n限制配置的流程节点白名单只能写 `FlowNodeAction` 里的类型，但平台自带的 `parallel` / `try_catch` 容器节点不在其中，所以禁止代码的环境会把它们当成插件节点拒掉，且无法放行。另外仅本地使用的 `devPlugins` 也被算作代码，以及白名单字段的说明还缺读者规则一句。\n\n## What is wrong\n\n1. **ADR-0031 containers cannot be listed.** `allowedFlowNodeTypes` is an array of `FlowNodeAction`. `parallel` and `try_catch` are engine built-ins (`@objectstack/service-automation` `src/builtin/parallel-node.ts`, `try-catch-node.ts`) but not `FlowNodeAction` ids. The reader rule ruled in review 6710350208 (a type outside `FlowNodeAction` is governed by `allowCode`) rests on the premise that such a type exists only because a code plugin registered it. That premise is false for these two. Today `os validate --target` refuses them under `allowCode: false` (fail-closed, message says \"outside the registry\"), and no profile can allow them.\n2. **`devPlugins` is code.** `UNMANAGED_INSTALL_KEY_DISPOSITIONS` classifies `devPlugins` as `code`, and the reader uses that one table, so a stack with dev-only plugins is refused under `allowCode: false` although `devPlugins` never reaches a target.\n3. **Docblock.** The `allowedFlowNodeTypes` docblock does not state the reader rules (start/end are structural and always allowed; a `script` node is also subject to `allowCode`). The cloud control plane will read the spec, not the CLI's module header.\n\n## Expected\n\n- Item 1, options from the dev report: (B, recommended) the profile's node vocabulary gains the ADR-0031 container ids — derived from the `LOOP/PARALLEL/TRY_CATCH_NODE_TYPE` constants, or `FlowNodeAction` gains them — so the reader judges them by `allowedFlowNodeTypes`; (C) the reader treats them as always allowed like start/end (a second list). Until then the shipped behaviour (refuse) stands.\n- Item 2: decide whether the restriction reader should read `devPlugins` as code (it is the one table's classification; a carve-out belongs in spec, not in the CLI).\n- Item 3: one docblock sentence on `allowedFlowNodeTypes`.\n- The CLI reader (`packages/cli/src/utils/restriction-profile.ts`) follows in the same PR or a paired card; pins move with it."

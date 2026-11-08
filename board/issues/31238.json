@@ -2,8 +2,8 @@
   "number": 31238,
   "kind": "issue",
   "title": "spec: declare ISecurityService.describeEffectiveAccess? and the EffectiveAccess answer types (spec half of #31215)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -15,7 +15,6 @@
     "domain:spec",
     "enhancement",
     "pm:blocking",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -24,11 +23,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-07T19:17:20Z",
-  "updated_at": "2026-11-07T20:03:45Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-08T01:27:40Z",
+  "closed_at": "2026-11-08T01:26:55Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/31238",
   "body": "domain:spec#1 · os-project-manager · session_01FEkQ5mw7HFYn9o4LEGMQdK\n\nFiling gate: ② a contract addition a dispatched card is serial behind — the spec half of #31215 (p1, `pm:blocking`), split off by server seat 5's route-A decision on that card (comment 6711854159). Filed by the spec seat at server seat 5's request.\nReader: `domain:spec` — `packages/spec/src/contracts/security-service.ts`, beside `DelegableScope` / `describeDelegableScope?`.\nDedupe (open AND closed): \"describeEffectiveAccess\" → 1 hit (#31215, the server card this blocks); \"EffectiveAccess security-service\" → none other.\nreach: every implementer and consumer of `ISecurityService`; additive (optional member + three new exported types). Measured on `main` `df22adc3` by the #31215 dev report, not run.\nclass: c · type: Feature\nGrade: p1 — self-graded by the spec seat (Ruling-ref 2026-11-01T12:11Z 「定级你可以自己决定」): it blocks p1 #31215.\n\n## What is owed\n\nIn `packages/spec/src/contracts/security-service.ts`, following the `DelegableScope` precedent (TS interfaces, no Zod: a wire answer, not authorable metadata):\n\n1. `EffectivePermissionSetOrigin` — `{ kind: 'default' } | { kind: 'position'; position: string } | { kind: 'direct' }`, documented: `default` = a binding to the `everyone` audience anchor (deployment baseline, an app's `isDefault` set, an accepted package default; ADR-0090 D5) or the human baseline the resolution adds (`external_default` for an external member); `position` = a held position's definition names the set (ADR-0131 D3/D4), `everyone` never reported here; `direct` = a `sys_user_permission_set` row of the user's.\n2. `EffectivePermissionSet` — `{ name: string; origins: EffectivePermissionSetOrigin[] }`, at least one origin, a set reached two ways listed once with both.\n3. `EffectiveAccess` — `{ userId: string; organizationId: string | null; positions: string[]; permissionSets: EffectivePermissionSet[] }` (sets in resolution order; organization = the caller's active one, vetted for the described user as `explain` vets it).\n4. `ISecurityService.describeEffectiveAccess?(userId: string, callerContext?: SecurityContext): Promise<EffectiveAccess>` after `describeDelegableScope`, docblock citing ADR-0090 D6/D12: resolved by the resolver enforcement uses; gated as `explain` is (`manage_users`, org admin of an org the user belongs to, or a delegated `adminScope` covering the user); an unknown user refused exactly as one the caller may not manage; OPTIONAL with absence a defined state (REST door answers 501).\n\nThe full drafted text, measured on `main` `df22adc3`, is the #31215 dev report (also carried in the seat order). Optional member, so `REQUIRED_MEMBERS` in `security-service.test.ts` does not move.\n\n## Done when\n\n- The three types are exported from `@objectstack/spec` (api-surface regenerated) and the member is declared optional.\n- A test pins the member optional and the three types' shapes (type-level), beside the `describeDelegableScope?` pins.\n- Changeset `'@objectstack/spec': minor`. `Clause-②: yes (widening)`, `Metadata-protocol: none`.\n- No plugin, REST or client change here: those land on #31215, which is `Blocked-by` this card.\n\nRelated: #31215, ADR-0090, ADR-0131. Name precedent: `DelegableScope` / `describeDelegableScope?`; the maintainer's veto window on the names applies."

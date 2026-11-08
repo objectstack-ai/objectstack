@@ -2,8 +2,8 @@
   "number": 31246,
   "kind": "issue",
   "title": "mcp: a CODED sandboxed hook refusal still answers the sandbox wrapper text with the hook's name, where /data answers the body's sentence — and the other MCP tools still render a throw unlike REST",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:ai",
     "bug",
     "domain:server",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-07T19:43:08Z",
-  "updated_at": "2026-11-07T20:07:53Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-07T22:09:12Z",
+  "closed_at": "2026-11-07T22:07:55Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/31246",
   "body": "domain:server#4 · marchtian · session_017ihL2dLQEXWGsE2SZ3Qn5F\n\nFiling gate: ① product defect, from the delivery of #31218 (PR #31245, dev report 6712120510, open questions 1 and 3). #31218 closed the CODE-LESS half on the six record data tools; the coded half was a CONTROL there by order. ⛔ Not a claim. Triage sets the grade and the lane.\nReader: the seat that owns `packages/mcp` (`src/mcp-http-tools.ts` `thrownRefusalEnvelope`, `errorResultWithCode`, `errorResultFromThrown`).\nDedupe (open AND closed): `mcp HOOK_ABORTED`, `mcp thrownRefusalEnvelope`, `mcp run_action error parity` → #31218 (parent), #23509 / #23701 / #27672 (prior art), none open for this.\nreach: every MCP agent whose app has a sandboxed hook that throws with a declared `code` + `status`; and agents calling the tools listed below. Measured by the dev on `MCPServerRuntime` (item 1); item 2 read from the code.\nclass: c · type: Bug\n\n## 维护者速读\n\n#31218 让 MCP 的六个记录工具在“无码”异常上与 REST 数据接口一致。但 hook 自己声明了错误码时，MCP 仍把沙箱调试包装（含 hook 内部名）原样给 agent，REST 只给 hook 写的那句话。另有几个 MCP 工具对异常的渲染仍与 REST 不同。\n\n## What is wrong\n\n1. **Coded sandboxed refusal.** A sandboxed hook body that throws with `code` + `status` reaches MCP through `thrownRefusalEnvelope`, whose `message` is the sandbox's wrapper (`hook '<name>' threw: Error: …`), naming the hook. `/api/v1/data` answers the body's sentence alone (`sandboxBusinessMessage`). Affects the record data tools, the record resources and `run_action`.\n2. **Remaining divergences (noted by the dev, not measured one by one):** the metadata tools, `list_actions`, the record resources, `run_action`, `delete_records`' outer catch (fault text), and driver-native string codes (`SQLITE_BUSY`) still render a throw unlike the REST door that serves the same verb.\n\n## Expected\n\n- Item 1: `thrownRefusalEnvelope` reads the caller-addressed sentence the same way the data door does (one reader, never a copy); the code and status are unchanged. Pins: coded sandboxed refusal → its code + the inner sentence, the hook name absent, on each MCP face that renders it; CONTROL: a coded non-sandbox refusal renders byte for byte as today.\n- Item 2: triage decides whether each divergence is a defect (one card per face) or intended; `delete_records`' outer catch keeps its own sentences (they would trip `mapDataError`'s unknown-object heuristic, PR #31245 note)."

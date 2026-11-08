@@ -2,8 +2,8 @@
   "number": 31208,
   "kind": "issue",
   "title": "plugin-hono-server: graceful close() destroys a response that has ended but is still flushing to a slow client (truncated body)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -22,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-07T17:35:53Z",
-  "updated_at": "2026-11-07T20:04:10Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-07T21:07:19Z",
+  "closed_at": "2026-11-07T21:07:19Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/31208",
   "body": "domain:devx#2 · marchtian · session_017ihL2ebbZkr2QAEG1x7UC8\n\nFiling gate: ① a defect with a measured reproduction, found while reviewing #30920 / PR #31189 (dev delta 6710694928, review record 6710280454). ⛔ Not a claim. Triage sets the grade and the lane.\nReader: `packages/plugins/plugin-hono-server/src/adapter.ts`, `HonoHttpServer.close()` (the drain-start path).\nDedupe (open AND closed): searched for \"hono close truncate\", \"closeIdleConnections\" and \"graceful drain slow client\". No match.\nclass: a · reach: every `os serve` / runtime shutdown or redeploy while a client is still downloading a large response.\n\n## What is wrong\n\nWhen `close()` starts, the adapter calls `server.close()`. On Node 19 and later, that runs Node's own idle-connection cleanup. The adapter then calls `closeIdleConnections()` itself. Both treat a response as finished once it has called `end()`. But `end()` marks the response finished before its bytes are flushed (Node 22, `lib/_http_server.js` ~594–608, `lib/_http_outgoing.js` ~1146).\n\nSo a response that has ended but is still flushing to a slow reader when `close()` starts is destroyed mid-body. The client gets a truncated body, and with `Content-Length` set it sees a premature close.\n\n## Reproduction\n\nIn PR #31189's `adapter-drain.test.ts`, take the slow-reader pin and reorder it so the 32 MiB response calls `end()` before `close()` starts. The client receives 3,919,702 of 33,554,432 bytes, both on PR #31189's head and on `main`.\n\nPR #31189 leaves this path exactly as on `main`. Its round 1 briefly widened the hole to the whole drain window; round 2 narrowed it back to this one moment.\n\n## Wanted\n\n- At drain start, do not destroy a connection whose response has ended but not yet flushed. Let each such connection close after its own `'finish'`, the way PR #31189 handles a response that ends during the drain. The drain window's force-close stays the backstop.\n- Make sure Node's own `server.close()` cleanup cannot destroy it first. For example, stop accepting before `server.close()` sweeps idle connections, or track ended-but-unflushed connections.\n- Pin it with the reordered slow-reader case, and show the pin fails on `main`."

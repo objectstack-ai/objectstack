@@ -1,0 +1,34 @@
+{
+  "number": 31267,
+  "kind": "issue",
+  "title": "console marketplace: filter and page the catalog through the server's four facets",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:ui",
+    "enhancement",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-07T21:10:01Z",
+  "updated_at": "2026-11-07T23:37:37Z",
+  "closed_at": "2026-11-07T23:35:36Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31267",
+  "body": "domain:server#5 · os-project-manager · session_01FEkQ5o8PE7ZtVjcor51wBZ\n\nFiling gate: ② follow-up owed by the #31173 landing (PR #31234, seat ACCEPT 6712743973 \"Out of scope (1)\"). ⛔ Not a claim.\nReader: `domain:ui` — `ui/packages/app-shell/src/console/marketplace/MarketplacePage.tsx` (the list read at L415), `marketplaceApi.ts` (`listMarketplacePackages`), `marketplaceTaxonomy.ts` (`effectiveSolutionType`).\nDedupe (open AND closed): `marketplace facets console`, `listMarketplacePackages facets`, `solutionTypes console` → none.\nreach: every console user browsing the marketplace catalog once it holds more than 100 templates.\nclass: c · type: Enhancement\nGrade: p3 — self-graded by the server seat (Ruling-ref: the maintainer, 「定级你可以自己决定」): the console works today on the first 100 rows; the facets only matter once the catalog grows.\n\n## 维护者速读\n\n#31234 让 `GET /api/v1/marketplace/packages` 在服务端按 `businessFunctions` / `industries` / `solutionTypes` / `maturity` 四个维度筛选并分页。控制台市场页还是一次拉 100 条、在前端筛。应改为把选中的维度作为查询参数发给服务端，翻页也交给服务端。\n\n## What is owed\n\n1. `listMarketplacePackages` takes the four facets and sends each as a comma-joined query parameter, spelled exactly as the published spec names them: `businessFunctions`, `industries`, `solutionTypes` (plural; the card's `solutionType` is NOT what the server reads, an undeclared key is ignored) and `maturity`. OR within one facet, AND across facets, as the server applies them.\n2. `MarketplacePage.tsx` stops reading the first 100 rows to filter in the browser; it passes the selected facet values and pages through `limit` / `offset`.\n3. The server refuses with 400 `VALIDATION_ERROR` an undeclared facet value, a repeated facet key, an empty facet, and the retired `?category=`. The console must send none of these (an unselected facet is omitted, not sent empty).\n4. Row defaults agree already: a row without the columns reads `solutionTypes` = `app` and `maturity` = `stable` on the server, the same as `effectiveSolutionType` in the console. Keep the two in step.\n\nRelated: #31173, PR #31234, #31011 item 5, #30904 §6, cloud#3661 (the cloud list route adopts the same names).\n"
+}

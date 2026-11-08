@@ -1,0 +1,31 @@
+{
+  "number": 31303,
+  "kind": "issue",
+  "title": "cloud: measure whether the control plane reads manifest_json.devPlugins or judges a restriction profile server-side",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:cloud",
+    "pm:queue",
+    "priority:p3",
+    "repo:cloud"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-08T00:17:56Z",
+  "updated_at": "2026-11-08T01:10:41Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31303",
+  "body": "domain:spec#1 · os-project-manager · session_01FEkQ5mw7HFYn9o4LEGMQdK\n\n## What is unmeasured\n\n#31264 and its two PRs (#31276, which merged, and #31277) settle the open-source side. `os build` now leaves `devPlugins` out of the artifact (`packages/cli/src/commands/compile.ts`). The CLI restriction-profile reader no longer judges it as code (`NEVER_REACHES_TARGET` in `packages/cli/src/utils/restriction-profile.ts`). The `RestrictionProfileSchema` `allowCode` docblock says so.\n\nOne reader is outside this repository. `os package publish` snapshots `dist/objectstack.json` into `sys_package_version.manifest_json`, and the cloud control plane may read that row. No seat on this side could reach `objectstack-ai/cloud`, so two questions are recorded as **not measured** (PR #31276 body and dev report 6713325766 on #31264):\n\n1. Does any cloud code read `manifest_json.devPlugins`, for example to load, count or judge it?\n2. Does cloud judge a restriction profile (`allowCode`, `allowedFlowNodeTypes`) server-side? If it does, does it read `devPlugins` as code? Does it accept the ADR-0031 containers `parallel` and `try_catch`, which the CLI reader now always allows (#31239, pending the maintainer's C/B pick)?\n\n## Owed\n\n- A grep of `objectstack-ai/cloud` for `devPlugins`, `manifest_json` readers and any restriction-profile judge. The answer goes on this card.\n- If a reader exists, align it with the OSS rules above, or file the gap. An artifact built before `ea053b4a` still carries the key, so a reader that loads it would load dev-only plugins on a target.\n\n## Where it came from\n\nThis is the residual from the contract review of PR #31277 (comment 6714938466 ③). It is filed so that the residual keeps a tracker once `Fixes #31264` closes that card."
+}

@@ -1,0 +1,34 @@
+{
+  "number": 31272,
+  "kind": "issue",
+  "title": "mcp: the metadata tools and list_actions answer a fault with its raw text (or a driver code), where the /meta door answers 500 INTERNAL_ERROR",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "bug",
+    "domain:server",
+    "pm:dispatched",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-07T21:15:38Z",
+  "updated_at": "2026-11-08T00:42:02Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31272",
+  "body": "domain:server#6 · os-project-manager · session_01FEkQ5p3T5YWhLjurajudnQ\n\nOut-of-scope finding (class a) from the #31246 dev (report 6713074631 on #31246, PR #31268), item 2 of #31246 as triage 6712294143 ruled: one card per MCP face that really diverges from the REST door serving the same verb. Filed by `domain:server#6`. ⛔ Not a claim. Measured by the dev on `main` with PR #31245 merged.\n\nReader: the seat that owns `packages/mcp`.\n\nSuggested-grade: p3 (no named production producer measured: metadata reads run no record hooks, so only faults reach these members).\n\n**Observed:** `tools/call list_objects`, `describe_object`, `validate_expression`, `list_actions`, with the bridge member throwing a bare `Error` or a driver string code, answer the bare text (`'socket hang up'`) or `{ code: SQLITE_BUSY, message: driver text }`; the `/meta` door (`handleRouteError`) answers `500 INTERNAL_ERROR 'Internal server error'` and `500 DATABASE_ERROR 'Internal data error'`.\n\n**Expected:** these tools answer a fault the way `/meta` does, through its reader (`isServerFault` / `logServerFault` family), never a copy: no raw fault text to the agent, the fault logged server-side. Pins: bare Error and driver code, red first; CONTROL: a declared refusal keeps its code and sentence.\n\nDedupe words: mcp metadata tools fault text, list_actions errorResultWithCode, mcp meta door parity."
+}

@@ -2,7 +2,7 @@
   "number": 31245,
   "kind": "pull_request",
   "title": "fix(mcp): the record data tools answer a code-less throw as the /data door does, so an undeclared hook abort is HOOK_ABORTED",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -22,10 +22,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-07T19:39:54Z",
-  "updated_at": "2026-11-07T20:03:09Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-11-07T20:26:59Z",
+  "closed_at": "2026-11-07T20:26:57Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-07T20:26:57Z",
   "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/31245",

@@ -1,0 +1,33 @@
+{
+  "number": 31302,
+  "kind": "issue",
+  "title": "write-pace: raise DEFAULT_HOURLY_MAX from 40 to 80 writes per token-hour; keep the min gap, lease, batch gap and back-off stop marker unchanged",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:skills",
+    "pm:dispatched",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [
+    "os-bob"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-08T00:16:14Z",
+  "updated_at": "2026-11-08T01:09:58Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31302",
+  "body": "repo:cloud#1 · os-bob · session_012dn2AdARJtc4RgABPH7PHk\n\nFiling gate: **③ a task on the maintainer's word.** The account owner, verbatim, in `session_012dn2AdARJtc4RgABPH7PHk`: 「写入配额临时增加到80」, then 「同意」 to the seat's brief recommending option C (change the default rather than a per-role environment override), after an independent re-analysis. Reader: triage routes (expected `domain:skills`, non-gate PM tooling in `scripts/pm/`).\n\n## 维护者速读\n\n车队每个账号令牌每小时最多 40 次 GitHub 写入(`write-pace.mjs` 默认值)。席位和它派出的开发共用同一个令牌和同一份计数;今天席位临时用测试专用的环境变量把自己提到 80,开发仍按 40 被拒,最长等了 25 分钟。改法:把默认值改成 80,所有人自动一致;防封真正靠的「最小间隔、全队单写租约、批量间隔、遇平台退避即停」都不动。\n\n## Facts (from the script header on `main`)\n\n- The suspensions that motivated the pace were a RATE shape (17 issues in 29 s), stopped by rules ① min gap, ③ back-off stop marker, ④ fleet-wide single in-flight lease, ⑤ batch gap; the hourly cap ② is the second guard.\n- The budget is per token over a shared log, so seat and devs in one container share one count; `OS_PM_WRITE_HOURLY_MAX` is documented as a FOR-TESTS override, the wrong carrier for production pace.\n- Dev refusals today were rule ② (reports: \"51/40\", \"55 of 40 on the shared token\").\n\n## Ask\n\n- `DEFAULT_HOURLY_MAX` 40 → 80, the header's rationale updated with the ruling quote and the residual risk (several containers on one token add up; keep concurrent containers per token small), the self-test updated. No other rule changes.\n\nPriority: p2."
+}

@@ -1,0 +1,36 @@
+{
+  "number": 31307,
+  "kind": "pull_request",
+  "title": "docs(agents): a dispatched dev's pr_create carries the claim Account as PR assignee",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-08T00:29:40Z",
+  "updated_at": "2026-11-08T01:56:53Z",
+  "closed_at": "2026-11-08T01:55:28Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-11-08T01:55:27Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/31307",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"huangyiirene\"} -->\n_Requested by **Irene** · [project thread](https://claude.ai/code/project/chan_01TJXtQ1tVD26ecLDZxFS67x?thread=cmsg_01TJXtQ1tVD26ecLDZxFS67xVQzeHAefCAj1LT1qxPYafJ)_\n\nFixes #31190\n\nClause-②: no\nMetadata-protocol: none\n\n`dispatch-gates --tier` reads no path-derived model mandate for this diff. Any mandate above the thread's would be waived by the maintainer's standing order in this project (2026-11-03). This card ran on the project's default model, and the dispatching seat (domain:skills#3) runs the contract review.\n\n## 维护者速读\n\n- 改了什么：`AGENTS.md` L403 的括注改成「PR 的 assignee 是认领的 `Account:`，由 `pr_create` 带上；交棒归席位」，保留「⛔ 永不写卡的 assignee」半句；`scripts/pm/fleet-write/ops.mjs` 头注释与 `pr_create` 描述符上的内联注释同步改正，只改注释，不动代码。\n- 为什么改：裁决 A（#29828，记录 6674390671，经 PR #30796 落地）与 `.claude/agents/os-dev.md` 第 2 条规定 dev 的 `pr_create` 给 PR 指派认领账号；`AGENTS.md` 仍写「`pr_create` 不带 assignee」，而它声称冲突时优先，已有派发的 dev 因此停工或开出无 assignee 的 PR（#31190）。\n- 风险与回滚：纯文字；`AGENTS.md` 保持 1050 / 1050 行（无上限上调），只在原两行内重排，两行均在 120 字节内；`ops.mjs` 头注释多一行；不发版（`skip-changeset`）；回滚即 revert。\n- 先看：`AGENTS.md` L403-L404；然后 `scripts/pm/fleet-write/ops.mjs` L125-L128 与 L2126。\n- 两分钟验证：`node scripts/pm/check-skill-line-ratchet.mjs`（AGENTS.md 1050 行，余量 0，无超宽行）；对照 `.claude/agents/os-dev.md` L38 与 L63 读新句；`node scripts/pm/fleet-write/execute.mjs --self-test` 全绿。\n- 需要你做的：`check-governed-merges` 判为 Tier H（`AGENTS.md`），需 `os-zhuang` 或 `hotlong` 批准；请在席位契约复核 ACCEPT 后再批。\n\n## What changed (ruling A on #29828, record 6674390671, landed by PR #30796)\n\nThe ruling's home is `.claude/agents/os-dev.md` rule 2: \"PR 派认领 `Account:`(`pr_create` 带),交棒归席位\" (L38) and the write budget \"`pr_create`(draft,含 labels 与 assignees)\" (L63). `.claude/skills/pm-dispatch/references/execution-duties.md` L69 and pm-dispatch `SKILL.md` agree. None of those files is touched.\n\n### `AGENTS.md` L403-L404 (Multi-agent, the dispatched executor)\n\n```diff\n-writes the card's assignee (nor the PR's: `pr_create` carries none; the seat sets it at hand-over,\n+writes the card's assignee (the PR's is the claim's `Account:`, carried by `pr_create`; hand-over is the seat's,\n `.claude/agents/os-dev.md` rule 2) and ⛔ never yields a card it was dispatched to. Before writing code, re-read\n```\n\nThe \"⛔ never writes the card's assignee\" half is kept. Line count unchanged (1050 / 1050). L403 is 112 bytes and L404 is 113 bytes, both under the ratchet's 120-byte line budget.\n\n### `scripts/pm/fleet-write/ops.mjs` header, § The governed-review follow-up (L125-L128)\n\n```diff\n- * nothing reads the pull's files there, and a dev's `pr_create` carries no\n- * `assignees` at all — the seat's own account is never assigned to or\n- * requested on a pull. The one follow-up left is `pr_ready`. The platform\n+ * nothing reads the pull's files there, and a dev's `pr_create` carries the\n+ * claim's `Account:` as its `assignees` (ruling A on #29828, os-dev.md rule 2;\n+ * hand-over is the seat's) — the seat's own account is never requested on a\n+ * pull as a reviewer. The one follow-up left is `pr_ready`. The platform\n```\n\nKept as still true: the draft open summons nobody (no file read, no review request, no governed-review follow-up), and the seat never REQUESTS its own account as a reviewer (pm-dispatch `SKILL.md` L198, \"⛔ 永不请席位自身账号\"). Only the assignee half is corrected.\n\n### `scripts/pm/fleet-write/ops.mjs` inline comment on the `pr_create` descriptor (L2126)\n\nThe seat widened the claim to this site (claim 6714934662).\n\n```diff\n     // sees the pull at the seat's hand-off — `pr_request_reviewers` after ACCEPT + a same-head PASS — and a dev's\n-    // create carries no `assignees`; the leg stays for the author-is-approver fallback, never for a seat's account.\n+    // create carries the claim's `Account:` as `assignees` (ruling A on #29828); never a reviewer request on the seat.\n```\n\nNo code changes. The descriptor already takes `assignees` as optional and sends the leg to the number the create answered.\n\n## Other sites found\n\nGrep over `AGENTS.md`, `scripts/pm/**` and `.claude/**` for a sentence saying a dev's `pr_create` carries no assignee, or that a PR is never assigned the claim's account:\n\n1. `scripts/pm/fleet-write/ops.mjs` L2124-L2125 (now L2126): the same stale claim. Fixed in this PR on the seat's widening.\n2. `scripts/pm/fleet-write/execute.mjs` L1647 and L2012 (\"no assignee\"): these pin that the governed-review follow-up adds no assignee on a draft create when the caller spelled none. Still true. Checked and consistent, no action.\n3. `scripts/pm/check-half-states.mjs` L15733 and L15763: already state the ruling (the dev's `pr_create` carries the claim's `Account:`, record 6674390671). Checked and consistent.\n4. `.claude/agents/os-dev.md` L38 and L63, `.claude/skills/pm-dispatch/references/execution-duties.md` L69, pm-dispatch `SKILL.md`: agree with the ruling. Checked and consistent, untouched.\n5. `scripts/pm/fleet-write/validate.mjs` L1247 pins that a `pr_create` without assignees or labels is one request. It describes the relay's behaviour, not who passes assignees. Consistent.\n\n## Gates\n\nOn head `b069bd29` (base `7c523aa1`): all 40 `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` commands exit 0. Also: `node scripts/pm/check-skill-line-ratchet.mjs` (exit 0, AGENTS.md 1050 / 1050), `node scripts/pm/fleet-write/dispatch.mjs --self-test` (exit 0, 331 cases), `validate.mjs --self-test` (exit 0, 340 cases), `execute.mjs --self-test` (exit 0, 284 cases), `node scripts/check-commit-card-trailers.mjs --range origin/main..HEAD` (exit 0). Changed lines: 11 (+6 / -5), 2 files.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01J8VVAm38fJUP5TCBNAD8RY\n"
+}

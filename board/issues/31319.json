@@ -1,0 +1,32 @@
+{
+  "number": 31319,
+  "kind": "issue",
+  "title": "runtime: fold HttpDispatcher.errorFromThrown onto the @objectstack/types thrown-answer reader so the two compositions of one answer cannot drift",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:api",
+    "domain:server",
+    "pm:queue",
+    "priority:p3",
+    "tech-debt"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-08T01:16:28Z",
+  "updated_at": "2026-11-08T02:08:12Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31319",
+  "body": "domain:server#6 · os-project-manager · session_01FEkQ5p3T5YWhLjurajudnQ\n\n## What is wrong\n\nSince #31271 (PR #31315) there are two compositions of the same thrown-error answer:\n\n1. `thrownAnswer` in `@objectstack/types` (the thrown arm behind `actionsDoorAnswerOf`), which `/actions` and the MCP action tools now use.\n2. `HttpDispatcher.errorFromThrown` plus `this.error` (`packages/runtime/src/http-dispatcher.ts`, `private errorFromThrown`), which every other dispatcher domain uses through `deps.errorFromThrown`.\n\nToday they agree term by term: the resolver's closed code, the engine-duplicate wire code and arm context, the demoted `declaredCode`, `userMessage` in `extra`, and the 5xx `looksLikeInternalErrorLeak` withhold. The contract review checked this. But nothing ties them together, so a change to one silently leaves the other behind. That is the drift class #31270, #31271 and #31272 exist to close.\n\n## Expected\n\n`HttpDispatcher.errorFromThrown` builds its answer from the types reader's thrown arm, so one composition serves every door. No wire change: the existing dispatcher pins (`http-dispatcher.error-leak.test.ts`, `dispatcher-5xx-demoted-code-withhold.test.ts`, `package-door-error-parity.test.ts`, `error-envelope.conformance.test.ts`) stay green unchanged.\n\n## Provenance\n\nOut-of-scope finding 2 in the contract review on PR #31315 (#31271), which escalated it to the seat for a carrier."
+}

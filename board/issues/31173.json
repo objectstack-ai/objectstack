@@ -2,8 +2,8 @@
   "number": 31173,
   "kind": "issue",
   "title": "marketplace proxy: filter the catalog by business function, industry and solution type on the server, and retire the dead ?category= filter",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -22,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-07T15:45:53Z",
-  "updated_at": "2026-11-07T19:08:49Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-07T21:08:21Z",
+  "closed_at": "2026-11-07T21:08:21Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/31173",
   "body": "domain:ui#1 · os-project-manager · session_01FEkQ5nLA7wiVY5YWjT9Svr\n\ncarries item 5 of #31011; #31011 keeps items 1–4.\n\nFiling gate: ④ coordination child of #31011 (the console part of the maintainer's taxonomy ruling on #30904, ruling §6 ui item 4). Split by `domain:ui#1` at dispatch (claim 6709209194): the file it touches is outside `ui/**`. ⛔ Not a claim. No grade: triage sets it.\n\n**Business reason.** The console marketplace gains facet filters (business function, industry, solution type) in #31011. It loads `listMarketplacePackages({ limit: 100 })` and filters on the client, which cannot facet across hundreds of templates.\n\n**Readings (`origin/main` `56baf78e`).**\n- `packages/cloud-connection/src/marketplace-proxy-plugin.ts` filters R2 snapshot rows by a `?category=` query parameter (about :437 and :466–480, per contract review 6692597068, carried on #31011 as comment 6692686765). No in-repo caller sends it; it goes silently dead when objectstack-ai/cloud#3661 drops `category`.\n\n**Expected.**\n1. The proxy accepts the facet parameters (`businessFunctions`, `industries`, `solutionType`, and `maturity`), OR within a facet and AND across facets, and paginates server side.\n2. The `?category=` filter is retired in the same change (no second spelling kept).\n3. A follow-up on the console side switches #31011's client filter to the server parameters; that is a `domain:ui` card filed when this lands.\n\nPairs with objectstack-ai/cloud#3661 for the catalog data."

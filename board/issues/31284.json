@@ -1,0 +1,34 @@
+{
+  "number": 31284,
+  "kind": "pull_request",
+  "title": "test(scenarios): give the external-driver crm run a measured 30s budget and a lighter stand-in",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-07T22:13:13Z",
+  "updated_at": "2026-11-07T23:10:48Z",
+  "closed_at": "2026-11-07T23:10:46Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-07T23:10:46Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/31284",
+  "body": "Fixes #31281\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么:`@objectstack/scenarios` 的外部驱动端到端用例改为显式 30 秒超时,并在用例旁写明实测数据;测试用的替身命令不再加载 `node:crypto`,key 指纹从 SHA-256 改为 FNV-1a。只改测试,不动 `src/`。\n- 为什么改:这个用例每个回合启动一次替身进程,连续 45 次。本地 2.2–2.5 秒,负载高的 Test Core 分片上被 vitest 默认 5 秒超时在 5042ms 截断,把 main 合并队列里别人的 PR 弹出去(#31247 两次)。\n- 风险与回滚:只改测试文件与其替身,不发布(skip-changeset)。回滚即 revert。\n- 先看:`packages/qa/scenarios/test/runner/external-driver.test.ts` 末尾的超时和注释。\n- 两分钟验证:`pnpm --filter @objectstack/scenarios exec vitest run test/runner/external-driver.test.ts`,预期 8/8 通过。\n- 需要你做的:无,席位落地。\n\n## What changes\n\n- `test/runner/external-driver.test.ts`, the case \"a full crm run through the command…\": an explicit 30 000 ms budget instead of vitest's 5 s default, with the measurement written beside it.\n- `test/runner/fixtures/fake-external-driver.mjs`: the stand-in no longer imports `node:crypto`. It fingerprints the key it read with FNV-1a (32-bit hex) as `keyPrint`. The test computes the same function and now also asserts that this run's keys have distinct fingerprints, so the membership check cannot pass by collision.\n\n**Root cause.** The case starts the stand-in once per turn, one after another: 45 starts (3 author calls; 42 asks over scratch run, scratch iterate-run and template iterate-run, measured from the call log). Each start costs about 50 ms locally, and node's own start-up is about 35 ms of that. On a Test Core shard one start took 212 ms (the `info` case in the failing job), and this case was cut off at 5042 ms. Both modes are kept: each mode boots its own app and issues its own keys.\n\n## Tests\n\n- Per-start cost, 30 starts each, on this container: bare node about 35 ms; with `node:fs`/`node:path` about 39 ms; with `node:crypto` added 41 to 45 ms. That is the stand-in's start-up before and after.\n- The case, 5 local runs each: before 2374 to 2520 ms; after 2186 to 2425 ms.\n- `pnpm --filter @objectstack/scenarios exec vitest run test/runner/external-driver.test.ts`: Test Files 1 passed (1), Tests 8 passed (8).\n\n## Acceptance notes\n\n- CI evidence: merge-queue run 42414930416, job Test Core (2/8). The case failed with `Test timed out in 5000ms` (5042 ms). The coordinator reported the same on #31256 and #31277, and #31247 was dequeued twice (runs 42414930416 and 42417438743).\n- In the same job, `test/runner/codex-driver.test.ts` took 7657 ms for 12 cases. No case failed, and per-case times were not printed for it. Not touched here (outside the claim's surface).\n\n## Verification\n\nOn `31dffb8d`: `pnpm --filter @objectstack/scenarios typecheck` exit 0; scoped lint `node --stack-size=4000 node_modules/eslint/bin/eslint.js packages/qa/scenarios/test/runner --no-inline-config` exit 0; `node scripts/check-nul-bytes.mjs` exit 0.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01FEkQ5mx64pxVGCbKfuxEwi\n"
+}

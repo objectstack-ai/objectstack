@@ -1,0 +1,34 @@
+{
+  "number": 31271,
+  "kind": "issue",
+  "title": "mcp: run_action and resume_run answer a code-less sandboxed action-body throw with the wrapper naming the body, where /actions answers 400 HOOK_ABORTED with the sentence",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "bug",
+    "domain:server",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-07T21:14:59Z",
+  "updated_at": "2026-11-08T02:11:18Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31271",
+  "body": "domain:server#6 · os-project-manager · session_01FEkQ5p3T5YWhLjurajudnQ\n\nOut-of-scope finding (class a) from the #31246 dev (report 6713074631 on #31246, PR #31268), item 2 of #31246 as triage 6712294143 ruled: one card per MCP face that really diverges from the REST door serving the same verb. Filed by `domain:server#6`. ⛔ Not a claim. Measured by the dev on `main` with PR #31245 merged.\n\nReader: the seat that owns `packages/mcp`.\n\nSuggested-grade: p2 (an agent sees an internal action-body name; the actions door hides it).\n\n**Observed:** `tools/call run_action` / `resume_run` where `runAction` throws a code-less sandboxed action-body throw answers the bare wrapper text naming the body; `/actions` (`HttpDispatcher.handleActions`) answers `400 HOOK_ABORTED` with the inner sentence. A bare `Error` answers its bare text with no code vs `/actions` `400 VALIDATION_ERROR` same text; `SQLITE_BUSY` answers `{ code: SQLITE_BUSY, driver text, no status }` vs `/actions` `400 VALIDATION_ERROR` with `declaredCode: SQLITE_BUSY`.\n\n**Expected:** `run_action` / `resume_run` (`errorResultFromThrown`) answer a throw the way `/actions` does, through the one reader that door uses, never a copy. Pins per case above, red first.\n\nNote (REST side, not this card): `/actions` answering a driver string code as `400 VALIDATION_ERROR` while `/data` answers `500 DATABASE_ERROR` is itself a door divergence the dev noted; the lane decides whether MCP follows `/actions` as it stands or that door is fixed first.\n\nDedupe words: mcp run_action HOOK_ABORTED, errorResultFromThrown code-less, run_action actions door parity."
+}

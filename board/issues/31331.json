@@ -1,0 +1,32 @@
+{
+  "number": 31331,
+  "kind": "pull_request",
+  "title": "docs(external-datasources): a borrowed-credential connect failure recovers without a restart",
+  "state": "open",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "marchtian"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-08T02:18:35Z",
+  "updated_at": "2026-11-08T02:19:39Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/31331",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"marchtian\"} -->\n_Requested by **田騏** · [project thread](https://claude.ai/code/project/chan_01VmuUhXU9SSUzqJYyXSmYSi?thread=cmsg_01VmuUhXU9SSUzqJYyXSmYSiPizEZatw36sCQ3zgD5Ehd8)_\n\nFixes #31325\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么：只改文档。`external-datasources.mdx` §4「借用连接器凭据」在 \"Fail-closed at connect\" 下面加一条 \"Recovery without a restart\"：插件驱动的数据源开机借不到连接器实例的凭据会记为失败，实例修好后，下一个请求借用成功就自动撤销失败，不用重启。§3 的 `OS_ALLOW_DRIVER_CONNECT_FAILURE` 提示里补一句「这是唯一的例外」；`odata-datasources.mdx` 原有的指向 §4 的链接说明里加上「也讲了怎么恢复」，不重复规则。\n- 为什么改：这是 #27990 合入的行为（`DatasourceConnectionService.retractOnLend`），指南只写了连接失败，没写会自动恢复。\n- 风险与回滚：纯文档，不发布任何包，无 changeset。回滚即还原这两个文件。\n- 先看：`content/docs/data-modeling/external-datasources.mdx` 新加的 \"Recovery without a restart\" 一条。\n- 需要你做的：无，席位落地。\n\n## What changes\n\n- **external-datasources §4, \"Borrowing a connector instance's credential\"**: a new rule, \"Recovery without a restart\", right after \"Fail-closed at connect\". Each sentence and the code it holds against, in `packages/services/service-datasource/src/datasource-connection-service.ts` at origin/main 604a2b3b:\n  - The connect judges the instance once; the plugin driver stays registered and borrows again on each request: the already-registered guard in `attemptConnect` records `failed-credentials` without evicting the driver, and driver-odata drops a refused borrow and borrows again on the next request (`packages/drivers/driver-odata/src/plugin.ts`).\n  - It applies when the failure did not stop the boot (no gate refuses it, or `OS_ALLOW_DRIVER_CONNECT_FAILURE` is set): `handleFailure` throws in the other cases, so there is no process to recover.\n  - `error` in Setup and `503` until the repair: `failed-credentials` maps to availability `failed`; a refused borrow on a read is answered `503` (the odata guide's fail-closed rule).\n  - The first borrow granted for that instance clears it and the datasource reads `ok`: `retractOnLend` re-records `already-registered` (availability `available`), which clears the engine's unavailable mark through `recordState`.\n  - A grant for a different instance leaves it standing: `retractOnLend` skips entries whose `connector` differs.\n  - A reconnect or edit in between records its own result: `attemptConnect` and `disconnect` drop the `awaitingLend` entry, and `retractOnLend` also checks the retained state is still the recorded verdict and the driver is still registered.\n  - It needs a lender that reports grants (`onLent`), which `@objectstack/service-automation`'s source does (`announceLent` in `borrow`); otherwise `subscribeToLends` answers false and the verdict stands until a restart.\n  - The `DEGRADED BOOT` banner says which: the `recovery` sentence names the instance when retractable, else the default \"until it is reachable AND the server is restarted\".\n- **external-datasources §3, the `OS_ALLOW_DRIVER_CONNECT_FAILURE` callout**: its \"nothing re-runs the connect ... until the server is restarted\" now names this case as the one exception and links to §4.\n- **odata-datasources §3**: the fail-closed bullet already pointed at §4 for the rules; the pointer now says §4 also covers the recovery. The rule is not restated there.\n\n## Why\n\n#27990 made the retraction, and the guide still described a borrowed-credential connect failure as lasting for the process. A reader who repairs the connector instance had no way to know a restart is not needed, or when it still is.\n\n## Verification\n\n- `node scripts/check-doc-authoring.mjs`: exit 0.\n- `node scripts/check-doc-anchors.mjs`: exit 0, 945 internal fragment links resolve (the two new links included).\n- Every sentence read against the code named above at 604a2b3b, and against `datasource-connector-credential.test.ts` (the retraction and banner cases).\n\n## Acceptance notes\n\n- The claim names §4 only; the diff also adds one sentence to the §3 callout, because it said a failed datasource stays failed until a restart with no exception. #31327 and #31328 add driver sections elsewhere in this file, so the two edits do not overlap.\n- Edited on the card thread's own checkout of `claude/project-thread-9xq009`, not a separate `objectstack-issue-31325` worktree: no other agent shares this container.\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic. (not touched)\n- [x] 2. Every name I added uses the casing for its kind. (no names)\n- [x] 3. No formatter ran; `pnpm lint` passes. (docs only)\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset. (publishes nothing)\n- [x] 6. `packages/spec` touched: its generated artifacts are regenerated and committed. (not touched)\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_017ihL2fHTwitn43z5tu7gTt\n"
+}

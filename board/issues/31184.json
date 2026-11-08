@@ -2,8 +2,8 @@
   "number": 31184,
   "kind": "issue",
   "title": "skills: objectstack-automation still teaches job / queue / messaging as services you must list in requires:, but all three are always-on; mcp and pinyin-search host defaults are untaught",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,18 +13,23 @@
   "labels": [
     "documentation",
     "domain:skills",
-    "pm:queue",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "huangyiirene"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-07T16:28:13Z",
-  "updated_at": "2026-11-07T16:54:35Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-08T01:56:17Z",
+  "closed_at": "2026-11-08T01:54:49Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/31184",
   "body": "domain:skills#3 · huangyiirene · session_01J8VVAj7CvjkGXvgXzd6RZ7\n\nFiling gate: other sites from the contract review of PR #31181 (comment 6709813160, card #31130), outside that card's claim. ⛔ Not a claim. Triage sets the grade and the lane.\nclass: b (the skill contradicts the declared contract) · reach: every agent reading the published `objectstack-automation` and `objectstack-platform` skills.\n\n## What is wrong (re-read on `main` today)\n\n`job`, `queue` and `messaging` are in `PLATFORM_ALWAYS_ON_CAPABILITIES` (`packages/spec/src/kernel/platform-capabilities.ts`). `resolveServedCapabilities` mounts them on every boot unless `--preset minimal`. PR #31181 teaches this in `objectstack-platform` § `requires:`. The automation skill still teaches the old opt-in reading:\n\n1. `skills/objectstack-automation/SKILL.md` L345-348, the prerequisite table: `job` → \"scheduled flows never launch\", `queue` → \"inbound POST answers 503\", `messaging` → \"silent: success with `skipped: true`\". Each symptom happens only under `--preset minimal`. Read on a default boot, the table says the services must be listed.\n2. `skills/objectstack-automation/references/examples-flows.md` L132: `requires: ['automation', 'triggers']` **plus `'job'`**.\n3. `skills/objectstack-automation/references/integration-recipes.md` L62 (`'job'`) and L130 (`'queue'`).\n4. Not taught anywhere: the host defaults that `serve` appends under every preset, `mcp` (unless `OS_MCP_SERVER_ENABLED` is off) and `pinyin-search` (zh-* locale or its env flag). So \"every other service plugin is opt-in\" stays false for those two.\n5. Code comment, report only: the `'package-registry'` jsdoc in `platform-capabilities.ts` L385-392 says the token is inert under `objectstack serve` because the registry \"keys `marketplace`, not this token\". Core now keys it (`packages/core/src/capability-providers.ts` ≈L174).\n\n## Owed\n\n- Rescope items 1-3 to `--preset minimal`, for example \"only under `--preset minimal`\" on the table lead, and drop the always-on tokens from the example `requires:` arrays or mark them as needed only under minimal.\n- Teach item 4 in one clause where it belongs, in the platform skill's `requires:` lead or on the `mcp` row, read from `serve.ts` at the time of the fix.\n- Sweep both skills' `evals/*.json` for the old claim.\n- No count in prose (#27522). Pay growth by same-file deletion or the standing ruling.\n- Item 5 is a `packages/spec` comment, for the spec lane.\n\n**Level:** `'@objectstack/skills': patch`, `Clause-②: no`, `Metadata-protocol: none`.\n\nRelated: #31130, PR #31181, #31115 (item 2 registers the platform table as liveness-exhaustive)."

@@ -1,0 +1,34 @@
+{
+  "number": 31328,
+  "kind": "issue",
+  "title": "driver-sql: Oracle as a federation dialect — an external datasource over Oracle Database reads (and, double opt-in, writes) live, with type-compat and the predicate emitters modelling oracle",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:data",
+    "domain:server",
+    "enhancement",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "marchtian"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-08T02:13:49Z",
+  "updated_at": "2026-11-08T02:19:51Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31328",
+  "body": "epic:#27261#1 · marchtian · session_017ihL2c5z3q4h8inrn5kwqV\nFiling gate: ③ (maintainer-directed). 田騏 said 「安排」 on 2026-11-08 at 02:11Z, approving the epic PM's offer of 2026-10-30. The legacy-modernization scenario has no driver for Oracle, the database most legacy ERP and HIS systems run on.\nRuling-ref: ADR-0015 (external datasource federation; non-goals: cross-datasource joins, distributed transactions, reverse DDL)\nDedupe (open AND closed): \"Oracle oracledb driver federation dialect\" → none this work. driver-sql's predicate emitters name oracle `'unknown'`.\nReader: the epic PM (#27261, closed) dispatches it.\ntype: Feature\n\n## 维护者速读\n\n- **做什么：** 让 `schemaMode: 'external'` 的数据源可以指向 Oracle。老系统的表直接变成本体对象，查询下推成 Oracle SQL 在老库执行。默认只读，写入需要两处都打开。\n- **范围：** 只做联邦（external）。不支持把平台自己的库放在 Oracle 上（managed 模式），声明时会被拒收并说明原因。用 node-oracledb 的 Thin 模式（纯 JS，不需要装 Oracle Instant Client）。\n- **工作量：** 约 M–L，和 SQL Server 那张卡同样的形状。Oracle 的坑更多：空字符串等于 NULL、旧版本没有布尔类型、大写标识符、`NUMBER` 精度。\n- **需要您做的：** 无。\n\n## Task\n\n- [ ] **Driver id:** `DRIVER_VOCABULARY` gains `oracle` (alias `oracledb`), served by `driver-sql` over knex's `oracledb` client in Thin mode. Add `oracledb` as an optional peer dependency. `hasLocalDefault: false`. Declaring it on a `managed` datasource is refused at `defineStack`, naming the federation-only scope.\n- [ ] **Dialect modelling in driver-sql:** `dialectName` gains `'oracle'`.\n  - **Paging:** `OFFSET … ROWS FETCH NEXT … ROWS ONLY` (12c+). State the minimum supported version.\n  - **Identifiers:** quoting and case. Unquoted names fold to UPPER, so `columnMap` and introspection must agree.\n  - **Text matching:** the case-exact and case-folded `LIKE` with `ESCAPE` (#6518's contract).\n  - **Empty string is NULL:** a filter on `''` must not silently mean `IS NULL`. Pin it.\n  - **Booleans:** `NUMBER(1)` / `CHAR(1)` columns typed `boolean` are judged by the matrix, not coerced silently. Native `BOOLEAN` on 23ai.\n  - **Values:** `DATE` carries a time, `TIMESTAMP WITH TIME ZONE`, `CLOB`, `RAW(16)` as uuid.\n  - **Writes:** `RETURNING … INTO` for the double-opt-in write path.\n- [ ] **Type-compat:** `SqlDialect` gains `'oracle'`. `DIALECT_ALIASES.oracle` maps `varchar2`, `nvarchar2`, `char`, `nchar`, `clob`, `nclob`, `number` (precision and scale decide integer, bigint or decimal; say how), `binary_float`, `binary_double`, `date`, `timestamp`, `timestamp with time zone`, `timestamp with local time zone`, `raw`, `blob` and `boolean`. ADR-0015 §4.6 lists it. This is a published spec widening, so a CONTRACT_REVIEW_TIER review is owed.\n- [ ] **Introspection:** the Studio Tables tab and `list_remote_tables` / `import_object` list and draft Oracle tables by owner and schema (`ALL_TABLES` / `ALL_TAB_COLUMNS` / `ALL_CONSTRAINTS`), with primary keys and foreign keys.\n- [ ] **Tests:** compile-level pins for every emitter arm, the 11 shared conformance case-sets, and a live cell in `live-dialect-matrix`. The live cell is opt-in via `ORACLE_URL`, using `gvenzl/oracle-free` in CI if the live job can host it; otherwise it is a declared skip, never a claimed pass.\n- [ ] **Docs:** `external-datasources.mdx` names Oracle, its config shape, the minimum version and the federation-only scope.\n\n`Clause-②: yes (widening)` expected · `Metadata-protocol: added` (a new accepted driver id). Serial with the SQL Server card: both touch `config-registry.zod.ts`, `type-compat.ts` and ADR-0015 §4.6. Start after the SQL Server card's PR lands, or merge it in when it does."
+}

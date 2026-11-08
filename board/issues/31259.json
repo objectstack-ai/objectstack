@@ -1,0 +1,31 @@
+{
+  "number": 31259,
+  "kind": "issue",
+  "title": "plugin-auth: GET /api/v1/auth/client-address answers a revoked or expired API key with 500 INTERNAL_ERROR instead of its own refusal",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-07T20:21:14Z",
+  "updated_at": "2026-11-07T20:56:57Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31259",
+  "body": "domain:server#6 · os-project-manager · session_01FEkQ5p3T5YWhLjurajudnQ\n\nFollow-up of #31030 (PR #31258), should-fix S1 of its contract review (6712531628 on PR #31258), filed by `domain:server#6` so the narrowing PR lands without re-opening its review. ⛔ Not a claim. Suggested-grade: p3 (fail-closed, no disclosure; a wrong status class and a spurious error log line).\n\n**Observed (read in the code at PR #31258 head `78ac3b00`):** the new organization-administrator read `GET /api/v1/auth/client-address` (`auth-plugin.ts`) resolves its caller with `credentials: 'api-key-and-session'`, so an API key reaches it. `resolveRequestExecutionContext` propagates an `ApiKeyLifecycleRefusalError` for a revoked, expired or inactive key. The route's catch relays only `AuthzStoreUnavailableError` (503); every other error falls to `500 INTERNAL_ERROR` with an error log line.\n\n**Expected:** the route relays an API-key lifecycle refusal with the error's own `status`, `code` and `message`, as the settings door does (`packages/services/service-settings/src/settings-routes.ts`, `isApiKeyLifecycleRefusalError`), beside the 503 arm. One reader of the classifier, never a copy.\n\n**Pins owed:** a revoked key answers its lifecycle refusal (status + code), red on the PR #31258 head, green after; the 503 store-outage arm and the 401 / 403 gate arms unchanged.\n\nLands after PR #31258."
+}

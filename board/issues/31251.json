@@ -2,8 +2,8 @@
   "number": 31251,
   "kind": "issue",
   "title": "plugin-auth: a correct-password sign-in refused by an organization IP list counts toward the account lockout",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "bug",
     "domain:server",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-07T19:49:20Z",
-  "updated_at": "2026-11-07T19:51:24Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-07T22:07:06Z",
+  "closed_at": "2026-11-07T22:05:51Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/31251",
   "body": "domain:server#6 · os-project-manager · session_01FEkQ5p3T5YWhLjurajudnQ\n\nOut-of-scope finding (class a) from the #30924 PR 2 dev (report 6712181248 on #30924), filed by `domain:server#6`. ⛔ Not a claim. Suggested-grade: p2 (a person working from outside their organization's network locks their own account with the right password; an administrator then has to unlock it).\n\n**Observed (measured by the #30924 dev on `main`):** an organization with `allowed_ip_ranges`, deployment lockout threshold 3. Three sign-ins with the CORRECT password from outside the organization's list each answer `403 IP_NOT_ALLOWED` (`SESSION_SCOPING_REFUSAL`, refused when the session is created). The fourth sign-in, from INSIDE the list with the correct password, answers `403 ACCOUNT_LOCKED`; `failed_login_count` is 3.\n\n**Cause:** `packages/plugins/plugin-auth/src/auth-manager-after-hook.ts` (the ADR-0069 D2 counter, `SIGN_IN_EMAIL_PATH` branch) treats ANY `APIError` on `ctx.context.returned` as a failed credential and calls `recordSignInOutcome(email, false)`. The organization IP refusal is thrown after the password was verified, so it is counted as if the password were wrong.\n\n**Expected:** only a refused CREDENTIAL counts toward lockout. A policy refusal after the credential passed (organization IP list; check whether any other post-credential refusal shares the path) neither increments nor resets the counter. Its audit row stays as #30924 writes it.\n\n**Reach:** public door `POST /api/v1/auth/sign-in/email`. Not a disclosure: a wrong password already counts, so this adds no new way for a stranger to lock an account; it locks out the account holder who did nothing wrong.\n\n**Pins owed:** the measured sequence above, red on `main`, green after; a wrong-password control still counts; a correct sign-in from inside the list still resets.\n\nDedupe words: lockout IP_NOT_ALLOWED, organization allowed_ip_ranges lockout, recordSignInOutcome scoping refusal."
