@@ -121,6 +121,7 @@ import { FieldTypePicker } from './FieldTypePicker.js';
 import {
   CurrencyConfigField,
   currencyCodeFieldCandidates,
+  homeAmountCandidates,
   nextCurrencyCodeFieldName,
   newCurrencyCodeFieldDef,
   type CurrencyConfigDraft,
@@ -1713,6 +1714,7 @@ export function ObjectFieldInspector({
               <CurrencyConfigField
                 config={def.currencyConfig as CurrencyConfigDraft | undefined}
                 candidates={currencyCodeFieldCandidates(view.entries, name)}
+                homeCandidates={type === 'currency' ? homeAmountCandidates(view.entries, name) : undefined}
                 onCommit={(next) => patchDef({ currencyConfig: next })}
                 onCreateCodeField={createCurrencyCodeField}
                 disabled={locked}

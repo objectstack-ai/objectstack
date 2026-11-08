@@ -819,7 +819,7 @@ One locale of translations — the `translation` metadata type
 | **_packageId** | `string` | optional | Owning package machine id. |
 | **_packageVersion** | `string` | optional | Owning package version. |
 | **_lockDocsUrl** | `string` | optional | Optional documentation link surfaced next to _lockReason. |
-| **overrides** | `{ package: string; basedOn: string }` | optional | Override declaration (ADR-0146 D2): `{ package, basedOn }` — this item of "`<base>`.custom" replaces the base package's same-named item whole. `basedOn` is recorded and never judged. |
+| **overrides** | `{ package: string; basedOn: string }` | optional | Override declaration (ADR-0146 D2): `{ package, basedOn }` — this item of "`<base>`.custom" replaces the base package's same-named item whole. `basedOn` is recorded and never gates; a base's upgrade plan reads it only as advice. |
 
 ### Nested Shape: `TranslationItem.objects[string]`
 
@@ -964,7 +964,7 @@ Translation data for a single object
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **package** | `string` | ✅ | The base package id whose same-named item this item replaces whole (e.g. "com.acme.crm"). Only an item of the base's paired "`<base>`.custom" package declares an override. |
-| **basedOn** | `string` | ✅ | Recorded, never judged: the base package's `manifest.version` this override was taken from (e.g. "3.2.0"), not a history version of the item. No door compares it with the installed base, no upgrade diff is produced from it, and nothing is refused on it; it tells a person re-basing the override where it started (ADR-0146 D2). |
+| **basedOn** | `string` | ✅ | Recorded, never a gate: the base package's `manifest.version` this override was taken from (e.g. "3.2.0"), not a history version of the item. Nothing is refused, merged or rebased on it; it tells a person re-basing the override where it started. One reader, as advice: a base's upgrade plan lists an override whose `basedOn` is not the installed base version as stale, beside each override whose base item the upgrade changes (ADR-0146 D2, as amended). |
 
 
 ---

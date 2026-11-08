@@ -18,7 +18,7 @@
  * zod schemas, projected to JSON Schema. A language below overrides a word
  * only where the English side has one, and any word it leaves out is served in
  * English (`driverCatalogFor`), never as a key. Product names (SQLite,
- * PostgreSQL, MySQL / MariaDB, MongoDB) and technical terms (URL, URI, SSL/TLS,
+ * PostgreSQL, MySQL / MariaDB, MongoDB, Oracle Database, SQL Server) and technical terms (URL, URI, SSL/TLS,
  * `knex searchPath`, `application_name`) are not translated.
  *
  * The fields are the top-level properties of each driver's `configSchema`, the
@@ -31,7 +31,7 @@
  * field the spec adds without its words, goes red there.
  *
  * Each language is written once as {@link CatalogWords}, the distinct words
- * the five drivers use; {@link catalogText} lays them out per driver, so a
+ * the seven drivers use; {@link catalogText} lays them out per driver, so a
  * field the drivers share (host, port, password, …) cannot read two ways.
  */
 
@@ -86,6 +86,16 @@ interface CatalogWords {
   statementTimeout: Required<DriverFieldText>;
   authSource: Required<DriverFieldText>;
   mongoOptionsDescription: string;
+  oracleDescription: string;
+  mssqlDescription: string;
+  connectString: Required<DriverFieldText>;
+  listenerHostDescription: string;
+  listenerPortDescription: string;
+  serviceName: Required<DriverFieldText>;
+  oracleUsernameDescription: string;
+  instanceName: Required<DriverFieldText>;
+  mssqlUsernameDescription: string;
+  encryptTitle: string;
 }
 
 /** One language's words laid out per driver and field. */
@@ -146,6 +156,29 @@ function catalogText(w: CatalogWords): DriverCatalogLocaleText {
         options: { description: w.mongoOptionsDescription },
       },
     },
+    oracle: {
+      description: w.oracleDescription,
+      fields: {
+        connectString: w.connectString,
+        host: { title: w.host.title, description: w.listenerHostDescription },
+        port: { title: w.port.title, description: w.listenerPortDescription },
+        serviceName: w.serviceName,
+        username: { title: w.username.title, description: w.oracleUsernameDescription },
+        password: w.password,
+      },
+    },
+    mssql: {
+      description: w.mssqlDescription,
+      fields: {
+        host: w.host,
+        port: w.port,
+        instanceName: w.instanceName,
+        database: w.database,
+        username: { title: w.username.title, description: w.mssqlUsernameDescription },
+        password: w.password,
+        ssl: { title: w.encryptTitle, description: w.ssl.description },
+      },
+    },
   };
 }
 
@@ -183,6 +216,16 @@ const zhHans: CatalogWords = {
   applicationName: { title: '应用名称', description: 'Postgres 的 application_name' },
   statementTimeout: { title: '语句超时（毫秒）', description: '中止运行时间超过此值的语句（毫秒）' },
   authSource: { title: '认证库', description: '认证数据库' },
+  oracleDescription: 'Oracle Database 12c R1 及以上版本。仅限联邦：按原样使用其中已有的表，绝不建表或改表。',
+  mssqlDescription: 'Microsoft SQL Server。仅限联邦：按原样使用其中已有的表，绝不建表或改表。',
+  connectString: { title: '连接字符串', description: 'Oracle 连接字符串：Easy Connect 或完整描述符（优先于主机/端口/服务名）' },
+  listenerHostDescription: '监听器主机地址',
+  listenerPortDescription: '监听器端口',
+  serviceName: { title: '服务名', description: '数据库服务名' },
+  oracleUsernameDescription: '认证用户（同时也是默认模式）',
+  instanceName: { title: '实例名', description: '命名实例，通过 SQL Server Browser 服务解析（默认实例请留空）' },
+  mssqlUsernameDescription: 'SQL 身份验证登录名',
+  encryptTitle: '加密（TLS）',
   mongoOptionsDescription:
     '额外的 MongoClient 选项（replicaSet、tls、超时等）。以凭据命名的键（`password`、`authToken` 及其旧别名）'
     + '在任何层级都会被直接拒绝，请通过连接表单或 external.credentialsRef 绑定密钥。'
@@ -224,6 +267,16 @@ const zhHant: CatalogWords = {
   applicationName: { title: '應用程式名稱', description: 'Postgres 的 application_name' },
   statementTimeout: { title: '陳述式逾時（毫秒）', description: '中止執行時間超過此值的陳述式（毫秒）' },
   authSource: { title: '驗證來源', description: '驗證資料庫' },
+  oracleDescription: 'Oracle Database 12c R1 或更新版本。僅限聯邦：依原樣使用其中既有的資料表，絕不建立或變更資料表。',
+  mssqlDescription: 'Microsoft SQL Server。僅限聯邦：依原樣使用其中既有的資料表，絕不建立或變更資料表。',
+  connectString: { title: '連線字串', description: 'Oracle 連線字串：Easy Connect 或完整描述元（優先於主機/連接埠/服務名稱）' },
+  listenerHostDescription: '監聽器主機位址',
+  listenerPortDescription: '監聽器連接埠',
+  serviceName: { title: '服務名稱', description: '資料庫服務名稱' },
+  oracleUsernameDescription: '驗證使用者（同時也是預設結構描述）',
+  instanceName: { title: '執行個體名稱', description: '具名執行個體，透過 SQL Server Browser 服務解析（預設執行個體請留空）' },
+  mssqlUsernameDescription: 'SQL 驗證登入',
+  encryptTitle: '加密（TLS）',
   mongoOptionsDescription:
     '額外的 MongoClient 選項（replicaSet、tls、逾時等）。以憑證命名的鍵（`password`、`authToken` 及其舊別名）'
     + '在任何層級都會被直接拒絕，請透過連線表單或 external.credentialsRef 繫結密鑰。'
@@ -280,6 +333,16 @@ const es: CatalogWords = {
     description: 'Cancela las sentencias que tarden más que este valor (ms)',
   },
   authSource: { title: 'Origen de autenticación', description: 'Base de datos de autenticación' },
+  oracleDescription: 'Oracle Database 12c R1 o posterior. Solo federación: sus tablas existentes se usan tal como están; nunca se crean ni se modifican.',
+  mssqlDescription: 'Microsoft SQL Server. Solo federación: sus tablas existentes se usan tal como están; nunca se crean ni se modifican.',
+  connectString: { title: 'Cadena de conexión', description: 'Cadena de conexión de Oracle: Easy Connect o un descriptor completo (prevalece sobre host/puerto/nombre de servicio)' },
+  listenerHostDescription: 'Dirección del host del listener',
+  listenerPortDescription: 'Puerto del listener',
+  serviceName: { title: 'Nombre de servicio', description: 'Nombre del servicio de la base de datos' },
+  oracleUsernameDescription: 'Usuario de autenticación (también el esquema predeterminado)',
+  instanceName: { title: 'Nombre de instancia', description: 'Instancia con nombre, resuelta mediante el servicio SQL Server Browser (déjalo vacío para la instancia predeterminada)' },
+  mssqlUsernameDescription: 'Inicio de sesión de autenticación SQL',
+  encryptTitle: 'Cifrar (TLS)',
   mongoOptionsDescription:
     'Opciones adicionales de MongoClient (replicaSet, tls, tiempos de espera, …). Las claves con nombre de '
     + 'credencial (`password`, `authToken` y sus alias anteriores) se rechazan a cualquier profundidad: vincula '
@@ -328,6 +391,16 @@ const ar: CatalogWords = {
     description: 'إيقاف العبارات التي يتجاوز تنفيذها هذه المدة (مللي ثانية)',
   },
   authSource: { title: 'مصدر المصادقة', description: 'قاعدة بيانات المصادقة' },
+  oracleDescription: 'Oracle Database 12c R1 أو أحدث. ربط خارجي فقط: تُستخدم جداوله الموجودة كما هي، ولا تُنشأ ولا تُعدَّل أبدًا.',
+  mssqlDescription: 'Microsoft SQL Server. ربط خارجي فقط: تُستخدم جداوله الموجودة كما هي، ولا تُنشأ ولا تُعدَّل أبدًا.',
+  connectString: { title: 'سلسلة الاتصال', description: 'سلسلة اتصال Oracle: صيغة Easy Connect أو واصف كامل (تتقدّم على المضيف/المنفذ/اسم الخدمة)' },
+  listenerHostDescription: 'عنوان مضيف المستمع',
+  listenerPortDescription: 'منفذ المستمع',
+  serviceName: { title: 'اسم الخدمة', description: 'اسم خدمة قاعدة البيانات' },
+  oracleUsernameDescription: 'مستخدم المصادقة (وهو أيضًا المخطط الافتراضي)',
+  instanceName: { title: 'اسم المثيل', description: 'مثيل مسمّى يُحدَّد عبر خدمة SQL Server Browser (اتركه فارغًا للمثيل الافتراضي)' },
+  mssqlUsernameDescription: 'اسم تسجيل الدخول لمصادقة SQL',
+  encryptTitle: 'تشفير (TLS)',
   mongoOptionsDescription:
     'خيارات إضافية لـ MongoClient (replicaSet وtls والمهلات، …). المفاتيح التي تحمل أسماء بيانات اعتماد '
     + '(`password` و`authToken` وأسماؤها البديلة السابقة) تُرفض في أي مستوى: اربط السر عبر نموذج الاتصال أو '
@@ -388,6 +461,16 @@ const fr: CatalogWords = {
     description: 'Interrompt les requêtes qui durent plus longtemps que cette valeur (ms)',
   },
   authSource: { title: 'Source d’authentification', description: 'Base de données d’authentification' },
+  oracleDescription: 'Oracle Database 12c R1 ou ultérieure. Fédération uniquement : ses tables existantes sont utilisées telles quelles, jamais créées ni modifiées.',
+  mssqlDescription: 'Microsoft SQL Server. Fédération uniquement : ses tables existantes sont utilisées telles quelles, jamais créées ni modifiées.',
+  connectString: { title: 'Chaîne de connexion', description: 'Chaîne de connexion Oracle : Easy Connect ou un descripteur complet (prévaut sur hôte/port/nom de service)' },
+  listenerHostDescription: 'Adresse de l’hôte du listener',
+  listenerPortDescription: 'Port du listener',
+  serviceName: { title: 'Nom de service', description: 'Nom du service de base de données' },
+  oracleUsernameDescription: 'Utilisateur d’authentification (également le schéma par défaut)',
+  instanceName: { title: 'Nom d’instance', description: 'Instance nommée, résolue par le service SQL Server Browser (laisser vide pour l’instance par défaut)' },
+  mssqlUsernameDescription: 'Identifiant d’authentification SQL',
+  encryptTitle: 'Chiffrer (TLS)',
   mongoOptionsDescription:
     'Options MongoClient supplémentaires (replicaSet, tls, délais, …). Les clés portant un nom d’identifiant '
     + '(`password`, `authToken` et leurs anciens alias) sont refusées à toute profondeur : liez le secret via le '
@@ -444,6 +527,16 @@ const ptBR: CatalogWords = {
     description: 'Interrompe instruções que demorarem mais que este valor (ms)',
   },
   authSource: { title: 'Origem da autenticação', description: 'Banco de dados de autenticação' },
+  oracleDescription: 'Oracle Database 12c R1 ou posterior. Somente federação: as tabelas existentes são usadas como estão, nunca criadas nem alteradas.',
+  mssqlDescription: 'Microsoft SQL Server. Somente federação: as tabelas existentes são usadas como estão, nunca criadas nem alteradas.',
+  connectString: { title: 'String de conexão', description: 'String de conexão do Oracle: Easy Connect ou um descritor completo (prevalece sobre host/porta/nome do serviço)' },
+  listenerHostDescription: 'Endereço do host do listener',
+  listenerPortDescription: 'Porta do listener',
+  serviceName: { title: 'Nome do serviço', description: 'Nome do serviço do banco de dados' },
+  oracleUsernameDescription: 'Usuário de autenticação (também o esquema padrão)',
+  instanceName: { title: 'Nome da instância', description: 'Instância nomeada, resolvida pelo serviço SQL Server Browser (deixe em branco para a instância padrão)' },
+  mssqlUsernameDescription: 'Login de autenticação SQL',
+  encryptTitle: 'Criptografar (TLS)',
   mongoOptionsDescription:
     'Opções adicionais do MongoClient (replicaSet, tls, tempos limite, …). Chaves com nome de credencial '
     + '(`password`, `authToken` e seus aliases antigos) são recusadas em qualquer nível: vincule o segredo pelo '
@@ -502,6 +595,16 @@ const ru: CatalogWords = {
     description: 'Прерывать запросы, выполняющиеся дольше этого значения (мс)',
   },
   authSource: { title: 'Источник аутентификации', description: 'База данных аутентификации' },
+  oracleDescription: 'Oracle Database 12c R1 или новее. Только федерация: существующие таблицы используются как есть и никогда не создаются и не изменяются.',
+  mssqlDescription: 'Microsoft SQL Server. Только федерация: существующие таблицы используются как есть и никогда не создаются и не изменяются.',
+  connectString: { title: 'Строка подключения', description: 'Строка подключения Oracle: Easy Connect или полный дескриптор (имеет приоритет над хостом, портом и именем службы)' },
+  listenerHostDescription: 'Адрес хоста листенера',
+  listenerPortDescription: 'Порт листенера',
+  serviceName: { title: 'Имя службы', description: 'Имя службы базы данных' },
+  oracleUsernameDescription: 'Пользователь для аутентификации (он же схема по умолчанию)',
+  instanceName: { title: 'Имя экземпляра', description: 'Именованный экземпляр, определяемый через службу SQL Server Browser (оставьте пустым для экземпляра по умолчанию)' },
+  mssqlUsernameDescription: 'Имя входа для проверки подлинности SQL',
+  encryptTitle: 'Шифрование (TLS)',
   mongoOptionsDescription:
     'Дополнительные параметры MongoClient (replicaSet, tls, тайм-ауты, …). Ключи с именами учетных данных '
     + '(`password`, `authToken` и их прежние псевдонимы) отклоняются на любом уровне вложенности: привяжите секрет '
@@ -559,6 +662,16 @@ const de: CatalogWords = {
     description: 'Bricht Anweisungen ab, die länger als dieser Wert laufen (ms)',
   },
   authSource: { title: 'Authentifizierungsquelle', description: 'Authentifizierungsdatenbank' },
+  oracleDescription: 'Oracle Database 12c R1 oder neuer. Nur Föderation: Die vorhandenen Tabellen werden unverändert genutzt und nie angelegt oder geändert.',
+  mssqlDescription: 'Microsoft SQL Server. Nur Föderation: Die vorhandenen Tabellen werden unverändert genutzt und nie angelegt oder geändert.',
+  connectString: { title: 'Verbindungszeichenfolge', description: 'Oracle-Verbindungszeichenfolge: Easy Connect oder ein vollständiger Deskriptor (hat Vorrang vor Host/Port/Dienstname)' },
+  listenerHostDescription: 'Hostadresse des Listeners',
+  listenerPortDescription: 'Port des Listeners',
+  serviceName: { title: 'Dienstname', description: 'Name des Datenbankdienstes' },
+  oracleUsernameDescription: 'Authentifizierungsbenutzer (zugleich das Standardschema)',
+  instanceName: { title: 'Instanzname', description: 'Benannte Instanz, aufgelöst über den SQL Server Browser-Dienst (für die Standardinstanz leer lassen)' },
+  mssqlUsernameDescription: 'SQL-Authentifizierungsanmeldung',
+  encryptTitle: 'Verschlüsseln (TLS)',
   mongoOptionsDescription:
     'Zusätzliche MongoClient-Optionen (replicaSet, tls, Timeouts, …). Schlüssel mit Anmeldedaten-Namen '
     + '(`password`, `authToken` und ihre früheren Aliasse) werden auf jeder Ebene abgelehnt: Binden Sie das Secret '
@@ -609,6 +722,16 @@ const ja: CatalogWords = {
     description: 'この時間を超えて実行されるステートメントを中止します（ミリ秒）',
   },
   authSource: { title: '認証ソース', description: '認証データベース' },
+  oracleDescription: 'Oracle Database 12c R1 以降。フェデレーション専用：既存のテーブルをそのまま使用し、作成や変更は一切行いません。',
+  mssqlDescription: 'Microsoft SQL Server。フェデレーション専用：既存のテーブルをそのまま使用し、作成や変更は一切行いません。',
+  connectString: { title: '接続文字列', description: 'Oracle の接続文字列：Easy Connect または完全な記述子（ホスト/ポート/サービス名より優先）' },
+  listenerHostDescription: 'リスナーのホストアドレス',
+  listenerPortDescription: 'リスナーのポート',
+  serviceName: { title: 'サービス名', description: 'データベースのサービス名' },
+  oracleUsernameDescription: '認証ユーザー（既定のスキーマも兼ねる）',
+  instanceName: { title: 'インスタンス名', description: '名前付きインスタンス。SQL Server Browser サービスで解決されます（既定のインスタンスでは空欄のまま）' },
+  mssqlUsernameDescription: 'SQL 認証のログイン',
+  encryptTitle: '暗号化（TLS）',
   mongoOptionsDescription:
     '追加の MongoClient オプション（replicaSet、tls、タイムアウトなど）。認証情報の名前を持つキー'
     + '（`password`、`authToken` とその旧エイリアス）は、どの階層でも拒否されます。シークレットは接続フォームまたは '
@@ -660,6 +783,16 @@ const ko: CatalogWords = {
     description: '이 값보다 오래 실행되는 문을 중단합니다(ms)',
   },
   authSource: { title: '인증 소스', description: '인증 데이터베이스' },
+  oracleDescription: 'Oracle Database 12c R1 이상. 페더레이션 전용: 기존 테이블을 그대로 사용하며, 테이블을 만들거나 변경하지 않습니다.',
+  mssqlDescription: 'Microsoft SQL Server. 페더레이션 전용: 기존 테이블을 그대로 사용하며, 테이블을 만들거나 변경하지 않습니다.',
+  connectString: { title: '연결 문자열', description: 'Oracle 연결 문자열: Easy Connect 또는 전체 디스크립터(호스트/포트/서비스 이름보다 우선)' },
+  listenerHostDescription: '리스너 호스트 주소',
+  listenerPortDescription: '리스너 포트',
+  serviceName: { title: '서비스 이름', description: '데이터베이스 서비스 이름' },
+  oracleUsernameDescription: '인증 사용자(기본 스키마이기도 함)',
+  instanceName: { title: '인스턴스 이름', description: '명명된 인스턴스로, SQL Server Browser 서비스를 통해 확인됩니다(기본 인스턴스는 비워 두세요)' },
+  mssqlUsernameDescription: 'SQL 인증 로그인',
+  encryptTitle: '암호화(TLS)',
   mongoOptionsDescription:
     '추가 MongoClient 옵션(replicaSet, tls, 제한 시간 등). 자격 증명 이름을 가진 키(`password`, `authToken` 및 '
     + '이전 별칭)는 어느 깊이에서든 거부됩니다. 연결 양식 또는 external.credentialsRef로 시크릿을 바인딩하세요. '

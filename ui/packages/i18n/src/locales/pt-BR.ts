@@ -435,6 +435,10 @@ const pt = {
       available: 'Disponíveis',
       all: 'Todas as moedas (ISO 4217)',
     },
+    currencyHome: {
+      convertedAt: 'Convertido à taxa {{rate}} em {{date}}',
+      homeCurrency: 'Na moeda base (taxa 1)',
+    },
     boolean: {
       offBadge: "{{label}} — Desativado",
       completed: "Concluído",

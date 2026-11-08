@@ -16,7 +16,7 @@ import { describe, it, expect, afterEach } from 'vitest';
 import React from 'react';
 import { render, cleanup, screen, fireEvent, within } from '@testing-library/react';
 import '@testing-library/jest-dom';
-import { LocalizationProvider } from '@object-ui/i18n';
+import { LocalizationProvider, homeAmountSourceOf, withHomeAmountSource } from '@object-ui/i18n';
 import { CurrencyCellRenderer } from '../index';
 import { CurrencyField } from '../widgets/CurrencyField';
 import { TextField } from '../widgets/TextField';
@@ -134,5 +134,62 @@ describe('the record-currency code select (CurrencyCodeField)', () => {
       </LocalizationProvider>,
     );
     expect(screen.getByText(/^EUR — /)).toBeInTheDocument();
+  });
+});
+
+// ADR-0144 D5: a home field draws its read face with the rate and document
+// date the engine converted at, read from the record; the stamp is the
+// producer's (`withHomeAmountSource`), so an unstamped amount is unchanged.
+describe('home field faces (ADR-0144 D5)', () => {
+  const FIELDS = {
+    currency_code: { type: 'text', valueDomain: 'iso_4217_currency' },
+    invoice_date: { type: 'date' },
+    amount: { type: 'currency', currencyConfig: { currencyMode: 'record', currencyField: 'currency_code', homeAmount: { field: 'amount_home', rateDate: 'invoice_date', rateField: 'amount_rate' } } },
+    amount_home: { type: 'currency', readonly: true },
+    amount_rate: { type: 'number', readonly: true },
+  };
+  const HOME = withHomeAmountSource({ name: 'amount_home', ...FIELDS.amount_home }, FIELDS, 'amount_home') as any;
+  const FOREIGN = { currency_code: 'EUR', invoice_date: '2026-11-01', amount: 10000, amount_home: 71994.24, amount_rate: 0.1389 };
+  const SAME = { currency_code: 'CNY', invoice_date: '', amount: 500, amount_home: 500, amount_rate: 1 };
+
+  function face(el: React.ReactElement) {
+    const { container, unmount } = render(<LocalizationProvider value={TENANT}>{el}</LocalizationProvider>);
+    const out = {
+      text: text(container.textContent),
+      inputs: container.querySelectorAll('input').length,
+      hint: text(container.querySelector('[data-testid="home-amount-hint"]')?.textContent ?? null),
+    };
+    unmount();
+    return out;
+  }
+
+  it('reads the source off the object, and stamps nothing on a field no amount names', () => {
+    expect(homeAmountSourceOf(FIELDS, 'amount_home')).toEqual({ amountField: 'amount', codeField: 'currency_code', rateDateField: 'invoice_date', rateField: 'amount_rate' });
+    expect(homeAmountSourceOf(FIELDS, 'amount_rate')).toBeUndefined();
+    const plain = { type: 'currency' };
+    expect(withHomeAmountSource(plain, FIELDS, 'plain')).toBe(plain);
+  });
+
+  it('the form widget draws the read face, never an input, with the rate and date', () => {
+    const out = face(<CurrencyField value={71994.24} onChange={() => {}} field={HOME} dependentValues={FOREIGN} disabled />);
+    expect(out.inputs).toBe(0);
+    expect(out.text).toContain('CN¥71,994.24');
+    expect(out.hint).toBe('Converted at 0.1389 on Nov 1, 2026');
+  });
+
+  it('the record-page cell says the same, and an amount in the home currency says rate 1', () => {
+    expect(face(<CurrencyCellRenderer value={71994.24} field={HOME} dependentValues={FOREIGN} />).hint).toBe('Converted at 0.1389 on Nov 1, 2026');
+    expect(face(<CurrencyCellRenderer value={500} field={HOME} dependentValues={SAME} />).hint).toBe('In the home currency (rate 1)');
+  });
+
+  it('no stored rate (a blank amount): no hint', () => {
+    expect(face(<CurrencyCellRenderer value={0} field={HOME} dependentValues={{ ...FOREIGN, amount_rate: null }} />).hint).toBe('');
+  });
+
+  it('CONTROL: an unstamped amount renders as before, an input in the form and a bare cell', () => {
+    const plain = { name: 'amount_home', ...FIELDS.amount_home } as any;
+    expect(face(<CurrencyField value={71994.24} onChange={() => {}} field={plain} dependentValues={FOREIGN} disabled />).inputs).toBe(1);
+    const cellOut = face(<CurrencyCellRenderer value={71994.24} field={plain} dependentValues={FOREIGN} />);
+    expect(cellOut).toEqual({ text: 'CN¥71,994.24', inputs: 0, hint: '' });
   });
 });

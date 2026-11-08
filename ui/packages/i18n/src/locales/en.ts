@@ -401,6 +401,12 @@ const en = {
       available: 'Available',
       all: 'All currencies (ISO 4217)',
     },
+    // ADR-0144 D5 — the home field's read-only hint: the rate and document date
+    // the engine converted the record's amount at (`CurrencyField`, the record page).
+    currencyHome: {
+      convertedAt: 'Converted at {{rate}} on {{date}}',
+      homeCurrency: 'In the home currency (rate 1)',
+    },
     // objectui#13461 — names for icon-only buttons in the field widgets.
     masterDetail: {
       view: 'Open {{name}}',

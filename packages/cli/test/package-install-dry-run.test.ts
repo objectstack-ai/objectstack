@@ -134,6 +134,30 @@ describe('os package install --dry-run (#30884)', () => {
     expect(renderUpgradePlan({ plan: {}, environment: {} })).toEqual(['  No change to objects, fields or seed datasets.']);
   });
 
+  it('the advisory overrides: each hiding override and each stale one, beside an otherwise empty plan', () => {
+    const finding = { package: 'com.acme.crm', type: 'view', name: 'acme_lead_list', installedVersion: '1.2.0', incomingVersion: '2.0.0' };
+    const lines = renderUpgradePlan({
+      plan: {},
+      environment: {
+        overrides: {
+          hidesChange: [{ ...finding, basedOn: '1.2.0', change: 'changed', next: 'Open it in Studio.' }],
+          stale: [{ ...finding, name: 'acme_home', type: 'dashboard', basedOn: '1.0.0', next: 'Re-base it.' }],
+        },
+      },
+    });
+    expect(lines).toEqual([
+      '  No change to objects, fields or seed datasets.',
+      '  Overrides that hide a change in this upgrade (advisory; the upgrade installs either way)',
+      "    view 'acme_lead_list': the base changes it; the override was taken from 1.2.0. Open it in Studio.",
+      '  Overrides taken from another version than the installed one (advisory)',
+      "    dashboard 'acme_home': taken from 1.0.0, installed 1.2.0. Re-base it.",
+    ]);
+    // A reading the runtime could not make is said so, never printed as "no override".
+    expect(renderUpgradePlan({ plan: {}, environment: { overrides: null } })).toContain(
+      '  Overrides (advisory): the customizations of this package could not be read.',
+    );
+  });
+
   it('a runtime that ignored --dry-run and installed is a failure, exit 1', async () => {
     stubRuntime({ ok: true, status: 200, body: { success: true, data: { manifestId: 'com.acme.crm', version: '2.0.0', hotLoaded: true } } });
     const { out, exit } = await runInstall(['--dry-run']);
