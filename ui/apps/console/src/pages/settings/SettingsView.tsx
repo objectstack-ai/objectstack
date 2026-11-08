@@ -25,6 +25,7 @@ import {
   runSettingsAction,
   saveSettingsNamespace,
   type JudgedClientAddress,
+  type JudgedClientAddressRoute,
 } from './api';
 import { resolveLabel, type SettingsNamespacePayload, type Specifier } from './types';
 import { useSettingsLabel, type SettingsLabelHelpers } from './useSettingsLabel';
@@ -52,13 +53,23 @@ function evalVisibility(expr: string | undefined, data: Record<string, unknown>)
 }
 
 /**
- * The row the judged client address is drawn beside (objectstack#30313): the
- * `auth` namespace's Allowed IP ranges. A save of a list that leaves this
+ * The rows the judged client address is drawn beside (objectstack#30313): the
+ * Allowed IP ranges of the deployment (`auth`, platform administrators) and of
+ * an organization (`access_policy`, organization administrators), each with the
+ * route gated to whoever may save that list. A save of a list that leaves this
  * address out is refused (`invalid_value`, `constraint.clientAddress`), so the
  * admin is shown it before saving rather than learning it from the refusal.
  */
-const CLIENT_ADDRESS_NAMESPACE = 'auth';
+const CLIENT_ADDRESS_ROUTES: ReadonlyMap<string, JudgedClientAddressRoute> = new Map<string, JudgedClientAddressRoute>([
+  ['auth', '/admin/client-address'],
+  ['access_policy', '/client-address'],
+]);
 const CLIENT_ADDRESS_KEY = 'allowed_ip_ranges';
+
+/** The judged-address route of `namespace`, or undefined when its page draws no address. */
+function clientAddressRouteOf(namespace: string | undefined): JudgedClientAddressRoute | undefined {
+  return namespace === undefined ? undefined : CLIENT_ADDRESS_ROUTES.get(namespace);
+}
 
 /**
  * The note under Allowed IP ranges, one whole sentence per state so a pack
@@ -441,20 +452,21 @@ export function SettingsView() {
   }, [namespace]);
 
   /**
-   * The caller's address as the server judges it, on the `auth` page only
-   * (objectstack#30313), or null: not that page, not read yet, or the read
-   * failed. A failure draws no note rather than a guess: the route is
-   * platform-admin gated and absent on a server older than objectstack#30398,
-   * and a refused save still names the address in the row.
+   * The caller's address as the server judges it, on a page that draws it
+   * ({@link CLIENT_ADDRESS_ROUTES}), or null: another page, not read yet, or
+   * the read failed. A failure draws no note rather than a guess: each route is
+   * gated to whoever may save its list and absent on an older server, and a
+   * refused save still names the address in the row.
    */
   const [judgedRead, setJudgedRead] = useState<{
     namespace: string;
     judged: JudgedClientAddress;
   } | null>(null);
   useEffect(() => {
-    if (namespace !== CLIENT_ADDRESS_NAMESPACE) return;
+    const route = clientAddressRouteOf(namespace);
+    if (!namespace || !route) return;
     let live = true;
-    getJudgedClientAddress().then(
+    getJudgedClientAddress(route).then(
       (judged) => {
         if (live) setJudgedRead({ namespace, judged });
       },
@@ -832,7 +844,7 @@ export function SettingsView() {
                 error={key ? fieldErrors[key] : undefined}
                 note={
                   judgedAddress &&
-                  namespace === CLIENT_ADDRESS_NAMESPACE &&
+                  clientAddressRouteOf(namespace) !== undefined &&
                   key === CLIENT_ADDRESS_KEY
                     ? clientAddressNote(judgedAddress, t)
                     : isStoredJsonText(spec, resolved)
