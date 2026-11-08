@@ -50,6 +50,11 @@ import {
     hasMetadataRedactor,
     redactMetadataItem,
 } from './index.js';
+// `@objectstack/lint` is reached through the save door's author-time gate, a
+// dynamic `import()` (`metadata-diagnostics.ts`). Paid here, at collection, so no
+// case's `testTimeout` window pays that first load
+// (`scripts/check-test-source-alias.mjs`, "The source reach").
+import '@objectstack/lint';
 // [#20611] Not on the package entry — the gate's half of the carry-forward,
 // consumed inside this package only.
 import { redactedPathsCarriedForward } from './metadata-redaction.js';
@@ -766,7 +771,10 @@ function relocate(served: any, secret?: string) {
                 config: { triggerType: 'api', hookId: 'intake', ...(secret !== undefined ? { secret } : {}) },
             },
         ],
-        edges: [{ id: 'e1', source: 'begin_v2', target: 'finish' }],
+        // `e2` keeps the old start node reached: the save door's flow lint
+        // refuses a node no edge reaches (`flow-node-unreachable`), which is
+        // not the refusal these tests are about.
+        edges: [{ id: 'e1', source: 'begin_v2', target: 'finish' }, { id: 'e2', source: 'begin_v2', target: 'begin' }],
     };
 }
 
@@ -906,7 +914,8 @@ function storedCalloutFlow() {
                 },
             },
         ],
-        edges: [],
+        // Wired: the save door's flow lint refuses a top-level node no edge reaches.
+        edges: [{ id: 's1', source: 'begin', target: 'each' }, { id: 's2', source: 'each', target: 'fan' }],
     };
 }
 
@@ -1042,6 +1051,7 @@ function storedMovesFlow() {
     const flow: any = storedCalloutFlow();
     flow.name = 'moves';
     flow.nodes.push({ id: 'call', type: 'http', label: 'Call', config: { url: 'https://c', durable: true, signingSecret: SIGNING } });
+    flow.edges.push({ id: 's3', source: 'fan', target: 'call' });
     return flow;
 }
 
@@ -1054,6 +1064,7 @@ function movedOutOfLoop(served: any) {
     return {
         ...served,
         nodes: [begin, { ...each, config: { ...each.config, body: { nodes: [NOOP('body_noop')], edges: [] } } }, fan, call, perRow],
+        edges: [...served.edges, { id: 's4', source: 'call', target: perRow.id }],
     };
 }
 
@@ -1178,7 +1189,7 @@ describe('#20590 round 2 — the relocation counts nodes, not every object carry
         const stored = storedMovesFlow();
         const incoming = movedWithEdgeTwin(redactMetadataItem('flow', stored));
         const out: any = carryForwardRedactedValues('flow', incoming, stored);
-        expect(out.edges.map((e: any) => e.id)).toEqual(['per_row']);
+        expect(out.edges.map((e: any) => e.id)).toEqual(['s1', 's2', 's3', 's4', 'per_row']);
         expect(out.nodes[4].id).toBe('per_row');
         expect(out.nodes[4].config.signingSecret).toBe(SIGNING);
         expect(allStrings(redactMetadataItem('flow', out))).not.toContain(SIGNING);
@@ -1197,7 +1208,7 @@ describe('#20590 round 2 — the relocation counts nodes, not every object carry
         await protocol.saveMetaItem({ type: 'flow', name: 'moves', item: movedWithEdgeTwin(editable) });
 
         const at = JSON.parse(Array.from(rows.values()).find((r) => r.name === 'moves' && r.state === 'active')!.metadata);
-        expect(at.edges.map((e: any) => e.id)).toEqual(['per_row']);
+        expect(at.edges.map((e: any) => e.id)).toEqual(['s1', 's2', 's3', 's4', 'per_row']);
         expect(at.nodes[4].config.signingSecret).toBe(SIGNING);
         expect(allStrings(await protocol.getMetaItem({ type: 'flow', name: 'moves' }))).not.toContain(SIGNING);
     });

@@ -264,6 +264,18 @@ const CALLERS: Record<string, Classification> = {
       "resolves on the target (the engine's `referenceExists` probe) and answers `reference_not_found` or nothing, " +
       'never a field of the target',
   },
+  // The grant-holder membership refusal's hand-off to that check.
+  'packages/plugins/plugin-security/src/grant-holder-membership-refusal.ts': {
+    kind: 'not-a-served-read',
+    reason:
+      "the grant-holder membership refusal (`referenceCheckAsksCaller`, `callerReadsHolder`) asks whether a grant's `user_id` is a reference " +
+      "the write-path reference check judges. Its one read of the target is the CALLER's own read door, projected to " +
+      '`id`, and its answer only decides whether that check (`engine-referential-integrity.ts`, its row) answers the ' +
+      'holder; it reads no field of the target and serves nothing of it. Pinned by ' +
+      '`packages/plugins/plugin-security/src/grant-holder-membership-refusal.test.ts` (a holder the caller cannot read ' +
+      "is read only through the caller's own door, projected to `id`, and the answer served is the same whatever the " +
+      'target holds)',
+  },
   // [#25522 cut 14] The validation-predicate reads, moved out of engine.ts.
   'packages/objectql/src/engine-master-detail-related.ts': {
     kind: 'not-a-served-read',

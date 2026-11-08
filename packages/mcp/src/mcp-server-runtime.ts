@@ -14,7 +14,8 @@ import type {
   ToolRegistry,
   ToolExecutionResult,
 } from './types.js';
-import { wireBridgeTools, grantsAuthoringTools, thrownRefusalEnvelope } from './mcp-http-tools.js';
+import { wireBridgeTools, grantsAuthoringTools, thrownRefusalEnvelope, dataDoorAnswerOf } from './mcp-http-tools.js';
+import { isServerFault, logServerFault } from '@objectstack/types';
 import type {
   McpDataBridge,
   McpActionBridge,
@@ -1555,35 +1556,53 @@ export class MCPServerRuntime {
               }],
             };
           } catch (err) {
-            const message = err instanceof Error ? err.message : String(err);
             // [#23509] A coded refusal carries its ADR-0112 `code` (and its
             // `status`, when it has one) beside the sentence, so a client reads
             // the code it branches on. A held owner's key is refused here "with
             // the same code" (ruling C′ item 1) as on REST. The members are
             // ADDED to the body, in the `{ error, code, status }` vocabulary
             // the two sibling resources above already answer with (#6055,
-            // #6504). `error` stays the same string, so a client that tells a
-            // refusal from a row by `typeof body.error === 'string'` still
-            // does. A throw with no code answers `{ error }` as before.
+            // #6504). `error` stays a string, so a client that tells a refusal
+            // from a row by `typeof body.error === 'string'` still does.
             // `details` is withheld, as on the data tools; `errorResultWithCode`
             // in mcp-http-tools.ts says why.
             // [#31246] A coded refusal's `error` is the envelope's sentence,
             // so a sandboxed hook's refusal answers the body's own sentence
             // rather than the runner's wrapper naming the hook, as the tools do.
+            // [#31270] A throw with NO code answers what the record data tools
+            // answer since #31218: the `/api/v1/data` door's answer
+            // (`dataDoorAnswerOf`, the door's own `mapDataError`), in the same
+            // members, so `code` and `status` now appear on a code-less throw
+            // too. A sandboxed hook's abort is `HOOK_ABORTED` with the inner
+            // sentence; a fault (a bare `Error`, a crash) is the sanitised 500,
+            // its thrown text withheld from the client and logged once, as the
+            // door logs it.
+            const uri = `objectstack://objects/${objectName}/records/${recordId}`;
             const envelope = thrownRefusalEnvelope(err);
+            let body: { error: string; code?: string; status?: number };
+            if (envelope) {
+              body = {
+                error: envelope.message,
+                code: envelope.code,
+                ...(envelope.status !== undefined ? { status: envelope.status } : {}),
+              };
+            } else {
+              const door = dataDoorAnswerOf(err, objectName);
+              if (isServerFault(door.status)) {
+                logServerFault({
+                  status: door.status,
+                  error: err,
+                  ...(door.code !== undefined ? { code: door.code } : {}),
+                  request: { method: 'resources/read', path: uri },
+                });
+              }
+              body = { error: door.message, ...(door.code !== undefined ? { code: door.code } : {}), status: door.status };
+            }
             return {
               contents: [{
-                uri: `objectstack://objects/${objectName}/records/${recordId}`,
+                uri,
                 mimeType: 'application/json',
-                text: JSON.stringify(
-                  envelope
-                    ? {
-                        error: envelope.message,
-                        code: envelope.code,
-                        ...(envelope.status !== undefined ? { status: envelope.status } : {}),
-                      }
-                    : { error: message },
-                ),
+                text: JSON.stringify(body),
               }],
             };
           }
