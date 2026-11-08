@@ -24,9 +24,11 @@ from `node_modules` — there is no local copy in the skill bundle.
 - `node_modules/@objectstack/spec/src/automation/api-trigger-secret-ref.zod.ts` — An inbound `api` hook's secret, by reference.
 - `node_modules/@objectstack/spec/src/automation/api-trigger-signature.zod.ts` — An inbound `api` hook's verifier for a THIRD-PARTY sender, declared.
 - `node_modules/@objectstack/spec/src/automation/control-flow.zod.ts` — Structured control-flow constructs (ADR-0031) — the **native + AI-authored**
+- `node_modules/@objectstack/spec/src/automation/schedule-organization.zod.ts` — The ACTING ORGANIZATION of a time-triggered flow — the one start-node key
 - `node_modules/@objectstack/spec/src/automation/schemaless-node-config.zod.ts` — Config contracts for the **descriptor-schemaless** builtins whose designer
 - `node_modules/@objectstack/spec/src/data/context-tokens.zod.ts` — Context Tokens — the declarative placeholders that resolve against the
 - `node_modules/@objectstack/spec/src/data/date-macros.zod.ts` — Date Macro Tokens — the declarative placeholders the UI substitutes
+- `node_modules/@objectstack/spec/src/data/hook-body.zod.ts` — Exports: HookBodyCapability, ExpressionBodySchema, ScriptBodySchema, HookBodySchema
 - `node_modules/@objectstack/spec/src/kernel/metadata-protection.zod.ts` — Metadata Protection Model — Phase 1 (ADR-0010)
 - `node_modules/@objectstack/spec/src/kernel/override-declaration.zod.ts` — The override declaration (ADR-0146 D2)
 - `node_modules/@objectstack/spec/src/shared/expression.zod.ts` — Expression Protocol
@@ -34,6 +36,8 @@ from `node_modules` — there is no local copy in the skill bundle.
 - `node_modules/@objectstack/spec/src/shared/protection.zod.ts` — Package-level metadata protection (ADR-0010 §3.7 — Phase 4.3)
 - `node_modules/@objectstack/spec/src/shared/retry-policy.zod.ts` — The **single declaration** of the exponential-backoff retry policy.
 - `node_modules/@objectstack/spec/src/shared/suggestions.zod.ts` — "Did you mean?" Suggestion Utilities
+- `node_modules/@objectstack/spec/src/shared/value-domain.zod.ts` — Standard value domains: one closed vocabulary and one membership predicate for settings and fields.
+- `node_modules/@objectstack/spec/src/system/job.zod.ts` — Exports: CronScheduleSchema, IntervalScheduleSchema, OnceScheduleSchema, ScheduleSchema, JobSchema
 
 ## How to read these
 

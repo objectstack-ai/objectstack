@@ -67,7 +67,7 @@ import {
 import { SecurityCatalogNameConflictError, findEnvironmentHeldSecurityCatalogNames } from './registry.js';
 // One name, one package holder for the bare-name types (a picklist, a mapping, a
 // dataset, an API, an object-less action, a function, a flow, a webhook, a
-// connector, an email template) — the cold boot's seal and its one switch
+// connector, an email template, an agent, a skill) — the cold boot's seal and its one switch
 // (`bare-name-one-holder.ts`, "The cold boot").
 import { sealBareNameHoldersAtColdBoot } from './registry.js';
 import { BARE_NAME_COLD_BOOT_MODE } from './bare-name-one-holder.js';
