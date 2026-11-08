@@ -18,8 +18,11 @@
  *     same package and name give ONE slot, the stored row's: no duplicate.
  *     Another package's seed of the same name keeps its own slot.
  *  3. The draft preview lists a draft seed row by its row's name too.
+ *     Each listed seed's `_diagnostics` is the by-name read's: the served
+ *     `name` is judged off, as the row stores the body.
  *  4. Control: a stored body that states a name keeps it, whatever the row
- *     says, and the stored body itself is not written by the list.
+ *     says (a seed body spelling the retired `name` keeps its diagnostic),
+ *     and the stored body itself is not written by the list.
  */
 // Pays the lint root's first load at collection, never inside a clocked case.
 import './lint-root-preload.testkit.js';
@@ -145,6 +148,10 @@ describe('[#31399] §1 N stored seed rows list as N named items', () => {
             const item = items.find((i) => i.name === name);
             expect(markerOf(item)).toBe(markerOf(read.item));
             expect(item.object).toBe(read.item.object);
+            // …and judged as the row stores it: the served `name` is not a
+            // seed key, so the list's verdict is the by-name read's.
+            expect(read.item._diagnostics).toEqual({ valid: true });
+            expect(item._diagnostics).toEqual(read.item._diagnostics);
         }
     });
 
@@ -188,6 +195,15 @@ describe('[#31399] §4 CONTROL — a body that states a name keeps it; the store
         };
         const res: any = await harness([row]).getMetaItems({ type: 'dashboard' });
         expect((res.items as any[]).map((i) => i.name)).toEqual(['body_spelling']);
+    });
+
+    it('a stored seed body that spells a `name` itself is listed under it and keeps its diagnostic, as the by-name read', async () => {
+        const protocol = harness([seedRow('legacy', { body: { name: 'legacy', ...seedBody('legacy body') } })]);
+        const items = await listed(protocol);
+        expect(items.map((i) => i.name)).toEqual(['legacy']);
+        const read: any = await protocol.getMetaItem({ type: 'seed', name: 'legacy' });
+        expect(read.item._diagnostics.valid).toBe(false);
+        expect(items[0]._diagnostics).toEqual(read.item._diagnostics);
     });
 
     it('listing does not write the stored seed body', async () => {

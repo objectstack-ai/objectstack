@@ -27,7 +27,7 @@ import {
     resolveItemLock,
     resolveOverlayLockLayer,
 } from './item-lock.js';
-import { decorateMetadataItems } from './metadata-diagnostics.js';
+import { decorateMetadataItem } from './metadata-diagnostics.js';
 import {
     isActionWithheldByDisabledPackage,
     isItemOfDisabledPackage,
@@ -35,7 +35,7 @@ import {
 import { soleShippingPackage } from './protocol-environment-rows.js';
 import type { ProtocolHost } from './protocol-host.js';
 import { canonicalizeMetaRequestType } from './protocol-meta-type-schema.js';
-import { mergePackageAwareOverlay, servedViewExpansion } from './protocol-overlay-merge.js';
+import { mergePackageAwareOverlay, servedViewExpansion, withoutServedRowName } from './protocol-overlay-merge.js';
 import {
     type ShippingPackages,
     boundPackageOf,
@@ -75,6 +75,20 @@ export async function getMetaItemsForExecution(host: Pick<ProtocolHost, 'readFla
 export async function getMetaItemsPerPackage(host: Pick<ProtocolHost, 'readFlattenedMetaItems'>, request: { type: string; packageId?: string; previewDrafts?: boolean }) {
     // The same #4432 fold {@link getMetaItems} applies, for the same reason.
     return host.readFlattenedMetaItems(canonicalizeMetaRequestType(request), 'served', 'per-package');
+}
+
+/**
+ * [#31399] One listed item, decorated for the served face. An item the merge
+ * served its row's `name` (a body that states none, a `seed`) is judged as the
+ * row stores it, without that `name` its schema does not declare, which is the
+ * verdict the by-name read gives the same row; it is served with the name.
+ * Every other item is decorated as before ({@link decorateMetadataItem}).
+ */
+function decorateListedItem(type: string, item: unknown): unknown {
+    const stored = withoutServedRowName(item);
+    if (stored === undefined) return decorateMetadataItem(type, item);
+    const { _diagnostics, ...served } = decorateMetadataItem(type, stored);
+    return { ...served, name: (item as { name: string }).name, ...(_diagnostics !== undefined ? { _diagnostics } : {}) };
 }
 
 /** The body of `ObjectStackProtocolImplementation#readFlattenedMetaItems`; the method's docblock there is its contract. */
@@ -929,7 +943,9 @@ export async function readFlattenedMetaItems(host: Pick<ProtocolHost, 'artifactL
         type: request.type,
         // [#20552] Served: diagnostics + per-type credential redaction.
         // Execution: the stored bodies — see `getMetaItemsForExecution`.
-        items: audience === 'served' ? decorateMetadataItems(request.type, governed) : governed,
+        // [#31399] An item served its row's `name` (a body that states none)
+        // is judged as stored, without it, then served with it.
+        items: audience === 'served' ? governed.map((it) => decorateListedItem(request.type, it)) : governed,
         // [#23316] Served only: the engine's verdict on each listed flow —
         // see {@link flowRegistrationsOf}. The execution face is the
         // engine's own read, so it carries none.

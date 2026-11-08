@@ -57,6 +57,26 @@ interface StoredRowPlace {
 }
 
 /**
+ * [#31399] Marks a listed body that carries its row's `name` because it states
+ * none of its own ({@link mergePackageAwareOverlay}). A symbol key: object
+ * spreads along the list keep it, and it never reaches the wire. The list's
+ * served exit judges such a body's `_diagnostics` without that `name`
+ * ({@link withoutServedRowName}), since the document's schema does not
+ * declare it: the verdict is the one the by-name read gives the same row.
+ */
+export const SERVED_ROW_NAME: unique symbol = Symbol('metadata-protocol.servedRowName');
+
+/**
+ * [#31399] The body a listed item was stored as, when the list served it its
+ * row's `name` ({@link SERVED_ROW_NAME}); otherwise `undefined`.
+ */
+export function withoutServedRowName(item: unknown): Record<string, unknown> | undefined {
+    if (item === null || typeof item !== 'object' || (item as Record<PropertyKey, unknown>)[SERVED_ROW_NAME] !== true) return undefined;
+    const { name: _name, [SERVED_ROW_NAME]: _mark, ...stored } = item as Record<PropertyKey, unknown>;
+    return stored as Record<string, unknown>;
+}
+
+/**
  * [#21804, ADR-0131 D6, ADR-0048] THE served-row resolution: the order in
  * which the stored rows of one item are tried for the CONTENT a read serves.
  * The first candidate that holds a row is the served row.
@@ -375,7 +395,7 @@ export function mergePackageAwareOverlay(
             && data !== null && typeof data === 'object' && !Array.isArray(data)
             ? stored.name
             : undefined;
-        const body = (rowName !== undefined ? { ...(data as object), name: rowName } : data) as any;
+        const body = (rowName !== undefined ? { ...(data as object), name: rowName, [SERVED_ROW_NAME]: true } : data) as any;
         const bodyName = ownName ?? rowName;
         if (bodyName === undefined) continue;
         // The base row this record shadows at its own slot (for view-identity
