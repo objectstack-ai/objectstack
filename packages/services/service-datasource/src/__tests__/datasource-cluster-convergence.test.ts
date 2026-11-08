@@ -693,3 +693,58 @@ describe('[#13805] the attach seam — loopback, idempotency, the missing conver
     expect(published).toHaveLength(0);
   });
 });
+
+describe('resyncDatasourceMutationPubSub() — signals lost in a cluster outage converge on the resync', () => {
+  /** Drop every publish while `down`: the at-most-once loss an outage causes. */
+  function lossy(c: Awaited<ReturnType<typeof makeCluster>>) {
+    const state = { down: false };
+    const publish = c.raw.publish.bind(c.raw);
+    c.raw.publish = async (channel: string, payload: unknown) => {
+      if (state.down) return;
+      await publish(channel, payload);
+    };
+    return state;
+  }
+
+  it('a DELETE whose signal was lost: the peer keeps the stuck driver, then evicts it on the resync', async () => {
+    const c = await makeCluster({ seed: [seeded] });
+    const outage = lossy(c);
+    outage.down = true;
+    await c.writer.service.removeDatasource('analytics');
+    outage.down = false;
+    await settle();
+    expect(c.peer.drivers.has('analytics')).toBe(true);
+
+    await c.peer.service.resyncDatasourceMutationPubSub();
+    expect(c.peer.drivers.has('analytics')).toBe(false);
+    expect(c.peer.evicted).toContain('analytics');
+  });
+
+  it('a CREATE whose signal was lost: the peer is pool-less, then builds it from its own read on the resync', async () => {
+    const c = await makeCluster();
+    const outage = lossy(c);
+    outage.down = true;
+    await c.writer.service.createDatasource(draft());
+    outage.down = false;
+    await settle();
+    expect(c.peer.drivers.has('analytics')).toBe(false);
+
+    await c.peer.service.resyncDatasourceMutationPubSub();
+    expect(c.peer.drivers.get('analytics')?.connected).toBe(true);
+  });
+
+  it('nothing lost: a resync leaves the pool it already holds — no churn', async () => {
+    const c = await makeCluster({ seed: [seeded] });
+    const before = c.peer.drivers.get('analytics');
+    await c.peer.service.resyncDatasourceMutationPubSub();
+    expect(c.peer.drivers.get('analytics')).toBe(before);
+    expect(before!.closed).toBe(false);
+  });
+
+  it('CONTROL — no transport attached (single node): the resync converges nothing', async () => {
+    const c = await makeCluster({ attach: false, seed: [seeded] });
+    await c.writer.service.removeDatasource('analytics');
+    await c.peer.service.resyncDatasourceMutationPubSub();
+    expect(c.peer.drivers.has('analytics')).toBe(true);
+  });
+});
