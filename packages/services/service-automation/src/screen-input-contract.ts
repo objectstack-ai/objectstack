@@ -156,11 +156,13 @@ export function screenDeclaresInputContract(screen: ScreenSpec | undefined): boo
  * degradation is loud rather than silent. Its KEY stays accepted either way —
  * the author declared it, so it is never "undeclared".
  *
- * Value SHAPE (`type`) is out of scope here with ONE closed exception, and the
- * exception is the maintainer's (ruling A′, 2026-09-13): a screen field's
- * `type` is an open widget hint, so no member of it constrains a value —
- * EXCEPT the numeric kinds, whose meaning is not a rendering preference but a
- * value domain the bound pair beside it already assumes. Ruling A′ named
+ * Value SHAPE (`type`) is out of scope here except for one closed set, and
+ * every member of it is a maintainer's ruling (`SCREEN_FIELD_VALUE_DOMAINS`):
+ * a screen field's `type` is an open widget hint, so no member of it
+ * constrains a value — EXCEPT the numeric kinds, `'file'` and the five string
+ * kinds, whose meaning is not a rendering preference but a value domain. The
+ * numeric kinds came first (ruling A′, 2026-09-13): their domain is the one
+ * the bound pair beside them already assumes. Ruling A′ named
  * `'number'`; `'currency'` and `'percent'` joined it under the same rule by a
  * later ruling (#30178), so the three numeric kinds the object protocol groups
  * (`MEASURE_FIELD_TYPES`) answer one question one way. A present value for a
