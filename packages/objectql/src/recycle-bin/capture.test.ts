@@ -37,7 +37,7 @@ function recordingLogger() {
   };
 }
 
-function makeDriver(opts: { transactional?: boolean; failDeleteOf?: string } = {}) {
+function makeDriver(opts: { transactional?: boolean; failDeleteOf?: string; removesNothingOf?: { object: string; answer: boolean | number } } = {}) {
   const stores = new Map<string, Map<string, Row>>();
   const storeFor = (o: string) => {
     let s = stores.get(o);
@@ -113,6 +113,9 @@ function makeDriver(opts: { transactional?: boolean; failDeleteOf?: string } = {
     async delete(o: string, id: string, options: any) {
       if (opts.failDeleteOf === o) throw new Error(`driver refused the delete of ${o}/${id}`);
       writes.push({ object: o, op: 'delete', transaction: options?.transaction });
+      // The driver answers that it removed nothing, and keeps the row: a row
+      // already gone, filtered out, or a lost race, as the engine sees it.
+      if (opts.removesNothingOf?.object === o) return opts.removesNothingOf.answer;
       return storeFor(o).delete(String(id));
     },
     async deleteMany(o: string, ast: any, options: any) {
@@ -215,7 +218,7 @@ const ephemeral = {
 /** Nothing references it: the plain, non-cascading delete. */
 const loner = { name: 'loner', label: 'Loner', fields: { id: text('id'), name: text('name') } };
 
-async function makeEngine(options: { withBin?: boolean; transactional?: boolean; failDeleteOf?: string } = {}) {
+async function makeEngine(options: { withBin?: boolean; transactional?: boolean; failDeleteOf?: string; removesNothingOf?: { object: string; answer: boolean | number } } = {}) {
   const rec = recordingLogger();
   const engine = new ObjectQL({ logger: rec.logger } as any);
   const driver = makeDriver(options);
@@ -430,6 +433,65 @@ describe('a failed delete leaves no entry', () => {
     // The entry was written, then compensated: not merely never written.
     expect(driver.writes.filter((w: any) => w.object === 'sys_recycle_bin').map((w: any) => w.op))
       .toEqual(['create', 'delete']);
+  });
+});
+
+describe('a delete the driver answers as removing nothing leaves no entry (#31630)', () => {
+  const binOps = (driver: any) => driver.writes.filter((w: any) => w.object === 'sys_recycle_bin');
+
+  it('a removal the driver confirms keeps exactly one entry', async () => {
+    const { engine, driver } = await makeEngine({ transactional: false });
+    driver.seed('loner', { id: 'l1', name: 'x' });
+    await expect(engine.delete('loner', { where: { id: 'l1' } } as any)).resolves.toBe(true);
+    expect(driver.rowsOf('loner')).toHaveLength(0);
+    expect(entriesOf(driver)).toHaveLength(1);
+    expect(binOps(driver).map((w: any) => w.op)).toEqual(['create']);
+  });
+
+  it.each<[boolean | number, string]>([
+    [false, 'not found'],
+    [0, 'an off-contract count of none'],
+  ])('withdraws the entry when no transaction covered it, the driver answering %j (%s)', async (answer) => {
+    const { engine, driver, rec } = await makeEngine({ transactional: false, removesNothingOf: { object: 'loner', answer } });
+    driver.seed('loner', { id: 'l1', name: 'x' });
+    const told: string[] = [];
+    await expect(engine.delete('loner', { where: { id: 'l1' }, onRecycleBinEntry: (id: string) => told.push(id) } as any))
+      .resolves.toBe(answer);
+    expect(driver.rowsOf('loner')).toHaveLength(1);
+    expect(entriesOf(driver)).toHaveLength(0);
+    // Written, then withdrawn: not merely never written.
+    expect(binOps(driver).map((w: any) => w.op)).toEqual(['create', 'delete']);
+    expect(told).toEqual([]);
+    expect(rec.at('error')).toEqual([]);
+  });
+
+  it.each<[boolean | number]>([[false], [0]])(
+    'withdraws the entry inside the transaction that wraps the cascade, the driver answering %j',
+    async (answer) => {
+      const { engine, driver } = await makeEngine({ removesNothingOf: { object: 'account', answer } });
+      seedAccountTree(driver);
+      await expect(engine.delete('account', { where: { id: 'acc1' } } as any)).resolves.toBe(answer);
+      expect(driver.rowsOf('account')).toHaveLength(1);
+      expect(entriesOf(driver)).toHaveLength(0);
+      const ops = binOps(driver);
+      expect(ops.map((w: any) => w.op)).toEqual(['create', 'delete']);
+      // The withdrawal rides the unit the entry was written in.
+      expect(ops[1].transaction).toBeDefined();
+      expect(ops[1].transaction).toBe(ops[0].transaction);
+    },
+  );
+
+  it('logs at error, and keeps the answer, when the entry cannot be withdrawn', async () => {
+    const { engine, driver, rec } = await makeEngine({
+      transactional: false,
+      removesNothingOf: { object: 'loner', answer: false },
+      failDeleteOf: 'sys_recycle_bin',
+    });
+    driver.seed('loner', { id: 'l1', name: 'x' });
+    await expect(engine.delete('loner', { where: { id: 'l1' } } as any)).resolves.toBe(false);
+    expect(entriesOf(driver)).toHaveLength(1);
+    // Said once, at `error`: the bin keeps an entry for a row that is still live.
+    expect(rec.at('error')).toHaveLength(1);
   });
 });
 
