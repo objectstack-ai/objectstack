@@ -7438,6 +7438,12 @@ export class SqlDriver implements IDataDriver {
    * ORDER BY at all** — trading a reshuffle among ties for the loss of the
    * caller's whole sort.
    *
+   * One federated case is not a guess: an object whose `external.columnMap`
+   * maps a remote column to `id` has DECLARED its key column (the one the
+   * by-id doors address), so that column orders its pages too (#31328 —
+   * measured on Oracle, where unkeyed ties reshuffle between executions and a
+   * page walk repeated and lost rows).
+   *
    * Returns the LOGICAL field name; the call site maps it to a physical column
    * like any other sort key.
    */
