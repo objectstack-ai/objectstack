@@ -12,6 +12,8 @@ import {
   MetadataEventSchema,
   DataEventSchema,
   BulkDataEventSchema,
+  DataEventType,
+  BulkDataEventType,
   type MetadataEvent,
   type MetadataEventSubject,
   type MetadataEventType,
@@ -142,11 +144,11 @@ export class RealtimeAPI {
       filter: {
         type: object,
         recordId: options?.recordId,
-        eventTypes: [
-          'data.record.created',
-          'data.record.updated',
-          'data.record.deleted'
-        ]
+        // [#31473] Read from the spec's enum, never hand-listed: a hand list
+        // of created / updated / deleted silently dropped
+        // `data.record.restored` when #31220 added it, so a row restored from
+        // the recycle bin never reached the subscriber.
+        eventTypes: [...DataEventType.options]
       },
       handler: (event) => {
         if (!event.type.startsWith('data.') || event.object !== object) return;
@@ -224,7 +226,8 @@ export class RealtimeAPI {
     this.subscriptions.set(subscriptionId, {
       filter: {
         type: object,
-        eventTypes: ['data.records.updated', 'data.records.deleted']
+        // [#31473] Read from the spec's enum, like subscribeData's list.
+        eventTypes: [...BulkDataEventType.options]
       },
       handler: (event) => {
         if (!event.type.startsWith('data.records.') || event.object !== object) return;
